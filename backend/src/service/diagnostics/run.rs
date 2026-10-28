@@ -686,6 +686,7 @@ impl BackendService {
                     )
                 })?;
         let rating_colour = compare_rating_colour(conn, parsed, &edb_playlists);
+        let field_notes = compare_note_fields(conn, parsed, &edb_playlists);
         note_stage("read eDB", &mut raw_warnings);
 
         on_progress(58, 100, "USB: Checking indexed audio file presence");
@@ -719,6 +720,7 @@ impl BackendService {
             parsed,
             &edb_playlists,
             &rating_colour,
+            &field_notes,
             Some(strict_raw_coverage.clone()),
         );
         let section_groups = parity_section_groups(&checks);

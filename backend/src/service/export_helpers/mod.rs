@@ -8,12 +8,14 @@ pub mod pdb_menu;
 pub mod playlist_ops;
 
 mod edb_export;
+pub(crate) mod field_table;
 mod pdb_export;
 #[cfg(test)]
 mod tests;
 
 pub use deferred_close::FileCloser;
 pub use edb_export::*;
+pub(crate) use field_table::{EdbContentFields, read_edb_content_fields};
 pub use pdb_export::*;
 
 // Re-export submodule items at this level for backward compatibility.
@@ -192,6 +194,8 @@ pub struct ExclusiveTrackInfo {
 #[derive(Debug, Clone)]
 pub struct WriteExportLibraryDbResult {
     pub inserted_content: usize,
+    /// Existing content rows the write changed.
+    pub updated_content: usize,
     pub linked_playlist_entries: usize,
     pub playlist_id: i64,
     pub sort_order: i64,
@@ -223,6 +227,9 @@ pub struct PdbTrackRowData {
     pub artwork_id: u32,
     pub key_id: u32,
     pub genre_id: u32,
+    pub composer_id: u32,
+    pub label_id: u32,
+    pub remixer_id: u32,
     pub bitrate_kbps: Option<u32>,
     pub track_number: Option<u32>,
     pub bpm: Option<f64>,

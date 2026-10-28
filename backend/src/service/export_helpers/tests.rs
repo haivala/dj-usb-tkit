@@ -8,6 +8,14 @@ use tempfile::tempdir;
 
 fn mapping_test_track() -> ExportManifestTrack {
     ExportManifestTrack {
+        date_added: None,
+        date_created: None,
+        label: None,
+        remixer: None,
+        composer: None,
+        from_library: true,
+        pdb_track_id: None,
+        edb_content_id: None,
         first_beat_ms: None,
         cues: Vec::new(),
         id: "track-1".to_string(),
@@ -468,8 +476,9 @@ fn update_existing_content_row_preserves_existing_metadata_when_export_track_is_
         "missing export album should preserve existing album"
     );
     assert_eq!(
-        row.2, None,
-        "missing export key should clear stale existing key"
+        row.2,
+        Some(5),
+        "missing export key keeps the existing key: a value the export doesn't carry is never cleared"
     );
     assert_eq!(
         row.3,
@@ -521,7 +530,11 @@ fn update_existing_content_row_matches_rb6_null_empty_conventions() {
         )
         .expect("load updated row");
 
-    assert_eq!(row.0, None, "titleForSearch should be NULL after update");
+    assert_eq!(
+        row.0.as_deref(),
+        Some("legacy-search"),
+        "a titleForSearch the export doesn't carry stays"
+    );
     assert_eq!(
         row.1.as_deref(),
         Some("2024-05-01"),
@@ -608,7 +621,7 @@ fn insert_content_from_template_sets_release_year_zero_when_missing() {
 }
 
 #[test]
-fn update_existing_content_row_sets_release_year_zero_when_missing() {
+fn update_existing_content_row_keeps_release_year_when_missing() {
     let mut conn = rusqlite::Connection::open_in_memory().expect("open memory db");
     create_content_mapping_schema(&conn);
     conn.execute(r#"INSERT INTO "key" (key_id, name) VALUES (1, '8A')"#, [])
@@ -637,7 +650,56 @@ fn update_existing_content_row_sets_release_year_zero_when_missing() {
             |r| r.get::<_, Option<i64>>(0),
         )
         .expect("load updated row");
-    assert_eq!(release_year, Some(0));
+    assert_eq!(release_year, Some(2024), "a missing year never clears the row's");
+}
+
+#[test]
+fn update_existing_content_row_writes_only_the_columns_that_differ() {
+    let mut conn = rusqlite::Connection::open_in_memory().expect("open memory db");
+    create_content_mapping_schema(&conn);
+    conn.execute(r#"INSERT INTO "key" (key_id, name) VALUES (1, '8A')"#, [])
+        .expect("seed key");
+    let mut track = mapping_test_track();
+    let content_id =
+        insert_content_from_template(&conn, &track, Some("2024-07-09")).expect("insert content");
+    // A value the library doesn't have (rekordbox wrote it): never cleared.
+    conn.execute(
+        "UPDATE content SET isrc = 'GBXXX2400001' WHERE content_id = ?1",
+        [content_id],
+    )
+    .expect("seed isrc");
+    track.isrc = None;
+    let row = |conn: &rusqlite::Connection| {
+        conn.query_row(
+            "SELECT title, isrc, dateAdded FROM content WHERE content_id = ?1",
+            [content_id],
+            |r| {
+                Ok((
+                    r.get::<_, Option<String>>(0)?,
+                    r.get::<_, Option<String>>(1)?,
+                    r.get::<_, Option<String>>(2)?,
+                ))
+            },
+        )
+        .expect("load row")
+    };
+    let mut update = |track: &ExportManifestTrack| {
+        let tx = conn.transaction().expect("start tx");
+        let columns = load_table_columns_tx(&tx, "content").expect("content columns");
+        let changed = update_existing_content_row(&tx, content_id, track, &columns, Some("2025-01-01"))
+            .expect("update content");
+        tx.commit().expect("commit tx");
+        changed
+    };
+
+    assert!(!update(&track), "a re-export of the same track changes nothing");
+    track.title = "Renamed".to_string();
+    assert!(update(&track), "a changed title is written");
+    assert!(!update(&track), "and only once");
+    let (title, isrc, date_added) = row(&conn);
+    assert_eq!(title.as_deref(), Some("Renamed"));
+    assert_eq!(isrc.as_deref(), Some("GBXXX2400001"));
+    assert_eq!(date_added.as_deref(), Some("2024-07-09"), "the export date never replaces a date added");
 }
 
 #[test]
@@ -1081,6 +1143,14 @@ fn verify_edb_content_fails_when_artwork_file_is_missing_on_disk() {
         skipped_tracks: 0,
         warnings: vec![],
         tracks: vec![ExportManifestTrack {
+            date_added: None,
+            date_created: None,
+            label: None,
+            remixer: None,
+            composer: None,
+            from_library: true,
+            pdb_track_id: None,
+            edb_content_id: None,
             first_beat_ms: None,
             cues: Vec::new(),
             id: "t1".to_string(),
@@ -1953,6 +2023,14 @@ fn remove_playlist_and_tracks_from_pdb_allows_removing_last_playlist() {
         skipped_tracks: 0,
         warnings: Vec::new(),
         tracks: vec![ExportManifestTrack {
+            date_added: None,
+            date_created: None,
+            label: None,
+            remixer: None,
+            composer: None,
+            from_library: true,
+            pdb_track_id: None,
+            edb_content_id: None,
             first_beat_ms: None,
             cues: Vec::new(),
             id: "t1".to_string(),
@@ -2384,6 +2462,9 @@ fn remove_playlist_and_tracks_from_pdb_keeps_history_referenced_tracks() {
 
     let mut data = crate::pdb_writer::PdbData::empty();
     data.tracks.push(PdbTrackRowData {
+        composer_id: 0,
+        label_id: 0,
+        remixer_id: 0,
         header_flags_u32: None,
         content_link: Some(1),
         sample_rate_hz: Some(44_100),
@@ -2817,6 +2898,14 @@ fn rewrite_pdb_playlist_rebuilds_resolvable_dictionary_rows_on_initialized_usb()
         skipped_tracks: 0,
         warnings: Vec::new(),
         tracks: vec![ExportManifestTrack {
+            date_added: None,
+            date_created: None,
+            label: None,
+            remixer: None,
+            composer: None,
+            from_library: true,
+            pdb_track_id: None,
+            edb_content_id: None,
             first_beat_ms: None,
             cues: Vec::new(),
             id: "t1".to_string(),
@@ -3783,6 +3872,14 @@ fn rewrite_pdb_playlist_keeps_f_sharp_and_f_minor_as_distinct_keys() {
         warnings: Vec::new(),
         tracks: vec![
             ExportManifestTrack {
+                date_added: None,
+                date_created: None,
+                label: None,
+                remixer: None,
+                composer: None,
+                from_library: true,
+                pdb_track_id: None,
+                edb_content_id: None,
                 first_beat_ms: None,
                 cues: Vec::new(),
                 id: "t1".to_string(),
@@ -3831,6 +3928,14 @@ fn rewrite_pdb_playlist_keeps_f_sharp_and_f_minor_as_distinct_keys() {
                 duration_ms: Some(180_000),
             },
             ExportManifestTrack {
+                date_added: None,
+                date_created: None,
+                label: None,
+                remixer: None,
+                composer: None,
+                from_library: true,
+                pdb_track_id: None,
+                edb_content_id: None,
                 first_beat_ms: None,
                 cues: Vec::new(),
                 id: "t2".to_string(),
@@ -4001,6 +4106,14 @@ fn make_test_manifest(
             .iter()
             .enumerate()
             .map(|(i, (id, title, filename))| ExportManifestTrack {
+                date_added: None,
+                date_created: None,
+                label: None,
+                remixer: None,
+                composer: None,
+                from_library: true,
+                pdb_track_id: None,
+                edb_content_id: None,
                 first_beat_ms: None,
                 cues: Vec::new(),
                 id: id.to_string(),
@@ -4105,6 +4218,115 @@ fn write_pdb_refreshes_file_size_sample_rate_bitrate_on_reexport_of_existing_tra
     assert_eq!(track.bitrate_kbps, Some(320));
 }
 
+#[test]
+fn pdb_writer_keeps_dictionary_rows_that_differ_only_in_case() {
+    // The PDB has two spellings of the same artist and genre. A track
+    // handed over with the spelling its row already names keeps its rows,
+    // every time (no pick between colliding rows), and stays byte-identical.
+    let dir = tempdir().unwrap();
+    let usb_root = dir.path();
+    crate::service::usb_utils::initialize_usb(usb_root).expect("initialize usb skeleton");
+    let pdb_path = usb_root
+        .join(USB_VENDOR_ROOT_DIR)
+        .join(USB_VENDOR_DB_DIR)
+        .join("export.pdb");
+    let mut data = crate::pdb_writer::PdbData::empty();
+    for (id, name) in [(1, "spirit"), (2, "Spirit"), (3, "SPIRIT")] {
+        data.artists.push(crate::pdb_writer::PdbArtistRow {
+            id,
+            name: name.into(),
+        });
+    }
+    for (id, name) in [(1, "drum & Bass"), (2, "Drum & Bass"), (3, "Drum and Bass!")] {
+        data.genres.push(crate::pdb_writer::PdbDictRow {
+            id,
+            name: name.into(),
+        });
+    }
+    data.tracks.push(PdbTrackRowData {
+        composer_id: 0,
+        label_id: 0,
+        remixer_id: 0,
+        header_flags_u32: None,
+        id: 1,
+        artist_id: 2,
+        album_id: 0,
+        artwork_id: 0,
+        key_id: 0,
+        genre_id: 2,
+        title: "Song".into(),
+        anlz_path: "/PIONEER/USBANLZ/P000/00000001/ANLZ0000.DAT".into(),
+        file_path: "/Contents/song.mp3".into(),
+        content_link: None,
+        sample_rate_hz: None,
+        file_size_bytes: None,
+        master_content_id: None,
+        master_db_id: None,
+        bitrate_kbps: None,
+        track_number: None,
+        bpm: None,
+        release_year: None,
+        bit_depth: None,
+        duration_seconds: Some(180),
+        file_type: None,
+        isrc: None,
+        date_added: None,
+        release_date: None,
+        dj_comment: None,
+        file_name: Some("song.mp3".into()),
+        publish_track_info_on: None,
+        autoload_hotcues_on: None,
+        color_id: None,
+        rating: None,
+    });
+    data.colors = crate::pdb_writer::standard_colors();
+    data.columns_raw_rows = crate::pdb_writer::standard_columns_raw();
+    fs::write(&pdb_path, crate::pdb_writer::write_pdb(&data).expect("write seed"))
+        .expect("store seed");
+    let rows_before = crate::pdb_reader::parse_pdb_track_debug_rows(&pdb_path).expect("rows");
+
+    let playlist = ExportPlaylistData {
+        id: "pl".to_string(),
+        name: "Collide".to_string(),
+        tracks: Vec::new(),
+    };
+    let mut manifest = make_test_manifest("pl", "Collide", usb_root, &[("t1", "Song", "song.mp3")]);
+    let track = &mut manifest.tracks[0];
+    track.from_library = false;
+    track.exported_path = "/Contents/song.mp3".into();
+    track.waveform_path = Some("/PIONEER/USBANLZ/P000/00000001/ANLZ0000.DAT".into());
+    track.artist = "Spirit".into();
+    track.genre = Some("Drum & Bass".into());
+    track.duration_ms = Some(180_000);
+    // Only what the seed row has.
+    track.album = None;
+    track.bpm = None;
+    track.track_number = None;
+    for _ in 0..8 {
+        let build = build_pdb_for_playlists(
+            usb_root,
+            &[PdbPlaylistWrite {
+                playlist: &playlist,
+                manifest: &manifest,
+                mirror_playlist_entries: false,
+                row_id: None,
+                playlist_id: None,
+                sort_order: None,
+                move_to_front: false,
+            }],
+            None,
+            false,
+        )
+        .expect("build");
+        assert_eq!(build.changed_tracks, 0, "the track's own rows already name these");
+        let scratch = dir.path().join("built.pdb");
+        fs::write(&scratch, &build.bytes).expect("store build");
+        let rows = crate::pdb_reader::parse_pdb_track_debug_rows(&scratch).expect("rows");
+        assert_eq!(rows.len(), 1);
+        assert_eq!(rows[0].raw_hex, rows_before[0].raw_hex, "track row byte-identical");
+    }
+}
+
 // --- collect_manifest_owned_paths ---
 
 #[test]
@@ -4125,6 +4347,14 @@ fn collect_owned_paths_includes_media_artwork_analysis() {
         skipped_tracks: 0,
         warnings: vec![],
         tracks: vec![ExportManifestTrack {
+            date_added: None,
+            date_created: None,
+            label: None,
+            remixer: None,
+            composer: None,
+            from_library: true,
+            pdb_track_id: None,
+            edb_content_id: None,
             first_beat_ms: None,
             cues: Vec::new(),
             id: "t1".to_string(),
@@ -4213,6 +4443,14 @@ fn collect_owned_paths_skips_none_artwork_and_waveform() {
         skipped_tracks: 0,
         warnings: vec![],
         tracks: vec![ExportManifestTrack {
+            date_added: None,
+            date_created: None,
+            label: None,
+            remixer: None,
+            composer: None,
+            from_library: true,
+            pdb_track_id: None,
+            edb_content_id: None,
             first_beat_ms: None,
             cues: Vec::new(),
             id: "t1".to_string(),
@@ -4524,6 +4762,14 @@ fn genre_and_label_tables_preserved_through_export_roundtrip() {
         skipped_tracks: 0,
         warnings: Vec::new(),
         tracks: vec![super::ExportManifestTrack {
+            date_added: None,
+            date_created: None,
+            label: None,
+            remixer: None,
+            composer: None,
+            from_library: true,
+            pdb_track_id: None,
+            edb_content_id: None,
             first_beat_ms: None,
             cues: Vec::new(),
             id: "t1".to_string(),

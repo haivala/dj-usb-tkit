@@ -1080,7 +1080,7 @@ fn initialize_fullshape_edb(db_path: &Path, created_date: &str) -> BackendResult
     Ok(())
 }
 
-const EDB_SCHEMA: &str = r#"
+pub(crate) const EDB_SCHEMA: &str = r#"
 CREATE TABLE album(album_id integer primary key, name varchar, artist_id integer, image_id integer, isComplation integer, nameForSearch varchar);
 CREATE TABLE artist(artist_id integer primary key, name varchar, nameForSearch varchar);
 CREATE TABLE category(category_id integer primary key, menuItem_id integer, sequenceNo integer, isVisible integer);
@@ -1112,8 +1112,8 @@ CREATE INDEX index_playlist_content_playlist_id on playlist_content(playlist_id)
 fn seed_edb_defaults(conn: &rusqlite::Connection, created_date: &str) -> BackendResult<()> {
     // property
     conn.execute(
-        "INSERT INTO property (deviceName, dbVersion, numberOfContents, createdDate, backGroundColorType, myTagMasterDBID) VALUES ('', '1000', 0, ?1, 0, 969967066)",
-        [created_date],
+        "INSERT INTO property (deviceName, dbVersion, numberOfContents, createdDate, backGroundColorType, myTagMasterDBID) VALUES ('', ?1, 0, ?2, 0, 969967066)",
+        [crate::pdb_writer::T19_DB_VERSION, created_date],
     )?;
 
     // color (8 standard player colors)
@@ -2328,6 +2328,29 @@ mod diag_tests {
     }
 
     #[test]
+    fn t19_property_keeps_the_app_version_whatever_the_edb_says() {
+        // Libraries rekordbox upgraded say `10000` in `dbVersion` while
+        // their t19 rows keep `"1000"`; t19 never takes the eDB's.
+        let tmp = tempfile::tempdir().expect("tempdir");
+        initialize_usb(tmp.path()).expect("initialize usb");
+        let db_path = tmp
+            .path()
+            .join(USB_VENDOR_ROOT_DIR)
+            .join(USB_VENDOR_DB_DIR)
+            .join("exportLibrary.db");
+        let conn = rusqlite::Connection::open(db_path).expect("open exportLibrary.db");
+        conn.execute_batch(&format!("PRAGMA key='{DEFAULT_USB_EDB_KEY}';"))
+            .expect("apply SQLCipher key");
+        conn.execute("UPDATE property SET dbVersion = '10000', deviceName = 'Stick'", [])
+            .expect("update property");
+        drop(conn);
+        let property =
+            crate::service::export_helpers::edb_t19_property(tmp.path()).expect("eDB");
+        assert_eq!(property.db_version, crate::pdb_writer::T19_DB_VERSION);
+        assert_eq!(property.device_name.as_deref(), Some("Stick"));
+    }
+
+    #[test]
     fn initialize_usb_seeds_reference_menu_defaults() {
         let tmp = tempfile::tempdir().expect("tempdir");
         initialize_usb(tmp.path()).expect("initialize usb");
@@ -2515,6 +2538,14 @@ mod diag_tests {
             skipped_tracks: 0,
             warnings: Vec::new(),
             tracks: vec![ExportManifestTrack {
+                date_added: None,
+                date_created: None,
+                label: None,
+                remixer: None,
+                composer: None,
+                from_library: true,
+                pdb_track_id: None,
+                edb_content_id: None,
                 first_beat_ms: None,
                 cues: Vec::new(),
                 id: "track-1".to_string(),
@@ -2669,6 +2700,14 @@ mod diag_tests {
             skipped_tracks: 0,
             warnings: Vec::new(),
             tracks: vec![ExportManifestTrack {
+                date_added: None,
+                date_created: None,
+                label: None,
+                remixer: None,
+                composer: None,
+                from_library: true,
+                pdb_track_id: None,
+                edb_content_id: None,
                 first_beat_ms: None,
                 cues: Vec::new(),
                 id: "track-1".to_string(),

@@ -1293,6 +1293,14 @@ impl BackendService {
                 app_content_link_id,
             )?;
             manifest_tracks.push(ExportManifestTrack {
+                date_added: None,
+                date_created: None,
+                label: None,
+                remixer: None,
+                composer: None,
+                from_library: true,
+                pdb_track_id: None,
+                edb_content_id: None,
                 id: track.id.clone(),
                 master_db_id: mdb,
                 master_content_id: mci,
@@ -1480,6 +1488,7 @@ impl BackendService {
             match write_result {
                 Ok(WriteExportLibraryDbResult {
                     inserted_content,
+                    updated_content: _,
                     linked_playlist_entries,
                     playlist_id,
                     sort_order,
@@ -2726,6 +2735,14 @@ mod tests {
 
     fn manifest_track(exported_path: &str) -> ExportManifestTrack {
         ExportManifestTrack {
+            date_added: None,
+            date_created: None,
+            label: None,
+            remixer: None,
+            composer: None,
+            from_library: true,
+            pdb_track_id: None,
+            edb_content_id: None,
             id: "t1".to_string(),
             master_db_id: None,
             master_content_id: None,

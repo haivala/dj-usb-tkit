@@ -60,6 +60,9 @@ fn main() {
     // Tracks
     for t in &parsed.tracks {
         data.tracks.push(PdbTrackRowData {
+            composer_id: t.composer_id,
+            label_id: t.label_id,
+            remixer_id: t.remixer_id,
             header_flags_u32: None,
             id: t.id,
             artist_id: t.artist_id,

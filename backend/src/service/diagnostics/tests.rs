@@ -3,7 +3,7 @@ use std::fs;
 
 use super::{
     DISPLAY_ANALYSIS, DISPLAY_EDB, DISPLAY_ENGINE, DISPLAY_LAYOUT, DISPLAY_LOW_LEVEL, DISPLAY_PDB,
-    DISPLAY_PLAYLISTS, ExportDbPlaylist, OverviewFacts, ParityTotals, RatingColourParity,
+    DISPLAY_PLAYLISTS, ExportDbPlaylist, FieldNoteParity, OverviewFacts, ParityTotals, RatingColourParity,
     T19_TEMPLATE_STATE_LABEL, build_usb_parity_comparison, compare_rating_colour,
     count_named_history_rows, diagnose_analysis_integrity, diagnose_contents_integrity,
     diagnose_playlist_resolution_with_db, diagnose_playlist_resolution_with_edb_internal,
@@ -300,6 +300,7 @@ fn parity_detail() -> UsbParityPlaylistDetail {
         pdb_missing_core_metadata: 0,
         artwork_mismatch_tracks: 0,
         rating_colour_mismatch_tracks: 0,
+        field_note_tracks: 0,
         sample_only_in_pdb: Vec::new(),
         sample_only_in_edb: Vec::new(),
         sample_metadata_mismatches: Vec::new(),
@@ -797,6 +798,7 @@ fn parity_comparison_notes_a_rating_or_colour_difference_without_failing() {
         &parsed,
         &edb_playlists_from_tracks(edb_tracks.clone()),
         &rating_colour,
+        &FieldNoteParity::default(),
         None,
     );
 
@@ -830,6 +832,7 @@ fn parity_comparison_notes_a_rating_or_colour_difference_without_failing() {
         &parsed,
         &edb_playlists_from_tracks(edb_tracks),
         &RatingColourParity::default(),
+        &FieldNoteParity::default(),
         None,
     );
     assert_eq!(format!("{overall:?}"), format!("{overall_without:?}"));
@@ -901,6 +904,7 @@ fn parity_counts_use_unique_tracks_when_pdb_has_duplicate_entries() {
         &parsed,
         &edb_playlists_from_tracks(edb_tracks),
         &RatingColourParity::default(),
+        &FieldNoteParity::default(),
         None,
     );
     let test = details
@@ -1070,6 +1074,7 @@ fn parity_comparison_reports_strict_raw_coverage_as_separate_check_and_row() {
         &parsed,
         &edb_playlists_from_tracks(edb_tracks),
         &RatingColourParity::default(),
+        &FieldNoteParity::default(),
         Some(raw_coverage),
     );
 
@@ -1120,6 +1125,7 @@ fn parity_report_fails_when_playlist_is_missing_from_one_database() {
             &parsed,
             &edb_playlists_from_tracks(edb_tracks),
             &RatingColourParity::default(),
+            &FieldNoteParity::default(),
             None,
         );
         let playlist = details
@@ -1210,6 +1216,7 @@ fn parity_report_fails_when_playlist_order_differs() {
         &parsed,
         &edb_playlists_from_tracks(edb_tracks),
         &RatingColourParity::default(),
+        &FieldNoteParity::default(),
         None,
     );
     let playlist = details
@@ -1283,6 +1290,7 @@ fn parity_report_fails_when_playlist_sort_order_differs() {
         &parsed,
         &edb_playlists,
         &RatingColourParity::default(),
+        &FieldNoteParity::default(),
         None,
     );
 
@@ -1365,6 +1373,7 @@ fn parity_playlist_details_follow_playlist_sort_order_not_name() {
         &parsed,
         &edb_playlists,
         &RatingColourParity::default(),
+        &FieldNoteParity::default(),
         None,
     );
 
@@ -1404,6 +1413,7 @@ fn parity_report_fails_when_media_or_analysis_path_differs_between_edb_and_pdb()
             &parsed,
             &edb_playlists_from_tracks(edb_tracks),
             &RatingColourParity::default(),
+            &FieldNoteParity::default(),
             None,
         );
         let playlist = details
@@ -1452,6 +1462,7 @@ fn parity_report_passes_when_both_have_artwork_with_different_paths() {
         &parsed,
         &edb_playlists_from_tracks(edb_tracks),
         &RatingColourParity::default(),
+        &FieldNoteParity::default(),
         None,
     );
     let playlist = details
@@ -1492,6 +1503,7 @@ fn parity_report_warns_when_artwork_present_in_one_db_only() {
         &parsed,
         &edb_playlists_from_tracks(edb_tracks),
         &RatingColourParity::default(),
+        &FieldNoteParity::default(),
         None,
     );
     let playlist = details
@@ -1524,6 +1536,7 @@ fn parity_report_fails_when_required_pdb_dictionary_ids_do_not_resolve() {
         &parsed,
         &edb_playlists_from_tracks(edb_tracks),
         &RatingColourParity::default(),
+        &FieldNoteParity::default(),
         None,
     );
     let playlist = details
@@ -1566,6 +1579,7 @@ fn parity_report_warns_when_edb_source_metadata_is_incomplete() {
         &parsed,
         &edb_playlists_from_tracks(edb_tracks),
         &RatingColourParity::default(),
+        &FieldNoteParity::default(),
         None,
     );
     let playlist = details
@@ -1614,6 +1628,7 @@ fn parity_report_treats_empty_artist_as_unknown_artist_for_gate() {
         &parsed,
         &edb_playlists_from_tracks(edb_tracks),
         &RatingColourParity::default(),
+        &FieldNoteParity::default(),
         None,
     );
     let playlist = details

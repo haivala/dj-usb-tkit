@@ -11,7 +11,7 @@ use rusqlite::params;
 
 use crate::edb::{
     ExportDbPlaylist, find_key_id_by_name, open_edb_from_usb_root, open_edb_rw,
-    try_read_playlists_with_metadata_from_edb, try_read_playlists_with_metadata_from_edb_with_conn,
+    try_read_playlists_with_metadata_from_edb_with_conn,
 };
 use crate::error::{BackendError, BackendResult};
 use crate::logging::{self, Level};
@@ -40,10 +40,10 @@ use super::cues::collapse_anlz_cues;
 use super::export::APP_CONTENT_LINK_ID;
 use super::export_helpers::pdb_encoding::ARTIST_SHORT_ASCII_NAME_OFFSET;
 use super::export_helpers::{
-    ExportManifest, ExportManifestTrack, ExportPlaylistData, PdbLayoutProfile, PdbTrackRemoval,
-    PdbTrackRowData, encode_album_row, encode_artist_row, load_table_columns,
-    remove_tracks_from_pdb, replace_export_playlist_row_with_identity, table_exists,
-    usb_relative_path, write_edb_playlist_with_conn, write_pdb,
+    EdbPlaylistWrite, ExportManifest, ExportManifestTrack, ExportPlaylistData, PdbLayoutProfile,
+    PdbPlaylistWrite, PdbTrackRemoval, PdbTrackRowData, build_pdb_for_playlists,
+    encode_album_row, encode_artist_row, load_table_columns, remove_tracks_from_pdb,
+    t19_property_from_conn, table_exists, usb_relative_path, write_edb_playlists_in_tx,
 };
 use super::track_matching::{
     ContentFingerprint, content_fingerprint_key, matching_file_name, same_file_bytes,

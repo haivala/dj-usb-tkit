@@ -438,16 +438,17 @@ holds 96 rows (96 × 40 bytes plus 6 footer groups fill the page exactly,
 | 96 × 40 bytes | ids 228 / 229 / 2.. | `0x0002` / `0x0003` | 0 |
 | 80 × 48 bytes (rows carry a string) | ids 0 / 332 / 331, then 1.. | `0x0002` / `0x0006` | 1 |
 
-**The rows mirror the eDB's `property` row.** Each row holds, after the
-slot/id words: a flags word whose byte 9 is `backGroundColorType`, then PDB
-strings for `createdDate`, two bytes holding the row offsets of the next two
-strings (`19 1e`), `dbVersion` (`"1000"`) and `deviceName`, then at least 4
+**The rows follow the eDB's `property` row for the name and color.** Each
+row holds, after the slot/id words: a flags word whose byte 9 is
+`backGroundColorType`, then PDB strings for a date, two bytes holding the row
+offsets of the next two strings (`19 1e`), the version `"1000"` and
+`deviceName`, then at least 4
 zero bytes up to a 4-byte boundary, and at least 40 bytes in all. A
 non-ASCII name is a UTF-16 long string; rekordbox moves it from offset 30 to
 32 with two zero bytes so its header is 4-byte aligned (`19 20`), as for other
 long string headers (see the alignment section). Names up to 80 characters
 (the app's limit) keep this row shape; rekordbox uses another one (`0x0284`,
-u16 offsets) only for far longer names. The newest id is `numberOfContents`. Seen on rekordbox's own USBs:
+u16 offsets) only for far longer names. The newest id is the PDB's track count. Seen on rekordbox's own USBs:
 
 | USB | eDB `property` | t19 rows |
 | --- | --- | --- |
@@ -463,10 +464,17 @@ they disagree; byte 9 sets the player's menu highlight (color 1 turned a
 CDJ-2000NXS2's highlight from blue to purple).
 
 The writer builds the rows from the eDB's `property` row (`T19Property`,
-read by `edb_t19_property` after the eDB export has updated it). Without a
-readable eDB, a page keeps the property its rows carry. `initialize_usb`
-stamps the template row and the eDB's `createdDate` with the same date, the
-day it initializes the USB, as rekordbox's own init does.
+read by `edb_t19_property` after the eDB export has updated it): name and
+color from the eDB, the version always the app's `"1000"` (`T19_DB_VERSION`).
+The version is not copied from the eDB's `dbVersion`: libraries rekordbox
+upgraded say `10000` there while their t19 rows keep `"1000"`, and `"1000"`
+is what players were validated against. The date is the eDB's `createdDate`
+only when the page is built from template state; a ring keeps its own date,
+as rekordbox leaves the date in existing rows (older libraries keep a
+2020/2021 date beside a newer `createdDate`). Without a readable eDB, a page
+keeps the property its rows carry. `initialize_usb` stamps the template row
+and the eDB's `createdDate` with the same date, the day it initializes the
+USB, as rekordbox's own init does.
 
 In every one, `rowpf` marks the newest id's slot, `tranrf` that slot plus the
 slot of the id before it, and `num_rl` is the lower of those two slots. The
@@ -478,8 +486,8 @@ track count. `sync_t19_ring_page` in `pdb_writer/additive.rs` rewrites the
 page on any export with tracks when `t19_sync_target` asks for it: the page
 is still in template state (`t19_is_template_state`), or it is a ring
 (`t19_ring_state`: exactly the rows `t19_ring_rows` builds for the property
-they carry) whose newest id is not the track count or whose property is not
-the eDB's. This includes an export onto a PDB that already has tracks, so a
+they carry) whose newest id is not the track count or whose name, color or
+version differs. This includes an export onto a PDB that already has tracks, so a
 USB an older build left at 0 songs, or at the fixed 2-row page (players then
 show 1 track and can hang on a communication error), recovers on its next
 export. A page a player has added rows to is not a ring (a CDJ copies the
@@ -588,11 +596,14 @@ Track rows live in `t00`. Known fixed fields written by the current encoder:
 | `0x02` | page-local `index_shift` |
 | `0x04` | `content_link` |
 | `0x08` | sample rate |
+| `0x0c` | composer id (`t02` artist) |
 | `0x10` | file size |
 | `0x14` | master content id |
 | `0x18` | master DB id |
 | `0x1c` | artwork id |
 | `0x20` | key id |
+| `0x28` | label id (`t04` label) |
+| `0x2c` | remixer id (`t02` artist) |
 | `0x30` | bitrate |
 | `0x34` | track number |
 | `0x38` | tempo x100 |
@@ -837,7 +848,10 @@ It accepts changes that can be represented without unsafe topology changes:
   playlist-entry rows;
 - patch known same-size `t00` scalar fields and same-length string slots;
 - when a mapped `t00` string changes length, mark the old active row inactive
-  and append a replacement row with the same track id;
+  and append a replacement row with the same track id. The replacement keeps
+  the old row's fixed bytes and every string slot the change doesn't touch
+  (including slots the writer doesn't model); only changed mapped slots are
+  re-encoded, and the slots are laid out again with 4-byte alignment;
 - patch `t07.sort_order` in place;
 - rewrite a template-state or app-written `t19` page for the track count (see
   "`tt=19` activation").

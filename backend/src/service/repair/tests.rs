@@ -121,6 +121,7 @@ fn make_strict_repair_detail(name: &str) -> UsbParityPlaylistDetail {
         pdb_missing_core_metadata: 0,
         artwork_mismatch_tracks: 0,
         rating_colour_mismatch_tracks: 0,
+        field_note_tracks: 0,
         sample_only_in_pdb: Vec::new(),
         sample_only_in_edb: Vec::new(),
         sample_metadata_mismatches: Vec::new(),
@@ -817,6 +818,9 @@ fn build_seed_pdb_bytes_for_alignment_test() -> Vec<u8> {
         name: "Am".into(),
     });
     data.tracks.push(PdbTrackRowData {
+        composer_id: 0,
+        label_id: 0,
+        remixer_id: 0,
         header_flags_u32: None,
         id: 1,
         artist_id: 1,

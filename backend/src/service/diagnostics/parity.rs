@@ -74,6 +74,7 @@ pub(crate) fn build_usb_parity_comparison(
     parsed: &crate::pdb_reader::ParsedPdb,
     edb_playlists: &HashMap<String, ExportDbPlaylist>,
     rating_colour: &RatingColourParity,
+    field_notes: &FieldNoteParity,
     strict_raw_coverage: Option<StrictRawCoverageParity>,
 ) -> (
     Vec<DiagCheck>,
@@ -540,6 +541,7 @@ pub(crate) fn build_usb_parity_comparison(
         let mut edb_missing_core_metadata = 0usize;
         let mut artwork_mismatch_tracks = 0usize;
         let mut rating_colour_mismatch_tracks = 0usize;
+        let mut field_note_tracks = 0usize;
         let mut path_mismatch_tracks = 0usize;
         let mut dictionary_id_issue_tracks = 0usize;
 
@@ -676,6 +678,17 @@ pub(crate) fn build_usb_parity_comparison(
                 ))
             {
                 rating_colour_mismatch_tracks += 1;
+            }
+            if field_notes
+                .mismatched_paths
+                .contains(&normalize_pdb_path_for_edb_lookup(
+                    edb_detail
+                        .usb_media_path
+                        .as_deref()
+                        .unwrap_or(&edb_detail.file_path),
+                ))
+            {
+                field_note_tracks += 1;
             }
 
             let mut mismatches = Vec::<String>::new();
@@ -854,6 +867,7 @@ pub(crate) fn build_usb_parity_comparison(
             pdb_missing_core_metadata,
             artwork_mismatch_tracks,
             rating_colour_mismatch_tracks,
+            field_note_tracks,
             path_mismatch_tracks,
             dictionary_id_issue_tracks,
             playlist_id_match,
@@ -1064,6 +1078,24 @@ pub(crate) fn build_usb_parity_comparison(
                 DiagStatus::Warn
             },
             count: rating_colour.mismatched_tracks,
+        },
+        // A note: other synced fields that differ never fail parity.
+        DiagSummaryRow {
+            label: if field_notes.by_field.is_empty() {
+                "Other track field differences (note)".to_string()
+            } else {
+                format!(
+                    "Other track field differences (note: {})",
+                    field_notes
+                        .by_field
+                        .iter()
+                        .map(|(field, n)| format!("{field} {n}"))
+                        .collect::<Vec<_>>()
+                        .join(", ")
+                )
+            },
+            status: DiagStatus::Pass,
+            count: field_notes.mismatched_tracks,
         },
     ];
     if let Some(raw_coverage) = strict_raw_coverage.as_ref() {

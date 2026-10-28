@@ -316,11 +316,14 @@ pub fn encode_track_row_with_profile(
     );
     row[4..8].copy_from_slice(&track.content_link.unwrap_or(0).to_le_bytes());
     row[8..12].copy_from_slice(&track.sample_rate_hz.unwrap_or(0).to_le_bytes());
+    row[12..16].copy_from_slice(&track.composer_id.to_le_bytes());
     row[16..20].copy_from_slice(&track.file_size_bytes.unwrap_or(0).to_le_bytes());
     row[20..24].copy_from_slice(&track.master_content_id.unwrap_or(0).to_le_bytes());
     row[24..28].copy_from_slice(&track.master_db_id.unwrap_or(0).to_le_bytes());
     row[28..32].copy_from_slice(&track.artwork_id.to_le_bytes());
     row[32..36].copy_from_slice(&track.key_id.to_le_bytes());
+    row[40..44].copy_from_slice(&track.label_id.to_le_bytes());
+    row[44..48].copy_from_slice(&track.remixer_id.to_le_bytes());
     row[48..52].copy_from_slice(&track.bitrate_kbps.unwrap_or(0).to_le_bytes());
     row[52..56].copy_from_slice(&track.track_number.unwrap_or(0).to_le_bytes());
     let tempo_x100 = track
@@ -455,6 +458,9 @@ mod tests {
         file_path: &str,
     ) -> super::super::PdbTrackRowData {
         super::super::PdbTrackRowData {
+            composer_id: 0,
+            label_id: 0,
+            remixer_id: 0,
             header_flags_u32: None,
             content_link: None,
             sample_rate_hz: None,

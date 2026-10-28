@@ -3740,6 +3740,14 @@ mod tests {
                 .enumerate()
                 .map(
                     |(i, (id, title, filename))| crate::edb::ExportManifestTrack {
+                        date_added: None,
+                        date_created: None,
+                        label: None,
+                        remixer: None,
+                        composer: None,
+                        from_library: true,
+                        pdb_track_id: None,
+                        edb_content_id: None,
                         first_beat_ms: None,
                         cues: Vec::new(),
                         id: id.to_string(),

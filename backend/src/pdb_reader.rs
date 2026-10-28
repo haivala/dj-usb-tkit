@@ -1769,6 +1769,9 @@ mod tests {
     fn encode_track_row_populates_known_observed_string_slots() {
         let row = crate::service::export_helpers::encode_track_row_with_profile(
             &crate::service::export_helpers::PdbTrackRowData {
+                composer_id: 0,
+                label_id: 0,
+                remixer_id: 0,
                 header_flags_u32: None,
                 content_link: Some(788_224),
                 sample_rate_hz: Some(44_100),
@@ -1845,6 +1848,9 @@ mod tests {
     fn encode_track_row_applies_reference_defaults_for_unresolved_slots_and_bytes() {
         let row = crate::service::export_helpers::encode_track_row_with_profile(
             &crate::service::export_helpers::PdbTrackRowData {
+                composer_id: 0,
+                label_id: 0,
+                remixer_id: 0,
                 header_flags_u32: None,
                 content_link: None,
                 sample_rate_hz: None,

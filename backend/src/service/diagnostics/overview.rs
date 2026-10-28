@@ -610,5 +610,8 @@ pub(super) fn parity_issue_labels(d: &UsbParityPlaylistDetail) -> Vec<String> {
             d.rating_colour_mismatch_tracks
         ));
     }
+    if d.field_note_tracks > 0 {
+        labels.push(format!("field notes {}", d.field_note_tracks));
+    }
     labels
 }

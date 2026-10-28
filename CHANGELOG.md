@@ -39,6 +39,30 @@
 
 ## Unreleased
 
+**Severity:** critical — see item(s) marked **(CRITICAL)** below.
+
+- **Fix (CRITICAL):** The "Upgrade Export Data To Strict Parity" repair could leave a large USB that
+  neither the players nor rekordbox would load. It rewrote both databases once per playlist, replaced
+  every track's eDB values with a thin copy (clearing comments, ISRCs, dates added, cues and labels),
+  and wrote the USB many times in one run. It now reads both databases completely, merges them
+  (a value on either side is kept), and writes each database once through the export's own writers,
+  changing only what differs (a track's artwork in the PDB stays when it has some). If it fails,
+  neither database is changed. Preview Fixes shows how many rows it will add and change.
+- **Fix:** Re-exporting a playlist no longer rewrites eDB values that haven't changed, and no longer
+  clears values the library doesn't have (an ISRC, release year or key rekordbox wrote stays). The
+  export date only fills in a missing date added.
+- **Fix:** Export and repairs no longer move a track to another artist, album, genre, key or label
+  entry that differs only in case or punctuation (for example "Drum & Bass" to "drum & Bass"), and
+  no longer trim spaces from titles and comments. Which entry was picked could change from one run to
+  the next.
+- **Fix:** A PDB track row that has to grow (a longer title or path) keeps its composer, label,
+  remixer and the other values the app doesn't change. Export now also writes composer, label and
+  remixer into the PDB.
+- **Fix:** Adding unindexed audio files to a playlist during a repair writes the USB once, at the
+  end of the repair, together with the other fixes; fixes that run after strict parity act on what it
+  wrote.
+- **Improvement:** The parity report notes other track fields that differ between the databases
+  (comment, ISRC, genre, label, dates, audio format details) without failing the check.
 - **Improvement:** Track and album text an older version stored where older CDJs can't read it is no
   longer rewritten behind your back on every write to the USB. Health & Diagnostics shows it as failing,
   and Preview Fixes repairs it when you choose to.
@@ -50,6 +74,10 @@
   rows now also have rekordbox's length.
 - **Fix:** A newly initialized USB carries the day it was initialized in the PDB as well as the eDB,
   like a USB rekordbox initializes. Before, the PDB got a fixed date.
+- **Fix:** The player history page in the PDB again carries the app's own version string. Since
+  0.4.8 it copied the eDB's, which on libraries rekordbox upgraded is a value the app had never
+  written. The page also keeps the date it already has instead of taking the eDB's, as rekordbox
+  does.
 
 ## 0.4.8
 

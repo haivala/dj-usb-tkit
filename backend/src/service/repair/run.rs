@@ -6,6 +6,19 @@ use super::*;
 /// most fixes share. Fixes that differ override fields with struct-update
 /// syntax; `always_applied` and `bookkeeping` are filled in once every
 /// proposal is collected.
+/// The distinct row ids of `table_type` among `slots`, sorted.
+fn misaligned_row_ids(slots: &[MisalignedStringSlot], table_type: u32) -> Vec<u32> {
+    let mut ids: Vec<u32> = slots
+        .iter()
+        .filter(|m| m.table_type == table_type)
+        .map(|m| m.id)
+        .collect::<HashSet<_>>()
+        .into_iter()
+        .collect();
+    ids.sort_unstable();
+    ids
+}
+
 fn fix_proposal(id: &str, title: &str, description: impl Into<String>) -> RepairFixProposal {
     RepairFixProposal {
         id: id.to_string(),
@@ -580,39 +593,9 @@ impl BackendService {
             crate::service::export_helpers::edb_t19_property(&usb_root).as_ref(),
         );
         let pdb_misaligned_slots = detect_pdb_string_misalignment(&staged_pdb_path);
-        let pdb_misaligned_track_ids: Vec<u32> = {
-            let mut ids: Vec<u32> = pdb_misaligned_slots
-                .iter()
-                .filter(|m| m.table_type == 0)
-                .map(|m| m.id)
-                .collect::<std::collections::HashSet<_>>()
-                .into_iter()
-                .collect();
-            ids.sort_unstable();
-            ids
-        };
-        let pdb_misaligned_album_ids: Vec<u32> = {
-            let mut ids: Vec<u32> = pdb_misaligned_slots
-                .iter()
-                .filter(|m| m.table_type == 3)
-                .map(|m| m.id)
-                .collect::<std::collections::HashSet<_>>()
-                .into_iter()
-                .collect();
-            ids.sort_unstable();
-            ids
-        };
-        let pdb_misaligned_artist_ids: Vec<u32> = {
-            let mut ids: Vec<u32> = pdb_misaligned_slots
-                .iter()
-                .filter(|m| m.table_type == 2)
-                .map(|m| m.id)
-                .collect::<std::collections::HashSet<_>>()
-                .into_iter()
-                .collect();
-            ids.sort_unstable();
-            ids
-        };
+        let pdb_misaligned_track_ids = misaligned_row_ids(&pdb_misaligned_slots, 0);
+        let pdb_misaligned_album_ids = misaligned_row_ids(&pdb_misaligned_slots, 3);
+        let pdb_misaligned_artist_ids = misaligned_row_ids(&pdb_misaligned_slots, 2);
         // rekordbox transaction bookkeeping (see `fix_is_bookkeeping`): no
         // detected issue and no write of its own -- it rides along with the
         // PDB write of whatever repair runs.
@@ -1200,12 +1183,35 @@ impl BackendService {
                     .collect();
                 if strict_count > 0 {
                     detected_issues.push(format!("{strict_count} playlist(s) fail strict parity"));
+                    // A dry run of the apply: same collect, merge and
+                    // writers, eDB rolled back and PDB bytes dropped.
+                    let mut dry_run_warnings = Vec::<WarningEntry>::new();
+                    let (estimated_writes, planned) = match run_strict_parity_upgrade(
+                        &usb_root,
+                        Some(&strict_upgrade_targets),
+                        None,
+                        &mut dry_run_warnings,
+                        false,
+                    ) {
+                        Ok(dry) => (
+                            dry.edb_rows_inserted
+                                + dry.edb_rows_updated
+                                + dry.pdb_tracks_inserted
+                                + dry.pdb_tracks_changed
+                                + dry.pdb_playlists_inserted
+                                + dry.duplicate_entries_removed,
+                            format!(" {}.", strict_parity_summary(&dry)),
+                        ),
+                        Err(err) => (0, format!(" Dry run failed: {err}.")),
+                    };
                     proposed_fixes.push(RepairFixProposal {
-                        estimated_writes: 0,
+                        estimated_writes,
                         ..fix_proposal(
                             STRICT_PARITY_UPGRADE_FIX_ID,
                             "Upgrade Export Data To Strict Parity",
-                            "Collect all playlists from both eDB and PDB, merge metadata from both sides, and rewrite both databases once.",
+                            format!(
+                                "Collect the failing playlists from both eDB and PDB, merge metadata from both sides, and write both databases once through the export writers.{planned}"
+                            ),
                         )
                     });
                 }
@@ -1633,39 +1639,15 @@ impl BackendService {
                     fix_edb_conn.as_mut(),
                     warnings,
                 ) {
-                    Ok(result) => {
-                        if result.failed_playlists > 0 {
-                            outcomes.failed.push(format!(
-                            "Upgrade Export Data To Strict Parity: merged {} playlist(s), wrote {} eDB playlist(s), removed {} duplicate PDB entry/entries, {} failed{}",
-                            result.merged_playlists,
-                            result.edb_playlists_written,
-                            result.duplicate_entries_removed,
-                            result.failed_playlists,
-                            if result.artwork_patch_incomplete {
-                                " (artwork parity incomplete)"
-                            } else {
-                                ""
-                            }
+                    Ok(result) if result.merged_playlists > 0 => {
+                        outcomes.applied.push(format!(
+                            "Upgrade Export Data To Strict Parity: {}",
+                            strict_parity_summary(&result)
                         ));
-                        } else if result.merged_playlists > 0 {
-                            outcomes.applied.push(format!(
-                            "Upgrade Export Data To Strict Parity: merged {} playlist(s), wrote {} eDB playlist(s), removed {} duplicate PDB entry/entries{}",
-                            result.merged_playlists,
-                            result.edb_playlists_written,
-                            result.duplicate_entries_removed,
-                            if result.artwork_patch_incomplete {
-                                " (artwork parity incomplete)"
-                            } else {
-                                ""
-                            }
-                        ));
-                        } else {
-                            outcomes.skipped.push(
-                                "Upgrade Export Data To Strict Parity: nothing to apply"
-                                    .to_string(),
-                            );
-                        }
                     }
+                    Ok(_) => outcomes
+                        .skipped
+                        .push("Upgrade Export Data To Strict Parity: nothing to apply".to_string()),
                     Err(err) => outcomes.failed.push(format!(
                         "Upgrade Export Data To Strict Parity failed: {err}"
                     )),
@@ -1725,6 +1707,35 @@ impl BackendService {
         let pdb_wrong_playlist_tree_shape_pages = bookkeeping_pdb
             .map(detect_pdb_wrong_playlist_tree_shape)
             .unwrap_or_default();
+        // The page and row targets the preview found are stale once the
+        // fixes above wrote the PDB (strict parity, the audio fixes); find
+        // them again on the current file. A target the writers already fixed
+        // is then simply gone.
+        let pdb_wrong_history_shape_pages = if pdb_wrong_history_shape_pages.is_empty() {
+            pdb_wrong_history_shape_pages
+        } else {
+            bookkeeping_pdb
+                .map(detect_pdb_wrong_history_page_shape)
+                .unwrap_or_default()
+        };
+        let pdb_ec_conflicts = if pdb_ec_conflicts.is_empty() {
+            pdb_ec_conflicts
+        } else {
+            bookkeeping_pdb
+                .map(detect_pdb_ec_data_page_conflicts)
+                .unwrap_or_default()
+        };
+        let pdb_misaligned_slots = bookkeeping_pdb
+            .filter(|_| {
+                !(pdb_misaligned_track_ids.is_empty()
+                    && pdb_misaligned_album_ids.is_empty()
+                    && pdb_misaligned_artist_ids.is_empty())
+            })
+            .map(detect_pdb_string_misalignment)
+            .unwrap_or_default();
+        let pdb_misaligned_track_ids = misaligned_row_ids(&pdb_misaligned_slots, 0);
+        let pdb_misaligned_album_ids = misaligned_row_ids(&pdb_misaligned_slots, 3);
+        let pdb_misaligned_artist_ids = misaligned_row_ids(&pdb_misaligned_slots, 2);
         outcomes.record_with_progress(
             progress,
             "Repair Data Pages With Zero tranrf",

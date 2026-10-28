@@ -760,6 +760,9 @@ fn append_tracks_round_trips_through_parser() {
     use crate::service::export_helpers::PdbTrackRowData;
     use PdbLayoutProfile;
     let mk = |id: u32, title: &str, path: &str| PdbTrackRowData {
+        composer_id: 0,
+        label_id: 0,
+        remixer_id: 0,
         header_flags_u32: None,
         id,
         artist_id: 1,
@@ -872,6 +875,9 @@ fn additive_diff_patches_existing_track_scalars_in_place() {
     use PdbLayoutProfile;
 
     let mk_track = |key_id: u32, duration_seconds: Option<u32>| PdbTrackRowData {
+        composer_id: 0,
+        label_id: 0,
+        remixer_id: 0,
         header_flags_u32: None,
         id: 1,
         artist_id: 1,
@@ -1080,6 +1086,9 @@ fn build_seed_pdb_data() -> PdbData {
     // Seed one track so classifier tests can exercise existing-row
     // dictionary/playlist behavior.
     data.tracks.push(PdbTrackRowData {
+        composer_id: 0,
+        label_id: 0,
+        remixer_id: 0,
         header_flags_u32: None,
         id: 1,
         artist_id: 1,
@@ -1165,6 +1174,9 @@ fn additive_diff_rejects_renamed_artist() {
 fn additive_diff_rejects_removed_track() {
     use crate::service::export_helpers::PdbTrackRowData;
     let mk_track = || PdbTrackRowData {
+        composer_id: 0,
+        label_id: 0,
+        remixer_id: 0,
         header_flags_u32: None,
         id: 42,
         artist_id: 1,
@@ -1470,6 +1482,60 @@ fn mutate_tracks_in_place_zeroes_id_on_relocated_slot() {
     );
 }
 
+#[test]
+fn relocated_track_row_keeps_the_fields_the_change_does_not_touch() {
+    // A row that no longer fits its slot is rebuilt from the old row, not
+    // encoded from scratch: composer, label, remixer, the original-artist
+    // field the writer doesn't model and string slots it writes defaults
+    // for all survive a title change.
+    let mut seed = build_seed_pdb_data();
+    seed.tracks[0].composer_id = 5;
+    seed.tracks[0].label_id = 6;
+    seed.tracks[0].remixer_id = 8;
+    let mut bytes = write_pdb(&seed).expect("write seed");
+    let (_, row_abs, row_len, _) = track_row_loc_by_id(&bytes, 1).expect("track row");
+    bytes[row_abs + 36..row_abs + 40].copy_from_slice(&7u32.to_le_bytes());
+    let old_row = bytes[row_abs..row_abs + row_len].to_vec();
+    let slot = |row: &[u8], index: usize| {
+        let at = read_u16_le_at(row, 94 + 2 * index).unwrap() as usize;
+        row[at..at + 2].to_vec()
+    };
+
+    let mut row = seed.tracks[0].clone();
+    row.title = "A much longer title than the seed row had room for".into();
+    row.composer_id = 0;
+    mutate_tracks_in_place(
+        &mut bytes,
+        &[PdbTrackRowMutation {
+            row,
+            changed_fields: vec!["title"],
+        }],
+        PdbLayoutProfile::Rb7Compatible,
+        PAGE_SIZE,
+    )
+    .expect("mutate track");
+
+    let parsed = crate::pdb_reader::parse_pdb_bytes(&bytes).expect("parse");
+    let track = parsed.tracks.iter().find(|t| t.id == 1).expect("track 1");
+    assert_eq!(track.title, "A much longer title than the seed row had room for");
+    assert_eq!(
+        (track.composer_id, track.label_id, track.remixer_id),
+        (5, 6, 8)
+    );
+    let (_, new_abs, new_len, _) = track_row_loc_by_id(&bytes, 1).expect("relocated row");
+    assert_ne!(new_abs, row_abs, "the row moved");
+    let new_row = &bytes[new_abs..new_abs + new_len];
+    assert_eq!(read_u32_le_at(new_row, 36), Some(7));
+    // Rb7Compatible would write "" into slots 2 and 3; the old row's stay.
+    assert_eq!(slot(new_row, 2), slot(&old_row, 2));
+    assert_eq!(slot(new_row, 3), slot(&old_row, 3));
+    assert_eq!(new_row[..94], {
+        let mut fixed = old_row[..94].to_vec();
+        fixed[..4].copy_from_slice(&new_row[..4]);
+        fixed
+    }[..]);
+}
+
 /// Simulate a row whose UTF-16 slot isn't padded to a 4-byte aligned offset: insert one byte
 /// right before slot 17's (title) content and bump
 /// the recorded offsets for slots 17..21 (which all shifted right by that insertion) by 1.
@@ -1703,6 +1769,9 @@ fn same_size_track_row_patch_sanitizes_metadata_strings() {
     }
 
     let base = PdbTrackRowData {
+        composer_id: 0,
+        label_id: 0,
+        remixer_id: 0,
         header_flags_u32: None,
         id: 1,
         artist_id: 1,
@@ -1775,6 +1844,9 @@ fn apply_additive_diff_grows_file_minimally() {
 
     // Build a PDB with 3 tracks + supporting dictionary rows.
     let mk_track = |id: u32, title: &str| PdbTrackRowData {
+        composer_id: 0,
+        label_id: 0,
+        remixer_id: 0,
         header_flags_u32: None,
         id,
         artist_id: 1,
@@ -1927,6 +1999,9 @@ fn additive_diff_accepts_empty_existing_pdb_for_first_export() {
         name: "Added Artist".into(),
     });
     next.tracks.push(PdbTrackRowData {
+        composer_id: 0,
+        label_id: 0,
+        remixer_id: 0,
         header_flags_u32: None,
         content_link: None,
         sample_rate_hz: None,
@@ -1978,6 +2053,9 @@ fn mirror_removal_leaves_tt8_pages_with_single_bit_tranrf() {
     use crate::service::export_helpers::PdbTrackRowData;
 
     let track = |id: u32| PdbTrackRowData {
+        composer_id: 0,
+        label_id: 0,
+        remixer_id: 0,
         header_flags_u32: None,
         content_link: None,
         sample_rate_hz: None,
@@ -2110,6 +2188,9 @@ fn additive_first_export_large_library_synthesizes_single_t19_row() {
             name: format!("Artist {id}"),
         });
         next.tracks.push(PdbTrackRowData {
+            composer_id: 0,
+            label_id: 0,
+            remixer_id: 0,
             header_flags_u32: None,
             content_link: None,
             sample_rate_hz: None,
@@ -2174,6 +2255,9 @@ fn additive_first_export_preserves_template_menu_pages() {
         name: "First Artist".into(),
     });
     next.tracks.push(PdbTrackRowData {
+        composer_id: 0,
+        label_id: 0,
+        remixer_id: 0,
         header_flags_u32: None,
         content_link: None,
         sample_rate_hz: None,
@@ -2279,6 +2363,9 @@ fn additive_first_export_keeps_t07_on_initial_tail_candidate() {
 
     for id in 1..=10u32 {
         next.tracks.push(PdbTrackRowData {
+            composer_id: 0,
+            label_id: 0,
+            remixer_id: 0,
             header_flags_u32: None,
             content_link: None,
             sample_rate_hz: None,
@@ -2359,6 +2446,9 @@ fn additive_first_export_keeps_t07_on_initial_tail_candidate() {
 fn reposition_test_track(id: u32) -> crate::service::export_helpers::PdbTrackRowData {
     use crate::service::export_helpers::PdbTrackRowData;
     PdbTrackRowData {
+        composer_id: 0,
+        label_id: 0,
+        remixer_id: 0,
         header_flags_u32: None,
         content_link: None,
         sample_rate_hz: None,
@@ -2712,6 +2802,9 @@ fn t19_newest_and_active_slot(bytes: &[u8]) -> (u32, usize) {
 
 fn t19_test_track(id: u32) -> crate::service::export_helpers::PdbTrackRowData {
     crate::service::export_helpers::PdbTrackRowData {
+        composer_id: 0,
+        label_id: 0,
+        remixer_id: 0,
         header_flags_u32: None,
         content_link: None,
         sample_rate_hz: None,
@@ -2829,8 +2922,9 @@ fn export_keeps_rekordbox_t19_ring_at_track_count() {
 
 #[test]
 fn export_writes_edb_property_into_t19() {
-    // t19 mirrors the eDB's `property` row: a new date, color or name
-    // there rewrites the page; the same property leaves it alone.
+    // t19 follows the eDB's `property` row: a new color or name there
+    // rewrites the page; the same property leaves it alone. The ring keeps
+    // its own date, as rekordbox does.
     let (empty, before) = template_state_seed_with_row(&T19_TEMPLATE_ROW);
     let mut next = empty.clone();
     next.tracks = (1..=3).map(t19_test_track).collect();
@@ -2859,9 +2953,24 @@ fn export_writes_edb_property_into_t19() {
 
     let colored = T19Property {
         background_color: 1,
-        ..prop
+        ..prop.clone()
     };
     next.t19_property = Some(colored.clone());
+    let diff = compute_additive_diff(&out, &next, vec![]).expect("additive");
+    assert_eq!(diff.sync_t19_ring, Some((3, colored.clone())));
+
+    // A different `createdDate` alone leaves the ring alone, and a rewrite
+    // for another reason keeps the ring's date.
+    next.t19_property = Some(T19Property {
+        created_date: "2027-01-01".into(),
+        ..prop
+    });
+    let diff = compute_additive_diff(&out, &next, vec![]).expect("additive");
+    assert_eq!(diff.sync_t19_ring, None);
+    next.t19_property = Some(T19Property {
+        created_date: "2027-01-01".into(),
+        ..colored.clone()
+    });
     let diff = compute_additive_diff(&out, &next, vec![]).expect("additive");
     assert_eq!(diff.sync_t19_ring, Some((3, colored)));
 }

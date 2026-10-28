@@ -1963,6 +1963,10 @@ pub struct UsbParityPlaylistDetail {
     /// Tracks whose star rating or colour differs between the PDB and the eDB.
     #[serde(default)]
     pub rating_colour_mismatch_tracks: usize,
+    /// Tracks whose other synced fields (comment, ISRC, genre, label, …)
+    /// differ between the PDB and the eDB. A note: never fails parity.
+    #[serde(default)]
+    pub field_note_tracks: usize,
     #[serde(default)]
     pub sample_only_in_pdb: Vec<String>,
     #[serde(default)]

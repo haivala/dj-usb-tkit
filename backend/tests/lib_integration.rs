@@ -194,6 +194,14 @@ fn seed_usb_missing_audio_fixture(backend: &BackendCommands, usb_root: &Path) ->
         skipped_tracks: 0,
         warnings: Vec::new(),
         tracks: vec![ExportManifestTrack {
+            date_added: None,
+            date_created: None,
+            label: None,
+            remixer: None,
+            composer: None,
+            from_library: true,
+            pdb_track_id: None,
+            edb_content_id: None,
             first_beat_ms: None,
             cues: Vec::new(),
             id: "t-missing".to_string(),
@@ -1921,8 +1929,9 @@ fn export_to_usb_preserves_existing_export_db_metadata_when_local_track_is_thin(
         "image_id should preserve the existing artwork when local export metadata is thin"
     );
     assert_eq!(
-        row.3, None,
-        "key_id should clear stale existing key metadata when local export track has no key"
+        row.3,
+        Some(5),
+        "key_id keeps the existing key when the local export track has none: a value the export doesn't carry is never cleared"
     );
     assert_eq!(
         row.4, 180,
@@ -3396,6 +3405,14 @@ fn adding_usb_track_clears_stale_local_key_when_usb_key_is_missing() {
         tracks: Vec::new(),
     };
     let manifest_track = ExportManifestTrack {
+        date_added: None,
+        date_created: None,
+        label: None,
+        remixer: None,
+        composer: None,
+        from_library: true,
+        pdb_track_id: None,
+        edb_content_id: None,
         first_beat_ms: None,
         cues: Vec::new(),
         id: "manifest-track".to_string(),
@@ -3584,6 +3601,14 @@ fn fetch_usb_histories_opens_edb_exactly_once_not_once_per_read() {
         tracks: Vec::new(),
     };
     let manifest_track = ExportManifestTrack {
+        date_added: None,
+        date_created: None,
+        label: None,
+        remixer: None,
+        composer: None,
+        from_library: true,
+        pdb_track_id: None,
+        edb_content_id: None,
         first_beat_ms: None,
         cues: Vec::new(),
         id: "manifest-track".to_string(),
@@ -3967,6 +3992,14 @@ fn repair_usb_diagnostics_strict_upgrade_rewrites_pdb_from_edb() {
         warnings: Vec::new(),
         tracks: vec![
             ExportManifestTrack {
+                date_added: None,
+                date_created: None,
+                label: None,
+                remixer: None,
+                composer: None,
+                from_library: true,
+                pdb_track_id: None,
+                edb_content_id: None,
                 first_beat_ms: None,
                 cues: Vec::new(),
                 id: "t-a".to_string(),
@@ -4015,6 +4048,14 @@ fn repair_usb_diagnostics_strict_upgrade_rewrites_pdb_from_edb() {
                 duration_ms: Some(180_000),
             },
             ExportManifestTrack {
+                date_added: None,
+                date_created: None,
+                label: None,
+                remixer: None,
+                composer: None,
+                from_library: true,
+                pdb_track_id: None,
+                edb_content_id: None,
                 first_beat_ms: None,
                 cues: Vec::new(),
                 id: "t-b".to_string(),
@@ -4063,6 +4104,14 @@ fn repair_usb_diagnostics_strict_upgrade_rewrites_pdb_from_edb() {
                 duration_ms: Some(181_000),
             },
             ExportManifestTrack {
+                date_added: None,
+                date_created: None,
+                label: None,
+                remixer: None,
+                composer: None,
+                from_library: true,
+                pdb_track_id: None,
+                edb_content_id: None,
                 first_beat_ms: None,
                 cues: Vec::new(),
                 id: "t-c".to_string(),
@@ -4265,6 +4314,14 @@ fn repair_usb_diagnostics_strict_upgrade_is_not_proposed_when_neither_side_is_ri
         skipped_tracks: 0,
         warnings: Vec::new(),
         tracks: vec![ExportManifestTrack {
+            date_added: None,
+            date_created: None,
+            label: None,
+            remixer: None,
+            composer: None,
+            from_library: true,
+            pdb_track_id: None,
+            edb_content_id: None,
             first_beat_ms: None,
             cues: Vec::new(),
             id: "t-thin".to_string(),
@@ -5614,6 +5671,14 @@ fn export_to_usb_fingerprint_fallback_reuses_foreign_scheme_track_instead_of_dup
         skipped_tracks: 0,
         warnings: Vec::new(),
         tracks: vec![ExportManifestTrack {
+            date_added: None,
+            date_created: None,
+            label: None,
+            remixer: None,
+            composer: None,
+            from_library: true,
+            pdb_track_id: None,
+            edb_content_id: None,
             first_beat_ms: None,
             cues: Vec::new(),
             id: "t-foreign".to_string(),

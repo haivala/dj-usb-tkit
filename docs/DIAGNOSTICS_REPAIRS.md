@@ -261,23 +261,70 @@ Menu commands are separate from diagnostics repair:
 
 ## Strict Parity Upgrade
 
-`upgrade_export_data_to_strict_parity` uses a collect-merge-write flow:
+`upgrade_export_data_to_strict_parity` collects, merges and hands the result
+to the export writers. The repair writes nothing itself:
 
-- parse PDB once;
-- read eDB playlists with metadata;
-- merge playlist names from both sources;
-- preserve existing PDB playlist ids and sort order for matched playlists;
-- keep PDB-only playlist members instead of pruning them;
-- prefer eDB track metadata when present, falling back to PDB fields;
-- write PDB through the current writer;
-- remove stale duplicate PDB playlist-entry rows left by prior repairs;
-- re-read PDB playlist identities;
-- write eDB using the final playlist identity, including syncing
-  `sequenceNo` from the current PDB `t07.sort_order` for every playlist.
+- **Collect.** Parse the staged PDB once and read the eDB's playlists and
+  every `content` row with its dictionary names (raw values; nothing is
+  substituted for a missing one).
+- **Merge**, for the playlists that fail strict parity:
+  - per track field, a non-empty eDB value wins, else the PDB's; a side
+    without a value never blanks the other. The eDB's rating and colour win
+    whenever it has the track (0 is a rating);
+  - artwork only needs to resolve on both sides (not the same file): a PDB
+    row that has artwork keeps it, and a side without artwork takes the
+    other side's exact path;
+  - membership is the union: eDB members in eDB order, then members only the
+    PDB has. Membership on one side is never pruned;
+  - matched and PDB-only playlists keep their PDB playlist id and sort
+    order; eDB-only playlists get a free id after the existing ones;
+  - a track the eDB doesn't have yet takes its creation date from the audio
+    file on the USB, else its PDB date added.
+- **Write once, all or nothing.** The eDB writer writes every merged playlist
+  in one transaction; the PDB writer builds the new PDB in memory from the
+  staged copy (same transaction's t19 property; duplicate playlist entries
+  dropped); the staged PDB is written, then the eDB transaction commits. A
+  failure before the commit rolls the eDB back and leaves the staged PDB as
+  it was; a failed commit puts the old PDB bytes back. The repair run writes
+  both staged databases back to the USB once, after all selected fixes.
 
-The strict repair path is intended to converge on rerun. It does not compact
-PDB tables, rebuild the entire PDB from scratch, or silently remove playlist
-membership that exists on only one side.
+The writers write only what differs. Merged tracks are handed over as not
+exported from the library, so the export's own touches (cue rewrite, update
+counters, `analysedBits`, `hasModified`, auto-load and KUVO flags, derived
+dates) are skipped. A track whose merged values equal its rows leaves both
+rows as they are: PDB track rows stay byte-identical, and a track keeps
+its dictionary rows when they already name the merged value (see
+`docs/USB_EXPORT.md`). A PDB track row that
+has to grow is relocated with every byte the change doesn't touch kept.
+
+The preview runs the same collect, merge and writers with the eDB
+transaction rolled back and the PDB bytes dropped, so its counts (rows
+added and changed on each side) are what the apply writes, before the
+structural prerequisites that run first.
+
+Fixes that act on page or row targets (history page shape, table
+write-pointer conflict, string alignment) detect their targets again on the
+current staged PDB at apply time, since strict parity and the audio fixes may
+have rewritten it.
+
+The strict repair converges on rerun. It does not compact PDB tables,
+rebuild the PDB from scratch, or remove playlist membership that exists on
+only one side.
+
+### Track field table
+
+`service/export_helpers/field_table.rs` lists which manifest field, eDB
+`content` column and PDB track field carry the same value, for export and
+the repair alike. Adding a field to `ExportManifestTrack` or
+`PdbTrackRowData` doesn't compile until it is classified there, and a test
+fails on any eDB template `content` column that is neither synced nor listed
+as not synced.
+
+Parity diagnostics report differences in the other synced fields (comment,
+ISRC, genre, label, remixer, composer, release year and date, date added,
+bitrate, sample rate, bit depth, file size) only as notes: the "Other track
+field differences (note)" summary row and a per-playlist `field notes N`
+label. They never fail parity.
 
 ## Implementation Anchors
 

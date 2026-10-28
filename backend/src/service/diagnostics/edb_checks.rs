@@ -199,6 +199,60 @@ pub(super) fn compare_rating_colour(
     out
 }
 
+/// Playlist tracks whose other synced fields (`note_field_differences`)
+/// differ between the eDB and their PDB row. Reported as notes only.
+#[derive(Debug, Default, Clone)]
+pub(crate) struct FieldNoteParity {
+    pub(super) mismatched_tracks: usize,
+    /// Tracks per differing field.
+    pub(super) by_field: std::collections::BTreeMap<&'static str, usize>,
+    /// `normalize_pdb_path_for_edb_lookup` paths of the mismatched tracks.
+    pub(super) mismatched_paths: HashSet<String>,
+}
+
+pub(super) fn compare_note_fields(
+    conn: &rusqlite::Connection,
+    parsed: &crate::pdb_reader::ParsedPdb,
+    edb_playlists: &HashMap<String, ExportDbPlaylist>,
+) -> FieldNoteParity {
+    let pdb_by_path = parsed
+        .tracks
+        .iter()
+        .map(|t| (normalize_pdb_path_for_edb_lookup(&t.track_file_path), t))
+        .collect::<HashMap<_, _>>();
+    let playlist_paths = edb_playlists
+        .values()
+        .flat_map(|playlist| playlist.tracks.iter())
+        .map(|track| normalize_pdb_path_for_edb_lookup(track.identity_path()))
+        .collect::<HashSet<_>>();
+    let mut out = FieldNoteParity::default();
+    let rows = crate::service::export_helpers::read_edb_content_fields(conn).unwrap_or_default();
+    for edb in rows.values() {
+        let Some(path) = edb.path.as_deref() else {
+            continue;
+        };
+        let key = normalize_pdb_path_for_edb_lookup(path);
+        if !playlist_paths.contains(&key) {
+            continue;
+        }
+        let Some(pdb) = pdb_by_path.get(&key) else {
+            continue; // a track missing from the PDB is the membership check's
+        };
+        let fields =
+            crate::service::export_helpers::field_table::note_field_differences(edb, pdb, parsed);
+        if fields.is_empty() {
+            continue;
+        }
+        for field in fields {
+            *out.by_field.entry(field).or_default() += 1;
+        }
+        if out.mismatched_paths.insert(key) {
+            out.mismatched_tracks += 1;
+        }
+    }
+    out
+}
+
 /// Count PDB history playlists/entries that look like real rekordbox-recorded
 /// sessions, excluding the blank template/seed rows every fresh or
 /// never-played export ships in t17/t18 (see `is_named_history_playlist`).

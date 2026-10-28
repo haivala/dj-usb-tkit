@@ -193,34 +193,43 @@ pub(super) fn validate_topology_locked_export_bytes(
     }
 }
 
-/// Write PDB export data.
-///
-/// Existing PDBs are written through the topology-locked additive path only.
-/// A full rebuild is allowed only when there is no PDB on disk yet; falling
-/// back to a rebuilt blob for a populated USB is a known player database corruption class.
-/// The eDB's `property` row as the PDB's t19 rows mirror it (see
-/// [`crate::pdb_writer::T19Property`]), or `None` when the USB has no
-/// readable eDB.
+/// The t19 property for this USB (see [`crate::pdb_writer::T19Property`]):
+/// the eDB's `deviceName`, `backGroundColorType` and `createdDate`, with the
+/// app's [`crate::pdb_writer::T19_DB_VERSION`] rather than the eDB's
+/// `dbVersion`. `None` when the USB has no readable eDB.
 pub(crate) fn edb_t19_property(usb_root: &Path) -> Option<crate::pdb_writer::T19Property> {
     let mut warnings = Vec::<WarningEntry>::new();
     let conn = open_edb_rw(usb_root, &mut warnings)?;
+    t19_property_from_conn(&conn)
+}
+
+/// [`edb_t19_property`] read through an open connection, so a writer can
+/// read the property its own uncommitted transaction has written.
+pub(crate) fn t19_property_from_conn(
+    conn: &rusqlite::Connection,
+) -> Option<crate::pdb_writer::T19Property> {
     conn.query_row(
-        "SELECT COALESCE(deviceName, ''), CAST(dbVersion AS TEXT), createdDate, \
+        "SELECT COALESCE(deviceName, ''), createdDate, \
          COALESCE(backGroundColorType, 0) FROM property LIMIT 1",
         [],
         |row| {
             let name: String = row.get(0)?;
             Ok(crate::pdb_writer::T19Property {
-                created_date: row.get(2)?,
-                db_version: row.get(1)?,
+                created_date: row.get(1)?,
+                db_version: crate::pdb_writer::T19_DB_VERSION.to_string(),
                 device_name: (!name.is_empty()).then_some(name),
-                background_color: u8::try_from(row.get::<_, i64>(3)?).unwrap_or(0),
+                background_color: u8::try_from(row.get::<_, i64>(2)?).unwrap_or(0),
             })
         },
     )
     .ok()
 }
 
+/// Write PDB export data.
+///
+/// Existing PDBs are written through the topology-locked additive path only.
+/// A full rebuild is allowed only when there is no PDB on disk yet; falling
+/// back to a rebuilt blob for a populated USB is a known player database corruption class.
 pub fn write_pdb(
     usb_root: &Path,
     playlist: &ExportPlaylistData,
@@ -373,6 +382,28 @@ pub(crate) fn key_names_match(a: &str, b: &str) -> bool {
         .any(|v| !v.is_empty() && b_variants.contains(v))
 }
 
+/// A map's entries in id order, so the lowest id wins a name collision.
+fn sorted_by_id(map: &HashMap<u32, String>) -> Vec<(&u32, &String)> {
+    let mut entries: Vec<_> = map.iter().collect();
+    entries.sort_by_key(|(id, _)| **id);
+    entries
+}
+
+/// `current` when its dictionary row already names the wanted value: an
+/// existing track keeps its row, rather than moving to another row that
+/// differs only in case or punctuation.
+fn still_named(
+    current: u32,
+    names: &HashMap<u32, String>,
+    same: impl Fn(&str) -> bool,
+) -> Option<u32> {
+    (current != 0)
+        .then(|| names.get(&current))
+        .flatten()
+        .filter(|name| same(name))
+        .map(|_| current)
+}
+
 pub(super) fn resolve_key_id_by_name(
     key_id_by_name: &HashMap<String, u32>,
     key_name: &str,
@@ -391,13 +422,6 @@ pub(super) fn write_pdb_fresh_with_overrides(
     override_sort_order: Option<u32>,
     commit_write: bool,
 ) -> BackendResult<WriteExportPdbResult> {
-    use crate::pdb_writer::{
-        PdbAlbumRow, PdbArtistRow, PdbArtworkRow, PdbData, PdbKeyRow, PdbPlaylistEntryRow,
-        PdbPlaylistTreeRow,
-    };
-
-    let pdb_path = crate::service::usb_staging::stage_pdb(usb_root)?;
-
     if std::env::var("PDB_WRITE_MODE")
         .ok()
         .map(|v| v.eq_ignore_ascii_case("skip"))
@@ -410,10 +434,87 @@ pub(super) fn write_pdb_fresh_with_overrides(
             writer_warnings: Vec::new(),
         });
     }
+    let build = build_pdb_for_playlists(
+        usb_root,
+        &[PdbPlaylistWrite {
+            playlist,
+            manifest,
+            mirror_playlist_entries,
+            row_id: None,
+            playlist_id: override_playlist_id,
+            sort_order: override_sort_order,
+            move_to_front: true,
+        }],
+        // The eDB export runs first, so this is the property it just wrote.
+        edb_t19_property(usb_root),
+        false,
+    )?;
+    if commit_write {
+        crate::service::usb_staging::commit_and_write_back(
+            usb_root,
+            crate::service::usb_staging::DbKind::Pdb,
+            &build.bytes,
+        )?;
+    }
+    Ok(WriteExportPdbResult {
+        inserted_tracks: build.inserted_tracks,
+        inserted_playlists: build.inserted_playlists,
+        topology_issues: Vec::new(),
+        writer_warnings: Vec::new(),
+    })
+}
 
+/// One playlist for [`build_pdb_for_playlists`].
+pub(crate) struct PdbPlaylistWrite<'a> {
+    pub playlist: &'a ExportPlaylistData,
+    pub manifest: &'a ExportManifest,
+    /// The playlist's entries become exactly the manifest's tracks, in its
+    /// order; otherwise new tracks are appended to the entries it has.
+    pub mirror_playlist_entries: bool,
+    /// The existing PDB playlist row to write into (the repair knows it).
+    /// Without one the row is matched by name.
+    pub row_id: Option<u32>,
+    /// The id a new playlist row gets, when free.
+    pub playlist_id: Option<u32>,
+    /// Sort order for a new playlist row.
+    pub sort_order: Option<u32>,
+    /// Show the playlist first, as an export does. The repair keeps every
+    /// playlist's order.
+    pub move_to_front: bool,
+}
+
+/// A PDB [`build_pdb_for_playlists`] built in memory, not yet written.
+pub(crate) struct PdbBuild {
+    /// The staged PDB it was built from.
+    pub before: Vec<u8>,
+    pub bytes: Vec<u8>,
+    pub inserted_tracks: usize,
+    pub changed_tracks: usize,
+    pub inserted_playlists: usize,
+    pub duplicate_entries_removed: usize,
+}
+
+/// Build the PDB that results from writing every one of `writes` into the
+/// staged PDB, in memory, through the topology-locked additive writer: one
+/// seed, one diff, one set of in-place patches. Nothing is written; the
+/// caller decides where the bytes go (the USB now, only the staged copy, or
+/// nowhere for a preview). `t19_property` is the eDB property tt=19 follows.
+/// `remove_duplicate_entries` also drops every repeated `(playlist, track)`
+/// playlist entry but the first, across the whole PDB (stale copies left on
+/// shared tt=8 pages by older writes), as the strict parity repair needs.
+pub(crate) fn build_pdb_for_playlists(
+    usb_root: &Path,
+    writes: &[PdbPlaylistWrite<'_>],
+    t19_property: Option<crate::pdb_writer::T19Property>,
+    remove_duplicate_entries: bool,
+) -> BackendResult<PdbBuild> {
+    use crate::pdb_writer::{
+        PdbAlbumRow, PdbArtistRow, PdbArtworkRow, PdbData, PdbKeyRow, PdbPlaylistEntryRow,
+        PdbPlaylistTreeRow,
+    };
+
+    let pdb_path = crate::service::usb_staging::stage_pdb(usb_root)?;
     let profile = PdbLayoutProfile::from_env();
-    let export_date_added = normalize_export_date(Some(&manifest.generated_at))
-        .unwrap_or_else(|| chrono::Utc::now().format("%Y-%m-%d").to_string());
 
     // ── Load existing PDB data (for additive mode) ──────────────────────
     let existing = if pdb_path.is_file() {
@@ -449,6 +550,7 @@ pub(super) fn write_pdb_fresh_with_overrides(
     let mut album_id_by_name = HashMap::<String, u32>::new();
     let mut key_id_by_name = HashMap::<String, u32>::new();
     let mut genre_id_by_name = HashMap::<String, u32>::new();
+    let mut label_id_by_name = HashMap::<String, u32>::new();
     let mut artwork_id_by_path = HashMap::<String, u32>::new();
     let mut track_id_by_path = HashMap::<String, u32>::new();
     let mut track_index_by_id = HashMap::<u32, usize>::new();
@@ -457,6 +559,7 @@ pub(super) fn write_pdb_fresh_with_overrides(
     let mut all_albums = Vec::<PdbAlbumRow>::new();
     let mut all_keys = Vec::<PdbKeyRow>::new();
     let mut all_genres = Vec::<crate::pdb_writer::PdbDictRow>::new();
+    let mut all_labels = Vec::<crate::pdb_writer::PdbDictRow>::new();
     let mut all_artwork = Vec::<PdbArtworkRow>::new();
     let mut all_tracks = Vec::<PdbTrackRowData>::new();
     let mut all_playlist_tree = Vec::<PdbPlaylistTreeRow>::new();
@@ -466,28 +569,27 @@ pub(super) fn write_pdb_fresh_with_overrides(
     let mut next_album_id = 1u32;
     let mut next_key_id = 1u32;
     let mut next_genre_id = 1u32;
+    let mut next_label_id = 1u32;
     let mut next_artwork_id = 1u32;
     let mut next_track_id = 1u32;
     let mut next_playlist_id = 1u32;
     let mut next_sort_order = 1u32;
-    let mut next_entry_index = 1u32;
-    let mut existing_playlist_pdb_id: Option<u32> = None;
     let mut desired_manifest_track_rows = HashMap::<u32, PdbTrackRowData>::new();
 
     // ── Seed from existing PDB ──────────────────────────────────────────
     if let Some(ref parsed) = existing {
-        for (id, name) in &parsed.artists {
+        for (id, name) in sorted_by_id(&parsed.artists) {
             let key = canonicalize_playlist_name(name);
-            artist_id_by_name.insert(key, *id);
+            artist_id_by_name.entry(key).or_insert(*id);
             all_artists.push(PdbArtistRow {
                 id: *id,
                 name: name.clone(),
             });
             next_artist_id = next_artist_id.max(id + 1);
         }
-        for (id, name) in &parsed.albums {
+        for (id, name) in sorted_by_id(&parsed.albums) {
             let key = canonicalize_playlist_name(name);
-            album_id_by_name.insert(key, *id);
+            album_id_by_name.entry(key).or_insert(*id);
             all_albums.push(PdbAlbumRow {
                 id: *id,
                 name: name.clone(),
@@ -495,27 +597,37 @@ pub(super) fn write_pdb_fresh_with_overrides(
             });
             next_album_id = next_album_id.max(id + 1);
         }
-        for (id, name) in &parsed.keys {
+        for (id, name) in sorted_by_id(&parsed.keys) {
             let key = normalize_pdb_key_name(name);
-            key_id_by_name.insert(key, *id);
+            key_id_by_name.entry(key).or_insert(*id);
             all_keys.push(PdbKeyRow {
                 id: *id,
                 name: name.clone(),
             });
             next_key_id = next_key_id.max(id + 1);
         }
-        for (id, name) in &parsed.genres {
+        for (id, name) in sorted_by_id(&parsed.genres) {
             let key = canonicalize_playlist_name(name);
-            genre_id_by_name.insert(key, *id);
+            genre_id_by_name.entry(key).or_insert(*id);
             all_genres.push(crate::pdb_writer::PdbDictRow {
                 id: *id,
                 name: name.clone(),
             });
             next_genre_id = next_genre_id.max(id + 1);
         }
-        for (id, path) in &parsed.artworks {
+        for (id, name) in sorted_by_id(&parsed.labels) {
+            label_id_by_name
+                .entry(canonicalize_playlist_name(name))
+                .or_insert(*id);
+            all_labels.push(crate::pdb_writer::PdbDictRow {
+                id: *id,
+                name: name.clone(),
+            });
+            next_label_id = next_label_id.max(id + 1);
+        }
+        for (id, path) in sorted_by_id(&parsed.artworks) {
             let key = canonicalize_artwork_path_lookup(path);
-            artwork_id_by_path.insert(key, *id);
+            artwork_id_by_path.entry(key).or_insert(*id);
             all_artwork.push(PdbArtworkRow {
                 id: *id,
                 path: path.clone(),
@@ -529,6 +641,9 @@ pub(super) fn write_pdb_fresh_with_overrides(
             }
             track_index_by_id.insert(track.id, all_tracks.len());
             all_tracks.push(PdbTrackRowData {
+                composer_id: track.composer_id,
+                label_id: track.label_id,
+                remixer_id: track.remixer_id,
                 header_flags_u32: existing_header_flags_by_track_id.get(&track.id).copied(),
                 content_link: track.content_link,
                 sample_rate_hz: track.sample_rate_hz,
@@ -575,20 +690,9 @@ pub(super) fn write_pdb_fresh_with_overrides(
             next_track_id = next_track_id.max(track.id + 1);
         }
 
-        // Seed playlist tree preserving legacy rows as-is. Some real exports
-        // carry duplicate names/IDs in ways that should not be normalized
-        // during additive export writes.
-        let same_name_playlists: Vec<_> = parsed
-            .playlist_tree
-            .iter()
-            .filter(|p| !p.row_is_folder && p.name == playlist.name)
-            .collect();
-        let existing_pl = same_name_playlists
-            .iter()
-            .min_by_key(|p| p.sort_order)
-            .copied();
-        existing_playlist_pdb_id = existing_pl.map(|p| p.id);
-        let same_name_ids: HashSet<u32> = same_name_playlists.iter().map(|p| p.id).collect();
+        // Seed playlist tree and entries preserving legacy rows as-is. Some
+        // real exports carry duplicate names/IDs in ways that should not be
+        // normalized during additive export writes.
         for row in &parsed.playlist_tree {
             all_playlist_tree.push(PdbPlaylistTreeRow {
                 id: row.id,
@@ -600,17 +704,7 @@ pub(super) fn write_pdb_fresh_with_overrides(
             next_playlist_id = next_playlist_id.max(row.id + 1);
             next_sort_order = next_sort_order.max(row.sort_order + 1);
         }
-
-        // Seed playlist entries preserving existing rows.
-        let playlist_pdb_id = existing_playlist_pdb_id;
         for entry in &parsed.playlist_entries {
-            if mirror_playlist_entries && same_name_ids.contains(&entry.playlist_id) {
-                continue; // will be rebuilt from manifest
-            }
-            if !mirror_playlist_entries && playlist_pdb_id == Some(entry.playlist_id) {
-                // Keep existing entries for this playlist (additive)
-                next_entry_index = next_entry_index.max(entry.entry_index + 1);
-            }
             all_playlist_entries.push(PdbPlaylistEntryRow {
                 entry_index: entry.entry_index,
                 track_id: entry.track_id,
@@ -618,42 +712,6 @@ pub(super) fn write_pdb_fresh_with_overrides(
             });
         }
     }
-
-    // ── Ensure playlist exists in tree ──────────────────────────────────
-    let playlist_pdb_id = if let Some(existing_id) = existing_playlist_pdb_id {
-        // Preserve the existing row identity. Its fixed-width sort_order is
-        // adjusted after this block for "exported playlist first"
-        // behavior without rewriting the t07 row body.
-        existing_id
-    } else {
-        let requested_id = override_playlist_id.unwrap_or(next_playlist_id);
-        let id = if all_playlist_tree.iter().any(|row| row.id == requested_id) {
-            next_playlist_id
-        } else {
-            requested_id
-        };
-        let so = override_sort_order.unwrap_or(next_sort_order);
-        all_playlist_tree.push(PdbPlaylistTreeRow {
-            id,
-            parent_id: 0,
-            sort_order: so,
-            is_folder: false,
-            name: playlist.name.clone(),
-        });
-        id
-    };
-    move_playlist_tree_row_to_front(&mut all_playlist_tree, playlist_pdb_id);
-
-    // ── Existing playlist track IDs for dedup ───────────────────────────
-    let existing_playlist_track_ids: HashSet<u32> = if existing_playlist_pdb_id.is_some() {
-        all_playlist_entries
-            .iter()
-            .filter(|e| e.playlist_id == playlist_pdb_id)
-            .map(|e| e.track_id)
-            .collect()
-    } else {
-        HashSet::new()
-    };
 
     let mut edb_key_by_path = HashMap::<String, String>::new();
     let mut edb_artist_by_path = HashMap::<String, String>::new();
@@ -804,30 +862,421 @@ pub(super) fn write_pdb_fresh_with_overrides(
         }
     }
 
-    // ── Process manifest tracks ─────────────────────────────────────────
-    for (idx, track) in manifest.tracks.iter().enumerate() {
-        // exported_path is already USB-relative (set by export.rs manifest builder)
-        let file_path = track.exported_path.clone();
-        let path_key = canonicalize_track_path_identity(&file_path);
+    // Each dictionary's names by id, as the existing PDB has them.
+    let names_of = |pick: fn(&crate::pdb_reader::ParsedPdb) -> &HashMap<u32, String>| {
+        existing.as_ref().map(pick).cloned().unwrap_or_default()
+    };
+    let artist_names = names_of(|p| &p.artists);
+    let album_names = names_of(|p| &p.albums);
+    let key_names = names_of(|p| &p.keys);
+    let genre_names = names_of(|p| &p.genres);
+    let label_names = names_of(|p| &p.labels);
+    let artwork_paths = names_of(|p| &p.artworks);
 
-        let pdb_track_id = if let Some(existing) = track_id_by_path.get(&path_key).copied() {
-            // Update existing track metadata for exported members in all modes.
-            if let Some(existing_track) = track_index_by_id
-                .get(&existing)
-                .copied()
-                .and_then(|idx| all_tracks.get_mut(idx))
+    // Dictionary id for a name, adding a row for a new one.
+    fn dict_id_for<R>(
+        name: &str,
+        id_by_name: &mut HashMap<String, u32>,
+        rows: &mut Vec<R>,
+        next_id: &mut u32,
+        make_row: impl FnOnce(u32, String) -> R,
+    ) -> u32 {
+        *id_by_name
+            .entry(canonicalize_playlist_name(name))
+            .or_insert_with(|| {
+                let id = *next_id;
+                *next_id += 1;
+                rows.push(make_row(id, name.to_string()));
+                id
+            })
+    }
+    let artist_row = |id, name| PdbArtistRow { id, name };
+    let label_row = |id, name| crate::pdb_writer::PdbDictRow { id, name };
+    let named = |value: &Option<String>| -> Option<String> {
+        value.clone().filter(|v| !v.trim().is_empty())
+    };
+
+    let mut written_playlist_ids = HashSet::<u32>::new();
+    for write in writes {
+        let PdbPlaylistWrite {
+            playlist,
+            manifest,
+            mirror_playlist_entries,
+            row_id,
+            playlist_id: override_playlist_id,
+            sort_order: override_sort_order,
+            move_to_front,
+        } = *write;
+        let export_date_added = normalize_export_date(Some(&manifest.generated_at))
+            .unwrap_or_else(|| chrono::Utc::now().format("%Y-%m-%d").to_string());
+
+        // The playlist's existing row: the one asked for by id, else the
+        // same-named one with the lowest sort order.
+        let by_id = row_id.filter(|id| {
+            all_playlist_tree
+                .iter()
+                .any(|row| row.id == *id && !row.is_folder)
+        });
+        let same_name_ids: HashSet<u32> = match by_id {
+            Some(id) => HashSet::from([id]),
+            None => all_playlist_tree
+                .iter()
+                .filter(|row| !row.is_folder && row.name == playlist.name)
+                .map(|row| row.id)
+                .collect(),
+        };
+        let existing_playlist_pdb_id = by_id.or_else(|| {
+            all_playlist_tree
+                .iter()
+                .filter(|row| same_name_ids.contains(&row.id))
+                .min_by_key(|row| row.sort_order)
+                .map(|row| row.id)
+        });
+        let mut next_entry_index = 1u32;
+        if mirror_playlist_entries {
+            // Rebuilt from the manifest below.
+            all_playlist_entries.retain(|e| !same_name_ids.contains(&e.playlist_id));
+        } else if let Some(id) = existing_playlist_pdb_id {
+            // Keep existing entries for this playlist (additive)
+            next_entry_index = all_playlist_entries
+                .iter()
+                .filter(|e| e.playlist_id == id)
+                .map(|e| e.entry_index + 1)
+                .max()
+                .unwrap_or(1);
+        }
+
+        // ── Ensure playlist exists in tree ──────────────────────────────────
+        let playlist_pdb_id = if let Some(existing_id) = existing_playlist_pdb_id {
+            // Preserve the existing row identity. Its fixed-width sort_order is
+            // adjusted after this block for "exported playlist first"
+            // behavior without rewriting the t07 row body.
+            existing_id
+        } else {
+            let requested_id = override_playlist_id.unwrap_or(next_playlist_id);
+            let id = if all_playlist_tree.iter().any(|row| row.id == requested_id) {
+                next_playlist_id
+            } else {
+                requested_id
+            };
+            let so = override_sort_order.unwrap_or(next_sort_order);
+            all_playlist_tree.push(PdbPlaylistTreeRow {
+                id,
+                parent_id: 0,
+                sort_order: so,
+                is_folder: false,
+                name: playlist.name.clone(),
+            });
+            next_playlist_id = next_playlist_id.max(id + 1);
+            next_sort_order = next_sort_order.max(so + 1);
+            id
+        };
+        if move_to_front {
+            move_playlist_tree_row_to_front(&mut all_playlist_tree, playlist_pdb_id);
+        }
+        written_playlist_ids.insert(playlist_pdb_id);
+
+        // ── Existing playlist track IDs for dedup ───────────────────────────
+        let existing_playlist_track_ids: HashSet<u32> = if existing_playlist_pdb_id.is_some() {
+            all_playlist_entries
+                .iter()
+                .filter(|e| e.playlist_id == playlist_pdb_id)
+                .map(|e| e.track_id)
+                .collect()
+        } else {
+            HashSet::new()
+        };
+
+        // ── Process manifest tracks ─────────────────────────────────────────
+        for (idx, track) in manifest.tracks.iter().enumerate() {
+            // A track from the library gets the export's derived dates; one the
+            // repair carries over from the USB keeps exactly the dates it has.
+            let (release_year, release_date) = if track.from_library {
+                (
+                    resolve_track_release_year_for_export(track),
+                    resolve_track_release_date_for_export(track),
+                )
+            } else {
+                (
+                    track.release_year.and_then(|y| u16::try_from(y).ok()),
+                    normalize_export_date(track.release_date.as_deref()),
+                )
+            };
+            let date_added = normalize_export_date(track.date_added.as_deref());
+            // exported_path is already USB-relative (set by export.rs manifest builder)
+            let file_path = track.exported_path.clone();
+            let path_key = canonicalize_track_path_identity(&file_path);
+
+            let hinted_track_id = track
+                .pdb_track_id
+                .filter(|id| track_index_by_id.contains_key(id));
+            let pdb_track_id = if let Some(existing) =
+                hinted_track_id.or_else(|| track_id_by_path.get(&path_key).copied())
             {
-                let edb_identity = edb_identity_by_path.get(&path_key).copied();
-                // Update dictionary references — resolve fresh IDs from manifest data
+                // Update existing track metadata for exported members in all modes.
+                if let Some(existing_track) = track_index_by_id
+                    .get(&existing)
+                    .copied()
+                    .and_then(|idx| all_tracks.get_mut(idx))
+                {
+                    let edb_identity = edb_identity_by_path.get(&path_key).copied();
+                    // Update dictionary references — resolve fresh IDs from manifest data
+                    let resolved_artist_name = if !track.artist.trim().is_empty() {
+                        Some(track.artist.as_str())
+                    } else {
+                        edb_artist_by_path.get(&path_key).map(String::as_str)
+                    };
+                    if let Some(artist_name) = resolved_artist_name {
+                        let artist_key = canonicalize_playlist_name(artist_name);
+                        let aid = if let Some(id) = still_named(
+                            existing_track.artist_id,
+                            &artist_names,
+                            |n| canonicalize_playlist_name(n) == artist_key,
+                        ) {
+                            id
+                        } else if let Some(id) = artist_id_by_name.get(&artist_key).copied() {
+                            id
+                        } else {
+                            let new_id = next_artist_id;
+                            next_artist_id += 1;
+                            artist_id_by_name.insert(artist_key, new_id);
+                            all_artists.push(PdbArtistRow {
+                                id: new_id,
+                                name: artist_name.to_string(),
+                            });
+                            new_id
+                        };
+                        existing_track.artist_id = aid;
+                    }
+                    if let Some(album) = track
+                        .album
+                        .as_deref()
+                        .filter(|v| !v.trim().is_empty())
+                        .or_else(|| edb_album_by_path.get(&path_key).map(String::as_str))
+                    {
+                        let album_key = canonicalize_playlist_name(album);
+                        let aid = if let Some(id) = still_named(
+                            existing_track.album_id,
+                            &album_names,
+                            |n| canonicalize_playlist_name(n) == album_key,
+                        ) {
+                            id
+                        } else if let Some(id) = album_id_by_name.get(&album_key).copied() {
+                            id
+                        } else {
+                            let new_id = next_album_id;
+                            next_album_id += 1;
+                            album_id_by_name.insert(album_key, new_id);
+                            all_albums.push(PdbAlbumRow {
+                                id: new_id,
+                                name: album.to_string(),
+                                artist_id: existing_track.artist_id,
+                            });
+                            new_id
+                        };
+                        existing_track.album_id = aid;
+                    }
+                    let resolved_key_name = track
+                        .key
+                        .as_deref()
+                        .filter(|v| !v.trim().is_empty())
+                        .map(|v| v.to_string())
+                        .or_else(|| edb_key_by_path.get(&path_key).cloned());
+                    if let Some(key_name) = resolved_key_name.as_deref() {
+                        let key_lookup = normalize_pdb_key_name(key_name);
+                        let kid = if let Some(id) = still_named(
+                            existing_track.key_id,
+                            &key_names,
+                            |n| key_names_match(n, key_name),
+                        ) {
+                            id
+                        } else if let Some(id) = resolve_key_id_by_name(&key_id_by_name, key_name) {
+                            id
+                        } else {
+                            let new_id = next_key_id;
+                            next_key_id += 1;
+                            key_id_by_name.insert(key_lookup, new_id);
+                            all_keys.push(PdbKeyRow {
+                                id: new_id,
+                                name: key_name.to_string(),
+                            });
+                            new_id
+                        };
+                        existing_track.key_id = kid;
+                    }
+                    if let Some(genre_name) = track.genre.as_deref().filter(|v| !v.trim().is_empty()) {
+                        let genre_key = canonicalize_playlist_name(genre_name);
+                        let gid = if let Some(id) = still_named(
+                            existing_track.genre_id,
+                            &genre_names,
+                            |n| canonicalize_playlist_name(n) == genre_key,
+                        ) {
+                            id
+                        } else if let Some(id) = genre_id_by_name.get(&genre_key).copied() {
+                            id
+                        } else {
+                            let new_id = next_genre_id;
+                            next_genre_id += 1;
+                            genre_id_by_name.insert(genre_key, new_id);
+                            all_genres.push(crate::pdb_writer::PdbDictRow {
+                                id: new_id,
+                                name: genre_name.to_string(),
+                            });
+                            new_id
+                        };
+                        existing_track.genre_id = gid;
+                    }
+                    if let Some(art_path) = track
+                        .artwork_path
+                        .as_deref()
+                        .filter(|v| !v.trim().is_empty())
+                        .map(|p| p.to_string())
+                        .or_else(|| edb_artwork_by_path.get(&path_key).cloned())
+                    {
+                        let relative = to_usb_relative_path(usb_root, &art_path)
+                            .unwrap_or_else(|| art_path.to_string());
+                        let artwork_key = canonicalize_artwork_path_lookup(&relative);
+                        // Parity needs artwork to resolve on both sides, not the
+                        // same file: a track not exported from the library
+                        // keeps the artwork its row already has.
+                        let aid = if let Some(id) = still_named(
+                            existing_track.artwork_id,
+                            &artwork_paths,
+                            |p| {
+                                !track.from_library
+                                    || canonicalize_artwork_path_lookup(p) == artwork_key
+                            },
+                        ) {
+                            id
+                        } else if let Some(id) = artwork_id_by_path.get(&artwork_key).copied() {
+                            id
+                        } else {
+                            let new_id = next_artwork_id;
+                            next_artwork_id += 1;
+                            artwork_id_by_path.insert(artwork_key, new_id);
+                            all_artwork.push(PdbArtworkRow {
+                                id: new_id,
+                                path: relative,
+                            });
+                            new_id
+                        };
+                        existing_track.artwork_id = aid;
+                    }
+                    // Update identity fields from manifest (only set for our library tracks)
+                    existing_track.master_db_id = edb_identity
+                        .and_then(|(_, _, mdb, _)| mdb)
+                        .or_else(|| track.master_db_id.and_then(|v| u32::try_from(v).ok()))
+                        .or(existing_track.master_db_id);
+                    existing_track.master_content_id = edb_identity
+                        .and_then(|(_, mci, _, _)| mci)
+                        .or_else(|| track.master_content_id.and_then(|v| u32::try_from(v).ok()))
+                        .or(existing_track.master_content_id);
+                    existing_track.content_link = edb_identity
+                        .and_then(|(cl, _, _, _)| cl)
+                        .or_else(|| track.content_link.and_then(|v| u32::try_from(v).ok()))
+                        .or(existing_track.content_link);
+                    // Update scalar metadata from manifest
+                    if let Some(ms) = track.duration_ms {
+                        existing_track.duration_seconds = Some(duration_ms_to_seconds(ms) as u32);
+                    }
+                    existing_track.bit_depth = edb_identity
+                        .and_then(|(_, _, _, bd)| bd)
+                        .or_else(|| track.bit_depth.map(u16::from))
+                        .or(existing_track.bit_depth);
+                    if let Some(bpm) = track.bpm {
+                        existing_track.bpm = Some(bpm);
+                    }
+                    if let Some(tn) = track.track_number {
+                        existing_track.track_number = Some(tn);
+                    }
+                    // Same rule as the eDB row (`update_existing_content_row`).
+                    if let Some(color_id) = track.color_id.and_then(|v| u8::try_from(v).ok()) {
+                        existing_track.color_id = Some(color_id);
+                    }
+                    if let Some(rating) = track.rating.and_then(|v| u8::try_from(v).ok()) {
+                        existing_track.rating = Some(rating);
+                    }
+                    // These were previously never refreshed on an update, so a
+                    // re-exported track that got re-encoded/replaced (different
+                    // size, bitrate, sample rate) at the same path kept the
+                    // *original* insert's stale values forever, even though
+                    // duration/title/anlz_path above were refreshing correctly
+                    // -- a real PDB-vs-actual-file mismatch, not just a
+                    // collision-specific symptom.
+                    if let Some(size) = track.file_size_bytes.and_then(|v| u32::try_from(v).ok()) {
+                        existing_track.file_size_bytes = Some(size);
+                    }
+                    if let Some(sr) = track.sample_rate_hz {
+                        existing_track.sample_rate_hz = Some(sr);
+                    }
+                    if let Some(br) = track.bitrate_kbps {
+                        existing_track.bitrate_kbps = Some(br);
+                    }
+                    if let Some(ft) = track.file_type.and_then(|v| u16::try_from(v).ok()) {
+                        existing_track.file_type = Some(ft);
+                    }
+                    if let Some(ry) = release_year {
+                        existing_track.release_year = Some(ry);
+                    }
+                    if let Some(ref rd) = release_date {
+                        existing_track.release_date = Some(rd.clone());
+                    }
+                    if let Some(ref isrc) = track.isrc {
+                        existing_track.isrc = Some(isrc.clone());
+                    }
+                    if let Some(comment) = named(&track.comment) {
+                        existing_track.dj_comment = Some(comment);
+                    }
+                    if let Some(ref date) = date_added {
+                        existing_track.date_added = Some(date.clone());
+                    }
+                    if let Some(name) = named(&track.label) {
+                        let key = canonicalize_playlist_name(&name);
+                        existing_track.label_id = still_named(existing_track.label_id, &label_names, |n| {
+                            canonicalize_playlist_name(n) == key
+                        })
+                        .unwrap_or_else(|| {
+                            dict_id_for(&name, &mut label_id_by_name, &mut all_labels, &mut next_label_id, label_row)
+                        });
+                    }
+                    if let Some(name) = named(&track.remixer) {
+                        let key = canonicalize_playlist_name(&name);
+                        existing_track.remixer_id = still_named(existing_track.remixer_id, &artist_names, |n| {
+                            canonicalize_playlist_name(n) == key
+                        })
+                        .unwrap_or_else(|| {
+                            dict_id_for(&name, &mut artist_id_by_name, &mut all_artists, &mut next_artist_id, artist_row)
+                        });
+                    }
+                    if let Some(name) = named(&track.composer) {
+                        let key = canonicalize_playlist_name(&name);
+                        existing_track.composer_id = still_named(existing_track.composer_id, &artist_names, |n| {
+                            canonicalize_playlist_name(n) == key
+                        })
+                        .unwrap_or_else(|| {
+                            dict_id_for(&name, &mut artist_id_by_name, &mut all_artists, &mut next_artist_id, artist_row)
+                        });
+                    }
+                    if let Some(ref wp) = track.waveform_path {
+                        existing_track.anlz_path =
+                            to_usb_relative_path(usb_root, wp).unwrap_or_else(|| wp.clone());
+                    }
+                    existing_track.title = track.title.clone();
+                    existing_track.file_name = Some(content_file_name(&file_path));
+                    existing_track.file_path = file_path.clone();
+                }
+                existing
+            } else {
+                // Resolve dictionary IDs
                 let resolved_artist_name = if !track.artist.trim().is_empty() {
                     Some(track.artist.as_str())
                 } else {
                     edb_artist_by_path.get(&path_key).map(String::as_str)
                 };
-                if let Some(artist_name) = resolved_artist_name {
+                let artist_id = if let Some(artist_name) = resolved_artist_name {
                     let artist_key = canonicalize_playlist_name(artist_name);
-                    let aid = if let Some(id) = artist_id_by_name.get(&artist_key).copied() {
-                        id
+                    if let Some(existing) = artist_id_by_name.get(&artist_key).copied() {
+                        existing
                     } else {
                         let new_id = next_artist_id;
                         next_artist_id += 1;
@@ -837,358 +1286,206 @@ pub(super) fn write_pdb_fresh_with_overrides(
                             name: artist_name.to_string(),
                         });
                         new_id
-                    };
-                    existing_track.artist_id = aid;
-                }
-                if let Some(album) = track
+                    }
+                } else {
+                    0
+                };
+                let album_id = track
                     .album
                     .as_deref()
                     .filter(|v| !v.trim().is_empty())
                     .or_else(|| edb_album_by_path.get(&path_key).map(String::as_str))
-                {
-                    let album_key = canonicalize_playlist_name(album);
-                    let aid = if let Some(id) = album_id_by_name.get(&album_key).copied() {
-                        id
-                    } else {
-                        let new_id = next_album_id;
-                        next_album_id += 1;
-                        album_id_by_name.insert(album_key, new_id);
-                        all_albums.push(PdbAlbumRow {
-                            id: new_id,
-                            name: album.to_string(),
-                            artist_id: existing_track.artist_id,
-                        });
-                        new_id
-                    };
-                    existing_track.album_id = aid;
-                }
-                let resolved_key_name = track
+                    .map(|album| {
+                        let album_key = canonicalize_playlist_name(album);
+                        if let Some(existing) = album_id_by_name.get(&album_key).copied() {
+                            existing
+                        } else {
+                            let new_id = next_album_id;
+                            next_album_id += 1;
+                            album_id_by_name.insert(album_key, new_id);
+                            all_albums.push(PdbAlbumRow {
+                                id: new_id,
+                                name: album.to_string(),
+                                artist_id,
+                            });
+                            new_id
+                        }
+                    })
+                    .unwrap_or(0);
+                let key_id = track
                     .key
                     .as_deref()
                     .filter(|v| !v.trim().is_empty())
                     .map(|v| v.to_string())
-                    .or_else(|| edb_key_by_path.get(&path_key).cloned());
-                if let Some(key_name) = resolved_key_name.as_deref() {
-                    let key_lookup = normalize_pdb_key_name(key_name);
-                    let kid = if let Some(id) = resolve_key_id_by_name(&key_id_by_name, key_name) {
-                        id
-                    } else {
-                        let new_id = next_key_id;
-                        next_key_id += 1;
-                        key_id_by_name.insert(key_lookup, new_id);
-                        all_keys.push(PdbKeyRow {
-                            id: new_id,
-                            name: key_name.to_string(),
-                        });
-                        new_id
-                    };
-                    existing_track.key_id = kid;
-                }
-                if let Some(genre_name) = track.genre.as_deref().filter(|v| !v.trim().is_empty()) {
-                    let genre_key = canonicalize_playlist_name(genre_name);
-                    let gid = if let Some(id) = genre_id_by_name.get(&genre_key).copied() {
-                        id
-                    } else {
-                        let new_id = next_genre_id;
-                        next_genre_id += 1;
-                        genre_id_by_name.insert(genre_key, new_id);
-                        all_genres.push(crate::pdb_writer::PdbDictRow {
-                            id: new_id,
-                            name: genre_name.to_string(),
-                        });
-                        new_id
-                    };
-                    existing_track.genre_id = gid;
-                }
-                if let Some(art_path) = track
+                    .or_else(|| edb_key_by_path.get(&path_key).cloned())
+                    .map(|key_name| {
+                        let key_lookup = normalize_pdb_key_name(&key_name);
+                        if let Some(existing) = resolve_key_id_by_name(&key_id_by_name, &key_name) {
+                            existing
+                        } else {
+                            let new_id = next_key_id;
+                            next_key_id += 1;
+                            key_id_by_name.insert(key_lookup, new_id);
+                            all_keys.push(PdbKeyRow {
+                                id: new_id,
+                                name: key_name.to_string(),
+                            });
+                            new_id
+                        }
+                    })
+                    .unwrap_or(0);
+                let genre_id = track
+                    .genre
+                    .as_deref()
+                    .filter(|v| !v.trim().is_empty())
+                    .map(|genre_name| {
+                        let genre_key = canonicalize_playlist_name(genre_name);
+                        if let Some(existing) = genre_id_by_name.get(&genre_key).copied() {
+                            existing
+                        } else {
+                            let new_id = next_genre_id;
+                            next_genre_id += 1;
+                            genre_id_by_name.insert(genre_key, new_id);
+                            all_genres.push(crate::pdb_writer::PdbDictRow {
+                                id: new_id,
+                                name: genre_name.to_string(),
+                            });
+                            new_id
+                        }
+                    })
+                    .unwrap_or(0);
+                let artwork_id = track
                     .artwork_path
                     .as_deref()
                     .filter(|v| !v.trim().is_empty())
-                    .map(|p| p.to_string())
+                    .map(|art_path| art_path.to_string())
                     .or_else(|| edb_artwork_by_path.get(&path_key).cloned())
-                {
-                    let relative = to_usb_relative_path(usb_root, &art_path)
-                        .unwrap_or_else(|| art_path.to_string());
-                    let artwork_key = canonicalize_artwork_path_lookup(&relative);
-                    let aid = if let Some(id) = artwork_id_by_path.get(&artwork_key).copied() {
-                        id
-                    } else {
-                        let new_id = next_artwork_id;
-                        next_artwork_id += 1;
-                        artwork_id_by_path.insert(artwork_key, new_id);
-                        all_artwork.push(PdbArtworkRow {
-                            id: new_id,
-                            path: relative,
-                        });
-                        new_id
-                    };
-                    existing_track.artwork_id = aid;
-                }
-                // Update identity fields from manifest (only set for our library tracks)
-                existing_track.master_db_id = edb_identity
-                    .and_then(|(_, _, mdb, _)| mdb)
-                    .or_else(|| track.master_db_id.and_then(|v| u32::try_from(v).ok()))
-                    .or(existing_track.master_db_id);
-                existing_track.master_content_id = edb_identity
-                    .and_then(|(_, mci, _, _)| mci)
-                    .or_else(|| track.master_content_id.and_then(|v| u32::try_from(v).ok()))
-                    .or(existing_track.master_content_id);
-                existing_track.content_link = edb_identity
-                    .and_then(|(cl, _, _, _)| cl)
-                    .or_else(|| track.content_link.and_then(|v| u32::try_from(v).ok()))
-                    .or(existing_track.content_link);
-                // Update scalar metadata from manifest
-                if let Some(ms) = track.duration_ms {
-                    existing_track.duration_seconds = Some(duration_ms_to_seconds(ms) as u32);
-                }
-                existing_track.bit_depth = edb_identity
-                    .and_then(|(_, _, _, bd)| bd)
-                    .or_else(|| track.bit_depth.map(u16::from))
-                    .or(existing_track.bit_depth);
-                if let Some(bpm) = track.bpm {
-                    existing_track.bpm = Some(bpm);
-                }
-                if let Some(tn) = track.track_number {
-                    existing_track.track_number = Some(tn);
-                }
-                // Same rule as the eDB row (`update_existing_content_row`).
-                if let Some(color_id) = track.color_id.and_then(|v| u8::try_from(v).ok()) {
-                    existing_track.color_id = Some(color_id);
-                }
-                if let Some(rating) = track.rating.and_then(|v| u8::try_from(v).ok()) {
-                    existing_track.rating = Some(rating);
-                }
-                // These were previously never refreshed on an update, so a
-                // re-exported track that got re-encoded/replaced (different
-                // size, bitrate, sample rate) at the same path kept the
-                // *original* insert's stale values forever, even though
-                // duration/title/anlz_path above were refreshing correctly
-                // -- a real PDB-vs-actual-file mismatch, not just a
-                // collision-specific symptom.
-                if let Some(size) = track.file_size_bytes.and_then(|v| u32::try_from(v).ok()) {
-                    existing_track.file_size_bytes = Some(size);
-                }
-                if let Some(sr) = track.sample_rate_hz {
-                    existing_track.sample_rate_hz = Some(sr);
-                }
-                if let Some(br) = track.bitrate_kbps {
-                    existing_track.bitrate_kbps = Some(br);
-                }
-                if let Some(ft) = track.file_type.and_then(|v| u16::try_from(v).ok()) {
-                    existing_track.file_type = Some(ft);
-                }
-                if let Some(ry) = resolve_track_release_year_for_export(track) {
-                    existing_track.release_year = Some(ry);
-                }
-                if let Some(rd) = resolve_track_release_date_for_export(track) {
-                    existing_track.release_date = Some(rd);
-                }
-                if let Some(ref isrc) = track.isrc {
-                    existing_track.isrc = Some(isrc.clone());
-                }
-                if let Some(ref wp) = track.waveform_path {
-                    existing_track.anlz_path =
-                        to_usb_relative_path(usb_root, wp).unwrap_or_else(|| wp.clone());
-                }
-                existing_track.title = track.title.clone();
-                existing_track.file_name = Some(content_file_name(&file_path));
-                existing_track.file_path = file_path.clone();
+                    .map(|art_path| {
+                        let relative = to_usb_relative_path(usb_root, &art_path)
+                            .unwrap_or_else(|| art_path.to_string());
+                        let artwork_key = canonicalize_artwork_path_lookup(&relative);
+                        if let Some(existing) = artwork_id_by_path.get(&artwork_key).copied() {
+                            existing
+                        } else {
+                            let new_id = next_artwork_id;
+                            next_artwork_id += 1;
+                            artwork_id_by_path.insert(artwork_key, new_id);
+                            all_artwork.push(PdbArtworkRow {
+                                id: new_id,
+                                path: relative,
+                            });
+                            new_id
+                        }
+                    })
+                    .unwrap_or(0);
+
+                let mut dict_id = |name: Option<String>, labels: bool| -> u32 {
+                    match (name, labels) {
+                        (None, _) => 0,
+                        (Some(name), true) => dict_id_for(
+                            &name,
+                            &mut label_id_by_name,
+                            &mut all_labels,
+                            &mut next_label_id,
+                            label_row,
+                        ),
+                        (Some(name), false) => dict_id_for(
+                            &name,
+                            &mut artist_id_by_name,
+                            &mut all_artists,
+                            &mut next_artist_id,
+                            artist_row,
+                        ),
+                    }
+                };
+                let label_id = dict_id(named(&track.label), true);
+                let remixer_id = dict_id(named(&track.remixer), false);
+                let composer_id = dict_id(named(&track.composer), false);
+                let track_id = next_track_id;
+                next_track_id += 1;
+                // waveform_path is already USB-relative (set by export.rs manifest builder)
+                let anlz_path = track.waveform_path.clone().unwrap_or_default();
+                let edb_identity = edb_identity_by_path.get(&path_key).copied();
+                all_tracks.push(PdbTrackRowData {
+                    composer_id,
+                    label_id,
+                    remixer_id,
+                    // Bytes 2..4 are the page-local index_shift and are assigned
+                    // when the row is placed into its final PDB page.
+                    header_flags_u32: Some(0x0000_0024),
+                    content_link: edb_identity
+                        .and_then(|(cl, _, _, _)| cl)
+                        .or_else(|| track.content_link.and_then(|v| u32::try_from(v).ok())),
+                    sample_rate_hz: track.sample_rate_hz,
+                    file_size_bytes: track.file_size_bytes.and_then(|v| u32::try_from(v).ok()),
+                    master_content_id: edb_identity
+                        .and_then(|(_, mci, _, _)| mci)
+                        .or_else(|| track.master_content_id.and_then(|v| u32::try_from(v).ok())),
+                    master_db_id: edb_identity
+                        .and_then(|(_, _, mdb, _)| mdb)
+                        .or_else(|| track.master_db_id.and_then(|v| u32::try_from(v).ok())),
+                    id: track_id,
+                    artist_id,
+                    album_id,
+                    artwork_id,
+                    key_id,
+                    genre_id,
+                    bitrate_kbps: track.bitrate_kbps,
+                    track_number: track.track_number,
+                    bpm: track.bpm,
+                    release_year,
+                    bit_depth: edb_identity
+                        .and_then(|(_, _, _, bd)| bd)
+                        .or_else(|| track.bit_depth.map(u16::from)),
+                    duration_seconds: track
+                        .duration_ms
+                        .map(|ms| duration_ms_to_seconds(ms) as u32),
+                    file_type: track.file_type.and_then(|v| u16::try_from(v).ok()),
+                    isrc: track.isrc.clone(),
+                    date_added: date_added.clone().or_else(|| Some(export_date_added.clone())),
+                    release_date: release_date.clone(),
+                    dj_comment: track.comment.clone(),
+                    file_name: Some(content_file_name(&track.exported_path)),
+                    publish_track_info_on: Some(true),
+                    autoload_hotcues_on: Some(true),
+                    color_id: track.color_id.and_then(|v| u8::try_from(v).ok()),
+                    rating: track.rating.and_then(|v| u8::try_from(v).ok()),
+                    title: track.title.clone(),
+                    anlz_path,
+                    file_path: file_path.clone(),
+                });
+                track_index_by_id.insert(track_id, all_tracks.len() - 1);
+                track_id_by_path.insert(path_key, track_id);
+                track_id
+            };
+
+            if let Some(track_row) = track_index_by_id
+                .get(&pdb_track_id)
+                .and_then(|&idx| all_tracks.get(idx))
+            {
+                desired_manifest_track_rows.insert(pdb_track_id, track_row.clone());
             }
-            existing
-        } else {
-            // Resolve dictionary IDs
-            let resolved_artist_name = if !track.artist.trim().is_empty() {
-                Some(track.artist.as_str())
-            } else {
-                edb_artist_by_path.get(&path_key).map(String::as_str)
-            };
-            let artist_id = if let Some(artist_name) = resolved_artist_name {
-                let artist_key = canonicalize_playlist_name(artist_name);
-                if let Some(existing) = artist_id_by_name.get(&artist_key).copied() {
-                    existing
-                } else {
-                    let new_id = next_artist_id;
-                    next_artist_id += 1;
-                    artist_id_by_name.insert(artist_key, new_id);
-                    all_artists.push(PdbArtistRow {
-                        id: new_id,
-                        name: artist_name.to_string(),
-                    });
-                    new_id
-                }
-            } else {
-                0
-            };
-            let album_id = track
-                .album
-                .as_deref()
-                .filter(|v| !v.trim().is_empty())
-                .or_else(|| edb_album_by_path.get(&path_key).map(String::as_str))
-                .map(|album| {
-                    let album_key = canonicalize_playlist_name(album);
-                    if let Some(existing) = album_id_by_name.get(&album_key).copied() {
-                        existing
-                    } else {
-                        let new_id = next_album_id;
-                        next_album_id += 1;
-                        album_id_by_name.insert(album_key, new_id);
-                        all_albums.push(PdbAlbumRow {
-                            id: new_id,
-                            name: album.to_string(),
-                            artist_id,
-                        });
-                        new_id
-                    }
-                })
-                .unwrap_or(0);
-            let key_id = track
-                .key
-                .as_deref()
-                .filter(|v| !v.trim().is_empty())
-                .map(|v| v.to_string())
-                .or_else(|| edb_key_by_path.get(&path_key).cloned())
-                .map(|key_name| {
-                    let key_lookup = normalize_pdb_key_name(&key_name);
-                    if let Some(existing) = resolve_key_id_by_name(&key_id_by_name, &key_name) {
-                        existing
-                    } else {
-                        let new_id = next_key_id;
-                        next_key_id += 1;
-                        key_id_by_name.insert(key_lookup, new_id);
-                        all_keys.push(PdbKeyRow {
-                            id: new_id,
-                            name: key_name.to_string(),
-                        });
-                        new_id
-                    }
-                })
-                .unwrap_or(0);
-            let genre_id = track
-                .genre
-                .as_deref()
-                .filter(|v| !v.trim().is_empty())
-                .map(|genre_name| {
-                    let genre_key = canonicalize_playlist_name(genre_name);
-                    if let Some(existing) = genre_id_by_name.get(&genre_key).copied() {
-                        existing
-                    } else {
-                        let new_id = next_genre_id;
-                        next_genre_id += 1;
-                        genre_id_by_name.insert(genre_key, new_id);
-                        all_genres.push(crate::pdb_writer::PdbDictRow {
-                            id: new_id,
-                            name: genre_name.to_string(),
-                        });
-                        new_id
-                    }
-                })
-                .unwrap_or(0);
-            let artwork_id = track
-                .artwork_path
-                .as_deref()
-                .filter(|v| !v.trim().is_empty())
-                .map(|art_path| art_path.to_string())
-                .or_else(|| edb_artwork_by_path.get(&path_key).cloned())
-                .map(|art_path| {
-                    let relative = to_usb_relative_path(usb_root, &art_path)
-                        .unwrap_or_else(|| art_path.to_string());
-                    let artwork_key = canonicalize_artwork_path_lookup(&relative);
-                    if let Some(existing) = artwork_id_by_path.get(&artwork_key).copied() {
-                        existing
-                    } else {
-                        let new_id = next_artwork_id;
-                        next_artwork_id += 1;
-                        artwork_id_by_path.insert(artwork_key, new_id);
-                        all_artwork.push(PdbArtworkRow {
-                            id: new_id,
-                            path: relative,
-                        });
-                        new_id
-                    }
-                })
-                .unwrap_or(0);
 
-            let track_id = next_track_id;
-            next_track_id += 1;
-            // waveform_path is already USB-relative (set by export.rs manifest builder)
-            let anlz_path = track.waveform_path.clone().unwrap_or_default();
-            let edb_identity = edb_identity_by_path.get(&path_key).copied();
-            all_tracks.push(PdbTrackRowData {
-                // Bytes 2..4 are the page-local index_shift and are assigned
-                // when the row is placed into its final PDB page.
-                header_flags_u32: Some(0x0000_0024),
-                content_link: edb_identity
-                    .and_then(|(cl, _, _, _)| cl)
-                    .or_else(|| track.content_link.and_then(|v| u32::try_from(v).ok())),
-                sample_rate_hz: track.sample_rate_hz,
-                file_size_bytes: track.file_size_bytes.and_then(|v| u32::try_from(v).ok()),
-                master_content_id: edb_identity
-                    .and_then(|(_, mci, _, _)| mci)
-                    .or_else(|| track.master_content_id.and_then(|v| u32::try_from(v).ok())),
-                master_db_id: edb_identity
-                    .and_then(|(_, _, mdb, _)| mdb)
-                    .or_else(|| track.master_db_id.and_then(|v| u32::try_from(v).ok())),
-                id: track_id,
-                artist_id,
-                album_id,
-                artwork_id,
-                key_id,
-                genre_id,
-                bitrate_kbps: track.bitrate_kbps,
-                track_number: track.track_number,
-                bpm: track.bpm,
-                release_year: resolve_track_release_year_for_export(track),
-                bit_depth: edb_identity
-                    .and_then(|(_, _, _, bd)| bd)
-                    .or_else(|| track.bit_depth.map(u16::from)),
-                duration_seconds: track
-                    .duration_ms
-                    .map(|ms| duration_ms_to_seconds(ms) as u32),
-                file_type: track.file_type.and_then(|v| u16::try_from(v).ok()),
-                isrc: track.isrc.clone(),
-                date_added: Some(export_date_added.clone()),
-                release_date: resolve_track_release_date_for_export(track),
-                dj_comment: track.comment.clone(),
-                file_name: Some(content_file_name(&track.exported_path)),
-                publish_track_info_on: Some(true),
-                autoload_hotcues_on: Some(true),
-                color_id: track.color_id.and_then(|v| u8::try_from(v).ok()),
-                rating: track.rating.and_then(|v| u8::try_from(v).ok()),
-                title: track.title.clone(),
-                anlz_path,
-                file_path: file_path.clone(),
+            // Add playlist entry
+            if !mirror_playlist_entries
+                && existing_playlist_pdb_id.is_some()
+                && existing_playlist_track_ids.contains(&pdb_track_id)
+            {
+                continue;
+            }
+            let entry_index = if mirror_playlist_entries {
+                (idx as u32) + 1
+            } else {
+                let current = next_entry_index;
+                next_entry_index += 1;
+                current
+            };
+            all_playlist_entries.push(PdbPlaylistEntryRow {
+                entry_index,
+                track_id: pdb_track_id,
+                playlist_id: playlist_pdb_id,
             });
-            track_index_by_id.insert(track_id, all_tracks.len() - 1);
-            track_id_by_path.insert(path_key, track_id);
-            track_id
-        };
-
-        if let Some(track_row) = track_index_by_id
-            .get(&pdb_track_id)
-            .and_then(|&idx| all_tracks.get(idx))
-        {
-            desired_manifest_track_rows.insert(pdb_track_id, track_row.clone());
         }
-
-        // Add playlist entry
-        if !mirror_playlist_entries
-            && existing_playlist_pdb_id.is_some()
-            && existing_playlist_track_ids.contains(&pdb_track_id)
-        {
-            continue;
-        }
-        let entry_index = if mirror_playlist_entries {
-            (idx as u32) + 1
-        } else {
-            let current = next_entry_index;
-            next_entry_index += 1;
-            current
-        };
-        all_playlist_entries.push(PdbPlaylistEntryRow {
-            entry_index,
-            track_id: pdb_track_id,
-            playlist_id: playlist_pdb_id,
-        });
     }
 
     // ── Build PdbData and write ─────────────────────────────────────────
@@ -1197,18 +1494,7 @@ pub(super) fn write_pdb_fresh_with_overrides(
         artists: all_artists,
         albums: all_albums,
         genres: all_genres,
-        labels: if let Some(ref parsed) = existing {
-            parsed
-                .labels
-                .iter()
-                .map(|(id, name)| crate::pdb_writer::PdbDictRow {
-                    id: *id,
-                    name: name.clone(),
-                })
-                .collect()
-        } else {
-            Vec::new()
-        },
+        labels: all_labels,
         keys: all_keys,
         colors: crate::pdb_writer::standard_colors(),
         artwork: all_artwork,
@@ -1258,8 +1544,7 @@ pub(super) fn write_pdb_fresh_with_overrides(
             .as_ref()
             .map(|parsed| parsed.history_raw_rows_bytes.clone())
             .unwrap_or_default(),
-        // The eDB export runs first, so this is the property it just wrote.
-        t19_property: edb_t19_property(usb_root),
+        t19_property,
         profile,
     };
 
@@ -1282,7 +1567,7 @@ pub(super) fn write_pdb_fresh_with_overrides(
         let desired_t08: Vec<T08EntryKey> = pdb_data
             .playlist_entries
             .iter()
-            .filter(|e| e.playlist_id == playlist_pdb_id)
+            .filter(|e| written_playlist_ids.contains(&e.playlist_id))
             .map(|e| T08EntryKey {
                 entry_index: e.entry_index,
                 track_id: e.track_id,
@@ -1295,20 +1580,20 @@ pub(super) fn write_pdb_fresh_with_overrides(
             desired_t08,
             4096,
         )? {
-            Some((additive_bytes, summary)) => {
+            Some((mut additive_bytes, summary)) => {
+                let duplicate_entries_removed = if remove_duplicate_entries {
+                    crate::pdb_writer::remove_duplicate_playlist_entries_inplace(&mut additive_bytes)
+                } else {
+                    0
+                };
                 validate_topology_locked_export_bytes(before, &additive_bytes)?;
-                if commit_write {
-                    crate::service::usb_staging::commit_and_write_back(
-                        usb_root,
-                        crate::service::usb_staging::DbKind::Pdb,
-                        &additive_bytes,
-                    )?;
-                }
-                return Ok(WriteExportPdbResult {
+                return Ok(PdbBuild {
+                    before: before.to_vec(),
+                    bytes: additive_bytes,
                     inserted_tracks: summary.new_tracks,
+                    changed_tracks: summary.changed_tracks,
                     inserted_playlists: summary.new_playlist_tree,
-                    topology_issues: Vec::new(),
-                    writer_warnings: Vec::new(),
+                    duplicate_entries_removed,
                 });
             }
             None => {

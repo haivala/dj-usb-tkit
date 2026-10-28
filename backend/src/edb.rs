@@ -128,6 +128,29 @@ pub struct ExportManifestTrack {
     pub duration_ms: Option<u64>,
     pub first_beat_ms: Option<u32>,
     pub cues: Vec<crate::models::TrackCue>,
+    /// Date the track was added to the USB (`content.dateAdded`, the PDB's
+    /// `date_added`). `None`: a new row gets the export date and an existing
+    /// one keeps its own.
+    pub date_added: Option<String>,
+    /// `content.dateCreated`. `None` derives it from the recorded date,
+    /// release date or file timestamp, as before.
+    pub date_created: Option<String>,
+    /// Label, remixer and composer names, written to both databases'
+    /// dictionaries. `None` leaves what a row has.
+    pub label: Option<String>,
+    pub remixer: Option<String>,
+    pub composer: Option<String>,
+    /// Built from the app's library by an export. `false` for a track the
+    /// repair builds from the USB's own databases: the writers then write
+    /// only its data and keep the USB's cues, update counters and flags, and
+    /// derive no dates.
+    pub from_library: bool,
+    /// The PDB track row and eDB content row this track already has on the
+    /// USB, when the caller knows them (the repair does). The writers update
+    /// those rows instead of matching by path, so a path that differs
+    /// between the two databases is corrected rather than duplicated.
+    pub pdb_track_id: Option<u32>,
+    pub edb_content_id: Option<i64>,
 }
 
 #[derive(Debug, Clone)]
@@ -1460,26 +1483,41 @@ pub fn populate_content_values_map(
             ),
         );
     }
+    // A track from the library gets the export's derived dates; one the
+    // repair carries over from the USB keeps exactly the dates it has.
+    let (release_year, release_date, date_created) = if track.from_library {
+        (
+            resolve_track_release_year_for_export(track).map(i64::from),
+            resolve_track_release_date_for_export(track),
+            track
+                .date_created
+                .clone()
+                .or_else(|| resolve_track_created_date_for_export(track)),
+        )
+    } else {
+        (
+            track.release_year.map(i64::from),
+            track.release_date.clone(),
+            track.date_created.clone(),
+        )
+    };
     if values.contains_key("releaseYear") {
         values.insert(
             "releaseYear".to_string(),
-            Value::Integer(i64::from(
-                resolve_track_release_year_for_export(track).unwrap_or(0),
-            )),
+            Value::Integer(release_year.unwrap_or(0)),
         );
     }
     if values.contains_key("releaseDate") {
         values.insert(
             "releaseDate".to_string(),
-            resolve_track_release_date_for_export(track)
-                .map(Value::Text)
-                .unwrap_or_else(|| Value::Text(String::new())),
+            Value::Text(release_date.unwrap_or_default()),
         );
     }
     if values.contains_key("dateAdded") {
         values.insert(
             "dateAdded".to_string(),
-            normalize_export_date(export_date_added)
+            normalize_export_date(track.date_added.as_deref())
+                .or_else(|| normalize_export_date(export_date_added))
                 .map(Value::Text)
                 .unwrap_or(Value::Null),
         );
@@ -1487,9 +1525,7 @@ pub fn populate_content_values_map(
     if values.contains_key("dateCreated") {
         values.insert(
             "dateCreated".to_string(),
-            resolve_track_created_date_for_export(track)
-                .map(Value::Text)
-                .unwrap_or(Value::Null),
+            date_created.map(Value::Text).unwrap_or(Value::Null),
         );
     }
     if values.contains_key("artist_id_lyricist") {
@@ -1504,17 +1540,23 @@ pub fn populate_content_values_map(
             Value::Integer(i64::from(track.artist_id_original_artist.unwrap_or(0))),
         );
     }
+    let named_artist = |name: Option<&str>| -> BackendResult<Option<i64>> {
+        match name.map(str::trim).filter(|v| !v.is_empty()) {
+            Some(name) => find_or_insert_artist(conn, name),
+            None => Ok(None),
+        }
+    };
     if values.contains_key("artist_id_remixer") {
-        values.insert(
-            "artist_id_remixer".to_string(),
-            Value::Integer(i64::from(track.artist_id_remixer.unwrap_or(0))),
-        );
+        let id = named_artist(track.remixer.as_deref())?
+            .or(track.artist_id_remixer.map(i64::from))
+            .unwrap_or(0);
+        values.insert("artist_id_remixer".to_string(), Value::Integer(id));
     }
     if values.contains_key("artist_id_composer") {
-        values.insert(
-            "artist_id_composer".to_string(),
-            Value::Integer(i64::from(track.artist_id_composer.unwrap_or(0))),
-        );
+        let id = named_artist(track.composer.as_deref())?
+            .or(track.artist_id_composer.map(i64::from))
+            .unwrap_or(0);
+        values.insert("artist_id_composer".to_string(), Value::Integer(id));
     }
     if values.contains_key("genre_id") {
         let resolved_genre_id = if let Some(ref genre_name) = track.genre {
@@ -1528,10 +1570,13 @@ pub fn populate_content_values_map(
         );
     }
     if values.contains_key("label_id") {
-        values.insert(
-            "label_id".to_string(),
-            Value::Integer(i64::from(track.label_id.unwrap_or(0))),
-        );
+        let id = match track.label.as_deref().filter(|v| !v.trim().is_empty()) {
+            Some(label) => find_or_insert_label(conn, label)?,
+            None => None,
+        }
+        .or(track.label_id.map(i64::from))
+        .unwrap_or(0);
+        values.insert("label_id".to_string(), Value::Integer(id));
     }
     if values.contains_key("analysedBits") {
         values.insert(
@@ -1772,6 +1817,36 @@ pub fn find_or_insert_genre(
     conn.execute(
         "INSERT INTO genre (genre_id, name) VALUES (?1, ?2)",
         params![next_id, genre_name],
+    )?;
+    Ok(Some(next_id))
+}
+
+pub fn find_or_insert_label(
+    conn: &rusqlite::Connection,
+    label_name: &str,
+) -> BackendResult<Option<i64>> {
+    if !table_exists(conn, "label") {
+        return Ok(None);
+    }
+    let label_name = sanitize_metadata(label_name.trim());
+    let label_name = label_name.trim();
+    if label_name.is_empty() {
+        return Ok(None);
+    }
+    if let Some(existing) = conn
+        .query_row(
+            "SELECT label_id FROM label WHERE lower(name) = lower(?1) LIMIT 1",
+            params![label_name],
+            |row| row.get::<_, i64>(0),
+        )
+        .optional()?
+    {
+        return Ok(Some(existing));
+    }
+    let next_id = next_numeric_id(conn, "label", "label_id")?;
+    conn.execute(
+        "INSERT INTO label (label_id, name) VALUES (?1, ?2)",
+        params![next_id, label_name],
     )?;
     Ok(Some(next_id))
 }

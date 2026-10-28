@@ -99,6 +99,12 @@ fn main() {
     println!("repair.applied={}", repair_data.applied_fixes.join(" || "));
     println!("repair.failed={}", repair_data.failed_fixes.join(" || "));
     println!("repair.skipped={}", repair_data.skipped_fixes.join(" || "));
+    for fix in &repair_data.proposed_fixes {
+        println!(
+            "repair.proposed|{}|writes={}|{}",
+            fix.id, fix.estimated_writes, fix.description
+        );
+    }
     for w in &repair_data.warnings {
         println!(
             "repair.warning|level={}|code={}|{}",

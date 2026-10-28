@@ -835,8 +835,8 @@ pub(crate) fn compute_additive_diff(
     // u5=1), otherwise the newest row id of its ring (see `t19_ring_rows`).
     // rekordbox's own exports keep that id at the track count. So any
     // export with tracks rewrites a template-state page or an app-written
-    // ring whose newest id or eDB property (date, version, name, color) is
-    // off -- including one onto a PDB that already has tracks, so a USB an
+    // ring whose newest id, name, color or version is off (a ring keeps its
+    // date) -- including one onto a PDB that already has tracks, so a USB an
     // older build left at 0 songs (or "1 track") recovers on its next
     // export. A page a player has added rows to is left alone.
     let sync_t19_ring = t19_sync_target(
@@ -878,6 +878,15 @@ pub(crate) fn compute_additive_diff(
             }
             if existing.genre_id != new_row.genre_id {
                 changed_fields.push("genre_id");
+            }
+            if existing.composer_id != new_row.composer_id {
+                changed_fields.push("composer_id");
+            }
+            if existing.label_id != new_row.label_id {
+                changed_fields.push("label_id");
+            }
+            if existing.remixer_id != new_row.remixer_id {
+                changed_fields.push("remixer_id");
             }
             if existing.content_link.unwrap_or(0) != new_row.content_link.unwrap_or(0) {
                 changed_fields.push("content_link");
@@ -1137,8 +1146,9 @@ pub(crate) fn compute_additive_diff(
 
     // ── t08 deletion + reposition check ─────────────────────────────
     //
-    // `desired_t08_entries` describes the FINAL desired set for the
-    // target playlist. An existing entry is matched against it by
+    // `desired_t08_entries` describes the FINAL desired set for every
+    // playlist it has entries for (an export passes one playlist, the
+    // strict parity repair all it merges). An existing entry is matched against it by
     // `(playlist_id, track_id)` identity only -- `entry_index` is a
     // position, not part of identity (see `T08EntryKey`'s doc comment and
     // `patch_t08_entry_indices_in_place`). This keeps a track whose order
@@ -1147,7 +1157,8 @@ pub(crate) fn compute_additive_diff(
     // and re-added.
     let (removed_t08_entries, repositioned_t08_entries): (Vec<T08EntryKey>, Vec<(u32, u32, u32)>) =
         if !desired_t08_entries.is_empty() {
-            let target_playlist_id = desired_t08_entries[0].playlist_id;
+            let target_playlist_ids: std::collections::HashSet<u32> =
+                desired_t08_entries.iter().map(|k| k.playlist_id).collect();
             let desired_by_identity: std::collections::HashMap<(u32, u32), u32> =
                 desired_t08_entries
                     .iter()
@@ -1157,7 +1168,7 @@ pub(crate) fn compute_additive_diff(
             let mut removed = Vec::new();
             let mut repositioned = Vec::new();
             for k in existing_t08 {
-                if k.playlist_id != target_playlist_id {
+                if !target_playlist_ids.contains(&k.playlist_id) {
                     continue;
                 }
                 match desired_by_identity.get(&(k.playlist_id, k.track_id)) {
@@ -1298,6 +1309,13 @@ pub(crate) fn remove_t08_entries_in_place(
 /// Fixed width of a tt=19 (history_runtime) row.
 pub(crate) const T19_ROW_LEN: usize = 40;
 
+/// The version string every tt=19 row the app writes carries, and the
+/// `dbVersion` `initialize_usb` gives the eDB. It is the app's constant, not
+/// copied from the eDB: rekordbox libraries can say `10000` there while
+/// their t19 rows keep `"1000"`, and `"1000"` is what players were
+/// validated against.
+pub(crate) const T19_DB_VERSION: &str = "1000";
+
 /// The single tt=19 row of an empty-device template, with the date of the
 /// rekordbox-initialized USB it was copied from. `initialize_usb` seeds the
 /// same row with its own date ([`t19_template_row`]).
@@ -1319,11 +1337,13 @@ pub(crate) const T19_RING_SLOTS: usize = 96;
 const T19_DATE_OFFSET: usize = 12;
 
 
-/// What a tt=19 row mirrors of the eDB's `property` row: rekordbox keeps
-/// every row's date, version string, name and byte 9 equal to `createdDate`,
-/// `dbVersion`, `deviceName` and `backGroundColorType`, and the newest row id
-/// equal to `numberOfContents`. Players compare the two databases and give
-/// communication errors when they disagree.
+/// What a tt=19 row carries: a date, a version string, the device name and
+/// byte 9 (the background color). The name and color follow the eDB's
+/// `deviceName` and `backGroundColorType`; the version is always
+/// [`T19_DB_VERSION`]. The date is the eDB's `createdDate` on a fresh ring
+/// (rekordbox stamps both on init), and an existing ring keeps its own:
+/// rekordbox doesn't rewrite it. Players compare the two databases and give
+/// communication errors when the name, color or song count disagree.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct T19Property {
     pub created_date: String,
@@ -1381,7 +1401,7 @@ impl T19Property {
 /// One tt=19 row for `slot`/`id`: bytes `0..4` = `0x0280 + slot *
 /// 0x0020_0000`, `4..8` = the id, byte 9 the background color, then the
 /// date as a PDB string, two bytes holding the row offsets of the version
-/// and name strings (`19 1e`), `dbVersion` and the name. A name that is a
+/// and name strings (`19 1e`), the version and the name. A name that is a
 /// long string (UTF-16, so any non-ASCII name) starts on a 4-byte boundary
 /// after zero padding (`19 20`), like other long string headers players
 /// read. Then at least 4 zero bytes up to a 4-byte boundary, and at least
@@ -1427,7 +1447,7 @@ fn t19_slot_row(prop: &T19Property, slot: usize, id: u32) -> Vec<u8> {
 pub(crate) fn t19_template_row(created_date: &str) -> Vec<u8> {
     let prop = T19Property {
         created_date: created_date.to_string(),
-        db_version: "1000".to_string(),
+        db_version: T19_DB_VERSION.to_string(),
         device_name: None,
         background_color: 0,
     };
@@ -1445,8 +1465,7 @@ fn t19_ring_capacity(row0_len: usize, row_len: usize) -> usize {
 
 /// The tt=19 rows rekordbox leaves for `prop` (the eDB's `property` row)
 /// once its newest row id is `newest`. Older players read the newest id as
-/// the USB's song count, so the writers pass the track count (the eDB's
-/// `numberOfContents`).
+/// the USB's song count, so the writers pass the PDB's track count.
 ///
 /// The page is a ring: slot `s` holds the row [`t19_slot_row`] builds for
 /// it. Ids `0..=newest` fill slots `0..` in order until the page is full;
@@ -1576,7 +1595,9 @@ fn t19_ring_state(bytes: &[u8], page_size: usize) -> Option<(u32, T19Property)> 
 /// page an older build wrote). The page is rewritten while still in template
 /// state (see [`t19_is_template_state`]), or while it is a ring (see
 /// [`t19_ring_state`]) whose newest id is not the track count or whose
-/// property is not the eDB's. Without an eDB (`property` `None`) the page
+/// name, color or version is not `property`'s. A ring keeps its own date:
+/// rekordbox doesn't rewrite it in existing rows, and only a template-state
+/// page takes `property`'s date. Without an eDB (`property` `None`) the page
 /// keeps the property it has. A page a player has added rows to is never
 /// rewritten, nor is a t19 with more than one data page (see
 /// [`t19_only_data_page`]).
@@ -1600,7 +1621,13 @@ pub(crate) fn t19_sync_target(
         return Some((track_count, prop));
     }
     let (newest, current) = t19_ring_state(bytes, page_size)?;
-    let prop = property.cloned().unwrap_or_else(|| current.clone());
+    let prop = property.map_or_else(
+        || current.clone(),
+        |prop| T19Property {
+            created_date: current.created_date.clone(),
+            ..prop.clone()
+        },
+    );
     (newest as usize != track_count || prop != current).then_some((track_count, prop))
 }
 
@@ -1705,6 +1732,173 @@ pub(super) fn track_row_has_misaligned_utf16_slot(row: &[u8]) -> bool {
     false
 }
 
+/// Patch the fixed-width fields of a t00 row that `fields` names with
+/// `desired`'s values, leaving every other byte as it is.
+fn patch_changed_track_scalars(
+    patched: &mut [u8],
+    fields: &std::collections::HashSet<&'static str>,
+    desired: &PdbTrackRowData,
+) {
+    if field_changed(fields, "content_link") {
+        patched[4..8].copy_from_slice(&desired.content_link.unwrap_or(0).to_le_bytes());
+    }
+    if field_changed(fields, "sample_rate_hz") {
+        patched[8..12].copy_from_slice(&desired.sample_rate_hz.unwrap_or(0).to_le_bytes());
+    }
+    if field_changed(fields, "file_size_bytes") {
+        patched[16..20].copy_from_slice(&desired.file_size_bytes.unwrap_or(0).to_le_bytes());
+    }
+    if field_changed(fields, "master_content_id") {
+        patched[20..24].copy_from_slice(&desired.master_content_id.unwrap_or(0).to_le_bytes());
+    }
+    if field_changed(fields, "master_db_id") {
+        patched[24..28].copy_from_slice(&desired.master_db_id.unwrap_or(0).to_le_bytes());
+    }
+    if field_changed(fields, "artwork_id") {
+        patched[28..32].copy_from_slice(&desired.artwork_id.to_le_bytes());
+    }
+    if field_changed(fields, "key_id") {
+        patched[32..36].copy_from_slice(&desired.key_id.to_le_bytes());
+    }
+    if field_changed(fields, "bitrate_kbps") {
+        patched[48..52].copy_from_slice(&desired.bitrate_kbps.unwrap_or(0).to_le_bytes());
+    }
+    if field_changed(fields, "track_number") {
+        patched[52..56].copy_from_slice(&desired.track_number.unwrap_or(0).to_le_bytes());
+    }
+    if field_changed(fields, "tempo_x100") {
+        let tempo_x100 = desired
+            .bpm
+            .map(|v| (v * 100.0).round().max(0.0) as u32)
+            .unwrap_or(0);
+        patched[56..60].copy_from_slice(&tempo_x100.to_le_bytes());
+    }
+    if field_changed(fields, "genre_id") {
+        patched[60..64].copy_from_slice(&desired.genre_id.to_le_bytes());
+    }
+    if field_changed(fields, "album_id") {
+        patched[64..68].copy_from_slice(&desired.album_id.to_le_bytes());
+    }
+    if field_changed(fields, "artist_id") {
+        patched[68..72].copy_from_slice(&desired.artist_id.to_le_bytes());
+    }
+    if field_changed(fields, "release_year") {
+        patched[80..82].copy_from_slice(&desired.release_year.unwrap_or(0).to_le_bytes());
+    }
+    if field_changed(fields, "bit_depth") {
+        patched[82..84].copy_from_slice(&desired.bit_depth.unwrap_or(0).to_le_bytes());
+    }
+    if field_changed(fields, "duration_seconds") {
+        let duration_seconds = desired.duration_seconds.unwrap_or(0).min(u16::MAX as u32) as u16;
+        patched[84..86].copy_from_slice(&duration_seconds.to_le_bytes());
+    }
+    if field_changed(fields, "file_type") {
+        patched[90..92].copy_from_slice(&desired.file_type.unwrap_or(0).to_le_bytes());
+    }
+    if field_changed(fields, "color_id") {
+        patched[88] = desired.color_id.unwrap_or(0);
+    }
+    if field_changed(fields, "rating") {
+        patched[89] = desired.rating.unwrap_or(0).min(5);
+    }
+    if field_changed(fields, "composer_id") {
+        patched[12..16].copy_from_slice(&desired.composer_id.to_le_bytes());
+    }
+    if field_changed(fields, "label_id") {
+        patched[40..44].copy_from_slice(&desired.label_id.to_le_bytes());
+    }
+    if field_changed(fields, "remixer_id") {
+        patched[44..48].copy_from_slice(&desired.remixer_id.to_le_bytes());
+    }
+}
+
+/// Total bytes of the PDB string starting at `at` in `row`: short strings
+/// carry it in their kind byte, long ones (`0x40` ASCII, `0x90` UTF-16) in the
+/// u16 after it.
+fn track_row_string_len(row: &[u8], at: usize) -> Option<usize> {
+    let kind = *row.get(at)?;
+    let len = if kind & 1 == 1 {
+        usize::from(kind >> 1)
+    } else {
+        usize::from(read_u16_le_at(row, at + 1)?)
+    };
+    (len > 0 && at + len <= row.len()).then_some(len)
+}
+
+/// A changed t00 row that no longer fits its slot, rebuilt from the row it
+/// replaces: the fixed-width fields and string slots the change doesn't
+/// touch keep their bytes (composer, label, original artist, the strings
+/// the writer doesn't model, ...), and only the changed fields take the
+/// encoder's bytes. The strings are laid out again with the encoder's
+/// alignment. Falls back to a full encode only when the old row's string
+/// table can't be read.
+fn rebuild_track_row_preserving(
+    row: &[u8],
+    mutation: &PdbTrackRowMutation,
+    profile: PdbLayoutProfile,
+) -> BackendResult<Vec<u8>> {
+    const STRING_START: usize = 136;
+    let fresh = encode_track_row_with_profile(&mutation.row, profile)?;
+    let fields: std::collections::HashSet<&'static str> =
+        mutation.changed_fields.iter().copied().collect();
+    // String slots the writer owns, by the field that fills them (see
+    // `encode_track_row_with_profile`).
+    const OWNED_SLOTS: [(&str, usize); 10] = [
+        ("isrc", 0),
+        ("publish_track_info_on", 6),
+        ("autoload_hotcues_on", 7),
+        ("date_added", 10),
+        ("release_date", 11),
+        ("anlz_path", 14),
+        ("dj_comment", 16),
+        ("title", 17),
+        ("file_name", 19),
+        ("file_path", 20),
+    ];
+    let slot_bytes = |source: &[u8], slot: usize| -> Option<Vec<u8>> {
+        let at = usize::from(read_u16_le_at(source, 94 + 2 * slot)?);
+        let len = track_row_string_len(source, at)?;
+        source.get(at..at + len).map(<[u8]>::to_vec)
+    };
+    let mut slots = Vec::with_capacity(21);
+    for slot in 0..21 {
+        let changed = OWNED_SLOTS
+            .iter()
+            .any(|&(field, owned)| owned == slot && field_changed(&fields, field));
+        let bytes = if changed {
+            slot_bytes(&fresh, slot)
+        } else {
+            slot_bytes(row, slot)
+        };
+        let Some(bytes) = bytes else {
+            return Ok(fresh);
+        };
+        slots.push(bytes);
+    }
+
+    let mut out = row
+        .get(..STRING_START)
+        .map(<[u8]>::to_vec)
+        .unwrap_or_else(|| fresh[..STRING_START].to_vec());
+    patch_changed_track_scalars(&mut out, &fields, &mutation.row);
+    for (index, bytes) in slots.iter().enumerate() {
+        // Same alignment as the encoder: the path and any long string start
+        // on a 4-byte boundary.
+        if index == 20 || matches!(bytes.first(), Some(0x40 | 0x90)) {
+            out.resize(out.len().next_multiple_of(4), 0);
+        }
+        let offset = u16::try_from(out.len()).map_err(|_| {
+            BackendError::Validation(format!(
+                "track row too large for PDB encoding (id {})",
+                mutation.row.id
+            ))
+        })?;
+        out[94 + 2 * index..96 + 2 * index].copy_from_slice(&offset.to_le_bytes());
+        out.extend_from_slice(bytes);
+    }
+    Ok(out)
+}
+
 pub(super) fn build_same_size_track_row_patch(
     row: &[u8],
     mutation: &PdbTrackRowMutation,
@@ -1728,68 +1922,7 @@ pub(super) fn build_same_size_track_row_patch(
         mutation.changed_fields.iter().copied().collect();
     let desired = &mutation.row;
 
-    if field_changed(&fields, "content_link") {
-        patched[4..8].copy_from_slice(&desired.content_link.unwrap_or(0).to_le_bytes());
-    }
-    if field_changed(&fields, "sample_rate_hz") {
-        patched[8..12].copy_from_slice(&desired.sample_rate_hz.unwrap_or(0).to_le_bytes());
-    }
-    if field_changed(&fields, "file_size_bytes") {
-        patched[16..20].copy_from_slice(&desired.file_size_bytes.unwrap_or(0).to_le_bytes());
-    }
-    if field_changed(&fields, "master_content_id") {
-        patched[20..24].copy_from_slice(&desired.master_content_id.unwrap_or(0).to_le_bytes());
-    }
-    if field_changed(&fields, "master_db_id") {
-        patched[24..28].copy_from_slice(&desired.master_db_id.unwrap_or(0).to_le_bytes());
-    }
-    if field_changed(&fields, "artwork_id") {
-        patched[28..32].copy_from_slice(&desired.artwork_id.to_le_bytes());
-    }
-    if field_changed(&fields, "key_id") {
-        patched[32..36].copy_from_slice(&desired.key_id.to_le_bytes());
-    }
-    if field_changed(&fields, "bitrate_kbps") {
-        patched[48..52].copy_from_slice(&desired.bitrate_kbps.unwrap_or(0).to_le_bytes());
-    }
-    if field_changed(&fields, "track_number") {
-        patched[52..56].copy_from_slice(&desired.track_number.unwrap_or(0).to_le_bytes());
-    }
-    if field_changed(&fields, "tempo_x100") {
-        let tempo_x100 = desired
-            .bpm
-            .map(|v| (v * 100.0).round().max(0.0) as u32)
-            .unwrap_or(0);
-        patched[56..60].copy_from_slice(&tempo_x100.to_le_bytes());
-    }
-    if field_changed(&fields, "genre_id") {
-        patched[60..64].copy_from_slice(&desired.genre_id.to_le_bytes());
-    }
-    if field_changed(&fields, "album_id") {
-        patched[64..68].copy_from_slice(&desired.album_id.to_le_bytes());
-    }
-    if field_changed(&fields, "artist_id") {
-        patched[68..72].copy_from_slice(&desired.artist_id.to_le_bytes());
-    }
-    if field_changed(&fields, "release_year") {
-        patched[80..82].copy_from_slice(&desired.release_year.unwrap_or(0).to_le_bytes());
-    }
-    if field_changed(&fields, "bit_depth") {
-        patched[82..84].copy_from_slice(&desired.bit_depth.unwrap_or(0).to_le_bytes());
-    }
-    if field_changed(&fields, "duration_seconds") {
-        let duration_seconds = desired.duration_seconds.unwrap_or(0).min(u16::MAX as u32) as u16;
-        patched[84..86].copy_from_slice(&duration_seconds.to_le_bytes());
-    }
-    if field_changed(&fields, "file_type") {
-        patched[90..92].copy_from_slice(&desired.file_type.unwrap_or(0).to_le_bytes());
-    }
-    if field_changed(&fields, "color_id") {
-        patched[88] = desired.color_id.unwrap_or(0);
-    }
-    if field_changed(&fields, "rating") {
-        patched[89] = desired.rating.unwrap_or(0).min(5);
-    }
+    patch_changed_track_scalars(&mut patched, &fields, desired);
 
     use crate::service::export_helpers::pdb_encoding::{
         encode_pdb_track_inline_string, encode_pdb_track_isrc_slot, encode_pdb_track_path_string,
@@ -2099,7 +2232,7 @@ pub(crate) fn mutate_tracks_in_place(
                 };
                 row_mut.copy_from_slice(&patched_row);
             } else {
-                let replacement = encode_track_row_with_profile(&mutation.row, profile)?;
+                let replacement = rebuild_track_row_preserving(row_view, mutation, profile)?;
                 if replacement.len() > MAX_ROW_LEN {
                     return Err(BackendError::Validation(format!(
                         "PDB additive track mutation blocked: replacement t00 row {} exceeds page capacity ({} bytes; max {MAX_ROW_LEN})",
@@ -2464,6 +2597,7 @@ pub(crate) fn try_write_pdb_additive_in_place(
 
     let summary = AdditiveWriteSummary {
         new_tracks: diff.new_tracks.len(),
+        changed_tracks: diff.mutated_tracks.len(),
         new_playlist_tree: diff.new_playlist_tree.len(),
     };
 
@@ -2525,6 +2659,7 @@ pub(crate) fn try_write_pdb_additive_in_place(
 #[derive(Debug, Default, Clone, Copy)]
 pub(crate) struct AdditiveWriteSummary {
     pub new_tracks: usize,
+    pub changed_tracks: usize,
     pub new_playlist_tree: usize,
 }
 

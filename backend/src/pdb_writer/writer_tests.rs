@@ -133,6 +133,9 @@ fn test_data_page_header_fields() {
 fn test_track_page_uses_0x34_flags() {
     // Tracks (type 0) should use page_flags 0x34
     let track = PdbTrackRowData {
+        composer_id: 0,
+        label_id: 0,
+        remixer_id: 0,
         header_flags_u32: None,
         id: 1,
         artist_id: 0,
@@ -173,6 +176,9 @@ fn test_track_page_uses_0x34_flags() {
 
 fn minimal_track_row(title: &str, file_name: &str, file_path: &str) -> PdbTrackRowData {
     PdbTrackRowData {
+        composer_id: 0,
+        label_id: 0,
+        remixer_id: 0,
         header_flags_u32: None,
         id: 1,
         artist_id: 0,
@@ -349,6 +355,9 @@ fn test_string_encoding_non_ascii_roundtrip() {
         artist_id: 1,
     });
     data.tracks.push(PdbTrackRowData {
+        composer_id: 0,
+        label_id: 0,
+        remixer_id: 0,
         header_flags_u32: None,
         id: 1,
         artist_id: 1,
@@ -551,6 +560,9 @@ fn pdb_page_conventions_synthetic_fixture() {
 
     // Force at least one row in every table type the convention covers.
     data.tracks.push(PdbTrackRowData {
+        composer_id: 0,
+        label_id: 0,
+        remixer_id: 0,
         header_flags_u32: None,
         id: 1,
         artist_id: 1,
@@ -708,6 +720,9 @@ fn test_growth_does_not_shift_legacy_history_block() {
     ]);
     data.tracks = (1..=250)
         .map(|id| PdbTrackRowData {
+            composer_id: 0,
+            label_id: 0,
+            remixer_id: 0,
             header_flags_u32: None,
             content_link: None,
             sample_rate_hz: None,
@@ -1159,6 +1174,9 @@ fn test_pdb_with_tracks_round_trip() {
         name: "Am".into(),
     });
     data.tracks.push(PdbTrackRowData {
+        composer_id: 0,
+        label_id: 0,
+        remixer_id: 0,
         header_flags_u32: None,
         id: 1,
         artist_id: 1,
@@ -1215,6 +1233,9 @@ fn test_fresh_write_multipage_tt0_all_pages_sealed() {
     data.columns_raw_rows = standard_columns_raw();
     for id in 1u32..=30 {
         data.tracks.push(PdbTrackRowData {
+            composer_id: 0,
+            label_id: 0,
+            remixer_id: 0,
             header_flags_u32: None,
             id,
             artist_id: 0,

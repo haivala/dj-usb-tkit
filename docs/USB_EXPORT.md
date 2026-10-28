@@ -396,8 +396,35 @@ older PDB-first hardware compatibility even when the table topology is unchanged
 Strict-repair metadata fixes use the same path: t00 track rows may receive
 direct scalar patches and same-length string-slot patches. When a mapped string
 slot grows or shrinks, the old active t00 row is marked inactive and a
-replacement row with the same track id is appended to the t00 chain. Unrelated
-PDB shape, inactive rows, and menu tables are not normalized.
+replacement row with the same track id is appended to the t00 chain. The
+replacement keeps every byte of the old row the change doesn't touch (fixed
+fields and string slots the writer doesn't model, such as composer, label and
+remixer ids, mix name and message slots); only the changed slots take new
+values. Unrelated PDB shape, inactive rows, and menu tables are not normalized.
+
+The PDB writer also writes the composer, label and remixer dictionary ids
+(track row offsets 12, 40 and 44), by name, adding label rows as needed.
+
+Dictionary names (artist, album, genre, key, label, remixer, composer) and
+artwork paths are matched ignoring case and punctuation. An existing track
+keeps its row when that row already names the value, even if another row
+matches too ("Drum & Bass" stays on its row rather than moving to a
+"drum & Bass" row). Where several existing rows match a new value, the lowest
+id wins, so the same input always gives the same PDB. Values are written as
+given: blank values are skipped, but surrounding spaces are not trimmed.
+A track handed over by a repair (not exported from the library) keeps the
+artwork its PDB row already has; only a row without artwork takes the
+manifest's.
+
+Existing eDB `content` rows are updated column by column: a column is written
+only when the track has a value for it and that value differs from the row's.
+A missing or default value never clears the row's own value (a rekordbox
+ISRC, release year or key the library doesn't have stays), the album is only
+filled in, and the export date fills `dateAdded` only when the row has none.
+A re-export of an unchanged track leaves its row as it was. The export's own
+bookkeeping (cue rewrite, update counters, `analysedBits`, `hasModified`,
+auto-load and KUVO flags) applies only to tracks exported from the library,
+not to tracks the strict parity repair or the audio fixes hand the writers.
 
 Deterministic rerun behavior is handled at this pipeline level. Re-exporting the same playlist uses stable identity/linkage rules so metadata and membership can be updated predictably without duplicating entries by default.
 

@@ -1254,6 +1254,14 @@ impl BackendService {
             )?;
             let file_timestamp_at = scanned.file_timestamp();
             manifest_tracks.push(ExportManifestTrack {
+                date_added: None,
+                date_created: None,
+                label: None,
+                remixer: None,
+                composer: None,
+                from_library: false,
+                pdb_track_id: None,
+                edb_content_id: None,
                 id: identity_key,
                 master_db_id,
                 master_content_id,
@@ -1333,39 +1341,66 @@ impl BackendService {
 
         // Same order as export: eDB first, then the PDB takes its playlist id
         // and sort order. Additive (no mirror), so an existing playlist of the
-        // same name is appended to rather than replaced.
-        let mut edb_playlist_id = None;
-        let mut edb_sort_order = None;
+        // same name is appended to rather than replaced. All or nothing, and
+        // only the staged copies: the eDB transaction commits after the
+        // staged PDB is written, and the repair run writes both back once.
+        let pdb_path = usb_staging::stage_pdb(usb_root)?;
         let mut handle = EdbConnHandle::acquire(edb_conn, || open_edb_rw(usb_root, warnings));
-        match handle.as_mut().map(EdbConnHandle::conn) {
-            Some(conn) => {
-                let written = write_edb_playlist_with_conn(conn, &playlist, &manifest, false)?;
-                edb_playlist_id = u32::try_from(written.playlist_id).ok();
-                edb_sort_order = u32::try_from(written.sort_order).ok();
+        let tx = match handle.as_mut().map(EdbConnHandle::conn) {
+            Some(conn) => Some(conn.transaction()?),
+            None => {
+                warnings.push(logging::log(
+                    Level::Warn,
+                    "usb-repair",
+                    "usb.repair.unindexed-audio.edb-open-failed",
+                    "unindexed audio: eDB unavailable, only the PDB was updated",
+                ));
+                None
             }
-            None => warnings.push(logging::log(
-                Level::Warn,
-                "usb-repair",
-                "usb.repair.unindexed-audio.edb-open-failed",
-                "unindexed audio: eDB unavailable, only the PDB was updated",
-            )),
-        }
-        let written = write_pdb(
+        };
+        let (edb_identity, t19_property) = match tx.as_ref() {
+            Some(tx) => {
+                let written = write_edb_playlists_in_tx(
+                    tx,
+                    &[EdbPlaylistWrite {
+                        playlist: &playlist,
+                        manifest: &manifest,
+                        mirror_playlist_entries: false,
+                        identity: None,
+                    }],
+                )?;
+                let identity = written.first().map(|w| {
+                    (
+                        u32::try_from(w.playlist_id).ok(),
+                        u32::try_from(w.sort_order).ok(),
+                    )
+                });
+                (identity, t19_property_from_conn(tx))
+            }
+            None => (None, None),
+        };
+        let (playlist_id, sort_order) = edb_identity.unwrap_or((None, None));
+        let build = build_pdb_for_playlists(
             usb_root,
-            &playlist,
-            &manifest,
+            &[PdbPlaylistWrite {
+                playlist: &playlist,
+                manifest: &manifest,
+                mirror_playlist_entries: false,
+                row_id: None,
+                playlist_id,
+                sort_order,
+                move_to_front: true,
+            }],
+            t19_property,
             false,
-            edb_playlist_id,
-            edb_sort_order,
         )?;
-        warnings.extend(written.writer_warnings.into_iter().map(|message| {
-            logging::log(
-                Level::Warn,
-                "usb-repair",
-                "usb.repair.unindexed-audio.pdb-writer-warning",
-                message,
-            )
-        }));
+        std::fs::write(&pdb_path, &build.bytes)?;
+        if let Some(tx) = tx
+            && let Err(err) = tx.commit()
+        {
+            let _ = std::fs::write(&pdb_path, &build.before);
+            return Err(err.into());
+        }
         Ok((manifest.tracks.len(), analysed, without_analysis))
     }
 

@@ -40,169 +40,237 @@ pub fn write_edb_playlist_with_conn(
     manifest: &ExportManifest,
     mirror_playlist_entries: bool,
 ) -> BackendResult<WriteExportLibraryDbResult> {
-    let export_date_added = normalize_export_date(Some(&manifest.generated_at))
-        .unwrap_or_else(|| chrono::Utc::now().format("%Y-%m-%d").to_string());
     let tx = conn.transaction()?;
-    if !table_exists(&tx, "playlist")
-        || !table_exists(&tx, "content")
-        || !table_exists(&tx, "playlist_content")
+    let mut results = write_edb_playlists_in_tx(
+        &tx,
+        &[EdbPlaylistWrite {
+            playlist,
+            manifest,
+            mirror_playlist_entries,
+            identity: None,
+        }],
+    )?;
+    tx.commit()?;
+    // Keep WAL mode after writes.
+    let _ = conn.execute_batch("PRAGMA wal_checkpoint(TRUNCATE);");
+    let _ = conn.execute_batch("PRAGMA journal_mode=WAL;");
+    results
+        .pop()
+        .ok_or_else(|| BackendError::Internal("eDB write produced no result".to_string()))
+}
+
+/// One playlist for [`write_edb_playlists_in_tx`].
+pub struct EdbPlaylistWrite<'a> {
+    pub playlist: &'a ExportPlaylistData,
+    pub manifest: &'a ExportManifest,
+    /// The playlist's members become exactly the manifest's tracks, in its
+    /// order; otherwise new tracks are appended.
+    pub mirror_playlist_entries: bool,
+    /// The playlist row's id and `sequenceNo`, as the repair takes them from
+    /// the PDB. Without one the row is found by name and moved first, as an
+    /// export does.
+    pub identity: Option<(i64, i64)>,
+}
+
+/// Write every one of `writes` into the eDB inside `tx`: playlist rows,
+/// content rows (inserted, or updated where they changed), membership and
+/// `property`. Nothing is committed; the caller commits or rolls back, so
+/// several playlists (and the PDB written beside them) succeed or fail
+/// together.
+pub fn write_edb_playlists_in_tx(
+    tx: &rusqlite::Transaction<'_>,
+    writes: &[EdbPlaylistWrite<'_>],
+) -> BackendResult<Vec<WriteExportLibraryDbResult>> {
+    if !table_exists(tx, "playlist")
+        || !table_exists(tx, "content")
+        || !table_exists(tx, "playlist_content")
     {
         return Err(BackendError::Internal(
             "eDB is missing required playlist/content tables".to_string(),
         ));
     }
-
-    let playlist_id = upsert_export_playlist_row(&tx, playlist)?;
-    let sort_order = tx
-        .query_row(
-            "SELECT COALESCE(sequenceNo, 0) FROM playlist WHERE playlist_id = ?1",
-            params![playlist_id],
-            |row| row.get::<_, i64>(0),
-        )
-        .unwrap_or(0);
-    // Capture playlist-linked content rows by path before optional mirror-delete.
-    // This avoids picking an arbitrary duplicate content row for a path.
-    let mut prev_content_id_by_path = HashMap::<String, i64>::new();
-    let mut previously_linked_ids = HashSet::<i64>::new();
-    {
-        let mut stmt = tx.prepare(
-            r#"
-            SELECT pc.content_id, c.path
-            FROM playlist_content pc
-            JOIN content c ON c.content_id = pc.content_id
-            WHERE pc.playlist_id = ?1
-            "#,
-        )?;
-        let rows = stmt.query_map(params![playlist_id], |row| {
-            Ok((row.get::<_, i64>(0)?, row.get::<_, Option<String>>(1)?))
-        })?;
-        for row in rows {
-            let (content_id, maybe_path) = row?;
-            previously_linked_ids.insert(content_id);
-            if let Some(path) = maybe_path {
-                let key = canonicalize_track_path_identity(&path);
-                if !key.is_empty() {
-                    prev_content_id_by_path.entry(key).or_insert(content_id);
+    let mut results = Vec::with_capacity(writes.len());
+    for write in writes {
+        let EdbPlaylistWrite {
+            playlist,
+            manifest,
+            mirror_playlist_entries,
+            identity,
+        } = *write;
+        let export_date_added = normalize_export_date(Some(&manifest.generated_at))
+            .unwrap_or_else(|| chrono::Utc::now().format("%Y-%m-%d").to_string());
+        let playlist_id = match identity {
+            Some((id, sequence_no)) => {
+                replace_export_playlist_row_with_identity(tx, playlist, id, sequence_no)?
+            }
+            None => upsert_export_playlist_row(tx, playlist)?,
+        };
+        let sort_order = tx
+            .query_row(
+                "SELECT COALESCE(sequenceNo, 0) FROM playlist WHERE playlist_id = ?1",
+                params![playlist_id],
+                |row| row.get::<_, i64>(0),
+            )
+            .unwrap_or(0);
+        // Capture playlist-linked content rows by path before optional mirror-delete.
+        // This avoids picking an arbitrary duplicate content row for a path.
+        let mut prev_content_id_by_path = HashMap::<String, i64>::new();
+        let mut previously_linked_ids = HashSet::<i64>::new();
+        {
+            let mut stmt = tx.prepare(
+                r#"
+                SELECT pc.content_id, c.path
+                FROM playlist_content pc
+                JOIN content c ON c.content_id = pc.content_id
+                WHERE pc.playlist_id = ?1
+                "#,
+            )?;
+            let rows = stmt.query_map(params![playlist_id], |row| {
+                Ok((row.get::<_, i64>(0)?, row.get::<_, Option<String>>(1)?))
+            })?;
+            for row in rows {
+                let (content_id, maybe_path) = row?;
+                previously_linked_ids.insert(content_id);
+                if let Some(path) = maybe_path {
+                    let key = canonicalize_track_path_identity(&path);
+                    if !key.is_empty() {
+                        prev_content_id_by_path.entry(key).or_insert(content_id);
+                    }
                 }
             }
         }
+
+        if mirror_playlist_entries {
+            tx.execute(
+                "DELETE FROM playlist_content WHERE playlist_id = ?1",
+                params![playlist_id],
+            )?;
+        }
+
+        let mut inserted_content = 0usize;
+        let mut updated_content = 0usize;
+        let mut linked_playlist_entries = 0usize;
+        let playlist_content_columns = load_table_columns_tx(tx, "playlist_content")?;
+        let mut seq = if mirror_playlist_entries {
+            0i64
+        } else if playlist_content_columns.contains("sequenceNo") {
+            tx.query_row(
+                "SELECT COALESCE(MAX(sequenceNo), 0) FROM playlist_content WHERE playlist_id = ?1",
+                params![playlist_id],
+                |row| row.get::<_, i64>(0),
+            )
+            .unwrap_or(0)
+        } else {
+            0i64
+        };
+        let content_columns = load_table_columns_tx(tx, "content")?;
+
+        for track in &manifest.tracks {
+            let track_path_key = canonicalize_track_path_identity(&track.exported_path);
+            let preferred_existing = prev_content_id_by_path.get(&track_path_key).copied();
+            let hinted_existing = match track.edb_content_id {
+                Some(content_id) => tx
+                    .query_row(
+                        "SELECT content_id FROM content WHERE content_id = ?1",
+                        params![content_id],
+                        |row| row.get::<_, i64>(0),
+                    )
+                    .optional()?,
+                None => None,
+            };
+            let resolved_existing = match hinted_existing.or(preferred_existing) {
+                Some(content_id) => Some(content_id),
+                None => find_content_id_by_path(tx, &track.exported_path)?,
+            };
+            let content_id = match resolved_existing {
+                Some(existing) => {
+                    let was_previously_linked = previously_linked_ids.contains(&existing);
+                    if update_existing_content_row(
+                        tx,
+                        existing,
+                        track,
+                        &content_columns,
+                        Some(export_date_added.as_str()),
+                    )? {
+                        updated_content += 1;
+                    }
+                    // The update counters are the app's export bookkeeping; a
+                    // track the repair carries over from the USB keeps its own.
+                    if track.from_library {
+                        // Vendor-authored exports apply +8 only to the appended
+                        // export member while other existing rows receive +2.
+                        let is_appended_export_member = track.position + 1 >= manifest.tracks.len();
+                        let bump = if was_previously_linked || !is_appended_export_member {
+                            2
+                        } else {
+                            8
+                        };
+                        for column in ["analysisDataUpdateCount", "informationUpdateCount"] {
+                            if content_columns.contains(column) {
+                                tx.execute(
+                                    &format!(
+                                        "UPDATE content SET {column} = (COALESCE(CAST({column} AS INTEGER), 0) + ?2) WHERE content_id = ?1"
+                                    ),
+                                    params![existing, bump],
+                                )?;
+                            }
+                        }
+                        if content_columns.contains("cueUpdateCount") {
+                            tx.execute(
+                                "UPDATE content SET cueUpdateCount = '' WHERE content_id = ?1",
+                                params![existing],
+                            )?;
+                        }
+                    }
+                    existing
+                }
+                None => {
+                    let id =
+                        insert_content_from_template(tx, track, Some(export_date_added.as_str()))?;
+                    inserted_content += 1;
+                    id
+                }
+            };
+
+            // The app owns the cues of tracks it exports from its library; a
+            // track carried over from the USB keeps the cue rows it has.
+            if track.from_library {
+                write_edb_cues_for_content(tx, content_id, &track.cues, &content_columns)?;
+            }
+
+            if !mirror_playlist_entries {
+                let already_linked: Option<i64> = tx
+                    .query_row(
+                        "SELECT 1 FROM playlist_content WHERE playlist_id = ?1 AND content_id = ?2 LIMIT 1",
+                        params![playlist_id, content_id],
+                        |row| row.get(0),
+                    )
+                    .optional()?;
+                if already_linked.is_some() {
+                    continue;
+                }
+            }
+
+            seq += 1;
+            link_playlist_content(tx, playlist_id, content_id, seq)?;
+            linked_playlist_entries += 1;
+        }
+        results.push(WriteExportLibraryDbResult {
+            inserted_content,
+            updated_content,
+            linked_playlist_entries,
+            playlist_id,
+            sort_order,
+        });
+
     }
 
-    if mirror_playlist_entries {
-        tx.execute(
-            "DELETE FROM playlist_content WHERE playlist_id = ?1",
-            params![playlist_id],
-        )?;
-    }
-
-    let mut inserted_content = 0usize;
-    let mut linked_playlist_entries = 0usize;
-    let playlist_content_columns = load_table_columns_tx(&tx, "playlist_content")?;
-    let mut seq = if mirror_playlist_entries {
-        0i64
-    } else if playlist_content_columns.contains("sequenceNo") {
-        tx.query_row(
-            "SELECT COALESCE(MAX(sequenceNo), 0) FROM playlist_content WHERE playlist_id = ?1",
-            params![playlist_id],
-            |row| row.get::<_, i64>(0),
-        )
-        .unwrap_or(0)
-    } else {
-        0i64
+    let Some(manifest) = writes.first().map(|w| w.manifest) else {
+        return Ok(results);
     };
-    let content_columns = load_table_columns_tx(&tx, "content")?;
-
-    for track in &manifest.tracks {
-        let track_path_key = canonicalize_track_path_identity(&track.exported_path);
-        let preferred_existing = prev_content_id_by_path.get(&track_path_key).copied();
-        let resolved_existing = match preferred_existing {
-            Some(content_id) => Some(content_id),
-            None => find_content_id_by_path(&tx, &track.exported_path)?,
-        };
-        let content_id = match resolved_existing {
-            Some(existing) => {
-                let was_previously_linked = previously_linked_ids.contains(&existing);
-                update_existing_content_row(
-                    &tx,
-                    existing,
-                    track,
-                    &content_columns,
-                    Some(export_date_added.as_str()),
-                )?;
-                if content_columns.contains("analysedBits") {
-                    let analysed_bits: i64 = if track.waveform_path.is_some() { 41 } else { 0 };
-                    tx.execute(
-                        "UPDATE content SET analysedBits = ?2 WHERE content_id = ?1",
-                        params![existing, analysed_bits],
-                    )?;
-                }
-                // Keep contentLink stable across additive rewrites so eDB/PDB
-                // identity fields remain in lockstep for player metadata lookup.
-                if content_columns.contains("analysisDataUpdateCount") {
-                    // Vendor-authored exports apply +8 only to the appended
-                    // export member while other existing rows receive +2.
-                    let is_appended_export_member = track.position + 1 >= manifest.tracks.len();
-                    let bump = if was_previously_linked || !is_appended_export_member {
-                        2
-                    } else {
-                        8
-                    };
-                    tx.execute(
-                        "UPDATE content SET analysisDataUpdateCount = (COALESCE(CAST(analysisDataUpdateCount AS INTEGER), 0) + ?2) WHERE content_id = ?1",
-                        params![existing, bump],
-                    )?;
-                }
-                if content_columns.contains("informationUpdateCount") {
-                    let is_appended_export_member = track.position + 1 >= manifest.tracks.len();
-                    let bump = if was_previously_linked || !is_appended_export_member {
-                        2
-                    } else {
-                        8
-                    };
-                    tx.execute(
-                        "UPDATE content SET informationUpdateCount = (COALESCE(CAST(informationUpdateCount AS INTEGER), 0) + ?2) WHERE content_id = ?1",
-                        params![existing, bump],
-                    )?;
-                }
-                if content_columns.contains("cueUpdateCount") {
-                    tx.execute(
-                        "UPDATE content SET cueUpdateCount = '' WHERE content_id = ?1",
-                        params![existing],
-                    )?;
-                }
-                existing
-            }
-            None => {
-                let id =
-                    insert_content_from_template(&tx, track, Some(export_date_added.as_str()))?;
-                inserted_content += 1;
-                id
-            }
-        };
-
-        write_edb_cues_for_content(&tx, content_id, &track.cues, &content_columns)?;
-
-        if !mirror_playlist_entries {
-            let already_linked: Option<i64> = tx
-                .query_row(
-                    "SELECT 1 FROM playlist_content WHERE playlist_id = ?1 AND content_id = ?2 LIMIT 1",
-                    params![playlist_id, content_id],
-                    |row| row.get(0),
-                )
-                .optional()?;
-            if already_linked.is_some() {
-                continue;
-            }
-        }
-
-        seq += 1;
-        link_playlist_content(&tx, playlist_id, content_id, seq)?;
-        linked_playlist_entries += 1;
-    }
-
     // Keep property summary in sync with actual content cardinality.
-    if table_exists(&tx, "property") {
-        let property_columns = load_table_columns_tx(&tx, "property")?;
+    if table_exists(tx, "property") {
+        let property_columns = load_table_columns_tx(tx, "property")?;
         if property_columns.contains("numberOfContents") {
             tx.execute(
                 "UPDATE property SET numberOfContents = (SELECT COUNT(1) FROM content)",
@@ -221,16 +289,7 @@ pub fn write_edb_playlist_with_conn(
         }
     }
 
-    tx.commit()?;
-    // Keep WAL mode after writes.
-    let _ = conn.execute_batch("PRAGMA wal_checkpoint(TRUNCATE);");
-    let _ = conn.execute_batch("PRAGMA journal_mode=WAL;");
-    Ok(WriteExportLibraryDbResult {
-        inserted_content,
-        linked_playlist_entries,
-        playlist_id,
-        sort_order,
-    })
+    Ok(results)
 }
 
 pub fn load_table_columns_tx(
@@ -353,58 +412,212 @@ pub fn write_edb_cues_for_content(
     Ok(())
 }
 
+/// Two SQL values equal for a content column: integers, reals and numeric
+/// text compare by value (rekordbox stores some numbers as text).
+fn content_values_equal(a: &rusqlite::types::Value, b: &rusqlite::types::Value) -> bool {
+    use rusqlite::types::Value;
+    let text = |v: &Value| match v {
+        Value::Null => None,
+        Value::Integer(i) => Some(i.to_string()),
+        Value::Real(f) if f.fract() == 0.0 && f.abs() < 1e15 => Some((*f as i64).to_string()),
+        Value::Real(f) => Some(f.to_string()),
+        Value::Text(t) => Some(t.trim().to_string()),
+        Value::Blob(b) => Some(String::from_utf8_lossy(b).into_owned()),
+    };
+    text(a) == text(b)
+}
+
+/// Update an existing `content` row from `track`, writing only what changed:
+/// each column the track gives a value for takes it when the row's differs.
+/// A value the track doesn't carry leaves the row's own, never NULL or a
+/// default over it. The app's own export touches (flags, `analysedBits`,
+/// the export date as `dateAdded` on a row that has none, derived dates)
+/// only apply to a track built from the library (`from_library`). Returns
+/// whether the row changed.
 pub fn update_existing_content_row(
     tx: &rusqlite::Transaction<'_>,
     content_id: i64,
     track: &ExportManifestTrack,
     content_columns: &HashSet<String>,
     export_date_added: Option<&str>,
-) -> BackendResult<()> {
-    if content_columns.contains("title") {
-        let title = sanitize_metadata(&track.title).into_owned();
-        tx.execute(
-            "UPDATE content SET title = ?1 WHERE content_id = ?2",
-            params![title, content_id],
-        )?;
-    }
-    if content_columns.contains("path") {
-        tx.execute(
-            "UPDATE content SET path = ?1 WHERE content_id = ?2",
-            params![track.exported_path, content_id],
-        )?;
-    }
-    if content_columns.contains("analysisDataFilePath") && track.waveform_path.is_some() {
-        tx.execute(
-            "UPDATE content SET analysisDataFilePath = ?1 WHERE content_id = ?2",
-            params![track.waveform_path, content_id],
-        )?;
-    }
-    if content_columns.contains("bpmx100")
-        && let Some(bpm) = track.bpm
+) -> BackendResult<bool> {
+    use rusqlite::types::Value;
+    let text = |value: Option<&str>| {
+        value
+            .map(|v| sanitize_metadata(v).trim().to_string())
+            .filter(|v| !v.is_empty())
+            .map(Value::Text)
+    };
+    let int = |value: Option<i64>| value.map(Value::Integer);
+    let from_library = track.from_library;
+
+    // (column, value) the row should have; columns the track has no value
+    // for are left out. `if_empty` columns are only filled, never replaced.
+    let mut desired: Vec<(&'static str, Value)> = Vec::new();
+    let mut if_empty: Vec<(&'static str, Value)> = Vec::new();
+    let mut want = |column: &'static str, value: Option<Value>| {
+        if let Some(value) = value
+            && content_columns.contains(column)
+        {
+            desired.push((column, value));
+        }
+    };
+
+    want("title", text(Some(&track.title)));
+    want(
+        "path",
+        Some(track.exported_path.as_str())
+            .filter(|p| !p.trim().is_empty())
+            .map(|p| Value::Text(p.to_string())),
+    );
+    want(
+        "fileName",
+        Some(track.exported_path.as_str())
+            .filter(|p| !p.trim().is_empty())
+            .map(|p| Value::Text(content_file_name(p))),
+    );
+    want(
+        "analysisDataFilePath",
+        track
+            .waveform_path
+            .as_deref()
+            .filter(|p| !p.trim().is_empty())
+            .map(|p| Value::Text(p.to_string())),
+    );
+    want("bpmx100", int(track.bpm.map(|bpm| (bpm * 100.0).round() as i64)));
+    want("length", int(track.duration_ms.map(duration_ms_to_seconds)));
+    want(
+        "artist_id_artist",
+        match track.artist.trim() {
+            "" => None,
+            artist => int(find_or_insert_artist(tx, artist)?),
+        },
+    );
+    want(
+        "key_id",
+        int(find_key_id_by_name(tx, track.key.as_deref())?),
+    );
+    if let Some(path) = track
+        .artwork_path
+        .as_deref()
+        .filter(|path| !path.trim().is_empty())
+        && (content_columns.contains("image_id") || content_columns.contains("imageFilePath_id"))
     {
-        let bpmx100 = (bpm * 100.0).round() as i64;
-        tx.execute(
-            "UPDATE content SET bpmx100 = ?1 WHERE content_id = ?2",
-            params![bpmx100, content_id],
-        )?;
+        let image_id = find_or_insert_image(tx, path)?;
+        want("image_id", int(image_id));
+        want("imageFilePath_id", int(image_id));
     }
-    if content_columns.contains("length")
-        && let Some(duration_ms) = track.duration_ms
+    want("fileSize", int(track.file_size_bytes));
+    want("fileType", int(track.file_type));
+    want("trackNo", int(track.track_number.map(i64::from)));
+    want("discNo", int(track.disc_number.map(i64::from)));
+    want("bitrate", int(track.bitrate_kbps.map(i64::from)));
+    want("samplingRate", int(track.sample_rate_hz.map(i64::from)));
+    want("bitDepth", int(track.bit_depth.map(i64::from)));
+    want("subtitle", text(track.subtitle.as_deref()));
+    want("titleForSearch", text(track.title_for_search.as_deref()));
+    want("isrc", text(track.isrc.as_deref()));
+    want("djComment", text(track.comment.as_deref()));
+    want("kuvoDeliveryComment", text(track.kuvo_delivery_comment.as_deref()));
+    if from_library {
+        want(
+            "releaseYear",
+            int(resolve_track_release_year_for_export(track).map(i64::from)),
+        );
+        want(
+            "releaseDate",
+            text(resolve_track_release_date_for_export(track).as_deref()),
+        );
+    } else {
+        want("releaseYear", int(track.release_year.map(i64::from)));
+        want("releaseDate", text(track.release_date.as_deref()));
+    }
+    want(
+        "dateCreated",
+        text(
+            track
+                .date_created
+                .clone()
+                .or_else(|| {
+                    from_library
+                        .then(|| resolve_track_created_date_for_export(track))
+                        .flatten()
+                })
+                .as_deref(),
+        ),
+    );
+    match normalize_export_date(track.date_added.as_deref()) {
+        Some(date) => want("dateAdded", Some(Value::Text(date))),
+        None if from_library && content_columns.contains("dateAdded") => {
+            if let Some(date) = normalize_export_date(export_date_added) {
+                if_empty.push(("dateAdded", Value::Text(date)));
+            }
+        }
+        None => {}
+    }
+    want("contentLink", int(track.content_link));
+    want("masterContentId", int(track.master_content_id));
+    want("masterDbId", int(track.master_db_id));
+    // Rating and colour only when the library has one: the app doesn't set
+    // them, so a rekordbox row's own values stay (and match its PDB row).
+    want("rating", int(track.rating.map(i64::from)));
+    want("color_id", int(track.color_id.map(i64::from)));
+    want("djPlayCount", int(track.dj_play_count.map(i64::from)));
+    want(
+        "artist_id_lyricist",
+        int(track.artist_id_lyricist.map(i64::from)),
+    );
+    want(
+        "artist_id_originalArtist",
+        int(track.artist_id_original_artist.map(i64::from)),
+    );
+    let named_artist = |name: Option<&str>| -> BackendResult<Option<i64>> {
+        match name.map(str::trim).filter(|v| !v.is_empty()) {
+            Some(name) => find_or_insert_artist(tx, name),
+            None => Ok(None),
+        }
+    };
+    want(
+        "artist_id_remixer",
+        int(named_artist(track.remixer.as_deref())?
+            .or(track.artist_id_remixer.map(i64::from))),
+    );
+    want(
+        "artist_id_composer",
+        int(named_artist(track.composer.as_deref())?
+            .or(track.artist_id_composer.map(i64::from))),
+    );
+    // By name, as the PDB row is: the library's `genre_id` is never set, so
+    // writing it would clear the genre the PDB keeps.
+    want(
+        "genre_id",
+        match track.genre.as_deref().filter(|v| !v.trim().is_empty()) {
+            Some(genre) => int(crate::edb::find_or_insert_genre(tx, genre)?),
+            None => None,
+        },
+    );
+    want(
+        "label_id",
+        match track.label.as_deref().filter(|v| !v.trim().is_empty()) {
+            Some(label) => int(crate::edb::find_or_insert_label(tx, label)?),
+            None => int(track.label_id.map(i64::from)),
+        },
+    );
+    if from_library {
+        // Mark exported tracks as having the newer analysis generation so
+        // Vendor software can enable the modern waveform path for generated ANLZ.
+        want(
+            "analysedBits",
+            Some(Value::Integer(if track.waveform_path.is_some() { 41 } else { 0 })),
+        );
+        want("isHotCueAutoLoadOn", Some(Value::Integer(1)));
+        want("isKuvoDeliverStatusOn", Some(Value::Integer(1)));
+        want("hasModified", Some(Value::Integer(0)));
+    }
+    // The album is only filled in: a row's own album stays.
+    if content_columns.contains("album_id")
+        && let Some(album) = track.album.as_deref().filter(|v| !v.trim().is_empty())
     {
-        let length = duration_ms_to_seconds(duration_ms);
-        tx.execute(
-            "UPDATE content SET length = ?1 WHERE content_id = ?2",
-            params![length, content_id],
-        )?;
-    }
-    if content_columns.contains("artist_id_artist") {
-        let artist_id = find_or_insert_artist(tx, &track.artist)?;
-        tx.execute(
-            "UPDATE content SET artist_id_artist = ?1 WHERE content_id = ?2",
-            params![artist_id, content_id],
-        )?;
-    }
-    if content_columns.contains("album_id") {
         let existing_album_id: Option<i64> = tx
             .query_row(
                 "SELECT album_id FROM content WHERE content_id = ?1",
@@ -413,282 +626,66 @@ pub fn update_existing_content_row(
             )
             .optional()?
             .flatten();
-        if existing_album_id.is_none() && track.album.is_some() {
-            let album_id = find_or_insert_album(tx, track.album.as_deref(), Some(&track.artist))?;
-            tx.execute(
-                "UPDATE content SET album_id = ?1 WHERE content_id = ?2",
-                params![album_id, content_id],
-            )?;
+        if existing_album_id.is_none()
+            && let Some(album_id) = find_or_insert_album(tx, Some(album), Some(&track.artist))?
+        {
+            if_empty.push(("album_id", Value::Integer(album_id)));
         }
     }
-    if content_columns.contains("key_id") {
-        let key_id = find_key_id_by_name(tx, track.key.as_deref())?;
-        tx.execute(
-            "UPDATE content SET key_id = ?1 WHERE content_id = ?2",
-            params![key_id, content_id],
-        )?;
+
+    let columns: Vec<&'static str> = desired
+        .iter()
+        .chain(&if_empty)
+        .map(|(column, _)| *column)
+        .collect();
+    if columns.is_empty() {
+        return Ok(false);
     }
-    if (content_columns.contains("image_id") || content_columns.contains("imageFilePath_id"))
-        && let Some(path) = track
-            .artwork_path
-            .as_deref()
-            .filter(|path| !path.trim().is_empty())
-    {
-        let image_id = find_or_insert_image(tx, path)?;
-        if content_columns.contains("image_id") {
-            tx.execute(
-                "UPDATE content SET image_id = ?1 WHERE content_id = ?2",
-                params![image_id, content_id],
-            )?;
-        }
-        if content_columns.contains("imageFilePath_id") {
-            tx.execute(
-                "UPDATE content SET imageFilePath_id = ?1 WHERE content_id = ?2",
-                params![image_id, content_id],
-            )?;
-        }
+    let current: Vec<Value> = tx.query_row(
+        &format!(
+            "SELECT {} FROM content WHERE content_id = ?1",
+            columns
+                .iter()
+                .map(|c| format!("\"{c}\""))
+                .collect::<Vec<_>>()
+                .join(", ")
+        ),
+        params![content_id],
+        |row| (0..columns.len()).map(|i| row.get::<_, Value>(i)).collect(),
+    )?;
+    let is_empty = |v: &Value| match v {
+        Value::Null => true,
+        Value::Text(t) => t.trim().is_empty(),
+        _ => false,
+    };
+    let changes: Vec<(&'static str, Value)> = desired
+        .into_iter()
+        .map(|change| (change, false))
+        .chain(if_empty.into_iter().map(|change| (change, true)))
+        .zip(&current)
+        .filter(|(((_, value), only_if_empty), now)| {
+            if *only_if_empty {
+                is_empty(now)
+            } else {
+                !content_values_equal(value, now)
+            }
+        })
+        .map(|((change, _), _)| change)
+        .collect();
+    if changes.is_empty() {
+        return Ok(false);
     }
-    if content_columns.contains("fileName") {
-        tx.execute(
-            "UPDATE content SET fileName = ?1 WHERE content_id = ?2",
-            params![content_file_name(&track.exported_path), content_id],
-        )?;
-    }
-    if content_columns.contains("fileSize") {
-        tx.execute(
-            "UPDATE content SET fileSize = ?1 WHERE content_id = ?2",
-            params![track.file_size_bytes, content_id],
-        )?;
-    }
-    if content_columns.contains("fileType") {
-        tx.execute(
-            "UPDATE content SET fileType = ?1 WHERE content_id = ?2",
-            params![track.file_type, content_id],
-        )?;
-    }
-    if content_columns.contains("trackNo") {
-        tx.execute(
-            "UPDATE content SET trackNo = ?1 WHERE content_id = ?2",
-            params![track.track_number, content_id],
-        )?;
-    }
-    if content_columns.contains("discNo") {
-        tx.execute(
-            "UPDATE content SET discNo = ?1 WHERE content_id = ?2",
-            params![track.disc_number.unwrap_or(0), content_id],
-        )?;
-    }
-    if content_columns.contains("bitrate") {
-        tx.execute(
-            "UPDATE content SET bitrate = ?1 WHERE content_id = ?2",
-            params![track.bitrate_kbps, content_id],
-        )?;
-    }
-    if content_columns.contains("samplingRate") {
-        tx.execute(
-            "UPDATE content SET samplingRate = ?1 WHERE content_id = ?2",
-            params![track.sample_rate_hz, content_id],
-        )?;
-    }
-    if content_columns.contains("bitDepth") {
-        tx.execute(
-            "UPDATE content SET bitDepth = ?1 WHERE content_id = ?2",
-            params![track.bit_depth.map(i64::from).unwrap_or(16), content_id],
-        )?;
-    }
-    if content_columns.contains("subtitle") {
-        let subtitle = track
-            .subtitle
-            .as_deref()
-            .map(|value| sanitize_metadata(value).into_owned())
-            .unwrap_or_default();
-        tx.execute(
-            "UPDATE content SET subtitle = ?1 WHERE content_id = ?2",
-            params![subtitle, content_id],
-        )?;
-    }
-    if content_columns.contains("titleForSearch") {
-        let title_for_search = track
-            .title_for_search
-            .as_deref()
-            .map(|value| sanitize_metadata(value).into_owned())
-            .map(|value| value.trim().to_string())
-            .filter(|value| !value.is_empty())
-            .map(|value| value.to_string());
-        tx.execute(
-            "UPDATE content SET titleForSearch = ?1 WHERE content_id = ?2",
-            params![title_for_search, content_id],
-        )?;
-    }
-    if content_columns.contains("isrc") {
-        tx.execute(
-            "UPDATE content SET isrc = ?1 WHERE content_id = ?2",
-            params![track.isrc, content_id],
-        )?;
-    }
-    if content_columns.contains("djComment") {
-        let comment = track
-            .comment
-            .as_deref()
-            .map(|value| sanitize_metadata(value).into_owned());
-        tx.execute(
-            "UPDATE content SET djComment = ?1 WHERE content_id = ?2",
-            params![comment, content_id],
-        )?;
-    }
-    if content_columns.contains("releaseYear") {
-        tx.execute(
-            "UPDATE content SET releaseYear = ?1 WHERE content_id = ?2",
-            params![track.release_year.unwrap_or(0), content_id],
-        )?;
-    }
-    if content_columns.contains("releaseDate") {
-        tx.execute(
-            "UPDATE content SET releaseDate = ?1 WHERE content_id = ?2",
-            params![
-                resolve_track_release_date_for_export(track).unwrap_or_default(),
-                content_id
-            ],
-        )?;
-    }
-    if content_columns.contains("dateAdded") {
-        tx.execute(
-            "UPDATE content SET dateAdded = ?1 WHERE content_id = ?2",
-            params![normalize_export_date(export_date_added), content_id],
-        )?;
-    }
-    if content_columns.contains("dateCreated") {
-        tx.execute(
-            "UPDATE content SET dateCreated = ?1 WHERE content_id = ?2",
-            params![resolve_track_created_date_for_export(track), content_id],
-        )?;
-    }
-    if content_columns.contains("analysedBits") {
-        // Mark exported tracks as having the newer analysis generation so
-        // Vendor software can enable the modern waveform path for generated ANLZ.
-        let analysed_bits: i64 = if track.waveform_path.is_some() { 41 } else { 0 };
-        tx.execute(
-            "UPDATE content SET analysedBits = ?1 WHERE content_id = ?2",
-            params![analysed_bits, content_id],
-        )?;
-    }
-    if content_columns.contains("contentLink")
-        && let Some(cl) = track.content_link
-    {
-        tx.execute(
-            "UPDATE content SET contentLink = ?1 WHERE content_id = ?2",
-            params![cl, content_id],
-        )?;
-    }
-    if content_columns.contains("masterContentId")
-        && let Some(mci) = track.master_content_id
-    {
-        tx.execute(
-            "UPDATE content SET masterContentId = ?1 WHERE content_id = ?2",
-            params![mci, content_id],
-        )?;
-    }
-    if content_columns.contains("masterDbId")
-        && let Some(mdb) = track.master_db_id
-    {
-        tx.execute(
-            "UPDATE content SET masterDbId = ?1 WHERE content_id = ?2",
-            params![mdb, content_id],
-        )?;
-    }
-    if content_columns.contains("isHotCueAutoLoadOn") {
-        tx.execute(
-            "UPDATE content SET isHotCueAutoLoadOn = 1 WHERE content_id = ?1",
-            params![content_id],
-        )?;
-    }
-    if content_columns.contains("isKuvoDeliverStatusOn") {
-        tx.execute(
-            "UPDATE content SET isKuvoDeliverStatusOn = 1 WHERE content_id = ?1",
-            params![content_id],
-        )?;
-    }
-    if content_columns.contains("hasModified") {
-        tx.execute(
-            "UPDATE content SET hasModified = 0 WHERE content_id = ?1",
-            params![content_id],
-        )?;
-    }
-    // Rating and colour only when the library has one: the app doesn't set
-    // them, so a rekordbox row's own values stay (and match its PDB row).
-    if content_columns.contains("rating")
-        && let Some(rating) = track.rating
-    {
-        tx.execute(
-            "UPDATE content SET rating = ?1 WHERE content_id = ?2",
-            params![rating, content_id],
-        )?;
-    }
-    if content_columns.contains("djPlayCount") {
-        tx.execute(
-            "UPDATE content SET djPlayCount = ?1 WHERE content_id = ?2",
-            params![track.dj_play_count.unwrap_or(0), content_id],
-        )?;
-    }
-    if content_columns.contains("color_id")
-        && let Some(color_id) = track.color_id
-    {
-        tx.execute(
-            "UPDATE content SET color_id = ?1 WHERE content_id = ?2",
-            params![color_id, content_id],
-        )?;
-    }
-    if content_columns.contains("artist_id_lyricist") {
-        tx.execute(
-            "UPDATE content SET artist_id_lyricist = ?1 WHERE content_id = ?2",
-            params![track.artist_id_lyricist.unwrap_or(0), content_id],
-        )?;
-    }
-    if content_columns.contains("artist_id_originalArtist") {
-        tx.execute(
-            "UPDATE content SET artist_id_originalArtist = ?1 WHERE content_id = ?2",
-            params![track.artist_id_original_artist.map(i64::from), content_id],
-        )?;
-    }
-    if content_columns.contains("artist_id_remixer") {
-        tx.execute(
-            "UPDATE content SET artist_id_remixer = ?1 WHERE content_id = ?2",
-            params![track.artist_id_remixer.map(i64::from), content_id],
-        )?;
-    }
-    if content_columns.contains("artist_id_composer") {
-        tx.execute(
-            "UPDATE content SET artist_id_composer = ?1 WHERE content_id = ?2",
-            params![track.artist_id_composer.map(i64::from), content_id],
-        )?;
-    }
-    // By name, as the PDB row is: the library's `genre_id` is never set, so
-    // writing it would clear the genre the PDB keeps.
-    if content_columns.contains("genre_id")
-        && let Some(genre_name) = track.genre.as_deref().filter(|v| !v.trim().is_empty())
-        && let Some(genre_id) = crate::edb::find_or_insert_genre(tx, genre_name)?
-    {
-        tx.execute(
-            "UPDATE content SET genre_id = ?1 WHERE content_id = ?2",
-            params![genre_id, content_id],
-        )?;
-    }
-    if content_columns.contains("label_id") {
-        tx.execute(
-            "UPDATE content SET label_id = ?1 WHERE content_id = ?2",
-            params![track.label_id.map(i64::from), content_id],
-        )?;
-    }
-    if content_columns.contains("kuvoDeliveryComment") {
-        let kuvo_delivery_comment = track
-            .kuvo_delivery_comment
-            .as_deref()
-            .map(|value| sanitize_metadata(value).into_owned())
-            .unwrap_or_default();
-        tx.execute(
-            "UPDATE content SET kuvoDeliveryComment = ?1 WHERE content_id = ?2",
-            params![kuvo_delivery_comment, content_id],
-        )?;
-    }
-    Ok(())
+    let assignments = changes
+        .iter()
+        .enumerate()
+        .map(|(i, (column, _))| format!("\"{column}\" = ?{}", i + 2))
+        .collect::<Vec<_>>()
+        .join(", ");
+    let mut values: Vec<Value> = vec![Value::Integer(content_id)];
+    values.extend(changes.into_iter().map(|(_, value)| value));
+    tx.execute(
+        &format!("UPDATE content SET {assignments} WHERE content_id = ?1"),
+        rusqlite::params_from_iter(values),
+    )?;
+    Ok(true)
 }

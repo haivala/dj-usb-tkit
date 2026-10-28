@@ -72,7 +72,7 @@ pub(super) fn apply_pdb_header_compatibility_repair(
 /// True when the PDB holds tracks but its tt=19 page does not match them
 /// and the eDB's `property` row: still the untouched init template (older
 /// players count 0 songs), or a ring whose newest id is not the track count
-/// or whose date, version, name or color is not the eDB's (see
+/// or whose name, color or version differs (see
 /// [`crate::pdb_writer::t19_sync_target`]).
 pub(in crate::service) fn detect_pdb_t19_template_state(
     pdb_path: &Path,
@@ -1291,6 +1291,9 @@ pub(crate) fn track_row_data_from_reader_row(
     row: &crate::pdb_reader::PdbTrackRow,
 ) -> PdbTrackRowData {
     PdbTrackRowData {
+        composer_id: row.composer_id,
+        label_id: row.label_id,
+        remixer_id: row.remixer_id,
         header_flags_u32: None,
         content_link: row.content_link,
         sample_rate_hz: row.sample_rate_hz,

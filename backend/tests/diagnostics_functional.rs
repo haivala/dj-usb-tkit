@@ -1719,6 +1719,181 @@ fn strict_repair_carries_the_edb_rating_and_colour_into_the_pdb() {
     assert_eq!(edb, (3, 5), "the eDB keeps its values");
 }
 
+/// Drop the eDB membership of `playlist_name`, which makes the playlist
+/// fail strict parity while every track row stays.
+fn drop_edb_membership(usb: &Path, playlist_name: &str) {
+    let conn = open_edb(&vendor_db_dir(usb).join("exportLibrary.db"));
+    conn.execute(
+        "DELETE FROM playlist_content WHERE playlist_id IN \
+         (SELECT playlist_id FROM playlist WHERE name = ?1)",
+        [playlist_name],
+    )
+    .expect("delete playlist_content rows");
+}
+
+/// Every column of every eDB `content` row, as text, by content_id.
+fn edb_content_rows(usb: &Path) -> Vec<Vec<String>> {
+    let conn = open_edb(&vendor_db_dir(usb).join("exportLibrary.db"));
+    let mut stmt = conn
+        .prepare("SELECT * FROM content ORDER BY content_id")
+        .expect("prepare content");
+    let n = stmt.column_count();
+    stmt.query_map([], |row| {
+        (0..n)
+            .map(|i| {
+                Ok(match row.get::<_, rusqlite::types::Value>(i)? {
+                    rusqlite::types::Value::Null => "NULL".to_string(),
+                    rusqlite::types::Value::Integer(v) => v.to_string(),
+                    rusqlite::types::Value::Real(v) => v.to_string(),
+                    rusqlite::types::Value::Text(v) => format!("'{v}'"),
+                    rusqlite::types::Value::Blob(v) => format!("{v:?}"),
+                })
+            })
+            .collect::<Result<Vec<_>, _>>()
+    })
+    .expect("query content")
+    .collect::<Result<Vec<_>, _>>()
+    .expect("collect content")
+}
+
+fn pdb_track_row_bytes(usb: &Path) -> Vec<(u32, String)> {
+    let mut rows = backend::pdb_reader::parse_pdb_track_debug_rows(
+        &vendor_db_dir(usb).join("export.pdb"),
+    )
+    .expect("track debug rows")
+    .into_iter()
+    .map(|row| (row.id, row.raw_hex))
+    .collect::<Vec<_>>();
+    rows.sort();
+    rows
+}
+
+fn apply_strict_repair(backend: &BackendCommands, usb: &Path) -> backend::models::RepairUsbDiagnosticsData {
+    let repair = backend.repair_usb_diagnostics(RepairUsbDiagnosticsRequest {
+        usb_root: Some(usb.to_string_lossy().to_string()),
+        apply: true,
+        selected_fix_ids: vec!["upgrade_export_data_to_strict_parity".to_string()],
+    });
+    assert!(repair.ok, "repair failed: {repair:?}");
+    repair.data.expect("repair data")
+}
+
+#[test]
+fn strict_repair_writes_nothing_the_merge_does_not_change() {
+    let (_root, backend, usb, playlist_name) = setup_clean_strict_parity_fixture();
+    // Values the export's own bookkeeping would rewrite: the repair must
+    // leave them, and every unchanged PDB row, as they are.
+    let conn = open_edb(&vendor_db_dir(&usb).join("exportLibrary.db"));
+    conn.execute(
+        "UPDATE content SET cueUpdateCount = 7, analysisDataUpdateCount = 8, \
+         informationUpdateCount = 9, hasModified = 1",
+        [],
+    )
+    .expect("seed counters");
+    drop(conn);
+    let content_before = edb_content_rows(&usb);
+    let pdb_rows_before = pdb_track_row_bytes(&usb);
+    drop_edb_membership(&usb, &playlist_name);
+
+    let data = apply_strict_repair(&backend, &usb);
+    assert!(data.failed_fixes.is_empty(), "{:#?}", data.failed_fixes);
+    assert!(
+        data.applied_fixes
+            .iter()
+            .any(|line| line.contains("merged 1 playlist(s)")
+                && line.contains("eDB: 0 row(s) added, 0 changed")
+                && line.contains("PDB: 0 track(s) added, 0 changed")),
+        "{:#?}",
+        data.applied_fixes
+    );
+    assert_eq!(edb_content_rows(&usb), content_before, "eDB content rows untouched");
+    assert_eq!(pdb_track_row_bytes(&usb), pdb_rows_before, "PDB track rows byte-identical");
+    assert_eq!(edb_playlist_member_count(&usb, &playlist_name), 1);
+    let failing = failing_parity_checks(&backend, &usb);
+    assert!(failing.is_empty(), "{failing:#?}");
+}
+
+#[test]
+fn strict_repair_carries_pdb_only_fields_into_a_new_edb_row() {
+    let (_root, backend, usb, playlist_name) = setup_clean_strict_parity_fixture();
+    let vendor_db = vendor_db_dir(&usb).join("exportLibrary.db");
+    let pdb_path = vendor_db_dir(&usb).join("export.pdb");
+
+    // eDB-only values first: the repair carries them into the PDB.
+    let conn = open_edb(&vendor_db);
+    conn.execute(
+        "UPDATE content SET djComment = 'Peak time', isrc = 'GBXXX2400001', \
+         dateAdded = '2021-02-03'",
+        [],
+    )
+    .expect("seed eDB values");
+    drop(conn);
+    drop_edb_membership(&usb, &playlist_name);
+    let data = apply_strict_repair(&backend, &usb);
+    assert!(data.failed_fixes.is_empty(), "{:#?}", data.failed_fixes);
+    let parsed = parse_pdb(&pdb_path).expect("parse pdb");
+    assert_eq!(parsed.tracks.len(), 1);
+    assert_eq!(parsed.tracks[0].dj_comment.as_deref(), Some("Peak time"));
+    assert_eq!(parsed.tracks[0].isrc.as_deref(), Some("GBXXX2400001"));
+    assert_eq!(parsed.tracks[0].date_added.as_deref(), Some("2021-02-03"));
+
+    // Then the eDB loses the track: the new row takes the PDB's values.
+    let conn = open_edb(&vendor_db);
+    conn.execute("DELETE FROM playlist_content", []).expect("delete links");
+    conn.execute("DELETE FROM content", []).expect("delete content");
+    drop(conn);
+    let data = apply_strict_repair(&backend, &usb);
+    assert!(data.failed_fixes.is_empty(), "{:#?}", data.failed_fixes);
+    let conn = open_edb(&vendor_db);
+    let row: (String, String, String) = conn
+        .query_row("SELECT djComment, isrc, dateAdded FROM content", [], |row| {
+            Ok((row.get(0)?, row.get(1)?, row.get(2)?))
+        })
+        .expect("new eDB row");
+    assert_eq!(
+        row,
+        (
+            "Peak time".to_string(),
+            "GBXXX2400001".to_string(),
+            "2021-02-03".to_string()
+        )
+    );
+    drop(conn);
+    assert_eq!(edb_playlist_member_count(&usb, &playlist_name), 1);
+    assert_one_repair_pass_clears_parity(&backend, &usb);
+}
+
+#[test]
+fn strict_repair_failure_leaves_both_databases_as_they_were() {
+    let (_root, backend, usb, playlist_name) = setup_clean_strict_parity_fixture();
+    let vendor_db = vendor_db_dir(&usb).join("exportLibrary.db");
+    let pdb_path = vendor_db_dir(&usb).join("export.pdb");
+    // The eDB lost the track, and refuses the repair's insert.
+    let conn = open_edb(&vendor_db);
+    conn.execute("DELETE FROM playlist_content", []).expect("delete links");
+    conn.execute("DELETE FROM content", []).expect("delete content");
+    conn.execute_batch(
+        "CREATE TRIGGER refuse_content BEFORE INSERT ON content \
+         BEGIN SELECT RAISE(ABORT, 'forced failure'); END;",
+    )
+    .expect("create trigger");
+    drop(conn);
+    let pdb_before = fs::read(&pdb_path).expect("read pdb");
+    let content_before = edb_content_rows(&usb);
+
+    let data = apply_strict_repair(&backend, &usb);
+    assert!(
+        data.failed_fixes
+            .iter()
+            .any(|line| line.contains("Upgrade Export Data To Strict Parity failed")),
+        "{:#?}",
+        data
+    );
+    assert_eq!(fs::read(&pdb_path).expect("read pdb"), pdb_before, "PDB untouched");
+    assert_eq!(edb_content_rows(&usb), content_before, "eDB untouched");
+    assert_eq!(edb_playlist_member_count(&usb, &playlist_name), 0);
+}
+
 #[test]
 fn strict_repair_avoids_playlist_id_collisions_with_existing_pdb_folders() {
     let (_root, backend, usb, _target_playlist, control_playlist) =
@@ -2087,7 +2262,7 @@ fn strict_repair_chooses_richer_side_when_membership_matches_but_metadata_differ
 }
 
 #[test]
-fn strict_repair_copies_exact_source_artwork_paths_in_both_directions() {
+fn strict_repair_copies_exact_source_artwork_paths_where_one_side_lacks_artwork() {
     // PDB-primary case: thin eDB artwork linkage and verify strict repair restores
     // the exact PDB artwork path instead of deriving a new one.
     let (_root_pdb, backend_pdb, usb_pdb, playlist_pdb) =
@@ -2131,10 +2306,13 @@ fn strict_repair_copies_exact_source_artwork_paths_in_both_directions() {
         "PDB-primary strict repair must copy the exact PDB artwork path into eDB"
     );
 
-    // eDB-primary case: mutate eDB image path in-place to a same-length alternative and
-    // verify strict repair patches the PDB artwork dictionary row to that exact path.
+    // Both sides have artwork, at different paths: parity only needs both to
+    // resolve, so the PDB keeps its own. Then the PDB row loses its artwork:
+    // the repair fills in the exact eDB path.
     let (_root_edb, backend_edb, usb_edb, playlist_edb) =
         setup_clean_strict_parity_fixture_with_artwork();
+    let (_pdb_track_id, _pdb_artwork_id, original_pdb_artwork_path) =
+        first_playlist_pdb_artwork(&usb_edb, &playlist_edb);
     let vendor_db_edb = vendor_db_dir(&usb_edb).join("exportLibrary.db");
     let conn_edb = open_edb(&vendor_db_edb);
     let (_content_id_edb, image_id_edb, original_edb_artwork_path) =
@@ -2147,11 +2325,6 @@ fn strict_repair_copies_exact_source_artwork_paths_in_both_directions() {
     assert_ne!(
         replacement_edb_artwork_path, original_edb_artwork_path,
         "expected artwork path mutation target"
-    );
-    assert_eq!(
-        replacement_edb_artwork_path.len(),
-        original_edb_artwork_path.len(),
-        "PDB artwork patch helper currently requires same-length replacements"
     );
     conn_edb
         .execute(
@@ -2173,12 +2346,54 @@ fn strict_repair_copies_exact_source_artwork_paths_in_both_directions() {
         repair_edb.ok,
         "eDB-primary artwork repair failed: {repair_edb:?}"
     );
-    let (_track_id_after, _artwork_id_after, repaired_pdb_artwork_path) =
+    let (_track_id_after, _artwork_id_after, kept_pdb_artwork_path) =
         first_playlist_pdb_artwork(&usb_edb, &playlist_edb);
     assert_eq!(
-        repaired_pdb_artwork_path, replacement_edb_artwork_path,
-        "eDB-primary strict repair must copy the exact eDB artwork path into PDB"
+        kept_pdb_artwork_path, original_pdb_artwork_path,
+        "a PDB row that has artwork keeps it"
     );
+    let (_, _, kept_edb_artwork_path) = first_playlist_edb_artwork(&usb_edb, &playlist_edb);
+    assert_eq!(kept_edb_artwork_path, replacement_edb_artwork_path, "the eDB keeps its own");
+
+    clear_first_pdb_track_artwork(&pdb_path);
+    let repair_edb =
+        backend_edb.repair_usb_diagnostics(backend::models::RepairUsbDiagnosticsRequest {
+            usb_root: Some(usb_edb.to_string_lossy().to_string()),
+            apply: true,
+            selected_fix_ids: vec!["upgrade_export_data_to_strict_parity".to_string()],
+        });
+    assert!(repair_edb.ok, "artwork fill repair failed: {repair_edb:?}");
+    let (_track_id_after, _artwork_id_after, filled_pdb_artwork_path) =
+        first_playlist_pdb_artwork(&usb_edb, &playlist_edb);
+    assert_eq!(
+        filled_pdb_artwork_path, replacement_edb_artwork_path,
+        "a PDB row without artwork takes the exact eDB artwork path"
+    );
+}
+
+/// Zero the artwork id (row offset 0x1c) of the first PDB track row.
+fn clear_first_pdb_track_artwork(pdb_path: &Path) {
+    let mut bytes = fs::read(pdb_path).expect("read export pdb");
+    let len_page = u32::from_le_bytes(bytes[4..8].try_into().expect("len_page bytes")) as usize;
+    let mut mutated = false;
+    for page_idx in 1..(bytes.len() / len_page) {
+        let start = page_idx * len_page;
+        let page_index =
+            u32::from_le_bytes(bytes[start + 4..start + 8].try_into().expect("page index"));
+        let table_type =
+            u32::from_le_bytes(bytes[start + 8..start + 12].try_into().expect("table type"));
+        let used_s =
+            u16::from_le_bytes(bytes[start + 30..start + 32].try_into().expect("used_s")) as usize;
+        if page_index == 0 || table_type != 0 || used_s == 0 {
+            continue;
+        }
+        let row_start = start + 40;
+        bytes[row_start + 0x1c..row_start + 0x20].copy_from_slice(&0u32.to_le_bytes());
+        mutated = true;
+        break;
+    }
+    assert!(mutated, "expected to mutate one PDB track row");
+    fs::write(pdb_path, bytes).expect("write PDB without artwork");
 }
 
 #[test]
@@ -4650,6 +4865,29 @@ fn repair_adds_numbered_unindexed_audio_that_is_not_a_copy() {
         sibling.exists(),
         "a file that is not a copy is never deleted"
     );
+}
+
+#[test]
+fn strict_repair_and_unindexed_audio_fix_clear_parity_in_one_pass() {
+    // Both fixes write both databases: each must build on what the other
+    // wrote (staged copies), and the run writes both back once.
+    let (_root, backend, usb, playlist_name) = setup_clean_strict_parity_fixture();
+    let original = find_contents_audio_file(&usb);
+    fs::copy(
+        fixture_audio_path("embedded/track_embedded.mp3"),
+        numbered_sibling(&original),
+    )
+    .expect("copy other audio");
+    drop_edb_membership(&usb, &playlist_name);
+    let ids = proposed_fix_ids(&backend, &usb);
+    for id in ["upgrade_export_data_to_strict_parity", "add_unindexed_audio_playlist"] {
+        assert!(ids.iter().any(|p| p == id), "{id} not proposed: {ids:?}");
+    }
+
+    assert_one_repair_pass_clears_parity(&backend, &usb);
+    assert_eq!(edb_playlist_member_count(&usb, &playlist_name), 1);
+    let parsed = parse_pdb(&vendor_db_dir(&usb).join("export.pdb")).expect("parse pdb");
+    assert_eq!(parsed.tracks.len(), 2, "the unindexed file joined the PDB");
 }
 
 /// Parity report checks that are not Pass, as "label: detail".
