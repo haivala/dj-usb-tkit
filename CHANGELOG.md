@@ -37,7 +37,7 @@
   - **Fix (CRITICAL):** ...
 -->
 
-## Unreleased
+## 0.4.9
 
 **Severity:** critical — see item(s) marked **(CRITICAL)** below.
 
