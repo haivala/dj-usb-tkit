@@ -37,7 +37,9 @@
   - **Fix (CRITICAL):** ...
 -->
 
-## Unreleased
+## 0.4.10
+
+**Severity:** feature
 
 - **Fix:** When Repair can't save the repaired databases to the USB, it now saves neither: if the PDB
   was already written, the previous PDB is put back. The fixes are then reported as failed instead
