@@ -1028,11 +1028,10 @@ pub(crate) fn build_pdb_for_playlists(
                     };
                     if let Some(artist_name) = resolved_artist_name {
                         let artist_key = canonicalize_playlist_name(artist_name);
-                        let aid = if let Some(id) = still_named(
-                            existing_track.artist_id,
-                            &artist_names,
-                            |n| canonicalize_playlist_name(n) == artist_key,
-                        ) {
+                        let aid = if let Some(id) =
+                            still_named(existing_track.artist_id, &artist_names, |n| {
+                                canonicalize_playlist_name(n) == artist_key
+                            }) {
                             id
                         } else if let Some(id) = artist_id_by_name.get(&artist_key).copied() {
                             id
@@ -1055,11 +1054,10 @@ pub(crate) fn build_pdb_for_playlists(
                         .or_else(|| edb_album_by_path.get(&path_key).map(String::as_str))
                     {
                         let album_key = canonicalize_playlist_name(album);
-                        let aid = if let Some(id) = still_named(
-                            existing_track.album_id,
-                            &album_names,
-                            |n| canonicalize_playlist_name(n) == album_key,
-                        ) {
+                        let aid = if let Some(id) =
+                            still_named(existing_track.album_id, &album_names, |n| {
+                                canonicalize_playlist_name(n) == album_key
+                            }) {
                             id
                         } else if let Some(id) = album_id_by_name.get(&album_key).copied() {
                             id
@@ -1084,11 +1082,10 @@ pub(crate) fn build_pdb_for_playlists(
                         .or_else(|| edb_key_by_path.get(&path_key).cloned());
                     if let Some(key_name) = resolved_key_name.as_deref() {
                         let key_lookup = normalize_pdb_key_name(key_name);
-                        let kid = if let Some(id) = still_named(
-                            existing_track.key_id,
-                            &key_names,
-                            |n| key_names_match(n, key_name),
-                        ) {
+                        let kid = if let Some(id) =
+                            still_named(existing_track.key_id, &key_names, |n| {
+                                key_names_match(n, key_name)
+                            }) {
                             id
                         } else if let Some(id) = resolve_key_id_by_name(&key_id_by_name, key_name) {
                             id
@@ -1104,13 +1101,14 @@ pub(crate) fn build_pdb_for_playlists(
                         };
                         existing_track.key_id = kid;
                     }
-                    if let Some(genre_name) = track.genre.as_deref().filter(|v| !v.trim().is_empty()) {
+                    if let Some(genre_name) =
+                        track.genre.as_deref().filter(|v| !v.trim().is_empty())
+                    {
                         let genre_key = canonicalize_playlist_name(genre_name);
-                        let gid = if let Some(id) = still_named(
-                            existing_track.genre_id,
-                            &genre_names,
-                            |n| canonicalize_playlist_name(n) == genre_key,
-                        ) {
+                        let gid = if let Some(id) =
+                            still_named(existing_track.genre_id, &genre_names, |n| {
+                                canonicalize_playlist_name(n) == genre_key
+                            }) {
                             id
                         } else if let Some(id) = genre_id_by_name.get(&genre_key).copied() {
                             id
@@ -1139,14 +1137,11 @@ pub(crate) fn build_pdb_for_playlists(
                         // Parity needs artwork to resolve on both sides, not the
                         // same file: a track not exported from the library
                         // keeps the artwork its row already has.
-                        let aid = if let Some(id) = still_named(
-                            existing_track.artwork_id,
-                            &artwork_paths,
-                            |p| {
+                        let aid = if let Some(id) =
+                            still_named(existing_track.artwork_id, &artwork_paths, |p| {
                                 !track.from_library
                                     || canonicalize_artwork_path_lookup(p) == artwork_key
-                            },
-                        ) {
+                            }) {
                             id
                         } else if let Some(id) = artwork_id_by_path.get(&artwork_key).copied() {
                             id
@@ -1232,30 +1227,51 @@ pub(crate) fn build_pdb_for_playlists(
                     }
                     if let Some(name) = named(&track.label) {
                         let key = canonicalize_playlist_name(&name);
-                        existing_track.label_id = still_named(existing_track.label_id, &label_names, |n| {
-                            canonicalize_playlist_name(n) == key
-                        })
-                        .unwrap_or_else(|| {
-                            dict_id_for(&name, &mut label_id_by_name, &mut all_labels, &mut next_label_id, label_row)
-                        });
+                        existing_track.label_id =
+                            still_named(existing_track.label_id, &label_names, |n| {
+                                canonicalize_playlist_name(n) == key
+                            })
+                            .unwrap_or_else(|| {
+                                dict_id_for(
+                                    &name,
+                                    &mut label_id_by_name,
+                                    &mut all_labels,
+                                    &mut next_label_id,
+                                    label_row,
+                                )
+                            });
                     }
                     if let Some(name) = named(&track.remixer) {
                         let key = canonicalize_playlist_name(&name);
-                        existing_track.remixer_id = still_named(existing_track.remixer_id, &artist_names, |n| {
-                            canonicalize_playlist_name(n) == key
-                        })
-                        .unwrap_or_else(|| {
-                            dict_id_for(&name, &mut artist_id_by_name, &mut all_artists, &mut next_artist_id, artist_row)
-                        });
+                        existing_track.remixer_id =
+                            still_named(existing_track.remixer_id, &artist_names, |n| {
+                                canonicalize_playlist_name(n) == key
+                            })
+                            .unwrap_or_else(|| {
+                                dict_id_for(
+                                    &name,
+                                    &mut artist_id_by_name,
+                                    &mut all_artists,
+                                    &mut next_artist_id,
+                                    artist_row,
+                                )
+                            });
                     }
                     if let Some(name) = named(&track.composer) {
                         let key = canonicalize_playlist_name(&name);
-                        existing_track.composer_id = still_named(existing_track.composer_id, &artist_names, |n| {
-                            canonicalize_playlist_name(n) == key
-                        })
-                        .unwrap_or_else(|| {
-                            dict_id_for(&name, &mut artist_id_by_name, &mut all_artists, &mut next_artist_id, artist_row)
-                        });
+                        existing_track.composer_id =
+                            still_named(existing_track.composer_id, &artist_names, |n| {
+                                canonicalize_playlist_name(n) == key
+                            })
+                            .unwrap_or_else(|| {
+                                dict_id_for(
+                                    &name,
+                                    &mut artist_id_by_name,
+                                    &mut all_artists,
+                                    &mut next_artist_id,
+                                    artist_row,
+                                )
+                            });
                     }
                     if let Some(ref wp) = track.waveform_path {
                         existing_track.anlz_path =
@@ -1442,7 +1458,9 @@ pub(crate) fn build_pdb_for_playlists(
                         .map(|ms| duration_ms_to_seconds(ms) as u32),
                     file_type: track.file_type.and_then(|v| u16::try_from(v).ok()),
                     isrc: track.isrc.clone(),
-                    date_added: date_added.clone().or_else(|| Some(export_date_added.clone())),
+                    date_added: date_added
+                        .clone()
+                        .or_else(|| Some(export_date_added.clone())),
                     release_date: release_date.clone(),
                     dj_comment: track.comment.clone(),
                     file_name: Some(content_file_name(&track.exported_path)),
@@ -1582,7 +1600,9 @@ pub(crate) fn build_pdb_for_playlists(
         )? {
             Some((mut additive_bytes, summary)) => {
                 let duplicate_entries_removed = if remove_duplicate_entries {
-                    crate::pdb_writer::remove_duplicate_playlist_entries_inplace(&mut additive_bytes)
+                    crate::pdb_writer::remove_duplicate_playlist_entries_inplace(
+                        &mut additive_bytes,
+                    )
                 } else {
                     0
                 };

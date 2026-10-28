@@ -18,11 +18,10 @@ use crate::models::{
     SaveUsbTrackMetadataEditsRequest, SharedValue, TrackMetadataValues, TracksMetadataSummary,
     UsbMetadataEditResult, UsbMetadataEditTrack, WarningEntry,
 };
+use crate::pdb_reader::pdb_page_size;
 
 use super::anlz::atomic_write_bytes;
-use super::cues::{
-    UsbLocalTrackHint, mark_track_edited_tx, pdb_page_size, pdb_track_by_media_path,
-};
+use super::cues::{UsbLocalTrackHint, mark_track_edited_tx, pdb_track_by_media_path};
 use super::export_helpers::{PdbLayoutProfile, load_table_columns_tx};
 use super::usb_utils::resolve_usb_root;
 use super::{BackendService, now};

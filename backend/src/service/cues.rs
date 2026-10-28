@@ -30,6 +30,7 @@ use crate::models::{
     SaveUsbTrackAnalysisEditsData, SaveUsbTrackAnalysisEditsRequest, TrackCue, TrackCueInput,
     TrackDetail, UsbTrackAnalysisDetail, WarningEntry,
 };
+use crate::pdb_reader::pdb_page_size;
 
 use crate::edb::{find_content_id_by_path, find_key_id_by_name, open_edb_rw};
 
@@ -211,15 +212,6 @@ pub fn collapse_anlz_cues(bytes: &[u8]) -> Vec<TrackCue> {
         });
     }
     out
-}
-
-/// The page size from a PDB file header.
-pub(super) fn pdb_page_size(bytes: &[u8]) -> BackendResult<usize> {
-    bytes
-        .get(4..8)
-        .and_then(|b| b.try_into().ok())
-        .map(|b: [u8; 4]| u32::from_le_bytes(b) as usize)
-        .ok_or_else(|| BackendError::Validation("PDB too small to read page size".into()))
 }
 
 /// The local track whose content fingerprint (`content_fingerprint_key`:

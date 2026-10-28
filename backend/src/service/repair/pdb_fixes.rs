@@ -178,15 +178,7 @@ pub(super) fn apply_pdb_sentinel_u5_repair(
     }
     let pdb_path = usb_staging::stage_pdb(usb_root)?;
     let mut bytes = std::fs::read(&pdb_path)?;
-    let Some(page_size) = bytes
-        .get(4..8)
-        .and_then(|b| b.try_into().ok())
-        .map(|b: [u8; 4]| u32::from_le_bytes(b) as usize)
-    else {
-        return Err(BackendError::Validation(
-            "PDB too small to read page size".into(),
-        ));
-    };
+    let page_size = pdb_page_size(&bytes)?;
     let mut patched = 0usize;
     for page in pages {
         let off = page.page_index * page_size;
@@ -291,15 +283,7 @@ pub(super) fn apply_pdb_wrong_page_flags_repair(
     }
     let pdb_path = usb_staging::stage_pdb(usb_root)?;
     let mut bytes = std::fs::read(&pdb_path)?;
-    let Some(page_size) = bytes
-        .get(4..8)
-        .and_then(|b| b.try_into().ok())
-        .map(|b: [u8; 4]| u32::from_le_bytes(b) as usize)
-    else {
-        return Err(BackendError::Validation(
-            "PDB too small to read page size".into(),
-        ));
-    };
+    let page_size = pdb_page_size(&bytes)?;
     let mut patched = 0usize;
     for page in pages {
         let off = page.page_index * page_size + 0x1b;
@@ -404,15 +388,7 @@ pub(super) fn apply_pdb_wrong_history_page_shape_repair(
     }
     let pdb_path = usb_staging::stage_pdb(usb_root)?;
     let mut bytes = std::fs::read(&pdb_path)?;
-    let Some(page_size) = bytes
-        .get(4..8)
-        .and_then(|b| b.try_into().ok())
-        .map(|b: [u8; 4]| u32::from_le_bytes(b) as usize)
-    else {
-        return Err(BackendError::Validation(
-            "PDB too small to read page size".into(),
-        ));
-    };
+    let page_size = pdb_page_size(&bytes)?;
     let mut patched = 0usize;
     for page in pages {
         let off = page.page_index * page_size;
@@ -752,15 +728,7 @@ pub(super) fn apply_pdb_t00_multipage_active_repair(
     }
     let pdb_path = usb_staging::stage_pdb(usb_root)?;
     let mut bytes = std::fs::read(&pdb_path)?;
-    let Some(page_size) = bytes
-        .get(4..8)
-        .and_then(|b| b.try_into().ok())
-        .map(|b: [u8; 4]| u32::from_le_bytes(b) as usize)
-    else {
-        return Err(BackendError::Validation(
-            "PDB too small to read page size".into(),
-        ));
-    };
+    let page_size = pdb_page_size(&bytes)?;
     let mut patched = 0usize;
     for page in pages {
         let off = page.page_index * page_size;
@@ -867,15 +835,7 @@ pub(super) fn apply_pdb_ec_data_page_conflict_repair(
     }
     let pdb_path = usb_staging::stage_pdb(usb_root)?;
     let mut bytes = std::fs::read(&pdb_path)?;
-    let Some(page_size) = bytes
-        .get(4..8)
-        .and_then(|b| b.try_into().ok())
-        .map(|b: [u8; 4]| u32::from_le_bytes(b) as usize)
-    else {
-        return Err(BackendError::Validation(
-            "PDB too small to read page size".into(),
-        ));
-    };
+    let page_size = pdb_page_size(&bytes)?;
     let num_tables = bytes
         .get(8..12)
         .and_then(|b| b.try_into().ok())
@@ -1353,15 +1313,7 @@ fn realign_track_rows_in_bytes(bytes: &mut Vec<u8>, ids: &[u32]) -> BackendResul
     if ids.is_empty() {
         return Ok(0);
     }
-    let Some(page_size) = bytes
-        .get(4..8)
-        .and_then(|b| b.try_into().ok())
-        .map(|b: [u8; 4]| u32::from_le_bytes(b) as usize)
-    else {
-        return Err(BackendError::Validation(
-            "PDB too small to read page size".into(),
-        ));
-    };
+    let page_size = pdb_page_size(bytes)?;
     let parsed = crate::pdb_reader::parse_pdb_bytes(bytes)?;
     let by_id: HashMap<u32, &crate::pdb_reader::PdbTrackRow> =
         parsed.tracks.iter().map(|t| (t.id, t)).collect();
@@ -1493,15 +1445,7 @@ fn reencode_dictionary_rows_in_bytes(
     if ids.is_empty() {
         return Ok(0);
     }
-    let Some(page_size) = bytes
-        .get(4..8)
-        .and_then(|b| b.try_into().ok())
-        .map(|b: [u8; 4]| u32::from_le_bytes(b) as usize)
-    else {
-        return Err(BackendError::Validation(
-            "PDB too small to read page size".into(),
-        ));
-    };
+    let page_size = pdb_page_size(bytes)?;
     let target_ids: HashSet<u32> = ids.iter().copied().collect();
     let (_ec, first, last) =
         crate::utils::table_ptr_fields(bytes, table_type).ok_or_else(|| {
@@ -1589,15 +1533,7 @@ pub(super) fn apply_pdb_wrong_track_u5_repair(
     }
     let pdb_path = usb_staging::stage_pdb(usb_root)?;
     let mut bytes = std::fs::read(&pdb_path)?;
-    let Some(page_size) = bytes
-        .get(4..8)
-        .and_then(|b| b.try_into().ok())
-        .map(|b: [u8; 4]| u32::from_le_bytes(b) as usize)
-    else {
-        return Err(BackendError::Validation(
-            "PDB too small to read page size".into(),
-        ));
-    };
+    let page_size = pdb_page_size(&bytes)?;
     let mut patched = 0usize;
     for page in pages {
         let off = page.page_index * page_size;
@@ -1792,15 +1728,7 @@ pub(super) fn apply_pdb_wrong_playlist_tree_shape_repair(
     }
     let pdb_path = usb_staging::stage_pdb(usb_root)?;
     let mut bytes = std::fs::read(&pdb_path)?;
-    let Some(page_size) = bytes
-        .get(4..8)
-        .and_then(|b| b.try_into().ok())
-        .map(|b: [u8; 4]| u32::from_le_bytes(b) as usize)
-    else {
-        return Err(BackendError::Validation(
-            "PDB too small to read page size".into(),
-        ));
-    };
+    let page_size = pdb_page_size(&bytes)?;
     let mut patched = 0usize;
     for page in pages {
         let off = page.page_index * page_size;
@@ -1960,15 +1888,7 @@ pub(super) fn apply_pdb_stale_sentinel_btree_repair(
     }
     let pdb_path = usb_staging::stage_pdb(usb_root)?;
     let mut bytes = std::fs::read(&pdb_path)?;
-    let Some(page_size) = bytes
-        .get(4..8)
-        .and_then(|b| b.try_into().ok())
-        .map(|b: [u8; 4]| u32::from_le_bytes(b) as usize)
-    else {
-        return Err(BackendError::Validation(
-            "PDB too small to read page size".into(),
-        ));
-    };
+    let page_size = pdb_page_size(&bytes)?;
     const SENTINEL_EMPTY_ENTRY: u32 = 0x1fff_fff8;
     const SENTINEL_TAIL_ZERO_BYTES: usize = 20;
     let total_physical = bytes.len() / page_size;
@@ -2045,15 +1965,7 @@ pub(super) fn apply_pdb_tombstoned_playlist_tree_id_repair(
     }
     let pdb_path = usb_staging::stage_pdb(usb_root)?;
     let mut bytes = std::fs::read(&pdb_path)?;
-    let Some(page_size) = bytes
-        .get(4..8)
-        .and_then(|b| b.try_into().ok())
-        .map(|b: [u8; 4]| u32::from_le_bytes(b) as usize)
-    else {
-        return Err(BackendError::Validation(
-            "PDB too small to read page size".into(),
-        ));
-    };
+    let page_size = pdb_page_size(&bytes)?;
     let mut patched = 0usize;
     for item in items {
         let abs = item.page_index * page_size + item.id_field_offset;
@@ -2164,15 +2076,7 @@ pub(super) fn apply_pdb_zero_tranrf_repair(
     }
     let pdb_path = usb_staging::stage_pdb(usb_root)?;
     let mut bytes = std::fs::read(&pdb_path)?;
-    let Some(page_size) = bytes
-        .get(4..8)
-        .and_then(|b| b.try_into().ok())
-        .map(|b: [u8; 4]| u32::from_le_bytes(b) as usize)
-    else {
-        return Err(BackendError::Validation(
-            "PDB too small to read page size".into(),
-        ));
-    };
+    let page_size = pdb_page_size(&bytes)?;
     let mut patched = 0usize;
     for page in pages {
         let page_base = page.page_index * page_size;

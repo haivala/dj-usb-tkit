@@ -1336,7 +1336,6 @@ pub(crate) const T19_RING_SLOTS: usize = 96;
 /// a flags word whose byte 9 is the background color.
 const T19_DATE_OFFSET: usize = 12;
 
-
 /// What a tt=19 row carries: a date, a version string, the device name and
 /// byte 9 (the background color). The name and color follow the eDB's
 /// `deviceName` and `backGroundColorType`; the version is always
@@ -1654,10 +1653,9 @@ pub(crate) fn sync_t19_ring_page(
     // cannot do. Not reachable in production: the `initialize_usb` template
     // always pre-seeds one tt=19 data page (`seed_rb_initialized_history_shape`
     // in usb_utils.rs). Tests must mirror that pre-seeded page.
-    let page_idx = t19_only_data_page(bytes, page_size)
-        .ok_or_else(|| {
-            BackendError::Validation("t19 sync: table 19 has no single data page".into())
-        })?;
+    let page_idx = t19_only_data_page(bytes, page_size).ok_or_else(|| {
+        BackendError::Validation("t19 sync: table 19 has no single data page".into())
+    })?;
     let newest = u32::try_from(track_count)
         .map_err(|_| BackendError::Validation("t19 sync: track count overflows u32".into()))?;
     let rows = t19_ring_rows(property, newest);

@@ -136,14 +136,6 @@ pub(super) fn strict_repair_ordered_playlist_names(
     out
 }
 
-pub(super) fn pdb_page_size_from_bytes(bytes: &[u8]) -> Option<usize> {
-    bytes
-        .get(4..8)
-        .and_then(|raw| raw.try_into().ok())
-        .map(u32::from_le_bytes)
-        .and_then(|value| usize::try_from(value).ok())
-}
-
 pub(crate) fn restore_pdb_playlist_sort_orders(
     usb_root: &std::path::Path,
     desired_sort_by_id: &HashMap<u32, u32>,
@@ -156,12 +148,7 @@ pub(crate) fn restore_pdb_playlist_sort_orders(
         return Ok(0);
     }
     let mut bytes = std::fs::read(&pdb_path)?;
-    let page_size = pdb_page_size_from_bytes(&bytes).ok_or_else(|| {
-        BackendError::Validation(format!(
-            "PDB playlist order restore failed: cannot read page size from {}",
-            pdb_path.display()
-        ))
-    })?;
+    let page_size = pdb_page_size(&bytes)?;
     let patches = desired_sort_by_id
         .iter()
         .map(

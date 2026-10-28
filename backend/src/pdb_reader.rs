@@ -328,6 +328,13 @@ pub fn validate_pdb_page_conventions(bytes: &[u8]) -> Vec<PdbPageConventionMisma
     mismatches
 }
 
+/// The page size from a PDB file header.
+pub fn pdb_page_size(bytes: &[u8]) -> BackendResult<usize> {
+    crate::utils::read_u32_le_at(bytes, 4)
+        .map(|v| v as usize)
+        .ok_or_else(|| BackendError::Validation("PDB too small to read page size".into()))
+}
+
 /// Collect the `seq` (offset `0x10`) value from every non-sentinel,
 /// non-zeroed data page. Used by tests to assert that an export's
 /// transaction-commit counter actually varies across pages — player firmware

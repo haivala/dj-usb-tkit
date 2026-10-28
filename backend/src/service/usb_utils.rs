@@ -498,19 +498,7 @@ pub(crate) fn waveform_preview_candidates(path: &Path) -> Vec<PathBuf> {
 /// Extract the raw PWV4 payload from a desktop library ANLZ `.EXT` file (no conversion).
 /// Returns the 1200 × 6 byte payload, or None if the file/chunk is absent.
 pub(crate) fn read_pwv4_from_anlz(dat_path: &Path) -> Option<Vec<u8>> {
-    let base = dat_path.to_path_buf();
-    let ext_path = if base
-        .extension()
-        .and_then(|e| e.to_str())
-        .is_some_and(|e| e.eq_ignore_ascii_case("ext"))
-    {
-        base
-    } else {
-        base.with_extension("EXT")
-    };
-    let bytes = std::fs::read(&ext_path).ok()?;
-    let container = find_anlz_chunk_payload(&bytes, "PMAI").unwrap_or(&bytes);
-    find_anlz_chunk_payload(container, "PWV4").map(|p| p.to_vec())
+    read_ext_chunk(dat_path, "PWV4")
 }
 
 /// Extract the raw PWV5 colour-detail waveform payload from a desktop library
@@ -518,21 +506,24 @@ pub(crate) fn read_pwv4_from_anlz(dat_path: &Path) -> Option<Vec<u8>> {
 /// `R(3) | G(3) | B(3) | Height(5) | _(2)`. Entry count is duration-derived
 /// (`ceil(duration_s * 150) + 4`), so this can be tens of thousands of entries.
 pub(crate) fn read_pwv5_from_anlz(dat_path: &Path) -> Option<Vec<u8>> {
-    let base = dat_path.to_path_buf();
-    let ext_path = if base
+    read_ext_chunk(dat_path, "PWV5").filter(|p| p.len() >= 4)
+}
+
+/// The raw `tag` chunk payload from the `.EXT` sibling of `dat_path` (or
+/// `dat_path` itself when it already is the `.EXT`).
+fn read_ext_chunk(dat_path: &Path, tag: &str) -> Option<Vec<u8>> {
+    let ext_path = if dat_path
         .extension()
         .and_then(|e| e.to_str())
         .is_some_and(|e| e.eq_ignore_ascii_case("ext"))
     {
-        base
+        dat_path.to_path_buf()
     } else {
-        base.with_extension("EXT")
+        dat_path.with_extension("EXT")
     };
     let bytes = std::fs::read(&ext_path).ok()?;
     let container = find_anlz_chunk_payload(&bytes, "PMAI").unwrap_or(&bytes);
-    find_anlz_chunk_payload(container, "PWV5")
-        .map(<[u8]>::to_vec)
-        .filter(|p| p.len() >= 4)
+    find_anlz_chunk_payload(container, tag).map(<[u8]>::to_vec)
 }
 
 pub(crate) fn extract_waveform_preview_from_anlz_bytes(
@@ -2362,11 +2353,13 @@ mod diag_tests {
         let conn = rusqlite::Connection::open(db_path).expect("open exportLibrary.db");
         conn.execute_batch(&format!("PRAGMA key='{DEFAULT_USB_EDB_KEY}';"))
             .expect("apply SQLCipher key");
-        conn.execute("UPDATE property SET dbVersion = '10000', deviceName = 'Stick'", [])
-            .expect("update property");
+        conn.execute(
+            "UPDATE property SET dbVersion = '10000', deviceName = 'Stick'",
+            [],
+        )
+        .expect("update property");
         drop(conn);
-        let property =
-            crate::service::export_helpers::edb_t19_property(tmp.path()).expect("eDB");
+        let property = crate::service::export_helpers::edb_t19_property(tmp.path()).expect("eDB");
         assert_eq!(property.db_version, crate::pdb_writer::T19_DB_VERSION);
         assert_eq!(property.device_name.as_deref(), Some("Stick"));
     }

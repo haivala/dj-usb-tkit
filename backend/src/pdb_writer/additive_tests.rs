@@ -1517,7 +1517,10 @@ fn relocated_track_row_keeps_the_fields_the_change_does_not_touch() {
 
     let parsed = crate::pdb_reader::parse_pdb_bytes(&bytes).expect("parse");
     let track = parsed.tracks.iter().find(|t| t.id == 1).expect("track 1");
-    assert_eq!(track.title, "A much longer title than the seed row had room for");
+    assert_eq!(
+        track.title,
+        "A much longer title than the seed row had room for"
+    );
     assert_eq!(
         (track.composer_id, track.label_id, track.remixer_id),
         (5, 6, 8)
@@ -1529,11 +1532,14 @@ fn relocated_track_row_keeps_the_fields_the_change_does_not_touch() {
     // Rb7Compatible would write "" into slots 2 and 3; the old row's stay.
     assert_eq!(slot(new_row, 2), slot(&old_row, 2));
     assert_eq!(slot(new_row, 3), slot(&old_row, 3));
-    assert_eq!(new_row[..94], {
-        let mut fixed = old_row[..94].to_vec();
-        fixed[..4].copy_from_slice(&new_row[..4]);
-        fixed
-    }[..]);
+    assert_eq!(
+        new_row[..94],
+        {
+            let mut fixed = old_row[..94].to_vec();
+            fixed[..4].copy_from_slice(&new_row[..4]);
+            fixed
+        }[..]
+    );
 }
 
 /// Simulate a row whose UTF-16 slot isn't padded to a 4-byte aligned offset: insert one byte
@@ -3061,8 +3067,8 @@ fn export_leaves_t19_alone_once_rekordbox_moved_it_to_a_second_page() {
     assert!(t19_sync_target(&before, PAGE_SIZE, 154, Some(&named)).is_some());
 
     let renamed_row = t19_ring_rows(&named, 154).pop().expect("row");
-    let outcome = append_rows_to_chain_in_place(&mut before, 19, &[renamed_row], PAGE_SIZE)
-        .expect("append");
+    let outcome =
+        append_rows_to_chain_in_place(&mut before, 19, &[renamed_row], PAGE_SIZE).expect("append");
     assert_eq!(outcome.pages_appended, 1, "the ring page is full");
     assert_eq!(t19_sync_target(&before, PAGE_SIZE, 154, Some(&named)), None);
     assert_eq!(t19_sync_target(&before, PAGE_SIZE, 157, Some(&named)), None);
@@ -3078,7 +3084,11 @@ fn export_leaves_t19_alone_once_rekordbox_moved_it_to_a_second_page() {
     let (_ec, first, last) = table_ptr_fields(&before, 19).expect("t19 ptr");
     for page in collect_chain_pages(&before, PAGE_SIZE, first, last).expect("t19 chain") {
         let off = page_offset(page, PAGE_SIZE).expect("t19 page offset");
-        assert_eq!(&out[off..off + PAGE_SIZE], &before[off..off + PAGE_SIZE], "page {page}");
+        assert_eq!(
+            &out[off..off + PAGE_SIZE],
+            &before[off..off + PAGE_SIZE],
+            "page {page}"
+        );
     }
 }
 

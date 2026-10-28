@@ -650,7 +650,11 @@ fn update_existing_content_row_keeps_release_year_when_missing() {
             |r| r.get::<_, Option<i64>>(0),
         )
         .expect("load updated row");
-    assert_eq!(release_year, Some(2024), "a missing year never clears the row's");
+    assert_eq!(
+        release_year,
+        Some(2024),
+        "a missing year never clears the row's"
+    );
 }
 
 #[test]
@@ -686,20 +690,28 @@ fn update_existing_content_row_writes_only_the_columns_that_differ() {
     let mut update = |track: &ExportManifestTrack| {
         let tx = conn.transaction().expect("start tx");
         let columns = load_table_columns_tx(&tx, "content").expect("content columns");
-        let changed = update_existing_content_row(&tx, content_id, track, &columns, Some("2025-01-01"))
-            .expect("update content");
+        let changed =
+            update_existing_content_row(&tx, content_id, track, &columns, Some("2025-01-01"))
+                .expect("update content");
         tx.commit().expect("commit tx");
         changed
     };
 
-    assert!(!update(&track), "a re-export of the same track changes nothing");
+    assert!(
+        !update(&track),
+        "a re-export of the same track changes nothing"
+    );
     track.title = "Renamed".to_string();
     assert!(update(&track), "a changed title is written");
     assert!(!update(&track), "and only once");
     let (title, isrc, date_added) = row(&conn);
     assert_eq!(title.as_deref(), Some("Renamed"));
     assert_eq!(isrc.as_deref(), Some("GBXXX2400001"));
-    assert_eq!(date_added.as_deref(), Some("2024-07-09"), "the export date never replaces a date added");
+    assert_eq!(
+        date_added.as_deref(),
+        Some("2024-07-09"),
+        "the export date never replaces a date added"
+    );
 }
 
 #[test]
@@ -4229,7 +4241,11 @@ fn pdb_writer_keeps_dictionary_rows_that_differ_only_in_case() {
             name: name.into(),
         });
     }
-    for (id, name) in [(1, "drum & Bass"), (2, "Drum & Bass"), (3, "Drum and Bass!")] {
+    for (id, name) in [
+        (1, "drum & Bass"),
+        (2, "Drum & Bass"),
+        (3, "Drum and Bass!"),
+    ] {
         data.genres.push(crate::pdb_writer::PdbDictRow {
             id,
             name: name.into(),
@@ -4273,8 +4289,11 @@ fn pdb_writer_keeps_dictionary_rows_that_differ_only_in_case() {
     });
     data.colors = crate::pdb_writer::standard_colors();
     data.columns_raw_rows = crate::pdb_writer::standard_columns_raw();
-    fs::write(&pdb_path, crate::pdb_writer::write_pdb(&data).expect("write seed"))
-        .expect("store seed");
+    fs::write(
+        &pdb_path,
+        crate::pdb_writer::write_pdb(&data).expect("write seed"),
+    )
+    .expect("store seed");
     let rows_before = crate::pdb_reader::parse_pdb_track_debug_rows(&pdb_path).expect("rows");
 
     let playlist = ExportPlaylistData {
@@ -4310,12 +4329,18 @@ fn pdb_writer_keeps_dictionary_rows_that_differ_only_in_case() {
             false,
         )
         .expect("build");
-        assert_eq!(build.changed_tracks, 0, "the track's own rows already name these");
+        assert_eq!(
+            build.changed_tracks, 0,
+            "the track's own rows already name these"
+        );
         let scratch = dir.path().join("built.pdb");
         fs::write(&scratch, &build.bytes).expect("store build");
         let rows = crate::pdb_reader::parse_pdb_track_debug_rows(&scratch).expect("rows");
         assert_eq!(rows.len(), 1);
-        assert_eq!(rows[0].raw_hex, rows_before[0].raw_hex, "track row byte-identical");
+        assert_eq!(
+            rows[0].raw_hex, rows_before[0].raw_hex,
+            "track row byte-identical"
+        );
     }
 }
 

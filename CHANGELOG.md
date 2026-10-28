@@ -37,6 +37,14 @@
   - **Fix (CRITICAL):** ...
 -->
 
+## Unreleased
+
+- **Chore:** Removed backend code nothing in the app used (a Tauri command the UI never called,
+  an unused PDB check and wrappers only tests called), and merged duplicated helpers: PDB string
+  encoding, PDB page-size reads, atomic file writes, file moves, ANLZ `.EXT` chunk reads and page
+  cursor decoding. Exports and repairs produce the same bytes as before. The backend code is now
+  `cargo fmt` clean.
+
 ## 0.4.9
 
 **Severity:** critical — see item(s) marked **(CRITICAL)** below.

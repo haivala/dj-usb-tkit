@@ -413,11 +413,7 @@ pub(crate) fn rebuild_sentinel_btrees_inplace(bytes: &mut [u8]) {
 /// [`rebuild_sentinel_btrees_inplace`] for only the listed tables, which
 /// must use 0x34 for active pages (tt=0, tt=19).
 pub(crate) fn rebuild_sentinel_btrees_for_tables(bytes: &mut [u8], tables: &[u32]) {
-    let Some(page_size) = bytes
-        .get(4..8)
-        .and_then(|b| b.try_into().ok())
-        .map(|b: [u8; 4]| u32::from_le_bytes(b) as usize)
-    else {
+    let Some(page_size) = read_u32_le_at(bytes, 4).map(|v| v as usize) else {
         return;
     };
     if page_size == 0 || bytes.len() < page_size * 2 {

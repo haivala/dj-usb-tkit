@@ -1417,26 +1417,10 @@ pub(crate) fn decode_offset_cursor(
     raw_cursor: Option<&str>,
     expected_signature: &str,
 ) -> BackendResult<Option<usize>> {
-    let raw = match raw_cursor {
-        Some(value) if !value.trim().is_empty() => value.trim(),
-        _ => return Ok(None),
-    };
-    let decoded = base64::engine::general_purpose::URL_SAFE_NO_PAD
-        .decode(raw)
-        .map_err(|_| BackendError::Validation("invalid cursor token".to_string()))?;
-    let cursor: OffsetPageCursor = serde_json::from_slice(&decoded)
-        .map_err(|_| BackendError::Validation("invalid cursor payload".to_string()))?;
-    if cursor.version != TRACK_CURSOR_VERSION {
-        return Err(BackendError::Validation(
-            "unsupported cursor version".to_string(),
-        ));
-    }
-    if cursor.signature != expected_signature {
-        return Err(BackendError::Validation(
-            "cursor does not match current query".to_string(),
-        ));
-    }
-    Ok(Some(cursor.offset))
+    let cursor = decode_cursor(raw_cursor, expected_signature, |c: &OffsetPageCursor| {
+        (&c.version, &c.signature)
+    })?;
+    Ok(cursor.map(|c| c.offset))
 }
 
 pub(super) fn encode_track_page_cursor(
@@ -1461,6 +1445,26 @@ pub(super) fn decode_track_page_cursor(
     raw_cursor: Option<&str>,
     expected_signature: &str,
 ) -> BackendResult<Option<TrackPageCursor>> {
+    let cursor = decode_cursor(raw_cursor, expected_signature, |c: &TrackPageCursor| {
+        (&c.version, &c.signature)
+    })?;
+    if let Some(cursor) = &cursor
+        && (cursor.file_path.trim().is_empty() || cursor.id.trim().is_empty())
+    {
+        return Err(BackendError::Validation(
+            "invalid cursor payload".to_string(),
+        ));
+    }
+    Ok(cursor)
+}
+
+/// Decodes a base64 JSON page cursor and checks its version and query
+/// signature; `header` returns the cursor's `(version, signature)`.
+fn decode_cursor<T: serde::de::DeserializeOwned>(
+    raw_cursor: Option<&str>,
+    expected_signature: &str,
+    header: impl Fn(&T) -> (&String, &String),
+) -> BackendResult<Option<T>> {
     let raw = match raw_cursor {
         Some(value) if !value.trim().is_empty() => value.trim(),
         _ => return Ok(None),
@@ -1468,21 +1472,17 @@ pub(super) fn decode_track_page_cursor(
     let decoded = base64::engine::general_purpose::URL_SAFE_NO_PAD
         .decode(raw)
         .map_err(|_| BackendError::Validation("invalid cursor token".to_string()))?;
-    let cursor: TrackPageCursor = serde_json::from_slice(&decoded)
+    let cursor: T = serde_json::from_slice(&decoded)
         .map_err(|_| BackendError::Validation("invalid cursor payload".to_string()))?;
-    if cursor.version != TRACK_CURSOR_VERSION {
+    let (version, signature) = header(&cursor);
+    if version != TRACK_CURSOR_VERSION {
         return Err(BackendError::Validation(
             "unsupported cursor version".to_string(),
         ));
     }
-    if cursor.signature != expected_signature {
+    if signature != expected_signature {
         return Err(BackendError::Validation(
             "cursor does not match current query".to_string(),
-        ));
-    }
-    if cursor.file_path.trim().is_empty() || cursor.id.trim().is_empty() {
-        return Err(BackendError::Validation(
-            "invalid cursor payload".to_string(),
         ));
     }
     Ok(Some(cursor))

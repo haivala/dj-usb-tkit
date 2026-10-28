@@ -262,7 +262,6 @@ pub fn write_edb_playlists_in_tx(
             playlist_id,
             sort_order,
         });
-
     }
 
     let Some(manifest) = writes.first().map(|w| w.manifest) else {
@@ -484,7 +483,10 @@ pub fn update_existing_content_row(
             .filter(|p| !p.trim().is_empty())
             .map(|p| Value::Text(p.to_string())),
     );
-    want("bpmx100", int(track.bpm.map(|bpm| (bpm * 100.0).round() as i64)));
+    want(
+        "bpmx100",
+        int(track.bpm.map(|bpm| (bpm * 100.0).round() as i64)),
+    );
     want("length", int(track.duration_ms.map(duration_ms_to_seconds)));
     want(
         "artist_id_artist",
@@ -518,7 +520,10 @@ pub fn update_existing_content_row(
     want("titleForSearch", text(track.title_for_search.as_deref()));
     want("isrc", text(track.isrc.as_deref()));
     want("djComment", text(track.comment.as_deref()));
-    want("kuvoDeliveryComment", text(track.kuvo_delivery_comment.as_deref()));
+    want(
+        "kuvoDeliveryComment",
+        text(track.kuvo_delivery_comment.as_deref()),
+    );
     if from_library {
         want(
             "releaseYear",
@@ -579,13 +584,11 @@ pub fn update_existing_content_row(
     };
     want(
         "artist_id_remixer",
-        int(named_artist(track.remixer.as_deref())?
-            .or(track.artist_id_remixer.map(i64::from))),
+        int(named_artist(track.remixer.as_deref())?.or(track.artist_id_remixer.map(i64::from))),
     );
     want(
         "artist_id_composer",
-        int(named_artist(track.composer.as_deref())?
-            .or(track.artist_id_composer.map(i64::from))),
+        int(named_artist(track.composer.as_deref())?.or(track.artist_id_composer.map(i64::from))),
     );
     // By name, as the PDB row is: the library's `genre_id` is never set, so
     // writing it would clear the genre the PDB keeps.
@@ -608,7 +611,11 @@ pub fn update_existing_content_row(
         // Vendor software can enable the modern waveform path for generated ANLZ.
         want(
             "analysedBits",
-            Some(Value::Integer(if track.waveform_path.is_some() { 41 } else { 0 })),
+            Some(Value::Integer(if track.waveform_path.is_some() {
+                41
+            } else {
+                0
+            })),
         );
         want("isHotCueAutoLoadOn", Some(Value::Integer(1)));
         want("isKuvoDeliverStatusOn", Some(Value::Integer(1)));

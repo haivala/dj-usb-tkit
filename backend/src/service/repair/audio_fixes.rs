@@ -385,11 +385,7 @@ pub(super) fn apply_separate_shared_analysis(
 ) -> BackendResult<(usize, usize)> {
     let pdb_path = usb_staging::stage_pdb(usb_root)?;
     let mut bytes = std::fs::read(&pdb_path)?;
-    let page_size = bytes
-        .get(4..8)
-        .and_then(|b| b.try_into().ok())
-        .map(|b: [u8; 4]| u32::from_le_bytes(b) as usize)
-        .ok_or_else(|| BackendError::Validation("PDB too small to read page size".into()))?;
+    let page_size = pdb_page_size(&bytes)?;
     let parsed = crate::pdb_reader::parse_pdb_bytes(&bytes)?;
     let ownership = scan_analysis_ownership(usb_root, &parsed, app_master_db_id, true);
     let row_by_id: HashMap<u32, &crate::pdb_reader::PdbTrackRow> =
@@ -1016,11 +1012,7 @@ impl BackendService {
         // ── PDB: re-encode each track row with its new path ──────────
         let pdb_path = usb_staging::stage_pdb(usb_root)?;
         let mut bytes = std::fs::read(&pdb_path)?;
-        let page_size = bytes
-            .get(4..8)
-            .and_then(|b| b.try_into().ok())
-            .map(|b: [u8; 4]| u32::from_le_bytes(b) as usize)
-            .ok_or_else(|| BackendError::Validation("PDB too small to read page size".into()))?;
+        let page_size = pdb_page_size(&bytes)?;
         let parsed = crate::pdb_reader::parse_pdb_bytes(&bytes)?;
         let row_by_id: HashMap<u32, &crate::pdb_reader::PdbTrackRow> =
             parsed.tracks.iter().map(|t| (t.id, t)).collect();
