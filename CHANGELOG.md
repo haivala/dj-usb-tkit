@@ -45,6 +45,9 @@
 - **Fix:** Exporting to (or repairing) a USB that was renamed in rekordbox after it had filled its
   player history page no longer rewrites the page rekordbox had retired. That left two history pages
   that both looked current to the players.
+- **Fix:** A drive name with non-ASCII characters (ä, ö, é, …) is written into the player history
+  page the way rekordbox writes it, aligned where older CDJs expect it. Every named drive's history
+  rows now also have rekordbox's length.
 
 ## 0.4.8
 

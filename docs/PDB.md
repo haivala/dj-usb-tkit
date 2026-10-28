@@ -440,9 +440,14 @@ holds 96 rows (96 × 40 bytes plus 6 footer groups fill the page exactly,
 
 **The rows mirror the eDB's `property` row.** Each row holds, after the
 slot/id words: a flags word whose byte 9 is `backGroundColorType`, then PDB
-strings for `createdDate`, two constant bytes (`19 1e`), `dbVersion`
-(`"1000"`) and `deviceName`, then at least 7 zero bytes up to a 4-byte
-boundary. The newest id is `numberOfContents`. Seen on rekordbox's own USBs:
+strings for `createdDate`, two bytes holding the row offsets of the next two
+strings (`19 1e`), `dbVersion` (`"1000"`) and `deviceName`, then at least 4
+zero bytes up to a 4-byte boundary, and at least 40 bytes in all. A
+non-ASCII name is a UTF-16 long string; rekordbox moves it from offset 30 to
+32 with two zero bytes so its header is 4-byte aligned (`19 20`), as for other
+long string headers (see the alignment section). Names up to 80 characters
+(the app's limit) keep this row shape; rekordbox uses another one (`0x0284`,
+u16 offsets) only for far longer names. The newest id is `numberOfContents`. Seen on rekordbox's own USBs:
 
 | USB | eDB `property` | t19 rows |
 | --- | --- | --- |

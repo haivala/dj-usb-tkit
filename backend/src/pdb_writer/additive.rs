@@ -1318,9 +1318,6 @@ pub(crate) const T19_RING_SLOTS: usize = 96;
 /// a flags word whose byte 9 is the background color.
 const T19_DATE_OFFSET: usize = 12;
 
-/// The two bytes between the date and `dbVersion` strings in every tt=19
-/// row seen so far (rekordbox's, players' and the template's).
-const T19_MID_BYTES: [u8; 2] = [0x19, 0x1e];
 
 /// What a tt=19 row mirrors of the eDB's `property` row: rekordbox keeps
 /// every row's date, version string, name and byte 9 equal to `createdDate`,
@@ -1348,13 +1345,16 @@ impl T19Property {
             _ => read_u16_le_at(row, at + 1).map(usize::from),
         };
         let created_date = crate::pdb_reader::get_string_from_pdb(row, T19_DATE_OFFSET)?;
-        let mid = T19_DATE_OFFSET + string_len(T19_DATE_OFFSET)?;
-        if row.get(mid..mid + 2)? != T19_MID_BYTES {
+        // The two bytes after the date are the row offsets of the version
+        // and name strings (see `t19_slot_row`).
+        let offsets = T19_DATE_OFFSET + string_len(T19_DATE_OFFSET)?;
+        let version_at = usize::from(*row.get(offsets)?);
+        let name_at = usize::from(*row.get(offsets + 1)?);
+        let version_end = version_at + string_len(version_at)?;
+        if version_at != offsets + 2 || (name_at != version_end && name_at != align4(version_end)) {
             return None;
         }
-        let version_at = mid + 2;
         let db_version = crate::pdb_reader::get_string_from_pdb(row, version_at)?;
-        let name_at = version_at + string_len(version_at)?;
         // `get_string_from_pdb` has no value for the empty string (`03`).
         let device_name = match *row.get(name_at)? {
             0x03 => String::new(),
@@ -1380,11 +1380,18 @@ impl T19Property {
 
 /// One tt=19 row for `slot`/`id`: bytes `0..4` = `0x0280 + slot *
 /// 0x0020_0000`, `4..8` = the id, byte 9 the background color, then the
-/// date, [`T19_MID_BYTES`], `dbVersion` and the name as PDB strings, then
-/// at least 7 zero bytes up to a 4-byte boundary. Slot 0 is the template
-/// row: no name, color 0 (both as rekordbox writes it). That gives 40-byte
-/// rows unnamed, 48 for `"APECAR_red"` and 52 for `"Chiphead 256GB"`, as
-/// rekordbox and players write them.
+/// date as a PDB string, two bytes holding the row offsets of the version
+/// and name strings (`19 1e`), `dbVersion` and the name. A name that is a
+/// long string (UTF-16, so any non-ASCII name) starts on a 4-byte boundary
+/// after zero padding (`19 20`), like other long string headers players
+/// read. Then at least 4 zero bytes up to a 4-byte boundary, and at least
+/// 40 bytes in all. Slot 0 is the template row: no name, color 0 (both as
+/// rekordbox writes it). That gives rekordbox's 40-byte rows unnamed, 56
+/// for a 7-character non-ASCII name, 140 for 50 `ä` and 200 for 80, and
+/// the 48 for
+/// `"APECAR_red"` and 52 for `"Chiphead 256GB"` seen on other USBs.
+/// rekordbox switches to another row shape (`0x0284`, u16 offsets) only
+/// for far longer names than the app allows.
 fn t19_slot_row(prop: &T19Property, slot: usize, id: u32) -> Vec<u8> {
     let mut row = vec![0u8; T19_DATE_OFFSET];
     let val = 0x0000_0280u32 + (slot as u32) * 0x0020_0000;
@@ -1397,10 +1404,20 @@ fn t19_slot_row(prop: &T19Property, slot: usize, id: u32) -> Vec<u8> {
         prop.device_name.as_deref().unwrap_or("")
     };
     row.extend_from_slice(&encode_pdb_string(&prop.created_date));
-    row.extend_from_slice(&T19_MID_BYTES);
-    row.extend_from_slice(&encode_pdb_string(&prop.db_version));
-    row.extend_from_slice(&encode_pdb_string(name));
-    row.resize(align4(row.len() + 7), 0);
+    let version = encode_pdb_string(&prop.db_version);
+    let name = encode_pdb_string(name);
+    let version_at = row.len() + 2;
+    let mut name_at = version_at + version.len();
+    // Short strings have an odd kind byte; long ones get aligned.
+    if name[0] & 1 == 0 {
+        name_at = align4(name_at);
+    }
+    // The date and version strings are a few bytes, so both offsets fit.
+    row.extend_from_slice(&[version_at as u8, name_at as u8]);
+    row.extend_from_slice(&version);
+    row.resize(name_at, 0);
+    row.extend_from_slice(&name);
+    row.resize(align4(row.len() + 4).max(T19_ROW_LEN), 0);
     row
 }
 

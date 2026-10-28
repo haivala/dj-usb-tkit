@@ -3085,6 +3085,51 @@ fn named_t19_ring_matches_rekordbox() {
 }
 
 #[test]
+fn non_ascii_t19_names_match_rekordbox_rows() {
+    // rekordbox's rows after renaming a reference USB: a non-ASCII name is
+    // a UTF-16 long string, moved from offset 30 to 32 (`19 20`) so its
+    // header is 4-byte aligned, and the row ends after at least 4 zero
+    // bytes, not 7.
+    let prop = |name: &str, background_color| T19Property {
+        created_date: "2026-10-28".to_string(),
+        db_version: "1000".to_string(),
+        device_name: Some(name.to_string()),
+        background_color,
+    };
+    let row_for = |prop: &T19Property, word_id: [u8; 8]| {
+        let mut row = t19_ring_rows(prop, 1).pop().expect("slot 1");
+        row[0..8].copy_from_slice(&word_id);
+        row
+    };
+    // 50 and 80 `ä` are rekordbox's rows byte for byte (word and id
+    // included). 7 characters: 50 bytes of content padded to 56, the shape
+    // of a 7-character name rekordbox wrote (at least 7 zero bytes gave 60).
+    for (chars, len, word_id) in [
+        (7, 56, [0x80, 0x02, 0x60, 0x00, 0x9e, 0x00, 0x00, 0x00]),
+        (50, 140, [0x80, 0x02, 0x00, 0x00, 0x9a, 0x00, 0x00, 0x00]),
+        (80, 200, [0x80, 0x02, 0x20, 0x00, 0x9a, 0x00, 0x00, 0x00]),
+    ] {
+        let mut rekordbox = word_id.to_vec();
+        rekordbox.extend_from_slice(&[0x00, 0x06, 0x00, 0x00, 0x17]);
+        rekordbox.extend_from_slice(b"2026-10-28");
+        rekordbox.extend_from_slice(&[0x19, 0x20, 0x0b]);
+        rekordbox.extend_from_slice(b"1000");
+        rekordbox.extend_from_slice(&[0x00, 0x00, 0x90]);
+        rekordbox.extend_from_slice(&(4 + 2 * chars as u16).to_le_bytes());
+        rekordbox.push(0x00);
+        for _ in 0..chars {
+            rekordbox.extend_from_slice(&[0xe4, 0x00]);
+        }
+        rekordbox.resize((rekordbox.len() + 4).next_multiple_of(4), 0);
+        assert_eq!(rekordbox.len(), len);
+        let named = prop(&"\u{e4}".repeat(chars), 6);
+        let row = row_for(&named, word_id);
+        assert_eq!(row, rekordbox, "{chars} \u{e4}");
+        assert_eq!(T19Property::from_row(&row), Some(named));
+    }
+}
+
+#[test]
 fn export_writes_usb_name_into_app_t19_ring() {
     // The eDB carries the USB name (`property.deviceName`); t19 must carry
     // the same, or CDJs hit communication errors listing tracks.
