@@ -298,11 +298,14 @@ Context:
   (`t19`) from the eDB: the page rekordbox and the players had accepted
   (2020-10-30, version "1000", no drive name) became 2024-10-19, "10000" and
   the drive name. The same repair run with 0.4.7 leaves the page as it was.
-- The repair also damaged data in both databases (every eDB track row dated
-  1970, bitrates and comments cleared, most PDB track rows relocated), but
-  0.4.7 does the same, and earlier repairs passed on hardware with rekordbox-made
-  USBs, so this damage is not thought to stop the USB loading. Which change
-  stops it is not proven on hardware.
+- The repair also damaged data in both databases. The eDB damage (every track
+  row dated 1970, bitrates and comments cleared) is the same on this USB with
+  every version back to 0.1.36, including 0.4.0, whose repair passed on
+  CDJ-3000, so it is not thought to stop the USB loading. Since 0.4.3, which
+  gave exported tracks a release date from their year, the repair also
+  relocates most PDB track rows. No repair between 0.4.1 and 0.4.7 was run on
+  hardware, so 0.4.3 to 0.4.7 may fail the same way. Which change stops the
+  USB loading is not proven on hardware.
 - 0.4.9 rewrites the repair: both databases are read and merged in full, each is
   written once through the export's writers, and the history page keeps its
   date and carries the app's own version string.
