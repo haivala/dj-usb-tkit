@@ -104,20 +104,15 @@ pub fn truncate_component(value: &str, max_len: usize) -> String {
     }
 }
 
-pub fn limit_contents_file_name(file_name: &str, max_len: usize) -> String {
-    limit_contents_file_name_with_suffix(file_name, max_len, None)
-}
-
-/// Like `limit_contents_file_name`, but when `ordinal` is `Some(n)` (n >= 1)
-/// reserves room for a `-{n}` disambiguator and appends it before the
-/// extension, truncating the stem one or more characters shorter to make
-/// room. Used when the plain-truncated name collides with a *different*
-/// track's already-claimed target within the same export run — matches the
-/// disambiguation convention observed in real rekordbox exports for the
-/// same collision shape (`Some Long Name.wav`, then `Some Long Nam-1.wav`,
-/// `Some Long Na-2.wav`, ...). `ordinal` is `None` for the plain (first,
-/// non-colliding) case, which is byte-identical to `limit_contents_file_name`'s
-/// prior behavior.
+/// Truncates a media file name to `max_len` chars, keeping its extension.
+/// When `ordinal` is `Some(n)` (n >= 1) it reserves room for a `-{n}`
+/// disambiguator and appends it before the extension, truncating the stem one
+/// or more characters shorter to make room. Used when the plain-truncated name
+/// collides with a *different* track's already-claimed target within the same
+/// export run — matches the disambiguation convention observed in real
+/// rekordbox exports for the same collision shape (`Some Long Name.wav`, then
+/// `Some Long Nam-1.wav`, `Some Long Na-2.wav`, ...). `ordinal` is `None` for
+/// the plain (first, non-colliding) case.
 pub fn limit_contents_file_name_with_suffix(
     file_name: &str,
     max_len: usize,

@@ -45,7 +45,6 @@ Implemented command set:
   - `set_analysis_paused`
   - `cancel_analysis`
 - Library identity:
-  - `materialize_source_track`
   - `resolve_track_identity`
 - Playback:
   - `resolve_playback_source`

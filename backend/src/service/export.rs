@@ -82,7 +82,7 @@ fn record_existing_usb_path_by_fingerprint(
 /// Resolves the on-disk media target path for one track within a single
 /// export run, disambiguating it from any *different* track that already
 /// claimed the same truncated name this run (see `CONTENT_FILENAME_MAX_LEN`
-/// / `limit_contents_file_name` — the 48-char CDJ limit truncates the raw
+/// / `limit_contents_file_name_with_suffix` — the 48-char CDJ limit truncates the raw
 /// filename with no collision awareness, so tracks sharing a long
 /// artist/album prefix can truncate identically and silently overwrite each
 /// other). `claimed` tracks every target path resolved so far this run,

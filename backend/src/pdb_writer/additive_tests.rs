@@ -1752,9 +1752,7 @@ fn realign_dictionary_rows_in_place_fixes_misaligned_album_name() {
 
 #[test]
 fn same_size_track_row_patch_sanitizes_metadata_strings() {
-    use crate::service::export_helpers::pdb_encoding::{
-        encode_pdb_track_inline_string, encode_pdb_track_range_string,
-    };
+    use crate::service::export_helpers::pdb_encoding::encode_pdb_string;
 
     fn slot_bytes(row: &[u8], index: usize) -> &[u8] {
         let start_offset = 94 + index * 2;
@@ -1821,18 +1819,12 @@ fn same_size_track_row_patch_sanitizes_metadata_strings() {
     .expect("patch row")
     .expect("same-size sanitized patch");
 
-    assert_eq!(
-        slot_bytes(&patched, 17),
-        encode_pdb_track_range_string("GoodTitle")
-    );
-    assert_eq!(
-        slot_bytes(&patched, 16),
-        encode_pdb_track_inline_string("Comment")
-    );
+    assert_eq!(slot_bytes(&patched, 17), encode_pdb_string("GoodTitle"));
+    assert_eq!(slot_bytes(&patched, 16), encode_pdb_string("Comment"));
     // Slot 19 includes alignment padding bytes after the filename string
     // (to keep slot 20 at a 4-byte aligned offset), so check the string prefix only.
     assert!(
-        slot_bytes(&patched, 19).starts_with(&encode_pdb_track_inline_string("track.mp3")),
+        slot_bytes(&patched, 19).starts_with(&encode_pdb_string("track.mp3")),
         "slot 19 should start with filename bytes"
     );
 }

@@ -559,17 +559,7 @@ pub fn try_read_track_index_from_edb_with_conn(
 // eDB read/index helpers
 // -----------------------------------------------------------------------------
 
-pub fn try_read_content_date_created_index_from_edb(
-    usb_root: &Path,
-    warnings: &mut Vec<WarningEntry>,
-) -> Option<HashMap<u32, String>> {
-    let conn = open_edb_from_usb_root(usb_root, warnings)?;
-    try_read_content_date_created_index_from_edb_with_conn(&conn, warnings)
-}
-
-/// Same as `try_read_content_date_created_index_from_edb`, but reuses an
-/// already-open eDB connection. See `try_read_track_index_from_edb_with_conn`
-/// for why this exists.
+/// `content_id` -> `dateCreated` from an open eDB connection.
 pub fn try_read_content_date_created_index_from_edb_with_conn(
     conn: &rusqlite::Connection,
     warnings: &mut Vec<WarningEntry>,
@@ -656,14 +646,6 @@ pub fn try_read_content_date_created_index_from_edb_with_conn(
     }
 }
 
-pub fn try_read_playlists_with_metadata_from_edb(
-    usb_root: &Path,
-    warnings: &mut Vec<WarningEntry>,
-) -> Option<HashMap<String, ExportDbPlaylist>> {
-    let conn = open_edb_from_usb_root(usb_root, warnings)?;
-    try_read_playlists_with_metadata_from_edb_with_conn(&conn, usb_root, warnings)
-}
-
 pub fn try_read_playlists_with_metadata_from_edb_db_only(
     usb_root: &Path,
     warnings: &mut Vec<WarningEntry>,
@@ -683,9 +665,8 @@ pub fn try_read_playlists_with_metadata_from_edb_db_only_with_conn(
     try_read_playlists_with_metadata_from_edb_internal_with_conn(conn, usb_root, warnings, false)
 }
 
-/// Same as `try_read_playlists_with_metadata_from_edb`, but reuses an
-/// already-open eDB connection. See `try_read_track_index_from_edb_with_conn`
-/// for why this exists.
+/// Like `try_read_playlists_with_metadata_from_edb_db_only_with_conn`, but
+/// resolves USB-relative media paths against `usb_root`.
 pub fn try_read_playlists_with_metadata_from_edb_with_conn(
     conn: &rusqlite::Connection,
     usb_root: &Path,
@@ -2079,9 +2060,10 @@ pub fn dynamic_insert(
 mod tests {
     use super::{
         ExportPlaylistData, open_edb, open_edb_from_usb_root, open_edb_rw,
-        replace_export_playlist_row_with_identity, try_read_content_date_created_index_from_edb,
-        try_read_playlists_with_metadata_from_edb,
-        try_read_playlists_with_metadata_from_edb_db_only, try_read_track_index_from_edb,
+        replace_export_playlist_row_with_identity,
+        try_read_content_date_created_index_from_edb_with_conn,
+        try_read_playlists_with_metadata_from_edb_db_only,
+        try_read_playlists_with_metadata_from_edb_with_conn, try_read_track_index_from_edb,
         upsert_export_playlist_row,
     };
     use crate::service::usb_vendor_compat::{USB_VENDOR_DB_DIR, USB_VENDOR_ROOT_DIR};
@@ -2590,8 +2572,11 @@ mod tests {
         .expect("seed eDB");
 
         let mut warnings = Vec::new();
-        let playlists = try_read_playlists_with_metadata_from_edb(temp.path(), &mut warnings)
-            .expect("playlists");
+        let conn = open_edb_from_usb_root(temp.path(), &mut warnings)
+            .expect("open_edb_from_usb_root should resolve path");
+        let playlists =
+            try_read_playlists_with_metadata_from_edb_with_conn(&conn, temp.path(), &mut warnings)
+                .expect("playlists");
         let set_a = playlists.get("Set A").expect("Set A playlist");
         assert_eq!(set_a.playlist_id, 2);
         assert_eq!(set_a.tracks.len(), 1);
@@ -2620,12 +2605,8 @@ mod tests {
         );
 
         let mut warnings2 = Vec::new();
-        let dates = try_read_content_date_created_index_from_edb(temp.path(), &mut warnings2)
+        let dates = try_read_content_date_created_index_from_edb_with_conn(&conn, &mut warnings2)
             .expect("dateCreated index");
         assert_eq!(dates.get(&42).map(String::as_str), Some("2024-02-10"));
-
-        let mut warnings3 = Vec::new();
-        let conn = open_edb_from_usb_root(temp.path(), &mut warnings3);
-        assert!(conn.is_some(), "open_edb_from_usb_root should resolve path");
     }
 }

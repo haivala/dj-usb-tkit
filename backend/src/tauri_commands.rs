@@ -32,8 +32,7 @@ use crate::models::{
     InitializeUsbData, InitializeUsbRequest, InspectUsbTrackData, InspectUsbTrackRequest,
     JobEventPayload, ListExternalPlaylistsData, ListExternalPlaylistsRequest,
     ListMatchingTrackIdsData, ListMatchingTrackIdsRequest, ListPlaylistsData, ListUsbBackupsData,
-    ListUsbBackupsRequest, ListUsbDevicesData, MaterializeSourceTrackData,
-    MaterializeSourceTrackRequest, PlayResolvedTrackData, PlayResolvedTrackRequest,
+    ListUsbBackupsRequest, ListUsbDevicesData, PlayResolvedTrackData, PlayResolvedTrackRequest,
     PlaybackEventPayload, PlaybackMetronomeData, PlaybackStatusData, PruneUsbDeviceData,
     PruneUsbDeviceRequest, RelocateSourceRootData, RelocateSourceRootRequest,
     RemoveTracksBySourceRootsData, RemoveTracksBySourceRootsRequest, RemoveTracksFromPlaylistData,
@@ -769,14 +768,6 @@ pub fn check_source_roots(
     request: CheckSourceRootsRequest,
 ) -> ApiResponse<CheckSourceRootsData> {
     state.check_source_roots(request)
-}
-
-#[tauri::command]
-pub fn materialize_source_track(
-    state: State<'_, BackendCommands>,
-    request: MaterializeSourceTrackRequest,
-) -> ApiResponse<MaterializeSourceTrackData> {
-    state.materialize_source_track(request)
 }
 
 #[tauri::command]

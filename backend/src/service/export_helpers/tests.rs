@@ -903,17 +903,20 @@ fn truncate_empty_becomes_unknown() {
     assert_eq!(truncate_component("", 48), "Unknown");
 }
 
-// --- limit_contents_file_name ---
+// --- limit_contents_file_name_with_suffix ---
 
 #[test]
 fn limit_filename_within_limit_unchanged() {
-    assert_eq!(limit_contents_file_name("track.mp3", 48), "track.mp3");
+    assert_eq!(
+        limit_contents_file_name_with_suffix("track.mp3", 48, None),
+        "track.mp3"
+    );
 }
 
 #[test]
 fn limit_filename_preserves_extension() {
     let long_name = format!("{}.mp3", "a".repeat(60));
-    let result = limit_contents_file_name(&long_name, 48);
+    let result = limit_contents_file_name_with_suffix(&long_name, 48, None);
     assert!(
         result.ends_with(".mp3"),
         "extension not preserved: {result}"
@@ -924,19 +927,8 @@ fn limit_filename_preserves_extension() {
 #[test]
 fn limit_filename_no_extension() {
     let long_name = "a".repeat(60);
-    let result = limit_contents_file_name(&long_name, 48);
+    let result = limit_contents_file_name_with_suffix(&long_name, 48, None);
     assert_eq!(result.chars().count(), 48);
-}
-
-// --- limit_contents_file_name_with_suffix ---
-
-#[test]
-fn limit_filename_with_suffix_none_matches_plain() {
-    let long_name = format!("{}.mp3", "a".repeat(60));
-    assert_eq!(
-        limit_contents_file_name_with_suffix(&long_name, 48, None),
-        limit_contents_file_name(&long_name, 48)
-    );
 }
 
 #[test]
@@ -4857,41 +4849,6 @@ fn export_profile_as_str_roundtrips() {
     assert_eq!(PdbLayoutProfile::Current.as_str(), "current");
     assert_eq!(PdbLayoutProfile::Rb6Compatible.as_str(), "rb6_compatible");
     assert_eq!(PdbLayoutProfile::Rb7Compatible.as_str(), "rb7_compatible");
-}
-
-#[test]
-fn validate_no_empty_data_pages_catches_empty_page() {
-    // Build a minimal 3-page PDB: page 0 = file header, page 1 = sentinel, page 2 = data
-    let page_size = 4096usize;
-    let mut bytes = vec![0u8; page_size * 3];
-
-    // File header at page 0 — set table 8 pointers: first=1, last=2
-    crate::utils::set_table_ptr_fields(&mut bytes, 8, 3, 1, 2);
-
-    // Sentinel page (page 1): page_idx=1, table_type=8, next=2, flags=0x64
-    let off1 = page_size;
-    bytes[off1 + 0x04..off1 + 0x08].copy_from_slice(&1u32.to_le_bytes());
-    bytes[off1 + 0x08..off1 + 0x0c].copy_from_slice(&8u32.to_le_bytes());
-    bytes[off1 + 0x0c..off1 + 0x10].copy_from_slice(&2u32.to_le_bytes());
-    bytes[off1 + 0x1b] = 0x64; // sentinel
-
-    // Data page (page 2): page_idx=2, table_type=8, next=0, flags=0x24
-    // Leave nrs=0 and used_size=0 → empty data page
-    let off2 = page_size * 2;
-    bytes[off2 + 0x04..off2 + 0x08].copy_from_slice(&2u32.to_le_bytes());
-    bytes[off2 + 0x08..off2 + 0x0c].copy_from_slice(&8u32.to_le_bytes());
-    bytes[off2 + 0x1b] = 0x24; // data page
-
-    let result = validate_no_empty_data_pages(&bytes, page_size, 8, 1, 2);
-    assert!(result.is_err(), "should reject empty data page in chain");
-    let msg = result.unwrap_err().to_string();
-    assert!(msg.contains("0 rows"), "error should mention 0 rows: {msg}");
-
-    // Now give the page some rows — validation should pass
-    bytes[off2 + 0x18] = 1; // nrs = 1
-    bytes[off2 + 0x1e..off2 + 0x20].copy_from_slice(&12u16.to_le_bytes()); // used_size = 12
-    let result2 = validate_no_empty_data_pages(&bytes, page_size, 8, 1, 2);
-    assert!(result2.is_ok(), "should pass with non-empty data page");
 }
 
 #[test]

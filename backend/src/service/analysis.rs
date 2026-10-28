@@ -33,7 +33,8 @@ use crate::models::{
 };
 
 use super::anlz::{
-    AnlzBundlePaths, WaveformData, fill_mp3_pvbr, write_generated_anlz_bundle_with_first_beat,
+    AnlzBundlePaths, WaveformData, atomic_write_bytes, fill_mp3_pvbr,
+    write_generated_anlz_bundle_with_first_beat,
 };
 use super::bpm_key::{AnalysisEngine, BpmKeyResult, detect_bpm_key_stratum, first_beat_secs};
 use super::export_helpers::{
@@ -1818,22 +1819,6 @@ fn persist_library_artwork_thumbnail_from_image(
     encoder.encode_image(&resized).ok()?;
     atomic_write_bytes(&target, &buf).ok()?;
     Some(target.to_string_lossy().to_string())
-}
-
-fn atomic_write_bytes(path: &Path, bytes: &[u8]) -> BackendResult<()> {
-    let parent = path
-        .parent()
-        .ok_or_else(|| BackendError::Internal("missing parent directory".to_string()))?;
-    std::fs::create_dir_all(parent)?;
-    let tmp_name = format!(
-        ".{}.tmp.{}",
-        path.file_name().and_then(|s| s.to_str()).unwrap_or("tmp"),
-        Uuid::now_v7()
-    );
-    let tmp_path = parent.join(tmp_name);
-    std::fs::write(&tmp_path, bytes)?;
-    std::fs::rename(&tmp_path, path)?;
-    Ok(())
 }
 
 fn extract_embedded_cover_art_bytes(path: &Path) -> Option<Vec<u8>> {

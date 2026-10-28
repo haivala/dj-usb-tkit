@@ -15,42 +15,8 @@ pub fn encode_pdb_string(value: &str) -> Vec<u8> {
     encode_long_ascii(bytes)
 }
 
-pub fn encode_pdb_track_inline_string(value: &str) -> Vec<u8> {
-    if !value.is_ascii() {
-        return encode_utf16le(value, false);
-    }
-    let bytes = value.as_bytes();
-    if bytes.len() <= 126 {
-        return encode_short_ascii(bytes, false);
-    }
-    encode_long_ascii(bytes)
-}
-
-pub fn encode_pdb_track_range_string(value: &str) -> Vec<u8> {
-    if !value.is_ascii() {
-        return encode_utf16le(value, false);
-    }
-    let bytes = value.as_bytes();
-    if bytes.len() <= 126 {
-        return encode_short_ascii(bytes, false);
-    }
-    encode_long_ascii(bytes)
-}
-
-pub fn encode_pdb_track_path_string(value: &str) -> Vec<u8> {
-    // Reference exports: no trailing null on path strings (total_len covers exact char count).
-    if !value.is_ascii() {
-        return encode_utf16le(value, false);
-    }
-    let bytes = value.as_bytes();
-    if bytes.len() <= 126 {
-        return encode_short_ascii(bytes, false);
-    }
-    encode_long_ascii(bytes)
-}
-
 pub fn encode_pdb_track_isrc_slot(value: Option<&str>) -> Vec<u8> {
-    encode_pdb_track_inline_string(value.map(str::trim).filter(|v| !v.is_empty()).unwrap_or(""))
+    encode_pdb_string(value.map(str::trim).filter(|v| !v.is_empty()).unwrap_or(""))
 }
 
 const PDB_TRACK_UNKNOWN_SLOT_2_DEFAULT: &str = "2";
@@ -225,7 +191,7 @@ pub fn encode_track_row_with_profile(
     profile: PdbLayoutProfile,
 ) -> BackendResult<Vec<u8>> {
     let string_start = 136usize;
-    let empty_inline = encode_pdb_track_inline_string("");
+    let empty_inline = encode_pdb_string("");
     let mut slot_bytes = vec![empty_inline; 21];
     slot_bytes[0] = encode_pdb_track_isrc_slot(track.isrc.as_deref());
     // Keep the reference-documented but still-unmapped slots structurally present
@@ -251,30 +217,30 @@ pub fn encode_track_row_with_profile(
             PDB_TRACK_UNKNOWN_PRE_OFFSETS_92_93_ALT,
         ),
     };
-    slot_bytes[2] = encode_pdb_track_inline_string(slot_2_default);
-    slot_bytes[3] = encode_pdb_track_inline_string(slot_3_default);
-    slot_bytes[6] = encode_pdb_track_inline_string(if track.publish_track_info_on == Some(true) {
+    slot_bytes[2] = encode_pdb_string(slot_2_default);
+    slot_bytes[3] = encode_pdb_string(slot_3_default);
+    slot_bytes[6] = encode_pdb_string(if track.publish_track_info_on == Some(true) {
         "ON"
     } else {
         ""
     });
-    slot_bytes[7] = encode_pdb_track_inline_string(if track.autoload_hotcues_on == Some(true) {
+    slot_bytes[7] = encode_pdb_string(if track.autoload_hotcues_on == Some(true) {
         "ON"
     } else {
         ""
     });
-    slot_bytes[10] = encode_pdb_track_inline_string(track.date_added.as_deref().unwrap_or(""));
-    slot_bytes[11] = encode_pdb_track_inline_string(track.release_date.as_deref().unwrap_or(""));
-    slot_bytes[14] = encode_pdb_track_range_string(&track.anlz_path);
-    slot_bytes[15] = encode_pdb_track_inline_string(track.date_added.as_deref().unwrap_or(""));
-    slot_bytes[16] = encode_pdb_track_inline_string(&sanitize_metadata(
+    slot_bytes[10] = encode_pdb_string(track.date_added.as_deref().unwrap_or(""));
+    slot_bytes[11] = encode_pdb_string(track.release_date.as_deref().unwrap_or(""));
+    slot_bytes[14] = encode_pdb_string(&track.anlz_path);
+    slot_bytes[15] = encode_pdb_string(track.date_added.as_deref().unwrap_or(""));
+    slot_bytes[16] = encode_pdb_string(&sanitize_metadata(
         track.dj_comment.as_deref().unwrap_or(""),
     ));
-    slot_bytes[17] = encode_pdb_track_range_string(&sanitize_metadata(&track.title));
-    slot_bytes[19] = encode_pdb_track_inline_string(&sanitize_metadata(
+    slot_bytes[17] = encode_pdb_string(&sanitize_metadata(&track.title));
+    slot_bytes[19] = encode_pdb_string(&sanitize_metadata(
         track.file_name.as_deref().unwrap_or(&track.file_path),
     ));
-    slot_bytes[20] = encode_pdb_track_path_string(&track.file_path);
+    slot_bytes[20] = encode_pdb_string(&track.file_path);
 
     let mut row = vec![0u8; string_start];
     let mut offsets = [0u16; 21];
@@ -555,7 +521,7 @@ mod tests {
         // The header's total_len field = 4 (header size) + char_count * 2 (code units).
         // With a trailing null it would be 4 + char_count * 2 + 2 instead.
         let path = "/Contents/Ünité/track.flac";
-        let encoded = encode_pdb_track_path_string(path);
+        let encoded = encode_pdb_string(path);
         // Format: 0x90 [len_lo] [len_hi] 0x00 [utf16le bytes...]
         assert_eq!(encoded[0], 0x90, "UTF-16 string marker");
         let total_len = u16::from_le_bytes([encoded[1], encoded[2]]) as usize;

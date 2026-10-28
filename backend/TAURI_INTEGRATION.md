@@ -56,7 +56,6 @@ Commands currently exposed in `backend/src/tauri_commands.rs`:
   - `scan_rekordbox_db`, `list_rekordbox_playlists`, `import_rekordbox_playlist`
   - `scan_mixxx_db`, `list_mixxx_playlists`, `import_mixxx_playlist`
   - `browse_source_files`
-  - `materialize_source_track`
   - `remove_tracks_by_source_roots`
   - `get_tracks_by_ids_with_previews`
 - Playlists:
@@ -98,7 +97,6 @@ Commands currently exposed in `backend/src/tauri_commands.rs`:
   - `cancel_essentia_download`
   - `remove_essentia`
 - Library identity:
-  - `materialize_source_track`
   - `resolve_track_identity`
 - Playback:
   - `resolve_playback_source`

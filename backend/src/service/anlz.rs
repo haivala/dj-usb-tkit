@@ -256,7 +256,7 @@ pub(crate) fn atomic_write_bytes(path: &Path, bytes: &[u8]) -> BackendResult<()>
     std::fs::create_dir_all(parent)?;
     let tmp_name = format!(
         ".{}.tmp.{}",
-        path.file_name().and_then(|s| s.to_str()).unwrap_or("anlz"),
+        path.file_name().and_then(|s| s.to_str()).unwrap_or("tmp"),
         Uuid::now_v7()
     );
     let tmp_path = parent.join(tmp_name);

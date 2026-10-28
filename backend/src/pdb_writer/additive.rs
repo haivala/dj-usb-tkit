@@ -1925,8 +1925,7 @@ pub(super) fn build_same_size_track_row_patch(
     patch_changed_track_scalars(&mut patched, &fields, desired);
 
     use crate::service::export_helpers::pdb_encoding::{
-        encode_pdb_track_inline_string, encode_pdb_track_isrc_slot, encode_pdb_track_path_string,
-        encode_pdb_track_range_string,
+        encode_pdb_string, encode_pdb_track_isrc_slot,
     };
     let string_patches_ok = patch_changed_string_slot(
         &mut patched,
@@ -1939,7 +1938,7 @@ pub(super) fn build_same_size_track_row_patch(
         &fields,
         "publish_track_info_on",
         6,
-        encode_pdb_track_inline_string(if desired.publish_track_info_on == Some(true) {
+        encode_pdb_string(if desired.publish_track_info_on == Some(true) {
             "ON"
         } else {
             ""
@@ -1949,7 +1948,7 @@ pub(super) fn build_same_size_track_row_patch(
         &fields,
         "autoload_hotcues_on",
         7,
-        encode_pdb_track_inline_string(if desired.autoload_hotcues_on == Some(true) {
+        encode_pdb_string(if desired.autoload_hotcues_on == Some(true) {
             "ON"
         } else {
             ""
@@ -1959,25 +1958,25 @@ pub(super) fn build_same_size_track_row_patch(
         &fields,
         "date_added",
         10,
-        encode_pdb_track_inline_string(desired.date_added.as_deref().unwrap_or("")),
+        encode_pdb_string(desired.date_added.as_deref().unwrap_or("")),
     ) && patch_changed_string_slot(
         &mut patched,
         &fields,
         "release_date",
         11,
-        encode_pdb_track_inline_string(desired.release_date.as_deref().unwrap_or("")),
+        encode_pdb_string(desired.release_date.as_deref().unwrap_or("")),
     ) && patch_changed_string_slot(
         &mut patched,
         &fields,
         "anlz_path",
         14,
-        encode_pdb_track_range_string(&desired.anlz_path),
+        encode_pdb_string(&desired.anlz_path),
     ) && patch_changed_string_slot(
         &mut patched,
         &fields,
         "dj_comment",
         16,
-        encode_pdb_track_inline_string(&sanitize_metadata(
+        encode_pdb_string(&sanitize_metadata(
             desired.dj_comment.as_deref().unwrap_or(""),
         )),
     ) && patch_changed_string_slot(
@@ -1985,12 +1984,12 @@ pub(super) fn build_same_size_track_row_patch(
         &fields,
         "title",
         17,
-        encode_pdb_track_range_string(&sanitize_metadata(&desired.title)),
+        encode_pdb_string(&sanitize_metadata(&desired.title)),
     ) && {
         // Slot 19 (filename) is followed by alignment padding to keep slot 20 (UTF-16 path)
         // at a 4-byte aligned offset. Include that same padding in the desired bytes so the
         // same-size check passes.
-        let raw = encode_pdb_track_inline_string(&sanitize_metadata(
+        let raw = encode_pdb_string(&sanitize_metadata(
             desired.file_name.as_deref().unwrap_or(&desired.file_path),
         ));
         let slot19_start = read_u16_le_at(&patched, 94 + 19 * 2)
@@ -2005,7 +2004,7 @@ pub(super) fn build_same_size_track_row_patch(
         &fields,
         "file_path",
         20,
-        encode_pdb_track_path_string(&desired.file_path),
+        encode_pdb_string(&desired.file_path),
     );
 
     if string_patches_ok {

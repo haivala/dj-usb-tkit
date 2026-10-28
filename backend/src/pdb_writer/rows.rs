@@ -272,37 +272,3 @@ pub(crate) fn max_seqpage_in_file(bytes: &[u8], page_size: usize) -> u32 {
     }
     out
 }
-
-/// Validate that no data page in a table chain has zero rows.
-/// Empty data pages mid-chain can break desktop library software.
-pub fn validate_no_empty_data_pages(
-    bytes: &[u8],
-    page_size: usize,
-    table_type: u32,
-    first: u32,
-    last: u32,
-) -> crate::error::BackendResult<()> {
-    let chain = collect_chain_pages(bytes, page_size, first, last).ok_or_else(|| {
-        crate::error::BackendError::Validation(format!(
-            "PDB validation failed: invalid t{table_type:02} chain"
-        ))
-    })?;
-    for &page_idx in chain.iter().skip(1) {
-        let Some(off) = page_offset(page_idx, page_size) else {
-            continue;
-        };
-        let flags = bytes.get(off + 0x1b).copied().unwrap_or(0);
-        if flags & 0x40 != 0 {
-            continue;
-        }
-        let used_size = read_u16_le_at(bytes, off + 30).unwrap_or(0);
-        let nrs = bytes.get(off + 0x18).copied().unwrap_or(0);
-        if used_size == 0 && nrs == 0 {
-            return Err(crate::error::BackendError::Validation(format!(
-                "PDB validation failed: t{table_type:02} data page {page_idx} has 0 rows \
-                 (empty data pages in chain can break desktop library software)"
-            )));
-        }
-    }
-    Ok(())
-}

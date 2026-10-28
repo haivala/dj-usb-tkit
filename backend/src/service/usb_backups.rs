@@ -117,14 +117,15 @@ fn most_recent_backup_playlist_count(usb_root: &Path) -> Option<usize> {
         .find_map(|timestamp| read_backup_marker(&dirs, &timestamp).and_then(|m| m.playlist_count))
 }
 
-fn move_file(src: &Path, dest: &Path) -> std::io::Result<()> {
+/// Best-effort rename, falling back to copy + remove when the source and
+/// destination are on different filesystems (USB -> internal HDD).
+pub(super) fn move_file(src: &Path, dest: &Path) -> std::io::Result<()> {
     if let Some(parent) = dest.parent() {
         std::fs::create_dir_all(parent)?;
     }
     if std::fs::rename(src, dest).is_ok() {
         return Ok(());
     }
-    // rename fails across filesystems (USB -> internal HDD): fall back to copy + remove.
     std::fs::copy(src, dest)?;
     std::fs::remove_file(src)
 }

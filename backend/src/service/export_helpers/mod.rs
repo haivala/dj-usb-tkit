@@ -31,7 +31,7 @@ pub use crate::edb::{
     upsert_export_playlist_row,
 };
 pub(crate) use crate::metadata::sanitize_metadata;
-pub use crate::pdb_writer::{T08EntryKey, validate_no_empty_data_pages};
+pub use crate::pdb_writer::T08EntryKey;
 #[cfg(test)]
 pub use export_paths::canonical_artwork_target_path;
 pub use export_paths::{
@@ -41,7 +41,7 @@ pub use export_paths::{
     copy_if_different, copy_wav_normalized_if_needed, ensure_analysis_bundle_ppth,
     export_analysis_bundle_for_track, export_artwork_for_player, export_owned_files_setting_key,
     exported_media_target_path, exported_media_target_path_with_ordinal,
-    filter_prunable_stale_paths_for_playlist, is_safe_export_owned_path, limit_contents_file_name,
+    filter_prunable_stale_paths_for_playlist, is_safe_export_owned_path,
     limit_contents_file_name_with_suffix, normalize_owned_export_path,
     prune_stale_export_owned_files, sanitize_contents_component, sanitize_contents_file_name,
     sanitize_filename_component, stable_u32_hash, to_usb_relative_path, truncate_component,

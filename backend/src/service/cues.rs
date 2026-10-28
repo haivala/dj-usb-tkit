@@ -213,14 +213,6 @@ pub fn collapse_anlz_cues(bytes: &[u8]) -> Vec<TrackCue> {
     out
 }
 
-/// Stage the device `export.pdb` and build its bytes with the t00 tempo and/or
-/// key of the track at `media_path` set to `bpm` / `key` -- the same values the
-/// USB save writes to the ANLZ beat grid and eDB `content`, so the three never
-/// disagree (older CDJs read the PDB). Tempo uses export's `round(bpm*100)`; a
-/// key the PDB doesn't have yet gets a new t05 row, matched with export's own
-/// rule (`key_names_match`). Returns the staged path + new bytes to write, or
-/// `None` when nothing changes. Nothing is written here, so the caller can
-/// block before touching the device.
 /// The page size from a PDB file header.
 pub(super) fn pdb_page_size(bytes: &[u8]) -> BackendResult<usize> {
     bytes
@@ -293,6 +285,14 @@ pub(super) fn pdb_track_by_media_path<'a>(
         })
 }
 
+/// Stage the device `export.pdb` and build its bytes with the t00 tempo and/or
+/// key of the track at `media_path` set to `bpm` / `key` -- the same values the
+/// USB save writes to the ANLZ beat grid and eDB `content`, so the three never
+/// disagree (older CDJs read the PDB). Tempo uses export's `round(bpm*100)`; a
+/// key the PDB doesn't have yet gets a new t05 row, matched with export's own
+/// rule (`key_names_match`). Returns the staged path + new bytes to write, or
+/// `None` when nothing changes. Nothing is written here, so the caller can
+/// block before touching the device.
 fn build_pdb_track_patch(
     usb_root: &Path,
     media_path: &str,

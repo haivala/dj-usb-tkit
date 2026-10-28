@@ -791,22 +791,6 @@ function installPagedMaterializeAnalyzeMock(page, opts = {}) {
               data: { trackId: row.localTrackId, resolvedBy: "materialized", materialized: true }
             };
           }
-          if (command === "materialize_source_track") {
-            materializeCalls += 1;
-            if (materializeFails) {
-              return { ok: false, error: { code: "INTERNAL_ERROR", message: "materialize failed" } };
-            }
-            const filePath = String(payload?.request?.filePath || "");
-            const row = tracks.find((t) => t.filePath === filePath);
-            if (!row) {
-              return { ok: false, error: { code: "NOT_FOUND", message: "path not found" } };
-            }
-            if (!row.localTrackId) {
-              const suffix = String(row.filePath).replace(/[^0-9]+/g, "") || "1";
-              row.localTrackId = `ml-${suffix}`;
-            }
-            return { ok: true, data: { trackId: row.localTrackId } };
-          }
           if (command === "analyze_new_tracks") {
             const req = payload?.request || {};
             const ids = Array.isArray(req.trackIds) ? req.trackIds.map((v) => String(v)) : [];

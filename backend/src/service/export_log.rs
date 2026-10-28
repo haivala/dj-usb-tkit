@@ -8,6 +8,7 @@ use crate::models::{UsbHistory, UsbTrack};
 
 use super::diagnostics::track_identity_key;
 use super::export_helpers::{ExportManifest, ExportPlaylistData};
+use super::usb_backups::move_file;
 use super::usb_identity::app_marker_dir;
 use super::usb_vendor_compat::vendor_db_dir;
 
@@ -70,20 +71,6 @@ fn legacy_export_log_path(usb_root: &Path) -> PathBuf {
     vendor_db_dir(usb_root).join(EXPORT_LOG_FILE_NAME)
 }
 
-/// Best-effort rename, falling back to copy+remove when the source and
-/// destination are on different filesystems (e.g. USB -> internal HDD
-/// staging cache), same fallback `usb_backups::move_file` uses.
-fn migrate_file(src: &Path, dest: &Path) -> std::io::Result<()> {
-    if let Some(parent) = dest.parent() {
-        std::fs::create_dir_all(parent)?;
-    }
-    if std::fs::rename(src, dest).is_ok() {
-        return Ok(());
-    }
-    std::fs::copy(src, dest)?;
-    std::fs::remove_file(src)
-}
-
 /// Appends this export's record to the drive's log and returns it.
 pub(crate) fn append_export_log_record(
     usb_root: &Path,
@@ -131,7 +118,7 @@ pub(crate) fn load_export_log(usb_root: &Path) -> BackendResult<Option<UsbExport
         // saves land at the new path. If the move itself fails (e.g. a
         // read-only drive), fall back to reading the legacy file in place
         // rather than losing the log entirely.
-        if migrate_file(&legacy_path, &path).is_err() {
+        if move_file(&legacy_path, &path).is_err() {
             path = legacy_path;
         }
     }
