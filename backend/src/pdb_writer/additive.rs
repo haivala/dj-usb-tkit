@@ -1298,9 +1298,9 @@ pub(crate) fn remove_t08_entries_in_place(
 /// Fixed width of a tt=19 (history_runtime) row.
 pub(crate) const T19_ROW_LEN: usize = 40;
 
-/// The single tt=19 row of an empty-device template (`initialize_usb`
-/// seeds it; rekordbox's own template carries the same row with its own
-/// date).
+/// The single tt=19 row of an empty-device template, with the date of the
+/// rekordbox-initialized USB it was copied from. `initialize_usb` seeds the
+/// same row with its own date ([`t19_template_row`]).
 pub(crate) const T19_TEMPLATE_ROW: [u8; T19_ROW_LEN] = [
     0x80, 0x02, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x17, 0x32, 0x30, 0x32,
     0x36, 0x2d, 0x30, 0x33, 0x2d, 0x30, 0x36, 0x19, 0x1e, 0x0b, 0x31, 0x30, 0x30, 0x30, 0x03, 0x00,
@@ -1419,6 +1419,19 @@ fn t19_slot_row(prop: &T19Property, slot: usize, id: u32) -> Vec<u8> {
     row.extend_from_slice(&name);
     row.resize(align4(row.len() + 4).max(T19_ROW_LEN), 0);
     row
+}
+
+/// The single tt=19 row `initialize_usb` seeds: [`T19_TEMPLATE_ROW`] with
+/// `created_date`, the date the eDB's `property.createdDate` gets. rekordbox's
+/// own init stamps both with the day it initializes the USB.
+pub(crate) fn t19_template_row(created_date: &str) -> Vec<u8> {
+    let prop = T19Property {
+        created_date: created_date.to_string(),
+        db_version: "1000".to_string(),
+        device_name: None,
+        background_color: 0,
+    };
+    t19_slot_row(&prop, 0, 0)
 }
 
 /// Most rows a tt=19 page holds when slot 0 is `row0_len` bytes and every

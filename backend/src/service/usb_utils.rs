@@ -1018,6 +1018,10 @@ pub fn initialize_usb(root: &Path) -> BackendResult<crate::models::InitializeUsb
         root.join(USB_CONTENTS_DIR),
     ];
 
+    // The day the USB is initialized: the eDB's `property.createdDate` and
+    // the t19 template row carry it, as on a USB rekordbox initializes.
+    let created_date = chrono::Local::now().format("%Y-%m-%d").to_string();
+
     let mut created = Vec::new();
     for dir in &dirs_to_create {
         if !dir.exists() {
@@ -1034,7 +1038,7 @@ pub fn initialize_usb(root: &Path) -> BackendResult<crate::models::InitializeUsb
         super::usb_staging::commit_and_write_back(
             root,
             super::usb_staging::DbKind::Pdb,
-            &build_fullshape_pdb_bytes(),
+            &build_fullshape_pdb_bytes(&created_date),
         )?;
         created.push(pdb_file.to_string_lossy().to_string());
     }
@@ -1057,7 +1061,7 @@ pub fn initialize_usb(root: &Path) -> BackendResult<crate::models::InitializeUsb
         if let Some(parent) = local_edb_path.parent() {
             std::fs::create_dir_all(parent)?;
         }
-        initialize_fullshape_edb(&local_edb_path)?;
+        initialize_fullshape_edb(&local_edb_path, &created_date)?;
         super::usb_staging::write_back_if_changed(root, super::usb_staging::DbKind::Edb)?;
         created.push(edb_file.to_string_lossy().to_string());
     }
@@ -1068,11 +1072,11 @@ pub fn initialize_usb(root: &Path) -> BackendResult<crate::models::InitializeUsb
     })
 }
 
-fn initialize_fullshape_edb(db_path: &Path) -> BackendResult<()> {
+fn initialize_fullshape_edb(db_path: &Path, created_date: &str) -> BackendResult<()> {
     let conn = rusqlite::Connection::open(db_path)?;
     conn.execute_batch(&format!("PRAGMA key='{DEFAULT_USB_EDB_KEY}';"))?;
     conn.execute_batch(EDB_SCHEMA)?;
-    seed_edb_defaults(&conn)?;
+    seed_edb_defaults(&conn, created_date)?;
     Ok(())
 }
 
@@ -1105,11 +1109,11 @@ CREATE INDEX index_myTag_content_myTag_id on myTag_content(myTag_id);
 CREATE INDEX index_playlist_content_playlist_id on playlist_content(playlist_id);
 "#;
 
-fn seed_edb_defaults(conn: &rusqlite::Connection) -> BackendResult<()> {
+fn seed_edb_defaults(conn: &rusqlite::Connection, created_date: &str) -> BackendResult<()> {
     // property
     conn.execute(
-        "INSERT INTO property (deviceName, dbVersion, numberOfContents, createdDate, backGroundColorType, myTagMasterDBID) VALUES ('', '1000', 0, date('now'), 0, 969967066)",
-        [],
+        "INSERT INTO property (deviceName, dbVersion, numberOfContents, createdDate, backGroundColorType, myTagMasterDBID) VALUES ('', '1000', 0, ?1, 0, 969967066)",
+        [created_date],
     )?;
 
     // color (8 standard player colors)
@@ -1270,7 +1274,7 @@ fn seed_edb_defaults(conn: &rusqlite::Connection) -> BackendResult<()> {
     Ok(())
 }
 
-fn build_fullshape_pdb_bytes() -> Vec<u8> {
+fn build_fullshape_pdb_bytes(created_date: &str) -> Vec<u8> {
     use crate::pdb_writer::{PdbData, standard_colors, standard_columns_raw, write_pdb};
     let data = PdbData {
         colors: standard_colors(),
@@ -1278,7 +1282,7 @@ fn build_fullshape_pdb_bytes() -> Vec<u8> {
         ..PdbData::empty()
     };
     let mut bytes = write_pdb(&data).expect("build empty PDB");
-    seed_rb_initialized_history_shape(&mut bytes);
+    seed_rb_initialized_history_shape(&mut bytes, created_date);
     // The fresh writer starts seq_counter at 100, leaving seqdb=102 in the template.
     // Reset seqdb to 34 — template max_seqpage is now 31 (from tt=19 seq=31, matching
     // reference exporter template), so seqdb=34 satisfies seqdb > max_seqpage. The additive writer
@@ -1289,7 +1293,7 @@ fn build_fullshape_pdb_bytes() -> Vec<u8> {
     bytes
 }
 
-fn seed_rb_initialized_history_shape(bytes: &mut [u8]) {
+fn seed_rb_initialized_history_shape(bytes: &mut [u8], created_date: &str) {
     use crate::utils::{set_table_ptr_fields, write_u8_at, write_u16_le_at, write_u32_le_at};
     const PAGE_SIZE: usize = 4096;
     if bytes.len() < PAGE_SIZE * 40 {
@@ -1444,7 +1448,7 @@ fn seed_rb_initialized_history_shape(bytes: &mut [u8]) {
             seq: 31,
             u3: 0x20,
         },
-        &[&crate::pdb_writer::T19_TEMPLATE_ROW],
+        &[&crate::pdb_writer::t19_template_row(created_date)],
         &[0x0001],
         &[0x0001],
     );
@@ -2202,6 +2206,14 @@ mod diag_tests {
                 && parsed.playlist_entries.is_empty(),
             "initialized PDB should be valid and empty"
         );
+
+        // The t19 template row and the eDB's createdDate both carry today.
+        let today = chrono::Local::now().format("%Y-%m-%d").to_string();
+        let pdb = std::fs::read(vendor_pdb_path(&tmp)).unwrap();
+        let row0 = 40 * 4096 + 0x28;
+        assert_eq!(&pdb[row0 + 13..row0 + 23], today.as_bytes());
+        let property = crate::service::export_helpers::edb_t19_property(&tmp).expect("eDB");
+        assert_eq!(property.created_date, today);
 
         // Running initialize again should be idempotent (no error)
         let result2 = initialize_usb(&tmp).unwrap();

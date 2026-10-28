@@ -465,8 +465,8 @@ CDJ-2000NXS2's highlight from blue to purple).
 The writer builds the rows from the eDB's `property` row (`T19Property`,
 read by `edb_t19_property` after the eDB export has updated it). Without a
 readable eDB, a page keeps the property its rows carry. `initialize_usb`
-seeds the template row with a fixed date (`T19_TEMPLATE_ROW`) while the eDB
-gets the day's `createdDate`; the first export with tracks replaces it.
+stamps the template row and the eDB's `createdDate` with the same date, the
+day it initializes the USB, as rekordbox's own init does.
 
 In every one, `rowpf` marks the newest id's slot, `tranrf` that slot plus the
 slot of the id before it, and `num_rl` is the lower of those two slots. The

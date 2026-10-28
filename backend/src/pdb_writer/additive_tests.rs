@@ -3085,6 +3085,15 @@ fn named_t19_ring_matches_rekordbox() {
 }
 
 #[test]
+fn t19_template_row_is_rekordbox_template_with_its_date() {
+    assert_eq!(t19_template_row("2026-03-06"), T19_TEMPLATE_ROW.to_vec());
+    let row = t19_template_row("2026-10-28");
+    assert_eq!(&row[13..23], b"2026-10-28");
+    assert_eq!(row[..13], T19_TEMPLATE_ROW[..13]);
+    assert_eq!(row[23..], T19_TEMPLATE_ROW[23..]);
+}
+
+#[test]
 fn non_ascii_t19_names_match_rekordbox_rows() {
     // rekordbox's rows after renaming a reference USB: a non-ASCII name is
     // a UTF-16 long string, moved from offset 30 to 32 (`19 20`) so its

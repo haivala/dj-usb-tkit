@@ -48,6 +48,8 @@
 - **Fix:** A drive name with non-ASCII characters (ä, ö, é, …) is written into the player history
   page the way rekordbox writes it, aligned where older CDJs expect it. Every named drive's history
   rows now also have rekordbox's length.
+- **Fix:** A newly initialized USB carries the day it was initialized in the PDB as well as the eDB,
+  like a USB rekordbox initializes. Before, the PDB got a fixed date.
 
 ## 0.4.8
 

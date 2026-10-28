@@ -2694,8 +2694,8 @@ fn export_preserves_t17_t18_seed_shape_and_allows_t19_runtime_rows() {
     assert_eq!(u16le(p40 + 0x22), 3);
     assert_eq!(u16le(p40 + ps - 4), 0x0010);
     assert_eq!(u16le(p40 + ps - 2), 0x0018);
-    // Row 0 is the template row with the eDB's `createdDate` (the template
-    // carries a fixed one). Row 1 copies it with the runtime sequence
+    // Row 0 is the template row with the eDB's `createdDate`, which
+    // `initialize_usb` stamped into both. Row 1 copies it with the runtime sequence
     // patched in: 0x00000280 + i*0x00200000, then i.
     let row0 = p40 + 40;
     let row1 = row0 + 40;
