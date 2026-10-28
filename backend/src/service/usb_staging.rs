@@ -500,20 +500,7 @@ fn commit_local_to_usb(
     local_path: &Path,
 ) -> BackendResult<()> {
     let dest = vendor_path(usb_root, kind);
-
-    // External-modification guard: if the USB source has moved since we last
-    // synced with it, don't silently clobber whatever changed it.
-    let state = load_state(device_dir);
-    if let Some(recorded) = state.files.get(kind.state_key())
-        && dest.exists()
-        && let Ok(current) = stat(&dest)
-        && current != recorded.source
-    {
-        return Err(BackendError::Internal(format!(
-            "USB database changed since it was last read ({}) -- re-open and retry to avoid discarding the external change",
-            dest.display()
-        )));
-    }
+    ensure_usb_copy_unchanged(device_dir, kind, &dest)?;
 
     if let Some(parent) = dest.parent() {
         std::fs::create_dir_all(parent)?;
@@ -540,6 +527,62 @@ fn commit_local_to_usb(
     let _ = save_state(device_dir, &state);
 
     Ok(())
+}
+
+/// External-modification guard: if the USB source has moved since we last
+/// synced with it, don't silently clobber whatever changed it.
+fn ensure_usb_copy_unchanged(device_dir: &Path, kind: DbKind, dest: &Path) -> BackendResult<()> {
+    let state = load_state(device_dir);
+    if let Some(recorded) = state.files.get(kind.state_key())
+        && dest.exists()
+        && let Ok(current) = stat(dest)
+        && current != recorded.source
+    {
+        return Err(BackendError::Internal(format!(
+            "USB database changed since it was last read ({}) -- re-open and retry to avoid discarding the external change",
+            dest.display()
+        )));
+    }
+    Ok(())
+}
+
+/// Fails when the USB copy of `kind` changed since it was staged, so a
+/// caller writing back several databases can find out before writing any.
+pub(crate) fn check_write_back(usb_root: &Path, kind: DbKind) -> BackendResult<()> {
+    let Some(device_dir) = cache_root().map(|root| root.join(resolve_cache_key(usb_root))) else {
+        return Ok(());
+    };
+    let _guard = STATE_LOCK.lock().unwrap();
+    ensure_usb_copy_unchanged(&device_dir, kind, &vendor_path(usb_root, kind))
+}
+
+/// Drops the local changes to a staged database and stages it again from
+/// the USB, so the local copy matches the drive.
+pub(crate) fn restage_from_usb(usb_root: &Path, kind: DbKind) -> BackendResult<PathBuf> {
+    let cache_root = cache_root();
+    if let Some(device_dir) = cache_root
+        .as_ref()
+        .map(|root| root.join(resolve_cache_key(usb_root)))
+    {
+        let local_path = local_vendor_db_dir(&device_dir).join(kind.filename());
+        let _guard = STATE_LOCK.lock().unwrap();
+        for suffix in ["", "-wal", "-shm"] {
+            let mut path = local_path.clone().into_os_string();
+            path.push(suffix);
+            match std::fs::remove_file(&path) {
+                Ok(()) => {}
+                Err(err) if err.kind() == std::io::ErrorKind::NotFound => {}
+                Err(err) => return Err(err.into()),
+            }
+        }
+    }
+    stage_file_with_root(
+        cache_root.as_deref(),
+        usb_root,
+        &vendor_path(usb_root, kind),
+        kind,
+        true,
+    )
 }
 
 /// Write-back for byte-buffer writers (PDB): `local_bytes` are the exact

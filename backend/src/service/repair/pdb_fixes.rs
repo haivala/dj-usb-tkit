@@ -8,20 +8,14 @@ pub(super) struct PdbHeaderCompatibilityRepair {
     pub(super) target_value: u32,
 }
 
-pub(super) fn pdb_header_compatibility_value_from_bytes(bytes: &[u8]) -> Option<u32> {
+pub(in crate::service) fn pdb_header_compatibility_value_from_bytes(bytes: &[u8]) -> Option<u32> {
     bytes
         .get(0x10..0x14)
         .and_then(|raw| raw.try_into().ok())
         .map(u32::from_le_bytes)
 }
 
-pub(super) fn read_pdb_header_compatibility_value(path: &Path) -> Option<u32> {
-    std::fs::read(path)
-        .ok()
-        .and_then(|bytes| pdb_header_compatibility_value_from_bytes(&bytes))
-}
-
-pub(super) fn is_known_pdb_header_compatibility_value(value: u32) -> bool {
+pub(in crate::service) fn is_known_pdb_header_compatibility_value(value: u32) -> bool {
     matches!(value, 1 | PDB_HEADER_COMPATIBILITY_FALLBACK_VALUE)
 }
 
@@ -34,9 +28,9 @@ pub(super) fn is_known_pdb_header_compatibility_value(value: u32) -> bool {
 /// just sets up the next export to flag drift back toward `5`. Only an
 /// actually-unknown value is worth repairing.
 pub(super) fn detect_pdb_header_compatibility_repair(
-    staged_pdb_path: &Path,
+    bytes: &[u8],
 ) -> Option<PdbHeaderCompatibilityRepair> {
-    let current_value = read_pdb_header_compatibility_value(staged_pdb_path)?;
+    let current_value = pdb_header_compatibility_value_from_bytes(bytes)?;
     if is_known_pdb_header_compatibility_value(current_value) {
         return None;
     }
@@ -47,25 +41,18 @@ pub(super) fn detect_pdb_header_compatibility_repair(
 }
 
 pub(super) fn apply_pdb_header_compatibility_repair(
-    usb_root: &Path,
+    bytes: &mut [u8],
     repair: &PdbHeaderCompatibilityRepair,
 ) -> BackendResult<bool> {
-    let pdb_path = usb_staging::stage_pdb(usb_root)?;
-    let bytes = std::fs::read(&pdb_path)?;
-    let Some(current_value) = pdb_header_compatibility_value_from_bytes(&bytes) else {
-        return Err(BackendError::Validation(format!(
-            "PDB is too small to patch header compatibility field: {}",
-            pdb_path.display()
-        )));
+    let Some(current_value) = pdb_header_compatibility_value_from_bytes(bytes) else {
+        return Err(BackendError::Validation(
+            "PDB is too small to patch header compatibility field".into(),
+        ));
     };
     if current_value != repair.current_value {
         return Ok(false);
     }
-
-    let mut file = OpenOptions::new().write(true).open(&pdb_path)?;
-    file.seek(SeekFrom::Start(0x10))?;
-    file.write_all(&repair.target_value.to_le_bytes())?;
-    file.sync_data()?;
+    bytes[0x10..0x14].copy_from_slice(&repair.target_value.to_le_bytes());
     Ok(true)
 }
 
@@ -75,36 +62,30 @@ pub(super) fn apply_pdb_header_compatibility_repair(
 /// or whose name, color or version differs (see
 /// [`crate::pdb_writer::t19_sync_target`]).
 pub(in crate::service) fn detect_pdb_t19_template_state(
-    pdb_path: &Path,
+    bytes: &[u8],
     track_count: usize,
     property: Option<&crate::pdb_writer::T19Property>,
 ) -> bool {
-    let Ok(bytes) = std::fs::read(pdb_path) else {
-        return false;
-    };
-    let page_size = crate::utils::read_u32_le_at(&bytes, 4).unwrap_or(0) as usize;
-    crate::pdb_writer::t19_sync_target(&bytes, page_size, track_count, property).is_some()
+    let page_size = crate::utils::read_u32_le_at(bytes, 4).unwrap_or(0) as usize;
+    crate::pdb_writer::t19_sync_target(bytes, page_size, track_count, property).is_some()
 }
 
 /// Rewrite tt=19 as the ring rekordbox keeps for the PDB's track count and
-/// the eDB's `property` row. Re-checks the current file, so it is a no-op
+/// the eDB's `property` row. Re-checks the current bytes, so it is a no-op
 /// (`Ok(false)`) once the page matches. Touches only that page, its
 /// sentinel and the header's seqdb.
 pub(in crate::service) fn apply_pdb_t19_template_state_repair(
-    usb_root: &Path,
+    bytes: &mut [u8],
+    property: Option<&crate::pdb_writer::T19Property>,
 ) -> BackendResult<bool> {
-    let pdb_path = usb_staging::stage_pdb(usb_root)?;
-    let mut bytes = std::fs::read(&pdb_path)?;
-    let track_count = crate::pdb_reader::parse_pdb_bytes(&bytes)?.tracks.len();
-    let page_size = crate::utils::read_u32_le_at(&bytes, 4).unwrap_or(0) as usize;
-    let property = crate::service::export_helpers::edb_t19_property(usb_root);
+    let track_count = crate::pdb_reader::parse_pdb_bytes(bytes)?.tracks.len();
+    let page_size = crate::utils::read_u32_le_at(bytes, 4).unwrap_or(0) as usize;
     let Some((track_count, property)) =
-        crate::pdb_writer::t19_sync_target(&bytes, page_size, track_count, property.as_ref())
+        crate::pdb_writer::t19_sync_target(bytes, page_size, track_count, property)
     else {
         return Ok(false);
     };
-    crate::pdb_writer::sync_t19_ring_page(&mut bytes, page_size, track_count, &property)?;
-    std::fs::write(&pdb_path, &bytes)?;
+    crate::pdb_writer::sync_t19_ring_page(bytes, page_size, track_count, &property)?;
     Ok(true)
 }
 
@@ -120,14 +101,11 @@ pub(in crate::service) struct SentinelU5Page {
 }
 
 pub(in crate::service) fn detect_pdb_sentinel_u5_on_data_pages(
-    pdb_path: &Path,
+    bytes: &[u8],
 ) -> Vec<SentinelU5Page> {
     use crate::pdb_writer::data_page_footer_fields;
     use crate::utils::{read_u8_at, read_u16_le_at, read_u32_le_at};
-    let Ok(bytes) = std::fs::read(pdb_path) else {
-        return Vec::new();
-    };
-    let Some(page_size) = read_u32_le_at(&bytes, 4).map(|v| v as usize) else {
+    let Some(page_size) = read_u32_le_at(bytes, 4).map(|v| v as usize) else {
         return Vec::new();
     };
     if page_size == 0 || bytes.len() < page_size * 2 {
@@ -137,27 +115,27 @@ pub(in crate::service) fn detect_pdb_sentinel_u5_on_data_pages(
     let mut out = Vec::new();
     for i in 1..total {
         let off = i * page_size;
-        let Some(idx) = read_u32_le_at(&bytes, off + 4) else {
+        let Some(idx) = read_u32_le_at(bytes, off + 4) else {
             continue;
         };
         if idx == 0 {
             continue; // blank/zeroed page
         }
-        let Some(used_s) = read_u16_le_at(&bytes, off + 0x1e) else {
+        let Some(used_s) = read_u16_le_at(bytes, off + 0x1e) else {
             continue;
         };
         if used_s == 0 {
             continue; // sentinel/fence page — u5=8191 is expected here
         }
-        let Some(u5) = read_u16_le_at(&bytes, off + 0x20) else {
+        let Some(u5) = read_u16_le_at(bytes, off + 0x20) else {
             continue;
         };
         if u5 != 0x1FFF {
             continue;
         }
-        let table_type = read_u32_le_at(&bytes, off + 8).unwrap_or(9999);
-        let nrs = read_u8_at(&bytes, off + 24).unwrap_or(0);
-        let current_num_rl = read_u16_le_at(&bytes, off + 0x22).unwrap_or(0);
+        let table_type = read_u32_le_at(bytes, off + 8).unwrap_or(9999);
+        let nrs = read_u8_at(bytes, off + 24).unwrap_or(0);
+        let current_num_rl = read_u16_le_at(bytes, off + 0x22).unwrap_or(0);
         let (correct_u5, correct_num_rl) = data_page_footer_fields(table_type, nrs as u16);
         out.push(SentinelU5Page {
             page_index: i,
@@ -170,15 +148,13 @@ pub(in crate::service) fn detect_pdb_sentinel_u5_on_data_pages(
 }
 
 pub(super) fn apply_pdb_sentinel_u5_repair(
-    usb_root: &Path,
+    bytes: &mut [u8],
     pages: &[SentinelU5Page],
 ) -> BackendResult<usize> {
     if pages.is_empty() {
         return Ok(0);
     }
-    let pdb_path = usb_staging::stage_pdb(usb_root)?;
-    let mut bytes = std::fs::read(&pdb_path)?;
-    let page_size = pdb_page_size(&bytes)?;
+    let page_size = pdb_page_size(bytes)?;
     let mut patched = 0usize;
     for page in pages {
         let off = page.page_index * page_size;
@@ -193,7 +169,6 @@ pub(super) fn apply_pdb_sentinel_u5_repair(
         }
         patched += 1;
     }
-    std::fs::write(&pdb_path, &bytes)?;
     Ok(patched)
 }
 
@@ -203,14 +178,10 @@ pub(super) fn apply_pdb_sentinel_u5_repair(
 /// the raw PDB byte image with no dependency on eDB or merged-playlist
 /// state, and it's idempotent (a second call on an already-clean PDB
 /// returns 0 and leaves the bytes untouched).
-pub(super) fn apply_pdb_duplicate_playlist_entries_repair(usb_root: &Path) -> BackendResult<usize> {
-    let pdb_path = usb_staging::stage_pdb(usb_root)?;
-    let mut bytes = std::fs::read(&pdb_path)?;
-    let removed = crate::pdb_writer::remove_duplicate_playlist_entries_inplace(&mut bytes);
-    if removed > 0 {
-        std::fs::write(&pdb_path, &bytes)?;
-    }
-    Ok(removed)
+pub(super) fn apply_pdb_duplicate_playlist_entries_repair(
+    bytes: &mut [u8],
+) -> BackendResult<usize> {
+    Ok(crate::pdb_writer::remove_duplicate_playlist_entries_inplace(bytes))
 }
 
 pub(super) fn expected_page_flags(table_type: u32) -> u8 {
@@ -237,12 +208,9 @@ pub(in crate::service) struct WrongFlagsPage {
     pub(in crate::service) correct_flags: u8,
 }
 
-pub(in crate::service) fn detect_pdb_wrong_page_flags(pdb_path: &Path) -> Vec<WrongFlagsPage> {
+pub(in crate::service) fn detect_pdb_wrong_page_flags(bytes: &[u8]) -> Vec<WrongFlagsPage> {
     use crate::utils::{read_u8_at, read_u16_le_at, read_u32_le_at};
-    let Ok(bytes) = std::fs::read(pdb_path) else {
-        return Vec::new();
-    };
-    let Some(page_size) = read_u32_le_at(&bytes, 4).map(|v| v as usize) else {
+    let Some(page_size) = read_u32_le_at(bytes, 4).map(|v| v as usize) else {
         return Vec::new();
     };
     if page_size == 0 || bytes.len() < page_size * 2 {
@@ -252,18 +220,18 @@ pub(in crate::service) fn detect_pdb_wrong_page_flags(pdb_path: &Path) -> Vec<Wr
     let mut out = Vec::new();
     for i in 1..total {
         let off = i * page_size;
-        let Some(idx) = read_u32_le_at(&bytes, off + 4) else {
+        let Some(idx) = read_u32_le_at(bytes, off + 4) else {
             continue;
         };
         if idx == 0 {
             continue;
         }
-        let used_s = read_u16_le_at(&bytes, off + 0x1e).unwrap_or(0);
+        let used_s = read_u16_le_at(bytes, off + 0x1e).unwrap_or(0);
         if used_s == 0 {
             continue; // sentinel/fence page — skip
         }
-        let table_type = read_u32_le_at(&bytes, off + 8).unwrap_or(9999);
-        let flags = read_u8_at(&bytes, off + 0x1b).unwrap_or(0);
+        let table_type = read_u32_le_at(bytes, off + 8).unwrap_or(9999);
+        let flags = read_u8_at(bytes, off + 0x1b).unwrap_or(0);
         if !is_valid_page_flags(table_type, flags) {
             out.push(WrongFlagsPage {
                 page_index: i,
@@ -275,15 +243,13 @@ pub(in crate::service) fn detect_pdb_wrong_page_flags(pdb_path: &Path) -> Vec<Wr
 }
 
 pub(super) fn apply_pdb_wrong_page_flags_repair(
-    usb_root: &Path,
+    bytes: &mut [u8],
     pages: &[WrongFlagsPage],
 ) -> BackendResult<usize> {
     if pages.is_empty() {
         return Ok(0);
     }
-    let pdb_path = usb_staging::stage_pdb(usb_root)?;
-    let mut bytes = std::fs::read(&pdb_path)?;
-    let page_size = pdb_page_size(&bytes)?;
+    let page_size = pdb_page_size(bytes)?;
     let mut patched = 0usize;
     for page in pages {
         let off = page.page_index * page_size + 0x1b;
@@ -293,7 +259,6 @@ pub(super) fn apply_pdb_wrong_page_flags_repair(
         bytes[off] = page.correct_flags;
         patched += 1;
     }
-    std::fs::write(&pdb_path, &bytes)?;
     Ok(patched)
 }
 
@@ -328,13 +293,10 @@ pub(in crate::service) struct WrongShapeHistoryPage {
 /// Detect tt=16/17/18 data pages carrying the wrong `(1, nrs-1)` footer shape.
 /// The correct convention for these tables is `(nrs, 0)`.
 pub(in crate::service) fn detect_pdb_wrong_history_page_shape(
-    pdb_path: &Path,
+    bytes: &[u8],
 ) -> Vec<WrongShapeHistoryPage> {
     use crate::utils::{read_u8_at, read_u16_le_at, read_u32_le_at};
-    let Ok(bytes) = std::fs::read(pdb_path) else {
-        return Vec::new();
-    };
-    let Some(page_size) = read_u32_le_at(&bytes, 4).map(|v| v as usize) else {
+    let Some(page_size) = read_u32_le_at(bytes, 4).map(|v| v as usize) else {
         return Vec::new();
     };
     if page_size == 0 || bytes.len() < page_size * 2 {
@@ -344,26 +306,26 @@ pub(in crate::service) fn detect_pdb_wrong_history_page_shape(
     let mut out = Vec::new();
     for i in 1..total {
         let off = i * page_size;
-        let Some(idx) = read_u32_le_at(&bytes, off + 4) else {
+        let Some(idx) = read_u32_le_at(bytes, off + 4) else {
             continue;
         };
         if idx == 0 {
             continue;
         }
-        let used_s = read_u16_le_at(&bytes, off + 0x1e).unwrap_or(0);
+        let used_s = read_u16_le_at(bytes, off + 0x1e).unwrap_or(0);
         if used_s == 0 {
             continue;
         }
-        let table_type = read_u32_le_at(&bytes, off + 8).unwrap_or(9999);
+        let table_type = read_u32_le_at(bytes, off + 8).unwrap_or(9999);
         if !matches!(table_type, 16..=18) {
             continue;
         }
-        let nrs = read_u8_at(&bytes, off + 0x18).unwrap_or(0) as u16;
+        let nrs = read_u8_at(bytes, off + 0x18).unwrap_or(0) as u16;
         if nrs == 0 {
             continue;
         }
-        let u5 = read_u16_le_at(&bytes, off + 0x20).unwrap_or(0);
-        let num_rl = read_u16_le_at(&bytes, off + 0x22).unwrap_or(0);
+        let u5 = read_u16_le_at(bytes, off + 0x20).unwrap_or(0);
+        let num_rl = read_u16_le_at(bytes, off + 0x22).unwrap_or(0);
         // Flag the old-bug pattern: u5=1 and num_rl=nrs-1. When nrs=1 this
         // pattern is bit-identical to the correct (u5=nrs, num_rl=0) shape —
         // a single-row page can never be distinguished as wrong, so skip it
@@ -380,27 +342,32 @@ pub(in crate::service) fn detect_pdb_wrong_history_page_shape(
 }
 
 pub(super) fn apply_pdb_wrong_history_page_shape_repair(
-    usb_root: &Path,
+    bytes: &mut [u8],
     pages: &[WrongShapeHistoryPage],
 ) -> BackendResult<usize> {
-    if pages.is_empty() {
+    set_nrs_footer_shape(bytes, pages.iter().map(|p| (p.page_index, p.nrs)))
+}
+
+/// Sets each `(page_index, nrs)` page's footer to `u5 = nrs, num_rl = 0`,
+/// the shape the history, columns and playlist-tree tables use.
+fn set_nrs_footer_shape(
+    bytes: &mut [u8],
+    pages: impl ExactSizeIterator<Item = (usize, u16)>,
+) -> BackendResult<usize> {
+    if pages.len() == 0 {
         return Ok(0);
     }
-    let pdb_path = usb_staging::stage_pdb(usb_root)?;
-    let mut bytes = std::fs::read(&pdb_path)?;
-    let page_size = pdb_page_size(&bytes)?;
+    let page_size = pdb_page_size(bytes)?;
     let mut patched = 0usize;
-    for page in pages {
-        let off = page.page_index * page_size;
+    for (page_index, nrs) in pages {
+        let off = page_index * page_size;
         if off + 0x24 > bytes.len() {
             continue;
         }
-        // Set u5 = nrs, num_rl = 0.
-        bytes[off + 0x20..off + 0x22].copy_from_slice(&page.nrs.to_le_bytes());
+        bytes[off + 0x20..off + 0x22].copy_from_slice(&nrs.to_le_bytes());
         bytes[off + 0x22..off + 0x24].copy_from_slice(&0u16.to_le_bytes());
         patched += 1;
     }
-    std::fs::write(&pdb_path, &bytes)?;
     Ok(patched)
 }
 
@@ -415,12 +382,9 @@ pub(in crate::service) struct WrongTrackU5Page {
     pub(in crate::service) page_index: usize,
 }
 
-pub(in crate::service) fn detect_pdb_wrong_track_u5(pdb_path: &Path) -> Vec<WrongTrackU5Page> {
+pub(in crate::service) fn detect_pdb_wrong_track_u5(bytes: &[u8]) -> Vec<WrongTrackU5Page> {
     use crate::utils::{read_u8_at, read_u16_le_at, read_u32_le_at};
-    let Ok(bytes) = std::fs::read(pdb_path) else {
-        return Vec::new();
-    };
-    let Some(page_size) = read_u32_le_at(&bytes, 4).map(|v| v as usize) else {
+    let Some(page_size) = read_u32_le_at(bytes, 4).map(|v| v as usize) else {
         return Vec::new();
     };
     if page_size == 0 || bytes.len() < page_size * 2 {
@@ -430,29 +394,29 @@ pub(in crate::service) fn detect_pdb_wrong_track_u5(pdb_path: &Path) -> Vec<Wron
     let mut out = Vec::new();
     for i in 1..total {
         let off = i * page_size;
-        let Some(idx) = read_u32_le_at(&bytes, off + 4) else {
+        let Some(idx) = read_u32_le_at(bytes, off + 4) else {
             continue;
         };
         if idx == 0 {
             continue;
         }
-        let table_type = read_u32_le_at(&bytes, off + 8).unwrap_or(9999);
+        let table_type = read_u32_le_at(bytes, off + 8).unwrap_or(9999);
         if table_type != 0 {
             continue;
         }
-        let nrs = read_u8_at(&bytes, off + 0x18).unwrap_or(0) as u16;
+        let nrs = read_u8_at(bytes, off + 0x18).unwrap_or(0) as u16;
         if nrs == 0 {
             continue;
         }
-        let u5 = read_u16_le_at(&bytes, off + 0x20).unwrap_or(0);
+        let u5 = read_u16_le_at(bytes, off + 0x20).unwrap_or(0);
         if u5 == 0x1FFF {
             continue; // sentinel — handled by separate repair
         }
-        let flags = read_u8_at(&bytes, off + 0x1b).unwrap_or(0);
+        let flags = read_u8_at(bytes, off + 0x1b).unwrap_or(0);
         if flags == 0x64 {
             continue; // sentinel page
         }
-        let num_rl = read_u16_le_at(&bytes, off + 0x22).unwrap_or(0);
+        let num_rl = read_u16_le_at(bytes, off + 0x22).unwrap_or(0);
         // Active (0x34) pages: accept both (u5=1, num_rl=nrs-1) (current writer)
         // and (u5=2, num_rl=0) (old writer / early reference export observation). Flag anything else.
         if flags == 0x34 {
@@ -512,15 +476,6 @@ pub(super) const TRACK_STRING_SLOT_LABELS: [&str; 21] = [
 /// rekordbox puts it: Engine DJ's `export.pdb` import reads it only there and leaves the artist
 /// empty otherwise. This app's writer used to put every artist name at 12.
 pub(in crate::service) fn detect_pdb_string_misalignment(
-    pdb_path: &Path,
-) -> Vec<MisalignedStringSlot> {
-    std::fs::read(pdb_path)
-        .map(|bytes| detect_string_misalignment_in_bytes(&bytes))
-        .unwrap_or_default()
-}
-
-/// [`detect_pdb_string_misalignment`] on PDB bytes in memory.
-pub(in crate::service) fn detect_string_misalignment_in_bytes(
     bytes: &[u8],
 ) -> Vec<MisalignedStringSlot> {
     use crate::pdb_writer::parse_page_row_slots;
@@ -657,13 +612,10 @@ pub(in crate::service) struct T00MultipageActivePage {
 /// The last (active write) page in the chain legitimately stays ACTV; only
 /// predecessor pages that are still marked ACTV are flagged.
 pub(in crate::service) fn detect_pdb_t00_multipage_active_pages(
-    pdb_path: &Path,
+    bytes: &[u8],
 ) -> Vec<T00MultipageActivePage> {
     use crate::utils::{read_u8_at, read_u16_le_at, read_u32_le_at};
-    let Ok(bytes) = std::fs::read(pdb_path) else {
-        return Vec::new();
-    };
-    let Some(page_size) = read_u32_le_at(&bytes, 4).map(|v| v as usize) else {
+    let Some(page_size) = read_u32_le_at(bytes, 4).map(|v| v as usize) else {
         return Vec::new();
     };
     if page_size == 0 || bytes.len() < page_size * 2 {
@@ -675,26 +627,26 @@ pub(in crate::service) fn detect_pdb_t00_multipage_active_pages(
     let mut t00_pages: Vec<(usize, u8, u8, u32)> = Vec::new();
     for i in 1..total {
         let off = i * page_size;
-        let Some(idx) = read_u32_le_at(&bytes, off + 4) else {
+        let Some(idx) = read_u32_le_at(bytes, off + 4) else {
             continue;
         };
         if idx == 0 {
             continue;
         }
-        let tt = read_u32_le_at(&bytes, off + 8).unwrap_or(9999);
+        let tt = read_u32_le_at(bytes, off + 8).unwrap_or(9999);
         if tt != 0 {
             continue;
         }
-        let flags = read_u8_at(&bytes, off + 0x1b).unwrap_or(0);
+        let flags = read_u8_at(bytes, off + 0x1b).unwrap_or(0);
         if flags == 0x64 {
             continue; // sentinel page
         }
-        let used_s = read_u16_le_at(&bytes, off + 0x1e).unwrap_or(0);
+        let used_s = read_u16_le_at(bytes, off + 0x1e).unwrap_or(0);
         if used_s == 0 {
             continue;
         }
-        let nrs = read_u8_at(&bytes, off + 0x18).unwrap_or(0);
-        let next_page = read_u32_le_at(&bytes, off + 0x0c).unwrap_or(0);
+        let nrs = read_u8_at(bytes, off + 0x18).unwrap_or(0);
+        let next_page = read_u32_le_at(bytes, off + 0x0c).unwrap_or(0);
         t00_pages.push((i, flags, nrs, next_page));
     }
 
@@ -720,15 +672,13 @@ pub(in crate::service) fn detect_pdb_t00_multipage_active_pages(
 }
 
 pub(super) fn apply_pdb_t00_multipage_active_repair(
-    usb_root: &Path,
+    bytes: &mut [u8],
     pages: &[T00MultipageActivePage],
 ) -> BackendResult<usize> {
     if pages.is_empty() {
         return Ok(0);
     }
-    let pdb_path = usb_staging::stage_pdb(usb_root)?;
-    let mut bytes = std::fs::read(&pdb_path)?;
-    let page_size = pdb_page_size(&bytes)?;
+    let page_size = pdb_page_size(bytes)?;
     let mut patched = 0usize;
     for page in pages {
         let off = page.page_index * page_size;
@@ -743,7 +693,6 @@ pub(super) fn apply_pdb_t00_multipage_active_repair(
         bytes[off + 0x22..off + 0x24].copy_from_slice(&nrs.saturating_sub(1).to_le_bytes());
         patched += 1;
     }
-    std::fs::write(&pdb_path, &bytes)?;
     Ok(patched)
 }
 
@@ -766,35 +715,32 @@ pub(in crate::service) struct EcDataPageConflict {
 /// Detect tables whose `empty_candidate` points to a page already used as
 /// data by a different table.
 pub(in crate::service) fn detect_pdb_ec_data_page_conflicts(
-    pdb_path: &Path,
+    bytes: &[u8],
 ) -> Vec<EcDataPageConflict> {
     use crate::utils::{read_u8_at, read_u16_le_at, read_u32_le_at};
-    let Ok(bytes) = std::fs::read(pdb_path) else {
-        return Vec::new();
-    };
-    let Some(page_size) = read_u32_le_at(&bytes, 4).map(|v| v as usize) else {
+    let Some(page_size) = read_u32_le_at(bytes, 4).map(|v| v as usize) else {
         return Vec::new();
     };
     if page_size == 0 || bytes.len() < page_size * 2 {
         return Vec::new();
     }
     let total_pages = bytes.len() / page_size;
-    let num_tables = read_u32_le_at(&bytes, 8).unwrap_or(0) as usize;
+    let num_tables = read_u32_le_at(bytes, 8).unwrap_or(0) as usize;
 
     // Build: page_index → table_type for all non-sentinel, non-empty data pages.
     let mut data_page_owner: std::collections::HashMap<u32, u32> = std::collections::HashMap::new();
     for p in 1..total_pages {
         let off = p * page_size;
-        let stored_idx = read_u32_le_at(&bytes, off + 4).unwrap_or(0);
+        let stored_idx = read_u32_le_at(bytes, off + 4).unwrap_or(0);
         if stored_idx == 0 {
             continue;
         }
-        let pf = read_u8_at(&bytes, off + 0x1b).unwrap_or(0);
+        let pf = read_u8_at(bytes, off + 0x1b).unwrap_or(0);
         if pf == 0x64 {
             continue; // sentinel page
         }
-        let tt = read_u32_le_at(&bytes, off + 8).unwrap_or(0);
-        let used_s = read_u16_le_at(&bytes, off + 0x1e).unwrap_or(0);
+        let tt = read_u32_le_at(bytes, off + 8).unwrap_or(0);
+        let used_s = read_u16_le_at(bytes, off + 0x1e).unwrap_or(0);
         if used_s == 0 {
             continue;
         }
@@ -807,10 +753,10 @@ pub(in crate::service) fn detect_pdb_ec_data_page_conflicts(
         if toff + 16 > bytes.len() {
             break;
         }
-        let tt = read_u32_le_at(&bytes, toff).unwrap_or(0);
-        let ec = read_u32_le_at(&bytes, toff + 4).unwrap_or(0);
-        let fp = read_u32_le_at(&bytes, toff + 8).unwrap_or(0);
-        let lp = read_u32_le_at(&bytes, toff + 12).unwrap_or(0);
+        let tt = read_u32_le_at(bytes, toff).unwrap_or(0);
+        let ec = read_u32_le_at(bytes, toff + 4).unwrap_or(0);
+        let fp = read_u32_le_at(bytes, toff + 8).unwrap_or(0);
+        let lp = read_u32_le_at(bytes, toff + 12).unwrap_or(0);
         if fp == lp {
             continue; // empty table — ec is just the pre-allocated blank slot
         }
@@ -827,15 +773,13 @@ pub(in crate::service) fn detect_pdb_ec_data_page_conflicts(
 }
 
 pub(super) fn apply_pdb_ec_data_page_conflict_repair(
-    usb_root: &Path,
+    bytes: &mut [u8],
     conflicts: &[EcDataPageConflict],
 ) -> BackendResult<usize> {
     if conflicts.is_empty() {
         return Ok(0);
     }
-    let pdb_path = usb_staging::stage_pdb(usb_root)?;
-    let mut bytes = std::fs::read(&pdb_path)?;
-    let page_size = pdb_page_size(&bytes)?;
+    let page_size = pdb_page_size(bytes)?;
     let num_tables = bytes
         .get(8..12)
         .and_then(|b| b.try_into().ok())
@@ -893,8 +837,6 @@ pub(super) fn apply_pdb_ec_data_page_conflict_repair(
 
     // Update next_unused_page so future writers don't collide with the new ECs.
     bytes[0x0c..0x10].copy_from_slice(&next_free.to_le_bytes());
-
-    std::fs::write(&pdb_path, &bytes)?;
     Ok(patched)
 }
 
@@ -926,20 +868,17 @@ pub(in crate::service) struct TruncatedTableChain {
 /// in the file, and compute the metadata correction that restores
 /// `empty_candidate == last_page.next` without touching any page content.
 pub(in crate::service) fn detect_pdb_truncated_table_chains(
-    pdb_path: &Path,
+    bytes: &[u8],
 ) -> Vec<TruncatedTableChain> {
     use crate::utils::{collect_chain, page_offset, read_u16_le_at, read_u32_le_at};
-    let Ok(bytes) = std::fs::read(pdb_path) else {
-        return Vec::new();
-    };
-    let Some(page_size) = read_u32_le_at(&bytes, 4).map(|v| v as usize) else {
+    let Some(page_size) = read_u32_le_at(bytes, 4).map(|v| v as usize) else {
         return Vec::new();
     };
     if page_size == 0 || bytes.len() < page_size * 2 {
         return Vec::new();
     }
     let total_pages = (bytes.len() / page_size) as u32;
-    let num_tables = read_u32_le_at(&bytes, 8).unwrap_or(0) as usize;
+    let num_tables = read_u32_le_at(bytes, 8).unwrap_or(0) as usize;
 
     let mut fixes = Vec::new();
     for i in 0..num_tables {
@@ -947,13 +886,13 @@ pub(in crate::service) fn detect_pdb_truncated_table_chains(
         if toff + 16 > bytes.len() {
             break;
         }
-        let tt = read_u32_le_at(&bytes, toff).unwrap_or(0);
-        let first = read_u32_le_at(&bytes, toff + 8).unwrap_or(0);
-        let last = read_u32_le_at(&bytes, toff + 12).unwrap_or(0);
+        let tt = read_u32_le_at(bytes, toff).unwrap_or(0);
+        let first = read_u32_le_at(bytes, toff + 8).unwrap_or(0);
+        let last = read_u32_le_at(bytes, toff + 12).unwrap_or(0);
         if first == 0 || last < total_pages {
             continue; // empty table, or declared last already physically exists
         }
-        if collect_chain(&bytes, page_size, first, last).is_some() {
+        if collect_chain(bytes, page_size, first, last).is_some() {
             continue; // shouldn't happen (last >= total_pages), but stay safe
         }
         // Walk from `first` following `next` pointers, anchoring `real_last`
@@ -985,7 +924,7 @@ pub(in crate::service) fn detect_pdb_truncated_table_chains(
             if cur == last {
                 break;
             }
-            let Some(next) = read_u32_le_at(&bytes, off + 0x0c) else {
+            let Some(next) = read_u32_le_at(bytes, off + 0x0c) else {
                 break;
             };
             if next == 0 {
@@ -1009,7 +948,7 @@ pub(in crate::service) fn detect_pdb_truncated_table_chains(
             // as a defensive guard against ever anchoring on a blank page.
             continue;
         }
-        let real_next = read_u32_le_at(&bytes, off + 0x0c).unwrap_or(total_pages);
+        let real_next = read_u32_le_at(bytes, off + 0x0c).unwrap_or(total_pages);
         let corrected_ec = if real_next > real_last {
             real_next
         } else {
@@ -1029,14 +968,12 @@ pub(in crate::service) fn detect_pdb_truncated_table_chains(
 /// found by [`detect_pdb_truncated_table_chains`] is already valid, live
 /// data, and its own `next` field already anticipated the corrected `ec`.
 pub(super) fn apply_pdb_truncated_table_chain_repair(
-    usb_root: &Path,
+    bytes: &mut [u8],
     fixes: &[TruncatedTableChain],
 ) -> BackendResult<usize> {
     if fixes.is_empty() {
         return Ok(0);
     }
-    let pdb_path = usb_staging::stage_pdb(usb_root)?;
-    let mut bytes = std::fs::read(&pdb_path)?;
     let num_tables = bytes
         .get(8..12)
         .and_then(|b| b.try_into().ok())
@@ -1070,8 +1007,6 @@ pub(super) fn apply_pdb_truncated_table_chain_repair(
         bytes[toff + 12..toff + 16].copy_from_slice(&fix.corrected_last.to_le_bytes());
         patched += 1;
     }
-
-    std::fs::write(&pdb_path, &bytes)?;
     Ok(patched)
 }
 
@@ -1114,20 +1049,17 @@ impl PdbTornGrowthReport {
 ///
 /// Only pages outside every table's live-data set are ever proposed here;
 /// this never touches a page that is part of a real chain.
-pub(in crate::service) fn detect_pdb_torn_growth_pages(pdb_path: &Path) -> PdbTornGrowthReport {
+pub(in crate::service) fn detect_pdb_torn_growth_pages(bytes: &[u8]) -> PdbTornGrowthReport {
     use crate::utils::{page_offset, read_u8_at, read_u16_le_at, read_u32_le_at};
-    let Ok(bytes) = std::fs::read(pdb_path) else {
-        return PdbTornGrowthReport::default();
-    };
-    let Some(page_size) = read_u32_le_at(&bytes, 4).map(|v| v as usize) else {
+    let Some(page_size) = read_u32_le_at(bytes, 4).map(|v| v as usize) else {
         return PdbTornGrowthReport::default();
     };
     if page_size == 0 || bytes.len() < page_size * 2 {
         return PdbTornGrowthReport::default();
     }
     let total_pages = (bytes.len() / page_size) as u32;
-    let num_tables = read_u32_le_at(&bytes, 8).unwrap_or(0) as usize;
-    let next_unused = read_u32_le_at(&bytes, 0x0c).unwrap_or(total_pages);
+    let num_tables = read_u32_le_at(bytes, 8).unwrap_or(0) as usize;
+    let next_unused = read_u32_le_at(bytes, 0x0c).unwrap_or(total_pages);
 
     // Same page-ownership scan detect_pdb_ec_data_page_conflicts uses: a page
     // is "live" only if it is a non-sentinel, non-empty data page actually
@@ -1135,15 +1067,15 @@ pub(in crate::service) fn detect_pdb_torn_growth_pages(pdb_path: &Path) -> PdbTo
     let mut live_data_pages: std::collections::HashSet<u32> = std::collections::HashSet::new();
     for p in 1..total_pages as usize {
         let off = p * page_size;
-        let stored_idx = read_u32_le_at(&bytes, off + 4).unwrap_or(0);
+        let stored_idx = read_u32_le_at(bytes, off + 4).unwrap_or(0);
         if stored_idx == 0 {
             continue;
         }
-        let pf = read_u8_at(&bytes, off + 0x1b).unwrap_or(0);
+        let pf = read_u8_at(bytes, off + 0x1b).unwrap_or(0);
         if pf == 0x64 {
             continue; // sentinel page
         }
-        let used_s = read_u16_le_at(&bytes, off + 0x1e).unwrap_or(0);
+        let used_s = read_u16_le_at(bytes, off + 0x1e).unwrap_or(0);
         if used_s == 0 {
             continue;
         }
@@ -1156,7 +1088,7 @@ pub(in crate::service) fn detect_pdb_torn_growth_pages(pdb_path: &Path) -> PdbTo
         if toff + 16 > bytes.len() {
             break;
         }
-        let ec = read_u32_le_at(&bytes, toff + 4).unwrap_or(0);
+        let ec = read_u32_le_at(bytes, toff + 4).unwrap_or(0);
         if ec == 0 || live_data_pages.contains(&ec) {
             continue;
         }
@@ -1195,16 +1127,14 @@ pub(in crate::service) fn detect_pdb_torn_growth_pages(pdb_path: &Path) -> PdbTo
 /// any table are never touched or renumbered — this only restores pages the
 /// header itself says are blank/unallocated back to that state.
 pub(super) fn apply_pdb_torn_growth_pages_repair(
-    usb_root: &Path,
+    bytes: &mut Vec<u8>,
     report: &PdbTornGrowthReport,
 ) -> BackendResult<usize> {
     use crate::utils::{page_offset, read_u32_le_at};
     if report.is_empty() {
         return Ok(0);
     }
-    let pdb_path = usb_staging::stage_pdb(usb_root)?;
-    let mut bytes = std::fs::read(&pdb_path)?;
-    let Some(page_size) = read_u32_le_at(&bytes, 4).map(|v| v as usize) else {
+    let Some(page_size) = read_u32_le_at(bytes, 4).map(|v| v as usize) else {
         return Err(BackendError::Validation(
             "PDB too small to read page size".into(),
         ));
@@ -1235,12 +1165,10 @@ pub(super) fn apply_pdb_torn_growth_pages_repair(
     // seqdb must stay strictly greater than every remaining seqpage. The
     // garbage pages could have carried bogus huge seqpage values; recompute
     // now that they're zeroed/truncated away.
-    let max_seq = crate::pdb_writer::max_seqpage_in_file(&bytes, page_size);
-    let cur = read_u32_le_at(&bytes, 0x14).unwrap_or(0);
+    let max_seq = crate::pdb_writer::max_seqpage_in_file(bytes, page_size);
+    let cur = read_u32_le_at(bytes, 0x14).unwrap_or(0);
     let seqdb = cur.max(max_seq.saturating_add(1));
     bytes[0x14..0x18].copy_from_slice(&seqdb.to_le_bytes());
-
-    std::fs::write(&pdb_path, &bytes)?;
     Ok(patched)
 }
 
@@ -1295,21 +1223,9 @@ pub(crate) fn track_row_data_from_reader_row(
 /// `track_row_has_misaligned_utf16_slot` in pdb_writer) and instead always takes the
 /// relocate/append path.
 pub(super) fn apply_pdb_track_string_alignment_repair(
-    usb_root: &Path,
+    bytes: &mut Vec<u8>,
     ids: &[u32],
 ) -> BackendResult<usize> {
-    if ids.is_empty() {
-        return Ok(0);
-    }
-    let pdb_path = usb_staging::stage_pdb(usb_root)?;
-    let mut bytes = std::fs::read(&pdb_path)?;
-    let patched = realign_track_rows_in_bytes(&mut bytes, ids)?;
-    std::fs::write(&pdb_path, &bytes)?;
-    Ok(patched)
-}
-
-/// [`apply_pdb_track_string_alignment_repair`] on PDB bytes in memory.
-fn realign_track_rows_in_bytes(bytes: &mut Vec<u8>, ids: &[u32]) -> BackendResult<usize> {
     if ids.is_empty() {
         return Ok(0);
     }
@@ -1354,11 +1270,11 @@ fn realign_track_rows_in_bytes(bytes: &mut Vec<u8>, ids: &[u32]) -> BackendResul
 /// directly off the raw bytes (nothing semantic changes, only the encoding) and re-encodes it via
 /// `encode_album_row` (already alignment-fixed).
 pub(super) fn apply_pdb_album_string_alignment_repair(
-    usb_root: &Path,
+    bytes: &mut Vec<u8>,
     ids: &[u32],
 ) -> BackendResult<usize> {
     reencode_pdb_dictionary_rows(
-        usb_root,
+        bytes,
         ids,
         3,
         12,
@@ -1382,17 +1298,10 @@ fn reencode_album_row(row: &[u8], id: u32) -> Option<Vec<u8>> {
 /// Fix artist rows whose name isn't where rekordbox puts it (see
 /// `detect_pdb_string_misalignment`): re-encodes each via `encode_artist_row`, name unchanged.
 pub(super) fn apply_pdb_artist_name_layout_repair(
-    usb_root: &Path,
+    bytes: &mut Vec<u8>,
     ids: &[u32],
 ) -> BackendResult<usize> {
-    reencode_pdb_dictionary_rows(
-        usb_root,
-        ids,
-        2,
-        4,
-        "Artist name layout",
-        reencode_artist_row,
-    )
+    reencode_pdb_dictionary_rows(bytes, ids, 2, 4, "Artist name layout", reencode_artist_row)
 }
 
 /// Artist row `id` re-encoded by the current writer, name unchanged.
@@ -1414,26 +1323,6 @@ fn reencode_artist_row(row: &[u8], id: u32) -> Option<Vec<u8>> {
 /// relocate them via `realign_dictionary_rows_in_place`. `encode` builds the replacement from the
 /// existing row's bytes.
 pub(super) fn reencode_pdb_dictionary_rows(
-    usb_root: &Path,
-    ids: &[u32],
-    table_type: u32,
-    id_offset: usize,
-    label: &str,
-    encode: impl Fn(&[u8], u32) -> Option<Vec<u8>>,
-) -> BackendResult<usize> {
-    if ids.is_empty() {
-        return Ok(0);
-    }
-    let pdb_path = usb_staging::stage_pdb(usb_root)?;
-    let mut bytes = std::fs::read(&pdb_path)?;
-    let patched =
-        reencode_dictionary_rows_in_bytes(&mut bytes, ids, table_type, id_offset, label, encode)?;
-    std::fs::write(&pdb_path, &bytes)?;
-    Ok(patched)
-}
-
-/// [`reencode_pdb_dictionary_rows`] on PDB bytes in memory.
-fn reencode_dictionary_rows_in_bytes(
     bytes: &mut Vec<u8>,
     ids: &[u32],
     table_type: u32,
@@ -1525,15 +1414,13 @@ fn reencode_dictionary_rows_in_bytes(
 /// `(2, 0)` shape `detect_pdb_wrong_track_u5` still tolerates as valid on
 /// pages that already have it.
 pub(super) fn apply_pdb_wrong_track_u5_repair(
-    usb_root: &Path,
+    bytes: &mut [u8],
     pages: &[WrongTrackU5Page],
 ) -> BackendResult<usize> {
     if pages.is_empty() {
         return Ok(0);
     }
-    let pdb_path = usb_staging::stage_pdb(usb_root)?;
-    let mut bytes = std::fs::read(&pdb_path)?;
-    let page_size = pdb_page_size(&bytes)?;
+    let page_size = pdb_page_size(bytes)?;
     let mut patched = 0usize;
     for page in pages {
         let off = page.page_index * page_size;
@@ -1547,7 +1434,6 @@ pub(super) fn apply_pdb_wrong_track_u5_repair(
         bytes[off + 0x22..off + 0x24].copy_from_slice(&num_rl.to_le_bytes());
         patched += 1;
     }
-    std::fs::write(&pdb_path, &bytes)?;
     Ok(patched)
 }
 
@@ -1577,13 +1463,10 @@ pub(super) const TOMBSTONE_ID_TABLES: &[(u32, usize)] = &[(0, 72), (7, 12)];
 /// deletions (the DJ software leaves IDs in place when deleting rows) and are
 /// not flagged.
 pub(in crate::service) fn detect_pdb_tombstoned_playlist_tree_ids(
-    pdb_path: &Path,
+    bytes: &[u8],
 ) -> Vec<TombstonedRowId> {
     use crate::utils::{read_u16_le_at, read_u32_le_at};
-    let Ok(bytes) = std::fs::read(pdb_path) else {
-        return Vec::new();
-    };
-    let Some(page_size) = read_u32_le_at(&bytes, 4).map(|v| v as usize) else {
+    let Some(page_size) = read_u32_le_at(bytes, 4).map(|v| v as usize) else {
         return Vec::new();
     };
     if page_size == 0 || bytes.len() < page_size * 2 {
@@ -1600,17 +1483,17 @@ pub(in crate::service) fn detect_pdb_tombstoned_playlist_tree_ids(
 
     for i in 1..total {
         let off = i * page_size;
-        let Some(idx) = read_u32_le_at(&bytes, off + 4) else {
+        let Some(idx) = read_u32_le_at(bytes, off + 4) else {
             continue;
         };
         if idx == 0 {
             continue;
         }
-        let used_s = read_u16_le_at(&bytes, off + 0x1e).unwrap_or(0);
+        let used_s = read_u16_le_at(bytes, off + 0x1e).unwrap_or(0);
         if used_s == 0 {
             continue;
         }
-        let tt = read_u32_le_at(&bytes, off + 8).unwrap_or(9999);
+        let tt = read_u32_le_at(bytes, off + 8).unwrap_or(9999);
         let id_field_offset = match TOMBSTONE_ID_TABLES.iter().find(|(t, _)| *t == tt) {
             Some((_, ofs)) => *ofs,
             None => continue,
@@ -1629,7 +1512,7 @@ pub(in crate::service) fn detect_pdb_tombstoned_playlist_tree_ids(
             if id_byte_off + 4 > bytes.len() {
                 continue;
             }
-            let id = read_u32_le_at(&bytes, id_byte_off).unwrap_or(0);
+            let id = read_u32_le_at(bytes, id_byte_off).unwrap_or(0);
             if id == 0 {
                 continue;
             }
@@ -1672,13 +1555,10 @@ pub(in crate::service) struct WrongPlaylistTreeShapePage {
 }
 
 pub(in crate::service) fn detect_pdb_wrong_playlist_tree_shape(
-    pdb_path: &Path,
+    bytes: &[u8],
 ) -> Vec<WrongPlaylistTreeShapePage> {
     use crate::utils::{read_u8_at, read_u16_le_at, read_u32_le_at};
-    let Ok(bytes) = std::fs::read(pdb_path) else {
-        return Vec::new();
-    };
-    let Some(page_size) = read_u32_le_at(&bytes, 4).map(|v| v as usize) else {
+    let Some(page_size) = read_u32_le_at(bytes, 4).map(|v| v as usize) else {
         return Vec::new();
     };
     if page_size == 0 || bytes.len() < page_size * 2 {
@@ -1688,29 +1568,29 @@ pub(in crate::service) fn detect_pdb_wrong_playlist_tree_shape(
     let mut out = Vec::new();
     for i in 1..total {
         let off = i * page_size;
-        let Some(idx) = read_u32_le_at(&bytes, off + 4) else {
+        let Some(idx) = read_u32_le_at(bytes, off + 4) else {
             continue;
         };
         if idx == 0 {
             continue;
         }
-        let tt = read_u32_le_at(&bytes, off + 8).unwrap_or(9999);
+        let tt = read_u32_le_at(bytes, off + 8).unwrap_or(9999);
         if tt != 7 {
             continue;
         }
-        let flags = read_u8_at(&bytes, off + 0x1b).unwrap_or(0);
+        let flags = read_u8_at(bytes, off + 0x1b).unwrap_or(0);
         if flags == 0x64 {
             continue; // sentinel page, skip
         }
-        let nrs = read_u8_at(&bytes, off + 0x18).unwrap_or(0);
+        let nrs = read_u8_at(bytes, off + 0x18).unwrap_or(0);
         if nrs == 0 {
             continue;
         }
-        let u5 = read_u16_le_at(&bytes, off + 0x20).unwrap_or(0);
+        let u5 = read_u16_le_at(bytes, off + 0x20).unwrap_or(0);
         if u5 == 0x1FFF {
             continue; // sentinel value — handled separately
         }
-        let num_rl = read_u16_le_at(&bytes, off + 0x22).unwrap_or(0);
+        let num_rl = read_u16_le_at(bytes, off + 0x22).unwrap_or(0);
         // Convention: (nrs, 0). Flag if num_rl ≠ 0 OR u5 ≠ nrs.
         if num_rl != 0 || u5 != nrs as u16 {
             out.push(WrongPlaylistTreeShapePage { page_index: i, nrs });
@@ -1720,29 +1600,13 @@ pub(in crate::service) fn detect_pdb_wrong_playlist_tree_shape(
 }
 
 pub(super) fn apply_pdb_wrong_playlist_tree_shape_repair(
-    usb_root: &Path,
+    bytes: &mut [u8],
     pages: &[WrongPlaylistTreeShapePage],
 ) -> BackendResult<usize> {
-    if pages.is_empty() {
-        return Ok(0);
-    }
-    let pdb_path = usb_staging::stage_pdb(usb_root)?;
-    let mut bytes = std::fs::read(&pdb_path)?;
-    let page_size = pdb_page_size(&bytes)?;
-    let mut patched = 0usize;
-    for page in pages {
-        let off = page.page_index * page_size;
-        if off + 0x24 > bytes.len() {
-            continue;
-        }
-        // Set u5 = nrs (total row slot count), num_rl = 0.
-        let nrs_u16 = page.nrs as u16;
-        bytes[off + 0x20..off + 0x22].copy_from_slice(&nrs_u16.to_le_bytes());
-        bytes[off + 0x22..off + 0x24].copy_from_slice(&0u16.to_le_bytes());
-        patched += 1;
-    }
-    std::fs::write(&pdb_path, &bytes)?;
-    Ok(patched)
+    set_nrs_footer_shape(
+        bytes,
+        pages.iter().map(|p| (p.page_index, u16::from(p.nrs))),
+    )
 }
 
 /// A sentinel (index) page whose B-tree entry area is stale — it has num_entries > 0
@@ -1769,15 +1633,10 @@ pub(in crate::service) struct StaleSentinelBtree {
 /// and whose entry count equals the actual data page count, is considered consistent and
 /// is NOT flagged. This means a freshly DJ-software-authored PDB with correct B-tree
 /// entries passes without error.
-pub(in crate::service) fn detect_pdb_stale_sentinel_btree(
-    pdb_path: &Path,
-) -> Vec<StaleSentinelBtree> {
+pub(in crate::service) fn detect_pdb_stale_sentinel_btree(bytes: &[u8]) -> Vec<StaleSentinelBtree> {
     use crate::utils::{read_u8_at, read_u16_le_at, read_u32_le_at};
     use std::collections::HashMap;
-    let Ok(bytes) = std::fs::read(pdb_path) else {
-        return Vec::new();
-    };
-    let Some(page_size) = read_u32_le_at(&bytes, 4).map(|v| v as usize) else {
+    let Some(page_size) = read_u32_le_at(bytes, 4).map(|v| v as usize) else {
         return Vec::new();
     };
     if page_size == 0 || bytes.len() < page_size * 2 {
@@ -1792,21 +1651,21 @@ pub(in crate::service) fn detect_pdb_stale_sentinel_btree(
     let mut active_pages_per_tt: HashMap<u32, usize> = HashMap::new();
     for i in 1..total {
         let off = i * page_size;
-        let Some(idx) = read_u32_le_at(&bytes, off + 4) else {
+        let Some(idx) = read_u32_le_at(bytes, off + 4) else {
             continue;
         };
         if idx == 0 {
             continue;
         }
-        let flags = read_u8_at(&bytes, off + 0x1b).unwrap_or(0);
+        let flags = read_u8_at(bytes, off + 0x1b).unwrap_or(0);
         if flags == 0x64 {
             continue;
         } // sentinel — skip
-        let used_s = read_u16_le_at(&bytes, off + 0x1e).unwrap_or(0);
+        let used_s = read_u16_le_at(bytes, off + 0x1e).unwrap_or(0);
         if used_s == 0 {
             continue;
         } // empty page — skip
-        let tt = read_u32_le_at(&bytes, off + 8).unwrap_or(9999);
+        let tt = read_u32_le_at(bytes, off + 8).unwrap_or(9999);
         *data_pages_per_tt.entry(tt).or_insert(0) += 1;
         if flags == 0x34 {
             *active_pages_per_tt.entry(tt).or_insert(0) += 1;
@@ -1816,19 +1675,19 @@ pub(in crate::service) fn detect_pdb_stale_sentinel_btree(
     let mut out = Vec::new();
     for i in 1..total {
         let off = i * page_size;
-        let Some(idx) = read_u32_le_at(&bytes, off + 4) else {
+        let Some(idx) = read_u32_le_at(bytes, off + 4) else {
             continue;
         };
         if idx == 0 {
             continue;
         }
-        let flags = read_u8_at(&bytes, off + 0x1b).unwrap_or(0);
+        let flags = read_u8_at(bytes, off + 0x1b).unwrap_or(0);
         if flags != 0x64 {
             continue;
         } // only sentinel/index pages
-        let ne = read_u16_le_at(&bytes, off + 0x38).unwrap_or(0);
-        let u7 = read_u16_le_at(&bytes, off + 0x26).unwrap_or(0);
-        let tt = read_u32_le_at(&bytes, off + 8).unwrap_or(9999);
+        let ne = read_u16_le_at(bytes, off + 0x38).unwrap_or(0);
+        let u7 = read_u16_le_at(bytes, off + 0x26).unwrap_or(0);
+        let tt = read_u32_le_at(bytes, off + 8).unwrap_or(9999);
         let active = *active_pages_per_tt.get(&tt).unwrap_or(&0);
         // Quick-exit: clean sentinel — no active pages and no orphaned pointer.
         if ne == 0 && u7 == 0 && active == 0 {
@@ -1844,7 +1703,7 @@ pub(in crate::service) fn detect_pdb_stale_sentinel_btree(
         let mut entries_valid = true;
         for slot in 0..ne as usize {
             let entry_off = off + 0x3c + slot * 4;
-            let Some(entry) = read_u32_le_at(&bytes, entry_off) else {
+            let Some(entry) = read_u32_le_at(bytes, entry_off) else {
                 entries_valid = false;
                 break;
             };
@@ -1858,8 +1717,8 @@ pub(in crate::service) fn detect_pdb_stale_sentinel_btree(
                 entries_valid = false;
                 break;
             }
-            let page_tt = read_u32_le_at(&bytes, page_off + 8).unwrap_or(9999);
-            let page_flags = read_u8_at(&bytes, page_off + 0x1b).unwrap_or(0);
+            let page_tt = read_u32_le_at(bytes, page_off + 8).unwrap_or(9999);
+            let page_flags = read_u8_at(bytes, page_off + 0x1b).unwrap_or(0);
             if page_tt != tt || page_flags == 0x64 {
                 entries_valid = false;
                 break;
@@ -1879,16 +1738,14 @@ pub(in crate::service) fn detect_pdb_stale_sentinel_btree(
 }
 
 pub(super) fn apply_pdb_stale_sentinel_btree_repair(
-    usb_root: &Path,
+    bytes: &mut [u8],
     pages: &[StaleSentinelBtree],
 ) -> BackendResult<usize> {
     use crate::utils::{read_u8_at, read_u16_le_at, read_u32_le_at};
     if pages.is_empty() {
         return Ok(0);
     }
-    let pdb_path = usb_staging::stage_pdb(usb_root)?;
-    let mut bytes = std::fs::read(&pdb_path)?;
-    let page_size = pdb_page_size(&bytes)?;
+    let page_size = pdb_page_size(bytes)?;
     const SENTINEL_EMPTY_ENTRY: u32 = 0x1fff_fff8;
     const SENTINEL_TAIL_ZERO_BYTES: usize = 20;
     let total_physical = bytes.len() / page_size;
@@ -1902,24 +1759,24 @@ pub(super) fn apply_pdb_stale_sentinel_btree_repair(
         // Following next_page chain pointers is unreliable — old pages may have
         // stale pointers to pages that have been repurposed for a different table.
         // Scanning by tt gives the definitive set of live pages.
-        let tt = read_u32_le_at(&bytes, off + 8).unwrap_or(9999);
+        let tt = read_u32_le_at(bytes, off + 8).unwrap_or(9999);
         let mut data_pages: Vec<u32> = Vec::new();
         for j in 1..total_physical {
             if j == page.page_index {
                 continue;
             }
             let poff = j * page_size;
-            let page_tt = read_u32_le_at(&bytes, poff + 8).unwrap_or(9999);
+            let page_tt = read_u32_le_at(bytes, poff + 8).unwrap_or(9999);
             if page_tt != tt {
                 continue;
             }
-            let page_flags = read_u8_at(&bytes, poff + 0x1b).unwrap_or(0);
+            let page_flags = read_u8_at(bytes, poff + 0x1b).unwrap_or(0);
             // B-tree entries must point to active (0x34) pages only.
             // Sealed (0x24) pages are navigated via next_page chain, not indexed.
             if page_flags != 0x34 {
                 continue;
             }
-            let used_s = read_u16_le_at(&bytes, poff + 0x1e).unwrap_or(0);
+            let used_s = read_u16_le_at(bytes, poff + 0x1e).unwrap_or(0);
             if used_s == 0 {
                 continue;
             } // skip empty pages
@@ -1952,20 +1809,17 @@ pub(super) fn apply_pdb_stale_sentinel_btree_repair(
         bytes[off + 0x26..off + 0x28].copy_from_slice(&ne.to_le_bytes());
         patched += 1;
     }
-    std::fs::write(&pdb_path, &bytes)?;
     Ok(patched)
 }
 
 pub(super) fn apply_pdb_tombstoned_playlist_tree_id_repair(
-    usb_root: &Path,
+    bytes: &mut [u8],
     items: &[TombstonedRowId],
 ) -> BackendResult<usize> {
     if items.is_empty() {
         return Ok(0);
     }
-    let pdb_path = usb_staging::stage_pdb(usb_root)?;
-    let mut bytes = std::fs::read(&pdb_path)?;
-    let page_size = pdb_page_size(&bytes)?;
+    let page_size = pdb_page_size(bytes)?;
     let mut patched = 0usize;
     for item in items {
         let abs = item.page_index * page_size + item.id_field_offset;
@@ -1975,27 +1829,21 @@ pub(super) fn apply_pdb_tombstoned_playlist_tree_id_repair(
         bytes[abs..abs + 4].copy_from_slice(&0u32.to_le_bytes());
         patched += 1;
     }
-    std::fs::write(&pdb_path, &bytes)?;
     Ok(patched)
 }
 
 /// Detect zero-tranrf on all non-empty data pages (any table type).
-pub(in crate::service) fn detect_pdb_zero_tranrf_all_tables(
-    pdb_path: &Path,
-) -> Vec<ZeroTranrfPage> {
-    detect_pdb_zero_tranrf_pages_for_tables(pdb_path, Some(&[]))
+pub(in crate::service) fn detect_pdb_zero_tranrf_all_tables(bytes: &[u8]) -> Vec<ZeroTranrfPage> {
+    detect_pdb_zero_tranrf_pages_for_tables(bytes, Some(&[]))
 }
 
 // table_filter: None = only tt=0; Some(&[]) = all tables; Some(list) = specific tables
 pub(super) fn detect_pdb_zero_tranrf_pages_for_tables(
-    pdb_path: &Path,
+    bytes: &[u8],
     table_filter: Option<&[u32]>,
 ) -> Vec<ZeroTranrfPage> {
     use crate::utils::{read_u16_le_at, read_u32_le_at};
-    let Ok(bytes) = std::fs::read(pdb_path) else {
-        return Vec::new();
-    };
-    let Some(page_size) = read_u32_le_at(&bytes, 4).map(|v| v as usize) else {
+    let Some(page_size) = read_u32_le_at(bytes, 4).map(|v| v as usize) else {
         return Vec::new();
     };
     if page_size == 0 || bytes.len() < page_size * 2 {
@@ -2006,13 +1854,13 @@ pub(super) fn detect_pdb_zero_tranrf_pages_for_tables(
 
     for i in 1..total {
         let off = i * page_size;
-        let Some(idx) = read_u32_le_at(&bytes, off + 4) else {
+        let Some(idx) = read_u32_le_at(bytes, off + 4) else {
             continue;
         };
         if idx == 0 {
             continue;
         }
-        let tt = read_u32_le_at(&bytes, off + 8).unwrap_or(9999);
+        let tt = read_u32_le_at(bytes, off + 8).unwrap_or(9999);
         let pass = match table_filter {
             None => tt == 0,   // track pages only
             Some(&[]) => true, // all tables
@@ -2021,12 +1869,12 @@ pub(super) fn detect_pdb_zero_tranrf_pages_for_tables(
         if !pass {
             continue;
         }
-        let used_s = read_u16_le_at(&bytes, off + 0x1e).unwrap_or(0);
+        let used_s = read_u16_le_at(bytes, off + 0x1e).unwrap_or(0);
         if used_s == 0 {
             continue;
         }
-        let u5 = read_u16_le_at(&bytes, off + 0x20).unwrap_or(0);
-        let num_rl = read_u16_le_at(&bytes, off + 0x22).unwrap_or(0) as usize;
+        let u5 = read_u16_le_at(bytes, off + 0x20).unwrap_or(0);
+        let num_rl = read_u16_le_at(bytes, off + 0x22).unwrap_or(0) as usize;
         let page = &bytes[off..off + page_size];
         let row_slots = crate::utils::packed_page_row_slot_count(page).unwrap_or(0);
         if row_slots == 0 || !pdb_page::footer_fits(page_size, row_slots) {
@@ -2068,15 +1916,13 @@ pub(super) fn detect_pdb_zero_tranrf_pages_for_tables(
 }
 
 pub(super) fn apply_pdb_zero_tranrf_repair(
-    usb_root: &Path,
+    bytes: &mut [u8],
     pages: &[ZeroTranrfPage],
 ) -> BackendResult<usize> {
     if pages.is_empty() {
         return Ok(0);
     }
-    let pdb_path = usb_staging::stage_pdb(usb_root)?;
-    let mut bytes = std::fs::read(&pdb_path)?;
-    let page_size = pdb_page_size(&bytes)?;
+    let page_size = pdb_page_size(bytes)?;
     let mut patched = 0usize;
     for page in pages {
         let page_base = page.page_index * page_size;
@@ -2111,6 +1957,25 @@ pub(super) fn apply_pdb_zero_tranrf_repair(
             patched += 1;
         }
     }
-    std::fs::write(&pdb_path, &bytes)?;
     Ok(patched)
+}
+
+/// The bytes of the PDB file at `path`, for the detectors.
+#[cfg(test)]
+pub(crate) fn read_pdb_file(path: &Path) -> Vec<u8> {
+    std::fs::read(path).unwrap_or_default()
+}
+
+/// Runs a page-level fix on the staged PDB file of `usb_root`, as the repair
+/// run does on its in-memory copy, and saves the result.
+#[cfg(test)]
+pub(crate) fn patch_pdb_file<T>(
+    usb_root: &Path,
+    fix: impl FnOnce(&mut Vec<u8>) -> BackendResult<T>,
+) -> BackendResult<T> {
+    let path = usb_staging::stage_pdb(usb_root)?;
+    let mut bytes = std::fs::read(&path)?;
+    let result = fix(&mut bytes)?;
+    std::fs::write(&path, &bytes)?;
+    Ok(result)
 }

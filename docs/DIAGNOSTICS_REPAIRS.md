@@ -304,7 +304,7 @@ structural prerequisites that run first.
 
 Fixes that act on page or row targets (history page shape, table
 write-pointer conflict, string alignment) detect their targets again on the
-current staged PDB at apply time, since strict parity and the audio fixes may
+current PDB bytes at apply time, since strict parity and the audio fixes may
 have rewritten it.
 
 The strict repair converges on rerun. It does not compact PDB tables,
@@ -339,11 +339,25 @@ The `diagnostics` module's PDB reads (integrity checks, parity report) go throug
 layer described in `docs/USB_EXPORT.md`'s "Local HDD staging" section, same as export. eDB access
 is always staged transparently regardless of caller (`edb::open_edb_from_usb_root`/`open_edb_rw`).
 
-The `repair` module's PDB/eDB reads and writes go through the same staging layer: its diagnostic scanners
-(`detect_pdb_*`) share one staged read per diagnostics pass, and every `apply_*`/`apply_fix_*`
-writer selected in a `repair_usb_diagnostics` apply request writes to the local staged copy only —
-`apply_selected_fixes` flushes both databases back to the real USB drive exactly
-once, at its end, after every selected fix has run (not once per fix).
+The `repair` module's PDB/eDB reads and writes go through the same staging layer. Both databases are
+staged when the USB is connected (`validate_usb_root`). The PDB detectors (`detect_pdb_*`) take PDB
+bytes, so a diagnostics pass reads the staged PDB once. A `repair_usb_diagnostics` apply request
+works like this:
+
+1. Read the staged PDB once into memory (`StagedPdb` in `repair/run.rs`). The page-level fixes
+   (`apply_pdb_*`) patch those bytes, each on a copy that is kept only when the fix succeeds.
+2. Fixes that read or write the staged PDB file themselves (strict parity, the audio and analysis
+   fixes) get the current bytes saved there first and read back afterwards. eDB fixes share one
+   connection on the staged eDB.
+3. After every selected fix, save the bytes to the staged PDB and write both databases back to the
+   USB, both or neither (`write_back_both_or_neither`). Both USB copies are first checked for
+   changes made since staging. If the eDB write fails after the PDB was written, the PDB the USB
+   held before is put back. On failure the staged copies are staged again from the USB, every
+   applied fix is reported as failed ("not saved to the USB"), and the Engine DJ rebuild is skipped.
+
+Analysis and audio files (ANLZ bundles, duplicate audio copies) are not staged: those fixes change
+them on the USB as they run, before the databases are written back, so the databases never point at
+a file that isn't there yet.
 `update_usb_player_menu_config` and `sync_usb_player_menu_edb_to_pdb` are staged the same way but
 are standalone operations outside the apply-batch flow, so each backs up and flushes on its own.
 

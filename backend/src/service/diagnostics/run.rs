@@ -250,9 +250,11 @@ impl BackendService {
         // at page/table shape, so this is otherwise invisible on read.
         {
             let (artist_layout, misaligned): (Vec<_>, Vec<_>) =
-                crate::service::repair::detect_pdb_string_misalignment(&pdb_path)
-                    .into_iter()
-                    .partition(|m| m.slot_label == "ascii_name_offset");
+                crate::service::repair::detect_pdb_string_misalignment(
+                    &std::fs::read(&pdb_path).unwrap_or_default(),
+                )
+                .into_iter()
+                .partition(|m| m.slot_label == "ascii_name_offset");
             let status = if misaligned.is_empty() {
                 DiagStatus::Pass
             } else {

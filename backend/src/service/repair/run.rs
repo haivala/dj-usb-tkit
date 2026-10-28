@@ -192,6 +192,122 @@ impl FixOutcomes {
             (false, false) => {}
         }
     }
+
+    /// The databases could not be saved to the USB, so nothing applied
+    /// reached it: every applied fix is reported as failed.
+    fn not_saved(&mut self, err: &BackendError) {
+        for fix in self.applied.drain(..) {
+            self.failed.push(format!("{fix} (not saved to the USB)"));
+        }
+        self.failed.push(format!(
+            "Saving the repaired databases to the USB failed, the USB's databases are unchanged: {err}"
+        ));
+    }
+}
+
+/// The staged PDB a repair run works on, read once. The page-level fixes
+/// patch `bytes` in memory; a fix that reads or writes the staged file itself
+/// goes through [`StagedPdb::on_file`]. The bytes reach the staged file only
+/// when such a fix needs them and once at the end, before write-back.
+pub(super) struct StagedPdb {
+    path: std::path::PathBuf,
+    pub(super) bytes: Vec<u8>,
+    on_disk: Vec<u8>,
+    /// What the USB held when the run started, for undoing a write-back.
+    original: Vec<u8>,
+}
+
+impl StagedPdb {
+    pub(super) fn load(usb_root: &Path) -> BackendResult<Self> {
+        let path = usb_staging::stage_pdb(usb_root)?;
+        let bytes = if path.is_file() {
+            std::fs::read(&path)?
+        } else {
+            Vec::new()
+        };
+        Ok(Self {
+            path,
+            on_disk: bytes.clone(),
+            original: bytes.clone(),
+            bytes,
+        })
+    }
+
+    /// Runs a page-level fix on a copy, keeping its changes only when it
+    /// succeeds, so a fix that fails halfway leaves the PDB as it was.
+    pub(super) fn patch<T>(
+        &mut self,
+        fix: impl FnOnce(&mut Vec<u8>) -> BackendResult<T>,
+    ) -> BackendResult<T> {
+        let mut work = self.bytes.clone();
+        let result = fix(&mut work)?;
+        self.bytes = work;
+        Ok(result)
+    }
+
+    /// Runs a fix that reads or writes the staged PDB file: the current
+    /// bytes are saved there first and read back afterwards.
+    fn on_file<T>(&mut self, fix: impl FnOnce() -> BackendResult<T>) -> BackendResult<T> {
+        self.save()?;
+        let result = fix();
+        self.reload()?;
+        result
+    }
+
+    fn save(&mut self) -> BackendResult<()> {
+        if self.bytes != self.on_disk {
+            std::fs::write(&self.path, &self.bytes)?;
+            self.on_disk.clone_from(&self.bytes);
+        }
+        Ok(())
+    }
+
+    fn reload(&mut self) -> BackendResult<()> {
+        if self.path.is_file() {
+            self.bytes = std::fs::read(&self.path)?;
+            self.on_disk.clone_from(&self.bytes);
+        }
+        Ok(())
+    }
+}
+
+/// Saves both staged databases to the USB, or neither, after putting the
+/// PDB's in-memory bytes into its staged file. Before writing, both
+/// USB copies are checked for outside changes. When the eDB write fails after
+/// the PDB was written, the PDB the USB held before is put back. On failure
+/// the staged copies are staged again from the USB, so they match the drive.
+pub(super) fn write_back_both_or_neither(
+    usb_root: &Path,
+    pdb: &mut StagedPdb,
+) -> BackendResult<()> {
+    let restage_both = || {
+        let _ = usb_staging::restage_from_usb(usb_root, usb_staging::DbKind::Pdb);
+        let _ = usb_staging::restage_from_usb(usb_root, usb_staging::DbKind::Edb);
+    };
+    let pdb_written = pdb
+        .save()
+        .and_then(|()| usb_staging::check_write_back(usb_root, usb_staging::DbKind::Pdb))
+        .and_then(|()| usb_staging::check_write_back(usb_root, usb_staging::DbKind::Edb))
+        .and_then(|()| usb_staging::write_back_if_changed(usb_root, usb_staging::DbKind::Pdb))
+        .inspect_err(|_| restage_both())?;
+    if let Err(err) = usb_staging::write_back_if_changed(usb_root, usb_staging::DbKind::Edb) {
+        if pdb_written
+            && let Err(undo_err) = usb_staging::commit_and_write_back(
+                usb_root,
+                usb_staging::DbKind::Pdb,
+                &pdb.original,
+            )
+        {
+            restage_both();
+            return Err(BackendError::Internal(format!(
+                "{err}; putting the previous PDB back also failed ({undo_err}), so the USB has the \
+                 repaired PDB with the previous eDB -- restore the \"Before repair\" backup"
+            )));
+        }
+        restage_both();
+        return Err(err);
+    }
+    Ok(())
 }
 
 impl BackendService {
@@ -573,26 +689,29 @@ impl BackendService {
                 ..fix_proposal(format.fix_id(), format.title(), description.to_string())
             });
         }
-        let pdb_sentinel_u5_pages = detect_pdb_sentinel_u5_on_data_pages(&staged_pdb_path);
-        let pdb_wrong_flags_pages = detect_pdb_wrong_page_flags(&staged_pdb_path);
-        let pdb_zero_tranrf_pages = detect_pdb_zero_tranrf_all_tables(&staged_pdb_path);
-        let pdb_wrong_history_shape_pages = detect_pdb_wrong_history_page_shape(&staged_pdb_path);
-        let pdb_tombstoned_playlist_ids = detect_pdb_tombstoned_playlist_tree_ids(&staged_pdb_path);
-        let pdb_wrong_track_u5_pages = detect_pdb_wrong_track_u5(&staged_pdb_path);
+        // Every PDB detector below reads the same staged bytes.
+        let staged_pdb_bytes = std::fs::read(&staged_pdb_path).unwrap_or_default();
+        let pdb_sentinel_u5_pages = detect_pdb_sentinel_u5_on_data_pages(&staged_pdb_bytes);
+        let pdb_wrong_flags_pages = detect_pdb_wrong_page_flags(&staged_pdb_bytes);
+        let pdb_zero_tranrf_pages = detect_pdb_zero_tranrf_all_tables(&staged_pdb_bytes);
+        let pdb_wrong_history_shape_pages = detect_pdb_wrong_history_page_shape(&staged_pdb_bytes);
+        let pdb_tombstoned_playlist_ids =
+            detect_pdb_tombstoned_playlist_tree_ids(&staged_pdb_bytes);
+        let pdb_wrong_track_u5_pages = detect_pdb_wrong_track_u5(&staged_pdb_bytes);
         let pdb_t00_multipage_active_pages =
-            detect_pdb_t00_multipage_active_pages(&staged_pdb_path);
-        let pdb_stale_sentinel_btree_pages = detect_pdb_stale_sentinel_btree(&staged_pdb_path);
+            detect_pdb_t00_multipage_active_pages(&staged_pdb_bytes);
+        let pdb_stale_sentinel_btree_pages = detect_pdb_stale_sentinel_btree(&staged_pdb_bytes);
         let pdb_wrong_playlist_tree_shape_pages =
-            detect_pdb_wrong_playlist_tree_shape(&staged_pdb_path);
-        let pdb_ec_conflicts = detect_pdb_ec_data_page_conflicts(&staged_pdb_path);
-        let pdb_truncated_chains = detect_pdb_truncated_table_chains(&staged_pdb_path);
-        let pdb_torn_growth = detect_pdb_torn_growth_pages(&staged_pdb_path);
+            detect_pdb_wrong_playlist_tree_shape(&staged_pdb_bytes);
+        let pdb_ec_conflicts = detect_pdb_ec_data_page_conflicts(&staged_pdb_bytes);
+        let pdb_truncated_chains = detect_pdb_truncated_table_chains(&staged_pdb_bytes);
+        let pdb_torn_growth = detect_pdb_torn_growth_pages(&staged_pdb_bytes);
         let pdb_t19_template_state = detect_pdb_t19_template_state(
-            &staged_pdb_path,
+            &staged_pdb_bytes,
             parsed_pdb.as_ref().map_or(0, |p| p.tracks.len()),
             crate::service::export_helpers::edb_t19_property(&usb_root).as_ref(),
         );
-        let pdb_misaligned_slots = detect_pdb_string_misalignment(&staged_pdb_path);
+        let pdb_misaligned_slots = detect_pdb_string_misalignment(&staged_pdb_bytes);
         let pdb_misaligned_track_ids = misaligned_row_ids(&pdb_misaligned_slots, 0);
         let pdb_misaligned_album_ids = misaligned_row_ids(&pdb_misaligned_slots, 3);
         let pdb_misaligned_artist_ids = misaligned_row_ids(&pdb_misaligned_slots, 2);
@@ -858,7 +977,7 @@ impl BackendService {
             ));
         }
         let pdb_header_compatibility_repair =
-            detect_pdb_header_compatibility_repair(&staged_pdb_path);
+            detect_pdb_header_compatibility_repair(&staged_pdb_bytes);
         if let Some(repair) = pdb_header_compatibility_repair.as_ref() {
             detected_issues.push(format!(
                 "PDB header compatibility field 0x10..0x14 is {}",
@@ -1510,16 +1629,27 @@ impl BackendService {
         // back to opening their own connection if this fails.
         progress.report(70, "USB: Opening repair databases");
         let mut fix_edb_conn = open_edb_rw(usb_root, warnings);
+        let mut pdb = match StagedPdb::load(usb_root) {
+            Ok(pdb) => pdb,
+            Err(err) => {
+                outcomes.failed.push(format!(
+                    "Reading the staged PDB failed, nothing was applied: {err}"
+                ));
+                return outcomes;
+            }
+        };
 
         if selected.contains(EMPTY_ANALYSIS_FILES_FIX_ID) {
             progress.start("Fix Empty Analysis Files");
-            match self.apply_fix_empty_analysis_files(
-                usb_root,
-                &empty_analysis_paths,
-                fix_edb_conn.as_mut(),
-                parsed_pdb.as_ref(),
-                warnings,
-            ) {
+            match pdb.on_file(|| {
+                self.apply_fix_empty_analysis_files(
+                    usb_root,
+                    &empty_analysis_paths,
+                    fix_edb_conn.as_mut(),
+                    parsed_pdb.as_ref(),
+                    warnings,
+                )
+            }) {
                 Ok((fixed, skipped, failed, write_count)) => {
                     *estimated_file_writes = (*estimated_file_writes).max(write_count);
                     if failed > 0 {
@@ -1561,8 +1691,10 @@ impl BackendService {
             selected.contains(PDB_TRUNCATED_TABLE_CHAIN_FIX_ID),
             !pdb_truncated_chains.is_empty(),
             || {
-                apply_pdb_truncated_table_chain_repair(usb_root, &pdb_truncated_chains)
-                    .map(|n| format!("fixed {n} table(s)"))
+                pdb.patch(|bytes| {
+                    apply_pdb_truncated_table_chain_repair(bytes, &pdb_truncated_chains)
+                })
+                .map(|n| format!("fixed {n} table(s)"))
             },
         );
 
@@ -1583,16 +1715,17 @@ impl BackendService {
             selected.contains(PDB_TORN_GROWTH_PAGES_FIX_ID),
             !pdb_torn_growth.is_empty(),
             || {
-                apply_pdb_torn_growth_pages_repair(usb_root, &pdb_torn_growth).map(|n| {
-                    format!(
-                        "zeroed {n} page(s){}",
-                        if pdb_torn_growth.truncate_to_pages.is_some() {
-                            ", truncated unpopulated tail"
-                        } else {
-                            ""
-                        }
-                    )
-                })
+                pdb.patch(|bytes| apply_pdb_torn_growth_pages_repair(bytes, &pdb_torn_growth))
+                    .map(|n| {
+                        format!(
+                            "zeroed {n} page(s){}",
+                            if pdb_torn_growth.truncate_to_pages.is_some() {
+                                ", truncated unpopulated tail"
+                            } else {
+                                ""
+                            }
+                        )
+                    })
             },
         );
 
@@ -1606,13 +1739,15 @@ impl BackendService {
             selected.contains(PDB_T19_TEMPLATE_STATE_FIX_ID),
             pdb_t19_template_state,
             || {
-                apply_pdb_t19_template_state_repair(usb_root).map(|activated| {
-                    if activated {
-                        "rewrote tt=19 page for the track count".to_string()
-                    } else {
-                        "already matches the track count".to_string()
-                    }
-                })
+                let property = crate::service::export_helpers::edb_t19_property(usb_root);
+                pdb.patch(|bytes| apply_pdb_t19_template_state_repair(bytes, property.as_ref()))
+                    .map(|activated| {
+                        if activated {
+                            "rewrote tt=19 page for the track count".to_string()
+                        } else {
+                            "already matches the track count".to_string()
+                        }
+                    })
             },
         );
 
@@ -1633,12 +1768,14 @@ impl BackendService {
                     Some(&strict_upgrade_targets)
                 };
                 progress.start("Upgrade Export Data To Strict Parity");
-                match self.apply_strict_parity_upgrade(
-                    usb_root,
-                    target_names,
-                    fix_edb_conn.as_mut(),
-                    warnings,
-                ) {
+                match pdb.on_file(|| {
+                    self.apply_strict_parity_upgrade(
+                        usb_root,
+                        target_names,
+                        fix_edb_conn.as_mut(),
+                        warnings,
+                    )
+                }) {
                     Ok(result) if result.merged_playlists > 0 => {
                         outcomes.applied.push(format!(
                             "Upgrade Export Data To Strict Parity: {}",
@@ -1662,7 +1799,7 @@ impl BackendService {
 
         if selected.contains(PDB_DUPLICATE_PLAYLIST_ENTRIES_FIX_ID) {
             progress.start("Remove Duplicate PDB Playlist Entries");
-            match apply_pdb_duplicate_playlist_entries_repair(usb_root) {
+            match pdb.patch(|bytes| apply_pdb_duplicate_playlist_entries_repair(bytes)) {
                 Ok(0) => outcomes
                     .skipped
                     .push("Remove Duplicate PDB Playlist Entries: nothing to apply".to_string()),
@@ -1682,57 +1819,37 @@ impl BackendService {
 
         // rekordbox bookkeeping runs with every apply, so it always follows
         // the fixes above that rewrite the PDB (strict parity appends rows
-        // and pages). Detect it again on the current file instead of
+        // and pages). Detect it again on the current bytes instead of
         // patching the preview's page snapshot.
-        let bookkeeping_pdb = usb_staging::stage_pdb(usb_root).ok();
-        let bookkeeping_pdb = bookkeeping_pdb.as_deref();
-        let pdb_zero_tranrf_pages = bookkeeping_pdb
-            .map(detect_pdb_zero_tranrf_all_tables)
-            .unwrap_or_default();
-        let pdb_wrong_flags_pages = bookkeeping_pdb
-            .map(detect_pdb_wrong_page_flags)
-            .unwrap_or_default();
-        let pdb_sentinel_u5_pages = bookkeeping_pdb
-            .map(detect_pdb_sentinel_u5_on_data_pages)
-            .unwrap_or_default();
-        let pdb_wrong_track_u5_pages = bookkeeping_pdb
-            .map(detect_pdb_wrong_track_u5)
-            .unwrap_or_default();
-        let pdb_t00_multipage_active_pages = bookkeeping_pdb
-            .map(detect_pdb_t00_multipage_active_pages)
-            .unwrap_or_default();
-        let pdb_tombstoned_playlist_ids = bookkeeping_pdb
-            .map(detect_pdb_tombstoned_playlist_tree_ids)
-            .unwrap_or_default();
-        let pdb_wrong_playlist_tree_shape_pages = bookkeeping_pdb
-            .map(detect_pdb_wrong_playlist_tree_shape)
-            .unwrap_or_default();
+        let pdb_zero_tranrf_pages = detect_pdb_zero_tranrf_all_tables(&pdb.bytes);
+        let pdb_wrong_flags_pages = detect_pdb_wrong_page_flags(&pdb.bytes);
+        let pdb_sentinel_u5_pages = detect_pdb_sentinel_u5_on_data_pages(&pdb.bytes);
+        let pdb_wrong_track_u5_pages = detect_pdb_wrong_track_u5(&pdb.bytes);
+        let pdb_t00_multipage_active_pages = detect_pdb_t00_multipage_active_pages(&pdb.bytes);
+        let pdb_tombstoned_playlist_ids = detect_pdb_tombstoned_playlist_tree_ids(&pdb.bytes);
+        let pdb_wrong_playlist_tree_shape_pages = detect_pdb_wrong_playlist_tree_shape(&pdb.bytes);
         // The page and row targets the preview found are stale once the
         // fixes above wrote the PDB (strict parity, the audio fixes); find
-        // them again on the current file. A target the writers already fixed
+        // them again on the current bytes. A target the writers already fixed
         // is then simply gone.
         let pdb_wrong_history_shape_pages = if pdb_wrong_history_shape_pages.is_empty() {
             pdb_wrong_history_shape_pages
         } else {
-            bookkeeping_pdb
-                .map(detect_pdb_wrong_history_page_shape)
-                .unwrap_or_default()
+            detect_pdb_wrong_history_page_shape(&pdb.bytes)
         };
         let pdb_ec_conflicts = if pdb_ec_conflicts.is_empty() {
             pdb_ec_conflicts
         } else {
-            bookkeeping_pdb
-                .map(detect_pdb_ec_data_page_conflicts)
-                .unwrap_or_default()
+            detect_pdb_ec_data_page_conflicts(&pdb.bytes)
         };
-        let pdb_misaligned_slots = bookkeeping_pdb
-            .filter(|_| {
-                !(pdb_misaligned_track_ids.is_empty()
-                    && pdb_misaligned_album_ids.is_empty()
-                    && pdb_misaligned_artist_ids.is_empty())
-            })
-            .map(detect_pdb_string_misalignment)
-            .unwrap_or_default();
+        let pdb_misaligned_slots = if pdb_misaligned_track_ids.is_empty()
+            && pdb_misaligned_album_ids.is_empty()
+            && pdb_misaligned_artist_ids.is_empty()
+        {
+            Vec::new()
+        } else {
+            detect_pdb_string_misalignment(&pdb.bytes)
+        };
         let pdb_misaligned_track_ids = misaligned_row_ids(&pdb_misaligned_slots, 0);
         let pdb_misaligned_album_ids = misaligned_row_ids(&pdb_misaligned_slots, 3);
         let pdb_misaligned_artist_ids = misaligned_row_ids(&pdb_misaligned_slots, 2);
@@ -1742,7 +1859,7 @@ impl BackendService {
             selected.contains(PDB_ZERO_TRANRF_FIX_ID),
             !pdb_zero_tranrf_pages.is_empty(),
             || {
-                apply_pdb_zero_tranrf_repair(usb_root, &pdb_zero_tranrf_pages)
+                pdb.patch(|bytes| apply_pdb_zero_tranrf_repair(bytes, &pdb_zero_tranrf_pages))
                     .map(|n| format!("patched {n} page(s)"))
             },
         );
@@ -1753,7 +1870,7 @@ impl BackendService {
             selected.contains(PDB_WRONG_PAGE_FLAGS_FIX_ID),
             !pdb_wrong_flags_pages.is_empty(),
             || {
-                apply_pdb_wrong_page_flags_repair(usb_root, &pdb_wrong_flags_pages)
+                pdb.patch(|bytes| apply_pdb_wrong_page_flags_repair(bytes, &pdb_wrong_flags_pages))
                     .map(|n| format!("patched {n} page(s)"))
             },
         );
@@ -1764,7 +1881,7 @@ impl BackendService {
             selected.contains(PDB_SENTINEL_U5_FIX_ID),
             !pdb_sentinel_u5_pages.is_empty(),
             || {
-                apply_pdb_sentinel_u5_repair(usb_root, &pdb_sentinel_u5_pages)
+                pdb.patch(|bytes| apply_pdb_sentinel_u5_repair(bytes, &pdb_sentinel_u5_pages))
                     .map(|n| format!("patched {n} page(s)"))
             },
         );
@@ -1775,8 +1892,10 @@ impl BackendService {
             selected.contains(PDB_WRONG_HISTORY_SHAPE_FIX_ID),
             !pdb_wrong_history_shape_pages.is_empty(),
             || {
-                apply_pdb_wrong_history_page_shape_repair(usb_root, &pdb_wrong_history_shape_pages)
-                    .map(|n| format!("patched {n} page(s)"))
+                pdb.patch(|bytes| {
+                    apply_pdb_wrong_history_page_shape_repair(bytes, &pdb_wrong_history_shape_pages)
+                })
+                .map(|n| format!("patched {n} page(s)"))
             },
         );
 
@@ -1786,7 +1905,7 @@ impl BackendService {
             selected.contains(PDB_WRONG_TRACK_U5_FIX_ID),
             !pdb_wrong_track_u5_pages.is_empty(),
             || {
-                apply_pdb_wrong_track_u5_repair(usb_root, &pdb_wrong_track_u5_pages)
+                pdb.patch(|bytes| apply_pdb_wrong_track_u5_repair(bytes, &pdb_wrong_track_u5_pages))
                     .map(|n| format!("patched {n} page(s)"))
             },
         );
@@ -1797,8 +1916,10 @@ impl BackendService {
             selected.contains(PDB_T00_MULTIPAGE_ACTIVE_FIX_ID),
             !pdb_t00_multipage_active_pages.is_empty(),
             || {
-                apply_pdb_t00_multipage_active_repair(usb_root, &pdb_t00_multipage_active_pages)
-                    .map(|n| format!("patched {n} page(s)"))
+                pdb.patch(|bytes| {
+                    apply_pdb_t00_multipage_active_repair(bytes, &pdb_t00_multipage_active_pages)
+                })
+                .map(|n| format!("patched {n} page(s)"))
             },
         );
 
@@ -1808,8 +1929,13 @@ impl BackendService {
             selected.contains(PDB_TOMBSTONED_PLAYLIST_TREE_ID_FIX_ID),
             !pdb_tombstoned_playlist_ids.is_empty(),
             || {
-                apply_pdb_tombstoned_playlist_tree_id_repair(usb_root, &pdb_tombstoned_playlist_ids)
-                    .map(|n| format!("zeroed id in {n} slot(s)"))
+                pdb.patch(|bytes| {
+                    apply_pdb_tombstoned_playlist_tree_id_repair(
+                        bytes,
+                        &pdb_tombstoned_playlist_ids,
+                    )
+                })
+                .map(|n| format!("zeroed id in {n} slot(s)"))
             },
         );
 
@@ -1819,27 +1945,29 @@ impl BackendService {
             selected.contains(PDB_WRONG_PLAYLIST_TREE_SHAPE_FIX_ID),
             !pdb_wrong_playlist_tree_shape_pages.is_empty(),
             || {
-                apply_pdb_wrong_playlist_tree_shape_repair(
-                    usb_root,
-                    &pdb_wrong_playlist_tree_shape_pages,
-                )
+                pdb.patch(|bytes| {
+                    apply_pdb_wrong_playlist_tree_shape_repair(
+                        bytes,
+                        &pdb_wrong_playlist_tree_shape_pages,
+                    )
+                })
                 .map(|n| format!("patched {n} page(s)"))
             },
         );
 
         // After the page fixes above: resealing a track page can leave its
         // sentinel's B-tree stale.
-        let pdb_stale_sentinel_btree_pages = bookkeeping_pdb
-            .map(detect_pdb_stale_sentinel_btree)
-            .unwrap_or_default();
+        let pdb_stale_sentinel_btree_pages = detect_pdb_stale_sentinel_btree(&pdb.bytes);
         outcomes.record_with_progress(
             progress,
             "Repair Stale Sentinel B-Tree",
             selected.contains(PDB_STALE_SENTINEL_BTREE_FIX_ID),
             !pdb_stale_sentinel_btree_pages.is_empty(),
             || {
-                apply_pdb_stale_sentinel_btree_repair(usb_root, &pdb_stale_sentinel_btree_pages)
-                    .map(|n| format!("reset {n} sentinel page(s)"))
+                pdb.patch(|bytes| {
+                    apply_pdb_stale_sentinel_btree_repair(bytes, &pdb_stale_sentinel_btree_pages)
+                })
+                .map(|n| format!("reset {n} sentinel page(s)"))
             },
         );
 
@@ -1849,7 +1977,7 @@ impl BackendService {
             selected.contains(PDB_EC_CONFLICT_FIX_ID),
             !pdb_ec_conflicts.is_empty(),
             || {
-                apply_pdb_ec_data_page_conflict_repair(usb_root, &pdb_ec_conflicts)
+                pdb.patch(|bytes| apply_pdb_ec_data_page_conflict_repair(bytes, &pdb_ec_conflicts))
                     .map(|n| format!("fixed {n} table(s)"))
             },
         );
@@ -1860,8 +1988,10 @@ impl BackendService {
             selected.contains(PDB_TRACK_STRING_ALIGNMENT_FIX_ID),
             !pdb_misaligned_track_ids.is_empty(),
             || {
-                apply_pdb_track_string_alignment_repair(usb_root, &pdb_misaligned_track_ids)
-                    .map(|n| format!("fixed {n} row(s)"))
+                pdb.patch(|bytes| {
+                    apply_pdb_track_string_alignment_repair(bytes, &pdb_misaligned_track_ids)
+                })
+                .map(|n| format!("fixed {n} row(s)"))
             },
         );
 
@@ -1871,8 +2001,10 @@ impl BackendService {
             selected.contains(PDB_ALBUM_STRING_ALIGNMENT_FIX_ID),
             !pdb_misaligned_album_ids.is_empty(),
             || {
-                apply_pdb_album_string_alignment_repair(usb_root, &pdb_misaligned_album_ids)
-                    .map(|n| format!("fixed {n} row(s)"))
+                pdb.patch(|bytes| {
+                    apply_pdb_album_string_alignment_repair(bytes, &pdb_misaligned_album_ids)
+                })
+                .map(|n| format!("fixed {n} row(s)"))
             },
         );
 
@@ -1882,15 +2014,17 @@ impl BackendService {
             selected.contains(PDB_ARTIST_NAME_LAYOUT_FIX_ID),
             !pdb_misaligned_artist_ids.is_empty(),
             || {
-                apply_pdb_artist_name_layout_repair(usb_root, &pdb_misaligned_artist_ids)
-                    .map(|n| format!("fixed {n} row(s)"))
+                pdb.patch(|bytes| {
+                    apply_pdb_artist_name_layout_repair(bytes, &pdb_misaligned_artist_ids)
+                })
+                .map(|n| format!("fixed {n} row(s)"))
             },
         );
 
         if selected.contains(PDB_HEADER_COMPATIBILITY_FIX_ID) {
             if let Some(repair) = pdb_header_compatibility_repair.as_ref() {
                 progress.start("Repair PDB Header Compatibility Field");
-                match apply_pdb_header_compatibility_repair(usb_root, repair) {
+                match pdb.patch(|bytes| apply_pdb_header_compatibility_repair(bytes, repair)) {
                     Ok(true) => outcomes.applied.push(format!(
                         "Repair PDB Header Compatibility Field: wrote 0x10..0x14 {}->{}",
                         repair.current_value, repair.target_value,
@@ -1920,12 +2054,14 @@ impl BackendService {
             selected.contains(RELINK_MOVED_AUDIO_FIX_ID),
             !moved_audio_relinks.is_empty(),
             || {
-                self.apply_fix_relink_moved_audio(
-                    usb_root,
-                    &moved_audio_relinks,
-                    fix_edb_conn.as_mut(),
-                    warnings,
-                )
+                pdb.on_file(|| {
+                    self.apply_fix_relink_moved_audio(
+                        usb_root,
+                        &moved_audio_relinks,
+                        fix_edb_conn.as_mut(),
+                        warnings,
+                    )
+                })
                 .map(|relinked| format!("relinked {relinked} track(s)"))
             },
         );
@@ -1936,12 +2072,14 @@ impl BackendService {
             selected.contains(UNINDEXED_AUDIO_PLAYLIST_FIX_ID),
             !unindexed_audio_files.is_empty(),
             || {
-                self.apply_fix_add_unindexed_audio_playlist(
-                    usb_root,
-                    &unindexed_audio_files,
-                    fix_edb_conn.as_mut(),
-                    warnings,
-                )
+                pdb.on_file(|| {
+                    self.apply_fix_add_unindexed_audio_playlist(
+                        usb_root,
+                        &unindexed_audio_files,
+                        fix_edb_conn.as_mut(),
+                        warnings,
+                    )
+                })
                 .map(|(added, analysed, without_analysis)| {
                     let mut notes = Vec::new();
                     if analysed > 0 {
@@ -1973,12 +2111,14 @@ impl BackendService {
 
         if selected.contains(REMOVE_MISSING_AUDIO_REFERENCES_FIX_ID) {
             progress.start("Remove Missing Audio References");
-            match self.apply_fix_remove_missing_audio_references(
-                usb_root,
-                &missing_audio_paths,
-                fix_edb_conn.as_mut(),
-                warnings,
-            ) {
+            match pdb.on_file(|| {
+                self.apply_fix_remove_missing_audio_references(
+                    usb_root,
+                    &missing_audio_paths,
+                    fix_edb_conn.as_mut(),
+                    warnings,
+                )
+            }) {
                 Ok((removed_db_content, removed_db_playlist_links, removed_pdb)) => {
                     if removed_db_content > 0
                         || removed_db_playlist_links > 0
@@ -2011,12 +2151,14 @@ impl BackendService {
             selected.contains(SHARED_ANALYSIS_FIX_ID),
             !analysis_ownership.shared.is_empty(),
             || {
-                apply_separate_shared_analysis(
-                    usb_root,
-                    app_master_db_id,
-                    fix_edb_conn.as_mut(),
-                    warnings,
-                )
+                pdb.on_file(|| {
+                    apply_separate_shared_analysis(
+                        usb_root,
+                        app_master_db_id,
+                        fix_edb_conn.as_mut(),
+                        warnings,
+                    )
+                })
                 .map(|(moved, kept)| {
                     format!("gave {moved} track(s) their own analysis file, {kept} kept theirs")
                 })
@@ -2028,7 +2170,7 @@ impl BackendService {
             selected.contains(ANALYSIS_TRACK_PATH_FIX_ID),
             !analysis_ownership.unmarked.is_empty(),
             || {
-                apply_add_analysis_track_path(usb_root, app_master_db_id)
+                pdb.on_file(|| apply_add_analysis_track_path(usb_root, app_master_db_id))
                     .map(|stamped| format!("named the track in {stamped} analysis file(s)"))
             },
         );
@@ -2039,13 +2181,15 @@ impl BackendService {
             progress.start("Fix BPM/Key Mismatch");
         }
         outcomes.record("Fix BPM/Key Mismatch", bpm_selected, bpm_found, || {
-            apply_bpm_key_mismatch_repair(
-                usb_root,
-                app_master_db_id,
-                fix_edb_conn.as_mut(),
-                warnings,
-                &mut |done, total| progress.item_done(done, total),
-            )
+            pdb.on_file(|| {
+                apply_bpm_key_mismatch_repair(
+                    usb_root,
+                    app_master_db_id,
+                    fix_edb_conn.as_mut(),
+                    warnings,
+                    &mut |done, total| progress.item_done(done, total),
+                )
+            })
             .map(|(anlz_fixed, edb_fixed)| {
                 format!("rebuilt {anlz_fixed} beat grid(s), updated {edb_fixed} eDB row(s)")
             })
@@ -2060,8 +2204,10 @@ impl BackendService {
             progress.start("Fix Beat Grid");
         }
         outcomes.record("Fix Beat Grid", grid_selected, grid_found, || {
-            apply_beat_grid_repair(usb_root, warnings, &mut |done, total| {
-                progress.item_done(done, total)
+            pdb.on_file(|| {
+                apply_beat_grid_repair(usb_root, warnings, &mut |done, total| {
+                    progress.item_done(done, total)
+                })
             })
             .map(|fixed| format!("fixed {fixed} bundle(s)"))
         });
@@ -2076,8 +2222,13 @@ impl BackendService {
                 progress.start(format.title());
             }
             outcomes.record(format.title(), selected_format, found, || {
-                apply_missing_seek_data_repair(usb_root, *format, warnings, &mut |done, total| {
-                    progress.item_done(done, total)
+                pdb.on_file(|| {
+                    apply_missing_seek_data_repair(
+                        usb_root,
+                        *format,
+                        warnings,
+                        &mut |done, total| progress.item_done(done, total),
+                    )
                 })
                 .map(|(fixed, skipped)| format!("fixed {fixed}, skipped {skipped}"))
             });
@@ -2129,30 +2280,29 @@ impl BackendService {
         }
         drop(fix_edb_conn);
 
-        // All selected fixes above write to their local staged copies only
-        // (see usb_staging.rs) -- flush the accumulated local changes back
-        // to the USB drive here, once per database, instead of once per
-        // fix.
+        // All selected fixes above changed only the staged copies (see
+        // usb_staging.rs); save them to the USB here, both or neither.
         progress.report(95, "USB: Saving repaired databases");
-        if let Err(err) = usb_staging::write_back_if_changed(usb_root, usb_staging::DbKind::Pdb) {
+        let saved = write_back_both_or_neither(usb_root, &mut pdb);
+        if let Err(err) = &saved {
+            outcomes.not_saved(err);
             warnings.push(logging::log(
                 Level::Error,
                 "usb-repair",
-                "usb.repair.pdb-write-back-failed",
-                format!("PDB write-back to USB failed: {err}"),
-            ));
-        }
-        if let Err(err) = usb_staging::write_back_if_changed(usb_root, usb_staging::DbKind::Edb) {
-            warnings.push(logging::log(
-                Level::Error,
-                "usb-repair",
-                "usb.repair.edb-write-back-failed",
-                format!("eDB write-back to USB failed: {err}"),
+                "usb.repair.write-back-failed",
+                format!("Saving the repaired databases to the USB failed: {err}"),
             ));
         }
 
         // After the write-back, so it reads the repaired PDB.
-        if selected.contains(ENGINE_LIBRARY_FIX_ID) && engine_library_fix_needed {
+        if saved.is_err() {
+            if selected.contains(ENGINE_LIBRARY_FIX_ID) && engine_library_fix_needed {
+                outcomes.failed.push(
+                    "Keep Engine DJ Library Up to Date: not run, the repaired databases were not saved"
+                        .to_string(),
+                );
+            }
+        } else if selected.contains(ENGINE_LIBRARY_FIX_ID) && engine_library_fix_needed {
             progress.report(95, "USB: Applying Write Engine DJ Library");
             match self
                 .enable_engine_library()

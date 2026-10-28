@@ -39,11 +39,18 @@
 
 ## Unreleased
 
+- **Fix:** When Repair can't save the repaired databases to the USB, it now saves neither: if the PDB
+  was already written, the previous PDB is put back. The fixes are then reported as failed instead
+  of applied. Before, the USB could be left with a repaired PDB next to the old eDB (or the other
+  way round), and the repair still reported its fixes as applied.
+- **Chore:** Repair reads the staged PDB once and runs its page fixes in memory, writing the PDB
+  only when a fix that works on the file needs it and once at the end, instead of reading and
+  writing the whole file for every fix.
 - **Chore:** Removed backend code nothing in the app used (a Tauri command the UI never called,
   an unused PDB check and wrappers only tests called), and merged duplicated helpers: PDB string
-  encoding, PDB page-size reads, atomic file writes, file moves, ANLZ `.EXT` chunk reads and page
-  cursor decoding. Exports and repairs produce the same bytes as before. The backend code is now
-  `cargo fmt` clean.
+  encoding, PDB page-size reads, PDB page footer repairs, atomic file writes, file moves, ANLZ
+  `.EXT` chunk reads, PDB `columns` reads and page cursor decoding. Exports and repairs produce the
+  same bytes as before. The backend code is now `cargo fmt` clean.
 
 ## 0.4.9
 

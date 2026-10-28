@@ -2,19 +2,6 @@
 
 use super::*;
 
-pub(super) fn is_known_pdb_header_compatibility_value(value: u32) -> bool {
-    matches!(value, 1 | 5)
-}
-
-pub(super) fn read_pdb_header_compatibility_value(path: &std::path::Path) -> Option<u32> {
-    use std::io::Read;
-
-    let mut file = std::fs::File::open(path).ok()?;
-    let mut header = [0u8; 0x14];
-    file.read_exact(&mut header).ok()?;
-    read_u32_le_at(&header, 0x10)
-}
-
 pub(crate) fn diagnose_pdb_integrity(
     pdb_path: &std::path::Path,
     raw_warnings: &mut Vec<WarningEntry>,
@@ -88,13 +75,18 @@ pub(crate) fn diagnose_pdb_integrity(
         link: None,
     });
 
-    if let Some(header_compat) = read_pdb_header_compatibility_value(pdb_path) {
+    // The detectors below all look at the same bytes; read the file once.
+    let bytes = std::fs::read(pdb_path).unwrap_or_default();
+    if let Some(header_compat) =
+        crate::service::repair::pdb_header_compatibility_value_from_bytes(&bytes)
+    {
         // docs/PDB.md "File header 0x10 compatibility field": both 1 and 5 are
         // confirmed accepted by every tested validator. Comparing against a
         // backup snapshot's value here would flag "drift" every time a fresh
         // export (writer always emits 5) follows a prior repair application
         // (which patches to 1) — an unwinnable oscillation, not a real issue.
-        let invalid_current = !is_known_pdb_header_compatibility_value(header_compat);
+        let invalid_current =
+            !crate::service::repair::is_known_pdb_header_compatibility_value(header_compat);
         let header_compat_status = if invalid_current {
             DiagStatus::Warn
         } else {
@@ -128,9 +120,9 @@ pub(crate) fn diagnose_pdb_integrity(
         // exports carry them and play fine, so they never warn. Repair USB
         // still normalizes them whenever it runs (see
         // `repair::fix_is_bookkeeping`); our own writer never produces them.
-        let bad_u5 = crate::service::repair::detect_pdb_sentinel_u5_on_data_pages(pdb_path);
-        let bad_flags = crate::service::repair::detect_pdb_wrong_page_flags(pdb_path);
-        let bad_tranrf = crate::service::repair::detect_pdb_zero_tranrf_all_tables(pdb_path);
+        let bad_u5 = crate::service::repair::detect_pdb_sentinel_u5_on_data_pages(&bytes);
+        let bad_flags = crate::service::repair::detect_pdb_wrong_page_flags(&bytes);
+        let bad_tranrf = crate::service::repair::detect_pdb_zero_tranrf_all_tables(&bytes);
         let mut parts = Vec::new();
         if !bad_u5.is_empty() {
             parts.push(format!("{} page(s) with sentinel u5=0x1FFF", bad_u5.len()));
@@ -173,16 +165,16 @@ pub(crate) fn diagnose_pdb_integrity(
     }
 
     {
-        let stale_btree = crate::service::repair::detect_pdb_stale_sentinel_btree(pdb_path);
-        let wrong_pl_tree = crate::service::repair::detect_pdb_wrong_playlist_tree_shape(pdb_path);
-        let tombstoned = crate::service::repair::detect_pdb_tombstoned_playlist_tree_ids(pdb_path);
-        let wrong_track_u5 = crate::service::repair::detect_pdb_wrong_track_u5(pdb_path);
-        let wrong_history = crate::service::repair::detect_pdb_wrong_history_page_shape(pdb_path);
+        let stale_btree = crate::service::repair::detect_pdb_stale_sentinel_btree(&bytes);
+        let wrong_pl_tree = crate::service::repair::detect_pdb_wrong_playlist_tree_shape(&bytes);
+        let tombstoned = crate::service::repair::detect_pdb_tombstoned_playlist_tree_ids(&bytes);
+        let wrong_track_u5 = crate::service::repair::detect_pdb_wrong_track_u5(&bytes);
+        let wrong_history = crate::service::repair::detect_pdb_wrong_history_page_shape(&bytes);
         let t00_multipage_active =
-            crate::service::repair::detect_pdb_t00_multipage_active_pages(pdb_path);
-        let ec_conflicts = crate::service::repair::detect_pdb_ec_data_page_conflicts(pdb_path);
-        let truncated_chains = crate::service::repair::detect_pdb_truncated_table_chains(pdb_path);
-        let torn_growth = crate::service::repair::detect_pdb_torn_growth_pages(pdb_path);
+            crate::service::repair::detect_pdb_t00_multipage_active_pages(&bytes);
+        let ec_conflicts = crate::service::repair::detect_pdb_ec_data_page_conflicts(&bytes);
+        let truncated_chains = crate::service::repair::detect_pdb_truncated_table_chains(&bytes);
+        let torn_growth = crate::service::repair::detect_pdb_torn_growth_pages(&bytes);
 
         // Hard failures: conditions that cause player or DJ software rejection.
         let mut fail_parts = Vec::new();

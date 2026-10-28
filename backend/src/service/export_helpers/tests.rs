@@ -2293,7 +2293,9 @@ fn remove_playlist_cleans_exclusive_tracks_preserves_shared() {
     // into the shape `detect_pdb_wrong_playlist_tree_shape` (and the "PDB
     // structural integrity: playlist_tree page(s) wrong shape"
     // diagnostic) flags as broken.
-    let wrong_shape_pages = crate::service::repair::detect_pdb_wrong_playlist_tree_shape(&pdb_path);
+    let wrong_shape_pages = crate::service::repair::detect_pdb_wrong_playlist_tree_shape(
+        &crate::service::repair::read_pdb_file(&pdb_path),
+    );
     assert!(
         wrong_shape_pages.is_empty(),
         "deleting a playlist must not leave playlist_tree pages in the wrong \
@@ -2649,16 +2651,30 @@ fn t19_template_state_repair_activates_page_once() {
     broken[p40..p40 + ps].copy_from_slice(&template[p40..p40 + ps]);
     std::fs::write(&pdb_path, &broken).unwrap();
     assert!(crate::service::repair::detect_pdb_t19_template_state(
-        &pdb_path, 1, None
+        &crate::service::repair::read_pdb_file(&pdb_path),
+        1,
+        None
     ));
     assert!(!crate::service::repair::detect_pdb_t19_template_state(
-        &pdb_path, 0, None
+        &crate::service::repair::read_pdb_file(&pdb_path),
+        0,
+        None
     ));
 
-    assert!(crate::service::repair::apply_pdb_t19_template_state_repair(usb_root).unwrap());
+    assert!(
+        crate::service::repair::patch_pdb_file(usb_root, |bytes| {
+            crate::service::repair::apply_pdb_t19_template_state_repair(
+                bytes,
+                crate::service::export_helpers::edb_t19_property(usb_root).as_ref(),
+            )
+        })
+        .unwrap()
+    );
     let repaired = std::fs::read(&pdb_path).unwrap();
     assert!(!crate::service::repair::detect_pdb_t19_template_state(
-        &pdb_path, 1, None
+        &crate::service::repair::read_pdb_file(&pdb_path),
+        1,
+        None
     ));
     // Same page 40 and t19 sentinel (page 39) the export writes, apart from
     // seq; no other page touched.
@@ -2687,7 +2703,15 @@ fn t19_template_state_repair_activates_page_once() {
     );
 
     // One shot: a second run finds nothing and writes nothing.
-    assert!(!crate::service::repair::apply_pdb_t19_template_state_repair(usb_root).unwrap());
+    assert!(
+        !crate::service::repair::patch_pdb_file(usb_root, |bytes| {
+            crate::service::repair::apply_pdb_t19_template_state_repair(
+                bytes,
+                crate::service::export_helpers::edb_t19_property(usb_root).as_ref(),
+            )
+        })
+        .unwrap()
+    );
     assert_eq!(std::fs::read(&pdb_path).unwrap(), repaired);
 }
 
@@ -3210,10 +3234,12 @@ fn write_pdb_updates_alias_matched_track_to_manifest_filename_exactly() {
     // must not be left holding a duplicate of the relocated row's id —
     // see `mark_row_slot_inactive` in pdb_writer.
     let tombstoned = crate::service::repair::detect_pdb_tombstoned_playlist_tree_ids(
-        &usb_root
-            .join(USB_VENDOR_ROOT_DIR)
-            .join(USB_VENDOR_DB_DIR)
-            .join("export.pdb"),
+        &crate::service::repair::read_pdb_file(
+            &usb_root
+                .join(USB_VENDOR_ROOT_DIR)
+                .join(USB_VENDOR_DB_DIR)
+                .join("export.pdb"),
+        ),
     );
     assert!(
         tombstoned.is_empty(),

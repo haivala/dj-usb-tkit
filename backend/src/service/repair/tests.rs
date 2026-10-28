@@ -328,50 +328,6 @@ fn player_menu_config_roundtrip_updates_edb_not_pdb() {
 // leaked via `.keep()` as harmless extra insurance.
 
 #[test]
-fn apply_pdb_sentinel_u5_repair_writes_to_staged_local_copy_when_enabled() {
-    let cache_dir = tempdir().expect("cache dir").keep();
-    let _guard = usb_staging::set_cache_root_for_test(Some(cache_dir));
-
-    let mut p1 = data_page(1, 7);
-    set_nrs(&mut p1, 3);
-    set_u5_num_rl(&mut p1, 0x1FFF, 0x1FFF);
-    let (_td, usb_root) = write_pdb_pages_as_usb_root(vec![header_page(), p1]);
-    let raw_pdb_path = vendor_pdb_path(&usb_root);
-    let raw_bytes_before = std::fs::read(&raw_pdb_path).unwrap();
-
-    let staged_path = usb_staging::stage_pdb(&usb_root).expect("stage pdb");
-    assert_ne!(
-        staged_path, raw_pdb_path,
-        "staging must route through a local path distinct from the USB mount"
-    );
-    let pages = detect_pdb_sentinel_u5_on_data_pages(&staged_path);
-    assert_eq!(pages.len(), 1, "expected one sentinel-u5 page detected");
-
-    let patched = apply_pdb_sentinel_u5_repair(&usb_root, &pages).unwrap();
-    assert_eq!(patched, 1);
-
-    // The raw USB file must be completely untouched -- the write landed
-    // in the local staged copy only, per the batching decision (no
-    // individual writer self-commits).
-    let raw_bytes_after = std::fs::read(&raw_pdb_path).unwrap();
-    assert_eq!(
-        raw_bytes_before, raw_bytes_after,
-        "write must not reach the raw USB path directly"
-    );
-
-    // The local staged copy must reflect the patch.
-    let staged_bytes = std::fs::read(&staged_path).unwrap();
-    assert_ne!(
-        raw_bytes_before, staged_bytes,
-        "local staged copy should reflect the patch"
-    );
-    assert!(
-        detect_pdb_sentinel_u5_on_data_pages(&staged_path).is_empty(),
-        "repair should be idempotent against the staged copy"
-    );
-}
-
-#[test]
 fn repair_apply_batches_local_writes_and_flushes_pdb_to_usb_once() {
     let cache_dir = tempdir().expect("cache dir").keep();
     let _guard = usb_staging::set_cache_root_for_test(Some(cache_dir));
@@ -437,6 +393,102 @@ fn repair_apply_batches_local_writes_and_flushes_pdb_to_usb_once() {
     );
     let value_after = u32::from_le_bytes(raw_bytes_after_apply[0x10..0x14].try_into().unwrap());
     assert_eq!(value_after, PDB_HEADER_COMPATIBILITY_FALLBACK_VALUE);
+}
+
+#[test]
+fn a_page_fix_that_fails_halfway_leaves_the_staged_pdb_unchanged() {
+    let (_td, usb_root) = test_usb_root();
+    let mut pdb = super::run::StagedPdb::load(&usb_root).expect("load staged pdb");
+    let before = pdb.bytes.clone();
+
+    let result: BackendResult<()> = pdb.patch(|bytes| {
+        bytes[0x10] = 0xAA;
+        Err(BackendError::Validation("failed halfway".into()))
+    });
+
+    assert!(result.is_err());
+    assert_eq!(pdb.bytes, before);
+}
+
+/// Stages both databases of `usb_root` and changes the staged PDB's header
+/// compatibility field, as a repair run would before write-back.
+fn staged_repair_with_changed_pdb(usb_root: &Path) -> super::run::StagedPdb {
+    let mut pdb = super::run::StagedPdb::load(usb_root).expect("load staged pdb");
+    usb_staging::stage_edb(usb_root).expect("stage edb");
+    pdb.patch(|bytes| {
+        bytes[0x10..0x14].copy_from_slice(&99u32.to_le_bytes());
+        Ok(())
+    })
+    .expect("patch staged pdb");
+    pdb
+}
+
+fn append_byte(path: &Path) {
+    use std::io::Write;
+    std::fs::OpenOptions::new()
+        .append(true)
+        .open(path)
+        .expect("open for append")
+        .write_all(b"x")
+        .expect("append");
+}
+
+#[test]
+fn repair_write_back_writes_neither_database_when_the_usb_changed_since_staging() {
+    let cache_dir = tempdir().expect("cache dir").keep();
+    let _guard = usb_staging::set_cache_root_for_test(Some(cache_dir));
+    let (_td, usb_root) = test_usb_root();
+    let raw_pdb_path = vendor_pdb_path(&usb_root);
+    let raw_pdb_before = std::fs::read(&raw_pdb_path).unwrap();
+    let mut pdb = staged_repair_with_changed_pdb(&usb_root);
+
+    // Something else writes the USB's eDB after it was staged.
+    append_byte(&super::super::usb_vendor_compat::vendor_edb_path(&usb_root));
+
+    let err = super::run::write_back_both_or_neither(&usb_root, &mut pdb)
+        .expect_err("write-back must refuse an outside change");
+    assert!(
+        err.to_string().contains("changed since it was last read"),
+        "{err}"
+    );
+    assert_eq!(std::fs::read(&raw_pdb_path).unwrap(), raw_pdb_before);
+    assert_eq!(
+        std::fs::read(usb_staging::stage_pdb(&usb_root).unwrap()).unwrap(),
+        raw_pdb_before,
+        "the staged PDB is staged again from the USB"
+    );
+}
+
+#[test]
+fn repair_write_back_puts_the_previous_pdb_back_when_the_edb_write_fails() {
+    let cache_dir = tempdir().expect("cache dir").keep();
+    let _guard = usb_staging::set_cache_root_for_test(Some(cache_dir));
+    let (_td, usb_root) = test_usb_root();
+    let raw_pdb_path = vendor_pdb_path(&usb_root);
+    let raw_edb_path = super::super::usb_vendor_compat::vendor_edb_path(&usb_root);
+    let raw_pdb_before = std::fs::read(&raw_pdb_path).unwrap();
+    let raw_edb_before = std::fs::read(&raw_edb_path).unwrap();
+    let mut pdb = staged_repair_with_changed_pdb(&usb_root);
+    append_byte(&usb_staging::stage_edb(&usb_root).unwrap());
+
+    // The eDB's write-back copies through this temp path; a directory
+    // there makes that copy fail after the PDB was written.
+    let edb_tmp = raw_edb_path.with_extension(format!("tmp-{}", std::process::id()));
+    std::fs::create_dir_all(edb_tmp.join("blocked")).unwrap();
+
+    super::run::write_back_both_or_neither(&usb_root, &mut pdb)
+        .expect_err("the eDB write-back must fail");
+    assert_eq!(
+        std::fs::read(&raw_pdb_path).unwrap(),
+        raw_pdb_before,
+        "the PDB the USB held before is put back"
+    );
+    assert_eq!(std::fs::read(&raw_edb_path).unwrap(), raw_edb_before);
+    assert_eq!(
+        std::fs::read(usb_staging::stage_edb(&usb_root).unwrap()).unwrap(),
+        raw_edb_before,
+        "the staged eDB is staged again from the USB"
+    );
 }
 
 #[test]
@@ -590,14 +642,20 @@ fn sentinel_u5_repair_detects_and_fixes_sentinel_footer() {
     let (_td, usb_root) = write_pdb_pages_as_usb_root(vec![header_page(), p1]);
     let pdb_path = vendor_pdb_path(&usb_root);
 
-    let pages = detect_pdb_sentinel_u5_on_data_pages(&pdb_path);
+    let pages = detect_pdb_sentinel_u5_on_data_pages(&read_pdb_file(&pdb_path));
     assert_eq!(pages.len(), 1, "expected one sentinel-u5 page detected");
     assert_eq!(pages[0].page_index, 1);
 
     // No-op on empty input.
-    assert_eq!(apply_pdb_sentinel_u5_repair(&usb_root, &[]).unwrap(), 0);
+    assert_eq!(
+        patch_pdb_file(&usb_root, |bytes| apply_pdb_sentinel_u5_repair(bytes, &[])).unwrap(),
+        0
+    );
 
-    let patched = apply_pdb_sentinel_u5_repair(&usb_root, &pages).unwrap();
+    let patched = patch_pdb_file(&usb_root, |bytes| {
+        apply_pdb_sentinel_u5_repair(bytes, &pages)
+    })
+    .unwrap();
     assert_eq!(patched, 1);
 
     let bytes = std::fs::read(&pdb_path).unwrap();
@@ -612,7 +670,7 @@ fn sentinel_u5_repair_detects_and_fixes_sentinel_footer() {
     );
 
     assert!(
-        detect_pdb_sentinel_u5_on_data_pages(&pdb_path).is_empty(),
+        detect_pdb_sentinel_u5_on_data_pages(&read_pdb_file(&pdb_path)).is_empty(),
         "repair should be idempotent"
     );
 }
@@ -629,17 +687,26 @@ fn duplicate_playlist_entries_repair_removes_stale_rows_and_is_idempotent() {
     let pages: Vec<Vec<u8>> = bytes.chunks(TEST_PAGE_SIZE).map(|c| c.to_vec()).collect();
     let (_td, usb_root) = write_pdb_pages_as_usb_root(pages);
 
-    let removed = apply_pdb_duplicate_playlist_entries_repair(&usb_root).unwrap();
+    let removed = patch_pdb_file(&usb_root, |bytes| {
+        apply_pdb_duplicate_playlist_entries_repair(bytes)
+    })
+    .unwrap();
     assert_eq!(removed, 1);
 
-    let removed_again = apply_pdb_duplicate_playlist_entries_repair(&usb_root).unwrap();
+    let removed_again = patch_pdb_file(&usb_root, |bytes| {
+        apply_pdb_duplicate_playlist_entries_repair(bytes)
+    })
+    .unwrap();
     assert_eq!(removed_again, 0, "repair should be idempotent");
 }
 
 #[test]
 fn duplicate_playlist_entries_repair_is_noop_on_clean_pdb() {
     let (_td, usb_root) = write_pdb_pages_as_usb_root(vec![header_page(), data_page(1, 8)]);
-    let removed = apply_pdb_duplicate_playlist_entries_repair(&usb_root).unwrap();
+    let removed = patch_pdb_file(&usb_root, |bytes| {
+        apply_pdb_duplicate_playlist_entries_repair(bytes)
+    })
+    .unwrap();
     assert_eq!(removed, 0);
 }
 
@@ -650,22 +717,29 @@ fn wrong_page_flags_repair_detects_and_fixes_invalid_flags() {
     let (_td, usb_root) = write_pdb_pages_as_usb_root(vec![header_page(), p1]);
     let pdb_path = vendor_pdb_path(&usb_root);
 
-    let pages = detect_pdb_wrong_page_flags(&pdb_path);
+    let pages = detect_pdb_wrong_page_flags(&read_pdb_file(&pdb_path));
     assert_eq!(pages.len(), 1);
     assert_eq!(pages[0].page_index, 1);
     assert_eq!(pages[0].correct_flags, 0x24);
 
     assert_eq!(
-        apply_pdb_wrong_page_flags_repair(&usb_root, &[]).unwrap(),
+        patch_pdb_file(&usb_root, |bytes| apply_pdb_wrong_page_flags_repair(
+            bytes,
+            &[]
+        ))
+        .unwrap(),
         0
     );
 
-    let patched = apply_pdb_wrong_page_flags_repair(&usb_root, &pages).unwrap();
+    let patched = patch_pdb_file(&usb_root, |bytes| {
+        apply_pdb_wrong_page_flags_repair(bytes, &pages)
+    })
+    .unwrap();
     assert_eq!(patched, 1);
 
     let bytes = std::fs::read(&pdb_path).unwrap();
     assert_eq!(bytes[TEST_PAGE_SIZE + 0x1b], 0x24);
-    assert!(detect_pdb_wrong_page_flags(&pdb_path).is_empty());
+    assert!(detect_pdb_wrong_page_flags(&read_pdb_file(&pdb_path)).is_empty());
 }
 
 #[test]
@@ -677,7 +751,7 @@ fn wrong_page_flags_repair_allows_active_flag_on_track_table() {
     let (_td, usb_root) = write_pdb_pages_as_usb_root(vec![header_page(), p1]);
     let pdb_path = vendor_pdb_path(&usb_root);
 
-    let pages = detect_pdb_wrong_page_flags(&pdb_path);
+    let pages = detect_pdb_wrong_page_flags(&read_pdb_file(&pdb_path));
     assert_eq!(pages.len(), 1);
     assert_eq!(pages[0].correct_flags, 0x34);
 }
@@ -697,13 +771,19 @@ fn zero_tranrf_repair_detects_and_fixes_missing_transaction_flags() {
     let (_td, usb_root) = write_pdb_pages_as_usb_root(vec![header_page(), p1]);
     let pdb_path = vendor_pdb_path(&usb_root);
 
-    let pages = detect_pdb_zero_tranrf_all_tables(&pdb_path);
+    let pages = detect_pdb_zero_tranrf_all_tables(&read_pdb_file(&pdb_path));
     assert_eq!(pages.len(), 1, "expected one zero-tranrf page detected");
     assert_eq!(pages[0].page_index, 1);
 
-    assert_eq!(apply_pdb_zero_tranrf_repair(&usb_root, &[]).unwrap(), 0);
+    assert_eq!(
+        patch_pdb_file(&usb_root, |bytes| apply_pdb_zero_tranrf_repair(bytes, &[])).unwrap(),
+        0
+    );
 
-    let patched = apply_pdb_zero_tranrf_repair(&usb_root, &pages).unwrap();
+    let patched = patch_pdb_file(&usb_root, |bytes| {
+        apply_pdb_zero_tranrf_repair(bytes, &pages)
+    })
+    .unwrap();
     assert_eq!(patched, 1);
 
     let bytes = std::fs::read(&pdb_path).unwrap();
@@ -713,7 +793,7 @@ fn zero_tranrf_repair_detects_and_fixes_missing_transaction_flags() {
         1,
         "tranrf should now mirror rowpf"
     );
-    assert!(detect_pdb_zero_tranrf_all_tables(&pdb_path).is_empty());
+    assert!(detect_pdb_zero_tranrf_all_tables(&read_pdb_file(&pdb_path)).is_empty());
 }
 
 #[test]
@@ -741,7 +821,7 @@ fn zero_tranrf_repair_detects_corruption_on_a_wrapped_257_row_page() {
     let (_td, usb_root) = write_pdb_pages_as_usb_root(vec![header_page(), p1]);
     let pdb_path = vendor_pdb_path(&usb_root);
 
-    let pages = detect_pdb_zero_tranrf_all_tables(&pdb_path);
+    let pages = detect_pdb_zero_tranrf_all_tables(&read_pdb_file(&pdb_path));
     assert_eq!(
         pages.len(),
         1,
@@ -749,7 +829,10 @@ fn zero_tranrf_repair_detects_corruption_on_a_wrapped_257_row_page() {
     );
     assert_eq!(pages[0].page_index, 1);
 
-    let patched = apply_pdb_zero_tranrf_repair(&usb_root, &pages).unwrap();
+    let patched = patch_pdb_file(&usb_root, |bytes| {
+        apply_pdb_zero_tranrf_repair(bytes, &pages)
+    })
+    .unwrap();
     assert_eq!(patched, 1);
 
     let bytes = std::fs::read(&pdb_path).unwrap();
@@ -759,7 +842,7 @@ fn zero_tranrf_repair_detects_corruption_on_a_wrapped_257_row_page() {
         1,
         "tranrf should now mirror rowpf"
     );
-    assert!(detect_pdb_zero_tranrf_all_tables(&pdb_path).is_empty());
+    assert!(detect_pdb_zero_tranrf_all_tables(&read_pdb_file(&pdb_path)).is_empty());
 }
 
 #[test]
@@ -772,15 +855,22 @@ fn wrong_history_page_shape_repair_detects_and_fixes_old_bug_pattern() {
     let (_td, usb_root) = write_pdb_pages_as_usb_root(vec![header_page(), p1]);
     let pdb_path = vendor_pdb_path(&usb_root);
 
-    let pages = detect_pdb_wrong_history_page_shape(&pdb_path);
+    let pages = detect_pdb_wrong_history_page_shape(&read_pdb_file(&pdb_path));
     assert_eq!(pages.len(), 1);
     assert_eq!(pages[0].nrs, 4);
 
     assert_eq!(
-        apply_pdb_wrong_history_page_shape_repair(&usb_root, &[]).unwrap(),
+        patch_pdb_file(
+            &usb_root,
+            |bytes| apply_pdb_wrong_history_page_shape_repair(bytes, &[])
+        )
+        .unwrap(),
         0
     );
-    let patched = apply_pdb_wrong_history_page_shape_repair(&usb_root, &pages).unwrap();
+    let patched = patch_pdb_file(&usb_root, |bytes| {
+        apply_pdb_wrong_history_page_shape_repair(bytes, &pages)
+    })
+    .unwrap();
     assert_eq!(patched, 1);
 
     let bytes = std::fs::read(&pdb_path).unwrap();
@@ -793,7 +883,7 @@ fn wrong_history_page_shape_repair_detects_and_fixes_old_bug_pattern() {
         u16::from_le_bytes(bytes[off + 0x22..off + 0x24].try_into().unwrap()),
         0
     );
-    assert!(detect_pdb_wrong_history_page_shape(&pdb_path).is_empty());
+    assert!(detect_pdb_wrong_history_page_shape(&read_pdb_file(&pdb_path)).is_empty());
 }
 
 /// Build a small realistic PDB (via the real writer) with one track and one album, both
@@ -918,7 +1008,7 @@ fn corrupt_alignment_in_place(bytes: &mut [u8]) {
 fn detect_pdb_string_misalignment_finds_corrupted_track_and_album_rows() {
     let mut bytes = build_seed_pdb_bytes_for_alignment_test();
     assert!(
-        detect_pdb_string_misalignment_bytes(&bytes).is_empty(),
+        detect_pdb_string_misalignment(&bytes).is_empty(),
         "current writer must produce aligned rows"
     );
     corrupt_alignment_in_place(&mut bytes);
@@ -929,7 +1019,7 @@ fn detect_pdb_string_misalignment_finds_corrupted_track_and_album_rows() {
     std::fs::create_dir_all(pdb_path.parent().unwrap()).expect("create vendor db dir");
     std::fs::write(&pdb_path, &bytes).expect("write corrupted pdb");
 
-    let found = detect_pdb_string_misalignment(&pdb_path);
+    let found = detect_pdb_string_misalignment(&read_pdb_file(&pdb_path));
     assert!(
         found.iter().any(|m| m.table_type == 0 && m.id == 1),
         "must detect the misaligned track row"
@@ -938,18 +1028,6 @@ fn detect_pdb_string_misalignment_finds_corrupted_track_and_album_rows() {
         found.iter().any(|m| m.table_type == 3 && m.id == 1),
         "must detect the misaligned album row"
     );
-}
-
-/// Test-only helper mirroring `detect_pdb_string_misalignment` but operating on an in-memory
-/// byte buffer, so the "current writer produces clean output" precondition can be asserted
-/// without a round-trip through a temp file.
-fn detect_pdb_string_misalignment_bytes(bytes: &[u8]) -> Vec<MisalignedStringSlot> {
-    let td = tempdir().expect("tempdir");
-    let usb_root = td.path().to_path_buf();
-    let pdb_path = vendor_pdb_path(&usb_root);
-    std::fs::create_dir_all(pdb_path.parent().unwrap()).expect("create vendor db dir");
-    std::fs::write(&pdb_path, bytes).expect("write pdb");
-    detect_pdb_string_misalignment(&pdb_path)
 }
 
 #[test]
@@ -963,7 +1041,7 @@ fn repair_usb_diagnostics_proposes_and_applies_string_alignment_fixes() {
     std::fs::create_dir_all(pdb_path.parent().unwrap()).expect("create vendor db dir");
     std::fs::write(&pdb_path, &bytes).expect("write corrupted pdb");
 
-    let found_before = detect_pdb_string_misalignment(&pdb_path);
+    let found_before = detect_pdb_string_misalignment(&read_pdb_file(&pdb_path));
     assert!(!found_before.is_empty());
 
     let track_ids: Vec<u32> = found_before
@@ -983,15 +1061,19 @@ fn repair_usb_diagnostics_proposes_and_applies_string_alignment_fixes() {
     assert_eq!(track_ids, vec![1]);
     assert_eq!(album_ids, vec![1]);
 
-    let track_patched =
-        apply_pdb_track_string_alignment_repair(&usb_root, &track_ids).expect("apply track repair");
+    let track_patched = patch_pdb_file(&usb_root, |bytes| {
+        apply_pdb_track_string_alignment_repair(bytes, &track_ids)
+    })
+    .expect("apply track repair");
     assert_eq!(track_patched, 1);
-    let album_patched =
-        apply_pdb_album_string_alignment_repair(&usb_root, &album_ids).expect("apply album repair");
+    let album_patched = patch_pdb_file(&usb_root, |bytes| {
+        apply_pdb_album_string_alignment_repair(bytes, &album_ids)
+    })
+    .expect("apply album repair");
     assert_eq!(album_patched, 1);
 
     assert!(
-        detect_pdb_string_misalignment(&pdb_path).is_empty(),
+        detect_pdb_string_misalignment(&read_pdb_file(&pdb_path)).is_empty(),
         "no misaligned rows should remain after both repairs"
     );
 
@@ -1073,7 +1155,7 @@ fn repair_realigns_misaligned_long_ascii_track_strings() {
     std::fs::create_dir_all(pdb_path.parent().unwrap()).expect("create vendor db dir");
     std::fs::write(&pdb_path, &bytes).expect("write pdb");
 
-    let found = detect_pdb_string_misalignment(&pdb_path);
+    let found = detect_pdb_string_misalignment(&read_pdb_file(&pdb_path));
     assert!(
         found
             .iter()
@@ -1081,10 +1163,14 @@ fn repair_realigns_misaligned_long_ascii_track_strings() {
         "{found:?}"
     );
     assert_eq!(
-        apply_pdb_track_string_alignment_repair(&usb_root, &[1]).expect("apply track repair"),
+        patch_pdb_file(&usb_root, |bytes| apply_pdb_track_string_alignment_repair(
+            bytes,
+            &[1]
+        ))
+        .expect("apply track repair"),
         1
     );
-    assert!(detect_pdb_string_misalignment(&pdb_path).is_empty());
+    assert!(detect_pdb_string_misalignment(&read_pdb_file(&pdb_path)).is_empty());
 
     let parsed = crate::pdb_reader::parse_pdb(&pdb_path).expect("parse repaired pdb");
     let track = parsed.tracks.iter().find(|t| t.id == 1).expect("track 1");
@@ -1151,7 +1237,7 @@ fn artist_name_layout_repair_moves_ascii_name_to_rekordbox_offset() {
     const PAGE_SIZE: usize = 4096;
     let mut bytes = build_seed_pdb_bytes_for_alignment_test();
     assert!(
-        detect_pdb_string_misalignment_bytes(&bytes).is_empty(),
+        detect_pdb_string_misalignment(&bytes).is_empty(),
         "current writer must put an ASCII artist name at 10"
     );
 
@@ -1184,7 +1270,7 @@ fn artist_name_layout_repair_moves_ascii_name_to_rekordbox_offset() {
     std::fs::create_dir_all(pdb_path.parent().unwrap()).expect("create vendor db dir");
     std::fs::write(&pdb_path, &bytes).expect("write old-layout pdb");
 
-    let found = detect_pdb_string_misalignment(&pdb_path);
+    let found = detect_pdb_string_misalignment(&read_pdb_file(&pdb_path));
     assert!(
         found
             .iter()
@@ -1192,11 +1278,13 @@ fn artist_name_layout_repair_moves_ascii_name_to_rekordbox_offset() {
         "must flag the ASCII artist name at 12, got {found:?}"
     );
 
-    let patched =
-        apply_pdb_artist_name_layout_repair(&usb_root, &[1]).expect("apply artist repair");
+    let patched = patch_pdb_file(&usb_root, |bytes| {
+        apply_pdb_artist_name_layout_repair(bytes, &[1])
+    })
+    .expect("apply artist repair");
     assert_eq!(patched, 1);
     assert!(
-        detect_pdb_string_misalignment(&pdb_path).is_empty(),
+        detect_pdb_string_misalignment(&read_pdb_file(&pdb_path)).is_empty(),
         "no artist row should be flagged after one repair pass"
     );
     let parsed = crate::pdb_reader::parse_pdb(&pdb_path).expect("parse repaired pdb");
@@ -1235,21 +1323,23 @@ fn album_string_alignment_repair_fixes_row_orphaned_from_live_t03_chain() {
     std::fs::create_dir_all(pdb_path.parent().unwrap()).expect("create vendor db dir");
     std::fs::write(&pdb_path, &bytes).expect("write corrupted pdb");
 
-    let found_before = detect_pdb_string_misalignment(&pdb_path);
+    let found_before = detect_pdb_string_misalignment(&read_pdb_file(&pdb_path));
     assert!(
         found_before.iter().any(|m| m.table_type == 3 && m.id == 1),
         "raw scan must still find the orphaned misaligned album row"
     );
 
-    let album_patched =
-        apply_pdb_album_string_alignment_repair(&usb_root, &[1]).expect("apply album repair");
+    let album_patched = patch_pdb_file(&usb_root, |bytes| {
+        apply_pdb_album_string_alignment_repair(bytes, &[1])
+    })
+    .expect("apply album repair");
     assert_eq!(
         album_patched, 1,
         "repair must find and fix the orphaned row, not silently report 0"
     );
 
     assert!(
-        !detect_pdb_string_misalignment(&pdb_path)
+        !detect_pdb_string_misalignment(&read_pdb_file(&pdb_path))
             .iter()
             .any(|m| m.table_type == 3),
         "no misaligned album rows should remain after repair, including orphaned ones \
@@ -1272,12 +1362,22 @@ fn wrong_track_u5_repair_detects_and_fixes_active_page_footer() {
     let (_td, usb_root) = write_pdb_pages_as_usb_root(vec![header_page(), p1]);
     let pdb_path = vendor_pdb_path(&usb_root);
 
-    let pages = detect_pdb_wrong_track_u5(&pdb_path);
+    let pages = detect_pdb_wrong_track_u5(&read_pdb_file(&pdb_path));
     assert_eq!(pages.len(), 1);
     assert_eq!(pages[0].page_index, 1);
 
-    assert_eq!(apply_pdb_wrong_track_u5_repair(&usb_root, &[]).unwrap(), 0);
-    let patched = apply_pdb_wrong_track_u5_repair(&usb_root, &pages).unwrap();
+    assert_eq!(
+        patch_pdb_file(&usb_root, |bytes| apply_pdb_wrong_track_u5_repair(
+            bytes,
+            &[]
+        ))
+        .unwrap(),
+        0
+    );
+    let patched = patch_pdb_file(&usb_root, |bytes| {
+        apply_pdb_wrong_track_u5_repair(bytes, &pages)
+    })
+    .unwrap();
     assert_eq!(patched, 1);
 
     let bytes = std::fs::read(&pdb_path).unwrap();
@@ -1290,7 +1390,7 @@ fn wrong_track_u5_repair_detects_and_fixes_active_page_footer() {
         u16::from_le_bytes(bytes[off + 0x22..off + 0x24].try_into().unwrap()),
         4
     );
-    assert!(detect_pdb_wrong_track_u5(&pdb_path).is_empty());
+    assert!(detect_pdb_wrong_track_u5(&read_pdb_file(&pdb_path)).is_empty());
 }
 
 #[test]
@@ -1309,7 +1409,7 @@ fn t00_multipage_active_repair_flags_only_predecessor_pages() {
     let (_td, usb_root) = write_pdb_pages_as_usb_root(vec![header_page(), p1, p2]);
     let pdb_path = vendor_pdb_path(&usb_root);
 
-    let pages = detect_pdb_t00_multipage_active_pages(&pdb_path);
+    let pages = detect_pdb_t00_multipage_active_pages(&read_pdb_file(&pdb_path));
     assert_eq!(
         pages.len(),
         1,
@@ -1318,10 +1418,17 @@ fn t00_multipage_active_repair_flags_only_predecessor_pages() {
     assert_eq!(pages[0].page_index, 1);
 
     assert_eq!(
-        apply_pdb_t00_multipage_active_repair(&usb_root, &[]).unwrap(),
+        patch_pdb_file(&usb_root, |bytes| apply_pdb_t00_multipage_active_repair(
+            bytes,
+            &[]
+        ))
+        .unwrap(),
         0
     );
-    let patched = apply_pdb_t00_multipage_active_repair(&usb_root, &pages).unwrap();
+    let patched = patch_pdb_file(&usb_root, |bytes| {
+        apply_pdb_t00_multipage_active_repair(bytes, &pages)
+    })
+    .unwrap();
     assert_eq!(patched, 1);
 
     let bytes = std::fs::read(&pdb_path).unwrap();
@@ -1338,7 +1445,7 @@ fn t00_multipage_active_repair_flags_only_predecessor_pages() {
     // Terminal page 2 must be left untouched.
     let off2 = TEST_PAGE_SIZE * 2;
     assert_eq!(bytes[off2 + 0x1b], 0x34);
-    assert!(detect_pdb_t00_multipage_active_pages(&pdb_path).is_empty());
+    assert!(detect_pdb_t00_multipage_active_pages(&read_pdb_file(&pdb_path)).is_empty());
 }
 
 #[test]
@@ -1350,15 +1457,21 @@ fn wrong_playlist_tree_shape_repair_detects_and_fixes_footer() {
     let (_td, usb_root) = write_pdb_pages_as_usb_root(vec![header_page(), p1]);
     let pdb_path = vendor_pdb_path(&usb_root);
 
-    let pages = detect_pdb_wrong_playlist_tree_shape(&pdb_path);
+    let pages = detect_pdb_wrong_playlist_tree_shape(&read_pdb_file(&pdb_path));
     assert_eq!(pages.len(), 1);
     assert_eq!(pages[0].nrs, 6);
 
     assert_eq!(
-        apply_pdb_wrong_playlist_tree_shape_repair(&usb_root, &[]).unwrap(),
+        patch_pdb_file(&usb_root, |bytes| {
+            apply_pdb_wrong_playlist_tree_shape_repair(bytes, &[])
+        })
+        .unwrap(),
         0
     );
-    let patched = apply_pdb_wrong_playlist_tree_shape_repair(&usb_root, &pages).unwrap();
+    let patched = patch_pdb_file(&usb_root, |bytes| {
+        apply_pdb_wrong_playlist_tree_shape_repair(bytes, &pages)
+    })
+    .unwrap();
     assert_eq!(patched, 1);
 
     let bytes = std::fs::read(&pdb_path).unwrap();
@@ -1371,7 +1484,7 @@ fn wrong_playlist_tree_shape_repair_detects_and_fixes_footer() {
         u16::from_le_bytes(bytes[off + 0x22..off + 0x24].try_into().unwrap()),
         0
     );
-    assert!(detect_pdb_wrong_playlist_tree_shape(&pdb_path).is_empty());
+    assert!(detect_pdb_wrong_playlist_tree_shape(&read_pdb_file(&pdb_path)).is_empty());
 }
 
 #[test]
@@ -1397,7 +1510,7 @@ fn tombstoned_playlist_tree_id_repair_zeroes_duplicate_dead_id() {
     let (_td, usb_root) = write_pdb_pages_as_usb_root(vec![header_page(), p1]);
     let pdb_path = vendor_pdb_path(&usb_root);
 
-    let items = detect_pdb_tombstoned_playlist_tree_ids(&pdb_path);
+    let items = detect_pdb_tombstoned_playlist_tree_ids(&read_pdb_file(&pdb_path));
     assert_eq!(
         items.len(),
         1,
@@ -1407,10 +1520,16 @@ fn tombstoned_playlist_tree_id_repair_zeroes_duplicate_dead_id() {
     assert_eq!(items[0].id_field_offset, heap_start + 0x20 + 12);
 
     assert_eq!(
-        apply_pdb_tombstoned_playlist_tree_id_repair(&usb_root, &[]).unwrap(),
+        patch_pdb_file(&usb_root, |bytes| {
+            apply_pdb_tombstoned_playlist_tree_id_repair(bytes, &[])
+        })
+        .unwrap(),
         0
     );
-    let patched = apply_pdb_tombstoned_playlist_tree_id_repair(&usb_root, &items).unwrap();
+    let patched = patch_pdb_file(&usb_root, |bytes| {
+        apply_pdb_tombstoned_playlist_tree_id_repair(bytes, &items)
+    })
+    .unwrap();
     assert_eq!(patched, 1);
 
     let bytes = std::fs::read(&pdb_path).unwrap();
@@ -1419,7 +1538,7 @@ fn tombstoned_playlist_tree_id_repair_zeroes_duplicate_dead_id() {
         u32::from_le_bytes(bytes[id_off..id_off + 4].try_into().unwrap()),
         0
     );
-    assert!(detect_pdb_tombstoned_playlist_tree_ids(&pdb_path).is_empty());
+    assert!(detect_pdb_tombstoned_playlist_tree_ids(&read_pdb_file(&pdb_path)).is_empty());
 }
 
 #[test]
@@ -1436,15 +1555,22 @@ fn stale_sentinel_btree_repair_rebuilds_missing_index() {
     let (_td, usb_root) = write_pdb_pages_as_usb_root(vec![header_page(), data, sentinel]);
     let pdb_path = vendor_pdb_path(&usb_root);
 
-    let pages = detect_pdb_stale_sentinel_btree(&pdb_path);
+    let pages = detect_pdb_stale_sentinel_btree(&read_pdb_file(&pdb_path));
     assert_eq!(pages.len(), 1);
     assert_eq!(pages[0].page_index, 2);
 
     assert_eq!(
-        apply_pdb_stale_sentinel_btree_repair(&usb_root, &[]).unwrap(),
+        patch_pdb_file(&usb_root, |bytes| apply_pdb_stale_sentinel_btree_repair(
+            bytes,
+            &[]
+        ))
+        .unwrap(),
         0
     );
-    let patched = apply_pdb_stale_sentinel_btree_repair(&usb_root, &pages).unwrap();
+    let patched = patch_pdb_file(&usb_root, |bytes| {
+        apply_pdb_stale_sentinel_btree_repair(bytes, &pages)
+    })
+    .unwrap();
     assert_eq!(patched, 1);
 
     let bytes = std::fs::read(&pdb_path).unwrap();
@@ -1457,7 +1583,7 @@ fn stale_sentinel_btree_repair_rebuilds_missing_index() {
         u32::from_le_bytes(bytes[soff + 0x3c..soff + 0x40].try_into().unwrap()),
         8, // page_index(1) * 8
     );
-    assert!(detect_pdb_stale_sentinel_btree(&pdb_path).is_empty());
+    assert!(detect_pdb_stale_sentinel_btree(&read_pdb_file(&pdb_path)).is_empty());
 }
 
 #[test]
@@ -1476,16 +1602,23 @@ fn ec_data_page_conflict_repair_relocates_empty_candidate() {
     let (_td, usb_root) = write_pdb_pages_as_usb_root(vec![header, owned_by_a]);
     let pdb_path = vendor_pdb_path(&usb_root);
 
-    let conflicts = detect_pdb_ec_data_page_conflicts(&pdb_path);
+    let conflicts = detect_pdb_ec_data_page_conflicts(&read_pdb_file(&pdb_path));
     assert_eq!(conflicts.len(), 1);
     assert_eq!(conflicts[0].table_type, 9);
     assert_eq!(conflicts[0].last_page, 1);
 
     assert_eq!(
-        apply_pdb_ec_data_page_conflict_repair(&usb_root, &[]).unwrap(),
+        patch_pdb_file(&usb_root, |bytes| apply_pdb_ec_data_page_conflict_repair(
+            bytes,
+            &[]
+        ))
+        .unwrap(),
         0
     );
-    let patched = apply_pdb_ec_data_page_conflict_repair(&usb_root, &conflicts).unwrap();
+    let patched = patch_pdb_file(&usb_root, |bytes| {
+        apply_pdb_ec_data_page_conflict_repair(bytes, &conflicts)
+    })
+    .unwrap();
     assert_eq!(patched, 1);
 
     let bytes = std::fs::read(&pdb_path).unwrap();
@@ -1501,7 +1634,7 @@ fn ec_data_page_conflict_repair_relocates_empty_candidate() {
             .unwrap(),
     );
     assert_eq!(p1_next, new_ec);
-    assert!(detect_pdb_ec_data_page_conflicts(&pdb_path).is_empty());
+    assert!(detect_pdb_ec_data_page_conflicts(&read_pdb_file(&pdb_path)).is_empty());
 }
 
 #[test]
@@ -1529,17 +1662,24 @@ fn truncated_table_chain_repair_restores_last_and_ec_to_physical_reality() {
     let (_td, usb_root) = write_pdb_pages_as_usb_root(vec![header, p1, p2]);
     let pdb_path = vendor_pdb_path(&usb_root);
 
-    let fixes = detect_pdb_truncated_table_chains(&pdb_path);
+    let fixes = detect_pdb_truncated_table_chains(&read_pdb_file(&pdb_path));
     assert_eq!(fixes.len(), 1);
     assert_eq!(fixes[0].table_type, 9);
     assert_eq!(fixes[0].corrected_last, 2);
     assert_eq!(fixes[0].corrected_ec, 3);
 
     assert_eq!(
-        apply_pdb_truncated_table_chain_repair(&usb_root, &[]).unwrap(),
+        patch_pdb_file(&usb_root, |bytes| apply_pdb_truncated_table_chain_repair(
+            bytes,
+            &[]
+        ))
+        .unwrap(),
         0
     );
-    let patched = apply_pdb_truncated_table_chain_repair(&usb_root, &fixes).unwrap();
+    let patched = patch_pdb_file(&usb_root, |bytes| {
+        apply_pdb_truncated_table_chain_repair(bytes, &fixes)
+    })
+    .unwrap();
     assert_eq!(patched, 1);
 
     let bytes = std::fs::read(&pdb_path).unwrap();
@@ -1558,7 +1698,7 @@ fn truncated_table_chain_repair_restores_last_and_ec_to_physical_reality() {
         crate::utils::collect_chain(&bytes, TEST_PAGE_SIZE, 1, 2).is_some(),
         "chain must now walk cleanly to the corrected last page"
     );
-    assert!(detect_pdb_truncated_table_chains(&pdb_path).is_empty());
+    assert!(detect_pdb_truncated_table_chains(&read_pdb_file(&pdb_path)).is_empty());
 }
 
 #[test]
@@ -1591,7 +1731,7 @@ fn truncated_table_chain_detected_past_trailing_blank_reserve_page() {
     let (_td, usb_root) = write_pdb_pages_as_usb_root(vec![header, p1, p2, p3]);
     let pdb_path = vendor_pdb_path(&usb_root);
 
-    let fixes = detect_pdb_truncated_table_chains(&pdb_path);
+    let fixes = detect_pdb_truncated_table_chains(&read_pdb_file(&pdb_path));
     assert_eq!(
         fixes.len(),
         1,
@@ -1607,7 +1747,10 @@ fn truncated_table_chain_detected_past_trailing_blank_reserve_page() {
         "empty_candidate == real last page's own next (the blank reserve page)"
     );
 
-    let patched = apply_pdb_truncated_table_chain_repair(&usb_root, &fixes).unwrap();
+    let patched = patch_pdb_file(&usb_root, |bytes| {
+        apply_pdb_truncated_table_chain_repair(bytes, &fixes)
+    })
+    .unwrap();
     assert_eq!(patched, 1);
 
     let bytes = std::fs::read(&pdb_path).unwrap();
@@ -1619,7 +1762,7 @@ fn truncated_table_chain_detected_past_trailing_blank_reserve_page() {
         crate::utils::collect_chain(&bytes, TEST_PAGE_SIZE, 1, 2).is_some(),
         "chain must now walk cleanly to the corrected last page"
     );
-    assert!(detect_pdb_truncated_table_chains(&pdb_path).is_empty());
+    assert!(detect_pdb_truncated_table_chains(&read_pdb_file(&pdb_path)).is_empty());
 }
 
 #[test]
@@ -1645,15 +1788,22 @@ fn torn_growth_repair_zeroes_garbage_ec_page_and_truncates_tail() {
     let (_td, usb_root) = write_pdb_pages_as_usb_root(vec![header, p1, garbage_ec, garbage_tail]);
     let pdb_path = vendor_pdb_path(&usb_root);
 
-    let report = detect_pdb_torn_growth_pages(&pdb_path);
+    let report = detect_pdb_torn_growth_pages(&read_pdb_file(&pdb_path));
     assert_eq!(report.garbage_ec_pages, vec![2]);
     assert_eq!(report.truncate_to_pages, Some(3));
 
     assert_eq!(
-        apply_pdb_torn_growth_pages_repair(&usb_root, &PdbTornGrowthReport::default()).unwrap(),
+        patch_pdb_file(&usb_root, |bytes| apply_pdb_torn_growth_pages_repair(
+            bytes,
+            &PdbTornGrowthReport::default()
+        ))
+        .unwrap(),
         0
     );
-    let patched = apply_pdb_torn_growth_pages_repair(&usb_root, &report).unwrap();
+    let patched = patch_pdb_file(&usb_root, |bytes| {
+        apply_pdb_torn_growth_pages_repair(bytes, &report)
+    })
+    .unwrap();
     assert_eq!(patched, 1, "one garbage ec page zeroed");
 
     let bytes = std::fs::read(&pdb_path).unwrap();
@@ -1675,7 +1825,7 @@ fn torn_growth_repair_zeroes_garbage_ec_page_and_truncates_tail() {
         seqdb > max_seq,
         "seqdb must stay strictly greater than max seqpage"
     );
-    assert!(detect_pdb_torn_growth_pages(&pdb_path).is_empty());
+    assert!(detect_pdb_torn_growth_pages(&read_pdb_file(&pdb_path)).is_empty());
 
     // The reclaimed ec page must now satisfy the additive writer's own
     // "all zero" reuse precondition (pdb_writer's

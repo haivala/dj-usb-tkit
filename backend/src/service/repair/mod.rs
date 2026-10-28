@@ -3,8 +3,6 @@
 //! detectors and apply functions it calls.
 
 use std::collections::{HashMap, HashSet};
-use std::fs::OpenOptions;
-use std::io::{Seek, SeekFrom, Write};
 use std::path::Path;
 
 use rusqlite::params;

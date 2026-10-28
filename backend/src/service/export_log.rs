@@ -6,6 +6,7 @@ use serde::{Deserialize, Serialize};
 use crate::error::{BackendError, BackendResult};
 use crate::models::{UsbHistory, UsbTrack};
 
+use super::anlz::atomic_write_bytes;
 use super::diagnostics::track_identity_key;
 use super::export_helpers::{ExportManifest, ExportPlaylistData};
 use super::usb_backups::move_file;
@@ -192,15 +193,9 @@ pub(crate) fn apply_history_dates_from_export_log(
 
 fn save_export_log(usb_root: &Path, log: &UsbExportLog) -> BackendResult<()> {
     let path = export_log_path(usb_root);
-    if let Some(parent) = path.parent() {
-        std::fs::create_dir_all(parent)?;
-    }
     let encoded = serde_json::to_string_pretty(log)
         .map_err(|err| BackendError::Internal(format!("serialize USB export log: {err}")))?;
-    let tmp_path = path.with_extension("json.tmp");
-    std::fs::write(&tmp_path, encoded)?;
-    std::fs::rename(&tmp_path, &path)?;
-    Ok(())
+    atomic_write_bytes(&path, encoded.as_bytes())
 }
 
 pub(crate) fn build_export_log_record(

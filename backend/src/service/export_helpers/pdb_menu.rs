@@ -3,7 +3,6 @@
 use std::collections::{HashMap, HashSet};
 use std::path::Path;
 
-use super::super::usb_vendor_compat::{USB_VENDOR_DB_DIR, USB_VENDOR_ROOT_DIR};
 use crate::error::{BackendError, BackendResult};
 use crate::pdb_writer::{parse_page_row_slots, rewrite_variable_page_rows_in_place};
 use crate::utils::{
@@ -216,19 +215,16 @@ pub fn load_pdb_t16_rows_from_bytes(bytes: &[u8]) -> Option<Vec<Vec<u8>>> {
     if rows.is_empty() { None } else { Some(rows) }
 }
 
-/// Load raw PDB t16 row bytes for a USB root. Used by write-path tests to
-/// verify byte-for-byte round-trip equality between decode and re-encode.
+/// Raw t16 row bytes of the staged PDB of a USB root; empty when there is no
+/// PDB or it isn't page-aligned.
 pub fn load_pdb_t16_raw(usb_root: &Path) -> BackendResult<Vec<Vec<u8>>> {
-    let pdb_path = usb_root
-        .join(USB_VENDOR_ROOT_DIR)
-        .join(USB_VENDOR_DB_DIR)
-        .join("export.pdb");
+    let pdb_path = crate::service::usb_staging::stage_pdb(usb_root)?;
     if !pdb_path.is_file() {
         return Ok(Vec::new());
     }
     let bytes = std::fs::read(&pdb_path)?;
     let page_size = 4096usize;
-    if bytes.len() < page_size || bytes.len() % page_size != 0 {
+    if bytes.len() < page_size || !bytes.len().is_multiple_of(page_size) {
         return Ok(Vec::new());
     }
     let (_pages, rows) = load_pdb_t16_rows(&bytes, page_size)?;
@@ -238,16 +234,7 @@ pub fn load_pdb_t16_raw(usb_root: &Path) -> BackendResult<Vec<Vec<u8>>> {
 /// Load decoded PDB t16 rows for a USB root. PDB is the source older players
 /// use for the browse menu.
 pub fn load_pdb_t16_decoded(usb_root: &Path) -> BackendResult<Vec<PdbT16Row>> {
-    let pdb_path = crate::service::usb_staging::stage_pdb(usb_root)?;
-    if !pdb_path.is_file() {
-        return Ok(Vec::new());
-    }
-    let bytes = std::fs::read(&pdb_path)?;
-    let page_size = 4096usize;
-    if bytes.len() < page_size || bytes.len() % page_size != 0 {
-        return Ok(Vec::new());
-    }
-    let (_pages, rows) = load_pdb_t16_rows(&bytes, page_size)?;
+    let rows = load_pdb_t16_raw(usb_root)?;
     let mut out = Vec::with_capacity(rows.len());
     for row in rows {
         let Some(id) = row_id_u16(&row) else { continue };
@@ -261,19 +248,7 @@ pub fn load_pdb_t16_decoded(usb_root: &Path) -> BackendResult<Vec<PdbT16Row>> {
 }
 
 pub fn inspect_pdb_columns_playlist_order(usb_root: &Path) -> BackendResult<Option<(bool, usize)>> {
-    let pdb_path = usb_root
-        .join(USB_VENDOR_ROOT_DIR)
-        .join(USB_VENDOR_DB_DIR)
-        .join("export.pdb");
-    if !pdb_path.is_file() {
-        return Ok(None);
-    }
-    let bytes = std::fs::read(&pdb_path)?;
-    let page_size = 4096usize;
-    if bytes.len() < page_size || bytes.len() % page_size != 0 {
-        return Ok(None);
-    }
-    let (_pages, rows) = load_pdb_t16_rows(&bytes, page_size)?;
+    let rows = load_pdb_t16_raw(usb_root)?;
     if rows.is_empty() {
         return Ok(None);
     }
@@ -434,6 +409,7 @@ pub fn patch_pdb_t17_category_snapshot(
 
 #[cfg(test)]
 mod tests {
+    use super::super::super::usb_vendor_compat::{USB_VENDOR_DB_DIR, USB_VENDOR_ROOT_DIR};
     use super::*;
 
     fn test_usb_root() -> (tempfile::TempDir, std::path::PathBuf) {
