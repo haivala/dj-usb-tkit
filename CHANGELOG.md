@@ -61,11 +61,6 @@
 - **Fix:** Adding unindexed audio files to a playlist during a repair writes the USB once, at the
   end of the repair, together with the other fixes; fixes that run after strict parity act on what it
   wrote.
-- **Improvement:** The parity report notes other track fields that differ between the databases
-  (comment, ISRC, genre, label, dates, audio format details) without failing the check.
-- **Improvement:** Track and album text an older version stored where older CDJs can't read it is no
-  longer rewritten behind your back on every write to the USB. Health & Diagnostics shows it as failing,
-  and Preview Fixes repairs it when you choose to.
 - **Fix:** Exporting to (or repairing) a USB that was renamed in rekordbox after it had filled its
   player history page no longer rewrites the page rekordbox had retired. That left two history pages
   that both looked current to the players.
@@ -81,6 +76,11 @@
 - **Fix:** Health & Diagnostics on a large USB no longer sits on "Checking analysis references" for
   a long time. The shared analysis file check looked up every track's analysis folder on the drive,
   although it only compares the paths stored in the databases.
+- **Improvement:** The parity report notes other track fields that differ between the databases
+  (comment, ISRC, genre, label, dates, audio format details) without failing the check.
+- **Improvement:** Track and album text an older version stored where older CDJs can't read it is no
+  longer rewritten behind your back on every write to the USB. Health & Diagnostics shows it as failing,
+  and Preview Fixes repairs it when you choose to.
 
 ## 0.4.8
 
