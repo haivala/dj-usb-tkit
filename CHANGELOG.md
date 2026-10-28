@@ -42,6 +42,9 @@
 - **Improvement:** Track and album text an older version stored where older CDJs can't read it is no
   longer rewritten behind your back on every write to the USB. Health & Diagnostics shows it as failing,
   and Preview Fixes repairs it when you choose to.
+- **Fix:** Exporting to (or repairing) a USB that was renamed in rekordbox after it had filled its
+  player history page no longer rewrites the page rekordbox had retired. That left two history pages
+  that both looked current to the players.
 
 ## 0.4.8
 

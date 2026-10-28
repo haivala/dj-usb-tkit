@@ -2947,6 +2947,41 @@ fn export_leaves_t19_alone_once_a_player_wrote_to_it() {
 }
 
 #[test]
+fn export_leaves_t19_alone_once_rekordbox_moved_it_to_a_second_page() {
+    // A rekordbox rename on a full page (reference USB, 154 tracks): the
+    // longer row doesn't fit, so rekordbox retires the full ring page and
+    // goes on in a new page with one sealed row. The retired page still
+    // holds a clean unnamed ring and the new one looks like template
+    // state; rewriting either leaves two pages that both claim to be live.
+    let (empty, mut before) = template_state_seed_with_row(&T19_TEMPLATE_ROW);
+    let unnamed = test_prop(&T19_TEMPLATE_ROW, None);
+    sync_t19_ring_page(&mut before, PAGE_SIZE, 154, &unnamed).expect("sync");
+    let named = test_prop(&T19_TEMPLATE_ROW, Some(&"\u{e4}".repeat(50)));
+    assert!(t19_sync_target(&before, PAGE_SIZE, 154, Some(&named)).is_some());
+
+    let renamed_row = t19_ring_rows(&named, 154).pop().expect("row");
+    let outcome = append_rows_to_chain_in_place(&mut before, 19, &[renamed_row], PAGE_SIZE)
+        .expect("append");
+    assert_eq!(outcome.pages_appended, 1, "the ring page is full");
+    assert_eq!(t19_sync_target(&before, PAGE_SIZE, 154, Some(&named)), None);
+    assert_eq!(t19_sync_target(&before, PAGE_SIZE, 157, Some(&named)), None);
+
+    let mut next = empty.clone();
+    next.tracks = (1..=3).map(t19_test_track).collect();
+    next.t19_property = Some(named);
+    let diff = compute_additive_diff(&before, &next, vec![]).expect("additive");
+    assert_eq!(diff.sync_t19_ring, None);
+    let (out, _) = try_write_pdb_additive_in_place(&before, &next, vec![], PAGE_SIZE)
+        .expect("export")
+        .expect("export accepted");
+    let (_ec, first, last) = table_ptr_fields(&before, 19).expect("t19 ptr");
+    for page in collect_chain_pages(&before, PAGE_SIZE, first, last).expect("t19 chain") {
+        let off = page_offset(page, PAGE_SIZE).expect("t19 page offset");
+        assert_eq!(&out[off..off + PAGE_SIZE], &before[off..off + PAGE_SIZE], "page {page}");
+    }
+}
+
+#[test]
 fn t19_ring_wraps_like_rekordbox() {
     // rekordbox's own wrapped ring: 96 slots, slots 0/1 hold ids 228/229,
     // slots 2..95 keep ids 2..95; rowpf marks slot 1, tranrf slots 0 and 1,

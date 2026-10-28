@@ -479,7 +479,10 @@ USB an older build left at 0 songs, or at the fixed 2-row page (players then
 show 1 track and can hang on a communication error), recovers on its next
 export. A page a player has added rows to is not a ring (a CDJ copies the
 newest id into its rows) and is left untouched: the writer never rewrites or
-drops a player's rows. `repair_pdb_t19_template_state` applies the same
+drops a player's rows. Nor is a `tt=19` with more than one data page: only
+rekordbox adds pages (a rename whose longer row doesn't fit retires the full
+page and goes on in a new one), and the ring code reads and writes only a
+single data page. `repair_pdb_t19_template_state` applies the same
 change to an existing USB (`docs/DIAGNOSTICS_REPAIRS.md`).
 
 The fresh writer (`write_pdb`) builds the same page: for a library with tracks

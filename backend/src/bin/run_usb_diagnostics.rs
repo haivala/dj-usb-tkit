@@ -39,20 +39,6 @@ fn main() {
         std::process::exit(1);
     };
 
-    let snapshot = data.cdj_counter_snapshot.clone().map(|s| {
-        json!({
-            "playlistCountCandidate": s.playlist_count_candidate,
-            "songCountCandidate": s.song_count_candidate,
-            "shapeMode": s.shape_mode,
-            "baselineInitLike": s.baseline_init_like,
-            "t11": s.t11,
-            "t12": s.t12,
-            "t17": s.t17,
-            "t18": s.t18,
-            "t19": s.t19,
-        })
-    });
-
     fn section_json(s: &backend::models::DiagSection) -> serde_json::Value {
         json!({
             "status": s.status,
@@ -67,7 +53,7 @@ fn main() {
     let payload = json!({
         "overallStatus": data.overall_status,
         "warnings": data.warnings,
-        "cdjCounterSnapshot": snapshot,
+        "cdjCounterSnapshot": data.cdj_counter_snapshot,
         "playlistDetailCount": data.playlist_details.len(),
         "sections": {
             "pdbIntegrity": section_json(&data.pdb_integrity),
@@ -75,6 +61,7 @@ fn main() {
             "contentsIntegrity": section_json(&data.contents_integrity),
             "analysisIntegrity": section_json(&data.analysis_integrity),
             "playlistResolution": section_json(&data.playlist_resolution),
+            "cdjCounter": data.cdj_counter_section.as_ref().map(section_json),
         },
     });
     println!("{}", serde_json::to_string_pretty(&payload).unwrap());

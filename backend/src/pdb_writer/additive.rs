@@ -1451,15 +1451,21 @@ pub(crate) fn t19_ring_rows(prop: &T19Property, newest: u32) -> Vec<Vec<u8>> {
         .collect()
 }
 
-/// First data page of tt=19 (`chain[1]`, after the sentinel), if the table
-/// has one.
-fn t19_first_data_page(bytes: &[u8], page_size: usize) -> Option<u32> {
+/// tt=19's data page (`chain[1]`, after the sentinel) when it is the only
+/// one. `initialize_usb` and rekordbox's own init leave one; only rekordbox
+/// adds more, when a renamed USB's longer row no longer fits: it retires the
+/// full page and goes on in a new one, whose single sealed row looks like
+/// template state. Such a chain is rekordbox's, and the ring code here
+/// neither reads nor writes it.
+fn t19_only_data_page(bytes: &[u8], page_size: usize) -> Option<u32> {
     let (_ec, first, last) = table_ptr_fields(bytes, 19)?;
-    let chain = collect_chain_pages(bytes, page_size, first, last)?;
-    chain.get(1).copied()
+    match collect_chain_pages(bytes, page_size, first, last)?[..] {
+        [_sentinel, page] => Some(page),
+        _ => None,
+    }
 }
 
-/// True when tt=19's first data page is still the untouched init template:
+/// True when tt=19's only data page is still the untouched init template:
 /// one sealed row (`nrs=1`, flags `0x24`, `u5=1`, group-0 `rowpf=0x0001`).
 /// Both rekordbox's own empty-device template and the one
 /// `initialize_usb` writes have this shape. Older players count 0 songs
@@ -1469,7 +1475,7 @@ pub(crate) fn t19_is_template_state(bytes: &[u8], page_size: usize) -> bool {
     if page_size < HEAP_START {
         return false;
     }
-    let Some(page_idx) = t19_first_data_page(bytes, page_size) else {
+    let Some(page_idx) = t19_only_data_page(bytes, page_size) else {
         return false;
     };
     let Some(off) = page_offset(page_idx, page_size) else {
@@ -1489,10 +1495,10 @@ pub(crate) fn t19_is_template_state(bytes: &[u8], page_size: usize) -> bool {
         .is_some_and(|group| group.rowpf(page) == 0x0001)
 }
 
-/// Rows of tt=19's first data page in slot order, each running to the next
+/// Rows of tt=19's only data page in slot order, each running to the next
 /// row's offset (the last one to the heap's used size).
 fn t19_page_rows(bytes: &[u8], page_size: usize) -> Option<(u32, Vec<Vec<u8>>)> {
-    let page_idx = t19_first_data_page(bytes, page_size)?;
+    let page_idx = t19_only_data_page(bytes, page_size)?;
     let off = page_offset(page_idx, page_size)?;
     let page = bytes.get(off..off + page_size)?;
     let (nrs, _) = pdb_page::read_slot_counts(page)?;
@@ -1542,7 +1548,8 @@ fn t19_ring_state(bytes: &[u8], page_size: usize) -> Option<(u32, T19Property)> 
 /// [`t19_ring_state`]) whose newest id is not the track count or whose
 /// property is not the eDB's. Without an eDB (`property` `None`) the page
 /// keeps the property it has. A page a player has added rows to is never
-/// rewritten.
+/// rewritten, nor is a t19 with more than one data page (see
+/// [`t19_only_data_page`]).
 pub(crate) fn t19_sync_target(
     bytes: &[u8],
     page_size: usize,
@@ -1567,7 +1574,7 @@ pub(crate) fn t19_sync_target(
     (newest as usize != track_count || prop != current).then_some((track_count, prop))
 }
 
-/// Rewrite tt=19's first data page as the ring rekordbox keeps for
+/// Rewrite tt=19's only data page as the ring rekordbox keeps for
 /// `track_count` tracks and `property` (see [`t19_ring_rows`]), turning the
 /// page active (flags `0x34`, `u5=2`). Unnamed with one track this is
 /// byte-for-byte what rekordbox wrote on a 1-track reference export apart
@@ -1590,8 +1597,10 @@ pub(crate) fn sync_t19_ring_page(
     // cannot do. Not reachable in production: the `initialize_usb` template
     // always pre-seeds one tt=19 data page (`seed_rb_initialized_history_shape`
     // in usb_utils.rs). Tests must mirror that pre-seeded page.
-    let page_idx = t19_first_data_page(bytes, page_size)
-        .ok_or_else(|| BackendError::Validation("t19 sync: table 19 has no data page".into()))?;
+    let page_idx = t19_only_data_page(bytes, page_size)
+        .ok_or_else(|| {
+            BackendError::Validation("t19 sync: table 19 has no single data page".into())
+        })?;
     let newest = u32::try_from(track_count)
         .map_err(|_| BackendError::Validation("t19 sync: track count overflows u32".into()))?;
     let rows = t19_ring_rows(property, newest);
