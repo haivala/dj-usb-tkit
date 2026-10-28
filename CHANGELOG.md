@@ -78,6 +78,9 @@
   0.4.8 it copied the eDB's, which on libraries rekordbox upgraded is a value the app had never
   written. The page also keeps the date it already has instead of taking the eDB's, as rekordbox
   does.
+- **Fix:** Health & Diagnostics on a large USB no longer sits on "Checking analysis references" for
+  a long time. The shared analysis file check looked up every track's analysis folder on the drive,
+  although it only compares the paths stored in the databases.
 
 ## 0.4.8
 

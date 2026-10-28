@@ -364,6 +364,23 @@ pub(crate) fn parse_staged_pdb(usb_root: &Path) -> BackendResult<crate::pdb_read
 /// inside it; absolute paths, `file://` URLs and Windows drive paths pass
 /// through. `None` for an empty path or one that escapes `usb_root`.
 pub(crate) fn resolve_usb_side_path(usb_root: &Path, raw: &str) -> Option<PathBuf> {
+    resolve_usb_side_path_with(usb_root, raw, canonicalize_or_self)
+}
+
+/// [`resolve_usb_side_path`] without touching the filesystem: `.`/`..` are
+/// resolved by name only, symlinks are not followed. For loops over every
+/// track that only need the path as a key -- `canonicalize` costs a directory
+/// lookup per path component, which on a cold, large stick is a disk seek per
+/// track.
+pub(crate) fn resolve_usb_side_path_lexical(usb_root: &Path, raw: &str) -> Option<PathBuf> {
+    resolve_usb_side_path_with(usb_root, raw, |path| normalize_path_components(&path))
+}
+
+fn resolve_usb_side_path_with(
+    usb_root: &Path,
+    raw: &str,
+    normalize: impl Fn(PathBuf) -> PathBuf,
+) -> Option<PathBuf> {
     let trimmed = raw.trim();
     if trimmed.is_empty() {
         return None;
@@ -386,7 +403,7 @@ pub(crate) fn resolve_usb_side_path(usb_root: &Path, raw: &str) -> Option<PathBu
     }
 
     // Resolve relative paths under usb_root, then verify containment
-    let canon_root = canonicalize_or_self(usb_root.to_path_buf());
+    let canon_root = normalize(usb_root.to_path_buf());
 
     let looks_usb_relative = normalized.starts_with(USB_VENDOR_ROOT_PREFIX)
         || normalized.starts_with(format!("/{USB_CONTENTS_DIR}/").as_str())
@@ -395,7 +412,7 @@ pub(crate) fn resolve_usb_side_path(usb_root: &Path, raw: &str) -> Option<PathBu
 
     if looks_usb_relative {
         let rel = normalized.trim_start_matches('/');
-        let resolved = canonicalize_or_self(usb_root.join(rel));
+        let resolved = normalize(usb_root.join(rel));
         if !resolved.starts_with(&canon_root) {
             return None; // path traversal attempt
         }
@@ -404,10 +421,10 @@ pub(crate) fn resolve_usb_side_path(usb_root: &Path, raw: &str) -> Option<PathBu
 
     let normalized = PathBuf::from(normalized);
     if normalized.is_absolute() {
-        return Some(canonicalize_or_self(normalized));
+        return Some(normalize(normalized));
     }
 
-    let resolved = canonicalize_or_self(usb_root.join(&normalized));
+    let resolved = normalize(usb_root.join(&normalized));
     if !resolved.starts_with(&canon_root) {
         return None; // path traversal attempt
     }

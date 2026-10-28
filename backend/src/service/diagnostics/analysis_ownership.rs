@@ -98,11 +98,17 @@ pub(crate) fn scan_analysis_ownership(
     app_master_db_id: Option<u32>,
     read_ppth: bool,
 ) -> AnalysisOwnership {
+    // Database-only, the paths are just keys: resolve them without a
+    // filesystem lookup per track, which on a cold, large stick is what the
+    // whole diagnosis waits on.
+    let resolve = if read_ppth {
+        crate::service::usb_utils::resolve_usb_side_path
+    } else {
+        crate::service::usb_utils::resolve_usb_side_path_lexical
+    };
     let mut by_bundle = BTreeMap::<String, (PathBuf, Vec<&crate::pdb_reader::PdbTrackRow>)>::new();
     for track in &parsed.tracks {
-        let Some(dat) =
-            crate::service::usb_utils::resolve_usb_side_path(usb_root, &track.anlz_path)
-        else {
+        let Some(dat) = resolve(usb_root, &track.anlz_path) else {
             continue;
         };
         by_bundle
