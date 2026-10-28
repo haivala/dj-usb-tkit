@@ -105,7 +105,7 @@
             </button>
           </li>
           <li class="hidden" id="importPlaylistItem">
-            <button class="nav-item nav-add-playlist" id="importPlaylistBtn" data-tooltip="Import a playlist from rekordbox or Mixxx" aria-label="Import playlist">
+            <button class="nav-item nav-add-playlist" id="importPlaylistBtn" data-tooltip="Import playlists from rekordbox or Mixxx" aria-label="Import playlists">
               <span class="nav-icon">&#8615;</span>
               <span class="nav-label">Import</span>
             </button>
@@ -845,23 +845,20 @@
   </div>
 
   <div class="confirm-overlay" id="playlistImportOverlay" hidden>
-    <div class="confirm-dialog" role="dialog" aria-modal="true" aria-labelledby="playlistImportTitle">
-      <h3 id="playlistImportTitle">Import Playlist</h3>
+    <div class="confirm-dialog playlist-import-dialog" role="dialog" aria-modal="true" aria-labelledby="playlistImportTitle">
+      <h3 id="playlistImportTitle">Import Playlists</h3>
       <div class="tracklist-export-body">
-        <p class="muted">Imported as a new playlist. Tracks not yet in the library are imported with it.</p>
-        <div class="tracklist-export-field">
-          <select id="playlistImportSelect" aria-label="Playlist to import"></select>
-          <span class="playlist-import-source" id="playlistImportSource"></span>
-        </div>
+        <p class="muted">Each is imported as a new playlist. Tracks not yet in the library are imported with it.</p>
+        <div class="playlist-import-columns" id="playlistImportList"><!-- tplPlaylistImportColumn per library --></div>
         <label class="usb-cfg-toggle-row" for="playlistImportForce">
           <input type="checkbox" id="playlistImportForce" />
           <span id="playlistImportForceLabel">Force update track data</span>
-          <span class="muted usb-cfg-toggle-hint">Replaces the BPM, key and cues of the playlist's tracks, including your own edits.</span>
+          <span class="muted usb-cfg-toggle-hint">Replaces the BPM, key and cues of the playlists' tracks, including your own edits.</span>
         </label>
       </div>
       <div class="row confirm-actions">
         <button id="playlistImportCancelBtn">Cancel</button>
-        <button id="playlistImportOkBtn" data-primary>Import</button>
+        <button id="playlistImportOkBtn" data-primary disabled>Import</button>
       </div>
     </div>
   </div>
@@ -930,6 +927,10 @@
   </template>
   <template id="tplSourceChip">
     <span class="source-chip"><input class="source-chip-toggle" type="checkbox" aria-label="Filter source" /><span class="source-chip-path"></span><button class="source-chip-remove" aria-label="Remove">&times;</button></span>
+  </template>
+  <template id="tplCheckListGroup"><li class="check-list-group"></li></template>
+  <template id="tplPlaylistImportColumn">
+    <section class="playlist-import-column"><h4 class="playlist-import-column-title"></h4><ul class="add-to-list"></ul></section>
   </template>
   <template id="tplAddToItem">
     <li><label class="add-to-item"><input type="checkbox" /><span class="add-to-name"></span><span class="muted add-to-note"></span></label></li>

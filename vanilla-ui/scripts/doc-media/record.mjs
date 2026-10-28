@@ -516,10 +516,10 @@ function scenes(fixture) {
       },
     },
     {
-      // docs/EXTERNAL_LIBRARIES.md: Import under New, pick a rekordbox
-      // playlist from the grouped list, and it opens as a new playlist.
+      // docs/EXTERNAL_LIBRARIES.md: Import under New, tick two rekordbox
+      // playlists in the grouped list, and the first opens as a new playlist.
       name: "import-playlist",
-      caption: "Importing a rekordbox playlist: it opens as a new playlist",
+      caption: "Importing two rekordbox playlists: the first opens as a new playlist",
       editor: false,
       opts: {
         externalLibraries: {
@@ -541,20 +541,10 @@ function scenes(fixture) {
         await record(async () => {
           await page.waitForTimeout(600);
           await clickOn(page, page.locator("#importPlaylistBtn"), 900);
-          // The native drop-down list isn't in a screencast: step through the
-          // choices on the closed select instead, as the keyboard does.
-          const select = page.locator("#playlistImportSelect");
-          await moveTo(page, ...(await center(select)));
-          await select.focus();
-          await page.waitForTimeout(700);
-          for (let i = 0; i < 4; i += 1) {
-            await page.keyboard.press("ArrowDown");
-            await page.waitForTimeout(650);
-          }
-          for (let i = 0; i < 4; i += 1) {
-            await page.keyboard.press("ArrowUp");
-            await page.waitForTimeout(450);
-          }
+          // Tick two lists, then import them together.
+          const pick = (index) => page.locator("#playlistImportList input").nth(index);
+          await clickOn(page, pick(0), 700);
+          await clickOn(page, pick(1), 700);
           await page.waitForTimeout(500);
           await clickOn(page, page.locator("#playlistImportOkBtn"), 300);
           await page.locator("#playlistTracksBody .track-grid-row").first().waitFor();

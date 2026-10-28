@@ -43,6 +43,9 @@
   was already written, the previous PDB is put back. The fixes are then reported as failed instead
   of applied. Before, the USB could be left with a repaired PDB next to the old eDB (or the other
   way round), and the repair still reported its fixes as applied.
+- **New feature:** Import Playlists from rekordbox or Mixxx is a checklist: tick any number of
+  playlists, crates and history sessions, from both libraries at once, and import them in one go.
+  The first one opens when they are done.
 - **Improvement:** The cue editor's waveform works like rekordbox's: while a track is loaded
   (playing or paused), the playhead stays in the middle and the waveform scrolls under it, blank
   past the track's start and end. Dragging the waveform scrubs it under the playhead, zooming keeps

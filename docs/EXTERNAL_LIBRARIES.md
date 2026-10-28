@@ -101,7 +101,7 @@ that is in both libraries shows when either chip is on.
 ### Importing a playlist
 
 The **Import** button under **New** in the sidebar's Playlists section appears
-when either library is found. It opens a picker listing, per library:
+when either library is found. It opens a checklist with a column per library:
 
 - **rekordbox playlists**, in rekordbox's order. A playlist inside a folder
   shows as `Folder / Name`.
@@ -110,18 +110,21 @@ when either library is found. It opens a picker listing, per library:
 - **Mixxx crates**.
 - **Mixxx history** (set logs), newest first.
 
-Only lists with tracks are shown. rekordbox smart playlists aren't listed,
-because rekordbox doesn't store their tracks. The line under the list says
-where the selected one comes from, for example `Mixxx crate · 3 tracks`.
+Only lists with tracks are shown, each with its track count. rekordbox smart
+playlists aren't listed, because rekordbox doesn't store their tracks.
 
-![Import under New, picking a playlist, and the imported playlist opening](assets/import-playlist.gif)
+Tick any number of lists, from either library, and click **Import**. Each
+ticked list becomes a new playlist with the same name and track order (Mixxx
+crates have no order, so their tracks are sorted by artist and title). Its
+tracks are imported into the library the same way as with the chip's ↻, and
+its library's chip is turned on. The lists are imported one after another, in
+the checklist's order; one that fails doesn't stop the rest, and the status
+line names it. When they are done, the first imported playlist opens. A track
+listed twice in a list is added to its playlist once.
 
-The chosen list becomes a new playlist with the same name and track order
-(Mixxx crates have no order, so their tracks are sorted by artist and title).
-Its tracks are imported into the library the same way as with the chip's ↻,
-the library's chip is turned on, and the new playlist
-opens. A track listed twice is added once. The playlist's header says where
-it came from, e.g. `Friday Set (5 tracks, Total time: 14:05) · Imported from
+![Import under New, ticking two playlists, and the first imported playlist opening](assets/import-playlist.gif)
+
+An imported playlist's header says where it came from, e.g. `Friday Set (5 tracks, Total time: 14:05) · Imported from
 rekordbox`.
 
 If none of the list's tracks can be imported, for example a rekordbox library
@@ -131,14 +134,14 @@ created and the status line says why.
 **Importing a list again** updates the playlist its first import made instead
 of creating another one: its tracks and their order are replaced with the
 current ones from rekordbox / Mixxx, its name is kept (even if you renamed it),
-and its USB export status is cleared. The line under the list says so, for
-example `Mixxx playlist · 5 tracks · updates your playlist "Friday Set"`.
+and its USB export status is cleared. The checklist says so next to the list,
+for example `5 tracks · updates "Friday Set"`.
 Changes you made to that playlist in the app are replaced. A playlist you
 delete is created again on the next import.
 
 **Force update track data from rekordbox / Mixxx** (a checkbox, off by
-default) makes the playlist's tracks take BPM, key and cues from the library
-even where you edited them or reanalyzed them in the app. Cues are only
+default) makes the ticked playlists' tracks take BPM, key and cues from their
+library even where you edited them or reanalyzed them in the app. Cues are only
 replaced when the library has cues for the track. The analysis files on the
 USB follow on the next export, which rebuilds each track's beat grid and cues
 from the app's values.

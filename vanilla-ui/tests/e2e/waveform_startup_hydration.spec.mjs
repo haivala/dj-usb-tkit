@@ -376,7 +376,7 @@ test("source chips show analyzed green on startup and adding a source indexes it
   await expect.poll(async () => page.evaluate(() => window.__scanCalls)).toBe(1);
 });
 
-test("Import picks a rekordbox or Mixxx playlist, imports it and opens the new playlist", async ({ page }) => {
+test("Import ticks rekordbox and Mixxx playlists, imports each and opens the first", async ({ page }) => {
   await installSourceChipAnalysisMock(page);
   await page.goto("/");
 
@@ -385,32 +385,42 @@ test("Import picks a rekordbox or Mixxx playlist, imports it and opens the new p
   await importBtn.click();
 
   const overlay = page.locator("#playlistImportOverlay");
+  const list = page.locator("#playlistImportList");
+  const row = (name) => list.locator("li", { hasText: name });
+  const okBtn = page.locator("#playlistImportOkBtn");
+  const forceLabel = page.locator("#playlistImportForceLabel");
   await expect(overlay).toBeVisible();
-  await expect(page.locator("#playlistImportSelect optgroup")).toHaveCount(5);
-  expect(await page.locator("#playlistImportSelect optgroup").evaluateAll((groups) => groups.map((g) => g.label)))
-    .toEqual(["rekordbox playlists", "rekordbox history", "Mixxx playlists", "Mixxx crates", "Mixxx history"]);
-  await expect(page.locator('#playlistImportSelect optgroup[label="Mixxx crates"] option')).toHaveText("Peak (2)");
-  // The closed select shows only the name: the line under it names the source.
-  await expect(page.locator("#playlistImportSource")).toHaveText("rekordbox playlist · 40 tracks");
-  await expect(page.locator("#playlistImportForceLabel")).toHaveText("Force update track data from rekordbox");
-  await expect(page.locator("#playlistImportForce")).not.toBeChecked();
+  // A column per library, its lists grouped by kind.
+  await expect(list.locator(".playlist-import-column-title")).toHaveText(["rekordbox", "Mixxx"]);
+  const column = (label) => list.locator(".playlist-import-column", { hasText: label });
+  await expect(column("rekordbox").locator(".check-list-group")).toHaveText(["Playlists", "History"]);
+  await expect(column("Mixxx").locator(".check-list-group")).toHaveText(["Playlists", "Crates", "History"]);
+  await expect(row("Peak").locator(".add-to-note")).toHaveText("2 tracks");
   // A list imported before says which playlist importing it again updates.
-  await page.locator("#playlistImportSelect").selectOption({ label: "Test playlist (3)" });
-  await expect(page.locator("#playlistImportSource"))
-    .toHaveText('Mixxx playlist · 3 tracks · updates your playlist "My Test playlist"');
-  await expect(page.locator("#playlistImportForceLabel")).toHaveText("Force update track data from Mixxx");
-  await page.locator("#playlistImportSelect").selectOption({ label: "Peak (2)" });
-  await expect(page.locator("#playlistImportSource")).toHaveText("Mixxx crate · 2 tracks");
+  await expect(row("Test playlist").locator(".add-to-note")).toHaveText('3 tracks · updates "My Test playlist"');
+  // Nothing ticked: nothing to import.
+  await expect(okBtn).toBeDisabled();
+  await expect(forceLabel).toHaveText("Force update track data");
+  await expect(page.locator("#playlistImportForce")).not.toBeChecked();
+  // The force option names the library when every ticked list comes from one.
+  await row("Peak").locator("input").check();
+  await expect(okBtn).toBeEnabled();
+  await expect(okBtn).toHaveText("Import");
+  await expect(forceLabel).toHaveText("Force update track data from Mixxx");
+  await row("Winter Party").locator("input").check();
+  await expect(okBtn).toHaveText("Import 2");
+  await expect(forceLabel).toHaveText("Force update track data");
 
   // Escape cancels without importing.
   await page.keyboard.press("Escape");
   await expect(overlay).toBeHidden();
   expect(await page.evaluate(() => window.__playlistImports || null)).toBeNull();
 
+  // One list: imported and opened.
   await importBtn.click();
-  await page.locator("#playlistImportSelect").selectOption({ label: "2026-09-30 (4)" });
-  await expect(page.locator("#playlistImportSource")).toHaveText("Mixxx history session · 4 tracks");
-  await page.locator("#playlistImportOkBtn").click();
+  await expect(okBtn).toBeDisabled();
+  await row("2026-09-30").locator("input").check();
+  await okBtn.click();
   await expect(overlay).toBeHidden();
   await expect.poll(async () => page.evaluate(() => window.__playlistImports)).toEqual([
     { command: "import_mixxx_playlist", request: { path: "/home/dj/.mixxx/mixxxdb.sqlite", kind: "history", id: "3", force: false } }
@@ -419,17 +429,22 @@ test("Import picks a rekordbox or Mixxx playlist, imports it and opens the new p
   await expect(page.locator("#playlistPanelTitle")).toHaveText(/ · Imported from Mixxx$/);
   await expect(page.locator('.source-chip-toggle[data-mixxx-db="true"]')).toBeChecked();
 
+  // Several lists from both libraries: each imported in list order, with
+  // force for all; the first opens, and both libraries' chips turn on.
   await importBtn.click();
   await expect(page.locator("#playlistImportForce")).not.toBeChecked();
-  await page.locator("#playlistImportSelect").selectOption({ label: "Winter Party (40)" });
+  await row("Peak").locator("input").check();
+  await row("Winter Party").locator("input").check();
   await page.locator("#playlistImportForce").check();
-  await page.locator("#playlistImportOkBtn").click();
-  await expect.poll(async () => page.evaluate(() => window.__playlistImports.at(-1))).toEqual({
-    command: "import_rekordbox_playlist",
-    request: { path: "/music/master.db", kind: "playlist", id: "1234567890", force: true }
-  });
+  await okBtn.click();
+  await expect.poll(async () => page.evaluate(() => window.__playlistImports.slice(1))).toEqual([
+    { command: "import_rekordbox_playlist", request: { path: "/music/master.db", kind: "playlist", id: "1234567890", force: true } },
+    { command: "import_mixxx_playlist", request: { path: "/home/dj/.mixxx/mixxxdb.sqlite", kind: "crate", id: "7", force: true } }
+  ]);
   await expect(page.locator('.nav-playlist-item[data-playlist-id="pl-rekordbox"]')).toHaveClass(/active/);
   await expect(page.locator('.source-chip-toggle[data-rekordbox-db="true"]')).toBeChecked();
+  await expect(page.locator('.source-chip-toggle[data-mixxx-db="true"]')).toBeChecked();
+  await expect(page.locator("#statusText")).toContainText("Imported 2 of 2 playlists: 4 track(s)");
 });
 
 // Regression coverage for: searching the library used to make a fully

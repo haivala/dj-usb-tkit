@@ -391,16 +391,16 @@ const PLAYLIST_IMPORT_SOURCES = [
   }
 ];
 
-// [kind, group label, one list of that kind]
+// [kind, group label]
 const PLAYLIST_IMPORT_KINDS = [
-  ["playlist", "playlists", "playlist"],
-  ["crate", "crates", "crate"],
-  ["history", "history", "history session"]
+  ["playlist", "Playlists"],
+  ["crate", "Crates"],
+  ["history", "History"]
 ];
 
-// Pick one playlist / crate / history session from a detected rekordbox or
-// Mixxx library and import it as a new local playlist (the backend imports
-// its tracks too), then open it.
+// Pick any number of playlists / crates / history sessions from a detected
+// rekordbox or Mixxx library and import each as a local playlist (the backend
+// imports its tracks too), then open the first one.
 export async function importExternalPlaylist(ctx) {
   const { state, withProgress, command, updateModeText, switchView, logWarnings } = ctx;
   const { emitStatus } = ctx;
@@ -416,74 +416,114 @@ export async function importExternalPlaylist(ctx) {
       return null;
     }
   }));
-  const groups = sources.flatMap((source, index) => PLAYLIST_IMPORT_KINDS.map(([kind, kindLabel, oneLabel]) => ({
-    label: `${source.label} ${kindLabel}`,
-    items: (listed[index] || [])
-      .filter((item) => item.kind === kind)
-      .map((item) => ({
-        ...item,
-        sourceLabel: source.label,
-        description: [
-          `${source.label} ${oneLabel}`,
-          `${item.trackCount} ${item.trackCount === 1 ? "track" : "tracks"}`,
-          // Importing a list again updates the playlist its earlier import made.
-          ...(item.existingPlaylist ? [`updates your playlist "${item.existingPlaylist.name}"`] : [])
-        ].join(" · ")
-      }))
-  })));
-  if (!groups.some((group) => group.items.length)) {
+  // A column per library, its lists grouped by kind.
+  const columns = sources.map((source, index) => ({
+    label: source.label,
+    groups: PLAYLIST_IMPORT_KINDS.map(([kind, kindLabel]) => ({
+      label: kindLabel,
+      items: (listed[index] || [])
+        .filter((item) => item.kind === kind)
+        .map((item) => ({
+          ...item,
+          sourceLabel: source.label,
+          note: [
+            `${item.trackCount} ${item.trackCount === 1 ? "track" : "tracks"}`,
+            // Importing a list again updates the playlist its earlier import made.
+            ...(item.existingPlaylist ? [`updates "${item.existingPlaylist.name}"`] : [])
+          ].join(" · ")
+        }))
+    }))
+  }));
+  if (!columns.some((column) => column.groups.some((group) => group.items.length))) {
     // Keep a listing error on the status line rather than hiding it.
     if (!listed.includes(null)) emitStatus("No playlists with tracks found");
     return;
   }
 
-  const chosen = await ctx.playlistImportDialog.open({ groups });
-  if (!chosen) return;
-  const { source, path } = chosen;
+  const chosen = await ctx.playlistImportDialog.open({ columns });
+  if (!chosen?.length) return;
 
-  let result;
+  // One import after another; a failed one doesn't stop the rest.
+  const done = [];
+  const failed = [];
+  const logFailed = () => {
+    for (const { item, message } of failed) {
+      logWarnings(
+        item.source.label,
+        [{ level: "error", message: `${item.name}: ${message}`, code: "playlist_import.failed" }],
+        `${item.source.label} playlist import`
+      );
+    }
+  };
   try {
-    result = await withProgress(`Importing ${source.label} playlist`, async (progress) => {
-      progress(30, `Importing ${chosen.name}...`);
-      const imported = await command(source.importCommand, {
-        path, kind: chosen.kind, id: chosen.id, force: chosen.force === true
-      });
-      progress(70, "Refreshing playlists...");
-      // The imported tracks belong to that library: show them in the library too.
-      source.enable(ctx);
-      state.sourcesEverConfigured = true;
-      ctx.persistSourcesEverConfigured(true);
-      // Re-detect: the library now counts as imported, unlocking its chip.
-      await source.detect(ctx);
-      await ctx.resetAndLoadLibraryTracks(state.libraryQuery || "");
-      await loadPlaylists(ctx);
-      state.currentPlaylistId = imported.playlistId;
-      updateModeText();
-      await switchView(imported.playlistId);
-      return imported;
-    });
+    await withProgress(
+      chosen.length === 1 ? `Importing ${chosen[0].source.label} playlist` : `Importing ${chosen.length} playlists`,
+      async (progress) => {
+        for (const [index, item] of chosen.entries()) {
+          progress(5 + Math.round((index / chosen.length) * 70), `Importing ${item.name}...`);
+          try {
+            const result = await command(item.source.importCommand, {
+              path: item.path, kind: item.kind, id: item.id, force: item.force === true
+            });
+            done.push({ item, result });
+          } catch (err) {
+            failed.push({ item, message: err?.message || String(err) });
+          }
+        }
+        if (!done.length) throw new Error(failed[0].message);
+        progress(80, "Refreshing playlists...");
+        // The imported tracks belong to those libraries: show them in the library too.
+        const imported = [...new Set(done.map(({ item }) => item.source))];
+        for (const source of imported) source.enable(ctx);
+        state.sourcesEverConfigured = true;
+        ctx.persistSourcesEverConfigured(true);
+        // Re-detect: each library now counts as imported, unlocking its chip.
+        for (const source of imported) await source.detect(ctx);
+        await ctx.resetAndLoadLibraryTracks(state.libraryQuery || "");
+        await loadPlaylists(ctx);
+        state.currentPlaylistId = done[0].result.playlistId;
+        updateModeText();
+        await switchView(done[0].result.playlistId);
+      }
+    );
   } catch (err) {
-    emitStatus(`${source.label} playlist import failed: ${err?.message || err}`);
+    logFailed();
+    const what = chosen.length === 1 ? `${chosen[0].source.label} playlist` : "Playlist";
+    emitStatus(`${what} import failed: ${err?.message || err}`);
     return;
   }
 
-  const logLabel = `${source.label} playlist import`;
-  const notFound = Array.isArray(result.notFound) ? result.notFound : [];
-  if (notFound.length > 0) {
-    logWarnings(
-      source.label,
-      notFound.map((p) => ({ level: "warn", message: p, code: "playlist_import.file_not_found" })),
-      logLabel
-    );
+  let skipped = 0;
+  for (const { item, result } of done) {
+    const logLabel = `${item.source.label} playlist import`;
+    const notFound = Array.isArray(result.notFound) ? result.notFound : [];
+    if (notFound.length > 0) {
+      logWarnings(
+        item.source.label,
+        notFound.map((p) => ({ level: "warn", message: p, code: "playlist_import.file_not_found" })),
+        logLabel
+      );
+    }
+    const warnings = Array.isArray(result.warnings) ? result.warnings : [];
+    if (warnings.length > 0) {
+      logWarnings(item.source.label, warnings, logLabel);
+    }
+    skipped += Math.max(0, Number(item.trackCount || 0) - Number(result.added || 0));
   }
-  const warnings = Array.isArray(result.warnings) ? result.warnings : [];
-  if (warnings.length > 0) {
-    logWarnings(source.label, warnings, logLabel);
-  }
-  const skipped = Math.max(0, Number(chosen.trackCount || 0) - Number(result.added || 0));
+  logFailed();
+
   const suffix = skipped > 0 ? ` | ${skipped} track(s) skipped (see event log)` : "";
-  const verb = result.updatedExisting ? "Updated" : "Imported";
-  emitStatus(`${verb} playlist ${result.name}: ${result.added} track(s)${suffix}`);
+  if (chosen.length === 1) {
+    const { result } = done[0];
+    const verb = result.updatedExisting ? "Updated" : "Imported";
+    emitStatus(`${verb} playlist ${result.name}: ${result.added} track(s)${suffix}`);
+    return;
+  }
+  const added = done.reduce((sum, { result }) => sum + Number(result.added || 0), 0);
+  const failedSuffix = failed.length
+    ? ` | ${failed.length} failed: ${failed.map(({ item }) => item.name).join(", ")} (see event log)`
+    : "";
+  emitStatus(`Imported ${done.length} of ${chosen.length} playlists: ${added} track(s)${suffix}${failedSuffix}`);
 }
 
 export async function deletePlaylist(ctx, playlistId) {

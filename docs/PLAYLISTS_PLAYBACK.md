@@ -19,9 +19,9 @@ name, to rename one. New playlists appear at the top. The sidebar order is the a
 not change the playlist order on the USB, which is set in USB → Playlists. Drag the sidebar's
 right edge to make it wider or narrower, and double-click the edge to reset the width.
 
-A playlist can also be imported from a rekordbox or Mixxx library with the
-**Import** button under **New** in the sidebar. It becomes an ordinary local
-playlist; see `docs/EXTERNAL_LIBRARIES.md`.
+Playlists can also be imported from a rekordbox or Mixxx library with the
+**Import** button under **New** in the sidebar: tick as many as you like. Each
+becomes an ordinary local playlist; see `docs/EXTERNAL_LIBRARIES.md`.
 
 ### Adding selected tracks
 

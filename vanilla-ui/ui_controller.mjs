@@ -187,40 +187,65 @@ export function createConfirmDialogController(el) {
 // The line under the select shows the chosen item's `description` -- the
 // group isn't visible once the list is closed -- and the checkbox names its
 // `sourceLabel`.
+// The Import Playlists dialog: every importable list, a column per library
+// grouped by kind, to tick any number of. Resolves with the ticked items in
+// list order (each with `force`), or null on cancel.
 export function createPlaylistImportDialogController(el, document) {
   let resolveFn = null;
   let isOpen = false;
   let items = [];
 
-  function populate(groups) {
-    const select = el.playlistImportSelect;
-    select.textContent = "";
+  function populate(columns) {
     items = [];
-    const Option = select.ownerDocument.defaultView.Option;
-    for (const { label, items: groupItems } of groups) {
-      if (!groupItems?.length) continue;
-      const group = cloneTemplate(document, "tplSelectOptgroup");
-      group.label = label;
-      for (const item of groupItems) {
-        group.appendChild(new Option(`${item.name} (${item.trackCount})`, String(items.length)));
-        items.push(item);
+    const sections = [];
+    for (const { label, groups } of columns) {
+      const rows = [];
+      for (const { label: groupLabel, items: groupItems } of groups) {
+        if (!groupItems?.length) continue;
+        const heading = cloneTemplate(document, "tplCheckListGroup");
+        heading.textContent = groupLabel;
+        rows.push(heading);
+        for (const item of groupItems) {
+          const row = cloneTemplate(document, "tplAddToItem");
+          row.querySelector("input").value = String(items.length);
+          row.querySelector(".add-to-name").textContent = item.name;
+          row.querySelector(".add-to-note").textContent = item.note || "";
+          rows.push(row);
+          items.push(item);
+        }
       }
-      select.appendChild(group);
+      if (!rows.length) continue;
+      const section = cloneTemplate(document, "tplPlaylistImportColumn");
+      section.querySelector(".playlist-import-column-title").textContent = label;
+      const list = section.querySelector(".add-to-list");
+      list.setAttribute("aria-label", `${label} lists`);
+      list.replaceChildren(...rows);
+      sections.push(section);
     }
-    select.selectedIndex = 0;
-    syncDescription();
+    el.playlistImportList.replaceChildren(...sections);
+    sync();
   }
 
-  function syncDescription() {
-    const item = items[Number(el.playlistImportSelect.value)];
-    el.playlistImportSource.textContent = item?.description || "";
-    el.playlistImportForceLabel.textContent = item?.sourceLabel
-      ? `Force update track data from ${item.sourceLabel}`
+  function checkedItems() {
+    return [...el.playlistImportList.querySelectorAll("input:checked")]
+      .map((box) => items[Number(box.value)])
+      .filter(Boolean);
+  }
+
+  /// The Import button counts the ticked lists; the force option names their
+  /// library when they all come from one.
+  function sync() {
+    const chosen = checkedItems();
+    el.playlistImportOkBtn.disabled = chosen.length === 0;
+    el.playlistImportOkBtn.textContent = chosen.length > 1 ? `Import ${chosen.length}` : "Import";
+    const sources = new Set(chosen.map((item) => item.sourceLabel));
+    el.playlistImportForceLabel.textContent = sources.size === 1
+      ? `Force update track data from ${[...sources][0]}`
       : "Force update track data";
   }
 
   return {
-    syncDescription,
+    sync,
     isOpen() {
       return isOpen;
     },
@@ -228,21 +253,21 @@ export function createPlaylistImportDialogController(el, document) {
       if (!isOpen) return;
       isOpen = false;
       el.playlistImportOverlay.hidden = true;
-      const item = confirmed ? items[Number(el.playlistImportSelect.value)] : null;
-      const chosen = item ? { ...item, force: !!el.playlistImportForce.checked } : null;
+      const force = !!el.playlistImportForce.checked;
+      const chosen = confirmed ? checkedItems().map((item) => ({ ...item, force })) : [];
       const resolver = resolveFn;
       resolveFn = null;
-      if (resolver) resolver(chosen);
+      if (resolver) resolver(chosen.length ? chosen : null);
     },
-    open({ groups = [] } = {}) {
+    open({ columns = [] } = {}) {
       if (isOpen) {
         this.close(false);
       }
       isOpen = true;
       el.playlistImportForce.checked = false;
-      populate(groups);
+      populate(columns);
       el.playlistImportOverlay.hidden = false;
-      el.playlistImportSelect.focus();
+      el.playlistImportList.querySelector("input")?.focus();
       return new Promise((resolve) => {
         resolveFn = resolve;
       });
