@@ -43,6 +43,16 @@
   was already written, the previous PDB is put back. The fixes are then reported as failed instead
   of applied. Before, the USB could be left with a repaired PDB next to the old eDB (or the other
   way round), and the repair still reported its fixes as applied.
+- **Improvement:** The cue editor's waveform works like rekordbox's: while a track is loaded
+  (playing or paused), the playhead stays in the middle and the waveform scrolls under it, blank
+  past the track's start and end. Dragging the waveform scrubs it under the playhead, zooming keeps
+  the playhead centred, and clicking the overview moves playback there. With nothing loaded, the
+  waveform still drags to pan.
+- **Improvement:** The cue editor leaves room above the waveform for the cue marker flags, so they
+  no longer disappear into loud parts of the waveform.
+- **Improvement:** Adding a hot cue on a memory cue turns that memory cue into the hot cue (a hot
+  cue is a memory point too), keeping its name and colour, instead of refusing with "A memory cue
+  is already there."
 - **Chore:** Repair reads the staged PDB once and runs its page fixes in memory, writing the PDB
   only when a fix that works on the file needs it and once at the end, instead of reading and
   writing the whole file for every fix.

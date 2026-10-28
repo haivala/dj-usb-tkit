@@ -4931,12 +4931,13 @@ td button[data-action]:disabled,
   -webkit-user-select: none;
   user-select: none;
 }
-/* A thin strip above and below the waveform where only the beat grid shows,
-   so beats stay readable where the waveform is loud. (Beats the shared
+/* A strip above and below the waveform where only the beat grid shows, so
+   beats stay readable where the waveform is loud. (Beats the shared
    `.waveform.waveform-canvas { padding: 0 }`.) */
 .waveform.track-detail-canvas {
-  /* Bottom strip is taller: it carries the bar numbers. */
-  padding: 6px 0 12px;
+  /* Top strip holds the cue marker flags (15px) clear of the waveform;
+     bottom strip carries the bar numbers. */
+  padding: 17px 0 12px;
   box-sizing: border-box;
   background: color-mix(in srgb, var(--ink) 8%, var(--bg));
 }
@@ -4953,6 +4954,8 @@ td button[data-action]:disabled,
 }
 .track-detail-canvas .waveform-canvas-el { width: 100%; height: 100%; display: block; }
 .track-detail-canvas .waveform-playhead { display: none; }
+/* Fixed in the middle while a track is loaded; the waveform is dragged under
+   it, so it takes no pointer and never covers a cue marker. */
 .track-detail-playhead {
   position: absolute;
   top: 0;
@@ -4961,17 +4964,8 @@ td button[data-action]:disabled,
   margin-left: -1px;
   background: var(--accent, #b06cff);
   box-shadow: 0 0 6px var(--accent-glow, rgba(176, 108, 255, 0.6));
-  cursor: ew-resize;
+  pointer-events: none;
   z-index: 1;
-}
-/* Grab area: a few px either side of the 1px line. */
-.track-detail-playhead::before {
-  content: "";
-  position: absolute;
-  top: 0;
-  bottom: 0;
-  left: -5px;
-  right: -5px;
 }
 .track-detail-playhead[hidden] { display: none; }
 .track-detail-canvas.is-scrubbing { cursor: ew-resize; }

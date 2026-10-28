@@ -3,7 +3,9 @@
 // This app targets CDJ playback directly, so a cue is just a position + name +
 // colour. The list is capped at 8; on save each becomes a memory point + a
 // hot-cue pad. The waveform is the full-detail PWV5 colour waveform with
-// scroll-to-zoom and drag-to-pan (see waveform_detail.mjs).
+// scroll-to-zoom (see waveform_detail.mjs). While a track is loaded the
+// playhead stays in the middle and the waveform scrolls under it, as in
+// rekordbox; stopped, the waveform drags to pan.
 //
 // "Start the playback on first beat" adds one more cue on top of those: the
 // playback-start cue (`playbackStart: true`), a memory point only (no pad, no
@@ -100,7 +102,6 @@ let tempIdSeq = 0;
 
 const raf = (cb) => (globalThis.requestAnimationFrame || ((f) => setTimeout(f, 16)))(cb);
 const caf = (h) => (globalThis.cancelAnimationFrame || globalThis.clearTimeout)(h);
-const nowMs = () => globalThis.performance?.now?.() ?? Date.now();
 
 /// Position order; the playback-start cue wins a tie with a hot cue.
 function byPosition(a, b) {
@@ -165,7 +166,6 @@ export function createTrackDetailController(el, prefs = {}) {
     view: { startMs: 0, endMs: 0 },
     bytes: null, // decoded PWV5 Uint8Array
     waveNorm: null, // whole-track {lo, hi} amplitude reference (fixed across zoom)
-    followSuspendUntil: 0,
     draggingTempId: null, // cue whose marker is being dragged on the waveform
     selectedTempId: null, // the cue ←/→ moves: last added, clicked, dragged or jumped to
   };
@@ -438,11 +438,23 @@ export function createTrackDetailController(el, prefs = {}) {
     return ((ms - working.view.startMs) / viewSpanMs()) * 100;
   }
 
+  function clampSpan(span) {
+    return Math.max(MIN_SPAN_MS, Math.min(span, working.durationMs || 1));
+  }
+
   function applyView(startMs, span) {
     const dur = working.durationMs || 1;
-    const clampedSpan = Math.max(MIN_SPAN_MS, Math.min(span, dur));
+    const clampedSpan = clampSpan(span);
     const clampedStart = Math.max(0, Math.min(startMs, dur - clampedSpan));
     working.view = { startMs: clampedStart, endMs: clampedStart + clampedSpan };
+  }
+
+  /// While a track is loaded the view is centred on the playhead, reaching
+  /// past the track's ends at its start and end (blank there, as in rekordbox).
+  function centerOnPlayhead(span = viewSpanMs()) {
+    const clampedSpan = clampSpan(span);
+    const startMs = currentPositionMs() - clampedSpan / 2;
+    working.view = { startMs, endMs: startMs + clampedSpan };
   }
 
   function scheduleRenderView() {
@@ -576,14 +588,20 @@ export function createTrackDetailController(el, prefs = {}) {
   }
 
   /// The visible-window box and cue ticks on the overview strip.
-  function renderOverview() {
+  /// The overview's box around the part of the track the waveform shows.
+  function positionOverviewWindow() {
     const dur = working.durationMs || 0;
     const box = el.trackDetailOverviewWindow;
-    if (box && dur) {
-      const left = (working.view.startMs / dur) * 100;
-      box.style.left = `${left}%`;
-      box.style.width = `${Math.min(100 - left, (viewSpanMs() / dur) * 100)}%`;
-    }
+    if (!box || !dur) return;
+    const from = Math.max(0, working.view.startMs);
+    const to = Math.min(dur, working.view.endMs);
+    box.style.left = `${(from / dur) * 100}%`;
+    box.style.width = `${(Math.max(0, to - from) / dur) * 100}%`;
+  }
+
+  function renderOverview() {
+    const dur = working.durationMs || 0;
+    positionOverviewWindow();
     const cuesHost = el.trackDetailOverviewCues;
     if (!cuesHost) return;
     cuesHost.textContent = "";
@@ -637,6 +655,23 @@ export function createTrackDetailController(el, prefs = {}) {
     renderOverview();
   }
 
+  /// Move the markers already there to the current view. Scrolling rebuilds
+  /// none: a marker detached mid-click would never get its click.
+  function positionMarkers() {
+    const host = el.trackDetailCueMarkers;
+    if (!host) return;
+    const byId = new Map(working.cues.map((c) => [c.tempId, c]));
+    for (const marker of host.children) {
+      const cue = byId.get(marker.dataset.tempId);
+      if (!cue) continue;
+      const pct = msToPct(cue.positionMs);
+      marker.classList.toggle("off-view", pct < -2 || pct > 102);
+      marker.style.left = `${pct}%`;
+    }
+    renderPreStart();
+    positionOverviewWindow();
+  }
+
   /// Grey out the waveform before where the CDJ starts playback: its earliest
   /// memory point, whether the playback-start cue's, a memory cue's or a hot
   /// cue's own. With no cues the CDJ starts at the first audio, so nothing is
@@ -645,9 +680,11 @@ export function createTrackDetailController(el, prefs = {}) {
     const shade = el.trackDetailPreStart;
     if (!shade) return;
     const first = orderedCues()[0];
+    const left = Math.max(0, Math.min(100, msToPct(0)));
     const pct = first ? Math.max(0, Math.min(100, msToPct(first.positionMs))) : 0;
-    shade.hidden = pct <= 0;
-    shade.style.width = `${pct}%`;
+    shade.hidden = pct <= left;
+    shade.style.left = `${left}%`;
+    shade.style.width = `${pct - left}%`;
   }
 
   // Both flags are the shared playback module's projection of backend state
@@ -658,6 +695,12 @@ export function createTrackDetailController(el, prefs = {}) {
 
   function isPaused() {
     return !!el.trackDetailWaveform?.classList.contains("is-paused");
+  }
+
+  /// A track is loaded here (playing, paused or being scrubbed): the playhead
+  /// is shown, centred, and the waveform moves under it.
+  function playheadLocked() {
+    return playheadDragMs != null || isPlaying() || isPaused();
   }
 
   /// Where "now" is: the live playhead, or the backend's paused position.
@@ -681,12 +724,11 @@ export function createTrackDetailController(el, prefs = {}) {
   function positionModalPlayhead() {
     const ph = el.trackDetailPlayhead;
     if (!ph) return;
-    const posMs = currentPositionMs();
-    if (posMs <= 0 && playheadDragMs == null) {
+    if (!playheadLocked()) {
       ph.hidden = true;
       return;
     }
-    const pct = msToPct(posMs);
+    const pct = msToPct(currentPositionMs());
     ph.hidden = pct < 0 || pct > 100;
     ph.style.left = `${pct}%`;
   }
@@ -696,26 +738,11 @@ export function createTrackDetailController(el, prefs = {}) {
     renderPlayPause();
     if (!open || !wf || !wf.classList.contains("is-playing")) {
       playheadRafHandle = 0;
-      // Paused: the playhead stays at the backend's position; stopped: hidden.
-      positionModalPlayhead();
+      // Paused: centred on the backend's position; stopped: the playhead hides.
+      if (open) renderView();
       return;
     }
-    const posMs = playheadFullRatio() * working.durationMs;
-    // Follow: keep the playhead in view when zoomed in, unless the user just
-    // panned/zoomed manually.
-    if (
-      posMs > 0 &&
-      playheadDragMs == null &&
-      viewSpanMs() < working.durationMs &&
-      nowMs() > working.followSuspendUntil
-    ) {
-      const span = viewSpanMs();
-      if (posMs > working.view.startMs + span * 0.85 || posMs < working.view.startMs) {
-        applyView(posMs - span * 0.3, span);
-        renderView();
-      }
-    }
-    positionModalPlayhead();
+    scrollView();
     playheadRafHandle = raf(playheadTick);
   }
 
@@ -851,15 +878,28 @@ export function createTrackDetailController(el, prefs = {}) {
     }
     out.hidden = false;
     out.textContent = zoomed
-      ? `${formatClock(working.view.startMs)}–${formatClock(working.view.endMs)}`
+      ? `${formatClock(Math.max(0, working.view.startMs))}–${formatClock(Math.min(dur, working.view.endMs))}`
       : "Whole track";
   }
 
   function renderView() {
     if (!open) return;
+    if (playheadLocked()) centerOnPlayhead();
     renderWaveform();
     renderBeatgrid();
     renderMarkers();
+    positionModalPlayhead();
+    renderZoomHint();
+    renderPlayPause();
+  }
+
+  /// One playback frame: the waveform scrolls under the centred playhead.
+  function scrollView() {
+    if (!open) return;
+    centerOnPlayhead();
+    renderWaveform();
+    renderBeatgrid();
+    positionMarkers();
     positionModalPlayhead();
     renderZoomHint();
     renderPlayPause();
@@ -970,6 +1010,8 @@ export function createTrackDetailController(el, prefs = {}) {
     getView: () => ({ ...working.view }),
     isPlaying,
     isPaused,
+    isPlayheadLocked: playheadLocked,
+    currentPositionMs,
     render,
     beatIntervalMs,
 
@@ -978,14 +1020,20 @@ export function createTrackDetailController(el, prefs = {}) {
       return working.durationMs > 0 ? trackMs / working.durationMs : 0;
     },
 
-    setView(startMs, span, { suspendFollow = true } = {}) {
+    setView(startMs, span) {
       applyView(startMs, span);
-      if (suspendFollow) working.followSuspendUntil = nowMs() + 1000;
       scheduleRenderView();
     },
 
+    /// Zoom around the pointer's spot; with a track loaded, around the
+    /// centred playhead.
     zoomAt(ratio, factor) {
       const span = viewSpanMs();
+      if (playheadLocked()) {
+        centerOnPlayhead(span * factor);
+        scheduleRenderView();
+        return;
+      }
       const anchor = working.view.startMs + Math.max(0, Math.min(1, ratio)) * span;
       const newSpan = span * factor;
       api.setView(anchor - Math.max(0, Math.min(1, ratio)) * newSpan, newSpan);
@@ -1012,7 +1060,7 @@ export function createTrackDetailController(el, prefs = {}) {
     /// it back to playback.
     setPlayheadDrag(trackRatio) {
       playheadDragMs = trackRatio == null ? null : trackRatio * working.durationMs;
-      positionModalPlayhead();
+      scheduleRenderView();
     },
 
     setFirstBeatMs(ms) {
@@ -1136,6 +1184,8 @@ export function createTrackDetailController(el, prefs = {}) {
     /// The first cue on a track also applies the remembered "Start the
     /// playback on first beat" setting.
     /// With Quantize on it lands on the nearest beat; `free` (Shift) inverts that.
+    /// On a memory cue it turns that one into the hot cue (a hot cue is a
+    /// memory point too), keeping its name and colour if it had them.
     addCue(positionMs, { free = false } = {}) {
       const ordinal = hotCues().length;
       if (ordinal >= MAX_CUES) return null;
@@ -1148,8 +1198,13 @@ export function createTrackDetailController(el, prefs = {}) {
         colorId: HOTCUE_PALETTE[ordinal % HOTCUE_PALETTE.length].id,
         name: `Cue ${ordinal + 1}`,
       };
-      if (!positionFree(cue, cue.positionMs)) return null;
+      const memory = working.cues.find((c) => c.memory && c.positionMs === cue.positionMs);
+      if (memory) {
+        if (memory.name) cue.name = memory.name;
+        if (hasOwnColor(memory)) cue.colorId = memory.colorId;
+      }
       mutate(null, () => {
+        if (memory) working.cues = working.cues.filter((c) => c !== memory);
         working.cues.push(cue);
         if (ordinal === 0 && getStartOnFirstBeatPref()) addStartCue();
         enforceStartOrder();
@@ -1469,7 +1524,6 @@ export function createTrackDetailController(el, prefs = {}) {
       working.releaseDate = releaseDate || null;
       working.genreOptions = Array.isArray(genreOptions) ? genreOptions : [];
       working.firstBeatMs = firstBeatMs ?? null;
-      working.followSuspendUntil = 0;
       working.draggingTempId = null;
       working.selectedTempId = null;
       undoStack = [];

@@ -1361,15 +1361,30 @@ test("a first memory cue on the first beat is where the CDJ loads: no start cue 
   await expect(page.locator("#trackDetailStartCue")).toBeHidden();
 });
 
-test("a memory cue never lands on another cue: a drag stops short, and no cue is added on one", async ({ page }) => {
-  // Quantize on: the hot cue sits on beat 64 (30120 ms), the memory cue on
-  // the first beat (120 ms).
-  await openCueEditor(page, { seedCues: [30120], seedMemory: [{ positionMs: 120 }] });
+test("a hot cue added on a memory cue turns it into that hot cue, keeping its name and colour", async ({ page }) => {
+  await openCueEditor(page, {
+    seedCues: [30120],
+    seedMemory: [{ positionMs: 120, name: "Intro", colorId: 3 }],
+  });
 
   // C at the stopped playhead snaps to the first beat, where the memory cue is.
   await page.keyboard.press("c");
-  await expect(page.locator("#statusText")).toContainText("A memory cue is already there.");
-  await expect(page.locator("#trackDetailCueMarkers .cue-marker:not(.is-memory)")).toHaveCount(1);
+  await expect(page.locator("#trackDetailCueMarkers .cue-marker.is-memory")).toHaveCount(0);
+  await expect(page.locator("#trackDetailCueMarkers .cue-marker:not(.is-memory)")).toHaveCount(2);
+
+  await page.locator("#trackDetailSaveBtn").click();
+  const saveCall = await page.evaluate(() =>
+    window.__calls.find((c) => c.command === "save_track_analysis_edits")
+  );
+  const at120 = saveCall.request.cues.filter((c) => c.positionMs === 120);
+  expect(at120).toHaveLength(1);
+  expect(at120[0]).toMatchObject({ memory: false, name: "Intro", colorId: 3 });
+});
+
+test("a memory cue never lands on another cue: a drag stops short", async ({ page }) => {
+  // Quantize on: the hot cue sits on beat 64 (30120 ms), the memory cue on
+  // the first beat (120 ms).
+  await openCueEditor(page, { seedCues: [30120], seedMemory: [{ positionMs: 120 }] });
 
   // Drag the memory cue onto the hot cue: it stops on the beat before.
   const memory = page.locator("#trackDetailCueMarkers .cue-marker.is-memory");
@@ -1463,6 +1478,10 @@ test("a cue row's play button and its waveform marker both play from that cue's 
   await expect.poll(async () => (await playCalls()).length).toBe(1);
   expect((await playCalls()).at(-1).request.startRatio).toBeCloseTo(90000 / 180000, 2);
 
+  // Playing, the marker scrolls with the waveform; paused, it holds still
+  // right under the centred playhead and is still clickable there.
+  await page.locator("#trackDetailPlayPause").click();
+  await expect(page.locator("#trackDetailPlayPause")).toHaveAttribute("aria-label", "Play");
   await page.locator("#trackDetailCueMarkers .cue-marker").first().click();
   await expect.poll(async () => (await playCalls()).length).toBe(2);
   expect((await playCalls()).at(-1).request.startRatio).toBeCloseTo(90000 / 180000, 2);
@@ -1600,6 +1619,12 @@ test("play/pause pauses in the backend, freezes the playhead, and + Hot cue land
   expect((await calls("play_resolved_track"))[0].request.startRatio).toBe(0);
   await expect(btn).toHaveAttribute("aria-label", "Pause");
   await expect.poll(() => modalPlayheadMs(page)).toBeGreaterThan(200);
+  // Playing, the playhead stays in the middle and the waveform scrolls under
+  // it, blank before the track's start.
+  const wfBox = await page.locator("#trackDetailWaveform").boundingBox();
+  const ph = await page.locator("#trackDetailPlayhead").boundingBox();
+  expect(Math.abs(ph.x + ph.width / 2 - (wfBox.x + wfBox.width / 2))).toBeLessThan(4);
+  await expect(page.locator("#trackDetailZoomRange")).toHaveText(/^0:00–0:5\d$/);
 
   // Pause goes to the backend -- not a stop + replay.
   await btn.click();
@@ -1650,7 +1675,7 @@ test("play/pause resumes in the backend from where it was paused", async ({ page
   expect(await modalPlayheadMs(page)).toBeLessThan(pausedMs + 2000);
 });
 
-test("a waveform click parks the playhead without playing; dragging the playhead plays along", async ({ page }) => {
+test("a waveform click parks the playhead without playing; dragging the waveform under the centred playhead plays along", async ({ page }) => {
   await installTrackDetailMock(page, { quantize: false });
   await page.goto("/");
   await page.locator('#libraryTableBody .waveform-cell [data-action="edit-track-detail"]').click();
@@ -1686,36 +1711,42 @@ test("a waveform click parks the playhead without playing; dragging the playhead
   expect((await playCalls())[1].startPaused).toBe(false);
   await expect(btn).toHaveAttribute("aria-label", "Pause");
 
-  // Paused, drag the playhead: it plays while moving, holds paused under the
-  // resting pointer, and parks at the drop point.
+  // Paused, the playhead sits in the middle; dragging the waveform moves it
+  // under the playhead (left goes forward): it plays while moving, holds
+  // paused while the pointer rests, and parks at the drop point.
   await btn.click();
   await expect(btn).toHaveAttribute("aria-label", "Play");
-  const ph = await playhead.boundingBox();
+  const centreX = wfBox.x + wfBox.width * 0.5;
+  const centred = async () => {
+    const ph = await playhead.boundingBox();
+    expect(Math.abs(ph.x + ph.width / 2 - centreX)).toBeLessThan(4);
+  };
+  await centred();
+  const startMs = await modalPlayheadMs(page);
   const y = wfBox.y + 100;
+  const x0 = wfBox.x + wfBox.width * 0.6;
   const before = (await playCalls()).length;
-  await page.mouse.move(ph.x + ph.width / 2, y);
+  await page.mouse.move(x0, y);
   await page.mouse.down();
-  await page.mouse.move(wfBox.x + wfBox.width * 0.5, y, { steps: 8 });
+  await page.mouse.move(x0 - wfBox.width * 0.1, y, { steps: 8 });
   await expect.poll(async () => (await playCalls()).length).toBeGreaterThan(before);
   expect((await playCalls()).slice(before)[0].startPaused).toBe(false);
-  // Resting: paused right under the pointer, the line still there.
+  // Resting: paused at the spot dragged under the playhead.
   await expect.poll(async () => (await playCalls()).at(-1).startPaused).toBe(true);
-  expect(Math.abs((await playCalls()).at(-1).startRatio * 180000 - 0.5 * viewMs)).toBeLessThan(500);
+  expect(Math.abs((await playCalls()).at(-1).startRatio * 180000 - (startMs + 0.1 * viewMs))).toBeLessThan(500);
   await expect(wf).toHaveClass(/is-paused/);
-  const resting = await playhead.boundingBox();
-  expect(Math.abs(resting.x - (wfBox.x + wfBox.width * 0.5))).toBeLessThan(4);
+  await centred();
   // Moving again plays again.
   const beforeMove = (await playCalls()).length;
-  await page.mouse.move(wfBox.x + wfBox.width * 0.7, y, { steps: 4 });
+  await page.mouse.move(x0 - wfBox.width * 0.3, y, { steps: 4 });
   await expect.poll(async () => (await playCalls()).length).toBeGreaterThan(beforeMove);
   expect((await playCalls())[beforeMove].startPaused).toBe(false);
   await page.mouse.up();
   await expect.poll(async () => (await playCalls()).at(-1).startPaused).toBe(true);
-  expect(Math.abs((await playCalls()).at(-1).startRatio * 180000 - 0.7 * viewMs)).toBeLessThan(500);
+  expect(Math.abs((await playCalls()).at(-1).startRatio * 180000 - (startMs + 0.3 * viewMs))).toBeLessThan(500);
   await expect(wf).toHaveClass(/is-paused/);
   await expect(btn).toHaveAttribute("aria-label", "Play");
-  const dropped = await playhead.boundingBox();
-  expect(Math.abs(dropped.x - (wfBox.x + wfBox.width * 0.7))).toBeLessThan(4);
+  await centred();
 });
 
 test("opening the editor on the track already playing from its row shows it playing, and hands it back on close", async ({ page }) => {

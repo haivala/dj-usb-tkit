@@ -1,7 +1,7 @@
 // DOM event wiring for the track-detail (cues + beat grid) editor.
 
 import { scrubRatioFromPointer } from "../playback/actions.mjs";
-import { HOTCUE_PALETTE, MAX_CUES } from "./actions.mjs";
+import { HOTCUE_PALETTE } from "./actions.mjs";
 import { cloneTemplate } from "../../ui_utils.mjs";
 
 export function bindTrackDetailEvents(ctx) {
@@ -118,9 +118,11 @@ export function bindTrackDetailEvents(ctx) {
   });
 
   // --- Waveform: click to move the playhead there (playing on if it was
-  // playing, parked paused otherwise), drag the playhead to hear it follow the
-  // pointer, double-click to add a cue, wheel to zoom, drag to pan, drag a cue
-  // marker to move it (Shift inverts Quantize: free with Q on, snapped with Q off) ---
+  // playing, parked paused otherwise), double-click to add a cue, wheel to
+  // zoom, drag a cue marker to move it (Shift inverts Quantize: free with Q on,
+  // snapped with Q off). With a track loaded the playhead stays centred and
+  // dragging the waveform scrubs it under the playhead, as in rekordbox;
+  // stopped, dragging pans ---
   const wf = el.trackDetailWaveform;
   const PAN_THRESHOLD_PX = 4;
   let pan = null; // { startX, startViewMs, moved }
@@ -139,13 +141,8 @@ export function bindTrackDetailEvents(ctx) {
       .then(() => trackDetailDialog.notePlaybackStarted())
       .catch(() => {});
   };
-  // Adding a hot cue failed: all 8 pads are taken, or a memory cue sits
-  // exactly there.
-  const emitCueBlocked = () => {
-    ctx.emitStatus(
-      trackDetailDialog.hotCueCount() >= MAX_CUES ? "Maximum 8 cue points." : "A memory cue is already there."
-    );
-  };
+  // Adding a hot cue failed: all 8 pads are taken.
+  const emitCueBlocked = () => ctx.emitStatus("Maximum 8 cue points.");
   const playFromCue = (cue) => {
     const dur = trackDetailDialog.getWorking().durationMs;
     if (cue && dur) playFromRatio(cue.positionMs / dur);
@@ -193,11 +190,10 @@ export function bindTrackDetailEvents(ctx) {
     trackDetailDialog.setDraggingCue(null);
   };
 
-  // Playhead drag: the audio follows the pointer (one seek in flight at a
-  // time, always to the latest spot) and is held paused under it while the
-  // pointer rests, so the sound never runs ahead of the line. On release the
-  // track goes back to how it was -- playing on from the drop point, or parked
-  // there paused.
+  // Scrub: the audio follows the drag (one seek in flight at a time, always
+  // to the latest spot) and is held paused while the pointer rests, so the
+  // sound never runs ahead of the playhead. On release the track goes back to
+  // how it was -- playing on from the drop point, or parked there paused.
   const SCRUB_REST_MS = 100;
   const flushScrub = (s) => {
     if (s.inFlight) return;
@@ -213,12 +209,12 @@ export function bindTrackDetailEvents(ctx) {
     });
   };
   const onScrubMove = (event) => {
-    if (!scrub.moved && Math.abs(event.clientX - scrub.startX) < PAN_THRESHOLD_PX) return;
+    if (!scrub.moved && Math.abs(event.clientX - scrub.startX) < scrub.threshold) return;
     if (!scrub.moved) {
       scrub.moved = true;
       wf.classList.add("is-scrubbing");
     }
-    const ratio = trackRatioAt(event.clientX);
+    const ratio = Math.max(0, Math.min(1, scrub.ratioAt(event.clientX)));
     trackDetailDialog.setPlayheadDrag(ratio);
     scrub.target = { ratio, paused: false };
     flushScrub(scrub);
@@ -230,7 +226,7 @@ export function bindTrackDetailEvents(ctx) {
       flushScrub(s);
     }, SCRUB_REST_MS);
   };
-  const endScrub = () => {
+  const endScrub = (event) => {
     if (!scrub) return;
     const s = scrub;
     scrub = null;
@@ -238,41 +234,74 @@ export function bindTrackDetailEvents(ctx) {
     window.removeEventListener("pointermove", onScrubMove);
     window.removeEventListener("pointerup", endScrub);
     window.removeEventListener("pointercancel", endScrub);
-    if (!s.moved) return;
+    if (!s.moved) {
+      if (event?.type === "pointerup") s.onClick?.(event);
+      return;
+    }
     wf.classList.remove("is-scrubbing");
     s.done = true;
     s.target = { ratio: s.target.ratio, paused: !s.resumeAfter };
     flushScrub(s);
   };
 
+  // `ratioAt(clientX)`: the whole-track ratio the pointer has scrubbed to.
+  // `onClick`: what a press released without dragging does.
+  const startScrub = (event, ratioAt, { threshold = PAN_THRESHOLD_PX, onClick = null } = {}) => {
+    clearTimeout(pendingPlace);
+    pendingPlace = null;
+    scrub = {
+      startX: event.clientX,
+      threshold,
+      ratioAt,
+      onClick,
+      moved: false,
+      resumeAfter: trackDetailDialog.isPlaying(),
+      target: null,
+      sent: null,
+      inFlight: null,
+      restTimer: 0,
+      done: false,
+    };
+    window.addEventListener("pointermove", onScrubMove);
+    window.addEventListener("pointerup", endScrub);
+    window.addEventListener("pointercancel", endScrub);
+  };
+
+  // Defer the move so a following double-click can cancel it and add a cue
+  // instead, leaving the playhead where it was.
+  const deferPlace = (clientX) => {
+    clearTimeout(pendingPlace);
+    pendingPlace = setTimeout(() => {
+      pendingPlace = null;
+      placePlayhead(clientX);
+    }, 230);
+  };
+
   wf?.addEventListener("pointerdown", (event) => {
     if (event.button !== 0) return;
     beginDragNoSelect();
     suppressMarkerClick = false;
-    if (event.target.closest(".track-detail-playhead")) {
-      clearTimeout(pendingPlace);
-      pendingPlace = null;
-      scrub = {
-        startX: event.clientX,
-        moved: false,
-        resumeAfter: trackDetailDialog.isPlaying(),
-        target: null,
-        sent: null,
-        inFlight: null,
-        restTimer: 0,
-        done: false,
-      };
-      window.addEventListener("pointermove", onScrubMove);
-      window.addEventListener("pointerup", endScrub);
-      window.addEventListener("pointercancel", endScrub);
-      return;
-    }
     const marker = event.target.closest(".cue-marker");
     if (marker) {
       cueDrag = { tempId: marker.dataset.tempId, startX: event.clientX, moved: false };
       window.addEventListener("pointermove", onCueDragMove);
       window.addEventListener("pointerup", endCueDrag);
       window.addEventListener("pointercancel", endCueDrag);
+      return;
+    }
+    if (trackDetailDialog.isPlayheadLocked()) {
+      // The waveform moves with the pointer under the centred playhead:
+      // dragging right goes back in time.
+      const { durationMs } = trackDetailDialog.getWorking();
+      const startMs = trackDetailDialog.currentPositionMs();
+      const view = trackDetailDialog.getView();
+      const msPerPx = (view.endMs - view.startMs) / (wf.clientWidth || 1);
+      const startX = event.clientX;
+      startScrub(
+        event,
+        (clientX) => (durationMs ? (startMs - (clientX - startX) * msPerPx) / durationMs : 0),
+        { onClick: (up) => deferPlace(up.clientX) }
+      );
       return;
     }
     pan = {
@@ -298,14 +327,7 @@ export function bindTrackDetailEvents(ctx) {
     pan = null;
     wf.classList.remove("is-panning");
     if (wasMove || event.target.closest(".cue-marker")) return;
-    // Defer the move so a following double-click can cancel it and add a cue
-    // instead, leaving the playhead where it was.
-    const { clientX } = event;
-    clearTimeout(pendingPlace);
-    pendingPlace = setTimeout(() => {
-      pendingPlace = null;
-      placePlayhead(clientX);
-    }, 230);
+    deferPlace(event.clientX);
   };
   wf?.addEventListener("pointerup", endPan);
   wf?.addEventListener("pointercancel", () => {
@@ -340,7 +362,8 @@ export function bindTrackDetailEvents(ctx) {
     }
   });
 
-  // Overview strip: press or drag to centre the view there (zoom kept).
+  // Overview strip: press or drag to centre the view there (zoom kept); with
+  // a track loaded, to scrub the centred playhead there.
   const overview = el.trackDetailOverview;
   let overviewDragging = false;
   const overviewTo = (event) =>
@@ -348,6 +371,11 @@ export function bindTrackDetailEvents(ctx) {
   overview?.addEventListener("pointerdown", (event) => {
     if (event.button !== 0) return;
     beginDragNoSelect();
+    if (trackDetailDialog.isPlayheadLocked()) {
+      startScrub(event, (clientX) => scrubRatioFromPointer({ clientX }, overview), { threshold: 0 });
+      onScrubMove(event);
+      return;
+    }
     overviewDragging = true;
     overview.setPointerCapture?.(event.pointerId);
     overview.classList.add("is-dragging");

@@ -3,10 +3,12 @@
 // PWV5 entries are 2 bytes each, big-endian u16: R(3) | G(3) | B(3) | H(5) | _(2).
 // Entry count is duration-derived (~150/sec), so a 4-minute track is ~36k
 // entries — far more than the canvas is wide. `drawDetailWaveform` renders only
-// the visible [startMs, endMs] slice so zoom shows real detail. Heights are RMS-
-// bucketed and normalised against the visible slice's own p05..p95 (with a
-// gamma curve) — the same treatment the row preview gets — so the shape keeps
-// its dynamics instead of maxing out on a loud master.
+// the visible [startMs, endMs] slice so zoom shows real detail; a slice reaching
+// past the track's ends (the centred playhead at its start or end) leaves that
+// part blank. Heights are RMS-bucketed and normalised against the visible
+// slice's own p05..p95 (with a gamma curve) — the same treatment the row
+// preview gets — so the shape keeps its dynamics instead of maxing out on a
+// loud master.
 
 export function base64ToBytes(b64) {
   if (typeof b64 !== "string" || !b64) return new Uint8Array(0);
@@ -68,12 +70,17 @@ export function drawDetailWaveform(wrapperEl, bytes, { startMs, endMs, durationM
   if (!ctx) return true; // jsdom / no 2d context
 
   ctx.clearRect(0, 0, W, H);
-  ctx.fillStyle = "rgba(128,140,160,0.14)";
-  ctx.fillRect(0, H - 1, W, 1); // faint baseline
-
   const n = bytes.length >>> 1;
   const dur = durationMs > 0 ? durationMs : 1;
+  // The canvas columns the track covers; outside them the view is past its ends.
+  const viewSpan = Math.max(1, endMs - startMs);
+  const x0 = Math.max(0, Math.round(((0 - startMs) / viewSpan) * W));
+  const x1 = Math.min(W, Math.round(((dur - startMs) / viewSpan) * W));
+  if (x1 <= x0) return true;
+  ctx.fillStyle = "rgba(128,140,160,0.14)";
+  ctx.fillRect(x0, H - 1, x1 - x0, 1); // faint baseline
   if (n === 0) return true;
+  const trackW = x1 - x0;
 
   let e0 = Math.floor((Math.max(0, startMs) / dur) * n);
   let e1 = Math.ceil((Math.min(dur, endMs) / dur) * n);
@@ -84,7 +91,7 @@ export function drawDetailWaveform(wrapperEl, bytes, { startMs, endMs, durationM
   const at = (i) => (bytes[i * 2] << 8) | bytes[i * 2 + 1];
   const heightOf = (v) => (v >> 2) & 0x1f;
 
-  const cols = Math.min(W, span);
+  const cols = Math.min(trackW, span);
   const levels = new Float32Array(cols);
   const colR = new Float32Array(cols);
   const colG = new Float32Array(cols);
@@ -121,14 +128,14 @@ export function drawDetailWaveform(wrapperEl, bytes, { startMs, endMs, durationM
 
   const lo = norm?.lo ?? 0;
   const range = Math.max(1, (norm?.hi ?? 31) - lo);
-  const barW = W / cols;
+  const barW = trackW / cols;
 
   for (let c = 0; c < cols; c += 1) {
     const norm = Math.pow(Math.max(0, Math.min(1, (levels[c] - lo) / range)), 0.8);
     if (norm <= 0.001) continue;
     const barH = Math.max(2, Math.round(norm * (H - 3)));
-    const x = Math.round(c * barW);
-    const w = Math.max(1, Math.round((c + 1) * barW) - x);
+    const x = x0 + Math.round(c * barW);
+    const w = Math.max(1, x0 + Math.round((c + 1) * barW) - x);
     ctx.fillStyle = `rgb(${chan(colR[c])},${chan(colG[c])},${chan(colB[c])})`;
     ctx.fillRect(x, H - barH, w, barH);
   }
