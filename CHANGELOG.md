@@ -48,6 +48,8 @@
   Mixxx chips' switches, are now kept by the backend. The library list, Select all, the selection's
   time, adding to a playlist and analysis all read the same switches, and a library whose database
   is gone is switched off for good.
+- **Fix:** The cue editor's waveform no longer shimmers while it scrolls during playback: the bars
+  slide along instead of changing height from frame to frame.
 - **Fix:** In the cue editor, Play after the track has played to its end starts it from the
   beginning. Before, it started again just before the end and stopped almost at once.
 - **Improvement:** After analysis, a cue editor save or a track details edit, the backend sends the

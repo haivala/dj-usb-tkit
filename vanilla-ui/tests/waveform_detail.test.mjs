@@ -53,3 +53,43 @@ test("drawDetailWaveform does not throw and signals when the canvas has no width
     true
   );
 });
+
+test("drawDetailWaveform moves the same bars a whole pixel together when the view moves by a fraction of one", () => {
+  const dom = new JSDOM(
+    `<!doctype html><body><div id="w" class="waveform"><canvas class="waveform-canvas-el"></canvas></div></body>`,
+    { pretendToBeVisual: true }
+  );
+  global.window = dom.window;
+  let bars = [];
+  dom.window.HTMLCanvasElement.prototype.getContext = () => ({
+    clearRect() {},
+    fillRect(x, y, w, h) { if (h > 1) bars.push({ x, h }); },
+  });
+  const wrap = dom.window.document.getElementById("w");
+  wrap.querySelector("canvas").getBoundingClientRect = () => ({ width: 400, height: 100, left: 0, top: 0 });
+  // 2 minutes at ~150 entries/s, heights varying entry to entry.
+  const n = 18000;
+  const bytes = new Uint8Array(n * 2);
+  for (let i = 0; i < n; i += 1) {
+    const v = (4 << 13) | (2 << 10) | (6 << 7) | ((3 + ((i * 7919) % 29)) << 2);
+    bytes[i * 2] = v >> 8;
+    bytes[i * 2 + 1] = v & 0xff;
+  }
+  const norm = computeWaveNorm(bytes);
+  const draw = (startMs) => {
+    bars = [];
+    drawDetailWaveform(wrap, bytes, { startMs, endMs: startMs + 30000, durationMs: 120000, norm });
+    return bars;
+  };
+  // 30 s over 400 px: 75 ms a pixel; move the view by a third of one.
+  const a = draw(40000);
+  const b = draw(40025);
+  // The same bars on the same whole pixels: the view's offset (533.33 ->
+  // 533.67 px) is rounded once, so all of them move one pixel together --
+  // not regrouped entries with new heights.
+  assert.ok(a.length > 300);
+  const before = new Map(a.map((bar) => [bar.x, bar.h]));
+  const moved = b.filter((bar) => before.has(bar.x + 1));
+  assert.ok(moved.length > 300);
+  for (const bar of moved) assert.equal(bar.h, before.get(bar.x + 1));
+});

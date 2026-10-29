@@ -80,64 +80,63 @@ export function drawDetailWaveform(wrapperEl, bytes, { startMs, endMs, durationM
   ctx.fillStyle = "rgba(128,140,160,0.14)";
   ctx.fillRect(x0, H - 1, x1 - x0, 1); // faint baseline
   if (n === 0) return true;
-  const trackW = x1 - x0;
 
-  let e0 = Math.floor((Math.max(0, startMs) / dur) * n);
-  let e1 = Math.ceil((Math.min(dur, endMs) / dur) * n);
-  e0 = Math.max(0, Math.min(n - 1, e0));
-  e1 = Math.max(e0 + 1, Math.min(n, e1));
-  const span = e1 - e0;
+  // Columns are anchored to the track, not the view: column c always holds
+  // the same entries -- one device pixel's worth when entries are narrower
+  // than a pixel, else one entry -- and sits at c * colPx minus the view's
+  // offset. Scrolling (playback moves the view a fraction of a pixel each
+  // frame) then slides the same bars along instead of regrouping the entries
+  // under each pixel, which made every bar change height from frame to frame.
+  //
+  // Bars sit on whole pixels, counted from the track's start: the view's
+  // offset is rounded once, so every bar (and the beat grid, which rounds the
+  // same way) moves a whole pixel at a time, together. Sliding by the
+  // fraction instead softens 1-pixel bars into their gaps by an amount that
+  // changes with the fraction, so the waveform pulsed while it moved.
+  const startPx = (startMs / viewSpan) * W;
+  const base = Math.round(startPx);
+  const entryPx = (dur / n / viewSpan) * W;
+  const perCol = Math.max(1, 1 / entryPx);
+  const colPx = perCol * entryPx;
+  const colCount = Math.ceil(n / perCol);
+  const cFirst = Math.max(0, Math.floor(startPx / colPx));
+  const cLast = Math.min(colCount, Math.ceil((startPx + W) / colPx));
 
   const at = (i) => (bytes[i * 2] << 8) | bytes[i * 2 + 1];
   const heightOf = (v) => (v >> 2) & 0x1f;
+  const lo = norm?.lo ?? 0;
+  const range = Math.max(1, (norm?.hi ?? 31) - lo);
 
-  const cols = Math.min(trackW, span);
-  const levels = new Float32Array(cols);
-  const colR = new Float32Array(cols);
-  const colG = new Float32Array(cols);
-  const colB = new Float32Array(cols);
-  for (let c = 0; c < cols; c += 1) {
-    const s = e0 + Math.floor((c / cols) * span);
-    const e = Math.max(s + 1, e0 + Math.floor(((c + 1) / cols) * span));
+  for (let c = cFirst; c < cLast; c += 1) {
+    const s = Math.floor(c * perCol);
+    const e = Math.min(n, Math.max(s + 1, Math.floor((c + 1) * perCol)));
     let sumSq = 0;
-    let cnt = 0;
     let peak = 0;
     let sr = 0;
     let sg = 0;
     let sb = 0;
     let wsum = 0;
-    for (let i = s; i < e && i < n; i += 1) {
+    for (let i = s; i < e; i += 1) {
       const v = at(i);
       const h = heightOf(v);
       sumSq += h * h;
-      cnt += 1;
       if (h > peak) peak = h;
-      // Energy-weighted mean of the real PWV5 colours in this slice.
+      // Energy-weighted mean of the real PWV5 colours in this column.
       const w = h * h + 1;
       sr += ((v >> 13) & 7) * w;
       sg += ((v >> 10) & 7) * w;
       sb += ((v >> 7) & 7) * w;
       wsum += w;
     }
-    const rms = cnt ? Math.sqrt(sumSq / cnt) : 0;
-    levels[c] = 0.7 * rms + 0.3 * peak;
-    colR[c] = sr / wsum;
-    colG[c] = sg / wsum;
-    colB[c] = sb / wsum;
-  }
-
-  const lo = norm?.lo ?? 0;
-  const range = Math.max(1, (norm?.hi ?? 31) - lo);
-  const barW = trackW / cols;
-
-  for (let c = 0; c < cols; c += 1) {
-    const norm = Math.pow(Math.max(0, Math.min(1, (levels[c] - lo) / range)), 0.8);
-    if (norm <= 0.001) continue;
-    const barH = Math.max(2, Math.round(norm * (H - 3)));
-    const x = x0 + Math.round(c * barW);
-    const w = Math.max(1, x0 + Math.round((c + 1) * barW) - x);
-    ctx.fillStyle = `rgb(${chan(colR[c])},${chan(colG[c])},${chan(colB[c])})`;
-    ctx.fillRect(x, H - barH, w, barH);
+    const level = 0.7 * Math.sqrt(sumSq / (e - s)) + 0.3 * peak;
+    const scaled = Math.pow(Math.max(0, Math.min(1, (level - lo) / range)), 0.8);
+    if (scaled <= 0.001) continue;
+    const barH = Math.max(2, Math.round(scaled * (H - 3)));
+    const x = Math.max(x0, Math.round(c * colPx) - base);
+    const xEnd = Math.min(x1, Math.round((c + 1) * colPx) - base);
+    if (xEnd <= x) continue;
+    ctx.fillStyle = `rgb(${chan(sr / wsum)},${chan(sg / wsum)},${chan(sb / wsum)})`;
+    ctx.fillRect(x, H - barH, xEnd - x, barH);
   }
   return true;
 }

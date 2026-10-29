@@ -524,7 +524,11 @@ export function createTrackDetailController(el, prefs = {}) {
     const showBeats = !width || (interval / viewSpanMs()) * width >= GRID_LINE_MIN_PX;
     // Lines sit on whole device pixels: at a fractional position the browser
     // smears some across two pixels and not others, so an even grid looks
-    // uneven (and its spacing jitters). The % fallback is for an unlaid-out host.
+    // uneven. The pixels are counted from the track's start, not the view's,
+    // and the view's offset is rounded once, as for the waveform's bars
+    // (drawDetailWaveform): scrolling moves every line a whole pixel together,
+    // with the bars, instead of each line hopping at its own moment, which
+    // rippled the gaps along the grid. The % fallback is for an unlaid-out host.
     const dpr = (typeof window !== "undefined" && window.devicePixelRatio) || 1;
     // Widths in whole device pixels too (at least one per CSS px on HiDPI),
     // thicker as the "Beat grid" slider goes up; centred on the line's pixel.
@@ -536,8 +540,10 @@ export function createTrackDetailController(el, prefs = {}) {
     setWidth("beat", 1 + Math.round((level / 100) * 2));
     setWidth("bar", 2 + Math.round((level / 100) * 2));
     host.style.setProperty("--dpx", `${dpx}px`);
+    const pxPerMs = (width * dpr) / viewSpanMs();
+    const basePx = Math.round(working.view.startMs * pxPerMs);
     const lineLeft = (t) => width
-      ? `${Math.round(((t - working.view.startMs) / viewSpanMs()) * width * dpr) / dpr}px`
+      ? `${(Math.round(t * pxPerMs) - basePx) / dpr}px`
       : `${msToPct(t)}%`;
     // Snap `from` to the nearest grid line at or before it.
     const firstBeatIdx = Math.max(0, Math.floor((from - working.firstBeatMs) / interval));
