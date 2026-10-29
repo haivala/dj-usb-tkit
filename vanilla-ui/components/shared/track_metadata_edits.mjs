@@ -2,8 +2,8 @@
 // the selection bar's Edit (many) -- and the track-table updates after them.
 // Library and app-playlist tracks save by local id; USB playlist / history
 // rows save to the stick (and the matched library tracks) by their media
-// path. The table shows only the year of these fields, as the save returns
-// it.
+// path. Each save answers with the saved tracks' whole rows, which the tables
+// show as they are.
 
 import { isUsbRootChangeBlocked } from "../usb/actions.mjs";
 
@@ -24,31 +24,11 @@ function usbEditTrack(row) {
   };
 }
 
-// Patch `fields` onto every loaded USB row of these files -- the same file
-// can sit in several USB playlists and the history -- and redraw them.
-export async function patchUsbTrackRows(ctx, rows, fields) {
-  const paths = new Set(rows.map((row) => String(row.usbMediaPath || "").trim()).filter(Boolean));
-  for (const ctl of [ctx.usbPlaylistTracksCtl, ctx.usbHistoryTracksCtl]) {
-    let changed = false;
-    for (const item of ctl?.items || []) {
-      const sameFile = rows.includes(item)
-        || paths.has(String(item?.usbMediaPath || "").trim());
-      if (sameFile) changed = ctx.patchTrackAnalysisFields(item, fields) || changed;
-    }
-    if (changed) await ctl.rerender();
-  }
-  for (const row of rows) ctx.patchTrackAnalysisFields(row, fields);
-}
-
 // `edits`: { genre?, rating?, releaseDate? } -- only the fields to change;
 // an empty genre or release date clears it.
 export async function saveLibraryMetadataEdits(ctx, trackIds, edits) {
   const saved = await ctx.command("save_track_metadata_edits", { trackIds, ...edits });
-  if ("releaseDate" in edits) {
-    for (const item of saved?.items || []) {
-      ctx.applyRealtimeAnalyzedTrackUpdate({ trackId: item.trackId, year: item.year ?? null });
-    }
-  }
+  for (const track of saved.tracks) ctx.showTrackRow(track);
   return saved;
 }
 
@@ -64,17 +44,8 @@ export async function saveUsbMetadataEdits(ctx, rows, edits) {
     tracks: rows.map(usbEditTrack),
     ...edits,
   });
-  if ("releaseDate" in edits) {
-    // Each track's year as the save wrote it (items are in request order),
-    // so rows sharing a year redraw together.
-    const rowsByYear = new Map();
-    (saved?.items || []).forEach((item, i) => {
-      const year = item.year ?? null;
-      if (rows[i]) rowsByYear.set(year, [...(rowsByYear.get(year) || []), rows[i]]);
-      if (item.localTrackId) ctx.applyRealtimeAnalyzedTrackUpdate({ trackId: item.localTrackId, year });
-    });
-    for (const [year, yearRows] of rowsByYear) await patchUsbTrackRows(ctx, yearRows, { year });
-  }
+  // Every loaded row of these files, and the library tracks also written.
+  for (const track of [...saved.tracks, ...saved.localTracks]) ctx.showTrackRow(track);
   return saved;
 }
 

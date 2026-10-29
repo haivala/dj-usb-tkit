@@ -93,6 +93,10 @@ pub struct JobEventPayload {
     pub library_total_duration_ms: Option<u64>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub library_duration_unknown_count: Option<usize>,
+    /// On an analysis track-ready event: the track's whole library row, which
+    /// the frontend shows in place of the one it has.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub track: Option<Box<Track>>,
     pub timestamp: String,
 }
 
@@ -2494,6 +2498,8 @@ pub struct SaveTrackAnalysisEditsData {
     /// new cues / beat grid. `false` when the track has no analysis cache yet
     /// (the edits are still persisted and applied at the next analysis/export).
     pub anlz_regenerated: bool,
+    /// The track's whole library row after the save, for the track tables.
+    pub track: Track,
 }
 
 // ── USB-native cue editing (edits an on-device bundle directly) ────────────
@@ -2593,6 +2599,13 @@ pub struct SaveUsbTrackAnalysisEditsData {
     /// and the app playlists that contain it.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub local_track_id: Option<String>,
+    /// The edited file's whole stick row after the save, for the USB track
+    /// tables (absent when no playlist or history lists the file).
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub track: Option<UsbTrack>,
+    /// `local_track_id`'s whole library row after the save.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub local_track: Option<Track>,
 }
 
 /// Genre / star rating / release date edit, from the cue editor (one track)
@@ -2635,6 +2648,8 @@ pub struct TrackMetadataValues {
 pub struct SaveTrackMetadataEditsData {
     /// One per saved track, in request order.
     pub items: Vec<TrackMetadataValues>,
+    /// The saved tracks' whole library rows, for the track tables.
+    pub tracks: Vec<Track>,
 }
 
 /// One USB track of a [`SaveUsbTrackMetadataEditsRequest`].
@@ -2690,6 +2705,11 @@ pub struct UsbMetadataEditResult {
 pub struct SaveUsbTrackMetadataEditsData {
     /// One per saved track, in request order.
     pub items: Vec<UsbMetadataEditResult>,
+    /// The edited files' whole stick rows after the save, for the USB track
+    /// tables (a file no playlist or history lists has none).
+    pub tracks: Vec<UsbTrack>,
+    /// The library tracks the edits were also written to, whole.
+    pub local_tracks: Vec<Track>,
 }
 
 /// One field across a set of tracks: the value they all share, or `mixed`

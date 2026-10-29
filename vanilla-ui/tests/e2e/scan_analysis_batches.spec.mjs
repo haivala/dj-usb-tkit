@@ -324,7 +324,9 @@ function installScanAnalysisMock(page, opts = {}) {
           waveformPeaksPath: track.waveformPeaksPath,
           waveformPreview: track.waveformPreview,
           libraryTotalDurationMs,
-          libraryDurationUnknownCount: Math.max(0, tracks.length - libraryDurationKnownCount)
+          libraryDurationUnknownCount: Math.max(0, tracks.length - libraryDurationKnownCount),
+          // The track's row as saved, whole, as the backend sends it.
+          track: { ...track, analysisReady: isCountable(track) },
         });
       }
 
@@ -729,7 +731,9 @@ function installPagedMaterializeAnalyzeMock(page, opts = {}) {
           waveformPeaksPath: row.waveformPeaksPath,
           waveformPreview: row.waveformPreview,
           libraryTotalDurationMs,
-          libraryDurationUnknownCount: Math.max(0, tracks.length - libraryDurationKnownCount)
+          libraryDurationUnknownCount: Math.max(0, tracks.length - libraryDurationKnownCount),
+          // The track's row as saved, whole, as the backend sends it.
+          track: { ...row, analysisReady: isCountable(row) },
         });
       }
 

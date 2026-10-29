@@ -15,7 +15,7 @@
 
 import { drawDetailWaveform, base64ToBytes, computeWaveNorm } from "./waveform_detail.mjs";
 import { isUsbRootChangeBlocked } from "../usb/actions.mjs";
-import { patchUsbTrackRows, RELEASE_DATE_PATTERN, saveLibraryMetadataEdits, saveUsbMetadataEdits } from "../shared/track_metadata_edits.mjs";
+import { RELEASE_DATE_PATTERN, saveLibraryMetadataEdits, saveUsbMetadataEdits } from "../shared/track_metadata_edits.mjs";
 import { cloneTemplate } from "../../ui_utils.mjs";
 import { coverElement, markLastEditedRow } from "../../track_table.mjs";
 import { buildCoverSrcCandidates, attachCoverFallbackHandlers } from "../library/actions.mjs";
@@ -37,6 +37,8 @@ export const MAX_CUES = 8;
 export const MIN_SPAN_MS = 1000;
 export const DEFAULT_SPAN_MS = 60_000;
 export const DEFAULT_VIEW_BARS = 60;
+// How close to the end the last playhead frame counts as having reached it.
+const END_OF_TRACK_TOLERANCE_MS = 1000;
 
 /// The view the editor opens on: the first 60 bars (4 beats each) at the
 /// track's BPM, so beat lines are spaced the same on every track whatever
@@ -1052,6 +1054,14 @@ export function createTrackDetailController(el, prefs = {}) {
       openListeners.push(listener);
     },
 
+    /// Playback ran to the track's end and stopped: the view is still centred
+    /// where the playhead last was (a stop leaves it), at the end.
+    stoppedAtTrackEnd() {
+      if (playheadLocked() || !(working.durationMs > 0)) return false;
+      const centreMs = (working.view.startMs + working.view.endMs) / 2;
+      return centreMs >= working.durationMs - END_OF_TRACK_TOLERANCE_MS;
+    },
+
     notePlaybackStarted() {
       if (!playheadRafHandle) playheadRafHandle = raf(playheadTick);
     },
@@ -1769,7 +1779,7 @@ async function openUsbTrackDetail(ctx, track, { rowKey = null } = {}) {
 
 /// The cue / beat-grid / BPM / key part of a USB save. False when it failed.
 async function saveUsbAnalysisEdits(ctx, track, usbAnalysisPathRaw, payload) {
-  const { command, emitStatus, state, applyRealtimeAnalyzedTrackUpdate } = ctx;
+  const { command, emitStatus, state } = ctx;
   try {
     const saved = await command("save_usb_track_analysis_edits", {
       usbRoot: state.usbRoot,
@@ -1784,21 +1794,11 @@ async function saveUsbAnalysisEdits(ctx, track, usbAnalysisPathRaw, payload) {
     });
     const n = saved.cues.length;
     emitStatus(`Saved ${n} cue${n === 1 ? "" : "s"} to USB`);
-    const fields = {
-      bpm: saved.bpm,
-      bpmAnalyzer: saved.bpmAnalyzer,
-      key: saved.key,
-      keyDisplay: saved.keyDisplay,
-      keyColor: saved.keyColor,
-    };
-    // Every loaded USB row of this file, not just the row that was clicked.
-    await patchUsbTrackRows(ctx, [track], fields);
-    // The backend also wrote the library track it resolved (not only the
-    // row's hint), so refresh that one and the app playlists containing it.
-    const localTrackId = saved.localTrackId || track.localTrackId;
-    if (localTrackId) {
-      applyRealtimeAnalyzedTrackUpdate({ trackId: localTrackId, ...fields });
-    }
+    // Every loaded USB row of this file, and the library track the backend
+    // also wrote (it resolves that one itself), with the app playlists
+    // holding it.
+    ctx.showTrackRow(saved.track);
+    ctx.showTrackRow(saved.localTrack);
     return true;
   } catch (err) {
     emitStatus(`Could not save cues: ${err.message}`);
@@ -1872,7 +1872,7 @@ export async function openTrackDetail(ctx, track, opts = {}) {
 
 /// The cue / beat-grid / BPM / key part of a library save. False when it failed.
 async function saveLocalAnalysisEdits(ctx, localId, payload) {
-  const { command, emitStatus, applyRealtimeAnalyzedTrackUpdate } = ctx;
+  const { command, emitStatus } = ctx;
   try {
     const saved = await command("save_track_analysis_edits", {
       trackId: localId,
@@ -1885,14 +1885,7 @@ async function saveLocalAnalysisEdits(ctx, localId, payload) {
       `Saved ${saved.cues.length} cue${saved.cues.length === 1 ? "" : "s"}` +
         (saved.anlzRegenerated ? "" : " (analysis cache not updated yet)")
     );
-    applyRealtimeAnalyzedTrackUpdate({
-      trackId: localId,
-      bpm: saved.bpm,
-      bpmAnalyzer: saved.bpmAnalyzer,
-      key: saved.key,
-      keyDisplay: saved.keyDisplay,
-      keyColor: saved.keyColor,
-    });
+    ctx.showTrackRow(saved.track);
     return true;
   } catch (err) {
     emitStatus(`Could not save cues: ${err.message}`);

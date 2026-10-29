@@ -356,6 +356,9 @@ export function bindTrackDetailEvents(ctx) {
         .resumePlaybackFromUi()
         .then(() => trackDetailDialog.notePlaybackStarted())
         .catch(() => {});
+    } else if (trackDetailDialog.stoppedAtTrackEnd()) {
+      // Played to the end: start over.
+      playFromRatio(0);
     } else {
       // Nothing loaded here yet: start at the left edge of the visible window.
       playFromRatio(trackDetailDialog.viewRatioToTrackRatio(0));

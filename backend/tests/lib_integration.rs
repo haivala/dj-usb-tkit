@@ -2495,6 +2495,10 @@ fn analyze_new_tracks_progress_reports_library_duration_total_scoped_to_visible_
         track_ready: bool,
         library_total_duration_ms: Option<u64>,
         library_duration_unknown_count: Option<usize>,
+        /// The event's whole row: `(id, analysis_ready, bpm, duration_ms)`.
+        row: Option<(String, bool, Option<f64>, Option<u64>)>,
+        analysis_ready: bool,
+        bpm: Option<f64>,
     }
 
     let progress = Arc::new(Mutex::new(Vec::<ProgressEvent>::new()));
@@ -2526,6 +2530,12 @@ fn analyze_new_tracks_progress_reports_library_duration_total_scoped_to_visible_
                     track_ready: progress.track_ready,
                     library_total_duration_ms: progress.library_total_duration_ms,
                     library_duration_unknown_count: progress.library_duration_unknown_count,
+                    row: progress
+                        .track
+                        .as_ref()
+                        .map(|t| (t.id.clone(), t.analysis_ready, t.bpm, t.duration_ms)),
+                    analysis_ready: progress.analysis_ready,
+                    bpm: progress.bpm,
                 });
         },
     );
@@ -2533,6 +2543,18 @@ fn analyze_new_tracks_progress_reports_library_duration_total_scoped_to_visible_
         analyzed_response.ok,
         "analyze internal failed: {analyzed_response:?}"
     );
+    // Each track-ready event carries the track's row as saved, whole, for the
+    // frontend to show as it is; the pieces before it carry none.
+    for event in progress.lock().expect("progress lock rows").iter() {
+        if !event.track_ready {
+            assert!(event.row.is_none(), "a piece carries no row: {event:?}");
+            continue;
+        }
+        let (id, ready, bpm, duration_ms) = event.row.clone().expect("track-ready row");
+        assert_eq!(id, event.track_id);
+        assert_eq!((ready, bpm), (event.analysis_ready, event.bpm));
+        assert!(duration_ms.is_some(), "saved row has the analyzed length");
+    }
     let analyzed = analyzed_response.data.expect("analyze data");
     assert_eq!(
         analyzed.analyzed + analyzed.failed,

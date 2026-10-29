@@ -1044,6 +1044,9 @@ impl BackendService {
 
         let (key_display, key_color) =
             key_display_fields(key.as_deref(), key_notation_setting(&conn)?);
+        let track = super::library::track_rows(&conn, std::slice::from_ref(&track_id))?
+            .pop()
+            .ok_or_else(|| BackendError::NotFound(format!("track not found: {track_id}")))?;
         Ok(SaveTrackAnalysisEditsData {
             track_id,
             first_beat_ms,
@@ -1055,6 +1058,7 @@ impl BackendService {
             key_display,
             key_color,
             anlz_regenerated,
+            track,
         })
     }
 
@@ -1325,6 +1329,16 @@ impl BackendService {
             .or_else(|_| std::fs::read(dat_path))
             .unwrap_or_default();
         let (key_display, key_color) = key_display_fields(key.as_deref(), self.key_notation()?);
+        let track = self
+            .usb_track_rows(&usb_root, std::slice::from_ref(&req.usb_media_path_raw))?
+            .pop()
+            .flatten();
+        let local_track = match &local_track_id {
+            Some(id) => {
+                super::library::track_rows(&*self.db.connect()?, std::slice::from_ref(id))?.pop()
+            }
+            None => None,
+        };
         Ok(SaveUsbTrackAnalysisEditsData {
             first_beat_ms: read_first_beat_from_anlz(&bytes),
             cues: collapse_anlz_cues(&bytes),
@@ -1338,6 +1352,8 @@ impl BackendService {
             edb_updated: true,
             local_updated: local_track_id.is_some(),
             local_track_id,
+            track,
+            local_track,
         })
     }
 

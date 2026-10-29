@@ -57,6 +57,23 @@ Long-running commands emit job lifecycle events:
 
 The desktop host also emits a unified `job:event` channel carrying the same payload shape.
 
+Analysis (`analyze_new_tracks`) reports each track on `job.progress`: a
+`trackStarted` event when a worker picks it up, then pieces in the row's
+column order (artwork, waveform, length, BPM / key) as each is found, then a
+`trackReady` event. The pieces carry only their own fields; the `trackReady`
+event carries `track`, the track's whole library row as saved (or as it was,
+when the analysis failed), which the frontend shows in place of its copy.
+
+### Whole track rows
+
+A command that changes tracks answers with their whole rows, in the shape the
+track lists show them: `Track` for library tracks (as `browse_source_files`,
+with the waveform preview) and `UsbTrack` for a USB file (as
+`fetch_usb_playlist_tracks`, read back from the stick). The frontend's
+`showTrackRow` puts each one in place of every loaded copy of that track (a
+USB file by its `usbMediaPath`, in every USB playlist and the history) and
+redraws those rows; it merges nothing from the old copy.
+
 USB-scoped jobs lock the selected USB root in the frontend until the matching
 `job.completed` or `job.failed` event arrives. Locking job types are
 `usb_read`, `usb_write`, `diagnostics`, and `export`; this covers playlist and
@@ -114,7 +131,8 @@ drive selection from being rendered against a newer selected drive.
   or the start cue's position is dropped. At most one entry may have
   `playbackStart: true`: the memory-only playback-start cue (no pad, colour or
   name, never after the first hot cue, dropped without another cue, hot or
-  memory; outside the 8).
+  memory; outside the 8). Returns the saved values and `track`, the track's
+  whole row.
 - `get_usb_track_detail` — `{ usbRoot, usbAnalysisPathRaw, usbMediaPathRaw? }` →
   reads `{ firstBeatMs, cues, detailWaveform, keyOptions }` straight off an
   **on-USB** ANLZ bundle for the cue editor opened from a USB playlist / history
@@ -134,7 +152,9 @@ drive selection from being rendered against a newer selected drive.
   bpmAnalyzer, key, keySource, anlzUpdated, edbUpdated, localUpdated,
   localTrackId }` (`localUpdated: false` / no `localTrackId` only when no local
   track matched; `localTrackId` is the library track the backend resolved, which
-  the UI refreshes). Runs as a background `usb_write` job
+  the UI refreshes), plus the whole rows: `track` (the file's stick row, absent
+  when no playlist or history lists it) and `localTrack` (`localTrackId`'s
+  library row). Runs as a background `usb_write` job
   (`run_usb_job_with_progress`), so the window never freezes: `job:event`
   progress reports each write (checking, ANLZ, `export.pdb`, library,
   `exportLibrary.db`) to the footer bar. Saves are serialized by
@@ -157,8 +177,8 @@ drive selection from being rendered against a newer selected drive.
   so rescans and rekordbox / Mixxx imports keep it over the file's tag; the
   date gets `release_date_source = 'user'`, so rescans keep it and its year.
   An unknown id blocks the save. Returns `{ items: [{ trackId, genre, rating,
-  year, releaseDate }] }`, `releaseDate` being the date export writes (as
-  `get_track_detail`'s). The cue editor sends it with one id instead of
+  year, releaseDate }], tracks }`, `releaseDate` being the date export writes
+  (as `get_track_detail`'s) and `tracks` the saved tracks' whole rows. The cue editor sends it with one id instead of
   `save_track_analysis_edits` when only the genre / rating / release date
   changed; the selection bar's Edit sends the selection.
 - `save_usb_track_metadata_edits` — `{ usbRoot, tracks: [{ usbMediaPathRaw,
@@ -170,8 +190,9 @@ drive selection from being rendered against a newer selected drive.
   already there when it falls inside it, else becomes the first day of that
   year or month. A track missing from either database blocks the save before
   anything is written. Leaves the ANLZ bundle, BPM, key and cues alone.
-  Returns `{ items: [{ usbMediaPathRaw, localTrackId?, year?, releaseDate? }]
-  }` with the PDB's year and date after the save. A background `usb_write`
+  Returns `{ items: [{ usbMediaPathRaw, localTrackId?, year?, releaseDate? }],
+  tracks, localTracks }` with the PDB's year and date after the save, the
+  edited files' whole stick rows and the library tracks' whole rows. A background `usb_write`
   job, serialized by `usb_write_lock` like `save_usb_track_analysis_edits`.
 - `get_tracks_metadata_summary` — `{ trackIds }` /
   `get_usb_tracks_metadata_summary` — `{ usbRoot, usbMediaPathsRaw }` → what

@@ -46,6 +46,12 @@ function installTrackDetailMock(page, opts = {}) {
     const detailWaveformB64 = btoa(String.fromCharCode.apply(null, pwv5));
 
     const MAJORS = ["C", "C#", "D", "D#", "E", "F", "F#", "G", "G#", "A", "A#", "B"];
+    if (opts.tauriEvents) {
+      // registerBackendJobEvents() only listens when window.isTauri is set, and
+      // the bundled invoke then routes through __TAURI_INTERNALS__.
+      window.isTauri = true;
+      window.__TAURI_INTERNALS__ = { invoke: (cmd, args) => window.__TAURI__.core.invoke(cmd, args) };
+    }
     window.__TAURI__ = {
       core: {
         invoke: async (command, payload = {}) => {
@@ -101,13 +107,18 @@ function installTrackDetailMock(page, opts = {}) {
           }
           if (command === "save_track_metadata_edits") {
             const r = payload?.request || {};
+            // The saved rows, whole, as the backend answers.
+            const saved = tracks.filter((t) => (r.trackIds || []).includes(t.id));
+            if (r.releaseDate !== undefined) {
+              for (const t of saved) t.year = Number(r.releaseDate.slice(0, 4)) || null;
+            }
             return {
               ok: true,
               data: {
-                items: (r.trackIds || []).map((trackId) => ({
-                  trackId, genre: r.genre ?? "Techno", rating: r.rating ?? 3,
-                  year: r.releaseDate === undefined ? 2009 : Number(r.releaseDate.slice(0, 4)) || undefined,
+                items: saved.map((t) => ({
+                  trackId: t.id, genre: r.genre ?? "Techno", rating: r.rating ?? 3, year: t.year ?? undefined,
                 })),
+                tracks: saved.map(withKeyLabel),
               },
             };
           }
@@ -154,9 +165,19 @@ function installTrackDetailMock(page, opts = {}) {
             return { ok: true, data: { enabled: !!r.enabled && r.bpm > 0 } };
           }
           if (command === "save_track_analysis_edits") {
+            const r = payload?.request || {};
+            // The saved row, whole, as the backend answers.
+            const t = tracks.find((track) => track.id === r.trackId);
+            Object.assign(t, {
+              bpm: r.bpm ?? null,
+              bpmAnalyzer: r.bpm != null ? "user" : null,
+              key: r.key ?? null,
+              keyColor: opts.camelot && r.key === "F#m" ? 10 : t.keyColor,
+            });
             return {
               ok: true,
               data: {
+                track: withKeyLabel(t),
                 trackId: "t1",
                 firstBeatMs: payload?.request?.firstBeatMs ?? null,
                 cues: payload?.request?.cues ?? [],
@@ -172,7 +193,19 @@ function installTrackDetailMock(page, opts = {}) {
           return { ok: false, error: { code: "UNKNOWN", message: `Unhandled: ${command}` } };
         },
       },
-      event: { listen: async () => () => {} },
+      event: {
+        // Kept so a test can play the backend's events (`window.__emit`).
+        listen: async (eventName, callback) => {
+          const listeners = (window.__eventListeners ||= {});
+          (listeners[eventName] ||= []).push(callback);
+          return () => {
+            listeners[eventName] = listeners[eventName].filter((fn) => fn !== callback);
+          };
+        },
+      },
+    };
+    window.__emit = (eventName, payload) => {
+      for (const fn of window.__eventListeners?.[eventName] || []) fn({ payload });
     };
   }, opts);
 }
@@ -1656,6 +1689,35 @@ test("play/pause pauses in the backend, freezes the playhead, and + Hot cue land
   await expect.poll(async () => (await calls("stop_playback_native")).length).toBe(1);
 });
 
+test("play after the track played to its end starts it over", async ({ page }) => {
+  await installTrackDetailMock(page, { tauriEvents: true });
+  await page.goto("/");
+  await page.locator('#libraryTableBody .waveform-cell [data-action="edit-track-detail"]').click();
+  const btn = page.locator("#trackDetailPlayPause");
+  const playCalls = () =>
+    page.evaluate(() =>
+      window.__calls.filter((c) => c.command === "play_resolved_track").map((c) => c.request)
+    );
+
+  await btn.click();
+  await expect(btn).toHaveAttribute("aria-label", "Pause");
+  // The backend runs the track out: last position at its end, then stopped.
+  await page.evaluate(() => {
+    window.__emit("playback:event", {
+      event: "playback.seeked", path: null, playing: true, positionMs: 179990, durationMs: 180000,
+    });
+  });
+  await expect.poll(() => modalPlayheadMs(page)).toBeGreaterThan(179000);
+  await page.evaluate(() => {
+    window.__emit("playback:event", { event: "playback.stopped", path: null, playing: false, durationMs: 180000 });
+  });
+  await expect(btn).toHaveAttribute("aria-label", "Play");
+
+  await btn.click();
+  await expect.poll(async () => (await playCalls()).length).toBe(2);
+  expect((await playCalls())[1].startRatio).toBe(0);
+});
+
 test("play/pause resumes in the backend from where it was paused", async ({ page }) => {
   await installTrackDetailMock(page);
   await page.goto("/");
@@ -1871,8 +1933,8 @@ test("cue editor opens + saves from an app-playlist track row", async ({ page })
     const detailWaveformB64 = btoa(String.fromCharCode.apply(null, pwv5));
 
     const track = {
-      id: "plt-entry-1",
-      localTrackId: "local-1",
+      // An app playlist's rows carry their library track's id.
+      id: "local-1",
       title: "Playlist Cue Track",
       artist: "Artist",
       album: "Album",
@@ -1921,6 +1983,12 @@ test("cue editor opens + saves from an app-playlist track row", async ({ page })
             return {
               ok: true,
               data: {
+                // The saved row, whole, as the backend answers.
+                track: Object.assign(track, {
+                  bpm: request?.bpm ?? null,
+                  bpmAnalyzer: request?.bpm != null ? "user" : null,
+                  key: request?.key ?? null,
+                }),
                 trackId: "local-1",
                 firstBeatMs: request?.firstBeatMs ?? null,
                 cues: request?.cues ?? [],
@@ -2036,6 +2104,9 @@ function installUsbTrackDetailMock(page, mockOpts = {}) {
 
     // When set, save_usb_track_analysis_edits fails (USB yanked mid-edit).
     window.__usbSaveFails = false;
+    // The library track the saves also write (the backend resolves it).
+    const localTrack = (opts.libraryTracks || []).find((t) => t.id === "local-1")
+      || { id: "local-1", title: usbTrack.title, artist: usbTrack.artist, filePath: "/music/track.mp3" };
 
     const MAJORS = ["C", "C#", "D", "D#", "E", "F", "F#", "G", "G#", "A", "A#", "B"];
     window.__TAURI__ = {
@@ -2095,9 +2166,18 @@ function installUsbTrackDetailMock(page, mockOpts = {}) {
           if (command === "save_usb_track_metadata_edits") {
             const r = payload?.request || {};
             const year = r.releaseDate ? Number(r.releaseDate.slice(0, 4)) : undefined;
+            if (r.releaseDate !== undefined) {
+              usbTrack.year = year ?? null;
+              localTrack.year = year ?? null;
+            }
+            // The edited rows, whole, as the backend answers.
             return {
               ok: true,
-              data: { items: (r.tracks || []).map((t) => ({ usbMediaPathRaw: t.usbMediaPathRaw, localTrackId: "local-1", year })) },
+              data: {
+                items: (r.tracks || []).map((t) => ({ usbMediaPathRaw: t.usbMediaPathRaw, localTrackId: "local-1", year })),
+                tracks: [{ ...usbTrack }],
+                localTracks: [{ ...localTrack }],
+              },
             };
           }
           if (command === "save_usb_track_analysis_edits") {
@@ -2111,9 +2191,16 @@ function installUsbTrackDetailMock(page, mockOpts = {}) {
               await usbSaveGate;
               window.__emitJobEvent({ ...job, event: "job.completed", percent: 100, message: "USB: Cue edits saved" });
             }
+            const r = payload?.request || {};
+            const saved = { bpm: r.bpm ?? null, bpmAnalyzer: r.bpm != null ? "user" : null, key: r.key ?? null };
+            Object.assign(usbTrack, saved);
+            Object.assign(localTrack, saved);
             return {
               ok: true,
               data: {
+                // The edited rows, whole, as the backend answers.
+                track: { ...usbTrack },
+                localTrack: { ...localTrack },
                 firstBeatMs: payload?.request?.firstBeatMs ?? null,
                 cues: payload?.request?.cues ?? [],
                 bpm: payload?.request?.bpm ?? null,

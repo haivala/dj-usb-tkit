@@ -509,7 +509,9 @@ impl BackendService {
                 })
             })
             .collect::<BackendResult<Vec<_>>>()?;
-        Ok(SaveTrackMetadataEditsData { items })
+        let ids: Vec<String> = items.iter().map(|item| item.track_id.clone()).collect();
+        let tracks = super::library::track_rows(&conn, &ids)?;
+        Ok(SaveTrackMetadataEditsData { items, tracks })
     }
 
     /// What library tracks share, for the selection bar's Edit.
@@ -721,7 +723,25 @@ impl BackendService {
         self.invalidate_usb_parse_cache();
 
         on_progress(STEPS, STEPS, "USB: Track details saved");
-        Ok(SaveUsbTrackMetadataEditsData { items })
+        let paths: Vec<String> = items
+            .iter()
+            .map(|item| item.usb_media_path_raw.clone())
+            .collect();
+        let tracks = self
+            .usb_track_rows(&usb_root, &paths)?
+            .into_iter()
+            .flatten()
+            .collect();
+        let local_ids: Vec<String> = items
+            .iter()
+            .filter_map(|item| item.local_track_id.clone())
+            .collect();
+        let local_tracks = super::library::track_rows(&*self.db.connect()?, &local_ids)?;
+        Ok(SaveUsbTrackMetadataEditsData {
+            items,
+            tracks,
+            local_tracks,
+        })
     }
 }
 

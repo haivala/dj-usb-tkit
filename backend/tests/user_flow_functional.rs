@@ -1664,6 +1664,31 @@ fn save_usb_track_analysis_edits_bpm_and_key_keep_pdb_edb_anlz_and_library_in_sy
     assert_eq!(saved.key.as_deref(), Some("G#m"));
     assert_eq!(saved.key_display.as_deref(), Some("1A"));
     assert_eq!(saved.key_color, Some(0));
+    // The edited rows come back whole, as the track tables show them: the
+    // stick's row read back from the stick, and the library track's.
+    let stick_row = saved.track.as_ref().expect("saved stick row");
+    assert_eq!(
+        stick_row.usb_media_path.as_deref(),
+        Some(media_raw.as_str())
+    );
+    assert_eq!(
+        (
+            stick_row.bpm,
+            stick_row.key.as_deref(),
+            stick_row.key_display.as_deref()
+        ),
+        (Some(137.25), Some("G#m"), Some("1A"))
+    );
+    let library_row = saved.local_track.as_ref().expect("saved library row");
+    assert_eq!(library_row.id, track_id);
+    assert_eq!(
+        (
+            library_row.bpm,
+            library_row.key.as_deref(),
+            library_row.key_display.as_deref()
+        ),
+        (Some(137.25), Some("G#m"), Some("1A"))
+    );
     // Each write phase is reported, so the UI shows progress instead of hanging.
     assert_eq!(
         steps,
@@ -1789,6 +1814,23 @@ fn save_usb_track_metadata_edits_writes_only_genre_rating_and_release_date() {
     assert_eq!(
         (saved.items[0].year, saved.items[0].release_date.as_deref()),
         (Some(2016), Some("2016-01-01"))
+    );
+    // The edited rows come back whole: the stick's and the library track's.
+    assert_eq!(
+        saved
+            .tracks
+            .iter()
+            .map(|t| (t.usb_media_path.as_deref(), t.year))
+            .collect::<Vec<_>>(),
+        [(Some(media_raw.as_str()), Some(2016))]
+    );
+    assert_eq!(
+        saved
+            .local_tracks
+            .iter()
+            .map(|t| (t.id.as_str(), t.year))
+            .collect::<Vec<_>>(),
+        [(track_id.as_str(), Some(2016))]
     );
 
     let parsed = parse_pdb(&pdb_path(&usb)).expect("parse pdb");
@@ -1993,7 +2035,17 @@ fn save_track_metadata_edits_leaves_analysis_alone() {
         release_date: Some("1994".to_string()),
     });
     assert!(saved.ok, "metadata save failed: {saved:?}");
-    let saved = &saved.data.expect("metadata save data").items[0];
+    let saved = saved.data.expect("metadata save data");
+    // The saved track's whole row, for the track tables.
+    assert_eq!(
+        saved
+            .tracks
+            .iter()
+            .map(|t| (t.id.as_str(), t.year))
+            .collect::<Vec<_>>(),
+        [(track_id.as_str(), Some(1994))]
+    );
+    let saved = &saved.items[0];
     assert_eq!(
         (
             saved.genre.as_deref(),

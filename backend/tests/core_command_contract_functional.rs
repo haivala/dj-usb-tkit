@@ -1126,6 +1126,29 @@ fn save_track_analysis_edits_persists_cues_and_first_beat_and_validates() {
     });
     assert!(!bad_color.ok, "unknown colorId should be rejected");
 
+    // A BPM / key edit answers with the track's whole row as saved, for the
+    // track tables.
+    let tempo = backend
+        .save_track_analysis_edits(SaveTrackAnalysisEditsRequest {
+            track_id: track_id.clone(),
+            first_beat_ms: None,
+            bpm: Some(131.5),
+            key: Some("Em".to_string()),
+            cues: None,
+        })
+        .data
+        .expect("bpm/key save");
+    assert_eq!(tempo.track.id, track_id);
+    assert_eq!(
+        (
+            tempo.track.bpm,
+            tempo.track.bpm_analyzer.as_deref(),
+            tempo.track.key.as_deref(),
+            tempo.track.key_display.as_deref()
+        ),
+        (Some(131.5), Some("user"), Some("Em"), Some("Em"))
+    );
+
     // Unknown track id is a NotFound.
     let missing = backend.get_track_detail(GetTrackDetailRequest {
         track_id: "nope".to_string(),

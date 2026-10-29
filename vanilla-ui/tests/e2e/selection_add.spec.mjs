@@ -213,17 +213,34 @@ function installSelectionMock(page, mockOpts = {}) {
               },
             };
           }
+          // The saves answer with the edited rows, whole, as the backend does.
           if (command === "save_track_metadata_edits") {
             const r = payload?.request || {};
+            const year = Number(r.releaseDate?.slice(0, 4)) || null;
+            const saved = tracks.filter((t) => (r.trackIds || []).includes(t.id));
+            if (r.releaseDate !== undefined) for (const t of saved) t.year = year;
             return {
               ok: true,
-              data: { items: (r.trackIds || []).map((trackId) => ({ trackId, genre: r.genre, rating: r.rating ?? 0, year: Number(r.releaseDate?.slice(0, 4)) || undefined })) },
+              data: {
+                items: saved.map((t) => ({ trackId: t.id, genre: r.genre, rating: r.rating ?? 0, year: t.year ?? undefined })),
+                tracks: saved.map((t) => ({ ...t })),
+              },
             };
           }
           if (command === "save_usb_track_metadata_edits") {
             const r = payload?.request || {};
-            const year = Number(r.releaseDate?.slice(0, 4)) || undefined;
-            return { ok: true, data: { items: (r.tracks || []).map((t) => ({ usbMediaPathRaw: t.usbMediaPathRaw, year })) } };
+            const year = Number(r.releaseDate?.slice(0, 4)) || null;
+            const paths = (r.tracks || []).map((t) => t.usbMediaPathRaw);
+            const saved = usbTracks.filter((t) => paths.includes(t.usbMediaPath));
+            if (r.releaseDate !== undefined) for (const t of saved) t.year = year;
+            return {
+              ok: true,
+              data: {
+                items: (r.tracks || []).map((t) => ({ usbMediaPathRaw: t.usbMediaPathRaw, year: year ?? undefined })),
+                tracks: saved.map((t) => ({ ...t })),
+                localTracks: [],
+              },
+            };
           }
           if (opts.usb) {
             if (command === "pick_usb_folder") return "/Volumes/USB-TEST";

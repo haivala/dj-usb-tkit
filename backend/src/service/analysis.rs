@@ -191,6 +191,9 @@ pub struct AnalyzeTrackProgress {
     pub error_message: Option<String>,
     pub library_total_duration_ms: Option<u64>,
     pub library_duration_unknown_count: Option<usize>,
+    /// On the track-ready event: the track's library row as saved (or as it
+    /// was, when the analysis failed), whole, for the frontend to show as is.
+    pub track: Option<crate::models::Track>,
 }
 
 #[derive(Debug, Clone, Default)]
@@ -235,6 +238,7 @@ fn build_partial_progress(
         error_message: None,
         library_total_duration_ms: None,
         library_duration_unknown_count: None,
+        track: None,
     }
 }
 
@@ -290,6 +294,7 @@ fn build_done_progress_success(
         error_message: None,
         library_total_duration_ms: None,
         library_duration_unknown_count: None,
+        track: None,
     }
 }
 
@@ -322,6 +327,7 @@ fn build_done_progress_error(
         error_message: Some(error_message),
         library_total_duration_ms: None,
         library_duration_unknown_count: None,
+        track: None,
     }
 }
 
@@ -950,6 +956,7 @@ impl BackendService {
                             }
                         }
                         persist_done_result(
+                            &tx_db,
                             &mut persist_stmt,
                             track,
                             result,
@@ -1053,6 +1060,7 @@ impl BackendService {
                     )
                 };
                 persist_done_result(
+                    &tx_db,
                     &mut persist_stmt,
                     track,
                     result,
@@ -1143,6 +1151,7 @@ fn incomplete_analysis_reason(local: &LocalAnalysisResult) -> String {
 }
 
 fn persist_done_result(
+    conn: &rusqlite::Connection,
     persist_stmt: &mut rusqlite::CachedStatement<'_>,
     track: LocalTrackForAnalysis,
     result: BackendResult<LocalAnalysisResult>,
@@ -1205,6 +1214,8 @@ fn persist_done_result(
                 ctx.known_count += 1;
             }
             let mut progress = build_done_progress_success(*completed_count, total, &track, &local);
+            progress.track =
+                super::library::track_rows(conn, std::slice::from_ref(&track.id))?.pop();
             if let Some(ctx) = library_context.as_deref() {
                 progress.library_total_duration_ms = Some(ctx.total_ms);
                 progress.library_duration_unknown_count =
@@ -1222,6 +1233,8 @@ fn persist_done_result(
                 format!("{}: {}", track.file_path, err_msg),
             ));
             let mut progress = build_done_progress_error(*completed_count, total, &track, err_msg);
+            progress.track =
+                super::library::track_rows(conn, std::slice::from_ref(&track.id))?.pop();
             if let Some(ctx) = library_context.as_deref() {
                 progress.library_total_duration_ms = Some(ctx.total_ms);
                 progress.library_duration_unknown_count =

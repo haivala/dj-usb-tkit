@@ -94,7 +94,7 @@ export function createAppContext(env) {
     scheduleLibrarySearch resetAndLoadLibraryTracks
     reloadTrackListsForKeyNotation scanLibrary reanalyzeTracks
     scanRekordboxDb scanMixxxDb analyzeTrackIds analyzeSingleTrack setTrackAnalyzingState promoteTrackIdentity
-    patchTrackAnalysisFields`);
+    showTrackRow`);
   bindActions(usb, `setUsbRootControlsLocked refreshPlaylistExportStatus showDiagReportView
     clearUsbDiagnostics hideUsbDiagnostics loadUsbRootFromStorage resetUsbStateViews
     syncAssetScopePaths pickSourceFolders detectExternalRekordboxDb detectExternalMixxxDb

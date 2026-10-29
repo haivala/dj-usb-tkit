@@ -536,6 +536,22 @@ fn hydrate_usb_page(
     }
 }
 
+/// `usb_track_rows`: the first row of each wanted media path in `tracks`.
+fn collect_usb_rows<'a>(
+    rows: &mut HashMap<String, UsbTrack>,
+    wanted: &HashSet<&str>,
+    tracks: impl Iterator<Item = &'a UsbTrack>,
+) {
+    for track in tracks {
+        let Some(path) = track.usb_media_path.as_deref().map(str::trim) else {
+            continue;
+        };
+        if wanted.contains(path) && !rows.contains_key(path) {
+            rows.insert(path.to_string(), track.clone());
+        }
+    }
+}
+
 /// The registered `usb_devices` id for the stick mounted at `usb_root`.
 fn usb_device_id_for_root(
     conn: &rusqlite::Connection,
@@ -2671,6 +2687,51 @@ impl BackendService {
             || generation.load(std::sync::atomic::Ordering::SeqCst) != this_load,
         );
         Ok(data)
+    }
+
+    /// The stick's rows for these media paths (`UsbTrack::usb_media_path`, the
+    /// key the USB saves take), in order, as a fetched page shows them:
+    /// read fresh from the stick's playlists, then its history, and hydrated.
+    /// `None` for a path no list holds. The USB saves answer with these, and
+    /// the frontend swaps every row of that file in as it is.
+    pub(crate) fn usb_track_rows(
+        &self,
+        usb_root: &Path,
+        media_paths: &[String],
+    ) -> BackendResult<Vec<Option<UsbTrack>>> {
+        let wanted: HashSet<&str> = media_paths.iter().map(|path| path.trim()).collect();
+        let mut rows: HashMap<String, UsbTrack> = HashMap::new();
+        let playlists = self.usb_playlists_resolved(usb_root)?;
+        collect_usb_rows(
+            &mut rows,
+            &wanted,
+            playlists.items.iter().flat_map(|list| &list.tracks),
+        );
+        if rows.len() < wanted.len() {
+            let histories = self.usb_histories_resolved(usb_root)?;
+            collect_usb_rows(
+                &mut rows,
+                &wanted,
+                histories.items.iter().flat_map(|list| &list.tracks),
+            );
+        }
+        let mut found: Vec<UsbTrack> = rows.into_values().collect();
+        let files = self.resolve_usb_track_page_local_ids(&mut found, usb_root)?;
+        hydrate_usb_page(
+            "usb_track_rows",
+            &mut found,
+            self.key_notation()?,
+            &files,
+            || false,
+        );
+        let by_path: HashMap<String, UsbTrack> = found
+            .into_iter()
+            .filter_map(|track| Some((track.usb_media_path.as_deref()?.trim().to_string(), track)))
+            .collect();
+        Ok(media_paths
+            .iter()
+            .map(|path| by_path.get(path.trim()).cloned())
+            .collect())
     }
 
     /// USB-history counterpart to `fetch_usb_playlist_tracks`.

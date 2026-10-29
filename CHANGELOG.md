@@ -48,6 +48,12 @@
   Mixxx chips' switches, are now kept by the backend. The library list, Select all, the selection's
   time, adding to a playlist and analysis all read the same switches, and a library whose database
   is gone is switched off for good.
+- **Fix:** In the cue editor, Play after the track has played to its end starts it from the
+  beginning. Before, it started again just before the end and stopped almost at once.
+- **Improvement:** After analysis, a cue editor save or a track details edit, the backend sends the
+  track's whole updated row, and every list showing that track (the library, app playlists, USB
+  playlists and history) shows it as sent. A reanalysis that fails now brings back the track's
+  BPM and key in the row instead of leaving them blank.
 - **Improvement:** When the selection bar needs more room, the search field beside it narrows to
   make space before the bar moves onto a line of its own.
 

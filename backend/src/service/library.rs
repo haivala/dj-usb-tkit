@@ -1151,17 +1151,28 @@ impl BackendService {
         }
 
         let conn = self.db.connect()?;
-        let placeholders = vec!["?"; ids.len()].join(", ");
-        let sql = format!("SELECT {TRACK_COLS} FROM tracks WHERE id IN ({placeholders})");
-
-        let mut stmt = conn.prepare(&sql)?;
-        let rows = stmt.query_map(params_from_iter(ids.iter()), |row| row_to_track(row, true))?;
-        let mut found = rows.collect::<Result<Vec<_>, _>>()?;
-        found.sort_by(|a, b| a.id.cmp(&b.id));
-        apply_frontend_track_fields(&conn, &mut found)?;
-
-        Ok(GetTracksByIdsData { items: found })
+        Ok(GetTracksByIdsData {
+            items: track_rows(&conn, &ids)?,
+        })
     }
+}
+
+/// The library rows of `ids` (unknown ids are left out), sorted by id, whole
+/// and as the track tables show them: with the waveform preview and the
+/// display fields. Every command that changes a track answers with these, and
+/// the frontend swaps the row in as it is.
+pub(crate) fn track_rows(conn: &rusqlite::Connection, ids: &[String]) -> BackendResult<Vec<Track>> {
+    if ids.is_empty() {
+        return Ok(Vec::new());
+    }
+    let placeholders = vec!["?"; ids.len()].join(", ");
+    let sql = format!("SELECT {TRACK_COLS} FROM tracks WHERE id IN ({placeholders})");
+    let mut stmt = conn.prepare(&sql)?;
+    let rows = stmt.query_map(params_from_iter(ids.iter()), |row| row_to_track(row, true))?;
+    let mut found = rows.collect::<Result<Vec<_>, _>>()?;
+    found.sort_by(|a, b| a.id.cmp(&b.id));
+    apply_frontend_track_fields(conn, &mut found)?;
+    Ok(found)
 }
 
 /// Finds a single high-confidence local-track match for a USB-sourced

@@ -137,10 +137,54 @@ export function mergeHydratedTrackIntoState(ctx, rawTrack) {
   return changed;
 }
 
+// A command that changed a track answers with its whole row -- the library's
+// `Track`, or a USB list's `UsbTrack` (which carries `usbMediaPath`) -- and
+// the tables show it as it is: every loaded copy of that track takes the
+// row's contents (kept as the same object, so the lists holding it stay put)
+// and its drawn rows are redrawn. Nothing is merged from the old copy.
+export function showTrackRow(ctx, rawTrack) {
+  if (!rawTrack) return;
+  const track = normalizeTrack(ctx, rawTrack);
+  const replace = (copy) => {
+    for (const key of Object.keys(copy)) delete copy[key];
+    Object.assign(copy, track);
+  };
+  if ("usbMediaPath" in rawTrack) {
+    // The same file can sit in several USB playlists and the history.
+    const path = String(track.usbMediaPath || "").trim();
+    for (const ctl of [ctx.usbPlaylistTracksCtl, ctx.usbHistoryTracksCtl]) {
+      const copies = (ctl?.items || []).filter((item) => item && String(item.usbMediaPath || "").trim() === path);
+      copies.forEach(replace);
+      for (const copy of copies) ctl.patchRow(copy, (body, t) => patchUsbRowsInContainer(ctx, body, t));
+    }
+    return;
+  }
+  const { state } = ctx;
+  const id = String(track.id);
+  for (const copy of state.tracks) {
+    if (copy && String(copy.id) === id) replace(copy);
+  }
+  for (const playlist of state.playlists) {
+    for (const copy of playlist.tracks || []) {
+      if (copy && String(copy.localTrackId || copy.id || "").trim() === id) replace(copy);
+    }
+  }
+  patchLibraryRowByTrackId(ctx, id);
+  patchPlaylistRowByTrackId(ctx, id);
+}
+
+// An analysis job event. A track-ready event carries the track's saved row
+// (`track`), shown whole; the pieces before it (`trackStarted`, then
+// artwork, waveform, length and BPM / key as each is found) fill the row in
+// column order while the track is analyzed.
 export async function applyRealtimeAnalyzedTrackUpdate(ctx, payload) {
   const { state } = ctx;
   const trackId = String(payload?.trackId || "").trim();
   if (!trackId) return;
+  if (payload.track) {
+    showTrackRow(ctx, payload.track);
+    return;
+  }
 
   let libraryChanged = false;
   for (const track of state.tracks) {
@@ -710,26 +754,8 @@ export async function analyzeTrackIds(ctx, trackIds, modeLabel = "Analyze", opti
       setTrackAnalyzingState(ctx, String(id), false);
     }
   }
-  const changedIds = [];
-  for (const item of hydratedItems) {
-    const changed = mergeHydratedTrackIntoState(ctx, item);
-    if (changed) {
-      const id = String(item?.id || "").trim();
-      if (id) changedIds.push(id);
-    }
-  }
-  if (changedIds.length) {
-    if (ids.length === 1) {
-      await ctx.nextPaint();
-      await ctx.nextPaint();
-    }
-    for (const id of changedIds) {
-      patchLibraryRowByTrackId(ctx, id);
-      patchPlaylistRowByTrackId(ctx, id);
-    }
-    renderLibraryRows(ctx);
-    renderSourceChips(ctx);
-  }
+  // The batch's tracks as saved (each also came on its track-ready event).
+  for (const item of hydratedItems) showTrackRow(ctx, item);
 
   refreshLibrarySources(ctx);
   await ctx.refreshCurrentPlaylistTracks();
@@ -867,8 +893,8 @@ export function promoteTrackIdentity(ctx, oldId, newId) {
 
 // --- analysis_patch.mjs ---
 
-// `payload` is backend-typed (a job event, or a cue save's result): a field
-// that is absent or null leaves the row's value alone.
+// An analysis piece (job event) on a row while its track is analyzed: a
+// field that is absent or null leaves the row's value alone.
 export function patchTrackAnalysisFields(ctx, track, payload) {
   if (!track || !payload) return false;
   let changed = false;
@@ -881,8 +907,8 @@ export function patchTrackAnalysisFields(ctx, track, payload) {
     if (next != null) put(key, next);
   };
   // A reanalysis replaces the BPM / key: clear them as the track starts so the
-  // row visibly refills with the fresh values (the batch's final hydrate
-  // restores the stored ones if the analysis fails).
+  // row visibly refills with the fresh values (the track-ready event's row
+  // brings the stored ones back if the analysis fails).
   if (payload.trackStarted && payload.reanalysis) {
     put("bpm", null);
     put("bpmAnalyzer", null);
@@ -900,9 +926,7 @@ export function patchTrackAnalysisFields(ctx, track, payload) {
   setIfChanged("filePath", payload.filePath);
   if (payload.artworkPath) {
     setIfChanged("artworkPath", payload.artworkPath);
-    setIfChanged("artworkUrl", appendUrlRevision(ctx.toPlayableUrl(payload.artworkPath) || "", payload.updatedAt || Date.now()));
-    setIfChanged("artworkChecked", true);
-  } else if (payload.artworkChecked) {
+    setIfChanged("artworkUrl", appendUrlRevision(ctx.toPlayableUrl(payload.artworkPath) || "", Date.now()));
     setIfChanged("artworkChecked", true);
   }
   setIfChanged("waveformPeaksPath", payload.waveformPeaksPath);
@@ -912,10 +936,6 @@ export function patchTrackAnalysisFields(ctx, track, payload) {
     track.waveformPreview = preview;
     changed = true;
   }
-  // Backend-owned readiness; only ever flips false -> true on a progress event.
-  if (payload.analysisReady) put("analysisReady", true);
-  // The release year after a cue-editor save; null clears it.
-  if (payload.year !== undefined) put("year", payload.year || null);
   return changed;
 }
 
