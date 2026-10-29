@@ -37,7 +37,9 @@
   - **Fix (CRITICAL):** ...
 -->
 
-## Unreleased
+## 0.4.11
+
+**Severity:** feature
 
 - **New feature:** The selection bar shows the total time of the selected tracks next to their
   count, with a "+" when some of them have no length yet.
