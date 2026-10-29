@@ -262,6 +262,9 @@
             return ok({ values: {}, nodeAvailable: false, essentiaInstalled: false });
           case "get_library_sources":
             return ok(librarySources);
+          case "set_external_library_enabled":
+            librarySources[`${r.library}DbEnabled`] = !!r.enabled;
+            return ok(librarySources);
           case "set_theme_background":
             return null;
           case "allow_asset_paths":
@@ -325,8 +328,15 @@
               ...listTotals(items),
             });
           }
-          case "get_tracks_by_ids_with_previews":
-            return ok({ items: tracks.filter((t) => (r.trackIds || []).includes(t.id)) });
+          case "get_selection_duration": {
+            // The ticked tracks' total time, as the backend sums it.
+            const picked = tracks.filter((t) => (r.trackIds || []).includes(t.id));
+            return ok({
+              totalDurationMs: sumMs(picked),
+              durationUnknownCount: picked.filter((t) => !(Number(t.durationMs) > 0)).length,
+              trackCount: picked.length,
+            });
+          }
           case "resolve_track_identity":
             return ok({ trackId: r.trackId || detail.track.id, resolvedBy: "self", materialized: false });
           case "get_track_detail":

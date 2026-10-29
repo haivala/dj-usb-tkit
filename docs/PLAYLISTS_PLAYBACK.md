@@ -26,7 +26,9 @@ becomes an ordinary local playlist; see `docs/EXTERNAL_LIBRARIES.md`.
 ### Adding selected tracks
 
 Every track list has a checkbox on each row and a select-all box in its header. The selection
-bar beside the search shows what is selected and what can be done with it:
+bar beside the search shows what is selected and what can be done with it. Next to the count it
+shows the selected tracks' total time, with a "+" when some of them have no length yet (not yet
+analyzed); hover it to see how many.
 
 - **+ Add to** and the active playlist's name adds the selection to that playlist (Library, USB
   playlists and USB history). Without an active playlist the button is not shown.
