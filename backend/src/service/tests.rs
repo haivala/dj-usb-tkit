@@ -1428,6 +1428,42 @@ fn get_playlist_tracks_computes_total_duration_server_side() {
 }
 
 #[test]
+fn get_selection_duration_sums_only_the_ticked_playlist_tracks() {
+    let (_dir, service) = test_service();
+    let conn = service.db.connect().expect("connect");
+    for (id, path, duration) in [
+        ("t1", "/music/a.mp3", Some(200_000)),
+        ("t2", "/music/b.mp3", None),
+        ("t3", "/music/c.mp3", Some(100_000)),
+    ] {
+        insert_full_track(&conn, id, "Song", "Artist", path, duration, None, false);
+    }
+    drop(conn);
+    let playlist = service
+        .create_playlist(CreatePlaylistRequest {
+            name: "PL".to_string(),
+        })
+        .expect("create playlist");
+    service
+        .add_tracks_to_playlist(AddTracksToPlaylistRequest {
+            playlist_id: playlist.playlist_id.clone(),
+            track_ids: vec!["t1".to_string(), "t2".to_string(), "t3".to_string()],
+        })
+        .expect("add tracks");
+
+    // t3 unticked; "gone" is no longer in the playlist and adds nothing.
+    let data = service
+        .get_selection_duration(GetSelectionDurationRequest::Playlist {
+            playlist_id: playlist.playlist_id,
+            track_ids: vec!["t1".to_string(), "t2".to_string(), "gone".to_string()],
+        })
+        .expect("selection duration");
+    assert_eq!(data.total_duration_ms, 200_000);
+    assert_eq!(data.duration_known_count, 1);
+    assert_eq!(data.track_count, 2);
+}
+
+#[test]
 fn get_playlist_tracks_paginates_filters_and_sorts_server_side() {
     let (_dir, service) = test_service();
     let conn = service.db.connect().expect("connect");

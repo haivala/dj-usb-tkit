@@ -354,20 +354,8 @@ impl BackendService {
 
         // Computed once server-side (here) over the whole filtered playlist, not
         // just the returned page -- see `GetPlaylistTracksData::total_duration_ms`.
-        let mut total_duration_ms: u64 = 0;
-        let mut duration_known_count: usize = 0;
-        let mut unanalyzed_count: usize = 0;
-        for track in &items {
-            if let Some(d) = track.duration_ms
-                && d > 0
-            {
-                total_duration_ms += d;
-                duration_known_count += 1;
-            }
-            if !track.analysis_ready {
-                unanalyzed_count += 1;
-            }
-        }
+        let (total_duration_ms, duration_known_count) = duration_totals(&items);
+        let unanalyzed_count = items.iter().filter(|track| !track.analysis_ready).count();
         let total = items.len();
 
         // Default order is playlist position (the SQL `ORDER BY`); a client
@@ -518,6 +506,65 @@ impl BackendService {
         let track_ids: Vec<String> = visible.into_iter().map(|track| track.id).collect();
         let total = track_ids.len();
         Ok(ListMatchingTrackIdsData { track_ids, total })
+    }
+
+    /// The selection bar's total time: the ticked tracks of one view's list,
+    /// summed by the same rule as that list's "Total time". The whole list,
+    /// not the searched one, so a ticked track the search now hides still
+    /// counts while it stays ticked.
+    pub fn get_selection_duration(
+        &self,
+        req: GetSelectionDurationRequest,
+    ) -> BackendResult<GetSelectionDurationData> {
+        // Library rows count by the library's own rule (`library_length_known`).
+        let totals = |selected: Vec<&Track>, library: bool| {
+            let (total_duration_ms, duration_known_count) = duration_totals(
+                selected
+                    .iter()
+                    .copied()
+                    .filter(|track| !library || library_length_known(track)),
+            );
+            GetSelectionDurationData {
+                total_duration_ms,
+                duration_known_count,
+                track_count: selected.len(),
+            }
+        };
+        match req {
+            GetSelectionDurationRequest::Library {
+                source_roots,
+                include_rekordbox_db,
+                include_mixxx_db,
+                track_ids,
+            } => {
+                let conn = self.db.connect()?;
+                let items = self.compute_all_library_tracks(
+                    &conn,
+                    &source_roots,
+                    ExternalLibraries::from_flags(include_rekordbox_db, include_mixxx_db),
+                )?;
+                Ok(totals(selected_tracks(&items, &track_ids).collect(), true))
+            }
+            GetSelectionDurationRequest::Playlist {
+                playlist_id,
+                track_ids,
+            } => {
+                ensure_playlist_exists(&self.db, &playlist_id)?;
+                let conn = self.db.connect()?;
+                let items = self.load_playlist_tracks_ordered(&conn, &playlist_id)?;
+                Ok(totals(selected_tracks(&items, &track_ids).collect(), false))
+            }
+            GetSelectionDurationRequest::UsbPlaylist {
+                usb_root,
+                id,
+                track_ids,
+            } => self.usb_selection_duration(usb_root.as_deref(), false, &id, &track_ids),
+            GetSelectionDurationRequest::UsbHistory {
+                usb_root,
+                id,
+                track_ids,
+            } => self.usb_selection_duration(usb_root.as_deref(), true, &id, &track_ids),
+        }
     }
 
     pub fn add_library_selection_to_playlist(

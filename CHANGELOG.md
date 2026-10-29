@@ -37,6 +37,13 @@
   - **Fix (CRITICAL):** ...
 -->
 
+## Unreleased
+
+- **New feature:** The selection bar shows the total time of the selected tracks next to their
+  count, with a "+" when some of them have no length yet.
+- **Improvement:** When the selection bar needs more room, the search field beside it narrows to
+  make space before the bar moves onto a line of its own.
+
 ## 0.4.10
 
 **Severity:** feature

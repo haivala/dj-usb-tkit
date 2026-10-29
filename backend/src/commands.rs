@@ -15,17 +15,18 @@ use crate::models::{
     FetchUsbPlaylistsData, FetchUsbPlaylistsRequest, FetchUsbTracksData, FetchUsbTracksRequest,
     GetFrontendSettingsData, GetPlaylistExportSpaceData, GetPlaylistExportSpaceRequest,
     GetPlaylistMembershipData, GetPlaylistMembershipRequest, GetPlaylistTracksData,
-    GetPlaylistTracksRequest, GetSourceRootAnalysisData, GetSourceRootAnalysisRequest,
-    GetTrackDetailRequest, GetTracksByIdsData, GetTracksByIdsRequest,
-    GetTracksMetadataSummaryRequest, GetUsbDeviceNameData, GetUsbDeviceNameRequest,
-    GetUsbPlayerMenuConfigData, GetUsbPlayerMenuConfigRequest, GetUsbTrackDetailRequest,
-    GetUsbTracksMetadataSummaryRequest, ImportExternalPlaylistData, ImportExternalPlaylistRequest,
-    InitializeUsbData, InitializeUsbRequest, InspectUsbTrackData, InspectUsbTrackRequest,
-    ListExternalPlaylistsData, ListExternalPlaylistsRequest, ListMatchingTrackIdsData,
-    ListMatchingTrackIdsRequest, ListPlaylistsData, ListUsbBackupsData, ListUsbBackupsRequest,
-    ListUsbDevicesData, MaterializeSourceTrackData, MaterializeSourceTrackRequest,
-    PlayResolvedTrackData, PlayResolvedTrackRequest, PlaybackMetronomeData, PlaybackStatusData,
-    PruneUsbDeviceData, PruneUsbDeviceRequest, RelocateSourceRootData, RelocateSourceRootRequest,
+    GetPlaylistTracksRequest, GetSelectionDurationData, GetSelectionDurationRequest,
+    GetSourceRootAnalysisData, GetSourceRootAnalysisRequest, GetTrackDetailRequest,
+    GetTracksByIdsData, GetTracksByIdsRequest, GetTracksMetadataSummaryRequest,
+    GetUsbDeviceNameData, GetUsbDeviceNameRequest, GetUsbPlayerMenuConfigData,
+    GetUsbPlayerMenuConfigRequest, GetUsbTrackDetailRequest, GetUsbTracksMetadataSummaryRequest,
+    ImportExternalPlaylistData, ImportExternalPlaylistRequest, InitializeUsbData,
+    InitializeUsbRequest, InspectUsbTrackData, InspectUsbTrackRequest, ListExternalPlaylistsData,
+    ListExternalPlaylistsRequest, ListMatchingTrackIdsData, ListMatchingTrackIdsRequest,
+    ListPlaylistsData, ListUsbBackupsData, ListUsbBackupsRequest, ListUsbDevicesData,
+    MaterializeSourceTrackData, MaterializeSourceTrackRequest, PlayResolvedTrackData,
+    PlayResolvedTrackRequest, PlaybackMetronomeData, PlaybackStatusData, PruneUsbDeviceData,
+    PruneUsbDeviceRequest, RelocateSourceRootData, RelocateSourceRootRequest,
     RemoveTracksBySourceRootsData, RemoveTracksBySourceRootsRequest, RemoveTracksFromPlaylistData,
     RemoveTracksFromPlaylistRequest, RemoveUsbPlaylistData, RemoveUsbPlaylistRequest,
     RenamePlaylistData, RenamePlaylistRequest, ReorderPlaylistTracksData,
@@ -308,6 +309,13 @@ impl BackendCommands {
         req: ListMatchingTrackIdsRequest,
     ) -> ApiResponse<ListMatchingTrackIdsData> {
         wrap(self.service.list_matching_track_ids(req))
+    }
+
+    pub fn get_selection_duration(
+        &self,
+        req: GetSelectionDurationRequest,
+    ) -> ApiResponse<GetSelectionDurationData> {
+        wrap(self.service.get_selection_duration(req))
     }
 
     pub fn add_library_selection_to_playlist(

@@ -66,6 +66,8 @@ export function bindUsbEvents(ctx) {
         });
         return (data?.items || []).map((track) => ctx.normalizeTrack(track));
       },
+      durationRequest: () =>
+        ctl.scopeId == null ? null : { view, usbRoot: state.usbRoot || null, id: ctl.scopeId },
       actions: {
         add: (_ids, rows) => ctx.addTracksToCurrentPlaylist(rows),
         "add-to": (ids, rows) => addSelectionToPlaylists(ctx, view, ids, rows),

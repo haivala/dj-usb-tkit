@@ -729,6 +729,54 @@ pub struct AddTracksToPlaylistData {
     pub skipped: usize,
 }
 
+/// The ticked tracks of one track-list view, for the selection bar's total
+/// time. Each variant names its list the way that view's own fetch does; the
+/// ids are the rows' `id`s. Ids no longer in the list add nothing.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(tag = "view", rename_all = "camelCase")]
+pub enum GetSelectionDurationRequest {
+    #[serde(rename_all = "camelCase")]
+    Library {
+        #[serde(default)]
+        source_roots: Vec<String>,
+        #[serde(default)]
+        include_rekordbox_db: bool,
+        #[serde(default)]
+        include_mixxx_db: bool,
+        track_ids: Vec<String>,
+    },
+    #[serde(rename_all = "camelCase")]
+    Playlist {
+        playlist_id: String,
+        track_ids: Vec<String>,
+    },
+    #[serde(rename_all = "camelCase")]
+    UsbPlaylist {
+        #[serde(default)]
+        usb_root: Option<String>,
+        id: String,
+        track_ids: Vec<String>,
+    },
+    #[serde(rename_all = "camelCase")]
+    UsbHistory {
+        #[serde(default)]
+        usb_root: Option<String>,
+        id: String,
+        track_ids: Vec<String>,
+    },
+}
+
+/// Summed like the list's own "Total time": `total_duration_ms` over the
+/// `duration_known_count` selected tracks with a known length, out of
+/// `track_count` selected tracks found in the list.
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct GetSelectionDurationData {
+    pub total_duration_ms: u64,
+    pub duration_known_count: usize,
+    pub track_count: usize,
+}
+
 /// Every local track id that matches the current library filter -- so
 /// "Select all" doesn't have to page the whole list into the frontend just to
 /// enumerate ids.

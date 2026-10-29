@@ -163,6 +163,12 @@ drive selection from being rendered against a newer selected drive.
   releaseDate, genreOptions }`, each field `{ value?, mixed }` (`mixed` when the
   tracks differ). The USB form reads the stick's PDB rows; `genreOptions`
   adds its genres to the library's.
+- `get_selection_duration` — `{ view, trackIds, … }`, `view` naming the list
+  the way its own fetch does: `library` (`sourceRoots`, `includeRekordboxDb`,
+  `includeMixxxDb`), `playlist` (`playlistId`), `usbPlaylist` / `usbHistory`
+  (`usbRoot`, `id`) → `{ totalDurationMs, durationKnownCount, trackCount }` for
+  the selection bar's time: the ticked tracks summed by the same rule as that
+  list's Total time, over the whole list, not the searched one.
 
 ### Settings
 

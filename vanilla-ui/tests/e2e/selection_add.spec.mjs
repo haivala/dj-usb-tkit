@@ -248,6 +248,15 @@ function installSelectionMock(page, mockOpts = {}) {
           if (command === "fetch_usb_playlists" || command === "fetch_usb_histories") {
             return { ok: true, data: { items: [], warnings: [] } };
           }
+          // Three minutes per ticked track; "t3" has no length.
+          if (command === "get_selection_duration") {
+            const ids = payload?.request?.trackIds || [];
+            const known = ids.filter((id) => id !== "t3").length;
+            return {
+              ok: true,
+              data: { totalDurationMs: known * 180_000, durationKnownCount: known, trackCount: ids.length },
+            };
+          }
           if (command === "get_backend_log_buffer") return [];
           if (opts.usb) return { ok: true, data: {} };
           return { ok: false, error: { code: "UNKNOWN", message: `Unhandled: ${command}` } };
@@ -508,8 +517,14 @@ test("the selection bar is always there; its actions wait for a selection, and R
   await expect(bar.locator('[data-selection-action="reanalyze"]')).toBeDisabled();
   await expect(bar.locator('[data-selection-action="clear"]')).toBeDisabled();
 
+  await expect(bar.locator(".selection-time")).toBeHidden();
   await tickRows(page, "libraryTableBody", 2);
   await expect(bar.locator(".selection-count")).toHaveText("2 selected");
+  // The backend sums the ticked tracks; the bar shows what it says.
+  await expect(bar.locator(".selection-time")).toHaveText("· 6:00");
+  await expect.poll(async () => (await page.evaluate(() => window.__calls))
+    .filter((c) => c.command === "get_selection_duration").pop()?.request)
+    .toMatchObject({ view: "library", trackIds: ["t1", "t2"] });
   await expect(page.locator("#selectAllTracks")).toHaveJSProperty("indeterminate", true);
   await bar.locator('[data-selection-action="reanalyze"]').click();
   await expect.poll(async () => (await page.evaluate(() => window.__calls))
@@ -542,8 +557,11 @@ test("the playlist view selects tracks and removes them from the playlist only",
   const selectAll = (await page.evaluate(() => window.__calls))
     .filter((c) => c.command === "get_playlist_tracks").pop();
   expect(selectAll.request.limit).toBe(0);
+  // "t3" has no length: the time is a lower bound.
+  await expect(bar.locator(".selection-time")).toHaveText("· 6:00+");
   await page.locator("#playlistTracksBody .track-grid-row").nth(1).locator(".td-select input").uncheck();
   await expect(bar.locator(".selection-count")).toHaveText("2 selected");
+  await expect(bar.locator(".selection-time")).toHaveText("· 3:00+");
 
   await bar.locator('[data-selection-action="remove"]').click();
   await expect(page.locator("#statusText")).toContainText("Removed 2 track(s) from Trim");

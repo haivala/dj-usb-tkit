@@ -1097,25 +1097,32 @@ main {
   transform: rotate(0deg);
 }
 
+/* Folds by its one grid row going from its content's height (1fr) to 0fr,
+   so it opens to exactly what it holds, however many folders. */
 .source-body {
+  display: grid;
+  grid-template-rows: 1fr;
+  padding-top: 8px;
+  transition: grid-template-rows 250ms ease, opacity 200ms ease, padding 200ms ease, visibility 0s;
+  opacity: 1;
+}
+
+.source-body-inner {
   display: flex;
   flex-direction: column;
   gap: 8px;
+  min-height: 0;
   overflow: hidden;
-  max-height: 400px;
-  padding-top: 8px;
-  transition: max-height 250ms ease, opacity 200ms ease, padding 200ms ease, visibility 0s;
-  opacity: 1;
 }
 
 /* Hidden once the close animation ends, so the folded-away buttons can't be
    tabbed to or clicked. */
 .source-bar.collapsed .source-body {
-  max-height: 0;
+  grid-template-rows: 0fr;
   opacity: 0;
   padding-top: 0;
   visibility: hidden;
-  transition: max-height 250ms ease, opacity 200ms ease, padding 200ms ease, visibility 0s 250ms;
+  transition: grid-template-rows 250ms ease, opacity 200ms ease, padding 200ms ease, visibility 0s 250ms;
 }
 
 .source-filter-header {
@@ -1369,13 +1376,18 @@ main {
   display: flex;
   align-items: center;
   gap: 8px;
+  /* Half the toolbar beside the selection bar, giving way down to a fifth
+     only when the bar (never narrower than its contents) needs the room.
+     Wrapped onto lines of their own, both take the full width. */
   flex: 1 1 0;
-  max-width: 50%;
-  min-width: 220px;
+  min-width: 20%;
 }
 
 .search-row input {
   flex: 1;
+  /* An input's default minimum is its `size` width, wider than the row's
+     narrowest; without this it would spill under the selection bar. */
+  min-width: 0;
 }
 
 /* Always shown and exactly as tall as the search field, so the table below
@@ -1388,7 +1400,6 @@ main {
   align-items: center;
   gap: 8px;
   flex: 1 1 0;
-  max-width: 50%;
   min-width: fit-content;
   box-sizing: border-box;
   height: 36px;
@@ -1399,9 +1410,15 @@ main {
   transition: background 120ms ease, border-color 120ms ease;
 }
 
-.selection-actions .selection-count {
-  margin-right: auto;
+.selection-actions .selection-count,
+.selection-actions .selection-time {
   white-space: nowrap;
+}
+
+/* The time follows the count and pushes the actions right; empty, it still
+   holds that place. */
+.selection-actions .selection-time {
+  margin-right: auto;
 }
 
 .selection-hint {
@@ -1422,6 +1439,7 @@ main {
 }
 
 .selection-actions.is-empty .selection-count,
+.selection-actions.is-empty .selection-time,
 .selection-actions.is-empty button {
   display: none;
 }
@@ -1808,7 +1826,8 @@ button[data-export-playlist]:hover {
 
 /* ── selection count ────────────────────────────────── */
 
-.selection-count {
+.selection-count,
+.selection-time {
   font-family: 'JetBrains Mono', monospace;
   font-size: 12px;
   color: var(--accent);

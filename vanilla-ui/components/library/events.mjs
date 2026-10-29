@@ -219,6 +219,12 @@ export function bindLibraryEvents(ctx) {
       });
       return (data?.trackIds || []).filter(Boolean);
     },
+    durationRequest: () => ({
+      view: "library",
+      sourceRoots: ctx.enabledLibrarySourceRoots(),
+      includeRekordboxDb: state.rekordboxDbEnabled === true,
+      includeMixxxDb: state.mixxxDbEnabled === true,
+    }),
     actions: {
       // Backend-owned: it enumerates the ticked ids against the current
       // library filter and materializes any browse-only rows -- so a

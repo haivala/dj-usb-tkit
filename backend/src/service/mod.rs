@@ -51,7 +51,7 @@ pub(crate) use playlists::*;
 use rekordbox_resources::*;
 pub use settings::*;
 pub(crate) use source_roots::*;
-use track_list::{TrackQuery, TrackSort, list_totals};
+use track_list::{TrackQuery, TrackSort, duration_totals, list_totals, selected_tracks};
 pub use track_matching::build_track_match_fingerprint;
 use track_matching::{
     library_metadata_candidate_compatible, matching_file_name, matching_file_stem,
@@ -90,14 +90,14 @@ use crate::models::{
     CreatePlaylistData, CreatePlaylistRequest, DeletePlaylistData, DeletePlaylistRequest,
     DetectExternalRekordboxDbData, ExternalPlaylistKind, ExternalPlaylistSummary,
     GetFrontendSettingsData, GetPlaylistMembershipData, GetPlaylistMembershipRequest,
-    GetPlaylistTracksData, GetPlaylistTracksRequest, GetSourceRootAnalysisData,
-    GetSourceRootAnalysisRequest, GetTracksByIdsData, GetTracksByIdsRequest, ImportedPlaylistRef,
-    InitializeUsbData, InitializeUsbRequest, ListMatchingTrackIdsData, ListMatchingTrackIdsRequest,
-    ListPlaylistsData, MaterializeSourceTrackData, MaterializeSourceTrackRequest,
-    PlayResolvedTrackData, PlayResolvedTrackRequest, PlaybackMetronomeData, PlaybackSource,
-    PlaybackStatusData, Playlist, PlaylistMembership, PlaylistMembershipState,
-    RelocateSourceRootData, RelocateSourceRootRequest, RemoveTracksBySourceRootsData,
-    RemoveTracksBySourceRootsRequest, RemoveTracksFromPlaylistData,
+    GetPlaylistTracksData, GetPlaylistTracksRequest, GetSelectionDurationData,
+    GetSelectionDurationRequest, GetSourceRootAnalysisData, GetSourceRootAnalysisRequest,
+    GetTracksByIdsData, GetTracksByIdsRequest, ImportedPlaylistRef, InitializeUsbData,
+    InitializeUsbRequest, ListMatchingTrackIdsData, ListMatchingTrackIdsRequest, ListPlaylistsData,
+    MaterializeSourceTrackData, MaterializeSourceTrackRequest, PlayResolvedTrackData,
+    PlayResolvedTrackRequest, PlaybackMetronomeData, PlaybackSource, PlaybackStatusData, Playlist,
+    PlaylistMembership, PlaylistMembershipState, RelocateSourceRootData, RelocateSourceRootRequest,
+    RemoveTracksBySourceRootsData, RemoveTracksBySourceRootsRequest, RemoveTracksFromPlaylistData,
     RemoveTracksFromPlaylistRequest, RenamePlaylistData, RenamePlaylistRequest,
     ReorderPlaylistTracksData, ReorderPlaylistTracksRequest, ReorderPlaylistsData,
     ReorderPlaylistsRequest, ResolvePlaybackSourceData, ResolvePlaybackSourceRequest,

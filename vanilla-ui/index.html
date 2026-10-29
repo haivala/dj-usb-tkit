@@ -144,19 +144,21 @@
               <span class="source-filter-indicator" id="sourceFilterIndicator">Filtered</span>
             </div>
             <div class="source-body" id="sourceBody">
-              <div class="source-row">
-                <span class="source-row-label">Folders</span>
-                <div class="source-chips" id="sourceChipsContainer"></div>
+              <div class="source-body-inner">
+                <div class="source-row">
+                  <span class="source-row-label">Folders</span>
+                  <div class="source-chips" id="sourceChipsContainer"></div>
+                </div>
+                <div class="source-row hidden" id="libraryChipsRow">
+                  <span class="source-row-label">Libraries</span>
+                  <div class="source-chips" id="libraryChipsContainer"></div>
+                </div>
+                <label class="external-rekordbox-db-toggle hidden" id="externalRekordboxDbToggle">
+                  <input type="checkbox" id="externalRekordboxDbCheckbox" />
+                  <span class="external-rekordbox-db-toggle-label">External Library</span>
+                  <span class="external-rekordbox-db-toggle-path muted" id="externalRekordboxDbPath"></span>
+                </label>
               </div>
-              <div class="source-row hidden" id="libraryChipsRow">
-                <span class="source-row-label">Libraries</span>
-                <div class="source-chips" id="libraryChipsContainer"></div>
-              </div>
-              <label class="external-rekordbox-db-toggle hidden" id="externalRekordboxDbToggle">
-                <input type="checkbox" id="externalRekordboxDbCheckbox" />
-                <span class="external-rekordbox-db-toggle-label">External Library</span>
-                <span class="external-rekordbox-db-toggle-path muted" id="externalRekordboxDbPath"></span>
-              </label>
             </div>
           </div>
           <div class="track-toolbar">
@@ -165,6 +167,7 @@
             </div>
             <div class="selection-actions is-empty" data-selection-bar="library">
               <span class="selection-count">0 selected</span>
+              <span class="selection-time"></span>
               <span class="selection-hint">Select tracks to add, reanalyze or edit them</span>
               <button type="button" data-selection-action="add" data-primary disabled hidden>+ <span class="selection-label-long">Add to </span><span class="selection-target"></span></button>
               <button type="button" data-selection-action="add-to" disabled data-tooltip="Pick one or more playlists to add the selected tracks to">Add to…</button>
@@ -222,7 +225,9 @@
               <span class="source-filter-label">Recent USBs</span>
             </div>
             <div class="source-body">
-              <div class="usb-cfg-recent-list" id="usbRecentList"></div>
+              <div class="source-body-inner">
+                <div class="usb-cfg-recent-list" id="usbRecentList"></div>
+              </div>
             </div>
           </div>
           <div class="usb-cfg-init-row hidden" id="usbInitRow">
@@ -291,6 +296,7 @@
               </div>
               <div class="selection-actions is-empty" data-selection-bar="usbPlaylist">
                 <span class="selection-count">0 selected</span>
+                <span class="selection-time"></span>
                 <span class="selection-hint">Select tracks to add to a playlist or edit them</span>
                 <button type="button" data-selection-action="add" data-primary disabled hidden>+ <span class="selection-label-long">Add to </span><span class="selection-target"></span></button>
                 <button type="button" data-selection-action="add-to" disabled data-tooltip="Pick one or more playlists to add the selected tracks to">Add to…</button>
@@ -347,6 +353,7 @@
               </div>
               <div class="selection-actions is-empty" data-selection-bar="usbHistory">
                 <span class="selection-count">0 selected</span>
+                <span class="selection-time"></span>
                 <span class="selection-hint">Select tracks to add to a playlist or edit them</span>
                 <button type="button" data-selection-action="add" data-primary disabled hidden>+ <span class="selection-label-long">Add to </span><span class="selection-target"></span></button>
                 <button type="button" data-selection-action="add-to" disabled data-tooltip="Pick one or more playlists to add the selected tracks to">Add to…</button>
@@ -419,6 +426,7 @@
           </div>
           <div class="selection-actions is-empty" data-selection-bar="playlist">
             <span class="selection-count">0 selected</span>
+            <span class="selection-time"></span>
             <span class="selection-hint">Select tracks to add, remove, reanalyze or edit them</span>
             <button type="button" data-selection-action="add-to" disabled data-tooltip="Pick one or more playlists to add the selected tracks to">Add to…</button>
             <button type="button" data-selection-action="remove" disabled data-tooltip="Remove the selected tracks from this playlist (they stay in the library)"><span class="selection-label-long">Remove from playlist</span><span class="selection-label-short">Remove</span></button>

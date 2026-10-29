@@ -13,6 +13,7 @@ use super::key_notation;
 
 /// The fields a track list searches and sorts by.
 pub(crate) trait ListTrack {
+    fn id(&self) -> &str;
     fn title(&self) -> &str;
     fn artist(&self) -> &str;
     fn album(&self) -> Option<&str>;
@@ -28,6 +29,9 @@ pub(crate) trait ListTrack {
 macro_rules! impl_list_track {
     ($ty:ty) => {
         impl ListTrack for $ty {
+            fn id(&self) -> &str {
+                &self.id
+            }
             fn title(&self) -> &str {
                 &self.title
             }
@@ -76,6 +80,28 @@ pub(crate) fn list_totals<T: ListTrack>(tracks: &[T]) -> (usize, u64) {
         .map(|size| size as u64)
         .sum();
     (tracks.len(), size_bytes)
+}
+
+/// Summed length of `tracks` and how many had one: the "Total time" of a list.
+/// Tracks without a known length (`None` or 0) add nothing.
+pub(crate) fn duration_totals<'a, T: ListTrack + 'a>(
+    tracks: impl IntoIterator<Item = &'a T>,
+) -> (u64, usize) {
+    tracks
+        .into_iter()
+        .filter_map(|track| track.duration_ms())
+        .filter(|&d| d > 0)
+        .fold((0, 0), |(total, known), d| (total + d, known + 1))
+}
+
+/// The tracks of `tracks` whose id is in `ids`, each id once (a USB history
+/// can list a track more than once; the selection holds its id once).
+pub(crate) fn selected_tracks<'a, T: ListTrack>(
+    tracks: &'a [T],
+    ids: &[String],
+) -> impl Iterator<Item = &'a T> {
+    let mut wanted: std::collections::HashSet<String> = ids.iter().cloned().collect();
+    tracks.iter().filter(move |track| wanted.remove(track.id()))
 }
 
 /// A search over title, artist, album, genre and year. Each word of the text

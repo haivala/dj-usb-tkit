@@ -8,8 +8,24 @@
 // has its own selection (`state.trackSelections[view]`: ticked ids, plus the
 // rows by id for views whose actions need the row itself) and its own set of
 // actions -- the bar's buttons in index.html say which.
+//
+// Beside the count, the ticked tracks' total time, summed by the backend
+// (`get_selection_duration`) by the same rule as the list's "Total time".
 
 import { catchErr } from "./track_actions.mjs";
+import { formatDurationMs } from "../../track_utils.mjs";
+
+// Per app context and view: the view's `durationRequest` and the last request
+// sent, so an unchanged selection isn't asked for again and a late answer for
+// an older selection is dropped.
+const selectionTimes = new WeakMap();
+
+function selectionTimeOf(ctx, view) {
+  if (!selectionTimes.has(ctx)) selectionTimes.set(ctx, {});
+  const views = selectionTimes.get(ctx);
+  views[view] ||= { request: null, sent: "" };
+  return views[view];
+}
 
 export function trackSelection(ctx, view) {
   return ctx.state.trackSelections[view];
@@ -31,6 +47,7 @@ export function renderSelectionBar(ctx, view) {
   const count = ids.size;
   bar.classList.toggle("is-empty", count === 0);
   bar.querySelector(".selection-count").textContent = `${count} selected`;
+  renderSelectionTime(ctx, view, bar, ids);
   for (const button of bar.querySelectorAll("[data-selection-action]")) {
     button.disabled = count === 0;
   }
@@ -49,6 +66,33 @@ export function renderSelectionBar(ctx, view) {
     box.checked = count > 0 && count >= total;
     box.indeterminate = count > 0 && count < total;
   }
+}
+
+// "· 52:14" once the backend has summed the selection; "+" and a tooltip when
+// some ticked tracks have no length yet. Blank while asking, or when none of
+// them has a length.
+function renderSelectionTime(ctx, view, bar, ids) {
+  const target = bar.querySelector(".selection-time");
+  const time = selectionTimeOf(ctx, view);
+  const args = ids.size && time.request ? time.request() : null;
+  const key = args ? JSON.stringify({ ...args, trackIds: [...ids] }) : "";
+  if (key === time.sent) return;
+  time.sent = key;
+  if (!target) return;
+  target.textContent = "";
+  delete target.dataset.tooltip;
+  if (!args) return;
+  ctx
+    .command("get_selection_duration", { ...args, trackIds: [...ids] })
+    .then((data) => {
+      if (time.sent !== key) return;
+      const known = Number(data?.durationKnownCount) || 0;
+      if (!known) return;
+      const unknown = Math.max(0, (Number(data?.trackCount) || 0) - known);
+      target.textContent = `· ${formatDurationMs(data.totalDurationMs)}${unknown ? "+" : ""}`;
+      if (unknown) target.dataset.tooltip = `${unknown} of the selected tracks have no length yet`;
+    })
+    .catch(() => {});
 }
 
 export function renderAllSelectionBars(ctx) {
@@ -96,8 +140,12 @@ export function narrowTrackSelectionToLoaded(ctx, view, loaded) {
 //               under its current search, not just the loaded pages
 //   actions:    { add, "add-to", remove, reanalyze, edit }
 //               -- async (ids, rows) => void
-export function bindTrackSelection(ctx, { view, body, ctl, selectAll, actions }) {
+//   durationRequest: () => the `get_selection_duration` request naming this
+//               view's list (its `view` and list fields, not the ids), or
+//               null while there is no list
+export function bindTrackSelection(ctx, { view, body, ctl, selectAll, actions, durationRequest }) {
   const { emitStatus } = ctx;
+  selectionTimeOf(ctx, view).request = durationRequest || null;
 
   body?.addEventListener("change", (event) => {
     const box = event.target.closest?.(".td-select input[type='checkbox']");

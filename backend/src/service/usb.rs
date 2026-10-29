@@ -17,8 +17,8 @@ use crate::error::{BackendError, BackendResult};
 use crate::logging::{self, Level};
 use crate::models::{
     FetchUsbHistoriesData, FetchUsbHistoriesRequest, FetchUsbPlaylistsData,
-    FetchUsbPlaylistsRequest, FetchUsbTracksData, FetchUsbTracksRequest, InspectUsbTrackData,
-    InspectUsbTrackRequest, RemoveUsbPlaylistData, RemoveUsbPlaylistRequest,
+    FetchUsbPlaylistsRequest, FetchUsbTracksData, FetchUsbTracksRequest, GetSelectionDurationData,
+    InspectUsbTrackData, InspectUsbTrackRequest, RemoveUsbPlaylistData, RemoveUsbPlaylistRequest,
     ReorderUsbPlaylistsData, ReorderUsbPlaylistsRequest, UsbHistory, UsbHistoryCounts,
     UsbImportStats, UsbPlaylist, UsbTrack, ValidateUsbRootData, ValidateUsbRootRequest,
     WarningEntry,
@@ -34,6 +34,7 @@ use super::export_helpers::{
     remove_playlist_and_tracks_from_pdb, remove_playlist_from_edb,
 };
 use super::key_notation::KeyNotation;
+use super::track_list::{duration_totals, selected_tracks};
 use super::track_matching::{ContentFingerprint, content_fingerprint_key};
 use super::usb_display_files::{
     DisplayReadCounts, LibraryDisplayFiles, UsbDisplaySource, library_files_off_usb,
@@ -368,24 +369,6 @@ fn build_pdb_track_index(
     Some(index)
 }
 
-/// Sums `duration_ms` over tracks where it's known (`Some(d)` with `d > 0`).
-/// Computed once server-side (here) instead of by the frontend summing
-/// whatever subset of tracks it happens to have rendered/hydrated -- see
-/// `UsbPlaylist::total_duration_ms`.
-fn sum_usb_track_durations(tracks: &[UsbTrack]) -> (u64, usize) {
-    let mut total_ms = 0u64;
-    let mut known_count = 0usize;
-    for track in tracks {
-        if let Some(d) = track.duration_ms
-            && d > 0
-        {
-            total_ms += d;
-            known_count += 1;
-        }
-    }
-    (total_ms, known_count)
-}
-
 /// Fills in the expensive payload fields (waveform-preview bytes, artwork data
 /// URL) on an already-resolved cheap `UsbTrack`. Called only for the tracks on
 /// the returned page.
@@ -445,7 +428,7 @@ fn paginate_usb_tracks(
     let (list_track_count, list_size_bytes) = super::list_totals(&tracks);
     let query = super::TrackQuery::new(&req.query);
     query.retain(&mut tracks);
-    let (total_duration_ms, duration_known_count) = sum_usb_track_durations(&tracks);
+    let (total_duration_ms, duration_known_count) = duration_totals(&tracks);
     let total = tracks.len();
 
     let sort = super::TrackSort::new(req.sort_by.as_deref(), req.sort_dir.as_deref());
@@ -1360,8 +1343,7 @@ impl BackendService {
             *source_counts.entry(source).or_insert(0) += 1;
             playlist_entries_total += playlist_tracks.len();
 
-            let (total_duration_ms, duration_known_count) =
-                sum_usb_track_durations(&playlist_tracks);
+            let (total_duration_ms, duration_known_count) = duration_totals(&playlist_tracks);
             items.push(UsbPlaylist {
                 id: candidate
                     .pdb_id
@@ -2056,7 +2038,7 @@ impl BackendService {
                         parse_history_name_numeric_id(&cleaned_name)
                             .and_then(|n| history_date_by_num.get(&n).cloned())
                     });
-                let (total_duration_ms, duration_known_count) = sum_usb_track_durations(&tracks);
+                let (total_duration_ms, duration_known_count) = duration_totals(&tracks);
                 UsbHistory {
                     id: format!("usb-h-{}", logical_playlist_id),
                     name: if cleaned_name.is_empty() {
@@ -2738,6 +2720,46 @@ impl BackendService {
         );
         Ok(data)
     }
+
+    /// Summed length of the ticked tracks of a USB playlist (`history:
+    /// false`) or history, from the same cached parse their track lists
+    /// page through.
+    pub(super) fn usb_selection_duration(
+        &self,
+        usb_root: Option<&str>,
+        history: bool,
+        id: &str,
+        track_ids: &[String],
+    ) -> BackendResult<GetSelectionDurationData> {
+        let usb_root = resolve_usb_root(usb_root)?;
+        let totals = |tracks: &[UsbTrack]| {
+            let selected: Vec<&UsbTrack> = selected_tracks(tracks, track_ids).collect();
+            let (total_duration_ms, duration_known_count) =
+                duration_totals(selected.iter().copied());
+            GetSelectionDurationData {
+                total_duration_ms,
+                duration_known_count,
+                track_count: selected.len(),
+            }
+        };
+        if history {
+            let all = self.usb_histories_resolved(&usb_root)?;
+            let history = all
+                .items
+                .iter()
+                .find(|history| history.id == id)
+                .ok_or_else(|| BackendError::NotFound(format!("USB history not found: {id}")))?;
+            Ok(totals(&history.tracks))
+        } else {
+            let resolved = self.usb_playlists_resolved(&usb_root)?;
+            let playlist = resolved
+                .items
+                .iter()
+                .find(|playlist| playlist.id == id)
+                .ok_or_else(|| BackendError::NotFound(format!("USB playlist not found: {id}")))?;
+            Ok(totals(&playlist.tracks))
+        }
+    }
 }
 
 /// Hints used to disambiguate PDB rows that share a track id (rare, but the
@@ -2942,10 +2964,10 @@ mod tests {
         filter_named_history_playlists, hydrate_usb_page, hydrate_usb_track_in_place,
         normalize_date_created, now, paginate_usb_tracks, push_usb_stage_timing,
         push_usb_stage_timing_with_threshold, select_history_rows, slow_stage_threshold_ms,
-        sum_usb_track_durations,
     };
     use crate::models::{UsbHistory, UsbTrack};
     use crate::pdb_reader::{PdbHistoryEntryRow, PdbHistoryPlaylistRow, PdbTrackRow};
+    use crate::service::track_list::duration_totals;
     use std::collections::HashMap;
 
     #[test]
@@ -3115,7 +3137,7 @@ mod tests {
     }
 
     #[test]
-    fn sum_usb_track_durations_counts_only_known_positive_durations() {
+    fn duration_totals_counts_only_known_positive_durations() {
         let tracks = vec![
             UsbTrack {
                 duration_ms: Some(200_000),
@@ -3135,7 +3157,7 @@ mod tests {
             },
         ];
 
-        let (total_ms, known_count) = sum_usb_track_durations(&tracks);
+        let (total_ms, known_count) = duration_totals(&tracks);
 
         assert_eq!(total_ms, 300_000);
         assert_eq!(known_count, 2);

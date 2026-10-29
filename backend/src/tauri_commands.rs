@@ -24,18 +24,19 @@ use crate::models::{
     FetchUsbPlaylistsData, FetchUsbPlaylistsRequest, FetchUsbTracksData, FetchUsbTracksRequest,
     GetFrontendSettingsData, GetPlaylistExportSpaceData, GetPlaylistExportSpaceRequest,
     GetPlaylistMembershipData, GetPlaylistMembershipRequest, GetPlaylistTracksData,
-    GetPlaylistTracksRequest, GetSourceRootAnalysisData, GetSourceRootAnalysisRequest,
-    GetTrackDetailRequest, GetTracksByIdsData, GetTracksByIdsRequest,
-    GetTracksMetadataSummaryRequest, GetUsbDeviceNameData, GetUsbDeviceNameRequest,
-    GetUsbPlayerMenuConfigData, GetUsbPlayerMenuConfigRequest, GetUsbTrackDetailRequest,
-    GetUsbTracksMetadataSummaryRequest, ImportExternalPlaylistData, ImportExternalPlaylistRequest,
-    InitializeUsbData, InitializeUsbRequest, InspectUsbTrackData, InspectUsbTrackRequest,
-    JobEventPayload, ListExternalPlaylistsData, ListExternalPlaylistsRequest,
-    ListMatchingTrackIdsData, ListMatchingTrackIdsRequest, ListPlaylistsData, ListUsbBackupsData,
-    ListUsbBackupsRequest, ListUsbDevicesData, PlayResolvedTrackData, PlayResolvedTrackRequest,
-    PlaybackEventPayload, PlaybackMetronomeData, PlaybackStatusData, PruneUsbDeviceData,
-    PruneUsbDeviceRequest, RelocateSourceRootData, RelocateSourceRootRequest,
-    RemoveTracksBySourceRootsData, RemoveTracksBySourceRootsRequest, RemoveTracksFromPlaylistData,
+    GetPlaylistTracksRequest, GetSelectionDurationData, GetSelectionDurationRequest,
+    GetSourceRootAnalysisData, GetSourceRootAnalysisRequest, GetTrackDetailRequest,
+    GetTracksByIdsData, GetTracksByIdsRequest, GetTracksMetadataSummaryRequest,
+    GetUsbDeviceNameData, GetUsbDeviceNameRequest, GetUsbPlayerMenuConfigData,
+    GetUsbPlayerMenuConfigRequest, GetUsbTrackDetailRequest, GetUsbTracksMetadataSummaryRequest,
+    ImportExternalPlaylistData, ImportExternalPlaylistRequest, InitializeUsbData,
+    InitializeUsbRequest, InspectUsbTrackData, InspectUsbTrackRequest, JobEventPayload,
+    ListExternalPlaylistsData, ListExternalPlaylistsRequest, ListMatchingTrackIdsData,
+    ListMatchingTrackIdsRequest, ListPlaylistsData, ListUsbBackupsData, ListUsbBackupsRequest,
+    ListUsbDevicesData, PlayResolvedTrackData, PlayResolvedTrackRequest, PlaybackEventPayload,
+    PlaybackMetronomeData, PlaybackStatusData, PruneUsbDeviceData, PruneUsbDeviceRequest,
+    RelocateSourceRootData, RelocateSourceRootRequest, RemoveTracksBySourceRootsData,
+    RemoveTracksBySourceRootsRequest, RemoveTracksFromPlaylistData,
     RemoveTracksFromPlaylistRequest, RemoveUsbPlaylistData, RemoveUsbPlaylistRequest,
     RenamePlaylistData, RenamePlaylistRequest, ReorderPlaylistTracksData,
     ReorderPlaylistTracksRequest, ReorderPlaylistsData, ReorderPlaylistsRequest,
@@ -984,6 +985,18 @@ pub fn list_matching_track_ids(
     request: ListMatchingTrackIdsRequest,
 ) -> ApiResponse<ListMatchingTrackIdsData> {
     state.list_matching_track_ids(request)
+}
+
+#[tauri::command]
+pub async fn get_selection_duration(
+    state: State<'_, BackendCommands>,
+    request: GetSelectionDurationRequest,
+) -> Result<ApiResponse<GetSelectionDurationData>, String> {
+    let commands = state.inner().clone();
+    Ok(run_blocking_command("get_selection_duration", move || {
+        commands.get_selection_duration(request)
+    })
+    .await)
 }
 
 #[tauri::command]

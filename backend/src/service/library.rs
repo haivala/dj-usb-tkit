@@ -175,6 +175,13 @@ pub(crate) fn browse_path_matches_root(file_path: &str, root: &str) -> bool {
     !root_key.is_empty() && (file_key == root_key || file_key.starts_with(&format!("{root_key}/")))
 }
 
+/// Whether a library row's length counts toward a "Total time": an analyzed
+/// track's, or a rekordbox library track's own.
+pub(super) fn library_length_known(track: &Track) -> bool {
+    track_has_core_analysis_for_source_status(track)
+        || (track.rekordbox_db_source && track.duration_ms.is_some_and(|d| d > 0))
+}
+
 impl BackendService {
     /// The source folders may have changed outside the app: the next library
     /// listing walks them again.
@@ -908,17 +915,8 @@ impl BackendService {
         // the natural file-path order from compute_all_library_tracks.
         sort.apply(&mut items);
 
-        let mut total_duration_ms: u64 = 0;
-        let mut duration_known_count: usize = 0;
-        for track in &items {
-            let has_duration = track.duration_ms.map(|d| d > 0).unwrap_or(false);
-            let countable = track_has_core_analysis_for_source_status(track)
-                || (track.rekordbox_db_source && has_duration);
-            if countable && let Some(d) = track.duration_ms {
-                total_duration_ms += d;
-                duration_known_count += 1;
-            }
-        }
+        let (total_duration_ms, duration_known_count) =
+            duration_totals(items.iter().filter(|track| library_length_known(track)));
 
         let total = items.len();
         let start_idx = if let Some(offset) = req.offset {
