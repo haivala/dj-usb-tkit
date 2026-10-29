@@ -2,7 +2,7 @@ import { catchErr, handleTrackAction, resolveRowActionTrack } from "../shared/tr
 import { bindTrackSelection } from "../shared/track_selection.mjs";
 import { addSelectionToPlaylists } from "../shared/add_to_playlists.mjs";
 import { editTrackSelection } from "../shared/track_metadata_edits.mjs";
-import { applyLibrarySources, LIBRARY_LOAD_LIMIT_DEFAULT } from "./actions.mjs";
+import { applyLibrarySources } from "./actions.mjs";
 
 export function bindLibraryEvents(ctx) {
   const {
@@ -43,7 +43,7 @@ export function bindLibraryEvents(ctx) {
   const applySwitchedSources = async (sources) => {
     await applyLibrarySources(ctx, sources);
     emitSourceFilterCounts();
-    await resetAndLoadLibraryTracks(state.libraryQuery, LIBRARY_LOAD_LIMIT_DEFAULT);
+    await resetAndLoadLibraryTracks(state.libraryQuery);
   };
 
   el.sourceChipsContainer.addEventListener("click", (event) => {
@@ -61,7 +61,7 @@ export function bindLibraryEvents(ctx) {
 
       const result = await command("remove_source_folder", { path: removedRoot });
       await applyLibrarySources(ctx, result.sources);
-      await resetAndLoadLibraryTracks(state.libraryQuery, LIBRARY_LOAD_LIMIT_DEFAULT);
+      await resetAndLoadLibraryTracks(state.libraryQuery);
       await refreshCurrentPlaylistTracks();
       emitStatus(`Source folders: ${folders().length} | removed ${result.removed} track(s) from library`);
     })().catch(catchErr(emitStatus));
@@ -106,7 +106,7 @@ export function bindLibraryEvents(ctx) {
           });
 
           progress(70, "Building track list...");
-          await resetAndLoadLibraryTracks(state.libraryQuery, LIBRARY_LOAD_LIMIT_DEFAULT);
+          await resetAndLoadLibraryTracks(state.libraryQuery);
 
           progress(85, "Refreshing playlist views...");
           await refreshCurrentPlaylistTracks();

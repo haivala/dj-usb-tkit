@@ -406,13 +406,6 @@ function installScanAnalysisMock(page, opts = {}) {
               data: { total: filtered.length, items: withAnalysisReady(filtered), totalDurationMs: totalMs, durationUnknownCount: filtered.length - knownCount }
             };
           }
-          if (command === "get_tracks_by_ids_with_previews") {
-            const ids = Array.isArray(payload?.request?.trackIds)
-              ? payload.request.trackIds.map((v) => String(v))
-              : [];
-            const items = withAnalysisReady(tracks.filter((t) => ids.includes(String(t.id))));
-            return { ok: true, data: { items } };
-          }
           if (command === "resolve_track_identity") {
             const id = String(payload?.request?.trackId ?? payload?.trackId ?? "");
             return { ok: true, data: { trackId: tracks.some((t) => t.id === id) ? id : null } };
@@ -812,15 +805,6 @@ function installPagedMaterializeAnalyzeMock(page, opts = {}) {
             const ids = Array.isArray(req.trackIds) ? req.trackIds.map((v) => String(v)) : [];
             const data = await runAnalyzeNewTracks(ids);
             return { ok: true, data };
-          }
-          if (command === "get_tracks_by_ids_with_previews") {
-            const ids = Array.isArray(payload?.request?.trackIds)
-              ? payload.request.trackIds.map((v) => String(v))
-              : [];
-            const items = tracks
-              .filter((t) => ids.includes(String(t.localTrackId || t.id)) || ids.includes(String(t.id)))
-              .map(toTrackDto);
-            return { ok: true, data: { items } };
           }
           if (command === "scan_library") {
             return {
@@ -1541,9 +1525,6 @@ function installAnalyzeResponseMock(page, { analyzeResponse }) {
           }
           if (command === "analyze_new_tracks") {
             return { ok: true, data: analyzeResponse };
-          }
-          if (command === "get_tracks_by_ids_with_previews") {
-            return { ok: true, data: { items: [] } };
           }
           return { ok: false, error: { code: "UNKNOWN", message: `Unhandled command: ${command}` } };
         }

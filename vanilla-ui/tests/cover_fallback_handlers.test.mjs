@@ -4,25 +4,16 @@ import { attachCoverFallbackHandlers } from "../components/library/actions.mjs";
 import { buildTrackTableRow, finishTrackRows } from "../track_table.mjs";
 import { makeTestCtx } from "./test_helpers.mjs";
 
-test("attachCoverFallbackHandlers advances fallback queue and replaces with placeholder", () => {
+test("attachCoverFallbackHandlers shows the placeholder for a cover that fails to load", () => {
   const ctx = makeTestCtx();
   const cell = ctx.el.libraryTableBody;
-  cell.innerHTML = '<img class="cover-thumb" src="original" data-fallbacks="next-a|next-b" />';
+  cell.innerHTML = '<img class="cover-thumb" src="original" />';
   const image = cell.querySelector("img");
 
   attachCoverFallbackHandlers(cell);
   assert.equal(image.dataset.fallbackBound, "1");
 
-  const fail = () => image.dispatchEvent(new ctx.window.Event("error"));
-  fail();
-  assert.equal(image.getAttribute("src"), "next-a");
-  assert.equal(image.dataset.fallbacks, "next-b");
-
-  fail();
-  assert.equal(image.getAttribute("src"), "next-b");
-  assert.equal(image.dataset.fallbacks, "");
-
-  fail();
+  image.dispatchEvent(new ctx.window.Event("error"));
   const placeholder = cell.querySelector(".cover-thumb");
   assert.equal(placeholder.tagName, "DIV");
   assert.equal(placeholder.getAttribute("aria-hidden"), "true");
@@ -32,7 +23,7 @@ test("finishTrackRows wires cover fallback handlers on the new rows", async () =
   const ctx = makeTestCtx();
   const tbody = ctx.el.usbPlaylistTracks;
   const rows = [
-    { id: "a", title: "A", artworkDataUrl: "data:image/png;base64,AAA" },
+    { id: "a", title: "A", artworkUrl: "data:image/png;base64,AAA" },
     { id: "b", title: "B" },
   ].map((track, index) => buildTrackTableRow(ctx, track, { origin: "usb", index }));
   tbody.append(...rows);

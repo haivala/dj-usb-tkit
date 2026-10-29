@@ -195,10 +195,6 @@ function installSelectionMock(page, mockOpts = {}) {
             const ids = payload?.request?.trackIds || [];
             return { ok: true, data: { analyzed: ids.length, failed: 0, incomplete: 0, warnings: [], items: [] } };
           }
-          if (command === "get_tracks_by_ids_with_previews") {
-            const ids = new Set((payload?.request?.trackIds || []).map(String));
-            return { ok: true, data: { items: tracks.filter((t) => ids.has(t.id)) } };
-          }
           // What the selected tracks share: genres differ, the release date is shared.
           if (command === "get_tracks_metadata_summary" || command === "get_usb_tracks_metadata_summary") {
             const count = (payload?.request?.trackIds || payload?.request?.usbMediaPathsRaw || []).length;
@@ -376,7 +372,7 @@ test("Selection state stays correct when filtering visible rows", async ({ page 
   await expect(page.locator("#playlistTracksBody")).toContainText("Sel Two");
 });
 
-// The library is server-paginated (browse_source_files, LIBRARY_LOAD_LIMIT_DEFAULT tracks/page).
+// The library is server-paginated (browse_source_files, one page of the list controller at a time).
 // "select all" used to only select state.filteredTracks -- the tracks already loaded into the
 // UI -- so on any library with more matches than one page, it silently missed the rest. This
 // mock implements real offset pagination (unlike installSelectionMock's single-page stub) so
@@ -503,7 +499,7 @@ function installPaginatedLibraryMock(page, { trackCount }) {
 }
 
 test("select all loads and adds every matching track across multiple pages, not just the first page", async ({ page }) => {
-  const trackCount = 220; // over LIBRARY_LOAD_LIMIT_DEFAULT (200) -- forces a second page
+  const trackCount = 220; // over one page (150) -- forces a second page
   await installPaginatedLibraryMock(page, { trackCount });
   await page.goto("/");
 

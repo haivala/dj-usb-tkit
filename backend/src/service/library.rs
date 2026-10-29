@@ -935,6 +935,8 @@ impl BackendService {
             .take(limit + 1)
             .collect::<Vec<_>>();
         let (has_more, next_cursor) = paginate_tracks(&mut page_items, limit, &signature);
+        // Only the page's rows read their waveforms, as a USB page does.
+        page_items.iter_mut().for_each(load_waveform_previews);
         apply_frontend_track_fields(&conn, &mut page_items)?;
         Ok(BrowseSourceFilesData {
             total,
@@ -1251,39 +1253,11 @@ pub(crate) fn row_to_track(
     let artwork_path: Option<String> = row.get(14)?;
     let waveform_peaks_path: Option<String> = row.get(15)?;
     let bpm_analyzer: Option<String> = row.get(16)?;
-    // Load waveform preview (small, ~400 bytes) when requested.
     // Skip artwork base64 data URL for local tracks - the frontend uses
     // artworkPath via Tauri's asset protocol (convertFileSrc) instead.
     // Embedding full images as data URLs in JSON causes IPC/memory crashes
     // when hydrating many tracks at once.
     let is_rekordbox_db = row.get::<_, i64>(19).unwrap_or(0) != 0;
-    // master.db tracks: try PWV4 color data from .EXT first; fall back to greyscale
-    // PWAV/PWV2 from .DAT if extended analysis hasn't been run.
-    let (waveform_preview, waveform_color_data) = if include_previews {
-        if is_rekordbox_db {
-            let color = waveform_peaks_path
-                .as_deref()
-                .map(Path::new)
-                .and_then(read_pwv4_from_anlz);
-            if color.is_some() {
-                (None, color)
-            } else {
-                let preview = waveform_peaks_path
-                    .as_deref()
-                    .map(Path::new)
-                    .and_then(load_waveform_preview_from_analysis_path);
-                (preview, None)
-            }
-        } else {
-            let preview = waveform_peaks_path
-                .as_deref()
-                .map(Path::new)
-                .and_then(load_waveform_preview_from_analysis_path);
-            (preview, None)
-        }
-    } else {
-        (None, None)
-    };
     let artwork_data_url: Option<String> = None;
 
     let bpm: Option<f64> = row.get(5)?;
@@ -1306,7 +1280,7 @@ pub(crate) fn row_to_track(
         wav_extensible_kind.as_deref(),
     );
 
-    Ok(Track {
+    let mut track = Track {
         id: row.get(0)?,
         title: row.get(1)?,
         artist: row.get(2)?,
@@ -1339,8 +1313,8 @@ pub(crate) fn row_to_track(
         artwork_path,
         artwork_data_url,
         waveform_peaks_path,
-        waveform_preview,
-        waveform_color_data,
+        waveform_preview: None,
+        waveform_color_data: None,
         created_at: row.get(17)?,
         updated_at: row.get(18)?,
         rekordbox_db_source: is_rekordbox_db,
@@ -1352,7 +1326,27 @@ pub(crate) fn row_to_track(
         key_color: None,
         analysis_ready,
         format_compat,
-    })
+    };
+    if include_previews {
+        load_waveform_previews(&mut track);
+    }
+    Ok(track)
+}
+
+/// The row's waveform for the track tables, read from its analysis file:
+/// master.db tracks the PWV4 colour data from the .EXT when there is one,
+/// every other track (or a master.db one without it) the greyscale preview.
+pub(crate) fn load_waveform_previews(track: &mut Track) {
+    let Some(path) = track.waveform_peaks_path.as_deref().map(Path::new) else {
+        return;
+    };
+    if track.rekordbox_db_source {
+        track.waveform_color_data = read_pwv4_from_anlz(path);
+        if track.waveform_color_data.is_some() {
+            return;
+        }
+    }
+    track.waveform_preview = load_waveform_preview_from_analysis_path(path);
 }
 
 /// Resolve a decoded page cursor to the index the next page starts at, over an

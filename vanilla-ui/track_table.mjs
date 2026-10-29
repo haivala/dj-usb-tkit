@@ -1,6 +1,6 @@
 import { formatDurationMs, formatBpm, ANALYZE_TOOLTIP, REANALYZE_TOOLTIP } from "./track_utils.mjs";
 import { cloneTemplate } from "./ui_utils.mjs";
-import { buildCoverSrcCandidates, attachCoverFallbackHandlers } from "./components/library/actions.mjs";
+import { coverUrl, attachCoverFallbackHandlers } from "./components/library/actions.mjs";
 import { isTrackCurrentlyPlaying, moveActiveWaveform, updateTransportButtonsInDom } from "./components/playback/actions.mjs";
 import { renderWaveforms, setWaveformColorData } from "./waveform.mjs";
 
@@ -60,19 +60,18 @@ export function fillKeyCell(cell, track) {
   cell.replaceChildren(pill);
 }
 
-// A cover <img> trying `candidates` in order (see attachCoverFallbackHandlers),
-// or the empty placeholder when there are none.
 // Whether a row has a waveform to draw: the colour data, or a preview (the
 // backend's 0-100 levels) with any level above zero.
 export function trackHasWaveform(track) {
   return track.waveformColorData?.length >= 6 || !!track.waveformPreview?.some((v) => v > 0);
 }
 
-export function coverElement(doc, candidates) {
-  if (!candidates.length) return cloneTemplate(doc, "tplCoverPlaceholder");
+// A cover <img> of `src` (see attachCoverFallbackHandlers), or the empty
+// placeholder when there is none.
+export function coverElement(doc, src) {
+  if (!src) return cloneTemplate(doc, "tplCoverPlaceholder");
   const img = cloneTemplate(doc, "tplCoverImg");
-  img.src = candidates[0];
-  img.dataset.fallbacks = candidates.slice(1).join("|");
+  img.src = src;
   return img;
 }
 
@@ -123,7 +122,7 @@ export function createTrackRow(ctx, track, options) {
   }
 
   // The play button sits over the cover (see .cover-play).
-  cell("cover").firstElementChild.prepend(coverElement(doc, buildCoverSrcCandidates(ctx, track)));
+  cell("cover").firstElementChild.prepend(coverElement(doc, coverUrl(track)));
 
   const transport = row.querySelector(".transport-btn");
   if (options.secondaryActionLabel) {
@@ -266,7 +265,7 @@ export function markLastEditedRow(ctx, rowKey) {
   }
 }
 
-// Wire up rows just put in the table: cover fallbacks, transport state,
+// Wire up rows just put in the table: cover placeholders, transport state,
 // waveforms. A rebuilt row of the playing track takes the playhead back --
 // the row it had was dropped when it left the rendered window.
 export async function finishTrackRows(ctx, rows) {

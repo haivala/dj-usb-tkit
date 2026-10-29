@@ -118,13 +118,6 @@ function installSourceRemovalMock(page) {
             }
             return { ok: true, data: { indexed, updated: 0, removed: 0, notFound: [] } };
           }
-          if (command === "get_tracks_by_ids_with_previews") {
-            const ids = Array.isArray(payload?.request?.trackIds)
-              ? payload.request.trackIds.map((v) => String(v))
-              : [];
-            const items = trackStore.filter((t) => ids.includes(String(t.id)));
-            return { ok: true, data: { items } };
-          }
           if (command === "fetch_usb_playlists" || command === "fetch_usb_histories") {
             return { ok: true, data: { items: [], warnings: [] } };
           }

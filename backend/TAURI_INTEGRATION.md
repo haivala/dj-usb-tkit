@@ -57,7 +57,6 @@ Commands currently exposed in `backend/src/tauri_commands.rs`:
   - `scan_mixxx_db`, `list_mixxx_playlists`, `import_mixxx_playlist`
   - `browse_source_files`
   - `remove_tracks_by_source_roots`
-  - `get_tracks_by_ids_with_previews`
 - Playlists:
   - `create_playlist`
   - `rename_playlist`

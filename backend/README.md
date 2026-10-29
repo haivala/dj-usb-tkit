@@ -6,7 +6,6 @@ Implemented command set:
   - `scan_library`
   - `browse_source_files`
   - `remove_tracks_by_source_roots`
-  - `get_tracks_by_ids_with_previews`
 - Playlists:
   - `create_playlist`
   - `rename_playlist`

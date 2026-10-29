@@ -7,7 +7,7 @@ use std::path::Path;
 use backend::commands::BackendCommands;
 use backend::models::{
     AddLibrarySelectionToPlaylistRequest, BrowseSourceFilesRequest, CreatePlaylistRequest,
-    ExportToUsbOptions, ExportToUsbRequest, GetTracksByIdsRequest, InitializeUsbRequest,
+    ExportToUsbOptions, ExportToUsbRequest, InitializeUsbRequest,
     RemoveUsbPlaylistRequest, ScanLibraryRequest,
 };
 use backend::pdb_reader::parse_pdb;
@@ -237,16 +237,22 @@ fn add_from_library(
     playlist_id: &str,
     track_ids: &[String],
 ) -> backend::models::ApiResponse<backend::models::AddTracksToPlaylistData> {
-    let mut source_roots = backend
-        .get_tracks_by_ids_with_previews(GetTracksByIdsRequest {
-            track_ids: track_ids.to_vec(),
-        })
-        .data
-        .expect("tracks by ids")
-        .items
+    let mut source_roots = track_ids
         .iter()
-        .filter_map(|t| Path::new(&t.file_path).parent())
-        .map(|dir| dir.to_string_lossy().to_string())
+        .map(|id| {
+            backend
+                .get_track_detail(backend::models::GetTrackDetailRequest {
+                    track_id: id.clone(),
+                })
+                .data
+                .expect("track detail")
+                .track
+        })
+        .filter_map(|t| {
+            Path::new(&t.file_path)
+                .parent()
+                .map(|dir| dir.to_string_lossy().to_string())
+        })
         .collect::<Vec<_>>();
     source_roots.sort();
     source_roots.dedup();

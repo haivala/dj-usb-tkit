@@ -9,7 +9,7 @@ use backend::models::{
     AddLibrarySelectionToPlaylistRequest, AddTrackCandidate, AddTrackCandidatesToPlaylistRequest,
     AnalyzeNewTracksRequest, BrowseSourceFilesRequest, CreatePlaylistRequest, ExportToUsbOptions,
     ExportToUsbRequest, FetchUsbHistoriesRequest, FetchUsbPlaylistsRequest, FetchUsbTracksRequest,
-    GetPlaylistTracksRequest, GetTrackDetailRequest, GetTracksByIdsRequest,
+    GetPlaylistTracksRequest, GetTrackDetailRequest,
     GetUsbTrackDetailRequest, InitializeUsbRequest, MaterializeSourceTrackRequest,
     SaveTrackAnalysisEditsRequest, SaveTrackMetadataEditsRequest, SaveUsbTrackAnalysisEditsRequest,
     SaveUsbTrackMetadataEditsRequest, ScanLibraryRequest, SetFrontendSettingRequest, TrackCueInput,
@@ -449,13 +449,15 @@ fn user_like_flow_imports_sources_analyzes_and_adds_from_library_usb_and_history
     assert!(id_set.iter().any(|id| id == &usb_local_track_id));
     assert!(id_set.iter().any(|id| id == &history_local_track_id));
 
-    let reloaded_tracks = backend
-        .get_tracks_by_ids_with_previews(GetTracksByIdsRequest {
-            track_ids: vec![usb_local_track_id.clone(), history_local_track_id.clone()],
-        })
-        .data
-        .expect("reloaded imported tracks")
-        .items;
+    let reloaded_tracks = [&usb_local_track_id, &history_local_track_id].map(|id| {
+        backend
+            .get_track_detail(GetTrackDetailRequest {
+                track_id: id.clone(),
+            })
+            .data
+            .expect("reloaded imported track")
+            .track
+    });
     for track in reloaded_tracks {
         assert!(
             track.duration_ms.unwrap_or(0) > 0,
@@ -814,16 +816,14 @@ fn analyze_local_track_waveform_preview_comes_from_anlz_roundtrip() {
     assert_eq!(analyze_data.analyzed, 1);
     assert_eq!(analyze_data.failed, 0);
 
-    // Fetch with previews — this reads waveform from ANLZ file on disk
-    let hydrated = backend
-        .get_tracks_by_ids_with_previews(GetTracksByIdsRequest {
-            track_ids: vec![track_id.clone()],
+    // The row with its preview -- this reads waveform from ANLZ file on disk
+    let track = &backend
+        .get_track_detail(GetTrackDetailRequest {
+            track_id: track_id.clone(),
         })
         .data
-        .expect("get tracks with previews")
-        .items;
-    assert_eq!(hydrated.len(), 1);
-    let track = &hydrated[0];
+        .expect("track detail")
+        .track;
 
     let waveform_path = track
         .waveform_peaks_path
@@ -889,12 +889,12 @@ fn save_track_analysis_edits_bakes_cues_and_first_beat_into_cached_anlz() {
     assert_eq!(analyze.data.expect("analyze").analyzed, 1);
 
     let dat_path = backend
-        .get_tracks_by_ids_with_previews(GetTracksByIdsRequest {
-            track_ids: vec![track_id.clone()],
+        .get_track_detail(GetTrackDetailRequest {
+            track_id: track_id.clone(),
         })
         .data
-        .expect("hydrate")
-        .items[0]
+        .expect("track detail")
+        .track
         .waveform_peaks_path
         .clone()
         .expect("waveform path");
@@ -3035,28 +3035,6 @@ fn startup_hydration_reopen_keeps_waveform_bpm_key_and_length_without_reanalysis
     drop(backend);
 
     let reopened = BackendCommands::new(&data_dir).expect("reopen backend");
-    let hydrated = reopened
-        .get_tracks_by_ids_with_previews(GetTracksByIdsRequest {
-            track_ids: vec![track_id.clone()],
-        })
-        .data
-        .expect("hydrate tracks by ids")
-        .items;
-    assert_eq!(hydrated.len(), 1, "expected one hydrated track");
-    let hydrated_track = &hydrated[0];
-    let preview = hydrated_track
-        .waveform_preview
-        .as_ref()
-        .expect("waveform preview must hydrate from analyzed DAT");
-    assert!(
-        !preview.is_empty(),
-        "hydrated waveform preview should not be empty"
-    );
-    assert!(
-        preview.iter().any(|&v| v > 0),
-        "hydrated waveform preview should contain non-zero bins"
-    );
-
     library_sources::show_only(
         &reopened,
         vec![source.to_string_lossy().to_string()],
@@ -3076,6 +3054,15 @@ fn startup_hydration_reopen_keeps_waveform_bpm_key_and_length_without_reanalysis
         .into_iter()
         .find(|t| t.id == track_id)
         .expect("track exists after reopen");
+    // The library page carries the row's waveform, read from the analyzed DAT.
+    let preview = after
+        .waveform_preview
+        .as_ref()
+        .expect("browse page must carry the waveform preview");
+    assert!(
+        preview.iter().any(|&v| v > 0),
+        "waveform preview should contain non-zero bins"
+    );
 
     assert_eq!(
         after.waveform_peaks_path, before_waveform_path,

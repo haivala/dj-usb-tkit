@@ -22,7 +22,6 @@ import {
 } from "./settings_keys.mjs";
 
 const APP_VERSION_FALLBACK = "Not set";
-const LIBRARY_LOAD_LIMIT_INIT = 200;
 
 export async function hydrateAppVersionLabel(ctx) {
   const { el, tauriIsTauri, tauriGetVersion } = ctx;
@@ -222,7 +221,7 @@ export function runDeferredInitialLoad(ctx) {
       progress(35, "Loading playlists...");
       await ctx.loadPlaylists();
       progress(70, "Loading tracks...");
-      await ctx.resetAndLoadLibraryTracks("", LIBRARY_LOAD_LIMIT_INIT);
+      await ctx.resetAndLoadLibraryTracks("");
 
       if (state.playlists.length > 0) {
         const hasCurrent = state.playlists.some((playlist) => playlist.id === state.currentPlaylistId);

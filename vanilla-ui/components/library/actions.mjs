@@ -11,10 +11,7 @@ import {
 } from "../../track_utils.mjs";
 import { drawWaveformCanvas, invalidateWaveformCache, setWaveformColorData } from "../../waveform.mjs";
 
-export const LIBRARY_LOAD_LIMIT_DEFAULT = 200;
-const LIBRARY_LOAD_LIMIT_POST_SCAN = 1000;
 const LIBRARY_SEARCH_DEBOUNCE_MS = 180;
-const PREVIEW_HYDRATION_BATCH_SIZE = 48;
 
 export function warningEntryText(entry) {
   return String(entry?.message ?? entry ?? "").trim();
@@ -48,34 +45,6 @@ export function normalizeUsbPlaylist(ctx, playlist) {
   return { ...playlist, tracks: playlist.tracks.map((track) => normalizeTrack(ctx, track)) };
 }
 
-// A re-fetched row is the backend's word on everything it carries; only what
-// is loaded lazily (waveform preview, colour data, artwork) is kept from the
-// row it replaces while the new one lacks it.
-export function mergeTrackPreservingBestFields(existing, normalized) {
-  const merged = { ...existing, ...normalized };
-  if ((!Array.isArray(normalized.waveformPreview) || normalized.waveformPreview.length === 0)
-    && Array.isArray(existing.waveformPreview)
-    && existing.waveformPreview.length > 0) {
-    merged.waveformPreview = [...existing.waveformPreview];
-  }
-  if ((!Array.isArray(normalized.waveformColorData) || normalized.waveformColorData.length === 0)
-    && Array.isArray(existing.waveformColorData)
-    && existing.waveformColorData.length > 0) {
-    merged.waveformColorData = existing.waveformColorData;
-  }
-  if (!normalized.artworkDataUrl && existing.artworkDataUrl) merged.artworkDataUrl = existing.artworkDataUrl;
-  if (!normalized.artworkUrl && existing.artworkUrl) merged.artworkUrl = existing.artworkUrl;
-  if (!normalized.artworkPath && existing.artworkPath) merged.artworkPath = existing.artworkPath;
-  if (normalized.artworkChecked || existing.artworkChecked) merged.artworkChecked = true;
-  if (!normalized.waveformPeaksPath && existing.waveformPeaksPath) merged.waveformPeaksPath = existing.waveformPeaksPath;
-  // Once a row has been hydrated (backend flag cleared, or an inspect ran),
-  // it stays hydrated across a re-fetch/merge.
-  merged.needsHydration = existing.needsHydration === false
-    ? false
-    : normalized.needsHydration === true;
-  return merged;
-}
-
 // The library's sources are the backend's (`get_library_sources`): the
 // folders with their switch and missing / analyzed state, and the imported
 // libraries' switches. Every change goes through a command that answers with
@@ -99,42 +68,6 @@ export async function refreshLibrarySources(ctx) {
 function missingFoldersStatus(paths) {
   const more = paths.length > 1 ? ` (+${paths.length - 1} more)` : "";
   return `Source folder missing: ${paths[0]}${more}. Relocate or remove it.`;
-}
-
-export function trackNeedsPreviewHydration(track) {
-  if (!track) return false;
-  const missingWaveformPreview = !Array.isArray(track.waveformPreview) || track.waveformPreview.length === 0;
-  const missingColorData = !Array.isArray(track.waveformColorData) || track.waveformColorData.length === 0;
-  const hasWaveformPath = typeof track.waveformPeaksPath === "string" && track.waveformPeaksPath.trim().length > 0;
-  return (missingWaveformPreview && missingColorData) && hasWaveformPath;
-}
-
-export function mergeHydratedTrackIntoState(ctx, rawTrack) {
-  const { state } = ctx;
-  const normalized = normalizeTrack(ctx, rawTrack);
-  const trackId = String(normalized.id || "").trim();
-  if (!trackId) return false;
-  let changed = false;
-
-  for (let i = 0; i < state.tracks.length; i += 1) {
-    const existing = state.tracks[i];
-    if (String(existing?.id || "") !== trackId) continue;
-    state.tracks[i] = mergeTrackPreservingBestFields(existing, normalized);
-    changed = true;
-    break;
-  }
-
-  for (const playlist of state.playlists) {
-    for (let i = 0; i < (playlist.tracks || []).length; i += 1) {
-      const existing = playlist.tracks[i];
-      const localTrackId = String(existing?.localTrackId || existing?.id || "").trim();
-      if (localTrackId !== trackId) continue;
-      playlist.tracks[i] = mergeTrackPreservingBestFields(existing, normalized);
-      changed = true;
-    }
-  }
-
-  return changed;
 }
 
 // A command that changed a track answers with its whole row -- the library's
@@ -221,45 +154,6 @@ export async function applyRealtimeAnalyzedTrackUpdate(ctx, payload) {
   patchPlaylistRowByTrackId(ctx, trackId);
 }
 
-export async function hydrateLoadedTracksPreviewsInBackground(ctx) {
-  const { state } = ctx;
-  const hydrationSeq = ++state.loadedPreviewHydrationSeq;
-  const pendingIds = (state.tracks || [])
-    .filter((track) => trackNeedsPreviewHydration(track))
-    .map((track) => String(track.id || "").trim())
-    .filter(Boolean);
-  if (!pendingIds.length) return;
-
-  let anyChanged = false;
-  for (let i = 0; i < pendingIds.length; i += PREVIEW_HYDRATION_BATCH_SIZE) {
-    if (hydrationSeq !== state.loadedPreviewHydrationSeq) return;
-    const batch = pendingIds.slice(i, i + PREVIEW_HYDRATION_BATCH_SIZE);
-    try {
-      const data = await ctx.command("get_tracks_by_ids_with_previews", { trackIds: batch });
-      const changedIds = [];
-      for (const item of data?.items || []) {
-        const changed = mergeHydratedTrackIntoState(ctx, item);
-        if (!changed) continue;
-        anyChanged = true;
-        const id = String(item?.id || "").trim();
-        if (id) changedIds.push(id);
-      }
-      for (const id of changedIds) {
-        patchLibraryRowByTrackId(ctx, id);
-      }
-      await ctx.nextPaint();
-    } catch (_) {
-      return;
-    }
-  }
-
-  if (hydrationSeq !== state.loadedPreviewHydrationSeq) return;
-  if (anyChanged) {
-    renderLibraryRows(ctx);
-    ctx.renderCurrentPlaylistTracksFromState();
-  }
-}
-
 export async function relocateSourceRoot(ctx, oldRoot) {
   const { state } = ctx;
   const { emitStatus } = ctx;
@@ -278,7 +172,7 @@ export async function relocateSourceRoot(ctx, oldRoot) {
     newRoot
   });
   await applyLibrarySources(ctx, result.sources);
-  await resetAndLoadLibraryTracks(ctx, state.libraryQuery, LIBRARY_LOAD_LIMIT_DEFAULT);
+  await resetAndLoadLibraryTracks(ctx, state.libraryQuery);
   await ctx.refreshCurrentPlaylistTracks();
 
   const unresolved = Number(result.missingAtNewRoot || 0) + Number(result.conflicts || 0);
@@ -411,12 +305,10 @@ export function renderLibraryChrome(ctx) {
 // via `browse_source_files`, rendered through the shared TrackListController.
 // `ctl.items` is backed by `state.tracks` (read by playback resolution,
 // analysis patching, and selection) so those stay consistent as pages load.
-// `ctl.prevById` is rebuilt before every page's normalize() so a lazily
-// hydrated waveform preview survives a reload / filter / sort change.
+// Each page comes with its rows' waveforms, as a USB page does.
 export function createLibraryTracksController(ctx) {
-  const ctl = createTrackListController({
+  return createTrackListController({
     bodyId: "libraryTableBody",
-    pageSize: LIBRARY_LOAD_LIMIT_DEFAULT,
     getElements: () => ({
       body: ctx.el.libraryTableBody,
       wrap: ctx.el.libraryTableWrap,
@@ -433,11 +325,7 @@ export function createLibraryTracksController(ctx) {
         limit,
       });
     },
-    normalize: (track) => {
-      const normalized = normalizeTrack(ctx, track);
-      const prev = ctl.prevById.get(String(normalized.id));
-      return prev ? mergeTrackPreservingBestFields(prev, normalized) : normalized;
-    },
+    normalize: (track) => normalizeTrack(ctx, track),
     getItems: () => ctx.state.tracks,
     setItems: (value) => { ctx.state.tracks = value; },
     rowOptions: () => ({
@@ -462,14 +350,6 @@ export function createLibraryTracksController(ctx) {
       ctx.emitStatus(err.message || String(err));
     },
     onResponse: (data) => {
-      // On a re-query (search / sort) ctx.state.tracks still holds the previous list;
-      // snapshot it so surviving tracks keep their lazily hydrated previews. On a
-      // full reload (source-filter change) ctx.state.tracks is already cleared and
-      // resetAndLoadLibraryTracks took the snapshot before clearing.
-      const loaded = (ctx.state.tracks || []).filter(Boolean);
-      if (loaded.length) {
-        ctl.prevById = new Map(loaded.map((t) => [String(t.id), t]));
-      }
       // The enabled sources' tracks, ignoring the search.
       if (ctx.el.libraryCountsText) {
         ctx.el.libraryCountsText.textContent = formatTrackListSummary(data.listTrackCount, data.listSizeBytes);
@@ -478,24 +358,18 @@ export function createLibraryTracksController(ctx) {
     onPage: (_page, { first }) => {
       if (first) narrowTrackSelectionToLoaded(ctx, "library", ctx.state.tracks || []);
       renderLibraryChrome(ctx);
-      void hydrateLoadedTracksPreviewsInBackground(ctx);
     },
   });
-  ctl.prevById = new Map();
-  return ctl;
 }
 
 // Re-render the loaded library rows (no fetch) + chrome -- used after an
-// in-place mutation of `state.tracks` (analysis patch, bg preview hydration)
-// or a selection change.
+// in-place mutation of `state.tracks` (analysis patch) or a selection change.
 export async function renderLibraryRows(ctx) {
   await ctx.libraryTracksCtl.rerender();
   renderLibraryChrome(ctx);
 }
 
-// Debounced library search. Goes through the controller's setSearch (a
-// re-query of page 1 that does NOT pre-clear state.tracks), so lazily hydrated
-// waveform previews on tracks that survive the filter aren't flashed away.
+// Debounced library search: the controller's setSearch, a re-query of page 1.
 export function scheduleLibrarySearch(ctx) {
   const { state } = ctx;
   clearTimeout(state.librarySearchDebounceTimer);
@@ -511,16 +385,12 @@ export function scheduleLibrarySearch(ctx) {
 }
 
 // Fetch the library from page 1 (source-filter / search / post-scan reload).
-// `state.libraryQuery` is the persisted search text; a bigger `limit` (post
-// scan) is a one-shot override, otherwise the controller's page size is used.
-export async function resetAndLoadLibraryTracks(ctx, query = "", limit = LIBRARY_LOAD_LIMIT_DEFAULT) {
+// `state.libraryQuery` is the persisted search text.
+export async function resetAndLoadLibraryTracks(ctx, query = "") {
   const { state, libraryTracksCtl } = ctx;
   state.libraryQuery = String(query || "").trim();
   libraryTracksCtl.query = state.libraryQuery;
-  // Snapshot for waveform-preview preservation before ctl.load() clears state.tracks.
-  libraryTracksCtl.prevById = new Map((state.tracks || []).filter(Boolean).map((t) => [String(t.id), t]));
-  const opts = Number.isFinite(limit) && limit > LIBRARY_LOAD_LIMIT_DEFAULT ? { limit } : {};
-  await libraryTracksCtl.load(opts);
+  await libraryTracksCtl.load();
 }
 
 // Key labels are rendered by the backend in the user's notation, so a notation
@@ -550,7 +420,7 @@ export async function scanLibrary(ctx) {
     ctx.logWarnings("library-scan", scanWarnings, "Library scan");
   }
 
-  await resetAndLoadLibraryTracks(ctx, "", LIBRARY_LOAD_LIMIT_POST_SCAN);
+  await resetAndLoadLibraryTracks(ctx, "");
   // Backend-owned: `scan_library` reports these over the whole scanned library,
   // not the page the frontend just loaded.
   const scopedTrackCount = Math.max(0, Number(result?.scopedTrackCount || 0));
@@ -643,7 +513,7 @@ async function importExternalLibrary(ctx, { command, path, label, logSource, cod
   await showExternalLibrary(ctx, library);
   await detect();
 
-  await resetAndLoadLibraryTracks(ctx, "", LIBRARY_LOAD_LIMIT_POST_SCAN);
+  await resetAndLoadLibraryTracks(ctx, "");
 
   await ctx.refreshCurrentPlaylistTracks();
 
@@ -919,19 +789,16 @@ export function patchLibraryRowCells(ctx, row, track) {
 
   const coverTd = row.querySelector(".td-cover");
   if (coverTd) {
-    const coverCandidates = buildCoverSrcCandidates(ctx, track);
-    if (coverCandidates.length) {
-      const img = coverTd.querySelector("img.cover-thumb");
-      if (img) {
-        img.src = coverCandidates[0];
-        img.dataset.fallbacks = coverCandidates.slice(1).join("|");
-      } else {
-        // Swap only the cover: the play button shares the cell (.cover-play).
-        coverTd.querySelector(".cover-thumb")?.replaceWith(coverElement(row.ownerDocument, coverCandidates));
-        attachCoverFallbackHandlers(coverTd);
-      }
+    const src = coverUrl(track);
+    const img = coverTd.querySelector("img.cover-thumb");
+    if (src && img) {
+      if (img.getAttribute("src") !== src) img.src = src;
+    } else if (src) {
+      // Swap only the cover: the play button shares the cell (.cover-play).
+      coverTd.querySelector(".cover-thumb")?.replaceWith(coverElement(row.ownerDocument, src));
+      attachCoverFallbackHandlers(coverTd);
     } else {
-      coverTd.querySelector("img.cover-thumb")?.replaceWith(coverElement(row.ownerDocument, []));
+      img?.replaceWith(coverElement(row.ownerDocument, ""));
     }
   }
 
@@ -1002,14 +869,6 @@ export function scanLibraryButtonLabel(folders) {
 
 // --- cover_url.mjs ---
 
-export function convertFileSrcLocal(filePath) {
-  const normalized = String(filePath || "").replace(/\\/g, "/").trim();
-  if (!normalized) return null;
-  if (/^(?:asset|tauri|https?|blob|data|file):/i.test(normalized)) return normalized;
-  const encoded = normalized.split("/").map(encodeURIComponent).join("/");
-  return `asset://localhost${encoded}`;
-}
-
 export function appendUrlRevision(url, revision) {
   const normalized = String(url || "").trim();
   if (!normalized) return "";
@@ -1020,61 +879,22 @@ export function appendUrlRevision(url, revision) {
   return `${normalized}${joiner}rev=${encodeURIComponent(rev)}`;
 }
 
-export function buildCoverSrcCandidates(ctx, track) {
-  const toPlayableUrl = ctx?.toPlayableUrl;
-  const out = [];
-  const seen = new Set();
-  const addPathVariants = (value) => {
-    const raw = String(value || "").trim();
-    if (!raw) return;
-    if (/^(?:asset|tauri|https?|blob|data|file):/i.test(raw)) {
-      push(raw);
-      return;
-    }
-    if (typeof toPlayableUrl === "function") {
-      push(toPlayableUrl(raw));
-      const normalizedPath = raw.replace(/^file:\/\//i, "");
-      if (normalizedPath && normalizedPath !== raw) {
-        push(toPlayableUrl(normalizedPath));
-      }
-      if (raw.startsWith("/")) {
-        push(toPlayableUrl(raw.replace(/^\/+/, "")));
-      } else {
-        push(toPlayableUrl(`/${raw}`));
-      }
-    }
-    push(convertFileSrcLocal(raw));
-  };
-  const push = (value) => {
-    const v = String(value || "").trim();
-    if (!v || seen.has(v)) return;
-    seen.add(v);
-    out.push(v);
-  };
-
-  push(track?.artworkDataUrl);
-  addPathVariants(track?.artworkPath);
-  push(track?.artworkUrl);
-  return out;
+// A row's cover: the backend sends the image itself (`artworkDataUrl`, USB
+// rows) or its file (`artworkPath`, an absolute path), and `normalizeTrack`
+// makes that the row's one `artworkUrl`. Empty when the row has none.
+export function coverUrl(track) {
+  return String(track?.artworkUrl || "");
 }
 
 // --- cover_fallback.mjs ---
 
+// A cover that fails to load shows the empty placeholder.
 export function attachCoverFallbackHandlers(root) {
   root.querySelectorAll("img.cover-thumb").forEach((img) => {
     if (img.dataset.fallbackBound === "1") return;
     img.dataset.fallbackBound = "1";
     img.addEventListener("error", () => {
-      const queue = String(img.dataset.fallbacks || "")
-        .split("|")
-        .filter(Boolean);
-      const next = queue.shift();
-      if (next) {
-        img.dataset.fallbacks = queue.join("|");
-        img.src = next;
-        return;
-      }
-      img.replaceWith(coverElement(img.ownerDocument, []));
+      img.replaceWith(coverElement(img.ownerDocument, ""));
     });
   });
 }

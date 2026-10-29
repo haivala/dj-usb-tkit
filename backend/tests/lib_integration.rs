@@ -17,7 +17,7 @@ use backend::models::{
     AddLibrarySelectionToPlaylistRequest, AddTrackCandidate, AddTrackCandidatesToPlaylistRequest,
     AnalyzeNewTracksRequest, BrowseSourceFilesRequest, CreatePlaylistRequest, ExportToUsbOptions,
     ExportToUsbRequest, FetchUsbHistoriesRequest, FetchUsbPlaylistsRequest, FetchUsbTracksRequest,
-    GetPlaylistTracksRequest, GetTracksByIdsRequest, InitializeUsbRequest,
+    GetPlaylistTracksRequest, GetTrackDetailRequest, InitializeUsbRequest,
     MaterializeSourceTrackRequest, RemoveSourceFolderRequest, RemoveTracksFromPlaylistRequest,
     RemoveUsbPlaylistRequest, RepairUsbDiagnosticsRequest, ResolvePlaybackSourceRequest,
     RunUsbDiagnosticsRequest, RunUsbParityReportRequest, ScanLibraryRequest,
@@ -3761,15 +3761,12 @@ fn adding_usb_track_clears_stale_local_key_when_usb_key_is_missing() {
 
     let reload = || {
         backend
-            .get_tracks_by_ids_with_previews(GetTracksByIdsRequest {
-                track_ids: vec![stale_local_id.clone()],
+            .get_track_detail(GetTrackDetailRequest {
+                track_id: stale_local_id.clone(),
             })
             .data
-            .expect("reloaded local track")
-            .items
-            .into_iter()
-            .find(|t| t.id == stale_local_id)
             .expect("materialized local track")
+            .track
     };
 
     // Browsing is read-only: the stale local row is left as it was.

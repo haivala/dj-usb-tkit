@@ -27,7 +27,8 @@ function installWaveformStartupMock(page) {
         filePath: "/music/Track One.mp3",
         fileSizeBytes: 1000,
         waveformPeaksPath: "/tmp/t-1.DAT",
-        waveformPreview: [],
+        // The page carries its rows' waveforms.
+        waveformPreview: [8, 20, 42, 65, 30, 55],
         analysisReady: true,
         createdAt: "2026-03-01T00:00:00Z",
         updatedAt: "2026-03-01T00:00:00Z"
@@ -40,7 +41,7 @@ function installWaveformStartupMock(page) {
         filePath: "/music/Track Two.mp3",
         fileSizeBytes: 1001,
         waveformPeaksPath: "/tmp/t-2.DAT",
-        waveformPreview: [],
+        waveformPreview: [8, 20, 42, 65, 30, 55],
         createdAt: "2026-03-01T00:00:00Z",
         updatedAt: "2026-03-01T00:00:00Z"
       }
@@ -65,18 +66,6 @@ function installWaveformStartupMock(page) {
           }
           if (command === "browse_source_files") {
             return { ok: true, data: { total: baseTracks.length, items: baseTracks } };
-          }
-          if (command === "get_tracks_by_ids_with_previews") {
-            const ids = Array.isArray(payload?.request?.trackIds)
-              ? payload.request.trackIds.map((v) => String(v))
-              : [];
-            const items = baseTracks
-              .filter((t) => ids.includes(String(t.id)))
-              .map((t) => ({
-                ...t,
-                waveformPreview: [8, 20, 42, 65, 30, 55]
-              }));
-            return { ok: true, data: { items } };
           }
           if (command === "fetch_usb_playlists" || command === "fetch_usb_histories") {
             return { ok: true, data: { items: [], warnings: [] } };
@@ -124,7 +113,7 @@ function canvasesDrawn(page, selector) {
   );
 }
 
-test("startup hydrates waveform previews for tracks with waveform paths", async ({ page }) => {
+test("startup draws the waveforms the library page carries", async ({ page }) => {
   await installWaveformStartupMock(page);
   await page.goto("/");
 
@@ -309,9 +298,6 @@ function installSourceChipAnalysisMock(page) {
           if (command === "browse_source_files") {
             window.__browseCalls += 1;
             return { ok: true, data: { total: tracks.length, items: tracks } };
-          }
-          if (command === "get_tracks_by_ids_with_previews") {
-            return { ok: true, data: { items: tracks } };
           }
           if (command === "fetch_usb_playlists" || command === "fetch_usb_histories") {
             return { ok: true, data: { items: [], warnings: [] } };

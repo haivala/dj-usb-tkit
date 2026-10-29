@@ -89,7 +89,7 @@ export function createAppContext(env) {
     getCurrentPlaylist isPlaylistSortActive renderCurrentPlaylistTracksFromState
     refreshCurrentPlaylistTracks importExternalPlaylist renderOpenPlaylistExportStatus`);
   bindActions(library, `normalizeTrack normalizeUsbPlaylist applyLibrarySources
-    refreshLibrarySources showExternalLibrary applyRealtimeAnalyzedTrackUpdate hydrateLoadedTracksPreviewsInBackground
+    refreshLibrarySources showExternalLibrary applyRealtimeAnalyzedTrackUpdate
     relocateSourceRoot renderSourceChips applyLibraryDurationSummary renderLibraryRows
     scheduleLibrarySearch resetAndLoadLibraryTracks
     reloadTrackListsForKeyNotation scanLibrary reanalyzeTracks

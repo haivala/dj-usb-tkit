@@ -16,7 +16,7 @@ use crate::models::{
     FetchUsbTracksRequest, GetFrontendSettingsData, GetPlaylistExportSpaceData,
     GetPlaylistExportSpaceRequest, GetPlaylistMembershipData, GetPlaylistMembershipRequest,
     GetPlaylistTracksData, GetPlaylistTracksRequest, GetSelectionDurationData,
-    GetSelectionDurationRequest, GetTrackDetailRequest, GetTracksByIdsData, GetTracksByIdsRequest,
+    GetSelectionDurationRequest, GetTrackDetailRequest,
     GetTracksMetadataSummaryRequest, GetUsbDeviceNameData, GetUsbDeviceNameRequest,
     GetUsbPlayerMenuConfigData, GetUsbPlayerMenuConfigRequest, GetUsbTrackDetailRequest,
     GetUsbTracksMetadataSummaryRequest, ImportExternalPlaylistData, ImportExternalPlaylistRequest,
@@ -251,13 +251,6 @@ impl BackendCommands {
         req: RelocateSourceRootRequest,
     ) -> ApiResponse<RelocateSourceRootData> {
         wrap(self.service.relocate_source_root(req))
-    }
-
-    pub fn get_tracks_by_ids_with_previews(
-        &self,
-        req: GetTracksByIdsRequest,
-    ) -> ApiResponse<GetTracksByIdsData> {
-        wrap(self.service.get_tracks_by_ids_with_previews(req))
     }
 
     pub fn resolve_playback_source(

@@ -18,7 +18,7 @@ import { isUsbRootChangeBlocked } from "../usb/actions.mjs";
 import { RELEASE_DATE_PATTERN, saveLibraryMetadataEdits, saveUsbMetadataEdits } from "../shared/track_metadata_edits.mjs";
 import { cloneTemplate } from "../../ui_utils.mjs";
 import { coverElement, markLastEditedRow } from "../../track_table.mjs";
-import { buildCoverSrcCandidates, attachCoverFallbackHandlers } from "../library/actions.mjs";
+import { coverUrl, attachCoverFallbackHandlers } from "../library/actions.mjs";
 import { formatBpm } from "../../track_utils.mjs";
 import {
   STORAGE_KEY_CUE_START_ON_FIRST_BEAT,
@@ -1514,7 +1514,7 @@ export function createTrackDetailController(el, prefs = {}) {
       rating = 0,
       releaseDate = null,
       genreOptions = [],
-      coverCandidates = [],
+      coverSrc = "",
       rowKey = null,
     }) {
       if (open) api.close(null);
@@ -1567,7 +1567,7 @@ export function createTrackDetailController(el, prefs = {}) {
         el.trackDetailRevealBtn.dataset.tooltip = `Show in folder: ${t.filePath || ""}`;
       }
       if (el.trackDetailCover) {
-        el.trackDetailCover.replaceChildren(coverElement(el.trackDetailCover.ownerDocument, coverCandidates));
+        el.trackDetailCover.replaceChildren(coverElement(el.trackDetailCover.ownerDocument, coverSrc));
         attachCoverFallbackHandlers(el.trackDetailCover);
       }
       el.trackDetailView.hidden = false;
@@ -1750,7 +1750,7 @@ async function openUsbTrackDetail(ctx, track, { rowKey = null } = {}) {
     rating: detail.rating,
     releaseDate: detail.releaseDate,
     genreOptions: detail.genreOptions,
-    coverCandidates: buildCoverSrcCandidates(ctx, track),
+    coverSrc: coverUrl(track),
     rowKey,
   });
   if (!payload) return;
@@ -1850,7 +1850,7 @@ export async function openTrackDetail(ctx, track, opts = {}) {
     rating: detail.rating,
     releaseDate: detail.releaseDate,
     genreOptions: detail.genreOptions,
-    coverCandidates: buildCoverSrcCandidates(ctx, track),
+    coverSrc: coverUrl(track),
     rowKey: opts.rowKey || null,
   });
   if (!payload) return;

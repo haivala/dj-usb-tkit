@@ -1,5 +1,5 @@
 use backend::commands::BackendCommands;
-use backend::models::{AnalyzeNewTracksRequest, GetTracksByIdsRequest};
+use backend::models::{AnalyzeNewTracksRequest, GetTrackDetailRequest};
 use std::env;
 use std::path::PathBuf;
 
@@ -67,20 +67,10 @@ fn main() {
         }
     }
 
-    let search = backend.get_tracks_by_ids_with_previews(GetTracksByIdsRequest {
-        track_ids: vec![track_id.clone()],
+    let detail = backend.get_track_detail(GetTrackDetailRequest {
+        track_id: track_id.clone(),
     });
-    if !search.ok {
-        let msg = search
-            .error
-            .as_ref()
-            .map(|e| e.message.as_str())
-            .unwrap_or("unknown lookup error");
-        eprintln!("get_tracks_by_ids_with_previews failed: {msg}");
-        std::process::exit(1);
-    }
-    let items = search.data.expect("search data").items;
-    if let Some(track) = items.into_iter().find(|t| t.id == track_id) {
+    if let Some(track) = detail.data.map(|detail| detail.track) {
         println!(
             "track: bpm={:?} key={:?} waveform={} artwork={}",
             track.bpm,

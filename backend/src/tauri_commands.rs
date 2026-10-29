@@ -25,7 +25,7 @@ use crate::models::{
     FetchUsbTracksRequest, GetFrontendSettingsData, GetPlaylistExportSpaceData,
     GetPlaylistExportSpaceRequest, GetPlaylistMembershipData, GetPlaylistMembershipRequest,
     GetPlaylistTracksData, GetPlaylistTracksRequest, GetSelectionDurationData,
-    GetSelectionDurationRequest, GetTrackDetailRequest, GetTracksByIdsData, GetTracksByIdsRequest,
+    GetSelectionDurationRequest, GetTrackDetailRequest,
     GetTracksMetadataSummaryRequest, GetUsbDeviceNameData, GetUsbDeviceNameRequest,
     GetUsbPlayerMenuConfigData, GetUsbPlayerMenuConfigRequest, GetUsbTrackDetailRequest,
     GetUsbTracksMetadataSummaryRequest, ImportExternalPlaylistData, ImportExternalPlaylistRequest,
@@ -906,14 +906,6 @@ pub fn relocate_source_root(
     request: RelocateSourceRootRequest,
 ) -> ApiResponse<RelocateSourceRootData> {
     state.relocate_source_root(request)
-}
-
-#[tauri::command]
-pub fn get_tracks_by_ids_with_previews(
-    state: State<'_, BackendCommands>,
-    request: GetTracksByIdsRequest,
-) -> ApiResponse<GetTracksByIdsData> {
-    state.get_tracks_by_ids_with_previews(request)
 }
 
 #[tauri::command]

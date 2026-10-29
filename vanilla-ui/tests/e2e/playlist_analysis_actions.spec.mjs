@@ -301,11 +301,6 @@ test("playlist analyze-missing skips already-analyzed tracks and targets the res
               }
             };
           }
-          if (command === "get_tracks_by_ids_with_previews") {
-            const ids = request.trackIds || [];
-            const items = ids.includes("local-missing-1") ? [hydratedTrack()] : [];
-            return { ok: true, data: { items } };
-          }
           if (command === "set_frontend_setting" || command === "get_frontend_settings") {
             return command === "get_frontend_settings"
               ? { ok: true, data: { settings: {} } }

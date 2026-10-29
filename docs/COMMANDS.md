@@ -94,7 +94,9 @@ drive selection from being rendered against a newer selected drive.
 - `scan_rekordbox_db`
 - `scan_mixxx_db`
 - `browse_source_files` — lists the library as its sources are set (below);
-  the request carries no folder or library filter.
+  the request carries no folder or library filter. The page's rows carry
+  their waveforms (`waveformPreview`, or `waveformColorData` for rekordbox
+  tracks), read for that page only, as a USB page's are.
 - `get_library_sources` → `{ folders, rekordboxDbEnabled, mixxxDbEnabled,
   everConfigured }`, each folder `{ path, enabled, missing, fullyAnalyzed }`.
   The backend stores the source folders and their switches; every library
@@ -115,7 +117,6 @@ drive selection from being rendered against a newer selected drive.
 - `relocate_source_root` — `{ oldRoot, newRoot }` → the rewrite counts plus
   `sources`: once every track moved, the new folder replaces the old one;
   otherwise both stay.
-- `get_tracks_by_ids_with_previews`
 - `get_track_detail` — returns `{ track, firstBeatMs, cues, detailWaveform,
   keyOptions, genre, rating, releaseDate, genreOptions }` for the cue editor
   (see `docs/CUE_EDITOR.md`). `rating` is 0–5 stars; `releaseDate` is the date
@@ -347,7 +348,7 @@ for when the UI disables reordering. `fetch_usb_playlists` and `run_usb_diagnost
 re-derive that lock condition from raw USB-scan/export-setting state.
 
 `analyze_new_tracks` returns hydrated changed track rows in `items`, so the UI can patch rows from
-the analysis response without a separate `get_tracks_by_ids_with_previews` call. It takes the raw
+the analysis response without a separate read. It takes the raw
 `bpmRange` string (e.g. `"70-180"`) from the settings dropdown and parses/validates it server-side
 (`bpmMin`/`bpmMax` are the older pre-parsed form, still accepted as a fallback).
 
