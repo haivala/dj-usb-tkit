@@ -181,7 +181,8 @@ undo). Space never presses the focused button (Save has focus on open).
 
 - **Play/pause**: the button left of the hints, or Space. Pause holds the track
   in the audio engine; "+ Hot cue" and C then land on the paused spot. The playhead
-  view follows playback when zoomed in, unless you just panned or zoomed.
+  view follows playback when zoomed in, unless you just panned or zoomed. When
+  the track has played to its end, Play starts it from the beginning.
 - **Metronome** (next to Q): clicks on every grid beat while playing, higher and
   louder on bar starts, so you can hear whether the grid lines up. Grid edits
   apply while it plays. It is off each time the editor opens and switches off
