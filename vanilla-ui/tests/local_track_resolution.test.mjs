@@ -15,28 +15,31 @@ test("resolveLocalTrackIdAsync returns an existing localTrackId without hitting 
   assert.equal(called, false);
 });
 
-test("resolveLocalTrackIdAsync resolves via the backend and promotes identity", async () => {
+test("resolveLocalTrackIdAsync resolves via the backend and shows a materialized file's new row", async () => {
   const calls = [];
-  let promoted = null;
-  const track = { id: "usb-1", filePath: "/music/a.mp3", title: "A", artist: "AA" };
+  let shown = null;
+  const track = { id: "/music/a.mp3", filePath: "/music/a.mp3", title: "A", artist: "AA" };
 
   const id = await resolveLocalTrackIdAsync({
     state: { usbRoot: null },
     command: async (name, payload) => {
       calls.push({ name, payload });
       if (name === "resolve_track_identity") {
-        return { trackId: "local-99", resolvedBy: "materialized", materialized: true };
+        return {
+          trackId: "local-99", resolvedBy: "materialized", materialized: true,
+          track: { id: "local-99", title: "A" },
+        };
       }
       throw new Error(`unexpected command ${name}`);
     },
-    promoteTrackIdentity: (from, to) => { promoted = { from, to }; }
+    showTrackRow: (row, options) => { shown = { row, options }; }
   }, track);
 
   assert.equal(id, "local-99");
   assert.equal(track.localTrackId, "local-99");
-  assert.deepEqual(promoted, { from: "usb-1", to: "local-99" });
+  assert.deepEqual(shown, { row: { id: "local-99", title: "A" }, options: { replaces: "/music/a.mp3" } });
   assert.equal(calls[0].name, "resolve_track_identity");
-  assert.equal(calls[0].payload.trackId, "usb-1");
+  assert.equal(calls[0].payload.trackId, "/music/a.mp3");
   assert.equal(calls[0].payload.filePath, "/music/a.mp3");
 });
 

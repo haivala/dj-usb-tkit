@@ -52,8 +52,11 @@
   beginning. Before, it started again just before the end and stopped almost at once.
 - **Improvement:** After analysis, a cue editor save or a track details edit, the backend sends the
   track's whole updated row, and every list showing that track (the library, app playlists, USB
-  playlists and history) shows it as sent. A reanalysis that fails now brings back the track's
+  playlists and history) shows it as sent. The same goes for a USB row filled in when you click it,
+  and for a file that playing or adding to a playlist puts into the library. A reanalysis that fails now brings back the track's
   BPM and key in the row instead of leaving them blank.
+- **Improvement:** While a track is analyzed, its waveform and length show as soon as the file is
+  decoded, before its BPM and key are detected.
 - **Improvement:** When the selection bar needs more room, the search field beside it narrows to
   make space before the bar moves onto a line of its own.
 

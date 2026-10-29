@@ -390,8 +390,8 @@ fn hydrate_usb_track_in_place(
     // Whether a row is still missing display data the `inspect_usb_track`
     // deep-resolve could fill in (waveform bytes, artwork, BPM, key). Computed
     // here, after the cheap hydration above, so the frontend just reads the
-    // flag instead of re-deriving it from four field checks. The frontend
-    // clears it to `false` once it has run an inspect for that row.
+    // flag instead of re-deriving it from four field checks. An inspect's own
+    // row comes back with it cleared.
     let has_waveform = track
         .waveform_preview
         .as_ref()
@@ -2223,14 +2223,6 @@ impl BackendService {
         self.build_usb_display_source(&conn, usb_root, usb_device_id, tracks)
     }
 
-    /// Display-file source for rows with no resolved local track: the local
-    /// cache of this stick's reads, else the stick.
-    fn usb_display_source(&self, usb_root: &Path) -> BackendResult<UsbDisplaySource> {
-        let conn = self.db.connect()?;
-        let usb_device_id = usb_device_id_for_root(&conn, usb_root)?;
-        self.build_usb_display_source(&conn, usb_root, usb_device_id, &[])
-    }
-
     /// Where `page`'s display files are read from: the matched local tracks'
     /// own files, else the local cache of this stick's reads, else the stick.
     fn build_usb_display_source(
@@ -2622,9 +2614,15 @@ impl BackendService {
             true,
             edb_index.as_ref(),
         ) {
-            Some((source, mut track)) => {
-                let files = self.usb_display_source(&usb_root)?;
+            Some((source, track)) => {
+                // The whole row, as a page shows it: library id resolved and
+                // display data filled in the same way.
+                let mut tracks = vec![track];
+                let files = self.resolve_usb_track_page_local_ids(&mut tracks, &usb_root)?;
+                let mut track = tracks.pop().expect("one track");
                 hydrate_usb_track_in_place(&mut track, self.key_notation()?, Some(&files));
+                // Inspected: whatever is still missing, this is all there is.
+                track.needs_hydration = false;
                 Ok(InspectUsbTrackData {
                     source,
                     track,
@@ -5026,18 +5024,21 @@ mod tests {
                 usb_root: Some(usb_root.to_string_lossy().to_string()),
             })
             .expect("fetch playlists");
-        let track_id = fetched.items[0].tracks[0].id.clone();
+        let row = fetched.items[0].tracks[0].clone();
 
         let inspected = service
             .inspect_usb_track(crate::models::InspectUsbTrackRequest {
                 usb_root: Some(usb_root.to_string_lossy().to_string()),
-                track_id,
+                track_id: row.id.clone(),
                 file_path: None,
                 title: None,
                 artist: None,
             })
             .expect("inspect usb track");
         assert_eq!(inspected.track.title, "Song A");
+        // The whole row: same file as the playlist row, and inspected.
+        assert_eq!(inspected.track.usb_media_path, row.usb_media_path);
+        assert!(!inspected.track.needs_hydration);
     }
 
     #[test]

@@ -818,6 +818,7 @@ impl BackendService {
                     track_id: Some(track_id),
                     resolved_by: ResolvedBy::UsbMaterialized,
                     materialized: true,
+                    track: None,
                 });
             }
         }
@@ -833,6 +834,7 @@ impl BackendService {
                 track_id: Some(local_track_id),
                 resolved_by: ResolvedBy::LocalTrackId,
                 materialized: false,
+                track: None,
             });
         }
 
@@ -847,6 +849,7 @@ impl BackendService {
                 track_id: Some(track_id.to_string()),
                 resolved_by: ResolvedBy::SelfId,
                 materialized: false,
+                track: None,
             });
         }
 
@@ -856,6 +859,7 @@ impl BackendService {
                 track_id: None,
                 resolved_by: ResolvedBy::UsbOrigin,
                 materialized: false,
+                track: None,
             });
         }
 
@@ -886,6 +890,7 @@ impl BackendService {
             track_id: identity.track_id,
             resolved_by: identity.resolved_by,
             materialized: identity.materialized,
+            track: identity.track,
         })
     }
 

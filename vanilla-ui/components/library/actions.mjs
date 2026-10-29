@@ -142,7 +142,9 @@ export function mergeHydratedTrackIntoState(ctx, rawTrack) {
 // the tables show it as it is: every loaded copy of that track takes the
 // row's contents (kept as the same object, so the lists holding it stay put)
 // and its drawn rows are redrawn. Nothing is merged from the old copy.
-export function showTrackRow(ctx, rawTrack) {
+// `replaces`: the id the track's rows had before (a listed file, whose id
+// was its path, just given its library row); those rows take the new one.
+export function showTrackRow(ctx, rawTrack, { replaces = null } = {}) {
   if (!rawTrack) return;
   const track = normalizeTrack(ctx, rawTrack);
   const replace = (copy) => {
@@ -161,14 +163,17 @@ export function showTrackRow(ctx, rawTrack) {
   }
   const { state } = ctx;
   const id = String(track.id);
+  const oldId = String(replaces || "").trim();
+  const ids = new Set(oldId ? [id, oldId] : [id]);
   for (const copy of state.tracks) {
-    if (copy && String(copy.id) === id) replace(copy);
+    if (copy && ids.has(String(copy.id))) replace(copy);
   }
   for (const playlist of state.playlists) {
     for (const copy of playlist.tracks || []) {
-      if (copy && String(copy.localTrackId || copy.id || "").trim() === id) replace(copy);
+      if (copy && ids.has(String(copy.localTrackId || copy.id || "").trim())) replace(copy);
     }
   }
+  if (oldId && oldId !== id) renameTrackRows(ctx, oldId, id);
   patchLibraryRowByTrackId(ctx, id);
   patchPlaylistRowByTrackId(ctx, id);
 }
@@ -214,33 +219,6 @@ export async function applyRealtimeAnalyzedTrackUpdate(ctx, payload) {
   // The open app playlist shows the same library track: redraw its row too,
   // or it keeps the old BPM/key until the playlist is reloaded.
   patchPlaylistRowByTrackId(ctx, trackId);
-
-  const payloadHasPreview = Array.isArray(payload?.waveformPreview) && payload.waveformPreview.length > 0;
-  const payloadHasWaveformPath = typeof payload?.waveformPeaksPath === "string"
-    && payload.waveformPeaksPath.trim().length > 0;
-  if (!payloadHasPreview && payloadHasWaveformPath) {
-    hydrateTrackPreviewFromBackend(ctx, trackId).catch(() => {});
-  }
-}
-
-export async function hydrateTrackPreviewFromBackend(ctx, trackId) {
-  const { state } = ctx;
-  const id = String(trackId || "").trim();
-  if (!id) return;
-  if (state.trackPreviewHydrateInFlight.has(id)) return;
-  state.trackPreviewHydrateInFlight.add(id);
-  try {
-    const data = await ctx.command("get_tracks_by_ids_with_previews", { trackIds: [id] });
-    let changed = false;
-    for (const item of data?.items || []) {
-      changed = mergeHydratedTrackIntoState(ctx, item) || changed;
-    }
-    if (changed) {
-      patchLibraryRowByTrackId(ctx, id);
-    }
-  } finally {
-    state.trackPreviewHydrateInFlight.delete(id);
-  }
 }
 
 export async function hydrateLoadedTracksPreviewsInBackground(ctx) {
@@ -850,34 +828,14 @@ export function setTrackAnalyzingState(ctx, trackId, active) {
   patchPlaylistRowByTrackId(ctx, id);
 }
 
-export function promoteTrackIdentity(ctx, oldId, newId) {
+// A track's id changed (see `showTrackRow`'s `replaces`): the selection and
+// the drawn library row follow it.
+function renameTrackRows(ctx, fromId, toId) {
   const { state, el } = ctx;
-  const fromId = String(oldId || "").trim();
-  const toId = String(newId || "").trim();
-  if (!fromId || !toId || fromId === toId) return;
-
-  for (const track of state.tracks) {
-    if (String(track?.id || "") !== fromId) continue;
-    track.id = toId;
-    track.localTrackId = toId;
-  }
-
   if (state.selectedTrackIds.has(fromId)) {
     state.selectedTrackIds.delete(fromId);
     state.selectedTrackIds.add(toId);
   }
-
-  for (const playlist of state.playlists) {
-    for (const track of playlist.tracks || []) {
-      const localTrackId = String(track?.localTrackId || track?.id || "").trim();
-      if (localTrackId !== fromId) continue;
-      track.localTrackId = toId;
-      if (String(track.id || "") === fromId) {
-        track.id = toId;
-      }
-    }
-  }
-
   const row = el.libraryTableBody?.querySelector(
     `.track-grid-row[data-track-id="${cssEscape(fromId)}"][data-track-origin="local"]`
   );

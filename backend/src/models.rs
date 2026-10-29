@@ -556,6 +556,10 @@ pub struct ResolveTrackIdentityData {
     pub track_id: Option<String>,
     pub resolved_by: ResolvedBy,
     pub materialized: bool,
+    /// When `materialized`: the new library row of the listed file, shown in
+    /// place of the file's row (whose id was its path).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub track: Option<Track>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -873,6 +877,10 @@ pub struct AddTrackCandidateResolution {
     pub track_id: Option<String>,
     pub resolved_by: ResolvedBy,
     pub materialized: bool,
+    /// As `ResolveTrackIdentityData::track`: a listed file's new library row,
+    /// shown in place of the row whose id was `previous_id`.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub track: Option<Track>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -1290,8 +1298,8 @@ pub struct UsbTrack {
     pub format_compat: FormatCompat,
     /// True when the row is still missing display data (waveform bytes,
     /// artwork, BPM, or key) that an `inspect_usb_track` deep-resolve could
-    /// fill in. Set during page hydration; the frontend clears it once it has
-    /// inspected that row.
+    /// fill in. Set during page hydration; false on the row an inspect
+    /// returns.
     #[serde(default)]
     pub needs_hydration: bool,
 }

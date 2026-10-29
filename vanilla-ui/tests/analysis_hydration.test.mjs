@@ -3,7 +3,6 @@ import assert from "node:assert/strict";
 import {
   trackNeedsPreviewHydration,
   mergeHydratedTrackIntoState,
-  hydrateTrackPreviewFromBackend,
   hydrateLoadedTracksPreviewsInBackground
 } from "../components/library/actions.mjs";
 import { makeTestCtx } from "./test_helpers.mjs";
@@ -25,23 +24,6 @@ test("mergeHydratedTrackIntoState merges into library and playlist", () => {
   assert.deepEqual(state.tracks[0].waveformPreview, [20]);
   assert.equal(state.playlists[0].tracks[0].title, "New");
   assert.deepEqual(state.playlists[0].tracks[0].waveformPreview, [30]);
-});
-
-test("hydrateTrackPreviewFromBackend merges the fetched preview into the loaded track", async () => {
-  const state = {
-    tracks: [{ id: "1", title: "T", waveformPreview: [] }],
-    playlists: [],
-    trackPreviewHydrateInFlight: new Set(),
-    analyzingTrackIds: new Set(),
-    loadedPreviewHydrationSeq: 0
-  };
-  const ctx = makeTestCtx({
-    state,
-    command: async () => ({ items: [{ id: "1", title: "T", waveformPreview: [5, 9] }] }),
-  });
-  await hydrateTrackPreviewFromBackend(ctx, "1");
-  assert.deepEqual(state.tracks[0].waveformPreview, [5, 9]);
-  assert.equal(state.trackPreviewHydrateInFlight.size, 0);
 });
 
 test("hydrateLoadedTracksPreviewsInBackground fetches every track still missing a preview", async () => {

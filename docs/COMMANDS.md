@@ -74,6 +74,11 @@ with the waveform preview) and `UsbTrack` for a USB file (as
 USB file by its `usbMediaPath`, in every USB playlist and the history) and
 redraws those rows; it merges nothing from the old copy.
 
+A listed file not yet in the library has its path as its row id. When playing
+or adding it gives it a library row, `resolve_track_identity` and each add
+resolution carry that row as `track` (only then), and `showTrackRow` shows it
+in place of the row whose id was the path.
+
 USB-scoped jobs lock the selected USB root in the frontend until the matching
 `job.completed` or `job.failed` event arrives. Locking job types are
 `usb_read`, `usb_write`, `diagnostics`, and `export`; this covers playlist and
@@ -105,7 +110,8 @@ drive selection from being rendered against a newer selected drive.
 - `set_source_folder_enabled` — `{ path, enabled }` → the sources.
 - `set_external_library_enabled` — `{ library: "rekordbox" | "mixxx",
   enabled }` → the sources.
-- `resolve_track_identity`
+- `resolve_track_identity` — `{ trackId, resolvedBy, materialized, track? }`;
+  `track` is the new library row when a listed file was materialized.
 - `relocate_source_root` — `{ oldRoot, newRoot }` → the rewrite counts plus
   `sources`: once every track moved, the new folder replaces the old one;
   otherwise both stay.
@@ -260,7 +266,8 @@ drive selection from being rendered against a newer selected drive.
 - `sync_usb_player_menu_edb_to_pdb`
 - `remove_usb_playlist`
 - `reorder_usb_playlists`
-- `inspect_usb_track`
+- `inspect_usb_track` — `{ source, track, warnings }`; `track` is the whole
+  row as a page shows it (library id resolved), with `needsHydration` false.
 - `initialize_usb`
 - `export_to_usb`
 - `detect_external_rekordbox_db`
@@ -326,7 +333,8 @@ PDB+eDB snapshot pairs taken before every USB-mutating operation.
 
 `add_track_candidates_to_playlist` accepts frontend row candidates, resolves/materializes safe
 local source rows server-side, preserves the USB-origin no-fuzzy-match rule, and then delegates
-to playlist membership insertion.
+to playlist membership insertion. Each resolution names the candidate's `previousId` and resolved
+`trackId`, plus the new library row (`track`) when a listed file was materialized.
 
 `reorder_playlist_tracks` persists a new order to the `playlist_tracks.position` column for a
 local (app-owned) playlist, in one of three request shapes — `orderedTrackIds` (the full order),

@@ -93,7 +93,7 @@ export function createAppContext(env) {
     relocateSourceRoot renderSourceChips applyLibraryDurationSummary renderLibraryRows
     scheduleLibrarySearch resetAndLoadLibraryTracks
     reloadTrackListsForKeyNotation scanLibrary reanalyzeTracks
-    scanRekordboxDb scanMixxxDb analyzeTrackIds analyzeSingleTrack setTrackAnalyzingState promoteTrackIdentity
+    scanRekordboxDb scanMixxxDb analyzeTrackIds analyzeSingleTrack setTrackAnalyzingState
     showTrackRow`);
   bindActions(usb, `setUsbRootControlsLocked refreshPlaylistExportStatus showDiagReportView
     clearUsbDiagnostics hideUsbDiagnostics loadUsbRootFromStorage resetUsbStateViews
@@ -103,8 +103,8 @@ export function createAppContext(env) {
     previewUsbRepairs applyUsbRepairs refreshHistory exportHistoryTracklist
     handleUsbPlayerMenuListClick renderUsbPlayerMenuEditor syncUsbPlayerMenusEdbToPdb
     syncUsbPlayerMenuEditorControls loadUsbPlayerMenuConfig addUsbPlayerMenuItems
-    removeUsbPlayerMenuItems moveUsbPlayerMenuItems exportPlaylistToUsb patchUsbTrackRow
-    patchHistoryTrackRow initializeUsb pickUsbFolder hydrateUsbTrackMetadata loadUsbDevices
+    removeUsbPlayerMenuItems moveUsbPlayerMenuItems exportPlaylistToUsb
+    initializeUsb pickUsbFolder hydrateUsbTrackMetadata loadUsbDevices
     pruneUsbDevice updateUsbRootText`);
   bindActions(trackTable, "buildTrackTableRow renderEmptyTrackTable finishTrackRows");
   bindActions(trackDetail, "openTrackDetail");

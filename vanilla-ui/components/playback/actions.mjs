@@ -308,9 +308,9 @@ export async function resolveLocalTrackIdAsync(ctx, track) {
       usbAnalysisPath: track.usbAnalysisPath || null
     });
     if (data?.trackId) {
-      const previousId = String(track.id || "").trim();
+      // A listed file just given its library row: shown in place of its row.
+      if (data.track) ctx.showTrackRow(data.track, { replaces: track.id });
       track.localTrackId = data.trackId;
-      ctx.promoteTrackIdentity(previousId, data.trackId);
       return data.trackId;
     }
   } catch (_) {

@@ -132,7 +132,6 @@ export function createInitialState() {
     progressStartedAtMs: 0,
     progressPausedAtMs: null,
     librarySearchDebounceTimer: null,
-    trackPreviewHydrateInFlight: new Set(),
     loadedPreviewHydrationSeq: 0,
     analyzingTrackIds: new Set(),
     deletingPlaylistId: null,

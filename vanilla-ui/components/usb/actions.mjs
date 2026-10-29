@@ -1,4 +1,4 @@
-import { warningEntryText, patchUsbRowsInContainer } from "../library/actions.mjs";
+import { warningEntryText } from "../library/actions.mjs";
 import { createTrackListController } from "../shared/track_list_controller.mjs";
 import { narrowTrackSelectionToLoaded } from "../shared/track_selection.mjs";
 import { cloneTemplate } from "../../ui_utils.mjs";
@@ -1635,14 +1635,6 @@ export function createUsbHistoryTracksController(ctx) {
   });
 }
 
-export function patchUsbTrackRow(ctx, track) {
-  return patchUsbRowsInContainer(ctx, ctx.el.usbPlaylistTracks, track);
-}
-
-export function patchHistoryTrackRow(ctx, track) {
-  return patchUsbRowsInContainer(ctx, ctx.el.historyTracks, track);
-}
-
 export async function initializeUsb(ctx) {
   const { state, el } = ctx;
   const { emitStatus } = ctx;
@@ -1669,12 +1661,18 @@ export async function pickUsbFolder(ctx) {
   return selected;
 }
 
+// A clicked USB row the page fetch couldn't fill in completely: the backend
+// inspects the track and answers with its whole row, shown on every loaded
+// copy of that file.
 export async function hydrateUsbTrackMetadata(ctx, track) {
   // Backend-owned: `needsHydration` (service::usb::hydrate_usb_track_in_place)
   // says whether an inspect could still fill anything in.
-  if (!track || track.needsHydration !== true) return track;
+  if (!track || track.needsHydration !== true) return;
   const trackId = String(track.id || "").trim();
-  if (!/^\d+$/.test(trackId)) return track;
+  if (!/^\d+$/.test(trackId)) return;
+  // Asked once: the inspected row comes back with the flag cleared, and a
+  // failed inspect isn't retried.
+  track.needsHydration = false;
   try {
     const inspected = await ctx.command("inspect_usb_track", {
       usbRoot: ctx.state.usbRoot,
@@ -1683,26 +1681,10 @@ export async function hydrateUsbTrackMetadata(ctx, track) {
       title: track.title || "",
       artist: track.artist || ""
     });
-    applyHydratedTrackResult(ctx, track, inspected?.track);
+    ctx.showTrackRow(inspected?.track);
   } catch (err) {
     console.warn(`inspect_usb_track failed for ${trackId}:`, err);
   }
-  // We've inspected this row -- don't ask again even if fields are still blank.
-  track.needsHydration = false;
-  return track;
-}
-
-function applyHydratedTrackResult(ctx, track, inspectedTrack) {
-  if (!inspectedTrack || typeof inspectedTrack !== "object") {
-    track.artworkChecked = true;
-    return;
-  }
-  const normalized = ctx.normalizeTrack({ ...track, ...inspectedTrack });
-  if (!normalized.localTrackId && track.localTrackId) {
-    normalized.localTrackId = track.localTrackId;
-  }
-  normalized.artworkChecked = true;
-  Object.assign(track, normalized);
 }
 
 // Replaces the old localStorage/app_settings "recent USB roots" list with a

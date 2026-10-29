@@ -1,4 +1,4 @@
-import { catchErr, handleTrackAction, trackMetaFingerprint, resolveRowActionTrack } from "../shared/track_actions.mjs";
+import { catchErr, handleTrackAction, resolveRowActionTrack } from "../shared/track_actions.mjs";
 import { bindListDragReorder, moveArrayItem } from "../shared/list_drag_reorder.mjs";
 import { setActiveListItem } from "../shell/actions.mjs";
 import { bindTrackSelection } from "../shared/track_selection.mjs";
@@ -35,8 +35,6 @@ export function bindUsbEvents(ctx) {
     stopPlaybackIfActive,
     hydrateUsbTrackMetadata,
     pruneUsbDevice,
-    patchUsbTrackRow,
-    patchHistoryTrackRow,
   } = ctx;
   const { emitStatus } = ctx;
   // USB-playlist and USB-history track tables: fetch / paginate / search /
@@ -270,11 +268,7 @@ export function bindUsbEvents(ctx) {
     if (!action) {
       // Rows arrive hydrated from fetch_usb_playlist_tracks; this is the
       // belt-and-suspenders re-hydrate for a row that somehow still isn't.
-      const before = trackMetaFingerprint(track);
       await hydrateUsbTrackMetadata(track);
-      if (trackMetaFingerprint(track) !== before && !patchUsbTrackRow(track)) {
-        usbPlaylistTracksCtl.rerender();
-      }
       return;
     }
 
@@ -316,11 +310,7 @@ export function bindUsbEvents(ctx) {
     if (!track) return;
 
     if (!action) {
-      const before = trackMetaFingerprint(track);
       await hydrateUsbTrackMetadata(track);
-      if (trackMetaFingerprint(track) !== before && !patchHistoryTrackRow(track)) {
-        usbHistoryTracksCtl.rerender();
-      }
       return;
     }
 

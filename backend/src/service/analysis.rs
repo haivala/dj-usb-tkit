@@ -202,7 +202,6 @@ struct TrackPartialUpdate {
     bpm_analyzer: Option<String>,
     key: Option<String>,
     artwork_path: Option<String>,
-    waveform_peaks_path: Option<String>,
     waveform_preview: Option<Vec<u8>>,
     duration_ms: Option<u64>,
 }
@@ -227,7 +226,7 @@ fn build_partial_progress(
         key_display: None,
         key_color: None,
         artwork_path: update.artwork_path,
-        waveform_peaks_path: update.waveform_peaks_path,
+        waveform_peaks_path: None,
         waveform_preview: update.waveform_preview,
         duration_ms: update.duration_ms,
         track_ready: false,
@@ -1618,15 +1617,42 @@ fn analyze_local_track_with_updates(
     // "analyzed" into a waveform drawn from its raw bytes.
     let (samples, sample_rate) = decode_audio_mono_samples(&path, ANALYSIS_DECODE_MAX_SAMPLES)?;
 
-    // Emission order (artwork, waveform, duration, bpm/key) mirrors the track
-    // row's left-to-right column order in the UI. A couple of pieces still
-    // have to be *computed* earlier than they're emitted: waveform generation
-    // needs duration_ms (for bin count) and bpm/first_beat_ms (embedded into
-    // the ANLZ bundle), so those are computed up front and only emitted later.
+    // Each piece is sent as soon as it is known, in the row's column order:
+    // the cover, then the waveform and the length (from the decode), then BPM
+    // / key after their detection, the slow part. The analysis bundle needs
+    // the BPM and first beat, so it is written only after that.
     let persisted_artwork = resolve_persisted_artwork(&path, artwork_dir, track_id);
     if persisted_artwork.is_some() {
         on_update(TrackPartialUpdate {
             artwork_path: persisted_artwork.clone(),
+            ..TrackPartialUpdate::default()
+        });
+    }
+
+    let duration_ms = detect_track_duration_ms(&path)
+        .or_else(|| duration_ms_from_decoded(samples.len(), sample_rate));
+    // The waveform's detail entries are a time axis: with no known length
+    // there is no waveform, rather than one stretched to a made-up length.
+    let waveform = match duration_ms {
+        Some(duration_ms) => build_waveform_data_from_samples_with_rate(
+            &samples,
+            waveform_detail_bins_for_duration(duration_ms),
+            sample_rate,
+        ),
+        None => WaveformData::empty(),
+    };
+    if !waveform.peaks.is_empty() {
+        on_update(TrackPartialUpdate {
+            waveform_preview: Some(downsample_waveform_peaks(
+                &waveform.peaks,
+                WAVEFORM_PREVIEW_BINS,
+            )),
+            ..TrackPartialUpdate::default()
+        });
+    }
+    if duration_ms.is_some() {
+        on_update(TrackPartialUpdate {
+            duration_ms,
             ..TrackPartialUpdate::default()
         });
     }
@@ -1648,19 +1674,6 @@ fn analyze_local_track_with_updates(
         *existing_first_beat_ms,
         *kept_first_beat_ms,
     );
-    let duration_ms = detect_track_duration_ms(&path)
-        .or_else(|| duration_ms_from_decoded(samples.len(), sample_rate));
-
-    // The waveform's detail entries are a time axis: with no known length
-    // there is no waveform, rather than one stretched to a made-up length.
-    let waveform = match duration_ms {
-        Some(duration_ms) => build_waveform_data_from_samples_with_rate(
-            &samples,
-            waveform_detail_bins_for_duration(duration_ms),
-            sample_rate,
-        ),
-        None => WaveformData::empty(),
-    };
     let bundle_paths = local_analysis_bundle_paths(waveform_dir, track_id, file_path);
     let waveform_peaks_path =
         if let Some(duration_ms) = duration_ms.filter(|_| !waveform.peaks.is_empty()) {
@@ -1684,20 +1697,6 @@ fn analyze_local_track_with_updates(
             None
         };
     let waveform_preview = waveform_preview_if_persisted(&waveform, &waveform_peaks_path);
-    if waveform_peaks_path.is_some() || waveform_preview.is_some() {
-        on_update(TrackPartialUpdate {
-            waveform_peaks_path: waveform_peaks_path.clone(),
-            waveform_preview: waveform_preview.clone(),
-            ..TrackPartialUpdate::default()
-        });
-    }
-
-    if duration_ms.is_some() {
-        on_update(TrackPartialUpdate {
-            duration_ms,
-            ..TrackPartialUpdate::default()
-        });
-    }
 
     if bpm.is_some() || key.is_some() {
         on_update(TrackPartialUpdate {

@@ -559,15 +559,14 @@ export async function deletePlaylist(ctx, playlistId) {
 }
 
 // An add's per-candidate resolutions, onto the rows it was sent from: each
-// row learns its local track id, and a row that had another id hands its
-// identity over to the resolved one.
+// row learns its local track id, and a listed file given its library row
+// shows that row in place of its own.
 export function applyAddResolutions(ctx, tracks, resolutions) {
   (resolutions || []).forEach((resolution, i) => {
     const resolvedId = String(resolution?.trackId || "").trim();
     if (!resolvedId) return;
+    if (resolution.track) ctx.showTrackRow(resolution.track, { replaces: resolution.previousId });
     if (tracks?.[i]) tracks[i].localTrackId = resolvedId;
-    const previousId = String(resolution.previousId || "").trim();
-    if (previousId && previousId !== resolvedId) ctx.promoteTrackIdentity(previousId, resolvedId);
   });
 }
 

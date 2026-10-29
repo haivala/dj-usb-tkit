@@ -1101,6 +1101,7 @@ impl BackendService {
                 track_id: resolved.track_id,
                 resolved_by: resolved.matched_by.into(),
                 materialized: false,
+                track: None,
             });
         }
 
@@ -1120,10 +1121,12 @@ impl BackendService {
                 bitrate_kbps: req.bitrate_kbps,
             })
         {
+            let track = track_rows(&*self.db.connect()?, std::slice::from_ref(&data.track_id))?.pop();
             return Ok(ResolveTrackIdentityData {
                 track_id: Some(data.track_id),
                 resolved_by: ResolvedBy::Materialized,
                 materialized: true,
+                track,
             });
         }
 
@@ -1131,6 +1134,7 @@ impl BackendService {
             track_id: resolved.track_id,
             resolved_by: resolved.matched_by.into(),
             materialized: false,
+            track: None,
         })
     }
 

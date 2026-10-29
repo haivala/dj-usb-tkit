@@ -28,14 +28,12 @@ test("createInitialState creates fresh mutable containers", () => {
 
   a.selectedTrackIds.add("1");
   a.playlistUsbExportStatusById.set("p1", { sameNameExistsOnUsb: true, locksReorder: true });
-  a.trackPreviewHydrateInFlight.add("t1");
   a.analyzingTrackIds.add("t2");
   a.selectedRepairFixIds.add("fix1");
   a.librarySources.folders.push({ path: "/music" });
 
   assert.equal(b.selectedTrackIds.size, 0);
   assert.equal(b.playlistUsbExportStatusById.size, 0);
-  assert.equal(b.trackPreviewHydrateInFlight.size, 0);
   assert.equal(b.analyzingTrackIds.size, 0);
   assert.equal(b.selectedRepairFixIds.size, 0);
   assert.deepEqual(b.librarySources.folders, []);

@@ -300,15 +300,18 @@ test("a slow page load shows the loading indicator instead of stale rows", async
 });
 
 // A row that somehow still isn't fully hydrated: clicking it re-hydrates via
-// `inspect_usb_track` (singular) and patches just that row's cells in place;
-// if the row is gone by the time hydration resolves it full-rerenders.
-// Track id "3" is left un-hydrated by the page fetch to exercise both paths.
+// `inspect_usb_track` (singular), which answers with the whole row, patched
+// into just that row's cells. Track id "3" is left un-hydrated by the page
+// fetch.
 function installRowClickMock(page) {
   return page.addInitScript(() => {
     window.localStorage.setItem("djusbtkit.helpSeen", "1");
     window.__singleInspectCalls = [];
 
-    const tracks = Array.from({ length: 5 }, (_, i) => ({ id: String(i + 1), title: `Track ${String(i).padStart(4, "0")}`, artist: "Same Artist", album: "Album" }));
+    const tracks = Array.from({ length: 5 }, (_, i) => ({
+      id: String(i + 1), title: `Track ${String(i).padStart(4, "0")}`, artist: "Same Artist", album: "Album",
+      usbMediaPath: `/Contents/Same Artist/Album/track${i + 1}.mp3`,
+    }));
     const base = window.__usbSpecHelpers.baseUsbCommands;
     const responder = window.__usbSpecHelpers.playlistTracksResponder(
       tracks,
@@ -336,7 +339,15 @@ function installRowClickMock(page) {
           if (command === "inspect_usb_track") {
             window.__singleInspectCalls.push(payload?.request?.trackId);
             await new Promise((resolve) => { window.__releaseInspectUsbTrack = resolve; });
-            return { ok: true, data: { source: "pdb", track: { bpm: 128, key: "5A", waveformPreview: [5, 15, 25, 15, 5] } } };
+            // The whole row, as the backend answers.
+            const row = tracks.find((t) => t.id === payload?.request?.trackId);
+            return {
+              ok: true,
+              data: {
+                source: "pdb",
+                track: { ...row, bpm: 128, key: "5A", waveformPreview: [5, 15, 25, 15, 5], needsHydration: false },
+              },
+            };
           }
           return { ok: false, error: { code: "INTERNAL_ERROR", message: `Unknown mock command: ${command}` } };
         },
@@ -369,26 +380,4 @@ test("clicking an unhydrated track row patches it in place instead of re-renderi
   await expect(siblingRow).toHaveAttribute("data-test-marker", "keep");
   const singleCalls = await page.evaluate(() => window.__singleInspectCalls);
   expect(singleCalls).toEqual(["3"]);
-});
-
-test("falls back to a full re-render when the clicked row is gone by the time hydration resolves", async ({ page }) => {
-  await installSpecHelpers(page);
-  await installRowClickMock(page);
-  await selectBigPlaylist(page);
-  await expect(page.locator("#usbPlaylistTracks .track-grid-row")).toHaveCount(5);
-
-  const targetRow = page.locator('#usbPlaylistTracks .track-grid-row[data-track-id="3"]');
-  await targetRow.click();
-  await page.waitForFunction(() => typeof window.__releaseInspectUsbTrack === "function");
-
-  await page.locator("#usbPlaylistTracks").evaluate((container) => {
-    container.querySelector('.track-grid-row[data-track-id="3"]')?.remove();
-  });
-  await expect(page.locator('#usbPlaylistTracks .track-grid-row[data-track-id="3"]')).toHaveCount(0);
-  await page.evaluate(() => window.__releaseInspectUsbTrack());
-
-  const recoveredRow = page.locator('#usbPlaylistTracks .track-grid-row[data-track-id="3"]');
-  await expect(recoveredRow).toHaveCount(1);
-  await expect(recoveredRow.locator(".bpm-pill")).toHaveText("128.00");
-  await expect(page.locator("#usbPlaylistTracks .track-grid-row")).toHaveCount(5);
 });
