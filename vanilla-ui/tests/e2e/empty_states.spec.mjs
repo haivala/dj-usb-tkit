@@ -9,6 +9,11 @@ function installEmptyStateMock(page) {
     window.__TAURI__ = {
       core: {
         invoke: async (command, payload = {}) => {
+          if (command === "get_library_sources") {
+            const folders = (window.__e2eSourceFolders || [])
+              .map((path) => ({ path, enabled: true, missing: false, fullyAnalyzed: false }));
+            return { ok: true, data: { folders, rekordboxDbEnabled: false, mixxxDbEnabled: false, everConfigured: folders.length > 0 } };
+          }
           if (command === "clear_frontend_log") return "";
           if (command === "append_frontend_log") return null;
           if (command === "show_window") return null;
@@ -68,7 +73,8 @@ test("Empty states render correctly", async ({ page }) => {
 test("Configured source folders with zero indexed tracks prompt scan and keep controls visible", async ({ page }) => {
   await installEmptyStateMock(page);
   await page.addInitScript(() => {
-    window.localStorage.setItem("djusbtkit.sourceRoots", JSON.stringify(["/music"]));
+    // The library\'s source folders, as `get_library_sources` answers.
+    window.__e2eSourceFolders = ["/music"];
   });
   await page.goto("/");
 
@@ -98,6 +104,11 @@ test("A playlist with tracks shows loading, never the empty screen", async ({ pa
     window.__TAURI__ = {
       core: {
         invoke: async (command, payload = {}) => {
+          if (command === "get_library_sources") {
+            const folders = (window.__e2eSourceFolders || [])
+              .map((path) => ({ path, enabled: true, missing: false, fullyAnalyzed: false }));
+            return { ok: true, data: { folders, rekordboxDbEnabled: false, mixxxDbEnabled: false, everConfigured: folders.length > 0 } };
+          }
           if (command === "clear_frontend_log") return "";
           if (command === "append_frontend_log") return null;
           if (command === "show_window") return null;

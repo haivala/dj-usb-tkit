@@ -4,6 +4,7 @@
 //! unconditionally in CI and sandboxed environments alike.
 
 mod common;
+mod library_sources;
 
 use std::fs;
 use std::path::{Path, PathBuf};
@@ -98,9 +99,14 @@ fn scan_and_export_single_track(
     });
     assert!(scan.ok, "scan failed: {scan:?}");
 
+    library_sources::show_only(
+        &backend,
+        vec![media.to_string_lossy().to_string()],
+        false,
+        false,
+    );
     let scanned = backend
         .browse_source_files(BrowseSourceFilesRequest {
-            source_roots: vec![media.to_string_lossy().to_string()],
             query: String::new(),
             limit: 10,
             cursor: None,
@@ -124,8 +130,13 @@ fn scan_and_export_single_track(
     assert!(created.ok, "create playlist failed: {created:?}");
     let playlist_id = created.data.expect("playlist data").playlist_id;
 
+    library_sources::show_only(
+        &backend,
+        vec![media.to_string_lossy().to_string()],
+        false,
+        false,
+    );
     let added = backend.add_library_selection_to_playlist(AddLibrarySelectionToPlaylistRequest {
-        source_roots: vec![media.to_string_lossy().to_string()],
         playlist_id: playlist_id.clone(),
         track_ids: vec![track_id.clone()],
         ..Default::default()
@@ -171,9 +182,14 @@ fn scan_and_export_tracks(
     });
     assert!(scan.ok, "scan failed: {scan:?}");
 
+    library_sources::show_only(
+        &backend,
+        vec![media.to_string_lossy().to_string()],
+        false,
+        false,
+    );
     let scanned = backend
         .browse_source_files(BrowseSourceFilesRequest {
-            source_roots: vec![media.to_string_lossy().to_string()],
             query: String::new(),
             limit: 50,
             cursor: None,
@@ -201,8 +217,13 @@ fn scan_and_export_tracks(
     assert!(created.ok, "create playlist failed: {created:?}");
     let playlist_id = created.data.expect("playlist data").playlist_id;
 
+    library_sources::show_only(
+        &backend,
+        vec![media.to_string_lossy().to_string()],
+        false,
+        false,
+    );
     let added = backend.add_library_selection_to_playlist(AddLibrarySelectionToPlaylistRequest {
-        source_roots: vec![media.to_string_lossy().to_string()],
         playlist_id: playlist_id.clone(),
         track_ids: track_ids.clone(),
         ..Default::default()
@@ -1123,9 +1144,9 @@ fn library_group_edit_changes_only_named_fields_on_every_track() {
             })
             .ok
     );
+    library_sources::show_only(&backend, roots, false, false);
     let ids: Vec<String> = backend
         .browse_source_files(BrowseSourceFilesRequest {
-            source_roots: roots,
             limit: 10,
             ..Default::default()
         })

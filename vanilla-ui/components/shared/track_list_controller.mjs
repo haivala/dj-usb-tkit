@@ -60,7 +60,7 @@ export function createTrackListController(config = {}) {
     renderDurationSummary = () => {},
     // (pageTracks, { first }) -> void  (e.g. library kicks off bg preview hydration)
     onPage = () => {},
-    // (envelope) -> void  (e.g. library consumes sourceRootAnalysis)
+    // (envelope) -> void  (e.g. the library's track-count heading)
     onResponse = () => {},
     // (scopeId) -> void  -- the shown list changed (load with a new scopeId,
     // or clear); e.g. the USB playlist view's heading.

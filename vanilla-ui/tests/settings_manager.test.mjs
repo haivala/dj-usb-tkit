@@ -3,24 +3,14 @@ import assert from "node:assert/strict";
 
 import {
   hydrateLocalStorageFromFrontendSettingsDb,
-  loadSourceRootEnabledFromStorage,
-  loadSourceRootsFromStorage,
-  loadSourcesEverConfiguredFromStorage,
   persistSetting,
-  persistSourceRootEnabled,
-  persistSourceRoots,
   persistUsbRoot
 } from "../components/settings/actions.mjs";
 import {
   FRONTEND_DB_KEY_ANALYSIS_ENGINE,
-  FRONTEND_DB_KEY_SOURCE_ROOT_ENABLED,
-  FRONTEND_DB_KEY_SOURCE_ROOTS,
   FRONTEND_DB_KEY_THEME,
   FRONTEND_DB_KEY_USB_ROOT,
   STORAGE_KEY_ANALYSIS_ENGINE,
-  STORAGE_KEY_SOURCE_ROOT_ENABLED,
-  STORAGE_KEY_SOURCE_ROOTS,
-  STORAGE_KEY_SOURCES_EVER_CONFIGURED,
   STORAGE_KEY_THEME,
   STORAGE_KEY_USB_ROOT
 } from "../settings_keys.mjs";
@@ -32,17 +22,6 @@ function installLocalStorage() {
     setItem: (key, value) => { store.set(key, String(value)); },
     removeItem: (key) => { store.delete(key); },
     clear: () => { store.clear(); }
-  };
-}
-
-function makeState(overrides = {}) {
-  return {
-    usbRecentRoots: [],
-    sourceRoots: [],
-    sourceRootEnabled: {},
-    rekordboxDbEnabled: false,
-    sourcesEverConfigured: false,
-    ...overrides
   };
 }
 
@@ -58,20 +37,14 @@ test("persistence helpers mirror localStorage values to the frontend settings DB
   await persistSetting(ctx, STORAGE_KEY_THEME, FRONTEND_DB_KEY_THEME, "dark");
   localStorage.setItem(STORAGE_KEY_USB_ROOT, "/tmp/usb");
   await persistSetting(ctx, STORAGE_KEY_USB_ROOT, FRONTEND_DB_KEY_USB_ROOT, "");
-  persistSourceRoots(ctx, ["/music/a", "/music/b"]);
   persistUsbRoot(ctx, "/usb/root");
-  persistSourceRootEnabled(ctx, { "/music/a": true, "/music/b": false });
 
   assert.equal(localStorage.getItem(STORAGE_KEY_THEME), "dark");
   assert.equal(localStorage.getItem(STORAGE_KEY_USB_ROOT), "/usb/root");
-  assert.equal(localStorage.getItem(STORAGE_KEY_SOURCE_ROOTS), "[\"/music/a\",\"/music/b\"]");
-  assert.equal(localStorage.getItem(STORAGE_KEY_SOURCE_ROOT_ENABLED), "{\"/music/a\":true,\"/music/b\":false}");
   assert.deepEqual(calls.map((call) => call.payload), [
     { key: FRONTEND_DB_KEY_THEME, value: "dark" },
     { key: FRONTEND_DB_KEY_USB_ROOT, value: null },
-    { key: FRONTEND_DB_KEY_SOURCE_ROOTS, value: "[\"/music/a\",\"/music/b\"]" },
-    { key: FRONTEND_DB_KEY_USB_ROOT, value: "/usb/root" },
-    { key: FRONTEND_DB_KEY_SOURCE_ROOT_ENABLED, value: "{\"/music/a\":true,\"/music/b\":false}" }
+    { key: FRONTEND_DB_KEY_USB_ROOT, value: "/usb/root" }
   ]);
 });
 
@@ -91,23 +64,4 @@ test("hydrateLocalStorageFromFrontendSettingsDb copies DB-backed values into loc
 
   assert.equal(localStorage.getItem(STORAGE_KEY_THEME), "light");
   assert.equal(localStorage.getItem(STORAGE_KEY_ANALYSIS_ENGINE), "stratum");
-});
-
-test("storage loaders recover invalid JSON and derive sources-ever-configured", () => {
-  const invalid = makeState();
-  localStorage.setItem(STORAGE_KEY_SOURCE_ROOTS, "{");
-  localStorage.setItem(STORAGE_KEY_SOURCE_ROOT_ENABLED, "{");
-  loadSourceRootsFromStorage({ state: invalid, localStorage });
-  loadSourceRootEnabledFromStorage({ state: invalid, localStorage });
-  assert.deepEqual(invalid.sourceRoots, []);
-  assert.deepEqual(invalid.sourceRootEnabled, {});
-
-  const migrated = makeState({ sourceRoots: ["/music"] });
-  loadSourcesEverConfiguredFromStorage({ state: migrated, localStorage });
-  assert.equal(migrated.sourcesEverConfigured, true);
-
-  const persisted = makeState();
-  localStorage.setItem(STORAGE_KEY_SOURCES_EVER_CONFIGURED, "1");
-  loadSourcesEverConfiguredFromStorage({ state: persisted, localStorage });
-  assert.equal(persisted.sourcesEverConfigured, true);
 });

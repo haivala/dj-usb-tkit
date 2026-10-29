@@ -1,3 +1,5 @@
+mod library_sources;
+
 use std::fs;
 use std::path::Path;
 use std::path::PathBuf;
@@ -111,12 +113,17 @@ fn user_like_flow_imports_sources_analyzes_and_adds_from_library_usb_and_history
     assert_eq!(remove_data.scoped_track_count, 3);
     assert_eq!(remove_data.unanalyzed_count, 3);
 
+    library_sources::show_only(
+        &backend,
+        vec![
+            source_a.to_string_lossy().to_string(),
+            source_b.to_string_lossy().to_string(),
+        ],
+        false,
+        false,
+    );
     let remaining_tracks = backend
         .browse_source_files(BrowseSourceFilesRequest {
-            source_roots: vec![
-                source_a.to_string_lossy().to_string(),
-                source_b.to_string_lossy().to_string(),
-            ],
             query: String::new(),
             limit: 50,
             cursor: None,
@@ -143,12 +150,17 @@ fn user_like_flow_imports_sources_analyzes_and_adds_from_library_usb_and_history
     assert_eq!(analyzed_data.analyzed, 3, "expected 3 analyzed tracks");
     assert_eq!(analyzed_data.failed, 0, "analysis should not fail");
 
+    library_sources::show_only(
+        &backend,
+        vec![
+            source_a.to_string_lossy().to_string(),
+            source_b.to_string_lossy().to_string(),
+        ],
+        false,
+        false,
+    );
     let analyzed_tracks = backend
         .browse_source_files(BrowseSourceFilesRequest {
-            source_roots: vec![
-                source_a.to_string_lossy().to_string(),
-                source_b.to_string_lossy().to_string(),
-            ],
             query: String::new(),
             limit: 50,
             cursor: None,
@@ -206,13 +218,18 @@ fn user_like_flow_imports_sources_analyzes_and_adds_from_library_usb_and_history
         .expect("source playlist data")
         .playlist_id;
 
+    library_sources::show_only(
+        &backend,
+        vec![
+            source_a.to_string_lossy().to_string(),
+            source_b.to_string_lossy().to_string(),
+        ],
+        false,
+        false,
+    );
     let add_source_tracks =
         backend.add_library_selection_to_playlist(AddLibrarySelectionToPlaylistRequest {
             playlist_id: source_playlist_id.clone(),
-            source_roots: vec![
-                source_a.to_string_lossy().to_string(),
-                source_b.to_string_lossy().to_string(),
-            ],
             track_ids: remaining_ids.clone(),
             ..Default::default()
         });
@@ -363,13 +380,18 @@ fn user_like_flow_imports_sources_analyzes_and_adds_from_library_usb_and_history
         .expect("target playlist data")
         .playlist_id;
 
+    library_sources::show_only(
+        &backend,
+        vec![
+            source_a.to_string_lossy().to_string(),
+            source_b.to_string_lossy().to_string(),
+        ],
+        false,
+        false,
+    );
     let add_from_library =
         backend.add_library_selection_to_playlist(AddLibrarySelectionToPlaylistRequest {
             playlist_id: target_playlist_id.clone(),
-            source_roots: vec![
-                source_a.to_string_lossy().to_string(),
-                source_b.to_string_lossy().to_string(),
-            ],
             track_ids: vec![library_track_id.clone()],
             ..Default::default()
         });
@@ -606,9 +628,14 @@ fn first_analysis_keeps_imported_bpm_and_key_and_reanalysis_resets_them() {
         incremental: true,
     });
     assert!(scan.ok, "scan failed: {scan:?}");
+    library_sources::show_only(
+        &backend,
+        vec![source.to_string_lossy().to_string()],
+        false,
+        false,
+    );
     let track_id = backend
         .browse_source_files(BrowseSourceFilesRequest {
-            source_roots: vec![source.to_string_lossy().to_string()],
             query: String::new(),
             limit: 10,
             cursor: None,
@@ -756,9 +783,14 @@ fn analyze_local_track_waveform_preview_comes_from_anlz_roundtrip() {
     });
     assert!(scan.ok, "scan failed: {scan:?}");
 
+    library_sources::show_only(
+        &backend,
+        vec![source.to_string_lossy().to_string()],
+        false,
+        false,
+    );
     let tracks = backend
         .browse_source_files(BrowseSourceFilesRequest {
-            source_roots: vec![source.to_string_lossy().to_string()],
             query: String::new(),
             limit: 50,
             cursor: None,
@@ -828,9 +860,14 @@ fn save_track_analysis_edits_bakes_cues_and_first_beat_into_cached_anlz() {
         source_roots: vec![source.to_string_lossy().to_string()],
         incremental: true,
     });
+    library_sources::show_only(
+        &backend,
+        vec![source.to_string_lossy().to_string()],
+        false,
+        false,
+    );
     let track_id = backend
         .browse_source_files(BrowseSourceFilesRequest {
-            source_roots: vec![source.to_string_lossy().to_string()],
             query: String::new(),
             limit: 10,
             cursor: None,
@@ -959,9 +996,14 @@ fn export_to_usb_writes_cues_into_anlz_and_edb() {
         source_roots: vec![source.to_string_lossy().to_string()],
         incremental: true,
     });
+    library_sources::show_only(
+        &backend,
+        vec![source.to_string_lossy().to_string()],
+        false,
+        false,
+    );
     let track_id = backend
         .browse_source_files(BrowseSourceFilesRequest {
-            source_roots: vec![source.to_string_lossy().to_string()],
             query: String::new(),
             limit: 10,
             cursor: None,
@@ -1014,8 +1056,13 @@ fn export_to_usb_writes_cues_into_anlz_and_edb() {
         .data
         .expect("playlist")
         .playlist_id;
+    library_sources::show_only(
+        &backend,
+        vec![source.to_string_lossy().to_string()],
+        false,
+        false,
+    );
     backend.add_library_selection_to_playlist(AddLibrarySelectionToPlaylistRequest {
-        source_roots: vec![source.to_string_lossy().to_string()],
         playlist_id: playlist_id.clone(),
         track_ids: vec![track_id.clone()],
         ..Default::default()
@@ -1317,9 +1364,14 @@ fn export_one_track_with_cues(
         source_roots: vec![source.to_string_lossy().to_string()],
         incremental: true,
     });
+    library_sources::show_only(
+        &backend,
+        vec![source.to_string_lossy().to_string()],
+        false,
+        false,
+    );
     let track_id = backend
         .browse_source_files(BrowseSourceFilesRequest {
-            source_roots: vec![source.to_string_lossy().to_string()],
             query: String::new(),
             limit: 10,
             cursor: None,
@@ -1356,8 +1408,13 @@ fn export_one_track_with_cues(
         .data
         .expect("playlist")
         .playlist_id;
+    library_sources::show_only(
+        &backend,
+        vec![source.to_string_lossy().to_string()],
+        false,
+        false,
+    );
     backend.add_library_selection_to_playlist(AddLibrarySelectionToPlaylistRequest {
-        source_roots: vec![source.to_string_lossy().to_string()],
         playlist_id: playlist_id.clone(),
         track_ids: vec![track_id.clone()],
         ..Default::default()
@@ -2843,9 +2900,14 @@ fn startup_hydration_reopen_keeps_waveform_bpm_key_and_length_without_reanalysis
     });
     assert!(scan.ok, "scan failed: {scan:?}");
 
+    library_sources::show_only(
+        &backend,
+        vec![source.to_string_lossy().to_string()],
+        false,
+        false,
+    );
     let scanned = backend
         .browse_source_files(BrowseSourceFilesRequest {
-            source_roots: vec![source.to_string_lossy().to_string()],
             query: String::new(),
             limit: 50,
             cursor: None,
@@ -2869,9 +2931,14 @@ fn startup_hydration_reopen_keeps_waveform_bpm_key_and_length_without_reanalysis
     assert_eq!(analyze_data.analyzed, 1);
     assert_eq!(analyze_data.failed, 0);
 
+    library_sources::show_only(
+        &backend,
+        vec![source.to_string_lossy().to_string()],
+        false,
+        false,
+    );
     let before = backend
         .browse_source_files(BrowseSourceFilesRequest {
-            source_roots: vec![source.to_string_lossy().to_string()],
             query: String::new(),
             limit: 50,
             cursor: None,
@@ -2938,9 +3005,14 @@ fn startup_hydration_reopen_keeps_waveform_bpm_key_and_length_without_reanalysis
         "hydrated waveform preview should contain non-zero bins"
     );
 
+    library_sources::show_only(
+        &reopened,
+        vec![source.to_string_lossy().to_string()],
+        false,
+        false,
+    );
     let after = reopened
         .browse_source_files(BrowseSourceFilesRequest {
-            source_roots: vec![source.to_string_lossy().to_string()],
             query: String::new(),
             limit: 50,
             cursor: None,
@@ -2991,11 +3063,14 @@ fn browse_only_track_can_be_materialized_and_added_without_scan_or_analysis() {
     .expect("copy fixture track");
 
     let backend = BackendCommands::new(&data_dir).expect("create backend");
+    library_sources::show_only(
+        &backend,
+        vec![source.to_string_lossy().to_string()],
+        false,
+        false,
+    );
     let browsed = backend
         .browse_source_files(BrowseSourceFilesRequest {
-            source_roots: vec![source.to_string_lossy().to_string()],
-            include_rekordbox_db: false,
-            include_mixxx_db: false,
             query: String::new(),
             limit: 50,
             cursor: None,
@@ -3035,8 +3110,13 @@ fn browse_only_track_can_be_materialized_and_added_without_scan_or_analysis() {
     assert!(created.ok, "create failed: {created:?}");
     let playlist_id = created.data.expect("playlist data").playlist_id;
 
+    library_sources::show_only(
+        &backend,
+        vec![source.to_string_lossy().to_string()],
+        false,
+        false,
+    );
     let added = backend.add_library_selection_to_playlist(AddLibrarySelectionToPlaylistRequest {
-        source_roots: vec![source.to_string_lossy().to_string()],
         playlist_id: playlist_id.clone(),
         track_ids: vec![materialized.track_id.clone()],
         ..Default::default()

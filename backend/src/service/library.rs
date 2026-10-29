@@ -190,11 +190,27 @@ impl BackendService {
     }
 
     pub fn scan_library(&self, req: ScanLibraryRequest) -> BackendResult<ScanLibraryData> {
-        let source_roots = sanitize_source_roots(req.source_roots);
+        let mut source_roots = sanitize_source_roots(req.source_roots);
         if source_roots.is_empty() {
-            return Err(BackendError::Validation(
-                "sourceRoots must contain at least one path".to_string(),
-            ));
+            // The library's switched-on folders; a missing one is reported in
+            // `not_found` below.
+            let sources = LibrarySources::load(&*self.db.connect()?)?;
+            if sources.roots.is_empty() {
+                return Err(BackendError::Validation(
+                    "Add a source folder before scanning".to_string(),
+                ));
+            }
+            source_roots = sources
+                .roots
+                .iter()
+                .filter(|root| sources.is_enabled(root))
+                .cloned()
+                .collect();
+            if source_roots.is_empty() {
+                return Err(BackendError::Validation(
+                    "Switch on at least one source folder before scanning".to_string(),
+                ));
+            }
         }
 
         let mut existing_roots = Vec::<String>::new();
@@ -634,12 +650,11 @@ impl BackendService {
     /// Builds the complete library track list for a set of source roots
     /// (plus optional master.db tracks) -- NOT filtered by search query.
     /// This is the expensive, I/O-bound part (filesystem scan + DB read),
-    /// shared by `compute_visible_library_tracks` below and by
-    /// `browse_source_files` directly (which needs the *unfiltered* set to
-    /// compute `source_root_analysis` -- a folder's analyzed status must
-    /// not depend on the current search query -- without scanning twice).
-    /// Sanitizes/sorts/dedups `source_roots` itself, so callers may pass
-    /// raw values.
+    /// shared by `compute_visible_library_tracks` below, by
+    /// `browse_source_files` directly (which needs the *unfiltered* set for
+    /// its whole-list totals without scanning twice) and by the source
+    /// chips' analyzed status (`library_sources_data`). Sanitizes/sorts/dedups
+    /// `source_roots` itself, so callers may pass raw values.
     pub(super) fn compute_all_library_tracks(
         &self,
         conn: &rusqlite::Connection,
@@ -822,21 +837,20 @@ impl BackendService {
         Ok(items)
     }
 
-    /// Builds the complete filtered track list for a set of source roots
-    /// (plus optional master.db tracks) matching a search query -- the same
-    /// filtering `browse_source_files` returns to the frontend before it's
-    /// paginated. Shared by `browse_source_files` and the analysis pipeline
-    /// (which uses it to compute the live library-duration-total baseline),
-    /// so both stay consistent by construction. Sanitizes/sorts/dedups
-    /// `source_roots` itself, so callers may pass raw values.
+    /// The library as its sources are set (`LibrarySources`: the switched-on
+    /// folders that are present, plus the switched-on imported libraries)
+    /// matching a search query -- the list `browse_source_files` pages. Shared
+    /// by every library listing (select all, add selection, selection time,
+    /// the analysis scope and its live library total), so they all stay
+    /// consistent by construction.
     pub(super) fn compute_visible_library_tracks(
         &self,
         conn: &rusqlite::Connection,
-        source_roots: &[String],
-        libraries: ExternalLibraries,
         query: &str,
     ) -> BackendResult<Vec<Track>> {
-        let mut items = self.compute_all_library_tracks(conn, source_roots, libraries)?;
+        let sources = LibrarySources::load(conn)?;
+        let mut items =
+            self.compute_all_library_tracks(conn, &sources.listed_roots(), sources.external())?;
         TrackQuery::new(query).retain(&mut items);
         Ok(items)
     }
@@ -845,25 +859,17 @@ impl BackendService {
         &self,
         req: BrowseSourceFilesRequest,
     ) -> BackendResult<BrowseSourceFilesData> {
-        let mut source_roots = req
-            .source_roots
-            .into_iter()
-            .map(|root| root.trim().to_string())
-            .filter(|root| !root.is_empty())
-            .collect::<Vec<_>>();
+        let conn = self.db.connect()?;
+        let sources = LibrarySources::load(&conn)?;
+        let mut source_roots = sources.listed_roots();
         source_roots.sort();
-        source_roots.dedup();
-        let libraries = ExternalLibraries {
-            rekordbox_db: req.include_rekordbox_db,
-            mixxx_db: req.include_mixxx_db,
-        };
+        let libraries = sources.external();
         if source_roots.is_empty() && !libraries.any() {
             return Ok(BrowseSourceFilesData {
                 total: 0,
                 items: Vec::new(),
                 next_cursor: None,
                 has_more: false,
-                source_root_analysis: Vec::new(),
                 total_duration_ms: 0,
                 duration_unknown_count: 0,
                 list_track_count: 0,
@@ -895,17 +901,7 @@ impl BackendService {
         ]);
         let cursor = decode_track_page_cursor(req.cursor.as_deref(), &signature)?;
 
-        let conn = self.db.connect()?;
         let all_items = self.compute_all_library_tracks(&conn, &source_roots, libraries)?;
-
-        // source_root_analysis describes each folder's own analyzed state
-        // and must not depend on the current search query -- otherwise a
-        // query that doesn't match (all of) a folder's tracks makes an
-        // otherwise fully-analyzed folder's chip appear unanalyzed (in the
-        // worst case, a query matching zero tracks in a folder collapses
-        // `total` to 0, and `fully_analyzed` requires `total > 0`). Computed
-        // from the full, unfiltered set -- before the query filter below.
-        let source_root_analysis = source_root_analysis(&source_roots, &all_items);
         let (list_track_count, list_size_bytes) = list_totals(&all_items);
 
         let mut items = all_items;
@@ -945,7 +941,6 @@ impl BackendService {
             items: page_items,
             next_cursor,
             has_more,
-            source_root_analysis,
             total_duration_ms,
             duration_unknown_count,
             list_track_count,

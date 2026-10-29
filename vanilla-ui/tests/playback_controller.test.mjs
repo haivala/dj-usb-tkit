@@ -20,7 +20,6 @@ function playbackState(overrides = {}) {
     playbackPendingRowKey: null,
     playbackPendingTrackId: null,
     playbackBackendQueue: null,
-    sourceRoots: ["/music"],
     usbRoot: null,
     usbRootValid: false,
     ...overrides

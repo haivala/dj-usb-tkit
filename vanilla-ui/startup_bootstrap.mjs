@@ -265,30 +265,20 @@ export async function initApp(ctx) {
   pushEventLog({ level: "info", source: "startup", message: "Console/event logging ready" });
 
   ctx.setProgress(false, 0, "Idle");
-  ctx.loadSourceRootsFromStorage();
-  ctx.loadSourceRootEnabledFromStorage();
-  ctx.loadRekordboxDbEnabledFromStorage();
-  ctx.loadMixxxDbEnabledFromStorage();
-  ctx.loadSourcesEverConfiguredFromStorage();
   await ctx.loadUsbDevices();
-
-  for (const root of state.sourceRoots || []) {
-    if (state.sourceRootEnabled[root] === undefined) {
-      state.sourceRootEnabled[root] = true;
-    }
-  }
-  ctx.persistSourceRootEnabled(state.sourceRootEnabled);
-  await ctx.syncAssetScopePaths();
-  await ctx.refreshMissingSourceRoots({ silent: true });
+  // The library's folders and their switches (draws the chips, lets the
+  // folders into the asset scope).
+  await ctx.refreshLibrarySources();
   ctx.loadUsbRootFromStorage();
 
   restoreStoredUiPrefs(ctx);
   applySidebarCollapsedUi(ctx);
 
-  ctx.renderSourceChips();
-  ctx.refreshSourceRootAnalysisStatus().catch(() => {});
   await ctx.detectExternalRekordboxDb();
   await ctx.detectExternalMixxxDb();
+  // Sources starts folded (index.html) and opens once its chips are drawn:
+  // opened earlier, its row keeps the height it had before they arrived.
+  ctx.el.sourceBar?.classList.remove("collapsed");
   ctx.bindEvents();
   await ctx.switchView("library");
   pushEventLog({ level: "info", source: "startup", message: "Initial view ready" });

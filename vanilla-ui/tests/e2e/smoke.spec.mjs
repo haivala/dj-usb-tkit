@@ -174,13 +174,24 @@ test("usb panel shows when clicking USB nav item", async ({ page }) => {
   await expect(page.locator("#panel-library")).not.toHaveClass(/active/);
 });
 
-test("restores source roots from localStorage as source chips", async ({ page }) => {
+test("draws the backend's source folders as source chips", async ({ page }) => {
   await page.addInitScript(() => {
     window.localStorage.setItem("djusbtkit.helpSeen", "1");
-    window.localStorage.setItem(
-      "djusbtkit.sourceRoots",
-      JSON.stringify(["/music", "/media/library"])
-    );
+    window.__TAURI__ = {
+      core: {
+        invoke: async (command) => {
+          if (command === "get_library_sources") {
+            const folders = ["/music", "/media/library"]
+              .map((path) => ({ path, enabled: true, missing: false, fullyAnalyzed: false }));
+            return { ok: true, data: { folders, rekordboxDbEnabled: false, mixxxDbEnabled: false, everConfigured: true } };
+          }
+          if (command === "list_playlists") return { ok: true, data: { items: [] } };
+          if (command === "browse_source_files") return { ok: true, data: { total: 0, items: [] } };
+          return { ok: false, error: { code: "UNKNOWN", message: `Unhandled: ${command}` } };
+        }
+      },
+      event: { listen: async () => () => {} }
+    };
   });
   await page.goto("/");
 

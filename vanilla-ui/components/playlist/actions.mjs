@@ -375,10 +375,7 @@ const PLAYLIST_IMPORT_SOURCES = [
     pathKey: "externalRekordboxDbPath",
     listCommand: "list_rekordbox_playlists",
     importCommand: "import_rekordbox_playlist",
-    enable: (ctx) => {
-      ctx.state.rekordboxDbEnabled = true;
-      ctx.persistRekordboxDbEnabled(true);
-    },
+    library: "rekordbox",
     detect: (ctx) => ctx.detectExternalRekordboxDb()
   },
   {
@@ -386,10 +383,7 @@ const PLAYLIST_IMPORT_SOURCES = [
     pathKey: "externalMixxxDbPath",
     listCommand: "list_mixxx_playlists",
     importCommand: "import_mixxx_playlist",
-    enable: (ctx) => {
-      ctx.state.mixxxDbEnabled = true;
-      ctx.persistMixxxDbEnabled(true);
-    },
+    library: "mixxx",
     detect: (ctx) => ctx.detectExternalMixxxDb()
   }
 ];
@@ -477,9 +471,7 @@ export async function importExternalPlaylist(ctx) {
         progress(80, "Refreshing playlists...");
         // The imported tracks belong to those libraries: show them in the library too.
         const imported = [...new Set(done.map(({ item }) => item.source))];
-        for (const source of imported) source.enable(ctx);
-        state.sourcesEverConfigured = true;
-        ctx.persistSourcesEverConfigured(true);
+        for (const source of imported) await ctx.showExternalLibrary(source.library);
         // Re-detect: each library now counts as imported, unlocking its chip.
         for (const source of imported) await source.detect(ctx);
         await ctx.resetAndLoadLibraryTracks(state.libraryQuery || "");
@@ -649,9 +641,6 @@ export async function addLibrarySelectionToCurrentPlaylist(ctx, { trackIds = [],
     progress(30, "Adding tracks...");
     return command("add_library_selection_to_playlist", {
       playlistId: playlist.id,
-      sourceRoots: ctx.enabledLibrarySourceRoots(),
-      includeRekordboxDb: state.rekordboxDbEnabled === true,
-      includeMixxxDb: state.mixxxDbEnabled === true,
       query: String(state.libraryQuery || "").trim(),
       trackIds: allMatching ? [] : trackIds,
       allMatching

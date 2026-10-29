@@ -1,3 +1,5 @@
+mod library_sources;
+
 use std::fs;
 
 use backend::commands::BackendCommands;
@@ -64,9 +66,14 @@ fn scan_incremental_covers_unchanged_new_and_deleted_files() {
     assert_eq!(with_delete_data.updated, 0);
     assert_eq!(with_delete_data.removed, 1);
 
+    library_sources::show_only(
+        &backend,
+        vec![media.to_string_lossy().to_string()],
+        false,
+        false,
+    );
     let final_tracks = backend
         .browse_source_files(BrowseSourceFilesRequest {
-            source_roots: vec![media.to_string_lossy().to_string()],
             query: String::new(),
             limit: 50,
             cursor: None,
@@ -90,9 +97,9 @@ fn scan_analysis_skips_unindexed_files() {
     let roots = vec![media.to_string_lossy().to_string()];
     scan(&backend, &media);
     fs::write(media.join("Artist - Unindexed.mp3"), b"audio-b").expect("write unindexed");
+    library_sources::show_only(&backend, roots.clone(), false, false);
     let listed = backend
         .browse_source_files(BrowseSourceFilesRequest {
-            source_roots: roots.clone(),
             limit: 10,
             ..Default::default()
         })
@@ -102,10 +109,10 @@ fn scan_analysis_skips_unindexed_files() {
     assert_eq!(listed.len(), 2);
     assert!(listed.iter().any(|track| track.id == track.file_path));
 
+    library_sources::show_only(&backend, roots, false, false);
     let run = backend
         .analyze_new_tracks(AnalyzeNewTracksRequest {
             scope_to_library_filter: true,
-            source_roots: roots,
             ..Default::default()
         })
         .data
@@ -132,9 +139,9 @@ fn scan_missing_source_root_reports_not_found_without_pruning_tracks() {
     assert!(first.ok, "first scan failed: {first:?}");
     assert_eq!(first.data.expect("first scan data").indexed, 1);
     let library = || {
+        library_sources::show_only(&backend, vec![source_root.clone()], false, false);
         backend
             .browse_source_files(BrowseSourceFilesRequest {
-                source_roots: vec![source_root.clone()],
                 query: String::new(),
                 limit: 50,
                 cursor: None,
@@ -188,9 +195,9 @@ fn relocate_source_root_rewrites_paths_and_preserves_playlist_membership() {
     });
     assert!(scan.ok, "scan failed: {scan:?}");
 
+    library_sources::show_only(&backend, vec![old_root.clone()], false, false);
     let tracks = backend
         .browse_source_files(BrowseSourceFilesRequest {
-            source_roots: vec![old_root.clone()],
             query: String::new(),
             limit: 50,
             cursor: None,
@@ -207,8 +214,8 @@ fn relocate_source_root_rewrites_paths_and_preserves_playlist_membership() {
         })
         .data
         .expect("playlist data");
+    library_sources::show_only(&backend, vec![old_root.clone()], false, false);
     let added = backend.add_library_selection_to_playlist(AddLibrarySelectionToPlaylistRequest {
-        source_roots: vec![old_root.clone()],
         playlist_id: playlist.playlist_id.clone(),
         track_ids: vec![track_id.clone()],
         ..Default::default()
@@ -230,9 +237,9 @@ fn relocate_source_root_rewrites_paths_and_preserves_playlist_membership() {
     assert_eq!(relocated_data.missing_at_new_root, 0);
     assert_eq!(relocated_data.conflicts, 0);
 
+    library_sources::show_only(&backend, vec![new_root.clone()], false, false);
     let tracks_after = backend
         .browse_source_files(BrowseSourceFilesRequest {
-            source_roots: vec![new_root.clone()],
             query: String::new(),
             limit: 50,
             cursor: None,

@@ -36,9 +36,6 @@ export async function addSelectionToPlaylists(ctx, view, ids, rows) {
     if (view === "library") {
       return command("add_library_selection_to_playlists", {
         playlistIds,
-        sourceRoots: ctx.enabledLibrarySourceRoots(),
-        includeRekordboxDb: state.rekordboxDbEnabled === true,
-        includeMixxxDb: state.mixxxDbEnabled === true,
         query: String(state.libraryQuery || "").trim(),
         trackIds: ids,
       });

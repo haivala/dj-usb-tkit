@@ -1,12 +1,8 @@
 // Settings persistence and hydration helpers.
 
 import {
-  STORAGE_KEY_SOURCE_ROOTS, STORAGE_KEY_SOURCE_ROOT_ENABLED,
   STORAGE_KEY_USB_ROOT,
-  STORAGE_KEY_REKORDBOX_DB_ENABLED, STORAGE_KEY_MIXXX_DB_ENABLED, STORAGE_KEY_SOURCES_EVER_CONFIGURED,
-  FRONTEND_DB_KEY_SOURCE_ROOTS, FRONTEND_DB_KEY_SOURCE_ROOT_ENABLED,
   FRONTEND_DB_KEY_USB_ROOT,
-  FRONTEND_DB_KEY_REKORDBOX_DB_ENABLED, FRONTEND_DB_KEY_MIXXX_DB_ENABLED, FRONTEND_DB_KEY_SOURCES_EVER_CONFIGURED,
   FRONTEND_SETTING_BINDINGS,
   STORAGE_KEY_THEME, FRONTEND_DB_KEY_THEME,
   STORAGE_KEY_ACCENT_HUE, FRONTEND_DB_KEY_ACCENT_HUE
@@ -62,89 +58,12 @@ export async function hydrateLocalStorageFromFrontendSettingsDb(ctx) {
   }
 }
 
-export function persistSourceRoots(ctx, roots) {
-  persistSetting(ctx, STORAGE_KEY_SOURCE_ROOTS, FRONTEND_DB_KEY_SOURCE_ROOTS, JSON.stringify(roots || []));
-}
-
 export function persistUsbRoot(ctx, path) {
   if (!path) {
     persistSetting(ctx, STORAGE_KEY_USB_ROOT, FRONTEND_DB_KEY_USB_ROOT, null);
     return;
   }
   persistSetting(ctx, STORAGE_KEY_USB_ROOT, FRONTEND_DB_KEY_USB_ROOT, String(path));
-}
-
-export function loadSourceRootsFromStorage(ctx) {
-  const { state, localStorage } = ctx;
-  const raw = localStorage.getItem(STORAGE_KEY_SOURCE_ROOTS);
-  if (!raw) {
-    state.sourceRoots = [];
-    return;
-  }
-
-  try {
-    const parsed = JSON.parse(raw);
-    state.sourceRoots = Array.isArray(parsed)
-      ? parsed.filter((x) => typeof x === "string" && x.trim())
-      : [];
-  } catch {
-    state.sourceRoots = [];
-  }
-}
-
-export function loadSourceRootEnabledFromStorage(ctx) {
-  const { state, localStorage } = ctx;
-  const raw = localStorage.getItem(STORAGE_KEY_SOURCE_ROOT_ENABLED);
-  if (!raw) {
-    state.sourceRootEnabled = {};
-    return;
-  }
-  try {
-    const parsed = JSON.parse(raw);
-    state.sourceRootEnabled = parsed && typeof parsed === "object" ? parsed : {};
-  } catch {
-    state.sourceRootEnabled = {};
-  }
-}
-
-export function persistSourceRootEnabled(ctx, enabledMap) {
-  persistSetting(
-    ctx,
-    STORAGE_KEY_SOURCE_ROOT_ENABLED,
-    FRONTEND_DB_KEY_SOURCE_ROOT_ENABLED,
-    JSON.stringify(enabledMap || {})
-  );
-}
-
-export function persistRekordboxDbEnabled(ctx, enabled) {
-  persistSetting(ctx, STORAGE_KEY_REKORDBOX_DB_ENABLED, FRONTEND_DB_KEY_REKORDBOX_DB_ENABLED, enabled ? "1" : "0");
-}
-
-export function loadRekordboxDbEnabledFromStorage(ctx) {
-  const { state, localStorage } = ctx;
-  state.rekordboxDbEnabled = localStorage.getItem(STORAGE_KEY_REKORDBOX_DB_ENABLED) === "1";
-}
-
-export function persistMixxxDbEnabled(ctx, enabled) {
-  persistSetting(ctx, STORAGE_KEY_MIXXX_DB_ENABLED, FRONTEND_DB_KEY_MIXXX_DB_ENABLED, enabled ? "1" : "0");
-}
-
-export function loadMixxxDbEnabledFromStorage(ctx) {
-  const { state, localStorage } = ctx;
-  state.mixxxDbEnabled = localStorage.getItem(STORAGE_KEY_MIXXX_DB_ENABLED) === "1";
-}
-
-export function persistSourcesEverConfigured(ctx, value) {
-  persistSetting(ctx, STORAGE_KEY_SOURCES_EVER_CONFIGURED, FRONTEND_DB_KEY_SOURCES_EVER_CONFIGURED, value ? "1" : "0");
-}
-
-export function loadSourcesEverConfiguredFromStorage(ctx) {
-  const { state, localStorage } = ctx;
-  state.sourcesEverConfigured =
-    localStorage.getItem(STORAGE_KEY_SOURCES_EVER_CONFIGURED) === "1" ||
-    (Array.isArray(state.sourceRoots) && state.sourceRoots.length > 0) ||
-    state.rekordboxDbEnabled === true ||
-    state.mixxxDbEnabled === true;
 }
 
 const ACCENT_DEFAULT_HUE = 270;

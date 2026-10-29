@@ -41,7 +41,7 @@ use super::export_helpers::{
     KeptAnalysis, LocalAnalysisResult, LocalTrackForAnalysis, stable_u32_hash,
 };
 use super::{
-    BackendService, ExternalLibraries, SETTING_UI_ANALYSIS_ENGINE, WAVEFORM_PREVIEW_BINS,
+    BackendService, LibrarySources, SETTING_UI_ANALYSIS_ENGINE, WAVEFORM_PREVIEW_BINS,
     has_core_analysis_fields, now, track_has_core_analysis_for_source_status,
 };
 
@@ -617,12 +617,8 @@ impl BackendService {
             {
                 Some(self.collect_playlist_unanalyzed_track_ids(&conn, playlist_id, &req.query)?)
             } else if req.scope_to_library_filter {
-                let visible = self.compute_visible_library_tracks(
-                    &conn,
-                    &req.source_roots,
-                    ExternalLibraries::from_flags(req.include_rekordbox_db, req.include_mixxx_db),
-                    &req.query,
-                )?;
+                let rekordbox_db_shown = LibrarySources::load(&conn)?.rekordbox_db;
+                let visible = self.compute_visible_library_tracks(&conn, &req.query)?;
                 Some(
                     visible
                         .iter()
@@ -632,7 +628,7 @@ impl BackendService {
                         // Nor does a file the scan couldn't index (a browse-only
                         // row, `id == file_path`): there's no track to analyze.
                         .filter(|track| {
-                            !(req.include_rekordbox_db && track.rekordbox_db_source)
+                            !(rekordbox_db_shown && track.rekordbox_db_source)
                                 && !track_has_core_analysis_for_source_status(track)
                                 && track.id != track.file_path
                         })
@@ -695,22 +691,16 @@ impl BackendService {
             resolve_analysis_bpm_range(req.bpm_range.as_deref(), req.bpm_min, req.bpm_max);
         let engine = resolve_analysis_engine(&self.db, req.analysis_engine.as_deref());
 
-        // Live library-duration-total baseline: the frontend passes its
-        // current library filter (enabled source roots / master.db toggle /
-        // search query) so `on_progress` can push an up-to-date total as
-        // each track finishes, instead of the frontend recomputing it
-        // locally from a possibly-partial (paginated) view. No filter
-        // context (no source roots and master.db off) opts this out at no
-        // extra cost -- the two progress fields just stay `None`.
-        let libraries =
-            ExternalLibraries::from_flags(req.include_rekordbox_db, req.include_mixxx_db);
-        let mut library_context = if !req.source_roots.is_empty() || libraries.any() {
-            let visible = self.compute_visible_library_tracks(
-                &conn,
-                &req.source_roots,
-                libraries,
-                &req.query,
-            )?;
+        // Live library-duration-total baseline: the library as filtered (its
+        // sources plus the frontend's search query), so `on_progress` can
+        // push an up-to-date total as each track finishes, instead of the
+        // frontend recomputing it locally from a possibly-partial (paginated)
+        // view. A library with no sources set opts this out at no extra cost
+        // -- the two progress fields just stay `None`.
+        let sources = LibrarySources::load(&conn)?;
+        let mut library_context = if !sources.listed_roots().is_empty() || sources.external().any()
+        {
+            let visible = self.compute_visible_library_tracks(&conn, &req.query)?;
             let batch_ids: std::collections::HashSet<&str> =
                 tracks.iter().map(|t| t.id.as_str()).collect();
             let visible_track_ids: std::collections::HashSet<String> =

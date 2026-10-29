@@ -13,7 +13,7 @@ import { DEFAULT_ANALYSIS_BPM_RANGE } from "../components/library/actions.mjs";
 test("createInitialState returns expected default values", () => {
   const state = createInitialState();
 
-  assert.deepEqual(state.sourceRoots, []);
+  assert.deepEqual(state.librarySources.folders, []);
   assert.equal(state.usbRoot, null);
   assert.equal(state.exportPruneStale, true);
   assert.equal(state.analysisBpmRange, DEFAULT_ANALYSIS_BPM_RANGE);
@@ -31,16 +31,14 @@ test("createInitialState creates fresh mutable containers", () => {
   a.trackPreviewHydrateInFlight.add("t1");
   a.analyzingTrackIds.add("t2");
   a.selectedRepairFixIds.add("fix1");
-  a.missingSourceRoots.add("/missing");
-  a.sourceRoots.push("/music");
+  a.librarySources.folders.push({ path: "/music" });
 
   assert.equal(b.selectedTrackIds.size, 0);
   assert.equal(b.playlistUsbExportStatusById.size, 0);
   assert.equal(b.trackPreviewHydrateInFlight.size, 0);
   assert.equal(b.analyzingTrackIds.size, 0);
   assert.equal(b.selectedRepairFixIds.size, 0);
-  assert.equal(b.missingSourceRoots.size, 0);
-  assert.deepEqual(b.sourceRoots, []);
+  assert.deepEqual(b.librarySources.folders, []);
 });
 
 test("createTableSortState returns an empty object", () => {

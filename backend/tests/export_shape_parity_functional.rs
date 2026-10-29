@@ -1,3 +1,5 @@
+mod library_sources;
+
 use std::collections::{BTreeMap, BTreeSet};
 use std::fs;
 use std::path::{Path, PathBuf};
@@ -272,8 +274,13 @@ fn strict_shape_compare_detects_match_and_mismatch_on_generated_usb_roots() {
     });
     assert!(scan.ok, "scan failed: {scan:?}");
 
+    library_sources::show_only(
+        &backend,
+        vec![media_dir.to_string_lossy().to_string()],
+        false,
+        false,
+    );
     let search = backend.browse_source_files(backend::models::BrowseSourceFilesRequest {
-        source_roots: vec![media_dir.to_string_lossy().to_string()],
         query: String::new(),
         limit: 100,
         cursor: None,
@@ -296,9 +303,14 @@ fn strict_shape_compare_detects_match_and_mismatch_on_generated_usb_roots() {
     assert!(created.ok, "create playlist failed: {created:?}");
     let playlist_id = created.data.unwrap().playlist_id;
 
+    library_sources::show_only(
+        &backend,
+        vec![media_dir.to_string_lossy().to_string()],
+        false,
+        false,
+    );
     let added = backend.add_library_selection_to_playlist(
         backend::models::AddLibrarySelectionToPlaylistRequest {
-            source_roots: vec![media_dir.to_string_lossy().to_string()],
             playlist_id: playlist_id.clone(),
             track_ids: tracks.iter().map(|t| t.id.clone()).collect(),
             ..Default::default()
@@ -524,8 +536,13 @@ fn export_preserves_full_20_table_family() {
     });
     assert!(scan.ok, "scan failed: {scan:?}");
 
+    library_sources::show_only(
+        &backend,
+        vec![media_dir.to_string_lossy().to_string()],
+        false,
+        false,
+    );
     let search = backend.browse_source_files(backend::models::BrowseSourceFilesRequest {
-        source_roots: vec![media_dir.to_string_lossy().to_string()],
         query: String::new(),
         limit: 100,
         cursor: None,
@@ -547,9 +564,14 @@ fn export_preserves_full_20_table_family() {
     assert!(created.ok, "create playlist failed: {created:?}");
     let playlist_id = created.data.unwrap().playlist_id;
 
+    library_sources::show_only(
+        &backend,
+        vec![media_dir.to_string_lossy().to_string()],
+        false,
+        false,
+    );
     let added = backend.add_library_selection_to_playlist(
         backend::models::AddLibrarySelectionToPlaylistRequest {
-            source_roots: vec![media_dir.to_string_lossy().to_string()],
             playlist_id: playlist_id.clone(),
             track_ids: tracks.iter().map(|t| t.id.clone()).collect(),
             ..Default::default()

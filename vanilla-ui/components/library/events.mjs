@@ -2,27 +2,17 @@ import { catchErr, handleTrackAction, resolveRowActionTrack } from "../shared/tr
 import { bindTrackSelection } from "../shared/track_selection.mjs";
 import { addSelectionToPlaylists } from "../shared/add_to_playlists.mjs";
 import { editTrackSelection } from "../shared/track_metadata_edits.mjs";
-import { enabledSourceRoots, LIBRARY_LOAD_LIMIT_DEFAULT } from "./actions.mjs";
+import { applyLibrarySources, LIBRARY_LOAD_LIMIT_DEFAULT } from "./actions.mjs";
 
 export function bindLibraryEvents(ctx) {
   const {
     state,
     el,
-    renderSourceChips,
-    syncAssetScopePaths,
-    renderLibraryRows,
-    updateSelectionCount,
-    updateSourceFilterIndicator,
     openConfirmDialog,
     command,
     resetAndLoadLibraryTracks,
     refreshCurrentPlaylistTracks,
     withProgress,
-    persistSourceRoots,
-    persistSourceRootEnabled,
-    persistRekordboxDbEnabled,
-    persistMixxxDbEnabled,
-    persistSourcesEverConfigured,
     pickSourceFolders,
     relocateSourceRoot,
     scanLibrary,
@@ -34,23 +24,33 @@ export function bindLibraryEvents(ctx) {
   } = ctx;
   const { emitStatus } = ctx;
 
+  const folders = () => state.librarySources.folders;
+  const folderAt = (index) => (Number.isInteger(index) ? folders()[index]?.path : undefined);
+
   // "enabled/total" over the folder chips plus each imported library chip.
   const emitSourceFilterCounts = () => {
+    const sources = state.librarySources;
     const libraries = [
-      [state.externalRekordboxDbPath && state.rekordboxDbImported, state.rekordboxDbEnabled],
-      [state.externalMixxxDbPath && state.mixxxDbImported, state.mixxxDbEnabled],
+      [state.externalRekordboxDbPath && state.rekordboxDbImported, sources.rekordboxDbEnabled],
+      [state.externalMixxxDbPath && state.mixxxDbImported, sources.mixxxDbEnabled],
     ].filter(([available]) => !!available);
-    const enabled = enabledSourceRoots(state.sourceRoots, state.sourceRootEnabled, state.missingSourceRoots).length
-      + libraries.filter(([, on]) => on === true).length;
-    emitStatus(`Source filters: ${enabled}/${state.sourceRoots.length + libraries.length} enabled`);
+    const enabled = sources.folders.filter((folder) => folder.enabled && !folder.missing).length
+      + libraries.filter(([, on]) => on).length;
+    emitStatus(`Source filters: ${enabled}/${sources.folders.length + libraries.length} enabled`);
+  };
+
+  // A switch changed: the backend saved it and lists the library with it.
+  const applySwitchedSources = async (sources) => {
+    await applyLibrarySources(ctx, sources);
+    emitSourceFilterCounts();
+    await resetAndLoadLibraryTracks(state.libraryQuery, LIBRARY_LOAD_LIMIT_DEFAULT);
   };
 
   el.sourceChipsContainer.addEventListener("click", (event) => {
     const removeBtn = event.target.closest(".source-chip-remove");
     if (!removeBtn) return;
-    const index = Number(removeBtn.dataset.sourceIndex);
-    if (!Number.isInteger(index) || index < 0 || index >= state.sourceRoots.length) return;
-    const removedRoot = state.sourceRoots[index];
+    const removedRoot = folderAt(Number(removeBtn.dataset.sourceIndex));
+    if (!removedRoot) return;
     (async () => {
       const confirmed = await openConfirmDialog({
         title: "Remove Source Folder",
@@ -59,93 +59,49 @@ export function bindLibraryEvents(ctx) {
       });
       if (!confirmed) return;
 
-      state.sourceRoots.splice(index, 1);
-      delete state.sourceRootEnabled[removedRoot];
-      persistSourceRoots(state.sourceRoots);
-      persistSourceRootEnabled(state.sourceRootEnabled);
-      renderSourceChips();
-      syncAssetScopePaths().catch(() => {});
-      if (!removedRoot) {
-        renderLibraryRows();
-        updateSelectionCount();
-        emitStatus(`Source folders: ${state.sourceRoots.length}`);
-        return;
-      }
-      try {
-        const result = await command("remove_tracks_by_source_roots", {
-          sourceRoots: [removedRoot]
-        });
-        await resetAndLoadLibraryTracks(state.libraryQuery, LIBRARY_LOAD_LIMIT_DEFAULT);
-        await refreshCurrentPlaylistTracks();
-        emitStatus(
-          `Source folders: ${state.sourceRoots.length} | removed ${Number(result?.removed || 0)} track(s) from library`
-        );
-      } catch (err) {
-        console.error(err);
-        emitStatus(`Source removed, but track pruning failed: ${err.message || err}`);
-      }
-    })();
+      const result = await command("remove_source_folder", { path: removedRoot });
+      await applyLibrarySources(ctx, result.sources);
+      await resetAndLoadLibraryTracks(state.libraryQuery, LIBRARY_LOAD_LIMIT_DEFAULT);
+      await refreshCurrentPlaylistTracks();
+      emitStatus(`Source folders: ${folders().length} | removed ${result.removed} track(s) from library`);
+    })().catch(catchErr(emitStatus));
   });
 
   el.sourceChipsContainer.addEventListener("click", (event) => {
     if (event.target.closest(".source-chip-remove")) return;
     const chip = event.target.closest(".source-chip-missing[data-source-relocate-index]");
     if (!chip) return;
-    const index = Number(chip.dataset.sourceRelocateIndex);
-    if (!Number.isInteger(index) || index < 0 || index >= state.sourceRoots.length) return;
-    const path = state.sourceRoots[index];
+    const path = folderAt(Number(chip.dataset.sourceRelocateIndex));
+    if (!path) return;
     relocateSourceRoot(path).catch(catchErr(emitStatus));
   });
 
   el.sourceChipsContainer.addEventListener("change", (event) => {
     const checkbox = event.target.closest(".source-chip-toggle");
     if (!checkbox) return;
-
-    const index = Number(checkbox.dataset.sourceToggleIndex);
-    if (!Number.isInteger(index) || index < 0 || index >= state.sourceRoots.length) return;
-    const path = state.sourceRoots[index];
-    state.sourceRootEnabled[path] = !!checkbox.checked;
-    persistSourceRootEnabled(state.sourceRootEnabled);
-    resetAndLoadLibraryTracks(state.libraryQuery, LIBRARY_LOAD_LIMIT_DEFAULT)
+    const path = folderAt(Number(checkbox.dataset.sourceToggleIndex));
+    if (!path) return;
+    command("set_source_folder_enabled", { path, enabled: checkbox.checked })
+      .then(applySwitchedSources)
       .catch(catchErr(emitStatus));
-    updateSourceFilterIndicator();
-    emitSourceFilterCounts();
   });
 
   el.addSourceBtn.addEventListener("click", () => {
     pickSourceFolders()
       .then(async (picked) => {
         if (!picked.length) return;
-
-        const known = new Set(state.sourceRoots);
-        const newRoots = [];
-        for (const path of picked) {
-          if (!known.has(path)) {
-            state.sourceRoots.push(path);
-            state.sourceRootEnabled[path] = true;
-            known.add(path);
-            newRoots.push(path);
-          }
-        }
-        if (newRoots.length === 0) {
-          emitStatus(`Source folders unchanged: ${state.sourceRoots.length}`);
-          return;
-        }
         let indexResult = null;
+        let added = [];
         await withProgress("Loading media library", async (progress) => {
           progress(20, "Saving source folders...");
-          persistSourceRoots(state.sourceRoots);
-          persistSourceRootEnabled(state.sourceRootEnabled);
-          if (!state.sourcesEverConfigured) {
-            state.sourcesEverConfigured = true;
-            persistSourcesEverConfigured(true);
-          }
-          renderSourceChips();
-          syncAssetScopePaths().catch(() => {});
+          const result = await command("add_source_folders", { paths: picked });
+          added = result.added;
+          await applyLibrarySources(ctx, result.sources);
+          if (!added.length) return;
 
           progress(45, "Indexing new files...");
           indexResult = await command("scan_library", {
-            sourceRoots: newRoots,
+            sourceRoots: added,
             incremental: true
           });
 
@@ -155,7 +111,9 @@ export function bindLibraryEvents(ctx) {
           progress(85, "Refreshing playlist views...");
           await refreshCurrentPlaylistTracks();
         });
-        emitStatus(`Source folders: ${state.sourceRoots.length} | indexed ${Number(indexResult?.indexed || 0)} track(s)`);
+        emitStatus(added.length
+          ? `Source folders: ${folders().length} | indexed ${Number(indexResult?.indexed || 0)} track(s)`
+          : `Source folders unchanged: ${folders().length}`);
       })
       .catch(catchErr(emitStatus));
   });
@@ -168,20 +126,13 @@ export function bindLibraryEvents(ctx) {
   el.libraryChipsContainer?.addEventListener("change", (event) => {
     const checkbox = event.target.closest(".source-chip-toggle");
     if (!checkbox) return;
-    const enabling = checkbox.checked;
-    if (checkbox.dataset.rekordboxDb === "true") {
-      state.rekordboxDbEnabled = enabling;
-      persistRekordboxDbEnabled(enabling);
-    } else if (checkbox.dataset.mixxxDb === "true") {
-      state.mixxxDbEnabled = enabling;
-      persistMixxxDbEnabled(enabling);
-    } else {
-      return;
-    }
-    resetAndLoadLibraryTracks(state.libraryQuery, LIBRARY_LOAD_LIMIT_DEFAULT)
+    const library = checkbox.dataset.rekordboxDb === "true" ? "rekordbox"
+      : checkbox.dataset.mixxxDb === "true" ? "mixxx"
+      : null;
+    if (!library) return;
+    command("set_external_library_enabled", { library, enabled: checkbox.checked })
+      .then(applySwitchedSources)
       .catch(catchErr(emitStatus));
-    updateSourceFilterIndicator();
-    emitSourceFilterCounts();
   });
   el.libraryChipsContainer?.addEventListener("click", (event) => {
     const importBtn = event.target.closest(".source-chip-import");
@@ -198,10 +149,10 @@ export function bindLibraryEvents(ctx) {
     el.sourceBar?.classList.toggle("collapsed");
   });
   el.librarySearch.addEventListener("focus", () => {
-    if (state.sourceRoots.length > 6) el.sourceBar?.classList.add("collapsed");
+    if (folders().length > 6) el.sourceBar?.classList.add("collapsed");
   }, { passive: true });
   el.libraryTableWrap?.addEventListener("scroll", () => {
-    if (state.sourceRoots.length > 6) el.sourceBar?.classList.add("collapsed");
+    if (folders().length > 6) el.sourceBar?.classList.add("collapsed");
   }, { passive: true });
 
   bindTrackSelection(ctx, {
@@ -212,9 +163,6 @@ export function bindLibraryEvents(ctx) {
     // no need to page the whole list into the client to collect ids.
     selectAll: async () => {
       const data = await command("list_matching_track_ids", {
-        sourceRoots: ctx.enabledLibrarySourceRoots(),
-        includeRekordboxDb: state.rekordboxDbEnabled === true,
-        includeMixxxDb: state.mixxxDbEnabled === true,
         query: String(state.libraryQuery || "").trim(),
       });
       return (data?.trackIds || []).filter(Boolean);

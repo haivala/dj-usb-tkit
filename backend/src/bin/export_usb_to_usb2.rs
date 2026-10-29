@@ -4,8 +4,9 @@ use std::path::{Path, PathBuf};
 
 use backend::commands::BackendCommands;
 use backend::models::{
-    AddTrackCandidate, AddTrackCandidatesToPlaylistRequest, BrowseSourceFilesRequest,
-    ExportToUsbRequest, FetchUsbPlaylistsRequest, InitializeUsbRequest, ScanLibraryRequest,
+    AddSourceFoldersRequest, AddTrackCandidate, AddTrackCandidatesToPlaylistRequest,
+    BrowseSourceFilesRequest, ExportToUsbRequest, FetchUsbPlaylistsRequest, InitializeUsbRequest,
+    ScanLibraryRequest,
 };
 
 fn fail(message: impl AsRef<str>) -> ! {
@@ -105,12 +106,18 @@ fn main() {
         );
     }
 
+    let add = backend.add_source_folders(AddSourceFoldersRequest {
+        paths: vec![source_contents.to_string_lossy().to_string()],
+    });
+    if !add.ok {
+        fail_with_cleanup("add_source_folders failed", &data_dir);
+    }
+
     // The library view's pages (at most 5000 rows each), until the last one.
     let mut track_map = HashMap::new();
     let mut cursor = None;
     loop {
         let page = backend.browse_source_files(BrowseSourceFilesRequest {
-            source_roots: vec![source_contents.to_string_lossy().to_string()],
             query: String::new(),
             limit: 5000,
             cursor: cursor.take(),

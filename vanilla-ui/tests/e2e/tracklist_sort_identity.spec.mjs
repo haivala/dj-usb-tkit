@@ -35,7 +35,8 @@ function baseTauriMock() {
 test("Library: scrub-play after column sort plays the clicked row's track, not the pre-sort one", async ({ page }) => {
   await page.addInitScript(({ base }) => {
     window.localStorage.setItem("djusbtkit.helpSeen", "1");
-    window.localStorage.setItem("djusbtkit.sourceRoots", JSON.stringify(["/music"]));
+    // The library\'s source folders, as `get_library_sources` answers.
+    window.__e2eSourceFolders = ["/music"];
 
     // Insertion order deliberately differs from album-sorted order, so a
     // stale index lookup after sorting resolves to the wrong track.
@@ -76,6 +77,11 @@ test("Library: scrub-play after column sort plays the clicked row's track, not t
     window.__TAURI__ = {
       core: {
         invoke: async (command, payload = {}) => {
+          if (command === "get_library_sources") {
+            const folders = (window.__e2eSourceFolders || [])
+              .map((path) => ({ path, enabled: true, missing: false, fullyAnalyzed: false }));
+            return { ok: true, data: { folders, rekordboxDbEnabled: false, mixxxDbEnabled: false, everConfigured: folders.length > 0 } };
+          }
           const request = payload?.request || payload;
           const handler = handlers[command];
           if (handler) return handler(request);
@@ -177,6 +183,11 @@ test("Playlist: Play and Remove after column sort act on the clicked row's track
     window.__TAURI__ = {
       core: {
         invoke: async (command, payload = {}) => {
+          if (command === "get_library_sources") {
+            const folders = (window.__e2eSourceFolders || [])
+              .map((path) => ({ path, enabled: true, missing: false, fullyAnalyzed: false }));
+            return { ok: true, data: { folders, rekordboxDbEnabled: false, mixxxDbEnabled: false, everConfigured: folders.length > 0 } };
+          }
           const request = payload?.request || payload;
           const handler = handlers[command];
           if (handler) return handler(request);
@@ -271,6 +282,11 @@ test("Playlist: header click shows and clears the sorted-by hint like other trac
     window.__TAURI__ = {
       core: {
         invoke: async (command, payload = {}) => {
+          if (command === "get_library_sources") {
+            const folders = (window.__e2eSourceFolders || [])
+              .map((path) => ({ path, enabled: true, missing: false, fullyAnalyzed: false }));
+            return { ok: true, data: { folders, rekordboxDbEnabled: false, mixxxDbEnabled: false, everConfigured: folders.length > 0 } };
+          }
           const request = payload?.request || payload;
           const handler = handlers[command];
           if (handler) return handler(request);
@@ -307,7 +323,8 @@ test("Playlist: header click shows and clears the sorted-by hint like other trac
 test("Library: sorting by BPM column actually orders rows by numeric BPM value", async ({ page }) => {
   await page.addInitScript(({ base }) => {
     window.localStorage.setItem("djusbtkit.helpSeen", "1");
-    window.localStorage.setItem("djusbtkit.sourceRoots", JSON.stringify(["/music"]));
+    // The library\'s source folders, as `get_library_sources` answers.
+    window.__e2eSourceFolders = ["/music"];
 
     // BPM values are deliberately non-monotonic with insertion order and
     // include decimals/duplicates, so a broken comparator (e.g. lexicographic
@@ -343,6 +360,11 @@ test("Library: sorting by BPM column actually orders rows by numeric BPM value",
     window.__TAURI__ = {
       core: {
         invoke: async (command, payload = {}) => {
+          if (command === "get_library_sources") {
+            const folders = (window.__e2eSourceFolders || [])
+              .map((path) => ({ path, enabled: true, missing: false, fullyAnalyzed: false }));
+            return { ok: true, data: { folders, rekordboxDbEnabled: false, mixxxDbEnabled: false, everConfigured: folders.length > 0 } };
+          }
           const request = payload?.request || payload;
           const handler = handlers[command];
           if (handler) return handler(request);

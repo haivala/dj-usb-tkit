@@ -1,6 +1,29 @@
 use super::*;
 use crate::models::ScanRekordboxDbRequest;
 
+/// The library's sources as the app sets them: `roots` added (switched on),
+/// the imported libraries switched on or off as given.
+pub(super) fn set_library_sources(
+    service: &BackendService,
+    roots: &[&str],
+    rekordbox_db: bool,
+    mixxx_db: bool,
+) {
+    service
+        .add_source_folders(AddSourceFoldersRequest {
+            paths: roots.iter().map(|root| root.to_string()).collect(),
+        })
+        .expect("add source folders");
+    for (library, enabled) in [
+        (ExternalLibrary::Rekordbox, rekordbox_db),
+        (ExternalLibrary::Mixxx, mixxx_db),
+    ] {
+        service
+            .set_external_library_enabled(SetExternalLibraryEnabledRequest { library, enabled })
+            .expect("switch library");
+    }
+}
+
 // --- build_track_match_fingerprint ---
 
 #[test]
@@ -681,18 +704,6 @@ fn source_root_is_usable_true_for_dir_false_for_missing() {
     assert!(!source_root_is_usable(Path::new(
         "/definitely/does/not/exist/anywhere"
     )));
-}
-
-#[test]
-fn source_root_status_reports_exists_and_is_dir() {
-    let dir = tempfile::tempdir().expect("tempdir");
-    let status = source_root_status(dir.path().to_str().unwrap());
-    assert!(status.exists);
-    assert!(status.is_dir);
-
-    let missing = source_root_status("/definitely/does/not/exist/anywhere");
-    assert!(!missing.exists);
-    assert!(!missing.is_dir);
 }
 
 #[test]
@@ -1975,9 +1986,6 @@ fn browse_source_files_empty_without_roots_or_rekordbox_db() {
     let (_dir, service) = test_service();
     let result = service
         .browse_source_files(BrowseSourceFilesRequest {
-            source_roots: Vec::new(),
-            include_rekordbox_db: false,
-            include_mixxx_db: false,
             query: String::new(),
             limit: 100,
             cursor: None,
@@ -2004,11 +2012,9 @@ fn browse_source_files_includes_rekordbox_db_tracks_when_requested() {
     );
     drop(conn);
 
+    set_library_sources(&service, &[], true, false);
     let result = service
         .browse_source_files(BrowseSourceFilesRequest {
-            source_roots: Vec::new(),
-            include_rekordbox_db: true,
-            include_mixxx_db: false,
             query: String::new(),
             limit: 100,
             cursor: None,
@@ -2050,11 +2056,9 @@ fn browse_source_files_computes_duration_total_over_countable_tracks_only() {
     .expect("insert t3");
     drop(conn);
 
+    set_library_sources(&service, &[], true, false);
     let result = service
         .browse_source_files(BrowseSourceFilesRequest {
-            source_roots: Vec::new(),
-            include_rekordbox_db: true,
-            include_mixxx_db: false,
             query: String::new(),
             limit: 100,
             cursor: None,
@@ -2080,9 +2084,8 @@ fn browse_source_files_sorts_server_side_across_pages() {
     }
     drop(conn);
 
+    set_library_sources(&service, &[], true, false);
     let req = |cursor: Option<String>| BrowseSourceFilesRequest {
-        include_rekordbox_db: true,
-        include_mixxx_db: false,
         limit: 2,
         cursor,
         sort_by: Some("title".to_string()),
@@ -2151,11 +2154,9 @@ fn track_rows_carry_analysis_ready_computed_from_db_fields() {
     .expect("insert missing");
     drop(conn);
 
+    set_library_sources(&service, &[], true, false);
     let result = service
         .browse_source_files(BrowseSourceFilesRequest {
-            source_roots: Vec::new(),
-            include_rekordbox_db: true,
-            include_mixxx_db: false,
             query: String::new(),
             limit: 100,
             cursor: None,
@@ -2187,11 +2188,9 @@ fn track_rows_derive_format_ext_from_path_when_the_column_is_null() {
     .expect("insert null-format row");
     drop(conn);
 
+    set_library_sources(&service, &[], true, false);
     let browsed = service
         .browse_source_files(BrowseSourceFilesRequest {
-            source_roots: Vec::new(),
-            include_rekordbox_db: true,
-            include_mixxx_db: false,
             query: String::new(),
             limit: 100,
             cursor: None,
@@ -2231,70 +2230,48 @@ fn track_rows_derive_format_ext_from_path_when_the_column_is_null() {
 }
 
 #[test]
-fn browse_source_files_source_root_analysis_ignores_the_search_query() {
+fn browse_source_files_lists_only_switched_on_present_folders() {
     let (_dir, service) = test_service();
     let root_a = tempfile::tempdir().expect("root a");
     let root_b = tempfile::tempdir().expect("root b");
-    let path_a = root_a.path().join("alpha.mp3");
-    let path_b = root_b.path().join("bravo.mp3");
-    std::fs::write(&path_a, b"data").expect("write alpha");
-    std::fs::write(&path_b, b"data").expect("write bravo");
-    let path_a_str = path_a.to_string_lossy().to_string();
-    let path_b_str = path_b.to_string_lossy().to_string();
-
+    let root_a_str = root_a.path().to_string_lossy().to_string();
+    let root_b_str = root_b.path().to_string_lossy().to_string();
     let conn = service.db.connect().expect("connect");
-    // Both tracks are fully analyzed (bpm + waveform + duration). Their
-    // titles deliberately share no substring, so a query matching one
-    // matches zero tracks in the other's source root.
-    conn.execute(
-        "INSERT INTO tracks (id, title, artist, file_path, duration_ms, bpm, waveform_peaks_path, match_fingerprint, rekordbox_db_source, created_at, updated_at)
-         VALUES ('t1', 'Findable Alpha', 'Artist', ?1, 200000, 120.0, '/data/a.dat', ?2, 0, datetime('now'), datetime('now'))",
-        params![path_a_str, build_track_match_fingerprint("Findable Alpha", "Artist", None)],
-    )
-    .expect("insert t1");
-    conn.execute(
-        "INSERT INTO tracks (id, title, artist, file_path, duration_ms, bpm, waveform_peaks_path, match_fingerprint, rekordbox_db_source, created_at, updated_at)
-         VALUES ('t2', 'Unrelated Bravo', 'Artist', ?1, 200000, 120.0, '/data/b.dat', ?2, 0, datetime('now'), datetime('now'))",
-        params![path_b_str, build_track_match_fingerprint("Unrelated Bravo", "Artist", None)],
-    )
-    .expect("insert t2");
-    drop(conn);
-
-    let result = service
-        .browse_source_files(BrowseSourceFilesRequest {
-            source_roots: vec![
-                root_a.path().to_string_lossy().to_string(),
-                root_b.path().to_string_lossy().to_string(),
-            ],
-            include_rekordbox_db: false,
-            include_mixxx_db: false,
-            // Matches only the track in root_a -- root_b's track matches
-            // nothing, which used to collapse its `total` to 0 and flip
-            // `fully_analyzed` to false even though root_b is 100%
-            // analyzed on its own.
-            query: "Findable".to_string(),
-            limit: 100,
-            cursor: None,
-            ..Default::default()
-        })
-        .expect("browse source files");
-
-    // The search still narrows what's returned/shown...
-    assert_eq!(result.total, 1);
-    assert_eq!(result.items[0].id, "t1");
-
-    // ...but both source roots' analyzed status reflects their full,
-    // query-independent contents.
-    assert_eq!(result.source_root_analysis.len(), 2);
-    for status in &result.source_root_analysis {
-        assert_eq!(status.total, 1, "source root {}", status.source_root);
-        assert_eq!(status.analyzed, 1, "source root {}", status.source_root);
-        assert!(status.fully_analyzed, "source root {}", status.source_root);
+    for (id, root) in [("a", &root_a_str), ("b", &root_b_str)] {
+        let path = format!("{root}/{id}.mp3");
+        std::fs::write(&path, b"data").expect("write track");
+        insert_full_track(&conn, id, id, "Artist", &path, None, None, false);
     }
+    drop(conn);
+    let gone = "/definitely/does/not/exist/anywhere";
+    set_library_sources(&service, &[&root_a_str, &root_b_str, gone], false, false);
+    let listed = || -> Vec<String> {
+        let mut ids: Vec<String> = service
+            .browse_source_files(BrowseSourceFilesRequest {
+                limit: 100,
+                ..Default::default()
+            })
+            .expect("browse source files")
+            .items
+            .into_iter()
+            .map(|track| track.id)
+            .collect();
+        ids.sort();
+        ids
+    };
+    assert_eq!(listed(), ["a", "b"]);
+
+    service
+        .set_source_folder_enabled(SetSourceFolderEnabledRequest {
+            path: root_b_str.clone(),
+            enabled: false,
+        })
+        .expect("switch off");
+    assert_eq!(listed(), ["a"]);
 }
 
 #[test]
-fn get_source_root_analysis_counts_each_root_on_its_own() {
+fn get_library_sources_reports_each_folder_on_its_own() {
     let (_dir, service) = test_service();
     let root_a = tempfile::tempdir().expect("root a");
     let root_b = tempfile::tempdir().expect("root b");
@@ -2334,49 +2311,96 @@ fn get_source_root_analysis_counts_each_root_on_its_own() {
 
     let root_a_str = root_a.path().to_string_lossy().to_string();
     let root_b_str = root_b.path().to_string_lossy().to_string();
-    let result = service
-        .get_source_root_analysis(GetSourceRootAnalysisRequest {
-            source_roots: vec![root_a_str.clone(), root_b_str.clone()],
+    let gone = "/definitely/does/not/exist/anywhere";
+    set_library_sources(&service, &[&root_a_str, &root_b_str, gone], false, false);
+    // A switched-off folder still reports its own status.
+    service
+        .set_source_folder_enabled(SetSourceFolderEnabledRequest {
+            path: root_a_str.clone(),
+            enabled: false,
         })
-        .expect("source root analysis");
+        .expect("switch off");
 
-    let status = |root: &str| {
-        result
-            .items
-            .iter()
-            .find(|item| item.source_root == root)
-            .unwrap_or_else(|| panic!("no status for {root}"))
-    };
-    assert_eq!(result.items.len(), 2);
+    let sources = service.get_library_sources().expect("library sources");
+    let summary: Vec<(&str, bool, bool, bool)> = sources
+        .folders
+        .iter()
+        .map(|f| (f.path.as_str(), f.enabled, f.missing, f.fully_analyzed))
+        .collect();
     assert_eq!(
-        (status(&root_a_str).total, status(&root_a_str).analyzed),
-        (1, 1)
+        summary,
+        [
+            (root_a_str.as_str(), false, false, true),
+            (root_b_str.as_str(), true, false, false),
+            (gone, true, true, false),
+        ]
     );
-    assert!(status(&root_a_str).fully_analyzed);
-    assert_eq!(
-        (status(&root_b_str).total, status(&root_b_str).analyzed),
-        (2, 1)
-    );
-    assert!(!status(&root_b_str).fully_analyzed);
+    assert!(sources.ever_configured);
 }
 
 #[test]
-fn check_source_roots_reports_missing_and_existing() {
+fn library_sources_read_what_older_versions_stored() {
     let (_dir, service) = test_service();
-    let existing = tempfile::tempdir().expect("tempdir");
-    let result = service
-        .check_source_roots(CheckSourceRootsRequest {
-            source_roots: vec![
-                existing.path().to_string_lossy().to_string(),
-                "/definitely/does/not/exist/anywhere".to_string(),
-            ],
-        })
-        .expect("check source roots");
-    assert_eq!(result.items.len(), 2);
-    assert_eq!(
-        result.missing,
-        vec!["/definitely/does/not/exist/anywhere".to_string()]
+    let conn = service.db.connect().expect("connect");
+    for (key, value) in [
+        (
+            SETTING_UI_SOURCE_ROOTS,
+            r#"["/music/a"," /music/b ","/music/a",""]"#,
+        ),
+        (
+            SETTING_UI_SOURCE_ROOT_ENABLED,
+            r#"{"/music/b":false,"/stale":true}"#,
+        ),
+        (SETTING_UI_MIXXX_DB_ENABLED, "1"),
+    ] {
+        conn.execute(
+            "INSERT INTO app_settings (key, value, updated_at) VALUES (?1, ?2, datetime('now'))",
+            params![key, value],
+        )
+        .expect("seed setting");
+    }
+
+    let sources = LibrarySources::load(&conn).expect("library sources");
+    assert_eq!(sources.roots, ["/music/a", "/music/b"]);
+    assert!(sources.is_enabled("/music/a"));
+    assert!(!sources.is_enabled("/music/b"));
+    assert!(sources.mixxx_db && !sources.rekordbox_db);
+    assert!(sources.ever_configured());
+}
+
+#[test]
+fn add_source_folders_adds_only_new_folders_switched_on() {
+    let (_dir, service) = test_service();
+    assert!(
+        !service
+            .get_library_sources()
+            .expect("sources")
+            .ever_configured
     );
+    let add = |paths: &[&str]| {
+        service
+            .add_source_folders(AddSourceFoldersRequest {
+                paths: paths.iter().map(|p| p.to_string()).collect(),
+            })
+            .expect("add source folders")
+    };
+    assert_eq!(
+        add(&["/music/a", "/music/b"]).added,
+        ["/music/a", "/music/b"]
+    );
+    let again = add(&["/music/b", "/music/c"]);
+    assert_eq!(again.added, ["/music/c"]);
+    let folders: Vec<(&str, bool)> = again
+        .sources
+        .folders
+        .iter()
+        .map(|f| (f.path.as_str(), f.enabled))
+        .collect();
+    assert_eq!(
+        folders,
+        [("/music/a", true), ("/music/b", true), ("/music/c", true)]
+    );
+    assert!(again.sources.ever_configured);
 }
 
 #[test]
@@ -2460,6 +2484,76 @@ fn relocate_source_root_updates_matching_track_paths() {
         })
         .expect("read updated path");
     assert_eq!(new_path, new_root.path().join("song.mp3").to_string_lossy());
+}
+
+#[test]
+fn relocate_source_root_replaces_the_folder_once_every_track_moved() {
+    let (_dir, service) = test_service();
+    let old_root = tempfile::tempdir().expect("old root");
+    let new_root = tempfile::tempdir().expect("new root");
+    let old_str = old_root.path().to_string_lossy().to_string();
+    let new_str = new_root.path().to_string_lossy().to_string();
+    // Only "moved.mp3" exists at the new root; "left.mp3" can't move.
+    std::fs::write(new_root.path().join("moved.mp3"), b"data").expect("write new file");
+    let conn = service.db.connect().expect("connect");
+    for id in ["moved", "left"] {
+        let path = old_root.path().join(format!("{id}.mp3"));
+        insert_full_track(
+            &conn,
+            id,
+            id,
+            "Artist",
+            path.to_str().unwrap(),
+            None,
+            None,
+            false,
+        );
+    }
+    drop(conn);
+    set_library_sources(&service, &["/music/other", &old_str], false, false);
+    service
+        .set_source_folder_enabled(SetSourceFolderEnabledRequest {
+            path: old_str.clone(),
+            enabled: false,
+        })
+        .expect("switch off");
+    let relocate = || {
+        service
+            .relocate_source_root(RelocateSourceRootRequest {
+                old_root: old_str.clone(),
+                new_root: new_str.clone(),
+            })
+            .expect("relocate source root")
+    };
+    let folders = |data: &RelocateSourceRootData| -> Vec<(String, bool)> {
+        data.sources
+            .folders
+            .iter()
+            .map(|f| (f.path.clone(), f.enabled))
+            .collect()
+    };
+
+    // A track left behind keeps the old folder; the new one joins it, with
+    // the old one's switch.
+    let partial = relocate();
+    assert_eq!(partial.missing_at_new_root, 1);
+    assert_eq!(
+        folders(&partial),
+        [
+            ("/music/other".to_string(), true),
+            (old_str.clone(), false),
+            (new_str.clone(), false),
+        ]
+    );
+
+    // Once the last track can move too, the old folder goes.
+    std::fs::write(new_root.path().join("left.mp3"), b"data").expect("write new file");
+    let full = relocate();
+    assert_eq!(full.missing_at_new_root, 0);
+    assert_eq!(
+        folders(&full),
+        [("/music/other".to_string(), true), (new_str.clone(), false)]
+    );
 }
 
 #[test]
@@ -2661,7 +2755,7 @@ fn resolve_track_identity_skips_usb_materialization_and_resolves_local_match() {
 }
 
 #[test]
-fn remove_tracks_by_source_roots_deletes_matching_prefix() {
+fn remove_source_folder_drops_it_and_deletes_its_tracks() {
     let (_dir, service) = test_service();
     let conn = service.db.connect().expect("connect");
     insert_full_track(
@@ -2685,13 +2779,21 @@ fn remove_tracks_by_source_roots_deletes_matching_prefix() {
         false,
     );
     drop(conn);
+    set_library_sources(&service, &["/music/keep", "/music/drop"], false, false);
 
     let result = service
-        .remove_tracks_by_source_roots(RemoveTracksBySourceRootsRequest {
-            source_roots: vec!["/music/drop".to_string()],
+        .remove_source_folder(RemoveSourceFolderRequest {
+            path: "/music/drop".to_string(),
         })
-        .expect("remove tracks by source roots");
+        .expect("remove source folder");
     assert_eq!(result.removed, 1);
+    let folders: Vec<&str> = result
+        .sources
+        .folders
+        .iter()
+        .map(|f| f.path.as_str())
+        .collect();
+    assert_eq!(folders, ["/music/keep"]);
 
     let conn = service.db.connect().expect("connect");
     let remaining: Vec<String> = conn
@@ -2705,14 +2807,10 @@ fn remove_tracks_by_source_roots_deletes_matching_prefix() {
 }
 
 #[test]
-fn remove_tracks_by_source_roots_keeps_tracks_another_root_covers() {
+fn remove_source_folder_keeps_tracks_another_folder_covers() {
     let (_dir, service) = test_service();
+    set_library_sources(&service, &["/music", "/music/sub"], false, false);
     let conn = service.db.connect().expect("connect");
-    conn.execute(
-        "INSERT INTO app_settings (key, value, updated_at) VALUES (?1, ?2, datetime('now'))",
-        params![SETTING_UI_SOURCE_ROOTS, r#"["/music","/music/sub"]"#],
-    )
-    .expect("seed source roots");
     for (id, path) in [
         ("top", "/music/a.mp3"),
         ("sub", "/music/sub/b.mp3"),
@@ -2732,10 +2830,10 @@ fn remove_tracks_by_source_roots_keeps_tracks_another_root_covers() {
     };
     let remove = |root: &str| {
         service
-            .remove_tracks_by_source_roots(RemoveTracksBySourceRootsRequest {
-                source_roots: vec![root.to_string()],
+            .remove_source_folder(RemoveSourceFolderRequest {
+                path: root.to_string(),
             })
-            .expect("remove tracks by source roots")
+            .expect("remove source folder")
             .removed
     };
 
@@ -2744,6 +2842,7 @@ fn remove_tracks_by_source_roots_keeps_tracks_another_root_covers() {
     assert_eq!(remaining(), ["other", "sub", "top"]);
 
     // The still-configured subfolder keeps its track when the parent goes.
+    set_library_sources(&service, &["/music/sub"], false, false);
     assert_eq!(remove("/music"), 1);
     assert_eq!(remaining(), ["other", "sub"]);
 }

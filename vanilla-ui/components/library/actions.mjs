@@ -76,78 +76,29 @@ export function mergeTrackPreservingBestFields(existing, normalized) {
   return merged;
 }
 
-// Store the backend's per-folder analyzed status (SourceRootAnalysisStatus rows).
-export function applySourceRootAnalysis(state, rows) {
-  if (!rows?.length) return;
-  if (!state.sourceRootAnalysisStatus || typeof state.sourceRootAnalysisStatus !== "object") {
-    state.sourceRootAnalysisStatus = {};
-  }
-  for (const row of rows) {
-    const root = String(row?.sourceRoot ?? "").trim();
-    if (!root) continue;
-    state.sourceRootAnalysisStatus[root] = !!row?.fullyAnalyzed;
-  }
+// The library's sources are the backend's (`get_library_sources`): the
+// folders with their switch and missing / analyzed state, and the imported
+// libraries' switches. Every change goes through a command that answers with
+// the new sources; they're stored here, drawn as chips, and the folders are
+// let into the asset scope (covers).
+export function applyLibrarySources(ctx, sources) {
+  ctx.state.librarySources = sources;
+  renderSourceChips(ctx);
+  return ctx.syncAssetScopePaths().catch(() => {});
 }
 
-export async function refreshSourceRootAnalysisStatus(ctx) {
-  const { state } = ctx;
-  // Analysis status is a property of the folder itself, not of whether it's
-  // currently toggled on in the library filter, so this asks about every
-  // configured root (enabled or not). Missing roots are skipped since there's
-  // nothing on disk to scan.
-  const roots = (state.sourceRoots || []).filter((root) => !sourceRootIsMissing(state, root));
-  if (!roots.length) return;
+export async function refreshLibrarySources(ctx) {
   try {
-    const data = await ctx.command("get_source_root_analysis", { sourceRoots: roots });
-    applySourceRootAnalysis(state, data?.items);
-    renderSourceChips(ctx);
+    await applyLibrarySources(ctx, await ctx.command("get_library_sources"));
   } catch (err) {
-    console.warn("Failed to refresh source folder analysis status:", err);
+    console.warn("Failed to load library sources:", err);
   }
 }
 
-export function missingSourceRootsArray(state) {
-  const roots = state?.missingSourceRoots;
-  if (roots instanceof Set) return Array.from(roots);
-  if (Array.isArray(roots)) return roots;
-  return [];
-}
-
-export function setMissingSourceRoots(state, roots) {
-  const normalized = Array.isArray(roots)
-    ? roots.map((root) => String(root || "").trim()).filter(Boolean)
-    : [];
-  state.missingSourceRoots = new Set(normalized);
-  return normalized;
-}
-
-export function sourceRootIsMissing(state, root) {
-  const key = normalizePath(root).replace(/\/+$/, "");
-  if (!key) return false;
-  return missingSourceRootsArray(state)
-    .some((candidate) => normalizePath(candidate).replace(/\/+$/, "") === key);
-}
-
-export async function refreshMissingSourceRoots(ctx, { silent = true } = {}) {
-  const { state } = ctx;
-  const roots = Array.isArray(state.sourceRoots) ? state.sourceRoots : [];
-  if (!roots.length) {
-    setMissingSourceRoots(state, []);
-    renderSourceChips(ctx);
-    return [];
-  }
-  try {
-    const data = await ctx.command("check_source_roots", { sourceRoots: roots });
-    const missing = setMissingSourceRoots(state, Array.isArray(data?.missing) ? data.missing : []);
-    renderSourceChips(ctx);
-    if (!silent && missing.length) {
-      ctx.emitStatus(`Source folder missing: ${missing[0]}${missing.length > 1 ? ` (+${missing.length - 1} more)` : ""}. Relocate or remove it.`);
-    }
-    return missing;
-  } catch (err) {
-    console.warn("Failed to check source folders:", err);
-    return missingSourceRootsArray(state);
-  }
+// "Source folder missing: /a (+2 more). Relocate or remove it."
+function missingFoldersStatus(paths) {
+  const more = paths.length > 1 ? ` (+${paths.length - 1} more)` : "";
+  return `Source folder missing: ${paths[0]}${more}. Relocate or remove it.`;
 }
 
 export function trackNeedsPreviewHydration(track) {
@@ -284,7 +235,6 @@ export async function hydrateLoadedTracksPreviewsInBackground(ctx) {
   if (anyChanged) {
     renderLibraryRows(ctx);
     ctx.renderCurrentPlaylistTracksFromState();
-    renderSourceChips(ctx);
   }
 }
 
@@ -305,43 +255,11 @@ export async function relocateSourceRoot(ctx, oldRoot) {
     oldRoot: sourceRoot,
     newRoot
   });
-
-  const oldIndex = state.sourceRoots.findIndex((root) => normalizePath(root) === normalizePath(sourceRoot));
-  // Not the old root itself: `normalizePath` ignores case, and a case-only
-  // rename (`music` → `Music`) is a real move on Linux.
-  const alreadyHasNewRoot = state.sourceRoots.some(
-    (root, index) => index !== oldIndex && normalizePath(root) === normalizePath(newRoot)
-  );
-  const unresolved = Number(result?.missingAtNewRoot || 0) + Number(result?.conflicts || 0);
-  if (!state.sourceRootEnabled || typeof state.sourceRootEnabled !== "object") {
-    state.sourceRootEnabled = {};
-  }
-  const oldEnabled = state.sourceRootEnabled?.[sourceRoot];
-  if (oldIndex >= 0 && unresolved === 0) {
-    if (alreadyHasNewRoot) {
-      state.sourceRoots.splice(oldIndex, 1);
-    } else {
-      state.sourceRoots[oldIndex] = newRoot;
-    }
-  } else if (!alreadyHasNewRoot) {
-    state.sourceRoots.push(newRoot);
-  }
-  if (oldEnabled !== undefined && state.sourceRootEnabled?.[newRoot] === undefined) {
-    state.sourceRootEnabled[newRoot] = oldEnabled;
-  } else if (state.sourceRootEnabled?.[newRoot] === undefined) {
-    state.sourceRootEnabled[newRoot] = true;
-  }
-  if (unresolved === 0) {
-    delete state.sourceRootEnabled[sourceRoot];
-  }
-  ctx.persistSourceRoots(state.sourceRoots);
-  ctx.persistSourceRootEnabled(state.sourceRootEnabled);
-  renderSourceChips(ctx);
-  await ctx.syncAssetScopePaths();
-  await refreshMissingSourceRoots(ctx, { silent: true });
+  await applyLibrarySources(ctx, result.sources);
   await resetAndLoadLibraryTracks(ctx, state.libraryQuery, LIBRARY_LOAD_LIMIT_DEFAULT);
   await ctx.refreshCurrentPlaylistTracks();
 
+  const unresolved = Number(result.missingAtNewRoot || 0) + Number(result.conflicts || 0);
   const updated = Number(result?.updated || 0);
   const partial = unresolved > 0
     ? ` | ${unresolved} track(s) still unresolved`
@@ -357,11 +275,13 @@ function renderLibraryChips(ctx) {
   if (!el.libraryChipsContainer) return;
   const libraries = [
     {
-      path: state.externalRekordboxDbPath, imported: state.rekordboxDbImported, enabled: state.rekordboxDbEnabled,
+      path: state.externalRekordboxDbPath, imported: state.rekordboxDbImported,
+      enabled: state.librarySources.rekordboxDbEnabled,
       template: "tplSourceChipRekordboxDb", label: "rekordbox"
     },
     {
-      path: state.externalMixxxDbPath, imported: state.mixxxDbImported, enabled: state.mixxxDbEnabled,
+      path: state.externalMixxxDbPath, imported: state.mixxxDbImported,
+      enabled: state.librarySources.mixxxDbEnabled,
       template: "tplSourceChipMixxxDb", label: "Mixxx"
     }
   ].filter((library) => library.path);
@@ -382,33 +302,11 @@ function renderLibraryChips(ctx) {
 export function renderSourceChips(ctx) {
   const { state, el, document } = ctx;
   el.sourceChipsContainer.replaceChildren();
-  if (!state.sourceRootAnalysisStatus || typeof state.sourceRootAnalysisStatus !== "object") {
-    state.sourceRootAnalysisStatus = {};
-  }
-  const activeRoots = new Set(state.sourceRoots || []);
-  for (const cachedRoot of Object.keys(state.sourceRootAnalysisStatus)) {
-    if (!activeRoots.has(cachedRoot)) delete state.sourceRootAnalysisStatus[cachedRoot];
-  }
-  const activeRootKeys = new Set((state.sourceRoots || []).map((root) => normalizePath(root).replace(/\/+$/, "")));
-  const retainedMissingRoots = missingSourceRootsArray(state)
-    .filter((root) => activeRootKeys.has(normalizePath(root).replace(/\/+$/, "")));
-  if (retainedMissingRoots.length !== missingSourceRootsArray(state).length) {
-    setMissingSourceRoots(state, retainedMissingRoots);
-  }
   renderLibraryChips(ctx);
 
-  state.sourceRoots.forEach((path, index) => {
-    if (state.sourceRootEnabled[path] === undefined) {
-      state.sourceRootEnabled[path] = true;
-    }
-    const missing = sourceRootIsMissing(state, path);
-    // Per-root "fully analyzed" is computed by the backend over the complete,
-    // unfiltered track set and delivered as `sourceRootAnalysis` (see
-    // applySourceRootAnalysis). Just render what it told us.
-    const fullyAnalyzed = state.sourceRootAnalysisStatus[path] === true;
-
+  state.librarySources.folders.forEach(({ path, enabled, missing, fullyAnalyzed }, index) => {
     const chip = cloneTemplate(document, "tplSourceChip");
-    chip.classList.toggle("source-chip-analyzed", fullyAnalyzed && !missing);
+    chip.classList.toggle("source-chip-analyzed", fullyAnalyzed);
     chip.classList.toggle("source-chip-missing", missing);
     if (missing) {
       chip.dataset.sourceRelocateIndex = String(index);
@@ -416,7 +314,7 @@ export function renderSourceChips(ctx) {
     }
     const toggle = chip.querySelector(".source-chip-toggle");
     toggle.dataset.sourceToggleIndex = String(index);
-    toggle.checked = !missing && state.sourceRootEnabled[path] !== false;
+    toggle.checked = !missing && enabled;
     toggle.disabled = missing;
     if (missing) toggle.setAttribute("aria-label", "Source folder missing");
     const pathEl = chip.querySelector(".source-chip-path");
@@ -428,7 +326,6 @@ export function renderSourceChips(ctx) {
     el.sourceChipsContainer.appendChild(chip);
   });
 
-  ctx.persistSourceRootEnabled(state.sourceRootEnabled);
   if (el.importPlaylistItem) {
     el.importPlaylistItem.classList.toggle("hidden", !state.externalRekordboxDbPath && !state.externalMixxxDbPath);
   }
@@ -459,7 +356,7 @@ export function applyLibraryDurationSummary(ctx, totalMs, unknownCount) {
 // after a (re)render. The table itself is drawn by the controller.
 export function renderLibraryChrome(ctx) {
   const { state, el } = ctx;
-  const noSources = !state.sourcesEverConfigured;
+  const noSources = !state.librarySources.everConfigured;
   if (el.libraryEmptyState) {
     el.libraryEmptyState.replaceChildren();
     if (noSources) {
@@ -503,20 +400,10 @@ export function createLibraryTracksController(ctx) {
       wrap: ctx.el.libraryTableWrap,
       durationTarget: ctx.el.libraryTotalDuration,
     }),
+    // The backend lists the library as its sources are set.
     fetchPage: ({ query, sortBy, sortDir, offset, limit }) => {
-      const enabledRoots = (ctx.state.sourceRoots || []).filter(
-        (root) => ctx.state.sourceRootEnabled?.[root] !== false && !sourceRootIsMissing(ctx.state, root),
-      );
-      const includeRekordboxDb = ctx.state.rekordboxDbEnabled === true;
-      const includeMixxxDb = ctx.state.mixxxDbEnabled === true;
       ctx.state.libraryQuery = String(query || "").trim();
-      if (!enabledRoots.length && !includeRekordboxDb && !includeMixxxDb) {
-        return { total: 0, items: [], totalDurationMs: 0, durationUnknownCount: 0 };
-      }
       return ctx.command("browse_source_files", {
-        sourceRoots: enabledRoots,
-        includeRekordboxDb,
-        includeMixxxDb,
         query: ctx.state.libraryQuery,
         sortBy: sortBy || null,
         sortDir: sortDir || null,
@@ -561,8 +448,6 @@ export function createLibraryTracksController(ctx) {
       if (loaded.length) {
         ctl.prevById = new Map(loaded.map((t) => [String(t.id), t]));
       }
-      applySourceRootAnalysis(ctx.state, data.sourceRootAnalysis);
-      renderSourceChips(ctx);
       // The enabled sources' tracks, ignoring the search.
       if (ctx.el.libraryCountsText) {
         ctx.el.libraryCountsText.textContent = formatTrackListSummary(data.listTrackCount, data.listSizeBytes);
@@ -628,41 +513,15 @@ export async function reloadTrackListsForKeyNotation(ctx) {
   await Promise.all(reloads);
 }
 
-export function enabledLibrarySourceRoots(ctx) {
-  const { state } = ctx;
-  return enabledSourceRoots(state.sourceRoots, state.sourceRootEnabled, state.missingSourceRoots);
-}
-
+// Scans the library's switched-on folders (the backend picks them, and says
+// when there are none).
 export async function scanLibrary(ctx) {
   const { state } = ctx;
   const { emitStatus } = ctx;
-  if (!state.sourceRoots.length) {
-    emitStatus("Set at least one source root path before scanning");
-    return;
-  }
-
-  ctx.persistSourceRoots(state.sourceRoots);
-  const knownMissing = missingSourceRootsArray(state);
-  if (knownMissing.length) {
-    emitStatus(`Source folder missing: ${knownMissing[0]}${knownMissing.length > 1 ? ` (+${knownMissing.length - 1} more)` : ""}. Relocate or remove it.`);
-  }
-  const activeScanRoots = enabledLibrarySourceRoots(ctx);
-  if (!activeScanRoots.length) {
-    emitStatus(knownMissing.length
-      ? "No available source folders to scan. Relocate or remove missing source folders."
-      : "Enable at least one source folder before scanning");
-    return;
-  }
   emitStatus("Scanning library files...");
-  const result = await ctx.command("scan_library", {
-    sourceRoots: activeScanRoots,
-    incremental: true
-  });
-  if (Array.isArray(result?.notFound) && result.notFound.length) {
-    setMissingSourceRoots(state, [...missingSourceRootsArray(state), ...result.notFound]);
-    renderSourceChips(ctx);
-    emitStatus(`Source folder missing: ${result.notFound[0]}${result.notFound.length > 1 ? ` (+${result.notFound.length - 1} more)` : ""}. Relocate or remove it.`);
-  }
+  const result = await ctx.command("scan_library", { incremental: true });
+  if (result.notFound?.length) emitStatus(missingFoldersStatus(result.notFound));
+  await refreshLibrarySources(ctx);
   // e.g. the same file found in two folders; the backend words them.
   const scanWarnings = Array.isArray(result?.warnings) ? result.warnings : [];
   if (scanWarnings.length) {
@@ -691,7 +550,7 @@ export async function scanLibrary(ctx) {
 
   const warningCount = ctx.countWarningsForStatus([...scanWarnings, ...warnings]);
   const warningSuffix = warningCount ? ` (${warningCount} warning(s))` : "";
-  const missingCount = missingSourceRootsArray(state).length;
+  const missingCount = state.librarySources.folders.filter((folder) => folder.missing).length;
   const missingSuffix = missingCount ? ` | ${missingCount} source folder(s) missing` : "";
   emitStatus(
     `Scan done: ${scopedTrackCount} tracks / ${albumCount} albums | analyzed ${analyzed}, failed ${failed}${incompleteSuffix}${warningSuffix}${missingSuffix}`,
@@ -716,10 +575,7 @@ export async function scanRekordboxDb(ctx) {
     label: "Desktop library",
     logSource: "master.db",
     codePrefix: "rekordbox_db",
-    enable: () => {
-      ctx.state.rekordboxDbEnabled = true;
-      ctx.persistRekordboxDbEnabled(true);
-    },
+    library: "rekordbox",
     detect: () => ctx.detectExternalRekordboxDb(),
   });
 }
@@ -731,18 +587,23 @@ export async function scanMixxxDb(ctx) {
     label: "Mixxx library",
     logSource: "mixxx",
     codePrefix: "mixxx_db",
-    enable: () => {
-      ctx.state.mixxxDbEnabled = true;
-      ctx.persistMixxxDbEnabled(true);
-    },
+    library: "mixxx",
     detect: () => ctx.detectExternalMixxxDb(),
   });
 }
 
+// An imported library's tracks join the library (its chip switched on).
+export async function showExternalLibrary(ctx, library) {
+  await applyLibrarySources(
+    ctx,
+    await ctx.command("set_external_library_enabled", { library, enabled: true }),
+  );
+}
+
 // Shared by the rekordbox master.db and Mixxx imports: run the backend
 // import, turn the library's source chip on, and report the outcome.
-async function importExternalLibrary(ctx, { command, path, label, logSource, codePrefix, enable, detect }) {
-  const { state, logWarnings } = ctx;
+async function importExternalLibrary(ctx, { command, path, label, logSource, codePrefix, library, detect }) {
+  const { logWarnings } = ctx;
   const { emitStatus } = ctx;
   const logLabel = `${label.toLowerCase()} import`;
 
@@ -755,12 +616,9 @@ async function importExternalLibrary(ctx, { command, path, label, logSource, cod
     return;
   }
 
-  // Mark the library as enabled and configured so the library's browse query
-  // includes it alongside the folder sources, and re-detect it: the backend
-  // now reports it as imported, which unlocks its chip.
-  enable();
-  state.sourcesEverConfigured = true;
-  ctx.persistSourcesEverConfigured(true);
+  // Show the library's tracks alongside the folder sources, and re-detect it:
+  // the backend now reports it as imported, which unlocks its chip.
+  await showExternalLibrary(ctx, library);
   await detect();
 
   await resetAndLoadLibraryTracks(ctx, "", LIBRARY_LOAD_LIMIT_POST_SCAN);
@@ -833,11 +691,6 @@ export async function analyzeTrackIds(ctx, trackIds, modeLabel = "Analyze", opti
       // Backend parses + validates the range string (service::analysis).
       bpmRange: String(state.analysisBpmRange || ""),
       analysisEngine: state.analysisEngine,
-      sourceRoots: (state.sourceRoots || []).filter(
-        (root) => state.sourceRootEnabled?.[root] !== false && !sourceRootIsMissing(state, root)
-      ),
-      includeRekordboxDb: state.rekordboxDbEnabled === true,
-      includeMixxxDb: state.mixxxDbEnabled === true,
       query: String(state.libraryQuery || "").trim(),
       reanalyze: !!options.reanalyze
     });
@@ -878,7 +731,7 @@ export async function analyzeTrackIds(ctx, trackIds, modeLabel = "Analyze", opti
     renderSourceChips(ctx);
   }
 
-  Promise.resolve(refreshSourceRootAnalysisStatus(ctx)).catch(() => {});
+  refreshLibrarySources(ctx);
   await ctx.refreshCurrentPlaylistTracks();
   if (warnings.length) {
     ctx.logWarnings("analysis", warnings, modeLabel);
@@ -1165,28 +1018,8 @@ export function normalizeAnalysisBpmRange(range) {
     : DEFAULT_ANALYSIS_BPM_RANGE;
 }
 
-// --- source_root_filter.mjs ---
-
-export function normalizePath(value) {
-  return String(value || "").replace(/\\/g, "/").trim().toLowerCase();
-}
-
-export function enabledSourceRoots(sourceRoots, sourceRootEnabled = {}, missingSourceRoots = null) {
-  const roots = Array.isArray(sourceRoots) ? sourceRoots : [];
-  const missingKeys = missingSourceRoots instanceof Set
-    ? Array.from(missingSourceRoots).map((root) => normalizePath(root).replace(/\/+$/, ""))
-    : (Array.isArray(missingSourceRoots)
-      ? missingSourceRoots.map((root) => normalizePath(root).replace(/\/+$/, ""))
-      : []);
-  return roots.filter((root) => {
-    const rootKey = normalizePath(root).replace(/\/+$/, "");
-    return sourceRootEnabled[root] !== false && !missingKeys.includes(rootKey);
-  });
-}
-
-export function scanLibraryButtonLabel(sourceRoots) {
-  const count = Array.isArray(sourceRoots) ? sourceRoots.length : 0;
-  return count > 1 ? "Scan Libraries" : "Scan Library";
+export function scanLibraryButtonLabel(folders) {
+  return folders.length > 1 ? "Scan Libraries" : "Scan Library";
 }
 
 // --- cover_url.mjs ---

@@ -76,11 +76,7 @@ export function createAppContext(env) {
     updateUsbNameBadge updateSelectionCount updateUsbSubNavDisabledState updateUsbEmptyState
     updateSourceFilterIndicator updateScanLibraryButtonLabel closeSettingsDrawer updateUsbHealthDot
     syncLibraryOnboardingMode bindEvents`);
-  bindActions(settings, `persistSetting hydrateLocalStorageFromFrontendSettingsDb persistSourceRoots
-    persistUsbRoot loadSourceRootsFromStorage loadSourceRootEnabledFromStorage persistSourceRootEnabled
-    persistRekordboxDbEnabled loadRekordboxDbEnabledFromStorage persistMixxxDbEnabled
-    loadMixxxDbEnabledFromStorage persistSourcesEverConfigured
-    loadSourcesEverConfiguredFromStorage`);
+  bindActions(settings, "persistSetting hydrateLocalStorageFromFrontendSettingsDb persistUsbRoot");
   bindActions(bootstrap, "switchView debugFrontendLog handleBackendLogEvent");
   bindActions(shell, "handleSortHeaderClick");
   bindActions(playback, `toPlayableUrl updateTransportButtonsInDom clearAllWaveformPlayheads
@@ -92,11 +88,11 @@ export function createAppContext(env) {
     addTracksToCurrentPlaylist addLibrarySelectionToCurrentPlaylist populatePlaylistPanel
     getCurrentPlaylist isPlaylistSortActive renderCurrentPlaylistTracksFromState
     refreshCurrentPlaylistTracks importExternalPlaylist renderOpenPlaylistExportStatus`);
-  bindActions(library, `normalizeTrack normalizeUsbPlaylist refreshSourceRootAnalysisStatus
-    refreshMissingSourceRoots applyRealtimeAnalyzedTrackUpdate hydrateLoadedTracksPreviewsInBackground
+  bindActions(library, `normalizeTrack normalizeUsbPlaylist applyLibrarySources
+    refreshLibrarySources showExternalLibrary applyRealtimeAnalyzedTrackUpdate hydrateLoadedTracksPreviewsInBackground
     relocateSourceRoot renderSourceChips applyLibraryDurationSummary renderLibraryRows
     scheduleLibrarySearch resetAndLoadLibraryTracks
-    reloadTrackListsForKeyNotation enabledLibrarySourceRoots scanLibrary reanalyzeTracks
+    reloadTrackListsForKeyNotation scanLibrary reanalyzeTracks
     scanRekordboxDb scanMixxxDb analyzeTrackIds analyzeSingleTrack setTrackAnalyzingState promoteTrackIdentity
     patchTrackAnalysisFields`);
   bindActions(usb, `setUsbRootControlsLocked refreshPlaylistExportStatus showDiagReportView

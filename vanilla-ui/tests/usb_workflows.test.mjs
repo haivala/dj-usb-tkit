@@ -175,8 +175,6 @@ test("exportHistoryTracklist guards, cancels, saves sliced tracks, and reports s
 
 function makeExportState(overrides = {}) {
   return {
-    sourceRoots: [],
-    missingSourceRoots: new Set(),
     playlists: [{ id: "p1", name: "Set", tracks: [{ id: "t1", filePath: "/music/track.mp3" }] }],
     usbRoot: "/USB",
     usbRootValid: true,

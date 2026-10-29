@@ -1,3 +1,5 @@
+mod library_sources;
+
 use std::fs;
 
 use backend::commands::BackendCommands;
@@ -27,9 +29,14 @@ fn adding_a_track_already_in_the_playlist_skips_it() {
     });
     assert!(scan.ok, "scan failed: {scan:?}");
 
+    library_sources::show_only(
+        &backend,
+        vec![media.to_string_lossy().to_string()],
+        false,
+        false,
+    );
     let track_id = backend
         .browse_source_files(BrowseSourceFilesRequest {
-            source_roots: vec![media.to_string_lossy().to_string()],
             query: String::new(),
             limit: 10,
             cursor: None,
@@ -51,9 +58,14 @@ fn adding_a_track_already_in_the_playlist_skips_it() {
         .expect("playlist data")
         .playlist_id;
 
+    library_sources::show_only(
+        &backend,
+        vec![media.to_string_lossy().to_string()],
+        false,
+        false,
+    );
     let add_first =
         backend.add_library_selection_to_playlist(AddLibrarySelectionToPlaylistRequest {
-            source_roots: vec![media.to_string_lossy().to_string()],
             playlist_id: playlist_id.clone(),
             track_ids: vec![track_id.clone()],
             ..Default::default()
@@ -63,9 +75,14 @@ fn adding_a_track_already_in_the_playlist_skips_it() {
     assert_eq!(add_first_data.added, 1);
     assert_eq!(add_first_data.skipped, 0);
 
+    library_sources::show_only(
+        &backend,
+        vec![media.to_string_lossy().to_string()],
+        false,
+        false,
+    );
     let add_again =
         backend.add_library_selection_to_playlist(AddLibrarySelectionToPlaylistRequest {
-            source_roots: vec![media.to_string_lossy().to_string()],
             playlist_id: playlist_id.clone(),
             track_ids: vec![track_id.clone()],
             ..Default::default()
@@ -109,11 +126,9 @@ fn library_selection_is_enumerated_and_added_entirely_server_side() {
     );
 
     // Every matching id, enumerated server-side (no need to page the list).
+    library_sources::show_only(&backend, roots.clone(), false, false);
     let matching = backend
         .list_matching_track_ids(ListMatchingTrackIdsRequest {
-            source_roots: roots.clone(),
-            include_rekordbox_db: false,
-            include_mixxx_db: false,
             query: String::new(),
         })
         .data
@@ -131,12 +146,10 @@ fn library_selection_is_enumerated_and_added_entirely_server_side() {
 
     // `all_matching` adds the whole filtered set even though the caller passed
     // no ids at all.
+    library_sources::show_only(&backend, roots.clone(), false, false);
     let added_all = backend
         .add_library_selection_to_playlist(AddLibrarySelectionToPlaylistRequest {
             playlist_id: playlist_id.clone(),
-            source_roots: roots.clone(),
-            include_rekordbox_db: false,
-            include_mixxx_db: false,
             query: String::new(),
             track_ids: Vec::new(),
             all_matching: true,
@@ -146,12 +159,10 @@ fn library_selection_is_enumerated_and_added_entirely_server_side() {
     assert_eq!(added_all.added, 3);
 
     // A second call with explicit ids is fully de-duped.
+    library_sources::show_only(&backend, roots, false, false);
     let added_again = backend
         .add_library_selection_to_playlist(AddLibrarySelectionToPlaylistRequest {
             playlist_id: playlist_id.clone(),
-            source_roots: roots,
-            include_rekordbox_db: false,
-            include_mixxx_db: false,
             query: String::new(),
             track_ids: matching.track_ids.clone(),
             all_matching: false,
@@ -222,11 +233,9 @@ fn add_to_picker_shows_membership_and_adds_the_selection_to_several_playlists() 
             })
             .ok
     );
+    library_sources::show_only(&backend, roots.clone(), false, false);
     let ids = backend
         .list_matching_track_ids(ListMatchingTrackIdsRequest {
-            source_roots: roots.clone(),
-            include_rekordbox_db: false,
-            include_mixxx_db: false,
             query: String::new(),
         })
         .data
@@ -243,10 +252,10 @@ fn add_to_picker_shows_membership_and_adds_the_selection_to_several_playlists() 
     };
     let warmup = create("Warmup");
     let peak = create("Peak");
+    library_sources::show_only(&backend, roots.clone(), false, false);
     let added = backend
         .add_library_selection_to_playlist(AddLibrarySelectionToPlaylistRequest {
             playlist_id: warmup.clone(),
-            source_roots: roots.clone(),
             track_ids: vec![ids[0].clone()],
             ..Default::default()
         })
@@ -273,16 +282,16 @@ fn add_to_picker_shows_membership_and_adds_the_selection_to_several_playlists() 
     );
 
     // No playlist, or one that doesn't exist: nothing is added anywhere.
+    library_sources::show_only(&backend, roots.clone(), false, false);
     let none = backend.add_library_selection_to_playlists(AddLibrarySelectionToPlaylistsRequest {
-        source_roots: roots.clone(),
         track_ids: ids.clone(),
         ..Default::default()
     });
     assert!(!none.ok);
+    library_sources::show_only(&backend, roots.clone(), false, false);
     let unknown =
         backend.add_library_selection_to_playlists(AddLibrarySelectionToPlaylistsRequest {
             playlist_ids: vec![peak.clone(), "missing".to_string()],
-            source_roots: roots.clone(),
             track_ids: ids.clone(),
             ..Default::default()
         });
@@ -290,10 +299,10 @@ fn add_to_picker_shows_membership_and_adds_the_selection_to_several_playlists() 
     assert!(playlist_track_ids(&backend, &peak).is_empty());
 
     // Both playlists, one named twice: each takes what it lacks.
+    library_sources::show_only(&backend, roots, false, false);
     let multi = backend
         .add_library_selection_to_playlists(AddLibrarySelectionToPlaylistsRequest {
             playlist_ids: vec![warmup.clone(), peak.clone(), warmup.clone()],
-            source_roots: roots,
             track_ids: ids.clone(),
             ..Default::default()
         })
@@ -378,9 +387,14 @@ fn scan(backend: &BackendCommands, media: &std::path::Path) -> backend::models::
 
 /// (id, file path) of every library track under `media`, by path.
 fn library_tracks(backend: &BackendCommands, media: &std::path::Path) -> Vec<(String, String)> {
+    library_sources::show_only(
+        &backend,
+        vec![media.to_string_lossy().to_string()],
+        false,
+        false,
+    );
     let mut tracks = backend
         .browse_source_files(BrowseSourceFilesRequest {
-            source_roots: vec![media.to_string_lossy().to_string()],
             query: String::new(),
             limit: 20,
             cursor: None,
@@ -462,8 +476,13 @@ fn scan_merges_identical_tracks_already_in_the_library_into_the_one_in_more_play
             .data
             .expect("playlist data")
             .playlist_id;
+        library_sources::show_only(
+            &backend,
+            vec![media.to_string_lossy().to_string()],
+            false,
+            false,
+        );
         let add = backend.add_library_selection_to_playlist(AddLibrarySelectionToPlaylistRequest {
-            source_roots: vec![media.to_string_lossy().to_string()],
             playlist_id: id.clone(),
             track_ids: ids.iter().map(|id| id.to_string()).collect(),
             ..Default::default()

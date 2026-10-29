@@ -5,45 +5,45 @@ use crate::error::BackendResult;
 use crate::error::ErrorPayload;
 use crate::models::{
     AddLibrarySelectionToPlaylistRequest, AddLibrarySelectionToPlaylistsRequest,
-    AddTrackCandidatesToPlaylistData, AddTrackCandidatesToPlaylistRequest,
-    AddTrackCandidatesToPlaylistsRequest, AddTracksToPlaylistData, AddTracksToPlaylistsData,
-    AnalyzeNewTracksData, AnalyzeNewTracksRequest, ApiResponse, BrowseSourceFilesData,
-    BrowseSourceFilesRequest, CheckSourceRootsData, CheckSourceRootsRequest, CreatePlaylistData,
-    CreatePlaylistRequest, DeletePlaylistData, DeletePlaylistRequest, DeleteUsbBackupData,
-    DeleteUsbBackupRequest, DetectExternalMixxxDbData, DetectExternalRekordboxDbData,
-    ExportToUsbData, ExportToUsbRequest, FetchUsbHistoriesData, FetchUsbHistoriesRequest,
-    FetchUsbPlaylistsData, FetchUsbPlaylistsRequest, FetchUsbTracksData, FetchUsbTracksRequest,
-    GetFrontendSettingsData, GetPlaylistExportSpaceData, GetPlaylistExportSpaceRequest,
-    GetPlaylistMembershipData, GetPlaylistMembershipRequest, GetPlaylistTracksData,
-    GetPlaylistTracksRequest, GetSelectionDurationData, GetSelectionDurationRequest,
-    GetSourceRootAnalysisData, GetSourceRootAnalysisRequest, GetTrackDetailRequest,
-    GetTracksByIdsData, GetTracksByIdsRequest, GetTracksMetadataSummaryRequest,
-    GetUsbDeviceNameData, GetUsbDeviceNameRequest, GetUsbPlayerMenuConfigData,
-    GetUsbPlayerMenuConfigRequest, GetUsbTrackDetailRequest, GetUsbTracksMetadataSummaryRequest,
-    ImportExternalPlaylistData, ImportExternalPlaylistRequest, InitializeUsbData,
-    InitializeUsbRequest, InspectUsbTrackData, InspectUsbTrackRequest, ListExternalPlaylistsData,
-    ListExternalPlaylistsRequest, ListMatchingTrackIdsData, ListMatchingTrackIdsRequest,
-    ListPlaylistsData, ListUsbBackupsData, ListUsbBackupsRequest, ListUsbDevicesData,
-    MaterializeSourceTrackData, MaterializeSourceTrackRequest, PlayResolvedTrackData,
-    PlayResolvedTrackRequest, PlaybackMetronomeData, PlaybackStatusData, PruneUsbDeviceData,
-    PruneUsbDeviceRequest, RelocateSourceRootData, RelocateSourceRootRequest,
-    RemoveTracksBySourceRootsData, RemoveTracksBySourceRootsRequest, RemoveTracksFromPlaylistData,
-    RemoveTracksFromPlaylistRequest, RemoveUsbPlaylistData, RemoveUsbPlaylistRequest,
-    RenamePlaylistData, RenamePlaylistRequest, ReorderPlaylistTracksData,
-    ReorderPlaylistTracksRequest, ReorderPlaylistsData, ReorderPlaylistsRequest,
-    ReorderUsbPlaylistsData, ReorderUsbPlaylistsRequest, RepairUsbDiagnosticsData,
-    RepairUsbDiagnosticsRequest, ResolvePlaybackSourceData, ResolvePlaybackSourceRequest,
-    ResolveTrackIdentityData, ResolveTrackIdentityRequest, RestoreUsbBackupData,
-    RestoreUsbBackupRequest, RunDataMigrationsData, RunUsbDiagnosticsData,
+    AddSourceFoldersData, AddSourceFoldersRequest, AddTrackCandidatesToPlaylistData,
+    AddTrackCandidatesToPlaylistRequest, AddTrackCandidatesToPlaylistsRequest,
+    AddTracksToPlaylistData, AddTracksToPlaylistsData, AnalyzeNewTracksData,
+    AnalyzeNewTracksRequest, ApiResponse, BrowseSourceFilesData, BrowseSourceFilesRequest,
+    CreatePlaylistData, CreatePlaylistRequest, DeletePlaylistData, DeletePlaylistRequest,
+    DeleteUsbBackupData, DeleteUsbBackupRequest, DetectExternalMixxxDbData,
+    DetectExternalRekordboxDbData, ExportToUsbData, ExportToUsbRequest, FetchUsbHistoriesData,
+    FetchUsbHistoriesRequest, FetchUsbPlaylistsData, FetchUsbPlaylistsRequest, FetchUsbTracksData,
+    FetchUsbTracksRequest, GetFrontendSettingsData, GetPlaylistExportSpaceData,
+    GetPlaylistExportSpaceRequest, GetPlaylistMembershipData, GetPlaylistMembershipRequest,
+    GetPlaylistTracksData, GetPlaylistTracksRequest, GetSelectionDurationData,
+    GetSelectionDurationRequest, GetTrackDetailRequest, GetTracksByIdsData, GetTracksByIdsRequest,
+    GetTracksMetadataSummaryRequest, GetUsbDeviceNameData, GetUsbDeviceNameRequest,
+    GetUsbPlayerMenuConfigData, GetUsbPlayerMenuConfigRequest, GetUsbTrackDetailRequest,
+    GetUsbTracksMetadataSummaryRequest, ImportExternalPlaylistData, ImportExternalPlaylistRequest,
+    InitializeUsbData, InitializeUsbRequest, InspectUsbTrackData, InspectUsbTrackRequest,
+    LibrarySourcesData, ListExternalPlaylistsData, ListExternalPlaylistsRequest,
+    ListMatchingTrackIdsData, ListMatchingTrackIdsRequest, ListPlaylistsData, ListUsbBackupsData,
+    ListUsbBackupsRequest, ListUsbDevicesData, MaterializeSourceTrackData,
+    MaterializeSourceTrackRequest, PlayResolvedTrackData, PlayResolvedTrackRequest,
+    PlaybackMetronomeData, PlaybackStatusData, PruneUsbDeviceData, PruneUsbDeviceRequest,
+    RelocateSourceRootData, RelocateSourceRootRequest, RemoveSourceFolderData,
+    RemoveSourceFolderRequest, RemoveTracksFromPlaylistData, RemoveTracksFromPlaylistRequest,
+    RemoveUsbPlaylistData, RemoveUsbPlaylistRequest, RenamePlaylistData, RenamePlaylistRequest,
+    ReorderPlaylistTracksData, ReorderPlaylistTracksRequest, ReorderPlaylistsData,
+    ReorderPlaylistsRequest, ReorderUsbPlaylistsData, ReorderUsbPlaylistsRequest,
+    RepairUsbDiagnosticsData, RepairUsbDiagnosticsRequest, ResolvePlaybackSourceData,
+    ResolvePlaybackSourceRequest, ResolveTrackIdentityData, ResolveTrackIdentityRequest,
+    RestoreUsbBackupData, RestoreUsbBackupRequest, RunDataMigrationsData, RunUsbDiagnosticsData,
     RunUsbDiagnosticsRequest, RunUsbParityReportData, RunUsbParityReportRequest,
     SaveTrackAnalysisEditsData, SaveTrackAnalysisEditsRequest, SaveTrackMetadataEditsData,
     SaveTrackMetadataEditsRequest, SaveUsbTrackAnalysisEditsData, SaveUsbTrackAnalysisEditsRequest,
     SaveUsbTrackMetadataEditsData, SaveUsbTrackMetadataEditsRequest, ScanLibraryData,
     ScanLibraryRequest, ScanMixxxDbRequest, ScanRekordboxDbRequest, SetAnalysisPausedData,
-    SetFrontendSettingData, SetFrontendSettingRequest, SetPlaybackMetronomeRequest,
-    SetUsbDeviceNameData, SetUsbDeviceNameRequest, StopPlaybackData, TrackDetail,
-    TracksMetadataSummary, UpdateUsbPlayerMenuConfigData, UpdateUsbPlayerMenuConfigRequest,
-    UsbTrackAnalysisDetail, ValidateUsbRootData, ValidateUsbRootRequest,
+    SetExternalLibraryEnabledRequest, SetFrontendSettingData, SetFrontendSettingRequest,
+    SetPlaybackMetronomeRequest, SetSourceFolderEnabledRequest, SetUsbDeviceNameData,
+    SetUsbDeviceNameRequest, StopPlaybackData, TrackDetail, TracksMetadataSummary,
+    UpdateUsbPlayerMenuConfigData, UpdateUsbPlayerMenuConfigRequest, UsbTrackAnalysisDetail,
+    ValidateUsbRootData, ValidateUsbRootRequest,
 };
 use crate::player::{PlaybackController, PlaybackTransition};
 use crate::service::BackendService;
@@ -126,18 +126,36 @@ impl BackendCommands {
         wrap(self.service.browse_source_files(req))
     }
 
-    pub fn check_source_roots(
-        &self,
-        req: CheckSourceRootsRequest,
-    ) -> ApiResponse<CheckSourceRootsData> {
-        wrap(self.service.check_source_roots(req))
+    pub fn get_library_sources(&self) -> ApiResponse<LibrarySourcesData> {
+        wrap(self.service.get_library_sources())
     }
 
-    pub fn get_source_root_analysis(
+    pub fn add_source_folders(
         &self,
-        req: GetSourceRootAnalysisRequest,
-    ) -> ApiResponse<GetSourceRootAnalysisData> {
-        wrap(self.service.get_source_root_analysis(req))
+        req: AddSourceFoldersRequest,
+    ) -> ApiResponse<AddSourceFoldersData> {
+        wrap(self.service.add_source_folders(req))
+    }
+
+    pub fn remove_source_folder(
+        &self,
+        req: RemoveSourceFolderRequest,
+    ) -> ApiResponse<RemoveSourceFolderData> {
+        wrap(self.service.remove_source_folder(req))
+    }
+
+    pub fn set_source_folder_enabled(
+        &self,
+        req: SetSourceFolderEnabledRequest,
+    ) -> ApiResponse<LibrarySourcesData> {
+        wrap(self.service.set_source_folder_enabled(req))
+    }
+
+    pub fn set_external_library_enabled(
+        &self,
+        req: SetExternalLibraryEnabledRequest,
+    ) -> ApiResponse<LibrarySourcesData> {
+        wrap(self.service.set_external_library_enabled(req))
     }
 
     pub fn materialize_source_track(
@@ -152,13 +170,6 @@ impl BackendCommands {
         req: ResolveTrackIdentityRequest,
     ) -> ApiResponse<ResolveTrackIdentityData> {
         wrap(self.service.resolve_track_identity(req))
-    }
-
-    pub fn remove_tracks_by_source_roots(
-        &self,
-        req: RemoveTracksBySourceRootsRequest,
-    ) -> ApiResponse<RemoveTracksBySourceRootsData> {
-        wrap(self.service.remove_tracks_by_source_roots(req))
     }
 
     pub fn get_track_detail(&self, req: GetTrackDetailRequest) -> ApiResponse<TrackDetail> {

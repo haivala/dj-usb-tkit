@@ -46,3 +46,23 @@ write. Still open:
 - rekordbox also appends t19 rows carrying the name (the short string at row
   offset `0x1e`, empty `0x03` otherwise). The app doesn't write them.
 - Renaming the drive in the app updates the eDB only on the next export.
+
+## Startup: parallel commands, maybe a boot payload
+
+`initApp` (`vanilla-ui/startup_bootstrap.mjs`) awaits its startup commands one
+after another, though they don't depend on each other: the frontend settings,
+the USB devices, the library sources, and the rekordbox and Mixxx detection.
+If startup feels slow, start the independent ones together (`Promise.all`)
+and draw once they're all in. The window stays hidden until `show_window`, so
+only the total wait matters.
+
+Further option: a Tauri init script (`WebviewWindowBuilder::initialization_script`
+in `desktop/src-tauri/src/main.rs`, which then builds the window instead of
+`tauri.conf.json`) carrying the startup state (settings, theme, sources) so the
+first render needs no command. Costs: the payload is a snapshot taken when
+the window is built (stale after a webview reload, so the commands stay as the
+fallback), its DB reads and folder checks delay creating the window, and e2e
+stubs would set the boot global as well as answer commands. Worth it at most
+for the theme (no wrong-colour first paint); app data stays behind commands.
+The Sources bar starting folded and opening once its chips are drawn doesn't
+depend on either.

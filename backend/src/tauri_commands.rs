@@ -14,29 +14,28 @@ use crate::commands::BackendCommands;
 use crate::error::{ErrorCode, ErrorPayload};
 use crate::models::{
     AddLibrarySelectionToPlaylistRequest, AddLibrarySelectionToPlaylistsRequest,
-    AddTrackCandidatesToPlaylistData, AddTrackCandidatesToPlaylistRequest,
-    AddTrackCandidatesToPlaylistsRequest, AddTracksToPlaylistData, AddTracksToPlaylistsData,
-    AnalyzeNewTracksData, AnalyzeNewTracksRequest, ApiResponse, BrowseSourceFilesData,
-    BrowseSourceFilesRequest, CheckSourceRootsData, CheckSourceRootsRequest, CreatePlaylistData,
-    CreatePlaylistRequest, DeletePlaylistData, DeletePlaylistRequest, DeleteUsbBackupData,
-    DeleteUsbBackupRequest, DetectExternalMixxxDbData, DetectExternalRekordboxDbData,
-    ExportToUsbData, ExportToUsbRequest, FetchUsbHistoriesData, FetchUsbHistoriesRequest,
-    FetchUsbPlaylistsData, FetchUsbPlaylistsRequest, FetchUsbTracksData, FetchUsbTracksRequest,
-    GetFrontendSettingsData, GetPlaylistExportSpaceData, GetPlaylistExportSpaceRequest,
-    GetPlaylistMembershipData, GetPlaylistMembershipRequest, GetPlaylistTracksData,
-    GetPlaylistTracksRequest, GetSelectionDurationData, GetSelectionDurationRequest,
-    GetSourceRootAnalysisData, GetSourceRootAnalysisRequest, GetTrackDetailRequest,
-    GetTracksByIdsData, GetTracksByIdsRequest, GetTracksMetadataSummaryRequest,
-    GetUsbDeviceNameData, GetUsbDeviceNameRequest, GetUsbPlayerMenuConfigData,
-    GetUsbPlayerMenuConfigRequest, GetUsbTrackDetailRequest, GetUsbTracksMetadataSummaryRequest,
-    ImportExternalPlaylistData, ImportExternalPlaylistRequest, InitializeUsbData,
-    InitializeUsbRequest, InspectUsbTrackData, InspectUsbTrackRequest, JobEventPayload,
-    ListExternalPlaylistsData, ListExternalPlaylistsRequest, ListMatchingTrackIdsData,
-    ListMatchingTrackIdsRequest, ListPlaylistsData, ListUsbBackupsData, ListUsbBackupsRequest,
-    ListUsbDevicesData, PlayResolvedTrackData, PlayResolvedTrackRequest, PlaybackEventPayload,
-    PlaybackMetronomeData, PlaybackStatusData, PruneUsbDeviceData, PruneUsbDeviceRequest,
-    RelocateSourceRootData, RelocateSourceRootRequest, RemoveTracksBySourceRootsData,
-    RemoveTracksBySourceRootsRequest, RemoveTracksFromPlaylistData,
+    AddSourceFoldersData, AddSourceFoldersRequest, AddTrackCandidatesToPlaylistData,
+    AddTrackCandidatesToPlaylistRequest, AddTrackCandidatesToPlaylistsRequest,
+    AddTracksToPlaylistData, AddTracksToPlaylistsData, AnalyzeNewTracksData,
+    AnalyzeNewTracksRequest, ApiResponse, BrowseSourceFilesData, BrowseSourceFilesRequest,
+    CreatePlaylistData, CreatePlaylistRequest, DeletePlaylistData, DeletePlaylistRequest,
+    DeleteUsbBackupData, DeleteUsbBackupRequest, DetectExternalMixxxDbData,
+    DetectExternalRekordboxDbData, ExportToUsbData, ExportToUsbRequest, FetchUsbHistoriesData,
+    FetchUsbHistoriesRequest, FetchUsbPlaylistsData, FetchUsbPlaylistsRequest, FetchUsbTracksData,
+    FetchUsbTracksRequest, GetFrontendSettingsData, GetPlaylistExportSpaceData,
+    GetPlaylistExportSpaceRequest, GetPlaylistMembershipData, GetPlaylistMembershipRequest,
+    GetPlaylistTracksData, GetPlaylistTracksRequest, GetSelectionDurationData,
+    GetSelectionDurationRequest, GetTrackDetailRequest, GetTracksByIdsData, GetTracksByIdsRequest,
+    GetTracksMetadataSummaryRequest, GetUsbDeviceNameData, GetUsbDeviceNameRequest,
+    GetUsbPlayerMenuConfigData, GetUsbPlayerMenuConfigRequest, GetUsbTrackDetailRequest,
+    GetUsbTracksMetadataSummaryRequest, ImportExternalPlaylistData, ImportExternalPlaylistRequest,
+    InitializeUsbData, InitializeUsbRequest, InspectUsbTrackData, InspectUsbTrackRequest,
+    JobEventPayload, LibrarySourcesData, ListExternalPlaylistsData, ListExternalPlaylistsRequest,
+    ListMatchingTrackIdsData, ListMatchingTrackIdsRequest, ListPlaylistsData, ListUsbBackupsData,
+    ListUsbBackupsRequest, ListUsbDevicesData, PlayResolvedTrackData, PlayResolvedTrackRequest,
+    PlaybackEventPayload, PlaybackMetronomeData, PlaybackStatusData, PruneUsbDeviceData,
+    PruneUsbDeviceRequest, RelocateSourceRootData, RelocateSourceRootRequest,
+    RemoveSourceFolderData, RemoveSourceFolderRequest, RemoveTracksFromPlaylistData,
     RemoveTracksFromPlaylistRequest, RemoveUsbPlaylistData, RemoveUsbPlaylistRequest,
     RenamePlaylistData, RenamePlaylistRequest, ReorderPlaylistTracksData,
     ReorderPlaylistTracksRequest, ReorderPlaylistsData, ReorderPlaylistsRequest,
@@ -49,11 +48,11 @@ use crate::models::{
     SaveTrackMetadataEditsRequest, SaveUsbTrackAnalysisEditsData, SaveUsbTrackAnalysisEditsRequest,
     SaveUsbTrackMetadataEditsData, SaveUsbTrackMetadataEditsRequest, ScanLibraryData,
     ScanLibraryRequest, ScanMixxxDbRequest, ScanRekordboxDbRequest, SetAnalysisPausedData,
-    SetAnalysisPausedRequest, SetFrontendSettingData, SetFrontendSettingRequest,
-    SetPlaybackMetronomeRequest, SetUsbDeviceNameData, SetUsbDeviceNameRequest, StopPlaybackData,
-    TrackDetail, TracksMetadataSummary, UpdateUsbPlayerMenuConfigData,
-    UpdateUsbPlayerMenuConfigRequest, UsbTrackAnalysisDetail, ValidateUsbRootData,
-    ValidateUsbRootRequest,
+    SetAnalysisPausedRequest, SetExternalLibraryEnabledRequest, SetFrontendSettingData,
+    SetFrontendSettingRequest, SetPlaybackMetronomeRequest, SetSourceFolderEnabledRequest,
+    SetUsbDeviceNameData, SetUsbDeviceNameRequest, StopPlaybackData, TrackDetail,
+    TracksMetadataSummary, UpdateUsbPlayerMenuConfigData, UpdateUsbPlayerMenuConfigRequest,
+    UsbTrackAnalysisDetail, ValidateUsbRootData, ValidateUsbRootRequest,
 };
 
 const JOB_EVENT_CHANNEL: &str = "job:event";
@@ -756,19 +755,40 @@ pub async fn browse_source_files(
 }
 
 #[tauri::command]
-pub fn get_source_root_analysis(
-    state: State<'_, BackendCommands>,
-    request: GetSourceRootAnalysisRequest,
-) -> ApiResponse<GetSourceRootAnalysisData> {
-    state.get_source_root_analysis(request)
+pub fn get_library_sources(state: State<'_, BackendCommands>) -> ApiResponse<LibrarySourcesData> {
+    state.get_library_sources()
 }
 
 #[tauri::command]
-pub fn check_source_roots(
+pub fn add_source_folders(
     state: State<'_, BackendCommands>,
-    request: CheckSourceRootsRequest,
-) -> ApiResponse<CheckSourceRootsData> {
-    state.check_source_roots(request)
+    request: AddSourceFoldersRequest,
+) -> ApiResponse<AddSourceFoldersData> {
+    state.add_source_folders(request)
+}
+
+#[tauri::command]
+pub fn remove_source_folder(
+    state: State<'_, BackendCommands>,
+    request: RemoveSourceFolderRequest,
+) -> ApiResponse<RemoveSourceFolderData> {
+    state.remove_source_folder(request)
+}
+
+#[tauri::command]
+pub fn set_source_folder_enabled(
+    state: State<'_, BackendCommands>,
+    request: SetSourceFolderEnabledRequest,
+) -> ApiResponse<LibrarySourcesData> {
+    state.set_source_folder_enabled(request)
+}
+
+#[tauri::command]
+pub fn set_external_library_enabled(
+    state: State<'_, BackendCommands>,
+    request: SetExternalLibraryEnabledRequest,
+) -> ApiResponse<LibrarySourcesData> {
+    state.set_external_library_enabled(request)
 }
 
 #[tauri::command]
@@ -777,14 +797,6 @@ pub fn resolve_track_identity(
     request: ResolveTrackIdentityRequest,
 ) -> ApiResponse<ResolveTrackIdentityData> {
     state.resolve_track_identity(request)
-}
-
-#[tauri::command]
-pub fn remove_tracks_by_source_roots(
-    state: State<'_, BackendCommands>,
-    request: RemoveTracksBySourceRootsRequest,
-) -> ApiResponse<RemoveTracksBySourceRootsData> {
-    state.remove_tracks_by_source_roots(request)
 }
 
 #[tauri::command]

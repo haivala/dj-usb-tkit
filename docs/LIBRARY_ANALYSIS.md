@@ -107,12 +107,13 @@ Source folders are recoverable state. If a configured source folder is renamed,
 moved, unmounted, or otherwise missing, the app must not interpret that as "all
 tracks under this folder were deleted".
 
-On startup the UI checks configured source folders through `check_source_roots`.
-Missing folders are rendered as warning-colored source chips. The normal filter
+The backend stores the source folders; `get_library_sources` reports each
+one's `missing` state on startup and after every change. Missing folders are
+rendered as warning-colored source chips. The normal filter
 checkbox is shown unchecked/disabled for a missing source, and clicking the chip
 opens relocation instead of toggling the filter. The chip remove action remains
 the explicit destructive path and uses the existing confirmation before
-`remove_tracks_by_source_roots` prunes tracks.
+`remove_source_folder` removes the folder and prunes its tracks.
 
 Scanning also treats missing folders as non-destructive. `scan_library` reports
 missing roots in `notFound`, scans only usable roots, and only prunes stale
@@ -123,8 +124,8 @@ Relocation uses `relocate_source_root`: the backend rewrites `tracks.file_path`
 from `oldRoot/relative/path` to `newRoot/relative/path` only when the target
 file exists and no indexed-path conflict exists. Track IDs are preserved, so
 local playlist membership remains intact. If some files cannot be resolved under
-the new root, those tracks remain under the old missing root and the UI keeps the
-old root visible for follow-up.
+the new root, those tracks remain under the old missing root and the backend
+keeps the old root configured for follow-up.
 
 ## Deep technical details
 

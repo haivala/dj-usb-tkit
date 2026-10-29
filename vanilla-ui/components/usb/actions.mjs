@@ -484,11 +484,7 @@ export function resetUsbStateViews(ctx, { hideDiagnostics = true } = {}) {
 
 export async function syncAssetScopePaths(ctx) {
   const { state } = ctx;
-  const paths = [];
-  for (const root of state.sourceRoots || []) {
-    const value = String(root || "").trim();
-    if (value) paths.push(value);
-  }
+  const paths = state.librarySources.folders.map((folder) => folder.path);
   const usbRoot = String(state.usbRoot || "").trim();
   if (usbRoot) paths.push(usbRoot);
   if (!paths.length) return;
@@ -540,11 +536,9 @@ export async function detectExternalRekordboxDb(ctx) {
     const found = !!data?.found && !!data?.path;
     state.externalRekordboxDbPath = found ? data.path : null;
     state.rekordboxDbImported = found && data.imported === true;
-    if (!found) state.rekordboxDbEnabled = false;
   } catch (err) {
     state.externalRekordboxDbPath = null;
     state.rekordboxDbImported = false;
-    state.rekordboxDbEnabled = false;
     ctx.warn("External rekordbox DB detection failed:", err);
   }
   // Hide the legacy toggle element; the chip in renderSourceChips is the control
@@ -559,11 +553,9 @@ export async function detectExternalMixxxDb(ctx) {
     const found = !!data?.found && !!data?.path;
     state.externalMixxxDbPath = found ? data.path : null;
     state.mixxxDbImported = found && data.imported === true;
-    if (!found) state.mixxxDbEnabled = false;
   } catch (err) {
     state.externalMixxxDbPath = null;
     state.mixxxDbImported = false;
-    state.mixxxDbEnabled = false;
     ctx.warn("Mixxx library detection failed:", err);
   }
   ctx.renderSourceChips();

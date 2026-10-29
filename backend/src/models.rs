@@ -212,6 +212,8 @@ pub struct Playlist {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct ScanLibraryRequest {
+    /// The folders to scan; empty scans the library's switched-on folders.
+    #[serde(default)]
     pub source_roots: Vec<String>,
     pub incremental: bool,
 }
@@ -362,11 +364,6 @@ pub struct ResolvePlaybackSourceData {
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct BrowseSourceFilesRequest {
-    pub source_roots: Vec<String>,
-    #[serde(default)]
-    pub include_rekordbox_db: bool,
-    #[serde(default)]
-    pub include_mixxx_db: bool,
     pub query: String,
     pub limit: usize,
     #[serde(default)]
@@ -394,8 +391,6 @@ pub struct BrowseSourceFilesData {
     pub next_cursor: Option<String>,
     pub has_more: bool,
     #[serde(default)]
-    pub source_root_analysis: Vec<SourceRootAnalysisStatus>,
-    #[serde(default)]
     pub total_duration_ms: u64,
     #[serde(default)]
     pub duration_unknown_count: usize,
@@ -406,47 +401,82 @@ pub struct BrowseSourceFilesData {
     pub list_size_bytes: u64,
 }
 
+/// One configured library source folder, as its chip shows it.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
-pub struct CheckSourceRootsRequest {
-    pub source_roots: Vec<String>,
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize)]
-#[serde(rename_all = "camelCase")]
-pub struct SourceRootStatus {
-    pub source_root: String,
-    pub exists: bool,
-    pub is_dir: bool,
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize)]
-#[serde(rename_all = "camelCase")]
-pub struct CheckSourceRootsData {
-    pub items: Vec<SourceRootStatus>,
-    #[serde(default)]
-    pub missing: Vec<String>,
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize)]
-#[serde(rename_all = "camelCase")]
-pub struct SourceRootAnalysisStatus {
-    pub source_root: String,
-    pub total: usize,
-    pub analyzed: usize,
+pub struct SourceFolder {
+    pub path: String,
+    /// Switched on in the library filter (a missing folder keeps its switch).
+    pub enabled: bool,
+    /// Not a directory right now (unplugged drive, moved folder).
+    pub missing: bool,
+    /// Every track in the folder has its core analysis -- counted over the
+    /// whole folder, whatever the search or the switch.
     pub fully_analyzed: bool,
 }
 
+/// The library filter, kept by the backend: the source folders in the order
+/// they were added, each with its switch, and whether the imported rekordbox
+/// / Mixxx libraries' tracks are shown. Every library listing reads it here.
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
-pub struct GetSourceRootAnalysisRequest {
-    pub source_roots: Vec<String>,
+pub struct LibrarySourcesData {
+    pub folders: Vec<SourceFolder>,
+    pub rekordbox_db_enabled: bool,
+    pub mixxx_db_enabled: bool,
+    /// A source has been set up at some point (a folder added or a library
+    /// imported), even if none is left: the library then shows its table
+    /// instead of the "add a folder" onboarding.
+    pub ever_configured: bool,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
-pub struct GetSourceRootAnalysisData {
-    pub items: Vec<SourceRootAnalysisStatus>,
+pub struct AddSourceFoldersRequest {
+    pub paths: Vec<String>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct AddSourceFoldersData {
+    pub sources: LibrarySourcesData,
+    /// The paths that weren't configured yet, in the order given.
+    pub added: Vec<String>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct RemoveSourceFolderRequest {
+    pub path: String,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct RemoveSourceFolderData {
+    pub sources: LibrarySourcesData,
+    /// Tracks removed from the library with the folder.
+    pub removed: usize,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct SetSourceFolderEnabledRequest {
+    pub path: String,
+    pub enabled: bool,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub enum ExternalLibrary {
+    Rekordbox,
+    Mixxx,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct SetExternalLibraryEnabledRequest {
+    pub library: ExternalLibrary,
+    pub enabled: bool,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -526,18 +556,6 @@ pub struct ResolveTrackIdentityData {
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
-pub struct RemoveTracksBySourceRootsRequest {
-    pub source_roots: Vec<String>,
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize)]
-#[serde(rename_all = "camelCase")]
-pub struct RemoveTracksBySourceRootsData {
-    pub removed: usize,
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize)]
-#[serde(rename_all = "camelCase")]
 pub struct RelocateSourceRootRequest {
     pub old_root: String,
     pub new_root: String,
@@ -553,6 +571,9 @@ pub struct RelocateSourceRootData {
     pub unchanged: usize,
     pub missing_at_new_root: usize,
     pub conflicts: usize,
+    /// The source folders after the move: the old folder is replaced by the
+    /// new one, or kept beside it while some of its tracks couldn't move.
+    pub sources: LibrarySourcesData,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -737,15 +758,7 @@ pub struct AddTracksToPlaylistData {
 #[serde(tag = "view", rename_all = "camelCase")]
 pub enum GetSelectionDurationRequest {
     #[serde(rename_all = "camelCase")]
-    Library {
-        #[serde(default)]
-        source_roots: Vec<String>,
-        #[serde(default)]
-        include_rekordbox_db: bool,
-        #[serde(default)]
-        include_mixxx_db: bool,
-        track_ids: Vec<String>,
-    },
+    Library { track_ids: Vec<String> },
     #[serde(rename_all = "camelCase")]
     Playlist { id: String, track_ids: Vec<String> },
     #[serde(rename_all = "camelCase")]
@@ -782,12 +795,6 @@ pub struct GetSelectionDurationData {
 #[serde(rename_all = "camelCase")]
 pub struct ListMatchingTrackIdsRequest {
     #[serde(default)]
-    pub source_roots: Vec<String>,
-    #[serde(default)]
-    pub include_rekordbox_db: bool,
-    #[serde(default)]
-    pub include_mixxx_db: bool,
-    #[serde(default)]
     pub query: String,
 }
 
@@ -799,19 +806,13 @@ pub struct ListMatchingTrackIdsData {
 }
 
 /// Add a library selection to a playlist entirely server-side: the frontend
-/// sends the current filter plus either the ticked ids or `all_matching`, and
+/// sends the search plus either the ticked ids or `all_matching`, and
 /// the backend enumerates, materializes any browse-only rows, and appends --
 /// so a selection that spans pages the user has scrolled past is never lost.
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct AddLibrarySelectionToPlaylistRequest {
     pub playlist_id: String,
-    #[serde(default)]
-    pub source_roots: Vec<String>,
-    #[serde(default)]
-    pub include_rekordbox_db: bool,
-    #[serde(default)]
-    pub include_mixxx_db: bool,
     #[serde(default)]
     pub query: String,
     #[serde(default)]
@@ -902,12 +903,6 @@ pub struct AddTrackCandidatesToPlaylistData {
 #[serde(rename_all = "camelCase")]
 pub struct AddLibrarySelectionToPlaylistsRequest {
     pub playlist_ids: Vec<String>,
-    #[serde(default)]
-    pub source_roots: Vec<String>,
-    #[serde(default)]
-    pub include_rekordbox_db: bool,
-    #[serde(default)]
-    pub include_mixxx_db: bool,
     #[serde(default)]
     pub query: String,
     #[serde(default)]
@@ -1663,8 +1658,8 @@ pub struct AnalyzeNewTracksRequest {
     #[serde(default)]
     pub playlist_id: Option<String>,
     /// When `track_ids` is empty and `playlist_id` is unset: restrict
-    /// auto-selection to the current library filter (`source_roots` +
-    /// `include_rekordbox_db` + `query`) instead of the whole DB.
+    /// auto-selection to the library as filtered (its source folders and
+    /// libraries, plus `query`) instead of the whole DB.
     #[serde(default)]
     pub scope_to_library_filter: bool,
     /// Preferred: the raw range string from the settings dropdown, e.g.
@@ -1679,12 +1674,8 @@ pub struct AnalyzeNewTracksRequest {
     pub bpm_max: Option<u32>,
     #[serde(default)]
     pub analysis_engine: Option<String>,
-    #[serde(default)]
-    pub source_roots: Vec<String>,
-    #[serde(default)]
-    pub include_rekordbox_db: bool,
-    #[serde(default)]
-    pub include_mixxx_db: bool,
+    /// The library search, for `scope_to_library_filter` and the live
+    /// library total time.
     #[serde(default)]
     pub query: String,
     /// With `track_ids`: analyze each one afresh, replacing an imported or

@@ -3,7 +3,8 @@ import { test, expect } from "./coverage-fixture.mjs";
 function installSortMock(page) {
   return page.addInitScript(() => {
     window.localStorage.setItem("djusbtkit.helpSeen", "1");
-    window.localStorage.setItem("djusbtkit.sourceRoots", JSON.stringify(["/music"]));
+    // The library\'s source folders, as `get_library_sources` answers.
+    window.__e2eSourceFolders = ["/music"];
 
     const tracks = [
       { id: "t1", title: "Zeta", artist: "Bob", album: "A", year: 2021, filePath: "/music/zeta.mp3" },
@@ -15,6 +16,11 @@ function installSortMock(page) {
     window.__TAURI__ = {
       core: {
         invoke: async (command, payload = {}) => {
+          if (command === "get_library_sources") {
+            const folders = (window.__e2eSourceFolders || [])
+              .map((path) => ({ path, enabled: true, missing: false, fullyAnalyzed: false }));
+            return { ok: true, data: { folders, rekordboxDbEnabled: false, mixxxDbEnabled: false, everConfigured: folders.length > 0 } };
+          }
           if (command === "clear_frontend_log") return "";
           if (command === "append_frontend_log") return null;
           if (command === "show_window") return null;

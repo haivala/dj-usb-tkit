@@ -39,7 +39,7 @@ function jobCtx(lockCalls) {
     debugFrontendLog: () => {},
     emitMessage: () => {},
     applyRealtimeAnalyzedTrackUpdate: () => Promise.resolve(),
-    refreshSourceRootAnalysisStatus: () => {},
+    refreshLibrarySources: () => {},
     applyLibraryDurationSummary: () => {},
     setTrackAnalyzingState: () => {},
     setUsbRootControlsLocked: (locked) => lockCalls.push(locked)

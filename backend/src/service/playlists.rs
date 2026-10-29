@@ -497,12 +497,7 @@ impl BackendService {
         req: ListMatchingTrackIdsRequest,
     ) -> BackendResult<ListMatchingTrackIdsData> {
         let conn = self.db.connect()?;
-        let visible = self.compute_visible_library_tracks(
-            &conn,
-            &req.source_roots,
-            ExternalLibraries::from_flags(req.include_rekordbox_db, req.include_mixxx_db),
-            &req.query,
-        )?;
+        let visible = self.compute_visible_library_tracks(&conn, &req.query)?;
         let track_ids: Vec<String> = visible.into_iter().map(|track| track.id).collect();
         let total = track_ids.len();
         Ok(ListMatchingTrackIdsData { track_ids, total })
@@ -517,18 +512,9 @@ impl BackendService {
         req: GetSelectionDurationRequest,
     ) -> BackendResult<GetSelectionDurationData> {
         match req {
-            GetSelectionDurationRequest::Library {
-                source_roots,
-                include_rekordbox_db,
-                include_mixxx_db,
-                track_ids,
-            } => {
+            GetSelectionDurationRequest::Library { track_ids } => {
                 let conn = self.db.connect()?;
-                let items = self.compute_all_library_tracks(
-                    &conn,
-                    &source_roots,
-                    ExternalLibraries::from_flags(include_rekordbox_db, include_mixxx_db),
-                )?;
+                let items = self.compute_visible_library_tracks(&conn, "")?;
                 Ok(selection_duration(&items, &track_ids, library_length_known))
             }
             GetSelectionDurationRequest::Playlist { id, track_ids } => {
@@ -556,14 +542,8 @@ impl BackendService {
     ) -> BackendResult<AddTracksToPlaylistData> {
         let conn = self.db.connect()?;
         ensure_playlist_exists_conn(&conn, &req.playlist_id)?;
-        let track_ids = self.resolve_library_selection(
-            &conn,
-            &req.source_roots,
-            ExternalLibraries::from_flags(req.include_rekordbox_db, req.include_mixxx_db),
-            &req.query,
-            &req.track_ids,
-            req.all_matching,
-        )?;
+        let track_ids =
+            self.resolve_library_selection(&conn, &req.query, &req.track_ids, req.all_matching)?;
         drop(conn);
 
         if track_ids.is_empty() {
@@ -588,14 +568,7 @@ impl BackendService {
     ) -> BackendResult<AddTracksToPlaylistsData> {
         let conn = self.db.connect()?;
         let playlist_ids = checked_playlist_ids(&conn, &req.playlist_ids)?;
-        let track_ids = self.resolve_library_selection(
-            &conn,
-            &req.source_roots,
-            ExternalLibraries::from_flags(req.include_rekordbox_db, req.include_mixxx_db),
-            &req.query,
-            &req.track_ids,
-            false,
-        )?;
+        let track_ids = self.resolve_library_selection(&conn, &req.query, &req.track_ids, false)?;
         drop(conn);
         self.add_resolved_to_playlists(&playlist_ids, track_ids, req.track_ids.len(), Vec::new())
     }
@@ -610,13 +583,11 @@ impl BackendService {
     fn resolve_library_selection(
         &self,
         conn: &rusqlite::Connection,
-        source_roots: &[String],
-        external: ExternalLibraries,
         query: &str,
         wanted_ids: &[String],
         all_matching: bool,
     ) -> BackendResult<Vec<String>> {
-        let visible = self.compute_visible_library_tracks(conn, source_roots, external, query)?;
+        let visible = self.compute_visible_library_tracks(conn, query)?;
 
         let wanted: HashSet<&str> = wanted_ids.iter().map(String::as_str).collect();
         let chosen: Vec<&Track> = visible

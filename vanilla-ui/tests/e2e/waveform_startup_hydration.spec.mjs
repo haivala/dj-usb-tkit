@@ -2,7 +2,8 @@ import { test, expect } from "./coverage-fixture.mjs";
 
 function installWaveformStartupMock(page) {
   return page.addInitScript(() => {
-    window.localStorage.setItem("djusbtkit.sourceRoots", JSON.stringify(["/music"]));
+    // The library\'s source folders, as `get_library_sources` answers.
+    window.__e2eSourceFolders = ["/music"];
     window.localStorage.setItem("djusbtkit.helpSeen", "1");
 
     const listeners = new Map();
@@ -48,6 +49,11 @@ function installWaveformStartupMock(page) {
     window.__TAURI__ = {
       core: {
         invoke: async (command, payload = {}) => {
+          if (command === "get_library_sources") {
+            const folders = (window.__e2eSourceFolders || [])
+              .map((path) => ({ path, enabled: true, missing: false, fullyAnalyzed: false }));
+            return { ok: true, data: { folders, rekordboxDbEnabled: false, mixxxDbEnabled: false, everConfigured: folders.length > 0 } };
+          }
           if (command === "clear_frontend_log") return "";
           if (command === "append_frontend_log") return null;
           if (command === "show_window") return null;
@@ -151,12 +157,15 @@ test("the cue editor draws the track's detail waveform", async ({ page }) => {
 
 function installSourceChipAnalysisMock(page) {
   return page.addInitScript(() => {
-    window.localStorage.setItem("djusbtkit.sourceRoots", JSON.stringify(["/music"]));
-    window.localStorage.setItem(
-      "djusbtkit.sourceRootEnabled",
-      JSON.stringify({ "/music": true })
-    );
     window.localStorage.setItem("djusbtkit.helpSeen", "1");
+    // The backend's library sources; the source commands below change them
+    // as the real backend does.
+    const folder = (path) => ({ path, enabled: true, missing: false, fullyAnalyzed: true });
+    window.__sources = {
+      folders: [folder("/music")], rekordboxDbEnabled: false, mixxxDbEnabled: false, everConfigured: true
+    };
+    window.__libraryToggles = [];
+    window.__browseCalls = 0;
     window.__scanCalls = 0;
     window.__picked = false;
 
@@ -208,6 +217,20 @@ function installSourceChipAnalysisMock(page) {
     window.__TAURI__ = {
       core: {
         invoke: async (command, payload = {}) => {
+          const sources = window.__sources;
+          if (command === "get_library_sources") return { ok: true, data: sources };
+          if (command === "add_source_folders") {
+            const known = new Set(sources.folders.map((f) => f.path));
+            const added = payload.request.paths.filter((path) => !known.has(path));
+            sources.folders.push(...added.map(folder));
+            return { ok: true, data: { sources, added } };
+          }
+          if (command === "set_external_library_enabled") {
+            const { library, enabled } = payload.request;
+            window.__libraryToggles.push({ library, enabled });
+            sources[library === "mixxx" ? "mixxxDbEnabled" : "rekordboxDbEnabled"] = enabled;
+            return { ok: true, data: sources };
+          }
           if (command === "clear_frontend_log") return "";
           if (command === "append_frontend_log") return null;
           if (command === "show_window") return null;
@@ -284,29 +307,8 @@ function installSourceChipAnalysisMock(page) {
             return { ok: true, data: { indexed: 1, updated: 0, removed: 0 } };
           }
           if (command === "browse_source_files") {
-            window.__lastBrowsePayload = payload?.request || null;
-            return {
-              ok: true,
-              data: {
-                total: tracks.length,
-                items: tracks,
-                // Per-root readiness is backend-computed and delivered here.
-                sourceRootAnalysis: [
-                  { sourceRoot: "/music", total: 1, analyzed: 1, fullyAnalyzed: true },
-                  { sourceRoot: "/music2", total: 1, analyzed: 1, fullyAnalyzed: true }
-                ]
-              }
-            };
-          }
-          if (command === "get_source_root_analysis") {
-            return {
-              ok: true,
-              data: {
-                items: (payload?.request?.sourceRoots || []).map((sourceRoot) => ({
-                  sourceRoot, total: 1, analyzed: 1, fullyAnalyzed: true
-                }))
-              }
-            };
+            window.__browseCalls += 1;
+            return { ok: true, data: { total: tracks.length, items: tracks } };
           }
           if (command === "get_tracks_by_ids_with_previews") {
             return { ok: true, data: { items: tracks } };
@@ -344,35 +346,40 @@ test("source chips show analyzed green on startup and adding a source indexes it
   await expect(page.locator("#sourceChipsContainer .source-chip-toggle[data-rekordbox-db]")).toHaveCount(0);
 
   // The rekordbox chip's checkbox (imported library) is a pure browse-filter
-  // toggle -- it must never trigger a rescan, only a re-filtered reload of
+  // toggle -- it must never trigger a rescan, only the switch and a reload of
   // what's already indexed.
   const rekordboxDbToggle = page.locator('#libraryChipsContainer .source-chip-toggle[data-rekordbox-db="true"]');
   await expect(rekordboxDbToggle).toBeVisible();
   await expect(rekordboxDbToggle).toHaveAttribute("aria-label", "Toggle rekordbox library");
   await expect(rekordboxDbToggle).toBeEnabled();
+  const browseCalls = await page.evaluate(() => window.__browseCalls);
   await rekordboxDbToggle.check();
   await expect(rekordboxDbToggle).toBeChecked();
+  await expect.poll(async () => page.evaluate(() => window.__browseCalls)).toBeGreaterThan(browseCalls);
   await expect.poll(async () => page.evaluate(() => window.__scanCalls)).toBe(1);
 
   // Mixxx isn't imported yet: its checkbox is disabled until the chip's ↻ runs
-  // the import, which then turns it on (a separate browse flag).
+  // the import, which then switches it on.
   const mixxxToggle = page.locator('#libraryChipsContainer .source-chip-toggle[data-mixxx-db="true"]');
   await expect(mixxxToggle).toHaveAttribute("aria-label", "Toggle Mixxx library");
   await expect(mixxxToggle).toBeDisabled();
   await expect(mixxxToggle).not.toBeChecked();
-  await expect.poll(async () => page.evaluate(() => window.__lastBrowsePayload?.includeMixxxDb)).toBe(false);
   await page.locator('#libraryChipsContainer .source-chip-import[data-import-library="mixxx"]').click();
   await expect.poll(async () => page.evaluate(() => window.__mixxxScanPayload)).toEqual({
     path: "/home/dj/.mixxx/mixxxdb.sqlite"
   });
   await expect(mixxxToggle).toBeEnabled();
   await expect(mixxxToggle).toBeChecked();
-  await expect.poll(async () => page.evaluate(() => window.__lastBrowsePayload?.includeMixxxDb)).toBe(true);
-  await expect.poll(async () => page.evaluate(() => window.__lastBrowsePayload?.includeRekordboxDb)).toBe(true);
+  await expect(rekordboxDbToggle).toBeChecked();
 
-  // Unticking only filters: no import, and the browse drops Mixxx.
+  // Unticking only switches it off: no import.
   await mixxxToggle.uncheck();
-  await expect.poll(async () => page.evaluate(() => window.__lastBrowsePayload?.includeMixxxDb)).toBe(false);
+  await expect(mixxxToggle).not.toBeChecked();
+  await expect.poll(async () => page.evaluate(() => window.__libraryToggles)).toEqual([
+    { library: "rekordbox", enabled: true },
+    { library: "mixxx", enabled: true },
+    { library: "mixxx", enabled: false },
+  ]);
   await expect.poll(async () => page.evaluate(() => window.__scanCalls)).toBe(1);
 });
 
@@ -445,118 +452,4 @@ test("Import ticks rekordbox and Mixxx playlists, imports each and opens the fir
   await expect(page.locator('.source-chip-toggle[data-rekordbox-db="true"]')).toBeChecked();
   await expect(page.locator('.source-chip-toggle[data-mixxx-db="true"]')).toBeChecked();
   await expect(page.locator("#statusText")).toContainText("Imported 2 of 2 playlists: 4 track(s)");
-});
-
-// Regression coverage for: searching the library used to make a fully
-// -analyzed folder's chip lose its green state whenever the search term
-// didn't match any track in that folder (backend/src/service/library.rs's
-// browse_source_files computed source_root_analysis from the search
-// -filtered track list instead of each folder's full contents, so a
-// zero-match folder's `total` collapsed to 0 and `fully_analyzed` -- which
-// requires `total > 0` -- went false). The fix moved that computation to
-// the unfiltered set; this mock simulates the *fixed* backend contract
-// (sourceRootAnalysis always reflects full folder contents, independent of
-// the query) as a frontend regression guard -- it can't exercise the real
-// Rust computation itself (see the backend test in mod.rs for that), only
-// that the frontend keeps trusting/applying that field correctly rather
-// than re-deriving it from whatever's currently visible.
-function installSourceChipSearchMock(page) {
-  return page.addInitScript(() => {
-    window.localStorage.setItem("djusbtkit.sourceRoots", JSON.stringify(["/music-a", "/music-b"]));
-    window.localStorage.setItem(
-      "djusbtkit.sourceRootEnabled",
-      JSON.stringify({ "/music-a": true, "/music-b": true })
-    );
-    window.localStorage.setItem("djusbtkit.helpSeen", "1");
-
-    const makeTrack = (id, title, filePath) => ({
-      id,
-      title,
-      artist: "Artist",
-      album: "Album",
-      filePath,
-      fileSizeBytes: 1000,
-      waveformPeaksPath: `/tmp/${id}.DAT`,
-      waveformPreview: [8, 20, 42, 65, 30, 55],
-      bpm: 128,
-      key: "8A",
-      durationMs: 195000,
-      createdAt: "2026-03-01T00:00:00Z",
-      updatedAt: "2026-03-01T00:00:00Z"
-    });
-
-    // trackB's title deliberately shares no substring with the search term
-    // used below -- searching for it matches zero tracks in /music-b, the
-    // exact case that used to flip that folder's chip out of green.
-    const trackA = makeTrack("t-a", "Findable Alpha", "/music-a/Findable Alpha.mp3");
-    const trackB = makeTrack("t-b", "Unrelated Bravo", "/music-b/Unrelated Bravo.mp3");
-
-    window.__TAURI__ = {
-      core: {
-        invoke: async (command, payload = {}) => {
-          if (command === "clear_frontend_log") return "";
-          if (command === "append_frontend_log") return null;
-          if (command === "show_window") return null;
-          if (command === "detect_external_rekordbox_db") {
-            return { ok: true, data: { found: false, path: null } };
-          }
-          if (command === "list_playlists") return { ok: true, data: { items: [] } };
-          if (command === "fetch_usb_playlists" || command === "fetch_usb_histories") {
-            return { ok: true, data: { items: [], warnings: [] } };
-          }
-          if (command === "get_source_root_analysis") {
-            return {
-              ok: true,
-              data: {
-                items: [
-                  { sourceRoot: "/music-a", total: 1, analyzed: 1, fullyAnalyzed: true },
-                  { sourceRoot: "/music-b", total: 1, analyzed: 1, fullyAnalyzed: true }
-                ]
-              }
-            };
-          }
-          if (command === "browse_source_files") {
-            const query = String(payload?.request?.query || "").trim().toLowerCase();
-            const visible = [trackA, trackB].filter(
-              (t) => !query || t.title.toLowerCase().includes(query)
-            );
-            return {
-              ok: true,
-              data: {
-                total: visible.length,
-                items: visible,
-                nextCursor: null,
-                hasMore: false,
-                // Both folders are fully analyzed regardless of the
-                // current search -- this must not track `visible`.
-                sourceRootAnalysis: [
-                  { sourceRoot: "/music-a", total: 1, analyzed: 1, fullyAnalyzed: true },
-                  { sourceRoot: "/music-b", total: 1, analyzed: 1, fullyAnalyzed: true }
-                ],
-                totalDurationMs: visible.reduce((sum, t) => sum + t.durationMs, 0),
-                durationUnknownCount: 0
-              }
-            };
-          }
-          return { ok: false, error: { code: "UNKNOWN", message: `Unhandled command: ${command}` } };
-        }
-      },
-      event: { listen: async () => () => {} }
-    };
-  });
-}
-
-test("searching does not clear an unrelated folder's analyzed chip", async ({ page }) => {
-  await installSourceChipSearchMock(page);
-  await page.goto("/");
-
-  await expect(page.locator(".source-chip.source-chip-analyzed")).toHaveCount(2);
-
-  // Matches only /music-a's track -- /music-b's chip must stay green even
-  // though nothing in /music-b matches this search.
-  await page.locator("#librarySearch").fill("Findable Alpha");
-  await expect(page.locator(".source-chip.source-chip-analyzed")).toHaveCount(2);
-
-  await page.locator("#librarySearch").fill("");
-  await expect(page.locator(".source-chip.source-chip-analyzed")).toHaveCount(2);
 });

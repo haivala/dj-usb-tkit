@@ -80,8 +80,6 @@ pub(super) fn frontend_ui_setting_keys() -> &'static [&'static str] {
     &[
         SETTING_UI_THEME,
         SETTING_UI_ACCENT_HUE,
-        SETTING_UI_SOURCE_ROOTS,
-        SETTING_UI_SOURCE_ROOT_ENABLED,
         SETTING_UI_USB_ROOT,
         SETTING_UI_EXPORT_PRUNE_STALE,
         SETTING_UI_EXPORT_BACKUP,
@@ -93,9 +91,6 @@ pub(super) fn frontend_ui_setting_keys() -> &'static [&'static str] {
         SETTING_UI_SIDEBAR_WIDTH,
         SETTING_UI_HELP_SEEN,
         SETTING_UI_KEY_NOTATION,
-        SETTING_UI_REKORDBOX_DB_ENABLED,
-        SETTING_UI_MIXXX_DB_ENABLED,
-        SETTING_UI_SOURCES_EVER_CONFIGURED,
         SETTING_UI_CUE_START_ON_FIRST_BEAT,
         SETTING_UI_CUE_BEATGRID_LEVEL,
         SETTING_UI_CUE_QUANTIZE,
@@ -104,23 +99,12 @@ pub(super) fn frontend_ui_setting_keys() -> &'static [&'static str] {
     ]
 }
 
-/// The user's currently-configured local library folders, read directly from
-/// `app_settings` (the same JSON array `SETTING_UI_SOURCE_ROOTS` the frontend
-/// persists). An explicit "this is my library folder" assertion from the user
-/// outranks stale USB-device history for that same path (see
-/// `usb_utils::all_usb_device_root_paths`). Tolerates a missing key (fresh
-/// install) or malformed JSON by returning an empty list rather than failing.
+/// The user's configured local library folders (`LibrarySources`). An
+/// explicit "this is my library folder" assertion from the user outranks
+/// stale USB-device history for that same path (see
+/// `usb_utils::all_usb_device_root_paths`).
 pub(crate) fn configured_source_roots(conn: &rusqlite::Connection) -> BackendResult<Vec<String>> {
-    let raw: Option<String> = conn
-        .query_row(
-            "SELECT value FROM app_settings WHERE key = ?1",
-            params![SETTING_UI_SOURCE_ROOTS],
-            |row| row.get(0),
-        )
-        .optional()?;
-    Ok(raw
-        .and_then(|value| serde_json::from_str::<Vec<String>>(&value).ok())
-        .unwrap_or_default())
+    Ok(LibrarySources::load(conn)?.roots)
 }
 
 /// The user's currently-configured export sync mode, read directly from

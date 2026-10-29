@@ -98,9 +98,9 @@ test("playlist mode and selection helpers derive DOM state from app state", () =
   updateAddToPlaylistButtons({ state: { currentPlaylistId: "p1", trackSelections }, document, getCurrentPlaylist });
   trackSelections.library.ids = new Set(["a", "b"]);
   updateSelectionCount({
-    state: { currentPlaylistId: "p1", trackSelections, sourceRoots: [] }, el, document, getCurrentPlaylist,
+    state: { currentPlaylistId: "p1", trackSelections }, el, document, getCurrentPlaylist,
   });
-  updateScanLibraryButtonLabel({ state: { sourceRoots: [] }, el });
+  updateScanLibraryButtonLabel({ state: { librarySources: { folders: [] } }, el });
 
   assert.equal(document.querySelector('[data-playlist-id="p1"]').classList.contains("playlist-active-mode"), false);
   assert.equal(document.querySelector('[data-playlist-id="p2"]').classList.contains("playlist-active-mode"), true);
@@ -161,40 +161,40 @@ test("source, settings, health, name badge, and onboarding helpers update compac
 
   updateSourceFilterIndicator({
     state: {
-      sourceRoots: ["/a"],
-      sourceRootEnabled: { "/a": true },
+      librarySources: { folders: [{ path: "/a", enabled: true, missing: false }], rekordboxDbEnabled: false },
       externalRekordboxDbPath: "/path/to/master.db",
       rekordboxDbImported: true,
-      rekordboxDbEnabled: false
     },
     el
   });
-  updateScanLibraryButtonLabel({ state: { sourceRoots: ["/a", "/b"], selectedTrackIds: new Set() }, el });
+  updateScanLibraryButtonLabel({ state: { librarySources: { folders: [{ path: "/a" }, { path: "/b" }] } }, el });
   closeSettingsDrawer({ el });
   updateUsbHealthDot({ el }, "WARN");
   updateUsbNameBadge({ state: { usbDeviceName: "Club Stick" }, el });
-  syncLibraryOnboardingMode({ state: { activeTab: "library", sourceRoots: [] }, document });
+  syncLibraryOnboardingMode({ state: { activeTab: "library", librarySources: { folders: [] } }, document });
 
   assert.equal(el.sourceFilterIndicator.classList.contains("active"), true);
   // A library never imported isn't filtering anything out.
   updateSourceFilterIndicator({
     state: {
-      sourceRoots: ["/a"],
-      sourceRootEnabled: { "/a": true },
+      librarySources: { folders: [{ path: "/a", enabled: true, missing: false }], rekordboxDbEnabled: false },
       externalRekordboxDbPath: "/path/to/master.db",
       rekordboxDbImported: false,
-      rekordboxDbEnabled: false
     },
     el
   });
   assert.equal(el.sourceFilterIndicator.classList.contains("active"), false);
+  // A missing folder hides its tracks too.
+  updateSourceFilterIndicator({
+    state: { librarySources: { folders: [{ path: "/a", enabled: true, missing: true }] } },
+    el
+  });
+  assert.equal(el.sourceFilterIndicator.classList.contains("active"), true);
   updateSourceFilterIndicator({
     state: {
-      sourceRoots: ["/a"],
-      sourceRootEnabled: { "/a": true },
+      librarySources: { folders: [{ path: "/a", enabled: true, missing: false }], rekordboxDbEnabled: false },
       externalRekordboxDbPath: "/path/to/master.db",
       rekordboxDbImported: true,
-      rekordboxDbEnabled: false
     },
     el
   });

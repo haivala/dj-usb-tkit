@@ -205,11 +205,11 @@ came from. An import that fills in a track's BPM, key or first beat sets
 `mixxx` (a cue-editor edit sets `user`), only over a value that is missing or
 came from the same library, unless forced. `analysis::kept_analysis_values` keeps a value with one of those
 sources when the track has no waveform yet (its first analysis); a track that
-already has one is reanalyzed and gets the detected values. The library filter requests (`browse_source_files`,
-`list_matching_track_ids`, `add_library_selection_to_playlist`,
-`analyze_new_tracks`) carry `includeRekordboxDb` / `includeMixxxDb`; a track is
-included when `(includeRekordboxDb && rekordboxDbSource) || (includeMixxxDb &&
-mixxxDbSource)`.
+already has one is reanalyzed and gets the detected values. Each library's
+chip switch is stored by the backend (`set_external_library_enabled`, read
+back through `get_library_sources`); the library commands include a track
+from an imported library when `(rekordboxDbEnabled && rekordboxDbSource) ||
+(mixxxDbEnabled && mixxxDbSource)`.
 
 ### rekordbox `master.db` fields read
 

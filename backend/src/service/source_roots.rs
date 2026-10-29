@@ -1,4 +1,5 @@
-//! Source roots: status, analysis, relocation and removal.
+//! Source roots: the library's source folders and its filter, analysis
+//! status, relocation and removal.
 
 use super::*;
 
@@ -16,15 +17,6 @@ pub(super) fn sanitize_source_roots(source_roots: Vec<String>) -> Vec<String> {
 
 pub(super) fn source_root_is_usable(root: &Path) -> bool {
     root.is_dir()
-}
-
-pub(super) fn source_root_status(root: &str) -> SourceRootStatus {
-    let path = Path::new(root);
-    SourceRootStatus {
-        source_root: root.to_string(),
-        exists: path.exists(),
-        is_dir: path.is_dir(),
-    }
 }
 
 pub(crate) fn normalize_source_root_for_matching(value: &str) -> String {
@@ -137,41 +129,119 @@ pub(super) fn track_has_core_analysis_for_source_status(track: &Track) -> bool {
 }
 
 impl BackendService {
-    /// Each source folder's analyzed status on its own (every track in it,
-    /// enabled in the library filter or not) -- the source chips' green state.
-    /// Same scan and count as `browse_source_files`, without the search,
-    /// sort and paging a browse does.
-    pub fn get_source_root_analysis(
-        &self,
-        req: GetSourceRootAnalysisRequest,
-    ) -> BackendResult<GetSourceRootAnalysisData> {
-        let source_roots = sanitize_source_roots(req.source_roots);
-        if source_roots.is_empty() {
-            return Ok(GetSourceRootAnalysisData { items: Vec::new() });
-        }
+    pub fn get_library_sources(&self) -> BackendResult<LibrarySourcesData> {
         let conn = self.db.connect()?;
-        let tracks =
-            self.compute_all_library_tracks(&conn, &source_roots, ExternalLibraries::default())?;
-        Ok(GetSourceRootAnalysisData {
-            items: source_root_analysis(&source_roots, &tracks),
+        let mut sources = LibrarySources::load(&conn)?;
+        // A library whose database is gone has no chip to switch it off
+        // with: its imported tracks leave the library until it's found and
+        // switched on again.
+        let rekordbox_gone = sources.rekordbox_db && !detect_external_rekordbox_db_util().found;
+        let mixxx_gone = sources.mixxx_db && !super::mixxx_import::detect_external_mixxx_db().found;
+        if rekordbox_gone || mixxx_gone {
+            sources.rekordbox_db &= !rekordbox_gone;
+            sources.mixxx_db &= !mixxx_gone;
+            sources.save(&conn)?;
+        }
+        self.library_sources_data(&conn, &sources)
+    }
+
+    /// The source chips' view of `sources`. Each folder's analyzed status is
+    /// its own (every track in it, switched on or not); same scan and count
+    /// as `browse_source_files`, without the search, sort and paging.
+    pub(super) fn library_sources_data(
+        &self,
+        conn: &rusqlite::Connection,
+        sources: &LibrarySources,
+    ) -> BackendResult<LibrarySourcesData> {
+        let present: Vec<String> = sources
+            .roots
+            .iter()
+            .filter(|root| source_root_is_usable(Path::new(root)))
+            .cloned()
+            .collect();
+        let tracks = if present.is_empty() {
+            Vec::new()
+        } else {
+            self.compute_all_library_tracks(conn, &present, ExternalLibraries::default())?
+        };
+        let folders = sources
+            .roots
+            .iter()
+            .map(|root| {
+                let missing = !present.contains(root);
+                SourceFolder {
+                    path: root.clone(),
+                    enabled: sources.is_enabled(root),
+                    missing,
+                    fully_analyzed: !missing && folder_fully_analyzed(root, &tracks),
+                }
+            })
+            .collect();
+        Ok(LibrarySourcesData {
+            folders,
+            rekordbox_db_enabled: sources.rekordbox_db,
+            mixxx_db_enabled: sources.mixxx_db,
+            ever_configured: sources.ever_configured(),
         })
     }
 
-    pub fn check_source_roots(
+    /// Adds the folders not configured yet, switched on. Indexing them is
+    /// `scan_library`'s job.
+    pub fn add_source_folders(
         &self,
-        req: CheckSourceRootsRequest,
-    ) -> BackendResult<CheckSourceRootsData> {
-        let items = sanitize_source_roots(req.source_roots)
-            .into_iter()
-            .map(|root| source_root_status(&root))
-            .collect::<Vec<_>>();
-        let missing = items
-            .iter()
-            .filter(|item| !item.exists || !item.is_dir)
-            .map(|item| item.source_root.clone())
-            .collect::<Vec<_>>();
+        req: AddSourceFoldersRequest,
+    ) -> BackendResult<AddSourceFoldersData> {
+        let conn = self.db.connect()?;
+        let mut sources = LibrarySources::load(&conn)?;
+        let mut added = Vec::new();
+        for path in sanitize_source_roots(req.paths) {
+            if !sources.roots.contains(&path) {
+                sources.roots.push(path.clone());
+                added.push(path);
+            }
+        }
+        if !added.is_empty() {
+            sources.ever_configured = true;
+            sources.save(&conn)?;
+        }
+        Ok(AddSourceFoldersData {
+            sources: self.library_sources_data(&conn, &sources)?,
+            added,
+        })
+    }
 
-        Ok(CheckSourceRootsData { items, missing })
+    pub fn set_source_folder_enabled(
+        &self,
+        req: SetSourceFolderEnabledRequest,
+    ) -> BackendResult<LibrarySourcesData> {
+        let conn = self.db.connect()?;
+        let mut sources = LibrarySources::load(&conn)?;
+        if !sources.roots.contains(&req.path) {
+            return Err(BackendError::NotFound(format!(
+                "source folder not configured: {}",
+                req.path
+            )));
+        }
+        sources.enabled.insert(req.path, req.enabled);
+        sources.save(&conn)?;
+        self.library_sources_data(&conn, &sources)
+    }
+
+    /// Shows or hides an imported library's tracks. Switching one on counts
+    /// as setting up a source (an import does it).
+    pub fn set_external_library_enabled(
+        &self,
+        req: SetExternalLibraryEnabledRequest,
+    ) -> BackendResult<LibrarySourcesData> {
+        let conn = self.db.connect()?;
+        let mut sources = LibrarySources::load(&conn)?;
+        match req.library {
+            ExternalLibrary::Rekordbox => sources.rekordbox_db = req.enabled,
+            ExternalLibrary::Mixxx => sources.mixxx_db = req.enabled,
+        }
+        sources.ever_configured |= req.enabled;
+        sources.save(&conn)?;
+        self.library_sources_data(&conn, &sources)
     }
 
     pub fn relocate_source_root(
@@ -257,8 +327,11 @@ impl BackendService {
             updated += 1;
         }
 
-        replace_relocated_source_root_settings(&tx, &old_root, &new_root)?;
+        let mut sources = LibrarySources::load(&tx)?;
+        sources.relocate(&old_root, &new_root, missing_at_new_root + conflicts == 0);
+        sources.save(&tx)?;
         tx.commit()?;
+        self.forget_source_folder_listings();
 
         Ok(RelocateSourceRootData {
             old_root,
@@ -268,204 +341,218 @@ impl BackendService {
             unchanged,
             missing_at_new_root,
             conflicts,
+            sources: self.library_sources_data(&conn, &sources)?,
         })
     }
 
-    pub fn remove_tracks_by_source_roots(
+    /// Removes the folder from the library's sources and its tracks from the
+    /// library. A track another source folder still covers (a parent of the
+    /// removed one, or a subfolder of it) stays.
+    pub fn remove_source_folder(
         &self,
-        req: RemoveTracksBySourceRootsRequest,
-    ) -> BackendResult<RemoveTracksBySourceRootsData> {
-        let mut roots = req
-            .source_roots
-            .into_iter()
-            .map(|root| root.trim().to_string())
-            .filter(|root| !root.is_empty())
-            .collect::<Vec<_>>();
-        roots.sort();
-        roots.dedup();
-        if roots.is_empty() {
-            return Ok(RemoveTracksBySourceRootsData { removed: 0 });
-        }
-
+        req: RemoveSourceFolderRequest,
+    ) -> BackendResult<RemoveSourceFolderData> {
+        let root = req.path.trim().to_string();
         let mut conn = self.db.connect()?;
         let tx = conn.transaction()?;
-        // A track another source folder still covers (a parent of the removed
-        // one, or a subfolder of it) stays. The removed roots are left out
-        // explicitly: the setting may not have been rewritten yet.
-        let remaining_roots = configured_source_roots(&tx)?
-            .into_iter()
-            .filter(|root| {
-                !roots
-                    .iter()
-                    .any(|removed| source_root_keys_equal(root, removed))
-            })
-            .collect::<Vec<_>>();
-        let mut removed = 0usize;
-        for root in roots {
-            let escaped = root
-                .replace('\\', "\\\\")
-                .replace('%', "\\%")
-                .replace('_', "\\_");
-            let slash_like = format!("{escaped}/%");
-            let backslash_like = format!("{escaped}\\\\%");
-            let mut stmt = tx.prepare(
+        let mut sources = LibrarySources::load(&tx)?;
+        let Some(index) = sources.roots.iter().position(|existing| existing == &root) else {
+            return Err(BackendError::NotFound(format!(
+                "source folder not configured: {root}"
+            )));
+        };
+        sources.roots.remove(index);
+        sources.save(&tx)?;
+
+        let escaped = root
+            .replace('\\', "\\\\")
+            .replace('%', "\\%")
+            .replace('_', "\\_");
+        let slash_like = format!("{escaped}/%");
+        let backslash_like = format!("{escaped}\\\\%");
+        let rows = tx
+            .prepare(
                 r#"
                 SELECT id, file_path FROM tracks
                 WHERE file_path = ?1
                    OR file_path LIKE ?2 ESCAPE '\'
                    OR file_path LIKE ?3 ESCAPE '\'
                 "#,
-            )?;
-            let rows = stmt
-                .query_map(params![root, slash_like, backslash_like], |row| {
-                    Ok((row.get::<_, String>(0)?, row.get::<_, String>(1)?))
-                })?
-                .collect::<Result<Vec<_>, _>>()?;
-            for (id, file_path) in rows {
-                if remaining_roots
-                    .iter()
-                    .any(|remaining| browse_path_matches_root(&file_path, remaining))
-                {
-                    continue;
-                }
-                removed += tx.execute("DELETE FROM tracks WHERE id = ?1", params![id])?;
+            )?
+            .query_map(params![root, slash_like, backslash_like], |row| {
+                Ok((row.get::<_, String>(0)?, row.get::<_, String>(1)?))
+            })?
+            .collect::<Result<Vec<_>, _>>()?;
+        let mut removed = 0usize;
+        for (id, file_path) in rows {
+            if sources
+                .roots
+                .iter()
+                .any(|remaining| browse_path_matches_root(&file_path, remaining))
+            {
+                continue;
             }
+            removed += tx.execute("DELETE FROM tracks WHERE id = ?1", params![id])?;
         }
         tx.commit()?;
-        Ok(RemoveTracksBySourceRootsData { removed })
+        self.forget_source_folder_listings();
+        Ok(RemoveSourceFolderData {
+            sources: self.library_sources_data(&conn, &sources)?,
+            removed,
+        })
     }
 }
 
-/// Per source root: how many of `tracks` live under it and how many of those
-/// have their core analysis. Callers pass the full, unfiltered track set so a
+/// Whether every one of `tracks` under `root` has its core analysis, and
+/// there is at least one. Callers pass the full, unfiltered track set so a
 /// folder's status never depends on a search query.
-pub(super) fn source_root_analysis(
-    source_roots: &[String],
-    tracks: &[Track],
-) -> Vec<SourceRootAnalysisStatus> {
-    source_roots
+pub(super) fn folder_fully_analyzed(root: &str, tracks: &[Track]) -> bool {
+    let mut under_root = tracks
         .iter()
-        .map(|root| {
-            let mut total = 0usize;
-            let mut analyzed = 0usize;
-            for track in tracks {
-                if browse_path_matches_root(&track.file_path, root) {
-                    total += 1;
-                    if track_has_core_analysis_for_source_status(track) {
-                        analyzed += 1;
-                    }
-                }
-            }
-            SourceRootAnalysisStatus {
-                source_root: root.clone(),
-                total,
-                analyzed,
-                fully_analyzed: total > 0 && analyzed == total,
-            }
-        })
-        .collect()
+        .filter(|track| browse_path_matches_root(&track.file_path, root))
+        .peekable();
+    under_root.peek().is_some() && under_root.all(track_has_core_analysis_for_source_status)
 }
 
 pub(super) fn source_root_keys_equal(left: &str, right: &str) -> bool {
     normalize_source_root_for_matching(left) == normalize_source_root_for_matching(right)
 }
 
-pub(super) fn write_app_setting_tx(
-    tx: &rusqlite::Transaction<'_>,
-    key: &str,
-    value: String,
-) -> BackendResult<()> {
-    tx.execute(
-        r#"
-        INSERT INTO app_settings (key, value, updated_at)
-        VALUES (?1, ?2, ?3)
-        ON CONFLICT(key) DO UPDATE SET value = excluded.value, updated_at = excluded.updated_at
-        "#,
-        params![key, value, now()],
-    )?;
-    Ok(())
+/// The library's sources as stored in `app_settings` (under the `ui_` keys
+/// the frontend once wrote itself): the folders in the order added, their
+/// switches (a folder without one is on), the imported libraries' switches,
+/// and whether a source was ever set up.
+#[derive(Debug, Clone, Default)]
+pub(crate) struct LibrarySources {
+    pub(crate) roots: Vec<String>,
+    pub(crate) enabled: std::collections::BTreeMap<String, bool>,
+    pub(crate) rekordbox_db: bool,
+    pub(crate) mixxx_db: bool,
+    pub(crate) ever_configured: bool,
 }
 
-pub(super) fn replace_relocated_source_root_settings(
-    tx: &rusqlite::Transaction<'_>,
-    old_root: &str,
-    new_root: &str,
-) -> BackendResult<()> {
-    if let Some(raw_roots) = tx
-        .query_row(
-            "SELECT value FROM app_settings WHERE key = ?1",
-            params![SETTING_UI_SOURCE_ROOTS],
-            |row| row.get::<_, String>(0),
-        )
-        .optional()?
-        && let Ok(roots) = serde_json::from_str::<Vec<String>>(&raw_roots)
-    {
-        let mut changed = false;
-        let mut next_roots = Vec::<String>::new();
-        for root in roots {
-            let replacement = if source_root_keys_equal(&root, old_root) {
-                changed = true;
-                new_root.to_string()
-            } else {
-                root
-            };
-            if next_roots
-                .iter()
-                .any(|existing| source_root_keys_equal(existing, &replacement))
-            {
-                changed = true;
-            } else {
-                next_roots.push(replacement);
-            }
-        }
-        if changed {
-            let encoded = serde_json::to_string(&next_roots).map_err(|err| {
-                BackendError::Internal(format!("failed to encode source roots setting: {err}"))
-            })?;
-            write_app_setting_tx(tx, SETTING_UI_SOURCE_ROOTS, encoded)?;
-        }
+impl LibrarySources {
+    /// Tolerates missing keys (fresh install) and malformed values.
+    pub(crate) fn load(conn: &rusqlite::Connection) -> BackendResult<Self> {
+        let read = |key: &str| -> BackendResult<Option<String>> {
+            Ok(conn
+                .query_row(
+                    "SELECT value FROM app_settings WHERE key = ?1",
+                    params![key],
+                    |row| row.get::<_, String>(0),
+                )
+                .optional()?)
+        };
+        let roots = read(SETTING_UI_SOURCE_ROOTS)?
+            .and_then(|value| serde_json::from_str::<Vec<String>>(&value).ok())
+            .map(sanitize_source_roots)
+            .unwrap_or_default();
+        let enabled = read(SETTING_UI_SOURCE_ROOT_ENABLED)?
+            .and_then(|value| {
+                serde_json::from_str::<std::collections::BTreeMap<String, bool>>(&value).ok()
+            })
+            .unwrap_or_default();
+        let flag = |value: Option<String>| value.as_deref() == Some("1");
+        Ok(Self {
+            roots,
+            enabled,
+            rekordbox_db: flag(read(SETTING_UI_REKORDBOX_DB_ENABLED)?),
+            mixxx_db: flag(read(SETTING_UI_MIXXX_DB_ENABLED)?),
+            ever_configured: flag(read(SETTING_UI_SOURCES_EVER_CONFIGURED)?),
+        })
     }
 
-    if let Some(raw_enabled) = tx
-        .query_row(
-            "SELECT value FROM app_settings WHERE key = ?1",
-            params![SETTING_UI_SOURCE_ROOT_ENABLED],
-            |row| row.get::<_, String>(0),
-        )
-        .optional()?
-        && let Ok(mut enabled) =
-            serde_json::from_str::<serde_json::Map<String, serde_json::Value>>(&raw_enabled)
-    {
-        let old_keys = enabled
-            .keys()
-            .filter(|key| source_root_keys_equal(key, old_root))
+    /// Writes every key; the switches only for the configured folders.
+    pub(crate) fn save(&self, conn: &rusqlite::Connection) -> BackendResult<()> {
+        let enabled: std::collections::BTreeMap<&str, bool> = self
+            .roots
+            .iter()
+            .map(|root| (root.as_str(), self.is_enabled(root)))
+            .collect();
+        let encode = |value: Result<String, serde_json::Error>| {
+            value.map_err(|err| {
+                BackendError::Internal(format!("failed to encode library sources: {err}"))
+            })
+        };
+        let flag = |on: bool| if on { "1" } else { "0" }.to_string();
+        for (key, value) in [
+            (
+                SETTING_UI_SOURCE_ROOTS,
+                encode(serde_json::to_string(&self.roots))?,
+            ),
+            (
+                SETTING_UI_SOURCE_ROOT_ENABLED,
+                encode(serde_json::to_string(&enabled))?,
+            ),
+            (SETTING_UI_REKORDBOX_DB_ENABLED, flag(self.rekordbox_db)),
+            (SETTING_UI_MIXXX_DB_ENABLED, flag(self.mixxx_db)),
+            (
+                SETTING_UI_SOURCES_EVER_CONFIGURED,
+                flag(self.ever_configured()),
+            ),
+        ] {
+            conn.execute(
+                r#"
+                INSERT INTO app_settings (key, value, updated_at)
+                VALUES (?1, ?2, ?3)
+                ON CONFLICT(key) DO UPDATE SET value = excluded.value, updated_at = excluded.updated_at
+                "#,
+                params![key, value, now()],
+            )?;
+        }
+        Ok(())
+    }
+
+    pub(crate) fn is_enabled(&self, root: &str) -> bool {
+        self.enabled.get(root).copied().unwrap_or(true)
+    }
+
+    pub(crate) fn ever_configured(&self) -> bool {
+        self.ever_configured || !self.roots.is_empty() || self.rekordbox_db || self.mixxx_db
+    }
+
+    /// The folders the library lists: switched on and present on disk.
+    pub(crate) fn listed_roots(&self) -> Vec<String> {
+        self.roots
+            .iter()
+            .filter(|root| self.is_enabled(root) && source_root_is_usable(Path::new(root)))
             .cloned()
-            .collect::<Vec<_>>();
-        if !old_keys.is_empty() {
-            let mut moved_value = None;
-            for key in old_keys {
-                if moved_value.is_none() {
-                    moved_value = enabled.remove(&key);
-                } else {
-                    enabled.remove(&key);
-                }
-            }
-            if let Some(value) = moved_value {
-                let has_new_key = enabled
-                    .keys()
-                    .any(|key| source_root_keys_equal(key, new_root));
-                if !has_new_key {
-                    enabled.insert(new_root.to_string(), value);
-                }
-            }
-            let encoded = serde_json::to_string(&enabled).map_err(|err| {
-                BackendError::Internal(format!(
-                    "failed to encode source root enabled setting: {err}"
-                ))
-            })?;
-            write_app_setting_tx(tx, SETTING_UI_SOURCE_ROOT_ENABLED, encoded)?;
-        }
+            .collect()
     }
 
-    Ok(())
+    pub(crate) fn external(&self) -> ExternalLibraries {
+        ExternalLibraries::from_flags(self.rekordbox_db, self.mixxx_db)
+    }
+
+    /// `old_root` moved to `new_root`. Once all its tracks moved
+    /// (`fully_moved`) the new folder takes the old one's place (or the old
+    /// one just goes, when the new one is configured already); otherwise the
+    /// old folder stays, for the tracks left behind, and the new one is
+    /// added. The new folder takes the old one's switch.
+    pub(crate) fn relocate(&mut self, old_root: &str, new_root: &str, fully_moved: bool) {
+        let old_index = self
+            .roots
+            .iter()
+            .position(|root| source_root_keys_equal(root, old_root));
+        // Not the old root itself: the keys ignore case, and a case-only
+        // rename (`music` → `Music`) is a real move on Linux.
+        let has_new_root = self.roots.iter().enumerate().any(|(index, root)| {
+            Some(index) != old_index && source_root_keys_equal(root, new_root)
+        });
+        let old_enabled = old_index.is_none_or(|index| self.is_enabled(&self.roots[index]));
+        match old_index {
+            Some(index) if fully_moved => {
+                if has_new_root {
+                    self.roots.remove(index);
+                } else {
+                    self.roots[index] = new_root.to_string();
+                }
+            }
+            _ if !has_new_root => self.roots.push(new_root.to_string()),
+            _ => {}
+        }
+        self.enabled
+            .entry(new_root.to_string())
+            .or_insert(old_enabled);
+    }
 }

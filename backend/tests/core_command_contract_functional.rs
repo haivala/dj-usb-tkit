@@ -1,10 +1,12 @@
+mod library_sources;
+
 use std::collections::{HashMap, HashSet};
 use std::fs;
 use std::path::Path;
 
 use backend::commands::BackendCommands;
 use backend::models::{
-    AddLibrarySelectionToPlaylistRequest, BrowseSourceFilesRequest, CheckSourceRootsRequest,
+    AddLibrarySelectionToPlaylistRequest, AddSourceFoldersRequest, BrowseSourceFilesRequest,
     CreatePlaylistRequest, DeleteUsbBackupRequest, ExportToUsbRequest, FetchUsbHistoriesRequest,
     FetchUsbPlaylistsRequest, GetPlaylistTracksRequest, GetTrackDetailRequest,
     GetUsbDeviceNameRequest, InitializeUsbRequest, ListUsbBackupsRequest, PlayResolvedTrackRequest,
@@ -47,8 +49,13 @@ fn browse_source_files_cursor_paginates_stably_and_rejects_query_mismatch_cursor
     });
     assert!(scan.ok, "scan failed: {scan:?}");
 
+    library_sources::show_only(
+        &backend,
+        vec![media.to_string_lossy().to_string()],
+        false,
+        false,
+    );
     let page1 = backend.browse_source_files(BrowseSourceFilesRequest {
-        source_roots: vec![media.to_string_lossy().to_string()],
         query: String::new(),
         limit: 2,
         cursor: None,
@@ -61,8 +68,13 @@ fn browse_source_files_cursor_paginates_stably_and_rejects_query_mismatch_cursor
     assert!(page1_data.has_more);
     let page1_cursor = page1_data.next_cursor.clone().expect("page1 next cursor");
 
+    library_sources::show_only(
+        &backend,
+        vec![media.to_string_lossy().to_string()],
+        false,
+        false,
+    );
     let page2 = backend.browse_source_files(BrowseSourceFilesRequest {
-        source_roots: vec![media.to_string_lossy().to_string()],
         query: String::new(),
         limit: 2,
         cursor: Some(page1_cursor.clone()),
@@ -75,8 +87,13 @@ fn browse_source_files_cursor_paginates_stably_and_rejects_query_mismatch_cursor
     assert!(page2_data.has_more);
     let page2_cursor = page2_data.next_cursor.clone().expect("page2 next cursor");
 
+    library_sources::show_only(
+        &backend,
+        vec![media.to_string_lossy().to_string()],
+        false,
+        false,
+    );
     let page3 = backend.browse_source_files(BrowseSourceFilesRequest {
-        source_roots: vec![media.to_string_lossy().to_string()],
         query: String::new(),
         limit: 2,
         cursor: Some(page2_cursor),
@@ -103,8 +120,13 @@ fn browse_source_files_cursor_paginates_stably_and_rejects_query_mismatch_cursor
     }
     assert_eq!(seen.len(), 5, "expected all tracks across 3 pages");
 
+    library_sources::show_only(
+        &backend,
+        vec![media.to_string_lossy().to_string()],
+        false,
+        false,
+    );
     let mismatch = backend.browse_source_files(BrowseSourceFilesRequest {
-        source_roots: vec![media.to_string_lossy().to_string()],
         query: "Artist".to_string(),
         limit: 2,
         cursor: Some(page1_cursor),
@@ -223,9 +245,14 @@ fn playlist_order_remains_stable_after_remove_and_readd() {
     assert!(scan.ok, "scan failed: {scan:?}");
 
     let mut id_by_title = HashMap::new();
+    library_sources::show_only(
+        &backend,
+        vec![media.to_string_lossy().to_string()],
+        false,
+        false,
+    );
     for track in backend
         .browse_source_files(BrowseSourceFilesRequest {
-            source_roots: vec![media.to_string_lossy().to_string()],
             query: String::new(),
             limit: 10,
             cursor: None,
@@ -250,9 +277,14 @@ fn playlist_order_remains_stable_after_remove_and_readd() {
         .expect("playlist data")
         .playlist_id;
 
+    library_sources::show_only(
+        &backend,
+        vec![media.to_string_lossy().to_string()],
+        false,
+        false,
+    );
     let add_initial =
         backend.add_library_selection_to_playlist(AddLibrarySelectionToPlaylistRequest {
-            source_roots: vec![media.to_string_lossy().to_string()],
             playlist_id: playlist_id.clone(),
             track_ids: vec![track_a.clone(), track_b.clone(), track_c.clone()],
             ..Default::default()
@@ -279,8 +311,13 @@ fn playlist_order_remains_stable_after_remove_and_readd() {
         .collect::<Vec<_>>();
     assert_eq!(after_remove_titles, vec!["A".to_string(), "C".to_string()]);
 
+    library_sources::show_only(
+        &backend,
+        vec![media.to_string_lossy().to_string()],
+        false,
+        false,
+    );
     let readd = backend.add_library_selection_to_playlist(AddLibrarySelectionToPlaylistRequest {
-        source_roots: vec![media.to_string_lossy().to_string()],
         playlist_id: playlist_id.clone(),
         track_ids: vec![track_b],
         ..Default::default()
@@ -325,9 +362,14 @@ fn reorder_playlist_tracks_persists_a_custom_order() {
     assert!(scan.ok, "scan failed: {scan:?}");
 
     let mut id_by_title = HashMap::new();
+    library_sources::show_only(
+        &backend,
+        vec![media.to_string_lossy().to_string()],
+        false,
+        false,
+    );
     for track in backend
         .browse_source_files(BrowseSourceFilesRequest {
-            source_roots: vec![media.to_string_lossy().to_string()],
             query: String::new(),
             limit: 10,
             cursor: None,
@@ -352,9 +394,14 @@ fn reorder_playlist_tracks_persists_a_custom_order() {
         .expect("playlist data")
         .playlist_id;
 
+    library_sources::show_only(
+        &backend,
+        vec![media.to_string_lossy().to_string()],
+        false,
+        false,
+    );
     let add_initial =
         backend.add_library_selection_to_playlist(AddLibrarySelectionToPlaylistRequest {
-            source_roots: vec![media.to_string_lossy().to_string()],
             playlist_id: playlist_id.clone(),
             track_ids: vec![track_a.clone(), track_b.clone(), track_c.clone()],
             ..Default::default()
@@ -392,17 +439,25 @@ fn scan_library_reports_validation_for_empty_roots_and_tolerates_missing_root() 
     let data_dir = root.path().join("data");
     let backend = BackendCommands::new(&data_dir).expect("create backend");
 
-    let empty_roots = backend.scan_library(ScanLibraryRequest {
-        source_roots: Vec::new(),
-        incremental: true,
-    });
-    assert!(!empty_roots.ok, "empty roots should fail validation");
-    let empty_error = empty_roots.error.expect("empty roots error payload");
-    assert!(
-        empty_error
+    // No roots given: the backend scans the switched-on source folders, and
+    // says when there are none to scan.
+    let scan_switched_on = || {
+        backend
+            .scan_library(ScanLibraryRequest {
+                source_roots: Vec::new(),
+                incremental: true,
+            })
+            .error
+            .expect("validation error payload")
             .message
-            .contains("sourceRoots must contain at least one path"),
-        "unexpected empty-roots error: {empty_error:?}"
+    };
+    assert_eq!(scan_switched_on(), "Add a source folder before scanning");
+    let music = root.path().join("music").to_string_lossy().to_string();
+    library_sources::show_only(&backend, vec![music.clone()], false, false);
+    library_sources::show_only(&backend, Vec::new(), false, false);
+    assert_eq!(
+        scan_switched_on(),
+        "Switch on at least one source folder before scanning"
     );
 
     let missing_root = root.path().join("does-not-exist");
@@ -520,8 +575,13 @@ fn list_tracks_paginates_the_full_library() {
     });
     assert!(scan.ok, "scan failed: {scan:?}");
 
+    library_sources::show_only(
+        &backend,
+        vec![media.to_string_lossy().to_string()],
+        false,
+        false,
+    );
     let page = backend.browse_source_files(BrowseSourceFilesRequest {
-        source_roots: vec![media.to_string_lossy().to_string()],
         query: String::new(),
         limit: 2,
         cursor: None,
@@ -534,8 +594,13 @@ fn list_tracks_paginates_the_full_library() {
     assert!(page_data.has_more);
 
     let next_cursor = page_data.next_cursor.expect("next cursor");
+    library_sources::show_only(
+        &backend,
+        vec![media.to_string_lossy().to_string()],
+        false,
+        false,
+    );
     let page2 = backend.browse_source_files(BrowseSourceFilesRequest {
-        source_roots: vec![media.to_string_lossy().to_string()],
         query: String::new(),
         limit: 2,
         cursor: Some(next_cursor),
@@ -548,7 +613,7 @@ fn list_tracks_paginates_the_full_library() {
 }
 
 #[test]
-fn check_source_roots_reports_missing_and_existing_roots() {
+fn library_sources_report_missing_and_existing_folders() {
     let root = tempdir().expect("temp root");
     let existing = root.path().join("existing");
     fs::create_dir_all(&existing).expect("create existing root");
@@ -557,16 +622,29 @@ fn check_source_roots_reports_missing_and_existing_roots() {
     let data_dir = root.path().join("data");
     let backend = BackendCommands::new(&data_dir).expect("create backend");
 
-    let response = backend.check_source_roots(CheckSourceRootsRequest {
-        source_roots: vec![
+    let added = backend.add_source_folders(AddSourceFoldersRequest {
+        paths: vec![
             existing.to_string_lossy().to_string(),
             missing.to_string_lossy().to_string(),
         ],
     });
-    assert!(response.ok, "check_source_roots failed: {response:?}");
-    let data = response.data.expect("check_source_roots data");
-    assert_eq!(data.items.len(), 2);
-    assert_eq!(data.missing, vec![missing.to_string_lossy().to_string()]);
+    assert!(added.ok, "add_source_folders failed: {added:?}");
+    let response = backend.get_library_sources();
+    assert!(response.ok, "get_library_sources failed: {response:?}");
+    let missing_flags: Vec<(String, bool)> = response
+        .data
+        .expect("get_library_sources data")
+        .folders
+        .into_iter()
+        .map(|folder| (folder.path, folder.missing))
+        .collect();
+    assert_eq!(
+        missing_flags,
+        [
+            (existing.to_string_lossy().to_string(), false),
+            (missing.to_string_lossy().to_string(), true),
+        ]
+    );
 }
 
 #[test]
@@ -917,8 +995,13 @@ fn save_track_analysis_edits_persists_cues_and_first_beat_and_validates() {
     });
     assert!(scan.ok, "scan failed: {scan:?}");
 
+    library_sources::show_only(
+        &backend,
+        vec![media.to_string_lossy().to_string()],
+        false,
+        false,
+    );
     let listed = backend.browse_source_files(BrowseSourceFilesRequest {
-        source_roots: vec![media.to_string_lossy().to_string()],
         query: String::new(),
         limit: 10,
         cursor: None,

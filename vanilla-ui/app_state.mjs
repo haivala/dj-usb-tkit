@@ -8,10 +8,10 @@ export const EVENT_LOG_MAX = 500;
 
 export function createInitialState() {
   const state = {
-    sourceRoots: [],
-    sourceRootEnabled: {},
-    missingSourceRoots: new Set(),
-    sourceRootAnalysisStatus: {},
+    // The backend's `get_library_sources`: the source folders
+    // ({ path, enabled, missing, fullyAnalyzed }) and the imported libraries'
+    // switches.
+    librarySources: { folders: [], rekordboxDbEnabled: false, mixxxDbEnabled: false, everConfigured: false },
     usbRoot: null,
     usbRecentRoots: [],
     usbRootValid: false,
@@ -96,12 +96,9 @@ export function createInitialState() {
     sidebarCollapsed: false,
     sidebarWidth: 220,
     externalRekordboxDbPath: null,
-    rekordboxDbEnabled: false,
     rekordboxDbImported: false,
     externalMixxxDbPath: null,
-    mixxxDbEnabled: false,
     mixxxDbImported: false,
-    sourcesEverConfigured: false,
     // The job whose progress the footer bar shows: the oldest running one.
     activeJobId: null,
     activeJobType: null,

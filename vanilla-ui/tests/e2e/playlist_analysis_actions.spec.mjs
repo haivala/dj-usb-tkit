@@ -81,7 +81,8 @@ test("playlist analyze-missing skips already-analyzed tracks and targets the res
       invoke: (cmd, args) => window.__TAURI__.core.invoke(cmd, args)
     };
     window.localStorage.setItem("djusbtkit.helpSeen", "1");
-    window.localStorage.setItem("djusbtkit.sourceRoots", JSON.stringify(["/music"]));
+    // The library\'s source folders, as `get_library_sources` answers.
+    window.__e2eSourceFolders = ["/music"];
 
     const playlists = [{
       id: "pl-1",
@@ -183,6 +184,11 @@ test("playlist analyze-missing skips already-analyzed tracks and targets the res
     window.__TAURI__ = {
       core: {
         invoke: async (command, payload = {}) => {
+          if (command === "get_library_sources") {
+            const folders = (window.__e2eSourceFolders || [])
+              .map((path) => ({ path, enabled: true, missing: false, fullyAnalyzed: false }));
+            return { ok: true, data: { folders, rekordboxDbEnabled: false, mixxxDbEnabled: false, everConfigured: folders.length > 0 } };
+          }
           const request = payload?.request || payload;
           if (command === "clear_frontend_log") return "";
           if (command === "append_frontend_log") return null;
@@ -429,6 +435,11 @@ test("playlist actions hide Analyze Missing when unnecessary and keep Export vis
     window.__TAURI__ = {
       core: {
         invoke: async (command, payload = {}) => {
+          if (command === "get_library_sources") {
+            const folders = (window.__e2eSourceFolders || [])
+              .map((path) => ({ path, enabled: true, missing: false, fullyAnalyzed: false }));
+            return { ok: true, data: { folders, rekordboxDbEnabled: false, mixxxDbEnabled: false, everConfigured: folders.length > 0 } };
+          }
           const request = payload?.request || payload;
           if (command === "clear_frontend_log") return "";
           if (command === "append_frontend_log") return null;
@@ -505,7 +516,8 @@ test("playlist analyze-missing offers unanalyzed tracks that live on a USB drive
       invoke: (cmd, args) => window.__TAURI__.core.invoke(cmd, args)
     };
     window.localStorage.setItem("djusbtkit.helpSeen", "1");
-    window.localStorage.setItem("djusbtkit.sourceRoots", JSON.stringify(["/music"]));
+    // The library\'s source folders, as `get_library_sources` answers.
+    window.__e2eSourceFolders = ["/music"];
 
     const playlists = [{
       id: "pl-1",
@@ -568,6 +580,11 @@ test("playlist analyze-missing offers unanalyzed tracks that live on a USB drive
     window.__TAURI__ = {
       core: {
         invoke: async (command, payload = {}) => {
+          if (command === "get_library_sources") {
+            const folders = (window.__e2eSourceFolders || [])
+              .map((path) => ({ path, enabled: true, missing: false, fullyAnalyzed: false }));
+            return { ok: true, data: { folders, rekordboxDbEnabled: false, mixxxDbEnabled: false, everConfigured: folders.length > 0 } };
+          }
           const request = payload?.request || payload;
           if (command === "clear_frontend_log") return "";
           if (command === "append_frontend_log") return null;
@@ -671,6 +688,11 @@ test("selecting a playlist with tracks right after an empty one still paints its
     window.__TAURI__ = {
       core: {
         invoke: async (command, payload = {}) => {
+          if (command === "get_library_sources") {
+            const folders = (window.__e2eSourceFolders || [])
+              .map((path) => ({ path, enabled: true, missing: false, fullyAnalyzed: false }));
+            return { ok: true, data: { folders, rekordboxDbEnabled: false, mixxxDbEnabled: false, everConfigured: folders.length > 0 } };
+          }
           const request = payload?.request || payload;
           if (command === "clear_frontend_log") return "";
           if (command === "append_frontend_log") return null;
@@ -770,6 +792,11 @@ function installReorderTauriMock(page, { usbSameNamePlaylistName, exportPruneSta
     window.__TAURI__ = {
       core: {
         invoke: async (command, payload = {}) => {
+          if (command === "get_library_sources") {
+            const folders = (window.__e2eSourceFolders || [])
+              .map((path) => ({ path, enabled: true, missing: false, fullyAnalyzed: false }));
+            return { ok: true, data: { folders, rekordboxDbEnabled: false, mixxxDbEnabled: false, everConfigured: folders.length > 0 } };
+          }
           const request = payload?.request || payload;
           if (command === "clear_frontend_log") return "";
           if (command === "append_frontend_log") return null;
@@ -1284,6 +1311,11 @@ test("switching away from a sorted playlist commits the sort as its real order, 
     window.__TAURI__ = {
       core: {
         invoke: async (command, payload = {}) => {
+          if (command === "get_library_sources") {
+            const folders = (window.__e2eSourceFolders || [])
+              .map((path) => ({ path, enabled: true, missing: false, fullyAnalyzed: false }));
+            return { ok: true, data: { folders, rekordboxDbEnabled: false, mixxxDbEnabled: false, everConfigured: folders.length > 0 } };
+          }
           const request = payload?.request || payload;
           if (command === "clear_frontend_log") return "";
           if (command === "append_frontend_log") return null;
@@ -1401,6 +1433,11 @@ function installTwoPlaylistTauriMock(page) {
     window.__TAURI__ = {
       core: {
         invoke: async (command, payload = {}) => {
+          if (command === "get_library_sources") {
+            const folders = (window.__e2eSourceFolders || [])
+              .map((path) => ({ path, enabled: true, missing: false, fullyAnalyzed: false }));
+            return { ok: true, data: { folders, rekordboxDbEnabled: false, mixxxDbEnabled: false, everConfigured: folders.length > 0 } };
+          }
           const request = payload?.request || payload;
           if (command === "clear_frontend_log") return "";
           if (command === "append_frontend_log") return null;

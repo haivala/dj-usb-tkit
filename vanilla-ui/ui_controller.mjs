@@ -96,20 +96,18 @@ export function updateUsbEmptyState(ctx) {
 export function updateSourceFilterIndicator(ctx) {
   const { state, el } = ctx;
   if (!el.sourceFilterIndicator) return;
-  const anyUnchecked = state.sourceRoots.some((root) => state.sourceRootEnabled[root] === false);
+  const sources = state.librarySources;
+  const folderHidden = sources.folders.some((folder) => !folder.enabled || folder.missing);
   // Only an imported library can be filtered out; one never imported isn't.
-  const rekordboxDbFiltered = !!(state.externalRekordboxDbPath && state.rekordboxDbImported && !state.rekordboxDbEnabled);
-  const mixxxDbFiltered = !!(state.externalMixxxDbPath && state.mixxxDbImported && !state.mixxxDbEnabled);
-  const missingRoots = state.missingSourceRoots instanceof Set
-    ? state.missingSourceRoots.size
-    : (Array.isArray(state.missingSourceRoots) ? state.missingSourceRoots.length : 0);
-  el.sourceFilterIndicator.classList.toggle("active", anyUnchecked || rekordboxDbFiltered || mixxxDbFiltered || missingRoots > 0);
+  const rekordboxDbFiltered = !!(state.externalRekordboxDbPath && state.rekordboxDbImported && !sources.rekordboxDbEnabled);
+  const mixxxDbFiltered = !!(state.externalMixxxDbPath && state.mixxxDbImported && !sources.mixxxDbEnabled);
+  el.sourceFilterIndicator.classList.toggle("active", folderHidden || rekordboxDbFiltered || mixxxDbFiltered);
 }
 
 export function updateScanLibraryButtonLabel(ctx) {
   const { state, el } = ctx;
   if (!el.scanLibraryBtn) return;
-  el.scanLibraryBtn.textContent = scanLibraryButtonLabel(state.sourceRoots);
+  el.scanLibraryBtn.textContent = scanLibraryButtonLabel(state.librarySources.folders);
 }
 
 export function closeSettingsDrawer(ctx) {
@@ -144,7 +142,7 @@ export function syncLibraryOnboardingMode(ctx) {
   const { state, document } = ctx;
   document.body.classList.toggle(
     "library-onboarding",
-    state.activeTab === "library" && !state.sourceRoots.length
+    state.activeTab === "library" && !state.librarySources.folders.length
   );
 }
 

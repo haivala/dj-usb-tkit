@@ -4,7 +4,8 @@ import { test, expect } from "./coverage-fixture.mjs";
 function installSelectionMock(page, mockOpts = {}) {
   return page.addInitScript((opts) => {
     window.localStorage.setItem("djusbtkit.helpSeen", "1");
-    window.localStorage.setItem("djusbtkit.sourceRoots", JSON.stringify(["/music"]));
+    // The library\'s source folders, as `get_library_sources` answers.
+    window.__e2eSourceFolders = ["/music"];
     if (opts.usb) window.localStorage.setItem("djusbtkit.usbRoot", "/Volumes/USB-TEST");
     window.__calls = [];
     const usbTracks = ["Stick A", "Stick B"].map((title, i) => ({
@@ -50,6 +51,11 @@ function installSelectionMock(page, mockOpts = {}) {
     window.__TAURI__ = {
       core: {
         invoke: async (command, payload = {}) => {
+          if (command === "get_library_sources") {
+            const folders = (window.__e2eSourceFolders || [])
+              .map((path) => ({ path, enabled: true, missing: false, fullyAnalyzed: false }));
+            return { ok: true, data: { folders, rekordboxDbEnabled: false, mixxxDbEnabled: false, everConfigured: folders.length > 0 } };
+          }
           window.__calls.push({ command, request: payload?.request ?? null });
           if (command === "get_playlist_membership") {
             const ids = payload?.request?.trackIds || [];
@@ -361,7 +367,8 @@ test("Selection state stays correct when filtering visible rows", async ({ page 
 function installPaginatedLibraryMock(page, { trackCount }) {
   return page.addInitScript(({ trackCount }) => {
     window.localStorage.setItem("djusbtkit.helpSeen", "1");
-    window.localStorage.setItem("djusbtkit.sourceRoots", JSON.stringify(["/music"]));
+    // The library\'s source folders, as `get_library_sources` answers.
+    window.__e2eSourceFolders = ["/music"];
 
     const allTracks = Array.from({ length: trackCount }, (_, i) => ({
       id: `t${i + 1}`,
@@ -376,6 +383,11 @@ function installPaginatedLibraryMock(page, { trackCount }) {
     window.__TAURI__ = {
       core: {
         invoke: async (command, payload = {}) => {
+          if (command === "get_library_sources") {
+            const folders = (window.__e2eSourceFolders || [])
+              .map((path) => ({ path, enabled: true, missing: false, fullyAnalyzed: false }));
+            return { ok: true, data: { folders, rekordboxDbEnabled: false, mixxxDbEnabled: false, everConfigured: folders.length > 0 } };
+          }
           if (command === "clear_frontend_log") return "";
           if (command === "append_frontend_log") return null;
           if (command === "show_window") return null;

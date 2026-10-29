@@ -13,8 +13,8 @@
 //! one audio file renamed, one analysis file emptied and one playlist entry
 //! dropped from the eDB only -- the diagnostics and the repair preview.
 use backend::models::{
-    AnalyzeNewTracksRequest, ApiResponse, BrowseSourceFilesRequest, GetTrackDetailRequest,
-    GetTracksByIdsRequest, ScanLibraryRequest,
+    AddSourceFoldersRequest, AnalyzeNewTracksRequest, ApiResponse, BrowseSourceFilesRequest,
+    GetTrackDetailRequest, GetTracksByIdsRequest, ScanLibraryRequest,
 };
 use backend::service::BackendService;
 use backend::service::usb_vendor_compat::DEFAULT_USB_EDB_KEY;
@@ -57,9 +57,12 @@ fn main() {
         incremental: false,
     })
     .unwrap_or_else(|e| fail("scan_library", e));
+    svc.add_source_folders(AddSourceFoldersRequest {
+        paths: vec![source_dir.clone()],
+    })
+    .unwrap_or_else(|e| fail("add_source_folders", e));
     let ids = svc
         .browse_source_files(BrowseSourceFilesRequest {
-            source_roots: vec![source_dir.clone()],
             limit: 1000,
             ..Default::default()
         })

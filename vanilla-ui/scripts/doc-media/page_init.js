@@ -22,15 +22,22 @@
   // Never shown (the label is hidden); the update check just needs a value.
   const DOC_APP_VERSION = "0.0.0";
   const ls = window.localStorage;
+  // The backend's library sources: the folders (some switched off) and, when
+  // shown, an imported Mixxx library switched on in the Libraries row.
+  const librarySources = {
+    folders: sourceRoots.map((path) => ({
+      path, enabled: sourceRootEnabled[path] !== false, missing: false, fullyAnalyzed: true,
+    })),
+    rekordboxDbEnabled: false,
+    mixxxDbEnabled: !!opts.externalLibraries?.mixxx,
+    everConfigured: true,
+  };
+  const shownRoots = sourceRoots.filter((path) => sourceRootEnabled[path] !== false);
   ls.setItem("djusbtkit.helpSeen", "1");
   ls.setItem("djusbtkit.theme", "dark");
   ls.setItem("djusbtkit.accentHue", "270");
-  ls.setItem("djusbtkit.sourceRoots", JSON.stringify(sourceRoots));
-  ls.setItem("djusbtkit.sourceRootEnabled", JSON.stringify(sourceRootEnabled));
   ls.setItem("djusbtkit.cueStartOnFirstBeat", "0");
   ls.setItem("djusbtkit.cueQuantize", "1");
-  // An imported Mixxx library is switched on in the Libraries row.
-  if (opts.externalLibraries?.mixxx) ls.setItem("djusbtkit.mixxxDbEnabled", "1");
 
   const durationMs = detail.track.durationMs;
   const clock = { offsetMs: 0, startedAt: null, loaded: false };
@@ -75,7 +82,7 @@
     hasMore: false,
     nextCursor: null,
     totalDurationMs: sumMs(items),
-    durationKnownCount: items.length,
+    durationUnknownCount: 0,
     ...listTotals(items),
   });
   const historySessions = (usbHistory || []).map(({ id, name, createdAt, titles }) => {
@@ -237,7 +244,7 @@
               total: items.length,
               hasMore: false,
               totalDurationMs: sumMs(items),
-              durationKnownCount: items.length,
+              durationUnknownCount: 0,
               ...listTotals(items),
             });
           }
@@ -253,19 +260,12 @@
             });
           case "get_frontend_settings":
             return ok({ values: {}, nodeAvailable: false, essentiaInstalled: false });
-          case "get_source_root_analysis":
-            return ok({
-              items: (r.sourceRoots || sourceRoots).map((sourceRoot) => {
-                const total = tracks.filter((t) => t.filePath.startsWith(`${sourceRoot}/`)).length;
-                return { sourceRoot, total, analyzed: total, fullyAnalyzed: true };
-              }),
-            });
+          case "get_library_sources":
+            return ok(librarySources);
           case "set_theme_background":
             return null;
           case "allow_asset_paths":
             return 0;
-          case "check_source_roots":
-            return ok({ missing: [] });
           case "list_usb_backups":
             return ok({ items: opts.backups || [] });
           case "list_usb_devices":
@@ -298,7 +298,7 @@
             return ok({
               ...usb.histories.data,
               items: historySessions.map(({ id, name, createdAt, items }) => ({
-                id, name, createdAt, tracks: items, totalDurationMs: sumMs(items), durationKnownCount: items.length,
+                id, name, createdAt, tracks: items, totalDurationMs: sumMs(items), durationUnknownCount: 0,
               })),
               counts: {
                 ...usb.histories.data.counts,
@@ -313,17 +313,15 @@
           case "export_to_usb":
             return replayExport(r.playlistId);
           case "browse_source_files": {
-            // Only the checked folders' tracks, as the backend filters them.
-            const roots = r.sourceRoots || sourceRoots;
-            const items = tracks.filter((t) => roots.some((root) => t.filePath.startsWith(`${root}/`)));
+            // Only the switched-on folders' tracks, as the backend lists them.
+            const items = tracks.filter((t) => shownRoots.some((root) => t.filePath.startsWith(`${root}/`)));
             return ok({
               total: items.length,
               items,
               nextCursor: null,
               hasMore: false,
-              sourceRootAnalysis: roots.map((sourceRoot) => ({ sourceRoot, fullyAnalyzed: true })),
               totalDurationMs: sumMs(items),
-              durationKnownCount: items.length,
+              durationUnknownCount: 0,
               ...listTotals(items),
             });
           }

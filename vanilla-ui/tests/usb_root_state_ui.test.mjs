@@ -45,8 +45,8 @@ test("resetUsbStateViews clears lists and rerenders", () => {
   assert.match(ctx.el.historyList.textContent, /No history imported yet/);
 });
 
-test("syncAssetScopePaths calls allow_asset_paths with roots and usb root", async () => {
-  const state = { sourceRoots: ["/music"], usbRoot: "/usb" };
+test("syncAssetScopePaths calls allow_asset_paths with the source folders and usb root", async () => {
+  const state = { librarySources: { folders: [{ path: "/music" }] }, usbRoot: "/usb" };
   let called = null;
   await syncAssetScopePaths({
     state,

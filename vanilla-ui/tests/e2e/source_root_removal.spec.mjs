@@ -2,10 +2,8 @@ import { test, expect } from "./coverage-fixture.mjs";
 
 function installSourceRemovalMock(page) {
   return page.addInitScript(() => {
-    window.localStorage.setItem(
-      "djusbtkit.sourceRoots",
-      JSON.stringify(["/music/a", "/music/b"])
-    );
+    // The backend's source folders (a test may set its own before load).
+    window.__sourceFolders = window.__sourceFolders || ["/music/a", "/music/b"];
     window.localStorage.setItem("djusbtkit.helpSeen", "1");
     window.__scanCalls = [];
 
@@ -55,7 +53,7 @@ function installSourceRemovalMock(page) {
     ];
 
     // Ground-truth files that exist on disk under /music/a and /music/b --
-    // independent of trackStore (the DB state), which remove_tracks_by_source_roots
+    // independent of trackStore (the DB state), which remove_source_folder
     // empties out. scan_library "rediscovers" these and assigns fresh ids, just
     // like the real backend does on re-scan (it never reuses a deleted row's id).
     const filesOnDisk = trackStore.map((t) => ({ ...t, id: `${t.id}-rescanned` }));
@@ -69,6 +67,18 @@ function installSourceRemovalMock(page) {
     window.__TAURI__ = {
       core: {
         invoke: async (command, payload = {}) => {
+          const sources = () => ({
+            folders: window.__sourceFolders.map((path) => ({ path, enabled: true, missing: false, fullyAnalyzed: false })),
+            rekordboxDbEnabled: false,
+            mixxxDbEnabled: false,
+            everConfigured: true,
+          });
+          if (command === "get_library_sources") return { ok: true, data: sources() };
+          if (command === "add_source_folders") {
+            const added = payload.request.paths.filter((path) => !window.__sourceFolders.includes(path));
+            window.__sourceFolders.push(...added);
+            return { ok: true, data: { sources: sources(), added } };
+          }
           if (command === "clear_frontend_log") return "";
           if (command === "append_frontend_log") return null;
           if (command === "show_window") return null;
@@ -81,18 +91,14 @@ function installSourceRemovalMock(page) {
           if (command === "browse_source_files") {
             return { ok: true, data: { total: trackStore.length, items: trackStore } };
           }
-          if (command === "remove_tracks_by_source_roots") {
-            const roots = Array.isArray(payload?.request?.sourceRoots)
-              ? payload.request.sourceRoots.map((v) => String(v || "").trim()).filter(Boolean)
-              : [];
+          if (command === "remove_source_folder") {
+            const root = payload.request.path;
+            window.__sourceFolders = window.__sourceFolders.filter((path) => path !== root);
             const before = trackStore.length;
             for (let i = trackStore.length - 1; i >= 0; i -= 1) {
-              const filePath = trackStore[i]?.filePath || "";
-              if (roots.some((root) => underRoot(filePath, root))) {
-                trackStore.splice(i, 1);
-              }
+              if (underRoot(trackStore[i]?.filePath, root)) trackStore.splice(i, 1);
             }
-            return { ok: true, data: { removed: before - trackStore.length } };
+            return { ok: true, data: { sources: sources(), removed: before - trackStore.length } };
           }
           if (command === "pick_source_folders") {
             return window.__pickReturn || [];
@@ -153,12 +159,12 @@ test("removing a source folder deletes corresponding tracks from the library", a
 });
 
 test("a long source folder path wraps inside the confirm dialog", async ({ page }) => {
-  await installSourceRemovalMock(page);
   const longRoot =
     "/home/someone/Music/Library/Collections/USB_SOURCE_AUDIO_FILES/WAV_EXPORTS_WITH_A_VERY_LONG_NAME";
   await page.addInitScript((root) => {
-    window.localStorage.setItem("djusbtkit.sourceRoots", JSON.stringify([root, "/music/b"]));
+    window.__sourceFolders = [root, "/music/b"];
   }, longRoot);
+  await installSourceRemovalMock(page);
   await page.goto("/");
   await page.locator("#sourceChipsContainer .source-chip-remove").first().click();
   const message = page.locator("#confirmMessage");

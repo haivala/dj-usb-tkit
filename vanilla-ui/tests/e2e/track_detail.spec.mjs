@@ -3,7 +3,8 @@ import { test, expect } from "./coverage-fixture.mjs";
 function installTrackDetailMock(page, opts = {}) {
   return page.addInitScript((opts) => {
     window.localStorage.setItem("djusbtkit.helpSeen", "1");
-    window.localStorage.setItem("djusbtkit.sourceRoots", JSON.stringify(["/music"]));
+    // The library\'s source folders, as `get_library_sources` answers.
+    window.__e2eSourceFolders = ["/music"];
     if (opts.startOnFirstBeat) window.localStorage.setItem("djusbtkit.cueStartOnFirstBeat", "1");
     // Quantize defaults on; tests that place cues at exact spots turn it off.
     if (opts.quantize === false) window.localStorage.setItem("djusbtkit.cueQuantize", "0");
@@ -48,6 +49,11 @@ function installTrackDetailMock(page, opts = {}) {
     window.__TAURI__ = {
       core: {
         invoke: async (command, payload = {}) => {
+          if (command === "get_library_sources") {
+            const folders = (window.__e2eSourceFolders || [])
+              .map((path) => ({ path, enabled: true, missing: false, fullyAnalyzed: false }));
+            return { ok: true, data: { folders, rekordboxDbEnabled: false, mixxxDbEnabled: false, everConfigured: folders.length > 0 } };
+          }
           window.__calls.push({ command, request: payload?.request ?? null });
           if (command === "clear_frontend_log") return "";
           if (command === "append_frontend_log") return null;
@@ -1851,7 +1857,8 @@ test("cue editor opens + saves from an app-playlist track row", async ({ page })
   // was inert there — clicking it did nothing.
   await page.addInitScript(() => {
     window.localStorage.setItem("djusbtkit.helpSeen", "1");
-    window.localStorage.setItem("djusbtkit.sourceRoots", JSON.stringify(["/music"]));
+    // The library\'s source folders, as `get_library_sources` answers.
+    window.__e2eSourceFolders = ["/music"];
     window.__calls = [];
 
     const pwv5 = new Uint8Array(4000);
@@ -1880,6 +1887,11 @@ test("cue editor opens + saves from an app-playlist track row", async ({ page })
     window.__TAURI__ = {
       core: {
         invoke: async (command, payload = {}) => {
+          if (command === "get_library_sources") {
+            const folders = (window.__e2eSourceFolders || [])
+              .map((path) => ({ path, enabled: true, missing: false, fullyAnalyzed: false }));
+            return { ok: true, data: { folders, rekordboxDbEnabled: false, mixxxDbEnabled: false, everConfigured: folders.length > 0 } };
+          }
           const request = payload?.request ?? payload;
           window.__calls.push({ command, request: request ?? null });
           if (command === "clear_frontend_log") return "";
@@ -1984,7 +1996,8 @@ function installUsbTrackDetailMock(page, mockOpts = {}) {
       window.__TAURI_INTERNALS__ = { invoke: (cmd, args) => window.__TAURI__.core.invoke(cmd, args) };
     }
     window.localStorage.setItem("djusbtkit.helpSeen", "1");
-    window.localStorage.setItem("djusbtkit.sourceRoots", JSON.stringify(["/music"]));
+    // The library\'s source folders, as `get_library_sources` answers.
+    window.__e2eSourceFolders = ["/music"];
     window.localStorage.setItem("djusbtkit.usbRoot", "/Volumes/USB-TEST");
     window.__calls = [];
 
@@ -2028,6 +2041,11 @@ function installUsbTrackDetailMock(page, mockOpts = {}) {
     window.__TAURI__ = {
       core: {
         invoke: async (command, payload = {}) => {
+          if (command === "get_library_sources") {
+            const folders = (window.__e2eSourceFolders || [])
+              .map((path) => ({ path, enabled: true, missing: false, fullyAnalyzed: false }));
+            return { ok: true, data: { folders, rekordboxDbEnabled: false, mixxxDbEnabled: false, everConfigured: folders.length > 0 } };
+          }
           window.__calls.push({ command, request: payload?.request ?? null });
           if (command === "clear_frontend_log") return "";
           if (command === "append_frontend_log") return null;
@@ -2035,7 +2053,6 @@ function installUsbTrackDetailMock(page, mockOpts = {}) {
           if (command === "allow_asset_paths") return null;
           if (command === "get_backend_log_buffer") return [];
           if (command === "detect_external_rekordbox_db") return { ok: true, data: { found: false, path: null } };
-          if (command === "check_source_roots") return { ok: true, data: { roots: [] } };
           if (command === "list_playlists") return { ok: true, data: { items: [] } };
           if (command === "list_usb_devices") return { ok: true, data: { items: [] } };
           if (command === "browse_source_files") {
@@ -2380,11 +2397,17 @@ test("a USB-side save that fails on the device is surfaced, not silently dropped
 test("cue button is disabled for an un-analyzed track", async ({ page }) => {
   await page.addInitScript(() => {
     window.localStorage.setItem("djusbtkit.helpSeen", "1");
-    window.localStorage.setItem("djusbtkit.sourceRoots", JSON.stringify(["/music"]));
+    // The library\'s source folders, as `get_library_sources` answers.
+    window.__e2eSourceFolders = ["/music"];
     const tracks = [{ id: "t1", title: "Raw", artist: "A", filePath: "/music/raw.mp3", analysisReady: false }];
     window.__TAURI__ = {
       core: {
         invoke: async (command) => {
+          if (command === "get_library_sources") {
+            const folders = (window.__e2eSourceFolders || [])
+              .map((path) => ({ path, enabled: true, missing: false, fullyAnalyzed: false }));
+            return { ok: true, data: { folders, rekordboxDbEnabled: false, mixxxDbEnabled: false, everConfigured: folders.length > 0 } };
+          }
           if (command === "detect_external_rekordbox_db") return { ok: true, data: { found: false, path: null } };
           if (command === "list_playlists") return { ok: true, data: { items: [] } };
           if (command === "get_backend_log_buffer") return [];

@@ -1,3 +1,5 @@
+mod library_sources;
+
 use std::collections::{BTreeSet, HashSet};
 use std::fs;
 use std::path::Path;
@@ -202,9 +204,14 @@ fn setup_multi_track_fixture() -> (
     });
     assert!(scan.ok, "scan failed: {scan:?}");
 
+    library_sources::show_only(
+        &backend,
+        vec![media.to_string_lossy().to_string()],
+        false,
+        false,
+    );
     let mut tracks = backend
         .browse_source_files(BrowseSourceFilesRequest {
-            source_roots: vec![media.to_string_lossy().to_string()],
             query: String::new(),
             limit: 20,
             cursor: None,
@@ -243,9 +250,9 @@ fn add_from_library(
         .collect::<Vec<_>>();
     source_roots.sort();
     source_roots.dedup();
+    library_sources::show_only(&backend, source_roots, false, false);
     backend.add_library_selection_to_playlist(AddLibrarySelectionToPlaylistRequest {
         playlist_id: playlist_id.to_string(),
-        source_roots,
         track_ids: track_ids.to_vec(),
         ..Default::default()
     })

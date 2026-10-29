@@ -44,6 +44,10 @@
 - **Fix:** A playlist's "Last exported … to ‹drive›" line now goes away as soon as the playlist
   changes. Before, it stayed after reordering the playlist's tracks, and adding tracks or renaming
   the playlist left the drive's name in it.
+- **Improvement:** The library's source folders and their on/off switches, and the rekordbox and
+  Mixxx chips' switches, are now kept by the backend. The library list, Select all, the selection's
+  time, adding to a playlist and analysis all read the same switches, and a library whose database
+  is gone is switched off for good.
 - **Improvement:** When the selection bar needs more room, the search field beside it narrows to
   make space before the bar moves onto a line of its own.
 

@@ -1577,11 +1577,14 @@ mod tests {
 
         // Browse: Mixxx tracks show only when the Mixxx source is included.
         let browse = |include_rekordbox_db: bool, include_mixxx_db: bool| {
+            super::super::tests::set_library_sources(
+                &service,
+                &[],
+                include_rekordbox_db,
+                include_mixxx_db,
+            );
             service
                 .browse_source_files(BrowseSourceFilesRequest {
-                    source_roots: Vec::new(),
-                    include_rekordbox_db,
-                    include_mixxx_db,
                     query: String::new(),
                     limit: 100,
                     ..Default::default()

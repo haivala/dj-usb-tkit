@@ -56,16 +56,11 @@ export function renderSelectionBar(ctx, view) {
   }
 }
 
-// The list `get_selection_duration` sums in: the library's filter, else the
-// shown playlist or history (`scopeId`); null while no list is shown.
+// The list `get_selection_duration` sums in: the library as its sources are
+// set (the backend's), else the shown playlist or history (`scopeId`); null
+// while no list is shown.
 function selectionList(ctx, view) {
-  if (view === "library") {
-    return {
-      sourceRoots: ctx.enabledLibrarySourceRoots(),
-      includeRekordboxDb: ctx.state.rekordboxDbEnabled === true,
-      includeMixxxDb: ctx.state.mixxxDbEnabled === true,
-    };
-  }
+  if (view === "library") return {};
   const id = barCtl(ctx, view)?.scopeId;
   return id == null ? null : { id, usbRoot: ctx.state.usbRoot || null };
 }
@@ -79,7 +74,9 @@ function renderSelectionTime(ctx, view, bar, ids) {
   if (!target) return;
   const list = ids.size ? selectionList(ctx, view) : null;
   const request = list && { view, ...list, trackIds: [...ids] };
-  const key = request ? JSON.stringify(request) : "";
+  // A library source switched on or off changes the sum, not the request.
+  const sources = view === "library" ? ctx.state.librarySources : null;
+  const key = request ? JSON.stringify([request, sources]) : "";
   if (key === (target.dataset.request || "")) return;
   target.dataset.request = key;
   target.textContent = "";

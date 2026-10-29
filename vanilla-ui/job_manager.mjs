@@ -197,7 +197,7 @@ export function handleJobEvent(ctx, payload) {
     debugFrontendLog,
     emitMessage,
     applyRealtimeAnalyzedTrackUpdate,
-    refreshSourceRootAnalysisStatus,
+    refreshLibrarySources,
     applyLibraryDurationSummary,
     setTrackAnalyzingState,
     setUsbRootControlsLocked,
@@ -338,7 +338,8 @@ export function handleJobEvent(ctx, payload) {
         status
       });
     }
-    Promise.resolve(refreshSourceRootAnalysisStatus()).catch(() => {});
+    // A folder may now be fully analyzed.
+    refreshLibrarySources();
     finishJob(ctx, jobId, jobType, ownsProgressBar, 350);
     return;
   }

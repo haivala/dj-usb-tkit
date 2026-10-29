@@ -55,7 +55,8 @@ function installScanAnalysisMock(page, opts = {}) {
     window.__TAURI_INTERNALS__ = {
       invoke: (cmd, args) => window.__TAURI__.core.invoke(cmd, args)
     };
-    window.localStorage.setItem("djusbtkit.sourceRoots", JSON.stringify(["/music"]));
+    // The library\'s source folders, as `get_library_sources` answers.
+    window.__e2eSourceFolders = ["/music"];
     window.localStorage.setItem("djusbtkit.helpSeen", "1");
     window.localStorage.setItem("djusbtkit.analysisBpmRange", analysisBpmRange);
 
@@ -352,6 +353,11 @@ function installScanAnalysisMock(page, opts = {}) {
     window.__TAURI__ = {
       core: {
         invoke: async (command, payload = {}) => {
+          if (command === "get_library_sources") {
+            const folders = (window.__e2eSourceFolders || [])
+              .map((path) => ({ path, enabled: true, missing: false, fullyAnalyzed: false }));
+            return { ok: true, data: { folders, rekordboxDbEnabled: false, mixxxDbEnabled: false, everConfigured: folders.length > 0 } };
+          }
           if (command === "append_frontend_log") {
             logFileLines.push(`[${payload?.level}] ${payload?.message}`);
             return null;
@@ -503,7 +509,8 @@ function installPagedMaterializeAnalyzeMock(page, opts = {}) {
     window.__TAURI_INTERNALS__ = {
       invoke: (cmd, args) => window.__TAURI__.core.invoke(cmd, args)
     };
-    window.localStorage.setItem("djusbtkit.sourceRoots", JSON.stringify(["/music"]));
+    // The library\'s source folders, as `get_library_sources` answers.
+    window.__e2eSourceFolders = ["/music"];
     window.localStorage.setItem("djusbtkit.helpSeen", "1");
 
     const listeners = new Map();
@@ -752,6 +759,11 @@ function installPagedMaterializeAnalyzeMock(page, opts = {}) {
     window.__TAURI__ = {
       core: {
         invoke: async (command, payload = {}) => {
+          if (command === "get_library_sources") {
+            const folders = (window.__e2eSourceFolders || [])
+              .map((path) => ({ path, enabled: true, missing: false, fullyAnalyzed: false }));
+            return { ok: true, data: { folders, rekordboxDbEnabled: false, mixxxDbEnabled: false, everConfigured: folders.length > 0 } };
+          }
           if (command === "clear_frontend_log") return "";
           if (command === "append_frontend_log") return null;
           if (command === "show_window") return null;
@@ -1478,7 +1490,8 @@ test("analyze on auto-loaded track updates row in place without full reload", as
 // still render its `message`, not "[object Object]".
 function installAnalyzeResponseMock(page, { analyzeResponse }) {
   return page.addInitScript(({ analyzeResponse }) => {
-    window.localStorage.setItem("djusbtkit.sourceRoots", JSON.stringify(["/music"]));
+    // The library\'s source folders, as `get_library_sources` answers.
+    window.__e2eSourceFolders = ["/music"];
     window.localStorage.setItem("djusbtkit.helpSeen", "1");
 
     const track = {
@@ -1500,6 +1513,11 @@ function installAnalyzeResponseMock(page, { analyzeResponse }) {
     window.__TAURI__ = {
       core: {
         invoke: async (command) => {
+          if (command === "get_library_sources") {
+            const folders = (window.__e2eSourceFolders || [])
+              .map((path) => ({ path, enabled: true, missing: false, fullyAnalyzed: false }));
+            return { ok: true, data: { folders, rekordboxDbEnabled: false, mixxxDbEnabled: false, everConfigured: folders.length > 0 } };
+          }
           if (command === "clear_frontend_log") return "";
           if (command === "append_frontend_log") return null;
           if (command === "show_window") return null;

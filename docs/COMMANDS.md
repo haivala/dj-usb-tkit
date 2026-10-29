@@ -37,7 +37,7 @@ pagination shape: the request carries `query`, `sortBy` (`title` | `artist` |
 `sortDir` (`asc` | `desc`), `offset` or `cursor`, and `limit` (`0` ⇒
 unpaginated). The response carries `items`, `total` (filtered count),
 `nextCursor`, `hasMore`, plus any whole-set aggregates (`totalDurationMs`,
-`sourceRootAnalysis`). Filtering and sorting are server-side so they span the
+`durationUnknownCount`). Filtering and sorting are server-side so they span the
 entire list, not just the loaded page.
 
 `offset` is a position in the filtered, sorted list and takes precedence over
@@ -71,11 +71,27 @@ drive selection from being rendered against a newer selected drive.
 - `scan_library`
 - `scan_rekordbox_db`
 - `scan_mixxx_db`
-- `browse_source_files`
-- `check_source_roots`
+- `browse_source_files` — lists the library as its sources are set (below);
+  the request carries no folder or library filter.
+- `get_library_sources` → `{ folders, rekordboxDbEnabled, mixxxDbEnabled,
+  everConfigured }`, each folder `{ path, enabled, missing, fullyAnalyzed }`.
+  The backend stores the source folders and their switches; every library
+  command (`browse_source_files`, `list_matching_track_ids`,
+  `get_selection_duration`, `add_library_selection_to_playlist(s)`,
+  `analyze_new_tracks`, and `scan_library` without `sourceRoots`) uses the
+  switched-on folders that are present plus the switched-on imported
+  libraries. A library whose database is no longer found is switched off.
+- `add_source_folders` — `{ paths }` → `{ sources, added }`; `added` are the
+  paths not already configured (switched on).
+- `remove_source_folder` — `{ path }` → `{ sources, removed }`; removes the
+  folder and its tracks, keeping tracks inside another source folder.
+- `set_source_folder_enabled` — `{ path, enabled }` → the sources.
+- `set_external_library_enabled` — `{ library: "rekordbox" | "mixxx",
+  enabled }` → the sources.
 - `resolve_track_identity`
-- `remove_tracks_by_source_roots`
-- `relocate_source_root`
+- `relocate_source_root` — `{ oldRoot, newRoot }` → the rewrite counts plus
+  `sources`: once every track moved, the new folder replaces the old one;
+  otherwise both stay.
 - `get_tracks_by_ids_with_previews`
 - `get_track_detail` — returns `{ track, firstBeatMs, cues, detailWaveform,
   keyOptions, genre, rating, releaseDate, genreOptions }` for the cue editor
@@ -164,8 +180,7 @@ drive selection from being rendered against a newer selected drive.
   tracks differ). The USB form reads the stick's PDB rows; `genreOptions`
   adds its genres to the library's.
 - `get_selection_duration` — `{ view, trackIds, … }`, the list named by
-  `view`: `library` with its filter (`sourceRoots`, `includeRekordboxDb`,
-  `includeMixxxDb`), `playlist` with `id`, `usbPlaylist` / `usbHistory` with
+  `view`: `library` (as its sources are set), `playlist` with `id`, `usbPlaylist` / `usbHistory` with
   `usbRoot` and `id` → `{ totalDurationMs, durationUnknownCount, trackCount }` for
   the selection bar's time: the ticked tracks summed by the same rule as that
   list's Total time, over the whole list, not the searched one.
