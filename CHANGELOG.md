@@ -61,6 +61,10 @@
   instead of being filled in after the list is drawn.
 - **Improvement:** While a track is analyzed, its waveform and length show as soon as the file is
   decoded, before its BPM and key are detected.
+- **Improvement:** Zoomed out, the cue editor's bar lines no longer cover the waveform: they thin
+  to every 2nd, 4th… bar and draw narrower, and the Beat grid slider's thicker lines show once
+  there is room for them. On a tall window the editor sits a little above the middle instead of at
+  the top.
 - **Improvement:** When the selection bar needs more room, the search field beside it narrows to
   make space before the bar moves onto a line of its own.
 

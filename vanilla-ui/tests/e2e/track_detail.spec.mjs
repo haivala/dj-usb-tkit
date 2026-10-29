@@ -419,8 +419,10 @@ test("cue list rows carry the same letter as their waveform marker, in position 
 test("the Beat grid slider sets how strongly the grid shows, and is remembered", async ({ page }) => {
   await openCueEditor(page);
   const slider = page.locator("#trackDetailGridLevel");
-  // The opening 60-bar view only draws bar lines; one zoom step spreads the
-  // beats far enough apart to draw them too.
+  // The opening 60-bar view only draws bar lines; zooming in spreads the
+  // beats far enough apart to draw them too, and the bars far enough apart
+  // for full-width bar lines even at the thickest setting.
+  await page.locator("#trackDetailZoomIn").click();
   await page.locator("#trackDetailZoomIn").click();
   const lineWidth = (selector) =>
     page
@@ -584,11 +586,19 @@ test("bar numbers label the grid without crowding, down to every bar when zoomed
     }));
 
   // The opening view is 60 bars: ~5 px a beat is too dense for beat lines,
-  // so only the bar lines are drawn.
+  // so only bar lines are drawn -- every 2nd bar, at beat-line width, since
+  // ~20 px a bar is too tight for a full-width line on every bar.
   const beatLines = page.locator("#trackDetailBeatgrid .beatgrid-line:not(.is-downbeat)");
   const barLines = page.locator("#trackDetailBeatgrid .beatgrid-line.is-downbeat");
   await expect(beatLines).toHaveCount(0);
-  expect(await barLines.count()).toBeGreaterThanOrEqual(60);
+  const openingXs = await barLines.evaluateAll((nodes) =>
+    nodes.map((n) => n.getBoundingClientRect().left)
+  );
+  expect(openingXs.length).toBeGreaterThanOrEqual(30);
+  expect(openingXs.length).toBeLessThan(60);
+  const barLineWidth = () =>
+    barLines.first().evaluate((n) => n.getBoundingClientRect().width);
+  const thinBarWidth = await barLineWidth();
 
   // Labelled every Nth bar, never closer than 36 px.
   let { numbers, xs } = await barState();
@@ -605,8 +615,9 @@ test("bar numbers label the grid without crowding, down to every bar when zoomed
     ({ numbers } = await barState());
     return numbers.length > 1 ? numbers[1] - numbers[0] : 0;
   }).toBe(1);
-  // Zoomed in, every beat has its line again.
+  // Zoomed in, every beat has its line again, and bar lines are full width.
   expect(await beatLines.count()).toBeGreaterThan(0);
+  expect(await barLineWidth()).toBeGreaterThan(thinBarWidth);
 
   // Packed tighter than 8 px a bar (whole 3:00 track at 512 BPM = 384 bars,
   // ~3 px each), bar lines thin to every Nth bar too.

@@ -55,6 +55,11 @@ const BAR_LABEL_MIN_PX = 36;
 // lines are left out until zooming in spreads the beats this far apart; bar
 // lines thin to every 2nd, 4th… bar (the bar-number steps) the same way.
 const GRID_LINE_MIN_PX = 8;
+// Bar lines are also kept at least this many of their own widths (outline
+// included) apart, so a thick grid never covers more than about an eighth of
+// the waveform. Bar lines that can't all be drawn at full width are drawn at
+// beat-line width instead.
+const BAR_LINE_GAP_WIDTHS = 8;
 const UNDO_LIMIT = 100;
 // ←/→ with Shift, or without a beat grid: a fine nudge.
 const FINE_NUDGE_MS = 10;
@@ -520,7 +525,6 @@ export function createTrackDetailController(el, prefs = {}) {
     const to = Math.min(working.durationMs, working.view.endMs + interval);
     const width = el.trackDetailWaveform?.clientWidth || 0;
     const labelStep = barStep(interval, BAR_LABEL_MIN_PX);
-    const lineStep = width ? barStep(interval, GRID_LINE_MIN_PX) : 1;
     const showBeats = !width || (interval / viewSpanMs()) * width >= GRID_LINE_MIN_PX;
     // Lines sit on whole device pixels: at a fractional position the browser
     // smears some across two pixels and not others, so an even grid looks
@@ -537,8 +541,21 @@ export function createTrackDetailController(el, prefs = {}) {
       host.style.setProperty(`--${name}-w`, `${devicePx * dpx}px`);
       host.style.setProperty(`--${name}-ml`, `${-Math.floor(devicePx / 2) * dpx}px`);
     };
-    setWidth("beat", 1 + Math.round((level / 100) * 2));
-    setWidth("bar", 2 + Math.round((level / 100) * 2));
+    const beatPx = 1 + Math.round((level / 100) * 2);
+    let barPx = 2 + Math.round((level / 100) * 2);
+    // A line's footprint is its width plus a one-pixel outline on each side.
+    const barLineStep = (devicePx) =>
+      barStep(interval, Math.max(GRID_LINE_MIN_PX, BAR_LINE_GAP_WIDTHS * (devicePx + 2) * dpx));
+    let lineStep = 1;
+    if (width) {
+      lineStep = barLineStep(barPx);
+      if (lineStep > 1) {
+        barPx = beatPx;
+        lineStep = barLineStep(barPx);
+      }
+    }
+    setWidth("beat", beatPx);
+    setWidth("bar", barPx);
     host.style.setProperty("--dpx", `${dpx}px`);
     const pxPerMs = (width * dpr) / viewSpanMs();
     const basePx = Math.round(working.view.startMs * pxPerMs);

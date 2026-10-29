@@ -4587,7 +4587,16 @@ td button[data-action]:disabled,
   min-height: 0;
   overflow-y: auto;
   padding: 0 0 16px;
+  /* The editor sits a little above the middle of a tall window: a third of
+     the spare height above it, two thirds below. Without spare height the
+     spacers are gone and it scrolls from the top. */
+  display: flex;
+  flex-direction: column;
 }
+.track-detail-dialog > * { flex-shrink: 0; }
+.track-detail-dialog::before,
+.track-detail-dialog::after { content: ""; flex: 1 1 0; }
+.track-detail-dialog::after { flex-grow: 2; }
 .track-detail-header {
   display: grid;
   grid-template-columns: minmax(0, 1fr) auto auto;
