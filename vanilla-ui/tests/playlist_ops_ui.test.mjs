@@ -10,7 +10,7 @@ import {
 } from "../components/playlist/actions.mjs";
 import { createInitialState } from "../app_state.mjs";
 import { bindPlaylistEvents } from "../components/playlist/events.mjs";
-import { APP_TEMPLATES } from "./test_helpers.mjs";
+import { APP_TEMPLATES, makeTestCtx } from "./test_helpers.mjs";
 
 function makeDom() {
   return new JSDOM(`<!doctype html><body>
@@ -107,20 +107,23 @@ test("formatPlaylistExportStatus leads with whether the playlist is on the conne
 
 // The active playlist sort lives in tableSortState; committing always clears
 // it (recorded as "clear") before deciding whether to persist it.
+// After a persisted reorder the playlist rows are re-read (`list_playlists`).
 function commitCtx(state, sort = { key: "artist", dir: "desc" }) {
   const calls = [];
   const tableSortState = sort ? { playlistTracksBody: sort } : {};
-  const ctx = {
-    state,
-    el: {},
-    command: async (cmd, payload) => { calls.push([cmd, payload]); return {}; },
+  const ctx = makeTestCtx({
+    command: async (cmd, payload) => {
+      calls.push(payload === undefined ? [cmd] : [cmd, payload]);
+      return cmd === "list_playlists" ? { items: state.playlists.map(({ tracks: _t, ...row }) => row) } : {};
+    },
     tableSortState: new Proxy(tableSortState, {
       deleteProperty(target, key) {
         calls.push(["clear"]);
         return delete target[key];
       }
     })
-  };
+  });
+  Object.assign(ctx.state, state);
   return { calls, ctx };
 }
 
@@ -135,7 +138,8 @@ test("commitActivePlaylistSort sends the active sort to the backend to persist a
 
   assert.deepEqual(calls, [
     ["clear"],
-    ["reorder_playlist_tracks", { playlistId: "p1", sortBy: "artist", sortDir: "desc" }]
+    ["reorder_playlist_tracks", { playlistId: "p1", sortBy: "artist", sortDir: "desc" }],
+    ["list_playlists"]
   ]);
 });
 

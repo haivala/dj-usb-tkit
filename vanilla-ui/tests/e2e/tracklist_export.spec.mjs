@@ -78,7 +78,7 @@ function installTauriMock(page) {
                 hasMore: false,
                 nextCursor: null,
                 totalDurationMs: historyTracks.reduce((s, t) => s + (t.durationMs || 0), 0),
-                durationKnownCount: historyTracks.length,
+                durationUnknownCount: 0,
                 warnings: []
               }
             };

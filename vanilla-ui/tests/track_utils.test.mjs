@@ -70,13 +70,13 @@ test("formatBpm returns an empty string for missing or non-positive values", () 
 
 test("renderTrackListDurationSummary renders the backend total verbatim", () => {
   const target = { textContent: "" };
-  renderTrackListDurationSummary(target, { totalDurationMs: 3661000, durationKnownCount: 3, trackCount: 3 });
+  renderTrackListDurationSummary(target, { totalDurationMs: 3661000, durationUnknownCount: 0 });
   assert.equal(target.textContent, "Total time: 1:01:01");
 });
 
 test("renderTrackListDurationSummary appends a 'without length' suffix when some durations are unknown", () => {
   const target = { textContent: "" };
-  renderTrackListDurationSummary(target, { totalDurationMs: 180000, durationKnownCount: 1, trackCount: 3 });
+  renderTrackListDurationSummary(target, { totalDurationMs: 180000, durationUnknownCount: 2 });
   assert.equal(target.textContent, "Total time: 3:00 (2 without length)");
 });
 

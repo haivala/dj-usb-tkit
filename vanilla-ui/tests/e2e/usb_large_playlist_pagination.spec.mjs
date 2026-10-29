@@ -53,7 +53,7 @@ function playlistTracksResponder(tracks, hydrate) {
         hasMore: nextOffset < total,
         nextCursor: nextOffset < total ? String(nextOffset) : null,
         totalDurationMs: 0,
-        durationKnownCount: 0,
+        durationUnknownCount: 0,
         warnings: [],
       },
     };
@@ -111,7 +111,7 @@ function installTauriMock(page, { trackCount, gateFetches = false }) {
             return {
               ok: true,
               data: {
-                items: [{ id: "usb-1", name: "Big Playlist", source: "mock-tauri", trackCount: tracks.length, tracks: [], totalDurationMs: 0, durationKnownCount: 0 }],
+                items: [{ id: "usb-1", name: "Big Playlist", source: "mock-tauri", trackCount: tracks.length, tracks: [], totalDurationMs: 0, durationUnknownCount: 0 }],
                 stats: { indexedTracks: tracks.length, playlistReferencedTracks: tracks.length, playlistEntries: tracks.length },
                 warnings: [],
               },
@@ -326,7 +326,7 @@ function installRowClickMock(page) {
             return {
               ok: true,
               data: {
-                items: [{ id: "usb-1", name: "Small Playlist", source: "mock-tauri", trackCount: tracks.length, tracks: [], totalDurationMs: 0, durationKnownCount: 0 }],
+                items: [{ id: "usb-1", name: "Small Playlist", source: "mock-tauri", trackCount: tracks.length, tracks: [], totalDurationMs: 0, durationUnknownCount: 0 }],
                 stats: { indexedTracks: tracks.length, playlistReferencedTracks: tracks.length, playlistEntries: tracks.length },
                 warnings: [],
               },

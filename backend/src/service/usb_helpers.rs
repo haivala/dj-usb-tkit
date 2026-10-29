@@ -252,7 +252,7 @@ mod tests {
             track_count,
             tracks: Vec::new(),
             total_duration_ms: 0,
-            duration_known_count: 0,
+            duration_unknown_count: 0,
         }
     }
 

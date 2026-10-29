@@ -166,7 +166,7 @@ drive selection from being rendered against a newer selected drive.
 - `get_selection_duration` — `{ view, trackIds, … }`, the list named by
   `view`: `library` with its filter (`sourceRoots`, `includeRekordboxDb`,
   `includeMixxxDb`), `playlist` with `id`, `usbPlaylist` / `usbHistory` with
-  `usbRoot` and `id` → `{ totalDurationMs, durationKnownCount, trackCount }` for
+  `usbRoot` and `id` → `{ totalDurationMs, durationUnknownCount, trackCount }` for
   the selection bar's time: the ticked tracks summed by the same rule as that
   list's Total time, over the whole list, not the searched one.
 

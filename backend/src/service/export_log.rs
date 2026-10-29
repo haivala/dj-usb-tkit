@@ -643,7 +643,7 @@ mod tests {
                 history_track("2", "Track Two", "Artist", "/Contents/Artist/Album/two.mp3"),
             ],
             total_duration_ms: 0,
-            duration_known_count: 0,
+            duration_unknown_count: 0,
         }];
         let log = UsbExportLog {
             schema_version: 1,

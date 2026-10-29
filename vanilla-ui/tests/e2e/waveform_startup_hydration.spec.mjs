@@ -534,7 +534,7 @@ function installSourceChipSearchMock(page) {
                   { sourceRoot: "/music-b", total: 1, analyzed: 1, fullyAnalyzed: true }
                 ],
                 totalDurationMs: visible.reduce((sum, t) => sum + t.durationMs, 0),
-                durationKnownCount: visible.length
+                durationUnknownCount: 0
               }
             };
           }

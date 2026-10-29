@@ -62,6 +62,12 @@ export function fillKeyCell(cell, track) {
 
 // A cover <img> trying `candidates` in order (see attachCoverFallbackHandlers),
 // or the empty placeholder when there are none.
+// Whether a row has a waveform to draw: the colour data, or a preview (the
+// backend's 0-100 levels) with any level above zero.
+export function trackHasWaveform(track) {
+  return track.waveformColorData?.length >= 6 || !!track.waveformPreview?.some((v) => v > 0);
+}
+
 export function coverElement(doc, candidates) {
   if (!candidates.length) return cloneTemplate(doc, "tplCoverPlaceholder");
   const img = cloneTemplate(doc, "tplCoverImg");
@@ -140,16 +146,10 @@ export function createTrackRow(ctx, track, options) {
 
   const waveform = row.querySelector(".waveform");
   Object.assign(waveform.dataset, { index: String(options.index), id: renderTrackId, origin });
-  const peaks = Array.isArray(track.waveformPreview)
-    ? track.waveformPreview
-      .map((v) => Math.max(0, Math.min(100, Number(v) || 0)))
-      .filter((v) => Number.isFinite(v))
-    : [];
-  const hasColorWaveform = Array.isArray(track.waveformColorData) && track.waveformColorData.length >= 6;
-  const hasWaveform = hasColorWaveform || (peaks.length > 0 && peaks.some((v) => v > 0));
+  const hasWaveform = trackHasWaveform(track);
   if (hasWaveform) {
     waveform.classList.add("waveform-canvas");
-    waveform.dataset.peaks = peaks.join(",");
+    waveform.dataset.peaks = (track.waveformPreview || []).join(",");
     waveform.prepend(cloneTemplate(doc, "tplWaveformCanvas"));
   }
 
@@ -289,7 +289,7 @@ export async function finishTrackRows(ctx, rows) {
   await renderWaveforms(waveforms);
 }
 
-function formatTrackDuration(track) {
+export function formatTrackDuration(track) {
   const rawMs = Number(track?.durationMs);
   if (!Number.isFinite(rawMs) || rawMs <= 0) return "-";
   return formatDurationMs(rawMs);

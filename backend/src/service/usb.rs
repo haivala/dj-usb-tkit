@@ -428,7 +428,7 @@ fn paginate_usb_tracks(
     let (list_track_count, list_size_bytes) = super::list_totals(&tracks);
     let query = super::TrackQuery::new(&req.query);
     query.retain(&mut tracks);
-    let (total_duration_ms, duration_known_count) = duration_totals(&tracks);
+    let (total_duration_ms, duration_unknown_count) = duration_totals(&tracks);
     let total = tracks.len();
 
     let sort = super::TrackSort::new(req.sort_by.as_deref(), req.sort_dir.as_deref());
@@ -464,7 +464,7 @@ fn paginate_usb_tracks(
         next_cursor,
         has_more,
         total_duration_ms,
-        duration_known_count,
+        duration_unknown_count,
         list_track_count,
         list_size_bytes,
         warnings,
@@ -1343,7 +1343,7 @@ impl BackendService {
             *source_counts.entry(source).or_insert(0) += 1;
             playlist_entries_total += playlist_tracks.len();
 
-            let (total_duration_ms, duration_known_count) = duration_totals(&playlist_tracks);
+            let (total_duration_ms, duration_unknown_count) = duration_totals(&playlist_tracks);
             items.push(UsbPlaylist {
                 id: candidate
                     .pdb_id
@@ -1359,7 +1359,7 @@ impl BackendService {
                 track_count: playlist_tracks.len(),
                 tracks: playlist_tracks,
                 total_duration_ms,
-                duration_known_count,
+                duration_unknown_count,
             });
         }
         push_usb_stage_timing(&mut warnings, "resolve playlists", &mut stage_started);
@@ -2038,7 +2038,7 @@ impl BackendService {
                         parse_history_name_numeric_id(&cleaned_name)
                             .and_then(|n| history_date_by_num.get(&n).cloned())
                     });
-                let (total_duration_ms, duration_known_count) = duration_totals(&tracks);
+                let (total_duration_ms, duration_unknown_count) = duration_totals(&tracks);
                 UsbHistory {
                     id: format!("usb-h-{}", logical_playlist_id),
                     name: if cleaned_name.is_empty() {
@@ -2049,7 +2049,7 @@ impl BackendService {
                     created_at,
                     tracks,
                     total_duration_ms,
-                    duration_known_count,
+                    duration_unknown_count,
                 }
             })
             .collect::<Vec<_>>();
@@ -3152,7 +3152,7 @@ mod tests {
                     make_track("20", "/USB/Contents/A/2.mp3"),
                 ],
                 total_duration_ms: 0,
-                duration_known_count: 0,
+                duration_unknown_count: 0,
             },
             UsbHistory {
                 id: "usb-h-2".to_string(),
@@ -3160,7 +3160,7 @@ mod tests {
                 created_at: Some("2021-09".to_string()),
                 tracks: vec![make_track("30", "/USB/Contents/A/3.mp3")],
                 total_duration_ms: 0,
-                duration_known_count: 0,
+                duration_unknown_count: 0,
             },
             UsbHistory {
                 id: "usb-h-3".to_string(),
@@ -3168,7 +3168,7 @@ mod tests {
                 created_at: Some("2021-09".to_string()),
                 tracks: vec![make_track("40", "/USB/Contents/A/4.mp3")],
                 total_duration_ms: 0,
-                duration_known_count: 0,
+                duration_unknown_count: 0,
             },
         ];
         let date_created_by_track_id = HashMap::from([
@@ -3193,7 +3193,7 @@ mod tests {
             created_at: Some("2026-04-03".to_string()),
             tracks: vec![make_track("10", "/USB/Contents/A/1.mp3")],
             total_duration_ms: 0,
-            duration_known_count: 0,
+            duration_unknown_count: 0,
         }];
         let date_created_by_track_id = HashMap::from([(10u32, "2024-10-15".to_string())]);
 
@@ -3211,7 +3211,7 @@ mod tests {
                 created_at: Some("2026-04-03".to_string()),
                 tracks: vec![make_track("10", "/USB/Contents/A/1.mp3")],
                 total_duration_ms: 0,
-                duration_known_count: 0,
+                duration_unknown_count: 0,
             },
             UsbHistory {
                 id: "usb-h-2".to_string(),
@@ -3219,7 +3219,7 @@ mod tests {
                 created_at: Some("2021-09".to_string()),
                 tracks: vec![make_track("20", "/USB/Contents/A/2.mp3")],
                 total_duration_ms: 0,
-                duration_known_count: 0,
+                duration_unknown_count: 0,
             },
         ];
         let date_created_by_track_id = HashMap::from([(20u32, "2024-10-15".to_string())]);
@@ -4365,7 +4365,7 @@ mod tests {
         // make_export_track() gives every seeded track a fixed 200_000ms
         // duration, so two tracks should sum to 400_000ms with both known.
         assert_eq!(result.items[0].total_duration_ms, 400_000);
-        assert_eq!(result.items[0].duration_known_count, 2);
+        assert_eq!(result.items[0].duration_unknown_count, 0);
     }
 
     #[test]

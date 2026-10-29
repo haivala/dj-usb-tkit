@@ -4,7 +4,7 @@
 // footer, sorting (column headers) and row-action dispatch are shared too.
 //
 // Every backing command returns the same envelope:
-//   { items, total, totalDurationMs?, durationKnownCount? }
+//   { items, total, totalDurationMs?, durationUnknownCount? }
 // for `query` / `sortBy` / `sortDir` / `offset` / `limit` request params, so
 // filtering and sorting run server-side over the whole list. Changing the
 // search text or the column sort reloads from the top.
@@ -56,7 +56,7 @@ export function createTrackListController(config = {}) {
     renderEmpty = () => {},
     // (rows) -> Promise  -- wire up rows just put in the DOM
     finishRows = async () => {},
-    // (target, { totalDurationMs, durationKnownCount, trackCount }) -> void
+    // (target, { totalDurationMs, durationUnknownCount }) -> void
     renderDurationSummary = () => {},
     // (pageTracks, { first }) -> void  (e.g. library kicks off bg preview hydration)
     onPage = () => {},
@@ -302,8 +302,7 @@ export function createTrackListController(config = {}) {
   function renderSummary(data) {
     renderDurationSummary(getElements().durationTarget, {
       totalDurationMs: data.totalDurationMs,
-      durationKnownCount: data.durationKnownCount,
-      trackCount: ctl.total,
+      durationUnknownCount: data.durationUnknownCount,
     });
   }
 
@@ -455,7 +454,7 @@ export function createTrackListController(config = {}) {
     updateLoadingIndicator();
     resetRows();
     await renderWindow();
-    renderDurationSummary(getElements().durationTarget, { totalDurationMs: 0, durationKnownCount: 0, trackCount: 0 });
+    renderDurationSummary(getElements().durationTarget, { totalDurationMs: 0, durationUnknownCount: 0 });
   };
 
   ctl.setSearch = (value) => {

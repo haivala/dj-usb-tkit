@@ -1891,7 +1891,7 @@ test("cue editor opens + saves from an app-playlist track row", async ({ page })
             return { ok: true, data: { items: [{ id: "pl-1", name: "My Set", source: "local", createdAt: new Date().toISOString(), updatedAt: new Date().toISOString() }] } };
           }
           if (command === "get_playlist_tracks") {
-            return { ok: true, data: { playlistId: "pl-1", items: [track], total: 1, nextCursor: null, hasMore: false, totalDurationMs: 180000, durationKnownCount: 1, unanalyzedCount: 0 } };
+            return { ok: true, data: { playlistId: "pl-1", items: [track], total: 1, nextCursor: null, hasMore: false, totalDurationMs: 180000, durationUnknownCount: 0, unanalyzedCount: 0 } };
           }
           if (command === "browse_source_files") {
             return { ok: true, data: { total: 0, items: [], nextCursor: null, hasMore: false } };
@@ -2017,7 +2017,7 @@ function installUsbTrackDetailMock(page, mockOpts = {}) {
       ok: true,
       data: {
         items: [usbTrack], total: 1, nextCursor: null, hasMore: false,
-        totalDurationMs: 200000, durationKnownCount: 1, warnings: [],
+        totalDurationMs: 200000, durationUnknownCount: 0, warnings: [],
       },
     };
 

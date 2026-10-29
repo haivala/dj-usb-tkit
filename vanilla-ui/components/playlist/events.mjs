@@ -310,6 +310,8 @@ export function bindPlaylistEvents(ctx) {
           moveTrackId,
           beforeTrackId
         });
+        // The reorder cleared the playlist's last export.
+        await loadPlaylists();
       } catch (err) {
         console.error(err);
         emitStatus(`Save track order failed: ${err.message || err}`);

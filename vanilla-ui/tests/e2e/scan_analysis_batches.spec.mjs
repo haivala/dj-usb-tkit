@@ -395,7 +395,7 @@ function installScanAnalysisMock(page, opts = {}) {
             const { totalMs, knownCount } = computeDurationTotals(filtered);
             return {
               ok: true,
-              data: { total: filtered.length, items: withAnalysisReady(filtered), totalDurationMs: totalMs, durationKnownCount: knownCount }
+              data: { total: filtered.length, items: withAnalysisReady(filtered), totalDurationMs: totalMs, durationUnknownCount: filtered.length - knownCount }
             };
           }
           if (command === "get_tracks_by_ids_with_previews") {
@@ -600,7 +600,7 @@ function installPagedMaterializeAnalyzeMock(page, opts = {}) {
         nextCursor: hasMore ? String(nextOffset) : null,
         hasMore,
         totalDurationMs: totalMs,
-        durationKnownCount: knownCount
+        durationUnknownCount: rows.length - knownCount
       };
     };
 

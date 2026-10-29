@@ -6,7 +6,6 @@ import { clearTrackSort, renderEmptyState } from "../shell/actions.mjs";
 import { computeExportButtonState, isUsbRootChangeBlocked } from "../usb/actions.mjs";
 import { cssEscape, cloneTemplate } from "../../ui_utils.mjs";
 import {
-  formatDurationMs,
   formatTimestampLocal,
   renderTrackListDurationSummary,
   formatTrackListSummary,
@@ -150,14 +149,8 @@ export function startPlaylistRename(ctx, playlistId) {
     const newName = input.value.trim();
     if (save && newName && newName !== originalName) {
       try {
-        const data = await command("rename_playlist", { playlistId, name: newName });
-        // loadPlaylists may have replaced the list while the field was open.
-        const current = state.playlists.find((item) => item.id === playlistId) || playlist;
-        current.name = data.name;
-        current.lastExportedAt = null;
-        current.lastExportedUsbRoot = null;
-        current.lastExportedTrackCount = null;
-        refreshUsbExportStatusInBackground(ctx);
+        await command("rename_playlist", { playlistId, name: newName });
+        await loadPlaylists(ctx);
       } catch (err) {
         console.error("rename failed:", err);
         emitStatus(`Rename failed: ${err.message || err}`);
@@ -249,9 +242,17 @@ export async function reorderPlaylists(ctx, fromIndex, toIndex) {
   }
 }
 
+// The backend's rows replace every stored field (an unset one comes as null);
+// what a playlist's track list loaded onto it (its tracks, totals) is kept, so
+// a re-read after a change doesn't empty the open playlist.
 export async function loadPlaylists(ctx) {
   const data = await ctx.command("list_playlists");
-  ctx.state.playlists = (data.items || []).map((playlist) => ({ ...playlist, tracks: [] }));
+  const loaded = new Map(ctx.state.playlists.map((playlist) => [playlist.id, playlist]));
+  ctx.state.playlists = (data.items || []).map((playlist) => ({
+    tracks: [],
+    ...loaded.get(playlist.id),
+    ...playlist,
+  }));
   renderPlaylistList(ctx);
   updatePlaylistExportButtons(ctx);
   refreshUsbExportStatusInBackground(ctx);
@@ -290,6 +291,8 @@ export async function commitActivePlaylistSort(ctx, playlistId) {
     sortBy: sort.key,
     sortDir: sort.dir || "asc",
   });
+  // The reorder cleared the playlist's last export.
+  await loadPlaylists(ctx);
 }
 
 export function updatePlaylistExportButtons(ctx) {
@@ -607,14 +610,9 @@ export async function addTracksToCurrentPlaylist(ctx, tracks) {
     if (!Number(add.resolved || 0)) {
       return add;
     }
-    // Backend unconditionally nulls out last_exported_* on every
-    // add-track call (mod.rs) -- mirror that here so the
-    // sidebar's "exported to USB" checkmark doesn't keep showing stale
-    // state until an unrelated list_playlists refetch happens.
-    playlist.lastExportedAt = null;
-    playlist.lastExportedUsbRoot = null;
-    playlist.lastExportedTrackCount = null;
     progress(80, "Refreshing playlist...");
+    // The add cleared the playlist's last export.
+    await loadPlaylists(ctx);
     await refreshCurrentPlaylistTracks(ctx);
     pushEventLog({
       level: "info",
@@ -660,10 +658,8 @@ export async function addLibrarySelectionToCurrentPlaylist(ctx, { trackIds = [],
     });
   });
 
-  // Mirror the backend unconditionally clearing last_exported_* on add.
-  playlist.lastExportedAt = null;
-  playlist.lastExportedUsbRoot = null;
-  playlist.lastExportedTrackCount = null;
+  // The add cleared the playlist's last export.
+  await loadPlaylists(ctx);
   await refreshCurrentPlaylistTracks(ctx);
   pushEventLog({
     level: "info",
@@ -869,14 +865,13 @@ export function createPlaylistTracksController(ctx) {
     buildRow: ctx.buildTrackTableRow,
     renderEmpty: ctx.renderEmptyTrackTable,
     finishRows: ctx.finishTrackRows,
-    renderDurationSummary: (target, summary) =>
-      renderTrackListDurationSummary(target, summary, formatDurationMs),
+    renderDurationSummary: renderTrackListDurationSummary,
     getTableSortState: () => ctx.tableSortState,
     onResponse: (data) => {
       const p = getCurrentPlaylist(ctx);
       if (p) {
         p.totalDurationMs = Number(data.totalDurationMs) || 0;
-        p.durationKnownCount = Number(data.durationKnownCount) || 0;
+        p.durationUnknownCount = Number(data.durationUnknownCount) || 0;
         p.unanalyzedCount = Number(data.unanalyzedCount) || 0;
         // Whole-playlist count from the backend, not just the loaded page(s).
         p.trackCount = Number(data.total) || 0;

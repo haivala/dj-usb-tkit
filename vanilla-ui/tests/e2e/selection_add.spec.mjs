@@ -242,7 +242,7 @@ function installSelectionMock(page, mockOpts = {}) {
               };
             }
             if (command === "fetch_usb_playlist_tracks") {
-              return { ok: true, data: { items: usbTracks, total: usbTracks.length, totalDurationMs: 0, durationKnownCount: 0, warnings: [] } };
+              return { ok: true, data: { items: usbTracks, total: usbTracks.length, totalDurationMs: 0, durationUnknownCount: usbTracks.length, warnings: [] } };
             }
           }
           if (command === "fetch_usb_playlists" || command === "fetch_usb_histories") {
@@ -254,7 +254,7 @@ function installSelectionMock(page, mockOpts = {}) {
             const known = ids.filter((id) => id !== "t3").length;
             return {
               ok: true,
-              data: { totalDurationMs: known * 180_000, durationKnownCount: known, trackCount: ids.length },
+              data: { totalDurationMs: known * 180_000, durationUnknownCount: ids.length - known, trackCount: ids.length },
             };
           }
           if (command === "get_backend_log_buffer") return [];

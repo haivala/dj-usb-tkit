@@ -41,6 +41,9 @@
 
 - **New feature:** The selection bar shows the total time of the selected tracks next to their
   count, with a "+" when some of them have no length yet.
+- **Fix:** A playlist's "Last exported … to ‹drive›" line now goes away as soon as the playlist
+  changes. Before, it stayed after reordering the playlist's tracks, and adding tracks or renaming
+  the playlist left the drive's name in it.
 - **Improvement:** When the selection bar needs more room, the search field beside it narrows to
   make space before the bar moves onto a line of its own.
 

@@ -4,7 +4,6 @@ import { narrowTrackSelectionToLoaded } from "../shared/track_selection.mjs";
 import { cloneTemplate } from "../../ui_utils.mjs";
 import { STORAGE_KEY_USB_ROOT, STORAGE_KEY_EXPORT_ENGINE_LIBRARY } from "../../settings_keys.mjs";
 import {
-  formatDurationMs,
   renderTrackListDurationSummary,
   formatTrackListSummary,
   getHistoryDateValue,
@@ -1611,8 +1610,7 @@ function createUsbTracksController(ctx, { bodyId, selectionView, fetchCommand, s
     buildRow: ctx.buildTrackTableRow,
     renderEmpty: ctx.renderEmptyTrackTable,
     finishRows: ctx.finishTrackRows,
-    renderDurationSummary: (target, summary) =>
-      renderTrackListDurationSummary(target, summary, formatDurationMs),
+    renderDurationSummary: renderTrackListDurationSummary,
     getTableSortState: () => ctx.tableSortState,
     onPage: (_page, { first }) => {
       if (first) narrowTrackSelectionToLoaded(ctx, selectionView, ctl.items);

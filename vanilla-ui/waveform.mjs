@@ -78,10 +78,7 @@ export function getWaveformPeaksFromElement(element) {
     return [];
   }
 
-  const peaks = raw
-    .split(",")
-    .map((v) => Math.max(0, Math.min(100, Number(v) || 0)))
-    .filter((v) => Number.isFinite(v));
+  const peaks = raw.split(",").map(Number);
   waveformPeakCache.set(element, peaks);
   return peaks;
 }

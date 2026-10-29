@@ -72,7 +72,7 @@ function selectionList(ctx, view) {
 
 // "· 52:14" once the backend has summed the selection; "+" and a tooltip when
 // some ticked tracks have no length yet. Blank while asking, or when none of
-// them has a length. The request last sent rides on the element, so an
+// them has a length (a zero total). The request last sent rides on the element, so an
 // unchanged selection isn't asked for again and a late answer is dropped.
 function renderSelectionTime(ctx, view, bar, ids) {
   const target = bar.querySelector(".selection-time");
@@ -88,9 +88,8 @@ function renderSelectionTime(ctx, view, bar, ids) {
   ctx
     .command("get_selection_duration", request)
     .then((data) => {
-      const known = Number(data?.durationKnownCount) || 0;
-      if (target.dataset.request !== key || !known) return;
-      const unknown = Math.max(0, (Number(data?.trackCount) || 0) - known);
+      if (target.dataset.request !== key || !data?.totalDurationMs) return;
+      const unknown = Number(data.durationUnknownCount) || 0;
       target.textContent = `· ${formatDurationMs(data.totalDurationMs)}${unknown ? "+" : ""}`;
       if (unknown) target.dataset.tooltip = `${unknown} of the selected tracks have no length yet`;
     })

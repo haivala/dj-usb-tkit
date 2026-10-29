@@ -83,16 +83,26 @@ pub(crate) fn list_totals<T: ListTrack>(tracks: &[T]) -> (usize, u64) {
     (tracks.len(), size_bytes)
 }
 
-/// Summed length of `tracks` and how many had one: the "Total time" of a list.
-/// Tracks without a known length (`None` or 0) add nothing.
+/// Summed length of `tracks` and how many had none: the "Total time" of a
+/// list and its "(N without length)". A length of 0 counts as none.
 pub(crate) fn duration_totals<'a, T: ListTrack + 'a>(
     tracks: impl IntoIterator<Item = &'a T>,
 ) -> (u64, usize) {
-    tracks
-        .into_iter()
-        .filter_map(|track| track.duration_ms())
-        .filter(|&d| d > 0)
-        .fold((0, 0), |(total, known), d| (total + d, known + 1))
+    duration_totals_where(tracks, |_| true)
+}
+
+/// `duration_totals` for a list whose rule leaves some lengths out: a track
+/// `counts` rejects adds nothing and is one more without length.
+pub(crate) fn duration_totals_where<'a, T: ListTrack + 'a>(
+    tracks: impl IntoIterator<Item = &'a T>,
+    counts: impl Fn(&T) -> bool,
+) -> (u64, usize) {
+    tracks.into_iter().fold((0, 0), |(total, unknown), track| {
+        match track.duration_ms().filter(|&d| d > 0 && counts(track)) {
+            Some(d) => (total + d, unknown),
+            None => (total, unknown + 1),
+        }
+    })
 }
 
 /// The selection bar's time: the tracks of `tracks` whose id is in `ids`,
@@ -109,11 +119,11 @@ pub(crate) fn selection_duration<T: ListTrack>(
         .iter()
         .filter(|track| wanted.remove(track.id()))
         .collect();
-    let (total_duration_ms, duration_known_count) =
-        duration_totals(selected.iter().copied().filter(|track| counts(track)));
+    let (total_duration_ms, duration_unknown_count) =
+        duration_totals_where(selected.iter().copied(), counts);
     GetSelectionDurationData {
         total_duration_ms,
-        duration_known_count,
+        duration_unknown_count,
         track_count: selected.len(),
     }
 }
@@ -304,7 +314,7 @@ mod tests {
         let ids = ["1", "2", "gone"].map(String::from);
         let data = selection_duration(&tracks, &ids, |_| true);
         assert_eq!(data.total_duration_ms, 200_000);
-        assert_eq!(data.duration_known_count, 1);
+        assert_eq!(data.duration_unknown_count, 1);
         assert_eq!(data.track_count, 2);
         // `counts` leaves a track's length out without unticking it.
         let data = selection_duration(&tracks, &ids, |track| track.id != "1");

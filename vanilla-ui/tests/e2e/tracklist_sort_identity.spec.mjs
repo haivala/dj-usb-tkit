@@ -151,12 +151,12 @@ test("Playlist: Play and Remove after column sort act on the clicked row's track
           });
         }
         const totalDurationMs = items.reduce((sum, t) => sum + (t.durationMs > 0 ? t.durationMs : 0), 0);
-        const durationKnownCount = items.filter((t) => t.durationMs > 0).length;
+        const durationUnknownCount = items.filter((t) => !(t.durationMs > 0)).length;
         return {
           ok: true,
           data: {
             playlistId: request.playlistId, items, total: items.length,
-            nextCursor: null, hasMore: false, totalDurationMs, durationKnownCount,
+            nextCursor: null, hasMore: false, totalDurationMs, durationUnknownCount,
             unanalyzedCount: items.filter((t) => !t.analysisReady).length,
           },
         };
@@ -255,12 +255,12 @@ test("Playlist: header click shows and clears the sorted-by hint like other trac
           });
         }
         const totalDurationMs = items.reduce((sum, t) => sum + (t.durationMs > 0 ? t.durationMs : 0), 0);
-        const durationKnownCount = items.filter((t) => t.durationMs > 0).length;
+        const durationUnknownCount = items.filter((t) => !(t.durationMs > 0)).length;
         return {
           ok: true,
           data: {
             playlistId: request.playlistId, items, total: items.length,
-            nextCursor: null, hasMore: false, totalDurationMs, durationKnownCount,
+            nextCursor: null, hasMore: false, totalDurationMs, durationUnknownCount,
             unanalyzedCount: items.filter((t) => !t.analysisReady).length,
           },
         };

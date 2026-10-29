@@ -865,7 +865,7 @@ impl BackendService {
                 has_more: false,
                 source_root_analysis: Vec::new(),
                 total_duration_ms: 0,
-                duration_known_count: 0,
+                duration_unknown_count: 0,
                 list_track_count: 0,
                 list_size_bytes: 0,
             });
@@ -915,8 +915,8 @@ impl BackendService {
         // the natural file-path order from compute_all_library_tracks.
         sort.apply(&mut items);
 
-        let (total_duration_ms, duration_known_count) =
-            duration_totals(items.iter().filter(|track| library_length_known(track)));
+        let (total_duration_ms, duration_unknown_count) =
+            duration_totals_where(&items, library_length_known);
 
         let total = items.len();
         let start_idx = if let Some(offset) = req.offset {
@@ -947,7 +947,7 @@ impl BackendService {
             has_more,
             source_root_analysis,
             total_duration_ms,
-            duration_known_count,
+            duration_unknown_count,
             list_track_count,
             list_size_bytes,
         })

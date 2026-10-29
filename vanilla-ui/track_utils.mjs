@@ -36,22 +36,14 @@ export function formatBpm(value) {
 }
 
 // The single "Total time: … (N without length)" renderer for every track-list
-// footer (app playlist, library, USB playlist/history). The totals are always
-// backend-computed and passed straight through -- no client-side summing, and
-// no reaction to a client-side search filter. Callers give the unknown count
-// either directly as `unknownCount`, or as `trackCount` - `durationKnownCount`.
-export function renderTrackListDurationSummary(
-  target,
-  { totalDurationMs, unknownCount, durationKnownCount, trackCount } = {},
-  formatDurationMsFn = formatDurationMs
-) {
+// footer (app playlist, library, USB playlist/history). Both numbers are the
+// backend's (`totalDurationMs`, `durationUnknownCount`), passed straight
+// through -- no client-side summing or counting.
+export function renderTrackListDurationSummary(target, { totalDurationMs, durationUnknownCount } = {}) {
   if (!target) return;
-  const total = Math.max(0, Number(totalDurationMs) || 0);
-  const unknown = Number.isFinite(Number(unknownCount))
-    ? Math.max(0, Number(unknownCount))
-    : Math.max(0, (Number(trackCount) || 0) - Math.max(0, Number(durationKnownCount) || 0));
+  const unknown = Number(durationUnknownCount) || 0;
   const suffix = unknown > 0 ? ` (${unknown} without length)` : "";
-  target.textContent = `Total time: ${formatDurationMsFn(total)}${suffix}`;
+  target.textContent = `Total time: ${formatDurationMs(totalDurationMs)}${suffix}`;
 }
 
 // Binary units, like file managers and `df` show a USB stick's size.

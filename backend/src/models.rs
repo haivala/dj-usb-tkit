@@ -200,12 +200,12 @@ pub struct Playlist {
     pub updated_at: String,
     /// The library an imported playlist came from, as shown ("Mixxx",
     /// "rekordbox"); derived from `playlists.import_source`.
-    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[serde(default)]
     pub imported_from: Option<String>,
     /// The name the drive had when the playlist was exported to it, when it
     /// had one. Exports from before this was recorded have none (the mount
     /// path may since belong to another stick, so it isn't guessed).
-    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[serde(default)]
     pub last_exported_usb_name: Option<String>,
 }
 
@@ -398,7 +398,7 @@ pub struct BrowseSourceFilesData {
     #[serde(default)]
     pub total_duration_ms: u64,
     #[serde(default)]
-    pub duration_known_count: usize,
+    pub duration_unknown_count: usize,
     /// Whole list before the search filter -- see `track_list::list_totals`.
     #[serde(default)]
     pub list_track_count: usize,
@@ -701,7 +701,7 @@ pub struct GetPlaylistTracksData {
     #[serde(default)]
     pub total_duration_ms: u64,
     #[serde(default)]
-    pub duration_known_count: usize,
+    pub duration_unknown_count: usize,
     /// Tracks in the whole filtered playlist the backend flags as not yet
     /// analysis-ready (drives the "Analyze Missing Tracks (N)" button, which
     /// can't count them from a single loaded page).
@@ -765,13 +765,13 @@ pub enum GetSelectionDurationRequest {
 }
 
 /// Summed like the list's own "Total time": `total_duration_ms` over the
-/// `duration_known_count` selected tracks with a known length, out of
-/// `track_count` selected tracks found in the list.
+/// `track_count` selected tracks found in the list, `duration_unknown_count`
+/// of them without a known length.
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct GetSelectionDurationData {
     pub total_duration_ms: u64,
-    pub duration_known_count: usize,
+    pub duration_unknown_count: usize,
     pub track_count: usize,
 }
 
@@ -1319,10 +1319,9 @@ pub struct UsbPlaylist {
     /// sum durations itself, regardless of how much of the list it has
     /// rendered/hydrated.
     pub total_duration_ms: u64,
-    /// How many of `tracks` contributed to `total_duration_ms` (i.e. had a
-    /// known duration). `tracks.len() - duration_known_count` is the "N
-    /// without length" count.
-    pub duration_known_count: usize,
+    /// How many of `tracks` have no known duration: the "N without length"
+    /// count.
+    pub duration_unknown_count: usize,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -1450,8 +1449,8 @@ pub struct UsbHistory {
     pub tracks: Vec<UsbTrack>,
     /// See `UsbPlaylist::total_duration_ms`.
     pub total_duration_ms: u64,
-    /// See `UsbPlaylist::duration_known_count`.
-    pub duration_known_count: usize,
+    /// See `UsbPlaylist::duration_unknown_count`.
+    pub duration_unknown_count: usize,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -1645,7 +1644,7 @@ pub struct FetchUsbTracksData {
     pub has_more: bool,
     /// Sum over the whole filtered list, not just the page.
     pub total_duration_ms: u64,
-    pub duration_known_count: usize,
+    pub duration_unknown_count: usize,
     /// Whole playlist/history before the search filter -- see
     /// `track_list::list_totals`.
     pub list_track_count: usize,

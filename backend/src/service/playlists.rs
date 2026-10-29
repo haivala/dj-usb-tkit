@@ -354,7 +354,7 @@ impl BackendService {
 
         // Computed once server-side (here) over the whole filtered playlist, not
         // just the returned page -- see `GetPlaylistTracksData::total_duration_ms`.
-        let (total_duration_ms, duration_known_count) = duration_totals(&items);
+        let (total_duration_ms, duration_unknown_count) = duration_totals(&items);
         let unanalyzed_count = items.iter().filter(|track| !track.analysis_ready).count();
         let total = items.len();
 
@@ -394,7 +394,7 @@ impl BackendService {
             next_cursor,
             has_more,
             total_duration_ms,
-            duration_known_count,
+            duration_unknown_count,
             unanalyzed_count,
             list_track_count,
             list_size_bytes,

@@ -2,7 +2,7 @@ import { createTrackListController } from "../shared/track_list_controller.mjs";
 import { narrowTrackSelectionToLoaded } from "../shared/track_selection.mjs";
 import { renderEmptyState } from "../shell/actions.mjs";
 import { cssEscape, cloneTemplate } from "../../ui_utils.mjs";
-import { fillBpmCell, fillKeyCell, fillYearCell, coverElement, setCueButtonState } from "../../track_table.mjs";
+import { fillBpmCell, fillKeyCell, fillYearCell, coverElement, setCueButtonState, formatTrackDuration, trackHasWaveform } from "../../track_table.mjs";
 import { REANALYZE_TOOLTIP } from "../../track_utils.mjs";
 import {
   formatDurationMs,
@@ -48,6 +48,9 @@ export function normalizeUsbPlaylist(ctx, playlist) {
   return { ...playlist, tracks: playlist.tracks.map((track) => normalizeTrack(ctx, track)) };
 }
 
+// A re-fetched row is the backend's word on everything it carries; only what
+// is loaded lazily (waveform preview, colour data, artwork) is kept from the
+// row it replaces while the new one lacks it.
 export function mergeTrackPreservingBestFields(existing, normalized) {
   const merged = { ...existing, ...normalized };
   if ((!Array.isArray(normalized.waveformPreview) || normalized.waveformPreview.length === 0)
@@ -65,15 +68,6 @@ export function mergeTrackPreservingBestFields(existing, normalized) {
   if (!normalized.artworkPath && existing.artworkPath) merged.artworkPath = existing.artworkPath;
   if (normalized.artworkChecked || existing.artworkChecked) merged.artworkChecked = true;
   if (!normalized.waveformPeaksPath && existing.waveformPeaksPath) merged.waveformPeaksPath = existing.waveformPeaksPath;
-  if (!normalized.bpm && existing.bpm) merged.bpm = existing.bpm;
-  if (!normalized.key && existing.key) {
-    merged.key = existing.key;
-    merged.keyDisplay = existing.keyDisplay;
-    merged.keyColor = existing.keyColor;
-  }
-  // Backend-owned readiness only ever moves false -> true; a partial merge that
-  // lacks the flag must not drop a previously-analyzed row back to "needs analysis".
-  merged.analysisReady = !!(existing.analysisReady || normalized.analysisReady);
   // Once a row has been hydrated (backend flag cleared, or an inspect ran),
   // it stays hydrated across a re-fetch/merge.
   merged.needsHydration = existing.needsHydration === false
@@ -451,12 +445,11 @@ export function renderSourceChips(ctx) {
 export function applyLibraryDurationSummary(ctx, totalMs, unknownCount) {
   const { state, el } = ctx;
   state.libraryDurationTotalMs = Number(totalMs) || 0;
-  state.libraryDurationUnknownCount = Math.max(0, Number(unknownCount) || 0);
-  renderTrackListDurationSummary(
-    el?.libraryTotalDuration,
-    { totalDurationMs: state.libraryDurationTotalMs, unknownCount: state.libraryDurationUnknownCount },
-    formatDurationMs
-  );
+  state.libraryDurationUnknownCount = Number(unknownCount) || 0;
+  renderTrackListDurationSummary(el?.libraryTotalDuration, {
+    totalDurationMs: state.libraryDurationTotalMs,
+    durationUnknownCount: state.libraryDurationUnknownCount,
+  });
 }
 
 // The library track table is fetched/paginated/searched/sorted by the shared
@@ -518,7 +511,7 @@ export function createLibraryTracksController(ctx) {
       const includeMixxxDb = ctx.state.mixxxDbEnabled === true;
       ctx.state.libraryQuery = String(query || "").trim();
       if (!enabledRoots.length && !includeRekordboxDb && !includeMixxxDb) {
-        return { total: 0, items: [], totalDurationMs: 0, durationKnownCount: 0 };
+        return { total: 0, items: [], totalDurationMs: 0, durationUnknownCount: 0 };
       }
       return ctx.command("browse_source_files", {
         sourceRoots: enabledRoots,
@@ -553,11 +546,7 @@ export function createLibraryTracksController(ctx) {
     renderEmpty: ctx.renderEmptyTrackTable,
     finishRows: ctx.finishTrackRows,
     renderDurationSummary: (_target, summary) =>
-      applyLibraryDurationSummary(
-        ctx,
-        summary.totalDurationMs,
-        Number(summary.trackCount || 0) - Number(summary.durationKnownCount || 0),
-      ),
+      applyLibraryDurationSummary(ctx, summary.totalDurationMs, summary.durationUnknownCount),
     getTableSortState: () => ctx.tableSortState,
     onError: (err) => {
       console.error(err);
@@ -1025,83 +1014,55 @@ export function promoteTrackIdentity(ctx, oldId, newId) {
 
 // --- analysis_patch.mjs ---
 
-export function parseProgressWaveformPreview(value) {
-  if (!Array.isArray(value)) return null;
-  return value
-    .map((v) => Math.max(0, Math.min(100, Number(v) || 0)))
-    .filter((v) => Number.isFinite(v));
-}
-
+// `payload` is backend-typed (a job event, or a cue save's result): a field
+// that is absent or null leaves the row's value alone.
 export function patchTrackAnalysisFields(ctx, track, payload) {
-  if (!track || !payload || typeof payload !== "object") return false;
+  if (!track || !payload) return false;
   let changed = false;
-  const setIfChanged = (key, next) => {
-    if (next === undefined) return;
+  const put = (key, next) => {
     if (track[key] === next) return;
     track[key] = next;
     changed = true;
   };
+  const setIfChanged = (key, next) => {
+    if (next != null) put(key, next);
+  };
   // A reanalysis replaces the BPM / key: clear them as the track starts so the
   // row visibly refills with the fresh values (the batch's final hydrate
   // restores the stored ones if the analysis fails).
-  if (payload.trackStarted === true && payload.reanalysis === true) {
-    setIfChanged("bpm", null);
-    setIfChanged("bpmAnalyzer", null);
-    setIfChanged("key", null);
-    setIfChanged("keyDisplay", "");
-    setIfChanged("keyColor", null);
+  if (payload.trackStarted && payload.reanalysis) {
+    put("bpm", null);
+    put("bpmAnalyzer", null);
+    put("key", null);
+    put("keyDisplay", "");
+    put("keyColor", null);
   }
-  const bpm = Number(payload.bpm);
-  if (payload.bpm !== undefined && payload.bpm !== null && Number.isFinite(bpm) && bpm > 0) {
-    // Store the raw number, same as normalizeTrack -- display formatting is
-    // formatBpm's job at render time, not state's.
-    setIfChanged("bpm", bpm);
+  setIfChanged("bpm", payload.bpm);
+  setIfChanged("bpmAnalyzer", payload.bpmAnalyzer);
+  if (payload.key) {
+    put("key", payload.key);
+    put("keyDisplay", payload.keyDisplay ?? "");
+    put("keyColor", payload.keyColor ?? null);
   }
-  if (typeof payload.bpmAnalyzer === "string" && payload.bpmAnalyzer.trim()) {
-    setIfChanged("bpmAnalyzer", payload.bpmAnalyzer.trim());
-  }
-  if (typeof payload.key === "string" && payload.key.trim()) {
-    setIfChanged("key", payload.key.trim());
-    setIfChanged("keyDisplay", typeof payload.keyDisplay === "string" ? payload.keyDisplay : "");
-    setIfChanged("keyColor", Number.isInteger(payload.keyColor) ? payload.keyColor : null);
-  }
-  if (typeof payload.filePath === "string" && payload.filePath.trim()) {
-    setIfChanged("filePath", payload.filePath.trim());
-  }
-  if (typeof payload.artworkPath === "string" && payload.artworkPath.trim()) {
-    const artworkPath = payload.artworkPath.trim();
-    setIfChanged("artworkPath", artworkPath);
-    setIfChanged("artworkUrl", appendUrlRevision(ctx.toPlayableUrl(artworkPath) || "", payload.updatedAt || Date.now()));
+  setIfChanged("filePath", payload.filePath);
+  if (payload.artworkPath) {
+    setIfChanged("artworkPath", payload.artworkPath);
+    setIfChanged("artworkUrl", appendUrlRevision(ctx.toPlayableUrl(payload.artworkPath) || "", payload.updatedAt || Date.now()));
     setIfChanged("artworkChecked", true);
-  } else if (payload.artworkChecked === true) {
+  } else if (payload.artworkChecked) {
     setIfChanged("artworkChecked", true);
   }
-  if (typeof payload.waveformPeaksPath === "string" && payload.waveformPeaksPath.trim()) {
-    setIfChanged("waveformPeaksPath", payload.waveformPeaksPath.trim());
-  }
-  const durationMs = Number(payload.durationMs);
-  if (payload.durationMs !== undefined && payload.durationMs !== null
-      && Number.isFinite(durationMs) && durationMs > 0) {
-    setIfChanged("durationMs", Math.round(durationMs));
-  }
-  const waveformPreview = parseProgressWaveformPreview(payload.waveformPreview);
-  if (waveformPreview && waveformPreview.length) {
-    const samePreview = Array.isArray(track.waveformPreview)
-      && track.waveformPreview.length === waveformPreview.length
-      && track.waveformPreview.every((value, index) => Number(value) === Number(waveformPreview[index]));
-    if (!samePreview) {
-      track.waveformPreview = waveformPreview;
-      changed = true;
-    }
+  setIfChanged("waveformPeaksPath", payload.waveformPeaksPath);
+  setIfChanged("durationMs", payload.durationMs);
+  const preview = payload.waveformPreview;
+  if (preview?.length && String(track.waveformPreview) !== String(preview)) {
+    track.waveformPreview = preview;
+    changed = true;
   }
   // Backend-owned readiness; only ever flips false -> true on a progress event.
-  if (payload.analysisReady === true) {
-    setIfChanged("analysisReady", true);
-  }
+  if (payload.analysisReady) put("analysisReady", true);
   // The release year after a cue-editor save; null clears it.
-  if (payload.year !== undefined) {
-    setIfChanged("year", payload.year || null);
-  }
+  if (payload.year !== undefined) put("year", payload.year || null);
   return changed;
 }
 
@@ -1113,7 +1074,7 @@ export function patchLibraryRowCells(ctx, row, track) {
 
   const durationTd = row.querySelector(".td-length");
   if (durationTd) {
-    durationTd.textContent = formatDurationMsInternal(track.durationMs);
+    durationTd.textContent = formatTrackDuration(track);
   }
 
   const yearTd = row.querySelector(".td-year");
@@ -1147,19 +1108,14 @@ export function patchLibraryRowCells(ctx, row, track) {
   if (waveformTd) {
     const waveformDiv = waveformTd.querySelector(".waveform");
     if (waveformDiv) {
-      const colorData = Array.isArray(track.waveformColorData) && track.waveformColorData.length >= 6
-        ? track.waveformColorData : null;
-      const peaks = Array.isArray(track.waveformPreview)
-        ? track.waveformPreview.map((v) => Math.max(0, Math.min(100, Number(v) || 0))).filter((v) => Number.isFinite(v))
-        : [];
-      const hasRenderableWaveform = colorData !== null || (peaks.length > 0 && peaks.some((v) => v > 0));
+      const hasRenderableWaveform = trackHasWaveform(track);
       if (hasRenderableWaveform) {
         invalidateWaveformCache(waveformDiv);
-        if (colorData) {
-          setWaveformColorData(waveformDiv, colorData);
+        if (track.waveformColorData?.length >= 6) {
+          setWaveformColorData(waveformDiv, track.waveformColorData);
           delete waveformDiv.dataset.peaks;
         } else {
-          waveformDiv.dataset.peaks = peaks.join(",");
+          waveformDiv.dataset.peaks = track.waveformPreview.join(",");
         }
         if (!waveformDiv.classList.contains("waveform-canvas")) {
           waveformDiv.classList.add("waveform-canvas");
@@ -1192,11 +1148,6 @@ export function patchLibraryRowCells(ctx, row, track) {
   }
 
   return true;
-}
-
-function formatDurationMsInternal(value) {
-  const rawMs = Number(value);
-  return Number.isFinite(rawMs) && rawMs > 0 ? formatDurationMs(rawMs) : "-";
 }
 
 // --- analysis_settings.mjs ---

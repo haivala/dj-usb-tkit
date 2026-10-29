@@ -31,7 +31,7 @@ test.beforeEach(async ({ page }) => {
         nextCursor: nextOff < rows.length ? String(nextOff) : null,
         hasMore: nextOff < rows.length,
         totalDurationMs: rows.reduce((s, t) => s + (t.durationMs > 0 ? t.durationMs : 0), 0),
-        durationKnownCount: rows.filter((t) => t.durationMs > 0).length,
+        durationUnknownCount: rows.filter((t) => !(t.durationMs > 0)).length,
         unanalyzedCount: rows.filter((t) => !t.analysisReady).length,
         // The heading's totals cover the whole playlist, ignoring the search.
         listTrackCount: (all || []).length,

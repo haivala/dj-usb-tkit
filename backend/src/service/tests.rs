@@ -1411,7 +1411,7 @@ fn get_playlist_tracks_computes_total_duration_server_side() {
         })
         .expect("get playlist tracks");
     assert_eq!(tracks.total_duration_ms, 300_000);
-    assert_eq!(tracks.duration_known_count, 2);
+    assert_eq!(tracks.duration_unknown_count, 1);
 
     let by_id = |id: &str| {
         tracks
@@ -1459,7 +1459,7 @@ fn get_selection_duration_sums_only_the_ticked_playlist_tracks() {
         })
         .expect("selection duration");
     assert_eq!(data.total_duration_ms, 200_000);
-    assert_eq!(data.duration_known_count, 1);
+    assert_eq!(data.duration_unknown_count, 1);
     assert_eq!(data.track_count, 2);
 }
 
@@ -2041,7 +2041,7 @@ fn browse_source_files_computes_duration_total_over_countable_tracks_only() {
     )
     .expect("insert t2");
     // No analysis at all: not countable, excluded from both the sum and
-    // the known count, but still present in `total`.
+    // counted as without length, and still present in `total`.
     conn.execute(
         "INSERT INTO tracks (id, title, artist, file_path, match_fingerprint, rekordbox_db_source, created_at, updated_at)
          VALUES ('t3', 'Unanalyzed', 'Artist', '/master/c.mp3', ?1, 1, datetime('now'), datetime('now'))",
@@ -2062,7 +2062,7 @@ fn browse_source_files_computes_duration_total_over_countable_tracks_only() {
         })
         .expect("browse source files");
     assert_eq!(result.total, 3);
-    assert_eq!(result.duration_known_count, 2);
+    assert_eq!(result.duration_unknown_count, 1);
     assert_eq!(result.total_duration_ms, 300_000);
 }
 

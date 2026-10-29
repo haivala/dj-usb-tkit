@@ -4,20 +4,23 @@ import { addTracksToCurrentPlaylist } from "../components/playlist/actions.mjs";
 import { makeTestCtx } from "./test_helpers.mjs";
 
 // An app ctx with `playlist` open. `onAdd` answers add_track_candidates_to_playlist;
-// the playlist re-fetch after a resolved add is counted in `refreshes`.
-function addCtx({ playlist = { id: "pl-1", name: "Main" }, onAdd, usbRoot = null, usbRootValid = false } = {}) {
+// the playlist re-fetch after a resolved add is counted in `refreshes`, and
+// `list_playlists` answers with `rows` (default: the playlist as given).
+function addCtx({ playlist = { id: "pl-1", name: "Main" }, rows = null, onAdd, usbRoot = null, usbRootValid = false } = {}) {
   const out = { status: "", refreshes: 0 };
   out.ctx = makeTestCtx({
     withProgress: async (_label, run) => run(() => {}),
     pushEventLog: () => {},
     emitStatus: (text) => { out.status = text; },
     command: async (name, payload) => {
+      if (name === "list_playlists") return { items: rows ?? (playlist ? [playlist] : []) };
       if (name === "get_playlist_tracks") {
         out.refreshes += 1;
         return { items: [], total: 0 };
       }
       // Asked for in the background once a USB is connected and the list is shown.
       if (name === "get_playlist_export_space") return { exportSpace: null };
+      if (name === "refresh_playlist_export_status") return { playlistUsbExportStatus: [] };
       return onAdd(name, payload);
     }
   });
@@ -162,22 +165,34 @@ test("addTracksToCurrentPlaylist reports unresolved backend candidates without r
   assert.equal(harness.status, "No imported track IDs found to add");
 });
 
-test("addTracksToCurrentPlaylist clears exported-to-USB status after a resolved add", async () => {
-  const playlist = {
+test("addTracksToCurrentPlaylist re-reads the playlist row after a resolved add", async () => {
+  const exported = {
     id: "pl-1",
     name: "Main",
     lastExportedAt: "2026-01-01T00:00:00Z",
     lastExportedUsbRoot: "/mnt/usb1",
-    lastExportedTrackCount: 5
+    lastExportedTrackCount: 5,
+    lastExportedUsbName: "STICK"
+  };
+  // The backend cleared the last export on the add.
+  const cleared = {
+    id: "pl-1",
+    name: "Main",
+    lastExportedAt: null,
+    lastExportedUsbRoot: null,
+    lastExportedTrackCount: null,
+    lastExportedUsbName: null
   };
 
   const harness = addCtx({
-    playlist: playlist,
+    playlist: exported,
+    rows: [cleared],
     onAdd: async () => ({ playlistId: "pl-1", requested: 1, resolved: 1, unresolved: 0, added: 1, skipped: 0, resolutions: [] })
   });
   await addTracksToCurrentPlaylist(harness.ctx, [{ id: "1" }]);
 
-  assert.equal(playlist.lastExportedAt, null);
-  assert.equal(playlist.lastExportedUsbRoot, null);
-  assert.equal(playlist.lastExportedTrackCount, null);
+  const row = harness.ctx.state.playlists.find((p) => p.id === "pl-1");
+  assert.equal(row.lastExportedAt, null);
+  assert.equal(row.lastExportedUsbName, null);
+  assert.equal(harness.refreshes, 1);
 });
