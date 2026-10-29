@@ -730,8 +730,9 @@ pub struct AddTracksToPlaylistData {
 }
 
 /// The ticked tracks of one track-list view, for the selection bar's total
-/// time. Each variant names its list the way that view's own fetch does; the
-/// ids are the rows' `id`s. Ids no longer in the list add nothing.
+/// time. The library names its list by its filter, the others by the shown
+/// list's `id`; `track_ids` are the rows' `id`s. Ids no longer in the list add
+/// nothing.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(tag = "view", rename_all = "camelCase")]
 pub enum GetSelectionDurationRequest {
@@ -746,10 +747,7 @@ pub enum GetSelectionDurationRequest {
         track_ids: Vec<String>,
     },
     #[serde(rename_all = "camelCase")]
-    Playlist {
-        playlist_id: String,
-        track_ids: Vec<String>,
-    },
+    Playlist { id: String, track_ids: Vec<String> },
     #[serde(rename_all = "camelCase")]
     UsbPlaylist {
         #[serde(default)]

@@ -559,6 +559,9 @@ test("the playlist view selects tracks and removes them from the playlist only",
   expect(selectAll.request.limit).toBe(0);
   // "t3" has no length: the time is a lower bound.
   await expect(bar.locator(".selection-time")).toHaveText("· 6:00+");
+  const playlistTime = (await page.evaluate(() => window.__calls))
+    .filter((c) => c.command === "get_selection_duration").pop();
+  expect(playlistTime.request).toMatchObject({ view: "playlist", id: expect.any(String) });
   await page.locator("#playlistTracksBody .track-grid-row").nth(1).locator(".td-select input").uncheck();
   await expect(bar.locator(".selection-count")).toHaveText("2 selected");
   await expect(bar.locator(".selection-time")).toHaveText("· 3:00+");

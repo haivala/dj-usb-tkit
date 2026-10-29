@@ -34,7 +34,7 @@ use super::export_helpers::{
     remove_playlist_and_tracks_from_pdb, remove_playlist_from_edb,
 };
 use super::key_notation::KeyNotation;
-use super::track_list::{duration_totals, selected_tracks};
+use super::track_list::{duration_totals, selection_duration};
 use super::track_matching::{ContentFingerprint, content_fingerprint_key};
 use super::usb_display_files::{
     DisplayReadCounts, LibraryDisplayFiles, UsbDisplaySource, library_files_off_usb,
@@ -2732,16 +2732,6 @@ impl BackendService {
         track_ids: &[String],
     ) -> BackendResult<GetSelectionDurationData> {
         let usb_root = resolve_usb_root(usb_root)?;
-        let totals = |tracks: &[UsbTrack]| {
-            let selected: Vec<&UsbTrack> = selected_tracks(tracks, track_ids).collect();
-            let (total_duration_ms, duration_known_count) =
-                duration_totals(selected.iter().copied());
-            GetSelectionDurationData {
-                total_duration_ms,
-                duration_known_count,
-                track_count: selected.len(),
-            }
-        };
         if history {
             let all = self.usb_histories_resolved(&usb_root)?;
             let history = all
@@ -2749,7 +2739,7 @@ impl BackendService {
                 .iter()
                 .find(|history| history.id == id)
                 .ok_or_else(|| BackendError::NotFound(format!("USB history not found: {id}")))?;
-            Ok(totals(&history.tracks))
+            Ok(selection_duration(&history.tracks, track_ids, |_| true))
         } else {
             let resolved = self.usb_playlists_resolved(&usb_root)?;
             let playlist = resolved
@@ -2757,7 +2747,7 @@ impl BackendService {
                 .iter()
                 .find(|playlist| playlist.id == id)
                 .ok_or_else(|| BackendError::NotFound(format!("USB playlist not found: {id}")))?;
-            Ok(totals(&playlist.tracks))
+            Ok(selection_duration(&playlist.tracks, track_ids, |_| true))
         }
     }
 }
@@ -2967,7 +2957,6 @@ mod tests {
     };
     use crate::models::{UsbHistory, UsbTrack};
     use crate::pdb_reader::{PdbHistoryEntryRow, PdbHistoryPlaylistRow, PdbTrackRow};
-    use crate::service::track_list::duration_totals;
     use std::collections::HashMap;
 
     #[test]
@@ -3134,33 +3123,6 @@ mod tests {
                 .map(|d| d.format("%Y-%m-%d").to_string()),
             Some("2024-10-15".to_string())
         );
-    }
-
-    #[test]
-    fn duration_totals_counts_only_known_positive_durations() {
-        let tracks = vec![
-            UsbTrack {
-                duration_ms: Some(200_000),
-                ..make_track("1", "/a.mp3")
-            },
-            UsbTrack {
-                duration_ms: Some(100_000),
-                ..make_track("2", "/b.mp3")
-            },
-            UsbTrack {
-                duration_ms: Some(0),
-                ..make_track("3", "/c.mp3")
-            },
-            UsbTrack {
-                duration_ms: None,
-                ..make_track("4", "/d.mp3")
-            },
-        ];
-
-        let (total_ms, known_count) = duration_totals(&tracks);
-
-        assert_eq!(total_ms, 300_000);
-        assert_eq!(known_count, 2);
     }
 
     #[test]

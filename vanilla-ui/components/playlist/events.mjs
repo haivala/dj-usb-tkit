@@ -148,10 +148,6 @@ export function bindPlaylistEvents(ctx) {
       });
       return data?.items || [];
     },
-    durationRequest: () => {
-      const playlist = getCurrentPlaylist();
-      return playlist ? { view: "playlist", playlistId: playlist.id } : null;
-    },
     actions: {
       "add-to": (ids) => addSelectionToPlaylists(ctx, "playlist", ids, []),
       remove: (ids) => removeFromCurrentPlaylist(ids),

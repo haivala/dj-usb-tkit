@@ -15,18 +15,6 @@
 import { catchErr } from "./track_actions.mjs";
 import { formatDurationMs } from "../../track_utils.mjs";
 
-// Per app context and view: the view's `durationRequest` and the last request
-// sent, so an unchanged selection isn't asked for again and a late answer for
-// an older selection is dropped.
-const selectionTimes = new WeakMap();
-
-function selectionTimeOf(ctx, view) {
-  if (!selectionTimes.has(ctx)) selectionTimes.set(ctx, {});
-  const views = selectionTimes.get(ctx);
-  views[view] ||= { request: null, sent: "" };
-  return views[view];
-}
-
 export function trackSelection(ctx, view) {
   return ctx.state.trackSelections[view];
 }
@@ -68,26 +56,40 @@ export function renderSelectionBar(ctx, view) {
   }
 }
 
+// The list `get_selection_duration` sums in: the library's filter, else the
+// shown playlist or history (`scopeId`); null while no list is shown.
+function selectionList(ctx, view) {
+  if (view === "library") {
+    return {
+      sourceRoots: ctx.enabledLibrarySourceRoots(),
+      includeRekordboxDb: ctx.state.rekordboxDbEnabled === true,
+      includeMixxxDb: ctx.state.mixxxDbEnabled === true,
+    };
+  }
+  const id = barCtl(ctx, view)?.scopeId;
+  return id == null ? null : { id, usbRoot: ctx.state.usbRoot || null };
+}
+
 // "· 52:14" once the backend has summed the selection; "+" and a tooltip when
 // some ticked tracks have no length yet. Blank while asking, or when none of
-// them has a length.
+// them has a length. The request last sent rides on the element, so an
+// unchanged selection isn't asked for again and a late answer is dropped.
 function renderSelectionTime(ctx, view, bar, ids) {
   const target = bar.querySelector(".selection-time");
-  const time = selectionTimeOf(ctx, view);
-  const args = ids.size && time.request ? time.request() : null;
-  const key = args ? JSON.stringify({ ...args, trackIds: [...ids] }) : "";
-  if (key === time.sent) return;
-  time.sent = key;
   if (!target) return;
+  const list = ids.size ? selectionList(ctx, view) : null;
+  const request = list && { view, ...list, trackIds: [...ids] };
+  const key = request ? JSON.stringify(request) : "";
+  if (key === (target.dataset.request || "")) return;
+  target.dataset.request = key;
   target.textContent = "";
   delete target.dataset.tooltip;
-  if (!args) return;
+  if (!request) return;
   ctx
-    .command("get_selection_duration", { ...args, trackIds: [...ids] })
+    .command("get_selection_duration", request)
     .then((data) => {
-      if (time.sent !== key) return;
       const known = Number(data?.durationKnownCount) || 0;
-      if (!known) return;
+      if (target.dataset.request !== key || !known) return;
       const unknown = Math.max(0, (Number(data?.trackCount) || 0) - known);
       target.textContent = `· ${formatDurationMs(data.totalDurationMs)}${unknown ? "+" : ""}`;
       if (unknown) target.dataset.tooltip = `${unknown} of the selected tracks have no length yet`;
@@ -140,12 +142,8 @@ export function narrowTrackSelectionToLoaded(ctx, view, loaded) {
 //               under its current search, not just the loaded pages
 //   actions:    { add, "add-to", remove, reanalyze, edit }
 //               -- async (ids, rows) => void
-//   durationRequest: () => the `get_selection_duration` request naming this
-//               view's list (its `view` and list fields, not the ids), or
-//               null while there is no list
-export function bindTrackSelection(ctx, { view, body, ctl, selectAll, actions, durationRequest }) {
+export function bindTrackSelection(ctx, { view, body, ctl, selectAll, actions }) {
   const { emitStatus } = ctx;
-  selectionTimeOf(ctx, view).request = durationRequest || null;
 
   body?.addEventListener("change", (event) => {
     const box = event.target.closest?.(".td-select input[type='checkbox']");

@@ -1454,7 +1454,7 @@ fn get_selection_duration_sums_only_the_ticked_playlist_tracks() {
     // t3 unticked; "gone" is no longer in the playlist and adds nothing.
     let data = service
         .get_selection_duration(GetSelectionDurationRequest::Playlist {
-            playlist_id: playlist.playlist_id,
+            id: playlist.playlist_id,
             track_ids: vec!["t1".to_string(), "t2".to_string(), "gone".to_string()],
         })
         .expect("selection duration");

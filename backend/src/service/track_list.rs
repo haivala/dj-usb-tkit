@@ -6,8 +6,9 @@
 //! column key and direction.
 
 use std::cmp::Ordering;
+use std::collections::HashSet;
 
-use crate::models::{Track, UsbTrack};
+use crate::models::{GetSelectionDurationData, Track, UsbTrack};
 
 use super::key_notation;
 
@@ -94,14 +95,27 @@ pub(crate) fn duration_totals<'a, T: ListTrack + 'a>(
         .fold((0, 0), |(total, known), d| (total + d, known + 1))
 }
 
-/// The tracks of `tracks` whose id is in `ids`, each id once (a USB history
-/// can list a track more than once; the selection holds its id once).
-pub(crate) fn selected_tracks<'a, T: ListTrack>(
-    tracks: &'a [T],
+/// The selection bar's time: the tracks of `tracks` whose id is in `ids`,
+/// each id once (a USB history can list a track more than once; the
+/// selection holds its id once), summed over those `counts` accepts -- the
+/// rule of that list's own "Total time".
+pub(crate) fn selection_duration<T: ListTrack>(
+    tracks: &[T],
     ids: &[String],
-) -> impl Iterator<Item = &'a T> {
-    let mut wanted: std::collections::HashSet<String> = ids.iter().cloned().collect();
-    tracks.iter().filter(move |track| wanted.remove(track.id()))
+    counts: impl Fn(&T) -> bool,
+) -> GetSelectionDurationData {
+    let mut wanted: HashSet<&str> = ids.iter().map(String::as_str).collect();
+    let selected: Vec<&T> = tracks
+        .iter()
+        .filter(|track| wanted.remove(track.id()))
+        .collect();
+    let (total_duration_ms, duration_known_count) =
+        duration_totals(selected.iter().copied().filter(|track| counts(track)));
+    GetSelectionDurationData {
+        total_duration_ms,
+        duration_known_count,
+        track_count: selected.len(),
+    }
 }
 
 /// A search over title, artist, album, genre and year. Each word of the text
@@ -257,6 +271,44 @@ mod tests {
 
     fn titles(items: &[UsbTrack]) -> Vec<&str> {
         items.iter().map(|t| t.title.as_str()).collect()
+    }
+
+    fn timed(id: &str, duration_ms: Option<u64>) -> UsbTrack {
+        UsbTrack {
+            id: id.to_string(),
+            duration_ms,
+            ..UsbTrack::default()
+        }
+    }
+
+    #[test]
+    fn duration_totals_counts_only_known_positive_durations() {
+        let tracks = [
+            timed("1", Some(200_000)),
+            timed("2", Some(100_000)),
+            timed("3", Some(0)),
+            timed("4", None),
+        ];
+        assert_eq!(duration_totals(&tracks), (300_000, 2));
+    }
+
+    #[test]
+    fn selection_duration_takes_each_ticked_id_once() {
+        // "1" twice, as a history can list it; "gone" isn't in the list.
+        let tracks = [
+            timed("1", Some(200_000)),
+            timed("2", None),
+            timed("1", Some(200_000)),
+            timed("3", Some(100_000)),
+        ];
+        let ids = ["1", "2", "gone"].map(String::from);
+        let data = selection_duration(&tracks, &ids, |_| true);
+        assert_eq!(data.total_duration_ms, 200_000);
+        assert_eq!(data.duration_known_count, 1);
+        assert_eq!(data.track_count, 2);
+        // `counts` leaves a track's length out without unticking it.
+        let data = selection_duration(&tracks, &ids, |track| track.id != "1");
+        assert_eq!((data.total_duration_ms, data.track_count), (0, 2));
     }
 
     #[test]

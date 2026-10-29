@@ -516,20 +516,6 @@ impl BackendService {
         &self,
         req: GetSelectionDurationRequest,
     ) -> BackendResult<GetSelectionDurationData> {
-        // Library rows count by the library's own rule (`library_length_known`).
-        let totals = |selected: Vec<&Track>, library: bool| {
-            let (total_duration_ms, duration_known_count) = duration_totals(
-                selected
-                    .iter()
-                    .copied()
-                    .filter(|track| !library || library_length_known(track)),
-            );
-            GetSelectionDurationData {
-                total_duration_ms,
-                duration_known_count,
-                track_count: selected.len(),
-            }
-        };
         match req {
             GetSelectionDurationRequest::Library {
                 source_roots,
@@ -543,16 +529,13 @@ impl BackendService {
                     &source_roots,
                     ExternalLibraries::from_flags(include_rekordbox_db, include_mixxx_db),
                 )?;
-                Ok(totals(selected_tracks(&items, &track_ids).collect(), true))
+                Ok(selection_duration(&items, &track_ids, library_length_known))
             }
-            GetSelectionDurationRequest::Playlist {
-                playlist_id,
-                track_ids,
-            } => {
-                ensure_playlist_exists(&self.db, &playlist_id)?;
+            GetSelectionDurationRequest::Playlist { id, track_ids } => {
+                ensure_playlist_exists(&self.db, &id)?;
                 let conn = self.db.connect()?;
-                let items = self.load_playlist_tracks_ordered(&conn, &playlist_id)?;
-                Ok(totals(selected_tracks(&items, &track_ids).collect(), false))
+                let items = self.load_playlist_tracks_ordered(&conn, &id)?;
+                Ok(selection_duration(&items, &track_ids, |_| true))
             }
             GetSelectionDurationRequest::UsbPlaylist {
                 usb_root,
