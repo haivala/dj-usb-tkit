@@ -1234,6 +1234,28 @@ main {
   overflow: hidden;
 }
 
+/* Chips filling their row in equal columns: as many as fit while each still
+   shows 36 characters of its path (the last two folders of a typical path,
+   after "…/"), down to one per row on a narrow window. The chips' monospace
+   font is set here so `ch` is one of their characters; 60px is the chip's
+   checkbox, ×, gaps, padding and border. */
+.source-chips-grid {
+  display: grid;
+  font-family: 'JetBrains Mono', monospace;
+  font-size: 12px;
+  grid-template-columns: repeat(auto-fill, minmax(min(100%, calc(36ch + 60px)), 1fr));
+}
+
+.source-chips-grid > .source-chip {
+  max-width: none;
+  min-width: 0;
+}
+
+/* The path takes the chip's spare width, so × sits at its right end. */
+.source-chips-grid .source-chip-path {
+  flex: 1;
+}
+
 .source-chip-analyzed {
   border-color: color-mix(in srgb, var(--success) 55%, var(--line));
   background: color-mix(in srgb, var(--success) 16%, var(--bg-raised));
