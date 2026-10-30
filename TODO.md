@@ -38,3 +38,18 @@ stubs would set the boot global as well as answer commands. Worth it at most
 for the theme (no wrong-colour first paint); app data stays behind commands.
 The Sources bar starting folded and opening once its chips are drawn doesn't
 depend on either.
+
+## Hardware: does the CDJ-3000X use eDB play history?
+
+The eDB has its own play history (`history`, `history_content`), but no player
+tested so far has been seen using it. Test on a CDJ-3000X: play a few tracks from an exported
+USB, then check whether `history`/`history_content` in `exportLibrary.db`
+gained rows.
+
+If it does, the mirror export's stale-file prune must protect tracks in eDB
+history too. Today `filter_prunable_stale_paths_for_playlist`
+(`backend/src/service/export_helpers/export_paths.rs`) keeps the files of
+tracks in PDB history but reads only `playlist_content` from the eDB, so a
+track only in eDB history and in no playlist could lose its audio, analysis
+and artwork files. "Remove Missing Audio References" already counts both
+histories.
