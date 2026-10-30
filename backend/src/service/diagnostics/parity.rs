@@ -1113,8 +1113,8 @@ pub(crate) fn build_usb_parity_comparison(
             DiagStatus::Fail
         },
         detail: format!(
-            "{} playlist(s) have mismatched or unresolved playlist ids between PDB and eDB",
-            playlist_id_mismatches
+            "{} with mismatched or unresolved playlist ids between PDB and eDB",
+            counted(playlist_id_mismatches, "playlist", "playlists")
         ),
         link: None,
     });
@@ -1162,8 +1162,12 @@ pub(crate) fn build_usb_parity_comparison(
             DiagStatus::Fail
         },
         detail: format!(
-            "{} duplicate PDB playlist entry/entries detected",
-            total_duplicate_entries
+            "{} detected",
+            counted(
+                total_duplicate_entries,
+                "duplicate PDB playlist entry",
+                "duplicate PDB playlist entries"
+            )
         ),
         link: None,
     });
@@ -1175,8 +1179,12 @@ pub(crate) fn build_usb_parity_comparison(
             DiagStatus::Warn
         },
         detail: format!(
-            "{} playlist-linked PDB track(s) are missing required player metadata",
-            total_pdb_missing_core_metadata
+            "{} missing required player metadata",
+            counted(
+                total_pdb_missing_core_metadata,
+                "playlist-linked PDB track",
+                "playlist-linked PDB tracks"
+            )
         ),
         link: None,
     });
@@ -1188,8 +1196,12 @@ pub(crate) fn build_usb_parity_comparison(
             DiagStatus::Fail
         },
         detail: format!(
-            "{} playlist-linked track(s) have media or analysis path mismatches",
-            total_path_mismatches
+            "{} with media or analysis path mismatches",
+            counted(
+                total_path_mismatches,
+                "playlist-linked track",
+                "playlist-linked tracks"
+            )
         ),
         link: None,
     });
@@ -1201,8 +1213,12 @@ pub(crate) fn build_usb_parity_comparison(
             DiagStatus::Warn
         },
         detail: format!(
-            "{} playlist-linked track(s) have artwork in one DB but not the other",
-            total_artwork_mismatches
+            "{} with artwork in one DB but not the other",
+            counted(
+                total_artwork_mismatches,
+                "playlist-linked track",
+                "playlist-linked tracks"
+            )
         ),
         link: None,
     });
@@ -1214,8 +1230,12 @@ pub(crate) fn build_usb_parity_comparison(
             DiagStatus::Fail
         },
         detail: format!(
-            "{} playlist-linked track(s) have unresolved required PDB dictionary ids",
-            total_dictionary_id_issues
+            "{} with unresolved required PDB dictionary ids",
+            counted(
+                total_dictionary_id_issues,
+                "playlist-linked track",
+                "playlist-linked tracks"
+            )
         ),
         link: None,
     });
@@ -1227,8 +1247,12 @@ pub(crate) fn build_usb_parity_comparison(
             DiagStatus::Warn
         },
         detail: format!(
-            "{} playlist-linked eDB track(s) are missing metadata used by strict parity comparison",
-            total_edb_missing_core_metadata
+            "{} missing metadata used by strict parity comparison",
+            counted(
+                total_edb_missing_core_metadata,
+                "playlist-linked eDB track",
+                "playlist-linked eDB tracks"
+            )
         ),
         link: None,
     });
@@ -1242,9 +1266,13 @@ pub(crate) fn build_usb_parity_comparison(
             DiagStatus::Warn
         },
         detail: format!(
-            "{} playlist-linked track(s) have a different rating or colour in the PDB than in \
+            "{} with a different rating or colour in the PDB than in \
              the eDB (rating differs: {}, colour differs: {})",
-            rating_colour.mismatched_tracks,
+            counted(
+                rating_colour.mismatched_tracks,
+                "playlist-linked track",
+                "playlist-linked tracks"
+            ),
             rating_colour.rating_mismatches,
             rating_colour.colour_mismatches
         ),

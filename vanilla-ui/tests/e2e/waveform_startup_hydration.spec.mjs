@@ -437,5 +437,5 @@ test("Import ticks rekordbox and Mixxx playlists, imports each and opens the fir
   await expect(page.locator('.nav-playlist-item[data-playlist-id="pl-rekordbox"]')).toHaveClass(/active/);
   await expect(page.locator('.source-chip-toggle[data-rekordbox-db="true"]')).toBeChecked();
   await expect(page.locator('.source-chip-toggle[data-mixxx-db="true"]')).toBeChecked();
-  await expect(page.locator("#statusText")).toContainText("Imported 2 of 2 playlists: 4 track(s)");
+  await expect(page.locator("#statusText")).toContainText("Imported 2 of 2 playlists: 4 tracks");
 });

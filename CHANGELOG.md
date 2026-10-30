@@ -42,6 +42,8 @@
 - **Improvement:** The Player Menu editor's Add, Remove, Up and Down are applied by the backend to
   the menu on the USB, instead of the app sending a whole new menu built from what it last loaded.
   An edit that changes nothing, such as Up on the top item, no longer makes a USB backup.
+- **Improvement:** Counts in status messages, the Event Log, USB diagnostics and repair
+  descriptions read naturally: "1 track", "3 tracks" instead of "track(s)", and no more "1 tracks".
 
 ## 0.4.11
 

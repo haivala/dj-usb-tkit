@@ -4,6 +4,7 @@
 //! every time; keeps the player's history (`hm.db`) and the track ids it
 //! refers to. Format layer: [`crate::engine_db`].
 
+use crate::utils::counted;
 use std::collections::{HashMap, HashSet};
 use std::path::Path;
 
@@ -272,10 +273,10 @@ pub fn rebuild_engine_library(usb_root: &Path) -> BackendResult<EngineLibrarySum
             "engine-export",
             "engine.tracks-without-analysis",
             format!(
-                "{} of {} tracks have no usable beat grid or waveform on the USB; \
-                 the Engine player analyzes them itself on load",
+                "{} of {} without a usable beat grid or waveform on the USB; \
+                 the Engine player analyzes those itself on load",
                 tracks.len() - analyzed_tracks,
-                tracks.len()
+                counted(tracks.len(), "track", "tracks")
             ),
         ));
     }

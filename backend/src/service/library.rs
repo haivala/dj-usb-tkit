@@ -1,5 +1,6 @@
 //! Track library: scanning, search, listing, browsing, track identity and paging.
 
+use crate::utils::counted;
 use std::collections::{HashMap, HashSet};
 
 use super::*;
@@ -229,8 +230,8 @@ impl BackendService {
                 "library-scan",
                 "scan.source-folders-missing",
                 format!(
-                    "{} source folder(s) missing or not directories: {}",
-                    not_found.len(),
+                    "{} missing or not directories: {}",
+                    counted(not_found.len(), "source folder", "source folders"),
                     not_found.join(", ")
                 ),
             ));

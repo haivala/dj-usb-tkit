@@ -5418,7 +5418,7 @@ fn export_mirror_prune_keeps_history_protected_track_full_shape() {
             && w.code == "export.orphan-tracks-removed"
             && !w
                 .message
-                .contains("0 dropped-track content row(s) from eDB and 0 track row(s)")),
+                .contains("0 dropped-track content rows from eDB and 0 track rows")),
         "expected an export.orphan-tracks-removed info warning with non-zero counts: {:?}",
         second_data.warnings
     );

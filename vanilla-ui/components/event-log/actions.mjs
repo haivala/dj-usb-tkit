@@ -1,5 +1,6 @@
 // Event log UI rendering helpers.
 
+import { counted } from "../../track_utils.mjs";
 import { cloneTemplate } from "../../ui_utils.mjs";
 
 // Stores an already-normalized entry (see message_bus.mjs emitMessage). With
@@ -48,7 +49,7 @@ export function renderEventLogBadge(ctx) {
   el.eventLogBadge.classList.toggle("hidden", count === 0);
   el.eventLogDot?.classList.toggle("hidden", !dot);
   let label = "Event Log";
-  if (count) label = `Event Log, ${count} new error${count === 1 ? "" : "s"}`;
+  if (count) label = `Event Log, ${counted(count, "new error")}`;
   else if (dot) label = "Event Log, has details for the USB report";
   el.eventLogBtn?.setAttribute("aria-label", label);
 }
@@ -94,8 +95,8 @@ function filteredEventLogEntries(ctx) {
 function renderEventLogSummary(ctx, entries) {
   const totalOccurrences = entries.reduce((sum, item) => sum + Math.max(1, Number(item.count) || 1), 0);
   ctx.el.eventLogSummary.textContent = totalOccurrences === entries.length
-    ? `${entries.length} event(s)`
-    : `${entries.length} event(s) (${totalOccurrences} occurrences)`;
+    ? counted(entries.length, "event")
+    : `${counted(entries.length, "event")} (${totalOccurrences} occurrences)`;
 }
 
 function eventLogRow(doc, item) {

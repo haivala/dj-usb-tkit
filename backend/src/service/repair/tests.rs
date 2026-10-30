@@ -44,14 +44,14 @@ fn fix_outcomes_record_covers_every_selected_found_combination() {
     use super::run::FixOutcomes;
 
     let mut outcomes = FixOutcomes::default();
-    let ok = || Ok::<_, String>("fixed 2 row(s)".to_string());
+    let ok = || Ok::<_, String>("fixed 2 rows".to_string());
     outcomes.record("Fix A", true, true, ok);
     outcomes.record("Fix B", true, true, || Err::<String, _>("disk full"));
     outcomes.record("Fix C", true, false, ok);
     outcomes.record("Fix D", false, true, ok);
     outcomes.record("Fix E", false, false, ok);
 
-    assert_eq!(outcomes.applied, vec!["Fix A: fixed 2 row(s)"]);
+    assert_eq!(outcomes.applied, vec!["Fix A: fixed 2 rows"]);
     assert_eq!(outcomes.failed, vec!["Fix B failed: disk full"]);
     assert_eq!(
         outcomes.skipped,
@@ -2318,7 +2318,7 @@ fn repair_overview_groups_fixes_by_area_and_flags_what_it_cant_fix() {
         proposal(ENGINE_LIBRARY_FIX_ID, true),
     ];
     let unsupported = [RepairUnsupportedItem {
-        issue: "2 malformed USBANLZ entry/entries".to_string(),
+        issue: "2 malformed USBANLZ entries".to_string(),
         reason: "Inspect the Event Log.".to_string(),
         link: None,
     }];

@@ -1,5 +1,6 @@
 // USB DB backup snapshot list/restore/delete UI logic.
 
+import { counted } from "../../track_utils.mjs";
 import { cloneTemplate } from "../../ui_utils.mjs";
 
 function formatBackupTimestamp(raw) {
@@ -54,7 +55,7 @@ export async function renderBackups(ctx) {
   }
 
   state.usbBackups = items;
-  el.backupsSummary.textContent = `${items.length} backup(s)`;
+  el.backupsSummary.textContent = counted(items.length, "backup");
   if (!items.length) {
     showBackupsMessage(el.backupsList, "No backups yet.");
     return;
@@ -64,7 +65,7 @@ export async function renderBackups(ctx) {
     const row = cloneTemplate(el.backupsList.ownerDocument, "tplBackupRow");
     const location = item.location === "usb" ? "On USB" : "On this computer";
     const playlistCount = Number.isFinite(item.playlistCount)
-      ? ` · ${item.playlistCount} playlist${item.playlistCount === 1 ? "" : "s"}`
+      ? ` · ${counted(item.playlistCount, "playlist")}`
       : "";
     row.dataset.timestamp = item.timestamp;
     row.querySelector(".event-log-time").textContent = formatBackupTimestamp(item.timestamp);

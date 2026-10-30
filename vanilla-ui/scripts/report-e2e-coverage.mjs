@@ -83,7 +83,7 @@ for (const [file, fc] of Object.entries(istanbulData)) {
 
 rows.sort((a, b) => a.file.localeCompare(b.file));
 
-console.log(`\nE2e coverage (from ${entries.length} test run(s), merged):\n`);
+console.log(`\nE2e coverage (from ${entries.length} test run${entries.length === 1 ? "" : "s"}, merged):\n`);
 console.log("file".padEnd(50), "line %".padStart(8), "branch %".padStart(10), "func %".padStart(8));
 for (const r of rows) {
   console.log(

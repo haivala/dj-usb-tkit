@@ -1,5 +1,6 @@
 //! Playlist and track removal from eDB and PDB, content verification.
 
+use crate::utils::counted;
 use std::collections::{HashMap, HashSet};
 use std::path::Path;
 
@@ -575,8 +576,14 @@ pub fn remove_orphaned_dropped_tracks_from_dbs(
             "export",
             "export.orphan-tracks-removed",
             format!(
-                "mirror export removed {} dropped-track content row(s) from eDB and {} track row(s) ({} artwork row(s)) from PDB — no other playlist or history references them",
-                result.removed_edb_content, result.removed_pdb_tracks, result.removed_pdb_artwork
+                "mirror export removed {} from eDB and {} ({}) from PDB — no other playlist or history references them",
+                counted(
+                    result.removed_edb_content,
+                    "dropped-track content row",
+                    "dropped-track content rows"
+                ),
+                counted(result.removed_pdb_tracks, "track row", "track rows"),
+                counted(result.removed_pdb_artwork, "artwork row", "artwork rows")
             ),
         ));
     }

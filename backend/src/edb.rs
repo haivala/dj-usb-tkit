@@ -1,5 +1,6 @@
 //! Export database (eDB/SQLite) helpers and CRUD operations.
 
+use crate::utils::counted;
 use std::collections::HashMap;
 use std::path::Path;
 
@@ -250,7 +251,10 @@ pub fn open_edb(path: &Path, warnings: &mut Vec<WarningEntry>) -> Option<rusqlit
         Level::Warn,
         "edb",
         "edb.open.failed",
-        format!("eDB unreadable after trying {attempts} SQLCipher key(s)"),
+        format!(
+            "eDB unreadable after trying {}",
+            counted(attempts, "SQLCipher key", "SQLCipher keys")
+        ),
     ));
     None
 }
@@ -636,8 +640,8 @@ pub fn try_read_content_date_created_index_from_edb_with_conn(
             "edb",
             "edb.loaded-date-created-index",
             format!(
-                "loaded {} dateCreated value(s) from eDB content index",
-                out.len()
+                "loaded {} from eDB content index",
+                counted(out.len(), "dateCreated value", "dateCreated values")
             ),
         ));
         Some(out)
@@ -906,7 +910,10 @@ fn try_read_playlists_with_metadata_from_edb_internal_with_conn(
             Level::Info,
             "edb",
             "edb.loaded-playlists",
-            format!("loaded {} playlist(s) from eDB", out.len()),
+            format!(
+                "loaded {} from eDB",
+                counted(out.len(), "playlist", "playlists")
+            ),
         ));
         Some(out)
     } else {

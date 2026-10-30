@@ -172,6 +172,21 @@ pub fn collect_chain_lenient(bytes: &[u8], page_size: usize, first: u32, last: u
 }
 
 // ---------------------------------------------------------------------------
+// Counted text
+// ---------------------------------------------------------------------------
+
+/// `count` followed by the singular or plural phrase ("1 track" / "3 tracks").
+pub fn counted(count: usize, one: &str, many: &str) -> String {
+    format!("{count} {}", plural(count, one, many))
+}
+
+/// The singular or plural form for `count`, for a word that doesn't follow the
+/// number or a verb that agrees with it ("1 track has" / "3 tracks have").
+pub fn plural<'a>(count: usize, one: &'a str, many: &'a str) -> &'a str {
+    if count == 1 { one } else { many }
+}
+
+// ---------------------------------------------------------------------------
 // Process helpers
 // ---------------------------------------------------------------------------
 

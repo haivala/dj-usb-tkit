@@ -57,10 +57,11 @@ use super::usb_vendor_compat::vendor_pdb_path;
 use super::usb_vendor_compat::{USB_ANALYSIS_DIR, USB_VENDOR_ROOT_DIR};
 use crate::audio_format::same_format_extension;
 use crate::scanner::scan_audio_file;
+use crate::utils::{counted, plural};
 
 use super::diagnostics::{
     AnalysisOwnership, BpmKeyMismatch, audio_path_key, build_meta_key, collect_edb_audio_paths,
-    counted, detect_bpm_key_mismatches, normalize_analysis_path_for_identity,
+    detect_bpm_key_mismatches, normalize_analysis_path_for_identity,
     normalize_pdb_path_for_edb_lookup, scan_analysis_ownership, scan_audio_presence,
     track_identity_key,
 };

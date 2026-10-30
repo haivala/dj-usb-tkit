@@ -180,7 +180,7 @@ test("selecting a large playlist renders the top of the first hydrated page", as
   await expect(page.locator('[data-usb-playlist="usb-1"] .playlist-label')).toHaveText("Big Playlist");
   await expect(page.locator("#usbPlaylistHeading .track-list-heading-name")).toHaveText("Big Playlist");
   await expect(page.locator("#usbPlaylistHeading .track-list-heading-count")).toHaveText(`${PLAYLIST_SIZE} tracks`);
-  await expect(page.locator(".panel-header #usbCountsText")).toHaveText(/^1 playlists, \d+ tracks$/);
+  await expect(page.locator(".panel-header #usbCountsText")).toHaveText(/^1 playlist, \d+ tracks?$/);
 });
 
 test("the scrollbar spans the whole playlist from the start", async ({ page }) => {

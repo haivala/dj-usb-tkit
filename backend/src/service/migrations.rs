@@ -10,6 +10,7 @@
 //! - `Startup` migrations are quick and run before the UI reads anything;
 //!   `Background` ones run as a progress-bar job and report progress.
 
+use crate::utils::counted;
 use std::sync::atomic::Ordering;
 
 use rusqlite::params;
@@ -258,7 +259,8 @@ fn upgrade_cached_beat_grids(
     crate::backend_log!(
         Info,
         "migrations",
-        "rewrote {rewritten} cached beat grid(s) in the 0.3.7 format"
+        "rewrote {} in the 0.3.7 format",
+        counted(rewritten, "cached beat grid", "cached beat grids")
     );
     Ok(if retry {
         Outcome::RetryLater
@@ -333,8 +335,9 @@ fn fill_cached_mp3_seek_indexes(
     crate::backend_log!(
         Info,
         "migrations",
-        "added the MP3 seek index to {filled} cached bundle(s); {missing} track(s) whose \
-         file wasn't found are marked for analysis"
+        "added the MP3 seek index to {}; marked {} for analysis (file not found)",
+        counted(filled, "cached bundle", "cached bundles"),
+        counted(missing, "track", "tracks")
     );
     Ok(if retry {
         Outcome::RetryLater

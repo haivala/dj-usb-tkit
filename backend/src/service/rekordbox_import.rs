@@ -34,6 +34,7 @@ use crate::models::{
     ScanLibraryData, ScanRekordboxDbRequest, TrackCue, WarningEntry,
 };
 use crate::scanner::is_library_audio_file;
+use crate::utils::counted;
 
 // `djmdPlaylist.Attribute` / `djmdHistory.Attribute`: a list of tracks (as
 // opposed to a folder, 1, or a smart playlist, 4, whose tracks rekordbox
@@ -827,7 +828,10 @@ impl<'a> RekordboxTrackImporter<'a> {
             summary(
                 Level::Info,
                 "scan.rekordbox-db.cues-imported",
-                format!("cues imported for {} track(s)", self.cue_tracks),
+                format!(
+                    "cues imported for {}",
+                    counted(self.cue_tracks, "track", "tracks")
+                ),
             );
         }
         if self.cue_tracks_kept_local > 0 {
@@ -835,8 +839,8 @@ impl<'a> RekordboxTrackImporter<'a> {
                 Level::Info,
                 "scan.rekordbox-db.cues-kept-local",
                 format!(
-                    "{} track(s) already had cues; their rekordbox cues were not imported",
-                    self.cue_tracks_kept_local
+                    "existing cues kept for {}; their rekordbox cues were not imported",
+                    counted(self.cue_tracks_kept_local, "track", "tracks")
                 ),
             );
         }
@@ -845,8 +849,8 @@ impl<'a> RekordboxTrackImporter<'a> {
                 Level::Info,
                 "scan.rekordbox-db.unsupported-skipped",
                 format!(
-                    "{} track(s) skipped: not a supported audio file",
-                    self.unsupported
+                    "{} skipped: not a supported audio file",
+                    counted(self.unsupported, "track", "tracks")
                 ),
             );
         }
@@ -854,28 +858,40 @@ impl<'a> RekordboxTrackImporter<'a> {
             summary(
                 Level::Info,
                 "scan.rekordbox-db.anlz-null",
-                format!("{} track(s) have no AnalysisDataPath", self.anlz_null),
+                format!(
+                    "{} without AnalysisDataPath",
+                    counted(self.anlz_null, "track", "tracks")
+                ),
             );
         }
         if self.anlz_miss > 0 {
             summary(
                 Level::Warn,
                 "scan.rekordbox-db.anlz-miss-summary",
-                format!("{} ANLZ path(s) not found on disk", self.anlz_miss),
+                format!(
+                    "{} not found on disk",
+                    counted(self.anlz_miss, "ANLZ path", "ANLZ paths")
+                ),
             );
         }
         if self.anlz_ok > 0 {
             summary(
                 Level::Info,
                 "scan.rekordbox-db.anlz-ok",
-                format!("{} ANLZ path(s) resolved OK", self.anlz_ok),
+                format!(
+                    "{} resolved OK",
+                    counted(self.anlz_ok, "ANLZ path", "ANLZ paths")
+                ),
             );
         }
         if self.artwork_null > 0 {
             summary(
                 Level::Info,
                 "scan.rekordbox-db.artwork-null",
-                format!("{} track(s) have no ImagePath", self.artwork_null),
+                format!(
+                    "{} without ImagePath",
+                    counted(self.artwork_null, "track", "tracks")
+                ),
             );
         }
         if self.artwork_miss > 0 {
@@ -883,8 +899,12 @@ impl<'a> RekordboxTrackImporter<'a> {
                 Level::Warn,
                 "scan.rekordbox-db.artwork-miss-summary",
                 format!(
-                    "{} artwork source file(s) not found or copy failed",
-                    self.artwork_miss
+                    "{} not found or copy failed",
+                    counted(
+                        self.artwork_miss,
+                        "artwork source file",
+                        "artwork source files"
+                    )
                 ),
             );
         }
@@ -892,7 +912,10 @@ impl<'a> RekordboxTrackImporter<'a> {
             summary(
                 Level::Info,
                 "scan.rekordbox-db.artwork-ok",
-                format!("{} artwork file(s) copied OK", self.artwork_ok),
+                format!(
+                    "{} copied OK",
+                    counted(self.artwork_ok, "artwork file", "artwork files")
+                ),
             );
         }
         std::mem::take(&mut self.warnings)
@@ -1000,7 +1023,10 @@ impl BackendService {
                 Level::Info,
                 "scan-rekordbox-db",
                 "scan.rekordbox-db.playlist-duplicates-skipped",
-                format!("{duplicates} repeated track(s) in {name:?} added once"),
+                format!(
+                    "{} in {name:?} added once",
+                    counted(duplicates, "repeated track", "repeated tracks")
+                ),
             ));
         }
         if deleted_in_rekordbox > 0 {
@@ -1009,7 +1035,8 @@ impl BackendService {
                 "scan-rekordbox-db",
                 "scan.rekordbox-db.playlist-tracks-deleted",
                 format!(
-                    "{deleted_in_rekordbox} track(s) in {name:?} are no longer in the rekordbox library"
+                    "{} in {name:?} no longer in the rekordbox library",
+                    counted(deleted_in_rekordbox, "track", "tracks")
                 ),
             ));
         }
@@ -1765,7 +1792,7 @@ mod tests {
                 force: false,
             })
             .unwrap_err();
-        assert!(err.to_string().contains("none of the 1 track(s)"), "{err}");
+        assert!(err.to_string().contains("the only track in"), "{err}");
         let playlists: i64 = service
             .db
             .connect()

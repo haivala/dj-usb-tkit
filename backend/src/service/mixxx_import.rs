@@ -32,6 +32,7 @@ use crate::models::{
     ListExternalPlaylistsRequest, ScanLibraryData, ScanMixxxDbRequest, TrackCue, WarningEntry,
 };
 use crate::scanner::is_library_audio_file;
+use crate::utils::counted;
 
 pub(crate) const MIXXX_DB_ENV_KEY: &str = "DJUSBTKIT_MIXXX_DB_PATH";
 /// `playlists.import_source` prefix of playlists imported from Mixxx.
@@ -817,8 +818,8 @@ impl<'a> MixxxTrackImporter<'a> {
                 Level::Info,
                 "scan.mixxx-db.unsupported-skipped",
                 format!(
-                    "{} track(s) skipped: not a supported audio file",
-                    self.unsupported
+                    "{} skipped: not a supported audio file",
+                    counted(self.unsupported, "track", "tracks")
                 ),
             );
         }
@@ -826,7 +827,10 @@ impl<'a> MixxxTrackImporter<'a> {
             summary(
                 Level::Info,
                 "scan.mixxx-db.cues-imported",
-                format!("hot cues imported for {} track(s)", self.cue_tracks),
+                format!(
+                    "hot cues imported for {}",
+                    counted(self.cue_tracks, "track", "tracks")
+                ),
             );
         }
         if self.cue_tracks_kept_local > 0 {
@@ -834,8 +838,8 @@ impl<'a> MixxxTrackImporter<'a> {
                 Level::Info,
                 "scan.mixxx-db.cues-kept-local",
                 format!(
-                    "{} track(s) already had cues; their Mixxx cues were not imported",
-                    self.cue_tracks_kept_local
+                    "existing cues kept for {}; their Mixxx cues were not imported",
+                    counted(self.cue_tracks_kept_local, "track", "tracks")
                 ),
             );
         }
@@ -843,7 +847,10 @@ impl<'a> MixxxTrackImporter<'a> {
             summary(
                 Level::Info,
                 "scan.mixxx-db.artwork-ok",
-                format!("{} cover file(s) copied OK", self.artwork_ok),
+                format!(
+                    "{} copied OK",
+                    counted(self.artwork_ok, "cover file", "cover files")
+                ),
             );
         }
         if self.artwork_miss > 0 {
@@ -851,8 +858,8 @@ impl<'a> MixxxTrackImporter<'a> {
                 Level::Warn,
                 "scan.mixxx-db.artwork-miss-summary",
                 format!(
-                    "{} cover file(s) not found or copy failed",
-                    self.artwork_miss
+                    "{} not found or copy failed",
+                    counted(self.artwork_miss, "cover file", "cover files")
                 ),
             );
         }
@@ -970,7 +977,10 @@ impl BackendService {
                 Level::Info,
                 "scan-mixxx-db",
                 "scan.mixxx-db.playlist-duplicates-skipped",
-                format!("{duplicates} repeated track(s) in {name:?} added once"),
+                format!(
+                    "{} in {name:?} added once",
+                    counted(duplicates, "repeated track", "repeated tracks")
+                ),
             ));
         }
         if deleted_in_mixxx > 0 {
@@ -979,7 +989,8 @@ impl BackendService {
                 "scan-mixxx-db",
                 "scan.mixxx-db.playlist-tracks-deleted",
                 format!(
-                    "{deleted_in_mixxx} track(s) in {name:?} are no longer in the Mixxx library"
+                    "{} in {name:?} no longer in the Mixxx library",
+                    counted(deleted_in_mixxx, "track", "tracks")
                 ),
             ));
         }
@@ -1858,7 +1869,7 @@ mod tests {
                 force: false,
             })
             .unwrap_err();
-        assert!(err.to_string().contains("none of the 1 track(s)"), "{err}");
+        assert!(err.to_string().contains("the only track in"), "{err}");
         let playlists: i64 = service
             .db
             .connect()

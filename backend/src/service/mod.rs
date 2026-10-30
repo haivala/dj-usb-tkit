@@ -44,6 +44,7 @@ mod track_matching;
 mod track_metadata;
 
 use crate::audio_format::same_format_extension;
+use crate::utils::counted;
 pub(crate) use library::*;
 #[cfg(test)]
 use playback::*;
@@ -407,7 +408,8 @@ impl BackendService {
         sys.refresh_memory();
         let to_gib = |bytes: u64| bytes as f64 / (1024.0 * 1024.0 * 1024.0);
         format!(
-            "system resources: {cpu_threads} CPU thread(s), {:.1} GiB total RAM, {:.1} GiB available RAM",
+            "system resources: {}, {:.1} GiB total RAM, {:.1} GiB available RAM",
+            counted(cpu_threads, "CPU thread", "CPU threads"),
             to_gib(sys.total_memory()),
             to_gib(sys.available_memory())
         )

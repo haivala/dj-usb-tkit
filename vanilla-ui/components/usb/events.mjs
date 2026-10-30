@@ -1,3 +1,4 @@
+import { counted } from "../../track_utils.mjs";
 import { catchErr, handleTrackAction, resolveRowActionTrack } from "../shared/track_actions.mjs";
 import { bindListDragReorder, moveArrayItem } from "../shared/list_drag_reorder.mjs";
 import { setActiveListItem } from "../shell/actions.mjs";
@@ -242,7 +243,7 @@ export function bindUsbEvents(ctx) {
       console.warn("USB playlist load failed:", err);
       emitStatus(`Failed to load USB playlist: ${err.message}`);
     });
-    emitStatus(`USB playlist selected: ${playlist.name} (${playlist.trackCount ?? "?"} tracks)`);
+    emitStatus(`USB playlist selected: ${playlist.name} (${playlist.trackCount == null ? "? tracks" : counted(playlist.trackCount, "track")})`);
   });
 
   bindListDragReorder(el.usbPlaylists, {

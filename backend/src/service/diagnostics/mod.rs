@@ -19,7 +19,7 @@ use crate::models::{
 use crate::pdb_reader::parse_pdb;
 use crate::pdb_reader::parse_pdb_with_diagnostics;
 use crate::utils::{
-    collect_chain_lenient as collect_chain, page_offset, read_u8_at, read_u16_le_at,
+    collect_chain_lenient as collect_chain, counted, page_offset, read_u8_at, read_u16_le_at,
     read_u32_le_at, table_ptr_fields,
 };
 
@@ -51,7 +51,6 @@ pub(crate) use analysis_ownership::*;
 pub(crate) use audio_presence::*;
 pub(crate) use content_checks::*;
 pub(crate) use edb_checks::*;
-pub(crate) use overview::counted;
 use overview::*;
 pub(crate) use parity::*;
 pub(crate) use paths::*;

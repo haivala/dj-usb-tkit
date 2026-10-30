@@ -592,7 +592,7 @@ test("the playlist view selects tracks and removes them from the playlist only",
   await expect(bar.locator(".selection-time")).toHaveText("· 3:00+");
 
   await bar.locator('[data-selection-action="remove"]').click();
-  await expect(page.locator("#statusText")).toContainText("Removed 2 track(s) from Trim");
+  await expect(page.locator("#statusText")).toContainText("Removed 2 tracks from Trim");
   const removed = (await page.evaluate(() => window.__calls)).find((c) => c.command === "remove_tracks_from_playlist");
   expect(removed.request.trackIds).toEqual(["t1", "t3"]);
   await expect(page.locator("#playlistTracksBody .track-grid-row")).toHaveCount(1);
@@ -654,7 +654,7 @@ test("Edit… shows what the selection shares and saves only the changed fields 
 
   const save = (await page.evaluate(() => window.__calls)).find((c) => c.command === "save_track_metadata_edits");
   expect(save.request).toEqual({ trackIds: ["t1", "t2"], genre: "Techno", rating: 4, releaseDate: "2001-05" });
-  await expect(page.locator("#statusText")).toContainText("Saved track details for 2 track(s)");
+  await expect(page.locator("#statusText")).toContainText("Saved track details for 2 tracks");
 });
 
 test("Edit… on USB playlist rows writes them to the stick and shows the new year in the rows", async ({ page }) => {
@@ -710,7 +710,7 @@ test("+ Add to names the active playlist; Add to… shows what each playlist hol
   await expect(add).toHaveText("+ Add to Warmup");
   await expect(add).toHaveAttribute("data-tooltip", "Add the selected tracks to Warmup");
   await add.click();
-  await expect(page.locator("#statusText")).toContainText("Added 1 tracks (skipped 0) to Warmup");
+  await expect(page.locator("#statusText")).toContainText("Added 1 track (skipped 0) to Warmup");
   await bar.locator('[data-selection-action="clear"]').click();
 
   await createPlaylist(page, "Peak");

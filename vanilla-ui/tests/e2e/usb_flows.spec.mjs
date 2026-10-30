@@ -144,7 +144,7 @@ function installTauriMock(page, mode) {
                           {
                             label: "PDB metadata completeness",
                             status: "FAIL",
-                            detail: "1 playlist-linked PDB track(s) are missing required player metadata",
+                            detail: "1 playlist-linked PDB track missing required player metadata",
                             link: "event-log"
                           }
                         ]
@@ -156,7 +156,7 @@ function installTauriMock(page, mode) {
                           {
                             label: "Media and analysis path parity",
                             status: "FAIL",
-                            detail: "1 playlist-linked track(s) have media/analysis path mismatches"
+                            detail: "1 playlist-linked track with media/analysis path mismatches"
                           }
                         ]
                       }
@@ -217,9 +217,9 @@ function installTauriMock(page, mode) {
                   { title: "Needs your attention", status: "FAIL", detail: "1 problem can't be fixed automatically." }
                 ],
                 detectedIssues: [
-                  "1 table(s) with a declared last page beyond the physical end of the file",
+                  "1 table with a declared last page beyond the physical end of the file",
                   "PDB shows signs of a torn additive-growth write",
-                  "1 PDB history/columns page(s) with wrong u5/num_rl shape"
+                  "1 PDB history/columns page with wrong u5/num_rl shape"
                 ],
                 proposedFixes: [
                   {
@@ -552,8 +552,8 @@ test("USB playlists status counts only warn/error warnings", async ({ page }) =>
   await page.locator('.nav-item[data-view="usb-playlists"]').click();
   await page.locator("#refreshUsbBtn").click();
 
-  await expect(page.locator("#statusText")).toContainText("USB playlists loaded: 1 | (2 warning(s))");
-  await expect(page.locator("#statusText .status-warning-link")).toHaveText("(2 warning(s))");
+  await expect(page.locator("#statusText")).toContainText("USB playlists loaded: 1 | (2 warnings)");
+  await expect(page.locator("#statusText .status-warning-link")).toHaveText("(2 warnings)");
 });
 
 test("console.log messages appear in Event Log", async ({ page }) => {
@@ -679,7 +679,7 @@ test("Event Log flood remains capped", async ({ page }) => {
   });
 
   await page.locator("#eventLogBtn").click();
-  await expect(page.locator("#eventLogSummary")).toContainText("500 event(s)");
+  await expect(page.locator("#eventLogSummary")).toContainText("500 events");
 });
 
 test("an open Event Log updates live: new entries on top, repeats coalesce, rows are kept", async ({ page }) => {
@@ -713,7 +713,7 @@ test("an open Event Log updates live: new entries on top, repeats coalesce, rows
   await page.evaluate(() => {
     for (let i = 0; i < 1200; i += 1) console.log(`live-flood-${i}`);
   });
-  await expect(page.locator("#eventLogSummary")).toContainText("500 event(s)");
+  await expect(page.locator("#eventLogSummary")).toContainText("500 events");
   await expect(rows).toHaveCount(500);
   await expect(rows.first()).toContainText("live-flood-1199");
 });

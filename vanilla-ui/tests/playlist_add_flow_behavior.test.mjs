@@ -98,7 +98,7 @@ test("addTracksToCurrentPlaylist sends row candidates to backend and reports res
     usbRootValid: false
   });
   assert.equal(harness.refreshes, 1);
-  assert.match(harness.status, /Added 1 tracks \(skipped 0\) to Main/);
+  assert.match(harness.status, /Added 1 track \(skipped 0\) to Main/);
 });
 
 test("addTracksToCurrentPlaylist never sends both id and trackId (backend aliases them to the same field)", async () => {

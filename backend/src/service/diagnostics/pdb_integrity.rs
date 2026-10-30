@@ -63,14 +63,14 @@ pub(crate) fn diagnose_pdb_integrity(
         label: "PDB parseable".to_string(),
         status: DiagStatus::Pass,
         detail: format!(
-            "{} tracks, {} artists, {} albums, {} genres, {} labels, {} keys, {} artworks",
-            parsed.tracks.len(),
-            parsed.artists.len(),
-            parsed.albums.len(),
-            parsed.genres.len(),
-            parsed.labels.len(),
-            parsed.keys.len(),
-            parsed.artworks.len(),
+            "{}, {}, {}, {}, {}, {}, {}",
+            counted(parsed.tracks.len(), "track", "tracks"),
+            counted(parsed.artists.len(), "artist", "artists"),
+            counted(parsed.albums.len(), "album", "albums"),
+            counted(parsed.genres.len(), "genre", "genres"),
+            counted(parsed.labels.len(), "label", "labels"),
+            counted(parsed.keys.len(), "key", "keys"),
+            counted(parsed.artworks.len(), "artwork", "artworks"),
         ),
         link: None,
     });
@@ -125,18 +125,21 @@ pub(crate) fn diagnose_pdb_integrity(
         let bad_tranrf = crate::service::repair::detect_pdb_zero_tranrf_all_tables(&bytes);
         let mut parts = Vec::new();
         if !bad_u5.is_empty() {
-            parts.push(format!("{} page(s) with sentinel u5=0x1FFF", bad_u5.len()));
+            parts.push(format!(
+                "{} with sentinel u5=0x1FFF",
+                counted(bad_u5.len(), "page", "pages")
+            ));
         }
         if !bad_flags.is_empty() {
             parts.push(format!(
-                "{} page(s) with non-default page_flags",
-                bad_flags.len()
+                "{} with non-default page_flags",
+                counted(bad_flags.len(), "page", "pages")
             ));
         }
         if !bad_tranrf.is_empty() {
             parts.push(format!(
-                "{} data page(s) with tranrf=0 on last-row group",
-                bad_tranrf.len()
+                "{} with tranrf=0 on last-row group",
+                counted(bad_tranrf.len(), "data page", "data pages")
             ));
         }
         let detail = if parts.is_empty() {
@@ -185,30 +188,37 @@ pub(crate) fn diagnose_pdb_integrity(
         let mut bookkeeping_parts = Vec::new();
 
         if !stale_btree.is_empty() {
-            bookkeeping_parts.push(format!("{} sentinel(s) stale b-tree", stale_btree.len()));
+            bookkeeping_parts.push(format!(
+                "{} stale b-tree",
+                counted(stale_btree.len(), "sentinel", "sentinels")
+            ));
         }
         if !wrong_pl_tree.is_empty() {
             bookkeeping_parts.push(format!(
-                "{} playlist_tree page(s) with non-default shape",
-                wrong_pl_tree.len()
+                "{} with non-default shape",
+                counted(
+                    wrong_pl_tree.len(),
+                    "playlist_tree page",
+                    "playlist_tree pages"
+                )
             ));
         }
         if !tombstoned.is_empty() {
             bookkeeping_parts.push(format!(
-                "{} tombstoned row(s) non-zero id",
-                tombstoned.len()
+                "{} non-zero id",
+                counted(tombstoned.len(), "tombstoned row", "tombstoned rows")
             ));
         }
         if !wrong_track_u5.is_empty() {
             bookkeeping_parts.push(format!(
-                "{} track page(s) with non-default shape",
-                wrong_track_u5.len()
+                "{} with non-default shape",
+                counted(wrong_track_u5.len(), "track page", "track pages")
             ));
         }
         if !t00_multipage_active.is_empty() {
             bookkeeping_parts.push(format!(
-                "{} track page(s) ACTV in multi-page chain",
-                t00_multipage_active.len()
+                "{} ACTV in multi-page chain",
+                counted(t00_multipage_active.len(), "track page", "track pages")
             ));
         }
         if !bookkeeping_parts.is_empty() {
@@ -228,13 +238,13 @@ pub(crate) fn diagnose_pdb_integrity(
                 "usb-diagnostics",
                 "usb.diagnostics.pdb-wrong-history-shape",
                 format!(
-                    "{} history page(s) with wrong u5/num_rl shape; run repair_pdb_wrong_history_page_shape to fix.",
-                    wrong_history.len()
+                    "{} with wrong u5/num_rl shape; run repair_pdb_wrong_history_page_shape to fix.",
+                    counted(wrong_history.len(), "history page", "history pages")
                 ),
             ));
             warn_parts.push(format!(
-                "{} history page(s) wrong shape",
-                wrong_history.len()
+                "{} wrong shape",
+                counted(wrong_history.len(), "history page", "history pages")
             ));
         }
         if !ec_conflicts.is_empty() {
@@ -243,14 +253,14 @@ pub(crate) fn diagnose_pdb_integrity(
                 "usb-diagnostics",
                 "usb.diagnostics.pdb-ec-data-page-conflict",
                 format!(
-                    "{} table(s) with empty_candidate pointing to another table's data page \
+                    "{} with empty_candidate pointing to another table's data page \
                      (may cause write-pointer conflict rejection); run repair_pdb_ec_data_page_conflict to fix.",
-                    ec_conflicts.len()
+                    counted(ec_conflicts.len(), "table", "tables")
                 ),
             ));
             fail_parts.push(format!(
-                "{} table(s) write-pointer conflict",
-                ec_conflicts.len()
+                "{} write-pointer conflict",
+                counted(ec_conflicts.len(), "table", "tables")
             ));
         }
         if !truncated_chains.is_empty() {
@@ -259,20 +269,23 @@ pub(crate) fn diagnose_pdb_integrity(
                 "usb-diagnostics",
                 "usb.diagnostics.pdb-truncated-table-chain",
                 format!(
-                    "{} table(s) declare a last page beyond the physical end of the file \
+                    "{} with a declared last page beyond the physical end of the file \
                      (interrupted export); run repair_pdb_truncated_table_chain to fix.",
-                    truncated_chains.len()
+                    counted(truncated_chains.len(), "table", "tables")
                 ),
             ));
             fail_parts.push(format!(
-                "{} table(s) with declared last page beyond physical file end",
-                truncated_chains.len()
+                "{} with declared last page beyond physical file end",
+                counted(truncated_chains.len(), "table", "tables")
             ));
         }
         if !torn_growth.is_empty() {
             let ec_count = torn_growth.garbage_ec_pages.len();
             let ec_desc = if ec_count > 0 {
-                format!("{ec_count} empty_candidate page(s) hold garbage instead of a blank page")
+                format!(
+                    "{} with garbage instead of a blank page",
+                    counted(ec_count, "empty_candidate page", "empty_candidate pages")
+                )
             } else {
                 "the file has a never-populated tail".to_string()
             };
@@ -291,7 +304,10 @@ pub(crate) fn diagnose_pdb_integrity(
                 ),
             ));
             fail_parts.push(if ec_count > 0 {
-                format!("{ec_count} empty_candidate page(s) torn from interrupted export")
+                format!(
+                    "{} torn from interrupted export",
+                    counted(ec_count, "empty_candidate page", "empty_candidate pages")
+                )
             } else {
                 "PDB tail torn from interrupted export".to_string()
             });
@@ -335,9 +351,9 @@ pub(crate) fn diagnose_pdb_integrity(
         label: "PDB playlists".to_string(),
         status: DiagStatus::Pass,
         detail: format!(
-            "{} tree nodes, {} entries",
-            parsed.playlist_tree.len(),
-            parsed.playlist_entries.len(),
+            "{}, {}",
+            counted(parsed.playlist_tree.len(), "tree node", "tree nodes"),
+            counted(parsed.playlist_entries.len(), "entry", "entries"),
         ),
         link: None,
     });
@@ -355,7 +371,12 @@ pub(crate) fn diagnose_pdb_integrity(
             checks.push(DiagCheck {
                 label: "PDB history".to_string(),
                 status: DiagStatus::Pass,
-                detail: format!("{hp} playlists, {he} entries, {hr} rows"),
+                detail: format!(
+                    "{}, {}, {}",
+                    counted(hp, "playlist", "playlists"),
+                    counted(he, "entry", "entries"),
+                    counted(hr, "row", "rows")
+                ),
                 link: None,
             });
         } else {
@@ -373,8 +394,9 @@ pub(crate) fn diagnose_pdb_integrity(
         label: "num_rl=8191 pages".to_string(),
         status: DiagStatus::Pass,
         detail: format!(
-            "{} of {} pages (using nrs fallback)",
-            diag.pages_with_num_rl_8191, diag.total_pages
+            "{} of {} (using nrs fallback)",
+            diag.pages_with_num_rl_8191,
+            counted(diag.total_pages, "page", "pages")
         ),
         link: None,
     });
@@ -384,8 +406,8 @@ pub(crate) fn diagnose_pdb_integrity(
         label: "nrs wrapping".to_string(),
         status: DiagStatus::Pass,
         detail: format!(
-            "{} pages with row count exceeding nrs header",
-            diag.nrs_wrapping_pages
+            "{} with row count exceeding nrs header",
+            counted(diag.nrs_wrapping_pages, "page", "pages")
         ),
         link: None,
     });
@@ -409,13 +431,17 @@ pub(crate) fn diagnose_pdb_integrity(
         label: "Orphaned entries".to_string(),
         status: orphan_status,
         detail: format!(
-            "{} entries reference {} track IDs not in PDB",
-            parsed
-                .playlist_entries
-                .iter()
-                .filter(|e| !track_ids.contains(&e.track_id))
-                .count(),
-            orphaned.len()
+            "{} referencing {} not in PDB",
+            counted(
+                parsed
+                    .playlist_entries
+                    .iter()
+                    .filter(|e| !track_ids.contains(&e.track_id))
+                    .count(),
+                "entry",
+                "entries"
+            ),
+            counted(orphaned.len(), "track ID", "track IDs")
         ),
         link: None,
     });
@@ -433,7 +459,10 @@ pub(crate) fn diagnose_pdb_integrity(
         checks.push(DiagCheck {
             label: "Parse warnings".to_string(),
             status: DiagStatus::Warn,
-            detail: format!("{} warnings during parsing", parsed.warnings.len()),
+            detail: format!(
+                "{} during parsing",
+                counted(parsed.warnings.len(), "warning", "warnings")
+            ),
             link: None,
         });
     }

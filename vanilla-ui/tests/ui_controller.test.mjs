@@ -66,10 +66,10 @@ test("setStatusText turns warning suffixes into event-log links", () => {
   const { document } = makeDom().window;
   const statusText = document.getElementById("statusText");
 
-  setStatusText({ statusText }, "USB playlists loaded: 1 | (2 warning(s))", 2);
+  setStatusText({ statusText }, "USB playlists loaded: 1 | (2 warnings)", 2);
 
-  assert.equal(statusText.textContent, "USB playlists loaded: 1 | (2 warning(s))");
-  assert.equal(statusText.querySelector(".status-warning-link")?.textContent, "(2 warning(s))");
+  assert.equal(statusText.textContent, "USB playlists loaded: 1 | (2 warnings)");
+  assert.equal(statusText.querySelector(".status-warning-link")?.textContent, "(2 warnings)");
   assert.equal(statusText.querySelector(".status-warning-link")?.getAttribute("href"), "#");
 });
 

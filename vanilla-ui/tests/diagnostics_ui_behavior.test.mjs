@@ -72,7 +72,7 @@ test("renderRepairPreview renders each backend fix description verbatim and appe
       {
         id: "remove_missing_audio_references",
         title: "Remove Missing Audio References",
-        description: "9 missing-audio reference(s) require manual review. Automatic removal is disabled while 13 canonical-path unindexed audio file(s) are present.",
+        description: "9 missing-audio references require manual review. Automatic removal is disabled while 13 canonical-path unindexed audio files are present.",
         supported: false,
         destructive: false
       }
@@ -97,7 +97,7 @@ test("renderRepairPreview renders each backend fix description verbatim and appe
   assert.equal(fixTitle(fixes[0]), "Remove Missing Audio References");
   assert.match(
     fixDesc(fixes[0]),
-    /9 missing-audio reference\(s\) require manual review.*13 canonical-path unindexed audio file\(s\)/
+    /9 missing-audio references require manual review.*13 canonical-path unindexed audio files/
   );
   // The standalone unsupported item renders as its own row, unmodified.
   assert.equal(fixTitle(fixes[1]), "2 malformed USBANLZ entry/entries");

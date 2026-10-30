@@ -1,5 +1,6 @@
 //! Export to USB implementation.
 
+use crate::utils::counted;
 use std::collections::{HashMap, HashSet};
 use std::path::{Path, PathBuf};
 
@@ -311,8 +312,8 @@ fn run_manifest_invariant_check(
 
     if manifest.options.prune_stale && manifest.skipped_tracks > 0 {
         issues.record(format!(
-            "mirror export cannot safely prune while {} playlist track(s) were skipped",
-            manifest.skipped_tracks
+            "mirror export cannot safely prune with {} skipped",
+            counted(manifest.skipped_tracks, "playlist track", "playlist tracks")
         ));
     }
 
@@ -1424,8 +1425,8 @@ impl BackendService {
                             "export",
                             "export.pdb-preview-topology-risk",
                             format!(
-                                "PDB preview topology risk: {} issue(s)",
-                                topology_issues.len()
+                                "PDB preview topology risk: {}",
+                                counted(topology_issues.len(), "issue", "issues")
                             ),
                         ));
                         warnings.extend(topology_issues.into_iter().map(|issue| {

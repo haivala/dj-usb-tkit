@@ -88,7 +88,7 @@ test("formatPlaylistExportStatus describes the last export", () => {
     lastExportedAt: "2026-01-01T00:00:00Z",
     lastExportedUsbRoot: "/usb",
     lastExportedTrackCount: 5
-  }), /^Last exported .+ to \/usb \(5 track\(s\)\)\.$/);
+  }), /^Last exported .+ to \/usb \(5 tracks\)\.$/);
 });
 
 test("formatPlaylistExportStatus leads with whether the playlist is on the connected USB", () => {
@@ -101,7 +101,7 @@ test("formatPlaylistExportStatus leads with whether the playlist is on the conne
   assert.equal(formatPlaylistExportStatus({}, { sameNameExistsOnUsb: false }), "Not on this USB.");
   assert.match(
     formatPlaylistExportStatus(exported, { sameNameExistsOnUsb: false }),
-    /^Not on this USB\. Last exported .+ to \/other \(5 track\(s\)\)\.$/
+    /^Not on this USB\. Last exported .+ to \/other \(5 tracks\)\.$/
   );
 });
 

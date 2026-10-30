@@ -19,7 +19,7 @@ import { RELEASE_DATE_PATTERN, saveLibraryMetadataEdits, saveUsbMetadataEdits } 
 import { cloneTemplate } from "../../ui_utils.mjs";
 import { coverElement, markLastEditedRow } from "../../track_table.mjs";
 import { coverUrl, attachCoverFallbackHandlers } from "../library/actions.mjs";
-import { formatBpm } from "../../track_utils.mjs";
+import { counted, formatBpm } from "../../track_utils.mjs";
 import {
   STORAGE_KEY_CUE_START_ON_FIRST_BEAT,
   FRONTEND_DB_KEY_CUE_START_ON_FIRST_BEAT,
@@ -1816,7 +1816,7 @@ async function saveUsbAnalysisEdits(ctx, track, usbAnalysisPathRaw, payload) {
       localTrackId: track.localTrackId || null,
     });
     const n = saved.cues.length;
-    emitStatus(`Saved ${n} cue${n === 1 ? "" : "s"} to USB`);
+    emitStatus(`Saved ${counted(n, "cue")} to USB`);
     // Every loaded USB row of this file, and the library track the backend
     // also wrote (it resolves that one itself), with the app playlists
     // holding it.
@@ -1905,7 +1905,7 @@ async function saveLocalAnalysisEdits(ctx, localId, payload) {
       cues: payload.cues,
     });
     emitStatus(
-      `Saved ${saved.cues.length} cue${saved.cues.length === 1 ? "" : "s"}` +
+      `Saved ${counted(saved.cues.length, "cue")}` +
         (saved.anlzRegenerated ? "" : " (analysis cache not updated yet)")
     );
     ctx.showTrackRow(saved.track);

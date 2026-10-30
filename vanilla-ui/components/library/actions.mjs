@@ -3,7 +3,7 @@ import { narrowTrackSelectionToLoaded } from "../shared/track_selection.mjs";
 import { renderEmptyState } from "../shell/actions.mjs";
 import { cssEscape, cloneTemplate } from "../../ui_utils.mjs";
 import { fillBpmCell, fillKeyCell, fillYearCell, coverElement, setCueButtonState, formatTrackDuration, trackHasWaveform } from "../../track_table.mjs";
-import { REANALYZE_TOOLTIP } from "../../track_utils.mjs";
+import { REANALYZE_TOOLTIP, counted } from "../../track_utils.mjs";
 import {
   formatDurationMs,
   renderTrackListDurationSummary,
@@ -178,9 +178,9 @@ export async function relocateSourceRoot(ctx, oldRoot) {
   const unresolved = Number(result.missingAtNewRoot || 0) + Number(result.conflicts || 0);
   const updated = Number(result?.updated || 0);
   const partial = unresolved > 0
-    ? ` | ${unresolved} track(s) still unresolved`
+    ? ` | ${counted(unresolved, "track")} still unresolved`
     : "";
-  emitStatus(`Source relocated: ${updated} track path(s) updated${partial}`);
+  emitStatus(`Source relocated: ${counted(updated, "track path")} updated${partial}`);
 }
 
 // The detected DJ libraries' chips, in their own "Libraries" row. A library's
@@ -428,7 +428,7 @@ export async function scanLibrary(ctx) {
   const unanalyzedCount = Math.max(0, Number(result?.unanalyzedCount || 0));
 
   emitStatus(
-    `Library scan: ${scopedTrackCount} tracks across ${albumCount} albums (local DB rows indexed ${result.indexed}, updated ${result.updated}, removed ${result.removed}). Resolving waveform/BPM/key...`
+    `Library scan: ${counted(scopedTrackCount, "track")} across ${counted(albumCount, "album")} (local DB rows indexed ${result.indexed}, updated ${result.updated}, removed ${result.removed}). Resolving waveform/BPM/key...`
   );
 
   const analysis = unanalyzedCount > 0
@@ -441,11 +441,11 @@ export async function scanLibrary(ctx) {
   await ctx.refreshCurrentPlaylistTracks();
 
   const warningCount = ctx.countWarningsForStatus([...scanWarnings, ...warnings]);
-  const warningSuffix = warningCount ? ` (${warningCount} warning(s))` : "";
+  const warningSuffix = warningCount ? ` (${counted(warningCount, "warning")})` : "";
   const missingCount = state.librarySources.folders.filter((folder) => folder.missing).length;
-  const missingSuffix = missingCount ? ` | ${missingCount} source folder(s) missing` : "";
+  const missingSuffix = missingCount ? ` | ${counted(missingCount, "source folder")} missing` : "";
   emitStatus(
-    `Scan done: ${scopedTrackCount} tracks / ${albumCount} albums | analyzed ${analyzed}, failed ${failed}${incompleteSuffix}${warningSuffix}${missingSuffix}`,
+    `Scan done: ${counted(scopedTrackCount, "track")} / ${counted(albumCount, "album")} | analyzed ${analyzed}, failed ${failed}${incompleteSuffix}${warningSuffix}${missingSuffix}`,
     { warningCount }
   );
 }
@@ -537,7 +537,7 @@ async function importExternalLibrary(ctx, { command, path, label, logSource, cod
     );
   }
 
-  const suffix = notFound.length > 0 ? ` | ${notFound.length} file(s) not found (see event log)` : "";
+  const suffix = notFound.length > 0 ? ` | ${counted(notFound.length, "file")} not found (see event log)` : "";
   emitStatus(`${label} import done: ${result.indexed} new, ${result.updated} updated${suffix}`);
 }
 
@@ -557,7 +557,7 @@ export async function analyzeTrackIds(ctx, trackIds, modeLabel = "Analyze", opti
   // page the frontend has loaded), so an empty `ids` list is a valid request.
   const backendScoped = !!(options.playlistId || options.scopeToLibraryFilter);
   if (!ids.length && !backendScoped) return;
-  const countLabel = ids.length ? `${ids.length}` : "matching";
+  const countLabel = ids.length ? counted(ids.length, "track") : "matching tracks";
 
   let analyzed = 0;
   // Decoded fine, but analysis left something out (no BPM detected, ...).
@@ -567,7 +567,7 @@ export async function analyzeTrackIds(ctx, trackIds, modeLabel = "Analyze", opti
   const warnings = [];
   let hydratedItems = [];
 
-  emitStatus(`${modeLabel}: preparing ${countLabel} track(s)...`);
+  emitStatus(`${modeLabel}: preparing ${countLabel}...`);
 
   // Per-row "analyzing" state is driven by job:event (job_manager.mjs), which
   // only marks a track analyzing once the backend actually starts working on
@@ -593,7 +593,7 @@ export async function analyzeTrackIds(ctx, trackIds, modeLabel = "Analyze", opti
     const batchWarnings = Array.isArray(batch?.warnings) ? batch.warnings : [];
     warnings.push(...batchWarnings);
     hydratedItems = Array.isArray(batch?.items) ? batch.items : [];
-    emitStatus(`${modeLabel}: ${analyzed + incomplete + failed} track(s) processed...`);
+    emitStatus(`${modeLabel}: ${counted(analyzed + incomplete + failed, "track")} processed...`);
   } catch (err) {
     failed = ids.length;
     warnings.push(`batch analysis failed: ${err.message || err}`);
@@ -611,7 +611,7 @@ export async function analyzeTrackIds(ctx, trackIds, modeLabel = "Analyze", opti
     ctx.logWarnings("analysis", warnings, modeLabel);
   }
   const warningCount = ctx.countWarningsForStatus(warnings);
-  const warningSuffix = warningCount ? ` | (${warningCount} warning(s))` : "";
+  const warningSuffix = warningCount ? ` | (${counted(warningCount, "warning")})` : "";
   const incompleteSuffix = incomplete ? `, incomplete ${incomplete}` : "";
   emitStatus(`${modeLabel} done: analyzed ${analyzed}, failed ${failed}${incompleteSuffix}${warningSuffix}`, { warningCount });
   const processed = analyzed + incomplete + failed;
@@ -620,7 +620,7 @@ export async function analyzeTrackIds(ctx, trackIds, modeLabel = "Analyze", opti
       level: "info",
       source: "analysis",
       code: "analysis.batch_done",
-      message: `${modeLabel}: ${processed} track(s) in ${formatDurationMs(elapsedMs)} (analyzed ${analyzed}, failed ${failed}${incompleteSuffix})`
+      message: `${modeLabel}: ${counted(processed, "track")} in ${formatDurationMs(elapsedMs)} (analyzed ${analyzed}, failed ${failed}${incompleteSuffix})`
     });
   }
   return { analyzed, incomplete, failed, warnings };

@@ -1353,7 +1353,7 @@ fn strict_repair_preview_and_apply_repopulate_edb_for_exported_playlist_gap_case
         repair_data
             .applied_fixes
             .iter()
-            .any(|line| line.contains("merged 1 playlist(s)")),
+            .any(|line| line.contains("merged 1 playlist")),
         "strict repair should use the PDB-primary repopulation path: {repair_data:?}"
     );
 
@@ -1679,7 +1679,7 @@ fn strict_repair_pdb_primary_repopulates_thin_edb_and_restores_strict_parity() {
         repair_data
             .applied_fixes
             .iter()
-            .any(|line| line.contains("merged 1 playlist(s)")),
+            .any(|line| line.contains("merged 1 playlist")),
         "strict repair should take the PDB-primary repopulation path: {repair_data:?}"
     );
     assert!(
@@ -1746,7 +1746,7 @@ fn strict_repair_carries_the_edb_rating_and_colour_into_the_pdb() {
         repair_data
             .applied_fixes
             .iter()
-            .any(|line| line.contains("merged 1 playlist(s)")),
+            .any(|line| line.contains("merged 1 playlist")),
         "strict repair should run: {repair_data:?}"
     );
 
@@ -1843,9 +1843,9 @@ fn strict_repair_writes_nothing_the_merge_does_not_change() {
     assert!(
         data.applied_fixes
             .iter()
-            .any(|line| line.contains("merged 1 playlist(s)")
-                && line.contains("eDB: 0 row(s) added, 0 changed")
-                && line.contains("PDB: 0 track(s) added, 0 changed")),
+            .any(|line| line.contains("merged 1 playlist")
+                && line.contains("eDB: 0 rows added, 0 changed")
+                && line.contains("PDB: 0 tracks added, 0 changed")),
         "{:#?}",
         data.applied_fixes
     );
@@ -2273,7 +2273,7 @@ fn strict_repair_chooses_richer_side_when_membership_matches_but_metadata_differ
         repair_pdb_data
             .applied_fixes
             .iter()
-            .any(|line| line.contains("merged 1 playlist(s)")),
+            .any(|line| line.contains("merged 1 playlist")),
         "expected PDB-primary repair for metadata-only mismatch: {repair_pdb_data:?}"
     );
     let after_pdb = parity_detail_for_playlist(&backend_pdb, &usb_pdb, &playlist_pdb);
@@ -2312,7 +2312,7 @@ fn strict_repair_chooses_richer_side_when_membership_matches_but_metadata_differ
         repair_edb_data
             .applied_fixes
             .iter()
-            .any(|line| line.contains("merged 1 playlist(s)")),
+            .any(|line| line.contains("merged 1 playlist")),
         "expected eDB-primary repair for metadata-only mismatch: {repair_edb_data:?}"
     );
     let after_edb = parity_detail_for_playlist(&backend_edb, &usb_edb, &playlist_edb);
@@ -2507,7 +2507,7 @@ fn strict_repair_restores_path_only_pdb_mismatch_from_edb() {
         repair_data
             .applied_fixes
             .iter()
-            .any(|line| line.contains("merged 1 playlist(s)")),
+            .any(|line| line.contains("merged 1 playlist")),
         "path-only case should rewrite PDB from richer eDB data: {repair_data:?}"
     );
 
@@ -2613,7 +2613,7 @@ fn strict_repair_restores_unresolved_pdb_dictionary_ids_from_edb() {
         repair_data
             .applied_fixes
             .iter()
-            .any(|line| line.contains("merged 1 playlist(s)")),
+            .any(|line| line.contains("merged 1 playlist")),
         "dictionary-id case should rewrite PDB from richer eDB data: {repair_data:?}"
     );
 
@@ -2692,7 +2692,7 @@ fn strict_repair_source_selection_matrix_uses_supported_deltas() {
         repair_edb_data
             .applied_fixes
             .iter()
-            .any(|line| line.contains("merged 1 playlist(s)")),
+            .any(|line| line.contains("merged 1 playlist")),
         "matrix eDB-primary case should choose eDB as richer source: {repair_edb_data:?}"
     );
     assert!(
@@ -2747,7 +2747,7 @@ fn strict_repair_source_selection_matrix_uses_supported_deltas() {
         repair_pdb_data
             .applied_fixes
             .iter()
-            .any(|line| line.contains("merged 1 playlist(s)")),
+            .any(|line| line.contains("merged 1 playlist")),
         "matrix PDB-primary case should choose PDB as richer source: {repair_pdb_data:?}"
     );
     assert!(
@@ -4383,7 +4383,7 @@ fn repair_fix_beat_grid_rewrites_pre_0_3_7_grids_once() {
     assert!(
         data.applied_fixes
             .iter()
-            .any(|m| m == "Fix Beat Grid: fixed 1 bundle(s)"),
+            .any(|m| m == "Fix Beat Grid: fixed 1 bundle"),
         "expected the grid to be rewritten: {:#?} {:#?}",
         data.applied_fixes,
         data.warnings
@@ -4392,7 +4392,7 @@ fn repair_fix_beat_grid_rewrites_pre_0_3_7_grids_once() {
     assert!(
         data.warnings.iter().any(|w| w.code == "usb.repair.applied"
             && w.level == "info"
-            && w.message == "repair applied: Fix Beat Grid: fixed 1 bundle(s)"),
+            && w.message == "repair applied: Fix Beat Grid: fixed 1 bundle"),
         "expected the applied fix in the log: {:#?}",
         data.warnings
     );
@@ -4456,7 +4456,8 @@ fn diagnostics_flag_outdated_beat_grids_only_on_tracks_last_exported_by_older_ve
     let (status, detail) = analysis_check(&backend, &usb, "Beat grid format").expect("check");
     assert_eq!(status, "Warn");
     assert!(
-        detail.starts_with("1 track(s) have a beat grid in an outdated format")
+        detail.starts_with("Tracks with a beat grid in an outdated format")
+            && detail.contains("reject, so Beat Sync is unavailable on them: 1;")
             && detail.contains(&track_path),
         "{detail}"
     );
@@ -4728,7 +4729,7 @@ fn repair_relinks_a_renamed_audio_file_instead_of_removing_it() {
     assert!(
         data.applied_fixes
             .iter()
-            .any(|m| m == "Relink Moved Audio Files: relinked 1 track(s)"),
+            .any(|m| m == "Relink Moved Audio Files: relinked 1 track"),
         "applied {:#?} failed {:#?}",
         data.applied_fixes,
         data.failed_fixes
@@ -4818,7 +4819,7 @@ fn repair_removes_missing_and_adds_unrelated_unindexed_audio_in_one_pass() {
     assert!(
         data.applied_fixes
             .iter()
-            .any(|m| m.starts_with("Add Unindexed Audio to a Playlist: added 1 track(s)")),
+            .any(|m| m.starts_with("Add Unindexed Audio to a Playlist: added 1 track")),
         "{:#?}",
         data.applied_fixes
     );
@@ -4946,7 +4947,7 @@ fn repair_deletes_unindexed_copy_of_an_indexed_audio_file() {
     assert!(
         data.applied_fixes
             .iter()
-            .any(|m| m == "Remove Duplicate Audio Copies: deleted 1 file(s)"),
+            .any(|m| m == "Remove Duplicate Audio Copies: deleted 1 file"),
         "{:#?}",
         data.applied_fixes
     );
@@ -5625,7 +5626,9 @@ fn repair_detects_unindexed_audio_under_contents() {
             f.id == "add_unindexed_audio_playlist"
                 && f.supported
                 && !f.destructive
-                && f.description.contains("1 audio file(s)")
+                && f.description.contains(
+                    "in no playlist (e.g. after restoring the databases from a backup): 1.",
+                )
                 && f.description.contains("\"Unindexed\"")
                 && f.link.as_deref() == Some("event-log")
         }),
@@ -5659,7 +5662,7 @@ fn repair_adds_unindexed_audio_to_usb_playlist_in_one_pass() {
     assert!(
         data.applied_fixes
             .iter()
-            .any(|m| m.contains("added 1 track(s)")
+            .any(|m| m.contains("added 1 track")
                 && m.contains("\"Unindexed\"")
                 && m.contains("1 analysed from the audio")),
         "expected the fix to report the added track: applied {:#?} failed {:#?}",
@@ -5779,7 +5782,7 @@ fn repair_unindexed_audio_playlist_reuses_the_files_analysis_bundle() {
     assert!(
         data.applied_fixes
             .iter()
-            .any(|m| m.contains("added 1 track(s)") && !m.contains("without analysis")),
+            .any(|m| m.contains("added 1 track") && !m.contains("without analysis")),
         "applied {:#?} failed {:#?}",
         data.applied_fixes,
         data.failed_fixes

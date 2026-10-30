@@ -1,5 +1,6 @@
 //! File path utilities: sanitization, artwork/analysis export, pruning, manifest paths.
 
+use crate::utils::counted;
 use std::collections::{HashMap, HashSet};
 use std::io::{Cursor, Write};
 use std::path::{Path, PathBuf};
@@ -889,8 +890,8 @@ pub fn filter_prunable_stale_paths_for_playlist(
             "export",
             "export.prune-protected",
             format!(
-                "prune stale protected {} shared file(s) still referenced by other USB playlists",
-                protected.len()
+                "prune stale protected {} still referenced by other USB playlists",
+                counted(protected.len(), "shared file", "shared files")
             ),
         ));
     }

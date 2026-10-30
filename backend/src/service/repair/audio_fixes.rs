@@ -524,8 +524,8 @@ pub(super) fn apply_separate_shared_analysis(
         Ok((moved.len(), kept))
     } else {
         Err(BackendError::Internal(format!(
-            "gave {} track(s) their own analysis files; could not analyse the audio of: {}",
-            moved.len(),
+            "gave {} a new analysis file; could not analyse the audio of: {}",
+            counted(moved.len(), "track", "tracks"),
             failed.join(", ")
         )))
     }

@@ -148,7 +148,7 @@ test("removing a source folder deletes corresponding tracks from the library", a
   await expect(page.locator("#libraryTableBody")).toContainText("B One");
   await expect(page.locator("#libraryTableBody")).not.toContainText("A One");
   await expect(page.locator("#libraryTableBody")).not.toContainText("A Two");
-  await expect(page.locator("#statusText")).toContainText("removed 2 track(s)");
+  await expect(page.locator("#statusText")).toContainText("removed 2 tracks");
 });
 
 test("a long source folder path wraps inside the confirm dialog", async ({ page }) => {

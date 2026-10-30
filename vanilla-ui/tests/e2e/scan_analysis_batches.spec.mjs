@@ -866,7 +866,7 @@ test("scan applies per-piece row updates before track-ready status", async ({ pa
     const text = await page.locator("#statusText").textContent();
     return (text || "").includes("Scan analysis: 0/1 track(s) ready")
       || (text || "").includes("Analyzing")
-      || (text || "").includes("Scan done: 1 tracks / 1 albums | analyzed 1, failed 0");
+      || (text || "").includes("Scan done: 1 track / 1 album | analyzed 1, failed 0");
   }).toBeTruthy();
   await expect(page.locator("#libraryTotalDuration")).toContainText("1 without length");
 
@@ -885,7 +885,7 @@ test("scan applies per-piece row updates before track-ready status", async ({ pa
     const text = await page.locator("#statusText").textContent();
     return (text || "").includes("Scan analysis: 0/1 track(s) ready")
       || (text || "").includes("Analyzing")
-      || (text || "").includes("Scan done: 1 tracks / 1 albums | analyzed 1, failed 0");
+      || (text || "").includes("Scan done: 1 track / 1 album | analyzed 1, failed 0");
   }).toBeTruthy();
 
   await expect(page.locator("#statusText")).toContainText("analyzed 1, failed 0");
@@ -1095,7 +1095,7 @@ test("a scan's own warnings (a file found in two folders) reach the event log an
   });
   await page.goto("/");
   await page.locator("#scanLibraryBtn").click();
-  await expect(page.locator("#statusText")).toContainText("analyzed 1, failed 0 (1 warning(s))");
+  await expect(page.locator("#statusText")).toContainText("analyzed 1, failed 0 (1 warning)");
   await page.locator("#eventLogBtn").click();
   await expect(page.locator("#eventLogList")).toContainText(message);
 });
@@ -1191,9 +1191,9 @@ test("event log entries go to the session log file, which the Open log file butt
   await expect(page.locator("#statusText")).toContainText("analyzed 2, failed 0");
 
   await page.locator("#eventLogBtn").click();
-  await expect(page.locator("#eventLogList")).toContainText("2 track(s) in");
+  await expect(page.locator("#eventLogList")).toContainText("2 tracks in");
   const lines = await page.evaluate(() => window.__scanTestStats.logFileLines);
-  expect(lines.some((line) => line.startsWith("[info] [analysis] [analysis.batch_done] ") && line.includes("2 track(s) in"))).toBe(true);
+  expect(lines.some((line) => line.startsWith("[info] [analysis] [analysis.batch_done] ") && line.includes("2 tracks in"))).toBe(true);
 
   await page.locator("#eventLogOpenFileBtn").click();
   await expect.poll(async () => page.evaluate(() => window.__scanTestStats.openLogFileCalls)).toBe(1);
@@ -1551,7 +1551,7 @@ test("a failed analyze_new_tracks count is reported in the status line and the b
 
   await expect(page.locator("#statusText")).toContainText("done: analyzed 0, failed 1");
   await page.locator("#eventLogBtn").click();
-  await expect(page.locator("#eventLogList")).toContainText("1 track(s) in 1:23 (analyzed 0, failed 1)");
+  await expect(page.locator("#eventLogList")).toContainText("1 track in 1:23 (analyzed 0, failed 1)");
 });
 
 test("a track analysis couldn't finish (no BPM found) is reported as incomplete, not analyzed", async ({ page }) => {

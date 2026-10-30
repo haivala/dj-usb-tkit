@@ -1,3 +1,4 @@
+import { counted } from "../../track_utils.mjs";
 import { catchErr, handleTrackAction, resolveRowActionTrack } from "../shared/track_actions.mjs";
 import { bindTrackSelection, clearTrackSelection } from "../shared/track_selection.mjs";
 import { addSelectionToPlaylists } from "../shared/add_to_playlists.mjs";
@@ -126,7 +127,7 @@ export function bindPlaylistEvents(ctx) {
       state.currentPlaylistId = playlist.id;
       updateModeText();
       await switchView(playlist.id);
-      emitStatus(`Removed ${res.removed || 0} track(s) from ${playlist.name}`);
+      emitStatus(`Removed ${counted(res.removed || 0, "track")} from ${playlist.name}`);
     } catch (err) {
       console.error(err);
       emitStatus(`Remove failed: ${err.message || err}`);

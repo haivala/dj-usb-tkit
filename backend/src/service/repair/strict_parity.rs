@@ -204,14 +204,18 @@ pub(crate) fn sync_edb_playlist_sort_orders_from_pdb(
 /// One line for the repair outcome and the preview card.
 pub(super) fn strict_parity_summary(result: &StrictParityUpgradeApplyResult) -> String {
     format!(
-        "merged {} playlist(s); eDB: {} row(s) added, {} changed; PDB: {} track(s) added, {} changed, {} playlist(s) added, {} duplicate entry/entries removed",
-        result.merged_playlists,
-        result.edb_rows_inserted,
+        "merged {}; eDB: {} added, {} changed; PDB: {} added, {} changed, {} added, {} removed",
+        counted(result.merged_playlists, "playlist", "playlists"),
+        counted(result.edb_rows_inserted, "row", "rows"),
         result.edb_rows_updated,
-        result.pdb_tracks_inserted,
+        counted(result.pdb_tracks_inserted, "track", "tracks"),
         result.pdb_tracks_changed,
-        result.pdb_playlists_inserted,
-        result.duplicate_entries_removed,
+        counted(result.pdb_playlists_inserted, "playlist", "playlists"),
+        counted(
+            result.duplicate_entries_removed,
+            "duplicate entry",
+            "duplicate entries"
+        ),
     )
 }
 

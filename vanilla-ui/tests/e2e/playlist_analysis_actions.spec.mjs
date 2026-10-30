@@ -1058,7 +1058,7 @@ test("sidebar checkmarks show which playlists are on the connected USB", async (
   await page.locator('#navPlaylistList .nav-playlist-item[data-playlist-id="pl-1"]').click();
   await expect(page.locator("#playlistExportStatus")).toHaveText("On this USB.");
   await page.locator('#navPlaylistList .nav-playlist-item[data-playlist-id="pl-2"]').click();
-  await expect(page.locator("#playlistExportStatus")).toHaveText(/^Not on this USB\. Last exported .+ to \/OTHER_USB \(2 track\(s\)\)\.$/);
+  await expect(page.locator("#playlistExportStatus")).toHaveText(/^Not on this USB\. Last exported .+ to \/OTHER_USB \(2 tracks\)\.$/);
 });
 
 test("playlist track drag handle is disabled with a tooltip when additive export won't reorder it on the USB", async ({ page }) => {

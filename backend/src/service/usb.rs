@@ -1,5 +1,6 @@
 //! USB validation, playlist/history fetching, track inspection.
 
+use crate::utils::counted;
 use std::collections::{HashMap, HashSet};
 use std::path::Path;
 use std::sync::Arc;
@@ -520,8 +521,8 @@ fn hydrate_usb_page(
             Level::Info,
             "usb-import",
             &format!(
-                "{command}: superseded by a newer load after reading {read_count} of {} track(s) in {elapsed}ms ({sources})",
-                page.len()
+                "{command}: superseded by a newer load after reading {read_count} of {} in {elapsed}ms ({sources})",
+                counted(page.len(), "track", "tracks")
             ),
         );
     } else {
@@ -529,8 +530,8 @@ fn hydrate_usb_page(
             Level::Info,
             "usb-import",
             &format!(
-                "{command}: read {} track(s) in {elapsed}ms ({sources})",
-                page.len()
+                "{command}: read {} in {elapsed}ms ({sources})",
+                counted(page.len(), "track", "tracks")
             ),
         );
     }
@@ -1386,7 +1387,14 @@ impl BackendService {
                 Level::Info,
                 "usb-import",
                 "usb.playlists.collapsed-duplicates",
-                format!("collapsed {collapsed} duplicate playlist name(s) from USB sources"),
+                format!(
+                    "collapsed {} from USB sources",
+                    counted(
+                        collapsed,
+                        "duplicate playlist name",
+                        "duplicate playlist names"
+                    )
+                ),
             ));
         }
 
@@ -1421,7 +1429,10 @@ impl BackendService {
                     Level::Info,
                     "usb-import",
                     "usb.playlists.source-edb",
-                    format!("used eDB as playlist source for {edb_count} playlist(s)"),
+                    format!(
+                        "used eDB as playlist source for {}",
+                        counted(edb_count, "playlist", "playlists")
+                    ),
                 ));
             }
             if pdb_count > 0 {
@@ -1429,7 +1440,10 @@ impl BackendService {
                     Level::Info,
                     "usb-import",
                     "usb.playlists.source-pdb",
-                    format!("used PDB as playlist source for {pdb_count} playlist(s)"),
+                    format!(
+                        "used PDB as playlist source for {}",
+                        counted(pdb_count, "playlist", "playlists")
+                    ),
                 ));
             }
         }
@@ -1439,8 +1453,8 @@ impl BackendService {
                 "usb-import",
                 "usb.playlists.empty-source",
                 format!(
-                    "{} playlist(s) had zero static track entries in export data: {}",
-                    empty_source_playlists.len(),
+                    "{} with zero static track entries in export data: {}",
+                    counted(empty_source_playlists.len(), "playlist", "playlists"),
                     empty_source_playlists.join(", ")
                 ),
             ));
@@ -1721,7 +1735,10 @@ impl BackendService {
                     Level::Warn,
                     "usb-import",
                     "usb.remove.file-missing",
-                    format!("{} files already missing from USB", prune_result.missing),
+                    format!(
+                        "{} already missing from USB",
+                        counted(prune_result.missing, "file", "files")
+                    ),
                 ));
             }
             for path in &stale_paths {

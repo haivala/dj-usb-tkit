@@ -8,6 +8,7 @@ import {
   formatTrackListSummary,
   getHistoryDateValue,
   buildTracklistText,
+  counted,
 } from "../../track_utils.mjs";
 
 // Job types that scope a Tauri command to state.usbRoot -- while one of
@@ -850,7 +851,7 @@ export async function removeUsbPlaylist(ctx, playlist) {
   clearUsbDiagnostics(ctx);
   await refreshUsb(ctx);
   const warningCount = ctx.countWarningsForStatus(data.warnings);
-  const warningSuffix = warningCount ? ` | (${warningCount} warning(s))` : "";
+  const warningSuffix = warningCount ? ` | (${counted(warningCount, "warning")})` : "";
   emitStatus(
     `Removed USB playlist: ${playlist.name} [db ${data.removedFromEdb || 0}, pdb ${data.removedFromPdb || 0}]${warningSuffix}`,
     { warningCount }
@@ -907,16 +908,16 @@ export async function refreshUsb(ctx) {
   applyPlaylistUsbExportStatus(ctx, data.playlistUsbExportStatus);
 
   const usbTrackTotal = Number(data.playlistTrackTotal) || 0;
-  el.usbCountsText.textContent = `${state.usbPlaylists.length} playlists, ${usbTrackTotal} tracks`;
+  el.usbCountsText.textContent = `${counted(state.usbPlaylists.length, "playlist")}, ${counted(usbTrackTotal, "track")}`;
   renderUsbPlaylists(ctx);
   ctx.usbPlaylistTracksCtl.clear();
   // The freshly scanned status may flip an open local playlist's reorder lock.
   await ctx.renderCurrentPlaylistTracksFromState();
 
   const warningCount = ctx.countWarningsForStatus(data.warnings);
-  const warningSuffix = warningCount ? ` | (${warningCount} warning(s))` : "";
+  const warningSuffix = warningCount ? ` | (${counted(warningCount, "warning")})` : "";
   ctx.logWarnings("usb-import", data.warnings, "fetch_usb_playlists");
-  setProgress(true, 100, `Done — ${state.usbPlaylists.length} playlists, ${usbTrackTotal} tracks`);
+  setProgress(true, 100, `Done — ${counted(state.usbPlaylists.length, "playlist")}, ${counted(usbTrackTotal, "track")}`);
   emitStatus(`USB playlists loaded: ${state.usbPlaylists.length}${warningSuffix}`, { warningCount });
   ctx.scheduleProgressIdle(1200);
 }
@@ -1054,14 +1055,14 @@ export async function refreshHistory(ctx) {
   // Backend-owned: `fetch_usb_histories` always returns `counts` computed over
   // the full import -- the frontend renders them, never re-tallies.
   const counts = data.counts || {};
-  el.historyCountsText.textContent = `${counts.importedPlaylists || 0} sessions, ${counts.importedTracks || 0} tracks`;
+  el.historyCountsText.textContent = `${counted(counts.importedPlaylists || 0, "session")}, ${counted(counts.importedTracks || 0, "track")}`;
   state.selectedHistoryIndex = null;
   state.historyTracks = [];
   if (el.exportHistoryTracklistBtn) el.exportHistoryTracklistBtn.disabled = true;
   renderHistoryList(ctx);
   ctx.usbHistoryTracksCtl.clear();
   const warningCount = ctx.countWarningsForStatus(data.warnings);
-  const warningSuffix = warningCount ? ` | (${warningCount} warning(s))` : "";
+  const warningSuffix = warningCount ? ` | (${counted(warningCount, "warning")})` : "";
   ctx.logWarnings("usb-import", data.warnings, "fetch_usb_histories");
   emitStatus(`USB histories loaded: ${state.histories.length}${warningSuffix}`, { warningCount });
 }
@@ -1409,7 +1410,7 @@ async function runPlaylistExport(ctx, playlistId) {
     if (details?.validationType === "missing_analysis") {
       const missing = Number(details.missingTrackCount || 0);
       const total = Number(details.totalTrackCount || 0);
-      emitStatus(`Export blocked: ${missing}/${total} track(s) need analysis. Use Analyze Missing Tracks.`);
+      emitStatus(`Export blocked: ${missing} of ${counted(total, "track")} not analyzed yet. Use Analyze Missing Tracks.`);
     } else if (details?.validationType === "source_root_missing") {
       const missingRoot = Array.isArray(details.missingRoots) ? details.missingRoots[0] : "";
       const suffix = missingRoot ? `: ${missingRoot}` : "";
@@ -1429,13 +1430,13 @@ async function runPlaylistExport(ctx, playlistId) {
   }
   clearUsbDiagnostics(ctx);
   const warningCount = ctx.countWarningsForStatus(data.warnings);
-  const warningSuffix = warningCount ? ` | (${warningCount} warning(s))` : "";
+  const warningSuffix = warningCount ? ` | (${counted(warningCount, "warning")})` : "";
   const warningList = Array.isArray(data.warnings) ? data.warnings : [];
   if (warningList.length) {
     const infoCount = warningList.filter((entry) => ctx.warningEntryLevel(entry) === "info").length;
     if (warningCount > 0) {
       console.warn(
-        `Export completed with ${warningCount} warning/error entr${warningCount === 1 ? "y" : "ies"}${infoCount ? ` (+${infoCount} info)` : ""}.`
+        `Export completed with ${counted(warningCount, "warning/error entry", "warning/error entries")}${infoCount ? ` (+${infoCount} info)` : ""}.`
       );
     } else {
       console.info(
@@ -1445,7 +1446,7 @@ async function runPlaylistExport(ctx, playlistId) {
   }
   ctx.logWarnings("export", data.warnings, "export_to_usb");
   emitStatus(
-    `Export complete: ${playlist.name} - ${data.exportedTracks || 0} track(s), ${data.skippedTracks || 0} skipped${warningSuffix}${state.exportPruneStale ? " [sync: mirror]" : " [sync: additive]"}`,
+    `Export complete: ${playlist.name} - ${counted(data.exportedTracks || 0, "track")}, ${data.skippedTracks || 0} skipped${warningSuffix}${state.exportPruneStale ? " [sync: mirror]" : " [sync: additive]"}`,
     { warningCount }
   );
   await ctx.loadPlaylists();

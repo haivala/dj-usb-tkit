@@ -64,7 +64,10 @@ pub(crate) fn diagnose_contents_integrity(
     checks.push(DiagCheck {
         label: "Indexed tracks".to_string(),
         status: DiagStatus::Pass,
-        detail: format!("{indexed_count} indexed track path(s) in PDB/eDB"),
+        detail: format!(
+            "{} in PDB/eDB",
+            counted(indexed_count, "indexed track path", "indexed track paths")
+        ),
         link: None,
     });
 
@@ -117,13 +120,21 @@ pub(crate) fn diagnose_contents_integrity_db_only(
     checks.push(DiagCheck {
         label: "PDB indexed paths".to_string(),
         status: DiagStatus::Pass,
-        detail: format!("{pdb_indexed_count} canonical track path(s)"),
+        detail: counted(
+            pdb_indexed_count,
+            "canonical track path",
+            "canonical track paths",
+        ),
         link: None,
     });
     checks.push(DiagCheck {
         label: "eDB indexed paths".to_string(),
         status: DiagStatus::Pass,
-        detail: format!("{edb_indexed_count} canonical track path(s)"),
+        detail: counted(
+            edb_indexed_count,
+            "canonical track path",
+            "canonical track paths",
+        ),
         link: None,
     });
 
@@ -133,26 +144,43 @@ pub(crate) fn diagnose_contents_integrity_db_only(
         DiagStatus::Warn
     };
     let history_suffix = if history_only_count > 0 {
-        format!("; {history_only_count} history-only track(s)")
+        format!(
+            "; {}",
+            counted(
+                history_only_count,
+                "history-only track",
+                "history-only tracks"
+            )
+        )
     } else {
         String::new()
     };
-    let disagreement_detail = if pdb_only_count == 0
-        && edb_only_count == 0
-        && history_only_count == 0
-    {
-        "PDB/eDB canonical-path sets agree".to_string()
-    } else if pdb_only_count == 0 && edb_only_count == 0 {
-        format!("{history_only_count} history-only track(s)")
-    } else if pdb_only_count > 0 && edb_only_count > 0 {
-        format!(
-            "{pdb_only_count} PDB-only path(s); {edb_only_count} eDB-only path(s){history_suffix}"
-        )
-    } else if pdb_only_count > 0 {
-        format!("{pdb_only_count} PDB-only path(s){history_suffix}")
-    } else {
-        format!("{edb_only_count} eDB-only path(s){history_suffix}")
-    };
+    let disagreement_detail =
+        if pdb_only_count == 0 && edb_only_count == 0 && history_only_count == 0 {
+            "PDB/eDB canonical-path sets agree".to_string()
+        } else if pdb_only_count == 0 && edb_only_count == 0 {
+            counted(
+                history_only_count,
+                "history-only track",
+                "history-only tracks",
+            )
+        } else if pdb_only_count > 0 && edb_only_count > 0 {
+            format!(
+                "{}; {}{history_suffix}",
+                counted(pdb_only_count, "PDB-only path", "PDB-only paths"),
+                counted(edb_only_count, "eDB-only path", "eDB-only paths")
+            )
+        } else if pdb_only_count > 0 {
+            format!(
+                "{}{history_suffix}",
+                counted(pdb_only_count, "PDB-only path", "PDB-only paths")
+            )
+        } else {
+            format!(
+                "{}{history_suffix}",
+                counted(edb_only_count, "eDB-only path", "eDB-only paths")
+            )
+        };
     let agreement_link = if history_only_count > 0 {
         Some("event-log".to_string())
     } else {
@@ -364,8 +392,8 @@ pub(super) fn diagnose_beat_grid_format(
     check(
         DiagStatus::Warn,
         format!(
-            "{} track(s) have a beat grid in an outdated format that some players (e.g. the \
-             XDJ-AZ) reject, so Beat Sync is unavailable on them; e.g. {}; re-export them or \
+            "Tracks with a beat grid in an outdated format that some players (e.g. the \
+             XDJ-AZ) reject, so Beat Sync is unavailable on them: {}; e.g. {}; re-export or \
              run the repair (fix_beat_grid_header) to fix",
             outdated.len(),
             outdated
@@ -408,8 +436,12 @@ pub(crate) fn diagnose_analysis_integrity(
                 DiagStatus::Warn
             },
             detail: format!(
-                "{tracks_with_ref}/{total_tracks} track row(s) have analysis paths; {} unique bundle reference(s)",
-                path_refs.len()
+                "{tracks_with_ref}/{total_tracks} track rows with analysis paths; {}",
+                counted(
+                    path_refs.len(),
+                    "unique bundle reference",
+                    "unique bundle references"
+                )
             ),
             link: None,
         });
@@ -460,11 +492,15 @@ pub(crate) fn diagnose_analysis_integrity(
                 DiagStatus::Warn
             },
             detail: format!(
-                "{}/{} playlist-linked content row(s) have analysis paths; {} unique bundle reference(s) from {} playlist entries",
+                "{}/{} playlist-linked content rows with analysis paths; {} from {}",
                 refs.len(),
                 unique_content_rows,
-                unique_refs,
-                total_playlist_entries
+                counted(
+                    unique_refs,
+                    "unique bundle reference",
+                    "unique bundle references"
+                ),
+                counted(total_playlist_entries, "playlist entry", "playlist entries")
             ),
             link: None,
         });
@@ -725,7 +761,10 @@ where
             checks.push(DiagCheck {
                 label: edb_name.clone(),
                 status: DiagStatus::Fail,
-                detail: format!("present in eDB only ({edb_entries} entries), missing from PDB"),
+                detail: format!(
+                    "present in eDB only ({}), missing from PDB",
+                    counted(edb_entries, "entry", "entries")
+                ),
                 link: None,
             });
         }
@@ -749,9 +788,9 @@ where
             DiagStatus::Warn
         },
         detail: format!(
-            "{total_resolved}/{total_entries} entries resolve ({:.1}%) across {} playlists",
+            "{total_resolved}/{total_entries} entries resolve ({:.1}%) across {}",
             overall_rate * 100.0,
-            grouped_leaves.len()
+            counted(grouped_leaves.len(), "playlist", "playlists")
         ),
         link: None,
     });
@@ -759,7 +798,10 @@ where
         checks.push(DiagCheck {
             label: "DB-only playlists".to_string(),
             status: DiagStatus::Fail,
-            detail: format!("{edb_only_playlist_count} playlist(s) exist in eDB but not in PDB"),
+            detail: format!(
+                "{} in eDB but not in PDB",
+                counted(edb_only_playlist_count, "playlist", "playlists")
+            ),
             link: None,
         });
     }

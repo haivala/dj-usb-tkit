@@ -3,6 +3,7 @@
 // plus a field to create a new playlist. The ticked playlists all get the
 // selection in one call, which resolves the tracks once.
 
+import { counted } from "../../track_utils.mjs";
 import { cloneTemplate } from "../../ui_utils.mjs";
 import { applyAddResolutions, toAddTrackCandidatePayload } from "../playlist/actions.mjs";
 
@@ -66,10 +67,10 @@ export async function addSelectionToPlaylists(ctx, view, ids, rows) {
     level: "info",
     source: "playlist-add",
     code: "playlist_add.result",
-    message: `Added ${result.added} track(s) to ${names}`,
+    message: `Added ${counted(result.added, "track")} to ${names}`,
     details: `requested=${result.requested} | resolved=${result.resolved} | added=${result.added} | skipped=${result.skipped}`,
   });
-  emitStatus(`Added ${result.added} tracks (skipped ${result.skipped}) to ${names}`);
+  emitStatus(`Added ${counted(result.added, "track")} (skipped ${result.skipped}) to ${names}`);
 }
 
 // The Add to… dialog. `open({ count, load, create })` lists what `load()`
@@ -172,7 +173,7 @@ export function createAddToDialogController(el, document) {
       if (resolveFn) close(null);
       checked = new Set();
       el.addToNewName.value = "";
-      el.addToTitle.textContent = `Add ${count} track${count === 1 ? "" : "s"} to playlists`;
+      el.addToTitle.textContent = `Add ${counted(count, "track")} to playlists`;
       render(await load());
       request = { load, create };
       el.addToOverlay.hidden = false;

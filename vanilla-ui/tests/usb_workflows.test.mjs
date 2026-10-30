@@ -95,9 +95,9 @@ test("diagnostics guard, history refresh, and tracklist filename sanitizing stay
   await refreshHistory(ctx);
 
   assert.equal(ctx.state.histories[0].tracks[0].normalized, true);
-  assert.equal(ctx.el.historyCountsText.textContent, "1 sessions, 1 tracks");
+  assert.equal(ctx.el.historyCountsText.textContent, "1 session, 1 track");
   assert.equal(ctx.el.historyList.querySelectorAll("[data-history-index]").length, 1);
-  assert.match(status, /USB histories loaded: 1 \| \(1 warning\(s\)\)/);
+  assert.match(status, /USB histories loaded: 1 \| \(1 warning\)/);
 
   assert.equal(sanitizeTracklistFileName("HISTORY 003"), "HISTORY 003.txt");
   assert.equal(sanitizeTracklistFileName('Set: A/B "Live"?'), "Set- A-B -Live-.txt");

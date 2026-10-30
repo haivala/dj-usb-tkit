@@ -5,6 +5,7 @@
 // path. Each save answers with the saved tracks' whole rows, which the tables
 // show as they are.
 
+import { counted } from "../../track_utils.mjs";
 import { isUsbRootChangeBlocked } from "../usb/actions.mjs";
 
 // The shape of a release date the editors send: YYYY, YYYY-MM or YYYY-MM-DD
@@ -66,7 +67,7 @@ export async function editTrackSelection(ctx, view, ids, rows) {
   try {
     if (usb) await saveUsbMetadataEdits(ctx, rows, edits);
     else await saveLibraryMetadataEdits(ctx, ids, edits);
-    ctx.emitStatus(`Saved track details for ${count} track(s)${usb ? " to USB" : ""}`);
+    ctx.emitStatus(`Saved track details for ${counted(count, "track")}${usb ? " to USB" : ""}`);
   } catch (err) {
     ctx.emitStatus(`Could not save track details: ${err.message || err}`);
   }
@@ -150,7 +151,7 @@ export function createGroupEditDialogController(el, document) {
       if (resolveFn) close(null);
       touched = new Set();
       const count = Number(summary?.count || 0);
-      el.groupEditTitle.textContent = `Edit ${count} track${count === 1 ? "" : "s"}`;
+      el.groupEditTitle.textContent = `Edit ${counted(count, "track")}`;
       const list = el.groupEditGenreOptions;
       const { Option } = list.ownerDocument.defaultView;
       list.replaceChildren(...(summary?.genreOptions || []).map((name) => new Option(name)));

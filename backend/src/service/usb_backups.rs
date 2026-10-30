@@ -13,6 +13,7 @@
 //!
 //! Also backs the "Backups" UI panel: list / restore / delete.
 
+use crate::utils::plural;
 use std::collections::BTreeMap;
 use std::path::{Path, PathBuf};
 
@@ -166,7 +167,8 @@ fn reconcile_backups(
             }
             if archived > 0 {
                 notes.push(format!(
-                    "Archived {archived} older {stem} backup(s) to local cache"
+                    "Archived {archived} older {stem} {} to local cache",
+                    plural(archived, "backup", "backups")
                 ));
             }
         }
@@ -208,7 +210,8 @@ fn reconcile_backups(
             }
             if pruned > 0 {
                 notes.push(format!(
-                    "Pruned {pruned} old {stem} backup(s) beyond retention limit"
+                    "Pruned {pruned} old {stem} {} beyond retention limit",
+                    plural(pruned, "backup", "backups")
                 ));
             }
         }

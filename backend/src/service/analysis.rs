@@ -1,5 +1,6 @@
 //! Track analysis: BPM detection, key detection, waveform generation, cover art.
 
+use crate::utils::counted;
 use std::fs::File;
 use std::io::{BufRead, BufReader, Write};
 use std::path::{Path, PathBuf};
@@ -899,7 +900,10 @@ impl BackendService {
                                 Level::Info,
                                 "analysis",
                                 "analysis.cancelled",
-                                format!("Analysis cancelled: {completed_count} of {total} tracks analyzed"),
+                                format!(
+                                    "Analysis cancelled: {completed_count} of {} analyzed",
+                                    counted(total, "track", "tracks")
+                                ),
                             ));
                             break;
                         }

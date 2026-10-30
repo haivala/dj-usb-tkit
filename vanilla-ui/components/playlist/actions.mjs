@@ -10,6 +10,7 @@ import {
   renderTrackListDurationSummary,
   formatTrackListSummary,
   formatByteSize,
+  counted,
   ANALYZE_PLAYLIST_MISSING_TOOLTIP,
 } from "../../track_utils.mjs";
 
@@ -199,7 +200,7 @@ function formatLastExport(playlist) {
   // The drive's name (backend-resolved) reads better than its mount path.
   const drive = String(playlist?.lastExportedUsbName || "").trim() || root;
   const count = Number(playlist?.lastExportedTrackCount);
-  const countText = Number.isFinite(count) && count >= 0 ? `${count} track(s)` : "unknown track count";
+  const countText = Number.isFinite(count) && count >= 0 ? counted(count, "track") : "unknown track count";
   const driveText = drive ? ` to ${drive}` : "";
   return `Last exported ${formattedWhen}${driveText} (${countText}).`;
 }
@@ -424,7 +425,7 @@ export async function importExternalPlaylist(ctx) {
           ...item,
           sourceLabel: source.label,
           note: [
-            `${item.trackCount} ${item.trackCount === 1 ? "track" : "tracks"}`,
+            counted(item.trackCount, "track"),
             // Importing a list again updates the playlist its earlier import made.
             ...(item.existingPlaylist ? [`updates "${item.existingPlaylist.name}"`] : [])
           ].join(" · ")
@@ -507,18 +508,18 @@ export async function importExternalPlaylist(ctx) {
   }
   logFailed();
 
-  const suffix = skipped > 0 ? ` | ${skipped} track(s) skipped (see event log)` : "";
+  const suffix = skipped > 0 ? ` | ${counted(skipped, "track")} skipped (see event log)` : "";
   if (chosen.length === 1) {
     const { result } = done[0];
     const verb = result.updatedExisting ? "Updated" : "Imported";
-    emitStatus(`${verb} playlist ${result.name}: ${result.added} track(s)${suffix}`);
+    emitStatus(`${verb} playlist ${result.name}: ${counted(result.added, "track")}${suffix}`);
     return;
   }
   const added = done.reduce((sum, { result }) => sum + Number(result.added || 0), 0);
   const failedSuffix = failed.length
     ? ` | ${failed.length} failed: ${failed.map(({ item }) => item.name).join(", ")} (see event log)`
     : "";
-  emitStatus(`Imported ${done.length} of ${chosen.length} playlists: ${added} track(s)${suffix}${failedSuffix}`);
+  emitStatus(`Imported ${done.length} of ${counted(chosen.length, "playlist")}: ${counted(added, "track")}${suffix}${failedSuffix}`);
 }
 
 export async function deletePlaylist(ctx, playlistId) {
@@ -588,7 +589,7 @@ export async function addTracksToCurrentPlaylist(ctx, tracks) {
       level: "info",
       source: "playlist-add",
       code: "playlist_add.request",
-      message: `Adding ${candidates.length} track(s) to ${playlist.name}`,
+      message: `Adding ${counted(candidates.length, "track")} to ${playlist.name}`,
       details: `candidateIds=${candidates.map((item) => item.trackId || item.id || item.filePath || "unknown").join(",")}`
     });
     const add = await command("add_track_candidates_to_playlist", {
@@ -609,7 +610,7 @@ export async function addTracksToCurrentPlaylist(ctx, tracks) {
       level: "info",
       source: "playlist-add",
       code: "playlist_add.result",
-      message: `Added ${add.added} track(s) to ${playlist.name}`,
+      message: `Added ${counted(add.added, "track")} to ${playlist.name}`,
       details: `requested=${add.requested || candidates.length} | resolved=${add.resolved || 0} | added=${add.added} | skipped=${add.skipped}`
     });
     return add;
@@ -618,7 +619,7 @@ export async function addTracksToCurrentPlaylist(ctx, tracks) {
     emitStatus("No imported track IDs found to add");
     return;
   }
-  emitStatus(`Added ${result.added} tracks (skipped ${result.skipped}) to ${playlist.name}`);
+  emitStatus(`Added ${counted(result.added, "track")} (skipped ${result.skipped}) to ${playlist.name}`);
 }
 
 // Library "Add selected" / "Add all matching": the backend enumerates the
@@ -653,10 +654,10 @@ export async function addLibrarySelectionToCurrentPlaylist(ctx, { trackIds = [],
     level: "info",
     source: "playlist-add",
     code: "playlist_add.result",
-    message: `Added ${add?.added || 0} track(s) to ${playlist.name}`,
+    message: `Added ${counted(add?.added || 0, "track")} to ${playlist.name}`,
     details: `added=${add?.added || 0} | skipped=${add?.skipped || 0} | allMatching=${allMatching}`
   });
-  emitStatus(`Added ${add?.added || 0} tracks (skipped ${add?.skipped || 0}) to ${playlist.name}`);
+  emitStatus(`Added ${counted(add?.added || 0, "track")} (skipped ${add?.skipped || 0}) to ${playlist.name}`);
 }
 
 export function createSingleSubmit(handler) {
@@ -751,7 +752,7 @@ function renderPlaylistExportSpace(ctx, playlist) {
   const free = space.availableBytes == null ? null : `${formatByteSize(space.availableBytes)} free on USB`;
   const tracks = Number(space.tracksToCopy) || 0;
   const parts = tracks > 0
-    ? [`${tracks} of ${Number(playlist.listTrackCount)} tracks to copy`, formatByteSize(space.bytesToCopy)]
+    ? [`${tracks} of ${counted(Number(playlist.listTrackCount), "track")} to copy`, formatByteSize(space.bytesToCopy)]
     : ["All tracks on USB"];
   if (free) parts.push(free);
   const text = `${space.fits ? "" : "Doesn't fit: "}${parts.join(" · ")}`;

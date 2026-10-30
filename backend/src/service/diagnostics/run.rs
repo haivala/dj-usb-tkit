@@ -139,7 +139,11 @@ impl BackendService {
                 edb_access.checks.push(DiagCheck {
                     label: "eDB history".to_string(),
                     status: DiagStatus::Pass,
-                    detail: format!("{edb_h} playlists, {edb_hc} entries"),
+                    detail: format!(
+                        "{}, {}",
+                        counted(edb_h, "playlist", "playlists"),
+                        counted(edb_hc, "entry", "entries")
+                    ),
                     link: None,
                 });
             } else {
@@ -277,10 +281,10 @@ impl BackendService {
                     .collect::<Vec<_>>()
                     .join(", ");
                 format!(
-                    "{} row(s) with a misaligned UTF-16 or long ASCII string slot — \
+                    "{} with a misaligned UTF-16 or long ASCII string slot — \
                      freezes/comm-errors CDJ hardware while browsing; e.g. {examples}; run repair_pdb_track_string_alignment \
                      / repair_pdb_album_string_alignment / repair_pdb_artist_name_layout to fix",
-                    misaligned.len()
+                    counted(misaligned.len(), "row", "rows")
                 )
             };
             if matches!(status, DiagStatus::Fail) {
@@ -307,10 +311,10 @@ impl BackendService {
                 )
             } else {
                 let detail = format!(
-                    "{} artist row(s) with the name at a different offset than rekordbox uses; \
-                     an Engine DJ player importing export.pdb shows these tracks without an \
-                     artist; run repair_pdb_artist_name_layout to fix",
-                    artist_layout.len()
+                    "{} with the name at a different offset than rekordbox uses; \
+                     an Engine DJ player importing export.pdb shows the artist's tracks without \
+                     an artist; run repair_pdb_artist_name_layout to fix",
+                    counted(artist_layout.len(), "artist row", "artist rows")
                 );
                 raw_warnings.push(logging::log(
                     Level::Warn,
@@ -368,11 +372,11 @@ impl BackendService {
                 (
                     DiagStatus::Warn,
                     format!(
-                        "{} track(s) whose BPM/key in exportLibrary.db differs from export.pdb \
+                        "{} whose BPM/key in exportLibrary.db differs from export.pdb \
                          -- CDJs may show a different BPM/key than the app; e.g. {examples}; \
                          run the repair (fix_bpm_key_mismatch, which also checks the ANLZ beat \
                          grids) to fix",
-                        mismatches.len()
+                        counted(mismatches.len(), "track", "tracks")
                     ),
                 )
             };
@@ -428,10 +432,11 @@ impl BackendService {
                     "every track has its own analysis file".to_string()
                 } else {
                     format!(
-                        "{shared_tracks} track(s) share {} analysis file(s), so players can show \
+                        "{} sharing {}, so players can show \
                          one track's waveform and beat grid for another; run the repair \
                          (separate_shared_analysis) to fix",
-                        shared.len()
+                        counted(shared_tracks, "track", "tracks"),
+                        counted(shared.len(), "analysis file", "analysis files")
                     )
                 },
                 link: (!shared.is_empty()).then(|| "event-log".to_string()),

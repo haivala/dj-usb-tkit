@@ -171,12 +171,6 @@ pub(super) struct OverviewFacts {
 
 pub(super) const PREVIEW_FIXES_HINT: &str = "Preview Fixes shows what can be repaired.";
 
-/// `count` followed by the singular or plural phrase, for overview text
-/// ("1 track is …" / "3 tracks are …").
-pub(crate) fn counted(count: usize, one: &str, many: &str) -> String {
-    format!("{count} {}", if count == 1 { one } else { many })
-}
-
 /// The short "what does this mean for me" summary shown above the technical
 /// sections: one row per thing a DJ cares about, in everyday words. Built from
 /// the display sections so its status always agrees with them.

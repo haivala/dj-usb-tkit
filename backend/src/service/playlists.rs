@@ -153,8 +153,13 @@ pub(crate) fn save_imported_playlist(
 /// An external playlist import that found none of its tracks: failing beats
 /// creating an empty playlist.
 pub(crate) fn no_importable_tracks_error(name: &str, listed: usize) -> BackendError {
+    let tracks = if listed == 1 {
+        format!("the only track in {name:?} could not be imported")
+    } else {
+        format!("none of the {listed} tracks in {name:?} could be imported")
+    };
     BackendError::Validation(format!(
-        "none of the {listed} track(s) in {name:?} could be imported: files not found on this computer or not supported"
+        "{tracks}: files not found on this computer or not supported"
     ))
 }
 

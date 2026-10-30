@@ -1,3 +1,4 @@
+import { counted } from "../../track_utils.mjs";
 import { catchErr, handleTrackAction, resolveRowActionTrack } from "../shared/track_actions.mjs";
 import { bindTrackSelection } from "../shared/track_selection.mjs";
 import { addSelectionToPlaylists } from "../shared/add_to_playlists.mjs";
@@ -63,7 +64,7 @@ export function bindLibraryEvents(ctx) {
       await applyLibrarySources(ctx, result.sources);
       await resetAndLoadLibraryTracks(state.libraryQuery);
       await refreshCurrentPlaylistTracks();
-      emitStatus(`Source folders: ${folders().length} | removed ${result.removed} track(s) from library`);
+      emitStatus(`Source folders: ${folders().length} | removed ${counted(result.removed, "track")} from library`);
     })().catch(catchErr(emitStatus));
   });
 
@@ -112,7 +113,7 @@ export function bindLibraryEvents(ctx) {
           await refreshCurrentPlaylistTracks();
         });
         emitStatus(added.length
-          ? `Source folders: ${folders().length} | indexed ${Number(indexResult?.indexed || 0)} track(s)`
+          ? `Source folders: ${folders().length} | indexed ${counted(Number(indexResult?.indexed || 0), "track")}`
           : `Source folders unchanged: ${folders().length}`);
       })
       .catch(catchErr(emitStatus));

@@ -128,7 +128,7 @@ test("relocateSourceRoot shows the folders the backend answers with and reloads 
   assert.equal(ctx.el.sourceChipsContainer.querySelector(".source-chip-path").textContent, "/music/new");
   assert.deepEqual(allowed, [["/music/new"]], "the new folder's covers can load");
   assert.equal(refreshedPlaylists, 1);
-  assert.ok(statuses.at(-1).includes("2 track path(s) updated"));
+  assert.ok(statuses.at(-1).includes("2 track paths updated"));
 });
 
 test("refreshLibrarySources draws what get_library_sources answers", async () => {
@@ -168,13 +168,13 @@ test("scanRekordboxDb reports success, failure, and structured warnings", async 
     warnings: [{
       level: "warn",
       code: "rekordbox_db.scan_diag",
-      message: "3 file(s) had unreadable ANLZ analysis",
+      message: "3 files had unreadable ANLZ analysis",
       source: "scan_rekordbox_db"
     }]
   }));
   assert.equal(warning.logged.length, 1);
   assert.equal(warning.logged[0].warnings.length, 1);
   assert.equal(warning.logged[0].warnings[0].level, "warn");
-  assert.equal(warning.logged[0].warnings[0].message, "3 file(s) had unreadable ANLZ analysis");
+  assert.equal(warning.logged[0].warnings[0].message, "3 files had unreadable ANLZ analysis");
   assert.notEqual(typeof warning.logged[0].warnings[0].message, "object");
 });
