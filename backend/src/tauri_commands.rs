@@ -1981,10 +1981,7 @@ pub async fn download_essentia(
         let _ = std::fs::remove_file(&tmp_tgz);
 
         // Make the new install visible to analysis in this session without restart.
-        // SAFETY: single write after download completes; analysis threads read this lazily per-job.
-        unsafe {
-            std::env::set_var("DJTKIT_ESSENTIA_NODE_MODULES", &node_modules_dir);
-        }
+        crate::essentia_runtime::set_node_modules(node_modules_dir.clone());
 
         Ok(())
     }

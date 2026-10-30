@@ -588,8 +588,18 @@ impl BackendService {
                 "usb.player-menu.edb-write-failed",
                 format!("eDB write failed ({err}); restoring eDB from snapshot"),
             ));
-            if let Some(snapshot) = edb_snapshot.as_ref() {
-                let _ = std::fs::write(&edb_path, snapshot);
+            if let Some(snapshot) = edb_snapshot.as_ref()
+                && let Err(restore_err) = std::fs::write(&edb_path, snapshot)
+            {
+                warnings.push(logging::log(
+                    Level::Error,
+                    "usb-player-menu",
+                    "usb.player-menu.edb-restore-failed",
+                    format!(
+                        "eDB snapshot could not be put back ({restore_err}): {}",
+                        edb_path.display()
+                    ),
+                ));
             }
             // Deliberately no write_back_if_changed here: the local copy was
             // just restored to its pre-attempt state, so the real USB drive

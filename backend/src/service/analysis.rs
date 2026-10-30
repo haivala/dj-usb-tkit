@@ -399,6 +399,7 @@ impl EssentiaNodeWorker {
             .stdin(Stdio::piped())
             .stdout(Stdio::piped())
             .stderr(Stdio::inherit());
+        crate::essentia_runtime::apply_node_modules(&mut command);
         strip_appimage_lib_path(&mut command);
         crate::utils::suppress_console_window(&mut command);
         let mut child = command.spawn().map_err(|err| {
@@ -1963,10 +1964,8 @@ fn detect_bpm_key_with_essentia_js(
 fn resolve_essentia_worker_config() -> BackendResult<EssentiaWorkerConfig> {
     let node_bin = std::env::var_os("DJTKIT_ESSENTIA_NODE")
         .map_or_else(|| PathBuf::from("node"), PathBuf::from);
-    let runner_candidate = std::env::var_os("DJTKIT_ESSENTIA_RUNNER").map_or_else(
-        || PathBuf::from("../desktop/scripts/essentia_runner.cjs"),
-        PathBuf::from,
-    );
+    let runner_candidate = crate::essentia_runtime::runner()
+        .unwrap_or_else(|| PathBuf::from("../desktop/scripts/essentia_runner.cjs"));
     let runner_path = if runner_candidate.is_absolute() {
         runner_candidate
     } else {
@@ -2026,6 +2025,7 @@ fn run_essentia_request_once(
 ) -> BackendResult<Vec<u8>> {
     let mut command = Command::new(&config.node_bin);
     command.arg(&config.runner_path).arg(args.to_string());
+    crate::essentia_runtime::apply_node_modules(&mut command);
     strip_appimage_lib_path(&mut command);
     crate::utils::suppress_console_window(&mut command);
     let output = command.output().map_err(|err| {

@@ -37,6 +37,15 @@
   - **Fix (CRITICAL):** ...
 -->
 
+## Unreleased
+
+**Severity:** feature
+
+- **Chore:** The essentia analysis engine's runner and module paths are handed to the analysis
+  process directly instead of being written into the app's environment while it runs, which could
+  crash the app in rare cases. A repair whose database write fails and whose staged database then
+  can't be put back now says so in the Event Log instead of failing silently.
+
 ## 0.5.1
 
 **Severity:** critical — see item(s) marked **(CRITICAL)** below.

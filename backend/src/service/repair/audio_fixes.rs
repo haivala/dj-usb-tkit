@@ -1390,7 +1390,18 @@ impl BackendService {
         if let Some(tx) = tx
             && let Err(err) = tx.commit()
         {
-            let _ = std::fs::write(&pdb_path, &build.before);
+            if let Err(restore_err) = std::fs::write(&pdb_path, &build.before) {
+                warnings.push(logging::log(
+                    Level::Error,
+                    "usb-repair",
+                    "usb.repair.unindexed-audio.pdb-restore-failed",
+                    format!(
+                        "adding unindexed audio: eDB commit failed ({err}) and the staged PDB could \
+                         not be put back ({restore_err}): {}",
+                        pdb_path.display()
+                    ),
+                ));
+            }
             return Err(err.into());
         }
         Ok((manifest.tracks.len(), analysed, without_analysis))

@@ -800,7 +800,18 @@ pub(super) fn run_strict_parity_upgrade(
     }
     std::fs::write(&pdb_path, &build.bytes)?;
     if let Err(err) = tx.commit() {
-        let _ = std::fs::write(&pdb_path, &build.before);
+        if let Err(restore_err) = std::fs::write(&pdb_path, &build.before) {
+            warnings.push(logging::log(
+                Level::Error,
+                "usb-repair",
+                "usb.repair.strict-parity.pdb-restore-failed",
+                format!(
+                    "strict parity upgrade: eDB commit failed ({err}) and the staged PDB could not \
+                     be put back ({restore_err}): {}",
+                    pdb_path.display()
+                ),
+            ));
+        }
         return Err(err.into());
     }
     let _ = conn.execute_batch("PRAGMA wal_checkpoint(TRUNCATE);");

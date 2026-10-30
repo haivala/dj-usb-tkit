@@ -4,6 +4,7 @@ pub mod db;
 pub mod edb;
 pub mod engine_db;
 pub mod error;
+pub mod essentia_runtime;
 pub mod logging;
 pub mod metadata;
 pub mod metronome;
