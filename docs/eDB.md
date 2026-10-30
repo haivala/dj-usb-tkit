@@ -272,7 +272,7 @@ playlists (`attribute = 0`). Scoping the collision *check* or the
 reassignment *update* to `attribute = 0` lets a same-id folder row go
 undetected (or detected but left unmoved), so the subsequent `INSERT` fails
 with `UNIQUE constraint failed: playlist.playlist_id`. This surfaced on a
-real corrupted export (`USB_ANOTHER_FIX`) where several playlists that only
+real corrupted export (the additional-fix fixture) where several playlists that only
 existed in eDB (needing a fresh PDB-side id allocated via the
 `allocate_unique_playlist_id` closure in `apply_strict_parity_upgrade`,
 `backend/src/service/repair/strict_parity.rs`, which only avoids collisions against

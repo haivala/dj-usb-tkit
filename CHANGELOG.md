@@ -45,21 +45,25 @@
   highlight colour. One selector writes it to both databases; when rekordbox left them with
   different colours, the editor names both. Export and repair no longer change a colour set in
   rekordbox for the PDB alone.
-- **Improvement:** A USB the app initializes starts with a purple background colour on every
-  player, instead of the default.
 - **New feature:** A source folder inside another source folder, also through a symlink, is shown
   grouped under that folder's chip, labelled with its path inside it.
+- **Improvement:** A USB the app initializes starts with a purple background colour on every
+  player, instead of the default.
 - **Improvement:** The Player Menu editor's Add, Remove, Up and Down are applied by the backend to
   the menu on the USB, instead of the app sending a whole new menu built from what it last loaded.
   An edit that changes nothing, such as Up on the top item, no longer makes a USB backup.
 - **Improvement:** Counts in status messages, the Event Log, USB diagnostics and repair
   descriptions read naturally: "1 track", "3 tracks" instead of "track(s)", and no more "1 tracks".
-- **Fix:** Scan Library decides whether to analyze from the same tracks the analysis picks. Before,
-  it could skip analysis that imported library tracks needed, or start one that found nothing to do
-  for tracks rekordbox had already analyzed.
 - **Improvement:** The counts in status messages (warnings, skipped and unresolved tracks, the
   totals of a multi-playlist import) come from the backend; importing several rekordbox or Mixxx
   lists is one backend call that keeps going past a failed list.
+- **Fix:** A playlist track whose analysis files were deleted (for example with the analysis
+  cache) blocked the export while the playlist showed no tracks to analyze. It now counts as
+  unanalyzed, and Analyze Missing Tracks writes its files again, keeping an edited or imported
+  BPM, key and first beat.
+- **Fix:** Scan Library decides whether to analyze from the same tracks the analysis picks. Before,
+  it could skip analysis that imported library tracks needed, or start one that found nothing to do
+  for tracks rekordbox had already analyzed.
 - **Fix:** With a source folder and a folder inside it both switched on, the library listed the
   inner folder's tracks twice, inflating the track count, size and total time.
 

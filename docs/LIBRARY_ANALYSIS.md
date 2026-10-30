@@ -72,6 +72,9 @@ or a list of tracks, for checking changes to these steps.
 1. Scan/index sources to materialize tracks quickly.
 2. Build or update the target playlist.
 3. Use "Analyze Missing Tracks" for only that playlist's unanalyzed local tracks.
+   On a playlist, a track whose local analysis files (`DAT`/`EXT`) are gone
+   counts as unanalyzed too, as the export gate sees it; analyzing it writes
+   new files as a first analysis, so edited and imported values are kept.
 4. Export after missing-analysis count reaches zero.
 
 ### Analyze and Reanalyze

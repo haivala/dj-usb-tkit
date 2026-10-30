@@ -275,7 +275,7 @@ The main technical stages are:
 4. Write playlist/track metadata into PDB and eDB.
 5. Emit progress and warnings through the job event model.
 
-If playlist tracks are missing required analysis, export is blocked and UI instructs the user to run "Analyze Missing Tracks" for that playlist before retrying export.
+If playlist tracks are missing required analysis, export is blocked and UI instructs the user to run "Analyze Missing Tracks" for that playlist before retrying export. That button counts the same tracks the gate blocks, including analyzed tracks whose local analysis files are gone (`local_analysis_bundle_missing`). A USB-side bundle path can only be checked against the target stick; when only such files are missing, the message says to Reanalyze those tracks.
 
 Analysis bundle handling is copy-only during export. Export requires the track to already have a `DAT` + `EXT` bundle (plus `2EX` when one exists; rekordbox bundles from older analyses have none) and copies/reuses it even if the bundle is older or low-detail. Export does not decode source audio or regenerate ANLZ files; missing bundle files block export before media copy starts. See `docs/WAVEFORMS.md`.
 

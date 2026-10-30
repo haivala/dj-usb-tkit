@@ -358,6 +358,20 @@ impl BackendService {
         let rows = stmt.query_map(params![playlist_id], |row| row_to_track(row, true))?;
         let mut items = rows.collect::<Result<Vec<_>, _>>()?;
         apply_frontend_track_fields(conn, &mut items)?;
+        // The export gate also needs the analysis files, so a playlist track
+        // whose files are gone needs analysis even with its fields set:
+        // "Analyze Missing Tracks" then rewrites them instead of the export
+        // failing with nothing to click.
+        for track in &mut items {
+            if track.analysis_ready
+                && track
+                    .waveform_peaks_path
+                    .as_deref()
+                    .is_some_and(super::usb_utils::local_analysis_bundle_missing)
+            {
+                track.analysis_ready = false;
+            }
+        }
         Ok(items)
     }
 

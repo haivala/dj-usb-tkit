@@ -156,7 +156,9 @@ pub struct Track {
     pub is_usb_path: bool,
     /// Authoritative: true when the track has its core analysis (waveform
     /// peaks path + BPM > 0 + duration > 0). Computed fresh on every read
-    /// from the DB row -- not stored, no filesystem check. The frontend
+    /// from the DB row -- not stored, no filesystem check, except on playlist
+    /// tracks, which also need their local analysis files (as the export gate
+    /// does; see `local_analysis_bundle_missing`). The frontend
     /// treats this as the only signal for "needs analysis". See
     /// `service::has_core_analysis_fields`.
     pub analysis_ready: bool,

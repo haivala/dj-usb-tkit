@@ -860,6 +860,21 @@ pub(crate) fn analysis_bundle_exists(usb_root: &Path, anlz_path: &str) -> bool {
     path.with_extension("DAT").is_file() && path.with_extension("EXT").is_file()
 }
 
+/// Whether a library track's analysis bundle is gone from the local disk: an
+/// absolute `anlz_path` whose `.DAT` or `.EXT` is missing (see
+/// [`analysis_bundle_exists`]). A USB-side path (`/PIONEER/...`,
+/// `/Contents/...`) only resolves against a stick, so it is not checked here;
+/// the export gate checks it against the target.
+pub(crate) fn local_analysis_bundle_missing(anlz_path: &str) -> bool {
+    let normalized = anlz_path.trim().replace('\\', "/");
+    let usb_side = normalized.starts_with(USB_VENDOR_ROOT_PREFIX)
+        || normalized.starts_with(&format!("/{USB_CONTENTS_DIR}/"));
+    let path = Path::new(&normalized);
+    !usb_side
+        && path.is_absolute()
+        && !(path.with_extension("DAT").is_file() && path.with_extension("EXT").is_file())
+}
+
 pub(crate) fn load_existing_analysis_paths_by_content_path(
     usb_root: &Path,
     warnings: &mut Vec<WarningEntry>,

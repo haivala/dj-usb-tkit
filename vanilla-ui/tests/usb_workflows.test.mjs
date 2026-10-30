@@ -243,6 +243,21 @@ test("exportPlaylistToUsb reports local blockers and generic command failures", 
     "p1"
   );
   assert.match(status, /Export blocked: source folder is missing: \/music\/missing/);
+
+  // Missing analysis: unanalyzed tracks point to Analyze Missing Tracks;
+  // analyzed tracks whose files are gone, to Reanalyze.
+  const missingAnalysis = (details) => exportCtx(makeExportState(), {
+    emitStatus: (text) => { status = text; },
+    command: async () => {
+      const err = new Error("export blocked: missing required analysis");
+      err.details = { validationType: "missing_analysis", totalTrackCount: 3, ...details };
+      throw err;
+    }
+  });
+  await exportPlaylistToUsb(missingAnalysis({ missingTrackCount: 2, missingAnalysisBundleCount: 0 }), "p1");
+  assert.match(status, /Export blocked: 2 of 3 tracks not analyzed yet\. Use Analyze Missing Tracks\./);
+  await exportPlaylistToUsb(missingAnalysis({ missingTrackCount: 2, missingAnalysisBundleCount: 2 }), "p1");
+  assert.match(status, /Export blocked: the analysis files of 2 of 3 tracks are missing\. Select them and use Reanalyze\./);
 });
 
 test("exportPlaylistToUsb clears diagnostics after success and forwards backup option", async () => {

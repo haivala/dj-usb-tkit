@@ -1302,6 +1302,71 @@ fn add_tracks_to_playlist_dedupe_skip_counts_skipped_and_get_playlist_tracks_ord
 }
 
 #[test]
+fn playlist_tracks_with_their_analysis_files_gone_need_analysis() {
+    let (_dir, service) = test_service();
+    let anlz = tempfile::tempdir().expect("anlz dir");
+    let present = anlz.path().join("ANLZ0000.DAT");
+    for ext in ["DAT", "EXT"] {
+        std::fs::write(present.with_extension(ext), b"x").expect("bundle");
+    }
+    let gone = anlz.path().join("ANLZ0001.DAT");
+    let conn = service.db.connect().expect("connect");
+    for (id, waveform) in [
+        ("present", present.to_string_lossy().to_string()),
+        ("gone", gone.to_string_lossy().to_string()),
+        // Only a stick resolves this; the export gate checks it there.
+        (
+            "usb-side",
+            "/PIONEER/USBANLZ/P000/0000/ANLZ0000.DAT".to_string(),
+        ),
+    ] {
+        conn.execute(
+            "INSERT INTO tracks (id, title, artist, file_path, duration_ms, bpm, waveform_peaks_path, match_fingerprint, created_at, updated_at)
+             VALUES (?1, ?1, 'Artist', ?2, 200000, 120.0, ?3, ?4, datetime('now'), datetime('now'))",
+            params![id, format!("/music/{id}.mp3"), waveform, build_track_match_fingerprint(id, "Artist", None)],
+        )
+        .expect("insert track");
+    }
+    drop(conn);
+    let playlist = service
+        .create_playlist(CreatePlaylistRequest {
+            name: "PL".to_string(),
+        })
+        .expect("create playlist");
+    service
+        .add_tracks_to_playlist(AddTracksToPlaylistRequest {
+            playlist_id: playlist.playlist_id.clone(),
+            track_ids: vec!["present".into(), "gone".into(), "usb-side".into()],
+        })
+        .expect("add tracks");
+
+    let tracks = service
+        .get_playlist_tracks(GetPlaylistTracksRequest {
+            playlist_id: playlist.playlist_id.clone(),
+            ..Default::default()
+        })
+        .expect("get playlist tracks");
+    assert_eq!(tracks.unanalyzed_count, 1);
+    let ready: Vec<_> = tracks
+        .items
+        .iter()
+        .map(|t| (t.id.as_str(), t.analysis_ready))
+        .collect();
+    assert_eq!(
+        ready,
+        [("present", true), ("gone", false), ("usb-side", true)]
+    );
+    // "Analyze Missing Tracks" picks the same track.
+    let conn = service.db.connect().expect("connect");
+    assert_eq!(
+        service
+            .collect_playlist_unanalyzed_track_ids(&conn, &playlist.playlist_id, "")
+            .expect("collect"),
+        ["gone"]
+    );
+}
+
+#[test]
 fn get_playlist_tracks_list_totals_ignore_search() {
     let (_dir, service) = test_service();
     let conn = service.db.connect().expect("connect");

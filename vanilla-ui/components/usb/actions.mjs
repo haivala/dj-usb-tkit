@@ -1501,7 +1501,15 @@ async function runPlaylistExport(ctx, playlistId) {
     if (details?.validationType === "missing_analysis") {
       const missing = Number(details.missingTrackCount || 0);
       const total = Number(details.totalTrackCount || 0);
-      emitStatus(`Export blocked: ${missing} of ${counted(total, "track")} not analyzed yet. Use Analyze Missing Tracks.`);
+      const filesMissing = Number(details.missingAnalysisBundleCount || 0);
+      // Analyzed tracks whose analysis files aren't there (e.g. a USB-side
+      // path the target stick doesn't hold): Analyze Missing Tracks skips
+      // them, Reanalyze writes new files.
+      if (filesMissing > 0 && filesMissing === missing) {
+        emitStatus(`Export blocked: the analysis files of ${missing} of ${counted(total, "track")} are missing. Select them and use Reanalyze.`);
+      } else {
+        emitStatus(`Export blocked: ${missing} of ${counted(total, "track")} not analyzed yet. Use Analyze Missing Tracks.`);
+      }
     } else if (details?.validationType === "source_root_missing") {
       const missingRoot = Array.isArray(details.missingRoots) ? details.missingRoots[0] : "";
       const suffix = missingRoot ? `: ${missingRoot}` : "";

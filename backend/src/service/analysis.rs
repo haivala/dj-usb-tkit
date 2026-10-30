@@ -86,7 +86,8 @@ const TRACK_ANALYSIS_UPDATE_SQL: &str = r#"
 /// "N need analysis" figures shown in the UI (`Track::analysis_ready`,
 /// `GetPlaylistTracksData::unanalyzed_count`, the scan status line, the
 /// source-folder "analyzed" dot) and the set actually picked for auto-analysis
-/// always agree. Key (`tonality`) and embedded artwork are deliberately NOT
+/// always agree. A playlist's figures and analysis also count a track whose
+/// local analysis files are gone (`load_playlist_tracks_ordered`). Key (`tonality`) and embedded artwork are deliberately NOT
 /// gated here -- backfilling those is a hydration concern, not "needs analysis".
 pub(crate) const MISSING_CORE_ANALYSIS_SQL: &str = "(COALESCE(TRIM(waveform_peaks_path), '') = '' \
      OR bpm IS NULL OR bpm <= 0 \
@@ -1355,9 +1356,11 @@ pub(crate) fn kept_analysis_values(
 const ANALYSIS_TRACK_COLS: &str = "id, title, file_path, bpm, bpm_analyzer, tonality, tonality_source, waveform_peaks_path, first_beat_ms, first_beat_ms_source";
 
 fn row_to_track_for_analysis(row: &rusqlite::Row<'_>) -> rusqlite::Result<LocalTrackForAnalysis> {
-    let has_waveform = row
-        .get::<_, Option<String>>(7)?
-        .is_some_and(|p| !p.trim().is_empty());
+    // A waveform whose files are gone counts as none: analyzing that track
+    // restores them, a first analysis that keeps edited and imported values.
+    let has_waveform = row.get::<_, Option<String>>(7)?.is_some_and(|p| {
+        !p.trim().is_empty() && !super::usb_utils::local_analysis_bundle_missing(&p)
+    });
     let existing_first_beat_ms = row
         .get::<_, Option<i64>>(8)?
         .and_then(|ms| u32::try_from(ms).ok());
@@ -2722,19 +2725,34 @@ mod tests {
     fn collect_tracks_for_analysis_reads_the_kept_values() {
         let conn = Connection::open_in_memory().expect("open db");
         setup_tracks_table(&conn);
-        conn.execute_batch(
+        let anlz = tempdir().expect("anlz dir");
+        for name in ["ANLZ0000", "ANLZ0001"] {
+            for ext in ["DAT", "EXT"] {
+                std::fs::write(anlz.path().join(format!("{name}.{ext}")), b"x").expect("bundle");
+            }
+        }
+        let a = anlz.path().display();
+        conn.execute_batch(&format!(
             r#"
             INSERT INTO tracks (id, title, file_path, bpm, bpm_analyzer, tonality, tonality_source, waveform_peaks_path, first_beat_ms, first_beat_ms_source, updated_at)
             VALUES
               ('fresh', 'Fresh', '/m/a.mp3', 140.0, 'mixxx', 'Dm', 'mixxx', NULL, 250, 'user', '1'),
-              ('analyzed', 'Analyzed', '/m/b.mp3', 140.0, 'user', 'Dm', 'user', '/a/ANLZ0000.DAT', 300, 'user', '2'),
+              ('analyzed', 'Analyzed', '/m/b.mp3', 140.0, 'user', 'Dm', 'user', '{a}/ANLZ0000.DAT', 300, 'user', '2'),
               ('imported', 'Imported', '/m/c.mp3', 140.0, 'rekordbox', NULL, NULL, NULL, 120, 'rekordbox', '3'),
               ('edited-bpm', 'Edited BPM', '/m/d.mp3', 141.0, 'user', NULL, NULL, NULL, 120, 'rekordbox', '4'),
-              ('reanalyzed', 'Reanalyzed', '/m/e.mp3', 140.0, 'rekordbox', NULL, NULL, '/a/ANLZ0001.DAT', 120, 'rekordbox', '5');
+              ('reanalyzed', 'Reanalyzed', '/m/e.mp3', 140.0, 'rekordbox', NULL, NULL, '{a}/ANLZ0001.DAT', 120, 'rekordbox', '5'),
+              ('files-gone', 'Files Gone', '/m/f.mp3', 141.0, 'user', 'Am', 'user', '{a}/ANLZ0002.DAT', 300, 'user', '6');
             "#,
-        )
+        ))
         .expect("insert tracks");
-        let ids = ["fresh", "analyzed", "imported", "edited-bpm", "reanalyzed"];
+        let ids = [
+            "fresh",
+            "analyzed",
+            "imported",
+            "edited-bpm",
+            "reanalyzed",
+            "files-gone",
+        ];
         let tracks = collect_tracks_for_analysis(&conn, &ids.map(String::from)).expect("collect");
         assert_eq!(
             tracks[0].kept,
@@ -2752,6 +2770,18 @@ mod tests {
         assert_eq!(tracks[2].kept_first_beat_ms, Some(120));
         assert_eq!(tracks[3].kept_first_beat_ms, None);
         assert_eq!(tracks[4].kept_first_beat_ms, None);
+        // A waveform whose files are gone is analyzed as a first analysis:
+        // the edited BPM, key and first beat stay.
+        assert_eq!(
+            tracks[5].kept,
+            KeptAnalysis {
+                bpm: Some(141.0),
+                key: Some("Am".to_string())
+            }
+        );
+        assert_eq!(tracks[5].kept_first_beat_ms, Some(300));
+        assert!(!tracks[5].reanalysis);
+        assert!(tracks[1].reanalysis);
     }
 
     #[test]

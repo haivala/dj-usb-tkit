@@ -310,7 +310,7 @@ Context:
 
 Artifacts:
 - The post-repair databases and the restored pre-repair ones, kept as the
-  `USB_HUGE_CANNOT_PARITY_FIX` fixture.
+  large corrupted-export fixture used for the parity-repair test.
 
 Validation questions:
 - None outstanding — fixed in 0.4.9 and hardware-confirmed `pass` on 0.4.9

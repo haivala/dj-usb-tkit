@@ -151,14 +151,14 @@ it stays greater than every remaining `seqpage`. See
 **Truncated table chain (a more severe interrupted-export variant): declared
 `last_page` beyond the physical file.** Unlike `empty_candidate` — which
 healthy exports routinely set beyond the file's current physical length as
-reserved headroom for future growth (confirmed on both `USB_REKORDBOX6` and
-`USB_LOTS_OF_TRACKS_RB`, where several tables' `empty_candidate`/
+reserved headroom for future growth (confirmed on both the Rekordbox 6 and
+large-library reference exports, where several tables' `empty_candidate`/
 `next_unused_page` exceed `total_pages` in an otherwise clean, accepted
 export) — a table's `last_page` must always reference a page that physically
 exists in the file. It is not a future candidate; it is the table's real,
 already-written tail.
 
-One corrupted reference export (`USB_ANOTHER_FIX`, tracks table) had:
+One corrupted reference export (the tracks table in the additional-fix fixture) had:
 
 - physical file: 510 pages (valid indices `0..509`);
 - `t00` table pointer: `empty_candidate=512`, `last_page=511` — both beyond
@@ -458,7 +458,7 @@ u16 offsets) only for far longer names. The newest id is the PDB's track count. 
 Slot 0 (the template row) carries no name and color 0. Unnamed rows are 40
 bytes; rekordbox's `"APECAR_red"` rows are 48, so its ring holds 80 slots,
 and once wrapped its ids alternate in slots 1/2 (slot 0 keeps the template
-row). A CDJ writes the same shape into rows it adds (`"Chiphead 256GB"`, 52
+row). A CDJ writes the same shape into rows it adds (a 14-character name, 52
 bytes). Players compare t19 with the eDB and give communication errors when
 they disagree on the name or song count. Byte 9 is the player's background
 (menu highlight) colour, which rekordbox keeps apart from the eDB's
