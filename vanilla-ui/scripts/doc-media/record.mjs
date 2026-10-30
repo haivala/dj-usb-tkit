@@ -242,7 +242,9 @@ function buildFixture(work) {
 
 // --- 2. Browser session + capture ---
 
-async function openApp(browser, fixture, opts) {
+// `sourcesOpen: false` closes the Sources accordion, as a click on its header
+// does, so the GIFs show more of the Library.
+async function openApp(browser, fixture, opts, { sourcesOpen = true } = {}) {
   const ctx = await browser.newContext({ viewport: VIEWPORT, deviceScaleFactor: 1, colorScheme: "dark" });
   await ctx.addInitScript({
     content: `window.__DOC_GIF_FIXTURE__=${JSON.stringify(fixture)};window.__DOC_GIF_OPTS__=${JSON.stringify(opts)};`,
@@ -254,6 +256,10 @@ async function openApp(browser, fixture, opts) {
   });
   await page.goto(BASE_URL);
   await page.locator("#libraryTableBody .track-grid-row", { hasText: EDITOR_TITLE }).waitFor();
+  if (!sourcesOpen) {
+    await page.locator("#sourceFilterHeader").click();
+    await page.locator("#sourceBar.collapsed").waitFor({ state: "attached" });
+  }
   await page.waitForTimeout(300);
   return { ctx, page };
 }
@@ -266,8 +272,8 @@ async function openEditor(page) {
   return page.locator("#trackDetailWaveform").boundingBox();
 }
 
-async function openSession(browser, fixture, opts) {
-  const { ctx, page } = await openApp(browser, fixture, opts);
+async function openSession(browser, fixture, opts, view) {
+  const { ctx, page } = await openApp(browser, fixture, opts, view);
   const wf = await openEditor(page);
   return { ctx, page, wf };
 }
@@ -799,10 +805,11 @@ function shots(fixture) {
       },
     },
     {
-      // README / docs/USB_EXPORT.md: the Settings drawer.
+      // README / docs/USB_EXPORT.md: the Settings drawer, over the Library as
+      // the README hero shows it.
       name: "settings",
       caption: "Settings: theme, analysis, export sync mode and backups",
-      opts: { tauriRuntime: true },
+      opts: { tauriRuntime: true, externalLibraries: { mixxx: [] } },
       async run(page) {
         await page.locator("#settingsBtn").click();
         await page.mouse.move(VIEWPORT.width / 3, VIEWPORT.height - 2);
@@ -857,9 +864,10 @@ try {
   const wanted = (name) => !only.length || only.includes(name);
   for (const scene of scenes(fixture)) {
     if (!wanted(scene.name)) continue;
+    const view = { sourcesOpen: false };
     const { ctx, page, wf } = scene.editor === false
-      ? await openApp(browser, fixture, scene.opts)
-      : await openSession(browser, fixture, scene.opts);
+      ? await openApp(browser, fixture, scene.opts, view)
+      : await openSession(browser, fixture, scene.opts, view);
     const framesDir = join(work, `frames-${scene.name}`);
     let captured = null;
     await scene.run(page, wf, async (body, captureOpts) => {
