@@ -356,6 +356,10 @@ re-derive that lock condition from raw USB-scan/export-setting state.
 `analyze_new_tracks` returns hydrated changed track rows in `items`, so the UI can patch rows from
 the analysis response without a separate read, and `processed` (`analyzed + incomplete + failed`).
 
+`scan_library` returns `unanalyzedCount`: how many tracks an `analyze_new_tracks` call with
+`scopeToLibraryFilter` and no search would analyze (the whole library as shown, not just the
+scanned folders). Scan Library uses it to decide whether to run that analysis.
+
 `scan_library`, `analyze_new_tracks`, `fetch_usb_playlists`, `fetch_usb_histories`,
 `remove_usb_playlist` and `export_to_usb` return `warningCount` beside `warnings`: how many of
 them are warnings or errors, for the status line's "(N warnings)" link to the Event Log. It takes the raw

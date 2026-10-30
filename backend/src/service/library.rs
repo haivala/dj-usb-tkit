@@ -605,7 +605,7 @@ impl BackendService {
         // Post-scan library facts over the whole scanned set (not the page the
         // frontend reloads next): every on-disk file now has an indexed row and
         // removed files are gone, so a plain DB read is accurate.
-        let (scoped_track_count, album_count, unanalyzed_count) = {
+        let (scoped_track_count, album_count) = {
             let mut stmt = conn.prepare(&format!("SELECT {TRACK_COLS} FROM tracks"))?;
             let rows = stmt.query_map([], |row| row_to_track(row, false))?;
             let scoped: Vec<Track> = rows
@@ -618,7 +618,6 @@ impl BackendService {
                 })
                 .collect();
             let mut albums = std::collections::HashSet::<String>::new();
-            let mut unanalyzed = 0usize;
             for track in &scoped {
                 let album = track
                     .album
@@ -629,12 +628,12 @@ impl BackendService {
                 if !album.is_empty() {
                     albums.insert(album);
                 }
-                if !track_has_core_analysis_for_source_status(track) {
-                    unanalyzed += 1;
-                }
             }
-            (scoped.len(), albums.len(), unanalyzed)
+            (scoped.len(), albums.len())
         };
+        // What Scan Library's analysis would pick next (the whole library as
+        // shown, without a search), not just the tracks under the scanned roots.
+        let unanalyzed_count = self.library_filter_unanalyzed_track_ids(&conn, "")?.len();
 
         Ok(ScanLibraryData {
             job_id: Uuid::now_v7().to_string(),

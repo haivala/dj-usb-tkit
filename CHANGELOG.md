@@ -44,6 +44,9 @@
   An edit that changes nothing, such as Up on the top item, no longer makes a USB backup.
 - **Improvement:** Counts in status messages, the Event Log, USB diagnostics and repair
   descriptions read naturally: "1 track", "3 tracks" instead of "track(s)", and no more "1 tracks".
+- **Fix:** Scan Library decides whether to analyze from the same tracks the analysis picks. Before,
+  it could skip analysis that imported library tracks needed, or start one that found nothing to do
+  for tracks rekordbox had already analyzed.
 - **Improvement:** The counts in status messages (warnings, skipped and unresolved tracks, the
   totals of a multi-playlist import) come from the backend; importing several rekordbox or Mixxx
   lists is one backend call that keeps going past a failed list.

@@ -65,11 +65,19 @@ fn user_like_flow_imports_sources_analyzes_and_adds_from_library_usb_and_history
     let data_dir = root.path().join("data");
     let backend = BackendCommands::new(&data_dir).expect("create backend");
 
-    let scan_all = backend.scan_library(ScanLibraryRequest {
-        source_roots: vec![
+    // As in the app: the folders are added to the library, then scanned.
+    library_sources::show_only(
+        &backend,
+        vec![
             source_a.to_string_lossy().to_string(),
             source_b.to_string_lossy().to_string(),
         ],
+        false,
+        false,
+    );
+
+    let scan_all = backend.scan_library(ScanLibraryRequest {
+        source_roots: Vec::new(),
         incremental: true,
     });
     assert!(scan_all.ok, "scan all failed: {scan_all:?}");
@@ -86,6 +94,17 @@ fn user_like_flow_imports_sources_analyzes_and_adds_from_library_usb_and_history
         scan_all_data.unanalyzed_count, 4,
         "nothing is analyzed right after the first scan"
     );
+    // Scanning one folder (as adding a folder does) still counts what a Scan
+    // Library analysis would pick: the whole library as shown.
+    let scan_a = backend
+        .scan_library(ScanLibraryRequest {
+            source_roots: vec![source_a.to_string_lossy().to_string()],
+            incremental: true,
+        })
+        .data
+        .expect("scan source-a data");
+    assert_eq!(scan_a.scoped_track_count, 2);
+    assert_eq!(scan_a.unanalyzed_count, 4);
 
     // Remove just the file, not the whole source-b directory: the scanner
     // deliberately treats a vanished source ROOT as "not found" rather than
@@ -95,10 +114,7 @@ fn user_like_flow_imports_sources_analyzes_and_adds_from_library_usb_and_history
     // in scan_incremental_functional.rs for the other half of that contract.
     fs::remove_file(source_b.join("Artist - C132.wav")).expect("remove source-b track file");
     let scan_remove_source_b = backend.scan_library(ScanLibraryRequest {
-        source_roots: vec![
-            source_a.to_string_lossy().to_string(),
-            source_b.to_string_lossy().to_string(),
-        ],
+        source_roots: Vec::new(),
         incremental: true,
     });
     assert!(
@@ -113,15 +129,6 @@ fn user_like_flow_imports_sources_analyzes_and_adds_from_library_usb_and_history
     assert_eq!(remove_data.scoped_track_count, 3);
     assert_eq!(remove_data.unanalyzed_count, 3);
 
-    library_sources::show_only(
-        &backend,
-        vec![
-            source_a.to_string_lossy().to_string(),
-            source_b.to_string_lossy().to_string(),
-        ],
-        false,
-        false,
-    );
     let remaining_tracks = backend
         .browse_source_files(BrowseSourceFilesRequest {
             query: String::new(),
@@ -190,10 +197,7 @@ fn user_like_flow_imports_sources_analyzes_and_adds_from_library_usb_and_history
     // count and `Track::analysis_ready` agree.
     let rescan = backend
         .scan_library(ScanLibraryRequest {
-            source_roots: vec![
-                source_a.to_string_lossy().to_string(),
-                source_b.to_string_lossy().to_string(),
-            ],
+            source_roots: Vec::new(),
             incremental: true,
         })
         .data

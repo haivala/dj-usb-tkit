@@ -239,8 +239,11 @@ pub struct ScanLibraryData {
     /// Distinct non-empty album names among `scoped_track_count`.
     #[serde(default)]
     pub album_count: usize,
-    /// How many of `scoped_track_count` still need core analysis
-    /// (same predicate as `Track::analysis_ready`).
+    /// How many tracks an `analyze_new_tracks` call with
+    /// `scope_to_library_filter` and no search would analyze: the library as
+    /// shown (all switched-on folders and libraries), not just the scanned
+    /// roots, minus tracks analyzed by rekordbox and files that couldn't be
+    /// indexed.
     #[serde(default)]
     pub unanalyzed_count: usize,
     #[serde(default)]

@@ -2,7 +2,7 @@
 
 ## How it works
 
-Library management starts with source folders selected in the desktop UI. Scanning is intentionally split into two stages so the library becomes usable quickly: indexing first, then analysis.
+Library management starts with source folders selected in the desktop UI. Scanning is intentionally split into two stages so the library becomes usable quickly: indexing first, then analysis. Indexing only walks the folders and adds the audio files to the library, so it is quick; analysis is slow and runs as a separate job the user can pause or cancel. They stay separate commands (`scan_library`, `analyze_new_tracks`), and the frontend runs one after the other.
 
 The primary workflow is fast playlist preparation, not full-library pre-analysis. Users can add tracks to playlists immediately after indexing, then run analysis only for tracks needed for the current export target.
 

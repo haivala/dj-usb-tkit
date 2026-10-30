@@ -623,24 +623,7 @@ impl BackendService {
             {
                 Some(self.collect_playlist_unanalyzed_track_ids(&conn, playlist_id, &req.query)?)
             } else if req.scope_to_library_filter {
-                let rekordbox_db_shown = LibrarySources::load(&conn)?.rekordbox_db;
-                let visible = self.compute_visible_library_tracks(&conn, &req.query)?;
-                Some(
-                    visible
-                        .iter()
-                        // A track whose analysis data comes from an attached
-                        // master.db doesn't need local analysis -- matches the
-                        // frontend's old post-scan `pendingTrackIds` filter.
-                        // Nor does a file the scan couldn't index (a browse-only
-                        // row, `id == file_path`): there's no track to analyze.
-                        .filter(|track| {
-                            !(rekordbox_db_shown && track.rekordbox_db_source)
-                                && !track_has_core_analysis_for_source_status(track)
-                                && track.id != track.file_path
-                        })
-                        .map(|track| track.id.clone())
-                        .collect(),
-                )
+                Some(self.library_filter_unanalyzed_track_ids(&conn, &req.query)?)
             } else {
                 None
             }
@@ -1104,6 +1087,33 @@ impl BackendService {
             items,
             elapsed_ms: elapsed_ms_since(batch_started),
         })
+    }
+
+    /// The tracks a library-filter analysis (`scope_to_library_filter`) picks:
+    /// the ones the library shows for `query` that still need core analysis.
+    /// `scan_library`'s `unanalyzed_count` counts the same set, so the
+    /// frontend's "anything to analyze?" check after a scan matches what the
+    /// analysis then does.
+    pub(super) fn library_filter_unanalyzed_track_ids(
+        &self,
+        conn: &rusqlite::Connection,
+        query: &str,
+    ) -> BackendResult<Vec<String>> {
+        let rekordbox_db_shown = LibrarySources::load(conn)?.rekordbox_db;
+        let visible = self.compute_visible_library_tracks(conn, query)?;
+        Ok(visible
+            .iter()
+            // A track whose analysis data comes from an attached master.db
+            // doesn't need local analysis. Nor does a file the scan couldn't
+            // index (a browse-only row, `id == file_path`): there's no track
+            // to analyze.
+            .filter(|track| {
+                !(rekordbox_db_shown && track.rekordbox_db_source)
+                    && !track_has_core_analysis_for_source_status(track)
+                    && track.id != track.file_path
+            })
+            .map(|track| track.id.clone())
+            .collect())
     }
 
     pub fn set_analysis_paused(&self, paused: bool) -> BackendResult<SetAnalysisPausedData> {
