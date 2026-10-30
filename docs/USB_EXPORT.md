@@ -447,7 +447,7 @@ Player browse-category metadata is stored in two related places:
 
 The USB view's Player Menu editor shows and changes the visible categories:
 
-![The Player Menu editor: hidden categories on the left, the player's menu on the right](assets/player-menu.png)
+![The Player Menu editor: the background colour on top, hidden categories on the left, the player's menu on the right](assets/player-menu.png)
 
 App-initialized USBs seed the current 27-row PDB catalog, but existing USBs can
 carry smaller or source-specific PDB menu profiles. Normal playlist export

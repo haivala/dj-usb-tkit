@@ -68,7 +68,7 @@
     const id = `pl-import-${source}-${item.id}`;
     const items = byTitles(item.titles);
     playlists.push({ id, name: item.name, tracks: items, imported: true });
-    return ok({ playlistId: id, name: item.name, added: items.length, indexed: 0, notFound: [], warnings: [] });
+    return { playlistId: id, name: item.name, added: items.length, indexed: 0, notFound: [], warnings: [] };
   };
   // USB track rows by title, from every exported playlist.
   const usbTracksByTitle = new Map(
@@ -203,10 +203,17 @@
             return listExternal("rekordbox");
           case "list_mixxx_playlists":
             return listExternal("mixxx");
-          case "import_rekordbox_playlist":
-            return importPlaylist("rekordbox", r);
-          case "import_mixxx_playlist":
-            return importPlaylist("mixxx", r);
+          case "import_external_playlists": {
+            // Every ticked list in one call, as the backend imports them.
+            const results = r.items.map((item) => ({ playlist: importPlaylist(item.library, item) }));
+            return ok({
+              results,
+              imported: results.length,
+              failed: 0,
+              added: results.reduce((n, { playlist }) => n + playlist.added, 0),
+              skipped: 0,
+            });
+          }
           case "list_playlists":
             return ok({ items: playlistRows() });
           case "create_playlist": {
@@ -312,6 +319,9 @@
             return usbTracksPage(historySessions.find((h) => h.id === r.id)?.items || []);
           case "get_usb_player_menu_config":
             return usb.playerMenu;
+          case "get_usb_background_color":
+            // What an app-initialized USB holds: purple in both databases.
+            return ok({ pdbColor: 8, edbColor: 8, writable: true });
           case "export_to_usb":
             return replayExport(r.playlistId);
           case "browse_source_files": {
