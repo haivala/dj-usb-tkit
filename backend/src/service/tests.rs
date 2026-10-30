@@ -2271,6 +2271,85 @@ fn browse_source_files_lists_only_switched_on_present_folders() {
 }
 
 #[test]
+fn browse_source_files_lists_a_subfolders_tracks_once() {
+    let (_dir, service) = test_service();
+    let parent = tempfile::tempdir().expect("parent");
+    let parent_str = parent.path().to_string_lossy().to_string();
+    let child_str = format!("{parent_str}/sub");
+    std::fs::create_dir(&child_str).expect("subfolder");
+    let conn = service.db.connect().expect("connect");
+    for (id, folder) in [("top", &parent_str), ("nested", &child_str)] {
+        let path = format!("{folder}/{id}.mp3");
+        std::fs::write(&path, b"data").expect("write track");
+        insert_full_track(&conn, id, id, "Artist", &path, None, None, false);
+    }
+    drop(conn);
+    set_library_sources(&service, &[&parent_str, &child_str], false, false);
+    let listed = || {
+        let data = service
+            .browse_source_files(BrowseSourceFilesRequest {
+                limit: 100,
+                ..Default::default()
+            })
+            .expect("browse source files");
+        let mut ids: Vec<String> = data.items.into_iter().map(|track| track.id).collect();
+        ids.sort();
+        (ids, data.total, data.list_track_count)
+    };
+    assert_eq!(listed(), (vec!["nested".into(), "top".into()], 2, 2));
+
+    // Switching the parent off leaves the subfolder as a filter.
+    service
+        .set_source_folder_enabled(SetSourceFolderEnabledRequest {
+            path: parent_str.clone(),
+            enabled: false,
+        })
+        .expect("switch off");
+    assert_eq!(listed(), (vec!["nested".into()], 1, 1));
+}
+
+#[test]
+fn get_library_sources_nests_subfolders_under_their_parent() {
+    let (_dir, service) = test_service();
+    let base = tempfile::tempdir().expect("base");
+    let base_str = base.path().to_string_lossy().to_string();
+    let music = format!("{base_str}/music");
+    let other = format!("{base_str}/other");
+    for dir in [
+        format!("{music}/a/deep"),
+        format!("{music}/b"),
+        other.clone(),
+    ] {
+        std::fs::create_dir_all(dir).expect("folder");
+    }
+    // `link/b` names `music/b` through a symlink.
+    let link = format!("{base_str}/link");
+    std::os::unix::fs::symlink(&music, &link).expect("symlink");
+    let deep = format!("{music}/a/deep");
+    let a = format!("{music}/a");
+    let linked_b = format!("{link}/b");
+    set_library_sources(&service, &[&deep, &other, &music, &linked_b, &a], false, false);
+
+    let folders: Vec<(String, String, Option<String>)> = service
+        .get_library_sources()
+        .expect("sources")
+        .folders
+        .into_iter()
+        .map(|folder| (folder.path, folder.label, folder.parent))
+        .collect();
+    assert_eq!(
+        folders,
+        [
+            (other.clone(), other.clone(), None),
+            (music.clone(), music.clone(), None),
+            (linked_b.clone(), "b/".to_string(), Some(music.clone())),
+            (a.clone(), "a/".to_string(), Some(music.clone())),
+            (deep.clone(), "deep/".to_string(), Some(a.clone())),
+        ]
+    );
+}
+
+#[test]
 fn get_library_sources_reports_each_folder_on_its_own() {
     let (_dir, service) = test_service();
     let root_a = tempfile::tempdir().expect("root a");

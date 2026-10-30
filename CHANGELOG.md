@@ -39,6 +39,10 @@
 
 ## Unreleased
 
+**Severity:** feature
+
+- **New feature:** A source folder inside another source folder, also through a symlink, is shown
+  grouped under that folder's chip, labelled with its path inside it.
 - **Improvement:** The Player Menu editor's Add, Remove, Up and Down are applied by the backend to
   the menu on the USB, instead of the app sending a whole new menu built from what it last loaded.
   An edit that changes nothing, such as Up on the top item, no longer makes a USB backup.
@@ -50,6 +54,8 @@
 - **Improvement:** The counts in status messages (warnings, skipped and unresolved tracks, the
   totals of a multi-playlist import) come from the backend; importing several rekordbox or Mixxx
   lists is one backend call that keeps going past a failed list.
+- **Fix:** With a source folder and a folder inside it both switched on, the library listed the
+  inner folder's tracks twice, inflating the track count, size and total time.
 
 ## 0.4.11
 

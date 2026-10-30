@@ -79,7 +79,7 @@ test("Library: scrub-play after column sort plays the clicked row's track, not t
         invoke: async (command, payload = {}) => {
           if (command === "get_library_sources") {
             const folders = (window.__e2eSourceFolders || [])
-              .map((path) => ({ path, enabled: true, missing: false, fullyAnalyzed: false }));
+              .map((path) => ({ path, label: path, parent: null, enabled: true, missing: false, fullyAnalyzed: false }));
             return { ok: true, data: { folders, rekordboxDbEnabled: false, mixxxDbEnabled: false, everConfigured: folders.length > 0 } };
           }
           const request = payload?.request || payload;
@@ -185,7 +185,7 @@ test("Playlist: Play and Remove after column sort act on the clicked row's track
         invoke: async (command, payload = {}) => {
           if (command === "get_library_sources") {
             const folders = (window.__e2eSourceFolders || [])
-              .map((path) => ({ path, enabled: true, missing: false, fullyAnalyzed: false }));
+              .map((path) => ({ path, label: path, parent: null, enabled: true, missing: false, fullyAnalyzed: false }));
             return { ok: true, data: { folders, rekordboxDbEnabled: false, mixxxDbEnabled: false, everConfigured: folders.length > 0 } };
           }
           const request = payload?.request || payload;
@@ -284,7 +284,7 @@ test("Playlist: header click shows and clears the sorted-by hint like other trac
         invoke: async (command, payload = {}) => {
           if (command === "get_library_sources") {
             const folders = (window.__e2eSourceFolders || [])
-              .map((path) => ({ path, enabled: true, missing: false, fullyAnalyzed: false }));
+              .map((path) => ({ path, label: path, parent: null, enabled: true, missing: false, fullyAnalyzed: false }));
             return { ok: true, data: { folders, rekordboxDbEnabled: false, mixxxDbEnabled: false, everConfigured: folders.length > 0 } };
           }
           const request = payload?.request || payload;
@@ -362,7 +362,7 @@ test("Library: sorting by BPM column actually orders rows by numeric BPM value",
         invoke: async (command, payload = {}) => {
           if (command === "get_library_sources") {
             const folders = (window.__e2eSourceFolders || [])
-              .map((path) => ({ path, enabled: true, missing: false, fullyAnalyzed: false }));
+              .map((path) => ({ path, label: path, parent: null, enabled: true, missing: false, fullyAnalyzed: false }));
             return { ok: true, data: { folders, rekordboxDbEnabled: false, mixxxDbEnabled: false, everConfigured: folders.length > 0 } };
           }
           const request = payload?.request || payload;

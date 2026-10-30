@@ -53,7 +53,7 @@ function installSelectionMock(page, mockOpts = {}) {
         invoke: async (command, payload = {}) => {
           if (command === "get_library_sources") {
             const folders = (window.__e2eSourceFolders || [])
-              .map((path) => ({ path, enabled: true, missing: false, fullyAnalyzed: false }));
+              .map((path) => ({ path, label: path, parent: null, enabled: true, missing: false, fullyAnalyzed: false }));
             return { ok: true, data: { folders, rekordboxDbEnabled: false, mixxxDbEnabled: false, everConfigured: folders.length > 0 } };
           }
           window.__calls.push({ command, request: payload?.request ?? null });
@@ -398,7 +398,7 @@ function installPaginatedLibraryMock(page, { trackCount }) {
         invoke: async (command, payload = {}) => {
           if (command === "get_library_sources") {
             const folders = (window.__e2eSourceFolders || [])
-              .map((path) => ({ path, enabled: true, missing: false, fullyAnalyzed: false }));
+              .map((path) => ({ path, label: path, parent: null, enabled: true, missing: false, fullyAnalyzed: false }));
             return { ok: true, data: { folders, rekordboxDbEnabled: false, mixxxDbEnabled: false, everConfigured: folders.length > 0 } };
           }
           if (command === "clear_frontend_log") return "";

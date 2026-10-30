@@ -11,7 +11,7 @@ import { makeTestCtx } from "./test_helpers.mjs";
 // The backend's `get_library_sources` answer.
 function sources(folders, extra = {}) {
   return {
-    folders: folders.map((folder) => ({ enabled: true, missing: false, fullyAnalyzed: false, ...folder })),
+    folders: folders.map((folder) => ({ label: folder.path, parent: null, enabled: true, missing: false, fullyAnalyzed: false, ...folder })),
     rekordboxDbEnabled: false,
     mixxxDbEnabled: false,
     everConfigured: folders.length > 0,

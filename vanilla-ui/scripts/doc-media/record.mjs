@@ -225,9 +225,14 @@ function buildFixture(work) {
     return folder(a) - folder(b) || a.filePath.localeCompare(b.filePath);
   });
   fixture.detail.track = fixture.tracks.find((t) => t.id === fixture.detail.track.id);
-  fixture.sourceRoots = FOLDERS.map((f) => `${SHOWN_ROOT}/${f}`);
-  // Heinäkuu unchecked, so the Library shows the "Filtered" badge.
-  fixture.sourceRootEnabled = { [fixture.sourceRoots[0]]: true, [fixture.sourceRoots[1]]: false };
+  // The library's folder with its subfolders added too, grouped under its
+  // chip as the backend sends them (tree order, parent, label). Only Syyskuu
+  // is switched on, filtering the library to it, so the Library shows the
+  // "Filtered" badge.
+  fixture.sourceFolders = [
+    { path: SHOWN_ROOT, label: SHOWN_ROOT, parent: null, enabled: false },
+    ...FOLDERS.map((f, i) => ({ path: `${SHOWN_ROOT}/${f}`, label: `${f}/`, parent: SHOWN_ROOT, enabled: i === 0 })),
+  ];
   fixture.playlists = PLAYLISTS.map(({ titles, ...playlist }) => ({
     ...playlist,
     tracks: fixture.tracks.filter((t) => titles.includes(t.title)),
@@ -685,8 +690,10 @@ function shots(fixture) {
 
   return [
     {
-      // README hero: the Library with a USB connected, a playlist active, an
-      // imported Mixxx library, and more tracks than fit (so it scrolls). One
+      // README hero: the Library with a USB connected, a playlist active, the
+      // source folders grouped under the folder they lie in (one switched on
+      // as the filter), an imported Mixxx library, and more tracks than fit
+      // (so it scrolls). One
       // row hovered, so its play button shows on the cover art.
       name: "DJ-USB-Tkit",
       caption: "The Library, with a USB connected and a playlist active",

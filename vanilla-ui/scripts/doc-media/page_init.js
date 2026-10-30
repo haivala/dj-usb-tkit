@@ -16,23 +16,22 @@
 // the app needs to follow job events. The Settings drawer's version label is
 // hidden, so the media doesn't go stale with every release.
 (() => {
-  const { tracks, detail, sourceRoots, sourceRootEnabled, playlists, usb, usbHistory } = window.__DOC_GIF_FIXTURE__;
+  const { tracks, detail, sourceFolders, playlists, usb, usbHistory } = window.__DOC_GIF_FIXTURE__;
   const opts = window.__DOC_GIF_OPTS__ || {};
   const USB_ROOT = "/run/media/dj/Chiphead";
   // Never shown (the label is hidden); the update check just needs a value.
   const DOC_APP_VERSION = "0.0.0";
   const ls = window.localStorage;
-  // The backend's library sources: the folders (some switched off) and, when
-  // shown, an imported Mixxx library switched on in the Libraries row.
+  // The backend's library sources: the folders (some switched off, some
+  // inside another) and, when shown, an imported Mixxx library switched on
+  // in the Libraries row.
   const librarySources = {
-    folders: sourceRoots.map((path) => ({
-      path, enabled: sourceRootEnabled[path] !== false, missing: false, fullyAnalyzed: true,
-    })),
+    folders: sourceFolders.map((folder) => ({ ...folder, missing: false, fullyAnalyzed: true })),
     rekordboxDbEnabled: false,
     mixxxDbEnabled: !!opts.externalLibraries?.mixxx,
     everConfigured: true,
   };
-  const shownRoots = sourceRoots.filter((path) => sourceRootEnabled[path] !== false);
+  const shownRoots = sourceFolders.filter((folder) => folder.enabled).map((folder) => folder.path);
   ls.setItem("djusbtkit.helpSeen", "1");
   ls.setItem("djusbtkit.theme", "dark");
   ls.setItem("djusbtkit.accentHue", "270");

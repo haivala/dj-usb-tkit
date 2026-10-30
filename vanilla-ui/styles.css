@@ -1256,6 +1256,31 @@ main {
   flex: 1;
 }
 
+/* A folder with source folders inside it: its chip across the row, theirs
+   (just the path inside it, so sized to their text) wrapping under it,
+   indented, a guide line marking the group. */
+.source-chip-group {
+  grid-column: 1 / -1;
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 6px;
+  min-width: 0;
+}
+
+.source-chip-children {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  margin-left: 18px;
+  padding-left: 10px;
+  border-left: 1px solid var(--line);
+}
+
+.source-chip-children > .source-chip-group {
+  flex-basis: 100%;
+}
+
 .source-chip-analyzed {
   border-color: color-mix(in srgb, var(--success) 55%, var(--line));
   background: color-mix(in srgb, var(--success) 16%, var(--bg-raised));
@@ -1290,6 +1315,14 @@ main {
   white-space: nowrap;
   direction: rtl;
   text-align: left;
+}
+
+/* Left-to-right marks at both ends, so the right-to-left direction (which
+   puts the ellipsis on the left) keeps a path's leading and trailing "/"
+   where they are. */
+.source-chip-path::before,
+.source-chip-path::after {
+  content: "\200E";
 }
 
 .source-chip-remove {

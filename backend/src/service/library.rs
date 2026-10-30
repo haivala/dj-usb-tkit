@@ -754,7 +754,10 @@ impl BackendService {
         let mut seen_paths = HashSet::<String>::new();
         let mut items = Vec::with_capacity(listed.len());
         for (scanned_key, file) in &listed {
-            seen_paths.insert(scanned_key.clone());
+            // A folder inside another switched-on one lists its files again.
+            if !seen_paths.insert(scanned_key.clone()) {
+                continue;
+            }
             if let Some(existing) = indexed_by_path.get(scanned_key) {
                 items.push((*existing).clone());
                 continue;

@@ -220,7 +220,11 @@ export function renderSourceChips(ctx) {
   el.sourceChipsContainer.replaceChildren();
   renderLibraryChips(ctx);
 
-  state.librarySources.folders.forEach(({ path, enabled, missing, fullyAnalyzed }, index) => {
+  // A folder with folders inside it heads a group holding their chips.
+  const { folders } = state.librarySources;
+  const parents = new Set(folders.map((folder) => folder.parent).filter(Boolean));
+  const childrenOf = new Map();
+  folders.forEach(({ path, label, parent, enabled, missing, fullyAnalyzed }, index) => {
     const chip = cloneTemplate(document, "tplSourceChip");
     chip.classList.toggle("source-chip-analyzed", fullyAnalyzed);
     chip.classList.toggle("source-chip-missing", missing);
@@ -235,11 +239,19 @@ export function renderSourceChips(ctx) {
     if (missing) toggle.setAttribute("aria-label", "Source folder missing");
     const pathEl = chip.querySelector(".source-chip-path");
     const pathTitle = missing ? `Folder missing. Click to relocate: ${path}` : path;
-    pathEl.textContent = path;
+    pathEl.textContent = label;
     pathEl.dataset.tooltip = pathTitle;
     pathEl.setAttribute("aria-label", pathTitle);
     chip.querySelector(".source-chip-remove").dataset.sourceIndex = String(index);
-    el.sourceChipsContainer.appendChild(chip);
+    const container = childrenOf.get(parent) ?? el.sourceChipsContainer;
+    if (parents.has(path)) {
+      const group = cloneTemplate(document, "tplSourceChipGroup");
+      group.prepend(chip);
+      childrenOf.set(path, group.querySelector(".source-chip-children"));
+      container.appendChild(group);
+    } else {
+      container.appendChild(chip);
+    }
   });
 
   if (el.importPlaylistItem) {

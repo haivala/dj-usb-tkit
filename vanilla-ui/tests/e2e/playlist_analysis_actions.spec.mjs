@@ -186,7 +186,7 @@ test("playlist analyze-missing skips already-analyzed tracks and targets the res
         invoke: async (command, payload = {}) => {
           if (command === "get_library_sources") {
             const folders = (window.__e2eSourceFolders || [])
-              .map((path) => ({ path, enabled: true, missing: false, fullyAnalyzed: false }));
+              .map((path) => ({ path, label: path, parent: null, enabled: true, missing: false, fullyAnalyzed: false }));
             return { ok: true, data: { folders, rekordboxDbEnabled: false, mixxxDbEnabled: false, everConfigured: folders.length > 0 } };
           }
           const request = payload?.request || payload;
@@ -432,7 +432,7 @@ test("playlist actions hide Analyze Missing when unnecessary and keep Export vis
         invoke: async (command, payload = {}) => {
           if (command === "get_library_sources") {
             const folders = (window.__e2eSourceFolders || [])
-              .map((path) => ({ path, enabled: true, missing: false, fullyAnalyzed: false }));
+              .map((path) => ({ path, label: path, parent: null, enabled: true, missing: false, fullyAnalyzed: false }));
             return { ok: true, data: { folders, rekordboxDbEnabled: false, mixxxDbEnabled: false, everConfigured: folders.length > 0 } };
           }
           const request = payload?.request || payload;
@@ -577,7 +577,7 @@ test("playlist analyze-missing offers unanalyzed tracks that live on a USB drive
         invoke: async (command, payload = {}) => {
           if (command === "get_library_sources") {
             const folders = (window.__e2eSourceFolders || [])
-              .map((path) => ({ path, enabled: true, missing: false, fullyAnalyzed: false }));
+              .map((path) => ({ path, label: path, parent: null, enabled: true, missing: false, fullyAnalyzed: false }));
             return { ok: true, data: { folders, rekordboxDbEnabled: false, mixxxDbEnabled: false, everConfigured: folders.length > 0 } };
           }
           const request = payload?.request || payload;
@@ -685,7 +685,7 @@ test("selecting a playlist with tracks right after an empty one still paints its
         invoke: async (command, payload = {}) => {
           if (command === "get_library_sources") {
             const folders = (window.__e2eSourceFolders || [])
-              .map((path) => ({ path, enabled: true, missing: false, fullyAnalyzed: false }));
+              .map((path) => ({ path, label: path, parent: null, enabled: true, missing: false, fullyAnalyzed: false }));
             return { ok: true, data: { folders, rekordboxDbEnabled: false, mixxxDbEnabled: false, everConfigured: folders.length > 0 } };
           }
           const request = payload?.request || payload;
@@ -789,7 +789,7 @@ function installReorderTauriMock(page, { usbSameNamePlaylistName, exportPruneSta
         invoke: async (command, payload = {}) => {
           if (command === "get_library_sources") {
             const folders = (window.__e2eSourceFolders || [])
-              .map((path) => ({ path, enabled: true, missing: false, fullyAnalyzed: false }));
+              .map((path) => ({ path, label: path, parent: null, enabled: true, missing: false, fullyAnalyzed: false }));
             return { ok: true, data: { folders, rekordboxDbEnabled: false, mixxxDbEnabled: false, everConfigured: folders.length > 0 } };
           }
           const request = payload?.request || payload;
@@ -1308,7 +1308,7 @@ test("switching away from a sorted playlist commits the sort as its real order, 
         invoke: async (command, payload = {}) => {
           if (command === "get_library_sources") {
             const folders = (window.__e2eSourceFolders || [])
-              .map((path) => ({ path, enabled: true, missing: false, fullyAnalyzed: false }));
+              .map((path) => ({ path, label: path, parent: null, enabled: true, missing: false, fullyAnalyzed: false }));
             return { ok: true, data: { folders, rekordboxDbEnabled: false, mixxxDbEnabled: false, everConfigured: folders.length > 0 } };
           }
           const request = payload?.request || payload;
@@ -1430,7 +1430,7 @@ function installTwoPlaylistTauriMock(page) {
         invoke: async (command, payload = {}) => {
           if (command === "get_library_sources") {
             const folders = (window.__e2eSourceFolders || [])
-              .map((path) => ({ path, enabled: true, missing: false, fullyAnalyzed: false }));
+              .map((path) => ({ path, label: path, parent: null, enabled: true, missing: false, fullyAnalyzed: false }));
             return { ok: true, data: { folders, rekordboxDbEnabled: false, mixxxDbEnabled: false, everConfigured: folders.length > 0 } };
           }
           const request = payload?.request || payload;

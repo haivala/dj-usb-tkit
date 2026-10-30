@@ -417,6 +417,12 @@ pub struct BrowseSourceFilesData {
 #[serde(rename_all = "camelCase")]
 pub struct SourceFolder {
     pub path: String,
+    /// The chip's text: the path inside `parent` (`Kursa/`), else `path`.
+    pub label: String,
+    /// The nearest configured folder this one lies inside (through symlinks
+    /// too). The list comes in tree order: each folder right after its
+    /// parent's earlier children.
+    pub parent: Option<String>,
     /// Switched on in the library filter (a missing folder keeps its switch).
     pub enabled: bool,
     /// Not a directory right now (unplugged drive, moved folder).

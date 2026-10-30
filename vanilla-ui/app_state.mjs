@@ -9,8 +9,9 @@ export const EVENT_LOG_MAX = 500;
 export function createInitialState() {
   const state = {
     // The backend's `get_library_sources`: the source folders
-    // ({ path, enabled, missing, fullyAnalyzed }) and the imported libraries'
-    // switches.
+    // ({ path, label, parent, enabled, missing, fullyAnalyzed }, in tree
+    // order: a folder after the one it lies inside) and the imported
+    // libraries' switches.
     librarySources: { folders: [], rekordboxDbEnabled: false, mixxxDbEnabled: false, everConfigured: false },
     usbRoot: null,
     usbRecentRoots: [],

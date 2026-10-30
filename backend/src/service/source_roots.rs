@@ -19,6 +19,64 @@ pub(super) fn source_root_is_usable(root: &Path) -> bool {
     root.is_dir()
 }
 
+/// Where `root` really is, following symlinks; a missing folder is taken as
+/// written. With `Data` linking to `/mnt/raid`, a source `/mnt/raid/music/a`
+/// lies inside a source `/home/me/Data/music`.
+fn resolved_source_root(root: &str) -> String {
+    std::fs::canonicalize(root)
+        .map(|path| path.to_string_lossy().to_string())
+        .unwrap_or_else(|_| root.trim().to_string())
+}
+
+/// For each of `roots`, the index of the nearest other root it lies inside
+/// (resolved through symlinks), if any. Two roots naming the same folder
+/// don't nest: the first one keeps it, the later one is inside it.
+fn source_root_parents(roots: &[String]) -> Vec<Option<usize>> {
+    let resolved: Vec<String> = roots.iter().map(|root| resolved_source_root(root)).collect();
+    resolved
+        .iter()
+        .enumerate()
+        .map(|(index, child)| {
+            resolved
+                .iter()
+                .enumerate()
+                .filter(|&(other, parent)| {
+                    other != index
+                        && browse_path_matches_root(child, parent)
+                        && (browse_path_key(child) != browse_path_key(parent) || other < index)
+                })
+                .max_by_key(|(_, parent)| parent.len())
+                .map(|(other, _)| other)
+        })
+        .collect()
+}
+
+/// The indexes of `parents` depth first: each top-level folder in the order
+/// added, followed by the folders inside it, in the order added.
+fn source_tree_order(parents: &[Option<usize>]) -> Vec<usize> {
+    fn visit(index: usize, parents: &[Option<usize>], order: &mut Vec<usize>) {
+        order.push(index);
+        for child in (0..parents.len()).filter(|&child| parents[child] == Some(index)) {
+            visit(child, parents, order);
+        }
+    }
+    let mut order = Vec::with_capacity(parents.len());
+    for root in (0..parents.len()).filter(|&index| parents[index].is_none()) {
+        visit(root, parents, &mut order);
+    }
+    order
+}
+
+/// A nested folder's chip text: its path inside `parent`, ending in `/`.
+fn nested_source_label(root: &str, parent: &str) -> String {
+    let child = resolved_source_root(root);
+    let parent = resolved_source_root(parent);
+    match relative_path_under_source_root(&child, &parent) {
+        Some(relative) if !relative.is_empty() => format!("{}/", relative.trim_end_matches('/')),
+        _ => root.to_string(),
+    }
+}
+
 pub(crate) fn normalize_source_root_for_matching(value: &str) -> String {
     value
         .trim()
@@ -164,13 +222,19 @@ impl BackendService {
         } else {
             self.compute_all_library_tracks(conn, &present, ExternalLibraries::default())?
         };
-        let folders = sources
-            .roots
-            .iter()
-            .map(|root| {
+        let parents = source_root_parents(&sources.roots);
+        let folders = source_tree_order(&parents)
+            .into_iter()
+            .map(|index| {
+                let root = &sources.roots[index];
+                let parent = parents[index].map(|parent| sources.roots[parent].clone());
                 let missing = !present.contains(root);
                 SourceFolder {
                     path: root.clone(),
+                    label: parent
+                        .as_deref()
+                        .map_or_else(|| root.clone(), |parent| nested_source_label(root, parent)),
+                    parent,
                     enabled: sources.is_enabled(root),
                     missing,
                     fully_analyzed: !missing && folder_fully_analyzed(root, &tracks),

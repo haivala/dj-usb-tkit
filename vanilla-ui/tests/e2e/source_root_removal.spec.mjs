@@ -68,7 +68,7 @@ function installSourceRemovalMock(page) {
       core: {
         invoke: async (command, payload = {}) => {
           const sources = () => ({
-            folders: window.__sourceFolders.map((path) => ({ path, enabled: true, missing: false, fullyAnalyzed: false })),
+            folders: window.__sourceFolders.map((path) => ({ path, label: path, parent: null, enabled: true, missing: false, fullyAnalyzed: false })),
             rekordboxDbEnabled: false,
             mixxxDbEnabled: false,
             everConfigured: true,

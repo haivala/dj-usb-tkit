@@ -52,7 +52,7 @@ function installWaveformStartupMock(page) {
         invoke: async (command, payload = {}) => {
           if (command === "get_library_sources") {
             const folders = (window.__e2eSourceFolders || [])
-              .map((path) => ({ path, enabled: true, missing: false, fullyAnalyzed: false }));
+              .map((path) => ({ path, label: path, parent: null, enabled: true, missing: false, fullyAnalyzed: false }));
             return { ok: true, data: { folders, rekordboxDbEnabled: false, mixxxDbEnabled: false, everConfigured: folders.length > 0 } };
           }
           if (command === "clear_frontend_log") return "";
@@ -149,11 +149,12 @@ function installSourceChipAnalysisMock(page) {
     window.localStorage.setItem("djusbtkit.helpSeen", "1");
     // The backend's library sources; the source commands below change them
     // as the real backend does.
-    const folder = (path) => ({ path, enabled: true, missing: false, fullyAnalyzed: true });
+    const folder = (path) => ({ path, label: path, parent: null, enabled: true, missing: false, fullyAnalyzed: true });
     window.__sources = {
       folders: [folder("/music")], rekordboxDbEnabled: false, mixxxDbEnabled: false, everConfigured: true
     };
     window.__libraryToggles = [];
+    window.__folderToggles = [];
     window.__browseCalls = 0;
     window.__scanCalls = 0;
     window.__picked = false;
@@ -213,6 +214,12 @@ function installSourceChipAnalysisMock(page) {
             const added = payload.request.paths.filter((path) => !known.has(path));
             sources.folders.push(...added.map(folder));
             return { ok: true, data: { sources, added } };
+          }
+          if (command === "set_source_folder_enabled") {
+            const { path, enabled } = payload.request;
+            window.__folderToggles.push({ path, enabled });
+            sources.folders.find((f) => f.path === path).enabled = enabled;
+            return { ok: true, data: sources };
           }
           if (command === "set_external_library_enabled") {
             const { library, enabled } = payload.request;
@@ -374,6 +381,44 @@ test("source chips show analyzed green on startup and adding a source indexes it
     { library: "mixxx", enabled: false },
   ]);
   await expect.poll(async () => page.evaluate(() => window.__scanCalls)).toBe(1);
+});
+
+test("source folders inside another one show grouped under its chip", async ({ page }) => {
+  await installSourceChipAnalysisMock(page);
+  await page.addInitScript(() => {
+    // As the backend sends them: tree order, each with its parent and label.
+    const folder = (path, label, parent) => ({
+      path, label, parent, enabled: parent === null, missing: false, fullyAnalyzed: false
+    });
+    window.__sources.folders = [
+      folder("/music", "/music", null),
+      folder("/music/house", "house/", "/music"),
+      folder("/music/house/deep", "deep/", "/music/house"),
+      folder("/mnt/raid/music/techno", "techno/", "/music"),
+      folder("/other", "/other", null),
+    ];
+  });
+  await page.goto("/");
+
+  const container = page.locator("#sourceChipsContainer");
+  const group = container.locator(":scope > .source-chip-group");
+  await expect(group).toHaveCount(1);
+  await expect(group.locator(":scope > .source-chip .source-chip-path")).toHaveText("/music");
+  const children = group.locator(":scope > .source-chip-children");
+  await expect(children.locator(":scope > .source-chip .source-chip-path")).toHaveText(["techno/"]);
+  const nested = children.locator(":scope > .source-chip-group");
+  await expect(nested.locator(":scope > .source-chip .source-chip-path")).toHaveText("house/");
+  await expect(nested.locator(".source-chip-children .source-chip-path")).toHaveText("deep/");
+  await expect(container.locator(":scope > .source-chip .source-chip-path")).toHaveText("/other");
+  // The tooltip keeps the full path.
+  await expect(nested.locator(".source-chip-children .source-chip-path"))
+    .toHaveAttribute("data-tooltip", "/music/house/deep");
+
+  // A nested chip's switch is that folder's own.
+  await children.locator(":scope > .source-chip .source-chip-toggle").check();
+  await expect.poll(async () => page.evaluate(() => window.__folderToggles)).toEqual([
+    { path: "/mnt/raid/music/techno", enabled: true },
+  ]);
 });
 
 test("Import ticks rekordbox and Mixxx playlists, imports each and opens the first", async ({ page }) => {
