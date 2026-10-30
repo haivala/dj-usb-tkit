@@ -5922,3 +5922,131 @@ fn parse_max_last_page(bytes: &[u8], num_tables: usize) -> usize {
     }
     max_page
 }
+
+#[test]
+fn mirror_reexport_after_swapping_colliding_tracks_keeps_their_files() {
+    let root = tempdir().expect("temp root");
+    let media = root.path().join("media");
+    let usb = root.path().join("usb");
+    fs::create_dir_all(media.join("x/Same Album")).expect("create media dir");
+    fs::create_dir_all(media.join("y/Same Album")).expect("create media dir");
+    fs::create_dir_all(&usb).expect("create usb dir");
+    // Same artist and title, different files: the second exported gets `-1`.
+    fs::write(
+        media.join("x/Same Album/Artist 1 - Same.mp3"),
+        b"audio-first",
+    )
+    .expect("write track");
+    fs::write(
+        media.join("y/Same Album/Artist 1 - Same.mp3"),
+        b"audio-second-longer",
+    )
+    .expect("write track");
+
+    let data_dir = root.path().join("data");
+    let backend = BackendCommands::new(&data_dir).expect("create backend");
+    let initialized = backend.initialize_usb(InitializeUsbRequest {
+        usb_root: usb.to_string_lossy().to_string(),
+    });
+    assert!(initialized.ok, "initialize usb failed: {initialized:?}");
+    let scan = backend.scan_library(ScanLibraryRequest {
+        source_roots: vec![media.to_string_lossy().to_string()],
+        incremental: true,
+    });
+    assert!(scan.ok, "scan failed: {scan:?}");
+    library_sources::show_only(
+        &backend,
+        vec![media.to_string_lossy().to_string()],
+        false,
+        false,
+    );
+    let track_ids = backend
+        .browse_source_files(BrowseSourceFilesRequest {
+            query: String::new(),
+            limit: 20,
+            cursor: None,
+            ..Default::default()
+        })
+        .data
+        .expect("search data")
+        .items
+        .into_iter()
+        .map(|item| item.id)
+        .collect::<Vec<_>>();
+    assert_eq!(track_ids.len(), 2, "expected two tracks after scan");
+
+    let playlist_name = "Swap Colliding";
+    let playlist_id = backend
+        .create_playlist(CreatePlaylistRequest {
+            name: playlist_name.to_string(),
+        })
+        .data
+        .expect("playlist data")
+        .playlist_id;
+    let add = backend.add_library_selection_to_playlist(AddLibrarySelectionToPlaylistRequest {
+        playlist_id: playlist_id.clone(),
+        track_ids: track_ids.clone(),
+        ..Default::default()
+    });
+    assert!(add.ok, "add failed: {add:?}");
+    seed_tracks_as_analyzed(&data_dir, &track_ids);
+
+    let export = || {
+        backend.export_to_usb(ExportToUsbRequest {
+            usb_root: Some(usb.to_string_lossy().to_string()),
+            playlist_id: playlist_id.clone(),
+            options: Some(ExportToUsbOptions {
+                include_artwork: false,
+                include_analysis: false,
+                prune_stale: true,
+                ..Default::default()
+            }),
+        })
+    };
+    let first = export();
+    assert!(first.ok, "first export failed: {first:?}");
+    let paths = usb_playlist_track_paths(&usb, playlist_name);
+    assert_eq!(paths.len(), 2, "{paths:?}");
+    assert!(
+        paths.iter().any(|p| p.ends_with("-1.mp3")),
+        "no collision: {paths:?}"
+    );
+
+    let reordered = backend.reorder_playlist_tracks(ReorderPlaylistTracksRequest {
+        playlist_id: playlist_id.clone(),
+        ordered_track_ids: vec![track_ids[1].clone(), track_ids[0].clone()],
+        ..Default::default()
+    });
+    assert!(reordered.ok, "reorder failed: {reordered:?}");
+
+    let second = export();
+    assert!(second.ok, "second export failed: {second:?}");
+    // `usb_playlist_track_paths` lowercases, as FAT matches names.
+    let on_usb = || {
+        walkdir::WalkDir::new(usb.join("Contents"))
+            .into_iter()
+            .filter_map(Result::ok)
+            .filter(|entry| entry.file_type().is_file())
+            .map(|entry| {
+                format!("/{}", entry.path().strip_prefix(&usb).unwrap().display()).to_lowercase()
+            })
+            .collect::<Vec<_>>()
+    };
+    let paths = usb_playlist_track_paths(&usb, playlist_name);
+    assert_eq!(paths.len(), 2, "{paths:?}");
+    for path in &paths {
+        assert!(on_usb().contains(path), "exported file is gone: {path}");
+    }
+
+    // The playlist still owns both files: dropping a track prunes its file.
+    let removed = backend.remove_tracks_from_playlist(RemoveTracksFromPlaylistRequest {
+        playlist_id: playlist_id.clone(),
+        track_ids: vec![track_ids[0].clone()],
+    });
+    assert!(removed.ok, "remove failed: {removed:?}");
+    let third = export();
+    assert!(third.ok, "third export failed: {third:?}");
+    let kept = usb_playlist_track_paths(&usb, playlist_name);
+    assert_eq!(kept.len(), 1, "{kept:?}");
+    assert_eq!(on_usb(), kept, "the dropped track's file is pruned");
+}

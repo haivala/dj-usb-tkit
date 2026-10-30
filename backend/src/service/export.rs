@@ -26,9 +26,10 @@ use crate::audio_format::{AudioFormat, same_format_extension};
 use super::export_helpers::{
     ExportManifest, ExportManifestTrack, ExportPlaylistData, ExportTrackData, FileCloser,
     WriteExportLibraryDbResult, WriteExportPdbResult, analysis_bundle_claimable,
-    canonicalize_track_path_identity, collect_manifest_owned_paths, copy_if_different,
-    copy_wav_normalized_if_needed, ensure_analysis_bundle_ppth, export_analysis_bundle_for_track,
-    export_artwork_for_player, export_owned_files_setting_key, exported_media_target_path,
+    canonicalize_track_path_identity, collect_manifest_owned_paths,
+    collect_manifest_referenced_paths, copy_if_different, copy_wav_normalized_if_needed,
+    ensure_analysis_bundle_ppth, export_analysis_bundle_for_track, export_artwork_for_player,
+    export_owned_files_setting_key, exported_media_target_path,
     exported_media_target_path_with_ordinal, filter_prunable_stale_paths_for_playlist,
     is_safe_export_owned_path, normalize_owned_export_path, preview_pdb,
     prune_stale_export_owned_files, remove_orphaned_dropped_tracks_from_dbs, stable_u32_hash,
@@ -280,9 +281,11 @@ fn validate_export_manifest_before_db_write(
 
 /// Post-prune bookend to `validate_export_manifest_before_db_write`: re-checks
 /// that every file the freshly-exported playlist references still exists after
-/// the mirror-mode stale-file prune ran. `filter_prunable_stale_paths_for_playlist`
-/// already excludes in-playlist paths, so a hit here means the prune deleted
-/// something it shouldn't have and the drive needs the backup.
+/// the mirror-mode stale-file prune ran. A path the manifest references stays
+/// in the playlist's owned set, so it is never stale, and
+/// `filter_prunable_stale_paths_for_playlist` keeps other playlists' paths; a
+/// hit here means the prune deleted something it shouldn't have and the drive
+/// needs the backup.
 fn validate_export_manifest_after_prune(
     usb_root: &Path,
     manifest: &ExportManifest,
@@ -1567,8 +1570,17 @@ impl BackendService {
 
         if !export_dry_run {
             let owned_setting_key = export_owned_files_setting_key(&usb_root, &playlist.id);
-            let current_owned = collect_manifest_owned_paths(&usb_root, &manifest);
             let previous_owned = self.load_export_owned_files(&owned_setting_key)?;
+            // A file this playlist owned and still points at stays owned even
+            // when this run reused it instead of writing it (a track matched
+            // to its file under another name, e.g. after two same-named
+            // tracks swapped places), so it is never stale while referenced
+            // and is still pruned once the track leaves the playlist.
+            let referenced = collect_manifest_referenced_paths(&usb_root, &manifest);
+            let current_owned = collect_manifest_owned_paths(&usb_root, &manifest)
+                .into_iter()
+                .chain(previous_owned.intersection(&referenced).cloned())
+                .collect::<HashSet<_>>();
             if options.prune_stale {
                 let stale = previous_owned
                     .difference(&current_owned)

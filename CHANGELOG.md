@@ -37,6 +37,17 @@
   - **Fix (CRITICAL):** ...
 -->
 
+## 0.5.1
+
+**Severity:** critical — see item(s) marked **(CRITICAL)** below.
+
+- **Fix (CRITICAL):** An export in the default "Mirror playlist (exact match)" mode could delete
+  the audio files of tracks still in the playlist and then report "the stale-file prune removed a
+  file the exported playlist still references". It happened when two tracks with the same artist,
+  album and title swapped places in the playlist: each was matched to the other's file name on the
+  USB. A file the exported playlist points to is no longer removed; it is removed once its track
+  leaves the playlist.
+
 ## 0.5.0
 
 **Severity:** feature

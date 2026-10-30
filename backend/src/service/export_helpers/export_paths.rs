@@ -685,19 +685,37 @@ fn as_usb_relative_path(trimmed: &str) -> String {
 }
 
 pub fn collect_manifest_owned_paths(usb_root: &Path, manifest: &ExportManifest) -> HashSet<String> {
+    collect_manifest_paths(usb_root, manifest, true)
+}
+
+/// Every export-owned path the manifest's tracks point at (media, artwork with
+/// its `_m` variant, analysis bundle), whether this run wrote it or reused it.
+/// A mirror export never prunes one of these.
+pub fn collect_manifest_referenced_paths(
+    usb_root: &Path,
+    manifest: &ExportManifest,
+) -> HashSet<String> {
+    collect_manifest_paths(usb_root, manifest, false)
+}
+
+fn collect_manifest_paths(
+    usb_root: &Path,
+    manifest: &ExportManifest,
+    owned_only: bool,
+) -> HashSet<String> {
     let mut owned = HashSet::<String>::new();
     for track in &manifest.tracks {
-        if track.owns_exported_media {
+        if track.owns_exported_media || !owned_only {
             insert_if_owned_path(&mut owned, usb_root, &track.exported_path);
         }
-        if track.owns_artwork
+        if (track.owns_artwork || !owned_only)
             && let Some(path) = track.artwork_path.as_deref()
             && let Some(normalized) = normalize_owned_export_path(usb_root, path)
         {
             // Also claim the _m (medium) variant
             insert_with_medium_variant(&mut owned, normalized);
         }
-        if track.owns_waveform
+        if (track.owns_waveform || !owned_only)
             && let Some(path) = track.waveform_path.as_deref()
         {
             for bundle_path in analysis_bundle_path_variants(path) {
