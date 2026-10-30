@@ -291,11 +291,6 @@ fn init_backend_commands_with_recovery(data_dir: &Path) -> Result<BackendCommand
 }
 
 fn configure_desktop_analysis_runtime(_app: &tauri::AppHandle) -> Result<(), String> {
-    if std::env::var_os("DJTKIT_ENABLE_ESSENTIA_JS").is_none() {
-        // SAFETY: set once at startup before backend worker threads are spawned.
-        unsafe { std::env::set_var("DJTKIT_ENABLE_ESSENTIA_JS", "1") };
-    }
-
     let essentia_enabled = std::env::var("DJTKIT_ENABLE_ESSENTIA_JS")
         .ok()
         .map(|v| !(v == "0" || v.eq_ignore_ascii_case("false")))
@@ -318,7 +313,7 @@ fn configure_desktop_analysis_runtime(_app: &tauri::AppHandle) -> Result<(), Str
         .ok()
         .and_then(|p| p.parent().map(Path::to_path_buf));
 
-    let mut resolved_node = std::env::var_os("DJTKIT_ESSENTIA_NODE").map(PathBuf::from);
+    let mut resolved_node = backend::essentia_runtime::node();
     if resolved_node.is_none() {
         let mut runtime_candidates = Vec::<PathBuf>::new();
         if let Some(dir) = resource_dir.as_ref() {
@@ -361,8 +356,7 @@ fn configure_desktop_analysis_runtime(_app: &tauri::AppHandle) -> Result<(), Str
             .into_iter()
             .find(|p| is_file(p.as_path()))
         {
-            // SAFETY: set once at startup before backend worker threads are spawned.
-            unsafe { std::env::set_var("DJTKIT_ESSENTIA_NODE", &runtime) };
+            backend::essentia_runtime::set_node(runtime.clone());
             resolved_node = Some(runtime);
         }
 
@@ -436,7 +430,7 @@ fn configure_desktop_analysis_runtime(_app: &tauri::AppHandle) -> Result<(), Str
         ),
     );
 
-    let node_bin = std::env::var("DJTKIT_ESSENTIA_NODE").unwrap_or_else(|_| "node".to_string());
+    let node_bin = backend::essentia_runtime::node_bin();
     let runner_path = backend::essentia_runtime::runner()
         .unwrap_or_else(|| PathBuf::from("../desktop/scripts/essentia_runner.cjs"));
     if !runner_path.is_file() {
@@ -465,7 +459,7 @@ fn configure_desktop_analysis_runtime(_app: &tauri::AppHandle) -> Result<(), Str
                 "startup",
                 format!(
                     "analysis runtime unavailable: failed to start node '{}' with runner '{}': {err}; essentia disabled",
-                    node_bin,
+                    node_bin.display(),
                     runner_path.display()
                 ),
             );
@@ -480,7 +474,7 @@ fn configure_desktop_analysis_runtime(_app: &tauri::AppHandle) -> Result<(), Str
             "startup",
             format!(
                 "analysis runtime unavailable: node '{}' failed to execute runner '{}' (status: {}); essentia disabled",
-                node_bin,
+                node_bin.display(),
                 runner_path.display(),
                 probe.status
             ),

@@ -1962,8 +1962,7 @@ fn detect_bpm_key_with_essentia_js(
 }
 
 fn resolve_essentia_worker_config() -> BackendResult<EssentiaWorkerConfig> {
-    let node_bin = std::env::var_os("DJTKIT_ESSENTIA_NODE")
-        .map_or_else(|| PathBuf::from("node"), PathBuf::from);
+    let node_bin = crate::essentia_runtime::node_bin();
     let runner_candidate = crate::essentia_runtime::runner()
         .unwrap_or_else(|| PathBuf::from("../desktop/scripts/essentia_runner.cjs"));
     let runner_path = if runner_candidate.is_absolute() {

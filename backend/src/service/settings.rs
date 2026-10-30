@@ -223,7 +223,7 @@ pub fn check_essentia_installed(data_dir: &std::path::Path) -> bool {
 }
 
 pub(super) fn check_node_available() -> bool {
-    let node_bin = std::env::var_os("DJTKIT_ESSENTIA_NODE").unwrap_or_else(|| "node".into());
+    let node_bin = crate::essentia_runtime::node_bin();
     let mut cmd = std::process::Command::new(&node_bin);
     cmd.arg("--version")
         .stdout(std::process::Stdio::null())

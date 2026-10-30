@@ -1,4 +1,4 @@
-//! Where the essentia analysis runner and its node modules are, as the app
+//! Where node, the essentia analysis runner and its node modules are, as the app
 //! resolves them at startup or after installing the engine. Kept in memory
 //! instead of the process environment: writing the environment while other
 //! threads read it is undefined behaviour on Linux (why `std::env::set_var` is
@@ -12,10 +12,12 @@ use std::path::PathBuf;
 use std::process::Command;
 use std::sync::{PoisonError, RwLock};
 
+const NODE_ENV: &str = "DJTKIT_ESSENTIA_NODE";
 const RUNNER_ENV: &str = "DJTKIT_ESSENTIA_RUNNER";
 /// Read by `desktop/scripts/essentia_runner.cjs`.
 const NODE_MODULES_ENV: &str = "DJTKIT_ESSENTIA_NODE_MODULES";
 
+static NODE: RwLock<Option<PathBuf>> = RwLock::new(None);
 static RUNNER: RwLock<Option<PathBuf>> = RwLock::new(None);
 static NODE_MODULES: RwLock<Option<PathBuf>> = RwLock::new(None);
 
@@ -28,6 +30,21 @@ fn stored_or_env(slot: &RwLock<Option<PathBuf>>, env: &str) -> Option<PathBuf> {
 
 fn store(slot: &RwLock<Option<PathBuf>>, path: PathBuf) {
     *slot.write().unwrap_or_else(PoisonError::into_inner) = Some(path);
+}
+
+/// The node binary the app found (bundled runtime), if any.
+pub fn node() -> Option<PathBuf> {
+    stored_or_env(&NODE, NODE_ENV)
+}
+
+pub fn set_node(path: PathBuf) {
+    store(&NODE, path);
+}
+
+/// The node binary to run the essentia runner with: the one found, else
+/// `node` from `PATH`.
+pub fn node_bin() -> PathBuf {
+    node().unwrap_or_else(|| PathBuf::from("node"))
 }
 
 /// The essentia runner script (`essentia_runner.cjs`), if known.
@@ -78,6 +95,8 @@ mod tests {
 
         set_node_modules(PathBuf::from("/data/essentia/node_modules"));
         set_runner(PathBuf::from("/app/scripts/essentia_runner.cjs"));
+        set_node(PathBuf::from("/app/bin/node"));
+        assert_eq!(node_bin(), PathBuf::from("/app/bin/node"));
         assert_eq!(
             node_modules(),
             Some(PathBuf::from("/data/essentia/node_modules"))
