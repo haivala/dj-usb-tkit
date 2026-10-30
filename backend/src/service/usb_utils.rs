@@ -1120,8 +1120,12 @@ CREATE INDEX index_playlist_content_playlist_id on playlist_content(playlist_id)
 fn seed_edb_defaults(conn: &rusqlite::Connection, created_date: &str) -> BackendResult<()> {
     // property
     conn.execute(
-        "INSERT INTO property (deviceName, dbVersion, numberOfContents, createdDate, backGroundColorType, myTagMasterDBID) VALUES ('', ?1, 0, ?2, 0, 969967066)",
-        [crate::pdb_writer::T19_DB_VERSION, created_date],
+        "INSERT INTO property (deviceName, dbVersion, numberOfContents, createdDate, backGroundColorType, myTagMasterDBID) VALUES ('', ?1, 0, ?2, ?3, 969967066)",
+        rusqlite::params![
+            crate::pdb_writer::T19_DB_VERSION,
+            created_date,
+            crate::pdb_writer::INIT_BACKGROUND_COLOR
+        ],
     )?;
 
     // color (8 standard player colors)
@@ -2226,6 +2230,12 @@ mod diag_tests {
         assert_eq!(&pdb[row0 + 13..row0 + 23], today.as_bytes());
         let property = crate::service::export_helpers::edb_t19_property(&tmp).expect("eDB");
         assert_eq!(property.created_date, today);
+        // Both databases start purple.
+        assert_eq!(pdb[row0 + 9], crate::pdb_writer::INIT_BACKGROUND_COLOR);
+        assert_eq!(
+            property.background_color,
+            crate::pdb_writer::INIT_BACKGROUND_COLOR
+        );
 
         // Running initialize again should be idempotent (no error)
         let result2 = initialize_usb(&tmp).unwrap();

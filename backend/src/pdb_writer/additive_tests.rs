@@ -3105,7 +3105,9 @@ fn export_leaves_t19_alone_once_rekordbox_moved_it_to_a_second_page() {
 
 /// Byte offsets in `bytes` where `before` and `bytes` differ.
 fn changed_offsets(before: &[u8], bytes: &[u8]) -> Vec<usize> {
-    (0..bytes.len()).filter(|&i| before[i] != bytes[i]).collect()
+    (0..bytes.len())
+        .filter(|&i| before[i] != bytes[i])
+        .collect()
 }
 
 /// Offsets of byte 9 (the color) of every row on t19 page `page_idx`.
@@ -3236,7 +3238,10 @@ fn background_color_patches_only_the_live_page_of_a_two_page_t19() {
     let mut out = before.clone();
     assert!(set_t19_background_color(&mut out, PAGE_SIZE, 8).expect("set"));
     assert_eq!(t19_background_color(&out, PAGE_SIZE), Some(8));
-    assert_eq!(changed_offsets(&before, &out), t19_color_offsets(&out, last));
+    assert_eq!(
+        changed_offsets(&before, &out),
+        t19_color_offsets(&out, last)
+    );
 }
 
 #[test]
@@ -3343,12 +3348,14 @@ fn named_t19_ring_matches_rekordbox() {
 }
 
 #[test]
-fn t19_template_row_is_rekordbox_template_with_its_date() {
-    assert_eq!(t19_template_row("2026-03-06"), T19_TEMPLATE_ROW.to_vec());
+fn t19_template_row_is_rekordbox_template_with_its_date_and_purple() {
+    let mut expected = T19_TEMPLATE_ROW.to_vec();
+    expected[9] = INIT_BACKGROUND_COLOR;
+    assert_eq!(t19_template_row("2026-03-06"), expected);
     let row = t19_template_row("2026-10-28");
     assert_eq!(&row[13..23], b"2026-10-28");
-    assert_eq!(row[..13], T19_TEMPLATE_ROW[..13]);
-    assert_eq!(row[23..], T19_TEMPLATE_ROW[23..]);
+    assert_eq!(row[..13], expected[..13]);
+    assert_eq!(row[23..], expected[23..]);
 }
 
 #[test]

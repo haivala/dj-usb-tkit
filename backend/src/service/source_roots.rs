@@ -32,7 +32,10 @@ fn resolved_source_root(root: &str) -> String {
 /// (resolved through symlinks), if any. Two roots naming the same folder
 /// don't nest: the first one keeps it, the later one is inside it.
 fn source_root_parents(roots: &[String]) -> Vec<Option<usize>> {
-    let resolved: Vec<String> = roots.iter().map(|root| resolved_source_root(root)).collect();
+    let resolved: Vec<String> = roots
+        .iter()
+        .map(|root| resolved_source_root(root))
+        .collect();
     resolved
         .iter()
         .enumerate()

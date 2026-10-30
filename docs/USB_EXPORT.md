@@ -483,7 +483,8 @@ when both databases hold it; when rekordbox left them different, a note names
 both, and choosing a colour sets both. `set_usb_background_color` writes the
 eDB's `property` row and the PDB's live `t19` page in place, then saves both
 to the USB or neither (see `docs/PDB.md`, "`tt=19` background colour"). Export
-and repair never change either colour.
+and repair never change either colour. A USB the app initializes starts purple
+in both databases (rekordbox's own init uses the default).
 
 Strict parity is intentionally separated from basic export success. A USB may be playable while still failing strict parity checks. The parity report path validates deeper consistency such as:
 

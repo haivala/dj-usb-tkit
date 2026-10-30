@@ -45,6 +45,8 @@
   highlight colour. One selector writes it to both databases; when rekordbox left them with
   different colours, the editor names both. Export and repair no longer change a colour set in
   rekordbox for the PDB alone.
+- **Improvement:** A USB the app initializes starts with a purple background colour on every
+  player, instead of the default.
 - **New feature:** A source folder inside another source folder, also through a symlink, is shown
   grouped under that folder's chip, labelled with its path inside it.
 - **Improvement:** The Player Menu editor's Add, Remove, Up and Down are applied by the backend to

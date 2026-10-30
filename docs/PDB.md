@@ -476,7 +476,9 @@ as rekordbox leaves the date in existing rows (older libraries keep a
 2020/2021 date beside a newer `createdDate`). Without a readable eDB, a page
 keeps the property its rows carry. `initialize_usb` stamps the template row
 and the eDB's `createdDate` with the same date, the day it initializes the
-USB, as rekordbox's own init does.
+USB, as rekordbox's own init does. Unlike rekordbox's init, it also sets the
+background colour to purple (8) in both: byte 9 of the template row and the
+eDB's `backGroundColorType` (`INIT_BACKGROUND_COLOR`).
 
 #### `tt=19` background colour
 
@@ -513,6 +515,10 @@ the players show the colour whichever row they read:
   and nothing else changed: no footer, seq, row layout or chain.
 
 Export and `repair_pdb_t19_template_state` keep a ring's colour (`t19_sync_target`).
+A USB the app initializes starts purple: the players read the template row's
+colour while it is the only row, and the first export's ring takes the eDB's
+purple, with slot 0 back at colour 0 (the shape the players showed green for in
+the hardware test).
 
 In every one, `rowpf` marks the newest id's slot, `tranrf` that slot plus the
 slot of the id before it, and `num_rl` is the lower of those two slots. The

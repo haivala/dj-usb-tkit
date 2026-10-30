@@ -1316,6 +1316,10 @@ pub(crate) const T19_ROW_LEN: usize = 40;
 /// validated against.
 pub(crate) const T19_DB_VERSION: &str = "1000";
 
+/// The background color `initialize_usb` gives both databases: purple
+/// (rekordbox's own init writes 0, the default).
+pub(crate) const INIT_BACKGROUND_COLOR: u8 = 8;
+
 /// The single tt=19 row of an empty-device template, with the date of the
 /// rekordbox-initialized USB it was copied from. `initialize_usb` seeds the
 /// same row with its own date ([`t19_template_row`]).
@@ -1441,8 +1445,11 @@ fn t19_slot_row(prop: &T19Property, slot: usize, id: u32) -> Vec<u8> {
 }
 
 /// The single tt=19 row `initialize_usb` seeds: [`T19_TEMPLATE_ROW`] with
-/// `created_date`, the date the eDB's `property.createdDate` gets. rekordbox's
-/// own init stamps both with the day it initializes the USB.
+/// `created_date`, the date the eDB's `property.createdDate` gets, and byte 9
+/// [`INIT_BACKGROUND_COLOR`]. rekordbox's own init stamps both with the day it
+/// initializes the USB. Players read the color from this row while it is the
+/// only one; the first export's ring takes the eDB's color and slot 0 goes
+/// back to color 0.
 pub(crate) fn t19_template_row(created_date: &str) -> Vec<u8> {
     let prop = T19Property {
         created_date: created_date.to_string(),
@@ -1450,7 +1457,9 @@ pub(crate) fn t19_template_row(created_date: &str) -> Vec<u8> {
         device_name: None,
         background_color: 0,
     };
-    t19_slot_row(&prop, 0, 0)
+    let mut row = t19_slot_row(&prop, 0, 0);
+    row[9] = INIT_BACKGROUND_COLOR;
+    row
 }
 
 /// Most rows a tt=19 page holds when slot 0 is `row0_len` bytes and every

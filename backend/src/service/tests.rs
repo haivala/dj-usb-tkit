@@ -2328,7 +2328,12 @@ fn get_library_sources_nests_subfolders_under_their_parent() {
     let deep = format!("{music}/a/deep");
     let a = format!("{music}/a");
     let linked_b = format!("{link}/b");
-    set_library_sources(&service, &[&deep, &other, &music, &linked_b, &a], false, false);
+    set_library_sources(
+        &service,
+        &[&deep, &other, &music, &linked_b, &a],
+        false,
+        false,
+    );
 
     let folders: Vec<(String, String, Option<String>)> = service
         .get_library_sources()

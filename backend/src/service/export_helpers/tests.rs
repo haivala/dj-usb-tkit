@@ -2804,11 +2804,21 @@ fn export_preserves_t17_t18_seed_shape_and_allows_t19_runtime_rows() {
     assert_eq!(u16le(p40 + ps - 4), 0x0010);
     assert_eq!(u16le(p40 + ps - 2), 0x0018);
     // Row 0 is the template row with the eDB's `createdDate`, which
-    // `initialize_usb` stamped into both. Row 1 copies it with the runtime sequence
-    // patched in: 0x00000280 + i*0x00200000, then i.
+    // `initialize_usb` stamped into both, and color 0 again (the init row
+    // carried the purple the ring rows now get). Row 1 copies it with the
+    // runtime sequence patched in: 0x00000280 + i*0x00200000, then i.
     let row0 = p40 + 40;
     let row1 = row0 + 40;
-    assert_eq!(&bytes[row0..row0 + 13], &before_bytes[row0..row0 + 13]);
+    assert_eq!(&bytes[row0..row0 + 9], &before_bytes[row0..row0 + 9]);
+    assert_eq!(
+        before_bytes[row0 + 9],
+        crate::pdb_writer::INIT_BACKGROUND_COLOR
+    );
+    assert_eq!(bytes[row0 + 9], 0);
+    assert_eq!(
+        &bytes[row0 + 10..row0 + 13],
+        &before_bytes[row0 + 10..row0 + 13]
+    );
     assert_eq!(
         &bytes[row0 + 23..row0 + 40],
         &before_bytes[row0 + 23..row0 + 40]
@@ -2819,7 +2829,14 @@ fn export_preserves_t17_t18_seed_shape_and_allows_t19_runtime_rows() {
     assert_eq!(&bytes[row0 + 13..row0 + 23], edb_date.as_bytes());
     assert_eq!(u32le(row1), 0x0020_0280u32);
     assert_eq!(u32le(row1 + 4), 1u32);
-    assert_eq!(&bytes[row1 + 8..row1 + 40], &bytes[row0 + 8..row0 + 40]);
+    assert_eq!(bytes[row1 + 8], bytes[row0 + 8]);
+    assert_eq!(bytes[row1 + 9], crate::pdb_writer::INIT_BACKGROUND_COLOR);
+    assert_eq!(&bytes[row1 + 10..row1 + 40], &bytes[row0 + 10..row0 + 40]);
+    // The row players read keeps the init's purple.
+    assert_eq!(
+        crate::pdb_writer::t19_background_color(&bytes, ps),
+        Some(crate::pdb_writer::INIT_BACKGROUND_COLOR)
+    );
     let row4 = row0 + 4 * 40;
     assert_eq!(u32le(row4), 0x0080_0280u32);
     assert_eq!(u32le(row4 + 4), 4u32);
@@ -4936,7 +4953,7 @@ fn export_writes_edb_property_into_t19() {
     let row0 = 40 * 4096 + 40;
     assert_eq!(&bytes[row0 + 12..row0 + 23], b"\x172026-10-22");
     let row1 = row0 + 40;
-    assert_eq!(bytes[row1 + 9], 0x00);
+    assert_eq!(bytes[row1 + 9], crate::pdb_writer::INIT_BACKGROUND_COLOR);
     assert_eq!(&bytes[row1 + 12..row1 + 23], b"\x172026-10-22");
     assert_eq!(&bytes[row1 + 30..row1 + 41], b"\x17Test Stick");
 }

@@ -267,12 +267,16 @@ fn background_color_sets_both_databases_on_the_usb() {
     };
 
     let before = get();
-    assert_eq!((before.pdb_color, before.edb_color), (Some(0), Some(0)));
+    let purple = Some(crate::pdb_writer::INIT_BACKGROUND_COLOR);
+    assert_eq!((before.pdb_color, before.edb_color), (purple, purple));
     assert!(before.writable);
 
     let set_green = set(5).expect("set green");
     assert!(set_green.updated);
-    assert_eq!((set_green.pdb_color, set_green.edb_color), (Some(5), Some(5)));
+    assert_eq!(
+        (set_green.pdb_color, set_green.edb_color),
+        (Some(5), Some(5))
+    );
     let after = get();
     assert_eq!((after.pdb_color, after.edb_color), (Some(5), Some(5)));
 
@@ -285,7 +289,9 @@ fn background_color_sets_both_databases_on_the_usb() {
     )
     .expect("open eDB");
     let edb_color: i64 = conn
-        .query_row("SELECT backGroundColorType FROM property", [], |row| row.get(0))
+        .query_row("SELECT backGroundColorType FROM property", [], |row| {
+            row.get(0)
+        })
         .expect("property");
     assert_eq!(edb_color, 5);
 

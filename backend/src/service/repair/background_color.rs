@@ -87,10 +87,7 @@ impl BackendService {
             return Err(BackendError::Validation(reason));
         }
         if before.pdb_color == Some(req.color) && before.edb_color == Some(req.color) {
-            return Ok(UsbBackgroundColorData {
-                warnings,
-                ..before
-            });
+            return Ok(UsbBackgroundColorData { warnings, ..before });
         }
 
         warnings.extend(
@@ -112,7 +109,9 @@ impl BackendService {
 
         // The PDB change stays in memory until the eDB one has succeeded.
         let page_size = page_size_of(&pdb.bytes);
-        pdb.patch(|bytes| crate::pdb_writer::set_t19_background_color(bytes, page_size, req.color))?;
+        pdb.patch(|bytes| {
+            crate::pdb_writer::set_t19_background_color(bytes, page_size, req.color)
+        })?;
         let conn = open_edb_rw(&usb_root, &mut warnings)
             .ok_or_else(|| BackendError::Validation("unable to open the USB's eDB".to_string()))?;
         conn.execute(
