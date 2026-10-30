@@ -37,6 +37,12 @@
   - **Fix (CRITICAL):** ...
 -->
 
+## Unreleased
+
+- **Improvement:** The Player Menu editor's Add, Remove, Up and Down are applied by the backend to
+  the menu on the USB, instead of the app sending a whole new menu built from what it last loaded.
+  An edit that changes nothing, such as Up on the top item, no longer makes a USB backup.
+
 ## 0.4.11
 
 **Severity:** feature

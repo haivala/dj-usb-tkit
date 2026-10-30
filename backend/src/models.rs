@@ -2149,17 +2149,24 @@ pub struct GetUsbPlayerMenuConfigData {
 pub struct UpdateUsbPlayerMenuConfigRequest {
     #[serde(default)]
     pub usb_root: Option<String>,
-    /// Ordered list of menu_item_ids to keep visible. Kept for backwards
-    /// compatibility; prefer `current_kinds` on new callers since `kind` is the
-    /// universal identifier that works for PDB-only rows too (menu_item_id = 0
-    /// for those).
-    #[serde(default)]
-    pub current_menu_item_ids: Vec<u32>,
-    /// Ordered list of `kind` values to keep visible. When present, this takes
-    /// precedence over `current_menu_item_ids` and is the source of truth for
-    /// what gets written to PDB t16.
-    #[serde(default)]
-    pub current_kinds: Vec<u32>,
+    /// What to do with `kind`; the backend applies it to the stick's current
+    /// menu order.
+    pub action: UsbPlayerMenuEdit,
+    pub kind: u32,
+}
+
+/// One edit in the player menu editor.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub enum UsbPlayerMenuEdit {
+    /// Show the kind, last in the menu.
+    Add,
+    /// Hide the kind (rejected for the browse categories a CDJ requires).
+    Remove,
+    /// Swap the kind with the one before it.
+    MoveUp,
+    /// Swap the kind with the one after it.
+    MoveDown,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]

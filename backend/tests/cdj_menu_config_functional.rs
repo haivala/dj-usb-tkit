@@ -3,7 +3,8 @@ use std::fs;
 use backend::commands::BackendCommands;
 use backend::models::{
     GetUsbPlayerMenuConfigRequest, InitializeUsbRequest, RunUsbDiagnosticsRequest,
-    UpdateUsbPlayerMenuConfigRequest, UsbPlayerMenuItemOrigin,
+    UpdateUsbPlayerMenuConfigData, UpdateUsbPlayerMenuConfigRequest, UsbPlayerMenuEdit,
+    UsbPlayerMenuItemOrigin,
 };
 use backend::service::export_helpers::{
     encode_pdb_t16_row, load_pdb_t16_decoded, load_pdb_t16_raw,
@@ -11,6 +12,67 @@ use backend::service::export_helpers::{
 use tempfile::tempdir;
 
 const BPM_KIND: u32 = 133;
+
+/// One player menu editor edit, as the editor's buttons send it.
+fn edit_menu(
+    backend: &BackendCommands,
+    usb_root: &std::path::Path,
+    action: UsbPlayerMenuEdit,
+    kind: u32,
+) -> backend::models::ApiResponse<UpdateUsbPlayerMenuConfigData> {
+    backend.update_usb_player_menu_config(UpdateUsbPlayerMenuConfigRequest {
+        usb_root: Some(usb_root.to_string_lossy().into_owned()),
+        action,
+        kind,
+    })
+}
+
+/// Brings the shown menu to `target` with the editor's edits: Remove what
+/// isn't wanted, Add what is missing, then Up until each sits in its place.
+fn set_menu_with_edits(
+    backend: &BackendCommands,
+    usb_root: &std::path::Path,
+    target: &[u32],
+) -> UpdateUsbPlayerMenuConfigData {
+    let load = |backend: &BackendCommands| {
+        backend
+            .get_usb_player_menu_config(GetUsbPlayerMenuConfigRequest {
+                usb_root: Some(usb_root.to_string_lossy().into_owned()),
+            })
+            .data
+            .expect("menu config")
+            .current_items
+            .iter()
+            .map(|i| i.kind)
+            .collect::<Vec<u32>>()
+    };
+    let mut last = None;
+    let mut apply = |action, kind| {
+        let resp = edit_menu(backend, usb_root, action, kind);
+        assert!(resp.ok, "{action:?} {kind} failed: {resp:?}");
+        last = resp.data;
+    };
+    for kind in load(backend) {
+        if !target.contains(&kind) {
+            apply(UsbPlayerMenuEdit::Remove, kind);
+        }
+    }
+    for &kind in target {
+        if !load(backend).contains(&kind) {
+            apply(UsbPlayerMenuEdit::Add, kind);
+        }
+    }
+    for (place, &kind) in target.iter().enumerate() {
+        let at = load(backend)
+            .iter()
+            .position(|&k| k == kind)
+            .expect("added");
+        for _ in place..at {
+            apply(UsbPlayerMenuEdit::MoveUp, kind);
+        }
+    }
+    last.expect("at least one edit")
+}
 
 #[test]
 fn pdb_extra_rows_not_divergence() {
@@ -136,20 +198,14 @@ fn save_updates_edb_only_not_pdb() {
         "fresh init seeds the full PDB catalog"
     );
 
-    // Remove KEY (kind 139) -> submit 9 visible kinds.
+    // Remove KEY (kind 139).
     const KEY_KIND: u32 = 139;
-    let mut desired_kinds: Vec<u32> = before.current_items.iter().map(|i| i.kind).collect();
     assert!(
-        desired_kinds.contains(&KEY_KIND),
+        before.current_items.iter().any(|i| i.kind == KEY_KIND),
         "fresh visible set should contain KEY"
     );
-    desired_kinds.retain(|kind| *kind != KEY_KIND);
 
-    let save = backend.update_usb_player_menu_config(UpdateUsbPlayerMenuConfigRequest {
-        usb_root: Some(usb_root.to_string_lossy().into_owned()),
-        current_menu_item_ids: vec![],
-        current_kinds: desired_kinds.clone(),
-    });
+    let save = edit_menu(&backend, &usb_root, UsbPlayerMenuEdit::Remove, KEY_KIND);
     assert!(save.ok, "save failed: {save:?}");
     let after = save.data.expect("save data");
     assert!(after.updated, "eDB was changed so updated must be true");
@@ -175,10 +231,13 @@ fn save_updates_edb_only_not_pdb() {
         "PDB t16 must still include KEY after eDB-only removal"
     );
     let after_kinds: Vec<u32> = after.current_items.iter().map(|i| i.kind).collect();
-    assert_eq!(
-        after_kinds, desired_kinds,
-        "visible order must match request"
-    );
+    let expected_kinds: Vec<u32> = before
+        .current_items
+        .iter()
+        .map(|i| i.kind)
+        .filter(|&kind| kind != KEY_KIND)
+        .collect();
+    assert_eq!(after_kinds, expected_kinds, "the others keep their order");
 
     // Verify PDB t17 was rewritten with the new eDB.category state.
     // t17 data page is page 36 (0-indexed); offset 24 within the page = nrs.
@@ -415,16 +474,13 @@ fn save_idempotent_when_already_in_sync() {
         usb_root: Some(usb_root.to_string_lossy().into_owned()),
     });
     let before = load.data.expect("data");
-    let kinds: Vec<u32> = before.current_items.iter().map(|i| i.kind).collect();
+    let first = before.current_items.first().expect("a shown item").kind;
 
     let pdb_path = usb_root.join("PIONEER/rekordbox/export.pdb");
     let pdb_before = fs::read(&pdb_path).expect("read pdb");
 
-    let save = backend.update_usb_player_menu_config(UpdateUsbPlayerMenuConfigRequest {
-        usb_root: Some(usb_root.to_string_lossy().into_owned()),
-        current_menu_item_ids: vec![],
-        current_kinds: kinds.clone(),
-    });
+    // Up on the first item changes nothing.
+    let save = edit_menu(&backend, &usb_root, UsbPlayerMenuEdit::MoveUp, first);
     assert!(save.ok, "save failed: {save:?}");
     let after = save.data.expect("data");
     let pdb_after = fs::read(&pdb_path).expect("read pdb");
@@ -460,20 +516,10 @@ fn update_player_menu_rejects_removing_protected_kind() {
         .expect("config data");
 
     // The default initialized menu always includes TRACK (kind=131).
-    // Build a kinds list with TRACK removed to trigger the protection.
     const TRACK: u32 = 131;
-    let kinds_without_track: Vec<u32> = config
-        .current_items
-        .iter()
-        .map(|i| i.kind)
-        .filter(|&k| k != TRACK)
-        .collect();
+    assert!(config.current_items.iter().any(|i| i.kind == TRACK));
 
-    let resp = backend.update_usb_player_menu_config(UpdateUsbPlayerMenuConfigRequest {
-        usb_root: Some(usb_root.to_string_lossy().into_owned()),
-        current_kinds: kinds_without_track,
-        current_menu_item_ids: vec![],
-    });
+    let resp = edit_menu(&backend, &usb_root, UsbPlayerMenuEdit::Remove, TRACK);
     assert!(!resp.ok, "expected error when removing TRACK, got ok");
     let err_msg = resp
         .error
@@ -507,13 +553,7 @@ fn update_player_menu_vendor_seven_item_set_keeps_pdb_catalog() {
     // ARTIST=129, ALBUM=130, TRACK=131, PLAYLIST=132, HISTORY=149, SEARCH=145, FOLDER=144
     let vendor_kinds: Vec<u32> = vec![129, 130, 131, 132, 149, 145, 144];
 
-    let resp = backend.update_usb_player_menu_config(UpdateUsbPlayerMenuConfigRequest {
-        usb_root: Some(usb_root.to_string_lossy().into_owned()),
-        current_kinds: vendor_kinds.clone(),
-        current_menu_item_ids: vec![],
-    });
-    assert!(resp.ok, "update failed: {resp:?}");
-    let data = resp.data.expect("data");
+    let data = set_menu_with_edits(&backend, &usb_root, &vendor_kinds);
 
     let after_kinds: Vec<u32> = data.current_items.iter().map(|i| i.kind).collect();
     assert_eq!(

@@ -1123,7 +1123,8 @@ impl BackendService {
                 bitrate_kbps: req.bitrate_kbps,
             })
         {
-            let track = track_rows(&*self.db.connect()?, std::slice::from_ref(&data.track_id))?.pop();
+            let track =
+                track_rows(&*self.db.connect()?, std::slice::from_ref(&data.track_id))?.pop();
             return Ok(ResolveTrackIdentityData {
                 track_id: Some(data.track_id),
                 resolved_by: ResolvedBy::Materialized,

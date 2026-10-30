@@ -263,7 +263,9 @@ drive selection from being rendered against a newer selected drive.
 - `fetch_usb_playlist_tracks`
 - `fetch_usb_history_tracks`
 - `get_usb_player_menu_config`
-- `update_usb_player_menu_config`
+- `update_usb_player_menu_config` — `{ usbRoot, action, kind }`, one editor edit
+  (`add`, `remove`, `moveUp`, `moveDown`) applied to the stick's current menu;
+  an edit that changes nothing writes nothing.
 - `sync_usb_player_menu_edb_to_pdb`
 - `remove_usb_playlist`
 - `reorder_usb_playlists`

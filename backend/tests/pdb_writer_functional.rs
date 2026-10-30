@@ -7,8 +7,8 @@ use std::path::Path;
 use backend::commands::BackendCommands;
 use backend::models::{
     AddLibrarySelectionToPlaylistRequest, BrowseSourceFilesRequest, CreatePlaylistRequest,
-    ExportToUsbOptions, ExportToUsbRequest, InitializeUsbRequest,
-    RemoveUsbPlaylistRequest, ScanLibraryRequest,
+    ExportToUsbOptions, ExportToUsbRequest, InitializeUsbRequest, RemoveUsbPlaylistRequest,
+    ScanLibraryRequest,
 };
 use backend::pdb_reader::parse_pdb;
 use backend::service::usb_vendor_compat::DEFAULT_USB_EDB_KEY;

@@ -360,6 +360,28 @@ pub(super) fn mirror_edb_category_from_pdb_kinds(
     Ok(true)
 }
 
+/// The menu order after `action` on `kind`. An edit that doesn't apply (adding
+/// a shown kind, moving the first one up, a kind not in the menu) leaves the
+/// order as it is.
+pub(crate) fn apply_player_menu_edit(
+    current: &[u32],
+    action: UsbPlayerMenuEdit,
+    kind: u32,
+) -> Vec<u32> {
+    let mut kinds = current.to_vec();
+    let at = kinds.iter().position(|&k| k == kind);
+    match (action, at) {
+        (UsbPlayerMenuEdit::Add, None) => kinds.push(kind),
+        (UsbPlayerMenuEdit::Remove, Some(i)) => {
+            kinds.remove(i);
+        }
+        (UsbPlayerMenuEdit::MoveUp, Some(i)) if i > 0 => kinds.swap(i, i - 1),
+        (UsbPlayerMenuEdit::MoveDown, Some(i)) if i + 1 < kinds.len() => kinds.swap(i, i + 1),
+        _ => {}
+    }
+    kinds
+}
+
 impl BackendService {
     pub fn get_usb_player_menu_config(
         &self,
@@ -476,20 +498,7 @@ impl BackendService {
     ) -> BackendResult<UpdateUsbPlayerMenuConfigData> {
         let usb_root = resolve_usb_root(req.usb_root.as_deref())?;
         let mut warnings = Vec::<WarningEntry>::new();
-        warnings.extend(
-            self.backup_usb_databases_with_retention(&usb_root, "Before menu update", None)
-                .into_iter()
-                .map(|message| {
-                    logging::log(
-                        Level::Info,
-                        "usb-player-menu",
-                        "usb.player-menu.backup",
-                        message,
-                    )
-                }),
-        );
-
-        let (before_current, before_available, _before_divergence) =
+        let (before_current, before_available, before_divergence) =
             load_usb_player_menu_config(&usb_root, &mut warnings)?;
 
         // Build lookup: (kind -> display name), preferring PDB-sourced names
@@ -502,35 +511,25 @@ impl BackendService {
         for item in &before_current {
             name_by_kind.insert(item.kind, item.name.clone());
         }
-        let kind_by_menu: HashMap<u32, u32> = before_current
-            .iter()
-            .chain(before_available.iter())
-            .filter(|item| item.menu_item_id != 0)
-            .map(|item| (item.menu_item_id, item.kind))
-            .collect();
 
-        // Resolve the submitted selection into an ordered, deduped list of
-        // kinds. `current_kinds` wins when present; otherwise we fall back to
-        // `current_menu_item_ids` (which can only address eDB-backed items).
-        let mut desired_kinds = Vec::<u32>::new();
-        let mut seen = HashSet::<u32>::new();
-        if !req.current_kinds.is_empty() {
-            for kind in &req.current_kinds {
-                if seen.insert(*kind) {
-                    desired_kinds.push(*kind);
-                }
-            }
-        } else {
-            for menu_id in &req.current_menu_item_ids {
-                if let Some(kind) = kind_by_menu.get(menu_id).copied()
-                    && seen.insert(kind)
-                {
-                    desired_kinds.push(kind);
-                }
-            }
+        let before_kinds = before_current
+            .iter()
+            .map(|item| item.kind)
+            .collect::<Vec<_>>();
+        let desired_kinds = apply_player_menu_edit(&before_kinds, req.action, req.kind);
+
+        if desired_kinds == before_kinds {
+            // Nothing to write (and no backup to make).
+            return Ok(UpdateUsbPlayerMenuConfigData {
+                updated: false,
+                current_items: before_current,
+                available_items: before_available,
+                divergence: before_divergence,
+                warnings,
+            });
         }
 
-        // Reject if any currently-present protected kind is absent from the request.
+        // Reject removing a browse category the CDJ requires.
         let desired_set: HashSet<u32> = desired_kinds.iter().copied().collect();
         for &kind in REQUIRED_PLAYER_MENU_KINDS {
             if before_current.iter().any(|item| item.kind == kind) && !desired_set.contains(&kind) {
@@ -555,6 +554,19 @@ impl BackendService {
             }
             final_kinds.push(*kind);
         }
+
+        warnings.extend(
+            self.backup_usb_databases_with_retention(&usb_root, "Before menu update", None)
+                .into_iter()
+                .map(|message| {
+                    logging::log(
+                        Level::Info,
+                        "usb-player-menu",
+                        "usb.player-menu.backup",
+                        message,
+                    )
+                }),
+        );
 
         // Snapshot eDB for rollback if the write fails. Staged path: this must
         // match whatever path `mirror_edb_category_from_pdb_kinds`'s
@@ -595,10 +607,6 @@ impl BackendService {
 
         let (current_items, available_items, divergence) =
             load_usb_player_menu_config(&usb_root, &mut warnings)?;
-        let before_kinds = before_current
-            .iter()
-            .map(|item| item.kind)
-            .collect::<Vec<_>>();
         let after_kinds = current_items
             .iter()
             .map(|item| item.kind)

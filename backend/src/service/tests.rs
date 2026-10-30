@@ -2755,7 +2755,8 @@ fn resolve_track_identity_skips_usb_materialization_and_resolves_local_match() {
 
     assert!(!result.materialized);
     assert_eq!(result.resolved_by, crate::models::ResolvedBy::Hash);
-    assert_eq!(result.track_id.as_deref(), Some("local-1"));    assert!(result.track.is_none());
+    assert_eq!(result.track_id.as_deref(), Some("local-1"));
+    assert!(result.track.is_none());
 }
 
 #[test]

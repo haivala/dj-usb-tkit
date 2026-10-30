@@ -18,7 +18,8 @@ use crate::models::{
     RepairFixProposal, RepairUnsupportedItem, RepairUsbDiagnosticsData,
     RepairUsbDiagnosticsRequest, RunUsbDiagnosticsRequest, RunUsbParityReportRequest,
     UpdateUsbPlayerMenuConfigData, UpdateUsbPlayerMenuConfigRequest, UsbParityPlaylistDetail,
-    UsbPlayerMenuDivergence, UsbPlayerMenuItem, UsbPlayerMenuItemOrigin, WarningEntry,
+    UsbPlayerMenuDivergence, UsbPlayerMenuEdit, UsbPlayerMenuItem, UsbPlayerMenuItemOrigin,
+    WarningEntry,
 };
 use crate::pdb_page;
 use crate::pdb_reader::{ParsedPdb, parse_pdb, pdb_page_size};

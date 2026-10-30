@@ -272,23 +272,42 @@ fn player_menu_config_roundtrip_updates_edb_not_pdb() {
         .expect("pdb t16 rows available")
         .1;
 
-    // Protected kinds (TRACK=4, HISTORY=19, SEARCH=20) must remain in the
-    // list even though the intent of this test is to check ordering only.
-    let updated = service
-        .update_usb_player_menu_config(UpdateUsbPlayerMenuConfigRequest {
-            usb_root: Some(usb_root.to_string_lossy().to_string()),
-            current_menu_item_ids: vec![17, 2, 3, 24, 4, 19, 20],
-            current_kinds: vec![],
-        })
-        .expect("update cdj menu config");
-    assert!(updated.updated, "expected player menu update to be applied");
-
-    let ordered_ids = updated
+    // Move PLAYLIST up to the top, one step at a time, as the editor's Up
+    // button does.
+    let playlist_kind = before
         .current_items
         .iter()
-        .map(|item| item.menu_item_id)
-        .collect::<Vec<_>>();
-    assert_eq!(&ordered_ids[0..4], &[17, 2, 3, 24]);
+        .find(|item| item.menu_item_id == 17)
+        .expect("playlist in the menu")
+        .kind;
+    let steps = before
+        .current_items
+        .iter()
+        .position(|item| item.kind == playlist_kind)
+        .expect("playlist position");
+    let mut updated = None;
+    for _ in 0..steps {
+        updated = Some(
+            service
+                .update_usb_player_menu_config(UpdateUsbPlayerMenuConfigRequest {
+                    usb_root: Some(usb_root.to_string_lossy().to_string()),
+                    action: UsbPlayerMenuEdit::MoveUp,
+                    kind: playlist_kind,
+                })
+                .expect("update cdj menu config"),
+        );
+    }
+    let updated = updated.expect("at least one move");
+    assert!(updated.updated, "expected player menu update to be applied");
+    assert_eq!(
+        updated.current_items.first().map(|item| item.menu_item_id),
+        Some(17)
+    );
+    assert_eq!(
+        updated.current_items.len(),
+        before.current_items.len(),
+        "moving changes the order only"
+    );
 
     // PDB t16 must NOT be modified — row count stays the same.
     let pdb_after = inspect_pdb_columns_playlist_order(&usb_root)
@@ -311,10 +330,25 @@ fn player_menu_config_roundtrip_updates_edb_not_pdb() {
         .map(|i| i.menu_item_id)
         .collect::<Vec<_>>();
     assert_eq!(
-        &after_ids[0..4],
-        &[17, 2, 3, 24],
+        after_ids.first(),
+        Some(&17),
         "menu order must persist across a re-read"
     );
+}
+
+#[test]
+fn player_menu_edits_apply_to_the_current_order() {
+    use UsbPlayerMenuEdit::*;
+    let menu = [1, 2, 3];
+    assert_eq!(apply_player_menu_edit(&menu, Add, 4), vec![1, 2, 3, 4]);
+    assert_eq!(apply_player_menu_edit(&menu, Add, 2), vec![1, 2, 3]);
+    assert_eq!(apply_player_menu_edit(&menu, Remove, 2), vec![1, 3]);
+    assert_eq!(apply_player_menu_edit(&menu, Remove, 9), vec![1, 2, 3]);
+    assert_eq!(apply_player_menu_edit(&menu, MoveUp, 2), vec![2, 1, 3]);
+    assert_eq!(apply_player_menu_edit(&menu, MoveUp, 1), vec![1, 2, 3]);
+    assert_eq!(apply_player_menu_edit(&menu, MoveDown, 2), vec![1, 3, 2]);
+    assert_eq!(apply_player_menu_edit(&menu, MoveDown, 3), vec![1, 2, 3]);
+    assert_eq!(apply_player_menu_edit(&menu, MoveDown, 9), vec![1, 2, 3]);
 }
 
 // ── Local HDD staging integration ─────────────────────────────────

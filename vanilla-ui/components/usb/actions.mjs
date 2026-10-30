@@ -1308,68 +1308,40 @@ export async function loadUsbPlayerMenuConfig(ctx) {
   emitStatus("Player menu loaded");
 }
 
-async function updateUsbPlayerMenuConfig(ctx, currentKinds, preferredSelection = null) {
+// One editor edit (add, remove, moveUp, moveDown) on `kind`: the backend
+// applies it to the stick's menu and answers with the new config. The edited
+// item stays selected, in whichever list it is now in.
+async function editUsbPlayerMenu(ctx, action, kind, side) {
   const { state } = ctx;
   const { emitStatus } = ctx;
+  if (kind === null) return;
   if (!state.usbRoot || !state.usbRootValid) {
     emitStatus("Select USB folder first");
     return;
   }
   const data = await ctx.command("update_usb_player_menu_config", {
     usbRoot: state.usbRoot,
-    currentKinds,
+    action,
+    kind,
   });
   if (data?.updated) clearUsbDiagnostics(ctx);
-  applyPlayerMenuConfig(ctx, data, preferredSelection);
+  applyPlayerMenuConfig(ctx, data, { side, kind });
   emitStatus(data?.updated ? "Player menu updated" : "Player menu unchanged");
 }
 
 export async function addUsbPlayerMenuItems(ctx) {
-  const { state } = ctx;
-  const selected = normalizeMenuKind(state.usbPlayerMenuAvailableSelectedKind);
-  if (selected === null) return;
-  const currentKinds = (state.usbPlayerMenuCurrent || []).map((item) => Number(item.kind));
-  if (!currentKinds.includes(selected)) {
-    currentKinds.push(selected);
-  }
-  await updateUsbPlayerMenuConfig(ctx, currentKinds, {
-    side: "current",
-    kind: selected,
-  });
+  const kind = normalizeMenuKind(ctx.state.usbPlayerMenuAvailableSelectedKind);
+  await editUsbPlayerMenu(ctx, "add", kind, "current");
 }
 
 export async function removeUsbPlayerMenuItems(ctx) {
-  const { state } = ctx;
-  const selected = normalizeMenuKind(state.usbPlayerMenuCurrentSelectedKind);
-  if (selected === null) return;
-  // Belt-and-suspenders: the Remove button is already disabled for these, and
-  // update_usb_player_menu_config rejects the request backend-side.
-  if (currentPlayerMenuItemByKind(state, selected)?.removable === false) return;
-  const currentKinds = (state.usbPlayerMenuCurrent || [])
-    .map((item) => Number(item.kind))
-    .filter((kind) => kind !== selected);
-  await updateUsbPlayerMenuConfig(ctx, currentKinds, {
-    side: "available",
-    kind: selected,
-  });
+  const kind = normalizeMenuKind(ctx.state.usbPlayerMenuCurrentSelectedKind);
+  await editUsbPlayerMenu(ctx, "remove", kind, "available");
 }
 
 export async function moveUsbPlayerMenuItems(ctx, direction) {
-  const { state } = ctx;
-  const selected = normalizeMenuKind(state.usbPlayerMenuCurrentSelectedKind);
-  if (selected === null) return;
-  const currentKinds = (state.usbPlayerMenuCurrent || []).map((item) => Number(item.kind));
-  const selectedIdx = currentKinds.indexOf(selected);
-  if (selectedIdx < 0) return;
-
-  const swapIdx = direction < 0 ? selectedIdx - 1 : selectedIdx + 1;
-  if (swapIdx >= 0 && swapIdx < currentKinds.length) {
-    [currentKinds[swapIdx], currentKinds[selectedIdx]] = [currentKinds[selectedIdx], currentKinds[swapIdx]];
-  }
-  await updateUsbPlayerMenuConfig(ctx, currentKinds, {
-    side: "current",
-    kind: selected,
-  });
+  const kind = normalizeMenuKind(ctx.state.usbPlayerMenuCurrentSelectedKind);
+  await editUsbPlayerMenu(ctx, direction < 0 ? "moveUp" : "moveDown", kind, "current");
 }
 
 // One export at a time: the button is disabled from the click on, not only

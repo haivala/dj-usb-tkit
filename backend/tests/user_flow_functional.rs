@@ -9,9 +9,9 @@ use backend::models::{
     AddLibrarySelectionToPlaylistRequest, AddTrackCandidate, AddTrackCandidatesToPlaylistRequest,
     AnalyzeNewTracksRequest, BrowseSourceFilesRequest, CreatePlaylistRequest, ExportToUsbOptions,
     ExportToUsbRequest, FetchUsbHistoriesRequest, FetchUsbPlaylistsRequest, FetchUsbTracksRequest,
-    GetPlaylistTracksRequest, GetTrackDetailRequest,
-    GetUsbTrackDetailRequest, InitializeUsbRequest, MaterializeSourceTrackRequest,
-    SaveTrackAnalysisEditsRequest, SaveTrackMetadataEditsRequest, SaveUsbTrackAnalysisEditsRequest,
+    GetPlaylistTracksRequest, GetTrackDetailRequest, GetUsbTrackDetailRequest,
+    InitializeUsbRequest, MaterializeSourceTrackRequest, SaveTrackAnalysisEditsRequest,
+    SaveTrackMetadataEditsRequest, SaveUsbTrackAnalysisEditsRequest,
     SaveUsbTrackMetadataEditsRequest, ScanLibraryRequest, SetFrontendSettingRequest, TrackCueInput,
     UsbMetadataEditTrack, UsbTrack,
 };
