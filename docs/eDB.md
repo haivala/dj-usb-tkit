@@ -180,7 +180,7 @@ Navigation/config rows live in `property`, `menuItem`, `category`, and `sort`.
 
 | Table | Usage |
 | --- | --- |
-| `property` | device/db metadata, content count, background color type, My Tag master DB id |
+| `property` | device/db metadata, content count, background color type (player background colour, 0 = default, 1–8 = pink, red, orange, yellow, green, aqua, blue, purple; kept apart from the PDB's `t19` byte 9, see `docs/USB_EXPORT.md` "Background colour"), My Tag master DB id |
 | `menuItem` | full browse-category catalog: kind and display name |
 | `category` | Active Category state: linked `menuItem`, visible order, hidden state |
 | `sort` | visible/selected sort settings per menu item |

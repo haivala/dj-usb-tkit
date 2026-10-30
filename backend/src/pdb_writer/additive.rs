@@ -1594,9 +1594,11 @@ fn t19_ring_state(bytes: &[u8], page_size: usize) -> Option<(u32, T19Property)> 
 /// page an older build wrote). The page is rewritten while still in template
 /// state (see [`t19_is_template_state`]), or while it is a ring (see
 /// [`t19_ring_state`]) whose newest id is not the track count or whose
-/// name, color or version is not `property`'s. A ring keeps its own date:
-/// rekordbox doesn't rewrite it in existing rows, and only a template-state
-/// page takes `property`'s date. Without an eDB (`property` `None`) the page
+/// name or version is not `property`'s. A ring keeps its own date and
+/// background color: rekordbox doesn't rewrite the date in existing rows,
+/// and it keeps the PDB's color apart from the eDB's (only
+/// [`set_t19_background_color`] changes it). Only a template-state page
+/// takes `property`'s date and color. Without an eDB (`property` `None`) the page
 /// keeps the property it has. A page a player has added rows to is never
 /// rewritten, nor is a t19 with more than one data page (see
 /// [`t19_only_data_page`]).
@@ -1624,6 +1626,7 @@ pub(crate) fn t19_sync_target(
         || current.clone(),
         |prop| T19Property {
             created_date: current.created_date.clone(),
+            background_color: current.background_color,
             ..prop.clone()
         },
     );
@@ -1689,6 +1692,108 @@ pub(crate) fn sync_t19_ring_page(
     let _ = write_u32_le_at(bytes, 0x14, seqdb);
 
     Ok(())
+}
+
+/// One row of tt=19's live page: where it starts in the file, whether its
+/// `rowpf` bit is set, and its id.
+struct T19LiveRow {
+    at: usize,
+    present: bool,
+    id: u32,
+}
+
+/// The rows of tt=19's live page: the last page of its chain, the one
+/// rekordbox and the players write to (rekordbox retires a full page and
+/// goes on in a new one). `None` without a data page, or when its footer or
+/// rows don't fit the page.
+fn t19_live_rows(bytes: &[u8], page_size: usize) -> Option<Vec<T19LiveRow>> {
+    let (_ec, first, last) = table_ptr_fields(bytes, 19)?;
+    let chain = collect_chain_pages(bytes, page_size, first, last)?;
+    let &page_idx = chain.get(1..)?.last()?;
+    let off = page_offset(page_idx, page_size)?;
+    let page = bytes.get(off..off + page_size)?;
+    let (nrs, _) = pdb_page::read_slot_counts(page)?;
+    if nrs == 0 || !pdb_page::footer_fits(page_size, nrs) {
+        return None;
+    }
+    let used = read_u16_le_at(page, 0x1e)? as usize;
+    pdb_page::footer_slots(page, nrs)
+        .map(|slot| {
+            // The id (bytes 4..8) and the color (byte 9) lie in the used heap.
+            if slot.heap_off + 10 > used {
+                return None;
+            }
+            Some(T19LiveRow {
+                at: off + HEAP_START + slot.heap_off,
+                present: slot.present,
+                id: read_u32_le_at(page, HEAP_START + slot.heap_off + 4)?,
+            })
+        })
+        .collect()
+}
+
+/// The player background color the PDB holds: byte 9 of the newest row on
+/// tt=19's live page. rekordbox writes a new color into one row and sets
+/// only that row's `rowpf` bit (a reference USB: slot 1 aqua, slot 0 still 0), so
+/// the newest row is the highest id among the rows whose bit is set (the
+/// last such slot on a tie), or among all rows when none is. `None` without
+/// a tt=19 data page.
+pub(crate) fn t19_background_color(bytes: &[u8], page_size: usize) -> Option<u8> {
+    let rows = t19_live_rows(bytes, page_size)?;
+    let newest = |present_only: bool| {
+        rows.iter()
+            .filter(|row| row.present || !present_only)
+            .max_by_key(|row| row.id)
+    };
+    let row = newest(true).or_else(|| newest(false))?;
+    bytes.get(row.at + 9).copied()
+}
+
+/// Write `color` as the PDB's player background color, in place on tt=19's
+/// live page. A ring (see [`t19_ring_state`]) is rewritten as the ring for
+/// its own newest id with the new color, so it stays a ring that exports
+/// keep at the track count. Any other page (rekordbox's after a color
+/// change or rename, the init template, rows a player added) gets byte 9
+/// of every row set and nothing else changed: no footer, seq, row layout or
+/// chain, so whichever row a player reads carries the color. Returns
+/// whether anything changed; an error without a tt=19 data page.
+pub(crate) fn set_t19_background_color(
+    bytes: &mut [u8],
+    page_size: usize,
+    color: u8,
+) -> BackendResult<bool> {
+    if page_size != PAGE_SIZE {
+        return Err(BackendError::Validation(format!(
+            "t19 color requires page_size {PAGE_SIZE}, got {page_size}"
+        )));
+    }
+    // A ring's slot 0 is the colorless template row, so a ring holding only
+    // that row (newest id 0) can't carry a color; it is patched instead.
+    if !t19_is_template_state(bytes, page_size)
+        && let Some((newest, prop)) = t19_ring_state(bytes, page_size)
+        && newest > 0
+    {
+        if prop.background_color == color {
+            return Ok(false);
+        }
+        let prop = T19Property {
+            background_color: color,
+            ..prop
+        };
+        sync_t19_ring_page(bytes, page_size, newest as usize, &prop)?;
+        return Ok(true);
+    }
+    let rows = t19_live_rows(bytes, page_size).ok_or_else(|| {
+        BackendError::Validation("the PDB has no history (t19) page to hold the color".into())
+    })?;
+    let mut changed = false;
+    for row in rows {
+        if bytes[row.at + 9] != color {
+            bytes[row.at + 9] = color;
+            changed = true;
+        }
+    }
+    Ok(changed)
 }
 
 // ── In-place t00 row mutation helpers ────────────────────────────────────────

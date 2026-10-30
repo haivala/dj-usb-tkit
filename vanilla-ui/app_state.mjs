@@ -89,6 +89,8 @@ export function createInitialState() {
     usbPlayerMenuCurrentSelectedKind: null,
     usbPlayerMenuAvailableSelectedKind: null,
     usbPlayerMenuDivergence: null,
+    // `get_usb_background_color`'s answer for the selected USB.
+    usbBackgroundColor: null,
     activeTab: "library",
     // Errors logged since the Event Log was last open (header badge).
     eventLogUnseenErrors: 0,

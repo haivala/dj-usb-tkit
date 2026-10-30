@@ -467,6 +467,7 @@ export function resetUsbStateViews(ctx, { hideDiagnostics = true } = {}) {
   state.usbPlayerMenuAvailable = [];
   state.usbPlayerMenuCurrentSelectedKind = null;
   state.usbPlayerMenuAvailableSelectedKind = null;
+  state.usbBackgroundColor = null;
 
   el.usbCountsText.textContent = "";
   el.historyCountsText.textContent = "";
@@ -481,6 +482,7 @@ export function resetUsbStateViews(ctx, { hideDiagnostics = true } = {}) {
   renderHistoryList(ctx);
   ctx.usbHistoryTracksCtl.clear();
   renderUsbPlayerMenuEditor(ctx);
+  renderUsbBackgroundColor(ctx);
 }
 
 export async function syncAssetScopePaths(ctx) {
@@ -1343,6 +1345,95 @@ export async function removeUsbPlayerMenuItems(ctx) {
 export async function moveUsbPlayerMenuItems(ctx, direction) {
   const kind = normalizeMenuKind(ctx.state.usbPlayerMenuCurrentSelectedKind);
   await editUsbPlayerMenu(ctx, direction < 0 ? "moveUp" : "moveDown", kind, "current");
+}
+
+// The player background colours in rekordbox's order: a colour's index is
+// the value both databases store (0 = the player's default, a blue highlight).
+export const USB_BACKGROUND_COLORS = [
+  { name: "Default", css: "#2f6bff" },
+  { name: "Pink", css: "#e94fc8" },
+  { name: "Red", css: "#e5333b" },
+  { name: "Orange", css: "#f08a24" },
+  { name: "Yellow", css: "#e6cf2a" },
+  { name: "Green", css: "#45b84f" },
+  { name: "Aqua", css: "#1fb5c4" },
+  { name: "Blue", css: "#2f5fe0" },
+  { name: "Purple", css: "#8b45d6" },
+];
+
+function backgroundColorName(value) {
+  return USB_BACKGROUND_COLORS[value]?.name ?? `colour ${value}`;
+}
+
+// One chip per colour. A chip is selected only while both databases hold that
+// colour; when rekordbox left them different, the note names both, and
+// choosing a chip sets both.
+export function renderUsbBackgroundColor(ctx) {
+  const { state, el, document } = ctx;
+  const chips = el.usbBackgroundColorChips;
+  if (!chips) return;
+  const data = state.usbBackgroundColor;
+  const hasRoot = !!state.usbRoot && !!state.usbRootValid;
+  const canSet = hasRoot && !!data?.writable && state.usbWritable !== false;
+  const pdb = data?.pdbColor ?? null;
+  const edb = data?.edbColor ?? null;
+  const selected = pdb !== null && pdb === edb ? pdb : null;
+
+  chips.replaceChildren();
+  USB_BACKGROUND_COLORS.forEach((color, value) => {
+    const chip = cloneTemplate(document, "tplBackgroundColorChip");
+    chip.dataset.color = String(value);
+    chip.style.setProperty("--bg-color-dot", color.css);
+    chip.querySelector(".bg-color-chip-label").textContent = color.name;
+    chip.classList.toggle("is-selected", value === selected);
+    chip.setAttribute("aria-checked", value === selected ? "true" : "false");
+    chip.disabled = !canSet;
+    chips.appendChild(chip);
+  });
+
+  const note = el.usbBackgroundColorNote;
+  if (!note) return;
+  let text = "";
+  if (hasRoot && data && !data.writable) {
+    text = data.reason || "This USB has no place for a background colour.";
+  } else if (hasRoot && pdb !== null && edb !== null && pdb !== edb) {
+    text = `rekordbox set two colours: ${backgroundColorName(pdb)} for older players (PDB), `
+      + `${backgroundColorName(edb)} for rekordbox and the CDJ-3000 (eDB). Choosing a colour sets both.`;
+  }
+  note.textContent = text;
+  note.classList.toggle("hidden", !text);
+}
+
+export async function loadUsbBackgroundColor(ctx) {
+  const { state } = ctx;
+  if (!state.usbRoot || !state.usbRootValid) {
+    state.usbBackgroundColor = null;
+    renderUsbBackgroundColor(ctx);
+    return;
+  }
+  try {
+    state.usbBackgroundColor = await ctx.command("get_usb_background_color", { usbRoot: state.usbRoot });
+  } catch (err) {
+    state.usbBackgroundColor = null;
+    ctx.warn("get_usb_background_color failed:", err);
+  }
+  renderUsbBackgroundColor(ctx);
+}
+
+export async function setUsbBackgroundColor(ctx, color) {
+  const { state } = ctx;
+  const { emitStatus } = ctx;
+  if (!state.usbRoot || !state.usbRootValid) {
+    emitStatus("Select USB folder first");
+    return;
+  }
+  const data = await ctx.command("set_usb_background_color", { usbRoot: state.usbRoot, color });
+  state.usbBackgroundColor = data ?? null;
+  if (data?.updated) clearUsbDiagnostics(ctx);
+  renderUsbBackgroundColor(ctx);
+  emitStatus(data?.updated
+    ? `Background colour set to ${backgroundColorName(color)}`
+    : "Background colour unchanged");
 }
 
 // One export at a time: the button is disabled from the click on, not only

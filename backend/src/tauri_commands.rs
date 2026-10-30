@@ -27,7 +27,7 @@ use crate::models::{
     GetPlaylistTracksData, GetPlaylistTracksRequest, GetSelectionDurationData,
     GetSelectionDurationRequest, GetTrackDetailRequest, GetTracksMetadataSummaryRequest,
     GetUsbDeviceNameData, GetUsbDeviceNameRequest, GetUsbPlayerMenuConfigData,
-    GetUsbPlayerMenuConfigRequest, GetUsbTrackDetailRequest, GetUsbTracksMetadataSummaryRequest,
+    GetUsbBackgroundColorRequest, GetUsbPlayerMenuConfigRequest, GetUsbTrackDetailRequest, GetUsbTracksMetadataSummaryRequest,
     ImportExternalPlaylistsData, ImportExternalPlaylistsRequest, InitializeUsbData,
     InitializeUsbRequest, InspectUsbTrackData, InspectUsbTrackRequest, JobEventPayload,
     LibrarySourcesData, ListExternalPlaylistsData, ListExternalPlaylistsRequest,
@@ -53,6 +53,7 @@ use crate::models::{
     SetUsbDeviceNameData, SetUsbDeviceNameRequest, StopPlaybackData, TrackDetail,
     TracksMetadataSummary, UpdateUsbPlayerMenuConfigData, UpdateUsbPlayerMenuConfigRequest,
     UsbTrackAnalysisDetail, ValidateUsbRootData, ValidateUsbRootRequest,
+    SetUsbBackgroundColorRequest, UsbBackgroundColorData,
 };
 
 const JOB_EVENT_CHANNEL: &str = "job:event";
@@ -1260,6 +1261,44 @@ pub async fn update_usb_player_menu_config(
         "USB: Player menu updated",
         Some((45, "USB: Writing menu configuration".to_string())),
         move || commands.update_usb_player_menu_config(request),
+    )
+    .await
+}
+
+#[tauri::command]
+pub async fn get_usb_background_color(
+    app: AppHandle,
+    state: State<'_, BackendCommands>,
+    request: GetUsbBackgroundColorRequest,
+) -> Result<ApiResponse<UsbBackgroundColorData>, String> {
+    let commands = state.inner().clone();
+    run_usb_job(
+        &app,
+        "usb_read",
+        "get_usb_background_color",
+        "USB: Loading background color",
+        "USB: Background color loaded",
+        Some((40, "USB: Reading background color".to_string())),
+        move || commands.get_usb_background_color(request),
+    )
+    .await
+}
+
+#[tauri::command]
+pub async fn set_usb_background_color(
+    app: AppHandle,
+    state: State<'_, BackendCommands>,
+    request: SetUsbBackgroundColorRequest,
+) -> Result<ApiResponse<UsbBackgroundColorData>, String> {
+    let commands = state.inner().clone();
+    run_usb_job(
+        &app,
+        "usb_write",
+        "set_usb_background_color",
+        "USB: Setting background color",
+        "USB: Background color set",
+        Some((45, "USB: Writing background color".to_string())),
+        move || commands.set_usb_background_color(request),
     )
     .await
 }

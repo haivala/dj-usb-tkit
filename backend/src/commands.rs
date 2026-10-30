@@ -18,7 +18,7 @@ use crate::models::{
     GetPlaylistTracksData, GetPlaylistTracksRequest, GetSelectionDurationData,
     GetSelectionDurationRequest, GetTrackDetailRequest, GetTracksMetadataSummaryRequest,
     GetUsbDeviceNameData, GetUsbDeviceNameRequest, GetUsbPlayerMenuConfigData,
-    GetUsbPlayerMenuConfigRequest, GetUsbTrackDetailRequest, GetUsbTracksMetadataSummaryRequest,
+    GetUsbBackgroundColorRequest, GetUsbPlayerMenuConfigRequest, GetUsbTrackDetailRequest, GetUsbTracksMetadataSummaryRequest,
     ImportExternalPlaylistsData, ImportExternalPlaylistsRequest, InitializeUsbData,
     InitializeUsbRequest, InspectUsbTrackData, InspectUsbTrackRequest, LibrarySourcesData,
     ListExternalPlaylistsData, ListExternalPlaylistsRequest, ListMatchingTrackIdsData,
@@ -44,6 +44,7 @@ use crate::models::{
     SetUsbDeviceNameRequest, StopPlaybackData, TrackDetail, TracksMetadataSummary,
     UpdateUsbPlayerMenuConfigData, UpdateUsbPlayerMenuConfigRequest, UsbTrackAnalysisDetail,
     ValidateUsbRootData, ValidateUsbRootRequest,
+    SetUsbBackgroundColorRequest, UsbBackgroundColorData,
 };
 use crate::player::{PlaybackController, PlaybackTransition};
 use crate::service::BackendService;
@@ -499,6 +500,20 @@ impl BackendCommands {
         req: GetUsbPlayerMenuConfigRequest,
     ) -> ApiResponse<UpdateUsbPlayerMenuConfigData> {
         wrap(self.service.sync_usb_player_menu_edb_to_pdb(req))
+    }
+
+    pub fn get_usb_background_color(
+        &self,
+        req: GetUsbBackgroundColorRequest,
+    ) -> ApiResponse<UsbBackgroundColorData> {
+        wrap(self.service.get_usb_background_color(req))
+    }
+
+    pub fn set_usb_background_color(
+        &self,
+        req: SetUsbBackgroundColorRequest,
+    ) -> ApiResponse<UsbBackgroundColorData> {
+        wrap(self.service.set_usb_background_color(req))
     }
 
     pub fn remove_usb_playlist(

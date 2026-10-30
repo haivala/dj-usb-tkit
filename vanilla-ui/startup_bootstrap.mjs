@@ -385,7 +385,9 @@ export async function switchView(ctx, viewId) {
     await ctx.renderBackups();
   } else if (viewId === "usb-player-menu") {
     ctx.renderUsbPlayerMenuEditor();
+    ctx.renderUsbBackgroundColor();
     await ctx.loadUsbPlayerMenuConfig();
+    await ctx.loadUsbBackgroundColor();
   }
 
   // refreshCurrentPlaylistTracks() already renders and draws waveforms for

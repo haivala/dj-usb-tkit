@@ -466,6 +466,25 @@ PDB t16 from the full eDB `menuItem` catalog when older app code or manual
 editing has removed catalog rows from PDB. See `docs/PDB.md` for the t16 row
 layout and observed kind codes.
 
+### Background colour
+
+The player's background (menu highlight) colour is stored in both databases,
+and rekordbox lets the two differ:
+
+- PDB: byte 9 of the `t19` (history) rows, read by PDB players such as the
+  CDJ-2000NXS2.
+- eDB: `property.backGroundColorType`, read by rekordbox.
+
+The values follow rekordbox's list: 0 = default, then 1 pink, 2 red, 3 orange,
+4 yellow, 5 green, 6 aqua, 7 blue, 8 purple. `DEVSETTING.DAT` is not involved.
+
+The Player Menu editor has one colour selector for both. A colour is selected
+when both databases hold it; when rekordbox left them different, a note names
+both, and choosing a colour sets both. `set_usb_background_color` writes the
+eDB's `property` row and the PDB's live `t19` page in place, then saves both
+to the USB or neither (see `docs/PDB.md`, "`tt=19` background colour"). Export
+and repair never change either colour.
+
 Strict parity is intentionally separated from basic export success. A USB may be playable while still failing strict parity checks. The parity report path validates deeper consistency such as:
 
 - playlist membership equivalence across DB surfaces

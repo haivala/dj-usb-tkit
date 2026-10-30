@@ -7,8 +7,10 @@ import {
   handleUsbPlayerMenuListClick,
   refreshHistory,
   refreshUsb,
+  renderUsbBackgroundColor,
   renderUsbPlayerMenuEditor,
   runUsbDiagnostics,
+  setUsbBackgroundColor,
   sanitizeTracklistFileName,
   syncUsbPlayerMenuEditorControls,
 } from "../components/usb/actions.mjs";
@@ -330,4 +332,55 @@ test("player menu single-select clears opposite list and enables proper actions"
   });
   syncUsbPlayerMenuEditorControls(ctx);
   assert.equal(el.usbPlayerMenuRemoveBtn.disabled, true);
+});
+
+test("background colour chips select the shared colour and name both when rekordbox split them", () => {
+  const ctx = makeTestCtx();
+  const { state, el } = ctx;
+  Object.assign(state, { usbRoot: "/USB", usbRootValid: true, usbWritable: true });
+  const selected = () =>
+    [...el.usbBackgroundColorChips.querySelectorAll(".bg-color-chip.is-selected")].map((c) => c.dataset.color);
+
+  state.usbBackgroundColor = { pdbColor: 6, edbColor: 6, writable: true };
+  renderUsbBackgroundColor(ctx);
+  assert.equal(el.usbBackgroundColorChips.querySelectorAll(".bg-color-chip").length, 9);
+  assert.deepEqual(selected(), ["6"]);
+  assert.equal(el.usbBackgroundColorChips.querySelector(".bg-color-chip").disabled, false);
+  assert.equal(el.usbBackgroundColorNote.classList.contains("hidden"), true);
+
+  state.usbBackgroundColor = { pdbColor: 6, edbColor: 0, writable: true };
+  renderUsbBackgroundColor(ctx);
+  assert.deepEqual(selected(), []);
+  assert.match(el.usbBackgroundColorNote.textContent, /Aqua for older players \(PDB\), Default for rekordbox/);
+
+  state.usbBackgroundColor = { pdbColor: null, edbColor: 0, writable: false, reason: "no t19 page" };
+  renderUsbBackgroundColor(ctx);
+  assert.equal(el.usbBackgroundColorChips.querySelector(".bg-color-chip").disabled, true);
+  assert.equal(el.usbBackgroundColorNote.textContent, "no t19 page");
+});
+
+test("choosing a background colour sets it on the USB and redraws from the answer", async () => {
+  const calls = [];
+  const ctx = usbCtx({
+    command: async (name, args) => {
+      calls.push([name, args]);
+      return { pdbColor: 5, edbColor: 5, writable: true, updated: true, warnings: [] };
+    },
+  });
+  Object.assign(ctx.state, {
+    usbRoot: "/USB",
+    usbRootValid: true,
+    usbBackgroundColor: { pdbColor: 0, edbColor: 0, writable: true },
+  });
+  let status = "";
+  ctx.emitStatus = (msg) => { status = msg; };
+
+  await setUsbBackgroundColor(ctx, 5);
+  assert.deepEqual(calls, [["set_usb_background_color", { usbRoot: "/USB", color: 5 }]]);
+  assert.equal(ctx.state.usbBackgroundColor.pdbColor, 5);
+  assert.equal(
+    ctx.el.usbBackgroundColorChips.querySelector(".bg-color-chip[data-color='5']").classList.contains("is-selected"),
+    true,
+  );
+  assert.equal(status, "Background colour set to Green");
 });

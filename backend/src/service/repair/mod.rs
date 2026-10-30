@@ -67,6 +67,7 @@ use super::diagnostics::{
 };
 
 mod audio_fixes;
+mod background_color;
 mod history;
 mod overview;
 mod pdb_fixes;

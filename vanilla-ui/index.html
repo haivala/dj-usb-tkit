@@ -390,6 +390,11 @@
       <!-- USB player menu panel -->
       <section class="panel" id="panel-usb-player-menu" role="tabpanel" aria-hidden="true">
         <h2>Player Menu Editor</h2>
+        <div class="bg-color-setting">
+          <p class="muted player-menu-label">Background colour</p>
+          <div id="usbBackgroundColorChips" class="bg-color-chips" role="radiogroup" aria-label="Player background colour"></div>
+          <p id="usbBackgroundColorNote" class="muted bg-color-note hidden"></p>
+        </div>
         <div id="usbPlayerMenuDivergence" class="player-menu-divergence hidden">
           <span id="usbPlayerMenuDivergenceMessage"></span>
           <button id="usbPlayerMenuSyncBtn" type="button">Fix PDB sync</button>
@@ -996,6 +1001,9 @@
   </template>
   <template id="tplRepairFix">
     <li><input type="checkbox" class="diag-repair-fix-check" /><div class="diag-repair-fix-content"><div class="diag-repair-fix-title"><strong></strong></div><span class="diag-repair-fix-desc"></span><span class="diag-repair-fix-meta"></span></div></li>
+  </template>
+  <template id="tplBackgroundColorChip">
+    <button type="button" class="bg-color-chip" role="radio"><span class="bg-color-chip-dot" aria-hidden="true"></span><span class="bg-color-chip-label"></span></button>
   </template>
   <template id="tplPlayerMenuItem">
     <button type="button" class="player-menu-item" role="option"><span class="player-menu-item-label"></span><span class="player-menu-item-origin"></span></button>

@@ -2221,6 +2221,44 @@ pub struct UpdateUsbPlayerMenuConfigData {
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
+pub struct GetUsbBackgroundColorRequest {
+    #[serde(default)]
+    pub usb_root: Option<String>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct SetUsbBackgroundColorRequest {
+    #[serde(default)]
+    pub usb_root: Option<String>,
+    /// 0 = default, then rekordbox's order: 1 pink, 2 red, 3 orange,
+    /// 4 yellow, 5 green, 6 aqua, 7 blue, 8 purple.
+    pub color: u8,
+}
+
+/// The player background color each database holds. rekordbox lets the two
+/// differ; setting a color writes it to both.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct UsbBackgroundColorData {
+    /// What older players read (PDB t19); `None` without a t19 data page.
+    pub pdb_color: Option<u8>,
+    /// What the CDJ-3000 and rekordbox read (eDB `property.backGroundColorType`);
+    /// `None` without a readable eDB `property` row.
+    pub edb_color: Option<u8>,
+    /// Whether a color can be set: both databases have a place for it.
+    pub writable: bool,
+    /// Why not, when `writable` is false.
+    #[serde(default)]
+    pub reason: Option<String>,
+    /// Whether the set wrote anything (always false for a get).
+    #[serde(default)]
+    pub updated: bool,
+    pub warnings: Vec<WarningEntry>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
 pub struct RepairUsbDiagnosticsRequest {
     #[serde(default)]
     pub usb_root: Option<String>,

@@ -59,7 +59,7 @@ pub(super) fn apply_pdb_header_compatibility_repair(
 /// True when the PDB holds tracks but its tt=19 page does not match them
 /// and the eDB's `property` row: still the untouched init template (older
 /// players count 0 songs), or a ring whose newest id is not the track count
-/// or whose name, color or version differs (see
+/// or whose name or version differs (see
 /// [`crate::pdb_writer::t19_sync_target`]).
 pub(in crate::service) fn detect_pdb_t19_template_state(
     bytes: &[u8],

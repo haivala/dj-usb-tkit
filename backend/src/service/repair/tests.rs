@@ -247,6 +247,54 @@ fn test_usb_root() -> (tempfile::TempDir, std::path::PathBuf) {
 }
 
 #[test]
+fn background_color_sets_both_databases_on_the_usb() {
+    let (_td, usb_root) = test_usb_root();
+    let service_data_dir = tempdir().expect("service data dir");
+    let service = BackendService::new(service_data_dir.path()).expect("backend service");
+    let root = Some(usb_root.to_string_lossy().to_string());
+    let get = || {
+        service
+            .get_usb_background_color(crate::models::GetUsbBackgroundColorRequest {
+                usb_root: root.clone(),
+            })
+            .expect("get color")
+    };
+    let set = |color| {
+        service.set_usb_background_color(crate::models::SetUsbBackgroundColorRequest {
+            usb_root: root.clone(),
+            color,
+        })
+    };
+
+    let before = get();
+    assert_eq!((before.pdb_color, before.edb_color), (Some(0), Some(0)));
+    assert!(before.writable);
+
+    let set_green = set(5).expect("set green");
+    assert!(set_green.updated);
+    assert_eq!((set_green.pdb_color, set_green.edb_color), (Some(5), Some(5)));
+    let after = get();
+    assert_eq!((after.pdb_color, after.edb_color), (Some(5), Some(5)));
+
+    // On the USB itself, not just the staged copies.
+    let pdb = std::fs::read(vendor_pdb_path(&usb_root)).expect("read pdb");
+    assert_eq!(crate::pdb_writer::t19_background_color(&pdb, 4096), Some(5));
+    let conn = crate::edb::open_edb(
+        &super::super::usb_vendor_compat::vendor_edb_path(&usb_root),
+        &mut Vec::new(),
+    )
+    .expect("open eDB");
+    let edb_color: i64 = conn
+        .query_row("SELECT backGroundColorType FROM property", [], |row| row.get(0))
+        .expect("property");
+    assert_eq!(edb_color, 5);
+
+    assert!(!set(5).expect("same color").updated);
+    assert!(set(9).is_err(), "out of range");
+    assert_eq!(get().pdb_color, Some(5));
+}
+
+#[test]
 fn player_menu_config_roundtrip_updates_edb_not_pdb() {
     let (_td, usb_root) = test_usb_root();
     let service_data_dir = tempdir().expect("service data dir");

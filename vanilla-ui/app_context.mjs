@@ -101,6 +101,7 @@ export function createAppContext(env) {
     previewUsbRepairs applyUsbRepairs refreshHistory exportHistoryTracklist
     handleUsbPlayerMenuListClick renderUsbPlayerMenuEditor syncUsbPlayerMenusEdbToPdb
     syncUsbPlayerMenuEditorControls loadUsbPlayerMenuConfig addUsbPlayerMenuItems
+    loadUsbBackgroundColor renderUsbBackgroundColor setUsbBackgroundColor
     removeUsbPlayerMenuItems moveUsbPlayerMenuItems exportPlaylistToUsb
     initializeUsb pickUsbFolder hydrateUsbTrackMetadata loadUsbDevices
     pruneUsbDevice updateUsbRootText`);

@@ -904,6 +904,8 @@ fn main() {
             backend::tauri_commands::fetch_usb_histories,
             backend::tauri_commands::get_usb_player_menu_config,
             backend::tauri_commands::update_usb_player_menu_config,
+            backend::tauri_commands::get_usb_background_color,
+            backend::tauri_commands::set_usb_background_color,
             backend::tauri_commands::sync_usb_player_menu_edb_to_pdb,
             backend::tauri_commands::remove_usb_playlist,
             backend::tauri_commands::reorder_usb_playlists,

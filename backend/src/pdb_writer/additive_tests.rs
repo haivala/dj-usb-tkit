@@ -2920,9 +2920,10 @@ fn export_keeps_rekordbox_t19_ring_at_track_count() {
 
 #[test]
 fn export_writes_edb_property_into_t19() {
-    // t19 follows the eDB's `property` row: a new color or name there
-    // rewrites the page; the same property leaves it alone. The ring keeps
-    // its own date, as rekordbox does.
+    // t19 follows the eDB's `property` row: a new name there rewrites the
+    // page; the same property leaves it alone. The ring keeps its own date,
+    // as rekordbox does, and its own color, which rekordbox keeps apart
+    // from the eDB's.
     let (empty, before) = template_state_seed_with_row(&T19_TEMPLATE_ROW);
     let mut next = empty.clone();
     next.tracks = (1..=3).map(t19_test_track).collect();
@@ -2955,22 +2956,32 @@ fn export_writes_edb_property_into_t19() {
     };
     next.t19_property = Some(colored.clone());
     let diff = compute_additive_diff(&out, &next, vec![]).expect("additive");
-    assert_eq!(diff.sync_t19_ring, Some((3, colored.clone())));
+    assert_eq!(diff.sync_t19_ring, None, "the eDB's color alone");
 
     // A different `createdDate` alone leaves the ring alone, and a rewrite
-    // for another reason keeps the ring's date.
+    // for another reason keeps the ring's date and color.
     next.t19_property = Some(T19Property {
         created_date: "2027-01-01".into(),
-        ..prop
+        ..prop.clone()
     });
     let diff = compute_additive_diff(&out, &next, vec![]).expect("additive");
     assert_eq!(diff.sync_t19_ring, None);
     next.t19_property = Some(T19Property {
         created_date: "2027-01-01".into(),
-        ..colored.clone()
+        device_name: Some("Other".into()),
+        ..colored
     });
     let diff = compute_additive_diff(&out, &next, vec![]).expect("additive");
-    assert_eq!(diff.sync_t19_ring, Some((3, colored)));
+    assert_eq!(
+        diff.sync_t19_ring,
+        Some((
+            3,
+            T19Property {
+                device_name: Some("Other".into()),
+                ..prop
+            }
+        ))
+    );
 }
 
 #[test]
@@ -3090,6 +3101,142 @@ fn export_leaves_t19_alone_once_rekordbox_moved_it_to_a_second_page() {
             "page {page}"
         );
     }
+}
+
+/// Byte offsets in `bytes` where `before` and `bytes` differ.
+fn changed_offsets(before: &[u8], bytes: &[u8]) -> Vec<usize> {
+    (0..bytes.len()).filter(|&i| before[i] != bytes[i]).collect()
+}
+
+/// Offsets of byte 9 (the color) of every row on t19 page `page_idx`.
+fn t19_color_offsets(bytes: &[u8], page_idx: u32) -> Vec<usize> {
+    let off = page_offset(page_idx, PAGE_SIZE).expect("t19 page offset");
+    let page = &bytes[off..off + PAGE_SIZE];
+    crate::pdb_page::footer_slots(page, page[0x18] as usize)
+        .map(|slot| off + HEAP_START + slot.heap_off + 9)
+        .collect()
+}
+
+#[test]
+fn background_color_rewrites_an_app_ring_that_exports_then_keep() {
+    // A ring this app wrote: setting a color rewrites it as the ring for
+    // the same newest id with that color, so it stays a ring and later
+    // exports keep the track count in step without touching the color, even
+    // with the eDB's color still 0.
+    let (empty, before) = template_state_seed_with_row(&T19_TEMPLATE_ROW);
+    let unnamed = test_prop(&T19_TEMPLATE_ROW, None);
+    let mut next = empty.clone();
+    next.tracks = (1..=3).map(t19_test_track).collect();
+    next.t19_property = Some(unnamed.clone());
+    let (ring, _) = try_write_pdb_additive_in_place(&before, &next, vec![], PAGE_SIZE)
+        .expect("export")
+        .expect("export accepted");
+    assert_eq!(t19_background_color(&ring, PAGE_SIZE), Some(0));
+
+    let mut colored = ring.clone();
+    assert!(set_t19_background_color(&mut colored, PAGE_SIZE, 6).expect("set"));
+    assert_eq!(t19_background_color(&colored, PAGE_SIZE), Some(6));
+    let aqua = T19Property {
+        background_color: 6,
+        ..unnamed.clone()
+    };
+    assert_eq!(
+        t19_sync_target(&colored, PAGE_SIZE, 4, Some(&unnamed)),
+        Some((4, aqua.clone())),
+        "still a ring at 3 tracks, keeping its color"
+    );
+    let mut again = colored.clone();
+    assert!(!set_t19_background_color(&mut again, PAGE_SIZE, 6).expect("set"));
+    assert_eq!(again, colored);
+
+    next.tracks.push(t19_test_track(4));
+    let (out, _) = try_write_pdb_additive_in_place(&colored, &next, vec![], PAGE_SIZE)
+        .expect("export")
+        .expect("export accepted");
+    assert_eq!(t19_background_color(&out, PAGE_SIZE), Some(6));
+    assert_eq!(t19_newest_and_active_slot(&out).0, 4);
+    assert_eq!(t19_sync_target(&out, PAGE_SIZE, 4, Some(&unnamed)), None);
+}
+
+#[test]
+fn background_color_patches_the_template_row_in_place() {
+    // The init template has no ring to rewrite: byte 9 of its one row is
+    // the only change, and the page stays template state, so the first
+    // export activates it with the eDB's color as before.
+    let (_, before) = template_state_seed_with_row(&T19_TEMPLATE_ROW);
+    let mut out = before.clone();
+    assert!(set_t19_background_color(&mut out, PAGE_SIZE, 3).expect("set"));
+    assert_eq!(t19_background_color(&out, PAGE_SIZE), Some(3));
+    assert!(t19_is_template_state(&out, PAGE_SIZE));
+    assert_eq!(
+        changed_offsets(&before, &out),
+        t19_color_offsets(&out, t19_page_index(&out))
+    );
+}
+
+#[test]
+fn background_color_patches_a_rekordbox_colored_page_in_place() {
+    // rekordbox's own color change (a reference USB): the new color goes
+    // into one more row with the newest id, and `rowpf` marks only that
+    // row, so the page is no longer a ring. Reading takes that row's color;
+    // setting one changes byte 9 of every row and nothing else, and export
+    // leaves the page alone before and after.
+    let (empty, before) = template_state_seed_with_row(&T19_TEMPLATE_ROW);
+    let unnamed = test_prop(&T19_TEMPLATE_ROW, None);
+    let mut next = empty.clone();
+    next.tracks = (1..=3).map(t19_test_track).collect();
+    next.t19_property = Some(unnamed.clone());
+    let (mut page, _) = try_write_pdb_additive_in_place(&before, &next, vec![], PAGE_SIZE)
+        .expect("export")
+        .expect("export accepted");
+    let off = t19_page_offset(&page);
+    let slot1 = {
+        let p = &page[off..off + PAGE_SIZE];
+        let group = crate::pdb_page::footer_groups(PAGE_SIZE, p[0x18] as usize)
+            .next()
+            .expect("group 0");
+        let slot1 = off + HEAP_START + group.row_offset(p, 1);
+        group.set_rowpf(&mut page[off..off + PAGE_SIZE], 0b10);
+        slot1
+    };
+    page[slot1 + 4..slot1 + 8].copy_from_slice(&3u32.to_le_bytes());
+    page[slot1 + 9] = 6;
+    assert_eq!(t19_background_color(&page, PAGE_SIZE), Some(6));
+    assert_eq!(t19_sync_target(&page, PAGE_SIZE, 4, Some(&unnamed)), None);
+
+    let mut out = page.clone();
+    assert!(set_t19_background_color(&mut out, PAGE_SIZE, 2).expect("set"));
+    assert_eq!(t19_background_color(&out, PAGE_SIZE), Some(2));
+    let colors = t19_color_offsets(&out, t19_page_index(&out));
+    assert!(colors.iter().all(|&at| out[at] == 2));
+    let mut expected = colors.clone();
+    expected.retain(|&at| page[at] != 2);
+    assert_eq!(changed_offsets(&page, &out), expected);
+    assert_eq!(t19_sync_target(&out, PAGE_SIZE, 4, Some(&unnamed)), None);
+}
+
+#[test]
+fn background_color_patches_only_the_live_page_of_a_two_page_t19() {
+    // After a rekordbox rename on a full page the chain has two pages and
+    // only the last is live: that's the one that gets the color.
+    let (_, mut before) = template_state_seed_with_row(&T19_TEMPLATE_ROW);
+    let unnamed = test_prop(&T19_TEMPLATE_ROW, None);
+    sync_t19_ring_page(&mut before, PAGE_SIZE, 154, &unnamed).expect("sync");
+    let named = test_prop(&T19_TEMPLATE_ROW, Some(&"\u{e4}".repeat(50)));
+    let renamed_row = t19_ring_rows(&named, 154).pop().expect("row");
+    append_rows_to_chain_in_place(&mut before, 19, &[renamed_row], PAGE_SIZE).expect("append");
+    let (_ec, first, last) = table_ptr_fields(&before, 19).expect("t19 ptr");
+    assert_eq!(
+        collect_chain_pages(&before, PAGE_SIZE, first, last)
+            .expect("chain")
+            .len(),
+        3
+    );
+
+    let mut out = before.clone();
+    assert!(set_t19_background_color(&mut out, PAGE_SIZE, 8).expect("set"));
+    assert_eq!(t19_background_color(&out, PAGE_SIZE), Some(8));
+    assert_eq!(changed_offsets(&before, &out), t19_color_offsets(&out, last));
 }
 
 #[test]

@@ -460,12 +460,14 @@ bytes; rekordbox's `"APECAR_red"` rows are 48, so its ring holds 80 slots,
 and once wrapped its ids alternate in slots 1/2 (slot 0 keeps the template
 row). A CDJ writes the same shape into rows it adds (`"Chiphead 256GB"`, 52
 bytes). Players compare t19 with the eDB and give communication errors when
-they disagree; byte 9 sets the player's menu highlight (color 1 turned a
-CDJ-2000NXS2's highlight from blue to purple).
+they disagree on the name or song count. Byte 9 is the player's background
+(menu highlight) colour, which rekordbox keeps apart from the eDB's
+`backGroundColorType` and lets differ (see "`tt=19` background colour" below).
 
 The writer builds the rows from the eDB's `property` row (`T19Property`,
-read by `edb_t19_property` after the eDB export has updated it): name and
-color from the eDB, the version always the app's `"1000"` (`T19_DB_VERSION`).
+read by `edb_t19_property` after the eDB export has updated it): the name from
+the eDB, the version always the app's `"1000"` (`T19_DB_VERSION`), and the
+colour from the eDB only on a template-state page; a ring keeps its own colour.
 The version is not copied from the eDB's `dbVersion`: libraries rekordbox
 upgraded say `10000` there while their t19 rows keep `"1000"`, and `"1000"`
 is what players were validated against. The date is the eDB's `createdDate`
@@ -475,6 +477,36 @@ as rekordbox leaves the date in existing rows (older libraries keep a
 keeps the property its rows carry. `initialize_usb` stamps the template row
 and the eDB's `createdDate` with the same date, the day it initializes the
 USB, as rekordbox's own init does.
+
+#### `tt=19` background colour
+
+Byte 9 of a `t19` row is the player background colour, in rekordbox's order:
+0 = default, 1 pink, 2 red, 3 orange, 4 yellow, 5 green, 6 aqua, 7 blue,
+8 purple (rekordbox desktop showed 1 and 5 as pink and green). rekordbox keeps it apart
+from the eDB's `backGroundColorType`: on a reference USB, a colour changed for
+the PDB alone left the eDB at 0, and one changed for the eDB alone left the PDB
+as it was. `DEVSETTING.DAT` does not change.
+
+rekordbox writes a new colour into one more row: the next ring slot gets the
+newest id and the colour, and `rowpf` marks only that row (a 154-track
+reference USB: slot 1 = id 154, colour 6, `rowpf 0x0002`; slot 0 keeps id 154,
+colour 0). After a rename on a full page the colour goes into the new page's rows.
+The page is no longer a ring after such a change, so export leaves it alone.
+
+The app reads the colour from the newest row on the live page (the last page
+of the chain): the highest id among the rows whose `rowpf` bit is set, the last
+such slot on a tie (`t19_background_color`). Which row the players read is
+still to be measured on hardware. `set_t19_background_color` writes it so that
+this doesn't matter:
+
+- A ring (`t19_ring_state`) is rewritten as the ring for its own newest id with
+  the new colour (`sync_t19_ring_page`), so it stays a ring that export keeps at
+  the track count. Slot 0 stays the colourless template row.
+- Any other page (rekordbox's after a colour change or rename, the init
+  template, rows a player added) gets byte 9 of every row on the live page set
+  and nothing else changed: no footer, seq, row layout or chain.
+
+Export and `repair_pdb_t19_template_state` keep a ring's colour (`t19_sync_target`).
 
 In every one, `rowpf` marks the newest id's slot, `tranrf` that slot plus the
 slot of the id before it, and `num_rl` is the lower of those two slots. The
