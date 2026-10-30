@@ -29,12 +29,10 @@ A device that has passed every scenario gets a single `everything tested` row
 instead of one row per scenario. A scenario added in a later app version gets
 its own row for that device (`untested` until it has run on hardware).
 
-Overall status: everything is working on CDJ/XDJ hardware except
-`strict-parity-repair` on 0.4.8: on a large USB, CDJ-2000NXS and CDJ-2000NXS2
-could not load the repaired stick at all. The fix in 0.4.9 is not yet
-hardware-confirmed; see Known Issues. All other previously known issues on those
-devices are fixed and hardware-confirmed on the hardware that originally showed
-them. The one Engine DJ issue (`engine-pdb-import-artists`) is fixed in 0.4.1 but not yet
+Overall status: everything is working on CDJ/XDJ hardware. Every previously
+known issue on those devices is fixed and hardware-confirmed on the hardware
+that originally showed it, the last being `strict-parity-repair` on 0.4.8
+(fixed in 0.4.9, confirmed on CDJ-2000NXS and CDJ-2000NXS2 on 2026-10-30). The one Engine DJ issue (`engine-pdb-import-artists`) is fixed in 0.4.1 but not yet
 confirmed on the player. On 0.1.36 (2026-09-02), a run re-validated every scenario on CDJ-2000NXS2, CDJ-3000, and the newly
 added CDJ-3000X. On 0.2.0 (2026-09-11), CDJ-2000, CDJ-2000NXS and CDJ-2000NXS2
 each ran every scenario available in that version. `cue-points-and-edited-beatgrid` is hardware-confirmed
@@ -72,10 +70,8 @@ release (0.1.0) and has stayed working through every version since.
 | Device model | Test scenario | Status | Last tested app version | Last validated date | Notes |
 |---|---|---|---|---|---|
 | CDJ-2000 | everything tested | pass | 0.3.7 | 2026-10-09 | First validation on this device (fw 4.33) on 0.2.0 (2026-09-11), covering every scenario available then; `playback-start-position` (added in 0.2.4) run on 0.3.7. |
-| CDJ-2000NXS | everything tested | pass | 0.3.7 | 2026-10-09 | All scenarios run on 0.2.0 (2026-09-11); cue-editor scenarios re-run on 0.2.4; `cue-points-and-edited-beatgrid` re-run on 0.3.7 with memory cues. |
-| CDJ-2000NXS2 | everything tested | pass | 0.3.7 | 2026-10-09 | All scenarios run on 0.2.0 (2026-09-11); cue-editor scenarios re-run on 0.2.4; `cue-points-and-edited-beatgrid` re-run on 0.3.7 with memory cues. `more-than-16-tracks-fresh-usb-init` was `fail` at <=0.1.30; fixed in 0.1.31. |
-| CDJ-2000NXS | `strict-parity-repair` | untested | 0.4.9 | | `fail` at 0.4.8; fix in 0.4.9 not yet run on hardware. |
-| CDJ-2000NXS2 | `strict-parity-repair` | untested | 0.4.9 | | `fail` at 0.4.8; fix in 0.4.9 not yet run on hardware. |
+| CDJ-2000NXS | everything tested | pass | 0.4.9 | 2026-10-30 | All scenarios run on 0.2.0 (2026-09-11); cue-editor scenarios re-run on 0.2.4; `cue-points-and-edited-beatgrid` re-run on 0.3.7 with memory cues. `strict-parity-repair` was `fail` at 0.4.8; fixed in 0.4.9. |
+| CDJ-2000NXS2 | everything tested | pass | 0.4.9 | 2026-10-30 | All scenarios run on 0.2.0 (2026-09-11); cue-editor scenarios re-run on 0.2.4; `cue-points-and-edited-beatgrid` re-run on 0.3.7 with memory cues. `more-than-16-tracks-fresh-usb-init` was `fail` at <=0.1.30; fixed in 0.1.31. `strict-parity-repair` was `fail` at 0.4.8; fixed in 0.4.9. |
 | XDJ-1000MK2 | everything tested | pass | 0.2.6 | 2026-09-29 | First validation on this device (fw 1.44). |
 | XDJ-AZ | `normal-export` | pass | 0.3.7-rc.3 | 2026-10-09 | First validation on this device (fw 1.30). |
 | XDJ-AZ | `beat-grid-and-beat-sync` | pass | 0.3.7-rc.3 | 2026-10-09 | `fail` at <=0.3.7-rc.1; fixed in 0.3.7-rc.3. |
@@ -151,6 +147,8 @@ tested` row.
 | CDJ-3000 | not recorded | 0.4.0 | everything tested | pass | 2026-10-10 | maintainer | Every CDJ/XDJ scenario available in 0.4.0. First CDJ-3000 run since 0.1.36, so the first with the cue editor (hot cues, memory cues, edited beat grid, playback start) on this device. |
 | CDJ-2000NXS2 | 1.82 | 0.4.8 | `strict-parity-repair` | fail | 2026-10-27 | maintainer | Run stopped at: database mount. A large USB whose eDB held only a small part of its tracks could not be loaded after the repair; rekordbox desktop refused it too. See Known Issues: "0.4.8 — `strict-parity-repair`". |
 | CDJ-2000NXS | 1.44 | 0.4.8 | `strict-parity-repair` | fail | 2026-10-27 | maintainer | Run stopped at: database mount. Same USB and repair as the CDJ-2000NXS2 row above. See Known Issues: "0.4.8 — `strict-parity-repair`". |
+| CDJ-2000NXS2 | 1.82 | 0.4.9 | `strict-parity-repair` | pass | 2026-10-30 | maintainer | Run to check the 0.4.9 fix: strict parity repair, reinsert, database mount, playlist browse, track load and playback all work. Previously `fail` at 0.4.8 (see Known Issues). |
+| CDJ-2000NXS | 1.44 | 0.4.9 | `strict-parity-repair` | pass | 2026-10-30 | maintainer | Same run as the CDJ-2000NXS2 row above. |
 
 ## Known Issues
 
@@ -278,7 +276,7 @@ Validation questions:
 - After 0.4.1's export (or **Repair Artist Name Layout** on an older USB), does the
   player's own import show every artist?
 
-### 0.4.8 — `strict-parity-repair` (fix in 0.4.9, not yet hardware-confirmed)
+### 0.4.8 — `strict-parity-repair` (fixed in 0.4.9)
 
 **Devices:** CDJ-2000NXS2 (fw 1.82), CDJ-2000NXS (fw 1.44)
 
@@ -315,8 +313,10 @@ Artifacts:
   `USB_HUGE_CANNOT_PARITY_FIX` fixture.
 
 Validation questions:
-- Does a 0.4.9 strict parity repair of the same pre-repair USB load and play on
-  CDJ-2000NXS and CDJ-2000NXS2?
+- None outstanding — fixed in 0.4.9 and hardware-confirmed `pass` on 0.4.9
+  (2026-10-30) on the CDJ-2000NXS2 (fw 1.82) and CDJ-2000NXS (fw 1.44) that
+  originally showed the fault. Which 0.4.8 change stopped the USB loading
+  remains unproven.
 
 ## Required Operations
 

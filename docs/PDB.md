@@ -482,7 +482,9 @@ USB, as rekordbox's own init does.
 
 Byte 9 of a `t19` row is the player background colour, in rekordbox's order:
 0 = default, 1 pink, 2 red, 3 orange, 4 yellow, 5 green, 6 aqua, 7 blue,
-8 purple (rekordbox desktop showed 1 and 5 as pink and green). rekordbox keeps it apart
+8 purple (rekordbox desktop showed 1 and 5 as pink and green; a CDJ-2000NXS
+and CDJ-2000NXS2 showed them the same with every row of the live page set to
+the colour). rekordbox keeps it apart
 from the eDB's `backGroundColorType`: on a reference USB, a colour changed for
 the PDB alone left the eDB at 0, and one changed for the eDB alone left the PDB
 as it was. `DEVSETTING.DAT` does not change.
@@ -495,13 +497,17 @@ The page is no longer a ring after such a change, so export leaves it alone.
 
 The app reads the colour from the newest row on the live page (the last page
 of the chain): the highest id among the rows whose `rowpf` bit is set, the last
-such slot on a tie (`t19_background_color`). Which row the players read is
-still to be measured on hardware. `set_t19_background_color` writes it so that
-this doesn't matter:
+such slot on a tie (`t19_background_color`). A CDJ-2000NXS and CDJ-2000NXS2
+read the same row: with slot 0 and slot 1 holding different colours, they
+showed the colour of the row `rowpf` marked, whichever slot that was, and
+ignored the eDB's colour. `set_t19_background_color` sets every row anyway, so
+the players show the colour whichever row they read:
 
 - A ring (`t19_ring_state`) is rewritten as the ring for its own newest id with
   the new colour (`sync_t19_ring_page`), so it stays a ring that export keeps at
-  the track count. Slot 0 stays the colourless template row.
+  the track count. Slot 0 stays the colourless template row. A CDJ-2000NXS
+  and CDJ-2000NXS2 showed the colour and browsed the USB without a
+  communication error, so they don't read the colour from slot 0 alone.
 - Any other page (rekordbox's after a colour change or rename, the init
   template, rows a player added) gets byte 9 of every row on the live page set
   and nothing else changed: no footer, seq, row layout or chain.

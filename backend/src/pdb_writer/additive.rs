@@ -1349,8 +1349,8 @@ pub struct T19Property {
     pub db_version: String,
     /// `None` for an unnamed USB (`deviceName` empty).
     pub device_name: Option<String>,
-    /// Player background color; `0` is the default (blue highlight). A
-    /// rekordbox USB with `1` turned a CDJ-2000NXS2's highlight purple.
+    /// Player background color; `0` is the default (blue highlight), `1`
+    /// pink and `5` green on a CDJ-2000NXS and CDJ-2000NXS2.
     pub background_color: u8,
 }
 
