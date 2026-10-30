@@ -98,7 +98,7 @@ library, an app playlist, a USB playlist, or USB history. It shows the track's
 full-detail colour waveform with the beat grid over it.
 
 <p align="center">
-  <img src="docs/assets/cue-editor-drag-cues.gif" alt="Dragging cue points in the cue editor" width="800" />
+  <img src="docs/assets/cue-editor-drag-cues.webp" alt="Dragging cue points in the cue editor" width="800" />
 </p>
 
 - **Hot cues**: up to 8, lettered A–H by position, each with a name and

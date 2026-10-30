@@ -34,7 +34,7 @@ Export is intentionally tied to a quick prep loop:
 - analyze only missing tracks for that playlist
 - then export once required analysis fields are present
 
-![Exporting a playlist: progress in the footer, then the export status](assets/export-playlist.gif)
+![Exporting a playlist: progress in the footer, then the export status](assets/export-playlist.webp)
 
 Export is designed for deterministic re-runs. Re-exporting the same playlist should produce predictable results, and optional cleanup can prune stale export-owned files when enabled.
 

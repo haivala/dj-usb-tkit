@@ -45,6 +45,9 @@
   process directly instead of being written into the app's environment while it runs, which could
   crash the app in rare cases. A repair whose database write fails and whose staged database then
   can't be put back now says so in the Event Log instead of failing silently.
+- **Chore:** The docs animations are animated WebP instead of GIF: under half the size (3.2 MB to
+  1.4 MB) and without the GIF colour banding. The repair preview screenshot's caption no longer
+  lists three problems next to a banner that counts four.
 
 ## 0.5.1
 

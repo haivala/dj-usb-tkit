@@ -39,7 +39,7 @@ analyzed); hover it to see how many.
 
 A track already in a playlist is never added to it twice.
 
-![Ticking tracks, + Add to the active playlist, then Add to… another playlist and a new one](assets/selection-toolbar.gif)
+![Ticking tracks, + Add to the active playlist, then Add to… another playlist and a new one](assets/selection-toolbar.webp)
 
 ## Deep technical details
 

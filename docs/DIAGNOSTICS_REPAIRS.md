@@ -118,7 +118,7 @@ preview, then builds a repair catalog from the current findings.
 
 When `apply=false`, no files are changed.
 
-![Preview Fixes for a renamed audio file, an empty analysis file and a playlist the PDB and eDB disagree on](assets/usb-repair-preview.png)
+![Preview Fixes for a USB with a renamed audio file, an emptied analysis file and a playlist entry missing from the eDB: what Apply Fixes repairs](assets/usb-repair-preview.png)
 
 When `apply=true`:
 

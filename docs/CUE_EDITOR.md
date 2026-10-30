@@ -43,7 +43,7 @@ The grid redraws as you edit, so it can be lined up by eye: here a wrong BPM
 (127) drifts off the kicks, 129 runs parallel, typing the first beat puts it on
 them, and ± moves the bar starts one beat.
 
-![Beat grid following BPM and first-beat edits](assets/cue-editor-beatgrid.gif)
+![Beat grid following BPM and first-beat edits](assets/cue-editor-beatgrid.webp)
 
 Cues keep their place in the audio when the grid changes, as in rekordbox. To
 fix a grid under cues that were placed on it, turn on **Cues follow grid** (the
@@ -101,7 +101,7 @@ point **and** a hot-cue pad (see `docs/USB_EXPORT.md`).
   other way round: Shift snaps.
 - **Delete**: × on the cue's row.
 
-![Dragging cues: A snaps beat to beat with Q on, B moves freely with Shift](assets/cue-editor-drag-cues.gif)
+![Dragging cues: A snaps beat to beat with Q on, B moves freely with Shift](assets/cue-editor-drag-cues.webp)
 
 ### Memory cues
 
@@ -145,7 +145,7 @@ the first beat itself, where the CDJ then loads). The start marker stays while
 the track has any cue, hot or memory. With no cues both options are disabled
 and a note says the CDJ starts at the first audio.
 
-![Choosing First beat adds the start marker; dragging it makes it a Start marker](assets/cue-editor-playback-start.gif)
+![Choosing First beat adds the start marker; dragging it makes it a Start marker](assets/cue-editor-playback-start.webp)
 
 ### Known limitations
 

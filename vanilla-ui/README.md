@@ -130,9 +130,9 @@ message-routing contracts.
 
 ## Docs media
 
-The GIFs and screenshots in `docs/assets/` (used by `docs/CUE_EDITOR.md` and
+The animations (WebP) and screenshots in `docs/assets/` (used by `docs/CUE_EDITOR.md` and
 the top-level README) are recorded from the real frontend build: the three
-`cue-editor-*.gif`, `DJ-USB-Tkit.png` and `cue-editor.png`. Re-record them
+`cue-editor-*.webp`, `DJ-USB-Tkit.png` and `cue-editor.png`. Re-record them
 after a UI change:
 
 ```bash

@@ -122,7 +122,7 @@ the checklist's order; one that fails doesn't stop the rest, and the status
 line names it. When they are done, the first imported playlist opens. A track
 listed twice in a list is added to its playlist once.
 
-![Import under New, ticking two playlists, and the first imported playlist opening](assets/import-playlist.gif)
+![Import under New, ticking two playlists, and the first imported playlist opening](assets/import-playlist.webp)
 
 An imported playlist's header says where it came from, e.g. `Friday Set (5 tracks, Total time: 14:05) · Imported from
 rekordbox`.

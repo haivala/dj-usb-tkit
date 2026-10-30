@@ -1,6 +1,6 @@
 // Records the docs media in docs/assets/ -- the cue-editor, playlist-import,
-// export and selection-toolbar GIFs and the README / cue-editor / Backups
-// screenshots -- from the real frontend build.
+// export and selection-toolbar animations (WebP) and the README / cue-editor /
+// Backups screenshots -- from the real frontend build.
 //
 //   npm run docs:media           (from vanilla-ui/; needs cargo and ffmpeg)
 //   npm run docs:media -- cue-editor cue-editor-drag-cues   (only those)
@@ -14,9 +14,9 @@
 //    receive.
 // 3. Serves dist/ with Tauri's invoke stubbed from that dump (page_init.js,
 //    which also stands in for the playlists and a connected USB), drives the
-//    app in headless Chromium, and writes each GIF scene (lossless frames
+//    app in headless Chromium, and writes each animated scene (lossless frames
 //    over CDP, encoded with ffmpeg) and each screenshot.
-// 4. Every GIF and screenshot gets a footer added below it (so it covers
+// 4. Every animation and screenshot gets a footer added below it (so it covers
 //    nothing): the scene's caption and "DJ USB Tkit". No version anywhere,
 //    so the media only needs re-recording after a UI change.
 import { chromium } from "@playwright/test";
@@ -32,7 +32,7 @@ const repoDir = resolve(uiDir, "..");
 const outDir = join(repoDir, "docs/assets");
 const BASE_URL = "http://127.0.0.1:4173/";
 const VIEWPORT = { width: 1280, height: 837 };
-const GIF_WIDTH = 960;
+const ANIM_WIDTH = 960;
 const EDITOR_TITLE = "Demo Groove";
 // What the source folders look like in the app (long, so the chips truncate).
 const SHOWN_ROOT = "/home/dj/Music/Projects/Chiphead.Music";
@@ -419,7 +419,9 @@ function addFooter(raw, footer, out) {
   run("ffmpeg", ["-v", "error", "-y", "-i", raw, "-i", footer, "-lavfi", `[0:v]${footerFilter(1)}`, out]);
 }
 
-function encodeGif({ frames, crop }, framesDir, footer, out) {
+// Animated WebP rather than GIF: no 256-colour palette, and about a third of
+// the size. GitHub shows it like any other image.
+function encodeWebp({ frames, crop }, framesDir, footer, out) {
   // Frames only arrive when the page changes: hold each until the next one.
   let list = "";
   frames.forEach((f, i) => {
@@ -429,14 +431,11 @@ function encodeGif({ frames, crop }, framesDir, footer, out) {
   list += `file '${frames.at(-1).file}'\n`;
   const listFile = join(framesDir, "list.txt");
   writeFileSync(listFile, list);
-  const palette = join(framesDir, "palette.png");
-  const vf = `fps=12,crop=${crop.w}:${crop.h}:${crop.x}:${crop.y},scale=${GIF_WIDTH}:-1:flags=lanczos`;
-  const input = ["-v", "error", "-y", "-f", "concat", "-safe", "0", "-i", listFile, "-i", footer];
-  const tagged = `[0:v]${vf},${footerFilter(1)}`;
-  run("ffmpeg", [...input, "-lavfi", `${tagged},palettegen=max_colors=128:stats_mode=diff`, palette]);
+  const vf = `fps=12,crop=${crop.w}:${crop.h}:${crop.x}:${crop.y},scale=${ANIM_WIDTH}:-1:flags=lanczos`;
   run("ffmpeg", [
-    ...input, "-i", palette,
-    "-lavfi", `${tagged}[x];[x][2:v]paletteuse=dither=bayer:bayer_scale=5:diff_mode=rectangle`,
+    "-v", "error", "-y", "-f", "concat", "-safe", "0", "-i", listFile, "-i", footer,
+    "-lavfi", `[0:v]${vf},${footerFilter(1)}`,
+    "-c:v", "libwebp_anim", "-lossless", "0", "-quality", "85", "-compression_level", "6", "-loop", "0",
     out,
   ]);
   console.log(`wrote ${relative(repoDir, out)}`);
@@ -793,7 +792,7 @@ function shots(fixture) {
       // USB with a renamed audio file, an emptied analysis file and a
       // playlist entry missing from the eDB.
       name: "usb-repair-preview",
-      caption: "Preview Fixes for a renamed file, an empty analysis file and a playlist the PDB and eDB disagree on",
+      caption: "Preview Fixes for a damaged USB: what Apply Fixes repairs, before anything is changed",
       opts: { brokenUsb: true },
       async run(page) {
         await openHealthCard(page);
@@ -874,8 +873,8 @@ try {
       captured = await capture(page, framesDir, body, captureOpts);
     });
     await ctx.close();
-    const footer = await renderFooter(browser, scene.caption, GIF_WIDTH, join(work, `footer-${scene.name}.png`));
-    encodeGif(captured, framesDir, footer, join(outDir, `${scene.name}.gif`));
+    const footer = await renderFooter(browser, scene.caption, ANIM_WIDTH, join(work, `footer-${scene.name}.png`));
+    encodeWebp(captured, framesDir, footer, join(outDir, `${scene.name}.webp`));
   }
   for (const shot of shots(fixture)) {
     if (!wanted(shot.name)) continue;
