@@ -341,6 +341,7 @@ impl BackendService {
             unchanged,
             missing_at_new_root,
             conflicts,
+            unresolved: missing_at_new_root + conflicts,
             sources: self.library_sources_data(&conn, &sources)?,
         })
     }

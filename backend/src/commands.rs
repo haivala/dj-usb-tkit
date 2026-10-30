@@ -19,7 +19,7 @@ use crate::models::{
     GetSelectionDurationRequest, GetTrackDetailRequest, GetTracksMetadataSummaryRequest,
     GetUsbDeviceNameData, GetUsbDeviceNameRequest, GetUsbPlayerMenuConfigData,
     GetUsbPlayerMenuConfigRequest, GetUsbTrackDetailRequest, GetUsbTracksMetadataSummaryRequest,
-    ImportExternalPlaylistData, ImportExternalPlaylistRequest, InitializeUsbData,
+    ImportExternalPlaylistsData, ImportExternalPlaylistsRequest, InitializeUsbData,
     InitializeUsbRequest, InspectUsbTrackData, InspectUsbTrackRequest, LibrarySourcesData,
     ListExternalPlaylistsData, ListExternalPlaylistsRequest, ListMatchingTrackIdsData,
     ListMatchingTrackIdsRequest, ListPlaylistsData, ListUsbBackupsData, ListUsbBackupsRequest,
@@ -94,13 +94,6 @@ impl BackendCommands {
         wrap(self.service.list_rekordbox_playlists(req))
     }
 
-    pub fn import_rekordbox_playlist(
-        &self,
-        req: ImportExternalPlaylistRequest,
-    ) -> ApiResponse<ImportExternalPlaylistData> {
-        wrap(self.service.import_rekordbox_playlist(req))
-    }
-
     pub fn scan_mixxx_db(&self, req: ScanMixxxDbRequest) -> ApiResponse<ScanLibraryData> {
         wrap(self.service.scan_mixxx_db(req))
     }
@@ -112,11 +105,11 @@ impl BackendCommands {
         wrap(self.service.list_mixxx_playlists(req))
     }
 
-    pub fn import_mixxx_playlist(
+    pub fn import_external_playlists(
         &self,
-        req: ImportExternalPlaylistRequest,
-    ) -> ApiResponse<ImportExternalPlaylistData> {
-        wrap(self.service.import_mixxx_playlist(req))
+        req: ImportExternalPlaylistsRequest,
+    ) -> ApiResponse<ImportExternalPlaylistsData> {
+        wrap(self.service.import_external_playlists(req))
     }
 
     pub fn browse_source_files(

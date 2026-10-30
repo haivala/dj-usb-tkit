@@ -245,6 +245,10 @@ pub struct ScanLibraryData {
     pub unanalyzed_count: usize,
     #[serde(default)]
     pub warnings: Vec<WarningEntry>,
+    /// The warn/error entries among `warnings`, for the status line's
+    /// "(N warnings)" (`logging::count_warnings`).
+    #[serde(default)]
+    pub warning_count: usize,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -579,6 +583,9 @@ pub struct RelocateSourceRootData {
     pub unchanged: usize,
     pub missing_at_new_root: usize,
     pub conflicts: usize,
+    /// Tracks still pointing at the old folder: `missing_at_new_root` plus
+    /// `conflicts`.
+    pub unresolved: usize,
     /// The source folders after the move: the old folder is replaced by the
     /// new one, or kept beside it while some of its tracks couldn't move.
     pub sources: LibrarySourcesData,
@@ -1400,6 +1407,10 @@ pub struct FetchUsbPlaylistsData {
     /// count, so a track in two playlists still counts twice.
     pub playlist_track_total: usize,
     pub warnings: Vec<WarningEntry>,
+    /// The warn/error entries among `warnings`, for the status line's
+    /// "(N warnings)" (`logging::count_warnings`).
+    #[serde(default)]
+    pub warning_count: usize,
     pub playlist_usb_export_status: Vec<PlaylistUsbExportStatus>,
 }
 
@@ -1423,6 +1434,10 @@ pub struct RemoveUsbPlaylistData {
     pub files_deleted: usize,
     pub tracks_kept_shared: usize,
     pub warnings: Vec<WarningEntry>,
+    /// The warn/error entries among `warnings`, for the status line's
+    /// "(N warnings)" (`logging::count_warnings`).
+    #[serde(default)]
+    pub warning_count: usize,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -1479,6 +1494,10 @@ pub struct FetchUsbHistoriesData {
     pub items: Vec<UsbHistory>,
     pub counts: UsbHistoryCounts,
     pub warnings: Vec<WarningEntry>,
+    /// The warn/error entries among `warnings`, for the status line's
+    /// "(N warnings)" (`logging::count_warnings`).
+    #[serde(default)]
+    pub warning_count: usize,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -1708,7 +1727,14 @@ pub struct AnalyzeNewTracksData {
     #[serde(default)]
     pub incomplete: usize,
     pub failed: usize,
+    /// `analyzed + incomplete + failed`.
+    #[serde(default)]
+    pub processed: usize,
     pub warnings: Vec<WarningEntry>,
+    /// The warn/error entries among `warnings`, for the status line's
+    /// "(N warnings)" (`logging::count_warnings`).
+    #[serde(default)]
+    pub warning_count: usize,
     #[serde(default)]
     pub items: Vec<Track>,
     /// Wall-clock time the batch took, paused time included.
@@ -1770,6 +1796,10 @@ pub struct ExportToUsbData {
     pub exported_artworks: usize,
     pub exported_analysis_files: usize,
     pub warnings: Vec<WarningEntry>,
+    /// The warn/error entries among `warnings`, for the status line's
+    /// "(N warnings)" (`logging::count_warnings`).
+    #[serde(default)]
+    pub warning_count: usize,
 }
 
 // --- USB Diagnostics ---
@@ -2360,10 +2390,51 @@ pub struct ImportExternalPlaylistData {
     pub updated_existing: bool,
     /// Tracks placed in the new playlist.
     pub added: usize,
+    /// Entries of the source list not placed: missing or unsupported files,
+    /// tracks no longer in the library, and repeats of a track.
+    pub skipped: usize,
     /// Tracks new to the local library.
     pub indexed: usize,
     pub not_found: Vec<String>,
     pub warnings: Vec<WarningEntry>,
+}
+
+/// One list picked in the playlist import dialog: which library it is from,
+/// plus the single-list import's fields.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ImportExternalPlaylistsItem {
+    pub library: ExternalLibrary,
+    #[serde(flatten)]
+    pub request: ImportExternalPlaylistRequest,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ImportExternalPlaylistsRequest {
+    pub items: Vec<ImportExternalPlaylistsItem>,
+}
+
+/// One list's import: its playlist, or why it failed.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ImportExternalPlaylistOutcome {
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub playlist: Option<ImportExternalPlaylistData>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub error: Option<String>,
+}
+
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ImportExternalPlaylistsData {
+    /// One per requested list, in request order.
+    pub results: Vec<ImportExternalPlaylistOutcome>,
+    pub imported: usize,
+    pub failed: usize,
+    /// Tracks placed, and entries skipped, over every imported list.
+    pub added: usize,
+    pub skipped: usize,
 }
 
 // ── track cues + beat-grid editing ────────────────────────

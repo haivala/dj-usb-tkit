@@ -949,6 +949,7 @@ impl BackendService {
             scoped_track_count: 0,
             album_count: 0,
             unanalyzed_count: 0,
+            warning_count: logging::count_warnings(&warnings),
             warnings,
         })
     }
@@ -1045,6 +1046,7 @@ impl BackendService {
             name: playlist.name,
             updated_existing,
             added: local_ids.len(),
+            skipped: entry_ids.len() - local_ids.len(),
             indexed: importer.indexed,
             not_found: importer.not_found,
             warnings,
@@ -1656,6 +1658,63 @@ mod tests {
         assert!(!saved.anlz_regenerated);
         assert_eq!(std::fs::read(anlz_dir.join("ANLZ0000.DAT")).unwrap(), dat);
         assert_eq!(std::fs::read(anlz_dir.join("ANLZ0000.EXT")).unwrap(), ext);
+    }
+
+    #[test]
+    fn import_external_playlists_totals_imports_and_keeps_going_after_a_failure() {
+        use crate::models::{
+            ExternalLibrary, ImportExternalPlaylistsItem, ImportExternalPlaylistsRequest,
+        };
+
+        let rb_root = tempfile::tempdir().expect("rb root");
+        let media_root = tempfile::tempdir().expect("media root");
+        let (_service_dir, service) = test_service();
+        let media: Vec<PathBuf> = ["a.mp3", "b.flac", "c.wav"]
+            .iter()
+            .map(|n| media_root.path().join(n))
+            .collect();
+        for p in &media {
+            std::fs::write(p, b"audio").expect("write media");
+        }
+        let path = Some(
+            create_rekordbox_db_with_playlists(rb_root.path(), &media)
+                .to_string_lossy()
+                .to_string(),
+        );
+        let item = |id: &str| ImportExternalPlaylistsItem {
+            library: ExternalLibrary::Rekordbox,
+            request: ImportExternalPlaylistRequest {
+                path: path.clone(),
+                kind: ExternalPlaylistKind::Playlist,
+                id: id.to_string(),
+                force: false,
+            },
+        };
+
+        let data = service
+            .import_external_playlists(ImportExternalPlaylistsRequest {
+                items: vec![item("15"), item("11"), item("13")],
+            })
+            .expect("import playlists");
+
+        // "All missing" has no importable track; the other two still import.
+        assert_eq!((data.imported, data.failed), (2, 1));
+        assert!(data.results[0].playlist.is_none());
+        assert!(
+            data.results[0]
+                .error
+                .as_deref()
+                .is_some_and(|e| e.contains("could not be imported")),
+            "{:?}",
+            data.results[0].error
+        );
+        let friday = data.results[1].playlist.as_ref().expect("Friday imported");
+        let openers = data.results[2].playlist.as_ref().expect("Openers imported");
+        assert_eq!(friday.name, "Friday");
+        // Friday lists a missing file, a deleted track and a repeat.
+        assert!(friday.skipped > 0, "{}", friday.skipped);
+        assert_eq!(data.added, friday.added + openers.added);
+        assert_eq!(data.skipped, friday.skipped + openers.skipped);
     }
 
     #[test]

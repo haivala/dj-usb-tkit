@@ -247,6 +247,7 @@ impl BackendService {
                 scoped_track_count: 0,
                 album_count: 0,
                 unanalyzed_count: 0,
+                warning_count: logging::count_warnings(&warnings),
                 warnings,
             });
         }
@@ -644,6 +645,7 @@ impl BackendService {
             scoped_track_count,
             album_count,
             unanalyzed_count,
+            warning_count: logging::count_warnings(&warnings),
             warnings,
         })
     }

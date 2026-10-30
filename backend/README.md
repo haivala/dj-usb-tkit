@@ -36,9 +36,9 @@ Implemented command set:
   - `run_usb_parity_report`
   - `detect_external_rekordbox_db`
 - External libraries (rekordbox / Mixxx, see `docs/EXTERNAL_LIBRARIES.md`):
-  - `scan_rekordbox_db`, `list_rekordbox_playlists`, `import_rekordbox_playlist`
-  - `detect_external_mixxx_db`, `scan_mixxx_db`, `list_mixxx_playlists`,
-    `import_mixxx_playlist`
+  - `scan_rekordbox_db`, `list_rekordbox_playlists`
+  - `detect_external_mixxx_db`, `scan_mixxx_db`, `list_mixxx_playlists`
+  - `import_external_playlists`
 - Analysis:
   - `analyze_new_tracks`
   - `set_analysis_paused`

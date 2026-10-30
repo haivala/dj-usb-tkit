@@ -219,6 +219,7 @@ function installScanAnalysisMock(page, opts = {}) {
             jobId,
             analyzed,
             failed,
+            processed: analyzed + failed,
             warnings: [`Analysis cancelled: ${analyzed} of ${total} tracks analyzed`],
             items: withAnalysisReady(tracks.filter((track) => ids.includes(String(track.id))))
           };
@@ -346,6 +347,7 @@ function installScanAnalysisMock(page, opts = {}) {
         jobId,
         analyzed,
         failed,
+        processed: analyzed + failed,
         warnings: [],
         items: withAnalysisReady(tracks.filter((track) => ids.includes(String(track.id)))),
         elapsedMs: 1500
@@ -390,7 +392,8 @@ function installScanAnalysisMock(page, opts = {}) {
                 scopedTrackCount: tracks.length,
                 albumCount: albums.size,
                 unanalyzedCount: tracks.filter((t) => !isCountable(t)).length,
-                warnings: scanWarnings
+                warnings: scanWarnings,
+                warningCount: scanWarnings.filter((w) => w.level === "warn" || w.level === "error").length
               }
             };
           }
@@ -746,6 +749,7 @@ function installPagedMaterializeAnalyzeMock(page, opts = {}) {
         jobId,
         analyzed,
         failed,
+        processed: analyzed + failed,
         warnings: [],
         items: tracks
           .filter((track) => ids.some((id) => findRowByAnalysisId(id) === track))
@@ -1540,6 +1544,7 @@ test("a failed analyze_new_tracks count is reported in the status line and the b
       jobId: "job-1",
       analyzed: 0,
       failed: 1,
+      processed: 1,
       warnings: ["1 bpm_key (essentia): no BPM/key result"],
       elapsedMs: 83000
     }
@@ -1561,6 +1566,8 @@ test("a track analysis couldn't finish (no BPM found) is reported as incomplete,
       analyzed: 0,
       incomplete: 1,
       failed: 0,
+      processed: 1,
+      warningCount: 1,
       warnings: [{
         level: "warn",
         source: "analysis",

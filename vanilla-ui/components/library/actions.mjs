@@ -175,7 +175,7 @@ export async function relocateSourceRoot(ctx, oldRoot) {
   await resetAndLoadLibraryTracks(ctx, state.libraryQuery);
   await ctx.refreshCurrentPlaylistTracks();
 
-  const unresolved = Number(result.missingAtNewRoot || 0) + Number(result.conflicts || 0);
+  const unresolved = Number(result.unresolved || 0);
   const updated = Number(result?.updated || 0);
   const partial = unresolved > 0
     ? ` | ${counted(unresolved, "track")} still unresolved`
@@ -433,14 +433,13 @@ export async function scanLibrary(ctx) {
 
   const analysis = unanalyzedCount > 0
     ? await analyzeTrackIds(ctx, [], "Scan analysis", { scopeToLibraryFilter: true })
-    : { analyzed: 0, incomplete: 0, failed: 0, warnings: [] };
+    : { analyzed: 0, incomplete: 0, failed: 0, warningCount: 0 };
   const analyzed = Number(analysis?.analyzed || 0);
   const failed = Number(analysis?.failed || 0);
   const incompleteSuffix = analysis?.incomplete ? `, incomplete ${analysis.incomplete}` : "";
-  const warnings = Array.isArray(analysis?.warnings) ? analysis.warnings : [];
   await ctx.refreshCurrentPlaylistTracks();
 
-  const warningCount = ctx.countWarningsForStatus([...scanWarnings, ...warnings]);
+  const warningCount = Number(result.warningCount || 0) + analysis.warningCount;
   const warningSuffix = warningCount ? ` (${counted(warningCount, "warning")})` : "";
   const missingCount = state.librarySources.folders.filter((folder) => folder.missing).length;
   const missingSuffix = missingCount ? ` | ${counted(missingCount, "source folder")} missing` : "";
@@ -563,6 +562,8 @@ export async function analyzeTrackIds(ctx, trackIds, modeLabel = "Analyze", opti
   // Decoded fine, but analysis left something out (no BPM detected, ...).
   let incomplete = 0;
   let failed = 0;
+  let processed = 0;
+  let warningCount = 0;
   let elapsedMs = null;
   const warnings = [];
   let hydratedItems = [];
@@ -589,11 +590,13 @@ export async function analyzeTrackIds(ctx, trackIds, modeLabel = "Analyze", opti
     analyzed = Math.max(0, Number(batch?.analyzed || 0));
     incomplete = Math.max(0, Number(batch?.incomplete || 0));
     failed = Math.max(0, Number(batch?.failed || 0));
+    processed = Math.max(0, Number(batch?.processed || 0));
+    warningCount = Math.max(0, Number(batch?.warningCount || 0));
     elapsedMs = Number.isFinite(Number(batch?.elapsedMs)) ? Number(batch.elapsedMs) : null;
     const batchWarnings = Array.isArray(batch?.warnings) ? batch.warnings : [];
     warnings.push(...batchWarnings);
     hydratedItems = Array.isArray(batch?.items) ? batch.items : [];
-    emitStatus(`${modeLabel}: ${counted(analyzed + incomplete + failed, "track")} processed...`);
+    emitStatus(`${modeLabel}: ${counted(processed, "track")} processed...`);
   } catch (err) {
     failed = ids.length;
     warnings.push(`batch analysis failed: ${err.message || err}`);
@@ -610,11 +613,9 @@ export async function analyzeTrackIds(ctx, trackIds, modeLabel = "Analyze", opti
   if (warnings.length) {
     ctx.logWarnings("analysis", warnings, modeLabel);
   }
-  const warningCount = ctx.countWarningsForStatus(warnings);
   const warningSuffix = warningCount ? ` | (${counted(warningCount, "warning")})` : "";
   const incompleteSuffix = incomplete ? `, incomplete ${incomplete}` : "";
   emitStatus(`${modeLabel} done: analyzed ${analyzed}, failed ${failed}${incompleteSuffix}${warningSuffix}`, { warningCount });
-  const processed = analyzed + incomplete + failed;
   if (processed > 0 && elapsedMs !== null) {
     ctx.pushEventLog({
       level: "info",
@@ -623,7 +624,7 @@ export async function analyzeTrackIds(ctx, trackIds, modeLabel = "Analyze", opti
       message: `${modeLabel}: ${counted(processed, "track")} in ${formatDurationMs(elapsedMs)} (analyzed ${analyzed}, failed ${failed}${incompleteSuffix})`
     });
   }
-  return { analyzed, incomplete, failed, warnings };
+  return { analyzed, incomplete, failed, warningCount };
 }
 
 export async function analyzeSingleTrack(ctx, track, modeLabel = null) {

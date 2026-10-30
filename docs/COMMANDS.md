@@ -114,9 +114,9 @@ drive selection from being rendered against a newer selected drive.
   enabled }` → the sources.
 - `resolve_track_identity` — `{ trackId, resolvedBy, materialized, track? }`;
   `track` is the new library row when a listed file was materialized.
-- `relocate_source_root` — `{ oldRoot, newRoot }` → the rewrite counts plus
-  `sources`: once every track moved, the new folder replaces the old one;
-  otherwise both stay.
+- `relocate_source_root` — `{ oldRoot, newRoot }` → the rewrite counts
+  (`unresolved` = `missingAtNewRoot` + `conflicts`) plus `sources`: once every
+  track moved, the new folder replaces the old one; otherwise both stay.
 - `get_track_detail` — returns `{ track, firstBeatMs, cues, detailWaveform,
   keyOptions, genre, rating, releaseDate, genreOptions }` for the cue editor
   (see `docs/CUE_EDITOR.md`). `rating` is 0–5 stars; `releaseDate` is the date
@@ -288,13 +288,17 @@ See `docs/EXTERNAL_LIBRARIES.md` for behavior and the fields read.
   the source library's own id as a string, `kind` is `playlist` | `crate` |
   `history` (only lists with tracks), and `existingPlaylist` (`{ id, name }`)
   is the local playlist an earlier import of that list made
-- `import_rekordbox_playlist` / `import_mixxx_playlist` — `{ path?, kind, id,
-  force? }`; imports the list's tracks into the playlist an earlier import of
-  it made (`updatedExisting: true`) or a new one, returns `{ playlistId, name,
-  updatedExisting, added, indexed, notFound, warnings }`. `force` makes the
-  tracks take BPM, key and cues from the library over the app's own values.
-  Fails with a validation error, changing nothing, when none of the list's
-  tracks can be imported
+- `import_external_playlists` — `{ items: [{ library, path?, kind, id, force? }] }`
+  (`library`: `rekordbox` | `mixxx`); imports the lists one after another, a
+  failed one not stopping the rest. Each imports its tracks into the playlist
+  an earlier import of that list made (`updatedExisting: true`) or a new one.
+  Returns `{ results, imported, failed, added, skipped }`: `results` follows
+  `items`, each `{ playlist }` (`{ playlistId, name, updatedExisting, added,
+  skipped, indexed, notFound, warnings }`) or `{ error }`, and the counts total
+  them. `skipped` counts list entries not placed (missing or unsupported files,
+  tracks gone from the library, repeats). `force` makes the tracks take BPM,
+  key and cues from the library over the app's own values. A list none of
+  whose tracks can be imported fails, changing nothing
 
 `export_to_usb` options:
 
@@ -350,7 +354,11 @@ for when the UI disables reordering. `fetch_usb_playlists` and `run_usb_diagnost
 re-derive that lock condition from raw USB-scan/export-setting state.
 
 `analyze_new_tracks` returns hydrated changed track rows in `items`, so the UI can patch rows from
-the analysis response without a separate read. It takes the raw
+the analysis response without a separate read, and `processed` (`analyzed + incomplete + failed`).
+
+`scan_library`, `analyze_new_tracks`, `fetch_usb_playlists`, `fetch_usb_histories`,
+`remove_usb_playlist` and `export_to_usb` return `warningCount` beside `warnings`: how many of
+them are warnings or errors, for the status line's "(N warnings)" link to the Event Log. It takes the raw
 `bpmRange` string (e.g. `"70-180"`) from the settings dropdown and parses/validates it server-side
 (`bpmMin`/`bpmMax` are the older pre-parsed form, still accepted as a fallback).
 

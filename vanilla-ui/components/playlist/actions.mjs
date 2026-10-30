@@ -375,7 +375,6 @@ const PLAYLIST_IMPORT_SOURCES = [
     label: "rekordbox",
     pathKey: "externalRekordboxDbPath",
     listCommand: "list_rekordbox_playlists",
-    importCommand: "import_rekordbox_playlist",
     library: "rekordbox",
     detect: (ctx) => ctx.detectExternalRekordboxDb()
   },
@@ -383,7 +382,6 @@ const PLAYLIST_IMPORT_SOURCES = [
     label: "Mixxx",
     pathKey: "externalMixxxDbPath",
     listCommand: "list_mixxx_playlists",
-    importCommand: "import_mixxx_playlist",
     library: "mixxx",
     detect: (ctx) => ctx.detectExternalMixxxDb()
   }
@@ -398,7 +396,8 @@ const PLAYLIST_IMPORT_KINDS = [
 
 // Pick any number of playlists / crates / history sessions from a detected
 // rekordbox or Mixxx library and import each as a local playlist (the backend
-// imports its tracks too), then open the first one.
+// imports their tracks too, one list after another, and totals the outcome),
+// then open the first one imported.
 export async function importExternalPlaylist(ctx) {
   const { state, withProgress, command, updateModeText, switchView, logWarnings } = ctx;
   const { emitStatus } = ctx;
@@ -441,7 +440,8 @@ export async function importExternalPlaylist(ctx) {
   const chosen = await ctx.playlistImportDialog.open({ columns });
   if (!chosen?.length) return;
 
-  // One import after another; a failed one doesn't stop the rest.
+  // `results` follows `chosen`: each list's playlist, or why it failed.
+  let data = null;
   const done = [];
   const failed = [];
   const logFailed = () => {
@@ -455,20 +455,24 @@ export async function importExternalPlaylist(ctx) {
   };
   try {
     await withProgress(
-      chosen.length === 1 ? `Importing ${chosen[0].source.label} playlist` : `Importing ${chosen.length} playlists`,
+      chosen.length === 1 ? `Importing ${chosen[0].source.label} playlist` : `Importing ${counted(chosen.length, "playlist")}`,
       async (progress) => {
-        for (const [index, item] of chosen.entries()) {
-          progress(5 + Math.round((index / chosen.length) * 70), `Importing ${item.name}...`);
-          try {
-            const result = await command(item.source.importCommand, {
-              path: item.path, kind: item.kind, id: item.id, force: item.force === true
-            });
-            done.push({ item, result });
-          } catch (err) {
-            failed.push({ item, message: err?.message || String(err) });
-          }
+        progress(5, chosen.length === 1 ? `Importing ${chosen[0].name}...` : "Importing playlists...");
+        data = await command("import_external_playlists", {
+          items: chosen.map((item) => ({
+            library: item.source.library,
+            path: item.path,
+            kind: item.kind,
+            id: item.id,
+            force: item.force === true
+          }))
+        });
+        for (const [index, outcome] of (data.results || []).entries()) {
+          const item = chosen[index];
+          if (outcome.playlist) done.push({ item, result: outcome.playlist });
+          else failed.push({ item, message: outcome.error || "import failed" });
         }
-        if (!done.length) throw new Error(failed[0].message);
+        if (!done.length) throw new Error(failed[0]?.message || "import failed");
         progress(80, "Refreshing playlists...");
         // The imported tracks belong to those libraries: show them in the library too.
         const imported = [...new Set(done.map(({ item }) => item.source))];
@@ -489,7 +493,6 @@ export async function importExternalPlaylist(ctx) {
     return;
   }
 
-  let skipped = 0;
   for (const { item, result } of done) {
     const logLabel = `${item.source.label} playlist import`;
     const notFound = Array.isArray(result.notFound) ? result.notFound : [];
@@ -504,10 +507,10 @@ export async function importExternalPlaylist(ctx) {
     if (warnings.length > 0) {
       logWarnings(item.source.label, warnings, logLabel);
     }
-    skipped += Math.max(0, Number(item.trackCount || 0) - Number(result.added || 0));
   }
   logFailed();
 
+  const skipped = Number(data.skipped || 0);
   const suffix = skipped > 0 ? ` | ${counted(skipped, "track")} skipped (see event log)` : "";
   if (chosen.length === 1) {
     const { result } = done[0];
@@ -515,11 +518,10 @@ export async function importExternalPlaylist(ctx) {
     emitStatus(`${verb} playlist ${result.name}: ${counted(result.added, "track")}${suffix}`);
     return;
   }
-  const added = done.reduce((sum, { result }) => sum + Number(result.added || 0), 0);
-  const failedSuffix = failed.length
-    ? ` | ${failed.length} failed: ${failed.map(({ item }) => item.name).join(", ")} (see event log)`
+  const failedSuffix = data.failed
+    ? ` | ${data.failed} failed: ${failed.map(({ item }) => item.name).join(", ")} (see event log)`
     : "";
-  emitStatus(`Imported ${done.length} of ${counted(chosen.length, "playlist")}: ${counted(added, "track")}${suffix}${failedSuffix}`);
+  emitStatus(`Imported ${data.imported} of ${counted(chosen.length, "playlist")}: ${counted(data.added, "track")}${suffix}${failedSuffix}`);
 }
 
 export async function deletePlaylist(ctx, playlistId) {

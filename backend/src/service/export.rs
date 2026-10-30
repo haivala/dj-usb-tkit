@@ -1688,6 +1688,7 @@ impl BackendService {
             skipped_tracks,
             exported_artworks,
             exported_analysis_files,
+            warning_count: logging::count_warnings(&warnings),
             warnings,
         })
     }

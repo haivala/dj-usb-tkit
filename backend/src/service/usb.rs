@@ -1162,6 +1162,7 @@ impl BackendService {
             items: resolved.items.clone(),
             stats: resolved.stats.clone(),
             playlist_track_total: resolved.items.iter().map(|p| p.track_count).sum(),
+            warning_count: logging::count_warnings(&resolved.warnings),
             warnings: resolved.warnings.clone(),
             playlist_usb_export_status,
         })
@@ -1817,6 +1818,7 @@ impl BackendService {
             tracks_removed,
             files_deleted,
             tracks_kept_shared,
+            warning_count: logging::count_warnings(&warnings),
             warnings,
         })
     }
@@ -1843,6 +1845,23 @@ impl BackendService {
 
         let pdb_path = super::usb_staging::stage_pdb(&usb_root)?;
         if !pdb_path.exists() {
+            let warnings = vec![
+                logging::log(
+                    Level::Info,
+                    "usb-import",
+                    "usb.import.root-in-use",
+                    format!("USB root in use: {}", usb_root.display()),
+                ),
+                logging::log(
+                    Level::Warn,
+                    "usb-import",
+                    "usb.histories.pdb-not-found",
+                    format!(
+                        "PDB not found under {}; history import requires PDB",
+                        usb_root.display()
+                    ),
+                ),
+            ];
             return Ok(FetchUsbHistoriesData {
                 items: Vec::new(),
                 counts: UsbHistoryCounts {
@@ -1855,23 +1874,8 @@ impl BackendService {
                     edb_history_rows: 0,
                     edb_history_content_rows: 0,
                 },
-                warnings: vec![
-                    logging::log(
-                        Level::Info,
-                        "usb-import",
-                        "usb.import.root-in-use",
-                        format!("USB root in use: {}", usb_root.display()),
-                    ),
-                    logging::log(
-                        Level::Warn,
-                        "usb-import",
-                        "usb.histories.pdb-not-found",
-                        format!(
-                            "PDB not found under {}; history import requires PDB",
-                            usb_root.display()
-                        ),
-                    ),
-                ],
+                warning_count: logging::count_warnings(&warnings),
+                warnings,
             });
         }
 
@@ -2163,6 +2167,7 @@ impl BackendService {
                 edb_history_rows,
                 edb_history_content_rows,
             },
+            warning_count: logging::count_warnings(&warnings),
             warnings,
         };
         let data = Arc::new(data);

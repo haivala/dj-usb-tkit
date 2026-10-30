@@ -53,8 +53,9 @@ Commands currently exposed in `backend/src/tauri_commands.rs`:
 
 - Library:
   - `scan_library`
-  - `scan_rekordbox_db`, `list_rekordbox_playlists`, `import_rekordbox_playlist`
-  - `scan_mixxx_db`, `list_mixxx_playlists`, `import_mixxx_playlist`
+  - `scan_rekordbox_db`, `list_rekordbox_playlists`
+  - `scan_mixxx_db`, `list_mixxx_playlists`
+  - `import_external_playlists`
   - `browse_source_files`
   - `remove_tracks_by_source_roots`
 - Playlists:

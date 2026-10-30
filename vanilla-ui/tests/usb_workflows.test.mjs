@@ -86,10 +86,10 @@ test("diagnostics guard, history refresh, and tracklist filename sanitizing stay
     command: async () => ({
       items: [{ name: "H1", tracks: [{ id: "1", title: "A" }] }],
       counts: { importedPlaylists: 1, importedTracks: 1 },
-      warnings: ["warn"]
+      warnings: [{ level: "warn", code: "test.warn", message: "warn", source: "usb-import" }],
+      warningCount: 1
     }),
-    normalizeTrack: (track) => ({ ...track, normalized: true }),
-    countWarningsForStatus: () => 1
+    normalizeTrack: (track) => ({ ...track, normalized: true })
   });
   ctx.state.usbRoot = "/USB";
   await refreshHistory(ctx);
@@ -197,9 +197,7 @@ function exportCtx(state, overrides = {}) {
     setProgress: () => {},
     startProgressHeartbeat: () => {},
     stopProgressHeartbeat: () => {},
-    command: async () => ({ exportedTracks: 1, skippedTracks: 0, warnings: [] }),
-    countWarningsForStatus: () => 0,
-    warningEntryLevel: () => "info",
+    command: async () => ({ exportedTracks: 1, skippedTracks: 0, warnings: [], warningCount: 0 }),
     logWarnings: () => {},
     emitMessage: () => {},
     loadPlaylists: async () => {},

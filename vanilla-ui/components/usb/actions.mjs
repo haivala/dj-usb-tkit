@@ -850,7 +850,7 @@ export async function removeUsbPlaylist(ctx, playlist) {
   });
   clearUsbDiagnostics(ctx);
   await refreshUsb(ctx);
-  const warningCount = ctx.countWarningsForStatus(data.warnings);
+  const warningCount = Number(data.warningCount || 0);
   const warningSuffix = warningCount ? ` | (${counted(warningCount, "warning")})` : "";
   emitStatus(
     `Removed USB playlist: ${playlist.name} [db ${data.removedFromEdb || 0}, pdb ${data.removedFromPdb || 0}]${warningSuffix}`,
@@ -914,7 +914,7 @@ export async function refreshUsb(ctx) {
   // The freshly scanned status may flip an open local playlist's reorder lock.
   await ctx.renderCurrentPlaylistTracksFromState();
 
-  const warningCount = ctx.countWarningsForStatus(data.warnings);
+  const warningCount = Number(data.warningCount || 0);
   const warningSuffix = warningCount ? ` | (${counted(warningCount, "warning")})` : "";
   ctx.logWarnings("usb-import", data.warnings, "fetch_usb_playlists");
   setProgress(true, 100, `Done — ${counted(state.usbPlaylists.length, "playlist")}, ${counted(usbTrackTotal, "track")}`);
@@ -1061,7 +1061,7 @@ export async function refreshHistory(ctx) {
   if (el.exportHistoryTracklistBtn) el.exportHistoryTracklistBtn.disabled = true;
   renderHistoryList(ctx);
   ctx.usbHistoryTracksCtl.clear();
-  const warningCount = ctx.countWarningsForStatus(data.warnings);
+  const warningCount = Number(data.warningCount || 0);
   const warningSuffix = warningCount ? ` | (${counted(warningCount, "warning")})` : "";
   ctx.logWarnings("usb-import", data.warnings, "fetch_usb_histories");
   emitStatus(`USB histories loaded: ${state.histories.length}${warningSuffix}`, { warningCount });
@@ -1429,21 +1429,8 @@ async function runPlaylistExport(ctx, playlistId) {
     }
   }
   clearUsbDiagnostics(ctx);
-  const warningCount = ctx.countWarningsForStatus(data.warnings);
+  const warningCount = Number(data.warningCount || 0);
   const warningSuffix = warningCount ? ` | (${counted(warningCount, "warning")})` : "";
-  const warningList = Array.isArray(data.warnings) ? data.warnings : [];
-  if (warningList.length) {
-    const infoCount = warningList.filter((entry) => ctx.warningEntryLevel(entry) === "info").length;
-    if (warningCount > 0) {
-      console.warn(
-        `Export completed with ${counted(warningCount, "warning/error entry", "warning/error entries")}${infoCount ? ` (+${infoCount} info)` : ""}.`
-      );
-    } else {
-      console.info(
-        `Export completed with ${infoCount} informational entr${infoCount === 1 ? "y" : "ies"}.`
-      );
-    }
-  }
   ctx.logWarnings("export", data.warnings, "export_to_usb");
   emitStatus(
     `Export complete: ${playlist.name} - ${counted(data.exportedTracks || 0, "track")}, ${data.skippedTracks || 0} skipped${warningSuffix}${state.exportPruneStale ? " [sync: mirror]" : " [sync: additive]"}`,

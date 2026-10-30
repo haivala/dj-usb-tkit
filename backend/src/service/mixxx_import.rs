@@ -900,6 +900,7 @@ impl BackendService {
             scoped_track_count: 0,
             album_count: 0,
             unanalyzed_count: 0,
+            warning_count: logging::count_warnings(&warnings),
             warnings,
         })
     }
@@ -999,6 +1000,7 @@ impl BackendService {
             name: playlist.name,
             updated_existing,
             added: local_ids.len(),
+            skipped: entry_ids.len() - local_ids.len(),
             indexed: importer.indexed,
             not_found: importer.not_found,
             warnings,

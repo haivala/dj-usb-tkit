@@ -407,7 +407,9 @@ function installTauriMock(page, mode) {
                   playlistReferencedTracks: 0,
                   playlistEntries: state.usbPlaylists.reduce((sum, p) => sum + p.tracks.length, 0)
                 },
-                warnings
+                warnings,
+                // The backend counts the warn/error entries (the info one isn't).
+                warningCount: mode === "warning-mix" ? 2 : 0
               }
             };
           }
@@ -543,7 +545,7 @@ test("USB history tab shows empty state before import", async ({ page }) => {
   await expect(page.locator("#historyList")).toContainText("Import History");
 });
 
-test("USB playlists status counts only warn/error warnings", async ({ page }) => {
+test("USB playlists status shows the backend's warning count, linked to the Event Log", async ({ page }) => {
   await installTauriMock(page, "warning-mix");
   await page.goto("/");
 

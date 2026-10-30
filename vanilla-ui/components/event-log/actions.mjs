@@ -249,17 +249,9 @@ export function setupRuntimeErrorLogging({ pushEventLog, window }) {
 // (built through `logging::log` in Rust -- see backend/src/logging.rs). The
 // frontend reads `level` verbatim and never guesses severity from the message
 // text.
-export function warningEntryLevel(entry) {
+function warningEntryLevel(entry) {
   const level = String(entry?.level || "").toLowerCase().trim();
   return level === "error" || level === "warn" || level === "info" ? level : "info";
-}
-
-export function countWarningsForStatus(warnings) {
-  const list = Array.isArray(warnings) ? warnings : [];
-  return list.filter((entry) => {
-    const level = warningEntryLevel(entry);
-    return level === "warn" || level === "error";
-  }).length;
 }
 
 export function logWarnings(ctx, source, warnings, context = "") {

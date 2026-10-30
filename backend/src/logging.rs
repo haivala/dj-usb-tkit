@@ -69,6 +69,15 @@ pub fn log(
     }
 }
 
+/// How many of `entries` are warnings or errors: the "(N warnings)" a
+/// command's status line reports and links to the Event Log.
+pub fn count_warnings(entries: &[crate::models::WarningEntry]) -> usize {
+    entries
+        .iter()
+        .filter(|entry| entry.level == Level::Warn.as_str() || entry.level == Level::Error.as_str())
+        .count()
+}
+
 /// Convenience macro: `backend_log!(warn, "pdb-writer", "msg {x}")`.
 #[macro_export]
 macro_rules! backend_log {
@@ -100,6 +109,17 @@ mod tests {
         assert_eq!(entry.source, "test-source");
         assert_eq!(entry.code, "test.code");
         assert_eq!(entry.message, "hello world");
+    }
+
+    #[test]
+    fn count_warnings_counts_warn_and_error_entries_only() {
+        let entries = [
+            log(Level::Info, "src", "code", "info"),
+            log(Level::Warn, "src", "code", "warn"),
+            log(Level::Error, "src", "code", "error"),
+        ];
+        assert_eq!(count_warnings(&entries), 2);
+        assert_eq!(count_warnings(&[]), 0);
     }
 
     #[test]

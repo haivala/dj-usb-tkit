@@ -28,7 +28,7 @@ use crate::models::{
     GetSelectionDurationRequest, GetTrackDetailRequest, GetTracksMetadataSummaryRequest,
     GetUsbDeviceNameData, GetUsbDeviceNameRequest, GetUsbPlayerMenuConfigData,
     GetUsbPlayerMenuConfigRequest, GetUsbTrackDetailRequest, GetUsbTracksMetadataSummaryRequest,
-    ImportExternalPlaylistData, ImportExternalPlaylistRequest, InitializeUsbData,
+    ImportExternalPlaylistsData, ImportExternalPlaylistsRequest, InitializeUsbData,
     InitializeUsbRequest, InspectUsbTrackData, InspectUsbTrackRequest, JobEventPayload,
     LibrarySourcesData, ListExternalPlaylistsData, ListExternalPlaylistsRequest,
     ListMatchingTrackIdsData, ListMatchingTrackIdsRequest, ListPlaylistsData, ListUsbBackupsData,
@@ -1727,26 +1727,6 @@ pub fn list_mixxx_playlists(
 }
 
 #[tauri::command]
-pub async fn import_mixxx_playlist(
-    state: State<'_, BackendCommands>,
-    request: ImportExternalPlaylistRequest,
-) -> Result<ApiResponse<ImportExternalPlaylistData>, String> {
-    let commands = state.inner().clone();
-    Ok(
-        tauri::async_runtime::spawn_blocking(move || commands.import_mixxx_playlist(request))
-            .await
-            .unwrap_or_else(|err| {
-                ApiResponse::failure(
-                    crate::error::BackendError::Internal(format!(
-                        "import_mixxx_playlist task failed: {err}"
-                    ))
-                    .into(),
-                )
-            }),
-    )
-}
-
-#[tauri::command]
 pub fn list_rekordbox_playlists(
     state: State<'_, BackendCommands>,
     request: ListExternalPlaylistsRequest,
@@ -1755,18 +1735,18 @@ pub fn list_rekordbox_playlists(
 }
 
 #[tauri::command]
-pub async fn import_rekordbox_playlist(
+pub async fn import_external_playlists(
     state: State<'_, BackendCommands>,
-    request: ImportExternalPlaylistRequest,
-) -> Result<ApiResponse<ImportExternalPlaylistData>, String> {
+    request: ImportExternalPlaylistsRequest,
+) -> Result<ApiResponse<ImportExternalPlaylistsData>, String> {
     let commands = state.inner().clone();
     Ok(
-        tauri::async_runtime::spawn_blocking(move || commands.import_rekordbox_playlist(request))
+        tauri::async_runtime::spawn_blocking(move || commands.import_external_playlists(request))
             .await
             .unwrap_or_else(|err| {
                 ApiResponse::failure(
                     crate::error::BackendError::Internal(format!(
-                        "import_rekordbox_playlist task failed: {err}"
+                        "import_external_playlists task failed: {err}"
                     ))
                     .into(),
                 )

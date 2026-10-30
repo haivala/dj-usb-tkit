@@ -52,8 +52,6 @@ export function createAppContext(env) {
     warn: (...a) => console.warn(...a),
     logError: (...a) => console.error(...a),
     nextPaint: jobMgr.nextPaint,
-    countWarningsForStatus: eventLog.countWarningsForStatus,
-    warningEntryLevel: eventLog.warningEntryLevel,
     renderWaveformsIn,
     ...env,
   };

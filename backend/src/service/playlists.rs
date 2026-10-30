@@ -150,6 +150,42 @@ pub(crate) fn save_imported_playlist(
     ))
 }
 
+impl BackendService {
+    /// The playlist import dialog's picks, one after another; a failed one
+    /// doesn't stop the rest.
+    pub fn import_external_playlists(
+        &self,
+        req: ImportExternalPlaylistsRequest,
+    ) -> BackendResult<ImportExternalPlaylistsData> {
+        let mut out = ImportExternalPlaylistsData::default();
+        for item in req.items {
+            let result = match item.library {
+                ExternalLibrary::Rekordbox => self.import_rekordbox_playlist(item.request),
+                ExternalLibrary::Mixxx => self.import_mixxx_playlist(item.request),
+            };
+            out.results.push(match result {
+                Ok(playlist) => {
+                    out.imported += 1;
+                    out.added += playlist.added;
+                    out.skipped += playlist.skipped;
+                    ImportExternalPlaylistOutcome {
+                        playlist: Some(playlist),
+                        error: None,
+                    }
+                }
+                Err(err) => {
+                    out.failed += 1;
+                    ImportExternalPlaylistOutcome {
+                        playlist: None,
+                        error: Some(crate::error::ErrorPayload::from(err).message),
+                    }
+                }
+            });
+        }
+        Ok(out)
+    }
+}
+
 /// An external playlist import that found none of its tracks: failing beats
 /// creating an empty playlist.
 pub(crate) fn no_importable_tracks_error(name: &str, listed: usize) -> BackendError {

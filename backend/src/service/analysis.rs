@@ -667,6 +667,9 @@ impl BackendService {
                 analyzed: 0,
                 incomplete: 0,
                 failed: 0,
+                processed: 0,
+                // Only an info entry.
+                warning_count: 0,
                 warnings: vec![logging::log(
                     Level::Info,
                     "analysis",
@@ -1095,6 +1098,8 @@ impl BackendService {
             analyzed,
             incomplete,
             failed,
+            processed: analyzed + incomplete + failed,
+            warning_count: logging::count_warnings(&warnings),
             warnings,
             items,
             elapsed_ms: elapsed_ms_since(batch_started),

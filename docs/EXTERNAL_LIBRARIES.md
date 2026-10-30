@@ -186,6 +186,8 @@ See `backend/src/service/wine_paths.rs`.
   `list_rekordbox_playlists`, `import_rekordbox_playlist`
 - `backend/src/service/mixxx_import.rs`: `detect_external_mixxx_db`,
   `scan_mixxx_db`, `list_mixxx_playlists`, `import_mixxx_playlist`
+- `backend/src/service/playlists.rs`: `import_external_playlists`, the
+  command the playlist import dialog calls, running the two above per list
 
 Each module has one per-track importer (`RekordboxTrackImporter`,
 `MixxxTrackImporter`) that the whole-library import and the playlist import
