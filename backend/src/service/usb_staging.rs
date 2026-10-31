@@ -341,8 +341,15 @@ fn stage_file_with_root(
     }
 
     if !source.exists() {
-        // Nothing to stage yet (e.g. fresh USB, PDB not created). Callers
+        // Nothing to stage (e.g. fresh USB, PDB not created). Callers
         // already handle "file not present" via their own existence checks.
+        // A connect-time call also drops the local copy: one left from an
+        // earlier session isn't this USB's database. A passive call keeps
+        // it -- it may be one this session created and hasn't written back.
+        if force_recheck {
+            let _guard = STATE_LOCK.lock().unwrap();
+            remove_local_copy(&device_dir, kind, &local_path)?;
+        }
         return Ok(local_path);
     }
 
@@ -556,6 +563,25 @@ pub(crate) fn check_write_back(usb_root: &Path, kind: DbKind) -> BackendResult<(
     ensure_usb_copy_unchanged(&device_dir, kind, &vendor_path(usb_root, kind))
 }
 
+/// Deletes the local copy of `kind` (with the eDB's journal files) and its
+/// synced state. The caller holds `STATE_LOCK`.
+fn remove_local_copy(device_dir: &Path, kind: DbKind, local_path: &Path) -> BackendResult<()> {
+    for suffix in ["", "-wal", "-shm"] {
+        let mut path = local_path.as_os_str().to_owned();
+        path.push(suffix);
+        match std::fs::remove_file(&path) {
+            Ok(()) => {}
+            Err(err) if err.kind() == std::io::ErrorKind::NotFound => {}
+            Err(err) => return Err(err.into()),
+        }
+    }
+    let mut state = load_state(device_dir);
+    if state.files.remove(kind.state_key()).is_some() {
+        let _ = save_state(device_dir, &state);
+    }
+    Ok(())
+}
+
 /// Drops the local changes to a staged database and stages it again from
 /// the USB, so the local copy matches the drive.
 pub(crate) fn restage_from_usb(usb_root: &Path, kind: DbKind) -> BackendResult<PathBuf> {
@@ -566,15 +592,7 @@ pub(crate) fn restage_from_usb(usb_root: &Path, kind: DbKind) -> BackendResult<P
     {
         let local_path = local_vendor_db_dir(&device_dir).join(kind.filename());
         let _guard = STATE_LOCK.lock().unwrap();
-        for suffix in ["", "-wal", "-shm"] {
-            let mut path = local_path.clone().into_os_string();
-            path.push(suffix);
-            match std::fs::remove_file(&path) {
-                Ok(()) => {}
-                Err(err) if err.kind() == std::io::ErrorKind::NotFound => {}
-                Err(err) => return Err(err.into()),
-            }
-        }
+        remove_local_copy(&device_dir, kind, &local_path)?;
     }
     stage_file_with_root(
         cache_root.as_deref(),
@@ -894,6 +912,28 @@ mod tests {
             b"changed externally, reconnected",
             "connect-time staging must always re-verify, never trust a stale mark"
         );
+    }
+
+    #[test]
+    fn stage_edb_on_connect_drops_the_local_copy_when_the_usb_has_none() {
+        let cache = tempdir().unwrap();
+        let usb = tempdir().unwrap();
+        let usb_root = usb_root_with_edb(usb.path(), b"hello");
+        let staged = stage_edb_on_connect_with_root(Some(cache.path()), &usb_root).unwrap();
+        std::fs::write(staged.with_extension("db-wal"), b"wal").unwrap();
+        std::fs::remove_file(super::super::usb_vendor_compat::vendor_edb_path(&usb_root)).unwrap();
+
+        // A passive call keeps it: it may be a copy this session hasn't
+        // written back yet.
+        let passive = stage_edb_with_root(Some(cache.path()), &usb_root).unwrap();
+        assert!(passive.is_file());
+
+        let staged = stage_edb_on_connect_with_root(Some(cache.path()), &usb_root).unwrap();
+        assert!(
+            !staged.exists(),
+            "a stale local eDB must not stand in for the USB's"
+        );
+        assert!(!staged.with_extension("db-wal").exists());
     }
 
     #[test]

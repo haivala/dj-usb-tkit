@@ -742,8 +742,9 @@ impl BackendService {
         // session (diagnostics, playlist fetch, track inspect, export, ...)
         // can trust the local copy and skip its own USB stat() -- see
         // `usb_staging::stage_file_with_root`'s verified-this-connect fast
-        // path. Best-effort: a staging hiccup shouldn't fail validation.
-        if has_pdb && let Err(err) = super::usb_staging::stage_pdb_on_connect(&normalized) {
+        // path. A database the USB lacks is dropped from staging. Best-effort:
+        // a staging hiccup shouldn't fail validation.
+        if let Err(err) = super::usb_staging::stage_pdb_on_connect(&normalized) {
             warnings.push(logging::log(
                 Level::Warn,
                 "usb-import",
@@ -751,7 +752,7 @@ impl BackendService {
                 format!("Failed to stage PDB locally: {err}"),
             ));
         }
-        if has_edb && let Err(err) = super::usb_staging::stage_edb_on_connect(&normalized) {
+        if let Err(err) = super::usb_staging::stage_edb_on_connect(&normalized) {
             warnings.push(logging::log(
                 Level::Warn,
                 "usb-import",
