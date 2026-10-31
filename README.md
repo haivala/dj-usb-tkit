@@ -80,6 +80,8 @@ analysis runs.
 - USB diagnostics, strict parity reporting, and preview-first repair actions.
 - Repair tools can help recover some broken USB database states; backups are
   created before repair writes, but recovery is not guaranteed.
+- A USB that has only one of its two player databases (the PDB or the eDB)
+  gets the missing one rebuilt from the other by the repair.
 - USB initialization for drives that are writable but missing the expected
   export database structure.
 - USB drives can be given a persistent name, so the same physical drive keeps

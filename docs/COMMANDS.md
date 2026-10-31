@@ -336,7 +336,7 @@ the frontend renders the page directly, no follow-up hydration round-trip.
 list and its counts.
 
 `list_usb_backups`/`restore_usb_backup`/`delete_usb_backup` back the Backups panel described in
-`docs/USB_EXPORT.md`'s "Backup" section — listing, restoring, and deleting the timestamped
+`docs/USB_BACKUPS.md` — listing, restoring, and deleting the timestamped
 PDB+eDB snapshot pairs taken before every USB-mutating operation.
 
 ### Diagnostics and repairs

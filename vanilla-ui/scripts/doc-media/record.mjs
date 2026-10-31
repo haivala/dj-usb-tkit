@@ -710,7 +710,7 @@ function shots(fixture) {
       },
     },
     {
-      // docs/USB_EXPORT.md: the Backups panel, opened from the USB page.
+      // docs/USB_BACKUPS.md: the Backups panel, opened from the USB page.
       name: "backup-view",
       caption: "Backups of the USB's databases, on the USB and on this computer",
       opts: { backups: BACKUPS },

@@ -33,7 +33,8 @@ select it again, from **Recent USBs**, once it's plugged in.
    the copy doesn't have, the app asks for a name of its own. Until it gets one, it's treated as
    unnamed, so nothing is shared with the original.
 4. **The databases are staged.** The stick's player databases are copied to your computer, or
-   the copy from last time is reused if the stick hasn't changed since. See
+   the copy from last time is reused if the stick hasn't changed since. A database the stick
+   doesn't have is removed from the copy, so an old one never stands in for it. See
    [Staging](#staging-the-local-working-copy) below.
 5. **Diagnostics run.** The result shows as the dot next to the drive's name in the header:
    good, warnings, or issues found (hover it to see which). **Health & Diagnostics** in the USB
@@ -64,7 +65,7 @@ per connect. Music, analysis and artwork files are still read and written on the
 - **Where it is:** the `usb_cache` folder in the app's data folder (on Linux,
   `~/.local/share/art.chiph.djusbtkit/usb_cache`). The Event Log shows the exact folder the first
   time it's created for a drive. A named drive's older backups are moved there too: only the
-  newest one stays on the stick ([USB_EXPORT.md](USB_EXPORT.md), "Backup").
+  newest one stays on the stick ([USB_BACKUPS.md](USB_BACKUPS.md)).
 
 The technical details are under "Local HDD staging" in [USB_EXPORT.md](USB_EXPORT.md).
 

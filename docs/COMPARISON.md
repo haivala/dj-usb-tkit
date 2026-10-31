@@ -106,8 +106,8 @@ writers independently.
 
 Before every export and every applied repair, existing PDB/eDB files are
 copied to a timestamped backup under `PIONEER/rekordbox/backups/` on the
-drive itself, so a prior database state can potentially be restored. See the
-Backup section of [`docs/USB_EXPORT.md`](USB_EXPORT.md).
+drive itself, so a prior database state can potentially be restored. See
+[`docs/USB_BACKUPS.md`](USB_BACKUPS.md).
 
 ## Hardware bugs found and worked around
 

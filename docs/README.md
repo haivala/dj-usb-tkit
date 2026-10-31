@@ -24,6 +24,7 @@ This is the documentation set for DJ USB Tkit.
 - `docs/USB_CONNECT.md` - selecting a USB, what connecting does, and what changes while one is connected
 - `docs/USB_IMPORT.md` - USB read/merge behavior and hydration model
 - `docs/USB_EXPORT.md` - USB export behavior, mirror/additive sync modes, and strict parity expectations
+- `docs/USB_BACKUPS.md` - database backups before every USB write, retention, and the Backups panel
 - `docs/DIAGNOSTICS_REPAIRS.md` - diagnostics scope, reports, and fix workflows
 - `docs/RELEASE_BUILD_INSTALL.md` - install/build/release workflow overview
 

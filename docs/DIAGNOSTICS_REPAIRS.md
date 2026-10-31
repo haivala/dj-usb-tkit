@@ -152,7 +152,7 @@ The current code can propose these repair IDs:
 
 | Repair ID | Applies to | What it does |
 | --- | --- | --- |
-| `upgrade_export_data_to_strict_parity` | PDB and eDB playlist parity failures, including playlists whose only difference is artwork presence or a track's rating/colour | Merges playlists from both databases, preserves membership from both sides, rewrites PDB and eDB through the export writers, removes stale duplicate PDB playlist-entry rows, and syncs eDB `sequenceNo` from PDB `t07.sort_order` |
+| `upgrade_export_data_to_strict_parity` | PDB and eDB playlist parity failures, including playlists whose only difference is artwork presence or a track's rating/colour; a USB that has only one of the two databases | Creates a missing PDB or eDB as `initialize_usb` does (see "Missing database" below), merges playlists from both databases, preserves membership from both sides, rewrites PDB and eDB through the export writers, removes stale duplicate PDB playlist-entry rows, and syncs eDB `sequenceNo` from PDB `t07.sort_order` |
 | `fix_empty_analysis_files` | empty USB analysis files with resolvable source audio | Regenerates `DAT/EXT/2EX` bundles for the affected analysis directory, baking in the track's known PDB tempo/duration (the source file's own length when the PDB has none; a track with no known length is reported as failed). With no known tempo the bundle gets no beat grid |
 | `separate_shared_analysis` | analysis bundles used by more than one track, or whose `PPTH` names another track on the stick (see "Analysis file ownership") | The owner keeps the bundle and gets its `PPTH`. Every other track gets the next free `ANLZnnnn` in its own hash folder, analysed from its audio with its PDB tempo and length (plus the MP3/FLAC seek index), and its PDB row and eDB `analysisDataFilePath` point there. A track whose audio can't be analysed fails the fix, after the others are done. Marked destructive: the cues in the shared bundle stay with the owner. Runs before `fix_bpm_key_mismatch` |
 | `add_analysis_track_path` | bundles only one track uses whose `.DAT`, `.EXT` or `.2EX` has no `PPTH` naming that track (all bundles exported by app versions that didn't write one) | Writes the track path into each file's `PPTH`; nothing else changes |
@@ -218,7 +218,8 @@ Some findings intentionally do not have automatic repairs:
 | Finding | Behavior |
 | --- | --- |
 | malformed entries under `PIONEER/USBANLZ` | reported as unsupported; inspect event-log warnings and re-export affected tracks |
-| parity preview unavailable | repair preview continues, but strict parity upgrade is not proposed |
+| parity preview unavailable | repair preview continues, but strict parity upgrade is not proposed, unless exactly one database is missing (see "Missing database") |
+| both the PDB and the eDB missing | nothing to rebuild from; strict parity upgrade is not proposed. Initialize the USB and export again |
 | an MP3/FLAC whose seek index can't be built (e.g. a large zero-filled region in the audio) | reported as unsupported with the reason in the Event Log; a damaged file needs an intact copy |
 | a track in a history playlist (PDB history or eDB `history_content`) whose audio file is missing | reported as unsupported; the track is kept so the play history stays intact. Copy the file back (the Event Log lists the paths) |
 | indexed audio missing while `Contents/` holds no audio at all | reported as unsupported: a databases-only copy, not tracks to remove. Copy the audio back |
@@ -308,8 +309,25 @@ current PDB bytes at apply time, since strict parity and the audio fixes may
 have rewritten it.
 
 The strict repair converges on rerun. It does not compact PDB tables,
-rebuild the PDB from scratch, or remove playlist membership that exists on
-only one side.
+rebuild an existing PDB from scratch, or remove playlist membership that
+exists on only one side.
+
+### Missing database
+
+When the USB has only one of the two databases, the fix rebuilds the other:
+
+- **Collect** first stages the missing database exactly as `initialize_usb`
+  creates it: the full-shape PDB template, or the encrypted eDB with its
+  schema and default rows. A local copy left from an earlier session is
+  discarded first, so it never stands in for the USB's.
+- Every playlist of the existing database is then merged into it, through
+  the same merge and writers as above. The PDB's t19 follows the eDB's
+  `property`, as on a first export.
+- The preview offers the fix without counts; nothing is created until it is
+  applied. If the rebuild fails, the created database is removed, and a USB
+  that had no PDB is never left with an empty one.
+- Play history is not part of parity and isn't copied: the rebuilt
+  database starts with empty history.
 
 ### Track field table
 
