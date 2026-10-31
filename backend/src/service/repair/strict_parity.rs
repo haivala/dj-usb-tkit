@@ -4,6 +4,10 @@
 //! The repair reads and merges; it writes nothing itself. Every row it
 //! changes goes through the export writers (`write_edb_playlists_in_tx`,
 //! `build_pdb_for_playlists`), which write only what differs.
+//!
+//! When the USB has only one of the two databases, collecting first stages
+//! the missing one as `initialize_usb` would create it, so the merge and
+//! the writers rebuild it from the other.
 
 use super::*;
 use crate::service::export_helpers::{
@@ -20,6 +24,58 @@ pub(super) struct StrictParityUpgradeApplyResult {
     pub(super) pdb_tracks_inserted: usize,
     pub(super) pdb_tracks_changed: usize,
     pub(super) pdb_playlists_inserted: usize,
+    /// The database the collect phase created because the USB lacked it.
+    pub(super) rebuilt_database: Option<usb_staging::DbKind>,
+}
+
+/// The database to rebuild from the other: the one missing from the USB
+/// while the other is there. `None` when both or neither are.
+pub(super) fn missing_database(usb_root: &std::path::Path) -> Option<usb_staging::DbKind> {
+    use crate::service::usb_vendor_compat::{vendor_edb_path, vendor_pdb_path};
+    match (
+        vendor_pdb_path(usb_root).is_file(),
+        vendor_edb_path(usb_root).is_file(),
+    ) {
+        (false, true) => Some(usb_staging::DbKind::Pdb),
+        (true, false) => Some(usb_staging::DbKind::Edb),
+        _ => None,
+    }
+}
+
+/// Stage `kind`, missing from the USB, as `initialize_usb` creates it.
+/// Returns the staged path.
+fn stage_initialized_database(
+    usb_root: &std::path::Path,
+    kind: usb_staging::DbKind,
+) -> BackendResult<std::path::PathBuf> {
+    // A local copy left from an earlier session isn't this USB's database.
+    let path = usb_staging::restage_from_usb(usb_root, kind)?;
+    if let Some(parent) = path.parent() {
+        std::fs::create_dir_all(parent)?;
+    }
+    let created_date = chrono::Local::now().format("%Y-%m-%d").to_string();
+    match kind {
+        usb_staging::DbKind::Pdb => {
+            std::fs::write(
+                &path,
+                crate::service::usb_utils::build_fullshape_pdb_bytes(&created_date),
+            )?;
+        }
+        usb_staging::DbKind::Edb => {
+            crate::service::usb_utils::initialize_fullshape_edb(&path, &created_date)?;
+        }
+    }
+    Ok(path)
+}
+
+/// Remove a database [`stage_initialized_database`] staged, with the
+/// eDB's journal files, so a failed rebuild leaves nothing to write back.
+fn remove_staged_database(path: &std::path::Path) {
+    for suffix in ["", "-wal", "-shm"] {
+        let mut file = path.as_os_str().to_owned();
+        file.push(suffix);
+        let _ = std::fs::remove_file(file);
+    }
 }
 
 pub(super) fn edb_track_analysis_key(track: &crate::models::UsbTrack) -> String {
@@ -203,8 +259,13 @@ pub(crate) fn sync_edb_playlist_sort_orders_from_pdb(
 
 /// One line for the repair outcome and the preview card.
 pub(super) fn strict_parity_summary(result: &StrictParityUpgradeApplyResult) -> String {
+    let rebuilt = match result.rebuilt_database {
+        Some(usb_staging::DbKind::Pdb) => "rebuilt the missing PDB from the eDB; ",
+        Some(usb_staging::DbKind::Edb) => "rebuilt the missing eDB from the PDB; ",
+        None => "",
+    };
     format!(
-        "merged {}; eDB: {} added, {} changed; PDB: {} added, {} changed, {} added, {} removed",
+        "{rebuilt}merged {}; eDB: {} added, {} changed; PDB: {} added, {} changed, {} added, {} removed",
         counted(result.merged_playlists, "playlist", "playlists"),
         counted(result.edb_rows_inserted, "row", "rows"),
         result.edb_rows_updated,
@@ -694,7 +755,42 @@ impl BackendService {
 /// failure before the commit rolls the eDB back and leaves the staged PDB
 /// as it was; a failed commit puts the staged PDB's old bytes back. The
 /// repair run writes both staged databases back to the USB once at its end.
+///
+/// A database missing from the USB (see [`missing_database`]) is staged as
+/// `initialize_usb` creates it and every playlist of the other merged into
+/// it; that is applied only, never previewed. A failed rebuild removes the
+/// staged database again.
 pub(super) fn run_strict_parity_upgrade(
+    usb_root: &std::path::Path,
+    target_playlist_names: Option<&HashSet<String>>,
+    edb_conn: Option<&mut rusqlite::Connection>,
+    warnings: &mut Vec<WarningEntry>,
+    write: bool,
+) -> BackendResult<StrictParityUpgradeApplyResult> {
+    let Some(kind) = missing_database(usb_root) else {
+        return collect_merge_write(usb_root, target_playlist_names, edb_conn, warnings, write);
+    };
+    if !write {
+        return Err(BackendError::Validation(
+            "strict parity upgrade: a missing database is rebuilt only when applied".to_string(),
+        ));
+    }
+    let staged = stage_initialized_database(usb_root, kind)?;
+    // A connection opened before the eDB was staged isn't to this one.
+    let edb_conn = edb_conn.filter(|_| kind != usb_staging::DbKind::Edb);
+    match collect_merge_write(usb_root, None, edb_conn, warnings, true) {
+        Ok(result) => Ok(StrictParityUpgradeApplyResult {
+            rebuilt_database: Some(kind),
+            ..result
+        }),
+        Err(err) => {
+            remove_staged_database(&staged);
+            Err(err)
+        }
+    }
+}
+
+fn collect_merge_write(
     usb_root: &std::path::Path,
     target_playlist_names: Option<&HashSet<String>>,
     edb_conn: Option<&mut rusqlite::Connection>,

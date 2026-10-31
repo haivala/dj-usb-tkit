@@ -59,6 +59,7 @@ struct DetectedRepairs {
     sync_edb_history_supported: bool,
     sync_edb_history_needed: bool,
     strict_upgrade_targets: HashSet<String>,
+    missing_database: Option<usb_staging::DbKind>,
     pdb_duplicate_entry_count: usize,
     engine_library_fix_needed: bool,
 }
@@ -213,8 +214,9 @@ pub(super) struct StagedPdb {
     path: std::path::PathBuf,
     pub(super) bytes: Vec<u8>,
     on_disk: Vec<u8>,
-    /// What the USB held when the run started, for undoing a write-back.
-    original: Vec<u8>,
+    /// What the USB held when the run started, for undoing a write-back;
+    /// `None` when it had no PDB.
+    original: Option<Vec<u8>>,
 }
 
 impl StagedPdb {
@@ -225,10 +227,13 @@ impl StagedPdb {
         } else {
             Vec::new()
         };
+        let original = crate::service::usb_vendor_compat::vendor_pdb_path(usb_root)
+            .is_file()
+            .then(|| bytes.clone());
         Ok(Self {
             path,
             on_disk: bytes.clone(),
-            original: bytes.clone(),
+            original,
             bytes,
         })
     }
@@ -291,13 +296,17 @@ pub(super) fn write_back_both_or_neither(
         .and_then(|()| usb_staging::write_back_if_changed(usb_root, usb_staging::DbKind::Pdb))
         .inspect_err(|_| restage_both())?;
     if let Err(err) = usb_staging::write_back_if_changed(usb_root, usb_staging::DbKind::Edb) {
-        if pdb_written
-            && let Err(undo_err) = usb_staging::commit_and_write_back(
-                usb_root,
-                usb_staging::DbKind::Pdb,
-                &pdb.original,
-            )
-        {
+        let undo = || match &pdb.original {
+            Some(original) => {
+                usb_staging::commit_and_write_back(usb_root, usb_staging::DbKind::Pdb, original)
+                    .map(|_| ())
+            }
+            None => {
+                std::fs::remove_file(crate::service::usb_vendor_compat::vendor_pdb_path(usb_root))
+                    .map_err(Into::into)
+            }
+        };
+        if pdb_written && let Err(undo_err) = undo() {
             restage_both();
             return Err(BackendError::Internal(format!(
                 "{err}; putting the previous PDB back also failed ({undo_err}), so the USB has the \
@@ -1343,7 +1352,11 @@ impl BackendService {
 
         let mut strict_upgrade_targets = HashSet::<String>::new();
         let mut pdb_duplicate_entry_count: usize = 0;
+        // With one database missing, whatever the parity report compared it
+        // against was a stale local copy, not the USB's.
+        let missing_database = missing_database(&usb_root);
         match parity {
+            Ok(_) if missing_database.is_some() => {}
             Ok(report) => {
                 let strict_count = report
                     .playlist_details
@@ -1436,6 +1449,26 @@ impl BackendService {
                 ));
             }
         }
+        if let Some(kind) = missing_database {
+            let (issue, description) = match kind {
+                usb_staging::DbKind::Pdb => (
+                    "PDB missing",
+                    "This USB has an eDB but no PDB, so older players show no music. Creates the \
+                     PDB as Initialize USB does and writes every eDB playlist into it.",
+                ),
+                usb_staging::DbKind::Edb => (
+                    "eDB missing",
+                    "This USB has a PDB but no eDB, so newer players and rekordbox show no music. \
+                     Creates the eDB as Initialize USB does and writes every PDB playlist into it.",
+                ),
+            };
+            detected_issues.push(issue.to_string());
+            proposed_fixes.push(fix_proposal(
+                STRICT_PARITY_UPGRADE_FIX_ID,
+                "Upgrade Export Data To Strict Parity",
+                description,
+            ));
+        }
 
         let engine_library_fix_needed = self.engine_library_needs_fix(&usb_root);
         if engine_library_fix_needed {
@@ -1524,6 +1557,7 @@ impl BackendService {
             sync_edb_history_supported,
             sync_edb_history_needed,
             strict_upgrade_targets,
+            missing_database,
             pdb_duplicate_entry_count,
             engine_library_fix_needed,
         };
@@ -1673,6 +1707,7 @@ impl BackendService {
             sync_edb_history_supported,
             sync_edb_history_needed,
             strict_upgrade_targets,
+            missing_database,
             pdb_duplicate_entry_count,
             engine_library_fix_needed,
         } = found;
@@ -1697,7 +1732,13 @@ impl BackendService {
         // key negotiation is the expensive part. Individual fixes fall
         // back to opening their own connection if this fails.
         progress.report(70, "USB: Opening repair databases");
-        let mut fix_edb_conn = open_edb_rw(usb_root, warnings);
+        // A missing eDB is created by strict parity; a connection opened now
+        // would be to a stale local copy.
+        let mut fix_edb_conn = if missing_database == Some(usb_staging::DbKind::Edb) {
+            None
+        } else {
+            open_edb_rw(usb_root, warnings)
+        };
         let mut pdb = match StagedPdb::load(usb_root) {
             Ok(pdb) => pdb,
             Err(err) => {
@@ -1827,7 +1868,7 @@ impl BackendService {
         // the final result in one clean pass.
         if selected.contains(STRICT_PARITY_UPGRADE_FIX_ID) {
             let force_all = strict_repair_force_all_enabled();
-            if strict_upgrade_targets.is_empty() && !force_all {
+            if strict_upgrade_targets.is_empty() && !force_all && missing_database.is_none() {
                 outcomes
                     .skipped
                     .push("Upgrade Export Data To Strict Parity: nothing to apply".to_string());
@@ -1846,7 +1887,9 @@ impl BackendService {
                         warnings,
                     )
                 }) {
-                    Ok(result) if result.merged_playlists > 0 => {
+                    Ok(result)
+                        if result.merged_playlists > 0 || result.rebuilt_database.is_some() =>
+                    {
                         outcomes.applied.push(format!(
                             "Upgrade Export Data To Strict Parity: {}",
                             strict_parity_summary(&result)

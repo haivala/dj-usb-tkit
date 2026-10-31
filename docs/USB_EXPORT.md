@@ -498,6 +498,8 @@ Strict parity also recognizes a small allowed-difference set where values are ap
 
 When strict mismatches are found, correction is handled through explicit repair actions rather than silent mutation inside report commands.
 
+When the USB has only one of the two databases, the strict parity repair creates the missing one first, as `initialize_usb` does, then merges every playlist of the other database into it through the same writers. The preview offers the fix without counts, and nothing is created until it is applied. If the rebuild fails, the created database is removed, and a USB that had no PDB is never left with an empty one. Play history is not copied. When both databases are missing there is nothing to rebuild from, and the fix is not offered.
+
 Implementation anchors:
 
 - export command façade: `backend/src/commands.rs`

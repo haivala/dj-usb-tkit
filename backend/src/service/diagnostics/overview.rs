@@ -206,7 +206,13 @@ pub(super) fn diagnostics_overview(
     let pdb_unreadable = ["PDB exists", "PDB parseable"]
         .iter()
         .any(|label| !check_status(pdb, label).is_some_and(|s| is_pass(&s)));
-    let pdb_detail = if pdb_unreadable {
+    // The repair rebuilds a missing database from the other one.
+    let pdb_missing = !check_status(pdb, "PDB exists").is_some_and(|s| is_pass(&s));
+    let pdb_detail = if pdb_missing && facts.edb_file_present {
+        with_hint(vec![
+            "This USB has no player database, so these players won't show any music.".to_string(),
+        ])
+    } else if pdb_unreadable {
         "The player database is missing or can't be read, so these players won't show any music."
             .to_string()
     } else {
@@ -240,8 +246,13 @@ pub(super) fn diagnostics_overview(
     // Newer Pioneer players also read exportLibrary.db.
     let edb = section(DISPLAY_EDB);
     let edb_status = edb.map_or(DiagStatus::Warn, |s| s.status.clone());
-    let edb_detail = if !facts.edb_file_present {
-        "This USB has no database for newer players yet. Exporting to it creates one.".to_string()
+    let edb_detail = if !facts.edb_file_present && !pdb_missing {
+        with_hint(vec![
+            "This USB has no database for newer players, so they may not show this USB's music."
+                .to_string(),
+        ])
+    } else if !facts.edb_file_present {
+        "This USB has no database for newer players yet.".to_string()
     } else if !check_status(edb, "eDB").is_some_and(|s| is_pass(&s)) {
         "The database newer players read can't be opened, so they may not show this USB's music."
             .to_string()

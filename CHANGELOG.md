@@ -39,6 +39,11 @@
 
 ## Unreleased
 
+- **New feature:** A USB that has only one of its two databases, the PDB or the eDB, can be
+  repaired: "Upgrade Export Data To Strict Parity" creates the missing one as Initialize USB does
+  and writes every playlist of the other into it. Play history isn't copied. The diagnostics
+  overview points to Preview Fixes for a missing database instead of saying an export creates
+  one.
 - **Chore:** The essentia analysis engine's node, runner and module paths are handed to the analysis
   process directly instead of being written into the app's environment while it runs, which could
   crash the app in rare cases. A repair whose database write fails and whose staged database then

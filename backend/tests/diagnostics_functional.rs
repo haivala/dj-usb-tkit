@@ -1808,6 +1808,88 @@ fn pdb_track_row_bytes(usb: &Path) -> Vec<(u32, String)> {
     rows
 }
 
+fn preview_repair(
+    backend: &BackendCommands,
+    usb: &Path,
+) -> backend::models::RepairUsbDiagnosticsData {
+    let preview = backend.repair_usb_diagnostics(RepairUsbDiagnosticsRequest {
+        usb_root: Some(usb.to_string_lossy().to_string()),
+        apply: false,
+        selected_fix_ids: vec![],
+    });
+    assert!(preview.ok, "preview failed: {preview:?}");
+    preview.data.expect("preview data")
+}
+
+/// Deletes one database from the two-playlist fixture, previews (which must
+/// offer strict parity and write nothing), applies, and checks both
+/// playlists are strict-clean against the rebuilt database.
+fn assert_strict_repair_rebuilds_missing(file_name: &str, applied_line: &str) {
+    let (_root, backend, usb, target, control) = setup_two_playlist_strict_parity_fixture();
+    let missing = vendor_db_dir(&usb).join(file_name);
+    fs::remove_file(&missing).expect("delete database");
+
+    let preview = preview_repair(&backend, &usb);
+    assert!(
+        preview
+            .proposed_fixes
+            .iter()
+            .any(|fix| fix.id == "upgrade_export_data_to_strict_parity"),
+        "strict parity should be offered for the missing {file_name}: {preview:?}"
+    );
+    assert!(!missing.exists(), "preview must not create {file_name}");
+
+    let data = apply_strict_repair(&backend, &usb);
+    assert!(data.failed_fixes.is_empty(), "{data:?}");
+    assert!(
+        data.applied_fixes
+            .iter()
+            .any(|line| line.contains(applied_line) && line.contains("merged 2 playlists")),
+        "{data:?}"
+    );
+    assert!(missing.is_file(), "{file_name} should be rebuilt");
+
+    for name in [&target, &control] {
+        let detail = parity_detail_for_playlist(&backend, &usb, name);
+        assert!(
+            matches!(detail.status, backend::models::DiagStatus::Pass),
+            "{name} should be strict-clean after the rebuild: {detail:?}"
+        );
+        assert_eq!(detail.pdb_tracks, 1);
+        assert_eq!(detail.edb_tracks, 1);
+    }
+}
+
+#[test]
+fn strict_repair_rebuilds_a_missing_pdb_from_the_edb() {
+    assert_strict_repair_rebuilds_missing("export.pdb", "rebuilt the missing PDB from the eDB");
+}
+
+#[test]
+fn strict_repair_rebuilds_a_missing_edb_from_the_pdb() {
+    assert_strict_repair_rebuilds_missing(
+        "exportLibrary.db",
+        "rebuilt the missing eDB from the PDB",
+    );
+}
+
+#[test]
+fn strict_repair_is_not_offered_when_both_databases_are_missing() {
+    let (_root, backend, usb, _target, _control) = setup_two_playlist_strict_parity_fixture();
+    for name in ["export.pdb", "exportLibrary.db"] {
+        fs::remove_file(vendor_db_dir(&usb).join(name)).expect("delete database");
+    }
+
+    let preview = preview_repair(&backend, &usb);
+    assert!(
+        !preview
+            .proposed_fixes
+            .iter()
+            .any(|fix| fix.id == "upgrade_export_data_to_strict_parity"),
+        "{preview:?}"
+    );
+}
+
 fn apply_strict_repair(
     backend: &BackendCommands,
     usb: &Path,

@@ -1095,7 +1095,7 @@ pub fn initialize_usb(root: &Path) -> BackendResult<crate::models::InitializeUsb
     })
 }
 
-fn initialize_fullshape_edb(db_path: &Path, created_date: &str) -> BackendResult<()> {
+pub(crate) fn initialize_fullshape_edb(db_path: &Path, created_date: &str) -> BackendResult<()> {
     let conn = rusqlite::Connection::open(db_path)?;
     conn.execute_batch(&format!("PRAGMA key='{DEFAULT_USB_EDB_KEY}';"))?;
     conn.execute_batch(EDB_SCHEMA)?;
@@ -1301,7 +1301,7 @@ fn seed_edb_defaults(conn: &rusqlite::Connection, created_date: &str) -> Backend
     Ok(())
 }
 
-fn build_fullshape_pdb_bytes(created_date: &str) -> Vec<u8> {
+pub(crate) fn build_fullshape_pdb_bytes(created_date: &str) -> Vec<u8> {
     use crate::pdb_writer::{PdbData, standard_colors, standard_columns_raw, write_pdb};
     let data = PdbData {
         colors: standard_colors(),

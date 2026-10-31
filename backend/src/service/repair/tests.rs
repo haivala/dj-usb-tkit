@@ -580,6 +580,34 @@ fn repair_write_back_puts_the_previous_pdb_back_when_the_edb_write_fails() {
 }
 
 #[test]
+fn repair_write_back_removes_a_rebuilt_pdb_when_the_edb_write_fails() {
+    let cache_dir = tempdir().expect("cache dir").keep();
+    let _guard = usb_staging::set_cache_root_for_test(Some(cache_dir));
+    let (_td, usb_root) = test_usb_root();
+    let raw_pdb_path = vendor_pdb_path(&usb_root);
+    let raw_edb_path = super::super::usb_vendor_compat::vendor_edb_path(&usb_root);
+    let rebuilt = std::fs::read(&raw_pdb_path).unwrap();
+    std::fs::remove_file(&raw_pdb_path).unwrap();
+    let mut pdb = super::run::StagedPdb::load(&usb_root).expect("load staged pdb");
+    append_byte(&usb_staging::stage_edb(&usb_root).unwrap());
+    pdb.patch(|bytes| {
+        bytes.clone_from(&rebuilt);
+        Ok(())
+    })
+    .expect("stage rebuilt pdb");
+
+    let edb_tmp = raw_edb_path.with_extension(format!("tmp-{}", std::process::id()));
+    std::fs::create_dir_all(edb_tmp.join("blocked")).unwrap();
+
+    super::run::write_back_both_or_neither(&usb_root, &mut pdb)
+        .expect_err("the eDB write-back must fail");
+    assert!(
+        !raw_pdb_path.exists(),
+        "a USB that had no PDB is left without one"
+    );
+}
+
+#[test]
 fn apply_fix_sync_edb_history_from_pdb_flushes_to_usb_when_staging_enabled() {
     let cache_dir = tempdir().expect("cache dir").keep();
     let _guard = usb_staging::set_cache_root_for_test(Some(cache_dir));
