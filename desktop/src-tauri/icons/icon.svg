@@ -4,48 +4,29 @@
       <stop stop-color="#0c0a12"/>
       <stop offset="1" stop-color="#1a1726"/>
     </linearGradient>
-    <linearGradient id="accent" x1="140" y1="80" x2="372" y2="440" gradientUnits="userSpaceOnUse">
-      <stop stop-color="#a855f7"/>
-      <stop offset="1" stop-color="#c026d3"/>
-    </linearGradient>
-    <linearGradient id="body" x1="200" y1="140" x2="312" y2="420" gradientUnits="userSpaceOnUse">
-      <stop stop-color="#a855f7"/>
-      <stop offset="1" stop-color="#9333ea"/>
+    <!-- Same colours as the header logo (accent to accent-hot) -->
+    <linearGradient id="body" x1="0" y1="184" x2="0" y2="424" gradientUnits="userSpaceOnUse">
+      <stop stop-color="#8c2eea"/>
+      <stop offset="1" stop-color="#e236e2"/>
     </linearGradient>
   </defs>
 
-  <!-- Background rounded rect -->
   <rect x="40" y="40" width="432" height="432" rx="96" fill="url(#bg)"/>
-  <rect x="56" y="56" width="400" height="400" rx="80" stroke="url(#accent)" stroke-width="10" opacity="0.35"/>
-
-  <!-- USB-A metal connector — drawn FIRST so body overlaps its base -->
-  <rect x="214" y="92" width="84" height="100" rx="2" fill="#b0abb8"/>
-  <!-- Two holes on connector face -->
-  <rect x="226" y="124" width="22" height="14" rx="2" fill="#7c28c9"/>
-  <rect x="264" y="124" width="22" height="14" rx="2" fill="#7c28c9"/>
-
-  <!-- USB stick body — drawn AFTER connector, overlaps its bottom -->
-  <rect x="196" y="170" width="120" height="230" rx="12" fill="url(#body)"/>
-
-  <!-- LED indicator dot -->
-  <circle cx="256" cy="192" r="6" fill="#c026d3" opacity="0.9"/>
-  <circle cx="256" cy="192" r="3" fill="#e879f9"/>
-
-  <!-- Waveform bars on USB body -->
-  <rect x="218" y="240" width="6"  height="28" rx="3" fill="#e4dff0" opacity="0.55"/>
-  <rect x="230" y="230" width="6"  height="48" rx="3" fill="#e4dff0" opacity="0.65"/>
-  <rect x="242" y="220" width="6"  height="68" rx="3" fill="#e4dff0" opacity="0.75"/>
-  <rect x="254" y="212" width="6"  height="84" rx="3" fill="#e4dff0" opacity="0.85"/>
-  <rect x="266" y="224" width="6"  height="60" rx="3" fill="#e4dff0" opacity="0.7"/>
-  <rect x="278" y="234" width="6"  height="40" rx="3" fill="#e4dff0" opacity="0.6"/>
-  <rect x="290" y="244" width="6"  height="20" rx="3" fill="#e4dff0" opacity="0.5"/>
-
-  <!-- Second waveform row — subtle echo -->
-  <rect x="218" y="326" width="6"  height="16" rx="3" fill="#e4dff0" opacity="0.25"/>
-  <rect x="230" y="320" width="6"  height="28" rx="3" fill="#e4dff0" opacity="0.3"/>
-  <rect x="242" y="314" width="6"  height="40" rx="3" fill="#e4dff0" opacity="0.35"/>
-  <rect x="254" y="310" width="6"  height="48" rx="3" fill="#e4dff0" opacity="0.4"/>
-  <rect x="266" y="316" width="6"  height="36" rx="3" fill="#e4dff0" opacity="0.3"/>
-  <rect x="278" y="322" width="6"  height="24" rx="3" fill="#e4dff0" opacity="0.25"/>
-  <rect x="290" y="328" width="6"  height="12" rx="3" fill="#e4dff0" opacity="0.2"/>
+  <!-- Faint "DJ" behind the stick: Outfit Bold glyphs (the app font) as paths -->
+  <g fill="#8c2eea" opacity="0.14">
+    <path d="M118.03966005665723 396.0V341.2691218130312H187.44475920679886Q212.82719546742211 341.2691218130312 231.8640226628895 331.1558073654391Q250.90084985835693 321.042492917847 261.2124645892351 301.60906515580734Q271.5240793201133 282.1756373937677 271.5240793201133 255.60339943342777Q271.5240793201133 229.03116147308782 261.014164305949 209.9943342776204Q250.5042492917847 190.95750708215297 231.6657223796034 180.64589235127477Q212.82719546742211 170.3342776203966 187.44475920679886 170.3342776203966H116.05665722379604V116.0H188.23796033994336Q219.96600566572238 116.0 246.73654390934843 126.11331444759207Q273.5070821529745 136.22662889518415 293.5354107648725 155.06515580736544Q313.56373937677057 173.90368271954674 324.4702549575071 199.4844192634561Q335.37677053824365 225.06515580736544 335.37677053824365 256.0Q335.37677053824365 286.53824362606235 324.4702549575071 312.3172804532578Q313.56373937677057 338.09631728045326 293.7337110481586 356.7365439093485Q273.90368271954674 375.37677053824365 247.1331444759207 385.6883852691218Q220.3626062322946 396.0 189.03116147308782 396.0ZM76.0 396.0V116.0H138.26628895184137V396.0Z"/>
+    <path d="M332.8838526912181 400.36260623229464Q306.3116147308782 400.36260623229464 286.67988668555245 390.6458923512748Q267.04815864022663 380.92917847025495 253.1671388101983 363.47875354107646L294.8101983002833 323.4220963172804Q301.94900849858357 333.3371104815864 311.6657223796034 338.4929178470255Q321.38243626062325 343.64872521246457 333.6770538243626 343.64872521246457Q345.5750708215297 343.64872521246457 354.300283286119 338.6912181303116Q363.0254957507082 333.7337110481586 368.1813031161473 324.4135977337111Q373.3371104815864 315.09348441926346 373.3371104815864 301.21246458923514V116.0H436.0V297.64305949008497Q436.0 328.9745042492918 423.3087818696884 351.9773371104816Q410.6175637393768 374.9801699716714 387.614730878187 387.671388101983Q364.6118980169972 400.36260623229464 332.8838526912181 400.36260623229464Z"/>
+  </g>
+  <!-- USB stick: the header logo's glyph scaled x8 -->
+  <rect x="204" y="88" width="104" height="120" rx="8" fill="#b0abb8"/>
+  <rect x="220" y="128" width="28" height="20" rx="4" fill="#59109e"/>
+  <rect x="268" y="128" width="28" height="20" rx="4" fill="#59109e"/>
+  <rect x="180" y="184" width="152" height="240" rx="20" fill="url(#body)"/>
+  <rect x="208" y="264" width="10" height="40"  rx="5" fill="#fff" opacity="0.55"/>
+  <rect x="224" y="248" width="10" height="72"  rx="5" fill="#fff" opacity="0.65"/>
+  <rect x="240" y="232" width="10" height="104" rx="5" fill="#fff" opacity="0.75"/>
+  <rect x="256" y="224" width="10" height="120" rx="5" fill="#fff" opacity="0.85"/>
+  <rect x="272" y="240" width="10" height="88"  rx="5" fill="#fff" opacity="0.7"/>
+  <rect x="288" y="256" width="10" height="56"  rx="5" fill="#fff" opacity="0.6"/>
+  <rect x="304" y="272" width="10" height="24"  rx="5" fill="#fff" opacity="0.5"/>
 </svg>
