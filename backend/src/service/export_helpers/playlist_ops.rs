@@ -455,40 +455,14 @@ pub fn remove_orphaned_dropped_tracks_from_dbs(
     let mut unlock_warnings = Vec::<WarningEntry>::new();
     if let Some(conn) = open_edb_rw(usb_root, &mut unlock_warnings) {
         if table_exists(&conn, "content") {
-            let mut to_delete = Vec::<i64>::new();
-            {
-                let file_size = crate::edb::content_column_or_null(&conn, "fileSize");
-                let mut stmt = conn.prepare(&format!(
-                    "SELECT c.content_id, c.path, {file_size}, c.title, ar.name
-                     FROM content c
-                     LEFT JOIN artist ar ON ar.artist_id = c.artist_id_artist"
-                ))?;
-                let rows = stmt.query_map([], |row| {
-                    Ok((
-                        row.get::<_, i64>(0)?,
-                        row.get::<_, Option<String>>(1)?,
-                        row.get::<_, Option<i64>>(2)?,
-                        row.get::<_, Option<String>>(3)?,
-                        row.get::<_, Option<String>>(4)?,
-                    ))
-                })?;
-                for row in rows {
-                    let (content_id, path, size, title, artist) = row?;
-                    let is_orphan = match content_fingerprint_key(
-                        size,
-                        title.as_deref().unwrap_or(""),
-                        artist.as_deref().unwrap_or(""),
-                    ) {
-                        Some(fingerprint) => orphan_fingerprints.contains(&fingerprint),
-                        None => path.as_deref().is_some_and(|p| {
-                            orphan_path_keys.contains(&canonicalize_track_path_identity(p))
-                        }),
-                    };
-                    if is_orphan {
-                        to_delete.push(content_id);
-                    }
-                }
-            }
+            let to_delete = crate::service::usb_track_facts::read_edb_content_tracks(&conn)?
+                .into_iter()
+                .filter(|row| match &row.fingerprint {
+                    Some(fingerprint) => orphan_fingerprints.contains(fingerprint),
+                    None => orphan_path_keys.contains(&canonicalize_track_path_identity(&row.path)),
+                })
+                .filter_map(|row| row.content_id)
+                .collect::<Vec<i64>>();
             let has_playlist_content = table_exists(&conn, "playlist_content");
             for content_id in &to_delete {
                 // Never delete a content row still linked to any playlist. The

@@ -116,51 +116,58 @@ impl UsbTrackFacts {
             .keys()
             .cloned()
             .collect::<HashSet<_>>();
-        for (path, size, fingerprint) in read_edb_content_tracks(conn) {
-            if let Some(fingerprint) = &fingerprint
+        for row in edb_track_rows(conn) {
+            if let Some(fingerprint) = &row.fingerprint
                 && !pdb_fingerprints.contains(fingerprint)
             {
                 record_existing_usb_path_by_fingerprint(
                     &mut self.path_by_fingerprint,
                     fingerprint.clone(),
-                    &path,
+                    &row.path,
                 );
             }
             let fact = self
                 .by_path
-                .entry(canonicalize_track_path_identity(&path))
+                .entry(canonicalize_track_path_identity(&row.path))
                 .or_insert_with(|| UsbTrackFact {
-                    path,
+                    path: row.path,
                     ..UsbTrackFact::default()
                 });
             if fact.size.is_none() {
-                fact.size = size;
+                fact.size = row.size;
             }
             if fact.fingerprint.is_none() {
-                fact.fingerprint = fingerprint;
+                fact.fingerprint = row.fingerprint;
             }
         }
     }
 }
 
-/// The eDB's `content` rows as (path, positive size, fingerprint). Columns a
-/// schema lacks read as NULL; a schema without `path` (`FolderPath` +
-/// `FileNameL`) gives its paths alone (`collect_edb_audio_paths`).
-fn read_edb_content_tracks(
+/// One eDB `content` row with what tells its track apart.
+#[derive(Debug, Clone, PartialEq)]
+pub(crate) struct EdbContentTrack {
+    pub content_id: Option<i64>,
+    /// As written; may be blank.
+    pub path: String,
+    /// `fileSize` when positive.
+    pub size: Option<u32>,
+    /// `content_fingerprint_key` of `fileSize`, `title` and the artist's name.
+    pub fingerprint: Option<ContentFingerprint>,
+}
+
+/// Every eDB `content` row as an `EdbContentTrack`. Columns a schema lacks
+/// read as NULL; a schema without `path` gives no rows. A row that can't be
+/// read is skipped; a query that can't run is an error.
+pub(crate) fn read_edb_content_tracks(
     conn: &rusqlite::Connection,
-) -> Vec<(String, Option<u32>, Option<ContentFingerprint>)> {
-    let Ok(columns) = crate::edb::load_table_columns(conn, "content") else {
-        return Vec::new();
-    };
+) -> crate::error::BackendResult<Vec<EdbContentTrack>> {
+    if !crate::edb::table_exists(conn, "content") {
+        return Ok(Vec::new());
+    }
+    let columns = crate::edb::load_table_columns(conn, "content")?;
     let has = |name: &str| columns.iter().any(|column| column == name);
     if !has("path") {
-        // Its schema warnings are the diagnostics' to report, not ours.
-        let mut ignored_warnings = Vec::new();
-        return crate::service::diagnostics::collect_edb_audio_paths(conn, &mut ignored_warnings)
-            .into_iter()
-            .filter(|path| !path.trim().is_empty())
-            .map(|path| (path, None, None))
-            .collect();
+        return Ok(Vec::new());
     }
     let column = |name: &str| {
         if has(name) {
@@ -179,36 +186,61 @@ fn read_edb_content_tracks(
             ("NULL", "")
         };
     let sql = format!(
-        "SELECT c.path, CAST({} AS INTEGER), {}, {artist} FROM content c {artist_join}",
+        "SELECT {}, c.path, CAST({} AS INTEGER), {}, {artist} FROM content c {artist_join}",
+        column("content_id"),
         column("fileSize"),
         column("title"),
     );
-    let Ok(mut stmt) = conn.prepare(&sql) else {
-        return Vec::new();
-    };
-    let Ok(rows) = stmt.query_map([], |row| {
+    let mut stmt = conn.prepare(&sql)?;
+    let rows = stmt.query_map([], |row| {
         Ok((
-            row.get::<_, Option<String>>(0)?,
-            row.get::<_, Option<i64>>(1)?,
-            row.get::<_, Option<String>>(2)?,
+            row.get::<_, Option<i64>>(0)?,
+            row.get::<_, Option<String>>(1)?,
+            row.get::<_, Option<i64>>(2)?,
             row.get::<_, Option<String>>(3)?,
+            row.get::<_, Option<String>>(4)?,
         ))
-    }) else {
-        return Vec::new();
-    };
-    rows.flatten()
-        .filter_map(|(path, size, title, artist)| {
-            let path = path.filter(|path| !path.trim().is_empty())?;
-            let fingerprint = content_fingerprint_key(
+    })?;
+    Ok(rows
+        .flatten()
+        .map(|(content_id, path, size, title, artist)| EdbContentTrack {
+            content_id,
+            path: path.unwrap_or_default(),
+            fingerprint: content_fingerprint_key(
                 size,
                 title.as_deref().unwrap_or(""),
                 artist.as_deref().unwrap_or(""),
-            );
-            let size = size
+            ),
+            size: size
                 .and_then(|size| u32::try_from(size).ok())
-                .filter(|&size| size > 0);
-            Some((path, size, fingerprint))
+                .filter(|&size| size > 0),
         })
+        .collect())
+}
+
+/// The eDB's tracks with a path, for `UsbTrackFacts`. A schema without
+/// `path` (`FolderPath` + `FileNameL`) gives its paths alone
+/// (`collect_edb_audio_paths`).
+fn edb_track_rows(conn: &rusqlite::Connection) -> Vec<EdbContentTrack> {
+    let has_path = crate::edb::load_table_columns(conn, "content")
+        .is_ok_and(|columns| columns.iter().any(|column| column == "path"));
+    let rows = if has_path {
+        read_edb_content_tracks(conn).unwrap_or_default()
+    } else {
+        // Its schema warnings are the diagnostics' to report, not ours.
+        let mut ignored_warnings = Vec::new();
+        crate::service::diagnostics::collect_edb_audio_paths(conn, &mut ignored_warnings)
+            .into_iter()
+            .map(|path| EdbContentTrack {
+                content_id: None,
+                path,
+                size: None,
+                fingerprint: None,
+            })
+            .collect()
+    };
+    rows.into_iter()
+        .filter(|row| !row.path.trim().is_empty())
         .collect()
 }
 

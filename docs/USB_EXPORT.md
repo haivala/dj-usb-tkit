@@ -241,6 +241,33 @@ into the waveform/beatgrid bundle (see `docs/WAVEFORMS.md`). Neither cap is
 applied to the literal media path used to read the audio file itself — that
 must always match the real file on disk.
 
+### Tracks already on the USB
+
+A stick can list a track in the PDB only, in the eDB only (for example a stick
+whose PDB was lost or never written), or in both. Every check of what is
+already on the USB reads both databases through one helper, `UsbTrackFacts`
+(`backend/src/service/usb_track_facts.rs`): the PDB's track rows first, then the
+eDB's `content` rows, which add the tracks the PDB doesn't list and fill in a
+file size or content fingerprint a PDB row lacks. The content fingerprint is
+the recorded file size plus the normalized title and artist
+(`content_fingerprint_key`). It uses:
+
+- **File names.** The `/Contents/...` name is cut to the USB's 48-character
+  limit, so two tracks can end up with the same name. A name either database
+  already holds belongs to that track unless the file size or fingerprint
+  matches, in which case it is this track (edited since) and the file is
+  updated in place. Otherwise this track gets the next free `-N` name, as
+  rekordbox does. A row that records neither size nor fingerprint is settled
+  by the file at that path: no file, or one of this track's size, means the
+  name is free.
+- **Reusing a file.** A track whose source isn't inside the USB's `Contents`
+  tree, but whose fingerprint points at exactly one track on the USB, reuses
+  that file and row instead of copying the audio again. A fingerprint the PDB
+  records keeps the PDB's path; one several paths share is never used.
+- **The export estimate and free-space check** (`get_playlist_export_space`,
+  the export's own preflight) count a track as already on the USB when either
+  database lists it.
+
 The main technical stages are:
 
 1. Resolve export target and selected playlist content.
