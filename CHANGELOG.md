@@ -44,6 +44,16 @@
   and writes every playlist of the other into it. Play history isn't copied. The diagnostics
   overview points to Preview Fixes for a missing database instead of saying an export creates
   one.
+- **Fix:** USB diagnostics no longer report an exported `.ogg`, `.opus` or `.m4p` track as missing
+  its audio file, which offered to remove the track from its playlists although the file was on the
+  USB. The macOS `._` files that sit next to each audio file on a stick written from a Mac are no
+  longer counted as unindexed audio, which offered to add them to the databases as tracks.
+- **Improvement:** Export leaves `.ogg`, `.opus` and `.m4p` tracks off the USB, since no player
+  plays them. They stay in the library and its playlists; the export counts them as skipped and
+  names each one in the Event Log, and the Library's format warning says they aren't exported. A
+  mirror export of a playlist with such tracks still syncs the rest.
+- **Fix:** A library scan no longer fails when an audio file is moved or deleted while the scan
+  runs; that file is left out and the rest is scanned.
 - **Chore:** The essentia analysis engine's node, runner and module paths are handed to the analysis
   process directly instead of being written into the app's environment while it runs, which could
   crash the app in rare cases. A repair whose database write fails and whose staged database then

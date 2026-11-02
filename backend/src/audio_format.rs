@@ -137,9 +137,19 @@ pub fn is_player_extension(ext: &str) -> bool {
     PLAYER_EXTENSIONS.contains(&ext.trim().to_ascii_lowercase().as_str())
 }
 
-/// A file on a USB stick that players can play.
+/// A file on a USB stick that players can play. A macOS AppleDouble sidecar
+/// (`._Track.mp3`) isn't one, whatever its extension.
 pub fn is_player_audio(path: &Path) -> bool {
-    format_ext_of(path).is_some_and(|ext| is_player_extension(&ext))
+    !is_apple_double(path) && format_ext_of(path).is_some_and(|ext| is_player_extension(&ext))
+}
+
+/// A macOS AppleDouble sidecar (`._Track.mp3`): the metadata macOS writes
+/// next to each file it copies to a FAT32/exFAT drive. It holds no audio, yet
+/// carries the audio file's extension.
+pub fn is_apple_double(path: &Path) -> bool {
+    path.file_name()
+        .and_then(|name| name.to_str())
+        .is_some_and(|name| name.trim().starts_with("._"))
 }
 
 /// The lowercase extension a file gets when exported to a USB stick: the
@@ -256,6 +266,7 @@ mod tests {
         assert!(!is_player_audio(Path::new("/Contents/a/b.ogg")));
         assert!(!is_player_audio(Path::new("/Contents/a/b.opus")));
         assert!(!is_player_audio(Path::new("/Contents/a/b.m4p")));
+        assert!(!is_player_audio(Path::new("/Contents/a/._b.mp3")));
         assert!(is_format_folder_name(" FLAC "));
         assert!(!is_format_folder_name("mp4"));
     }

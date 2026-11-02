@@ -165,9 +165,11 @@ fn format_verdict(
             }
             _ => FormatCompat::ok(),
         },
-        AudioFormat::M4p | AudioFormat::Ogg | AudioFormat::Opus | AudioFormat::Alac => {
-            FormatCompat::warn("Unlisted format")
+        // Export leaves these off the USB (`split_off_unplayable_tracks`).
+        AudioFormat::M4p | AudioFormat::Ogg | AudioFormat::Opus => {
+            FormatCompat::warn("Players don't play this format. Not exported to USB.")
         }
+        AudioFormat::Alac => FormatCompat::warn("Unlisted format"),
     }
 }
 

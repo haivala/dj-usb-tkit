@@ -17,7 +17,7 @@ use lofty::tag::{ItemKey, Tag};
 use walkdir::WalkDir;
 
 use crate::audio_format::{
-    AudioFormat, format_ext_of, is_format_folder_name, is_library_extension,
+    AudioFormat, format_ext_of, is_apple_double, is_format_folder_name, is_library_extension,
 };
 use crate::error::{BackendError, BackendResult};
 use crate::wav_format::{WavFormatIssue, detect_wav_format_issue};
@@ -224,7 +224,13 @@ fn walk_audio_files<T>(
                 continue;
             }
 
-            tracks.push(scan(path)?);
+            match scan(path) {
+                Ok(track) => tracks.push(track),
+                // Moved or deleted since the walk listed it: not a track
+                // any more, and no reason to fail the whole scan.
+                Err(BackendError::Io(err)) if err.kind() == std::io::ErrorKind::NotFound => {}
+                Err(err) => return Err(err),
+            }
         }
     }
 
@@ -341,16 +347,7 @@ fn infer_artist_title(path: &Path) -> (String, String) {
 }
 
 fn is_audio_path(path: &Path) -> bool {
-    let file_name = path
-        .file_name()
-        .and_then(|x| x.to_str())
-        .map(str::trim)
-        .unwrap_or_default();
-    if file_name.starts_with("._") {
-        return false;
-    }
-
-    format_ext_of(path).is_some_and(|ext| is_library_extension(&ext))
+    !is_apple_double(path) && format_ext_of(path).is_some_and(|ext| is_library_extension(&ext))
 }
 
 /// A file the library takes: a supported audio extension and not an MP4 video.
@@ -953,6 +950,23 @@ mod tests {
 
         let result = scan_audio_files(&[dir.path().to_string_lossy().to_string()]).unwrap();
         assert!(result.is_empty());
+    }
+
+    #[test]
+    fn walk_skips_a_file_gone_since_the_listing() {
+        // A file moved away mid-scan drops out; the rest of the scan stands.
+        let dir = tempdir().unwrap();
+        fs::write(dir.path().join("a.mp3"), b"x").unwrap();
+        fs::write(dir.path().join("b.mp3"), b"x").unwrap();
+        let roots = [dir.path().to_string_lossy().to_string()];
+        let found = walk_audio_files(&roots, |path| {
+            if path.ends_with("a.mp3") {
+                fs::remove_file(path).unwrap();
+            }
+            read_file_metadata(path).map(|_| path.to_path_buf())
+        })
+        .unwrap();
+        assert_eq!(found, vec![dir.path().join("b.mp3")]);
     }
 
     #[test]

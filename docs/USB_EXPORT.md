@@ -28,6 +28,12 @@ also rebuilds the Engine DJ library on the USB, so Denon and Numark players
 use the app's beat grids and waveforms instead of analyzing each track again.
 See [ENGINE_DJ.md](ENGINE_DJ.md).
 
+Tracks in a format the players don't play (`.ogg`, `.opus`, `.m4p`) stay in the library and its
+playlists but are left off the USB: each export lists them as skipped, with a warning naming the
+file, and the Library shows them with a "Players don't play this format" warning. A mirror export
+still prunes; such a track, if an older export copied it to the stick, drops out of the USB
+playlist. An export where every track is in such a format is refused.
+
 Export is intentionally tied to a quick prep loop:
 
 - users can prepare playlists first

@@ -947,7 +947,11 @@ pub(crate) fn load_existing_analysis_paths_by_pdb_track_path(
     out
 }
 
-pub(crate) fn collect_contents_audio_files(usb_root: &Path) -> Vec<String> {
+/// Every file under `Contents/`, USB-relative (`/Contents/...`). Not filtered
+/// by type: an indexed path is found whatever its format (an exported `.ogg`
+/// is on the stick, not missing), and `scan_audio_presence` decides which
+/// unindexed files are audio.
+pub(crate) fn collect_contents_files(usb_root: &Path) -> Vec<String> {
     let contents_root = usb_root.join(USB_CONTENTS_DIR);
     if !contents_root.exists() {
         return Vec::new();
@@ -956,9 +960,6 @@ pub(crate) fn collect_contents_audio_files(usb_root: &Path) -> Vec<String> {
     for entry in WalkDir::new(&contents_root) {
         let Ok(entry) = entry else { continue };
         if !entry.file_type().is_file() {
-            continue;
-        }
-        if !crate::audio_format::is_player_audio(entry.path()) {
             continue;
         }
         let rel = entry

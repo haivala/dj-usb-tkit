@@ -29,8 +29,7 @@ use super::export_helpers::{load_table_columns, table_exists};
 use super::export_prune_stale_setting;
 use super::usb_helpers::is_named_history_playlist;
 use super::usb_utils::{
-    canonicalize_playlist_name, collect_contents_audio_files, repair_utf8_mojibake,
-    resolve_usb_root,
+    canonicalize_playlist_name, collect_contents_files, repair_utf8_mojibake, resolve_usb_root,
 };
 use super::usb_vendor_compat::vendor_edb_path;
 

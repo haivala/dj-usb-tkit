@@ -68,17 +68,20 @@ pub(crate) fn scan_audio_presence(
         indexed_count: indexed.len(),
         ..AudioPresence::default()
     };
-    for file in collect_contents_audio_files(usb_root) {
+    for file in collect_contents_files(usb_root) {
         let key = audio_path_key(&file);
         if key.is_empty() {
             continue;
         }
         if indexed.contains_key(&key) {
+            // Found whatever its format: the databases point at it.
             out.indexed_on_usb.push(file);
-        } else {
+            on_usb_keys.insert(key);
+        } else if crate::audio_format::is_player_audio(Path::new(&file)) {
+            // Only what players would play is offered for indexing -- not an
+            // `.ogg`, an AppleDouble `._` sidecar, or a stray `.DS_Store`.
             out.unindexed.push(file);
         }
-        on_usb_keys.insert(key);
     }
     out.indexed_on_usb.sort();
     out.unindexed.sort();

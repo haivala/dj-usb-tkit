@@ -1039,6 +1039,45 @@ fn audio_presence_counts_edb_content_paths_as_indexed() {
 }
 
 #[test]
+fn audio_presence_finds_indexed_files_in_formats_players_dont_read() {
+    // The library takes `.ogg`/`.opus`/`.m4p` and export copies them as they
+    // are. Such a track is on the USB, not missing: calling it missing would
+    // offer to remove a track whose file is right there.
+    let root = tempdir().expect("tempdir");
+    let files = [
+        "/Contents/Artist/Track.ogg",
+        "/Contents/Artist/Track.opus",
+        "/Contents/Artist/Track.m4p",
+    ];
+    let presence = audio_presence_for(root.path(), &files, &files, &[]);
+    assert!(presence.missing.is_empty(), "{presence:?}");
+    assert!(presence.unindexed.is_empty(), "{presence:?}");
+    assert_eq!(presence.indexed_on_usb.len(), 3);
+}
+
+#[test]
+fn audio_presence_leaves_unindexed_non_player_files_out() {
+    // Only files players read are offered for indexing: no `.ogg`, no
+    // macOS AppleDouble `._` sidecar (which holds no audio), no stray file.
+    let root = tempdir().expect("tempdir");
+    let presence = audio_presence_for(
+        root.path(),
+        &[
+            "/Contents/Artist/Track.ogg",
+            "/Contents/Artist/._Track.mp3",
+            "/Contents/Artist/.DS_Store",
+            "/Contents/Artist/New.mp3",
+        ],
+        &[],
+        &[],
+    );
+    assert_eq!(
+        presence.unindexed,
+        vec!["/Contents/Artist/New.mp3".to_string()]
+    );
+}
+
+#[test]
 fn audio_presence_reports_missing_from_either_database_once() {
     let root = tempdir().expect("tempdir");
     let presence = audio_presence_for(

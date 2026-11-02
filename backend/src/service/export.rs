@@ -21,7 +21,9 @@ use crate::models::{
 type UsbTrackIdentity = (Option<u32>, Option<u32>, Option<u32>, Option<String>);
 
 use super::track_matching::{ContentFingerprint, content_fingerprint_key};
-use crate::audio_format::{AudioFormat, same_format_extension};
+use crate::audio_format::{
+    AudioFormat, export_extension, is_player_extension, same_format_extension,
+};
 
 use super::export_helpers::{
     ExportManifest, ExportManifestTrack, ExportPlaylistData, ExportTrackData, FileCloser,
@@ -504,6 +506,18 @@ fn track_on_usb(
     })
 }
 
+/// Takes the tracks players don't play (`.ogg`, `.opus`, `.m4p`) out of
+/// `playlist` and returns them: export leaves them off the USB rather than
+/// put a track in the databases that won't play. Unlike a missing source file
+/// this skip is deliberate, so it doesn't hold back a mirror export's prune.
+fn split_off_unplayable_tracks(playlist: &mut ExportPlaylistData) -> Vec<ExportTrackData> {
+    let (playable, unplayable) = std::mem::take(&mut playlist.tracks)
+        .into_iter()
+        .partition(|track| is_player_extension(&export_extension(Path::new(&track.file_path))));
+    playlist.tracks = playable;
+    unplayable
+}
+
 /// The playlist heading's export estimate, from recorded data only: each
 /// track's audio size as the DB recorded it at scan time, and whether it is
 /// already on the drive (`track_on_usb`). Touches no file, so neither the
@@ -828,7 +842,8 @@ impl BackendService {
         playlist_id: &str,
         usb_root: &Path,
     ) -> BackendResult<PlaylistExportSpace> {
-        let playlist = self.load_playlist_for_export(playlist_id)?;
+        let mut playlist = self.load_playlist_for_export(playlist_id)?;
+        split_off_unplayable_tracks(&mut playlist);
         let on_usb = self.usb_track_sizes(usb_root)?;
         let estimate = estimate_playlist_copy(usb_root, &playlist, &on_usb);
         let available_bytes = usb_mount_available_bytes(usb_root);
@@ -935,10 +950,17 @@ impl BackendService {
                 n == "1" || n == "true" || n == "yes" || n == "on"
             })
             .unwrap_or(false);
-        let playlist = self.load_playlist_for_export(&playlist_id)?;
+        let mut playlist = self.load_playlist_for_export(&playlist_id)?;
         if playlist.tracks.is_empty() {
             return Err(BackendError::Validation(
                 "playlist has no tracks to export".to_string(),
+            ));
+        }
+        let unplayable_tracks = split_off_unplayable_tracks(&mut playlist);
+        if playlist.tracks.is_empty() {
+            return Err(BackendError::Validation(
+                "none of the playlist's tracks are in a format the players play (MP3, AAC, WAV, AIFF, FLAC, ALAC)"
+                    .to_string(),
             ));
         }
 
@@ -968,6 +990,17 @@ impl BackendService {
         on_progress(0, total_steps, "USB: Preparing export");
 
         let mut warnings = Vec::<WarningEntry>::new();
+        for track in &unplayable_tracks {
+            warnings.push(logging::log(
+                Level::Warn,
+                "export",
+                "export.unplayable-format",
+                format!(
+                    "not exported, players don't play its format: {}",
+                    track.file_path
+                ),
+            ));
+        }
         ensure_playlist_tracks_analysis_ready(&usb_root, &playlist)?;
         if !export_dry_run {
             // A USB without a PDB yet holds no tracks.
@@ -1697,7 +1730,7 @@ impl BackendService {
             playlist_name: playlist.name,
             usb_root: usb_root.to_string_lossy().to_string(),
             exported_tracks,
-            skipped_tracks,
+            skipped_tracks: skipped_tracks + unplayable_tracks.len(),
             exported_artworks,
             exported_analysis_files,
             warning_count: logging::count_warnings(&warnings),
@@ -1786,6 +1819,9 @@ impl BackendService {
         Ok(warnings)
     }
 
+    /// The playlist's tracks in position order, every format included; export
+    /// and its space estimate then leave out what players don't play
+    /// (`split_off_unplayable_tracks`).
     fn load_playlist_for_export(&self, playlist_id: &str) -> BackendResult<ExportPlaylistData> {
         let conn = self.db.connect()?;
         let playlist = conn

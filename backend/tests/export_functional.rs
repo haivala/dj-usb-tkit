@@ -1952,6 +1952,108 @@ fn export_to_usb_skips_missing_source_files_and_reports_warning() {
 }
 
 #[test]
+fn export_to_usb_leaves_formats_players_dont_play_off_the_usb() {
+    // `.ogg` is in the library but no player plays it: the mirror export
+    // copies the MP3 only, says why the OGG was left out, and isn't held back
+    // the way a missing source file holds back its prune.
+    let root = tempdir().expect("temp root");
+    let media = root.path().join("media");
+    let usb = root.path().join("usb");
+    fs::create_dir_all(&media).expect("create media dir");
+    fs::create_dir_all(&usb).expect("create usb dir");
+    fs::write(media.join("Artist 1 - Plays.mp3"), b"audio-mp3").expect("write mp3");
+    fs::write(media.join("Artist 2 - Doesnt.ogg"), b"audio-ogg").expect("write ogg");
+
+    let data_dir = root.path().join("data");
+    let backend = BackendCommands::new(&data_dir).expect("create backend");
+    let initialized = backend.initialize_usb(InitializeUsbRequest {
+        usb_root: usb.to_string_lossy().to_string(),
+    });
+    assert!(initialized.ok, "initialize usb failed: {initialized:?}");
+    let scan = backend.scan_library(ScanLibraryRequest {
+        source_roots: vec![media.to_string_lossy().to_string()],
+        incremental: true,
+    });
+    assert!(scan.ok, "scan failed: {scan:?}");
+    library_sources::show_only(
+        &backend,
+        vec![media.to_string_lossy().to_string()],
+        false,
+        false,
+    );
+    let tracks = backend
+        .browse_source_files(BrowseSourceFilesRequest {
+            query: String::new(),
+            limit: 20,
+            cursor: None,
+            ..Default::default()
+        })
+        .data
+        .expect("search data")
+        .items;
+    assert_eq!(tracks.len(), 2, "the library takes both files");
+    let all_ids = tracks.iter().map(|t| t.id.clone()).collect::<Vec<_>>();
+    let ogg_id = tracks
+        .iter()
+        .find(|t| t.file_path.ends_with(".ogg"))
+        .expect("ogg track")
+        .id
+        .clone();
+
+    let export = |track_ids: Vec<String>, name: &str| {
+        let created = backend.create_playlist(CreatePlaylistRequest {
+            name: name.to_string(),
+        });
+        let playlist_id = created.data.expect("playlist data").playlist_id;
+        let add = backend.add_library_selection_to_playlist(AddLibrarySelectionToPlaylistRequest {
+            playlist_id: playlist_id.clone(),
+            track_ids: track_ids.clone(),
+            ..Default::default()
+        });
+        assert!(add.ok, "add failed: {add:?}");
+        seed_tracks_as_analyzed(&data_dir, &track_ids);
+        backend.export_to_usb(ExportToUsbRequest {
+            usb_root: Some(usb.to_string_lossy().to_string()),
+            playlist_id,
+            options: Some(ExportToUsbOptions {
+                include_artwork: false,
+                include_analysis: false,
+                prune_stale: true,
+                ..Default::default()
+            }),
+        })
+    };
+
+    let mixed = export(all_ids, "Mixed Formats");
+    assert!(mixed.ok, "mirror export failed: {mixed:?}");
+    let data = mixed.data.expect("export data");
+    assert_eq!(data.exported_tracks, 1);
+    assert_eq!(data.skipped_tracks, 1);
+    assert!(
+        data.warnings
+            .iter()
+            .any(|w| w.level == "warn" && w.code == "export.unplayable-format"),
+        "expected the unplayable-format warning, got {:?}",
+        data.warnings
+    );
+    let paths = usb_playlist_track_paths(&usb, "Mixed Formats");
+    assert_eq!(paths.len(), 1, "{paths:?}");
+    assert!(paths[0].ends_with(".mp3"), "{paths:?}");
+    let ogg_on_usb = walkdir::WalkDir::new(usb.join("Contents"))
+        .into_iter()
+        .filter_map(Result::ok)
+        .any(|e| e.path().extension().is_some_and(|ext| ext == "ogg"));
+    assert!(!ogg_on_usb, "the OGG must not be copied to the USB");
+
+    let only_ogg = export(vec![ogg_id], "Only Ogg");
+    assert!(!only_ogg.ok, "nothing playable to export: {only_ogg:?}");
+    assert!(matches!(
+        only_ogg.error.expect("error").code,
+        ErrorCode::ValidationError
+    ));
+}
+
+#[test]
 fn export_to_usb_blocks_mirror_prune_when_source_files_are_missing() {
     let root = tempdir().expect("temp root");
     let media = root.path().join("media");
