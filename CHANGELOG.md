@@ -60,7 +60,8 @@
   rekordbox does. A track exported before and edited since still keeps its own file.
 - **Fix:** Exporting a track that is on the USB in the rekordbox eDB but not in the PDB, under a
   file name the app wouldn't pick, now reuses that file instead of copying the track a second
-  time.
+  time. The playlist's export estimate and the export's free-space check count such a track as
+  already on the USB too.
 - **Fix:** A library scan no longer fails when an audio file is moved or deleted while the scan
   runs; that file is left out and the rest is scanned.
 - **Chore:** The essentia analysis engine's node, runner and module paths are handed to the analysis

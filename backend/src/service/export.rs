@@ -17,10 +17,8 @@ use crate::models::{
     WarningEntry,
 };
 
-/// (master_db_id, master_content_id, content_link, artwork_path) for a USB track.
-type UsbTrackIdentity = (Option<u32>, Option<u32>, Option<u32>, Option<String>);
-
 use super::track_matching::{ContentFingerprint, content_fingerprint_key};
+use super::usb_track_facts::{UsbTrackFact, UsbTrackFacts, UsbTrackIdentity};
 use crate::audio_format::{
     AudioFormat, export_extension, is_player_extension, same_format_extension,
 };
@@ -67,138 +65,6 @@ fn existing_usb_relative_file(usb_root: &Path, path: &Path) -> Option<String> {
     if abs.is_file() { Some(rel) } else { None }
 }
 
-fn record_existing_usb_path_by_fingerprint(
-    lookup: &mut HashMap<ContentFingerprint, Option<String>>,
-    fingerprint: ContentFingerprint,
-    path: &str,
-) {
-    let path_key = canonicalize_track_path_identity(path);
-    lookup
-        .entry(fingerprint)
-        .and_modify(|existing| {
-            if existing.as_deref().map(canonicalize_track_path_identity) != Some(path_key.clone()) {
-                *existing = None;
-            }
-        })
-        .or_insert_with(|| Some(path.to_string()));
-}
-
-/// A track row already on the USB, as `occupied_usb_media_paths` records it
-/// per path: the file size and content fingerprint it was written with.
-type UsbOccupant = (Option<u32>, Option<ContentFingerprint>);
-
-/// Paths the USB PDB's track rows point at, keyed by
-/// `canonicalize_track_path_identity` (case-insensitive, as FAT32/exFAT are),
-/// so an export never writes another track's audio over one of them.
-fn occupied_usb_media_paths(parsed: &crate::pdb_reader::ParsedPdb) -> HashMap<String, UsbOccupant> {
-    parsed
-        .tracks
-        .iter()
-        .map(|track| {
-            let artist = parsed
-                .artists
-                .get(&track.artist_id)
-                .map(String::as_str)
-                .unwrap_or("");
-            let fingerprint =
-                content_fingerprint_key(track.file_size_bytes.map(i64::from), &track.title, artist);
-            (
-                canonicalize_track_path_identity(&track.track_file_path),
-                (track.file_size_bytes, fingerprint),
-            )
-        })
-        .collect()
-}
-
-/// One eDB `content` row's path with what tells its track apart: the file
-/// size and the content fingerprint (`content_fingerprint_key`), each `None`
-/// where the row doesn't carry it.
-struct EdbTrackFacts {
-    path: String,
-    size: Option<i64>,
-    fingerprint: Option<ContentFingerprint>,
-}
-
-/// The eDB's `content` rows as `EdbTrackFacts`, for the lookups the export
-/// otherwise builds from the PDB alone: a track can sit in one database only.
-/// Empty when the schema has no `path`/`fileSize`/`title` columns.
-fn read_edb_track_facts(conn: &rusqlite::Connection) -> Vec<EdbTrackFacts> {
-    let Ok(columns) = crate::edb::load_table_columns(conn, "content") else {
-        return Vec::new();
-    };
-    let has = |name: &str| columns.iter().any(|column| column == name);
-    if !(has("path") && has("fileSize") && has("title")) {
-        return Vec::new();
-    }
-    let sql = if has("artist_id_artist") && crate::edb::table_exists(conn, "artist") {
-        "SELECT c.path, CAST(c.fileSize AS INTEGER), c.title, ar.name FROM content c \
-         LEFT JOIN artist ar ON ar.artist_id = c.artist_id_artist"
-    } else {
-        "SELECT c.path, CAST(c.fileSize AS INTEGER), c.title, NULL FROM content c"
-    };
-    let Ok(mut stmt) = conn.prepare(sql) else {
-        return Vec::new();
-    };
-    let Ok(rows) = stmt.query_map([], |row| {
-        Ok((
-            row.get::<_, Option<String>>(0)?,
-            row.get::<_, Option<i64>>(1)?,
-            row.get::<_, Option<String>>(2)?,
-            row.get::<_, Option<String>>(3)?,
-        ))
-    }) else {
-        return Vec::new();
-    };
-    rows.flatten()
-        .filter_map(|(path, size, title, artist)| {
-            let path = path.filter(|path| !path.trim().is_empty())?;
-            Some(EdbTrackFacts {
-                fingerprint: content_fingerprint_key(
-                    size,
-                    title.as_deref().unwrap_or(""),
-                    artist.as_deref().unwrap_or(""),
-                ),
-                size,
-                path,
-            })
-        })
-        .collect()
-}
-
-/// Adds the eDB's `content` paths to `occupied` (from `occupied_usb_media_paths`),
-/// so a name is taken when either database holds it. Every path counts (either
-/// eDB schema, `collect_edb_audio_paths`); its size and fingerprint come from
-/// `edb_facts` where the row has them, else stay unknown, which
-/// `resolve_collision_free_media_target` settles by the file on the USB. What
-/// the PDB already knows about a path is kept.
-fn add_edb_occupied_media_paths(
-    conn: &rusqlite::Connection,
-    edb_facts: &[EdbTrackFacts],
-    occupied: &mut HashMap<String, UsbOccupant>,
-) {
-    // Its schema warnings are the diagnostics' to report, not the export's.
-    let mut ignored_warnings = Vec::new();
-    for path in crate::service::diagnostics::collect_edb_audio_paths(conn, &mut ignored_warnings) {
-        occupied
-            .entry(canonicalize_track_path_identity(&path))
-            .or_insert((None, None));
-    }
-    for facts in edb_facts {
-        let entry = occupied
-            .entry(canonicalize_track_path_identity(&facts.path))
-            .or_insert((None, None));
-        if entry.0.is_none() {
-            entry.0 = facts
-                .size
-                .and_then(|size| u32::try_from(size).ok())
-                .filter(|&size| size > 0);
-        }
-        if entry.1.is_none() {
-            entry.1.clone_from(&facts.fingerprint);
-        }
-    }
-}
-
 /// Resolves the on-disk media target path for one track, disambiguating it
 /// from any *different* track that holds the same truncated name (see
 /// `CONTENT_FILENAME_MAX_LEN` / `limit_contents_file_name_with_suffix` — the
@@ -209,9 +75,9 @@ fn add_edb_occupied_media_paths(
 ///   content fingerprint (`None` when one couldn't be computed -- tracked
 ///   regardless, so collision *detection* never depends on it). This call
 ///   inserts its own result before returning.
-/// - `occupied`: a track row already on the USB in either database, from an
-///   earlier export or another playlist (`occupied_usb_media_paths`,
-///   `add_edb_occupied_media_paths`). It is this same track when
+/// - `occupied`: a track already on the USB in either database, from an
+///   earlier export or another playlist (`UsbTrackFacts::by_path`). It is
+///   this same track when
 ///   its file size or fingerprint matches -- the size alone carries a title
 ///   edited since, the fingerprint a file re-tagged since -- and then the
 ///   name is reused and the file updated in place.
@@ -226,7 +92,7 @@ fn add_edb_occupied_media_paths(
 #[allow(clippy::too_many_arguments)]
 fn resolve_collision_free_media_target(
     claimed: &mut HashMap<PathBuf, Option<ContentFingerprint>>,
-    occupied: &HashMap<String, UsbOccupant>,
+    occupied: &HashMap<String, UsbTrackFact>,
     media_root: &Path,
     source: &Path,
     artist: &str,
@@ -250,7 +116,8 @@ fn resolve_collision_free_media_target(
             .get(&canonicalize_track_path_identity(
                 &candidate.to_string_lossy(),
             ))
-            .is_some_and(|(occupant_size, occupant_fingerprint)| {
+            .is_some_and(|occupant| {
+                let (occupant_size, occupant_fingerprint) = (&occupant.size, &occupant.fingerprint);
                 if occupant_size.is_none() && occupant_fingerprint.is_none() {
                     // The row doesn't say whose it is: the file decides. No
                     // file means no audio to lose; one of this track's size is
@@ -1164,83 +1031,16 @@ impl BackendService {
                 .entry(path_key)
                 .or_insert(analysis_path);
         }
-        // Build identity lookup from existing USB PDB: identity fields + artwork path per
-        // track, plus a coarse content-fingerprint lookup (file size + normalized
-        // title/artist) used as a fallback when a track's source file isn't itself
-        // already inside this USB's Contents tree, but the same content already is —
-        // under a path this app didn't write. See `content_fingerprint_key`.
-        let mut existing_usb_identity_by_path = HashMap::<String, UsbTrackIdentity>::new();
-        let mut existing_usb_path_by_fingerprint =
-            HashMap::<ContentFingerprint, Option<String>>::new();
-        // masterContentIds more than one USB row carries: copied from another
-        // track by an older export, so not this track's to keep.
-        let mut shared_master_content_ids = HashSet::<u32>::new();
-        let mut occupied_media_paths = HashMap::<String, UsbOccupant>::new();
-        if let Ok(parsed) = usb_utils::parse_staged_pdb(&usb_root) {
-            occupied_media_paths = occupied_usb_media_paths(&parsed);
-            let mut seen_master_content_ids = HashSet::<u32>::new();
-            for track in &parsed.tracks {
-                if let Some(mci) = track.master_content_id
-                    && !seen_master_content_ids.insert(mci)
-                {
-                    shared_master_content_ids.insert(mci);
-                }
-                let path_key = canonicalize_track_path_identity(&track.track_file_path);
-                let art = parsed.artworks.get(&track.artwork_id).cloned();
-                existing_usb_identity_by_path.insert(
-                    path_key,
-                    (
-                        track.master_db_id,
-                        track.master_content_id,
-                        track.content_link,
-                        art,
-                    ),
-                );
-                let artist_name = parsed
-                    .artists
-                    .get(&track.artist_id)
-                    .map(String::as_str)
-                    .unwrap_or("");
-                if let Some(fingerprint) = content_fingerprint_key(
-                    track.file_size_bytes.map(i64::from),
-                    &track.title,
-                    artist_name,
-                ) {
-                    // Fingerprints are deliberately coarse. Reuse by fingerprint
-                    // only when it points at exactly one existing USB path; if
-                    // multiple same-size/same-title tracks exist, path reuse
-                    // would collapse distinct manifest rows into one DB track.
-                    record_existing_usb_path_by_fingerprint(
-                        &mut existing_usb_path_by_fingerprint,
-                        fingerprint,
-                        &track.track_file_path,
-                    );
-                }
-            }
-        }
-
-        // A track only the eDB holds is just as much on the USB: its name is
-        // taken, and its file is found by content like a PDB row's. A
-        // fingerprint the PDB already recorded keeps the PDB's path.
-        if let Some(conn) = edb_read_conn.as_ref() {
-            let edb_facts = read_edb_track_facts(conn);
-            add_edb_occupied_media_paths(conn, &edb_facts, &mut occupied_media_paths);
-            let pdb_fingerprints = existing_usb_path_by_fingerprint
-                .keys()
-                .cloned()
-                .collect::<HashSet<_>>();
-            for facts in &edb_facts {
-                if let Some(fingerprint) = &facts.fingerprint
-                    && !pdb_fingerprints.contains(fingerprint)
-                {
-                    record_existing_usb_path_by_fingerprint(
-                        &mut existing_usb_path_by_fingerprint,
-                        fingerprint.clone(),
-                        &facts.path,
-                    );
-                }
-            }
-        }
+        // What both USB databases say about the tracks already on it (see
+        // `UsbTrackFacts`): the names they hold, each row's identity, and a
+        // coarse content-fingerprint lookup (file size + normalized
+        // title/artist) used as a fallback when a track's source file isn't
+        // itself already inside this USB's Contents tree, but the same content
+        // already is -- under a path this app didn't write.
+        let usb_tracks = UsbTrackFacts::read(
+            usb_utils::parse_staged_pdb(&usb_root).ok().as_ref(),
+            edb_read_conn.as_ref(),
+        );
 
         let mut exported_tracks = 0usize;
         let mut skipped_tracks = 0usize;
@@ -1289,7 +1089,7 @@ impl BackendService {
                 content_fingerprint_key(track.file_size_bytes, &track.title, &track.artist);
             let target = resolve_collision_free_media_target(
                 &mut claimed_media_targets,
-                &occupied_media_paths,
+                &usb_tracks.by_path,
                 &media_root,
                 &source,
                 &track.artist,
@@ -1319,9 +1119,7 @@ impl BackendService {
                         &track.title,
                         &track.artist,
                     )?;
-                    let candidate = existing_usb_path_by_fingerprint
-                        .get(&fingerprint)
-                        .and_then(|path| path.as_deref())?;
+                    let candidate = usb_tracks.path_for_fingerprint(&fingerprint)?;
                     if !same_format_extension(&source.to_string_lossy(), candidate) {
                         return None;
                     }
@@ -1352,22 +1150,16 @@ impl BackendService {
             // content fingerprint, else the one at its exported path.
             let existing_identity = this_fingerprint
                 .as_ref()
-                .and_then(|fingerprint| existing_usb_path_by_fingerprint.get(fingerprint))
-                .and_then(|path| path.as_deref())
-                .and_then(|path| {
-                    existing_usb_identity_by_path.get(&canonicalize_track_path_identity(path))
-                })
-                .or_else(|| {
-                    existing_usb_identity_by_path
-                        .get(&canonicalize_track_path_identity(&exported_path))
-                })
+                .and_then(|fingerprint| usb_tracks.path_for_fingerprint(fingerprint))
+                .and_then(|path| usb_tracks.identity_at(path))
+                .or_else(|| usb_tracks.identity_at(&exported_path))
                 .cloned();
             // A masterContentId of this app's that another row carries too is
             // another track's: this one gets its own, and no artwork from that row.
             let existing_identity = match existing_identity {
                 Some((Some(mdb), Some(mci), cl, _))
                     if i64::from(mdb) == app_master_db_id
-                        && shared_master_content_ids.contains(&mci) =>
+                        && usb_tracks.shared_master_content_ids.contains(&mci) =>
                 {
                     let own = Self::ensure_track_master_content_id(&local_conn, &track.id)?;
                     Some((Some(mdb), u32::try_from(own).ok(), cl, None))
@@ -2278,8 +2070,8 @@ mod tests {
         estimate_playlist_copy, existing_usb_relative_if_file, existing_usb_relative_if_present,
         export_space_shortfall, format_bytes, has_required_analysis, has_required_analysis_fields,
         normalize_playlist_name_for_compare, playlist_locks_reorder_on_export,
-        record_existing_usb_path_by_fingerprint, resolve_collision_free_media_target,
-        usb_drive_label, usb_playlist_names_for_export_compare, usb_root_last_segment,
+        resolve_collision_free_media_target, usb_drive_label,
+        usb_playlist_names_for_export_compare, usb_root_last_segment,
         validate_export_manifest_after_prune, validate_export_manifest_before_db_write,
     };
     use crate::error::BackendError;
@@ -2530,40 +2322,6 @@ mod tests {
         );
     }
 
-    #[test]
-    fn existing_usb_fingerprint_lookup_marks_duplicate_fingerprints_ambiguous() {
-        let fingerprint = content_fingerprint_key(Some(1234), "Title", "Artist").unwrap();
-        let mut lookup = HashMap::<ContentFingerprint, Option<String>>::new();
-
-        record_existing_usb_path_by_fingerprint(
-            &mut lookup,
-            fingerprint.clone(),
-            "/Contents/Artist/Title A.mp3",
-        );
-        assert_eq!(
-            lookup.get(&fingerprint).and_then(|path| path.as_deref()),
-            Some("/Contents/Artist/Title A.mp3")
-        );
-
-        record_existing_usb_path_by_fingerprint(
-            &mut lookup,
-            fingerprint.clone(),
-            "/Contents/Artist/Title B.mp3",
-        );
-        assert_eq!(lookup.get(&fingerprint), Some(&None));
-
-        record_existing_usb_path_by_fingerprint(
-            &mut lookup,
-            fingerprint.clone(),
-            "/Contents/Artist/Title A.mp3",
-        );
-        assert_eq!(
-            lookup.get(&fingerprint),
-            Some(&None),
-            "ambiguous fingerprints must stay disabled rather than flipping between paths"
-        );
-    }
-
     // --- resolve_collision_free_media_target ---
 
     #[test]
@@ -2698,21 +2456,29 @@ mod tests {
         let media_root = usb.path().join("Contents");
         let source = PathBuf::from("/music/Song.mp3");
         let key = "/contents/artist/album/song.mp3".to_string();
-        let resolve = |occupant: super::UsbOccupant, size: Option<u32>, title: &str| {
-            let occupied = HashMap::from([(key.clone(), occupant)]);
-            resolve_collision_free_media_target(
-                &mut HashMap::new(),
-                &occupied,
-                &media_root,
-                &source,
-                "Artist",
-                Some("Album"),
-                title,
-                "mp3",
-                size,
-                content_fingerprint_key(size.map(i64::from), title, "Artist"),
-            )
-        };
+        let resolve =
+            |(size_on_usb, fingerprint_on_usb): (Option<u32>, Option<ContentFingerprint>),
+             size: Option<u32>,
+             title: &str| {
+                let occupant = super::UsbTrackFact {
+                    size: size_on_usb,
+                    fingerprint: fingerprint_on_usb,
+                    ..Default::default()
+                };
+                let occupied = HashMap::from([(key.clone(), occupant)]);
+                resolve_collision_free_media_target(
+                    &mut HashMap::new(),
+                    &occupied,
+                    &media_root,
+                    &source,
+                    "Artist",
+                    Some("Album"),
+                    title,
+                    "mp3",
+                    size,
+                    content_fingerprint_key(size.map(i64::from), title, "Artist"),
+                )
+            };
         let own = media_root.join("Artist/Album/Song.mp3");
         let next = media_root.join("Artist/Album/Song-1.mp3");
 

@@ -36,7 +36,7 @@ use super::export_helpers::{
 };
 use super::key_notation::KeyNotation;
 use super::track_list::{duration_totals, selection_duration};
-use super::track_matching::{ContentFingerprint, content_fingerprint_key};
+use super::track_matching::ContentFingerprint;
 use super::usb_display_files::{
     DisplayReadCounts, LibraryDisplayFiles, UsbDisplaySource, library_files_off_usb,
 };
@@ -114,7 +114,7 @@ pub(crate) type UsbPlaylistsCache =
 pub(crate) type UsbHistoriesCache =
     std::sync::Mutex<Option<(UsbParseCacheKey, Arc<crate::models::FetchUsbHistoriesData>)>>;
 
-/// Every track the staged PDB lists.
+/// Every track either staged database lists (`UsbTrackFacts`).
 #[derive(Debug, Default)]
 pub(crate) struct UsbTrackSizes {
     /// By `content_fingerprint_key` (recorded size, title, artist), so a local
@@ -145,10 +145,15 @@ impl UsbTrackSizes {
     }
 }
 /// One-entry cache of `UsbTrackSizes`, keyed by the staged PDB's path and
-/// signature, so the playlist heading's export estimate doesn't re-parse the
-/// PDB on every page load.
-pub(crate) type UsbTrackSizesCache =
-    std::sync::Mutex<Option<(std::path::PathBuf, StagedFileSig, Arc<UsbTrackSizes>)>>;
+/// both staged databases' signatures, so the playlist heading's export
+/// estimate doesn't re-read them on every page load.
+pub(crate) type UsbTrackSizesCache = std::sync::Mutex<
+    Option<(
+        std::path::PathBuf,
+        (StagedFileSig, Option<StagedFileSig>),
+        Arc<UsbTrackSizes>,
+    )>,
+>;
 
 /// Lookup key for a file under the USB root: its root-relative path with `/`
 /// separators, lowercased (FAT32 and exFAT names are case-insensitive).
@@ -1039,13 +1044,17 @@ impl BackendService {
         }
     }
 
-    /// The staged PDB's track files and sizes (see `UsbTrackSizes`). Reads
-    /// only the local staged copy; `stage_pdb` touches the drive only when
-    /// this stick's PDB hasn't been staged and verified yet.
+    /// The staged databases' track files and sizes (see `UsbTrackSizes`).
+    /// Reads only the local staged copies; staging touches the drive only
+    /// when this stick's databases haven't been staged and verified yet.
     pub(crate) fn usb_track_sizes(&self, usb_root: &Path) -> BackendResult<Arc<UsbTrackSizes>> {
         let pdb_path = super::usb_staging::stage_pdb(usb_root)?;
-        let sig = StagedFileSig::of(&pdb_path)
-            .ok_or_else(|| BackendError::NotFound("staged PDB is missing".to_string()))?;
+        let edb_path = super::usb_staging::stage_edb(usb_root).ok();
+        let sig = (
+            StagedFileSig::of(&pdb_path)
+                .ok_or_else(|| BackendError::NotFound("staged PDB is missing".to_string()))?,
+            edb_path.as_deref().and_then(StagedFileSig::of),
+        );
         if let Ok(guard) = self.usb_track_sizes_cache.lock()
             && let Some((path, cached_sig, sizes)) = guard.as_ref()
             && *path == pdb_path
@@ -1054,24 +1063,22 @@ impl BackendService {
             return Ok(Arc::clone(sizes));
         }
         let parsed = parse_pdb(&pdb_path)?;
+        // Its open warnings are the USB view's to report, not the estimate's.
+        let edb = edb_path
+            .as_deref()
+            .and_then(|path| crate::edb::open_edb(path, &mut Vec::new()));
+        let facts = super::usb_track_facts::UsbTrackFacts::read(Some(&parsed), edb.as_ref());
         let mut sizes = UsbTrackSizes::default();
-        for track in &parsed.tracks {
-            let Some(size) = track.file_size_bytes else {
+        for fact in facts.by_path.into_values() {
+            let Some(size) = fact.size else {
                 continue;
             };
-            let artist = parsed
-                .artists
-                .get(&track.artist_id)
-                .map(String::as_str)
-                .unwrap_or("");
-            if let Some(fingerprint) =
-                content_fingerprint_key(Some(i64::from(size)), &track.title, artist)
-            {
+            if let Some(fingerprint) = fact.fingerprint {
                 sizes.by_fingerprint.insert(fingerprint);
             }
             sizes
                 .by_path
-                .insert(usb_track_size_key(&track.track_file_path), u64::from(size));
+                .insert(usb_track_size_key(&fact.path), u64::from(size));
         }
         let sizes = Arc::new(sizes);
         if let Ok(mut guard) = self.usb_track_sizes_cache.lock() {

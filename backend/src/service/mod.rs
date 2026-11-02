@@ -27,6 +27,7 @@ pub(crate) mod usb_display_files;
 pub(crate) mod usb_helpers;
 pub(crate) mod usb_identity;
 pub mod usb_staging;
+mod usb_track_facts;
 pub(crate) mod usb_utils;
 pub mod usb_vendor_compat;
 mod wine_paths;

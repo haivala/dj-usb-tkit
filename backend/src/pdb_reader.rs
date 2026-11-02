@@ -3,7 +3,7 @@ use std::path::Path;
 
 use crate::error::{BackendError, BackendResult};
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Default)]
 pub struct PdbTrackRow {
     pub content_link: Option<u32>,
     pub sample_rate_hz: Option<u32>,

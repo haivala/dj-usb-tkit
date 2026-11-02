@@ -2287,6 +2287,45 @@ fn re_export_reuses_the_file_of_a_track_only_the_edb_holds() {
 }
 
 #[test]
+fn export_space_counts_a_track_only_the_edb_holds_as_on_the_usb() {
+    // The estimate reads both databases: a track the eDB alone lists is
+    // already on the USB, nothing to copy.
+    let root = tempdir().expect("temp root");
+    let media = root.path().join("media");
+    let usb = root.path().join("usb");
+    fs::create_dir_all(&media).expect("create media dir");
+    fs::create_dir_all(&usb).expect("create usb dir");
+    let (backend, playlist_id) =
+        playlist_of_fixture_wavs(root.path(), &media, &usb, &["Edb Artist - Edb Only.wav"]);
+    let pdb_path = usb
+        .join(USB_VENDOR_ROOT_DIR)
+        .join(USB_VENDOR_DB_DIR)
+        .join("export.pdb");
+    let empty_pdb = fs::read(&pdb_path).expect("read initialized PDB");
+    let tracks_to_copy = || {
+        backend
+            .get_playlist_export_space(GetPlaylistExportSpaceRequest {
+                playlist_id: playlist_id.clone(),
+                usb_root: usb.to_string_lossy().to_string(),
+            })
+            .data
+            .expect("export space data")
+            .export_space
+            .expect("export space")
+            .tracks_to_copy
+    };
+    assert_eq!(tracks_to_copy(), 1, "nothing on the USB yet");
+    let exported = backend.export_to_usb(ExportToUsbRequest {
+        usb_root: Some(usb.to_string_lossy().to_string()),
+        playlist_id: playlist_id.clone(),
+        options: None,
+    });
+    assert!(exported.ok, "export failed: {exported:?}");
+    fs::write(&pdb_path, &empty_pdb).expect("restore empty PDB");
+    assert_eq!(tracks_to_copy(), 0, "the eDB holds it");
+}
+
+#[test]
 fn export_to_usb_blocks_mirror_prune_when_source_files_are_missing() {
     let root = tempdir().expect("temp root");
     let media = root.path().join("media");

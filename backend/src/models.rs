@@ -716,8 +716,8 @@ pub struct GetPlaylistExportSpaceData {
 
 /// What exporting a playlist to the connected USB would newly copy, against
 /// the drive's free space. Worked out from recorded data only: audio sizes
-/// from the app DB, what is already on the USB from the locally staged PDB's
-/// track list, and the free space from one filesystem query.
+/// from the app DB, what is already on the USB from the locally staged
+/// databases' track lists, and the free space from one filesystem query.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct PlaylistExportSpace {
