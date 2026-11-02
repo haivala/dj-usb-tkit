@@ -37,7 +37,7 @@
   - **Fix (CRITICAL):** ...
 -->
 
-## Unreleased
+## 0.5.2
 
 **Severity:** critical — see item(s) marked **(CRITICAL)** below.
 
@@ -50,19 +50,19 @@
   its audio file, which offered to remove the track from its playlists although the file was on the
   USB. The macOS `._` files that sit next to each audio file on a stick written from a Mac are no
   longer counted as unindexed audio, which offered to add them to the databases as tracks.
-- **Improvement:** Export leaves `.ogg`, `.opus` and `.m4p` tracks off the USB, since no player
-  plays them. They stay in the library and its playlists; the export counts them as skipped and
-  names each one in the Event Log, and the Library's format warning says they aren't exported. A
-  mirror export of a playlist with such tracks still syncs the rest.
-- **Fix (CRITICAL):** Exporting a track whose file name, cut to the USB's 48-character limit, matches a track
-  already on the USB (in either database) from another playlist or an earlier export no longer copies its audio over
-  that track's file; both playlists played the newer track. The new one gets a `-1` name, as
-  rekordbox does. A track exported before and edited since still keeps its own file.
+- **Fix (CRITICAL):** Exporting a track whose file name, cut to the USB's 48-character limit,
+  matches a track already on the USB (in either database) from another playlist or an earlier
+  export no longer copies its audio over that track's file; both playlists played the newer track.
+  The new one gets a `-1` name, as rekordbox does. A track exported before and edited since still keeps its own file.
 - **Fix:** A track that is on the USB only in the rekordbox eDB, not the PDB, now counts as on the
   USB when exporting: exporting it again reuses its file instead of copying it a second time,
   and the playlist's export estimate and free-space check don't count it as still to copy.
 - **Fix:** A library scan no longer fails when an audio file is moved or deleted while the scan
   runs; that file is left out and the rest is scanned.
+- **Improvement:** Export leaves `.ogg`, `.opus` and `.m4p` tracks off the USB, since no player
+  plays them. They stay in the library and its playlists; the export counts them as skipped and
+  names each one in the Event Log, and the Library's format warning says they aren't exported. A
+  mirror export of a playlist with such tracks still syncs the rest.
 - **Chore:** The essentia analysis engine's node, runner and module paths are handed to the analysis
   process directly instead of being written into the app's environment while it runs, which could
   crash the app in rare cases. A repair whose database write fails and whose staged database then
