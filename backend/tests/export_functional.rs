@@ -2176,6 +2176,116 @@ fn export_truncated_name_twins_in_two_runs(first_in_edb_only: bool) {
     );
 }
 
+/// Exports a one-track playlist, lets `edit_edb` turn its eDB row into one
+/// rekordbox could have written, empties the PDB so only the eDB knows the
+/// track, and exports again. Returns the USB root (kept alive by `root`).
+fn re_export_with_track_in_edb_only(
+    root: &Path,
+    edit_edb: impl FnOnce(&Path, &rusqlite::Connection),
+) -> std::path::PathBuf {
+    let media = root.join("media");
+    let usb = root.join("usb");
+    fs::create_dir_all(&media).expect("create media dir");
+    fs::create_dir_all(&usb).expect("create usb dir");
+    let (backend, playlist_id) =
+        playlist_of_fixture_wavs(root, &media, &usb, &["Edb Artist - Edb Only.wav"]);
+    let db_dir = usb.join(USB_VENDOR_ROOT_DIR).join(USB_VENDOR_DB_DIR);
+    let empty_pdb = fs::read(db_dir.join("export.pdb")).expect("read initialized PDB");
+    let export = || {
+        let exported = backend.export_to_usb(ExportToUsbRequest {
+            usb_root: Some(usb.to_string_lossy().to_string()),
+            playlist_id: playlist_id.clone(),
+            options: None,
+        });
+        assert!(exported.ok, "export failed: {exported:?}");
+    };
+    export();
+    edit_edb(&usb, &open_edb(&db_dir.join("exportLibrary.db")));
+    fs::write(db_dir.join("export.pdb"), &empty_pdb).expect("restore empty PDB");
+    export();
+    usb
+}
+
+fn audio_files_under_contents(usb: &Path) -> Vec<std::path::PathBuf> {
+    WalkDir::new(usb.join("Contents"))
+        .into_iter()
+        .filter_map(Result::ok)
+        .filter(|e| e.path().extension().is_some_and(|ext| ext == "wav"))
+        .map(|e| e.into_path())
+        .collect()
+}
+
+#[test]
+fn re_export_keeps_ids_of_a_track_only_the_edb_holds() {
+    // rekordbox's IDs on the eDB row are the track's; the PDB row the
+    // export writes carries them too, and the eDB keeps them.
+    let root = tempdir().expect("temp root");
+    let usb = re_export_with_track_in_edb_only(root.path(), |_, edb| {
+        edb.execute(
+            "UPDATE content SET masterDbId = 4242, masterContentId = 4343, contentLink = 4444",
+            [],
+        )
+        .expect("set rekordbox ids");
+    });
+    let parsed = parse_pdb(
+        &usb.join(USB_VENDOR_ROOT_DIR)
+            .join(USB_VENDOR_DB_DIR)
+            .join("export.pdb"),
+    )
+    .expect("parse PDB");
+    let ids = parsed
+        .tracks
+        .iter()
+        .map(|t| (t.master_db_id, t.master_content_id))
+        .collect::<Vec<_>>();
+    assert_eq!(ids, vec![(Some(4242), Some(4343))]);
+    let edb = open_edb(
+        &usb.join(USB_VENDOR_ROOT_DIR)
+            .join(USB_VENDOR_DB_DIR)
+            .join("exportLibrary.db"),
+    );
+    let edb_ids = load_query_rows(&edb, "SELECT masterContentId FROM content");
+    assert_eq!(edb_ids, vec![vec!["4343".to_string()]]);
+}
+
+#[test]
+fn re_export_reuses_the_file_of_a_track_only_the_edb_holds() {
+    // The eDB row points at the track's audio under a name this app wouldn't
+    // pick: the export reuses that file instead of copying the track again.
+    let root = tempdir().expect("temp root");
+    let usb = re_export_with_track_in_edb_only(root.path(), |usb, edb| {
+        let files = audio_files_under_contents(usb);
+        let [exported] = files.as_slice() else {
+            panic!("one exported file: {files:?}");
+        };
+        let foreign = usb.join("Contents/Foreign/Elsewhere.wav");
+        fs::create_dir_all(foreign.parent().unwrap()).expect("create foreign dir");
+        fs::rename(exported, &foreign).expect("move file to a foreign name");
+        edb.execute(
+            "UPDATE content SET path = '/Contents/Foreign/Elsewhere.wav'",
+            [],
+        )
+        .expect("point eDB row at the foreign name");
+    });
+    assert_eq!(
+        audio_files_under_contents(&usb),
+        vec![usb.join("Contents/Foreign/Elsewhere.wav")],
+        "no second copy"
+    );
+    let parsed = parse_pdb(
+        &usb.join(USB_VENDOR_ROOT_DIR)
+            .join(USB_VENDOR_DB_DIR)
+            .join("export.pdb"),
+    )
+    .expect("parse PDB");
+    let paths = parsed
+        .tracks
+        .iter()
+        .map(|t| t.track_file_path.clone())
+        .collect::<Vec<_>>();
+    assert_eq!(paths, vec!["/Contents/Foreign/Elsewhere.wav".to_string()]);
+}
+
 #[test]
 fn export_to_usb_blocks_mirror_prune_when_source_files_are_missing() {
     let root = tempdir().expect("temp root");

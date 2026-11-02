@@ -110,39 +110,34 @@ fn occupied_usb_media_paths(parsed: &crate::pdb_reader::ParsedPdb) -> HashMap<St
         .collect()
 }
 
-/// Adds the eDB's `content` paths to `occupied` (from `occupied_usb_media_paths`),
-/// so a name is taken when either database holds it -- a stick can carry a
-/// track in one database only, or no PDB at all. Every path counts (either
-/// eDB schema, `collect_edb_audio_paths`); its size and fingerprint come from
-/// `fileSize`/`title`/artist where the row has them, else stay unknown, which
-/// `resolve_collision_free_media_target` treats as another track's. What the
-/// PDB already knows about a path is kept.
-fn add_edb_occupied_media_paths(
-    conn: &rusqlite::Connection,
-    occupied: &mut HashMap<String, UsbOccupant>,
-) {
-    // Its schema warnings are the diagnostics' to report, not the export's.
-    let mut ignored_warnings = Vec::new();
-    for path in crate::service::diagnostics::collect_edb_audio_paths(conn, &mut ignored_warnings) {
-        occupied
-            .entry(canonicalize_track_path_identity(&path))
-            .or_insert((None, None));
-    }
+/// One eDB `content` row's path with what tells its track apart: the file
+/// size and the content fingerprint (`content_fingerprint_key`), each `None`
+/// where the row doesn't carry it.
+struct EdbTrackFacts {
+    path: String,
+    size: Option<i64>,
+    fingerprint: Option<ContentFingerprint>,
+}
+
+/// The eDB's `content` rows as `EdbTrackFacts`, for the lookups the export
+/// otherwise builds from the PDB alone: a track can sit in one database only.
+/// Empty when the schema has no `path`/`fileSize`/`title` columns.
+fn read_edb_track_facts(conn: &rusqlite::Connection) -> Vec<EdbTrackFacts> {
     let Ok(columns) = crate::edb::load_table_columns(conn, "content") else {
-        return;
+        return Vec::new();
     };
     let has = |name: &str| columns.iter().any(|column| column == name);
     if !(has("path") && has("fileSize") && has("title")) {
-        return;
+        return Vec::new();
     }
-    let sql = if has("artist_id") && crate::edb::table_exists(conn, "artist") {
-        "SELECT c.path, c.fileSize, c.title, a.name FROM content c \
-         LEFT JOIN artist a ON a.artist_id = c.artist_id"
+    let sql = if has("artist_id_artist") && crate::edb::table_exists(conn, "artist") {
+        "SELECT c.path, CAST(c.fileSize AS INTEGER), c.title, ar.name FROM content c \
+         LEFT JOIN artist ar ON ar.artist_id = c.artist_id_artist"
     } else {
-        "SELECT c.path, c.fileSize, c.title, NULL FROM content c"
+        "SELECT c.path, CAST(c.fileSize AS INTEGER), c.title, NULL FROM content c"
     };
     let Ok(mut stmt) = conn.prepare(sql) else {
-        return;
+        return Vec::new();
     };
     let Ok(rows) = stmt.query_map([], |row| {
         Ok((
@@ -152,24 +147,54 @@ fn add_edb_occupied_media_paths(
             row.get::<_, Option<String>>(3)?,
         ))
     }) else {
-        return;
+        return Vec::new();
     };
-    for (path, size, title, artist) in rows.flatten() {
-        let Some(path) = path else { continue };
-        let entry = occupied
+    rows.flatten()
+        .filter_map(|(path, size, title, artist)| {
+            let path = path.filter(|path| !path.trim().is_empty())?;
+            Some(EdbTrackFacts {
+                fingerprint: content_fingerprint_key(
+                    size,
+                    title.as_deref().unwrap_or(""),
+                    artist.as_deref().unwrap_or(""),
+                ),
+                size,
+                path,
+            })
+        })
+        .collect()
+}
+
+/// Adds the eDB's `content` paths to `occupied` (from `occupied_usb_media_paths`),
+/// so a name is taken when either database holds it. Every path counts (either
+/// eDB schema, `collect_edb_audio_paths`); its size and fingerprint come from
+/// `edb_facts` where the row has them, else stay unknown, which
+/// `resolve_collision_free_media_target` settles by the file on the USB. What
+/// the PDB already knows about a path is kept.
+fn add_edb_occupied_media_paths(
+    conn: &rusqlite::Connection,
+    edb_facts: &[EdbTrackFacts],
+    occupied: &mut HashMap<String, UsbOccupant>,
+) {
+    // Its schema warnings are the diagnostics' to report, not the export's.
+    let mut ignored_warnings = Vec::new();
+    for path in crate::service::diagnostics::collect_edb_audio_paths(conn, &mut ignored_warnings) {
+        occupied
             .entry(canonicalize_track_path_identity(&path))
             .or_insert((None, None));
+    }
+    for facts in edb_facts {
+        let entry = occupied
+            .entry(canonicalize_track_path_identity(&facts.path))
+            .or_insert((None, None));
         if entry.0.is_none() {
-            entry.0 = size
+            entry.0 = facts
+                .size
                 .and_then(|size| u32::try_from(size).ok())
                 .filter(|&size| size > 0);
         }
         if entry.1.is_none() {
-            entry.1 = content_fingerprint_key(
-                size,
-                title.as_deref().unwrap_or(""),
-                artist.as_deref().unwrap_or(""),
-            );
+            entry.1.clone_from(&facts.fingerprint);
         }
     }
 }
@@ -1194,8 +1219,27 @@ impl BackendService {
             }
         }
 
+        // A track only the eDB holds is just as much on the USB: its name is
+        // taken, and its file is found by content like a PDB row's. A
+        // fingerprint the PDB already recorded keeps the PDB's path.
         if let Some(conn) = edb_read_conn.as_ref() {
-            add_edb_occupied_media_paths(conn, &mut occupied_media_paths);
+            let edb_facts = read_edb_track_facts(conn);
+            add_edb_occupied_media_paths(conn, &edb_facts, &mut occupied_media_paths);
+            let pdb_fingerprints = existing_usb_path_by_fingerprint
+                .keys()
+                .cloned()
+                .collect::<HashSet<_>>();
+            for facts in &edb_facts {
+                if let Some(fingerprint) = &facts.fingerprint
+                    && !pdb_fingerprints.contains(fingerprint)
+                {
+                    record_existing_usb_path_by_fingerprint(
+                        &mut existing_usb_path_by_fingerprint,
+                        fingerprint.clone(),
+                        &facts.path,
+                    );
+                }
+            }
         }
 
         let mut exported_tracks = 0usize;
