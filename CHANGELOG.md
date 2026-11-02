@@ -37,6 +37,17 @@
   - **Fix (CRITICAL):** ...
 -->
 
+## Unreleased
+
+- **Improvement:** Saving cue, beat grid, key or track detail edits on a USB track that one of
+  the USB's two databases doesn't list is still refused, since it would leave them disagreeing,
+  but the message now says so in plain words and points to Preview Fixes, which repairs it.
+- **Improvement:** USB tracks the rekordbox eDB lists carry the file size it records, so finding
+  their library track no longer reads each file's size from the stick.
+- **Improvement:** Export, mirror export cleanup, repair and USB edits work out a USB track's
+  file size, title and artist match key in one place, so they always agree on which tracks are
+  the same.
+
 ## 0.5.2
 
 **Severity:** critical — see item(s) marked **(CRITICAL)** below.

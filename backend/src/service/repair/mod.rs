@@ -45,7 +45,8 @@ use super::export_helpers::{
     table_exists, usb_relative_path, write_edb_playlists_in_tx,
 };
 use super::track_matching::{
-    ContentFingerprint, content_fingerprint_key, matching_file_name, same_file_bytes,
+    ContentFingerprint, content_fingerprint_key, matching_file_name, pdb_track_fingerprint,
+    same_file_bytes,
 };
 use super::usb_staging;
 use super::usb_utils::{

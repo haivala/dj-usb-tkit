@@ -408,6 +408,7 @@ pub fn try_read_track_index_from_edb_with_conn(
         > 0;
     let length_expr = if has_length_col { "c.length" } else { "NULL" };
     let release_year_expr = content_column_or_null(conn, "releaseYear");
+    let file_size_expr = content_column_or_null(conn, "fileSize");
     let image_fk_col = if conn
         .query_row(
             "SELECT COUNT(1) FROM pragma_table_info('content') WHERE name = 'imageFilePath_id'",
@@ -435,7 +436,8 @@ pub fn try_read_track_index_from_edb_with_conn(
           img.path AS image_path,
           c.analysisDataFilePath,
           {length_expr} AS length_seconds,
-          {release_year_expr} AS release_year
+          {release_year_expr} AS release_year,
+          CAST({file_size_expr} AS INTEGER) AS file_size
         FROM content c
         LEFT JOIN artist ar ON ar.artist_id = c.artist_id_artist
         LEFT JOIN album al ON al.album_id = c.album_id
@@ -468,6 +470,7 @@ pub fn try_read_track_index_from_edb_with_conn(
         let analysis_path: Option<String> = row.get(8)?;
         let length_seconds: Option<i64> = row.get(9)?;
         let release_year: Option<i64> = row.get(10)?;
+        let file_size: Option<i64> = row.get(11)?;
         let resolved_file_path = path
             .as_deref()
             .and_then(|p| resolve_usb_side_path_text(usb_root, p))
@@ -516,7 +519,7 @@ pub fn try_read_track_index_from_edb_with_conn(
                 duration_ms: length_seconds
                     .filter(|v| *v > 0)
                     .map(|v| (v as u64).saturating_mul(1000)),
-                file_size_bytes: None,
+                file_size_bytes: file_size.filter(|size| *size > 0),
             },
         ))
     }) {
@@ -710,6 +713,7 @@ fn try_read_playlists_with_metadata_from_edb_internal_with_conn(
         "NULL"
     };
     let release_year_expr = content_column_or_null(conn, "releaseYear");
+    let file_size_expr = content_column_or_null(conn, "fileSize");
     let image_fk_col = if conn
         .query_row(
             "SELECT COUNT(1) FROM pragma_table_info('content') WHERE name = 'imageFilePath_id'",
@@ -784,7 +788,8 @@ fn try_read_playlists_with_metadata_from_edb_internal_with_conn(
               c.analysisDataFilePath,
               {length_expr} AS length_seconds,
               {track_no_expr} AS track_no,
-              {release_year_expr} AS release_year
+              {release_year_expr} AS release_year,
+              CAST({file_size_expr} AS INTEGER) AS file_size
             FROM playlist_content pc
             JOIN content c ON c.content_id = pc.content_id
             LEFT JOIN artist ar ON ar.artist_id = c.artist_id_artist
@@ -813,6 +818,7 @@ fn try_read_playlists_with_metadata_from_edb_internal_with_conn(
             let length_seconds: Option<i64> = row.get(9)?;
             let track_no: Option<i64> = row.get(10)?;
             let release_year: Option<i64> = row.get(11)?;
+            let file_size: Option<i64> = row.get(12)?;
             let resolved_image_path = if resolve_paths {
                 image_path
                     .as_deref()
@@ -870,7 +876,7 @@ fn try_read_playlists_with_metadata_from_edb_internal_with_conn(
                 duration_ms: length_seconds
                     .filter(|v| *v > 0)
                     .map(|v| (v as u64).saturating_mul(1000)),
-                file_size_bytes: None,
+                file_size_bytes: file_size.filter(|size| *size > 0),
             })
         }) {
             Ok(r) => r,
@@ -2502,7 +2508,8 @@ mod tests {
               path TEXT,
               analysisDataFilePath TEXT,
               bpmx100 INTEGER,
-              length INTEGER
+              length INTEGER,
+              fileSize INTEGER
             );
             INSERT INTO artist (artist_id, name) VALUES (1, 'Artist');
             INSERT INTO album (album_id, name) VALUES (1, 'Album');
@@ -2510,10 +2517,10 @@ mod tests {
             INSERT INTO image (image_id, path) VALUES (1, '/Contents/art.jpg');
             INSERT INTO content (
               content_id, title, artist_id_artist, album_id, key_id, image_id,
-              path, analysisDataFilePath, bpmx100, length
+              path, analysisDataFilePath, bpmx100, length, fileSize
             ) VALUES (
               10, 'Track', 1, 1, 1, 1,
-              '/Contents/track.mp3', '/PIONEER/USBANLZ/P001/T/ANLZ0000.DAT', 12800, 180
+              '/Contents/track.mp3', '/PIONEER/USBANLZ/P001/T/ANLZ0000.DAT', 12800, 180, 4096
             );
             "#,
         )
@@ -2528,6 +2535,7 @@ mod tests {
         assert_eq!(track.key.as_deref(), Some("8A"));
         assert_eq!(track.bpm, Some(128.0));
         assert_eq!(track.duration_ms, Some(180_000));
+        assert_eq!(track.file_size_bytes, Some(4096), "the recorded size");
     }
 
     #[test]
@@ -2559,7 +2567,8 @@ mod tests {
               bpmx100 INTEGER,
               length INTEGER,
               trackNo INTEGER,
-              dateCreated TEXT
+              dateCreated TEXT,
+              fileSize INTEGER
             );
             CREATE TABLE playlist_content (playlist_id INTEGER, content_id INTEGER, sequenceNo INTEGER);
             INSERT INTO artist (artist_id, name) VALUES (1, 'Artist');
@@ -2568,10 +2577,11 @@ mod tests {
             INSERT INTO playlist (playlist_id, name, attribute, sequenceNo) VALUES (2, 'Set A', 0, 1);
             INSERT INTO content (
               content_id, title, artist_id_artist, album_id, key_id,
-              path, analysisDataFilePath, bpmx100, length, trackNo, dateCreated
+              path, analysisDataFilePath, bpmx100, length, trackNo, dateCreated, fileSize
             ) VALUES (
               42, 'Track A', 1, 1, 1,
-              '/Contents/a.mp3', '/PIONEER/USBANLZ/P001/A/ANLZ0000.DAT', 12500, 200, 3, '2024-02-10'
+              '/Contents/a.mp3', '/PIONEER/USBANLZ/P001/A/ANLZ0000.DAT', 12500, 200, 3, '2024-02-10',
+              5120
             );
             INSERT INTO playlist_content (playlist_id, content_id, sequenceNo) VALUES (2, 42, 1);
             "#,
@@ -2588,6 +2598,11 @@ mod tests {
         assert_eq!(set_a.playlist_id, 2);
         assert_eq!(set_a.tracks.len(), 1);
         assert_eq!(set_a.tracks[0].track_number, Some(3));
+        assert_eq!(
+            set_a.tracks[0].file_size_bytes,
+            Some(5120),
+            "the recorded size"
+        );
         assert!(
             std::path::Path::new(&set_a.tracks[0].file_path).starts_with(temp.path()),
             "default reader should resolve USB-relative media paths: {:?}",

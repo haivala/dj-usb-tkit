@@ -1119,19 +1119,10 @@ impl BackendService {
                         .iter()
                         .filter(|t| missing_audio_track_ids.contains(&t.id))
                         .map(|t| {
-                            let artist = parsed
-                                .artists
-                                .get(&t.artist_id)
-                                .map(String::as_str)
-                                .unwrap_or("");
                             (
                                 t.id,
                                 t.track_file_path.clone(),
-                                content_fingerprint_key(
-                                    t.file_size_bytes.map(i64::from),
-                                    &t.title,
-                                    artist,
-                                ),
+                                pdb_track_fingerprint(parsed, t),
                             )
                         })
                         .collect::<Vec<_>>();

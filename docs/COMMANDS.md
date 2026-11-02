@@ -155,7 +155,9 @@ drive selection from being rendered against a newer selected drive.
   `last_exported_*` on every playlist containing the track. The USB must be
   connected: a not-connected root, a missing bundle, or a track absent from the
   USB's eDB or PDB blocks the save with an error before anything is written,
-  rather than a silent partial write. Returns `{ firstBeatMs, cues, bpm,
+  rather than a silent partial write. For a track absent from one database the
+  error points to Preview Fixes, whose strict parity repair brings the two
+  databases back in line (`track_not_in_usb_database` in `service/cues.rs`). Returns `{ firstBeatMs, cues, bpm,
   bpmAnalyzer, key, keySource, anlzUpdated, edbUpdated, localUpdated,
   localTrackId }` (`localUpdated: false` / no `localTrackId` only when no local
   track matched; `localTrackId` is the library track the backend resolved, which
@@ -196,7 +198,7 @@ drive selection from being rendered against a newer selected drive.
   The stick holds only full dates, so a `YYYY` or `YYYY-MM` keeps the date
   already there when it falls inside it, else becomes the first day of that
   year or month. A track missing from either database blocks the save before
-  anything is written. Leaves the ANLZ bundle, BPM, key and cues alone.
+  anything is written, with the same error as `save_usb_track_analysis_edits`. Leaves the ANLZ bundle, BPM, key and cues alone.
   Returns `{ items: [{ usbMediaPathRaw, localTrackId?, year?, releaseDate? }],
   tracks, localTracks }` with the PDB's year and date after the save, the
   edited files' whole stick rows and the library tracks' whole rows. A background `usb_write`

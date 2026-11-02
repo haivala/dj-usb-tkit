@@ -2643,6 +2643,81 @@ fn save_usb_track_analysis_edits_blocks_when_usb_not_connected() {
 }
 
 #[test]
+fn usb_save_of_a_track_missing_from_either_database_points_to_the_repair() {
+    // A save would leave the two databases disagreeing, so it is refused,
+    // and the error says where the fix is. Nothing on the stick changes.
+    let root = tempdir().expect("temp root");
+    let (backend, _data_dir, usb, _track_id, _playlist_id) = export_one_track_with_cues(
+        root.path(),
+        vec![TrackCueInput {
+            position_ms: 2_000,
+            color_id: None,
+            name: None,
+            playback_start: false,
+            memory: false,
+        }],
+    );
+    let usb_track = first_usb_playlist_track(&backend, &usb);
+    let blank_usb = root.path().join("blank_usb");
+    fs::create_dir_all(&blank_usb).expect("create blank usb dir");
+    backend.initialize_usb(InitializeUsbRequest {
+        usb_root: blank_usb.to_string_lossy().to_string(),
+    });
+    let edb_path = |root: &Path| {
+        root.join(USB_VENDOR_ROOT_DIR)
+            .join(USB_VENDOR_DB_DIR)
+            .join("exportLibrary.db")
+    };
+    let save = || {
+        backend.save_usb_track_analysis_edits(SaveUsbTrackAnalysisEditsRequest {
+            usb_root: usb.to_string_lossy().to_string(),
+            usb_analysis_path_raw: usb_track.usb_analysis_path_raw.clone().unwrap(),
+            usb_media_path_raw: usb_track.usb_media_path.clone().unwrap(),
+            bpm: usb_track.bpm,
+            key: usb_track.key.clone(),
+            duration_ms: usb_track.duration_ms,
+            first_beat_ms: None,
+            cues: Some(vec![TrackCueInput {
+                position_ms: 1_000,
+                color_id: None,
+                name: None,
+                playback_start: false,
+                memory: false,
+            }]),
+            local_track_id: usb_track.local_track_id.clone(),
+            title: None,
+            artist: None,
+            album: None,
+        })
+    };
+    let assert_points_to_repair = |which: &str| {
+        let ext = only_exported_ext(&usb);
+        let ext_before = fs::read(&ext).expect("read ext");
+        let blocked = save();
+        assert!(!blocked.ok, "{which}: save must be blocked");
+        let message = blocked.error.expect("error").message;
+        assert!(
+            message.contains("missing from one of the USB's two databases")
+                && message.contains("Preview Fixes"),
+            "{which}: {message}"
+        );
+        assert_eq!(
+            fs::read(&ext).unwrap(),
+            ext_before,
+            "{which}: ANLZ untouched"
+        );
+    };
+
+    let exported_pdb = fs::read(pdb_path(&usb)).expect("read PDB");
+    fs::copy(pdb_path(&blank_usb), pdb_path(&usb)).expect("empty the PDB");
+    assert_points_to_repair("not in the PDB");
+
+    fs::write(pdb_path(&usb), &exported_pdb).expect("restore the PDB");
+    fs::copy(edb_path(&blank_usb), edb_path(&usb)).expect("empty the eDB");
+    assert_points_to_repair("not in the eDB");
+}
+
+#[test]
 fn save_usb_track_analysis_edits_empty_list_clears_device_and_local() {
     let root = tempdir().expect("temp root");
     let (backend, data_dir, usb, track_id, _playlist_id) = export_one_track_with_cues(

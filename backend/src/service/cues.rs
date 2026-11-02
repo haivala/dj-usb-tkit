@@ -42,7 +42,7 @@ use super::export_helpers::{
     PdbLayoutProfile, key_names_match, load_table_columns_tx, write_edb_cues_for_content,
 };
 use super::key_notation::{self, KeyNotation, key_display_fields, key_notation_setting};
-use super::track_matching::content_fingerprint_key;
+use super::track_matching::{content_fingerprint_key, pdb_track_fingerprint};
 use super::usb_utils::{
     read_pwv5_from_anlz, resolve_usb_root, resolve_usb_side_path, resolve_usb_side_path_text,
 };
@@ -224,13 +224,8 @@ fn local_track_id_by_usb_fingerprint(
 ) -> Option<String> {
     let parsed = super::usb_utils::parse_staged_pdb(usb_root).ok()?;
     let row = pdb_track_by_media_path(&parsed, req.usb_media_path_raw).ok()?;
-    let artist = parsed
-        .artists
-        .get(&row.artist_id)
-        .map(String::as_str)
-        .unwrap_or("");
+    let fingerprint = pdb_track_fingerprint(&parsed, row)?;
     let size = row.file_size_bytes.map(i64::from);
-    let fingerprint = content_fingerprint_key(size, &row.title, artist)?;
     let mut stmt = conn
         .prepare("SELECT id, title, artist FROM tracks WHERE file_size_bytes = ?1")
         .ok()?;
@@ -272,9 +267,19 @@ pub(super) fn pdb_track_by_media_path<'a>(
                 .iter()
                 .find(|t| t.track_file_path.eq_ignore_ascii_case(media_path))
         })
-        .ok_or_else(|| {
-            BackendError::NotFound(format!("track not in this USB's export.pdb: {media_path}"))
-        })
+        .ok_or_else(|| track_not_in_usb_database(media_path))
+}
+
+/// The error for editing a USB track that one of the stick's two databases
+/// doesn't list: the edit would leave them disagreeing, so it is refused, and
+/// the user is pointed at the repair that adds the missing rows.
+pub(super) fn track_not_in_usb_database(media_path: &str) -> BackendError {
+    BackendError::NotFound(format!(
+        "this track is missing from one of the USB's two databases, so it can't be edited on \
+         the USB ({}). {}",
+        media_path.trim(),
+        super::diagnostics::PREVIEW_FIXES_HINT
+    ))
 }
 
 /// Stage the device `export.pdb` and build its bytes with the t00 tempo and/or
@@ -1205,13 +1210,8 @@ impl BackendService {
                 "USB library database (exportLibrary.db) not found or unreadable".to_string(),
             )
         })?;
-        let content_id =
-            find_content_id_by_path(&edb_conn, &req.usb_media_path_raw)?.ok_or_else(|| {
-                BackendError::NotFound(format!(
-                    "track not in this USB's library database: {}",
-                    req.usb_media_path_raw
-                ))
-            })?;
+        let content_id = find_content_id_by_path(&edb_conn, &req.usb_media_path_raw)?
+            .ok_or_else(|| track_not_in_usb_database(&req.usb_media_path_raw))?;
 
         // A BPM edit re-grids the ANLZ and sets eDB `bpmx100`; the PDB tempo
         // (what older CDJs read) must follow or the three disagree until the

@@ -8,7 +8,7 @@
 use std::collections::{HashMap, HashSet};
 
 use super::export_helpers::canonicalize_track_path_identity;
-use super::track_matching::{ContentFingerprint, content_fingerprint_key};
+use super::track_matching::{ContentFingerprint, content_fingerprint_key, pdb_track_fingerprint};
 
 /// (master_db_id, master_content_id, content_link, artwork_path) for a USB track.
 pub(crate) type UsbTrackIdentity = (Option<u32>, Option<u32>, Option<u32>, Option<String>);
@@ -79,13 +79,7 @@ impl UsbTrackFacts {
             {
                 self.shared_master_content_ids.insert(mci);
             }
-            let artist = parsed
-                .artists
-                .get(&track.artist_id)
-                .map(String::as_str)
-                .unwrap_or("");
-            let fingerprint =
-                content_fingerprint_key(track.file_size_bytes.map(i64::from), &track.title, artist);
+            let fingerprint = pdb_track_fingerprint(parsed, track);
             if let Some(fingerprint) = &fingerprint {
                 record_existing_usb_path_by_fingerprint(
                     &mut self.path_by_fingerprint,

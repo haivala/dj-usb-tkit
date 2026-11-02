@@ -21,7 +21,9 @@ use crate::models::{
 use crate::pdb_reader::pdb_page_size;
 
 use super::anlz::atomic_write_bytes;
-use super::cues::{UsbLocalTrackHint, mark_track_edited_tx, pdb_track_by_media_path};
+use super::cues::{
+    UsbLocalTrackHint, mark_track_edited_tx, pdb_track_by_media_path, track_not_in_usb_database,
+};
 use super::export_helpers::{PdbLayoutProfile, load_table_columns_tx};
 use super::usb_utils::resolve_usb_root;
 use super::{BackendService, now};
@@ -603,12 +605,8 @@ impl BackendService {
         let content_ids = tracks
             .iter()
             .map(|t| {
-                find_content_id_by_path(&edb_conn, &t.usb_media_path_raw)?.ok_or_else(|| {
-                    BackendError::NotFound(format!(
-                        "track not in this USB's library database: {}",
-                        t.usb_media_path_raw
-                    ))
-                })
+                find_content_id_by_path(&edb_conn, &t.usb_media_path_raw)?
+                    .ok_or_else(|| track_not_in_usb_database(&t.usb_media_path_raw))
             })
             .collect::<BackendResult<Vec<_>>>()?;
         let media_paths: Vec<String> = tracks

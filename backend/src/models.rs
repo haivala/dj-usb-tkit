@@ -1302,8 +1302,8 @@ pub struct UsbTrack {
     pub waveform_preview: Option<Vec<u8>>,
     #[serde(default)]
     pub duration_ms: Option<u64>,
-    /// File size as recorded by Rekordbox at export/analysis time (from the
-    /// PDB), not a fresh stat of the mounted file. Used to gate fingerprint
+    /// File size as recorded at export/analysis time (the PDB row's, or the
+    /// eDB `content.fileSize`), not a fresh stat of the mounted file. Used to gate fingerprint
     /// matching against local tracks so same-length variants (e.g. Clean vs
     /// Explicit edits) don't get silently merged.
     #[serde(default)]

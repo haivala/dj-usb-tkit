@@ -169,7 +169,7 @@ pub(super) struct OverviewFacts {
     pub(super) resolved_playlist_entries: usize,
 }
 
-pub(super) const PREVIEW_FIXES_HINT: &str = "Preview Fixes shows what can be repaired.";
+pub(crate) const PREVIEW_FIXES_HINT: &str = "Preview Fixes shows what can be repaired.";
 
 /// The short "what does this mean for me" summary shown above the technical
 /// sections: one row per thing a DJ cares about, in everyday words. Built from

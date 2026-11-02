@@ -17,7 +17,7 @@ use crate::error::{BackendError, BackendResult};
 use crate::logging::{self, Level};
 use crate::models::WarningEntry;
 use crate::pdb_reader::parse_pdb;
-use crate::service::track_matching::{ContentFingerprint, content_fingerprint_key};
+use crate::service::track_matching::{ContentFingerprint, pdb_track_fingerprint};
 use crate::service::usb_utils::canonicalize_playlist_name;
 
 fn parse_usb_playlist_numeric_id(raw: Option<&str>) -> Option<u32> {
@@ -436,12 +436,7 @@ pub fn remove_orphaned_dropped_tracks_from_dbs(
     let mut orphan_fingerprints = HashSet::<ContentFingerprint>::new();
     let mut orphan_path_keys = HashSet::<String>::new();
     for track in &orphan_tracks {
-        let artist = parsed
-            .artists
-            .get(&track.artist_id)
-            .map(String::as_str)
-            .unwrap_or("");
-        match content_fingerprint_key(track.file_size_bytes.map(i64::from), &track.title, artist) {
+        match pdb_track_fingerprint(&parsed, track) {
             Some(fingerprint) => {
                 orphan_fingerprints.insert(fingerprint);
             }

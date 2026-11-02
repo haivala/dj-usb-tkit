@@ -28,6 +28,20 @@ pub(crate) fn content_fingerprint_key(
     Some((size, title_key, canonicalize_playlist_name(artist)))
 }
 
+/// `content_fingerprint_key` of a PDB track row: its recorded size, title and
+/// artist name.
+pub(crate) fn pdb_track_fingerprint(
+    parsed: &crate::pdb_reader::ParsedPdb,
+    track: &crate::pdb_reader::PdbTrackRow,
+) -> Option<ContentFingerprint> {
+    let artist = parsed
+        .artists
+        .get(&track.artist_id)
+        .map(String::as_str)
+        .unwrap_or("");
+    content_fingerprint_key(track.file_size_bytes.map(i64::from), &track.title, artist)
+}
+
 /// Metadata-only key used to find Library candidates. It does not hash audio.
 pub fn build_track_match_fingerprint(title: &str, artist: &str, album: Option<&str>) -> String {
     let normalized = format!(
