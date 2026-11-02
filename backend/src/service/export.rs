@@ -110,6 +110,70 @@ fn occupied_usb_media_paths(parsed: &crate::pdb_reader::ParsedPdb) -> HashMap<St
         .collect()
 }
 
+/// Adds the eDB's `content` paths to `occupied` (from `occupied_usb_media_paths`),
+/// so a name is taken when either database holds it -- a stick can carry a
+/// track in one database only, or no PDB at all. Every path counts (either
+/// eDB schema, `collect_edb_audio_paths`); its size and fingerprint come from
+/// `fileSize`/`title`/artist where the row has them, else stay unknown, which
+/// `resolve_collision_free_media_target` treats as another track's. What the
+/// PDB already knows about a path is kept.
+fn add_edb_occupied_media_paths(
+    conn: &rusqlite::Connection,
+    occupied: &mut HashMap<String, UsbOccupant>,
+) {
+    // Its schema warnings are the diagnostics' to report, not the export's.
+    let mut ignored_warnings = Vec::new();
+    for path in crate::service::diagnostics::collect_edb_audio_paths(conn, &mut ignored_warnings) {
+        occupied
+            .entry(canonicalize_track_path_identity(&path))
+            .or_insert((None, None));
+    }
+    let Ok(columns) = crate::edb::load_table_columns(conn, "content") else {
+        return;
+    };
+    let has = |name: &str| columns.iter().any(|column| column == name);
+    if !(has("path") && has("fileSize") && has("title")) {
+        return;
+    }
+    let sql = if has("artist_id") && crate::edb::table_exists(conn, "artist") {
+        "SELECT c.path, c.fileSize, c.title, a.name FROM content c \
+         LEFT JOIN artist a ON a.artist_id = c.artist_id"
+    } else {
+        "SELECT c.path, c.fileSize, c.title, NULL FROM content c"
+    };
+    let Ok(mut stmt) = conn.prepare(sql) else {
+        return;
+    };
+    let Ok(rows) = stmt.query_map([], |row| {
+        Ok((
+            row.get::<_, Option<String>>(0)?,
+            row.get::<_, Option<i64>>(1)?,
+            row.get::<_, Option<String>>(2)?,
+            row.get::<_, Option<String>>(3)?,
+        ))
+    }) else {
+        return;
+    };
+    for (path, size, title, artist) in rows.flatten() {
+        let Some(path) = path else { continue };
+        let entry = occupied
+            .entry(canonicalize_track_path_identity(&path))
+            .or_insert((None, None));
+        if entry.0.is_none() {
+            entry.0 = size
+                .and_then(|size| u32::try_from(size).ok())
+                .filter(|&size| size > 0);
+        }
+        if entry.1.is_none() {
+            entry.1 = content_fingerprint_key(
+                size,
+                title.as_deref().unwrap_or(""),
+                artist.as_deref().unwrap_or(""),
+            );
+        }
+    }
+}
+
 /// Resolves the on-disk media target path for one track, disambiguating it
 /// from any *different* track that holds the same truncated name (see
 /// `CONTENT_FILENAME_MAX_LEN` / `limit_contents_file_name_with_suffix` — the
@@ -120,8 +184,9 @@ fn occupied_usb_media_paths(parsed: &crate::pdb_reader::ParsedPdb) -> HashMap<St
 ///   content fingerprint (`None` when one couldn't be computed -- tracked
 ///   regardless, so collision *detection* never depends on it). This call
 ///   inserts its own result before returning.
-/// - `occupied`: a track row already on the USB, from an earlier export or
-///   another playlist (`occupied_usb_media_paths`). It is this same track when
+/// - `occupied`: a track row already on the USB in either database, from an
+///   earlier export or another playlist (`occupied_usb_media_paths`,
+///   `add_edb_occupied_media_paths`). It is this same track when
 ///   its file size or fingerprint matches -- the size alone carries a title
 ///   edited since, the fingerprint a file re-tagged since -- and then the
 ///   name is reused and the file updated in place.
@@ -130,8 +195,9 @@ fn occupied_usb_media_paths(parsed: &crate::pdb_reader::ParsedPdb) -> HashMap<St
 /// new suffix. Anything else -- a genuinely different track, or either side's
 /// identity being unknown -- takes the next free `-N` slot, matching the
 /// disambiguation convention observed in real rekordbox exports hitting the
-/// same collision shape (`Name.wav`, `Nam-1.wav`, `Na-2.wav`, ...). At worst
-/// an unknown identity costs a second copy, never an overwrite.
+/// same collision shape (`Name.wav`, `Nam-1.wav`, `Na-2.wav`, ...). A row with
+/// neither size nor fingerprint is decided by the file at that path: none, or
+/// one of this track's size, is free to use; any other is another track's.
 #[allow(clippy::too_many_arguments)]
 fn resolve_collision_free_media_target(
     claimed: &mut HashMap<PathBuf, Option<ContentFingerprint>>,
@@ -160,6 +226,13 @@ fn resolve_collision_free_media_target(
                 &candidate.to_string_lossy(),
             ))
             .is_some_and(|(occupant_size, occupant_fingerprint)| {
+                if occupant_size.is_none() && occupant_fingerprint.is_none() {
+                    // The row doesn't say whose it is: the file decides. No
+                    // file means no audio to lose; one of this track's size is
+                    // this track's.
+                    return std::fs::metadata(candidate)
+                        .is_ok_and(|file| size.is_none_or(|size| file.len() != u64::from(size)));
+                }
                 let same_size = matches!((occupant_size, size), (Some(a), Some(b)) if *a == b);
                 !same_size && !same_fingerprint(occupant_fingerprint)
             })
@@ -1119,6 +1192,10 @@ impl BackendService {
                     );
                 }
             }
+        }
+
+        if let Some(conn) = edb_read_conn.as_ref() {
+            add_edb_occupied_media_paths(conn, &mut occupied_media_paths);
         }
 
         let mut exported_tracks = 0usize;
@@ -2571,8 +2648,10 @@ mod tests {
     fn resolve_collision_free_media_target_respects_names_already_on_the_usb() {
         // A name a USB row already uses is another track's unless its size or
         // fingerprint matches: then it's this track (title edited since), and
-        // the name is kept. An unknown occupant is never overwritten.
-        let media_root = PathBuf::from("/usb/Contents");
+        // the name is kept. A row that doesn't say whose it is is decided by
+        // the file there: a different-sized one is never overwritten.
+        let usb = tempfile::tempdir().expect("tempdir");
+        let media_root = usb.path().join("Contents");
         let source = PathBuf::from("/music/Song.mp3");
         let key = "/contents/artist/album/song.mp3".to_string();
         let resolve = |occupant: super::UsbOccupant, size: Option<u32>, title: &str| {
@@ -2590,8 +2669,8 @@ mod tests {
                 content_fingerprint_key(size.map(i64::from), title, "Artist"),
             )
         };
-        let own = PathBuf::from("/usb/Contents/Artist/Album/Song.mp3");
-        let next = PathBuf::from("/usb/Contents/Artist/Album/Song-1.mp3");
+        let own = media_root.join("Artist/Album/Song.mp3");
+        let next = media_root.join("Artist/Album/Song-1.mp3");
 
         let other = (
             Some(500),
@@ -2615,7 +2694,24 @@ mod tests {
             "same fingerprint"
         );
 
-        assert_eq!(resolve((None, None), Some(900), "Song"), next);
+        assert_eq!(
+            resolve((None, None), Some(900), "Song"),
+            own,
+            "no file: nothing to lose"
+        );
+        std::fs::create_dir_all(own.parent().unwrap()).unwrap();
+        std::fs::write(&own, vec![0u8; 900]).unwrap();
+        assert_eq!(
+            resolve((None, None), Some(900), "Song"),
+            own,
+            "this track's file"
+        );
+        std::fs::write(&own, vec![0u8; 500]).unwrap();
+        assert_eq!(
+            resolve((None, None), Some(900), "Song"),
+            next,
+            "another file"
+        );
     }
 
     // --- existing_usb_relative_if_present ---

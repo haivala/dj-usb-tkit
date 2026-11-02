@@ -2055,6 +2055,17 @@ fn export_to_usb_leaves_formats_players_dont_play_off_the_usb() {
 
 #[test]
 fn exports_in_separate_runs_keep_truncated_name_twins_apart() {
+    export_truncated_name_twins_in_two_runs(false);
+}
+
+#[test]
+fn exports_keep_truncated_name_twins_apart_when_only_the_edb_holds_the_first() {
+    // The PDB is put back to its empty state after the first export, so only
+    // the eDB knows the first track's file: its name is just as taken.
+    export_truncated_name_twins_in_two_runs(true);
+}
+
+fn export_truncated_name_twins_in_two_runs(first_in_edb_only: bool) {
     // Two tracks whose file names agree for longer than the USB name limit
     // (48 chars) end up at the same truncated name. Exported in one run they
     // get `-1`; exported by two playlists in two runs the second must not
@@ -2076,6 +2087,11 @@ fn exports_in_separate_runs_keep_truncated_name_twins_apart() {
         usb_root: usb.to_string_lossy().to_string(),
     });
     assert!(initialized.ok, "initialize usb failed: {initialized:?}");
+    let pdb_path = usb
+        .join(USB_VENDOR_ROOT_DIR)
+        .join(USB_VENDOR_DB_DIR)
+        .join("export.pdb");
+    let empty_pdb = fs::read(&pdb_path).expect("read initialized PDB");
     let scan = backend.scan_library(ScanLibraryRequest {
         source_roots: vec![media.to_string_lossy().to_string()],
         incremental: true,
@@ -2129,15 +2145,20 @@ fn exports_in_separate_runs_keep_truncated_name_twins_apart() {
             }),
         });
         assert!(exported.ok, "{playlist_name} export failed: {exported:?}");
+        if first_in_edb_only && playlist_name == "First" {
+            fs::write(&pdb_path, &empty_pdb).expect("restore empty PDB");
+        }
     }
 
-    let first = usb_playlist_track_paths(&usb, "First");
-    let second = usb_playlist_track_paths(&usb, "Second");
-    assert_eq!((first.len(), second.len()), (1, 1), "{first:?} {second:?}");
-    assert_ne!(
-        first[0], second[0],
-        "each track has its own file on the USB"
-    );
+    if !first_in_edb_only {
+        let first = usb_playlist_track_paths(&usb, "First");
+        let second = usb_playlist_track_paths(&usb, "Second");
+        assert_eq!((first.len(), second.len()), (1, 1), "{first:?} {second:?}");
+        assert_ne!(
+            first[0], second[0],
+            "each track has its own file on the USB"
+        );
+    }
     let mut audio_on_usb = walkdir::WalkDir::new(usb.join("Contents"))
         .into_iter()
         .filter_map(Result::ok)

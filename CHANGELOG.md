@@ -55,7 +55,7 @@
   names each one in the Event Log, and the Library's format warning says they aren't exported. A
   mirror export of a playlist with such tracks still syncs the rest.
 - **Fix (CRITICAL):** Exporting a track whose file name, cut to the USB's 48-character limit, matches a track
-  already on the USB from another playlist or an earlier export no longer copies its audio over
+  already on the USB (in either database) from another playlist or an earlier export no longer copies its audio over
   that track's file; both playlists played the newer track. The new one gets a `-1` name, as
   rekordbox does. A track exported before and edited since still keeps its own file.
 - **Fix:** A library scan no longer fails when an audio file is moved or deleted while the scan
