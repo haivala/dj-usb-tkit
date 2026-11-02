@@ -83,66 +83,101 @@ fn record_existing_usb_path_by_fingerprint(
         .or_insert_with(|| Some(path.to_string()));
 }
 
-/// Resolves the on-disk media target path for one track within a single
-/// export run, disambiguating it from any *different* track that already
-/// claimed the same truncated name this run (see `CONTENT_FILENAME_MAX_LEN`
-/// / `limit_contents_file_name_with_suffix` — the 48-char CDJ limit truncates the raw
-/// filename with no collision awareness, so tracks sharing a long
-/// artist/album prefix can truncate identically and silently overwrite each
-/// other). `claimed` tracks every target path resolved so far this run,
-/// keyed by path and valued by the claiming track's content fingerprint
-/// (`None` when a fingerprint couldn't be computed, e.g. missing file size —
-/// tracked unconditionally regardless, so collision *detection* never
-/// depends on fingerprint availability, only the same-track *reuse* check
-/// below does). This call inserts its own result before returning.
+/// A track row already on the USB, as `occupied_usb_media_paths` records it
+/// per path: the file size and content fingerprint it was written with.
+type UsbOccupant = (Option<u32>, Option<ContentFingerprint>);
+
+/// Paths the USB PDB's track rows point at, keyed by
+/// `canonicalize_track_path_identity` (case-insensitive, as FAT32/exFAT are),
+/// so an export never writes another track's audio over one of them.
+fn occupied_usb_media_paths(parsed: &crate::pdb_reader::ParsedPdb) -> HashMap<String, UsbOccupant> {
+    parsed
+        .tracks
+        .iter()
+        .map(|track| {
+            let artist = parsed
+                .artists
+                .get(&track.artist_id)
+                .map(String::as_str)
+                .unwrap_or("");
+            let fingerprint =
+                content_fingerprint_key(track.file_size_bytes.map(i64::from), &track.title, artist);
+            (
+                canonicalize_track_path_identity(&track.track_file_path),
+                (track.file_size_bytes, fingerprint),
+            )
+        })
+        .collect()
+}
+
+/// Resolves the on-disk media target path for one track, disambiguating it
+/// from any *different* track that holds the same truncated name (see
+/// `CONTENT_FILENAME_MAX_LEN` / `limit_contents_file_name_with_suffix` — the
+/// 48-char CDJ limit truncates the raw filename with no collision awareness,
+/// so tracks sharing a long prefix can truncate identically and silently
+/// overwrite each other). A name is held by:
+/// - `claimed`: a track earlier in this run, keyed by path and valued by its
+///   content fingerprint (`None` when one couldn't be computed -- tracked
+///   regardless, so collision *detection* never depends on it). This call
+///   inserts its own result before returning.
+/// - `occupied`: a track row already on the USB, from an earlier export or
+///   another playlist (`occupied_usb_media_paths`). It is this same track when
+///   its file size or fingerprint matches -- the size alone carries a title
+///   edited since, the fingerprint a file re-tagged since -- and then the
+///   name is reused and the file updated in place.
 ///
-/// A collision against the *same* track (fingerprint match) reuses the
-/// already-claimed path rather than minting a new suffix -- e.g. a
-/// legitimate re-processing of one track, not two distinct ones. Anything
-/// else -- a genuinely different track, or either side's identity being
-/// unknown -- takes the next free `-N` slot, matching the disambiguation
-/// convention observed in real rekordbox exports hitting the same collision
-/// shape (`Name.wav`, `Nam-1.wav`, `Na-2.wav`, ...).
+/// A collision against the *same* track reuses the path rather than minting a
+/// new suffix. Anything else -- a genuinely different track, or either side's
+/// identity being unknown -- takes the next free `-N` slot, matching the
+/// disambiguation convention observed in real rekordbox exports hitting the
+/// same collision shape (`Name.wav`, `Nam-1.wav`, `Na-2.wav`, ...). At worst
+/// an unknown identity costs a second copy, never an overwrite.
 #[allow(clippy::too_many_arguments)]
 fn resolve_collision_free_media_target(
     claimed: &mut HashMap<PathBuf, Option<ContentFingerprint>>,
+    occupied: &HashMap<String, UsbOccupant>,
     media_root: &Path,
     source: &Path,
     artist: &str,
     album: Option<&str>,
     title: &str,
     extension: &str,
+    size: Option<u32>,
     fingerprint: Option<ContentFingerprint>,
 ) -> PathBuf {
-    let same_track = |claimant: &Option<ContentFingerprint>| -> bool {
-        matches!((claimant, &fingerprint), (Some(a), Some(b)) if a == b)
+    let same_fingerprint = |other: &Option<ContentFingerprint>| -> bool {
+        matches!((other, &fingerprint), (Some(a), Some(b)) if a == b)
+    };
+    let taken = |candidate: &Path| -> bool {
+        if claimed
+            .get(candidate)
+            .is_some_and(|claimant| !same_fingerprint(claimant))
+        {
+            return true;
+        }
+        occupied
+            .get(&canonicalize_track_path_identity(
+                &candidate.to_string_lossy(),
+            ))
+            .is_some_and(|(occupant_size, occupant_fingerprint)| {
+                let same_size = matches!((occupant_size, size), (Some(a), Some(b)) if *a == b);
+                !same_size && !same_fingerprint(occupant_fingerprint)
+            })
     };
     let mut target =
         exported_media_target_path(media_root, source, artist, album, title, extension);
-    if let Some(claimant) = claimed.get(&target)
-        && !same_track(claimant)
-    {
-        let mut ordinal = 1u32;
-        loop {
-            let candidate = exported_media_target_path_with_ordinal(
-                media_root,
-                source,
-                artist,
-                album,
-                title,
-                extension,
-                Some(ordinal),
-            );
-            match claimed.get(&candidate) {
-                Some(claimant) if !same_track(claimant) => {
-                    ordinal += 1;
-                }
-                _ => {
-                    target = candidate;
-                    break;
-                }
-            }
-        }
+    let mut ordinal = 1u32;
+    while taken(&target) {
+        target = exported_media_target_path_with_ordinal(
+            media_root,
+            source,
+            artist,
+            album,
+            title,
+            extension,
+            Some(ordinal),
+        );
+        ordinal += 1;
     }
     claimed.insert(target.clone(), fingerprint);
     target
@@ -1042,7 +1077,9 @@ impl BackendService {
         // masterContentIds more than one USB row carries: copied from another
         // track by an older export, so not this track's to keep.
         let mut shared_master_content_ids = HashSet::<u32>::new();
+        let mut occupied_media_paths = HashMap::<String, UsbOccupant>::new();
         if let Ok(parsed) = usb_utils::parse_staged_pdb(&usb_root) {
+            occupied_media_paths = occupied_usb_media_paths(&parsed);
             let mut seen_master_content_ids = HashSet::<u32>::new();
             for track in &parsed.tracks {
                 if let Some(mci) = track.master_content_id
@@ -1131,12 +1168,16 @@ impl BackendService {
                 content_fingerprint_key(track.file_size_bytes, &track.title, &track.artist);
             let target = resolve_collision_free_media_target(
                 &mut claimed_media_targets,
+                &occupied_media_paths,
                 &media_root,
                 &source,
                 &track.artist,
                 track.album.as_deref(),
                 &track.title,
                 &extension,
+                track
+                    .file_size_bytes
+                    .and_then(|size| u32::try_from(size).ok()),
                 this_fingerprint.clone(),
             );
             let computed_target_relative = usb_relative_path(&usb_root, &target);
@@ -2429,12 +2470,14 @@ mod tests {
             let fingerprint = content_fingerprint_key(Some(1_000_000), title, artist);
             let target = resolve_collision_free_media_target(
                 &mut claimed,
+                &HashMap::new(),
                 &media_root,
                 &source,
                 artist,
                 Some(album),
                 title,
                 "wav",
+                None,
                 fingerprint,
             );
             targets.push(target);
@@ -2458,22 +2501,26 @@ mod tests {
         let fingerprint = content_fingerprint_key(Some(1_000_000), "Track", "Some Artist");
         let first = resolve_collision_free_media_target(
             &mut claimed,
+            &HashMap::new(),
             &media_root,
             &source,
             "Some Artist",
             Some("Some Very Long Album Title"),
             "Track",
             "wav",
+            None,
             fingerprint.clone(),
         );
         let second = resolve_collision_free_media_target(
             &mut claimed,
+            &HashMap::new(),
             &media_root,
             &source,
             "Some Artist",
             Some("Some Very Long Album Title"),
             "Track",
             "wav",
+            None,
             fingerprint,
         );
         assert_eq!(first, second, "same track must reuse its claimed path");
@@ -2487,22 +2534,26 @@ mod tests {
         let mut claimed = HashMap::new();
         let a = resolve_collision_free_media_target(
             &mut claimed,
+            &HashMap::new(),
             &media_root,
             &PathBuf::from("/music/a.mp3"),
             "Artist A",
             Some("Album A"),
             "Song A",
             "mp3",
+            None,
             content_fingerprint_key(Some(1_000), "Song A", "Artist A"),
         );
         let b = resolve_collision_free_media_target(
             &mut claimed,
+            &HashMap::new(),
             &media_root,
             &PathBuf::from("/music/b.mp3"),
             "Artist B",
             Some("Album B"),
             "Song B",
             "mp3",
+            None,
             content_fingerprint_key(Some(1_000), "Song B", "Artist B"),
         );
         assert_ne!(a, b);
@@ -2514,6 +2565,57 @@ mod tests {
             b.to_string_lossy().ends_with("b.mp3") && !b.to_string_lossy().contains('-'),
             "non-colliding track must not get a disambiguating suffix: {b:?}"
         );
+    }
+
+    #[test]
+    fn resolve_collision_free_media_target_respects_names_already_on_the_usb() {
+        // A name a USB row already uses is another track's unless its size or
+        // fingerprint matches: then it's this track (title edited since), and
+        // the name is kept. An unknown occupant is never overwritten.
+        let media_root = PathBuf::from("/usb/Contents");
+        let source = PathBuf::from("/music/Song.mp3");
+        let key = "/contents/artist/album/song.mp3".to_string();
+        let resolve = |occupant: super::UsbOccupant, size: Option<u32>, title: &str| {
+            let occupied = HashMap::from([(key.clone(), occupant)]);
+            resolve_collision_free_media_target(
+                &mut HashMap::new(),
+                &occupied,
+                &media_root,
+                &source,
+                "Artist",
+                Some("Album"),
+                title,
+                "mp3",
+                size,
+                content_fingerprint_key(size.map(i64::from), title, "Artist"),
+            )
+        };
+        let own = PathBuf::from("/usb/Contents/Artist/Album/Song.mp3");
+        let next = PathBuf::from("/usb/Contents/Artist/Album/Song-1.mp3");
+
+        let other = (
+            Some(500),
+            content_fingerprint_key(Some(500), "Other", "Artist"),
+        );
+        assert_eq!(resolve(other, Some(900), "Song"), next);
+
+        let before_title_edit = (
+            Some(900),
+            content_fingerprint_key(Some(900), "Old", "Artist"),
+        );
+        assert_eq!(resolve(before_title_edit, Some(900), "Song"), own);
+
+        let retagged_file = (
+            Some(800),
+            content_fingerprint_key(Some(800), "Song", "Artist"),
+        );
+        assert_eq!(
+            resolve(retagged_file, Some(800), "Song"),
+            own,
+            "same fingerprint"
+        );
+
+        assert_eq!(resolve((None, None), Some(900), "Song"), next);
     }
 
     // --- existing_usb_relative_if_present ---

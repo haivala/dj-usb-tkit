@@ -2054,6 +2054,108 @@ fn export_to_usb_leaves_formats_players_dont_play_off_the_usb() {
 }
 
 #[test]
+fn exports_in_separate_runs_keep_truncated_name_twins_apart() {
+    // Two tracks whose file names agree for longer than the USB name limit
+    // (48 chars) end up at the same truncated name. Exported in one run they
+    // get `-1`; exported by two playlists in two runs the second must not
+    // overwrite the first one's audio or share its file.
+    let root = tempdir().expect("temp root");
+    let media = root.path().join("media");
+    let usb = root.path().join("usb");
+    fs::create_dir_all(&media).expect("create media dir");
+    fs::create_dir_all(&usb).expect("create usb dir");
+    let stem = "Artist - A very long title that keeps going on and on";
+    let first_name = format!("{stem} Part One.mp3");
+    let second_name = format!("{stem} Part Two.mp3");
+    fs::write(media.join(&first_name), b"first-track-audio").expect("write first");
+    fs::write(media.join(&second_name), b"second-track-audio-longer").expect("write second");
+
+    let data_dir = root.path().join("data");
+    let backend = BackendCommands::new(&data_dir).expect("create backend");
+    let initialized = backend.initialize_usb(InitializeUsbRequest {
+        usb_root: usb.to_string_lossy().to_string(),
+    });
+    assert!(initialized.ok, "initialize usb failed: {initialized:?}");
+    let scan = backend.scan_library(ScanLibraryRequest {
+        source_roots: vec![media.to_string_lossy().to_string()],
+        incremental: true,
+    });
+    assert!(scan.ok, "scan failed: {scan:?}");
+    library_sources::show_only(
+        &backend,
+        vec![media.to_string_lossy().to_string()],
+        false,
+        false,
+    );
+    let tracks = backend
+        .browse_source_files(BrowseSourceFilesRequest {
+            query: String::new(),
+            limit: 20,
+            cursor: None,
+            ..Default::default()
+        })
+        .data
+        .expect("search data")
+        .items;
+    let id_of = |name: &str| {
+        tracks
+            .iter()
+            .find(|t| t.file_path.ends_with(name))
+            .expect("track")
+            .id
+            .clone()
+    };
+
+    for (playlist_name, file_name) in [("First", &first_name), ("Second", &second_name)] {
+        let created = backend.create_playlist(CreatePlaylistRequest {
+            name: playlist_name.to_string(),
+        });
+        let playlist_id = created.data.expect("playlist data").playlist_id;
+        let track_ids = vec![id_of(file_name)];
+        let add = backend.add_library_selection_to_playlist(AddLibrarySelectionToPlaylistRequest {
+            playlist_id: playlist_id.clone(),
+            track_ids: track_ids.clone(),
+            ..Default::default()
+        });
+        assert!(add.ok, "add failed: {add:?}");
+        seed_tracks_as_analyzed(&data_dir, &track_ids);
+        let exported = backend.export_to_usb(ExportToUsbRequest {
+            usb_root: Some(usb.to_string_lossy().to_string()),
+            playlist_id,
+            options: Some(ExportToUsbOptions {
+                include_artwork: false,
+                include_analysis: false,
+                ..Default::default()
+            }),
+        });
+        assert!(exported.ok, "{playlist_name} export failed: {exported:?}");
+    }
+
+    let first = usb_playlist_track_paths(&usb, "First");
+    let second = usb_playlist_track_paths(&usb, "Second");
+    assert_eq!((first.len(), second.len()), (1, 1), "{first:?} {second:?}");
+    assert_ne!(
+        first[0], second[0],
+        "each track has its own file on the USB"
+    );
+    let mut audio_on_usb = walkdir::WalkDir::new(usb.join("Contents"))
+        .into_iter()
+        .filter_map(Result::ok)
+        .filter(|e| e.file_type().is_file())
+        .map(|e| fs::read(e.path()).expect("read usb file"))
+        .collect::<Vec<_>>();
+    audio_on_usb.sort();
+    assert_eq!(
+        audio_on_usb,
+        vec![
+            b"first-track-audio".to_vec(),
+            b"second-track-audio-longer".to_vec()
+        ],
+        "both tracks' audio is on the USB, neither overwritten"
+    );
+}
+
+#[test]
 fn export_to_usb_blocks_mirror_prune_when_source_files_are_missing() {
     let root = tempdir().expect("temp root");
     let media = root.path().join("media");

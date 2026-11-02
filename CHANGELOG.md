@@ -39,6 +39,8 @@
 
 ## Unreleased
 
+**Severity:** critical — see item(s) marked **(CRITICAL)** below.
+
 - **New feature:** A USB that has only one of its two databases, the PDB or the eDB, can be
   repaired: "Upgrade Export Data To Strict Parity" creates the missing one as Initialize USB does
   and writes every playlist of the other into it. Play history isn't copied. The diagnostics
@@ -52,6 +54,10 @@
   plays them. They stay in the library and its playlists; the export counts them as skipped and
   names each one in the Event Log, and the Library's format warning says they aren't exported. A
   mirror export of a playlist with such tracks still syncs the rest.
+- **Fix (CRITICAL):** Exporting a track whose file name, cut to the USB's 48-character limit, matches a track
+  already on the USB from another playlist or an earlier export no longer copies its audio over
+  that track's file; both playlists played the newer track. The new one gets a `-1` name, as
+  rekordbox does. A track exported before and edited since still keeps its own file.
 - **Fix:** A library scan no longer fails when an audio file is moved or deleted while the scan
   runs; that file is left out and the rest is scanned.
 - **Chore:** The essentia analysis engine's node, runner and module paths are handed to the analysis
