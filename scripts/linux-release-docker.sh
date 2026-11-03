@@ -54,7 +54,9 @@ fi
 
 if [ -n "$REBUILD_IMAGE" ] || ! docker image inspect "$IMAGE_NAME" >/dev/null 2>&1; then
   echo "==> Building Docker image $IMAGE_NAME..."
-  docker build -f "$SCRIPT_DIR/Dockerfile.linux-build" -t "$IMAGE_NAME" "$ROOT_DIR"
+  # A new day rebuilds the apt layer, so the bundled WebKitGTK is current.
+  docker build -f "$SCRIPT_DIR/Dockerfile.linux-build" -t "$IMAGE_NAME" \
+    --build-arg APT_REFRESH="$(date -u +%Y-%m-%d)" "$ROOT_DIR"
 else
   echo "==> Using cached Docker image $IMAGE_NAME"
   echo "    (set REBUILD_IMAGE=1 to force rebuild)"

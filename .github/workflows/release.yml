@@ -190,6 +190,14 @@ jobs:
         if: runner.os == 'Linux'
         uses: docker/setup-buildx-action@v3
 
+      # The image's apt layer is keyed on the build date (see APT_REFRESH in
+      # the Dockerfile), so a release bundles the current 22.04 WebKitGTK
+      # instead of whatever the cached layer first installed.
+      - name: Date for the Docker apt layer
+        if: runner.os == 'Linux'
+        shell: bash
+        run: echo "APT_REFRESH=$(date -u +%Y-%m-%d)" >> "$GITHUB_ENV"
+
       - name: Build Linux Docker build image (cached)
         if: runner.os == 'Linux'
         uses: docker/build-push-action@v6
@@ -204,6 +212,8 @@ jobs:
           file: scripts/Dockerfile.linux-build
           tags: djtkit-linux-build:latest
           load: true
+          build-args: |
+            APT_REFRESH=${{ env.APT_REFRESH }}
           cache-from: type=gha
           cache-to: type=gha,mode=max
 

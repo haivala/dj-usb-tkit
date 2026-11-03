@@ -10,7 +10,14 @@ FROM ubuntu:22.04
 
 ENV DEBIAN_FRONTEND=noninteractive
 
-RUN apt-get update && apt-get install -y --no-install-recommends \
+# Ubuntu keeps backporting new WebKitGTK releases (and their security fixes)
+# to 22.04, and the AppImage bundles whatever this layer installed. A cached
+# layer would freeze that WebKit, so builds pass the build date here: a new
+# day rebuilds the layer with the current packages.
+ARG APT_REFRESH=unset
+RUN echo "apt refresh: $APT_REFRESH" \
+    && apt-get update && apt-get upgrade -y \
+    && apt-get install -y --no-install-recommends \
       build-essential git curl ca-certificates pkg-config \
       libssl-dev libasound2-dev libgtk-3-dev libwebkit2gtk-4.1-dev \
       libayatana-appindicator3-dev librsvg2-dev \
