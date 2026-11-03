@@ -1,12 +1,12 @@
-// Player formats: per USB stick, which audio formats the players it goes
-// into read, in the user's order of preference. Stored on the stick
+// Player formats: per USB stick, which audio formats export puts on it, in
+// the user's order of preference. Stored on the stick
 // (drive.json) by the backend, which also judges the rows against it; this
 // module only shows the list and sends the user's changes.
 
 import { cloneTemplate } from "../../ui_utils.mjs";
 import { bindListDragReorder, moveArrayItem } from "../shared/list_drag_reorder.mjs";
 
-const HINT_WRITABLE = "Untick a format the players can't read · drag to set the order of preference";
+const HINT_WRITABLE = "The formats export puts on this USB · drag to set the order of preference";
 const HINT_READONLY = "USB is read-only";
 const LAST_TICKED_TOOLTIP = "At least one format stays ticked";
 

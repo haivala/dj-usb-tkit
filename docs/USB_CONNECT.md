@@ -100,11 +100,12 @@ The technical details are under "Local HDD staging" in [USB_EXPORT.md](USB_EXPOR
 
 ## Player formats
 
-The **Player formats** row, above Health & Diagnostics, says which audio formats the players this
-USB goes into can read: FLAC, ALAC, AIFF, WAV, MP3 and AAC, each with a tick box.
+The **Player formats** row, above Health & Diagnostics, says which audio formats export puts on
+this USB: FLAC, ALAC, AIFF, WAV, MP3 and AAC, each with a tick box. Set it for the players the
+stick goes into next; they change from gig to gig, so the app doesn't guess.
 
-- **Ticked** means the players read it. A USB that was never set has all six ticked, so nothing
-  changes until you untick one.
+- **Ticked** means export may put it on the USB. A USB that was never set has all six ticked, so
+  nothing changes until you untick one.
 - **Order:** drag a format by its handle to move it. The order is your preference among the
   ticked formats.
 - **At least one stays ticked:** the last ticked box can't be unticked.

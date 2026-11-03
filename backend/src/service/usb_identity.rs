@@ -14,8 +14,7 @@
 //! root's directory listing, only known paths).
 //!
 //! The same file carries the stick's Player formats ([`DriveFormats`]): which
-//! audio formats the players it goes into read, so they travel with the stick
-//! too.
+//! audio formats export puts on it, so they travel with the stick too.
 
 use std::path::{Path, PathBuf};
 use std::sync::Mutex;
@@ -48,8 +47,8 @@ struct MarkerFormat {
     allowed: bool,
 }
 
-/// The formats the players a stick goes into can read (Player formats in the
-/// USB panel), as the full ordered list: an unticked format keeps its place.
+/// The formats export puts on a stick (Player formats in the USB panel), as
+/// the full ordered list: an unticked format keeps its place.
 /// The order is the user's preference among the ticked ones. At least one is
 /// always ticked.
 #[derive(Debug, Clone, PartialEq, Eq)]

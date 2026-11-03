@@ -1,5 +1,5 @@
-//! Player formats: per USB stick, which audio formats the players it goes
-//! into read, in the user's order of preference. Stored in the stick's
+//! Player formats: per USB stick, which audio formats export puts on it, in
+//! the user's order of preference. Stored in the stick's
 //! `drive.json` (see `usb_identity::DriveFormats`), so the setting travels
 //! with the stick.
 //!
