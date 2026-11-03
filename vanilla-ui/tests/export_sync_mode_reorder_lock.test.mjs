@@ -1,49 +1,17 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { JSDOM } from "jsdom";
 import { bindSettingsEvents } from "../components/settings/events.mjs";
 import { applyPlaylistReorderLockToGrid } from "../components/shared/export_reorder_lock.mjs";
-import { withSilencedConsole } from "./test_helpers.mjs";
+import { makeTestCtx, withSilencedConsole } from "./test_helpers.mjs";
 
 // Regression: changing the export-sync mode must release/engage the reorder lock
 // on the currently open playlist immediately, without waiting for a USB rescan.
 
-const HTML = `<!doctype html><body>
-  <fieldset id="exportSyncModeGroup">
-    <label><input type="radio" name="exportSyncMode" id="exportSyncModeMirror" value="mirror" /></label>
-    <label><input type="radio" name="exportSyncMode" id="exportSyncModeAdditive" value="additive" checked /></label>
-  </fieldset>
-  <div data-track-grid data-body-id="playlistTracksBody" data-sort-locked="true">
-    <div class="track-grid-cell sortable" role="columnheader" data-sort-key="title" data-tooltip="stale"></div>
-    <div class="track-grid-cell sortable" role="columnheader" data-sort-key="artist" data-tooltip="stale"></div>
-    <div id="playlistTracksBody"></div>
-  </div>
-</body>`;
-
-const CONSTANTS = {
-  STORAGE_KEY_HELP_SEEN: "help",
-  STORAGE_KEY_EXPORT_PRUNE_STALE: "prune",
-  STORAGE_KEY_EXPORT_BACKUP: "backup",
-  STORAGE_KEY_BACKUP_RETENTION_COUNT: "backup_retention",
-  STORAGE_KEY_ANALYSIS_BPM_RANGE: "bpm",
-  STORAGE_KEY_ANALYSIS_ENGINE: "engine",
-  FRONTEND_DB_KEY_HELP_SEEN: "ui_help_seen_v1",
-  FRONTEND_DB_KEY_EXPORT_PRUNE_STALE: "ui_export_prune_stale_v1",
-  FRONTEND_DB_KEY_EXPORT_BACKUP: "ui_export_backup_v1",
-  FRONTEND_DB_KEY_BACKUP_RETENTION_COUNT: "ui_backup_retention_count_v1",
-  FRONTEND_DB_KEY_ANALYSIS_BPM_RANGE: "ui_analysis_bpm_range_v1",
-  FRONTEND_DB_KEY_ANALYSIS_ENGINE: "ui_analysis_engine_v1"
-};
-
 function setup({ sortActive = false, commitThrows = false } = {}) {
-  const dom = new JSDOM(HTML);
-  const doc = dom.window.document;
-  const el = {
-    exportSyncModeGroup: doc.querySelector("#exportSyncModeGroup"),
-    exportSyncModeMirror: doc.querySelector("#exportSyncModeMirror"),
-    exportSyncModeAdditive: doc.querySelector("#exportSyncModeAdditive"),
-    playlistTracksBody: doc.querySelector("#playlistTracksBody")
-  };
+  const ctx = makeTestCtx();
+  const { dom, el, document: doc } = ctx;
+  const grid = doc.querySelector('[data-track-grid][data-body-id="playlistTracksBody"]');
+  grid.dataset.sortLocked = "true";
   const state = {
     exportPruneStale: false,
     playlistTrackSearch: "",
@@ -58,13 +26,8 @@ function setup({ sortActive = false, commitThrows = false } = {}) {
   const persistCalls = [];
   const getCurrentPlaylist = () => state.playlists.find((p) => p.id === state.currentPlaylistId) || null;
 
-  bindSettingsEvents({
+  bindSettingsEvents(Object.assign(ctx, {
     state,
-    el,
-    document: doc,
-    window: dom.window,
-    navigator: {},
-    constants: CONSTANTS,
     persistSetting: (storageKey, dbKey, value) => persistCalls.push({ dbKey, value }),
     emitStatus: (message) => statuses.push(message),
     command: async () => {},
@@ -103,10 +66,8 @@ function setup({ sortActive = false, commitThrows = false } = {}) {
       }
       state.playlistUsbExportStatusById = next;
     }
-  });
+  }));
 
-  const grid = doc.querySelector("[data-track-grid]");
-  const headers = () => [...doc.querySelectorAll('.sortable[role="columnheader"]')];
   const fire = (radio) => {
     el.exportSyncModeMirror.checked = radio === "mirror";
     el.exportSyncModeAdditive.checked = radio === "additive";
@@ -115,7 +76,7 @@ function setup({ sortActive = false, commitThrows = false } = {}) {
     return new Promise((resolve) => setTimeout(resolve, 0));
   };
 
-  return { state, el, statuses, commitCalls, persistCalls, grid, headers, fire };
+  return { state, el, statuses, commitCalls, persistCalls, grid, fire };
 }
 
 test("the mode change still goes through when the pre-lock sort commit fails", async () => {

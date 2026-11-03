@@ -1,45 +1,36 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { JSDOM } from "jsdom";
 import { bindShellEvents } from "../components/shell/events.mjs";
+import { makeTestCtx } from "./test_helpers.mjs";
 
 function setup(playbackRowKey) {
-  const dom = new JSDOM(`
-    <!doctype html>
-    <body>
-      <nav id="navSidebar"></nav>
-      <div id="unrelated">unrelated</div>
-      <div class="track-grid-row" data-playback-row="row-active">
-        <button data-action="play-library" data-row-key="row-active">active-row-play</button>
-        <span class="track-title">Active Row Title</span>
-      </div>
-      <div class="track-grid-row" data-playback-row="row-other">
-        <button data-action="play-library" data-row-key="row-other">other-row-play</button>
-      </div>
-    </body>
-  `);
-  const document = dom.window.document;
   const state = { playbackActive: true, playbackRowKey };
   let stopCalls = 0;
   const stopPlaybackIfActive = () => {
     stopCalls += 1;
     return Promise.resolve();
   };
-
-  bindShellEvents({
+  const ctx = makeTestCtx({
     state,
-    el: { navSidebar: document.getElementById("navSidebar") },
-    document,
-    window: dom.window,
-    sidebarExpandBtn: null,
     confirmDialog: { isOpen: () => false, close: () => {} },
-    constants: {},
     persistSetting: () => {},
     emitStatus: () => {},
     switchView: async () => {},
     handleSortHeaderClick: () => {},
     stopPlaybackIfActive
   });
+  const { document } = ctx;
+  document.body.insertAdjacentHTML("beforeend", `
+    <div id="unrelated">unrelated</div>
+    <div class="track-grid-row" data-playback-row="row-active">
+      <button data-action="play-library" data-row-key="row-active">active-row-play</button>
+      <span class="track-title">Active Row Title</span>
+    </div>
+    <div class="track-grid-row" data-playback-row="row-other">
+      <button data-action="play-library" data-row-key="row-other">other-row-play</button>
+    </div>
+  `);
+  bindShellEvents(ctx);
 
   return { document, state, getStopCalls: () => stopCalls };
 }

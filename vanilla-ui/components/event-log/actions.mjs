@@ -42,16 +42,15 @@ export async function openEventLogFile(ctx) {
 // or, with no new errors, a dot when a USB report links to log details.
 export function renderEventLogBadge(ctx) {
   const { el, state } = ctx;
-  if (!el.eventLogBadge) return;
   const count = state.eventLogUnseenErrors;
   const dot = !count && state.eventLogHasLinkedDetails;
   el.eventLogBadge.textContent = count > 99 ? "99+" : String(count);
   el.eventLogBadge.classList.toggle("hidden", count === 0);
-  el.eventLogDot?.classList.toggle("hidden", !dot);
+  el.eventLogDot.classList.toggle("hidden", !dot);
   let label = "Event Log";
   if (count) label = `Event Log, ${counted(count, "new error")}`;
   else if (dot) label = "Event Log, has details for the USB report";
-  el.eventLogBtn?.setAttribute("aria-label", label);
+  el.eventLogBtn.setAttribute("aria-label", label);
 }
 
 // A diagnostics/parity check links to its details in the Event Log.
@@ -83,8 +82,8 @@ function ensureEventLogSourceOptions(ctx, sources) {
 // The entries the level/source filters let through, oldest first.
 function filteredEventLogEntries(ctx) {
   const { el } = ctx;
-  const levelFilter = String(el.eventLogLevelFilter?.value || "all");
-  const sourceFilter = String(el.eventLogSourceFilter?.value || "all");
+  const levelFilter = String(el.eventLogLevelFilter.value || "all");
+  const sourceFilter = String(el.eventLogSourceFilter.value || "all");
   return ctx.eventLogStore.list().filter((item) => {
     const levelMatch = levelFilter === "all" || item.level === levelFilter;
     const sourceMatch = sourceFilter === "all" || item.source === sourceFilter;
@@ -134,7 +133,6 @@ function eventLogRow(doc, item) {
 
 export function renderEventLog(ctx) {
   const { el } = ctx;
-  if (!el.eventLogList || !el.eventLogSummary) return;
   ensureEventLogSourceOptions(ctx, ctx.eventLogStore.list().map((item) => item.source));
   const entries = filteredEventLogEntries(ctx);
   renderEventLogSummary(ctx, entries);
@@ -154,7 +152,6 @@ export function renderEventLog(ctx) {
 function showEventLogEntry(ctx, item) {
   const { el } = ctx;
   const list = el.eventLogList;
-  if (!list || !el.eventLogSummary) return;
   ensureEventLogSourceOptions(ctx, [item.source]);
   const entries = filteredEventLogEntries(ctx);
   renderEventLogSummary(ctx, entries);

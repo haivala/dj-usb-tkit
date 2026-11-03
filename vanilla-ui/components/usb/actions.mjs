@@ -27,13 +27,11 @@ export function isUsbRootChangeBlocked(state) {
 
 export function setUsbRootControlsLocked(ctx, locked) {
   const { el } = ctx;
-  if (el.selectUsbFolderBtn) {
-    el.selectUsbFolderBtn.disabled = !!locked;
-    el.selectUsbFolderBtn.title = locked ? "Please wait for the current USB operation to finish" : "";
-  }
-  el.usbRecentList?.querySelectorAll("button").forEach((btn) => { btn.disabled = !!locked; });
+  el.selectUsbFolderBtn.disabled = !!locked;
+  el.selectUsbFolderBtn.title = locked ? "Please wait for the current USB operation to finish" : "";
+  el.usbRecentList.querySelectorAll("button").forEach((btn) => { btn.disabled = !!locked; });
   if (locked) {
-    if (el.exportPlaylistBtn) el.exportPlaylistBtn.disabled = true;
+    el.exportPlaylistBtn.disabled = true;
   } else {
     // Don't just flip disabled=false here -- the export button's disabled
     // state is normally owned by playlist/usbRootValid logic (see below),
@@ -225,10 +223,8 @@ export function renderParityReport(ctx, data) {
   el.previewRepairsBtn.disabled = false;
   // Its own badge next to the health one: the health badge keeps matching
   // the USB health dot.
-  if (el.diagParityStatus) {
-    el.diagParityStatus.textContent = `Parity ${data.overallStatus}`;
-    el.diagParityStatus.className = `diag-badge diag-${data.overallStatus.toLowerCase()}`;
-  }
+  el.diagParityStatus.textContent = `Parity ${data.overallStatus}`;
+  el.diagParityStatus.className = `diag-badge diag-${data.overallStatus.toLowerCase()}`;
   el.diagDuration.textContent = `Completed in ${data.durationMs}ms`;
 
   el.diagSections.replaceChildren(cloneTemplate(document, "tplDiagParityIntro"));
@@ -254,10 +250,8 @@ export function renderParityReport(ctx, data) {
 }
 
 function clearParityBadge(el) {
-  if (el.diagParityStatus) {
-    el.diagParityStatus.textContent = "";
-    el.diagParityStatus.className = "diag-badge";
-  }
+  el.diagParityStatus.textContent = "";
+  el.diagParityStatus.className = "diag-badge";
 }
 
 export function showDiagReportView(ctx) {
@@ -277,41 +271,23 @@ function showDiagRepairView(ctx) {
 // the stale report should disappear, not the whole panel.
 function resetDiagnosticsContent(ctx) {
   const { el } = ctx;
-  [el.usbHealthDot, el.usbHeaderHealthDot].filter(Boolean).forEach((dot) => {
+  [el.usbHealthDot, el.usbHeaderHealthDot].forEach((dot) => {
     dot.classList.remove("health-pass", "health-warn", "health-fail");
     dot.dataset.tooltip = "USB health: unknown";
     dot.setAttribute("aria-label", "USB health: unknown");
   });
-  if (el.diagSections) {
-    el.diagSections.replaceChildren();
-  }
-  if (el.diagOverallStatus) {
-    el.diagOverallStatus.textContent = "";
-    el.diagOverallStatus.className = "diag-badge";
-  }
+  el.diagSections.replaceChildren();
+  el.diagOverallStatus.textContent = "";
+  el.diagOverallStatus.className = "diag-badge";
   clearParityBadge(el);
-  if (el.diagDuration) {
-    el.diagDuration.textContent = "";
-  }
-  if (el.diagRepairSummary) {
-    el.diagRepairSummary.textContent = "";
-    el.diagRepairSummary.className = "diag-repair-summary";
-  }
-  if (el.diagRepairOverview) {
-    el.diagRepairOverview.replaceChildren();
-  }
-  if (el.diagRepairFixes) {
-    el.diagRepairFixes.replaceChildren();
-  }
-  if (el.previewRepairsBtn) {
-    el.previewRepairsBtn.disabled = true;
-  }
-  if (el.applyRepairsBtn) {
-    el.applyRepairsBtn.disabled = true;
-  }
-  if (el.diagReportView && el.diagRepairPanel) {
-    showDiagReportView(ctx);
-  }
+  el.diagDuration.textContent = "";
+  el.diagRepairSummary.textContent = "";
+  el.diagRepairSummary.className = "diag-repair-summary";
+  el.diagRepairOverview.replaceChildren();
+  el.diagRepairFixes.replaceChildren();
+  el.previewRepairsBtn.disabled = true;
+  el.applyRepairsBtn.disabled = true;
+  showDiagReportView(ctx);
 }
 
 // Clears a stale diagnostics report in place -- the DBs changed but the same
@@ -326,19 +302,13 @@ export function clearUsbDiagnostics(ctx) {
 export function hideUsbDiagnostics(ctx) {
   const { el } = ctx;
   resetDiagnosticsContent(ctx);
-  if (el.usbDiagnosticsCard) {
-    el.usbDiagnosticsCard.classList.add("hidden");
-  }
-  const healthCard = el.usbDiagnosticsCard?.closest?.("#usbHealthCard");
-  if (healthCard) {
-    healthCard.removeAttribute("open");
-    healthCard.classList.remove("is-loading");
-  }
+  el.usbDiagnosticsCard.classList.add("hidden");
+  el.usbHealthCard.removeAttribute("open");
+  el.usbHealthCard.classList.remove("is-loading");
 }
 
 export function renderRepairPreview(ctx, data) {
   const { state, el, document } = ctx;
-  if (!el.diagRepairPanel) return;
   el.usbDiagnosticsCard.classList.remove("hidden");
 
   // Bookkeeping fixes are never shown or selected: the backend applies them
@@ -354,83 +324,75 @@ export function renderRepairPreview(ctx, data) {
 
   // Backend-owned: headline and rows (service::repair::repair_overview); the
   // per-fix list below is the collapsed technical detail.
-  if (el.diagRepairSummary) {
-    el.diagRepairSummary.textContent = data.summary || "";
-    el.diagRepairSummary.className = overview.length === 0
-      ? "diag-repair-summary diag-repair-summary-clean"
-      : "diag-repair-summary";
-  }
-  if (el.diagRepairOverview) {
-    el.diagRepairOverview.replaceChildren();
-    renderOverviewRows(el.diagRepairOverview, overview);
-  }
-  if (el.diagRepairTechnical) {
-    el.diagRepairTechnical.open = false;
-    el.diagRepairTechnical.classList.toggle("hidden", fixCount === 0 && unsupportedItems.length === 0);
+  el.diagRepairSummary.textContent = data.summary || "";
+  el.diagRepairSummary.className = overview.length === 0
+    ? "diag-repair-summary diag-repair-summary-clean"
+    : "diag-repair-summary";
+  el.diagRepairOverview.replaceChildren();
+  renderOverviewRows(el.diagRepairOverview, overview);
+  el.diagRepairTechnical.open = false;
+  el.diagRepairTechnical.classList.toggle("hidden", fixCount === 0 && unsupportedItems.length === 0);
+
+  // Backend-owned: each fix's `description` is already the full text (the
+  // reason a fix is manual-only is baked in server-side), and unsupported
+  // items no longer duplicate a fix row -- so they render straight through.
+  const fixesToRender = fixes.map((f) => ({ ...f }));
+  for (const item of unsupportedItems) {
+    fixesToRender.push({
+      id: `unsupported:${item.issue}`,
+      title: item.issue,
+      description: item.reason,
+      supported: false,
+      destructive: false,
+      estimatedWrites: 0,
+      estimatedDeletes: 0,
+      link: item.link
+    });
   }
 
-  if (el.diagRepairFixes) {
-    // Backend-owned: each fix's `description` is already the full text (the
-    // reason a fix is manual-only is baked in server-side), and unsupported
-    // items no longer duplicate a fix row -- so they render straight through.
-    const fixesToRender = fixes.map((f) => ({ ...f }));
-    for (const item of unsupportedItems) {
-      fixesToRender.push({
-        id: `unsupported:${item.issue}`,
-        title: item.issue,
-        description: item.reason,
-        supported: false,
-        destructive: false,
-        estimatedWrites: 0,
-        estimatedDeletes: 0,
-        link: item.link
-      });
+  el.diagRepairFixes.replaceChildren();
+  for (const fix of fixesToRender) {
+    const li = cloneTemplate(document, "tplRepairFix");
+    li.className = fix.supported ? "diag-repair-fix-supported" : "diag-repair-fix-unsupported";
+    if (fix.supported) {
+      li.classList.add("diag-repair-fix-with-select");
     }
+    const checkbox = li.querySelector(".diag-repair-fix-check");
 
-    el.diagRepairFixes.replaceChildren();
-    for (const fix of fixesToRender) {
-      const li = cloneTemplate(document, "tplRepairFix");
-      li.className = fix.supported ? "diag-repair-fix-supported" : "diag-repair-fix-unsupported";
-      if (fix.supported) {
-        li.classList.add("diag-repair-fix-with-select");
-      }
-      const checkbox = li.querySelector(".diag-repair-fix-check");
-
-      if (fix.supported) {
-        const fixId = String(fix.id || "");
-        const alwaysApplied = fix.alwaysApplied === true;
-        checkbox.checked = alwaysApplied || state.selectedRepairFixIds.has(fixId);
-        checkbox.dataset.fixId = fixId;
-        if (alwaysApplied) {
-          checkbox.disabled = true;
-          checkbox.title = "Always applied — required for other repairs to complete safely";
-        } else {
-          checkbox.addEventListener("change", (event) => {
-            if (!fixId) return;
-            if (event?.target?.checked) state.selectedRepairFixIds.add(fixId);
-            else state.selectedRepairFixIds.delete(fixId);
-            el.applyRepairsBtn.disabled = state.selectedRepairFixIds.size === 0;
-          });
-        }
+    if (fix.supported) {
+      const fixId = String(fix.id || "");
+      const alwaysApplied = fix.alwaysApplied === true;
+      checkbox.checked = alwaysApplied || state.selectedRepairFixIds.has(fixId);
+      checkbox.dataset.fixId = fixId;
+      if (alwaysApplied) {
+        checkbox.disabled = true;
+        checkbox.title = "Always applied — required for other repairs to complete safely";
       } else {
-        checkbox.remove();
+        checkbox.addEventListener("change", (event) => {
+          if (!fixId) return;
+          if (event?.target?.checked) state.selectedRepairFixIds.add(fixId);
+          else state.selectedRepairFixIds.delete(fixId);
+          el.applyRepairsBtn.disabled = state.selectedRepairFixIds.size === 0;
+        });
       }
-
-      li.querySelector(".diag-repair-fix-title strong").textContent = fix.title;
-      const desc = li.querySelector(".diag-repair-fix-desc");
-      desc.textContent = fix.description;
-      appendEventLogLink(ctx, desc, fix.link);
-      const meta = li.querySelector(".diag-repair-fix-meta");
-      const support = fix.supported ? "✓ supported" : "✗ preview-only";
-      const mode = fix.destructive ? "destructive" : "safe";
-      const metaParts = [support, mode];
-      if (fix.estimatedWrites) metaParts.push(`${fix.estimatedWrites} writes`);
-      if (fix.estimatedDeletes) metaParts.push(`${fix.estimatedDeletes} deletes`);
-      if (fix.alwaysApplied === true) metaParts.push("always applied");
-      meta.textContent = metaParts.join(" · ");
-
-      el.diagRepairFixes.appendChild(li);
+    } else {
+      checkbox.remove();
     }
+
+    li.querySelector(".diag-repair-fix-title strong").textContent = fix.title;
+    const desc = li.querySelector(".diag-repair-fix-desc");
+    desc.textContent = fix.description;
+    appendEventLogLink(ctx, desc, fix.link);
+    const meta = li.querySelector(".diag-repair-fix-meta");
+    const support = fix.supported ? "✓ supported" : "✗ preview-only";
+    const mode = fix.destructive ? "destructive" : "safe";
+    const metaParts = [support, mode];
+    if (fix.estimatedWrites) metaParts.push(`${fix.estimatedWrites} writes`);
+    if (fix.estimatedDeletes) metaParts.push(`${fix.estimatedDeletes} deletes`);
+    if (fix.alwaysApplied === true) metaParts.push("always applied");
+    meta.textContent = metaParts.join(" · ");
+
+    el.diagRepairFixes.appendChild(li);
   }
 
   showDiagRepairView(ctx);
@@ -449,9 +411,7 @@ export function loadUsbRootFromStorage(ctx) {
   }
   state.usbRootValid = false;
   updateUsbRootText(ctx, state.usbRoot, false);
-  if (el.usbInitRow) {
-    el.usbInitRow.classList.add("hidden");
-  }
+  el.usbInitRow.classList.add("hidden");
   updateUsbConfigControlsVisibility(ctx);
   ctx.updatePlaylistExportButtons();
 }
@@ -471,7 +431,7 @@ export function resetUsbStateViews(ctx, { hideDiagnostics = true } = {}) {
 
   el.usbCountsText.textContent = "";
   el.historyCountsText.textContent = "";
-  if (el.exportHistoryTracklistBtn) el.exportHistoryTracklistBtn.disabled = true;
+  el.exportHistoryTracklistBtn.disabled = true;
   // The USB may still be connected and selected (e.g. after a backup
   // restore or a repair apply) -- only a full disconnect/switch-drive
   // should collapse the diagnostics panel itself, not just blank its report.
@@ -520,15 +480,9 @@ export async function pickSourceFolders(ctx) {
 export function updateUsbConfigControlsVisibility(ctx) {
   const { state, el } = ctx;
   const hasValidRoot = !!state.usbRoot && !!state.usbRootValid;
-  if (el.usbSelectedControls) {
-    el.usbSelectedControls.classList.toggle("hidden", !hasValidRoot);
-  }
-  if (el.usbDiagToolbar) {
-    el.usbDiagToolbar.classList.toggle("hidden", !hasValidRoot);
-  }
-  if (!hasValidRoot && el.usbDiagnosticsCard) {
-    el.usbDiagnosticsCard.classList.add("hidden");
-  }
+  el.usbSelectedControls.classList.toggle("hidden", !hasValidRoot);
+  el.usbDiagToolbar.classList.toggle("hidden", !hasValidRoot);
+  if (!hasValidRoot) el.usbDiagnosticsCard.classList.add("hidden");
   ctx.updateUsbEmptyState();
 }
 
@@ -545,7 +499,7 @@ export async function detectExternalRekordboxDb(ctx) {
     ctx.warn("External rekordbox DB detection failed:", err);
   }
   // Hide the legacy toggle element; the chip in renderSourceChips is the control
-  el.externalRekordboxDbToggle?.classList.add("hidden");
+  el.externalRekordboxDbToggle.classList.add("hidden");
   ctx.renderSourceChips();
 }
 
@@ -640,20 +594,11 @@ export async function renameDrive(ctx) {
 async function openDriveNameDialog(ctx, { mode, initial }) {
   const { state, el, command, document: doc } = ctx;
   const overlay = el.driveNameOverlay;
-  if (!doc || !overlay || !el.driveNameInput || !el.driveNameOkBtn) {
-    console.warn("[usb] drive-naming prompt DOM elements missing, skipping prompt", {
-      hasDoc: !!doc,
-      hasOverlay: !!overlay,
-      hasInput: !!el.driveNameInput,
-      hasOkBtn: !!el.driveNameOkBtn
-    });
-    return null;
-  }
   for (const node of overlay.querySelectorAll("[data-drive-name-mode]")) {
     node.hidden = !node.dataset.driveNameMode.split(" ").includes(mode);
   }
   const takenBy = mode === "conflict" ? String(state.usbNameTakenBy || "") : "";
-  if (el.driveNameTakenBy) el.driveNameTakenBy.textContent = takenBy;
+  el.driveNameTakenBy.textContent = takenBy;
 
   // This overlay is full-viewport and intercepts every click while open, so
   // it must never be able to get stuck there -- Escape, a backdrop click,
@@ -662,7 +607,7 @@ async function openDriveNameDialog(ctx, { mode, initial }) {
   // entire app if anything about it ever misbehaves.
   return new Promise((resolve) => {
     el.driveNameInput.value = initial || "";
-    if (el.driveNameError) el.driveNameError.hidden = true;
+    el.driveNameError.hidden = true;
     overlay.hidden = false;
     el.driveNameInput.focus();
     el.driveNameInput.select();
@@ -670,7 +615,7 @@ async function openDriveNameDialog(ctx, { mode, initial }) {
     const cleanup = () => {
       overlay.hidden = true;
       el.driveNameOkBtn.removeEventListener("click", onSave);
-      el.driveNameSkipBtn?.removeEventListener("click", onSkip);
+      el.driveNameSkipBtn.removeEventListener("click", onSkip);
       el.driveNameInput.removeEventListener("keydown", onEnter);
       doc.removeEventListener("keydown", onEscape);
       overlay.removeEventListener("click", onOverlayClick);
@@ -678,10 +623,8 @@ async function openDriveNameDialog(ctx, { mode, initial }) {
     const onSave = async () => {
       const name = String(el.driveNameInput.value || "").trim();
       if (!name) {
-        if (el.driveNameError) {
-          el.driveNameError.textContent = "Enter a name for this drive.";
-          el.driveNameError.hidden = false;
-        }
+        el.driveNameError.textContent = "Enter a name for this drive.";
+        el.driveNameError.hidden = false;
         return;
       }
       try {
@@ -692,10 +635,8 @@ async function openDriveNameDialog(ctx, { mode, initial }) {
         cleanup();
         resolve(name);
       } catch (err) {
-        if (el.driveNameError) {
-          el.driveNameError.textContent = err?.message || String(err);
-          el.driveNameError.hidden = false;
-        }
+        el.driveNameError.textContent = err?.message || String(err);
+        el.driveNameError.hidden = false;
       }
     };
     const onSkip = () => {
@@ -712,7 +653,7 @@ async function openDriveNameDialog(ctx, { mode, initial }) {
       if (event.target === overlay) onSkip();
     };
     el.driveNameOkBtn.addEventListener("click", onSave);
-    el.driveNameSkipBtn?.addEventListener("click", onSkip);
+    el.driveNameSkipBtn.addEventListener("click", onSkip);
     el.driveNameInput.addEventListener("keydown", onEnter);
     doc.addEventListener("keydown", onEscape);
     overlay.addEventListener("click", onOverlayClick);
@@ -748,7 +689,7 @@ export async function validateAndSetUsbRoot(ctx, path, silent = false) {
     ctx.updatePlaylistExportButtons();
     ctx.loadUsbAudioFormats().catch((err) => console.warn("get_usb_audio_formats failed:", err));
     if (!silent) emitStatus("USB root cleared");
-    el.usbRecentRow?.classList.remove("collapsed");
+    el.usbRecentRow.classList.remove("collapsed");
     await syncAssetScopePaths(ctx);
     return false;
   }
@@ -763,22 +704,16 @@ export async function validateAndSetUsbRoot(ctx, path, silent = false) {
   state.usbRoot = normalized || input;
   ctx.persistUsbRoot(state.usbRoot);
   updateUsbRootText(ctx, state.usbRoot, valid);
-  if (el.usbInitRow) {
-    el.usbInitRow.classList.toggle("hidden", !canInitialize);
+  el.usbInitRow.classList.toggle("hidden", !canInitialize);
+  const warningText = joinWarningTexts(result?.warnings);
+  if (canInitialize) {
+    const reason = warningText ? ` (${warningText})` : "";
+    el.usbInitHint.textContent = `USB folder is writable but missing External library structure${reason}`;
+  } else if (!valid) {
+    const reason = warningText ? ` (${warningText})` : "";
+    el.usbInitHint.textContent = `USB folder is not ready for initialization${reason}`;
   }
-  if (el.usbInitHint) {
-    const warningText = joinWarningTexts(result?.warnings);
-    if (canInitialize) {
-      const reason = warningText ? ` (${warningText})` : "";
-      el.usbInitHint.textContent = `USB folder is writable but missing External library structure${reason}`;
-    } else if (!valid) {
-      const reason = warningText ? ` (${warningText})` : "";
-      el.usbInitHint.textContent = `USB folder is not ready for initialization${reason}`;
-    }
-  }
-  if (el.initializeUsbBtn) {
-    el.initializeUsbBtn.disabled = !canInitialize;
-  }
+  el.initializeUsbBtn.disabled = !canInitialize;
   if (previousRoot !== state.usbRoot) {
     resetUsbStateViews(ctx);
   }
@@ -823,7 +758,7 @@ export async function validateAndSetUsbRoot(ctx, path, silent = false) {
   await syncAssetScopePaths(ctx);
   // The recent list is for picking a drive: close it once one is selected
   // (its header reopens it).
-  if (valid) el.usbRecentRow?.classList.add("collapsed");
+  if (valid) el.usbRecentRow.classList.add("collapsed");
   return valid;
 }
 
@@ -1062,7 +997,7 @@ export async function refreshHistory(ctx) {
   el.historyCountsText.textContent = `${counted(counts.importedPlaylists || 0, "session")}, ${counted(counts.importedTracks || 0, "track")}`;
   state.selectedHistoryIndex = null;
   state.historyTracks = [];
-  if (el.exportHistoryTracklistBtn) el.exportHistoryTracklistBtn.disabled = true;
+  el.exportHistoryTracklistBtn.disabled = true;
   renderHistoryList(ctx);
   ctx.usbHistoryTracksCtl.clear();
   const warningCount = Number(data.warningCount || 0);
@@ -1180,7 +1115,6 @@ export function renderUsbPlayerMenuEditor(ctx) {
   const { state, el, document } = ctx;
   const availableEl = el.usbPlayerMenuAvailable;
   const currentEl = el.usbPlayerMenuCurrent;
-  if (!availableEl || !currentEl) return;
 
   ensureValidPlayerMenuSelections(state);
 
@@ -1213,7 +1147,6 @@ export function renderUsbPlayerMenuEditor(ctx) {
 function renderUsbPlayerMenuDivergence(ctx) {
   const { state, el } = ctx;
   const node = el.usbPlayerMenuDivergence;
-  if (!node) return;
   // Backend-owned: `summary` / `canSync` / `canRestore` come from
   // service::repair (load_usb_player_menu_config). `canFix` is frontend state
   // (a valid USB must be selected to run either action).
@@ -1221,24 +1154,16 @@ function renderUsbPlayerMenuDivergence(ctx) {
   const canFix = !!(state.usbRoot && state.usbRootValid);
   if (!canFix || (!div.canSync && !div.canRestore)) {
     node.classList.add("hidden");
-    if (el.usbPlayerMenuDivergenceMessage) el.usbPlayerMenuDivergenceMessage.textContent = "";
-    if (el.usbPlayerMenuSyncBtn) el.usbPlayerMenuSyncBtn.disabled = true;
-    if (el.usbPlayerMenuRestoreBtn) el.usbPlayerMenuRestoreBtn.disabled = true;
+    el.usbPlayerMenuDivergenceMessage.textContent = "";
+    el.usbPlayerMenuSyncBtn.disabled = true;
+    el.usbPlayerMenuRestoreBtn.disabled = true;
     return;
   }
   node.classList.remove("hidden");
   const msg = String(div.summary || "");
-  if (el.usbPlayerMenuDivergenceMessage) {
-    el.usbPlayerMenuDivergenceMessage.textContent = msg;
-  } else {
-    node.textContent = msg;
-  }
-  if (el.usbPlayerMenuSyncBtn) {
-    el.usbPlayerMenuSyncBtn.disabled = !div.canSync;
-  }
-  if (el.usbPlayerMenuRestoreBtn) {
-    el.usbPlayerMenuRestoreBtn.disabled = !div.canRestore;
-  }
+  el.usbPlayerMenuDivergenceMessage.textContent = msg;
+  el.usbPlayerMenuSyncBtn.disabled = !div.canSync;
+  el.usbPlayerMenuRestoreBtn.disabled = !div.canRestore;
 }
 
 // Store a player-menu config response and redraw the editor.
@@ -1275,10 +1200,6 @@ function currentPlayerMenuItemByKind(state, kind) {
 
 export function syncUsbPlayerMenuEditorControls(ctx) {
   const { state, el } = ctx;
-  const availableEl = el.usbPlayerMenuAvailable;
-  const currentEl = el.usbPlayerMenuCurrent;
-  if (!availableEl || !currentEl) return;
-
   const hasRoot = !!state.usbRoot && !!state.usbRootValid;
 
   const availableSelected = normalizeMenuKind(state.usbPlayerMenuAvailableSelectedKind);
@@ -1288,15 +1209,12 @@ export function syncUsbPlayerMenuEditorControls(ctx) {
 
   const hasAvailable = availableSelected !== null;
   const hasCurrent = currentSelected !== null;
-  if (el.usbPlayerMenuAddBtn) el.usbPlayerMenuAddBtn.disabled = !hasRoot || !hasAvailable;
-  if (el.usbPlayerMenuRemoveBtn)
-    el.usbPlayerMenuRemoveBtn.disabled =
-      !hasRoot || !hasCurrent
-      || currentPlayerMenuItemByKind(state, currentSelected)?.removable === false;
-  if (el.usbPlayerMenuUpBtn) el.usbPlayerMenuUpBtn.disabled = !hasRoot || currentIdx <= 0;
-  if (el.usbPlayerMenuDownBtn) {
-    el.usbPlayerMenuDownBtn.disabled = !hasRoot || currentIdx < 0 || currentIdx >= currentKinds.length - 1;
-  }
+  el.usbPlayerMenuAddBtn.disabled = !hasRoot || !hasAvailable;
+  el.usbPlayerMenuRemoveBtn.disabled =
+    !hasRoot || !hasCurrent
+    || currentPlayerMenuItemByKind(state, currentSelected)?.removable === false;
+  el.usbPlayerMenuUpBtn.disabled = !hasRoot || currentIdx <= 0;
+  el.usbPlayerMenuDownBtn.disabled = !hasRoot || currentIdx < 0 || currentIdx >= currentKinds.length - 1;
 }
 
 export async function loadUsbPlayerMenuConfig(ctx) {
@@ -1373,7 +1291,6 @@ function backgroundColorName(value) {
 export function renderUsbBackgroundColor(ctx) {
   const { state, el, document } = ctx;
   const chips = el.usbBackgroundColorChips;
-  if (!chips) return;
   const data = state.usbBackgroundColor;
   const hasRoot = !!state.usbRoot && !!state.usbRootValid;
   const canSet = hasRoot && !!data?.writable && state.usbWritable !== false;
@@ -1394,7 +1311,6 @@ export function renderUsbBackgroundColor(ctx) {
   });
 
   const note = el.usbBackgroundColorNote;
-  if (!note) return;
   let text = "";
   if (hasRoot && data && !data.writable) {
     text = data.reason || "This USB has no place for a background colour.";
@@ -1482,7 +1398,7 @@ async function runPlaylistExport(ctx, playlistId) {
   }
 
   emitStatus(`Exporting ${playlist.name} to USB...`);
-  el.donateBtn?.classList.add("exporting");
+  el.donateBtn.classList.add("exporting");
   setProgress(true, 8, "Starting USB export...");
   ctx.startProgressHeartbeat();
   await ctx.nextPaint();
@@ -1703,7 +1619,7 @@ export async function initializeUsb(ctx) {
   try {
     await ctx.command("initialize_usb", { usbRoot: state.usbRoot });
     emitStatus("USB initialized");
-    el.usbInitRow?.classList?.add("hidden");
+    el.usbInitRow.classList?.add("hidden");
     await validateAndSetUsbRoot(ctx, state.usbRoot, false);
   } catch (err) {
     ctx.logError("Initialize USB failed:", err);
@@ -1818,9 +1734,7 @@ export function renderUsbRecentRoots(ctx) {
 export function updateUsbRootText(ctx, path, valid = false) {
   const { el } = ctx;
   if (!el?.usbRootPathText) return;
-  if (el.usbConnectionBar) {
-    el.usbConnectionBar.classList.remove("hidden");
-  }
+  el.usbConnectionBar.classList.remove("hidden");
   if (!valid) {
     el.usbRootPathText.textContent = "No USB selected";
     el.usbRootPathText.classList.remove("usb-path-valid", "usb-path-invalid");

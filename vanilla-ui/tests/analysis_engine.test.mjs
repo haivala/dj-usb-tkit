@@ -1,38 +1,12 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { JSDOM } from "jsdom";
 import { bindSettingsEvents, renderEssentiaInstallRow } from "../components/settings/events.mjs";
-import { APP_TEMPLATES } from "./test_helpers.mjs";
+import { makeTestCtx } from "./test_helpers.mjs";
 
-const ENGINE_HTML = `<!doctype html><body>
-  <select id="analysisEngineSelect">
-    <option value="stratum">Stratum (built-in)</option>
-    <option value="essentia">Essentia</option>
-  </select>
-  <div id="essentiaInstallRow" class="hidden">
-    <span id="essentiaNodeStatus"></span>
-    <button id="essentiaDownloadBtn">Download ~5 MB</button>
-    <button id="essentiaCancelBtn" class="hidden">Cancel</button>
-    <button id="essentiaRemoveBtn" class="hidden">Remove</button>
-  </div>
-  ${APP_TEMPLATES}
-</body>`;
-
+// The real app context on index.html; `el` is its real settings controls.
 function makeDom() {
-  const dom = new JSDOM(ENGINE_HTML);
-  const doc = dom.window.document;
-  return {
-    dom,
-    document: doc,
-    el: {
-      analysisEngineSelect: doc.querySelector("#analysisEngineSelect"),
-      essentiaInstallRow: doc.querySelector("#essentiaInstallRow"),
-      essentiaNodeStatus: doc.querySelector("#essentiaNodeStatus"),
-      essentiaDownloadBtn: doc.querySelector("#essentiaDownloadBtn"),
-      essentiaCancelBtn: doc.querySelector("#essentiaCancelBtn"),
-      essentiaRemoveBtn: doc.querySelector("#essentiaRemoveBtn")
-    }
-  };
+  const ctx = makeTestCtx();
+  return { ctx, dom: ctx.dom, el: ctx.el };
 }
 
 test("engine selector exposes stratum and essentia", () => {
@@ -95,28 +69,23 @@ test("renderEssentiaInstallRow maps engine/install state to row text and actions
   }
 });
 
-function bindEngineSettings({ state, el, document, dom, command, persistSetting, setProgress }) {
+function bindEngineSettings({ ctx, state, command, persistSetting, setProgress }) {
   const statuses = [];
-  bindSettingsEvents({
+  bindSettingsEvents(Object.assign(ctx, {
     state,
-    el,
-    document,
-    window: dom.window,
-    navigator: {},
     persistSetting,
     emitStatus: (message) => statuses.push(message),
     command,
-    getTauriEventListen: async () => null,
     setProgress,
     closeSettingsDrawer: () => {},
     switchView: async () => {},
     updatePlaylistExportButtons: () => {}
-  });
+  }));
   return statuses;
 }
 
 test("settings events persist engine changes and invoke Essentia commands", async () => {
-  const { dom, document, el } = makeDom();
+  const { ctx, dom, el } = makeDom();
   const state = {
     analysisEngine: "stratum",
     nodeAvailable: true,
@@ -126,10 +95,8 @@ test("settings events persist engine changes and invoke Essentia commands", asyn
   const commands = [];
   const persisted = [];
   const statuses = bindEngineSettings({
+    ctx,
     state,
-    el,
-    document,
-    dom,
     command: async (cmd) => { commands.push(cmd); },
     persistSetting: (storageKey, dbKey, value) => { persisted.push({ storageKey, dbKey, value }); },
     setProgress: () => {}

@@ -7,7 +7,7 @@ import { cloneTemplate } from "../../ui_utils.mjs";
 export function bindTrackDetailEvents(ctx) {
   const { el, trackDetailDialog } = ctx;
   const view = el.trackDetailView;
-  if (!view || !trackDetailDialog) return;
+  if (!trackDetailDialog) return;
 
   let playbackStartedHere = false;
   // Playback of this track was already running when the editor opened: the
@@ -55,8 +55,8 @@ export function bindTrackDetailEvents(ctx) {
     trackDetailDialog.close(null);
   };
 
-  el.trackDetailCloseBtn?.addEventListener("click", close);
-  el.trackDetailCancelBtn?.addEventListener("click", close);
+  el.trackDetailCloseBtn.addEventListener("click", close);
+  el.trackDetailCancelBtn.addEventListener("click", close);
   // An outside click or Escape closes the dialog only when there is nothing
   // to lose; with unsaved edits it just points at Save (Cancel still discards).
   const closeIfClean = () => {
@@ -65,24 +65,23 @@ export function bindTrackDetailEvents(ctx) {
       return;
     }
     const save = el.trackDetailSaveBtn;
-    if (!save) return;
     save.classList.remove("is-attention");
     void save.offsetWidth; // restart the animation on repeated attempts
     save.classList.add("is-attention");
   };
-  el.trackDetailSaveBtn?.addEventListener("animationend", (event) =>
+  el.trackDetailSaveBtn.addEventListener("animationend", (event) =>
     event.currentTarget.classList.remove("is-attention")
   );
   // On the document, like the shell's dialogs: deleting a cue removes the
   // focused button, leaving focus on <body>, outside the editor.
   view.ownerDocument.addEventListener("keydown", (event) => {
     if (event.key !== "Escape" || !trackDetailDialog.isOpen()) return;
-    if (el.confirmOverlay && !el.confirmOverlay.hidden) return; // its own Escape
+    if (!el.confirmOverlay.hidden) return; // its own Escape
     event.preventDefault();
     closeIfClean();
   });
 
-  el.trackDetailSaveBtn?.addEventListener("click", () => {
+  el.trackDetailSaveBtn.addEventListener("click", () => {
     stopIfOwned();
     trackDetailDialog.close({
       ...trackDetailDialog.toSavePayload(),
@@ -346,7 +345,7 @@ export function bindTrackDetailEvents(ctx) {
     }
   });
 
-  el.trackDetailPlayPause?.addEventListener("click", () => {
+  el.trackDetailPlayPause.addEventListener("click", () => {
     clearTimeout(pendingPlace);
     pendingPlace = null;
     if (trackDetailDialog.isPlaying()) {
@@ -394,16 +393,16 @@ export function bindTrackDetailEvents(ctx) {
   overview?.addEventListener("pointerup", endOverviewDrag);
   overview?.addEventListener("pointercancel", endOverviewDrag);
 
-  el.trackDetailZoomIn?.addEventListener("click", () => trackDetailDialog.zoomAt(0.5, 0.5));
-  el.trackDetailZoomOut?.addEventListener("click", () => trackDetailDialog.zoomAt(0.5, 2));
-  el.trackDetailZoomFit?.addEventListener("click", () => trackDetailDialog.fitView());
+  el.trackDetailZoomIn.addEventListener("click", () => trackDetailDialog.zoomAt(0.5, 0.5));
+  el.trackDetailZoomOut.addEventListener("click", () => trackDetailDialog.zoomAt(0.5, 2));
+  el.trackDetailZoomFit.addEventListener("click", () => trackDetailDialog.fitView());
 
   // Click a marker → scroll its row into view and play from that cue
   // (not when the click ends a marker drag).
-  el.trackDetailCueMarkers?.addEventListener("click", (event) => {
+  el.trackDetailCueMarkers.addEventListener("click", (event) => {
     const marker = event.target.closest(".cue-marker");
     if (!marker || suppressMarkerClick) return;
-    const row = el.trackDetailCueList?.querySelector(
+    const row = el.trackDetailCueList.querySelector(
       `.cue-row[data-temp-id="${marker.dataset.tempId}"]`
     );
     row?.scrollIntoView({ block: "nearest" });
@@ -417,7 +416,7 @@ export function bindTrackDetailEvents(ctx) {
   const addCueAtPlayhead = (free) => {
     if (!trackDetailDialog.addCue(undefined, { free })) emitCueBlocked();
   };
-  el.trackDetailAddCue?.addEventListener("click", (event) => addCueAtPlayhead(event.shiftKey));
+  el.trackDetailAddCue.addEventListener("click", (event) => addCueAtPlayhead(event.shiftKey));
   const addMemoryCueAtPlayhead = (free) => {
     if (!trackDetailDialog.addMemoryCue(undefined, { free })) {
       ctx.emitStatus("A cue is already there.");
@@ -428,7 +427,7 @@ export function bindTrackDetailEvents(ctx) {
   // the one reached), + adds one at the playhead. Play, colour, name and ×
   // work as in the cue rows (bindCueRows below). These re-render the slot,
   // so the cue-row handler mustn't then select the old slot's cue again.
-  el.trackDetailMemoryCue?.addEventListener("click", (event) => {
+  el.trackDetailMemoryCue.addEventListener("click", (event) => {
     const action = event.target.closest("[data-action]")?.dataset.action;
     if (action?.startsWith("memory-")) event.stopImmediatePropagation();
     if (action === "memory-prev" || action === "memory-next") {
@@ -438,13 +437,13 @@ export function bindTrackDetailEvents(ctx) {
     }
   });
 
-  el.trackDetailQuantize?.addEventListener("click", () => trackDetailDialog.toggleQuantize());
-  el.trackDetailFollowGrid?.addEventListener("click", () => trackDetailDialog.toggleFollowGrid());
-  el.trackDetailMetronome?.addEventListener("click", () => trackDetailDialog.toggleMetronome());
-  el.trackDetailUndo?.addEventListener("click", () => trackDetailDialog.undo());
-  el.trackDetailRedo?.addEventListener("click", () => trackDetailDialog.redo());
-  el.trackDetailBpmHalf?.addEventListener("click", () => trackDetailDialog.scaleBpm(0.5));
-  el.trackDetailBpmDouble?.addEventListener("click", () => trackDetailDialog.scaleBpm(2));
+  el.trackDetailQuantize.addEventListener("click", () => trackDetailDialog.toggleQuantize());
+  el.trackDetailFollowGrid.addEventListener("click", () => trackDetailDialog.toggleFollowGrid());
+  el.trackDetailMetronome.addEventListener("click", () => trackDetailDialog.toggleMetronome());
+  el.trackDetailUndo.addEventListener("click", () => trackDetailDialog.undo());
+  el.trackDetailRedo.addEventListener("click", () => trackDetailDialog.redo());
+  el.trackDetailBpmHalf.addEventListener("click", () => trackDetailDialog.scaleBpm(0.5));
+  el.trackDetailBpmDouble.addEventListener("click", () => trackDetailDialog.scaleBpm(2));
 
   // --- Keyboard shortcuts (while the editor is open) ---
   // Text fields, the key select and the sliders keep their own keys, including
@@ -459,7 +458,7 @@ export function bindTrackDetailEvents(ctx) {
   };
   doc.addEventListener("keydown", (event) => {
     if (!trackDetailDialog.isOpen()) return;
-    if (el.confirmOverlay && !el.confirmOverlay.hidden) return;
+    if (!el.confirmOverlay.hidden) return;
     if (isTypingTarget(event.target)) return;
     const mod = event.ctrlKey || event.metaKey;
     const key = event.key;
@@ -473,7 +472,7 @@ export function bindTrackDetailEvents(ctx) {
       handled = false;
     } else if (key === " ") {
       // Also keeps Space from pressing the focused button (Save has focus on open).
-      if (!event.repeat) el.trackDetailPlayPause?.click();
+      if (!event.repeat) el.trackDetailPlayPause.click();
     } else if (key === "c" || key === "C") {
       if (!event.repeat) addCueAtPlayhead(event.shiftKey);
     } else if (key === "m" || key === "M") {
@@ -491,73 +490,73 @@ export function bindTrackDetailEvents(ctx) {
     if (handled) event.preventDefault();
   });
 
-  bindNumberSteppers(el.trackDetailBpm?.closest(".track-detail-fields"));
+  bindNumberSteppers(el.trackDetailBpm.closest(".track-detail-fields"));
 
-  el.trackDetailFirstBeatMinus?.addEventListener("click", () =>
+  el.trackDetailFirstBeatMinus.addEventListener("click", () =>
     trackDetailDialog.nudgeFirstBeat(-1)
   );
-  el.trackDetailFirstBeatPlus?.addEventListener("click", () =>
+  el.trackDetailFirstBeatPlus.addEventListener("click", () =>
     trackDetailDialog.nudgeFirstBeat(1)
   );
-  el.trackDetailFirstBeatMs?.addEventListener("change", (event) => {
+  el.trackDetailFirstBeatMs.addEventListener("change", (event) => {
     trackDetailDialog.setFirstBeatMs(Number(event.target.value) || 0);
   });
 
-  el.trackDetailGridLevel?.addEventListener("input", (event) =>
+  el.trackDetailGridLevel.addEventListener("input", (event) =>
     trackDetailDialog.setBeatgridLevel(event.target.value)
   );
-  el.trackDetailGridLevel?.addEventListener("change", (event) =>
+  el.trackDetailGridLevel.addEventListener("change", (event) =>
     trackDetailDialog.setBeatgridLevel(event.target.value, { remember: true })
   );
 
-  el.trackDetailMetronomeMix?.addEventListener("input", (event) =>
+  el.trackDetailMetronomeMix.addEventListener("input", (event) =>
     trackDetailDialog.setMetronomeMix(event.target.value)
   );
-  el.trackDetailMetronomeMix?.addEventListener("change", (event) =>
+  el.trackDetailMetronomeMix.addEventListener("change", (event) =>
     trackDetailDialog.setMetronomeMix(event.target.value, { remember: true })
   );
 
-  el.trackDetailStartFirstCue?.addEventListener("click", () =>
+  el.trackDetailStartFirstCue.addEventListener("click", () =>
     trackDetailDialog.setStartOnFirstBeat(false, { remember: true })
   );
-  el.trackDetailStartFirstBeat?.addEventListener("click", () =>
+  el.trackDetailStartFirstBeat.addEventListener("click", () =>
     trackDetailDialog.setStartOnFirstBeat(true, { remember: true })
   );
 
-  el.trackDetailBpmMinus?.addEventListener("click", () =>
+  el.trackDetailBpmMinus.addEventListener("click", () =>
     trackDetailDialog.nudgeBpm(-1)
   );
-  el.trackDetailBpmPlus?.addEventListener("click", () =>
+  el.trackDetailBpmPlus.addEventListener("click", () =>
     trackDetailDialog.nudgeBpm(1)
   );
-  el.trackDetailBpm?.addEventListener("change", (event) => {
+  el.trackDetailBpm.addEventListener("change", (event) => {
     trackDetailDialog.setBpm(Number.parseFloat(event.target.value));
   });
 
-  el.trackDetailKeyMinus?.addEventListener("click", () =>
+  el.trackDetailKeyMinus.addEventListener("click", () =>
     trackDetailDialog.nudgeKey(-1)
   );
-  el.trackDetailKeyPlus?.addEventListener("click", () =>
+  el.trackDetailKeyPlus.addEventListener("click", () =>
     trackDetailDialog.nudgeKey(1)
   );
-  el.trackDetailKey?.addEventListener("change", (event) => {
+  el.trackDetailKey.addEventListener("change", (event) => {
     trackDetailDialog.setKey(event.target.value);
   });
 
-  el.trackDetailGenre?.addEventListener("change", (event) => {
+  el.trackDetailGenre.addEventListener("change", (event) => {
     trackDetailDialog.setGenre(event.target.value);
   });
-  el.trackDetailReleaseDate?.addEventListener("change", (event) => {
+  el.trackDetailReleaseDate.addEventListener("change", (event) => {
     trackDetailDialog.setReleaseDate(event.target.value);
   });
-  el.trackDetailRevealBtn?.addEventListener("click", () => {
+  el.trackDetailRevealBtn.addEventListener("click", () => {
     const path = trackDetailDialog.getWorking().track?.filePath;
     if (!path) return;
     ctx.invoke("reveal_track_file", { path }).catch((err) => {
       ctx.emitStatus(`Could not show the file: ${err?.message || err}`, { level: "error" });
     });
   });
-  el.trackDetailRating?.addEventListener("click", (event) => {
+  el.trackDetailRating.addEventListener("click", (event) => {
     const star = event.target.closest?.("[data-rating]");
     if (star) trackDetailDialog.setRating(Number(star.dataset.rating));
   });
@@ -645,7 +644,6 @@ function bindCueRows(host, ctx, playFromCue) {
 function openColorPopover(ctx, anchor, tempId) {
   const { el, trackDetailDialog } = ctx;
   const pop = el.trackDetailColorPopover;
-  if (!pop) return;
   pop.textContent = "";
   for (const entry of HOTCUE_PALETTE) {
     const swatch = cloneTemplate(pop.ownerDocument, "tplCueColorSwatch");

@@ -71,10 +71,8 @@ export function renderUpdateNotice(ctx) {
   const info = state.updateCheck;
   const available = !!info?.updateAvailable;
 
-  if (el.settingsUpdateDot) {
-    el.settingsUpdateDot.classList.toggle("hidden", !available);
-    el.settingsBtn?.setAttribute("aria-label", available ? "Settings (update available)" : "Settings");
-  }
+  el.settingsUpdateDot.classList.toggle("hidden", !available);
+  el.settingsBtn.setAttribute("aria-label", available ? "Settings (update available)" : "Settings");
 
   // Only offered once a check has run (never in the browser/test build).
   const checkBtn = el.settingsUpdateCheckBtn;
@@ -85,7 +83,6 @@ export function renderUpdateNotice(ctx) {
   }
 
   const section = el.settingsUpdateSection;
-  if (!section) return;
   const text = updateStatusText(state);
   section.classList.toggle("hidden", !text);
   section.classList.toggle("is-available", available);
@@ -146,7 +143,6 @@ const BANNER_TEXT = {
 
 export function renderUpdateBanner(ctx) {
   const { state, el, localStorage } = ctx;
-  if (!el.updateBanner) return;
 
   renderUpdateActions(ctx, el.updateBannerActions);
   const info = state.updateCheck;
@@ -171,20 +167,16 @@ export function renderUpdateBanner(ctx) {
   el.updateBanner.classList.toggle("is-critical", info.severity === "critical");
   el.updateBanner.classList.toggle("is-feature", info.severity === "feature");
   el.updateBanner.setAttribute("role", info.severity === "critical" ? "alert" : "status");
-  if (el.updateBannerText) {
-    el.updateBannerText.querySelector(".update-banner-message").textContent = bannerText(info.latestVersion);
-    el.updateBannerText.querySelector(".update-banner-link").onclick = (event) => {
-      event.preventDefault();
-      openExternalUrl(ctx.window, info.releaseUrl || RELEASES_PAGE_URL);
-    };
-  }
+  el.updateBannerText.querySelector(".update-banner-message").textContent = bannerText(info.latestVersion);
+  el.updateBannerText.querySelector(".update-banner-link").onclick = (event) => {
+    event.preventDefault();
+    openExternalUrl(ctx.window, info.releaseUrl || RELEASES_PAGE_URL);
+  };
 }
 
 export function dismissUpdateBanner(ctx) {
   const { state, el, localStorage } = ctx;
-  if (el.updateBanner) {
-    el.updateBanner.classList.add("hidden");
-  }
+  el.updateBanner.classList.add("hidden");
   try {
     const latestVersion = state.updateCheck?.latestVersion;
     if (latestVersion) {
@@ -213,7 +205,7 @@ export async function installUpdate(ctx) {
   }
 
   state.updateInstalling = true;
-  el.updateBanner?.classList.add("hidden");
+  el.updateBanner.classList.add("hidden");
   renderUpdateNotice(ctx);
   try {
     await ctx.command("install_update");

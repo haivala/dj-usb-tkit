@@ -19,7 +19,7 @@ import {
   updateUsbSubNavDisabledState
 } from "../ui_controller.mjs";
 import { initTooltips } from "../tooltip.mjs";
-import { APP_TEMPLATES } from "./test_helpers.mjs";
+import { APP_TEMPLATES, makeTestCtx } from "./test_helpers.mjs";
 
 function makeDom(body = "") {
   return new JSDOM(`<!doctype html><body>${APP_TEMPLATES}<div id="app-tooltip" class="app-tooltip" role="tooltip"></div>${body || `
@@ -119,8 +119,7 @@ test("playlist mode and selection helpers derive DOM state from app state", () =
 });
 
 test("USB nav and empty-state helpers follow the selected-root state", () => {
-  const { document } = makeDom().window;
-  const el = elements(document, ["navSidebar", "refreshUsbBtn", "refreshHistoryBtn"]);
+  const { document, el } = makeTestCtx();
   const switched = [];
 
   updateUsbSubNavDisabledState({

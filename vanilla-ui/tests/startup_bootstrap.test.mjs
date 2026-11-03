@@ -10,7 +10,7 @@ import {
   showHelpOnFirstVisit,
   switchView
 } from "../startup_bootstrap.mjs";
-import { withSilencedConsole } from "./test_helpers.mjs";
+import { makeTestCtx, withSilencedConsole } from "./test_helpers.mjs";
 import {
   STORAGE_KEY_EXPORT_PRUNE_STALE,
   STORAGE_KEY_EXPORT_BACKUP,
@@ -19,14 +19,9 @@ import {
   STORAGE_KEY_SIDEBAR_COLLAPSED
 } from "../settings_keys.mjs";
 
+// The real settings controls from index.html.
 function prefEls() {
-  return {
-    exportSyncModeMirror: { checked: false },
-    exportSyncModeAdditive: { checked: false },
-    exportBackupCheckbox: { checked: false },
-    exportEngineLibraryCheckbox: { checked: false },
-    analysisBpmRangeSelect: { value: "" }
-  };
+  return makeTestCtx().el;
 }
 
 function restorePrefs(state, el, values) {
@@ -191,26 +186,7 @@ function switchViewCtx(state, el, overrides = {}) {
 }
 
 function switchViewDom() {
-  const dom = new JSDOM(`<!doctype html><body>
-    <nav id="navSidebar">
-      <button class="nav-item" data-view="library"></button>
-      <button class="nav-item" data-view="usb"></button>
-    </nav>
-    <ul id="navPlaylistList"></ul>
-  </body>`);
-  const document = dom.window.document;
-  return {
-    document,
-    el: {
-      navSidebar: document.getElementById("navSidebar"),
-      navPlaylistList: document.getElementById("navPlaylistList"),
-      panels: {
-        library: document.createElement("div"),
-        usb: document.createElement("div"),
-        playlist: document.createElement("div")
-      }
-    }
-  };
+  return { el: makeTestCtx().el };
 }
 
 test("switchView commits the outgoing playlist's sort only when the view actually changes", async () => {

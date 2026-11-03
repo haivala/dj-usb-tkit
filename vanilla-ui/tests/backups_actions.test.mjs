@@ -2,18 +2,18 @@ import test from "node:test";
 import assert from "node:assert/strict";
 
 import { restoreUsbBackup, deleteUsbBackup } from "../components/backups/actions.mjs";
+import { makeTestCtx } from "./test_helpers.mjs";
 
-// Every collaborator restore/delete touches, as no-ops (the post-action list
-// reload finds no list element to render into).
+// The real app context with every collaborator restore/delete touches as a
+// no-op; the post-action list reload renders into the real backups list.
 function backupCtx(state, overrides = {}) {
-  return {
+  return makeTestCtx({
     state,
-    el: {},
     emitStatus: () => {},
     clearUsbDiagnostics: () => {},
     resetUsbStateViews: () => {},
     ...overrides
-  };
+  });
 }
 
 test("restoreUsbBackup clears the on-screen diagnostics report after a successful restore", async () => {
@@ -76,11 +76,12 @@ test("restoreUsbBackup does nothing when the user cancels the confirm dialog", a
 
 test("deleteUsbBackup removes the entry without touching the diagnostics report", async () => {
   const state = { usbRoot: "/usb", usbBackups: [{ timestamp: "2020-01-01_00-00-00", files: [] }] };
-  let commandArgs = null;
+  const calls = [];
   await deleteUsbBackup(backupCtx(state, {
-    command: async (name, args) => { commandArgs = { name, args }; return {}; },
+    command: async (name, args) => { calls.push({ name, args }); return {}; },
     openConfirmDialog: async () => true
   }), "2020-01-01_00-00-00");
-  assert.equal(commandArgs.name, "delete_usb_backup");
-  assert.equal(commandArgs.args.timestamp, "2020-01-01_00-00-00");
+  // The delete, then the list reload.
+  assert.deepEqual(calls.map((c) => c.name), ["delete_usb_backup", "list_usb_backups"]);
+  assert.equal(calls[0].args.timestamp, "2020-01-01_00-00-00");
 });

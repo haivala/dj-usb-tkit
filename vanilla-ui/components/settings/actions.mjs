@@ -169,8 +169,8 @@ export function createAccentManager(ctx, themeManager) {
       const h = Number.isFinite(hue) ? Math.round(hue) % 360 : mgr.hue();
       document.documentElement.style.setProperty("--accent-h", String(h));
       persistSetting(ctx, STORAGE_KEY_ACCENT_HUE, FRONTEND_DB_KEY_ACCENT_HUE, String(h));
-      if (el.accentSwatch) el.accentSwatch.style.background = `hsl(${h}, 82%, 55%)`;
-      if (el.accentHueSlider) el.accentHueSlider.value = String(h);
+      el.accentSwatch.style.background = `hsl(${h}, 82%, 55%)`;
+      el.accentHueSlider.value = String(h);
       themeManager.updateWaveformColors();
     },
 
@@ -180,14 +180,10 @@ export function createAccentManager(ctx, themeManager) {
 
     init() {
       mgr.apply();
-      if (el.accentHueSlider) {
-        el.accentHueSlider.addEventListener("input", () => {
-          mgr.apply(Number(el.accentHueSlider.value));
-        });
-      }
-      if (el.accentResetBtn) {
-        el.accentResetBtn.addEventListener("click", () => mgr.reset());
-      }
+      el.accentHueSlider.addEventListener("input", () => {
+        mgr.apply(Number(el.accentHueSlider.value));
+      });
+      el.accentResetBtn.addEventListener("click", () => mgr.reset());
     }
   };
 

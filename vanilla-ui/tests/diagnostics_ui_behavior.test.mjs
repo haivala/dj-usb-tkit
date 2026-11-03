@@ -5,7 +5,6 @@ import {
   hideUsbDiagnostics,
   renderRepairPreview
 } from "../components/usb/actions.mjs";
-import { makeClassList } from "./fixtures/dom.mjs";
 import { makeTestCtx } from "./test_helpers.mjs";
 
 function renderPreview(payload) {
@@ -103,51 +102,23 @@ test("renderRepairPreview renders each backend fix description verbatim and appe
   assert.equal(fixTitle(fixes[1]), "2 malformed USBANLZ entry/entries");
 });
 
-function makeHealthDot() {
-  return {
-    classList: makeClassList(),
-    dataset: {},
-    ariaLabel: "",
-    setAttribute(name, value) {
-      if (name === "aria-label") this.ariaLabel = value;
-    }
-  };
-}
-
-// A stand-in container: `replaceChildren()` empties its markup.
-function container(innerHTML) {
-  return { innerHTML, replaceChildren() { this.innerHTML = ""; } };
-}
-
-function makeDiagnosticsEl() {
-  const healthCard = {
-    classList: makeClassList(),
-    open: true,
-    removeAttribute(name) {
-      if (name === "open") this.open = false;
-    }
-  };
-  healthCard.classList.add("is-loading");
-  const el = {
-    usbHealthDot: makeHealthDot(),
-    usbHeaderHealthDot: makeHealthDot(),
-    usbDiagnosticsCard: {
-      classList: makeClassList(),
-      closest: (selector) => selector === "#usbHealthCard" ? healthCard : null
-    },
-    diagSections: container("<div>stale</div>"),
-    diagOverallStatus: { textContent: "WARN", className: "diag-badge diag-warn" },
-    diagDuration: { textContent: "Completed in 1ms" },
-    diagRepairSummary: { textContent: "stale summary", className: "diag-repair-summary is-bad" },
-    diagRepairFixes: container("<div>stale fix</div>"),
-    previewRepairsBtn: { disabled: false },
-    applyRepairsBtn: { disabled: false },
-    diagReportView: { classList: makeClassList() },
-    diagRepairPanel: { classList: makeClassList() },
-    _healthCard: healthCard
-  };
+// The real app context, with a stale report and an open, loading health card.
+function makeDiagnosticsCtx() {
+  const ctx = makeTestCtx();
+  const { el } = ctx;
+  el.usbHealthCard.setAttribute("open", "");
+  el.usbHealthCard.classList.add("is-loading");
   el.usbHealthDot.classList.add("health-warn");
-  return el;
+  el.diagSections.innerHTML = "<div>stale</div>";
+  el.diagRepairFixes.innerHTML = "<div>stale fix</div>";
+  el.diagOverallStatus.textContent = "WARN";
+  el.diagDuration.textContent = "Completed in 1ms";
+  el.diagRepairSummary.textContent = "stale summary";
+  el.previewRepairsBtn.disabled = false;
+  el.applyRepairsBtn.disabled = false;
+  el.diagReportView.classList.add("hidden");
+  el.diagRepairPanel.classList.remove("hidden");
+  return ctx;
 }
 
 function assertDiagnosticsContentCleared(el) {
@@ -170,11 +141,13 @@ test("clearUsbDiagnostics and hideUsbDiagnostics blank content with different vi
     [clearUsbDiagnostics, false, true, true],
     [hideUsbDiagnostics, true, false, false]
   ]) {
-    const el = makeDiagnosticsEl();
-    action({ el });
+    const ctx = makeDiagnosticsCtx();
+    const { el } = ctx;
+    el.usbDiagnosticsCard.classList.remove("hidden");
+    action(ctx);
     assertDiagnosticsContentCleared(el);
     assert.equal(el.usbDiagnosticsCard.classList.contains("hidden"), cardHidden);
-    assert.equal(el._healthCard.open, cardOpen);
-    assert.equal(el._healthCard.classList.contains("is-loading"), loading);
+    assert.equal(el.usbHealthCard.open, cardOpen);
+    assert.equal(el.usbHealthCard.classList.contains("is-loading"), loading);
   }
 });

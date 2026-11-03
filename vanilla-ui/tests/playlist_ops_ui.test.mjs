@@ -178,24 +178,19 @@ test("commitActivePlaylistSort no-ops for a missing/empty playlist id", async ()
 });
 
 test("bindPlaylistEvents ignores playlist selection clicks while new playlist input is open", async () => {
-  const dom = makeDom();
-  const { document, Event } = dom.window;
-  const el = {
-    ...elements(document, ["navPlaylistList", "addPlaylistBtn", "playlistSearchInput", "exportPlaylistBtn"]),
-    panels: { playlist: document.createElement("div") }
-  };
+  const switched = [];
+  const ctx = makeTestCtx(bindDeps({
+    state: { currentPlaylistId: "p0", trackSelections: createInitialState().trackSelections },
+    switchView: async (view) => { switched.push(view); }
+  }));
+  const { document, el } = ctx;
+  const { Event } = ctx.dom.window;
   el.navPlaylistList.innerHTML = `
     <li><button class="nav-playlist-item" data-playlist-id="p1">One</button></li>
     <li class="nav-new-input-wrap"><input class="nav-new-input" /></li>
   `;
-  const switched = [];
 
-  bindPlaylistEvents(bindDeps({
-    state: { currentPlaylistId: "p0", trackSelections: createInitialState().trackSelections },
-    document,
-    el,
-    switchView: async (view) => { switched.push(view); }
-  }));
+  bindPlaylistEvents(ctx);
 
   document.querySelector(".nav-playlist-item").dispatchEvent(new Event("click", { bubbles: true }));
   await new Promise((resolve) => setTimeout(resolve, 0));

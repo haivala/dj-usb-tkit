@@ -323,19 +323,15 @@ export function updatePlaylistExportButtons(ctx) {
   // holds a page, so it can't count them itself.
   const unanalyzedCount = Number(current?.unanalyzedCount) || 0;
   const showAnalyzeMissing = unanalyzedCount > 0;
-  if (el.analyzePlaylistMissingBtn) {
-    el.analyzePlaylistMissingBtn.disabled = !showAnalyzeMissing;
-    el.analyzePlaylistMissingBtn.hidden = !showAnalyzeMissing;
-    el.analyzePlaylistMissingBtn.textContent = showAnalyzeMissing
-      ? `Analyze Missing Tracks (${unanalyzedCount})`
-      : "Analyze Missing Tracks";
-    el.analyzePlaylistMissingBtn.dataset.tooltip = showAnalyzeMissing
-      ? ANALYZE_PLAYLIST_MISSING_TOOLTIP
-      : "No tracks in this playlist need analysis";
-  }
-  if (el.exportPlaylistBtn) {
-    el.exportPlaylistBtn.hidden = showAnalyzeMissing;
-  }
+  el.analyzePlaylistMissingBtn.disabled = !showAnalyzeMissing;
+  el.analyzePlaylistMissingBtn.hidden = !showAnalyzeMissing;
+  el.analyzePlaylistMissingBtn.textContent = showAnalyzeMissing
+    ? `Analyze Missing Tracks (${unanalyzedCount})`
+    : "Analyze Missing Tracks";
+  el.analyzePlaylistMissingBtn.dataset.tooltip = showAnalyzeMissing
+    ? ANALYZE_PLAYLIST_MISSING_TOOLTIP
+    : "No tracks in this playlist need analysis";
+  el.exportPlaylistBtn.hidden = showAnalyzeMissing;
 }
 
 export async function createPlaylist(ctx, name) {
@@ -812,7 +808,7 @@ export function clearPlaylistTrackSort(ctx) {
   clearTrackSort(
     ctx.tableSortState,
     "playlistTracksBody",
-    ctx.el.playlistTracksBody?.closest("[data-track-grid]")
+    ctx.el.playlistTracksBody.closest("[data-track-grid]")
   );
 }
 
@@ -904,8 +900,8 @@ export function createPlaylistTracksController(ctx) {
       // onPage still owns the authoritative empty/non-empty state afterwards.
       const hasTracks = Number(data.listTrackCount) > 0 || Number(data.total) > 0
         || (data.items || []).length > 0;
-      ctx.el.playlistTableWrap?.classList.toggle("hidden", !hasTracks);
-      ctx.el.playlistTotalDuration?.classList.toggle("hidden", !hasTracks);
+      ctx.el.playlistTableWrap.classList.toggle("hidden", !hasTracks);
+      ctx.el.playlistTotalDuration.classList.toggle("hidden", !hasTracks);
     },
     onPage: (_page, { first }) => {
       if (first) narrowTrackSelectionToLoaded(ctx, "playlist", getCurrentPlaylist(ctx)?.tracks || []);
@@ -924,30 +920,28 @@ function renderPlaylistEmptyState(ctx, playlist) {
   const { state, el, playlistTracksCtl } = ctx;
   const loaded = playlistTracksCtl.scopeId === playlist.id && !playlistTracksCtl.loading;
   const empty = loaded && playlistTracksCtl.total === 0 && !(Number(playlist.listTrackCount) > 0);
-  if (el.playlistEmptyState) {
-    el.playlistEmptyState.replaceChildren();
-    if (empty) {
-      // With a USB selected, its playlists are the tracks to add; without
-      // one, the USB view is where to select it.
-      const hasUsb = !!state.usbRoot && !!state.usbRootValid;
-      renderEmptyState(el.playlistEmptyState, {
-        icon: "♫",
-        heading: "Browse Library or USB to add tracks",
-        actionLabel: "Media Library",
-        onAction: () => ctx.switchView("library").catch((err) => console.error(err)),
-        extraActions: [{
-          label: hasUsb ? "USB Playlists" : "USB",
-          onAction: () => ctx.switchView(hasUsb ? "usb-playlists" : "usb").catch((err) => console.error(err)),
-        }],
-      });
-    }
+  el.playlistEmptyState.replaceChildren();
+  if (empty) {
+    // With a USB selected, its playlists are the tracks to add; without
+    // one, the USB view is where to select it.
+    const hasUsb = !!state.usbRoot && !!state.usbRootValid;
+    renderEmptyState(el.playlistEmptyState, {
+      icon: "♫",
+      heading: "Browse Library or USB to add tracks",
+      actionLabel: "Media Library",
+      onAction: () => ctx.switchView("library").catch((err) => console.error(err)),
+      extraActions: [{
+        label: hasUsb ? "USB Playlists" : "USB",
+        onAction: () => ctx.switchView(hasUsb ? "usb-playlists" : "usb").catch((err) => console.error(err)),
+      }],
+    });
   }
-  el.playlistTableWrap?.classList.toggle("hidden", empty);
-  el.playlistTotalDuration?.classList.toggle("hidden", empty);
+  el.playlistTableWrap.classList.toggle("hidden", empty);
+  el.playlistTotalDuration.classList.toggle("hidden", empty);
   // "Not exported yet." says nothing useful about a playlist with no tracks.
-  el.playlistExportStatus?.classList.toggle("hidden", empty && !playlist.lastExportedAt);
-  el.playlistSearchInput?.closest(".track-toolbar")?.classList.toggle("hidden", empty);
-  el.exportPlaylistBtn?.closest(".playlist-actions")?.classList.toggle("hidden", empty);
+  el.playlistExportStatus.classList.toggle("hidden", empty && !playlist.lastExportedAt);
+  el.playlistSearchInput.closest(".track-toolbar")?.classList.toggle("hidden", empty);
+  el.exportPlaylistBtn.closest(".playlist-actions")?.classList.toggle("hidden", empty);
 }
 
 // Panel glue around the playlist track table that the controller does not own:
@@ -958,11 +952,11 @@ export function renderPlaylistPanelChrome(ctx) {
   const playlist = getCurrentPlaylist(ctx);
   if (!playlist) return;
   renderPlaylistEmptyState(ctx, playlist);
-  if (el.playlistSearchInput && el.playlistSearchInput.value !== (state.playlistTrackSearch || "")) {
+  if (el.playlistSearchInput.value !== (state.playlistTrackSearch || "")) {
     el.playlistSearchInput.value = state.playlistTrackSearch || "";
   }
   for (const id of state.analyzingTrackIds) {
-    const row = el.playlistTracksBody?.querySelector(
+    const row = el.playlistTracksBody.querySelector(
       `.track-grid-row[data-track-id="${cssEscape(id)}"][data-track-origin="local"]`,
     );
     if (row) row.classList.add("is-analyzing");

@@ -1,9 +1,9 @@
 export function bindBackupsEvents(ctx) {
   const { el } = ctx;
 
-  el.backupsRefreshBtn?.addEventListener("click", () => ctx.renderBackups());
+  el.backupsRefreshBtn.addEventListener("click", () => ctx.renderBackups());
 
-  el.backupsList?.addEventListener("click", async (event) => {
+  el.backupsList.addEventListener("click", async (event) => {
     const target = event.target;
     if (!(target instanceof Element)) return;
 

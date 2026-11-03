@@ -18,7 +18,7 @@ export function applyPlaylistReorderLockToGrid(el, playlist, { searchActive } = 
   const enableDragReorder = !searchActive && !locksReorder;
   const tooltip = locksReorder ? exportReorderLockTooltip(playlist.name) : null;
   const dragDisabledTooltip = !searchActive ? tooltip : null;
-  const grid = el.playlistTracksBody?.closest("[data-track-grid]");
+  const grid = el.playlistTracksBody.closest("[data-track-grid]");
   if (grid) {
     grid.dataset.sortLocked = locksReorder ? "true" : "false";
     grid.querySelectorAll('.sortable[role="columnheader"]').forEach((h) => {

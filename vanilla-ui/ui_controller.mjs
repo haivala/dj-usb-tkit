@@ -68,10 +68,10 @@ export function updateUsbSubNavDisabledState(ctx) {
   el.navSidebar.querySelectorAll('.nav-sub-item[data-view^="usb-"]').forEach((btn) => {
     btn.classList.toggle("revealed", hasRoot);
   });
-  if (el.refreshUsbBtn) el.refreshUsbBtn.disabled = !hasRoot;
-  if (el.refreshHistoryBtn) el.refreshHistoryBtn.disabled = !hasRoot;
-  if (el.backupsRefreshBtn) el.backupsRefreshBtn.disabled = !hasRoot;
-  if (el.usbBackupsBtn) el.usbBackupsBtn.disabled = !hasRoot;
+  el.refreshUsbBtn.disabled = !hasRoot;
+  el.refreshHistoryBtn.disabled = !hasRoot;
+  el.backupsRefreshBtn.disabled = !hasRoot;
+  el.usbBackupsBtn.disabled = !hasRoot;
   if (!hasRoot && (state.activeTab === "usb-playlists" || state.activeTab === "usb-history" || state.activeTab === "usb-player-menu" || state.activeTab === "backups")) {
     ctx.switchView("usb").catch(() => {});
   }
@@ -96,7 +96,6 @@ export function updateUsbEmptyState(ctx) {
 
 export function updateSourceFilterIndicator(ctx) {
   const { state, el } = ctx;
-  if (!el.sourceFilterIndicator) return;
   const sources = state.librarySources;
   const folderHidden = sources.folders.some((folder) => !folder.enabled || folder.missing);
   // Only an imported library can be filtered out; one never imported isn't.
@@ -107,7 +106,6 @@ export function updateSourceFilterIndicator(ctx) {
 
 export function updateScanLibraryButtonLabel(ctx) {
   const { state, el } = ctx;
-  if (!el.scanLibraryBtn) return;
   el.scanLibraryBtn.textContent = scanLibraryButtonLabel(state.librarySources.folders);
 }
 
@@ -279,15 +277,12 @@ export function createTracklistExportDialogController(el) {
   let isOpen = false;
 
   function syncPlacementVisibility() {
-    const enabled = !!el.tracklistExportTimesToggle?.checked;
-    if (el.tracklistExportPlacementRow) {
-      el.tracklistExportPlacementRow.classList.toggle("hidden", !enabled);
-    }
+    const enabled = !!el.tracklistExportTimesToggle.checked;
+    el.tracklistExportPlacementRow.classList.toggle("hidden", !enabled);
   }
 
   function populateStartTrackOptions(tracks) {
     const select = el.tracklistExportStartTrack;
-    if (!select) return;
     select.textContent = "";
     (tracks || []).forEach((track, index) => {
       const label = `${index + 1}. ${track?.artist || ""} - ${track?.title || ""}`;
@@ -330,18 +325,10 @@ export function createTracklistExportDialogController(el) {
 export function bindEvents(ctx) {
   const { el } = ctx;
 
-  if (el.progressDismiss) {
-    el.progressDismiss.addEventListener("click", ctx.dismissProgress);
-  }
-  if (el.progressPauseBtn) {
-    el.progressPauseBtn.addEventListener("click", ctx.toggleAnalysisPause);
-  }
-  if (el.progressCancelAnalysisBtn) {
-    el.progressCancelAnalysisBtn.addEventListener("click", ctx.cancelAnalysis);
-  }
-  if (el.progressCancelTranscodeBtn) {
-    el.progressCancelTranscodeBtn.addEventListener("click", ctx.cancelTranscode);
-  }
+  el.progressDismiss.addEventListener("click", ctx.dismissProgress);
+  el.progressPauseBtn.addEventListener("click", ctx.toggleAnalysisPause);
+  el.progressCancelAnalysisBtn.addEventListener("click", ctx.cancelAnalysis);
+  el.progressCancelTranscodeBtn.addEventListener("click", ctx.cancelTranscode);
 
   initTooltips(ctx);
   bindShellEvents(ctx);

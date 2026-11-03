@@ -87,22 +87,22 @@ export function bindPlaylistEvents(ctx) {
     promptNewPlaylist();
   });
 
-  el.importPlaylistBtn?.addEventListener("click", () => {
+  el.importPlaylistBtn.addEventListener("click", () => {
     importExternalPlaylist().catch(catchErr(emitStatus));
   });
-  el.playlistImportList?.addEventListener("change", () => playlistImportDialog?.sync());
-  el.playlistImportOkBtn?.addEventListener("click", () => {
+  el.playlistImportList.addEventListener("change", () => playlistImportDialog?.sync());
+  el.playlistImportOkBtn.addEventListener("click", () => {
     playlistImportDialog?.close(true);
   });
-  el.playlistImportCancelBtn?.addEventListener("click", () => {
+  el.playlistImportCancelBtn.addEventListener("click", () => {
     playlistImportDialog?.close(false);
   });
-  el.playlistImportOverlay?.addEventListener("click", (event) => {
+  el.playlistImportOverlay.addEventListener("click", (event) => {
     if (event.target === el.playlistImportOverlay) playlistImportDialog?.close(false);
   });
 
   let playlistSearchTimer = null;
-  el.playlistSearchInput?.addEventListener("input", () => {
+  el.playlistSearchInput.addEventListener("input", () => {
     state.playlistTrackSearch = String(el.playlistSearchInput.value || "");
     // Debounced backend re-query of the playlist (get_playlist_tracks query
     // param) -- same as the library search.
@@ -181,7 +181,7 @@ export function bindPlaylistEvents(ctx) {
     }
   });
 
-  el.exportPlaylistBtn?.addEventListener("click", () => {
+  el.exportPlaylistBtn.addEventListener("click", () => {
     if (!state.usbRoot || !state.usbRootValid) {
       switchView("usb").catch((err) => console.error(err));
       return;
@@ -194,7 +194,7 @@ export function bindPlaylistEvents(ctx) {
     });
   });
 
-  el.analyzePlaylistMissingBtn?.addEventListener("click", async () => {
+  el.analyzePlaylistMissingBtn.addEventListener("click", async () => {
     const playlist = getCurrentPlaylist();
     if (!playlist) return;
     // Backend-owned: `analyze_new_tracks` with a `playlistId` selects the tracks
@@ -211,7 +211,7 @@ export function bindPlaylistEvents(ctx) {
   let dragSortCommit = null; // Promise while a sorted-list drag commits its order, else null
   const autoScroller = createDragAutoScroller(el.playlistTableWrap);
 
-  el.playlistTracksBody?.addEventListener("dragstart", (event) => {
+  el.playlistTracksBody.addEventListener("dragstart", (event) => {
     const handle = event.target.closest("[data-playlist-track-drag-handle]");
     const row = handle?.closest(".track-grid-row[data-track-id]");
     if (!handle || !row) {
@@ -245,7 +245,7 @@ export function bindPlaylistEvents(ctx) {
     }
   });
 
-  el.playlistTracksBody?.addEventListener("dragover", (event) => {
+  el.playlistTracksBody.addEventListener("dragover", (event) => {
     if (!dragSourceRow) return;
     event.preventDefault();
     autoScroller.update(event.clientY);
@@ -260,11 +260,11 @@ export function bindPlaylistEvents(ctx) {
     }
   });
 
-  el.playlistTracksBody?.addEventListener("drop", (event) => {
+  el.playlistTracksBody.addEventListener("drop", (event) => {
     if (dragSourceRow) event.preventDefault();
   });
 
-  el.playlistTracksBody?.addEventListener("dragend", () => {
+  el.playlistTracksBody.addEventListener("dragend", () => {
     autoScroller.stop();
     autoScroller.detachWheel();
     if (!dragSourceRow) return;

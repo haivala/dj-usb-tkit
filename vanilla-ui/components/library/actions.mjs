@@ -193,7 +193,6 @@ export async function relocateSourceRoot(ctx, oldRoot) {
 // `imported` comes from the backend's detect call; the chip's ↻ imports it.
 function renderLibraryChips(ctx) {
   const { state, el, document } = ctx;
-  if (!el.libraryChipsContainer) return;
   const libraries = [
     {
       path: state.externalRekordboxDbPath, imported: state.rekordboxDbImported,
@@ -217,7 +216,7 @@ function renderLibraryChips(ctx) {
       : `Not imported yet: click ↻ to import from ${library.label}`;
     el.libraryChipsContainer.appendChild(chip);
   }
-  el.libraryChipsRow?.classList.toggle("hidden", !libraries.length);
+  el.libraryChipsRow.classList.toggle("hidden", !libraries.length);
 }
 
 export function renderSourceChips(ctx) {
@@ -259,9 +258,7 @@ export function renderSourceChips(ctx) {
     }
   });
 
-  if (el.importPlaylistItem) {
-    el.importPlaylistItem.classList.toggle("hidden", !state.externalRekordboxDbPath && !state.externalMixxxDbPath);
-  }
+  el.importPlaylistItem.classList.toggle("hidden", !state.externalRekordboxDbPath && !state.externalMixxxDbPath);
   ctx.updateScanLibraryButtonLabel();
   ctx.updateSourceFilterIndicator();
 }
@@ -290,30 +287,26 @@ export function applyLibraryDurationSummary(ctx, totalMs, unknownCount) {
 export function renderLibraryChrome(ctx) {
   const { state, el } = ctx;
   const noSources = !state.librarySources.everConfigured;
-  if (el.libraryEmptyState) {
-    el.libraryEmptyState.replaceChildren();
-    if (noSources) {
-      const extraActions = [
-        ...(state.externalRekordboxDbPath ? [{ label: "rekordbox library", onAction: () => scanRekordboxDb(ctx) }] : []),
-        ...(state.externalMixxxDbPath ? [{ label: "Mixxx library", onAction: () => scanMixxxDb(ctx) }] : []),
-      ];
-      renderEmptyState(el.libraryEmptyState, {
-        icon: "♫",
-        heading: "Add a music folder to get started",
-        actionLabel: "Add Folder",
-        onAction: () => el.addSourceBtn?.click(),
-        extraActions
-      });
-    }
+  el.libraryEmptyState.replaceChildren();
+  if (noSources) {
+    const extraActions = [
+      ...(state.externalRekordboxDbPath ? [{ label: "rekordbox library", onAction: () => scanRekordboxDb(ctx) }] : []),
+      ...(state.externalMixxxDbPath ? [{ label: "Mixxx library", onAction: () => scanMixxxDb(ctx) }] : []),
+    ];
+    renderEmptyState(el.libraryEmptyState, {
+      icon: "♫",
+      heading: "Add a music folder to get started",
+      actionLabel: "Add Folder",
+      onAction: () => el.addSourceBtn.click(),
+      extraActions
+    });
   }
-  if (el.libraryContent) {
-    el.libraryContent.classList.toggle("hidden", noSources);
-  }
+  el.libraryContent.classList.toggle("hidden", noSources);
   ctx.syncLibraryOnboardingMode();
 
   for (const id of state.analyzingTrackIds) {
     const selector = `.track-grid-row[data-track-id="${cssEscape(id)}"][data-track-origin="local"]`;
-    const row = el.libraryTableBody?.querySelector(selector);
+    const row = el.libraryTableBody.querySelector(selector);
     if (row) row.classList.add("is-analyzing");
   }
 }
@@ -392,7 +385,7 @@ export function scheduleLibrarySearch(ctx) {
   clearTimeout(state.librarySearchDebounceTimer);
   state.librarySearchDebounceTimer = setTimeout(() => {
     state.librarySearchDebounceTimer = null;
-    Promise.resolve(ctx.libraryTracksCtl.setSearch(ctx.el.librarySearch?.value || ""))
+    Promise.resolve(ctx.libraryTracksCtl.setSearch(ctx.el.librarySearch.value || ""))
       .then(() => renderLibraryChrome(ctx))
       .catch((err) => {
         console.error(err);
@@ -662,7 +655,7 @@ export function patchLibraryRowByTrackId(ctx, trackId) {
   const id = String(trackId || "").trim();
   if (!id) return false;
   const selector = `.track-grid-row[data-track-id="${cssEscape(id)}"][data-track-origin="local"]`;
-  const row = el.libraryTableBody?.querySelector(selector);
+  const row = el.libraryTableBody.querySelector(selector);
   if (!row) return false;
   const track = state.tracks.find((t) => String(t?.id) === id);
   if (!track) return false;
@@ -679,7 +672,7 @@ export function patchPlaylistRowByTrackId(ctx, trackId) {
   const id = String(trackId || "").trim();
   if (!id) return false;
   const selector = `.track-grid-row[data-track-id="${cssEscape(id)}"][data-track-origin="local"]`;
-  const row = el.playlistTracksBody?.querySelector(selector);
+  const row = el.playlistTracksBody.querySelector(selector);
   if (!row) return false;
   const playlist = ctx.getCurrentPlaylist();
   const track = (playlist?.tracks || []).find((t) => {
@@ -724,7 +717,7 @@ function renameTrackRows(ctx, fromId, toId) {
     state.selectedTrackIds.delete(fromId);
     state.selectedTrackIds.add(toId);
   }
-  const row = el.libraryTableBody?.querySelector(
+  const row = el.libraryTableBody.querySelector(
     `.track-grid-row[data-track-id="${cssEscape(fromId)}"][data-track-origin="local"]`
   );
   if (row) {

@@ -26,7 +26,6 @@ const SUPPORT_URL = "https://chiph.art/en/dj-usb-tkit/support?utm_source=djtkit&
 
 export function renderEssentiaInstallRow(ctx) {
   const { state, el } = ctx;
-  if (!el.essentiaInstallRow) return;
 
   const show = state.analysisEngine === "essentia";
   el.essentiaInstallRow.classList.toggle("hidden", !show);
@@ -35,39 +34,31 @@ export function renderEssentiaInstallRow(ctx) {
   const { nodeAvailable, essentiaInstalled, essentiaDownloading, essentiaDownloadError } = state;
 
   // Node status line
-  if (el.essentiaNodeStatus) {
-    if (!nodeAvailable) {
-      const missing = cloneTemplate(el.essentiaNodeStatus.ownerDocument, "tplEssentiaNodeMissing");
-      missing.querySelector(".essentia-node-link")
-        .addEventListener("click", (e) => { e.preventDefault(); openExternalUrl(ctx.window, NODE_JS_URL); });
-      el.essentiaNodeStatus.replaceChildren(...missing.childNodes);
-    } else if (essentiaInstalled) {
-      el.essentiaNodeStatus.textContent = "✓ Essentia ready";
-      el.essentiaNodeStatus.classList.add("essentia-ready");
-      el.essentiaNodeStatus.classList.remove("essentia-warn");
-    } else if (essentiaDownloading) {
-      el.essentiaNodeStatus.textContent = "Downloading...";
-      el.essentiaNodeStatus.classList.remove("essentia-ready", "essentia-warn");
-    } else if (essentiaDownloadError) {
-      el.essentiaNodeStatus.textContent = `Download failed: ${essentiaDownloadError}`;
-      el.essentiaNodeStatus.classList.add("essentia-warn");
-      el.essentiaNodeStatus.classList.remove("essentia-ready");
-    } else {
-      el.essentiaNodeStatus.textContent = "Essentia files not installed";
-      el.essentiaNodeStatus.classList.remove("essentia-ready", "essentia-warn");
-    }
+  if (!nodeAvailable) {
+    const missing = cloneTemplate(el.essentiaNodeStatus.ownerDocument, "tplEssentiaNodeMissing");
+    missing.querySelector(".essentia-node-link")
+      .addEventListener("click", (e) => { e.preventDefault(); openExternalUrl(ctx.window, NODE_JS_URL); });
+    el.essentiaNodeStatus.replaceChildren(...missing.childNodes);
+  } else if (essentiaInstalled) {
+    el.essentiaNodeStatus.textContent = "✓ Essentia ready";
+    el.essentiaNodeStatus.classList.add("essentia-ready");
+    el.essentiaNodeStatus.classList.remove("essentia-warn");
+  } else if (essentiaDownloading) {
+    el.essentiaNodeStatus.textContent = "Downloading...";
+    el.essentiaNodeStatus.classList.remove("essentia-ready", "essentia-warn");
+  } else if (essentiaDownloadError) {
+    el.essentiaNodeStatus.textContent = `Download failed: ${essentiaDownloadError}`;
+    el.essentiaNodeStatus.classList.add("essentia-warn");
+    el.essentiaNodeStatus.classList.remove("essentia-ready");
+  } else {
+    el.essentiaNodeStatus.textContent = "Essentia files not installed";
+    el.essentiaNodeStatus.classList.remove("essentia-ready", "essentia-warn");
   }
 
   // Button visibility
-  if (el.essentiaDownloadBtn) {
-    el.essentiaDownloadBtn.classList.toggle("hidden", essentiaDownloading || essentiaInstalled);
-  }
-  if (el.essentiaCancelBtn) {
-    el.essentiaCancelBtn.classList.toggle("hidden", !essentiaDownloading);
-  }
-  if (el.essentiaRemoveBtn) {
-    el.essentiaRemoveBtn.classList.toggle("hidden", !essentiaInstalled);
-  }
+  el.essentiaDownloadBtn.classList.toggle("hidden", essentiaDownloading || essentiaInstalled);
+  el.essentiaCancelBtn.classList.toggle("hidden", !essentiaDownloading);
+  el.essentiaRemoveBtn.classList.toggle("hidden", !essentiaInstalled);
 }
 
 export function bindSettingsEvents(ctx) {
@@ -91,38 +82,38 @@ export function bindSettingsEvents(ctx) {
     refreshPlaylistExportStatus,
     reloadTrackListsForKeyNotation
   } = ctx;
-  el.settingsBtn?.addEventListener("click", () => {
+  el.settingsBtn.addEventListener("click", () => {
     el.settingsDrawer.classList.remove("hidden");
     el.settingsBackdrop.classList.remove("hidden");
     loadTranscodeFolder(ctx).catch(catchTranscodeFolderError);
   });
   const catchTranscodeFolderError = (err) => ctx.emitStatus(`Transcode folder: ${err?.message || err}`);
-  el.transcodeFolderChangeBtn?.addEventListener("click", () => {
+  el.transcodeFolderChangeBtn.addEventListener("click", () => {
     (async () => {
       const picked = await ctx.invoke("pick_transcode_folder");
       if (!picked) return;
       renderTranscodeFolder(el, await ctx.command("set_transcode_folder", { path: String(picked) }));
     })().catch(catchTranscodeFolderError);
   });
-  el.transcodeFolderResetBtn?.addEventListener("click", () => {
+  el.transcodeFolderResetBtn.addEventListener("click", () => {
     ctx.command("set_transcode_folder", { path: null })
       .then((folder) => renderTranscodeFolder(el, folder))
       .catch(catchTranscodeFolderError);
   });
-  el.settingsCloseBtn?.addEventListener("click", closeSettingsDrawer);
-  el.settingsUpdateCheckBtn?.addEventListener("click", () => {
+  el.settingsCloseBtn.addEventListener("click", closeSettingsDrawer);
+  el.settingsUpdateCheckBtn.addEventListener("click", () => {
     refreshUpdateCheck(ctx, { manual: true });
   });
-  el.settingsBackdrop?.addEventListener("click", closeSettingsDrawer);
+  el.settingsBackdrop.addEventListener("click", closeSettingsDrawer);
 
-  el.helpBtn?.addEventListener("click", () => {
+  el.helpBtn.addEventListener("click", () => {
     el.helpOverlay.classList.remove("hidden");
   });
-  el.helpCloseBtn?.addEventListener("click", () => {
+  el.helpCloseBtn.addEventListener("click", () => {
     el.helpOverlay.classList.add("hidden");
     persistSetting(STORAGE_KEY_HELP_SEEN, FRONTEND_DB_KEY_HELP_SEEN, "1");
   });
-  el.helpOverlay?.addEventListener("click", (event) => {
+  el.helpOverlay.addEventListener("click", (event) => {
     if (event.target === el.helpOverlay) {
       el.helpOverlay.classList.add("hidden");
       persistSetting(STORAGE_KEY_HELP_SEEN, FRONTEND_DB_KEY_HELP_SEEN, "1");
@@ -144,7 +135,7 @@ export function bindSettingsEvents(ctx) {
     });
   });
 
-  el.exportSyncModeGroup?.addEventListener("change", async (event) => {
+  el.exportSyncModeGroup.addEventListener("change", async (event) => {
     const mode = String(event?.target?.value || "").toLowerCase();
     state.exportPruneStale = mode !== "additive";
     persistSetting(
@@ -202,7 +193,7 @@ export function bindSettingsEvents(ctx) {
     );
   });
 
-  el.exportBackupCheckbox?.addEventListener("change", (event) => {
+  el.exportBackupCheckbox.addEventListener("change", (event) => {
     state.exportBackup = !!event?.target?.checked;
     persistSetting(
       STORAGE_KEY_EXPORT_BACKUP,
@@ -212,7 +203,7 @@ export function bindSettingsEvents(ctx) {
     emitStatus(state.exportBackup ? "Export backup: enabled" : "Export backup: disabled");
   });
 
-  el.exportEngineLibraryCheckbox?.addEventListener("change", (event) => {
+  el.exportEngineLibraryCheckbox.addEventListener("change", (event) => {
     state.exportEngineLibrary = !!event?.target?.checked;
     persistSetting(
       STORAGE_KEY_EXPORT_ENGINE_LIBRARY,
@@ -224,7 +215,7 @@ export function bindSettingsEvents(ctx) {
     );
   });
 
-  el.backupRetentionCountInput?.addEventListener("change", (event) => {
+  el.backupRetentionCountInput.addEventListener("change", (event) => {
     const parsed = Number.parseInt(event?.target?.value, 10);
     const count = Number.isFinite(parsed) && parsed >= 1 ? Math.min(parsed, 999) : 10;
     state.backupRetentionCount = count;
@@ -235,7 +226,7 @@ export function bindSettingsEvents(ctx) {
     emitStatus(`Backups to keep per file: ${count}`);
   });
 
-  el.analysisBpmRangeSelect?.addEventListener("change", (event) => {
+  el.analysisBpmRangeSelect.addEventListener("change", (event) => {
     const selected = normalizeAnalysisBpmRange(event?.target?.value);
     state.analysisBpmRange = selected;
     if (el.analysisBpmRangeSelect.value !== selected) {
@@ -247,7 +238,7 @@ export function bindSettingsEvents(ctx) {
 
   // Display only -- the backend renders every key label in this notation, so
   // save it first, then re-fetch the loaded track lists.
-  el.keyNotationSelect?.addEventListener("change", async (event) => {
+  el.keyNotationSelect.addEventListener("change", async (event) => {
     const notation = event?.target?.value === "camelot" ? "camelot" : "classic";
     state.keyNotation = notation;
     try {
@@ -264,7 +255,7 @@ export function bindSettingsEvents(ctx) {
     emitStatus(`Key notation: ${notation === "camelot" ? "Camelot (8A)" : "Classic (Am)"}`);
   });
 
-  el.analysisEngineSelect?.addEventListener("change", (event) => {
+  el.analysisEngineSelect.addEventListener("change", (event) => {
     const selected = String(event?.target?.value || "stratum").toLowerCase();
     const engine = selected === "essentia" ? "essentia" : "stratum";
     if (engine !== "essentia" && state.essentiaDownloading) {
@@ -291,7 +282,7 @@ export function bindSettingsEvents(ctx) {
     if (pushEventLog) pushEventLog({ level: "info", source: "settings", message: `Analysis engine changed to ${engineLabel}` });
   });
 
-  el.essentiaDownloadBtn?.addEventListener("click", async () => {
+  el.essentiaDownloadBtn.addEventListener("click", async () => {
     if (state.essentiaDownloading) return;
     state.essentiaDownloading = true;
     state.essentiaDownloadError = null;
@@ -307,16 +298,16 @@ export function bindSettingsEvents(ctx) {
     }
   });
 
-  el.essentiaCancelBtn?.addEventListener("click", () => {
+  el.essentiaCancelBtn.addEventListener("click", () => {
     command("cancel_essentia_download").catch(() => {});
   });
 
-  el.essentiaRemoveBtn?.addEventListener("click", async () => {
+  el.essentiaRemoveBtn.addEventListener("click", async () => {
     try {
       await command("remove_essentia");
       state.essentiaInstalled = false;
       state.analysisEngine = "stratum";
-      if (el.analysisEngineSelect) el.analysisEngineSelect.value = "stratum";
+      el.analysisEngineSelect.value = "stratum";
       persistSetting(STORAGE_KEY_ANALYSIS_ENGINE, FRONTEND_DB_KEY_ANALYSIS_ENGINE, "stratum");
       renderEssentiaInstallRow(ctx);
       emitStatus("Essentia removed");
@@ -361,7 +352,6 @@ async function loadTranscodeFolder(ctx) {
 }
 
 function renderTranscodeFolder(el, folder) {
-  if (!el.transcodeFolderText) return;
   el.transcodeFolderText.textContent = String(folder?.path || "");
   el.transcodeFolderDefaultTag.hidden = !folder?.isDefault;
   el.transcodeFolderResetBtn.hidden = !!folder?.isDefault;

@@ -125,7 +125,7 @@ export function bindLibraryEvents(ctx) {
   });
 
   // Library chips: the checkbox is a pure filter (never an import); ↻ imports.
-  el.libraryChipsContainer?.addEventListener("change", (event) => {
+  el.libraryChipsContainer.addEventListener("change", (event) => {
     const checkbox = event.target.closest(".source-chip-toggle");
     if (!checkbox) return;
     const library = checkbox.dataset.rekordboxDb === "true" ? "rekordbox"
@@ -136,7 +136,7 @@ export function bindLibraryEvents(ctx) {
       .then(applySwitchedSources)
       .catch(catchErr(emitStatus));
   });
-  el.libraryChipsContainer?.addEventListener("click", (event) => {
+  el.libraryChipsContainer.addEventListener("click", (event) => {
     const importBtn = event.target.closest(".source-chip-import");
     if (!importBtn) return;
     const scan = importBtn.dataset.importLibrary === "rekordbox" ? scanRekordboxDb : scanMixxxDb;
@@ -147,14 +147,14 @@ export function bindLibraryEvents(ctx) {
   el.librarySearch.addEventListener("input", () => ctx.scheduleLibrarySearch());
 
   // Source bar accordion
-  el.sourceFilterHeader?.addEventListener("click", () => {
-    el.sourceBar?.classList.toggle("collapsed");
+  el.sourceFilterHeader.addEventListener("click", () => {
+    el.sourceBar.classList.toggle("collapsed");
   });
   el.librarySearch.addEventListener("focus", () => {
-    if (folders().length > 6) el.sourceBar?.classList.add("collapsed");
+    if (folders().length > 6) el.sourceBar.classList.add("collapsed");
   }, { passive: true });
-  el.libraryTableWrap?.addEventListener("scroll", () => {
-    if (folders().length > 6) el.sourceBar?.classList.add("collapsed");
+  el.libraryTableWrap.addEventListener("scroll", () => {
+    if (folders().length > 6) el.sourceBar.classList.add("collapsed");
   }, { passive: true });
 
   bindTrackSelection(ctx, {

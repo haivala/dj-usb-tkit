@@ -31,7 +31,7 @@ export function bindShellEvents(ctx) {
     persistSetting(STORAGE_KEY_SIDEBAR_COLLAPSED, FRONTEND_DB_KEY_SIDEBAR_COLLAPSED, "0");
   });
 
-  el.sidebarCollapseBtn?.addEventListener("click", () => {
+  el.sidebarCollapseBtn.addEventListener("click", () => {
     state.sidebarCollapsed = true;
     el.navSidebar.classList.add("collapsed");
     document.body.classList.add("sidebar-collapsed");
@@ -71,9 +71,9 @@ export function bindShellEvents(ctx) {
   });
   resizer?.addEventListener("dblclick", () => saveSidebarWidth(SIDEBAR_WIDTH_DEFAULT));
 
-  el.confirmOkBtn?.addEventListener("click", () => confirmDialog.close(true));
-  el.confirmCancelBtn?.addEventListener("click", () => confirmDialog.close(false));
-  el.confirmOverlay?.addEventListener("click", (event) => {
+  el.confirmOkBtn.addEventListener("click", () => confirmDialog.close(true));
+  el.confirmCancelBtn.addEventListener("click", () => confirmDialog.close(false));
+  el.confirmOverlay.addEventListener("click", (event) => {
     if (event.target === el.confirmOverlay) confirmDialog.close(false);
   });
   document.addEventListener("keydown", (event) => {
@@ -113,7 +113,7 @@ export function bindShellEvents(ctx) {
     });
   });
 
-  el.statusText?.addEventListener("click", (event) => {
+  el.statusText.addEventListener("click", (event) => {
     const link = event.target.closest(".status-warning-link");
     if (!link) return;
     event.preventDefault();
@@ -138,7 +138,7 @@ export function bindShellEvents(ctx) {
 
   document.addEventListener("click", handleSortHeaderClick);
 
-  el.updateBannerDismissBtn?.addEventListener("click", () => {
+  el.updateBannerDismissBtn.addEventListener("click", () => {
     dismissUpdateBanner(ctx);
   });
 }

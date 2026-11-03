@@ -269,8 +269,8 @@ export function createTrackDetailController(el, prefs = {}) {
   }
 
   function renderUndo() {
-    if (el.trackDetailUndo) el.trackDetailUndo.disabled = !undoStack.length;
-    if (el.trackDetailRedo) el.trackDetailRedo.disabled = !redoStack.length;
+    el.trackDetailUndo.disabled = !undoStack.length;
+    el.trackDetailRedo.disabled = !redoStack.length;
   }
 
   // --- Quantize ------------------------------------------------------------
@@ -337,9 +337,9 @@ export function createTrackDetailController(el, prefs = {}) {
   }
 
   function renderTools() {
-    el.trackDetailQuantize?.setAttribute("aria-pressed", String(getQuantizePref()));
-    el.trackDetailFollowGrid?.setAttribute("aria-pressed", String(getFollowGridPref()));
-    el.trackDetailMetronome?.setAttribute("aria-pressed", String(metronome.on));
+    el.trackDetailQuantize.setAttribute("aria-pressed", String(getQuantizePref()));
+    el.trackDetailFollowGrid.setAttribute("aria-pressed", String(getFollowGridPref()));
+    el.trackDetailMetronome.setAttribute("aria-pressed", String(metronome.on));
     const mix = el.trackDetailMetronomeMix;
     if (mix) {
       mix.value = String(getMetronomeMixPref());
@@ -482,7 +482,7 @@ export function createTrackDetailController(el, prefs = {}) {
   function playheadFullRatio() {
     const wf = el.trackDetailWaveform;
     const win = wf?.ownerDocument?.defaultView;
-    if (!wf || !win?.getComputedStyle) return 0;
+    if (!win?.getComputedStyle) return 0;
     const styles = win.getComputedStyle(wf);
     const pct = parseFloat(styles.getPropertyValue("--playhead-position"));
     if (Number.isFinite(pct) && pct > 0) return Math.min(1, pct / 100);
@@ -497,7 +497,7 @@ export function createTrackDetailController(el, prefs = {}) {
 
   function renderWaveform() {
     const wf = el.trackDetailWaveform;
-    if (!wf || !open) return;
+    if (!open) return;
     if (!working.bytes) {
       working.bytes = base64ToBytes(working.track?.detailWaveform);
       working.waveNorm = computeWaveNorm(working.bytes);
@@ -524,16 +524,15 @@ export function createTrackDetailController(el, prefs = {}) {
 
   function renderBeatgrid() {
     const host = el.trackDetailBeatgrid;
-    if (!host) return;
     const level = getBeatgridLevelPref();
-    el.trackDetailWaveform?.style.setProperty("--grid-level", String(level / 100));
-    if (el.trackDetailGridLevel) el.trackDetailGridLevel.value = String(level);
+    el.trackDetailWaveform.style.setProperty("--grid-level", String(level / 100));
+    el.trackDetailGridLevel.value = String(level);
     host.textContent = "";
     const interval = beatIntervalMs();
     if (!interval || !working.durationMs || working.firstBeatMs == null) return;
     const from = Math.max(working.firstBeatMs, working.view.startMs - interval);
     const to = Math.min(working.durationMs, working.view.endMs + interval);
-    const width = el.trackDetailWaveform?.clientWidth || 0;
+    const width = el.trackDetailWaveform.clientWidth || 0;
     const labelStep = barStep(interval, BAR_LABEL_MIN_PX);
     const showBeats = !width || (interval / viewSpanMs()) * width >= GRID_LINE_MIN_PX;
     // Lines sit on whole device pixels: at a fractional position the browser
@@ -601,7 +600,7 @@ export function createTrackDetailController(el, prefs = {}) {
   /// Every Nth bar, N the smallest step keeping those bars at least `minPx`
   /// apart -- for bar numbers (1, 5, 9… when zoomed out) and bar lines.
   function barStep(interval, minPx) {
-    const width = el.trackDetailWaveform?.clientWidth || 0;
+    const width = el.trackDetailWaveform.clientWidth || 0;
     const pxPerBar = width ? ((4 * interval) / viewSpanMs()) * width : 0;
     if (!pxPerBar) return 4;
     return BAR_STEPS.find((n) => n * pxPerBar >= minPx) ?? BAR_STEPS[BAR_STEPS.length - 1];
@@ -610,7 +609,7 @@ export function createTrackDetailController(el, prefs = {}) {
   /// The whole-track strip under the waveform: drawn once per track/width.
   function renderOverviewCanvas() {
     const host = el.trackDetailOverview;
-    if (!host || !working.bytes || !working.durationMs) return;
+    if (!working.bytes || !working.durationMs) return;
     const key = `${working.track?.id ?? ""}:${host.clientWidth}:${working.bytes.length}`;
     if (key === overviewDrawnKey) return;
     const ok = drawDetailWaveform(host, working.bytes, {
@@ -627,7 +626,7 @@ export function createTrackDetailController(el, prefs = {}) {
   function positionOverviewWindow() {
     const dur = working.durationMs || 0;
     const box = el.trackDetailOverviewWindow;
-    if (!box || !dur) return;
+    if (!dur) return;
     const from = Math.max(0, working.view.startMs);
     const to = Math.min(dur, working.view.endMs);
     box.style.left = `${(from / dur) * 100}%`;
@@ -638,7 +637,6 @@ export function createTrackDetailController(el, prefs = {}) {
     const dur = working.durationMs || 0;
     positionOverviewWindow();
     const cuesHost = el.trackDetailOverviewCues;
-    if (!cuesHost) return;
     cuesHost.textContent = "";
     if (!dur) return;
     for (const cue of orderedCues()) {
@@ -654,13 +652,12 @@ export function createTrackDetailController(el, prefs = {}) {
   /// The usage hints show until the track has a cue; then they fold into "?".
   function renderHint() {
     const hasCues = hotCues().length > 0;
-    if (el.trackDetailHint) el.trackDetailHint.hidden = hasCues;
-    if (el.trackDetailHintBtn) el.trackDetailHintBtn.hidden = !hasCues;
+    el.trackDetailHint.hidden = hasCues;
+    el.trackDetailHintBtn.hidden = !hasCues;
   }
 
   function renderMarkers() {
     const host = el.trackDetailCueMarkers;
-    if (!host) return;
     host.textContent = "";
     const labels = cueLabels();
     for (const cue of orderedCues()) {
@@ -694,7 +691,6 @@ export function createTrackDetailController(el, prefs = {}) {
   /// none: a marker detached mid-click would never get its click.
   function positionMarkers() {
     const host = el.trackDetailCueMarkers;
-    if (!host) return;
     const byId = new Map(working.cues.map((c) => [c.tempId, c]));
     for (const marker of host.children) {
       const cue = byId.get(marker.dataset.tempId);
@@ -716,7 +712,6 @@ export function createTrackDetailController(el, prefs = {}) {
     // A cue edit that moved the point redraws the canvas's grey part too.
     if (preStartMs() !== drawnPreStartMs) renderWaveform();
     const shade = el.trackDetailPreStart;
-    if (!shade) return;
     const first = orderedCues()[0];
     const left = Math.max(0, Math.min(100, msToPct(0)));
     const pct = first ? Math.max(0, Math.min(100, msToPct(first.positionMs))) : 0;
@@ -728,11 +723,11 @@ export function createTrackDetailController(el, prefs = {}) {
   // Both flags are the shared playback module's projection of backend state
   // onto this waveform (`setWaveformPlayhead`); the editor keeps no copy.
   function isPlaying() {
-    return !!el.trackDetailWaveform?.classList.contains("is-playing");
+    return !!el.trackDetailWaveform.classList.contains("is-playing");
   }
 
   function isPaused() {
-    return !!el.trackDetailWaveform?.classList.contains("is-paused");
+    return !!el.trackDetailWaveform.classList.contains("is-paused");
   }
 
   /// A track is loaded here (playing, paused or being scrubbed): the playhead
@@ -750,7 +745,7 @@ export function createTrackDetailController(el, prefs = {}) {
   function renderPlayPause() {
     const btn = el.trackDetailPlayPause;
     const playing = isPlaying();
-    if (!btn || playing === playPauseShowsPlaying) return;
+    if (playing === playPauseShowsPlaying) return;
     playPauseShowsPlaying = playing;
     const label = playing ? "Pause" : "Play";
     btn.classList.toggle("is-playing", playing);
@@ -761,7 +756,6 @@ export function createTrackDetailController(el, prefs = {}) {
 
   function positionModalPlayhead() {
     const ph = el.trackDetailPlayhead;
-    if (!ph) return;
     if (!playheadLocked()) {
       ph.hidden = true;
       return;
@@ -801,7 +795,6 @@ export function createTrackDetailController(el, prefs = {}) {
   /// count with step and add.
   function renderMemorySlot() {
     const host = el.trackDetailMemoryCue;
-    if (!host) return;
     const doc = host.ownerDocument;
     const memory = memoryCues();
     const index = memory.findIndex((c) => c.tempId === working.selectedTempId);
@@ -857,7 +850,6 @@ export function createTrackDetailController(el, prefs = {}) {
   /// and go. The playback-start cue sits in the "Playback starts at" row.
   function renderCueList() {
     const host = el.trackDetailCueList;
-    if (!host) return;
     host.textContent = "";
     const hot = hotCues().sort(byPosition);
     const labels = cueLabels();
@@ -872,7 +864,7 @@ export function createTrackDetailController(el, prefs = {}) {
       if (start) startHost.appendChild(cueRow(start, labels.get(start.tempId)));
       startHost.hidden = !start;
     }
-    if (el.trackDetailAddCue) el.trackDetailAddCue.disabled = hot.length >= MAX_CUES;
+    el.trackDetailAddCue.disabled = hot.length >= MAX_CUES;
     renderMemorySlot();
   }
 
@@ -883,7 +875,6 @@ export function createTrackDetailController(el, prefs = {}) {
   function renderStartChoice() {
     const cueBtn = el.trackDetailStartFirstCue;
     const beatBtn = el.trackDetailStartFirstBeat;
-    if (!cueBtn || !beatBtn) return;
     const hasCues = withoutStartCue().length > 0;
     const start = startCue();
     const firstBeat = working.firstBeatMs == null ? 0 : working.firstBeatMs;
@@ -893,7 +884,7 @@ export function createTrackDetailController(el, prefs = {}) {
     beatBtn.setAttribute("aria-checked", String(hasCues && !!start));
     beatBtn.textContent = moved ? "Start marker" : "First beat";
     beatBtn.dataset.tooltip = moved ? START_MARKER_TOOLTIP : START_BEAT_TOOLTIP;
-    if (el.trackDetailStartNote) el.trackDetailStartNote.hidden = hasCues;
+    el.trackDetailStartNote.hidden = hasCues;
   }
 
   // The editor opens zoomed to the first 60 bars, so make it unmistakable that
@@ -901,7 +892,6 @@ export function createTrackDetailController(el, prefs = {}) {
   // track length ("0:00–2:00 of 5:34"), accented while zoomed, and point at Fit.
   function renderZoomHint() {
     const out = el.trackDetailZoomRange;
-    if (!out) return;
     const dur = working.durationMs || 0;
     const zoomed = dur > 0 && viewSpanMs() < dur - 1;
     out.classList.toggle("is-zoomed", zoomed);
@@ -971,7 +961,6 @@ export function createTrackDetailController(el, prefs = {}) {
   // reflects the real current value.
   function syncKeySelect() {
     const select = el.trackDetailKey;
-    if (!select) return;
     buildKeySelect(select);
     const synthetic = select.querySelector("option[data-synthetic]");
     if (working.key != null && !keyOptions().includes(working.key)) {
@@ -991,7 +980,6 @@ export function createTrackDetailController(el, prefs = {}) {
 
   function renderGenre() {
     const input = el.trackDetailGenre;
-    if (!input) return;
     const list = el.trackDetailGenreOptions;
     const built = JSON.stringify(working.genreOptions);
     if (list && built !== genreOptionsBuiltFor) {
@@ -1012,7 +1000,7 @@ export function createTrackDetailController(el, prefs = {}) {
   }
 
   function renderRating() {
-    for (const star of el.trackDetailRating?.querySelectorAll("[data-rating]") || []) {
+    for (const star of el.trackDetailRating.querySelectorAll("[data-rating]") || []) {
       const on = Number(star.dataset.rating) <= working.rating;
       star.classList.toggle("is-on", on);
       star.setAttribute("aria-checked", String(Number(star.dataset.rating) === working.rating));
@@ -1021,14 +1009,10 @@ export function createTrackDetailController(el, prefs = {}) {
 
   function render() {
     if (!open) return;
-    if (el.trackDetailFirstBeatMs) {
-      el.trackDetailFirstBeatMs.value =
-        working.firstBeatMs == null ? "" : String(working.firstBeatMs);
-    }
-    if (el.trackDetailBpm) {
-      // Two decimals, as in the track list (the ▲/▼ step is 0.01).
-      el.trackDetailBpm.value = working.bpm == null ? "" : formatBpm(working.bpm);
-    }
+    el.trackDetailFirstBeatMs.value =
+      working.firstBeatMs == null ? "" : String(working.firstBeatMs);
+    // Two decimals, as in the track list (the ▲/▼ step is 0.01).
+    el.trackDetailBpm.value = working.bpm == null ? "" : formatBpm(working.bpm);
     syncKeySelect();
     renderGenre();
     renderReleaseDate();
@@ -1189,7 +1173,7 @@ export function createTrackDetailController(el, prefs = {}) {
     setReleaseDate(text) {
       const trimmed = typeof text === "string" ? text.trim() : "";
       if (trimmed && !RELEASE_DATE_PATTERN.test(trimmed)) {
-        if (el.trackDetailReleaseDate) el.trackDetailReleaseDate.value = working.releaseDate || "";
+        el.trackDetailReleaseDate.value = working.releaseDate || "";
         return;
       }
       mutate(null, () => {
@@ -1521,8 +1505,8 @@ export function createTrackDetailController(el, prefs = {}) {
       syncMetronome();
       el.trackDetailView.hidden = true;
       setPageInert(false);
-      if (el.trackDetailColorPopover) el.trackDetailColorPopover.hidden = true;
-      if (el.trackDetailPlayhead) el.trackDetailPlayhead.hidden = true;
+      el.trackDetailColorPopover.hidden = true;
+      el.trackDetailPlayhead.hidden = true;
       if (resizeObserver) {
         resizeObserver.disconnect();
         resizeObserver = null;
@@ -1595,17 +1579,11 @@ export function createTrackDetailController(el, prefs = {}) {
 
       const t = working.track;
       el.trackDetailTitle.textContent = t.title || "Track";
-      if (el.trackDetailSubtitle) {
-        el.trackDetailSubtitle.textContent = [t.artist, t.album].filter(Boolean).join(" · ");
-      }
-      if (el.trackDetailRevealBtn) {
-        el.trackDetailRevealBtn.hidden = !t.filePath;
-        el.trackDetailRevealBtn.dataset.tooltip = `Show in folder: ${t.filePath || ""}`;
-      }
-      if (el.trackDetailCover) {
-        el.trackDetailCover.replaceChildren(coverElement(el.trackDetailCover.ownerDocument, coverSrc));
-        attachCoverFallbackHandlers(el.trackDetailCover);
-      }
+      el.trackDetailSubtitle.textContent = [t.artist, t.album].filter(Boolean).join(" · ");
+      el.trackDetailRevealBtn.hidden = !t.filePath;
+      el.trackDetailRevealBtn.dataset.tooltip = `Show in folder: ${t.filePath || ""}`;
+      el.trackDetailCover.replaceChildren(coverElement(el.trackDetailCover.ownerDocument, coverSrc));
+      attachCoverFallbackHandlers(el.trackDetailCover);
       el.trackDetailView.hidden = false;
       setPageInert(true);
       render();
@@ -1624,7 +1602,7 @@ export function createTrackDetailController(el, prefs = {}) {
         resizeObserver.observe(wf);
       }
 
-      el.trackDetailSaveBtn?.focus();
+      el.trackDetailSaveBtn.focus();
       const opened = api.toSavePayload();
       openedPayloadJson = JSON.stringify(opened);
       openedCuesJson = JSON.stringify(opened.cues);

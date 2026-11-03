@@ -49,6 +49,10 @@
 - **Improvement:** While the cue editor is open, the Help, Settings and Event Log buttons in the
   top bar look disabled. They already did nothing until the editor closed.
 
+- **Chore:** The UI code no longer checks whether its own page elements exist before using them;
+  every one is always there. The unit tests that relied on those checks now run on the real
+  page. About 250 fewer lines of JavaScript.
+
 ## 0.5.3
 
 **Severity:** feature

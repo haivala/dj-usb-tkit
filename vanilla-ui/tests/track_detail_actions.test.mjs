@@ -1,6 +1,5 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { JSDOM } from "jsdom";
 
 import {
   createTrackDetailController,
@@ -8,7 +7,7 @@ import {
   MAX_CUES,
 } from "../components/track-detail/actions.mjs";
 import { base64ToBytes } from "../components/track-detail/waveform_detail.mjs";
-import { APP_TEMPLATES } from "./test_helpers.mjs";
+import { makeTestCtx } from "./test_helpers.mjs";
 
 function pwv5Base64(entryCount) {
   const bytes = new Uint8Array(entryCount * 2);
@@ -21,35 +20,13 @@ function pwv5Base64(entryCount) {
   return btoa(String.fromCharCode(...bytes));
 }
 
+// The real app elements (index.html), with the globals the controller's
+// drawing helpers read.
 function makeEl() {
-  const dom = new JSDOM(
-    `<!doctype html><body>
-      <div id="trackDetailView" hidden>
-        <h3 id="trackDetailTitle"></h3>
-        <input id="trackDetailFirstBeatMs" />
-        <div class="waveform waveform-canvas" id="trackDetailWaveform">
-          <canvas class="waveform-canvas-el"></canvas>
-          <i id="trackDetailPlayhead" hidden></i>
-        </div>
-        <div id="trackDetailBeatgrid"></div>
-        <div id="trackDetailCueMarkers"></div>
-        <button id="trackDetailAddCue"></button>
-        <div id="trackDetailCueList"></div>
-        <button id="trackDetailSaveBtn"></button>
-        <div id="trackDetailColorPopover" hidden></div>
-      </div>
-      ${APP_TEMPLATES}
-    </body>`,
-    { pretendToBeVisual: true }
-  );
-  global.window = dom.window;
-  global.document = dom.window.document;
-  const ids = [
-    "trackDetailView", "trackDetailTitle", "trackDetailWaveform", "trackDetailBeatgrid",
-    "trackDetailCueMarkers", "trackDetailPlayhead", "trackDetailFirstBeatMs", "trackDetailAddCue",
-    "trackDetailCueList", "trackDetailSaveBtn", "trackDetailColorPopover",
-  ];
-  return Object.fromEntries(ids.map((id) => [id, dom.window.document.getElementById(id)]));
+  const ctx = makeTestCtx();
+  global.window = ctx.dom.window;
+  global.document = ctx.document;
+  return ctx.el;
 }
 
 test("base64ToBytes round-trips a PWV5 payload", () => {

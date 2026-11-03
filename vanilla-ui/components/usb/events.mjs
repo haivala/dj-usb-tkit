@@ -79,17 +79,17 @@ export function bindUsbEvents(ctx) {
     refreshUsb().catch(catchErr(emitStatus));
   });
 
-  el.selectUsbFolderBtn?.addEventListener("click", () => {
+  el.selectUsbFolderBtn.addEventListener("click", () => {
     pickUsbFolder().catch(catchErr(emitStatus));
   });
 
   // The header's drive name renames the connected drive.
-  el.usbNameBadge?.addEventListener("click", (event) => {
+  el.usbNameBadge.addEventListener("click", (event) => {
     // The health dot inside it has its own tooltip, not a rename.
     if (event.target.closest(".usb-health-dot")) return;
     ctx.renameDrive().catch(catchErr(emitStatus));
   });
-  el.usbNameBadge?.addEventListener("keydown", (event) => {
+  el.usbNameBadge.addEventListener("keydown", (event) => {
     if (event.key !== "Enter" && event.key !== " ") return;
     event.preventDefault();
     ctx.renameDrive().catch(catchErr(emitStatus));
@@ -98,11 +98,11 @@ export function bindUsbEvents(ctx) {
   bindUsbAudioFormatEvents(ctx);
 
   // Recent USBs accordion, like the library's Sources.
-  el.usbRecentHeader?.addEventListener("click", () => {
-    el.usbRecentRow?.classList.toggle("collapsed");
+  el.usbRecentHeader.addEventListener("click", () => {
+    el.usbRecentRow.classList.toggle("collapsed");
   });
 
-  el.usbRecentList?.addEventListener("click", (event) => {
+  el.usbRecentList.addEventListener("click", (event) => {
     const pruneBtn = event.target.closest("[data-usb-prune-device-id]");
     if (pruneBtn) {
       const deviceId = String(pruneBtn.dataset.usbPruneDeviceId || "").trim();
@@ -124,23 +124,23 @@ export function bindUsbEvents(ctx) {
     runUsbParityReport().catch(catchErr(emitStatus));
   });
 
-  el.reDiagnoseBtn?.addEventListener("click", () => {
+  el.reDiagnoseBtn.addEventListener("click", () => {
     runUsbDiagnostics({ openReport: true }).catch(catchErr(emitStatus));
   });
 
-  el.previewRepairsBtn?.addEventListener("click", () => {
+  el.previewRepairsBtn.addEventListener("click", () => {
     previewUsbRepairs().catch(catchErr(emitStatus));
   });
 
-  el.usbBackupsBtn?.addEventListener("click", () => {
+  el.usbBackupsBtn.addEventListener("click", () => {
     ctx.switchView("backups").catch(catchErr(emitStatus));
   });
 
-  el.applyRepairsBtn?.addEventListener("click", () => {
+  el.applyRepairsBtn.addEventListener("click", () => {
     applyUsbRepairs().catch(catchErr(emitStatus));
   });
 
-  el.diagBackToReportBtn?.addEventListener("click", () => {
+  el.diagBackToReportBtn.addEventListener("click", () => {
     showDiagReportView();
   });
 
@@ -148,74 +148,74 @@ export function bindUsbEvents(ctx) {
     refreshHistory().catch(catchErr(emitStatus));
   });
 
-  el.exportHistoryTracklistBtn?.addEventListener("click", () => {
+  el.exportHistoryTracklistBtn.addEventListener("click", () => {
     exportHistoryTracklist().catch(catchErr(emitStatus));
   });
 
-  el.tracklistExportTimesToggle?.addEventListener("change", () => {
+  el.tracklistExportTimesToggle.addEventListener("change", () => {
     tracklistExportDialog?.syncPlacementVisibility();
   });
-  el.tracklistExportOkBtn?.addEventListener("click", () => {
-    const timesOn = !!el.tracklistExportTimesToggle?.checked;
+  el.tracklistExportOkBtn.addEventListener("click", () => {
+    const timesOn = !!el.tracklistExportTimesToggle.checked;
     tracklistExportDialog?.close({
       timeMode: timesOn ? el.tracklistExportPlacement.value : "off",
-      startIndex: Number(el.tracklistExportStartTrack?.value) || 0
+      startIndex: Number(el.tracklistExportStartTrack.value) || 0
     });
   });
-  el.tracklistExportCancelBtn?.addEventListener("click", () => {
+  el.tracklistExportCancelBtn.addEventListener("click", () => {
     tracklistExportDialog?.close(null);
   });
-  el.tracklistExportOverlay?.addEventListener("click", (event) => {
+  el.tracklistExportOverlay.addEventListener("click", (event) => {
     if (event.target === el.tracklistExportOverlay) {
       tracklistExportDialog?.close(null);
     }
   });
 
-  el.usbPlayerMenuAddBtn?.addEventListener("click", () => {
+  el.usbPlayerMenuAddBtn.addEventListener("click", () => {
     addUsbPlayerMenuItems().catch(catchErr(emitStatus));
   });
 
-  el.usbPlayerMenuRemoveBtn?.addEventListener("click", () => {
+  el.usbPlayerMenuRemoveBtn.addEventListener("click", () => {
     removeUsbPlayerMenuItems().catch(catchErr(emitStatus));
   });
 
-  el.usbPlayerMenuUpBtn?.addEventListener("click", () => {
+  el.usbPlayerMenuUpBtn.addEventListener("click", () => {
     moveUsbPlayerMenuItems(-1).catch(catchErr(emitStatus));
   });
 
-  el.usbPlayerMenuDownBtn?.addEventListener("click", () => {
+  el.usbPlayerMenuDownBtn.addEventListener("click", () => {
     moveUsbPlayerMenuItems(1).catch(catchErr(emitStatus));
   });
 
-  el.usbPlayerMenuSyncBtn?.addEventListener("click", () => {
+  el.usbPlayerMenuSyncBtn.addEventListener("click", () => {
     syncUsbPlayerMenusEdbToPdb().catch(catchErr(emitStatus));
   });
 
-  el.usbPlayerMenuRestoreBtn?.addEventListener("click", () => {
+  el.usbPlayerMenuRestoreBtn.addEventListener("click", () => {
     syncUsbPlayerMenusEdbToPdb().catch(catchErr(emitStatus));
   });
 
-  el.usbBackgroundColorChips?.addEventListener("click", (event) => {
+  el.usbBackgroundColorChips.addEventListener("click", (event) => {
     const chip = event.target?.closest?.(".bg-color-chip");
     if (!chip || chip.disabled) return;
     setUsbBackgroundColor(Number(chip.dataset.color)).catch(catchErr(emitStatus));
   });
 
-  el.usbPlayerMenuAvailable?.addEventListener("click", (event) => {
+  el.usbPlayerMenuAvailable.addEventListener("click", (event) => {
     handleUsbPlayerMenuListClick("available", event);
     syncUsbPlayerMenuEditorControls();
   });
-  el.usbPlayerMenuCurrent?.addEventListener("click", (event) => {
+  el.usbPlayerMenuCurrent.addEventListener("click", (event) => {
     handleUsbPlayerMenuListClick("current", event);
     syncUsbPlayerMenuEditorControls();
   });
 
-  el.usbTrackSearch?.addEventListener("input", () => {
+  el.usbTrackSearch.addEventListener("input", () => {
     usbPlaylistTracksCtl.setSearch(el.usbTrackSearch.value)
       .catch((err) => console.warn("USB playlist search failed:", err));
   });
 
-  el.historyTrackSearch?.addEventListener("input", () => {
+  el.historyTrackSearch.addEventListener("input", () => {
     usbHistoryTracksCtl.setSearch(el.historyTrackSearch.value)
       .catch((err) => console.warn("USB history search failed:", err));
   });
@@ -300,7 +300,7 @@ export function bindUsbEvents(ctx) {
     // Kept for the "Export Tracklist" text feature, which needs the whole
     // session's tracks; the table itself is paginated by the controller.
     state.historyTracks = history?.tracks || [];
-    if (el.exportHistoryTracklistBtn) el.exportHistoryTracklistBtn.disabled = !state.historyTracks.length;
+    el.exportHistoryTracklistBtn.disabled = !state.historyTracks.length;
     setActiveListItem(el.historyList, btn);
     if (!history) {
       usbHistoryTracksCtl.clear();

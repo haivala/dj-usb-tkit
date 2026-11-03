@@ -31,7 +31,7 @@ export function renderUsbAudioFormats(ctx) {
   if (!data) return;
   const writable = !!data.writable;
   el.usbAudioFormatsList.classList.toggle("is-readonly", !writable);
-  if (el.usbAudioFormatsHint) el.usbAudioFormatsHint.textContent = data.hint || "";
+  el.usbAudioFormatsHint.textContent = data.hint || "";
   for (const item of data.formats) {
     const chip = cloneTemplate(document, "tplUsbAudioFormatChip");
     chip.dataset.usbAudioFormat = item.format;
@@ -76,8 +76,8 @@ export function bindUsbAudioFormatEvents(ctx) {
     ctx.emitStatus(`Save USB audio formats failed: ${err?.message || err}`);
   };
 
-  el.usbAudioFormatsHeader?.addEventListener("click", () => {
-    el.usbAudioFormatsRow?.classList.toggle("collapsed");
+  el.usbAudioFormatsHeader.addEventListener("click", () => {
+    el.usbAudioFormatsRow.classList.toggle("collapsed");
   });
 
   el.usbAudioFormatsList.addEventListener("change", (event) => {

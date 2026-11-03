@@ -36,7 +36,6 @@ function showBackupsMessage(list, text) {
 
 export async function renderBackups(ctx) {
   const { state, el, command } = ctx;
-  if (!el.backupsList || !el.backupsSummary) return;
 
   if (!state.usbRoot) {
     el.backupsSummary.textContent = "No USB connected";

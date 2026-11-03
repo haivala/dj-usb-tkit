@@ -25,7 +25,6 @@ const APP_VERSION_FALLBACK = "Not set";
 
 export async function hydrateAppVersionLabel(ctx) {
   const { el, tauriIsTauri, tauriGetVersion } = ctx;
-  if (!el.settingsVersionText) return;
   let version = APP_VERSION_FALLBACK;
   if (tauriIsTauri()) {
     try {
@@ -55,10 +54,8 @@ export function restoreStoredUiPrefs(ctx) {
   } catch {
     state.exportPruneStale = true;
   }
-  if (el.exportSyncModeMirror && el.exportSyncModeAdditive) {
-    el.exportSyncModeMirror.checked = !!state.exportPruneStale;
-    el.exportSyncModeAdditive.checked = !state.exportPruneStale;
-  }
+  el.exportSyncModeMirror.checked = !!state.exportPruneStale;
+  el.exportSyncModeAdditive.checked = !state.exportPruneStale;
 
   try {
     const stored = localStorage?.getItem?.(STORAGE_KEY_EXPORT_BACKUP);
@@ -66,18 +63,14 @@ export function restoreStoredUiPrefs(ctx) {
   } catch {
     state.exportBackup = true;
   }
-  if (el.exportBackupCheckbox) {
-    el.exportBackupCheckbox.checked = !!state.exportBackup;
-  }
+  el.exportBackupCheckbox.checked = !!state.exportBackup;
 
   try {
     state.exportEngineLibrary = localStorage?.getItem?.(STORAGE_KEY_EXPORT_ENGINE_LIBRARY) === "1";
   } catch {
     state.exportEngineLibrary = false;
   }
-  if (el.exportEngineLibraryCheckbox) {
-    el.exportEngineLibraryCheckbox.checked = !!state.exportEngineLibrary;
-  }
+  el.exportEngineLibraryCheckbox.checked = !!state.exportEngineLibrary;
 
   try {
     const stored = localStorage?.getItem?.(STORAGE_KEY_BACKUP_RETENTION_COUNT);
@@ -86,9 +79,7 @@ export function restoreStoredUiPrefs(ctx) {
   } catch {
     state.backupRetentionCount = 10;
   }
-  if (el.backupRetentionCountInput) {
-    el.backupRetentionCountInput.value = String(state.backupRetentionCount);
-  }
+  el.backupRetentionCountInput.value = String(state.backupRetentionCount);
 
   try {
     const stored = localStorage?.getItem?.(STORAGE_KEY_ANALYSIS_BPM_RANGE);
@@ -96,9 +87,7 @@ export function restoreStoredUiPrefs(ctx) {
   } catch {
     state.analysisBpmRange = DEFAULT_ANALYSIS_BPM_RANGE;
   }
-  if (el.analysisBpmRangeSelect) {
-    el.analysisBpmRangeSelect.value = state.analysisBpmRange;
-  }
+  el.analysisBpmRangeSelect.value = state.analysisBpmRange;
 
   try {
     const storedEngine = localStorage?.getItem?.(STORAGE_KEY_ANALYSIS_ENGINE);
@@ -106,9 +95,7 @@ export function restoreStoredUiPrefs(ctx) {
   } catch {
     state.analysisEngine = "stratum";
   }
-  if (el.analysisEngineSelect) {
-    el.analysisEngineSelect.value = state.analysisEngine;
-  }
+  el.analysisEngineSelect.value = state.analysisEngine;
 
   // Display only: the backend renders key labels in this notation.
   try {
@@ -117,13 +104,9 @@ export function restoreStoredUiPrefs(ctx) {
   } catch {
     state.keyNotation = "classic";
   }
-  if (el.keyNotationSelect) {
-    el.keyNotationSelect.value = state.keyNotation;
-  }
-  if (el.essentiaInstallRow) {
-    const show = state.analysisEngine === "essentia";
-    el.essentiaInstallRow.classList.toggle("hidden", !show);
-  }
+  el.keyNotationSelect.value = state.keyNotation;
+  const show = state.analysisEngine === "essentia";
+  el.essentiaInstallRow.classList.toggle("hidden", !show);
 
   try {
     state.cueStartOnFirstBeat =
@@ -182,7 +165,7 @@ export function applySidebarCollapsedUi(ctx) {
   applySidebarWidth(document, state.sidebarWidth);
   if (state.sidebarCollapsed) {
     el.navSidebar.classList.add("collapsed");
-    el.sidebarExpandBtn?.classList.add("visible");
+    el.sidebarExpandBtn.classList.add("visible");
   }
   document.body.classList.toggle("sidebar-collapsed", !!state.sidebarCollapsed);
 }
@@ -190,7 +173,7 @@ export function applySidebarCollapsedUi(ctx) {
 export function showHelpOnFirstVisit(ctx) {
   const { el, localStorage } = ctx;
   try {
-    if (!localStorage?.getItem?.(STORAGE_KEY_HELP_SEEN) && el.helpOverlay) {
+    if (!localStorage?.getItem?.(STORAGE_KEY_HELP_SEEN)) {
       el.helpOverlay.classList.remove("hidden");
     }
   } catch {}
@@ -277,7 +260,7 @@ export async function initApp(ctx) {
   await ctx.detectExternalMixxxDb();
   // Sources starts folded (index.html) and opens once its chips are drawn:
   // opened earlier, its row keeps the height it had before they arrived.
-  ctx.el.sourceBar?.classList.remove("collapsed");
+  ctx.el.sourceBar.classList.remove("collapsed");
   ctx.bindEvents();
   await ctx.switchView("library");
   pushEventLog({ level: "info", source: "startup", message: "Initial view ready" });
@@ -354,7 +337,7 @@ export async function switchView(ctx, viewId) {
     else btn.removeAttribute("aria-current");
   });
 
-  el.eventLogBtn?.classList.toggle("active", viewId === "event-log");
+  el.eventLogBtn.classList.toggle("active", viewId === "event-log");
 
   el.navPlaylistList.querySelectorAll(".nav-playlist-item").forEach((btn) => {
     btn.classList.toggle("active", btn.dataset.playlistId === viewId);
