@@ -34,6 +34,9 @@ order of preference. Export picks each track's file by it:
 - An MP3 or AAC track in a format the USB doesn't allow can't be converted (the app only converts
   from lossless). The export is refused before anything is written, and the message names the
   tracks.
+- A file already on the USB is never removed by the export (only a mirror export prunes, as
+  rekordbox's does). A track exported as its FLAC before and as its MP3 now is on the USB both
+  ways: two USB tracks, each with its own masterContentId, both in the playlist.
 - The app playlist's title row says ahead of time what the export will do: "2 tracks will be
   converted to MP3 on export", or that tracks can't go on the USB.
 

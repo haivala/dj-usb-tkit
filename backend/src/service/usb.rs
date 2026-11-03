@@ -3841,6 +3841,7 @@ mod tests {
             first_beat_ms: None,
             beatgrid_from_rekordbox: false,
             position: 0,
+            transcode_format: None,
         }
     }
 

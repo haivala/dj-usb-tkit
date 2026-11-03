@@ -49,8 +49,10 @@
   Export puts each track on the USB as the first file in a ticked format: the track's own file
   or one of its transcodes. A lossless track with neither gets its transcode made during the
   export; an MP3 or AAC track in a format the USB doesn't allow can't be converted, so the export
-  is refused and names it. Cues and the beat grid move with an MP3's later start, and cues edited
-  on such a USB track come back to the library track in step. The USB's playlist and history
+  is refused and names it. A track already on the USB in a format since unticked stays there, in
+  the playlist too: its transcode is added next to it as a USB track of its own. Cues and the
+  beat grid move with an MP3's later start, and cues edited on such a USB track come back to the
+  library track in step. The USB's playlist and history
   tracks in an unticked format get a warning in the FMT column, and an app playlist's title row
   says how many tracks the export will convert or refuse.
 - **Fix:** ALAC tracks (`.m4a`) are exported with the ALAC file type in the PDB and the eDB, as

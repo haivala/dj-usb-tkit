@@ -623,6 +623,17 @@ fn ensure_usb_has_space_for_export(
     ))
 }
 
+/// The key of `track`'s masterContentId (`track_export_identity`): its id
+/// for its own file, `<id>:<format>` for a transcode. A track can be on a
+/// stick both ways (its FLAC from an earlier export, its MP3 now), and each
+/// is a USB track of its own.
+fn export_identity_key(track: &ExportTrackData) -> std::borrow::Cow<'_, str> {
+    match track.transcode_format {
+        Some(format) => format!("{}:{format}", track.id).into(),
+        None => track.id.as_str().into(),
+    }
+}
+
 fn has_required_analysis_fields(track: &ExportTrackData) -> bool {
     has_core_analysis_fields(
         track.waveform_peaks_path.as_deref(),
@@ -1211,7 +1222,10 @@ impl BackendService {
                     if i64::from(mdb) == app_master_db_id
                         && usb_tracks.shared_master_content_ids.contains(&mci) =>
                 {
-                    let own = Self::ensure_track_master_content_id(&local_conn, &track.id)?;
+                    let own = Self::ensure_track_master_content_id(
+                        &local_conn,
+                        &export_identity_key(track),
+                    )?;
                     Some((Some(mdb), u32::try_from(own).ok(), cl, None))
                 }
                 other => other,
@@ -1327,7 +1341,7 @@ impl BackendService {
             // identity stable across additive exports.
             let (mdb, mci, cl) = Self::resolve_manifest_identity(
                 &local_conn,
-                &track.id,
+                &export_identity_key(track),
                 existing_identity.as_ref(),
                 owns_waveform,
                 app_master_db_id,
@@ -2031,6 +2045,7 @@ impl BackendService {
                 waveform_peaks_path: row.get(33)?,
                 duration_ms: row.get(34)?,
                 position: row.get::<_, i64>(35)? as usize,
+                transcode_format: None,
                 file_type: row
                     .get::<_, Option<String>>(36)?
                     .as_deref()
@@ -2298,6 +2313,7 @@ mod tests {
             first_beat_ms: None,
             beatgrid_from_rekordbox: false,
             position: 0,
+            transcode_format: None,
         }
     }
 

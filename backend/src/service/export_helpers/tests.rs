@@ -1335,6 +1335,7 @@ fn export_analysis_copies_internal_cache_anlz_even_when_invalid() {
         first_beat_ms: None,
         beatgrid_from_rekordbox: false,
         position: 1,
+        transcode_format: None,
     };
 
     let mut warnings = Vec::new();
@@ -1426,6 +1427,7 @@ fn export_analysis_copies_local_anlz_and_rewrites_ppth_path() {
         first_beat_ms: None,
         beatgrid_from_rekordbox: false,
         position: 1,
+        transcode_format: None,
     };
 
     let exported_path = "/Contents/Fixture Ö Artist/Fixture Ä Album/03 - Entä jos Fixture.flac";
@@ -1714,6 +1716,7 @@ fn export_analysis_does_not_regenerate_when_local_dat_missing() {
         first_beat_ms: None,
         beatgrid_from_rekordbox: false,
         position: 1,
+        transcode_format: None,
     };
 
     let mut warnings = Vec::new();
@@ -2010,6 +2013,7 @@ fn remove_playlist_and_tracks_from_pdb_allows_removing_last_playlist() {
             first_beat_ms: None,
             beatgrid_from_rekordbox: false,
             position: 0,
+            transcode_format: None,
         }],
     };
     let manifest = ExportManifest {
@@ -4125,6 +4129,7 @@ fn make_test_track(id: &str, title: &str, filename: &str) -> ExportTrackData {
         first_beat_ms: None,
         beatgrid_from_rekordbox: false,
         position: 0,
+        transcode_format: None,
     }
 }
 
@@ -4805,6 +4810,7 @@ fn genre_and_label_tables_preserved_through_export_roundtrip() {
             first_beat_ms: None,
             beatgrid_from_rekordbox: false,
             position: 0,
+            transcode_format: None,
         }],
     };
     let manifest = super::ExportManifest {

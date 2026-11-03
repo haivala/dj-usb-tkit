@@ -277,6 +277,7 @@ pub(crate) fn use_transcode(track: &mut ExportTrackData, file: &TranscodeFile) {
     track.sample_rate_hz = file.sample_rate_hz;
     track.bit_depth = file.bit_depth;
     track.bitrate_kbps = file.bitrate_kbps;
+    track.transcode_format = Some(file.format.as_str());
     track.file_type = Some(track_rekordbox_file_type(
         file.format.extension(),
         file.bit_depth,
@@ -590,6 +591,7 @@ mod tests {
         assert_eq!(track.duration_ms, Some(60_000));
         assert_eq!(track.first_beat_ms, Some(125));
         assert_eq!(track.cues[0].position_ms, 1_025);
+        assert_eq!(track.transcode_format, Some("mp3"));
 
         let mut wav = ExportTrackData {
             first_beat_ms: Some(100),

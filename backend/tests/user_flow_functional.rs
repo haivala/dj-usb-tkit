@@ -1759,6 +1759,110 @@ fn export_converts_a_track_the_stick_cant_play_and_keeps_its_timing() {
     assert_eq!(local_positions, vec![3_500 - i64::from(shift)]);
 }
 
+/// A track already on the stick in its own format (WAV) is exported again
+/// after the stick's Player formats drop that format: the MP3 transcode is
+/// added as a USB track of its own, with its own masterContentId, and the
+/// WAV stays, in the playlist too (an additive export keeps what's there and
+/// never deletes a track). The same playlist can hold the track both ways.
+#[test]
+fn re_export_as_a_transcode_keeps_the_tracks_old_file_on_the_stick() {
+    let root = tempdir().expect("temp root");
+    let (backend, _data_dir, usb, _track_id, playlist_id) =
+        export_one_track_with_cues_to(root.path(), Vec::new(), &[]);
+    let usb_text = usb.to_string_lossy().to_string();
+
+    let mut formats = backend
+        .get_usb_formats(GetUsbFormatsRequest {
+            usb_root: usb_text.clone(),
+        })
+        .data
+        .expect("usb formats")
+        .formats;
+    for item in &mut formats {
+        item.allowed = !["flac", "alac", "aiff", "wav"].contains(&item.format.as_str());
+    }
+    let set = backend.set_usb_formats(SetUsbFormatsRequest {
+        usb_root: usb_text.clone(),
+        formats,
+    });
+    assert!(set.ok, "set formats failed: {set:?}");
+    let export = backend.export_to_usb(ExportToUsbRequest {
+        usb_root: Some(usb_text),
+        playlist_id,
+        options: Some(ExportToUsbOptions {
+            include_artwork: false,
+            include_analysis: true,
+            prune_stale: false,
+            ..Default::default()
+        }),
+    });
+    assert!(export.ok, "re-export failed: {export:?}");
+
+    let mut on_stick: Vec<String> = Vec::new();
+    collect_files(&usb.join("Contents"), &mut on_stick);
+    on_stick.sort();
+    assert_eq!(on_stick.len(), 2, "{on_stick:?}");
+    assert!(on_stick.iter().any(|p| p.ends_with(".wav")), "{on_stick:?}");
+    assert!(on_stick.iter().any(|p| p.ends_with(".mp3")), "{on_stick:?}");
+
+    // PDB: both tracks, both in the playlist, the WAV first.
+    let parsed = parse_pdb(&pdb_path(&usb)).expect("parse pdb");
+    let mut paths: Vec<&str> = parsed
+        .tracks
+        .iter()
+        .map(|t| t.track_file_path.as_str())
+        .collect();
+    paths.sort();
+    assert_eq!(paths.len(), 2, "{paths:?}");
+    assert!(paths[0].ends_with(".mp3") && paths[1].ends_with(".wav"));
+    let entry_paths: Vec<&str> = parsed
+        .playlist_entries
+        .iter()
+        .filter_map(|e| parsed.tracks.iter().find(|t| t.id == e.track_id))
+        .map(|t| t.track_file_path.as_str())
+        .collect();
+    assert_eq!(entry_paths.len(), 2, "{entry_paths:?}");
+    assert!(entry_paths[0].ends_with(".wav"), "{entry_paths:?}");
+    assert!(entry_paths[1].ends_with(".mp3"), "{entry_paths:?}");
+    let ids: Vec<Option<u32>> = parsed.tracks.iter().map(|t| t.master_content_id).collect();
+    assert!(ids.iter().all(Option::is_some), "{ids:?}");
+    assert_ne!(ids[0], ids[1], "two rows share a masterContentId: {ids:?}");
+
+    // eDB: the same.
+    let edb = open_usb_edb(&usb);
+    let mut content: Vec<String> = edb
+        .prepare("SELECT path FROM content")
+        .unwrap()
+        .query_map([], |r| r.get(0))
+        .unwrap()
+        .collect::<Result<_, _>>()
+        .unwrap();
+    content.sort();
+    assert_eq!(content.len(), 2, "{content:?}");
+    let edb_ids: Vec<Option<i64>> = edb
+        .prepare("SELECT masterContentId FROM content ORDER BY path")
+        .unwrap()
+        .query_map([], |r| r.get(0))
+        .unwrap()
+        .collect::<Result<_, _>>()
+        .unwrap();
+    assert_ne!(edb_ids[0], edb_ids[1], "eDB: {edb_ids:?}");
+    let listed: Vec<String> = edb
+        .prepare(
+            "SELECT c.path FROM playlist_content pc
+             JOIN content c ON c.content_id = pc.content_id
+             ORDER BY pc.sequenceNo",
+        )
+        .unwrap()
+        .query_map([], |r| r.get(0))
+        .unwrap()
+        .collect::<Result<_, _>>()
+        .unwrap();
+    assert_eq!(listed.len(), 2, "{listed:?}");
+    assert!(listed[0].ends_with(".wav"), "{listed:?}");
+    assert!(listed[1].ends_with(".mp3"), "{listed:?}");
+}
+
 fn collect_files(dir: &Path, out: &mut Vec<String>) {
     let Ok(entries) = fs::read_dir(dir) else {
         return;

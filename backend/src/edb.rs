@@ -76,6 +76,10 @@ pub struct ExportTrackData {
     pub beatgrid_from_rekordbox: bool,
     pub cues: Vec<crate::models::TrackCue>,
     pub position: usize,
+    /// The file exported is one of the track's transcodes, in this format
+    /// (`"mp3"`): it is a USB track of its own, with its own
+    /// masterContentId (see `export_identity_key`).
+    pub transcode_format: Option<&'static str>,
 }
 
 #[derive(Debug, Clone, Serialize)]
