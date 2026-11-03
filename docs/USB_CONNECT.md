@@ -87,10 +87,10 @@ The technical details are under "Local HDD staging" in [USB_EXPORT.md](USB_EXPOR
     the sizes the library recorded when the files were scanned, so it doesn't wake a sleeping
     disk. The line is worked out after the track list is shown, so it can appear a moment after
     the tracks.
-  - When some of the playlist's tracks are in a format the USB's Player formats leave unticked,
-    the title row also says so: "3 tracks in formats that are not allowed on this USB". When
-    some of them have a transcode in a ticked format, it adds how many
-    ([TRANSCODES.md](TRANSCODES.md)); export doesn't use transcodes yet.
+  - When the USB's Player formats mean some tracks go on the USB converted, the title row says
+    so: "2 tracks will be converted to MP3 on export". MP3 or AAC tracks in a format the USB
+    doesn't allow can't be converted: "3 AAC tracks can't go on this USB; export is blocked", in
+    the warning colour ([TRANSCODES.md](TRANSCODES.md#on-a-usb)).
   - The export button names the drive: **Export to USB: \<name\>**. In additive sync mode, when
     the USB already has a playlist with the same name, it reads **Append to (\<playlist\>) on USB**
     instead, and the playlist's tracks can't be reordered by dragging, since an append keeps the
@@ -110,10 +110,12 @@ USB goes into can read: FLAC, ALAC, AIFF, WAV, MP3 and AAC, each with a tick box
 - **At least one stays ticked:** the last ticked box can't be unticked.
 - **Stored on the USB** (in `.dj-usb-tkit/drive.json`, next to the drive's name), so the setting
   goes with the stick to another computer. On a read-only USB the row can't be changed.
-- **What it does:** the USB's playlist and history tracks in an unticked format get a warning in
-  the FMT column ("FLAC is not allowed on this USB"), and an app playlist's title row counts its
-  tracks in one (see above). Export doesn't change yet. ALAC and AAC files both end in `.m4a`;
-  the app tells them apart by the audio inside.
+- **What it does:** export puts each track on the USB as its own file or one of its transcodes,
+  the first in a ticked format, and converts lossless tracks that have neither
+  ([TRANSCODES.md](TRANSCODES.md#on-a-usb)). The USB's playlist and history tracks in an
+  unticked format get a warning in the FMT column ("FLAC is not allowed on this USB"), and an
+  app playlist's title row says what the export will convert or refuse (see above). ALAC and AAC
+  files both end in `.m4a`; the app tells them apart by the audio inside.
 
 ## While the app is working on the USB
 

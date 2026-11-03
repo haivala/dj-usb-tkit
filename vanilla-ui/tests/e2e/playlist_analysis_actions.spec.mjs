@@ -1167,28 +1167,30 @@ test("the playlist heading shows what an export would copy against the USB's fre
   await expect(space).toHaveText("All tracks on USB · 27.0 GB free on USB");
   await expect(space).not.toHaveClass(/is-warning/);
 
-  // Tracks in formats the USB's Player formats leave unticked, counted by
-  // the backend; some have a transcode in a ticked one.
+  // What the USB's Player formats mean for the export, counted by the
+  // backend: tracks it converts, and lossy ones it refuses.
   const formatWarning = page.locator("#playlistFormatWarning");
   await expect(formatWarning).toBeHidden();
   await page.evaluate(() => {
     window.__exportSpace = {
       bytesToCopy: 0, tracksToCopy: 0, availableBytes: 27 * 1024 ** 3, fits: true,
-      disallowedTracks: 3, disallowedWithTranscode: 2, disallowedTranscodeFormat: "MP3",
+      convertTracks: 2, convertFormat: "MP3", refusedTracks: 0, refusedFormat: null,
     };
   });
   await page.locator("#playlistSearchInput").fill("Song");
-  await expect(formatWarning).toHaveText(
-    "3 tracks in formats that are not allowed on this USB (2 have an MP3 transcode; export doesn't use transcodes yet)"
-  );
+  await expect(formatWarning).toHaveText("2 tracks will be converted to MP3 on export");
+  await expect(formatWarning).not.toHaveClass(/is-warning/);
   await page.evaluate(() => {
     window.__exportSpace = {
       bytesToCopy: 0, tracksToCopy: 0, availableBytes: 27 * 1024 ** 3, fits: true,
-      disallowedTracks: 1, disallowedWithTranscode: 0, disallowedTranscodeFormat: null,
+      convertTracks: 1, convertFormat: null, refusedTracks: 3, refusedFormat: "AAC",
     };
   });
   await page.locator("#playlistSearchInput").fill("");
-  await expect(formatWarning).toHaveText("1 track in formats that are not allowed on this USB");
+  await expect(formatWarning).toHaveText(
+    "1 track will be converted on export · 3 AAC tracks can't go on this USB; export is blocked"
+  );
+  await expect(formatWarning).toHaveClass(/is-warning/);
 });
 
 test("a failed export is reported in the status bar and left to the backend's one Event Log entry", async ({ page }) => {

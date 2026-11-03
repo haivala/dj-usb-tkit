@@ -43,12 +43,16 @@
   MP3 320 kbps file of the selected lossless tracks, for players that can't read FLAC or ALAC. It
   is not a new track: the FMT column shows it under the track's own format, and cues, edits and
   playlists stay on the one track. Files go to a folder set in Settings → Transcodes, outside the
-  source folders. USB export doesn't use them yet.
+  source folders.
 - **New feature:** Player formats in the USB view: tick the audio formats the players a USB goes
   into can read, and drag them into your order of preference. The setting is stored on the USB.
-  Its playlist and history tracks in an unticked format get a warning in the FMT column, and an
-  app playlist's title row says how many of its tracks are in formats the connected USB doesn't
-  allow, and how many of those have a transcode in one it does. Export doesn't change yet.
+  Export puts each track on the USB as the first file in a ticked format: the track's own file
+  or one of its transcodes. A lossless track with neither gets its transcode made during the
+  export; an MP3 or AAC track in a format the USB doesn't allow can't be converted, so the export
+  is refused and names it. Cues and the beat grid move with an MP3's later start, and cues edited
+  on such a USB track come back to the library track in step. The USB's playlist and history
+  tracks in an unticked format get a warning in the FMT column, and an app playlist's title row
+  says how many tracks the export will convert or refuse.
 - **Fix:** ALAC tracks (`.m4a`) are exported with the ALAC file type in the PDB and the eDB, as
   rekordbox writes them, instead of the one for AAC. Exporting again corrects tracks already on a
   USB.

@@ -1950,7 +1950,7 @@ button[data-export-playlist]:hover {
   color: var(--danger);
 }
 
-.playlist-format-warning {
+.playlist-format-warning.is-warning {
   color: var(--diag-warn);
 }
 

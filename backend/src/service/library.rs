@@ -1228,6 +1228,12 @@ pub(crate) fn find_confident_fingerprint_match(
     let Some(incoming_size) = incoming_size else {
         return Ok(None);
     };
+    // Tracks with a transcode of the incoming file's format and exact size:
+    // the incoming file is that transcode (exported in its place).
+    let transcode_ids = match crate::audio_format::format_ext_from_path(incoming_path) {
+        Some(ext) => super::transcode_export::track_ids_with_transcode(conn, &ext, incoming_size)?,
+        None => Vec::new(),
+    };
     let mut passing = Vec::new();
     for (id, path, cand_duration, cand_size) in rows {
         if usb_root_paths
@@ -1236,14 +1242,16 @@ pub(crate) fn find_confident_fingerprint_match(
         {
             continue;
         }
-        if library_metadata_candidate_compatible(
-            incoming_path,
-            &path,
-            incoming_duration_ms,
-            cand_duration,
-            Some(incoming_size),
-            cand_size,
-        ) {
+        if transcode_ids.contains(&id)
+            || library_metadata_candidate_compatible(
+                incoming_path,
+                &path,
+                incoming_duration_ms,
+                cand_duration,
+                Some(incoming_size),
+                cand_size,
+            )
+        {
             passing.push(id);
         }
     }

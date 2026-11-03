@@ -18,6 +18,10 @@ use crate::models::{
 };
 
 use super::track_matching::{ContentFingerprint, content_fingerprint_key};
+use super::transcode_export::{
+    ExportFile, SourceFacts, estimated_transcode_bytes, plan_export_files,
+    prepare_transcode_bundle, use_transcode,
+};
 use super::usb_track_facts::{UsbTrackFact, UsbTrackFacts, UsbTrackIdentity};
 use crate::audio_format::{
     AudioFormat, export_extension, is_player_extension, same_format_extension,
@@ -845,24 +849,48 @@ impl BackendService {
     ) -> BackendResult<PlaylistExportSpace> {
         let mut playlist = self.load_playlist_for_export(playlist_id)?;
         split_off_unplayable_tracks(&mut playlist);
+        let plan = plan_export_files(
+            &*self.db.connect()?,
+            &playlist.tracks,
+            &super::usb_identity::read_drive_formats(usb_root),
+            SourceFacts::Recorded,
+        )?;
+        // Sized as the files export will copy: a transcode by its own size,
+        // one still to make by an estimate.
+        let mut convert = Vec::new();
+        let mut refused = Vec::new();
+        for (track, file) in playlist.tracks.iter_mut().zip(&plan) {
+            match file {
+                ExportFile::Source => {}
+                ExportFile::Transcode(file) => use_transcode(track, file),
+                ExportFile::Make(format) => {
+                    track.file_size_bytes =
+                        i64::try_from(estimated_transcode_bytes(track, *format)).ok();
+                    convert.push(format.label().to_string());
+                }
+                ExportFile::Refused(format) => refused.push(format.label().to_string()),
+            }
+        }
         let on_usb = self.usb_track_sizes(usb_root)?;
         let estimate = estimate_playlist_copy(usb_root, &playlist, &on_usb);
         let available_bytes = usb_mount_available_bytes(usb_root);
         let fits = available_bytes
             .is_none_or(|available| export_space_shortfall(estimate.bytes, available).is_none());
-        let disallowed = super::usb_formats::count_disallowed_tracks(
-            &*self.db.connect()?,
-            &playlist.tracks,
-            &super::usb_identity::read_drive_formats(usb_root),
-        )?;
+        let shared = |labels: &[String]| {
+            labels
+                .first()
+                .filter(|first| labels.iter().all(|label| label == *first))
+                .cloned()
+        };
         Ok(PlaylistExportSpace {
             bytes_to_copy: estimate.bytes,
             tracks_to_copy: estimate.tracks,
             available_bytes,
             fits,
-            disallowed_tracks: disallowed.tracks,
-            disallowed_with_transcode: disallowed.with_transcode,
-            disallowed_transcode_format: disallowed.transcode_format,
+            convert_tracks: convert.len(),
+            convert_format: shared(&convert),
+            refused_tracks: refused.len(),
+            refused_format: shared(&refused),
         })
     }
 
@@ -1011,6 +1039,17 @@ impl BackendService {
             ));
         }
         ensure_playlist_tracks_analysis_ready(&usb_root, &playlist)?;
+        let transcode_failures = self.use_transcodes_for_export(
+            &usb_root,
+            &mut playlist,
+            &mut warnings,
+            &mut on_progress,
+        )?;
+        if playlist.tracks.is_empty() {
+            return Err(BackendError::Validation(
+                "none of the playlist's tracks could be converted for this USB".to_string(),
+            ));
+        }
         if !export_dry_run {
             // A USB without a PDB yet holds no tracks.
             let on_usb = self.usb_track_sizes(&usb_root).unwrap_or_default();
@@ -1052,7 +1091,9 @@ impl BackendService {
         );
 
         let mut exported_tracks = 0usize;
-        let mut skipped_tracks = 0usize;
+        // A track whose transcode couldn't be made is left off, like one
+        // whose file is missing.
+        let mut skipped_tracks = transcode_failures;
         let mut exported_artworks = 0usize;
         let mut exported_analysis_files = 0usize;
         let mut manifest_tracks = Vec::<ExportManifestTrack>::new();
@@ -1780,6 +1821,124 @@ impl BackendService {
             ),
         ));
         Ok(warnings)
+    }
+
+    /// Swaps each of `playlist`'s tracks for the file the USB's Player
+    /// formats pick (`transcode_export`): refuses the export, before anything
+    /// is written, when a track can't go on the stick in any ticked format;
+    /// makes the transcodes that are missing or out of date; then points each
+    /// track that goes as a transcode at it and at its analysis bundle. A
+    /// track whose transcode fails is taken out with a warning; returns how
+    /// many.
+    fn use_transcodes_for_export<F>(
+        &self,
+        usb_root: &Path,
+        playlist: &mut ExportPlaylistData,
+        warnings: &mut Vec<WarningEntry>,
+        on_progress: &mut F,
+    ) -> BackendResult<usize>
+    where
+        F: FnMut(usize, usize, &str),
+    {
+        let formats = super::usb_identity::read_drive_formats(usb_root);
+        let plan = |tracks: &[ExportTrackData]| {
+            plan_export_files(&*self.db.connect()?, tracks, &formats, SourceFacts::OnDisk)
+        };
+        let first = plan(&playlist.tracks)?;
+        let refused: Vec<String> = playlist
+            .tracks
+            .iter()
+            .zip(&first)
+            .filter_map(|(track, file)| match file {
+                ExportFile::Refused(format) => {
+                    Some(format!("{} ({})", track.file_name, format.label()))
+                }
+                _ => None,
+            })
+            .collect();
+        if !refused.is_empty() {
+            return Err(BackendError::ValidationWithDetails(
+                format!(
+                    "export blocked: {} in a format this USB's Player formats don't allow, and \
+                     only lossless files can be converted: {}",
+                    counted(refused.len(), "track", "tracks"),
+                    refused.join(", ")
+                ),
+                json!({
+                    "validationType": "player_format_refused",
+                    "tracks": refused,
+                }),
+            ));
+        }
+
+        let mut wanted = Vec::new();
+        for (track, file) in playlist.tracks.iter().zip(&first) {
+            if let ExportFile::Make(format) = file
+                && !wanted.iter().any(|(id, _)| id == &track.id)
+            {
+                wanted.push((track.id.clone(), *format));
+            }
+        }
+        let failures = if wanted.is_empty() {
+            Vec::new()
+        } else {
+            self.make_transcodes_for_export(&wanted, |done, total, name| {
+                on_progress(
+                    done,
+                    total,
+                    &format!("USB: Converting track {done}/{total}: {name}"),
+                );
+            })?
+        };
+        let plan = if wanted.is_empty() {
+            first
+        } else {
+            plan(&playlist.tracks)?
+        };
+
+        let data_dir = self.db.data_dir();
+        let mut kept = Vec::with_capacity(playlist.tracks.len());
+        let mut dropped = 0usize;
+        for (mut track, file) in std::mem::take(&mut playlist.tracks).into_iter().zip(plan) {
+            match file {
+                ExportFile::Source => kept.push(track),
+                ExportFile::Transcode(file) => {
+                    let bundle = track
+                        .waveform_peaks_path
+                        .as_deref()
+                        .and_then(|bundle| prepare_transcode_bundle(&data_dir, bundle, &file));
+                    if bundle.is_none() {
+                        warnings.push(logging::log(
+                            Level::Warn,
+                            "export",
+                            "export.transcode-analysis-missing",
+                            format!("no analysis for the transcode of {}", track.file_path),
+                        ));
+                    }
+                    use_transcode(&mut track, &file);
+                    track.waveform_peaks_path = bundle;
+                    kept.push(track);
+                }
+                ExportFile::Make(_) | ExportFile::Refused(_) => {
+                    let reason = failures
+                        .iter()
+                        .find(|(id, _)| id == &track.id)
+                        .map_or("not converted", |(_, message)| message.as_str());
+                    warnings.push(logging::log(
+                        Level::Warn,
+                        "export",
+                        "export.transcode-failed",
+                        format!(
+                            "not exported, converting it failed: {}: {reason}",
+                            track.file_path
+                        ),
+                    ));
+                    dropped += 1;
+                }
+            }
+        }
+        playlist.tracks = kept;
+        Ok(dropped)
     }
 
     /// The playlist's tracks in position order, every format included; export

@@ -45,6 +45,7 @@ mod track_list;
 mod track_matching;
 mod track_metadata;
 pub(crate) mod transcode;
+pub(crate) mod transcode_export;
 
 use crate::audio_format::same_format_extension;
 use crate::utils::counted;

@@ -2383,7 +2383,12 @@ impl BackendService {
         self.materialize_usb_track_row(&tx, &mut track, &now_ts, &usb_device_id, &usb_root_paths)?;
         if let (Some(id), Some(path)) = (track.local_track_id.as_deref(), analysis_path.as_deref())
         {
-            super::cues::import_anlz_cues_for_track(&tx, id, Path::new(path))?;
+            super::cues::import_anlz_cues_for_track(
+                &tx,
+                id,
+                Path::new(path),
+                Some(Path::new(&track.file_path)),
+            )?;
         }
         tx.commit()?;
         Ok(track.local_track_id)

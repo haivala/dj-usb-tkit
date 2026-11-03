@@ -1775,6 +1775,43 @@ fn duration_ms_from_decoded(sample_count: usize, sample_rate: u32) -> Option<u64
     Some((sample_count as u64).saturating_mul(1000) / u64::from(sample_rate))
 }
 
+/// Writes an analysis bundle holding `audio`'s own waveforms and (for an
+/// MP3) seek index, the way track analysis draws them; no beat grid or cues.
+/// Used for a transcode, whose audio sits on its own timeline.
+pub(crate) fn write_waveform_bundle_for_audio(
+    audio: &Path,
+    paths: &AnlzBundlePaths,
+) -> BackendResult<()> {
+    let (samples, sample_rate) = decode_audio_mono_samples(audio, ANALYSIS_DECODE_MAX_SAMPLES)?;
+    let duration_ms = detect_track_duration_ms(audio)
+        .or_else(|| duration_ms_from_decoded(samples.len(), sample_rate))
+        .ok_or_else(|| {
+            BackendError::Internal(format!("no audio length for {}", audio.display()))
+        })?;
+    let waveform = build_waveform_data_from_samples_with_rate(
+        &samples,
+        waveform_detail_bins_for_duration(duration_ms),
+        sample_rate,
+    );
+    if waveform.peaks.is_empty() {
+        return Err(BackendError::Internal(format!(
+            "no waveform drawn from {}",
+            audio.display()
+        )));
+    }
+    write_generated_anlz_bundle_with_first_beat(
+        &waveform,
+        paths,
+        "",
+        None,
+        duration_ms,
+        None,
+        &[],
+    )?;
+    let _ = fill_mp3_pvbr(&paths.dat_path, audio);
+    Ok(())
+}
+
 pub(crate) fn detect_track_duration_ms(path: &Path) -> Option<u64> {
     // Deterministic single-source duration resolution: Symphonia metadata only.
     let source = crate::symphonia_decoder::open_media_source(path).ok()?;

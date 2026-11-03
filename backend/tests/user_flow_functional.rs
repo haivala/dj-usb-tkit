@@ -9,11 +9,11 @@ use backend::models::{
     AddLibrarySelectionToPlaylistRequest, AddTrackCandidate, AddTrackCandidatesToPlaylistRequest,
     AnalyzeNewTracksRequest, BrowseSourceFilesRequest, CreatePlaylistRequest, ExportToUsbOptions,
     ExportToUsbRequest, FetchUsbHistoriesRequest, FetchUsbPlaylistsRequest, FetchUsbTracksRequest,
-    GetPlaylistTracksRequest, GetTrackDetailRequest, GetUsbTrackDetailRequest,
-    InitializeUsbRequest, MaterializeSourceTrackRequest, SaveTrackAnalysisEditsRequest,
-    SaveTrackMetadataEditsRequest, SaveUsbTrackAnalysisEditsRequest,
-    SaveUsbTrackMetadataEditsRequest, ScanLibraryRequest, SetFrontendSettingRequest, TrackCueInput,
-    UsbMetadataEditTrack, UsbTrack,
+    GetPlaylistTracksRequest, GetTrackDetailRequest, GetUsbFormatsRequest,
+    GetUsbTrackDetailRequest, InitializeUsbRequest, MaterializeSourceTrackRequest,
+    SaveTrackAnalysisEditsRequest, SaveTrackMetadataEditsRequest, SaveUsbTrackAnalysisEditsRequest,
+    SaveUsbTrackMetadataEditsRequest, ScanLibraryRequest, SetFrontendSettingRequest,
+    SetUsbFormatsRequest, TrackCueInput, UsbMetadataEditTrack, UsbTrack,
 };
 use backend::pdb_reader::parse_pdb;
 use backend::service::anlz::{
@@ -1356,6 +1356,16 @@ fn export_one_track_with_cues(
     root: &Path,
     initial_cues: Vec<TrackCueInput>,
 ) -> (BackendCommands, PathBuf, PathBuf, String, String) {
+    export_one_track_with_cues_to(root, initial_cues, &[])
+}
+
+/// [`export_one_track_with_cues`] onto a stick whose Player formats leave
+/// `unticked` unticked.
+fn export_one_track_with_cues_to(
+    root: &Path,
+    initial_cues: Vec<TrackCueInput>,
+    unticked: &[&str],
+) -> (BackendCommands, PathBuf, PathBuf, String, String) {
     let data_dir = root.join("data");
     let source = root.join("source");
     let usb = root.join("usb");
@@ -1405,6 +1415,23 @@ fn export_one_track_with_cues(
     backend.initialize_usb(InitializeUsbRequest {
         usb_root: usb.to_string_lossy().to_string(),
     });
+    if !unticked.is_empty() {
+        let mut formats = backend
+            .get_usb_formats(GetUsbFormatsRequest {
+                usb_root: usb.to_string_lossy().to_string(),
+            })
+            .data
+            .expect("usb formats")
+            .formats;
+        for item in &mut formats {
+            item.allowed = !unticked.contains(&item.format.as_str());
+        }
+        let set = backend.set_usb_formats(SetUsbFormatsRequest {
+            usb_root: usb.to_string_lossy().to_string(),
+            formats,
+        });
+        assert!(set.ok, "set formats failed: {set:?}");
+    }
     let playlist_id = backend
         .create_playlist(CreatePlaylistRequest {
             name: "USB Cue Edit".to_string(),
@@ -1610,6 +1637,140 @@ fn save_usb_track_analysis_edits_writes_device_and_local_master() {
         .expect("usb detail 2");
     assert_eq!(detail.cues.len(), 1);
     assert_eq!(detail.cues[0].position_ms, 3_500);
+}
+
+/// A stick whose Player formats leave out the track's WAV gets an MP3
+/// transcode, made by the export itself: the MP3 is what the databases list,
+/// its cues and first beat sit `offset_ms` later (the MP3's audio starts that
+/// much later), and a cue edited on the USB row comes back to the library
+/// track minus that offset.
+#[test]
+fn export_converts_a_track_the_stick_cant_play_and_keeps_its_timing() {
+    let root = tempdir().expect("temp root");
+    let (backend, data_dir, usb, track_id, _playlist_id) = export_one_track_with_cues_to(
+        root.path(),
+        vec![TrackCueInput {
+            position_ms: 2_000,
+            color_id: None,
+            name: Some("A".into()),
+            playback_start: false,
+            memory: false,
+        }],
+        &["flac", "alac", "aiff", "wav"],
+    );
+
+    let local_db = rusqlite::Connection::open(data_dir.join("backend.db")).expect("open db");
+    let (mp3_path, mp3_size, offset_ms): (String, i64, f64) = local_db
+        .query_row(
+            "SELECT file_path, file_size_bytes, offset_ms FROM track_transcodes
+             WHERE track_id = ?1 AND format = 'mp3'",
+            [&track_id],
+            |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?)),
+        )
+        .expect("the export made an MP3 transcode");
+    assert!(Path::new(&mp3_path).is_file());
+    let shift = offset_ms.round() as u32;
+    assert!(shift > 20, "MP3 offset {offset_ms}");
+
+    let mut on_stick: Vec<String> = Vec::new();
+    collect_files(&usb.join("Contents"), &mut on_stick);
+    assert_eq!(on_stick.len(), 1, "{on_stick:?}");
+    assert!(on_stick[0].ends_with(".mp3"), "{on_stick:?}");
+
+    let parsed = parse_pdb(&pdb_path(&usb)).expect("parse pdb");
+    assert_eq!(parsed.tracks.len(), 1);
+    assert_eq!(parsed.tracks[0].file_type, Some(1));
+    assert_eq!(
+        parsed.tracks[0].file_size_bytes.map(i64::from),
+        Some(mp3_size)
+    );
+
+    let ext = fs::read(only_exported_ext(&usb)).unwrap();
+    let cues = read_cues_from_anlz(&ext);
+    assert!(!cues.is_empty());
+    assert!(
+        cues.iter().all(|c| c.position_ms == 2_000 + shift),
+        "{cues:?}"
+    );
+    assert_eq!(read_first_beat_from_anlz(&ext), Some(200 + shift));
+
+    // Edited on the stick: the USB keeps the value, the library track gets
+    // it on its own timeline.
+    // The stick's row is recognised as the library track by the
+    // transcode's size.
+    let usb_playlist = backend
+        .fetch_usb_playlists(FetchUsbPlaylistsRequest {
+            usb_root: Some(usb.to_string_lossy().to_string()),
+        })
+        .data
+        .expect("usb playlists")
+        .items
+        .pop()
+        .expect("usb playlist");
+    let page = backend
+        .fetch_usb_playlist_tracks(FetchUsbTracksRequest {
+            usb_root: Some(usb.to_string_lossy().to_string()),
+            id: usb_playlist.id,
+            limit: 10,
+            ..Default::default()
+        })
+        .data
+        .expect("usb playlist page");
+    assert_eq!(
+        page.items[0].local_track_id.as_deref(),
+        Some(track_id.as_str())
+    );
+
+    let usb_track = first_usb_playlist_track(&backend, &usb);
+    let saved = backend
+        .save_usb_track_analysis_edits(SaveUsbTrackAnalysisEditsRequest {
+            usb_root: usb.to_string_lossy().to_string(),
+            usb_analysis_path_raw: usb_track.usb_analysis_path_raw.clone().unwrap(),
+            usb_media_path_raw: usb_track.usb_media_path.clone().unwrap(),
+            bpm: usb_track.bpm,
+            key: None,
+            duration_ms: usb_track.duration_ms,
+            first_beat_ms: None,
+            cues: Some(vec![TrackCueInput {
+                position_ms: 3_500,
+                color_id: None,
+                name: None,
+                playback_start: false,
+                memory: false,
+            }]),
+            // As the frontend sends it: no hint, so the stick's file has to
+            // be recognised as the track's transcode.
+            local_track_id: None,
+            title: Some(usb_track.title.clone()),
+            artist: Some(usb_track.artist.clone()),
+            album: usb_track.album.clone(),
+        })
+        .data
+        .expect("usb save");
+    assert_eq!(saved.local_track_id.as_deref(), Some(track_id.as_str()));
+    assert_eq!(saved.cues[0].position_ms, 3_500);
+    let local_positions: Vec<i64> = local_db
+        .prepare("SELECT position_ms FROM track_cues WHERE track_id = ?1")
+        .unwrap()
+        .query_map([&track_id], |r| r.get(0))
+        .unwrap()
+        .collect::<Result<_, _>>()
+        .unwrap();
+    assert_eq!(local_positions, vec![3_500 - i64::from(shift)]);
+}
+
+fn collect_files(dir: &Path, out: &mut Vec<String>) {
+    let Ok(entries) = fs::read_dir(dir) else {
+        return;
+    };
+    for entry in entries.flatten() {
+        let path = entry.path();
+        if path.is_dir() {
+            collect_files(&path, out);
+        } else {
+            out.push(path.to_string_lossy().to_string());
+        }
+    }
 }
 
 /// A BPM/key edit saved straight onto the USB must land everywhere a player

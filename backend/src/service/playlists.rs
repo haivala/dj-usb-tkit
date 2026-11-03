@@ -860,6 +860,14 @@ impl BackendService {
             .filter(|s| !s.is_empty())
             .map(Path::new);
 
+        // The stick's audio file the bundle belongs to.
+        let usb_media = candidate
+            .file_path
+            .as_deref()
+            .map(str::trim)
+            .filter(|s| !s.is_empty())
+            .map(Path::new);
+
         let usb_origin = add_candidate_is_usb_origin(candidate, request_usb_root);
         if usb_origin {
             // Browsing a USB is read-only, so adding is where a USB track's
@@ -882,7 +890,7 @@ impl BackendService {
             if let Some(path) = usb_anlz
                 && track_id_exists(conn, &local_track_id)?
             {
-                self.ensure_usb_analysis_imported(&local_track_id, path)?;
+                self.ensure_usb_analysis_imported(&local_track_id, path, usb_media)?;
             }
             return Ok(AddTrackCandidateResolution {
                 previous_id,
@@ -897,7 +905,7 @@ impl BackendService {
             && track_id_exists(conn, track_id)?
         {
             if let Some(path) = usb_anlz {
-                self.ensure_usb_analysis_imported(track_id, path)?;
+                self.ensure_usb_analysis_imported(track_id, path, usb_media)?;
             }
             return Ok(AddTrackCandidateResolution {
                 previous_id: previous_id.clone(),

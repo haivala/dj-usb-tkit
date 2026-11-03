@@ -18,10 +18,41 @@ transcode is an extra file of that track:
   the warning colour and the tooltip says it is out of date. Convert again to
   replace it.
 
-USB export does not use transcodes yet. Each USB's **Player formats** row (the USB view, see
-[USB_CONNECT.md](USB_CONNECT.md#player-formats)) says which formats its players read; an app
-playlist's title row counts the tracks in a format the connected USB doesn't allow, and how many
-of them have a transcode in one it does.
+## On a USB
+
+Each USB's **Player formats** row (the USB view, see
+[USB_CONNECT.md](USB_CONNECT.md#player-formats)) says which formats its players read, in your
+order of preference. Export picks each track's file by it:
+
+- Of the track's own file and its up-to-date transcodes, the one in the first ticked format goes
+  on the USB. With FLAC and MP3 both ticked and MP3 first, a track with an MP3 transcode goes as
+  the MP3; one without goes as its FLAC.
+- None in a ticked format: a lossless track gets a transcode made by the export, in the first
+  ticked format the app makes (AIFF, WAV or MP3). The progress bar shows "Converting" first. The
+  new transcode stays in the library like one made with Convert…, so the next export reuses it.
+  An out-of-date transcode is made again the same way.
+- An MP3 or AAC track in a format the USB doesn't allow can't be converted (the app only converts
+  from lossless). The export is refused before anything is written, and the message names the
+  tracks.
+- The app playlist's title row says ahead of time what the export will do: "2 tracks will be
+  converted to MP3 on export", or that tracks can't go on the USB.
+
+The USB's databases list the transcode's own file: its format, size, bit rate and length.
+
+### Timing
+
+An MP3's audio starts a little later than its source: the encoder and the player's decoder each
+add a short delay, about 25 ms together. A cue at 1:00.000 on the FLAC is at 1:00.025 in the
+MP3. Export moves the cues, the first beat and the whole beat grid that much later on the USB,
+so they land on the same sound. AIFF and WAV start at the same sample, so nothing moves.
+
+The waveforms on the USB are drawn from the transcode itself. Song structure (phrases) and
+everything else in the track's analysis stays as it is.
+
+Going the other way, the app takes the delay off again: a cue edited on the USB's MP3 is saved
+on the library track that much earlier, and cues imported from the USB's MP3 land on the
+track's own timeline. The app recognises the USB's file as a transcode by its format and exact
+size.
 
 ## Which tracks get one
 
@@ -69,7 +100,8 @@ back.
 
 **Convert… → Remove transcodes** deletes the selected tracks' transcode files.
 A track removed from the library (its file is gone at the next scan, or its
-source folder is removed) takes its transcodes with it.
+source folder is removed) takes its transcodes with it. A transcode's
+analysis files (below) go with it.
 
 ## Converting runs as a job
 
@@ -86,7 +118,15 @@ converted keep their files; a half-written file is deleted.
 - The MP3's start offset is stored (`offset_ms`): an MP3 starts later than its
   source by the encoder and decoder delay, as a player that doesn't trim it
   plays the file. rekordbox plays MP3s this way (checked against its
-  waveforms); export will need it once it uses transcodes.
+  waveforms). Export moves cues and the grid by it, rounded to whole
+  milliseconds (`service/transcode_export.rs`).
+- Each transcode has its own analysis bundle in the app data
+  (`transcode_analysis/<hash of the transcode's path>/`): `TRANSCODE.*`, drawn
+  from the transcode file when it is made (waveforms, and the MP3 seek index
+  `PVBR`), and `ANLZ0000.*`, rebuilt at each export from the track's own
+  bundle with those waveforms and seek index and its beat grid moved
+  (`anlz::transcode_bundle_file`). A transcode made before export used them
+  gets `TRANSCODE.*` at its first export.
 - MP3s are written without the Info/LAME header frame. rekordbox plays the
   header frame LAME writes as one more frame of audio, which would move the
   file's timeline by 1152 samples; a CBR file needs no header frame.

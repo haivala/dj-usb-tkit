@@ -764,23 +764,28 @@ function renderPlaylistExportSpace(ctx, playlist) {
   el.playlistExportSpace.classList.toggle("is-warning", !space.fits);
 }
 
-// "3 tracks in formats that are not allowed on this USB", from the export
-// estimate's counts.
+// What the USB's Player formats mean for this playlist's export, from the
+// backend's counts: "2 tracks will be converted to MP3 on export", and the
+// tracks it refuses (lossy, in a format the USB doesn't allow).
 function renderPlaylistFormatWarning(ctx, space) {
   const { el } = ctx;
   if (!el?.playlistFormatWarning) return;
-  const disallowed = Number(space?.disallowedTracks) || 0;
-  el.playlistFormatWarning.classList.toggle("hidden", disallowed === 0);
-  if (!disallowed) return;
-  let text = `${counted(disallowed, "track")} in formats that are not allowed on this USB`;
-  const withTranscode = Number(space.disallowedWithTranscode) || 0;
-  if (withTranscode) {
-    const format = space.disallowedTranscodeFormat;
-    const what = format ? `${format === "WAV" ? "a" : "an"} ${format} transcode` : "a transcode in an allowed format";
-    const verb = withTranscode === 1 ? "has" : "have";
-    text += ` (${withTranscode} ${verb} ${what}; export doesn't use transcodes yet)`;
+  const convert = Number(space?.convertTracks) || 0;
+  const refused = Number(space?.refusedTracks) || 0;
+  const parts = [];
+  if (convert) {
+    const to = space.convertFormat ? ` to ${space.convertFormat}` : "";
+    parts.push(`${counted(convert, "track")} will be converted${to} on export`);
   }
-  el.playlistFormatWarning.textContent = text;
+  if (refused) {
+    const what = space.refusedFormat
+      ? `${refused} ${space.refusedFormat} ${refused === 1 ? "track" : "tracks"}`
+      : counted(refused, "track");
+    parts.push(`${what} can't go on this USB; export is blocked`);
+  }
+  el.playlistFormatWarning.classList.toggle("hidden", parts.length === 0);
+  el.playlistFormatWarning.classList.toggle("is-warning", refused > 0);
+  el.playlistFormatWarning.textContent = parts.join(" · ");
 }
 
 export function populatePlaylistPanel(ctx, playlist) {

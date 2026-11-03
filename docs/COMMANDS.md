@@ -234,10 +234,11 @@ drive selection from being rendered against a newer selected drive.
   bytes an export of the playlist would still copy to the USB, its free space, and whether it
   fits. Worked out from recorded data only (audio sizes from the app DB, what is already on the
   USB from the staged PDB and eDB, see "Tracks already on the USB" in `docs/USB_EXPORT.md`), so
-  no audio file is read. Also `disallowedTracks` (the playlist's tracks in a format the USB's
-  Player formats leave unticked), `disallowedWithTranscode` (of those, the ones with a
-  transcode in a ticked format) and `disallowedTranscodeFormat` (that transcode format's label
-  when they all share one, else `null`). `null` when it can't be made. The frontend asks
+  no audio file is read. Sizes are those of the files export would copy: a transcode's own, or
+  an estimate for one export still has to make. Also `convertTracks` (tracks export converts
+  first, see `docs/TRANSCODES.md`), `convertFormat` (the format's label when they all share
+  one, else `null`), `refusedTracks` (lossy tracks in a format the USB's Player formats don't
+  allow: the export is refused) and `refusedFormat` (likewise). `null` when it can't be made. The frontend asks
   for it after the track list is shown, so it never holds the list up
 - `add_library_selection_to_playlist`
 - `add_track_candidates_to_playlist`
@@ -291,7 +292,10 @@ drive selection from being rendered against a newer selected drive.
 - `inspect_usb_track` — `{ source, track, warnings }`; `track` is the whole
   row as a page shows it (library id resolved), with `needsHydration` false.
 - `initialize_usb`
-- `export_to_usb`
+- `export_to_usb` — refused before anything is written, with `validationType`
+  `player_format_refused` and the `tracks`, when a track can't go on the USB in any format its
+  Player formats tick (see `docs/TRANSCODES.md`). Transcodes it makes first report as
+  "USB: Converting track n/m".
 - `detect_external_rekordbox_db`
 
 ### External libraries

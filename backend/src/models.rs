@@ -840,16 +840,20 @@ pub struct PlaylistExportSpace {
     /// False when the copy plus the export's headroom exceeds the free space,
     /// the same rule the export's own preflight blocks on.
     pub fits: bool,
-    /// The playlist's tracks in a format the USB's Player formats leave
-    /// unticked.
+    /// The playlist's tracks export converts first: none of their files is
+    /// in a format the USB's Player formats tick (see `transcode_export`).
     #[serde(default)]
-    pub disallowed_tracks: usize,
-    /// Of those, the ones with a transcode in a ticked format.
+    pub convert_tracks: usize,
+    /// The format they are converted to (`"MP3"`), when they all share one.
     #[serde(default)]
-    pub disallowed_with_transcode: usize,
-    /// The format of those transcodes (`"MP3"`), when they all share one.
+    pub convert_format: Option<String>,
+    /// The playlist's tracks export refuses: in an unticked format and lossy,
+    /// so they can't be converted. Any blocks the export.
     #[serde(default)]
-    pub disallowed_transcode_format: Option<String>,
+    pub refused_tracks: usize,
+    /// Their format (`"MP3"`), when they all share one.
+    #[serde(default)]
+    pub refused_format: Option<String>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]

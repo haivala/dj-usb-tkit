@@ -520,6 +520,102 @@ pub(crate) fn with_beat_grid(data: &[u8], grid: &BeatGrid) -> Option<Vec<u8>> {
     Some(out)
 }
 
+/// Waveform chunks: drawn from the audio, so a transcode's come from its own
+/// file.
+const WAVEFORM_TAGS: [&[u8; 4]; 8] = [
+    b"PWAV", b"PWV2", b"PWV3", b"PWV4", b"PWV5", b"PWV6", b"PWV7", b"PWVC",
+];
+/// Seek index chunks: they describe one file's bytes.
+const SEEK_TAGS: [&[u8; 4]; 2] = [b"PVBR", b"PVB2"];
+
+/// One file of a transcode's analysis bundle (`.DAT`, `.EXT` or `.2EX`): the
+/// track's own `track_file` with the waveforms and seek index of the
+/// transcode's `transcode_file`, and every beat moved `shift_ms` later (the
+/// transcode's audio starts that much later). Everything else (cues, song
+/// structure, `PPTH`) is kept as the track has it; export applies the cues.
+/// `None` when either file doesn't walk cleanly.
+pub(crate) fn transcode_bundle_file(
+    track_file: &[u8],
+    transcode_file: &[u8],
+    shift_ms: u32,
+) -> Option<Vec<u8>> {
+    let track_chunks = anlz_chunk_ranges(track_file)?;
+    let transcode_chunks = anlz_chunk_ranges(transcode_file)?;
+    let from_transcode = |tag: &[u8; 4]| {
+        transcode_chunks
+            .iter()
+            .find(|(t, _)| t == tag)
+            .map(|(_, range)| &transcode_file[range.clone()])
+    };
+    let transcode_seek: Vec<&[u8]> = transcode_chunks
+        .iter()
+        .filter(|(tag, _)| SEEK_TAGS.contains(&tag))
+        .map(|(_, range)| &transcode_file[range.clone()])
+        .collect();
+    let track_has_seek = track_chunks.iter().any(|(tag, _)| SEEK_TAGS.contains(&tag));
+
+    let mut out = track_file[..28].to_vec();
+    let mut seek_written = false;
+    for (index, (tag, range)) in track_chunks.iter().enumerate() {
+        let chunk = &track_file[range.clone()];
+        if WAVEFORM_TAGS.contains(&tag) {
+            if let Some(own) = from_transcode(tag) {
+                out.extend_from_slice(own);
+            }
+        } else if SEEK_TAGS.contains(&tag) {
+            if !seek_written {
+                transcode_seek.iter().for_each(|c| out.extend_from_slice(c));
+                seek_written = true;
+            }
+        } else if tag == b"PQTZ" {
+            out.extend_from_slice(&shifted_pqtz(chunk, shift_ms)?);
+        } else if tag == b"PQT2" {
+            out.extend_from_slice(&shifted_pqt2(chunk, shift_ms)?);
+        } else {
+            out.extend_from_slice(chunk);
+        }
+        // A track file without a seek index (rekordbox writes it after PPTH)
+        // still gets the transcode's.
+        if index == 0 && !track_has_seek {
+            transcode_seek.iter().for_each(|c| out.extend_from_slice(c));
+        }
+    }
+    let file_len = u32::try_from(out.len()).ok()?;
+    out[8..12].copy_from_slice(&file_len.to_be_bytes());
+    Some(out)
+}
+
+/// A `PQTZ` chunk with every beat `shift_ms` later.
+fn shifted_pqtz(chunk: &[u8], shift_ms: u32) -> Option<Vec<u8>> {
+    let mut out = chunk.to_vec();
+    let header_len = read_u32_be_at(chunk, 4)? as usize;
+    let mut pos = header_len;
+    while pos + 8 <= out.len() {
+        let time = read_u32_be_at(&out, pos + 4)?.checked_add(shift_ms)?;
+        out[pos + 4..pos + 8].copy_from_slice(&time.to_be_bytes());
+        pos += 8;
+    }
+    Some(out)
+}
+
+/// A `PQT2` chunk with every beat `shift_ms` later: its first and last beat
+/// times and the checksum (which sums every beat time) move; the per-beat
+/// microseconds don't.
+fn shifted_pqt2(chunk: &[u8], shift_ms: u32) -> Option<Vec<u8>> {
+    if chunk.len() < 56 {
+        return Some(chunk.to_vec());
+    }
+    let mut out = chunk.to_vec();
+    for at in [28, 36] {
+        let time = read_u32_be_at(&out, at)?.checked_add(shift_ms)?;
+        out[at..at + 4].copy_from_slice(&time.to_be_bytes());
+    }
+    let beats = read_u32_be_at(&out, 40)?;
+    let checksum = read_u32_be_at(&out, 44)?.wrapping_add(beats.wrapping_mul(shift_ms));
+    out[44..48].copy_from_slice(&checksum.to_be_bytes());
+    Some(out)
+}
+
 fn normalize_first_beat_ms(first_beat_ms: u32, bpm: Option<f64>) -> u32 {
     let Some(bpm_val) = bpm.filter(|b| *b > 0.0) else {
         return first_beat_ms;
@@ -2201,6 +2297,62 @@ mod tests {
             pos += total_len;
         }
         None
+    }
+
+    // --- Transcode bundle ---
+
+    #[test]
+    fn a_transcode_bundle_has_its_own_waveforms_and_the_tracks_grid_moved() {
+        let track_wave = WaveformData::from_peaks(vec![40; 300]);
+        let transcode_wave = WaveformData::from_peaks(vec![200; 300]);
+        let cue = [AnlzCue {
+            position_ms: 1_000,
+            hot_cue: 1,
+            ..Default::default()
+        }];
+        let track_dat =
+            build_anlz_dat_file(&track_wave, "/a.flac", Some(128.0), 30_000, Some(100), &cue);
+        let track_ext =
+            build_anlz_ext_file(&track_wave, "/a.flac", Some(128.0), 30_000, Some(100), &cue);
+        // Drawn from the transcode file alone: no grid, no cues.
+        let transcode_dat = build_anlz_dat_file(&transcode_wave, "", None, 30_000, None, &[]);
+        let transcode_ext = build_anlz_ext_file(&transcode_wave, "", None, 30_000, None, &[]);
+
+        let dat = transcode_bundle_file(&track_dat, &transcode_dat, 25).unwrap();
+        let ext = transcode_bundle_file(&track_ext, &transcode_ext, 25).unwrap();
+
+        assert_eq!(collect_chunk_tags(&dat), collect_chunk_tags(&track_dat));
+        assert_eq!(collect_chunk_tags(&ext), collect_chunk_tags(&track_ext));
+        let chunk = |file: &[u8], tag: &[u8; 4]| {
+            let (_, range) = anlz_chunk_ranges(file)
+                .unwrap()
+                .into_iter()
+                .find(|(t, _)| t == tag)
+                .unwrap();
+            file[range].to_vec()
+        };
+        for tag in [b"PWAV", b"PWV2"] {
+            assert_eq!(chunk(&dat, tag), chunk(&transcode_dat, tag));
+        }
+        for tag in [b"PWV3", b"PWV4", b"PWV5"] {
+            assert_eq!(chunk(&ext, tag), chunk(&transcode_ext, tag));
+        }
+        assert_eq!(chunk(&ext, b"PCO2"), chunk(&track_ext, b"PCO2"));
+        assert_eq!(read_u32_be_at(&dat, 8), Some(dat.len() as u32));
+
+        let before = pqtz_beats(&track_dat).unwrap();
+        let after = pqtz_beats(&dat).unwrap();
+        assert_eq!(before.len(), after.len());
+        assert!(
+            before
+                .iter()
+                .zip(&after)
+                .all(|(b, a)| a.0 == b.0 && a.1 == b.1 && a.2 == b.2 + 25)
+        );
+        assert_eq!(read_first_beat_from_anlz(&dat), Some(125));
+        assert_eq!(read_first_beat_from_anlz(&ext), Some(125));
+        // PQT2 still agrees with PQTZ, as rekordbox checks.
+        assert_eq!(pqt2_checksum_ok(&dat, &ext), Some(true));
     }
 
     // --- DAT file ---

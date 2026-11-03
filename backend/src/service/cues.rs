@@ -43,6 +43,7 @@ use super::export_helpers::{
 };
 use super::key_notation::{self, KeyNotation, key_display_fields, key_notation_setting};
 use super::track_matching::{content_fingerprint_key, pdb_track_fingerprint};
+use super::transcode_export::transcode_offset_for_usb_file;
 use super::usb_utils::{
     read_pwv5_from_anlz, resolve_usb_root, resolve_usb_side_path, resolve_usb_side_path_text,
 };
@@ -62,14 +63,23 @@ pub const MAX_HOT_CUES: u8 = 8;
 /// the sibling `.EXT` (richer: colour + comment) is preferred when present.
 /// The exported bundle carries each cue as a memory + hot pair, so entries are
 /// deduped by position back into one `track_cues` row.
+///
+/// `media_path` is the stick's audio file the bundle belongs to: when it is
+/// one of the track's transcodes, whose audio starts later, the times are
+/// moved back onto the track's own timeline.
 pub fn import_anlz_cues_for_track(
     tx: &rusqlite::Transaction<'_>,
     track_id: &str,
     dat_path: &Path,
+    media_path: Option<&Path>,
 ) -> BackendResult<()> {
     if track_has_cues(tx, track_id)? {
         return Ok(());
     }
+    let shift = match media_path {
+        Some(media) => transcode_offset_for_usb_file(tx, track_id, media)?.unwrap_or(0),
+        None => 0,
+    };
 
     let ext_path = dat_path.with_extension("EXT");
     let bytes = std::fs::read(&ext_path)
@@ -79,7 +89,11 @@ pub fn import_anlz_cues_for_track(
         return Ok(());
     }
 
-    insert_track_cues(tx, track_id, &collapse_anlz_cues(&bytes))?;
+    let mut cues = collapse_anlz_cues(&bytes);
+    for cue in &mut cues {
+        cue.position_ms = cue.position_ms.saturating_sub(shift);
+    }
+    insert_track_cues(tx, track_id, &cues)?;
 
     // Seed the beat-grid anchor when the local row doesn't have one.
     let local_first_beat: Option<i64> = tx
@@ -95,7 +109,7 @@ pub fn import_anlz_cues_for_track(
     {
         tx.execute(
             "UPDATE tracks SET first_beat_ms = ?1 WHERE id = ?2 AND first_beat_ms IS NULL",
-            params![i64::from(first_beat), track_id],
+            params![i64::from(first_beat.saturating_sub(shift)), track_id],
         )?;
     }
     Ok(())
@@ -226,11 +240,20 @@ fn local_track_id_by_usb_fingerprint(
     let row = pdb_track_by_media_path(&parsed, req.usb_media_path_raw).ok()?;
     let fingerprint = pdb_track_fingerprint(&parsed, row)?;
     let size = row.file_size_bytes.map(i64::from);
+    // The track's own file, or one of its transcodes (same format and size).
+    let transcode_format = crate::audio_format::format_ext_from_path(req.usb_media_path_raw)
+        .as_deref()
+        .and_then(crate::audio_encode::TranscodeFormat::parse)
+        .map(|format| format.as_str());
     let mut stmt = conn
-        .prepare("SELECT id, title, artist FROM tracks WHERE file_size_bytes = ?1")
+        .prepare(
+            "SELECT id, title, artist FROM tracks WHERE file_size_bytes = ?1
+               OR id IN (SELECT track_id FROM track_transcodes
+                         WHERE format = ?2 AND file_size_bytes = ?1)",
+        )
         .ok()?;
     let rows = stmt
-        .query_map(params![size], |r| {
+        .query_map(params![size, transcode_format], |r| {
             Ok((
                 r.get::<_, String>(0)?,
                 r.get::<_, Option<String>>(1)?,
@@ -643,7 +666,7 @@ fn normalize_key_input(key: &str) -> BackendResult<String> {
 }
 
 /// A validated, normalised cue point ready to be persisted.
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 struct NormalizedCue {
     position_ms: u32,
     color_id: Option<u8>,
@@ -899,13 +922,14 @@ impl BackendService {
         &self,
         track_id: &str,
         anlz_abs_path: &Path,
+        media_path: Option<&Path>,
     ) -> BackendResult<()> {
         if track_id.trim().is_empty() || anlz_abs_path.as_os_str().is_empty() {
             return Ok(());
         }
         let mut conn = self.db.connect()?;
         let tx = conn.transaction()?;
-        import_anlz_cues_for_track(&tx, track_id, anlz_abs_path)?;
+        import_anlz_cues_for_track(&tx, track_id, anlz_abs_path, media_path)?;
         tx.commit()?;
         Ok(())
     }
@@ -1255,13 +1279,29 @@ impl BackendService {
         {
             Some(track_id) => {
                 let mut conn = self.db.connect()?;
+                // The stick's file is one of the track's transcodes: its
+                // audio starts later, so the track's own times are earlier.
+                let shift = resolve_usb_side_path(&usb_root, &req.usb_media_path_raw)
+                    .map(|media| transcode_offset_for_usb_file(&conn, &track_id, &media))
+                    .transpose()?
+                    .flatten()
+                    .unwrap_or(0);
+                let first_beat_ms = req.first_beat_ms.map(|ms| ms.saturating_sub(shift));
+                let local_cues = normalized.as_ref().map(|cues| {
+                    cues.iter()
+                        .map(|cue| NormalizedCue {
+                            position_ms: cue.position_ms.saturating_sub(shift),
+                            ..cue.clone()
+                        })
+                        .collect::<Vec<_>>()
+                });
                 let now = now();
                 let tx = conn.transaction()?;
                 apply_local_analysis_edits_tx(
                     &tx,
                     &track_id,
-                    req.first_beat_ms,
-                    normalized.as_deref(),
+                    first_beat_ms,
+                    local_cues.as_deref(),
                     req.bpm,
                     key.as_deref(),
                     &now,

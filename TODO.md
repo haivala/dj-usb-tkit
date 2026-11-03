@@ -53,3 +53,20 @@ tracks in PDB history but reads only `playlist_content` from the eDB, so a
 track only in eDB history and in no playlist could lose its audio, analysis
 and artwork files. "Remove Missing Audio References" already counts both
 histories.
+
+## Check: app timing of MP3s with a LAME header frame
+
+The app's analysis (waveform, beat grid, cues) decodes an MP3 without the
+Info/Xing header frame that most MP3 encoders write first. rekordbox played
+the header frame of the app's earlier MP3s (tagged `LAME4.0`) as one more
+frame of audio, but skipped the one ffmpeg writes (tagged `Lavc`); what it
+goes by is unknown, and no MP3 from the LAME encoder itself (`LAME3.100`), the
+usual kind in a library, has been checked. If rekordbox plays those header
+frames too, the app's grids and cues on such MP3s sit 1152 samples (about
+26 ms) early on players.
+
+To settle it without a new rekordbox export: on a stick rekordbox has
+analyzed, compare the app's waveform of its LAME MP3s with rekordbox's `PWV3`
+(cross-correlation; beat grids are too noisy to tell). Transcodes the app
+makes are not affected: they are written without a header frame, and their
+timing was checked against rekordbox.

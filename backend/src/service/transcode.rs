@@ -14,6 +14,7 @@ use std::sync::{Arc, Mutex, mpsc};
 
 use rusqlite::{OptionalExtension, params, params_from_iter};
 
+use super::anlz::AnlzBundlePaths;
 use super::{
     BackendService, LibrarySources, browse_path_matches_root, now, stored_file_path, track_rows,
 };
@@ -46,14 +47,82 @@ pub struct TranscodeProgress {
 /// One planned transcode.
 struct Job {
     track: Track,
+    format: TranscodeFormat,
     source: PathBuf,
     output: PathBuf,
     tags: TranscodeTags,
     source_size: Option<i64>,
     source_modified_at: Option<i64>,
+    /// Where the transcode's own waveform bundle goes (`None` without a data
+    /// folder, in tests on an in-memory DB).
+    bundle_dir: Option<PathBuf>,
 }
 
-fn file_facts(path: &Path) -> (Option<i64>, Option<i64>) {
+type JobResult = Result<crate::audio_encode::TranscodeOutput, TranscodeError>;
+
+/// Where a transcode's analysis bundle lives: in the app data, named after
+/// the transcode file's path, so it follows the file whichever track owns it.
+const BUNDLE_DIR_NAME: &str = "transcode_analysis";
+/// The bundle drawn from the transcode file: waveforms and seek index only.
+const WAVEFORM_BUNDLE_STEM: &str = "TRANSCODE";
+/// That bundle merged with the track's own analysis for export (see
+/// `anlz::transcode_bundle_file`).
+const EXPORT_BUNDLE_STEM: &str = "ANLZ0000";
+
+/// The app data folder of `conn`'s database.
+fn data_dir_of(conn: &rusqlite::Connection) -> Option<PathBuf> {
+    conn.path()
+        .filter(|path| !path.is_empty())
+        .and_then(|path| Path::new(path).parent().map(Path::to_path_buf))
+}
+
+pub(crate) fn transcode_bundle_dir(data_dir: &Path, transcode_path: &Path) -> PathBuf {
+    // FNV-1a: stable across runs and platforms.
+    let hash = transcode_path
+        .to_string_lossy()
+        .bytes()
+        .fold(0xcbf2_9ce4_8422_2325u64, |hash, byte| {
+            (hash ^ u64::from(byte)).wrapping_mul(0x0000_0100_0000_01b3)
+        });
+    data_dir.join(BUNDLE_DIR_NAME).join(format!("{hash:016x}"))
+}
+
+fn bundle_paths(dir: &Path, stem: &str) -> AnlzBundlePaths {
+    AnlzBundlePaths {
+        dat_path: dir.join(format!("{stem}.DAT")),
+        ext_path: dir.join(format!("{stem}.EXT")),
+        twoex_path: dir.join(format!("{stem}.2EX")),
+    }
+}
+
+pub(crate) fn transcode_waveform_bundle(dir: &Path) -> AnlzBundlePaths {
+    bundle_paths(dir, WAVEFORM_BUNDLE_STEM)
+}
+
+pub(crate) fn transcode_export_bundle(dir: &Path) -> AnlzBundlePaths {
+    bundle_paths(dir, EXPORT_BUNDLE_STEM)
+}
+
+/// Draws the transcode's waveform bundle from its file. A failure is logged:
+/// export draws it again when it needs it.
+pub(crate) fn write_transcode_waveform_bundle(dir: &Path, transcode: &Path) -> bool {
+    match super::analysis::write_waveform_bundle_for_audio(
+        transcode,
+        &transcode_waveform_bundle(dir),
+    ) {
+        Ok(()) => true,
+        Err(err) => {
+            crate::logging::emit(
+                crate::logging::Level::Warn,
+                "transcode",
+                &format!("no waveform for transcode {}: {err}", transcode.display()),
+            );
+            false
+        }
+    }
+}
+
+pub(crate) fn file_facts(path: &Path) -> (Option<i64>, Option<i64>) {
     match std::fs::metadata(path) {
         Ok(meta) => (
             i64::try_from(meta.len()).ok(),
@@ -214,27 +283,15 @@ impl BackendService {
                 data.messages.push(format!("{name}: {reason}"));
                 continue;
             }
-            let existing = existing_transcode_path(&conn, &track.id, format)?;
-            let output = output_path(
+            jobs.push(plan_job(
+                &conn,
                 &out_dir,
                 &roots,
-                &track,
-                &source,
-                format,
-                existing.as_deref(),
-                &reserved,
-            );
-            reserved.insert(output.clone());
-            let (source_size, source_modified_at) = file_facts(&source);
-            let tags = tags_for(&track, &source);
-            jobs.push(Job {
                 track,
                 source,
-                output,
-                tags,
-                source_size,
-                source_modified_at,
-            });
+                format,
+                &mut reserved,
+            )?);
         }
         drop(conn);
 
@@ -244,21 +301,65 @@ impl BackendService {
             return Ok(data);
         }
         let cancel = Arc::clone(&self.transcode_cancelled);
+        let mut current = 0usize;
+        self.run_transcode_jobs(jobs, &cancel, |job, result| {
+            let name = job
+                .source
+                .file_name()
+                .map(|n| n.to_string_lossy().to_string())
+                .unwrap_or_default();
+            let failed = match result {
+                Ok(()) => {
+                    data.transcoded += 1;
+                    false
+                }
+                Err(TranscodeError::Cancelled) => {
+                    data.cancelled = true;
+                    return;
+                }
+                Err(TranscodeError::Failed(message)) => {
+                    data.failed += 1;
+                    data.messages.push(format!("{name}: {message}"));
+                    true
+                }
+            };
+            current += 1;
+            on_progress(&TranscodeProgress {
+                current,
+                total,
+                track_id: job.track.id.clone(),
+                file_path: job.track.file_path.clone(),
+                failed,
+            });
+        })?;
+        data.cancelled |= self.transcode_cancelled.load(Ordering::SeqCst);
+        data.tracks = track_rows(&*self.db.connect()?, &track_ids)?;
+        Ok(data)
+    }
+
+    /// Runs `jobs` on a few worker threads and records each finished one;
+    /// `on_done` hears of every job, recorded or not, in finishing order.
+    fn run_transcode_jobs(
+        &self,
+        jobs: Vec<Job>,
+        cancel: &AtomicBool,
+        mut on_done: impl FnMut(&Job, Result<(), TranscodeError>),
+    ) -> BackendResult<()> {
+        let total = jobs.len();
+        if total == 0 {
+            return Ok(());
+        }
         let queue = Mutex::new(jobs.into_iter().collect::<VecDeque<_>>());
         let workers = std::thread::available_parallelism()
             .map(|n| n.get())
             .unwrap_or(1)
             .clamp(1, MAX_WORKERS)
             .min(total);
-        let (tx, rx) = mpsc::channel::<(
-            Job,
-            Result<crate::audio_encode::TranscodeOutput, TranscodeError>,
-        )>();
+        let (tx, rx) = mpsc::channel::<(Job, JobResult)>();
         std::thread::scope(|scope| -> BackendResult<()> {
             for _ in 0..workers {
                 let tx = tx.clone();
                 let queue = &queue;
-                let cancel = &cancel;
                 scope.spawn(move || {
                     loop {
                         if cancel.load(Ordering::Relaxed) {
@@ -267,7 +368,7 @@ impl BackendService {
                         let Some(job) = queue.lock().ok().and_then(|mut q| q.pop_front()) else {
                             return;
                         };
-                        let result = run_job(&job, format, cancel);
+                        let result = run_job(&job, cancel);
                         if tx.send((job, result)).is_err() {
                             return;
                         }
@@ -276,42 +377,73 @@ impl BackendService {
             }
             drop(tx);
             let conn = self.db.connect()?;
-            for (index, (job, result)) in rx.into_iter().enumerate() {
-                let current = index + 1;
-                let name = job
-                    .source
-                    .file_name()
-                    .map(|n| n.to_string_lossy().to_string())
-                    .unwrap_or_default();
-                let failed = match result {
+            for (job, result) in rx {
+                let result = match result {
                     Ok(output) => {
-                        record_transcode(&conn, &job, format, &output)?;
-                        data.transcoded += 1;
-                        false
+                        record_transcode(&conn, &job, &output)?;
+                        Ok(())
                     }
-                    Err(TranscodeError::Cancelled) => {
-                        data.cancelled = true;
-                        continue;
-                    }
-                    Err(TranscodeError::Failed(message)) => {
-                        data.failed += 1;
-                        data.messages.push(format!("{name}: {message}"));
-                        true
-                    }
+                    Err(err) => Err(err),
                 };
-                on_progress(&TranscodeProgress {
-                    current,
-                    total,
-                    track_id: job.track.id.clone(),
-                    file_path: job.track.file_path.clone(),
-                    failed,
-                });
+                on_done(&job, result);
             }
             Ok(())
+        })
+    }
+
+    /// Makes the transcodes an export needs: `wanted` is (track id, format).
+    /// Not cancellable on its own (export isn't). Reports each finished one
+    /// as (done, total, file name) and returns the failures as (track id,
+    /// message).
+    pub(crate) fn make_transcodes_for_export(
+        &self,
+        wanted: &[(String, TranscodeFormat)],
+        mut on_progress: impl FnMut(usize, usize, &str),
+    ) -> BackendResult<Vec<(String, String)>> {
+        let conn = self.db.connect()?;
+        let ids: Vec<String> = wanted.iter().map(|(id, _)| id.clone()).collect();
+        let mut tracks: HashMap<String, Track> = track_rows(&conn, &ids)?
+            .into_iter()
+            .map(|track| (track.id.clone(), track))
+            .collect();
+        let (out_dir, _) = self.transcode_dir(&conn)?;
+        let roots = LibrarySources::load(&conn)?.roots;
+        let mut reserved = HashSet::<PathBuf>::new();
+        let mut jobs = Vec::new();
+        let mut failures = Vec::new();
+        for (id, format) in wanted {
+            let Some(track) = tracks.remove(id) else {
+                failures.push((id.clone(), "track not found".to_string()));
+                continue;
+            };
+            let source = stored_file_path(&track.file_path).to_path_buf();
+            jobs.push(plan_job(
+                &conn,
+                &out_dir,
+                &roots,
+                track,
+                source,
+                *format,
+                &mut reserved,
+            )?);
+        }
+        drop(conn);
+        let total = jobs.len();
+        let mut done = 0usize;
+        let never_cancelled = AtomicBool::new(false);
+        self.run_transcode_jobs(jobs, &never_cancelled, |job, result| {
+            done += 1;
+            if let Err(err) = result {
+                failures.push((job.track.id.clone(), err.to_string()));
+            }
+            let name = job
+                .source
+                .file_name()
+                .map(|n| n.to_string_lossy().to_string())
+                .unwrap_or_default();
+            on_progress(done, total, &name);
         })?;
-        data.cancelled |= self.transcode_cancelled.load(Ordering::SeqCst);
-        data.tracks = track_rows(&*self.db.connect()?, &track_ids)?;
-        Ok(data)
+        Ok(failures)
     }
 
     /// The selected ids as `tracks` rows. A browse-only row (a file the
@@ -364,7 +496,7 @@ impl BackendService {
         for id in &req.track_ids {
             let paths = transcode_paths_where(&conn, "track_id = ?1", params![id])?;
             for path in &paths {
-                remove_file_if_present(path);
+                remove_transcode_files(&conn, path);
             }
             removed += conn.execute(
                 "DELETE FROM track_transcodes WHERE track_id = ?1",
@@ -378,11 +510,8 @@ impl BackendService {
     }
 }
 
-fn run_job(
-    job: &Job,
-    format: TranscodeFormat,
-    cancel: &AtomicBool,
-) -> Result<crate::audio_encode::TranscodeOutput, TranscodeError> {
+fn run_job(job: &Job, cancel: &AtomicBool) -> JobResult {
+    let format = job.format;
     let parent = job
         .output
         .parent()
@@ -403,8 +532,63 @@ fn run_job(
     });
     if result.is_err() {
         remove_file_if_present(&part);
+    } else if let Some(dir) = &job.bundle_dir {
+        write_transcode_waveform_bundle(dir, &job.output);
     }
     result
+}
+
+/// Deletes a transcode file and its analysis bundle.
+fn remove_transcode_files(conn: &rusqlite::Connection, path: &Path) {
+    remove_file_if_present(path);
+    if let Some(data_dir) = data_dir_of(conn) {
+        let dir = transcode_bundle_dir(&data_dir, path);
+        if let Err(err) = std::fs::remove_dir_all(&dir)
+            && err.kind() != std::io::ErrorKind::NotFound
+        {
+            crate::logging::emit(
+                crate::logging::Level::Warn,
+                "transcode",
+                &format!("could not remove {}: {err}", dir.display()),
+            );
+        }
+    }
+}
+
+/// A transcode of `track` into `format`, at its own free output path.
+fn plan_job(
+    conn: &rusqlite::Connection,
+    out_dir: &Path,
+    roots: &[String],
+    track: Track,
+    source: PathBuf,
+    format: TranscodeFormat,
+    reserved: &mut HashSet<PathBuf>,
+) -> BackendResult<Job> {
+    let existing = existing_transcode_path(conn, &track.id, format)?;
+    let output = output_path(
+        out_dir,
+        roots,
+        &track,
+        &source,
+        format,
+        existing.as_deref(),
+        reserved,
+    );
+    reserved.insert(output.clone());
+    let (source_size, source_modified_at) = file_facts(&source);
+    let tags = tags_for(&track, &source);
+    let bundle_dir = data_dir_of(conn).map(|dir| transcode_bundle_dir(&dir, &output));
+    Ok(Job {
+        track,
+        format,
+        source,
+        output,
+        tags,
+        source_size,
+        source_modified_at,
+        bundle_dir,
+    })
 }
 
 fn remove_file_if_present(path: &Path) {
@@ -515,9 +699,9 @@ fn tags_for(track: &Track, source: &Path) -> TranscodeTags {
 fn record_transcode(
     conn: &rusqlite::Connection,
     job: &Job,
-    format: TranscodeFormat,
     output: &crate::audio_encode::TranscodeOutput,
 ) -> BackendResult<()> {
+    let format = job.format;
     let previous = existing_transcode_path(conn, &job.track.id, format)?;
     let size = std::fs::metadata(&job.output)
         .ok()
@@ -552,7 +736,7 @@ fn record_transcode(
     if let Some(previous) = previous
         && previous != job.output
     {
-        remove_file_if_present(&previous);
+        remove_transcode_files(conn, &previous);
     }
     Ok(())
 }
@@ -582,7 +766,7 @@ pub(crate) fn sweep_orphan_transcodes(conn: &rusqlite::Connection) -> BackendRes
         return Ok(0);
     }
     for path in &paths {
-        remove_file_if_present(path);
+        remove_transcode_files(conn, path);
     }
     Ok(conn.execute(&format!("DELETE FROM track_transcodes WHERE {ORPHAN}"), [])?)
 }
