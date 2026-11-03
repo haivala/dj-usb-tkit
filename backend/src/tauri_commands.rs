@@ -1126,19 +1126,19 @@ pub fn set_usb_device_name(
 }
 
 #[tauri::command]
-pub fn get_usb_formats(
+pub fn get_usb_audio_formats(
     state: State<'_, BackendCommands>,
-    request: crate::models::GetUsbFormatsRequest,
-) -> ApiResponse<crate::models::UsbFormatsData> {
-    state.get_usb_formats(request)
+    request: crate::models::GetUsbAudioFormatsRequest,
+) -> ApiResponse<crate::models::UsbAudioFormatsData> {
+    state.get_usb_audio_formats(request)
 }
 
 #[tauri::command]
-pub fn set_usb_formats(
+pub fn set_usb_audio_formats(
     state: State<'_, BackendCommands>,
-    request: crate::models::SetUsbFormatsRequest,
-) -> ApiResponse<crate::models::UsbFormatsData> {
-    state.set_usb_formats(request)
+    request: crate::models::SetUsbAudioFormatsRequest,
+) -> ApiResponse<crate::models::UsbAudioFormatsData> {
+    state.set_usb_audio_formats(request)
 }
 
 #[tauri::command]

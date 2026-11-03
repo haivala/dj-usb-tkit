@@ -1,5 +1,5 @@
 //! Which file of a track goes onto a USB: the track's own, or one of its
-//! transcodes, by the stick's Player formats (see `usb_identity::DriveFormats`).
+//! transcodes, by the stick's USB audio formats (see `usb_identity::UsbAudioFormats`).
 //!
 //! The stick's order of preference picks among the files the track has in a
 //! ticked format: its own file and its up-to-date transcodes. When none is
@@ -19,7 +19,7 @@ use std::path::{Path, PathBuf};
 use rusqlite::{OptionalExtension, params, params_from_iter};
 
 use crate::audio_encode::TranscodeFormat;
-use crate::audio_format::{PlayerFormat, format_ext_from_path, track_rekordbox_file_type};
+use crate::audio_format::{UsbAudioFormat, format_ext_from_path, track_rekordbox_file_type};
 use crate::edb::ExportTrackData;
 use crate::error::BackendResult;
 use crate::models::{Track, TrackExportFile};
@@ -29,8 +29,8 @@ use super::transcode::{
     file_facts, size_text, transcode_bundle_dir, transcode_export_bundle,
     transcode_waveform_bundle, write_transcode_waveform_bundle,
 };
-use super::usb_formats::library_player_format;
-use super::usb_identity::DriveFormats;
+use super::usb_audio_formats::library_usb_audio_format;
+use super::usb_identity::UsbAudioFormats;
 
 /// A recorded transcode of a track.
 #[derive(Debug, Clone, PartialEq)]
@@ -70,7 +70,7 @@ pub(crate) enum ExportFile {
     /// No usable file yet: export makes a transcode in this format first.
     Make(TranscodeFormat),
     /// No ticked format the track has or can be converted to.
-    Refused(PlayerFormat),
+    Refused(UsbAudioFormat),
 }
 
 /// Where the "has the track's file changed since its transcode was made"
@@ -84,26 +84,26 @@ pub(crate) enum SourceFacts {
     OnDisk,
 }
 
-/// The [`PlayerFormat`] a transcode format is.
-fn player_format_of(format: TranscodeFormat) -> PlayerFormat {
+/// The [`UsbAudioFormat`] a transcode format is.
+fn usb_audio_format_of(format: TranscodeFormat) -> UsbAudioFormat {
     match format {
-        TranscodeFormat::Aiff => PlayerFormat::Aiff,
-        TranscodeFormat::Wav => PlayerFormat::Wav,
-        TranscodeFormat::Mp3 => PlayerFormat::Mp3,
+        TranscodeFormat::Aiff => UsbAudioFormat::Aiff,
+        TranscodeFormat::Wav => UsbAudioFormat::Wav,
+        TranscodeFormat::Mp3 => UsbAudioFormat::Mp3,
     }
 }
 
-/// The transcode format a [`PlayerFormat`] is, when the app can make it.
-fn transcode_format_of(format: PlayerFormat) -> Option<TranscodeFormat> {
+/// The transcode format a [`UsbAudioFormat`] is, when the app can make it.
+fn transcode_format_of(format: UsbAudioFormat) -> Option<TranscodeFormat> {
     TranscodeFormat::ALL
         .into_iter()
-        .find(|&candidate| player_format_of(candidate) == format)
+        .find(|&candidate| usb_audio_format_of(candidate) == format)
 }
 
-fn is_lossless(format: PlayerFormat) -> bool {
+fn is_lossless(format: UsbAudioFormat) -> bool {
     matches!(
         format,
-        PlayerFormat::Flac | PlayerFormat::Alac | PlayerFormat::Aiff | PlayerFormat::Wav
+        UsbAudioFormat::Flac | UsbAudioFormat::Alac | UsbAudioFormat::Aiff | UsbAudioFormat::Wav
     )
 }
 
@@ -196,7 +196,7 @@ fn recorded_source_facts(
 pub(crate) fn plan_export_files(
     conn: &rusqlite::Connection,
     tracks: &[ExportTrackData],
-    formats: &DriveFormats,
+    formats: &UsbAudioFormats,
     facts: SourceFacts,
 ) -> BackendResult<Vec<ExportFile>> {
     let ids: Vec<&str> = tracks.iter().map(|track| track.id.as_str()).collect();
@@ -241,11 +241,11 @@ pub(crate) fn plan_export_files(
 fn choose_export_file(
     track: &ExportTrackData,
     up_to_date: &[TranscodeFile],
-    formats: &DriveFormats,
+    formats: &UsbAudioFormats,
 ) -> ExportFile {
-    // Not a Player formats format: export's own "players don't play it"
+    // Not a USB audio formats format: export's own "players don't play it"
     // rule deals with it.
-    let Some(own) = library_player_format(&track.file_path, track.bit_depth) else {
+    let Some(own) = library_usb_audio_format(&track.file_path, track.bit_depth) else {
         return ExportFile::Source;
     };
     let ticked = || {
@@ -261,7 +261,7 @@ fn choose_export_file(
         }
         if let Some(file) = up_to_date
             .iter()
-            .find(|file| player_format_of(file.format) == format)
+            .find(|file| usb_audio_format_of(file.format) == format)
         {
             return ExportFile::Transcode(file.clone());
         }
@@ -336,7 +336,7 @@ fn track_format_text(track: &Track) -> String {
 }
 
 /// Sets each of `tracks`' `export_file` for the USB at `usb_root`, by its
-/// Player formats, from recorded data only (no music file is read), and
+/// USB audio formats, from recorded data only (no music file is read), and
 /// marks the transcode that goes as `exported`.
 pub(crate) fn fill_track_export_files(
     conn: &rusqlite::Connection,
@@ -352,7 +352,7 @@ pub(crate) fn fill_track_export_files(
             ..Default::default()
         })
         .collect();
-    let formats = super::usb_identity::read_drive_formats(usb_root);
+    let formats = super::usb_identity::read_usb_audio_formats(usb_root);
     let plan = plan_export_files(conn, &export_tracks, &formats, SourceFacts::Recorded)?;
     for (track, file) in tracks.iter_mut().zip(plan) {
         if let ExportFile::Transcode(file) = &file {
@@ -529,20 +529,20 @@ mod tests {
     use super::*;
     use crate::models::TrackCue;
 
-    fn formats(order: &[(&str, bool)]) -> DriveFormats {
+    fn formats(order: &[(&str, bool)]) -> UsbAudioFormats {
         let items: Vec<(String, bool)> = order
             .iter()
             .map(|(id, allowed)| (id.to_string(), *allowed))
             .collect();
-        DriveFormats::from_request(&items).unwrap()
+        UsbAudioFormats::from_request(&items).unwrap()
     }
 
-    fn no(unticked: &[&str]) -> DriveFormats {
-        let items: Vec<(String, bool)> = PlayerFormat::DEFAULT_ORDER
+    fn no(unticked: &[&str]) -> UsbAudioFormats {
+        let items: Vec<(String, bool)> = UsbAudioFormat::DEFAULT_ORDER
             .into_iter()
             .map(|format| (format.id().to_string(), !unticked.contains(&format.id())))
             .collect();
-        DriveFormats::from_request(&items).unwrap()
+        UsbAudioFormats::from_request(&items).unwrap()
     }
 
     fn track(id: &str, file_path: &str, bit_depth: Option<u8>) -> ExportTrackData {
@@ -601,7 +601,7 @@ mod tests {
     fn plan(
         fixture: &Fixture,
         tracks: &[ExportTrackData],
-        formats: &DriveFormats,
+        formats: &UsbAudioFormats,
     ) -> Vec<ExportFile> {
         plan_export_files(&fixture.conn, tracks, formats, SourceFacts::Recorded).unwrap()
     }
@@ -627,7 +627,7 @@ mod tests {
         // the first ticked format the app makes (AIFF, by the default order).
         assert_eq!(got[1], ExportFile::Make(TranscodeFormat::Aiff));
         assert_eq!(got[2], ExportFile::Make(TranscodeFormat::Aiff));
-        assert_eq!(got[3], ExportFile::Refused(PlayerFormat::Aac));
+        assert_eq!(got[3], ExportFile::Refused(UsbAudioFormat::Aac));
         assert_eq!(got[4], ExportFile::Source);
         assert_eq!(got[5], ExportFile::Source);
 
@@ -665,7 +665,7 @@ mod tests {
         ]);
         assert_eq!(
             plan(&fx, &tracks[1..2], &only_alac)[0],
-            ExportFile::Refused(PlayerFormat::Flac)
+            ExportFile::Refused(UsbAudioFormat::Flac)
         );
     }
 
@@ -755,7 +755,7 @@ mod tests {
         track.bit_depth = None;
         track.bitrate_kbps = Some(256);
         assert_eq!(
-            shown(&track, ExportFile::Refused(PlayerFormat::Aac)),
+            shown(&track, ExportFile::Refused(UsbAudioFormat::Aac)),
             Some((
                 "refused".to_string(),
                 "AAC".to_string(),

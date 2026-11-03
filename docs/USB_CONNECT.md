@@ -87,7 +87,7 @@ The technical details are under "Local HDD staging" in [USB_EXPORT.md](USB_EXPOR
     the sizes the library recorded when the files were scanned, so it doesn't wake a sleeping
     disk. The line is worked out after the track list is shown, so it can appear a moment after
     the tracks.
-  - When the USB's Player formats mean some tracks go on the USB converted, the title row says
+  - When the USB audio formats mean some tracks go on the USB converted, the title row says
     so: "2 tracks will be converted to MP3 on export". MP3 or AAC tracks in a format the USB
     doesn't allow can't be converted: "3 AAC tracks can't go on this USB; export is blocked", in
     the warning colour ([TRANSCODES.md](TRANSCODES.md#on-a-usb)).
@@ -98,9 +98,9 @@ The technical details are under "Local HDD staging" in [USB_EXPORT.md](USB_EXPOR
 - **Track editing:** cues, beat grids and tags can be edited straight on the USB's tracks
   ([CUE_EDITOR.md](CUE_EDITOR.md)).
 
-## Player formats
+## USB audio formats
 
-The **Player formats** row, above Health & Diagnostics, says which audio formats export puts on
+The **Audio formats** row, above Health & Diagnostics, says which audio formats export puts on
 this USB: FLAC, ALAC, AIFF, WAV, MP3 and AAC, each with a tick box. Set it for the players the
 stick goes into next; they change from gig to gig, so the app doesn't guess.
 

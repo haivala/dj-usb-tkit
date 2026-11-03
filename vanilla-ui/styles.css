@@ -3381,33 +3381,33 @@ td button[data-action]:disabled,
   background: var(--bg-elevated);
 }
 
-/* Player formats: the recent-USB chip look, with a drag handle and a
+/* USB audio formats: the recent-USB chip look, with a drag handle and a
    checkbox. */
-.usb-cfg-formats-bar {
+.usb-cfg-audio-formats-bar {
   margin-bottom: 10px;
 }
 
-.usb-cfg-formats-hint {
+.usb-cfg-audio-formats-hint {
   font-size: 11px;
 }
 
-.usb-cfg-formats-list {
+.usb-cfg-audio-formats-list {
   display: flex;
   gap: 6px;
   flex-wrap: wrap;
 }
 
-.usb-cfg-format-chip {
+.usb-cfg-audio-format-chip {
   gap: 4px;
   padding-left: 4px;
 }
 
-.usb-cfg-format-chip.dragging {
+.usb-cfg-audio-format-chip.dragging {
   opacity: 0.5;
   border-style: dashed;
 }
 
-.usb-cfg-format-label {
+.usb-cfg-audio-format-label {
   display: inline-flex;
   align-items: center;
   gap: 5px;
@@ -3416,11 +3416,11 @@ td button[data-action]:disabled,
   cursor: pointer;
 }
 
-.usb-cfg-format-check {
+.usb-cfg-audio-format-check {
   margin: 0;
 }
 
-.usb-cfg-formats-list.is-readonly .drag-handle {
+.usb-cfg-audio-formats-list.is-readonly .drag-handle {
   cursor: not-allowed;
   opacity: 0.4;
 }

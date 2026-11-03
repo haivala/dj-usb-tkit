@@ -61,13 +61,12 @@ export function createConvertDialogController(el, document) {
   };
 }
 
-// Shows each returned track in every table holding it. A browse-only row
-// (`id` is its file path) that the backend indexed comes back with its new id.
-function showTracks(ctx, ids, tracks) {
-  const asked = new Set(ids.map(String));
+// Shows each returned track in every table holding it, in place of the row
+// the backend says it replaces (a listed file it indexed: `replaced`).
+function showTracks(ctx, tracks, replaced = []) {
+  const previous = new Map(replaced.map((row) => [row.trackId, row.previousId]));
   for (const track of tracks || []) {
-    const replaces = asked.has(String(track.filePath)) ? track.filePath : null;
-    ctx.showTrackRow(track, { replaces });
+    ctx.showTrackRow(track, { replaces: previous.get(track.id) || null });
   }
 }
 
@@ -89,7 +88,7 @@ export async function convertTrackSelection(ctx, ids) {
 
   if (choice.action === "remove") {
     const result = await ctx.command("remove_track_transcodes", { trackIds });
-    showTracks(ctx, trackIds, result.tracks);
+    showTracks(ctx, result.tracks);
     // What export puts on the USB may have changed.
     ctx.reloadPlaylistForUsb?.();
     ctx.emitStatus(result.summary);
@@ -97,15 +96,8 @@ export async function convertTrackSelection(ctx, ids) {
   }
 
   const result = await ctx.command("transcode_tracks", { trackIds, format: choice.format });
-  showTracks(ctx, trackIds, result.tracks);
+  showTracks(ctx, result.tracks, result.replaced);
   ctx.reloadPlaylistForUsb?.();
-  for (const message of result.messages || []) {
-    ctx.pushEventLog({
-      level: "info",
-      source: "transcode",
-      code: "transcode.result",
-      message,
-    });
-  }
+  // Skipped and failed tracks are in the Event Log already (the backend's).
   ctx.emitStatus(result.summary);
 }

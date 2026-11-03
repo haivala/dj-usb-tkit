@@ -3,7 +3,7 @@ import { createDragAutoScroller } from "../../dnd_autoscroll.mjs";
 // Drag-to-reorder for a vertical list whose items carry a drag handle. Shared
 // by the sidebar playlists (components/playlist/events.mjs) and the USB
 // playlists (components/usb/events.mjs), and with `horizontal: true` by a row
-// of chips (the USB's Player formats, components/usb/formats.mjs). The
+// of chips (the USB audio formats, components/usb/audio_formats.mjs). The
 // dragged item moves live under the pointer; on drop `onMove(fromIndex,
 // toIndex)` gets its old and new index among the items, and isn't called when
 // it lands where it started.

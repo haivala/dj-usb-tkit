@@ -9,11 +9,11 @@ use backend::models::{
     AddLibrarySelectionToPlaylistRequest, AddTrackCandidate, AddTrackCandidatesToPlaylistRequest,
     AnalyzeNewTracksRequest, BrowseSourceFilesRequest, CreatePlaylistRequest, ExportToUsbOptions,
     ExportToUsbRequest, FetchUsbHistoriesRequest, FetchUsbPlaylistsRequest, FetchUsbTracksRequest,
-    GetPlaylistTracksRequest, GetTrackDetailRequest, GetUsbFormatsRequest,
+    GetPlaylistTracksRequest, GetTrackDetailRequest, GetUsbAudioFormatsRequest,
     GetUsbTrackDetailRequest, InitializeUsbRequest, MaterializeSourceTrackRequest,
     SaveTrackAnalysisEditsRequest, SaveTrackMetadataEditsRequest, SaveUsbTrackAnalysisEditsRequest,
     SaveUsbTrackMetadataEditsRequest, ScanLibraryRequest, SetFrontendSettingRequest,
-    SetUsbFormatsRequest, TrackCueInput, UsbMetadataEditTrack, UsbTrack,
+    SetUsbAudioFormatsRequest, TrackCueInput, UsbMetadataEditTrack, UsbTrack,
 };
 use backend::pdb_reader::parse_pdb;
 use backend::service::anlz::{
@@ -1359,7 +1359,7 @@ fn export_one_track_with_cues(
     export_one_track_with_cues_to(root, initial_cues, &[])
 }
 
-/// [`export_one_track_with_cues`] onto a stick whose Player formats leave
+/// [`export_one_track_with_cues`] onto a stick whose USB audio formats leave
 /// `unticked` unticked.
 fn export_one_track_with_cues_to(
     root: &Path,
@@ -1417,7 +1417,7 @@ fn export_one_track_with_cues_to(
     });
     if !unticked.is_empty() {
         let mut formats = backend
-            .get_usb_formats(GetUsbFormatsRequest {
+            .get_usb_audio_formats(GetUsbAudioFormatsRequest {
                 usb_root: usb.to_string_lossy().to_string(),
             })
             .data
@@ -1426,7 +1426,7 @@ fn export_one_track_with_cues_to(
         for item in &mut formats {
             item.allowed = !unticked.contains(&item.format.as_str());
         }
-        let set = backend.set_usb_formats(SetUsbFormatsRequest {
+        let set = backend.set_usb_audio_formats(SetUsbAudioFormatsRequest {
             usb_root: usb.to_string_lossy().to_string(),
             formats,
         });
@@ -1639,7 +1639,7 @@ fn save_usb_track_analysis_edits_writes_device_and_local_master() {
     assert_eq!(detail.cues[0].position_ms, 3_500);
 }
 
-/// A stick whose Player formats leave out the track's WAV gets an MP3
+/// A stick whose USB audio formats leave out the track's WAV gets an MP3
 /// transcode, made by the export itself: the MP3 is what the databases list,
 /// its cues and first beat sit `offset_ms` later (the MP3's audio starts that
 /// much later), and a cue edited on the USB row comes back to the library
@@ -1760,7 +1760,7 @@ fn export_converts_a_track_the_stick_cant_play_and_keeps_its_timing() {
 }
 
 /// A track already on the stick in its own format (WAV) is exported again
-/// after the stick's Player formats drop that format: the MP3 transcode is
+/// after the stick's USB audio formats drop that format: the MP3 transcode is
 /// added as a USB track of its own, with its own masterContentId, and the
 /// WAV stays, in the playlist too (an additive export keeps what's there and
 /// never deletes a track). The same playlist can hold the track both ways.
@@ -1788,7 +1788,7 @@ fn re_export_as_a_transcode_keeps_the_tracks_old_file_on_the_stick() {
     assert_eq!(export_file().export_file, None);
 
     let mut formats = backend
-        .get_usb_formats(GetUsbFormatsRequest {
+        .get_usb_audio_formats(GetUsbAudioFormatsRequest {
             usb_root: usb_text.clone(),
         })
         .data
@@ -1797,7 +1797,7 @@ fn re_export_as_a_transcode_keeps_the_tracks_old_file_on_the_stick() {
     for item in &mut formats {
         item.allowed = !["flac", "alac", "aiff", "wav"].contains(&item.format.as_str());
     }
-    let set = backend.set_usb_formats(SetUsbFormatsRequest {
+    let set = backend.set_usb_audio_formats(SetUsbAudioFormatsRequest {
         usb_root: usb_text.clone(),
         formats,
     });

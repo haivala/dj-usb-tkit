@@ -13,7 +13,7 @@
 //! and by this app's own validation/repair scans (neither enumerates the
 //! root's directory listing, only known paths).
 //!
-//! The same file carries the stick's Player formats ([`DriveFormats`]): which
+//! The same file carries the stick's USB audio formats ([`UsbAudioFormats`]): which
 //! audio formats export puts on it, so they travel with the stick too.
 
 use std::path::{Path, PathBuf};
@@ -21,7 +21,7 @@ use std::sync::Mutex;
 
 use serde::{Deserialize, Serialize};
 
-use crate::audio_format::PlayerFormat;
+use crate::audio_format::UsbAudioFormat;
 
 const MARKER_DIR: &str = ".dj-usb-tkit";
 const MARKER_FILE: &str = "drive.json";
@@ -34,7 +34,7 @@ const MAX_NAME_LEN: usize = 80;
 struct DriveMarker {
     #[serde(default, skip_serializing_if = "String::is_empty")]
     name: String,
-    /// Player formats, in the user's order of preference; see [`DriveFormats`].
+    /// USB audio formats, in the user's order of preference; see [`UsbAudioFormats`].
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     formats: Vec<MarkerFormat>,
     #[serde(flatten)]
@@ -47,19 +47,19 @@ struct MarkerFormat {
     allowed: bool,
 }
 
-/// The formats export puts on a stick (Player formats in the USB panel), as
+/// The formats export puts on a stick (USB audio formats in the USB panel), as
 /// the full ordered list: an unticked format keeps its place.
 /// The order is the user's preference among the ticked ones. At least one is
 /// always ticked.
 #[derive(Debug, Clone, PartialEq, Eq)]
-pub(crate) struct DriveFormats(Vec<(PlayerFormat, bool)>);
+pub(crate) struct UsbAudioFormats(Vec<(UsbAudioFormat, bool)>);
 
-impl Default for DriveFormats {
+impl Default for UsbAudioFormats {
     /// All ticked, lossless first: an unconfigured stick warns about nothing
     /// new.
     fn default() -> Self {
         Self(
-            PlayerFormat::DEFAULT_ORDER
+            UsbAudioFormat::DEFAULT_ORDER
                 .into_iter()
                 .map(|format| (format, true))
                 .collect(),
@@ -67,12 +67,12 @@ impl Default for DriveFormats {
     }
 }
 
-impl DriveFormats {
-    pub(crate) fn entries(&self) -> &[(PlayerFormat, bool)] {
+impl UsbAudioFormats {
+    pub(crate) fn entries(&self) -> &[(UsbAudioFormat, bool)] {
         &self.0
     }
 
-    pub(crate) fn allows(&self, format: PlayerFormat) -> bool {
+    pub(crate) fn allows(&self, format: UsbAudioFormat) -> bool {
         self.0
             .iter()
             .any(|&(entry, allowed)| entry == format && allowed)
@@ -83,15 +83,15 @@ impl DriveFormats {
     /// appended ticked in default order, and a list with nothing ticked reads
     /// as the default.
     fn from_marker(raw: &[MarkerFormat]) -> Self {
-        let mut entries: Vec<(PlayerFormat, bool)> = Vec::new();
+        let mut entries: Vec<(UsbAudioFormat, bool)> = Vec::new();
         for item in raw {
-            if let Some(format) = PlayerFormat::parse(&item.format)
+            if let Some(format) = UsbAudioFormat::parse(&item.format)
                 && !entries.iter().any(|&(entry, _)| entry == format)
             {
                 entries.push((format, item.allowed));
             }
         }
-        for format in PlayerFormat::DEFAULT_ORDER {
+        for format in UsbAudioFormat::DEFAULT_ORDER {
             if !entries.iter().any(|&(entry, _)| entry == format) {
                 entries.push((format, true));
             }
@@ -105,16 +105,16 @@ impl DriveFormats {
 
     /// A list the user sent: every format exactly once, at least one ticked.
     pub(crate) fn from_request(items: &[(String, bool)]) -> Result<Self, String> {
-        let mut entries: Vec<(PlayerFormat, bool)> = Vec::new();
+        let mut entries: Vec<(UsbAudioFormat, bool)> = Vec::new();
         for (id, allowed) in items {
             let format =
-                PlayerFormat::parse(id).ok_or_else(|| format!("Unknown audio format: {id}"))?;
+                UsbAudioFormat::parse(id).ok_or_else(|| format!("Unknown audio format: {id}"))?;
             if entries.iter().any(|&(entry, _)| entry == format) {
                 return Err(format!("{} is listed twice", format.label()));
             }
             entries.push((format, *allowed));
         }
-        if let Some(missing) = PlayerFormat::DEFAULT_ORDER
+        if let Some(missing) = UsbAudioFormat::DEFAULT_ORDER
             .into_iter()
             .find(|format| !entries.iter().any(|&(entry, _)| entry == *format))
         {
@@ -220,16 +220,19 @@ pub(crate) fn write_drive_name(root: &Path, name: &str) -> std::io::Result<()> {
     write_marker(root, &marker)
 }
 
-/// The stick's Player formats. A missing or unreadable `drive.json` reads as
+/// The stick's USB audio formats. A missing or unreadable `drive.json` reads as
 /// the default (everything ticked), never an error.
-pub(crate) fn read_drive_formats(root: &Path) -> DriveFormats {
+pub(crate) fn read_usb_audio_formats(root: &Path) -> UsbAudioFormats {
     read_marker(root)
-        .map(|marker| DriveFormats::from_marker(&marker.formats))
+        .map(|marker| UsbAudioFormats::from_marker(&marker.formats))
         .unwrap_or_default()
 }
 
-/// Write the stick's Player formats, keeping its name.
-pub(crate) fn write_drive_formats(root: &Path, formats: &DriveFormats) -> std::io::Result<()> {
+/// Write the stick's USB audio formats, keeping its name.
+pub(crate) fn write_usb_audio_formats(
+    root: &Path,
+    formats: &UsbAudioFormats,
+) -> std::io::Result<()> {
     let mut marker = read_marker(root).unwrap_or_default();
     marker.formats = formats.to_marker();
     write_marker(root, &marker)
@@ -476,7 +479,7 @@ mod tests {
         std::fs::write(marker_dir.join(MARKER_FILE), json).unwrap();
     }
 
-    fn ids(formats: &DriveFormats) -> Vec<(&'static str, bool)> {
+    fn ids(formats: &UsbAudioFormats) -> Vec<(&'static str, bool)> {
         formats
             .entries()
             .iter()
@@ -488,7 +491,10 @@ mod tests {
     fn an_old_name_only_marker_reads_as_default_formats() {
         let dir = tempdir().unwrap();
         write_raw_marker(dir.path(), r#"{"name":"Old Stick"}"#);
-        assert_eq!(read_drive_formats(dir.path()), DriveFormats::default());
+        assert_eq!(
+            read_usb_audio_formats(dir.path()),
+            UsbAudioFormats::default()
+        );
         assert_eq!(read_drive_name(dir.path()), Some("Old Stick".to_string()));
     }
 
@@ -496,7 +502,7 @@ mod tests {
     fn rename_keeps_formats_and_formats_write_keeps_name() {
         let dir = tempdir().unwrap();
         write_drive_name(dir.path(), "Club Stick").unwrap();
-        let formats = DriveFormats::from_request(&[
+        let formats = UsbAudioFormats::from_request(&[
             ("mp3".to_string(), true),
             ("aiff".to_string(), true),
             ("wav".to_string(), false),
@@ -505,10 +511,10 @@ mod tests {
             ("aac".to_string(), true),
         ])
         .unwrap();
-        write_drive_formats(dir.path(), &formats).unwrap();
+        write_usb_audio_formats(dir.path(), &formats).unwrap();
         assert_eq!(read_drive_name(dir.path()), Some("Club Stick".to_string()));
         write_drive_name(dir.path(), "Booth Stick").unwrap();
-        assert_eq!(read_drive_formats(dir.path()), formats);
+        assert_eq!(read_usb_audio_formats(dir.path()), formats);
         assert_eq!(read_drive_name(dir.path()), Some("Booth Stick".to_string()));
     }
 
@@ -516,7 +522,7 @@ mod tests {
     fn writes_keep_fields_this_version_does_not_know() {
         let dir = tempdir().unwrap();
         write_raw_marker(dir.path(), r#"{"name":"Stick","future":{"a":1}}"#);
-        write_drive_formats(dir.path(), &DriveFormats::default()).unwrap();
+        write_usb_audio_formats(dir.path(), &UsbAudioFormats::default()).unwrap();
         let raw: serde_json::Value =
             serde_json::from_slice(&std::fs::read(marker_path(dir.path())).unwrap()).unwrap();
         assert_eq!(raw["future"]["a"], 1);
@@ -532,7 +538,7 @@ mod tests {
                 {"format":"MP3","allowed":false},{"format":"flac","allowed":false}]}"#,
         );
         assert_eq!(
-            ids(&read_drive_formats(dir.path())),
+            ids(&read_usb_audio_formats(dir.path())),
             vec![
                 ("mp3", true),
                 ("flac", false),
@@ -550,32 +556,38 @@ mod tests {
                 {"format":"aiff","allowed":false},{"format":"wav","allowed":false},
                 {"format":"mp3","allowed":false},{"format":"aac","allowed":false}]}"#,
         );
-        assert_eq!(read_drive_formats(dir.path()), DriveFormats::default());
+        assert_eq!(
+            read_usb_audio_formats(dir.path()),
+            UsbAudioFormats::default()
+        );
 
         write_raw_marker(dir.path(), "not json");
-        assert_eq!(read_drive_formats(dir.path()), DriveFormats::default());
+        assert_eq!(
+            read_usb_audio_formats(dir.path()),
+            UsbAudioFormats::default()
+        );
     }
 
     #[test]
     fn requested_formats_must_list_each_once_with_one_ticked() {
         let all = |allowed: bool| -> Vec<(String, bool)> {
-            PlayerFormat::DEFAULT_ORDER
+            UsbAudioFormat::DEFAULT_ORDER
                 .into_iter()
                 .map(|format| (format.id().to_string(), allowed))
                 .collect()
         };
-        assert!(DriveFormats::from_request(&all(true)).is_ok());
+        assert!(UsbAudioFormats::from_request(&all(true)).is_ok());
         assert_eq!(
-            DriveFormats::from_request(&all(false)).unwrap_err(),
+            UsbAudioFormats::from_request(&all(false)).unwrap_err(),
             "At least one format stays ticked"
         );
         let mut twice = all(true);
         twice[1].0 = "flac".to_string();
-        assert!(DriveFormats::from_request(&twice).is_err());
+        assert!(UsbAudioFormats::from_request(&twice).is_err());
         let mut unknown = all(true);
         unknown.push(("ogg".to_string(), true));
-        assert!(DriveFormats::from_request(&unknown).is_err());
-        assert!(DriveFormats::from_request(&all(true)[1..]).is_err());
+        assert!(UsbAudioFormats::from_request(&unknown).is_err());
+        assert!(UsbAudioFormats::from_request(&all(true)[1..]).is_err());
     }
 
     #[test]

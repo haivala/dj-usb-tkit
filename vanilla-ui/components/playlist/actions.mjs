@@ -749,7 +749,7 @@ export function refreshPlaylistExportSpace(ctx) {
 
 // What exporting the playlist to the connected USB would copy, against its
 // free space -- `exportSpace` from get_playlist_export_space (the backend
-// decides whether it fits and counts the tracks the USB's Player formats
+// decides whether it fits and counts the tracks the USB audio formats
 // don't allow). Hidden without a USB or an estimate.
 function renderPlaylistExportSpace(ctx, playlist) {
   const { state, el } = ctx;
@@ -772,7 +772,7 @@ function renderPlaylistExportSpace(ctx, playlist) {
   el.playlistExportSpace.classList.toggle("is-warning", !space.fits);
 }
 
-// What the USB's Player formats mean for this playlist's export: the
+// What the USB audio formats mean for this playlist's export: the
 // backend's `formatNotice` ("2 tracks will be converted to MP3 320 on
 // export"), a warning when it blocks the export.
 function renderPlaylistFormatWarning(ctx, space) {

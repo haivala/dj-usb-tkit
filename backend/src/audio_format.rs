@@ -108,11 +108,11 @@ impl AudioFormat {
     }
 }
 
-/// A format the user ticks per USB stick (Player formats): which files the
-/// players that stick goes into can read. `.m4a` is ALAC or AAC depending on
+/// A format the user ticks per USB stick (USB audio formats): which files export
+/// may put on that stick. `.m4a` is ALAC or AAC depending on
 /// the codec inside; every other player extension maps by extension alone.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
-pub enum PlayerFormat {
+pub enum UsbAudioFormat {
     Flac,
     Alac,
     Aiff,
@@ -121,17 +121,17 @@ pub enum PlayerFormat {
     Aac,
 }
 
-/// What an extension says about its [`PlayerFormat`].
+/// What an extension says about its [`UsbAudioFormat`].
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum PlayerFormatOfExtension {
-    Known(PlayerFormat),
+pub enum UsbAudioFormatOfExtension {
+    Known(UsbAudioFormat),
     /// `.m4a`: ALAC or AAC, only the file itself can tell.
     AlacOrAac,
     /// Not a player extension.
     None,
 }
 
-impl PlayerFormat {
+impl UsbAudioFormat {
     /// Lossless first, the order an unconfigured stick uses.
     pub const DEFAULT_ORDER: [Self; 6] = [
         Self::Flac,
@@ -172,23 +172,23 @@ impl PlayerFormat {
     }
 
     /// `ext` in any case. `.mp4` and `.aac` count as AAC.
-    pub fn of_extension(ext: &str) -> PlayerFormatOfExtension {
+    pub fn of_extension(ext: &str) -> UsbAudioFormatOfExtension {
         let Some(format) = AudioFormat::from_extension(ext) else {
-            return PlayerFormatOfExtension::None;
+            return UsbAudioFormatOfExtension::None;
         };
         if !is_player_extension(ext) {
-            return PlayerFormatOfExtension::None;
+            return UsbAudioFormatOfExtension::None;
         }
-        PlayerFormatOfExtension::Known(match format {
+        UsbAudioFormatOfExtension::Known(match format {
             AudioFormat::Flac => Self::Flac,
             AudioFormat::Aiff => Self::Aiff,
             AudioFormat::Wav => Self::Wav,
             AudioFormat::Mp3 => Self::Mp3,
             AudioFormat::Aac | AudioFormat::Mp4 => Self::Aac,
-            AudioFormat::M4a => return PlayerFormatOfExtension::AlacOrAac,
+            AudioFormat::M4a => return UsbAudioFormatOfExtension::AlacOrAac,
             AudioFormat::Alac => Self::Alac,
             AudioFormat::M4p | AudioFormat::Ogg | AudioFormat::Opus => {
-                return PlayerFormatOfExtension::None;
+                return UsbAudioFormatOfExtension::None;
             }
         })
     }
@@ -399,31 +399,31 @@ mod tests {
     }
 
     #[test]
-    fn player_format_ids_round_trip_and_extensions_map() {
-        for format in PlayerFormat::DEFAULT_ORDER {
-            assert_eq!(PlayerFormat::parse(format.id()), Some(format));
+    fn usb_audio_format_ids_round_trip_and_extensions_map() {
+        for format in UsbAudioFormat::DEFAULT_ORDER {
+            assert_eq!(UsbAudioFormat::parse(format.id()), Some(format));
         }
-        assert_eq!(PlayerFormat::parse("ogg"), None);
-        let known = |ext| match PlayerFormat::of_extension(ext) {
-            PlayerFormatOfExtension::Known(format) => Some(format),
+        assert_eq!(UsbAudioFormat::parse("ogg"), None);
+        let known = |ext| match UsbAudioFormat::of_extension(ext) {
+            UsbAudioFormatOfExtension::Known(format) => Some(format),
             _ => None,
         };
-        assert_eq!(known("FLA"), Some(PlayerFormat::Flac));
-        assert_eq!(known("aif"), Some(PlayerFormat::Aiff));
-        assert_eq!(known("mp4"), Some(PlayerFormat::Aac));
-        assert_eq!(known("aac"), Some(PlayerFormat::Aac));
+        assert_eq!(known("FLA"), Some(UsbAudioFormat::Flac));
+        assert_eq!(known("aif"), Some(UsbAudioFormat::Aiff));
+        assert_eq!(known("mp4"), Some(UsbAudioFormat::Aac));
+        assert_eq!(known("aac"), Some(UsbAudioFormat::Aac));
         assert_eq!(
-            PlayerFormat::of_extension("m4a"),
-            PlayerFormatOfExtension::AlacOrAac
+            UsbAudioFormat::of_extension("m4a"),
+            UsbAudioFormatOfExtension::AlacOrAac
         );
         assert_eq!(
-            PlayerFormat::of_extension("ogg"),
-            PlayerFormatOfExtension::None
+            UsbAudioFormat::of_extension("ogg"),
+            UsbAudioFormatOfExtension::None
         );
         // `.wave` isn't read by players, whatever its content.
         assert_eq!(
-            PlayerFormat::of_extension("wave"),
-            PlayerFormatOfExtension::None
+            UsbAudioFormat::of_extension("wave"),
+            UsbAudioFormatOfExtension::None
         );
     }
 

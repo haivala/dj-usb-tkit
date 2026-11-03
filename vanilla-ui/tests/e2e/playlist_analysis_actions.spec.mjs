@@ -1174,7 +1174,7 @@ test("the playlist heading shows what an export would copy against the USB's fre
   await expect(space).toHaveText("All tracks on USB · 27.0 GB free on USB");
   await expect(space).not.toHaveClass(/is-warning/);
 
-  // What the USB's Player formats mean for the export, counted by the
+  // What the USB audio formats mean for the export, counted by the
   // backend: tracks it converts, and lossy ones it refuses.
   const formatWarning = page.locator("#playlistFormatWarning");
   await expect(formatWarning).toBeHidden();

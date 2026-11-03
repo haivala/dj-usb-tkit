@@ -21,10 +21,11 @@ use super::{
 use crate::audio_encode::{TranscodeError, TranscodeFormat, TranscodeTags, transcode_file};
 use crate::audio_format::AudioFormat;
 use crate::error::{BackendError, BackendResult};
+use crate::logging::Level;
 use crate::models::{
     MaterializeSourceTrackRequest, RemoveTrackTranscodesData, RemoveTrackTranscodesRequest,
-    SetTranscodeFolderRequest, Track, TrackTranscode, TranscodeFolderData, TranscodeFormatChoice,
-    TranscodeFormatsData, TranscodeTracksData, TranscodeTracksRequest,
+    ReplacedTrackRow, SetTranscodeFolderRequest, Track, TrackTranscode, TranscodeFolderData,
+    TranscodeFormatChoice, TranscodeFormatsData, TranscodeTracksData, TranscodeTracksRequest,
 };
 use crate::utils::counted;
 
@@ -272,12 +273,13 @@ impl BackendService {
         })?;
         self.transcode_cancelled.store(false, Ordering::SeqCst);
         let conn = self.db.connect()?;
-        let track_ids = self.resolve_transcode_track_ids(&conn, &req.track_ids)?;
+        let mut data = TranscodeTracksData::default();
+        let track_ids =
+            self.resolve_transcode_track_ids(&conn, &req.track_ids, &mut data.replaced)?;
         let tracks = track_rows(&conn, &track_ids)?;
         let (out_dir, _) = self.transcode_dir(&conn)?;
         let roots = LibrarySources::load(&conn)?.roots;
 
-        let mut data = TranscodeTracksData::default();
         let mut reserved = HashSet::<PathBuf>::new();
         let mut jobs = Vec::<Job>::new();
         for track in tracks {
@@ -303,7 +305,7 @@ impl BackendService {
             };
             if let Some(reason) = skip {
                 data.skipped += 1;
-                data.messages.push(format!("{name}: {reason}"));
+                note(&mut data, Level::Info, format!("{name}: {reason}"));
                 continue;
             }
             jobs.push(plan_job(
@@ -343,7 +345,7 @@ impl BackendService {
                 }
                 Err(TranscodeError::Failed(message)) => {
                     data.failed += 1;
-                    data.messages.push(format!("{name}: {message}"));
+                    note(&mut data, Level::Warn, format!("{name}: {message}"));
                     true
                 }
             };
@@ -473,11 +475,12 @@ impl BackendService {
 
     /// The selected ids as `tracks` rows. A browse-only row (a file the
     /// scan lists but hasn't indexed, `id == file_path`) is indexed first,
-    /// as adding it to a playlist does.
+    /// as adding it to a playlist does, and listed in `replaced`.
     fn resolve_transcode_track_ids(
         &self,
         conn: &rusqlite::Connection,
         ids: &[String],
+        replaced: &mut Vec<ReplacedTrackRow>,
     ) -> BackendResult<Vec<String>> {
         let mut out = Vec::with_capacity(ids.len());
         let mut seen = HashSet::new();
@@ -507,6 +510,10 @@ impl BackendService {
                 bit_depth: scanned.bit_depth,
                 bitrate_kbps: scanned.bitrate_kbps,
             })?;
+            replaced.push(ReplacedTrackRow {
+                previous_id: id.to_string(),
+                track_id: materialized.track_id.clone(),
+            });
             out.push(materialized.track_id);
         }
         Ok(out)
@@ -534,6 +541,13 @@ impl BackendService {
             summary: format!("Removed {}", counted(removed, "transcode", "transcodes")),
         })
     }
+}
+
+/// One skipped or failed track: in the response's `messages` and the Event
+/// Log.
+fn note(data: &mut TranscodeTracksData, level: Level, line: String) {
+    crate::logging::emit(level, "transcode", &line);
+    data.messages.push(line);
 }
 
 /// Convert…'s line for the status bar.
@@ -1066,6 +1080,7 @@ mod tests {
         let data = convert(&s.service, std::slice::from_ref(&id), "mp3");
         assert_eq!((data.transcoded, data.skipped, data.failed), (1, 0, 0));
         assert_eq!(data.summary, "Converting done: 1 track converted");
+        assert!(data.replaced.is_empty());
         let expected = s.out.join("Crate A/set.mp3");
         assert!(expected.is_file(), "no file at {}", expected.display());
 
@@ -1094,6 +1109,30 @@ mod tests {
         // Up to date: nothing to do.
         let again = convert(&s.service, std::slice::from_ref(&id), "mp3");
         assert_eq!((again.transcoded, again.skipped), (0, 1));
+    }
+
+    #[test]
+    fn a_listed_file_is_indexed_and_its_row_named_as_replaced() {
+        let s = setup(&[]);
+        // In the source folder, but not in the library yet: its row's id is
+        // its path.
+        let path = s.music.join("new.flac");
+        std::fs::copy(fixture("formats/track_format_flac.flac"), &path).expect("copy");
+        let listed_id = path.to_string_lossy().to_string();
+
+        let data = convert(&s.service, std::slice::from_ref(&listed_id), "mp3");
+        assert_eq!(data.transcoded, 1);
+        let id = track_id_for(&s.service, &path);
+        assert_ne!(id, listed_id);
+        assert_eq!(
+            data.replaced,
+            [ReplacedTrackRow {
+                previous_id: listed_id,
+                track_id: id.clone(),
+            }]
+        );
+        assert_eq!(data.tracks.len(), 1);
+        assert_eq!(data.tracks[0].id, id);
     }
 
     #[test]

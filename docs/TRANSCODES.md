@@ -20,9 +20,10 @@ transcode is an extra file of that track:
 
 ## On a USB
 
-Each USB's **Player formats** row (the USB view, see
-[USB_CONNECT.md](USB_CONNECT.md#player-formats)) says which formats its players read, in your
-order of preference. Export picks each track's file by it:
+Each USB's **Audio formats** row (the USB view, see
+[USB_CONNECT.md](USB_CONNECT.md#usb-audio-formats)) says which formats export puts on it, in your
+order of preference: set it for the players that stick goes to. Export picks each track's file
+by it:
 
 - Of the track's own file and its up-to-date transcodes, the one in the first ticked format goes
   on the USB. With FLAC and MP3 both ticked and MP3 first, a track with an MP3 transcode goes as

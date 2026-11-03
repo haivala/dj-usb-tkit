@@ -241,14 +241,14 @@
 
         <!-- Health & Diagnostics -->
         <div id="usbSelectedControls" class="hidden">
-          <div class="source-bar usb-cfg-formats-bar" id="usbFormatsRow">
-            <div class="source-filter-header" id="usbFormatsHeader">
-              <span class="source-filter-label">Player formats</span>
-              <span class="muted usb-cfg-formats-hint" id="usbFormatsHint"></span>
+          <div class="source-bar usb-cfg-audio-formats-bar" id="usbAudioFormatsRow">
+            <div class="source-filter-header" id="usbAudioFormatsHeader">
+              <span class="source-filter-label">Audio formats</span>
+              <span class="muted usb-cfg-audio-formats-hint" id="usbAudioFormatsHint"></span>
             </div>
             <div class="source-body">
               <div class="source-body-inner">
-                <div class="usb-cfg-formats-list" id="usbFormatsList"></div>
+                <div class="usb-cfg-audio-formats-list" id="usbAudioFormatsList"></div>
               </div>
             </div>
           </div>
@@ -436,7 +436,7 @@
         <div class="panel-header">
           <h2 id="playlistPanelTitle">Playlist</h2>
           <span class="muted panel-header-meta playlist-export-space hidden" id="playlistExportSpace" data-tooltip="The size to copy includes the tracks' analysis files and artwork, so it can be larger than the audio size in the title"></span>
-          <span class="muted panel-header-meta playlist-format-warning hidden" id="playlistFormatWarning" data-tooltip="Follows the USB's Player formats (USB view). Only lossless tracks can be converted"></span>
+          <span class="muted panel-header-meta playlist-format-warning hidden" id="playlistFormatWarning" data-tooltip="Follows the USB's Audio formats (USB view). Only lossless tracks can be converted"></span>
         </div>
         <div class="track-toolbar">
           <div class="search-row">
@@ -1022,8 +1022,8 @@
     <li><button><span class="drag-handle" data-usb-drag-handle draggable="true" data-tooltip="Drag to reorder" aria-label="Drag to reorder">&#10495;</span><span class="playlist-label"></span><span class="playlist-remove" data-tooltip="Remove" aria-label="Remove">&times;</span></button></li>
   </template>
   <template id="tplHistoryItem"><li><button><span class="playlist-label"></span></button></li></template>
-  <template id="tplUsbFormatChip">
-    <span class="usb-cfg-recent-item usb-cfg-format-chip"><span class="drag-handle" data-usb-format-drag-handle draggable="true" data-tooltip="Drag to set the order of preference" aria-label="Drag to reorder">&#10495;</span><label class="usb-cfg-format-label"><input type="checkbox" class="usb-cfg-format-check"><span class="usb-cfg-format-name"></span></label></span>
+  <template id="tplUsbAudioFormatChip">
+    <span class="usb-cfg-recent-item usb-cfg-audio-format-chip"><span class="drag-handle" data-usb-audio-format-drag-handle draggable="true" data-tooltip="Drag to set the order of preference" aria-label="Drag to reorder">&#10495;</span><label class="usb-cfg-audio-format-label"><input type="checkbox" class="usb-cfg-audio-format-check"><span class="usb-cfg-audio-format-name"></span></label></span>
   </template>
   <template id="tplUsbRecentItem">
     <span class="usb-cfg-recent-item"><button type="button" class="usb-cfg-recent-btn" style="direction: rtl; text-align: left;"></button><button type="button" class="usb-cfg-recent-prune-btn" data-tooltip="Forget this USB device">×</button></span>

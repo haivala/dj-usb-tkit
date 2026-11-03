@@ -20,8 +20,8 @@ export function createInitialState() {
     // The name a connected drive carries that belongs to another drive.
     usbNameTakenBy: null,
     usbWritable: true,
-    // get_usb_formats for the connected USB (Player formats), or null.
-    usbFormats: null,
+    // get_usb_audio_formats for the connected USB (USB audio formats), or null.
+    usbAudioFormats: null,
     // An export was clicked and hasn't finished (see exportPlaylistToUsb).
     exportStarting: false,
     exportPruneStale: true,

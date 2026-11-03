@@ -1,6 +1,6 @@
-//! Player formats: per USB stick, which audio formats export puts on it, in
+//! USB audio formats: per USB stick, which audio formats export puts on it, in
 //! the user's order of preference. Stored in the stick's
-//! `drive.json` (see `usb_identity::DriveFormats`), so the setting travels
+//! `drive.json` (see `usb_identity::UsbAudioFormats`), so the setting travels
 //! with the stick.
 //!
 //! USB rows in an unticked format get a warning (see
@@ -8,29 +8,32 @@
 //! file by it (see `transcode_export`).
 
 use crate::audio_format::{
-    PlayerFormat, PlayerFormatOfExtension, format_ext_from_path, m4a_is_alac_by_bit_depth,
+    UsbAudioFormat, UsbAudioFormatOfExtension, format_ext_from_path, m4a_is_alac_by_bit_depth,
 };
 use crate::error::{BackendError, BackendResult};
-use crate::models::{GetUsbFormatsRequest, SetUsbFormatsRequest, UsbFormatSetting, UsbFormatsData};
+use crate::models::{
+    GetUsbAudioFormatsRequest, SetUsbAudioFormatsRequest, UsbAudioFormatSetting,
+    UsbAudioFormatsData,
+};
 
 use super::BackendService;
-use super::usb_identity::{DriveFormats, read_drive_formats, write_drive_formats};
+use super::usb_identity::{UsbAudioFormats, read_usb_audio_formats, write_usb_audio_formats};
 use super::usb_utils::{has_write_access, resolve_usb_root};
 
-fn formats_data(formats: &DriveFormats, writable: bool) -> UsbFormatsData {
+fn formats_data(formats: &UsbAudioFormats, writable: bool) -> UsbAudioFormatsData {
     let ticked = formats
         .entries()
         .iter()
         .filter(|(_, allowed)| *allowed)
         .count();
-    UsbFormatsData {
+    UsbAudioFormatsData {
         formats: formats
             .entries()
             .iter()
             .map(|&(format, allowed)| {
-                // At least one stays ticked (`DriveFormats::from_request`).
+                // At least one stays ticked (`UsbAudioFormats::from_request`).
                 let last_ticked = allowed && ticked == 1;
-                UsbFormatSetting {
+                UsbAudioFormatSetting {
                     format: format.id().to_string(),
                     label: format.label().to_string(),
                     allowed,
@@ -50,10 +53,13 @@ fn formats_data(formats: &DriveFormats, writable: bool) -> UsbFormatsData {
 }
 
 impl BackendService {
-    pub fn get_usb_formats(&self, req: GetUsbFormatsRequest) -> BackendResult<UsbFormatsData> {
+    pub fn get_usb_audio_formats(
+        &self,
+        req: GetUsbAudioFormatsRequest,
+    ) -> BackendResult<UsbAudioFormatsData> {
         let usb_root = resolve_usb_root(Some(&req.usb_root))?;
         Ok(formats_data(
-            &read_drive_formats(&usb_root),
+            &read_usb_audio_formats(&usb_root),
             has_write_access(&usb_root),
         ))
     }
@@ -61,21 +67,24 @@ impl BackendService {
     /// Writes the whole ordered list to the stick's `drive.json`. USB rows
     /// are judged against it on every page load, so nothing cached needs
     /// clearing.
-    pub fn set_usb_formats(&self, req: SetUsbFormatsRequest) -> BackendResult<UsbFormatsData> {
+    pub fn set_usb_audio_formats(
+        &self,
+        req: SetUsbAudioFormatsRequest,
+    ) -> BackendResult<UsbAudioFormatsData> {
         let usb_root = resolve_usb_root(Some(&req.usb_root))?;
         let items: Vec<(String, bool)> = req
             .formats
             .iter()
             .map(|item| (item.format.clone(), item.allowed))
             .collect();
-        let formats = DriveFormats::from_request(&items).map_err(BackendError::Validation)?;
+        let formats = UsbAudioFormats::from_request(&items).map_err(BackendError::Validation)?;
         if !has_write_access(&usb_root) {
             return Err(BackendError::Validation(
-                "The USB is read-only, so its Player formats can't be changed".to_string(),
+                "The USB is read-only, so its USB audio formats can't be changed".to_string(),
             ));
         }
-        write_drive_formats(&usb_root, &formats).map_err(|err| {
-            BackendError::Internal(format!("failed to write the USB's Player formats: {err}"))
+        write_usb_audio_formats(&usb_root, &formats).map_err(|err| {
+            BackendError::Internal(format!("failed to write the USB audio formats: {err}"))
         })?;
         Ok(formats_data(&formats, true))
     }
@@ -83,20 +92,20 @@ impl BackendService {
 
 /// A library track's Player format. `.m4a` is ALAC when the scan recorded a
 /// bit depth (only ALAC has one), otherwise AAC. `None` for a format with no
-/// Player formats entry.
-pub(crate) fn library_player_format(
+/// USB audio formats entry.
+pub(crate) fn library_usb_audio_format(
     file_path: &str,
     bit_depth: Option<u8>,
-) -> Option<PlayerFormat> {
+) -> Option<UsbAudioFormat> {
     let ext = format_ext_from_path(file_path)?;
-    match PlayerFormat::of_extension(&ext) {
-        PlayerFormatOfExtension::Known(format) => Some(format),
-        PlayerFormatOfExtension::AlacOrAac => Some(if m4a_is_alac_by_bit_depth(bit_depth) {
-            PlayerFormat::Alac
+    match UsbAudioFormat::of_extension(&ext) {
+        UsbAudioFormatOfExtension::Known(format) => Some(format),
+        UsbAudioFormatOfExtension::AlacOrAac => Some(if m4a_is_alac_by_bit_depth(bit_depth) {
+            UsbAudioFormat::Alac
         } else {
-            PlayerFormat::Aac
+            UsbAudioFormat::Aac
         }),
-        PlayerFormatOfExtension::None => None,
+        UsbAudioFormatOfExtension::None => None,
     }
 }
 
@@ -107,28 +116,28 @@ mod tests {
     #[test]
     fn m4a_in_the_library_is_alac_when_it_has_a_bit_depth() {
         assert_eq!(
-            library_player_format("/m/a.m4a", Some(24)),
-            Some(PlayerFormat::Alac)
+            library_usb_audio_format("/m/a.m4a", Some(24)),
+            Some(UsbAudioFormat::Alac)
         );
         assert_eq!(
-            library_player_format("/m/a.m4a", None),
-            Some(PlayerFormat::Aac)
+            library_usb_audio_format("/m/a.m4a", None),
+            Some(UsbAudioFormat::Aac)
         );
         assert_eq!(
-            library_player_format("/m/a.FLAC", None),
-            Some(PlayerFormat::Flac)
+            library_usb_audio_format("/m/a.FLAC", None),
+            Some(UsbAudioFormat::Flac)
         );
-        assert_eq!(library_player_format("/m/a.ogg", None), None);
+        assert_eq!(library_usb_audio_format("/m/a.ogg", None), None);
     }
 
     #[test]
-    fn set_usb_formats_refuses_an_empty_selection_and_round_trips() {
+    fn set_usb_audio_formats_refuses_an_empty_selection_and_round_trips() {
         let dir = tempfile::tempdir().unwrap();
         let service = BackendService::new(dir.path()).unwrap();
         let usb = tempfile::tempdir().unwrap();
         let root = usb.path().to_string_lossy().to_string();
         let mut list = service
-            .get_usb_formats(GetUsbFormatsRequest {
+            .get_usb_audio_formats(GetUsbAudioFormatsRequest {
                 usb_root: root.clone(),
             })
             .unwrap()
@@ -140,7 +149,7 @@ mod tests {
             item.allowed = false;
         }
         let err = service
-            .set_usb_formats(SetUsbFormatsRequest {
+            .set_usb_audio_formats(SetUsbAudioFormatsRequest {
                 usb_root: root.clone(),
                 formats: list.clone(),
             })
@@ -150,15 +159,15 @@ mod tests {
         list.swap(0, 4);
         list[0].allowed = true;
         let saved = service
-            .set_usb_formats(SetUsbFormatsRequest {
+            .set_usb_audio_formats(SetUsbAudioFormatsRequest {
                 usb_root: root.clone(),
                 formats: list,
             })
             .unwrap();
         let read = service
-            .get_usb_formats(GetUsbFormatsRequest { usb_root: root })
+            .get_usb_audio_formats(GetUsbAudioFormatsRequest { usb_root: root })
             .unwrap();
-        let ids = |data: &UsbFormatsData| {
+        let ids = |data: &UsbAudioFormatsData| {
             data.formats
                 .iter()
                 .map(|item| (item.format.clone(), item.allowed))

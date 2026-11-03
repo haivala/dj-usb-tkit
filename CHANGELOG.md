@@ -44,7 +44,7 @@
   is not a new track: the FMT column shows it under the track's own format, and cues, edits and
   playlists stay on the one track. Files go to a folder set in Settings → Transcodes, outside the
   source folders.
-- **New feature:** Player formats in the USB view: tick the audio formats export puts on a USB,
+- **New feature:** Audio formats in the USB view: tick the audio formats export puts on a USB,
   and drag them into your order of preference. Set them for the players at the next gig; the
   setting is stored on the USB.
   Export puts each track on the USB as the first file in a ticked format: the track's own file

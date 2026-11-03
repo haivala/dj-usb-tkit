@@ -33,8 +33,8 @@ function installTauriMock(page, mode) {
         : []
     };
     window.__reorderCalls = [];
-    window.__usbFormatCalls = [];
-    let usbFormats = [
+    window.__usbAudioFormatCalls = [];
+    let usbAudioFormats = [
       ["flac", "FLAC"], ["alac", "ALAC"], ["aiff", "AIFF"], ["wav", "WAV"], ["mp3", "MP3"], ["aac", "AAC"]
     ].map(([format, label]) => ({ format, label, allowed: true }));
 
@@ -419,9 +419,9 @@ function installTauriMock(page, mode) {
           }
           // As the backend sends them: the last ticked box locked, the hint.
           const formatsData = () => {
-            const ticked = usbFormats.filter((item) => item.allowed).length;
+            const ticked = usbAudioFormats.filter((item) => item.allowed).length;
             return {
-              formats: usbFormats.map((item) => {
+              formats: usbAudioFormats.map((item) => {
                 const last = item.allowed && ticked === 1;
                 return { ...item, locked: last, tooltip: last ? "At least one format stays ticked" : null };
               }),
@@ -429,14 +429,14 @@ function installTauriMock(page, mode) {
               hint: "The formats export puts on this USB · drag to set the order of preference",
             };
           };
-          if (command === "get_usb_formats") {
+          if (command === "get_usb_audio_formats") {
             return { ok: true, data: formatsData() };
           }
-          if (command === "set_usb_formats") {
+          if (command === "set_usb_audio_formats") {
             const sent = payload?.request?.formats || [];
-            window.__usbFormatCalls.push(sent);
-            const labels = new Map(usbFormats.map((item) => [item.format, item.label]));
-            usbFormats = sent.map(({ format, allowed }) => ({ format, allowed, label: labels.get(format) }));
+            window.__usbAudioFormatCalls.push(sent);
+            const labels = new Map(usbAudioFormats.map((item) => [item.format, item.label]));
+            usbAudioFormats = sent.map(({ format, allowed }) => ({ format, allowed, label: labels.get(format) }));
             return { ok: true, data: formatsData() };
           }
           if (command === "reorder_usb_playlists") {
@@ -1113,21 +1113,21 @@ test("a job started right after another finished keeps its progress footer", asy
   await expect(page.locator("#progressText")).toContainText("Saving playlist");
 });
 
-test("Player formats: ticks and drag order are saved, and the last ticked format can't be unticked", async ({ page }) => {
+test("USB audio formats: ticks and drag order are saved, and the last ticked format can't be unticked", async ({ page }) => {
   await installTauriMock(page, "valid");
   await page.goto("/");
 
   await page.locator('.nav-item[data-view="usb"]').click();
   await page.locator("#usbEmptyState .empty-state-action").click();
 
-  const chips = page.locator("#usbFormatsList .usb-cfg-format-chip");
-  const names = page.locator("#usbFormatsList .usb-cfg-format-name");
-  await expect(page.locator("#usbFormatsRow")).toBeVisible();
+  const chips = page.locator("#usbAudioFormatsList .usb-cfg-audio-format-chip");
+  const names = page.locator("#usbAudioFormatsList .usb-cfg-audio-format-name");
+  await expect(page.locator("#usbAudioFormatsRow")).toBeVisible();
   await expect(names).toHaveText(["FLAC", "ALAC", "AIFF", "WAV", "MP3", "AAC"]);
-  const boxes = page.locator("#usbFormatsList .usb-cfg-format-check");
+  const boxes = page.locator("#usbAudioFormatsList .usb-cfg-audio-format-check");
   for (let i = 0; i < 6; i += 1) await expect(boxes.nth(i)).toBeChecked();
 
-  const lastCall = () => page.evaluate(() => window.__usbFormatCalls.at(-1));
+  const lastCall = () => page.evaluate(() => window.__usbAudioFormatCalls.at(-1));
 
   await boxes.nth(0).uncheck();
   await expect.poll(lastCall).toEqual([
@@ -1146,12 +1146,12 @@ test("Player formats: ticks and drag order are saved, and the last ticked format
   }
   await expect(boxes.nth(5)).toBeChecked();
   await expect(boxes.nth(5)).toBeDisabled();
-  await expect(chips.nth(5).locator(".usb-cfg-format-label")).toHaveAttribute("data-tooltip", "At least one format stays ticked");
+  await expect(chips.nth(5).locator(".usb-cfg-audio-format-label")).toHaveAttribute("data-tooltip", "At least one format stays ticked");
   await boxes.nth(4).check();
   await expect(boxes.nth(5)).toBeEnabled();
 
   // Drag MP3 (chip 4) to the left half of FLAC (chip 0): it goes first.
-  const handle = chips.nth(4).locator("[data-usb-format-drag-handle]");
+  const handle = chips.nth(4).locator("[data-usb-audio-format-drag-handle]");
   const sourceBox = await handle.boundingBox();
   const targetBox = await chips.nth(0).boundingBox();
   await page.mouse.move(sourceBox.x + sourceBox.width / 2, sourceBox.y + sourceBox.height / 2);

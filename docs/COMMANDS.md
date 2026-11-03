@@ -240,7 +240,7 @@ drive selection from being rendered against a newer selected drive.
   USB from the staged PDB and eDB, see "Tracks already on the USB" in `docs/USB_EXPORT.md`), so
   no audio file is read. Sizes are those of the files export would copy: a transcode's own, or
   an estimate for one export still has to make. Also `formatNotice`, the title row's line about
-  the tracks export converts first or refuses (lossy, in a format the USB's Player formats
+  the tracks export converts first or refuses (lossy, in a format the USB audio formats
   don't allow; see `docs/TRANSCODES.md`), or `null`, and `formatNoticeBlocks` (a track is
   refused, so the export is blocked). `null` when it can't be made. The frontend asks
   for it after the track list is shown, so it never holds the list up
@@ -266,13 +266,13 @@ drive selection from being rendered against a newer selected drive.
 - `prune_usb_device`
 - `get_usb_device_name`
 - `set_usb_device_name`
-- `get_usb_formats` — `{ usbRoot }` →
+- `get_usb_audio_formats` — `{ usbRoot }` →
   `{ formats: [{ format, label, allowed, locked, tooltip }], writable, hint }`: the USB's Player
   formats (`flac`, `alac`, `aiff`, `wav`, `mp3`, `aac`) in its order of preference, from the
   stick's `.dj-usb-tkit/drive.json`. A stick without the setting gets all six ticked. `locked`:
   the box can't change (the last ticked one, with `tooltip` saying so, or a read-only stick);
   `hint` is the row's line.
-- `set_usb_formats` — `{ usbRoot, formats: [{ format, allowed }] }` → the same shape. The list
+- `set_usb_audio_formats` — `{ usbRoot, formats: [{ format, allowed }] }` → the same shape. The list
   must hold every format once with at least one allowed; a read-only stick is refused.
 - `list_usb_backups`
 - `restore_usb_backup`
@@ -299,8 +299,8 @@ drive selection from being rendered against a newer selected drive.
   row as a page shows it (library id resolved), with `needsHydration` false.
 - `initialize_usb`
 - `export_to_usb` — refused before anything is written, with `validationType`
-  `player_format_refused` and the `tracks`, when a track can't go on the USB in any format its
-  Player formats tick (see `docs/TRANSCODES.md`). Transcodes it makes first report as
+  `usb_audio_format_refused` and the `tracks`, when a track can't go on the USB in any format its
+  USB audio formats tick (see `docs/TRANSCODES.md`). Transcodes it makes first report as
   "USB: Converting track n/m".
 - `detect_external_rekordbox_db`
 

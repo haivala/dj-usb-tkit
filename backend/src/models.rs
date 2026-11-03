@@ -237,13 +237,26 @@ pub struct TranscodeTracksData {
     pub skipped: usize,
     pub failed: usize,
     pub cancelled: bool,
-    /// One line per skipped or failed track.
+    /// One line per skipped or failed track, each also logged to the Event
+    /// Log by the backend.
     pub messages: Vec<String>,
     /// The selected tracks as they are now, for the tables to show.
     pub tracks: Vec<Track>,
     /// For the status bar: "Converting done: 2 tracks converted, 1 skipped".
     #[serde(default)]
     pub summary: String,
+    /// Selected rows that were files the scan lists but hadn't indexed: the
+    /// backend indexed them, so each `track_id` row (in `tracks`) is shown
+    /// in place of the row whose id was `previous_id` (its file path).
+    #[serde(default)]
+    pub replaced: Vec<ReplacedTrackRow>,
+}
+
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ReplacedTrackRow {
+    pub previous_id: String,
+    pub track_id: String,
 }
 
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
@@ -299,14 +312,14 @@ pub struct SetTranscodeFolderRequest {
 
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
-pub struct GetUsbFormatsRequest {
+pub struct GetUsbAudioFormatsRequest {
     pub usb_root: String,
 }
 
 /// One Player format of a USB stick.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
-pub struct UsbFormatSetting {
+pub struct UsbAudioFormatSetting {
     /// `flac`, `alac`, `aiff`, `wav`, `mp3` or `aac`.
     pub format: String,
     /// What the USB panel shows (`FLAC`); ignored in a request.
@@ -324,18 +337,18 @@ pub struct UsbFormatSetting {
 
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
-pub struct SetUsbFormatsRequest {
+pub struct SetUsbAudioFormatsRequest {
     pub usb_root: String,
     /// Every format once, in the order of preference, at least one allowed.
-    pub formats: Vec<UsbFormatSetting>,
+    pub formats: Vec<UsbAudioFormatSetting>,
 }
 
-/// The formats the players a USB stick goes into read (`drive.json`).
+/// The formats export puts on a USB stick (USB audio formats, `drive.json`).
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
-pub struct UsbFormatsData {
+pub struct UsbAudioFormatsData {
     /// Every format, in the order of preference.
-    pub formats: Vec<UsbFormatSetting>,
+    pub formats: Vec<UsbAudioFormatSetting>,
     /// False on a read-only stick: the list can't be changed.
     pub writable: bool,
     /// The line next to the row's title.
@@ -907,7 +920,7 @@ pub struct PlaylistExportSpace {
     /// False when the copy plus the export's headroom exceeds the free space,
     /// the same rule the export's own preflight blocks on.
     pub fits: bool,
-    /// What the USB's Player formats mean for the export, for the playlist
+    /// What the USB audio formats mean for the export, for the playlist
     /// heading: the tracks it converts first ("2 tracks will be converted to
     /// MP3 320 on export") and the lossy ones it refuses (see
     /// `transcode_export`). `None` when it does neither.
@@ -1496,7 +1509,7 @@ pub struct UsbTrack {
     pub file_size_bytes: Option<i64>,
     /// CDJ format-compatibility badge (mirrors `Track.format_compat`). USB rows
     /// only carry `format_ext`, so this flags an extension players don't read,
-    /// or a format the stick's Player formats leave unticked. Filled in during
+    /// or a format the stick's USB audio formats leave unticked. Filled in during
     /// page hydration -- see `service::usb::hydrate_usb_track_in_place`.
     #[serde(default)]
     pub format_compat: FormatCompat,

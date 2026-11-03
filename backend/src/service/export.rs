@@ -586,7 +586,7 @@ fn format_bytes(bytes: u64) -> String {
     }
 }
 
-/// The playlist heading's line about the USB's Player formats, from the
+/// The playlist heading's line about the USB audio formats, from the
 /// labels of the formats the export converts tracks to (`convert`) and of
 /// the tracks it refuses (`refused`), one per track; and whether it blocks.
 fn format_notice(convert: &[String], refused: &[String]) -> (Option<String>, bool) {
@@ -889,7 +889,7 @@ impl BackendService {
 
     /// The playlist heading's export estimate (see `estimate_playlist_copy`)
     /// against the USB's free space, and its tracks in formats the USB's
-    /// Player formats don't allow.
+    /// USB audio formats don't allow.
     pub(crate) fn playlist_export_space(
         &self,
         playlist_id: &str,
@@ -900,7 +900,7 @@ impl BackendService {
         let plan = plan_export_files(
             &*self.db.connect()?,
             &playlist.tracks,
-            &super::usb_identity::read_drive_formats(usb_root),
+            &super::usb_identity::read_usb_audio_formats(usb_root),
             SourceFacts::Recorded,
         )?;
         // Sized as the files export will copy: a transcode by its own size,
@@ -1884,7 +1884,7 @@ impl BackendService {
     where
         F: FnMut(usize, usize, &str),
     {
-        let formats = super::usb_identity::read_drive_formats(usb_root);
+        let formats = super::usb_identity::read_usb_audio_formats(usb_root);
         let plan = |tracks: &[ExportTrackData]| {
             plan_export_files(&*self.db.connect()?, tracks, &formats, SourceFacts::OnDisk)
         };
@@ -1903,13 +1903,13 @@ impl BackendService {
         if !refused.is_empty() {
             return Err(BackendError::ValidationWithDetails(
                 format!(
-                    "export blocked: {} in a format this USB's Player formats don't allow, and \
+                    "export blocked: {} in a format this USB's formats don't allow, and \
                      only lossless files can be converted: {}",
                     counted(refused.len(), "track", "tracks"),
                     refused.join(", ")
                 ),
                 json!({
-                    "validationType": "player_format_refused",
+                    "validationType": "usb_audio_format_refused",
                     "tracks": refused,
                 }),
             ));
