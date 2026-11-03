@@ -96,7 +96,9 @@ pub struct TranscodeOutput {
     pub bitrate_kbps: u32,
     pub duration_ms: u64,
     /// How much later the audio starts in the transcode than in the source,
-    /// as an untrimmed decoder (and the CDJ) plays it. 0 for PCM.
+    /// as an untrimmed decoder plays it: LAME's encoder delay plus the
+    /// decoder's 529 samples. rekordbox plays MP3s this way (checked against
+    /// its waveforms); CDJs are assumed to match it. 0 for PCM.
     pub offset_ms: f64,
 }
 
@@ -487,12 +489,22 @@ fn extended_80(rate: u32) -> [u8; 10] {
 // ---------------------------------------------------------------------------
 // MP3
 
+/// The MP3 is written without the Info frame LAME puts first. rekordbox
+/// plays LAME's Info frame as audio (one extra frame of silence, so the
+/// track's timeline starts 1152 samples later than for the same audio
+/// without it), while it skips ffmpeg's; without the frame there is nothing
+/// for a player to handle differently. A CBR file needs no Info frame:
+/// players work out its length and seek points from the file size.
 struct Mp3Writer {
     encoder: mp3lame_encoder::Encoder,
     file: BufWriter<File>,
     channels: u16,
     out_rate: u32,
     buf: Vec<u8>,
+    /// Bytes of LAME's placeholder Info frame still to drop from the
+    /// start of its output; `None` until its first output, whose frame
+    /// header gives the size.
+    placeholder_left: Option<usize>,
 }
 
 /// The MPEG-1 rate LAME encodes to: the source rate when it is one, else
@@ -522,6 +534,8 @@ impl Mp3Writer {
         builder.set_brate(Bitrate::Kbps320).map_err(failed)?;
         builder.set_quality(Quality::NearBest).map_err(failed)?;
         builder.set_to_write_vbr_tag(true).map_err(failed)?;
+        // LAME still builds the Info frame (its encoder delay is read from
+        // it in `finish`), but the placeholder it streams first is dropped.
         let encoder = builder.build().map_err(failed)?;
         let file = BufWriter::new(File::create(path).map_err(failed)?);
         Ok(Self {
@@ -530,7 +544,32 @@ impl Mp3Writer {
             channels,
             out_rate,
             buf: Vec::new(),
+            placeholder_left: None,
         })
+    }
+
+    /// Writes `self.buf`, minus whatever is left of the placeholder frame.
+    fn write_buf(&mut self) -> Result<(), TranscodeError> {
+        if self.buf.is_empty() {
+            return Ok(());
+        }
+        let left = match self.placeholder_left {
+            Some(left) => left,
+            None => self
+                .buf
+                .first_chunk::<4>()
+                .and_then(|header| mpeg1_layer3_frame_len(*header))
+                .ok_or_else(|| failed("LAME's output doesn't start with an MP3 frame"))?,
+        };
+        let skip = left.min(self.buf.len());
+        self.placeholder_left = Some(left - skip);
+        let rest = &self.buf[skip..];
+        if skip > 0 && !rest.is_empty() && rest[0] != 0xFF {
+            return Err(failed(
+                "LAME's first frame isn't where its Info frame size says",
+            ));
+        }
+        self.file.write_all(rest).map_err(failed)
     }
 
     fn write(&mut self, samples: &[i32]) -> Result<(), TranscodeError> {
@@ -544,7 +583,7 @@ impl Mp3Writer {
                 .encode_to_vec(InterleavedPcm(samples), &mut self.buf)
         };
         result.map_err(|err| failed(format!("MP3 encoding failed: {err:?}")))?;
-        self.file.write_all(&self.buf).map_err(failed)
+        self.write_buf()
     }
 
     fn finish(mut self) -> Result<TranscodeOutput, TranscodeError> {
@@ -553,17 +592,15 @@ impl Mp3Writer {
         self.encoder
             .flush_to_vec::<FlushGap>(&mut self.buf)
             .map_err(|err| failed(format!("MP3 encoding failed: {err:?}")))?;
-        self.file.write_all(&self.buf).map_err(failed)?;
+        self.write_buf()?;
+        self.file.flush().map_err(failed)?;
 
-        // LAME left a placeholder frame at the start for its Info tag; fill
-        // it in now that the stream is complete.
+        // The Info frame isn't written (see `Mp3Writer`); it is only where
+        // LAME reports its encoder delay.
         let mut tag = Vec::with_capacity(self.encoder.lame_tag_size());
         self.encoder
             .lame_tag_encode_to_vec(&mut tag)
             .ok_or_else(|| failed("LAME produced no Info tag"))?;
-        self.file.seek(SeekFrom::Start(0)).map_err(failed)?;
-        self.file.write_all(&tag).map_err(failed)?;
-        self.file.flush().map_err(failed)?;
 
         let encoder_delay = lame_tag_encoder_delay(&tag)
             .ok_or_else(|| failed("LAME Info tag has no encoder delay"))?;
@@ -577,6 +614,31 @@ impl Mp3Writer {
             offset_ms: f64::from(offset_samples) * 1000.0 / f64::from(self.out_rate),
         })
     }
+}
+
+/// The byte length of an MPEG-1 Layer III frame from its 4-byte header
+/// (`144 * bitrate / sample rate`, plus the padding byte). `None` for
+/// anything else; LAME only writes MPEG-1 here (see `mp3_output_rate`).
+fn mpeg1_layer3_frame_len(header: [u8; 4]) -> Option<usize> {
+    const KBPS: [u32; 15] = [
+        0, 32, 40, 48, 56, 64, 80, 96, 112, 128, 160, 192, 224, 256, 320,
+    ];
+    // Sync, MPEG-1 (11), Layer III (01).
+    if header[0] != 0xFF || header[1] & 0xFE != 0xFA {
+        return None;
+    }
+    let kbps = *KBPS.get(usize::from(header[2] >> 4))?;
+    let rate = match (header[2] >> 2) & 0b11 {
+        0 => 44_100,
+        1 => 48_000,
+        2 => 32_000,
+        _ => return None,
+    };
+    if kbps == 0 {
+        return None;
+    }
+    let padding = u32::from((header[2] >> 1) & 1);
+    usize::try_from(144_000 * kbps / rate + padding).ok()
 }
 
 /// The encoder delay (in samples) from a LAME Info/Xing frame: 12 bits, 21
@@ -657,6 +719,17 @@ mod tests {
             extended_80(48_000),
             [0x40, 0x0E, 0xBB, 0x80, 0, 0, 0, 0, 0, 0]
         );
+    }
+
+    #[test]
+    fn mpeg1_layer3_frame_len_follows_the_header() {
+        // 320 kbit/s, 44.1 kHz, no padding / padding; 48 kHz.
+        assert_eq!(mpeg1_layer3_frame_len([0xFF, 0xFB, 0xE0, 0x44]), Some(1044));
+        assert_eq!(mpeg1_layer3_frame_len([0xFF, 0xFB, 0xE2, 0x44]), Some(1045));
+        assert_eq!(mpeg1_layer3_frame_len([0xFF, 0xFB, 0xE4, 0x44]), Some(960));
+        // MPEG-2, or no sync.
+        assert_eq!(mpeg1_layer3_frame_len([0xFF, 0xF3, 0xE0, 0x44]), None);
+        assert_eq!(mpeg1_layer3_frame_len([0x00, 0xFB, 0xE0, 0x44]), None);
     }
 
     #[test]
@@ -798,9 +871,12 @@ mod tests {
             out.offset_ms
         );
 
-        // CBR: an Info (not Xing) tag, and the size 320 kbit/s gives.
+        // No Info/Xing frame (rekordbox plays LAME's as audio), and the size
+        // 320 kbit/s gives.
         let bytes = std::fs::read(&dst).expect("read mp3");
-        assert!(bytes.windows(4).any(|w| w == b"Info"));
+        assert_eq!(&bytes[..2], [0xFF, 0xFB], "starts with an audio frame");
+        // Stereo MPEG-1: an Info/Xing tag would sit after the 32-byte side info.
+        assert!(!matches!(&bytes[36..40], b"Info" | b"Xing"));
         let expected = 3.0 * 320_000.0 / 8.0;
         let size = bytes.len() as f64;
         assert!((size - expected).abs() / expected < 0.05, "size {size}");

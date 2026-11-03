@@ -85,7 +85,10 @@ converted keep their files; a half-written file is deleted.
   `fill_track_transcodes`).
 - The MP3's start offset is stored (`offset_ms`): an MP3 starts later than its
   source by the encoder and decoder delay, as a player that doesn't trim it
-  plays the file. It is computed from the LAME header the encoder writes, for
-  when export uses transcodes.
+  plays the file. rekordbox plays MP3s this way (checked against its
+  waveforms); export will need it once it uses transcodes.
+- MP3s are written without the Info/LAME header frame. rekordbox plays the
+  header frame LAME writes as one more frame of audio, which would move the
+  file's timeline by 1152 samples; a CBR file needs no header frame.
 - Encoding: `backend/src/audio_encode.rs` (symphonia decoding, a PCM
   AIFF/WAV writer, LAME through `mp3lame-encoder`, tags through lofty).
