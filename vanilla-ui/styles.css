@@ -5553,3 +5553,37 @@ html.is-ui-dragging * {
   cursor: pointer;
   padding: 0;
 }
+
+/* ── Older WebKit (Safari before 16.2, e.g. an older macOS) ──
+   It can't read color-mix(): a declaration using it is dropped, which left
+   the cue editor without a background (the page showed through). Each
+   color-mix() above gets a plain theme colour here instead; engines that
+   read color-mix() never see this block. */
+@supports not (color: color-mix(in srgb, red, blue)) {
+  .source-chip-analyzed {
+    border-color: var(--success);
+    background: var(--bg-raised);
+    color: var(--success);
+  }
+  .source-chip-missing {
+    border-color: var(--danger);
+    background: var(--bg-raised);
+    color: var(--danger);
+  }
+  .track-grid-row-skeleton .track-grid-skeleton {
+    --skeleton-base: var(--line);
+    --skeleton-shine: var(--muted);
+  }
+  input[type="checkbox"] {
+    border: 1.5px solid var(--muted);
+  }
+  .add-to-list > li.check-list-group {
+    background: var(--bg-raised);
+  }
+  .track-detail-view {
+    background-color: var(--bg-raised);
+  }
+  .waveform.track-detail-canvas {
+    background: var(--bg-raised);
+  }
+}

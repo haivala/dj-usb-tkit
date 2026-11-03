@@ -57,6 +57,9 @@
   tracks in an unticked format get a warning in the FMT column. In an app playlist, the FMT column
   shows the format each track goes on the selected USB in, with its own file as the source in
   the tooltip, and the title row says how many tracks the export will convert or refuse.
+- **Fix:** On older macOS versions (Safari before 16.2), the cue editor no longer has a
+  see-through background that shows the page under it. The few colours that used a newer CSS
+  feature get a plain theme colour there instead.
 - **Fix:** A track row's **+** no longer says "Create and activate a playlist first" while a
   playlist is active. Rows shown before the playlists had loaded, or before the active playlist
   was renamed, kept that tooltip; it now says "Add to …" with the active playlist's name, as the
