@@ -1885,10 +1885,12 @@ impl BackendService {
             ));
         }
 
+        // A track in the playlist twice is converted once.
+        let mut seen = HashSet::new();
         let mut wanted = Vec::new();
         for (track, file) in playlist.tracks.iter().zip(&first) {
             if let ExportFile::Make(format) = file
-                && !wanted.iter().any(|(id, _)| id == &track.id)
+                && seen.insert(track.id.as_str())
             {
                 wanted.push((track.id.clone(), *format));
             }

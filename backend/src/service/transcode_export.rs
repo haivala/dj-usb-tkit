@@ -126,11 +126,14 @@ fn load_transcodes(
              FROM track_transcodes WHERE track_id IN ({placeholders})"
         ))?;
         let rows = stmt.query_map(params_from_iter(chunk.iter()), |row| {
-            Ok((
+            // A format this build doesn't make: not a usable transcode.
+            let Some(format) = TranscodeFormat::parse(&row.get::<_, String>(1)?) else {
+                return Ok(None);
+            };
+            Ok(Some((
                 row.get::<_, String>(0)?,
-                row.get::<_, String>(1)?,
                 TranscodeFile {
-                    format: TranscodeFormat::Mp3,
+                    format,
                     file_path: row.get(2)?,
                     file_size_bytes: row.get(3)?,
                     sample_rate_hz: row.get(4)?,
@@ -141,17 +144,15 @@ fn load_transcodes(
                 },
                 row.get::<_, Option<i64>>(9)?,
                 row.get::<_, Option<i64>>(10)?,
-            ))
+            )))
         })?;
         for row in rows {
-            let (track_id, format, mut file, source_size_bytes, source_modified_at) = row?;
-            let Some(format) = TranscodeFormat::parse(&format) else {
+            let Some((track_id, file, source_size_bytes, source_modified_at)) = row? else {
                 continue;
             };
             if !Path::new(&file.file_path).is_file() {
                 continue;
             }
-            file.format = format;
             by_track.entry(track_id).or_default().push(StoredTranscode {
                 file,
                 source_size_bytes,
@@ -401,19 +402,33 @@ pub(crate) fn transcode_offset_for_usb_file(
 }
 
 /// The tracks with a transcode in `format_ext`'s format of exactly `size`
-/// bytes: a file on a stick with that size is one of theirs.
+/// bytes and about `duration_ms` long: a file on a stick like that is one of
+/// theirs. The same size and length rule as a track's own file
+/// (`library_metadata_candidate_compatible`), against the transcode's own;
+/// an unknown length on either side doesn't rule it out.
 pub(crate) fn track_ids_with_transcode(
     conn: &rusqlite::Connection,
     format_ext: &str,
     size: i64,
+    duration_ms: Option<i64>,
 ) -> BackendResult<Vec<String>> {
     let Some(format) = TranscodeFormat::parse(format_ext) else {
         return Ok(Vec::new());
     };
     let mut stmt = conn.prepare_cached(
-        "SELECT track_id FROM track_transcodes WHERE format = ?1 AND file_size_bytes = ?2",
+        "SELECT track_id FROM track_transcodes
+         WHERE format = ?1 AND file_size_bytes = ?2
+           AND (?3 IS NULL OR duration_ms IS NULL OR ABS(duration_ms - ?3) <= ?4)",
     )?;
-    let rows = stmt.query_map(params![format.as_str(), size], |row| row.get(0))?;
+    let rows = stmt.query_map(
+        params![
+            format.as_str(),
+            size,
+            duration_ms,
+            super::track_matching::METADATA_DURATION_TOLERANCE_MS
+        ],
+        |row| row.get(0),
+    )?;
     Ok(rows.collect::<Result<_, _>>()?)
 }
 
@@ -586,6 +601,22 @@ mod tests {
         assert_eq!(got[1], ExportFile::Source);
         assert_eq!(got[2], ExportFile::Source);
         assert_eq!(got[3], ExportFile::Make(TranscodeFormat::Aiff));
+    }
+
+    #[test]
+    fn a_stick_file_is_a_transcode_by_format_size_and_length() {
+        // Each transcode: 1234 bytes, 1000 ms.
+        let fx = fixture(&[("a", "mp3", 100), ("b", "wav", 100)]);
+        let ids = |ext: &str, size: i64, duration: Option<i64>| {
+            track_ids_with_transcode(&fx.conn, ext, size, duration).unwrap()
+        };
+        assert_eq!(ids("mp3", 1234, Some(1000)), vec!["a".to_string()]);
+        assert_eq!(ids("mp3", 1234, Some(2900)), vec!["a".to_string()]);
+        assert_eq!(ids("mp3", 1234, None), vec!["a".to_string()]);
+        assert!(ids("mp3", 1234, Some(3100)).is_empty());
+        assert!(ids("mp3", 1235, Some(1000)).is_empty());
+        assert!(ids("aiff", 1234, Some(1000)).is_empty());
+        assert!(ids("flac", 1234, Some(1000)).is_empty());
     }
 
     #[test]

@@ -1231,7 +1231,12 @@ pub(crate) fn find_confident_fingerprint_match(
     // Tracks with a transcode of the incoming file's format and exact size:
     // the incoming file is that transcode (exported in its place).
     let transcode_ids = match crate::audio_format::format_ext_from_path(incoming_path) {
-        Some(ext) => super::transcode_export::track_ids_with_transcode(conn, &ext, incoming_size)?,
+        Some(ext) => super::transcode_export::track_ids_with_transcode(
+            conn,
+            &ext,
+            incoming_size,
+            incoming_duration_ms,
+        )?,
         None => Vec::new(),
     };
     let mut passing = Vec::new();
