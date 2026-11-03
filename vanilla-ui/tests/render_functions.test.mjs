@@ -1,6 +1,6 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { buildTrackTableRow, finishTrackRows, renderEmptyTrackTable } from "../track_table.mjs";
+import { buildTrackTableRow, finishTrackRows, renderEmptyTrackTable, setAddButtonState } from "../track_table.mjs";
 import { ANALYZE_TOOLTIP, REANALYZE_TOOLTIP } from "../track_utils.mjs";
 import { makeTestCtx } from "./test_helpers.mjs";
 
@@ -52,6 +52,20 @@ test("createTrackRow disables add with a helpful tooltip when no playlist is act
 
   assert.equal(add.dataset.tooltip, "Create and activate a playlist first, then add tracks to it.");
   assert.equal(add.disabled, true);
+});
+
+test("a row drawn before the playlists load gets its + once the active playlist is known", async () => {
+  // The active playlist's id is restored at startup before its list loads.
+  const state = { currentPlaylistId: "playlist-1", playlists: [] };
+  const row = await renderRow({ id: "t-4" }, {}, state);
+  const add = row.querySelector('[data-action="add-library"]');
+  assert.equal(add.disabled, true);
+  assert.equal(add.dataset.tooltip, "Create and activate a playlist first, then add tracks to it.");
+
+  // The list loads (updateAddToPlaylistButtons redraws every row's + this way).
+  setAddButtonState(add, { id: "playlist-1", name: "mauste" });
+  assert.equal(add.disabled, false);
+  assert.equal(add.dataset.tooltip, "Add to mauste");
 });
 
 test("createTrackRow analyze button reflects backend track.analysisReady", async () => {

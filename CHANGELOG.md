@@ -57,6 +57,10 @@
   tracks in an unticked format get a warning in the FMT column. In an app playlist, the FMT column
   shows the format each track goes on the selected USB in, with its own file as the source in
   the tooltip, and the title row says how many tracks the export will convert or refuse.
+- **Fix:** A track row's **+** no longer says "Create and activate a playlist first" while a
+  playlist is active. Rows shown before the playlists had loaded, or before the active playlist
+  was renamed, kept that tooltip; it now says "Add to …" with the active playlist's name, as the
+  header does.
 - **Fix:** ALAC tracks (`.m4a`) are exported with the ALAC file type in the PDB and the eDB, as
   rekordbox writes them, instead of the one for AAC. Exporting again corrects tracks already on a
   USB.

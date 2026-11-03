@@ -9,6 +9,7 @@ import { bindShellEvents } from "./components/shell/events.mjs";
 import { bindTrackDetailEvents } from "./components/track-detail/events.mjs";
 import { initTooltips } from "./tooltip.mjs";
 import { cloneTemplate } from "./ui_utils.mjs";
+import { setAddButtonState } from "./track_table.mjs";
 import { renderEmptyState } from "./components/shell/actions.mjs";
 import { scanLibraryButtonLabel } from "./components/library/actions.mjs";
 import { renderAllSelectionBars, renderSelectionBar } from "./components/shared/track_selection.mjs";
@@ -22,10 +23,10 @@ export function updateActivePlaylistIndicators(ctx) {
 }
 
 export function updateAddToPlaylistButtons(ctx) {
-  const { state, document } = ctx;
-  const hasPlaylist = !!state.currentPlaylistId;
+  const { document } = ctx;
+  const playlist = ctx.getCurrentPlaylist();
   document.querySelectorAll('[data-action="add-library"], [data-action="add-usb"], [data-action="add-history"]').forEach((btn) => {
-    btn.disabled = !hasPlaylist;
+    setAddButtonState(btn, playlist);
   });
   // The selection bars' "+ Playlist" needs an active playlist too.
   renderAllSelectionBars(ctx);

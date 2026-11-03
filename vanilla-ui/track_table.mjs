@@ -179,16 +179,15 @@ export function createTrackRow(ctx, track, options) {
     const [primary, analyze] = actionCell.querySelectorAll("button");
     if (options.actionLabel) {
       const isRemoveAction = options.actionType === "remove-playlist-track";
-      const playlistName = state.playlists?.find((p) => p.id === state.currentPlaylistId)?.name;
       primary.dataset.action = options.actionType;
       primary.dataset.index = String(options.index);
       primary.dataset.id = track.id;
-      primary.disabled = !isRemoveAction && !state.currentPlaylistId;
-      primary.dataset.tooltip = isRemoveAction
-        ? (playlistName ? `Remove from ${playlistName}` : "Remove from playlist")
-        : (playlistName
-          ? `Add to ${playlistName}`
-          : "Create and activate a playlist first, then add tracks to it.");
+      if (isRemoveAction) {
+        const playlistName = state.playlists?.find((p) => p.id === state.currentPlaylistId)?.name;
+        primary.dataset.tooltip = playlistName ? `Remove from ${playlistName}` : "Remove from playlist";
+      } else {
+        setAddButtonState(primary, state.playlists?.find((p) => p.id === state.currentPlaylistId));
+      }
       primary.textContent = options.actionLabel;
       if (!options.compactAddButton) primary.removeAttribute("class");
     } else {
@@ -218,6 +217,17 @@ const SKELETON_SHIMMER_MS = 1600;
 // track's row, or a skeleton while its page isn't loaded (`track` undefined).
 // Rows are striped by that index, not by DOM position, since the table only
 // holds the rows around the viewport.
+// A row's "+": enabled, and saying where it adds, only with an active
+// `playlist` (as the header shows it). Also redrawn on rows already shown
+// when the active playlist or the playlist list changes
+// (`updateAddToPlaylistButtons`).
+export function setAddButtonState(button, playlist) {
+  button.disabled = !playlist;
+  button.dataset.tooltip = playlist
+    ? `Add to ${playlist.name}`
+    : "Create and activate a playlist first, then add tracks to it.";
+}
+
 export function buildTrackTableRow(ctx, track, options) {
   let row;
   if (!track) {
