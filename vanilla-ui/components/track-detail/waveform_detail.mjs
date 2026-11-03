@@ -49,9 +49,13 @@ export function computeWaveNorm(bytes) {
 /// Draw the [startMs, endMs] slice of a PWV5 payload onto the wrapper's canvas.
 /// `norm` is the whole-track {lo, hi} from `computeWaveNorm` — the vertical
 /// scale, kept fixed across zoom levels.
+/// Bars before `greyBeforeMs` (where the CDJ starts playback) are drawn in
+/// grey. Greying them here, not with a CSS backdrop filter over the canvas,
+/// keeps the GPU from re-filtering a surface redrawn every playback frame,
+/// which glitched on some drivers.
 /// Returns false when the canvas has no measurable width yet (caller should
 /// retry on rAF / resize); true otherwise.
-export function drawDetailWaveform(wrapperEl, bytes, { startMs, endMs, durationMs, norm }) {
+export function drawDetailWaveform(wrapperEl, bytes, { startMs, endMs, durationMs, norm, greyBeforeMs = 0 }) {
   if (!wrapperEl) return false;
   const canvas = wrapperEl.querySelector(".waveform-canvas-el");
   if (!canvas) return false;
@@ -101,6 +105,8 @@ export function drawDetailWaveform(wrapperEl, bytes, { startMs, endMs, durationM
   const colCount = Math.ceil(n / perCol);
   const cFirst = Math.max(0, Math.floor(startPx / colPx));
   const cLast = Math.min(colCount, Math.ceil((startPx + W) / colPx));
+  // The grey edge, on the same whole-pixel grid as the bars.
+  const xGrey = Math.round(((greyBeforeMs || 0) / viewSpan) * W) - base;
 
   const at = (i) => (bytes[i * 2] << 8) | bytes[i * 2 + 1];
   const heightOf = (v) => (v >> 2) & 0x1f;
@@ -135,8 +141,20 @@ export function drawDetailWaveform(wrapperEl, bytes, { startMs, endMs, durationM
     const x = Math.max(x0, Math.round(c * colPx) - base);
     const xEnd = Math.min(x1, Math.round((c + 1) * colPx) - base);
     if (xEnd <= x) continue;
-    ctx.fillStyle = `rgb(${chan(sr / wsum)},${chan(sg / wsum)},${chan(sb / wsum)})`;
-    ctx.fillRect(x, H - barH, xEnd - x, barH);
+    const r = chan(sr / wsum);
+    const g = chan(sg / wsum);
+    const b = chan(sb / wsum);
+    if (x < xGrey) {
+      // CSS grayscale(1)'s luminance weights, so it looks as it did.
+      const y = Math.round(0.2126 * r + 0.7152 * g + 0.0722 * b);
+      ctx.fillStyle = `rgb(${y},${y},${y})`;
+      ctx.fillRect(x, H - barH, Math.min(xEnd, xGrey) - x, barH);
+    }
+    if (xEnd > xGrey) {
+      const xs = Math.max(x, xGrey);
+      ctx.fillStyle = `rgb(${r},${g},${b})`;
+      ctx.fillRect(xs, H - barH, xEnd - xs, barH);
+    }
   }
   return true;
 }

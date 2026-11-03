@@ -5285,7 +5285,8 @@ td button[data-action]:disabled,
   bottom: 0;
   left: 0;
   background: var(--wave-prestart-dim);
-  backdrop-filter: grayscale(1);
+  /* The bars under it are drawn grey on the canvas: a backdrop filter over
+     the per-frame canvas glitched on some GPUs (WebView2 on NVIDIA). */
   pointer-events: none;
 }
 .track-detail-prestart[hidden] { display: none; }

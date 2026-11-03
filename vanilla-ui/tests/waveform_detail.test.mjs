@@ -93,3 +93,38 @@ test("drawDetailWaveform moves the same bars a whole pixel together when the vie
   assert.ok(moved.length > 300);
   for (const bar of moved) assert.equal(bar.h, before.get(bar.x + 1));
 });
+
+test("drawDetailWaveform draws the bars before greyBeforeMs in grey, the rest in colour", () => {
+  const dom = new JSDOM(
+    `<!doctype html><body><div id="w" class="waveform"><canvas class="waveform-canvas-el"></canvas></div></body>`,
+    { pretendToBeVisual: true }
+  );
+  global.window = dom.window;
+  const bars = [];
+  const ctx = {
+    fillStyle: "",
+    clearRect() {},
+    fillRect(x, y, w, h) { if (h > 1) bars.push({ x, w, fill: ctx.fillStyle }); },
+  };
+  dom.window.HTMLCanvasElement.prototype.getContext = () => ctx;
+  const wrap = dom.window.document.getElementById("w");
+  wrap.querySelector("canvas").getBoundingClientRect = () => ({ width: 400, height: 100, left: 0, top: 0 });
+  // 1 minute, one reddish colour throughout, heights varying.
+  const n = 9000;
+  const bytes = new Uint8Array(n * 2);
+  for (let i = 0; i < n; i += 1) {
+    const v = (6 << 13) | (2 << 10) | (1 << 7) | ((12 + (i % 2) * 19) << 2);
+    bytes[i * 2] = v >> 8;
+    bytes[i * 2 + 1] = v & 0xff;
+  }
+  const norm = computeWaveNorm(bytes);
+  // Whole track over 400 px: the edge at 15 s is x = 100.
+  drawDetailWaveform(wrap, bytes, { startMs: 0, endMs: 60000, durationMs: 60000, norm, greyBeforeMs: 15000 });
+  const isGrey = (fill) => /^rgb\((\d+),\1,\1\)$/.test(fill);
+  assert.ok(bars.length > 300);
+  for (const bar of bars) {
+    assert.equal(isGrey(bar.fill), bar.x < 100, `bar at ${bar.x} is ${bar.fill}`);
+    if (bar.x < 100) assert.ok(bar.x + bar.w <= 100, "a grey bar never crosses the edge");
+  }
+  assert.ok(bars.some((bar) => bar.x + bar.w === 100) && bars.some((bar) => bar.x === 100));
+});

@@ -385,6 +385,11 @@ export function createTrackDetailController(el, prefs = {}) {
     return working.cues.slice().sort(byPosition);
   }
 
+  /// Where the CDJ starts playback: the earliest cue, or the track start with none.
+  function preStartMs() {
+    return orderedCues()[0]?.positionMs ?? 0;
+  }
+
   /// Memory cues (memory points without a pad) in position order.
   function memoryCues() {
     return working.cues.filter((c) => c.memory).sort(byPosition);
@@ -487,6 +492,9 @@ export function createTrackDetailController(el, prefs = {}) {
     return 0;
   }
 
+  // The pre-start point the waveform canvas was last drawn with (see `renderPreStart`).
+  let drawnPreStartMs = 0;
+
   function renderWaveform() {
     const wf = el.trackDetailWaveform;
     if (!wf || !open) return;
@@ -494,11 +502,13 @@ export function createTrackDetailController(el, prefs = {}) {
       working.bytes = base64ToBytes(working.track?.detailWaveform);
       working.waveNorm = computeWaveNorm(working.bytes);
     }
+    drawnPreStartMs = preStartMs();
     const ok = drawDetailWaveform(wf, working.bytes, {
       startMs: working.view.startMs,
       endMs: working.view.endMs,
       durationMs: working.durationMs,
       norm: working.waveNorm,
+      greyBeforeMs: drawnPreStartMs,
     });
     renderOverviewCanvas();
     if (ok) {
@@ -701,7 +711,10 @@ export function createTrackDetailController(el, prefs = {}) {
   /// memory point, whether the playback-start cue's, a memory cue's or a hot
   /// cue's own. With no cues the CDJ starts at the first audio, so nothing is
   /// greyed.
+  /// The canvas greys the bars and this shade dims them.
   function renderPreStart() {
+    // A cue edit that moved the point redraws the canvas's grey part too.
+    if (preStartMs() !== drawnPreStartMs) renderWaveform();
     const shade = el.trackDetailPreStart;
     if (!shade) return;
     const first = orderedCues()[0];
