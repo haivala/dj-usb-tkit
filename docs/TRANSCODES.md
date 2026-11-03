@@ -45,6 +45,9 @@ by it:
   it to (dashed). The tooltip names the track's own file as the source. A track that can't go
   shows its own format with a warning.
 
+![An app playlist for a USB that takes only MP3 and AAC: two FLAC tracks go as their MP3
+transcodes, two get converted on export, and one is an MP3 already](assets/transcode-playlist.png)
+
 The USB's databases list the transcode's own file: its format, size, bit rate and length.
 
 ### Timing

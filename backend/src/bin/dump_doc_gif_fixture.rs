@@ -77,6 +77,16 @@ fn main() {
     })
     .unwrap_or_else(|e| fail("analyze_new_tracks", e));
 
+    let spec: Option<Value> = args.get(5).map(|spec| {
+        serde_json::from_str(&fs::read_to_string(spec).unwrap_or_else(|e| fail("read usb spec", e)))
+            .unwrap_or_else(|e| fail("parse usb spec", e))
+    });
+    // Convert… before the tracks are read, so their rows carry the transcodes.
+    let transcodes = spec
+        .as_ref()
+        .and_then(|spec| spec.get("audioFormats"))
+        .map(|formats| convert_tracks(&svc, formats, &ids));
+
     let tracks = svc
         .get_tracks_by_ids_with_previews(GetTracksByIdsRequest { track_ids: ids })
         .unwrap_or_else(|e| fail("get_tracks_by_ids_with_previews", e))
@@ -91,12 +101,8 @@ fn main() {
         })
         .unwrap_or_else(|e| fail("get_track_detail", e));
 
-    let mut json = json!({ "tracks": tracks, "detail": detail });
-    if let Some(spec) = args.get(5) {
-        let spec: Value = serde_json::from_str(
-            &fs::read_to_string(spec).unwrap_or_else(|e| fail("read usb spec", e)),
-        )
-        .unwrap_or_else(|e| fail("parse usb spec", e));
+    let mut json = json!({ "tracks": tracks, "detail": detail, "transcodes": transcodes });
+    if let Some(spec) = spec {
         let id_of = |title: &str| {
             tracks
                 .iter()
@@ -218,6 +224,9 @@ fn dump_usb(
         "repair_usb_diagnostics (broken)",
         svc.repair_usb_diagnostics(request("repair_usb_diagnostics", broken)),
     );
+    let audio_formats = spec
+        .get("audioFormats")
+        .map(|formats| dump_audio_formats(svc, formats, usb_root, source_dir, &id_of));
 
     json!({
         "exports": exports,
@@ -228,6 +237,135 @@ fn dump_usb(
         "diagnostics": diagnostics,
         "brokenDiagnostics": broken_diagnostics,
         "repairPreview": repair_preview,
+        "audioFormats": audio_formats,
+    })
+}
+
+/// Convert…: the transcode folder `spec.transcodeFolder`, and an MP3 of each
+/// track titled in `spec.transcode`. Returns the folder and the dialog's
+/// choices, as the Settings drawer and Convert… read them.
+fn convert_tracks(svc: &BackendService, spec: &Value, ids: &[String]) -> Value {
+    let folder = svc
+        .set_transcode_folder(request(
+            "set_transcode_folder",
+            json!({ "path": spec["transcodeFolder"] }),
+        ))
+        .unwrap_or_else(|e| fail("set_transcode_folder", e));
+    let tracks = svc
+        .get_tracks_by_ids_with_previews(GetTracksByIdsRequest {
+            track_ids: ids.to_vec(),
+        })
+        .unwrap_or_else(|e| fail("get_tracks_by_ids_with_previews", e))
+        .items;
+    let track_ids = spec["transcode"]
+        .as_array()
+        .expect("transcode")
+        .iter()
+        .map(|title| {
+            let title = title.as_str().expect("title");
+            tracks
+                .iter()
+                .find(|t| t.title == title)
+                .map(|t| t.id.clone())
+                .unwrap_or_else(|| fail("transcode", format!("no track titled {title:?}")))
+        })
+        .collect::<Vec<_>>();
+    let made = svc
+        .transcode_tracks_with_progress(
+            request(
+                "transcode_tracks",
+                json!({ "trackIds": track_ids, "format": "mp3" }),
+            ),
+            |_| {},
+        )
+        .unwrap_or_else(|e| fail("transcode_tracks", e));
+    if made.transcoded != track_ids.len() {
+        fail("transcode_tracks", made.summary);
+    }
+    json!({
+        "folder": response("get_transcode_folder", Ok(folder)),
+        "formats": response("get_transcode_formats", Ok(svc.transcode_formats())),
+    })
+}
+
+/// The USB's Audio formats as set (every one ticked), then with
+/// `spec.untick` unticked, and the app playlist `spec.playlist` (not
+/// exported) read for that USB: each track's `exportFile`, and the title
+/// row's estimate.
+fn dump_audio_formats(
+    svc: &BackendService,
+    spec: &Value,
+    usb_root: &str,
+    source_dir: &str,
+    id_of: impl Fn(&str) -> String,
+) -> Value {
+    let root = json!({ "usbRoot": usb_root });
+    let all_ticked = response(
+        "get_usb_audio_formats",
+        svc.get_usb_audio_formats(request("get_usb_audio_formats", root.clone())),
+    );
+    let untick = spec["untick"].as_array().expect("untick");
+    let formats = all_ticked["data"]["formats"]
+        .as_array()
+        .expect("formats")
+        .iter()
+        .map(|item| {
+            json!({
+                "format": item["format"],
+                "allowed": !untick.contains(&item["format"]),
+            })
+        })
+        .collect::<Vec<_>>();
+    let unticked = response(
+        "set_usb_audio_formats",
+        svc.set_usb_audio_formats(request(
+            "set_usb_audio_formats",
+            json!({ "usbRoot": usb_root, "formats": formats }),
+        )),
+    );
+
+    let playlist = &spec["playlist"];
+    let created = svc
+        .create_playlist(request(
+            "create_playlist",
+            json!({ "name": playlist["name"] }),
+        ))
+        .unwrap_or_else(|e| fail("create_playlist", e));
+    let track_ids = playlist["titles"]
+        .as_array()
+        .expect("titles")
+        .iter()
+        .map(|t| id_of(t.as_str().expect("title")))
+        .collect::<Vec<_>>();
+    svc.add_library_selection_to_playlist(request(
+        "add_library_selection_to_playlist",
+        json!({
+            "playlistId": created.playlist_id,
+            "sourceRoots": [source_dir],
+            "trackIds": track_ids
+        }),
+    ))
+    .unwrap_or_else(|e| fail("add_library_selection_to_playlist", e));
+    let tracks = response(
+        "get_playlist_tracks",
+        svc.get_playlist_tracks(request(
+            "get_playlist_tracks",
+            json!({ "playlistId": created.playlist_id, "usbRoot": usb_root }),
+        )),
+    );
+    let space = response(
+        "get_playlist_export_space",
+        svc.get_playlist_export_space(request(
+            "get_playlist_export_space",
+            json!({ "playlistId": created.playlist_id, "usbRoot": usb_root }),
+        )),
+    );
+    json!({
+        "allTicked": all_ticked,
+        "unticked": unticked,
+        "playlistId": created.playlist_id,
+        "playlistTracks": tracks,
+        "exportSpace": space,
     })
 }
 

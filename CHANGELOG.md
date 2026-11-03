@@ -39,6 +39,8 @@
 
 ## Unreleased
 
+**Severity:** feature
+
 - **New feature:** Convert… in the Library and playlist selection bars makes an AIFF, WAV or
   MP3 320 kbps file of the selected lossless tracks, for players that can't read FLAC or ALAC. It
   is not a new track: the FMT column shows it under the track's own format, and cues, edits and
@@ -75,6 +77,9 @@
 - **Improvement:** Export, mirror export cleanup, repair and USB edits work out a USB track's
   file size, title and artist match key in one place, so they always agree on which tracks are
   the same.
+- **Chore:** The docs' screenshots and animations are recorded again: the selection bar's
+  Convert…, the Transcodes folder in Settings and the USB's Audio formats row show, and
+  `docs/TRANSCODES.md` has a screenshot of an app playlist for a USB that takes only MP3 and AAC.
 
 ## 0.5.2
 

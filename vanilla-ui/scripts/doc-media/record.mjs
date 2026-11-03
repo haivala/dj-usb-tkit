@@ -1,17 +1,18 @@
 // Records the docs media in docs/assets/ -- the cue-editor, playlist-import,
 // export and selection-toolbar animations (WebP) and the README / cue-editor /
-// Backups screenshots -- from the real frontend build.
+// Backups / USB / transcode screenshots -- from the real frontend build.
 //
 //   npm run docs:media           (from vanilla-ui/; needs cargo and ffmpeg)
 //   npm run docs:media -- cue-editor cue-editor-drag-cues   (only those)
 //
 // 1. Synthesises a made-up 15-track library (three albums, all in the checked
 //    source folder; the other, unchecked one only shows the "Filtered" badge)
-//    with ffmpeg.
+//    with ffmpeg: two albums in MP3, one in FLAC.
 // 2. Scans and analyzes it with the real backend (`dump_doc_gif_fixture`
-//    bin), exports the sidebar's playlists to a scratch USB (and damages a
-//    copy of it, for the repair shots), and dumps what the frontend would
-//    receive.
+//    bin), converts two FLACs to MP3, exports the sidebar's playlists to a
+//    scratch USB (and damages a copy of it, for the repair shots), reads an
+//    unexported playlist for that USB with FLAC unticked, and dumps what the
+//    frontend would receive.
 // 3. Serves dist/ with Tauri's invoke stubbed from that dump (page_init.js,
 //    which also stands in for the playlists and a connected USB), drives the
 //    app in headless Chromium, and writes each animated scene (lossless frames
@@ -36,6 +37,8 @@ const ANIM_WIDTH = 960;
 const EDITOR_TITLE = "Demo Groove";
 // What the source folders look like in the app (long, so the chips truncate).
 const SHOWN_ROOT = "/home/dj/Music/Projects/Chiphead.Music";
+// Where Convert… puts its files, as Settings shows it.
+const SHOWN_TRANSCODES = "/home/dj/Music/Transcodes";
 const FOLDERS = ["Syyskuu", "Heinäkuu"];
 const FOOTER_HEIGHT = 28;
 // ffmpeg filter: grow the image by the footer's height and lay the footer
@@ -82,8 +85,10 @@ const ALBUMS = [
     ],
   },
   {
-    // A third album, so the Library has more rows than fit and scrolls.
+    // A third album, so the Library has more rows than fit and scrolls. In
+    // FLAC, so it has lossless tracks to convert (docs/TRANSCODES.md).
     folder: "Syyskuu/Polar Night",
+    lossless: true,
     album: "Polar Night",
     artist: "Revontuli Club",
     released: "2023-12-08",
@@ -104,7 +109,7 @@ const ALBUMS = [
 // breakdown in section `breakdown`, and a snare on 2 and 4 from the fifth, so
 // the waveform and the overview strip have some shape. A sustained triad on
 // the bass root gives the key analysis something to find.
-function synthesizeTrack(path, { title, artist, album, released, cover, bpm, rootHz, minor, seconds, breakdown }) {
+function synthesizeTrack(path, { title, artist, album, released, cover, bpm, rootHz, minor, seconds, breakdown, lossless }) {
   const beat = `(60/${bpm})`;
   const t = "(t-0.05)";
   const inBeat = `mod(${t},${beat})`;
@@ -127,18 +132,32 @@ function synthesizeTrack(path, { title, artist, album, released, cover, bpm, roo
     // column and the cue editor's date don't fall back to the files' own
     // (recording-day) dates.
     "-metadata", `TDRL=${released}`, "-metadata", `date=${released}`,
-    "-b:a", "192k", path,
+    // FLAC at 16-bit (ffmpeg would pick 32), else MP3.
+    ...(lossless ? ["-c:a", "flac", "-sample_fmt", "s16"] : ["-b:a", "192k"]),
+    path,
   ]);
 }
 
 // Sidebar order top to bottom; `current` is the active playlist. The ones
 // with tracks are exported to the USB, in this order.
 const PLAYLISTS = [
+  // Not exported: read for the USB with FLAC unticked (`AUDIO_FORMATS`), it
+  // shows what export would put on the USB (docs/TRANSCODES.md). First, so
+  // the sidebar (newest first) lists it last.
+  { id: "pl-warmup", name: "Warmup", titles: ["Aurora Loop", "Ice Road", "Midnight Sun", "Snowblind", "Low Orbit"], unexported: true },
   { id: "pl-event1", name: "Event 1", titles: ["Afterglow", "White Nights", "Last Ferry", "Pier Lights"] },
   { id: "pl-bass", name: "Bass", current: true, titles: ["Low Orbit", "Northbound", "Sauna Talk", "Driftwood", EDITOR_TITLE] },
   { id: "pl-house", name: "House", titles: ["Frost Line", "Afterglow", "Pier Lights"] },
   { id: "pl-1", name: "Playlist 1", titles: [] },
 ];
+// The USB's Audio formats for the transcode shot: only MP3 and AAC ticked,
+// as for older players. Two of Warmup's FLACs have an MP3 from Convert…
+// already; the other two export would convert.
+const AUDIO_FORMATS = {
+  untick: ["flac", "alac", "aiff", "wav"],
+  transcode: ["Ice Road", "Snowblind"],
+  playlist: "Warmup",
+};
 // USB history sessions (only a player writes these), from the USB's tracks.
 const USB_HISTORY = [
   { id: "hist-2", name: "HISTORY 002", createdAt: "2026-09-26", titles: ["Northbound", "Low Orbit", "Sauna Talk", "Frost Line", "Afterglow", "Driftwood"] },
@@ -178,7 +197,7 @@ function buildFixture(work) {
   for (const { folder, tracks, ...albumTags } of ALBUMS) {
     mkdirSync(join(src, folder), { recursive: true });
     tracks.forEach((track, i) => {
-      const file = `${String(i + 1).padStart(2, "0")} ${track.title}.mp3`;
+      const file = `${String(i + 1).padStart(2, "0")} ${track.title}.${albumTags.lossless ? "flac" : "mp3"}`;
       synthesizeTrack(join(src, folder, file), { ...albumTags, ...track });
     });
   }
@@ -187,11 +206,18 @@ function buildFixture(work) {
   const usbRoot = join(work, "usb");
   const brokenUsbRoot = join(work, "usb-broken");
   const usbSpec = join(work, "usb-spec.json");
+  const transcodeFolder = join(work, "transcodes");
   writeFileSync(usbSpec, JSON.stringify({
     usbRoot,
     usbName: USB_NAME,
     brokenUsbRoot,
-    playlists: PLAYLISTS.filter((p) => p.titles.length).map(({ name, titles }) => ({ name, titles })),
+    playlists: PLAYLISTS.filter((p) => p.titles.length && !p.unexported).map(({ name, titles }) => ({ name, titles })),
+    audioFormats: {
+      transcodeFolder,
+      transcode: AUDIO_FORMATS.transcode,
+      untick: AUDIO_FORMATS.untick,
+      playlist: { name: AUDIO_FORMATS.playlist, titles: PLAYLISTS.find((p) => p.name === AUDIO_FORMATS.playlist).titles },
+    },
   }));
   run("cargo", [
     "run", "-q", "--release", "-p", "backend", "--features", "dev-tools", "--bin", "dump_doc_gif_fixture",
@@ -204,9 +230,13 @@ function buildFixture(work) {
   // status (e.g. the export button's label) finds its playlist.
   const playlistIds = Object.entries(fixture.usb.exports)
     .map(([name, { playlistId }]) => [playlistId, PLAYLISTS.find((p) => p.name === name).id]);
-  fixture.usb = presentUsbResponses(fixture.usb, [
-    [brokenUsbRoot, USB_ROOT], [usbRoot, USB_ROOT], [src, SHOWN_ROOT], ...playlistIds,
-  ]);
+  const warmupId = PLAYLISTS.find((p) => p.name === AUDIO_FORMATS.playlist).id;
+  const swaps = [
+    [brokenUsbRoot, USB_ROOT], [usbRoot, USB_ROOT], [src, SHOWN_ROOT], [transcodeFolder, SHOWN_TRANSCODES],
+    ...playlistIds, [fixture.usb.audioFormats.playlistId, warmupId],
+  ];
+  fixture.usb = presentUsbResponses(fixture.usb, swaps);
+  fixture.transcodes = presentUsbResponses(fixture.transcodes, swaps);
   fixture.usbHistory = USB_HISTORY;
   // The page can't read local files: inline artwork, and show made-up paths.
   const mime = { ".jpg": "image/jpeg", ".jpeg": "image/jpeg", ".png": "image/png" };
@@ -218,6 +248,9 @@ function buildFixture(work) {
     track.artworkPath = null;
     track.filePath = `${SHOWN_ROOT}/${relative(src, track.filePath)}`;
     track.waveformPeaksPath = track.waveformPeaksPath && `/analysis/${basename(track.waveformPeaksPath)}`;
+    for (const transcode of track.transcodes || []) {
+      transcode.filePath = transcode.filePath.split(transcodeFolder).join(SHOWN_TRANSCODES);
+    }
   }
   // Album order, then track number (the file name), as a tidy library shows.
   fixture.tracks.sort((a, b) => {
@@ -237,6 +270,14 @@ function buildFixture(work) {
     ...playlist,
     tracks: fixture.tracks.filter((t) => titles.includes(t.title)),
   }));
+  // Warmup as the backend read it for the USB with FLAC unticked: each row
+  // with what export puts there (`exportFile`) and its transcodes then.
+  const forUsb = new Map(fixture.usb.audioFormats.playlistTracks.data.items.map((t) => [t.id, t]));
+  const warmup = fixture.playlists.find((p) => p.id === warmupId);
+  warmup.tracksForUsb = warmup.tracks.map((track) => {
+    const read = forUsb.get(track.id);
+    return { ...track, exportFile: read.exportFile, transcodes: read.transcodes };
+  });
   return fixture;
 }
 
@@ -800,6 +841,27 @@ function shots(fixture) {
         await page.locator("#diagRepairOverview .diag-overview-item").first().waitFor();
         await waitProgressHidden(page);
         await page.mouse.move(VIEWPORT.width - 2, VIEWPORT.height - 2);
+        await page.waitForTimeout(500);
+      },
+    },
+    {
+      // docs/TRANSCODES.md: an app playlist read for a USB whose Audio
+      // formats leave the lossless ones out. The FMT column shows what each
+      // track goes on the USB as (its MP3 transcode, an MP3 export makes
+      // first, or its own MP3), the title row what the export converts, and
+      // a converted track's tooltip its source.
+      name: "transcode-playlist",
+      caption: "An app playlist for a USB that takes only MP3 and AAC: what each track goes on it as",
+      opts: { audioFormats: true },
+      async run(page) {
+        await page.locator('.nav-playlist-item[data-playlist-id="pl-warmup"]').click();
+        await page.locator("#playlistFormatWarning:not(.hidden)").waitFor();
+        await collapseSidebar(page);
+        const badge = page
+          .locator("#playlistTracksBody .track-grid-row", { hasText: "Aurora Loop" })
+          .locator(".format-badge");
+        await badge.hover();
+        await page.locator(".app-tooltip--visible").waitFor();
         await page.waitForTimeout(500);
       },
     },

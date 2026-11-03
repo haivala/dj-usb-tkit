@@ -15,8 +15,14 @@
 // page pass for the Tauri runtime (as tests/e2e/smoke.spec.mjs does), which
 // the app needs to follow job events. The Settings drawer's version label is
 // hidden, so the media doesn't go stale with every release.
+//
+// The USB's Audio formats are as the backend returned them: every one ticked,
+// or with `opts.audioFormats` only the ones the transcode shot leaves ticked;
+// then an app playlist read for the USB carries what the backend said export
+// puts there (`tracksForUsb`), and its estimate is the backend's. Convert…'s
+// folder and choices are the backend's too (`fixture.transcodes`).
 (() => {
-  const { tracks, detail, sourceFolders, playlists, usb, usbHistory } = window.__DOC_GIF_FIXTURE__;
+  const { tracks, detail, sourceFolders, playlists, usb, usbHistory, transcodes } = window.__DOC_GIF_FIXTURE__;
   const opts = window.__DOC_GIF_OPTS__ || {};
   const USB_ROOT = "/run/media/dj/Chiphead";
   // Never shown (the label is hidden); the update check just needs a value.
@@ -98,7 +104,8 @@
   const changedNow = new Set();
   const isExported = (id, items, imported) =>
     exportedNow.has(id)
-    || (!!items.length && !imported && !changedNow.has(id) && !(opts.unexported || []).includes(id));
+    || (!!items.length && !imported && !changedNow.has(id) && !(opts.unexported || []).includes(id)
+      && !playlists.find((p) => p.id === id)?.unexported);
   // Library tracks into a playlist, each once.
   const addToPlaylist = (playlistId, trackIds) => {
     const playlist = playlists.find((p) => p.id === playlistId);
@@ -243,7 +250,9 @@
             return ok({ selected: ids.length, items });
           }
           case "get_playlist_tracks": {
-            const items = playlists.find((p) => p.id === r.playlistId)?.tracks || [];
+            const playlist = playlists.find((p) => p.id === r.playlistId);
+            const forUsb = opts.audioFormats && r.usbRoot ? playlist?.tracksForUsb : null;
+            const items = forUsb || playlist?.tracks || [];
             return ok({
               playlistId: r.playlistId,
               items,
@@ -255,9 +264,22 @@
             });
           }
           case "get_playlist_export_space": {
+            const formats = usb?.audioFormats;
+            if (opts.audioFormats && r.playlistId === formats?.playlistId) {
+              // The backend's estimate, against the made-up stick's free space.
+              const { exportSpace: space } = formats.exportSpace.data;
+              return ok({ exportSpace: { ...space, availableBytes: USB_FREE_BYTES } });
+            }
             const items = playlists.find((p) => p.id === r.playlistId)?.tracks || [];
             return ok({ exportSpace: exportSpace(items) });
           }
+          case "get_usb_audio_formats":
+          case "set_usb_audio_formats":
+            return opts.audioFormats ? usb.audioFormats.unticked : usb.audioFormats.allTicked;
+          case "get_transcode_folder":
+            return transcodes.folder;
+          case "get_transcode_formats":
+            return transcodes.formats;
           case "check_for_update":
             return ok({
               updateAvailable: false, severity: "none", currentVersion: DOC_APP_VERSION, latestVersion: DOC_APP_VERSION,
