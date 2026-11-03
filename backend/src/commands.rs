@@ -608,6 +608,42 @@ impl BackendCommands {
         wrap(self.service.cancel_analysis())
     }
 
+    pub fn transcode_tracks_with_progress<F>(
+        &self,
+        req: crate::models::TranscodeTracksRequest,
+        on_progress: F,
+    ) -> ApiResponse<crate::models::TranscodeTracksData>
+    where
+        F: FnMut(&crate::service::transcode::TranscodeProgress),
+    {
+        wrap(
+            self.service
+                .transcode_tracks_with_progress(req, on_progress),
+        )
+    }
+
+    pub fn cancel_transcode(&self) -> ApiResponse<()> {
+        wrap(self.service.cancel_transcode())
+    }
+
+    pub fn remove_track_transcodes(
+        &self,
+        req: crate::models::RemoveTrackTranscodesRequest,
+    ) -> ApiResponse<crate::models::RemoveTrackTranscodesData> {
+        wrap(self.service.remove_track_transcodes(req))
+    }
+
+    pub fn get_transcode_folder(&self) -> ApiResponse<crate::models::TranscodeFolderData> {
+        wrap(self.service.transcode_folder())
+    }
+
+    pub fn set_transcode_folder(
+        &self,
+        req: crate::models::SetTranscodeFolderRequest,
+    ) -> ApiResponse<crate::models::TranscodeFolderData> {
+        wrap(self.service.set_transcode_folder(req))
+    }
+
     pub fn export_to_usb(&self, req: ExportToUsbRequest) -> ApiResponse<ExportToUsbData> {
         wrap(self.service.export_to_usb(req))
     }

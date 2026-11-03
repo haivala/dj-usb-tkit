@@ -43,6 +43,7 @@ mod tests;
 mod track_list;
 mod track_matching;
 mod track_metadata;
+pub(crate) mod transcode;
 
 use crate::audio_format::same_format_extension;
 use crate::utils::counted;
@@ -253,6 +254,8 @@ pub struct BackendService {
     pub db: Db,
     pub analysis_paused: Arc<AtomicBool>,
     pub analysis_cancelled: Arc<AtomicBool>,
+    /// Set by `cancel_transcode`; reset when a transcode job starts.
+    pub(crate) transcode_cancelled: Arc<AtomicBool>,
     /// One-entry cache of the last USB stick's resolved playlists / histories,
     /// keyed by the staged PDB + eDB signatures. Lets the paginated
     /// `fetch_usb_playlist_tracks` / `fetch_usb_history_tracks` skip a full
@@ -286,6 +289,7 @@ impl BackendService {
             db: Db::new(data_dir)?,
             analysis_paused: Arc::new(AtomicBool::new(false)),
             analysis_cancelled: Arc::new(AtomicBool::new(false)),
+            transcode_cancelled: Arc::new(AtomicBool::new(false)),
             usb_playlists_cache: Arc::new(std::sync::Mutex::new(None)),
             usb_histories_cache: Arc::new(std::sync::Mutex::new(None)),
             usb_track_sizes_cache: Arc::new(std::sync::Mutex::new(None)),

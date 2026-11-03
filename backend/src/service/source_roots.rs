@@ -462,6 +462,7 @@ impl BackendService {
             }
             removed += tx.execute("DELETE FROM tracks WHERE id = ?1", params![id])?;
         }
+        super::transcode::sweep_orphan_transcodes(&tx)?;
         tx.commit()?;
         self.forget_source_folder_listings();
         Ok(RemoveSourceFolderData {

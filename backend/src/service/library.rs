@@ -166,6 +166,7 @@ pub(crate) fn merge_track_into(
         "UPDATE track_usb_links SET track_id = ?1 WHERE track_id = ?2",
         params![into_id, from_id],
     )?;
+    super::transcode::move_transcodes(tx, from_id, into_id)?;
     tx.execute("DELETE FROM tracks WHERE id = ?1", params![from_id])?;
     Ok(())
 }
@@ -569,6 +570,8 @@ impl BackendService {
                 remove_bundle_files(dat);
             }
         }
+        // The removed and merged tracks' transcodes go with them.
+        super::transcode::sweep_orphan_transcodes(&tx)?;
 
         // Detect stale local ANLZ cache (missing PWV6 in .2EX) and mark for
         // re-analysis. Only the app's own cache is checked: a bundle on a USB
@@ -822,6 +825,7 @@ impl BackendService {
                 // Freshly scanned, not yet indexed -- no analysis.
                 analysis_ready: false,
                 format_compat,
+                transcodes: Vec::new(),
             });
         }
 
@@ -1332,6 +1336,7 @@ pub(crate) fn row_to_track(
         key_color: None,
         analysis_ready,
         format_compat,
+        transcodes: Vec::new(),
     };
     if include_previews {
         load_waveform_previews(&mut track);

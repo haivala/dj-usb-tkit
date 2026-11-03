@@ -2,7 +2,7 @@ import { createTrackListController } from "../shared/track_list_controller.mjs";
 import { narrowTrackSelectionToLoaded } from "../shared/track_selection.mjs";
 import { renderEmptyState } from "../shell/actions.mjs";
 import { cssEscape, cloneTemplate } from "../../ui_utils.mjs";
-import { fillBpmCell, fillKeyCell, fillYearCell, coverElement, setCueButtonState, formatTrackDuration, trackHasWaveform } from "../../track_table.mjs";
+import { fillBpmCell, fillFormatCell, fillKeyCell, fillYearCell, coverElement, setCueButtonState, formatTrackDuration, trackHasWaveform } from "../../track_table.mjs";
 import { REANALYZE_TOOLTIP, counted } from "../../track_utils.mjs";
 import {
   formatDurationMs,
@@ -799,6 +799,8 @@ export function patchLibraryRowCells(ctx, row, track) {
 
   const keyTd = row.querySelector(".td-key");
   if (keyTd) fillKeyCell(keyTd, track);
+
+  fillFormatCell(row.querySelector(".td-format"), track);
 
   const coverTd = row.querySelector(".td-cover");
   if (coverTd) {

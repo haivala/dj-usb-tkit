@@ -1662,6 +1662,119 @@ pub fn cancel_analysis(state: State<'_, BackendCommands>) -> ApiResponse<()> {
     state.cancel_analysis()
 }
 
+/// Makes transcodes of the selected tracks as a cancellable job
+/// (`jobType: "transcode"`), one progress event per finished track.
+#[tauri::command]
+pub async fn transcode_tracks(
+    app: AppHandle,
+    state: State<'_, BackendCommands>,
+    request: crate::models::TranscodeTracksRequest,
+) -> Result<ApiResponse<crate::models::TranscodeTracksData>, String> {
+    let job_id = Uuid::now_v7().to_string();
+    let identity = JobIdentity {
+        job_id: &job_id,
+        job_type: "transcode",
+        stage: "transcode_tracks",
+    };
+    emit_job_event(
+        &app,
+        "job.started",
+        identity,
+        0,
+        1,
+        0,
+        "Converting selected tracks",
+    );
+    let commands = state.inner().clone();
+    let app_for_task = app.clone();
+    let job_id_for_task = job_id.clone();
+    let mut response = match tauri::async_runtime::spawn_blocking(move || {
+        commands.transcode_tracks_with_progress(request, |progress| {
+            let identity = JobIdentity {
+                job_id: &job_id_for_task,
+                job_type: "transcode",
+                stage: "transcode_tracks",
+            };
+            let file_name = std::path::Path::new(&progress.file_path)
+                .file_name()
+                .and_then(|s| s.to_str())
+                .unwrap_or(&progress.file_path);
+            let total = progress.total.max(1);
+            emit_job_event(
+                &app_for_task,
+                "job.progress",
+                identity,
+                progress.current,
+                total,
+                progress.current * 100 / total,
+                format!(
+                    "Converting {}/{}: {file_name}",
+                    progress.current, progress.total
+                ),
+            );
+        })
+    })
+    .await
+    {
+        Ok(response) => response,
+        Err(err) => ApiResponse::failure(
+            crate::error::BackendError::Internal(format!("transcode_tracks task failed: {err}"))
+                .into(),
+        ),
+    };
+    if let Some(data) = response.data.as_mut() {
+        data.job_id = job_id.clone();
+        let message = if data.cancelled {
+            format!("Converting cancelled: {} converted", data.transcoded)
+        } else {
+            format!(
+                "Converting finished: {} converted, {} skipped, {} failed",
+                data.transcoded, data.skipped, data.failed
+            )
+        };
+        emit_job_event(&app, "job.completed", identity, 1, 1, 100, message);
+    } else {
+        emit_job_failed(
+            &app,
+            identity,
+            response.error.as_ref().map(|e| e.message.clone()),
+        );
+    }
+    Ok(response)
+}
+
+#[tauri::command]
+pub fn cancel_transcode(state: State<'_, BackendCommands>) -> ApiResponse<()> {
+    state.cancel_transcode()
+}
+
+#[tauri::command]
+pub async fn remove_track_transcodes(
+    state: State<'_, BackendCommands>,
+    request: crate::models::RemoveTrackTranscodesRequest,
+) -> Result<ApiResponse<crate::models::RemoveTrackTranscodesData>, String> {
+    let commands = state.inner().clone();
+    Ok(run_blocking_command("remove_track_transcodes", move || {
+        commands.remove_track_transcodes(request)
+    })
+    .await)
+}
+
+#[tauri::command]
+pub fn get_transcode_folder(
+    state: State<'_, BackendCommands>,
+) -> ApiResponse<crate::models::TranscodeFolderData> {
+    state.get_transcode_folder()
+}
+
+#[tauri::command]
+pub fn set_transcode_folder(
+    state: State<'_, BackendCommands>,
+    request: crate::models::SetTranscodeFolderRequest,
+) -> ApiResponse<crate::models::TranscodeFolderData> {
+    state.set_transcode_folder(request)
+}
+
 #[tauri::command]
 pub async fn export_to_usb(
     app: AppHandle,

@@ -3,6 +3,7 @@ import { catchErr, handleTrackAction, resolveRowActionTrack } from "../shared/tr
 import { bindTrackSelection } from "../shared/track_selection.mjs";
 import { addSelectionToPlaylists } from "../shared/add_to_playlists.mjs";
 import { editTrackSelection } from "../shared/track_metadata_edits.mjs";
+import { convertTrackSelection } from "../shared/transcodes.mjs";
 import { applyLibrarySources } from "./actions.mjs";
 
 export function bindLibraryEvents(ctx) {
@@ -175,6 +176,7 @@ export function bindLibraryEvents(ctx) {
       add: (ids) => addLibrarySelectionToCurrentPlaylist({ trackIds: ids }),
       "add-to": (ids) => addSelectionToPlaylists(ctx, "library", ids, []),
       reanalyze: (ids) => reanalyzeTracks(ids),
+      convert: (ids) => convertTrackSelection(ctx, ids),
       edit: (ids, rows) => editTrackSelection(ctx, "library", ids, rows),
     },
   });

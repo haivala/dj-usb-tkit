@@ -942,6 +942,7 @@ fn sample_track(id: &str, file_path: &str) -> Track {
         is_usb_path: false,
         analysis_ready: false,
         format_compat: Default::default(),
+        transcodes: Vec::new(),
     }
 }
 

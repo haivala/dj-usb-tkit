@@ -94,6 +94,20 @@ export function bindSettingsEvents(ctx) {
   el.settingsBtn?.addEventListener("click", () => {
     el.settingsDrawer.classList.remove("hidden");
     el.settingsBackdrop.classList.remove("hidden");
+    loadTranscodeFolder(ctx).catch(catchTranscodeFolderError);
+  });
+  const catchTranscodeFolderError = (err) => ctx.emitStatus(`Transcode folder: ${err?.message || err}`);
+  el.transcodeFolderChangeBtn?.addEventListener("click", () => {
+    (async () => {
+      const picked = await ctx.invoke("pick_transcode_folder");
+      if (!picked) return;
+      renderTranscodeFolder(el, await ctx.command("set_transcode_folder", { path: String(picked) }));
+    })().catch(catchTranscodeFolderError);
+  });
+  el.transcodeFolderResetBtn?.addEventListener("click", () => {
+    ctx.command("set_transcode_folder", { path: null })
+      .then((folder) => renderTranscodeFolder(el, folder))
+      .catch(catchTranscodeFolderError);
   });
   el.settingsCloseBtn?.addEventListener("click", closeSettingsDrawer);
   el.settingsUpdateCheckBtn?.addEventListener("click", () => {
@@ -338,4 +352,18 @@ export function bindSettingsEvents(ctx) {
   }
 
   renderEssentiaInstallRow(ctx);
+}
+
+// Settings → Transcodes: the backend's folder (the chosen one, or its
+// default inside the app data).
+async function loadTranscodeFolder(ctx) {
+  renderTranscodeFolder(ctx.el, await ctx.command("get_transcode_folder"));
+}
+
+function renderTranscodeFolder(el, folder) {
+  if (!el.transcodeFolderText) return;
+  el.transcodeFolderText.textContent = folder?.isDefault
+    ? `${folder.path} (default)`
+    : String(folder?.path || "");
+  el.transcodeFolderResetBtn.hidden = !!folder?.isDefault;
 }

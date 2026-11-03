@@ -168,6 +168,80 @@ pub struct Track {
     /// badge/tooltip and never re-derives the rule.
     #[serde(default)]
     pub format_compat: FormatCompat,
+    /// Extra files of this track in other formats (AIFF / WAV / MP3 320),
+    /// made by the user from the library. Computed on every read from the
+    /// `track_transcodes` table (see `service::transcode`).
+    #[serde(default)]
+    pub transcodes: Vec<TrackTranscode>,
+}
+
+/// One transcode of a track: the same track as another file.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct TrackTranscode {
+    /// `"aiff"`, `"wav"` or `"mp3"`.
+    pub format: String,
+    /// What the library shows, e.g. `"MP3 320"`.
+    pub label: String,
+    pub file_path: String,
+    pub size_bytes: i64,
+    /// The source file changed after the transcode was made.
+    pub outdated: bool,
+}
+
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct TranscodeTracksRequest {
+    pub track_ids: Vec<String>,
+    /// `"aiff"`, `"wav"` or `"mp3"`.
+    pub format: String,
+}
+
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct TranscodeTracksData {
+    #[serde(default)]
+    pub job_id: String,
+    pub transcoded: usize,
+    /// Tracks that need no transcode in this format (not lossless, already
+    /// this format, already up to date, file missing).
+    pub skipped: usize,
+    pub failed: usize,
+    pub cancelled: bool,
+    /// One line per skipped or failed track.
+    pub messages: Vec<String>,
+    /// The selected tracks as they are now, for the tables to show.
+    pub tracks: Vec<Track>,
+}
+
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct RemoveTrackTranscodesRequest {
+    pub track_ids: Vec<String>,
+}
+
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct RemoveTrackTranscodesData {
+    pub removed: usize,
+    /// The selected tracks as they are now, for the tables to show.
+    pub tracks: Vec<Track>,
+}
+
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct TranscodeFolderData {
+    pub path: String,
+    /// No folder was chosen; `path` is the default inside the app data.
+    pub is_default: bool,
+}
+
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct SetTranscodeFolderRequest {
+    /// `None` or empty goes back to the default folder.
+    #[serde(default)]
+    pub path: Option<String>,
 }
 
 /// How a track's audio format is expected to behave on CDJ hardware.

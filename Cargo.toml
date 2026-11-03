@@ -23,6 +23,14 @@ panic = "abort"
 opt-level = 3
 [profile.release.package.rustfft]
 opt-level = 3
+# MP3 transcoding (LAME, built from C by mp3lame-sys) gets the same speed
+# build, and so do the FLAC/ALAC decoders the transcoder reads with.
+[profile.release.package.mp3lame-sys]
+opt-level = 3
+[profile.release.package.symphonia-bundle-flac]
+opt-level = 3
+[profile.release.package.symphonia-codec-alac]
+opt-level = 3
 
 [profile.dev]
 debug = "line-tables-only"

@@ -1,4 +1,4 @@
-import { formatDurationMs, formatBpm, ANALYZE_TOOLTIP, REANALYZE_TOOLTIP } from "./track_utils.mjs";
+import { formatDurationMs, formatBpm, formatByteSize, ANALYZE_TOOLTIP, REANALYZE_TOOLTIP } from "./track_utils.mjs";
 import { cloneTemplate } from "./ui_utils.mjs";
 import { coverUrl, attachCoverFallbackHandlers } from "./components/library/actions.mjs";
 import { isTrackCurrentlyPlaying, moveActiveWaveform, updateTransportButtonsInDom } from "./components/playback/actions.mjs";
@@ -169,16 +169,7 @@ export function createTrackRow(ctx, track, options) {
   cell("album").textContent = track.album ?? "";
   fillYearCell(cell("year"), track);
 
-  const formatInfo = describeTrackFormat(track);
-  const badge = row.querySelector(".format-badge");
-  const tooltip = formatTrackFormatTooltip(formatInfo);
-  if (tooltip) badge.dataset.tooltip = tooltip;
-  badge.textContent = formatInfo.label;
-  if (formatInfo.warning) {
-    const autofix = formatInfo.kind === "autofix";
-    badge.classList.add(autofix ? "autofix" : "warn");
-    badge.textContent += autofix ? " ⟳" : " ⚠";
-  }
+  fillFormatCell(row.querySelector(".td-format"), track);
   cell("length").textContent = formatTrackDuration(track);
   fillBpmCell(cell("bpm"), track);
   fillKeyCell(cell("key"), track);
@@ -327,6 +318,44 @@ function describeTrackFormat(track) {
     kind: severity === "ok" ? null : severity,
     warning: compat.warning || null,
   };
+}
+
+// The FMT cell: the format badge (with the backend's compatibility warning),
+// then the track's transcodes. Also redraws a row already shown.
+export function fillFormatCell(cell, track) {
+  const badge = cell?.querySelector(".format-badge");
+  if (!badge) return;
+  const formatInfo = describeTrackFormat(track);
+  const tooltip = formatTrackFormatTooltip(formatInfo);
+  if (tooltip) badge.dataset.tooltip = tooltip;
+  else delete badge.dataset.tooltip;
+  badge.textContent = formatInfo.label;
+  badge.classList.remove("autofix", "warn");
+  if (formatInfo.warning) {
+    const autofix = formatInfo.kind === "autofix";
+    badge.classList.add(autofix ? "autofix" : "warn");
+    badge.textContent += autofix ? " ⟳" : " ⚠";
+  }
+  cell.querySelectorAll(".format-transcode").forEach((line) => line.remove());
+  appendTranscodeLines(badge, track);
+}
+
+// Backend-owned `track.transcodes` (the track's other files, made from the
+// library): one small line each under the format badge.
+function appendTranscodeLines(badge, track) {
+  const transcodes = Array.isArray(track?.transcodes) ? track.transcodes : [];
+  const doc = badge.ownerDocument;
+  for (const transcode of transcodes) {
+    const line = cloneTemplate(doc, "tplFormatTranscode");
+    line.textContent = String(transcode.format || "").toUpperCase();
+    const size = formatByteSize(transcode.sizeBytes);
+    line.dataset.tooltip = transcode.outdated
+      ? `${transcode.label} transcode · ${size} — out of date: the source file changed since. Convert again to update it`
+      : `${transcode.label} transcode · ${size}`;
+    line.classList.toggle("outdated", !!transcode.outdated);
+    badge.after(line);
+    badge = line;
+  }
 }
 
 function formatTrackFormatTooltip(formatInfo) {

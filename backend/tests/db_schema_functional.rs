@@ -79,7 +79,16 @@ fn db_migration_is_idempotent_and_adds_expected_columns() {
             |row| row.get(0),
         )
         .expect("schema_version value");
-    assert_eq!(schema_version, 4);
+    assert_eq!(schema_version, 5);
+
+    let transcodes_table: i64 = conn
+        .query_row(
+            "SELECT COUNT(1) FROM sqlite_master WHERE type = 'table' AND name = 'track_transcodes'",
+            [],
+            |row| row.get(0),
+        )
+        .expect("track_transcodes table");
+    assert_eq!(transcodes_table, 1, "track_transcodes table should exist");
 
     let modified_type: String = conn
         .query_row(

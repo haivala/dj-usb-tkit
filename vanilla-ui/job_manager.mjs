@@ -161,6 +161,14 @@ export function cancelAnalysis(ctx) {
   });
 }
 
+// The Convert job's cancel: tracks already converted keep their files.
+export function cancelTranscode(ctx) {
+  ctx.el.progressCancelTranscodeBtn.hidden = true;
+  ctx.command("cancel_transcode").catch((err) => {
+    console.error("[transcode-ui] cancel_transcode failed:", err);
+  });
+}
+
 export function updateAnalysisPauseButtonAppearance(el, paused) {
   const label = paused ? "Resume analysis" : "Pause analysis";
   el.progressPauseBtn.setAttribute("aria-pressed", paused ? "true" : "false");
@@ -281,6 +289,9 @@ export function handleJobEvent(ctx, payload) {
     if (jobType === "analysis") {
       setAnalysisControlsVisible(state, el, true);
     }
+    if (jobType === "transcode") {
+      el.progressCancelTranscodeBtn.hidden = false;
+    }
     // A job started while another runs (an analysis or an update during an
     // export) only reports in the status line; the bar stays with the
     // running job until it ends.
@@ -390,6 +401,9 @@ function finishJob(ctx, jobId, jobType, ownsProgressBar, idleDelayMs) {
   }
   if (jobType === "analysis") {
     setAnalysisControlsVisible(state, el, false);
+  }
+  if (jobType === "transcode") {
+    el.progressCancelTranscodeBtn.hidden = true;
   }
   if (!ownsProgressBar) return;
   state.activeJobId = null;

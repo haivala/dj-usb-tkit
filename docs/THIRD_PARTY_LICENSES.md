@@ -48,6 +48,10 @@ Included notice files:
 
 The graph is primarily permissive licenses, with some weak-copyleft MPL-2.0 components in the ecosystem. MPL-2.0 dependencies are compatible with this AGPL project when combined as unmodified dependency files in a larger work; keep their notices and source-license terms intact, and keep dependency audits current for every release.
 
+### LAME MP3 encoder
+
+MP3 transcodes use LAME (`libmp3lame`, LGPL-2.0-or-later), compiled from source and linked into the app through the `mp3lame-sys` / `mp3lame-encoder` crates (LGPL-3.0). The app's own source is published under the AGPL, which lets users rebuild it against a modified LAME, as the LGPL requires of static linking. Keep LAME's notice with release artifacts.
+
 ### Linux AppImage shared libraries
 
 Published AppImages are built in the Ubuntu 22.04 container (`scripts/Dockerfile.linux-build`), so the bundled shared libraries come from Ubuntu 22.04 packages. A local `./scripts/release.sh` build bundles the host's libraries instead. If the build base changes, keep a per-release inventory of bundled shared libraries and build-host details.

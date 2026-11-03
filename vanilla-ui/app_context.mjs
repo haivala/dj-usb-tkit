@@ -16,6 +16,7 @@ import { createInitialState, createTableSortState, createEventLogState } from ".
 import { renderWaveformsIn } from "./waveform.mjs";
 import { createGroupEditDialogController } from "./components/shared/track_metadata_edits.mjs";
 import { createAddToDialogController } from "./components/shared/add_to_playlists.mjs";
+import { createConvertDialogController } from "./components/shared/transcodes.mjs";
 
 // Every element with an `id` in index.html, by id (`el.statusText`, …). Ids
 // inside <template>s aren't part of the document, so they're never collected.
@@ -69,7 +70,7 @@ export function createAppContext(env) {
     setupRuntimeErrorLogging`);
   bindActions(backupsUi, "renderBackups restoreUsbBackup deleteUsbBackup");
   bindActions(jobMgr, `setProgress dismissProgress startProgressHeartbeat stopProgressHeartbeat
-    withProgress handleJobEvent toggleAnalysisPause cancelAnalysis scheduleProgressIdle waitForUsbJobIdle`);
+    withProgress handleJobEvent toggleAnalysisPause cancelAnalysis cancelTranscode scheduleProgressIdle waitForUsbJobIdle`);
   bindActions(uiCtrl, `updateModeText updateActivePlaylistIndicators updateAddToPlaylistButtons
     updateUsbNameBadge updateSelectionCount updateUsbSubNavDisabledState updateUsbEmptyState
     updateSourceFilterIndicator updateScanLibraryButtonLabel closeSettingsDrawer updateUsbHealthDot
@@ -114,6 +115,7 @@ export function createAppContext(env) {
   ctx.playlistImportDialog = uiCtrl.createPlaylistImportDialogController(ctx.el, ctx.document);
   ctx.groupEditDialog = createGroupEditDialogController(ctx.el, ctx.document);
   ctx.addToDialog = createAddToDialogController(ctx.el, ctx.document);
+  ctx.convertDialog = createConvertDialogController(ctx.el, ctx.document);
   ctx.trackDetailDialog = trackDetail.createAppTrackDetailController(ctx);
   ctx.libraryTracksCtl = library.createLibraryTracksController(ctx);
   ctx.playlistTracksCtl = playlist.createPlaylistTracksController(ctx);

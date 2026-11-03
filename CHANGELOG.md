@@ -39,6 +39,11 @@
 
 ## Unreleased
 
+- **New feature:** Convert… in the Library and playlist selection bars makes an AIFF, WAV or
+  MP3 320 kbps file of the selected lossless tracks, for players that can't read FLAC or ALAC. It
+  is not a new track: the FMT column shows it under the track's own format, and cues, edits and
+  playlists stay on the one track. Files go to a folder set in Settings → Transcodes, outside the
+  source folders. USB export doesn't use them yet.
 - **Improvement:** Saving cue, beat grid, key or track detail edits on a USB track that one of
   the USB's two databases doesn't list is still refused, since it would leave them disagreeing,
   but the message now says so in plain words and points to Preview Fixes, which repairs it.

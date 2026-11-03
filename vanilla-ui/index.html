@@ -168,10 +168,11 @@
             <div class="selection-actions is-empty" data-selection-bar="library">
               <span class="selection-count">0 selected</span>
               <span class="selection-time"></span>
-              <span class="selection-hint">Select tracks to add, reanalyze or edit them</span>
+              <span class="selection-hint">Select tracks to add, reanalyze, convert or edit them</span>
               <button type="button" data-selection-action="add" data-primary disabled hidden>+ <span class="selection-label-long">Add to </span><span class="selection-target"></span></button>
               <button type="button" data-selection-action="add-to" disabled data-tooltip="Pick one or more playlists to add the selected tracks to">Add to…</button>
               <button type="button" data-selection-action="reanalyze" disabled data-tooltip="Reset waveform, BPM, key and first beat of the selected tracks to a fresh analysis, replacing imported or edited values (cues are kept)">Reanalyze</button>
+              <button type="button" data-selection-action="convert" disabled data-tooltip="Make AIFF, WAV or MP3 files of the selected lossless tracks for players that can't read FLAC or ALAC, or remove them">Convert…</button>
               <button type="button" data-selection-action="edit" disabled data-tooltip="Edit genre, release date and rating of the selected tracks"><span class="selection-label-long">Edit details…</span><span class="selection-label-short">Edit…</span></button>
               <button type="button" class="selection-clear" data-selection-action="clear" disabled aria-label="Clear selection" data-tooltip="Clear selection">&times;</button>
             </div>
@@ -432,10 +433,11 @@
           <div class="selection-actions is-empty" data-selection-bar="playlist">
             <span class="selection-count">0 selected</span>
             <span class="selection-time"></span>
-            <span class="selection-hint">Select tracks to add, remove, reanalyze or edit them</span>
+            <span class="selection-hint">Select tracks to add, remove, reanalyze, convert or edit them</span>
             <button type="button" data-selection-action="add-to" disabled data-tooltip="Pick one or more playlists to add the selected tracks to">Add to…</button>
             <button type="button" data-selection-action="remove" disabled data-tooltip="Remove the selected tracks from this playlist (they stay in the library)"><span class="selection-label-long">Remove from playlist</span><span class="selection-label-short">Remove</span></button>
             <button type="button" data-selection-action="reanalyze" disabled data-tooltip="Reset waveform, BPM, key and first beat of the selected tracks to a fresh analysis, replacing imported or edited values (cues are kept)">Reanalyze</button>
+            <button type="button" data-selection-action="convert" disabled data-tooltip="Make AIFF, WAV or MP3 files of the selected lossless tracks for players that can't read FLAC or ALAC, or remove them">Convert…</button>
             <button type="button" data-selection-action="edit" disabled data-tooltip="Edit genre, release date and rating of the selected tracks"><span class="selection-label-long">Edit details…</span><span class="selection-label-short">Edit…</span></button>
             <button type="button" class="selection-clear" data-selection-action="clear" disabled aria-label="Clear selection" data-tooltip="Clear selection">&times;</button>
           </div>
@@ -734,6 +736,15 @@
         </label>
       </div>
       <div class="settings-section">
+        <div class="settings-section-label">Transcodes</div>
+        <div class="settings-folder-row">
+          <span class="settings-folder-path" id="transcodeFolderText"></span>
+          <button type="button" class="settings-small-btn" id="transcodeFolderChangeBtn">Change…</button>
+          <button type="button" class="settings-small-btn" id="transcodeFolderResetBtn" hidden>Use default</button>
+        </div>
+        <span class="muted usb-cfg-toggle-hint">Where Convert… saves the AIFF, WAV and MP3 files it makes. Keep it outside your music folders, so other music apps don't list the files twice. A new folder only applies to new files.</span>
+      </div>
+      <div class="settings-section">
         <div class="settings-section-label">Backups</div>
         <label class="usb-cfg-toggle-row" for="exportBackupCheckbox">
           <input type="checkbox" id="exportBackupCheckbox" checked />
@@ -756,6 +767,7 @@
       <span id="progressText">Idle</span>
       <button class="progress-pause" id="progressPauseBtn" aria-label="Pause analysis" title="Pause analysis" aria-pressed="false" hidden>&#10074;&#10074;</button>
       <button class="progress-cancel" id="progressCancelAnalysisBtn" aria-label="Cancel analysis" title="Cancel analysis" hidden>&times;</button>
+      <button class="progress-cancel" id="progressCancelTranscodeBtn" aria-label="Cancel converting" title="Cancel converting (finished files are kept)" hidden>&times;</button>
       <button class="progress-dismiss" id="progressDismiss" aria-label="Dismiss">&times;</button>
     </div>
     <div class="progress-track" role="progressbar" aria-valuemin="0" aria-valuemax="100" aria-valuenow="0" aria-label="Operation progress">
@@ -825,6 +837,26 @@
       <div class="row confirm-actions">
         <button type="button" id="addToCancelBtn">Cancel</button>
         <button type="button" id="addToApplyBtn" data-primary disabled>Add</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- Selection bar "Convert…": make transcodes of the selected tracks, or remove them -->
+  <div class="confirm-overlay" id="convertOverlay" hidden>
+    <div class="confirm-dialog convert-dialog" role="dialog" aria-modal="true" aria-labelledby="convertTitle">
+      <h3 id="convertTitle">Convert tracks</h3>
+      <p class="muted">Makes another file of each selected lossless track, for players that can't read FLAC or ALAC. It is still the same track: no new library row, and cues and edits stay on the track.</p>
+      <fieldset class="usb-cfg-radio-group" id="convertFormatGroup">
+        <legend class="muted">Format</legend>
+        <label class="usb-cfg-toggle-row"><input type="radio" name="convertFormat" value="mp3" checked /> MP3 320 kbps</label>
+        <label class="usb-cfg-toggle-row"><input type="radio" name="convertFormat" value="aiff" /> AIFF (lossless)</label>
+        <label class="usb-cfg-toggle-row"><input type="radio" name="convertFormat" value="wav" /> WAV (lossless)</label>
+      </fieldset>
+      <p class="muted convert-folder-hint">Saved in <span id="convertFolderText"></span> (change it in Settings).</p>
+      <div class="row confirm-actions">
+        <button type="button" id="convertRemoveBtn" class="convert-remove-btn" data-tooltip="Delete the selected tracks' transcode files">Remove transcodes</button>
+        <button type="button" id="convertCancelBtn">Cancel</button>
+        <button type="button" id="convertApplyBtn" data-primary>Convert</button>
       </div>
     </div>
   </div>
@@ -910,6 +942,10 @@
       <div role="cell" class="track-grid-cell td-format"><span class="format-badge"></span></div>
       <div role="cell" class="track-grid-cell td-action"><div class="action-buttons"><button class="track-add-btn"></button><button data-action="analyze-track"></button></div></div>
     </div>
+  </template>
+  <!-- FMT cell: one per transcode of the track, under the format badge -->
+  <template id="tplFormatTranscode">
+    <span class="format-transcode"></span>
   </template>
   <template id="tplTrackRowEmpty">
     <div role="row" class="track-grid-row track-grid-row-empty"><div role="cell" class="track-grid-cell track-grid-empty">No tracks available.</div></div>

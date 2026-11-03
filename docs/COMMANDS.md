@@ -384,6 +384,16 @@ When `repair_usb_diagnostics` is called with `apply: true`, the response may inc
 - `analyze_new_tracks`
 - `set_analysis_paused`
 - `cancel_analysis`
+- `transcode_tracks` — `{ trackIds, format }` (`"aiff"`, `"wav"` or `"mp3"`) →
+  `{ transcoded, skipped, failed, cancelled, messages, tracks }`. A job
+  (`jobType: "transcode"`, one `job.progress` per finished track). The backend
+  picks which tracks need a transcode; `messages` has one line per skipped or
+  failed track, `tracks` the selected tracks' rows. See `docs/TRANSCODES.md`.
+- `cancel_transcode` — stops the running transcode job; finished files stay.
+- `remove_track_transcodes` — `{ trackIds }` → `{ removed, tracks }`.
+- `get_transcode_folder` / `set_transcode_folder` — `{ path? }` (none goes back
+  to the default) → `{ path, isDefault }`. A folder inside a source folder is
+  refused.
 - `download_essentia`
 - `cancel_essentia_download`
 - `remove_essentia`
@@ -420,6 +430,7 @@ These are desktop host commands, not backend API envelope commands:
 - `get_backend_log_buffer`
 - `pick_source_folders`
 - `pick_usb_folder`
+- `pick_transcode_folder`
 - `save_text_file`
 - `allow_asset_paths`
 - `show_window`

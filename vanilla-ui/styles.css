@@ -2425,6 +2425,23 @@ input[type="checkbox"]:disabled {
   border-color: var(--fmt-autofix-border);
 }
 
+/* A transcode of the track (another file of it, in another format): a
+   smaller, muted line under the format badge. Out of date (the source file
+   changed since) in the warning colour. */
+.format-transcode {
+  display: block;
+  font-family: 'JetBrains Mono', monospace;
+  font-size: 10px;
+  font-weight: 600;
+  line-height: 1.2;
+  color: var(--muted);
+  cursor: help;
+  white-space: nowrap;
+}
+.format-transcode.outdated {
+  color: var(--fmt-warn-fg);
+}
+
 /* ── lists (USB/History sidebar) ────────────────────── */
 
 .list {
@@ -3442,7 +3459,8 @@ td button[data-action]:disabled,
   gap: 6px;
   flex-wrap: wrap;
 }
-.essentia-btn {
+.essentia-btn,
+.settings-small-btn {
   height: 24px;
   font-size: 11px;
   padding: 0 8px;
@@ -3452,9 +3470,24 @@ td button[data-action]:disabled,
   color: var(--ink-secondary);
   cursor: pointer;
 }
-.essentia-btn:hover {
+.essentia-btn:hover,
+.settings-small-btn:hover {
   background: var(--surface-3, var(--accent-bg, var(--surface)));
   color: var(--ink);
+}
+/* Settings → Transcodes: the folder path, then its buttons (wrapping below
+   a long path). */
+.settings-folder-row {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 6px 10px;
+  font-size: 12px;
+  color: var(--ink-secondary);
+}
+.settings-folder-path {
+  overflow-wrap: anywhere;
+  min-width: 0;
 }
 .essentia-node-link {
   color: var(--accent);
@@ -4310,6 +4343,23 @@ td button[data-action]:disabled,
 
 .add-to-list > li.muted {
   padding: 10px 12px;
+}
+
+/* Selection bar "Convert…": the format choice; Remove sits apart on the left. */
+.convert-dialog {
+  width: min(440px, 100%);
+}
+
+.convert-dialog .usb-cfg-radio-group {
+  margin: 12px 0;
+}
+
+.convert-folder-hint {
+  font-size: 12px;
+}
+
+.convert-remove-btn {
+  margin-right: auto;
 }
 
 /* Import Playlists: one column per library, each its own scrolling checklist. */

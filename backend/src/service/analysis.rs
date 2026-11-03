@@ -1846,7 +1846,7 @@ fn persist_library_artwork_thumbnail_from_image(
     Some(target.to_string_lossy().to_string())
 }
 
-fn extract_embedded_cover_art_bytes(path: &Path) -> Option<Vec<u8>> {
+pub(crate) fn extract_embedded_cover_art_bytes(path: &Path) -> Option<Vec<u8>> {
     let tagged = read_from_path(path).ok()?;
     let mut fallback = None::<Vec<u8>>;
     for tag in tagged.tags() {

@@ -3,6 +3,7 @@ import { catchErr, handleTrackAction, resolveRowActionTrack } from "../shared/tr
 import { bindTrackSelection, clearTrackSelection } from "../shared/track_selection.mjs";
 import { addSelectionToPlaylists } from "../shared/add_to_playlists.mjs";
 import { editTrackSelection } from "../shared/track_metadata_edits.mjs";
+import { convertTrackSelection } from "../shared/transcodes.mjs";
 import { createDragAutoScroller } from "../../dnd_autoscroll.mjs";
 import { bindListDragReorder } from "../shared/list_drag_reorder.mjs";
 
@@ -153,6 +154,7 @@ export function bindPlaylistEvents(ctx) {
       "add-to": (ids) => addSelectionToPlaylists(ctx, "playlist", ids, []),
       remove: (ids) => removeFromCurrentPlaylist(ids),
       reanalyze: (ids) => reanalyzeTracks(ids),
+      convert: (ids) => convertTrackSelection(ctx, ids),
       edit: (ids, rows) => editTrackSelection(ctx, "playlist", ids, rows),
     },
   });

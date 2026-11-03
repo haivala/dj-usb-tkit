@@ -338,6 +338,9 @@ export function bindEvents(ctx) {
   if (el.progressCancelAnalysisBtn) {
     el.progressCancelAnalysisBtn.addEventListener("click", ctx.cancelAnalysis);
   }
+  if (el.progressCancelTranscodeBtn) {
+    el.progressCancelTranscodeBtn.addEventListener("click", ctx.cancelTranscode);
+  }
 
   initTooltips(ctx);
   bindShellEvents(ctx);

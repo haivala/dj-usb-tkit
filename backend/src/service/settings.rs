@@ -210,6 +210,7 @@ pub(crate) fn apply_frontend_track_fields(
         (track.key_display, track.key_color) =
             key_notation::key_display_fields(track.key.as_deref(), notation);
     }
+    super::transcode::fill_track_transcodes(conn, tracks)?;
     Ok(())
 }
 

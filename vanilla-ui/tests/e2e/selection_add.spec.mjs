@@ -191,6 +191,39 @@ function installSelectionMock(page, mockOpts = {}) {
             playlistTracks.set(playlistId, kept);
             return { ok: true, data: { playlistId, removed: current.length - kept.length } };
           }
+          // Convert…: the first selected track gets a transcode, the rest are
+          // skipped (the backend decides which need one).
+          if (command === "get_transcode_folder") {
+            return { ok: true, data: window.__transcodeFolder || { path: "/data/transcodes", isDefault: true } };
+          }
+          if (command === "pick_transcode_folder") return "/converted";
+          if (command === "set_transcode_folder") {
+            const path = payload?.request?.path;
+            window.__transcodeFolder = path ? { path, isDefault: false } : null;
+            return { ok: true, data: window.__transcodeFolder || { path: "/data/transcodes", isDefault: true } };
+          }
+          if (command === "transcode_tracks") {
+            const { trackIds = [], format } = payload?.request || {};
+            const converted = { ...tracks.find((t) => t.id === trackIds[0]) };
+            converted.transcodes = [{
+              format, label: format.toUpperCase(), filePath: `/data/transcodes/x.${format}`,
+              sizeBytes: 30 * 1024 * 1024, outdated: false,
+            }];
+            Object.assign(tracks.find((t) => t.id === trackIds[0]), converted);
+            return {
+              ok: true,
+              data: {
+                jobId: "j1", transcoded: 1, skipped: trackIds.length - 1, failed: 0, cancelled: false,
+                messages: trackIds.slice(1).map(() => "two.mp3: not a lossless file"),
+                tracks: [converted],
+              },
+            };
+          }
+          if (command === "remove_track_transcodes") {
+            const ids = payload?.request?.trackIds || [];
+            const cleared = tracks.filter((t) => ids.includes(t.id)).map((t) => Object.assign(t, { transcodes: [] }));
+            return { ok: true, data: { removed: 1, tracks: cleared } };
+          }
           if (command === "analyze_new_tracks") {
             const ids = payload?.request?.trackIds || [];
             return { ok: true, data: { analyzed: ids.length, failed: 0, incomplete: 0, warnings: [], items: [] } };
@@ -561,6 +594,67 @@ test("the selection bar is always there; its actions wait for a selection, and R
   await bar.locator('[data-selection-action="clear"]').click();
   await expect(bar.locator(".selection-count")).toHaveText("0 selected");
   await expect(page.locator("#libraryTableBody .td-select input:checked")).toHaveCount(0);
+});
+
+test("Convert… makes transcodes of the selection, shown under the format; Remove deletes them", async ({ page }) => {
+  await installSelectionMock(page);
+  await page.goto("/");
+  await expect(page.locator("#libraryTableBody .track-grid-row")).toHaveCount(3);
+  const bar = page.locator(libraryBar);
+  await expect(bar.locator('[data-selection-action="convert"]')).toBeDisabled();
+
+  await tickRows(page, "libraryTableBody", 2);
+  await bar.locator('[data-selection-action="convert"]').click();
+  await expect(page.locator("#convertOverlay")).toBeVisible();
+  await expect(page.locator("#convertTitle")).toHaveText("Convert 2 tracks");
+  await expect(page.locator("#convertFolderText")).toHaveText("/data/transcodes");
+  await page.locator("#convertFormatGroup input[value='aiff']").check();
+  await page.locator("#convertApplyBtn").click();
+  await expect(page.locator("#convertOverlay")).toBeHidden();
+  await expect.poll(async () => (await page.evaluate(() => window.__calls))
+    .find((c) => c.command === "transcode_tracks")?.request)
+    .toEqual({ trackIds: ["t1", "t2"], format: "aiff" });
+  await expect(page.locator("#statusText")).toContainText("Converting done: 1 track converted, 1 skipped");
+
+  // The transcode is a smaller line under the format badge, not a new row.
+  const first = page.locator("#libraryTableBody .track-grid-row").first();
+  await expect(page.locator("#libraryTableBody .track-grid-row")).toHaveCount(3);
+  const line = first.locator(".td-format .format-transcode");
+  await expect(line).toHaveText("AIFF");
+  await expect(line).toHaveAttribute("data-tooltip", "AIFF transcode · 30 MB");
+  await expect(line).not.toHaveClass(/outdated/);
+
+  // The selection stays; Cancel changes nothing.
+  await expect(bar.locator(".selection-count")).toHaveText("2 selected");
+  await bar.locator('[data-selection-action="convert"]').click();
+  await page.locator("#convertCancelBtn").click();
+  await expect(page.locator("#convertOverlay")).toBeHidden();
+  expect((await page.evaluate(() => window.__calls)).filter((c) => c.command === "transcode_tracks")).toHaveLength(1);
+
+  await bar.locator('[data-selection-action="convert"]').click();
+  await page.locator("#convertRemoveBtn").click();
+  await expect.poll(async () => (await page.evaluate(() => window.__calls))
+    .find((c) => c.command === "remove_track_transcodes")?.request)
+    .toEqual({ trackIds: ["t1", "t2"] });
+  await expect(first.locator(".format-transcode")).toHaveCount(0);
+});
+
+test("Settings shows the transcode folder; Change picks one and Use default goes back", async ({ page }) => {
+  await installSelectionMock(page);
+  await page.goto("/");
+  await page.locator("#settingsBtn").click();
+  await expect(page.locator("#transcodeFolderText")).toHaveText("/data/transcodes (default)");
+  await expect(page.locator("#transcodeFolderResetBtn")).toBeHidden();
+
+  await page.locator("#transcodeFolderChangeBtn").click();
+  await expect(page.locator("#transcodeFolderText")).toHaveText("/converted");
+  await expect.poll(async () => (await page.evaluate(() => window.__calls))
+    .find((c) => c.command === "set_transcode_folder")?.request)
+    .toEqual({ path: "/converted" });
+
+  await page.locator("#transcodeFolderResetBtn").click();
+  await expect(page.locator("#transcodeFolderText")).toHaveText("/data/transcodes (default)");
+  await expect(page.locator("#transcodeFolderResetBtn")).toBeHidden();
 });
 
 test("the playlist view selects tracks and removes them from the playlist only", async ({ page }) => {

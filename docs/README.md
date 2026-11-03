@@ -20,6 +20,7 @@ This is the documentation set for DJ USB Tkit.
 - `docs/EXTERNAL_LIBRARIES.md` - importing tracks and playlists from rekordbox and Mixxx
 - `docs/PLAYLISTS_PLAYBACK.md` - playlist workflows and native playback behavior
 - `docs/CUE_EDITOR.md` - cue points, beat grid, playback start, keyboard shortcuts, metronome
+- `docs/TRANSCODES.md` - Convert…: AIFF, WAV and MP3 files of library tracks for players that can't read FLAC or ALAC
 - `docs/USB_PREPARE.md` - partitioning and formatting a USB drive on Linux, macOS, and Windows
 - `docs/USB_CONNECT.md` - selecting a USB, what connecting does, and what changes while one is connected
 - `docs/USB_IMPORT.md` - USB read/merge behavior and hydration model

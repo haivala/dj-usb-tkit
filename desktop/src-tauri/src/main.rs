@@ -109,6 +109,29 @@ async fn pick_source_folders(app: tauri::AppHandle) -> Result<Vec<String>, Strin
     Ok(paths)
 }
 
+/// The Settings drawer's "Change" for the transcode folder.
+#[tauri::command]
+async fn pick_transcode_folder(app: tauri::AppHandle) -> Result<Option<String>, String> {
+    let (tx, rx) = mpsc::channel::<Option<FilePath>>();
+
+    app.dialog()
+        .file()
+        .set_title("Select the folder for transcodes")
+        .pick_folder(move |folder| {
+            let _ = tx.send(folder);
+        });
+
+    let selected = tauri::async_runtime::spawn_blocking(move || rx.recv())
+        .await
+        .map_err(|err| format!("dialog task failed: {err}"))?
+        .map_err(|err| format!("dialog response failed: {err}"))?;
+
+    Ok(selected.map(|path| match path {
+        FilePath::Path(path_buf) => path_buf.to_string_lossy().to_string(),
+        FilePath::Url(url) => url.to_string(),
+    }))
+}
+
 #[tauri::command]
 async fn pick_usb_folder(app: tauri::AppHandle) -> Result<Option<String>, String> {
     let (tx, rx) = mpsc::channel::<Option<FilePath>>();
@@ -907,6 +930,12 @@ fn main() {
             backend::tauri_commands::analyze_new_tracks,
             backend::tauri_commands::set_analysis_paused,
             backend::tauri_commands::cancel_analysis,
+            backend::tauri_commands::transcode_tracks,
+            backend::tauri_commands::cancel_transcode,
+            backend::tauri_commands::remove_track_transcodes,
+            backend::tauri_commands::get_transcode_folder,
+            backend::tauri_commands::set_transcode_folder,
+            pick_transcode_folder,
             backend::tauri_commands::export_to_usb,
             backend::tauri_commands::run_usb_diagnostics,
             backend::tauri_commands::run_usb_parity_report,

@@ -6,7 +6,7 @@ use rusqlite::{Connection, OptionalExtension};
 
 use crate::error::{BackendError, BackendResult};
 
-const CURRENT_SCHEMA_VERSION: i64 = 4;
+const CURRENT_SCHEMA_VERSION: i64 = 5;
 
 #[derive(Debug, Clone)]
 pub struct Db {
@@ -171,6 +171,26 @@ impl Db {
               created_at TEXT NOT NULL,
               FOREIGN KEY(usb_device_id) REFERENCES usb_devices(id) ON DELETE CASCADE,
               FOREIGN KEY(playlist_id) REFERENCES playlists(id) ON DELETE SET NULL
+            );
+
+            -- Extra files of a track in another format (service::transcode).
+            -- No foreign key: when a track row goes away, the transcode's
+            -- file must be deleted too, so `sweep_orphan_transcodes` finds
+            -- these rows, removes the files, then the rows.
+            CREATE TABLE IF NOT EXISTS track_transcodes (
+              track_id TEXT NOT NULL,
+              format TEXT NOT NULL,
+              file_path TEXT NOT NULL,
+              file_size_bytes INTEGER NOT NULL,
+              sample_rate_hz INTEGER,
+              bit_depth INTEGER,
+              bitrate_kbps INTEGER,
+              duration_ms INTEGER,
+              offset_ms REAL NOT NULL DEFAULT 0,
+              source_size_bytes INTEGER,
+              source_modified_at INTEGER,
+              created_at TEXT NOT NULL,
+              PRIMARY KEY (track_id, format)
             );
 
             CREATE TABLE IF NOT EXISTS app_settings (
