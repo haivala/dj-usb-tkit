@@ -861,9 +861,7 @@
       <p class="muted">Makes another file of each selected lossless track, for players that can't read FLAC or ALAC. It is still the same track: no new library row, and cues and edits stay on the track.</p>
       <fieldset class="usb-cfg-radio-group" id="convertFormatGroup">
         <legend class="muted">Format</legend>
-        <label class="usb-cfg-toggle-row"><input type="radio" name="convertFormat" value="mp3" checked /> MP3 320 kbps</label>
-        <label class="usb-cfg-toggle-row"><input type="radio" name="convertFormat" value="aiff" /> AIFF (lossless)</label>
-        <label class="usb-cfg-toggle-row"><input type="radio" name="convertFormat" value="wav" /> WAV (lossless)</label>
+        <!-- One tplConvertFormatChoice per format, from get_transcode_formats -->
       </fieldset>
       <p class="muted convert-folder-hint">Saved in <span id="convertFolderText"></span> (change it in Settings).</p>
       <div class="row confirm-actions">
@@ -955,6 +953,10 @@
       <div role="cell" class="track-grid-cell td-format"><span class="format-badge"></span></div>
       <div role="cell" class="track-grid-cell td-action"><div class="action-buttons"><button class="track-add-btn"></button><button data-action="analyze-track"></button></div></div>
     </div>
+  </template>
+  <!-- Convert… dialog: one format choice -->
+  <template id="tplConvertFormatChoice">
+    <label class="usb-cfg-toggle-row"><input type="radio" name="convertFormat" /> <span></span></label>
   </template>
   <!-- FMT cell: one per transcode of the track, under the format badge -->
   <template id="tplFormatTranscode">

@@ -23,9 +23,10 @@ use crate::audio_format::AudioFormat;
 use crate::error::{BackendError, BackendResult};
 use crate::models::{
     MaterializeSourceTrackRequest, RemoveTrackTranscodesData, RemoveTrackTranscodesRequest,
-    SetTranscodeFolderRequest, Track, TrackTranscode, TranscodeFolderData, TranscodeTracksData,
-    TranscodeTracksRequest,
+    SetTranscodeFolderRequest, Track, TrackTranscode, TranscodeFolderData, TranscodeFormatChoice,
+    TranscodeFormatsData, TranscodeTracksData, TranscodeTracksRequest,
 };
+use crate::utils::counted;
 
 pub(crate) const SETTING_TRANSCODE_DIR: &str = "transcode_dir_v1";
 const DEFAULT_DIR_NAME: &str = "transcodes";
@@ -176,6 +177,26 @@ impl BackendService {
         )
     }
 
+    /// The formats Convert… offers: MP3 first and picked, as most players
+    /// that can't read FLAC read MP3, then the lossless ones.
+    pub fn transcode_formats(&self) -> TranscodeFormatsData {
+        let order = [
+            TranscodeFormat::Mp3,
+            TranscodeFormat::Aiff,
+            TranscodeFormat::Wav,
+        ];
+        TranscodeFormatsData {
+            formats: order
+                .into_iter()
+                .map(|format| TranscodeFormatChoice {
+                    format: format.as_str().to_string(),
+                    label: format.choice_label().to_string(),
+                    is_default: format == TranscodeFormat::Mp3,
+                })
+                .collect(),
+        }
+    }
+
     pub fn transcode_folder(&self) -> BackendResult<TranscodeFolderData> {
         let conn = self.db.connect()?;
         let (path, is_default) = self.transcode_dir(&conn)?;
@@ -300,6 +321,7 @@ impl BackendService {
         let total = jobs.len();
         if total == 0 {
             data.tracks = track_rows(&*self.db.connect()?, &track_ids)?;
+            data.summary = convert_summary(&data);
             return Ok(data);
         }
         let cancel = Arc::clone(&self.transcode_cancelled);
@@ -336,6 +358,7 @@ impl BackendService {
         })?;
         data.cancelled |= self.transcode_cancelled.load(Ordering::SeqCst);
         data.tracks = track_rows(&*self.db.connect()?, &track_ids)?;
+        data.summary = convert_summary(&data);
         Ok(data)
     }
 
@@ -508,7 +531,42 @@ impl BackendService {
         Ok(RemoveTrackTranscodesData {
             removed,
             tracks: track_rows(&conn, &req.track_ids)?,
+            summary: format!("Removed {}", counted(removed, "transcode", "transcodes")),
         })
+    }
+}
+
+/// Convert…'s line for the status bar.
+fn convert_summary(data: &TranscodeTracksData) -> String {
+    let mut parts = vec![format!(
+        "{} converted",
+        counted(data.transcoded, "track", "tracks")
+    )];
+    if data.skipped > 0 {
+        parts.push(format!("{} skipped", data.skipped));
+    }
+    if data.failed > 0 {
+        parts.push(format!("{} failed", data.failed));
+    }
+    let what = if data.cancelled {
+        "Converting cancelled"
+    } else {
+        "Converting done"
+    };
+    format!("{what}: {}", parts.join(", "))
+}
+
+/// A file size as the track tables show sizes (`"9 MB"`, `"1.2 GB"`).
+pub(crate) fn size_text(bytes: i64) -> String {
+    let bytes = bytes.max(0) as f64;
+    const MB: f64 = 1024.0 * 1024.0;
+    const GB: f64 = MB * 1024.0;
+    if bytes >= GB {
+        format!("{:.1} GB", bytes / GB)
+    } else if bytes >= MB {
+        format!("{:.0} MB", bytes / MB)
+    } else {
+        format!("{:.0} KB", bytes / 1024.0)
     }
 }
 
@@ -844,12 +902,23 @@ pub(crate) fn fill_track_transcodes(
                 let parsed = TranscodeFormat::parse(&format)?;
                 let outdated = source_size.is_some()
                     && (source_size != stored_size || source_modified_at != stored_modified);
+                let about = format!("{} transcode · {}", parsed.label(), size_text(size));
                 Some(TrackTranscode {
                     format: parsed.as_str().to_string(),
                     label: parsed.label().to_string(),
                     file_path: path,
                     size_bytes: size,
                     outdated,
+                    exported: false,
+                    badge: parsed.as_str().to_ascii_uppercase(),
+                    tooltip: if outdated {
+                        format!(
+                            "{about} — out of date: the source file changed since. Convert again \
+                             to update it"
+                        )
+                    } else {
+                        about
+                    },
                 })
             })
             .collect();
@@ -866,6 +935,32 @@ mod tests {
         PathBuf::from(env!("CARGO_MANIFEST_DIR"))
             .join("tests/fixtures/audio")
             .join(name)
+    }
+
+    #[test]
+    fn convert_offers_every_format_it_makes_with_mp3_picked() {
+        let dir = tempfile::tempdir().unwrap();
+        let service = BackendService::new(dir.path()).unwrap();
+        let formats = service.transcode_formats().formats;
+        let shown: Vec<(&str, &str, bool)> = formats
+            .iter()
+            .map(|f| (f.format.as_str(), f.label.as_str(), f.is_default))
+            .collect();
+        assert_eq!(
+            shown,
+            [
+                ("mp3", "MP3 320 kbps", true),
+                ("aiff", "AIFF (lossless)", false),
+                ("wav", "WAV (lossless)", false),
+            ]
+        );
+        // Every format it makes, each one `transcode_tracks` takes.
+        assert_eq!(formats.len(), TranscodeFormat::ALL.len());
+        assert!(
+            formats
+                .iter()
+                .all(|f| TranscodeFormat::parse(&f.format).is_some())
+        );
     }
 
     #[test]
@@ -970,6 +1065,7 @@ mod tests {
 
         let data = convert(&s.service, std::slice::from_ref(&id), "mp3");
         assert_eq!((data.transcoded, data.skipped, data.failed), (1, 0, 0));
+        assert_eq!(data.summary, "Converting done: 1 track converted");
         let expected = s.out.join("Crate A/set.mp3");
         assert!(expected.is_file(), "no file at {}", expected.display());
 
@@ -979,6 +1075,13 @@ mod tests {
         assert_eq!(transcodes[0].label, "MP3 320");
         assert_eq!(transcodes[0].file_path, expected.to_string_lossy());
         assert!(!transcodes[0].outdated);
+        assert_eq!(transcodes[0].badge, "MP3");
+        assert!(
+            transcodes[0].tooltip.starts_with("MP3 320 transcode · ")
+                && transcodes[0].tooltip.ends_with(" KB"),
+            "{}",
+            transcodes[0].tooltip
+        );
 
         // Not a library track: a scan doesn't index it.
         scan(&s.service);
@@ -1088,6 +1191,7 @@ mod tests {
             })
             .expect("remove");
         assert_eq!(removed.removed, 2);
+        assert_eq!(removed.summary, "Removed 2 transcodes");
         assert!(!s.out.join("set.wav").exists());
         assert!(!s.out.join("set.mp3").exists());
         assert!(track(&s.service, &id).transcodes.is_empty());

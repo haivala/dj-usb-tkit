@@ -229,16 +229,20 @@ drive selection from being rendered against a newer selected drive.
   order, with playlists never reordered newest first
 - `delete_playlist`
 - `list_playlists`
-- `get_playlist_tracks`
+- `get_playlist_tracks` — with `usbRoot` (the selected USB), each track also carries
+  `exportFile` when export puts something other than its own file on that USB:
+  `{ kind: "transcode" | "convert" | "refused", badge, tooltip }`, the FMT badge's text and
+  tooltip (naming the track's own file as the source); the transcode that goes has `exported`
+  set. See `docs/TRANSCODES.md`
 - `get_playlist_export_space` — `{ playlistId, usbRoot }` → `exportSpace`: how many tracks and
   bytes an export of the playlist would still copy to the USB, its free space, and whether it
   fits. Worked out from recorded data only (audio sizes from the app DB, what is already on the
   USB from the staged PDB and eDB, see "Tracks already on the USB" in `docs/USB_EXPORT.md`), so
   no audio file is read. Sizes are those of the files export would copy: a transcode's own, or
-  an estimate for one export still has to make. Also `convertTracks` (tracks export converts
-  first, see `docs/TRANSCODES.md`), `convertFormat` (the format's label when they all share
-  one, else `null`), `refusedTracks` (lossy tracks in a format the USB's Player formats don't
-  allow: the export is refused) and `refusedFormat` (likewise). `null` when it can't be made. The frontend asks
+  an estimate for one export still has to make. Also `formatNotice`, the title row's line about
+  the tracks export converts first or refuses (lossy, in a format the USB's Player formats
+  don't allow; see `docs/TRANSCODES.md`), or `null`, and `formatNoticeBlocks` (a track is
+  refused, so the export is blocked). `null` when it can't be made. The frontend asks
   for it after the track list is shown, so it never holds the list up
 - `add_library_selection_to_playlist`
 - `add_track_candidates_to_playlist`
@@ -262,10 +266,12 @@ drive selection from being rendered against a newer selected drive.
 - `prune_usb_device`
 - `get_usb_device_name`
 - `set_usb_device_name`
-- `get_usb_formats` — `{ usbRoot }` → `{ formats: [{ format, label, allowed }], writable }`:
-  the USB's Player formats (`flac`, `alac`, `aiff`, `wav`, `mp3`, `aac`) in its order of
-  preference, from the stick's `.dj-usb-tkit/drive.json`. A stick without the setting gets all
-  six ticked.
+- `get_usb_formats` — `{ usbRoot }` →
+  `{ formats: [{ format, label, allowed, locked, tooltip }], writable, hint }`: the USB's Player
+  formats (`flac`, `alac`, `aiff`, `wav`, `mp3`, `aac`) in its order of preference, from the
+  stick's `.dj-usb-tkit/drive.json`. A stick without the setting gets all six ticked. `locked`:
+  the box can't change (the last ticked one, with `tooltip` saying so, or a read-only stick);
+  `hint` is the row's line.
 - `set_usb_formats` — `{ usbRoot, formats: [{ format, allowed }] }` → the same shape. The list
   must hold every format once with at least one allowed; a read-only stick is refused.
 - `list_usb_backups`
@@ -398,12 +404,16 @@ When `repair_usb_diagnostics` is called with `apply: true`, the response may inc
 - `set_analysis_paused`
 - `cancel_analysis`
 - `transcode_tracks` — `{ trackIds, format }` (`"aiff"`, `"wav"` or `"mp3"`) →
-  `{ transcoded, skipped, failed, cancelled, messages, tracks }`. A job
+  `{ transcoded, skipped, failed, cancelled, messages, tracks, summary }` (`summary`: the
+  status bar's line). A job
   (`jobType: "transcode"`, one `job.progress` per finished track). The backend
   picks which tracks need a transcode; `messages` has one line per skipped or
   failed track, `tracks` the selected tracks' rows. See `docs/TRANSCODES.md`.
 - `cancel_transcode` — stops the running transcode job; finished files stay.
-- `remove_track_transcodes` — `{ trackIds }` → `{ removed, tracks }`.
+- `remove_track_transcodes` — `{ trackIds }` → `{ removed, tracks, summary }`.
+- `get_transcode_formats` — `{ formats: [{ format, label, isDefault }] }`: the Convert…
+  dialog's choices in its order (`"mp3"` / "MP3 320 kbps" first and picked, then AIFF and WAV),
+  every format `transcode_tracks` takes.
 - `get_transcode_folder` / `set_transcode_folder` — `{ path? }` (none goes back
   to the default) → `{ path, isDefault }`. A folder inside a source folder is
   refused.

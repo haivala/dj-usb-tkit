@@ -647,6 +647,10 @@ impl BackendCommands {
         wrap(self.service.remove_track_transcodes(req))
     }
 
+    pub fn get_transcode_formats(&self) -> ApiResponse<crate::models::TranscodeFormatsData> {
+        wrap(Ok(self.service.transcode_formats()))
+    }
+
     pub fn get_transcode_folder(&self) -> ApiResponse<crate::models::TranscodeFolderData> {
         wrap(self.service.transcode_folder())
     }

@@ -907,7 +907,7 @@ fn test_service() -> (tempfile::TempDir, BackendService) {
     (dir, service)
 }
 
-fn sample_track(id: &str, file_path: &str) -> Track {
+pub(super) fn sample_track(id: &str, file_path: &str) -> Track {
     Track {
         id: id.to_string(),
         title: "Title".to_string(),
@@ -943,6 +943,7 @@ fn sample_track(id: &str, file_path: &str) -> Track {
         analysis_ready: false,
         format_compat: Default::default(),
         transcodes: Vec::new(),
+        export_file: None,
     }
 }
 

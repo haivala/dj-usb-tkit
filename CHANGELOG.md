@@ -54,8 +54,9 @@
   the playlist too: its transcode is added next to it as a USB track of its own. Cues and the
   beat grid move with an MP3's later start, and cues edited on such a USB track come back to the
   library track in step. The USB's playlist and history
-  tracks in an unticked format get a warning in the FMT column, and an app playlist's title row
-  says how many tracks the export will convert or refuse.
+  tracks in an unticked format get a warning in the FMT column. In an app playlist, the FMT column
+  shows the format each track goes on the selected USB in, with its own file as the source in
+  the tooltip, and the title row says how many tracks the export will convert or refuse.
 - **Fix:** ALAC tracks (`.m4a`) are exported with the ALAC file type in the PDB and the eDB, as
   rekordbox writes them, instead of the one for AAC. Exporting again corrects tracks already on a
   USB.

@@ -4,8 +4,10 @@
 // (`track.transcodes`); this module only asks and shows.
 
 import { counted } from "../../track_utils.mjs";
+import { cloneTemplate } from "../../ui_utils.mjs";
 
-// The Convert… dialog. `open({ count, folder })` resolves with
+// The Convert… dialog. `open({ count, folder, formats })` (the backend's
+// get_transcode_formats choices) resolves with
 // `{ action: "convert", format }`, `{ action: "remove" }`, or null on cancel.
 export function createConvertDialogController(el, document) {
   let resolveFn = null;
@@ -19,7 +21,7 @@ export function createConvertDialogController(el, document) {
   }
 
   function chosenFormat() {
-    return el.convertFormatGroup.querySelector("input[name='convertFormat']:checked")?.value || "mp3";
+    return el.convertFormatGroup.querySelector("input[name='convertFormat']:checked")?.value || "";
   }
 
   el.convertApplyBtn.addEventListener("click", () => close({ action: "convert", format: chosenFormat() }));
@@ -37,10 +39,19 @@ export function createConvertDialogController(el, document) {
   return {
     isOpen: () => !!resolveFn,
     close,
-    open({ count = 0, folder = "" }) {
+    open({ count = 0, folder = "", formats = [] }) {
       if (resolveFn) close(null);
       el.convertTitle.textContent = `Convert ${counted(count, "track")}`;
       el.convertFolderText.textContent = folder;
+      el.convertFormatGroup.querySelectorAll("label").forEach((row) => row.remove());
+      for (const choice of formats) {
+        const row = cloneTemplate(document, "tplConvertFormatChoice");
+        const input = row.querySelector("input");
+        input.value = choice.format;
+        input.checked = !!choice.isDefault;
+        row.querySelector("span").textContent = choice.label;
+        el.convertFormatGroup.appendChild(row);
+      }
       el.convertOverlay.hidden = false;
       el.convertApplyBtn.focus();
       return new Promise((resolve) => {
@@ -65,19 +76,29 @@ function showTracks(ctx, ids, tracks) {
 export async function convertTrackSelection(ctx, ids) {
   const trackIds = (ids || []).filter(Boolean);
   if (!trackIds.length) return;
-  const folder = await ctx.command("get_transcode_folder");
-  const choice = await ctx.convertDialog.open({ count: trackIds.length, folder: folder?.path || "" });
+  const [folder, offered] = await Promise.all([
+    ctx.command("get_transcode_folder"),
+    ctx.command("get_transcode_formats"),
+  ]);
+  const choice = await ctx.convertDialog.open({
+    count: trackIds.length,
+    folder: folder?.path || "",
+    formats: offered?.formats || [],
+  });
   if (!choice) return;
 
   if (choice.action === "remove") {
     const result = await ctx.command("remove_track_transcodes", { trackIds });
     showTracks(ctx, trackIds, result.tracks);
-    ctx.emitStatus(`Removed ${counted(result.removed, "transcode")}`);
+    // What export puts on the USB may have changed.
+    ctx.reloadPlaylistForUsb?.();
+    ctx.emitStatus(result.summary);
     return;
   }
 
   const result = await ctx.command("transcode_tracks", { trackIds, format: choice.format });
   showTracks(ctx, trackIds, result.tracks);
+  ctx.reloadPlaylistForUsb?.();
   for (const message of result.messages || []) {
     ctx.pushEventLog({
       level: "info",
@@ -86,8 +107,5 @@ export async function convertTrackSelection(ctx, ids) {
       message,
     });
   }
-  const parts = [`${counted(result.transcoded, "track")} converted`];
-  if (result.skipped) parts.push(`${result.skipped} skipped`);
-  if (result.failed) parts.push(`${result.failed} failed`);
-  ctx.emitStatus(`${result.cancelled ? "Converting cancelled" : "Converting done"}: ${parts.join(", ")}`);
+  ctx.emitStatus(result.summary);
 }

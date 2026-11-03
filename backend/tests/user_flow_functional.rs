@@ -1770,6 +1770,22 @@ fn re_export_as_a_transcode_keeps_the_tracks_old_file_on_the_stick() {
     let (backend, _data_dir, usb, _track_id, playlist_id) =
         export_one_track_with_cues_to(root.path(), Vec::new(), &[]);
     let usb_text = usb.to_string_lossy().to_string();
+    // What the app playlist's FMT column shows for the stick.
+    let export_file = || {
+        let items = backend
+            .get_playlist_tracks(GetPlaylistTracksRequest {
+                playlist_id: playlist_id.clone(),
+                usb_root: Some(usb_text.clone()),
+                ..Default::default()
+            })
+            .data
+            .expect("playlist tracks")
+            .items;
+        assert_eq!(items.len(), 1);
+        items.into_iter().next().unwrap()
+    };
+    // Every format ticked: the WAV goes as itself.
+    assert_eq!(export_file().export_file, None);
 
     let mut formats = backend
         .get_usb_formats(GetUsbFormatsRequest {
@@ -1786,9 +1802,19 @@ fn re_export_as_a_transcode_keeps_the_tracks_old_file_on_the_stick() {
         formats,
     });
     assert!(set.ok, "set formats failed: {set:?}");
+    let convert = export_file().export_file.expect("goes as an MP3");
+    assert_eq!(convert.kind, "convert");
+    assert_eq!(convert.badge, "MP3");
+    assert!(
+        convert
+            .tooltip
+            .starts_with("Converted to MP3 320 on export — source: WAV · "),
+        "{}",
+        convert.tooltip
+    );
     let export = backend.export_to_usb(ExportToUsbRequest {
-        usb_root: Some(usb_text),
-        playlist_id,
+        usb_root: Some(usb_text.clone()),
+        playlist_id: playlist_id.clone(),
         options: Some(ExportToUsbOptions {
             include_artwork: false,
             include_analysis: true,
@@ -1797,6 +1823,21 @@ fn re_export_as_a_transcode_keeps_the_tracks_old_file_on_the_stick() {
         }),
     });
     assert!(export.ok, "re-export failed: {export:?}");
+    // The export made the MP3: it goes as that transcode now.
+    let track = export_file();
+    let transcode = track.export_file.expect("goes as its MP3");
+    assert_eq!(transcode.kind, "transcode");
+    assert_eq!(transcode.badge, "MP3");
+    assert!(
+        transcode.tooltip.starts_with("MP3 320 transcode · ")
+            && transcode
+                .tooltip
+                .contains(", exported to this USB — source: WAV · "),
+        "{}",
+        transcode.tooltip
+    );
+    assert_eq!(track.transcodes.len(), 1);
+    assert!(track.transcodes[0].exported);
 
     let mut on_stick: Vec<String> = Vec::new();
     collect_files(&usb.join("Contents"), &mut on_stick);

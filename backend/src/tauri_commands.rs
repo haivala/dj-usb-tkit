@@ -1777,6 +1777,13 @@ pub async fn remove_track_transcodes(
 }
 
 #[tauri::command]
+pub fn get_transcode_formats(
+    state: State<'_, BackendCommands>,
+) -> ApiResponse<crate::models::TranscodeFormatsData> {
+    state.get_transcode_formats()
+}
+
+#[tauri::command]
 pub fn get_transcode_folder(
     state: State<'_, BackendCommands>,
 ) -> ApiResponse<crate::models::TranscodeFolderData> {

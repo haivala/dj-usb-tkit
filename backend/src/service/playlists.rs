@@ -441,6 +441,17 @@ impl BackendService {
         };
         let mut page: Vec<Track> = items.into_iter().skip(start_idx).take(limit + 1).collect();
         let (has_more, next_cursor) = paginate_tracks(&mut page, limit, &signature);
+        if let Some(usb_root) = req
+            .usb_root
+            .as_deref()
+            .filter(|root| !root.trim().is_empty())
+        {
+            super::transcode_export::fill_track_export_files(
+                &conn,
+                &mut page,
+                Path::new(usb_root),
+            )?;
+        }
 
         Ok(GetPlaylistTracksData {
             playlist_id: req.playlist_id,

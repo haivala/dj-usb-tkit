@@ -38,7 +38,11 @@ order of preference. Export picks each track's file by it:
   rekordbox's does). A track exported as its FLAC before and as its MP3 now is on the USB both
   ways: two USB tracks, each with its own masterContentId, both in the playlist.
 - The app playlist's title row says ahead of time what the export will do: "2 tracks will be
-  converted to MP3 on export", or that tracks can't go on the USB.
+  converted to MP3 320 on export", or that tracks can't go on the USB.
+- In the app playlist, the FMT column shows the format each track goes on the selected USB in:
+  its transcode's (MP3, with the FLAC no longer listed under it), or the one export will convert
+  it to (dashed). The tooltip names the track's own file as the source. A track that can't go
+  shows its own format with a warning.
 
 The USB's databases list the transcode's own file: its format, size, bit rate and length.
 

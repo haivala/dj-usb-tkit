@@ -586,6 +586,43 @@ fn format_bytes(bytes: u64) -> String {
     }
 }
 
+/// The playlist heading's line about the USB's Player formats, from the
+/// labels of the formats the export converts tracks to (`convert`) and of
+/// the tracks it refuses (`refused`), one per track; and whether it blocks.
+fn format_notice(convert: &[String], refused: &[String]) -> (Option<String>, bool) {
+    let shared = |labels: &[String]| {
+        labels
+            .first()
+            .filter(|first| labels.iter().all(|label| label == *first))
+            .cloned()
+    };
+    let mut parts = Vec::new();
+    if !convert.is_empty() {
+        let to = shared(convert)
+            .map(|label| format!(" to {label}"))
+            .unwrap_or_default();
+        parts.push(format!(
+            "{} will be converted{to} on export",
+            counted(convert.len(), "track", "tracks")
+        ));
+    }
+    if !refused.is_empty() {
+        let what = match shared(refused) {
+            Some(label) => format!(
+                "{} {label} {}",
+                refused.len(),
+                crate::utils::plural(refused.len(), "track", "tracks")
+            ),
+            None => counted(refused.len(), "track", "tracks"),
+        };
+        parts.push(format!("{what} can't go on this USB; export is blocked"));
+    }
+    (
+        (!parts.is_empty()).then(|| parts.join(" · ")),
+        !refused.is_empty(),
+    )
+}
+
 /// Best-effort free-space preflight. The copy loop writes each track's audio
 /// (and optional artwork/analysis) straight onto the USB filesystem before any
 /// database is written, so a drive that fills mid-loop leaves orphaned partial
@@ -887,21 +924,14 @@ impl BackendService {
         let available_bytes = usb_mount_available_bytes(usb_root);
         let fits = available_bytes
             .is_none_or(|available| export_space_shortfall(estimate.bytes, available).is_none());
-        let shared = |labels: &[String]| {
-            labels
-                .first()
-                .filter(|first| labels.iter().all(|label| label == *first))
-                .cloned()
-        };
+        let (format_notice, format_notice_blocks) = format_notice(&convert, &refused);
         Ok(PlaylistExportSpace {
             bytes_to_copy: estimate.bytes,
             tracks_to_copy: estimate.tracks,
             available_bytes,
             fits,
-            convert_tracks: convert.len(),
-            convert_format: shared(&convert),
-            refused_tracks: refused.len(),
-            refused_format: shared(&refused),
+            format_notice,
+            format_notice_blocks,
         })
     }
 
@@ -2250,6 +2280,7 @@ impl BackendService {
 
 #[cfg(test)]
 mod tests {
+    use super::format_notice;
     use super::{
         BackendService, ContentFingerprint, UsbTrackSizes, compute_playlist_usb_export_status,
         content_fingerprint_key, ensure_playlist_tracks_analysis_ready, estimate_export_new_bytes,
@@ -3323,6 +3354,41 @@ mod tests {
             .expect("a 5 GB estimate cannot fit in 1 GB free");
         assert!(required > available);
         assert_eq!(available, 1_000_000_000);
+    }
+
+    #[test]
+    fn the_format_notice_says_what_export_converts_and_refuses() {
+        let labels = |items: &[&str]| items.iter().map(|s| s.to_string()).collect::<Vec<_>>();
+        assert_eq!(format_notice(&[], &[]), (None, false));
+        assert_eq!(
+            format_notice(&labels(&["MP3 320", "MP3 320"]), &[]),
+            (
+                Some("2 tracks will be converted to MP3 320 on export".to_string()),
+                false
+            )
+        );
+        assert_eq!(
+            format_notice(&labels(&["MP3 320"]), &labels(&["AAC", "AAC", "AAC"])),
+            (
+                Some(
+                    "1 track will be converted to MP3 320 on export · 3 AAC tracks can't go on \
+                     this USB; export is blocked"
+                        .to_string()
+                ),
+                true
+            )
+        );
+        assert_eq!(
+            format_notice(&labels(&["AIFF", "WAV"]), &labels(&["AAC", "MP3"])),
+            (
+                Some(
+                    "2 tracks will be converted on export · 2 tracks can't go on this USB; \
+                     export is blocked"
+                        .to_string()
+                ),
+                true
+            )
+        );
     }
 
     #[test]

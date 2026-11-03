@@ -417,15 +417,27 @@ function installTauriMock(page, mode) {
               }
             };
           }
+          // As the backend sends them: the last ticked box locked, the hint.
+          const formatsData = () => {
+            const ticked = usbFormats.filter((item) => item.allowed).length;
+            return {
+              formats: usbFormats.map((item) => {
+                const last = item.allowed && ticked === 1;
+                return { ...item, locked: last, tooltip: last ? "At least one format stays ticked" : null };
+              }),
+              writable: true,
+              hint: "The formats export puts on this USB · drag to set the order of preference",
+            };
+          };
           if (command === "get_usb_formats") {
-            return { ok: true, data: { formats: usbFormats, writable: true } };
+            return { ok: true, data: formatsData() };
           }
           if (command === "set_usb_formats") {
             const sent = payload?.request?.formats || [];
             window.__usbFormatCalls.push(sent);
             const labels = new Map(usbFormats.map((item) => [item.format, item.label]));
-            usbFormats = sent.map((item) => ({ ...item, label: labels.get(item.format) }));
-            return { ok: true, data: { formats: usbFormats, writable: true } };
+            usbFormats = sent.map(({ format, allowed }) => ({ format, allowed, label: labels.get(format) }));
+            return { ok: true, data: formatsData() };
           }
           if (command === "reorder_usb_playlists") {
             const orderedIds = Array.isArray(payload?.request?.orderedPlaylistIds)

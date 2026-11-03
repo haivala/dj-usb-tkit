@@ -22,11 +22,12 @@ use crate::audio_encode::TranscodeFormat;
 use crate::audio_format::{PlayerFormat, format_ext_from_path, track_rekordbox_file_type};
 use crate::edb::ExportTrackData;
 use crate::error::BackendResult;
+use crate::models::{Track, TrackExportFile};
 
 use super::anlz::{atomic_write_bytes, transcode_bundle_file};
 use super::transcode::{
-    file_facts, transcode_bundle_dir, transcode_export_bundle, transcode_waveform_bundle,
-    write_transcode_waveform_bundle,
+    file_facts, size_text, transcode_bundle_dir, transcode_export_bundle,
+    transcode_waveform_bundle, write_transcode_waveform_bundle,
 };
 use super::usb_formats::library_player_format;
 use super::usb_identity::DriveFormats;
@@ -271,6 +272,97 @@ fn choose_export_file(
     ticked()
         .find_map(transcode_format_of)
         .map_or(ExportFile::Refused(own), ExportFile::Make)
+}
+
+/// What the FMT column shows for `file`; `None` for the track's own file.
+fn track_export_file(track: &Track, file: &ExportFile) -> Option<TrackExportFile> {
+    let source = format!("source: {}", track_format_text(track));
+    let (kind, badge, tooltip) = match file {
+        ExportFile::Source => return None,
+        ExportFile::Transcode(file) => (
+            "transcode",
+            file.format.as_str().to_ascii_uppercase(),
+            format!(
+                "{} transcode · {}, exported to this USB — {source}",
+                file.format.label(),
+                size_text(file.file_size_bytes)
+            ),
+        ),
+        ExportFile::Make(format) => (
+            "convert",
+            format.as_str().to_ascii_uppercase(),
+            format!("Converted to {} on export — {source}", format.label()),
+        ),
+        ExportFile::Refused(format) => (
+            "refused",
+            format.label().to_string(),
+            format!(
+                "{} — {} can't go on this USB: only lossless files can be converted",
+                track_format_text(track),
+                format.label()
+            ),
+        ),
+    };
+    Some(TrackExportFile {
+        kind: kind.to_string(),
+        badge,
+        tooltip,
+    })
+}
+
+/// A track's own file as the FMT column describes it: `"FLAC · 44.1 kHz ·
+/// 16-bit"`, `"MP3 · 44.1 kHz · 320 kbps"`.
+fn track_format_text(track: &Track) -> String {
+    let format = track
+        .format_ext
+        .as_deref()
+        .filter(|ext| !ext.is_empty())
+        .map_or_else(|| "Unknown".to_string(), str::to_ascii_uppercase);
+    let mut parts = vec![format];
+    if let Some(rate) = track.sample_rate_hz.filter(|&rate| rate > 0) {
+        let khz = f64::from(rate) / 1000.0;
+        parts.push(if khz.fract() == 0.0 {
+            format!("{khz:.0} kHz")
+        } else {
+            format!("{khz:.1} kHz")
+        });
+    }
+    if let Some(depth) = track.bit_depth.filter(|&depth| depth > 0) {
+        parts.push(format!("{depth}-bit"));
+    } else if let Some(bitrate) = track.bitrate_kbps.filter(|&rate| rate > 0) {
+        parts.push(format!("{bitrate} kbps"));
+    }
+    parts.join(" · ")
+}
+
+/// Sets each of `tracks`' `export_file` for the USB at `usb_root`, by its
+/// Player formats, from recorded data only (no music file is read), and
+/// marks the transcode that goes as `exported`.
+pub(crate) fn fill_track_export_files(
+    conn: &rusqlite::Connection,
+    tracks: &mut [Track],
+    usb_root: &Path,
+) -> BackendResult<()> {
+    let export_tracks: Vec<ExportTrackData> = tracks
+        .iter()
+        .map(|track| ExportTrackData {
+            id: track.id.clone(),
+            file_path: track.file_path.clone(),
+            bit_depth: track.bit_depth,
+            ..Default::default()
+        })
+        .collect();
+    let formats = super::usb_identity::read_drive_formats(usb_root);
+    let plan = plan_export_files(conn, &export_tracks, &formats, SourceFacts::Recorded)?;
+    for (track, file) in tracks.iter_mut().zip(plan) {
+        if let ExportFile::Transcode(file) = &file {
+            for transcode in &mut track.transcodes {
+                transcode.exported = transcode.file_path == file.file_path;
+            }
+        }
+        track.export_file = track_export_file(track, &file);
+    }
+    Ok(())
 }
 
 /// `track` as its transcode `file`: the file's facts, and its first beat and
@@ -617,6 +709,61 @@ mod tests {
         assert!(ids("mp3", 1235, Some(1000)).is_empty());
         assert!(ids("aiff", 1234, Some(1000)).is_empty());
         assert!(ids("flac", 1234, Some(1000)).is_empty());
+    }
+
+    #[test]
+    fn the_fmt_column_text_names_what_goes_and_the_source() {
+        let mut track = crate::service::tests::sample_track("t", "/m/a.flac");
+        track.format_ext = Some("flac".to_string());
+        track.sample_rate_hz = Some(44_100);
+        track.bit_depth = Some(16);
+        let shown = |track: &Track, file: ExportFile| {
+            track_export_file(track, &file).map(|f| (f.kind, f.badge, f.tooltip))
+        };
+
+        assert_eq!(shown(&track, ExportFile::Source), None);
+        assert_eq!(
+            shown(&track, ExportFile::Make(TranscodeFormat::Mp3)),
+            Some((
+                "convert".to_string(),
+                "MP3".to_string(),
+                "Converted to MP3 320 on export — source: FLAC · 44.1 kHz · 16-bit".to_string()
+            ))
+        );
+        let file = TranscodeFile {
+            format: TranscodeFormat::Aiff,
+            file_path: "/t/a.aiff".to_string(),
+            file_size_bytes: 9 * 1024 * 1024,
+            sample_rate_hz: Some(48_000),
+            bit_depth: Some(24),
+            bitrate_kbps: None,
+            duration_ms: None,
+            offset_ms: 0.0,
+        };
+        assert_eq!(
+            shown(&track, ExportFile::Transcode(file)),
+            Some((
+                "transcode".to_string(),
+                "AIFF".to_string(),
+                "AIFF transcode · 9 MB, exported to this USB — source: FLAC · 44.1 kHz · 16-bit"
+                    .to_string()
+            ))
+        );
+
+        track.format_ext = Some("m4a".to_string());
+        track.sample_rate_hz = Some(48_000);
+        track.bit_depth = None;
+        track.bitrate_kbps = Some(256);
+        assert_eq!(
+            shown(&track, ExportFile::Refused(PlayerFormat::Aac)),
+            Some((
+                "refused".to_string(),
+                "AAC".to_string(),
+                "M4A · 48 kHz · 256 kbps — AAC can't go on this USB: only lossless files can be \
+                 converted"
+                    .to_string()
+            ))
+        );
     }
 
     #[test]

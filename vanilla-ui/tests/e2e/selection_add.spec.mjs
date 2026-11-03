@@ -193,6 +193,18 @@ function installSelectionMock(page, mockOpts = {}) {
           }
           // Convert…: the first selected track gets a transcode, the rest are
           // skipped (the backend decides which need one).
+          if (command === "get_transcode_formats") {
+            return {
+              ok: true,
+              data: {
+                formats: [
+                  { format: "mp3", label: "MP3 320 kbps", isDefault: true },
+                  { format: "aiff", label: "AIFF (lossless)", isDefault: false },
+                  { format: "wav", label: "WAV (lossless)", isDefault: false },
+                ],
+              },
+            };
+          }
           if (command === "get_transcode_folder") {
             return { ok: true, data: window.__transcodeFolder || { path: "/data/transcodes", isDefault: true } };
           }
@@ -208,6 +220,7 @@ function installSelectionMock(page, mockOpts = {}) {
             converted.transcodes = [{
               format, label: format.toUpperCase(), filePath: `/data/transcodes/x.${format}`,
               sizeBytes: 30 * 1024 * 1024, outdated: false,
+              badge: format.toUpperCase(), tooltip: `${format.toUpperCase()} transcode · 30 MB`,
             }];
             Object.assign(tracks.find((t) => t.id === trackIds[0]), converted);
             return {
@@ -216,13 +229,14 @@ function installSelectionMock(page, mockOpts = {}) {
                 jobId: "j1", transcoded: 1, skipped: trackIds.length - 1, failed: 0, cancelled: false,
                 messages: trackIds.slice(1).map(() => "two.mp3: not a lossless file"),
                 tracks: [converted],
+                summary: `Converting done: 1 track converted, ${trackIds.length - 1} skipped`,
               },
             };
           }
           if (command === "remove_track_transcodes") {
             const ids = payload?.request?.trackIds || [];
             const cleared = tracks.filter((t) => ids.includes(t.id)).map((t) => Object.assign(t, { transcodes: [] }));
-            return { ok: true, data: { removed: 1, tracks: cleared } };
+            return { ok: true, data: { removed: 1, tracks: cleared, summary: "Removed 1 transcode" } };
           }
           if (command === "analyze_new_tracks") {
             const ids = payload?.request?.trackIds || [];
@@ -608,6 +622,9 @@ test("Convert… makes transcodes of the selection, shown under the format; Remo
   await expect(page.locator("#convertOverlay")).toBeVisible();
   await expect(page.locator("#convertTitle")).toHaveText("Convert 2 tracks");
   await expect(page.locator("#convertFolderText")).toHaveText("/data/transcodes");
+  // The backend's choices, its default picked.
+  await expect(page.locator("#convertFormatGroup label")).toHaveText(["MP3 320 kbps", "AIFF (lossless)", "WAV (lossless)"]);
+  await expect(page.locator("#convertFormatGroup input[value='mp3']")).toBeChecked();
   await page.locator("#convertFormatGroup input[value='aiff']").check();
   await page.locator("#convertApplyBtn").click();
   await expect(page.locator("#convertOverlay")).toBeHidden();
@@ -637,6 +654,7 @@ test("Convert… makes transcodes of the selection, shown under the format; Remo
     .find((c) => c.command === "remove_track_transcodes")?.request)
     .toEqual({ trackIds: ["t1", "t2"] });
   await expect(first.locator(".format-transcode")).toHaveCount(0);
+  await expect(page.locator("#statusText")).toContainText("Removed 1 transcode");
 });
 
 test("Settings shows the transcode folder; Change picks one and Use default goes back", async ({ page }) => {

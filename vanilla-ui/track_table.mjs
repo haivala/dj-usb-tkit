@@ -1,4 +1,4 @@
-import { formatDurationMs, formatBpm, formatByteSize, ANALYZE_TOOLTIP, REANALYZE_TOOLTIP } from "./track_utils.mjs";
+import { formatDurationMs, formatBpm, ANALYZE_TOOLTIP, REANALYZE_TOOLTIP } from "./track_utils.mjs";
 import { cloneTemplate } from "./ui_utils.mjs";
 import { coverUrl, attachCoverFallbackHandlers } from "./components/library/actions.mjs";
 import { isTrackCurrentlyPlaying, moveActiveWaveform, updateTransportButtonsInDom } from "./components/playback/actions.mjs";
@@ -322,36 +322,51 @@ function describeTrackFormat(track) {
 
 // The FMT cell: the format badge (with the backend's compatibility warning),
 // then the track's transcodes. Also redraws a row already shown.
+//
+// Backend-owned `track.exportFile` (an app playlist read for the selected
+// USB): what export puts on that USB when it isn't the track's own file. The
+// badge and its tooltip are then the backend's: the format that goes, and
+// the track's own file as its source.
 export function fillFormatCell(cell, track) {
   const badge = cell?.querySelector(".format-badge");
   if (!badge) return;
-  const formatInfo = describeTrackFormat(track);
-  const tooltip = formatTrackFormatTooltip(formatInfo);
-  if (tooltip) badge.dataset.tooltip = tooltip;
-  else delete badge.dataset.tooltip;
-  badge.textContent = formatInfo.label;
-  badge.classList.remove("autofix", "warn");
-  if (formatInfo.warning) {
-    const autofix = formatInfo.kind === "autofix";
-    badge.classList.add(autofix ? "autofix" : "warn");
-    badge.textContent += autofix ? " ⟳" : " ⚠";
-  }
+  badge.classList.remove("autofix", "warn", "export-convert");
   cell.querySelectorAll(".format-transcode").forEach((line) => line.remove());
+  const exportFile = track?.exportFile || null;
+  if (exportFile) {
+    badge.textContent = exportFile.badge;
+    badge.dataset.tooltip = exportFile.tooltip;
+    badge.classList.toggle("export-convert", exportFile.kind === "convert");
+    if (exportFile.kind === "refused") {
+      badge.classList.add("warn");
+      badge.textContent += " ⚠";
+    }
+  } else {
+    const formatInfo = describeTrackFormat(track);
+    const tooltip = formatTrackFormatTooltip(formatInfo);
+    if (tooltip) badge.dataset.tooltip = tooltip;
+    else delete badge.dataset.tooltip;
+    badge.textContent = formatInfo.label;
+    if (formatInfo.warning) {
+      const autofix = formatInfo.kind === "autofix";
+      badge.classList.add(autofix ? "autofix" : "warn");
+      badge.textContent += autofix ? " ⟳" : " ⚠";
+    }
+  }
   appendTranscodeLines(badge, track);
 }
 
 // Backend-owned `track.transcodes` (the track's other files, made from the
-// library): one small line each under the format badge.
+// library): one small line each under the format badge, except the one
+// export puts on the USB (`exported`), which the badge itself shows.
 function appendTranscodeLines(badge, track) {
   const transcodes = Array.isArray(track?.transcodes) ? track.transcodes : [];
   const doc = badge.ownerDocument;
   for (const transcode of transcodes) {
+    if (transcode.exported) continue;
     const line = cloneTemplate(doc, "tplFormatTranscode");
-    line.textContent = String(transcode.format || "").toUpperCase();
-    const size = formatByteSize(transcode.sizeBytes);
-    line.dataset.tooltip = transcode.outdated
-      ? `${transcode.label} transcode · ${size} — out of date: the source file changed since. Convert again to update it`
-      : `${transcode.label} transcode · ${size}`;
+    line.textContent = transcode.badge;
+    line.dataset.tooltip = transcode.tooltip;
     line.classList.toggle("outdated", !!transcode.outdated);
     badge.after(line);
     badge = line;

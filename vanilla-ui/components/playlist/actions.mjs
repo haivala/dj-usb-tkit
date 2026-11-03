@@ -720,6 +720,14 @@ export function updatePlaylistPanelTitle(ctx, playlist) {
 // playlist request count), and it is kept with the USB it was made for, so a
 // switched stick never shows another stick's numbers. A failed or missing
 // estimate just leaves the line hidden.
+// What export puts on the selected USB changed (another USB, its Player
+// formats, a track's transcodes): the open playlist is read again, so its
+// FMT column and export line follow.
+export function reloadPlaylistForUsb(ctx) {
+  const playlist = getCurrentPlaylist(ctx);
+  if (playlist && ctx.playlistTracksCtl?.scopeId === playlist.id) ctx.playlistTracksCtl.reload();
+}
+
 export function refreshPlaylistExportSpace(ctx) {
   const { state } = ctx;
   const playlist = getCurrentPlaylist(ctx);
@@ -764,28 +772,16 @@ function renderPlaylistExportSpace(ctx, playlist) {
   el.playlistExportSpace.classList.toggle("is-warning", !space.fits);
 }
 
-// What the USB's Player formats mean for this playlist's export, from the
-// backend's counts: "2 tracks will be converted to MP3 on export", and the
-// tracks it refuses (lossy, in a format the USB doesn't allow).
+// What the USB's Player formats mean for this playlist's export: the
+// backend's `formatNotice` ("2 tracks will be converted to MP3 320 on
+// export"), a warning when it blocks the export.
 function renderPlaylistFormatWarning(ctx, space) {
   const { el } = ctx;
   if (!el?.playlistFormatWarning) return;
-  const convert = Number(space?.convertTracks) || 0;
-  const refused = Number(space?.refusedTracks) || 0;
-  const parts = [];
-  if (convert) {
-    const to = space.convertFormat ? ` to ${space.convertFormat}` : "";
-    parts.push(`${counted(convert, "track")} will be converted${to} on export`);
-  }
-  if (refused) {
-    const what = space.refusedFormat
-      ? `${refused} ${space.refusedFormat} ${refused === 1 ? "track" : "tracks"}`
-      : counted(refused, "track");
-    parts.push(`${what} can't go on this USB; export is blocked`);
-  }
-  el.playlistFormatWarning.classList.toggle("hidden", parts.length === 0);
-  el.playlistFormatWarning.classList.toggle("is-warning", refused > 0);
-  el.playlistFormatWarning.textContent = parts.join(" · ");
+  const notice = space?.formatNotice || "";
+  el.playlistFormatWarning.classList.toggle("hidden", !notice);
+  el.playlistFormatWarning.classList.toggle("is-warning", !!space?.formatNoticeBlocks);
+  el.playlistFormatWarning.textContent = notice;
 }
 
 export function populatePlaylistPanel(ctx, playlist) {
@@ -847,6 +843,8 @@ export function createPlaylistTracksController(ctx) {
         sortDir: sortDir || null,
         offset,
         limit,
+        // Each track then says what export puts on this USB (FMT column).
+        usbRoot: ctx.state.usbRootValid ? ctx.state.usbRoot : null,
       }),
     normalize: (track) => ctx.normalizeTrack(track),
     getItems: () => getCurrentPlaylist(ctx)?.tracks || [],

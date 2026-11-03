@@ -935,6 +935,7 @@ fn main() {
             backend::tauri_commands::transcode_tracks,
             backend::tauri_commands::cancel_transcode,
             backend::tauri_commands::remove_track_transcodes,
+            backend::tauri_commands::get_transcode_formats,
             backend::tauri_commands::get_transcode_folder,
             backend::tauri_commands::set_transcode_folder,
             pick_transcode_folder,

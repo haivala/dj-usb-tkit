@@ -2429,6 +2429,13 @@ input[type="checkbox"]:disabled {
   border-color: var(--fmt-autofix-border);
 }
 
+/* An app playlist row's format on the connected USB, still to be made by
+   the export (a transcode it converts first): dashed, as it doesn't exist
+   yet. */
+.format-badge.export-convert {
+  border-style: dashed;
+}
+
 /* A transcode of the track (another file of it, in another format): a
    smaller, muted line under the format badge. Out of date (the source file
    changed since) in the warning colour. */

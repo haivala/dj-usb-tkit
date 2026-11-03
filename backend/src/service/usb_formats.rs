@@ -18,17 +18,34 @@ use super::usb_identity::{DriveFormats, read_drive_formats, write_drive_formats}
 use super::usb_utils::{has_write_access, resolve_usb_root};
 
 fn formats_data(formats: &DriveFormats, writable: bool) -> UsbFormatsData {
+    let ticked = formats
+        .entries()
+        .iter()
+        .filter(|(_, allowed)| *allowed)
+        .count();
     UsbFormatsData {
         formats: formats
             .entries()
             .iter()
-            .map(|&(format, allowed)| UsbFormatSetting {
-                format: format.id().to_string(),
-                label: format.label().to_string(),
-                allowed,
+            .map(|&(format, allowed)| {
+                // At least one stays ticked (`DriveFormats::from_request`).
+                let last_ticked = allowed && ticked == 1;
+                UsbFormatSetting {
+                    format: format.id().to_string(),
+                    label: format.label().to_string(),
+                    allowed,
+                    locked: !writable || last_ticked,
+                    tooltip: last_ticked.then(|| "At least one format stays ticked".to_string()),
+                }
             })
             .collect(),
         writable,
+        hint: if writable {
+            "The formats export puts on this USB · drag to set the order of preference"
+        } else {
+            "USB is read-only"
+        }
+        .to_string(),
     }
 }
 
@@ -151,5 +168,20 @@ mod tests {
         assert_eq!(read.formats[0].format, "mp3");
         assert_eq!(read.formats[0].label, "MP3");
         assert!(read.writable);
+        // MP3 is the only one ticked: its box is locked, and says why.
+        assert!(read.formats[0].locked);
+        assert_eq!(
+            read.formats[0].tooltip.as_deref(),
+            Some("At least one format stays ticked")
+        );
+        assert!(
+            read.formats[1..]
+                .iter()
+                .all(|item| !item.locked && item.tooltip.is_none())
+        );
+        assert_eq!(
+            read.hint,
+            "The formats export puts on this USB · drag to set the order of preference"
+        );
     }
 }

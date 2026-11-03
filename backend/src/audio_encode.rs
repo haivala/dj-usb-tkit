@@ -69,6 +69,15 @@ impl TranscodeFormat {
             Self::Mp3 => "MP3 320",
         }
     }
+
+    /// Its choice in the Convert… dialog.
+    pub fn choice_label(self) -> &'static str {
+        match self {
+            Self::Aiff => "AIFF (lossless)",
+            Self::Wav => "WAV (lossless)",
+            Self::Mp3 => "MP3 320 kbps",
+        }
+    }
 }
 
 /// Tag values written into the transcode.

@@ -173,6 +173,26 @@ pub struct Track {
     /// `track_transcodes` table (see `service::transcode`).
     #[serde(default)]
     pub transcodes: Vec<TrackTranscode>,
+    /// In an app playlist read for a USB (`GetPlaylistTracksRequest::
+    /// usb_root`): what export puts on that USB, when it isn't the track's
+    /// own file (see `service::transcode_export`). The FMT column shows it.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub export_file: Option<TrackExportFile>,
+}
+
+/// What export puts on a USB for a track, when it isn't the track's own
+/// file (see `transcode_export::ExportFile`), as the FMT column shows it.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct TrackExportFile {
+    /// `"transcode"`: one of its transcodes goes. `"convert"`: export makes
+    /// the transcode first. `"refused"`: it can't go (export is blocked).
+    pub kind: String,
+    /// The FMT badge: the format that goes (`"MP3"`); for `"refused"`, the
+    /// track's own.
+    pub badge: String,
+    /// The badge's tooltip, naming the track's own file as the source.
+    pub tooltip: String,
 }
 
 /// One transcode of a track: the same track as another file.
@@ -187,6 +207,15 @@ pub struct TrackTranscode {
     pub size_bytes: i64,
     /// The source file changed after the transcode was made.
     pub outdated: bool,
+    /// Its line in the FMT column (`"MP3"`) and that line's tooltip.
+    #[serde(default)]
+    pub badge: String,
+    #[serde(default)]
+    pub tooltip: String,
+    /// Export puts this one on the USB the track list was read for
+    /// (`Track::export_file`): the FMT badge shows it, not a line of its own.
+    #[serde(default)]
+    pub exported: bool,
 }
 
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
@@ -212,6 +241,9 @@ pub struct TranscodeTracksData {
     pub messages: Vec<String>,
     /// The selected tracks as they are now, for the tables to show.
     pub tracks: Vec<Track>,
+    /// For the status bar: "Converting done: 2 tracks converted, 1 skipped".
+    #[serde(default)]
+    pub summary: String,
 }
 
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
@@ -226,6 +258,9 @@ pub struct RemoveTrackTranscodesData {
     pub removed: usize,
     /// The selected tracks as they are now, for the tables to show.
     pub tracks: Vec<Track>,
+    /// For the status bar: "Removed 2 transcodes".
+    #[serde(default)]
+    pub summary: String,
 }
 
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
@@ -233,6 +268,24 @@ pub struct RemoveTrackTranscodesData {
 pub struct TranscodeFolderData {
     pub path: String,
     /// No folder was chosen; `path` is the default inside the app data.
+    pub is_default: bool,
+}
+
+/// The formats Convert… offers, in the dialog's order.
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct TranscodeFormatsData {
+    pub formats: Vec<TranscodeFormatChoice>,
+}
+
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct TranscodeFormatChoice {
+    /// What `transcode_tracks` takes (`"mp3"`).
+    pub format: String,
+    /// The choice's text (`"MP3 320 kbps"`).
+    pub label: String,
+    /// Picked when the dialog opens.
     pub is_default: bool,
 }
 
@@ -260,6 +313,13 @@ pub struct UsbFormatSetting {
     #[serde(default)]
     pub label: String,
     pub allowed: bool,
+    /// Its box can't be changed (the last ticked one, or a read-only USB);
+    /// ignored in a request.
+    #[serde(default)]
+    pub locked: bool,
+    /// Why, when it's the last ticked one; ignored in a request.
+    #[serde(default)]
+    pub tooltip: Option<String>,
 }
 
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
@@ -278,6 +338,9 @@ pub struct UsbFormatsData {
     pub formats: Vec<UsbFormatSetting>,
     /// False on a read-only stick: the list can't be changed.
     pub writable: bool,
+    /// The line next to the row's title.
+    #[serde(default)]
+    pub hint: String,
 }
 
 /// How a track's audio format is expected to behave on CDJ hardware.
@@ -806,6 +869,10 @@ pub struct GetPlaylistTracksRequest {
     /// `0` ⇒ unpaginated (the whole playlist), for backward compatibility.
     #[serde(default)]
     pub limit: usize,
+    /// The selected USB: each returned track then carries
+    /// `Track::export_file` for it.
+    #[serde(default)]
+    pub usb_root: Option<String>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -840,20 +907,15 @@ pub struct PlaylistExportSpace {
     /// False when the copy plus the export's headroom exceeds the free space,
     /// the same rule the export's own preflight blocks on.
     pub fits: bool,
-    /// The playlist's tracks export converts first: none of their files is
-    /// in a format the USB's Player formats tick (see `transcode_export`).
+    /// What the USB's Player formats mean for the export, for the playlist
+    /// heading: the tracks it converts first ("2 tracks will be converted to
+    /// MP3 320 on export") and the lossy ones it refuses (see
+    /// `transcode_export`). `None` when it does neither.
     #[serde(default)]
-    pub convert_tracks: usize,
-    /// The format they are converted to (`"MP3"`), when they all share one.
+    pub format_notice: Option<String>,
+    /// The notice says the export is blocked (a track is refused).
     #[serde(default)]
-    pub convert_format: Option<String>,
-    /// The playlist's tracks export refuses: in an unticked format and lossy,
-    /// so they can't be converted. Any blocks the export.
-    #[serde(default)]
-    pub refused_tracks: usize,
-    /// Their format (`"MP3"`), when they all share one.
-    #[serde(default)]
-    pub refused_format: Option<String>,
+    pub format_notice_blocks: bool,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]

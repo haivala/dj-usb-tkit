@@ -6,15 +6,14 @@
 import { cloneTemplate } from "../../ui_utils.mjs";
 import { bindListDragReorder, moveArrayItem } from "../shared/list_drag_reorder.mjs";
 
-const HINT_WRITABLE = "The formats export puts on this USB · drag to set the order of preference";
-const HINT_READONLY = "USB is read-only";
-const LAST_TICKED_TOOLTIP = "At least one format stays ticked";
 
 export async function loadUsbFormats(ctx) {
   const { state } = ctx;
   const usbRoot = state.usbRoot;
   state.usbFormats = null;
   renderUsbFormats(ctx);
+  // Another USB (or none): the open playlist follows it.
+  ctx.reloadPlaylistForUsb?.();
   if (!usbRoot || !state.usbRootValid) return;
   const data = await ctx.command("get_usb_formats", { usbRoot });
   // A switched stick while this was loading: its own load lands instead.
@@ -32,8 +31,7 @@ export function renderUsbFormats(ctx) {
   if (!data) return;
   const writable = !!data.writable;
   el.usbFormatsList.classList.toggle("is-readonly", !writable);
-  if (el.usbFormatsHint) el.usbFormatsHint.textContent = writable ? HINT_WRITABLE : HINT_READONLY;
-  const tickedCount = data.formats.filter((item) => item.allowed).length;
+  if (el.usbFormatsHint) el.usbFormatsHint.textContent = data.hint || "";
   for (const item of data.formats) {
     const chip = cloneTemplate(document, "tplUsbFormatChip");
     chip.dataset.usbFormat = item.format;
@@ -42,9 +40,8 @@ export function renderUsbFormats(ctx) {
     const box = chip.querySelector(".usb-cfg-format-check");
     box.checked = !!item.allowed;
     box.dataset.usbFormat = item.format;
-    const lastTicked = item.allowed && tickedCount === 1;
-    box.disabled = !writable || lastTicked;
-    if (lastTicked) chip.querySelector(".usb-cfg-format-label").dataset.tooltip = LAST_TICKED_TOOLTIP;
+    box.disabled = !!item.locked;
+    if (item.tooltip) chip.querySelector(".usb-cfg-format-label").dataset.tooltip = item.tooltip;
     chip.querySelector(".usb-cfg-format-name").textContent = item.label;
     el.usbFormatsList.appendChild(chip);
   }
@@ -73,7 +70,7 @@ async function saveUsbFormats(ctx, formats) {
   }
   if (ctx.usbPlaylistTracksCtl?.scopeId) ctx.usbPlaylistTracksCtl.reload();
   if (ctx.usbHistoryTracksCtl?.scopeId) ctx.usbHistoryTracksCtl.reload();
-  ctx.refreshPlaylistExportSpace?.();
+  ctx.reloadPlaylistForUsb?.();
 }
 
 export function bindUsbFormatEvents(ctx) {

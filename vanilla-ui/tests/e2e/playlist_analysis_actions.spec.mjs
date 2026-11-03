@@ -803,7 +803,13 @@ function installReorderTauriMock(page, { usbSameNamePlaylistName, exportPruneSta
             return { ok: true, data: { items: playlists } };
           }
           if (command === "get_playlist_tracks") {
-            return { ok: true, data: window.__playlistTracksPage(playlistTracks[request.playlistId] || [], request) };
+            // Read for a USB, each track carries what export puts on it
+            // (`__exportFiles`, by track id), as the backend sends it.
+            const items = (playlistTracks[request.playlistId] || []).map((track) => {
+              const exportFile = request.usbRoot ? window.__exportFiles?.[track.id] : null;
+              return exportFile ? { ...track, exportFile } : track;
+            });
+            return { ok: true, data: window.__playlistTracksPage(items, request) };
           }
           if (command === "get_playlist_export_space") {
             // `__exportSpaceGate` (a promise) holds the answer back, to show
@@ -1140,10 +1146,11 @@ test("the playlist heading shows what an export would copy against the USB's fre
 
   // The estimate is asked for after the rows are shown: a slow one leaves the
   // list usable and fills the line in when it arrives.
-  await connectUsbAndFetchPlaylists(page);
+  // Held back from the start: connecting the USB asks for it too.
   await page.evaluate(() => {
     window.__exportSpaceGate = new Promise((resolve) => { window.__releaseExportSpace = resolve; });
   });
+  await connectUsbAndFetchPlaylists(page);
   await page.locator("#navPlaylistList .nav-playlist-item").first().click();
   const space = page.locator("#playlistExportSpace");
   await expect(page.locator("#playlistTracksBody .track-grid-row")).toHaveCount(3);
@@ -1174,16 +1181,17 @@ test("the playlist heading shows what an export would copy against the USB's fre
   await page.evaluate(() => {
     window.__exportSpace = {
       bytesToCopy: 0, tracksToCopy: 0, availableBytes: 27 * 1024 ** 3, fits: true,
-      convertTracks: 2, convertFormat: "MP3", refusedTracks: 0, refusedFormat: null,
+      formatNotice: "2 tracks will be converted to MP3 320 on export", formatNoticeBlocks: false,
     };
   });
   await page.locator("#playlistSearchInput").fill("Song");
-  await expect(formatWarning).toHaveText("2 tracks will be converted to MP3 on export");
+  await expect(formatWarning).toHaveText("2 tracks will be converted to MP3 320 on export");
   await expect(formatWarning).not.toHaveClass(/is-warning/);
   await page.evaluate(() => {
     window.__exportSpace = {
       bytesToCopy: 0, tracksToCopy: 0, availableBytes: 27 * 1024 ** 3, fits: true,
-      convertTracks: 1, convertFormat: null, refusedTracks: 3, refusedFormat: "AAC",
+      formatNotice: "1 track will be converted on export · 3 AAC tracks can't go on this USB; export is blocked",
+      formatNoticeBlocks: true,
     };
   });
   await page.locator("#playlistSearchInput").fill("");
@@ -1191,6 +1199,30 @@ test("the playlist heading shows what an export would copy against the USB's fre
     "1 track will be converted on export · 3 AAC tracks can't go on this USB; export is blocked"
   );
   await expect(formatWarning).toHaveClass(/is-warning/);
+});
+
+test("with a USB connected, the FMT column shows what export puts on it, as the backend says", async ({ page }) => {
+  await installReorderTauriMock(page, { usbSameNamePlaylistName: "Reorder Playlist" });
+  await page.goto("/");
+  await page.evaluate(() => {
+    window.__exportFiles = {
+      t1: { kind: "transcode", badge: "AIFF", tooltip: "AIFF transcode · 40 MB, exported to this USB — source: FLAC · 44.1 kHz · 16-bit" },
+      t2: { kind: "convert", badge: "MP3", tooltip: "Converted to MP3 320 on export — source: FLAC · 44.1 kHz · 16-bit" },
+      t3: { kind: "refused", badge: "AAC", tooltip: "M4A · 48 kHz · 256 kbps — AAC can't go on this USB" },
+    };
+  });
+  await connectUsbAndFetchPlaylists(page);
+  await page.locator("#navPlaylistList .nav-playlist-item").first().click();
+  const badge = (id) => page.locator(`#playlistTracksBody .track-grid-row[data-track-id="${id}"] .format-badge`);
+  await expect(badge("t1")).toHaveText("AIFF");
+  await expect(badge("t1")).toHaveAttribute("data-tooltip", /^AIFF transcode · 40 MB, exported to this USB — source: FLAC/);
+  await expect(badge("t1")).not.toHaveClass(/export-convert|warn/);
+  await expect(badge("t2")).toHaveText("MP3");
+  await expect(badge("t2")).toHaveClass(/export-convert/);
+  await expect(badge("t2")).toHaveAttribute("data-tooltip", /^Converted to MP3 320 on export — source: FLAC/);
+  await expect(badge("t3")).toHaveText("AAC ⚠");
+  await expect(badge("t3")).toHaveClass(/warn/);
+  await expect(badge("t3")).toHaveAttribute("data-tooltip", /AAC can't go on this USB/);
 });
 
 test("a failed export is reported in the status bar and left to the backend's one Event Log entry", async ({ page }) => {
