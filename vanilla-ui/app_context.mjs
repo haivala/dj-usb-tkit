@@ -2,6 +2,7 @@ import * as trackTable from "./track_table.mjs";
 import * as playback from "./components/playback/actions.mjs";
 import * as playlist from "./components/playlist/actions.mjs";
 import * as usb from "./components/usb/actions.mjs";
+import * as usbFormats from "./components/usb/formats.mjs";
 import * as eventLog from "./components/event-log/actions.mjs";
 import * as backupsUi from "./components/backups/actions.mjs";
 import * as library from "./components/library/actions.mjs";
@@ -86,7 +87,8 @@ export function createAppContext(env) {
     commitActivePlaylistSort updatePlaylistExportButtons createPlaylist deletePlaylist
     addTracksToCurrentPlaylist addLibrarySelectionToCurrentPlaylist populatePlaylistPanel
     getCurrentPlaylist isPlaylistSortActive renderCurrentPlaylistTracksFromState
-    refreshCurrentPlaylistTracks importExternalPlaylist renderOpenPlaylistExportStatus`);
+    refreshCurrentPlaylistTracks importExternalPlaylist renderOpenPlaylistExportStatus
+    refreshPlaylistExportSpace`);
   bindActions(library, `normalizeTrack normalizeUsbPlaylist applyLibrarySources
     refreshLibrarySources showExternalLibrary applyRealtimeAnalyzedTrackUpdate
     relocateSourceRoot renderSourceChips applyLibraryDurationSummary renderLibraryRows
@@ -106,6 +108,7 @@ export function createAppContext(env) {
     removeUsbPlayerMenuItems moveUsbPlayerMenuItems exportPlaylistToUsb
     initializeUsb pickUsbFolder hydrateUsbTrackMetadata loadUsbDevices
     pruneUsbDevice updateUsbRootText`);
+  bindActions(usbFormats, "loadUsbFormats renderUsbFormats");
   bindActions(trackTable, "buildTrackTableRow renderEmptyTrackTable finishTrackRows");
   bindActions(trackDetail, "openTrackDetail");
 

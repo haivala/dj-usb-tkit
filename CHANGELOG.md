@@ -44,6 +44,11 @@
   is not a new track: the FMT column shows it under the track's own format, and cues, edits and
   playlists stay on the one track. Files go to a folder set in Settings → Transcodes, outside the
   source folders. USB export doesn't use them yet.
+- **New feature:** Player formats in the USB view: tick the audio formats the players a USB goes
+  into can read, and drag them into your order of preference. The setting is stored on the USB.
+  Its playlist and history tracks in an unticked format get a warning in the FMT column, and an
+  app playlist's title row says how many of its tracks are in formats the connected USB doesn't
+  allow, and how many of those have a transcode in one it does. Export doesn't change yet.
 - **Improvement:** Saving cue, beat grid, key or track detail edits on a USB track that one of
   the USB's two databases doesn't list is still refused, since it would leave them disagreeing,
   but the message now says so in plain words and points to Preview Fixes, which repairs it.

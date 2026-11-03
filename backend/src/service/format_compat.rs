@@ -9,13 +9,19 @@
 //! [`WavFormatIssue::is_export_autofixable`].
 //!
 //! Inputs are all fields already present on `Track` (`UsbTrack` only carries
-//! `format_ext`, so its verdict is whether players read the extension; see
+//! `format_ext`, so its verdict is whether players read the extension and
+//! whether the stick's Player formats allow it; see
 //! [`compute_usb_format_compat`]). Missing
 //! technical fields mean "can't judge" -> `Ok`, matching the old frontend
 //! behaviour where a `null` sample rate / bitrate short-circuited the check.
 
-use crate::audio_format::{AudioFormat, is_player_extension};
+use std::path::Path;
+
+use crate::audio_format::{
+    AudioFormat, PlayerFormat, PlayerFormatOfExtension, is_alac_file, is_player_extension,
+};
 use crate::models::{FormatCompat, FormatCompatSeverity};
+use crate::service::usb_identity::DriveFormats;
 use crate::wav_format::WavFormatIssue;
 
 const RATES_WAV: [u32; 3] = [44_100, 48_000, 96_000];
@@ -88,13 +94,39 @@ pub(crate) fn compute_format_compat(
 }
 
 /// A file already on a USB stick: no export will rename or convert it, and
-/// USB rows carry no sample rate / bit depth / bitrate, so the only verdict is
-/// whether players read its extension.
-pub(crate) fn compute_usb_format_compat(format_ext: Option<&str>) -> FormatCompat {
-    if format_ext.is_some_and(is_player_extension) {
+/// USB rows carry no sample rate / bit depth / bitrate, so the verdict is
+/// whether players read its extension, and whether its format is ticked in
+/// the stick's Player formats. `file_path` is the file on the stick; it is
+/// only read for an `.m4a` when the stick allows one of ALAC and AAC but not
+/// the other.
+pub(crate) fn compute_usb_format_compat(
+    format_ext: Option<&str>,
+    file_path: &Path,
+    formats: &DriveFormats,
+) -> FormatCompat {
+    let Some(ext) = format_ext.filter(|ext| is_player_extension(ext)) else {
+        return FormatCompat::warn("Unlisted format");
+    };
+    let format = match PlayerFormat::of_extension(ext) {
+        PlayerFormatOfExtension::Known(format) => format,
+        PlayerFormatOfExtension::AlacOrAac => {
+            if formats.allows(PlayerFormat::Alac) == formats.allows(PlayerFormat::Aac) {
+                PlayerFormat::Aac
+            } else if is_alac_file(file_path) {
+                PlayerFormat::Alac
+            } else {
+                PlayerFormat::Aac
+            }
+        }
+        PlayerFormatOfExtension::None => return FormatCompat::ok(),
+    };
+    if formats.allows(format) {
         FormatCompat::ok()
     } else {
-        FormatCompat::warn("Unlisted format")
+        FormatCompat::warn(&format!(
+            "{} is not allowed on this USB (Player formats)",
+            format.label()
+        ))
     }
 }
 
@@ -256,18 +288,61 @@ mod tests {
             "mp3", "M4A", "aac", "mp4", "wav", "aif", "aiff", "flac", "fla",
         ] {
             assert_eq!(
-                compute_usb_format_compat(Some(ext)).severity,
+                compute_usb_format_compat(Some(ext), Path::new(""), &DriveFormats::default())
+                    .severity,
                 FormatCompatSeverity::Ok,
                 "{ext}"
             );
         }
         for ext in [Some("wave"), Some("ogg"), Some("opus"), Some("m4p"), None] {
             assert_eq!(
-                compute_usb_format_compat(ext).severity,
+                compute_usb_format_compat(ext, Path::new(""), &DriveFormats::default()).severity,
                 FormatCompatSeverity::Warn,
                 "{ext:?}"
             );
         }
+    }
+
+    fn formats_without(unticked: &[&str]) -> DriveFormats {
+        let items: Vec<(String, bool)> = PlayerFormat::DEFAULT_ORDER
+            .into_iter()
+            .map(|format| (format.id().to_string(), !unticked.contains(&format.id())))
+            .collect();
+        DriveFormats::from_request(&items).unwrap()
+    }
+
+    #[test]
+    fn usb_rows_warn_for_formats_the_stick_does_not_allow() {
+        let no_flac = formats_without(&["flac"]);
+        let flac = compute_usb_format_compat(Some("fla"), Path::new("a.fla"), &no_flac);
+        assert_eq!(flac.severity, FormatCompatSeverity::Warn);
+        assert_eq!(
+            flac.warning.as_deref(),
+            Some("FLAC is not allowed on this USB (Player formats)")
+        );
+        assert_eq!(
+            compute_usb_format_compat(Some("mp3"), Path::new("a.mp3"), &no_flac).severity,
+            FormatCompatSeverity::Ok
+        );
+    }
+
+    #[test]
+    fn usb_m4a_is_judged_by_the_codec_inside() {
+        let alac = Path::new(env!("CARGO_MANIFEST_DIR"))
+            .join("tests/fixtures/audio/formats/track_format_alac.m4a");
+        let verdict = |path: &Path, unticked: &[&str]| {
+            compute_usb_format_compat(Some("m4a"), path, &formats_without(unticked)).severity
+        };
+        assert_eq!(verdict(&alac, &["alac"]), FormatCompatSeverity::Warn);
+        assert_eq!(verdict(&alac, &["aac"]), FormatCompatSeverity::Ok);
+        // Unreadable: counts as AAC.
+        let missing = Path::new("missing.m4a");
+        assert_eq!(verdict(missing, &["aac"]), FormatCompatSeverity::Warn);
+        assert_eq!(verdict(missing, &["alac"]), FormatCompatSeverity::Ok);
+        assert_eq!(
+            verdict(missing, &["alac", "aac"]),
+            FormatCompatSeverity::Warn
+        );
     }
 
     #[test]

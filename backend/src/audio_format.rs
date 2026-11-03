@@ -108,6 +108,117 @@ impl AudioFormat {
     }
 }
 
+/// A format the user ticks per USB stick (Player formats): which files the
+/// players that stick goes into can read. `.m4a` is ALAC or AAC depending on
+/// the codec inside; every other player extension maps by extension alone.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub enum PlayerFormat {
+    Flac,
+    Alac,
+    Aiff,
+    Wav,
+    Mp3,
+    Aac,
+}
+
+/// What an extension says about its [`PlayerFormat`].
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum PlayerFormatOfExtension {
+    Known(PlayerFormat),
+    /// `.m4a`: ALAC or AAC, only the file itself can tell.
+    AlacOrAac,
+    /// Not a player extension.
+    None,
+}
+
+impl PlayerFormat {
+    /// Lossless first, the order an unconfigured stick uses.
+    pub const DEFAULT_ORDER: [Self; 6] = [
+        Self::Flac,
+        Self::Alac,
+        Self::Aiff,
+        Self::Wav,
+        Self::Mp3,
+        Self::Aac,
+    ];
+
+    /// The id stored in `drive.json` and sent to the frontend.
+    pub fn id(self) -> &'static str {
+        match self {
+            Self::Flac => "flac",
+            Self::Alac => "alac",
+            Self::Aiff => "aiff",
+            Self::Wav => "wav",
+            Self::Mp3 => "mp3",
+            Self::Aac => "aac",
+        }
+    }
+
+    pub fn parse(id: &str) -> Option<Self> {
+        Self::DEFAULT_ORDER
+            .into_iter()
+            .find(|format| format.id().eq_ignore_ascii_case(id.trim()))
+    }
+
+    pub fn label(self) -> &'static str {
+        match self {
+            Self::Flac => "FLAC",
+            Self::Alac => "ALAC",
+            Self::Aiff => "AIFF",
+            Self::Wav => "WAV",
+            Self::Mp3 => "MP3",
+            Self::Aac => "AAC",
+        }
+    }
+
+    /// `ext` in any case. `.mp4` and `.aac` count as AAC.
+    pub fn of_extension(ext: &str) -> PlayerFormatOfExtension {
+        let Some(format) = AudioFormat::from_extension(ext) else {
+            return PlayerFormatOfExtension::None;
+        };
+        if !is_player_extension(ext) {
+            return PlayerFormatOfExtension::None;
+        }
+        PlayerFormatOfExtension::Known(match format {
+            AudioFormat::Flac => Self::Flac,
+            AudioFormat::Aiff => Self::Aiff,
+            AudioFormat::Wav => Self::Wav,
+            AudioFormat::Mp3 => Self::Mp3,
+            AudioFormat::Aac | AudioFormat::Mp4 => Self::Aac,
+            AudioFormat::M4a => return PlayerFormatOfExtension::AlacOrAac,
+            AudioFormat::Alac => Self::Alac,
+            AudioFormat::M4p | AudioFormat::Ogg | AudioFormat::Opus => {
+                return PlayerFormatOfExtension::None;
+            }
+        })
+    }
+}
+
+/// Whether an MP4 container (`.m4a`) holds ALAC rather than AAC. Probes the
+/// file's header; an unreadable file counts as AAC.
+pub fn is_alac_file(path: &Path) -> bool {
+    use symphonia::core::codecs::CODEC_TYPE_ALAC;
+    let Ok(media) = crate::symphonia_decoder::open_media_source(path) else {
+        return false;
+    };
+    let mut hint = symphonia::core::probe::Hint::new();
+    hint.with_extension("m4a");
+    symphonia::default::get_probe()
+        .format(
+            &hint,
+            symphonia::core::io::MediaSourceStream::new(media, Default::default()),
+            &Default::default(),
+            &Default::default(),
+        )
+        .is_ok_and(|probed| {
+            probed
+                .format
+                .tracks()
+                .iter()
+                .any(|track| track.codec_params.codec == CODEC_TYPE_ALAC)
+        })
+}
+
 /// [`AudioFormat::rekordbox_file_type`] for a stored extension; 0 when unknown.
 pub fn rekordbox_file_type(ext: &str) -> i64 {
     AudioFormat::from_extension(ext).map_or(0, AudioFormat::rekordbox_file_type)
@@ -253,6 +364,35 @@ mod tests {
         assert!(!same_format_extension("x.mp3", "y.flac"));
         assert!(!same_format_extension("x.m4a", "y.aac"));
         assert!(!same_format_extension("x", "y"));
+    }
+
+    #[test]
+    fn player_format_ids_round_trip_and_extensions_map() {
+        for format in PlayerFormat::DEFAULT_ORDER {
+            assert_eq!(PlayerFormat::parse(format.id()), Some(format));
+        }
+        assert_eq!(PlayerFormat::parse("ogg"), None);
+        let known = |ext| match PlayerFormat::of_extension(ext) {
+            PlayerFormatOfExtension::Known(format) => Some(format),
+            _ => None,
+        };
+        assert_eq!(known("FLA"), Some(PlayerFormat::Flac));
+        assert_eq!(known("aif"), Some(PlayerFormat::Aiff));
+        assert_eq!(known("mp4"), Some(PlayerFormat::Aac));
+        assert_eq!(known("aac"), Some(PlayerFormat::Aac));
+        assert_eq!(
+            PlayerFormat::of_extension("m4a"),
+            PlayerFormatOfExtension::AlacOrAac
+        );
+        assert_eq!(
+            PlayerFormat::of_extension("ogg"),
+            PlayerFormatOfExtension::None
+        );
+        // `.wave` isn't read by players, whatever its content.
+        assert_eq!(
+            PlayerFormat::of_extension("wave"),
+            PlayerFormatOfExtension::None
+        );
     }
 
     #[test]

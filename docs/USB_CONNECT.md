@@ -83,16 +83,37 @@ The technical details are under "Local HDD staging" in [USB_EXPORT.md](USB_EXPOR
     the playlist was last exported and to which drive.
   - The title row shows how many tracks and how much data an export would still copy, and how
     much space is free on the USB. It says "Doesn't fit" when the export won't fit. Tracks
-    already on the USB aren't counted. Working this out reads neither the USB nor your music
-    files: it uses the sizes the library recorded when the files were scanned, so it doesn't
-    wake a sleeping disk. The line is worked out after the track list is shown, so it can
-    appear a moment after the tracks.
+    already on the USB aren't counted. Working this out doesn't read your music files: it uses
+    the sizes the library recorded when the files were scanned, so it doesn't wake a sleeping
+    disk. The line is worked out after the track list is shown, so it can appear a moment after
+    the tracks.
+  - When some of the playlist's tracks are in a format the USB's Player formats leave unticked,
+    the title row also says so: "3 tracks in formats that are not allowed on this USB". When
+    some of them have a transcode in a ticked format, it adds how many
+    ([TRANSCODES.md](TRANSCODES.md)); export doesn't use transcodes yet.
   - The export button names the drive: **Export to USB: \<name\>**. In additive sync mode, when
     the USB already has a playlist with the same name, it reads **Append to (\<playlist\>) on USB**
     instead, and the playlist's tracks can't be reordered by dragging, since an append keeps the
     order already on the USB ([PLAYLISTS_PLAYBACK.md](PLAYLISTS_PLAYBACK.md)).
 - **Track editing:** cues, beat grids and tags can be edited straight on the USB's tracks
   ([CUE_EDITOR.md](CUE_EDITOR.md)).
+
+## Player formats
+
+The **Player formats** row, above Health & Diagnostics, says which audio formats the players this
+USB goes into can read: FLAC, ALAC, AIFF, WAV, MP3 and AAC, each with a tick box.
+
+- **Ticked** means the players read it. A USB that was never set has all six ticked, so nothing
+  changes until you untick one.
+- **Order:** drag a format by its handle to move it. The order is your preference among the
+  ticked formats.
+- **At least one stays ticked:** the last ticked box can't be unticked.
+- **Stored on the USB** (in `.dj-usb-tkit/drive.json`, next to the drive's name), so the setting
+  goes with the stick to another computer. On a read-only USB the row can't be changed.
+- **What it does:** the USB's playlist and history tracks in an unticked format get a warning in
+  the FMT column ("FLAC is not allowed on this USB"), and an app playlist's title row counts its
+  tracks in one (see above). Export doesn't change yet. ALAC and AAC files both end in `.m4a`;
+  the app tells them apart by the audio inside.
 
 ## While the app is working on the USB
 

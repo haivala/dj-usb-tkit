@@ -241,6 +241,17 @@
 
         <!-- Health & Diagnostics -->
         <div id="usbSelectedControls" class="hidden">
+          <div class="source-bar usb-cfg-formats-bar" id="usbFormatsRow">
+            <div class="source-filter-header" id="usbFormatsHeader">
+              <span class="source-filter-label">Player formats</span>
+              <span class="muted usb-cfg-formats-hint" id="usbFormatsHint"></span>
+            </div>
+            <div class="source-body">
+              <div class="source-body-inner">
+                <div class="usb-cfg-formats-list" id="usbFormatsList"></div>
+              </div>
+            </div>
+          </div>
           <details class="usb-health-card" id="usbHealthCard">
             <summary class="usb-health-summary">
               <span class="usb-cfg-section-label">Health &amp; Diagnostics</span>
@@ -425,6 +436,7 @@
         <div class="panel-header">
           <h2 id="playlistPanelTitle">Playlist</h2>
           <span class="muted panel-header-meta playlist-export-space hidden" id="playlistExportSpace" data-tooltip="The size to copy includes the tracks' analysis files and artwork, so it can be larger than the audio size in the title"></span>
+          <span class="panel-header-meta playlist-format-warning hidden" id="playlistFormatWarning" data-tooltip="Set in the USB view under Player formats"></span>
         </div>
         <div class="track-toolbar">
           <div class="search-row">
@@ -737,12 +749,13 @@
       </div>
       <div class="settings-section">
         <div class="settings-section-label">Transcodes</div>
-        <div class="settings-folder-row">
-          <span class="settings-folder-path" id="transcodeFolderText"></span>
-          <button type="button" class="settings-small-btn" id="transcodeFolderChangeBtn">Change…</button>
+        <div class="settings-folder-path" id="transcodeFolderText"></div>
+        <div class="settings-folder-actions">
+          <span class="muted" id="transcodeFolderDefaultTag" hidden>Default folder</span>
           <button type="button" class="settings-small-btn" id="transcodeFolderResetBtn" hidden>Use default</button>
+          <button type="button" class="settings-small-btn" id="transcodeFolderChangeBtn">Change…</button>
         </div>
-        <span class="muted usb-cfg-toggle-hint">Where Convert… saves the AIFF, WAV and MP3 files it makes. Keep it outside your music folders, so other music apps don't list the files twice. A new folder only applies to new files.</span>
+        <span class="muted settings-hint">Where Convert… saves the AIFF, WAV and MP3 files it makes. Keep it outside your music folders, so other music apps don't list the files twice. A new folder only applies to new files.</span>
       </div>
       <div class="settings-section">
         <div class="settings-section-label">Backups</div>
@@ -1007,6 +1020,9 @@
     <li><button><span class="drag-handle" data-usb-drag-handle draggable="true" data-tooltip="Drag to reorder" aria-label="Drag to reorder">&#10495;</span><span class="playlist-label"></span><span class="playlist-remove" data-tooltip="Remove" aria-label="Remove">&times;</span></button></li>
   </template>
   <template id="tplHistoryItem"><li><button><span class="playlist-label"></span></button></li></template>
+  <template id="tplUsbFormatChip">
+    <span class="usb-cfg-recent-item usb-cfg-format-chip"><span class="drag-handle" data-usb-format-drag-handle draggable="true" data-tooltip="Drag to set the order of preference" aria-label="Drag to reorder">&#10495;</span><label class="usb-cfg-format-label"><input type="checkbox" class="usb-cfg-format-check"><span class="usb-cfg-format-name"></span></label></span>
+  </template>
   <template id="tplUsbRecentItem">
     <span class="usb-cfg-recent-item"><button type="button" class="usb-cfg-recent-btn" style="direction: rtl; text-align: left;"></button><button type="button" class="usb-cfg-recent-prune-btn" data-tooltip="Forget this USB device">×</button></span>
   </template>

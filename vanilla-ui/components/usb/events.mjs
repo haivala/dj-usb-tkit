@@ -1,6 +1,7 @@
 import { counted } from "../../track_utils.mjs";
 import { catchErr, handleTrackAction, resolveRowActionTrack } from "../shared/track_actions.mjs";
 import { bindListDragReorder, moveArrayItem } from "../shared/list_drag_reorder.mjs";
+import { bindUsbFormatEvents } from "./formats.mjs";
 import { setActiveListItem } from "../shell/actions.mjs";
 import { bindTrackSelection } from "../shared/track_selection.mjs";
 import { addSelectionToPlaylists } from "../shared/add_to_playlists.mjs";
@@ -93,6 +94,8 @@ export function bindUsbEvents(ctx) {
     event.preventDefault();
     ctx.renameDrive().catch(catchErr(emitStatus));
   });
+
+  bindUsbFormatEvents(ctx);
 
   // Recent USBs accordion, like the library's Sources.
   el.usbRecentHeader?.addEventListener("click", () => {

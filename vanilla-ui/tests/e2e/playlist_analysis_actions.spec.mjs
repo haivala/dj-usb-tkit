@@ -1166,6 +1166,29 @@ test("the playlist heading shows what an export would copy against the USB's fre
   await page.locator("#playlistSearchInput").fill("");
   await expect(space).toHaveText("All tracks on USB · 27.0 GB free on USB");
   await expect(space).not.toHaveClass(/is-warning/);
+
+  // Tracks in formats the USB's Player formats leave unticked, counted by
+  // the backend; some have a transcode in a ticked one.
+  const formatWarning = page.locator("#playlistFormatWarning");
+  await expect(formatWarning).toBeHidden();
+  await page.evaluate(() => {
+    window.__exportSpace = {
+      bytesToCopy: 0, tracksToCopy: 0, availableBytes: 27 * 1024 ** 3, fits: true,
+      disallowedTracks: 3, disallowedWithTranscode: 2, disallowedTranscodeFormat: "MP3",
+    };
+  });
+  await page.locator("#playlistSearchInput").fill("Song");
+  await expect(formatWarning).toHaveText(
+    "3 tracks in formats that are not allowed on this USB (2 have an MP3 transcode; export doesn't use transcodes yet)"
+  );
+  await page.evaluate(() => {
+    window.__exportSpace = {
+      bytesToCopy: 0, tracksToCopy: 0, availableBytes: 27 * 1024 ** 3, fits: true,
+      disallowedTracks: 1, disallowedWithTranscode: 0, disallowedTranscodeFormat: null,
+    };
+  });
+  await page.locator("#playlistSearchInput").fill("");
+  await expect(formatWarning).toHaveText("1 track in formats that are not allowed on this USB");
 });
 
 test("a failed export is reported in the status bar and left to the backend's one Event Log entry", async ({ page }) => {

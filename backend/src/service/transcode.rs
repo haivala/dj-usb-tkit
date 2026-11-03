@@ -68,32 +68,9 @@ fn is_lossless_source(path: &Path) -> bool {
     match AudioFormat::of_path(path) {
         Some(AudioFormat::Flac | AudioFormat::Wav | AudioFormat::Aiff | AudioFormat::Alac) => true,
         // `.m4a` holds AAC or ALAC; only the codec tells.
-        Some(AudioFormat::M4a) => is_alac_file(path),
+        Some(AudioFormat::M4a) => crate::audio_format::is_alac_file(path),
         _ => false,
     }
-}
-
-fn is_alac_file(path: &Path) -> bool {
-    use symphonia::core::codecs::CODEC_TYPE_ALAC;
-    let Ok(media) = crate::symphonia_decoder::open_media_source(path) else {
-        return false;
-    };
-    let mut hint = symphonia::core::probe::Hint::new();
-    hint.with_extension("m4a");
-    symphonia::default::get_probe()
-        .format(
-            &hint,
-            symphonia::core::io::MediaSourceStream::new(media, Default::default()),
-            &Default::default(),
-            &Default::default(),
-        )
-        .is_ok_and(|probed| {
-            probed
-                .format
-                .tracks()
-                .iter()
-                .any(|track| track.codec_params.codec == CODEC_TYPE_ALAC)
-        })
 }
 
 /// Whether the source already is `format` (no transcode needed).

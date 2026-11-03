@@ -362,8 +362,7 @@ async function loadTranscodeFolder(ctx) {
 
 function renderTranscodeFolder(el, folder) {
   if (!el.transcodeFolderText) return;
-  el.transcodeFolderText.textContent = folder?.isDefault
-    ? `${folder.path} (default)`
-    : String(folder?.path || "");
+  el.transcodeFolderText.textContent = String(folder?.path || "");
+  el.transcodeFolderDefaultTag.hidden = !folder?.isDefault;
   el.transcodeFolderResetBtn.hidden = !!folder?.isDefault;
 }

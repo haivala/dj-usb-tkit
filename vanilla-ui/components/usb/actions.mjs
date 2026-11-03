@@ -746,6 +746,7 @@ export async function validateAndSetUsbRoot(ctx, path, silent = false) {
     updateUsbConfigControlsVisibility(ctx);
     ctx.updateUsbSubNavDisabledState();
     ctx.updatePlaylistExportButtons();
+    ctx.loadUsbFormats().catch((err) => console.warn("get_usb_formats failed:", err));
     if (!silent) emitStatus("USB root cleared");
     el.usbRecentRow?.classList.remove("collapsed");
     await syncAssetScopePaths(ctx);
@@ -784,6 +785,7 @@ export async function validateAndSetUsbRoot(ctx, path, silent = false) {
   updateUsbConfigControlsVisibility(ctx);
   ctx.updateUsbSubNavDisabledState();
   ctx.updatePlaylistExportButtons();
+  ctx.loadUsbFormats().catch((err) => console.warn("get_usb_formats failed:", err));
   if (valid) {
     await promptDriveNameIfUnset(ctx);
   } else {

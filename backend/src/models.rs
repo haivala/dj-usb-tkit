@@ -244,6 +244,42 @@ pub struct SetTranscodeFolderRequest {
     pub path: Option<String>,
 }
 
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct GetUsbFormatsRequest {
+    pub usb_root: String,
+}
+
+/// One Player format of a USB stick.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct UsbFormatSetting {
+    /// `flac`, `alac`, `aiff`, `wav`, `mp3` or `aac`.
+    pub format: String,
+    /// What the USB panel shows (`FLAC`); ignored in a request.
+    #[serde(default)]
+    pub label: String,
+    pub allowed: bool,
+}
+
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct SetUsbFormatsRequest {
+    pub usb_root: String,
+    /// Every format once, in the order of preference, at least one allowed.
+    pub formats: Vec<UsbFormatSetting>,
+}
+
+/// The formats the players a USB stick goes into read (`drive.json`).
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct UsbFormatsData {
+    /// Every format, in the order of preference.
+    pub formats: Vec<UsbFormatSetting>,
+    /// False on a read-only stick: the list can't be changed.
+    pub writable: bool,
+}
+
 /// How a track's audio format is expected to behave on CDJ hardware.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Serialize, Deserialize)]
 #[serde(rename_all = "lowercase")]
@@ -804,6 +840,16 @@ pub struct PlaylistExportSpace {
     /// False when the copy plus the export's headroom exceeds the free space,
     /// the same rule the export's own preflight blocks on.
     pub fits: bool,
+    /// The playlist's tracks in a format the USB's Player formats leave
+    /// unticked.
+    #[serde(default)]
+    pub disallowed_tracks: usize,
+    /// Of those, the ones with a transcode in a ticked format.
+    #[serde(default)]
+    pub disallowed_with_transcode: usize,
+    /// The format of those transcodes (`"MP3"`), when they all share one.
+    #[serde(default)]
+    pub disallowed_transcode_format: Option<String>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -1383,9 +1429,9 @@ pub struct UsbTrack {
     #[serde(default)]
     pub file_size_bytes: Option<i64>,
     /// CDJ format-compatibility badge (mirrors `Track.format_compat`). USB rows
-    /// only carry `format_ext`, so this is `ok` for every known extension and
-    /// only flags a genuinely unrecognised one. Filled in during page
-    /// hydration -- see `service::usb::hydrate_usb_track_in_place`.
+    /// only carry `format_ext`, so this flags an extension players don't read,
+    /// or a format the stick's Player formats leave unticked. Filled in during
+    /// page hydration -- see `service::usb::hydrate_usb_track_in_place`.
     #[serde(default)]
     pub format_compat: FormatCompat,
     /// True when the row is still missing display data (waveform bytes,

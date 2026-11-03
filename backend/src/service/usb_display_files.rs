@@ -22,6 +22,7 @@ use crate::logging::{self, Level};
 use crate::models::UsbTrack;
 
 use super::browse_path_matches_root;
+use super::usb_identity::{DriveFormats, read_drive_formats};
 use super::usb_utils::{
     artwork_path_to_data_url, load_waveform_preview_from_analysis_path, waveform_preview_candidates,
 };
@@ -73,6 +74,8 @@ struct ReadCache {
 
 pub(crate) struct UsbDisplaySource {
     usb_root: PathBuf,
+    /// The stick's Player formats, read once per page load.
+    formats: DriveFormats,
     cache: Option<ReadCache>,
     /// Keyed by local track id.
     library: HashMap<String, LibraryDisplayFiles>,
@@ -84,6 +87,7 @@ impl UsbDisplaySource {
     pub(crate) fn direct(usb_root: &Path) -> Self {
         Self {
             usb_root: usb_root.to_path_buf(),
+            formats: read_drive_formats(usb_root),
             cache: None,
             library: HashMap::new(),
         }
@@ -111,9 +115,14 @@ impl UsbDisplaySource {
         };
         Self {
             usb_root: usb_root.to_path_buf(),
+            formats: read_drive_formats(usb_root),
             cache,
             library,
         }
+    }
+
+    pub(crate) fn formats(&self) -> &DriveFormats {
+        &self.formats
     }
 
     /// Fills a row's missing waveform preview / artwork data URL.

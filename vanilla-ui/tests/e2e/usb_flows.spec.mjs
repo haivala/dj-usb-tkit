@@ -33,6 +33,10 @@ function installTauriMock(page, mode) {
         : []
     };
     window.__reorderCalls = [];
+    window.__usbFormatCalls = [];
+    let usbFormats = [
+      ["flac", "FLAC"], ["alac", "ALAC"], ["aiff", "AIFF"], ["wav", "WAV"], ["mp3", "MP3"], ["aac", "AAC"]
+    ].map(([format, label]) => ({ format, label, allowed: true }));
 
     const diagnosticsPayload = {
       overallStatus: "WARN",
@@ -412,6 +416,16 @@ function installTauriMock(page, mode) {
                 warningCount: mode === "warning-mix" ? 2 : 0
               }
             };
+          }
+          if (command === "get_usb_formats") {
+            return { ok: true, data: { formats: usbFormats, writable: true } };
+          }
+          if (command === "set_usb_formats") {
+            const sent = payload?.request?.formats || [];
+            window.__usbFormatCalls.push(sent);
+            const labels = new Map(usbFormats.map((item) => [item.format, item.label]));
+            usbFormats = sent.map((item) => ({ ...item, label: labels.get(item.format) }));
+            return { ok: true, data: { formats: usbFormats, writable: true } };
           }
           if (command === "reorder_usb_playlists") {
             const orderedIds = Array.isArray(payload?.request?.orderedPlaylistIds)
@@ -1085,4 +1099,56 @@ test("a job started right after another finished keeps its progress footer", asy
   await page.waitForTimeout(1500);
   await expect(page.locator("#progressFooter")).toHaveClass(/active/);
   await expect(page.locator("#progressText")).toContainText("Saving playlist");
+});
+
+test("Player formats: ticks and drag order are saved, and the last ticked format can't be unticked", async ({ page }) => {
+  await installTauriMock(page, "valid");
+  await page.goto("/");
+
+  await page.locator('.nav-item[data-view="usb"]').click();
+  await page.locator("#usbEmptyState .empty-state-action").click();
+
+  const chips = page.locator("#usbFormatsList .usb-cfg-format-chip");
+  const names = page.locator("#usbFormatsList .usb-cfg-format-name");
+  await expect(page.locator("#usbFormatsRow")).toBeVisible();
+  await expect(names).toHaveText(["FLAC", "ALAC", "AIFF", "WAV", "MP3", "AAC"]);
+  const boxes = page.locator("#usbFormatsList .usb-cfg-format-check");
+  for (let i = 0; i < 6; i += 1) await expect(boxes.nth(i)).toBeChecked();
+
+  const lastCall = () => page.evaluate(() => window.__usbFormatCalls.at(-1));
+
+  await boxes.nth(0).uncheck();
+  await expect.poll(lastCall).toEqual([
+    { format: "flac", allowed: false },
+    { format: "alac", allowed: true },
+    { format: "aiff", allowed: true },
+    { format: "wav", allowed: true },
+    { format: "mp3", allowed: true },
+    { format: "aac", allowed: true },
+  ]);
+
+  // Untick all but AAC: its box is then the last ticked one and locks.
+  for (const index of [1, 2, 3, 4]) {
+    await boxes.nth(index).uncheck();
+    await expect(boxes.nth(index)).not.toBeChecked();
+  }
+  await expect(boxes.nth(5)).toBeChecked();
+  await expect(boxes.nth(5)).toBeDisabled();
+  await expect(chips.nth(5).locator(".usb-cfg-format-label")).toHaveAttribute("data-tooltip", "At least one format stays ticked");
+  await boxes.nth(4).check();
+  await expect(boxes.nth(5)).toBeEnabled();
+
+  // Drag MP3 (chip 4) to the left half of FLAC (chip 0): it goes first.
+  const handle = chips.nth(4).locator("[data-usb-format-drag-handle]");
+  const sourceBox = await handle.boundingBox();
+  const targetBox = await chips.nth(0).boundingBox();
+  await page.mouse.move(sourceBox.x + sourceBox.width / 2, sourceBox.y + sourceBox.height / 2);
+  await page.mouse.down();
+  await page.mouse.move(sourceBox.x + sourceBox.width / 2 - 10, sourceBox.y + sourceBox.height / 2, { steps: 5 });
+  await page.mouse.move(targetBox.x + targetBox.width * 0.25, targetBox.y + targetBox.height / 2, { steps: 10 });
+  await page.mouse.up();
+
+  await expect(names).toHaveText(["MP3", "FLAC", "ALAC", "AIFF", "WAV", "AAC"]);
+  await expect.poll(async () => (await lastCall()).map((item) => item.format))
+    .toEqual(["mp3", "flac", "alac", "aiff", "wav", "aac"]);
 });

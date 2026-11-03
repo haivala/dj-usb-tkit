@@ -234,7 +234,10 @@ drive selection from being rendered against a newer selected drive.
   bytes an export of the playlist would still copy to the USB, its free space, and whether it
   fits. Worked out from recorded data only (audio sizes from the app DB, what is already on the
   USB from the staged PDB and eDB, see "Tracks already on the USB" in `docs/USB_EXPORT.md`), so
-  no file is read. `null` when it can't be made. The frontend asks
+  no audio file is read. Also `disallowedTracks` (the playlist's tracks in a format the USB's
+  Player formats leave unticked), `disallowedWithTranscode` (of those, the ones with a
+  transcode in a ticked format) and `disallowedTranscodeFormat` (that transcode format's label
+  when they all share one, else `null`). `null` when it can't be made. The frontend asks
   for it after the track list is shown, so it never holds the list up
 - `add_library_selection_to_playlist`
 - `add_track_candidates_to_playlist`
@@ -258,6 +261,12 @@ drive selection from being rendered against a newer selected drive.
 - `prune_usb_device`
 - `get_usb_device_name`
 - `set_usb_device_name`
+- `get_usb_formats` — `{ usbRoot }` → `{ formats: [{ format, label, allowed }], writable }`:
+  the USB's Player formats (`flac`, `alac`, `aiff`, `wav`, `mp3`, `aac`) in its order of
+  preference, from the stick's `.dj-usb-tkit/drive.json`. A stick without the setting gets all
+  six ticked.
+- `set_usb_formats` — `{ usbRoot, formats: [{ format, allowed }] }` → the same shape. The list
+  must hold every format once with at least one allowed; a read-only stick is refused.
 - `list_usb_backups`
 - `restore_usb_backup`
 - `delete_usb_backup`

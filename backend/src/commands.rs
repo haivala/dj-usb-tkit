@@ -406,6 +406,20 @@ impl BackendCommands {
         wrap(self.service.set_usb_device_name(req))
     }
 
+    pub fn get_usb_formats(
+        &self,
+        req: crate::models::GetUsbFormatsRequest,
+    ) -> ApiResponse<crate::models::UsbFormatsData> {
+        wrap(self.service.get_usb_formats(req))
+    }
+
+    pub fn set_usb_formats(
+        &self,
+        req: crate::models::SetUsbFormatsRequest,
+    ) -> ApiResponse<crate::models::UsbFormatsData> {
+        wrap(self.service.set_usb_formats(req))
+    }
+
     pub fn list_usb_backups(&self, req: ListUsbBackupsRequest) -> ApiResponse<ListUsbBackupsData> {
         wrap(self.service.list_usb_backups(req))
     }

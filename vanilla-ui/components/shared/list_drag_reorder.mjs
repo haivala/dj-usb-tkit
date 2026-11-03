@@ -2,10 +2,12 @@ import { createDragAutoScroller } from "../../dnd_autoscroll.mjs";
 
 // Drag-to-reorder for a vertical list whose items carry a drag handle. Shared
 // by the sidebar playlists (components/playlist/events.mjs) and the USB
-// playlists (components/usb/events.mjs). The dragged item moves live under the
-// pointer; on drop `onMove(fromIndex, toIndex)` gets its old and new index
-// among the items, and isn't called when it lands where it started.
-export function bindListDragReorder(list, { handleSelector, itemSelector, onMove }) {
+// playlists (components/usb/events.mjs), and with `horizontal: true` by a row
+// of chips (the USB's Player formats, components/usb/formats.mjs). The
+// dragged item moves live under the pointer; on drop `onMove(fromIndex,
+// toIndex)` gets its old and new index among the items, and isn't called when
+// it lands where it started.
+export function bindListDragReorder(list, { handleSelector, itemSelector, onMove, horizontal = false }) {
   let dragItem = null;
   let fromIndex = -1;
   const items = () => Array.from(list.querySelectorAll(itemSelector));
@@ -35,7 +37,10 @@ export function bindListDragReorder(list, { handleSelector, itemSelector, onMove
     const target = event.target.closest(itemSelector);
     if (!target || target === dragItem) return;
     const rect = target.getBoundingClientRect();
-    if (event.clientY < rect.top + rect.height / 2) {
+    const before = horizontal
+      ? event.clientX < rect.left + rect.width / 2
+      : event.clientY < rect.top + rect.height / 2;
+    if (before) {
       target.before(dragItem);
     } else {
       target.after(dragItem);

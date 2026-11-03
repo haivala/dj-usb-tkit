@@ -643,17 +643,20 @@ test("Settings shows the transcode folder; Change picks one and Use default goes
   await installSelectionMock(page);
   await page.goto("/");
   await page.locator("#settingsBtn").click();
-  await expect(page.locator("#transcodeFolderText")).toHaveText("/data/transcodes (default)");
+  await expect(page.locator("#transcodeFolderText")).toHaveText("/data/transcodes");
+  await expect(page.locator("#transcodeFolderDefaultTag")).toBeVisible();
   await expect(page.locator("#transcodeFolderResetBtn")).toBeHidden();
 
   await page.locator("#transcodeFolderChangeBtn").click();
   await expect(page.locator("#transcodeFolderText")).toHaveText("/converted");
+  await expect(page.locator("#transcodeFolderDefaultTag")).toBeHidden();
   await expect.poll(async () => (await page.evaluate(() => window.__calls))
     .find((c) => c.command === "set_transcode_folder")?.request)
     .toEqual({ path: "/converted" });
 
   await page.locator("#transcodeFolderResetBtn").click();
-  await expect(page.locator("#transcodeFolderText")).toHaveText("/data/transcodes (default)");
+  await expect(page.locator("#transcodeFolderText")).toHaveText("/data/transcodes");
+  await expect(page.locator("#transcodeFolderDefaultTag")).toBeVisible();
   await expect(page.locator("#transcodeFolderResetBtn")).toBeHidden();
 });
 

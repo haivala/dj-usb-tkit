@@ -12,19 +12,130 @@
 //! next to `PIONEER/`, not inside it, so it's untouched by rekordbox itself
 //! and by this app's own validation/repair scans (neither enumerates the
 //! root's directory listing, only known paths).
+//!
+//! The same file carries the stick's Player formats ([`DriveFormats`]): which
+//! audio formats the players it goes into read, so they travel with the stick
+//! too.
 
 use std::path::{Path, PathBuf};
 use std::sync::Mutex;
 
 use serde::{Deserialize, Serialize};
 
+use crate::audio_format::PlayerFormat;
+
 const MARKER_DIR: &str = ".dj-usb-tkit";
 const MARKER_FILE: &str = "drive.json";
 const MAX_NAME_LEN: usize = 80;
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+/// `drive.json`. Every write reads the file first and changes only its own
+/// field, so a rename keeps the formats and the other way round. Fields this
+/// version doesn't know (written by a newer one) are kept as they are.
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
 struct DriveMarker {
+    #[serde(default, skip_serializing_if = "String::is_empty")]
     name: String,
+    /// Player formats, in the user's order of preference; see [`DriveFormats`].
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    formats: Vec<MarkerFormat>,
+    #[serde(flatten)]
+    other: serde_json::Map<String, serde_json::Value>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+struct MarkerFormat {
+    format: String,
+    allowed: bool,
+}
+
+/// The formats the players a stick goes into can read (Player formats in the
+/// USB panel), as the full ordered list: an unticked format keeps its place.
+/// The order is the user's preference among the ticked ones. At least one is
+/// always ticked.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(crate) struct DriveFormats(Vec<(PlayerFormat, bool)>);
+
+impl Default for DriveFormats {
+    /// All ticked, lossless first: an unconfigured stick warns about nothing
+    /// new.
+    fn default() -> Self {
+        Self(
+            PlayerFormat::DEFAULT_ORDER
+                .into_iter()
+                .map(|format| (format, true))
+                .collect(),
+        )
+    }
+}
+
+impl DriveFormats {
+    pub(crate) fn entries(&self) -> &[(PlayerFormat, bool)] {
+        &self.0
+    }
+
+    pub(crate) fn allows(&self, format: PlayerFormat) -> bool {
+        self.0
+            .iter()
+            .any(|&(entry, allowed)| entry == format && allowed)
+    }
+
+    /// A list from `drive.json`, which may be hand-edited or from another
+    /// version: unknown ids and repeats are dropped, missing formats are
+    /// appended ticked in default order, and a list with nothing ticked reads
+    /// as the default.
+    fn from_marker(raw: &[MarkerFormat]) -> Self {
+        let mut entries: Vec<(PlayerFormat, bool)> = Vec::new();
+        for item in raw {
+            if let Some(format) = PlayerFormat::parse(&item.format)
+                && !entries.iter().any(|&(entry, _)| entry == format)
+            {
+                entries.push((format, item.allowed));
+            }
+        }
+        for format in PlayerFormat::DEFAULT_ORDER {
+            if !entries.iter().any(|&(entry, _)| entry == format) {
+                entries.push((format, true));
+            }
+        }
+        if entries.iter().any(|&(_, allowed)| allowed) {
+            Self(entries)
+        } else {
+            Self::default()
+        }
+    }
+
+    /// A list the user sent: every format exactly once, at least one ticked.
+    pub(crate) fn from_request(items: &[(String, bool)]) -> Result<Self, String> {
+        let mut entries: Vec<(PlayerFormat, bool)> = Vec::new();
+        for (id, allowed) in items {
+            let format =
+                PlayerFormat::parse(id).ok_or_else(|| format!("Unknown audio format: {id}"))?;
+            if entries.iter().any(|&(entry, _)| entry == format) {
+                return Err(format!("{} is listed twice", format.label()));
+            }
+            entries.push((format, *allowed));
+        }
+        if let Some(missing) = PlayerFormat::DEFAULT_ORDER
+            .into_iter()
+            .find(|format| !entries.iter().any(|&(entry, _)| entry == *format))
+        {
+            return Err(format!("{} is missing from the list", missing.label()));
+        }
+        if !entries.iter().any(|&(_, allowed)| allowed) {
+            return Err("At least one format stays ticked".to_string());
+        }
+        Ok(Self(entries))
+    }
+
+    fn to_marker(&self) -> Vec<MarkerFormat> {
+        self.0
+            .iter()
+            .map(|&(format, allowed)| MarkerFormat {
+                format: format.id().to_string(),
+                allowed,
+            })
+            .collect()
+    }
 }
 
 /// The app's own `.dj-usb-tkit/` directory at the root of a USB drive --
@@ -77,8 +188,7 @@ pub(crate) fn drive_name(root: &Path) -> Option<String> {
 /// Read the user-assigned name from the marker file at `root`, if any.
 /// Absence/corruption is treated as "unnamed", never an error.
 pub(crate) fn read_drive_name(root: &Path) -> Option<String> {
-    let bytes = std::fs::read(marker_path(root)).ok()?;
-    let marker: DriveMarker = serde_json::from_slice(&bytes).ok()?;
+    let marker = read_marker(root)?;
     let trimmed = marker.name.trim();
     if trimmed.is_empty() {
         None
@@ -106,10 +216,35 @@ pub(crate) fn validate_name(name: &str) -> Result<String, String> {
 /// known drives (see `usb_utils::find_registered_drive`).
 pub(crate) fn write_drive_name(root: &Path, name: &str) -> std::io::Result<()> {
     let validated = validate_name(name).map_err(std::io::Error::other)?;
-    let dir = root.join(MARKER_DIR);
-    std::fs::create_dir_all(&dir)?;
-    let marker = DriveMarker { name: validated };
-    let bytes = serde_json::to_vec_pretty(&marker)?;
+    let mut marker = read_marker(root).unwrap_or_default();
+    marker.name = validated;
+    write_marker(root, &marker)
+}
+
+/// The stick's Player formats. A missing or unreadable `drive.json` reads as
+/// the default (everything ticked), never an error.
+pub(crate) fn read_drive_formats(root: &Path) -> DriveFormats {
+    read_marker(root)
+        .map(|marker| DriveFormats::from_marker(&marker.formats))
+        .unwrap_or_default()
+}
+
+/// Write the stick's Player formats, keeping its name.
+pub(crate) fn write_drive_formats(root: &Path, formats: &DriveFormats) -> std::io::Result<()> {
+    let mut marker = read_marker(root).unwrap_or_default();
+    marker.formats = formats.to_marker();
+    write_marker(root, &marker)
+}
+
+/// `None` for a missing or corrupt file.
+fn read_marker(root: &Path) -> Option<DriveMarker> {
+    let bytes = std::fs::read(marker_path(root)).ok()?;
+    serde_json::from_slice(&bytes).ok()
+}
+
+fn write_marker(root: &Path, marker: &DriveMarker) -> std::io::Result<()> {
+    std::fs::create_dir_all(app_marker_dir(root))?;
+    let bytes = serde_json::to_vec_pretty(marker)?;
     std::fs::write(marker_path(root), bytes)
 }
 
@@ -334,6 +469,114 @@ mod tests {
         std::fs::create_dir_all(&marker_dir).unwrap();
         std::fs::write(marker_dir.join(MARKER_FILE), b"not json").unwrap();
         assert_eq!(read_drive_name(dir.path()), None);
+    }
+
+    fn write_raw_marker(root: &Path, json: &str) {
+        let marker_dir = root.join(MARKER_DIR);
+        std::fs::create_dir_all(&marker_dir).unwrap();
+        std::fs::write(marker_dir.join(MARKER_FILE), json).unwrap();
+    }
+
+    fn ids(formats: &DriveFormats) -> Vec<(&'static str, bool)> {
+        formats
+            .entries()
+            .iter()
+            .map(|&(format, allowed)| (format.id(), allowed))
+            .collect()
+    }
+
+    #[test]
+    fn an_old_name_only_marker_reads_as_default_formats() {
+        let dir = tempdir().unwrap();
+        write_raw_marker(dir.path(), r#"{"name":"Old Stick"}"#);
+        assert_eq!(read_drive_formats(dir.path()), DriveFormats::default());
+        assert_eq!(read_drive_name(dir.path()), Some("Old Stick".to_string()));
+    }
+
+    #[test]
+    fn rename_keeps_formats_and_formats_write_keeps_name() {
+        let dir = tempdir().unwrap();
+        write_drive_name(dir.path(), "Club Stick").unwrap();
+        let formats = DriveFormats::from_request(&[
+            ("mp3".to_string(), true),
+            ("aiff".to_string(), true),
+            ("wav".to_string(), false),
+            ("flac".to_string(), false),
+            ("alac".to_string(), false),
+            ("aac".to_string(), true),
+        ])
+        .unwrap();
+        write_drive_formats(dir.path(), &formats).unwrap();
+        assert_eq!(read_drive_name(dir.path()), Some("Club Stick".to_string()));
+        write_drive_name(dir.path(), "Booth Stick").unwrap();
+        assert_eq!(read_drive_formats(dir.path()), formats);
+        assert_eq!(read_drive_name(dir.path()), Some("Booth Stick".to_string()));
+    }
+
+    #[test]
+    fn writes_keep_fields_this_version_does_not_know() {
+        let dir = tempdir().unwrap();
+        write_raw_marker(dir.path(), r#"{"name":"Stick","future":{"a":1}}"#);
+        write_drive_formats(dir.path(), &DriveFormats::default()).unwrap();
+        let raw: serde_json::Value =
+            serde_json::from_slice(&std::fs::read(marker_path(dir.path())).unwrap()).unwrap();
+        assert_eq!(raw["future"]["a"], 1);
+        assert_eq!(raw["name"], "Stick");
+    }
+
+    #[test]
+    fn hand_edited_formats_are_normalized() {
+        let dir = tempdir().unwrap();
+        write_raw_marker(
+            dir.path(),
+            r#"{"formats":[{"format":"mp3","allowed":true},{"format":"ogg","allowed":true},
+                {"format":"MP3","allowed":false},{"format":"flac","allowed":false}]}"#,
+        );
+        assert_eq!(
+            ids(&read_drive_formats(dir.path())),
+            vec![
+                ("mp3", true),
+                ("flac", false),
+                ("alac", true),
+                ("aiff", true),
+                ("wav", true),
+                ("aac", true),
+            ]
+        );
+        assert_eq!(read_drive_name(dir.path()), None);
+
+        write_raw_marker(
+            dir.path(),
+            r#"{"formats":[{"format":"flac","allowed":false},{"format":"alac","allowed":false},
+                {"format":"aiff","allowed":false},{"format":"wav","allowed":false},
+                {"format":"mp3","allowed":false},{"format":"aac","allowed":false}]}"#,
+        );
+        assert_eq!(read_drive_formats(dir.path()), DriveFormats::default());
+
+        write_raw_marker(dir.path(), "not json");
+        assert_eq!(read_drive_formats(dir.path()), DriveFormats::default());
+    }
+
+    #[test]
+    fn requested_formats_must_list_each_once_with_one_ticked() {
+        let all = |allowed: bool| -> Vec<(String, bool)> {
+            PlayerFormat::DEFAULT_ORDER
+                .into_iter()
+                .map(|format| (format.id().to_string(), allowed))
+                .collect()
+        };
+        assert!(DriveFormats::from_request(&all(true)).is_ok());
+        assert_eq!(
+            DriveFormats::from_request(&all(false)).unwrap_err(),
+            "At least one format stays ticked"
+        );
+        let mut twice = all(true);
+        twice[1].0 = "flac".to_string();
+        assert!(DriveFormats::from_request(&twice).is_err());
+        let mut unknown = all(true);
+        unknown.push(("ogg".to_string(), true));
+        assert!(DriveFormats::from_request(&unknown).is_err());
+        assert!(DriveFormats::from_request(&all(true)[1..]).is_err());
     }
 
     #[test]

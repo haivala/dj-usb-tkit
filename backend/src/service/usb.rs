@@ -46,6 +46,7 @@ use super::usb_helpers::{
     is_named_history_playlist, lookup_playlist_tracks, merge_playlist_tracks, normalize_packed_id,
     parse_history_name_numeric_id, parse_history_slot_id, sanitize_history_name, sanitize_text,
 };
+use super::usb_identity::DriveFormats;
 use super::usb_utils::{
     self, artwork_path_to_data_url, canonicalize_or_self, canonicalize_playlist_name,
     has_write_access, load_waveform_preview_from_analysis_path, normalize_usb_root_path,
@@ -221,9 +222,8 @@ fn build_usb_track_index(
                     key_color: None,
                     file_path: resolved_file_path,
                     needs_hydration: false,
-                    format_compat: super::format_compat::compute_usb_format_compat(
-                        format_ext.as_deref(),
-                    ),
+                    // Judged when the row is hydrated for a page.
+                    format_compat: Default::default(),
                     format_ext,
                     usb_media_path: Some(t.track_file_path.clone()),
                     artwork_data_url: None,
@@ -385,13 +385,17 @@ fn build_pdb_track_index(
 fn hydrate_usb_track_in_place(
     track: &mut UsbTrack,
     notation: KeyNotation,
+    formats: &DriveFormats,
     files: Option<&UsbDisplaySource>,
 ) -> DisplayReadCounts {
     let counts = files.map(|files| files.fill(track)).unwrap_or_default();
-    // USB rows only carry `format_ext`, so this only flags an extension
-    // players don't read.
-    track.format_compat =
-        super::format_compat::compute_usb_format_compat(track.format_ext.as_deref());
+    // USB rows only carry `format_ext`, so this flags an extension players
+    // don't read, or a format the stick's Player formats leave unticked.
+    track.format_compat = super::format_compat::compute_usb_format_compat(
+        track.format_ext.as_deref(),
+        Path::new(&track.file_path),
+        formats,
+    );
 
     // Whether a row is still missing display data the `inspect_usb_track`
     // deep-resolve could fill in (waveform bytes, artwork, BPM, key). Computed
@@ -499,6 +503,7 @@ fn hydrate_usb_page(
         counts.add(hydrate_usb_track_in_place(
             track,
             notation,
+            files.formats(),
             (!superseded).then_some(files),
         ));
         if !superseded {
@@ -2650,7 +2655,12 @@ impl BackendService {
                 let mut tracks = vec![track];
                 let files = self.resolve_usb_track_page_local_ids(&mut tracks, &usb_root)?;
                 let mut track = tracks.pop().expect("one track");
-                hydrate_usb_track_in_place(&mut track, self.key_notation()?, Some(&files));
+                hydrate_usb_track_in_place(
+                    &mut track,
+                    self.key_notation()?,
+                    files.formats(),
+                    Some(&files),
+                );
                 // Inspected: whatever is still missing, this is all there is.
                 track.needs_hydration = false;
                 Ok(InspectUsbTrackData {
@@ -2983,9 +2993,8 @@ fn resolve_usb_track_from_sources(
                         key_color: None,
                         file_path: resolved_file_path,
                         needs_hydration: false,
-                        format_compat: super::format_compat::compute_usb_format_compat(
-                            format_ext.as_deref(),
-                        ),
+                        // Judged when the row is hydrated.
+                        format_compat: Default::default(),
                         format_ext,
                         usb_media_path: Some(t.track_file_path.clone()),
                         artwork_data_url: include_artwork_data_url
@@ -3046,6 +3055,7 @@ mod tests {
     };
     use crate::models::{UsbHistory, UsbTrack};
     use crate::pdb_reader::{PdbHistoryEntryRow, PdbHistoryPlaylistRow, PdbTrackRow};
+    use crate::service::usb_identity::DriveFormats;
     use std::collections::HashMap;
 
     #[test]
@@ -3100,6 +3110,37 @@ mod tests {
             || false,
         );
         assert!(page.items.iter().all(|t| t.artwork_data_url.is_some()));
+    }
+
+    #[test]
+    fn hydrated_usb_rows_follow_the_sticks_player_formats() {
+        let dir = tempfile::tempdir().expect("tempdir");
+        let items: Vec<(String, bool)> = crate::audio_format::PlayerFormat::DEFAULT_ORDER
+            .into_iter()
+            .map(|format| (format.id().to_string(), format.id() != "flac"))
+            .collect();
+        crate::service::usb_identity::write_drive_formats(
+            dir.path(),
+            &DriveFormats::from_request(&items).expect("formats"),
+        )
+        .expect("write formats");
+        let files = UsbDisplaySource::direct(dir.path());
+        let mut page = vec![
+            make_track("1", "/USB/Contents/a.flac"),
+            make_track("2", "/USB/Contents/b.mp3"),
+        ];
+        hydrate_usb_page(
+            "fetch_usb_playlist_tracks",
+            &mut page,
+            crate::service::key_notation::KeyNotation::Classic,
+            &files,
+            || false,
+        );
+        assert_eq!(
+            page[0].format_compat.warning.as_deref(),
+            Some("FLAC is not allowed on this USB (Player formats)")
+        );
+        assert_eq!(page[1].format_compat.warning, None);
     }
 
     fn make_track(id: &str, file_path: &str) -> UsbTrack {
@@ -3178,7 +3219,12 @@ mod tests {
         complete.artwork_path = Some("/USB/art/a.jpg".to_string());
         complete.bpm = Some(128.0);
         complete.key = Some("8A".to_string());
-        hydrate_usb_track_in_place(&mut complete, super::KeyNotation::Classic, None);
+        hydrate_usb_track_in_place(
+            &mut complete,
+            super::KeyNotation::Classic,
+            &DriveFormats::default(),
+            None,
+        );
         assert!(!complete.needs_hydration);
 
         // Any missing piece -> needs hydration.
@@ -3197,7 +3243,12 @@ mod tests {
             track.bpm = Some(128.0);
             track.key = Some("8A".to_string());
             tweak(&mut track);
-            hydrate_usb_track_in_place(&mut track, super::KeyNotation::Classic, None);
+            hydrate_usb_track_in_place(
+                &mut track,
+                super::KeyNotation::Classic,
+                &DriveFormats::default(),
+                None,
+            );
             assert!(
                 track.needs_hydration,
                 "expected needs_hydration after tweak"

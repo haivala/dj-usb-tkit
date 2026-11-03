@@ -1950,6 +1950,10 @@ button[data-export-playlist]:hover {
   color: var(--danger);
 }
 
+.playlist-format-warning {
+  color: var(--diag-warn);
+}
+
 .playlist-footer .playlist-export-status {
   margin: 8px 2px 0;
   padding-bottom: 10px;
@@ -3370,6 +3374,50 @@ td button[data-action]:disabled,
   background: var(--bg-elevated);
 }
 
+/* Player formats: the recent-USB chip look, with a drag handle and a
+   checkbox. */
+.usb-cfg-formats-bar {
+  margin-bottom: 10px;
+}
+
+.usb-cfg-formats-hint {
+  font-size: 11px;
+}
+
+.usb-cfg-formats-list {
+  display: flex;
+  gap: 6px;
+  flex-wrap: wrap;
+}
+
+.usb-cfg-format-chip {
+  gap: 4px;
+  padding-left: 4px;
+}
+
+.usb-cfg-format-chip.dragging {
+  opacity: 0.5;
+  border-style: dashed;
+}
+
+.usb-cfg-format-label {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  font-size: 11px;
+  color: var(--ink-secondary);
+  cursor: pointer;
+}
+
+.usb-cfg-format-check {
+  margin: 0;
+}
+
+.usb-cfg-formats-list.is-readonly .drag-handle {
+  cursor: not-allowed;
+  opacity: 0.4;
+}
+
 .usb-cfg-recent-btn {
   flex: 1 1 auto;
   font-size: 11px;
@@ -3475,19 +3523,35 @@ td button[data-action]:disabled,
   background: var(--surface-3, var(--accent-bg, var(--surface)));
   color: var(--ink);
 }
-/* Settings → Transcodes: the folder path, then its buttons (wrapping below
-   a long path). */
-.settings-folder-row {
+/* Settings → Transcodes: the folder path in a box (a long path wraps
+   anywhere), then a row with the default note and the buttons. */
+.settings-folder-path {
+  font-family: 'JetBrains Mono', monospace;
+  font-size: 11px;
+  line-height: 1.4;
+  color: var(--ink-secondary);
+  padding: 6px 8px;
+  border: 1px solid var(--line);
+  border-radius: 6px;
+  overflow-wrap: anywhere;
+}
+.settings-folder-actions {
   display: flex;
   align-items: center;
-  flex-wrap: wrap;
-  gap: 6px 10px;
-  font-size: 12px;
-  color: var(--ink-secondary);
+  justify-content: flex-end;
+  gap: 6px;
+  margin-top: 6px;
+  font-size: 11px;
 }
-.settings-folder-path {
-  overflow-wrap: anywhere;
-  min-width: 0;
+.settings-folder-actions > .muted {
+  margin-right: auto;
+}
+/* A section's explanation under its controls (no checkbox indent). */
+.settings-hint {
+  display: block;
+  font-size: 11px;
+  line-height: 1.4;
+  margin-top: 8px;
 }
 .essentia-node-link {
   color: var(--accent);

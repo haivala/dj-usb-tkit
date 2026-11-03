@@ -1126,6 +1126,22 @@ pub fn set_usb_device_name(
 }
 
 #[tauri::command]
+pub fn get_usb_formats(
+    state: State<'_, BackendCommands>,
+    request: crate::models::GetUsbFormatsRequest,
+) -> ApiResponse<crate::models::UsbFormatsData> {
+    state.get_usb_formats(request)
+}
+
+#[tauri::command]
+pub fn set_usb_formats(
+    state: State<'_, BackendCommands>,
+    request: crate::models::SetUsbFormatsRequest,
+) -> ApiResponse<crate::models::UsbFormatsData> {
+    state.set_usb_formats(request)
+}
+
+#[tauri::command]
 pub fn list_usb_backups(
     state: State<'_, BackendCommands>,
     request: ListUsbBackupsRequest,

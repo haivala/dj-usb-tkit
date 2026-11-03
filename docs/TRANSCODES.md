@@ -18,7 +18,10 @@ transcode is an extra file of that track:
   the warning colour and the tooltip says it is out of date. Convert again to
   replace it.
 
-USB export does not use transcodes yet.
+USB export does not use transcodes yet. Each USB's **Player formats** row (the USB view, see
+[USB_CONNECT.md](USB_CONNECT.md#player-formats)) says which formats its players read; an app
+playlist's title row counts the tracks in a format the connected USB doesn't allow, and how many
+of them have a transcode in one it does.
 
 ## Which tracks get one
 

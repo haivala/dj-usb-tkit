@@ -836,7 +836,8 @@ impl BackendService {
     }
 
     /// The playlist heading's export estimate (see `estimate_playlist_copy`)
-    /// against the USB's free space.
+    /// against the USB's free space, and its tracks in formats the USB's
+    /// Player formats don't allow.
     pub(crate) fn playlist_export_space(
         &self,
         playlist_id: &str,
@@ -849,11 +850,19 @@ impl BackendService {
         let available_bytes = usb_mount_available_bytes(usb_root);
         let fits = available_bytes
             .is_none_or(|available| export_space_shortfall(estimate.bytes, available).is_none());
+        let disallowed = super::usb_formats::count_disallowed_tracks(
+            &*self.db.connect()?,
+            &playlist.tracks,
+            &super::usb_identity::read_drive_formats(usb_root),
+        )?;
         Ok(PlaylistExportSpace {
             bytes_to_copy: estimate.bytes,
             tracks_to_copy: estimate.tracks,
             available_bytes,
             fits,
+            disallowed_tracks: disallowed.tracks,
+            disallowed_with_transcode: disallowed.with_transcode,
+            disallowed_transcode_format: disallowed.transcode_format,
         })
     }
 

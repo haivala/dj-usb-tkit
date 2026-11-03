@@ -720,7 +720,7 @@ export function updatePlaylistPanelTitle(ctx, playlist) {
 // playlist request count), and it is kept with the USB it was made for, so a
 // switched stick never shows another stick's numbers. A failed or missing
 // estimate just leaves the line hidden.
-function refreshPlaylistExportSpaceInBackground(ctx) {
+export function refreshPlaylistExportSpace(ctx) {
   const { state } = ctx;
   const playlist = getCurrentPlaylist(ctx);
   if (!playlist || !state.usbRoot || !state.usbRootValid) return;
@@ -741,7 +741,8 @@ function refreshPlaylistExportSpaceInBackground(ctx) {
 
 // What exporting the playlist to the connected USB would copy, against its
 // free space -- `exportSpace` from get_playlist_export_space (the backend
-// decides whether it fits). Hidden without a USB or an estimate.
+// decides whether it fits and counts the tracks the USB's Player formats
+// don't allow). Hidden without a USB or an estimate.
 function renderPlaylistExportSpace(ctx, playlist) {
   const { state, el } = ctx;
   if (!el?.playlistExportSpace) return;
@@ -750,6 +751,7 @@ function renderPlaylistExportSpace(ctx, playlist) {
     ? playlist.exportSpace
     : null;
   el.playlistExportSpace.classList.toggle("hidden", !space);
+  renderPlaylistFormatWarning(ctx, space);
   if (!space) return;
   const free = space.availableBytes == null ? null : `${formatByteSize(space.availableBytes)} free on USB`;
   const tracks = Number(space.tracksToCopy) || 0;
@@ -760,6 +762,25 @@ function renderPlaylistExportSpace(ctx, playlist) {
   const text = `${space.fits ? "" : "Doesn't fit: "}${parts.join(" · ")}`;
   el.playlistExportSpace.textContent = text;
   el.playlistExportSpace.classList.toggle("is-warning", !space.fits);
+}
+
+// "3 tracks in formats that are not allowed on this USB", from the export
+// estimate's counts.
+function renderPlaylistFormatWarning(ctx, space) {
+  const { el } = ctx;
+  if (!el?.playlistFormatWarning) return;
+  const disallowed = Number(space?.disallowedTracks) || 0;
+  el.playlistFormatWarning.classList.toggle("hidden", disallowed === 0);
+  if (!disallowed) return;
+  let text = `${counted(disallowed, "track")} in formats that are not allowed on this USB`;
+  const withTranscode = Number(space.disallowedWithTranscode) || 0;
+  if (withTranscode) {
+    const format = space.disallowedTranscodeFormat;
+    const what = format ? `${format === "WAV" ? "a" : "an"} ${format} transcode` : "a transcode in an allowed format";
+    const verb = withTranscode === 1 ? "has" : "have";
+    text += ` (${withTranscode} ${verb} ${what}; export doesn't use transcodes yet)`;
+  }
+  el.playlistFormatWarning.textContent = text;
 }
 
 export function populatePlaylistPanel(ctx, playlist) {
@@ -883,7 +904,7 @@ export function createPlaylistTracksController(ctx) {
     onPage: (_page, { first }) => {
       if (first) narrowTrackSelectionToLoaded(ctx, "playlist", getCurrentPlaylist(ctx)?.tracks || []);
       renderPlaylistPanelChrome(ctx);
-      if (first) refreshPlaylistExportSpaceInBackground(ctx);
+      if (first) refreshPlaylistExportSpace(ctx);
     },
   });
   return ctl;

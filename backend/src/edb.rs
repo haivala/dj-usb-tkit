@@ -28,7 +28,7 @@ pub struct ExportPlaylistData {
     pub tracks: Vec<ExportTrackData>,
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Default)]
 pub struct ExportTrackData {
     pub id: String,
     pub title: String,
