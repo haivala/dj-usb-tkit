@@ -39,6 +39,8 @@
 
 ## Unreleased
 
+## 0.5.3
+
 **Severity:** feature
 
 - **New feature:** Convert… in the Library and playlist selection bars makes an AIFF, WAV or
@@ -48,17 +50,19 @@
   source folders.
 - **New feature:** Audio formats in the USB view: tick the audio formats export puts on a USB,
   and drag them into your order of preference. Set them for the players at the next gig; the
-  setting is stored on the USB.
-  Export puts each track on the USB as the first file in a ticked format: the track's own file
-  or one of its transcodes. A lossless track with neither gets its transcode made during the
-  export; an MP3 or AAC track in a format the USB doesn't allow can't be converted, so the export
-  is refused and names it. A track already on the USB in a format since unticked stays there, in
-  the playlist too: its transcode is added next to it as a USB track of its own. Cues and the
-  beat grid move with an MP3's later start, and cues edited on such a USB track come back to the
-  library track in step. The USB's playlist and history
-  tracks in an unticked format get a warning in the FMT column. In an app playlist, the FMT column
-  shows the format each track goes on the selected USB in, with its own file as the source in
-  the tooltip, and the title row says how many tracks the export will convert or refuse.
+  setting is stored on the USB. Export puts each track on the USB as the first file in a ticked
+  format: the track's own file or one of its transcodes. A lossless track with neither gets its
+  transcode made during the export; an MP3 or AAC track in a format the USB doesn't allow can't
+  be converted, so the export is refused and names it. A track already on the USB in a format
+  since unticked stays there, in the playlist too: its transcode is added next to it as a USB
+  track of its own. Cues and the beat grid move with an MP3's later start, and cues edited on
+  such a USB track come back to the library track in step. The USB's playlist and history tracks
+  in an unticked format get a warning in the FMT column. In an app playlist, the FMT column shows
+  the format each track goes on the selected USB in, with its own file as the source in the
+  tooltip, and the title row says how many tracks the export will convert or refuse.
+- **Fix:** ALAC tracks (`.m4a`) are exported with the ALAC file type in the PDB and the eDB, as
+  rekordbox writes them, instead of the one for AAC. Exporting again corrects tracks already on a
+  USB.
 - **Fix:** On older macOS versions (Safari before 16.2), the cue editor no longer has a
   see-through background that shows the page under it. The few colours that used a newer CSS
   feature get a plain theme colour there instead.
@@ -66,9 +70,6 @@
   playlist is active. Rows shown before the playlists had loaded, or before the active playlist
   was renamed, kept that tooltip; it now says "Add to …" with the active playlist's name, as the
   header does.
-- **Fix:** ALAC tracks (`.m4a`) are exported with the ALAC file type in the PDB and the eDB, as
-  rekordbox writes them, instead of the one for AAC. Exporting again corrects tracks already on a
-  USB.
 - **Improvement:** Saving cue, beat grid, key or track detail edits on a USB track that one of
   the USB's two databases doesn't list is still refused, since it would leave them disagreeing,
   but the message now says so in plain words and points to Preview Fixes, which repairs it.
