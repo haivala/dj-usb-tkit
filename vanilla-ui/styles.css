@@ -337,6 +337,12 @@ body.library-onboarding {
   transition: all 150ms ease;
 }
 
+/* The cue editor makes the top bar inert: show its buttons as disabled. */
+.topbar[inert] .header-utility-group button {
+  opacity: 0.4;
+  cursor: not-allowed;
+}
+
 .event-log-btn {
   position: relative;
   font-size: 15px;

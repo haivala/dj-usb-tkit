@@ -39,6 +39,9 @@
 
 ## Unreleased
 
+- **Improvement:** While the cue editor is open, the Help, Settings and Event Log buttons in the
+  top bar look disabled. They already did nothing until the editor closed.
+
 ## 0.5.3
 
 **Severity:** feature
