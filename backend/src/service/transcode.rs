@@ -103,13 +103,12 @@ pub(crate) fn transcode_export_bundle(dir: &Path) -> AnlzBundlePaths {
     bundle_paths(dir, EXPORT_BUNDLE_STEM)
 }
 
-/// Draws the transcode's waveform bundle from its file. A failure is logged:
-/// export draws it again when it needs it.
+/// Draws the transcode's waveform bundle from its file. A failure is logged
+/// and leaves no bundle, so export draws it again when it needs it instead
+/// of using one drawn from an earlier file at this path.
 pub(crate) fn write_transcode_waveform_bundle(dir: &Path, transcode: &Path) -> bool {
-    match super::analysis::write_waveform_bundle_for_audio(
-        transcode,
-        &transcode_waveform_bundle(dir),
-    ) {
+    let paths = transcode_waveform_bundle(dir);
+    match super::analysis::write_waveform_bundle_for_audio(transcode, &paths) {
         Ok(()) => true,
         Err(err) => {
             crate::logging::emit(
@@ -117,6 +116,9 @@ pub(crate) fn write_transcode_waveform_bundle(dir: &Path, transcode: &Path) -> b
                 "transcode",
                 &format!("no waveform for transcode {}: {err}", transcode.display()),
             );
+            for path in [&paths.dat_path, &paths.ext_path, &paths.twoex_path] {
+                remove_file_if_present(path);
+            }
             false
         }
     }
@@ -864,6 +866,23 @@ mod tests {
         PathBuf::from(env!("CARGO_MANIFEST_DIR"))
             .join("tests/fixtures/audio")
             .join(name)
+    }
+
+    #[test]
+    fn a_waveform_bundle_that_cant_be_drawn_leaves_none_behind() {
+        let dir = tempfile::tempdir().unwrap();
+        let bundle = transcode_waveform_bundle(dir.path());
+        // Drawn from the file that was at this path before.
+        for path in [&bundle.dat_path, &bundle.ext_path, &bundle.twoex_path] {
+            std::fs::write(path, b"old").unwrap();
+        }
+        let not_audio = dir.path().join("broken.mp3");
+        std::fs::write(&not_audio, b"not audio").unwrap();
+
+        assert!(!write_transcode_waveform_bundle(dir.path(), &not_audio));
+        assert!(!bundle.dat_path.exists());
+        assert!(!bundle.ext_path.exists());
+        assert!(!bundle.twoex_path.exists());
     }
 
     struct Setup {

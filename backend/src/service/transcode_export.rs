@@ -222,7 +222,16 @@ pub(crate) fn plan_export_files(
                 })
                 .map(|stored| stored.file)
                 .collect();
-            choose_export_file(track, &up_to_date, formats)
+            match choose_export_file(track, &up_to_date, formats) {
+                // Nothing to convert from: export's own missing-file rule
+                // skips it and says so.
+                ExportFile::Make(_) | ExportFile::Refused(_)
+                    if facts == SourceFacts::OnDisk && !Path::new(&track.file_path).is_file() =>
+                {
+                    ExportFile::Source
+                }
+                file => file,
+            }
         })
         .collect())
 }
@@ -551,6 +560,32 @@ mod tests {
             plan(&fx, &tracks[1..2], &only_alac)[0],
             ExportFile::Refused(PlayerFormat::Flac)
         );
+    }
+
+    #[test]
+    fn a_missing_file_with_nothing_to_use_is_left_to_the_missing_file_rule() {
+        let fx = fixture(&[("a", "mp3", 100)]);
+        let dir = tempfile::tempdir().unwrap();
+        let here = dir.path().join("here.flac");
+        std::fs::write(&here, b"x").unwrap();
+        let tracks = [
+            // Its file is gone, its MP3 is still usable.
+            track("a", "/gone/a.flac", Some(16)),
+            track("flac", "/gone/b.flac", Some(16)),
+            track("aac", "/gone/c.m4a", None),
+            track("here", &here.to_string_lossy(), Some(16)),
+        ];
+        let got = plan_export_files(
+            &fx.conn,
+            &tracks,
+            &no(&["flac", "aac"]),
+            SourceFacts::OnDisk,
+        )
+        .unwrap();
+        assert!(matches!(got[0], ExportFile::Transcode(_)), "{:?}", got[0]);
+        assert_eq!(got[1], ExportFile::Source);
+        assert_eq!(got[2], ExportFile::Source);
+        assert_eq!(got[3], ExportFile::Make(TranscodeFormat::Aiff));
     }
 
     #[test]
