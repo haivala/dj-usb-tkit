@@ -224,6 +224,23 @@ pub fn rekordbox_file_type(ext: &str) -> i64 {
     AudioFormat::from_extension(ext).map_or(0, AudioFormat::rekordbox_file_type)
 }
 
+/// Whether a scanned `.m4a` holds ALAC rather than AAC: the scan records a
+/// bit depth only for lossless audio.
+pub fn m4a_is_alac_by_bit_depth(bit_depth: Option<u8>) -> bool {
+    bit_depth.is_some_and(|bits| bits > 0)
+}
+
+/// [`rekordbox_file_type`] for a scanned track: an `.m4a` holding ALAC is
+/// ALAC (6), as rekordbox writes it in both databases, not M4A (4).
+pub fn track_rekordbox_file_type(ext: &str, bit_depth: Option<u8>) -> i64 {
+    match AudioFormat::from_extension(ext) {
+        Some(AudioFormat::M4a) if m4a_is_alac_by_bit_depth(bit_depth) => {
+            AudioFormat::Alac.rekordbox_file_type()
+        }
+        _ => rekordbox_file_type(ext),
+    }
+}
+
 /// Whether two paths are the same audio format, spelling variants included.
 /// Two unknown extensions match when they are equal. This rules out an
 /// MP3/FLAC match; it does not prove equal encoding or file identity.
@@ -364,6 +381,21 @@ mod tests {
         assert!(!same_format_extension("x.mp3", "y.flac"));
         assert!(!same_format_extension("x.m4a", "y.aac"));
         assert!(!same_format_extension("x", "y"));
+    }
+
+    #[test]
+    fn scanned_alac_m4a_gets_the_alac_file_type() {
+        let fixtures = Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/fixtures/audio/formats");
+        let file_type = |name: &str| {
+            let scanned = crate::scanner::scan_audio_file(&fixtures.join(name)).expect("scan");
+            track_rekordbox_file_type(
+                scanned.format_ext.as_deref().expect("format_ext"),
+                scanned.bit_depth,
+            )
+        };
+        assert_eq!(file_type("track_format_alac.m4a"), 6);
+        assert_eq!(file_type("track_format_aac.m4a"), 4);
+        assert_eq!(file_type("track_format_flac_24bit.flac"), 5);
     }
 
     #[test]

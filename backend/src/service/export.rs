@@ -1828,6 +1828,7 @@ impl BackendService {
         )?;
         let rows = stmt.query_map(params![playlist_id], |row| {
             let file_path = row.get::<_, String>(7)?;
+            let bit_depth = row.get::<_, Option<u8>>(11)?;
             let file_name = Path::new(&file_path)
                 .file_name()
                 .and_then(|s| s.to_str())
@@ -1846,7 +1847,7 @@ impl BackendService {
                 file_timestamp_at: row.get(8)?,
                 file_size_bytes: row.get(9)?,
                 sample_rate_hz: row.get(10)?,
-                bit_depth: row.get(11)?,
+                bit_depth,
                 bitrate_kbps: row.get(12)?,
                 disc_number: row.get(13)?,
                 subtitle: row.get(14)?,
@@ -1874,7 +1875,7 @@ impl BackendService {
                 file_type: row
                     .get::<_, Option<String>>(36)?
                     .as_deref()
-                    .map(crate::audio_format::rekordbox_file_type),
+                    .map(|ext| crate::audio_format::track_rekordbox_file_type(ext, bit_depth)),
                 first_beat_ms: row.get::<_, Option<i64>>(37)?.map(|v| v as u32),
                 beatgrid_from_rekordbox: row.get(38)?,
                 cues: Vec::new(),
@@ -2749,6 +2750,14 @@ mod tests {
             [],
         )
         .expect("insert track b");
+        // `.m4a`: ALAC (a bit depth) and AAC.
+        conn.execute(
+            "INSERT INTO tracks (id, title, artist, file_path, format_ext, bit_depth, created_at, updated_at)
+             VALUES ('t3', 'Song C', 'Artist', '/music/c.m4a', 'm4a', 24, datetime('now'), datetime('now')),
+                    ('t4', 'Song D', 'Artist', '/music/d.m4a', 'm4a', NULL, datetime('now'), datetime('now'))",
+            [],
+        )
+        .expect("insert m4a tracks");
         drop(conn);
 
         let playlist = service
@@ -2759,7 +2768,12 @@ mod tests {
         service
             .add_tracks_to_playlist(crate::models::AddTracksToPlaylistRequest {
                 playlist_id: playlist.playlist_id.clone(),
-                track_ids: vec!["t2".to_string(), "t1".to_string()],
+                track_ids: vec![
+                    "t2".to_string(),
+                    "t1".to_string(),
+                    "t3".to_string(),
+                    "t4".to_string(),
+                ],
             })
             .expect("add tracks");
 
@@ -2773,10 +2787,11 @@ mod tests {
                 .iter()
                 .map(|t| t.id.clone())
                 .collect::<Vec<_>>(),
-            vec!["t2".to_string(), "t1".to_string()]
+            vec!["t2", "t1", "t3", "t4"]
         );
         assert_eq!(loaded.tracks[0].file_name, "b.flac");
-        assert_eq!(loaded.tracks[0].file_type, Some(5));
+        let file_types: Vec<_> = loaded.tracks.iter().map(|t| t.file_type).collect();
+        assert_eq!(file_types, vec![Some(5), Some(1), Some(6), Some(4)]);
     }
 
     // --- verify_export_outputs ---

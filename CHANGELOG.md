@@ -49,6 +49,9 @@
   Its playlist and history tracks in an unticked format get a warning in the FMT column, and an
   app playlist's title row says how many of its tracks are in formats the connected USB doesn't
   allow, and how many of those have a transcode in one it does. Export doesn't change yet.
+- **Fix:** ALAC tracks (`.m4a`) are exported with the ALAC file type in the PDB and the eDB, as
+  rekordbox writes them, instead of the one for AAC. Exporting again corrects tracks already on a
+  USB.
 - **Improvement:** Saving cue, beat grid, key or track detail edits on a USB track that one of
   the USB's two databases doesn't list is still refused, since it would leave them disagreeing,
   but the message now says so in plain words and points to Preview Fixes, which repairs it.

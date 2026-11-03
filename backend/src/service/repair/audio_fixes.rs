@@ -1291,10 +1291,9 @@ impl BackendService {
                 release_year: scanned.release_year,
                 release_date: scanned.release_date,
                 recorded_date: scanned.recorded_date,
-                file_type: scanned
-                    .format_ext
-                    .as_deref()
-                    .map(crate::audio_format::rekordbox_file_type),
+                file_type: scanned.format_ext.as_deref().map(|ext| {
+                    crate::audio_format::track_rekordbox_file_type(ext, scanned.bit_depth)
+                }),
                 owns_exported_media: false,
                 owns_artwork: false,
                 owns_waveform: false,

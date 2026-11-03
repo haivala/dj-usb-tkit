@@ -688,6 +688,10 @@ Known file type codes used by export:
 | WAV | `11` |
 | AIFF | `12` |
 
+An `.m4a` holding ALAC gets ALAC (`6`), not M4A (`4`), as rekordbox writes it in
+both the PDB and the eDB. The scan records a bit depth only for lossless audio,
+which tells ALAC from AAC (`audio_format::track_rekordbox_file_type`).
+
 ## Track String Slots
 
 Track rows contain 21 string slots. The current encoder writes these mapped

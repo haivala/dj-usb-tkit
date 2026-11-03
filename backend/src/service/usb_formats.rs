@@ -13,7 +13,9 @@ use std::path::Path;
 
 use rusqlite::params_from_iter;
 
-use crate::audio_format::{PlayerFormat, PlayerFormatOfExtension, format_ext_from_path};
+use crate::audio_format::{
+    PlayerFormat, PlayerFormatOfExtension, format_ext_from_path, m4a_is_alac_by_bit_depth,
+};
 use crate::edb::ExportTrackData;
 use crate::error::{BackendError, BackendResult};
 use crate::models::{GetUsbFormatsRequest, SetUsbFormatsRequest, UsbFormatSetting, UsbFormatsData};
@@ -79,7 +81,7 @@ pub(crate) fn library_player_format(
     let ext = format_ext_from_path(file_path)?;
     match PlayerFormat::of_extension(&ext) {
         PlayerFormatOfExtension::Known(format) => Some(format),
-        PlayerFormatOfExtension::AlacOrAac => Some(if bit_depth.is_some_and(|bits| bits > 0) {
+        PlayerFormatOfExtension::AlacOrAac => Some(if m4a_is_alac_by_bit_depth(bit_depth) {
             PlayerFormat::Alac
         } else {
             PlayerFormat::Aac
