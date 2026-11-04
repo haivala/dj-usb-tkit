@@ -146,9 +146,22 @@ test("can create and delete playlist via sidebar", async ({ page }) => {
   await expect(page.locator("#badgeLabel")).toHaveText("Smoke Playlist");
 
   // Delete the playlist
+  // Sidebar icon clicks suppress mousedown focus; establish the focus to restore.
+  await playlistItem.locator("[data-delete-playlist]").focus();
   await playlistItem.locator("[data-delete-playlist]").click();
   const confirmOverlay = page.locator("#confirmOverlay");
   await expect(confirmOverlay).toBeVisible();
+  for (const dismissal of ["Escape", "backdrop", "Cancel"]) {
+    await expect(page.locator("#confirmOkBtn")).toBeFocused();
+    if (dismissal === "Escape") await page.keyboard.press("Escape");
+    else if (dismissal === "backdrop") await confirmOverlay.click({ position: { x: 5, y: 5 } });
+    else await page.locator("#confirmCancelBtn").click();
+    await expect(confirmOverlay).toBeHidden();
+    await expect(playlistItem.locator("[data-delete-playlist]")).toBeFocused();
+    await expect(playlistItem).toBeVisible();
+    expect(await page.evaluate(() => window.__calls.filter((c) => c.command === "delete_playlist"))).toHaveLength(0);
+    await playlistItem.locator("[data-delete-playlist]").click();
+  }
   await page.locator("#confirmOkBtn").click();
 
   await expect(page.locator("#navPlaylistList .nav-playlist-item")).toHaveCount(0);

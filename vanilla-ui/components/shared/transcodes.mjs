@@ -5,20 +5,14 @@
 
 import { counted } from "../../track_utils.mjs";
 import { cloneTemplate } from "../../ui_utils.mjs";
+import { createDialogLifecycle } from "./dialog_lifecycle.mjs";
 
 // The Convert… dialog. `open({ count, folder, formats })` (the backend's
 // get_transcode_formats choices) resolves with
 // `{ action: "convert", format }`, `{ action: "remove" }`, or null on cancel.
 export function createConvertDialogController(el, document) {
-  let resolveFn = null;
-
-  function close(result) {
-    if (!resolveFn) return;
-    el.convertOverlay.hidden = true;
-    const resolve = resolveFn;
-    resolveFn = null;
-    resolve(result);
-  }
+  const dialog = createDialogLifecycle(el.convertOverlay);
+  const { close } = dialog;
 
   function chosenFormat() {
     return el.convertFormatGroup.querySelector("input[name='convertFormat']:checked")?.value || "";
@@ -27,20 +21,12 @@ export function createConvertDialogController(el, document) {
   el.convertApplyBtn.addEventListener("click", () => close({ action: "convert", format: chosenFormat() }));
   el.convertRemoveBtn.addEventListener("click", () => close({ action: "remove" }));
   el.convertCancelBtn.addEventListener("click", () => close(null));
-  el.convertOverlay.addEventListener("click", (event) => {
-    if (event.target === el.convertOverlay) close(null);
-  });
-  document.addEventListener("keydown", (event) => {
-    if (!resolveFn || event.key !== "Escape") return;
-    event.preventDefault();
-    close(null);
-  });
 
   return {
-    isOpen: () => !!resolveFn,
+    isOpen: dialog.isOpen,
     close,
     open({ count = 0, folder = "", formats = [] }) {
-      if (resolveFn) close(null);
+      close();
       el.convertTitle.textContent = `Convert ${counted(count, "track")}`;
       el.convertFolderText.textContent = folder;
       el.convertFormatGroup.querySelectorAll("label").forEach((row) => row.remove());
@@ -52,11 +38,7 @@ export function createConvertDialogController(el, document) {
         row.querySelector("span").textContent = choice.label;
         el.convertFormatGroup.appendChild(row);
       }
-      el.convertOverlay.hidden = false;
-      el.convertApplyBtn.focus();
-      return new Promise((resolve) => {
-        resolveFn = resolve;
-      });
+      return dialog.open(el.convertApplyBtn);
     },
   };
 }

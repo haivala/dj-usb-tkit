@@ -51,6 +51,12 @@
   the same, and the GPU has less work to do on every playback frame.
 - **Improvement:** While the cue editor is open, the Help, Settings and Event Log buttons in the
   top bar look disabled. They already did nothing until the editor closed.
+- **Improvement:** Closing a confirmation, playlist import, tracklist export, bulk Edit, Add to,
+  Convert or drive-name dialog restores focus to the previously focused control when it is
+  still present.
+- **Chore:** Those seven dialogs share their open/close, cancellation and event-listener cleanup
+  code. About 1.3 KB less JavaScript in the app. Existing unit and browser tests now also check
+  repeated dismissal, reopening and focus restoration.
 - **Chore:** The UI code no longer checks whether its own page elements exist before using them;
   every one is always there. The unit tests that relied on those checks now run on the real
   page. About 250 fewer lines of JavaScript.

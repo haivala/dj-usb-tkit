@@ -6,6 +6,7 @@
 // show as they are.
 
 import { counted } from "../../track_utils.mjs";
+import { createDialogLifecycle } from "./dialog_lifecycle.mjs";
 import { isUsbRootChangeBlocked } from "../usb/actions.mjs";
 
 // The shape of a release date the editors send: YYYY, YYYY-MM or YYYY-MM-DD
@@ -78,7 +79,8 @@ export async function editTrackSelection(ctx, view, ids, rows) {
 // releaseDate?, rating? }`; an empty genre / release date clears it), or null
 // on cancel.
 export function createGroupEditDialogController(el, document) {
-  let resolveFn = null;
+  const dialog = createDialogLifecycle(el.groupEditOverlay);
+  const { close } = dialog;
   let touched = new Set();
   let rating = 0;
 
@@ -88,14 +90,6 @@ export function createGroupEditDialogController(el, document) {
       star.classList.toggle("is-on", n <= rating);
       star.setAttribute("aria-checked", String(n === rating));
     }
-  }
-
-  function close(result) {
-    if (!resolveFn) return;
-    el.groupEditOverlay.hidden = true;
-    const resolve = resolveFn;
-    resolveFn = null;
-    resolve(result);
   }
 
   function apply() {
@@ -130,25 +124,19 @@ export function createGroupEditDialogController(el, document) {
   });
   el.groupEditApplyBtn.addEventListener("click", apply);
   el.groupEditCancelBtn.addEventListener("click", () => close(null));
-  el.groupEditOverlay.addEventListener("click", (event) => {
-    if (event.target === el.groupEditOverlay) close(null);
-  });
   document.addEventListener("keydown", (event) => {
-    if (!resolveFn) return;
-    if (event.key === "Escape") {
-      event.preventDefault();
-      close(null);
-    } else if (event.key === "Enter" && event.target?.tagName === "INPUT") {
+    if (!dialog.isOpen()) return;
+    if (event.key === "Enter" && event.target?.tagName === "INPUT") {
       event.preventDefault();
       apply();
     }
   });
 
   return {
-    isOpen: () => !!resolveFn,
+    isOpen: dialog.isOpen,
     close,
     open(summary) {
-      if (resolveFn) close(null);
+      close();
       touched = new Set();
       const count = Number(summary?.count || 0);
       el.groupEditTitle.textContent = `Edit ${counted(count, "track")}`;
@@ -165,11 +153,7 @@ export function createGroupEditDialogController(el, document) {
       rating = summary?.rating?.mixed ? 0 : Number(summary?.rating?.value || 0);
       el.groupEditRatingMixed.hidden = !summary?.rating?.mixed;
       renderRating();
-      el.groupEditOverlay.hidden = false;
-      el.groupEditGenre.focus();
-      return new Promise((resolve) => {
-        resolveFn = resolve;
-      });
+      return dialog.open(el.groupEditGenre);
     },
   };
 }

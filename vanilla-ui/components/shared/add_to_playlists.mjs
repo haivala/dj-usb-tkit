@@ -5,6 +5,7 @@
 
 import { counted } from "../../track_utils.mjs";
 import { cloneTemplate } from "../../ui_utils.mjs";
+import { createDialogLifecycle } from "./dialog_lifecycle.mjs";
 import { applyAddResolutions, toAddTrackCandidatePayload } from "../playlist/actions.mjs";
 
 const USB_VIEWS = new Set(["usbPlaylist", "usbHistory"]);
@@ -79,9 +80,10 @@ export async function addSelectionToPlaylists(ctx, view, ids, rows) {
 // null on cancel. A playlist holding the whole selection can't be ticked;
 // one holding part of it shows as partly ticked until it is.
 export function createAddToDialogController(el, document) {
-  let resolveFn = null;
   let request = null;
   let checked = new Set();
+  const dialog = createDialogLifecycle(el.addToOverlay, { onClose: () => { request = null; } });
+  const { close } = dialog;
 
   function sync() {
     el.addToApplyBtn.disabled = checked.size === 0;
@@ -114,22 +116,13 @@ export function createAddToDialogController(el, document) {
     sync();
   }
 
-  function close(result) {
-    if (!resolveFn) return;
-    el.addToOverlay.hidden = true;
-    const resolve = resolveFn;
-    resolveFn = null;
-    request = null;
-    resolve(result);
-  }
-
   async function createNew() {
     const name = el.addToNewName.value.trim();
     if (!name || !request) return;
     el.addToCreateBtn.disabled = true;
     const { load, create } = request;
     const id = await create(name);
-    if (!id || !resolveFn) {
+    if (!id || !dialog.isOpen()) {
       sync();
       return;
     }
@@ -152,35 +145,25 @@ export function createAddToDialogController(el, document) {
     [...el.addToList.querySelectorAll("input:checked:not(:disabled)")].map((box) => box.value),
   ));
   el.addToCancelBtn.addEventListener("click", () => close(null));
-  el.addToOverlay.addEventListener("click", (event) => {
-    if (event.target === el.addToOverlay) close(null);
-  });
   document.addEventListener("keydown", (event) => {
-    if (!resolveFn) return;
-    if (event.key === "Escape") {
-      event.preventDefault();
-      close(null);
-    } else if (event.key === "Enter" && event.target === el.addToNewName) {
+    if (!dialog.isOpen()) return;
+    if (event.key === "Enter" && event.target === el.addToNewName) {
       event.preventDefault();
       createNew();
     }
   });
 
   return {
-    isOpen: () => !!resolveFn,
+    isOpen: dialog.isOpen,
     close,
     async open({ count = 0, load, create }) {
-      if (resolveFn) close(null);
+      close();
       checked = new Set();
       el.addToNewName.value = "";
       el.addToTitle.textContent = `Add ${counted(count, "track")} to playlists`;
       render(await load());
       request = { load, create };
-      el.addToOverlay.hidden = false;
-      (el.addToList.querySelector("input:not(:disabled)") || el.addToNewName).focus();
-      return new Promise((resolve) => {
-        resolveFn = resolve;
-      });
+      return dialog.open(el.addToList.querySelector("input:not(:disabled)") || el.addToNewName);
     },
   };
 }

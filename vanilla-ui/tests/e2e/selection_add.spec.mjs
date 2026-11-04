@@ -592,6 +592,17 @@ test("Convert… makes transcodes of the selection, shown under the format; Remo
   await expect(bar.locator('[data-selection-action="convert"]')).toBeDisabled();
 
   await tickRows(page, "libraryTableBody", 2);
+  const convert = bar.locator('[data-selection-action="convert"]');
+  for (const dismissal of ["Escape", "backdrop", "Cancel"]) {
+    await convert.click();
+    await expect(page.locator("#convertApplyBtn")).toBeFocused();
+    if (dismissal === "Escape") await page.keyboard.press("Escape");
+    else if (dismissal === "backdrop") await page.locator("#convertOverlay").click({ position: { x: 5, y: 5 } });
+    else await page.locator("#convertCancelBtn").click();
+    await expect(page.locator("#convertOverlay")).toBeHidden();
+    await expect(convert).toBeFocused();
+  }
+  expect((await page.evaluate(() => window.__calls)).filter((c) => c.command === "transcode_tracks")).toHaveLength(0);
   await bar.locator('[data-selection-action="convert"]').click();
   await expect(page.locator("#convertOverlay")).toBeVisible();
   await expect(page.locator("#convertTitle")).toHaveText("Convert 2 tracks");
@@ -731,6 +742,20 @@ test("Edit… shows what the selection shares and saves only the changed fields 
   await expect(page.locator("#groupEditReleaseDate")).toHaveValue("2001-04-02");
   await expect(page.locator("#groupEditGenreOptions option")).toHaveCount(2);
 
+  const edit = page.locator(`${libraryBar} [data-selection-action="edit"]`);
+  for (const dismissal of ["Escape", "backdrop", "Cancel"]) {
+    await page.locator("#groupEditGenre").fill("Discard this edit");
+    if (dismissal === "Escape") await page.keyboard.press("Escape");
+    else if (dismissal === "backdrop") await dialog.click({ position: { x: 5, y: 5 } });
+    else await page.locator("#groupEditCancelBtn").click();
+    await expect(dialog).toBeHidden();
+    await expect(edit).toBeFocused();
+    expect((await page.evaluate(() => window.__calls)).filter((c) => c.command === "save_track_metadata_edits")).toHaveLength(0);
+    await edit.click();
+    await expect(page.locator("#groupEditGenre")).toBeFocused();
+    await expect(page.locator("#groupEditGenre")).toHaveValue("");
+  }
+
   await page.locator("#groupEditGenre").fill("Techno");
   await page.locator("#groupEditRating [data-rating='4']").click();
   // A date that isn't YYYY, YYYY-MM or YYYY-MM-DD keeps the dialog open.
@@ -840,6 +865,16 @@ test("+ Add to names the active playlist; Add to… shows what each playlist hol
   await expect(page.locator("#addToApplyBtn")).toBeDisabled();
   await page.keyboard.press("Escape");
   await expect(dialog).toBeHidden();
+  await expect(addTo).toBeFocused();
+  for (const dismissal of ["backdrop", "Cancel"]) {
+    await addTo.click();
+    await expect(dialog).toBeVisible();
+    if (dismissal === "backdrop") await dialog.click({ position: { x: 5, y: 5 } });
+    else await page.locator("#addToCancelBtn").click();
+    await expect(dialog).toBeHidden();
+    await expect(addTo).toBeFocused();
+  }
+  expect((await page.evaluate(() => window.__calls)).filter((c) => c.command === "add_library_selection_to_playlists")).toHaveLength(1);
 });
 
 test("Add to… from a USB playlist sends the rows' library matches and the rows themselves", async ({ page }) => {

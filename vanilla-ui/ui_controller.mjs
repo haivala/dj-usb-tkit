@@ -14,6 +14,7 @@ import { renderEmptyState } from "./components/shell/actions.mjs";
 import { scanLibraryButtonLabel } from "./components/library/actions.mjs";
 import { renderAllSelectionBars, renderSelectionBar } from "./components/shared/track_selection.mjs";
 import { clearManualUpdateCheck } from "./update_check.mjs";
+import { createDialogLifecycle } from "./components/shared/dialog_lifecycle.mjs";
 
 export function updateActivePlaylistIndicators(ctx) {
   const { state, el } = ctx;
@@ -146,50 +147,25 @@ export function syncLibraryOnboardingMode(ctx) {
 }
 
 export function createConfirmDialogController(el) {
-  let confirmResolve = null;
-  let confirmOpen = false;
+  const dialog = createDialogLifecycle(el.confirmOverlay, { cancelValue: false });
 
   return {
-    isOpen() {
-      return confirmOpen;
-    },
-    close(result) {
-      if (!confirmOpen) return;
-      confirmOpen = false;
-      el.confirmOverlay.hidden = true;
-      const resolver = confirmResolve;
-      confirmResolve = null;
-      if (resolver) resolver(!!result);
-    },
+    isOpen: dialog.isOpen,
+    close: (result) => dialog.close(!!result),
     open({ title, message, confirmLabel = "Confirm" }) {
-      if (confirmOpen) {
-        this.close(false);
-      }
-      confirmOpen = true;
       el.confirmTitle.textContent = title || "Confirm";
       el.confirmMessage.textContent = message || "";
       el.confirmOkBtn.textContent = confirmLabel;
-      el.confirmOverlay.hidden = false;
-      el.confirmOkBtn.focus();
-      return new Promise((resolve) => {
-        confirmResolve = resolve;
-      });
+      return dialog.open(el.confirmOkBtn);
     }
   };
 }
 
-// Picker for importing one external playlist. `open({ groups })` takes
-// `[{ label, items }]` (one <optgroup> each) and resolves with the chosen
-// item plus `force` (the "force update" checkbox), or null when cancelled.
-// The line under the select shows the chosen item's `description` -- the
-// group isn't visible once the list is closed -- and the checkbox names its
-// `sourceLabel`.
 // The Import Playlists dialog: every importable list, a column per library
 // grouped by kind, to tick any number of. Resolves with the ticked items in
 // list order (each with `force`), or null on cancel.
 export function createPlaylistImportDialogController(el, document) {
-  let resolveFn = null;
-  let isOpen = false;
+  const dialog = createDialogLifecycle(el.playlistImportOverlay);
   let items = [];
 
   function populate(columns) {
@@ -243,38 +219,24 @@ export function createPlaylistImportDialogController(el, document) {
 
   return {
     sync,
-    isOpen() {
-      return isOpen;
-    },
+    isOpen: dialog.isOpen,
     close(confirmed) {
-      if (!isOpen) return;
-      isOpen = false;
-      el.playlistImportOverlay.hidden = true;
+      if (!dialog.isOpen()) return;
       const force = !!el.playlistImportForce.checked;
       const chosen = confirmed ? checkedItems().map((item) => ({ ...item, force })) : [];
-      const resolver = resolveFn;
-      resolveFn = null;
-      if (resolver) resolver(chosen.length ? chosen : null);
+      dialog.close(chosen.length ? chosen : null);
     },
     open({ columns = [] } = {}) {
-      if (isOpen) {
-        this.close(false);
-      }
-      isOpen = true;
+      dialog.close();
       el.playlistImportForce.checked = false;
       populate(columns);
-      el.playlistImportOverlay.hidden = false;
-      el.playlistImportList.querySelector("input")?.focus();
-      return new Promise((resolve) => {
-        resolveFn = resolve;
-      });
+      return dialog.open(el.playlistImportList.querySelector("input"));
     }
   };
 }
 
 export function createTracklistExportDialogController(el) {
-  let resolveFn = null;
-  let isOpen = false;
+  const dialog = createDialogLifecycle(el.tracklistExportOverlay);
 
   function syncPlacementVisibility() {
     const enabled = !!el.tracklistExportTimesToggle.checked;
@@ -292,31 +254,15 @@ export function createTracklistExportDialogController(el) {
   }
 
   return {
-    isOpen() {
-      return isOpen;
-    },
-    close(result) {
-      if (!isOpen) return;
-      isOpen = false;
-      el.tracklistExportOverlay.hidden = true;
-      const resolver = resolveFn;
-      resolveFn = null;
-      if (resolver) resolver(result || null);
-    },
+    isOpen: dialog.isOpen,
+    close: (result) => dialog.close(result || null),
     open({ tracks = [], defaultTimesEnabled = true, defaultPlacement = "before" } = {}) {
-      if (isOpen) {
-        this.close(null);
-      }
-      isOpen = true;
+      dialog.close();
       populateStartTrackOptions(tracks);
       el.tracklistExportTimesToggle.checked = defaultTimesEnabled;
       el.tracklistExportPlacement.value = defaultPlacement;
       syncPlacementVisibility();
-      el.tracklistExportOverlay.hidden = false;
-      el.tracklistExportOkBtn.focus();
-      return new Promise((resolve) => {
-        resolveFn = resolve;
-      });
+      return dialog.open(el.tracklistExportOkBtn);
     },
     syncPlacementVisibility
   };

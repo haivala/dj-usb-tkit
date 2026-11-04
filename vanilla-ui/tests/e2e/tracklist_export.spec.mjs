@@ -134,6 +134,16 @@ test("Export Tracklist dialog's start-track select is populated from the selecte
   // Closing and reopening must rebuild the option list, not append to it.
   await page.locator("#tracklistExportCancelBtn").click();
   await expect(page.locator("#tracklistExportOverlay")).toBeHidden();
+  await expect(page.locator("#exportHistoryTracklistBtn")).toBeFocused();
+  // Escape and backdrop dismissal also restore focus and allow reopening.
+  for (const dismissal of ["Escape", "backdrop"]) {
+    await page.locator("#exportHistoryTracklistBtn").click();
+    await expect(page.locator("#tracklistExportOkBtn")).toBeFocused();
+    if (dismissal === "Escape") await page.keyboard.press("Escape");
+    else await page.locator("#tracklistExportOverlay").click({ position: { x: 5, y: 5 } });
+    await expect(page.locator("#tracklistExportOverlay")).toBeHidden();
+    await expect(page.locator("#exportHistoryTracklistBtn")).toBeFocused();
+  }
   await page.locator("#exportHistoryTracklistBtn").click();
   await expect(page.locator("#tracklistExportOverlay")).toBeVisible();
   await expect(options).toHaveCount(4);

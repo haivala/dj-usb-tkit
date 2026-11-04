@@ -2,6 +2,7 @@ import { warningEntryText } from "../library/actions.mjs";
 import { createTrackListController } from "../shared/track_list_controller.mjs";
 import { narrowTrackSelectionToLoaded } from "../shared/track_selection.mjs";
 import { cloneTemplate } from "../../ui_utils.mjs";
+import { createDialogLifecycle } from "../shared/dialog_lifecycle.mjs";
 import { STORAGE_KEY_USB_ROOT, STORAGE_KEY_EXPORT_ENGINE_LIBRARY } from "../../settings_keys.mjs";
 import {
   renderTrackListDurationSummary,
@@ -570,7 +571,7 @@ export async function renameDrive(ctx) {
 // the template's texts show. Resolves to the saved name, or null if closed
 // without saving.
 async function openDriveNameDialog(ctx, { mode, initial }) {
-  const { state, el, command, document: doc } = ctx;
+  const { state, el, command } = ctx;
   const overlay = el.driveNameOverlay;
   for (const node of overlay.querySelectorAll("[data-drive-name-mode]")) {
     node.hidden = !node.dataset.driveNameMode.split(" ").includes(mode);
@@ -583,59 +584,43 @@ async function openDriveNameDialog(ctx, { mode, initial }) {
   // and an explicit "Not now"/"Cancel" button all close it without a name,
   // in addition to Save. A prompt with no way out would silently freeze the
   // entire app if anything about it ever misbehaves.
-  return new Promise((resolve) => {
-    el.driveNameInput.value = initial || "";
-    el.driveNameError.hidden = true;
-    overlay.hidden = false;
-    el.driveNameInput.focus();
-    el.driveNameInput.select();
-
-    const cleanup = () => {
-      overlay.hidden = true;
+  const dialog = createDialogLifecycle(overlay, {
+    onClose() {
       el.driveNameOkBtn.removeEventListener("click", onSave);
       el.driveNameSkipBtn.removeEventListener("click", onSkip);
       el.driveNameInput.removeEventListener("keydown", onEnter);
-      doc.removeEventListener("keydown", onEscape);
-      overlay.removeEventListener("click", onOverlayClick);
-    };
-    const onSave = async () => {
-      const name = String(el.driveNameInput.value || "").trim();
-      if (!name) {
-        el.driveNameError.textContent = "Enter a name for this drive.";
-        el.driveNameError.hidden = false;
-        return;
-      }
-      try {
-        await command("set_usb_device_name", { usbRoot: state.usbRoot, name });
-        state.usbDeviceName = name;
-        state.usbNameTakenBy = null;
-        ctx.updateUsbNameBadge();
-        cleanup();
-        resolve(name);
-      } catch (err) {
-        el.driveNameError.textContent = err?.message || String(err);
-        el.driveNameError.hidden = false;
-      }
-    };
-    const onSkip = () => {
-      cleanup();
-      resolve(null);
-    };
-    const onEnter = (event) => {
-      if (event.key === "Enter") onSave();
-    };
-    const onEscape = (event) => {
-      if (event.key === "Escape") onSkip();
-    };
-    const onOverlayClick = (event) => {
-      if (event.target === overlay) onSkip();
-    };
-    el.driveNameOkBtn.addEventListener("click", onSave);
-    el.driveNameSkipBtn.addEventListener("click", onSkip);
-    el.driveNameInput.addEventListener("keydown", onEnter);
-    doc.addEventListener("keydown", onEscape);
-    overlay.addEventListener("click", onOverlayClick);
+    },
   });
+  const onSave = async () => {
+    const name = String(el.driveNameInput.value || "").trim();
+    if (!name) {
+      el.driveNameError.textContent = "Enter a name for this drive.";
+      el.driveNameError.hidden = false;
+      return;
+    }
+    try {
+      await command("set_usb_device_name", { usbRoot: state.usbRoot, name });
+      state.usbDeviceName = name;
+      state.usbNameTakenBy = null;
+      ctx.updateUsbNameBadge();
+      dialog.close(name);
+    } catch (err) {
+      el.driveNameError.textContent = err?.message || String(err);
+      el.driveNameError.hidden = false;
+    }
+  };
+  const onSkip = () => dialog.close();
+  const onEnter = (event) => {
+    if (event.key === "Enter") onSave();
+  };
+  el.driveNameInput.value = initial || "";
+  el.driveNameError.hidden = true;
+  el.driveNameOkBtn.addEventListener("click", onSave);
+  el.driveNameSkipBtn.addEventListener("click", onSkip);
+  el.driveNameInput.addEventListener("keydown", onEnter);
+  const result = dialog.open(el.driveNameInput);
+  el.driveNameInput.select();
+  return result;
 }
 
 export async function validateAndSetUsbRoot(ctx, path, silent = false) {

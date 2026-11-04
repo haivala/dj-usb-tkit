@@ -165,11 +165,6 @@ export function bindUsbEvents(ctx) {
   el.tracklistExportCancelBtn.addEventListener("click", () => {
     tracklistExportDialog?.close(null);
   });
-  el.tracklistExportOverlay.addEventListener("click", (event) => {
-    if (event.target === el.tracklistExportOverlay) {
-      tracklistExportDialog?.close(null);
-    }
-  });
 
   el.usbPlayerMenuAddBtn.addEventListener("click", () => {
     addUsbPlayerMenuItems().catch(catchErr(emitStatus));

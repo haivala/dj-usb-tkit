@@ -97,9 +97,6 @@ export function bindPlaylistEvents(ctx) {
   el.playlistImportCancelBtn.addEventListener("click", () => {
     playlistImportDialog?.close(false);
   });
-  el.playlistImportOverlay.addEventListener("click", (event) => {
-    if (event.target === el.playlistImportOverlay) playlistImportDialog?.close(false);
-  });
 
   let playlistSearchTimer = null;
   el.playlistSearchInput.addEventListener("input", () => {

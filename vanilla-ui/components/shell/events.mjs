@@ -14,8 +14,6 @@ export function bindShellEvents(ctx) {
     document,
     window,
     confirmDialog,
-    tracklistExportDialog,
-    playlistImportDialog,
     persistSetting,
     emitStatus,
     switchView,
@@ -73,34 +71,11 @@ export function bindShellEvents(ctx) {
 
   el.confirmOkBtn.addEventListener("click", () => confirmDialog.close(true));
   el.confirmCancelBtn.addEventListener("click", () => confirmDialog.close(false));
-  el.confirmOverlay.addEventListener("click", (event) => {
-    if (event.target === el.confirmOverlay) confirmDialog.close(false);
-  });
   document.addEventListener("keydown", (event) => {
     if (!confirmDialog.isOpen()) return;
-    if (event.key === "Escape") {
-      event.preventDefault();
-      confirmDialog.close(false);
-    }
     if (event.key === "Enter" && document.activeElement === el.confirmOkBtn) {
       event.preventDefault();
       confirmDialog.close(true);
-    }
-  });
-
-  document.addEventListener("keydown", (event) => {
-    if (!playlistImportDialog?.isOpen()) return;
-    if (event.key === "Escape") {
-      event.preventDefault();
-      playlistImportDialog.close(false);
-    }
-  });
-
-  document.addEventListener("keydown", (event) => {
-    if (!tracklistExportDialog?.isOpen()) return;
-    if (event.key === "Escape") {
-      event.preventDefault();
-      tracklistExportDialog.close(null);
     }
   });
 

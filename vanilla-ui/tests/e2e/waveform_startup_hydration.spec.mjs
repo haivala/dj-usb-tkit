@@ -437,6 +437,13 @@ test("Import ticks rekordbox and Mixxx playlists, imports each and opens the fir
   await page.keyboard.press("Escape");
   await expect(overlay).toBeHidden();
   expect(await page.evaluate(() => window.__playlistImports || null)).toBeNull();
+  await expect(importBtn).toBeFocused();
+
+  await importBtn.click();
+  await overlay.click({ position: { x: 5, y: 5 } });
+  await expect(overlay).toBeHidden();
+  await expect(importBtn).toBeFocused();
+  expect(await page.evaluate(() => window.__playlistImports || null)).toBeNull();
 
   // One list: imported and opened.
   await importBtn.click();

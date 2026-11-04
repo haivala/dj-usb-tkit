@@ -219,12 +219,23 @@ test("clicking the header drive name renames the connected drive", async ({ page
   await openNamedDrive(page);
   await expect(page.locator("#usbNameBadge")).toHaveAttribute("data-tooltip", "Rename this drive");
 
+  await page.locator("#usbNameBadge").focus();
   await page.locator("#usbNameBadgeLabel").click();
   const overlay = page.locator("#driveNameOverlay");
   await expect(overlay).toBeVisible();
   await expect(page.locator("#driveNameTitle")).toHaveText("Rename This Drive", { useInnerText: true });
   await expect(page.locator("#driveNameSkipBtn")).toHaveText("Cancel", { useInnerText: true });
   await expect(page.locator("#driveNameInput")).toHaveValue("Club Stick");
+  for (const dismissal of ["Escape", "backdrop", "Cancel"]) {
+    if (dismissal === "Escape") await page.keyboard.press("Escape");
+    else if (dismissal === "backdrop") await overlay.click({ position: { x: 5, y: 5 } });
+    else await page.locator("#driveNameSkipBtn").click();
+    await expect(overlay).toBeHidden();
+    await expect(page.locator("#usbNameBadge")).toBeFocused();
+    expect(await page.evaluate(() => window.__setNameCalls)).toEqual([]);
+    await page.locator("#usbNameBadgeLabel").click();
+    await expect(page.locator("#driveNameInput")).toBeFocused();
+  }
 
   await page.locator("#driveNameInput").fill("Booth Stick");
   await page.locator("#driveNameInput").press("Enter");
