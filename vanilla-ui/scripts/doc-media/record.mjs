@@ -33,6 +33,9 @@ const repoDir = resolve(uiDir, "..");
 const outDir = join(repoDir, "docs/assets");
 const BASE_URL = "http://127.0.0.1:4173/";
 const VIEWPORT = { width: 1280, height: 837 };
+// For the USB views: their side list, the sidebar and the track table side by
+// side, with no horizontal scrollbar on the table.
+const WIDE_VIEWPORT = { ...VIEWPORT, width: 1500 };
 const ANIM_WIDTH = 960;
 const EDITOR_TITLE = "Demo Groove";
 // What the source folders look like in the app (long, so the chips truncate).
@@ -285,8 +288,8 @@ function buildFixture(work) {
 
 // `sourcesOpen: false` closes the Sources accordion, as a click on its header
 // does, so the GIFs show more of the Library.
-async function openApp(browser, fixture, opts, { sourcesOpen = true } = {}) {
-  const ctx = await browser.newContext({ viewport: VIEWPORT, deviceScaleFactor: 1, colorScheme: "dark" });
+async function openApp(browser, fixture, opts, { sourcesOpen = true, viewport = VIEWPORT } = {}) {
+  const ctx = await browser.newContext({ viewport, deviceScaleFactor: 1, colorScheme: "dark" });
   await ctx.addInitScript({
     content: `window.__DOC_GIF_FIXTURE__=${JSON.stringify(fixture)};window.__DOC_GIF_OPTS__=${JSON.stringify(opts)};`,
   });
@@ -669,13 +672,6 @@ async function openNav(page, view) {
   await page.waitForTimeout(300);
 }
 
-// The USB views' side list plus the track table don't fit beside the
-// sidebar at this width: collapse it.
-async function collapseSidebar(page) {
-  await page.locator("#sidebarCollapseBtn").click();
-  await page.waitForTimeout(300);
-}
-
 // Opens the USB view's Health & Diagnostics card.
 async function openHealthCard(page) {
   await openNav(page, "usb");
@@ -684,12 +680,18 @@ async function openHealthCard(page) {
 }
 
 // Shows a USB side list's item `name`, importing the list first if needed.
+// Fails if the track table scrolls sideways: the shot needs a wider window.
 async function openUsbListItem(page, { importBtn, list, name, body }) {
   const item = page.locator(`${list} li`, { hasText: name });
   if (!(await item.count())) await page.locator(importBtn).click();
   await item.click();
   await page.locator(`${body} .track-grid-row`).first().waitFor();
   await waitProgressHidden(page);
+  const overflow = await page.locator(body).evaluate((el) => {
+    const wrap = el.closest(".table-wrap");
+    return wrap.scrollWidth - wrap.clientWidth;
+  });
+  if (overflow > 0) throw new Error(`${body}: track table overflows by ${overflow}px`);
 }
 
 // The progress footer lingers a moment after a job: wait it out.
@@ -768,9 +770,9 @@ function shots(fixture) {
       name: "usb-playlists",
       caption: "USB Playlists: the playlists on the USB, and the open playlist's tracks",
       opts: {},
+      viewport: WIDE_VIEWPORT,
       async run(page) {
         await openNav(page, "usb-playlists");
-        await collapseSidebar(page);
         await openUsbListItem(page, { importBtn: "#refreshUsbBtn", list: "#usbPlaylists", name: "Bass", body: "#usbPlaylistTracks" });
         await page.locator("#usbPlaylistTracks .track-grid-row").nth(1).locator(".track-grid-cell").nth(2).hover();
         await page.waitForTimeout(500);
@@ -781,11 +783,11 @@ function shots(fixture) {
       name: "usb-history",
       caption: "USB History: the sessions played on the USB, and the open session's tracks",
       opts: {},
+      viewport: WIDE_VIEWPORT,
       async run(page) {
         await openNav(page, "usb-history");
-        await collapseSidebar(page);
         await openUsbListItem(page, { importBtn: "#refreshHistoryBtn", list: "#historyList", name: "HISTORY 002", body: "#historyTracks" });
-        await page.mouse.move(VIEWPORT.width - 2, VIEWPORT.height - 2);
+        await page.mouse.move(WIDE_VIEWPORT.width - 2, WIDE_VIEWPORT.height - 2);
         await page.waitForTimeout(500);
       },
     },
@@ -856,7 +858,6 @@ function shots(fixture) {
       async run(page) {
         await page.locator('.nav-playlist-item[data-playlist-id="pl-warmup"]').click();
         await page.locator("#playlistFormatWarning:not(.hidden)").waitFor();
-        await collapseSidebar(page);
         const badge = page
           .locator("#playlistTracksBody .track-grid-row", { hasText: "Aurora Loop" })
           .locator(".format-badge");
@@ -940,14 +941,15 @@ try {
   }
   for (const shot of shots(fixture)) {
     if (!wanted(shot.name)) continue;
-    const { ctx, page } = await openApp(browser, fixture, shot.opts);
+    const viewport = shot.viewport ?? VIEWPORT;
+    const { ctx, page } = await openApp(browser, fixture, shot.opts, { viewport });
     await connectUsbAndPickPlaylist(page, fixture);
     await shot.run(page);
     const raw = join(work, `${shot.name}.png`);
     await page.screenshot({ path: raw });
     await ctx.close();
     const out = join(outDir, `${shot.name}.png`);
-    const footer = await renderFooter(browser, shot.caption, VIEWPORT.width, join(work, `footer-${shot.name}.png`));
+    const footer = await renderFooter(browser, shot.caption, viewport.width, join(work, `footer-${shot.name}.png`));
     addFooter(raw, footer, out);
     console.log(`wrote ${relative(repoDir, out)}`);
   }

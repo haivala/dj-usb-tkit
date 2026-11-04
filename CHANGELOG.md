@@ -41,6 +41,9 @@
 
 - **Fix:** Diagnostics no longer warn "PDB header compatibility: value 4" on USBs exported with
   rekordbox, which writes that value itself. The next repair you run on the USB sets it to 5.
+- **Chore:** The docs' transcode, USB Playlists and USB History screenshots show the side menu open,
+  and the last two are wider so their track lists have no horizontal scrollbar. The transcode
+  screenshot's export button names the USB.
 
 ## 0.5.4
 

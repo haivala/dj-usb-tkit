@@ -99,6 +99,12 @@
     for (const cb of listeners.get(name) || []) cb({ event: name, payload });
   };
   const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
+  // With `opts.audioFormats`, the status the backend gave once that shot's
+  // playlist existed: the diagnostics dump predates it.
+  const exportStatusList = () =>
+    opts.audioFormats
+      ? usb.audioFormats.exportStatus.data.playlistUsbExportStatus
+      : usb?.diagnostics?.data?.playlistUsbExportStatus;
   const exportedNow = new Set();
   // Playlists added to since: their "exported to USB" marks are cleared.
   const changedNow = new Set();
@@ -318,9 +324,12 @@
           case "get_usb_device_name":
             return ok({ name: "Chiphead" });
           case "refresh_playlist_export_status":
-            return ok({ playlistUsbExportStatus: usb?.diagnostics?.data?.playlistUsbExportStatus || [] });
+            return ok({ playlistUsbExportStatus: exportStatusList() || [] });
           case "run_usb_diagnostics":
             if (!usb) return ok({ overallStatus: "PASS", durationMs: 842, warnings: [], checks: [], playlistUsbExportStatus: [] });
+            if (opts.audioFormats) {
+              return ok({ ...usb.diagnostics.data, playlistUsbExportStatus: exportStatusList() });
+            }
             return opts.brokenUsb ? usb.brokenDiagnostics : usb.diagnostics;
           case "repair_usb_diagnostics":
             return usb.repairPreview;

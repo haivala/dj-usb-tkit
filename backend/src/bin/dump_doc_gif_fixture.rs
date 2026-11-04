@@ -360,12 +360,18 @@ fn dump_audio_formats(
             json!({ "playlistId": created.playlist_id, "usbRoot": usb_root }),
         )),
     );
+    // Asked after the playlist exists: the diagnostics dump predates it.
+    let export_status = response(
+        "refresh_playlist_export_status",
+        svc.refresh_playlist_export_status(request("refresh_playlist_export_status", root)),
+    );
     json!({
         "allTicked": all_ticked,
         "unticked": unticked,
         "playlistId": created.playlist_id,
         "playlistTracks": tracks,
         "exportSpace": space,
+        "exportStatus": export_status,
     })
 }
 
