@@ -698,8 +698,12 @@ fn update_existing_content_row_writes_only_the_columns_that_differ() {
     };
 
     assert!(
+        update(&track),
+        "the first re-export moves analysedBits from 41 to 105"
+    );
+    assert!(
         !update(&track),
-        "a re-export of the same track changes nothing"
+        "a later re-export of the same track changes nothing"
     );
     track.title = "Renamed".to_string();
     assert!(update(&track), "a changed title is written");
@@ -3576,6 +3580,106 @@ fn write_edb_playlist_sets_device_name_from_drive_name() {
     crate::service::usb_identity::set_name_conflict(usb_root, true);
     write_edb_playlist(usb_root, &playlist, &manifest, true).expect("export");
     assert_eq!(device_name(), "Named Elsewhere");
+}
+
+/// Replays a rekordbox export sequence and checks each step against what
+/// rekordbox wrote: first export, unchanged re-export, then a re-export with an
+/// existing track added mid-playlist and a new track at the end.
+#[test]
+fn write_edb_playlist_matches_rekordbox_reexport_bookkeeping() {
+    type Row = (i64, Option<i64>, Option<i64>, Option<String>);
+    const NEW: Row = (41, None, None, None);
+
+    let dir = tempdir().unwrap();
+    let usb_root = dir.path();
+    std::fs::create_dir_all(usb_root.join(USB_VENDOR_ROOT_DIR).join(USB_VENDOR_DB_DIR)).unwrap();
+    crate::service::usb_utils::initialize_usb(usb_root).expect("initialize usb skeleton");
+
+    let cues = |count: u32| -> Vec<TrackCue> {
+        (0..count)
+            .map(|i| TrackCue {
+                id: format!("cue-{i}"),
+                position_ms: 1_000 * (i + 1),
+                color_id: None,
+                name: None,
+                playback_start: false,
+                memory: false,
+            })
+            .collect()
+    };
+    let t1_cues = std::cell::Cell::new(0);
+    let export = |name: &str, tracks: &[(&str, &str, &str)]| {
+        let playlist = ExportPlaylistData {
+            id: name.to_string(),
+            name: name.to_string(),
+            tracks: Vec::new(),
+        };
+        let mut manifest = make_test_manifest(name, name, usb_root, tracks);
+        for track in &mut manifest.tracks {
+            track.waveform_path = Some("/PIONEER/USBANLZ/P000/00000000/ANLZ0000.DAT".to_string());
+            match track.id.as_str() {
+                "t1" => track.cues = cues(t1_cues.get()),
+                "t3" => track.cues = cues(5),
+                _ => {}
+            }
+        }
+        write_edb_playlist(usb_root, &playlist, &manifest, true).expect("export");
+    };
+    let row = |title: &str| -> Row {
+        let mut warnings = Vec::<WarningEntry>::new();
+        let conn = open_edb_rw(usb_root, &mut warnings).expect("open eDB");
+        conn.query_row(
+            "SELECT analysedBits, analysisDataUpdateCount, informationUpdateCount,
+                    CAST(cueUpdateCount AS TEXT)
+             FROM content WHERE title = ?1",
+            [title],
+            |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?, r.get(3)?)),
+        )
+        .expect("read content row")
+    };
+    let reexported = || -> Row { (105, Some(2), Some(2), Some(String::new())) };
+    let reexported_with_cues =
+        |count: &str| -> Row { (105, Some(2), Some(2), Some(count.to_string())) };
+
+    let t1 = ("t1", "T1", "t1.mp3");
+    let t2 = ("t2", "T2", "t2.mp3");
+    let t3 = ("t3", "T3", "t3.mp3");
+    let t4 = ("t4", "T4", "t4.mp3");
+
+    export("A", &[t1, t3]);
+    export("B", &[t2]);
+    for title in ["T1", "T2", "T3"] {
+        assert_eq!(row(title), NEW, "{title} after the first export");
+    }
+
+    export("A", &[t1, t3]);
+    assert_eq!(row("T1"), reexported());
+    assert_eq!(row("T3"), reexported_with_cues("5"));
+    assert_eq!(
+        row("T2"),
+        NEW,
+        "a track outside the playlist stays as it is"
+    );
+
+    export("A", &[t1, t2, t3, t4]);
+    assert_eq!(row("T1"), reexported());
+    assert_eq!(
+        row("T2"),
+        reexported(),
+        "joining the playlist re-exports it"
+    );
+    assert_eq!(row("T3"), reexported_with_cues("5"));
+    assert_eq!(row("T4"), NEW, "a brand-new track at the end");
+
+    // A first cue fills the empty count; the information count stays.
+    t1_cues.set(1);
+    export("A", &[t1, t2, t3, t4]);
+    assert_eq!(row("T1"), reexported_with_cues("1"));
+
+    // A count already set stays, even when the cues change.
+    t1_cues.set(2);
+    export("A", &[t1, t2, t3, t4]);
+    assert_eq!(row("T1"), reexported_with_cues("1"));
 }
 
 #[test]

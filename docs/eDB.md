@@ -116,12 +116,12 @@ Known `content` columns:
 | `masterDbId` | app-owned export identity scope |
 | `masterContentId` | app-owned per-track export identity |
 | `analysisDataFilePath` | analysis bundle path used by import/export/parity |
-| `analysedBits` | analysis/status bitfield used in export policy |
+| `analysedBits` | analysis/status bitfield: 41 on a new row with analysis, 105 once the row is re-exported (as rekordbox) |
 | `contentLink` | app-owned identity/linkage value |
 | `hasModified` | change state tracking |
-| `cueUpdateCount` | cue-update counter metadata |
-| `analysisDataUpdateCount` | analysis-update counter metadata |
-| `informationUpdateCount` | information-update counter metadata |
+| `cueUpdateCount` | cue-update counter metadata: NULL on a new row, empty string once re-exported without cues. rekordbox's value is its tally of cue edits, +1 for each add or removal (it rose from 9 to 13 after 4 edits, with 9 cues on the track both times). The app doesn't have that history, so export writes the track's cue count when the row has no count yet, then leaves it; the USB cue editor adds 1 per save |
+| `analysisDataUpdateCount` | analysis-update counter metadata: NULL on a new row, 2 once re-exported, then unchanged (as rekordbox) |
+| `informationUpdateCount` | information-update counter metadata: NULL on a new row, 2 once re-exported, then unchanged (as rekordbox) |
 
 Export updates `content` rows for exported tracks from the app's canonical
 playlist/track model.

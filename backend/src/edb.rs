@@ -1607,7 +1607,7 @@ pub fn populate_content_values_map(
         values.insert("hasModified".to_string(), Value::Integer(0));
     }
     if values.contains_key("cueUpdateCount") {
-        values.insert("cueUpdateCount".to_string(), Value::Integer(0));
+        values.insert("cueUpdateCount".to_string(), Value::Null);
     }
     if values.contains_key("analysisDataUpdateCount") {
         values.insert("analysisDataUpdateCount".to_string(), Value::Null);

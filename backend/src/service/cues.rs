@@ -1335,6 +1335,12 @@ impl BackendService {
         let content_columns = load_table_columns_tx(&tx, "content")?;
         if let Some(cues) = new_cues.as_deref() {
             write_edb_cues_for_content(&tx, content_id, cues, &content_columns)?;
+            if !cues.is_empty() && content_columns.contains("cueUpdateCount") {
+                tx.execute(
+                    "UPDATE content SET cueUpdateCount = (COALESCE(CAST(cueUpdateCount AS INTEGER), 0) + 1) WHERE content_id = ?1",
+                    params![content_id],
+                )?;
+            }
         }
         if let Some(bpm) = req.bpm
             && content_columns.contains("bpmx100")

@@ -39,6 +39,9 @@
 
 ## Unreleased
 
+- **Fix:** Re-exporting a playlist now writes the same update counters and analysis flags to
+  the eDB as rekordbox does. Before, the counters grew on every export and some tracks got
+  a larger jump depending on their position in the playlist. Players aren't affected.
 - **Fix:** On Windows, analyzing tracks could freeze the window ("Not Responding") for many
   seconds at a time, even with low CPU use. The app's event log was written from the window's own
   thread, opening and closing the log file for every analysis log line, and many library and
@@ -59,7 +62,7 @@
   repeated dismissal, reopening and focus restoration.
 - **Chore:** The UI code no longer checks whether its own page elements exist before using them;
   every one is always there. The unit tests that relied on those checks now run on the real
-  page. About 250 fewer lines of JavaScript.
+  page.
 - **Chore:** The USB page's code reads the backend's answers as the backend sends them, instead
   of re-checking every field's type and filling in defaults the backend never leaves out.
 - **Chore:** The browser tests share one stubbed backend, which fills every answer out to the

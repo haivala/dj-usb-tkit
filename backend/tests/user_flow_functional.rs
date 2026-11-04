@@ -1127,14 +1127,15 @@ fn export_to_usb_writes_cues_into_anlz_and_edb() {
         )
         .expect("hot cue row");
     assert_eq!(hot_in_usec, 6_000_000);
-    let cue_update_count: i64 = conn
-        .query_row(
-            "SELECT CAST(cueUpdateCount AS INTEGER) FROM content LIMIT 1",
-            [],
-            |row| row.get(0),
-        )
+    let cue_update_count: Option<i64> = conn
+        .query_row("SELECT cueUpdateCount FROM content LIMIT 1", [], |row| {
+            row.get(0)
+        })
         .expect("cueUpdateCount");
-    assert!(cue_update_count >= 1, "cueUpdateCount should be bumped");
+    assert_eq!(
+        cue_update_count, None,
+        "a new row has no cueUpdateCount until it is re-exported"
+    );
     drop(conn);
 
     // Re-import the exported stick into a clean library, then add the track to

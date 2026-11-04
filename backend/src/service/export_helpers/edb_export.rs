@@ -115,7 +115,6 @@ pub fn write_edb_playlists_in_tx(
         // Capture playlist-linked content rows by path before optional mirror-delete.
         // This avoids picking an arbitrary duplicate content row for a path.
         let mut prev_content_id_by_path = HashMap::<String, i64>::new();
-        let mut previously_linked_ids = HashSet::<i64>::new();
         {
             let mut stmt = tx.prepare(
                 r#"
@@ -130,7 +129,6 @@ pub fn write_edb_playlists_in_tx(
             })?;
             for row in rows {
                 let (content_id, maybe_path) = row?;
-                previously_linked_ids.insert(content_id);
                 if let Some(path) = maybe_path {
                     let key = canonicalize_track_path_identity(&path);
                     if !key.is_empty() {
@@ -184,7 +182,6 @@ pub fn write_edb_playlists_in_tx(
             };
             let content_id = match resolved_existing {
                 Some(existing) => {
-                    let was_previously_linked = previously_linked_ids.contains(&existing);
                     if update_existing_content_row(
                         tx,
                         existing,
@@ -197,29 +194,36 @@ pub fn write_edb_playlists_in_tx(
                     // The update counters are the app's export bookkeeping; a
                     // track the repair carries over from the USB keeps its own.
                     if track.from_library {
-                        // Vendor-authored exports apply +8 only to the appended
-                        // export member while other existing rows receive +2.
-                        let is_appended_export_member = track.position + 1 >= manifest.tracks.len();
-                        let bump = if was_previously_linked || !is_appended_export_member {
-                            2
-                        } else {
-                            8
-                        };
+                        // As rekordbox: the first re-export of a row sets these
+                        // from NULL, and later re-exports leave them. It doesn't
+                        // matter where the track sits or whether it was already
+                        // in this playlist.
                         for column in ["analysisDataUpdateCount", "informationUpdateCount"] {
                             if content_columns.contains(column) {
                                 tx.execute(
                                     &format!(
-                                        "UPDATE content SET {column} = (COALESCE(CAST({column} AS INTEGER), 0) + ?2) WHERE content_id = ?1"
+                                        "UPDATE content SET {column} = 2 WHERE content_id = ?1 AND {column} IS NULL"
                                     ),
-                                    params![existing, bump],
+                                    params![existing],
                                 )?;
                             }
                         }
+                        // rekordbox's count is its tally of cue edits (each add or
+                        // removal is +1), which the app doesn't have. The nearest
+                        // match here: the track's cue count, as if each cue was added
+                        // once, a count already set staying, and empty until then.
                         if content_columns.contains("cueUpdateCount") {
-                            tx.execute(
-                                "UPDATE content SET cueUpdateCount = '' WHERE content_id = ?1",
-                                params![existing],
-                            )?;
+                            if track.cues.is_empty() {
+                                tx.execute(
+                                    "UPDATE content SET cueUpdateCount = '' WHERE content_id = ?1 AND cueUpdateCount IS NULL",
+                                    params![existing],
+                                )?;
+                            } else {
+                                tx.execute(
+                                    "UPDATE content SET cueUpdateCount = ?2 WHERE content_id = ?1 AND COALESCE(cueUpdateCount, '') = ''",
+                                    params![existing, track.cues.len() as i64],
+                                )?;
+                            }
                         }
                     }
                     existing
@@ -311,7 +315,7 @@ pub fn load_table_columns_tx(
 /// memory point and the playback-start cue use `-1`; a memory cue carries its
 /// colour or `-1`, and its name like a hot cue. Precise decoder seek anchors (`inMpegFrameNumber`, block offsets,
 /// …) are left at 0 — the CDJ recomputes them from `inUsec` + the analysis
-/// file. `content.cueUpdateCount` is bumped when any cue is written.
+/// file. `content.cueUpdateCount` is the caller's to set.
 pub fn write_edb_cues_for_content(
     tx: &rusqlite::Transaction<'_>,
     content_id: i64,
@@ -396,12 +400,6 @@ pub fn write_edb_cues_for_content(
         }
     }
 
-    if content_columns.contains("cueUpdateCount") {
-        tx.execute(
-            "UPDATE content SET cueUpdateCount = (COALESCE(CAST(cueUpdateCount AS INTEGER), 0) + 1) WHERE content_id = ?1",
-            params![content_id],
-        )?;
-    }
     if content_columns.contains("isHotCueAutoLoadOn") {
         tx.execute(
             "UPDATE content SET isHotCueAutoLoadOn = 1 WHERE content_id = ?1",
@@ -410,7 +408,6 @@ pub fn write_edb_cues_for_content(
     }
     Ok(())
 }
-
 /// Two SQL values equal for a content column: integers, reals and numeric
 /// text compare by value (rekordbox stores some numbers as text).
 fn content_values_equal(a: &rusqlite::types::Value, b: &rusqlite::types::Value) -> bool {
@@ -607,12 +604,12 @@ pub fn update_existing_content_row(
         },
     );
     if from_library {
-        // Mark exported tracks as having the newer analysis generation so
-        // Vendor software can enable the modern waveform path for generated ANLZ.
+        // rekordbox writes 41 on a new row (see `insert_content_from_template`)
+        // and 105 when it re-exports the row.
         want(
             "analysedBits",
             Some(Value::Integer(if track.waveform_path.is_some() {
-                41
+                105
             } else {
                 0
             })),
