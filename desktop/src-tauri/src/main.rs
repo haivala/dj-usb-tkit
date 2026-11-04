@@ -561,6 +561,41 @@ fn reveal_track_file(app: tauri::AppHandle, path: String) -> Result<(), String> 
 
 const VALID_LOG_LEVELS: &[&str] = &["log", "info", "warn", "error", "debug", "trace"];
 
+/// The session log's single writer: one background thread that keeps the
+/// file open and appends queued lines. `append_frontend_log` is a sync
+/// command, so it runs on the main (window) thread; opening, appending and
+/// closing the file there for every line -- analysis logs several per track
+/// -- kept that thread in file I/O (slow on Windows, where each close is also
+/// virus-scanned) until the window showed "Not Responding".
+fn frontend_log_sender() -> &'static Mutex<mpsc::Sender<String>> {
+    static SENDER: OnceLock<Mutex<mpsc::Sender<String>>> = OnceLock::new();
+    SENDER.get_or_init(|| {
+        let (tx, rx) = mpsc::channel::<String>();
+        std::thread::spawn(move || write_frontend_log_lines(&rx));
+        Mutex::new(tx)
+    })
+}
+
+fn write_frontend_log_lines(rx: &mpsc::Receiver<String>) {
+    let path = frontend_log_path();
+    if let Some(parent) = path.parent() {
+        let _ = fs::create_dir_all(parent);
+    }
+    let Ok(file) = fs::OpenOptions::new().create(true).append(true).open(&path) else {
+        return;
+    };
+    let mut out = std::io::BufWriter::new(file);
+    while let Ok(line) = rx.recv() {
+        let _ = writeln!(out, "{line}");
+        // Write out everything already queued, then flush once, so the file
+        // is complete whenever the queue is idle (the log can be opened).
+        while let Ok(line) = rx.try_recv() {
+            let _ = writeln!(out, "{line}");
+        }
+        let _ = out.flush();
+    }
+}
+
 #[tauri::command]
 fn append_frontend_log(level: String, message: String) -> Result<(), String> {
     let sanitized_level = if VALID_LOG_LEVELS.contains(&level.as_str()) {
@@ -569,20 +604,12 @@ fn append_frontend_log(level: String, message: String) -> Result<(), String> {
         "info".to_string()
     };
     let sanitized_message = message.replace('\n', "\\n").replace('\r', "\\r");
-
-    let path = frontend_log_path();
-    if let Some(parent) = path.parent() {
-        fs::create_dir_all(parent).map_err(|err| format!("create log dir failed: {err}"))?;
-    }
-    let mut file = fs::OpenOptions::new()
-        .create(true)
-        .append(true)
-        .open(&path)
-        .map_err(|err| format!("open log failed: {err}"))?;
     let now = chrono::Utc::now().to_rfc3339();
-    writeln!(file, "[{now}] [{sanitized_level}] {sanitized_message}")
-        .map_err(|err| format!("append log failed: {err}"))?;
-    Ok(())
+    frontend_log_sender()
+        .lock()
+        .map_err(|err| format!("log queue lock failed: {err}"))?
+        .send(format!("[{now}] [{sanitized_level}] {sanitized_message}"))
+        .map_err(|err| format!("log writer stopped: {err}"))
 }
 
 #[tauri::command]

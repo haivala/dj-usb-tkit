@@ -39,6 +39,11 @@
 
 ## Unreleased
 
+- **Fix:** On Windows, analyzing tracks could freeze the window ("Not Responding") for many
+  seconds at a time, even with low CPU use. The app's event log was written from the window's own
+  thread, opening and closing the log file for every analysis log line, and many library and
+  playlist commands (including the folder scan run when analysis finishes) also ran there. The log
+  is now written by a background thread, and those commands run off the window thread.
 - **Improvement:** The Linux AppImage bundles the current WebKitGTK from Ubuntu 22.04's updates on
   every release, with its security fixes. Before, the build could reuse an older cached copy.
 - **Improvement:** In the cue editor, the greyed-out part of the waveform before where the CDJ

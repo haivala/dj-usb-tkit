@@ -758,90 +758,142 @@ pub async fn browse_source_files(
 }
 
 #[tauri::command]
-pub fn get_library_sources(state: State<'_, BackendCommands>) -> ApiResponse<LibrarySourcesData> {
-    state.get_library_sources()
+pub async fn get_library_sources(
+    state: State<'_, BackendCommands>,
+) -> Result<ApiResponse<LibrarySourcesData>, String> {
+    let commands = state.inner().clone();
+    Ok(run_blocking_command("get_library_sources", move || {
+        commands.get_library_sources()
+    })
+    .await)
 }
 
 #[tauri::command]
-pub fn add_source_folders(
+pub async fn add_source_folders(
     state: State<'_, BackendCommands>,
     request: AddSourceFoldersRequest,
-) -> ApiResponse<AddSourceFoldersData> {
-    state.add_source_folders(request)
+) -> Result<ApiResponse<AddSourceFoldersData>, String> {
+    let commands = state.inner().clone();
+    Ok(run_blocking_command("add_source_folders", move || {
+        commands.add_source_folders(request)
+    })
+    .await)
 }
 
 #[tauri::command]
-pub fn remove_source_folder(
+pub async fn remove_source_folder(
     state: State<'_, BackendCommands>,
     request: RemoveSourceFolderRequest,
-) -> ApiResponse<RemoveSourceFolderData> {
-    state.remove_source_folder(request)
+) -> Result<ApiResponse<RemoveSourceFolderData>, String> {
+    let commands = state.inner().clone();
+    Ok(run_blocking_command("remove_source_folder", move || {
+        commands.remove_source_folder(request)
+    })
+    .await)
 }
 
 #[tauri::command]
-pub fn set_source_folder_enabled(
+pub async fn set_source_folder_enabled(
     state: State<'_, BackendCommands>,
     request: SetSourceFolderEnabledRequest,
-) -> ApiResponse<LibrarySourcesData> {
-    state.set_source_folder_enabled(request)
+) -> Result<ApiResponse<LibrarySourcesData>, String> {
+    let commands = state.inner().clone();
+    Ok(run_blocking_command("set_source_folder_enabled", move || {
+        commands.set_source_folder_enabled(request)
+    })
+    .await)
 }
 
 #[tauri::command]
-pub fn set_external_library_enabled(
+pub async fn set_external_library_enabled(
     state: State<'_, BackendCommands>,
     request: SetExternalLibraryEnabledRequest,
-) -> ApiResponse<LibrarySourcesData> {
-    state.set_external_library_enabled(request)
+) -> Result<ApiResponse<LibrarySourcesData>, String> {
+    let commands = state.inner().clone();
+    Ok(
+        run_blocking_command("set_external_library_enabled", move || {
+            commands.set_external_library_enabled(request)
+        })
+        .await,
+    )
 }
 
 #[tauri::command]
-pub fn resolve_track_identity(
+pub async fn resolve_track_identity(
     state: State<'_, BackendCommands>,
     request: ResolveTrackIdentityRequest,
-) -> ApiResponse<ResolveTrackIdentityData> {
-    state.resolve_track_identity(request)
+) -> Result<ApiResponse<ResolveTrackIdentityData>, String> {
+    let commands = state.inner().clone();
+    Ok(run_blocking_command("resolve_track_identity", move || {
+        commands.resolve_track_identity(request)
+    })
+    .await)
 }
 
 #[tauri::command]
-pub fn get_track_detail(
+pub async fn get_track_detail(
     state: State<'_, BackendCommands>,
     request: GetTrackDetailRequest,
-) -> ApiResponse<TrackDetail> {
-    state.get_track_detail(request)
+) -> Result<ApiResponse<TrackDetail>, String> {
+    let commands = state.inner().clone();
+    Ok(run_blocking_command("get_track_detail", move || {
+        commands.get_track_detail(request)
+    })
+    .await)
 }
 
 #[tauri::command]
-pub fn save_track_analysis_edits(
+pub async fn save_track_analysis_edits(
     state: State<'_, BackendCommands>,
     request: SaveTrackAnalysisEditsRequest,
-) -> ApiResponse<SaveTrackAnalysisEditsData> {
-    state.save_track_analysis_edits(request)
+) -> Result<ApiResponse<SaveTrackAnalysisEditsData>, String> {
+    let commands = state.inner().clone();
+    Ok(run_blocking_command("save_track_analysis_edits", move || {
+        commands.save_track_analysis_edits(request)
+    })
+    .await)
 }
 
 #[tauri::command]
-pub fn save_track_metadata_edits(
+pub async fn save_track_metadata_edits(
     state: State<'_, BackendCommands>,
     request: SaveTrackMetadataEditsRequest,
-) -> ApiResponse<SaveTrackMetadataEditsData> {
-    state.save_track_metadata_edits(request)
+) -> Result<ApiResponse<SaveTrackMetadataEditsData>, String> {
+    let commands = state.inner().clone();
+    Ok(run_blocking_command("save_track_metadata_edits", move || {
+        commands.save_track_metadata_edits(request)
+    })
+    .await)
 }
 
 /// What the selected library tracks share, for the selection bar's Edit.
 #[tauri::command]
-pub fn get_tracks_metadata_summary(
+pub async fn get_tracks_metadata_summary(
     state: State<'_, BackendCommands>,
     request: GetTracksMetadataSummaryRequest,
-) -> ApiResponse<TracksMetadataSummary> {
-    state.get_tracks_metadata_summary(request)
+) -> Result<ApiResponse<TracksMetadataSummary>, String> {
+    let commands = state.inner().clone();
+    Ok(
+        run_blocking_command("get_tracks_metadata_summary", move || {
+            commands.get_tracks_metadata_summary(request)
+        })
+        .await,
+    )
 }
 
 /// What the selected USB tracks share, as the USB's PDB has them.
 #[tauri::command]
-pub fn get_usb_tracks_metadata_summary(
+pub async fn get_usb_tracks_metadata_summary(
     state: State<'_, BackendCommands>,
     request: GetUsbTracksMetadataSummaryRequest,
-) -> ApiResponse<TracksMetadataSummary> {
-    state.get_usb_tracks_metadata_summary(request)
+) -> Result<ApiResponse<TracksMetadataSummary>, String> {
+    let commands = state.inner().clone();
+    Ok(
+        run_blocking_command("get_usb_tracks_metadata_summary", move || {
+            commands.get_usb_tracks_metadata_summary(request)
+        })
+        .await,
+    )
 }
 
 /// A background `usb_write` job, like `save_usb_track_analysis_edits`: it
@@ -869,11 +921,15 @@ pub async fn save_usb_track_metadata_edits(
 }
 
 #[tauri::command]
-pub fn get_usb_track_detail(
+pub async fn get_usb_track_detail(
     state: State<'_, BackendCommands>,
     request: GetUsbTrackDetailRequest,
-) -> ApiResponse<UsbTrackAnalysisDetail> {
-    state.get_usb_track_detail(request)
+) -> Result<ApiResponse<UsbTrackAnalysisDetail>, String> {
+    let commands = state.inner().clone();
+    Ok(run_blocking_command("get_usb_track_detail", move || {
+        commands.get_usb_track_detail(request)
+    })
+    .await)
 }
 
 /// Runs as a background `usb_write` job (not on the main thread): the save
@@ -902,56 +958,74 @@ pub async fn save_usb_track_analysis_edits(
 }
 
 #[tauri::command]
-pub fn relocate_source_root(
+pub async fn relocate_source_root(
     state: State<'_, BackendCommands>,
     request: RelocateSourceRootRequest,
-) -> ApiResponse<RelocateSourceRootData> {
-    state.relocate_source_root(request)
+) -> Result<ApiResponse<RelocateSourceRootData>, String> {
+    let commands = state.inner().clone();
+    Ok(run_blocking_command("relocate_source_root", move || {
+        commands.relocate_source_root(request)
+    })
+    .await)
 }
 
 #[tauri::command]
-pub fn resolve_playback_source(
+pub async fn resolve_playback_source(
     state: State<'_, BackendCommands>,
     request: ResolvePlaybackSourceRequest,
-) -> ApiResponse<ResolvePlaybackSourceData> {
-    state.resolve_playback_source(request)
+) -> Result<ApiResponse<ResolvePlaybackSourceData>, String> {
+    let commands = state.inner().clone();
+    Ok(run_blocking_command("resolve_playback_source", move || {
+        commands.resolve_playback_source(request)
+    })
+    .await)
 }
 
 #[tauri::command]
-pub fn create_playlist(
+pub async fn create_playlist(
     state: State<'_, BackendCommands>,
     request: CreatePlaylistRequest,
-) -> ApiResponse<CreatePlaylistData> {
-    state.create_playlist(request)
+) -> Result<ApiResponse<CreatePlaylistData>, String> {
+    let commands = state.inner().clone();
+    Ok(run_blocking_command("create_playlist", move || commands.create_playlist(request)).await)
 }
 
 #[tauri::command]
-pub fn rename_playlist(
+pub async fn rename_playlist(
     state: State<'_, BackendCommands>,
     request: RenamePlaylistRequest,
-) -> ApiResponse<RenamePlaylistData> {
-    state.rename_playlist(request)
+) -> Result<ApiResponse<RenamePlaylistData>, String> {
+    let commands = state.inner().clone();
+    Ok(run_blocking_command("rename_playlist", move || commands.rename_playlist(request)).await)
 }
 
 #[tauri::command]
-pub fn reorder_playlists(
+pub async fn reorder_playlists(
     state: State<'_, BackendCommands>,
     request: ReorderPlaylistsRequest,
-) -> ApiResponse<ReorderPlaylistsData> {
-    state.reorder_playlists(request)
+) -> Result<ApiResponse<ReorderPlaylistsData>, String> {
+    let commands = state.inner().clone();
+    Ok(run_blocking_command("reorder_playlists", move || {
+        commands.reorder_playlists(request)
+    })
+    .await)
 }
 
 #[tauri::command]
-pub fn delete_playlist(
+pub async fn delete_playlist(
     state: State<'_, BackendCommands>,
     request: DeletePlaylistRequest,
-) -> ApiResponse<DeletePlaylistData> {
-    state.delete_playlist(request)
+) -> Result<ApiResponse<DeletePlaylistData>, String> {
+    let commands = state.inner().clone();
+    Ok(run_blocking_command("delete_playlist", move || commands.delete_playlist(request)).await)
 }
 
 #[tauri::command]
-pub fn list_playlists(state: State<'_, BackendCommands>) -> ApiResponse<ListPlaylistsData> {
-    state.list_playlists()
+pub async fn list_playlists(
+    state: State<'_, BackendCommands>,
+) -> Result<ApiResponse<ListPlaylistsData>, String> {
+    let commands = state.inner().clone();
+    Ok(run_blocking_command("list_playlists", move || commands.list_playlists()).await)
 }
 
 #[tauri::command]
@@ -979,19 +1053,29 @@ pub async fn get_playlist_export_space(
 }
 
 #[tauri::command]
-pub fn add_track_candidates_to_playlist(
+pub async fn add_track_candidates_to_playlist(
     state: State<'_, BackendCommands>,
     request: AddTrackCandidatesToPlaylistRequest,
-) -> ApiResponse<AddTrackCandidatesToPlaylistData> {
-    state.add_track_candidates_to_playlist(request)
+) -> Result<ApiResponse<AddTrackCandidatesToPlaylistData>, String> {
+    let commands = state.inner().clone();
+    Ok(
+        run_blocking_command("add_track_candidates_to_playlist", move || {
+            commands.add_track_candidates_to_playlist(request)
+        })
+        .await,
+    )
 }
 
 #[tauri::command]
-pub fn list_matching_track_ids(
+pub async fn list_matching_track_ids(
     state: State<'_, BackendCommands>,
     request: ListMatchingTrackIdsRequest,
-) -> ApiResponse<ListMatchingTrackIdsData> {
-    state.list_matching_track_ids(request)
+) -> Result<ApiResponse<ListMatchingTrackIdsData>, String> {
+    let commands = state.inner().clone();
+    Ok(run_blocking_command("list_matching_track_ids", move || {
+        commands.list_matching_track_ids(request)
+    })
+    .await)
 }
 
 #[tauri::command]
@@ -1007,68 +1091,114 @@ pub async fn get_selection_duration(
 }
 
 #[tauri::command]
-pub fn add_library_selection_to_playlist(
+pub async fn add_library_selection_to_playlist(
     state: State<'_, BackendCommands>,
     request: AddLibrarySelectionToPlaylistRequest,
-) -> ApiResponse<AddTracksToPlaylistData> {
-    state.add_library_selection_to_playlist(request)
+) -> Result<ApiResponse<AddTracksToPlaylistData>, String> {
+    let commands = state.inner().clone();
+    Ok(
+        run_blocking_command("add_library_selection_to_playlist", move || {
+            commands.add_library_selection_to_playlist(request)
+        })
+        .await,
+    )
 }
 
 #[tauri::command]
-pub fn add_library_selection_to_playlists(
+pub async fn add_library_selection_to_playlists(
     state: State<'_, BackendCommands>,
     request: AddLibrarySelectionToPlaylistsRequest,
-) -> ApiResponse<AddTracksToPlaylistsData> {
-    state.add_library_selection_to_playlists(request)
+) -> Result<ApiResponse<AddTracksToPlaylistsData>, String> {
+    let commands = state.inner().clone();
+    Ok(
+        run_blocking_command("add_library_selection_to_playlists", move || {
+            commands.add_library_selection_to_playlists(request)
+        })
+        .await,
+    )
 }
 
 #[tauri::command]
-pub fn add_track_candidates_to_playlists(
+pub async fn add_track_candidates_to_playlists(
     state: State<'_, BackendCommands>,
     request: AddTrackCandidatesToPlaylistsRequest,
-) -> ApiResponse<AddTracksToPlaylistsData> {
-    state.add_track_candidates_to_playlists(request)
+) -> Result<ApiResponse<AddTracksToPlaylistsData>, String> {
+    let commands = state.inner().clone();
+    Ok(
+        run_blocking_command("add_track_candidates_to_playlists", move || {
+            commands.add_track_candidates_to_playlists(request)
+        })
+        .await,
+    )
 }
 
 #[tauri::command]
-pub fn get_playlist_membership(
+pub async fn get_playlist_membership(
     state: State<'_, BackendCommands>,
     request: GetPlaylistMembershipRequest,
-) -> ApiResponse<GetPlaylistMembershipData> {
-    state.get_playlist_membership(request)
+) -> Result<ApiResponse<GetPlaylistMembershipData>, String> {
+    let commands = state.inner().clone();
+    Ok(run_blocking_command("get_playlist_membership", move || {
+        commands.get_playlist_membership(request)
+    })
+    .await)
 }
 
 #[tauri::command]
-pub fn remove_tracks_from_playlist(
+pub async fn remove_tracks_from_playlist(
     state: State<'_, BackendCommands>,
     request: RemoveTracksFromPlaylistRequest,
-) -> ApiResponse<RemoveTracksFromPlaylistData> {
-    state.remove_tracks_from_playlist(request)
+) -> Result<ApiResponse<RemoveTracksFromPlaylistData>, String> {
+    let commands = state.inner().clone();
+    Ok(
+        run_blocking_command("remove_tracks_from_playlist", move || {
+            commands.remove_tracks_from_playlist(request)
+        })
+        .await,
+    )
 }
 
 #[tauri::command]
-pub fn refresh_playlist_export_status(
+pub async fn refresh_playlist_export_status(
     state: State<'_, BackendCommands>,
     request: crate::models::RefreshPlaylistExportStatusRequest,
-) -> ApiResponse<crate::models::RefreshPlaylistExportStatusData> {
-    state.refresh_playlist_export_status(request)
+) -> Result<ApiResponse<crate::models::RefreshPlaylistExportStatusData>, String> {
+    let commands = state.inner().clone();
+    Ok(
+        run_blocking_command("refresh_playlist_export_status", move || {
+            commands.refresh_playlist_export_status(request)
+        })
+        .await,
+    )
 }
 
 #[tauri::command]
-pub fn reorder_playlist_tracks(
+pub async fn reorder_playlist_tracks(
     state: State<'_, BackendCommands>,
     request: ReorderPlaylistTracksRequest,
-) -> ApiResponse<ReorderPlaylistTracksData> {
-    state.reorder_playlist_tracks(request)
+) -> Result<ApiResponse<ReorderPlaylistTracksData>, String> {
+    let commands = state.inner().clone();
+    Ok(run_blocking_command("reorder_playlist_tracks", move || {
+        commands.reorder_playlist_tracks(request)
+    })
+    .await)
 }
 
 #[tauri::command]
-pub fn get_frontend_settings(
+pub async fn get_frontend_settings(
     state: State<'_, BackendCommands>,
-) -> ApiResponse<GetFrontendSettingsData> {
-    state.get_frontend_settings()
+) -> Result<ApiResponse<GetFrontendSettingsData>, String> {
+    let commands = state.inner().clone();
+    Ok(run_blocking_command("get_frontend_settings", move || {
+        commands.get_frontend_settings()
+    })
+    .await)
 }
 
+/// Stays sync (main thread) on purpose: sync commands run in call order, and
+/// the UI fires these without awaiting (the accent-hue slider sends one per
+/// step), so the last value sent must be the last one saved. It is one small
+/// row write.
 #[tauri::command]
 pub fn set_frontend_setting(
     state: State<'_, BackendCommands>,
@@ -1097,72 +1227,107 @@ pub async fn validate_usb_root(
 }
 
 #[tauri::command]
-pub fn list_usb_devices(state: State<'_, BackendCommands>) -> ApiResponse<ListUsbDevicesData> {
-    state.list_usb_devices()
+pub async fn list_usb_devices(
+    state: State<'_, BackendCommands>,
+) -> Result<ApiResponse<ListUsbDevicesData>, String> {
+    let commands = state.inner().clone();
+    Ok(run_blocking_command("list_usb_devices", move || commands.list_usb_devices()).await)
 }
 
 #[tauri::command]
-pub fn prune_usb_device(
+pub async fn prune_usb_device(
     state: State<'_, BackendCommands>,
     request: PruneUsbDeviceRequest,
-) -> ApiResponse<PruneUsbDeviceData> {
-    state.prune_usb_device(request)
+) -> Result<ApiResponse<PruneUsbDeviceData>, String> {
+    let commands = state.inner().clone();
+    Ok(run_blocking_command("prune_usb_device", move || {
+        commands.prune_usb_device(request)
+    })
+    .await)
 }
 
 #[tauri::command]
-pub fn get_usb_device_name(
+pub async fn get_usb_device_name(
     state: State<'_, BackendCommands>,
     request: GetUsbDeviceNameRequest,
-) -> ApiResponse<GetUsbDeviceNameData> {
-    state.get_usb_device_name(request)
+) -> Result<ApiResponse<GetUsbDeviceNameData>, String> {
+    let commands = state.inner().clone();
+    Ok(run_blocking_command("get_usb_device_name", move || {
+        commands.get_usb_device_name(request)
+    })
+    .await)
 }
 
 #[tauri::command]
-pub fn set_usb_device_name(
+pub async fn set_usb_device_name(
     state: State<'_, BackendCommands>,
     request: SetUsbDeviceNameRequest,
-) -> ApiResponse<SetUsbDeviceNameData> {
-    state.set_usb_device_name(request)
+) -> Result<ApiResponse<SetUsbDeviceNameData>, String> {
+    let commands = state.inner().clone();
+    Ok(run_blocking_command("set_usb_device_name", move || {
+        commands.set_usb_device_name(request)
+    })
+    .await)
 }
 
 #[tauri::command]
-pub fn get_usb_audio_formats(
+pub async fn get_usb_audio_formats(
     state: State<'_, BackendCommands>,
     request: crate::models::GetUsbAudioFormatsRequest,
-) -> ApiResponse<crate::models::UsbAudioFormatsData> {
-    state.get_usb_audio_formats(request)
+) -> Result<ApiResponse<crate::models::UsbAudioFormatsData>, String> {
+    let commands = state.inner().clone();
+    Ok(run_blocking_command("get_usb_audio_formats", move || {
+        commands.get_usb_audio_formats(request)
+    })
+    .await)
 }
 
 #[tauri::command]
-pub fn set_usb_audio_formats(
+pub async fn set_usb_audio_formats(
     state: State<'_, BackendCommands>,
     request: crate::models::SetUsbAudioFormatsRequest,
-) -> ApiResponse<crate::models::UsbAudioFormatsData> {
-    state.set_usb_audio_formats(request)
+) -> Result<ApiResponse<crate::models::UsbAudioFormatsData>, String> {
+    let commands = state.inner().clone();
+    Ok(run_blocking_command("set_usb_audio_formats", move || {
+        commands.set_usb_audio_formats(request)
+    })
+    .await)
 }
 
 #[tauri::command]
-pub fn list_usb_backups(
+pub async fn list_usb_backups(
     state: State<'_, BackendCommands>,
     request: ListUsbBackupsRequest,
-) -> ApiResponse<ListUsbBackupsData> {
-    state.list_usb_backups(request)
+) -> Result<ApiResponse<ListUsbBackupsData>, String> {
+    let commands = state.inner().clone();
+    Ok(run_blocking_command("list_usb_backups", move || {
+        commands.list_usb_backups(request)
+    })
+    .await)
 }
 
 #[tauri::command]
-pub fn restore_usb_backup(
+pub async fn restore_usb_backup(
     state: State<'_, BackendCommands>,
     request: RestoreUsbBackupRequest,
-) -> ApiResponse<RestoreUsbBackupData> {
-    state.restore_usb_backup(request)
+) -> Result<ApiResponse<RestoreUsbBackupData>, String> {
+    let commands = state.inner().clone();
+    Ok(run_blocking_command("restore_usb_backup", move || {
+        commands.restore_usb_backup(request)
+    })
+    .await)
 }
 
 #[tauri::command]
-pub fn delete_usb_backup(
+pub async fn delete_usb_backup(
     state: State<'_, BackendCommands>,
     request: DeleteUsbBackupRequest,
-) -> ApiResponse<DeleteUsbBackupData> {
-    state.delete_usb_backup(request)
+) -> Result<ApiResponse<DeleteUsbBackupData>, String> {
+    let commands = state.inner().clone();
+    Ok(run_blocking_command("delete_usb_backup", move || {
+        commands.delete_usb_backup(request)
+    })
+    .await)
 }
 
 /// Runs the pending one-time background data migrations (`migrations.rs`)
@@ -1784,18 +1949,26 @@ pub fn get_transcode_formats(
 }
 
 #[tauri::command]
-pub fn get_transcode_folder(
+pub async fn get_transcode_folder(
     state: State<'_, BackendCommands>,
-) -> ApiResponse<crate::models::TranscodeFolderData> {
-    state.get_transcode_folder()
+) -> Result<ApiResponse<crate::models::TranscodeFolderData>, String> {
+    let commands = state.inner().clone();
+    Ok(run_blocking_command("get_transcode_folder", move || {
+        commands.get_transcode_folder()
+    })
+    .await)
 }
 
 #[tauri::command]
-pub fn set_transcode_folder(
+pub async fn set_transcode_folder(
     state: State<'_, BackendCommands>,
     request: crate::models::SetTranscodeFolderRequest,
-) -> ApiResponse<crate::models::TranscodeFolderData> {
-    state.set_transcode_folder(request)
+) -> Result<ApiResponse<crate::models::TranscodeFolderData>, String> {
+    let commands = state.inner().clone();
+    Ok(run_blocking_command("set_transcode_folder", move || {
+        commands.set_transcode_folder(request)
+    })
+    .await)
 }
 
 #[tauri::command]
@@ -1887,26 +2060,40 @@ pub async fn repair_usb_diagnostics(
 }
 
 #[tauri::command]
-pub fn detect_external_rekordbox_db(
+pub async fn detect_external_rekordbox_db(
     state: State<'_, BackendCommands>,
-) -> ApiResponse<DetectExternalRekordboxDbData> {
-    state.detect_external_rekordbox_db()
+) -> Result<ApiResponse<DetectExternalRekordboxDbData>, String> {
+    let commands = state.inner().clone();
+    Ok(
+        run_blocking_command("detect_external_rekordbox_db", move || {
+            commands.detect_external_rekordbox_db()
+        })
+        .await,
+    )
 }
 
 #[tauri::command]
-pub fn list_mixxx_playlists(
+pub async fn list_mixxx_playlists(
     state: State<'_, BackendCommands>,
     request: ListExternalPlaylistsRequest,
-) -> ApiResponse<ListExternalPlaylistsData> {
-    state.list_mixxx_playlists(request)
+) -> Result<ApiResponse<ListExternalPlaylistsData>, String> {
+    let commands = state.inner().clone();
+    Ok(run_blocking_command("list_mixxx_playlists", move || {
+        commands.list_mixxx_playlists(request)
+    })
+    .await)
 }
 
 #[tauri::command]
-pub fn list_rekordbox_playlists(
+pub async fn list_rekordbox_playlists(
     state: State<'_, BackendCommands>,
     request: ListExternalPlaylistsRequest,
-) -> ApiResponse<ListExternalPlaylistsData> {
-    state.list_rekordbox_playlists(request)
+) -> Result<ApiResponse<ListExternalPlaylistsData>, String> {
+    let commands = state.inner().clone();
+    Ok(run_blocking_command("list_rekordbox_playlists", move || {
+        commands.list_rekordbox_playlists(request)
+    })
+    .await)
 }
 
 #[tauri::command]
@@ -1930,10 +2117,14 @@ pub async fn import_external_playlists(
 }
 
 #[tauri::command]
-pub fn detect_external_mixxx_db(
+pub async fn detect_external_mixxx_db(
     state: State<'_, BackendCommands>,
-) -> ApiResponse<DetectExternalMixxxDbData> {
-    state.detect_external_mixxx_db()
+) -> Result<ApiResponse<DetectExternalMixxxDbData>, String> {
+    let commands = state.inner().clone();
+    Ok(run_blocking_command("detect_external_mixxx_db", move || {
+        commands.detect_external_mixxx_db()
+    })
+    .await)
 }
 
 #[tauri::command]
@@ -2177,8 +2368,9 @@ pub fn cancel_essentia_download(cancel: State<'_, EssentiaDownloadCancel>) -> Ap
 }
 
 #[tauri::command]
-pub fn remove_essentia(state: State<'_, BackendCommands>) -> ApiResponse<()> {
-    state.remove_essentia()
+pub async fn remove_essentia(state: State<'_, BackendCommands>) -> Result<ApiResponse<()>, String> {
+    let commands = state.inner().clone();
+    Ok(run_blocking_command("remove_essentia", move || commands.remove_essentia()).await)
 }
 
 const RELEASES_API_URL: &str =
