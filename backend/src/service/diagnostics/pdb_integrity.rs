@@ -80,8 +80,9 @@ pub(crate) fn diagnose_pdb_integrity(
     if let Some(header_compat) =
         crate::service::repair::pdb_header_compatibility_value_from_bytes(&bytes)
     {
-        // docs/PDB.md "File header 0x10 compatibility field": both 1 and 5 are
-        // confirmed accepted by every tested validator. Comparing against a
+        // docs/PDB.md "File header 0x10 compatibility field": rekordbox writes
+        // 1, 4 and 5, so none of them warns; any repair that runs still sets
+        // 1 and 4 to 5. Comparing against a
         // backup snapshot's value here would flag "drift" every time a fresh
         // export (writer always emits 5) follows a prior repair application
         // (which patches to 1) — an unwinnable oscillation, not a real issue.

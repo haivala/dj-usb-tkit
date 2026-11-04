@@ -162,7 +162,7 @@ The current code can propose these repair IDs:
 | `add_missing_flac_seek_data` | FLAC tracks whose `.EXT` has no `PVB2`. Only the bundles are read for the preview | Parses each FLAC on the USB and appends `PVB2` to the `.EXT`. For long tracks about 98% of its entries match rekordbox's (the rest are one frame later), which is why it's a separate fix and not written at analysis. Files that don't parse cleanly are skipped and logged like the MP3 fix |
 | `repair_pdb_track_string_alignment` / `repair_pdb_album_string_alignment` | `t00` track or `t03` album rows with a long-form string slot (UTF-16 `0x90` or long ASCII `0x40`) that isn't 4-byte aligned: MIPS CDJs freeze or give communication errors while browsing, or (misaligned long ASCII comments) as soon as the track list opens. Shown as the "Track/album string alignment" check under Contents integrity | Re-encodes each row with the same content through the current, aligned encoder and relocates it. One pass leaves nothing flagged. Misaligned artist names go through `repair_pdb_artist_name_layout`. Nothing else rewrites these rows: until the fix is applied, diagnostics keeps the check (and the "Older Pioneer players" line) at FAIL |
 | `repair_pdb_artist_name_layout` | `t02` artist rows whose name isn't where rekordbox puts it: a short ASCII name not at offset 10 (written by app versions before 0.4.1, which put every name at 12), or a UTF-16 name not 4-byte aligned. Shown as the "Artist name layout" check under Contents integrity. CDJs read the ASCII rows fine, but an Engine DJ player's own import of `export.pdb` shows those tracks without an artist | Re-encodes each row with the same id and name (ASCII at 10, UTF-16 at 12) and relocates it within `t02`. One pass leaves nothing flagged |
-| `repair_pdb_header_compatibility_field` | PDB header bytes `0x10..0x14` | Writes only that 4-byte field to the built-in compatibility value `5` when the current value is unrecognized; known-compatible values are not repaired just because they differ from a local backup snapshot |
+| `repair_pdb_header_compatibility_field` | PDB header bytes `0x10..0x14` | Writes only that 4-byte field to the built-in compatibility value `5`. A value rekordbox writes (`1`, `4`) is bookkeeping: no warning, and it is set to `5` only when another repair runs. Any other value warns and is a fix of its own. A local backup snapshot's value is never used |
 | `repair_pdb_sentinel_u5_on_data_pages` | data pages whose `u5` is sentinel `0x1FFF` | Rewrites `u5` and, only when needed, `num_rl` to the per-table data-page convention |
 | `repair_pdb_wrong_page_flags` | data pages with invalid `page_flags` | Patches byte `0x1b` to the accepted value for that table family |
 | `repair_pdb_zero_tranrf_on_track_pages` | row-footer groups with active rows and zero `tranrf` | Patches only zero `tranrf` groups; it does not normalize non-zero transaction masks |
@@ -201,6 +201,7 @@ unrepaired. These fixes carry `bookkeeping: true`:
 - `repair_pdb_tombstoned_playlist_tree_ids`
 - `repair_pdb_wrong_playlist_tree_shape`
 - `repair_pdb_stale_sentinel_btree`
+- `repair_pdb_header_compatibility_field`, only when the value is `1` or `4`
 
 Diagnostics report them as Pass ("PDB page headers", "PDB structural
 integrity") with the counts in the detail, and they are not detected issues.

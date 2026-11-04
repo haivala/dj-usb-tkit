@@ -96,11 +96,18 @@ Known file header fields:
 | `0x1c` | table pointers | 20 × 16-byte table pointer slots |
 
 **File header `0x10` compatibility field**: our writer emits `5` here.
-Version-6 reference exports also use `5`; version-7 fresh reference exports
-commonly use `1`. Reference testing confirmed this field is not a
-desktop-library rejection cause when set to `5`. A version-7 fresh reference
-export patched from `1` to `5` was accepted by hardware players. Value `5` is
-accepted by tested desktop and hardware validators.
+rekordbox writes `1`, `4` and `5`, and the meaning is unknown. In a rekordbox
+6.8.6 test on one stick, creating the empty database wrote `4` to `export.pdb`
+and `5` to `exportExt.pdb`. The first export changed `export.pdb` to `5`, which
+then stayed through re-exports, playlist, track, cue and comment edits, and a
+restart. It doesn't follow the rekordbox version or what an export changed, and
+other exports on the same stick left `1` and `4`, with the cause not found.
+Reference testing confirmed this field is not a desktop-library rejection cause
+when set to `5`. A fresh reference export patched from `1` to `5` was accepted
+by hardware players. Value `5` is accepted by tested desktop and hardware
+validators; `4` has no player validation here. Diagnostics don't warn on `1`,
+`4` or `5`. Any repair that runs sets `1` and `4` to `5`, and any other value
+warns and has its own fix to `5`.
 
 There are 20 table pointer slots in the file header. Each table pointer stores:
 

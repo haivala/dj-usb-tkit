@@ -39,6 +39,9 @@
 
 ## Unreleased
 
+- **Fix:** Diagnostics no longer warn "PDB header compatibility: value 4" on USBs exported with
+  rekordbox, which writes that value itself. The next repair you run on the USB sets it to 5.
+
 ## 0.5.4
 
 - **New feature:** App playlist rows show a small icon next to the checkbox: a USB plug for a track

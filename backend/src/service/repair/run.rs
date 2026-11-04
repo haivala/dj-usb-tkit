@@ -1036,11 +1036,13 @@ impl BackendService {
         let pdb_header_compatibility_repair =
             detect_pdb_header_compatibility_repair(&staged_pdb_bytes);
         if let Some(repair) = pdb_header_compatibility_repair.as_ref() {
-            detected_issues.push(format!(
-                "PDB header compatibility field 0x10..0x14 is {}",
-                repair.current_value
-            ));
-            estimated_file_writes += 1;
+            if !repair.is_bookkeeping() {
+                detected_issues.push(format!(
+                    "PDB header compatibility field 0x10..0x14 is {}",
+                    repair.current_value
+                ));
+                estimated_file_writes += 1;
+            }
             proposed_fixes.push(fix_proposal(
                 PDB_HEADER_COMPATIBILITY_FIX_ID,
                 "Repair PDB Header Compatibility Field",
@@ -1488,7 +1490,11 @@ impl BackendService {
         });
         for fix in &mut proposed_fixes {
             fix.always_applied = fix_always_applied(&fix.id);
-            fix.bookkeeping = fix_is_bookkeeping(&fix.id);
+            fix.bookkeeping = fix_is_bookkeeping(&fix.id)
+                || (fix.id == PDB_HEADER_COMPATIBILITY_FIX_ID
+                    && pdb_header_compatibility_repair
+                        .as_ref()
+                        .is_some_and(PdbHeaderCompatibilityRepair::is_bookkeeping));
         }
 
         let mut selected = if req.selected_fix_ids.is_empty() {

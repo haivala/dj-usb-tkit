@@ -1296,6 +1296,67 @@ fn diagnostics_and_repair_pdb_header_compatibility_ignores_backup_snapshot_drift
     assert_eq!(read_pdb_header_compatibility_value(&pdb_path), 5);
 }
 
+/// rekordbox itself writes 4 when it creates a database, so it never warns or
+/// counts as an issue, but any repair that runs still sets it to 5.
+#[test]
+fn rekordbox_pdb_header_compatibility_value_4_never_warns_and_rides_along_with_any_repair() {
+    let (_root, backend, usb, _playlist_name) = setup_clean_strict_parity_fixture();
+    let pdb_path = vendor_db_dir(&usb).join("export.pdb");
+    write_pdb_header_compatibility_value(&pdb_path, 4);
+
+    let diagnostics = backend.run_usb_diagnostics(RunUsbDiagnosticsRequest {
+        usb_root: Some(usb.to_string_lossy().to_string()),
+    });
+    assert!(diagnostics.ok, "diagnostics failed: {diagnostics:?}");
+    let diagnostics_data = diagnostics.data.expect("diagnostics data");
+    let header_check = diagnostics_data
+        .pdb_integrity
+        .checks
+        .iter()
+        .find(|c| c.label == "PDB header compatibility")
+        .expect("header compatibility check");
+    assert!(
+        matches!(header_check.status, backend::models::DiagStatus::Pass),
+        "value rekordbox writes must not warn: {header_check:?}"
+    );
+
+    let preview = backend.repair_usb_diagnostics(RepairUsbDiagnosticsRequest {
+        usb_root: Some(usb.to_string_lossy().to_string()),
+        apply: false,
+        selected_fix_ids: Vec::new(),
+    });
+    assert!(preview.ok, "repair preview failed: {preview:?}");
+    let preview_data = preview.data.expect("preview data");
+    let proposal = preview_data
+        .proposed_fixes
+        .iter()
+        .find(|fix| fix.id == PDB_HEADER_COMPATIBILITY_FIX_ID)
+        .expect("header fix still proposed");
+    assert!(
+        proposal.bookkeeping,
+        "value 4 must be bookkeeping: {proposal:?}"
+    );
+    assert!(
+        !preview_data
+            .detected_issues
+            .iter()
+            .any(|issue| issue.contains("compatibility")),
+        "value 4 must not count as an issue: {:#?}",
+        preview_data.detected_issues
+    );
+    assert_eq!(read_pdb_header_compatibility_value(&pdb_path), 4);
+
+    // A repair for something else normalizes the value too.
+    break_history_page_shape(&pdb_path);
+    let repair = backend.repair_usb_diagnostics(RepairUsbDiagnosticsRequest {
+        usb_root: Some(usb.to_string_lossy().to_string()),
+        apply: true,
+        selected_fix_ids: vec![PDB_WRONG_HISTORY_SHAPE_FIX_ID.to_string()],
+    });
+    assert!(repair.ok, "repair apply failed: {repair:?}");
+    assert_eq!(read_pdb_header_compatibility_value(&pdb_path), 5);
+}
+
 #[test]
 fn strict_repair_preview_and_apply_repopulate_edb_for_exported_playlist_gap_case() {
     let (_root, backend, usb, playlist_name) = setup_clean_strict_parity_fixture();

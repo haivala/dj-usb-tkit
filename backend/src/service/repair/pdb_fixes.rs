@@ -8,6 +8,14 @@ pub(super) struct PdbHeaderCompatibilityRepair {
     pub(super) target_value: u32,
 }
 
+impl PdbHeaderCompatibilityRepair {
+    /// A value rekordbox writes itself: not an issue, normalized only when
+    /// another repair runs.
+    pub(super) fn is_bookkeeping(&self) -> bool {
+        is_known_pdb_header_compatibility_value(self.current_value)
+    }
+}
+
 pub(in crate::service) fn pdb_header_compatibility_value_from_bytes(bytes: &[u8]) -> Option<u32> {
     bytes
         .get(0x10..0x14)
@@ -16,22 +24,20 @@ pub(in crate::service) fn pdb_header_compatibility_value_from_bytes(bytes: &[u8]
 }
 
 pub(in crate::service) fn is_known_pdb_header_compatibility_value(value: u32) -> bool {
-    matches!(value, 1 | PDB_HEADER_COMPATIBILITY_FALLBACK_VALUE)
+    matches!(value, 1 | 4 | PDB_HEADER_COMPATIBILITY_FALLBACK_VALUE)
 }
 
-/// `docs/PDB.md` "File header `0x10` compatibility field" confirms both `1`
-/// and `5` are accepted by every tested validator. Comparing against the
-/// most recent backup snapshot's value here would cause this repair to
-/// oscillate forever: the writer always emits `5` on a fresh export, so any
-/// export following a prior application of this repair (which patches to
-/// `1`) immediately re-flags "drift" back toward `1`, and applying it again
-/// just sets up the next export to flag drift back toward `5`. Only an
-/// actually-unknown value is worth repairing.
+/// `docs/PDB.md` "File header `0x10` compatibility field": rekordbox writes
+/// `1`, `4` and `5`. Anything but `5` is patched to `5`, the value our writer
+/// emits and hardware players accepted. `1` and `4` are bookkeeping, so they
+/// only ride along with another repair (see `is_bookkeeping`); any other value
+/// is reported as an issue. The target is always `5`, never a backup
+/// snapshot's value, so repeated export and repair cycles can't oscillate.
 pub(super) fn detect_pdb_header_compatibility_repair(
     bytes: &[u8],
 ) -> Option<PdbHeaderCompatibilityRepair> {
     let current_value = pdb_header_compatibility_value_from_bytes(bytes)?;
-    if is_known_pdb_header_compatibility_value(current_value) {
+    if current_value == PDB_HEADER_COMPATIBILITY_FALLBACK_VALUE {
         return None;
     }
     Some(PdbHeaderCompatibilityRepair {
