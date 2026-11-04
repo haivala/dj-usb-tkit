@@ -2,18 +2,23 @@ import test from "node:test";
 import assert from "node:assert/strict";
 import { addUsbPlayerMenuItems, syncUsbPlayerMenusEdbToPdb } from "../components/usb/actions.mjs";
 import { makeTestCtx } from "./test_helpers.mjs";
+import { playerMenuConfig, playerMenuItem } from "./fixtures/backend_data.mjs";
 
 // A ctx showing a stale "WARN" diagnostics report; the player-menu command
 // answers `{ updated }`.
 function menuCtx(updated) {
   const ctx = makeTestCtx({
-    command: async () => ({ updated, currentItems: [{ kind: 131 }], availableItems: [{ kind: 132 }] })
+    command: async () => playerMenuConfig({
+      updated,
+      currentItems: [playerMenuItem(131)],
+      availableItems: [playerMenuItem(132)]
+    })
   });
   Object.assign(ctx.state, {
     usbRoot: "/tmp/usb",
     usbRootValid: true,
-    usbPlayerMenuCurrent: [{ kind: 131 }],
-    usbPlayerMenuAvailable: [{ kind: 132 }],
+    usbPlayerMenuCurrent: [playerMenuItem(131)],
+    usbPlayerMenuAvailable: [playerMenuItem(132)],
     usbPlayerMenuAvailableSelectedKind: 132
   });
   ctx.el.diagOverallStatus.textContent = "WARN";

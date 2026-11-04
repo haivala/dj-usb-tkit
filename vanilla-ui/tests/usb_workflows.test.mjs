@@ -16,6 +16,7 @@ import {
 } from "../components/usb/actions.mjs";
 import { buildTracklistText } from "../track_utils.mjs";
 import { makeTestCtx } from "./test_helpers.mjs";
+import { usbDiagnosticsData } from "./fixtures/backend_data.mjs";
 
 // An app ctx for USB refresh flows with the progress footer stubbed out.
 function usbCtx(overrides = {}) {
@@ -32,10 +33,7 @@ function usbCtx(overrides = {}) {
 test("runUsbDiagnostics refreshes the open playlist's reorder lock from the new status", async () => {
   let renderOpenPlaylist = 0;
   const ctx = usbCtx({
-    command: async () => ({
-      overallStatus: "PASS",
-      durationMs: 1,
-      warnings: [],
+    command: async () => usbDiagnosticsData({
       playlistUsbExportStatus: [
         { playlistId: "p1", playlistName: "Testi", sameNameExistsOnUsb: true, locksReorder: true }
       ]

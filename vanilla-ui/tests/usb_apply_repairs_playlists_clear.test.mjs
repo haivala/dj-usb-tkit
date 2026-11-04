@@ -2,16 +2,14 @@ import test from "node:test";
 import assert from "node:assert/strict";
 import { applyUsbRepairs } from "../components/usb/actions.mjs";
 import { makeTestCtx } from "./test_helpers.mjs";
+import { repairData, usbDiagnosticsData } from "./fixtures/backend_data.mjs";
 
 test("applyUsbRepairs does not clear playlists when nothing was applied", async () => {
   let renderOpenPlaylist = 0;
   const ctx = makeTestCtx({
-    command: async () => ({
-      appliedFixes: [],
+    command: async () => repairData({
       failedFixes: ["some_fix"],
-      warnings: [],
-      durationMs: 1,
-      diagnostics: { overallStatus: "WARN", playlistDetails: [], warnings: [], durationMs: 1 }
+      diagnostics: usbDiagnosticsData({ overallStatus: "WARN" })
     }),
     logWarnings: () => {},
     renderCurrentPlaylistTracksFromState: async () => { renderOpenPlaylist += 1; }

@@ -19,8 +19,7 @@ import {
 test("playlistUsbExportStatusById indexes the backend's per-playlist status by playlist id", () => {
   const statusById = playlistUsbExportStatusById([
     { playlistId: "p1", playlistName: "Testi", sameNameExistsOnUsb: true, locksReorder: true },
-    { playlistId: "p2", playlistName: "House", sameNameExistsOnUsb: false, locksReorder: false },
-    { playlistId: "", playlistName: "Unnamed", sameNameExistsOnUsb: false, locksReorder: false }
+    { playlistId: "p2", playlistName: "House", sameNameExistsOnUsb: false, locksReorder: false }
   ]);
 
   assert.equal(statusById.size, 2);

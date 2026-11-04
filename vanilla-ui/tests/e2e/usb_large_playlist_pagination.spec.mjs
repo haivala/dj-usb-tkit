@@ -68,7 +68,7 @@ function baseUsbCommands(payload, command) {
   if (command === "pick_usb_folder") return "/Volumes/USB-TEST";
   if (command === "list_playlists") return { ok: true, data: { items: [] } };
   if (command === "list_usb_devices") return { ok: true, data: { items: [] } };
-  if (command === "fetch_usb_histories") return { ok: true, data: { items: [], warnings: [] } };
+  if (command === "fetch_usb_histories") return { ok: true, data: { items: [], counts: { importedPlaylists: 0, importedTracks: 0 }, warnings: [], warningCount: 0 } };
   if (command === "validate_usb_root") {
     const path = String(payload?.request?.path || "");
     return {
@@ -113,6 +113,8 @@ function installTauriMock(page, { trackCount, gateFetches = false }) {
               data: {
                 items: [{ id: "usb-1", name: "Big Playlist", source: "mock-tauri", trackCount: tracks.length, tracks: [], totalDurationMs: 0, durationUnknownCount: 0 }],
                 stats: { indexedTracks: tracks.length, playlistReferencedTracks: tracks.length, playlistEntries: tracks.length },
+                playlistTrackTotal: tracks.length,
+                playlistUsbExportStatus: [],
                 warnings: [],
               },
             };
@@ -331,6 +333,8 @@ function installRowClickMock(page) {
               data: {
                 items: [{ id: "usb-1", name: "Small Playlist", source: "mock-tauri", trackCount: tracks.length, tracks: [], totalDurationMs: 0, durationUnknownCount: 0 }],
                 stats: { indexedTracks: tracks.length, playlistReferencedTracks: tracks.length, playlistEntries: tracks.length },
+                playlistTrackTotal: tracks.length,
+                playlistUsbExportStatus: [],
                 warnings: [],
               },
             };

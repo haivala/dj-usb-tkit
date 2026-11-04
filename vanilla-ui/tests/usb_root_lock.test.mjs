@@ -22,6 +22,7 @@ import { updatePlaylistExportButtons } from "../components/playlist/actions.mjs"
 import { handleJobEvent } from "../job_manager.mjs";
 import { makeClassList } from "./fixtures/dom.mjs";
 import { makeTestCtx, withSilencedConsole } from "./test_helpers.mjs";
+import { validateUsbRootData } from "./fixtures/backend_data.mjs";
 
 // handleJobEvent's collaborators as no-ops, recording USB lock toggles.
 function jobCtx(lockCalls) {
@@ -74,7 +75,10 @@ test("pickUsbFolder blocks every USB-locking job type and allows unlocked or unr
     const ctx = withJob(makeTestCtx({
       runUsbDiagnostics: async () => {},
       invoke: async () => { invokeCalled = true; return "/tmp/usb"; },
-      command: async (name) => { commands.push(name); return {}; },
+      command: async (name) => {
+        commands.push(name);
+        return name === "validate_usb_root" ? validateUsbRootData({ valid: false }) : {};
+      },
       emitStatus: () => {}
     }), activeJobId, activeJobType);
     await pickUsbFolder(ctx);

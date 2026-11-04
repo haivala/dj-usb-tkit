@@ -98,8 +98,11 @@ function installBasicTauriMock(page, opts = {}) {
             window.__pendingTrackLoads -= 1;
             return { ok: true, data };
           }
-          if (command === "fetch_usb_playlists" || command === "fetch_usb_histories") {
-            return { ok: true, data: { items: [], warnings: [] } };
+          if (command === "fetch_usb_playlists") {
+            return { ok: true, data: { items: [], stats: { indexedTracks: 0, playlistReferencedTracks: 0, playlistEntries: 0 }, playlistTrackTotal: 0, warnings: [], warningCount: 0, playlistUsbExportStatus: [] } };
+          }
+          if (command === "fetch_usb_histories") {
+            return { ok: true, data: { items: [], counts: { importedPlaylists: 0, importedTracks: 0 }, warnings: [], warningCount: 0 } };
           }
           if (command === "check_for_update" && opts?.updateCheck) {
             // `nextUpdateChecks` (set by a test) answers the later re-checks.

@@ -48,6 +48,8 @@ function installTauriMock(page) {
               ok: true,
               data: {
                 overallStatus: "PASS",
+                overview: [],
+                playlistUsbExportStatus: [],
                 sectionGroups: [],
                 playlistDetails: [],
                 warnings: [],

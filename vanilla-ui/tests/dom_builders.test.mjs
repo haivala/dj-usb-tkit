@@ -68,18 +68,23 @@ test("fillPlaylistSidebarItem marks by the connected USB's status when there is 
 });
 
 test("renderUsbRecentRoots toggles row visibility and renders buttons", () => {
-  const dom = makeDom();
-  const document = dom.window.document;
-  const el = {
-    usbRecentRow: document.getElementById("usbRecentRow"),
-    usbRecentList: document.getElementById("usbRecentList")
-  };
+  const ctx = makeTestCtx();
+  const { el } = ctx;
+  ctx.state.usbDevices = [{ id: "d1", rootPath: "/USB/A" }];
+  ctx.state.usbRecentRoots = ["/USB/A", "/USB/B"];
 
-  renderUsbRecentRoots({ el, document, state: { usbRecentRoots: ["/USB/A", "", " /USB/B "], runningJobs: new Map() } });
+  renderUsbRecentRoots(ctx);
 
   assert.equal(el.usbRecentRow.classList.contains("hidden"), false);
-  assert.equal(el.usbRecentList.querySelectorAll("button").length, 2);
-  assert.equal(el.usbRecentList.querySelector("button")?.dataset.usbRecentPath, "/USB/A");
+  const paths = [...el.usbRecentList.querySelectorAll(".usb-cfg-recent-btn")].map((b) => b.dataset.usbRecentPath);
+  assert.deepEqual(paths, ["/USB/A", "/USB/B"]);
+  // Only a known device can be forgotten.
+  const prune = [...el.usbRecentList.querySelectorAll(".usb-cfg-recent-prune-btn")];
+  assert.deepEqual(prune.map((b) => b.dataset.usbPruneDeviceId), ["d1"]);
+
+  ctx.state.usbRecentRoots = [];
+  renderUsbRecentRoots(ctx);
+  assert.equal(el.usbRecentRow.classList.contains("hidden"), true);
 });
 
 test("populatePlaylistPanel fills export status and search input", () => {

@@ -431,8 +431,11 @@ function installScanAnalysisMock(page, opts = {}) {
             const data = await runAnalyzeNewTracks(ids, bpmRangeSeen.min, bpmRangeSeen.max);
             return { ok: true, data };
           }
-          if (command === "fetch_usb_playlists" || command === "fetch_usb_histories") {
-            return { ok: true, data: { items: [], warnings: [] } };
+          if (command === "fetch_usb_playlists") {
+            return { ok: true, data: { items: [], stats: { indexedTracks: 0, playlistReferencedTracks: 0, playlistEntries: 0 }, playlistTrackTotal: 0, warnings: [], warningCount: 0, playlistUsbExportStatus: [] } };
+          }
+          if (command === "fetch_usb_histories") {
+            return { ok: true, data: { items: [], counts: { importedPlaylists: 0, importedTracks: 0 }, warnings: [], warningCount: 0 } };
           }
           if (command === "set_analysis_paused") {
             analysisPaused = !!(payload?.request?.paused);
@@ -816,8 +819,11 @@ function installPagedMaterializeAnalyzeMock(page, opts = {}) {
               data: { jobId: "job-scan-mock", indexed: tracks.length, updated: 0, removed: 0 }
             };
           }
-          if (command === "fetch_usb_playlists" || command === "fetch_usb_histories") {
-            return { ok: true, data: { items: [], warnings: [] } };
+          if (command === "fetch_usb_playlists") {
+            return { ok: true, data: { items: [], stats: { indexedTracks: 0, playlistReferencedTracks: 0, playlistEntries: 0 }, playlistTrackTotal: 0, warnings: [], warningCount: 0, playlistUsbExportStatus: [] } };
+          }
+          if (command === "fetch_usb_histories") {
+            return { ok: true, data: { items: [], counts: { importedPlaylists: 0, importedTracks: 0 }, warnings: [], warningCount: 0 } };
           }
           return { ok: false, error: { code: "UNKNOWN", message: `Unhandled command: ${command}` } };
         }
@@ -1517,8 +1523,11 @@ function installAnalyzeResponseMock(page, { analyzeResponse }) {
             return { ok: true, data: { found: false, path: null } };
           }
           if (command === "list_playlists") return { ok: true, data: { items: [] } };
-          if (command === "fetch_usb_playlists" || command === "fetch_usb_histories") {
-            return { ok: true, data: { items: [], warnings: [] } };
+          if (command === "fetch_usb_playlists") {
+            return { ok: true, data: { items: [], stats: { indexedTracks: 0, playlistReferencedTracks: 0, playlistEntries: 0 }, playlistTrackTotal: 0, warnings: [], warningCount: 0, playlistUsbExportStatus: [] } };
+          }
+          if (command === "fetch_usb_histories") {
+            return { ok: true, data: { items: [], counts: { importedPlaylists: 0, importedTracks: 0 }, warnings: [], warningCount: 0 } };
           }
           if (command === "browse_source_files") {
             return { ok: true, data: { total: 1, items: [track] } };

@@ -72,8 +72,11 @@ function installTrackDetailMock(page, opts = {}) {
           if (command === "detect_external_rekordbox_db") return { ok: true, data: { found: false, path: null } };
           if (command === "list_playlists") return { ok: true, data: { items: [] } };
           if (command === "get_backend_log_buffer") return [];
-          if (command === "fetch_usb_playlists" || command === "fetch_usb_histories") {
-            return { ok: true, data: { items: [], warnings: [] } };
+          if (command === "fetch_usb_playlists") {
+            return { ok: true, data: { items: [], stats: { indexedTracks: 0, playlistReferencedTracks: 0, playlistEntries: 0 }, playlistTrackTotal: 0, warnings: [], warningCount: 0, playlistUsbExportStatus: [] } };
+          }
+          if (command === "fetch_usb_histories") {
+            return { ok: true, data: { items: [], counts: { importedPlaylists: 0, importedTracks: 0 }, warnings: [], warningCount: 0 } };
           }
           if (command === "browse_source_files") {
             return { ok: true, data: { total: tracks.length, items: tracks.map(withKeyLabel), nextCursor: null, hasMore: false } };
@@ -1981,8 +1984,11 @@ test("cue editor opens + saves from an app-playlist track row", async ({ page })
           if (command === "browse_source_files") {
             return { ok: true, data: { total: 0, items: [], nextCursor: null, hasMore: false } };
           }
-          if (command === "fetch_usb_playlists" || command === "fetch_usb_histories") {
-            return { ok: true, data: { items: [], warnings: [] } };
+          if (command === "fetch_usb_playlists") {
+            return { ok: true, data: { items: [], stats: { indexedTracks: 0, playlistReferencedTracks: 0, playlistEntries: 0 }, playlistTrackTotal: 0, warnings: [], warningCount: 0, playlistUsbExportStatus: [] } };
+          }
+          if (command === "fetch_usb_histories") {
+            return { ok: true, data: { items: [], counts: { importedPlaylists: 0, importedTracks: 0 }, warnings: [], warningCount: 0 } };
           }
           if (command === "resolve_track_identity") {
             return { ok: true, data: { trackId: "local-1", resolvedBy: "self", materialized: false } };
@@ -2157,6 +2163,8 @@ function installUsbTrackDetailMock(page, mockOpts = {}) {
               data: {
                 items: [{ id: "usb-1", name: "Warmup", source: "mock", trackCount: 1, tracks: [{}] }],
                 stats: { indexedTracks: 1, playlistReferencedTracks: 1, playlistEntries: 1 },
+                playlistTrackTotal: 1,
+                playlistUsbExportStatus: [],
                 warnings: [],
               },
             };
@@ -2166,7 +2174,9 @@ function installUsbTrackDetailMock(page, mockOpts = {}) {
               ok: true,
               data: {
                 items: [{ id: "hist-1", name: "HISTORY 2024-01-01", source: "mock", trackCount: 1, tracks: [{}] }],
+                counts: { importedPlaylists: 1, importedTracks: 1 },
                 warnings: [],
+                warningCount: 0,
               },
             };
           }
@@ -2509,7 +2519,12 @@ test("cue button is disabled for an un-analyzed track", async ({ page }) => {
           if (command === "detect_external_rekordbox_db") return { ok: true, data: { found: false, path: null } };
           if (command === "list_playlists") return { ok: true, data: { items: [] } };
           if (command === "get_backend_log_buffer") return [];
-          if (command === "fetch_usb_playlists" || command === "fetch_usb_histories") return { ok: true, data: { items: [], warnings: [] } };
+          if (command === "fetch_usb_playlists") {
+            return { ok: true, data: { items: [], stats: { indexedTracks: 0, playlistReferencedTracks: 0, playlistEntries: 0 }, playlistTrackTotal: 0, warnings: [], warningCount: 0, playlistUsbExportStatus: [] } };
+          }
+          if (command === "fetch_usb_histories") {
+            return { ok: true, data: { items: [], counts: { importedPlaylists: 0, importedTracks: 0 }, warnings: [], warningCount: 0 } };
+          }
           if (command === "browse_source_files") {
             return { ok: true, data: { total: tracks.length, items: tracks, nextCursor: null, hasMore: false } };
           }

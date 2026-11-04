@@ -41,17 +41,17 @@
 
 - **Improvement:** The Linux AppImage bundles the current WebKitGTK from Ubuntu 22.04's updates on
   every release, with its security fixes. Before, the build could reuse an older cached copy.
-
 - **Improvement:** In the cue editor, the greyed-out part of the waveform before where the CDJ
   starts playback is now drawn by the waveform itself instead of a GPU filter laid over it. It looks
   the same, and the GPU has less work to do on every playback frame.
-
 - **Improvement:** While the cue editor is open, the Help, Settings and Event Log buttons in the
   top bar look disabled. They already did nothing until the editor closed.
-
 - **Chore:** The UI code no longer checks whether its own page elements exist before using them;
   every one is always there. The unit tests that relied on those checks now run on the real
   page. About 250 fewer lines of JavaScript.
+- **Chore:** The USB page's code reads the backend's answers as the backend sends them, instead
+  of re-checking every field's type and filling in defaults the backend never leaves out. The
+  test doubles of those answers now have the backend's full shape.
 
 ## 0.5.3
 

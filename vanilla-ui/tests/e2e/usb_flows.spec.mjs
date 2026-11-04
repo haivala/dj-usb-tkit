@@ -88,7 +88,8 @@ function installTauriMock(page, mode) {
         }
       ],
       warnings: [],
-      durationMs: 10
+      durationMs: 10,
+      playlistUsbExportStatus: []
     };
 
     window.__TAURI__ = {
@@ -122,7 +123,7 @@ function installTauriMock(page, mode) {
             return { ok: true, data: { pruned: true } };
           }
           if (command === "fetch_usb_histories") {
-            return { ok: true, data: { items: [], warnings: [] } };
+            return { ok: true, data: { items: [], counts: { importedPlaylists: 0, importedTracks: 0 }, warnings: [], warningCount: 0 } };
           }
           if (command === "run_usb_diagnostics") {
             return { ok: true, data: diagnosticsPayload };
@@ -411,6 +412,8 @@ function installTauriMock(page, mode) {
                   playlistReferencedTracks: 0,
                   playlistEntries: state.usbPlaylists.reduce((sum, p) => sum + p.tracks.length, 0)
                 },
+                playlistTrackTotal: state.usbPlaylists.reduce((sum, p) => sum + p.tracks.length, 0),
+                playlistUsbExportStatus: [],
                 warnings,
                 // The backend counts the warn/error entries (the info one isn't).
                 warningCount: mode === "warning-mix" ? 2 : 0

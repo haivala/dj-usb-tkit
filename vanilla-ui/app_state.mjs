@@ -14,6 +14,8 @@ export function createInitialState() {
     // libraries' switches.
     librarySources: { folders: [], rekordboxDbEnabled: false, mixxxDbEnabled: false, everConfigured: false },
     usbRoot: null,
+    // Known drives (`list_usb_devices`) and their root paths, for the recent list.
+    usbDevices: [],
     usbRecentRoots: [],
     usbRootValid: false,
     usbDeviceName: null,

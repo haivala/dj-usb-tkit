@@ -329,6 +329,8 @@ test("playlist analyze-missing skips already-analyzed tracks and targets the res
               ok: true,
               data: {
                 overallStatus: "PASS",
+                overview: [],
+                playlistUsbExportStatus: [],
                 durationMs: 1,
                 sectionGroups: [],
                 playlistDetails: [],
@@ -479,6 +481,8 @@ test("playlist actions hide Analyze Missing when unnecessary and keep Export vis
               ok: true,
               data: {
                 overallStatus: "PASS",
+                overview: [],
+                playlistUsbExportStatus: [],
                 durationMs: 1,
                 sectionGroups: [],
                 playlistDetails: [],
@@ -875,6 +879,8 @@ function installReorderTauriMock(page, { usbSameNamePlaylistName, exportPruneSta
               data: {
                 items,
                 stats: { indexedTracks: 0, playlistReferencedTracks: 0, playlistEntries: items.length },
+                playlistTrackTotal: items.length,
+                playlistUsbExportStatus: [],
                 warnings: [],
                 playlistUsbExportStatus: exportStatusFor()
               }
@@ -885,6 +891,7 @@ function installReorderTauriMock(page, { usbSameNamePlaylistName, exportPruneSta
               ok: true,
               data: {
                 overallStatus: "PASS",
+                overview: [],
                 durationMs: 1,
                 sectionGroups: [],
                 playlistDetails: [],
@@ -1406,6 +1413,8 @@ test("switching away from a sorted playlist commits the sort as its real order, 
               data: {
                 items,
                 stats: { indexedTracks: 0, playlistReferencedTracks: 0, playlistEntries: items.length },
+                playlistTrackTotal: items.length,
+                playlistUsbExportStatus: [],
                 warnings: [],
                 playlistUsbExportStatus: playlists.map((playlist) => {
                   const sameNameExistsOnUsb = usbNames.has(String(playlist.name || "").trim().toLowerCase());

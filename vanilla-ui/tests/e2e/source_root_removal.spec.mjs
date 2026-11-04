@@ -118,8 +118,11 @@ function installSourceRemovalMock(page) {
             }
             return { ok: true, data: { indexed, updated: 0, removed: 0, notFound: [] } };
           }
-          if (command === "fetch_usb_playlists" || command === "fetch_usb_histories") {
-            return { ok: true, data: { items: [], warnings: [] } };
+          if (command === "fetch_usb_playlists") {
+            return { ok: true, data: { items: [], stats: { indexedTracks: 0, playlistReferencedTracks: 0, playlistEntries: 0 }, playlistTrackTotal: 0, warnings: [], warningCount: 0, playlistUsbExportStatus: [] } };
+          }
+          if (command === "fetch_usb_histories") {
+            return { ok: true, data: { items: [], counts: { importedPlaylists: 0, importedTracks: 0 }, warnings: [], warningCount: 0 } };
           }
           return { ok: false, error: { code: "UNKNOWN", message: `Unhandled command: ${command}` } };
         }

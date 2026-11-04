@@ -6,6 +6,7 @@ import {
   renderRepairPreview
 } from "../components/usb/actions.mjs";
 import { makeTestCtx } from "./test_helpers.mjs";
+import { repairData, repairFix } from "./fixtures/backend_data.mjs";
 
 function renderPreview(payload) {
   const ctx = makeTestCtx();
@@ -21,31 +22,20 @@ const fixDesc = (li) => li.querySelector(".diag-repair-fix-desc").textContent;
 const fixCheck = (li) => li.querySelector(".diag-repair-fix-check");
 
 test("renderRepairPreview handles no fixes and supported fix selection", () => {
-  const empty = renderPreview({
-    summary: "No issues found.",
-    overview: [],
-    detectedIssues: [],
-    proposedFixes: [],
-    estimatedFileWrites: 0,
-    estimatedFileDeletes: 0,
-    unsupportedItems: []
-  }).el;
+  const empty = renderPreview(repairData({ summary: "No issues found." })).el;
   assert.equal(empty.applyRepairsBtn.disabled, true);
   assert.equal(empty.previewRepairsBtn.disabled, true);
   assert.equal(empty.diagRepairSummary.textContent, "No issues found.");
   assert.match(empty.diagRepairSummary.className, /diag-repair-summary-clean/);
   assert.equal(empty.diagRepairTechnical.classList.contains("hidden"), true);
 
-  const { ctx, el, fixes } = renderPreview({
+  const { ctx, el, fixes } = renderPreview(repairData({
+    summary: "2 fixes",
+    overview: [{ title: "Playlists", status: "WARN", detail: "2 fixes" }],
     detectedIssues: ["a"],
-    proposedFixes: [
-      { id: "fix_a", title: "Fix A", description: "desc", supported: true, destructive: false },
-      { id: "fix_b", title: "Fix B", description: "desc", supported: true, destructive: false }
-    ],
-    estimatedFileWrites: 2,
-    estimatedFileDeletes: 0,
-    unsupportedItems: []
-  });
+    proposedFixes: [repairFix("fix_a"), repairFix("fix_b")],
+    estimatedFileWrites: 2
+  }));
   const selected = ctx.state.selectedRepairFixIds;
   assert.deepEqual(Array.from(selected).sort(), ["fix_a", "fix_b"]);
   assert.equal(el.applyRepairsBtn.disabled, false);
