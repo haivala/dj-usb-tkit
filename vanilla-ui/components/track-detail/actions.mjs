@@ -107,8 +107,8 @@ function formatClock(ms) {
 
 let tempIdSeq = 0;
 
-const raf = (cb) => (globalThis.requestAnimationFrame || ((f) => setTimeout(f, 16)))(cb);
-const caf = (h) => (globalThis.cancelAnimationFrame || globalThis.clearTimeout)(h);
+const raf = (cb) => requestAnimationFrame(cb);
+const caf = (h) => cancelAnimationFrame(h);
 
 /// Position order; the playback-start cue wins a tie with a hot cue.
 function byPosition(a, b) {
@@ -542,7 +542,7 @@ export function createTrackDetailController(el, prefs = {}) {
     // (drawDetailWaveform): scrolling moves every line a whole pixel together,
     // with the bars, instead of each line hopping at its own moment, which
     // rippled the gaps along the grid. The % fallback is for an unlaid-out host.
-    const dpr = (typeof window !== "undefined" && window.devicePixelRatio) || 1;
+    const dpr = window.devicePixelRatio || 1;
     // Widths in whole device pixels too (at least one per CSS px on HiDPI),
     // thicker as the "Beat grid" slider goes up; centred on the line's pixel.
     const dpx = Math.max(1, Math.round(dpr)) / dpr;
@@ -1592,7 +1592,7 @@ export function createTrackDetailController(el, prefs = {}) {
       raf(() => renderWaveform());
 
       const wf = el.trackDetailWaveform;
-      if (wf && typeof ResizeObserver === "function") {
+      if (wf) {
         // The beat grid is laid out in whole pixels, so it redraws with the
         // canvas. On the next frame, not in the callback: a redraw that shifts
         // the layout (the dialog's scrollbar) would resize the waveform again

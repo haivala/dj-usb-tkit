@@ -8,33 +8,15 @@ test("toPlayableUrl keeps protocol urls unchanged", () => {
   assert.equal(toPlayableUrl({}, "data:audio/wav;base64,AAA"), "data:audio/wav;base64,AAA");
 });
 
-test("toPlayableUrl converts absolute unix paths", () => {
-  assert.equal(toPlayableUrl({}, "/tmp/audio/a b.mp3"), "file:///tmp/audio/a%20b.mp3");
-});
-
-test("toPlayableUrl converts windows paths", () => {
-  assert.equal(toPlayableUrl({}, "C:\\Music\\Track.mp3"), "file:///C:/Music/Track.mp3");
-});
-
-test("toPlayableUrl uses tauriConvertFileSrc when available", () => {
+test("toPlayableUrl loads a local file through Tauri's asset protocol", () => {
   const out = toPlayableUrl({
     isTauriRuntime: () => true,
-    tauriConvertFileSrc: (v) => `asset://${v}`,
-    window: {}
+    tauriConvertFileSrc: (v) => `asset://${v}`
   }, "/tmp/a.mp3");
   assert.equal(out, "asset:///tmp/a.mp3");
 });
 
-test("toPlayableUrl falls back to window tauri convertFileSrc", () => {
-  const out = toPlayableUrl({
-    isTauriRuntime: () => false,
-    window: {
-      __TAURI__: {
-        core: {
-          convertFileSrc: (v) => `asset-win://${v}`
-        }
-      }
-    }
-  }, "/tmp/a.mp3");
-  assert.equal(out, "asset-win:///tmp/a.mp3");
+test("toPlayableUrl has no url for an empty path", () => {
+  assert.equal(toPlayableUrl({}, ""), null);
+  assert.equal(toPlayableUrl({}, null), null);
 });

@@ -2,34 +2,12 @@ import { transportIcon } from "../../track_table.mjs";
 import { isTransportButtonPlaying } from "../../playback_ui_state.mjs";
 
 export function toPlayableUrl(ctx, path) {
-  if (!path) return null;
-  const raw = String(path).trim();
+  const raw = String(path || "").trim();
   if (!raw) return null;
-  if (/^https?:\/\//i.test(raw) || /^blob:/i.test(raw) || /^data:/i.test(raw)) return raw;
-  if (/^file:\/\//i.test(raw)) return raw;
-
-  if (ctx.isTauriRuntime?.() && typeof ctx.tauriConvertFileSrc === "function") {
-    try {
-      const converted = ctx.tauriConvertFileSrc(raw);
-      if (converted) return converted;
-    } catch (_) {}
-  }
-  const windowObj = ctx.window || globalThis;
-  if (windowObj?.__TAURI__?.core?.convertFileSrc) {
-    try {
-      const converted = windowObj.__TAURI__.core.convertFileSrc(raw);
-      if (converted) return converted;
-    } catch (_) {}
-  }
-
-  const normalized = raw.replace(/\\/g, "/");
-  if (/^[a-zA-Z]:\//.test(normalized)) {
-    return `file:///${encodeURI(normalized)}`;
-  }
-  if (normalized.startsWith("/")) {
-    return `file://${encodeURI(normalized)}`;
-  }
-  return null;
+  if (/^(https?:\/\/|blob:|data:|file:\/\/)/i.test(raw)) return raw;
+  // Local files load through Tauri's asset protocol; outside the app (the
+  // browser tests) the path is used as it is.
+  return ctx.isTauriRuntime() ? ctx.tauriConvertFileSrc(raw) : raw;
 }
 // Playback UI helpers that coordinate DOM state with playback state.
 
@@ -85,7 +63,7 @@ export function startPlayheadInterpolation(ctx, {
 }) {
   const { state, requestAnimationFrameFn } = ctx;
   stopPlayheadInterpolation(ctx);
-  if (!waveformEl || !(durationMs > 0) || typeof requestAnimationFrameFn !== "function") return;
+  if (!waveformEl || !(durationMs > 0)) return;
 
   const startWallClockMs = nowFn();
   const tick = () => {
@@ -100,7 +78,7 @@ export function startPlayheadInterpolation(ctx, {
 
 export function stopPlayheadInterpolation(ctx) {
   const { state, cancelAnimationFrameFn } = ctx;
-  if (state.playheadAnimationHandle != null && typeof cancelAnimationFrameFn === "function") {
+  if (state.playheadAnimationHandle != null) {
     cancelAnimationFrameFn(state.playheadAnimationHandle);
   }
   state.playheadAnimationHandle = null;

@@ -50,8 +50,15 @@
   every one is always there. The unit tests that relied on those checks now run on the real
   page. About 250 fewer lines of JavaScript.
 - **Chore:** The USB page's code reads the backend's answers as the backend sends them, instead
-  of re-checking every field's type and filling in defaults the backend never leaves out. The
-  test doubles of those answers now have the backend's full shape.
+  of re-checking every field's type and filling in defaults the backend never leaves out.
+- **Chore:** The browser tests share one stubbed backend, which fills every answer out to the
+  backend's full shape, instead of each test file keeping its own copy. The unit tests that fed
+  the USB page made-up backend answers are gone; the browser tests now cover what they checked.
+- **Chore:** The UI code no longer carries checks that only a test could fail: whether its own
+  functions, the browser's features (canvas, `ResizeObserver`, `requestAnimationFrame`,
+  `CSS.escape`, `localStorage`) or a well-formed drive-name answer are there. Artwork paths go
+  straight through Tauri's asset protocol, without the fallbacks only the tests used. The unit
+  tests supply what Node and jsdom lack instead. About 1 KB less JavaScript in the app.
 
 ## 0.5.3
 

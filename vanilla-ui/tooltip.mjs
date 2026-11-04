@@ -12,12 +12,9 @@ export function initTooltips({ document, window }) {
   let showTimer = null;
   // Watches for the active target being removed (a re-render replacing it) so
   // its tooltip doesn't linger orphaned. Only observes while a tooltip shows.
-  const detachObserver =
-    typeof window.MutationObserver === "function"
-      ? new window.MutationObserver(() => {
-          if (activeTarget && !activeTarget.isConnected) hideTooltip();
-        })
-      : null;
+  const detachObserver = new window.MutationObserver(() => {
+    if (activeTarget && !activeTarget.isConnected) hideTooltip();
+  });
 
   function ensureTooltipEl() {
     if (tooltipEl) return tooltipEl;
@@ -54,7 +51,7 @@ export function initTooltips({ document, window }) {
     el.classList.add("app-tooltip--visible");
     positionTooltip(target);
     target.setAttribute("aria-describedby", "app-tooltip");
-    detachObserver?.observe(document.body, { childList: true, subtree: true });
+    detachObserver.observe(document.body, { childList: true, subtree: true });
   }
 
   function hideTooltip() {
@@ -67,7 +64,7 @@ export function initTooltips({ document, window }) {
       activeTarget = null;
     }
     tooltipEl?.classList.remove("app-tooltip--visible");
-    detachObserver?.disconnect();
+    detachObserver.disconnect();
   }
 
   function scheduleShow(target) {

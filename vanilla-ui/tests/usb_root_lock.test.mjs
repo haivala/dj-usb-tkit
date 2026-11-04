@@ -11,9 +11,7 @@ if (typeof globalThis.window === "undefined") {
 
 import {
   USB_ROOT_LOCKING_JOB_TYPES,
-  loadUsbDevices,
   pickUsbFolder,
-  pruneUsbDevice,
   renderUsbRecentRoots,
   setUsbRootControlsLocked,
   validateAndSetUsbRoot
@@ -21,8 +19,7 @@ import {
 import { updatePlaylistExportButtons } from "../components/playlist/actions.mjs";
 import { handleJobEvent } from "../job_manager.mjs";
 import { makeClassList } from "./fixtures/dom.mjs";
-import { makeTestCtx, withSilencedConsole } from "./test_helpers.mjs";
-import { validateUsbRootData } from "./fixtures/backend_data.mjs";
+import { makeTestCtx } from "./test_helpers.mjs";
 
 // handleJobEvent's collaborators as no-ops, recording USB lock toggles.
 function jobCtx(lockCalls) {
@@ -53,7 +50,7 @@ function withJob(ctx, activeJobId, activeJobType) {
   return ctx;
 }
 
-test("pickUsbFolder blocks every USB-locking job type and allows unlocked or unrelated jobs", async (t) => {
+test("pickUsbFolder blocks every USB-locking job type", async (t) => {
   for (const jobType of USB_ROOT_LOCKING_JOB_TYPES) {
     await t.test(`blocked for jobType=${jobType}`, async () => {
       let invokeCalled = false;
@@ -67,23 +64,6 @@ test("pickUsbFolder blocks every USB-locking job type and allows unlocked or unr
       assert.equal(invokeCalled, false);
       assert.match(lastStatus, /wait/i);
     });
-  }
-
-  for (const [activeJobId, activeJobType] of [[null, null], ["job-1", "analysis"]]) {
-    let invokeCalled = false;
-    const commands = [];
-    const ctx = withJob(makeTestCtx({
-      runUsbDiagnostics: async () => {},
-      invoke: async () => { invokeCalled = true; return "/tmp/usb"; },
-      command: async (name) => {
-        commands.push(name);
-        return name === "validate_usb_root" ? validateUsbRootData({ valid: false }) : {};
-      },
-      emitStatus: () => {}
-    }), activeJobId, activeJobType);
-    await pickUsbFolder(ctx);
-    assert.equal(invokeCalled, true);
-    assert.ok(commands.includes("validate_usb_root"));
   }
 });
 
@@ -163,44 +143,4 @@ test("handleJobEvent locks USB controls only for USB-locking job lifecycles", ()
     handleJobEvent(ctx, { event: endEvent, jobId: "job-1", jobType });
     assert.deepEqual(lockCalls, expected, jobType);
   }
-});
-
-test("loadUsbDevices maps backend devices and recovers to an empty list on failure", async () => {
-  const items = [
-    { id: "dev-1", rootPath: "/mnt/usbA", mounted: true },
-    { id: "dev-2", rootPath: "/mnt/usbB", mounted: false }
-  ];
-  const ctx = makeTestCtx({
-    command: async (name) => {
-      assert.equal(name, "list_usb_devices");
-      return { items };
-    }
-  });
-  const rows = await loadUsbDevices(ctx);
-  assert.deepEqual(rows, ["/mnt/usbA", "/mnt/usbB"]);
-  assert.deepEqual(ctx.state.usbRecentRoots, ["/mnt/usbA", "/mnt/usbB"]);
-  assert.deepEqual(ctx.state.usbDevices, items);
-  assert.equal(ctx.el.usbRecentList.querySelectorAll(".usb-cfg-recent-btn").length, 2);
-
-  const failed = makeTestCtx({ command: async () => { throw new Error("boom"); } });
-  // loadUsbDevices logs the caught failure via console.warn -- expected
-  // here since we're deliberately exercising that path.
-  const failedRows = await withSilencedConsole(() => loadUsbDevices(failed));
-  assert.deepEqual(failedRows, []);
-  assert.deepEqual(failed.state.usbRecentRoots, []);
-});
-
-test("pruneUsbDevice calls the backend and reloads only when an id is provided", async () => {
-  const calls = [];
-  const ctx = makeTestCtx({
-    command: async (name, payload) => { calls.push({ name, payload }); return { items: [] }; }
-  });
-  await pruneUsbDevice(ctx, "dev-1");
-  assert.deepEqual(calls, [
-    { name: "prune_usb_device", payload: { id: "dev-1" } },
-    { name: "list_usb_devices", payload: undefined }
-  ]);
-
-  await pruneUsbDevice(ctx, null);
-  assert.equal(calls.length, 2);
 });

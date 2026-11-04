@@ -217,7 +217,8 @@ test("initTooltips handles hover delay, focus escape, and viewport clamping", ()
     window: {
       setTimeout: (fn) => { scheduled = fn; return 1; },
       clearTimeout: () => { scheduled = null; },
-      innerWidth: 1024
+      innerWidth: 1024,
+      MutationObserver: hoverDom.window.MutationObserver
     }
   });
   hoverTarget.dispatchEvent(new hoverDom.window.MouseEvent("mouseover", { bubbles: true }));
@@ -235,7 +236,7 @@ test("initTooltips handles hover delay, focus escape, and viewport clamping", ()
   const focusDoc = focusDom.window.document;
   initTooltips({
     document: focusDoc,
-    window: { setTimeout: () => 1, clearTimeout: () => {}, innerWidth: 1024 }
+    window: { setTimeout: () => 1, clearTimeout: () => {}, innerWidth: 1024, MutationObserver: focusDom.window.MutationObserver }
   });
   focusDoc.getElementById("target").dispatchEvent(new focusDom.window.FocusEvent("focusin", { bubbles: true }));
   const focusTooltip = focusDoc.getElementById("app-tooltip");
@@ -249,7 +250,7 @@ test("initTooltips handles hover delay, focus escape, and viewport clamping", ()
   clampTarget.getBoundingClientRect = () => ({ top: 5, bottom: 25, left: 2, right: 20, width: 18, height: 20 });
   initTooltips({
     document: clampDoc,
-    window: { setTimeout: (fn) => { fn(); return 1; }, clearTimeout: () => {}, innerWidth: 100 }
+    window: { setTimeout: (fn) => { fn(); return 1; }, clearTimeout: () => {}, innerWidth: 100, MutationObserver: clampDom.window.MutationObserver }
   });
   clampTarget.dispatchEvent(new clampDom.window.MouseEvent("mouseover", { bubbles: true }));
   const clampTooltip = clampDoc.getElementById("app-tooltip");

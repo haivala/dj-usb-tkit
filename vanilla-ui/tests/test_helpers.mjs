@@ -34,15 +34,33 @@ export async function withSilencedConsole(fn) {
   }
 }
 
+// A 2d canvas context that takes every call and draws nothing: jsdom has no
+// canvas. (Not a thenable, so it can't be mistaken for a promise.)
+export function fakeCanvasContext() {
+  const ctx = new Proxy({}, {
+    get: (target, key) => (key in target || key === "then" ? target[key] : () => ctx)
+  });
+  return ctx;
+}
+
+// What a browser has and Node doesn't (jsdom has no ResizeObserver either);
+// nothing resizes or paints in a test anyway.
+globalThis.ResizeObserver ??= class {
+  observe() {}
+  unobserve() {}
+  disconnect() {}
+};
+globalThis.requestAnimationFrame ??= (cb) => setTimeout(cb, 16);
+globalThis.cancelAnimationFrame ??= (handle) => clearTimeout(handle);
+globalThis.CSS ??= { escape: (text) => String(text).replace(/["\\]/g, "\\$&") };
+
 // The real app context (every module action bound, exactly as main.js builds
 // it) on a jsdom copy of index.html, with a stubbed backend. `overrides`
 // replaces ctx entries afterwards -- `command`, `state`, or any action a test
 // wants to observe (only calls made *through ctx* see an overridden action).
 export function makeTestCtx(overrides = {}) {
   const dom = new JSDOM(INDEX_HTML);
-  // jsdom can't draw on a canvas: answer like a browser with no 2d context
-  // (the app then skips drawing) instead of logging "Not implemented".
-  dom.window.HTMLCanvasElement.prototype.getContext = () => null;
+  dom.window.HTMLCanvasElement.prototype.getContext = fakeCanvasContext;
   const stored = new Map();
   const localStorage = {
     getItem: (key) => (stored.has(key) ? stored.get(key) : null),

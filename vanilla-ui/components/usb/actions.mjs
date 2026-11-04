@@ -391,7 +391,7 @@ export function renderRepairPreview(ctx, data) {
 export function loadUsbRootFromStorage(ctx) {
   const { state, el, localStorage } = ctx;
   try {
-    const raw = localStorage?.getItem?.(STORAGE_KEY_USB_ROOT);
+    const raw = localStorage.getItem(STORAGE_KEY_USB_ROOT);
     state.usbRoot = raw ? String(raw).trim() || null : null;
   } catch {
     state.usbRoot = null;
@@ -520,21 +520,12 @@ async function promptDriveNameIfUnset(ctx) {
   state.usbDeviceName = null;
   state.usbNameTakenBy = null;
   ctx.updateUsbNameBadge();
-  if (!state.usbRoot || typeof command !== "function") return;
+  if (!state.usbRoot) return;
 
   let existingName;
   let suggestedName = "";
   try {
     const data = await command("get_usb_device_name", { usbRoot: state.usbRoot });
-    // Fail closed: only trust an explicit "name" field as the real answer.
-    // A response that doesn't even look like GetUsbDeviceNameData (e.g. an
-    // unmocked test double, or a future API change) must never be read as
-    // "definitely unnamed" -- that would pop a prompt that blocks the whole
-    // UI (see below) based on a guess instead of a real answer.
-    if (!data || typeof data !== "object" || !("name" in data)) {
-      console.warn("[usb] get_usb_device_name returned an unexpected shape, skipping naming prompt:", data);
-      return;
-    }
     existingName = data.name;
     suggestedName = String(data.suggestedName || "").trim();
     state.usbNameTakenBy = String(data.nameTakenBy || "").trim() || null;

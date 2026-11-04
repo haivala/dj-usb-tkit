@@ -9,10 +9,7 @@ export function openExternalUrl(window, url) {
 }
 
 export function cssEscape(value) {
-  const text = String(value || "");
-  return typeof globalThis.CSS?.escape === "function"
-    ? globalThis.CSS.escape(text)
-    : text.replace(/["\\]/g, "\\$&");
+  return CSS.escape(String(value || ""));
 }
 
 // A fresh copy of the (single) element inside `<template id="…">` in index.html,

@@ -108,9 +108,7 @@ export function createThemeManager(ctx) {
         });
       }
 
-      if (typeof invoke === "function") {
-        invoke("set_theme_background", { dark: resolved === "dark" }).catch(() => {});
-      }
+      invoke("set_theme_background", { dark: resolved === "dark" }).catch(() => {});
     },
 
     init() {
@@ -140,9 +138,7 @@ export function createThemeManager(ctx) {
     WAVEFORM_COLORS.base = wc.base;
     WAVEFORM_COLORS.mid = wc.mid;
     WAVEFORM_COLORS.peak = wc.peak;
-    if (typeof renderWaveformsIn === "function") {
-      renderWaveformsIn(document);
-    }
+    renderWaveformsIn(document);
   }
 
   mgr.updateWaveformColors = updateWaveformColorsInternal;

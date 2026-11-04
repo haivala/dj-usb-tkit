@@ -95,21 +95,12 @@ function installTauriMock(page, mode) {
     window.__TAURI__ = {
       core: {
         invoke: async (command, payload = {}) => {
-          if (command === "clear_frontend_log") return "";
-          if (command === "append_frontend_log") return null;
-          if (command === "show_window") return null;
-          if (command === "detect_external_rekordbox_db") {
-            return { ok: true, data: { found: false, path: null } };
-          }
           if (command === "pick_usb_folder") {
             if (mode === "toggle-usb") {
               state.pickCount += 1;
               return state.pickCount % 2 === 1 ? "/Volumes/USB-TEST" : "/Volumes/USB-INVALID";
             }
             return "/Volumes/USB-TEST";
-          }
-          if (command === "list_playlists") {
-            return { ok: true, data: { items: [] } };
           }
           if (command === "create_playlist" && mode === "progress-race") {
             // Still saving well past the previous job's footer-hide delay.
@@ -121,9 +112,6 @@ function installTauriMock(page, mode) {
           }
           if (command === "prune_usb_device") {
             return { ok: true, data: { pruned: true } };
-          }
-          if (command === "fetch_usb_histories") {
-            return { ok: true, data: { items: [], counts: { importedPlaylists: 0, importedTracks: 0 }, warnings: [], warningCount: 0 } };
           }
           if (command === "run_usb_diagnostics") {
             return { ok: true, data: diagnosticsPayload };
@@ -171,7 +159,7 @@ function installTauriMock(page, mode) {
                 playlistDetails: [
                   {
                     name: "Warmup",
-                    pedbTracks: 3,
+                    pdbTracks: 3,
                     edbTracks: 3,
                     matchedTracks: 3,
                     onlyInPdb: 0,
@@ -466,7 +454,7 @@ function installTauriMock(page, mode) {
               }
             };
           }
-          return { ok: false, error: { code: "UNKNOWN", message: `Unhandled command: ${command}` } };
+          return window.__e2eBackend.answer(command);
         }
       }
     };
@@ -1166,4 +1154,135 @@ test("USB audio formats: ticks and drag order are saved, and the last ticked for
   await expect(names).toHaveText(["MP3", "FLAC", "ALAC", "AIFF", "WAV", "AAC"]);
   await expect.poll(async () => (await lastCall()).map((item) => item.format))
     .toEqual(["mp3", "flac", "alac", "aiff", "wav", "aac"]);
+});
+
+async function connectUsb(page) {
+  await page.locator('.nav-item[data-view="usb"]').click();
+  await page.locator("#usbEmptyState .empty-state-action").click();
+  await expect(page.locator("#diagOverallStatus")).toHaveText("WARN");
+}
+
+test("applying repairs that change nothing keeps the loaded USB playlists and shows the refreshed report", async ({ page }) => {
+  await installTauriMock(page, "valid");
+  await page.addInitScript(() => {
+    const invoke = window.__TAURI__.core.invoke;
+    window.__TAURI__.core.invoke = async (command, payload) => {
+      if (command === "repair_usb_diagnostics" && payload?.request?.apply) {
+        return {
+          ok: true,
+          data: { failedFixes: payload.request.selectedFixIds, diagnostics: { overallStatus: "FAIL" } }
+        };
+      }
+      return invoke(command, payload);
+    };
+  });
+  await page.goto("/");
+  await connectUsb(page);
+  await page.locator('.nav-item[data-view="usb-playlists"]').click();
+  await page.locator("#refreshUsbBtn").click();
+  await expect(page.locator('[data-usb-playlist="usb-1"]')).toBeVisible();
+  await page.locator('.nav-item[data-view="usb"]').click();
+
+  await page.locator("#usbHealthCard").evaluate((node) => { node.open = true; });
+  await page.locator("#previewRepairsBtn").click();
+  await page.locator("#applyRepairsBtn").click();
+  await expect(page.locator("#statusText")).toContainText("Repair apply complete: 0 applied");
+  await expect(page.locator("#diagOverallStatus")).toHaveText("FAIL");
+
+  await page.locator('.nav-item[data-view="usb-playlists"]').click();
+  await expect(page.locator('[data-usb-playlist="usb-1"]')).toBeVisible();
+});
+
+test("a player-menu edit or PDB sync clears the diagnostics report only when it changed the stick", async ({ page }) => {
+  await installTauriMock(page, "valid");
+  await page.addInitScript(() => {
+    const backend = window.__e2eBackend;
+    const invoke = window.__TAURI__.core.invoke;
+    window.__menuUpdated = false;
+    const config = (updated) => ({
+      ok: true,
+      data: {
+        updated,
+        currentItems: [backend.playerMenuItem(131, { name: "ARTIST" })],
+        availableItems: [backend.playerMenuItem(132, { name: "PLAYLIST" })],
+        divergence: { ...backend.playerMenuConfig().divergence, canSync: true, summary: "The PDB is missing a category." }
+      }
+    });
+    window.__TAURI__.core.invoke = async (command, payload) => {
+      if (command === "get_usb_player_menu_config") return config(false);
+      if (command === "update_usb_player_menu_config" || command === "sync_usb_player_menu_edb_to_pdb") {
+        return config(window.__menuUpdated);
+      }
+      return invoke(command, payload);
+    };
+  });
+  await page.goto("/");
+  await connectUsb(page);
+  const report = page.locator("#diagOverallStatus");
+  const status = page.locator("#statusText");
+  const menuNav = page.locator('.nav-item[data-view="usb-player-menu"]');
+  const addPlaylistCategory = async () => {
+    await page.locator("#usbPlayerMenuAvailable .player-menu-item[data-menu-kind='132']").click();
+    await page.locator("#usbPlayerMenuAddBtn").click();
+  };
+
+  await menuNav.click();
+  await addPlaylistCategory();
+  await expect(status).toContainText("Player menu unchanged");
+  await page.locator("#usbPlayerMenuSyncBtn").click();
+  await expect(status).toContainText("PDB already complete");
+  await expect(report).toHaveText("WARN");
+
+  await page.evaluate(() => { window.__menuUpdated = true; });
+  await addPlaylistCategory();
+  await expect(status).toContainText("Player menu updated");
+  await expect(report).toHaveText("");
+
+  await page.locator('.nav-item[data-view="usb"]').click();
+  await page.locator("#reDiagnoseBtn").click();
+  await expect(report).toHaveText("WARN");
+  await menuNav.click();
+  await page.locator("#usbPlayerMenuSyncBtn").click();
+  await expect(status).toContainText("PDB categories restored");
+  await expect(report).toHaveText("");
+});
+
+test("choosing a background colour sets it on the USB and redraws from the answer", async ({ page }) => {
+  await installTauriMock(page, "valid");
+  await page.addInitScript(() => {
+    const invoke = window.__TAURI__.core.invoke;
+    window.__colorCalls = [];
+    window.__colorUpdated = false;
+    window.__TAURI__.core.invoke = async (command, payload) => {
+      if (command === "get_usb_background_color") return { ok: true, data: { pdbColor: 0, edbColor: 0 } };
+      if (command === "set_usb_background_color") {
+        const { color } = payload.request;
+        window.__colorCalls.push(payload.request);
+        const now = window.__colorUpdated ? color : 0;
+        return { ok: true, data: { pdbColor: now, edbColor: now, updated: window.__colorUpdated } };
+      }
+      return invoke(command, payload);
+    };
+  });
+  await page.goto("/");
+  await connectUsb(page);
+  await page.locator('.nav-item[data-view="usb-player-menu"]').click();
+  const chip = (color) => page.locator(`#usbBackgroundColorChips .bg-color-chip[data-color='${color}']`);
+  await expect(chip(0)).toHaveClass(/is-selected/);
+
+  await chip(5).click();
+  await expect(page.locator("#statusText")).toContainText("Background colour unchanged");
+  await expect(chip(0)).toHaveClass(/is-selected/);
+  await expect(page.locator("#diagOverallStatus")).toHaveText("WARN");
+
+  await page.evaluate(() => { window.__colorUpdated = true; });
+  await chip(5).click();
+  await expect(page.locator("#statusText")).toContainText("Background colour set to Green");
+  await expect(chip(5)).toHaveClass(/is-selected/);
+  await expect(chip(0)).not.toHaveClass(/is-selected/);
+  await expect(page.locator("#diagOverallStatus")).toHaveText("");
+  expect(await page.evaluate(() => window.__colorCalls)).toEqual([
+    { usbRoot: "/Volumes/USB-TEST", color: 5 },
+    { usbRoot: "/Volumes/USB-TEST", color: 5 }
+  ]);
 });

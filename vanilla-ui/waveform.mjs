@@ -93,7 +93,7 @@ function measureWaveformCanvas(element) {
   if (!canvas) return null;
 
   const rect = element.getBoundingClientRect();
-  const dpr = Math.max(1, element.ownerDocument?.defaultView?.devicePixelRatio || 1);
+  const dpr = Math.max(1, element.ownerDocument.defaultView.devicePixelRatio || 1);
   return {
     element,
     canvas,
@@ -111,7 +111,6 @@ function paintMeasuredWaveform({ element, canvas, width, height }) {
   }
 
   const ctx = canvas.getContext("2d");
-  if (!ctx) return;
 
   const colorData = waveformColorCache.get(element);
   if (colorData && colorData.length >= 6) {

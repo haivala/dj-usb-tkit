@@ -144,7 +144,7 @@ export function bindSettingsEvents(ctx) {
       state.exportPruneStale ? "1" : "0"
     );
 
-    const openPlaylist = getCurrentPlaylist?.() || null;
+    const openPlaylist = getCurrentPlaylist();
     // Predict whether additive mode is about to lock the open playlist purely
     // to sequence the sort commit below -- `sameNameExistsOnUsb` is a
     // backend-provided fact already on the status map. The authoritative
@@ -158,7 +158,7 @@ export function bindSettingsEvents(ctx) {
     // mode change is a global preference and always goes through -- if the save
     // fails we just say so and carry on (the sort was only a view).
     let sortSaveFailed = false;
-    if (willLock && isPlaylistSortActive?.()) {
+    if (willLock && isPlaylistSortActive()) {
       try {
         await commitActivePlaylistSort(openPlaylist.id);
       } catch (err) {
@@ -170,7 +170,7 @@ export function bindSettingsEvents(ctx) {
     // The setting is now persisted; ask the backend to recompute every
     // playlist's reorder lock against it (cheap -- staged PDB/eDB, no USB scan).
     try {
-      await refreshPlaylistExportStatus?.();
+      await refreshPlaylistExportStatus();
     } catch (err) {
       console.error(err);
     }
@@ -248,7 +248,7 @@ export function bindSettingsEvents(ctx) {
       return;
     }
     try {
-      await reloadTrackListsForKeyNotation?.();
+      await reloadTrackListsForKeyNotation();
     } catch (err) {
       console.error(err);
     }

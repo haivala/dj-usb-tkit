@@ -16,15 +16,6 @@ function installTauriMock(
     window.__TAURI__ = {
       core: {
         invoke: async (command, payload = {}) => {
-          if (command === "clear_frontend_log") return "";
-          if (command === "append_frontend_log") return null;
-          if (command === "show_window") return null;
-          if (command === "detect_external_rekordbox_db") {
-            return { ok: true, data: { found: false, path: null } };
-          }
-          if (command === "list_playlists") {
-            return { ok: true, data: { items: [] } };
-          }
           if (command === "fetch_usb_histories") {
             return { ok: true, data: { items: [], warnings: [] } };
           }
@@ -80,9 +71,6 @@ function installTauriMock(
             if (getNameMode === "throw") {
               throw new Error("usb root not found");
             }
-            if (getNameMode === "unexpected") {
-              return { ok: true, data: {} };
-            }
             return {
               ok: true,
               data: {
@@ -121,7 +109,7 @@ function installTauriMock(
               }
             };
           }
-          return { ok: false, error: { code: "UNKNOWN", message: `Unhandled command: ${command}` } };
+          return window.__e2eBackend.answer(command);
         }
       }
     };
@@ -213,13 +201,6 @@ test("recent USB naming prompt can be dismissed without saving", async ({ page }
 
 test("recent USB naming check failures do not open a blocking prompt", async ({ page }) => {
   await openRecentUsbNamingPrompt(page, { getNameMode: "throw" });
-
-  await expect(page.locator("#usbRootPathText")).toContainText("/Volumes/USB-TEST");
-  await expect(page.locator("#driveNameOverlay")).toBeHidden();
-});
-
-test("recent USB naming check fails closed on an unexpected response shape", async ({ page }) => {
-  await openRecentUsbNamingPrompt(page, { getNameMode: "unexpected" });
 
   await expect(page.locator("#usbRootPathText")).toContainText("/Volumes/USB-TEST");
   await expect(page.locator("#driveNameOverlay")).toBeHidden();

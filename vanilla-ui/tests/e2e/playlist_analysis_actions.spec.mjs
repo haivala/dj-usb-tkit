@@ -184,18 +184,7 @@ test("playlist analyze-missing skips already-analyzed tracks and targets the res
     window.__TAURI__ = {
       core: {
         invoke: async (command, payload = {}) => {
-          if (command === "get_library_sources") {
-            const folders = (window.__e2eSourceFolders || [])
-              .map((path) => ({ path, label: path, parent: null, enabled: true, missing: false, fullyAnalyzed: false }));
-            return { ok: true, data: { folders, rekordboxDbEnabled: false, mixxxDbEnabled: false, everConfigured: folders.length > 0 } };
-          }
           const request = payload?.request || payload;
-          if (command === "clear_frontend_log") return "";
-          if (command === "append_frontend_log") return null;
-          if (command === "show_window") return null;
-          if (command === "detect_external_rekordbox_db") {
-            return { ok: true, data: { found: false, path: null } };
-          }
           if (command === "list_playlists") {
             return { ok: true, data: { items: playlists } };
           }
@@ -301,11 +290,6 @@ test("playlist analyze-missing skips already-analyzed tracks and targets the res
               }
             };
           }
-          if (command === "set_frontend_setting" || command === "get_frontend_settings") {
-            return command === "get_frontend_settings"
-              ? { ok: true, data: { settings: {} } }
-              : { ok: true, data: { key: request.key, value: request.value } };
-          }
           if (command === "resolve_playback_source") {
             return { ok: true, data: { resolvedPath: null, matchedBy: "none", trackId: null } };
           }
@@ -338,7 +322,7 @@ test("playlist analyze-missing skips already-analyzed tracks and targets the res
               }
             };
           }
-          return { ok: false, error: { code: "UNKNOWN", message: `Unhandled: ${command}` } };
+          return window.__e2eBackend.answer(command);
         }
       },
       event: { listen }
@@ -432,18 +416,7 @@ test("playlist actions hide Analyze Missing when unnecessary and keep Export vis
     window.__TAURI__ = {
       core: {
         invoke: async (command, payload = {}) => {
-          if (command === "get_library_sources") {
-            const folders = (window.__e2eSourceFolders || [])
-              .map((path) => ({ path, label: path, parent: null, enabled: true, missing: false, fullyAnalyzed: false }));
-            return { ok: true, data: { folders, rekordboxDbEnabled: false, mixxxDbEnabled: false, everConfigured: folders.length > 0 } };
-          }
           const request = payload?.request || payload;
-          if (command === "clear_frontend_log") return "";
-          if (command === "append_frontend_log") return null;
-          if (command === "show_window") return null;
-          if (command === "detect_external_rekordbox_db") {
-            return { ok: true, data: { found: false, path: null } };
-          }
           if (command === "list_playlists") {
             return { ok: true, data: { items: playlists } };
           }
@@ -452,11 +425,6 @@ test("playlist actions hide Analyze Missing when unnecessary and keep Export vis
           }
           if (command === "browse_source_files") {
             return { ok: true, data: { total: 0, items: [] } };
-          }
-          if (command === "set_frontend_setting" || command === "get_frontend_settings") {
-            return command === "get_frontend_settings"
-              ? { ok: true, data: { settings: {} } }
-              : { ok: true, data: { key: request.key, value: request.value } };
           }
           if (command === "resolve_playback_source") {
             return { ok: true, data: { resolvedPath: null, matchedBy: "none", trackId: null } };
@@ -490,7 +458,7 @@ test("playlist actions hide Analyze Missing when unnecessary and keep Export vis
               }
             };
           }
-          return { ok: false, error: { code: "UNKNOWN", message: `Unhandled: ${command}` } };
+          return window.__e2eBackend.answer(command);
         }
       }
     };
@@ -579,18 +547,7 @@ test("playlist analyze-missing offers unanalyzed tracks that live on a USB drive
     window.__TAURI__ = {
       core: {
         invoke: async (command, payload = {}) => {
-          if (command === "get_library_sources") {
-            const folders = (window.__e2eSourceFolders || [])
-              .map((path) => ({ path, label: path, parent: null, enabled: true, missing: false, fullyAnalyzed: false }));
-            return { ok: true, data: { folders, rekordboxDbEnabled: false, mixxxDbEnabled: false, everConfigured: folders.length > 0 } };
-          }
           const request = payload?.request || payload;
-          if (command === "clear_frontend_log") return "";
-          if (command === "append_frontend_log") return null;
-          if (command === "show_window") return null;
-          if (command === "detect_external_rekordbox_db") {
-            return { ok: true, data: { found: false, path: null } };
-          }
           if (command === "list_playlists") {
             return { ok: true, data: { items: playlists } };
           }
@@ -615,11 +572,6 @@ test("playlist analyze-missing offers unanalyzed tracks that live on a USB drive
               data: { jobId: "job-mock", analyzed: ids.length, failed: 0, warnings: [], items: [] }
             };
           }
-          if (command === "set_frontend_setting" || command === "get_frontend_settings") {
-            return command === "get_frontend_settings"
-              ? { ok: true, data: { settings: {} } }
-              : { ok: true, data: { key: request.key, value: request.value } };
-          }
           if (command === "resolve_playback_source") {
             return { ok: true, data: { resolvedPath: null, matchedBy: "none", trackId: null } };
           }
@@ -638,7 +590,7 @@ test("playlist analyze-missing offers unanalyzed tracks that live on a USB drive
               }
             };
           }
-          return { ok: false, error: { code: "UNKNOWN", message: `Unhandled: ${command}` } };
+          return window.__e2eBackend.answer(command);
         }
       },
       event: { listen }
@@ -687,30 +639,16 @@ test("selecting a playlist with tracks right after an empty one still paints its
     window.__TAURI__ = {
       core: {
         invoke: async (command, payload = {}) => {
-          if (command === "get_library_sources") {
-            const folders = (window.__e2eSourceFolders || [])
-              .map((path) => ({ path, label: path, parent: null, enabled: true, missing: false, fullyAnalyzed: false }));
-            return { ok: true, data: { folders, rekordboxDbEnabled: false, mixxxDbEnabled: false, everConfigured: folders.length > 0 } };
-          }
           const request = payload?.request || payload;
-          if (command === "clear_frontend_log") return "";
-          if (command === "append_frontend_log") return null;
-          if (command === "show_window") return null;
-          if (command === "detect_external_rekordbox_db") return { ok: true, data: { found: false, path: null } };
           if (command === "list_playlists") return { ok: true, data: { items: playlists } };
           if (command === "get_playlist_tracks") {
             return { ok: true, data: window.__playlistTracksPage(playlistTracks[request.playlistId] || [], request) };
           }
           if (command === "browse_source_files") return { ok: true, data: { total: 0, items: [] } };
-          if (command === "set_frontend_setting" || command === "get_frontend_settings") {
-            return command === "get_frontend_settings"
-              ? { ok: true, data: { settings: {} } }
-              : { ok: true, data: { key: request.key, value: request.value } };
-          }
           if (command === "resolve_playback_source") {
             return { ok: true, data: { resolvedPath: null, matchedBy: "none", trackId: null } };
           }
-          return { ok: false, error: { code: "UNKNOWN", message: `Unhandled: ${command}` } };
+          return window.__e2eBackend.answer(command);
         }
       }
     };
@@ -791,18 +729,7 @@ function installReorderTauriMock(page, { usbSameNamePlaylistName, exportPruneSta
     window.__TAURI__ = {
       core: {
         invoke: async (command, payload = {}) => {
-          if (command === "get_library_sources") {
-            const folders = (window.__e2eSourceFolders || [])
-              .map((path) => ({ path, label: path, parent: null, enabled: true, missing: false, fullyAnalyzed: false }));
-            return { ok: true, data: { folders, rekordboxDbEnabled: false, mixxxDbEnabled: false, everConfigured: folders.length > 0 } };
-          }
           const request = payload?.request || payload;
-          if (command === "clear_frontend_log") return "";
-          if (command === "append_frontend_log") return null;
-          if (command === "show_window") return null;
-          if (command === "detect_external_rekordbox_db") {
-            return { ok: true, data: { found: false, path: null } };
-          }
           if (command === "list_playlists") {
             return { ok: true, data: { items: playlists } };
           }
@@ -831,13 +758,8 @@ function installReorderTauriMock(page, { usbSameNamePlaylistName, exportPruneSta
           if (command === "browse_source_files") {
             return { ok: true, data: { total: 0, items: [] } };
           }
-          if (command === "set_frontend_setting" || command === "get_frontend_settings") {
-            if (command === "set_frontend_setting" && request.key === "ui_export_prune_stale_v1") {
-              currentPruneStale = request.value === "1";
-            }
-            return command === "get_frontend_settings"
-              ? { ok: true, data: { settings: {} } }
-              : { ok: true, data: { key: request.key, value: request.value } };
+          if (command === "set_frontend_setting" && request.key === "ui_export_prune_stale_v1") {
+            currentPruneStale = request.value === "1";
           }
           if (command === "refresh_playlist_export_status") {
             return { ok: true, data: { playlistUsbExportStatus: exportStatusFor() } };
@@ -900,7 +822,7 @@ function installReorderTauriMock(page, { usbSameNamePlaylistName, exportPruneSta
               }
             };
           }
-          return { ok: false, error: { code: "UNKNOWN", message: `Unhandled: ${command}` } };
+          return window.__e2eBackend.answer(command);
         }
       }
     };
@@ -1276,6 +1198,95 @@ test("export is disabled from the click until the export finishes, so a double c
   expect(await page.evaluate(() => window.__exportCalls)).toBe(1);
 });
 
+// Answers export_to_usb with `answer` and records it and the sort commits
+// (reorder_playlist_tracks) in `window.__exportFlow`; `window.__failSortCommit`
+// makes a sort commit fail.
+async function answerExports(page, answer) {
+  await page.evaluate((answer) => {
+    const invoke = window.__TAURI__.core.invoke;
+    window.__exportFlow = [];
+    window.__exportAnswer = answer;
+    window.__TAURI__.core.invoke = async (command, payload) => {
+      if (command === "export_to_usb") {
+        window.__exportFlow.push({ command, options: payload?.request?.options });
+        return window.__exportAnswer;
+      }
+      if (command === "reorder_playlist_tracks") {
+        window.__exportFlow.push({ command });
+        if (window.__failSortCommit) return { ok: false, error: { code: "IO", message: "disk full" } };
+      }
+      return invoke(command, payload);
+    };
+  }, answer);
+}
+
+async function openReorderPlaylist(page) {
+  await page.locator("#navPlaylistList .nav-playlist-item").first().click();
+  await expect(page.locator("#playlistTracksBody .track-grid-row")).toHaveCount(3);
+}
+
+test("a successful export clears the stale diagnostics report and sends the backup setting", async ({ page }) => {
+  await installReorderTauriMock(page, { usbSameNamePlaylistName: "Reorder Playlist" });
+  await page.addInitScript(() => window.localStorage.setItem("djusbtkit.exportBackup", "0"));
+  await page.goto("/");
+  await connectUsbAndFetchPlaylists(page);
+  await expect(page.locator("#diagOverallStatus")).toHaveText("PASS");
+  await openReorderPlaylist(page);
+  await answerExports(page, { ok: true, data: { playlistName: "Reorder Playlist", exportedTracks: 3 } });
+
+  await page.locator("#exportPlaylistBtn").click();
+  await expect(page.locator("#statusText")).toContainText("Export complete: Reorder Playlist - 3 tracks, 0 skipped");
+  await expect(page.locator("#diagOverallStatus")).toHaveText("");
+  const flow = await page.evaluate(() => window.__exportFlow);
+  expect(flow.map((call) => call.command)).toEqual(["export_to_usb"]);
+  expect(flow[0].options.backupBeforeExport).toBe(false);
+});
+
+test("the backend's export gate rejections are shown in the status bar", async ({ page }) => {
+  await installReorderTauriMock(page, { usbSameNamePlaylistName: "Reorder Playlist" });
+  await page.goto("/");
+  await connectUsbAndFetchPlaylists(page);
+  await openReorderPlaylist(page);
+  const rejection = (details) => ({ ok: false, error: { code: "VALIDATION", message: "export blocked", details } });
+  const status = page.locator("#statusText");
+  const exportBtn = page.locator("#exportPlaylistBtn");
+
+  await answerExports(page, rejection({ validationType: "source_root_missing", missingRoots: ["/music/missing"] }));
+  await exportBtn.click();
+  await expect(status).toContainText("Export blocked: source folder is missing: /music/missing. Relocate or remove it first.");
+
+  // Unanalyzed tracks point to Analyze Missing Tracks; analyzed tracks whose
+  // analysis files are gone, to Reanalyze.
+  await answerExports(page, rejection({ validationType: "missing_analysis", totalTrackCount: 3, missingTrackCount: 2, missingAnalysisBundleCount: 0 }));
+  await exportBtn.click();
+  await expect(status).toContainText("Export blocked: 2 of 3 tracks not analyzed yet. Use Analyze Missing Tracks.");
+
+  await answerExports(page, rejection({ validationType: "missing_analysis", totalTrackCount: 3, missingTrackCount: 2, missingAnalysisBundleCount: 2 }));
+  await exportBtn.click();
+  await expect(status).toContainText("Export blocked: the analysis files of 2 of 3 tracks are missing. Select them and use Reanalyze.");
+});
+
+test("export commits an active column sort first, and a failed commit blocks the export", async ({ page }) => {
+  await installReorderTauriMock(page, { usbSameNamePlaylistName: "Reorder Playlist" });
+  await page.goto("/");
+  await connectUsbAndFetchPlaylists(page);
+  await openReorderPlaylist(page);
+  const artistHeader = page.locator('#panel-playlist .track-grid-cell.sortable[data-sort-key="artist"]');
+  await answerExports(page, { ok: true, data: { exportedTracks: 3 } });
+
+  await artistHeader.click();
+  await page.locator("#exportPlaylistBtn").click();
+  await expect(page.locator("#statusText")).toContainText("Export complete");
+  expect(await page.evaluate(() => window.__exportFlow.map((call) => call.command)))
+    .toEqual(["reorder_playlist_tracks", "export_to_usb"]);
+
+  await page.evaluate(() => { window.__failSortCommit = true; window.__exportFlow = []; });
+  await artistHeader.click();
+  await page.locator("#exportPlaylistBtn").click();
+  await expect(page.locator("#statusText")).toContainText("Export blocked: couldn't save the current sort order (disk full)");
+  expect(await page.evaluate(() => window.__exportFlow.map((call) => call.command))).toEqual(["reorder_playlist_tracks"]);
+});
+
 test("changing the export sync mode releases and re-engages the open playlist's reorder lock without a USB rescan", async ({ page }) => {
   await installReorderTauriMock(page, { usbSameNamePlaylistName: "Reorder Playlist", exportPruneStale: false });
   await page.goto("/");
@@ -1370,16 +1381,7 @@ test("switching away from a sorted playlist commits the sort as its real order, 
     window.__TAURI__ = {
       core: {
         invoke: async (command, payload = {}) => {
-          if (command === "get_library_sources") {
-            const folders = (window.__e2eSourceFolders || [])
-              .map((path) => ({ path, label: path, parent: null, enabled: true, missing: false, fullyAnalyzed: false }));
-            return { ok: true, data: { folders, rekordboxDbEnabled: false, mixxxDbEnabled: false, everConfigured: folders.length > 0 } };
-          }
           const request = payload?.request || payload;
-          if (command === "clear_frontend_log") return "";
-          if (command === "append_frontend_log") return null;
-          if (command === "show_window") return null;
-          if (command === "detect_external_rekordbox_db") return { ok: true, data: { found: false, path: null } };
           if (command === "list_playlists") return { ok: true, data: { items: playlists } };
           if (command === "get_playlist_tracks") {
             return { ok: true, data: window.__playlistTracksPage(playlistTracks[request.playlistId], request) };
@@ -1390,11 +1392,6 @@ test("switching away from a sorted playlist commits the sort as its real order, 
             return { ok: true, data: { playlistId: request.playlistId, reordered: playlistTracks[request.playlistId].length } };
           }
           if (command === "browse_source_files") return { ok: true, data: { total: 0, items: [] } };
-          if (command === "set_frontend_setting" || command === "get_frontend_settings") {
-            return command === "get_frontend_settings"
-              ? { ok: true, data: { settings: {} } }
-              : { ok: true, data: { key: request.key, value: request.value } };
-          }
           if (command === "resolve_playback_source") {
             return { ok: true, data: { resolvedPath: null, matchedBy: "none", trackId: null } };
           }
@@ -1435,7 +1432,7 @@ test("switching away from a sorted playlist commits the sort as its real order, 
               }
             };
           }
-          return { ok: false, error: { code: "UNKNOWN", message: `Unhandled: ${command}` } };
+          return window.__e2eBackend.answer(command);
         }
       }
     };
@@ -1494,16 +1491,7 @@ function installTwoPlaylistTauriMock(page) {
     window.__TAURI__ = {
       core: {
         invoke: async (command, payload = {}) => {
-          if (command === "get_library_sources") {
-            const folders = (window.__e2eSourceFolders || [])
-              .map((path) => ({ path, label: path, parent: null, enabled: true, missing: false, fullyAnalyzed: false }));
-            return { ok: true, data: { folders, rekordboxDbEnabled: false, mixxxDbEnabled: false, everConfigured: folders.length > 0 } };
-          }
           const request = payload?.request || payload;
-          if (command === "clear_frontend_log") return "";
-          if (command === "append_frontend_log") return null;
-          if (command === "show_window") return null;
-          if (command === "detect_external_rekordbox_db") return { ok: true, data: { found: false, path: null } };
           if (command === "list_playlists") return { ok: true, data: { items: playlists } };
           if (command === "get_playlist_tracks") {
             return { ok: true, data: window.__playlistTracksPage(playlistTracks[request.playlistId], request) };
@@ -1514,15 +1502,10 @@ function installTwoPlaylistTauriMock(page) {
             return { ok: true, data: { playlistId: request.playlistId, reordered: playlistTracks[request.playlistId].length } };
           }
           if (command === "browse_source_files") return { ok: true, data: { total: 0, items: [] } };
-          if (command === "set_frontend_setting" || command === "get_frontend_settings") {
-            return command === "get_frontend_settings"
-              ? { ok: true, data: { settings: {} } }
-              : { ok: true, data: { key: request.key, value: request.value } };
-          }
           if (command === "resolve_playback_source") {
             return { ok: true, data: { resolvedPath: null, matchedBy: "none", trackId: null } };
           }
-          return { ok: false, error: { code: "UNKNOWN", message: `Unhandled: ${command}` } };
+          return window.__e2eBackend.answer(command);
         }
       }
     };

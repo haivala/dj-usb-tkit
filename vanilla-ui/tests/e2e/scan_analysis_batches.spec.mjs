@@ -357,11 +357,6 @@ function installScanAnalysisMock(page, opts = {}) {
     window.__TAURI__ = {
       core: {
         invoke: async (command, payload = {}) => {
-          if (command === "get_library_sources") {
-            const folders = (window.__e2eSourceFolders || [])
-              .map((path) => ({ path, label: path, parent: null, enabled: true, missing: false, fullyAnalyzed: false }));
-            return { ok: true, data: { folders, rekordboxDbEnabled: false, mixxxDbEnabled: false, everConfigured: folders.length > 0 } };
-          }
           if (command === "append_frontend_log") {
             logFileLines.push(`[${payload?.level}] ${payload?.message}`);
             return null;
@@ -369,13 +364,6 @@ function installScanAnalysisMock(page, opts = {}) {
           if (command === "open_frontend_log") {
             openLogFileCalls += 1;
             return null;
-          }
-          if (command === "show_window") return null;
-          if (command === "detect_external_rekordbox_db") {
-            return { ok: true, data: { found: false, path: null } };
-          }
-          if (command === "list_playlists") {
-            return { ok: true, data: { items: [] } };
           }
           if (command === "scan_library") {
             // Backend-owned post-scan library facts (see ScanLibraryData).
@@ -431,12 +419,6 @@ function installScanAnalysisMock(page, opts = {}) {
             const data = await runAnalyzeNewTracks(ids, bpmRangeSeen.min, bpmRangeSeen.max);
             return { ok: true, data };
           }
-          if (command === "fetch_usb_playlists") {
-            return { ok: true, data: { items: [], stats: { indexedTracks: 0, playlistReferencedTracks: 0, playlistEntries: 0 }, playlistTrackTotal: 0, warnings: [], warningCount: 0, playlistUsbExportStatus: [] } };
-          }
-          if (command === "fetch_usb_histories") {
-            return { ok: true, data: { items: [], counts: { importedPlaylists: 0, importedTracks: 0 }, warnings: [], warningCount: 0 } };
-          }
           if (command === "set_analysis_paused") {
             analysisPaused = !!(payload?.request?.paused);
             return { ok: true, data: { paused: analysisPaused } };
@@ -445,7 +427,7 @@ function installScanAnalysisMock(page, opts = {}) {
             analysisCancelled = true;
             return { ok: true, data: null };
           }
-          return { ok: false, error: { code: "UNKNOWN", message: `Unhandled command: ${command}` } };
+          return window.__e2eBackend.answer(command);
         }
       },
       event: { listen }
@@ -763,20 +745,6 @@ function installPagedMaterializeAnalyzeMock(page, opts = {}) {
     window.__TAURI__ = {
       core: {
         invoke: async (command, payload = {}) => {
-          if (command === "get_library_sources") {
-            const folders = (window.__e2eSourceFolders || [])
-              .map((path) => ({ path, label: path, parent: null, enabled: true, missing: false, fullyAnalyzed: false }));
-            return { ok: true, data: { folders, rekordboxDbEnabled: false, mixxxDbEnabled: false, everConfigured: folders.length > 0 } };
-          }
-          if (command === "clear_frontend_log") return "";
-          if (command === "append_frontend_log") return null;
-          if (command === "show_window") return null;
-          if (command === "detect_external_rekordbox_db") {
-            return { ok: true, data: { found: false, path: null } };
-          }
-          if (command === "list_playlists") {
-            return { ok: true, data: { items: [] } };
-          }
           if (command === "get_system_parallelism") {
             return { ok: true, data: { workers: 6 } };
           }
@@ -819,13 +787,7 @@ function installPagedMaterializeAnalyzeMock(page, opts = {}) {
               data: { jobId: "job-scan-mock", indexed: tracks.length, updated: 0, removed: 0 }
             };
           }
-          if (command === "fetch_usb_playlists") {
-            return { ok: true, data: { items: [], stats: { indexedTracks: 0, playlistReferencedTracks: 0, playlistEntries: 0 }, playlistTrackTotal: 0, warnings: [], warningCount: 0, playlistUsbExportStatus: [] } };
-          }
-          if (command === "fetch_usb_histories") {
-            return { ok: true, data: { items: [], counts: { importedPlaylists: 0, importedTracks: 0 }, warnings: [], warningCount: 0 } };
-          }
-          return { ok: false, error: { code: "UNKNOWN", message: `Unhandled command: ${command}` } };
+          return window.__e2eBackend.answer(command);
         }
       },
       event: { listen: async (eventName, callback) => {
@@ -1511,24 +1473,6 @@ function installAnalyzeResponseMock(page, { analyzeResponse }) {
     window.__TAURI__ = {
       core: {
         invoke: async (command) => {
-          if (command === "get_library_sources") {
-            const folders = (window.__e2eSourceFolders || [])
-              .map((path) => ({ path, label: path, parent: null, enabled: true, missing: false, fullyAnalyzed: false }));
-            return { ok: true, data: { folders, rekordboxDbEnabled: false, mixxxDbEnabled: false, everConfigured: folders.length > 0 } };
-          }
-          if (command === "clear_frontend_log") return "";
-          if (command === "append_frontend_log") return null;
-          if (command === "show_window") return null;
-          if (command === "detect_external_rekordbox_db") {
-            return { ok: true, data: { found: false, path: null } };
-          }
-          if (command === "list_playlists") return { ok: true, data: { items: [] } };
-          if (command === "fetch_usb_playlists") {
-            return { ok: true, data: { items: [], stats: { indexedTracks: 0, playlistReferencedTracks: 0, playlistEntries: 0 }, playlistTrackTotal: 0, warnings: [], warningCount: 0, playlistUsbExportStatus: [] } };
-          }
-          if (command === "fetch_usb_histories") {
-            return { ok: true, data: { items: [], counts: { importedPlaylists: 0, importedTracks: 0 }, warnings: [], warningCount: 0 } };
-          }
           if (command === "browse_source_files") {
             return { ok: true, data: { total: 1, items: [track] } };
           }
@@ -1539,7 +1483,7 @@ function installAnalyzeResponseMock(page, { analyzeResponse }) {
           if (command === "analyze_new_tracks") {
             return { ok: true, data: analyzeResponse };
           }
-          return { ok: false, error: { code: "UNKNOWN", message: `Unhandled command: ${command}` } };
+          return window.__e2eBackend.answer(command);
         }
       },
       event: { listen: async () => () => {} }

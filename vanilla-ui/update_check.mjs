@@ -154,7 +154,7 @@ export function renderUpdateBanner(ctx) {
 
   let dismissedVersion = null;
   try {
-    dismissedVersion = localStorage?.getItem?.(STORAGE_KEY_UPDATE_DISMISSED) || null;
+    dismissedVersion = localStorage.getItem(STORAGE_KEY_UPDATE_DISMISSED) || null;
   } catch {
     dismissedVersion = null;
   }
@@ -180,7 +180,7 @@ export function dismissUpdateBanner(ctx) {
   try {
     const latestVersion = state.updateCheck?.latestVersion;
     if (latestVersion) {
-      localStorage?.setItem?.(STORAGE_KEY_UPDATE_DISMISSED, latestVersion);
+      localStorage.setItem(STORAGE_KEY_UPDATE_DISMISSED, latestVersion);
     }
   } catch {
     // Best-effort persistence only.

@@ -49,7 +49,7 @@ export function restoreStoredUiPrefs(ctx) {
   const { state, el, localStorage } = ctx;
 
   try {
-    const stored = localStorage?.getItem?.(STORAGE_KEY_EXPORT_PRUNE_STALE);
+    const stored = localStorage.getItem(STORAGE_KEY_EXPORT_PRUNE_STALE);
     state.exportPruneStale = stored === null ? true : stored === "1";
   } catch {
     state.exportPruneStale = true;
@@ -58,7 +58,7 @@ export function restoreStoredUiPrefs(ctx) {
   el.exportSyncModeAdditive.checked = !state.exportPruneStale;
 
   try {
-    const stored = localStorage?.getItem?.(STORAGE_KEY_EXPORT_BACKUP);
+    const stored = localStorage.getItem(STORAGE_KEY_EXPORT_BACKUP);
     state.exportBackup = stored === null ? true : stored === "1";
   } catch {
     state.exportBackup = true;
@@ -66,14 +66,14 @@ export function restoreStoredUiPrefs(ctx) {
   el.exportBackupCheckbox.checked = !!state.exportBackup;
 
   try {
-    state.exportEngineLibrary = localStorage?.getItem?.(STORAGE_KEY_EXPORT_ENGINE_LIBRARY) === "1";
+    state.exportEngineLibrary = localStorage.getItem(STORAGE_KEY_EXPORT_ENGINE_LIBRARY) === "1";
   } catch {
     state.exportEngineLibrary = false;
   }
   el.exportEngineLibraryCheckbox.checked = !!state.exportEngineLibrary;
 
   try {
-    const stored = localStorage?.getItem?.(STORAGE_KEY_BACKUP_RETENTION_COUNT);
+    const stored = localStorage.getItem(STORAGE_KEY_BACKUP_RETENTION_COUNT);
     const parsed = stored === null ? NaN : Number.parseInt(stored, 10);
     state.backupRetentionCount = Number.isFinite(parsed) && parsed >= 1 ? parsed : 10;
   } catch {
@@ -82,7 +82,7 @@ export function restoreStoredUiPrefs(ctx) {
   el.backupRetentionCountInput.value = String(state.backupRetentionCount);
 
   try {
-    const stored = localStorage?.getItem?.(STORAGE_KEY_ANALYSIS_BPM_RANGE);
+    const stored = localStorage.getItem(STORAGE_KEY_ANALYSIS_BPM_RANGE);
     state.analysisBpmRange = normalizeAnalysisBpmRange(stored || DEFAULT_ANALYSIS_BPM_RANGE);
   } catch {
     state.analysisBpmRange = DEFAULT_ANALYSIS_BPM_RANGE;
@@ -90,7 +90,7 @@ export function restoreStoredUiPrefs(ctx) {
   el.analysisBpmRangeSelect.value = state.analysisBpmRange;
 
   try {
-    const storedEngine = localStorage?.getItem?.(STORAGE_KEY_ANALYSIS_ENGINE);
+    const storedEngine = localStorage.getItem(STORAGE_KEY_ANALYSIS_ENGINE);
     state.analysisEngine = storedEngine === "essentia" ? "essentia" : "stratum";
   } catch {
     state.analysisEngine = "stratum";
@@ -99,7 +99,7 @@ export function restoreStoredUiPrefs(ctx) {
 
   // Display only: the backend renders key labels in this notation.
   try {
-    const storedNotation = localStorage?.getItem?.(STORAGE_KEY_KEY_NOTATION);
+    const storedNotation = localStorage.getItem(STORAGE_KEY_KEY_NOTATION);
     state.keyNotation = storedNotation === "camelot" ? "camelot" : "classic";
   } catch {
     state.keyNotation = "classic";
@@ -110,28 +110,28 @@ export function restoreStoredUiPrefs(ctx) {
 
   try {
     state.cueStartOnFirstBeat =
-      localStorage?.getItem?.(STORAGE_KEY_CUE_START_ON_FIRST_BEAT) === "1";
+      localStorage.getItem(STORAGE_KEY_CUE_START_ON_FIRST_BEAT) === "1";
   } catch {
     state.cueStartOnFirstBeat = false;
   }
 
   try {
     state.cueQuantize =
-      localStorage?.getItem?.(STORAGE_KEY_CUE_QUANTIZE) !== "0";
+      localStorage.getItem(STORAGE_KEY_CUE_QUANTIZE) !== "0";
   } catch {
     state.cueQuantize = true;
   }
 
   try {
     state.cueFollowGrid =
-      localStorage?.getItem?.(STORAGE_KEY_CUE_FOLLOW_GRID) === "1";
+      localStorage.getItem(STORAGE_KEY_CUE_FOLLOW_GRID) === "1";
   } catch {
     state.cueFollowGrid = false;
   }
 
   state.cueBeatgridLevel = 35;
   try {
-    const raw = localStorage?.getItem?.(STORAGE_KEY_CUE_BEATGRID_LEVEL);
+    const raw = localStorage.getItem(STORAGE_KEY_CUE_BEATGRID_LEVEL);
     const level = raw == null || raw === "" ? NaN : Number(raw);
     if (Number.isFinite(level)) state.cueBeatgridLevel = Math.max(0, Math.min(100, Math.round(level)));
   } catch {
@@ -140,7 +140,7 @@ export function restoreStoredUiPrefs(ctx) {
 
   state.cueMetronomeMix = 50;
   try {
-    const raw = localStorage?.getItem?.(STORAGE_KEY_CUE_METRONOME_MIX);
+    const raw = localStorage.getItem(STORAGE_KEY_CUE_METRONOME_MIX);
     const mix = raw == null || raw === "" ? NaN : Number(raw);
     if (Number.isFinite(mix)) state.cueMetronomeMix = Math.max(0, Math.min(100, Math.round(mix)));
   } catch {
@@ -148,13 +148,13 @@ export function restoreStoredUiPrefs(ctx) {
   }
 
   try {
-    state.sidebarCollapsed = localStorage?.getItem?.(STORAGE_KEY_SIDEBAR_COLLAPSED) === "1";
+    state.sidebarCollapsed = localStorage.getItem(STORAGE_KEY_SIDEBAR_COLLAPSED) === "1";
   } catch {
     state.sidebarCollapsed = false;
   }
 
   try {
-    state.sidebarWidth = clampSidebarWidth(localStorage?.getItem?.(STORAGE_KEY_SIDEBAR_WIDTH));
+    state.sidebarWidth = clampSidebarWidth(localStorage.getItem(STORAGE_KEY_SIDEBAR_WIDTH));
   } catch {
     state.sidebarWidth = clampSidebarWidth(null);
   }
@@ -173,7 +173,7 @@ export function applySidebarCollapsedUi(ctx) {
 export function showHelpOnFirstVisit(ctx) {
   const { el, localStorage } = ctx;
   try {
-    if (!localStorage?.getItem?.(STORAGE_KEY_HELP_SEEN)) {
+    if (!localStorage.getItem(STORAGE_KEY_HELP_SEEN)) {
       el.helpOverlay.classList.remove("hidden");
     }
   } catch {}
@@ -184,11 +184,10 @@ export function showHelpOnFirstVisit(ctx) {
 // nothing is pending; a failure only gets logged, and they run again next
 // launch.
 export async function runDataMigrations(ctx) {
-  if (typeof ctx.command !== "function") return null;
   try {
     return await ctx.command("run_data_migrations");
   } catch (error) {
-    ctx.pushEventLog?.({
+    ctx.pushEventLog({
       level: "warn",
       source: "startup",
       message: `Data upgrade failed: ${error?.message || String(error)}`

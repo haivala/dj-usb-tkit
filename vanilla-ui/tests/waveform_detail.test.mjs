@@ -1,6 +1,7 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 import { JSDOM } from "jsdom";
+import { fakeCanvasContext } from "./test_helpers.mjs";
 
 import {
   base64ToBytes,
@@ -37,8 +38,7 @@ test("drawDetailWaveform does not throw and signals when the canvas has no width
     { pretendToBeVisual: true }
   );
   global.window = dom.window;
-  // jsdom can't draw: no 2d context, as in test_helpers.mjs.
-  dom.window.HTMLCanvasElement.prototype.getContext = () => null;
+  dom.window.HTMLCanvasElement.prototype.getContext = fakeCanvasContext;
   const wrap = dom.window.document.getElementById("w");
   const bytes = new Uint8Array(200); // 100 entries
   const norm = computeWaveNorm(bytes);

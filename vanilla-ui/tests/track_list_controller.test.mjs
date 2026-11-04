@@ -2,6 +2,7 @@ import test from "node:test";
 import assert from "node:assert/strict";
 import { JSDOM } from "jsdom";
 import { createTrackListController } from "../components/shared/track_list_controller.mjs";
+import "./test_helpers.mjs"; // jsdom's missing ResizeObserver
 
 const ROW_HEIGHT = 47; // the controller's fallback when there's no CSS layout
 const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms));

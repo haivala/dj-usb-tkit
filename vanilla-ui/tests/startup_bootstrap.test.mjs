@@ -160,7 +160,6 @@ test("runDataMigrations logs a failure instead of throwing", async () => {
   assert.equal(logs.length, 1);
   assert.equal(logs[0].level, "warn");
   assert.match(logs[0].message, /Data upgrade failed: disk full/);
-  assert.equal(await runDataMigrations({}), null, "no backend: nothing to do");
 });
 
 // Every collaborator switchView touches, as no-ops; tests override the ones

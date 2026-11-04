@@ -12,14 +12,7 @@ function installTauriMock(page) {
     window.__TAURI__ = {
       core: {
         invoke: async (command, payload = {}) => {
-          if (command === "clear_frontend_log") return "";
-          if (command === "append_frontend_log") return null;
-          if (command === "show_window") return null;
-          if (command === "detect_external_rekordbox_db") {
-            return { ok: true, data: { found: false, path: null } };
-          }
           if (command === "pick_usb_folder") return "/Volumes/USB-TEST";
-          if (command === "list_playlists") return { ok: true, data: { items: [] } };
           if (command === "get_library_sources") {
             return { ok: true, data: { folders: [], rekordboxDbEnabled: false, mixxxDbEnabled: false, everConfigured: false } };
           }
@@ -88,7 +81,7 @@ function installTauriMock(page) {
               }
             };
           }
-          return { ok: true, data: {} };
+          return window.__e2eBackend.answer(command);
         },
         convertFileSrc: (path) => path
       },
@@ -146,4 +139,45 @@ test("Export Tracklist dialog's start-track select is populated from the selecte
   await expect(options).toHaveCount(4);
 
   await page.screenshot({ path: "test-results/tracklist-export-dialog.png" });
+});
+
+test("Export Tracklist saves the session from the chosen start track, and reports a dismissed save", async ({ page }) => {
+  await installTauriMock(page);
+  await page.addInitScript(() => {
+    const invoke = window.__TAURI__.core.invoke;
+    window.__saves = [];
+    window.__saveAccepted = true;
+    window.__TAURI__.core.invoke = async (command, payload) => {
+      if (command !== "save_text_file") return invoke(command, payload);
+      window.__saves.push(payload);
+      return window.__saveAccepted;
+    };
+  });
+  await page.goto("/");
+  await page.locator('.nav-item[data-view="usb"]').click();
+  await page.locator("#usbEmptyState .empty-state-action").click();
+  await page.locator('.nav-item[data-view="usb-history"]').click();
+  await page.locator("#refreshHistoryBtn").click();
+  await page.locator("#historyList [data-history-index]").click();
+  const status = page.locator("#statusText");
+
+  // A cancelled dialog saves nothing.
+  await page.locator("#exportHistoryTracklistBtn").click();
+  await page.locator("#tracklistExportCancelBtn").click();
+  expect(await page.evaluate(() => window.__saves)).toEqual([]);
+
+  await page.locator("#exportHistoryTracklistBtn").click();
+  await page.locator("#tracklistExportStartTrack").selectOption({ index: 1 });
+  await page.locator("#tracklistExportOkBtn").click();
+  await expect(status).toContainText("Tracklist exported: HISTORY 001");
+  const [save] = await page.evaluate(() => window.__saves);
+  expect(save.suggestedFileName).toBe("HISTORY 001.txt");
+  const lines = save.contents.split("\n");
+  expect(lines).toHaveLength(3);
+  expect(lines.slice(0, 2)).toEqual(["0:00 DJ Two - Peak Time", "4:00 DJ Three - Closer"]);
+
+  await page.evaluate(() => { window.__saveAccepted = false; });
+  await page.locator("#exportHistoryTracklistBtn").click();
+  await page.locator("#tracklistExportOkBtn").click();
+  await expect(status).toContainText("Tracklist export cancelled");
 });

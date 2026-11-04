@@ -50,28 +50,8 @@ function installWaveformStartupMock(page) {
     window.__TAURI__ = {
       core: {
         invoke: async (command, payload = {}) => {
-          if (command === "get_library_sources") {
-            const folders = (window.__e2eSourceFolders || [])
-              .map((path) => ({ path, label: path, parent: null, enabled: true, missing: false, fullyAnalyzed: false }));
-            return { ok: true, data: { folders, rekordboxDbEnabled: false, mixxxDbEnabled: false, everConfigured: folders.length > 0 } };
-          }
-          if (command === "clear_frontend_log") return "";
-          if (command === "append_frontend_log") return null;
-          if (command === "show_window") return null;
-          if (command === "detect_external_rekordbox_db") {
-            return { ok: true, data: { found: false, path: null } };
-          }
-          if (command === "list_playlists") {
-            return { ok: true, data: { items: [] } };
-          }
           if (command === "browse_source_files") {
             return { ok: true, data: { total: baseTracks.length, items: baseTracks } };
-          }
-          if (command === "fetch_usb_playlists") {
-            return { ok: true, data: { items: [], stats: { indexedTracks: 0, playlistReferencedTracks: 0, playlistEntries: 0 }, playlistTrackTotal: 0, warnings: [], warningCount: 0, playlistUsbExportStatus: [] } };
-          }
-          if (command === "fetch_usb_histories") {
-            return { ok: true, data: { items: [], counts: { importedPlaylists: 0, importedTracks: 0 }, warnings: [], warningCount: 0 } };
           }
           if (command === "resolve_track_identity") {
             return { ok: true, data: { trackId: payload?.request?.trackId ?? null } };
@@ -95,7 +75,7 @@ function installWaveformStartupMock(page) {
               }
             };
           }
-          return { ok: false, error: { code: "UNKNOWN", message: `Unhandled command: ${command}` } };
+          return window.__e2eBackend.answer(command);
         }
       },
       event: { listen }
@@ -230,9 +210,6 @@ function installSourceChipAnalysisMock(page) {
             sources[library === "mixxx" ? "mixxxDbEnabled" : "rekordboxDbEnabled"] = enabled;
             return { ok: true, data: sources };
           }
-          if (command === "clear_frontend_log") return "";
-          if (command === "append_frontend_log") return null;
-          if (command === "show_window") return null;
           if (command === "detect_external_rekordbox_db") {
             return { ok: true, data: { found: true, path: "/music/master.db", imported: true } };
           }
@@ -316,13 +293,7 @@ function installSourceChipAnalysisMock(page) {
             window.__browseCalls += 1;
             return { ok: true, data: { total: tracks.length, items: tracks } };
           }
-          if (command === "fetch_usb_playlists") {
-            return { ok: true, data: { items: [], stats: { indexedTracks: 0, playlistReferencedTracks: 0, playlistEntries: 0 }, playlistTrackTotal: 0, warnings: [], warningCount: 0, playlistUsbExportStatus: [] } };
-          }
-          if (command === "fetch_usb_histories") {
-            return { ok: true, data: { items: [], counts: { importedPlaylists: 0, importedTracks: 0 }, warnings: [], warningCount: 0 } };
-          }
-          return { ok: false, error: { code: "UNKNOWN", message: `Unhandled command: ${command}` } };
+          return window.__e2eBackend.answer(command);
         }
       },
       event: { listen }

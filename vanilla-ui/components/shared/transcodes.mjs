@@ -90,14 +90,14 @@ export async function convertTrackSelection(ctx, ids) {
     const result = await ctx.command("remove_track_transcodes", { trackIds });
     showTracks(ctx, result.tracks);
     // What export puts on the USB may have changed.
-    ctx.reloadPlaylistForUsb?.();
+    ctx.reloadPlaylistForUsb();
     ctx.emitStatus(result.summary);
     return;
   }
 
   const result = await ctx.command("transcode_tracks", { trackIds, format: choice.format });
   showTracks(ctx, result.tracks, result.replaced);
-  ctx.reloadPlaylistForUsb?.();
+  ctx.reloadPlaylistForUsb();
   // Skipped and failed tracks are in the Event Log already (the backend's).
   ctx.emitStatus(result.summary);
 }

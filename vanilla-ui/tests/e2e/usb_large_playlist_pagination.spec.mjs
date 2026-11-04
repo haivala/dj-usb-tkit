@@ -61,14 +61,7 @@ function playlistTracksResponder(tracks, hydrate) {
 }
 
 function baseUsbCommands(payload, command) {
-  if (command === "clear_frontend_log") return "";
-  if (command === "append_frontend_log") return null;
-  if (command === "show_window") return null;
-  if (command === "detect_external_rekordbox_db") return { ok: true, data: { found: false, path: null } };
   if (command === "pick_usb_folder") return "/Volumes/USB-TEST";
-  if (command === "list_playlists") return { ok: true, data: { items: [] } };
-  if (command === "list_usb_devices") return { ok: true, data: { items: [] } };
-  if (command === "fetch_usb_histories") return { ok: true, data: { items: [], counts: { importedPlaylists: 0, importedTracks: 0 }, warnings: [], warningCount: 0 } };
   if (command === "validate_usb_root") {
     const path = String(payload?.request?.path || "");
     return {
@@ -124,7 +117,7 @@ function installTauriMock(page, { trackCount, gateFetches = false }) {
             if (gateFetches) await new Promise((resolve) => { window.__releaseFetch = resolve; });
             return responder(payload);
           }
-          return { ok: false, error: { code: "INTERNAL_ERROR", message: `Unknown mock command: ${command}` } };
+          return window.__e2eBackend.answer(command);
         },
       },
     };
@@ -353,7 +346,7 @@ function installRowClickMock(page) {
               },
             };
           }
-          return { ok: false, error: { code: "INTERNAL_ERROR", message: `Unknown mock command: ${command}` } };
+          return window.__e2eBackend.answer(command);
         },
       },
     };

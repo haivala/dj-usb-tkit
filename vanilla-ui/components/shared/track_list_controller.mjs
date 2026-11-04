@@ -266,8 +266,8 @@ export function createTrackListController(config = {}) {
   }
 
   function setPadding(body, before, after) {
-    body.style?.setProperty?.("--track-grid-before", `${before}px`);
-    body.style?.setProperty?.("--track-grid-after", `${after}px`);
+    body.style.setProperty("--track-grid-before", `${before}px`);
+    body.style.setProperty("--track-grid-after", `${after}px`);
   }
 
   // Drop every row. The body keeps the whole list's height, so the browser
@@ -277,8 +277,9 @@ export function createTrackListController(config = {}) {
     win = { start: 0, end: 0 };
     orderDirty = false;
     const { body } = getElements();
-    body?.replaceChildren?.();
-    if (body) setPadding(body, 0, ctl.total * rowHeight());
+    if (!body) return;
+    body.replaceChildren();
+    setPadding(body, 0, ctl.total * rowHeight());
   }
 
   function requestParams(offset, limit) {
@@ -404,8 +405,7 @@ export function createTrackListController(config = {}) {
   // once scrolling settles.
   function onViewportChange() {
     if (frameHandle === null) {
-      const raf = globalThis.requestAnimationFrame || ((cb) => setTimeout(cb, 16));
-      frameHandle = raf(() => {
+      frameHandle = requestAnimationFrame(() => {
         frameHandle = null;
         void renderWindow();
       });
@@ -504,7 +504,7 @@ export function createTrackListController(config = {}) {
     if (!wrap || ctl._scrollBound) return;
     ctl._scrollBound = true;
     wrap.addEventListener("scroll", onViewportChange, { passive: true });
-    if (typeof ResizeObserver === "function") new ResizeObserver(onViewportChange).observe(wrap);
+    new ResizeObserver(onViewportChange).observe(wrap);
   };
 
   return ctl;

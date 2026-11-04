@@ -1,5 +1,6 @@
-// Drop-in test/expect replacement for @playwright/test. When COVERAGE is
-// unset it's a pure passthrough. When COVERAGE=1, it wraps each test's page
+// Drop-in test/expect replacement for @playwright/test. Every page gets the
+// shared stubbed backend (backend_mock.js) installed first. When COVERAGE is
+// unset nothing else changes. When COVERAGE=1, it wraps each test's page
 // in V8 JS coverage collection and appends the raw per-test coverage entry
 // for dist/main.js to .coverage-e2e/raw-v8-coverage.jsonl, one JSON object
 // per line. Run `node scripts/report-e2e-coverage.mjs` afterwards to merge
@@ -13,9 +14,12 @@ const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const COVERAGE_ENABLED = !!process.env.COVERAGE;
 const coverageOutDir = path.resolve(__dirname, "../../.coverage-e2e");
 const rawOutFile = path.join(coverageOutDir, "raw-v8-coverage.jsonl");
+const backendMockPath = path.join(__dirname, "backend_mock.js");
 
 export const test = base.extend({
   page: async ({ page }, use) => {
+    // The shared stubbed backend (window.__e2eBackend) every spec builds on.
+    await page.addInitScript({ path: backendMockPath });
     if (!COVERAGE_ENABLED) {
       await use(page);
       return;

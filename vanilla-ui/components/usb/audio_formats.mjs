@@ -13,7 +13,7 @@ export async function loadUsbAudioFormats(ctx) {
   state.usbAudioFormats = null;
   renderUsbAudioFormats(ctx);
   // Another USB (or none): the open playlist follows it.
-  ctx.reloadPlaylistForUsb?.();
+  ctx.reloadPlaylistForUsb();
   if (!usbRoot || !state.usbRootValid) return;
   const data = await ctx.command("get_usb_audio_formats", { usbRoot });
   // A switched stick while this was loading: its own load lands instead.
@@ -63,9 +63,9 @@ async function saveUsbAudioFormats(ctx, formats) {
   } finally {
     renderUsbAudioFormats(ctx);
   }
-  if (ctx.usbPlaylistTracksCtl?.scopeId) ctx.usbPlaylistTracksCtl.reload();
-  if (ctx.usbHistoryTracksCtl?.scopeId) ctx.usbHistoryTracksCtl.reload();
-  ctx.reloadPlaylistForUsb?.();
+  if (ctx.usbPlaylistTracksCtl.scopeId) ctx.usbPlaylistTracksCtl.reload();
+  if (ctx.usbHistoryTracksCtl.scopeId) ctx.usbHistoryTracksCtl.reload();
+  ctx.reloadPlaylistForUsb();
 }
 
 export function bindUsbAudioFormatEvents(ctx) {

@@ -9,15 +9,6 @@ function installEmptyStateMock(page) {
     window.__TAURI__ = {
       core: {
         invoke: async (command, payload = {}) => {
-          if (command === "get_library_sources") {
-            const folders = (window.__e2eSourceFolders || [])
-              .map((path) => ({ path, label: path, parent: null, enabled: true, missing: false, fullyAnalyzed: false }));
-            return { ok: true, data: { folders, rekordboxDbEnabled: false, mixxxDbEnabled: false, everConfigured: folders.length > 0 } };
-          }
-          if (command === "clear_frontend_log") return "";
-          if (command === "append_frontend_log") return null;
-          if (command === "show_window") return null;
-          if (command === "detect_external_rekordbox_db") return { ok: true, data: { found: false, path: null } };
           if (command === "list_playlists") return { ok: true, data: { items: playlists } };
           if (command === "browse_source_files") {
             return { ok: true, data: { total: 0, items: [] } };
@@ -36,14 +27,7 @@ function installEmptyStateMock(page) {
             const playlistId = String(payload?.request?.playlistId || "");
             return { ok: true, data: { playlistId, items: [] } };
           }
-          if (command === "fetch_usb_playlists") {
-            return { ok: true, data: { items: [], stats: { indexedTracks: 0, playlistReferencedTracks: 0, playlistEntries: 0 }, playlistTrackTotal: 0, warnings: [], warningCount: 0, playlistUsbExportStatus: [] } };
-          }
-          if (command === "fetch_usb_histories") {
-            return { ok: true, data: { items: [], counts: { importedPlaylists: 0, importedTracks: 0 }, warnings: [], warningCount: 0 } };
-          }
-          if (command === "get_backend_log_buffer") return [];
-          return { ok: false, error: { code: "UNKNOWN", message: `Unhandled: ${command}` } };
+          return window.__e2eBackend.answer(command);
         }
       }
     };
@@ -107,15 +91,6 @@ test("A playlist with tracks shows loading, never the empty screen", async ({ pa
     window.__TAURI__ = {
       core: {
         invoke: async (command, payload = {}) => {
-          if (command === "get_library_sources") {
-            const folders = (window.__e2eSourceFolders || [])
-              .map((path) => ({ path, label: path, parent: null, enabled: true, missing: false, fullyAnalyzed: false }));
-            return { ok: true, data: { folders, rekordboxDbEnabled: false, mixxxDbEnabled: false, everConfigured: folders.length > 0 } };
-          }
-          if (command === "clear_frontend_log") return "";
-          if (command === "append_frontend_log") return null;
-          if (command === "show_window") return null;
-          if (command === "detect_external_rekordbox_db") return { ok: true, data: { found: false, path: null } };
           if (command === "list_playlists") {
             return { ok: true, data: { items: [playlist("pl-empty", "Nothing Yet"), playlist("pl-full", "Has Tracks")] } };
           }
@@ -133,14 +108,7 @@ test("A playlist with tracks shows loading, never the empty screen", async ({ pa
             await new Promise((resolve) => { release = resolve; });
             return { ok: true, data: { playlistId, items: tracks, total: tracks.length, listTrackCount: tracks.length } };
           }
-          if (command === "fetch_usb_playlists") {
-            return { ok: true, data: { items: [], stats: { indexedTracks: 0, playlistReferencedTracks: 0, playlistEntries: 0 }, playlistTrackTotal: 0, warnings: [], warningCount: 0, playlistUsbExportStatus: [] } };
-          }
-          if (command === "fetch_usb_histories") {
-            return { ok: true, data: { items: [], counts: { importedPlaylists: 0, importedTracks: 0 }, warnings: [], warningCount: 0 } };
-          }
-          if (command === "get_backend_log_buffer") return [];
-          return { ok: false, error: { code: "UNKNOWN", message: `Unhandled: ${command}` } };
+          return window.__e2eBackend.answer(command);
         }
       }
     };

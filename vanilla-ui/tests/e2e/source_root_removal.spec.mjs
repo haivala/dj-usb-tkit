@@ -79,15 +79,6 @@ function installSourceRemovalMock(page) {
             window.__sourceFolders.push(...added);
             return { ok: true, data: { sources: sources(), added } };
           }
-          if (command === "clear_frontend_log") return "";
-          if (command === "append_frontend_log") return null;
-          if (command === "show_window") return null;
-          if (command === "detect_external_rekordbox_db") {
-            return { ok: true, data: { found: false, path: null } };
-          }
-          if (command === "list_playlists") {
-            return { ok: true, data: { items: [] } };
-          }
           if (command === "browse_source_files") {
             return { ok: true, data: { total: trackStore.length, items: trackStore } };
           }
@@ -118,13 +109,7 @@ function installSourceRemovalMock(page) {
             }
             return { ok: true, data: { indexed, updated: 0, removed: 0, notFound: [] } };
           }
-          if (command === "fetch_usb_playlists") {
-            return { ok: true, data: { items: [], stats: { indexedTracks: 0, playlistReferencedTracks: 0, playlistEntries: 0 }, playlistTrackTotal: 0, warnings: [], warningCount: 0, playlistUsbExportStatus: [] } };
-          }
-          if (command === "fetch_usb_histories") {
-            return { ok: true, data: { items: [], counts: { importedPlaylists: 0, importedTracks: 0 }, warnings: [], warningCount: 0 } };
-          }
-          return { ok: false, error: { code: "UNKNOWN", message: `Unhandled command: ${command}` } };
+          return window.__e2eBackend.answer(command);
         }
       },
       event: { listen }

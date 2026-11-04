@@ -55,7 +55,7 @@ export function updateUsbNameBadge(ctx) {
   if (connected) badge.dataset.tooltip = name ? "Rename this drive" : "Name this drive";
   else delete badge.dataset.tooltip;
   // The USB Browser heading shows the same name.
-  if (state.usbRoot && state.usbRootValid) ctx.updateUsbRootText?.(state.usbRoot, true);
+  if (state.usbRoot && state.usbRootValid) ctx.updateUsbRootText(state.usbRoot, true);
 }
 
 export function updateSelectionCount(ctx) {

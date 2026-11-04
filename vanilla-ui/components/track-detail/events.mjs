@@ -29,7 +29,7 @@ export function bindTrackDetailEvents(ctx) {
 
   // On open: keep playing (and show it) if it's this track; stop any other
   // track so Play, "+ Hot cue" and the playhead all mean this one.
-  trackDetailDialog.onOpened?.(() => {
+  trackDetailDialog.onOpened(() => {
     playbackStartedHere = false;
     adopted = null;
     if (!ctx.state.playbackActive) return;
@@ -105,7 +105,7 @@ export function bindTrackDetailEvents(ctx) {
     window.removeEventListener("pointercancel", endDragNoSelect, true);
   };
   const beginDragNoSelect = () => {
-    doc.defaultView?.getSelection?.()?.removeAllRanges();
+    doc.defaultView.getSelection().removeAllRanges();
     if (dragNoSelect) return;
     dragNoSelect = true;
     doc.documentElement.classList.add("is-ui-dragging");

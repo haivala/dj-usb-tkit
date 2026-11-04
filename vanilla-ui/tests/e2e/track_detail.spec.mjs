@@ -55,28 +55,11 @@ function installTrackDetailMock(page, opts = {}) {
     window.__TAURI__ = {
       core: {
         invoke: async (command, payload = {}) => {
-          if (command === "get_library_sources") {
-            const folders = (window.__e2eSourceFolders || [])
-              .map((path) => ({ path, label: path, parent: null, enabled: true, missing: false, fullyAnalyzed: false }));
-            return { ok: true, data: { folders, rekordboxDbEnabled: false, mixxxDbEnabled: false, everConfigured: folders.length > 0 } };
-          }
           window.__calls.push({ command, request: payload?.request ?? null });
-          if (command === "clear_frontend_log") return "";
-          if (command === "append_frontend_log") return null;
-          if (command === "show_window") return null;
           if (command === "set_frontend_setting") {
             const r = payload?.request || {};
             if (r.key === "ui_key_notation_v1") opts.camelot = r.value === "camelot";
             return { ok: true, data: null };
-          }
-          if (command === "detect_external_rekordbox_db") return { ok: true, data: { found: false, path: null } };
-          if (command === "list_playlists") return { ok: true, data: { items: [] } };
-          if (command === "get_backend_log_buffer") return [];
-          if (command === "fetch_usb_playlists") {
-            return { ok: true, data: { items: [], stats: { indexedTracks: 0, playlistReferencedTracks: 0, playlistEntries: 0 }, playlistTrackTotal: 0, warnings: [], warningCount: 0, playlistUsbExportStatus: [] } };
-          }
-          if (command === "fetch_usb_histories") {
-            return { ok: true, data: { items: [], counts: { importedPlaylists: 0, importedTracks: 0 }, warnings: [], warningCount: 0 } };
           }
           if (command === "browse_source_files") {
             return { ok: true, data: { total: tracks.length, items: tracks.map(withKeyLabel), nextCursor: null, hasMore: false } };
@@ -193,7 +176,7 @@ function installTrackDetailMock(page, opts = {}) {
               },
             };
           }
-          return { ok: false, error: { code: "UNKNOWN", message: `Unhandled: ${command}` } };
+          return window.__e2eBackend.answer(command);
         },
       },
       event: {
@@ -1963,18 +1946,8 @@ test("cue editor opens + saves from an app-playlist track row", async ({ page })
     window.__TAURI__ = {
       core: {
         invoke: async (command, payload = {}) => {
-          if (command === "get_library_sources") {
-            const folders = (window.__e2eSourceFolders || [])
-              .map((path) => ({ path, label: path, parent: null, enabled: true, missing: false, fullyAnalyzed: false }));
-            return { ok: true, data: { folders, rekordboxDbEnabled: false, mixxxDbEnabled: false, everConfigured: folders.length > 0 } };
-          }
           const request = payload?.request ?? payload;
           window.__calls.push({ command, request: request ?? null });
-          if (command === "clear_frontend_log") return "";
-          if (command === "append_frontend_log") return null;
-          if (command === "show_window") return null;
-          if (command === "detect_external_rekordbox_db") return { ok: true, data: { found: false, path: null } };
-          if (command === "get_backend_log_buffer") return [];
           if (command === "list_playlists") {
             return { ok: true, data: { items: [{ id: "pl-1", name: "My Set", source: "local", createdAt: new Date().toISOString(), updatedAt: new Date().toISOString() }] } };
           }
@@ -1983,12 +1956,6 @@ test("cue editor opens + saves from an app-playlist track row", async ({ page })
           }
           if (command === "browse_source_files") {
             return { ok: true, data: { total: 0, items: [], nextCursor: null, hasMore: false } };
-          }
-          if (command === "fetch_usb_playlists") {
-            return { ok: true, data: { items: [], stats: { indexedTracks: 0, playlistReferencedTracks: 0, playlistEntries: 0 }, playlistTrackTotal: 0, warnings: [], warningCount: 0, playlistUsbExportStatus: [] } };
-          }
-          if (command === "fetch_usb_histories") {
-            return { ok: true, data: { items: [], counts: { importedPlaylists: 0, importedTracks: 0 }, warnings: [], warningCount: 0 } };
           }
           if (command === "resolve_track_identity") {
             return { ok: true, data: { trackId: "local-1", resolvedBy: "self", materialized: false } };
@@ -2018,7 +1985,7 @@ test("cue editor opens + saves from an app-playlist track row", async ({ page })
             };
           }
           if (command === "stop_playback_native" || command === "get_playback_status_native") return { ok: true, data: {} };
-          return { ok: false, error: { code: "UNKNOWN", message: `Unhandled: ${command}` } };
+          return window.__e2eBackend.answer(command);
         },
       },
       event: { listen: async () => () => {} },
@@ -2129,20 +2096,7 @@ function installUsbTrackDetailMock(page, mockOpts = {}) {
     window.__TAURI__ = {
       core: {
         invoke: async (command, payload = {}) => {
-          if (command === "get_library_sources") {
-            const folders = (window.__e2eSourceFolders || [])
-              .map((path) => ({ path, label: path, parent: null, enabled: true, missing: false, fullyAnalyzed: false }));
-            return { ok: true, data: { folders, rekordboxDbEnabled: false, mixxxDbEnabled: false, everConfigured: folders.length > 0 } };
-          }
           window.__calls.push({ command, request: payload?.request ?? null });
-          if (command === "clear_frontend_log") return "";
-          if (command === "append_frontend_log") return null;
-          if (command === "show_window") return null;
-          if (command === "allow_asset_paths") return null;
-          if (command === "get_backend_log_buffer") return [];
-          if (command === "detect_external_rekordbox_db") return { ok: true, data: { found: false, path: null } };
-          if (command === "list_playlists") return { ok: true, data: { items: [] } };
-          if (command === "list_usb_devices") return { ok: true, data: { items: [] } };
           if (command === "browse_source_files") {
             const items = opts.libraryTracks || [];
             return { ok: true, data: { total: items.length, items, nextCursor: null, hasMore: false } };
@@ -2235,7 +2189,7 @@ function installUsbTrackDetailMock(page, mockOpts = {}) {
             };
           }
           if (command === "stop_playback_native" || command === "get_playback_status_native") return { ok: true, data: {} };
-          return { ok: true, data: {} };
+          return window.__e2eBackend.answer(command);
         },
       },
       event: {
@@ -2511,24 +2465,10 @@ test("cue button is disabled for an un-analyzed track", async ({ page }) => {
     window.__TAURI__ = {
       core: {
         invoke: async (command) => {
-          if (command === "get_library_sources") {
-            const folders = (window.__e2eSourceFolders || [])
-              .map((path) => ({ path, label: path, parent: null, enabled: true, missing: false, fullyAnalyzed: false }));
-            return { ok: true, data: { folders, rekordboxDbEnabled: false, mixxxDbEnabled: false, everConfigured: folders.length > 0 } };
-          }
-          if (command === "detect_external_rekordbox_db") return { ok: true, data: { found: false, path: null } };
-          if (command === "list_playlists") return { ok: true, data: { items: [] } };
-          if (command === "get_backend_log_buffer") return [];
-          if (command === "fetch_usb_playlists") {
-            return { ok: true, data: { items: [], stats: { indexedTracks: 0, playlistReferencedTracks: 0, playlistEntries: 0 }, playlistTrackTotal: 0, warnings: [], warningCount: 0, playlistUsbExportStatus: [] } };
-          }
-          if (command === "fetch_usb_histories") {
-            return { ok: true, data: { items: [], counts: { importedPlaylists: 0, importedTracks: 0 }, warnings: [], warningCount: 0 } };
-          }
           if (command === "browse_source_files") {
             return { ok: true, data: { total: tracks.length, items: tracks, nextCursor: null, hasMore: false } };
           }
-          return { ok: true, data: {} };
+          return window.__e2eBackend.answer(command);
         },
       },
       event: { listen: async () => () => {} },

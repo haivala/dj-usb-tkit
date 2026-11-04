@@ -71,7 +71,6 @@ export function drawDetailWaveform(wrapperEl, bytes, { startMs, endMs, durationM
   }
 
   const ctx = canvas.getContext("2d");
-  if (!ctx) return true; // jsdom / no 2d context
 
   ctx.clearRect(0, 0, W, H);
   const n = bytes.length >>> 1;

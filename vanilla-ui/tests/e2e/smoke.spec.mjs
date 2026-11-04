@@ -36,12 +36,6 @@ function installBasicTauriMock(page, opts = {}) {
       core: {
         invoke: async (command, payload = {}) => {
           window.__calls.push({ command, payload });
-          if (command === "clear_frontend_log") return "";
-          if (command === "append_frontend_log") return null;
-          if (command === "show_window") return null;
-          if (command === "detect_external_rekordbox_db") {
-            return { ok: true, data: { found: false, path: null } };
-          }
           if (command === "list_playlists") {
             return { ok: true, data: { items: playlists } };
           }
@@ -98,12 +92,6 @@ function installBasicTauriMock(page, opts = {}) {
             window.__pendingTrackLoads -= 1;
             return { ok: true, data };
           }
-          if (command === "fetch_usb_playlists") {
-            return { ok: true, data: { items: [], stats: { indexedTracks: 0, playlistReferencedTracks: 0, playlistEntries: 0 }, playlistTrackTotal: 0, warnings: [], warningCount: 0, playlistUsbExportStatus: [] } };
-          }
-          if (command === "fetch_usb_histories") {
-            return { ok: true, data: { items: [], counts: { importedPlaylists: 0, importedTracks: 0 }, warnings: [], warningCount: 0 } };
-          }
           if (command === "check_for_update" && opts?.updateCheck) {
             // `nextUpdateChecks` (set by a test) answers the later re-checks.
             const next = window.__nextUpdateChecks?.shift();
@@ -121,7 +109,7 @@ function installBasicTauriMock(page, opts = {}) {
             // A real install restarts the app; the call never comes back.
             return new Promise(() => {});
           }
-          return { ok: false, error: { code: "UNKNOWN", message: `Unhandled: ${command}` } };
+          return window.__e2eBackend.answer(command);
         }
       }
     };
@@ -188,9 +176,8 @@ test("draws the backend's source folders as source chips", async ({ page }) => {
               .map((path) => ({ path, label: path, parent: null, enabled: true, missing: false, fullyAnalyzed: false }));
             return { ok: true, data: { folders, rekordboxDbEnabled: false, mixxxDbEnabled: false, everConfigured: true } };
           }
-          if (command === "list_playlists") return { ok: true, data: { items: [] } };
           if (command === "browse_source_files") return { ok: true, data: { total: 0, items: [] } };
-          return { ok: false, error: { code: "UNKNOWN", message: `Unhandled: ${command}` } };
+          return window.__e2eBackend.answer(command);
         }
       },
       event: { listen: async () => () => {} }

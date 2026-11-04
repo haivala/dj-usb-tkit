@@ -258,7 +258,7 @@ export async function loadPlaylists(ctx) {
   updatePlaylistExportButtons(ctx);
   // The active playlist's name is known now (or changed): the header and the
   // rows' "+" say it.
-  ctx.updateModeText?.();
+  ctx.updateModeText();
   refreshUsbExportStatusInBackground(ctx);
 }
 

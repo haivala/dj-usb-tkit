@@ -77,15 +77,10 @@ test("Library: scrub-play after column sort plays the clicked row's track, not t
     window.__TAURI__ = {
       core: {
         invoke: async (command, payload = {}) => {
-          if (command === "get_library_sources") {
-            const folders = (window.__e2eSourceFolders || [])
-              .map((path) => ({ path, label: path, parent: null, enabled: true, missing: false, fullyAnalyzed: false }));
-            return { ok: true, data: { folders, rekordboxDbEnabled: false, mixxxDbEnabled: false, everConfigured: folders.length > 0 } };
-          }
           const request = payload?.request || payload;
           const handler = handlers[command];
           if (handler) return handler(request);
-          return { ok: false, error: { code: "UNKNOWN", message: `Unhandled: ${command}` } };
+          return window.__e2eBackend.answer(command);
         }
       }
     };
@@ -183,15 +178,10 @@ test("Playlist: Play and Remove after column sort act on the clicked row's track
     window.__TAURI__ = {
       core: {
         invoke: async (command, payload = {}) => {
-          if (command === "get_library_sources") {
-            const folders = (window.__e2eSourceFolders || [])
-              .map((path) => ({ path, label: path, parent: null, enabled: true, missing: false, fullyAnalyzed: false }));
-            return { ok: true, data: { folders, rekordboxDbEnabled: false, mixxxDbEnabled: false, everConfigured: folders.length > 0 } };
-          }
           const request = payload?.request || payload;
           const handler = handlers[command];
           if (handler) return handler(request);
-          return { ok: false, error: { code: "UNKNOWN", message: `Unhandled: ${command}` } };
+          return window.__e2eBackend.answer(command);
         }
       }
     };
@@ -282,15 +272,10 @@ test("Playlist: header click shows and clears the sorted-by hint like other trac
     window.__TAURI__ = {
       core: {
         invoke: async (command, payload = {}) => {
-          if (command === "get_library_sources") {
-            const folders = (window.__e2eSourceFolders || [])
-              .map((path) => ({ path, label: path, parent: null, enabled: true, missing: false, fullyAnalyzed: false }));
-            return { ok: true, data: { folders, rekordboxDbEnabled: false, mixxxDbEnabled: false, everConfigured: folders.length > 0 } };
-          }
           const request = payload?.request || payload;
           const handler = handlers[command];
           if (handler) return handler(request);
-          return { ok: false, error: { code: "UNKNOWN", message: `Unhandled: ${command}` } };
+          return window.__e2eBackend.answer(command);
         }
       }
     };
@@ -360,15 +345,10 @@ test("Library: sorting by BPM column actually orders rows by numeric BPM value",
     window.__TAURI__ = {
       core: {
         invoke: async (command, payload = {}) => {
-          if (command === "get_library_sources") {
-            const folders = (window.__e2eSourceFolders || [])
-              .map((path) => ({ path, label: path, parent: null, enabled: true, missing: false, fullyAnalyzed: false }));
-            return { ok: true, data: { folders, rekordboxDbEnabled: false, mixxxDbEnabled: false, everConfigured: folders.length > 0 } };
-          }
           const request = payload?.request || payload;
           const handler = handlers[command];
           if (handler) return handler(request);
-          return { ok: false, error: { code: "UNKNOWN", message: `Unhandled: ${command}` } };
+          return window.__e2eBackend.answer(command);
         }
       }
     };

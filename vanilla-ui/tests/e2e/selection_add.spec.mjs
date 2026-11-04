@@ -51,11 +51,6 @@ function installSelectionMock(page, mockOpts = {}) {
     window.__TAURI__ = {
       core: {
         invoke: async (command, payload = {}) => {
-          if (command === "get_library_sources") {
-            const folders = (window.__e2eSourceFolders || [])
-              .map((path) => ({ path, label: path, parent: null, enabled: true, missing: false, fullyAnalyzed: false }));
-            return { ok: true, data: { folders, rekordboxDbEnabled: false, mixxxDbEnabled: false, everConfigured: folders.length > 0 } };
-          }
           window.__calls.push({ command, request: payload?.request ?? null });
           if (command === "get_playlist_membership") {
             const ids = payload?.request?.trackIds || [];
@@ -76,10 +71,6 @@ function installSelectionMock(page, mockOpts = {}) {
             const ids = r.tracks.map((t) => String(t.localTrackId || t.trackId || "")).filter(Boolean);
             return addToPlaylists(r.playlistIds, ids, r.tracks.length);
           }
-          if (command === "clear_frontend_log") return "";
-          if (command === "append_frontend_log") return null;
-          if (command === "show_window") return null;
-          if (command === "detect_external_rekordbox_db") return { ok: true, data: { found: false, path: null } };
           if (command === "list_playlists") return { ok: true, data: { items: playlists } };
           if (command === "browse_source_files") {
             // Library search is a backend query param now (shared TrackListController).
@@ -287,7 +278,6 @@ function installSelectionMock(page, mockOpts = {}) {
           }
           if (opts.usb) {
             if (command === "pick_usb_folder") return "/Volumes/USB-TEST";
-            if (command === "list_usb_devices") return { ok: true, data: { items: [] } };
             if (command === "validate_usb_root") {
               return {
                 ok: true,
@@ -313,12 +303,6 @@ function installSelectionMock(page, mockOpts = {}) {
               return { ok: true, data: { items: usbTracks, total: usbTracks.length, totalDurationMs: 0, durationUnknownCount: usbTracks.length, warnings: [] } };
             }
           }
-          if (command === "fetch_usb_playlists") {
-            return { ok: true, data: { items: [], stats: { indexedTracks: 0, playlistReferencedTracks: 0, playlistEntries: 0 }, playlistTrackTotal: 0, warnings: [], warningCount: 0, playlistUsbExportStatus: [] } };
-          }
-          if (command === "fetch_usb_histories") {
-            return { ok: true, data: { items: [], counts: { importedPlaylists: 0, importedTracks: 0 }, warnings: [], warningCount: 0 } };
-          }
           // Three minutes per ticked track; "t3" has no length.
           if (command === "get_selection_duration") {
             const ids = payload?.request?.trackIds || [];
@@ -328,9 +312,7 @@ function installSelectionMock(page, mockOpts = {}) {
               data: { totalDurationMs: known * 180_000, durationUnknownCount: ids.length - known, trackCount: ids.length },
             };
           }
-          if (command === "get_backend_log_buffer") return [];
-          if (opts.usb) return { ok: true, data: {} };
-          return { ok: false, error: { code: "UNKNOWN", message: `Unhandled: ${command}` } };
+          return window.__e2eBackend.answer(command);
         }
       }
     };
@@ -448,15 +430,6 @@ function installPaginatedLibraryMock(page, { trackCount }) {
     window.__TAURI__ = {
       core: {
         invoke: async (command, payload = {}) => {
-          if (command === "get_library_sources") {
-            const folders = (window.__e2eSourceFolders || [])
-              .map((path) => ({ path, label: path, parent: null, enabled: true, missing: false, fullyAnalyzed: false }));
-            return { ok: true, data: { folders, rekordboxDbEnabled: false, mixxxDbEnabled: false, everConfigured: folders.length > 0 } };
-          }
-          if (command === "clear_frontend_log") return "";
-          if (command === "append_frontend_log") return null;
-          if (command === "show_window") return null;
-          if (command === "detect_external_rekordbox_db") return { ok: true, data: { found: false, path: null } };
           if (command === "list_playlists") return { ok: true, data: { items: playlists } };
           if (command === "browse_source_files") {
             const limit = Number(payload?.request?.limit) || allTracks.length;
@@ -539,14 +512,7 @@ function installPaginatedLibraryMock(page, { trackCount }) {
             const ids = playlistTracks.get(playlistId) || [];
             return { ok: true, data: { playlistId, items: allTracks.filter((t) => ids.includes(t.id)) } };
           }
-          if (command === "fetch_usb_playlists") {
-            return { ok: true, data: { items: [], stats: { indexedTracks: 0, playlistReferencedTracks: 0, playlistEntries: 0 }, playlistTrackTotal: 0, warnings: [], warningCount: 0, playlistUsbExportStatus: [] } };
-          }
-          if (command === "fetch_usb_histories") {
-            return { ok: true, data: { items: [], counts: { importedPlaylists: 0, importedTracks: 0 }, warnings: [], warningCount: 0 } };
-          }
-          if (command === "get_backend_log_buffer") return [];
-          return { ok: false, error: { code: "UNKNOWN", message: `Unhandled: ${command}` } };
+          return window.__e2eBackend.answer(command);
         }
       }
     };
