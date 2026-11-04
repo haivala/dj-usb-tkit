@@ -39,20 +39,22 @@
 
 ## Unreleased
 
-- **Fix:** Adding a USB playlist track that isn't in the local library to an app playlist lost its
-  cover, year, genre and length, so it also showed as needing analysis with its cue editor disabled.
-  They now come along from the USB. To fix a track added earlier, add it from the USB again.
+## 0.5.4
+
 - **New feature:** App playlist rows show a small icon next to the checkbox: a USB plug for a track
   on a USB stick, a folder for a local one. It's red when that USB isn't the selected one, or when
   the file can't be found. The tooltip shows the file's path.
-- **Fix:** Re-exporting a playlist now writes the same update counters and analysis flags to
-  the eDB as rekordbox does. Before, the counters grew on every export and some tracks got
-  a larger jump depending on their position in the playlist. Players aren't affected.
 - **Fix:** On Windows, analyzing tracks could freeze the window ("Not Responding") for many
   seconds at a time, even with low CPU use. The app's event log was written from the window's own
   thread, opening and closing the log file for every analysis log line, and many library and
   playlist commands (including the folder scan run when analysis finishes) also ran there. The log
   is now written by a background thread, and those commands run off the window thread.
+- **Fix:** Adding a USB playlist track that isn't in the local library to an app playlist lost its
+  cover, year, genre and length, so it also showed as needing analysis with its cue editor disabled.
+  They now come along from the USB. To fix a track added earlier, add it from the USB again.
+- **Fix:** Re-exporting a playlist now writes the same update counters and analysis flags to
+  the eDB as rekordbox does. Before, the counters grew on every export and some tracks got
+  a larger jump depending on their position in the playlist. Players aren't affected.
 - **Improvement:** The Linux AppImage bundles the current WebKitGTK from Ubuntu 22.04's updates on
   every release, with its security fixes. Before, the build could reuse an older cached copy.
 - **Improvement:** In the cue editor, the greyed-out part of the waveform before where the CDJ

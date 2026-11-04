@@ -252,7 +252,11 @@
           case "get_playlist_tracks": {
             const playlist = playlists.find((p) => p.id === r.playlistId);
             const forUsb = opts.audioFormats && r.usbRoot ? playlist?.tracksForUsb : null;
-            const items = forUsb || playlist?.tracks || [];
+            // The backend's source icon: the demo library's tracks are local.
+            const items = (forUsb || playlist?.tracks || []).map((track) => ({
+              ...track,
+              fileSource: { kind: "local", missing: false, tooltip: `In local library: ${track.filePath}` },
+            }));
             return ok({
               playlistId: r.playlistId,
               items,
