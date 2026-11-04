@@ -2963,6 +2963,32 @@ input[type="checkbox"]:disabled {
   min-width: 0;
 }
 
+/* In the gap between the checkbox and the cover: no column of its own, so the
+   grid stays the same as the other track lists'. */
+.track-grid-cell.td-select {
+  position: relative;
+}
+
+.track-source {
+  position: absolute;
+  top: 50%;
+  right: 0;
+  transform: translateY(-50%);
+  display: inline-flex;
+  width: 12px;
+  height: 12px;
+  color: var(--muted);
+}
+
+.track-source svg {
+  width: 100%;
+  height: 100%;
+}
+
+.track-source.is-missing {
+  color: var(--danger);
+}
+
 .track-title {
   display: block;
   font-weight: 500;

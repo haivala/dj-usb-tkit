@@ -54,6 +54,32 @@ track only in eDB history and in no playlist could lose its audio, analysis
 and artwork files. "Remove Missing Audio References" already counts both
 histories.
 
+## Possibility: copy cues added on a CDJ back to the library
+
+Cues added on a CDJ don't reach a library track that already has cues:
+`import_anlz_cues_for_track` (`backend/src/service/cues.rs`) skips those. The
+next export then replaces the stick's cues with the library's
+(`ensure_analysis_bundle_ppth` in
+`backend/src/service/export_helpers/export_paths.rs`), so the CDJ's cues are
+lost. Found by reading the code, not yet seen on a CDJ.
+
+Idea: when a track's cues on the stick have changed since the last export,
+replace the library track's cues with the stick's, all of them, with no
+cue-by-cue merge. CDJ removals then carry over too.
+
+- Export saves what it wrote for each track on that stick. The library has no
+  `cueUpdateCount` of its own, and the app's count and rekordbox's can differ,
+  so the stick is compared with the saved value.
+- Ask when the track was also edited in the library since the last export: a
+  rewrite would lose those edits, and "local edits win" is the rule today.
+- The import's time shift for transcoded files still applies.
+
+First test on a CDJ: export a track, add a hot cue and a memory cue on the
+player, and compare `exportLibrary.db`, `export.pdb` and the track's `.DAT` and
+`.EXT` before and after. If `cueUpdateCount` changes, it can trigger the rewrite.
+If it doesn't, or only on some models, compare the stick's ANLZ cue list with
+the list the last export wrote instead.
+
 ## Check: app timing of MP3s with a LAME header frame
 
 The app's analysis (waveform, beat grid, cues) decodes an MP3 without the

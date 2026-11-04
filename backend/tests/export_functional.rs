@@ -6424,3 +6424,258 @@ fn mirror_reexport_after_swapping_colliding_tracks_keeps_their_files() {
     assert_eq!(kept.len(), 1, "{kept:?}");
     assert_eq!(on_usb(), kept, "the dropped track's file is pruned");
 }
+
+/// The track as the stick's row sends it: only on the stick, added from a USB
+/// playlist row in a profile whose library doesn't hold it.
+fn add_usb_row_to_new_playlist(backend: &BackendCommands, usb: &Path, name: &str) -> String {
+    let root = usb.to_string_lossy().to_string();
+    let lists = backend
+        .fetch_usb_playlists(FetchUsbPlaylistsRequest {
+            usb_root: Some(root.clone()),
+        })
+        .data
+        .expect("usb playlists");
+    let row = backend
+        .fetch_usb_playlist_tracks(FetchUsbTracksRequest {
+            usb_root: Some(root.clone()),
+            id: lists.items[0].id.clone(),
+            ..Default::default()
+        })
+        .data
+        .expect("usb tracks")
+        .items
+        .remove(0);
+    let playlist_id = backend
+        .create_playlist(CreatePlaylistRequest {
+            name: name.to_string(),
+        })
+        .data
+        .expect("playlist")
+        .playlist_id;
+    let added = backend.add_track_candidates_to_playlist(AddTrackCandidatesToPlaylistRequest {
+        playlist_id: playlist_id.clone(),
+        tracks: vec![AddTrackCandidate {
+            track_id: Some(row.id.clone()),
+            title: row.title.clone(),
+            artist: row.artist.clone(),
+            album: row.album.clone(),
+            bpm: row.bpm,
+            key: row.key.clone(),
+            file_path: Some(row.file_path.clone()),
+            file_size_bytes: row.file_size_bytes,
+            format_ext: row.format_ext.clone(),
+            usb_analysis_path: row.usb_analysis_path.clone(),
+            usb_root: Some(root.clone()),
+            usb_root_valid: true,
+            ..Default::default()
+        }],
+        usb_root: Some(root),
+        usb_root_valid: true,
+    });
+    assert!(added.ok, "add failed: {added:?}");
+    assert_eq!(added.data.expect("add data").added, 1);
+    playlist_id
+}
+
+fn export_usb_origin(
+    backend: &BackendCommands,
+    usb: &Path,
+    playlist_id: &str,
+    prune_stale: bool,
+) -> backend::models::ExportToUsbData {
+    let exported = backend.export_to_usb(ExportToUsbRequest {
+        usb_root: Some(usb.to_string_lossy().to_string()),
+        playlist_id: playlist_id.to_string(),
+        options: Some(ExportToUsbOptions {
+            include_artwork: true,
+            include_analysis: true,
+            prune_stale,
+            ..Default::default()
+        }),
+    });
+    assert!(
+        exported.ok,
+        "export to {} failed: {exported:?}",
+        usb.display()
+    );
+    exported.data.expect("export data")
+}
+
+fn files_under(dir: &Path) -> Vec<std::path::PathBuf> {
+    let mut files: Vec<_> = WalkDir::new(dir)
+        .into_iter()
+        .filter_map(Result::ok)
+        .filter(|e| e.file_type().is_file())
+        .map(|e| e.into_path())
+        .collect();
+    files.sort();
+    files
+}
+
+#[test]
+fn track_added_from_a_usb_row_exports_to_its_own_stick_and_to_another() {
+    let root = tempdir().expect("temp root");
+    let media = root.path().join("media");
+    let stick = root.path().join("stick");
+    fs::create_dir_all(&media).expect("create media");
+    fs::create_dir_all(&stick).expect("create stick");
+    copy_audio_fixture(&media, "formats/track_format_aif.aif", "song.aif");
+
+    // Someone's stick: exported from another library, with a year and a cover.
+    let first = BackendCommands::new(root.path().join("data-first")).expect("first backend");
+    assert!(
+        first
+            .initialize_usb(InitializeUsbRequest {
+                usb_root: stick.to_string_lossy().to_string(),
+            })
+            .ok
+    );
+    let scan = first.scan_library(ScanLibraryRequest {
+        source_roots: vec![media.to_string_lossy().to_string()],
+        incremental: true,
+    });
+    assert!(scan.ok, "scan failed: {scan:?}");
+    library_sources::show_only(
+        &first,
+        vec![media.to_string_lossy().to_string()],
+        false,
+        false,
+    );
+    let track_ids: Vec<String> = first
+        .browse_source_files(BrowseSourceFilesRequest {
+            limit: 10,
+            ..Default::default()
+        })
+        .data
+        .expect("library")
+        .items
+        .into_iter()
+        .map(|track| track.id)
+        .collect();
+    let data_first = first.data_dir().to_path_buf();
+    seed_tracks_as_analyzed(&data_first, &track_ids);
+    seed_track_artwork_path(&data_first, &track_ids[0], &cover_fixture_path());
+    rusqlite::Connection::open(data_first.join("backend.db"))
+        .expect("open db")
+        .execute(
+            "UPDATE tracks SET release_year = 2021, release_date = '2021-05-01', genre = 'Techno' WHERE id = ?1",
+            rusqlite::params![track_ids[0]],
+        )
+        .expect("seed year");
+    let source_list = first
+        .create_playlist(CreatePlaylistRequest {
+            name: "On the stick".to_string(),
+        })
+        .data
+        .expect("playlist")
+        .playlist_id;
+    first.add_library_selection_to_playlist(AddLibrarySelectionToPlaylistRequest {
+        playlist_id: source_list.clone(),
+        track_ids: track_ids.clone(),
+        ..Default::default()
+    });
+    export_usb_origin(&first, &stick, &source_list, false);
+
+    let pdb_of = |usb: &Path| {
+        parse_pdb(
+            &usb.join(USB_VENDOR_ROOT_DIR)
+                .join(USB_VENDOR_DB_DIR)
+                .join("export.pdb"),
+        )
+        .expect("parse pdb")
+    };
+    let original = pdb_of(&stick);
+    let original_row = original.tracks[0].clone();
+    let audio_on_stick = files_under(&stick.join("Contents"));
+    assert_eq!(audio_on_stick.len(), 1);
+    let audio_bytes = fs::read(&audio_on_stick[0]).expect("read audio");
+
+    // A profile whose library doesn't hold the track.
+    let backend = BackendCommands::new(root.path().join("data")).expect("backend");
+    let playlist_id = add_usb_row_to_new_playlist(&backend, &stick, "From the stick");
+
+    // Back to its own stick.
+    let same = export_usb_origin(&backend, &stick, &playlist_id, false);
+    assert_eq!(same.exported_tracks, 1);
+    assert_eq!(same.skipped_tracks, 0);
+    assert_eq!(same.exported_artworks, 0, "its cover is already there");
+    assert_eq!(
+        same.exported_analysis_files, 0,
+        "its analysis is already there"
+    );
+    assert_eq!(files_under(&stick.join("Contents")), audio_on_stick);
+    assert_eq!(
+        fs::read(&audio_on_stick[0]).expect("read audio"),
+        audio_bytes
+    );
+    let same_pdb = pdb_of(&stick);
+    assert_eq!(same_pdb.tracks.len(), 1, "no second row for the same file");
+    assert_eq!(same_pdb.tracks[0].release_year, original_row.release_year);
+    assert_eq!(
+        same_pdb.tracks[0].duration_seconds,
+        original_row.duration_seconds
+    );
+    assert_eq!(
+        same_pdb.artworks.get(&same_pdb.tracks[0].artwork_id),
+        original.artworks.get(&original_row.artwork_id)
+    );
+
+    // To another stick, with the first one still there.
+    let other = root.path().join("other");
+    fs::create_dir_all(&other).expect("create other");
+    assert!(
+        backend
+            .initialize_usb(InitializeUsbRequest {
+                usb_root: other.to_string_lossy().to_string(),
+            })
+            .ok
+    );
+    let copied = export_usb_origin(&backend, &other, &playlist_id, false);
+    assert_eq!(copied.exported_tracks, 1);
+    assert!(copied.exported_artworks > 0, "the cover goes along");
+    assert!(
+        copied.exported_analysis_files >= 2,
+        "the analysis goes along"
+    );
+    let other_audio = files_under(&other.join("Contents"));
+    assert_eq!(other_audio.len(), 1);
+    assert_eq!(fs::read(&other_audio[0]).expect("read copy"), audio_bytes);
+    let other_pdb = pdb_of(&other);
+    assert_eq!(
+        other_pdb.tracks[0].duration_seconds,
+        original_row.duration_seconds
+    );
+    assert_eq!(other_pdb.tracks[0].release_year, original_row.release_year);
+    assert_ne!(other_pdb.tracks[0].artwork_id, 0);
+
+    // A mirror export to its own stick keeps the file it's playing from.
+    export_usb_origin(&backend, &stick, &playlist_id, true);
+    assert_eq!(
+        fs::read(&audio_on_stick[0]).expect("audio survives mirror"),
+        audio_bytes
+    );
+
+    // Its stick isn't there: nothing to copy from, and export says so.
+    let third = root.path().join("third");
+    fs::create_dir_all(&third).expect("create third");
+    assert!(
+        backend
+            .initialize_usb(InitializeUsbRequest {
+                usb_root: third.to_string_lossy().to_string(),
+            })
+            .ok
+    );
+    fs::rename(&stick, root.path().join("stick-away")).expect("take the stick away");
+    let away = backend.export_to_usb(ExportToUsbRequest {
+        usb_root: Some(third.to_string_lossy().to_string()),
+        playlist_id,
+        options: Some(ExportToUsbOptions {
+            include_artwork: true,
+            include_analysis: true,
+            prune_stale: false,
+            ..Default::default()
+        }),
+    });
+    assert!(!away.ok, "nothing to copy from: {away:?}");
+    assert!(files_under(&third.join("Contents")).is_empty());
+}

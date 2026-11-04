@@ -944,6 +944,7 @@ pub(super) fn sample_track(id: &str, file_path: &str) -> Track {
         format_compat: Default::default(),
         transcodes: Vec::new(),
         export_file: None,
+        file_source: None,
     }
 }
 
@@ -3284,6 +3285,82 @@ fn unregistered_export_stick_counts_as_usb() {
         })
         .expect("get tracks by ids");
     assert!(tracks.items[0].is_usb_path);
+}
+
+#[test]
+fn playlist_tracks_say_where_their_file_is_and_whether_its_usb_is_selected() {
+    let (dir, service) = test_service();
+    let stick = dir.path().join("STICK");
+    std::fs::create_dir_all(stick.join("PIONEER")).expect("vendor dir");
+    std::fs::create_dir_all(stick.join("Contents")).expect("contents dir");
+    let on_stick = stick.join("Contents").join("Song.mp3");
+    std::fs::write(&on_stick, b"x").expect("write stick file");
+    let local = dir.path().join("local.mp3");
+    std::fs::write(&local, b"x").expect("write local file");
+    let gone = dir.path().join("gone.mp3");
+    let conn = service.db.connect().expect("connect");
+    for (id, path) in [("stick", &on_stick), ("local", &local), ("gone", &gone)] {
+        insert_full_track(
+            &conn,
+            id,
+            id,
+            "Artist",
+            &path.to_string_lossy(),
+            None,
+            None,
+            false,
+        );
+    }
+    drop(conn);
+    let playlist = service
+        .create_playlist(CreatePlaylistRequest {
+            name: "PL".to_string(),
+        })
+        .expect("create playlist");
+    service
+        .add_tracks_to_playlist(AddTracksToPlaylistRequest {
+            playlist_id: playlist.playlist_id.clone(),
+            track_ids: vec!["stick".to_string(), "local".to_string(), "gone".to_string()],
+        })
+        .expect("add tracks");
+
+    let read = |usb_root: Option<String>| {
+        service
+            .get_playlist_tracks(GetPlaylistTracksRequest {
+                playlist_id: playlist.playlist_id.clone(),
+                query: String::new(),
+                sort_by: None,
+                sort_dir: None,
+                cursor: None,
+                offset: None,
+                limit: 0,
+                usb_root,
+            })
+            .expect("playlist tracks")
+            .items
+            .into_iter()
+            .map(|track| {
+                let source = track.file_source.expect("file source");
+                (source.kind, source.missing)
+            })
+            .collect::<Vec<_>>()
+    };
+    let expect = |stick_missing: bool| {
+        vec![
+            ("usb".to_string(), stick_missing),
+            ("local".to_string(), false),
+            ("local".to_string(), true),
+        ]
+    };
+
+    // The stick's file is there, but no USB is selected, or another one is.
+    assert_eq!(read(None), expect(true));
+    let other = dir.path().join("OTHER").to_string_lossy().to_string();
+    assert_eq!(read(Some(other)), expect(true));
+    assert_eq!(
+        read(Some(stick.to_string_lossy().to_string())),
+        expect(false)
+    );
 }
 
 #[test]

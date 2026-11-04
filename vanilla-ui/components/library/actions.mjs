@@ -106,9 +106,10 @@ export function showTrackRow(ctx, rawTrack, { replaces = null } = {}) {
       if (!copy || !ids.has(String(copy.localTrackId || copy.id || "").trim())) continue;
       // Read for the selected USB with the playlist; a track update elsewhere
       // doesn't carry it.
-      const { exportFile } = copy;
+      const { exportFile, fileSource } = copy;
       replace(copy);
       if (exportFile && !("exportFile" in rawTrack)) copy.exportFile = exportFile;
+      if (fileSource && !("fileSource" in rawTrack)) copy.fileSource = fileSource;
     }
   }
   if (oldId && oldId !== id) renameTrackRows(ctx, oldId, id);

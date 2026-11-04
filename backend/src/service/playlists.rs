@@ -3,6 +3,31 @@
 use super::*;
 use std::collections::{HashMap, HashSet};
 
+/// A playlist row's source icon: USB or local (`is_usb` is the track's
+/// `UsbPathCheck`), and whether it's available. A USB is connected by being
+/// selected in the app, so a USB track outside `usb_root` (the selected USB)
+/// isn't available, whether or not that stick is plugged in.
+pub(crate) fn track_file_source(
+    is_usb: bool,
+    file_path: &str,
+    usb_root: Option<&str>,
+) -> TrackFileSource {
+    let connected =
+        !is_usb || usb_root.is_some_and(|root| browse_path_matches_root(file_path, root));
+    let found = connected && stored_file_path(file_path).is_file();
+    let tooltip = match (is_usb, connected, found) {
+        (true, false, _) => format!("USB not connected: {file_path}"),
+        (true, true, true) => format!("On USB: {file_path}"),
+        (false, _, true) => format!("In local library: {file_path}"),
+        (_, _, false) => format!("File not found: {file_path}"),
+    };
+    TrackFileSource {
+        kind: if is_usb { "usb" } else { "local" }.to_string(),
+        missing: !found,
+        tooltip,
+    }
+}
+
 pub(super) fn track_id_exists(conn: &rusqlite::Connection, track_id: &str) -> BackendResult<bool> {
     let found = conn
         .query_row(
@@ -441,16 +466,23 @@ impl BackendService {
         };
         let mut page: Vec<Track> = items.into_iter().skip(start_idx).take(limit + 1).collect();
         let (has_more, next_cursor) = paginate_tracks(&mut page, limit, &signature);
-        if let Some(usb_root) = req
+        let usb_root = req
             .usb_root
             .as_deref()
-            .filter(|root| !root.trim().is_empty())
-        {
+            .filter(|root| !root.trim().is_empty());
+        if let Some(usb_root) = usb_root {
             super::transcode_export::fill_track_export_files(
                 &conn,
                 &mut page,
                 Path::new(usb_root),
             )?;
+        }
+        for track in &mut page {
+            track.file_source = Some(track_file_source(
+                track.is_usb_path,
+                &track.file_path,
+                usb_root,
+            ));
         }
 
         Ok(GetPlaylistTracksData {

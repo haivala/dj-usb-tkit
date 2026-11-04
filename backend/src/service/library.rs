@@ -827,6 +827,7 @@ impl BackendService {
                 format_compat,
                 transcodes: Vec::new(),
                 export_file: None,
+                file_source: None,
             });
         }
 
@@ -1352,6 +1353,7 @@ pub(crate) fn row_to_track(
         format_compat,
         transcodes: Vec::new(),
         export_file: None,
+        file_source: None,
     };
     if include_previews {
         load_waveform_previews(&mut track);

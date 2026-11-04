@@ -112,7 +112,7 @@ use crate::models::{
     ResolveTrackIdentityData, ResolveTrackIdentityRequest, ResolvedBy, ScanLibraryData,
     ScanLibraryRequest, SetExternalLibraryEnabledRequest, SetFrontendSettingData,
     SetFrontendSettingRequest, SetPlaybackMetronomeRequest, SetSourceFolderEnabledRequest,
-    SourceFolder, StopPlaybackData, Track, TrackMatch, WarningEntry,
+    SourceFolder, StopPlaybackData, Track, TrackFileSource, TrackMatch, WarningEntry,
 };
 use crate::player::PlaybackController;
 use crate::scanner::{ScanCache, scan_audio_files, unique_paths};

@@ -2343,14 +2343,18 @@ impl BackendService {
             .filter(|s| !s.is_empty())
             .map(ToString::to_string);
 
+        // What the candidate doesn't carry comes from the stick's own row.
+        let usb_row = self.usb_row_of_file(&usb_root, &file_path);
+        let usb_row = usb_row.as_ref();
+
         let mut track = UsbTrack {
             id: String::new(),
             local_track_id: None,
             title: candidate.title.clone(),
             artist: candidate.artist.clone(),
             album: candidate.album.clone(),
-            year: None,
-            genre: None,
+            year: usb_row.and_then(|row| row.year),
+            genre: usb_row.and_then(|row| row.genre.clone()),
             track_number: candidate.track_number,
             bpm: candidate.bpm,
             key: candidate.key.clone(),
@@ -2359,13 +2363,13 @@ impl BackendService {
             file_path,
             format_ext: candidate.format_ext.clone(),
             usb_media_path: None,
-            artwork_path: None,
+            artwork_path: usb_row.and_then(|row| row.artwork_path.clone()),
             artwork_data_url: None,
             waveform_peaks_path: analysis_path.clone(),
             usb_analysis_path: analysis_path.clone(),
             usb_analysis_path_raw: None,
             waveform_preview: None,
-            duration_ms: None,
+            duration_ms: usb_row.and_then(|row| row.duration_ms),
             file_size_bytes: candidate.file_size_bytes,
             format_compat: Default::default(),
             needs_hydration: false,
@@ -2392,6 +2396,33 @@ impl BackendService {
         }
         tx.commit()?;
         Ok(track.local_track_id)
+    }
+
+    /// The stick's row of this audio file, from its parsed playlists, then its
+    /// history (both read from the PDB and the eDB). Without the file reads of
+    /// `usb_track_rows`, since adding a whole list asks this per track. `None`
+    /// when no list holds it or the stick can't be read: the add goes on with
+    /// what the candidate carries.
+    fn usb_row_of_file(&self, usb_root: &Path, file_path: &str) -> Option<UsbTrack> {
+        let is_file = |track: &&UsbTrack| track.file_path.trim() == file_path;
+        let lookup = || -> BackendResult<Option<UsbTrack>> {
+            let playlists = self.usb_playlists_resolved(usb_root)?;
+            let in_playlists = playlists.items.iter().flat_map(|list| &list.tracks);
+            if let Some(track) = in_playlists.into_iter().find(is_file) {
+                return Ok(Some(track.clone()));
+            }
+            let histories = self.usb_histories_resolved(usb_root)?;
+            let in_histories = histories.items.iter().flat_map(|list| &list.tracks);
+            Ok(in_histories.into_iter().find(is_file).cloned())
+        };
+        lookup().unwrap_or_else(|err| {
+            logging::emit(
+                Level::Warn,
+                "usb-import",
+                &format!("Could not read the USB's row of {file_path}: {err}"),
+            );
+            None
+        })
     }
 
     /// Matches an incoming USB-sourced track against existing `tracks` rows
@@ -2455,8 +2486,9 @@ impl BackendService {
                 r#"
                 INSERT INTO tracks (
                   id, title, artist, album, track_number, bpm, tonality, file_path, file_size_bytes,
-                  file_modified_at, artwork_path, waveform_peaks_path, duration_ms, match_fingerprint, format_ext, created_at, updated_at
-                ) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, NULL, ?10, ?11, ?12, ?13, ?15, ?14, ?14)
+                  file_modified_at, artwork_path, waveform_peaks_path, duration_ms, match_fingerprint, format_ext, created_at, updated_at,
+                  release_year, genre
+                ) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, NULL, ?10, ?11, ?12, ?13, ?15, ?14, ?14, ?16, ?17)
                 ON CONFLICT(file_path) DO UPDATE SET
                   title = excluded.title,
                   artist = excluded.artist,
@@ -2470,6 +2502,8 @@ impl BackendService {
                   duration_ms = COALESCE(excluded.duration_ms, tracks.duration_ms),
                   match_fingerprint = COALESCE(excluded.match_fingerprint, tracks.match_fingerprint),
                   format_ext = COALESCE(tracks.format_ext, excluded.format_ext),
+                  release_year = COALESCE(tracks.release_year, excluded.release_year),
+                  genre = COALESCE(tracks.genre, excluded.genre),
                   updated_at = excluded.updated_at
                 "#,
                 params![
@@ -2487,7 +2521,9 @@ impl BackendService {
                     track.duration_ms,
                     fingerprint,
                     now_ts,
-                    crate::audio_format::format_ext_from_path(file_path)
+                    crate::audio_format::format_ext_from_path(file_path),
+                    track.year,
+                    track.genre,
                 ],
             )?;
             id
@@ -4689,6 +4725,99 @@ mod tests {
 
     /// A row matched to a local track shows that track's own artwork:
     /// local ids are resolved before the page is hydrated.
+    #[test]
+    fn adding_a_usb_track_keeps_what_the_stick_knows_about_it() {
+        let (_dir, usb_root) = test_usb_root();
+        let tracks = [("t1", "Song", "song.mp3")];
+        let playlist = crate::edb::ExportPlaylistData {
+            id: "pl-1".to_string(),
+            name: "My Playlist".to_string(),
+            tracks: vec![make_export_track("t1", "Song", "song.mp3")],
+        };
+        let mut manifest = make_export_manifest("pl-1", "My Playlist", &usb_root, &tracks);
+        manifest.tracks[0].release_year = Some(2021);
+        manifest.tracks[0].genre_id = Some(1);
+        manifest.tracks[0].genre = Some("Techno".to_string());
+        manifest.tracks[0].owns_artwork = true;
+        manifest.tracks[0].artwork_path = Some("/PIONEER/Artwork/00001/b0000001.jpg".to_string());
+        crate::service::export_helpers::write_pdb(
+            &usb_root, &playlist, &manifest, true, None, None,
+        )
+        .expect("write pdb");
+
+        let (_dir2, service) = test_service();
+        let root = usb_root.to_string_lossy().to_string();
+        let list = service
+            .fetch_usb_playlists(crate::models::FetchUsbPlaylistsRequest {
+                usb_root: Some(root.clone()),
+            })
+            .expect("fetch playlists");
+        let row = service
+            .fetch_usb_playlist_tracks(crate::models::FetchUsbTracksRequest {
+                usb_root: Some(root.clone()),
+                id: list.items[0].id.clone(),
+                ..Default::default()
+            })
+            .expect("fetch tracks")
+            .items
+            .remove(0);
+        assert!(row.duration_ms.is_some(), "the stick must know the length");
+        assert_eq!(row.year, Some(2021));
+
+        // As the row's "+" sends it: the candidate has none of these fields.
+        let add = || {
+            service
+                .materialize_usb_add_candidate(
+                    &crate::models::AddTrackCandidate {
+                        title: row.title.clone(),
+                        artist: row.artist.clone(),
+                        album: row.album.clone(),
+                        bpm: row.bpm,
+                        file_path: Some(row.file_path.clone()),
+                        usb_root: Some(root.clone()),
+                        usb_analysis_path: Some("/stick/PIONEER/USBANLZ/ANLZ0000.DAT".to_string()),
+                        ..Default::default()
+                    },
+                    None,
+                )
+                .expect("materialize")
+                .expect("local id")
+        };
+        let assert_complete = |local_id: String| {
+            let local = service
+                .get_tracks_by_ids_with_previews(crate::models::GetTracksByIdsRequest {
+                    track_ids: vec![local_id],
+                })
+                .expect("local row")
+                .items
+                .remove(0);
+            assert_eq!(local.duration_ms, row.duration_ms);
+            assert_eq!(local.year, row.year);
+            assert_eq!(local.genre, row.genre);
+            assert_eq!(local.artwork_path, row.artwork_path);
+            assert!(
+                local.analysis_ready,
+                "BPM, waveform and length are all there"
+            );
+        };
+        let local_id = add();
+        assert_complete(local_id.clone());
+
+        // A row an earlier version added without them is completed by adding
+        // the track again.
+        service
+            .db
+            .connect()
+            .expect("connect")
+            .execute(
+                "UPDATE tracks SET duration_ms = NULL, release_year = NULL, genre = NULL, artwork_path = NULL WHERE id = ?1",
+                rusqlite::params![local_id],
+            )
+            .expect("strip row");
+        assert_eq!(add(), local_id);
+        assert_complete(local_id);
+    }
+
     #[test]
     fn fetch_usb_playlist_tracks_takes_matched_tracks_artwork_from_the_library() {
         let (_dir, usb_root) = seeded_playlist_usb_with_tracks(&[

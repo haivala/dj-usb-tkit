@@ -96,6 +96,13 @@ returned alongside `fetch_usb_playlists`/`run_usb_diagnostics` rather than
 re-derived per UI spot from raw state; the same status also backs the Export
 button's "Append to..." label.
 
+Each row of an app playlist has a small icon next to the checkbox: a USB plug for a track on a USB
+stick (`isUsbPath`), a folder for any other. It's red when the track isn't available: a USB track
+whose USB isn't the selected one, or a file that can't be found. The icon, its state and its tooltip
+are the backend's (`Track.fileSource`), read with the playlist, which reloads when another USB is
+selected. A USB counts as connected by being selected (see `docs/USB_CONNECT.md`), so a stick that's
+plugged in but not selected shows red, and nothing watches for a stick being pulled out.
+
 Playback architecture is backend-owned so transport behavior stays consistent across views and source types. The frontend requests playback actions, but audio lifecycle state is emitted by backend events. The UI subscribes to those events and updates controls/playhead state from the push stream.
 
 Playback resolution is source-aware:

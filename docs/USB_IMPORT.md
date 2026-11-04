@@ -36,6 +36,14 @@ Known DB data surfaces used by import:
 
 Track metadata resolution for imported playlist entries is multi-source. The importer attempts to resolve each referenced track ID through PDB row data, then eDB content data, then optional rekordbox DB fallback, and skips unresolvable orphan entries instead of failing the whole playlist import.
 
+### Adding a USB track to an app playlist
+
+Browsing a USB is read-only: adding a track is what creates its local `tracks` row, unless it matches
+one already in the library, which is then left as it is. The new row takes title, artist, album, BPM
+and key from the add request, and year, genre, artwork and length from the stick's own row
+(`usb_row_of_file`: its parsed playlists, then its history). Adding the track again fills in a row
+that's missing them, without replacing a year or genre already set.
+
 ### Cue points and beat grid on import
 
 When `materialize_usb_track_row` creates or matches a local `tracks` row for a

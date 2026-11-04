@@ -39,6 +39,12 @@
 
 ## Unreleased
 
+- **Fix:** Adding a USB playlist track that isn't in the local library to an app playlist lost its
+  cover, year, genre and length, so it also showed as needing analysis with its cue editor disabled.
+  They now come along from the USB. To fix a track added earlier, add it from the USB again.
+- **New feature:** App playlist rows show a small icon next to the checkbox: a USB plug for a track
+  on a USB stick, a folder for a local one. It's red when that USB isn't the selected one, or when
+  the file can't be found. The tooltip shows the file's path.
 - **Fix:** Re-exporting a playlist now writes the same update counters and analysis flags to
   the eDB as rekordbox does. Before, the counters grew on every export and some tracks got
   a larger jump depending on their position in the playlist. Players aren't affected.

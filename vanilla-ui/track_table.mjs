@@ -79,6 +79,20 @@ export function transportIcon(doc, playing) {
   return cloneTemplate(doc, playing ? "tplIconStop" : "tplIconPlay");
 }
 
+// The source icon next to the checkbox (backend-owned `track.fileSource`, sent
+// with an app playlist's rows): which icon, red when the track isn't
+// available, and the tooltip.
+function fillTrackSource(row, track) {
+  const source = track.fileSource;
+  const cell = row.querySelector(".td-select");
+  if (!source || !cell) return;
+  const icon = cloneTemplate(row.ownerDocument, source.kind === "usb" ? "tplTrackSourceUsb" : "tplTrackSourceLocal");
+  icon.classList.toggle("is-missing", !!source.missing);
+  icon.dataset.tooltip = source.tooltip;
+  icon.setAttribute("aria-label", source.tooltip);
+  cell.append(icon);
+}
+
 export function createTrackRow(ctx, track, options) {
   const { state } = ctx;
   const doc = ctx.document;
@@ -166,6 +180,7 @@ export function createTrackRow(ctx, track, options) {
 
   row.querySelector(".track-title").textContent = track.title ?? "";
   row.querySelector(".track-artist").textContent = track.artist ?? "";
+  fillTrackSource(row, track);
   cell("album").textContent = track.album ?? "";
   fillYearCell(cell("year"), track);
 

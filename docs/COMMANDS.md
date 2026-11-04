@@ -233,7 +233,9 @@ drive selection from being rendered against a newer selected drive.
   `exportFile` when export puts something other than its own file on that USB:
   `{ kind: "transcode" | "convert" | "refused", badge, tooltip }`, the FMT badge's text and
   tooltip (naming the track's own file as the source); the transcode that goes has `exported`
-  set. See `docs/TRANSCODES.md`
+  set. See `docs/TRANSCODES.md`. Each track also carries `fileSource`:
+  `{ kind: "usb" | "local", missing, tooltip }`, the row's source icon, read for the selected USB
+  (see `docs/PLAYLISTS_PLAYBACK.md`)
 - `get_playlist_export_space` — `{ playlistId, usbRoot }` → `exportSpace`: how many tracks and
   bytes an export of the playlist would still copy to the USB, its free space, and whether it
   fits. Worked out from recorded data only (audio sizes from the app DB, what is already on the

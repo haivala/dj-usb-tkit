@@ -178,6 +178,21 @@ pub struct Track {
     /// own file (see `service::transcode_export`). The FMT column shows it.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub export_file: Option<TrackExportFile>,
+    /// In an app playlist page: where the track's file lives and whether it's
+    /// available, for the row's icon (see `service::playlists::track_file_source`).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub file_source: Option<TrackFileSource>,
+}
+
+/// The source icon on a playlist row.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct TrackFileSource {
+    /// `"usb"`: on a USB stick (`Track::is_usb_path`). `"local"`: anywhere else.
+    pub kind: String,
+    /// Not available: on a USB other than the selected one, or the file is gone.
+    pub missing: bool,
+    pub tooltip: String,
 }
 
 /// What export puts on a USB for a track, when it isn't the track's own
