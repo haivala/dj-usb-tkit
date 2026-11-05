@@ -77,6 +77,7 @@ export function bindUsbEvents(ctx) {
   el.usbNameBadge.addEventListener("click", (event) => {
     // The health dot inside it has its own tooltip, not a rename.
     if (event.target.closest(".usb-health-dot")) return;
+    if (!el.usbNameBadge.classList.contains("is-renamable")) return;
     ctx.renameDrive().catch(catchErr(emitStatus));
   });
   el.usbNameBadge.addEventListener("keydown", (event) => {

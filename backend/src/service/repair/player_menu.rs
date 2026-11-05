@@ -220,12 +220,33 @@ fn menu_rows(
         return edb_menu_rows(usb_root, warnings);
     }
     let rows = pdb_menu_rows(usb_root)?;
-    if rows.is_empty() {
+    if !rows.is_empty() {
+        return Ok(rows);
+    }
+    // No t17 rows: older players show the whole catalog.
+    let catalog = crate::service::export_helpers::load_pdb_t16_decoded(usb_root)?;
+    if catalog.is_empty() {
         return Err(crate::error::BackendError::Validation(
             "this USB has no player menu in its eDB or PDB".to_string(),
         ));
     }
-    Ok(rows)
+    Ok((1u32..)
+        .zip(catalog)
+        .map(|(sequence_no, entry)| MenuRow {
+            menu_item_id: u32::from(entry.id),
+            kind: u32::from(entry.kind),
+            name: normalize_player_menu_name(&entry.name),
+            visible: true,
+            sequence_no,
+        })
+        .collect())
+}
+
+/// Whether edits can be written: with no eDB and no t17 rows there's nothing to
+/// update, and t16 is never changed.
+fn menu_is_editable(usb_root: &std::path::Path) -> BackendResult<bool> {
+    Ok(stick_has_edb(usb_root)?
+        || !crate::service::export_helpers::load_pdb_t17_live_rows(usb_root)?.is_empty())
 }
 
 /// What shows, in order, leaving DATE ADDED out: its rows are out of step on
@@ -254,6 +275,7 @@ pub(super) fn load_usb_player_menu_config(
     usb_root: &std::path::Path,
     warnings: &mut Vec<WarningEntry>,
 ) -> BackendResult<(Vec<UsbPlayerMenuItem>, Vec<UsbPlayerMenuItem>)> {
+    let editable = menu_is_editable(usb_root)?;
     let mut rows = menu_rows(usb_root, warnings)?;
     rows.sort_by_key(|row| (row.sequence_no, row.menu_item_id));
     // DATE ADDED always shows. Rekordbox can leave the eDB saying it's hidden.
@@ -277,10 +299,10 @@ pub(super) fn load_usb_player_menu_config(
             name: row.name.clone(),
             is_visible: row.visible,
             sequence_no,
-            removable: player_menu_kind_removable(row.kind),
+            removable: editable && player_menu_kind_removable(row.kind),
             label: player_menu_label(&row.name, row.kind),
-            can_move_up: position.is_some_and(|at| at > 0),
-            can_move_down: position.is_some_and(|at| at + 1 < movable.len()),
+            can_move_up: editable && position.is_some_and(|at| at > 0),
+            can_move_down: editable && position.is_some_and(|at| at + 1 < movable.len()),
         };
     let current = rows
         .iter()
@@ -572,6 +594,12 @@ impl BackendService {
             name_by_kind.insert(item.kind, item.name.clone());
         }
 
+        if !menu_is_editable(&usb_root)? {
+            return Err(crate::error::BackendError::Validation(
+                "this USB's player menu can't be changed: it has no eDB and no menu rows in its PDB"
+                    .to_string(),
+            ));
+        }
         let has_edb = stick_has_edb(&usb_root)?;
         let databases_differ = menu_databases_differ(&usb_root, &mut warnings);
 

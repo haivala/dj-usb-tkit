@@ -1311,10 +1311,24 @@ pub struct ValidateUsbRootData {
     #[serde(default)]
     pub has_write_access: bool,
     pub normalized_root: Option<String>,
+    // Backend only (CLI tools, tests): the UI gets `can_initialize` and the text.
+    #[serde(default, skip_serializing)]
     pub has_vendor_root: bool,
+    #[serde(default, skip_serializing)]
     pub has_contents: bool,
+    #[serde(default, skip_serializing)]
     pub has_pdb: bool,
+    #[serde(default, skip_serializing)]
     pub has_edb: bool,
+    /// The folder isn't a usable USB yet, but the app can set it up.
+    #[serde(default)]
+    pub can_initialize: bool,
+    /// The status line after selecting the folder.
+    #[serde(default)]
+    pub status_text: String,
+    /// Why the folder needs setting up, or can't be. Empty for a usable USB.
+    #[serde(default)]
+    pub init_hint_text: String,
     pub warnings: Vec<WarningEntry>,
 }
 
@@ -1329,6 +1343,9 @@ pub struct InitializeUsbRequest {
 pub struct InitializeUsbData {
     pub path: String,
     pub created_dirs: Vec<String>,
+    /// The status line after setting up the USB.
+    #[serde(default)]
+    pub status_text: String,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -2659,16 +2676,22 @@ pub struct RepairUsbDiagnosticsData {
     /// There's nothing to fix, not even by hand.
     #[serde(default)]
     pub nothing_to_fix: bool,
+    // Backend only (apply logic, CLI tools, tests): the UI gets `rows` and the text.
+    #[serde(default, skip_serializing)]
     pub detected_issues: Vec<String>,
-    // Backend only (apply logic, CLI tools, tests): the UI gets `rows`.
     #[serde(default, skip_serializing)]
     pub proposed_fixes: Vec<RepairFixProposal>,
     #[serde(default, skip_serializing)]
     pub unsupported_items: Vec<RepairUnsupportedItem>,
+    #[serde(default, skip_serializing)]
     pub applied_fixes: Vec<String>,
+    #[serde(default, skip_serializing)]
     pub skipped_fixes: Vec<String>,
+    #[serde(default, skip_serializing)]
     pub failed_fixes: Vec<String>,
+    #[serde(default, skip_serializing)]
     pub estimated_file_writes: usize,
+    #[serde(default, skip_serializing)]
     pub estimated_file_deletes: usize,
     pub warnings: Vec<WarningEntry>,
     pub duration_ms: u64,

@@ -376,9 +376,16 @@ test("Escape closes the cue editor only when nothing is unsaved", async ({ page 
   await page.locator('#libraryTableBody .waveform-cell [data-action="edit-track-detail"]').click();
   await expect(view).toBeVisible();
   await page.locator("#trackDetailAddCue").click();
+  // The highlight removes itself when its animation ends, so record it appearing.
+  await page.evaluate(() => {
+    const save = document.querySelector("#trackDetailSaveBtn");
+    new MutationObserver(() => {
+      if (save.classList.contains("is-attention")) window.__saveHighlighted = true;
+    }).observe(save, { attributes: true, attributeFilter: ["class"] });
+  });
   await page.keyboard.press("Escape");
   await expect(view).toBeVisible();
-  await expect(page.locator("#trackDetailSaveBtn")).toHaveClass(/is-attention/);
+  await expect.poll(() => page.evaluate(() => window.__saveHighlighted)).toBe(true);
 
   // Undoing the edit makes it clean again: Escape closes.
   await page

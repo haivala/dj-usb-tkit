@@ -1093,6 +1093,7 @@ pub fn initialize_usb(root: &Path) -> BackendResult<crate::models::InitializeUsb
     Ok(crate::models::InitializeUsbData {
         path: root.to_string_lossy().into_owned(),
         created_dirs: created,
+        status_text: "USB initialized".to_string(),
     })
 }
 

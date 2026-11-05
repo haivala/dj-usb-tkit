@@ -12,10 +12,6 @@ import { drawWaveformCanvas, invalidateWaveformCache, setWaveformColorData } fro
 
 const LIBRARY_SEARCH_DEBOUNCE_MS = 180;
 
-export function warningEntryText(entry) {
-  return String(entry?.message ?? entry ?? "").trim();
-}
-
 export function trackArtworkChecked(track) {
   return track?.artworkChecked === true;
 }

@@ -373,6 +373,27 @@ fn menu_works_with_only_the_pdb() {
 }
 
 #[test]
+fn a_pdb_with_no_menu_rows_shows_its_catalog_read_only() {
+    let usb_dir = tempdir().expect("usb tempdir");
+    let usb_root = usb_dir.path().to_path_buf();
+    let data_dir = tempdir().expect("data tempdir");
+    let backend = BackendCommands::new(data_dir.path()).expect("create backend");
+    initialized_usb(&backend, &usb_root);
+    fs::remove_file(usb_root.join("PIONEER/rekordbox/exportLibrary.db")).expect("remove eDB");
+    assert!(patch_pdb_t17_category_snapshot(&usb_root, &[]).expect("empty t17"));
+
+    let menu = get_menu(&backend, &usb_root);
+    assert_eq!(menu.current_items.len(), 27, "the whole catalog shows");
+    assert!(menu.available_items.is_empty());
+    assert!(
+        menu.current_items
+            .iter()
+            .all(|item| { !item.removable && !item.can_move_up && !item.can_move_down })
+    );
+    assert!(!edit_menu(&backend, &usb_root, UsbPlayerMenuEdit::MoveDown, 129).ok);
+}
+
+#[test]
 fn a_menu_edit_keeps_each_t17_rows_byte_and_place() {
     let usb_dir = tempdir().expect("usb tempdir");
     let usb_root = usb_dir.path().to_path_buf();

@@ -205,6 +205,15 @@ fn assert_no_pdb_structural_repairs(backend: &BackendCommands, usb: &Path) {
             .count()
             + preview_data.unsupported_items.len()
     );
+    let sent = serde_json::to_value(&preview_data).expect("serialize");
+    for field in [
+        "detectedIssues",
+        "proposedFixes",
+        "failedFixes",
+        "estimatedFileWrites",
+    ] {
+        assert!(sent.get(field).is_none(), "{field} isn't sent to the UI");
+    }
     let structural: Vec<String> = preview_data
         .proposed_fixes
         .iter()

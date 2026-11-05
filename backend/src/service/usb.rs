@@ -482,6 +482,45 @@ fn paginate_usb_tracks(
     })
 }
 
+/// What the UI says about a selected folder, and whether it can be set up: a
+/// folder that exists and is writable, but isn't a USB library yet.
+fn with_usb_selection_text(mut data: ValidateUsbRootData) -> ValidateUsbRootData {
+    let warning_text = data
+        .warnings
+        .iter()
+        .map(|warning| warning.message.trim())
+        .filter(|message| !message.is_empty())
+        .collect::<Vec<_>>()
+        .join(" | ");
+    let reason = if warning_text.is_empty() {
+        String::new()
+    } else {
+        format!(" ({warning_text})")
+    };
+    data.can_initialize = data.normalized_root.is_some() && !data.valid && data.has_write_access;
+    if data.valid {
+        data.status_text = format!(
+            "USB root selected: {}{reason}. Running diagnostics...",
+            data.normalized_root.as_deref().unwrap_or_default()
+        );
+    } else if data.can_initialize {
+        data.status_text =
+            "USB selected but not initialized. Click \"Initialize USB Structure\" to continue."
+                .to_string();
+        data.init_hint_text =
+            format!("USB folder is writable but missing External library structure{reason}");
+    } else {
+        let why = if warning_text.is_empty() {
+            "invalid USB root"
+        } else {
+            warning_text.as_str()
+        };
+        data.status_text = format!("USB root invalid: {why}");
+        data.init_hint_text = format!("USB folder is not ready for initialization{reason}");
+    }
+    data
+}
+
 /// The USB History panel's totals.
 fn usb_history_summary_text(sessions: usize, tracks: usize) -> String {
     format!(
@@ -689,7 +728,7 @@ impl BackendService {
                 "usb.import.path-empty",
                 "USB path is empty",
             ));
-            return Ok(ValidateUsbRootData {
+            return Ok(with_usb_selection_text(ValidateUsbRootData {
                 valid: false,
                 has_write_access: false,
                 normalized_root: None,
@@ -697,8 +736,11 @@ impl BackendService {
                 has_contents: false,
                 has_pdb: false,
                 has_edb: false,
+                can_initialize: false,
+                status_text: String::new(),
+                init_hint_text: String::new(),
                 warnings,
-            });
+            }));
         }
 
         let raw = std::path::PathBuf::from(trimmed);
@@ -716,7 +758,7 @@ impl BackendService {
                 "usb.import.path-not-found",
                 format!("Path does not exist: {}", candidate.display()),
             ));
-            return Ok(ValidateUsbRootData {
+            return Ok(with_usb_selection_text(ValidateUsbRootData {
                 valid: false,
                 has_write_access: false,
                 normalized_root: None,
@@ -724,8 +766,11 @@ impl BackendService {
                 has_contents: false,
                 has_pdb: false,
                 has_edb: false,
+                can_initialize: false,
+                status_text: String::new(),
+                init_hint_text: String::new(),
                 warnings,
-            });
+            }));
         }
 
         let normalized = normalize_usb_root_path(canonicalize_or_self(candidate));
@@ -754,14 +799,6 @@ impl BackendService {
                 "usb-import",
                 "usb.import.missing-contents",
                 "Missing contents directory",
-            ));
-        }
-        if !has_pdb {
-            warnings.push(logging::log(
-                Level::Warn,
-                "usb-import",
-                "usb.import.missing-pdb",
-                "Missing PDB in vendor db directory",
             ));
         }
 
@@ -799,7 +836,7 @@ impl BackendService {
             ));
         }
 
-        Ok(ValidateUsbRootData {
+        Ok(with_usb_selection_text(ValidateUsbRootData {
             valid: has_vendor_root && has_contents,
             has_write_access,
             normalized_root: Some(normalized.to_string_lossy().to_string()),
@@ -807,8 +844,11 @@ impl BackendService {
             has_contents,
             has_pdb,
             has_edb,
+            can_initialize: false,
+            status_text: String::new(),
+            init_hint_text: String::new(),
             warnings,
-        })
+        }))
     }
 
     pub fn list_usb_devices(&self) -> BackendResult<crate::models::ListUsbDevicesData> {
@@ -4131,12 +4171,6 @@ mod tests {
                 .warnings
                 .iter()
                 .any(|w| w.code == "usb.import.missing-contents")
-        );
-        assert!(
-            result
-                .warnings
-                .iter()
-                .any(|w| w.code == "usb.import.missing-pdb")
         );
     }
 

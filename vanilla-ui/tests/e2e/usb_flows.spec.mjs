@@ -357,6 +357,9 @@ function installTauriMock(page, mode) {
                     hasContents: false,
                     hasPdb: false,
                     hasEdb: false,
+                    canInitialize: true,
+                    statusText: "USB selected but not initialized.",
+                    initHintText: "USB folder is writable but missing External library structure (Missing vendor root folder)",
                     warnings: ["Missing vendor root folder"]
                   }
                 };
@@ -401,6 +404,11 @@ function installTauriMock(page, mode) {
                 hasContents: false,
                 hasPdb: false,
                 hasEdb: false,
+                canInitialize: true,
+                statusText: "USB selected but not initialized.",
+                initHintText: mode === "needs-init-structured"
+                  ? "Missing vendor root folder | Missing Contents directory"
+                  : "missing External library structure",
                 warnings
               }
             };
@@ -555,7 +563,28 @@ test("USB initialize flow: invalid-but-writable root can be initialized and unlo
   await expect(page.locator("#reDiagnoseBtn")).toBeVisible();
 });
 
-test("USB initialize hint renders structured warning messages", async ({ page }) => {
+test("a repair preview with nothing to fix hides the list and turns Preview Fixes off", async ({ page }) => {
+  await installTauriMock(page, "valid");
+  await page.addInitScript(() => {
+    const invoke = window.__TAURI__.core.invoke;
+    window.__TAURI__.core.invoke = async (command, payload) => {
+      if (command === "repair_usb_diagnostics" && !payload?.request?.apply) {
+        return { ok: true, data: { summary: "Nothing to repair.", overview: [], rows: [], nothingToFix: true } };
+      }
+      return invoke(command, payload);
+    };
+  });
+  await page.goto("/");
+  await connectUsb(page);
+  await page.locator("#usbHealthCard").evaluate((node) => { node.open = true; });
+  await page.locator("#previewRepairsBtn").click();
+  await expect(page.locator("#diagRepairSummary")).toHaveText("Nothing to repair.");
+  await expect(page.locator("#diagRepairTechnical")).toBeHidden();
+  await expect(page.locator("#previewRepairsBtn")).toBeDisabled();
+  await expect(page.locator("#applyRepairsBtn")).toBeDisabled();
+});
+
+test("USB initialize hint and status show what the backend sends", async ({ page }) => {
   await installTauriMock(page, "needs-init-structured");
   await page.goto("/");
 
@@ -565,8 +594,7 @@ test("USB initialize hint renders structured warning messages", async ({ page })
   await expect(page.locator("#usbInitRow")).not.toHaveClass(/hidden/);
   await expect(page.locator("#usbInitHint")).toContainText("Missing vendor root folder");
   await expect(page.locator("#usbInitHint")).toContainText("Missing Contents directory");
-  await expect(page.locator("#usbInitHint")).not.toContainText("[object Object]");
-  await expect(page.locator("#statusText")).not.toContainText("[object Object]");
+  await expect(page.locator("#statusText")).toContainText("USB selected but not initialized.");
 });
 
 test("USB playlist removal confirm path handles cancel and confirm", async ({ page }) => {
@@ -1633,6 +1661,16 @@ test("a running USB job locks the USB selection and export until it ends; other 
   await expect(exportBtn).toBeEnabled();
 });
 
+test("the drive name badge does nothing with no USB selected", async ({ page }) => {
+  await installTauriMock(page, "valid");
+  await page.goto("/");
+  await expect(page.locator("#usbNameBadgeLabel")).toHaveText("Not connected");
+  // A real mouse still lands on it: Playwright only refuses because of aria-disabled.
+  await page.locator("#usbNameBadgeLabel").click({ force: true });
+  await page.waitForTimeout(100);
+  await expect(page.locator("#driveNameOverlay")).toBeHidden();
+});
+
 test("a stored USB isn't shown as selected, or read, until it's validated", async ({ page }) => {
   await installTauriMock(page, "valid");
   await page.addInitScript(() => {
@@ -1887,7 +1925,10 @@ test("background colour shows nothing selected when the databases differ, and a 
     const invoke = window.__TAURI__.core.invoke;
     window.__color = { pdbColor: 6, edbColor: 6, writable: true };
     window.__TAURI__.core.invoke = async (command, payload) => {
-      if (command === "get_usb_background_color") return { ok: true, data: window.__color };
+      if (command === "get_usb_background_color") {
+        if (window.__colorFails) return { ok: false, error: { code: "IO", message: "colour read failed" } };
+        return { ok: true, data: window.__color };
+      }
       return invoke(command, payload);
     };
   });
@@ -1916,6 +1957,13 @@ test("background colour shows nothing selected when the databases differ, and a 
   await openMenu({ pdbColor: null, edbColor: 0, writable: false, noteText: "no t19 page" });
   await expect(chips.first()).toBeDisabled();
   await expect(note).toHaveText("no t19 page");
+
+  // A failed read says so.
+  await page.locator('.nav-item[data-view="usb"]').click();
+  await page.evaluate(() => { window.__colorFails = true; });
+  await page.locator('.nav-item[data-view="usb-player-menu"]').click();
+  await expect(chips).toHaveCount(0);
+  await expect(page.locator("#statusText")).toContainText("Failed to read the background colour: colour read failed");
 });
 
 test("choosing a background colour sets it on the USB and redraws from the answer", async ({ page }) => {

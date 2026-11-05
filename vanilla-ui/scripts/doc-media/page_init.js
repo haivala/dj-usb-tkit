@@ -325,10 +325,9 @@
           case "validate_usb_root":
             return ok({
               valid: true,
+              statusText: `USB root selected: ${USB_ROOT}. Running diagnostics...`,
+              initHintText: "",
               normalizedRoot: USB_ROOT,
-              hasVendorRoot: true,
-              hasContents: true,
-              hasPdb: true,
               hasWriteAccess: true,
               warnings: [],
             });

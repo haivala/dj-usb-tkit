@@ -1,4 +1,3 @@
-import { warningEntryText } from "../library/actions.mjs";
 import { createTrackListController } from "../shared/track_list_controller.mjs";
 import { narrowTrackSelectionToLoaded } from "../shared/track_selection.mjs";
 import { cloneTemplate } from "../../ui_utils.mjs";
@@ -38,13 +37,6 @@ export function setUsbRootControlsLocked(ctx, locked) {
     // so hand back to that recompute instead of overriding it.
     ctx.updatePlaylistExportButtons();
   }
-}
-
-function joinWarningTexts(warnings) {
-  return warnings
-    .map(warningEntryText)
-    .filter(Boolean)
-    .join(" | ");
 }
 
 // Index the backend's per-playlist `playlistUsbExportStatus` (see
@@ -373,11 +365,17 @@ export function usbContentChanged(ctx) {
   clearUsbMenuViews(ctx);
 }
 
+function refreshExportStatusInBackground(ctx) {
+  refreshPlaylistExportStatus(ctx).catch((err) => console.warn("refresh_playlist_export_status failed:", err));
+}
+
 // A USB was selected, re-selected or cleared: nothing on screen applies any more.
 export function usbSelectionChanged(ctx) {
   usbContentChanged(ctx);
   applyPlaylistUsbExportStatus(ctx, []);
-  refreshPlaylistExportStatus(ctx).catch((err) => console.warn("refresh_playlist_export_status failed:", err));
+  // A valid USB gets its status from the diagnostics run that follows, so this
+  // doesn't read its databases twice.
+  if (!ctx.state.usbRootValid) refreshExportStatusInBackground(ctx);
   hideUsbDiagnostics(ctx);
 }
 
@@ -496,7 +494,7 @@ async function promptDriveNameIfUnset(ctx) {
 // everything showing the name is refreshed from there.
 export async function renameDrive(ctx) {
   const { state } = ctx;
-  if (!state.usbRoot || !state.usbRootValid || isUsbRootChangeBlocked(state)) return;
+  if (isUsbRootChangeBlocked(state)) return;
   const current = String(state.usbDeviceName || "").trim();
   const mode = current ? "rename" : state.usbNameTakenBy ? "conflict" : "name";
   const saved = await openDriveNameDialog(ctx, { mode, initial: current });
@@ -586,8 +584,8 @@ export async function validateAndSetUsbRoot(ctx, path) {
   if (!input) {
     state.usbRoot = null;
     state.usbRootValid = false;
-      state.usbDeviceName = null;
-      state.usbNameTakenBy = null;
+    state.usbDeviceName = null;
+    state.usbNameTakenBy = null;
     ctx.updateUsbNameBadge();
     ctx.persistUsbRoot(null);
     updateUsbRootText(ctx, null, false);
@@ -604,24 +602,14 @@ export async function validateAndSetUsbRoot(ctx, path) {
   }
 
   const result = await command("validate_usb_root", { path: input });
-  const normalized = result.normalizedRoot?.trim() || "";
-  const valid = result.valid && !!normalized;
-  const hasStructureWarning = !result.hasVendorRoot || !result.hasContents || !result.hasPdb;
-  const canInitialize = !!normalized && !valid && result.hasWriteAccess && hasStructureWarning;
+  const { valid, canInitialize } = result;
   state.usbWritable = result.hasWriteAccess;
   state.usbRootValid = valid;
-  state.usbRoot = normalized || input;
+  state.usbRoot = result.normalizedRoot || input;
   ctx.persistUsbRoot(state.usbRoot);
   updateUsbRootText(ctx, state.usbRoot, valid);
   el.usbInitRow.classList.toggle("hidden", !canInitialize);
-  const warningText = joinWarningTexts(result.warnings);
-  if (canInitialize) {
-    const reason = warningText ? ` (${warningText})` : "";
-    el.usbInitHint.textContent = `USB folder is writable but missing External library structure${reason}`;
-  } else if (!valid) {
-    const reason = warningText ? ` (${warningText})` : "";
-    el.usbInitHint.textContent = `USB folder is not ready for initialization${reason}`;
-  }
+  el.usbInitHint.textContent = result.initHintText;
   el.initializeUsbBtn.disabled = !canInitialize;
   // Also when it's the same USB: selecting it again is how changes made on a
   // player show up (the backend just re-staged its databases).
@@ -639,9 +627,8 @@ export async function validateAndSetUsbRoot(ctx, path) {
     state.usbNameTakenBy = null;
     ctx.updateUsbNameBadge();
   }
+  emitStatus(result.statusText);
   if (valid) {
-    const reason = warningText ? ` (${warningText})` : "";
-    emitStatus(`USB root selected: ${state.usbRoot}${reason}. Running diagnostics...`);
     el.usbHealthCard.removeAttribute("open");
     el.usbHealthCard.classList.add("is-loading");
     // Next frame, so the "Running diagnostics..." state paints first.
@@ -649,12 +636,9 @@ export async function validateAndSetUsbRoot(ctx, path) {
       ctx.runUsbDiagnostics().catch((err) => {
         ctx.warn("Auto-diagnostics failed:", err);
         emitStatus(`Auto-diagnostics failed: ${err?.message || err}`);
+        refreshExportStatusInBackground(ctx);
       });
     });
-  } else if (canInitialize) {
-    emitStatus('USB selected but not initialized. Click "Initialize USB Structure" to continue.');
-  } else {
-    emitStatus(`USB root invalid: ${warningText || "invalid USB root"}`);
   }
   if (state.usbRoot) await loadUsbDevices(ctx);
   await syncAssetScopePaths(ctx);
@@ -1101,7 +1085,6 @@ export async function moveUsbPlayerMenuItems(ctx, direction) {
 export function renderUsbBackgroundColor(ctx) {
   const { state, el, document } = ctx;
   const data = state.usbBackgroundColor;
-  const canSet = !!data?.writable && state.usbWritable !== false;
 
   el.usbBackgroundColorChips.replaceChildren(...(data?.chips || []).map((color) => {
     const chip = cloneTemplate(document, "tplBackgroundColorChip");
@@ -1109,7 +1092,7 @@ export function renderUsbBackgroundColor(ctx) {
     chip.querySelector(".bg-color-chip-label").textContent = color.label;
     chip.classList.toggle("is-selected", color.selected);
     chip.setAttribute("aria-checked", String(color.selected));
-    chip.disabled = !canSet;
+    chip.disabled = !data.writable;
     return chip;
   }));
 
@@ -1125,6 +1108,7 @@ export async function loadUsbBackgroundColor(ctx) {
   } catch (err) {
     state.usbBackgroundColor = null;
     ctx.warn("get_usb_background_color failed:", err);
+    ctx.emitStatus(`Failed to read the background colour: ${err.message || err}`);
   }
   renderUsbBackgroundColor(ctx);
 }
@@ -1361,8 +1345,8 @@ export function createUsbHistoryTracksController(ctx) {
 export async function initializeUsb(ctx) {
   const { state, el, emitStatus } = ctx;
   try {
-    await ctx.command("initialize_usb", { usbRoot: state.usbRoot });
-    emitStatus("USB initialized");
+    const data = await ctx.command("initialize_usb", { usbRoot: state.usbRoot });
+    emitStatus(data.statusText);
     el.usbInitRow.classList.add("hidden");
     await validateAndSetUsbRoot(ctx, state.usbRoot);
   } catch (err) {

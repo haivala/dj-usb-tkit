@@ -779,6 +779,78 @@ fn fetch_usb_histories_returns_empty_result_when_pdb_is_missing() {
 }
 
 #[test]
+fn validate_usb_root_says_what_a_folder_is_and_what_to_do() {
+    let root = tempdir().expect("temp root");
+    let backend = BackendCommands::new(root.path().join("data")).expect("create backend");
+    let validate = |path: &Path| {
+        backend
+            .validate_usb_root(ValidateUsbRootRequest {
+                path: path.to_string_lossy().to_string(),
+            })
+            .data
+            .expect("validate data")
+    };
+
+    let missing = validate(&root.path().join("no-such-folder"));
+    assert!(!missing.can_initialize);
+    assert!(
+        missing
+            .status_text
+            .starts_with("USB root invalid: Path does not exist: ")
+    );
+    assert!(
+        missing
+            .init_hint_text
+            .starts_with("USB folder is not ready for initialization (Path does not exist: ")
+    );
+
+    let usb = root.path().join("usb");
+    fs::create_dir_all(&usb).expect("create usb dir");
+    let empty = validate(&usb);
+    assert!(empty.can_initialize);
+    assert_eq!(
+        empty.status_text,
+        "USB selected but not initialized. Click \"Initialize USB Structure\" to continue."
+    );
+    assert!(
+        empty
+            .init_hint_text
+            .starts_with("USB folder is writable but missing External library structure (")
+    );
+    assert!(
+        empty
+            .init_hint_text
+            .contains("Missing vendor root directory | Missing contents directory")
+    );
+
+    let initialized = backend
+        .initialize_usb(InitializeUsbRequest {
+            usb_root: usb.to_string_lossy().to_string(),
+        })
+        .data
+        .expect("initialize data");
+    assert_eq!(initialized.status_text, "USB initialized");
+    fs::remove_file(pdb_path(&usb)).expect("remove PDB");
+    let without_pdb = validate(&usb);
+    assert!(without_pdb.valid, "a missing database is fine");
+    assert!(
+        without_pdb.warnings.is_empty(),
+        "{:?}",
+        without_pdb.warnings
+    );
+    let ready = validate(&usb);
+    assert!(ready.valid && !ready.can_initialize);
+    let sent = serde_json::to_value(&ready).expect("serialize");
+    assert!(sent.get("hasPdb").is_none() && sent.get("hasVendorRoot").is_none());
+    assert_eq!(ready.init_hint_text, "");
+    let normalized = ready.normalized_root.clone().expect("root");
+    assert_eq!(
+        ready.status_text,
+        format!("USB root selected: {normalized}. Running diagnostics...")
+    );
+}
+
+#[test]
 fn fetch_usb_histories_marks_a_session_with_no_tracks_as_not_exportable() {
     let root = tempdir().expect("temp root");
     let usb = root.path().join("usb");

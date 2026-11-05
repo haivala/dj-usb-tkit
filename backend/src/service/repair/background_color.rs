@@ -75,6 +75,17 @@ fn edb_background_color(conn: &rusqlite::Connection) -> Option<u8> {
     .map(|color| u8::try_from(color).unwrap_or(0))
 }
 
+/// Why a color can't be set, if it can't.
+fn background_color_refusal(has_a_place: bool, writable: bool) -> Option<String> {
+    if !has_a_place {
+        Some("This USB has no place for a background colour.".to_string())
+    } else if !writable {
+        Some("This USB is read-only, so its background colour can't be changed.".to_string())
+    } else {
+        None
+    }
+}
+
 /// Both databases' colors for the staged `pdb`, and whether a color can be
 /// set: either database having a place for it is enough, and the app writes to
 /// whichever have one.
@@ -91,8 +102,10 @@ fn read_background_colors(
         .then(|| open_edb_rw(usb_root, warnings))
         .flatten()
         .and_then(|conn| edb_background_color(&conn));
-    let reason = (pdb_color.is_none() && edb_color.is_none())
-        .then(|| "This USB has no place for a background colour.".to_string());
+    let reason = background_color_refusal(
+        pdb_color.is_some() || edb_color.is_some(),
+        crate::service::usb_utils::has_write_access(usb_root),
+    );
     UsbBackgroundColorData {
         chips: background_color_chips(pdb_color, edb_color),
         note_text: background_color_note(pdb_color, edb_color, reason.as_deref()),
@@ -211,7 +224,22 @@ impl BackendService {
 
 #[cfg(test)]
 mod text_tests {
-    use super::{background_color_chips, background_color_note};
+    use super::{background_color_chips, background_color_note, background_color_refusal};
+
+    #[test]
+    fn a_color_can_be_set_with_a_place_for_it_on_a_writable_usb() {
+        assert_eq!(background_color_refusal(true, true), None);
+        assert!(
+            background_color_refusal(false, true)
+                .unwrap()
+                .contains("no place")
+        );
+        assert!(
+            background_color_refusal(true, false)
+                .unwrap()
+                .contains("read-only")
+        );
+    }
 
     #[test]
     fn a_chip_is_selected_only_while_both_databases_hold_it() {
