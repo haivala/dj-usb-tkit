@@ -96,8 +96,8 @@ export function createAppContext(env) {
     reloadTrackListsForKeyNotation scanLibrary reanalyzeTracks
     scanRekordboxDb scanMixxxDb analyzeTrackIds analyzeSingleTrack setTrackAnalyzingState
     showTrackRow`);
-  bindActions(usb, `setUsbRootControlsLocked refreshPlaylistExportStatus showDiagReportView
-    clearUsbDiagnostics hideUsbDiagnostics loadUsbRootFromStorage resetUsbStateViews
+  bindActions(usb, `setUsbRootControlsLocked refreshPlaylistExportStatus applyPlaylistUsbExportStatus showDiagReportView
+    clearUsbDiagnostics hideUsbDiagnostics loadUsbRootFromStorage usbContentChanged
     syncAssetScopePaths pickSourceFolders detectExternalRekordboxDb detectExternalMixxxDb
     validateAndSetUsbRoot renameDrive
     removeUsbPlaylist reorderUsbPlaylists refreshUsb runUsbDiagnostics runUsbParityReport

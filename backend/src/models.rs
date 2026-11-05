@@ -1461,6 +1461,10 @@ pub struct RestoreUsbBackupRequest {
 #[serde(rename_all = "camelCase")]
 pub struct RestoreUsbBackupData {
     pub restored: bool,
+    /// Computed from the restored databases. Empty if that failed (logged),
+    /// because the restore itself has already succeeded.
+    #[serde(default)]
+    pub playlist_usb_export_status: Vec<PlaylistUsbExportStatus>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -2541,6 +2545,14 @@ pub struct RepairUsbDiagnosticsData {
     pub duration_ms: u64,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub diagnostics: Option<Box<RunUsbDiagnosticsData>>,
+    /// On apply: from `diagnostics`, or computed separately if that run failed.
+    /// Empty on preview, or if computing it failed too (in `warnings`).
+    #[serde(default)]
+    pub playlist_usb_export_status: Vec<PlaylistUsbExportStatus>,
+    /// Whether an apply may have changed what the USB lists and player menu
+    /// show, so the UI must stop showing what it has loaded.
+    #[serde(default)]
+    pub usb_content_changed: bool,
     /// The "Write Engine DJ library" setting after this call; the
     /// `keep_engine_library_up_to_date` fix turns it on.
     #[serde(default)]

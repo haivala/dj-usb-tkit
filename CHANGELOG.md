@@ -41,6 +41,9 @@
 
 - **Fix:** Selecting the same USB again now clears its playlists and history, so a stick back from a
   player doesn't keep showing the old lists.
+- **Fix:** Restoring a USB backup no longer loses the "on this USB" marks and the playlist reorder lock
+  until the next diagnostics run. The same goes for a repair whose follow-up diagnostics fail.
+- **Fix:** Exporting a playlist to USB now clears the old USB Playlists totals along with the list.
 - **Fix:** Diagnostics no longer warn "PDB header compatibility: value 4" on USBs exported with
   rekordbox, which writes that value itself. The next repair you run on the USB sets it to 5.
 - **Chore:** The docs' transcode, USB Playlists and USB History screenshots show the side menu open,

@@ -89,19 +89,22 @@ export async function restoreUsbBackup(ctx, timestamp) {
   });
   if (!confirmed) return;
 
+  let data;
   try {
-    await command("restore_usb_backup", { usbRoot: state.usbRoot, timestamp });
-    emitStatus(`Restored ${label} from backup`);
-    // The restored files may no longer match whatever diagnostics report,
-    // playlists, histories, or player-menu state are on screen -- clear
-    // them rather than show stale results; the user can reload if they
-    // want fresh ones. The same drive is still selected, so only the
-    // diagnostics report is cleared, not the whole panel.
-    ctx.clearUsbDiagnostics();
-    ctx.resetUsbStateViews({ hideDiagnostics: false });
+    data = await command("restore_usb_backup", { usbRoot: state.usbRoot, timestamp });
   } catch (err) {
     emitStatus(`Restore failed: ${err?.message || err}`);
+    await renderBackups(ctx);
+    return;
   }
+  emitStatus(`Restored ${label} from backup`);
+  // The restored files may no longer match the diagnostics report, lists or
+  // player menu on screen. The same drive is still selected, so the lists read
+  // again when their page opens.
+  ctx.clearUsbDiagnostics();
+  ctx.usbContentChanged();
+  ctx.applyPlaylistUsbExportStatus(data.playlistUsbExportStatus);
+  await ctx.renderCurrentPlaylistTracksFromState();
   await renderBackups(ctx);
 }
 

@@ -2,7 +2,9 @@ import test from "node:test";
 import assert from "node:assert/strict";
 import {
   loadUsbRootFromStorage,
-  resetUsbStateViews,
+  clearUsbPlaylistsView,
+  usbContentChanged,
+  usbSelectionChanged,
   syncAssetScopePaths,
   pickSourceFolders
 } from "../components/usb/actions.mjs";
@@ -25,7 +27,7 @@ test("loadUsbRootFromStorage hydrates usb root and updates controls", () => {
   assert.equal(ctx.el.usbInitRow.classList.contains("hidden"), true);
 });
 
-test("resetUsbStateViews clears lists and rerenders", () => {
+test("usbSelectionChanged clears lists and rerenders", () => {
   const ctx = makeTestCtx();
   Object.assign(ctx.state, {
     usbPlaylists: [{ id: 1, name: "One" }],
@@ -35,7 +37,7 @@ test("resetUsbStateViews clears lists and rerenders", () => {
   });
   ctx.el.usbCountsText.textContent = "x";
 
-  resetUsbStateViews(ctx);
+  usbSelectionChanged(ctx);
 
   assert.equal(ctx.state.usbPlaylists.length, 0);
   assert.equal(ctx.state.histories.length, 0);
@@ -43,6 +45,44 @@ test("resetUsbStateViews clears lists and rerenders", () => {
   assert.equal(ctx.el.usbCountsText.textContent, "");
   assert.match(ctx.el.usbPlaylists.textContent, /No playlists imported yet/);
   assert.match(ctx.el.historyList.textContent, /No history imported yet/);
+  assert.equal(ctx.el.usbDiagnosticsCard.classList.contains("hidden"), true);
+});
+
+test("usbContentChanged clears the lists but keeps the export status and the diagnostics panel", () => {
+  const ctx = makeTestCtx();
+  const status = new Map([["p1", { sameNameExistsOnUsb: true, locksReorder: true }]]);
+  Object.assign(ctx.state, {
+    usbPlaylists: [{ id: 1, name: "One" }],
+    playlistUsbExportStatusById: status,
+    histories: [{ id: 1, name: "Session" }],
+    usbBackgroundColor: { color: "red" }
+  });
+  ctx.el.usbDiagnosticsCard.classList.remove("hidden");
+
+  usbContentChanged(ctx);
+
+  assert.equal(ctx.state.usbPlaylists.length, 0);
+  assert.equal(ctx.state.histories.length, 0);
+  assert.equal(ctx.state.usbBackgroundColor, null);
+  assert.equal(ctx.state.playlistUsbExportStatusById, status);
+  assert.equal(ctx.el.usbDiagnosticsCard.classList.contains("hidden"), false);
+});
+
+test("clearUsbPlaylistsView clears the playlists and their totals, and leaves the history", () => {
+  const ctx = makeTestCtx();
+  Object.assign(ctx.state, {
+    usbPlaylists: [{ id: 1, name: "One" }],
+    histories: [{ id: 1, name: "Session" }]
+  });
+  ctx.el.usbCountsText.textContent = "1 playlist, 3 tracks";
+  ctx.el.historyCountsText.textContent = "1 session, 3 tracks";
+
+  clearUsbPlaylistsView(ctx);
+
+  assert.equal(ctx.state.usbPlaylists.length, 0);
+  assert.equal(ctx.el.usbCountsText.textContent, "");
+  assert.equal(ctx.state.histories.length, 1);
+  assert.equal(ctx.el.historyCountsText.textContent, "1 session, 3 tracks");
 });
 
 test("syncAssetScopePaths calls allow_asset_paths with the source folders and usb root", async () => {

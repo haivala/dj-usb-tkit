@@ -126,6 +126,8 @@
         estimatedFileDeletes: 0,
         warnings: [],
         durationMs: 1,
+        playlistUsbExportStatus: [],
+        usbContentChanged: false,
         engineLibraryEnabled: false,
         ...overrides
       };

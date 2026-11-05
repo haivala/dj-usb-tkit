@@ -71,7 +71,7 @@ export async function refreshPlaylistExportStatus(ctx) {
 // Store a fresh backend status list and re-render what shows it: the export
 // button label, the sidebar's "on this USB" marks and the open playlist's
 // export status line.
-function applyPlaylistUsbExportStatus(ctx, statusList) {
+export function applyPlaylistUsbExportStatus(ctx, statusList) {
   ctx.state.playlistUsbExportStatusById = playlistUsbExportStatusById(statusList);
   ctx.updatePlaylistExportButtons();
   ctx.renderPlaylistList();
@@ -404,33 +404,50 @@ export function loadUsbRootFromStorage(ctx) {
   ctx.updatePlaylistExportButtons();
 }
 
-export function resetUsbStateViews(ctx, { hideDiagnostics = true } = {}) {
+// Each clear covers one list and its panel; the next read fills it again.
+export function clearUsbPlaylistsView(ctx) {
   const { state, el } = ctx;
   state.usbPlaylists = [];
-  applyPlaylistUsbExportStatus(ctx, []);
+  el.usbCountsText.textContent = "";
+  renderUsbPlaylists(ctx);
+  ctx.usbPlaylistTracksCtl.clear();
+}
+
+function clearUsbHistoryView(ctx) {
+  const { state, el } = ctx;
   state.histories = [];
   state.selectedHistoryIndex = null;
   state.historyTracks = [];
+  el.historyCountsText.textContent = "";
+  el.exportHistoryTracklistBtn.disabled = true;
+  renderHistoryList(ctx);
+  ctx.usbHistoryTracksCtl.clear();
+}
+
+function clearUsbMenuViews(ctx) {
+  const { state } = ctx;
   state.usbPlayerMenuCurrent = [];
   state.usbPlayerMenuAvailable = [];
   state.usbPlayerMenuCurrentSelectedKind = null;
   state.usbPlayerMenuAvailableSelectedKind = null;
   state.usbBackgroundColor = null;
-
-  el.usbCountsText.textContent = "";
-  el.historyCountsText.textContent = "";
-  el.exportHistoryTracklistBtn.disabled = true;
-  // The USB may still be connected and selected (e.g. after a backup
-  // restore or a repair apply) -- only a full disconnect/switch-drive
-  // should collapse the diagnostics panel itself, not just blank its report.
-  if (hideDiagnostics) hideUsbDiagnostics(ctx);
-
-  renderUsbPlaylists(ctx);
-  ctx.usbPlaylistTracksCtl.clear();
-  renderHistoryList(ctx);
-  ctx.usbHistoryTracksCtl.clear();
   renderUsbPlayerMenuEditor(ctx);
   renderUsbBackgroundColor(ctx);
+}
+
+// The same USB stays selected but its databases changed (repair, restore).
+// The export status and the diagnostics panel stay: the caller updates them.
+export function usbContentChanged(ctx) {
+  clearUsbPlaylistsView(ctx);
+  clearUsbHistoryView(ctx);
+  clearUsbMenuViews(ctx);
+}
+
+// A USB was selected, re-selected or cleared: nothing on screen applies any more.
+export function usbSelectionChanged(ctx) {
+  usbContentChanged(ctx);
+  applyPlaylistUsbExportStatus(ctx, []);
+  hideUsbDiagnostics(ctx);
 }
 
 export async function syncAssetScopePaths(ctx) {
@@ -646,7 +663,7 @@ export async function validateAndSetUsbRoot(ctx, path) {
     ctx.persistUsbRoot(null);
     updateUsbRootText(ctx, null, false);
     el.usbInitRow.classList.add("hidden");
-    resetUsbStateViews(ctx);
+    usbSelectionChanged(ctx);
     updateUsbConfigControlsVisibility(ctx);
     ctx.updateUsbSubNavDisabledState();
     ctx.updatePlaylistExportButtons();
@@ -679,7 +696,7 @@ export async function validateAndSetUsbRoot(ctx, path) {
   el.initializeUsbBtn.disabled = !canInitialize;
   // Also when it's the same USB: selecting it again is how changes made on a
   // player show up (the backend just re-staged its databases).
-  resetUsbStateViews(ctx);
+  usbSelectionChanged(ctx);
   updateUsbConfigControlsVisibility(ctx);
   ctx.updateUsbSubNavDisabledState();
   ctx.updatePlaylistExportButtons();
@@ -902,17 +919,13 @@ export async function applyUsbRepairs(ctx) {
   });
   const applied = data.appliedFixes.length;
   const failed = data.failedFixes.length;
-  // Some repair fixes rewrite the PDB playlist tree -- rather than track
-  // which specific fix IDs touch playlists, treat any successful apply as
-  // potentially invalidating whatever's loaded, same coarse-grained
-  // "DB changed, clear it" reasoning diagnostics-clearing already uses.
-  if (applied > 0) resetUsbStateViews(ctx, { hideDiagnostics: false });
+  if (data.usbContentChanged) usbContentChanged(ctx);
   // The Engine library fix turns the setting on backend-side.
   syncEngineLibrarySetting(ctx, data.engineLibraryEnabled);
   ctx.logWarnings("usb-diagnostics", data.warnings, "repair_usb_diagnostics apply");
+  applyPlaylistUsbExportStatus(ctx, data.playlistUsbExportStatus);
+  await ctx.renderCurrentPlaylistTracksFromState();
   if (data.diagnostics) {
-    applyPlaylistUsbExportStatus(ctx, data.diagnostics.playlistUsbExportStatus);
-    await ctx.renderCurrentPlaylistTracksFromState();
     renderDiagnosticsReport(ctx, data.diagnostics);
     ctx.logWarnings("usb-diagnostics", data.diagnostics.warnings, "run_usb_diagnostics");
   }
@@ -1384,9 +1397,7 @@ async function runPlaylistExport(ctx, playlistId) {
   ctx.updateModeText();
   await ctx.switchView(playlistId);
 
-  state.usbPlaylists = [];
-  renderUsbPlaylists(ctx);
-  ctx.usbPlaylistTracksCtl.clear();
+  clearUsbPlaylistsView(ctx);
 }
 
 // A USB side list (playlists / history): the items, or `emptyText` with the

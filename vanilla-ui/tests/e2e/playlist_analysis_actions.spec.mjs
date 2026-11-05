@@ -1240,6 +1240,9 @@ test("a successful export clears the stale diagnostics report and sends the back
   const flow = await page.evaluate(() => window.__exportFlow);
   expect(flow.map((call) => call.command)).toEqual(["export_to_usb"]);
   expect(flow[0].options.backupBeforeExport).toBe(false);
+  // The loaded USB playlists and their totals are out of date now.
+  await expect(page.locator("#usbPlaylists [data-usb-playlist]")).toHaveCount(0);
+  await expect(page.locator("#usbCountsText")).toHaveText("");
 });
 
 test("the backend's export gate rejections are shown in the status bar", async ({ page }) => {

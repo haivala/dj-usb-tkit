@@ -22,7 +22,8 @@ use rusqlite::{OptionalExtension, params};
 use crate::error::{BackendError, BackendResult};
 use crate::models::{
     DeleteUsbBackupData, DeleteUsbBackupRequest, ListUsbBackupsData, ListUsbBackupsRequest,
-    RestoreUsbBackupData, RestoreUsbBackupRequest, UsbBackupEntry, UsbBackupFile,
+    RefreshPlaylistExportStatusRequest, RestoreUsbBackupData, RestoreUsbBackupRequest,
+    UsbBackupEntry, UsbBackupFile,
 };
 
 use super::usb_utils::resolve_usb_root;
@@ -476,7 +477,24 @@ impl BackendService {
         // The response has no warnings; the log has them.
         self.refresh_engine_library(&usb_root);
 
-        Ok(RestoreUsbBackupData { restored: true })
+        let playlist_usb_export_status = self
+            .refresh_playlist_export_status(RefreshPlaylistExportStatusRequest {
+                usb_root: Some(usb_root.to_string_lossy().to_string()),
+            })
+            .map(|data| data.playlist_usb_export_status)
+            .unwrap_or_else(|err| {
+                crate::logging::emit(
+                    crate::logging::Level::Warn,
+                    "usb-backups",
+                    &format!("Failed to compute playlist export status after restore: {err}"),
+                );
+                Vec::new()
+            });
+
+        Ok(RestoreUsbBackupData {
+            restored: true,
+            playlist_usb_export_status,
+        })
     }
 
     pub fn delete_usb_backup(
@@ -971,6 +989,45 @@ mod tests {
             std::fs::read(&staged_path).unwrap(),
             b"restored-content",
             "passive reads must see the restored content, not the stale pre-restore staged copy"
+        );
+    }
+
+    #[test]
+    fn restore_usb_backup_returns_the_playlist_export_status() {
+        let (_dir, service) = test_service();
+        let usb = tempdir().unwrap();
+        let cache = tempdir().unwrap();
+        let usb_root = usb.path();
+        name_drive(usb_root, "Restore Status Test");
+        let _guard =
+            crate::service::usb_staging::set_cache_root_for_test(Some(cache.path().to_path_buf()));
+        let live_pdb = vendor_pdb_path(usb_root);
+        std::fs::create_dir_all(live_pdb.parent().unwrap()).unwrap();
+        std::fs::write(&live_pdb, b"live").unwrap();
+        touch_backup(
+            &usb_backups_dir(usb_root),
+            "export",
+            "pdb",
+            "2020-01-01_00-00-00",
+            b"restored",
+        );
+        let playlist = service
+            .create_playlist(crate::models::CreatePlaylistRequest {
+                name: "Set A".to_string(),
+            })
+            .expect("create playlist");
+
+        let result = service
+            .restore_usb_backup(RestoreUsbBackupRequest {
+                usb_root: usb_root.to_string_lossy().to_string(),
+                timestamp: "2020-01-01_00-00-00".to_string(),
+            })
+            .expect("restore");
+
+        assert_eq!(result.playlist_usb_export_status.len(), 1);
+        assert_eq!(
+            result.playlist_usb_export_status[0].playlist_id,
+            playlist.playlist_id
         );
     }
 

@@ -196,6 +196,7 @@ function installTauriMock(page, mode) {
                   warnings: [],
                   durationMs: 1,
                   diagnostics: diagnosticsPayload,
+                  usbContentChanged: (payload.request.selectedFixIds || []).length > 0,
                   engineLibraryEnabled: (payload.request.selectedFixIds || []).includes("keep_engine_library_up_to_date")
                 }
               };
@@ -925,6 +926,45 @@ test("Repair preview locks structural-prerequisite fix checkboxes, hides bookkee
   await expect(page.locator("#usbPlaylists")).toContainText("No playlists imported yet");
 });
 
+test("a repair whose diagnostics re-run failed still applies the export status it returns", async ({ page }) => {
+  await installTauriMock(page, "valid");
+  await page.addInitScript(() => {
+    const invoke = window.__TAURI__.core.invoke;
+    window.__statusRefreshes = 0;
+    window.__TAURI__.core.invoke = async (command, payload) => {
+      if (command === "list_playlists") {
+        return { ok: true, data: { items: [{ id: "pl-1", name: "Local Set", source: "local" }] } };
+      }
+      if (command === "repair_usb_diagnostics" && payload?.request?.apply) {
+        return {
+          ok: true,
+          data: {
+            appliedFixes: payload.request.selectedFixIds,
+            usbContentChanged: true,
+            playlistUsbExportStatus: [{ playlistId: "pl-1", playlistName: "Local Set", sameNameExistsOnUsb: true }]
+          }
+        };
+      }
+      if (command === "refresh_playlist_export_status") window.__statusRefreshes += 1;
+      return invoke(command, payload);
+    };
+  });
+  await page.goto("/");
+  await connectUsb(page);
+  const mark = page.locator('#navPlaylistList .nav-playlist-item[data-playlist-id="pl-1"] .nav-playlist-status');
+  await expect(mark).not.toHaveClass(/exported/);
+
+  await page.locator("#usbHealthCard").evaluate((node) => { node.open = true; });
+  await page.locator("#previewRepairsBtn").click();
+  await page.locator("#applyRepairsBtn").click();
+  await expect(page.locator("#statusText")).toContainText("Repair apply complete");
+  await expect(page.locator("#statusText")).not.toContainText("Diagnostics refreshed");
+
+  await expect(mark).toHaveClass(/exported/);
+  await expect(mark).toHaveAttribute("aria-label", "On this USB");
+  expect(await page.evaluate(() => window.__statusRefreshes)).toBe(0);
+});
+
 async function dragViaHandle(page, fromHandleSelector, toRowSelector, dropNearTop) {
   const source = page.locator(fromHandleSelector);
   const target = page.locator(toRowSelector);
@@ -1170,7 +1210,7 @@ test("applying repairs that change nothing keeps the loaded USB playlists and sh
       if (command === "repair_usb_diagnostics" && payload?.request?.apply) {
         return {
           ok: true,
-          data: { failedFixes: payload.request.selectedFixIds, diagnostics: { overallStatus: "FAIL" } }
+          data: { failedFixes: payload.request.selectedFixIds, usbContentChanged: false, diagnostics: { overallStatus: "FAIL" } }
         };
       }
       return invoke(command, payload);

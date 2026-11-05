@@ -1213,6 +1213,7 @@ fn diagnostics_and_repair_pdb_header_compatibility_without_previous_snapshot() {
     });
     assert!(preview.ok, "repair preview failed: {preview:?}");
     let preview_data = preview.data.expect("preview data");
+    assert!(!preview_data.usb_content_changed);
     let proposal = preview_data
         .proposed_fixes
         .iter()
@@ -1242,6 +1243,11 @@ fn diagnostics_and_repair_pdb_header_compatibility_without_previous_snapshot() {
             .iter()
             .any(|line| line.contains("Repair PDB Header Compatibility Field")),
         "repair should apply: {repair_data:?}"
+    );
+    assert!(repair_data.usb_content_changed);
+    assert!(
+        !repair_data.playlist_usb_export_status.is_empty(),
+        "an applied repair carries the export status of the fixture's playlist"
     );
     assert_eq!(read_pdb_header_compatibility_value(&pdb_path), 5);
 }

@@ -11,7 +11,9 @@ function backupCtx(state, overrides = {}) {
     state,
     emitStatus: () => {},
     clearUsbDiagnostics: () => {},
-    resetUsbStateViews: () => {},
+    usbContentChanged: () => {},
+    applyPlaylistUsbExportStatus: () => {},
+    renderCurrentPlaylistTracksFromState: async () => {},
     ...overrides
   });
 }
@@ -29,25 +31,41 @@ test("restoreUsbBackup clears the on-screen diagnostics report after a successfu
 
 test("restoreUsbBackup clears loaded playlists (and other derived state) after a successful restore", async () => {
   const state = { usbRoot: "/usb", usbBackups: [] };
-  const resetCalls = [];
+  let contentChanges = 0;
   await restoreUsbBackup(backupCtx(state, {
     command: async () => ({}),
     openConfirmDialog: async () => true,
-    resetUsbStateViews: (opts) => { resetCalls.push(opts); }
+    usbContentChanged: () => { contentChanges += 1; }
   }), "2020-01-01_00-00-00");
-  assert.equal(resetCalls.length, 1, "a successful restore must clear stale playlists/histories/player-menu state");
-  assert.equal(resetCalls[0].hideDiagnostics, false, "the diagnostics panel itself must stay visible -- only its report is cleared, separately");
+  assert.equal(contentChanges, 1, "a successful restore must clear stale playlists/histories/player-menu state");
 });
 
 test("restoreUsbBackup does not clear playlists when the restore command fails", async () => {
   const state = { usbRoot: "/usb", usbBackups: [] };
-  let resetCalls = 0;
+  let contentChanges = 0;
+  let statusApplied = 0;
   await restoreUsbBackup(backupCtx(state, {
     command: async () => { throw new Error("boom"); },
     openConfirmDialog: async () => true,
-    resetUsbStateViews: () => { resetCalls += 1; }
+    usbContentChanged: () => { contentChanges += 1; },
+    applyPlaylistUsbExportStatus: () => { statusApplied += 1; }
   }), "2020-01-01_00-00-00");
-  assert.equal(resetCalls, 0, "a failed restore left the live files untouched, so loaded playlists are still valid");
+  assert.equal(contentChanges, 0, "a failed restore left the live files untouched, so loaded playlists are still valid");
+  assert.equal(statusApplied, 0);
+});
+
+test("restoreUsbBackup applies the export status from its response", async () => {
+  const state = { usbRoot: "/usb", usbBackups: [] };
+  const status = [{ playlistId: "p1", locksReorder: true }];
+  const calls = [];
+  await restoreUsbBackup(backupCtx(state, {
+    command: async () => ({ restored: true, playlistUsbExportStatus: status }),
+    openConfirmDialog: async () => true,
+    usbContentChanged: () => { calls.push("content"); },
+    applyPlaylistUsbExportStatus: (list) => { calls.push(list); },
+    renderCurrentPlaylistTracksFromState: async () => { calls.push("tracks"); }
+  }), "2020-01-01_00-00-00");
+  assert.deepEqual(calls, ["content", status, "tracks"]);
 });
 
 test("restoreUsbBackup does not clear diagnostics when the restore command fails", async () => {

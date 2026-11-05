@@ -1641,6 +1641,26 @@ impl BackendService {
             None
         };
 
+        let playlist_usb_export_status = match &diagnostics_after_apply {
+            Some(diagnostics) => diagnostics.playlist_usb_export_status.clone(),
+            None if req.apply => self
+                .refresh_playlist_export_status(crate::models::RefreshPlaylistExportStatusRequest {
+                    usb_root: Some(usb_root.to_string_lossy().to_string()),
+                })
+                .map(|data| data.playlist_usb_export_status)
+                .unwrap_or_else(|err| {
+                    warnings.push(logging::log(
+                        Level::Warn,
+                        "usb-repair",
+                        "usb.repair.export-status-failed",
+                        format!("Playlist export status after repair failed: {err}"),
+                    ));
+                    Vec::new()
+                }),
+            None => Vec::new(),
+        };
+        let usb_content_changed = req.apply && !outcomes.applied.is_empty();
+
         on_progress(
             100,
             100,
@@ -1665,6 +1685,8 @@ impl BackendService {
             warnings,
             duration_ms: start.elapsed().as_millis() as u64,
             diagnostics: diagnostics_after_apply,
+            playlist_usb_export_status,
+            usb_content_changed,
             engine_library_enabled: self.engine_library_enabled(),
         })
     }
