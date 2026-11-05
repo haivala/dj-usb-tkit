@@ -1,6 +1,6 @@
 //! USB validation, playlist/history fetching, track inspection.
 
-use crate::utils::counted;
+use crate::utils::{counted, track_list_summary, warning_suffix};
 use std::collections::{HashMap, HashSet};
 use std::path::Path;
 use std::sync::Arc;
@@ -477,8 +477,26 @@ fn paginate_usb_tracks(
         duration_unknown_count,
         list_track_count,
         list_size_bytes,
+        list_summary_text: track_list_summary(list_track_count, list_size_bytes),
         warnings,
     })
+}
+
+/// The USB History panel's totals.
+fn usb_history_summary_text(sessions: usize, tracks: usize) -> String {
+    format!(
+        "{}, {}",
+        counted(sessions, "session", "sessions"),
+        counted(tracks, "track", "tracks"),
+    )
+}
+
+/// The status line after a USB History read.
+fn usb_history_status_text(sessions: usize, warning_count: usize) -> String {
+    format!(
+        "USB histories loaded: {sessions}{}",
+        warning_suffix(warning_count)
+    )
 }
 
 /// Hydrates a page from `paginate_usb_tracks`. Reading each row's waveform +
@@ -1171,11 +1189,24 @@ impl BackendService {
             prune_stale,
             Some(usb_root.to_string_lossy().as_ref()),
         );
+        let playlist_count = resolved.items.len();
+        let track_total: usize = resolved.items.iter().map(|p| p.track_count).sum();
+        let summary_text = format!(
+            "{}, {}",
+            counted(playlist_count, "playlist", "playlists"),
+            counted(track_total, "track", "tracks"),
+        );
+        let warning_count = logging::count_warnings(&resolved.warnings);
         Ok(FetchUsbPlaylistsData {
             items: resolved.items.clone(),
             stats: resolved.stats.clone(),
-            playlist_track_total: resolved.items.iter().map(|p| p.track_count).sum(),
-            warning_count: logging::count_warnings(&resolved.warnings),
+            status_text: format!(
+                "USB playlists loaded: {playlist_count}{}",
+                warning_suffix(warning_count)
+            ),
+            done_text: format!("Done — {summary_text}"),
+            summary_text,
+            warning_count,
             warnings: resolved.warnings.clone(),
             playlist_usb_export_status,
         })
@@ -1611,8 +1642,11 @@ impl BackendService {
         on_progress(100, 100, "USB: Playlist order saved");
         self.invalidate_usb_parse_cache();
 
+        let warning_count = logging::count_warnings(&warnings);
         Ok(ReorderUsbPlaylistsData {
             reordered: patched.max(edb_updated),
+            status_text: format!("Playlist order saved{}", warning_suffix(warning_count)),
+            warning_count,
             warnings,
         })
     }
@@ -1838,14 +1872,19 @@ impl BackendService {
         on_progress(100, 100, "USB: Playlist removal completed");
         self.invalidate_usb_parse_cache();
 
+        let warning_count = logging::count_warnings(&warnings);
         Ok(RemoveUsbPlaylistData {
+            status_text: format!(
+                "Removed USB playlist: {name} [db {removed_edb}, pdb {removed_pdb}]{}",
+                warning_suffix(warning_count)
+            ),
             playlist_name: name,
             removed_from_edb: removed_edb,
             removed_from_pdb: removed_pdb,
             tracks_removed,
             files_deleted,
             tracks_kept_shared,
-            warning_count: logging::count_warnings(&warnings),
+            warning_count,
             warnings,
         })
     }
@@ -1901,6 +1940,8 @@ impl BackendService {
                     edb_history_rows: 0,
                     edb_history_content_rows: 0,
                 },
+                summary_text: usb_history_summary_text(0, 0),
+                status_text: usb_history_status_text(0, logging::count_warnings(&warnings)),
                 warning_count: logging::count_warnings(&warnings),
                 warnings,
             });
@@ -2165,7 +2206,9 @@ impl BackendService {
         // (viewed page) and the add-to-playlist path -- see the note in
         // `fetch_usb_playlists_with_progress`.
 
-        let imported_tracks = items.iter().map(|history| history.tracks.len()).sum();
+        let imported_tracks: usize = items.iter().map(|history| history.tracks.len()).sum();
+        let summary_text = usb_history_summary_text(history_playlists.len(), imported_tracks);
+        let status_text = usb_history_status_text(items.len(), logging::count_warnings(&warnings));
         let data = FetchUsbHistoriesData {
             items,
             counts: UsbHistoryCounts {
@@ -2194,6 +2237,8 @@ impl BackendService {
                 edb_history_rows,
                 edb_history_content_rows,
             },
+            summary_text,
+            status_text,
             warning_count: logging::count_warnings(&warnings),
             warnings,
         };

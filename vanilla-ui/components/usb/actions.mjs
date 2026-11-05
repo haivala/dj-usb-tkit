@@ -8,7 +8,6 @@ import { setActiveListItem } from "../shell/actions.mjs";
 import { STORAGE_KEY_USB_ROOT, STORAGE_KEY_EXPORT_ENGINE_LIBRARY } from "../../settings_keys.mjs";
 import {
   renderTrackListDurationSummary,
-  formatTrackListSummary,
   getHistoryDateValue,
   buildTracklistText,
   counted,
@@ -766,12 +765,8 @@ export async function removeUsbPlaylist(ctx, playlist) {
   });
   clearUsbDiagnostics(ctx);
   await refreshUsb(ctx);
-  const warningCount = data.warningCount;
-  const warningSuffix = warningCount ? ` | (${counted(warningCount, "warning")})` : "";
-  emitStatus(
-    `Removed USB playlist: ${playlist.name} [db ${data.removedFromEdb}, pdb ${data.removedFromPdb}]${warningSuffix}`,
-    { warningCount }
-  );
+  ctx.logWarnings("usb-import", data.warnings, "remove_usb_playlist");
+  emitStatus(data.statusText, { warningCount: data.warningCount });
 }
 
 export async function reorderUsbPlaylists(ctx) {
@@ -784,12 +779,13 @@ export async function reorderUsbPlaylists(ctx) {
   }
 
   try {
-    await ctx.command("reorder_usb_playlists", {
+    const data = await ctx.command("reorder_usb_playlists", {
       usbRoot: state.usbRoot,
       orderedPlaylistIds: state.usbPlaylists.map((p) => p.id)
     });
     clearUsbDiagnostics(ctx);
-    emitStatus("Playlist order saved");
+    ctx.logWarnings("usb-import", data.warnings, "reorder_usb_playlists");
+    emitStatus(data.statusText, { warningCount: data.warningCount });
   } catch (err) {
     // The drag already moved the row: read the real order back.
     await refreshUsb(ctx);
@@ -931,18 +927,15 @@ async function readUsbPlaylists(ctx, isCurrent) {
   state.usbPlaylists = data.items.map((item) => ctx.normalizeUsbPlaylist(item));
   applyPlaylistUsbExportStatus(ctx, data.playlistUsbExportStatus);
 
-  const usbTrackTotal = data.playlistTrackTotal;
-  el.usbCountsText.textContent = `${counted(state.usbPlaylists.length, "playlist")}, ${counted(usbTrackTotal, "track")}`;
+  el.usbCountsText.textContent = data.summaryText;
   renderUsbPlaylists(ctx);
   keepOpenUsbPlaylist(ctx);
   // The freshly scanned status may flip an open local playlist's reorder lock.
   await ctx.renderCurrentPlaylistTracksFromState();
 
-  const warningCount = data.warningCount;
-  const warningSuffix = warningCount ? ` | (${counted(warningCount, "warning")})` : "";
   ctx.logWarnings("usb-import", data.warnings, "fetch_usb_playlists");
-  setProgress(true, 100, `Done — ${counted(state.usbPlaylists.length, "playlist")}, ${counted(usbTrackTotal, "track")}`);
-  emitStatus(`USB playlists loaded: ${state.usbPlaylists.length}${warningSuffix}`, { warningCount });
+  setProgress(true, 100, data.doneText);
+  emitStatus(data.statusText, { warningCount: data.warningCount });
   ctx.scheduleProgressIdle(1200);
 }
 
@@ -1043,8 +1036,6 @@ export async function applyUsbRepairs(ctx) {
     apply: true,
     selectedFixIds
   });
-  const applied = data.appliedFixes.length;
-  const failed = data.failedFixes.length;
   if (data.usbContentChanged) usbContentChanged(ctx);
   // The Engine library fix turns the setting on backend-side.
   syncEngineLibrarySetting(ctx, data.engineLibraryEnabled);
@@ -1055,7 +1046,7 @@ export async function applyUsbRepairs(ctx) {
     renderDiagnosticsReport(ctx, data.diagnostics);
     ctx.logWarnings("usb-diagnostics", data.diagnostics.warnings, "run_usb_diagnostics");
   }
-  emitStatus(`Repair apply complete: ${applied} applied, ${failed} failed (${data.durationMs}ms)${data.diagnostics ? ". Diagnostics refreshed." : ""}`);
+  emitStatus(data.statusText);
 }
 
 // The backend already saved it; this only brings the open UI in line.
@@ -1089,19 +1080,14 @@ async function readUsbHistories(ctx, isCurrent) {
     ...history,
     tracks: history.tracks.map((track) => ctx.normalizeTrack(track))
   }));
-  // Backend-owned: `fetch_usb_histories` always returns `counts` computed over
-  // the full import -- the frontend renders them, never re-tallies.
-  const { counts } = data;
-  el.historyCountsText.textContent = `${counted(counts.importedPlaylists, "session")}, ${counted(counts.importedTracks, "track")}`;
+  el.historyCountsText.textContent = data.summaryText;
   state.selectedHistoryIndex = null;
   state.historyTracks = [];
   el.exportHistoryTracklistBtn.disabled = true;
   renderHistoryList(ctx);
   ctx.usbHistoryTracksCtl.clear();
-  const warningCount = data.warningCount;
-  const warningSuffix = warningCount ? ` | (${counted(warningCount, "warning")})` : "";
   ctx.logWarnings("usb-import", data.warnings, "fetch_usb_histories");
-  emitStatus(`USB histories loaded: ${state.histories.length}${warningSuffix}`, { warningCount });
+  emitStatus(data.statusText, { warningCount: data.warningCount });
 }
 
 export function sanitizeTracklistFileName(name) {
@@ -1519,13 +1505,8 @@ async function runPlaylistExport(ctx, playlistId) {
     }
   }
   clearUsbDiagnostics(ctx);
-  const warningCount = data.warningCount;
-  const warningSuffix = warningCount ? ` | (${counted(warningCount, "warning")})` : "";
   ctx.logWarnings("export", data.warnings, "export_to_usb");
-  emitStatus(
-    `Export complete: ${playlist.name} - ${counted(data.exportedTracks, "track")}, ${data.skippedTracks} skipped${warningSuffix}${state.exportPruneStale ? " [sync: mirror]" : " [sync: additive]"}`,
-    { warningCount }
-  );
+  emitStatus(data.statusText, { warningCount: data.warningCount });
   await ctx.loadPlaylists();
   state.currentPlaylistId = playlistId;
   ctx.updateModeText();
@@ -1550,13 +1531,13 @@ export function renderUsbPlaylists(ctx) {
 }
 
 // Name, track count and size of the list shown in a USB track table, above
-// it. `item` is the open playlist/history (null hides the heading). The size
-// comes from the first page response (`listSizeBytes`, stored on the item).
-function renderTrackListHeading(heading, item, count) {
+// it. `item` is the open playlist/history (null hides the heading). The count
+// and size come with the first page (`listSummaryText`, stored on the item).
+function renderTrackListHeading(heading, item) {
   heading.classList.toggle("hidden", !item);
   if (!item) return;
   heading.querySelector(".track-list-heading-name").textContent = item.name;
-  heading.querySelector(".track-list-heading-count").textContent = formatTrackListSummary(count, item.listSizeBytes);
+  heading.querySelector(".track-list-heading-count").textContent = item.listSummaryText || "";
 }
 
 function findByScopeId(items, scopeId) {
@@ -1565,16 +1546,12 @@ function findByScopeId(items, scopeId) {
 
 export function renderUsbPlaylistHeading(ctx) {
   const playlist = findByScopeId(ctx.state.usbPlaylists, ctx.usbPlaylistTracksCtl?.scopeId);
-  renderTrackListHeading(
-    ctx.el.usbPlaylistHeading,
-    playlist,
-    playlist?.trackCount ?? 0,
-  );
+  renderTrackListHeading(ctx.el.usbPlaylistHeading, playlist);
 }
 
 export function renderHistoryHeading(ctx) {
   const history = findByScopeId(ctx.state.histories, ctx.usbHistoryTracksCtl?.scopeId);
-  renderTrackListHeading(ctx.el.historyHeading, history, history?.tracks?.length ?? 0);
+  renderTrackListHeading(ctx.el.historyHeading, history);
 }
 
 export function renderHistoryList(ctx) {
@@ -1601,7 +1578,7 @@ function createUsbTracksController(ctx, { bodyId, selectionView, fetchCommand, s
     onResponse: (data) => {
       const item = findByScopeId(getItems(), ctl.scopeId);
       if (!item) return;
-      item.listSizeBytes = data.listSizeBytes;
+      item.listSummaryText = data.listSummaryText;
       onScopeChange();
     },
     getElements: () => ({

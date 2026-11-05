@@ -48,6 +48,10 @@
   open. Removing a USB playlist keeps the open one too, unless that's the one you removed.
 - **Fix:** A failed USB playlist reorder now keeps its error in the status line instead of replacing it
   with "USB playlists loaded".
+- **Fix:** A USB playlist reorder that can't write to the stick now shows its warnings instead of a plain
+  "Playlist order saved".
+- **Fix:** Warnings from removing a USB playlist now reach the Event Log that the status line links to.
+- **Improvement:** The USB list totals, track-list headings and status lines now come from the backend.
 - **Fix:** Reordering USB playlists now saves the order in both databases for every playlist, by name.
   Before, a playlist only in the eDB kept its old place, and always listed after the others.
 - **Fix:** Selecting the same USB again now clears its playlists and history, so a stick back from a

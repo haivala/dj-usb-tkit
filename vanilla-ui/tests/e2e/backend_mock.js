@@ -9,6 +9,8 @@
 // is filled out to the struct's full shape (see `shapeAnswers`).
 (() => {
   const ok = (data) => ({ ok: true, data });
+  const counted = (count, one, many = `${one}s`) => `${count} ${count === 1 ? one : many}`;
+  const warningSuffix = (count) => (count ? ` | (${counted(count, "warning")})` : "");
 
   // `SourceFolder` rows for `LibrarySourcesData`.
   const sourceFolders = (paths) =>
@@ -33,10 +35,15 @@
 
     // `FetchUsbPlaylistsData` (fetch_usb_playlists).
     usbPlaylists(overrides = {}) {
+      const items = overrides.items || [];
+      const tracks = items.reduce((sum, item) => sum + (item.trackCount ?? item.tracks?.length ?? 0), 0);
+      const summaryText = `${counted(items.length, "playlist")}, ${counted(tracks, "track")}`;
       return {
         items: [],
         stats: { indexedTracks: 0, playlistReferencedTracks: 0, playlistEntries: 0 },
-        playlistTrackTotal: 0,
+        summaryText,
+        statusText: `USB playlists loaded: ${items.length}${warningSuffix(overrides.warningCount)}`,
+        doneText: `Done — ${summaryText}`,
         warnings: [],
         warningCount: 0,
         playlistUsbExportStatus: [],
@@ -47,8 +54,13 @@
     // `FetchUsbHistoriesData` (fetch_usb_histories).
     usbHistories(overrides = {}) {
       const { counts, ...rest } = overrides;
+      const items = overrides.items || [];
+      const sessions = counts?.importedPlaylists ?? 0;
+      const tracks = counts?.importedTracks ?? 0;
       return {
         items: [],
+        summaryText: `${counted(sessions, "session")}, ${counted(tracks, "track")}`,
+        statusText: `USB histories loaded: ${items.length}${warningSuffix(overrides.warningCount)}`,
         counts: {
           importedPlaylists: 0,
           importedTracks: 0,
@@ -113,7 +125,10 @@
 
     // `RepairUsbDiagnosticsData` (repair_usb_diagnostics, preview or apply).
     repair(overrides = {}) {
+      const applied = overrides.appliedFixes?.length ?? 0;
+      const failed = overrides.failedFixes?.length ?? 0;
       return {
+        statusText: `Repair apply complete: ${applied} applied, ${failed} failed (0ms)`,
         summary: "",
         overview: [],
         detectedIssues: [],
@@ -186,7 +201,9 @@
 
     // `ExportToUsbData` (export_to_usb).
     exportToUsb(overrides = {}) {
+      const tracks = overrides.exportedTracks ?? 0;
       return {
+        statusText: `Export complete: ${overrides.playlistName ?? ""} - ${counted(tracks, "track")}, ${overrides.skippedTracks ?? 0} skipped${warningSuffix(overrides.warningCount)} [sync: additive]`,
         jobId: "job-export-1",
         playlistId: "",
         playlistName: "",
@@ -232,6 +249,11 @@
     }
   };
 
+  function withListSummary(data) {
+    const count = data.listTrackCount ?? data.total ?? data.items?.length ?? 0;
+    return { listSummaryText: counted(count, "track"), ...data };
+  }
+
   // The builders that fill out a spec's own answer to each command.
   const SHAPES = {
     get_library_sources: (data) => backend.librarySources([], data),
@@ -249,7 +271,16 @@
     set_usb_background_color: backend.usbBackgroundColor,
     get_usb_audio_formats: backend.usbAudioFormats,
     set_usb_audio_formats: backend.usbAudioFormats,
-    export_to_usb: backend.exportToUsb
+    export_to_usb: backend.exportToUsb,
+    fetch_usb_playlist_tracks: withListSummary,
+    fetch_usb_history_tracks: withListSummary,
+    reorder_usb_playlists: (data) => ({ statusText: `Playlist order saved${warningSuffix(data.warningCount)}`, warningCount: 0, ...data }),
+    remove_usb_playlist: (data) => ({
+      statusText: `Removed USB playlist: ${data.playlistName} [db ${data.removedFromEdb}, pdb ${data.removedFromPdb}]${warningSuffix(data.warningCount)}`,
+      warningCount: 0,
+      ...data
+    }),
+    restore_usb_backup: (data) => ({ statusText: "Restored eDB and PDB from backup", ...data })
   };
 
   function shaped(invoke) {

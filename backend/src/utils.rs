@@ -186,6 +186,39 @@ pub fn plural<'a>(count: usize, one: &'a str, many: &'a str) -> &'a str {
     if count == 1 { one } else { many }
 }
 
+/// The status line's warning note (" | (2 warnings)"), empty without warnings.
+pub fn warning_suffix(warning_count: usize) -> String {
+    if warning_count == 0 {
+        String::new()
+    } else {
+        format!(" | ({})", counted(warning_count, "warning", "warnings"))
+    }
+}
+
+/// Binary units, like file managers and `df` show a USB stick's size.
+pub fn format_byte_size(bytes: u64) -> String {
+    const KIB: f64 = 1024.0;
+    let n = bytes as f64;
+    if n >= KIB * KIB * KIB {
+        format!("{:.1} GB", n / (KIB * KIB * KIB))
+    } else if n >= KIB * KIB {
+        format!("{} MB", (n / (KIB * KIB)).round())
+    } else {
+        format!("{} KB", (n / KIB).round())
+    }
+}
+
+/// "30 tracks · 412 MB" above a USB track table. The size is left out when no
+/// track in the list has a known size.
+pub fn track_list_summary(track_count: usize, size_bytes: u64) -> String {
+    let tracks = counted(track_count, "track", "tracks");
+    if size_bytes > 0 {
+        format!("{tracks} · {}", format_byte_size(size_bytes))
+    } else {
+        tracks
+    }
+}
+
 // ---------------------------------------------------------------------------
 // Process helpers
 // ---------------------------------------------------------------------------
@@ -209,6 +242,36 @@ pub fn suppress_console_window(cmd: &mut std::process::Command) {
 // ---------------------------------------------------------------------------
 // Tests
 // ---------------------------------------------------------------------------
+
+#[cfg(test)]
+mod list_text_tests {
+    use super::{format_byte_size, track_list_summary, warning_suffix};
+
+    #[test]
+    fn warning_suffix_is_empty_without_warnings_and_counts_otherwise() {
+        assert_eq!(warning_suffix(0), "");
+        assert_eq!(warning_suffix(1), " | (1 warning)");
+        assert_eq!(warning_suffix(2), " | (2 warnings)");
+    }
+
+    #[test]
+    fn format_byte_size_uses_kb_mb_and_gb_like_the_ui() {
+        assert_eq!(format_byte_size(0), "0 KB");
+        assert_eq!(format_byte_size(1536), "2 KB");
+        assert_eq!(format_byte_size(412 * 1024 * 1024), "412 MB");
+        assert_eq!(format_byte_size(1288490189), "1.2 GB");
+    }
+
+    #[test]
+    fn track_list_summary_leaves_out_an_unknown_size() {
+        assert_eq!(track_list_summary(1, 0), "1 track");
+        assert_eq!(track_list_summary(30, 0), "30 tracks");
+        assert_eq!(
+            track_list_summary(30, 412 * 1024 * 1024),
+            "30 tracks · 412 MB"
+        );
+    }
+}
 
 #[cfg(test)]
 mod tests {

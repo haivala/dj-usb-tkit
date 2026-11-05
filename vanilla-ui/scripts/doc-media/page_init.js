@@ -63,6 +63,13 @@
     listTrackCount: items.length,
     listSizeBytes: items.reduce((n, t) => n + Math.max(0, Number(t.fileSizeBytes) || 0), 0),
   });
+  // What the backend sends above a USB track table.
+  const listSummaryText = (items) => {
+    const { listTrackCount: count, listSizeBytes: bytes } = listTotals(items);
+    const tracks = `${count} ${count === 1 ? "track" : "tracks"}`;
+    if (!bytes) return tracks;
+    return `${tracks} · ${bytes >= 1024 ** 3 ? `${(bytes / 1024 ** 3).toFixed(1)} GB` : `${Math.round(bytes / 1024 ** 2)} MB`}`;
+  };
   // Free space on the made-up 32 GB stick.
   const USB_FREE_BYTES = Math.round(27.4 * 1024 ** 3);
   const exportedAt = "2026-09-26T18:00:00Z";
@@ -89,6 +96,7 @@
     totalDurationMs: sumMs(items),
     durationUnknownCount: 0,
     ...listTotals(items),
+    listSummaryText: listSummaryText(items),
   });
   const historySessions = (usbHistory || []).map(({ id, name, createdAt, titles }) => {
     const items = titles.map((title) => usbTracksByTitle.get(title)).filter(Boolean);
@@ -341,6 +349,8 @@
             if (!usb) return ok({ items: [], warnings: [] });
             return ok({
               ...usb.histories.data,
+              summaryText: `${historySessions.length} sessions, ${historySessions.reduce((n, h) => n + h.items.length, 0)} tracks`,
+              statusText: `USB histories loaded: ${historySessions.length}`,
               items: historySessions.map(({ id, name, createdAt, items }) => ({
                 id, name, createdAt, tracks: items, totalDurationMs: sumMs(items), durationUnknownCount: 0,
               })),

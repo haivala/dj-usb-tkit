@@ -1671,6 +1671,21 @@ impl BackendService {
             },
         );
         let (summary, overview) = repair_overview(&proposed_fixes, &unsupported_items);
+        let duration_ms = start.elapsed().as_millis() as u64;
+        let status_text = if req.apply {
+            format!(
+                "Repair apply complete: {} applied, {} failed ({duration_ms}ms){}",
+                outcomes.applied.len(),
+                outcomes.failed.len(),
+                if diagnostics_after_apply.is_some() {
+                    ". Diagnostics refreshed."
+                } else {
+                    ""
+                },
+            )
+        } else {
+            String::new()
+        };
         Ok(RepairUsbDiagnosticsData {
             summary,
             overview,
@@ -1683,7 +1698,8 @@ impl BackendService {
             estimated_file_writes,
             estimated_file_deletes,
             warnings,
-            duration_ms: start.elapsed().as_millis() as u64,
+            duration_ms,
+            status_text,
             diagnostics: diagnostics_after_apply,
             playlist_usb_export_status,
             usb_content_changed,

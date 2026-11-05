@@ -4765,6 +4765,14 @@ fn remove_usb_playlist_deletes_playlist_from_edb() {
     assert!(removed.ok, "remove failed: {removed:?}");
     let removed_data = removed.data.expect("remove data");
     assert_eq!(removed_data.removed_from_edb, 1);
+    assert_eq!(
+        removed_data.status_text,
+        format!(
+            "Removed USB playlist: My Playlist [db 1, pdb {}]{}",
+            removed_data.removed_from_pdb,
+            backend::utils::warning_suffix(removed_data.warning_count)
+        ),
+    );
 
     let conn = open_export_db(&db_path);
     let count: i64 = conn

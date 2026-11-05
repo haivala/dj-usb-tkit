@@ -1461,6 +1461,9 @@ pub struct RestoreUsbBackupRequest {
 #[serde(rename_all = "camelCase")]
 pub struct RestoreUsbBackupData {
     pub restored: bool,
+    /// The status line after the restore.
+    #[serde(default)]
+    pub status_text: String,
     /// Computed from the restored databases. Empty if that failed (logged),
     /// because the restore itself has already succeeded.
     #[serde(default)]
@@ -1630,11 +1633,14 @@ pub struct RefreshPlaylistExportStatusData {
 pub struct FetchUsbPlaylistsData {
     pub items: Vec<UsbPlaylist>,
     pub stats: UsbImportStats,
-    /// Sum of `track_count` over `items` (post name-dedupe) -- the "M tracks"
-    /// figure in the USB panel header. Computed server-side so the frontend
-    /// never re-sums per-playlist counts. Deliberately the sum, not a distinct
-    /// count, so a track in two playlists still counts twice.
-    pub playlist_track_total: usize,
+    /// The panel's totals ("3 playlists, 30 tracks"). The track figure is the sum
+    /// over `items` (post name-dedupe), not a distinct count, so a track in two
+    /// playlists counts twice.
+    pub summary_text: String,
+    /// The status line after the read.
+    pub status_text: String,
+    /// The progress footer's last line after the read.
+    pub done_text: String,
     pub warnings: Vec<WarningEntry>,
     /// The warn/error entries among `warnings`, for the status line's
     /// "(N warnings)" (`logging::count_warnings`).
@@ -1657,6 +1663,9 @@ pub struct RemoveUsbPlaylistRequest {
 #[serde(rename_all = "camelCase")]
 pub struct RemoveUsbPlaylistData {
     pub playlist_name: String,
+    /// The status line after the removal.
+    #[serde(default)]
+    pub status_text: String,
     pub removed_from_edb: usize,
     pub removed_from_pdb: usize,
     pub tracks_removed: usize,
@@ -1681,7 +1690,14 @@ pub struct ReorderUsbPlaylistsRequest {
 #[serde(rename_all = "camelCase")]
 pub struct ReorderUsbPlaylistsData {
     pub reordered: usize,
+    /// The status line after the reorder.
+    #[serde(default)]
+    pub status_text: String,
     pub warnings: Vec<WarningEntry>,
+    /// The warn/error entries among `warnings`, for the status line's
+    /// "(N warnings)" (`logging::count_warnings`).
+    #[serde(default)]
+    pub warning_count: usize,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -1722,6 +1738,12 @@ pub struct UsbHistoryCounts {
 pub struct FetchUsbHistoriesData {
     pub items: Vec<UsbHistory>,
     pub counts: UsbHistoryCounts,
+    /// The panel's totals ("2 sessions, 9 tracks").
+    #[serde(default)]
+    pub summary_text: String,
+    /// The status line after the read.
+    #[serde(default)]
+    pub status_text: String,
     pub warnings: Vec<WarningEntry>,
     /// The warn/error entries among `warnings`, for the status line's
     /// "(N warnings)" (`logging::count_warnings`).
@@ -1904,6 +1926,8 @@ pub struct FetchUsbTracksData {
     /// `track_list::list_totals`.
     pub list_track_count: usize,
     pub list_size_bytes: u64,
+    /// "30 tracks · 412 MB", from the two values above.
+    pub list_summary_text: String,
     pub warnings: Vec<WarningEntry>,
 }
 
@@ -2024,6 +2048,9 @@ pub struct ExportToUsbData {
     pub skipped_tracks: usize,
     pub exported_artworks: usize,
     pub exported_analysis_files: usize,
+    /// The status line after the export.
+    #[serde(default)]
+    pub status_text: String,
     pub warnings: Vec<WarningEntry>,
     /// The warn/error entries among `warnings`, for the status line's
     /// "(N warnings)" (`logging::count_warnings`).
@@ -2543,6 +2570,9 @@ pub struct RepairUsbDiagnosticsData {
     pub estimated_file_deletes: usize,
     pub warnings: Vec<WarningEntry>,
     pub duration_ms: u64,
+    /// The status line after an apply. Empty on preview.
+    #[serde(default)]
+    pub status_text: String,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub diagnostics: Option<Box<RunUsbDiagnosticsData>>,
     /// On apply: from `diagnostics`, or computed separately if that run failed.

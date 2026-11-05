@@ -1,6 +1,6 @@
 //! Export to USB implementation.
 
-use crate::utils::counted;
+use crate::utils::{counted, warning_suffix};
 use std::collections::{HashMap, HashSet};
 use std::path::{Path, PathBuf};
 
@@ -1772,16 +1772,30 @@ impl BackendService {
 
         self.invalidate_usb_parse_cache();
 
+        let warning_count = logging::count_warnings(&warnings);
+        let skipped_tracks = skipped_tracks + unplayable_tracks.len();
+        let status_text = format!(
+            "Export complete: {} - {}, {skipped_tracks} skipped{} [sync: {}]",
+            playlist.name,
+            counted(exported_tracks, "track", "tracks"),
+            warning_suffix(warning_count),
+            if options.prune_stale {
+                "mirror"
+            } else {
+                "additive"
+            },
+        );
         Ok(ExportToUsbData {
             job_id: String::new(),
             playlist_id: playlist.id,
             playlist_name: playlist.name,
             usb_root: usb_root.to_string_lossy().to_string(),
             exported_tracks,
-            skipped_tracks: skipped_tracks + unplayable_tracks.len(),
+            skipped_tracks,
             exported_artworks,
             exported_analysis_files,
-            warning_count: logging::count_warnings(&warnings),
+            status_text,
+            warning_count,
             warnings,
         })
     }

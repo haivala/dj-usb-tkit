@@ -823,6 +823,14 @@ fn fetch_usb_histories_reads_injected_pdb_history_rows_and_materializes_tracks()
     assert_eq!(data.counts.pdb_t11_playlists, 1);
     assert_eq!(data.counts.pdb_t12_entries, 2);
     assert_eq!(data.items.len(), 1, "expected the single injected history");
+    assert_eq!(data.summary_text, "1 session, 2 tracks");
+    assert_eq!(
+        data.status_text,
+        format!(
+            "USB histories loaded: 1{}",
+            backend::utils::warning_suffix(data.warning_count)
+        ),
+    );
     let history = &data.items[0];
     assert_eq!(
         history.tracks.len(),
@@ -1258,4 +1266,8 @@ fn usb_playlist_rows_carry_the_exported_release_year() {
         .data
         .expect("usb playlist page");
     assert_eq!(page.items[0].year, pdb_year);
+    assert_eq!(
+        page.list_summary_text,
+        backend::utils::track_list_summary(page.list_track_count, page.list_size_bytes),
+    );
 }

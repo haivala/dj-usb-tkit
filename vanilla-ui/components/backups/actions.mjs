@@ -97,7 +97,7 @@ export async function restoreUsbBackup(ctx, timestamp) {
     await renderBackups(ctx);
     return;
   }
-  emitStatus(`Restored ${label} from backup`);
+  emitStatus(data.statusText);
   // The restored files may no longer match the diagnostics report, lists or
   // player menu on screen. The same drive is still selected, so the lists read
   // again when their page opens.

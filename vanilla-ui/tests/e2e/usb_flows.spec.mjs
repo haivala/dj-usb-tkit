@@ -480,7 +480,15 @@ function installTauriMock(page, mode) {
             state.usbPlaylists = orderedIds
               .map((id) => byId.get(String(id)))
               .filter((p) => p !== undefined);
-            return { ok: true, data: { reordered: state.usbPlaylists.length, warnings: [] } };
+            return {
+              ok: true,
+              data: {
+                reordered: state.usbPlaylists.length,
+                statusText: "Playlist order saved | (1 warning)",
+                warnings: [{ level: "error", code: "usb.reorder.pdb-write-back-failed", message: "PDB write-back to USB failed", source: "usb-import" }],
+                warningCount: 1
+              }
+            };
           }
           if (command === "remove_usb_playlist") {
             const playlistId = String(payload?.request?.playlistId || "");
@@ -491,7 +499,10 @@ function installTauriMock(page, mode) {
                 playlistName: payload?.request?.playlistName || "",
                 removedFromEdb: 1,
                 removedFromPdb: 1,
-                warnings: []
+                warnings: mode === "reorder"
+                  ? [{ level: "warn", code: "usb.remove.kept-file", message: "Removal kept a shared file", source: "usb-import" }]
+                  : [],
+                warningCount: mode === "reorder" ? 1 : 0
               }
             };
           }
@@ -729,6 +740,10 @@ test("removing a USB playlist keeps the open one; removing the open one opens no
   await expect(page.locator('[data-usb-playlist="usb-pl-3"]')).toHaveClass(/active/);
   await expect(page.locator("#usbPlaylistTracks .track-grid-row")).toHaveCount(1);
   expect(await page.evaluate(() => window.__trackFetches)).toBe(3);
+
+  // A removal's warnings reach the Event Log its status line links to.
+  await page.locator("#eventLogBtn").click();
+  await expect(page.locator("#eventLogList")).toContainText("Removal kept a shared file");
 });
 
 test("a failed USB list read retries when the page is opened again", async ({ page }) => {
@@ -1198,6 +1213,8 @@ test("USB playlist drag-and-drop reorder persists the new order", async ({ page 
   );
 
   await expect(page.locator("#statusText")).toContainText("Playlist order saved");
+  // A write that didn't reach the stick isn't shown as a clean save.
+  await expect(page.locator("#statusText .status-warning-link")).toHaveText("(1 warning)");
   await expect(rows.nth(0)).toContainText("Bravo");
   await expect(rows.nth(1)).toContainText("Charlie");
   await expect(rows.nth(2)).toContainText("Alpha");
@@ -1526,6 +1543,7 @@ test("restoring a backup: cancel and failure change nothing; success clears the 
           ok: true,
           data: {
             restored: true,
+            statusText: "Restored eDB and PDB from backup",
             playlistUsbExportStatus: [{ playlistId: "pl-1", playlistName: "Local Set", sameNameExistsOnUsb: true }]
           }
         };
@@ -1561,7 +1579,7 @@ test("restoring a backup: cancel and failure change nothing; success clears the 
   await page.evaluate(() => { window.__failRestore = false; });
   await restoreBtn.click();
   await page.locator("#confirmOkBtn").click();
-  await expect(page.locator("#statusText")).toContainText("from backup");
+  await expect(page.locator("#statusText")).toContainText("Restored eDB and PDB from backup");
   await expect(report).toHaveText("");
   await expect(usbRow).toHaveCount(0);
   await expect(mark).toHaveClass(/exported/);

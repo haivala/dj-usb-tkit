@@ -284,14 +284,26 @@ fn user_like_flow_imports_sources_analyzes_and_adds_from_library_usb_and_history
         "fetch usb playlists failed: {usb_playlists:?}"
     );
     let usb_playlists_data = usb_playlists.data.expect("usb playlist data");
-    // Header total is backend-computed as the sum of per-playlist counts.
+    // The header's track figure is the sum of per-playlist counts.
+    let playlist_count = usb_playlists_data.items.len();
+    let track_total = usb_playlists_data
+        .items
+        .iter()
+        .map(|p| p.track_count)
+        .sum::<usize>();
+    let summary = format!(
+        "{}, {}",
+        backend::utils::counted(playlist_count, "playlist", "playlists"),
+        backend::utils::counted(track_total, "track", "tracks"),
+    );
+    assert_eq!(usb_playlists_data.summary_text, summary);
+    assert_eq!(usb_playlists_data.done_text, format!("Done — {summary}"));
     assert_eq!(
-        usb_playlists_data.playlist_track_total,
-        usb_playlists_data
-            .items
-            .iter()
-            .map(|p| p.track_count)
-            .sum::<usize>(),
+        usb_playlists_data.status_text,
+        format!(
+            "USB playlists loaded: {playlist_count}{}",
+            backend::utils::warning_suffix(usb_playlists_data.warning_count)
+        ),
     );
     let usb_items = usb_playlists_data.items;
     let usb_playlist = usb_items

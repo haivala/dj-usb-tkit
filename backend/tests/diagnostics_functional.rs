@@ -1245,6 +1245,20 @@ fn diagnostics_and_repair_pdb_header_compatibility_without_previous_snapshot() {
         "repair should apply: {repair_data:?}"
     );
     assert!(repair_data.usb_content_changed);
+    assert_eq!(
+        repair_data.status_text,
+        format!(
+            "Repair apply complete: {} applied, {} failed ({}ms){}",
+            repair_data.applied_fixes.len(),
+            repair_data.failed_fixes.len(),
+            repair_data.duration_ms,
+            if repair_data.diagnostics.is_some() {
+                ". Diagnostics refreshed."
+            } else {
+                ""
+            },
+        ),
+    );
     assert!(
         !repair_data.playlist_usb_export_status.is_empty(),
         "an applied repair carries the export status of the fixture's playlist"

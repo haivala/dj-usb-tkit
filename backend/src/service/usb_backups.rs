@@ -491,8 +491,20 @@ impl BackendService {
                 Vec::new()
             });
 
+        // What was restored, eDB first, whichever order the files came in.
+        let restored_labels = [("exportLibrary", "eDB"), ("export", "PDB")]
+            .into_iter()
+            .filter(|(stem, _)| files.iter().any(|(file_stem, _)| file_stem == stem))
+            .map(|(_, label)| label)
+            .collect::<Vec<_>>();
+        let restored_label = if restored_labels.is_empty() {
+            "Backup".to_string()
+        } else {
+            restored_labels.join(" and ")
+        };
         Ok(RestoreUsbBackupData {
             restored: true,
+            status_text: format!("Restored {restored_label} from backup"),
             playlist_usb_export_status,
         })
     }
@@ -920,6 +932,7 @@ mod tests {
             })
             .expect("restore");
         assert!(result.restored);
+        assert_eq!(result.status_text, "Restored eDB and PDB from backup");
         assert_eq!(std::fs::read(&live_pdb).unwrap(), b"pdb-live-v1");
         assert_eq!(std::fs::read(&live_edb).unwrap(), b"edb-live-v1");
 
