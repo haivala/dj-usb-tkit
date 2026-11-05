@@ -1,8 +1,7 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 import {
-  normalizeTrack,
-  normalizeUsbPlaylist
+  normalizeTrack
 } from "../components/library/actions.mjs";
 
 // The backend sends tracks fully typed (models.rs Track / UsbTrack);
@@ -37,16 +36,3 @@ test("normalizeTrack fills the display defaults for an untitled row", () => {
   assert.equal(normalized.artworkUrl, "");
 });
 
-test("normalizeUsbPlaylist normalizes each track", () => {
-  const playlist = normalizeUsbPlaylist(CTX, {
-    id: "u1",
-    name: "USB Set",
-    source: "pdb",
-    trackCount: 2,
-    tracks: [{ id: "t1", title: "A", artist: "B" }, { id: "t2", title: "", artist: "D", needsHydration: true }]
-  });
-
-  assert.equal(playlist.trackCount, 2);
-  assert.equal(playlist.tracks[1].title, "Unknown Title");
-  assert.equal(playlist.tracks[1].needsHydration, true);
-});

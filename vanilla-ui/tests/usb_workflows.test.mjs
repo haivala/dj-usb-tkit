@@ -5,7 +5,6 @@ import {
   handleUsbPlayerMenuListClick,
   renderUsbBackgroundColor,
   renderUsbPlayerMenuEditor,
-  sanitizeTracklistFileName,
   syncUsbPlayerMenuEditorControls,
 } from "../components/usb/actions.mjs";
 import { makeTestCtx } from "./test_helpers.mjs";
@@ -82,10 +81,4 @@ test("background colour chips select the shared colour and name both when rekord
   renderUsbBackgroundColor(ctx);
   assert.equal(el.usbBackgroundColorChips.querySelector(".bg-color-chip").disabled, true);
   assert.equal(el.usbBackgroundColorNote.textContent, "no t19 page");
-});
-
-test("sanitizeTracklistFileName makes a history name a safe .txt file name", () => {
-  assert.equal(sanitizeTracklistFileName("HISTORY 003"), "HISTORY 003.txt");
-  assert.equal(sanitizeTracklistFileName('Set: A/B "Live"?'), "Set- A-B -Live-.txt");
-  assert.equal(sanitizeTracklistFileName("   "), "tracklist.txt");
 });

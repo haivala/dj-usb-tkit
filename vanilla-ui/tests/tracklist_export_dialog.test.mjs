@@ -36,16 +36,12 @@ function makeController() {
   return { document, trigger, el, controller: createTracklistExportDialogController(el) };
 }
 
-const TRACKS = [
-  { artist: "Artist A", title: "Title A" },
-  { artist: "Artist B", title: "Title B" },
-  { artist: "Artist C", title: "Title C" }
-];
+const START_TRACKS = ["1. Artist A - Title A", "2. Artist B - Title B", "3. Artist C - Title C"];
 
 test("createTracklistExportDialogController opens with defaults and resolves on close", async () => {
   const { document, trigger, el, controller } = makeController();
 
-  const promise = controller.open({ tracks: TRACKS, defaultTimesEnabled: true, defaultPlacement: "after" });
+  const promise = controller.open({ startTracks: START_TRACKS, defaultTimesEnabled: true, defaultPlacement: "after" });
   assert.equal(controller.isOpen(), true);
   assert.equal(el.tracklistExportOverlay.hidden, false);
   assert.equal(document.activeElement, el.tracklistExportOkBtn);
@@ -63,7 +59,7 @@ test("createTracklistExportDialogController opens with defaults and resolves on 
 
 test("createTracklistExportDialogController resolves null on cancel", async () => {
   const { controller } = makeController();
-  const promise = controller.open({ tracks: TRACKS });
+  const promise = controller.open({ startTracks: START_TRACKS });
   controller.close(null);
   assert.equal(await promise, null);
 });
@@ -79,7 +75,7 @@ for (const dismissal of ["Escape", "backdrop"]) {
       return event;
     };
     for (let i = 0; i < 3; i++) {
-      const pending = controller.open({ tracks: TRACKS });
+      const pending = controller.open({ startTracks: START_TRACKS });
       el.tracklistExportOkBtn.click(); // Controller leaves result collection to its caller.
       assert.equal(controller.isOpen(), true);
       dismiss();
@@ -93,8 +89,8 @@ for (const dismissal of ["Escape", "backdrop"]) {
 
 test("reopening export cancels the previous request and rebuilds its options", async () => {
   const { document, trigger, el, controller } = makeController();
-  const first = controller.open({ tracks: TRACKS });
-  const second = controller.open({ tracks: TRACKS.slice(0, 1) });
+  const first = controller.open({ startTracks: START_TRACKS });
+  const second = controller.open({ startTracks: START_TRACKS.slice(0, 1) });
   assert.equal(await first, null);
   assert.equal(controller.isOpen(), true);
   assert.equal(el.tracklistExportStartTrack.options.length, 1);
@@ -106,7 +102,7 @@ test("reopening export cancels the previous request and rebuilds its options", a
 
 test("export dialog can close after its original trigger is removed", async () => {
   const { trigger, controller } = makeController();
-  const pending = controller.open({ tracks: TRACKS });
+  const pending = controller.open({ startTracks: START_TRACKS });
   trigger.remove();
   controller.close(null);
   assert.equal(await pending, null);

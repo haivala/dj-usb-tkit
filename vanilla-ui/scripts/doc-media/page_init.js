@@ -352,7 +352,7 @@
               summaryText: `${historySessions.length} sessions, ${historySessions.reduce((n, h) => n + h.items.length, 0)} tracks`,
               statusText: `USB histories loaded: ${historySessions.length}`,
               items: historySessions.map(({ id, name, createdAt, items }) => ({
-                id, name, createdAt, canExportTracklist: items.length > 0, tracks: items, totalDurationMs: sumMs(items), durationUnknownCount: 0,
+                id, name, createdAt, canExportTracklist: items.length > 0, trackCount: items.length, totalDurationMs: sumMs(items), durationUnknownCount: 0,
               })),
               counts: {
                 ...usb.histories.data.counts,

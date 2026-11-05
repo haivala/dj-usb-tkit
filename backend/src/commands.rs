@@ -9,24 +9,25 @@ use crate::models::{
     AddTrackCandidatesToPlaylistRequest, AddTrackCandidatesToPlaylistsRequest,
     AddTracksToPlaylistData, AddTracksToPlaylistsData, AnalyzeNewTracksData,
     AnalyzeNewTracksRequest, ApiResponse, BrowseSourceFilesData, BrowseSourceFilesRequest,
-    CreatePlaylistData, CreatePlaylistRequest, DeletePlaylistData, DeletePlaylistRequest,
-    DeleteUsbBackupData, DeleteUsbBackupRequest, DetectExternalMixxxDbData,
-    DetectExternalRekordboxDbData, ExportToUsbData, ExportToUsbRequest, FetchUsbHistoriesData,
-    FetchUsbHistoriesRequest, FetchUsbPlaylistsData, FetchUsbPlaylistsRequest, FetchUsbTracksData,
-    FetchUsbTracksRequest, GetFrontendSettingsData, GetPlaylistExportSpaceData,
-    GetPlaylistExportSpaceRequest, GetPlaylistMembershipData, GetPlaylistMembershipRequest,
-    GetPlaylistTracksData, GetPlaylistTracksRequest, GetSelectionDurationData,
-    GetSelectionDurationRequest, GetTrackDetailRequest, GetTracksMetadataSummaryRequest,
-    GetUsbBackgroundColorRequest, GetUsbDeviceNameData, GetUsbDeviceNameRequest,
-    GetUsbPlayerMenuConfigData, GetUsbPlayerMenuConfigRequest, GetUsbTrackDetailRequest,
-    GetUsbTracksMetadataSummaryRequest, ImportExternalPlaylistsData,
-    ImportExternalPlaylistsRequest, InitializeUsbData, InitializeUsbRequest, InspectUsbTrackData,
-    InspectUsbTrackRequest, LibrarySourcesData, ListExternalPlaylistsData,
-    ListExternalPlaylistsRequest, ListMatchingTrackIdsData, ListMatchingTrackIdsRequest,
-    ListPlaylistsData, ListUsbBackupsData, ListUsbBackupsRequest, ListUsbDevicesData,
-    MaterializeSourceTrackData, MaterializeSourceTrackRequest, PlayResolvedTrackData,
-    PlayResolvedTrackRequest, PlaybackMetronomeData, PlaybackStatusData, PruneUsbDeviceData,
-    PruneUsbDeviceRequest, RelocateSourceRootData, RelocateSourceRootRequest,
+    BuildUsbHistoryTracklistData, BuildUsbHistoryTracklistRequest, CreatePlaylistData,
+    CreatePlaylistRequest, DeletePlaylistData, DeletePlaylistRequest, DeleteUsbBackupData,
+    DeleteUsbBackupRequest, DetectExternalMixxxDbData, DetectExternalRekordboxDbData,
+    ExportToUsbData, ExportToUsbRequest, FetchUsbHistoriesData, FetchUsbHistoriesRequest,
+    FetchUsbPlaylistsData, FetchUsbPlaylistsRequest, FetchUsbTracksData, FetchUsbTracksRequest,
+    GetFrontendSettingsData, GetPlaylistExportSpaceData, GetPlaylistExportSpaceRequest,
+    GetPlaylistMembershipData, GetPlaylistMembershipRequest, GetPlaylistTracksData,
+    GetPlaylistTracksRequest, GetSelectionDurationData, GetSelectionDurationRequest,
+    GetTrackDetailRequest, GetTracksMetadataSummaryRequest, GetUsbBackgroundColorRequest,
+    GetUsbDeviceNameData, GetUsbDeviceNameRequest, GetUsbHistoryTracklistOptionsData,
+    GetUsbHistoryTracklistOptionsRequest, GetUsbPlayerMenuConfigData,
+    GetUsbPlayerMenuConfigRequest, GetUsbTrackDetailRequest, GetUsbTracksMetadataSummaryRequest,
+    ImportExternalPlaylistsData, ImportExternalPlaylistsRequest, InitializeUsbData,
+    InitializeUsbRequest, InspectUsbTrackData, InspectUsbTrackRequest, LibrarySourcesData,
+    ListExternalPlaylistsData, ListExternalPlaylistsRequest, ListMatchingTrackIdsData,
+    ListMatchingTrackIdsRequest, ListPlaylistsData, ListUsbBackupsData, ListUsbBackupsRequest,
+    ListUsbDevicesData, MaterializeSourceTrackData, MaterializeSourceTrackRequest,
+    PlayResolvedTrackData, PlayResolvedTrackRequest, PlaybackMetronomeData, PlaybackStatusData,
+    PruneUsbDeviceData, PruneUsbDeviceRequest, RelocateSourceRootData, RelocateSourceRootRequest,
     RemoveSourceFolderData, RemoveSourceFolderRequest, RemoveTracksFromPlaylistData,
     RemoveTracksFromPlaylistRequest, RemoveUsbPlaylistData, RemoveUsbPlaylistRequest,
     RenamePlaylistData, RenamePlaylistRequest, ReorderPlaylistTracksData,
@@ -591,6 +592,20 @@ impl BackendCommands {
         req: FetchUsbTracksRequest,
     ) -> ApiResponse<FetchUsbTracksData> {
         wrap(self.service.fetch_usb_history_tracks(req))
+    }
+
+    pub fn get_usb_history_tracklist_options(
+        &self,
+        req: GetUsbHistoryTracklistOptionsRequest,
+    ) -> ApiResponse<GetUsbHistoryTracklistOptionsData> {
+        wrap(self.service.get_usb_history_tracklist_options(req))
+    }
+
+    pub fn build_usb_history_tracklist(
+        &self,
+        req: BuildUsbHistoryTracklistRequest,
+    ) -> ApiResponse<BuildUsbHistoryTracklistData> {
+        wrap(self.service.build_usb_history_tracklist(req))
     }
 
     pub fn analyze_new_tracks(

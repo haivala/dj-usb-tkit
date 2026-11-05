@@ -1559,6 +1559,8 @@ pub struct UsbPlaylist {
     pub name: String,
     pub source: String,
     pub track_count: usize,
+    /// Backend only: the UI reads pages with `fetch_usb_playlist_tracks`.
+    #[serde(skip)]
     pub tracks: Vec<UsbTrack>,
     /// Sum of `duration_ms` over tracks where it's known (>0). Computed once
     /// server-side from the full track list so the frontend never needs to
@@ -1715,11 +1717,59 @@ pub struct UsbHistory {
     pub created_at: Option<String>,
     /// False for a session with no tracks.
     pub can_export_tracklist: bool,
+    pub track_count: usize,
+    /// Backend only: the UI reads pages with `fetch_usb_history_tracks`.
+    #[serde(skip)]
     pub tracks: Vec<UsbTrack>,
     /// See `UsbPlaylist::total_duration_ms`.
     pub total_duration_ms: u64,
     /// See `UsbPlaylist::duration_unknown_count`.
     pub duration_unknown_count: usize,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct GetUsbHistoryTracklistOptionsRequest {
+    #[serde(default)]
+    pub usb_root: Option<String>,
+    pub id: String,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct GetUsbHistoryTracklistOptionsData {
+    /// The Export Tracklist dialog's start-track labels, in session order.
+    pub start_tracks: Vec<String>,
+}
+
+/// Where a tracklist line shows its running time.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "lowercase")]
+pub enum TracklistTimeMode {
+    Off,
+    Before,
+    After,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct BuildUsbHistoryTracklistRequest {
+    #[serde(default)]
+    pub usb_root: Option<String>,
+    pub id: String,
+    pub start_index: usize,
+    pub time_mode: TracklistTimeMode,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct BuildUsbHistoryTracklistData {
+    pub suggested_file_name: String,
+    pub contents: String,
+    /// The status line after the file is saved.
+    pub exported_text: String,
+    /// The status line if the save dialog is dismissed.
+    pub cancelled_text: String,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]

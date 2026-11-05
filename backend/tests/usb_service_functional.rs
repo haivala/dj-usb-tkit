@@ -12,12 +12,14 @@ use std::path::{Path, PathBuf};
 use backend::commands::BackendCommands;
 use backend::error::ErrorCode;
 use backend::models::{
-    AddLibrarySelectionToPlaylistRequest, BrowseSourceFilesRequest, CreatePlaylistRequest,
-    ExportToUsbOptions, ExportToUsbRequest, FetchUsbHistoriesRequest, FetchUsbPlaylistsRequest,
-    FetchUsbTracksRequest, GetTracksMetadataSummaryRequest, GetUsbDeviceNameRequest,
+    AddLibrarySelectionToPlaylistRequest, BrowseSourceFilesRequest,
+    BuildUsbHistoryTracklistRequest, CreatePlaylistRequest, ExportToUsbOptions, ExportToUsbRequest,
+    FetchUsbHistoriesRequest, FetchUsbPlaylistsRequest, FetchUsbTracksRequest,
+    GetTracksMetadataSummaryRequest, GetUsbDeviceNameRequest, GetUsbHistoryTracklistOptionsRequest,
     GetUsbTracksMetadataSummaryRequest, InitializeUsbRequest, InspectUsbTrackRequest,
     SaveTrackMetadataEditsRequest, SaveUsbTrackMetadataEditsRequest, ScanLibraryRequest,
-    SetUsbDeviceNameRequest, SharedValue, UsbMetadataEditTrack, ValidateUsbRootRequest,
+    SetUsbDeviceNameRequest, SharedValue, TracklistTimeMode, UsbMetadataEditTrack,
+    ValidateUsbRootRequest,
 };
 use backend::pdb_reader::parse_pdb;
 use tempfile::tempdir;
@@ -833,6 +835,49 @@ fn fetch_usb_histories_reads_injected_pdb_history_rows_and_materializes_tracks()
     );
     let history = &data.items[0];
     assert!(history.can_export_tracklist);
+    assert_eq!(history.track_count, 2);
+    // The UI reads tracks in pages: the list response doesn't carry them.
+    let sent = serde_json::to_value(history).expect("serialize history");
+    assert_eq!(sent["trackCount"], 2);
+    assert!(sent.get("tracks").is_none());
+
+    let options = backend
+        .get_usb_history_tracklist_options(GetUsbHistoryTracklistOptionsRequest {
+            usb_root: Some(usb.to_string_lossy().to_string()),
+            id: history.id.clone(),
+        })
+        .data
+        .expect("tracklist options");
+    assert_eq!(options.start_tracks.len(), 2);
+    assert!(options.start_tracks[1].starts_with("2. "));
+    // A start past the end clamps to the last track.
+    let tracklist = backend
+        .build_usb_history_tracklist(BuildUsbHistoryTracklistRequest {
+            usb_root: Some(usb.to_string_lossy().to_string()),
+            id: history.id.clone(),
+            start_index: 99,
+            time_mode: TracklistTimeMode::Before,
+        })
+        .data
+        .expect("tracklist");
+    assert_eq!(
+        tracklist.suggested_file_name,
+        format!("{}.txt", history.name)
+    );
+    assert_eq!(tracklist.contents.lines().count(), 1);
+    assert!(tracklist.contents.starts_with("0:00 "));
+    assert_eq!(
+        tracklist.exported_text,
+        format!("Tracklist exported: {}", history.name)
+    );
+    assert_eq!(tracklist.cancelled_text, "Tracklist export cancelled");
+    let unknown = backend.build_usb_history_tracklist(BuildUsbHistoryTracklistRequest {
+        usb_root: Some(usb.to_string_lossy().to_string()),
+        id: "usb-h-missing".to_string(),
+        start_index: 0,
+        time_mode: TracklistTimeMode::Off,
+    });
+    assert!(!unknown.ok);
     assert_eq!(
         history.tracks.len(),
         2,

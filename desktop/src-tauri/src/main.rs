@@ -956,6 +956,8 @@ fn main() {
             backend::tauri_commands::inspect_usb_track,
             backend::tauri_commands::fetch_usb_playlist_tracks,
             backend::tauri_commands::fetch_usb_history_tracks,
+            backend::tauri_commands::get_usb_history_tracklist_options,
+            backend::tauri_commands::build_usb_history_tracklist,
             backend::tauri_commands::analyze_new_tracks,
             backend::tauri_commands::set_analysis_paused,
             backend::tauri_commands::cancel_analysis,

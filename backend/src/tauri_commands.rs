@@ -18,26 +18,28 @@ use crate::models::{
     AddTrackCandidatesToPlaylistRequest, AddTrackCandidatesToPlaylistsRequest,
     AddTracksToPlaylistData, AddTracksToPlaylistsData, AnalyzeNewTracksData,
     AnalyzeNewTracksRequest, ApiResponse, BrowseSourceFilesData, BrowseSourceFilesRequest,
-    CreatePlaylistData, CreatePlaylistRequest, DeletePlaylistData, DeletePlaylistRequest,
-    DeleteUsbBackupData, DeleteUsbBackupRequest, DetectExternalMixxxDbData,
-    DetectExternalRekordboxDbData, ExportToUsbData, ExportToUsbRequest, FetchUsbHistoriesData,
-    FetchUsbHistoriesRequest, FetchUsbPlaylistsData, FetchUsbPlaylistsRequest, FetchUsbTracksData,
-    FetchUsbTracksRequest, GetFrontendSettingsData, GetPlaylistExportSpaceData,
-    GetPlaylistExportSpaceRequest, GetPlaylistMembershipData, GetPlaylistMembershipRequest,
-    GetPlaylistTracksData, GetPlaylistTracksRequest, GetSelectionDurationData,
-    GetSelectionDurationRequest, GetTrackDetailRequest, GetTracksMetadataSummaryRequest,
-    GetUsbBackgroundColorRequest, GetUsbDeviceNameData, GetUsbDeviceNameRequest,
-    GetUsbPlayerMenuConfigData, GetUsbPlayerMenuConfigRequest, GetUsbTrackDetailRequest,
-    GetUsbTracksMetadataSummaryRequest, ImportExternalPlaylistsData,
-    ImportExternalPlaylistsRequest, InitializeUsbData, InitializeUsbRequest, InspectUsbTrackData,
-    InspectUsbTrackRequest, JobEventPayload, LibrarySourcesData, ListExternalPlaylistsData,
-    ListExternalPlaylistsRequest, ListMatchingTrackIdsData, ListMatchingTrackIdsRequest,
-    ListPlaylistsData, ListUsbBackupsData, ListUsbBackupsRequest, ListUsbDevicesData,
-    PlayResolvedTrackData, PlayResolvedTrackRequest, PlaybackEventPayload, PlaybackMetronomeData,
-    PlaybackStatusData, PruneUsbDeviceData, PruneUsbDeviceRequest, RelocateSourceRootData,
-    RelocateSourceRootRequest, RemoveSourceFolderData, RemoveSourceFolderRequest,
-    RemoveTracksFromPlaylistData, RemoveTracksFromPlaylistRequest, RemoveUsbPlaylistData,
-    RemoveUsbPlaylistRequest, RenamePlaylistData, RenamePlaylistRequest, ReorderPlaylistTracksData,
+    BuildUsbHistoryTracklistData, BuildUsbHistoryTracklistRequest, CreatePlaylistData,
+    CreatePlaylistRequest, DeletePlaylistData, DeletePlaylistRequest, DeleteUsbBackupData,
+    DeleteUsbBackupRequest, DetectExternalMixxxDbData, DetectExternalRekordboxDbData,
+    ExportToUsbData, ExportToUsbRequest, FetchUsbHistoriesData, FetchUsbHistoriesRequest,
+    FetchUsbPlaylistsData, FetchUsbPlaylistsRequest, FetchUsbTracksData, FetchUsbTracksRequest,
+    GetFrontendSettingsData, GetPlaylistExportSpaceData, GetPlaylistExportSpaceRequest,
+    GetPlaylistMembershipData, GetPlaylistMembershipRequest, GetPlaylistTracksData,
+    GetPlaylistTracksRequest, GetSelectionDurationData, GetSelectionDurationRequest,
+    GetTrackDetailRequest, GetTracksMetadataSummaryRequest, GetUsbBackgroundColorRequest,
+    GetUsbDeviceNameData, GetUsbDeviceNameRequest, GetUsbHistoryTracklistOptionsData,
+    GetUsbHistoryTracklistOptionsRequest, GetUsbPlayerMenuConfigData,
+    GetUsbPlayerMenuConfigRequest, GetUsbTrackDetailRequest, GetUsbTracksMetadataSummaryRequest,
+    ImportExternalPlaylistsData, ImportExternalPlaylistsRequest, InitializeUsbData,
+    InitializeUsbRequest, InspectUsbTrackData, InspectUsbTrackRequest, JobEventPayload,
+    LibrarySourcesData, ListExternalPlaylistsData, ListExternalPlaylistsRequest,
+    ListMatchingTrackIdsData, ListMatchingTrackIdsRequest, ListPlaylistsData, ListUsbBackupsData,
+    ListUsbBackupsRequest, ListUsbDevicesData, PlayResolvedTrackData, PlayResolvedTrackRequest,
+    PlaybackEventPayload, PlaybackMetronomeData, PlaybackStatusData, PruneUsbDeviceData,
+    PruneUsbDeviceRequest, RelocateSourceRootData, RelocateSourceRootRequest,
+    RemoveSourceFolderData, RemoveSourceFolderRequest, RemoveTracksFromPlaylistData,
+    RemoveTracksFromPlaylistRequest, RemoveUsbPlaylistData, RemoveUsbPlaylistRequest,
+    RenamePlaylistData, RenamePlaylistRequest, ReorderPlaylistTracksData,
     ReorderPlaylistTracksRequest, ReorderPlaylistsData, ReorderPlaylistsRequest,
     ReorderUsbPlaylistsData, ReorderUsbPlaylistsRequest, RepairUsbDiagnosticsData,
     RepairUsbDiagnosticsRequest, ResolvePlaybackSourceData, ResolvePlaybackSourceRequest,
@@ -1741,6 +1743,34 @@ pub async fn fetch_usb_history_tracks(
         commands.fetch_usb_history_tracks(request)
     })
     .await)
+}
+
+#[tauri::command]
+pub async fn get_usb_history_tracklist_options(
+    state: State<'_, BackendCommands>,
+    request: GetUsbHistoryTracklistOptionsRequest,
+) -> Result<ApiResponse<GetUsbHistoryTracklistOptionsData>, String> {
+    let commands = state.inner().clone();
+    Ok(
+        run_blocking_command("get_usb_history_tracklist_options", move || {
+            commands.get_usb_history_tracklist_options(request)
+        })
+        .await,
+    )
+}
+
+#[tauri::command]
+pub async fn build_usb_history_tracklist(
+    state: State<'_, BackendCommands>,
+    request: BuildUsbHistoryTracklistRequest,
+) -> Result<ApiResponse<BuildUsbHistoryTracklistData>, String> {
+    let commands = state.inner().clone();
+    Ok(
+        run_blocking_command("build_usb_history_tracklist", move || {
+            commands.build_usb_history_tracklist(request)
+        })
+        .await,
+    )
 }
 
 #[tauri::command]

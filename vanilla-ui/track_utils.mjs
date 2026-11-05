@@ -71,21 +71,6 @@ export function formatTrackListSummary(trackCount, sizeBytes) {
   return parts.join(" · ");
 }
 
-export function buildTracklistText(tracks, timeMode) {
-  const items = Array.isArray(tracks) ? tracks : [];
-  let cumulativeMs = 0;
-  return items
-    .map((track) => {
-      const line = `${track?.artist || ""} - ${track?.title || ""}`;
-      if (timeMode !== "before" && timeMode !== "after") return line;
-      const stamp = formatDurationMs(cumulativeMs);
-      const durationMs = Number(track?.durationMs);
-      cumulativeMs += Number.isFinite(durationMs) && durationMs > 0 ? durationMs : 0;
-      return timeMode === "before" ? `${stamp} ${line}` : `${line} - ${stamp}`;
-    })
-    .join("\n");
-}
-
 // The backend resolves a history session's date itself (from the export log,
 // then the PDB's track date_created -- see `apply_history_dates_*` in
 // service/usb.rs) and hands it back as the one `createdAt` field.

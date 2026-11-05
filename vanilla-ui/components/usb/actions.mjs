@@ -9,7 +9,6 @@ import { STORAGE_KEY_USB_ROOT, STORAGE_KEY_EXPORT_ENGINE_LIBRARY } from "../../s
 import {
   renderTrackListDurationSummary,
   getHistoryDateValue,
-  buildTracklistText,
   counted,
 } from "../../track_utils.mjs";
 
@@ -915,7 +914,7 @@ async function readUsbPlaylists(ctx, isCurrent) {
   }
 
   el.usbPlaylists.dataset.loaded = "";
-  state.usbPlaylists = data.items.map((item) => ctx.normalizeUsbPlaylist(item));
+  state.usbPlaylists = data.items;
   applyPlaylistUsbExportStatus(ctx, data.playlistUsbExportStatus);
 
   el.usbCountsText.textContent = data.summaryText;
@@ -1067,23 +1066,12 @@ async function readUsbHistories(ctx, isCurrent) {
   if (!isCurrent()) return;
 
   el.historyList.dataset.loaded = "";
-  state.histories = data.items.map((history) => ({
-    ...history,
-    tracks: history.tracks.map((track) => ctx.normalizeTrack(track))
-  }));
+  state.histories = data.items;
   el.historyCountsText.textContent = data.summaryText;
   renderHistoryList(ctx);
   ctx.usbHistoryTracksCtl.clear();
   ctx.logWarnings("usb-import", data.warnings, "fetch_usb_histories");
   emitStatus(data.statusText, { warningCount: data.warningCount });
-}
-
-export function sanitizeTracklistFileName(name) {
-  const cleaned = String(name || "")
-    .replace(/[\\/:*?"<>|]+/g, "-")
-    .replace(/\s+/g, " ")
-    .trim();
-  return `${cleaned || "tracklist"}.txt`;
 }
 
 export async function exportHistoryTracklist(ctx) {
@@ -1096,20 +1084,26 @@ export async function exportHistoryTracklist(ctx) {
     return;
   }
 
+  const usbRoot = state.usbRoot;
+  const { startTracks } = await ctx.command("get_usb_history_tracklist_options", { usbRoot, id: history.id });
   const choice = await ctx.tracklistExportDialog.open({
-    tracks: history.tracks,
+    startTracks,
     defaultTimesEnabled: true,
     defaultPlacement: "before"
   });
   if (!choice) return;
 
-  const startIndex = Math.min(Math.max(Number(choice.startIndex) || 0, 0), history.tracks.length - 1);
-  const text = buildTracklistText(history.tracks.slice(startIndex), choice.timeMode);
-  const saved = await ctx.invoke("save_text_file", {
-    suggestedFileName: sanitizeTracklistFileName(history.name),
-    contents: text
+  const tracklist = await ctx.command("build_usb_history_tracklist", {
+    usbRoot,
+    id: history.id,
+    startIndex: choice.startIndex,
+    timeMode: choice.timeMode
   });
-  emitStatus(saved ? `Tracklist exported: ${history.name}` : "Tracklist export cancelled");
+  const saved = await ctx.invoke("save_text_file", {
+    suggestedFileName: tracklist.suggestedFileName,
+    contents: tracklist.contents
+  });
+  emitStatus(saved ? tracklist.exportedText : tracklist.cancelledText);
 }
 
 // The selected kinds are a menu item's `kind` (a number) or null.

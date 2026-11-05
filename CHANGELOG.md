@@ -53,6 +53,8 @@
 - **Fix:** Warnings from removing a USB playlist now reach the Event Log that the status line links to.
 - **Improvement:** Export Tracklist moved next to the open session's name on USB History, and only shows
   when a session is open.
+- **Improvement:** The USB list responses no longer carry every track, and Export Tracklist is built in
+  the backend. The saved file doesn't change.
 - **Chore:** USB History keeps one record of the open session, instead of three.
 - **Improvement:** The USB list totals, track-list headings and status lines now come from the backend.
 - **Fix:** Reordering USB playlists now saves the order in both databases for every playlist, by name.

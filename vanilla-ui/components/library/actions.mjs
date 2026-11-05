@@ -41,10 +41,6 @@ export function normalizeTrack(ctx, track) {
   };
 }
 
-export function normalizeUsbPlaylist(ctx, playlist) {
-  return { ...playlist, tracks: playlist.tracks.map((track) => normalizeTrack(ctx, track)) };
-}
-
 // The library's sources are the backend's (`get_library_sources`): the
 // folders with their switch and missing / analyzed state, and the imported
 // libraries' switches. Every change goes through a command that answers with

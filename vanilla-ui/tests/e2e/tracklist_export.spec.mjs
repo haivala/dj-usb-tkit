@@ -3,6 +3,8 @@ import { test, expect } from "./coverage-fixture.mjs";
 function installTauriMock(page) {
   return page.addInitScript(() => {
     window.localStorage.setItem("djusbtkit.helpSeen", "1");
+    window.__tracklistOptionRequests = [];
+    window.__tracklistBuilds = [];
     const historyTracks = [
       { id: "1", title: "Opener", artist: "DJ One", durationMs: 180000 },
       { id: "2", title: "Peak Time", artist: "DJ Two", durationMs: 240000 },
@@ -47,6 +49,25 @@ function installTauriMock(page) {
                 playlistDetails: [],
                 warnings: [],
                 durationMs: 5
+              }
+            };
+          }
+          if (command === "get_usb_history_tracklist_options") {
+            window.__tracklistOptionRequests.push(payload.request);
+            return {
+              ok: true,
+              data: { startTracks: ["1. DJ One - Opener", "2. DJ Two - Peak Time", "3. DJ Three - Closer", "4. DJ Four - cut by the backend…"] }
+            };
+          }
+          if (command === "build_usb_history_tracklist") {
+            window.__tracklistBuilds.push(payload.request);
+            return {
+              ok: true,
+              data: {
+                suggestedFileName: "from the backend.txt",
+                contents: "the backend's tracklist",
+                exportedText: "Exported, says the backend",
+                cancelledText: "Cancelled, says the backend"
               }
             };
           }
@@ -120,9 +141,8 @@ test("Export Tracklist dialog's start-track select is populated from the selecte
   await expect(options.nth(0)).toHaveText("1. DJ One - Opener");
   await expect(options.nth(1)).toHaveText("2. DJ Two - Peak Time");
   await expect(options.nth(2)).toHaveText("3. DJ Three - Closer");
-  const longLabel = await options.nth(3).textContent();
-  expect(longLabel).toHaveLength(64);
-  expect(longLabel.endsWith("…")).toBe(true);
+  await expect(options.nth(3)).toHaveText("4. DJ Four - cut by the backend…");
+  expect(await page.evaluate(() => window.__tracklistOptionRequests)).toEqual([{ usbRoot: "/Volumes/USB-TEST", id: "hist-1" }]);
 
   // Times-on by default, so the placement row starts visible; toggling times
   // off/on should hide/show it.
@@ -178,17 +198,22 @@ test("Export Tracklist saves the session from the chosen start track, and report
   await page.locator("#exportHistoryTracklistBtn").click();
   await page.locator("#tracklistExportStartTrack").selectOption({ index: 1 });
   await page.locator("#tracklistExportOkBtn").click();
-  await expect(status).toContainText("Tracklist exported: HISTORY 001");
+  await expect(status).toContainText("Exported, says the backend");
   const [save] = await page.evaluate(() => window.__saves);
-  expect(save.suggestedFileName).toBe("HISTORY 001.txt");
-  const lines = save.contents.split("\n");
-  expect(lines).toHaveLength(3);
-  expect(lines.slice(0, 2)).toEqual(["0:00 DJ Two - Peak Time", "4:00 DJ Three - Closer"]);
+  expect(save.suggestedFileName).toBe("from the backend.txt");
+  expect(save.contents).toBe("the backend's tracklist");
+  expect(await page.evaluate(() => window.__tracklistBuilds)).toEqual([
+    { usbRoot: "/Volumes/USB-TEST", id: "hist-1", startIndex: 1, timeMode: "before" }
+  ]);
 
   await page.evaluate(() => { window.__saveAccepted = false; });
   await page.locator("#exportHistoryTracklistBtn").click();
+  await page.locator("#tracklistExportTimesToggle").uncheck();
   await page.locator("#tracklistExportOkBtn").click();
-  await expect(status).toContainText("Tracklist export cancelled");
+  await expect(status).toContainText("Cancelled, says the backend");
+  expect((await page.evaluate(() => window.__tracklistBuilds))[1]).toEqual(
+    { usbRoot: "/Volumes/USB-TEST", id: "hist-1", startIndex: 0, timeMode: "off" }
+  );
 });
 
 test("a session the backend says can't export disables Export Tracklist, and a long name leaves the button in view", async ({ page }) => {

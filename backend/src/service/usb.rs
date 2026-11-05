@@ -1130,7 +1130,7 @@ impl BackendService {
     }
 
     /// The resolved USB histories for a stick, from cache or a fresh parse.
-    fn usb_histories_resolved(
+    pub(super) fn usb_histories_resolved(
         &self,
         usb_root: &Path,
     ) -> BackendResult<Arc<crate::models::FetchUsbHistoriesData>> {
@@ -2153,6 +2153,7 @@ impl BackendService {
                     },
                     created_at,
                     can_export_tracklist: !tracks.is_empty(),
+                    track_count: tracks.len(),
                     tracks,
                     total_duration_ms,
                     duration_unknown_count,
@@ -3389,6 +3390,7 @@ mod tests {
                 name: "HISTORY 001".to_string(),
                 created_at: Some("2021-09".to_string()),
                 can_export_tracklist: true,
+                track_count: 2,
                 tracks: vec![
                     make_track("10", "/USB/Contents/A/1.mp3"),
                     make_track("20", "/USB/Contents/A/2.mp3"),
@@ -3401,6 +3403,7 @@ mod tests {
                 name: "HISTORY 002".to_string(),
                 created_at: Some("2021-09".to_string()),
                 can_export_tracklist: true,
+                track_count: 1,
                 tracks: vec![make_track("30", "/USB/Contents/A/3.mp3")],
                 total_duration_ms: 0,
                 duration_unknown_count: 0,
@@ -3410,6 +3413,7 @@ mod tests {
                 name: "HISTORY 003".to_string(),
                 created_at: Some("2021-09".to_string()),
                 can_export_tracklist: true,
+                track_count: 1,
                 tracks: vec![make_track("40", "/USB/Contents/A/4.mp3")],
                 total_duration_ms: 0,
                 duration_unknown_count: 0,
@@ -3436,6 +3440,7 @@ mod tests {
             name: "HISTORY 001".to_string(),
             created_at: Some("2026-04-03".to_string()),
             can_export_tracklist: true,
+            track_count: 1,
             tracks: vec![make_track("10", "/USB/Contents/A/1.mp3")],
             total_duration_ms: 0,
             duration_unknown_count: 0,
@@ -3455,6 +3460,7 @@ mod tests {
                 name: "HISTORY 001".to_string(),
                 created_at: Some("2026-04-03".to_string()),
                 can_export_tracklist: true,
+                track_count: 1,
                 tracks: vec![make_track("10", "/USB/Contents/A/1.mp3")],
                 total_duration_ms: 0,
                 duration_unknown_count: 0,
@@ -3464,6 +3470,7 @@ mod tests {
                 name: "HISTORY 002".to_string(),
                 created_at: Some("2021-09".to_string()),
                 can_export_tracklist: true,
+                track_count: 1,
                 tracks: vec![make_track("20", "/USB/Contents/A/2.mp3")],
                 total_duration_ms: 0,
                 duration_unknown_count: 0,

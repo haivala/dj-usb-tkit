@@ -241,12 +241,11 @@ export function createTracklistExportDialogController(el) {
     el.tracklistExportPlacementRow.classList.toggle("hidden", !enabled);
   }
 
-  function populateStartTrackOptions(tracks) {
+  function populateStartTrackOptions(startTracks) {
     const select = el.tracklistExportStartTrack;
     select.textContent = "";
-    (tracks || []).forEach((track, index) => {
-      const label = `${index + 1}. ${track?.artist || ""} - ${track?.title || ""}`;
-      select.add(new select.ownerDocument.defaultView.Option(label.length > 64 ? `${label.slice(0, 63)}…` : label, String(index)));
+    startTracks.forEach((label, index) => {
+      select.add(new select.ownerDocument.defaultView.Option(label, String(index)));
     });
     select.value = "0";
   }
@@ -254,9 +253,9 @@ export function createTracklistExportDialogController(el) {
   return {
     isOpen: dialog.isOpen,
     close: (result) => dialog.close(result || null),
-    open({ tracks = [], defaultTimesEnabled = true, defaultPlacement = "before" } = {}) {
+    open({ startTracks = [], defaultTimesEnabled = true, defaultPlacement = "before" } = {}) {
       dialog.close();
-      populateStartTrackOptions(tracks);
+      populateStartTrackOptions(startTracks);
       el.tracklistExportTimesToggle.checked = defaultTimesEnabled;
       el.tracklistExportPlacement.value = defaultPlacement;
       syncPlacementVisibility();
