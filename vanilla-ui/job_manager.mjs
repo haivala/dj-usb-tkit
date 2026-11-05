@@ -184,6 +184,10 @@ function analysisOwnsProgressBar(state) {
   return state.activeJobType === "analysis";
 }
 
+function isAnalysisJobRunning(state) {
+  return [...state.runningJobs.values()].some((job) => job.jobType === "analysis");
+}
+
 function setAnalysisControlsVisible(state, el, visible) {
   el.progressPauseBtn.hidden = !visible;
   el.progressCancelAnalysisBtn.hidden = !visible;
@@ -262,6 +266,7 @@ export function handleJobEvent(ctx, payload) {
     // rows show "analyzing" at once as there are active workers) rather than
     // marking the whole submitted batch as analyzing for the entire call.
     setTrackAnalyzingState(String(payload.trackId), payload.trackReady !== true);
+    setAnalysisAtCapacity(ctx, payload.analysisAtCapacity === true);
     if (payload.trackReady === true && typeof payload.libraryTotalDurationMs === "number") {
       applyLibraryDurationSummary(payload.libraryTotalDurationMs, payload.libraryDurationUnknownCount);
     }
@@ -282,11 +287,14 @@ export function handleJobEvent(ctx, payload) {
   }
 
   if (eventName === "job.started" && jobId) {
+    const firstAnalysis = jobType === "analysis" && !isAnalysisJobRunning(state);
     state.runningJobs.set(jobId, { jobType, startedAtMs: Date.now(), percent, message });
     if (USB_ROOT_LOCKING_JOB_TYPES.has(jobType)) {
       setUsbRootControlsLocked(true);
     }
-    if (jobType === "analysis") {
+    // A run starting beside another shares its pause and cancel (the backend's
+    // flags too), so it leaves them as they are.
+    if (firstAnalysis) {
       setAnalysisControlsVisible(state, el, true);
     }
     if (jobType === "transcode") {
@@ -373,6 +381,12 @@ export function handleJobEvent(ctx, payload) {
   }
 }
 
+function setAnalysisAtCapacity(ctx, atCapacity) {
+  if (ctx.state.analysisAtCapacity === atCapacity) return;
+  ctx.state.analysisAtCapacity = atCapacity;
+  ctx.renderAnalyzeButtons();
+}
+
 // Hand the footer bar to a running job: its own text, percent and elapsed
 // time, counted from when it started rather than when it got the bar.
 function showJobOnProgressBar(ctx, jobId) {
@@ -399,8 +413,10 @@ function finishJob(ctx, jobId, jobType, ownsProgressBar, idleDelayMs) {
     const waiters = state.usbJobIdleWaiters.splice(0);
     waiters.forEach((resolve) => resolve());
   }
-  if (jobType === "analysis") {
+  // The last run ended, whatever its last track event said.
+  if (jobType === "analysis" && !isAnalysisJobRunning(state)) {
     setAnalysisControlsVisible(state, el, false);
+    setAnalysisAtCapacity(ctx, false);
   }
   if (jobType === "transcode") {
     el.progressCancelTranscodeBtn.hidden = true;

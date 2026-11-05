@@ -229,6 +229,8 @@ test("playlist analyze-missing skips already-analyzed tracks and targets the res
                 percent: 0,
                 message: "Analyzing 1/1: Local Missing",
                 trackReady: false,
+                // Every worker busy: all the analyze buttons are disabled.
+                analysisAtCapacity: true,
                 timestamp: nowIso()
               });
             }
@@ -353,6 +355,11 @@ test("playlist analyze-missing skips already-analyzed tracks and targets the res
     /is-analyzing/
   );
   await expect(page.locator('#playlistTracksBody .track-grid-row[data-track-id="playlist-entry-1"]')).toHaveCount(0);
+  // At capacity the track buttons are disabled, on every row, and Analyze Missing too.
+  const analyzeButtons = page.locator('#playlistTracksBody [data-action="analyze-track"]');
+  await expect(analyzeButtons.first()).toBeDisabled();
+  await expect(analyzeButtons.last()).toBeDisabled();
+  await expect(page.locator("#analyzePlaylistMissingBtn")).toBeDisabled();
   // ...and clears it once the analysis completes (checked below).
   await page.evaluate(() => window.__playlistAnalysisTest.releaseAnalysis());
 
@@ -368,6 +375,8 @@ test("playlist analyze-missing skips already-analyzed tracks and targets the res
   expect(analyzedRequests.map((item) => item.trackIds)).toEqual([["local-missing-1"]]);
   await expect(page.locator("#statusText")).toContainText("Analyze Missing Tracks done: analyzed 1, failed 0");
   await expect(page.locator('#playlistTracksBody .track-grid-row[data-track-id="local-missing-1"]')).not.toHaveClass(/is-analyzing/);
+  await expect(analyzeButtons.first()).toBeEnabled();
+  await expect(analyzeButtons.last()).toBeEnabled();
 
   await page.locator('.nav-item[data-view="library"]').click();
   await expect(page.locator('#libraryTableBody .track-grid-row[data-track-id="local-missing-1"] [data-action="analyze-track"]')).toHaveText("Reanalyze");

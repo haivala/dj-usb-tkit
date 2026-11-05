@@ -81,7 +81,7 @@ use serde::{Deserialize, Serialize};
 use std::hash::{Hash, Hasher};
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
-use std::sync::atomic::AtomicBool;
+use std::sync::atomic::{AtomicBool, AtomicUsize};
 use uuid::Uuid;
 
 use base64::Engine;
@@ -257,6 +257,10 @@ pub struct BackendService {
     pub db: Db,
     pub analysis_paused: Arc<AtomicBool>,
     pub analysis_cancelled: Arc<AtomicBool>,
+    /// Tracks being analyzed right now, across overlapping runs.
+    pub analysis_tracks_in_flight: Arc<AtomicUsize>,
+    /// Analysis runs under way (see `AnalysisRun`).
+    pub(crate) analysis_runs_active: Arc<AtomicUsize>,
     /// Set by `cancel_transcode`; reset when a transcode job starts.
     pub(crate) transcode_cancelled: Arc<AtomicBool>,
     /// One-entry cache of the last USB stick's resolved playlists / histories,
@@ -292,6 +296,8 @@ impl BackendService {
             db: Db::new(data_dir)?,
             analysis_paused: Arc::new(AtomicBool::new(false)),
             analysis_cancelled: Arc::new(AtomicBool::new(false)),
+            analysis_tracks_in_flight: Arc::new(AtomicUsize::new(0)),
+            analysis_runs_active: Arc::new(AtomicUsize::new(0)),
             transcode_cancelled: Arc::new(AtomicBool::new(false)),
             usb_playlists_cache: Arc::new(std::sync::Mutex::new(None)),
             usb_histories_cache: Arc::new(std::sync::Mutex::new(None)),

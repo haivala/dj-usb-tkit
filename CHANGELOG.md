@@ -39,6 +39,11 @@
 
 ## Unreleased
 
+- **Fix:** While every analysis worker is busy, the Analyze and Reanalyze buttons on track rows and in
+  the selection bar, Analyze Missing Tracks and Scan Library are disabled. Below that you can still start
+  more analyses, and a track's own button is disabled while that track is being analyzed, in playlists too.
+- **Fix:** Starting an analysis while another runs no longer undoes a pause or cancel, and the pause and
+  cancel buttons stay until the last analysis has ended.
 - **Improvement:** USB Playlists and USB History load when you open the page, and only once until the
   USB changes. If a read fails, it tries again the next time you open the page. The Import Playlists
   and Import History buttons are gone.

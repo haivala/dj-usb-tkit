@@ -3392,6 +3392,193 @@ fn analyze_new_tracks_pauses_and_resumes_between_tracks() {
 }
 
 #[test]
+fn analyze_progress_reports_capacity_while_tracks_are_in_flight() {
+    // With a budget of one worker, each track fills it from its start until
+    // it is done, and the count is back to zero when the run ends.
+    let _guard = test_env_lock().lock().expect("env lock");
+    let prev_enabled = std::env::var("DJTKIT_ENABLE_ESSENTIA_JS").ok();
+    let prev_runner = std::env::var("DJTKIT_ESSENTIA_RUNNER").ok();
+    let prev_max_workers = std::env::var("DJTKIT_ANALYSIS_MAX_WORKERS").ok();
+    // SAFETY: tests serialize env access through a global mutex.
+    unsafe {
+        std::env::set_var("DJTKIT_ENABLE_ESSENTIA_JS", "0");
+        std::env::remove_var("DJTKIT_ESSENTIA_RUNNER");
+        std::env::set_var("DJTKIT_ANALYSIS_MAX_WORKERS", "1");
+    }
+
+    let root = tempdir().expect("temp root");
+    let media = root.path().join("media");
+    fs::create_dir_all(&media).expect("create media");
+    for i in 0..2 {
+        let source = media.join(format!("Artist - capacity_test_{i:02}.wav"));
+        write_test_pulsed_key_wav(&source, 120.0, 2_000);
+    }
+
+    let data_dir = root.path().join("data");
+    let service = BackendService::new(&data_dir).expect("create service");
+    service
+        .scan_library(ScanLibraryRequest {
+            source_roots: vec![media.to_string_lossy().to_string()],
+            incremental: true,
+        })
+        .expect("scan succeeds");
+    library_sources::show_only(
+        &service,
+        vec![media.to_string_lossy().to_string()],
+        false,
+        false,
+    );
+    let track_ids: Vec<String> = service
+        .browse_source_files(BrowseSourceFilesRequest {
+            query: String::new(),
+            limit: 50,
+            cursor: None,
+            ..Default::default()
+        })
+        .expect("search succeeds")
+        .items
+        .into_iter()
+        .map(|t| t.id)
+        .collect();
+    assert_eq!(track_ids.len(), 2);
+
+    let mut started = Vec::new();
+    let mut ready = Vec::new();
+    service
+        .analyze_new_tracks_with_progress(
+            AnalyzeNewTracksRequest {
+                track_ids,
+                ..Default::default()
+            },
+            |progress| {
+                if progress.track_started {
+                    started.push(progress.analysis_at_capacity);
+                } else if progress.track_ready {
+                    ready.push(progress.analysis_at_capacity);
+                }
+            },
+        )
+        .expect("analysis succeeds");
+
+    assert_eq!(started, vec![true, true]);
+    assert_eq!(ready, vec![false, false]);
+    assert_eq!(
+        service
+            .analysis_tracks_in_flight
+            .load(std::sync::atomic::Ordering::SeqCst),
+        0
+    );
+
+    for (name, previous) in [
+        ("DJTKIT_ENABLE_ESSENTIA_JS", prev_enabled),
+        ("DJTKIT_ESSENTIA_RUNNER", prev_runner),
+        ("DJTKIT_ANALYSIS_MAX_WORKERS", prev_max_workers),
+    ] {
+        // SAFETY: tests serialize env access through a global mutex.
+        unsafe {
+            match previous {
+                Some(value) => std::env::set_var(name, value),
+                None => std::env::remove_var(name),
+            }
+        }
+    }
+}
+
+#[test]
+fn a_run_starting_beside_another_keeps_its_pause_and_a_later_first_run_resets_it() {
+    let _guard = test_env_lock().lock().expect("env lock");
+    let prev_enabled = std::env::var("DJTKIT_ENABLE_ESSENTIA_JS").ok();
+    let prev_runner = std::env::var("DJTKIT_ESSENTIA_RUNNER").ok();
+    // SAFETY: tests serialize env access through a global mutex.
+    unsafe {
+        std::env::set_var("DJTKIT_ENABLE_ESSENTIA_JS", "0");
+        std::env::remove_var("DJTKIT_ESSENTIA_RUNNER");
+    }
+
+    let root = tempdir().expect("temp root");
+    let media = root.path().join("media");
+    fs::create_dir_all(&media).expect("create media");
+    write_test_pulsed_key_wav(&media.join("Artist - overlap_test.wav"), 120.0, 2_000);
+
+    let data_dir = root.path().join("data");
+    let service = BackendService::new(&data_dir).expect("create service");
+    service
+        .scan_library(ScanLibraryRequest {
+            source_roots: vec![media.to_string_lossy().to_string()],
+            incremental: true,
+        })
+        .expect("scan succeeds");
+    library_sources::show_only(
+        &service,
+        vec![media.to_string_lossy().to_string()],
+        false,
+        false,
+    );
+    let track_ids: Vec<String> = service
+        .browse_source_files(BrowseSourceFilesRequest {
+            query: String::new(),
+            limit: 50,
+            cursor: None,
+            ..Default::default()
+        })
+        .expect("search succeeds")
+        .items
+        .into_iter()
+        .map(|t| t.id)
+        .collect();
+    assert_eq!(track_ids.len(), 1);
+
+    // A run with nothing to do, started from inside the running one's callback.
+    let empty_run = || AnalyzeNewTracksRequest {
+        scope_to_library_filter: true,
+        query: "matches no track".to_string(),
+        ..Default::default()
+    };
+    let paused = |service: &BackendService| {
+        service
+            .analysis_paused
+            .load(std::sync::atomic::Ordering::SeqCst)
+    };
+
+    let mut checked = false;
+    service
+        .analyze_new_tracks_with_progress(
+            AnalyzeNewTracksRequest {
+                track_ids,
+                ..Default::default()
+            },
+            |progress| {
+                if progress.track_started {
+                    service.set_analysis_paused(true).expect("pause");
+                    let _ = service.analyze_new_tracks_with_progress(empty_run(), |_| {});
+                    assert!(paused(&service), "the overlapping run kept the pause");
+                    checked = true;
+                }
+            },
+        )
+        .expect("analysis succeeds");
+    assert!(checked);
+
+    // Nothing runs now, so the next run is a first run again.
+    assert!(paused(&service));
+    let _ = service.analyze_new_tracks_with_progress(empty_run(), |_| {});
+    assert!(!paused(&service), "a first run starts fresh");
+
+    for (name, previous) in [
+        ("DJTKIT_ENABLE_ESSENTIA_JS", prev_enabled),
+        ("DJTKIT_ESSENTIA_RUNNER", prev_runner),
+    ] {
+        // SAFETY: tests serialize env access through a global mutex.
+        unsafe {
+            match previous {
+                Some(value) => std::env::set_var(name, value),
+                None => std::env::remove_var(name),
+            }
+        }
+    }
+}
+
+#[test]
 fn analyze_new_tracks_cancel_stops_early_without_hanging() {
     // Cancelling must stop workers from picking up new tracks (the
     // in-flight one still finishes), and the coordinator must return

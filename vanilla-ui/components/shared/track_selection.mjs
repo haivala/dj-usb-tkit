@@ -37,7 +37,8 @@ export function renderSelectionBar(ctx, view) {
   bar.querySelector(".selection-count").textContent = `${count} selected`;
   renderSelectionTime(ctx, view, bar, ids);
   for (const button of bar.querySelectorAll("[data-selection-action]")) {
-    button.disabled = count === 0;
+    button.disabled = count === 0
+      || (button.dataset.selectionAction === "reanalyze" && ctx.state.analysisAtCapacity);
   }
   // "+ Add to ‹active playlist›" names its target; with no active playlist
   // it's gone, and Add to… picks one.

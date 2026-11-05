@@ -29,6 +29,13 @@ export const REANALYZE_TOOLTIP =
 export const ANALYZE_PLAYLIST_MISSING_TOOLTIP =
   "Add the missing waveform, BPM, key and first beat to this playlist's unanalyzed tracks; a BPM or key you edited or imported is kept";
 
+// A track's Analyze / Reanalyze: disabled while that track is being analyzed,
+// or while the backend reports every worker busy (`analysisAtCapacity`, which
+// disables all the buttons that start an analysis). Runs may otherwise overlap.
+export function isTrackAnalyzeDisabled(state, trackId) {
+  return state.analysisAtCapacity || state.analyzingTrackIds.has(String(trackId));
+}
+
 export function formatBpm(value) {
   const n = Number(value);
   if (!Number.isFinite(n) || n <= 0) return "";

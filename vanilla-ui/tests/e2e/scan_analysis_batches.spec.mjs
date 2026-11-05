@@ -248,6 +248,7 @@ function installScanAnalysisMock(page, opts = {}) {
             percent: Math.round((i / total) * 100),
             message: `Analyzing ${i + 1}/${ids.length}: ${track.title}`,
             trackReady: false,
+            analysisAtCapacity: window.__mockAnalysisAtCapacity === true,
             timestamp: nowIso(),
             ...basePayload,
             ...extra
@@ -313,6 +314,7 @@ function installScanAnalysisMock(page, opts = {}) {
           percent: Math.round(((i + 1) / total) * 100),
           message: `Analyzing ${i + 1}/${ids.length}: ${track.title}`,
           trackReady: true,
+          analysisAtCapacity: window.__mockReadyAtCapacity === true,
           failed: false,
           analysisReady: isCountable(track),
           timestamp: nowIso(),
@@ -998,6 +1000,110 @@ test("reanalyze clears the row's BPM and key until the fresh values arrive", asy
   await expect(row).not.toHaveClass(/is-analyzing/);
   await expect(row.locator(".td-bpm .bpm-pill")).toHaveText("121.00");
   await expect(row.locator(".td-key .key-pill")).toHaveText("2A");
+});
+
+test("below capacity another analysis can start, and only the track being analyzed has its button disabled", async ({ page }) => {
+  await installScanAnalysisMock(page, { trackCount: 2, pieceDelayMs: 0, holdAfterTrackStart: true });
+  await page.goto("/");
+
+  const analyzeButtons = page.locator('#libraryTableBody [data-action="analyze-track"]');
+  const reanalyze = page.locator('[data-selection-bar="library"] [data-selection-action="reanalyze"]');
+  await page.locator("#libraryTableBody .track-grid-row").nth(1).locator(".td-select input").check();
+
+  await analyzeButtons.first().click();
+  await page.waitForFunction(() => !!window.__heldTrack);
+
+  await expect(analyzeButtons.first()).toBeDisabled();
+  await expect(analyzeButtons.nth(1)).toBeEnabled();
+  await expect(reanalyze).toBeEnabled();
+  await expect(page.locator("#scanLibraryBtn")).toBeEnabled();
+
+  await page.evaluate(() => window.__heldTrack.release());
+  await expect(analyzeButtons.first()).toBeEnabled();
+});
+
+test("at capacity every button that starts an analysis is disabled until a worker frees up", async ({ page }) => {
+  await installScanAnalysisMock(page, { trackCount: 2, pieceDelayMs: 0, holdAfterTrackStart: true });
+  await page.goto("/");
+
+  const rows = page.locator("#libraryTableBody .track-grid-row");
+  const analyzeButtons = page.locator('#libraryTableBody [data-action="analyze-track"]');
+  const bar = page.locator('[data-selection-bar="library"]');
+  const reanalyze = bar.locator('[data-selection-action="reanalyze"]');
+  await rows.nth(1).locator(".td-select input").check();
+  await expect(reanalyze).toBeEnabled();
+
+  await page.evaluate(() => { window.__mockAnalysisAtCapacity = true; });
+  await analyzeButtons.first().click();
+  await page.waitForFunction(() => !!window.__heldTrack);
+
+  await expect(analyzeButtons.first()).toBeDisabled();
+  await expect(analyzeButtons.nth(1)).toBeDisabled();
+  await expect(reanalyze).toBeDisabled();
+  await expect(page.locator("#scanLibraryBtn")).toBeDisabled();
+  await expect(bar.locator('[data-selection-action="clear"]')).toBeEnabled();
+
+  // A row drawn while at capacity comes up disabled too.
+  const secondTitle = await rows.nth(1).locator(".track-title").textContent();
+  await page.locator("#librarySearch").fill(secondTitle);
+  await expect(rows).toHaveCount(1);
+  await expect(analyzeButtons.first()).toBeDisabled();
+  await page.locator("#librarySearch").fill("");
+  await expect(rows).toHaveCount(2);
+
+  // The track's ready event reports capacity free again.
+  await page.evaluate(() => {
+    window.__mockAnalysisAtCapacity = false;
+    window.__heldTrack.release();
+  });
+  await expect(page.locator("#statusText")).toContainText("done: analyzed 1");
+  await expect(analyzeButtons.first()).toBeEnabled();
+  await expect(analyzeButtons.nth(1)).toBeEnabled();
+  await expect(reanalyze).toBeEnabled();
+  await expect(page.locator("#scanLibraryBtn")).toBeEnabled();
+});
+
+test("the buttons come back when the last analysis job ends, even if its last track event said at capacity", async ({ page }) => {
+  await installScanAnalysisMock(page, { trackCount: 1, pieceDelayMs: 0, holdAfterTrackStart: true });
+  await page.goto("/");
+
+  const analyzeButton = page.locator('#libraryTableBody [data-action="analyze-track"]').first();
+  await page.evaluate(() => {
+    window.__mockAnalysisAtCapacity = true;
+    window.__mockReadyAtCapacity = true;
+  });
+  await analyzeButton.click();
+  await page.waitForFunction(() => !!window.__heldTrack);
+  await expect(page.locator("#scanLibraryBtn")).toBeDisabled();
+
+  await page.evaluate(() => window.__heldTrack.release());
+  await expect(page.locator("#statusText")).toContainText("done: analyzed 1");
+  await expect(page.locator("#scanLibraryBtn")).toBeEnabled();
+  await expect(analyzeButton).toBeEnabled();
+});
+
+test("overlapping analysis runs share pause and cancel, which stay until the last run ends", async ({ page }) => {
+  await installScanAnalysisMock(page, { trackCount: 1, pieceDelayMs: 0, holdAfterTrackStart: true });
+  await page.goto("/");
+
+  await page.locator('#libraryTableBody [data-action="analyze-track"]').first().click();
+  await page.waitForFunction(() => !!window.__heldTrack);
+  const pause = page.locator("#progressPauseBtn");
+  await pause.click();
+  await expect(pause).toHaveAttribute("title", "Resume analysis");
+
+  const otherRun = { jobId: "analysis-other", jobType: "analysis", stage: "analyze_new_tracks" };
+  await page.evaluate((run) => window.__emitJobEvent({ ...run, event: "job.started", percent: 0, message: "Analyzing selected tracks" }), otherRun);
+  await expect(pause).toHaveAttribute("title", "Resume analysis");
+
+  await page.evaluate((run) => window.__emitJobEvent({ ...run, event: "job.completed", percent: 100, message: "Analysis finished" }), otherRun);
+  await expect(pause).toBeVisible();
+  await expect(pause).toHaveAttribute("title", "Resume analysis");
+  await expect(page.locator("#progressCancelAnalysisBtn")).toBeVisible();
+
+  await page.evaluate(() => window.__heldTrack.release());
+  await expect(page.locator("#statusText")).toContainText("done: analyzed 1");
+  await expect(pause).toBeHidden();
 });
 
 test("a first analysis keeps the row's imported BPM and key while it runs", async ({ page }) => {

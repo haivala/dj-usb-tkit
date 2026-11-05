@@ -5,7 +5,7 @@ use std::fs::File;
 use std::io::{BufRead, BufReader, Write};
 use std::path::{Path, PathBuf};
 use std::process::{Child, ChildStdin, ChildStdout, Command, Stdio};
-use std::sync::atomic::Ordering;
+use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::{Arc, Condvar, Mutex, OnceLock, mpsc};
 use std::time::Instant;
 
@@ -182,6 +182,10 @@ pub struct AnalyzeTrackProgress {
     /// decode so the row shows "analyzing" for the whole time it is worked on,
     /// not only from its first finished piece.
     pub track_started: bool,
+    /// Tracks being analyzed across all runs have reached the worker budget:
+    /// the UI disables every button that starts an analysis until this clears.
+    /// Filled once per event by `analyze_new_tracks_with_progress`.
+    pub analysis_at_capacity: bool,
     /// On the `track_started` event: this run replaces the track's BPM / key,
     /// so the row clears them until the fresh values arrive.
     pub reanalysis: bool,
@@ -233,6 +237,7 @@ fn build_partial_progress(
         duration_ms: update.duration_ms,
         track_ready: false,
         track_started: false,
+        analysis_at_capacity: false,
         reanalysis: false,
         failed: false,
         analysis_ready: false,
@@ -250,6 +255,7 @@ fn build_started_progress(
 ) -> AnalyzeTrackProgress {
     AnalyzeTrackProgress {
         track_started: true,
+        analysis_at_capacity: false,
         reanalysis: track.reanalysis,
         ..build_partial_progress(
             current,
@@ -285,6 +291,7 @@ fn build_done_progress_success(
         duration_ms: local.duration_ms,
         track_ready: true,
         track_started: false,
+        analysis_at_capacity: false,
         reanalysis: false,
         failed: false,
         analysis_ready: has_core_analysis_fields(
@@ -322,6 +329,7 @@ fn build_done_progress_error(
         duration_ms: None,
         track_ready: true,
         track_started: false,
+        analysis_at_capacity: false,
         reanalysis: false,
         failed: true,
         analysis_ready: false,
@@ -597,18 +605,26 @@ impl BackendService {
         F: FnMut(&AnalyzeTrackProgress),
     {
         self.ensure_no_data_migration()?;
+        let _run = AnalysisRun::begin(self);
         let batch_started = Instant::now();
         let job_id = format!("job-analysis-{}", Uuid::now_v7());
         let conn = self.db.connect()?;
         let auto_mode = req.track_ids.is_empty();
         let notation = super::key_notation::key_notation_setting(&conn)?;
+        let engine = resolve_analysis_engine(&self.db, req.analysis_engine.as_deref());
+        let capacity = analysis_capacity(engine);
+        let mut in_flight = InFlightTracks {
+            count: self.analysis_tracks_in_flight.clone(),
+            held: 0,
+        };
         let mut on_progress = |progress: &AnalyzeTrackProgress| {
-            if progress.key.is_none() {
-                return on_progress(progress);
-            }
+            in_flight.follow(progress);
             let mut progress = progress.clone();
-            (progress.key_display, progress.key_color) =
-                super::key_notation::key_display_fields(progress.key.as_deref(), notation);
+            progress.analysis_at_capacity = in_flight.count.load(Ordering::SeqCst) >= capacity;
+            if progress.key.is_some() {
+                (progress.key_display, progress.key_color) =
+                    super::key_notation::key_display_fields(progress.key.as_deref(), notation);
+            }
             on_progress(&progress)
         };
 
@@ -683,7 +699,6 @@ impl BackendService {
         let total = tracks.len();
         let (bpm_min, bpm_max) =
             resolve_analysis_bpm_range(req.bpm_range.as_deref(), req.bpm_min, req.bpm_max);
-        let engine = resolve_analysis_engine(&self.db, req.analysis_engine.as_deref());
 
         // Live library-duration-total baseline: the library as filtered (its
         // sources plus the frontend's search query), so `on_progress` can
@@ -723,11 +738,6 @@ impl BackendService {
         };
 
         let mut completed_count = 0usize;
-
-        // Every new batch starts fresh: a pause/cancel from a previous batch
-        // must not leak into this one.
-        self.analysis_paused.store(false, Ordering::SeqCst);
-        self.analysis_cancelled.store(false, Ordering::SeqCst);
 
         if total > 1 {
             let mut tx_db = conn.unchecked_transaction()?;
@@ -1489,6 +1499,67 @@ pub(crate) fn resolve_analysis_parallelism_budget_with_cap(
     match cap {
         Some(c) if c > 0 => budget.min(c),
         _ => budget,
+    }
+}
+
+/// How many tracks may be analyzed at once before the UI stops offering more:
+/// the same budget a batch sizes its worker pool from.
+fn analysis_capacity(engine: AnalysisEngine) -> usize {
+    let cpu_workers = std::thread::available_parallelism()
+        .map(|n| n.get())
+        .unwrap_or(1);
+    resolve_analysis_parallelism_budget_with_cap(
+        cpu_workers,
+        resolve_worker_cap_for_engine(engine).combined,
+    )
+}
+
+/// One analysis run, counted while it lasts. Runs may overlap and share the
+/// pause / cancel flags: the first starts them fresh, so a pause or cancel from
+/// an earlier run doesn't leak into it, and a later one leaves them alone, so
+/// it doesn't undo a pause or cancel of the runs still going.
+struct AnalysisRun(Arc<AtomicUsize>);
+
+impl AnalysisRun {
+    fn begin(service: &BackendService) -> Self {
+        let runs = service.analysis_runs_active.clone();
+        if runs.fetch_add(1, Ordering::SeqCst) == 0 {
+            service.analysis_paused.store(false, Ordering::SeqCst);
+            service.analysis_cancelled.store(false, Ordering::SeqCst);
+        }
+        Self(runs)
+    }
+}
+
+impl Drop for AnalysisRun {
+    fn drop(&mut self) {
+        self.0.fetch_sub(1, Ordering::SeqCst);
+    }
+}
+
+/// One run's share of `BackendService::analysis_tracks_in_flight`. Runs may
+/// overlap, so the count spans them all; a run that ends early gives back what
+/// it still holds when this drops.
+struct InFlightTracks {
+    count: Arc<AtomicUsize>,
+    held: usize,
+}
+
+impl InFlightTracks {
+    fn follow(&mut self, progress: &AnalyzeTrackProgress) {
+        if progress.track_started {
+            self.count.fetch_add(1, Ordering::SeqCst);
+            self.held += 1;
+        } else if progress.track_ready && self.held > 0 {
+            self.count.fetch_sub(1, Ordering::SeqCst);
+            self.held -= 1;
+        }
+    }
+}
+
+impl Drop for InFlightTracks {
+    fn drop(&mut self) {
+        self.count.fetch_sub(self.held, Ordering::SeqCst);
     }
 }
 

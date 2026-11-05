@@ -1,4 +1,4 @@
-import { formatDurationMs, formatBpm, ANALYZE_TOOLTIP, REANALYZE_TOOLTIP } from "./track_utils.mjs";
+import { formatDurationMs, formatBpm, isTrackAnalyzeDisabled, ANALYZE_TOOLTIP, REANALYZE_TOOLTIP } from "./track_utils.mjs";
 import { cloneTemplate } from "./ui_utils.mjs";
 import { coverUrl, attachCoverFallbackHandlers } from "./components/library/actions.mjs";
 import { isTrackCurrentlyPlaying, moveActiveWaveform, updateTransportButtonsInDom } from "./components/playback/actions.mjs";
@@ -215,6 +215,7 @@ export function createTrackRow(ctx, track, options) {
       analyze.dataset.id = renderTrackId;
       analyze.dataset.tooltip = track.analysisReady ? REANALYZE_TOOLTIP : ANALYZE_TOOLTIP;
       analyze.textContent = track.analysisReady ? "Reanalyze" : "Analyze";
+      analyze.disabled = isTrackAnalyzeDisabled(state, renderTrackId);
     } else {
       analyze.remove();
     }

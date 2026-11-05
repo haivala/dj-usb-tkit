@@ -314,7 +314,7 @@ export function updatePlaylistExportButtons(ctx) {
   // holds a page, so it can't count them itself.
   const unanalyzedCount = Number(current?.unanalyzedCount) || 0;
   const showAnalyzeMissing = unanalyzedCount > 0;
-  el.analyzePlaylistMissingBtn.disabled = !showAnalyzeMissing;
+  el.analyzePlaylistMissingBtn.disabled = !showAnalyzeMissing || state.analysisAtCapacity;
   el.analyzePlaylistMissingBtn.hidden = !showAnalyzeMissing;
   el.analyzePlaylistMissingBtn.textContent = showAnalyzeMissing
     ? `Analyze Missing Tracks (${unanalyzedCount})`
