@@ -334,12 +334,7 @@ function installTauriMock(page, mode) {
                 ok: true,
                 data: {
                   valid: false,
-                  hasWriteAccess: false,
                   normalizedRoot: null,
-                  hasVendorRoot: false,
-                  hasContents: false,
-                  hasPdb: false,
-                  hasEdb: false,
                   warnings: ["USB path is empty"]
                 }
               };
@@ -351,12 +346,7 @@ function installTauriMock(page, mode) {
                   ok: true,
                   data: {
                     valid: false,
-                    hasWriteAccess: true,
                     normalizedRoot: path,
-                    hasVendorRoot: false,
-                    hasContents: false,
-                    hasPdb: false,
-                    hasEdb: false,
                     canInitialize: true,
                     statusText: "USB selected but not initialized.",
                     initHintText: "USB folder is writable but missing External library structure (Missing vendor root folder)",
@@ -368,12 +358,7 @@ function installTauriMock(page, mode) {
                 ok: true,
                 data: {
                   valid: true,
-                  hasWriteAccess: true,
                   normalizedRoot: path,
-                  hasVendorRoot: true,
-                  hasContents: true,
-                  hasPdb: true,
-                  hasEdb: true,
                   warnings: []
                 }
               };
@@ -398,12 +383,7 @@ function installTauriMock(page, mode) {
               ok: true,
               data: {
                 valid: false,
-                hasWriteAccess: true,
                 normalizedRoot: path,
-                hasVendorRoot: false,
-                hasContents: false,
-                hasPdb: false,
-                hasEdb: false,
                 canInitialize: true,
                 statusText: "USB selected but not initialized.",
                 initHintText: mode === "needs-init-structured"

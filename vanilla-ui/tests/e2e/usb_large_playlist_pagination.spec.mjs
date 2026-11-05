@@ -69,8 +69,8 @@ function baseUsbCommands(payload, command) {
     return {
       ok: true,
       data: path
-        ? { valid: true, hasWriteAccess: true, normalizedRoot: path, hasVendorRoot: true, hasContents: true, hasPdb: true, hasEdb: true, warnings: [] }
-        : { valid: false, hasWriteAccess: false, normalizedRoot: null, hasVendorRoot: false, hasContents: false, hasPdb: false, hasEdb: false, warnings: ["USB path is empty"] },
+        ? { valid: true, normalizedRoot: path, warnings: [] }
+        : { valid: false, normalizedRoot: null, warnings: ["USB path is empty"] },
     };
   }
   return undefined;

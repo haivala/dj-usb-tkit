@@ -298,12 +298,7 @@ test("playlist analyze-missing skips already-analyzed tracks and targets the res
               ok: true,
               data: {
                 valid: true,
-                hasWriteAccess: true,
                 normalizedRoot: "/USB",
-                hasVendorRoot: true,
-                hasContents: true,
-                hasPdb: true,
-                hasEdb: true,
                 warnings: []
               }
             };
@@ -440,12 +435,7 @@ test("playlist actions hide Analyze Missing when unnecessary and keep Export vis
               ok: true,
               data: {
                 valid: false,
-                hasWriteAccess: false,
                 normalizedRoot: "",
-                hasVendorRoot: false,
-                hasContents: false,
-                hasPdb: false,
-                hasEdb: false,
                 warnings: []
               }
             };
@@ -586,12 +576,7 @@ test("playlist analyze-missing offers unanalyzed tracks that live on a USB drive
               ok: true,
               data: {
                 valid: false,
-                hasWriteAccess: false,
                 normalizedRoot: "",
-                hasVendorRoot: false,
-                hasContents: false,
-                hasPdb: false,
-                hasEdb: false,
                 warnings: []
               }
             };
@@ -791,12 +776,7 @@ function installReorderTauriMock(page, { usbSameNamePlaylistName, exportPruneSta
               ok: true,
               data: {
                 valid,
-                hasWriteAccess: valid,
                 normalizedRoot: valid ? "/USB" : "",
-                hasVendorRoot: valid,
-                hasContents: valid,
-                hasPdb: valid,
-                hasEdb: valid,
                 warnings: []
               }
             };
@@ -1448,7 +1428,7 @@ test("switching away from a sorted playlist commits the sort as its real order, 
           if (command === "validate_usb_root") {
             return {
               ok: true,
-              data: { valid: true, hasWriteAccess: true, normalizedRoot: "/USB", hasVendorRoot: true, hasContents: true, hasPdb: true, hasEdb: true, warnings: [] }
+              data: { valid: true, normalizedRoot: "/USB", warnings: [] }
             };
           }
           if (command === "fetch_usb_playlists") {

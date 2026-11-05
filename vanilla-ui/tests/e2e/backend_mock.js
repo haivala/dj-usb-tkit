@@ -80,7 +80,6 @@
     validateUsbRoot(overrides = {}) {
       return {
         valid: true,
-        hasWriteAccess: true,
         normalizedRoot: "/Volumes/USB-TEST",
         canInitialize: false,
         statusText: "mock selection status",

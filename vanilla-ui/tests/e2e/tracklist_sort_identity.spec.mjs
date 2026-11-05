@@ -18,12 +18,7 @@ function baseTauriMock() {
       ok: true,
       data: {
         valid: false,
-        hasWriteAccess: false,
         normalizedRoot: "",
-        hasVendorRoot: false,
-        hasContents: false,
-        hasPdb: false,
-        hasEdb: false,
         warnings: []
       }
     }),

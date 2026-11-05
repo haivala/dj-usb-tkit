@@ -43,7 +43,7 @@ use super::export_helpers::{
 use super::export_log::{append_export_log_record, build_export_log_record};
 use super::usb_staging;
 use super::usb_utils::{
-    self, analysis_bundle_exists, has_write_access, load_existing_analysis_paths_by_content_path,
+    self, analysis_bundle_exists, can_write_file_at, load_existing_analysis_paths_by_content_path,
     load_existing_analysis_paths_by_content_path_with_conn,
     load_existing_analysis_paths_by_pdb_track_path, resolve_usb_root, resolve_usb_side_path,
 };
@@ -1145,7 +1145,7 @@ impl BackendService {
                 usb_root.display()
             )));
         }
-        if !has_write_access(&usb_root) {
+        if !can_write_file_at(&usb_root) {
             let message = "USB is read-only. Remount as read-write before export.";
             return Err(BackendError::ValidationWithDetails(
                 message.to_string(),
@@ -3962,6 +3962,8 @@ mod tests {
             .permissions();
         read_only.set_readonly(true);
         std::fs::set_permissions(usb_dir.path(), read_only.clone()).expect("set read-only");
+        // Root writes anyway, so there's nothing to refuse.
+        let root_writes = super::can_write_file_at(usb_dir.path());
 
         let result = service.export_to_usb(ExportToUsbRequest {
             usb_root: Some(usb_dir.path().to_string_lossy().to_string()),
@@ -3972,6 +3974,9 @@ mod tests {
         #[allow(clippy::permissions_set_readonly_false)]
         read_only.set_readonly(false);
         std::fs::set_permissions(usb_dir.path(), read_only).expect("restore permissions");
+        if root_writes {
+            return;
+        }
         match result.unwrap_err() {
             BackendError::ValidationWithDetails(_, details) => {
                 assert_eq!(details["validationType"], "usb_read_only");

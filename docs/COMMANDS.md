@@ -306,8 +306,8 @@ drive selection from being rendered against a newer selected drive.
 - `initialize_usb`
 - `export_to_usb` — refused before anything is written, with `validationType`
   `usb_audio_format_refused` and the `tracks`, when a track can't go on the USB in any format its
-  USB audio formats tick (see `docs/TRANSCODES.md`). Transcodes it makes first report as
-  "USB: Converting track n/m".
+  USB audio formats tick (see `docs/TRANSCODES.md`), or `usb_read_only` when the USB can't be
+  written. Transcodes it makes first report as "USB: Converting track n/m".
 - `detect_external_rekordbox_db`
 
 ### External libraries
@@ -363,8 +363,25 @@ the frontend renders the page directly, no follow-up hydration round-trip.
 `fetch_usb_playlists` / `fetch_usb_histories` still resolve the playlist/session
 list and its counts, newest session first, and don't send each item's tracks.
 They also send the panel's text (`summaryText`, `statusText`), and each playlist its
-`selectedText`; the track pages send `listSummaryText` for the heading, as `browse_source_files`
-and `get_playlist_tracks` do.
+`selectedText` and `removeConfirmText`; the track pages send `listSummaryText` for the heading, as
+`browse_source_files` and `get_playlist_tracks` do.
+
+The USB commands send the text the UI shows, ready to display:
+
+- `validate_usb_root`: `statusText`, `initHintText`, and `canInitialize` for the Initialize button.
+  `initialize_usb`: `statusText`.
+- `set_usb_device_name`: answers `{ name, updated, statusText }`. `name` is as saved, and `updated`
+  is false when the drive already had exactly that name.
+- `run_usb_diagnostics`: `statusText`, `durationText`. `run_usb_parity_report`: the same and
+  `statusLabel`. `overallStatus` stays a value, for the badge's style.
+- `repair_usb_diagnostics`: `statusText`, `nothingToFix`, and `rows`, the fix list ready to show,
+  including unsupported items.
+- `get_usb_player_menu_config` / `update_usb_player_menu_config`: `statusText`, and on each item
+  `label`, `canMoveUp` and `canMoveDown`.
+- `get_usb_background_color` / `set_usb_background_color`: `chips` (`color`, `label`, `selected`),
+  `noteText` (empty when there's nothing to say) and `statusText`.
+- `export_to_usb`: a refusal's `details` carry `statusText` with `validationType`. Refusals without
+  details have only the error's `message`.
 
 `list_usb_backups`/`restore_usb_backup`/`delete_usb_backup` back the Backups panel described in
 `docs/USB_BACKUPS.md` — listing, restoring, and deleting the timestamped

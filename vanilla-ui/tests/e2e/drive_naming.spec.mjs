@@ -56,12 +56,7 @@ function installTauriMock(
               ok: true,
               data: {
                 valid: true,
-                hasWriteAccess: true,
                 normalizedRoot: path,
-                hasVendorRoot: true,
-                hasContents: true,
-                hasPdb: true,
-                hasEdb: true,
                 warnings: []
               }
             };

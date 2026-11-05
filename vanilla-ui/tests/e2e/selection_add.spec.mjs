@@ -282,8 +282,8 @@ function installSelectionMock(page, mockOpts = {}) {
               return {
                 ok: true,
                 data: {
-                  valid: true, hasWriteAccess: true, normalizedRoot: "/Volumes/USB-TEST",
-                  hasVendorRoot: true, hasContents: true, hasPdb: true, hasEdb: true, warnings: [],
+                  valid: true, normalizedRoot: "/Volumes/USB-TEST",
+                  warnings: [],
                 },
               };
             }

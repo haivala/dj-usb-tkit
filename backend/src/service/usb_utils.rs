@@ -450,6 +450,19 @@ pub(crate) fn has_write_access(root: &Path) -> bool {
         .unwrap_or(false)
 }
 
+/// Whether a file can really be written at `root`. Unlike `has_write_access`
+/// this sees a read-only mount, whose folders keep their normal permission
+/// bits, and ignores a Windows folder's read-only attribute, which doesn't stop
+/// writes. It writes to the USB, so only for a command that's about to anyway.
+pub(crate) fn can_write_file_at(root: &Path) -> bool {
+    let probe = root.join(".dj-usb-tkit-write-probe");
+    let written = std::fs::write(&probe, b"").is_ok();
+    if written {
+        let _ = std::fs::remove_file(&probe);
+    }
+    written
+}
+
 pub(crate) fn load_waveform_preview_from_analysis_path(path: &Path) -> Option<Vec<u8>> {
     for candidate in waveform_preview_candidates(path) {
         let Ok(bytes) = std::fs::read(&candidate) else {

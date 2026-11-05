@@ -328,7 +328,6 @@
               statusText: `USB root selected: ${USB_ROOT}. Running diagnostics...`,
               initHintText: "",
               normalizedRoot: USB_ROOT,
-              hasWriteAccess: true,
               warnings: [],
             });
           case "get_usb_device_name":

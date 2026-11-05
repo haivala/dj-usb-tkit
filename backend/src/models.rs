@@ -1308,10 +1308,10 @@ pub struct ValidateUsbRootRequest {
 #[serde(rename_all = "camelCase")]
 pub struct ValidateUsbRootData {
     pub valid: bool,
-    #[serde(default)]
-    pub has_write_access: bool,
     pub normalized_root: Option<String>,
     // Backend only (CLI tools, tests): the UI gets `can_initialize` and the text.
+    #[serde(default, skip_serializing)]
+    pub has_write_access: bool,
     #[serde(default, skip_serializing)]
     pub has_vendor_root: bool,
     #[serde(default, skip_serializing)]
