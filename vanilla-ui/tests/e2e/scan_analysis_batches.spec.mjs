@@ -62,6 +62,7 @@ function installScanAnalysisMock(page, opts = {}) {
 
     const listeners = new Map();
     let analyzeNewTracksCalls = 0;
+    const claimedTrackIds = new Set();
     const pieceEventsByPiece = { duration: 0, artwork: 0, waveform: 0, bpm_key: 0 };
     let bpmRangeSeen = null;
     let analysisPaused = false;
@@ -418,8 +419,13 @@ function installScanAnalysisMock(page, opts = {}) {
               min: Number.isFinite(rangeMin) ? rangeMin : Number(req.bpmMin || 0),
               max: Number.isFinite(rangeMax) ? rangeMax : Number(req.bpmMax || 0)
             };
+            // One run at a time per track, as the backend's `TrackClaims`.
+            const alreadyAnalyzingTrackIds = ids.filter((id) => claimedTrackIds.has(id));
+            ids = ids.filter((id) => !claimedTrackIds.has(id));
+            ids.forEach((id) => claimedTrackIds.add(id));
             const data = await runAnalyzeNewTracks(ids, bpmRangeSeen.min, bpmRangeSeen.max);
-            return { ok: true, data };
+            ids.forEach((id) => claimedTrackIds.delete(id));
+            return { ok: true, data: { ...data, alreadyAnalyzingTrackIds } };
           }
           if (command === "set_analysis_paused") {
             analysisPaused = !!(payload?.request?.paused);
@@ -1080,6 +1086,28 @@ test("the buttons come back when the last analysis job ends, even if its last tr
   await expect(page.locator("#statusText")).toContainText("done: analyzed 1");
   await expect(page.locator("#scanLibraryBtn")).toBeEnabled();
   await expect(analyzeButton).toBeEnabled();
+});
+
+test("a run that skips a track another run has leaves that row analyzing", async ({ page }) => {
+  await installScanAnalysisMock(page, { trackCount: 1, pieceDelayMs: 0, holdAfterTrackStart: true });
+  await page.goto("/");
+
+  const row = page.locator("#libraryTableBody .track-grid-row").first();
+  await row.locator(".td-select input").check();
+  await row.locator('[data-action="analyze-track"]').click();
+  await page.waitForFunction(() => !!window.__heldTrack);
+  await expect(row).toHaveClass(/is-analyzing/);
+
+  await page.locator('[data-selection-bar="library"] [data-selection-action="reanalyze"]').click();
+  await expect(page.locator("#statusText")).toContainText("Reanalyze selected done: analyzed 0");
+  await expect(row).toHaveClass(/is-analyzing/);
+  await expect(row.locator('[data-action="analyze-track"]')).toBeDisabled();
+  await expect(page.locator("#progressPauseBtn")).toBeVisible();
+
+  await page.evaluate(() => window.__heldTrack.release());
+  await expect(row).not.toHaveClass(/is-analyzing/);
+  await expect(row.locator('[data-action="analyze-track"]')).toBeEnabled();
+  expect(await page.evaluate(() => window.__scanTestStats.analyzeNewTracksCalls)).toBe(2);
 });
 
 test("overlapping analysis runs share pause and cancel, which stay until the last run ends", async ({ page }) => {

@@ -579,6 +579,8 @@ export async function analyzeTrackIds(ctx, trackIds, modeLabel = "Analyze", opti
   let elapsedMs = null;
   const warnings = [];
   let hydratedItems = [];
+  // Another run is on these: their rows stay "analyzing" until it reports them.
+  let alreadyAnalyzing = new Set();
 
   emitStatus(`${modeLabel}: preparing ${countLabel}...`);
 
@@ -608,13 +610,14 @@ export async function analyzeTrackIds(ctx, trackIds, modeLabel = "Analyze", opti
     const batchWarnings = Array.isArray(batch?.warnings) ? batch.warnings : [];
     warnings.push(...batchWarnings);
     hydratedItems = Array.isArray(batch?.items) ? batch.items : [];
+    alreadyAnalyzing = new Set((batch?.alreadyAnalyzingTrackIds || []).map(String));
     emitStatus(`${modeLabel}: ${counted(processed, "track")} processed...`);
   } catch (err) {
     failed = ids.length;
     warnings.push(`batch analysis failed: ${err.message || err}`);
   } finally {
     for (const id of ids) {
-      setTrackAnalyzingState(ctx, String(id), false);
+      if (!alreadyAnalyzing.has(String(id))) setTrackAnalyzingState(ctx, String(id), false);
     }
   }
   // The batch's tracks as saved (each also came on its track-ready event).

@@ -259,6 +259,8 @@ pub struct BackendService {
     pub analysis_cancelled: Arc<AtomicBool>,
     /// Tracks being analyzed right now, across overlapping runs.
     pub analysis_tracks_in_flight: Arc<AtomicUsize>,
+    /// Tracks a run is analyzing or has queued, by id (see `TrackClaims`).
+    pub analysis_claimed_tracks: Arc<std::sync::Mutex<std::collections::HashSet<String>>>,
     /// Analysis runs under way (see `AnalysisRun`).
     pub(crate) analysis_runs_active: Arc<AtomicUsize>,
     /// Set by `cancel_transcode`; reset when a transcode job starts.
@@ -297,6 +299,7 @@ impl BackendService {
             analysis_paused: Arc::new(AtomicBool::new(false)),
             analysis_cancelled: Arc::new(AtomicBool::new(false)),
             analysis_tracks_in_flight: Arc::new(AtomicUsize::new(0)),
+            analysis_claimed_tracks: Arc::default(),
             analysis_runs_active: Arc::new(AtomicUsize::new(0)),
             transcode_cancelled: Arc::new(AtomicBool::new(false)),
             usb_playlists_cache: Arc::new(std::sync::Mutex::new(None)),

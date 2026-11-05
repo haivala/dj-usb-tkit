@@ -3579,6 +3579,113 @@ fn a_run_starting_beside_another_keeps_its_pause_and_a_later_first_run_resets_it
 }
 
 #[test]
+fn a_run_skips_a_track_another_run_has_until_that_track_is_done() {
+    let _guard = test_env_lock().lock().expect("env lock");
+    let prev_enabled = std::env::var("DJTKIT_ENABLE_ESSENTIA_JS").ok();
+    let prev_runner = std::env::var("DJTKIT_ESSENTIA_RUNNER").ok();
+    // SAFETY: tests serialize env access through a global mutex.
+    unsafe {
+        std::env::set_var("DJTKIT_ENABLE_ESSENTIA_JS", "0");
+        std::env::remove_var("DJTKIT_ESSENTIA_RUNNER");
+    }
+
+    let root = tempdir().expect("temp root");
+    let media = root.path().join("media");
+    fs::create_dir_all(&media).expect("create media");
+    write_test_pulsed_key_wav(&media.join("Artist - claim_test.wav"), 120.0, 2_000);
+
+    let data_dir = root.path().join("data");
+    let service = BackendService::new(&data_dir).expect("create service");
+    service
+        .scan_library(ScanLibraryRequest {
+            source_roots: vec![media.to_string_lossy().to_string()],
+            incremental: true,
+        })
+        .expect("scan succeeds");
+    library_sources::show_only(
+        &service,
+        vec![media.to_string_lossy().to_string()],
+        false,
+        false,
+    );
+    let track_ids: Vec<String> = service
+        .browse_source_files(BrowseSourceFilesRequest {
+            query: String::new(),
+            limit: 50,
+            cursor: None,
+            ..Default::default()
+        })
+        .expect("search succeeds")
+        .items
+        .into_iter()
+        .map(|t| t.id)
+        .collect();
+    assert_eq!(track_ids.len(), 1);
+    let request = || AnalyzeNewTracksRequest {
+        track_ids: track_ids.clone(),
+        reanalyze: true,
+        ..Default::default()
+    };
+    let is_claimed = |id: &str| {
+        service
+            .analysis_claimed_tracks
+            .lock()
+            .expect("claims lock")
+            .contains(id)
+    };
+
+    let mut skipped = None;
+    let mut released_when_ready = false;
+    let first = service
+        .analyze_new_tracks_with_progress(request(), |progress| {
+            if progress.track_started {
+                let mut events = 0usize;
+                let second = service
+                    .analyze_new_tracks_with_progress(request(), |_| events += 1)
+                    .expect("second run returns");
+                assert_eq!(events, 0, "the second run does nothing");
+                assert_eq!(second.processed, 0);
+                assert!(second.warnings.is_empty());
+                skipped = Some(second.already_analyzing_track_ids);
+            } else if progress.track_ready {
+                released_when_ready = !is_claimed(&progress.track_id);
+            }
+        })
+        .expect("first run succeeds");
+
+    assert_eq!(first.processed, 1);
+    assert!(first.already_analyzing_track_ids.is_empty());
+    assert_eq!(skipped, Some(track_ids.clone()));
+    assert!(released_when_ready);
+
+    // Once it's done, the track can be analyzed again.
+    let again = service
+        .analyze_new_tracks(request())
+        .expect("next run succeeds");
+    assert_eq!(again.processed, 1);
+    assert!(
+        service
+            .analysis_claimed_tracks
+            .lock()
+            .expect("lock")
+            .is_empty()
+    );
+
+    for (name, previous) in [
+        ("DJTKIT_ENABLE_ESSENTIA_JS", prev_enabled),
+        ("DJTKIT_ESSENTIA_RUNNER", prev_runner),
+    ] {
+        // SAFETY: tests serialize env access through a global mutex.
+        unsafe {
+            match previous {
+                Some(value) => std::env::set_var(name, value),
+                None => std::env::remove_var(name),
+            }
+        }
+    }
+}
+
+#[test]
 fn analyze_new_tracks_cancel_stops_early_without_hanging() {
     // Cancelling must stop workers from picking up new tracks (the
     // in-flight one still finishes), and the coordinator must return

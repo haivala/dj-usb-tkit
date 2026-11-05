@@ -2097,6 +2097,10 @@ pub struct AnalyzeNewTracksData {
     pub warning_count: usize,
     #[serde(default)]
     pub items: Vec<Track>,
+    /// Requested tracks left out because another run is on them: their rows
+    /// stay "analyzing" until that run reports them.
+    #[serde(default)]
+    pub already_analyzing_track_ids: Vec<String>,
     /// Wall-clock time the batch took, paused time included.
     #[serde(default)]
     pub elapsed_ms: u64,

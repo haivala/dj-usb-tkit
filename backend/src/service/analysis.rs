@@ -1,12 +1,14 @@
 //! Track analysis: BPM detection, key detection, waveform generation, cover art.
 
 use crate::utils::counted;
+use std::cell::RefCell;
+use std::collections::HashSet;
 use std::fs::File;
 use std::io::{BufRead, BufReader, Write};
 use std::path::{Path, PathBuf};
 use std::process::{Child, ChildStdin, ChildStdout, Command, Stdio};
 use std::sync::atomic::{AtomicUsize, Ordering};
-use std::sync::{Arc, Condvar, Mutex, OnceLock, mpsc};
+use std::sync::{Arc, Condvar, Mutex, MutexGuard, OnceLock, PoisonError, mpsc};
 use std::time::Instant;
 
 use image::imageops::FilterType;
@@ -606,6 +608,7 @@ impl BackendService {
     {
         self.ensure_no_data_migration()?;
         let _run = AnalysisRun::begin(self);
+        let claims = TrackClaims::new(self);
         let batch_started = Instant::now();
         let job_id = format!("job-analysis-{}", Uuid::now_v7());
         let conn = self.db.connect()?;
@@ -619,6 +622,9 @@ impl BackendService {
         };
         let mut on_progress = |progress: &AnalyzeTrackProgress| {
             in_flight.follow(progress);
+            if progress.track_ready {
+                claims.release(&progress.track_id);
+            }
             let mut progress = progress.clone();
             progress.analysis_at_capacity = in_flight.count.load(Ordering::SeqCst) >= capacity;
             if progress.key.is_some() {
@@ -662,22 +668,37 @@ impl BackendService {
                 track.force_reanalysis();
             }
         }
+        let mut already_analyzing_track_ids = Vec::new();
+        tracks.retain(|track| {
+            let claimed = claims.claim(&track.id);
+            if !claimed {
+                already_analyzing_track_ids.push(track.id.clone());
+            }
+            claimed
+        });
         if tracks.is_empty() {
+            // Tracks another run has aren't a problem to report.
+            let warnings = if already_analyzing_track_ids.is_empty() {
+                vec![logging::log(
+                    Level::Info,
+                    "analysis",
+                    "analysis.no-eligible-tracks",
+                    "No eligible tracks found for analysis",
+                )]
+            } else {
+                Vec::new()
+            };
             return Ok(AnalyzeNewTracksData {
                 job_id,
                 analyzed: 0,
                 incomplete: 0,
                 failed: 0,
                 processed: 0,
-                // Only an info entry.
+                // Only an info entry, if any.
                 warning_count: 0,
-                warnings: vec![logging::log(
-                    Level::Info,
-                    "analysis",
-                    "analysis.no-eligible-tracks",
-                    "No eligible tracks found for analysis",
-                )],
+                warnings,
                 items: Vec::new(),
+                already_analyzing_track_ids,
                 elapsed_ms: elapsed_ms_since(batch_started),
             });
         }
@@ -1097,6 +1118,7 @@ impl BackendService {
             warning_count: logging::count_warnings(&warnings),
             warnings,
             items,
+            already_analyzing_track_ids,
             elapsed_ms: elapsed_ms_since(batch_started),
         })
     }
@@ -1534,6 +1556,52 @@ impl AnalysisRun {
 impl Drop for AnalysisRun {
     fn drop(&mut self) {
         self.0.fetch_sub(1, Ordering::SeqCst);
+    }
+}
+
+/// The tracks one run has claimed in `BackendService::analysis_claimed_tracks`.
+/// A track is analyzed by one run at a time: a run skips what another holds. A
+/// claim ends when the track is done, so it can be analyzed again while its
+/// batch goes on; a run that ends early gives back the rest when this drops.
+struct TrackClaims {
+    all: Arc<Mutex<HashSet<String>>>,
+    held: RefCell<HashSet<String>>,
+}
+
+impl TrackClaims {
+    fn new(service: &BackendService) -> Self {
+        Self {
+            all: service.analysis_claimed_tracks.clone(),
+            held: RefCell::default(),
+        }
+    }
+
+    fn lock_all(&self) -> MutexGuard<'_, HashSet<String>> {
+        self.all.lock().unwrap_or_else(PoisonError::into_inner)
+    }
+
+    /// False when a run already holds `track_id`.
+    fn claim(&self, track_id: &str) -> bool {
+        let claimed = self.lock_all().insert(track_id.to_string());
+        if claimed {
+            self.held.borrow_mut().insert(track_id.to_string());
+        }
+        claimed
+    }
+
+    fn release(&self, track_id: &str) {
+        if self.held.borrow_mut().remove(track_id) {
+            self.lock_all().remove(track_id);
+        }
+    }
+}
+
+impl Drop for TrackClaims {
+    fn drop(&mut self) {
+        let mut all = self.lock_all();
+        for track_id in self.held.borrow().iter() {
+            all.remove(track_id);
+        }
     }
 }
 
