@@ -216,3 +216,14 @@ test("re-adding a removed source folder indexes it via scan_library so tracks ar
   const restoredRow = page.locator("#libraryTableBody .track-grid-row", { hasText: "A One" });
   await expect(restoredRow).toHaveAttribute("data-track-id", "a-1-rescanned");
 });
+
+test("a folder picker answer in any of its shapes adds every folder", async ({ page }) => {
+  await installSourceRemovalMock(page);
+  await page.goto("/");
+  await page.evaluate(() => {
+    window.__sourceFolders = [];
+    window.__pickReturn = ["/x/a", { path: "/x/b" }, { Path: "/x/c" }, { url: "/x/d" }, { Url: "/x/e" }, { filePath: "/x/f" }, null];
+  });
+  await page.locator("#addSourceBtn").click();
+  await expect.poll(() => page.evaluate(() => window.__sourceFolders)).toEqual(["/x/a", "/x/b", "/x/c", "/x/d", "/x/e", "/x/f"]);
+});

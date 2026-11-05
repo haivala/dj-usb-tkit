@@ -184,7 +184,7 @@ test("Export Tracklist dialog's start-track select is populated from the selecte
   await expect(page.locator("#tracklistExportOverlay")).toBeHidden();
   await expect(page.locator("#exportHistoryTracklistBtn")).toBeFocused();
   // Escape and backdrop dismissal also restore focus and allow reopening.
-  for (const dismissal of ["Escape", "backdrop"]) {
+  for (const dismissal of ["Escape", "backdrop", "Escape", "backdrop"]) {
     await page.locator("#exportHistoryTracklistBtn").click();
     await expect(page.locator("#tracklistExportOkBtn")).toBeFocused();
     if (dismissal === "Escape") await page.keyboard.press("Escape");
@@ -217,8 +217,10 @@ test("Export Tracklist saves the session from the chosen start track, and report
   await page.locator('.nav-item[data-view="usb-history"]').click();
   const status = page.locator("#statusText");
 
-  // A cancelled dialog saves nothing.
+  // A cancelled dialog saves nothing. It opens with times on, placed before the track.
   await page.locator("#exportHistoryTracklistBtn").click();
+  await expect(page.locator("#tracklistExportTimesToggle")).toBeChecked();
+  await expect(page.locator("#tracklistExportPlacement")).toHaveValue("before");
   await page.locator("#tracklistExportCancelBtn").click();
   expect(await page.evaluate(() => window.__saves)).toEqual([]);
 

@@ -35,6 +35,24 @@ function holdEmptyLists(page) {
   });
 }
 
+// Subscribes the app to `job:event`: `window.__emitJobEvent` fires one.
+function listenForJobEvents(page) {
+  return page.addInitScript(() => {
+    const listeners = [];
+    window.__emitJobEvent = (payload) => {
+      for (const callback of listeners.slice()) callback({ event: "job:event", payload });
+    };
+    window.isTauri = true;
+    window.__TAURI_INTERNALS__ = { invoke: (cmd, args) => window.__TAURI__.core.invoke(cmd, args) };
+    window.__TAURI__.event = {
+      listen: async (eventName, callback) => {
+        if (eventName === "job:event") listeners.push(callback);
+        return () => {};
+      }
+    };
+  });
+}
+
 function installTauriMock(page, mode) {
   return page.addInitScript(({ mode }) => {
     window.localStorage.setItem("djusbtkit.helpSeen", "1");
@@ -1523,12 +1541,124 @@ async function connectUsb(page) {
   await expect(page.locator("#diagOverallStatus")).toHaveText("WARN");
 }
 
+test("a running USB job locks the USB selection and export until it ends; other jobs don't", async ({ page }) => {
+  await installTauriMock(page, "valid");
+  await listenForJobEvents(page);
+  await page.addInitScript(() => {
+    const invoke = window.__TAURI__.core.invoke;
+    window.__picks = 0;
+    window.__validates = 0;
+    window.__TAURI__.core.invoke = async (command, payload) => {
+      if (command === "list_playlists") {
+        return { ok: true, data: { items: [{ id: "pl-1", name: "Local Set", source: "local" }] } };
+      }
+      // Another drive shows up as recent once the first is connected.
+      if (command === "list_usb_devices" && window.__validates > 0) {
+        return { ok: true, data: { items: [{ id: "dev-1", rootPath: "/Volumes/OTHER", label: "Other", mounted: false }] } };
+      }
+      if (command === "pick_usb_folder") window.__picks += 1;
+      if (command === "validate_usb_root") window.__validates += 1;
+      return invoke(command, payload);
+    };
+  });
+  await page.goto("/");
+  await connectUsb(page);
+  await page.locator('#navPlaylistList .nav-playlist-item[data-playlist-id="pl-1"]').click();
+  await page.locator('.nav-item[data-view="usb"]').click();
+
+  const select = page.locator("#selectUsbFolderBtn");
+  const recent = page.locator('#usbRecentList button[data-usb-recent-path="/Volumes/OTHER"]');
+  const exportBtn = page.locator("#exportPlaylistBtn");
+  const counts = () => page.evaluate(() => ({ picks: window.__picks, validates: window.__validates }));
+  const emit = (jobType, event) => page.evaluate(
+    ([jobType, event]) => window.__emitJobEvent({ jobId: `job-${jobType}`, jobType, stage: "test", event, percent: 0, message: "USB: working" }),
+    [jobType, event]
+  );
+  await expect(recent).toBeEnabled();
+  await expect(exportBtn).toBeEnabled();
+
+  for (const [jobType, endEvent] of [
+    ["usb_read", "job.completed"],
+    ["usb_write", "job.failed"],
+    ["diagnostics", "job.completed"],
+    ["export", "job.completed"]
+  ]) {
+    await emit(jobType, "job.started");
+    await expect(select).toBeDisabled();
+    await expect(select).toHaveAttribute("title", /wait/i);
+    await expect(recent).toBeDisabled();
+    await expect(exportBtn).toBeDisabled();
+
+    // A click already on its way when the job starts changes nothing either.
+    const before = await counts();
+    for (const selector of ["#selectUsbFolderBtn", '#usbRecentList button[data-usb-recent-path="/Volumes/OTHER"]']) {
+      await page.evaluate((selector) => {
+        document.querySelector("#statusText").textContent = "";
+        const button = document.querySelector(selector);
+        button.disabled = false;
+        button.click();
+      }, selector);
+      await expect(page.locator("#statusText")).toContainText(/wait/i);
+    }
+    expect(await counts()).toEqual(before);
+    await page.evaluate(() => { document.querySelector("#selectUsbFolderBtn").disabled = true; });
+
+    await emit(jobType, endEvent);
+    await expect(select).toBeEnabled();
+    await expect(recent).toBeEnabled();
+    await expect(exportBtn).toBeEnabled();
+  }
+
+  await emit("analysis", "job.started");
+  await page.waitForTimeout(100);
+  await expect(select).toBeEnabled();
+  await expect(exportBtn).toBeEnabled();
+});
+
+test("a stored USB isn't shown as selected, or read, until it's validated", async ({ page }) => {
+  await installTauriMock(page, "valid");
+  await page.addInitScript(() => {
+    window.localStorage.setItem("djusbtkit.usbRoot", "/Volumes/USB-TEST");
+    const invoke = window.__TAURI__.core.invoke;
+    window.__validates = 0;
+    window.__TAURI__.core.invoke = async (command, payload) => {
+      if (command === "validate_usb_root") window.__validates += 1;
+      return invoke(command, payload);
+    };
+  });
+  await page.goto("/");
+  await page.locator('.nav-item[data-view="usb"]').click();
+
+  await expect(page.locator("#usbRootPathText")).toHaveText("No USB selected");
+  await expect(page.locator("#usbSelectedControls")).toBeHidden();
+  await expect(page.locator("#usbInitRow")).toBeHidden();
+  await expect(page.locator('.nav-sub-item[data-view="usb-playlists"]')).not.toHaveClass(/revealed/);
+  expect(await page.evaluate(() => window.__validates)).toBe(0);
+});
+
+test("selecting a USB lets its folder and the library's into the asset scope", async ({ page }) => {
+  await installTauriMock(page, "valid");
+  await page.addInitScript(() => {
+    const invoke = window.__TAURI__.core.invoke;
+    window.__assetPaths = [];
+    window.__TAURI__.core.invoke = async (command, payload) => {
+      if (command === "get_library_sources") return window.__e2eBackend.ok(window.__e2eBackend.librarySources(["/music"]));
+      if (command === "allow_asset_paths") window.__assetPaths.push(payload.paths);
+      return invoke(command, payload);
+    };
+  });
+  await page.goto("/");
+  await connectUsb(page);
+  expect((await page.evaluate(() => window.__assetPaths)).at(-1)).toEqual(["/music", "/Volumes/USB-TEST"]);
+});
+
 test("restoring a backup: cancel and failure change nothing; success clears the report and lists and applies the export status", async ({ page }) => {
   await installTauriMock(page, "valid");
   await page.addInitScript(() => {
     const invoke = window.__TAURI__.core.invoke;
     window.__playlistReads = 0;
     window.__restores = 0;
+    window.__deletes = [];
     window.__TAURI__.core.invoke = async (command, payload) => {
       if (command === "list_playlists") {
         return { ok: true, data: { items: [{ id: "pl-1", name: "Local Set", source: "local" }] } };
@@ -1537,6 +1667,10 @@ test("restoring a backup: cancel and failure change nothing; success clears the 
         return { ok: true, data: { items: [{ timestamp: "2020-01-01_00-00-00", files: ["export.pdb"], reason: "export", sizeBytes: 1024, location: "usb" }] } };
       }
       if (command === "fetch_usb_playlists") window.__playlistReads += 1;
+      if (command === "delete_usb_backup") {
+        window.__deletes.push(payload.request.timestamp);
+        return { ok: true, data: { deleted: true } };
+      }
       if (command === "restore_usb_backup") {
         window.__restores += 1;
         if (window.__failRestore) return { ok: false, error: { code: "IO", message: "disk gone" } };
@@ -1568,6 +1702,13 @@ test("restoring a backup: cancel and failure change nothing; success clears the 
   await page.locator("#confirmCancelBtn").click();
   await expect(page.locator("#confirmOverlay")).toBeHidden();
   expect(await page.evaluate(() => window.__restores)).toBe(0);
+
+  // Deleting a backup leaves the report alone.
+  await page.locator(".backups-delete-btn").click();
+  await page.locator("#confirmOkBtn").click();
+  await expect(page.locator("#statusText")).toContainText(/^Deleted /);
+  expect(await page.evaluate(() => window.__deletes)).toEqual(["2020-01-01_00-00-00"]);
+  await expect(report).toHaveText("WARN");
 
   await page.evaluate(() => { window.__failRestore = true; });
   await restoreBtn.click();
@@ -1680,6 +1821,84 @@ test("a player-menu edit or PDB sync clears the diagnostics report only when it 
   await page.locator("#usbPlayerMenuSyncBtn").click();
   await expect(status).toContainText("PDB categories restored");
   await expect(report).toHaveText("");
+});
+
+test("the player menu editor selects in one list at a time, and its buttons follow the selected item", async ({ page }) => {
+  await installTauriMock(page, "valid");
+  await page.addInitScript(() => {
+    const backend = window.__e2eBackend;
+    const invoke = window.__TAURI__.core.invoke;
+    window.__TAURI__.core.invoke = async (command, payload) => {
+      if (command === "get_usb_player_menu_config") {
+        return backend.ok({
+          currentItems: [
+            backend.playerMenuItem(132, { name: "PLAYLIST", removable: false }),
+            backend.playerMenuItem(139, { name: "KEY" })
+          ],
+          availableItems: [backend.playerMenuItem(133, { name: "BPM" }), backend.playerMenuItem(134, { name: "RATING" })]
+        });
+      }
+      return invoke(command, payload);
+    };
+  });
+  await page.goto("/");
+  await connectUsb(page);
+  await page.locator('.nav-item[data-view="usb-player-menu"]').click();
+  const item = (list, kind) => page.locator(`#${list} .player-menu-item[data-menu-kind='${kind}']`);
+  const add = page.locator("#usbPlayerMenuAddBtn");
+  const remove = page.locator("#usbPlayerMenuRemoveBtn");
+
+  await item("usbPlayerMenuAvailable", 133).click();
+  await expect(add).toBeEnabled();
+  await expect(remove).toBeDisabled();
+
+  await item("usbPlayerMenuCurrent", 139).click();
+  await expect(item("usbPlayerMenuCurrent", 139)).toHaveClass(/is-selected/);
+  await expect(item("usbPlayerMenuAvailable", 133)).not.toHaveClass(/is-selected/);
+  await expect(add).toBeDisabled();
+  await expect(remove).toBeEnabled();
+  await expect(page.locator("#usbPlayerMenuUpBtn")).toBeEnabled();
+  await expect(page.locator("#usbPlayerMenuDownBtn")).toBeDisabled();
+
+  // The backend says this one can't be removed.
+  await item("usbPlayerMenuCurrent", 132).click();
+  await expect(remove).toBeDisabled();
+});
+
+test("background colour shows nothing selected when the databases differ, and a stick that can't take one says why", async ({ page }) => {
+  await installTauriMock(page, "valid");
+  await page.addInitScript(() => {
+    const invoke = window.__TAURI__.core.invoke;
+    window.__color = { pdbColor: 6, edbColor: 6, writable: true };
+    window.__TAURI__.core.invoke = async (command, payload) => {
+      if (command === "get_usb_background_color") return { ok: true, data: window.__color };
+      return invoke(command, payload);
+    };
+  });
+  await page.goto("/");
+  await connectUsb(page);
+  const openMenu = async (color) => {
+    await page.locator('.nav-item[data-view="usb"]').click();
+    await page.evaluate((color) => { window.__color = color; }, color);
+    await page.locator('.nav-item[data-view="usb-player-menu"]').click();
+  };
+  const chips = page.locator("#usbBackgroundColorChips .bg-color-chip");
+  const selected = page.locator("#usbBackgroundColorChips .bg-color-chip.is-selected");
+  const note = page.locator("#usbBackgroundColorNote");
+
+  await openMenu({ pdbColor: 6, edbColor: 6, writable: true });
+  await expect(chips).toHaveCount(9);
+  await expect(selected).toHaveAttribute("data-color", "6");
+  await expect(chips.first()).toBeEnabled();
+  await expect(note).toBeHidden();
+
+  await openMenu({ pdbColor: 6, edbColor: 0, writable: true });
+  await expect(selected).toHaveCount(0);
+  await expect(note).toContainText("Aqua for older players (PDB), Default for rekordbox");
+
+  await openMenu({ pdbColor: null, edbColor: 0, writable: false, reason: "no t19 page" });
+  await expect(chips.first()).toBeDisabled();
+  await expect(note).toHaveText("no t19 page");
 });
 
 test("choosing a background colour sets it on the USB and redraws from the answer", async ({ page }) => {

@@ -141,5 +141,5 @@ Implementation anchors:
 ## Verification links
 
 - USB import workflows: `backend/tests/export_functional.rs`, `backend/tests/user_flow_functional.rs`
-- Frontend USB flows: `vanilla-ui/tests/usb_workflows.test.mjs`, `vanilla-ui/tests/e2e/usb_flows.spec.mjs`
+- Frontend USB flows: `vanilla-ui/tests/e2e/usb_flows.spec.mjs`, `vanilla-ui/tests/e2e/tracklist_export.spec.mjs`
 - Parser compatibility coverage: `backend/src/pdb_reader.rs` tests (wrapping and sentinel handling)

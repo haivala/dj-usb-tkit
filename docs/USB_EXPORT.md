@@ -510,4 +510,4 @@ Implementation anchors:
 ## Verification links
 
 - Export behavior: `backend/tests/export_functional.rs`, `backend/tests/export_shape_parity_functional.rs`, `backend/tests/pdb_writer_functional.rs`
-- Frontend export flows: `vanilla-ui/tests/usb_export_label.test.mjs`, `vanilla-ui/tests/usb_workflows.test.mjs`
+- Frontend export flows: `vanilla-ui/tests/usb_export_label.test.mjs`, `vanilla-ui/tests/e2e/usb_flows.spec.mjs`
