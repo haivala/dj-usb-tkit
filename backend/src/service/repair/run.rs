@@ -37,10 +37,10 @@ fn repair_meta_text(
         if destructive { "destructive" } else { "safe" }.to_string(),
     ];
     if writes > 0 {
-        parts.push(format!("{writes} writes"));
+        parts.push(counted(writes, "write", "writes"));
     }
     if deletes > 0 {
-        parts.push(format!("{deletes} deletes"));
+        parts.push(counted(deletes, "delete", "deletes"));
     }
     if always_applied {
         parts.push("always applied".to_string());
@@ -2588,7 +2588,7 @@ mod repair_meta_text_tests {
         );
         assert_eq!(
             repair_meta_text(true, false, 1, 0, false),
-            "✓ supported · safe · 1 writes"
+            "✓ supported · safe · 1 write"
         );
     }
 }
