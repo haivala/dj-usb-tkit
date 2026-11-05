@@ -239,8 +239,8 @@ Known table families used by this repository:
 | `t14` | unlisted/other | not named in the Deep Symmetry table list; left empty by the current writer |
 | `t15` | unlisted/other | not named in the Deep Symmetry table list; left empty by the current writer |
 | `t16` | columns | player browse-category catalog; Deep Symmetry marks details as unconfirmed |
-| `t17` | history_playlists | Deep Symmetry: History menu playlist list; normal export preserves it; menu repair may rewrite it as an eDB category snapshot |
-| `t18` | history_entries | Deep Symmetry: links tracks to history playlist entries; normal export preserves it |
+| `t17` | history_playlists | Deep Symmetry: History menu playlist list. On the sticks checked it holds the Category menu, see "Menu Catalog"; normal export preserves it; menu edits update it |
+| `t18` | history_entries | Deep Symmetry: links tracks to history playlist entries. On the sticks checked it holds the Sort menu; normal export preserves it |
 | `t19` | history | Deep Symmetry: history synchronization data; a template-state page is activated on export |
 
 Deep Symmetry documents table type numbers in hexadecimal. In this document the
@@ -263,7 +263,8 @@ or playlists. All of them ship `t17`/`t18` pre-populated with a fixed,
 byte-identical block of blank template/seed rows (same ids, same shapes,
 regardless of the export's actual library or track count):
 
-- `t17` (`history_playlists`) rows have `name` empty (or a single stray
+- `t17` (named `history_playlists` by Deep Symmetry; on these sticks it's the Category
+  menu, see "Menu Catalog") rows have `name` empty (or a single stray
   control byte). Real rekordbox-recorded sessions are always named
   `"HISTORY NNN"`.
 - `t18` (`history_entries`) rows are physically 8 bytes — no `track_id`
@@ -849,6 +850,29 @@ eDB-only rows by `sequenceNo` together.
 
 PDB `t16` stores the hardware browse-category catalog. Normal playlist export
 does not rewrite `t16`, `t17`, or `t18`.
+
+`t17` holds the Category menu and `t18` the Sort menu, one 8-byte row per eDB
+`category` or `sort` row. Checked against rekordbox's own edits on a real stick,
+for `t17`:
+
+| Bytes | Meaning |
+| --- | --- |
+| 0-1 | `menuItem_id`, which is the `t16` row id |
+| 2-3 | `category_id` |
+| 4 | rekordbox's value for the row; it never changed in any edit |
+| 5 | flag: 1 hidden, 0 shown, 2 shown for MATCHING, 5 seen on DATE ADDED |
+| 6-7 | `sequenceNo` |
+
+Only rows `rowpf` marks present count. To change a row, rekordbox marks the old
+one absent and appends a new one, so the page's row count keeps rising while the
+live count stays the same. The app instead rewrites the live rows in place,
+keeping each row's bytes and position and changing only the flag and order, which
+is the shape of an untouched stick.
+
+DATE ADDED looks forced on: both databases list it on an untouched stick while
+rekordbox's editor shows it as inactive, and rekordbox's edits leave its row out of
+step between the databases. The app always shows it, never writes its rows, and
+leaves it out when comparing them.
 
 Fresh initialized USBs seed 27 browse categories:
 

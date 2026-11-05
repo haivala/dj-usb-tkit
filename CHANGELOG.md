@@ -71,6 +71,10 @@
   status lines, diagnostics, player menu and background colour text now come from the backend.
 - **Improvement:** The Player Menu editor no longer tags items as being in only one database, and its PDB fix is
   gone with its banner, buttons and diagnostics warning: it was for a one-time error the app no longer makes.
+- **Improvement:** The Player Menu editor and background colour work on a USB with only one of its databases.
+- **Fix:** A Player Menu change now keeps rekordbox's row data in the PDB, instead of overwriting part of it.
+- **Fix:** The Player Menu editor no longer offers items that aren't browse categories, such as COMMENTS and CUE.
+- **Improvement:** DATE ADDED always stays in the player menu, and differing menus in the databases are logged.
 - **Fix:** Removing a USB playlist no longer blanks the open playlist's track count while its table reloads.
 - **Fix:** Reordering USB playlists now saves the order in both databases for every playlist, by name.
   Before, a playlist only in the eDB kept its old place, and always listed after the others.

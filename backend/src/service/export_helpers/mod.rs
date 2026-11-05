@@ -54,7 +54,7 @@ pub use pdb_encoding::{
 };
 pub use pdb_menu::{
     PdbT16Row, encode_pdb_t16_row, encode_pdb_t17_cat_row, inspect_pdb_columns_playlist_order,
-    load_pdb_t16_decoded, load_pdb_t16_raw, load_pdb_t16_rows_from_bytes,
+    load_pdb_t16_decoded, load_pdb_t16_raw, load_pdb_t16_rows_from_bytes, load_pdb_t17_live_rows,
     patch_pdb_columns_menu_set_by_kind, patch_pdb_t17_category_snapshot,
 };
 pub use playlist_ops::{

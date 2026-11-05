@@ -5,7 +5,7 @@
 //! only ever sets them together, and export and repair leave both alone
 //! (see `crate::pdb_writer::t19_sync_target`).
 
-use super::run::{StagedPdb, write_back_both_or_neither};
+use super::run::{StagedPdb, write_back_both_or_neither, write_back_pdb_alone};
 use super::*;
 use crate::models::{
     GetUsbBackgroundColorRequest, SetUsbBackgroundColorRequest, UsbBackgroundColorChip,
@@ -28,9 +28,13 @@ fn background_color_name(color: u8) -> String {
         .map_or_else(|| format!("colour {color}"), |name| (*name).to_string())
 }
 
-/// A chip is selected only while both databases hold that color.
+/// A chip is selected only while both databases hold that color. With one
+/// database, that one decides.
 fn background_color_chips(pdb: Option<u8>, edb: Option<u8>) -> Vec<UsbBackgroundColorChip> {
-    let selected = pdb.filter(|_| pdb == edb);
+    let selected = match (pdb, edb) {
+        (Some(pdb), Some(edb)) => (pdb == edb).then_some(pdb),
+        (one, other) => one.or(other),
+    };
     (0u8..)
         .zip(BACKGROUND_COLORS)
         .map(|(color, name)| UsbBackgroundColorChip {
@@ -72,19 +76,23 @@ fn edb_background_color(conn: &rusqlite::Connection) -> Option<u8> {
 }
 
 /// Both databases' colors for the staged `pdb`, and whether a color can be
-/// set: only when both have a place for it, so the app never sets one alone.
+/// set: either database having a place for it is enough, and the app writes to
+/// whichever have one.
 fn read_background_colors(
     usb_root: &Path,
     pdb: &[u8],
     warnings: &mut Vec<WarningEntry>,
 ) -> UsbBackgroundColorData {
-    let pdb_color = crate::pdb_writer::t19_background_color(pdb, page_size_of(pdb));
-    let edb_color = open_edb_rw(usb_root, warnings).and_then(|conn| edb_background_color(&conn));
-    let reason = match (pdb_color, edb_color) {
-        (None, _) => Some("The USB's PDB has no history (t19) page to hold the color.".to_string()),
-        (_, None) => Some("The USB's eDB has no readable property row.".to_string()),
-        _ => None,
-    };
+    let pdb_color = (!pdb.is_empty())
+        .then(|| crate::pdb_writer::t19_background_color(pdb, page_size_of(pdb)))
+        .flatten();
+    let has_edb = usb_staging::stage_edb(usb_root).is_ok_and(|path| path.is_file());
+    let edb_color = has_edb
+        .then(|| open_edb_rw(usb_root, warnings))
+        .flatten()
+        .and_then(|conn| edb_background_color(&conn));
+    let reason = (pdb_color.is_none() && edb_color.is_none())
+        .then(|| "This USB has no place for a background colour.".to_string());
     UsbBackgroundColorData {
         chips: background_color_chips(pdb_color, edb_color),
         note_text: background_color_note(pdb_color, edb_color, reason.as_deref()),
@@ -130,7 +138,8 @@ impl BackendService {
         if let Some(reason) = before.reason {
             return Err(BackendError::Validation(reason));
         }
-        if before.pdb_color == Some(req.color) && before.edb_color == Some(req.color) {
+        let holds = |color: Option<u8>| color.is_none_or(|color| color == req.color);
+        if holds(before.pdb_color) && holds(before.edb_color) {
             return Ok(UsbBackgroundColorData {
                 status_text: "Background colour unchanged".to_string(),
                 warnings,
@@ -156,18 +165,28 @@ impl BackendService {
         );
 
         // The PDB change stays in memory until the eDB one has succeeded.
-        let page_size = page_size_of(&pdb.bytes);
-        pdb.patch(|bytes| {
-            crate::pdb_writer::set_t19_background_color(bytes, page_size, req.color)
-        })?;
-        let conn = open_edb_rw(&usb_root, &mut warnings)
-            .ok_or_else(|| BackendError::Validation("unable to open the USB's eDB".to_string()))?;
-        conn.execute(
-            "UPDATE property SET backGroundColorType = ?1",
-            params![req.color],
-        )?;
-        drop(conn);
-        write_back_both_or_neither(&usb_root, &mut pdb)?;
+        if before.pdb_color.is_some() {
+            let page_size = page_size_of(&pdb.bytes);
+            pdb.patch(|bytes| {
+                crate::pdb_writer::set_t19_background_color(bytes, page_size, req.color)
+            })?;
+        }
+        if before.edb_color.is_some() {
+            let conn = open_edb_rw(&usb_root, &mut warnings).ok_or_else(|| {
+                BackendError::Validation("unable to open the USB's eDB".to_string())
+            })?;
+            conn.execute(
+                "UPDATE property SET backGroundColorType = ?1",
+                params![req.color],
+            )?;
+        }
+        match (before.pdb_color, before.edb_color) {
+            (Some(_), Some(_)) => write_back_both_or_neither(&usb_root, &mut pdb)?,
+            (Some(_), None) => write_back_pdb_alone(&usb_root, &mut pdb)?,
+            _ => {
+                usb_staging::write_back_if_changed(&usb_root, usb_staging::DbKind::Edb)?;
+            }
+        }
         self.invalidate_usb_parse_cache();
         warnings.push(logging::log(
             Level::Info,
@@ -206,7 +225,9 @@ mod text_tests {
         assert_eq!(background_color_chips(None, None).len(), 9);
         assert_eq!(selected(Some(6), Some(6)), [6]);
         assert!(selected(Some(6), Some(0)).is_empty());
-        assert!(selected(None, Some(0)).is_empty());
+        // One database: that one decides.
+        assert_eq!(selected(None, Some(0)), [0]);
+        assert_eq!(selected(Some(4), None), [4]);
     }
 
     #[test]

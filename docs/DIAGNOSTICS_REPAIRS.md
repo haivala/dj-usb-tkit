@@ -254,7 +254,7 @@ Menu commands are separate from diagnostics repair:
 
 | Command | Behavior |
 | --- | --- |
-| `update_usb_player_menu_config` | treats eDB `category` as the Active Category source, keeps required player menu kinds visible, writes eDB category rows, and updates the PDB `t17` category snapshot when the visible set changes |
+| `update_usb_player_menu_config` | writes the menu to eDB `category` and PDB `t17`, or to the one the stick has; keeps required player menu kinds visible; never changes PDB `t16` |
 
 ## Strict Parity Upgrade
 

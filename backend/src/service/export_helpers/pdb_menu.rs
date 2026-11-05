@@ -10,7 +10,16 @@ use crate::utils::{
 };
 
 fn load_pdb_t16_rows(bytes: &[u8], page_size: usize) -> BackendResult<(Vec<u32>, Vec<Vec<u8>>)> {
-    let Some((_ec16, first16, last16)) = table_ptr_fields(bytes, 16) else {
+    load_live_table_rows(bytes, page_size, 16)
+}
+
+/// A table's data pages and live rows: only rows the page footer marks present.
+fn load_live_table_rows(
+    bytes: &[u8],
+    page_size: usize,
+    table: u32,
+) -> BackendResult<(Vec<u32>, Vec<Vec<u8>>)> {
+    let Some((_ec16, first16, last16)) = table_ptr_fields(bytes, table) else {
         return Ok((Vec::new(), Vec::new()));
     };
     let chain16 = collect_chain_pages(bytes, page_size, first16, last16).ok_or_else(|| {
@@ -341,6 +350,26 @@ pub fn patch_pdb_columns_menu_set_by_kind(
     Ok(true)
 }
 
+/// The live t17 rows of the staged PDB, one per eDB `category` row. Rekordbox
+/// marks a changed row absent and appends a new one, so the page holds dead rows
+/// too. Empty when there is no PDB or no t17.
+pub fn load_pdb_t17_live_rows(usb_root: &Path) -> BackendResult<Vec<[u8; 8]>> {
+    let pdb_path = crate::service::usb_staging::stage_pdb(usb_root)?;
+    if !pdb_path.is_file() {
+        return Ok(Vec::new());
+    }
+    let bytes = std::fs::read(&pdb_path)?;
+    let page_size = 4096usize;
+    if bytes.len() < page_size || !bytes.len().is_multiple_of(page_size) {
+        return Ok(Vec::new());
+    }
+    let (_pages, rows) = load_live_table_rows(&bytes, page_size, 17)?;
+    Ok(rows
+        .iter()
+        .filter_map(|row| <[u8; 8]>::try_from(row.as_slice()).ok())
+        .collect())
+}
+
 /// Encode one eDB.category row as an 8-byte PDB t17 entry.
 ///
 /// Format: menuItemId(u16LE) | categoryId(u16LE) | 0x63(u8) | flags(u8) | seqNo(u16LE)
@@ -399,7 +428,17 @@ pub fn patch_pdb_t17_category_snapshot(
     let data_pages: Vec<u32> = chain.iter().skip(1).copied().collect();
     let row_vecs: Vec<Vec<u8>> = encoded_rows.iter().map(|r| r.to_vec()).collect();
     let mut bytes = before.clone();
-    rewrite_pdb_t16_rows(&mut bytes, page_size, &data_pages, &row_vecs)?;
+    // Every row on the first page, as a fresh stick has them, so rows keep their
+    // order. Rekordbox may have put a row on a later page: that page empties.
+    let (first_page, later_pages) = data_pages.split_at(1);
+    rewrite_pdb_t16_rows(&mut bytes, page_size, first_page, &row_vecs)?;
+    for page_idx in later_pages {
+        if !rewrite_variable_page_rows_in_place(&mut bytes, *page_idx, &[], page_size) {
+            return Err(BackendError::Validation(format!(
+                "PDB t17 category patch failed: could not empty page {page_idx}"
+            )));
+        }
+    }
     if bytes == before {
         return Ok(false);
     }

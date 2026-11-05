@@ -1,10 +1,26 @@
-//! Player menu config: reading, editing, and eDB↔PDB sync.
+//! Player menu config: reading and editing it in both databases.
+//!
+//! The menu is held twice: eDB `category`, and PDB `t17`, one 8-byte row per
+//! category with the item, the category, a byte rekordbox keeps per row, a flag
+//! (1 = hidden) and the order. PDB `t16` is the catalog that names the items and
+//! is never changed here. A stick with only one database uses that one.
 
 use super::*;
 
 /// Player menu kinds that cannot be removed once present in the current menu.
-/// TRACK=131, PLAYLIST=132, FOLDER=144, SEARCH=145, HISTORY=149.
-pub(super) const REQUIRED_PLAYER_MENU_KINDS: &[u32] = &[131, 132, 144, 145, 149];
+/// TRACK=131, PLAYLIST=132, FOLDER=144, SEARCH=145, HISTORY=149, as rekordbox
+/// locks them, and DATE ADDED.
+pub(super) const REQUIRED_PLAYER_MENU_KINDS: &[u32] = &[131, 132, 140, 144, 145, 149];
+
+/// DATE ADDED looks forced on: both databases list it on an untouched stick while
+/// rekordbox's editor doesn't count it, and rekordbox's own edits leave its row
+/// out of step between them. So it always shows, can't be moved or removed, and
+/// its rows are never written.
+const DATE_ADDED_KIND: u32 = 140;
+const T17_FLAG_HIDDEN: u8 = 1;
+
+/// A menu item's id and its encoded t17 row.
+type T17RowByItem = (u32, [u8; 8]);
 
 /// Whether a player-menu item of this kind may be removed from the current
 /// menu. Mirrored onto `UsbPlayerMenuItem.removable` so the frontend never
@@ -73,14 +89,15 @@ pub(super) fn load_edb_menu_rows(
 /// eDB is what the player software reads; PDB t16 is a secondary index that
 /// must mirror eDB. `current` is the eDB-visible set in sequenceNo order;
 /// `available` is the full eDB menuItem catalog minus the visible set.
-/// Build PDB t17 8-byte rows from the current eDB.category state.
+/// Build PDB t17 8-byte rows from the current eDB.category state, by item, and
+/// DATE ADDED's item.
 /// Used to keep PDB t17 in sync with eDB.category after a menu config save.
 pub(super) fn load_t17_encoded_rows(
     usb_root: &std::path::Path,
     warnings: &mut Vec<WarningEntry>,
-) -> BackendResult<Vec<[u8; 8]>> {
+) -> BackendResult<(Vec<T17RowByItem>, Option<u32>)> {
     let Some(conn) = open_edb_from_usb_root(usb_root, warnings) else {
-        return Ok(Vec::new());
+        return Ok((Vec::new(), None));
     };
     let mut stmt = conn.prepare(
         "SELECT c.category_id, c.menuItem_id, c.sequenceNo, c.isVisible, m.kind
@@ -98,17 +115,26 @@ pub(super) fn load_t17_encoded_rows(
         ))
     })?;
     let mut out = Vec::new();
+    let mut date_added_item = None;
     for r in rows {
         let (cat_id, menu_item_id, seq_no, is_visible, kind) = r?;
-        out.push(crate::service::export_helpers::encode_pdb_t17_cat_row(
-            u16::try_from(menu_item_id).unwrap_or(0),
-            u16::try_from(cat_id).unwrap_or(0),
-            is_visible != 0,
-            u32::try_from(kind).unwrap_or(0),
-            u16::try_from(seq_no).unwrap_or(0),
+        let kind = u32::try_from(kind).unwrap_or(0);
+        let item = u32::try_from(menu_item_id).unwrap_or(0);
+        if kind == DATE_ADDED_KIND {
+            date_added_item = Some(item);
+        }
+        out.push((
+            item,
+            crate::service::export_helpers::encode_pdb_t17_cat_row(
+                u16::try_from(menu_item_id).unwrap_or(0),
+                u16::try_from(cat_id).unwrap_or(0),
+                is_visible != 0,
+                kind,
+                u16::try_from(seq_no).unwrap_or(0),
+            ),
         ));
     }
-    Ok(out)
+    Ok((out, date_added_item))
 }
 
 /// A menu row's text.
@@ -121,52 +147,243 @@ fn player_menu_label(name: &str, kind: u32) -> String {
     }
 }
 
+/// One menu row as a database holds it, whichever database that is.
+#[derive(Debug, Clone)]
+struct MenuRow {
+    menu_item_id: u32,
+    kind: u32,
+    name: String,
+    visible: bool,
+    sequence_no: u32,
+}
+
+fn t17_row_item(row: &[u8; 8]) -> u32 {
+    u32::from(u16::from_le_bytes([row[0], row[1]]))
+}
+
+fn t17_row_sequence(row: &[u8; 8]) -> u16 {
+    u16::from_le_bytes([row[6], row[7]])
+}
+
+/// The eDB's menu. An item with no `category` row isn't a browse category:
+/// COMMENTS and the like are `sort` items, and CUE is in neither.
+fn edb_menu_rows(
+    usb_root: &std::path::Path,
+    warnings: &mut Vec<WarningEntry>,
+) -> BackendResult<Vec<MenuRow>> {
+    Ok(load_edb_menu_rows(usb_root, warnings)?
+        .into_iter()
+        .filter_map(|row| {
+            Some(MenuRow {
+                sequence_no: row.sequence_no?,
+                menu_item_id: row.menu_item_id,
+                kind: row.kind,
+                name: row.name,
+                visible: row.is_visible,
+            })
+        })
+        .collect())
+}
+
+/// The PDB's menu: `t17` says what shows and in what order, `t16` names it.
+fn pdb_menu_rows(usb_root: &std::path::Path) -> BackendResult<Vec<MenuRow>> {
+    let catalog = crate::service::export_helpers::load_pdb_t16_decoded(usb_root)?;
+    let rows = crate::service::export_helpers::load_pdb_t17_live_rows(usb_root)?;
+    Ok(rows
+        .iter()
+        .filter_map(|row| {
+            let menu_item_id = t17_row_item(row);
+            let entry = catalog
+                .iter()
+                .find(|entry| u32::from(entry.id) == menu_item_id)?;
+            Some(MenuRow {
+                menu_item_id,
+                kind: u32::from(entry.kind),
+                name: normalize_player_menu_name(&entry.name),
+                visible: row[5] != T17_FLAG_HIDDEN,
+                sequence_no: u32::from(t17_row_sequence(row)),
+            })
+        })
+        .collect())
+}
+
+fn stick_has_edb(usb_root: &std::path::Path) -> BackendResult<bool> {
+    Ok(usb_staging::stage_edb(usb_root)?.is_file())
+}
+
+/// The menu rows, from the eDB when the stick has one, else from the PDB.
+fn menu_rows(
+    usb_root: &std::path::Path,
+    warnings: &mut Vec<WarningEntry>,
+) -> BackendResult<Vec<MenuRow>> {
+    if stick_has_edb(usb_root)? {
+        return edb_menu_rows(usb_root, warnings);
+    }
+    let rows = pdb_menu_rows(usb_root)?;
+    if rows.is_empty() {
+        return Err(crate::error::BackendError::Validation(
+            "this USB has no player menu in its eDB or PDB".to_string(),
+        ));
+    }
+    Ok(rows)
+}
+
+/// What shows, in order, leaving DATE ADDED out: its rows are out of step on
+/// rekordbox-written sticks, and it isn't edited.
+fn compared_menu_order(rows: &[MenuRow]) -> Vec<u32> {
+    let mut shown: Vec<&MenuRow> = rows
+        .iter()
+        .filter(|row| row.visible && row.kind != DATE_ADDED_KIND)
+        .collect();
+    shown.sort_by_key(|row| (row.sequence_no, row.menu_item_id));
+    shown.iter().map(|row| row.menu_item_id).collect()
+}
+
+/// Whether both databases hold a menu and they show different ones.
+fn menu_databases_differ(usb_root: &std::path::Path, warnings: &mut Vec<WarningEntry>) -> bool {
+    if !stick_has_edb(usb_root).unwrap_or(false) {
+        return false;
+    }
+    let (Ok(edb), Ok(pdb)) = (edb_menu_rows(usb_root, warnings), pdb_menu_rows(usb_root)) else {
+        return false;
+    };
+    !pdb.is_empty() && compared_menu_order(&edb) != compared_menu_order(&pdb)
+}
+
 pub(super) fn load_usb_player_menu_config(
     usb_root: &std::path::Path,
     warnings: &mut Vec<WarningEntry>,
 ) -> BackendResult<(Vec<UsbPlayerMenuItem>, Vec<UsbPlayerMenuItem>)> {
-    let edb_rows = load_edb_menu_rows(usb_root, warnings)?;
-    // current = eDB visible items in eDB sequenceNo order.
-    let mut edb_visible: Vec<&EdbMenuRow> = edb_rows.iter().filter(|r| r.is_visible).collect();
-    edb_visible.sort_by_key(|r| (r.sequence_no.unwrap_or(u32::MAX), r.menu_item_id));
-
-    let last_current = edb_visible.len().saturating_sub(1);
-    let mut current = Vec::<UsbPlayerMenuItem>::with_capacity(edb_visible.len());
-    for (seq, row) in edb_visible.iter().enumerate() {
-        current.push(UsbPlayerMenuItem {
-            menu_item_id: row.menu_item_id,
-            kind: row.kind,
-            name: row.name.clone(),
-            is_visible: true,
-            sequence_no: Some(u32::try_from(seq).unwrap_or(u32::MAX)),
-            removable: player_menu_kind_removable(row.kind),
-            label: player_menu_label(&row.name, row.kind),
-            can_move_up: seq > 0,
-            can_move_down: seq < last_current,
-        });
-    }
-
-    // available = all eDB menuItems not currently visible.
-    let mut available = Vec::<UsbPlayerMenuItem>::new();
-    for row in &edb_rows {
-        if row.is_visible {
-            continue;
+    let mut rows = menu_rows(usb_root, warnings)?;
+    rows.sort_by_key(|row| (row.sequence_no, row.menu_item_id));
+    // DATE ADDED always shows. Rekordbox can leave the eDB saying it's hidden.
+    for row in &mut rows {
+        if row.kind == DATE_ADDED_KIND && !row.visible {
+            row.visible = true;
+            row.sequence_no = u32::MAX;
         }
-        available.push(UsbPlayerMenuItem {
+    }
+    rows.sort_by_key(|row| (row.sequence_no, row.menu_item_id));
+
+    let movable: Vec<u32> = rows
+        .iter()
+        .filter(|row| row.visible && row.kind != DATE_ADDED_KIND)
+        .map(|row| row.kind)
+        .collect();
+    let item =
+        |row: &MenuRow, sequence_no: Option<u32>, position: Option<usize>| UsbPlayerMenuItem {
             menu_item_id: row.menu_item_id,
             kind: row.kind,
             name: row.name.clone(),
-            is_visible: false,
-            sequence_no: None,
+            is_visible: row.visible,
+            sequence_no,
             removable: player_menu_kind_removable(row.kind),
             label: player_menu_label(&row.name, row.kind),
-            can_move_up: false,
-            can_move_down: false,
-        });
-    }
+            can_move_up: position.is_some_and(|at| at > 0),
+            can_move_down: position.is_some_and(|at| at + 1 < movable.len()),
+        };
+    let current = rows
+        .iter()
+        .filter(|row| row.visible)
+        .enumerate()
+        .map(|(seq, row)| {
+            let position = movable.iter().position(|&kind| kind == row.kind);
+            item(row, Some(u32::try_from(seq).unwrap_or(u32::MAX)), position)
+        })
+        .collect();
+    let mut available: Vec<UsbPlayerMenuItem> = rows
+        .iter()
+        .filter(|row| !row.visible)
+        .map(|row| item(row, None, None))
+        .collect();
     available.sort_by_key(|item| item.menu_item_id);
-
     Ok((current, available))
+}
+
+/// The order values for `kinds`, counting from 1 and skipping `reserved`: DATE
+/// ADDED's value, which stays as it is.
+fn menu_sequence_values(kinds: &[u32], reserved: Option<u32>) -> Vec<(u32, u32)> {
+    let mut next = 0u32;
+    kinds
+        .iter()
+        .map(|&kind| {
+            next += 1;
+            if Some(next) == reserved {
+                next += 1;
+            }
+            (kind, next)
+        })
+        .collect()
+}
+
+/// `live` with each row's flag and order taken from `wanted`, a menu state by
+/// item. Everything else in a row stays, and rows stay in place. DATE ADDED's row
+/// isn't touched. A row the table lacks is added after the others.
+fn updated_t17_rows(
+    live: &[[u8; 8]],
+    wanted: &[T17RowByItem],
+    date_added_item: Option<u32>,
+) -> Vec<[u8; 8]> {
+    let mut rows: Vec<[u8; 8]> = live
+        .iter()
+        .map(|row| {
+            let mut row = *row;
+            if Some(t17_row_item(&row)) == date_added_item {
+                return row;
+            }
+            if let Some((_, new)) = wanted.iter().find(|(item, _)| *item == t17_row_item(&row)) {
+                row[5] = new[5];
+                row[6] = new[6];
+                row[7] = new[7];
+            }
+            row
+        })
+        .collect();
+    for (item, new) in wanted {
+        let known = live.iter().any(|row| t17_row_item(row) == *item);
+        if !known && Some(*item) != date_added_item {
+            rows.push(*new);
+        }
+    }
+    rows
+}
+
+/// The t17 rows for the eDB's menu, on top of the rows the PDB already has.
+fn t17_rows_from_edb(
+    usb_root: &std::path::Path,
+    warnings: &mut Vec<WarningEntry>,
+) -> BackendResult<Vec<[u8; 8]>> {
+    let (encoded, date_added_item) = load_t17_encoded_rows(usb_root, warnings)?;
+    let live = crate::service::export_helpers::load_pdb_t17_live_rows(usb_root)?;
+    Ok(updated_t17_rows(&live, &encoded, date_added_item))
+}
+
+/// The t17 rows for a stick with no eDB: `kinds` show, in order, the rest hide.
+fn t17_rows_for_kinds(usb_root: &std::path::Path, kinds: &[u32]) -> BackendResult<Vec<[u8; 8]>> {
+    let rows = pdb_menu_rows(usb_root)?;
+    let live = crate::service::export_helpers::load_pdb_t17_live_rows(usb_root)?;
+    let date_added = rows.iter().find(|row| row.kind == DATE_ADDED_KIND);
+    let values = menu_sequence_values(kinds, date_added.map(|row| row.sequence_no));
+    let wanted: Vec<T17RowByItem> = rows
+        .iter()
+        .map(|row| {
+            let value = values.iter().find(|(kind, _)| *kind == row.kind);
+            let sequence_no = value.map_or(0, |(_, seq)| *seq);
+            let new = crate::service::export_helpers::encode_pdb_t17_cat_row(
+                u16::try_from(row.menu_item_id).unwrap_or(0),
+                0,
+                value.is_some(),
+                row.kind,
+                u16::try_from(sequence_no).unwrap_or(0),
+            );
+            (row.menu_item_id, new)
+        })
+        .collect();
+    Ok(updated_t17_rows(
+        &live,
+        &wanted,
+        date_added.map(|row| row.menu_item_id),
+    ))
 }
 
 /// Mirror eDB `category` rows from an ordered list of PDB t16 kinds.
@@ -197,7 +414,7 @@ pub(super) fn mirror_edb_category_from_pdb_kinds(
     let mut desired_kinds = Vec::<u32>::new();
     let mut seen = HashSet::<u32>::new();
     for kind in pdb_kind_order {
-        if seen.insert(*kind) {
+        if *kind != DATE_ADDED_KIND && seen.insert(*kind) {
             desired_kinds.push(*kind);
         }
     }
@@ -227,8 +444,24 @@ pub(super) fn mirror_edb_category_from_pdb_kinds(
             category_by_menu.entry(menu_item_id).or_insert(category_id);
         }
 
+        // DATE ADDED's row stays exactly as it is.
+        let date_added_menu_id = menu_item_id_by_kind.get(&DATE_ADDED_KIND).copied();
+        let date_added_sequence: Option<u32> = match date_added_menu_id {
+            Some(menu_id) => tx
+                .query_row(
+                    "SELECT sequenceNo FROM category WHERE menuItem_id = ?1 AND isVisible = 1",
+                    params![menu_id],
+                    |row| row.get::<_, i64>(0),
+                )
+                .ok()
+                .and_then(|value| u32::try_from(value).ok()),
+            None => None,
+        };
+        let sequence_values = menu_sequence_values(&desired_kinds, date_added_sequence);
+
         let mut mirrored_menu_ids = HashSet::<i64>::new();
-        for (seq, kind) in desired_kinds.iter().enumerate() {
+        mirrored_menu_ids.extend(date_added_menu_id);
+        for (kind, seq) in &sequence_values {
             let Some(menu_id) = menu_item_id_by_kind.get(kind).copied() else {
                 warnings.push(logging::log(
                     Level::Warn,
@@ -239,7 +472,7 @@ pub(super) fn mirror_edb_category_from_pdb_kinds(
                 continue;
             };
             mirrored_menu_ids.insert(menu_id);
-            let seq_i64 = i64::try_from(seq + 1).unwrap_or(1);
+            let seq_i64 = i64::from(*seq);
             if let Some(category_id) = category_by_menu.get(&menu_id).copied() {
                 tx.execute(
                     "UPDATE category SET isVisible = 1, sequenceNo = ?2 WHERE category_id = ?1",
@@ -303,6 +536,14 @@ impl BackendService {
         let mut warnings = Vec::<WarningEntry>::new();
         let (current_items, available_items) =
             load_usb_player_menu_config(&usb_root, &mut warnings)?;
+        if menu_databases_differ(&usb_root, &mut warnings) {
+            warnings.push(logging::log(
+                Level::Warn,
+                "usb-player-menu",
+                "usb.player-menu.databases-differ",
+                "The PDB and eDB show different player menus. Showing the eDB's: the next menu change writes it to both.",
+            ));
+        }
         Ok(GetUsbPlayerMenuConfigData {
             status_text: "Player menu loaded".to_string(),
             current_items,
@@ -331,13 +572,37 @@ impl BackendService {
             name_by_kind.insert(item.kind, item.name.clone());
         }
 
+        let has_edb = stick_has_edb(&usb_root)?;
+        let databases_differ = menu_databases_differ(&usb_root, &mut warnings);
+
+        // Reject removing a browse category the CDJ requires.
+        if req.action == UsbPlayerMenuEdit::Remove
+            && !player_menu_kind_removable(req.kind)
+            && before_current.iter().any(|item| item.kind == req.kind)
+        {
+            let name = name_by_kind
+                .get(&req.kind)
+                .map(|s| s.as_str())
+                .unwrap_or("?");
+            return Err(crate::error::BackendError::Validation(format!(
+                "Player menu item \"{name}\" (kind {}) cannot be removed",
+                req.kind
+            )));
+        }
+
         let before_kinds = before_current
             .iter()
             .map(|item| item.kind)
+            .filter(|&kind| kind != DATE_ADDED_KIND)
             .collect::<Vec<_>>();
-        let desired_kinds = apply_player_menu_edit(&before_kinds, req.action, req.kind);
+        let desired_kinds = if req.kind == DATE_ADDED_KIND {
+            before_kinds.clone()
+        } else {
+            apply_player_menu_edit(&before_kinds, req.action, req.kind)
+        };
 
-        if desired_kinds == before_kinds {
+        // An edit that changes nothing still writes both when they differ.
+        if desired_kinds == before_kinds && !databases_differ {
             // Nothing to write (and no backup to make).
             return Ok(UpdateUsbPlayerMenuConfigData {
                 updated: false,
@@ -346,17 +611,6 @@ impl BackendService {
                 available_items: before_available,
                 warnings,
             });
-        }
-
-        // Reject removing a browse category the CDJ requires.
-        let desired_set: HashSet<u32> = desired_kinds.iter().copied().collect();
-        for &kind in REQUIRED_PLAYER_MENU_KINDS {
-            if before_current.iter().any(|item| item.kind == kind) && !desired_set.contains(&kind) {
-                let name = name_by_kind.get(&kind).map(|s| s.as_str()).unwrap_or("?");
-                return Err(crate::error::BackendError::Validation(format!(
-                    "Player menu item \"{name}\" (kind {kind}) cannot be removed"
-                )));
-            }
         }
 
         // Validate desired kinds: drop any with no known display name.
@@ -387,51 +641,59 @@ impl BackendService {
                 }),
         );
 
-        // Snapshot eDB for rollback if the write fails. Staged path: this must
-        // match whatever path `mirror_edb_category_from_pdb_kinds`'s
-        // `open_edb_rw` actually mutates (the local staged copy when staging
-        // is active), or the snapshot/restore would operate on a file the
-        // write never touched.
-        let edb_path = usb_staging::stage_edb(&usb_root)?;
-        let edb_snapshot = if edb_path.is_file() {
-            std::fs::read(&edb_path).ok()
-        } else {
-            None
-        };
+        if has_edb {
+            // Snapshot eDB for rollback if the write fails. Staged path: this must
+            // match whatever path `mirror_edb_category_from_pdb_kinds`'s
+            // `open_edb_rw` actually mutates (the local staged copy when staging
+            // is active), or the snapshot/restore would operate on a file the
+            // write never touched.
+            let edb_path = usb_staging::stage_edb(&usb_root)?;
+            let edb_snapshot = if edb_path.is_file() {
+                std::fs::read(&edb_path).ok()
+            } else {
+                None
+            };
 
-        if let Err(err) = mirror_edb_category_from_pdb_kinds(&usb_root, &final_kinds, &mut warnings)
-        {
-            warnings.push(logging::log(
-                Level::Error,
-                "usb-player-menu",
-                "usb.player-menu.edb-write-failed",
-                format!("eDB write failed ({err}); restoring eDB from snapshot"),
-            ));
-            if let Some(snapshot) = edb_snapshot.as_ref()
-                && let Err(restore_err) = std::fs::write(&edb_path, snapshot)
+            if let Err(err) =
+                mirror_edb_category_from_pdb_kinds(&usb_root, &final_kinds, &mut warnings)
             {
                 warnings.push(logging::log(
                     Level::Error,
                     "usb-player-menu",
-                    "usb.player-menu.edb-restore-failed",
-                    format!(
-                        "eDB snapshot could not be put back ({restore_err}): {}",
-                        edb_path.display()
-                    ),
+                    "usb.player-menu.edb-write-failed",
+                    format!("eDB write failed ({err}); restoring eDB from snapshot"),
+                ));
+                if let Some(snapshot) = edb_snapshot.as_ref()
+                    && let Err(restore_err) = std::fs::write(&edb_path, snapshot)
+                {
+                    warnings.push(logging::log(
+                        Level::Error,
+                        "usb-player-menu",
+                        "usb.player-menu.edb-restore-failed",
+                        format!(
+                            "eDB snapshot could not be put back ({restore_err}): {}",
+                            edb_path.display()
+                        ),
+                    ));
+                }
+                // Deliberately no write_back_if_changed here: the local copy was
+                // just restored to its pre-attempt state, so the real USB drive
+                // must never see this failed attempt.
+                return Err(err);
+            }
+            if let Err(err) =
+                usb_staging::write_back_if_changed(&usb_root, usb_staging::DbKind::Edb)
+            {
+                warnings.push(logging::log(
+                    Level::Error,
+                    "usb-player-menu",
+                    "usb.player-menu.edb-write-back-failed",
+                    format!("eDB write-back to USB failed: {err}"),
                 ));
             }
-            // Deliberately no write_back_if_changed here: the local copy was
-            // just restored to its pre-attempt state, so the real USB drive
-            // must never see this failed attempt.
-            return Err(err);
-        }
-        if let Err(err) = usb_staging::write_back_if_changed(&usb_root, usb_staging::DbKind::Edb) {
-            warnings.push(logging::log(
-                Level::Error,
-                "usb-player-menu",
-                "usb.player-menu.edb-write-back-failed",
-                format!("eDB write-back to USB failed: {err}"),
-            ));
+        } else {
+            let rows = t17_rows_for_kinds(&usb_root, &final_kinds)?;
+            crate::service::export_helpers::patch_pdb_t17_category_snapshot(&usb_root, &rows)?;
         }
 
         let (current_items, available_items) =
@@ -440,34 +702,38 @@ impl BackendService {
             .iter()
             .map(|item| item.kind)
             .collect::<Vec<_>>();
-        let updated = before_kinds != after_kinds;
+        let before_all_kinds = before_current
+            .iter()
+            .map(|item| item.kind)
+            .collect::<Vec<_>>();
+        let updated = before_all_kinds != after_kinds || databases_differ;
 
         if updated {
-            match load_t17_encoded_rows(&usb_root, &mut warnings) {
-                Ok(t17_rows) if !t17_rows.is_empty() => {
-                    match crate::service::export_helpers::patch_pdb_t17_category_snapshot(
-                        &usb_root, &t17_rows,
-                    ) {
-                        Ok(true) => {
-                            warnings.push(logging::log(
-                                Level::Info,
-                                "usb-player-menu",
-                                "usb.player-menu.t17-snapshot-updated",
-                                "PDB t17 category snapshot updated",
-                            ));
-                        }
-                        Ok(false) => {}
-                        Err(e) => {
-                            warnings.push(logging::log(
-                                Level::Warn,
-                                "usb-player-menu",
-                                "usb.player-menu.t17-update-skipped",
-                                format!("PDB t17 update skipped: {e}"),
-                            ));
-                        }
+            if has_edb {
+                let patched = t17_rows_from_edb(&usb_root, &mut warnings).and_then(|rows| {
+                    crate::service::export_helpers::patch_pdb_t17_category_snapshot(
+                        &usb_root, &rows,
+                    )
+                });
+                match patched {
+                    Ok(true) => {
+                        warnings.push(logging::log(
+                            Level::Info,
+                            "usb-player-menu",
+                            "usb.player-menu.t17-snapshot-updated",
+                            "PDB t17 category snapshot updated",
+                        ));
+                    }
+                    Ok(false) => {}
+                    Err(e) => {
+                        warnings.push(logging::log(
+                            Level::Warn,
+                            "usb-player-menu",
+                            "usb.player-menu.t17-update-skipped",
+                            format!("PDB t17 update skipped: {e}"),
+                        ));
                     }
                 }
-                _ => {}
             }
             if let Err(err) =
                 usb_staging::write_back_if_changed(&usb_root, usb_staging::DbKind::Pdb)
@@ -494,5 +760,86 @@ impl BackendService {
             available_items,
             warnings,
         })
+    }
+}
+
+#[cfg(test)]
+mod t17_tests {
+    use super::*;
+
+    // Rows as rekordbox wrote them on a real stick: item, category, its own byte,
+    // flag, order.
+    const BPM_HIDDEN: [u8; 8] = [5, 0, 6, 0, 0x05, 1, 0, 0];
+    const ARTIST_SHOWN: [u8; 8] = [2, 0, 2, 0, 0x02, 0, 1, 0];
+    const DATE_ADDED_SHOWN: [u8; 8] = [22, 0, 27, 0, 0x63, 0, 10, 0];
+
+    #[test]
+    fn updating_t17_keeps_each_rows_place_and_byte_and_leaves_date_added() {
+        let live = [BPM_HIDDEN, ARTIST_SHOWN, DATE_ADDED_SHOWN];
+        let encode = |item: u16, category, visible, kind, seq| {
+            (
+                u32::from(item),
+                crate::service::export_helpers::encode_pdb_t17_cat_row(
+                    item, category, visible, kind, seq,
+                ),
+            )
+        };
+        let wanted = [
+            encode(2, 2, false, 129, 0),
+            encode(5, 6, true, 133, 11),
+            encode(22, 27, false, 140, 0),
+        ];
+        assert_eq!(
+            updated_t17_rows(&live, &wanted, Some(22)),
+            [
+                [5, 0, 6, 0, 0x05, 0, 11, 0],
+                [2, 0, 2, 0, 0x02, 1, 0, 0],
+                DATE_ADDED_SHOWN,
+            ]
+        );
+    }
+
+    #[test]
+    fn a_row_the_table_lacks_goes_after_the_others() {
+        let new = crate::service::export_helpers::encode_pdb_t17_cat_row(5, 6, true, 133, 2);
+        assert_eq!(
+            updated_t17_rows(&[ARTIST_SHOWN], &[(5, new)], None),
+            [ARTIST_SHOWN, new]
+        );
+    }
+
+    #[test]
+    fn sequence_values_skip_the_reserved_one() {
+        assert_eq!(
+            menu_sequence_values(&[129, 130, 133], Some(2)),
+            [(129, 1), (130, 3), (133, 4)]
+        );
+        assert_eq!(menu_sequence_values(&[129], None), [(129, 1)]);
+    }
+
+    #[test]
+    fn the_comparison_ignores_date_added_and_gaps() {
+        let row = |menu_item_id, kind, visible, sequence_no| MenuRow {
+            menu_item_id,
+            kind,
+            name: String::new(),
+            visible,
+            sequence_no,
+        };
+        // As rekordbox leaves them: the order values differ and DATE ADDED is out of
+        // step, but the same menu shows.
+        let edb = [
+            row(5, 133, true, 9),
+            row(22, DATE_ADDED_KIND, true, 10),
+            row(18, 152, true, 11),
+        ];
+        let pdb = [
+            row(5, 133, true, 9),
+            row(22, DATE_ADDED_KIND, false, 0),
+            row(18, 152, true, 10),
+        ];
+        assert_eq!(compared_menu_order(&edb), compared_menu_order(&pdb));
+        let moved = [row(18, 152, true, 1), row(5, 133, true, 2)];
+        assert_ne!(compared_menu_order(&edb), compared_menu_order(&moved));
     }
 }

@@ -455,12 +455,17 @@ carry smaller or source-specific PDB menu profiles. Normal playlist export
 preserves PDB t16/t17/t18 and eDB `menuItem`/`category`/`sort` state exactly.
 Menu changes are explicit menu operations, not export side effects.
 
-The Menu Editor's Save action:
+A menu edit, either database being optional:
 
-1. Resolves the requested active kind list.
-2. Rewrites eDB `category` so those kinds are visible in the requested order.
-3. Leaves PDB t16 unchanged.
-4. If the eDB write fails, eDB is restored from its snapshot.
+1. Rewrites eDB `category` so those kinds are visible in the requested order.
+2. Updates PDB `t17` to match, row by row. PDB `t16` is never changed.
+3. If the eDB write fails, eDB is restored from its snapshot.
+
+With only one database, the editor reads and writes that one. If both are present
+and show different menus, the app logs it, shows the eDB's menu, and the next edit
+writes it to both. TRACK, PLAYLIST, FOLDER, SEARCH and HISTORY can't be removed, as in
+rekordbox, and DATE ADDED always shows and isn't edited. Items with no `category` row,
+such as COMMENTS and CUE, aren't browse categories and aren't offered.
 
 See `docs/PDB.md` for the t16 row layout and observed kind codes.
 

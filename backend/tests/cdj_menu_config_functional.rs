@@ -6,7 +6,8 @@ use backend::models::{
     UpdateUsbPlayerMenuConfigRequest, UsbPlayerMenuEdit,
 };
 use backend::service::export_helpers::{
-    encode_pdb_t16_row, load_pdb_t16_decoded, load_pdb_t16_raw,
+    encode_pdb_t16_row, load_pdb_t16_decoded, load_pdb_t16_raw, load_pdb_t17_live_rows,
+    patch_pdb_t17_category_snapshot,
 };
 use tempfile::tempdir;
 
@@ -174,27 +175,34 @@ fn save_updates_edb_only_not_pdb() {
     );
     // Rows start at payload offset 40; each row is 8 bytes:
     //   [menuItemId:2LE][categoryId:2LE][0x63][flags][seqNo:2LE]
-    // flags: 0=visible, 1=hidden, 2=MATCHING (kind=170) visible.
+    // flags: 0=visible, 1=hidden, 2=MATCHING (kind=170) visible, 5=the template's DATE ADDED.
     // After removing KEY from 10 visible: 9 visible (8 flags=0 + 1 flags=2), 13 hidden (flags=1).
     let page36 = &pdb_bytes[36 * 4096..37 * 4096];
-    let mut flags_counts = [0u32; 3]; // [visible, hidden, matching]
+    let mut flags_counts = [0u32; 6];
     for i in 0..22_usize {
         let off = 40 + i * 8;
         let menu_item_id = u16::from_le_bytes([page36[off], page36[off + 1]]);
         let flags = page36[off + 5];
         assert_ne!(menu_item_id, 0, "t17 row {i}: menuItemId must be non-zero");
-        assert!(flags <= 2, "t17 row {i}: unexpected flags value {flags}");
+        assert!(
+            matches!(flags, 0 | 1 | 2 | 5),
+            "t17 row {i}: unexpected flags value {flags}"
+        );
         flags_counts[flags as usize] += 1;
     }
     assert_eq!(
-        flags_counts[0], 8,
-        "t17 must have 8 visible rows (flags=0) after removing KEY"
+        flags_counts[0], 7,
+        "t17 must have 7 visible rows (flags=0) after removing KEY"
     );
     assert_eq!(
         flags_counts[1], 13,
         "t17 must have 13 hidden rows (flags=1) after removing KEY"
     );
     assert_eq!(flags_counts[2], 1, "t17 must have 1 MATCHING row (flags=2)");
+    assert_eq!(
+        flags_counts[5], 1,
+        "DATE ADDED's row must be left as the template has it"
+    );
 
     let reload = backend.get_usb_player_menu_config(GetUsbPlayerMenuConfigRequest {
         usb_root: Some(usb_root.to_string_lossy().into_owned()),
@@ -228,7 +236,7 @@ fn freshly_initialized_usb_shows_the_default_menu() {
     });
     assert!(load.ok, "get menu config failed: {load:?}");
     let data = load.data.expect("data");
-    // Default: 10 visible kinds in eDB; remaining 17 are available to add.
+    // Default: 10 visible kinds in eDB; the 12 other categories are available to add.
     assert_eq!(
         data.current_items.len(),
         10,
@@ -236,8 +244,8 @@ fn freshly_initialized_usb_shows_the_default_menu() {
     );
     assert_eq!(
         data.available_items.len(),
-        17,
-        "remaining 17 menuItems should be available to add",
+        12,
+        "the 12 other categories should be available to add",
     );
     let kinds: Vec<u32> = data.current_items.iter().map(|i| i.kind).collect();
     assert_eq!(
@@ -245,11 +253,14 @@ fn freshly_initialized_usb_shows_the_default_menu() {
         vec![129, 130, 131, 139, 132, 149, 145, 170, 144, 140],
         "default visible kinds must match vendor order"
     );
-    // The first and last rows can only move one way, and the labels are ready to show.
+    // The first and last movable rows can only move one way, and DATE ADDED, last, not at all.
     let last = data.current_items.len() - 1;
     assert!(!data.current_items[0].can_move_up && data.current_items[0].can_move_down);
-    assert!(data.current_items[last].can_move_up && !data.current_items[last].can_move_down);
     assert!(data.current_items[1].can_move_up && data.current_items[1].can_move_down);
+    assert!(
+        data.current_items[last - 1].can_move_up && !data.current_items[last - 1].can_move_down
+    );
+    assert!(!data.current_items[last].can_move_up && !data.current_items[last].can_move_down);
     assert!(data.current_items.iter().all(|item| !item.label.is_empty()));
     assert!(
         data.available_items
@@ -288,6 +299,286 @@ fn menu_works_with_only_the_edb() {
     assert!(edit.updated);
     assert_eq!(edit.current_items[1].kind, first);
     assert!(!pdb.exists(), "the edit must not create a PDB");
+}
+
+fn initialized_usb(backend: &BackendCommands, usb_root: &std::path::Path) {
+    let init = backend.initialize_usb(InitializeUsbRequest {
+        usb_root: usb_root.to_string_lossy().into_owned(),
+    });
+    assert!(init.ok, "initialize_usb failed: {init:?}");
+}
+
+fn menu_kinds(items: &[backend::models::UsbPlayerMenuItem]) -> Vec<u32> {
+    items.iter().map(|item| item.kind).collect()
+}
+
+fn get_menu(
+    backend: &BackendCommands,
+    usb_root: &std::path::Path,
+) -> backend::models::GetUsbPlayerMenuConfigData {
+    backend
+        .get_usb_player_menu_config(GetUsbPlayerMenuConfigRequest {
+            usb_root: Some(usb_root.to_string_lossy().into_owned()),
+        })
+        .data
+        .expect("menu")
+}
+
+#[test]
+fn menu_works_with_only_the_pdb() {
+    let usb_dir = tempdir().expect("usb tempdir");
+    let usb_root = usb_dir.path().to_path_buf();
+    let data_dir = tempdir().expect("data tempdir");
+    let backend = BackendCommands::new(data_dir.path()).expect("create backend");
+    initialized_usb(&backend, &usb_root);
+    let with_both = get_menu(&backend, &usb_root);
+    let edb = usb_root.join("PIONEER/rekordbox/exportLibrary.db");
+    let pdb = usb_root.join("PIONEER/rekordbox/export.pdb");
+    fs::remove_file(&edb).expect("remove eDB");
+    let t16_before = load_pdb_t16_raw(&usb_root).expect("t16");
+
+    // The PDB alone gives the same menu.
+    let menu = get_menu(&backend, &usb_root);
+    assert_eq!(
+        menu_kinds(&menu.current_items),
+        menu_kinds(&with_both.current_items)
+    );
+    assert_eq!(menu.available_items.len(), with_both.available_items.len());
+    assert!(menu.current_items.iter().all(|item| !item.label.is_empty()));
+
+    const BPM: u32 = 133;
+    let add = edit_menu(&backend, &usb_root, UsbPlayerMenuEdit::Add, BPM);
+    assert!(add.ok, "add failed: {add:?}");
+    let add = add.data.expect("add data");
+    assert!(add.updated);
+    assert!(menu_kinds(&add.current_items).contains(&BPM));
+    assert_eq!(
+        load_pdb_t16_raw(&usb_root).expect("t16"),
+        t16_before,
+        "t16 is never changed"
+    );
+    assert!(!edb.exists(), "the edit must not create an eDB");
+    assert!(pdb.exists());
+
+    let first = add.current_items[0].kind;
+    let moved = edit_menu(&backend, &usb_root, UsbPlayerMenuEdit::MoveDown, first)
+        .data
+        .expect("move data");
+    assert_eq!(moved.current_items[1].kind, first);
+    let reload = get_menu(&backend, &usb_root);
+    assert_eq!(
+        menu_kinds(&reload.current_items),
+        menu_kinds(&moved.current_items)
+    );
+}
+
+#[test]
+fn a_menu_edit_keeps_each_t17_rows_byte_and_place() {
+    let usb_dir = tempdir().expect("usb tempdir");
+    let usb_root = usb_dir.path().to_path_buf();
+    let data_dir = tempdir().expect("data tempdir");
+    let backend = BackendCommands::new(data_dir.path()).expect("create backend");
+    initialized_usb(&backend, &usb_root);
+    let before = load_pdb_t17_live_rows(&usb_root).expect("t17");
+    assert!(
+        before.iter().any(|row| row[4] != 0x63),
+        "the template has real values in byte 4"
+    );
+
+    const KEY: u32 = 139;
+    let edit = edit_menu(&backend, &usb_root, UsbPlayerMenuEdit::Remove, KEY);
+    assert!(edit.data.expect("edit").updated);
+
+    let after = load_pdb_t17_live_rows(&usb_root).expect("t17");
+    assert_eq!(after.len(), before.len());
+    for (old, new) in before.iter().zip(&after) {
+        assert_eq!(
+            old[..5],
+            new[..5],
+            "item, category and byte 4 stay, in place"
+        );
+    }
+    const DATE_ADDED_ITEM: u8 = 22;
+    let date_added = |rows: &[[u8; 8]]| *rows.iter().find(|row| row[0] == DATE_ADDED_ITEM).unwrap();
+    assert_eq!(
+        date_added(&before),
+        date_added(&after),
+        "DATE ADDED's row isn't written"
+    );
+}
+
+#[test]
+fn date_added_is_locked_and_stays_shown() {
+    const DATE_ADDED: u32 = 140;
+    let usb_dir = tempdir().expect("usb tempdir");
+    let usb_root = usb_dir.path().to_path_buf();
+    let data_dir = tempdir().expect("data tempdir");
+    let backend = BackendCommands::new(data_dir.path()).expect("create backend");
+    initialized_usb(&backend, &usb_root);
+
+    let menu = get_menu(&backend, &usb_root);
+    let item = menu
+        .current_items
+        .iter()
+        .find(|item| item.kind == DATE_ADDED)
+        .unwrap();
+    assert!(!item.removable && !item.can_move_up && !item.can_move_down);
+    assert!(!edit_menu(&backend, &usb_root, UsbPlayerMenuEdit::Remove, DATE_ADDED).ok);
+    let up = edit_menu(&backend, &usb_root, UsbPlayerMenuEdit::MoveUp, DATE_ADDED);
+    assert!(!up.data.expect("move").updated);
+
+    // The item above it has nothing it could swap with below.
+    assert_eq!(menu.current_items.last().unwrap().kind, DATE_ADDED);
+    assert!(!menu.current_items[menu.current_items.len() - 2].can_move_down);
+}
+
+#[test]
+fn items_that_are_not_categories_are_not_offered() {
+    let usb_dir = tempdir().expect("usb tempdir");
+    let usb_root = usb_dir.path().to_path_buf();
+    let data_dir = tempdir().expect("data tempdir");
+    let backend = BackendCommands::new(data_dir.path()).expect("create backend");
+    initialized_usb(&backend, &usb_root);
+    let kinds = menu_kinds(&get_menu(&backend, &usb_root).available_items);
+    // CUE, COMMENTS, DJ PLAY COUNT, DEFAULT, ALPHABET.
+    for kind in [141, 150, 151, 161, 162] {
+        assert!(
+            !kinds.contains(&kind),
+            "kind {kind} isn't a browse category"
+        );
+    }
+    assert!(kinds.contains(&152), "HOT CUE BANK is");
+}
+
+#[test]
+fn differing_databases_are_logged_and_any_edit_makes_them_match() {
+    let usb_dir = tempdir().expect("usb tempdir");
+    let usb_root = usb_dir.path().to_path_buf();
+    let data_dir = tempdir().expect("data tempdir");
+    let backend = BackendCommands::new(data_dir.path()).expect("create backend");
+    initialized_usb(&backend, &usb_root);
+    const CODE: &str = "usb.player-menu.databases-differ";
+    let logged = |data: &backend::models::GetUsbPlayerMenuConfigData| {
+        data.warnings.iter().any(|warning| warning.code == CODE)
+    };
+    assert!(
+        !logged(&get_menu(&backend, &usb_root)),
+        "a fresh stick matches"
+    );
+
+    // ARTIST and ALBUM swap in the PDB only.
+    let mut rows = load_pdb_t17_live_rows(&usb_root).expect("t17");
+    let sequence = |rows: &[[u8; 8]], item: u8| rows.iter().position(|row| row[0] == item).unwrap();
+    let (artist, album) = (sequence(&rows, 2), sequence(&rows, 3));
+    let (a, b) = (
+        [rows[artist][6], rows[artist][7]],
+        [rows[album][6], rows[album][7]],
+    );
+    rows[artist][6..8].copy_from_slice(&b);
+    rows[album][6..8].copy_from_slice(&a);
+    assert!(patch_pdb_t17_category_snapshot(&usb_root, &rows).expect("patch"));
+
+    let differing = get_menu(&backend, &usb_root);
+    assert!(logged(&differing));
+    assert_eq!(differing.current_items[0].kind, 129, "the eDB's menu shows");
+
+    // An edit that changes nothing else still writes both.
+    let first = differing.current_items[0].kind;
+    let edit = edit_menu(&backend, &usb_root, UsbPlayerMenuEdit::MoveUp, first)
+        .data
+        .expect("edit");
+    assert!(edit.updated);
+    assert!(!logged(&get_menu(&backend, &usb_root)), "they match now");
+}
+
+#[test]
+fn background_color_writes_to_the_database_that_exists() {
+    use backend::models::{GetUsbBackgroundColorRequest, SetUsbBackgroundColorRequest};
+    for missing in ["exportLibrary.db", "export.pdb"] {
+        let usb_dir = tempdir().expect("usb tempdir");
+        let usb_root = usb_dir.path().to_path_buf();
+        let data_dir = tempdir().expect("data tempdir");
+        let backend = BackendCommands::new(data_dir.path()).expect("create backend");
+        initialized_usb(&backend, &usb_root);
+        let gone = usb_root.join("PIONEER/rekordbox").join(missing);
+        fs::remove_file(&gone).expect("remove database");
+        let root = Some(usb_root.to_string_lossy().into_owned());
+
+        let read = backend
+            .get_usb_background_color(GetUsbBackgroundColorRequest {
+                usb_root: root.clone(),
+            })
+            .data
+            .expect("colour");
+        assert!(read.writable, "{missing} missing");
+        let set = backend.set_usb_background_color(SetUsbBackgroundColorRequest {
+            usb_root: root.clone(),
+            color: 5,
+        });
+        assert!(set.ok, "{missing} missing: {set:?}");
+        let set = set.data.expect("set");
+        assert!(set.updated);
+        assert_eq!(set.status_text, "Background colour set to Green");
+        assert_eq!(set.chips.iter().filter(|chip| chip.selected).count(), 1);
+        assert!(!gone.exists(), "writing must not create {missing}");
+    }
+}
+
+/// Real rekordbox edits, in the git-ignored `USB_MENU_TEST`: this checks nothing
+/// where that folder isn't.
+#[test]
+fn rekordbox_edited_menus_read_without_a_false_warning_and_keep_their_rows() {
+    const CODE: &str = "usb.player-menu.databases-differ";
+    let fixtures = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../USB_MENU_TEST");
+    let Ok(entries) = fs::read_dir(&fixtures) else {
+        return;
+    };
+    for entry in entries.flatten() {
+        let found = [
+            entry.path().join("PIONEER/rekordbox"),
+            entry.path().join("rekordbox"),
+        ]
+        .into_iter()
+        .find(|dir| dir.join("export.pdb").is_file());
+        let Some(source) = found else { continue };
+        let name = entry.file_name();
+
+        let usb_dir = tempdir().expect("usb tempdir");
+        let usb_root = usb_dir.path().to_path_buf();
+        let target = usb_root.join("PIONEER/rekordbox");
+        fs::create_dir_all(&target).expect("create dirs");
+        for file in ["export.pdb", "exportLibrary.db"] {
+            fs::copy(source.join(file), target.join(file)).expect("copy database");
+        }
+        let data_dir = tempdir().expect("data tempdir");
+        let backend = BackendCommands::new(data_dir.path()).expect("create backend");
+
+        let menu = get_menu(&backend, &usb_root);
+        assert!(!menu.warnings.iter().any(|w| w.code == CODE), "{name:?}");
+        assert!(
+            menu.current_items.iter().any(|item| item.kind == 140),
+            "{name:?}"
+        );
+        let before = load_pdb_t17_live_rows(&usb_root).expect("t17");
+        assert_eq!(before.len(), 22, "{name:?}");
+
+        let first = menu.current_items[0].kind;
+        let edit = edit_menu(&backend, &usb_root, UsbPlayerMenuEdit::MoveDown, first)
+            .data
+            .expect("edit");
+        assert!(edit.updated, "{name:?}");
+        let after = load_pdb_t17_live_rows(&usb_root).expect("t17");
+        assert_eq!(after.len(), before.len(), "{name:?}");
+        for (old, new) in before.iter().zip(&after) {
+            assert_eq!(
+                old[..5],
+                new[..5],
+                "{name:?}: rows keep their place and bytes"
+            );
+        }
+        let again = get_menu(&backend, &usb_root);
+        assert!(!again.warnings.iter().any(|w| w.code == CODE), "{name:?}");
+    }
 }
 
 #[test]
@@ -386,8 +677,9 @@ fn update_player_menu_vendor_seven_item_set_keeps_pdb_catalog() {
         .data
         .expect("initialize_usb");
 
-    // ARTIST=129, ALBUM=130, TRACK=131, PLAYLIST=132, HISTORY=149, SEARCH=145, FOLDER=144
-    let vendor_kinds: Vec<u32> = vec![129, 130, 131, 132, 149, 145, 144];
+    // ARTIST=129, ALBUM=130, TRACK=131, PLAYLIST=132, HISTORY=149, SEARCH=145, FOLDER=144,
+    // and DATE ADDED=140, which always stays.
+    let vendor_kinds: Vec<u32> = vec![129, 130, 131, 132, 149, 145, 144, 140];
 
     let data = set_menu_with_edits(&backend, &usb_root, &vendor_kinds);
 

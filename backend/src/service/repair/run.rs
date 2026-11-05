@@ -352,6 +352,13 @@ impl StagedPdb {
 /// USB copies are checked for outside changes. When the eDB write fails after
 /// the PDB was written, the PDB the USB held before is put back. On failure
 /// the staged copies are staged again from the USB, so they match the drive.
+/// Saves and writes back the PDB of a stick that has no eDB to keep it paired with.
+pub(super) fn write_back_pdb_alone(usb_root: &Path, pdb: &mut StagedPdb) -> BackendResult<()> {
+    pdb.save()?;
+    usb_staging::write_back_if_changed(usb_root, usb_staging::DbKind::Pdb)?;
+    Ok(())
+}
+
 pub(super) fn write_back_both_or_neither(
     usb_root: &Path,
     pdb: &mut StagedPdb,
