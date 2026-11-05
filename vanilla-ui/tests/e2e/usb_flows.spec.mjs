@@ -1,12 +1,15 @@
 import { test, expect } from "./coverage-fixture.mjs";
 
-// Counts the `fetch_usb_playlists` calls in `window.__playlistFetches`.
+// Counts the `fetch_usb_playlists` calls in `window.__playlistFetches`, and the
+// track table fetches in `window.__trackFetches`.
 function countPlaylistFetches(page) {
   return page.addInitScript(() => {
     const invoke = window.__TAURI__.core.invoke;
     window.__playlistFetches = 0;
+    window.__trackFetches = 0;
     window.__TAURI__.core.invoke = async (command, payload) => {
       if (command === "fetch_usb_playlists") window.__playlistFetches += 1;
+      if (command === "fetch_usb_playlist_tracks" || command === "fetch_usb_history_tracks") window.__trackFetches += 1;
       return invoke(command, payload);
     };
   });
@@ -453,6 +456,11 @@ function installTauriMock(page, mode) {
               hint: "The formats export puts on this USB · drag to set the order of preference",
             };
           };
+          if (command === "fetch_usb_playlist_tracks") {
+            const id = String(payload?.request?.id);
+            const tracks = state.usbPlaylists.find((p) => String(p.id) === id)?.tracks || [];
+            return { ok: true, data: { items: tracks, total: tracks.length } };
+          }
           if (command === "get_usb_audio_formats") {
             return { ok: true, data: formatsData() };
           }
@@ -574,6 +582,7 @@ test("USB playlist removal confirm path handles cancel and confirm", async ({ pa
 test("USB playlists tab shows the empty text only after a read finds nothing", async ({ page }) => {
   await installTauriMock(page, "valid");
   await holdEmptyLists(page);
+  await countPlaylistFetches(page);
   await page.goto("/");
 
   await page.locator('.nav-item[data-view="usb"]').click();
@@ -589,11 +598,13 @@ test("USB playlists tab shows the empty text only after a read finds nothing", a
   await expect(page.locator("#usbPlaylists")).toBeEmpty();
   expect(await page.locator("#usbPlaylists").evaluate((node) => getComputedStyle(node, "::before").content)).toBe('"No playlists on this USB."');
   await expect(page.locator("#panel-usb-playlists .split > .right")).toBeHidden();
+  expect(await page.evaluate(() => window.__trackFetches)).toBe(0);
 });
 
 test("USB history tab shows the empty text only after a read finds nothing", async ({ page }) => {
   await installTauriMock(page, "valid");
   await holdEmptyLists(page);
+  await countPlaylistFetches(page);
   await page.goto("/");
 
   await page.locator('.nav-item[data-view="usb"]').click();
@@ -609,6 +620,7 @@ test("USB history tab shows the empty text only after a read finds nothing", asy
   await expect(page.locator("#historyList")).toBeEmpty();
   expect(await page.locator("#historyList").evaluate((node) => getComputedStyle(node, "::before").content)).toBe('"No history on this USB."');
   await expect(page.locator("#panel-usb-history .split > .right")).toBeHidden();
+  expect(await page.evaluate(() => window.__trackFetches)).toBe(0);
 });
 
 test("USB playlists status shows the backend's warning count, linked to the Event Log", async ({ page }) => {
@@ -619,8 +631,95 @@ test("USB playlists status shows the backend's warning count, linked to the Even
   await page.locator("#usbEmptyState .empty-state-action").click();
   await page.locator('.nav-item[data-view="usb-playlists"]').click();
 
+  // The first playlist opens by itself, and that doesn't replace the status.
+  await expect(page.locator('[data-usb-playlist="usb-1"]')).toHaveClass(/active/);
+  await expect(page.locator("#usbPlaylistHeading .track-list-heading-name")).toHaveText("Warmup");
+  await expect(page.locator("#usbPlaylistTracks .track-grid-row")).toHaveCount(1);
   await expect(page.locator("#statusText")).toContainText("USB playlists loaded: 1 | (2 warnings)");
   await expect(page.locator("#statusText .status-warning-link")).toHaveText("(2 warnings)");
+});
+
+test("USB lists read after leaving their pages open the first item on return, and keep it on the next return", async ({ page }) => {
+  await installTauriMock(page, "valid");
+  await page.addInitScript(() => {
+    const invoke = window.__TAURI__.core.invoke;
+    const released = new Promise((resolve) => { window.__releaseReads = resolve; });
+    window.__TAURI__.core.invoke = async (command, payload) => {
+      const backend = window.__e2eBackend;
+      if (command === "fetch_usb_playlists") await released;
+      if (command === "fetch_usb_histories") {
+        await released;
+        return backend.ok(backend.usbHistories({ items: [{ id: "h-1", name: "HISTORY 001", tracks: [{ title: "Track A" }] }] }));
+      }
+      if (command === "fetch_usb_history_tracks") return backend.ok({ items: [{ title: "Track A" }], total: 1 });
+      return invoke(command, payload);
+    };
+  });
+  await countPlaylistFetches(page);
+  await page.goto("/");
+
+  const nav = (view) => page.locator(`.nav-item[data-view="${view}"]`);
+  await nav("usb").click();
+  await page.locator("#usbEmptyState .empty-state-action").click();
+  await nav("usb-playlists").click();
+  await nav("usb-history").click();
+  await nav("usb").click();
+
+  await page.evaluate(() => window.__releaseReads());
+  const lists = [
+    { view: "usb-playlists", row: "#usbPlaylists button", heading: "#usbPlaylistHeading", name: "Warmup", body: "#usbPlaylistTracks" },
+    { view: "usb-history", row: "#historyList button", heading: "#historyHeading", name: "HISTORY 001", body: "#historyTracks" },
+  ];
+  for (const { row } of lists) {
+    await expect(page.locator(row)).toHaveCount(1);
+    await expect(page.locator(row)).not.toHaveClass(/active/);
+  }
+  expect(await page.evaluate(() => window.__trackFetches)).toBe(0);
+
+  for (const [index, { view, row, heading, name, body }] of lists.entries()) {
+    for (let open = 0; open < 2; open += 1) {
+      await nav(view).click();
+      await expect(page.locator(row)).toHaveClass(/active/);
+      await expect(page.locator(`${heading} .track-list-heading-name`)).toHaveText(name);
+      await expect(page.locator(`${body} .track-grid-row`)).toHaveCount(1);
+      await nav("usb").click();
+    }
+    expect(await page.evaluate(() => window.__trackFetches)).toBe(index + 1);
+  }
+  expect(await page.evaluate(() => window.__playlistFetches)).toBe(1);
+});
+
+test("removing the open USB playlist opens nothing, even clicking its page again, until the page is opened again", async ({ page }) => {
+  await installTauriMock(page, "reorder");
+  await countPlaylistFetches(page);
+  await page.goto("/");
+
+  const nav = page.locator('.nav-item[data-view="usb-playlists"]');
+  await page.locator('.nav-item[data-view="usb"]').click();
+  await page.locator("#usbEmptyState .empty-state-action").click();
+  await nav.click();
+  const first = page.locator('[data-usb-playlist="usb-pl-1"]');
+  await expect(first).toHaveClass(/active/);
+  await expect(page.locator("#usbPlaylistTracks .track-grid-row")).toHaveCount(1);
+
+  await first.hover();
+  await page.locator('[data-usb-remove-playlist="usb-pl-1"]').click();
+  await page.locator("#confirmOkBtn").click();
+  await expect(page.locator("#statusText")).toContainText("Removed USB playlist: Alpha");
+  const rows = page.locator("#usbPlaylists button");
+  await expect(rows).toHaveCount(2);
+  await expect(page.locator("#usbPlaylists button.active")).toHaveCount(0);
+
+  await nav.click();
+  await page.waitForTimeout(100);
+  await expect(page.locator("#usbPlaylists button.active")).toHaveCount(0);
+  expect(await page.evaluate(() => window.__trackFetches)).toBe(1);
+
+  await page.locator('.nav-item[data-view="usb"]').click();
+  await nav.click();
+  await expect(page.locator('[data-usb-playlist="usb-pl-2"]')).toHaveClass(/active/);
+  await expect(page.locator("#usbPlaylistTracks .track-grid-row")).toHaveCount(1);
+  expect(await page.evaluate(() => window.__trackFetches)).toBe(2);
 });
 
 test("a failed USB list read retries when the page is opened again", async ({ page }) => {
@@ -1285,7 +1384,7 @@ test("a job started right after another finished keeps its progress footer", asy
   await page.locator(".nav-new-input").press("Enter");
   await expect(page.locator("#progressText")).toContainText("Saving playlist");
 
-  // Past the import's hide delay, the still-running save keeps the footer.
+  // Past the read's hide delay, the still-running save keeps the footer.
   await page.waitForTimeout(1500);
   await expect(page.locator("#progressFooter")).toHaveClass(/active/);
   await expect(page.locator("#progressText")).toContainText("Saving playlist");
@@ -1435,7 +1534,7 @@ test("applying repairs that change nothing keeps the loaded USB playlists and sh
   await page.goto("/");
   await connectUsb(page);
   await page.locator('.nav-item[data-view="usb-playlists"]').click();
-  await expect(page.locator('[data-usb-playlist="usb-1"]')).toBeVisible();
+  await expect(page.locator("#usbPlaylistTracks .track-grid-row")).toHaveCount(1);
   await page.locator('.nav-item[data-view="usb"]').click();
 
   await page.locator("#usbHealthCard").evaluate((node) => { node.open = true; });
@@ -1444,9 +1543,13 @@ test("applying repairs that change nothing keeps the loaded USB playlists and sh
   await expect(page.locator("#statusText")).toContainText("Repair apply complete: 0 applied");
   await expect(page.locator("#diagOverallStatus")).toHaveText("FAIL");
 
+  // Coming back keeps the open playlist and its table, with no new fetch.
   await page.locator('.nav-item[data-view="usb-playlists"]').click();
-  await expect(page.locator('[data-usb-playlist="usb-1"]')).toBeVisible();
+  await expect(page.locator('[data-usb-playlist="usb-1"]')).toHaveClass(/active/);
+  await expect(page.locator("#usbPlaylistHeading .track-list-heading-name")).toHaveText("Warmup");
+  await expect(page.locator("#usbPlaylistTracks .track-grid-row")).toHaveCount(1);
   expect(await page.evaluate(() => window.__playlistFetches)).toBe(1);
+  expect(await page.evaluate(() => window.__trackFetches)).toBe(1);
 });
 
 test("a player-menu edit or PDB sync clears the diagnostics report only when it changed the stick", async ({ page }) => {

@@ -316,7 +316,8 @@ export function handleBackendLogEvent(ctx, payload) {
 export async function switchView(ctx, viewId) {
   const { state, el, document } = ctx;
 
-  if (viewId !== state.activeTab) {
+  const viewChanged = viewId !== state.activeTab;
+  if (viewChanged) {
     await ctx.stopPlaybackIfActive();
     try {
       await ctx.commitActivePlaylistSort(state.activeTab);
@@ -366,7 +367,7 @@ export async function switchView(ctx, viewId) {
   } else if (viewId === "backups") {
     await ctx.renderBackups();
   } else if (viewId === "usb-playlists" || viewId === "usb-history") {
-    ctx.ensureUsbListLoaded(viewId);
+    ctx.ensureUsbListLoaded(viewId, { viewChanged });
   } else if (viewId === "usb-player-menu") {
     ctx.renderUsbPlayerMenuEditor();
     ctx.renderUsbBackgroundColor();

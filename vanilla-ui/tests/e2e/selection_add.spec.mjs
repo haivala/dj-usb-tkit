@@ -708,7 +708,6 @@ test("USB playlist rows are selected and added to the active playlist in list or
   await page.locator('.nav-item[data-view="usb"]').click();
   await page.locator("#usbEmptyState .empty-state-action").click();
   await page.locator('.nav-item[data-view="usb-playlists"]').click();
-  await page.locator('[data-usb-playlist-index="0"]').click();
   await expect(page.locator("#usbPlaylistTracks .track-grid-row")).toHaveCount(2);
 
   const bar = page.locator('[data-selection-bar="usbPlaylist"]');
@@ -776,7 +775,6 @@ test("Edit… on USB playlist rows writes them to the stick and shows the new ye
   await page.locator('.nav-item[data-view="usb"]').click();
   await page.locator("#usbEmptyState .empty-state-action").click();
   await page.locator('.nav-item[data-view="usb-playlists"]').click();
-  await page.locator('[data-usb-playlist-index="0"]').click();
   await expect(page.locator("#usbPlaylistTracks .track-grid-row")).toHaveCount(2);
 
   await page.locator('[data-select-all="usbPlaylist"]').check();
@@ -882,7 +880,6 @@ test("Add to… from a USB playlist sends the rows' library matches and the rows
   await page.locator('.nav-item[data-view="usb"]').click();
   await page.locator("#usbEmptyState .empty-state-action").click();
   await page.locator('.nav-item[data-view="usb-playlists"]').click();
-  await page.locator('[data-usb-playlist-index="0"]').click();
   await expect(page.locator("#usbPlaylistTracks .track-grid-row")).toHaveCount(2);
 
   await page.locator('[data-select-all="usbPlaylist"]').check();

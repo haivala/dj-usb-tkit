@@ -2,7 +2,6 @@ import { counted } from "../../track_utils.mjs";
 import { catchErr, handleTrackAction, resolveRowActionTrack } from "../shared/track_actions.mjs";
 import { bindListDragReorder, moveArrayItem } from "../shared/list_drag_reorder.mjs";
 import { bindUsbAudioFormatEvents } from "./audio_formats.mjs";
-import { setActiveListItem } from "../shell/actions.mjs";
 import { bindTrackSelection } from "../shared/track_selection.mjs";
 import { addSelectionToPlaylists } from "../shared/add_to_playlists.mjs";
 import { editTrackSelection } from "../shared/track_metadata_edits.mjs";
@@ -222,22 +221,8 @@ export function bindUsbEvents(ctx) {
     stopPlaybackIfActive().catch((err) => {
       console.warn("Failed stopping playback on USB playlist change:", err);
     });
-    const index = Number(btn.dataset.usbPlaylistIndex);
-    const id = btn.dataset.usbPlaylist;
-    const playlist = state.usbPlaylists[index]
-      || state.usbPlaylists.find((item) => String(item.id) === String(id));
-    setActiveListItem(el.usbPlaylists, btn);
-    if (!playlist) {
-      usbPlaylistTracksCtl.clear();
-      emitStatus("Failed to resolve selected USB playlist");
-      return;
-    }
-    // The controller fetches page 1 (paginated + hydrated server-side),
-    // renders it, and sets the "Total time" footer from the response.
-    usbPlaylistTracksCtl.load({ scopeId: playlist.id }).catch((err) => {
-      console.warn("USB playlist load failed:", err);
-      emitStatus(`Failed to load USB playlist: ${err.message}`);
-    });
+    const playlist = ctx.openUsbPlaylistRow(btn);
+    if (!playlist) return;
     emitStatus(`USB playlist selected: ${playlist.name} (${playlist.trackCount == null ? "? tracks" : counted(playlist.trackCount, "track")})`);
   });
 
@@ -278,23 +263,7 @@ export function bindUsbEvents(ctx) {
     stopPlaybackIfActive().catch((err) => {
       console.warn("Failed stopping playback on history change:", err);
     });
-    const index = btn.dataset.historyIndex;
-
-    state.selectedHistoryIndex = Number(index);
-    const history = state.histories[Number(index)];
-    // Kept for the "Export Tracklist" text feature, which needs the whole
-    // session's tracks; the table itself is paginated by the controller.
-    state.historyTracks = history?.tracks || [];
-    el.exportHistoryTracklistBtn.disabled = !state.historyTracks.length;
-    setActiveListItem(el.historyList, btn);
-    if (!history) {
-      usbHistoryTracksCtl.clear();
-      return;
-    }
-    usbHistoryTracksCtl.load({ scopeId: history.id }).catch((err) => {
-      console.warn("USB history load failed:", err);
-      emitStatus(`Failed to load USB history: ${err.message}`);
-    });
+    ctx.openHistoryRow(btn);
   });
 
   el.historyTracks.addEventListener("click", async (event) => {

@@ -220,6 +220,9 @@
         case "list_usb_devices": return ok({ items: [] });
         case "fetch_usb_playlists": return ok(backend.usbPlaylists());
         case "fetch_usb_histories": return ok(backend.usbHistories());
+        case "fetch_usb_playlist_tracks":
+        case "fetch_usb_history_tracks":
+          return ok({ items: [], total: 0 });
         case "get_usb_audio_formats": return ok(backend.usbAudioFormats());
         case "get_usb_player_menu_config": return ok(backend.playerMenuConfig());
         case "get_usb_background_color": return ok(backend.usbBackgroundColor());

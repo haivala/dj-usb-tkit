@@ -4,6 +4,7 @@ import { narrowTrackSelectionToLoaded } from "../shared/track_selection.mjs";
 import { cloneTemplate } from "../../ui_utils.mjs";
 import { createDialogLifecycle } from "../shared/dialog_lifecycle.mjs";
 import { catchErr } from "../shared/track_actions.mjs";
+import { setActiveListItem } from "../shell/actions.mjs";
 import { STORAGE_KEY_USB_ROOT, STORAGE_KEY_EXPORT_ENGINE_LIBRARY } from "../../settings_keys.mjs";
 import {
   renderTrackListDurationSummary,
@@ -797,10 +798,11 @@ export async function reorderUsbPlaylists(ctx) {
 }
 // USB workflow orchestration.
 
-// Each USB list page: its <ul> (which carries the `data-loaded` mark) and its read.
+// Each USB list page: its <ul> (which carries the `data-loaded` mark), its read,
+// its track table and how a row opens.
 const USB_LISTS = {
-  "usb-playlists": { list: "usbPlaylists", read: readUsbPlaylists },
-  "usb-history": { list: "historyList", read: readUsbHistories }
+  "usb-playlists": { list: "usbPlaylists", read: readUsbPlaylists, tracksCtl: "usbPlaylistTracksCtl", openRow: openUsbPlaylistRow },
+  "usb-history": { list: "historyList", read: readUsbHistories, tracksCtl: "usbHistoryTracksCtl", openRow: openHistoryRow }
 };
 
 // `state.usbListReads[viewId]` is the list's running read. Clearing the list or
@@ -823,13 +825,73 @@ function forgetUsbListRead(ctx, viewId) {
   delete ctx.el[USB_LISTS[viewId].list].dataset.loaded;
 }
 
-// Opening a list page reads the list unless it's already loaded. The page
-// doesn't wait for it, and a failed read leaves no mark, so the next open retries.
-export function ensureUsbListLoaded(ctx, viewId) {
+// Opening a list page reads the list unless it's already loaded, then opens the
+// first item if nothing is open. The page doesn't wait for it, and a failed read
+// leaves no mark, so the next open retries. Clicking the page already on screen
+// only retries a failed read: it doesn't reopen what a removal closed.
+export function ensureUsbListLoaded(ctx, viewId, { viewChanged }) {
   const { state, el } = ctx;
   if (!state.usbRoot || !state.usbRootValid) return;
-  if ("loaded" in el[USB_LISTS[viewId].list].dataset || state.usbListReads[viewId]) return;
-  startUsbListRead(ctx, viewId).catch(catchErr(ctx.emitStatus));
+  const running = state.usbListReads[viewId];
+  const loaded = "loaded" in el[USB_LISTS[viewId].list].dataset;
+  if (!viewChanged && (running || loaded)) return;
+  let read;
+  if (running) read = running.promise.catch(() => {}); // whoever started it reports its failure
+  else if (!loaded) read = startUsbListRead(ctx, viewId).catch(catchErr(ctx.emitStatus));
+  Promise.resolve(read).then(() => openFirstUsbListItem(ctx, viewId)).catch(catchErr(ctx.emitStatus));
+}
+
+// Only for a page still on screen: one the user left opens its item on return.
+function openFirstUsbListItem(ctx, viewId) {
+  const { list, tracksCtl, openRow } = USB_LISTS[viewId];
+  const listEl = ctx.el[list];
+  if (ctx.state.activeTab !== viewId || ctx[tracksCtl].scopeId != null || !("loaded" in listEl.dataset)) return;
+  const firstRow = listEl.firstElementChild?.firstElementChild;
+  if (firstRow) openRow(ctx, firstRow);
+}
+
+// Highlights a playlist row and loads its table. Returns the playlist, if it
+// resolved.
+export function openUsbPlaylistRow(ctx, btn) {
+  const { state, el, usbPlaylistTracksCtl, emitStatus } = ctx;
+  const index = Number(btn.dataset.usbPlaylistIndex);
+  const id = btn.dataset.usbPlaylist;
+  const playlist = state.usbPlaylists[index]
+    || state.usbPlaylists.find((item) => String(item.id) === String(id));
+  setActiveListItem(el.usbPlaylists, btn);
+  if (!playlist) {
+    usbPlaylistTracksCtl.clear();
+    emitStatus("Failed to resolve selected USB playlist");
+    return null;
+  }
+  // The controller fetches page 1 (paginated + hydrated server-side),
+  // renders it, and sets the "Total time" footer from the response.
+  usbPlaylistTracksCtl.load({ scopeId: playlist.id }).catch((err) => {
+    console.warn("USB playlist load failed:", err);
+    emitStatus(`Failed to load USB playlist: ${err.message}`);
+  });
+  return playlist;
+}
+
+// Highlights a history row and loads its table.
+export function openHistoryRow(ctx, btn) {
+  const { state, el, usbHistoryTracksCtl, emitStatus } = ctx;
+  const index = Number(btn.dataset.historyIndex);
+  state.selectedHistoryIndex = index;
+  const history = state.histories[index];
+  // Kept for the "Export Tracklist" text feature, which needs the whole
+  // session's tracks; the table itself is paginated by the controller.
+  state.historyTracks = history?.tracks || [];
+  el.exportHistoryTracklistBtn.disabled = !state.historyTracks.length;
+  setActiveListItem(el.historyList, btn);
+  if (!history) {
+    usbHistoryTracksCtl.clear();
+    return;
+  }
+  usbHistoryTracksCtl.load({ scopeId: history.id }).catch((err) => {
+    console.warn("USB history load failed:", err);
+    emitStatus(`Failed to load USB history: ${err.message}`);
+  });
 }
 
 // A read that must see the stick as it is now (after a write), so it doesn't
