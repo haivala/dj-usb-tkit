@@ -689,7 +689,7 @@ test("USB lists read after leaving their pages open the first item on return, an
   expect(await page.evaluate(() => window.__playlistFetches)).toBe(1);
 });
 
-test("removing the open USB playlist opens nothing, even clicking its page again, until the page is opened again", async ({ page }) => {
+test("removing a USB playlist keeps the open one; removing the open one opens nothing, even clicking its page again, until the page is opened again", async ({ page }) => {
   await installTauriMock(page, "reorder");
   await countPlaylistFetches(page);
   await page.goto("/");
@@ -702,24 +702,33 @@ test("removing the open USB playlist opens nothing, even clicking its page again
   await expect(first).toHaveClass(/active/);
   await expect(page.locator("#usbPlaylistTracks .track-grid-row")).toHaveCount(1);
 
+  const rows = page.locator("#usbPlaylists button");
+  await page.locator('[data-usb-playlist="usb-pl-2"]').hover();
+  await page.locator('[data-usb-remove-playlist="usb-pl-2"]').click();
+  await page.locator("#confirmOkBtn").click();
+  await expect(page.locator("#statusText")).toContainText("Removed USB playlist: Bravo");
+  await expect(rows).toHaveCount(2);
+  await expect(first).toHaveClass(/active/);
+  await expect(page.locator("#usbPlaylistHeading .track-list-heading-name")).toHaveText("Alpha");
+  await expect(page.locator("#usbPlaylistTracks .track-grid-row")).toContainText("Track A");
+
   await first.hover();
   await page.locator('[data-usb-remove-playlist="usb-pl-1"]').click();
   await page.locator("#confirmOkBtn").click();
   await expect(page.locator("#statusText")).toContainText("Removed USB playlist: Alpha");
-  const rows = page.locator("#usbPlaylists button");
-  await expect(rows).toHaveCount(2);
+  await expect(rows).toHaveCount(1);
   await expect(page.locator("#usbPlaylists button.active")).toHaveCount(0);
 
   await nav.click();
   await page.waitForTimeout(100);
   await expect(page.locator("#usbPlaylists button.active")).toHaveCount(0);
-  expect(await page.evaluate(() => window.__trackFetches)).toBe(1);
+  expect(await page.evaluate(() => window.__trackFetches)).toBe(2);
 
   await page.locator('.nav-item[data-view="usb"]').click();
   await nav.click();
-  await expect(page.locator('[data-usb-playlist="usb-pl-2"]')).toHaveClass(/active/);
+  await expect(page.locator('[data-usb-playlist="usb-pl-3"]')).toHaveClass(/active/);
   await expect(page.locator("#usbPlaylistTracks .track-grid-row")).toHaveCount(1);
-  expect(await page.evaluate(() => window.__trackFetches)).toBe(2);
+  expect(await page.evaluate(() => window.__trackFetches)).toBe(3);
 });
 
 test("a failed USB list read retries when the page is opened again", async ({ page }) => {
@@ -1157,6 +1166,7 @@ async function dragViaHandle(page, fromHandleSelector, toRowSelector, dropNearTo
 
 test("USB playlist drag-and-drop reorder persists the new order", async ({ page }) => {
   await installTauriMock(page, "reorder");
+  await countPlaylistFetches(page);
   await page.goto("/");
 
   await page.locator('.nav-item[data-view="usb"]').click();
@@ -1171,25 +1181,23 @@ test("USB playlist drag-and-drop reorder persists the new order", async ({ page 
 
   await page.locator('.nav-item[data-view="usb-playlists"]').click();
 
-  const rows = page.locator("#usbPlaylists li[data-usb-playlist-li]");
+  const rows = page.locator("#usbPlaylists [data-usb-playlist]");
   await expect(rows).toHaveCount(3);
   await expect(rows.nth(0)).toContainText("Alpha");
   await expect(rows.nth(1)).toContainText("Bravo");
   await expect(rows.nth(2)).toContainText("Charlie");
+  await expect(rows.nth(0)).toHaveClass(/active/);
+  await expect(page.locator("#usbPlaylistTracks .track-grid-row")).toHaveCount(1);
 
   // Drag "Alpha" (row 0) to below "Charlie" (row 2), moving it to the end.
   await dragViaHandle(
     page,
-    '#usbPlaylists li[data-usb-playlist-li="0"] [data-usb-drag-handle]',
-    '#usbPlaylists li[data-usb-playlist-li="2"]',
+    '#usbPlaylists li:nth-child(1) [data-usb-drag-handle]',
+    '#usbPlaylists li:nth-child(3)',
     false
   );
 
-  // reorderUsbPlaylists emits "Playlist order saved" and then immediately
-  // refreshes from the backend, which overwrites status with the fetch
-  // result — so assert on the settled state (row order + recorded call)
-  // rather than the transient status text.
-  await expect(page.locator("#statusText")).toContainText("USB playlists loaded: 3");
+  await expect(page.locator("#statusText")).toContainText("Playlist order saved");
   await expect(rows.nth(0)).toContainText("Bravo");
   await expect(rows.nth(1)).toContainText("Charlie");
   await expect(rows.nth(2)).toContainText("Alpha");
@@ -1200,6 +1208,55 @@ test("USB playlist drag-and-drop reorder persists the new order", async ({ page 
   expect(reorderCalls.length).toBeGreaterThan(0);
   const lastCall = reorderCalls[reorderCalls.length - 1];
   expect(lastCall).toEqual(["usb-pl-2", "usb-pl-3", "usb-pl-1"]);
+
+  // Nothing is read again: the moved playlist stays open.
+  await expect(rows.nth(2)).toHaveClass(/active/);
+  await expect(page.locator("#usbPlaylistHeading .track-list-heading-name")).toHaveText("Alpha");
+  await expect(page.locator("#usbPlaylistTracks .track-grid-row")).toContainText("Track A");
+  expect(await page.evaluate(() => window.__playlistFetches)).toBe(1);
+  expect(await page.evaluate(() => window.__trackFetches)).toBe(1);
+
+  // A click opens the row clicked, in its new place.
+  await rows.nth(0).click();
+  await expect(page.locator("#usbPlaylistHeading .track-list-heading-name")).toHaveText("Bravo");
+  await expect(page.locator("#usbPlaylistTracks .track-grid-row")).toContainText("Track B");
+});
+
+test("a failed USB playlist reorder restores the order and keeps the playlist open", async ({ page }) => {
+  await installTauriMock(page, "reorder");
+  await page.addInitScript(() => {
+    const invoke = window.__TAURI__.core.invoke;
+    window.__TAURI__.core.invoke = async (command, payload) => {
+      if (command === "reorder_usb_playlists") return { ok: false, error: { code: "IO", message: "write failed" } };
+      return invoke(command, payload);
+    };
+  });
+  await countPlaylistFetches(page);
+  await page.goto("/");
+
+  await page.locator('.nav-item[data-view="usb"]').click();
+  await page.locator("#usbEmptyState .empty-state-action").click();
+  await page.locator('.nav-item[data-view="usb-playlists"]').click();
+
+  const rows = page.locator("#usbPlaylists [data-usb-playlist]");
+  await expect(rows.nth(0)).toHaveClass(/active/);
+  await expect(page.locator("#usbPlaylistTracks .track-grid-row")).toHaveCount(1);
+
+  await dragViaHandle(
+    page,
+    '#usbPlaylists li:nth-child(1) [data-usb-drag-handle]',
+    '#usbPlaylists li:nth-child(3)',
+    false
+  );
+
+  await expect(page.locator("#statusText")).toContainText("Failed to save playlist order: write failed");
+  await expect(rows.nth(0)).toContainText("Alpha");
+  await expect(rows.nth(1)).toContainText("Bravo");
+  await expect(rows.nth(2)).toContainText("Charlie");
+  await expect(rows.nth(0)).toHaveClass(/active/);
+  await expect(page.locator("#usbPlaylistHeading .track-list-heading-name")).toHaveText("Alpha");
+  await expect(page.locator("#usbPlaylistTracks .track-grid-row")).toContainText("Track A");
+  expect(await page.evaluate(() => window.__playlistFetches)).toBe(2);
 });
 
 test("USB playlist drag that does not change position skips persisting order", async ({ page }) => {
@@ -1210,11 +1267,11 @@ test("USB playlist drag that does not change position skips persisting order", a
   await page.locator("#usbEmptyState .empty-state-action").click();
   await page.locator('.nav-item[data-view="usb-playlists"]').click();
 
-  const rows = page.locator("#usbPlaylists li[data-usb-playlist-li]");
+  const rows = page.locator("#usbPlaylists [data-usb-playlist]");
   await expect(rows).toHaveCount(3);
 
   // Drag row 0's handle a few pixels and drop back within the same row.
-  const handle = page.locator('#usbPlaylists li[data-usb-playlist-li="0"] [data-usb-drag-handle]');
+  const handle = page.locator('#usbPlaylists li:nth-child(1) [data-usb-drag-handle]');
   const box = await handle.boundingBox();
   await page.mouse.move(box.x + box.width / 2, box.y + box.height / 2);
   await page.mouse.down();
@@ -1235,7 +1292,7 @@ test("USB playlist drag auto-scrolls the list when held near its bottom edge", a
   await page.locator('.nav-item[data-view="usb-playlists"]').click();
 
   const list = page.locator("#usbPlaylists");
-  await expect(page.locator("#usbPlaylists li[data-usb-playlist-li]")).toHaveCount(40);
+  await expect(page.locator("#usbPlaylists [data-usb-playlist]")).toHaveCount(40);
 
   const initialScrollTop = await list.evaluate((node) => node.scrollTop);
   expect(initialScrollTop).toBe(0);
@@ -1245,7 +1302,7 @@ test("USB playlist drag auto-scrolls the list when held near its bottom edge", a
   // meant for the list underneath it.
   await expect(page.locator("#progressFooter")).not.toHaveClass(/active/, { timeout: 3000 });
 
-  const handle = page.locator('#usbPlaylists li[data-usb-playlist-li="0"] [data-usb-drag-handle]');
+  const handle = page.locator('#usbPlaylists li:nth-child(1) [data-usb-drag-handle]');
   const handleBox = await handle.boundingBox();
   const listBox = await list.boundingBox();
 

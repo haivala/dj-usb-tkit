@@ -223,33 +223,42 @@ pub(crate) fn restore_pdb_playlist_sort_orders(
     Ok(patched)
 }
 
-pub(crate) fn sync_edb_playlist_sort_orders_from_pdb(
+/// Writes a USB playlist order to the eDB. `order_by_name` is keyed by canonical
+/// playlist name, because the USB playlist list pairs eDB rows with PDB rows by
+/// name, and a playlist may have a row in only one database.
+pub(crate) fn write_edb_playlist_order(
     usb_root: &std::path::Path,
-    edb_conn: Option<&mut rusqlite::Connection>,
+    order_by_name: &HashMap<String, u32>,
     warnings: &mut Vec<WarningEntry>,
 ) -> BackendResult<usize> {
-    let parsed = parse_pdb(&usb_staging::stage_pdb(usb_root)?)?;
-    let Some(mut handle) = EdbConnHandle::acquire(edb_conn, || open_edb_rw(usb_root, warnings))
-    else {
+    let Some(mut conn) = open_edb_rw(usb_root, warnings) else {
         warnings.push(logging::log(
             Level::Error,
-            "usb-repair",
-            "usb.repair.strict-parity.order-sync-edb-open-failed",
-            "strict parity upgrade: unable to open eDB for playlist order sync",
+            "usb-import",
+            "usb.reorder.edb-open-failed",
+            "reorder: unable to open eDB for playlist order",
         ));
         return Ok(0);
     };
-    let conn = handle.conn();
-    if !table_exists(conn, "playlist") {
+    if !table_exists(&conn, "playlist") {
         return Ok(0);
     }
     let tx = conn.transaction()?;
+    let rows = {
+        let mut stmt = tx.prepare("SELECT playlist_id, name FROM playlist WHERE attribute = 0")?;
+        stmt.query_map([], |row| {
+            Ok((row.get::<_, i64>(0)?, row.get::<_, String>(1)?))
+        })?
+        .collect::<Result<Vec<_>, _>>()?
+    };
     let mut updated = 0usize;
-    for leaf in parsed.playlist_tree.iter().filter(|row| !row.row_is_folder) {
-        updated += tx.execute(
-            "UPDATE playlist SET sequenceNo = ?1 WHERE playlist_id = ?2 AND attribute = 0",
-            params![i64::from(leaf.sort_order), i64::from(leaf.id)],
-        )?;
+    for (playlist_id, name) in rows {
+        if let Some(position) = order_by_name.get(&canonicalize_playlist_name(&name)) {
+            updated += tx.execute(
+                "UPDATE playlist SET sequenceNo = ?1 WHERE playlist_id = ?2 AND attribute = 0",
+                params![i64::from(*position), playlist_id],
+            )?;
+        }
     }
     tx.commit()?;
     let _ = conn.execute_batch("PRAGMA wal_checkpoint(TRUNCATE);");

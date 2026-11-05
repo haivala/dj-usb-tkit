@@ -44,6 +44,12 @@
   and Import History buttons are gone.
 - **Improvement:** USB Playlists and USB History open their first item when you open the page with
   nothing open. Coming back to a page keeps what was open.
+- **Improvement:** Reordering USB playlists no longer re-reads the list, and the open playlist stays
+  open. Removing a USB playlist keeps the open one too, unless that's the one you removed.
+- **Fix:** A failed USB playlist reorder now keeps its error in the status line instead of replacing it
+  with "USB playlists loaded".
+- **Fix:** Reordering USB playlists now saves the order in both databases for every playlist, by name.
+  Before, a playlist only in the eDB kept its old place, and always listed after the others.
 - **Fix:** Selecting the same USB again now clears its playlists and history, so a stick back from a
   player doesn't keep showing the old lists.
 - **Fix:** Restoring a USB backup no longer loses the "on this USB" marks and the playlist reorder lock

@@ -791,9 +791,9 @@ export async function reorderUsbPlaylists(ctx) {
     clearUsbDiagnostics(ctx);
     emitStatus("Playlist order saved");
   } catch (err) {
-    emitStatus(`Failed to save playlist order: ${err.message || err}`);
-  } finally {
+    // The drag already moved the row: read the real order back.
     await refreshUsb(ctx);
+    emitStatus(`Failed to save playlist order: ${err.message || err}`);
   }
 }
 // USB workflow orchestration.
@@ -854,10 +854,7 @@ function openFirstUsbListItem(ctx, viewId) {
 // resolved.
 export function openUsbPlaylistRow(ctx, btn) {
   const { state, el, usbPlaylistTracksCtl, emitStatus } = ctx;
-  const index = Number(btn.dataset.usbPlaylistIndex);
-  const id = btn.dataset.usbPlaylist;
-  const playlist = state.usbPlaylists[index]
-    || state.usbPlaylists.find((item) => String(item.id) === String(id));
+  const playlist = findByScopeId(state.usbPlaylists, btn.dataset.usbPlaylist);
   setActiveListItem(el.usbPlaylists, btn);
   if (!playlist) {
     usbPlaylistTracksCtl.clear();
@@ -937,7 +934,7 @@ async function readUsbPlaylists(ctx, isCurrent) {
   const usbTrackTotal = data.playlistTrackTotal;
   el.usbCountsText.textContent = `${counted(state.usbPlaylists.length, "playlist")}, ${counted(usbTrackTotal, "track")}`;
   renderUsbPlaylists(ctx);
-  ctx.usbPlaylistTracksCtl.clear();
+  keepOpenUsbPlaylist(ctx);
   // The freshly scanned status may flip an open local playlist's reorder lock.
   await ctx.renderCurrentPlaylistTracksFromState();
 
@@ -947,6 +944,20 @@ async function readUsbPlaylists(ctx, isCurrent) {
   setProgress(true, 100, `Done — ${counted(state.usbPlaylists.length, "playlist")}, ${counted(usbTrackTotal, "track")}`);
   emitStatus(`USB playlists loaded: ${state.usbPlaylists.length}${warningSuffix}`, { warningCount });
   ctx.scheduleProgressIdle(1200);
+}
+
+// After a read, the open playlist stays open if it still exists. Its table loads
+// again in place, which also brings back the heading's size.
+function keepOpenUsbPlaylist(ctx) {
+  const { state, usbPlaylistTracksCtl: ctl, emitStatus } = ctx;
+  if (!findByScopeId(state.usbPlaylists, ctl.scopeId)) {
+    ctl.clear();
+    return;
+  }
+  ctl.load().catch((err) => {
+    console.warn("USB playlist load failed:", err);
+    emitStatus(`Failed to load USB playlist: ${err.message}`);
+  });
 }
 
 // `openReport`: a run the user asked for opens Health & Diagnostics whatever
@@ -1525,12 +1536,12 @@ async function runPlaylistExport(ctx, playlistId) {
 
 export function renderUsbPlaylists(ctx) {
   const { state, el, document } = ctx;
-  el.usbPlaylists.replaceChildren(...state.usbPlaylists.map((playlist, index) => {
+  const openId = String(ctx.usbPlaylistTracksCtl?.scopeId);
+  el.usbPlaylists.replaceChildren(...state.usbPlaylists.map((playlist) => {
     const li = cloneTemplate(document, "tplUsbPlaylistItem");
-    li.dataset.usbPlaylistLi = String(index);
     const btn = li.firstElementChild;
-    btn.dataset.usbPlaylistIndex = String(index);
     btn.dataset.usbPlaylist = playlist.id;
+    btn.classList.toggle("active", String(playlist.id) === openId);
     btn.querySelector(".playlist-label").textContent = playlist.name;
     btn.querySelector(".playlist-remove").dataset.usbRemovePlaylist = playlist.id;
     return li;

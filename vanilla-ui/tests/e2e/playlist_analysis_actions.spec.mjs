@@ -954,7 +954,7 @@ async function connectUsbAndFetchPlaylists(page) {
   await page.locator('.nav-item[data-view="usb"]').click();
   await page.locator("#usbEmptyState .empty-state-action").click();
   await page.locator('.nav-item[data-view="usb-playlists"]').click();
-  await expect(page.locator("#usbPlaylists li[data-usb-playlist-li]")).toHaveCount(1);
+  await expect(page.locator("#usbPlaylists [data-usb-playlist]")).toHaveCount(1);
 }
 
 test("sidebar checkmarks show which playlists are on the connected USB", async ({ page }) => {

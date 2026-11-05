@@ -216,7 +216,7 @@ export function bindUsbEvents(ctx) {
       return;
     }
 
-    const btn = event.target.closest("[data-usb-playlist-index]");
+    const btn = event.target.closest("[data-usb-playlist]");
     if (!btn) return;
     stopPlaybackIfActive().catch((err) => {
       console.warn("Failed stopping playback on USB playlist change:", err);
@@ -228,7 +228,7 @@ export function bindUsbEvents(ctx) {
 
   bindListDragReorder(el.usbPlaylists, {
     handleSelector: "[data-usb-drag-handle]",
-    itemSelector: "li[data-usb-playlist-li]",
+    itemSelector: "li",
     onMove: (fromIndex, toIndex) => {
       state.usbPlaylists = moveArrayItem(state.usbPlaylists, fromIndex, toIndex);
       reorderUsbPlaylists().catch((err) => {

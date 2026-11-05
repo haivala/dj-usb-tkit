@@ -1314,15 +1314,16 @@ impl BackendService {
             .iter()
             .map(|c| canonicalize_playlist_name(&c.display_name))
             .collect::<HashSet<_>>();
-        if let Some(map) = &edb_playlist_tracks {
-            for (idx, name) in map.keys().enumerate() {
+        if let Some(map) = &edb_playlists {
+            for (name, playlist) in map {
                 let key = canonicalize_playlist_name(name);
                 if seen.insert(key) {
                     playlist_candidates.push(PlaylistCandidate {
                         pdb_id: None,
                         short_name: name.clone(),
                         display_name: name.clone(),
-                        sort_order: u32::MAX.saturating_sub(20000).saturating_add(idx as u32),
+                        // A reorder gives both databases one numbering.
+                        sort_order: u32::try_from(playlist.sort_order).unwrap_or(0),
                     });
                 }
             }
@@ -1530,56 +1531,69 @@ impl BackendService {
         );
 
         on_progress(10, 100, "USB: Computing new playlist order");
-        let mut desired_sort_by_id = HashMap::<u32, u32>::new();
-        let mut next_sort_order = 0u32;
-        for id in &req.ordered_playlist_ids {
-            let Some(pdb_id_str) = id.strip_prefix("usb-pl-") else {
-                continue;
-            };
-            // eDB-only playlists use "usb-pl-name-{canonical}" ids and have no
-            // PDB row to patch, so they fail to parse as a bare u32 and are skipped.
-            let Ok(pdb_id) = pdb_id_str.parse::<u32>() else {
-                continue;
-            };
-            desired_sort_by_id.insert(pdb_id, next_sort_order);
-            next_sort_order += 1;
+        // Every playlist gets its place in the whole list, in both databases, so
+        // a read can sort rows from either database together.
+        let mut pdb_order = HashMap::<u32, u32>::new();
+        let mut edb_order = HashMap::<String, u32>::new();
+        for (position, id) in (0u32..).zip(&req.ordered_playlist_ids) {
+            if let Some(canonical_name) = id.strip_prefix("usb-pl-name-") {
+                edb_order.insert(canonical_name.to_string(), position);
+            } else if let Some(pdb_id) = id
+                .strip_prefix("usb-pl-")
+                .and_then(|pdb_id| pdb_id.parse::<u32>().ok())
+            {
+                pdb_order.insert(pdb_id, position);
+            }
         }
-
-        if desired_sort_by_id.is_empty() {
+        if pdb_order.is_empty() && edb_order.is_empty() {
             return Err(BackendError::Validation(
-                "reorder_usb_playlists: no PDB-backed playlist ids in orderedPlaylistIds"
-                    .to_string(),
+                "reorder_usb_playlists: no playlist ids in orderedPlaylistIds".to_string(),
             ));
         }
 
-        on_progress(30, 100, "USB: Patching PDB playlist order");
-        let patched = crate::service::repair::restore_pdb_playlist_sort_orders(
-            &usb_root,
-            &desired_sort_by_id,
-        )?;
-        if let Err(err) =
-            super::usb_staging::write_back_if_changed(&usb_root, super::usb_staging::DbKind::Pdb)
-        {
-            warnings.push(logging::log(
-                Level::Error,
-                "usb-import",
-                "usb.reorder.pdb-write-back-failed",
-                format!("PDB write-back to USB failed: {err}"),
-            ));
+        on_progress(30, 100, "USB: Writing PDB playlist order");
+        let mut patched = 0usize;
+        if !pdb_order.is_empty() {
+            patched =
+                crate::service::repair::restore_pdb_playlist_sort_orders(&usb_root, &pdb_order)?;
+            if let Err(err) = super::usb_staging::write_back_if_changed(
+                &usb_root,
+                super::usb_staging::DbKind::Pdb,
+            ) {
+                warnings.push(logging::log(
+                    Level::Error,
+                    "usb-import",
+                    "usb.reorder.pdb-write-back-failed",
+                    format!("PDB write-back to USB failed: {err}"),
+                ));
+            }
+            let parsed = crate::pdb_reader::parse_pdb(&super::usb_staging::stage_pdb(&usb_root)?)?;
+            for leaf in parsed.playlist_tree.iter().filter(|row| !row.row_is_folder) {
+                let Some(position) = pdb_order.get(&leaf.id) else {
+                    continue;
+                };
+                edb_order.insert(canonicalize_playlist_name(&leaf.name), *position);
+                if let Some(folder) = parsed.playlist_tree.iter().find(|p| p.id == leaf.parent_id) {
+                    let display_name = format!("{} / {}", folder.name, leaf.name);
+                    edb_order.insert(canonicalize_playlist_name(&display_name), *position);
+                }
+            }
         }
 
-        on_progress(70, 100, "USB: Syncing eDB playlist order");
-        let edb_updated = crate::service::repair::sync_edb_playlist_sort_orders_from_pdb(
-            &usb_root,
-            None,
-            &mut warnings,
-        )?;
+        on_progress(70, 100, "USB: Writing eDB playlist order");
+        let edb_updated =
+            crate::service::repair::write_edb_playlist_order(&usb_root, &edb_order, &mut warnings)?;
+        if patched == 0 && edb_updated == 0 {
+            return Err(BackendError::Validation(
+                "reorder_usb_playlists: orderedPlaylistIds matched no playlist".to_string(),
+            ));
+        }
         if edb_updated == 0 {
             warnings.push(logging::log(
                 Level::Warn,
                 "usb-import",
                 "usb.reorder.zero-rows-synced",
-                "reorder: eDB playlist order sync updated 0 rows",
+                "reorder: eDB playlist order updated 0 rows",
             ));
         }
         if let Err(err) =
@@ -1598,7 +1612,7 @@ impl BackendService {
         self.invalidate_usb_parse_cache();
 
         Ok(ReorderUsbPlaylistsData {
-            reordered: patched,
+            reordered: patched.max(edb_updated),
             warnings,
         })
     }
@@ -5112,7 +5126,125 @@ mod tests {
     }
 
     #[test]
-    fn reorder_usb_playlists_rejects_ids_with_no_pdb_backed_entries() {
+    fn reorder_usb_playlists_writes_one_order_to_both_databases() {
+        let (_dir, service) = test_service();
+        let (_usb_dir, usb_root) = test_usb_root();
+        let root = Some(usb_root.to_string_lossy().to_string());
+        let names_in_order = |service: &crate::service::BackendService| {
+            service
+                .fetch_usb_playlists(crate::models::FetchUsbPlaylistsRequest {
+                    usb_root: root.clone(),
+                })
+                .expect("fetch playlists")
+                .items
+        };
+
+        // "A" and "B" are in both databases, "C" only in the eDB.
+        for (id, name, in_pdb) in [
+            ("pl-a", "A", true),
+            ("pl-b", "B", true),
+            ("pl-c", "C", false),
+        ] {
+            let tracks = [("t1", "Song", "a.mp3")];
+            let playlist = crate::edb::ExportPlaylistData {
+                id: id.to_string(),
+                name: name.to_string(),
+                tracks: vec![make_export_track("t1", "Song", "a.mp3")],
+            };
+            let manifest = make_export_manifest(id, name, &usb_root, &tracks);
+            if in_pdb {
+                crate::service::export_helpers::write_pdb(
+                    &usb_root, &playlist, &manifest, true, None, None,
+                )
+                .expect("write pdb playlist");
+            }
+            crate::service::export_helpers::write_edb_playlist(
+                &usb_root, &playlist, &manifest, true,
+            )
+            .expect("write edb playlist");
+        }
+
+        let items = names_in_order(&service);
+        let id_of = |name: &str| {
+            items
+                .iter()
+                .find(|p| p.name == name)
+                .map(|p| p.id.clone())
+                .expect("playlist id")
+        };
+        assert!(id_of("C").starts_with("usb-pl-name-"));
+
+        for order in [["C", "B", "A"], ["B", "C", "A"], ["A", "B", "C"]] {
+            service
+                .reorder_usb_playlists(crate::models::ReorderUsbPlaylistsRequest {
+                    usb_root: root.clone(),
+                    ordered_playlist_ids: order.iter().map(|name| id_of(name)).collect(),
+                })
+                .expect("reorder playlists");
+
+            let read: Vec<String> = names_in_order(&service)
+                .into_iter()
+                .map(|p| p.name)
+                .collect();
+            assert_eq!(read, order);
+
+            let mut warnings = Vec::new();
+            let conn = crate::edb::open_edb_rw(&usb_root, &mut warnings).expect("open edb");
+            for (position, name) in order.iter().enumerate() {
+                let sequence: i64 = conn
+                    .query_row(
+                        "SELECT sequenceNo FROM playlist WHERE name = ?1 AND attribute = 0",
+                        [name],
+                        |row| row.get(0),
+                    )
+                    .expect("edb row");
+                assert_eq!(sequence, position as i64, "eDB place of {name}");
+            }
+        }
+    }
+
+    #[test]
+    fn reorder_usb_playlists_saves_order_with_only_edb_playlists() {
+        let (_dir, service) = test_service();
+        let (_usb_dir, usb_root) = test_usb_root();
+        let root = Some(usb_root.to_string_lossy().to_string());
+        for (id, name) in [("pl-a", "A"), ("pl-b", "B")] {
+            let tracks = [("t1", "Song", "a.mp3")];
+            let playlist = crate::edb::ExportPlaylistData {
+                id: id.to_string(),
+                name: name.to_string(),
+                tracks: vec![make_export_track("t1", "Song", "a.mp3")],
+            };
+            let manifest = make_export_manifest(id, name, &usb_root, &tracks);
+            crate::service::export_helpers::write_edb_playlist(
+                &usb_root, &playlist, &manifest, true,
+            )
+            .expect("write edb playlist");
+        }
+        let fetch = || {
+            service
+                .fetch_usb_playlists(crate::models::FetchUsbPlaylistsRequest {
+                    usb_root: root.clone(),
+                })
+                .expect("fetch playlists")
+                .items
+        };
+        let mut ids: Vec<String> = fetch().iter().map(|p| p.id.clone()).collect();
+        ids.reverse();
+
+        service
+            .reorder_usb_playlists(crate::models::ReorderUsbPlaylistsRequest {
+                usb_root: root.clone(),
+                ordered_playlist_ids: ids.clone(),
+            })
+            .expect("reorder playlists");
+
+        let read: Vec<String> = fetch().iter().map(|p| p.id.clone()).collect();
+        assert_eq!(read, ids);
+    }
+
+    #[test]
+    fn reorder_usb_playlists_rejects_ids_that_match_no_playlist() {
         let (_dir, service) = test_service();
         let (_usb_dir, usb_root) = test_usb_root();
         let err = service
