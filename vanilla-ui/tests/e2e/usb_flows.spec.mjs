@@ -872,6 +872,7 @@ test("USB sub-nav reveal/hide and fallback to USB panel", async ({ page }) => {
 
   const usbPlaylistsNav = page.locator('.nav-sub-item[data-view="usb-playlists"]');
   await expect(usbPlaylistsNav).not.toHaveClass(/revealed/);
+  await expect(usbPlaylistsNav).toBeHidden(); // Keyboard can't reach it either.
 
   await page.locator('.nav-item[data-view="usb"]').click();
   await page.locator("#usbEmptyState .empty-state-action").click();

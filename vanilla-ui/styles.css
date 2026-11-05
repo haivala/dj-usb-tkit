@@ -713,8 +713,9 @@ body.sidebar-resizing {
   padding-bottom: 0;
   margin: 0;
   border: none;
-  pointer-events: none;
-  transition: max-height 350ms ease, opacity 300ms ease 50ms, padding 350ms ease;
+  /* Hidden means not reachable by keyboard either: no USB page without a USB. */
+  visibility: hidden;
+  transition: max-height 350ms ease, opacity 300ms ease 50ms, padding 350ms ease, visibility 0s linear 350ms;
 }
 
 .nav-sub-item.revealed {
@@ -722,7 +723,8 @@ body.sidebar-resizing {
   opacity: 1;
   padding-top: 6px;
   padding-bottom: 6px;
-  pointer-events: auto;
+  visibility: visible;
+  transition: max-height 350ms ease, opacity 300ms ease 50ms, padding 350ms ease, visibility 0s;
   cursor: pointer;
 }
 

@@ -58,6 +58,8 @@
 - **Improvement:** USB History rows show the session's date on a smaller muted line under its name.
 - **Chore:** Moved the USB selection lock, stored USB, player menu, background colour, backup delete and
   tracklist dialog tests from unit tests to e2e tests.
+- **Fix:** The USB pages' hidden menu items can no longer be reached with the keyboard when no USB is selected.
+- **Chore:** Removed USB checks and messages that could never run.
 - **Chore:** The docs' USB Playlists and USB History screenshots show the new layout.
 - **Chore:** The docs describe the USB lists loading when a page opens, Export Tracklist's new place and
   backend build, and reorders writing both databases.

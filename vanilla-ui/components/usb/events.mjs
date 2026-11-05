@@ -19,7 +19,6 @@ export function bindUsbEvents(ctx) {
     showDiagReportView,
     exportHistoryTracklist,
     tracklistExportDialog,
-    loadUsbPlayerMenuConfig,
     syncUsbPlayerMenuEditorControls,
     handleUsbPlayerMenuListClick,
     addUsbPlayerMenuItems,
@@ -220,9 +219,7 @@ export function bindUsbEvents(ctx) {
     stopPlaybackIfActive().catch((err) => {
       console.warn("Failed stopping playback on USB playlist change:", err);
     });
-    const playlist = ctx.openUsbPlaylistRow(btn);
-    if (!playlist) return;
-    emitStatus(playlist.selectedText);
+    emitStatus(ctx.openUsbPlaylistRow(btn).selectedText);
   });
 
   bindListDragReorder(el.usbPlaylists, {
