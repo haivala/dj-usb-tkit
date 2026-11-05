@@ -69,8 +69,6 @@ export function updateUsbSubNavDisabledState(ctx) {
   el.navSidebar.querySelectorAll('.nav-sub-item[data-view^="usb-"]').forEach((btn) => {
     btn.classList.toggle("revealed", hasRoot);
   });
-  el.refreshUsbBtn.disabled = !hasRoot;
-  el.refreshHistoryBtn.disabled = !hasRoot;
   el.backupsRefreshBtn.disabled = !hasRoot;
   el.usbBackupsBtn.disabled = !hasRoot;
   if (!hasRoot && (state.activeTab === "usb-playlists" || state.activeTab === "usb-history" || state.activeTab === "usb-player-menu" || state.activeTab === "backups")) {

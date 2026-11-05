@@ -45,8 +45,6 @@ function makeDom(body = "") {
       <button class="nav-sub-item" data-view="usb-history"></button>
       <button class="nav-sub-item" data-view="usb-player-menu"></button>
     </nav>
-    <button id="refreshUsbBtn"></button>
-    <button id="refreshHistoryBtn"></button>
     <button id="selectUsbFolderBtn"></button>
     <div id="usbEmptyState"></div>
     <div id="sourceFilterIndicator"></div>
@@ -131,8 +129,6 @@ test("USB nav and empty-state helpers follow the selected-root state", () => {
     state: { usbRoot: null, usbRootValid: false, usbRecentRoots: [] },
     document
   });
-  assert.equal(el.refreshUsbBtn.disabled, true);
-  assert.equal(el.refreshHistoryBtn.disabled, true);
   assert.deepEqual(switched, ["usb"]);
   assert.equal(document.querySelector("#usbEmptyState .empty-state-heading").textContent, "Connect a USB drive to browse and export");
 
@@ -142,7 +138,6 @@ test("USB nav and empty-state helpers follow the selected-root state", () => {
     switchView: async () => {}
   });
   assert.equal(document.querySelector('.nav-sub-item[data-view="usb-playlists"]').classList.contains("revealed"), true);
-  assert.equal(el.refreshUsbBtn.disabled, false);
 });
 
 test("source, settings, health, name badge, and onboarding helpers update compact UI state", () => {

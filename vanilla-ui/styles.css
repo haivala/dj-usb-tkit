@@ -2679,11 +2679,18 @@ input[type="checkbox"]:disabled {
   overflow: hidden;
 }
 
-/* Nothing shown on the right yet (e.g. before an import): the list -- and its
-   "No ... imported yet" message -- gets the full width instead of wrapping at
-   260px. Engines without :has keep the narrow column. */
-.split:has(> .right.hidden) {
+/* A USB list with no items: no track pane, and the list -- with its empty text
+   once a read has finished -- gets the full width instead of wrapping at 260px. */
+.split:has(> ul:empty) {
   grid-template-columns: minmax(0, 1fr);
+}
+.split:has(> ul:empty) > .right {
+  display: none;
+}
+ul[data-loaded]:empty::before {
+  content: attr(data-empty-text);
+  color: var(--muted);
+  font-size: 13px;
 }
 
 /* ── Player menu editor ──────────────────────────────── */

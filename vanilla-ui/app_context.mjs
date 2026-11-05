@@ -100,7 +100,7 @@ export function createAppContext(env) {
     clearUsbDiagnostics hideUsbDiagnostics loadUsbRootFromStorage usbContentChanged
     syncAssetScopePaths pickSourceFolders detectExternalRekordboxDb detectExternalMixxxDb
     validateAndSetUsbRoot renameDrive
-    removeUsbPlaylist reorderUsbPlaylists refreshUsb readUsbList ensureUsbListLoaded
+    removeUsbPlaylist reorderUsbPlaylists refreshUsb ensureUsbListLoaded
     runUsbDiagnostics runUsbParityReport
     previewUsbRepairs applyUsbRepairs exportHistoryTracklist
     handleUsbPlayerMenuListClick renderUsbPlayerMenuEditor syncUsbPlayerMenusEdbToPdb

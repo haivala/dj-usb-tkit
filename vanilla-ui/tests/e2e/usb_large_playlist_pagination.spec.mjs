@@ -140,7 +140,6 @@ async function selectBigPlaylist(page) {
   await page.locator('.nav-item[data-view="usb"]').click();
   await page.locator("#usbEmptyState .empty-state-action").click();
   await page.locator('.nav-item[data-view="usb-playlists"]').click();
-  await page.locator("#refreshUsbBtn").click();
   await expect(page.locator('[data-usb-playlist="usb-1"]')).toBeVisible();
   await page.locator('[data-usb-playlist="usb-1"]').click();
   await expect(page.locator("#usbPlaylistTracks .track-grid-row").first()).toBeVisible();
@@ -265,7 +264,6 @@ test("a slow page load shows the loading indicator instead of stale rows", async
   await page.locator('.nav-item[data-view="usb"]').click();
   await page.locator("#usbEmptyState .empty-state-action").click();
   await page.locator('.nav-item[data-view="usb-playlists"]').click();
-  await page.locator("#refreshUsbBtn").click();
   await page.locator('[data-usb-playlist="usb-1"]').click();
 
   const body = page.locator("#usbPlaylistTracks");

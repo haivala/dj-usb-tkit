@@ -40,7 +40,8 @@
 ## Unreleased
 
 - **Improvement:** USB Playlists and USB History load when you open the page, and only once until the
-  USB changes. If a read fails, it tries again the next time you open the page.
+  USB changes. If a read fails, it tries again the next time you open the page. The Import Playlists
+  and Import History buttons are gone.
 - **Fix:** Selecting the same USB again now clears its playlists and history, so a stick back from a
   player doesn't keep showing the old lists.
 - **Fix:** Restoring a USB backup no longer loses the "on this USB" marks and the playlist reorder lock

@@ -823,11 +823,6 @@ function forgetUsbListRead(ctx, viewId) {
   delete ctx.el[USB_LISTS[viewId].list].dataset.loaded;
 }
 
-// The Import buttons: joins a read that's already running.
-export function readUsbList(ctx, viewId) {
-  return ctx.state.usbListReads[viewId]?.promise ?? startUsbListRead(ctx, viewId);
-}
-
 // Opening a list page reads the list unless it's already loaded. The page
 // doesn't wait for it, and a failed read leaves no mark, so the next open retries.
 export function ensureUsbListLoaded(ctx, viewId) {
@@ -1466,28 +1461,9 @@ async function runPlaylistExport(ctx, playlistId) {
   clearUsbPlaylistsView(ctx);
 }
 
-// A USB side list (playlists / history): the items, or the right-hand track
-// pane hidden when there are none, with `emptyText` once a read has finished.
-function renderUsbSideList(list, items, emptyText) {
-  const doc = list.ownerDocument;
-  const right = list.closest(".split")?.querySelector(".right");
-  right?.classList.toggle("hidden", !items.length);
-  if (!items.length) {
-    if (!("loaded" in list.dataset)) {
-      list.replaceChildren();
-      return;
-    }
-    const empty = cloneTemplate(doc, "tplMutedListItem");
-    empty.textContent = emptyText;
-    list.replaceChildren(empty);
-    return;
-  }
-  list.replaceChildren(...items);
-}
-
 export function renderUsbPlaylists(ctx) {
   const { state, el, document } = ctx;
-  renderUsbSideList(el.usbPlaylists, state.usbPlaylists.map((playlist, index) => {
+  el.usbPlaylists.replaceChildren(...state.usbPlaylists.map((playlist, index) => {
     const li = cloneTemplate(document, "tplUsbPlaylistItem");
     li.dataset.usbPlaylistLi = String(index);
     const btn = li.firstElementChild;
@@ -1496,7 +1472,7 @@ export function renderUsbPlaylists(ctx) {
     btn.querySelector(".playlist-label").textContent = playlist.name;
     btn.querySelector(".playlist-remove").dataset.usbRemovePlaylist = playlist.id;
     return li;
-  }), 'No playlists imported yet. Click "Import Playlists" to load from USB.');
+  }));
   renderUsbPlaylistHeading(ctx);
 }
 
@@ -1538,7 +1514,7 @@ export function renderHistoryList(ctx) {
     li.querySelector(".playlist-label").textContent = `${history.name}${dateText ? ` (${dateText})` : ""}`;
     return li;
   }).reverse();
-  renderUsbSideList(el.historyList, items, 'No history imported yet. Click "Import History" to load from USB.');
+  el.historyList.replaceChildren(...items);
   renderHistoryHeading(ctx);
 }
 

@@ -679,12 +679,10 @@ async function openHealthCard(page) {
   await page.locator("#diagSections > *").first().waitFor();
 }
 
-// Shows a USB side list's item `name`, importing the list first if needed.
+// Shows a USB side list's item `name`. The list loads when its page opens.
 // Fails if the track table scrolls sideways: the shot needs a wider window.
-async function openUsbListItem(page, { importBtn, list, name, body }) {
-  const item = page.locator(`${list} li`, { hasText: name });
-  if (!(await item.count())) await page.locator(importBtn).click();
-  await item.click();
+async function openUsbListItem(page, { list, name, body }) {
+  await page.locator(`${list} li`, { hasText: name }).click();
   await page.locator(`${body} .track-grid-row`).first().waitFor();
   await waitProgressHidden(page);
   const overflow = await page.locator(body).evaluate((el) => {
@@ -773,7 +771,7 @@ function shots(fixture) {
       viewport: WIDE_VIEWPORT,
       async run(page) {
         await openNav(page, "usb-playlists");
-        await openUsbListItem(page, { importBtn: "#refreshUsbBtn", list: "#usbPlaylists", name: "Bass", body: "#usbPlaylistTracks" });
+        await openUsbListItem(page, { list: "#usbPlaylists", name: "Bass", body: "#usbPlaylistTracks" });
         await page.locator("#usbPlaylistTracks .track-grid-row").nth(1).locator(".track-grid-cell").nth(2).hover();
         await page.waitForTimeout(500);
       },
@@ -786,7 +784,7 @@ function shots(fixture) {
       viewport: WIDE_VIEWPORT,
       async run(page) {
         await openNav(page, "usb-history");
-        await openUsbListItem(page, { importBtn: "#refreshHistoryBtn", list: "#historyList", name: "HISTORY 002", body: "#historyTracks" });
+        await openUsbListItem(page, { list: "#historyList", name: "HISTORY 002", body: "#historyTracks" });
         await page.mouse.move(WIDE_VIEWPORT.width - 2, WIDE_VIEWPORT.height - 2);
         await page.waitForTimeout(500);
       },

@@ -2214,7 +2214,6 @@ test("cue editor opens + saves from a USB playlist row through the USB commands"
   await page.goto("/");
 
   await openUsbView(page, "usb-playlists");
-  await page.locator("#refreshUsbBtn").click();
   await page.locator('[data-usb-playlist-index="0"]').click();
 
   const row = page.locator("#usbPlaylistTracks .track-grid-row");
@@ -2264,7 +2263,6 @@ test("cue editor edits BPM from a USB playlist row, saves it through the USB com
   await expect(libraryBpm).toHaveText("126.00");
 
   await openUsbView(page, "usb-playlists");
-  await page.locator("#refreshUsbBtn").click();
   await page.locator('[data-usb-playlist-index="0"]').click();
 
   const row = page.locator("#usbPlaylistTracks .track-grid-row");
@@ -2292,7 +2290,6 @@ test("a rating-only edit from a USB row saves only the rating through the USB me
   await installUsbTrackDetailMock(page);
   await page.goto("/");
   await openUsbView(page, "usb-playlists");
-  await page.locator("#refreshUsbBtn").click();
   await page.locator('[data-usb-playlist-index="0"]').click();
   await page.locator('#usbPlaylistTracks .track-grid-row [data-action="edit-track-detail"]').click();
   await expect(page.locator("#trackDetailView")).toBeVisible();
@@ -2327,7 +2324,6 @@ test("clearing the release date from a USB row sends an empty date and blanks th
   await installUsbTrackDetailMock(page);
   await page.goto("/");
   await openUsbView(page, "usb-playlists");
-  await page.locator("#refreshUsbBtn").click();
   await page.locator('[data-usb-playlist-index="0"]').click();
   const row = page.locator("#usbPlaylistTracks .track-grid-row");
   await expect(row.locator(".td-year")).toHaveText("2015");
@@ -2352,7 +2348,6 @@ test("cue editor edits the musical key from a USB playlist row and saves it thro
   await page.goto("/");
 
   await openUsbView(page, "usb-playlists");
-  await page.locator("#refreshUsbBtn").click();
   await page.locator('[data-usb-playlist-index="0"]').click();
 
   const row = page.locator("#usbPlaylistTracks .track-grid-row");
@@ -2374,7 +2369,6 @@ test("a USB save runs as a background job: the progress bar shows each write and
   await page.goto("/");
 
   await openUsbView(page, "usb-playlists");
-  await page.locator("#refreshUsbBtn").click();
   await page.locator('[data-usb-playlist-index="0"]').click();
   const row = page.locator("#usbPlaylistTracks .track-grid-row");
   await row.locator('[data-action="edit-track-detail"]').click();
@@ -2400,7 +2394,6 @@ test("a USB save waits for a running USB job instead of writing alongside it", a
   await page.goto("/");
 
   await openUsbView(page, "usb-playlists");
-  await page.locator("#refreshUsbBtn").click();
   await page.locator('[data-usb-playlist-index="0"]').click();
   const row = page.locator("#usbPlaylistTracks .track-grid-row");
   await row.locator('[data-action="edit-track-detail"]').click();
@@ -2426,7 +2419,6 @@ test("cue editor also opens from a USB history row", async ({ page }) => {
   await page.goto("/");
 
   await openUsbView(page, "usb-history");
-  await page.locator("#refreshHistoryBtn").click();
   await page.locator('[data-history-index="0"]').click();
 
   const row = page.locator("#historyTracks .track-grid-row");
@@ -2443,7 +2435,6 @@ test("a USB-side save that fails on the device is surfaced, not silently dropped
   await page.goto("/");
 
   await openUsbView(page, "usb-playlists");
-  await page.locator("#refreshUsbBtn").click();
   await page.locator('[data-usb-playlist-index="0"]').click();
   await page.locator('#usbPlaylistTracks .track-grid-row [data-action="edit-track-detail"]').click();
   await expect(page.locator("#trackDetailView")).toBeVisible();

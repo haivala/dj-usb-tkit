@@ -548,7 +548,6 @@ test("USB playlist removal confirm path handles cancel and confirm", async ({ pa
   await expect(page.locator("#diagSections")).not.toBeEmpty();
 
   await page.locator('.nav-item[data-view="usb-playlists"]').click();
-  await page.locator("#refreshUsbBtn").click();
   await expect(page.locator('[data-usb-playlist="usb-1"]')).toBeVisible();
 
   // The remove × only shows on the hovered row.
@@ -566,7 +565,8 @@ test("USB playlist removal confirm path handles cancel and confirm", async ({ pa
   await page.locator("#confirmOkBtn").click();
 
   await expect(page.locator("#statusText")).toContainText("Removed USB playlist: Warmup");
-  await expect(page.locator("#usbPlaylists")).toContainText("No playlists imported yet");
+  await expect(page.locator("#usbPlaylists")).toBeEmpty();
+  await expect(page.locator("#usbPlaylists")).toHaveAttribute("data-loaded");
   await expect(page.locator("#diagSections")).toBeEmpty();
   await expect(page.locator("#diagOverallStatus")).toBeEmpty();
 });
@@ -582,10 +582,13 @@ test("USB playlists tab shows the empty text only after a read finds nothing", a
 
   await expect(page.locator("#panel-usb-playlists")).toHaveClass(/active/);
   await expect(page.locator("#usbPlaylists")).toBeEmpty();
+  await expect(page.locator("#usbPlaylists")).not.toHaveAttribute("data-loaded");
 
   await page.evaluate(() => window.__releaseLists());
-  await expect(page.locator("#usbPlaylists")).toContainText("No playlists imported yet");
-  await expect(page.locator("#usbPlaylists")).toContainText("Import Playlists");
+  await expect(page.locator("#usbPlaylists")).toHaveAttribute("data-loaded");
+  await expect(page.locator("#usbPlaylists")).toBeEmpty();
+  expect(await page.locator("#usbPlaylists").evaluate((node) => getComputedStyle(node, "::before").content)).toBe('"No playlists on this USB."');
+  await expect(page.locator("#panel-usb-playlists .split > .right")).toBeHidden();
 });
 
 test("USB history tab shows the empty text only after a read finds nothing", async ({ page }) => {
@@ -599,10 +602,13 @@ test("USB history tab shows the empty text only after a read finds nothing", asy
 
   await expect(page.locator("#panel-usb-history")).toHaveClass(/active/);
   await expect(page.locator("#historyList")).toBeEmpty();
+  await expect(page.locator("#historyList")).not.toHaveAttribute("data-loaded");
 
   await page.evaluate(() => window.__releaseLists());
-  await expect(page.locator("#historyList")).toContainText("No history imported yet");
-  await expect(page.locator("#historyList")).toContainText("Import History");
+  await expect(page.locator("#historyList")).toHaveAttribute("data-loaded");
+  await expect(page.locator("#historyList")).toBeEmpty();
+  expect(await page.locator("#historyList").evaluate((node) => getComputedStyle(node, "::before").content)).toBe('"No history on this USB."');
+  await expect(page.locator("#panel-usb-history .split > .right")).toBeHidden();
 });
 
 test("USB playlists status shows the backend's warning count, linked to the Event Log", async ({ page }) => {
@@ -612,7 +618,6 @@ test("USB playlists status shows the backend's warning count, linked to the Even
   await page.locator('.nav-item[data-view="usb"]').click();
   await page.locator("#usbEmptyState .empty-state-action").click();
   await page.locator('.nav-item[data-view="usb-playlists"]').click();
-  await page.locator("#refreshUsbBtn").click();
 
   await expect(page.locator("#statusText")).toContainText("USB playlists loaded: 1 | (2 warnings)");
   await expect(page.locator("#statusText .status-warning-link")).toHaveText("(2 warnings)");
@@ -1030,6 +1035,8 @@ test("a repair whose diagnostics re-run failed still applies the export status i
   await page.locator("#applyRepairsBtn").click();
   await expect(page.locator("#statusText")).toContainText("Repair apply complete");
   await expect(page.locator("#statusText")).not.toContainText("Diagnostics refreshed");
+  // The same USB is still selected, so its diagnostics panel stays.
+  await expect(page.locator("#usbDiagnosticsCard")).toBeVisible();
 
   await expect(mark).toHaveClass(/exported/);
   await expect(mark).toHaveAttribute("aria-label", "On this USB");
@@ -1064,7 +1071,6 @@ test("USB playlist drag-and-drop reorder persists the new order", async ({ page 
   await expect(page.locator("#diagSections")).not.toBeEmpty();
 
   await page.locator('.nav-item[data-view="usb-playlists"]').click();
-  await page.locator("#refreshUsbBtn").click();
 
   const rows = page.locator("#usbPlaylists li[data-usb-playlist-li]");
   await expect(rows).toHaveCount(3);
@@ -1104,7 +1110,6 @@ test("USB playlist drag that does not change position skips persisting order", a
   await page.locator('.nav-item[data-view="usb"]').click();
   await page.locator("#usbEmptyState .empty-state-action").click();
   await page.locator('.nav-item[data-view="usb-playlists"]').click();
-  await page.locator("#refreshUsbBtn").click();
 
   const rows = page.locator("#usbPlaylists li[data-usb-playlist-li]");
   await expect(rows).toHaveCount(3);
@@ -1129,7 +1134,6 @@ test("USB playlist drag auto-scrolls the list when held near its bottom edge", a
   await page.locator('.nav-item[data-view="usb"]').click();
   await page.locator("#usbEmptyState .empty-state-action").click();
   await page.locator('.nav-item[data-view="usb-playlists"]').click();
-  await page.locator("#refreshUsbBtn").click();
 
   const list = page.locator("#usbPlaylists");
   await expect(page.locator("#usbPlaylists li[data-usb-playlist-li]")).toHaveCount(40);
@@ -1173,8 +1177,26 @@ test("USB playlist drag auto-scrolls the list when held near its bottom edge", a
   expect(scrolledTop).toBeGreaterThan(0);
 });
 
-test("USB toggle race ends in deterministic final state", async ({ page }) => {
+test("USB toggle race ends in deterministic final state, with nothing left of the previous USB", async ({ page }) => {
   await installTauriMock(page, "toggle-usb");
+  await page.addInitScript(() => {
+    const invoke = window.__TAURI__.core.invoke;
+    window.__TAURI__.core.invoke = async (command, payload) => {
+      if (command === "list_playlists") {
+        return { ok: true, data: { items: [{ id: "pl-1", name: "Local Set", source: "local" }] } };
+      }
+      const playlistUsbExportStatus = [{ playlistId: "pl-1", playlistName: "Local Set", sameNameExistsOnUsb: true }];
+      if (command === "fetch_usb_playlists") {
+        const backend = window.__e2eBackend;
+        return backend.ok(backend.usbPlaylists({ items: [{ id: "usb-1", name: "Warmup", tracks: [] }], playlistUsbExportStatus }));
+      }
+      const result = await invoke(command, payload);
+      if (command === "run_usb_diagnostics") {
+        result.data = { ...result.data, playlistUsbExportStatus };
+      }
+      return result;
+    };
+  });
   await page.goto("/");
 
   const usbPlaylistsNav = page.locator('.nav-sub-item[data-view="usb-playlists"]');
@@ -1186,11 +1208,27 @@ test("USB toggle race ends in deterministic final state", async ({ page }) => {
   await page.locator("#selectUsbFolderBtn").click(); // valid (3)
   await usbPlaylistsNav.click();
   await expect(page.locator("#panel-usb-playlists")).toHaveClass(/active/);
+  await expect(page.locator('[data-usb-playlist="usb-1"]')).toBeVisible();
+  await expect(page.locator("#usbCountsText")).not.toBeEmpty();
+  await page.locator('.nav-sub-item[data-view="usb-history"]').click();
+  await expect(page.locator("#historyList")).toHaveAttribute("data-loaded");
+  const mark = page.locator('#navPlaylistList .nav-playlist-item[data-playlist-id="pl-1"] .nav-playlist-status');
+  await expect(mark).toHaveClass(/exported/);
   await page.locator('.nav-item[data-view="usb"]').click();
+  await expect(page.locator("#usbDiagnosticsCard")).toBeVisible();
   await page.locator("#selectUsbFolderBtn").click(); // invalid (4)
 
   await expect(usbPlaylistsNav).not.toHaveClass(/revealed/);
   await expect(page.locator("#panel-usb")).toHaveClass(/active/);
+  // The lists are cleared and unread, so they show nothing rather than "no playlists".
+  await expect(page.locator("#usbPlaylists")).toBeEmpty();
+  await expect(page.locator("#usbPlaylists")).not.toHaveAttribute("data-loaded");
+  await expect(page.locator("#usbCountsText")).toBeEmpty();
+  await expect(page.locator("#historyList")).toBeEmpty();
+  await expect(page.locator("#historyList")).not.toHaveAttribute("data-loaded");
+  await expect(page.locator("#historyCountsText")).toBeEmpty();
+  await expect(mark).not.toHaveClass(/exported/);
+  await expect(page.locator("#usbDiagnosticsCard")).toBeHidden();
 });
 
 test("a USB list read overtaken by a USB change drops its late response", async ({ page }) => {
@@ -1239,8 +1277,7 @@ test("a job started right after another finished keeps its progress footer", asy
   await page.locator('.nav-item[data-view="usb"]').click();
   await page.locator("#usbEmptyState .empty-state-action").click();
   await page.locator('.nav-item[data-view="usb-playlists"]').click();
-  await page.locator("#refreshUsbBtn").click();
-  // The import finished; its footer is due to hide 1.2s from now.
+  // The read finished; its footer is due to hide 1.2s from now.
   await expect(page.locator("#progressText")).toContainText("Done");
 
   await page.locator("#addPlaylistBtn").click();
@@ -1311,6 +1348,74 @@ async function connectUsb(page) {
   await page.locator("#usbEmptyState .empty-state-action").click();
   await expect(page.locator("#diagOverallStatus")).toHaveText("WARN");
 }
+
+test("restoring a backup: cancel and failure change nothing; success clears the report and lists and applies the export status", async ({ page }) => {
+  await installTauriMock(page, "valid");
+  await page.addInitScript(() => {
+    const invoke = window.__TAURI__.core.invoke;
+    window.__playlistReads = 0;
+    window.__restores = 0;
+    window.__TAURI__.core.invoke = async (command, payload) => {
+      if (command === "list_playlists") {
+        return { ok: true, data: { items: [{ id: "pl-1", name: "Local Set", source: "local" }] } };
+      }
+      if (command === "list_usb_backups") {
+        return { ok: true, data: { items: [{ timestamp: "2020-01-01_00-00-00", files: ["export.pdb"], reason: "export", sizeBytes: 1024, location: "usb" }] } };
+      }
+      if (command === "fetch_usb_playlists") window.__playlistReads += 1;
+      if (command === "restore_usb_backup") {
+        window.__restores += 1;
+        if (window.__failRestore) return { ok: false, error: { code: "IO", message: "disk gone" } };
+        return {
+          ok: true,
+          data: {
+            restored: true,
+            playlistUsbExportStatus: [{ playlistId: "pl-1", playlistName: "Local Set", sameNameExistsOnUsb: true }]
+          }
+        };
+      }
+      return invoke(command, payload);
+    };
+  });
+  await page.goto("/");
+  await connectUsb(page);
+
+  const usbRow = page.locator('[data-usb-playlist="usb-1"]');
+  const report = page.locator("#diagOverallStatus");
+  const mark = page.locator('#navPlaylistList .nav-playlist-item[data-playlist-id="pl-1"] .nav-playlist-status');
+  await page.locator('.nav-item[data-view="usb-playlists"]').click();
+  await expect(usbRow).toBeVisible();
+  await page.locator('.nav-item[data-view="usb"]').click();
+  await page.locator("#usbBackupsBtn").click();
+  const restoreBtn = page.locator(".backups-restore-btn");
+
+  await restoreBtn.click();
+  await page.locator("#confirmCancelBtn").click();
+  await expect(page.locator("#confirmOverlay")).toBeHidden();
+  expect(await page.evaluate(() => window.__restores)).toBe(0);
+
+  await page.evaluate(() => { window.__failRestore = true; });
+  await restoreBtn.click();
+  await page.locator("#confirmOkBtn").click();
+  await expect(page.locator("#statusText")).toContainText("Restore failed: disk gone");
+  await expect(usbRow).toHaveCount(1);
+  await expect(report).toHaveText("WARN");
+  await expect(mark).not.toHaveClass(/exported/);
+
+  await page.evaluate(() => { window.__failRestore = false; });
+  await restoreBtn.click();
+  await page.locator("#confirmOkBtn").click();
+  await expect(page.locator("#statusText")).toContainText("from backup");
+  await expect(report).toHaveText("");
+  await expect(usbRow).toHaveCount(0);
+  await expect(mark).toHaveClass(/exported/);
+  await expect(mark).toHaveAttribute("aria-label", "On this USB");
+
+  // Opening the page reads the restored list.
+  await page.locator('.nav-item[data-view="usb-playlists"]').click();
+  await expect(usbRow).toBeVisible();
+  expect(await page.evaluate(() => window.__playlistReads)).toBe(2);
+});
 
 test("applying repairs that change nothing keeps the loaded USB playlists and shows the refreshed report", async ({ page }) => {
   await installTauriMock(page, "valid");

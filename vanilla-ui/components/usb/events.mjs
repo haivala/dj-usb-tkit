@@ -11,7 +11,6 @@ export function bindUsbEvents(ctx) {
   const {
     state,
     el,
-    readUsbList,
     pickUsbFolder,
     validateAndSetUsbRoot,
     initializeUsb,
@@ -73,10 +72,6 @@ export function bindUsbEvents(ctx) {
       },
     });
   }
-
-  el.refreshUsbBtn.addEventListener("click", () => {
-    readUsbList("usb-playlists").catch(catchErr(emitStatus));
-  });
 
   el.selectUsbFolderBtn.addEventListener("click", () => {
     pickUsbFolder().catch(catchErr(emitStatus));
@@ -141,10 +136,6 @@ export function bindUsbEvents(ctx) {
 
   el.diagBackToReportBtn.addEventListener("click", () => {
     showDiagReportView();
-  });
-
-  el.refreshHistoryBtn.addEventListener("click", () => {
-    readUsbList("usb-history").catch(catchErr(emitStatus));
   });
 
   el.exportHistoryTracklistBtn.addEventListener("click", () => {

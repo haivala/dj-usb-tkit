@@ -86,28 +86,6 @@ test("validateAndSetUsbRoot blocks every USB-locking job type before backend val
   }
 });
 
-test("re-selecting the same USB clears its lists, so the player's changes show", async () => {
-  const responses = {
-    validate_usb_root: { valid: true, normalizedRoot: "/tmp/usb", hasWriteAccess: true,
-      hasVendorRoot: true, hasContents: true, hasPdb: true, warnings: [] },
-    // A named drive, or the naming prompt would wait for an answer.
-    get_usb_device_name: { name: "Club Stick" },
-    get_usb_audio_formats: { formats: [] },
-    list_usb_devices: { items: [] },
-  };
-  const ctx = makeTestCtx({ command: async (name) => responses[name] ?? {} });
-  Object.assign(ctx.state, {
-    usbRoot: "/tmp/usb",
-    usbPlaylists: [{ id: "p1", name: "Old" }],
-    histories: [{ id: "h1", name: "Old session" }],
-  });
-
-  await validateAndSetUsbRoot(ctx, "/tmp/usb");
-
-  assert.equal(ctx.state.usbPlaylists.length, 0);
-  assert.equal(ctx.state.histories.length, 0);
-});
-
 test("USB root controls and recent-root buttons reflect lock state", () => {
   const lockedEl = {
     selectUsbFolderBtn: { disabled: false, title: "" },

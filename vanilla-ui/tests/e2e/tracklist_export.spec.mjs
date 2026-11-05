@@ -99,7 +99,6 @@ test("Export Tracklist dialog's start-track select is populated from the selecte
   await page.locator('.nav-item[data-view="usb"]').click();
   await page.locator("#usbEmptyState .empty-state-action").click();
   await page.locator('.nav-item[data-view="usb-history"]').click();
-  await page.locator("#refreshHistoryBtn").click();
 
   await expect(page.locator("#historyList")).toContainText("HISTORY 001");
   await page.locator('#historyList [data-history-index]').click();
@@ -167,7 +166,6 @@ test("Export Tracklist saves the session from the chosen start track, and report
   await page.locator('.nav-item[data-view="usb"]').click();
   await page.locator("#usbEmptyState .empty-state-action").click();
   await page.locator('.nav-item[data-view="usb-history"]').click();
-  await page.locator("#refreshHistoryBtn").click();
   await page.locator("#historyList [data-history-index]").click();
   const status = page.locator("#statusText");
 

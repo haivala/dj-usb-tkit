@@ -290,14 +290,11 @@
       <section class="panel" id="panel-usb-playlists" role="tabpanel" aria-hidden="true">
         <div class="panel-header">
           <h2>USB Playlists</h2>
-          <div class="panel-header-actions">
-            <button id="refreshUsbBtn" data-primary disabled>Import Playlists</button>
-          </div>
           <span class="muted panel-header-meta" id="usbCountsText"></span>
         </div>
         <div class="split">
-          <ul id="usbPlaylists" class="list list-compact left"></ul>
-          <div class="right hidden">
+          <ul id="usbPlaylists" class="list list-compact left" data-empty-text="No playlists on this USB."></ul>
+          <div class="right">
             <div class="track-list-heading hidden" id="usbPlaylistHeading">
               <h3 class="track-list-heading-name"></h3>
               <span class="muted track-list-heading-count"></span>
@@ -347,14 +344,13 @@
         <div class="panel-header">
           <h2>USB History</h2>
           <div class="panel-header-actions">
-            <button id="refreshHistoryBtn" data-primary disabled>Import History</button>
             <button id="exportHistoryTracklistBtn" disabled>Export Tracklist</button>
           </div>
           <span class="muted panel-header-meta" id="historyCountsText"></span>
         </div>
         <div class="split">
-          <ul id="historyList" class="list list-compact left"></ul>
-          <div class="right hidden">
+          <ul id="historyList" class="list list-compact left" data-empty-text="No history on this USB."></ul>
+          <div class="right">
             <div class="track-list-heading hidden" id="historyHeading">
               <h3 class="track-list-heading-name"></h3>
               <span class="muted track-list-heading-count"></span>

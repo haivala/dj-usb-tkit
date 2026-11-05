@@ -954,7 +954,6 @@ async function connectUsbAndFetchPlaylists(page) {
   await page.locator('.nav-item[data-view="usb"]').click();
   await page.locator("#usbEmptyState .empty-state-action").click();
   await page.locator('.nav-item[data-view="usb-playlists"]').click();
-  await page.locator("#refreshUsbBtn").click();
   await expect(page.locator("#usbPlaylists li[data-usb-playlist-li]")).toHaveCount(1);
 }
 
@@ -1227,10 +1226,30 @@ async function openReorderPlaylist(page) {
 
 test("a successful export clears the stale diagnostics report and sends the backup setting", async ({ page }) => {
   await installReorderTauriMock(page, { usbSameNamePlaylistName: "Reorder Playlist" });
-  await page.addInitScript(() => window.localStorage.setItem("djusbtkit.exportBackup", "0"));
+  await page.addInitScript(() => {
+    window.localStorage.setItem("djusbtkit.exportBackup", "0");
+    const invoke = window.__TAURI__.core.invoke;
+    window.__historyReads = 0;
+    window.__TAURI__.core.invoke = async (command, payload) => {
+      if (command === "fetch_usb_histories") {
+        window.__historyReads += 1;
+        return {
+          ok: true,
+          data: {
+            items: [{ id: "h-1", name: "HISTORY 001", tracks: [] }],
+            counts: { importedPlaylists: 1, importedTracks: 3 },
+            warnings: []
+          }
+        };
+      }
+      return invoke(command, payload);
+    };
+  });
   await page.goto("/");
   await connectUsbAndFetchPlaylists(page);
   await expect(page.locator("#diagOverallStatus")).toHaveText("PASS");
+  await page.locator('.nav-item[data-view="usb-history"]').click();
+  await expect(page.locator("#historyList")).toContainText("HISTORY 001");
   await openReorderPlaylist(page);
   await answerExports(page, { ok: true, data: { playlistName: "Reorder Playlist", exportedTracks: 3 } });
 
@@ -1247,6 +1266,12 @@ test("a successful export clears the stale diagnostics report and sends the back
   // Opening the page reads them again.
   await page.locator('.nav-item[data-view="usb-playlists"]').click();
   await expect(page.locator("#usbPlaylists [data-usb-playlist]")).toHaveCount(1);
+
+  // An export doesn't touch the history: it stays loaded, with its totals.
+  await page.locator('.nav-item[data-view="usb-history"]').click();
+  await expect(page.locator("#historyList")).toContainText("HISTORY 001");
+  await expect(page.locator("#historyCountsText")).toHaveText("1 session, 3 tracks");
+  expect(await page.evaluate(() => window.__historyReads)).toBe(1);
 });
 
 test("the backend's export gate rejections are shown in the status bar", async ({ page }) => {
