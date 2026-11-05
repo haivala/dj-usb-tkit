@@ -55,6 +55,7 @@
   when a session is open.
 - **Improvement:** The USB list responses no longer carry every track, and Export Tracklist is built in
   the backend. The saved file doesn't change.
+- **Improvement:** USB History rows show the session's date on a smaller muted line under its name.
 - **Chore:** The backend now sends USB History newest first, instead of the UI reversing the list.
 - **Chore:** USB History keeps one record of the open session, instead of three.
 - **Improvement:** The USB list totals, track-list headings and status lines now come from the backend.

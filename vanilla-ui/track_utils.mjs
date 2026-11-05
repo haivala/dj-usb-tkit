@@ -71,13 +71,6 @@ export function formatTrackListSummary(trackCount, sizeBytes) {
   return parts.join(" · ");
 }
 
-// The backend resolves a history session's date itself (from the export log,
-// then the PDB's track date_created -- see `apply_history_dates_*` in
-// service/usb.rs) and hands it back as the one `createdAt` field.
-export function getHistoryDateValue(history) {
-  return history?.createdAt || "";
-}
-
 export function formatTimestampLocal(value) {
   const date = new Date(value);
   if (Number.isNaN(date.getTime())) return value;

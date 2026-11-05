@@ -2516,6 +2516,26 @@ input[type="checkbox"]:disabled {
   white-space: nowrap;
 }
 
+/* a USB History row: the session's name, its date below */
+#historyList li button {
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 2px;
+}
+
+#historyList li button .playlist-label {
+  flex: none;
+  max-width: 100%;
+}
+
+.list li button .history-date {
+  font-size: 11px;
+}
+
+.history-date:empty {
+  display: none;
+}
+
 /* inline remove x inside the button */
 .list li button .playlist-remove {
   flex-shrink: 0;

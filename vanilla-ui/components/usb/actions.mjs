@@ -8,7 +8,6 @@ import { setActiveListItem } from "../shell/actions.mjs";
 import { STORAGE_KEY_USB_ROOT, STORAGE_KEY_EXPORT_ENGINE_LIBRARY } from "../../settings_keys.mjs";
 import {
   renderTrackListDurationSummary,
-  getHistoryDateValue,
   counted,
 } from "../../track_utils.mjs";
 
@@ -1540,10 +1539,10 @@ export function renderHistoryHeading(ctx) {
 export function renderHistoryList(ctx) {
   const { state, el, document } = ctx;
   const items = state.histories.map((history) => {
-    const dateText = getHistoryDateValue(history);
     const li = cloneTemplate(document, "tplHistoryItem");
     li.firstElementChild.dataset.historyId = history.id;
-    li.querySelector(".playlist-label").textContent = `${history.name}${dateText ? ` (${dateText})` : ""}`;
+    li.querySelector(".playlist-label").textContent = history.name;
+    li.querySelector(".history-date").textContent = history.createdAt;
     return li;
   });
   el.historyList.replaceChildren(...items);

@@ -85,7 +85,7 @@ function installTauriMock(page) {
                   {
                     id: "hist-0",
                     name: "HISTORY 000",
-                    createdAt: "2026-07-01",
+                    createdAt: null,
                     tracks: historyTracks.slice(0, 1)
                   }
                 ],
@@ -130,8 +130,17 @@ test("Export Tracklist dialog's start-track select is populated from the selecte
   // The list shows the sessions in the order the backend sends: newest first.
   const rows = page.locator("#historyList li");
   await expect(rows).toHaveCount(2);
-  await expect(rows.nth(0)).toContainText("HISTORY 001");
-  await expect(rows.nth(1)).toContainText("HISTORY 000");
+  await expect(rows.nth(0).locator(".playlist-label")).toHaveText("HISTORY 001");
+  await expect(rows.nth(1).locator(".playlist-label")).toHaveText("HISTORY 000");
+  // The date is its own line below the name, and a session without one has no line.
+  const firstDate = rows.nth(0).locator(".history-date");
+  await expect(firstDate).toHaveText("2026-08-01");
+  await expect(rows.nth(1).locator(".history-date")).toBeHidden();
+  const nameBox = await rows.nth(0).locator(".playlist-label").boundingBox();
+  const dateBox = await firstDate.boundingBox();
+  expect(dateBox.y).toBeGreaterThanOrEqual(nameBox.y + nameBox.height);
+  const fontSize = (locator) => locator.evaluate((node) => parseFloat(getComputedStyle(node).fontSize));
+  expect(await fontSize(firstDate)).toBeLessThan(await fontSize(rows.nth(0).locator(".playlist-label")));
   // Same layout as USB Playlists: totals on the header line, the open
   // session's name + track count above its table.
   await expect(page.locator(".panel-header #historyCountsText")).toHaveText("2 sessions, 5 tracks");
