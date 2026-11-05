@@ -1795,25 +1795,25 @@ test("applying repairs that change nothing keeps the loaded USB playlists and sh
   expect(await page.evaluate(() => window.__trackFetches)).toBe(1);
 });
 
-test("a player-menu edit or PDB sync clears the diagnostics report only when it changed the stick", async ({ page }) => {
+test("a player-menu edit clears the diagnostics report only when it changed the stick", async ({ page }) => {
   await installTauriMock(page, "valid");
   await page.addInitScript(() => {
     const backend = window.__e2eBackend;
     const invoke = window.__TAURI__.core.invoke;
     window.__menuUpdated = false;
-    const config = (updated) => ({
+    const config = (updated, statusText) => ({
       ok: true,
       data: {
         updated,
+        statusText,
         currentItems: [backend.playerMenuItem(131, { name: "ARTIST" })],
         availableItems: [backend.playerMenuItem(132, { name: "PLAYLIST" })],
-        divergence: { ...backend.playerMenuConfig().divergence, canSync: true, summary: "The PDB is missing a category." }
       }
     });
     window.__TAURI__.core.invoke = async (command, payload) => {
-      if (command === "get_usb_player_menu_config") return config(false);
-      if (command === "update_usb_player_menu_config" || command === "sync_usb_player_menu_edb_to_pdb") {
-        return config(window.__menuUpdated);
+      if (command === "get_usb_player_menu_config") return config(false, "Player menu loaded");
+      if (command === "update_usb_player_menu_config") {
+        return config(window.__menuUpdated, window.__menuUpdated ? "Player menu updated" : "Player menu unchanged");
       }
       return invoke(command, payload);
     };
@@ -1831,21 +1831,11 @@ test("a player-menu edit or PDB sync clears the diagnostics report only when it 
   await menuNav.click();
   await addPlaylistCategory();
   await expect(status).toContainText("Player menu unchanged");
-  await page.locator("#usbPlayerMenuSyncBtn").click();
-  await expect(status).toContainText("PDB already complete");
   await expect(report).toHaveText("WARN");
 
   await page.evaluate(() => { window.__menuUpdated = true; });
   await addPlaylistCategory();
   await expect(status).toContainText("Player menu updated");
-  await expect(report).toHaveText("");
-
-  await page.locator('.nav-item[data-view="usb"]').click();
-  await page.locator("#reDiagnoseBtn").click();
-  await expect(report).toHaveText("WARN");
-  await menuNav.click();
-  await page.locator("#usbPlayerMenuSyncBtn").click();
-  await expect(status).toContainText("PDB categories restored");
   await expect(report).toHaveText("");
 });
 
@@ -1859,7 +1849,7 @@ test("the player menu editor selects in one list at a time, and its buttons foll
         return backend.ok({
           currentItems: [
             backend.playerMenuItem(132, { name: "PLAYLIST", removable: false }),
-            backend.playerMenuItem(139, { name: "KEY" })
+            backend.playerMenuItem(139, { name: "KEY", canMoveUp: true })
           ],
           availableItems: [backend.playerMenuItem(133, { name: "BPM" }), backend.playerMenuItem(134, { name: "RATING" })]
         });
@@ -1914,15 +1904,16 @@ test("background colour shows nothing selected when the databases differ, and a 
 
   await openMenu({ pdbColor: 6, edbColor: 6, writable: true });
   await expect(chips).toHaveCount(9);
+  await expect(chips.nth(5).locator(".bg-color-chip-dot")).toHaveCSS("background-color", "rgb(69, 184, 79)");
   await expect(selected).toHaveAttribute("data-color", "6");
   await expect(chips.first()).toBeEnabled();
   await expect(note).toBeHidden();
 
-  await openMenu({ pdbColor: 6, edbColor: 0, writable: true });
+  await openMenu({ pdbColor: 6, edbColor: 0, writable: true, noteText: "the note about two colours" });
   await expect(selected).toHaveCount(0);
-  await expect(note).toContainText("Aqua for older players (PDB), Default for rekordbox");
+  await expect(note).toHaveText("the note about two colours");
 
-  await openMenu({ pdbColor: null, edbColor: 0, writable: false, reason: "no t19 page" });
+  await openMenu({ pdbColor: null, edbColor: 0, writable: false, noteText: "no t19 page" });
   await expect(chips.first()).toBeDisabled();
   await expect(note).toHaveText("no t19 page");
 });
@@ -1939,7 +1930,8 @@ test("choosing a background colour sets it on the USB and redraws from the answe
         const { color } = payload.request;
         window.__colorCalls.push(payload.request);
         const now = window.__colorUpdated ? color : 0;
-        return { ok: true, data: { pdbColor: now, edbColor: now, updated: window.__colorUpdated } };
+        const statusText = window.__colorUpdated ? "Background colour set to Green" : "Background colour unchanged";
+        return { ok: true, data: { pdbColor: now, edbColor: now, updated: window.__colorUpdated, statusText } };
       }
       return invoke(command, payload);
     };

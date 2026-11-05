@@ -137,10 +137,12 @@
         menuItemId: kind,
         kind,
         name: `Menu ${kind}`,
+        label: overrides.name ?? `Menu ${kind}`,
         isVisible: true,
         sequenceNo: null,
-        origin: "both",
         removable: true,
+        canMoveUp: false,
+        canMoveDown: false,
         ...overrides
       };
     },
@@ -151,15 +153,6 @@
         updated: false,
         currentItems: [],
         availableItems: [],
-        divergence: {
-          inEdbVisibleOnly: [],
-          inPdbOnly: [],
-          orderMismatch: false,
-          pdbMissingKinds: [],
-          summary: "",
-          canSync: false,
-          canRestore: false
-        },
         warnings: [],
         ...overrides
       };
@@ -167,7 +160,14 @@
 
     // `UsbBackgroundColorData` (get/set_usb_background_color).
     usbBackgroundColor(overrides = {}) {
-      return { pdbColor: 0, edbColor: 0, writable: true, reason: null, updated: false, warnings: [], ...overrides };
+      const pdbColor = overrides.pdbColor ?? 0;
+      const edbColor = overrides.edbColor ?? 0;
+      const chips = Array.from({ length: 9 }, (_, color) => ({
+        color,
+        label: `c${color}`,
+        selected: pdbColor === edbColor && pdbColor === color
+      }));
+      return { chips, noteText: "", statusText: "mock colour status", pdbColor: 0, edbColor: 0, writable: true, reason: null, updated: false, warnings: [], ...overrides };
     },
 
     // `UsbAudioFormatsData` (get/set_usb_audio_formats): every format allowed.
@@ -246,7 +246,6 @@
     ),
     get_usb_player_menu_config: backend.playerMenuConfig,
     update_usb_player_menu_config: backend.playerMenuConfig,
-    sync_usb_player_menu_edb_to_pdb: backend.playerMenuConfig,
     get_usb_background_color: backend.usbBackgroundColor,
     set_usb_background_color: backend.usbBackgroundColor,
     get_usb_audio_formats: backend.usbAudioFormats,

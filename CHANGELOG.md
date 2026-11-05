@@ -68,7 +68,9 @@
 - **Chore:** The backend now sends USB History newest first, instead of the UI reversing the list.
 - **Chore:** USB History keeps one record of the open session, instead of three.
 - **Improvement:** The list totals, track-list headings, export estimate, Backups page text, USB
-  status lines and diagnostics text now come from the backend.
+  status lines, diagnostics, player menu and background colour text now come from the backend.
+- **Improvement:** The Player Menu editor no longer tags items as being in only one database, and its PDB fix is
+  gone with its banner, buttons and diagnostics warning: it was for a one-time error the app no longer makes.
 - **Fix:** Removing a USB playlist no longer blanks the open playlist's track count while its table reloads.
 - **Fix:** Reordering USB playlists now saves the order in both databases for every playlist, by name.
   Before, a playlist only in the eDB kept its old place, and always listed after the others.

@@ -1487,25 +1487,6 @@ pub async fn set_usb_background_color(
 }
 
 #[tauri::command]
-pub async fn sync_usb_player_menu_edb_to_pdb(
-    app: AppHandle,
-    state: State<'_, BackendCommands>,
-    request: GetUsbPlayerMenuConfigRequest,
-) -> Result<ApiResponse<UpdateUsbPlayerMenuConfigData>, String> {
-    let commands = state.inner().clone();
-    run_usb_job(
-        &app,
-        "usb_write",
-        "sync_usb_player_menu_edb_to_pdb",
-        "USB: Fixing PDB sync",
-        "USB: PDB synced to active menu",
-        Some((45, "USB: Writing PDB from active menu".to_string())),
-        move || commands.sync_usb_player_menu_edb_to_pdb(request),
-    )
-    .await
-}
-
-#[tauri::command]
 pub async fn remove_usb_playlist(
     app: AppHandle,
     state: State<'_, BackendCommands>,

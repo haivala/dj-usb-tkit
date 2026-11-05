@@ -205,6 +205,10 @@ fn dump_usb(
         "fetch_usb_histories",
         svc.fetch_usb_histories(request("fetch_usb_histories", root.clone())),
     );
+    let background_color = response(
+        "get_usb_background_color",
+        svc.get_usb_background_color(request("get_usb_background_color", root.clone())),
+    );
     let player_menu = response(
         "get_usb_player_menu_config",
         svc.get_usb_player_menu_config(request("get_usb_player_menu_config", root.clone())),
@@ -234,6 +238,7 @@ fn dump_usb(
         "playlistTracks": playlist_tracks,
         "histories": histories,
         "playerMenu": player_menu,
+        "backgroundColor": background_color,
         "diagnostics": diagnostics,
         "brokenDiagnostics": broken_diagnostics,
         "repairPreview": repair_preview,

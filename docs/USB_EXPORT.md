@@ -86,8 +86,8 @@ from before staging existed.
 USB repair reads and writes through the same staging layer (see `docs/DIAGNOSTICS_REPAIRS.md`).
 Every fix selected in one apply request is written to the local copy first; the batch is flushed
 back to the USB drive once, at the end of the apply, rather than once per fix. The player-menu
-editor (`update_usb_player_menu_config`/`sync_usb_player_menu_edb_to_pdb`) is staged the same way,
-each as its own standalone backup-then-write-then-flush.
+editor (`update_usb_player_menu_config`) is staged the same way, as its own standalone
+backup-then-write-then-flush.
 
 The Event Log records the local staging folder path the first time it's created for a device,
 plus each individual stage-copy and write-back, so it's easy to find the working folder if you
@@ -462,10 +462,7 @@ The Menu Editor's Save action:
 3. Leaves PDB t16 unchanged.
 4. If the eDB write fails, eDB is restored from its snapshot.
 
-The PDB restore action is separate: `sync_usb_player_menu_edb_to_pdb` rebuilds
-PDB t16 from the full eDB `menuItem` catalog when older app code or manual
-editing has removed catalog rows from PDB. See `docs/PDB.md` for the t16 row
-layout and observed kind codes.
+See `docs/PDB.md` for the t16 row layout and observed kind codes.
 
 ### Background colour
 

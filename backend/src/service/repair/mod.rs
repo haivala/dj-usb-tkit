@@ -18,8 +18,7 @@ use crate::models::{
     RepairFixProposal, RepairRow, RepairUnsupportedItem, RepairUsbDiagnosticsData,
     RepairUsbDiagnosticsRequest, RunUsbDiagnosticsRequest, RunUsbParityReportRequest,
     UpdateUsbPlayerMenuConfigData, UpdateUsbPlayerMenuConfigRequest, UsbParityPlaylistDetail,
-    UsbPlayerMenuDivergence, UsbPlayerMenuEdit, UsbPlayerMenuItem, UsbPlayerMenuItemOrigin,
-    WarningEntry,
+    UsbPlayerMenuEdit, UsbPlayerMenuItem, WarningEntry,
 };
 use crate::pdb_page;
 use crate::pdb_reader::{ParsedPdb, parse_pdb, pdb_page_size};
@@ -82,7 +81,6 @@ use audio_fixes::*;
 use history::*;
 use overview::*;
 pub(crate) use pdb_fixes::*;
-pub(crate) use player_menu::*;
 pub(crate) use strict_parity::*;
 
 const EMPTY_ANALYSIS_FILES_FIX_ID: &str = "fix_empty_analysis_files";

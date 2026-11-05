@@ -478,29 +478,6 @@ impl BackendService {
             );
         note_stage("playlist resolution", &mut raw_warnings);
 
-        {
-            let mut menu_warnings = Vec::<WarningEntry>::new();
-            if let Ok((_current, _available, divergence)) =
-                crate::service::repair::load_usb_player_menu_config_public(
-                    &usb_root,
-                    &mut menu_warnings,
-                )
-                && !divergence.is_empty()
-            {
-                raw_warnings.push(logging::log(
-                    Level::Warn,
-                    "usb-diagnostics",
-                    "usb.diagnostics.player-menu-divergence",
-                    format!(
-                        "PDB and eDB menus disagree ({} active menu items missing from PDB)",
-                        divergence.in_edb_visible_only.len()
-                    ),
-                ));
-            }
-            raw_warnings.extend(menu_warnings);
-            note_stage("player menu divergence", &mut raw_warnings);
-        }
-
         let engine_library_section = self.engine_library_section(&usb_root);
         let overall_status = DiagStatus::worst_of(&[
             &pdb_integrity.status,

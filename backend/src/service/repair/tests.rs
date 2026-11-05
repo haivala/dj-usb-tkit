@@ -394,15 +394,42 @@ fn player_menu_config_roundtrip_updates_edb_not_pdb() {
 fn player_menu_edits_apply_to_the_current_order() {
     use UsbPlayerMenuEdit::*;
     let menu = [1, 2, 3];
-    assert_eq!(apply_player_menu_edit(&menu, Add, 4), vec![1, 2, 3, 4]);
-    assert_eq!(apply_player_menu_edit(&menu, Add, 2), vec![1, 2, 3]);
-    assert_eq!(apply_player_menu_edit(&menu, Remove, 2), vec![1, 3]);
-    assert_eq!(apply_player_menu_edit(&menu, Remove, 9), vec![1, 2, 3]);
-    assert_eq!(apply_player_menu_edit(&menu, MoveUp, 2), vec![2, 1, 3]);
-    assert_eq!(apply_player_menu_edit(&menu, MoveUp, 1), vec![1, 2, 3]);
-    assert_eq!(apply_player_menu_edit(&menu, MoveDown, 2), vec![1, 3, 2]);
-    assert_eq!(apply_player_menu_edit(&menu, MoveDown, 3), vec![1, 2, 3]);
-    assert_eq!(apply_player_menu_edit(&menu, MoveDown, 9), vec![1, 2, 3]);
+    assert_eq!(
+        player_menu::apply_player_menu_edit(&menu, Add, 4),
+        vec![1, 2, 3, 4]
+    );
+    assert_eq!(
+        player_menu::apply_player_menu_edit(&menu, Add, 2),
+        vec![1, 2, 3]
+    );
+    assert_eq!(
+        player_menu::apply_player_menu_edit(&menu, Remove, 2),
+        vec![1, 3]
+    );
+    assert_eq!(
+        player_menu::apply_player_menu_edit(&menu, Remove, 9),
+        vec![1, 2, 3]
+    );
+    assert_eq!(
+        player_menu::apply_player_menu_edit(&menu, MoveUp, 2),
+        vec![2, 1, 3]
+    );
+    assert_eq!(
+        player_menu::apply_player_menu_edit(&menu, MoveUp, 1),
+        vec![1, 2, 3]
+    );
+    assert_eq!(
+        player_menu::apply_player_menu_edit(&menu, MoveDown, 2),
+        vec![1, 3, 2]
+    );
+    assert_eq!(
+        player_menu::apply_player_menu_edit(&menu, MoveDown, 3),
+        vec![1, 2, 3]
+    );
+    assert_eq!(
+        player_menu::apply_player_menu_edit(&menu, MoveDown, 9),
+        vec![1, 2, 3]
+    );
 }
 
 // ── Local HDD staging integration ─────────────────────────────────

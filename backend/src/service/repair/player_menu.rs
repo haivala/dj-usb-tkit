@@ -73,20 +73,6 @@ pub(super) fn load_edb_menu_rows(
 /// eDB is what the player software reads; PDB t16 is a secondary index that
 /// must mirror eDB. `current` is the eDB-visible set in sequenceNo order;
 /// `available` is the full eDB menuItem catalog minus the visible set.
-///
-/// `divergence` summarises where PDB t16 diverges from the eDB visible set.
-/// Non-empty divergence means the two indexes disagree; Fix PDB sync resolves it.
-pub(crate) fn load_usb_player_menu_config_public(
-    usb_root: &std::path::Path,
-    warnings: &mut Vec<WarningEntry>,
-) -> BackendResult<(
-    Vec<UsbPlayerMenuItem>,
-    Vec<UsbPlayerMenuItem>,
-    UsbPlayerMenuDivergence,
-)> {
-    load_usb_player_menu_config(usb_root, warnings)
-}
-
 /// Build PDB t17 8-byte rows from the current eDB.category state.
 /// Used to keep PDB t17 in sync with eDB.category after a menu config save.
 pub(super) fn load_t17_encoded_rows(
@@ -125,39 +111,38 @@ pub(super) fn load_t17_encoded_rows(
     Ok(out)
 }
 
+/// A menu row's text.
+fn player_menu_label(name: &str, kind: u32) -> String {
+    let name = name.trim();
+    if name.is_empty() {
+        format!("Menu {kind}")
+    } else {
+        name.to_string()
+    }
+}
+
 pub(super) fn load_usb_player_menu_config(
     usb_root: &std::path::Path,
     warnings: &mut Vec<WarningEntry>,
-) -> BackendResult<(
-    Vec<UsbPlayerMenuItem>,
-    Vec<UsbPlayerMenuItem>,
-    UsbPlayerMenuDivergence,
-)> {
+) -> BackendResult<(Vec<UsbPlayerMenuItem>, Vec<UsbPlayerMenuItem>)> {
     let edb_rows = load_edb_menu_rows(usb_root, warnings)?;
-    let pdb_rows = crate::service::export_helpers::load_pdb_t16_decoded(usb_root)?;
-
-    let pdb_kinds: HashSet<u32> = pdb_rows.iter().map(|r| u32::from(r.kind)).collect();
-
     // current = eDB visible items in eDB sequenceNo order.
     let mut edb_visible: Vec<&EdbMenuRow> = edb_rows.iter().filter(|r| r.is_visible).collect();
     edb_visible.sort_by_key(|r| (r.sequence_no.unwrap_or(u32::MAX), r.menu_item_id));
-    let edb_visible_kinds: HashSet<u32> = edb_visible.iter().map(|r| r.kind).collect();
 
+    let last_current = edb_visible.len().saturating_sub(1);
     let mut current = Vec::<UsbPlayerMenuItem>::with_capacity(edb_visible.len());
     for (seq, row) in edb_visible.iter().enumerate() {
-        let origin = if pdb_kinds.contains(&row.kind) {
-            UsbPlayerMenuItemOrigin::Both
-        } else {
-            UsbPlayerMenuItemOrigin::EdbOnly
-        };
         current.push(UsbPlayerMenuItem {
             menu_item_id: row.menu_item_id,
             kind: row.kind,
             name: row.name.clone(),
             is_visible: true,
             sequence_no: Some(u32::try_from(seq).unwrap_or(u32::MAX)),
-            origin,
             removable: player_menu_kind_removable(row.kind),
+            label: player_menu_label(&row.name, row.kind),
+            can_move_up: seq > 0,
+            can_move_down: seq < last_current,
         });
     }
 
@@ -167,94 +152,21 @@ pub(super) fn load_usb_player_menu_config(
         if row.is_visible {
             continue;
         }
-        let origin = if pdb_kinds.contains(&row.kind) {
-            UsbPlayerMenuItemOrigin::PdbOnly
-        } else {
-            UsbPlayerMenuItemOrigin::EdbOnly
-        };
         available.push(UsbPlayerMenuItem {
             menu_item_id: row.menu_item_id,
             kind: row.kind,
             name: row.name.clone(),
             is_visible: false,
             sequence_no: None,
-            origin,
             removable: player_menu_kind_removable(row.kind),
+            label: player_menu_label(&row.name, row.kind),
+            can_move_up: false,
+            can_move_down: false,
         });
     }
     available.sort_by_key(|item| item.menu_item_id);
 
-    // divergence = where PDB t16 diverges from the eDB visible set.
-    let mut in_pdb_only: Vec<u32> = pdb_kinds
-        .iter()
-        .copied()
-        .filter(|k| !edb_visible_kinds.contains(k))
-        .collect();
-    let mut in_edb_visible_only: Vec<u32> = edb_visible_kinds
-        .iter()
-        .copied()
-        .filter(|k| !pdb_kinds.contains(k))
-        .collect();
-    in_pdb_only.sort_unstable();
-    in_pdb_only.dedup();
-    in_edb_visible_only.sort_unstable();
-    in_edb_visible_only.dedup();
-
-    let pdb_order: Vec<u32> = pdb_rows.iter().map(|r| u32::from(r.kind)).collect();
-    let common_from_pdb: Vec<u32> = pdb_order
-        .iter()
-        .copied()
-        .filter(|k| edb_visible_kinds.contains(k))
-        .collect();
-    let common_from_edb: Vec<u32> = edb_visible
-        .iter()
-        .map(|r| r.kind)
-        .filter(|k| pdb_kinds.contains(k))
-        .collect();
-    let order_mismatch = common_from_pdb != common_from_edb;
-
-    let edb_all_kinds: HashSet<u32> = edb_rows.iter().map(|r| r.kind).collect();
-    let mut pdb_missing_kinds: Vec<u32> = edb_all_kinds
-        .iter()
-        .copied()
-        .filter(|k| !pdb_kinds.contains(k))
-        .collect();
-    pdb_missing_kinds.sort_unstable();
-
-    let can_sync = !in_edb_visible_only.is_empty();
-    let can_restore = !pdb_missing_kinds.is_empty();
-    let mut summary_parts = Vec::new();
-    if can_sync {
-        summary_parts.push(format!(
-            "{} active menu items missing from PDB",
-            in_edb_visible_only.len()
-        ));
-    }
-    if can_restore {
-        summary_parts.push(format!(
-            "PDB missing {} browse categories",
-            pdb_missing_kinds.len()
-        ));
-    }
-    let summary = if summary_parts.is_empty() {
-        String::new()
-    } else {
-        format!("{}.", summary_parts.join("; "))
-    };
-
-    Ok((
-        current,
-        available,
-        UsbPlayerMenuDivergence {
-            in_edb_visible_only,
-            in_pdb_only,
-            order_mismatch,
-            pdb_missing_kinds,
-            summary,
-            can_sync,
-            can_restore,
-        },
-    ))
+    Ok((current, available))
 }
 
 /// Mirror eDB `category` rows from an ordered list of PDB t16 kinds.
@@ -389,105 +301,12 @@ impl BackendService {
     ) -> BackendResult<GetUsbPlayerMenuConfigData> {
         let usb_root = resolve_usb_root(req.usb_root.as_deref())?;
         let mut warnings = Vec::<WarningEntry>::new();
-        let (current_items, available_items, divergence) =
+        let (current_items, available_items) =
             load_usb_player_menu_config(&usb_root, &mut warnings)?;
         Ok(GetUsbPlayerMenuConfigData {
+            status_text: "Player menu loaded".to_string(),
             current_items,
             available_items,
-            divergence,
-            warnings,
-        })
-    }
-
-    /// Restore PDB t16 from the full eDB menuItem catalog.
-    ///
-    /// Reads ALL eDB menuItem rows (visible and hidden) and writes them to PDB
-    /// t16 in menuItem_id order. This repairs USBs where PDB was trimmed by
-    /// old code, restoring the full browse category set.
-    pub fn sync_usb_player_menu_edb_to_pdb(
-        &self,
-        req: GetUsbPlayerMenuConfigRequest,
-    ) -> BackendResult<UpdateUsbPlayerMenuConfigData> {
-        let usb_root = resolve_usb_root(req.usb_root.as_deref())?;
-        let mut warnings = Vec::<WarningEntry>::new();
-        warnings.extend(
-            self.backup_usb_databases_with_retention(&usb_root, "Before repair", None)
-                .into_iter()
-                .map(|message| {
-                    logging::log(
-                        Level::Info,
-                        "usb-player-menu",
-                        "usb.player-menu.backup",
-                        message,
-                    )
-                }),
-        );
-
-        let mut edb_rows = load_edb_menu_rows(&usb_root, &mut warnings)?;
-        edb_rows.sort_by_key(|r| r.menu_item_id);
-
-        let all_rows: Vec<(u16, String)> = edb_rows
-            .iter()
-            .filter_map(|r| u16::try_from(r.kind).ok().map(|k| (k, r.name.clone())))
-            .collect();
-
-        let pdb_updated = crate::service::export_helpers::patch_pdb_columns_menu_set_by_kind(
-            &usb_root, &all_rows,
-        )?;
-        if pdb_updated {
-            warnings.push(logging::log(
-                Level::Info,
-                "usb-player-menu",
-                "usb.player-menu.t16-restored",
-                "PDB t16 columns restored from eDB menuItem catalog",
-            ));
-        }
-
-        match load_t17_encoded_rows(&usb_root, &mut warnings) {
-            Ok(t17_rows) if !t17_rows.is_empty() => {
-                match crate::service::export_helpers::patch_pdb_t17_category_snapshot(
-                    &usb_root, &t17_rows,
-                ) {
-                    Ok(true) => {
-                        warnings.push(logging::log(
-                            Level::Info,
-                            "usb-player-menu",
-                            "usb.player-menu.t17-snapshot-updated",
-                            "PDB t17 category snapshot updated",
-                        ));
-                    }
-                    Ok(false) => {}
-                    Err(e) => {
-                        warnings.push(logging::log(
-                            Level::Warn,
-                            "usb-player-menu",
-                            "usb.player-menu.t17-update-skipped",
-                            format!("PDB t17 update skipped: {e}"),
-                        ));
-                    }
-                }
-            }
-            _ => {}
-        }
-
-        if let Err(err) = usb_staging::write_back_if_changed(&usb_root, usb_staging::DbKind::Pdb) {
-            warnings.push(logging::log(
-                Level::Error,
-                "usb-player-menu",
-                "usb.player-menu.pdb-write-back-failed",
-                format!("PDB write-back to USB failed: {err}"),
-            ));
-        }
-        warnings.extend(self.refresh_engine_library(&usb_root));
-
-        let (current_items, available_items, divergence) =
-            load_usb_player_menu_config(&usb_root, &mut warnings)?;
-
-        Ok(UpdateUsbPlayerMenuConfigData {
-            updated: pdb_updated,
-            current_items,
-            available_items,
-            divergence,
             warnings,
         })
     }
@@ -498,7 +317,7 @@ impl BackendService {
     ) -> BackendResult<UpdateUsbPlayerMenuConfigData> {
         let usb_root = resolve_usb_root(req.usb_root.as_deref())?;
         let mut warnings = Vec::<WarningEntry>::new();
-        let (before_current, before_available, before_divergence) =
+        let (before_current, before_available) =
             load_usb_player_menu_config(&usb_root, &mut warnings)?;
 
         // Build lookup: (kind -> display name), preferring PDB-sourced names
@@ -522,9 +341,9 @@ impl BackendService {
             // Nothing to write (and no backup to make).
             return Ok(UpdateUsbPlayerMenuConfigData {
                 updated: false,
+                status_text: "Player menu unchanged".to_string(),
                 current_items: before_current,
                 available_items: before_available,
-                divergence: before_divergence,
                 warnings,
             });
         }
@@ -615,7 +434,7 @@ impl BackendService {
             ));
         }
 
-        let (current_items, available_items, divergence) =
+        let (current_items, available_items) =
             load_usb_player_menu_config(&usb_root, &mut warnings)?;
         let after_kinds = current_items
             .iter()
@@ -665,9 +484,14 @@ impl BackendService {
 
         Ok(UpdateUsbPlayerMenuConfigData {
             updated,
+            status_text: if updated {
+                "Player menu updated"
+            } else {
+                "Player menu unchanged"
+            }
+            .to_string(),
             current_items,
             available_items,
-            divergence,
             warnings,
         })
     }

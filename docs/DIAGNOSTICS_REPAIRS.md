@@ -83,7 +83,6 @@ merging and rewriting both databases to match — see "Repair Flow" below.
 | Shared analysis files (under Analysis integrity) | Database-only: warns when several PDB track rows point at the same analysis bundle, so players can show one track's waveform and beat grid for another. The Event Log lists each bundle and its tracks. Points to `separate_shared_analysis`; the repair preview also reads each bundle's `PPTH` (see "Analysis file ownership") |
 | Beat grid format (under Analysis integrity) | Always shown. Warns about tracks whose latest export on the stick was written by an app version before 0.3.7 (an export-log record without `appVersion`) and whose `.DAT` still has the old `PQTZ` header. Only those tracks' `.DAT` files are read, and only their first 4 KB. Passes with "no tracks on this USB were exported by this app" when the stick has no export log. When the log can't be read, every track's `.DAT` is checked (first 4 KB each) instead. Points to `fix_beat_grid_header` or a re-export |
 | Playlist resolution | playlist rows resolve to tracks across PDB and eDB |
-| Player menu divergence | eDB visible menu categories are compared with PDB `t16` kinds |
 | Engine DJ library | Without `Engine Library/Database2/m.db`: a passing "Not on this USB" note while "Write Engine DJ library" is off, saying to turn it on before using the USB in an Engine player; nothing while it's on. With one: warns when "Write Engine DJ library" is off, and when `m.db`'s `lastRekordBoxLibraryImportReadCounter` differs from the `export.pdb` header sequence (e.g. after an export from rekordbox itself). Points to `keep_engine_library_up_to_date` |
 
 Operational diagnostics are deliberately DB-focused. They do not walk every
@@ -248,9 +247,6 @@ check is still open.
 
 ## Player Menu Behavior
 
-Diagnostics can report `usb.diagnostics.cdj-menu-divergence` when eDB
-`category` has visible menu kinds missing from PDB `t16`.
-
 Normal playlist export preserves PDB `t16`, `t17`, and `t18` and does not
 rewrite eDB `menuItem`, `category`, or `sort` menu state.
 
@@ -259,7 +255,6 @@ Menu commands are separate from diagnostics repair:
 | Command | Behavior |
 | --- | --- |
 | `update_usb_player_menu_config` | treats eDB `category` as the Active Category source, keeps required player menu kinds visible, writes eDB category rows, and updates the PDB `t17` category snapshot when the visible set changes |
-| `sync_usb_player_menu_edb_to_pdb` | restores PDB `t16` from the full eDB `menuItem` catalog and updates the PDB `t17` category snapshot |
 
 ## Strict Parity Upgrade
 
@@ -377,8 +372,8 @@ works like this:
 Analysis and audio files (ANLZ bundles, duplicate audio copies) are not staged: those fixes change
 them on the USB as they run, before the databases are written back, so the databases never point at
 a file that isn't there yet.
-`update_usb_player_menu_config` and `sync_usb_player_menu_edb_to_pdb` are staged the same way but
-are standalone operations outside the apply-batch flow, so each backs up and flushes on its own.
+`update_usb_player_menu_config` is staged the same way but is a standalone operation outside the
+apply-batch flow, so it backs up and flushes on its own.
 
 ## Verification
 

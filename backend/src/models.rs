@@ -2432,21 +2432,6 @@ pub struct RunUsbParityReportData {
     pub status_label: String,
 }
 
-/// Which database(s) a menu item appears in.
-///
-/// Describes whether a player-menu item came from PDB t16, eDB category data,
-/// or both representations.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
-#[serde(rename_all = "snake_case")]
-pub enum UsbPlayerMenuItemOrigin {
-    /// Row present in both PDB t16 and eDB menuItem.
-    Both,
-    /// Row only present in PDB t16 (eDB missing a matching kind).
-    PdbOnly,
-    /// Row only present in eDB menuItem (PDB t16 missing this kind).
-    EdbOnly,
-}
-
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct UsbPlayerMenuItem {
@@ -2456,57 +2441,23 @@ pub struct UsbPlayerMenuItem {
     pub is_visible: bool,
     #[serde(default)]
     pub sequence_no: Option<u32>,
-    #[serde(default = "default_menu_origin")]
-    pub origin: UsbPlayerMenuItemOrigin,
     /// False for the browse categories a CDJ requires (TRACK/PLAYLIST/FOLDER/
     /// SEARCH/HISTORY). `update_usb_player_menu_config` rejects a request that
     /// drops one; the frontend just disables the Remove button.
     #[serde(default = "default_menu_removable")]
     pub removable: bool,
-}
-
-fn default_menu_origin() -> UsbPlayerMenuItemOrigin {
-    UsbPlayerMenuItemOrigin::Both
+    /// The row's text: `name`, or "Menu <kind>" for a row with no name.
+    #[serde(default)]
+    pub label: String,
+    /// Whether the Up and Down buttons apply to this item.
+    #[serde(default)]
+    pub can_move_up: bool,
+    #[serde(default)]
+    pub can_move_down: bool,
 }
 
 fn default_menu_removable() -> bool {
     true
-}
-
-/// Kind-level mismatch between PDB t16 (master) and eDB category/menuItem.
-#[derive(Debug, Clone, Serialize, Deserialize, Default)]
-#[serde(rename_all = "camelCase")]
-pub struct UsbPlayerMenuDivergence {
-    /// Kinds visible in eDB but not present in PDB t16.
-    pub in_edb_visible_only: Vec<u32>,
-    /// Kinds present in PDB t16 but not visible in eDB.
-    pub in_pdb_only: Vec<u32>,
-    /// True if PDB t16 order and eDB visible sequenceNo order disagree for
-    /// the kinds present on both sides.
-    pub order_mismatch: bool,
-    /// eDB menuItem kinds absent from PDB t16. Non-empty means PDB was
-    /// trimmed (by old code) and older players have fewer browse categories.
-    /// Use the PDB sync command to restore.
-    #[serde(default)]
-    pub pdb_missing_kinds: Vec<u32>,
-    /// One-line description of the divergence for the editor's warning banner,
-    /// or empty when there is nothing to report. Built backend-side.
-    #[serde(default)]
-    pub summary: String,
-    /// Whether the "Sync eDB → PDB" action has anything to do
-    /// (`in_edb_visible_only` non-empty).
-    #[serde(default)]
-    pub can_sync: bool,
-    /// Whether the "Restore PDB categories" action has anything to do
-    /// (`pdb_missing_kinds` non-empty).
-    #[serde(default)]
-    pub can_restore: bool,
-}
-
-impl UsbPlayerMenuDivergence {
-    pub fn is_empty(&self) -> bool {
-        self.in_edb_visible_only.is_empty()
-    }
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -2519,10 +2470,11 @@ pub struct GetUsbPlayerMenuConfigRequest {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct GetUsbPlayerMenuConfigData {
+    /// The status line after the read.
+    #[serde(default)]
+    pub status_text: String,
     pub current_items: Vec<UsbPlayerMenuItem>,
     pub available_items: Vec<UsbPlayerMenuItem>,
-    #[serde(default)]
-    pub divergence: UsbPlayerMenuDivergence,
     pub warnings: Vec<WarningEntry>,
 }
 
@@ -2555,10 +2507,11 @@ pub enum UsbPlayerMenuEdit {
 #[serde(rename_all = "camelCase")]
 pub struct UpdateUsbPlayerMenuConfigData {
     pub updated: bool,
+    /// The status line after the edit.
+    #[serde(default)]
+    pub status_text: String,
     pub current_items: Vec<UsbPlayerMenuItem>,
     pub available_items: Vec<UsbPlayerMenuItem>,
-    #[serde(default)]
-    pub divergence: UsbPlayerMenuDivergence,
     pub warnings: Vec<WarningEntry>,
 }
 
@@ -2597,7 +2550,26 @@ pub struct UsbBackgroundColorData {
     /// Whether the set wrote anything (always false for a get).
     #[serde(default)]
     pub updated: bool,
+    /// One chip per color, ready to show.
+    #[serde(default)]
+    pub chips: Vec<UsbBackgroundColorChip>,
+    /// Why no color can be set, or that rekordbox left two. Empty otherwise.
+    #[serde(default)]
+    pub note_text: String,
+    /// The status line after a set. Empty for a get.
+    #[serde(default)]
+    pub status_text: String,
     pub warnings: Vec<WarningEntry>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct UsbBackgroundColorChip {
+    /// The value both databases store.
+    pub color: u8,
+    pub label: String,
+    /// Both databases hold this color.
+    pub selected: bool,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]

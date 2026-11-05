@@ -103,7 +103,7 @@ export function createAppContext(env) {
     removeUsbPlaylist reorderUsbPlaylists refreshUsb ensureUsbListLoaded openUsbPlaylistRow openHistoryRow
     runUsbDiagnostics runUsbParityReport
     previewUsbRepairs applyUsbRepairs exportHistoryTracklist
-    handleUsbPlayerMenuListClick renderUsbPlayerMenuEditor syncUsbPlayerMenusEdbToPdb
+    handleUsbPlayerMenuListClick renderUsbPlayerMenuEditor
     syncUsbPlayerMenuEditorControls loadUsbPlayerMenuConfig addUsbPlayerMenuItems
     loadUsbBackgroundColor renderUsbBackgroundColor setUsbBackgroundColor
     removeUsbPlayerMenuItems moveUsbPlayerMenuItems exportPlaylistToUsb

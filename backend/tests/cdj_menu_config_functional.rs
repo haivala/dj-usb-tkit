@@ -2,16 +2,13 @@ use std::fs;
 
 use backend::commands::BackendCommands;
 use backend::models::{
-    GetUsbPlayerMenuConfigRequest, InitializeUsbRequest, RunUsbDiagnosticsRequest,
-    UpdateUsbPlayerMenuConfigData, UpdateUsbPlayerMenuConfigRequest, UsbPlayerMenuEdit,
-    UsbPlayerMenuItemOrigin,
+    GetUsbPlayerMenuConfigRequest, InitializeUsbRequest, UpdateUsbPlayerMenuConfigData,
+    UpdateUsbPlayerMenuConfigRequest, UsbPlayerMenuEdit,
 };
 use backend::service::export_helpers::{
     encode_pdb_t16_row, load_pdb_t16_decoded, load_pdb_t16_raw,
 };
 use tempfile::tempdir;
-
-const BPM_KIND: u32 = 133;
 
 /// One player menu editor edit, as the editor's buttons send it.
 fn edit_menu(
@@ -72,71 +69,6 @@ fn set_menu_with_edits(
         }
     }
     last.expect("at least one edit")
-}
-
-#[test]
-fn pdb_extra_rows_not_divergence() {
-    // PDB having MORE rows than eDB-visible is normal: older players read all
-    // PDB rows as browse categories; eDB.category.isVisible controls the active
-    // set. This must NOT be treated as divergence or trigger the fix banner.
-    // A freshly-initialized USB already demonstrates this: PDB=27 rows, 10 visible.
-    let usb_dir = tempdir().expect("usb tempdir");
-    let usb_root = usb_dir.path().to_path_buf();
-    let data_dir = tempdir().expect("data tempdir");
-    let backend = BackendCommands::new(data_dir.path()).expect("create backend");
-
-    let init = backend.initialize_usb(InitializeUsbRequest {
-        usb_root: usb_root.to_string_lossy().into_owned(),
-    });
-    assert!(init.ok, "initialize_usb failed: {init:?}");
-
-    let load = backend.get_usb_player_menu_config(GetUsbPlayerMenuConfigRequest {
-        usb_root: Some(usb_root.to_string_lossy().into_owned()),
-    });
-    assert!(load.ok, "load failed: {load:?}");
-    let data = load.data.expect("data");
-
-    // eDB visible set drives current_items (10 items on fresh init).
-    assert_eq!(
-        data.current_items.len(),
-        10,
-        "10 visible items on fresh init"
-    );
-    assert!(
-        data.current_items.iter().all(|item| item.is_visible),
-        "every current item must be is_visible=true"
-    );
-    // Current items are visible in eDB AND in PDB → Both.
-    for item in &data.current_items {
-        assert!(
-            item.origin != UsbPlayerMenuItemOrigin::PdbOnly,
-            "PdbOnly item cannot be in current list: kind {} name {}",
-            item.kind,
-            item.name
-        );
-    }
-
-    // PDB has 17 extra rows beyond the 10 visible — informational, not divergence.
-    assert!(
-        !data.divergence.in_pdb_only.is_empty(),
-        "PDB has extra rows — in_pdb_only should be non-empty (informational)"
-    );
-    assert!(
-        data.divergence.in_pdb_only.contains(&BPM_KIND),
-        "BPM (kind {BPM_KIND}) is in PDB but not eDB-visible"
-    );
-    assert!(
-        data.divergence.in_edb_visible_only.is_empty(),
-        "all eDB-visible items must be present in PDB: {:?}",
-        data.divergence.in_edb_visible_only
-    );
-
-    // No real divergence — the fix banner must not appear.
-    assert!(
-        data.divergence.is_empty(),
-        "USB with in_pdb_only only must NOT be considered divergent: {:?}",
-        data.divergence
-    );
 }
 
 #[test]
@@ -210,19 +142,7 @@ fn save_updates_edb_only_not_pdb() {
     let after = save.data.expect("save data");
     assert!(after.updated, "eDB was changed so updated must be true");
     assert_eq!(after.current_items.len(), 9, "9 items now visible");
-    assert!(
-        after.divergence.is_empty(),
-        "no real divergence: all visible kinds are in PDB"
-    );
-    assert!(
-        after.divergence.pdb_missing_kinds.is_empty(),
-        "PDB must still have all 27 catalog rows after eDB-only update"
-    );
     // The removed kind is still in PDB (not trimmed) so it appears in in_pdb_only.
-    assert!(
-        after.divergence.in_pdb_only.contains(&KEY_KIND),
-        "removed kind {KEY_KIND} must still be in PDB (not trimmed)"
-    );
     let pdb_after = load_pdb_t16_decoded(&usb_root).expect("load PDB after save");
     let pdb_after_kinds: Vec<u32> = pdb_after.iter().map(|row| u32::from(row.kind)).collect();
     assert_eq!(pdb_after_kinds.len(), 27, "PDB t16 keeps the full catalog");
@@ -281,20 +201,18 @@ fn save_updates_edb_only_not_pdb() {
     });
     let reload_data = reload.data.expect("reload data");
     assert!(
-        reload_data.divergence.is_empty(),
-        "reload: divergence still empty"
-    );
-    assert!(
-        reload_data.divergence.pdb_missing_kinds.is_empty(),
-        "reload: PDB still has all 27 rows"
+        reload_data
+            .current_items
+            .iter()
+            .all(|item| item.kind != KEY_KIND),
+        "the removed kind stays removed after a reload"
     );
 }
 
 #[test]
-fn freshly_initialized_usb_has_no_menu_divergence() {
+fn freshly_initialized_usb_shows_the_default_menu() {
     // initialize_usb seeds PDB t16 with all 27 player browse categories
     // and marks 10 of them visible in eDB.
-    // No real divergence: all eDB-visible items are present in PDB.
     let usb_dir = tempdir().expect("usb tempdir");
     let usb_root = usb_dir.path().to_path_buf();
     let data_dir = tempdir().expect("data tempdir");
@@ -310,16 +228,6 @@ fn freshly_initialized_usb_has_no_menu_divergence() {
     });
     assert!(load.ok, "get menu config failed: {load:?}");
     let data = load.data.expect("data");
-    assert!(
-        data.divergence.is_empty(),
-        "fresh init must produce zero divergence: {:?}",
-        data.divergence
-    );
-    assert!(
-        data.divergence.pdb_missing_kinds.is_empty(),
-        "PDB must have all 27 catalog rows on fresh init: missing={:?}",
-        data.divergence.pdb_missing_kinds
-    );
     // Default: 10 visible kinds in eDB; remaining 17 are available to add.
     assert_eq!(
         data.current_items.len(),
@@ -337,121 +245,49 @@ fn freshly_initialized_usb_has_no_menu_divergence() {
         vec![129, 130, 131, 139, 132, 149, 145, 170, 144, 140],
         "default visible kinds must match vendor order"
     );
-    for item in &data.current_items {
-        assert_eq!(
-            item.origin,
-            UsbPlayerMenuItemOrigin::Both,
-            "every visible item should be present in both DBs on fresh init"
-        );
-    }
-    for item in &data.available_items {
-        assert_eq!(
-            item.origin,
-            UsbPlayerMenuItemOrigin::PdbOnly,
-            "available items are PDB-backed catalog entries not yet visible in eDB"
-        );
-    }
-}
-
-#[test]
-fn diagnostics_no_false_divergence_for_vendor_usb() {
-    // A USB where PDB has more rows than eDB visible (in_pdb_only non-empty)
-    // must NOT produce a player-menu-divergence warning — that state is normal
-    // and does not require user action.
-    let usb_dir = tempdir().expect("usb tempdir");
-    let usb_root = usb_dir.path().to_path_buf();
-    let data_dir = tempdir().expect("data tempdir");
-    let backend = BackendCommands::new(data_dir.path()).expect("create backend");
-
-    let init = backend.initialize_usb(InitializeUsbRequest {
-        usb_root: usb_root.to_string_lossy().into_owned(),
-    });
-    assert!(init.ok, "initialize_usb failed: {init:?}");
-
-    let response = backend.run_usb_diagnostics(RunUsbDiagnosticsRequest {
-        usb_root: Some(usb_root.to_string_lossy().into_owned()),
-    });
-    assert!(response.ok, "diagnostics failed: {response:?}");
-    let data = response.data.expect("diagnostics data");
-    let menu_warning = data
-        .warnings
-        .iter()
-        .find(|w| w.code == "usb.diagnostics.player-menu-divergence");
+    // The first and last rows can only move one way, and the labels are ready to show.
+    let last = data.current_items.len() - 1;
+    assert!(!data.current_items[0].can_move_up && data.current_items[0].can_move_down);
+    assert!(data.current_items[last].can_move_up && !data.current_items[last].can_move_down);
+    assert!(data.current_items[1].can_move_up && data.current_items[1].can_move_down);
+    assert!(data.current_items.iter().all(|item| !item.label.is_empty()));
     assert!(
-        menu_warning.is_none(),
-        "USB with in_pdb_only only must NOT produce player-menu-divergence warning; got: {:?}",
-        menu_warning.map(|w| w.message.as_str())
+        data.available_items
+            .iter()
+            .all(|item| !item.can_move_up && !item.can_move_down)
     );
+    assert_eq!(data.status_text, "Player menu loaded");
 }
 
 #[test]
-fn sync_edb_to_pdb_restores_trimmed_pdb() {
-    // If PDB t16 was trimmed by old code, sync_usb_player_menu_edb_to_pdb must
-    // restore it to the full 27-row catalog from eDB menuItems.
+fn menu_works_with_only_the_edb() {
+    // A missing database is fine: the edit goes to the one that exists.
     let usb_dir = tempdir().expect("usb tempdir");
     let usb_root = usb_dir.path().to_path_buf();
     let data_dir = tempdir().expect("data tempdir");
     let backend = BackendCommands::new(data_dir.path()).expect("create backend");
-
     let init = backend.initialize_usb(InitializeUsbRequest {
         usb_root: usb_root.to_string_lossy().into_owned(),
     });
     assert!(init.ok, "initialize_usb failed: {init:?}");
+    let pdb = usb_root.join("PIONEER/rekordbox/export.pdb");
+    fs::remove_file(&pdb).expect("remove PDB");
 
-    // Simulate old-code damage: trim PDB t16 to just 5 kinds.
-    let trim_kinds: &[(u16, String)] = &[
-        (129, "ARTIST".to_string()),
-        (130, "ALBUM".to_string()),
-        (131, "TRACK".to_string()),
-        (132, "PLAYLIST".to_string()),
-        (149, "HISTORY".to_string()),
-    ];
-    backend::service::export_helpers::patch_pdb_columns_menu_set_by_kind(&usb_root, trim_kinds)
-        .expect("trim PDB for test setup");
-
+    let root = Some(usb_root.to_string_lossy().into_owned());
     let before = backend
         .get_usb_player_menu_config(GetUsbPlayerMenuConfigRequest {
-            usb_root: Some(usb_root.to_string_lossy().into_owned()),
+            usb_root: root.clone(),
         })
         .data
-        .expect("before load");
-    assert!(
-        !before.divergence.pdb_missing_kinds.is_empty(),
-        "after trimming PDB, pdb_missing_kinds must be non-empty: {:?}",
-        before.divergence
-    );
+        .expect("menu without a PDB");
+    let first = before.current_items[0].kind;
 
-    let response = backend.sync_usb_player_menu_edb_to_pdb(GetUsbPlayerMenuConfigRequest {
-        usb_root: Some(usb_root.to_string_lossy().into_owned()),
-    });
-    assert!(response.ok, "sync failed: {response:?}");
-    let data = response.data.expect("sync data");
-    assert!(data.updated, "PDB was restored so updated must be true");
-    assert!(
-        data.divergence.pdb_missing_kinds.is_empty(),
-        "after sync, PDB must have all 27 rows: {:?}",
-        data.divergence
-    );
-    assert!(
-        data.divergence.is_empty(),
-        "after sync, no real divergence: {:?}",
-        data.divergence
-    );
-
-    let reload = backend
-        .get_usb_player_menu_config(GetUsbPlayerMenuConfigRequest {
-            usb_root: Some(usb_root.to_string_lossy().into_owned()),
-        })
-        .data
-        .expect("reload data");
-    assert!(
-        reload.divergence.pdb_missing_kinds.is_empty(),
-        "reload: PDB still complete after sync"
-    );
-    assert!(
-        reload.divergence.is_empty(),
-        "reload: no divergence after sync"
-    );
+    let edit = edit_menu(&backend, &usb_root, UsbPlayerMenuEdit::MoveDown, first);
+    assert!(edit.ok, "edit without a PDB failed: {edit:?}");
+    let edit = edit.data.expect("edit data");
+    assert!(edit.updated);
+    assert_eq!(edit.current_items[1].kind, first);
+    assert!(!pdb.exists(), "the edit must not create a PDB");
 }
 
 #[test]
@@ -565,21 +401,45 @@ fn update_player_menu_vendor_seven_item_set_keeps_pdb_catalog() {
     assert_eq!(pdb_kinds.len(), 27, "PDB t16 must keep the full catalog");
     assert!(pdb_kinds.contains(&139), "PDB t16 must still include KEY");
 
-    assert!(
-        data.divergence.is_empty(),
-        "expected zero divergence after 7-item set; got: {:?}",
-        data.divergence
-    );
+    // An edit that applies says so, and one that doesn't says that.
+    let root = Some(usb_root.to_string_lossy().into_owned());
+    let edit = |action| {
+        backend
+            .update_usb_player_menu_config(UpdateUsbPlayerMenuConfigRequest {
+                usb_root: root.clone(),
+                action,
+                kind: vendor_kinds[0],
+            })
+            .data
+            .expect("edit data")
+            .status_text
+    };
+    assert_eq!(edit(UsbPlayerMenuEdit::MoveUp), "Player menu unchanged");
+    assert_eq!(edit(UsbPlayerMenuEdit::MoveDown), "Player menu updated");
+    assert_eq!(edit(UsbPlayerMenuEdit::MoveUp), "Player menu updated");
 
-    for item in &data.current_items {
-        assert_eq!(
-            item.origin,
-            UsbPlayerMenuItemOrigin::Both,
-            "item kind {} should be Both, got {:?}",
-            item.kind,
-            item.origin
-        );
-    }
+    // The background colour says what it did too, and its chips follow.
+    let set_color = |color| {
+        backend
+            .set_usb_background_color(backend::models::SetUsbBackgroundColorRequest {
+                usb_root: root.clone(),
+                color,
+            })
+            .data
+            .expect("colour data")
+    };
+    let set = set_color(5);
+    assert_eq!(set.status_text, "Background colour set to Green");
+    assert_eq!(
+        set.chips
+            .iter()
+            .filter(|chip| chip.selected)
+            .map(|chip| chip.color)
+            .collect::<Vec<_>>(),
+        [5]
+    );
+    assert_eq!(set.note_text, "");
+    assert_eq!(set_color(5).status_text, "Background colour unchanged");
 
     let reload = backend
         .get_usb_player_menu_config(GetUsbPlayerMenuConfigRequest {
@@ -591,10 +451,5 @@ fn update_player_menu_vendor_seven_item_set_keeps_pdb_catalog() {
     assert_eq!(
         reload_kinds, vendor_kinds,
         "on-disk kinds must match after reload"
-    );
-    assert!(
-        reload.divergence.is_empty(),
-        "reload divergence must be empty: {:?}",
-        reload.divergence
     );
 }

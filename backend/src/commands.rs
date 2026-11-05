@@ -510,13 +510,6 @@ impl BackendCommands {
         wrap(self.service.update_usb_player_menu_config(req))
     }
 
-    pub fn sync_usb_player_menu_edb_to_pdb(
-        &self,
-        req: GetUsbPlayerMenuConfigRequest,
-    ) -> ApiResponse<UpdateUsbPlayerMenuConfigData> {
-        wrap(self.service.sync_usb_player_menu_edb_to_pdb(req))
-    }
-
     pub fn get_usb_background_color(
         &self,
         req: GetUsbBackgroundColorRequest,

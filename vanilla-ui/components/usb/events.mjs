@@ -24,7 +24,6 @@ export function bindUsbEvents(ctx) {
     addUsbPlayerMenuItems,
     removeUsbPlayerMenuItems,
     moveUsbPlayerMenuItems,
-    syncUsbPlayerMenusEdbToPdb,
     setUsbBackgroundColor,
     usbPlaylistTracksCtl,
     usbHistoryTracksCtl,
@@ -169,17 +168,9 @@ export function bindUsbEvents(ctx) {
     moveUsbPlayerMenuItems(1).catch(catchErr(emitStatus));
   });
 
-  el.usbPlayerMenuSyncBtn.addEventListener("click", () => {
-    syncUsbPlayerMenusEdbToPdb().catch(catchErr(emitStatus));
-  });
-
-  el.usbPlayerMenuRestoreBtn.addEventListener("click", () => {
-    syncUsbPlayerMenusEdbToPdb().catch(catchErr(emitStatus));
-  });
-
   el.usbBackgroundColorChips.addEventListener("click", (event) => {
-    const chip = event.target?.closest?.(".bg-color-chip");
-    if (!chip || chip.disabled) return;
+    const chip = event.target.closest(".bg-color-chip");
+    if (!chip) return;
     setUsbBackgroundColor(Number(chip.dataset.color)).catch(catchErr(emitStatus));
   });
 

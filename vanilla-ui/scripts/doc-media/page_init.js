@@ -368,8 +368,7 @@
           case "get_usb_player_menu_config":
             return usb.playerMenu;
           case "get_usb_background_color":
-            // What an app-initialized USB holds: purple in both databases.
-            return ok({ pdbColor: 8, edbColor: 8, writable: true });
+            return usb.backgroundColor;
           case "export_to_usb":
             return replayExport(r.playlistId);
           case "browse_source_files": {

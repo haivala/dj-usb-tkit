@@ -292,7 +292,6 @@ drive selection from being rendered against a newer selected drive.
 - `update_usb_player_menu_config` — `{ usbRoot, action, kind }`, one editor edit
   (`add`, `remove`, `moveUp`, `moveDown`) applied to the stick's current menu;
   an edit that changes nothing writes nothing.
-- `sync_usb_player_menu_edb_to_pdb`
 - `get_usb_background_color` — `{ pdbColor, edbColor, writable, reason, updated, warnings }`:
   the player background colour each database holds (0 = default, 1–8 = pink,
   red, orange, yellow, green, aqua, blue, purple; `null` where a database has

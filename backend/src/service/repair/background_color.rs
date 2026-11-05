@@ -8,12 +8,53 @@
 use super::run::{StagedPdb, write_back_both_or_neither};
 use super::*;
 use crate::models::{
-    GetUsbBackgroundColorRequest, SetUsbBackgroundColorRequest, UsbBackgroundColorData,
+    GetUsbBackgroundColorRequest, SetUsbBackgroundColorRequest, UsbBackgroundColorChip,
+    UsbBackgroundColorData,
 };
 
 /// rekordbox's list: 0 = default, then pink, red, orange, yellow, green,
 /// aqua, blue and purple.
 const MAX_BACKGROUND_COLOR: u8 = 8;
+
+/// The colors in rekordbox's order: the index is the stored value. The dots'
+/// colors are in `styles.css`.
+const BACKGROUND_COLORS: [&str; MAX_BACKGROUND_COLOR as usize + 1] = [
+    "Default", "Pink", "Red", "Orange", "Yellow", "Green", "Aqua", "Blue", "Purple",
+];
+
+fn background_color_name(color: u8) -> String {
+    BACKGROUND_COLORS
+        .get(usize::from(color))
+        .map_or_else(|| format!("colour {color}"), |name| (*name).to_string())
+}
+
+/// A chip is selected only while both databases hold that color.
+fn background_color_chips(pdb: Option<u8>, edb: Option<u8>) -> Vec<UsbBackgroundColorChip> {
+    let selected = pdb.filter(|_| pdb == edb);
+    (0u8..)
+        .zip(BACKGROUND_COLORS)
+        .map(|(color, name)| UsbBackgroundColorChip {
+            color,
+            label: name.to_string(),
+            selected: selected == Some(color),
+        })
+        .collect()
+}
+
+/// Why no color can be set, or which two rekordbox left. Empty otherwise.
+fn background_color_note(pdb: Option<u8>, edb: Option<u8>, reason: Option<&str>) -> String {
+    if let Some(reason) = reason {
+        return reason.to_string();
+    }
+    match (pdb, edb) {
+        (Some(pdb), Some(edb)) if pdb != edb => format!(
+            "rekordbox set two colours: {} for older players (PDB), {} for rekordbox and the CDJ-3000 (eDB). Choosing a colour sets both.",
+            background_color_name(pdb),
+            background_color_name(edb),
+        ),
+        _ => String::new(),
+    }
+}
 
 fn page_size_of(pdb: &[u8]) -> usize {
     crate::utils::read_u32_le_at(pdb, 4).unwrap_or(0) as usize
@@ -45,6 +86,9 @@ fn read_background_colors(
         _ => None,
     };
     UsbBackgroundColorData {
+        chips: background_color_chips(pdb_color, edb_color),
+        note_text: background_color_note(pdb_color, edb_color, reason.as_deref()),
+        status_text: String::new(),
         pdb_color,
         edb_color,
         writable: reason.is_none(),
@@ -87,7 +131,11 @@ impl BackendService {
             return Err(BackendError::Validation(reason));
         }
         if before.pdb_color == Some(req.color) && before.edb_color == Some(req.color) {
-            return Ok(UsbBackgroundColorData { warnings, ..before });
+            return Ok(UsbBackgroundColorData {
+                status_text: "Background colour unchanged".to_string(),
+                warnings,
+                ..before
+            });
         }
 
         warnings.extend(
@@ -133,7 +181,45 @@ impl BackendService {
 
         let mut data = read_background_colors(&usb_root, &pdb.bytes, &mut warnings);
         data.updated = true;
+        data.status_text = format!(
+            "Background colour set to {}",
+            background_color_name(req.color)
+        );
         data.warnings = warnings;
         Ok(data)
+    }
+}
+
+#[cfg(test)]
+mod text_tests {
+    use super::{background_color_chips, background_color_note};
+
+    #[test]
+    fn a_chip_is_selected_only_while_both_databases_hold_it() {
+        let selected = |pdb, edb| -> Vec<u8> {
+            background_color_chips(pdb, edb)
+                .into_iter()
+                .filter(|chip| chip.selected)
+                .map(|chip| chip.color)
+                .collect()
+        };
+        assert_eq!(background_color_chips(None, None).len(), 9);
+        assert_eq!(selected(Some(6), Some(6)), [6]);
+        assert!(selected(Some(6), Some(0)).is_empty());
+        assert!(selected(None, Some(0)).is_empty());
+    }
+
+    #[test]
+    fn the_note_says_why_or_names_both_colors() {
+        assert_eq!(background_color_note(Some(6), Some(6), None), "");
+        assert_eq!(
+            background_color_note(None, Some(0), Some("no page")),
+            "no page"
+        );
+        assert_eq!(
+            background_color_note(Some(6), Some(0), None),
+            "rekordbox set two colours: Aqua for older players (PDB), Default for rekordbox and the CDJ-3000 (eDB). Choosing a colour sets both."
+        );
+        assert!(background_color_note(Some(20), Some(0), None).contains("colour 20"));
     }
 }

@@ -360,7 +360,6 @@ function clearUsbMenuViews(ctx) {
   state.usbPlayerMenuAvailable = [];
   state.usbPlayerMenuCurrentSelectedKind = null;
   state.usbPlayerMenuAvailableSelectedKind = null;
-  state.usbPlayerMenuDivergence = null;
   state.usbBackgroundColor = null;
   renderUsbPlayerMenuEditor(ctx);
   renderUsbBackgroundColor(ctx);
@@ -985,25 +984,12 @@ function ensureValidPlayerMenuSelections(state) {
 }
 
 function buildPlayerMenuItemButton(documentObj, item, selectedKind, side) {
-  const { kind, origin } = item;
   const button = cloneTemplate(documentObj, "tplPlayerMenuItem");
-  button.dataset.menuKind = String(kind);
+  button.dataset.menuKind = String(item.kind);
   button.dataset.menuSide = side;
-  button.dataset.menuOrigin = origin;
-  button.querySelector(".player-menu-item-label").textContent = item.name.trim() || `Menu ${kind}`;
+  button.querySelector(".player-menu-item-label").textContent = item.label;
 
-  const tag = button.querySelector(".player-menu-item-origin");
-  if (side === "current" && origin !== "both") {
-    tag.classList.add(`is-${origin}`);
-    tag.textContent = origin === "pdb_only" ? "PDB" : "eDB";
-    tag.dataset.tooltip = origin === "pdb_only"
-      ? "Only in PDB t16 (eDB missing this kind)"
-      : "Only in eDB menuItem (not in PDB t16)";
-  } else {
-    tag.remove();
-  }
-
-  const selected = selectedKind === kind;
+  const selected = selectedKind === item.kind;
   button.classList.toggle("is-selected", selected);
   button.setAttribute("aria-selected", String(selected));
   return button;
@@ -1053,27 +1039,7 @@ export function renderUsbPlayerMenuEditor(ctx) {
     currentEl.appendChild(row);
   }
 
-  renderUsbPlayerMenuDivergence(ctx);
   syncUsbPlayerMenuEditorControls(ctx);
-}
-
-function renderUsbPlayerMenuDivergence(ctx) {
-  const { state, el } = ctx;
-  const node = el.usbPlayerMenuDivergence;
-  // Backend-owned: `summary` / `canSync` / `canRestore` come from
-  // service::repair (load_usb_player_menu_config).
-  const div = state.usbPlayerMenuDivergence || {};
-  if (!div.canSync && !div.canRestore) {
-    node.classList.add("hidden");
-    el.usbPlayerMenuDivergenceMessage.textContent = "";
-    el.usbPlayerMenuSyncBtn.disabled = true;
-    el.usbPlayerMenuRestoreBtn.disabled = true;
-    return;
-  }
-  node.classList.remove("hidden");
-  el.usbPlayerMenuDivergenceMessage.textContent = div.summary;
-  el.usbPlayerMenuSyncBtn.disabled = !div.canSync;
-  el.usbPlayerMenuRestoreBtn.disabled = !div.canRestore;
 }
 
 // Store a player-menu config response and redraw the editor.
@@ -1081,43 +1047,18 @@ function applyPlayerMenuConfig(ctx, data, selection = null) {
   const { state } = ctx;
   state.usbPlayerMenuCurrent = data.currentItems;
   state.usbPlayerMenuAvailable = data.availableItems;
-  state.usbPlayerMenuDivergence = data.divergence;
   state.usbPlayerMenuCurrentSelectedKind = selection?.side === "current" ? selection.kind : null;
   state.usbPlayerMenuAvailableSelectedKind = selection?.side === "available" ? selection.kind : null;
   renderUsbPlayerMenuEditor(ctx);
 }
 
-export async function syncUsbPlayerMenusEdbToPdb(ctx) {
-  const { state, emitStatus } = ctx;
-  emitStatus("Fixing PDB sync...");
-  const data = await ctx.command("sync_usb_player_menu_edb_to_pdb", { usbRoot: state.usbRoot });
-  applyPlayerMenuConfig(ctx, data);
-  if (data.updated) clearUsbDiagnostics(ctx);
-  emitStatus(data.updated ? "PDB categories restored" : "PDB already complete");
-}
-
-// Whether the currently-selected `current` menu item may be removed is a
-// backend-owned fact (`UsbPlayerMenuItem.removable`, see
-// backend/src/service/repair/player_menu.rs). The frontend just reads it.
-function currentPlayerMenuItemByKind(state, kind) {
-  return state.usbPlayerMenuCurrent.find((item) => item.kind === kind) || null;
-}
-
 export function syncUsbPlayerMenuEditorControls(ctx) {
   const { state, el } = ctx;
-  const availableSelected = state.usbPlayerMenuAvailableSelectedKind;
-  const currentSelected = state.usbPlayerMenuCurrentSelectedKind;
-  const currentKinds = state.usbPlayerMenuCurrent.map((item) => item.kind);
-  const currentIdx = currentSelected !== null ? currentKinds.indexOf(currentSelected) : -1;
-
-  const hasAvailable = availableSelected !== null;
-  const hasCurrent = currentSelected !== null;
-  el.usbPlayerMenuAddBtn.disabled = !hasAvailable;
-  el.usbPlayerMenuRemoveBtn.disabled =
-    !hasCurrent
-    || currentPlayerMenuItemByKind(state, currentSelected)?.removable === false;
-  el.usbPlayerMenuUpBtn.disabled = currentIdx <= 0;
-  el.usbPlayerMenuDownBtn.disabled = currentIdx < 0 || currentIdx >= currentKinds.length - 1;
+  const selected = state.usbPlayerMenuCurrent.find((item) => item.kind === state.usbPlayerMenuCurrentSelectedKind);
+  el.usbPlayerMenuAddBtn.disabled = state.usbPlayerMenuAvailableSelectedKind === null;
+  el.usbPlayerMenuRemoveBtn.disabled = !selected?.removable;
+  el.usbPlayerMenuUpBtn.disabled = !selected?.canMoveUp;
+  el.usbPlayerMenuDownBtn.disabled = !selected?.canMoveDown;
 }
 
 export async function loadUsbPlayerMenuConfig(ctx) {
@@ -1125,7 +1066,7 @@ export async function loadUsbPlayerMenuConfig(ctx) {
   emitStatus("Loading player menu configuration...");
   const data = await ctx.command("get_usb_player_menu_config", { usbRoot: state.usbRoot });
   applyPlayerMenuConfig(ctx, data);
-  emitStatus("Player menu loaded");
+  emitStatus(data.statusText);
 }
 
 // One editor edit (add, remove, moveUp, moveDown) on `kind`: the backend
@@ -1140,7 +1081,7 @@ async function editUsbPlayerMenu(ctx, action, kind, side) {
   });
   if (data.updated) clearUsbDiagnostics(ctx);
   applyPlayerMenuConfig(ctx, data, { side, kind });
-  emitStatus(data.updated ? "Player menu updated" : "Player menu unchanged");
+  emitStatus(data.statusText);
 }
 
 export async function addUsbPlayerMenuItems(ctx) {
@@ -1156,58 +1097,25 @@ export async function moveUsbPlayerMenuItems(ctx, direction) {
   await editUsbPlayerMenu(ctx, direction < 0 ? "moveUp" : "moveDown", kind, "current");
 }
 
-// The player background colours in rekordbox's order: a colour's index is
-// the value both databases store (0 = the player's default, a blue highlight).
-export const USB_BACKGROUND_COLORS = [
-  { name: "Default", css: "#2f6bff" },
-  { name: "Pink", css: "#e94fc8" },
-  { name: "Red", css: "#e5333b" },
-  { name: "Orange", css: "#f08a24" },
-  { name: "Yellow", css: "#e6cf2a" },
-  { name: "Green", css: "#45b84f" },
-  { name: "Aqua", css: "#1fb5c4" },
-  { name: "Blue", css: "#2f5fe0" },
-  { name: "Purple", css: "#8b45d6" },
-];
-
-function backgroundColorName(value) {
-  return USB_BACKGROUND_COLORS[value]?.name ?? `colour ${value}`;
-}
-
-// One chip per colour. A chip is selected only while both databases hold that
-// colour; when rekordbox left them different, the note names both, and
-// choosing a chip sets both.
+// The chips and the note are the backend's, ready to show.
 export function renderUsbBackgroundColor(ctx) {
   const { state, el, document } = ctx;
-  const chips = el.usbBackgroundColorChips;
   const data = state.usbBackgroundColor;
   const canSet = !!data?.writable && state.usbWritable !== false;
-  const pdb = data?.pdbColor ?? null;
-  const edb = data?.edbColor ?? null;
-  const selected = pdb !== null && pdb === edb ? pdb : null;
 
-  chips.replaceChildren();
-  USB_BACKGROUND_COLORS.forEach((color, value) => {
+  el.usbBackgroundColorChips.replaceChildren(...(data?.chips || []).map((color) => {
     const chip = cloneTemplate(document, "tplBackgroundColorChip");
-    chip.dataset.color = String(value);
-    chip.style.setProperty("--bg-color-dot", color.css);
-    chip.querySelector(".bg-color-chip-label").textContent = color.name;
-    chip.classList.toggle("is-selected", value === selected);
-    chip.setAttribute("aria-checked", value === selected ? "true" : "false");
+    chip.dataset.color = String(color.color);
+    chip.querySelector(".bg-color-chip-label").textContent = color.label;
+    chip.classList.toggle("is-selected", color.selected);
+    chip.setAttribute("aria-checked", String(color.selected));
     chip.disabled = !canSet;
-    chips.appendChild(chip);
-  });
+    return chip;
+  }));
 
-  const note = el.usbBackgroundColorNote;
-  let text = "";
-  if (data && !data.writable) {
-    text = data.reason || "This USB has no place for a background colour.";
-  } else if (pdb !== null && edb !== null && pdb !== edb) {
-    text = `rekordbox set two colours: ${backgroundColorName(pdb)} for older players (PDB), `
-      + `${backgroundColorName(edb)} for rekordbox and the CDJ-3000 (eDB). Choosing a colour sets both.`;
-  }
-  note.textContent = text;
-  note.classList.toggle("hidden", !text);
+  const text = data?.noteText || "";
+  el.usbBackgroundColorNote.textContent = text;
+  el.usbBackgroundColorNote.classList.toggle("hidden", !text);
 }
 
 export async function loadUsbBackgroundColor(ctx) {
@@ -1227,9 +1135,7 @@ export async function setUsbBackgroundColor(ctx, color) {
   state.usbBackgroundColor = data;
   if (data.updated) clearUsbDiagnostics(ctx);
   renderUsbBackgroundColor(ctx);
-  emitStatus(data.updated
-    ? `Background colour set to ${backgroundColorName(color)}`
-    : "Background colour unchanged");
+  emitStatus(data.statusText);
 }
 
 // One export at a time: the button is disabled from the click on, not only

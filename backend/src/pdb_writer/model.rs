@@ -167,8 +167,7 @@ pub fn standard_colors() -> Vec<PdbColorRow> {
 /// desktop library software shows. Keeping all 27 rows in PDB preserves the complete catalog
 /// regardless of which subset the user has marked visible.
 ///
-/// Order matches the eDB `menuItem_id` order seeded by `initialize_usb` so
-/// that `pdb_missing_kinds` stays empty on a fresh USB.
+/// Order matches the eDB `menuItem_id` order seeded by `initialize_usb`.
 ///
 /// Rows are encoded via `encode_pdb_t16_row` so they round-trip byte-for-byte
 /// against reference t16 rows on the same kind/name (see

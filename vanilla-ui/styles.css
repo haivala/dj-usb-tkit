@@ -2764,6 +2764,17 @@ ul[data-loaded]:empty::before {
   background: var(--bg-color-dot);
 }
 
+/* The value is what both databases store, in rekordbox's order. */
+.bg-color-chip[data-color="0"] { --bg-color-dot: #2f6bff; }
+.bg-color-chip[data-color="1"] { --bg-color-dot: #e94fc8; }
+.bg-color-chip[data-color="2"] { --bg-color-dot: #e5333b; }
+.bg-color-chip[data-color="3"] { --bg-color-dot: #f08a24; }
+.bg-color-chip[data-color="4"] { --bg-color-dot: #e6cf2a; }
+.bg-color-chip[data-color="5"] { --bg-color-dot: #45b84f; }
+.bg-color-chip[data-color="6"] { --bg-color-dot: #1fb5c4; }
+.bg-color-chip[data-color="7"] { --bg-color-dot: #2f5fe0; }
+.bg-color-chip[data-color="8"] { --bg-color-dot: #8b45d6; }
+
 .bg-color-note {
   font-size: 12px;
 }
@@ -2833,51 +2844,6 @@ ul[data-loaded]:empty::before {
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
-}
-
-.player-menu-item-origin {
-  flex: 0 0 auto;
-  font-size: 10px;
-  letter-spacing: 0.04em;
-  padding: 1px 6px;
-  border-radius: 999px;
-  border: 1px solid var(--line);
-  background: var(--card);
-  color: var(--muted);
-  text-transform: uppercase;
-}
-
-.player-menu-item-origin.is-pdb_only {
-  border-color: rgba(255, 170, 40, 0.6);
-  color: rgba(255, 170, 40, 0.95);
-}
-
-.player-menu-item-origin.is-edb_only {
-  border-color: rgba(110, 170, 255, 0.6);
-  color: rgba(110, 170, 255, 0.95);
-}
-
-.player-menu-divergence {
-  margin: 8px 0 12px;
-  padding: 10px 12px;
-  border-radius: 8px;
-  border: 1px solid rgba(255, 170, 40, 0.5);
-  background: rgba(255, 170, 40, 0.08);
-  color: rgba(255, 170, 40, 0.95);
-  font-size: 13px;
-  display: flex;
-  align-items: center;
-  gap: 12px;
-  flex-wrap: wrap;
-}
-
-.player-menu-divergence > span {
-  flex: 1 1 auto;
-  min-width: 0;
-}
-
-.player-menu-divergence button {
-  flex: 0 0 auto;
 }
 
 .player-menu-item:hover {
