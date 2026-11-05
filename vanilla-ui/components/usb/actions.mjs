@@ -7,7 +7,6 @@ import { setActiveListItem } from "../shell/actions.mjs";
 import { STORAGE_KEY_USB_ROOT, STORAGE_KEY_EXPORT_ENGINE_LIBRARY } from "../../settings_keys.mjs";
 import {
   renderTrackListDurationSummary,
-  counted,
 } from "../../track_utils.mjs";
 
 // Job types that scope a Tauri command to state.usbRoot -- while one of
@@ -603,7 +602,6 @@ export async function validateAndSetUsbRoot(ctx, path) {
 
   const result = await command("validate_usb_root", { path: input });
   const { valid, canInitialize } = result;
-  state.usbWritable = result.hasWriteAccess;
   state.usbRootValid = valid;
   state.usbRoot = result.normalizedRoot || input;
   ctx.persistUsbRoot(state.usbRoot);
@@ -1148,13 +1146,6 @@ async function runPlaylistExport(ctx, playlistId) {
     emitStatus(`Export blocked: couldn't save the current sort order (${err.message || err})`);
     return;
   }
-  // A missing source folder that a playlist track lives under is caught by the
-  // backend export gate (validationType "source_root_missing"), which sees the
-  // whole playlist rather than just the loaded page -- handled below.
-  if (!state.usbWritable) {
-    emitStatus("USB is read-only. Remount as read-write before export.");
-    return;
-  }
 
   emitStatus(`Exporting ${playlist.name} to USB...`);
   el.donateBtn.classList.add("exporting");
@@ -1174,25 +1165,8 @@ async function runPlaylistExport(ctx, playlistId) {
       }
     });
   } catch (error) {
-    const { details } = error;
-    if (details?.validationType === "missing_analysis") {
-      const missing = details.missingTrackCount;
-      const total = details.totalTrackCount;
-      const filesMissing = details.missingAnalysisBundleCount;
-      // Analyzed tracks whose analysis files aren't there (e.g. a USB-side
-      // path the target stick doesn't hold): Analyze Missing Tracks skips
-      // them, Reanalyze writes new files.
-      if (filesMissing > 0 && filesMissing === missing) {
-        emitStatus(`Export blocked: the analysis files of ${missing} of ${counted(total, "track")} are missing. Select them and use Reanalyze.`);
-      } else {
-        emitStatus(`Export blocked: ${missing} of ${counted(total, "track")} not analyzed yet. Use Analyze Missing Tracks.`);
-      }
-    } else if (details?.validationType === "source_root_missing") {
-      emitStatus(`Export blocked: source folder is missing: ${details.missingRoots[0]}. Relocate or remove it first.`);
-    } else {
-      const msg = error.message.trim() || "USB export failed";
-      emitStatus(`Export failed: ${msg}. See Event Log for details.`);
-    }
+    const msg = error.message.trim() || "USB export failed";
+    emitStatus(error.details?.statusText || `Export failed: ${msg}. See Event Log for details.`);
     // Reported: the backend already put the reason in the Event Log, so the
     // caller must not log it again.
     return;

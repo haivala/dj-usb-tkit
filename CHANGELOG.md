@@ -91,6 +91,10 @@
 - **Chore:** The docs' transcode, USB Playlists and USB History screenshots show the side menu open,
   and the last two are wider so their track lists have no horizontal scrollbar. The transcode
   screenshot's export button names the USB.
+- **Improvement:** A blocked export's status line no longer says "Export failed: export blocked: …". When
+  it's blocked by free space, formats or an internal check, it says so once, and a format block counts the
+  tracks and leaves their names to the Event Log. A read-only USB is now checked when you export, instead of
+  when you selected it.
 
 ## 0.5.4
 

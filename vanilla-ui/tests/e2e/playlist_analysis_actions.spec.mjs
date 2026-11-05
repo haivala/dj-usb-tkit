@@ -1288,28 +1288,18 @@ test("a successful export clears the stale diagnostics report and sends the back
   expect(await page.evaluate(() => window.__historyReads)).toBe(1);
 });
 
-test("the backend's export gate rejections are shown in the status bar", async ({ page }) => {
+test("the backend's export gate rejection is shown in the status bar", async ({ page }) => {
   await installReorderTauriMock(page, { usbSameNamePlaylistName: "Reorder Playlist" });
   await page.goto("/");
   await connectUsbAndFetchPlaylists(page);
   await openReorderPlaylist(page);
-  const rejection = (details) => ({ ok: false, error: { code: "VALIDATION", message: "export blocked", details } });
-  const status = page.locator("#statusText");
-  const exportBtn = page.locator("#exportPlaylistBtn");
+  await answerExports(page, {
+    ok: false,
+    error: { code: "VALIDATION", message: "the log's wording", details: { statusText: "mock export blocked text" } }
+  });
 
-  await answerExports(page, rejection({ validationType: "source_root_missing", missingRoots: ["/music/missing"] }));
-  await exportBtn.click();
-  await expect(status).toContainText("Export blocked: source folder is missing: /music/missing. Relocate or remove it first.");
-
-  // Unanalyzed tracks point to Analyze Missing Tracks; analyzed tracks whose
-  // analysis files are gone, to Reanalyze.
-  await answerExports(page, rejection({ validationType: "missing_analysis", totalTrackCount: 3, missingTrackCount: 2, missingAnalysisBundleCount: 0 }));
-  await exportBtn.click();
-  await expect(status).toContainText("Export blocked: 2 of 3 tracks not analyzed yet. Use Analyze Missing Tracks.");
-
-  await answerExports(page, rejection({ validationType: "missing_analysis", totalTrackCount: 3, missingTrackCount: 2, missingAnalysisBundleCount: 2 }));
-  await exportBtn.click();
-  await expect(status).toContainText("Export blocked: the analysis files of 2 of 3 tracks are missing. Select them and use Reanalyze.");
+  await page.locator("#exportPlaylistBtn").click();
+  await expect(page.locator("#statusText")).toHaveText("mock export blocked text");
 });
 
 test("a search with no matches doesn't change what Export to USB does", async ({ page }) => {

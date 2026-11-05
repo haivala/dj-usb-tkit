@@ -43,7 +43,7 @@ use super::export_helpers::{
 use super::export_log::{append_export_log_record, build_export_log_record};
 use super::usb_staging;
 use super::usb_utils::{
-    self, analysis_bundle_exists, load_existing_analysis_paths_by_content_path,
+    self, analysis_bundle_exists, has_write_access, load_existing_analysis_paths_by_content_path,
     load_existing_analysis_paths_by_content_path_with_conn,
     load_existing_analysis_paths_by_pdb_track_path, resolve_usb_root, resolve_usb_side_path,
 };
@@ -239,7 +239,7 @@ fn validate_manifest_path(
 
 /// Which side of the destructive steps a manifest invariant check runs on.
 /// Both run the same per-track path checks; the phase only changes the error
-/// wording and the `validationType` the frontend keys off of, so a failure
+/// wording and the `validationType`, so a failure
 /// that happens *after* the DB write and stale-file prune (drive already
 /// modified, restore from backup) is distinguishable from one caught before
 /// anything was touched.
@@ -259,9 +259,9 @@ impl ManifestCheckPhase {
 
     fn error_message(self) -> &'static str {
         match self {
-            Self::BeforeDbWrite => "export blocked: manifest invariant check failed",
+            Self::BeforeDbWrite => "Export blocked: manifest invariant check failed",
             Self::AfterPrune => {
-                "export finished with errors: the stale-file prune removed a file the exported \
+                "Export finished with errors: the stale-file prune removed a file the exported \
                  playlist still references — the USB databases were written; restore from the \
                  pre-export backup"
             }
@@ -410,6 +410,7 @@ fn run_manifest_invariant_check(
         phase.error_message().to_string(),
         json!({
             "validationType": phase.validation_type(),
+            "statusText": format!("{}. See Event Log for details.", phase.error_message()),
             "issueCount": issues.total,
             "issues": issues.samples,
         }),
@@ -707,21 +708,53 @@ fn ensure_usb_has_space_for_export(
     let Some((required, available)) = export_space_shortfall(estimate, available) else {
         return Ok(());
     };
-    Err(BackendError::ValidationWithDetails(
-        format!(
-            "export blocked: not enough free space on the USB drive — need about {}, {} free",
-            format_bytes(required),
-            format_bytes(available),
-        ),
+    Err(insufficient_space_error(
+        usb_root, estimate, required, available,
+    ))
+}
+
+fn insufficient_space_error(
+    usb_root: &Path,
+    estimate: u64,
+    required: u64,
+    available: u64,
+) -> BackendError {
+    let message = format!(
+        "Export blocked: not enough free space on the USB drive — need about {}, {} free",
+        format_bytes(required),
+        format_bytes(available),
+    );
+    let status_text = format!("{message}.");
+    BackendError::ValidationWithDetails(
+        message,
         json!({
             "validationType": "insufficient_usb_space",
+            "statusText": status_text,
             "estimatedCopyBytes": estimate,
             "headroomBytes": EXPORT_FREE_SPACE_HEADROOM_BYTES,
             "requiredBytes": required,
             "availableBytes": available,
             "usbRoot": usb_root.to_string_lossy(),
         }),
-    ))
+    )
+}
+
+/// The Event Log gets every refused track from the error's message; the status
+/// line only has room for how many.
+fn refused_formats_error(refused: Vec<String>) -> BackendError {
+    let what = format!(
+        "Export blocked: {} in a format this USB's formats don't allow, and only lossless files \
+         can be converted",
+        counted(refused.len(), "track", "tracks"),
+    );
+    BackendError::ValidationWithDetails(
+        format!("{what}: {}", refused.join(", ")),
+        json!({
+            "validationType": "usb_audio_format_refused",
+            "statusText": format!("{what}. See Event Log for details."),
+            "tracks": refused,
+        }),
+    )
 }
 
 /// The key of `track`'s masterContentId (`track_export_identity`): its id
@@ -774,12 +807,24 @@ fn ensure_playlist_tracks_analysis_ready(
     if missing == 0 {
         return Ok(());
     }
+    let of_total = format!("{missing} of {}", counted(total, "track", "tracks"));
+    // Analyzed tracks whose analysis files aren't there (e.g. a USB-side path
+    // the target stick doesn't hold): Analyze Missing Tracks skips them,
+    // Reanalyze writes new files.
+    let status_text = if missing_analysis_bundle == missing {
+        format!(
+            "Export blocked: the analysis files of {of_total} are missing. Select them and use Reanalyze."
+        )
+    } else {
+        format!("Export blocked: {of_total} not analyzed yet. Use Analyze Missing Tracks.")
+    };
     Err(BackendError::ValidationWithDetails(
         format!(
-            "export blocked: {missing}/{total} playlist tracks are missing required analysis (waveform, bpm, duration, DAT/EXT files); run analysis first"
+            "Export blocked: {missing}/{total} playlist tracks are missing required analysis (waveform, bpm, duration, DAT/EXT files); run analysis first"
         ),
         json!({
             "validationType": "missing_analysis",
+            "statusText": status_text,
             "requiredFields": ["waveform", "bpm", "duration"],
             "requiredFiles": ["DAT", "EXT"],
             "missingTrackCount": missing,
@@ -1100,6 +1145,13 @@ impl BackendService {
                 usb_root.display()
             )));
         }
+        if !has_write_access(&usb_root) {
+            let message = "USB is read-only. Remount as read-write before export.";
+            return Err(BackendError::ValidationWithDetails(
+                message.to_string(),
+                json!({ "validationType": "usb_read_only", "statusText": message }),
+            ));
+        }
         let options = req.options.unwrap_or_default();
         let export_dry_run = std::env::var("USB_EXPORT_DRY_RUN")
             .ok()
@@ -1130,12 +1182,14 @@ impl BackendService {
             )?
         };
         if let Some(missing_root) = blocking_missing_roots.first() {
+            let message = format!(
+                "Export blocked: source folder is missing: {missing_root}. Relocate or remove it first."
+            );
             return Err(BackendError::ValidationWithDetails(
-                format!(
-                    "export blocked: source folder is missing: {missing_root}. Relocate or remove it first."
-                ),
+                message.clone(),
                 json!({
                     "validationType": "source_root_missing",
+                    "statusText": message,
                     "missingRoots": blocking_missing_roots,
                 }),
             ));
@@ -1995,18 +2049,7 @@ impl BackendService {
             })
             .collect();
         if !refused.is_empty() {
-            return Err(BackendError::ValidationWithDetails(
-                format!(
-                    "export blocked: {} in a format this USB's formats don't allow, and \
-                     only lossless files can be converted: {}",
-                    counted(refused.len(), "track", "tracks"),
-                    refused.join(", ")
-                ),
-                json!({
-                    "validationType": "usb_audio_format_refused",
-                    "tracks": refused,
-                }),
-            ));
+            return Err(refused_formats_error(refused));
         }
 
         // A track in the playlist twice is converted once.
@@ -2380,7 +2423,8 @@ mod tests {
         content_fingerprint_key, ensure_playlist_tracks_analysis_ready, estimate_export_new_bytes,
         estimate_playlist_copy, existing_usb_relative_if_file, existing_usb_relative_if_present,
         export_space_shortfall, format_bytes, has_required_analysis, has_required_analysis_fields,
-        normalize_playlist_name_for_compare, playlist_locks_reorder_on_export,
+        insufficient_space_error, normalize_playlist_name_for_compare,
+        playlist_locks_reorder_on_export, refused_formats_error,
         resolve_collision_free_media_target, usb_drive_label,
         usb_playlist_names_for_export_compare, usb_root_last_segment,
         validate_export_manifest_after_prune, validate_export_manifest_before_db_write,
@@ -2545,6 +2589,10 @@ mod tests {
                 assert_eq!(details["missingTrackCount"], 1);
                 assert_eq!(details["missingAnalysisBundleCount"], 0);
                 assert_eq!(details["totalTrackCount"], 1);
+                assert_eq!(
+                    details["statusText"],
+                    "Export blocked: 1 of 1 track not analyzed yet. Use Analyze Missing Tracks."
+                );
             }
             other => panic!("unexpected error variant: {other:?}"),
         }
@@ -2570,9 +2618,70 @@ mod tests {
                 assert_eq!(details["missingTrackCount"], 1);
                 assert_eq!(details["missingAnalysisBundleCount"], 1);
                 assert_eq!(details["totalTrackCount"], 1);
+                assert_eq!(
+                    details["statusText"],
+                    "Export blocked: the analysis files of 1 of 1 track are missing. Select them and use Reanalyze."
+                );
             }
             other => panic!("unexpected error variant: {other:?}"),
         }
+    }
+
+    #[test]
+    fn playlist_guard_points_to_analyze_when_some_tracks_were_never_analyzed() {
+        let dir = tempdir().expect("tempdir");
+        let mut files_gone = make_track();
+        files_gone.waveform_peaks_path =
+            Some(dir.path().join("missing.DAT").to_string_lossy().to_string());
+        let mut never_analyzed = make_track();
+        never_analyzed.waveform_peaks_path = None;
+        let mut ready = make_track();
+        ready.waveform_peaks_path = Some(write_test_analysis_bundle(dir.path(), "ready"));
+        let playlist = ExportPlaylistData {
+            id: "pl1".to_string(),
+            name: "Playlist".to_string(),
+            tracks: vec![files_gone, never_analyzed, ready],
+        };
+
+        let err = ensure_playlist_tracks_analysis_ready(dir.path(), &playlist).unwrap_err();
+        let BackendError::ValidationWithDetails(_, details) = err else {
+            panic!("unexpected error variant: {err:?}");
+        };
+        assert_eq!(
+            details["statusText"],
+            "Export blocked: 2 of 3 tracks not analyzed yet. Use Analyze Missing Tracks."
+        );
+    }
+
+    #[test]
+    fn insufficient_space_says_how_much_is_needed_and_free() {
+        let err = insufficient_space_error(Path::new("/usb"), 900, 2_000_000_000, 1_000_000_000);
+        let BackendError::ValidationWithDetails(_, details) = err else {
+            panic!("unexpected error variant: {err:?}");
+        };
+        assert_eq!(details["validationType"], "insufficient_usb_space");
+        assert_eq!(
+            details["statusText"],
+            format!(
+                "Export blocked: not enough free space on the USB drive — need about {}, {} free.",
+                format_bytes(2_000_000_000),
+                format_bytes(1_000_000_000),
+            )
+        );
+    }
+
+    #[test]
+    fn refused_formats_name_the_tracks_only_in_the_log_message() {
+        let err = refused_formats_error(vec!["a.ogg (OGG)".to_string(), "b.wma (WMA)".to_string()]);
+        let BackendError::ValidationWithDetails(message, details) = err else {
+            panic!("unexpected error variant: {err:?}");
+        };
+        assert!(message.ends_with(": a.ogg (OGG), b.wma (WMA)"), "{message}");
+        assert_eq!(details["validationType"], "usb_audio_format_refused");
+        assert_eq!(
+            details["statusText"],
+            "Export blocked: 2 tracks in a format this USB's formats don't allow, and only lossless files can be converted. See Event Log for details."
+        );
     }
 
     // --- existing_usb_relative_if_file ---
@@ -3270,6 +3379,10 @@ mod tests {
             BackendError::ValidationWithDetails(msg, details) => {
                 assert!(msg.contains("manifest invariant"));
                 assert_eq!(details["validationType"], "export_manifest_invariant");
+                assert_eq!(
+                    details["statusText"],
+                    "Export blocked: manifest invariant check failed. See Event Log for details."
+                );
                 assert!(
                     details["issues"]
                         .as_array()
@@ -3425,6 +3538,10 @@ mod tests {
             BackendError::ValidationWithDetails(msg, details) => {
                 assert!(msg.contains("stale-file prune removed a file"));
                 assert_eq!(details["validationType"], "export_manifest_post_prune");
+                assert_eq!(
+                    details["statusText"],
+                    "Export finished with errors: the stale-file prune removed a file the exported playlist still references — the USB databases were written; restore from the pre-export backup. See Event Log for details."
+                );
                 assert!(
                     details["issues"]
                         .as_array()
@@ -3825,8 +3942,45 @@ mod tests {
             BackendError::ValidationWithDetails(_, details) => {
                 assert_eq!(details["validationType"], "source_root_missing");
                 assert_eq!(details["missingRoots"][0], missing_root);
+                assert_eq!(
+                    details["statusText"],
+                    format!(
+                        "Export blocked: source folder is missing: {missing_root}. Relocate or remove it first."
+                    )
+                );
             }
             other => panic!("expected source_root_missing validation, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn export_to_usb_refuses_a_read_only_usb() {
+        let (_dir, service) = test_service();
+        let usb_dir = tempdir().expect("usb tempdir");
+        let mut read_only = std::fs::metadata(usb_dir.path())
+            .expect("metadata")
+            .permissions();
+        read_only.set_readonly(true);
+        std::fs::set_permissions(usb_dir.path(), read_only.clone()).expect("set read-only");
+
+        let result = service.export_to_usb(ExportToUsbRequest {
+            usb_root: Some(usb_dir.path().to_string_lossy().to_string()),
+            playlist_id: "any".to_string(),
+            options: None,
+        });
+
+        #[allow(clippy::permissions_set_readonly_false)]
+        read_only.set_readonly(false);
+        std::fs::set_permissions(usb_dir.path(), read_only).expect("restore permissions");
+        match result.unwrap_err() {
+            BackendError::ValidationWithDetails(_, details) => {
+                assert_eq!(details["validationType"], "usb_read_only");
+                assert_eq!(
+                    details["statusText"],
+                    "USB is read-only. Remount as read-write before export."
+                );
+            }
+            other => panic!("expected usb_read_only validation, got {other:?}"),
         }
     }
 
