@@ -794,7 +794,7 @@ fn remove_usb_playlist_with_progress_removes_playlist_from_edb() {
 }
 
 #[test]
-fn reorder_usb_playlists_with_progress_rejects_ids_without_pdb_prefix() {
+fn reorder_usb_playlists_with_progress_rejects_ids_that_match_no_playlist() {
     let root = tempdir().expect("temp root");
     let usb_root = root.path().join("usb");
     fs::create_dir_all(&usb_root).expect("create usb root");
@@ -810,7 +810,7 @@ fn reorder_usb_playlists_with_progress_rejects_ids_without_pdb_prefix() {
     let response = backend.reorder_usb_playlists_with_progress(
         ReorderUsbPlaylistsRequest {
             usb_root: Some(usb_root.to_string_lossy().to_string()),
-            ordered_playlist_ids: vec!["usb-pl-name-not-pdb-backed".to_string()],
+            ordered_playlist_ids: vec!["usb-pl-name-not-on-this-usb".to_string()],
         },
         |_, _, _| {
             progress_events += 1;
@@ -819,10 +819,10 @@ fn reorder_usb_playlists_with_progress_rejects_ids_without_pdb_prefix() {
 
     assert!(
         !response.ok,
-        "ids without a bare-u32 PDB suffix should fail validation"
+        "ids that match no playlist in either database should fail validation"
     );
     let error = response.error.expect("error payload");
-    assert!(error.message.contains("no PDB-backed playlist ids"));
+    assert!(error.message.contains("matched no playlist"));
     let _ = progress_events;
 }
 

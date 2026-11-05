@@ -1539,14 +1539,13 @@ export function renderHistoryHeading(ctx) {
 
 export function renderHistoryList(ctx) {
   const { state, el, document } = ctx;
-  // Render newest first.
   const items = state.histories.map((history) => {
     const dateText = getHistoryDateValue(history);
     const li = cloneTemplate(document, "tplHistoryItem");
     li.firstElementChild.dataset.historyId = history.id;
     li.querySelector(".playlist-label").textContent = `${history.name}${dateText ? ` (${dateText})` : ""}`;
     return li;
-  }).reverse();
+  });
   el.historyList.replaceChildren(...items);
   renderHistoryHeading(ctx);
 }

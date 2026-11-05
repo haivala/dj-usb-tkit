@@ -81,9 +81,15 @@ function installTauriMock(page) {
                     name: "HISTORY 001",
                     createdAt: "2026-08-01",
                     tracks: historyTracks
+                  },
+                  {
+                    id: "hist-0",
+                    name: "HISTORY 000",
+                    createdAt: "2026-07-01",
+                    tracks: historyTracks.slice(0, 1)
                   }
                 ],
-                counts: { importedPlaylists: 1, importedTracks: 3 },
+                counts: { importedPlaylists: 2, importedTracks: 5 },
                 warnings: []
               }
             };
@@ -121,14 +127,18 @@ test("Export Tracklist dialog's start-track select is populated from the selecte
   await page.locator("#usbEmptyState .empty-state-action").click();
   await page.locator('.nav-item[data-view="usb-history"]').click();
 
-  await expect(page.locator("#historyList")).toContainText("HISTORY 001");
+  // The list shows the sessions in the order the backend sends: newest first.
+  const rows = page.locator("#historyList li");
+  await expect(rows).toHaveCount(2);
+  await expect(rows.nth(0)).toContainText("HISTORY 001");
+  await expect(rows.nth(1)).toContainText("HISTORY 000");
   // Same layout as USB Playlists: totals on the header line, the open
   // session's name + track count above its table.
-  await expect(page.locator(".panel-header #historyCountsText")).toHaveText("1 session, 3 tracks");
+  await expect(page.locator(".panel-header #historyCountsText")).toHaveText("2 sessions, 5 tracks");
   await expect(page.locator("#historyHeading .track-list-heading-name")).toHaveText("HISTORY 001");
   await expect(page.locator("#historyHeading .track-list-heading-count")).toHaveText("4 tracks");
   // Opening the first session by itself doesn't replace the read's status.
-  await expect(page.locator("#statusText")).toContainText("USB histories loaded: 1");
+  await expect(page.locator("#statusText")).toContainText("USB histories loaded: 2");
 
   // The export belongs to the open session: it sits on the session's row.
   await expect(page.locator("#historyHeading #exportHistoryTracklistBtn")).toBeEnabled();
@@ -214,6 +224,13 @@ test("Export Tracklist saves the session from the chosen start track, and report
   expect((await page.evaluate(() => window.__tracklistBuilds))[1]).toEqual(
     { usbRoot: "/Volumes/USB-TEST", id: "hist-1", startIndex: 0, timeMode: "off" }
   );
+
+  // Another row exports its own session.
+  await page.locator("#historyList li").nth(1).locator("button").click();
+  await expect(page.locator("#historyHeading .track-list-heading-name")).toHaveText("HISTORY 000");
+  await page.locator("#exportHistoryTracklistBtn").click();
+  await page.locator("#tracklistExportOkBtn").click();
+  await expect.poll(() => page.evaluate(() => window.__tracklistBuilds.at(-1)?.id)).toBe("hist-0");
 });
 
 test("a session the backend says can't export disables Export Tracklist, and a long name leaves the button in view", async ({ page }) => {

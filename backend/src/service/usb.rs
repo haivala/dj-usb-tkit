@@ -2169,6 +2169,8 @@ impl BackendService {
         items.sort_by_key(|h| parse_history_numeric_id(&h.id));
         export_log::apply_history_dates_from_export_log(&mut items, export_log.as_ref());
         apply_history_dates_from_track_date_created(&mut items, &date_created_by_track_id);
+        // Newest first. Only now: the date carry-forward above needs ascending order.
+        items.reverse();
 
         on_progress(90, 100, "USB: Finalizing history import");
         let mut warnings: Vec<WarningEntry> = parsed

@@ -814,22 +814,34 @@ fn fetch_usb_histories_reads_injected_pdb_history_rows_and_materializes_tracks()
     let parsed = parse_pdb(&pdb_path(&usb)).expect("parse exported pdb");
     let history_track_ids = parsed.tracks.iter().map(|t| t.id).collect::<Vec<_>>();
     assert_eq!(history_track_ids.len(), 2, "need two exported track ids");
-    append_history_to_pdb(&pdb_path(&usb), 1, &history_track_ids);
+    append_history_to_pdb(&pdb_path(&usb), 1, &history_track_ids[..1]);
+    append_history_to_pdb(&pdb_path(&usb), 2, &history_track_ids);
 
     let histories = backend.fetch_usb_histories(FetchUsbHistoriesRequest {
         usb_root: Some(usb.to_string_lossy().to_string()),
     });
     assert!(histories.ok, "fetch usb histories failed: {histories:?}");
     let data = histories.data.expect("history data");
-    assert_eq!(data.counts.imported_playlists, 1);
-    assert_eq!(data.counts.pdb_t11_playlists, 1);
-    assert_eq!(data.counts.pdb_t12_entries, 2);
-    assert_eq!(data.items.len(), 1, "expected the single injected history");
-    assert_eq!(data.summary_text, "1 session, 2 tracks");
+    assert_eq!(data.counts.imported_playlists, 2);
+    assert_eq!(data.counts.pdb_t11_playlists, 2);
+    assert_eq!(data.counts.pdb_t12_entries, 3);
+    // Newest first, and the same from the cache.
+    let ids = |items: &[backend::models::UsbHistory]| {
+        items.iter().map(|h| h.id.clone()).collect::<Vec<_>>()
+    };
+    assert_eq!(ids(&data.items), ["usb-h-2", "usb-h-1"]);
+    let cached = backend
+        .fetch_usb_histories(FetchUsbHistoriesRequest {
+            usb_root: Some(usb.to_string_lossy().to_string()),
+        })
+        .data
+        .expect("cached history data");
+    assert_eq!(ids(&cached.items), ["usb-h-2", "usb-h-1"]);
+    assert_eq!(data.summary_text, "2 sessions, 3 tracks");
     assert_eq!(
         data.status_text,
         format!(
-            "USB histories loaded: 1{}",
+            "USB histories loaded: 2{}",
             backend::utils::warning_suffix(data.warning_count)
         ),
     );
