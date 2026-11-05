@@ -35,7 +35,7 @@
 
     // `FetchUsbPlaylistsData` (fetch_usb_playlists).
     usbPlaylists(overrides = {}) {
-      const items = (overrides.items || []).map((item) => ({ selectedText: "mock selected", ...item }));
+      const items = (overrides.items || []).map((item) => ({ selectedText: "mock selected", removeConfirmText: "mock remove confirm", ...item }));
       return {
         items: [],
         stats: { indexedTracks: 0, playlistReferencedTracks: 0, playlistEntries: 0 },
@@ -250,6 +250,7 @@
     get_playlist_tracks: withListSummary,
     reorder_usb_playlists: (data) => ({ statusText: "mock reorder status", warningCount: 0, ...data }),
     remove_usb_playlist: (data) => ({ statusText: "mock remove status", warningCount: 0, ...data }),
+    set_usb_device_name: (data) => ({ statusText: "mock rename status", updated: true, ...data }),
     restore_usb_backup: (data) => ({ statusText: "mock restore status", ...data }),
     delete_usb_backup: (data) => ({ statusText: "mock delete status", ...data })
   };

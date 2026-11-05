@@ -95,6 +95,8 @@
   it's blocked by free space, formats or an internal check, it says so once, and a format block counts the
   tracks and leaves their names to the Event Log. A read-only USB is now checked when you export, instead of
   when you selected it.
+- **Improvement:** Saving a drive's name without changing it now says "Drive name unchanged." in the status
+  line.
 
 ## 0.5.4
 

@@ -44,7 +44,7 @@ export function updateModeText(ctx) {
 
 export function updateUsbNameBadge(ctx) {
   const { state, el } = ctx;
-  const name = String(state.usbDeviceName || "").trim();
+  const name = state.usbDeviceName;
   const connected = !!state.usbRoot && !!state.usbRootValid;
   el.usbNameBadgeLabel.textContent = name || (connected ? "Unnamed" : "Not connected");
   // Clicking the badge names or renames the connected drive.

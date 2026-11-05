@@ -928,8 +928,9 @@ impl BackendService {
 
         // The OS label is often the other drive's name: suggesting it would
         // have the two share it again.
-        let suggested_name =
-            super::usb_identity::suggest_drive_name(&usb_root).filter(|suggested| {
+        let suggested_name = super::usb_identity::suggest_drive_name(&usb_root)
+            .map(|suggested| suggested.trim().to_string())
+            .filter(|suggested| {
                 name_taken_by.as_deref().is_none_or(|taken| {
                     super::usb_identity::slug(taken) != super::usb_identity::slug(suggested)
                 })
@@ -1015,6 +1016,7 @@ impl BackendService {
         // A carried name isn't this drive's: renaming away from it must not
         // take the other drive's cache or free its name.
         let current = marker.as_deref().filter(|_| !conflicted);
+        let updated = current != Some(name.as_str());
         let renaming_away = current.filter(|current| !same_name(current));
         let claims_name = conflicted && marker.as_deref().is_some_and(same_name);
 
@@ -1070,7 +1072,15 @@ impl BackendService {
         usb_utils::set_device_label(&conn, &usb_root, &name, &now_ts)?;
         self.invalidate_usb_parse_cache();
 
-        Ok(crate::models::SetUsbDeviceNameData { saved: true })
+        Ok(crate::models::SetUsbDeviceNameData {
+            status_text: if updated {
+                format!("Drive renamed to {name}.")
+            } else {
+                "Drive name unchanged.".to_string()
+            },
+            name,
+            updated,
+        })
     }
 
     /// Staged-file signature key for the parse cache. Also forces the local
@@ -1464,6 +1474,10 @@ impl BackendService {
                     "USB playlist selected: {} ({})",
                     candidate.display_name,
                     counted(playlist_tracks.len(), "track", "tracks")
+                ),
+                remove_confirm_text: format!(
+                    "Remove USB playlist \"{}\" from the stick?",
+                    candidate.display_name
                 ),
                 tracks: playlist_tracks,
                 total_duration_ms,
@@ -4278,7 +4292,18 @@ mod tests {
                 name: "  Club Stick  ".to_string(),
             })
             .expect("set name");
-        assert!(saved.saved);
+        assert_eq!(saved.name, "Club Stick");
+        assert!(saved.updated);
+        assert_eq!(saved.status_text, "Drive renamed to Club Stick.");
+
+        let same = service
+            .set_usb_device_name(crate::models::SetUsbDeviceNameRequest {
+                usb_root: path.clone(),
+                name: "Club Stick".to_string(),
+            })
+            .expect("save the same name");
+        assert!(!same.updated);
+        assert_eq!(same.status_text, "Drive name unchanged.");
 
         let after = service
             .get_usb_device_name(crate::models::GetUsbDeviceNameRequest { usb_root: path })
@@ -4328,7 +4353,9 @@ mod tests {
                 name: "   ".to_string(),
             })
             .expect_err("empty name must be rejected");
-        assert!(matches!(err, crate::error::BackendError::Validation(_)));
+        assert!(
+            matches!(err, crate::error::BackendError::Validation(message) if message == "Enter a name for this drive.")
+        );
     }
 
     #[test]

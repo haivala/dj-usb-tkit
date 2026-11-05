@@ -452,7 +452,8 @@ function installTauriMock(page, mode) {
                 items: state.usbPlaylists.map((p) => ({
                   ...p,
                   trackCount: p.tracks.length,
-                  selectedText: `USB playlist selected: ${p.name}`
+                  selectedText: `USB playlist selected: ${p.name}`,
+                  removeConfirmText: `mock remove ${p.name}?`
                 })),
                 summaryText: `${state.usbPlaylists.length} playlists`,
                 statusText: `USB playlists loaded: ${state.usbPlaylists.length}${mode === "warning-mix" ? " | (2 warnings)" : ""}`,
@@ -620,7 +621,7 @@ test("USB playlist removal confirm path handles cancel and confirm", async ({ pa
   await page.locator('[data-usb-playlist="usb-1"]').hover();
   await page.locator('[data-usb-remove-playlist="usb-1"]').click();
   await expect(page.locator("#confirmOverlay")).toBeVisible();
-  await expect(page.locator("#confirmMessage")).toHaveText('Remove USB playlist "Warmup" from the stick?');
+  await expect(page.locator("#confirmMessage")).toHaveText("mock remove Warmup?");
   await page.locator("#confirmCancelBtn").click();
   await expect(page.locator("#confirmOverlay")).toBeHidden();
   await expect(page.locator('[data-usb-playlist="usb-1"]')).toBeVisible();

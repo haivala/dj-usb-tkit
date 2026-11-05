@@ -370,6 +370,9 @@ function refreshExportStatusInBackground(ctx) {
 
 // A USB was selected, re-selected or cleared: nothing on screen applies any more.
 export function usbSelectionChanged(ctx) {
+  ctx.state.usbDeviceName = null;
+  ctx.state.usbNameTakenBy = null;
+  ctx.updateUsbNameBadge();
   usbContentChanged(ctx);
   applyPlaylistUsbExportStatus(ctx, []);
   // A valid USB gets its status from the diagnostics run that follows, so this
@@ -460,32 +463,20 @@ export async function detectExternalMixxxDb(ctx) {
 // continue unnamed rather than blocking USB use entirely.
 async function promptDriveNameIfUnset(ctx) {
   const { state, command, emitStatus } = ctx;
-  // Reset first: a stale name from whatever drive was connected before must
-  // never linger on screen while this one's actual name is still unknown.
-  state.usbDeviceName = null;
-  state.usbNameTakenBy = null;
-  ctx.updateUsbNameBadge();
-  if (!state.usbRoot) return;
-
-  let existingName;
-  let suggestedName = "";
+  let data;
   try {
-    const data = await command("get_usb_device_name", { usbRoot: state.usbRoot });
-    existingName = data.name;
-    suggestedName = String(data.suggestedName || "").trim();
-    state.usbNameTakenBy = String(data.nameTakenBy || "").trim() || null;
+    data = await command("get_usb_device_name", { usbRoot: state.usbRoot });
   } catch (err) {
-    console.warn("[usb] get_usb_device_name failed, skipping naming prompt:", err);
     emitStatus(`Could not check this drive's name: ${err?.message || err}`);
     return;
   }
-  if (existingName) {
-    state.usbDeviceName = existingName;
+  state.usbNameTakenBy = data.nameTakenBy;
+  if (data.name) {
+    state.usbDeviceName = data.name;
     ctx.updateUsbNameBadge();
     return;
   }
-
-  await openDriveNameDialog(ctx, { mode: state.usbNameTakenBy ? "conflict" : "name", initial: suggestedName });
+  await openDriveNameDialog(ctx, data.suggestedName);
 }
 
 // Renames the selected drive (or names it, if the first-time prompt was
@@ -494,11 +485,10 @@ async function promptDriveNameIfUnset(ctx) {
 export async function renameDrive(ctx) {
   const { state } = ctx;
   if (isUsbRootChangeBlocked(state)) return;
-  const current = String(state.usbDeviceName || "").trim();
-  const mode = current ? "rename" : state.usbNameTakenBy ? "conflict" : "name";
-  const saved = await openDriveNameDialog(ctx, { mode, initial: current });
-  if (!saved || saved === current) return;
-  ctx.emitStatus(`Drive renamed to ${saved}.`);
+  const saved = await openDriveNameDialog(ctx, state.usbDeviceName);
+  if (!saved) return;
+  ctx.emitStatus(saved.statusText);
+  if (!saved.updated) return;
   try {
     // Playlists carry the backend-resolved name of the drive they were
     // exported to, and loadPlaylists refreshes the export status too.
@@ -510,18 +500,18 @@ export async function renameDrive(ctx) {
   }
 }
 
-// The name dialog: `mode` "name" (first time), "rename", or "conflict" (the
-// drive carries another drive's name, `state.usbNameTakenBy`) picks which of
-// the template's texts show. Resolves to the saved name, or null if closed
+// The name dialog: "rename", "name" (first time) or "conflict" (the drive
+// carries another drive's name, `state.usbNameTakenBy`) picks which of the
+// template's texts show. Resolves to the save's response, or null if closed
 // without saving.
-async function openDriveNameDialog(ctx, { mode, initial }) {
+async function openDriveNameDialog(ctx, initial) {
   const { state, el, command } = ctx;
   const overlay = el.driveNameOverlay;
+  const mode = state.usbDeviceName ? "rename" : state.usbNameTakenBy ? "conflict" : "name";
   for (const node of overlay.querySelectorAll("[data-drive-name-mode]")) {
     node.hidden = !node.dataset.driveNameMode.split(" ").includes(mode);
   }
-  const takenBy = mode === "conflict" ? String(state.usbNameTakenBy || "") : "";
-  el.driveNameTakenBy.textContent = takenBy;
+  el.driveNameTakenBy.textContent = state.usbNameTakenBy;
 
   // This overlay is full-viewport and intercepts every click while open, so
   // it must never be able to get stuck there -- Escape, a backdrop click,
@@ -536,18 +526,12 @@ async function openDriveNameDialog(ctx, { mode, initial }) {
     },
   });
   const onSave = async () => {
-    const name = String(el.driveNameInput.value || "").trim();
-    if (!name) {
-      el.driveNameError.textContent = "Enter a name for this drive.";
-      el.driveNameError.hidden = false;
-      return;
-    }
     try {
-      await command("set_usb_device_name", { usbRoot: state.usbRoot, name });
-      state.usbDeviceName = name;
+      const data = await command("set_usb_device_name", { usbRoot: state.usbRoot, name: el.driveNameInput.value });
+      state.usbDeviceName = data.name;
       state.usbNameTakenBy = null;
       ctx.updateUsbNameBadge();
-      dialog.close(name);
+      dialog.close(data);
     } catch (err) {
       el.driveNameError.textContent = err?.message || String(err);
       el.driveNameError.hidden = false;
@@ -557,7 +541,7 @@ async function openDriveNameDialog(ctx, { mode, initial }) {
   const onEnter = (event) => {
     if (event.key === "Enter") onSave();
   };
-  el.driveNameInput.value = initial || "";
+  el.driveNameInput.value = initial ?? "";
   el.driveNameError.hidden = true;
   el.driveNameOkBtn.addEventListener("click", onSave);
   el.driveNameSkipBtn.addEventListener("click", onSkip);
@@ -583,9 +567,6 @@ export async function validateAndSetUsbRoot(ctx, path) {
   if (!input) {
     state.usbRoot = null;
     state.usbRootValid = false;
-    state.usbDeviceName = null;
-    state.usbNameTakenBy = null;
-    ctx.updateUsbNameBadge();
     ctx.persistUsbRoot(null);
     updateUsbRootText(ctx, null, false);
     el.usbInitRow.classList.add("hidden");
@@ -616,15 +597,7 @@ export async function validateAndSetUsbRoot(ctx, path) {
   ctx.updateUsbSubNavDisabledState();
   ctx.updatePlaylistExportButtons();
   ctx.loadUsbAudioFormats().catch((err) => console.warn("get_usb_audio_formats failed:", err));
-  if (valid) {
-    await promptDriveNameIfUnset(ctx);
-  } else {
-    // Invalid/uninitialized root: clear any name badge left over from
-    // whatever drive was previously connected -- it no longer applies.
-    state.usbDeviceName = null;
-    state.usbNameTakenBy = null;
-    ctx.updateUsbNameBadge();
-  }
+  if (valid) await promptDriveNameIfUnset(ctx);
   emitStatus(result.statusText);
   if (valid) {
     el.usbHealthCard.removeAttribute("open");
@@ -650,7 +623,7 @@ export async function removeUsbPlaylist(ctx, playlist) {
   const { state, emitStatus } = ctx;
   const confirmed = await ctx.openConfirmDialog({
     title: "Remove USB Playlist",
-    message: `Remove USB playlist "${playlist.name}" from the stick?`,
+    message: playlist.removeConfirmText,
     confirmLabel: "Remove"
   });
   if (!confirmed) return;
@@ -1434,8 +1407,7 @@ export function updateUsbRootText(ctx, path, valid = false) {
   }
   // Show the drive's name; the full folder is in the tooltip. The path is the
   // label only until the name has been read (or for a drive without one).
-  const name = ctx.state.usbDeviceName?.trim();
-  el.usbRootPathText.textContent = name || path;
+  el.usbRootPathText.textContent = ctx.state.usbDeviceName || path;
   el.usbRootPathText.dataset.tooltip = path;
   el.usbRootPathText.classList.add("usb-path-valid");
   el.usbRootPathText.classList.remove("usb-path-invalid");

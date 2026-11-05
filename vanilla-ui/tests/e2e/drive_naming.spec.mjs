@@ -81,6 +81,9 @@ function installTauriMock(
           }
           if (command === "set_usb_device_name") {
             const name = payload?.request?.name || "";
+            if (!name.trim()) {
+              return { ok: false, error: { code: "VALIDATION", message: "mock empty name" } };
+            }
             if (name === takenName) {
               return {
                 ok: false,
@@ -90,9 +93,13 @@ function installTauriMock(
                 }
               };
             }
+            const updated = name !== storedName;
             storedName = name;
             window.__setNameCalls.push({ usbRoot: payload?.request?.usbRoot, name });
-            return { ok: true, data: { saved: true } };
+            return {
+              ok: true,
+              data: { name, updated, statusText: updated ? `mock renamed to ${name}` : "mock name unchanged" }
+            };
           }
           if (command === "run_usb_diagnostics") {
             return {
@@ -275,6 +282,11 @@ test("clicking the header drive name renames the connected drive", async ({ page
   ]);
   await expect(page.locator("#usbNameBadgeLabel")).toHaveText("Booth Stick");
   await expect(page.locator("#usbRootPathText")).toHaveText("Booth Stick");
+  await expect(page.locator("#statusText")).toHaveText("mock renamed to Booth Stick");
+
+  await page.locator("#usbNameBadgeLabel").click();
+  await page.locator("#driveNameOkBtn").click();
+  await expect(page.locator("#statusText")).toHaveText("mock name unchanged");
 });
 
 test("renaming to a name another drive has shows the error and cancel keeps the old name", async ({ page }) => {
@@ -289,6 +301,10 @@ test("renaming to a name another drive has shows the error and cancel keeps the 
   await expect(page.locator("#driveNameError")).toBeVisible();
   await expect(page.locator("#driveNameError")).toContainText("already used by another drive");
   await expect(page.locator("#driveNameOverlay")).toBeVisible();
+
+  await page.locator("#driveNameInput").fill("   ");
+  await page.locator("#driveNameOkBtn").click();
+  await expect(page.locator("#driveNameError")).toHaveText("mock empty name");
 
   await page.locator("#driveNameSkipBtn").click();
   await expect(page.locator("#driveNameOverlay")).toBeHidden();

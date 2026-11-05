@@ -1434,7 +1434,12 @@ pub struct SetUsbDeviceNameRequest {
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct SetUsbDeviceNameData {
-    pub saved: bool,
+    /// The name as saved (trimmed).
+    pub name: String,
+    /// False when the drive already had exactly this name.
+    pub updated: bool,
+    /// The status line after a rename from the header.
+    pub status_text: String,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -1604,6 +1609,8 @@ pub struct UsbPlaylist {
     pub track_count: usize,
     /// The status line when the playlist is clicked.
     pub selected_text: String,
+    /// What the remove dialog asks.
+    pub remove_confirm_text: String,
     /// Backend only: the UI reads pages with `fetch_usb_playlist_tracks`.
     #[serde(skip)]
     pub tracks: Vec<UsbTrack>,

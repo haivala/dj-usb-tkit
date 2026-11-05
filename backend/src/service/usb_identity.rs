@@ -200,7 +200,7 @@ pub(crate) fn read_drive_name(root: &Path) -> Option<String> {
 pub(crate) fn validate_name(name: &str) -> Result<String, String> {
     let trimmed = name.trim();
     if trimmed.is_empty() {
-        return Err("Drive name cannot be empty".to_string());
+        return Err("Enter a name for this drive.".to_string());
     }
     if trimmed.chars().count() > MAX_NAME_LEN {
         return Err(format!(

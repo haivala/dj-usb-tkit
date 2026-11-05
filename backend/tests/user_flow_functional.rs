@@ -310,6 +310,10 @@ fn user_like_flow_imports_sources_analyzes_and_adds_from_library_usb_and_history
             backend::utils::counted(first.track_count, "track", "tracks")
         ),
     );
+    assert_eq!(
+        first.remove_confirm_text,
+        format!("Remove USB playlist \"{}\" from the stick?", first.name),
+    );
     assert_eq!(usb_playlists_data.done_text, format!("Done — {summary}"));
     assert_eq!(
         usb_playlists_data.status_text,
