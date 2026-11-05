@@ -783,7 +783,7 @@ fn fetch_usb_histories_marks_a_session_with_no_tracks_as_not_exportable() {
     let root = tempdir().expect("temp root");
     let usb = root.path().join("usb");
     fs::create_dir_all(&usb).expect("create usb dir");
-    let backend = BackendCommands::new(&root.path().join("data")).expect("create backend");
+    let backend = BackendCommands::new(root.path().join("data")).expect("create backend");
     let initialized = backend.initialize_usb(InitializeUsbRequest {
         usb_root: usb.to_string_lossy().to_string(),
     });

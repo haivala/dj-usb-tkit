@@ -59,16 +59,16 @@
   const sumMs = (items) => items.reduce((ms, t) => ms + (Number(t.durationMs) || 0), 0);
   // A list's heading totals, as the backend's `track_list::list_totals`
   // counts them: every track, and the sizes that are known.
-  const listTotals = (items) => ({
-    listTrackCount: items.length,
-    listSizeBytes: items.reduce((n, t) => n + Math.max(0, Number(t.fileSizeBytes) || 0), 0),
-  });
-  // What the backend sends above a USB track table.
-  const listSummaryText = (items) => {
-    const { listTrackCount: count, listSizeBytes: bytes } = listTotals(items);
-    const tracks = `${count} ${count === 1 ? "track" : "tracks"}`;
-    if (!bytes) return tracks;
-    return `${tracks} · ${bytes >= 1024 ** 3 ? `${(bytes / 1024 ** 3).toFixed(1)} GB` : `${Math.round(bytes / 1024 ** 2)} MB`}`;
+  // What the backend sends about a list's size.
+  const byteSize = (bytes) => (bytes >= 1024 ** 3 ? `${(bytes / 1024 ** 3).toFixed(1)} GB` : `${Math.round(bytes / 1024 ** 2)} MB`);
+  const listTotals = (items) => {
+    const listSizeBytes = items.reduce((n, t) => n + Math.max(0, Number(t.fileSizeBytes) || 0), 0);
+    const tracks = `${items.length} ${items.length === 1 ? "track" : "tracks"}`;
+    return {
+      listTrackCount: items.length,
+      listSizeBytes,
+      listSummaryText: listSizeBytes ? `${tracks} · ${byteSize(listSizeBytes)}` : tracks,
+    };
   };
   // Free space on the made-up 32 GB stick.
   const USB_FREE_BYTES = Math.round(27.4 * 1024 ** 3);
@@ -96,7 +96,6 @@
     totalDurationMs: sumMs(items),
     durationUnknownCount: 0,
     ...listTotals(items),
-    listSummaryText: listSummaryText(items),
   });
   const historySessions = (usbHistory || []).map(({ id, name, createdAt, titles }) => {
     const items = titles.map((title) => usbTracksByTitle.get(title)).filter(Boolean);
@@ -156,11 +155,15 @@
       playlists.filter((p) => isExported(p.id, p.tracks, p.imported)).flatMap((p) => p.tracks.map((t) => t.id))
     );
     const toCopy = items.filter((t) => !onUsb.has(t.id));
+    const bytesToCopy = listTotals(toCopy).listSizeBytes;
+    const free = `${byteSize(USB_FREE_BYTES)} free on USB`;
+    const count = `${items.length} ${items.length === 1 ? "track" : "tracks"}`;
     return {
-      bytesToCopy: listTotals(toCopy).listSizeBytes,
+      bytesToCopy,
       tracksToCopy: toCopy.length,
       availableBytes: USB_FREE_BYTES,
       fits: true,
+      summaryText: toCopy.length ? `${toCopy.length} of ${count} to copy · ${byteSize(bytesToCopy)} · ${free}` : `All tracks on USB · ${free}`,
     };
   };
 

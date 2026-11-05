@@ -613,6 +613,9 @@ pub struct BrowseSourceFilesData {
     pub list_track_count: usize,
     #[serde(default)]
     pub list_size_bytes: u64,
+    /// "30 tracks · 412 MB", from the two values above.
+    #[serde(default)]
+    pub list_summary_text: String,
 }
 
 /// One configured library source folder, as its chip shows it.
@@ -935,6 +938,9 @@ pub struct PlaylistExportSpace {
     /// False when the copy plus the export's headroom exceeds the free space,
     /// the same rule the export's own preflight blocks on.
     pub fits: bool,
+    /// The playlist heading's line about this estimate.
+    #[serde(default)]
+    pub summary_text: String,
     /// What the USB audio formats mean for the export, for the playlist
     /// heading: the tracks it converts first ("2 tracks will be converted to
     /// MP3 320 on export") and the lossy ones it refuses (see
@@ -973,6 +979,9 @@ pub struct GetPlaylistTracksData {
     pub list_track_count: usize,
     #[serde(default)]
     pub list_size_bytes: u64,
+    /// "30 tracks · 412 MB", from the two values above.
+    #[serde(default)]
+    pub list_summary_text: String,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -1436,6 +1445,12 @@ pub struct UsbBackupEntry {
     pub location: String,
     pub size_bytes: u64,
     pub files: Vec<UsbBackupFile>,
+    /// The timestamp as the Backups list shows it.
+    pub time_text: String,
+    /// The restore dialog's question.
+    pub restore_confirm_text: String,
+    /// The delete dialog's question.
+    pub delete_confirm_text: String,
     /// Why this backup was taken (e.g. "Before export"), or `None` for
     /// backups made before this field existed.
     pub reason: Option<String>,
@@ -1481,6 +1496,9 @@ pub struct DeleteUsbBackupRequest {
 #[serde(rename_all = "camelCase")]
 pub struct DeleteUsbBackupData {
     pub deleted: bool,
+    /// The status line after the delete.
+    #[serde(default)]
+    pub status_text: String,
 }
 
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
@@ -1559,6 +1577,8 @@ pub struct UsbPlaylist {
     pub name: String,
     pub source: String,
     pub track_count: usize,
+    /// The status line when the playlist is clicked.
+    pub selected_text: String,
     /// Backend only: the UI reads pages with `fetch_usb_playlist_tracks`.
     #[serde(skip)]
     pub tracks: Vec<UsbTrack>,

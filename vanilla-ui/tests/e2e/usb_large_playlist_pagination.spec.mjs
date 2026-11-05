@@ -41,6 +41,7 @@ function playlistTracksResponder(tracks, hydrate) {
       });
     }
     const total = rows.length;
+    const listSummaryText = `${tracks.length} tracks`;
     const offset = Number(req.offset || 0);
     const limit = Number(req.limit || 0) || total;
     const page = rows.slice(offset, offset + limit).map((t) => hydrate(t));
@@ -54,6 +55,7 @@ function playlistTracksResponder(tracks, hydrate) {
         nextCursor: nextOffset < total ? String(nextOffset) : null,
         totalDurationMs: 0,
         durationUnknownCount: 0,
+        listSummaryText,
         warnings: [],
       },
     };
@@ -106,7 +108,7 @@ function installTauriMock(page, { trackCount, gateFetches = false }) {
               data: {
                 items: [{ id: "usb-1", name: "Big Playlist", source: "mock-tauri", trackCount: tracks.length, tracks: [], totalDurationMs: 0, durationUnknownCount: 0 }],
                 stats: { indexedTracks: tracks.length, playlistReferencedTracks: tracks.length, playlistEntries: tracks.length },
-                playlistTrackTotal: tracks.length,
+                summaryText: `1 playlist, ${tracks.length} tracks`,
                 playlistUsbExportStatus: [],
                 warnings: [],
               },
@@ -322,7 +324,7 @@ function installRowClickMock(page) {
               data: {
                 items: [{ id: "usb-1", name: "Small Playlist", source: "mock-tauri", trackCount: tracks.length, tracks: [], totalDurationMs: 0, durationUnknownCount: 0 }],
                 stats: { indexedTracks: tracks.length, playlistReferencedTracks: tracks.length, playlistEntries: tracks.length },
-                playlistTrackTotal: tracks.length,
+                summaryText: `1 playlist, ${tracks.length} tracks`,
                 playlistUsbExportStatus: [],
                 warnings: [],
               },

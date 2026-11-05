@@ -363,12 +363,14 @@ bytes and artwork data URLs already hydrated server-side **for that page only** 
 the frontend renders the page directly, no follow-up hydration round-trip.
 `fetch_usb_playlists` / `fetch_usb_histories` still resolve the playlist/session
 list and its counts, newest session first, and don't send each item's tracks.
-They also send the panel's text (`summaryText`, `statusText`); the track pages send
-`listSummaryText` for the heading.
+They also send the panel's text (`summaryText`, `statusText`), and each playlist its
+`selectedText`; the track pages send `listSummaryText` for the heading, as `browse_source_files`
+and `get_playlist_tracks` do.
 
 `list_usb_backups`/`restore_usb_backup`/`delete_usb_backup` back the Backups panel described in
 `docs/USB_BACKUPS.md` — listing, restoring, and deleting the timestamped
-PDB+eDB snapshot pairs taken before every USB-mutating operation.
+PDB+eDB snapshot pairs taken before every USB-mutating operation. Each listed backup
+carries its dialogs' text.
 
 ### Diagnostics and repairs
 

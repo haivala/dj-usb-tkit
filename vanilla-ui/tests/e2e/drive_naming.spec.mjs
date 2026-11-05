@@ -25,7 +25,6 @@ function installTauriMock(
               data: {
                 items: [],
                 stats: { indexedTracks: 0, playlistReferencedTracks: 0, playlistEntries: 0 },
-                playlistTrackTotal: 0,
                 playlistUsbExportStatus: [],
                 warnings: []
               }

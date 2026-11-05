@@ -3,29 +3,11 @@
 import { counted } from "../../track_utils.mjs";
 import { cloneTemplate } from "../../ui_utils.mjs";
 
-function formatBackupTimestamp(raw) {
-  // Stored as "%Y-%m-%d_%H-%M-%S" (usb_vendor_compat::backup_usb_databases).
-  const match = /^(\d{4}-\d{2}-\d{2})_(\d{2})-(\d{2})-(\d{2})$/.exec(String(raw || ""));
-  if (!match) return String(raw || "");
-  const [, date, hh, mm, ss] = match;
-  return `${date} ${hh}:${mm}:${ss}`;
-}
-
 function formatBackupSize(bytes) {
   const n = Number(bytes) || 0;
   if (n < 1024) return `${n} B`;
   if (n < 1024 * 1024) return `${(n / 1024).toFixed(1)} KB`;
   return `${(n / (1024 * 1024)).toFixed(1)} MB`;
-}
-
-// PDB and eDB are always backed up together under one timestamp, so a
-// bundle's label lists whichever of the two files it actually contains.
-const STEM_LABELS = { exportLibrary: "eDB", export: "PDB" };
-const STEM_LABEL_ORDER = ["exportLibrary", "export"];
-
-function labelForFiles(files) {
-  const present = STEM_LABEL_ORDER.filter((stem) => (files || []).some((f) => f.stem === stem));
-  return present.length ? present.map((stem) => STEM_LABELS[stem]).join(" and ") : "Backup";
 }
 
 function showBackupsMessage(list, text) {
@@ -67,7 +49,7 @@ export async function renderBackups(ctx) {
       ? ` · ${counted(item.playlistCount, "playlist")}`
       : "";
     row.dataset.timestamp = item.timestamp;
-    row.querySelector(".event-log-time").textContent = formatBackupTimestamp(item.timestamp);
+    row.querySelector(".event-log-time").textContent = item.timeText;
     row.querySelector(".event-log-source").textContent = item.reason || "—";
     row.querySelector(".event-log-message").textContent = `${formatBackupSize(item.sizeBytes)} · ${location}${playlistCount}`;
     row.querySelectorAll("button").forEach((btn) => { btn.dataset.timestamp = item.timestamp; });
@@ -79,12 +61,10 @@ export async function restoreUsbBackup(ctx, timestamp) {
   const { state, command, openConfirmDialog, emitStatus } = ctx;
   if (!state.usbRoot) return;
 
-  const known = (state.usbBackups || []).find((b) => b.timestamp === timestamp);
-  const label = known ? labelForFiles(known.files) : "backup";
-  const whenText = formatBackupTimestamp(timestamp);
+  const backup = state.usbBackups.find((b) => b.timestamp === timestamp);
   const confirmed = await openConfirmDialog({
     title: "Restore Backup",
-    message: `Restore ${label} from the backup taken at ${whenText}? The current files will themselves be backed up first.`,
+    message: backup.restoreConfirmText,
     confirmLabel: "Restore"
   });
   if (!confirmed) return;
@@ -112,18 +92,17 @@ export async function deleteUsbBackup(ctx, timestamp) {
   const { state, command, openConfirmDialog, emitStatus } = ctx;
   if (!state.usbRoot) return;
 
-  const known = (state.usbBackups || []).find((b) => b.timestamp === timestamp);
-  const label = known ? labelForFiles(known.files) : "backup";
+  const backup = state.usbBackups.find((b) => b.timestamp === timestamp);
   const confirmed = await openConfirmDialog({
     title: "Delete Backup",
-    message: `Delete this ${label} backup permanently?`,
+    message: backup.deleteConfirmText,
     confirmLabel: "Delete"
   });
   if (!confirmed) return;
 
   try {
-    await command("delete_usb_backup", { usbRoot: state.usbRoot, timestamp });
-    emitStatus(`Deleted ${label} backup`);
+    const data = await command("delete_usb_backup", { usbRoot: state.usbRoot, timestamp });
+    emitStatus(data.statusText);
   } catch (err) {
     emitStatus(`Delete failed: ${err?.message || err}`);
   }

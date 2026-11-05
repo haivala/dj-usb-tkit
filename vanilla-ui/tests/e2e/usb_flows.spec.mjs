@@ -447,14 +447,17 @@ function installTauriMock(page, mode) {
               data: {
                 items: state.usbPlaylists.map((p) => ({
                   ...p,
-                  trackCount: p.tracks.length
+                  trackCount: p.tracks.length,
+                  selectedText: `USB playlist selected: ${p.name}`
                 })),
+                summaryText: `${state.usbPlaylists.length} playlists`,
+                statusText: `USB playlists loaded: ${state.usbPlaylists.length}${mode === "warning-mix" ? " | (2 warnings)" : ""}`,
+                doneText: "Done",
                 stats: {
                   indexedTracks: 0,
                   playlistReferencedTracks: 0,
                   playlistEntries: state.usbPlaylists.reduce((sum, p) => sum + p.tracks.length, 0)
                 },
-                playlistTrackTotal: state.usbPlaylists.reduce((sum, p) => sum + p.tracks.length, 0),
                 playlistUsbExportStatus: [],
                 warnings,
                 // The backend counts the warn/error entries (the info one isn't).
@@ -477,7 +480,7 @@ function installTauriMock(page, mode) {
           if (command === "fetch_usb_playlist_tracks") {
             const id = String(payload?.request?.id);
             const tracks = state.usbPlaylists.find((p) => String(p.id) === id)?.tracks || [];
-            return { ok: true, data: { items: tracks, total: tracks.length } };
+            return { ok: true, data: { items: tracks, total: tracks.length, listSummaryText: `${tracks.length} listed` } };
           }
           if (command === "get_usb_audio_formats") {
             return { ok: true, data: formatsData() };
@@ -515,6 +518,7 @@ function installTauriMock(page, mode) {
               ok: true,
               data: {
                 playlistName: payload?.request?.playlistName || "",
+                statusText: `Removed USB playlist: ${payload?.request?.playlistName || ""}`,
                 removedFromEdb: 1,
                 removedFromPdb: 1,
                 warnings: mode === "reorder"
@@ -722,6 +726,13 @@ test("USB lists read after leaving their pages open the first item on return, an
 test("removing a USB playlist keeps the open one; removing the open one opens nothing, even clicking its page again, until the page is opened again", async ({ page }) => {
   await installTauriMock(page, "reorder");
   await countPlaylistFetches(page);
+  await page.addInitScript(() => {
+    const invoke = window.__TAURI__.core.invoke;
+    window.__TAURI__.core.invoke = async (command, payload) => {
+      if (command === "fetch_usb_playlist_tracks") await window.__tracksGate;
+      return invoke(command, payload);
+    };
+  });
   await page.goto("/");
 
   const nav = page.locator('.nav-item[data-view="usb-playlists"]');
@@ -733,11 +744,17 @@ test("removing a USB playlist keeps the open one; removing the open one opens no
   await expect(page.locator("#usbPlaylistTracks .track-grid-row")).toHaveCount(1);
 
   const rows = page.locator("#usbPlaylists button");
+  // The heading keeps its count while the open playlist's table loads again.
+  await page.evaluate(() => {
+    window.__tracksGate = new Promise((resolve) => { window.__releaseTracks = resolve; });
+  });
   await page.locator('[data-usb-playlist="usb-pl-2"]').hover();
   await page.locator('[data-usb-remove-playlist="usb-pl-2"]').click();
   await page.locator("#confirmOkBtn").click();
   await expect(page.locator("#statusText")).toContainText("Removed USB playlist: Bravo");
   await expect(rows).toHaveCount(2);
+  await expect(page.locator("#usbPlaylistHeading .track-list-heading-count")).toHaveText("1 listed");
+  await page.evaluate(() => { window.__tracksGate = null; window.__releaseTracks(); });
   await expect(first).toHaveClass(/active/);
   await expect(page.locator("#usbPlaylistHeading .track-list-heading-name")).toHaveText("Alpha");
   await expect(page.locator("#usbPlaylistTracks .track-grid-row")).toContainText("Track A");
@@ -1159,6 +1176,7 @@ test("a repair whose diagnostics re-run failed still applies the export status i
           data: {
             appliedFixes: payload.request.selectedFixIds,
             usbContentChanged: true,
+            statusText: "Repair apply complete: 1 applied",
             playlistUsbExportStatus: [{ playlistId: "pl-1", playlistName: "Local Set", sameNameExistsOnUsb: true }]
           }
         };
@@ -1254,6 +1272,7 @@ test("USB playlist drag-and-drop reorder persists the new order", async ({ page 
 
   // A click opens the row clicked, in its new place.
   await rows.nth(0).click();
+  await expect(page.locator("#statusText")).toContainText("USB playlist selected: Bravo");
   await expect(page.locator("#usbPlaylistHeading .track-list-heading-name")).toHaveText("Bravo");
   await expect(page.locator("#usbPlaylistTracks .track-grid-row")).toContainText("Track B");
 });
@@ -1664,12 +1683,12 @@ test("restoring a backup: cancel and failure change nothing; success clears the 
         return { ok: true, data: { items: [{ id: "pl-1", name: "Local Set", source: "local" }] } };
       }
       if (command === "list_usb_backups") {
-        return { ok: true, data: { items: [{ timestamp: "2020-01-01_00-00-00", files: ["export.pdb"], reason: "export", sizeBytes: 1024, location: "usb" }] } };
+        return { ok: true, data: { items: [{ timestamp: "2020-01-01_00-00-00", timeText: "2020-01-01 00:00:00", restoreConfirmText: "Restore it?", deleteConfirmText: "Delete it?", files: ["export.pdb"], reason: "export", sizeBytes: 1024, location: "usb" }] } };
       }
       if (command === "fetch_usb_playlists") window.__playlistReads += 1;
       if (command === "delete_usb_backup") {
         window.__deletes.push(payload.request.timestamp);
-        return { ok: true, data: { deleted: true } };
+        return { ok: true, data: { deleted: true, statusText: "Deleted PDB backup" } };
       }
       if (command === "restore_usb_backup") {
         window.__restores += 1;
@@ -1705,13 +1724,15 @@ test("restoring a backup: cancel and failure change nothing; success clears the 
 
   // Deleting a backup leaves the report alone.
   await page.locator(".backups-delete-btn").click();
+  await expect(page.locator("#confirmMessage")).toHaveText("Delete it?");
   await page.locator("#confirmOkBtn").click();
-  await expect(page.locator("#statusText")).toContainText(/^Deleted /);
+  await expect(page.locator("#statusText")).toContainText("Deleted PDB backup");
   expect(await page.evaluate(() => window.__deletes)).toEqual(["2020-01-01_00-00-00"]);
   await expect(report).toHaveText("WARN");
 
   await page.evaluate(() => { window.__failRestore = true; });
   await restoreBtn.click();
+  await expect(page.locator("#confirmMessage")).toHaveText("Restore it?");
   await page.locator("#confirmOkBtn").click();
   await expect(page.locator("#statusText")).toContainText("Restore failed: disk gone");
   await expect(usbRow).toHaveCount(1);
@@ -1742,7 +1763,7 @@ test("applying repairs that change nothing keeps the loaded USB playlists and sh
       if (command === "repair_usb_diagnostics" && payload?.request?.apply) {
         return {
           ok: true,
-          data: { failedFixes: payload.request.selectedFixIds, usbContentChanged: false, diagnostics: { overallStatus: "FAIL" } }
+          data: { failedFixes: payload.request.selectedFixIds, usbContentChanged: false, statusText: "Repair apply complete: 0 applied", diagnostics: { overallStatus: "FAIL" } }
         };
       }
       return invoke(command, payload);

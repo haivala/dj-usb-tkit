@@ -250,6 +250,7 @@ mod tests {
             name: name.to_string(),
             source: source.to_string(),
             track_count,
+            selected_text: String::new(),
             tracks: Vec::new(),
             total_duration_ms: 0,
             duration_unknown_count: 0,

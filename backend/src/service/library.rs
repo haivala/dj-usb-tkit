@@ -1,6 +1,6 @@
 //! Track library: scanning, search, listing, browsing, track identity and paging.
 
-use crate::utils::counted;
+use crate::utils::{counted, track_list_summary};
 use std::collections::{HashMap, HashSet};
 
 use super::*;
@@ -885,6 +885,7 @@ impl BackendService {
                 duration_unknown_count: 0,
                 list_track_count: 0,
                 list_size_bytes: 0,
+                list_summary_text: track_list_summary(0, 0),
             });
         }
 
@@ -958,6 +959,7 @@ impl BackendService {
             duration_unknown_count,
             list_track_count,
             list_size_bytes,
+            list_summary_text: track_list_summary(list_track_count, list_size_bytes),
         })
     }
 

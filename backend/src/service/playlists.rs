@@ -496,6 +496,7 @@ impl BackendService {
             unanalyzed_count,
             list_track_count,
             list_size_bytes,
+            list_summary_text: crate::utils::track_list_summary(list_track_count, list_size_bytes),
         })
     }
 

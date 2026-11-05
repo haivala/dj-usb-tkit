@@ -63,7 +63,9 @@
   backend build, and reorders writing both databases.
 - **Chore:** The backend now sends USB History newest first, instead of the UI reversing the list.
 - **Chore:** USB History keeps one record of the open session, instead of three.
-- **Improvement:** The USB list totals, track-list headings and status lines now come from the backend.
+- **Improvement:** The list totals, track-list headings, export estimate, backup dialogs and USB status
+  lines now come from the backend.
+- **Fix:** Removing a USB playlist no longer blanks the open playlist's track count while its table reloads.
 - **Fix:** Reordering USB playlists now saves the order in both databases for every playlist, by name.
   Before, a playlist only in the eDB kept its old place, and always listed after the others.
 - **Fix:** Selecting the same USB again now clears its playlists and history, so a stick back from a

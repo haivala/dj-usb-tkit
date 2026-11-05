@@ -1,4 +1,3 @@
-import { counted } from "../../track_utils.mjs";
 import { catchErr, handleTrackAction, resolveRowActionTrack } from "../shared/track_actions.mjs";
 import { bindListDragReorder, moveArrayItem } from "../shared/list_drag_reorder.mjs";
 import { bindUsbAudioFormatEvents } from "./audio_formats.mjs";
@@ -223,7 +222,7 @@ export function bindUsbEvents(ctx) {
     });
     const playlist = ctx.openUsbPlaylistRow(btn);
     if (!playlist) return;
-    emitStatus(`USB playlist selected: ${playlist.name} (${playlist.trackCount == null ? "? tracks" : counted(playlist.trackCount, "track")})`);
+    emitStatus(playlist.selectedText);
   });
 
   bindListDragReorder(el.usbPlaylists, {

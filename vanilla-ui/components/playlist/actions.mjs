@@ -8,8 +8,6 @@ import { cssEscape, cloneTemplate } from "../../ui_utils.mjs";
 import {
   formatTimestampLocal,
   renderTrackListDurationSummary,
-  formatTrackListSummary,
-  formatByteSize,
   counted,
   ANALYZE_PLAYLIST_MISSING_TOOLTIP,
 } from "../../track_utils.mjs";
@@ -691,23 +689,14 @@ export function fillPlaylistSidebarItem(item, playlist, usbStatus) {
   item.querySelector(".nav-playlist-delete").dataset.deletePlaylist = playlist.id;
 }
 
-// The playlist's track count and size are computed by the backend over the
-// whole playlist, ignoring the search (what an export copies), and pushed here
-// via playlist.listTrackCount / listSizeBytes -- see
-// GetPlaylistTracksData::list_track_count. This is a pure setter, no track
-// iteration.
+// The playlist's track count and size come from the backend, over the whole
+// playlist and ignoring the search (what an export copies), with its first page
+// (`listSummaryText`). The total time is under the table, not repeated here.
 export function updatePlaylistPanelTitle(ctx, playlist) {
   const { el } = ctx;
   if (!el?.playlistPanelTitle || !playlist) return;
-  const loaded = Array.isArray(playlist.tracks) ? playlist.tracks.length : 0;
-  // Prefer the backend's whole-playlist count; before the first page response
-  // has set it, fall back to the sidebar listing's count, then the loaded one.
-  const count = Number(playlist.listTrackCount) || Number(playlist.trackCount) || loaded;
   const parts = [playlist.name];
-  // The total time is under the table (playlistTotalDuration), not repeated here.
-  if (count > 0) {
-    parts.push(`(${formatTrackListSummary(count, playlist.listSizeBytes)})`);
-  }
+  if (playlist.listSummaryText && Number(playlist.listTrackCount) > 0) parts.push(`(${playlist.listSummaryText})`);
   // Backend-derived from where the playlist was imported (see list_playlists).
   if (playlist.importedFrom) parts.push(`· Imported from ${playlist.importedFrom}`);
   el.playlistPanelTitle.textContent = parts.join(" ");
@@ -760,14 +749,7 @@ function renderPlaylistExportSpace(ctx, playlist) {
   el.playlistExportSpace.classList.toggle("hidden", !space);
   renderPlaylistFormatWarning(ctx, space);
   if (!space) return;
-  const free = space.availableBytes == null ? null : `${formatByteSize(space.availableBytes)} free on USB`;
-  const tracks = Number(space.tracksToCopy) || 0;
-  const parts = tracks > 0
-    ? [`${tracks} of ${counted(Number(playlist.listTrackCount), "track")} to copy`, formatByteSize(space.bytesToCopy)]
-    : ["All tracks on USB"];
-  if (free) parts.push(free);
-  const text = `${space.fits ? "" : "Doesn't fit: "}${parts.join(" · ")}`;
-  el.playlistExportSpace.textContent = text;
+  el.playlistExportSpace.textContent = space.summaryText;
   el.playlistExportSpace.classList.toggle("is-warning", !space.fits);
 }
 
@@ -890,7 +872,7 @@ export function createPlaylistTracksController(ctx) {
         // Whole-playlist count from the backend, not just the loaded page(s).
         p.trackCount = Number(data.total) || 0;
         p.listTrackCount = Number(data.listTrackCount) || 0;
-        p.listSizeBytes = Number(data.listSizeBytes) || 0;
+        p.listSummaryText = data.listSummaryText;
       }
       // Reveal the table wrap *before* the rows are built: a
       // waveform canvas measured while an ancestor is `display:none` (the
@@ -941,7 +923,7 @@ function renderPlaylistEmptyState(ctx, playlist) {
   // "Not exported yet." says nothing useful about a playlist with no tracks.
   el.playlistExportStatus.classList.toggle("hidden", empty && !playlist.lastExportedAt);
   el.playlistSearchInput.closest(".track-toolbar")?.classList.toggle("hidden", empty);
-  el.exportPlaylistBtn.closest(".playlist-actions")?.classList.toggle("hidden", empty);
+  el.exportPlaylistBtn.closest(".panel-actions")?.classList.toggle("hidden", empty);
 }
 
 // Panel glue around the playlist track table that the controller does not own:

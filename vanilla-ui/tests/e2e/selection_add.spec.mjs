@@ -293,7 +293,6 @@ function installSelectionMock(page, mockOpts = {}) {
                 data: {
                   items: [{ id: "usb-1", name: "Stick Set", source: "mock", trackCount: 2, tracks: [{}, {}] }],
                   stats: { indexedTracks: 2, playlistReferencedTracks: 2, playlistEntries: 2 },
-                  playlistTrackTotal: 2,
                   playlistUsbExportStatus: [],
                   warnings: [],
                 },
@@ -510,7 +509,10 @@ function installPaginatedLibraryMock(page, { trackCount }) {
           if (command === "get_playlist_tracks") {
             const playlistId = String(payload?.request?.playlistId || "");
             const ids = playlistTracks.get(playlistId) || [];
-            return { ok: true, data: { playlistId, items: allTracks.filter((t) => ids.includes(t.id)) } };
+            return {
+              ok: true,
+              data: { playlistId, items: allTracks.filter((t) => ids.includes(t.id)), listTrackCount: ids.length, listSummaryText: `${ids.length} tracks` }
+            };
           }
           return window.__e2eBackend.answer(command);
         }

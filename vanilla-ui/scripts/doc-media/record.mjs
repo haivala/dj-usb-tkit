@@ -716,10 +716,12 @@ const BACKUPS = [
   ["2026-09-19_22-30-18", "cache", "Before restore", 2],
   ["2026-09-19_22-02-56", "cache", "Before export (additive)", 2],
 ].map(([timestamp, location, reason, playlistCount], i) => {
+  const timeText = `${timestamp.slice(0, 10)} ${timestamp.slice(11).replaceAll("-", ":")}`;
   const pdb = 1_480_000 + playlistCount * 12_288;
   const edb = 1_020_000 + playlistCount * 8_192 - i * 4_096;
   return {
     timestamp,
+    timeText,
     location,
     reason,
     playlistCount,

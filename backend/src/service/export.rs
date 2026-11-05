@@ -1,6 +1,6 @@
 //! Export to USB implementation.
 
-use crate::utils::{counted, warning_suffix};
+use crate::utils::{counted, format_byte_size, warning_suffix};
 use std::collections::{HashMap, HashSet};
 use std::path::{Path, PathBuf};
 
@@ -571,6 +571,70 @@ fn usb_mount_available_bytes(usb_root: &Path) -> Option<u64> {
     fs4::available_space(usb_root).ok()
 }
 
+/// The playlist heading's line about what an export would copy.
+fn export_space_text(
+    tracks_to_copy: usize,
+    list_track_count: usize,
+    bytes_to_copy: u64,
+    available_bytes: Option<u64>,
+    fits: bool,
+) -> String {
+    let mut parts = if tracks_to_copy > 0 {
+        vec![
+            format!(
+                "{tracks_to_copy} of {} to copy",
+                counted(list_track_count, "track", "tracks")
+            ),
+            format_byte_size(bytes_to_copy),
+        ]
+    } else {
+        vec!["All tracks on USB".to_string()]
+    };
+    if let Some(available) = available_bytes {
+        parts.push(format!("{} free on USB", format_byte_size(available)));
+    }
+    format!(
+        "{}{}",
+        if fits { "" } else { "Doesn't fit: " },
+        parts.join(" · ")
+    )
+}
+
+#[cfg(test)]
+mod export_space_text_tests {
+    use super::export_space_text;
+
+    const GB: u64 = 1024 * 1024 * 1024;
+
+    #[test]
+    fn export_space_text_says_what_copies_and_what_is_free() {
+        assert_eq!(
+            export_space_text(2, 3, GB + GB / 5, Some(27 * GB), true),
+            "2 of 3 tracks to copy · 1.2 GB · 27.0 GB free on USB"
+        );
+        assert_eq!(
+            export_space_text(1, 1, 412 * 1024 * 1024, None, true),
+            "1 of 1 track to copy · 412 MB"
+        );
+    }
+
+    #[test]
+    fn export_space_text_says_when_it_does_not_fit() {
+        assert_eq!(
+            export_space_text(3, 3, 31 * GB, Some(27 * GB), false),
+            "Doesn't fit: 3 of 3 tracks to copy · 31.0 GB · 27.0 GB free on USB"
+        );
+    }
+
+    #[test]
+    fn export_space_text_with_nothing_to_copy() {
+        assert_eq!(
+            export_space_text(0, 3, 0, Some(27 * GB), true),
+            "All tracks on USB · 27.0 GB free on USB"
+        );
+    }
+}
+
 fn format_bytes(bytes: u64) -> String {
     const UNITS: [&str; 5] = ["B", "KiB", "MiB", "GiB", "TiB"];
     let mut value = bytes as f64;
@@ -896,6 +960,7 @@ impl BackendService {
         usb_root: &Path,
     ) -> BackendResult<PlaylistExportSpace> {
         let mut playlist = self.load_playlist_for_export(playlist_id)?;
+        let list_track_count = playlist.tracks.len();
         split_off_unplayable_tracks(&mut playlist);
         let plan = plan_export_files(
             &*self.db.connect()?,
@@ -930,6 +995,13 @@ impl BackendService {
             tracks_to_copy: estimate.tracks,
             available_bytes,
             fits,
+            summary_text: export_space_text(
+                estimate.tracks,
+                list_track_count,
+                estimate.bytes,
+                available_bytes,
+                fits,
+            ),
             format_notice,
             format_notice_blocks,
         })

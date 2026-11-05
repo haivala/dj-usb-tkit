@@ -9,8 +9,8 @@
 // is filled out to the struct's full shape (see `shapeAnswers`).
 (() => {
   const ok = (data) => ({ ok: true, data });
-  const counted = (count, one, many = `${one}s`) => `${count} ${count === 1 ? one : many}`;
-  const warningSuffix = (count) => (count ? ` | (${counted(count, "warning")})` : "");
+  // The backend owns the UI's text: its tests check the wording. A default here is
+  // only a placeholder, and a spec that checks text sends that text itself.
 
   // `SourceFolder` rows for `LibrarySourcesData`.
   const sourceFolders = (paths) =>
@@ -35,19 +35,18 @@
 
     // `FetchUsbPlaylistsData` (fetch_usb_playlists).
     usbPlaylists(overrides = {}) {
-      const items = overrides.items || [];
-      const tracks = items.reduce((sum, item) => sum + (item.trackCount ?? item.tracks?.length ?? 0), 0);
-      const summaryText = `${counted(items.length, "playlist")}, ${counted(tracks, "track")}`;
+      const items = (overrides.items || []).map((item) => ({ selectedText: "mock selected", ...item }));
       return {
         items: [],
         stats: { indexedTracks: 0, playlistReferencedTracks: 0, playlistEntries: 0 },
-        summaryText,
-        statusText: `USB playlists loaded: ${items.length}${warningSuffix(overrides.warningCount)}`,
-        doneText: `Done — ${summaryText}`,
+        summaryText: "mock playlists summary",
+        statusText: "mock playlists status",
+        doneText: "mock done",
         warnings: [],
         warningCount: 0,
         playlistUsbExportStatus: [],
-        ...overrides
+        ...overrides,
+        items
       };
     },
 
@@ -55,12 +54,10 @@
     usbHistories(overrides = {}) {
       const { counts, ...rest } = overrides;
       const items = (overrides.items || []).map((item) => ({ canExportTracklist: !!item.tracks?.length, ...item }));
-      const sessions = counts?.importedPlaylists ?? 0;
-      const tracks = counts?.importedTracks ?? 0;
       return {
         items: [],
-        summaryText: `${counted(sessions, "session")}, ${counted(tracks, "track")}`,
-        statusText: `USB histories loaded: ${items.length}${warningSuffix(overrides.warningCount)}`,
+        summaryText: "mock histories summary",
+        statusText: "mock histories status",
         counts: {
           importedPlaylists: 0,
           importedTracks: 0,
@@ -126,10 +123,8 @@
 
     // `RepairUsbDiagnosticsData` (repair_usb_diagnostics, preview or apply).
     repair(overrides = {}) {
-      const applied = overrides.appliedFixes?.length ?? 0;
-      const failed = overrides.failedFixes?.length ?? 0;
       return {
-        statusText: `Repair apply complete: ${applied} applied, ${failed} failed (0ms)`,
+        statusText: "mock repair status",
         summary: "",
         overview: [],
         detectedIssues: [],
@@ -202,9 +197,8 @@
 
     // `ExportToUsbData` (export_to_usb).
     exportToUsb(overrides = {}) {
-      const tracks = overrides.exportedTracks ?? 0;
       return {
-        statusText: `Export complete: ${overrides.playlistName ?? ""} - ${counted(tracks, "track")}, ${overrides.skippedTracks ?? 0} skipped${warningSuffix(overrides.warningCount)} [sync: additive]`,
+        statusText: "mock export status",
         jobId: "job-export-1",
         playlistId: "",
         playlistName: "",
@@ -250,10 +244,7 @@
     }
   };
 
-  function withListSummary(data) {
-    const count = data.listTrackCount ?? data.total ?? data.items?.length ?? 0;
-    return { listSummaryText: counted(count, "track"), ...data };
-  }
+  const withListSummary = (data) => ({ listSummaryText: "mock list summary", ...data });
 
   // The builders that fill out a spec's own answer to each command.
   const SHAPES = {
@@ -275,13 +266,12 @@
     export_to_usb: backend.exportToUsb,
     fetch_usb_playlist_tracks: withListSummary,
     fetch_usb_history_tracks: withListSummary,
-    reorder_usb_playlists: (data) => ({ statusText: `Playlist order saved${warningSuffix(data.warningCount)}`, warningCount: 0, ...data }),
-    remove_usb_playlist: (data) => ({
-      statusText: `Removed USB playlist: ${data.playlistName} [db ${data.removedFromEdb}, pdb ${data.removedFromPdb}]${warningSuffix(data.warningCount)}`,
-      warningCount: 0,
-      ...data
-    }),
-    restore_usb_backup: (data) => ({ statusText: "Restored eDB and PDB from backup", ...data })
+    browse_source_files: withListSummary,
+    get_playlist_tracks: withListSummary,
+    reorder_usb_playlists: (data) => ({ statusText: "mock reorder status", warningCount: 0, ...data }),
+    remove_usb_playlist: (data) => ({ statusText: "mock remove status", warningCount: 0, ...data }),
+    restore_usb_backup: (data) => ({ statusText: "mock restore status", ...data }),
+    delete_usb_backup: (data) => ({ statusText: "mock delete status", ...data })
   };
 
   function shaped(invoke) {

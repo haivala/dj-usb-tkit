@@ -96,6 +96,8 @@ function installTauriMock(page) {
                   }
                 ],
                 counts: { importedPlaylists: 2, importedTracks: 5 },
+                summaryText: "2 sessions, 5 tracks",
+                statusText: "USB histories loaded: 2",
                 warnings: []
               }
             };
@@ -109,6 +111,7 @@ function installTauriMock(page) {
                 hasMore: false,
                 nextCursor: null,
                 totalDurationMs: historyTracks.reduce((s, t) => s + (t.durationMs || 0), 0),
+                listSummaryText: "4 tracks",
                 durationUnknownCount: 0,
                 warnings: []
               }
@@ -156,7 +159,7 @@ test("Export Tracklist dialog's start-track select is populated from the selecte
   await expect(page.locator("#statusText")).toContainText("USB histories loaded: 2");
 
   // Under the session's tracks, like an app playlist's Export to USB.
-  await expect(page.locator("#panel-usb-history .right > .playlist-actions #exportHistoryTracklistBtn")).toBeEnabled();
+  await expect(page.locator("#panel-usb-history .right > .panel-actions #exportHistoryTracklistBtn")).toBeEnabled();
   await expect(page.locator("#exportHistoryTracklistBtn")).toHaveCSS("background-image", /linear-gradient/);
   await expect(page.locator("#exportHistoryTracklistBtn")).toHaveText("Export Tracklist to Text File");
   await page.locator("#exportHistoryTracklistBtn").click();

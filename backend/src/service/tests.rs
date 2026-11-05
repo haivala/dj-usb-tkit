@@ -1429,6 +1429,7 @@ fn get_playlist_tracks_list_totals_ignore_search() {
     assert_eq!(tracks.total_duration_ms, 100_000);
     assert_eq!(tracks.list_track_count, 3);
     assert_eq!(tracks.list_size_bytes, 10_000_000);
+    assert_eq!(tracks.list_summary_text, "3 tracks · 10 MB");
 }
 
 #[test]

@@ -337,7 +337,7 @@ test("playlist analyze-missing skips already-analyzed tracks and targets the res
   await page.goto("/");
 
   await page.locator("#navPlaylistList .nav-playlist-item").first().click();
-  await expect(page.locator("#playlistPanelTitle")).toContainText("Testi (2 tracks · 3.5 GB)");
+  await expect(page.locator("#playlistPanelTitle")).toContainText("Testi (mock list summary)");
   // Footer total comes straight from the backend (get_playlist_tracks), not a
   // client-side sum -- 1 of the 2 tracks has no known length.
   await expect(page.locator("#playlistTotalDuration")).toHaveText("Total time: 3:00 (1 without length)");
@@ -345,7 +345,7 @@ test("playlist analyze-missing skips already-analyzed tracks and targets the res
   // playlist: that's what an export copies.
   await page.locator("#playlistSearchInput").fill("USB Ready");
   await expect(page.locator("#playlistTotalDuration")).toHaveText("Total time: 3:00");
-  await expect(page.locator("#playlistPanelTitle")).toContainText("Testi (2 tracks · 3.5 GB)");
+  await expect(page.locator("#playlistPanelTitle")).toContainText("Testi (mock list summary)");
   await page.locator("#playlistSearchInput").fill("");
   await expect(page.locator("#playlistTotalDuration")).toHaveText("Total time: 3:00 (1 without length)");
   await expect(page.locator("#analyzePlaylistMissingBtn")).toHaveText("Analyze Missing Tracks (1)");
@@ -466,7 +466,7 @@ test("playlist actions hide Analyze Missing when unnecessary and keep Export vis
 
   await page.goto("/");
   await page.locator("#navPlaylistList .nav-playlist-item").first().click();
-  await expect(page.locator("#playlistPanelTitle")).toContainText("Ready Playlist (1 track)");
+  await expect(page.locator("#playlistPanelTitle")).toContainText("Ready Playlist (mock list summary)");
   await expect(page.locator("#analyzePlaylistMissingBtn")).toBeHidden();
   await expect(page.locator("#exportPlaylistBtn")).toBeVisible();
   await expect(page.locator("#exportPlaylistBtn")).toHaveText("Select USB first");
@@ -801,7 +801,6 @@ function installReorderTauriMock(page, { usbSameNamePlaylistName, exportPruneSta
               data: {
                 items,
                 stats: { indexedTracks: 0, playlistReferencedTracks: 0, playlistEntries: items.length },
-                playlistTrackTotal: items.length,
                 playlistUsbExportStatus: [],
                 warnings: [],
                 playlistUsbExportStatus: exportStatusFor()
@@ -1063,7 +1062,7 @@ test("playlist header sort is disabled with a tooltip when additive export won't
 test("the playlist heading shows what an export would copy against the USB's free space", async ({ page }) => {
   await installReorderTauriMock(page, { usbSameNamePlaylistName: "Reorder Playlist" });
   await page.addInitScript(() => {
-    window.__exportSpace = { bytesToCopy: 1.2 * 1024 ** 3, tracksToCopy: 2, availableBytes: 27 * 1024 ** 3, fits: true };
+    window.__exportSpace = { bytesToCopy: 1.2 * 1024 ** 3, tracksToCopy: 2, availableBytes: 27 * 1024 ** 3, fits: true, summaryText: "2 of 3 tracks to copy · 1.2 GB · 27.0 GB free on USB" };
   });
   await page.goto("/");
 
@@ -1089,14 +1088,14 @@ test("the playlist heading shows what an export would copy against the USB's fre
 
   // The backend decides it won't fit; the next load (here a search) shows it.
   await page.evaluate(() => {
-    window.__exportSpace = { bytesToCopy: 31 * 1024 ** 3, tracksToCopy: 3, availableBytes: 27 * 1024 ** 3, fits: false };
+    window.__exportSpace = { bytesToCopy: 31 * 1024 ** 3, tracksToCopy: 3, availableBytes: 27 * 1024 ** 3, fits: false, summaryText: "Doesn't fit: 3 of 3 tracks to copy · 31.0 GB · 27.0 GB free on USB" };
   });
   await page.locator("#playlistSearchInput").fill("Song");
   await expect(space).toHaveText("Doesn't fit: 3 of 3 tracks to copy · 31.0 GB · 27.0 GB free on USB");
   await expect(space).toHaveClass(/is-warning/);
 
   await page.evaluate(() => {
-    window.__exportSpace = { bytesToCopy: 0, tracksToCopy: 0, availableBytes: 27 * 1024 ** 3, fits: true };
+    window.__exportSpace = { bytesToCopy: 0, tracksToCopy: 0, availableBytes: 27 * 1024 ** 3, fits: true, summaryText: "All tracks on USB · 27.0 GB free on USB" };
   });
   await page.locator("#playlistSearchInput").fill("");
   await expect(space).toHaveText("All tracks on USB · 27.0 GB free on USB");
@@ -1237,7 +1236,7 @@ test("a successful export clears the stale diagnostics report and sends the back
           ok: true,
           data: {
             items: [{ id: "h-1", name: "HISTORY 001", tracks: [] }],
-            counts: { importedPlaylists: 1, importedTracks: 3 },
+            summaryText: "1 session, 3 tracks", counts: { importedPlaylists: 1, importedTracks: 3 },
             warnings: []
           }
         };
@@ -1251,7 +1250,7 @@ test("a successful export clears the stale diagnostics report and sends the back
   await page.locator('.nav-item[data-view="usb-history"]').click();
   await expect(page.locator("#historyList")).toContainText("HISTORY 001");
   await openReorderPlaylist(page);
-  await answerExports(page, { ok: true, data: { playlistName: "Reorder Playlist", exportedTracks: 3 } });
+  await answerExports(page, { ok: true, data: { playlistName: "Reorder Playlist", exportedTracks: 3, statusText: "Export complete: Reorder Playlist - 3 tracks, 0 skipped" } });
 
   await page.locator("#exportPlaylistBtn").click();
   await expect(page.locator("#statusText")).toContainText("Export complete: Reorder Playlist - 3 tracks, 0 skipped");
@@ -1304,7 +1303,7 @@ test("export commits an active column sort first, and a failed commit blocks the
   await connectUsbAndFetchPlaylists(page);
   await openReorderPlaylist(page);
   const artistHeader = page.locator('#panel-playlist .track-grid-cell.sortable[data-sort-key="artist"]');
-  await answerExports(page, { ok: true, data: { exportedTracks: 3 } });
+  await answerExports(page, { ok: true, data: { exportedTracks: 3, statusText: "Export complete" } });
 
   await artistHeader.click();
   await page.locator("#exportPlaylistBtn").click();
@@ -1442,7 +1441,6 @@ test("switching away from a sorted playlist commits the sort as its real order, 
               data: {
                 items,
                 stats: { indexedTracks: 0, playlistReferencedTracks: 0, playlistEntries: items.length },
-                playlistTrackTotal: items.length,
                 playlistUsbExportStatus: [],
                 warnings: [],
                 playlistUsbExportStatus: playlists.map((playlist) => {

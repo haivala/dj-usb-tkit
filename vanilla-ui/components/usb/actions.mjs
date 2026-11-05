@@ -913,7 +913,12 @@ async function readUsbPlaylists(ctx, isCurrent) {
   }
 
   el.usbPlaylists.dataset.loaded = "";
+  // The open playlist's heading keeps its count until its table has loaded again.
+  const tracksCtl = ctx.usbPlaylistTracksCtl;
+  const openSummary = findByScopeId(state.usbPlaylists, tracksCtl.scopeId)?.listSummaryText;
   state.usbPlaylists = data.items;
+  const stillOpen = findByScopeId(state.usbPlaylists, tracksCtl.scopeId);
+  if (stillOpen) stillOpen.listSummaryText = openSummary;
   applyPlaylistUsbExportStatus(ctx, data.playlistUsbExportStatus);
 
   el.usbCountsText.textContent = data.summaryText;
@@ -929,7 +934,7 @@ async function readUsbPlaylists(ctx, isCurrent) {
 }
 
 // After a read, the open playlist stays open if it still exists. Its table loads
-// again in place, which also brings back the heading's size.
+// again in place.
 function keepOpenUsbPlaylist(ctx) {
   const { state, usbPlaylistTracksCtl: ctl, emitStatus } = ctx;
   if (!findByScopeId(state.usbPlaylists, ctl.scopeId)) {

@@ -265,6 +265,29 @@ fn read_backup_retention_count(conn: &rusqlite::Connection) -> u32 {
 /// but since both stems are created (and thus retained/archived) on the same
 /// timestamp schedule, a pair's files normally share a location; a bundle is
 /// labeled "usb" if either half is still USB-side, "cache" otherwise.
+/// What a backup holds, eDB first, for its dialogs and status lines. PDB and
+/// eDB are always backed up together, but one file can be missing.
+fn backup_files_label<'a>(stems: impl Iterator<Item = &'a str> + Clone) -> String {
+    let labels = [("exportLibrary", "eDB"), ("export", "PDB")]
+        .into_iter()
+        .filter(|(stem, _)| stems.clone().any(|file_stem| file_stem == *stem))
+        .map(|(_, label)| label)
+        .collect::<Vec<_>>();
+    if labels.is_empty() {
+        "Backup".to_string()
+    } else {
+        labels.join(" and ")
+    }
+}
+
+/// A backup timestamp ("%Y-%m-%d_%H-%M-%S") as "2020-01-02 03:04:05".
+fn backup_time_text(timestamp: &str) -> String {
+    match timestamp.split_once('_') {
+        Some((date, time)) => format!("{date} {}", time.replace('-', ":")),
+        None => timestamp.to_string(),
+    }
+}
+
 fn entries_by_timestamp(dirs: &[(PathBuf, &str)]) -> Vec<UsbBackupEntry> {
     let mut by_timestamp: BTreeMap<String, Vec<(UsbBackupFile, &str)>> = BTreeMap::new();
     for (dir, location) in dirs {
@@ -305,8 +328,15 @@ fn entries_by_timestamp(dirs: &[(PathBuf, &str)]) -> Vec<UsbBackupEntry> {
             let marker = read_backup_marker(dirs, &timestamp);
             let reason = marker.as_ref().map(|m| m.reason.clone());
             let playlist_count = marker.and_then(|m| m.playlist_count);
-            let files = entries.into_iter().map(|(f, _)| f).collect();
+            let files: Vec<UsbBackupFile> = entries.into_iter().map(|(f, _)| f).collect();
+            let label = backup_files_label(files.iter().map(|f| f.stem.as_str()));
+            let time_text = backup_time_text(&timestamp);
             UsbBackupEntry {
+                restore_confirm_text: format!(
+                    "Restore {label} from the backup taken at {time_text}? The current files will themselves be backed up first."
+                ),
+                delete_confirm_text: format!("Delete this {label} backup permanently?"),
+                time_text,
                 timestamp,
                 location: location.to_string(),
                 size_bytes,
@@ -491,17 +521,7 @@ impl BackendService {
                 Vec::new()
             });
 
-        // What was restored, eDB first, whichever order the files came in.
-        let restored_labels = [("exportLibrary", "eDB"), ("export", "PDB")]
-            .into_iter()
-            .filter(|(stem, _)| files.iter().any(|(file_stem, _)| file_stem == stem))
-            .map(|(_, label)| label)
-            .collect::<Vec<_>>();
-        let restored_label = if restored_labels.is_empty() {
-            "Backup".to_string()
-        } else {
-            restored_labels.join(" and ")
-        };
+        let restored_label = backup_files_label(files.iter().map(|(stem, _)| stem.as_str()));
         Ok(RestoreUsbBackupData {
             restored: true,
             status_text: format!("Restored {restored_label} from backup"),
@@ -521,6 +541,7 @@ impl BackendService {
                 req.timestamp
             )));
         }
+        let label = backup_files_label(files.iter().map(|(stem, _)| stem.as_str()));
         for (_, snapshot) in &files {
             std::fs::remove_file(snapshot)?;
         }
@@ -533,7 +554,10 @@ impl BackendService {
         if let Some(cache_dir) = cache_backups_dir(&usb_root) {
             let _ = std::fs::remove_file(backup_reason_path(&cache_dir, &req.timestamp));
         }
-        Ok(DeleteUsbBackupData { deleted: true })
+        Ok(DeleteUsbBackupData {
+            deleted: true,
+            status_text: format!("Deleted {label} backup"),
+        })
     }
 }
 
@@ -896,6 +920,51 @@ mod tests {
             Some(4),
             "an operation that can't change the playlist count must carry forward the previous backup's count"
         );
+    }
+
+    #[test]
+    fn backup_entries_and_delete_send_their_text() {
+        let (_dir, service) = test_service();
+        let usb = tempdir().unwrap();
+        let usb_root = usb.path();
+        let backups_dir = usb_backups_dir(usb_root);
+        std::fs::create_dir_all(&backups_dir).unwrap();
+        let both = "2020-01-02_03-04-05";
+        touch_backup(&backups_dir, "export", "pdb", both, b"pdb");
+        touch_backup(&backups_dir, "exportLibrary", "db", both, b"edb");
+        let one = "2020-01-03_03-04-05";
+        touch_backup(&backups_dir, "export", "pdb", one, b"pdb");
+        let root = usb_root.to_string_lossy().to_string();
+
+        let items = service
+            .list_usb_backups(ListUsbBackupsRequest {
+                usb_root: root.clone(),
+            })
+            .expect("list")
+            .items;
+        let entry = items.iter().find(|item| item.timestamp == both).unwrap();
+        assert_eq!(entry.time_text, "2020-01-02 03:04:05");
+        assert_eq!(
+            entry.restore_confirm_text,
+            "Restore eDB and PDB from the backup taken at 2020-01-02 03:04:05? The current files will themselves be backed up first."
+        );
+        assert_eq!(
+            entry.delete_confirm_text,
+            "Delete this eDB and PDB backup permanently?"
+        );
+        let entry = items.iter().find(|item| item.timestamp == one).unwrap();
+        assert_eq!(
+            entry.delete_confirm_text,
+            "Delete this PDB backup permanently?"
+        );
+
+        let deleted = service
+            .delete_usb_backup(DeleteUsbBackupRequest {
+                usb_root: root,
+                timestamp: both.to_string(),
+            })
+            .expect("delete");
+        assert_eq!(deleted.status_text, "Deleted eDB and PDB backup");
     }
 
     #[test]

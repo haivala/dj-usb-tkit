@@ -2117,7 +2117,6 @@ function installUsbTrackDetailMock(page, mockOpts = {}) {
               data: {
                 items: [{ id: "usb-1", name: "Warmup", source: "mock", trackCount: 1, tracks: [{}] }],
                 stats: { indexedTracks: 1, playlistReferencedTracks: 1, playlistEntries: 1 },
-                playlistTrackTotal: 1,
                 playlistUsbExportStatus: [],
                 warnings: [],
               },

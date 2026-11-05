@@ -297,6 +297,19 @@ fn user_like_flow_imports_sources_analyzes_and_adds_from_library_usb_and_history
         backend::utils::counted(track_total, "track", "tracks"),
     );
     assert_eq!(usb_playlists_data.summary_text, summary);
+    // The UI reads tracks in pages: the list response doesn't carry them.
+    let first = &usb_playlists_data.items[0];
+    let sent = serde_json::to_value(first).expect("serialize usb playlist");
+    assert_eq!(sent["trackCount"], first.track_count);
+    assert!(sent.get("tracks").is_none());
+    assert_eq!(
+        first.selected_text,
+        format!(
+            "USB playlist selected: {} ({})",
+            first.name,
+            backend::utils::counted(first.track_count, "track", "tracks")
+        ),
+    );
     assert_eq!(usb_playlists_data.done_text, format!("Done — {summary}"));
     assert_eq!(
         usb_playlists_data.status_text,

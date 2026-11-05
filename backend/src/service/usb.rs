@@ -1420,6 +1420,11 @@ impl BackendService {
                 name: candidate.display_name.clone(),
                 source: source.to_string(),
                 track_count: playlist_tracks.len(),
+                selected_text: format!(
+                    "USB playlist selected: {} ({})",
+                    candidate.display_name,
+                    counted(playlist_tracks.len(), "track", "tracks")
+                ),
                 tracks: playlist_tracks,
                 total_duration_ms,
                 duration_unknown_count,
