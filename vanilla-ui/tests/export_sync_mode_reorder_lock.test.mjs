@@ -18,7 +18,7 @@ function setup({ sortActive = false, commitThrows = false } = {}) {
     playlists: [{ id: "p1", name: "Testi", tracks: [{ id: "t1" }, { id: "t2" }] }],
     currentPlaylistId: "p1",
     playlistUsbExportStatusById: new Map([
-      ["p1", { playlistId: "p1", playlistName: "Testi", sameNameExistsOnUsb: true, locksReorder: true }]
+      ["p1", { playlistId: "p1", playlistName: "Testi", usbSelected: true, sameNameExistsOnUsb: true, locksReorder: true }]
     ])
   };
   const statuses = [];

@@ -417,6 +417,12 @@ test("playlist actions hide Analyze Missing when unnecessary and keep Export vis
       core: {
         invoke: async (command, payload = {}) => {
           const request = payload?.request || payload;
+          if (command === "refresh_playlist_export_status") {
+            return {
+              ok: true,
+              data: { playlistUsbExportStatus: [{ playlistId: "pl-1", usbSelected: false, exportButtonText: "Select USB first", exportButtonTitle: "Select a valid USB folder first" }] }
+            };
+          }
           if (command === "list_playlists") {
             return { ok: true, data: { items: playlists } };
           }
@@ -713,7 +719,7 @@ function installReorderTauriMock(page, { usbSameNamePlaylistName, exportPruneSta
       return {
         playlistId: playlist.id,
         playlistName: playlist.name,
-        sameNameExistsOnUsb,
+        usbSelected: true, sameNameExistsOnUsb,
         locksReorder,
         // Backend-built label (service::export::compute_playlist_usb_export_status);
         // usb root here is "/USB" so the trailing dir is "USB".
@@ -762,7 +768,16 @@ function installReorderTauriMock(page, { usbSameNamePlaylistName, exportPruneSta
             currentPruneStale = request.value === "1";
           }
           if (command === "refresh_playlist_export_status") {
-            return { ok: true, data: { playlistUsbExportStatus: exportStatusFor() } };
+            const noUsb = (status) => ({
+              ...status,
+              usbSelected: false,
+              sameNameExistsOnUsb: false,
+              locksReorder: false,
+              exportButtonText: "Select USB first",
+              exportButtonTitle: "Select a valid USB folder first"
+            });
+            const statuses = exportStatusFor();
+            return { ok: true, data: { playlistUsbExportStatus: payload?.request?.usbRoot ? statuses : statuses.map(noUsb) } };
           }
           if (command === "resolve_playback_source") {
             return { ok: true, data: { resolvedPath: null, matchedBy: "none", trackId: null } };
@@ -1297,6 +1312,19 @@ test("the backend's export gate rejections are shown in the status bar", async (
   await expect(status).toContainText("Export blocked: the analysis files of 2 of 3 tracks are missing. Select them and use Reanalyze.");
 });
 
+test("a search with no matches doesn't change what Export to USB does", async ({ page }) => {
+  await installReorderTauriMock(page, { usbSameNamePlaylistName: "Reorder Playlist" });
+  await page.goto("/");
+  await connectUsbAndFetchPlaylists(page);
+  await openReorderPlaylist(page);
+  await answerExports(page, { ok: true, data: { exportedTracks: 3, statusText: "Export complete" } });
+
+  await page.locator("#playlistSearchInput").fill("no such track");
+  await expect(page.locator("#playlistTotalDuration")).toHaveText("Total time: 0:00");
+  await page.locator("#exportPlaylistBtn").click();
+  await expect(page.locator("#statusText")).toContainText("Export complete");
+});
+
 test("export commits an active column sort first, and a failed commit blocks the export", async ({ page }) => {
   await installReorderTauriMock(page, { usbSameNamePlaylistName: "Reorder Playlist" });
   await page.goto("/");
@@ -1449,7 +1477,7 @@ test("switching away from a sorted playlist commits the sort as its real order, 
                   return {
                     playlistId: playlist.id,
                     playlistName: playlist.name,
-                    sameNameExistsOnUsb,
+                    usbSelected: true, sameNameExistsOnUsb,
                     locksReorder,
                     exportButtonText: locksReorder
                       ? `Append to (${playlist.name}) on USB: (USB)`

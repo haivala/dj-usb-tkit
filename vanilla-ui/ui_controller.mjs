@@ -44,7 +44,6 @@ export function updateModeText(ctx) {
 
 export function updateUsbNameBadge(ctx) {
   const { state, el } = ctx;
-  if (!el?.usbNameBadge || !el?.usbNameBadgeLabel) return;
   const name = String(state.usbDeviceName || "").trim();
   const connected = !!state.usbRoot && !!state.usbRootValid;
   el.usbNameBadgeLabel.textContent = name || (connected ? "Unnamed" : "Not connected");

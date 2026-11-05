@@ -54,13 +54,13 @@ test("fillPlaylistSidebarItem marks by the connected USB's status when there is 
   const freshItem = () => document.getElementById("tplNavPlaylistItem").content.firstElementChild.cloneNode(true).firstElementChild;
 
   const onUsb = freshItem();
-  fillPlaylistSidebarItem(onUsb, { id: "p1", name: "Warmup", lastExportedAt: null }, { sameNameExistsOnUsb: true });
+  fillPlaylistSidebarItem(onUsb, { id: "p1", name: "Warmup", lastExportedAt: null }, { usbSelected: true, sameNameExistsOnUsb: true });
   const onUsbStatus = onUsb.querySelector(".nav-playlist-status");
   assert.equal(onUsbStatus.classList.contains("exported"), true);
   assert.equal(onUsbStatus.getAttribute("aria-label"), "On this USB");
 
   const notOnUsb = freshItem();
-  fillPlaylistSidebarItem(notOnUsb, { id: "p2", name: "Peak", lastExportedAt: "2026-04-07T10:00:00Z" }, { sameNameExistsOnUsb: false });
+  fillPlaylistSidebarItem(notOnUsb, { id: "p2", name: "Peak", lastExportedAt: "2026-04-07T10:00:00Z" }, { usbSelected: true, sameNameExistsOnUsb: false });
   const notOnUsbStatus = notOnUsb.querySelector(".nav-playlist-status");
   assert.equal(notOnUsbStatus.classList.contains("exported"), false);
   assert.equal(notOnUsbStatus.textContent, "");
@@ -105,7 +105,6 @@ test("populatePlaylistPanel fills export status and search input", () => {
   assert.equal(ctx.el.playlistPanelTitle.textContent, "Set A (3 tracks · 3.4 GB)");
   assert.equal(ctx.el.playlistExportStatus.textContent, "Not exported yet.");
   assert.equal(ctx.el.playlistSearchInput.value, "acid");
-  assert.equal(ctx.el.exportPlaylistBtn.textContent, "Select USB first");
 });
 
 test("updateUsbRootText renders the disconnected state", () => {

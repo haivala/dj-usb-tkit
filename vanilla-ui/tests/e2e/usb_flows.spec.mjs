@@ -1178,7 +1178,7 @@ test("a repair whose diagnostics re-run failed still applies the export status i
             appliedFixes: payload.request.selectedFixIds,
             usbContentChanged: true,
             statusText: "Repair apply complete: 1 applied",
-            playlistUsbExportStatus: [{ playlistId: "pl-1", playlistName: "Local Set", sameNameExistsOnUsb: true }]
+            playlistUsbExportStatus: [{ playlistId: "pl-1", playlistName: "Local Set", usbSelected: true, sameNameExistsOnUsb: true }]
           }
         };
       }
@@ -1190,6 +1190,9 @@ test("a repair whose diagnostics re-run failed still applies the export status i
   await connectUsb(page);
   const mark = page.locator('#navPlaylistList .nav-playlist-item[data-playlist-id="pl-1"] .nav-playlist-status');
   await expect(mark).not.toHaveClass(/exported/);
+  // Selecting the USB refreshed the status. The repair must not need a second command.
+  await expect.poll(() => page.evaluate(() => window.__statusRefreshes)).toBeGreaterThan(0);
+  const refreshesBeforeRepair = await page.evaluate(() => window.__statusRefreshes);
 
   await page.locator("#usbHealthCard").evaluate((node) => { node.open = true; });
   await page.locator("#previewRepairsBtn").click();
@@ -1201,7 +1204,7 @@ test("a repair whose diagnostics re-run failed still applies the export status i
 
   await expect(mark).toHaveClass(/exported/);
   await expect(mark).toHaveAttribute("aria-label", "On this USB");
-  expect(await page.evaluate(() => window.__statusRefreshes)).toBe(0);
+  expect(await page.evaluate(() => window.__statusRefreshes)).toBe(refreshesBeforeRepair);
 });
 
 async function dragViaHandle(page, fromHandleSelector, toRowSelector, dropNearTop) {
@@ -1397,7 +1400,7 @@ test("USB toggle race ends in deterministic final state, with nothing left of th
       if (command === "list_playlists") {
         return { ok: true, data: { items: [{ id: "pl-1", name: "Local Set", source: "local" }] } };
       }
-      const playlistUsbExportStatus = [{ playlistId: "pl-1", playlistName: "Local Set", sameNameExistsOnUsb: true }];
+      const playlistUsbExportStatus = [{ playlistId: "pl-1", playlistName: "Local Set", usbSelected: true, sameNameExistsOnUsb: true }];
       if (command === "fetch_usb_playlists") {
         const backend = window.__e2eBackend;
         return backend.ok(backend.usbPlaylists({ items: [{ id: "usb-1", name: "Warmup", tracks: [] }], playlistUsbExportStatus }));
@@ -1699,7 +1702,7 @@ test("restoring a backup: cancel and failure change nothing; success clears the 
           data: {
             restored: true,
             statusText: "Restored eDB and PDB from backup",
-            playlistUsbExportStatus: [{ playlistId: "pl-1", playlistName: "Local Set", sameNameExistsOnUsb: true }]
+            playlistUsbExportStatus: [{ playlistId: "pl-1", playlistName: "Local Set", usbSelected: true, sameNameExistsOnUsb: true }]
           }
         };
       }

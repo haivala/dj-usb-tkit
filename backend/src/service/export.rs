@@ -919,17 +919,25 @@ pub(crate) fn compute_playlist_usb_export_status(
                 usb_playlist_names.contains(&normalize_playlist_name_for_compare(&playlist.name));
             let locks_reorder =
                 playlist_locks_reorder_on_export(prune_stale, same_name_exists_on_usb);
+            let (export_button_text, export_button_title) = if usb_root.is_some() {
+                (
+                    export_button_text(locks_reorder, &playlist.name, usb_dir.as_deref()),
+                    export_button_title(locks_reorder, &playlist.name),
+                )
+            } else {
+                (
+                    "Select USB first".to_string(),
+                    "Select a valid USB folder first".to_string(),
+                )
+            };
             PlaylistUsbExportStatus {
                 playlist_id: playlist.id.clone(),
                 playlist_name: playlist.name.clone(),
+                usb_selected: usb_root.is_some(),
                 same_name_exists_on_usb,
                 locks_reorder,
-                export_button_text: export_button_text(
-                    locks_reorder,
-                    &playlist.name,
-                    usb_dir.as_deref(),
-                ),
-                export_button_title: export_button_title(locks_reorder, &playlist.name),
+                export_button_text,
+                export_button_title,
             }
         })
         .collect()
@@ -3941,6 +3949,23 @@ mod tests {
     }
 
     #[test]
+    fn compute_playlist_usb_export_status_without_a_usb_asks_for_one() {
+        let local_playlists = vec![make_playlist("p1", "My Set")];
+        let status = compute_playlist_usb_export_status(
+            &local_playlists,
+            &std::collections::HashSet::new(),
+            false,
+            None,
+        );
+        assert!(!status[0].usb_selected);
+        assert_eq!(status[0].export_button_text, "Select USB first");
+        assert_eq!(
+            status[0].export_button_title,
+            "Select a valid USB folder first"
+        );
+    }
+
+    #[test]
     fn compute_playlist_usb_export_status_flags_reorder_lock_only_for_additive_collision() {
         let local_playlists = vec![
             make_playlist("p1", "My Set"),
@@ -4005,14 +4030,5 @@ mod tests {
         );
         assert_eq!(usb_root_last_segment("/"), None);
         assert_eq!(usb_root_last_segment("   "), None);
-    }
-
-    #[test]
-    fn compute_playlist_usb_export_status_without_usb_root_omits_dir_from_label() {
-        let local_playlists = vec![make_playlist("p1", "My Set")];
-        let usb_names: std::collections::HashSet<String> = std::collections::HashSet::new();
-
-        let status = compute_playlist_usb_export_status(&local_playlists, &usb_names, false, None);
-        assert_eq!(status[0].export_button_text, "Export to USB");
     }
 }

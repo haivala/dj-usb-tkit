@@ -1629,14 +1629,15 @@ pub struct WarningEntry {
 pub struct PlaylistUsbExportStatus {
     pub playlist_id: String,
     pub playlist_name: String,
+    /// A valid USB is selected, so `same_name_exists_on_usb` means something.
+    #[serde(default)]
+    pub usb_selected: bool,
     pub same_name_exists_on_usb: bool,
     pub locks_reorder: bool,
-    /// The export button's label when a valid USB is selected -- either
-    /// "Append to (<name>) on USB: (<dir>)" (additive export onto a same-named
-    /// playlist) or "Export to USB: <dir>". Built server-side (see
-    /// `service::export::compute_playlist_usb_export_status`) so the frontend
-    /// never re-derives it or parses the USB path itself; when no USB is
-    /// selected the frontend shows its own "Select USB first" instead.
+    /// The export button's label: "Append to (<name>) on USB: (<dir>)" (additive
+    /// export onto a same-named playlist), "Export to USB: <dir>", or with no
+    /// valid USB selected "Select USB first". Built server-side (see
+    /// `service::export::compute_playlist_usb_export_status`).
     pub export_button_text: String,
     /// Tooltip paired with `export_button_text`.
     pub export_button_title: String,

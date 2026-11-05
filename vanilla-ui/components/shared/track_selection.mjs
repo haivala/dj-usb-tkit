@@ -86,7 +86,7 @@ function renderSelectionTime(ctx, view, bar, ids) {
     .command("get_selection_duration", request)
     .then((data) => {
       if (target.dataset.request !== key || !data?.totalDurationMs) return;
-      const unknown = Number(data.durationUnknownCount) || 0;
+      const unknown = data.durationUnknownCount;
       target.textContent = `· ${formatDurationMs(data.totalDurationMs)}${unknown ? "+" : ""}`;
       if (unknown) target.dataset.tooltip = `${unknown} of the selected tracks have no length yet`;
     })

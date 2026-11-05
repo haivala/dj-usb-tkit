@@ -156,8 +156,7 @@ export async function applyRealtimeAnalyzedTrackUpdate(ctx, payload) {
 }
 
 export async function relocateSourceRoot(ctx, oldRoot) {
-  const { state } = ctx;
-  const { emitStatus } = ctx;
+  const { state, emitStatus } = ctx;
   const sourceRoot = String(oldRoot || "").trim();
   if (!sourceRoot) return;
 
@@ -269,7 +268,7 @@ export function applyLibraryDurationSummary(ctx, totalMs, unknownCount) {
   const { state, el } = ctx;
   state.libraryDurationTotalMs = Number(totalMs) || 0;
   state.libraryDurationUnknownCount = Number(unknownCount) || 0;
-  renderTrackListDurationSummary(el?.libraryTotalDuration, {
+  renderTrackListDurationSummary(el.libraryTotalDuration, {
     totalDurationMs: state.libraryDurationTotalMs,
     durationUnknownCount: state.libraryDurationUnknownCount,
   });
@@ -414,8 +413,7 @@ export async function reloadTrackListsForKeyNotation(ctx) {
 // Scans the library's switched-on folders (the backend picks them, and says
 // when there are none).
 export async function scanLibrary(ctx) {
-  const { state } = ctx;
-  const { emitStatus } = ctx;
+  const { state, emitStatus } = ctx;
   emitStatus("Scanning library files...");
   const result = await ctx.command("scan_library", { incremental: true });
   if (result.notFound?.length) emitStatus(missingFoldersStatus(result.notFound));
@@ -500,8 +498,7 @@ export async function showExternalLibrary(ctx, library) {
 // Shared by the rekordbox master.db and Mixxx imports: run the backend
 // import, turn the library's source chip on, and report the outcome.
 async function importExternalLibrary(ctx, { command, path, label, logSource, codePrefix, library, detect }) {
-  const { logWarnings } = ctx;
-  const { emitStatus } = ctx;
+  const { logWarnings, emitStatus } = ctx;
   const logLabel = `${label.toLowerCase()} import`;
 
   emitStatus(`Importing from ${label.toLowerCase()}...`);
@@ -547,8 +544,7 @@ async function importExternalLibrary(ctx, { command, path, label, logSource, cod
 }
 
 export async function analyzeTrackIds(ctx, trackIds, modeLabel = "Analyze", options = {}) {
-  const { state } = ctx;
-  const { emitStatus } = ctx;
+  const { state, emitStatus } = ctx;
   if (state.analysisEnginePersistPromise) {
     try {
       await state.analysisEnginePersistPromise;

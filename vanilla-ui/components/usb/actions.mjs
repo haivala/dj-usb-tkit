@@ -61,9 +61,10 @@ export function playlistUsbExportStatusById(statusList) {
 // and without the frontend re-deriving the rule.
 export async function refreshPlaylistExportStatus(ctx) {
   const { state } = ctx;
-  const data = await ctx.command("refresh_playlist_export_status", {
-    usbRoot: state.usbRoot || null,
-  });
+  const usbRoot = state.usbRootValid ? state.usbRoot : null;
+  const data = await ctx.command("refresh_playlist_export_status", { usbRoot });
+  // The USB changed while this was running: its own refresh lands instead.
+  if ((state.usbRootValid ? state.usbRoot : null) !== usbRoot) return state.playlistUsbExportStatusById;
   return applyPlaylistUsbExportStatus(ctx, data.playlistUsbExportStatus);
 }
 
@@ -78,28 +79,6 @@ export function applyPlaylistUsbExportStatus(ctx, statusList) {
   return ctx.state.playlistUsbExportStatusById;
 }
 
-export function computeExportButtonState({
-  usbRoot,
-  usbRootValid,
-  currentPlaylistId,
-  playlistUsbExportStatusById: statusById
-}) {
-  const enabled = !!usbRoot && !!usbRootValid;
-  if (!enabled) {
-    return { enabled: false, text: "Select USB first", title: "Select a valid USB folder first" };
-  }
-  // The label ("Append to (X) on USB: (dir)" vs "Export to USB: dir") and its
-  // tooltip are backend-computed per playlist (PlaylistUsbExportStatus --
-  // service::export::compute_playlist_usb_export_status), so the append rule
-  // and the USB-path parsing both live in Rust. The fallbacks only apply
-  // before the first USB scan has populated the status map.
-  const status = statusById instanceof Map ? statusById.get(String(currentPlaylistId || "")) : null;
-  return {
-    enabled: true,
-    text: status?.exportButtonText || "Export to USB",
-    title: status?.exportButtonTitle || "Export current playlist to selected USB"
-  };
-}
 export function diagStatusIcon(status) {
   if (status === "PASS") return "✓";
   if (status === "WARN") return "⚠";
@@ -446,6 +425,7 @@ export function usbContentChanged(ctx) {
 export function usbSelectionChanged(ctx) {
   usbContentChanged(ctx);
   applyPlaylistUsbExportStatus(ctx, []);
+  refreshPlaylistExportStatus(ctx).catch((err) => console.warn("refresh_playlist_export_status failed:", err));
   hideUsbDiagnostics(ctx);
 }
 
@@ -530,8 +510,7 @@ export async function detectExternalMixxxDb(ctx) {
 // Best-effort: any failure to even check/show the prompt just lets the user
 // continue unnamed rather than blocking USB use entirely.
 async function promptDriveNameIfUnset(ctx) {
-  const { state, command } = ctx;
-  const { emitStatus } = ctx;
+  const { state, command, emitStatus } = ctx;
   // Reset first: a stale name from whatever drive was connected before must
   // never linger on screen while this one's actual name is still unknown.
   state.usbDeviceName = null;
@@ -640,8 +619,7 @@ async function openDriveNameDialog(ctx, { mode, initial }) {
 }
 
 export async function validateAndSetUsbRoot(ctx, path) {
-  const { state, el, command } = ctx;
-  const { emitStatus } = ctx;
+  const { state, el, command, emitStatus } = ctx;
 
   if (isUsbRootChangeBlocked(state)) {
     emitStatus("Please wait for the current USB operation to finish before switching drives");
@@ -735,8 +713,7 @@ export async function validateAndSetUsbRoot(ctx, path) {
 }
 
 export async function removeUsbPlaylist(ctx, playlist) {
-  const { state } = ctx;
-  const { emitStatus } = ctx;
+  const { state, emitStatus } = ctx;
   const confirmed = await ctx.openConfirmDialog({
     title: "Remove USB Playlist",
     message: `Remove USB playlist "${playlist.name}" from the stick?`,
@@ -756,8 +733,7 @@ export async function removeUsbPlaylist(ctx, playlist) {
 }
 
 export async function reorderUsbPlaylists(ctx) {
-  const { state } = ctx;
-  const { emitStatus } = ctx;
+  const { state, emitStatus } = ctx;
   try {
     const data = await ctx.command("reorder_usb_playlists", {
       usbRoot: state.usbRoot,
@@ -857,8 +833,7 @@ export function refreshUsb(ctx) {
 }
 
 async function readUsbPlaylists(ctx, isCurrent) {
-  const { state, el, setProgress, startProgressHeartbeat, stopProgressHeartbeat } = ctx;
-  const { emitStatus } = ctx;
+  const { state, el, setProgress, startProgressHeartbeat, stopProgressHeartbeat, emitStatus } = ctx;
   emitStatus("Loading USB playlists...");
   setProgress(true, 5, "Reading USB database...");
   startProgressHeartbeat();
@@ -920,8 +895,7 @@ function keepOpenUsbPlaylist(ctx) {
 // `openReport`: a run the user asked for opens Health & Diagnostics whatever
 // the result; the automatic run on USB select opens it only when not PASS.
 export async function runUsbDiagnostics(ctx, { openReport = false } = {}) {
-  const { state } = ctx;
-  const { emitStatus } = ctx;
+  const { state, emitStatus } = ctx;
   const healthCard = ctx.el.usbHealthCard;
   healthCard.removeAttribute("open");
   healthCard.classList.add("is-loading");
@@ -942,8 +916,7 @@ export async function runUsbDiagnostics(ctx, { openReport = false } = {}) {
 }
 
 export async function runUsbParityReport(ctx) {
-  const { state } = ctx;
-  const { emitStatus } = ctx;
+  const { state, emitStatus } = ctx;
   emitStatus("Running USB parity report...");
   try {
     const data = await ctx.command("run_usb_parity_report", {
@@ -959,8 +932,7 @@ export async function runUsbParityReport(ctx) {
 }
 
 export async function previewUsbRepairs(ctx) {
-  const { state } = ctx;
-  const { emitStatus } = ctx;
+  const { state, emitStatus } = ctx;
   emitStatus("Previewing USB repair fixes...");
   const data = await ctx.command("repair_usb_diagnostics", {
     usbRoot: state.usbRoot
@@ -971,8 +943,7 @@ export async function previewUsbRepairs(ctx) {
 }
 
 export async function applyUsbRepairs(ctx) {
-  const { state } = ctx;
-  const { emitStatus } = ctx;
+  const { state, emitStatus } = ctx;
   emitStatus("Applying supported USB repair fixes...");
   const selectedFixIds = Array.from(state.selectedRepairFixIds);
   const data = await ctx.command("repair_usb_diagnostics", {
@@ -1003,8 +974,7 @@ function syncEngineLibrarySetting(ctx, enabled) {
 }
 
 async function readUsbHistories(ctx, isCurrent) {
-  const { state, el } = ctx;
-  const { emitStatus } = ctx;
+  const { state, el, emitStatus } = ctx;
   emitStatus("Loading USB history...");
   let data;
   try {
@@ -1025,8 +995,7 @@ async function readUsbHistories(ctx, isCurrent) {
 }
 
 export async function exportHistoryTracklist(ctx) {
-  const { state } = ctx;
-  const { emitStatus } = ctx;
+  const { state, emitStatus } = ctx;
 
   const history = findByScopeId(state.histories, ctx.usbHistoryTracksCtl.scopeId);
   const usbRoot = state.usbRoot;
@@ -1166,8 +1135,7 @@ function applyPlayerMenuConfig(ctx, data, selection = null) {
 }
 
 export async function syncUsbPlayerMenusEdbToPdb(ctx) {
-  const { state } = ctx;
-  const { emitStatus } = ctx;
+  const { state, emitStatus } = ctx;
   emitStatus("Fixing PDB sync...");
   const data = await ctx.command("sync_usb_player_menu_edb_to_pdb", { usbRoot: state.usbRoot });
   applyPlayerMenuConfig(ctx, data);
@@ -1200,8 +1168,7 @@ export function syncUsbPlayerMenuEditorControls(ctx) {
 }
 
 export async function loadUsbPlayerMenuConfig(ctx) {
-  const { state } = ctx;
-  const { emitStatus } = ctx;
+  const { state, emitStatus } = ctx;
   emitStatus("Loading player menu configuration...");
   const data = await ctx.command("get_usb_player_menu_config", { usbRoot: state.usbRoot });
   applyPlayerMenuConfig(ctx, data);
@@ -1212,8 +1179,7 @@ export async function loadUsbPlayerMenuConfig(ctx) {
 // applies it to the stick's menu and answers with the new config. The edited
 // item stays selected, in whichever list it is now in.
 async function editUsbPlayerMenu(ctx, action, kind, side) {
-  const { state } = ctx;
-  const { emitStatus } = ctx;
+  const { state, emitStatus } = ctx;
   const data = await ctx.command("update_usb_player_menu_config", {
     usbRoot: state.usbRoot,
     action,
@@ -1303,8 +1269,7 @@ export async function loadUsbBackgroundColor(ctx) {
 }
 
 export async function setUsbBackgroundColor(ctx, color) {
-  const { state } = ctx;
-  const { emitStatus } = ctx;
+  const { state, emitStatus } = ctx;
   const data = await ctx.command("set_usb_background_color", { usbRoot: state.usbRoot, color });
   state.usbBackgroundColor = data;
   if (data.updated) clearUsbDiagnostics(ctx);
@@ -1331,18 +1296,13 @@ export async function exportPlaylistToUsb(ctx, playlistId) {
 }
 
 async function runPlaylistExport(ctx, playlistId) {
-  const { state, el, setProgress, stopProgressHeartbeat } = ctx;
-  const { emitStatus } = ctx;
+  const { state, el, setProgress, stopProgressHeartbeat, emitStatus } = ctx;
   const playlist = state.playlists.find((item) => item.id === playlistId);
   if (!playlist) return;
   try {
     await ctx.commitActivePlaylistSort(playlistId);
   } catch (err) {
     emitStatus(`Export blocked: couldn't save the current sort order (${err.message || err})`);
-    return;
-  }
-  if (!playlist.tracks?.length) {
-    emitStatus("Playlist must contain tracks before export");
     return;
   }
   // A missing source folder that a playlist track lives under is caught by the
@@ -1412,7 +1372,7 @@ async function runPlaylistExport(ctx, playlistId) {
 
 export function renderUsbPlaylists(ctx) {
   const { state, el, document } = ctx;
-  const openId = String(ctx.usbPlaylistTracksCtl?.scopeId);
+  const openId = String(ctx.usbPlaylistTracksCtl.scopeId);
   el.usbPlaylists.replaceChildren(...state.usbPlaylists.map((playlist) => {
     const li = cloneTemplate(document, "tplUsbPlaylistItem");
     const btn = li.firstElementChild;
@@ -1440,12 +1400,12 @@ function findByScopeId(items, scopeId) {
 }
 
 export function renderUsbPlaylistHeading(ctx) {
-  const playlist = findByScopeId(ctx.state.usbPlaylists, ctx.usbPlaylistTracksCtl?.scopeId);
+  const playlist = findByScopeId(ctx.state.usbPlaylists, ctx.usbPlaylistTracksCtl.scopeId);
   renderTrackListHeading(ctx.el.usbPlaylistHeading, playlist);
 }
 
 export function renderHistoryHeading(ctx) {
-  const history = findByScopeId(ctx.state.histories, ctx.usbHistoryTracksCtl?.scopeId);
+  const history = findByScopeId(ctx.state.histories, ctx.usbHistoryTracksCtl.scopeId);
   renderTrackListHeading(ctx.el.historyHeading, history);
   ctx.el.exportHistoryTracklistBtn.disabled = !history?.canExportTracklist;
 }
@@ -1540,8 +1500,7 @@ export function createUsbHistoryTracksController(ctx) {
 }
 
 export async function initializeUsb(ctx) {
-  const { state, el } = ctx;
-  const { emitStatus } = ctx;
+  const { state, el, emitStatus } = ctx;
   try {
     await ctx.command("initialize_usb", { usbRoot: state.usbRoot });
     emitStatus("USB initialized");

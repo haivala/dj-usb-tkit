@@ -17,6 +17,8 @@ function makeDom() {
     <ul id="navPlaylistList"></ul>
     <button id="addPlaylistBtn"></button>
     <div id="playlistPanelTitle"></div>
+    <div id="playlistExportSpace"></div>
+    <div id="playlistFormatWarning"></div>
     <div id="playlistExportStatus"></div>
     <div id="badgeLabel"></div>
     <input id="playlistSearchInput" value="" />
@@ -97,10 +99,10 @@ test("formatPlaylistExportStatus leads with whether the playlist is on the conne
     lastExportedUsbRoot: "/other",
     lastExportedTrackCount: 5
   };
-  assert.equal(formatPlaylistExportStatus({}, { sameNameExistsOnUsb: true }), "On this USB.");
-  assert.equal(formatPlaylistExportStatus({}, { sameNameExistsOnUsb: false }), "Not on this USB.");
+  assert.equal(formatPlaylistExportStatus({}, { usbSelected: true, sameNameExistsOnUsb: true }), "On this USB.");
+  assert.equal(formatPlaylistExportStatus({}, { usbSelected: true, sameNameExistsOnUsb: false }), "Not on this USB.");
   assert.match(
-    formatPlaylistExportStatus(exported, { sameNameExistsOnUsb: false }),
+    formatPlaylistExportStatus(exported, { usbSelected: true, sameNameExistsOnUsb: false }),
     /^Not on this USB\. Last exported .+ to \/other \(5 tracks\)\.$/
   );
 });
@@ -113,6 +115,7 @@ function commitCtx(state, sort = { key: "artist", dir: "desc" }) {
   const tableSortState = sort ? { playlistTracksBody: sort } : {};
   const ctx = makeTestCtx({
     command: async (cmd, payload) => {
+      if (cmd === "refresh_playlist_export_status") return { playlistUsbExportStatus: [] };
       calls.push(payload === undefined ? [cmd] : [cmd, payload]);
       return cmd === "list_playlists" ? { items: state.playlists.map(({ tracks: _t, ...row }) => row) } : {};
     },
@@ -203,6 +206,7 @@ test("empty playlist links to the Media Library and to USB, or to USB Playlists 
   const views = [];
   const ctx = {
     state: {
+      playlistUsbExportStatusById: new Map(),
       activeTab: "p1",
       currentPlaylistId: "p1",
       playlists: [{ id: "p1", name: "One" }],
@@ -213,7 +217,7 @@ test("empty playlist links to the Media Library and to USB, or to USB Playlists 
       runningJobs: new Map(),
     },
     el: elements(document, [
-      "navPlaylistList", "playlistPanelTitle", "playlistExportStatus", "playlistSearchInput",
+      "navPlaylistList", "playlistPanelTitle", "playlistExportSpace", "playlistFormatWarning", "playlistExportStatus", "playlistSearchInput",
       "playlistEmptyState", "playlistTableWrap", "playlistTracksBody", "playlistTotalDuration",
       "exportPlaylistBtn", "analyzePlaylistMissingBtn",
     ]),

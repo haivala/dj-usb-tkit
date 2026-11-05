@@ -232,6 +232,7 @@
         case "list_usb_devices": return ok({ items: [] });
         case "fetch_usb_playlists": return ok(backend.usbPlaylists());
         case "fetch_usb_histories": return ok(backend.usbHistories());
+        case "refresh_playlist_export_status": return ok({ playlistUsbExportStatus: [] });
         case "fetch_usb_playlist_tracks":
         case "fetch_usb_history_tracks":
           return ok({ items: [], total: 0 });

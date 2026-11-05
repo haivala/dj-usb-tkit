@@ -2,7 +2,6 @@ import test from "node:test";
 import assert from "node:assert/strict";
 
 import {
-  computeExportButtonState,
   playlistUsbExportStatusById,
   refreshPlaylistExportStatus
 } from "../components/usb/actions.mjs";
@@ -18,8 +17,8 @@ import {
 
 test("playlistUsbExportStatusById indexes the backend's per-playlist status by playlist id", () => {
   const statusById = playlistUsbExportStatusById([
-    { playlistId: "p1", playlistName: "Testi", sameNameExistsOnUsb: true, locksReorder: true },
-    { playlistId: "p2", playlistName: "House", sameNameExistsOnUsb: false, locksReorder: false }
+    { playlistId: "p1", playlistName: "Testi", usbSelected: true, sameNameExistsOnUsb: true, locksReorder: true },
+    { playlistId: "p2", playlistName: "House", usbSelected: true, sameNameExistsOnUsb: false, locksReorder: false }
   ]);
 
   assert.equal(statusById.size, 2);
@@ -29,14 +28,14 @@ test("playlistUsbExportStatusById indexes the backend's per-playlist status by p
 });
 
 test("refreshPlaylistExportStatus re-indexes state from the backend command's response", async () => {
-  const state = { usbRoot: "/media/usb", playlistUsbExportStatusById: new Map() };
+  const state = { usbRootValid: true, usbRoot: "/media/usb", playlistUsbExportStatusById: new Map() };
   const calls = [];
   const command = async (name, payload) => {
     calls.push({ name, payload });
     return {
       playlistUsbExportStatus: [
-        { playlistId: "p1", playlistName: "Testi", sameNameExistsOnUsb: true, locksReorder: true },
-        { playlistId: "p2", playlistName: "House", sameNameExistsOnUsb: false, locksReorder: false }
+        { playlistId: "p1", playlistName: "Testi", usbSelected: true, sameNameExistsOnUsb: true, locksReorder: true },
+        { playlistId: "p2", playlistName: "House", usbSelected: true, sameNameExistsOnUsb: false, locksReorder: false }
       ]
     };
   };
@@ -63,40 +62,4 @@ test("refreshPlaylistExportStatus passes null usbRoot when none is connected", a
 
   await refreshPlaylistExportStatus({ state, command, updatePlaylistExportButtons() {}, renderPlaylistList() {}, renderOpenPlaylistExportStatus() {} });
   assert.equal(state.playlistUsbExportStatusById.size, 0);
-});
-
-test("computeExportButtonState renders the backend-computed label for the current playlist", () => {
-  const statusById = playlistUsbExportStatusById([
-    {
-      playlistId: "p1",
-      playlistName: "Testi",
-      sameNameExistsOnUsb: false,
-      locksReorder: false,
-      exportButtonText: "Export to USB: USB_TRY",
-      exportButtonTitle: "Export current playlist to selected USB"
-    }
-  ]);
-
-  const state = computeExportButtonState({
-    usbRoot: "/media/user/USB_TRY",
-    usbRootValid: true,
-    currentPlaylistId: "p1",
-    playlistUsbExportStatusById: statusById
-  });
-
-  assert.equal(state.enabled, true);
-  assert.equal(state.text, "Export to USB: USB_TRY");
-  assert.equal(state.title, "Export current playlist to selected USB");
-});
-
-test("computeExportButtonState shows the select-USB prompt when no valid USB is set", () => {
-  const state = computeExportButtonState({
-    usbRoot: "",
-    usbRootValid: false,
-    currentPlaylistId: "p1",
-    playlistUsbExportStatusById: new Map()
-  });
-
-  assert.equal(state.enabled, false);
-  assert.equal(state.text, "Select USB first");
 });

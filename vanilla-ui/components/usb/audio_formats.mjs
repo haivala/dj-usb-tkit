@@ -24,7 +24,6 @@ export async function loadUsbAudioFormats(ctx) {
 
 export function renderUsbAudioFormats(ctx) {
   const { state, el, document } = ctx;
-  if (!el?.usbAudioFormatsRow || !el?.usbAudioFormatsList) return;
   const data = state.usbAudioFormats;
   el.usbAudioFormatsRow.classList.toggle("hidden", !data);
   el.usbAudioFormatsList.replaceChildren();
@@ -70,7 +69,6 @@ async function saveUsbAudioFormats(ctx, formats) {
 
 export function bindUsbAudioFormatEvents(ctx) {
   const { state, el } = ctx;
-  if (!el?.usbAudioFormatsList) return;
   const fail = (err) => {
     console.error(err);
     ctx.emitStatus(`Save USB audio formats failed: ${err?.message || err}`);

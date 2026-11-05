@@ -27,7 +27,7 @@ test("createInitialState creates fresh mutable containers", () => {
   const b = createInitialState();
 
   a.selectedTrackIds.add("1");
-  a.playlistUsbExportStatusById.set("p1", { sameNameExistsOnUsb: true, locksReorder: true });
+  a.playlistUsbExportStatusById.set("p1", { usbSelected: true, sameNameExistsOnUsb: true, locksReorder: true });
   a.analyzingTrackIds.add("t2");
   a.selectedRepairFixIds.add("fix1");
   a.librarySources.folders.push({ path: "/music" });

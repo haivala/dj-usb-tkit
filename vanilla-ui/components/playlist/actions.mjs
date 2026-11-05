@@ -3,7 +3,7 @@ import { narrowTrackSelectionToLoaded } from "../shared/track_selection.mjs";
 import { applyPlaylistReorderLockToGrid } from "../shared/export_reorder_lock.mjs";
 import { moveArrayItem } from "../shared/list_drag_reorder.mjs";
 import { clearTrackSort, renderEmptyState } from "../shell/actions.mjs";
-import { computeExportButtonState, isUsbRootChangeBlocked } from "../usb/actions.mjs";
+import { isUsbRootChangeBlocked } from "../usb/actions.mjs";
 import { cssEscape, cloneTemplate } from "../../ui_utils.mjs";
 import {
   formatTimestampLocal,
@@ -69,8 +69,7 @@ export function renderPlaylistList(ctx) {
 }
 
 export function promptNewPlaylist(ctx) {
-  const { el, document, requestAnimationFrameFn } = ctx;
-  const { emitStatus } = ctx;
+  const { el, document, requestAnimationFrameFn, emitStatus } = ctx;
   const existing = el.navPlaylistList.querySelector(".nav-new-input-wrap");
   if (existing) {
     existing.querySelector(".nav-new-input")?.focus();
@@ -127,8 +126,7 @@ export function promptNewPlaylist(ctx) {
 }
 
 export function startPlaylistRename(ctx, playlistId) {
-  const { state, el, document, requestAnimationFrameFn, command } = ctx;
-  const { emitStatus } = ctx;
+  const { state, el, document, requestAnimationFrameFn, command, emitStatus } = ctx;
   const playlist = state.playlists.find((item) => item.id === playlistId);
   if (!playlist) return;
 
@@ -183,7 +181,7 @@ export function startPlaylistRename(ctx, playlistId) {
 // whether the playlist is on that stick, then the last export, if any.
 export function formatPlaylistExportStatus(playlist, usbStatus) {
   const lastExport = formatLastExport(playlist);
-  if (usbStatus) {
+  if (usbStatus?.usbSelected) {
     const onUsb = usbStatus.sameNameExistsOnUsb ? "On this USB." : "Not on this USB.";
     return lastExport ? `${onUsb} ${lastExport}` : onUsb;
   }
@@ -264,8 +262,6 @@ export async function loadPlaylists(ctx) {
 // delete or export leaves it stale; the backend recompute is cheap (staged
 // PDB/eDB only). Fire-and-forget: a failed refresh only leaves the marks stale.
 function refreshUsbExportStatusInBackground(ctx) {
-  const { state } = ctx;
-  if (!state.usbRoot || !state.usbRootValid || !ctx.refreshPlaylistExportStatus) return;
   Promise.resolve()
     .then(() => ctx.refreshPlaylistExportStatus())
     .catch((err) => console.warn("refresh_playlist_export_status failed:", err));
@@ -300,16 +296,13 @@ export async function commitActivePlaylistSort(ctx, playlistId) {
 export function updatePlaylistExportButtons(ctx) {
   const { state, el } = ctx;
   const current = getCurrentPlaylist(ctx);
-  const buttonState = computeExportButtonState({
-    usbRoot: state.usbRoot,
-    usbRootValid: state.usbRootValid,
-    currentPlaylistId: current?.id,
-    playlistUsbExportStatusById: state.playlistUsbExportStatusById
-  });
+  const status = state.playlistUsbExportStatusById.get(current?.id);
 
   el.exportPlaylistBtn.disabled = isUsbRootChangeBlocked(state) || !!state.exportStarting;
-  el.exportPlaylistBtn.textContent = buttonState.text;
-  el.exportPlaylistBtn.dataset.tooltip = buttonState.title;
+  if (status) {
+    el.exportPlaylistBtn.textContent = status.exportButtonText;
+    el.exportPlaylistBtn.dataset.tooltip = status.exportButtonTitle;
+  }
 
   // Offer analysis for any playlist track the backend flags as not yet
   // analysis-ready, regardless of where the file lives (a library track
@@ -333,8 +326,7 @@ export function updatePlaylistExportButtons(ctx) {
 }
 
 export async function createPlaylist(ctx, name) {
-  const { state, withProgress, command, updateModeText, switchView } = ctx;
-  const { emitStatus } = ctx;
+  const { state, withProgress, command, updateModeText, switchView, emitStatus } = ctx;
   if (!name) {
     emitStatus("Playlist name is required");
     return;
@@ -396,8 +388,7 @@ const PLAYLIST_IMPORT_KINDS = [
 // imports their tracks too, one list after another, and totals the outcome),
 // then open the first one imported.
 export async function importExternalPlaylist(ctx) {
-  const { state, withProgress, command, updateModeText, switchView, logWarnings } = ctx;
-  const { emitStatus } = ctx;
+  const { state, withProgress, command, updateModeText, switchView, logWarnings, emitStatus } = ctx;
 
   const sources = PLAYLIST_IMPORT_SOURCES.filter((source) => state[source.pathKey]);
   const listed = await Promise.all(sources.map(async (source) => {
@@ -522,8 +513,7 @@ export async function importExternalPlaylist(ctx) {
 }
 
 export async function deletePlaylist(ctx, playlistId) {
-  const { state, openConfirmDialog, command, updateModeText, switchView } = ctx;
-  const { emitStatus } = ctx;
+  const { state, openConfirmDialog, command, updateModeText, switchView, emitStatus } = ctx;
 
   if (!playlistId || state.deletingPlaylistId === playlistId) return;
   const playlist = state.playlists.find((p) => p.id === playlistId);
@@ -571,8 +561,7 @@ export function applyAddResolutions(ctx, tracks, resolutions) {
 }
 
 export async function addTracksToCurrentPlaylist(ctx, tracks) {
-  const { state, pushEventLog, withProgress, command } = ctx;
-  const { emitStatus } = ctx;
+  const { state, pushEventLog, withProgress, command, emitStatus } = ctx;
 
   const playlist = requireCurrentPlaylist(ctx);
   if (!playlist) return;
@@ -626,8 +615,7 @@ export async function addTracksToCurrentPlaylist(ctx, tracks) {
 // the user scrolled past is not lost), materializes any browse-only rows, and
 // appends -- the frontend just forwards the ids / `allMatching` flag.
 export async function addLibrarySelectionToCurrentPlaylist(ctx, { trackIds = [], allMatching = false } = {}) {
-  const { state, pushEventLog, withProgress, command } = ctx;
-  const { emitStatus } = ctx;
+  const { state, pushEventLog, withProgress, command, emitStatus } = ctx;
 
   const playlist = requireCurrentPlaylist(ctx);
   if (!playlist) return;
@@ -676,12 +664,12 @@ export function createSingleSubmit(handler) {
 export function fillPlaylistSidebarItem(item, playlist, usbStatus) {
   item.querySelector(".nav-playlist-name").textContent = playlist.name;
   const status = item.querySelector(".nav-playlist-status");
-  const exported = usbStatus ? !!usbStatus.sameNameExistsOnUsb : !!playlist.lastExportedAt;
+  const exported = usbStatus?.usbSelected ? usbStatus.sameNameExistsOnUsb : !!playlist.lastExportedAt;
   status.classList.toggle("exported", exported);
   status.textContent = exported ? "✓" : "";
   // No tooltip: hovering the row swaps the mark for the rename/delete buttons.
   if (exported) {
-    status.setAttribute("aria-label", usbStatus ? "On this USB" : "Exported to USB");
+    status.setAttribute("aria-label", usbStatus?.usbSelected ? "On this USB" : "Exported to USB");
   } else {
     status.removeAttribute("aria-label");
   }
@@ -694,7 +682,7 @@ export function fillPlaylistSidebarItem(item, playlist, usbStatus) {
 // (`listSummaryText`). The total time is under the table, not repeated here.
 export function updatePlaylistPanelTitle(ctx, playlist) {
   const { el } = ctx;
-  if (!el?.playlistPanelTitle || !playlist) return;
+  if (!playlist) return;
   const parts = [playlist.name];
   if (playlist.listSummaryText && Number(playlist.listTrackCount) > 0) parts.push(`(${playlist.listSummaryText})`);
   // Backend-derived from where the playlist was imported (see list_playlists).
@@ -713,7 +701,7 @@ export function updatePlaylistPanelTitle(ctx, playlist) {
 // FMT column and export line follow.
 export function reloadPlaylistForUsb(ctx) {
   const playlist = getCurrentPlaylist(ctx);
-  if (playlist && ctx.playlistTracksCtl?.scopeId === playlist.id) ctx.playlistTracksCtl.reload();
+  if (playlist && ctx.playlistTracksCtl.scopeId === playlist.id) ctx.playlistTracksCtl.reload();
 }
 
 export function refreshPlaylistExportSpace(ctx) {
@@ -741,7 +729,6 @@ export function refreshPlaylistExportSpace(ctx) {
 // don't allow). Hidden without a USB or an estimate.
 function renderPlaylistExportSpace(ctx, playlist) {
   const { state, el } = ctx;
-  if (!el?.playlistExportSpace) return;
   const space = state.usbRoot && state.usbRootValid && Number(playlist.listTrackCount) > 0
     && playlist.exportSpace?.usbRoot === state.usbRoot
     ? playlist.exportSpace
@@ -758,7 +745,6 @@ function renderPlaylistExportSpace(ctx, playlist) {
 // export"), a warning when it blocks the export.
 function renderPlaylistFormatWarning(ctx, space) {
   const { el } = ctx;
-  if (!el?.playlistFormatWarning) return;
   const notice = space?.formatNotice || "";
   el.playlistFormatWarning.classList.toggle("hidden", !notice);
   el.playlistFormatWarning.classList.toggle("is-warning", !!space?.formatNoticeBlocks);
@@ -866,12 +852,12 @@ export function createPlaylistTracksController(ctx) {
     onResponse: (data) => {
       const p = getCurrentPlaylist(ctx);
       if (p) {
-        p.totalDurationMs = Number(data.totalDurationMs) || 0;
-        p.durationUnknownCount = Number(data.durationUnknownCount) || 0;
-        p.unanalyzedCount = Number(data.unanalyzedCount) || 0;
+        p.totalDurationMs = data.totalDurationMs;
+        p.durationUnknownCount = data.durationUnknownCount;
+        p.unanalyzedCount = data.unanalyzedCount;
         // Whole-playlist count from the backend, not just the loaded page(s).
-        p.trackCount = Number(data.total) || 0;
-        p.listTrackCount = Number(data.listTrackCount) || 0;
+        p.trackCount = data.total;
+        p.listTrackCount = data.listTrackCount;
         p.listSummaryText = data.listSummaryText;
       }
       // Reveal the table wrap *before* the rows are built: a
