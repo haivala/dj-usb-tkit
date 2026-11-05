@@ -1,5 +1,37 @@
 import { test, expect } from "./coverage-fixture.mjs";
 
+// Counts the `fetch_usb_playlists` calls in `window.__playlistFetches`.
+function countPlaylistFetches(page) {
+  return page.addInitScript(() => {
+    const invoke = window.__TAURI__.core.invoke;
+    window.__playlistFetches = 0;
+    window.__TAURI__.core.invoke = async (command, payload) => {
+      if (command === "fetch_usb_playlists") window.__playlistFetches += 1;
+      return invoke(command, payload);
+    };
+  });
+}
+
+// Empty USB lists, answered only once the test calls `window.__releaseLists()`.
+function holdEmptyLists(page) {
+  return page.addInitScript(() => {
+    const invoke = window.__TAURI__.core.invoke;
+    const released = new Promise((resolve) => { window.__releaseLists = resolve; });
+    window.__TAURI__.core.invoke = async (command, payload) => {
+      const backend = window.__e2eBackend;
+      if (command === "fetch_usb_playlists") {
+        await released;
+        return backend.ok(backend.usbPlaylists());
+      }
+      if (command === "fetch_usb_histories") {
+        await released;
+        return backend.ok(backend.usbHistories());
+      }
+      return invoke(command, payload);
+    };
+  });
+}
+
 function installTauriMock(page, mode) {
   return page.addInitScript(({ mode }) => {
     window.localStorage.setItem("djusbtkit.helpSeen", "1");
@@ -539,26 +571,36 @@ test("USB playlist removal confirm path handles cancel and confirm", async ({ pa
   await expect(page.locator("#diagOverallStatus")).toBeEmpty();
 });
 
-test("USB playlists tab shows empty state before import", async ({ page }) => {
+test("USB playlists tab shows the empty text only after a read finds nothing", async ({ page }) => {
   await installTauriMock(page, "valid");
+  await holdEmptyLists(page);
   await page.goto("/");
 
   await page.locator('.nav-item[data-view="usb"]').click();
   await page.locator("#usbEmptyState .empty-state-action").click();
   await page.locator('.nav-item[data-view="usb-playlists"]').click();
 
+  await expect(page.locator("#panel-usb-playlists")).toHaveClass(/active/);
+  await expect(page.locator("#usbPlaylists")).toBeEmpty();
+
+  await page.evaluate(() => window.__releaseLists());
   await expect(page.locator("#usbPlaylists")).toContainText("No playlists imported yet");
   await expect(page.locator("#usbPlaylists")).toContainText("Import Playlists");
 });
 
-test("USB history tab shows empty state before import", async ({ page }) => {
+test("USB history tab shows the empty text only after a read finds nothing", async ({ page }) => {
   await installTauriMock(page, "valid");
+  await holdEmptyLists(page);
   await page.goto("/");
 
   await page.locator('.nav-item[data-view="usb"]').click();
   await page.locator("#usbEmptyState .empty-state-action").click();
   await page.locator('.nav-item[data-view="usb-history"]').click();
 
+  await expect(page.locator("#panel-usb-history")).toHaveClass(/active/);
+  await expect(page.locator("#historyList")).toBeEmpty();
+
+  await page.evaluate(() => window.__releaseLists());
   await expect(page.locator("#historyList")).toContainText("No history imported yet");
   await expect(page.locator("#historyList")).toContainText("Import History");
 });
@@ -574,6 +616,32 @@ test("USB playlists status shows the backend's warning count, linked to the Even
 
   await expect(page.locator("#statusText")).toContainText("USB playlists loaded: 1 | (2 warnings)");
   await expect(page.locator("#statusText .status-warning-link")).toHaveText("(2 warnings)");
+});
+
+test("a failed USB list read retries when the page is opened again", async ({ page }) => {
+  await installTauriMock(page, "valid");
+  await page.addInitScript(() => {
+    const invoke = window.__TAURI__.core.invoke;
+    let fetches = 0;
+    window.__TAURI__.core.invoke = async (command, payload) => {
+      if (command === "fetch_usb_playlists") {
+        fetches += 1;
+        if (fetches === 1) return { ok: false, error: { code: "IO", message: "read failed" } };
+      }
+      return invoke(command, payload);
+    };
+  });
+  await page.goto("/");
+  await page.locator('.nav-item[data-view="usb"]').click();
+  await page.locator("#usbEmptyState .empty-state-action").click();
+
+  await page.locator('.nav-item[data-view="usb-playlists"]').click();
+  await expect(page.locator("#statusText")).toContainText("read failed");
+  await expect(page.locator("#usbPlaylists")).toBeEmpty();
+
+  await page.locator('.nav-item[data-view="usb"]').click();
+  await page.locator('.nav-item[data-view="usb-playlists"]').click();
+  await expect(page.locator('[data-usb-playlist="usb-1"]')).toBeVisible();
 });
 
 test("console.log messages appear in Event Log", async ({ page }) => {
@@ -849,6 +917,7 @@ test("Diagnostics and parity render without warning panel", async ({ page }) => 
 
 test("Repair preview locks structural-prerequisite fix checkboxes, hides bookkeeping fixes; the Engine fix turns the setting on", async ({ page }) => {
   await installTauriMock(page, "valid");
+  await countPlaylistFetches(page);
   await page.goto("/");
 
   await page.locator('.nav-item[data-view="usb"]').click();
@@ -857,7 +926,6 @@ test("Repair preview locks structural-prerequisite fix checkboxes, hides bookkee
   // Load playlists first -- a successful repair apply must clear them, since
   // an applied fix may have rewritten the PDB playlist tree they came from.
   await page.locator('.nav-item[data-view="usb-playlists"]').click();
-  await page.locator("#refreshUsbBtn").click();
   await expect(page.locator('[data-usb-playlist="usb-1"]')).toBeVisible();
   await page.locator('.nav-item[data-view="usb"]').click();
 
@@ -918,12 +986,15 @@ test("Repair preview locks structural-prerequisite fix checkboxes, hides bookkee
   await expect(engineFix.locator(".diag-repair-fix-meta")).toContainText("destructive");
 
   // The repair response carries fresh diagnostics; assert on the settled state
-  // (playlists cleared) rather than the transient status text.
+  // rather than the transient status text.
   await page.locator("#applyRepairsBtn").click();
   await expect(page.locator("#exportEngineLibraryCheckbox")).toBeChecked();
+  expect(await page.evaluate(() => window.__playlistFetches)).toBe(1);
 
+  // The repair cleared the list, so opening the page reads it again.
   await page.locator('.nav-item[data-view="usb-playlists"]').click();
-  await expect(page.locator("#usbPlaylists")).toContainText("No playlists imported yet");
+  await expect(page.locator('[data-usb-playlist="usb-1"]')).toBeVisible();
+  expect(await page.evaluate(() => window.__playlistFetches)).toBe(2);
 });
 
 test("a repair whose diagnostics re-run failed still applies the export status it returns", async ({ page }) => {
@@ -1122,6 +1193,45 @@ test("USB toggle race ends in deterministic final state", async ({ page }) => {
   await expect(page.locator("#panel-usb")).toHaveClass(/active/);
 });
 
+test("a USB list read overtaken by a USB change drops its late response", async ({ page }) => {
+  await installTauriMock(page, "toggle-usb");
+  await page.addInitScript(() => {
+    const invoke = window.__TAURI__.core.invoke;
+    const backend = window.__e2eBackend;
+    const playlist = (name) => ({ id: name, name, source: "mock-tauri", tracks: [] });
+    const released = new Promise((resolve) => { window.__releaseFirstRead = resolve; });
+    let fetches = 0;
+    window.__TAURI__.core.invoke = async (command, payload) => {
+      if (command !== "fetch_usb_playlists") return invoke(command, payload);
+      fetches += 1;
+      if (fetches > 1) return backend.ok(backend.usbPlaylists({ items: [playlist("Fresh")] }));
+      await released;
+      return backend.ok(backend.usbPlaylists({ items: [playlist("Stale")] }));
+    };
+  });
+  await page.goto("/");
+
+  const usbPlaylistsNav = page.locator('.nav-sub-item[data-view="usb-playlists"]');
+  await page.locator('.nav-item[data-view="usb"]').click();
+  await page.locator("#usbEmptyState .empty-state-action").click(); // valid
+  await usbPlaylistsNav.click(); // the first read starts and stays open
+
+  await page.locator('.nav-item[data-view="usb"]').click();
+  await page.locator("#selectUsbFolderBtn").click(); // invalid
+  await expect(usbPlaylistsNav).not.toHaveClass(/revealed/);
+  await page.locator("#selectUsbFolderBtn").click(); // valid
+  await expect(usbPlaylistsNav).toHaveClass(/revealed/);
+  await usbPlaylistsNav.click();
+  await expect(page.locator('[data-usb-playlist="Fresh"]')).toBeVisible();
+
+  await page.evaluate(async () => {
+    window.__releaseFirstRead();
+    await new Promise((resolve) => setTimeout(resolve, 50));
+  });
+  await expect(page.locator('[data-usb-playlist="Fresh"]')).toBeVisible();
+  await expect(page.locator('[data-usb-playlist="Stale"]')).toHaveCount(0);
+});
+
 test("a job started right after another finished keeps its progress footer", async ({ page }) => {
   await installTauriMock(page, "progress-race");
   await page.goto("/");
@@ -1204,6 +1314,7 @@ async function connectUsb(page) {
 
 test("applying repairs that change nothing keeps the loaded USB playlists and shows the refreshed report", async ({ page }) => {
   await installTauriMock(page, "valid");
+  await countPlaylistFetches(page);
   await page.addInitScript(() => {
     const invoke = window.__TAURI__.core.invoke;
     window.__TAURI__.core.invoke = async (command, payload) => {
@@ -1219,7 +1330,6 @@ test("applying repairs that change nothing keeps the loaded USB playlists and sh
   await page.goto("/");
   await connectUsb(page);
   await page.locator('.nav-item[data-view="usb-playlists"]').click();
-  await page.locator("#refreshUsbBtn").click();
   await expect(page.locator('[data-usb-playlist="usb-1"]')).toBeVisible();
   await page.locator('.nav-item[data-view="usb"]').click();
 
@@ -1231,6 +1341,7 @@ test("applying repairs that change nothing keeps the loaded USB playlists and sh
 
   await page.locator('.nav-item[data-view="usb-playlists"]').click();
   await expect(page.locator('[data-usb-playlist="usb-1"]')).toBeVisible();
+  expect(await page.evaluate(() => window.__playlistFetches)).toBe(1);
 });
 
 test("a player-menu edit or PDB sync clears the diagnostics report only when it changed the stick", async ({ page }) => {

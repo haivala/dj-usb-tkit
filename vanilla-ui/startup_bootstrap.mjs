@@ -365,6 +365,8 @@ export async function switchView(ctx, viewId) {
     ctx.renderEventLog();
   } else if (viewId === "backups") {
     await ctx.renderBackups();
+  } else if (viewId === "usb-playlists" || viewId === "usb-history") {
+    ctx.ensureUsbListLoaded(viewId);
   } else if (viewId === "usb-player-menu") {
     ctx.renderUsbPlayerMenuEditor();
     ctx.renderUsbBackgroundColor();

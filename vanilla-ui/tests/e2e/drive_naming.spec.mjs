@@ -167,6 +167,36 @@ test("clicking a recent USB pill for an already-named drive does not reopen the 
   await expect(page.locator("#usbNameBadgeLabel")).toHaveText("Club Stick");
 });
 
+test("selecting the same USB again picks up a session recorded since the last read", async ({ page }) => {
+  await installTauriMock(page, { deviceName: "Club Stick" });
+  await page.addInitScript(() => {
+    const invoke = window.__TAURI__.core.invoke;
+    window.__sessions = [{ id: "h-1", name: "HISTORY 001", tracks: [] }];
+    window.__TAURI__.core.invoke = async (command, payload) => {
+      if (command === "fetch_usb_histories") {
+        return window.__e2eBackend.ok(window.__e2eBackend.usbHistories({ items: window.__sessions }));
+      }
+      return invoke(command, payload);
+    };
+  });
+  await page.goto("/");
+  const pill = page.locator('#usbRecentList button[data-usb-recent-path="/Volumes/USB-TEST"]');
+  const history = page.locator("#historyList");
+
+  await page.locator('.nav-item[data-view="usb"]').click();
+  await pill.click();
+  await expect(page.locator("#usbRootPathText")).toHaveClass(/usb-path-valid/);
+  await page.locator('.nav-item[data-view="usb-history"]').click();
+  await expect(history).toContainText("HISTORY 001");
+  await expect(history).not.toContainText("HISTORY 002");
+
+  await page.evaluate(() => window.__sessions.push({ id: "h-2", name: "HISTORY 002", tracks: [] }));
+  await page.locator('.nav-item[data-view="usb"]').click();
+  await page.locator("#selectUsbFolderBtn").click();
+  await page.locator('.nav-item[data-view="usb-history"]').click();
+  await expect(history).toContainText("HISTORY 002");
+});
+
 test("recent USB pill naming prompt pre-fills the OS-suggested drive label", async ({ page }) => {
   await openRecentUsbNamingPrompt(page, { suggestedName: "CLUBSTICK" });
 

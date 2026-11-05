@@ -1243,6 +1243,10 @@ test("a successful export clears the stale diagnostics report and sends the back
   // The loaded USB playlists and their totals are out of date now.
   await expect(page.locator("#usbPlaylists [data-usb-playlist]")).toHaveCount(0);
   await expect(page.locator("#usbCountsText")).toHaveText("");
+
+  // Opening the page reads them again.
+  await page.locator('.nav-item[data-view="usb-playlists"]').click();
+  await expect(page.locator("#usbPlaylists [data-usb-playlist]")).toHaveCount(1);
 });
 
 test("the backend's export gate rejections are shown in the status bar", async ({ page }) => {

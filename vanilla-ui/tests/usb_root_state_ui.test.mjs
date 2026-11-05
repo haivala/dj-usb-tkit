@@ -36,6 +36,8 @@ test("usbSelectionChanged clears lists and rerenders", () => {
     historyTracks: [{ id: 1 }]
   });
   ctx.el.usbCountsText.textContent = "x";
+  ctx.el.usbPlaylists.dataset.loaded = "";
+  ctx.el.historyList.dataset.loaded = "";
 
   usbSelectionChanged(ctx);
 
@@ -43,8 +45,11 @@ test("usbSelectionChanged clears lists and rerenders", () => {
   assert.equal(ctx.state.histories.length, 0);
   assert.equal(ctx.state.playlistUsbExportStatusById.size, 0);
   assert.equal(ctx.el.usbCountsText.textContent, "");
-  assert.match(ctx.el.usbPlaylists.textContent, /No playlists imported yet/);
-  assert.match(ctx.el.historyList.textContent, /No history imported yet/);
+  // Nothing is read yet, so the lists show nothing rather than "no playlists".
+  assert.equal(ctx.el.usbPlaylists.textContent, "");
+  assert.equal(ctx.el.historyList.textContent, "");
+  assert.equal("loaded" in ctx.el.usbPlaylists.dataset, false);
+  assert.equal("loaded" in ctx.el.historyList.dataset, false);
   assert.equal(ctx.el.usbDiagnosticsCard.classList.contains("hidden"), true);
 });
 
@@ -76,6 +81,8 @@ test("clearUsbPlaylistsView clears the playlists and their totals, and leaves th
   });
   ctx.el.usbCountsText.textContent = "1 playlist, 3 tracks";
   ctx.el.historyCountsText.textContent = "1 session, 3 tracks";
+  ctx.el.usbPlaylists.dataset.loaded = "";
+  ctx.el.historyList.dataset.loaded = "";
 
   clearUsbPlaylistsView(ctx);
 
@@ -83,6 +90,8 @@ test("clearUsbPlaylistsView clears the playlists and their totals, and leaves th
   assert.equal(ctx.el.usbCountsText.textContent, "");
   assert.equal(ctx.state.histories.length, 1);
   assert.equal(ctx.el.historyCountsText.textContent, "1 session, 3 tracks");
+  assert.equal("loaded" in ctx.el.usbPlaylists.dataset, false);
+  assert.equal("loaded" in ctx.el.historyList.dataset, true);
 });
 
 test("syncAssetScopePaths calls allow_asset_paths with the source folders and usb root", async () => {

@@ -85,6 +85,8 @@ export function createInitialState() {
     // The USB playlist/history track tables' fetch/pagination/search/sort state
     // lives in their TrackListControllers (main.js), not here.
     histories: [],
+    // The running read of each USB list, by page id (see startUsbListRead).
+    usbListReads: { "usb-playlists": null, "usb-history": null },
     selectedHistoryIndex: null,
     // Whole selected session, kept only for the "Export Tracklist" text feature.
     historyTracks: [],

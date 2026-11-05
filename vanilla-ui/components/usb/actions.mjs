@@ -3,6 +3,7 @@ import { createTrackListController } from "../shared/track_list_controller.mjs";
 import { narrowTrackSelectionToLoaded } from "../shared/track_selection.mjs";
 import { cloneTemplate } from "../../ui_utils.mjs";
 import { createDialogLifecycle } from "../shared/dialog_lifecycle.mjs";
+import { catchErr } from "../shared/track_actions.mjs";
 import { STORAGE_KEY_USB_ROOT, STORAGE_KEY_EXPORT_ENGINE_LIBRARY } from "../../settings_keys.mjs";
 import {
   renderTrackListDurationSummary,
@@ -407,6 +408,7 @@ export function loadUsbRootFromStorage(ctx) {
 // Each clear covers one list and its panel; the next read fills it again.
 export function clearUsbPlaylistsView(ctx) {
   const { state, el } = ctx;
+  forgetUsbListRead(ctx, "usb-playlists");
   state.usbPlaylists = [];
   el.usbCountsText.textContent = "";
   renderUsbPlaylists(ctx);
@@ -415,6 +417,7 @@ export function clearUsbPlaylistsView(ctx) {
 
 function clearUsbHistoryView(ctx) {
   const { state, el } = ctx;
+  forgetUsbListRead(ctx, "usb-history");
   state.histories = [];
   state.selectedHistoryIndex = null;
   state.historyTracks = [];
@@ -794,7 +797,53 @@ export async function reorderUsbPlaylists(ctx) {
 }
 // USB workflow orchestration.
 
-export async function refreshUsb(ctx) {
+// Each USB list page: its <ul> (which carries the `data-loaded` mark) and its read.
+const USB_LISTS = {
+  "usb-playlists": { list: "usbPlaylists", read: readUsbPlaylists },
+  "usb-history": { list: "historyList", read: readUsbHistories }
+};
+
+// `state.usbListReads[viewId]` is the list's running read. Clearing the list or
+// starting a newer read replaces it, and a read that is no longer the running
+// one drops its response: the stick may have changed since it started.
+function startUsbListRead(ctx, viewId) {
+  const { state, el } = ctx;
+  const { list, read } = USB_LISTS[viewId];
+  delete el[list].dataset.loaded;
+  const run = {};
+  state.usbListReads[viewId] = run;
+  run.promise = read(ctx, () => state.usbListReads[viewId] === run).finally(() => {
+    if (state.usbListReads[viewId] === run) state.usbListReads[viewId] = null;
+  });
+  return run.promise;
+}
+
+function forgetUsbListRead(ctx, viewId) {
+  ctx.state.usbListReads[viewId] = null;
+  delete ctx.el[USB_LISTS[viewId].list].dataset.loaded;
+}
+
+// The Import buttons: joins a read that's already running.
+export function readUsbList(ctx, viewId) {
+  return ctx.state.usbListReads[viewId]?.promise ?? startUsbListRead(ctx, viewId);
+}
+
+// Opening a list page reads the list unless it's already loaded. The page
+// doesn't wait for it, and a failed read leaves no mark, so the next open retries.
+export function ensureUsbListLoaded(ctx, viewId) {
+  const { state, el } = ctx;
+  if (!state.usbRoot || !state.usbRootValid) return;
+  if ("loaded" in el[USB_LISTS[viewId].list].dataset || state.usbListReads[viewId]) return;
+  startUsbListRead(ctx, viewId).catch(catchErr(ctx.emitStatus));
+}
+
+// A read that must see the stick as it is now (after a write), so it doesn't
+// join one that started earlier.
+export function refreshUsb(ctx) {
+  return startUsbListRead(ctx, "usb-playlists");
+}
+
+async function readUsbPlaylists(ctx, isCurrent) {
   const { state, el, setProgress, startProgressHeartbeat, stopProgressHeartbeat } = ctx;
   const { emitStatus } = ctx;
   if (!state.usbRoot) {
@@ -811,11 +860,20 @@ export async function refreshUsb(ctx) {
     });
   } catch (err) {
     stopProgressHeartbeat();
+    if (!isCurrent()) {
+      ctx.scheduleProgressIdle(0);
+      return;
+    }
     setProgress(true, 100, "USB load failed", { error: true, dismissable: true });
     throw err;
   }
   stopProgressHeartbeat();
+  if (!isCurrent()) {
+    ctx.scheduleProgressIdle(0);
+    return;
+  }
 
+  el.usbPlaylists.dataset.loaded = "";
   state.usbPlaylists = data.items.map((item) => ctx.normalizeUsbPlaylist(item));
   applyPlaylistUsbExportStatus(ctx, data.playlistUsbExportStatus);
 
@@ -941,7 +999,7 @@ function syncEngineLibrarySetting(ctx, enabled) {
   } catch {}
 }
 
-export async function refreshHistory(ctx) {
+async function readUsbHistories(ctx, isCurrent) {
   const { state, el } = ctx;
   const { emitStatus } = ctx;
   if (!state.usbRoot) {
@@ -949,8 +1007,16 @@ export async function refreshHistory(ctx) {
     return;
   }
   emitStatus("Loading USB history...");
-  const data = await ctx.command("fetch_usb_histories", { usbRoot: state.usbRoot });
+  let data;
+  try {
+    data = await ctx.command("fetch_usb_histories", { usbRoot: state.usbRoot });
+  } catch (err) {
+    if (!isCurrent()) return;
+    throw err;
+  }
+  if (!isCurrent()) return;
 
+  el.historyList.dataset.loaded = "";
   state.histories = data.items.map((history) => ({
     ...history,
     tracks: history.tracks.map((track) => ctx.normalizeTrack(track))
@@ -1400,13 +1466,17 @@ async function runPlaylistExport(ctx, playlistId) {
   clearUsbPlaylistsView(ctx);
 }
 
-// A USB side list (playlists / history): the items, or `emptyText` with the
-// right-hand track pane hidden when there are none.
+// A USB side list (playlists / history): the items, or the right-hand track
+// pane hidden when there are none, with `emptyText` once a read has finished.
 function renderUsbSideList(list, items, emptyText) {
   const doc = list.ownerDocument;
   const right = list.closest(".split")?.querySelector(".right");
   right?.classList.toggle("hidden", !items.length);
   if (!items.length) {
+    if (!("loaded" in list.dataset)) {
+      list.replaceChildren();
+      return;
+    }
     const empty = cloneTemplate(doc, "tplMutedListItem");
     empty.textContent = emptyText;
     list.replaceChildren(empty);
