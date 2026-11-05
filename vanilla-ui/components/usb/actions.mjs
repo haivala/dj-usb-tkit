@@ -419,8 +419,6 @@ function clearUsbHistoryView(ctx) {
   const { state, el } = ctx;
   forgetUsbListRead(ctx, "usb-history");
   state.histories = [];
-  state.selectedHistoryIndex = null;
-  state.historyTracks = [];
   el.historyCountsText.textContent = "";
   el.exportHistoryTracklistBtn.disabled = true;
   renderHistoryList(ctx);
@@ -869,13 +867,8 @@ export function openUsbPlaylistRow(ctx, btn) {
 // Highlights a history row and loads its table.
 export function openHistoryRow(ctx, btn) {
   const { state, el, usbHistoryTracksCtl, emitStatus } = ctx;
-  const index = Number(btn.dataset.historyIndex);
-  state.selectedHistoryIndex = index;
-  const history = state.histories[index];
-  // Kept for the "Export Tracklist" text feature, which needs the whole
-  // session's tracks; the table itself is paginated by the controller.
-  state.historyTracks = history?.tracks || [];
-  el.exportHistoryTracklistBtn.disabled = !state.historyTracks.length;
+  const history = findByScopeId(state.histories, btn.dataset.historyId);
+  el.exportHistoryTracklistBtn.disabled = !history?.tracks.length;
   setActiveListItem(el.historyList, btn);
   if (!history) {
     usbHistoryTracksCtl.clear();
@@ -1081,8 +1074,6 @@ async function readUsbHistories(ctx, isCurrent) {
     tracks: history.tracks.map((track) => ctx.normalizeTrack(track))
   }));
   el.historyCountsText.textContent = data.summaryText;
-  state.selectedHistoryIndex = null;
-  state.historyTracks = [];
   el.exportHistoryTracklistBtn.disabled = true;
   renderHistoryList(ctx);
   ctx.usbHistoryTracksCtl.clear();
@@ -1102,21 +1093,21 @@ export async function exportHistoryTracklist(ctx) {
   const { state } = ctx;
   const { emitStatus } = ctx;
 
-  const history = state.histories[state.selectedHistoryIndex];
-  if (!history || !state.historyTracks.length) {
+  const history = findByScopeId(state.histories, ctx.usbHistoryTracksCtl.scopeId);
+  if (!history?.tracks.length) {
     emitStatus("Select a history session first");
     return;
   }
 
   const choice = await ctx.tracklistExportDialog.open({
-    tracks: state.historyTracks,
+    tracks: history.tracks,
     defaultTimesEnabled: true,
     defaultPlacement: "before"
   });
   if (!choice) return;
 
-  const startIndex = Math.min(Math.max(Number(choice.startIndex) || 0, 0), state.historyTracks.length - 1);
-  const text = buildTracklistText(state.historyTracks.slice(startIndex), choice.timeMode);
+  const startIndex = Math.min(Math.max(Number(choice.startIndex) || 0, 0), history.tracks.length - 1);
+  const text = buildTracklistText(history.tracks.slice(startIndex), choice.timeMode);
   const saved = await ctx.invoke("save_text_file", {
     suggestedFileName: sanitizeTracklistFileName(history.name),
     contents: text
@@ -1556,11 +1547,11 @@ export function renderHistoryHeading(ctx) {
 
 export function renderHistoryList(ctx) {
   const { state, el, document } = ctx;
-  // Render newest first — keep original index so click handler resolves state.histories[index]
-  const items = state.histories.map((history, index) => {
+  // Render newest first.
+  const items = state.histories.map((history) => {
     const dateText = getHistoryDateValue(history);
     const li = cloneTemplate(document, "tplHistoryItem");
-    li.firstElementChild.dataset.historyIndex = String(index);
+    li.firstElementChild.dataset.historyId = history.id;
     li.querySelector(".playlist-label").textContent = `${history.name}${dateText ? ` (${dateText})` : ""}`;
     return li;
   }).reverse();

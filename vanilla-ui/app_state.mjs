@@ -87,9 +87,6 @@ export function createInitialState() {
     histories: [],
     // The running read of each USB list, by page id (see startUsbListRead).
     usbListReads: { "usb-playlists": null, "usb-history": null },
-    selectedHistoryIndex: null,
-    // Whole selected session, kept only for the "Export Tracklist" text feature.
-    historyTracks: [],
     usbPlayerMenuCurrent: [],
     usbPlayerMenuAvailable: [],
     usbPlayerMenuCurrentSelectedKind: null,

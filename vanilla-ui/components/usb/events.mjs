@@ -258,7 +258,7 @@ export function bindUsbEvents(ctx) {
   });
 
   el.historyList.addEventListener("click", (event) => {
-    const btn = event.target.closest("[data-history-index]");
+    const btn = event.target.closest("[data-history-id]");
     if (!btn) return;
     stopPlaybackIfActive().catch((err) => {
       console.warn("Failed stopping playback on history change:", err);
