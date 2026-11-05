@@ -51,6 +51,8 @@
 - **Fix:** A USB playlist reorder that can't write to the stick now shows its warnings instead of a plain
   "Playlist order saved".
 - **Fix:** Warnings from removing a USB playlist now reach the Event Log that the status line links to.
+- **Improvement:** Export Tracklist moved next to the open session's name on USB History, and only shows
+  when a session is open.
 - **Chore:** USB History keeps one record of the open session, instead of three.
 - **Improvement:** The USB list totals, track-list headings and status lines now come from the backend.
 - **Fix:** Reordering USB playlists now saves the order in both databases for every playlist, by name.

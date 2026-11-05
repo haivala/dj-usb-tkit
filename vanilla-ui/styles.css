@@ -2657,6 +2657,11 @@ input[type="checkbox"]:disabled {
   flex-shrink: 0;
 }
 
+.track-list-heading > button {
+  margin-left: auto;
+  flex-shrink: 0;
+}
+
 /* ── split layout ───────────────────────────────────── */
 
 .split {

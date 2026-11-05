@@ -420,7 +420,6 @@ function clearUsbHistoryView(ctx) {
   forgetUsbListRead(ctx, "usb-history");
   state.histories = [];
   el.historyCountsText.textContent = "";
-  el.exportHistoryTracklistBtn.disabled = true;
   renderHistoryList(ctx);
   ctx.usbHistoryTracksCtl.clear();
 }
@@ -868,7 +867,6 @@ export function openUsbPlaylistRow(ctx, btn) {
 export function openHistoryRow(ctx, btn) {
   const { state, el, usbHistoryTracksCtl, emitStatus } = ctx;
   const history = findByScopeId(state.histories, btn.dataset.historyId);
-  el.exportHistoryTracklistBtn.disabled = !history?.tracks.length;
   setActiveListItem(el.historyList, btn);
   if (!history) {
     usbHistoryTracksCtl.clear();
@@ -1074,7 +1072,6 @@ async function readUsbHistories(ctx, isCurrent) {
     tracks: history.tracks.map((track) => ctx.normalizeTrack(track))
   }));
   el.historyCountsText.textContent = data.summaryText;
-  el.exportHistoryTracklistBtn.disabled = true;
   renderHistoryList(ctx);
   ctx.usbHistoryTracksCtl.clear();
   ctx.logWarnings("usb-import", data.warnings, "fetch_usb_histories");
@@ -1094,7 +1091,7 @@ export async function exportHistoryTracklist(ctx) {
   const { emitStatus } = ctx;
 
   const history = findByScopeId(state.histories, ctx.usbHistoryTracksCtl.scopeId);
-  if (!history?.tracks.length) {
+  if (!history?.canExportTracklist) {
     emitStatus("Select a history session first");
     return;
   }
@@ -1543,6 +1540,7 @@ export function renderUsbPlaylistHeading(ctx) {
 export function renderHistoryHeading(ctx) {
   const history = findByScopeId(ctx.state.histories, ctx.usbHistoryTracksCtl?.scopeId);
   renderTrackListHeading(ctx.el.historyHeading, history);
+  ctx.el.exportHistoryTracklistBtn.disabled = !history?.canExportTracklist;
 }
 
 export function renderHistoryList(ctx) {

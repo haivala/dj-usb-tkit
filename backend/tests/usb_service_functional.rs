@@ -832,6 +832,7 @@ fn fetch_usb_histories_reads_injected_pdb_history_rows_and_materializes_tracks()
         ),
     );
     let history = &data.items[0];
+    assert!(history.can_export_tracklist);
     assert_eq!(
         history.tracks.len(),
         2,

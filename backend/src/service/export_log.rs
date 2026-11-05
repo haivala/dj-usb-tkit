@@ -638,6 +638,7 @@ mod tests {
             id: "usb-h-1".to_string(),
             name: "History 1".to_string(),
             created_at: None,
+            can_export_tracklist: true,
             tracks: vec![
                 history_track("1", "Track One", "Artist", "/Contents/Artist/Album/one.mp3"),
                 history_track("2", "Track Two", "Artist", "/Contents/Artist/Album/two.mp3"),

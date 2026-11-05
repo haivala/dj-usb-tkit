@@ -1713,6 +1713,8 @@ pub struct UsbHistory {
     pub id: String,
     pub name: String,
     pub created_at: Option<String>,
+    /// False for a session with no tracks.
+    pub can_export_tracklist: bool,
     pub tracks: Vec<UsbTrack>,
     /// See `UsbPlaylist::total_duration_ms`.
     pub total_duration_ms: u64,

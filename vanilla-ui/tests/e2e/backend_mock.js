@@ -54,7 +54,7 @@
     // `FetchUsbHistoriesData` (fetch_usb_histories).
     usbHistories(overrides = {}) {
       const { counts, ...rest } = overrides;
-      const items = overrides.items || [];
+      const items = (overrides.items || []).map((item) => ({ canExportTracklist: !!item.tracks?.length, ...item }));
       const sessions = counts?.importedPlaylists ?? 0;
       const tracks = counts?.importedTracks ?? 0;
       return {
@@ -74,7 +74,8 @@
         },
         warnings: [],
         warningCount: 0,
-        ...rest
+        ...rest,
+        items
       };
     },
 

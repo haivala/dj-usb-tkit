@@ -631,6 +631,7 @@ test("USB history tab shows the empty text only after a read finds nothing", asy
   await expect(page.locator("#historyList")).toBeEmpty();
   expect(await page.locator("#historyList").evaluate((node) => getComputedStyle(node, "::before").content)).toBe('"No history on this USB."');
   await expect(page.locator("#panel-usb-history .split > .right")).toBeHidden();
+  await expect(page.locator("#exportHistoryTracklistBtn")).toBeHidden();
   expect(await page.evaluate(() => window.__trackFetches)).toBe(0);
 });
 

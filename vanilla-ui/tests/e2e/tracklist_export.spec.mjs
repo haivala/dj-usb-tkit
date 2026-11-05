@@ -109,7 +109,8 @@ test("Export Tracklist dialog's start-track select is populated from the selecte
   // Opening the first session by itself doesn't replace the read's status.
   await expect(page.locator("#statusText")).toContainText("USB histories loaded: 1");
 
-  await expect(page.locator("#exportHistoryTracklistBtn")).toBeEnabled();
+  // The export belongs to the open session: it sits on the session's row.
+  await expect(page.locator("#historyHeading #exportHistoryTracklistBtn")).toBeEnabled();
   await page.locator("#exportHistoryTracklistBtn").click();
 
   await expect(page.locator("#tracklistExportOverlay")).toBeVisible();
@@ -188,4 +189,35 @@ test("Export Tracklist saves the session from the chosen start track, and report
   await page.locator("#exportHistoryTracklistBtn").click();
   await page.locator("#tracklistExportOkBtn").click();
   await expect(status).toContainText("Tracklist export cancelled");
+});
+
+test("a session the backend says can't export disables Export Tracklist, and a long name leaves the button in view", async ({ page }) => {
+  await installTauriMock(page);
+  const longName = `HISTORY ${"very long session name ".repeat(20)}`;
+  await page.addInitScript((name) => {
+    const invoke = window.__TAURI__.core.invoke;
+    window.__TAURI__.core.invoke = async (command, payload) => {
+      if (command === "fetch_usb_histories") {
+        return {
+          ok: true,
+          data: {
+            items: [{ id: "hist-1", name, createdAt: "2026-08-01", canExportTracklist: false, tracks: [] }],
+            counts: { importedPlaylists: 1, importedTracks: 0 },
+            warnings: []
+          }
+        };
+      }
+      return invoke(command, payload);
+    };
+  }, longName);
+  await page.goto("/");
+  await page.locator('.nav-item[data-view="usb"]').click();
+  await page.locator("#usbEmptyState .empty-state-action").click();
+  await page.locator('.nav-item[data-view="usb-history"]').click();
+
+  await expect(page.locator("#historyHeading .track-list-heading-name")).toHaveText(longName.trim());
+  const button = page.locator("#historyHeading #exportHistoryTracklistBtn");
+  await expect(button).toBeDisabled();
+  await expect(button).toBeInViewport({ ratio: 1 });
+  expect(await page.locator("#historyHeading").evaluate((node) => node.scrollWidth <= node.clientWidth)).toBe(true);
 });
