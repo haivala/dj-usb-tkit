@@ -100,26 +100,13 @@
         playlistDetails: [],
         warnings: [],
         durationMs: 1,
+        statusText: "mock diagnostics status",
+        durationText: "mock duration",
         playlistUsbExportStatus: [],
         ...overrides
       };
     },
 
-    // `RepairFixProposal`: one fix in a repair preview.
-    repairFix(id, overrides = {}) {
-      return {
-        id,
-        title: id,
-        description: "desc",
-        supported: true,
-        destructive: false,
-        estimatedWrites: 0,
-        estimatedDeletes: 0,
-        alwaysApplied: false,
-        bookkeeping: false,
-        ...overrides
-      };
-    },
 
     // `RepairUsbDiagnosticsData` (repair_usb_diagnostics, preview or apply).
     repair(overrides = {}) {
@@ -128,8 +115,8 @@
         summary: "",
         overview: [],
         detectedIssues: [],
-        proposedFixes: [],
-        unsupportedItems: [],
+        rows: [],
+        nothingToFix: false,
         appliedFixes: [],
         skippedFixes: [],
         failedFixes: [],

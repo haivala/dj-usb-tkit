@@ -2283,6 +2283,12 @@ pub struct RunUsbDiagnosticsData {
     pub engine_library_section: Option<DiagSection>,
     pub warnings: Vec<WarningEntry>,
     pub duration_ms: u64,
+    /// The status line after the run.
+    #[serde(default)]
+    pub status_text: String,
+    /// "Completed in 370ms", in the report's header.
+    #[serde(default)]
+    pub duration_text: String,
     pub playlist_usb_export_status: Vec<PlaylistUsbExportStatus>,
 }
 
@@ -2415,6 +2421,15 @@ pub struct RunUsbParityReportData {
     pub playlist_details: Vec<UsbParityPlaylistDetail>,
     pub warnings: Vec<WarningEntry>,
     pub duration_ms: u64,
+    /// The status line after the run.
+    #[serde(default)]
+    pub status_text: String,
+    /// "Completed in 370ms", in the report's header.
+    #[serde(default)]
+    pub duration_text: String,
+    /// "Parity PASS", on its badge.
+    #[serde(default)]
+    pub status_label: String,
 }
 
 /// Which database(s) a menu item appears in.
@@ -2631,6 +2646,31 @@ pub struct RepairFixProposal {
     pub link: Option<String>,
 }
 
+/// One row of the repair preview's fix list, ready to show: a fix that can be
+/// chosen, or something only described. `service::repair::repair_rows` builds
+/// them from `proposed_fixes` and `unsupported_items`.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct RepairRow {
+    pub id: String,
+    pub title: String,
+    pub description: String,
+    /// "✓ supported · safe · 3 writes · always applied".
+    pub meta_text: String,
+    /// The row has a checkbox.
+    pub selectable: bool,
+    /// The checkbox starts ticked.
+    pub checked: bool,
+    /// The checkbox can't be unticked.
+    pub locked: bool,
+    /// Why, when `locked`.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub locked_tooltip: Option<String>,
+    /// `"event-log"` when the Event Log already lists the affected items.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub link: Option<String>,
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct RepairUsbDiagnosticsData {
@@ -2641,8 +2681,17 @@ pub struct RepairUsbDiagnosticsData {
     /// (`service::repair::repair_overview`); the fix list is the detail.
     #[serde(default)]
     pub overview: Vec<DiagOverviewItem>,
+    /// The preview's fix list, ready to show.
+    #[serde(default)]
+    pub rows: Vec<RepairRow>,
+    /// There's nothing to fix, not even by hand.
+    #[serde(default)]
+    pub nothing_to_fix: bool,
     pub detected_issues: Vec<String>,
+    // Backend only (apply logic, CLI tools, tests): the UI gets `rows`.
+    #[serde(default, skip_serializing)]
     pub proposed_fixes: Vec<RepairFixProposal>,
+    #[serde(default, skip_serializing)]
     pub unsupported_items: Vec<RepairUnsupportedItem>,
     pub applied_fixes: Vec<String>,
     pub skipped_fixes: Vec<String>,
@@ -2651,7 +2700,7 @@ pub struct RepairUsbDiagnosticsData {
     pub estimated_file_deletes: usize,
     pub warnings: Vec<WarningEntry>,
     pub duration_ms: u64,
-    /// The status line after an apply. Empty on preview.
+    /// The status line after a preview or an apply.
     #[serde(default)]
     pub status_text: String,
     #[serde(default, skip_serializing_if = "Option::is_none")]

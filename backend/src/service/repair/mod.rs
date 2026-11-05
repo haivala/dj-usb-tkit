@@ -15,7 +15,7 @@ use crate::error::{BackendError, BackendResult};
 use crate::logging::{self, Level};
 use crate::models::{
     DiagOverviewItem, DiagStatus, GetUsbPlayerMenuConfigData, GetUsbPlayerMenuConfigRequest,
-    RepairFixProposal, RepairUnsupportedItem, RepairUsbDiagnosticsData,
+    RepairFixProposal, RepairRow, RepairUnsupportedItem, RepairUsbDiagnosticsData,
     RepairUsbDiagnosticsRequest, RunUsbDiagnosticsRequest, RunUsbParityReportRequest,
     UpdateUsbPlayerMenuConfigData, UpdateUsbPlayerMenuConfigRequest, UsbParityPlaylistDetail,
     UsbPlayerMenuDivergence, UsbPlayerMenuEdit, UsbPlayerMenuItem, UsbPlayerMenuItemOrigin,

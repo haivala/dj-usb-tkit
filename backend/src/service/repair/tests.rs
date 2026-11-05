@@ -2431,3 +2431,45 @@ fn repair_overview_groups_fixes_by_area_and_flags_what_it_cant_fix() {
     let (summary, _) = repair_overview(&[], &unsupported);
     assert_eq!(summary, "Nothing here can be fixed automatically.");
 }
+
+#[test]
+fn repair_rows_are_ready_to_show() {
+    let fixes = [
+        proposal(BPM_KEY_MISMATCH_FIX_ID, true),
+        RepairFixProposal {
+            always_applied: true,
+            ..proposal("always", true)
+        },
+        RepairFixProposal {
+            bookkeeping: true,
+            ..proposal("bookkeeping", true)
+        },
+        proposal("manual", false),
+    ];
+    let unsupported = [RepairUnsupportedItem {
+        issue: "2 malformed entries".to_string(),
+        reason: "Inspect the Event Log.".to_string(),
+        link: Some("event-log".to_string()),
+    }];
+
+    let rows = run::repair_rows(&fixes, &unsupported);
+    let ids: Vec<&str> = rows.iter().map(|row| row.id.as_str()).collect();
+    assert_eq!(
+        ids,
+        [
+            BPM_KEY_MISMATCH_FIX_ID,
+            "always",
+            "manual",
+            "unsupported:2 malformed entries"
+        ]
+    );
+
+    assert!(rows[0].selectable && rows[0].checked && !rows[0].locked);
+    assert!(rows[0].locked_tooltip.is_none());
+    assert!(rows[1].selectable && rows[1].checked && rows[1].locked);
+    assert!(rows[1].locked_tooltip.is_some());
+    assert!(!rows[2].selectable && !rows[2].checked && !rows[2].locked);
+    assert!(!rows[3].selectable);
+    assert_eq!(rows[3].meta_text, "✗ preview-only · safe");
+    assert_eq!(rows[3].link.as_deref(), Some("event-log"));
+}

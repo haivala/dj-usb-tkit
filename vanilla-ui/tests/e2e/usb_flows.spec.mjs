@@ -174,6 +174,9 @@ function installTauriMock(page, mode) {
               ok: true,
               data: {
                 overallStatus: "FAIL",
+                statusLabel: "Parity FAIL",
+                statusText: "Parity report complete",
+                durationText: "Completed in 1ms",
                 overview: [
                   { title: "Playlists", status: "PASS", detail: "Both databases have the same 1 playlists, with the same tracks in the same order." },
                   { title: "Track details", status: "FAIL", detail: "1 tracks are missing track details on older Pioneer players." },
@@ -268,60 +271,53 @@ function installTauriMock(page, mode) {
                   "PDB shows signs of a torn additive-growth write",
                   "1 PDB history/columns page with wrong u5/num_rl shape"
                 ],
-                proposedFixes: [
+                rows: [
                   {
                     id: "repair_pdb_truncated_table_chain",
                     title: "Repair Truncated Table Chain",
                     description: "Structural prerequisite fix.",
-                    supported: true,
-                    destructive: false,
-                    alwaysApplied: true,
-                    estimatedWrites: 1,
-                    estimatedDeletes: 0
+                    metaText: "✓ supported · safe · always applied",
+                    selectable: true,
+                    checked: true,
+                    locked: true,
+                    lockedTooltip: "Always applied"
                   },
                   {
                     id: "repair_pdb_torn_growth_pages",
                     title: "Repair Torn Growth Pages (Interrupted Export)",
                     description: "Structural prerequisite fix.",
-                    supported: true,
-                    destructive: false,
-                    alwaysApplied: true,
-                    estimatedWrites: 1,
-                    estimatedDeletes: 0
+                    metaText: "✓ supported · safe · always applied",
+                    selectable: true,
+                    checked: true,
+                    locked: true,
+                    lockedTooltip: "Always applied"
                   },
                   {
                     id: "repair_pdb_wrong_history_page_shape",
                     title: "Repair PDB History/Columns Page Footer Shape",
                     description: "Ordinary structural fix, not a prerequisite.",
-                    supported: true,
-                    destructive: false,
-                    estimatedWrites: 1,
-                    estimatedDeletes: 0
-                  },
-                  {
-                    id: "repair_pdb_wrong_page_flags",
-                    title: "Repair PDB Data Page Flags",
-                    description: "rekordbox transaction bookkeeping.",
-                    supported: true,
-                    destructive: false,
-                    bookkeeping: true,
-                    estimatedWrites: 0,
-                    estimatedDeletes: 0
+                    metaText: "✓ supported · safe",
+                    selectable: true,
+                    checked: true,
+                    locked: false
                   },
                   {
                     id: "keep_engine_library_up_to_date",
                     title: "Keep Engine DJ Library Up to Date",
                     description: "Turns on \"Write Engine DJ library\" and rebuilds it now.",
-                    supported: true,
-                    destructive: true,
-                    estimatedWrites: 1,
-                    estimatedDeletes: 0
-                  }
-                ],
-                unsupportedItems: [
+                    metaText: "✓ supported · destructive",
+                    selectable: true,
+                    checked: true,
+                    locked: false
+                  },
                   {
-                    issue: "2 malformed USBANLZ entry/entries",
-                    reason: "Inspect Event Log entries tagged 'analysis entry malformed'.",
+                    id: "unsupported:malformed",
+                    title: "2 malformed USBANLZ entry/entries",
+                    description: "Inspect Event Log entries tagged 'analysis entry malformed'.",
+                    metaText: "✗ preview-only · safe",
+                    selectable: false,
+                    checked: false,
+                    locked: false,
                     link: "event-log"
                   }
                 ],
@@ -1080,7 +1076,7 @@ test("Diagnostics and parity render without warning panel", async ({ page }) => 
   await expect(page.locator("#diagRawWarnings")).toHaveCount(0);
 });
 
-test("Repair preview locks structural-prerequisite fix checkboxes, hides bookkeeping fixes; the Engine fix turns the setting on", async ({ page }) => {
+test("Repair preview shows the backend's rows and locks structural-prerequisite fix checkboxes; the Engine fix turns the setting on", async ({ page }) => {
   await installTauriMock(page, "valid");
   await countPlaylistFetches(page);
   await page.goto("/");
@@ -1125,10 +1121,6 @@ test("Repair preview locks structural-prerequisite fix checkboxes, hides bookkee
     .locator("#diagRepairFixes li", { hasText: "Repair PDB History/Columns Page Footer Shape" })
     .locator(".diag-repair-fix-check");
 
-  // rekordbox bookkeeping is neither listed nor counted: the backend applies
-  // it with every repair.
-  await expect(page.locator("#diagRepairFixes li", { hasText: "Repair PDB Data Page Flags" })).toHaveCount(0);
-
   await expect(truncatedChainCheckbox).toBeChecked();
   await expect(truncatedChainCheckbox).toBeDisabled();
   await expect(tornGrowthCheckbox).toBeChecked();
@@ -1140,8 +1132,11 @@ test("Repair preview locks structural-prerequisite fix checkboxes, hides bookkee
   await controlCheckbox.uncheck();
   await expect(controlCheckbox).not.toBeChecked();
 
-  // Items whose details the Event Log lists link to it; the others don't.
+  // Items whose details the Event Log lists link to it; the others don't. A row
+  // that can't be chosen has no checkbox.
   const malformedItem = page.locator("#diagRepairFixes li", { hasText: "malformed USBANLZ" });
+  await expect(malformedItem.locator(".diag-repair-fix-check")).toHaveCount(0);
+  await expect(malformedItem.locator(".diag-repair-fix-meta")).toHaveText("✗ preview-only · safe");
   await expect(malformedItem.locator(".diag-log-link")).toBeVisible();
   await expect(page.locator("#diagRepairFixes li", { hasText: "Repair PDB History/Columns Page Footer Shape" }).locator(".diag-log-link")).toHaveCount(0);
 

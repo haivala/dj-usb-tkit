@@ -138,7 +138,7 @@ export function renderDiagnosticsReport(ctx, data) {
   el.diagOverallStatus.textContent = data.overallStatus;
   el.diagOverallStatus.className = `diag-badge diag-${data.overallStatus.toLowerCase()}`;
   clearParityBadge(el);
-  el.diagDuration.textContent = `Completed in ${data.durationMs}ms`;
+  el.diagDuration.textContent = data.durationText;
 
   el.diagSections.replaceChildren();
   renderReportBody(ctx, data);
@@ -192,9 +192,9 @@ export function renderParityReport(ctx, data) {
   el.previewRepairsBtn.disabled = false;
   // Its own badge next to the health one: the health badge keeps matching
   // the USB health dot.
-  el.diagParityStatus.textContent = `Parity ${data.overallStatus}`;
+  el.diagParityStatus.textContent = data.statusLabel;
   el.diagParityStatus.className = `diag-badge diag-${data.overallStatus.toLowerCase()}`;
-  el.diagDuration.textContent = `Completed in ${data.durationMs}ms`;
+  el.diagDuration.textContent = data.durationText;
 
   el.diagSections.replaceChildren(cloneTemplate(document, "tplDiagParityIntro"));
   const technicalBody = renderReportBody(ctx, data);
@@ -279,93 +279,46 @@ export function renderRepairPreview(ctx, data) {
   const { state, el, document } = ctx;
   el.usbDiagnosticsCard.classList.remove("hidden");
 
-  // Bookkeeping fixes are never shown or selected: the backend applies them
-  // with every repair that runs.
-  const fixes = data.proposedFixes.filter((f) => !f.bookkeeping);
-  const unsupportedItems = data.unsupportedItems;
-  const fixCount = fixes.length;
-  const supportedFixes = fixes.filter((f) => f.supported);
-  state.selectedRepairFixIds = new Set(supportedFixes.map((f) => f.id));
-  const overview = data.overview;
-
-  // Backend-owned: headline and rows (service::repair::repair_overview); the
-  // per-fix list below is the collapsed technical detail.
   el.diagRepairSummary.textContent = data.summary;
-  el.diagRepairSummary.className = overview.length === 0
+  el.diagRepairSummary.className = data.overview.length === 0
     ? "diag-repair-summary diag-repair-summary-clean"
     : "diag-repair-summary";
   el.diagRepairOverview.replaceChildren();
-  renderOverviewRows(el.diagRepairOverview, overview);
+  renderOverviewRows(el.diagRepairOverview, data.overview);
   el.diagRepairTechnical.open = false;
-  el.diagRepairTechnical.classList.toggle("hidden", fixCount === 0 && unsupportedItems.length === 0);
+  el.diagRepairTechnical.classList.toggle("hidden", data.rows.length === 0);
 
-  // Backend-owned: each fix's `description` is already the full text (the
-  // reason a fix is manual-only is baked in server-side), and unsupported
-  // items no longer duplicate a fix row -- so they render straight through.
-  const fixesToRender = fixes.map((f) => ({ ...f }));
-  for (const item of unsupportedItems) {
-    fixesToRender.push({
-      id: `unsupported:${item.issue}`,
-      title: item.issue,
-      description: item.reason,
-      supported: false,
-      destructive: false,
-      estimatedWrites: 0,
-      estimatedDeletes: 0,
-      link: item.link
-    });
-  }
-
+  state.selectedRepairFixIds = new Set(data.rows.filter((row) => row.checked).map((row) => row.id));
   el.diagRepairFixes.replaceChildren();
-  for (const fix of fixesToRender) {
+  for (const row of data.rows) {
     const li = cloneTemplate(document, "tplRepairFix");
-    li.className = fix.supported ? "diag-repair-fix-supported" : "diag-repair-fix-unsupported";
-    if (fix.supported) {
-      li.classList.add("diag-repair-fix-with-select");
-    }
+    li.className = row.selectable
+      ? "diag-repair-fix-supported diag-repair-fix-with-select"
+      : "diag-repair-fix-unsupported";
     const checkbox = li.querySelector(".diag-repair-fix-check");
-
-    if (fix.supported) {
-      const fixId = fix.id;
-      const alwaysApplied = !!fix.alwaysApplied;
-      checkbox.checked = alwaysApplied || state.selectedRepairFixIds.has(fixId);
-      checkbox.dataset.fixId = fixId;
-      if (alwaysApplied) {
-        checkbox.disabled = true;
-        checkbox.title = "Always applied — required for other repairs to complete safely";
-      } else {
-        checkbox.addEventListener("change", (event) => {
-          if (!fixId) return;
-          if (event?.target?.checked) state.selectedRepairFixIds.add(fixId);
-          else state.selectedRepairFixIds.delete(fixId);
-          el.applyRepairsBtn.disabled = state.selectedRepairFixIds.size === 0;
-        });
-      }
+    if (row.selectable) {
+      checkbox.checked = row.checked;
+      checkbox.disabled = row.locked;
+      if (row.lockedTooltip) checkbox.title = row.lockedTooltip;
+      checkbox.addEventListener("change", () => {
+        if (checkbox.checked) state.selectedRepairFixIds.add(row.id);
+        else state.selectedRepairFixIds.delete(row.id);
+        el.applyRepairsBtn.disabled = state.selectedRepairFixIds.size === 0;
+      });
     } else {
       checkbox.remove();
     }
-
-    li.querySelector(".diag-repair-fix-title strong").textContent = fix.title;
+    li.querySelector(".diag-repair-fix-title strong").textContent = row.title;
     const desc = li.querySelector(".diag-repair-fix-desc");
-    desc.textContent = fix.description;
-    appendEventLogLink(ctx, desc, fix.link);
-    const meta = li.querySelector(".diag-repair-fix-meta");
-    const support = fix.supported ? "✓ supported" : "✗ preview-only";
-    const mode = fix.destructive ? "destructive" : "safe";
-    const metaParts = [support, mode];
-    if (fix.estimatedWrites) metaParts.push(`${fix.estimatedWrites} writes`);
-    if (fix.estimatedDeletes) metaParts.push(`${fix.estimatedDeletes} deletes`);
-    if (fix.alwaysApplied === true) metaParts.push("always applied");
-    meta.textContent = metaParts.join(" · ");
-
+    desc.textContent = row.description;
+    appendEventLogLink(ctx, desc, row.link);
+    li.querySelector(".diag-repair-fix-meta").textContent = row.metaText;
     el.diagRepairFixes.appendChild(li);
   }
 
   showDiagRepairView(ctx);
   el.applyRepairsBtn.disabled = state.selectedRepairFixIds.size === 0;
-  if (supportedFixes.length === 0 && fixCount === 0) {
-    el.previewRepairsBtn.disabled = true;
-  }
+  if (data.nothingToFix) el.previewRepairsBtn.disabled = true;
 }
 export function loadUsbRootFromStorage(ctx) {
   const { state, el, localStorage } = ctx;
@@ -908,7 +861,7 @@ export async function runUsbDiagnostics(ctx, { openReport = false } = {}) {
     await ctx.renderCurrentPlaylistTracksFromState();
     renderDiagnosticsReport(ctx, data);
     ctx.logWarnings("usb-diagnostics", data.warnings, "run_usb_diagnostics");
-    emitStatus(`Diagnostics complete (${data.durationMs}ms)`);
+    emitStatus(data.statusText);
   } finally {
     healthCard.classList.remove("is-loading");
     if (openReport) healthCard.open = true;
@@ -924,7 +877,7 @@ export async function runUsbParityReport(ctx) {
     });
     renderParityReport(ctx, data);
     ctx.logWarnings("usb-diagnostics", data.warnings, "run_usb_parity_report");
-    emitStatus(`Parity report complete (${data.durationMs}ms)`);
+    emitStatus(data.statusText);
   } finally {
     // Only ever run from its button: show the result, whatever it is.
     ctx.el.usbHealthCard.open = true;
@@ -939,7 +892,7 @@ export async function previewUsbRepairs(ctx) {
   });
   renderRepairPreview(ctx, data);
   ctx.logWarnings("usb-diagnostics", data.warnings, "repair_usb_diagnostics preview");
-  emitStatus(`Repair preview ready (${data.durationMs}ms)`);
+  emitStatus(data.statusText);
 }
 
 export async function applyUsbRepairs(ctx) {

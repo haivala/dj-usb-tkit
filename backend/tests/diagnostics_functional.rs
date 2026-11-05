@@ -191,9 +191,21 @@ fn assert_no_pdb_structural_repairs(backend: &BackendCommands, usb: &Path) {
         selected_fix_ids: vec![],
     });
     assert!(preview.ok, "repair preview failed: {preview:?}");
-    let structural: Vec<String> = preview
-        .data
-        .expect("preview data")
+    let preview_data = preview.data.expect("preview data");
+    assert_eq!(
+        preview_data.status_text,
+        format!("Repair preview ready ({}ms)", preview_data.duration_ms)
+    );
+    assert_eq!(
+        preview_data.rows.len(),
+        preview_data
+            .proposed_fixes
+            .iter()
+            .filter(|fix| !fix.bookkeeping)
+            .count()
+            + preview_data.unsupported_items.len()
+    );
+    let structural: Vec<String> = preview_data
         .proposed_fixes
         .iter()
         .filter(|f| f.id.starts_with("repair_pdb_") && f.supported)
@@ -999,6 +1011,14 @@ fn diagnostics_parity_and_import_counts_stay_consistent_after_repeated_exports()
     });
     assert!(diagnostics.ok, "diagnostics failed: {diagnostics:?}");
     let diagnostics_data = diagnostics.data.expect("diagnostics data");
+    assert_eq!(
+        diagnostics_data.status_text,
+        format!("Diagnostics complete ({}ms)", diagnostics_data.duration_ms)
+    );
+    assert_eq!(
+        diagnostics_data.duration_text,
+        format!("Completed in {}ms", diagnostics_data.duration_ms)
+    );
     let diag_playlist = diagnostics_data
         .playlist_details
         .iter()
@@ -1015,6 +1035,24 @@ fn diagnostics_parity_and_import_counts_stay_consistent_after_repeated_exports()
     });
     assert!(parity.ok, "parity failed: {parity:?}");
     let parity_data = parity.data.expect("parity data");
+    assert_eq!(
+        parity_data.status_text,
+        format!("Parity report complete ({}ms)", parity_data.duration_ms)
+    );
+    assert_eq!(
+        parity_data.duration_text,
+        format!("Completed in {}ms", parity_data.duration_ms)
+    );
+    assert_eq!(
+        parity_data.status_label,
+        format!(
+            "Parity {}",
+            serde_json::to_value(parity_data.overall_status)
+                .unwrap()
+                .as_str()
+                .unwrap()
+        )
+    );
     let parity_playlist = parity_data
         .playlist_details
         .iter()

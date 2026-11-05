@@ -565,6 +565,7 @@ impl BackendService {
                     .sum(),
             },
         );
+        let duration_ms = start.elapsed().as_millis() as u64;
         let data = RunUsbDiagnosticsData {
             overall_status,
             overview,
@@ -579,7 +580,9 @@ impl BackendService {
             cdj_counter_section,
             engine_library_section,
             warnings: raw_warnings,
-            duration_ms: start.elapsed().as_millis() as u64,
+            duration_ms,
+            status_text: format!("Diagnostics complete ({duration_ms}ms)"),
+            duration_text: format!("Completed in {duration_ms}ms"),
             playlist_usb_export_status,
         };
         Ok((data, parsed_opt.map(|(parsed, _)| parsed)))
@@ -744,6 +747,12 @@ impl BackendService {
 
         on_progress(95, 100, "USB: Finalizing parity report");
         note_stage("finalize", &mut raw_warnings);
+        let duration_ms = start.elapsed().as_millis() as u64;
+        let status_label = match overall_status {
+            DiagStatus::Pass => "Parity PASS",
+            DiagStatus::Warn => "Parity WARN",
+            DiagStatus::Fail => "Parity FAIL",
+        };
         Ok(RunUsbParityReportData {
             overall_status,
             overview,
@@ -752,7 +761,10 @@ impl BackendService {
             summary_rows,
             playlist_details,
             warnings: raw_warnings,
-            duration_ms: start.elapsed().as_millis() as u64,
+            duration_ms,
+            status_text: format!("Parity report complete ({duration_ms}ms)"),
+            duration_text: format!("Completed in {duration_ms}ms"),
+            status_label: status_label.to_string(),
         })
     }
 }

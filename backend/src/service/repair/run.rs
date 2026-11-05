@@ -19,6 +19,77 @@ fn misaligned_row_ids(slots: &[MisalignedStringSlot], table_type: u32) -> Vec<u3
     ids
 }
 
+/// A repair row's details line.
+fn repair_meta_text(
+    supported: bool,
+    destructive: bool,
+    writes: usize,
+    deletes: usize,
+    always_applied: bool,
+) -> String {
+    let mut parts = vec![
+        if supported {
+            "✓ supported"
+        } else {
+            "✗ preview-only"
+        }
+        .to_string(),
+        if destructive { "destructive" } else { "safe" }.to_string(),
+    ];
+    if writes > 0 {
+        parts.push(format!("{writes} writes"));
+    }
+    if deletes > 0 {
+        parts.push(format!("{deletes} deletes"));
+    }
+    if always_applied {
+        parts.push("always applied".to_string());
+    }
+    parts.join(" · ")
+}
+
+/// The preview's fix list, ready to show: the fixes, then what can only be
+/// described. Bookkeeping fixes aren't listed: every repair applies them.
+pub(super) fn repair_rows(
+    fixes: &[RepairFixProposal],
+    unsupported: &[RepairUnsupportedItem],
+) -> Vec<RepairRow> {
+    let fix_rows = fixes
+        .iter()
+        .filter(|fix| !fix.bookkeeping)
+        .map(|fix| RepairRow {
+            id: fix.id.clone(),
+            title: fix.title.clone(),
+            description: fix.description.clone(),
+            meta_text: repair_meta_text(
+                fix.supported,
+                fix.destructive,
+                fix.estimated_writes,
+                fix.estimated_deletes,
+                fix.always_applied,
+            ),
+            selectable: fix.supported,
+            checked: fix.supported,
+            locked: fix.supported && fix.always_applied,
+            locked_tooltip: (fix.supported && fix.always_applied).then(|| {
+                "Always applied — required for other repairs to complete safely".to_string()
+            }),
+            link: fix.link.clone(),
+        });
+    let unsupported_rows = unsupported.iter().map(|item| RepairRow {
+        id: format!("unsupported:{}", item.issue),
+        title: item.issue.clone(),
+        description: item.reason.clone(),
+        meta_text: repair_meta_text(false, false, 0, 0, false),
+        selectable: false,
+        checked: false,
+        locked: false,
+        locked_tooltip: None,
+        link: item.link.clone(),
+    });
+    fix_rows.chain(unsupported_rows).collect()
+}
+
 fn fix_proposal(id: &str, title: &str, description: impl Into<String>) -> RepairFixProposal {
     RepairFixProposal {
         id: id.to_string(),
@@ -427,7 +498,7 @@ impl BackendService {
                 )
             ));
             unsupported_items.push(RepairUnsupportedItem {
-                issue: counted(
+                                issue: counted(
                     malformed_analysis_entries.len(),
                     "malformed USBANLZ entry",
                     "malformed USBANLZ entries",
@@ -1073,7 +1144,7 @@ impl BackendService {
                 ));
                 if !presence.missing.is_empty() {
                     unsupported_items.push(RepairUnsupportedItem {
-                        issue: format!(
+                                                issue: format!(
                             "{} missing: the USB has no audio under Contents",
                             counted(
                                 presence.missing.len(),
@@ -1162,7 +1233,7 @@ impl BackendService {
                 missing_audio_paths = removable;
                 if !in_history.is_empty() {
                     unsupported_items.push(RepairUnsupportedItem {
-                        issue: format!(
+                                                issue: format!(
                             "{} in a history playlist with missing audio files",
                             counted(in_history.len(), "track", "tracks")
                         ),
@@ -1670,6 +1741,8 @@ impl BackendService {
                 "USB: Repair preview ready"
             },
         );
+        let rows = repair_rows(&proposed_fixes, &unsupported_items);
+        let nothing_to_fix = !proposed_fixes.iter().any(|fix| !fix.bookkeeping);
         let (summary, overview) = repair_overview(&proposed_fixes, &unsupported_items);
         let duration_ms = start.elapsed().as_millis() as u64;
         let status_text = if req.apply {
@@ -1684,11 +1757,13 @@ impl BackendService {
                 },
             )
         } else {
-            String::new()
+            format!("Repair preview ready ({duration_ms}ms)")
         };
         Ok(RepairUsbDiagnosticsData {
             summary,
             overview,
+            rows,
+            nothing_to_fix,
             detected_issues,
             proposed_fixes,
             unsupported_items,
@@ -2494,5 +2569,26 @@ impl BackendService {
         }
 
         outcomes
+    }
+}
+
+#[cfg(test)]
+mod repair_meta_text_tests {
+    use super::repair_meta_text;
+
+    #[test]
+    fn repair_meta_text_lists_only_what_applies() {
+        assert_eq!(
+            repair_meta_text(false, false, 0, 0, false),
+            "✗ preview-only · safe"
+        );
+        assert_eq!(
+            repair_meta_text(true, true, 3, 2, true),
+            "✓ supported · destructive · 3 writes · 2 deletes · always applied"
+        );
+        assert_eq!(
+            repair_meta_text(true, false, 1, 0, false),
+            "✓ supported · safe · 1 writes"
+        );
     }
 }
