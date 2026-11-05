@@ -95,6 +95,8 @@
   it's blocked by free space, formats or an internal check, it says so once, and a format block counts the
   tracks and leaves their names to the Event Log. A read-only USB is now checked when you export, instead of
   when you selected it.
+- **Fix:** An empty playlist no longer shows its old "Last exported" line, which could happen after removing
+  the source folder its tracks were in.
 - **Fix:** Exporting to a USB mounted read-only is now refused straight away with "USB is read-only", instead
   of failing with a filesystem error. On Windows, a folder's read-only attribute no longer refuses a USB that
   can be written.

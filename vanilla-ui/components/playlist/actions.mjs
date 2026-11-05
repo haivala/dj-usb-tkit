@@ -906,8 +906,8 @@ function renderPlaylistEmptyState(ctx, playlist) {
   }
   el.playlistTableWrap.classList.toggle("hidden", empty);
   el.playlistTotalDuration.classList.toggle("hidden", empty);
-  // "Not exported yet." says nothing useful about a playlist with no tracks.
-  el.playlistExportStatus.classList.toggle("hidden", empty && !playlist.lastExportedAt);
+  // Export status says nothing useful about a playlist with no tracks.
+  el.playlistExportStatus.classList.toggle("hidden", empty);
   el.playlistSearchInput.closest(".track-toolbar")?.classList.toggle("hidden", empty);
   el.exportPlaylistBtn.closest(".panel-actions")?.classList.toggle("hidden", empty);
 }

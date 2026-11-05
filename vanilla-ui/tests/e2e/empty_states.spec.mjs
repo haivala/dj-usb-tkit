@@ -18,7 +18,8 @@ function installEmptyStateMock(page) {
             const id = `pl-${Date.now()}`;
             playlists.push({
               id, name, source: "local",
-              lastExportedAt: null, lastExportedUsbRoot: null, lastExportedTrackCount: null,
+              // Its tracks can go after an export, with a removed source folder.
+              lastExportedAt: "2026-08-06T21:03:26Z", lastExportedUsbRoot: "/usb", lastExportedTrackCount: 52,
               tracks: []
             });
             return { ok: true, data: { playlistId: id, name } };
