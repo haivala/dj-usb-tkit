@@ -722,6 +722,8 @@ const BACKUPS = [
   return {
     timestamp,
     timeText,
+    reasonText: reason,
+    detailText: `${((pdb + edb) / 1024 ** 2).toFixed(1)} MB · ${location === "usb" ? "On USB" : "On this computer"} · ${playlistCount} playlists`,
     location,
     reason,
     playlistCount,

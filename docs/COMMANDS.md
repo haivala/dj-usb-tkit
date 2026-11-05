@@ -369,8 +369,8 @@ and `get_playlist_tracks` do.
 
 `list_usb_backups`/`restore_usb_backup`/`delete_usb_backup` back the Backups panel described in
 `docs/USB_BACKUPS.md` — listing, restoring, and deleting the timestamped
-PDB+eDB snapshot pairs taken before every USB-mutating operation. Each listed backup
-carries its dialogs' text.
+PDB+eDB snapshot pairs taken before every USB-mutating operation. The list sends its summary, and each
+backup its row and dialog text.
 
 ### Diagnostics and repairs
 

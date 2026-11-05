@@ -1447,6 +1447,10 @@ pub struct UsbBackupEntry {
     pub files: Vec<UsbBackupFile>,
     /// The timestamp as the Backups list shows it.
     pub time_text: String,
+    /// Why it was taken, as the Backups list shows it.
+    pub reason_text: String,
+    /// "2.5 MB · On USB · 4 playlists".
+    pub detail_text: String,
     /// The restore dialog's question.
     pub restore_confirm_text: String,
     /// The delete dialog's question.
@@ -1463,6 +1467,10 @@ pub struct UsbBackupEntry {
 #[serde(rename_all = "camelCase")]
 pub struct ListUsbBackupsData {
     pub items: Vec<UsbBackupEntry>,
+    /// "6 backups", above the list.
+    pub summary_text: String,
+    /// What the list shows with no items.
+    pub empty_text: String,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]

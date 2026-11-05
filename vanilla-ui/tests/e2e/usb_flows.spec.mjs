@@ -1683,7 +1683,7 @@ test("restoring a backup: cancel and failure change nothing; success clears the 
         return { ok: true, data: { items: [{ id: "pl-1", name: "Local Set", source: "local" }] } };
       }
       if (command === "list_usb_backups") {
-        return { ok: true, data: { items: [{ timestamp: "2020-01-01_00-00-00", timeText: "2020-01-01 00:00:00", restoreConfirmText: "Restore it?", deleteConfirmText: "Delete it?", files: ["export.pdb"], reason: "export", sizeBytes: 1024, location: "usb" }] } };
+        return { ok: true, data: { summaryText: "the summary", emptyText: "none", items: [{ timestamp: "2020-01-01_00-00-00", timeText: "the time", reasonText: "the reason", detailText: "the detail", restoreConfirmText: "Restore it?", deleteConfirmText: "Delete it?", files: ["export.pdb"], reason: "export", sizeBytes: 1024, location: "usb" }] } };
       }
       if (command === "fetch_usb_playlists") window.__playlistReads += 1;
       if (command === "delete_usb_backup") {
@@ -1721,6 +1721,12 @@ test("restoring a backup: cancel and failure change nothing; success clears the 
   await page.locator("#confirmCancelBtn").click();
   await expect(page.locator("#confirmOverlay")).toBeHidden();
   expect(await page.evaluate(() => window.__restores)).toBe(0);
+
+  // The row and summary show what the backend sends.
+  await expect(page.locator("#backupsSummary")).toHaveText("the summary");
+  await expect(page.locator(".event-log-time").first()).toHaveText("the time");
+  await expect(page.locator(".event-log-source").first()).toHaveText("the reason");
+  await expect(page.locator(".event-log-message").first()).toHaveText("the detail");
 
   // Deleting a backup leaves the report alone.
   await page.locator(".backups-delete-btn").click();

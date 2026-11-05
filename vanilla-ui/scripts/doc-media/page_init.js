@@ -319,7 +319,7 @@
           case "allow_asset_paths":
             return 0;
           case "list_usb_backups":
-            return ok({ items: opts.backups || [] });
+            return ok({ items: opts.backups || [], summaryText: `${(opts.backups || []).length} backups`, emptyText: "No backups yet." });
           case "list_usb_devices":
             return ok({ items: [{ id: "usb-chiphead", rootPath: USB_ROOT }] });
           case "validate_usb_root":

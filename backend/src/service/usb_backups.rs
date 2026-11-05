@@ -13,7 +13,7 @@
 //!
 //! Also backs the "Backups" UI panel: list / restore / delete.
 
-use crate::utils::plural;
+use crate::utils::{counted, plural};
 use std::collections::BTreeMap;
 use std::path::{Path, PathBuf};
 
@@ -280,6 +280,33 @@ fn backup_files_label<'a>(stems: impl Iterator<Item = &'a str> + Clone) -> Strin
     }
 }
 
+/// A backup's size, with a decimal: these are small and close together.
+fn backup_size_text(bytes: u64) -> String {
+    const KIB: f64 = 1024.0;
+    let n = bytes as f64;
+    if n < KIB {
+        format!("{bytes} B")
+    } else if n < KIB * KIB {
+        format!("{:.1} KB", n / KIB)
+    } else {
+        format!("{:.1} MB", n / (KIB * KIB))
+    }
+}
+
+/// "2.5 MB · On USB · 4 playlists". Older backups have no playlist count.
+fn backup_detail_text(size_bytes: u64, location: &str, playlist_count: Option<usize>) -> String {
+    let location = if location == "usb" {
+        "On USB"
+    } else {
+        "On this computer"
+    };
+    let mut parts = vec![backup_size_text(size_bytes), location.to_string()];
+    if let Some(count) = playlist_count {
+        parts.push(counted(count, "playlist", "playlists"));
+    }
+    parts.join(" · ")
+}
+
 /// A backup timestamp ("%Y-%m-%d_%H-%M-%S") as "2020-01-02 03:04:05".
 fn backup_time_text(timestamp: &str) -> String {
     match timestamp.split_once('_') {
@@ -332,6 +359,12 @@ fn entries_by_timestamp(dirs: &[(PathBuf, &str)]) -> Vec<UsbBackupEntry> {
             let label = backup_files_label(files.iter().map(|f| f.stem.as_str()));
             let time_text = backup_time_text(&timestamp);
             UsbBackupEntry {
+                reason_text: reason
+                    .as_deref()
+                    .filter(|reason| !reason.is_empty())
+                    .unwrap_or("—")
+                    .to_string(),
+                detail_text: backup_detail_text(size_bytes, location, playlist_count),
                 restore_confirm_text: format!(
                     "Restore {label} from the backup taken at {time_text}? The current files will themselves be backed up first."
                 ),
@@ -436,7 +469,11 @@ impl BackendService {
             dirs.push((cache_dir, "cache"));
         }
         let items = entries_by_timestamp(&dirs);
-        Ok(ListUsbBackupsData { items })
+        Ok(ListUsbBackupsData {
+            summary_text: counted(items.len(), "backup", "backups"),
+            empty_text: "No backups yet.".to_string(),
+            items,
+        })
     }
 
     pub fn restore_usb_backup(
@@ -923,6 +960,19 @@ mod tests {
     }
 
     #[test]
+    fn backup_detail_text_shows_size_location_and_playlists() {
+        assert_eq!(backup_detail_text(512, "usb", None), "512 B · On USB");
+        assert_eq!(
+            backup_detail_text(1536, "cache", Some(1)),
+            "1.5 KB · On this computer · 1 playlist"
+        );
+        assert_eq!(
+            backup_detail_text(2_621_440, "usb", Some(4)),
+            "2.5 MB · On USB · 4 playlists"
+        );
+    }
+
+    #[test]
     fn backup_entries_and_delete_send_their_text() {
         let (_dir, service) = test_service();
         let usb = tempdir().unwrap();
@@ -936,14 +986,17 @@ mod tests {
         touch_backup(&backups_dir, "export", "pdb", one, b"pdb");
         let root = usb_root.to_string_lossy().to_string();
 
-        let items = service
+        let listed = service
             .list_usb_backups(ListUsbBackupsRequest {
                 usb_root: root.clone(),
             })
-            .expect("list")
-            .items;
+            .expect("list");
+        assert_eq!(listed.summary_text, "2 backups");
+        let items = listed.items;
         let entry = items.iter().find(|item| item.timestamp == both).unwrap();
         assert_eq!(entry.time_text, "2020-01-02 03:04:05");
+        assert_eq!(entry.reason_text, "—");
+        assert_eq!(entry.detail_text, "6 B · On USB");
         assert_eq!(
             entry.restore_confirm_text,
             "Restore eDB and PDB from the backup taken at 2020-01-02 03:04:05? The current files will themselves be backed up first."
