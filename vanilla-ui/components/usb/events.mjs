@@ -113,7 +113,7 @@ export function bindUsbEvents(ctx) {
     if (!btn) return;
     const selectedPath = String(btn.dataset.usbRecentPath || "").trim();
     if (!selectedPath) return;
-    validateAndSetUsbRoot(selectedPath, false).catch(catchErr(emitStatus));
+    validateAndSetUsbRoot(selectedPath).catch(catchErr(emitStatus));
   });
 
   el.initializeUsbBtn.addEventListener("click", () => {

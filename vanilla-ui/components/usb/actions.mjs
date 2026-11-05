@@ -623,12 +623,12 @@ async function openDriveNameDialog(ctx, { mode, initial }) {
   return result;
 }
 
-export async function validateAndSetUsbRoot(ctx, path, silent = false) {
+export async function validateAndSetUsbRoot(ctx, path) {
   const { state, el, command } = ctx;
   const { emitStatus } = ctx;
 
   if (isUsbRootChangeBlocked(state)) {
-    if (!silent) emitStatus("Please wait for the current USB operation to finish before switching drives");
+    emitStatus("Please wait for the current USB operation to finish before switching drives");
     return false;
   }
 
@@ -651,7 +651,7 @@ export async function validateAndSetUsbRoot(ctx, path, silent = false) {
     ctx.updateUsbSubNavDisabledState();
     ctx.updatePlaylistExportButtons();
     ctx.loadUsbAudioFormats().catch((err) => console.warn("get_usb_audio_formats failed:", err));
-    if (!silent) emitStatus("USB root cleared");
+    emitStatus("USB root cleared");
     el.usbRecentRow.classList.remove("collapsed");
     await syncAssetScopePaths(ctx);
     return false;
@@ -677,9 +677,9 @@ export async function validateAndSetUsbRoot(ctx, path, silent = false) {
     el.usbInitHint.textContent = `USB folder is not ready for initialization${reason}`;
   }
   el.initializeUsbBtn.disabled = !canInitialize;
-  if (previousRoot !== state.usbRoot) {
-    resetUsbStateViews(ctx);
-  }
+  // Also when it's the same USB: selecting it again is how changes made on a
+  // player show up (the backend just re-staged its databases).
+  resetUsbStateViews(ctx);
   updateUsbConfigControlsVisibility(ctx);
   ctx.updateUsbSubNavDisabledState();
   ctx.updatePlaylistExportButtons();
@@ -693,24 +693,22 @@ export async function validateAndSetUsbRoot(ctx, path, silent = false) {
     state.usbNameTakenBy = null;
     ctx.updateUsbNameBadge();
   }
-  if (!silent) {
-    if (valid) {
-      const reason = warningText ? ` (${warningText})` : "";
-      emitStatus(`USB root selected: ${state.usbRoot}${reason}. Running diagnostics...`);
-      el.usbHealthCard.removeAttribute("open");
-      el.usbHealthCard.classList.add("is-loading");
-      // Next frame, so the "Running diagnostics..." state paints first.
-      ctx.requestAnimationFrameFn(() => {
-        ctx.runUsbDiagnostics().catch((err) => {
-          ctx.warn("Auto-diagnostics failed:", err);
-          emitStatus(`Auto-diagnostics failed: ${err?.message || err}`);
-        });
+  if (valid) {
+    const reason = warningText ? ` (${warningText})` : "";
+    emitStatus(`USB root selected: ${state.usbRoot}${reason}. Running diagnostics...`);
+    el.usbHealthCard.removeAttribute("open");
+    el.usbHealthCard.classList.add("is-loading");
+    // Next frame, so the "Running diagnostics..." state paints first.
+    ctx.requestAnimationFrameFn(() => {
+      ctx.runUsbDiagnostics().catch((err) => {
+        ctx.warn("Auto-diagnostics failed:", err);
+        emitStatus(`Auto-diagnostics failed: ${err?.message || err}`);
       });
-    } else if (canInitialize) {
-      emitStatus('USB selected but not initialized. Click "Initialize USB Structure" to continue.');
-    } else {
-      emitStatus(`USB root invalid: ${warningText || "invalid USB root"}`);
-    }
+    });
+  } else if (canInitialize) {
+    emitStatus('USB selected but not initialized. Click "Initialize USB Structure" to continue.');
+  } else {
+    emitStatus(`USB root invalid: ${warningText || "invalid USB root"}`);
   }
   if (state.usbRoot) await loadUsbDevices(ctx);
   await syncAssetScopePaths(ctx);
@@ -1547,7 +1545,7 @@ export async function initializeUsb(ctx) {
     await ctx.command("initialize_usb", { usbRoot: state.usbRoot });
     emitStatus("USB initialized");
     el.usbInitRow.classList.add("hidden");
-    await validateAndSetUsbRoot(ctx, state.usbRoot, false);
+    await validateAndSetUsbRoot(ctx, state.usbRoot);
   } catch (err) {
     ctx.logError("Initialize USB failed:", err);
     emitStatus(`Initialize failed: ${err.message || err}`);
@@ -1561,7 +1559,7 @@ export async function pickUsbFolder(ctx) {
   }
   const selected = await ctx.invoke("pick_usb_folder");
   if (!selected) return null;
-  await validateAndSetUsbRoot(ctx, String(selected), false);
+  await validateAndSetUsbRoot(ctx, String(selected));
   return selected;
 }
 

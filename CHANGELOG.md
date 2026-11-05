@@ -39,6 +39,8 @@
 
 ## Unreleased
 
+- **Fix:** Selecting the same USB again now clears its playlists and history, so a stick back from a
+  player doesn't keep showing the old lists.
 - **Fix:** Diagnostics no longer warn "PDB header compatibility: value 4" on USBs exported with
   rekordbox, which writes that value itself. The next repair you run on the USB sets it to 5.
 - **Chore:** The docs' transcode, USB Playlists and USB History screenshots show the side menu open,
