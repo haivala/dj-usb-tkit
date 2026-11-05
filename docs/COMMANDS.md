@@ -283,6 +283,11 @@ drive selection from being rendered against a newer selected drive.
 - `fetch_usb_histories`
 - `fetch_usb_playlist_tracks`
 - `fetch_usb_history_tracks`
+- `get_usb_history_tracklist_options` — `{ usbRoot, id }`, answers `{ startTracks }`, the Export
+  Tracklist dialog's labels. Reads the cached history, not the stick.
+- `build_usb_history_tracklist` — `{ usbRoot, id, startIndex, timeMode }` (`off`, `before`, `after`),
+  answers `{ suggestedFileName, contents, exportedText, cancelledText }`. Reads the cached history,
+  not the stick; the desktop layer's `save_text_file` writes the file.
 - `get_usb_player_menu_config`
 - `update_usb_player_menu_config` — `{ usbRoot, action, kind }`, one editor edit
   (`add`, `remove`, `moveUp`, `moveDown`) applied to the stick's current menu;
@@ -357,7 +362,9 @@ paginated/searched/sorted page of a selected USB playlist or history session
 bytes and artwork data URLs already hydrated server-side **for that page only** —
 the frontend renders the page directly, no follow-up hydration round-trip.
 `fetch_usb_playlists` / `fetch_usb_histories` still resolve the playlist/session
-list and its counts.
+list and its counts, newest session first, and don't send each item's tracks.
+They also send the panel's text (`summaryText`, `statusText`); the track pages send
+`listSummaryText` for the heading.
 
 `list_usb_backups`/`restore_usb_backup`/`delete_usb_backup` back the Backups panel described in
 `docs/USB_BACKUPS.md` — listing, restoring, and deleting the timestamped

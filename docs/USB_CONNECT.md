@@ -74,8 +74,7 @@ The technical details are under "Local HDD staging" in [USB_EXPORT.md](USB_EXPOR
 - **Header:** shows the drive's name ("Unnamed" for a drive without one). Click the name to
   rename the drive, or to name it. Its backups and local working copy move with it.
 - **USB views:** **Playlists**, **History** and **Player Menu** appear under **USB Browser** in
-  the sidebar, and **Import Playlists**, **Import History** and **Backups** work
-  ([USB_IMPORT.md](USB_IMPORT.md)).
+  the sidebar ([USB_IMPORT.md](USB_IMPORT.md)), and **Backups** works.
 - **Sidebar playlists:** the checkmark next to a playlist means "on this USB": the USB has a
   playlist with that name.
 - **Playlist page:**

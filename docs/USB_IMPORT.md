@@ -7,6 +7,11 @@ what that does.
 
 USB import reads USB database data from the selected USB root and builds one in-app view of playlists, histories, and tracks. When possible, the import path tolerates incomplete or corrupted USB metadata and returns warnings instead of failing the entire operation.
 
+**USB Playlists** and **USB History** load when you open the page, and the first item opens if
+nothing is open yet. Coming back to a page keeps what was open and reads nothing again. A list is read
+again when you next open its page after selecting the USB again, or after the app changed that list on
+the stick. If a read fails, it tries again the next time you open the page.
+
 ![USB Playlists: the playlists on the USB, and the open playlist's tracks](assets/usb-playlists.png)
 
 For large USB libraries, import is metadata-first. Playlist and history lists can load without reading full waveform/artwork payload bytes for every track. Rich track previews are hydrated on demand when the UI requests them.
@@ -103,8 +108,11 @@ avoids mixing incompatible history-table families and prevents seeded
 `t17/t18` template rows from surfacing as real user history on initialized or
 freshly exported drives.
 
+USB History lists sessions newest first. The backend reverses them after filling in their dates,
+because carrying a date forward needs them oldest first.
+
 An imported history session can be exported as a plain-text tracklist
-("Export Tracklist" on the USB History panel), with a choice of which track
+("Export Tracklist to Text File", under the open session's tracks), with a choice of which track
 in the session the list starts from and an option to include estimated
 cumulative per-track times, placed before or after each `Artist - Title`
 line. These times are always an estimate — summed from track `durationMs`
@@ -117,10 +125,9 @@ the History panel isn't guaranteed to be a real hardware-recorded value —
 PDB `t19` rows can carry a date per history session when the CDJ wrote one,
 but when that's absent the app estimates it from the session's own tracks'
 `date_added` metadata instead (`apply_history_dates_from_track_date_created`
-in `backend/src/service/usb.rs`). This export is pure frontend formatting
-over already-imported `UsbHistory` data
-(`vanilla-ui/track_utils.mjs::buildTracklistText`); it does not read PDB/eDB
-again and is unrelated to the USB export/write pipeline.
+in `backend/src/service/usb.rs`). The backend builds this export from the
+cached `UsbHistory` data (`backend/src/service/usb_tracklist.rs`); it does not
+read PDB/eDB again and is unrelated to the USB export/write pipeline.
 
 Corruption tolerance is intentional: unreadable optional analysis artifacts should produce warnings rather than aborting whole playlist/history imports. The command returns partial-but-usable data whenever safe to do so.
 

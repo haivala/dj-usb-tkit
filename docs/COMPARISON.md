@@ -63,9 +63,9 @@ force a clean resync when that's what's wanted instead.
 ## Reordering playlists directly on the USB
 
 The USB Playlists panel supports drag-and-drop reordering of the playlist
-list on an already-exported USB (`reorder_usb_playlists`). This patches
-`t07.sort_order` in PDB in place and re-syncs eDB `playlist.sequenceNo` from
-it afterward, so the new order shows up on CDJs and in Rekordbox itself, not
+list on an already-exported USB (`reorder_usb_playlists`). This writes the
+same order to `t07.sort_order` in PDB, in place, and to eDB `playlist.sequenceNo`,
+so the new order shows up on CDJs and in Rekordbox itself, not
 just in DJ USB Tkit — and strict-parity ordering checks stay green. See
 "Playlist Reordering" in [`docs/PDB.md`](PDB.md). This works on the USB
 directly; it doesn't require reordering the source playlist locally and

@@ -831,16 +831,19 @@ parent-scoped order.
 
 Outside of export, the `reorder_usb_playlists` command lets the user
 drag-and-drop reorder the USB playlist list in the UI. Unlike the
-export-time placement above, this reassigns `t07.sort_order` as one
-monotonically increasing sequence across every PDB-backed leaf playlist
-in the requested order — it does not scope by parent/folder, matching how
+export-time placement above, every playlist gets its position in the whole
+requested list — it does not scope by parent/folder, matching how
 `fetch_usb_playlists` already sorts and displays the flat playlist list.
-eDB-only playlists (no PDB row) are left untouched since they have no
-`t07` row to patch. The command reuses the same in-place `t07.sort_order`
-byte patcher used by strict-repair order restoration
-(`patch_playlist_tree_sort_orders_in_place`), then re-syncs eDB
-`playlist.sequenceNo` from the freshly patched PDB so both surfaces agree
-and strict-parity ordering checks stay green.
+
+That one numbering goes to both databases: `t07.sort_order` for each playlist
+with a PDB row, through the same in-place byte patcher strict-repair order
+restoration uses (`patch_playlist_tree_sort_orders_in_place`), and eDB
+`playlist.sequenceNo` for each playlist with an eDB row, matched by name as the
+list read pairs them (`write_edb_playlist_order`). A playlist in only one
+database is reordered there. Because eDB-only playlists hold positions too,
+`t07.sort_order` can have gaps when the list includes them; a list without them
+stays consecutive. `fetch_usb_playlists` sorts PDB rows by `t07.sort_order` and
+eDB-only rows by `sequenceNo` together.
 
 ## Menu Catalog
 

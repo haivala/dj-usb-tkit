@@ -1782,7 +1782,8 @@ button[data-destructive]:hover {
 }
 
 /* export button */
-button[data-export-playlist] {
+button[data-export-playlist],
+#exportHistoryTracklistBtn {
   background: linear-gradient(135deg, var(--accent), var(--accent-hot));
   color: var(--ink-on-accent);
   border: none;
@@ -1790,7 +1791,8 @@ button[data-export-playlist] {
   padding: 0 20px;
 }
 
-button[data-export-playlist]:hover {
+button[data-export-playlist]:hover,
+#exportHistoryTracklistBtn:hover {
   box-shadow: 0 0 16px var(--accent-glow);
 }
 
@@ -2674,11 +2676,6 @@ input[type="checkbox"]:disabled {
 
 .track-list-heading-count {
   font-size: 13px;
-  flex-shrink: 0;
-}
-
-.track-list-heading > button {
-  margin-left: auto;
   flex-shrink: 0;
 }
 

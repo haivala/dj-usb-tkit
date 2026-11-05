@@ -233,9 +233,9 @@ Export writes eDB before PDB. The PDB writer then uses the eDB playlist id and
 sort order so both database surfaces describe the same exported playlist.
 
 Outside of export, the user-triggered `reorder_usb_playlists` command (see
-`docs/PDB.md` "Playlist Reordering") patches PDB `t07.sort_order` first, then
-re-derives `playlist.sequenceNo` for every leaf playlist from the patched PDB
-in one pass — a flat, non-parent-scoped order, unlike the per-parent order
+`docs/PDB.md` "Playlist Reordering") writes every leaf playlist's position in
+the whole list to `playlist.sequenceNo`, matched by name, including playlists
+with no PDB row — a flat, non-parent-scoped order, unlike the per-parent order
 export assigns to a newly exported playlist.
 
 ## Repair and Parity Behavior

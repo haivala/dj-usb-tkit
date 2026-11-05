@@ -779,6 +779,32 @@ fn fetch_usb_histories_returns_empty_result_when_pdb_is_missing() {
 }
 
 #[test]
+fn fetch_usb_histories_marks_a_session_with_no_tracks_as_not_exportable() {
+    let root = tempdir().expect("temp root");
+    let usb = root.path().join("usb");
+    fs::create_dir_all(&usb).expect("create usb dir");
+    let backend = BackendCommands::new(&root.path().join("data")).expect("create backend");
+    let initialized = backend.initialize_usb(InitializeUsbRequest {
+        usb_root: usb.to_string_lossy().to_string(),
+    });
+    assert!(initialized.ok, "initialize usb failed: {initialized:?}");
+    append_history_to_pdb(&pdb_path(&usb), 1, &[]);
+
+    let data = backend
+        .fetch_usb_histories(FetchUsbHistoriesRequest {
+            usb_root: Some(usb.to_string_lossy().to_string()),
+        })
+        .data
+        .expect("history data");
+    assert_eq!(data.items.len(), 1);
+    let history = &data.items[0];
+    assert_eq!(history.track_count, 0);
+    assert!(!history.can_export_tracklist);
+    let sent = serde_json::to_value(history).expect("serialize history");
+    assert_eq!(sent["canExportTracklist"], false);
+}
+
+#[test]
 fn fetch_usb_histories_reads_injected_pdb_history_rows_and_materializes_tracks() {
     let root = tempdir().expect("temp root");
     let media_a = root.path().join("media-a");

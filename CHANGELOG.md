@@ -51,11 +51,14 @@
 - **Fix:** A USB playlist reorder that can't write to the stick now shows its warnings instead of a plain
   "Playlist order saved".
 - **Fix:** Warnings from removing a USB playlist now reach the Event Log that the status line links to.
-- **Improvement:** Export Tracklist moved next to the open session's name on USB History, and only shows
-  when a session is open.
+- **Improvement:** Export Tracklist moved under the open session's tracks on USB History, where an app
+  playlist has Export to USB.
 - **Improvement:** The USB list responses no longer carry every track, and Export Tracklist is built in
   the backend. The saved file doesn't change.
 - **Improvement:** USB History rows show the session's date on a smaller muted line under its name.
+- **Chore:** The docs' USB Playlists and USB History screenshots show the new layout.
+- **Chore:** The docs describe the USB lists loading when a page opens, Export Tracklist's new place and
+  backend build, and reorders writing both databases.
 - **Chore:** The backend now sends USB History newest first, instead of the UI reversing the list.
 - **Chore:** USB History keeps one record of the open session, instead of three.
 - **Improvement:** The USB list totals, track-list headings and status lines now come from the backend.
