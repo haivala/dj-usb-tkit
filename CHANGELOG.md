@@ -63,6 +63,8 @@
   the source folder its tracks were in.
 - **Fix:** A Player Menu change now keeps rekordbox's row data in the PDB, instead of overwriting part of it,
   and the editor no longer offers items that aren't browse categories, such as COMMENTS and CUE.
+- **Fix:** Player Menu items that can't be removed now look muted in the list, so you can see which they are
+  without selecting them. They can still be selected and moved.
 - **Fix:** A failed background colour read now says so, and a read-only USB says why its colour can't change.
 - **Fix:** Restoring a USB backup no longer loses the "on this USB" marks and the playlist reorder lock
   until the next diagnostics run. The same goes for a repair whose follow-up diagnostics fail.

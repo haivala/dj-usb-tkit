@@ -1867,10 +1867,13 @@ test("the player menu editor selects in one list at a time, and its buttons foll
       if (command === "get_usb_player_menu_config") {
         return backend.ok({
           currentItems: [
-            backend.playerMenuItem(132, { name: "PLAYLIST", removable: false }),
+            backend.playerMenuItem(132, { name: "PLAYLIST", removable: false, canMoveDown: true }),
             backend.playerMenuItem(139, { name: "KEY", canMoveUp: true })
           ],
-          availableItems: [backend.playerMenuItem(133, { name: "BPM" }), backend.playerMenuItem(134, { name: "RATING" })]
+          availableItems: [
+            backend.playerMenuItem(133, { name: "BPM", removable: false }),
+            backend.playerMenuItem(134, { name: "RATING" })
+          ]
         });
       }
       return invoke(command, payload);
@@ -1895,9 +1898,15 @@ test("the player menu editor selects in one list at a time, and its buttons foll
   await expect(page.locator("#usbPlayerMenuUpBtn")).toBeEnabled();
   await expect(page.locator("#usbPlayerMenuDownBtn")).toBeDisabled();
 
-  // The backend says this one can't be removed.
+  // The backend says this one can't be removed: it looks locked before it's
+  // selected, and can still be selected and moved.
+  await expect(item("usbPlayerMenuCurrent", 132)).toHaveClass(/is-locked/);
+  await expect(item("usbPlayerMenuCurrent", 139)).not.toHaveClass(/is-locked/);
+  await expect(item("usbPlayerMenuAvailable", 133)).not.toHaveClass(/is-locked/);
   await item("usbPlayerMenuCurrent", 132).click();
+  await expect(item("usbPlayerMenuCurrent", 132)).toHaveClass(/is-selected/);
   await expect(remove).toBeDisabled();
+  await expect(page.locator("#usbPlayerMenuDownBtn")).toBeEnabled();
 });
 
 test("background colour shows nothing selected when the databases differ, and a stick that can't take one says why", async ({ page }) => {

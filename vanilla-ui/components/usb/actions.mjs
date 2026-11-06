@@ -943,6 +943,9 @@ function buildPlayerMenuItemButton(documentObj, item, selectedKind, side) {
   button.dataset.menuKind = String(item.kind);
   button.dataset.menuSide = side;
   button.querySelector(".player-menu-item-label").textContent = item.label;
+  // Only muted: it stays selectable, because it can still be moved. On the
+  // available side, `removable` means nothing.
+  button.classList.toggle("is-locked", side === "current" && !item.removable);
 
   const selected = selectedKind === item.kind;
   button.classList.toggle("is-selected", selected);

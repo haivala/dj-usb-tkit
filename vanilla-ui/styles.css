@@ -2833,9 +2833,8 @@ ul[data-loaded]:empty::before {
   gap: 8px;
 }
 
-.player-menu-item[disabled] {
-  cursor: default;
-  opacity: 0.7;
+.player-menu-item.is-locked:not(.is-selected) {
+  opacity: 0.55;
 }
 
 .player-menu-item-label {
