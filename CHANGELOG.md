@@ -39,6 +39,10 @@
 
 ## Unreleased
 
+## 0.5.5
+
+**Severity:** feature
+
 - **New feature:** A new analysis coordinator runs all analysis as one job. You can ask for more at any time:
   it joins the job's queue and runs in turn, with one progress bar, one pause and cancel, and one final message.
   A track already in the job is skipped, and its own Analyze button is disabled while it waits or is analyzed,
@@ -107,7 +111,9 @@
 - **Chore:** The docs describe the USB lists loading when a page opens, Export Tracklist's new place and
   backend build, and reorders writing both databases. The USB Playlists and USB History screenshots show the
   new layout. Those and the transcode screenshot show the side menu open, the USB ones are wider so their track
-  lists have no horizontal scrollbar, and the transcode screenshot's export button names the USB.
+  lists have no horizontal scrollbar, and the transcode screenshot's export button names the USB. The Library,
+  Settings and Player Menu screenshots and the import and selection animations show the Analyze button and the
+  muted menu items.
 
 ## 0.5.4
 

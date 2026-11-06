@@ -36,6 +36,9 @@
     rekordboxDbEnabled: false,
     mixxxDbEnabled: !!opts.externalLibraries?.mixxx,
     everConfigured: true,
+    analyzeButtonLabel: sourceFolders.length > 1 ? "Analyze Libraries" : "Analyze Library",
+    analyzeScanningStatus: "Scanning library files...",
+    trackNotInLibraryStatus: "Track is not in the local library yet. Run Analyze Library first.",
   };
   const shownRoots = sourceFolders.filter((folder) => folder.enabled).map((folder) => folder.path);
   ls.setItem("djusbtkit.helpSeen", "1");
@@ -333,7 +336,17 @@
           case "get_usb_device_name":
             return ok({ name: "Chiphead" });
           case "refresh_playlist_export_status":
-            return ok({ playlistUsbExportStatus: exportStatusList() || [] });
+            // With no USB, the backend answers for every playlist.
+            return ok({
+              playlistUsbExportStatus: r.usbRoot
+                ? exportStatusList() || []
+                : playlists.map((playlist) => ({
+                  playlistId: playlist.id,
+                  usbSelected: false,
+                  exportButtonText: "Select USB first",
+                  exportButtonTitle: "Select a valid USB folder first",
+                })),
+            });
           case "run_usb_diagnostics":
             if (!usb) return ok({ overallStatus: "PASS", durationMs: 842, warnings: [], checks: [], playlistUsbExportStatus: [] });
             if (opts.audioFormats) {
