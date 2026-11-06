@@ -7,7 +7,7 @@ use std::fs::File;
 use std::io::{BufRead, BufReader, Write};
 use std::path::{Path, PathBuf};
 use std::process::{Child, ChildStdin, ChildStdout, Command, Stdio};
-use std::sync::atomic::{AtomicUsize, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
 use std::sync::{Arc, Condvar, Mutex, MutexGuard, OnceLock, PoisonError, mpsc};
 use std::time::Instant;
 
@@ -184,10 +184,6 @@ pub struct AnalyzeTrackProgress {
     /// decode so the row shows "analyzing" for the whole time it is worked on,
     /// not only from its first finished piece.
     pub track_started: bool,
-    /// Tracks being analyzed across all runs have reached the worker budget:
-    /// the UI disables every button that starts an analysis until this clears.
-    /// Filled once per event by `analyze_new_tracks_with_progress`.
-    pub analysis_at_capacity: bool,
     /// On the `track_started` event: this run replaces the track's BPM / key,
     /// so the row clears them until the fresh values arrive.
     pub reanalysis: bool,
@@ -239,7 +235,6 @@ fn build_partial_progress(
         duration_ms: update.duration_ms,
         track_ready: false,
         track_started: false,
-        analysis_at_capacity: false,
         reanalysis: false,
         failed: false,
         analysis_ready: false,
@@ -257,7 +252,6 @@ fn build_started_progress(
 ) -> AnalyzeTrackProgress {
     AnalyzeTrackProgress {
         track_started: true,
-        analysis_at_capacity: false,
         reanalysis: track.reanalysis,
         ..build_partial_progress(
             current,
@@ -293,7 +287,6 @@ fn build_done_progress_success(
         duration_ms: local.duration_ms,
         track_ready: true,
         track_started: false,
-        analysis_at_capacity: false,
         reanalysis: false,
         failed: false,
         analysis_ready: has_core_analysis_fields(
@@ -331,7 +324,6 @@ fn build_done_progress_error(
         duration_ms: None,
         track_ready: true,
         track_started: false,
-        analysis_at_capacity: false,
         reanalysis: false,
         failed: true,
         analysis_ready: false,
@@ -611,26 +603,23 @@ impl BackendService {
         let claims = TrackClaims::new(self);
         let batch_started = Instant::now();
         let job_id = format!("job-analysis-{}", Uuid::now_v7());
+        // Takes a connection of its own, so before this run holds one: runs
+        // starting together that each hold one and want another would use up
+        // the pool and stall until its timeout.
+        let engine = resolve_analysis_engine(&self.db, req.analysis_engine.as_deref());
         let conn = self.db.connect()?;
         let auto_mode = req.track_ids.is_empty();
         let notation = super::key_notation::key_notation_setting(&conn)?;
-        let engine = resolve_analysis_engine(&self.db, req.analysis_engine.as_deref());
-        let capacity = analysis_capacity(engine);
-        let mut in_flight = InFlightTracks {
-            count: self.analysis_tracks_in_flight.clone(),
-            held: 0,
-        };
         let mut on_progress = |progress: &AnalyzeTrackProgress| {
-            in_flight.follow(progress);
             if progress.track_ready {
                 claims.release(&progress.track_id);
             }
-            let mut progress = progress.clone();
-            progress.analysis_at_capacity = in_flight.count.load(Ordering::SeqCst) >= capacity;
-            if progress.key.is_some() {
-                (progress.key_display, progress.key_color) =
-                    super::key_notation::key_display_fields(progress.key.as_deref(), notation);
+            if progress.key.is_none() {
+                return on_progress(progress);
             }
+            let mut progress = progress.clone();
+            (progress.key_display, progress.key_color) =
+                super::key_notation::key_display_fields(progress.key.as_deref(), notation);
             on_progress(&progress)
         };
 
@@ -702,6 +691,32 @@ impl BackendService {
                 elapsed_ms: elapsed_ms_since(batch_started),
             });
         }
+
+        // Claimed, so this run can wait its turn. A waiting run holds no
+        // connection: enough of them would starve the rest of the app.
+        drop(conn);
+        let Some(_run_permit) = self.analysis_limits.take(
+            AnalysisPermitKind::Run,
+            MAX_ACTIVE_ANALYSIS_RUNS,
+            None,
+            &self.analysis_cancelled,
+        ) else {
+            return Ok(AnalyzeNewTracksData {
+                job_id,
+                analyzed: 0,
+                incomplete: 0,
+                failed: 0,
+                processed: 0,
+                warning_count: 0,
+                warnings: vec![analysis_cancelled_warning(0, tracks.len())],
+                items: Vec::new(),
+                already_analyzing_track_ids,
+                elapsed_ms: elapsed_ms_since(batch_started),
+            });
+        };
+        let conn = self.db.connect()?;
+        let track_limit = analysis_capacity(engine);
+
         let hydrate_track_ids = tracks
             .iter()
             .map(|track| track.id.clone())
@@ -833,20 +848,22 @@ impl BackendService {
                 let queue = queue.clone();
                 let pause_flag = self.analysis_paused.clone();
                 let cancel_flag = self.analysis_cancelled.clone();
+                let limits = self.analysis_limits.clone();
                 let handle = std::thread::spawn(move || {
                     loop {
                         // Pausing lets a track already in flight finish, but
                         // no worker picks up a *new* one until resumed.
-                        // Cancelling breaks out of the wait immediately
-                        // instead of waiting for a resume that never comes.
-                        while pause_flag.load(Ordering::SeqCst)
-                            && !cancel_flag.load(Ordering::SeqCst)
-                        {
-                            std::thread::sleep(std::time::Duration::from_millis(150));
-                        }
-                        if cancel_flag.load(Ordering::SeqCst) {
+                        // Cancelling ends the wait instead of waiting for a
+                        // resume that never comes. Other runs' workers share
+                        // the slots, one track at a time.
+                        let Some(_track_permit) = limits.take(
+                            AnalysisPermitKind::Track,
+                            track_limit,
+                            Some(&pause_flag),
+                            &cancel_flag,
+                        ) else {
                             break;
-                        }
+                        };
 
                         let track = {
                             let mut guard = match queue.lock() {
@@ -915,15 +932,7 @@ impl BackendService {
                         // All workers exited early because the batch was
                         // cancelled -- not a genuine error.
                         if self.analysis_cancelled.load(Ordering::SeqCst) {
-                            warnings.push(logging::log(
-                                Level::Info,
-                                "analysis",
-                                "analysis.cancelled",
-                                format!(
-                                    "Analysis cancelled: {completed_count} of {} analyzed",
-                                    counted(total, "track", "tracks")
-                                ),
-                            ));
+                            warnings.push(analysis_cancelled_warning(completed_count, total));
                             break;
                         }
                         return Err(BackendError::Internal(
@@ -1045,15 +1054,22 @@ impl BackendService {
             let tx_db = conn.unchecked_transaction()?;
             let mut persist_stmt = tx_db.prepare_cached(TRACK_ANALYSIS_UPDATE_SQL)?;
             for track in tracks.drain(..) {
+                let Some(_track_permit) = self.analysis_limits.take(
+                    AnalysisPermitKind::Track,
+                    track_limit,
+                    Some(&self.analysis_paused),
+                    &self.analysis_cancelled,
+                ) else {
+                    warnings.push(analysis_cancelled_warning(completed_count, total));
+                    break;
+                };
                 on_progress(&build_started_progress(completed_count, total, &track));
-                // The batch (`total > 1`) branch above sizes a worker pool
-                // against available memory, but a lone single-track analyze
-                // -- the common "click Analyze on this row" action -- has no
-                // pool to size and no coordination with other independent
-                // analyze_new_tracks calls. Without this check, firing it
-                // repeatedly across many tracks (e.g. clicking through the
-                // track list) can pile up concurrent jobs with no memory
-                // awareness at all and crash the process.
+                // A lone single-track analyze -- the common "click Analyze on
+                // this row" action -- has no worker pool sized against
+                // available memory, and the budget it waited on above was read
+                // when this run started. Memory may be too tight by now
+                // (e.g. other programs), and starting anyway can crash the
+                // process.
                 let result = if !has_memory_headroom_for_engine(engine) {
                     Err(BackendError::Internal(format!(
                         "Not enough available memory to start analysis right now (needs ~{} MB free). Wait for other analysis to finish and try again.",
@@ -1152,11 +1168,13 @@ impl BackendService {
 
     pub fn set_analysis_paused(&self, paused: bool) -> BackendResult<SetAnalysisPausedData> {
         self.analysis_paused.store(paused, Ordering::SeqCst);
+        self.analysis_limits.wake();
         Ok(SetAnalysisPausedData { paused })
     }
 
     pub fn cancel_analysis(&self) -> BackendResult<()> {
         self.analysis_cancelled.store(true, Ordering::SeqCst);
+        self.analysis_limits.wake();
         Ok(())
     }
 }
@@ -1524,8 +1542,94 @@ pub(crate) fn resolve_analysis_parallelism_budget_with_cap(
     }
 }
 
-/// How many tracks may be analyzed at once before the UI stops offering more:
-/// the same budget a batch sizes its worker pool from.
+/// Runs that may hold a database connection at once. Each holds one for as long
+/// as it runs and briefly a second at its end, so four leave the pool (8) able
+/// to serve the rest of the app. Runs past this wait without a connection.
+const MAX_ACTIVE_ANALYSIS_RUNS: usize = 4;
+
+#[derive(Clone, Copy)]
+enum AnalysisPermitKind {
+    Run = 0,
+    Track = 1,
+}
+
+/// The limits every analysis run shares, so that any number of requests can be
+/// accepted and the work waits its turn: at most `MAX_ACTIVE_ANALYSIS_RUNS` runs
+/// at a time, and tracks at a time up to the worker budget. Whoever waits is
+/// woken by a permit coming free, or by a pause or cancel changing.
+#[derive(Debug, Default)]
+pub struct AnalysisLimits {
+    in_use: Mutex<[usize; 2]>,
+    changed: Condvar,
+}
+
+impl AnalysisLimits {
+    fn lock(&self) -> MutexGuard<'_, [usize; 2]> {
+        self.in_use.lock().unwrap_or_else(PoisonError::into_inner)
+    }
+
+    /// Wakes the waiters to look at the pause / cancel flags again. Taking the
+    /// lock means a waiter has either seen the new flag or is already waiting.
+    fn wake(&self) {
+        let _in_use = self.lock();
+        self.changed.notify_all();
+    }
+
+    /// Waits for a permit; `None` once the analysis is cancelled.
+    fn take(
+        self: &Arc<Self>,
+        kind: AnalysisPermitKind,
+        limit: usize,
+        paused: Option<&AtomicBool>,
+        cancelled: &AtomicBool,
+    ) -> Option<AnalysisPermit> {
+        let mut in_use = self.lock();
+        loop {
+            if cancelled.load(Ordering::SeqCst) {
+                return None;
+            }
+            let held_back = paused.is_some_and(|flag| flag.load(Ordering::SeqCst));
+            if !held_back && in_use[kind as usize] < limit {
+                in_use[kind as usize] += 1;
+                return Some(AnalysisPermit {
+                    limits: self.clone(),
+                    kind,
+                });
+            }
+            in_use = self
+                .changed
+                .wait(in_use)
+                .unwrap_or_else(PoisonError::into_inner);
+        }
+    }
+}
+
+struct AnalysisPermit {
+    limits: Arc<AnalysisLimits>,
+    kind: AnalysisPermitKind,
+}
+
+impl Drop for AnalysisPermit {
+    fn drop(&mut self) {
+        self.limits.lock()[self.kind as usize] -= 1;
+        self.limits.changed.notify_all();
+    }
+}
+
+fn analysis_cancelled_warning(analyzed: usize, total: usize) -> WarningEntry {
+    logging::log(
+        Level::Info,
+        "analysis",
+        "analysis.cancelled",
+        format!(
+            "Analysis cancelled: {analyzed} of {} analyzed",
+            counted(total, "track", "tracks")
+        ),
+    )
+}
+
+/// How many tracks may be analyzed at once, across all runs: the same budget a
+/// batch sizes its worker pool from.
 fn analysis_capacity(engine: AnalysisEngine) -> usize {
     let cpu_workers = std::thread::available_parallelism()
         .map(|n| n.get())
@@ -1605,32 +1709,6 @@ impl Drop for TrackClaims {
     }
 }
 
-/// One run's share of `BackendService::analysis_tracks_in_flight`. Runs may
-/// overlap, so the count spans them all; a run that ends early gives back what
-/// it still holds when this drops.
-struct InFlightTracks {
-    count: Arc<AtomicUsize>,
-    held: usize,
-}
-
-impl InFlightTracks {
-    fn follow(&mut self, progress: &AnalyzeTrackProgress) {
-        if progress.track_started {
-            self.count.fetch_add(1, Ordering::SeqCst);
-            self.held += 1;
-        } else if progress.track_ready && self.held > 0 {
-            self.count.fetch_sub(1, Ordering::SeqCst);
-            self.held -= 1;
-        }
-    }
-}
-
-impl Drop for InFlightTracks {
-    fn drop(&mut self) {
-        self.count.fetch_sub(self.held, Ordering::SeqCst);
-    }
-}
-
 fn analysis_worker_cap_from_env() -> Option<usize> {
     std::env::var("DJTKIT_ANALYSIS_MAX_WORKERS")
         .ok()
@@ -1669,9 +1747,7 @@ fn analysis_bytes_per_worker(engine: AnalysisEngine) -> u64 {
 /// (which always allows at least one worker so a batch never stalls), this
 /// has no floor -- it's used to gate the single-track analyze path, which has
 /// no worker pool to size and can legitimately be refused outright when
-/// memory is genuinely too tight (e.g. many single-track analyses fired in
-/// quick succession from the track list, each its own independent job with
-/// no shared worker-pool cap to bound it).
+/// memory is genuinely too tight.
 pub(crate) fn has_memory_headroom_for_engine(engine: AnalysisEngine) -> bool {
     match available_system_memory_bytes() {
         Some(available) => {

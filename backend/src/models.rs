@@ -79,8 +79,6 @@ pub struct JobEventPayload {
     #[serde(skip_serializing_if = "Option::is_none")]
     pub track_started: Option<bool>,
     #[serde(skip_serializing_if = "Option::is_none")]
-    pub analysis_at_capacity: Option<bool>,
-    #[serde(skip_serializing_if = "Option::is_none")]
     pub reanalysis: Option<bool>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub failed: Option<bool>,

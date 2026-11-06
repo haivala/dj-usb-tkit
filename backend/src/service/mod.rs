@@ -257,8 +257,8 @@ pub struct BackendService {
     pub db: Db,
     pub analysis_paused: Arc<AtomicBool>,
     pub analysis_cancelled: Arc<AtomicBool>,
-    /// Tracks being analyzed right now, across overlapping runs.
-    pub analysis_tracks_in_flight: Arc<AtomicUsize>,
+    /// What all analysis runs share, so extra work waits its turn.
+    pub(crate) analysis_limits: Arc<analysis::AnalysisLimits>,
     /// Tracks a run is analyzing or has queued, by id (see `TrackClaims`).
     pub analysis_claimed_tracks: Arc<std::sync::Mutex<std::collections::HashSet<String>>>,
     /// Analysis runs under way (see `AnalysisRun`).
@@ -298,7 +298,7 @@ impl BackendService {
             db: Db::new(data_dir)?,
             analysis_paused: Arc::new(AtomicBool::new(false)),
             analysis_cancelled: Arc::new(AtomicBool::new(false)),
-            analysis_tracks_in_flight: Arc::new(AtomicUsize::new(0)),
+            analysis_limits: Arc::default(),
             analysis_claimed_tracks: Arc::default(),
             analysis_runs_active: Arc::new(AtomicUsize::new(0)),
             transcode_cancelled: Arc::new(AtomicBool::new(false)),

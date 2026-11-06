@@ -110,8 +110,6 @@ export function createInitialState() {
     // startedAtMs, percent, message }.
     runningJobs: new Map(),
     analysisPaused: false,
-    // From the analysis job events: see `isTrackAnalyzeDisabled`.
-    analysisAtCapacity: false,
     unlistenJobEvent: null,
     unlistenPlaybackEvent: null,
     unlistenBackendLogEvent: null,

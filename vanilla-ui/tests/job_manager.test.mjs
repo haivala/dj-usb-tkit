@@ -72,7 +72,6 @@ function jobCtx(state, el, deps = {}) {
     refreshLibrarySources: () => {},
     applyLibraryDurationSummary: () => {},
     setTrackAnalyzingState: () => {},
-    renderAnalyzeButtons: () => {},
     setUsbRootControlsLocked: () => {},
     ...deps
   };

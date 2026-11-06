@@ -266,7 +266,6 @@ export function handleJobEvent(ctx, payload) {
     // rows show "analyzing" at once as there are active workers) rather than
     // marking the whole submitted batch as analyzing for the entire call.
     setTrackAnalyzingState(String(payload.trackId), payload.trackReady !== true);
-    setAnalysisAtCapacity(ctx, payload.analysisAtCapacity === true);
     if (payload.trackReady === true && typeof payload.libraryTotalDurationMs === "number") {
       applyLibraryDurationSummary(payload.libraryTotalDurationMs, payload.libraryDurationUnknownCount);
     }
@@ -381,12 +380,6 @@ export function handleJobEvent(ctx, payload) {
   }
 }
 
-function setAnalysisAtCapacity(ctx, atCapacity) {
-  if (ctx.state.analysisAtCapacity === atCapacity) return;
-  ctx.state.analysisAtCapacity = atCapacity;
-  ctx.renderAnalyzeButtons();
-}
-
 // Hand the footer bar to a running job: its own text, percent and elapsed
 // time, counted from when it started rather than when it got the bar.
 function showJobOnProgressBar(ctx, jobId) {
@@ -413,10 +406,8 @@ function finishJob(ctx, jobId, jobType, ownsProgressBar, idleDelayMs) {
     const waiters = state.usbJobIdleWaiters.splice(0);
     waiters.forEach((resolve) => resolve());
   }
-  // The last run ended, whatever its last track event said.
   if (jobType === "analysis" && !isAnalysisJobRunning(state)) {
     setAnalysisControlsVisible(state, el, false);
-    setAnalysisAtCapacity(ctx, false);
   }
   if (jobType === "transcode") {
     el.progressCancelTranscodeBtn.hidden = true;

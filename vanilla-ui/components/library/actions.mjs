@@ -1,9 +1,9 @@
 import { createTrackListController } from "../shared/track_list_controller.mjs";
-import { narrowTrackSelectionToLoaded, renderAllSelectionBars } from "../shared/track_selection.mjs";
+import { narrowTrackSelectionToLoaded } from "../shared/track_selection.mjs";
 import { renderEmptyState } from "../shell/actions.mjs";
 import { cssEscape, cloneTemplate } from "../../ui_utils.mjs";
 import { fillBpmCell, fillFormatCell, fillKeyCell, fillYearCell, coverElement, setCueButtonState, formatTrackDuration, trackHasWaveform } from "../../track_table.mjs";
-import { REANALYZE_TOOLTIP, counted, isTrackAnalyzeDisabled } from "../../track_utils.mjs";
+import { REANALYZE_TOOLTIP, counted } from "../../track_utils.mjs";
 import {
   formatDurationMs,
   renderTrackListDurationSummary,
@@ -539,20 +539,6 @@ async function importExternalLibrary(ctx, { command, path, label, logSource, cod
   emitStatus(`${label} import done: ${result.indexed} new, ${result.updated} updated${suffix}`);
 }
 
-// The backend's `analysisAtCapacity` changed (job_manager.mjs): redraw every
-// button that starts an analysis. Rows drawn later ask `isTrackAnalyzeDisabled`.
-export function renderAnalyzeButtons(ctx) {
-  const { state, el } = ctx;
-  for (const body of [el.libraryTableBody, el.playlistTracksBody]) {
-    for (const button of body.querySelectorAll("[data-action='analyze-track']")) {
-      button.disabled = isTrackAnalyzeDisabled(state, button.dataset.id);
-    }
-  }
-  renderAllSelectionBars(ctx);
-  el.scanLibraryBtn.disabled = state.analysisAtCapacity;
-  ctx.updatePlaylistExportButtons();
-}
-
 export async function analyzeTrackIds(ctx, trackIds, modeLabel = "Analyze", options = {}) {
   const { state, emitStatus } = ctx;
   if (state.analysisEnginePersistPromise) {
@@ -668,7 +654,7 @@ export function patchLibraryRowByTrackId(ctx, trackId) {
   const analyzing = state.analyzingTrackIds.has(id);
   row.classList.toggle("is-analyzing", analyzing);
   const analyzeBtn = row.querySelector("[data-action='analyze-track']");
-  if (analyzeBtn) analyzeBtn.disabled = isTrackAnalyzeDisabled(state, id);
+  if (analyzeBtn) analyzeBtn.disabled = analyzing;
   return patched;
 }
 
@@ -689,7 +675,7 @@ export function patchPlaylistRowByTrackId(ctx, trackId) {
   const analyzing = state.analyzingTrackIds.has(id);
   row.classList.toggle("is-analyzing", analyzing);
   const analyzeBtn = row.querySelector("[data-action='analyze-track']");
-  if (analyzeBtn) analyzeBtn.disabled = isTrackAnalyzeDisabled(state, id);
+  if (analyzeBtn) analyzeBtn.disabled = analyzing;
   return patched;
 }
 

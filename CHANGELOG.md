@@ -39,9 +39,9 @@
 
 ## Unreleased
 
-- **Fix:** While every analysis worker is busy, the Analyze and Reanalyze buttons on track rows and in
-  the selection bar, Analyze Missing Tracks and Scan Library are disabled. Below that you can still start
-  more analyses, and a track's own button is disabled while that track is being analyzed, in playlists too.
+- **Fix:** You can start an analysis at any time, and extra work waits its turn: all running analyses now
+  share one worker limit instead of piling up. A track's own Analyze button is disabled while that track
+  is being analyzed, in playlists too.
 - **Fix:** A track is analyzed by one run at a time. A run skips tracks another run is analyzing or has
   queued, and those rows keep showing as analyzing.
 - **Fix:** Starting an analysis while another runs no longer undoes a pause or cancel, and the pause and

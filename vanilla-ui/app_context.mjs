@@ -94,7 +94,7 @@ export function createAppContext(env) {
     relocateSourceRoot renderSourceChips applyLibraryDurationSummary renderLibraryRows
     scheduleLibrarySearch resetAndLoadLibraryTracks
     reloadTrackListsForKeyNotation scanLibrary reanalyzeTracks
-    scanRekordboxDb scanMixxxDb analyzeTrackIds analyzeSingleTrack setTrackAnalyzingState renderAnalyzeButtons
+    scanRekordboxDb scanMixxxDb analyzeTrackIds analyzeSingleTrack setTrackAnalyzingState
     showTrackRow`);
   bindActions(usb, `setUsbRootControlsLocked refreshPlaylistExportStatus applyPlaylistUsbExportStatus showDiagReportView
     clearUsbDiagnostics hideUsbDiagnostics loadUsbRootFromStorage usbContentChanged
