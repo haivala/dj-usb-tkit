@@ -896,11 +896,6 @@ impl BackendService {
             // Imports never remove tracks (see `MixxxTrackImporter::upsert`).
             removed: 0,
             not_found: importer.not_found,
-            // Like the master.db import: not scoped to source folders.
-            scoped_track_count: 0,
-            album_count: 0,
-            unanalyzed_count: 0,
-            warning_count: logging::count_warnings(&warnings),
             warnings,
         })
     }

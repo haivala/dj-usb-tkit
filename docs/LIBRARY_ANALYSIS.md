@@ -93,7 +93,7 @@ analyzed (has its waveform); the buttons' tooltips say the same:
   selected track gets the fresh analysis, even one never analyzed before, so
   imported or edited values are replaced (`reanalyze` on
   `analyze_new_tracks`). Filling in only what's missing stays with the
-  header's Scan Library and the playlist's Analyze Missing Tracks.
+  header's Analyze Library and the playlist's Analyze Missing Tracks.
 
 The rule lives in one place, `kept_analysis_values` (`service/analysis.rs`).
 
@@ -182,15 +182,14 @@ Runtime behavior differences:
 
 Batch concurrency model:
 
-- there is a single analysis dispatch path: the frontend always calls the `analyze_new_tracks` command with the full list of track IDs that need (re-)analysis, whether triggered by "Scan Library", "Analyze Missing Tracks", or a manual single-track reanalyze — there is no separate frontend-driven per-track concurrency mechanism
+- there is a single analysis dispatch path: the frontend always calls the `analyze_new_tracks` command with the full list of track IDs that need (re-)analysis, whether triggered by "Analyze Library", "Analyze Missing Tracks", or a manual single-track reanalyze — there is no separate frontend-driven per-track concurrency mechanism
 - multi-track analysis uses a shared-work-queue worker model; for a single track it processes sequentially without spinning up a thread pool
 - worker count is bounded by host parallelism, batch size, and available system memory, always reserving ~2 cores for the OS/UI thread (`resolve_analysis_parallelism_budget_with_cap`) so a high-core-count/high-RAM host doesn't peg every core and make the app unresponsive during a large batch
-- a conservative per-worker memory budget (heavier for the opt-in `essentia` engine than the default `stratum` engine) caps parallelism on RAM-constrained hosts to avoid OOM crashes on high-core-count/lower-RAM machines — because every caller now goes through this one path, this protection applies uniformly, including the common "Scan Library" auto-analysis flow that used to bypass it entirely
+- a conservative per-worker memory budget (heavier for the opt-in `essentia` engine than the default `stratum` engine) caps parallelism on RAM-constrained hosts to avoid OOM crashes on high-core-count/lower-RAM machines — because every caller now goes through this one path, this protection applies uniformly, including the common "Analyze Library" flow that used to bypass it entirely
 - optional worker caps/diagnostics are available for development and debugging (`DJTKIT_ANALYSIS_MAX_WORKERS`, `DJTKIT_ANALYSIS_AVAILABLE_MEMORY_BYTES`, `DJTKIT_ANALYSIS_DEBUG_WORKERS`); with `DJTKIT_ANALYSIS_DEBUG_WORKERS=1`, the resolved cap breakdown prints to the terminal (stderr) as well as the in-app Event Log
 - per-piece progress (artwork, then waveform, then duration, then bpm/key — matching the track row's left-to-right column order) still streams to the UI incrementally as each piece finishes, via `job.progress` events — this is independent of the dispatch path and unaffected by the above
-- a batch can be paused/resumed or cancelled mid-run via `set_analysis_paused`/`cancel_analysis`: both are backed by `Arc<AtomicBool>` flags on `BackendService` (`analysis_paused`, `analysis_cancelled`), reset when a run starts with no other run going (`AnalysisRun`), and checked before a track takes its worker slot -- a track already in flight always finishes normally either way. Pausing holds that wait until resumed; cancelling ends it, and the run then returns successfully with whatever was analyzed so far plus a warning noting how many of the total were completed
-- runs may overlap: any number of `analyze_new_tracks` calls is accepted and the work waits its turn (`AnalysisLimits`). All runs share the worker budget, one slot per track, and at most `MAX_ACTIVE_ANALYSIS_RUNS` run at a time, because each holds a database connection; a run waiting for its turn holds none. A pause, cancel or freed slot wakes the waiters
-- a track is analyzed by one run at a time (`TrackClaims`): a run skips tracks another run is analyzing or has queued and returns them as `alreadyAnalyzingTrackIds`, and a track's claim ends when it is done
+- a job can be paused/resumed or cancelled via `set_analysis_paused`/`cancel_analysis`, messages to the coordinator. A track already in flight always finishes normally either way, and with nothing running both do nothing
+- one coordinator thread (`service/analysis/coordinator.rs`) runs all analysis, for as long as there is work: it owns a database connection outside the pool, the queue, the worker budget (one slot per track, read once per engine for the job) and what the user is told. `analyze_new_tracks` adds to its job and returns at once, so requests during a job grow it, first come first served. Workers only analyze: they send track pieces to the user and their result to the coordinator, which saves and reports it. A track already in the job is skipped; a Reanalyze of one still waiting makes it replace its kept values. Pause stops new tracks from starting; cancel clears the queue and lets running tracks finish. A track waits for memory while others run, and fails only when nothing is running to free any
 
 Implemented throughput optimizations:
 

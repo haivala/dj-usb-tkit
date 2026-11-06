@@ -245,10 +245,6 @@ impl BackendService {
                 updated: 0,
                 removed: 0,
                 not_found,
-                scoped_track_count: 0,
-                album_count: 0,
-                unanalyzed_count: 0,
-                warning_count: logging::count_warnings(&warnings),
                 warnings,
             });
         }
@@ -605,49 +601,12 @@ impl BackendService {
 
         tx.commit()?;
 
-        // Post-scan library facts over the whole scanned set (not the page the
-        // frontend reloads next): every on-disk file now has an indexed row and
-        // removed files are gone, so a plain DB read is accurate.
-        let (scoped_track_count, album_count) = {
-            let mut stmt = conn.prepare(&format!("SELECT {TRACK_COLS} FROM tracks"))?;
-            let rows = stmt.query_map([], |row| row_to_track(row, false))?;
-            let scoped: Vec<Track> = rows
-                .collect::<Result<Vec<_>, _>>()?
-                .into_iter()
-                .filter(|track| {
-                    existing_roots
-                        .iter()
-                        .any(|root| browse_path_matches_root(&track.file_path, root))
-                })
-                .collect();
-            let mut albums = std::collections::HashSet::<String>::new();
-            for track in &scoped {
-                let album = track
-                    .album
-                    .as_deref()
-                    .unwrap_or_default()
-                    .trim()
-                    .to_lowercase();
-                if !album.is_empty() {
-                    albums.insert(album);
-                }
-            }
-            (scoped.len(), albums.len())
-        };
-        // What Scan Library's analysis would pick next (the whole library as
-        // shown, without a search), not just the tracks under the scanned roots.
-        let unanalyzed_count = self.library_filter_unanalyzed_track_ids(&conn, "")?.len();
-
         Ok(ScanLibraryData {
             job_id: Uuid::now_v7().to_string(),
             indexed,
             updated,
             removed,
             not_found,
-            scoped_track_count,
-            album_count,
-            unanalyzed_count,
-            warning_count: logging::count_warnings(&warnings),
             warnings,
         })
     }

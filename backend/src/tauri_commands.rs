@@ -16,7 +16,7 @@ use crate::models::{
     AddLibrarySelectionToPlaylistRequest, AddLibrarySelectionToPlaylistsRequest,
     AddSourceFoldersData, AddSourceFoldersRequest, AddTrackCandidatesToPlaylistData,
     AddTrackCandidatesToPlaylistRequest, AddTrackCandidatesToPlaylistsRequest,
-    AddTracksToPlaylistData, AddTracksToPlaylistsData, AnalyzeNewTracksData,
+    AddTracksToPlaylistData, AddTracksToPlaylistsData, AnalysisSubmittedData,
     AnalyzeNewTracksRequest, ApiResponse, BrowseSourceFilesData, BrowseSourceFilesRequest,
     BuildUsbHistoryTracklistData, BuildUsbHistoryTracklistRequest, CreatePlaylistData,
     CreatePlaylistRequest, DeletePlaylistData, DeletePlaylistRequest, DeleteUsbBackupData,
@@ -57,6 +57,7 @@ use crate::models::{
     UpdateUsbPlayerMenuConfigRequest, UsbBackgroundColorData, UsbTrackAnalysisDetail,
     ValidateUsbRootData, ValidateUsbRootRequest,
 };
+use crate::service::{AnalysisEvent, analysis_event_payload};
 
 const JOB_EVENT_CHANNEL: &str = "job:event";
 const PLAYBACK_EVENT_CHANNEL: &str = "playback:event";
@@ -212,6 +213,11 @@ fn emit_job_event<R: tauri::Runtime>(
         library_total_duration_ms: None,
         library_duration_unknown_count: None,
         track: None,
+        waiting_track_ids: None,
+        waiting_tooltip: None,
+        warnings: None,
+        warning_count: None,
+        log_message: None,
         timestamp: Utc::now().to_rfc3339(),
     };
 
@@ -239,54 +245,6 @@ fn emit_job_payload<R: tauri::Runtime>(
     } else {
         let _ = app.emit(JOB_EVENT_CHANNEL, payload);
     }
-}
-
-fn emit_job_event_with_track<R: tauri::Runtime>(
-    app: &AppHandle<R>,
-    event_name: &str,
-    identity: JobIdentity<'_>,
-    message: impl Into<String>,
-    progress: &crate::service::analysis::AnalyzeTrackProgress,
-) {
-    let total = progress.total.max(1);
-    let percent = (progress.current * 100)
-        .checked_div(total)
-        .unwrap_or(100)
-        .min(100);
-    let payload = JobEventPayload {
-        event: event_name.to_string(),
-        job_id: identity.job_id.to_string(),
-        job_type: identity.job_type.to_string(),
-        stage: identity.stage.to_string(),
-        current: progress.current,
-        total,
-        percent,
-        message: message.into(),
-        track_id: Some(progress.track_id.clone()),
-        track_title: Some(progress.track_title.clone()),
-        file_path: Some(progress.file_path.clone()),
-        bpm: progress.bpm,
-        bpm_analyzer: progress.bpm_analyzer.clone(),
-        key: progress.key.clone(),
-        key_display: progress.key_display.clone(),
-        key_color: progress.key_color,
-        artwork_path: progress.artwork_path.clone(),
-        waveform_peaks_path: progress.waveform_peaks_path.clone(),
-        waveform_preview: progress.waveform_preview.clone(),
-        duration_ms: progress.duration_ms,
-        track_ready: Some(progress.track_ready),
-        track_started: Some(progress.track_started),
-        reanalysis: Some(progress.reanalysis),
-        failed: Some(progress.failed),
-        analysis_ready: Some(progress.analysis_ready),
-        error_message: progress.error_message.clone(),
-        library_total_duration_ms: progress.library_total_duration_ms,
-        library_duration_unknown_count: progress.library_duration_unknown_count,
-        track: progress.track.clone().map(Box::new),
-        timestamp: Utc::now().to_rfc3339(),
-    };
-
-    emit_job_payload(app, event_name, payload);
 }
 
 fn emit_job_failed<R: tauri::Runtime>(
@@ -1754,91 +1712,28 @@ pub async fn build_usb_history_tracklist(
     )
 }
 
+fn emit_analysis_event<R: tauri::Runtime>(app: &AppHandle<R>, event: &AnalysisEvent) {
+    let payload = analysis_event_payload(event);
+    let name = payload.event.clone();
+    emit_job_payload(app, &name, payload);
+}
+
+/// Adds the request to the analysis job and returns at once; the job reports
+/// the rest through its events.
 #[tauri::command]
 pub async fn analyze_new_tracks(
     app: AppHandle,
     state: State<'_, BackendCommands>,
     request: AnalyzeNewTracksRequest,
-) -> Result<ApiResponse<AnalyzeNewTracksData>, String> {
-    let job_id = Uuid::now_v7().to_string();
-    let identity = JobIdentity {
-        job_id: &job_id,
-        job_type: "analysis",
-        stage: "analyze_new_tracks",
-    };
-    emit_job_event(
-        &app,
-        "job.started",
-        identity,
-        0,
-        1,
-        0,
-        "Analyzing selected tracks",
-    );
-    emit_job_event(
-        &app,
-        "job.progress",
-        identity,
-        0,
-        1,
-        40,
-        "Decoding audio and extracting metadata",
-    );
+) -> Result<ApiResponse<AnalysisSubmittedData>, String> {
     let commands = state.inner().clone();
-    let app_for_task = app.clone();
-    let job_id_for_task = job_id.clone();
-    let mut response = match tauri::async_runtime::spawn_blocking(move || {
-        commands.analyze_new_tracks_with_progress(request, |progress| {
-            let current = progress.current;
-            let total = progress.total;
-            let file_name = std::path::Path::new(&progress.file_path)
-                .file_name()
-                .and_then(|s| s.to_str())
-                .unwrap_or(&progress.file_path);
-            let identity = JobIdentity {
-                job_id: &job_id_for_task,
-                job_type: "analysis",
-                stage: "analyze_new_tracks",
-            };
-            emit_job_event_with_track(
-                &app_for_task,
-                "job.progress",
-                identity,
-                format!("Analyzing {current}/{total}: {file_name}"),
-                progress,
-            );
-        })
+    commands.set_analysis_observer(std::sync::Arc::new(move |event| {
+        emit_analysis_event(&app, event);
+    }));
+    Ok(run_blocking_command("analyze_new_tracks", move || {
+        commands.submit_analysis(request)
     })
-    .await
-    {
-        Ok(response) => response,
-        Err(err) => ApiResponse::failure(
-            crate::error::BackendError::Internal(format!("analyze_new_tracks task failed: {err}"))
-                .into(),
-        ),
-    };
-    if let Some(data) = response.data.as_mut() {
-        data.job_id = job_id.clone();
-        emit_job_event(
-            &app,
-            "job.completed",
-            identity,
-            1,
-            1,
-            100,
-            format!(
-                "Analysis finished: {} analyzed, {} failed",
-                data.analyzed, data.failed
-            ),
-        );
-    } else {
-        emit_job_failed(
-            &app,
-            identity,
-            response.error.as_ref().map(|e| e.message.clone()),
-        );
-    }
-    Ok(response)
+    .await)
 }
 
 #[tauri::command]

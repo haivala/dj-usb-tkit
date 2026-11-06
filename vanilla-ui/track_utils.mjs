@@ -24,6 +24,15 @@ export function formatDurationMs(value) {
 // `kept_analysis_values`).
 export const ANALYZE_TOOLTIP =
   "Add the missing waveform, BPM, key and first beat; a BPM or key you edited or imported is kept";
+// A row's own Analyze button: disabled while its track waits or is analyzed.
+export function applyAnalyzeButtonState(state, button, trackId, analysisReady) {
+  const id = String(trackId);
+  const waiting = state.analysisWaitingTrackIds.has(id);
+  button.disabled = waiting || state.analyzingTrackIds.has(id);
+  if (waiting) button.dataset.tooltip = state.analysisWaitingTooltip;
+  else button.dataset.tooltip = analysisReady ? REANALYZE_TOOLTIP : ANALYZE_TOOLTIP;
+}
+
 export const REANALYZE_TOOLTIP =
   "Reset waveform, BPM, key and first beat to a fresh analysis, replacing imported or edited values (cues are kept)";
 export const ANALYZE_PLAYLIST_MISSING_TOOLTIP =

@@ -22,7 +22,7 @@ function sources(folders, extra = {}) {
 function makeChipHarness(librarySources) {
   const calls = { scanLabels: 0, indicators: 0 };
   const ctx = makeTestCtx({
-    updateScanLibraryButtonLabel: () => { calls.scanLabels += 1; },
+    updateAnalyzeLibraryButtonLabel: () => { calls.scanLabels += 1; },
     updateSourceFilterIndicator: () => { calls.indicators += 1; },
   });
   ctx.state.librarySources = librarySources;

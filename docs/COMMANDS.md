@@ -409,16 +409,17 @@ for when the UI disables reordering. `fetch_usb_playlists` and `run_usb_diagnost
 `playlistUsbExportStatus` array (one entry per local playlist) so the frontend doesn't have to
 re-derive that lock condition from raw USB-scan/export-setting state.
 
-`analyze_new_tracks` returns hydrated changed track rows in `items`, so the UI can patch rows from
-the analysis response without a separate read, and `processed` (`analyzed + incomplete + failed`).
+`analyze_new_tracks` adds to the analysis job and returns at once: `jobId`, `queued`, `skipped` and
+the status line's `message`. The job's events carry the rest, including each track's saved row and,
+on `job.completed`, the final `message`, `warnings`, `warningCount` and `logMessage`. Rows waiting
+their turn come on `job.tracks_waiting` (`waitingTrackIds`, `waitingTooltip`) and leave on the
+track's first progress event, or on `job.tracks_not_waiting` after a cancel.
 
-`scan_library` returns `unanalyzedCount`: how many tracks an `analyze_new_tracks` call with
-`scopeToLibraryFilter` and no search would analyze (the whole library as shown, not just the
-scanned folders). Scan Library uses it to decide whether to run that analysis.
-
-`scan_library`, `analyze_new_tracks`, `fetch_usb_playlists`, `fetch_usb_histories`,
+`fetch_usb_playlists`, `fetch_usb_histories`,
 `remove_usb_playlist` and `export_to_usb` return `warningCount` beside `warnings`: how many of
-them are warnings or errors, for the status line's "(N warnings)" link to the Event Log. It takes the raw
+them are warnings or errors, for the status line's "(N warnings)" link to the Event Log.
+
+`analyze_new_tracks` takes the raw
 `bpmRange` string (e.g. `"70-180"`) from the settings dropdown and parses/validates it server-side
 (`bpmMin`/`bpmMax` are the older pre-parsed form, still accepted as a fallback).
 

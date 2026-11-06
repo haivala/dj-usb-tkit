@@ -205,6 +205,7 @@ test("playlist analyze-missing skips already-analyzed tracks and targets the res
             }
             analyzedRequests.push({ trackIds: ids, playlistId: request.playlistId || null });
             const jobId = "job-analysis-mock";
+            (async () => {
             emitJobEvent({
               event: "job.started",
               jobId,
@@ -265,6 +266,8 @@ test("playlist analyze-missing skips already-analyzed tracks and targets the res
                 durationMs: 180000,
                 waveformPeaksPath: "/tmp/local-missing.DAT",
                 waveformPreview: [5, 10, 20],
+                // The track's row as saved, whole, as the backend sends it.
+                track: hydratedTrack(),
                 timestamp: nowIso()
               });
             }
@@ -276,19 +279,11 @@ test("playlist analyze-missing skips already-analyzed tracks and targets the res
               current: ids.length,
               total: Math.max(1, ids.length),
               percent: 100,
-              message: `Analysis finished: ${ids.length} analyzed, 0 failed`,
+              message: `Analysis finished: analyzed ${ids.length}, failed 0`,
               timestamp: nowIso()
             });
-            return {
-              ok: true,
-              data: {
-                jobId,
-                analyzed: ids.length,
-                failed: 0,
-                warnings: [],
-                items: ids.includes("local-missing-1") ? [hydratedTrack()] : []
-              }
-            };
+            })();
+            return { ok: true, data: { jobId, queued: ids.length, skipped: 0, message: `Analyzing ${ids.length} tracks` } };
           }
           if (command === "resolve_playback_source") {
             return { ok: true, data: { resolvedPath: null, matchedBy: "none", trackId: null } };
@@ -372,7 +367,7 @@ test("playlist analyze-missing skips already-analyzed tracks and targets the res
   // a client-collected id list. The mock resolves it to the unanalyzed track.
   expect(analyzedRequests.map((item) => item.playlistId)).toEqual(["pl-1"]);
   expect(analyzedRequests.map((item) => item.trackIds)).toEqual([["local-missing-1"]]);
-  await expect(page.locator("#statusText")).toContainText("Analyze Missing Tracks done: analyzed 1, failed 0");
+  await expect(page.locator("#statusText")).toContainText("Analysis finished: analyzed 1, failed 0");
   await expect(page.locator('#playlistTracksBody .track-grid-row[data-track-id="local-missing-1"]')).not.toHaveClass(/is-analyzing/);
   await expect(ownButton).toBeEnabled();
 
@@ -572,7 +567,7 @@ test("playlist analyze-missing offers unanalyzed tracks that live on a USB drive
             analyzedRequests.push({ trackIds: ids, playlistId: request.playlistId || null });
             return {
               ok: true,
-              data: { jobId: "job-mock", analyzed: ids.length, failed: 0, warnings: [], items: [] }
+              data: { jobId: "job-mock", queued: ids.length, skipped: 0, message: `Analyzing ${ids.length} tracks` }
             };
           }
           if (command === "resolve_playback_source") {

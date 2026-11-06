@@ -197,7 +197,7 @@ export function bindPlaylistEvents(ctx) {
     // Backend-owned: `analyze_new_tracks` with a `playlistId` selects the tracks
     // in this playlist that still need analysis, over the whole playlist -- no
     // need to force-load every page here or resolve ids client-side.
-    analyzeTrackIds([], "Analyze Missing Tracks", { playlistId: playlist.id }).catch((err) => {
+    analyzeTrackIds([], { playlistId: playlist.id }).catch((err) => {
       console.error(err);
       emitStatus(`Analyze failed: ${err.message || err}`);
     });

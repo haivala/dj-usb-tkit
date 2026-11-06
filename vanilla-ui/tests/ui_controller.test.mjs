@@ -10,7 +10,7 @@ import {
   updateActivePlaylistIndicators,
   updateAddToPlaylistButtons,
   updateModeText,
-  updateScanLibraryButtonLabel,
+  updateAnalyzeLibraryButtonLabel,
   updateSelectionCount,
   updateSourceFilterIndicator,
   updateUsbEmptyState,
@@ -48,7 +48,7 @@ function makeDom(body = "") {
     <button id="selectUsbFolderBtn"></button>
     <div id="usbEmptyState"></div>
     <div id="sourceFilterIndicator"></div>
-    <button id="scanLibraryBtn"></button>
+    <button id="analyzeLibraryBtn"></button>
     <div id="settingsDrawer"></div>
     <div id="settingsBackdrop"></div>
     <div id="usbHealthDot"></div>
@@ -78,7 +78,7 @@ test("playlist mode and selection helpers derive DOM state from app state", () =
     "badgeLabel",
     "navPlaylistList",
   ]);
-  el.scanLibraryBtn = document.getElementById("scanLibraryBtn");
+  el.analyzeLibraryBtn = document.getElementById("analyzeLibraryBtn");
   const { trackSelections } = createInitialState();
   const getCurrentPlaylist = () => ({ id: "p1", name: "House" });
 
@@ -98,7 +98,7 @@ test("playlist mode and selection helpers derive DOM state from app state", () =
   updateSelectionCount({
     state: { currentPlaylistId: "p1", trackSelections }, el, document, getCurrentPlaylist,
   });
-  updateScanLibraryButtonLabel({ state: { librarySources: { folders: [] } }, el });
+  updateAnalyzeLibraryButtonLabel({ state: { librarySources: { folders: [], analyzeButtonLabel: "Analyze Library" } }, el });
 
   assert.equal(document.querySelector('[data-playlist-id="p1"]').classList.contains("playlist-active-mode"), false);
   assert.equal(document.querySelector('[data-playlist-id="p2"]').classList.contains("playlist-active-mode"), true);
@@ -113,7 +113,7 @@ test("playlist mode and selection helpers derive DOM state from app state", () =
   assert.equal(add.hidden, false);
   assert.equal(add.querySelector(".selection-target").textContent, "House");
   // The header button never turns into a selection action.
-  assert.equal(el.scanLibraryBtn.textContent, "Scan Library");
+  assert.equal(el.analyzeLibraryBtn.textContent, "Analyze Library");
 });
 
 test("USB nav and empty-state helpers follow the selected-root state", () => {
@@ -144,7 +144,7 @@ test("source, settings, health, name badge, and onboarding helpers update compac
   const { document } = makeDom().window;
   const el = elements(document, [
     "sourceFilterIndicator",
-    "scanLibraryBtn",
+    "analyzeLibraryBtn",
     "settingsDrawer",
     "settingsBackdrop",
     "usbHealthDot",
@@ -161,7 +161,7 @@ test("source, settings, health, name badge, and onboarding helpers update compac
     },
     el
   });
-  updateScanLibraryButtonLabel({ state: { librarySources: { folders: [{ path: "/a" }, { path: "/b" }] } }, el });
+  updateAnalyzeLibraryButtonLabel({ state: { librarySources: { folders: [{ path: "/a" }, { path: "/b" }], analyzeButtonLabel: "Analyze Libraries" } }, el });
   closeSettingsDrawer({ el });
   updateUsbHealthDot({ el }, "WARN");
   updateUsbNameBadge({ state: { usbDeviceName: "Club Stick" }, el });
@@ -192,7 +192,7 @@ test("source, settings, health, name badge, and onboarding helpers update compac
     },
     el
   });
-  assert.equal(el.scanLibraryBtn.textContent, "Scan Libraries");
+  assert.equal(el.analyzeLibraryBtn.textContent, "Analyze Libraries");
   assert.equal(el.settingsDrawer.classList.contains("hidden"), true);
   assert.equal(el.settingsBackdrop.classList.contains("hidden"), true);
   assert.equal(el.usbHealthDot.classList.contains("health-warn"), true);

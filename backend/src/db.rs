@@ -43,6 +43,20 @@ impl Db {
         Ok(conn)
     }
 
+    /// A connection of its own, outside the pool, for a holder that must never
+    /// wait on the rest of the app (or make it wait).
+    pub fn open_dedicated(&self) -> BackendResult<Connection> {
+        let conn = Connection::open(&self.db_path)?;
+        conn.execute_batch(
+            r#"
+            PRAGMA foreign_keys = ON;
+            PRAGMA journal_mode = WAL;
+            PRAGMA busy_timeout = 5000;
+            "#,
+        )?;
+        Ok(conn)
+    }
+
     pub fn data_dir(&self) -> PathBuf {
         self.db_path
             .parent()

@@ -11,7 +11,6 @@ import { initTooltips } from "./tooltip.mjs";
 import { cloneTemplate } from "./ui_utils.mjs";
 import { setAddButtonState } from "./track_table.mjs";
 import { renderEmptyState } from "./components/shell/actions.mjs";
-import { scanLibraryButtonLabel } from "./components/library/actions.mjs";
 import { renderAllSelectionBars, renderSelectionBar } from "./components/shared/track_selection.mjs";
 import { clearManualUpdateCheck } from "./update_check.mjs";
 import { createDialogLifecycle } from "./components/shared/dialog_lifecycle.mjs";
@@ -102,9 +101,9 @@ export function updateSourceFilterIndicator(ctx) {
   el.sourceFilterIndicator.classList.toggle("active", folderHidden || rekordboxDbFiltered || mixxxDbFiltered);
 }
 
-export function updateScanLibraryButtonLabel(ctx) {
+export function updateAnalyzeLibraryButtonLabel(ctx) {
   const { state, el } = ctx;
-  el.scanLibraryBtn.textContent = scanLibraryButtonLabel(state.librarySources.folders);
+  el.analyzeLibraryBtn.textContent = state.librarySources.analyzeButtonLabel;
 }
 
 export function closeSettingsDrawer(ctx) {

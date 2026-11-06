@@ -3,11 +3,8 @@ import { narrowTrackSelectionToLoaded } from "../shared/track_selection.mjs";
 import { renderEmptyState } from "../shell/actions.mjs";
 import { cssEscape, cloneTemplate } from "../../ui_utils.mjs";
 import { fillBpmCell, fillFormatCell, fillKeyCell, fillYearCell, coverElement, setCueButtonState, formatTrackDuration, trackHasWaveform } from "../../track_table.mjs";
-import { REANALYZE_TOOLTIP, counted } from "../../track_utils.mjs";
-import {
-  formatDurationMs,
-  renderTrackListDurationSummary,
-} from "../../track_utils.mjs";
+import { REANALYZE_TOOLTIP, applyAnalyzeButtonState, counted } from "../../track_utils.mjs";
+import { renderTrackListDurationSummary } from "../../track_utils.mjs";
 import { drawWaveformCanvas, invalidateWaveformCache, setWaveformColorData } from "../../waveform.mjs";
 
 const LIBRARY_SEARCH_DEBOUNCE_MS = 180;
@@ -250,7 +247,7 @@ export function renderSourceChips(ctx) {
   });
 
   el.importPlaylistItem.classList.toggle("hidden", !state.externalRekordboxDbPath && !state.externalMixxxDbPath);
-  ctx.updateScanLibraryButtonLabel();
+  ctx.updateAnalyzeLibraryButtonLabel();
   ctx.updateSourceFilterIndicator();
 }
 
@@ -406,57 +403,32 @@ export async function reloadTrackListsForKeyNotation(ctx) {
   await Promise.all(reloads);
 }
 
-// Scans the library's switched-on folders (the backend picks them, and says
-// when there are none).
-export async function scanLibrary(ctx) {
+// Analyze Library: first checks the switched-on folders' files exist and spots
+// changes (the backend picks the folders, and says when there are none), then
+// analyzes what needs it. The analysis job's own message is the result.
+export async function analyzeLibrary(ctx) {
   const { state, emitStatus } = ctx;
-  emitStatus("Scanning library files...");
+  emitStatus(state.librarySources.analyzeScanningStatus);
   const result = await ctx.command("scan_library", { incremental: true });
-  if (result.notFound?.length) emitStatus(missingFoldersStatus(result.notFound));
   await refreshLibrarySources(ctx);
-  // e.g. the same file found in two folders; the backend words them.
-  const scanWarnings = Array.isArray(result?.warnings) ? result.warnings : [];
-  if (scanWarnings.length) {
-    ctx.logWarnings("library-scan", scanWarnings, "Library scan");
+  // e.g. the same file found in two folders; the backend words them. In the
+  // Event Log, where the analysis' progress can't hide them.
+  ctx.logWarnings("library-scan", Array.isArray(result?.warnings) ? result.warnings : [], "Library scan");
+  if (result.notFound?.length) {
+    ctx.logWarnings("library-scan", [missingFoldersStatus(result.notFound)], "Library scan");
   }
-
   await resetAndLoadLibraryTracks(ctx, "");
-  // Backend-owned: `scan_library` reports these over the whole scanned library,
-  // not the page the frontend just loaded.
-  const scopedTrackCount = Math.max(0, Number(result?.scopedTrackCount || 0));
-  const albumCount = Math.max(0, Number(result?.albumCount || 0));
-  const unanalyzedCount = Math.max(0, Number(result?.unanalyzedCount || 0));
-
-  emitStatus(
-    `Library scan: ${counted(scopedTrackCount, "track")} across ${counted(albumCount, "album")} (local DB rows indexed ${result.indexed}, updated ${result.updated}, removed ${result.removed}). Resolving waveform/BPM/key...`
-  );
-
-  const analysis = unanalyzedCount > 0
-    ? await analyzeTrackIds(ctx, [], "Scan analysis", { scopeToLibraryFilter: true })
-    : { analyzed: 0, incomplete: 0, failed: 0, warningCount: 0 };
-  const analyzed = Number(analysis?.analyzed || 0);
-  const failed = Number(analysis?.failed || 0);
-  const incompleteSuffix = analysis?.incomplete ? `, incomplete ${analysis.incomplete}` : "";
   await ctx.refreshCurrentPlaylistTracks();
-
-  const warningCount = Number(result.warningCount || 0) + analysis.warningCount;
-  const warningSuffix = warningCount ? ` (${counted(warningCount, "warning")})` : "";
-  const missingCount = state.librarySources.folders.filter((folder) => folder.missing).length;
-  const missingSuffix = missingCount ? ` | ${counted(missingCount, "source folder")} missing` : "";
-  emitStatus(
-    `Scan done: ${counted(scopedTrackCount, "track")} / ${counted(albumCount, "album")} | analyzed ${analyzed}, failed ${failed}${incompleteSuffix}${warningSuffix}${missingSuffix}`,
-    { warningCount }
-  );
+  await analyzeTrackIds(ctx, [], { scopeToLibraryFilter: true });
 }
 
 // The selection bars' "Reanalyze": explicitly picked tracks are always
 // analyzed afresh, replacing what they had (cues are kept). Filling in only
-// what's missing is the header's job (Scan Library / Analyze Missing Tracks).
+// what's missing is the header's job (Analyze Library / Analyze Missing Tracks).
 export async function reanalyzeTracks(ctx, trackIds) {
   const ids = (trackIds || []).filter(Boolean);
   if (!ids.length) return;
-  await analyzeTrackIds(ctx, ids, "Reanalyze selected", { reanalyze: true });
-  await ctx.refreshCurrentPlaylistTracks();
+  await analyzeTrackIds(ctx, ids, { reanalyze: true });
 }
 
 export async function scanRekordboxDb(ctx) {
@@ -539,7 +511,9 @@ async function importExternalLibrary(ctx, { command, path, label, logSource, cod
   emitStatus(`${label} import done: ${result.indexed} new, ${result.updated} updated${suffix}`);
 }
 
-export async function analyzeTrackIds(ctx, trackIds, modeLabel = "Analyze", options = {}) {
+// Adds to the backend's analysis job and returns at once: the job's events
+// (job_manager.mjs) drive the rows, the progress bar and the final message.
+export async function analyzeTrackIds(ctx, trackIds, options = {}) {
   const { state, emitStatus } = ctx;
   if (state.analysisEnginePersistPromise) {
     try {
@@ -552,92 +526,29 @@ export async function analyzeTrackIds(ctx, trackIds, modeLabel = "Analyze", opti
   // With `playlistId` / `scopeToLibraryFilter` the backend picks the tracks that
   // still need analysis (over the whole playlist / library filter, not just the
   // page the frontend has loaded), so an empty `ids` list is a valid request.
-  const backendScoped = !!(options.playlistId || options.scopeToLibraryFilter);
-  if (!ids.length && !backendScoped) return;
-  const countLabel = ids.length ? counted(ids.length, "track") : "matching tracks";
+  if (!ids.length && !options.playlistId && !options.scopeToLibraryFilter) return;
 
-  let analyzed = 0;
-  // Decoded fine, but analysis left something out (no BPM detected, ...).
-  let incomplete = 0;
-  let failed = 0;
-  let processed = 0;
-  let warningCount = 0;
-  let elapsedMs = null;
-  const warnings = [];
-  let hydratedItems = [];
-  // Another run is on these: their rows stay "analyzing" until it reports them.
-  let alreadyAnalyzing = new Set();
-
-  emitStatus(`${modeLabel}: preparing ${countLabel}...`);
-
-  // Per-row "analyzing" state is driven by job:event (job_manager.mjs), which
-  // only marks a track analyzing once the backend actually starts working on
-  // it -- this reflects the real, memory/CPU-capped worker count instead of
-  // marking every requested track as "analyzing" for the whole batch call,
-  // which would look identical regardless of how many workers are actually
-  // running concurrently.
-  try {
-    const batch = await ctx.command("analyze_new_tracks", {
-      trackIds: ids,
-      playlistId: options.playlistId || null,
-      scopeToLibraryFilter: !!options.scopeToLibraryFilter,
-      // Backend parses + validates the range string (service::analysis).
-      bpmRange: String(state.analysisBpmRange || ""),
-      analysisEngine: state.analysisEngine,
-      query: String(state.libraryQuery || "").trim(),
-      reanalyze: !!options.reanalyze
-    });
-    analyzed = Math.max(0, Number(batch?.analyzed || 0));
-    incomplete = Math.max(0, Number(batch?.incomplete || 0));
-    failed = Math.max(0, Number(batch?.failed || 0));
-    processed = Math.max(0, Number(batch?.processed || 0));
-    warningCount = Math.max(0, Number(batch?.warningCount || 0));
-    elapsedMs = Number.isFinite(Number(batch?.elapsedMs)) ? Number(batch.elapsedMs) : null;
-    const batchWarnings = Array.isArray(batch?.warnings) ? batch.warnings : [];
-    warnings.push(...batchWarnings);
-    hydratedItems = Array.isArray(batch?.items) ? batch.items : [];
-    alreadyAnalyzing = new Set((batch?.alreadyAnalyzingTrackIds || []).map(String));
-    emitStatus(`${modeLabel}: ${counted(processed, "track")} processed...`);
-  } catch (err) {
-    failed = ids.length;
-    warnings.push(`batch analysis failed: ${err.message || err}`);
-  } finally {
-    for (const id of ids) {
-      if (!alreadyAnalyzing.has(String(id))) setTrackAnalyzingState(ctx, String(id), false);
-    }
-  }
-  // The batch's tracks as saved (each also came on its track-ready event).
-  for (const item of hydratedItems) showTrackRow(ctx, item);
-
-  refreshLibrarySources(ctx);
-  await ctx.refreshCurrentPlaylistTracks();
-  if (warnings.length) {
-    ctx.logWarnings("analysis", warnings, modeLabel);
-  }
-  const warningSuffix = warningCount ? ` | (${counted(warningCount, "warning")})` : "";
-  const incompleteSuffix = incomplete ? `, incomplete ${incomplete}` : "";
-  emitStatus(`${modeLabel} done: analyzed ${analyzed}, failed ${failed}${incompleteSuffix}${warningSuffix}`, { warningCount });
-  if (processed > 0 && elapsedMs !== null) {
-    ctx.pushEventLog({
-      level: "info",
-      source: "analysis",
-      code: "analysis.batch_done",
-      message: `${modeLabel}: ${counted(processed, "track")} in ${formatDurationMs(elapsedMs)} (analyzed ${analyzed}, failed ${failed}${incompleteSuffix})`
-    });
-  }
-  return { analyzed, incomplete, failed, warningCount };
+  const submitted = await ctx.command("analyze_new_tracks", {
+    trackIds: ids,
+    playlistId: options.playlistId || null,
+    scopeToLibraryFilter: !!options.scopeToLibraryFilter,
+    // Backend parses + validates the range string (service::analysis).
+    bpmRange: String(state.analysisBpmRange || ""),
+    analysisEngine: state.analysisEngine,
+    query: String(state.libraryQuery || "").trim(),
+    reanalyze: !!options.reanalyze
+  });
+  emitStatus(submitted.message);
 }
 
-export async function analyzeSingleTrack(ctx, track, modeLabel = null) {
-  const { emitStatus } = ctx;
+export async function analyzeSingleTrack(ctx, track) {
+  const { state, emitStatus } = ctx;
   const localId = await ctx.resolveLocalTrackIdAsync(track);
   if (!localId) {
-    emitStatus("Track is not in local library yet. Scan library first, then analyze.");
+    emitStatus(state.librarySources.trackNotInLibraryStatus);
     return;
   }
-  const localTrack = ctx.state.tracks.find((t) => t?.id === localId) || track;
-  const label = modeLabel || (localTrack.analysisReady ? "Reanalyze" : "Analyze missing");
-  await analyzeTrackIds(ctx, [localId], label);
+  await analyzeTrackIds(ctx, [localId]);
 }
 
 
@@ -651,10 +562,9 @@ export function patchLibraryRowByTrackId(ctx, trackId) {
   const track = state.tracks.find((t) => String(t?.id) === id);
   if (!track) return false;
   const patched = patchLibraryRowCells(ctx, row, track);
-  const analyzing = state.analyzingTrackIds.has(id);
-  row.classList.toggle("is-analyzing", analyzing);
+  row.classList.toggle("is-analyzing", state.analyzingTrackIds.has(id));
   const analyzeBtn = row.querySelector("[data-action='analyze-track']");
-  if (analyzeBtn) analyzeBtn.disabled = analyzing;
+  if (analyzeBtn) applyAnalyzeButtonState(state, analyzeBtn, id, track.analysisReady);
   return patched;
 }
 
@@ -672,10 +582,9 @@ export function patchPlaylistRowByTrackId(ctx, trackId) {
   });
   if (!track) return false;
   const patched = patchLibraryRowCells(ctx, row, track);
-  const analyzing = state.analyzingTrackIds.has(id);
-  row.classList.toggle("is-analyzing", analyzing);
+  row.classList.toggle("is-analyzing", state.analyzingTrackIds.has(id));
   const analyzeBtn = row.querySelector("[data-action='analyze-track']");
-  if (analyzeBtn) analyzeBtn.disabled = analyzing;
+  if (analyzeBtn) applyAnalyzeButtonState(state, analyzeBtn, id, track.analysisReady);
   return patched;
 }
 
@@ -696,10 +605,25 @@ export function setTrackAnalyzingState(ctx, trackId, active) {
   const { state } = ctx;
   const id = String(trackId || "").trim();
   if (!id) return;
+  state.analysisWaitingTrackIds.delete(id);
   if (active) state.analyzingTrackIds.add(id);
   else state.analyzingTrackIds.delete(id);
   patchLibraryRowByTrackId(ctx, id);
   patchPlaylistRowByTrackId(ctx, id);
+}
+
+// The backend's "these wait for their turn" / "no longer": their own button
+// is disabled and its tooltip says why. The first event of a track ends it too
+// (`setTrackAnalyzingState`).
+export function setTracksWaitingState(ctx, trackIds, tooltip, waiting) {
+  const { state } = ctx;
+  if (waiting) state.analysisWaitingTooltip = tooltip;
+  for (const id of trackIds) {
+    if (waiting) state.analysisWaitingTrackIds.add(id);
+    else state.analysisWaitingTrackIds.delete(id);
+    patchLibraryRowByTrackId(ctx, id);
+    patchPlaylistRowByTrackId(ctx, id);
+  }
 }
 
 // A track's id changed (see `showTrackRow`'s `replaces`): the selection and
@@ -867,10 +791,6 @@ export function normalizeAnalysisBpmRange(range) {
   return /^\d{1,3}\s*-\s*\d{1,3}$/.test(String(range || "").trim())
     ? String(range).trim()
     : DEFAULT_ANALYSIS_BPM_RANGE;
-}
-
-export function scanLibraryButtonLabel(folders) {
-  return folders.length > 1 ? "Scan Libraries" : "Scan Library";
 }
 
 // --- cover_url.mjs ---

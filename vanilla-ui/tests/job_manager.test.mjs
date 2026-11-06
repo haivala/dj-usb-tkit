@@ -72,7 +72,11 @@ function jobCtx(state, el, deps = {}) {
     refreshLibrarySources: () => {},
     applyLibraryDurationSummary: () => {},
     setTrackAnalyzingState: () => {},
+    setTracksWaitingState: () => {},
     setUsbRootControlsLocked: () => {},
+    logWarnings: () => {},
+    pushEventLog: () => {},
+    refreshCurrentPlaylistTracks: () => {},
     ...deps
   };
 }

@@ -1,14 +1,14 @@
 import { test, expect } from "./coverage-fixture.mjs";
 
-// NOTE: analysis is dispatched as a single `analyze_new_tracks` batch call per
-// analyzeTrackIds() invocation (see components/library/actions.mjs). The
-// backend reports progressive per-track/per-piece updates during that call
-// via `job:event` events (stage: "analyze_new_tracks"; a trackStarted event
+// NOTE: `analyze_new_tracks` adds to the backend's analysis job and returns at
+// once (see components/library/actions.mjs). The job then reports progressive
+// per-track/per-piece updates via `job:event` events (stage: "analyze_new_tracks"; a trackStarted event
 // as a worker picks the track up, trackReady: false for each of the 4 pieces,
 // then a final trackReady: true event per track) — see
 // backend/src/service/analysis.rs (analyze_local_track_with_updates,
-// build_partial_progress, build_done_progress_success) and
-// backend/src/tauri_commands.rs (analyze_new_tracks, emit_job_event_with_track).
+// build_partial_progress, build_done_progress_success),
+// backend/src/service/analysis/coordinator.rs and
+// backend/src/tauri_commands.rs (emit_analysis_event).
 // These mocks simulate that same event sequence so the frontend's real
 // job_manager.mjs handleJobEvent()/applyRealtimeAnalyzedTrackUpdate() codepath
 // is exercised exactly as it is in production.
@@ -162,12 +162,9 @@ function installScanAnalysisMock(page, opts = {}) {
     // field group each, matching backend/src/service/analysis.rs's
     // TrackPartialUpdate/on_update sequence) followed by one final
     // trackReady:true event carrying all fields (matching
-    // build_done_progress_success). The command's own promise resolves only
-    // after every track has been processed, with the real analyzed/failed
-    // counts - this matches the real analyze_new_tracks Tauri command, whose
-    // handler awaits the whole spawn_blocking batch before returning.
-    const runAnalyzeNewTracks = async (ids, bpmMin, bpmMax) => {
-      const jobId = `job-analysis-mock-${analyzeNewTracksCalls}`;
+    // build_done_progress_success). The command itself has returned by then,
+    // as the real one does; `job.completed` carries the result.
+    const runAnalyzeNewTracks = async (jobId, ids, bpmMin, bpmMax) => {
       const total = Math.max(1, ids.length);
       // Every new batch starts fresh, matching the real backend's
       // reset-at-start-of-batch behavior for its pause/cancel flags.
@@ -213,17 +210,10 @@ function installScanAnalysisMock(page, opts = {}) {
             current: i,
             total,
             percent: Math.round((i / total) * 100),
-            message: `Analysis finished: ${analyzed} analyzed, ${failed} failed`,
+            message: `Analysis finished: analyzed ${analyzed}, failed ${failed}`,
             timestamp: nowIso()
           });
-          return {
-            jobId,
-            analyzed,
-            failed,
-            processed: analyzed + failed,
-            warnings: [`Analysis cancelled: ${analyzed} of ${total} tracks analyzed`],
-            items: withAnalysisReady(tracks.filter((track) => ids.includes(String(track.id))))
-          };
+          return;
         }
 
         const id = ids[i];
@@ -340,19 +330,11 @@ function installScanAnalysisMock(page, opts = {}) {
         current: ids.length,
         total,
         percent: 100,
-        message: `Analysis finished: ${analyzed} analyzed, ${failed} failed`,
+        message: `Analysis finished: analyzed ${analyzed}, failed ${failed}`,
+        logMessage: `Analysis: ${ids.length} tracks in 0:01 (analyzed ${analyzed}, failed ${failed})`,
         timestamp: nowIso()
       });
 
-      return {
-        jobId,
-        analyzed,
-        failed,
-        processed: analyzed + failed,
-        warnings: [],
-        items: withAnalysisReady(tracks.filter((track) => ids.includes(String(track.id)))),
-        elapsedMs: 1500
-      };
     };
 
     window.__TAURI__ = {
@@ -368,9 +350,6 @@ function installScanAnalysisMock(page, opts = {}) {
           }
           if (command === "scan_library") {
             // Backend-owned post-scan library facts (see ScanLibraryData).
-            const albums = new Set(
-              tracks.map((t) => String(t.album || "").trim().toLowerCase()).filter(Boolean)
-            );
             return {
               ok: true,
               data: {
@@ -378,11 +357,7 @@ function installScanAnalysisMock(page, opts = {}) {
                 indexed: tracks.length,
                 updated: 0,
                 removed: 0,
-                scopedTrackCount: tracks.length,
-                albumCount: albums.size,
-                unanalyzedCount: tracks.filter((t) => !isCountable(t)).length,
-                warnings: scanWarnings,
-                warningCount: scanWarnings.filter((w) => w.level === "warn" || w.level === "error").length
+                warnings: scanWarnings
               }
             };
           }
@@ -417,13 +392,24 @@ function installScanAnalysisMock(page, opts = {}) {
               min: Number.isFinite(rangeMin) ? rangeMin : Number(req.bpmMin || 0),
               max: Number.isFinite(rangeMax) ? rangeMax : Number(req.bpmMax || 0)
             };
-            // One run at a time per track, as the backend's `TrackClaims`.
+            // A track already in the job is skipped, as the backend's coordinator does.
             const alreadyAnalyzingTrackIds = ids.filter((id) => claimedTrackIds.has(id));
             ids = ids.filter((id) => !claimedTrackIds.has(id));
             ids.forEach((id) => claimedTrackIds.add(id));
-            const data = await runAnalyzeNewTracks(ids, bpmRangeSeen.min, bpmRangeSeen.max);
-            ids.forEach((id) => claimedTrackIds.delete(id));
-            return { ok: true, data: { ...data, alreadyAnalyzingTrackIds } };
+            const jobId = `job-analysis-mock-${analyzeNewTracksCalls}`;
+            if (ids.length) {
+              runAnalyzeNewTracks(jobId, ids, bpmRangeSeen.min, bpmRangeSeen.max)
+                .finally(() => ids.forEach((id) => claimedTrackIds.delete(id)));
+            }
+            const data = {
+              jobId,
+              queued: ids.length,
+              skipped: alreadyAnalyzingTrackIds.length,
+              message: ids.length
+                ? `Analyzing ${ids.length} tracks`
+                : alreadyAnalyzingTrackIds.length ? "Already analyzing 1 track" : "No tracks need analysis",
+            };
+            return { ok: true, data };
           }
           if (command === "set_analysis_paused") {
             analysisPaused = !!(payload?.request?.paused);
@@ -616,9 +602,7 @@ function installPagedMaterializeAnalyzeMock(page, opts = {}) {
     // Same progressive-per-piece simulation as installScanAnalysisMock,
     // adapted to look rows up via findRowByAnalysisId (id may be a
     // filePath before materialization, or an ml-* localTrackId after).
-    const runAnalyzeNewTracks = async (ids) => {
-      analyzeCalls += 1;
-      const jobId = `job-paged-analysis-mock-${analyzeCalls}`;
+    const runAnalyzeNewTracks = async (jobId, ids) => {
       const total = Math.max(1, ids.length);
       emitJobEvent({
         event: "job.started",
@@ -732,20 +716,11 @@ function installPagedMaterializeAnalyzeMock(page, opts = {}) {
         current: ids.length,
         total,
         percent: 100,
-        message: `Analysis finished: ${analyzed} analyzed, ${failed} failed`,
+        message: `Analysis finished: analyzed ${analyzed}, failed ${failed}`,
+        logMessage: `Analysis: ${ids.length} tracks in 0:01 (analyzed ${analyzed}, failed ${failed})`,
         timestamp: nowIso()
       });
 
-      return {
-        jobId,
-        analyzed,
-        failed,
-        processed: analyzed + failed,
-        warnings: [],
-        items: tracks
-          .filter((track) => ids.some((id) => findRowByAnalysisId(id) === track))
-          .map(toTrackDto)
-      };
     };
 
     window.__TAURI__ = {
@@ -784,8 +759,10 @@ function installPagedMaterializeAnalyzeMock(page, opts = {}) {
           if (command === "analyze_new_tracks") {
             const req = payload?.request || {};
             const ids = Array.isArray(req.trackIds) ? req.trackIds.map((v) => String(v)) : [];
-            const data = await runAnalyzeNewTracks(ids);
-            return { ok: true, data };
+            analyzeCalls += 1;
+            const jobId = `job-paged-analysis-mock-${analyzeCalls}`;
+            if (ids.length) runAnalyzeNewTracks(jobId, ids);
+            return { ok: true, data: { jobId, queued: ids.length, skipped: 0, message: `Analyzing ${ids.length} tracks` } };
           }
           if (command === "scan_library") {
             return {
@@ -832,7 +809,7 @@ test("scan applies per-piece row updates before track-ready status", async ({ pa
   await installScanAnalysisMock(page, { trackCount: 1, pieceDelayMs: 250, pauseBeforeBpmKey: true });
   await page.goto("/");
 
-  await page.locator("#scanLibraryBtn").click();
+  await page.locator("#analyzeLibraryBtn").click();
   await expect(page.locator("#libraryTableBody .track-grid-row")).toHaveCount(1);
 
   await page.waitForFunction(() => {
@@ -842,9 +819,8 @@ test("scan applies per-piece row updates before track-ready status", async ({ pa
   await expect(page.locator("#libraryTableBody .track-grid-row").first()).toHaveClass(/is-analyzing/);
   await expect.poll(async () => {
     const text = await page.locator("#statusText").textContent();
-    return (text || "").includes("Scan analysis: 0/1 track(s) ready")
-      || (text || "").includes("Analyzing")
-      || (text || "").includes("Scan done: 1 track / 1 album | analyzed 1, failed 0");
+    return (text || "").includes("Analyzing")
+      || (text || "").includes("Analysis finished: analyzed 1, failed 0");
   }).toBeTruthy();
   await expect(page.locator("#libraryTotalDuration")).toContainText("1 without length");
 
@@ -861,9 +837,8 @@ test("scan applies per-piece row updates before track-ready status", async ({ pa
   });
   await expect.poll(async () => {
     const text = await page.locator("#statusText").textContent();
-    return (text || "").includes("Scan analysis: 0/1 track(s) ready")
-      || (text || "").includes("Analyzing")
-      || (text || "").includes("Scan done: 1 track / 1 album | analyzed 1, failed 0");
+    return (text || "").includes("Analyzing")
+      || (text || "").includes("Analysis finished: analyzed 1, failed 0");
   }).toBeTruthy();
 
   await expect(page.locator("#statusText")).toContainText("analyzed 1, failed 0");
@@ -904,7 +879,7 @@ test("an analysis run during an export keeps its pause/cancel but leaves the exp
   await page.goto("/");
   await startMockExport(page);
 
-  await page.locator("#scanLibraryBtn").click();
+  await page.locator("#analyzeLibraryBtn").click();
   await page.waitForFunction(() => typeof window.__releaseBeforeBpmKey === "function");
   await expect(page.locator("#progressText")).toHaveText("USB: Exporting playlist");
   // The analysis keeps its own controls while the export holds the bar, and
@@ -933,7 +908,7 @@ test("the progress bar passes to an analysis still running when the export ends"
   await page.goto("/");
   await startMockExport(page);
 
-  await page.locator("#scanLibraryBtn").click();
+  await page.locator("#analyzeLibraryBtn").click();
   await page.waitForFunction(() => typeof window.__releaseBeforeBpmKey === "function");
 
   await finishMockExport(page);
@@ -952,7 +927,7 @@ test("every track in a large batch pulses as analyzing while a worker is on it",
   await installScanAnalysisMock(page, { trackCount, pieceDelayMs: 0, holdAfterTrackStart: true });
   await page.goto("/");
 
-  await page.locator("#scanLibraryBtn").click();
+  await page.locator("#analyzeLibraryBtn").click();
   await expect(page.locator("#libraryTableBody .track-grid-row")).toHaveCount(trackCount);
 
   const seen = new Set();
@@ -1021,7 +996,7 @@ test("while a track is analyzed everything can still start an analysis, except t
   await expect(analyzeButtons.first()).toBeDisabled();
   await expect(analyzeButtons.nth(1)).toBeEnabled();
   await expect(reanalyze).toBeEnabled();
-  await expect(page.locator("#scanLibraryBtn")).toBeEnabled();
+  await expect(page.locator("#analyzeLibraryBtn")).toBeEnabled();
 
   // The row drawn again during the analysis still has its button disabled.
   const firstTitle = await rows.first().locator(".track-title").textContent();
@@ -1037,7 +1012,7 @@ test("while a track is analyzed everything can still start an analysis, except t
   await expect(analyzeButtons.first()).toBeEnabled();
 });
 
-test("a run that skips a track another run has leaves that row analyzing", async ({ page }) => {
+test("a request for a track already in the job leaves that row analyzing", async ({ page }) => {
   await installScanAnalysisMock(page, { trackCount: 1, pieceDelayMs: 0, holdAfterTrackStart: true });
   await page.goto("/");
 
@@ -1048,7 +1023,7 @@ test("a run that skips a track another run has leaves that row analyzing", async
   await expect(row).toHaveClass(/is-analyzing/);
 
   await page.locator('[data-selection-bar="library"] [data-selection-action="reanalyze"]').click();
-  await expect(page.locator("#statusText")).toContainText("Reanalyze selected done: analyzed 0");
+  await expect(page.locator("#statusText")).toContainText("Already analyzing 1 track");
   await expect(row).toHaveClass(/is-analyzing/);
   await expect(row.locator('[data-action="analyze-track"]')).toBeDisabled();
   await expect(page.locator("#progressPauseBtn")).toBeVisible();
@@ -1059,28 +1034,64 @@ test("a run that skips a track another run has leaves that row analyzing", async
   expect(await page.evaluate(() => window.__scanTestStats.analyzeNewTracksCalls)).toBe(2);
 });
 
-test("overlapping analysis runs share pause and cancel, which stay until the last run ends", async ({ page }) => {
-  await installScanAnalysisMock(page, { trackCount: 1, pieceDelayMs: 0, holdAfterTrackStart: true });
+test("tracks waiting in the job have their own button disabled, and new work after a cancel brings the controls back", async ({ page }) => {
+  await installScanAnalysisMock(page, { trackCount: 2, pieceDelayMs: 0, holdAfterTrackStart: true });
   await page.goto("/");
 
-  await page.locator('#libraryTableBody [data-action="analyze-track"]').first().click();
+  const analyzeButtons = page.locator('#libraryTableBody [data-action="analyze-track"]');
+  const waitingId = await page.locator("#libraryTableBody .track-grid-row").nth(1).getAttribute("data-track-id");
+  await analyzeButtons.first().click();
   await page.waitForFunction(() => !!window.__heldTrack);
+  const job = { jobId: "job-grows", jobType: "analysis", stage: "analyze_new_tracks" };
   const pause = page.locator("#progressPauseBtn");
   await pause.click();
-  await expect(pause).toHaveAttribute("title", "Resume analysis");
 
-  const otherRun = { jobId: "analysis-other", jobType: "analysis", stage: "analyze_new_tracks" };
-  await page.evaluate((run) => window.__emitJobEvent({ ...run, event: "job.started", percent: 0, message: "Analyzing selected tracks" }), otherRun);
+  await page.evaluate(([run, id]) => window.__emitJobEvent({
+    ...run, event: "job.tracks_waiting", waitingTrackIds: [id], waitingTooltip: "Waiting for its turn", message: "", percent: 0
+  }), [job, waitingId]);
+  const waitingButton = page.locator(`#libraryTableBody .track-grid-row[data-track-id="${waitingId}"] [data-action="analyze-track"]`);
+  await expect(waitingButton).toBeDisabled();
+  await expect(waitingButton).toHaveAttribute("data-tooltip", "Waiting for its turn");
   await expect(pause).toHaveAttribute("title", "Resume analysis");
+  await expect(page.locator("#analyzeLibraryBtn")).toBeEnabled();
 
-  await page.evaluate((run) => window.__emitJobEvent({ ...run, event: "job.completed", percent: 100, message: "Analysis finished" }), otherRun);
-  await expect(pause).toBeVisible();
-  await expect(pause).toHaveAttribute("title", "Resume analysis");
-  await expect(page.locator("#progressCancelAnalysisBtn")).toBeVisible();
+  await page.evaluate(([run, id]) => window.__emitJobEvent({
+    ...run, event: "job.tracks_not_waiting", waitingTrackIds: [id], message: "", percent: 0
+  }), [job, waitingId]);
+  await expect(waitingButton).toBeEnabled();
+  await expect(waitingButton).not.toHaveAttribute("data-tooltip", "Waiting for its turn");
 
-  await page.evaluate(() => window.__heldTrack.release());
-  await expect(page.locator("#statusText")).toContainText("done: analyzed 1");
+  await page.locator("#progressCancelAnalysisBtn").click();
   await expect(pause).toBeHidden();
+  await page.evaluate(([run, id]) => window.__emitJobEvent({
+    ...run, event: "job.tracks_waiting", waitingTrackIds: [id], waitingTooltip: "Waiting for its turn", message: "", percent: 0
+  }), [job, waitingId]);
+  await expect(pause).toBeVisible();
+  await expect(page.locator("#progressCancelAnalysisBtn")).toBeVisible();
+});
+
+test("the final message is the job's, with its warning count as the Event Log link", async ({ page }) => {
+  await installScanAnalysisMock(page, { trackCount: 1, pieceDelayMs: 0, holdAfterTrackStart: true });
+  await page.goto("/");
+  await page.waitForFunction(() => window.__hasJobListener?.());
+  await page.evaluate(() => {
+    const job = { jobId: "job-end", jobType: "analysis", stage: "analyze_new_tracks" };
+    window.__emitJobEvent({ ...job, event: "job.started", percent: 0, message: "Analyzing selected tracks" });
+    window.__emitJobEvent({
+      ...job,
+      event: "job.completed",
+      percent: 100,
+      message: "Analysis finished: analyzed 3, failed 1 | (1 warning)",
+      warnings: [{ level: "error", source: "analysis", code: "analysis.track-failed", message: "/music/bad.mp3: decode failed" }],
+      warningCount: 1,
+      logMessage: "Analysis: 4 tracks in 0:12 (analyzed 3, failed 1)",
+    });
+  });
+  await expect(page.locator("#statusText")).toContainText("Analysis finished: analyzed 3, failed 1");
+  await expect(page.locator("#statusText a, #statusText button")).toContainText("(1 warning)");
+  await page.locator("#eventLogBtn").click();
+  await expect(page.locator("#eventLogList")).toContainText("/music/bad.mp3: decode failed");
+  await expect(page.locator("#eventLogList")).toContainText("Analysis: 4 tracks in 0:12");
 });
 
 test("a first analysis keeps the row's imported BPM and key while it runs", async ({ page }) => {
@@ -1088,7 +1099,7 @@ test("a first analysis keeps the row's imported BPM and key while it runs", asyn
   await page.goto("/");
 
   // The scan analyzes the unanalyzed track.
-  await page.locator("#scanLibraryBtn").click();
+  await page.locator("#analyzeLibraryBtn").click();
   const row = page.locator("#libraryTableBody .track-grid-row").first();
   await page.waitForFunction(() => !!window.__heldTrack);
   await expect(row).toHaveClass(/is-analyzing/);
@@ -1109,7 +1120,7 @@ test("scan progressively changes action buttons to Reanalyze", async ({ page }, 
   await page.setViewportSize({ width: 1280, height: 2400 });
   await page.goto("/");
 
-  await page.locator("#scanLibraryBtn").click();
+  await page.locator("#analyzeLibraryBtn").click();
   await expect(page.locator("#libraryTableBody .track-grid-row")).toHaveCount(40);
 
   await page.waitForFunction(() => {
@@ -1136,12 +1147,12 @@ test("scan progressively changes action buttons to Reanalyze", async ({ page }, 
 test("scan forwards selected BPM range to analyze_new_tracks", async ({ page }) => {
   await installScanAnalysisMock(page, { trackCount: 1, pieceDelayMs: 20, analysisBpmRange: "88-175" });
   await page.goto("/");
-  await page.locator("#scanLibraryBtn").click();
+  await page.locator("#analyzeLibraryBtn").click();
   await expect(page.locator("#statusText")).toContainText("analyzed 1, failed 0");
   await expect.poll(async () => page.evaluate(() => window.__scanTestStats?.bpmRangeSeen)).toEqual({ min: 88, max: 175 });
 });
 
-test("a scan's own warnings (a file found in two folders) reach the event log and the status count", async ({ page }) => {
+test("a scan's own warnings (a file found in two folders) reach the event log", async ({ page }) => {
   const message = "Same file in two places: /music/B/Song.mp3 is identical to /music/A/Song.mp3. The library keeps one; delete the extra copy.";
   await installScanAnalysisMock(page, {
     trackCount: 1,
@@ -1149,8 +1160,8 @@ test("a scan's own warnings (a file found in two folders) reach the event log an
     scanWarnings: [{ level: "warn", source: "library-scan", code: "scan.duplicate-file", message }]
   });
   await page.goto("/");
-  await page.locator("#scanLibraryBtn").click();
-  await expect(page.locator("#statusText")).toContainText("analyzed 1, failed 0 (1 warning)");
+  await page.locator("#analyzeLibraryBtn").click();
+  await expect(page.locator("#statusText")).toContainText("analyzed 1, failed 0");
   await page.locator("#eventLogBtn").click();
   await expect(page.locator("#eventLogList")).toContainText(message);
 });
@@ -1160,7 +1171,7 @@ test("analysis populates BPM and key cells for all tracks", async ({ page }) => 
   await page.setViewportSize({ width: 1280, height: 2400 });
   await page.goto("/");
 
-  await page.locator("#scanLibraryBtn").click();
+  await page.locator("#analyzeLibraryBtn").click();
   await expect(page.locator("#libraryTableBody .track-grid-row")).toHaveCount(40);
   await expect(
     page.locator('#libraryTableBody button[data-action="analyze-track"]', { hasText: "Reanalyze" })
@@ -1174,7 +1185,7 @@ test("library total duration advances only when each track is fully ready", asyn
   await installScanAnalysisMock(page, { trackCount: 2, pieceDelayMs: 120, workers: 3 });
   await page.goto("/");
 
-  await page.locator("#scanLibraryBtn").click();
+  await page.locator("#analyzeLibraryBtn").click();
   await expect(page.locator("#libraryTableBody .track-grid-row")).toHaveCount(2);
 
   await page.waitForFunction(() => {
@@ -1197,7 +1208,7 @@ test("pause button stops picking up new tracks and resume continues the batch", 
   await installScanAnalysisMock(page, { trackCount: 5, pieceDelayMs: 60 });
   await page.goto("/");
 
-  await page.locator("#scanLibraryBtn").click();
+  await page.locator("#analyzeLibraryBtn").click();
   await expect(page.locator("#progressPauseBtn")).toBeVisible();
   await expect(page.locator("#progressCancelAnalysisBtn")).toBeVisible();
 
@@ -1242,7 +1253,7 @@ test("event log entries go to the session log file, which the Open log file butt
   await installScanAnalysisMock(page, { trackCount: 2, pieceDelayMs: 10 });
   await page.goto("/");
 
-  await page.locator("#scanLibraryBtn").click();
+  await page.locator("#analyzeLibraryBtn").click();
   await expect(page.locator("#statusText")).toContainText("analyzed 2, failed 0");
 
   await page.locator("#eventLogBtn").click();
@@ -1258,7 +1269,7 @@ test("pause clicked mid-track keeps the elapsed timer counting until that track 
   await installScanAnalysisMock(page, { trackCount: 3, pieceDelayMs: 300 });
   await page.goto("/");
 
-  await page.locator("#scanLibraryBtn").click();
+  await page.locator("#analyzeLibraryBtn").click();
   await expect(page.locator("#progressPauseBtn")).toBeVisible();
 
   // Click pause partway through track 1's own pieces (after "waveform", one
@@ -1290,7 +1301,7 @@ test("pause clicked between tracks unfreezes the timer if the next track was alr
   await installScanAnalysisMock(page, { trackCount: 3, pieceDelayMs: 300 });
   await page.goto("/");
 
-  await page.locator("#scanLibraryBtn").click();
+  await page.locator("#analyzeLibraryBtn").click();
   await expect(page.locator("#progressPauseBtn")).toBeVisible();
 
   // Click pause the moment track 1 is ready. By then the mock (like a real
@@ -1319,7 +1330,7 @@ test("cancel button stops the batch early and reports how many tracks completed"
   await installScanAnalysisMock(page, { trackCount: 5, pieceDelayMs: 40 });
   await page.goto("/");
 
-  await page.locator("#scanLibraryBtn").click();
+  await page.locator("#analyzeLibraryBtn").click();
   await expect(page.locator("#progressCancelAnalysisBtn")).toBeVisible();
 
   await page.waitForFunction(() => {
@@ -1332,7 +1343,7 @@ test("cancel button stops the batch early and reports how many tracks completed"
   await expect.poll(async () => page.evaluate(() => window.__scanTestStats?.analysisCancelled)).toBe(true);
 
   // The batch must not hang waiting on tracks that will never come; the
-  // status line should settle on "Scan done: ... | analyzed N, failed 0"
+  // status line should settle on "Analysis finished: analyzed N, failed 0"
   // instead of staying on "Analyzing...". Read N from the status text
   // itself (the frontend's own source of truth for how many completed)
   // rather than a DOM snapshot taken mid-flight, since one extra track can
@@ -1370,7 +1381,7 @@ test("scan recomputes waveform piece even when one already exists", async ({ pag
   });
   await page.goto("/");
 
-  await page.locator("#scanLibraryBtn").click();
+  await page.locator("#analyzeLibraryBtn").click();
   await expect(page.locator("#libraryTableBody .track-grid-row")).toHaveCount(1);
   await expect(page.locator("#statusText")).toContainText("analyzed 1, failed 0");
 
@@ -1386,7 +1397,7 @@ test("analysis patch updates BPM cell in-place without replacing row node", asyn
   await installScanAnalysisMock(page, { trackCount: 1, pieceDelayMs: 120 });
   await page.goto("/");
 
-  await page.locator("#scanLibraryBtn").click();
+  await page.locator("#analyzeLibraryBtn").click();
   await expect(page.locator("#libraryTableBody .track-grid-row")).toHaveCount(1);
 
   const initial = await page.evaluate(() => {
@@ -1428,7 +1439,7 @@ test("sorted library order stays stable during live analysis patching", async ({
   await sortHeader.click();
   const before = await page.locator("#libraryTableBody .track-grid-row .track-title").allTextContents();
 
-  await page.locator("#scanLibraryBtn").click();
+  await page.locator("#analyzeLibraryBtn").click();
   await expect(page.locator("#statusText")).toContainText("analyzed 8, failed 0");
   const after = await page.locator("#libraryTableBody .track-grid-row .track-title").allTextContents();
 
@@ -1460,7 +1471,7 @@ test("analyze on auto-loaded non-materialized track resolves local id", async ({
   const targetRow = libraryRowAt(page, 230);
   await targetRow.locator('[data-action="analyze-track"]').click();
 
-  await expect(page.locator("#statusText")).not.toContainText("Track is not in local library yet");
+  await expect(page.locator("#statusText")).not.toContainText("Track is not in the local library yet");
   await expect.poll(async () => {
     return page.evaluate(() => Number(window.__pagedAnalyzeStats?.materializeCalls || 0));
   }).toBeGreaterThan(0);
@@ -1480,7 +1491,7 @@ test("analyze reports the not-in-local-library message when materializing the tr
   await targetRow.locator('[data-action="analyze-track"]').click();
 
   await expect(page.locator("#statusText")).toContainText(
-    "Track is not in local library yet. Scan library first, then analyze."
+    "Track is not in the local library yet. Run Analyze Library first."
   );
   const analyzeCalls = await page.evaluate(() => Number(window.__pagedAnalyzeStats?.analyzeCalls || 0));
   expect(analyzeCalls).toBe(0);
@@ -1511,7 +1522,7 @@ test("analyze on auto-loaded track updates row in place without full reload", as
 
   await targetRow.locator('[data-action="analyze-track"]').click();
 
-  await expect(page.locator("#statusText")).toContainText("Analyze missing done: analyzed 1, failed 0");
+  await expect(page.locator("#statusText")).toContainText("Analysis finished: analyzed 1, failed 0");
 
   const afterTrackId = await libraryRowAt(page, 230)
     .evaluate((row) => String(row.getAttribute("data-track-id") || ""));
@@ -1531,93 +1542,3 @@ test("analyze on auto-loaded track updates row in place without full reload", as
 // unusual `analyze_new_tracks` response shapes: a partial-failure count, and
 // a structured WarningEntry object (as opposed to a plain string) that must
 // still render its `message`, not "[object Object]".
-function installAnalyzeResponseMock(page, { analyzeResponse }) {
-  return page.addInitScript(({ analyzeResponse }) => {
-    // The library\'s source folders, as `get_library_sources` answers.
-    window.__e2eSourceFolders = ["/music"];
-    window.localStorage.setItem("djusbtkit.helpSeen", "1");
-
-    const track = {
-      id: "t-1",
-      title: "Track One",
-      artist: "Artist",
-      album: "Album",
-      filePath: "/music/Track One.mp3",
-      fileSizeBytes: 1000,
-      bpm: null,
-      key: null,
-      durationMs: null,
-      waveformPeaksPath: null,
-      waveformPreview: [],
-      createdAt: "2026-03-01T00:00:00Z",
-      updatedAt: "2026-03-01T00:00:00Z"
-    };
-
-    window.__TAURI__ = {
-      core: {
-        invoke: async (command) => {
-          if (command === "browse_source_files") {
-            return { ok: true, data: { total: 1, items: [track] } };
-          }
-          if (command === "resolve_track_identity") {
-            // Single-row "Analyze" resolves the local id via the backend now.
-            return { ok: true, data: { trackId: track.id, resolvedBy: "self", materialized: false } };
-          }
-          if (command === "analyze_new_tracks") {
-            return { ok: true, data: analyzeResponse };
-          }
-          return window.__e2eBackend.answer(command);
-        }
-      },
-      event: { listen: async () => () => {} }
-    };
-  }, { analyzeResponse });
-}
-
-test("a failed analyze_new_tracks count is reported in the status line and the batch stats in the event log", async ({ page }) => {
-  await installAnalyzeResponseMock(page, {
-    analyzeResponse: {
-      jobId: "job-1",
-      analyzed: 0,
-      failed: 1,
-      processed: 1,
-      warnings: ["1 bpm_key (essentia): no BPM/key result"],
-      elapsedMs: 83000
-    }
-  });
-  await page.goto("/");
-
-  await expect(page.locator("#libraryTableBody .track-grid-row")).toHaveCount(1);
-  await page.locator('[data-action="analyze-track"]').click();
-
-  await expect(page.locator("#statusText")).toContainText("done: analyzed 0, failed 1");
-  await page.locator("#eventLogBtn").click();
-  await expect(page.locator("#eventLogList")).toContainText("1 track in 1:23 (analyzed 0, failed 1)");
-});
-
-test("a track analysis couldn't finish (no BPM found) is reported as incomplete, not analyzed", async ({ page }) => {
-  await installAnalyzeResponseMock(page, {
-    analyzeResponse: {
-      jobId: "job-1",
-      analyzed: 0,
-      incomplete: 1,
-      failed: 0,
-      processed: 1,
-      warningCount: 1,
-      warnings: [{
-        level: "warn",
-        source: "analysis",
-        code: "analysis.track-incomplete",
-        message: "/music/Track One.mp3: no BPM detected"
-      }]
-    }
-  });
-  await page.goto("/");
-
-  await expect(page.locator("#libraryTableBody .track-grid-row")).toHaveCount(1);
-  await page.locator('[data-action="analyze-track"]').click();
-
-  await expect(page.locator("#statusText")).toContainText("done: analyzed 0, failed 0, incomplete 1");
-  await page.locator("#eventLogBtn").click();
-  await expect(page.locator("#eventLogList")).toContainText("/music/Track One.mp3: no BPM detected");
-});

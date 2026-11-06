@@ -72,6 +72,9 @@ function installSourceRemovalMock(page) {
             rekordboxDbEnabled: false,
             mixxxDbEnabled: false,
             everConfigured: true,
+            analyzeButtonLabel: "Analyze Library",
+            analyzeScanningStatus: "Scanning library files...",
+            trackNotInLibraryStatus: "Track is not in the local library yet. Run Analyze Library first.",
           });
           if (command === "get_library_sources") return { ok: true, data: sources() };
           if (command === "add_source_folders") {
@@ -182,7 +185,7 @@ test("after removing source A, reloading tracks still filters by remaining roots
 // folder left its tracks visible in the browse view (via a live filesystem
 // scan) but with no backing row in the tracks DB, so playback failed with
 // "track not found in Library or selected USB" until the user separately
-// clicked "Scan Library". The fix indexes newly (re-)added folders
+// clicked "Analyze Library". The fix indexes newly (re-)added folders
 // immediately as part of "Add Source" -- see
 // vanilla-ui/components/library/events.mjs addSourceBtn handler and
 // backend/src/service/library.rs scan_library.

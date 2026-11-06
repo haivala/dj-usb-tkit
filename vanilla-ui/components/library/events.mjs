@@ -17,7 +17,7 @@ export function bindLibraryEvents(ctx) {
     withProgress,
     pickSourceFolders,
     relocateSourceRoot,
-    scanLibrary,
+    analyzeLibrary,
     scanRekordboxDb,
     scanMixxxDb,
     reanalyzeTracks,
@@ -120,8 +120,8 @@ export function bindLibraryEvents(ctx) {
       .catch(catchErr(emitStatus));
   });
 
-  el.scanLibraryBtn.addEventListener("click", () => {
-    scanLibrary().catch(catchErr(emitStatus));
+  el.analyzeLibraryBtn.addEventListener("click", () => {
+    analyzeLibrary().catch(catchErr(emitStatus));
   });
 
   // Library chips: the checkbox is a pure filter (never an import); ↻ imports.

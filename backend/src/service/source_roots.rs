@@ -244,8 +244,18 @@ impl BackendService {
                 }
             })
             .collect();
+        let folders: Vec<SourceFolder> = folders;
+        let analyze_button_label = if folders.len() > 1 {
+            "Analyze Libraries"
+        } else {
+            "Analyze Library"
+        };
         Ok(LibrarySourcesData {
             folders,
+            analyze_button_label: analyze_button_label.to_string(),
+            analyze_scanning_status: "Scanning library files...".to_string(),
+            track_not_in_library_status:
+                "Track is not in the local library yet. Run Analyze Library first.".to_string(),
             rekordbox_db_enabled: sources.rekordbox_db,
             mixxx_db_enabled: sources.mixxx_db,
             ever_configured: sources.ever_configured(),

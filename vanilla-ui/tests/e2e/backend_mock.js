@@ -29,6 +29,9 @@
         rekordboxDbEnabled: false,
         mixxxDbEnabled: false,
         everConfigured: paths.length > 0,
+        analyzeButtonLabel: paths.length > 1 ? "Analyze Libraries" : "Analyze Library",
+        analyzeScanningStatus: "Scanning library files...",
+        trackNotInLibraryStatus: "Track is not in the local library yet. Run Analyze Library first.",
         ...overrides
       };
     },

@@ -12,7 +12,7 @@ export function createInitialState() {
     // ({ path, label, parent, enabled, missing, fullyAnalyzed }, in tree
     // order: a folder after the one it lies inside) and the imported
     // libraries' switches.
-    librarySources: { folders: [], rekordboxDbEnabled: false, mixxxDbEnabled: false, everConfigured: false },
+    librarySources: { folders: [], rekordboxDbEnabled: false, mixxxDbEnabled: false, everConfigured: false, analyzeButtonLabel: "", analyzeScanningStatus: "", trackNotInLibraryStatus: "" },
     usbRoot: null,
     // Known drives (`list_usb_devices`) and their root paths, for the recent list.
     usbDevices: [],
@@ -137,6 +137,9 @@ export function createInitialState() {
     progressPausedAtMs: null,
     librarySearchDebounceTimer: null,
     analyzingTrackIds: new Set(),
+    // Queued by the backend's analysis job, not started yet.
+    analysisWaitingTrackIds: new Set(),
+    analysisWaitingTooltip: "",
     deletingPlaylistId: null,
     selectedRepairFixIds: new Set(),
     startupPhase: true

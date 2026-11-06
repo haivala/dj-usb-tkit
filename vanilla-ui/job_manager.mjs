@@ -184,10 +184,6 @@ function analysisOwnsProgressBar(state) {
   return state.activeJobType === "analysis";
 }
 
-function isAnalysisJobRunning(state) {
-  return [...state.runningJobs.values()].some((job) => job.jobType === "analysis");
-}
-
 function setAnalysisControlsVisible(state, el, visible) {
   el.progressPauseBtn.hidden = !visible;
   el.progressCancelAnalysisBtn.hidden = !visible;
@@ -212,7 +208,11 @@ export function handleJobEvent(ctx, payload) {
     refreshLibrarySources,
     applyLibraryDurationSummary,
     setTrackAnalyzingState,
+    setTracksWaitingState,
     setUsbRootControlsLocked,
+    logWarnings,
+    pushEventLog,
+    refreshCurrentPlaylistTracks,
   } = ctx;
   if (!payload || typeof payload !== "object") return;
 
@@ -286,14 +286,11 @@ export function handleJobEvent(ctx, payload) {
   }
 
   if (eventName === "job.started" && jobId) {
-    const firstAnalysis = jobType === "analysis" && !isAnalysisJobRunning(state);
     state.runningJobs.set(jobId, { jobType, startedAtMs: Date.now(), percent, message });
     if (USB_ROOT_LOCKING_JOB_TYPES.has(jobType)) {
       setUsbRootControlsLocked(true);
     }
-    // A run starting beside another shares its pause and cancel (the backend's
-    // flags too), so it leaves them as they are.
-    if (firstAnalysis) {
+    if (jobType === "analysis") {
       setAnalysisControlsVisible(state, el, true);
     }
     if (jobType === "transcode") {
@@ -312,6 +309,17 @@ export function handleJobEvent(ctx, payload) {
         code: `${jobType}.started`,
         status
       });
+    }
+    return;
+  }
+
+  if (eventName === "job.tracks_waiting" || eventName === "job.tracks_not_waiting") {
+    const waiting = eventName === "job.tracks_waiting";
+    setTracksWaitingState((payload.waitingTrackIds || []).map(String), payload.waitingTooltip, waiting);
+    // New work in the job after a cancel hid these: they apply to it again.
+    if (waiting) {
+      el.progressPauseBtn.hidden = false;
+      el.progressCancelAnalysisBtn.hidden = false;
     }
     return;
   }
@@ -353,8 +361,15 @@ export function handleJobEvent(ctx, payload) {
         level: "info",
         source: "job",
         code: `${jobType}.completed`,
-        status
+        status: { ...status, warningCount: payload.warningCount || 0 }
       });
+    }
+    if (jobType === "analysis") {
+      logWarnings("analysis", payload.warnings || [], "Analysis");
+      if (payload.logMessage) {
+        pushEventLog({ level: "info", source: "analysis", code: "analysis.batch_done", message: payload.logMessage });
+      }
+      refreshCurrentPlaylistTracks();
     }
     // A folder may now be fully analyzed.
     refreshLibrarySources();
@@ -406,7 +421,7 @@ function finishJob(ctx, jobId, jobType, ownsProgressBar, idleDelayMs) {
     const waiters = state.usbJobIdleWaiters.splice(0);
     waiters.forEach((resolve) => resolve());
   }
-  if (jobType === "analysis" && !isAnalysisJobRunning(state)) {
+  if (jobType === "analysis") {
     setAnalysisControlsVisible(state, el, false);
   }
   if (jobType === "transcode") {

@@ -134,7 +134,7 @@ function installSourceChipAnalysisMock(page) {
     // as the real backend does.
     const folder = (path) => ({ path, label: path, parent: null, enabled: true, missing: false, fullyAnalyzed: true });
     window.__sources = {
-      folders: [folder("/music")], rekordboxDbEnabled: false, mixxxDbEnabled: false, everConfigured: true
+      folders: [folder("/music")], rekordboxDbEnabled: false, mixxxDbEnabled: false, everConfigured: true, analyzeButtonLabel: "Analyze Library", analyzeScanningStatus: "Scanning library files...", trackNotInLibraryStatus: "Track is not in the local library yet. Run Analyze Library first."
     };
     window.__libraryToggles = [];
     window.__folderToggles = [];
@@ -308,7 +308,7 @@ test("source chips show analyzed green on startup and adding a source indexes it
   await expect(page.locator(".source-chip.source-chip-analyzed")).toHaveCount(1);
   await page.locator("#addSourceBtn").click();
   // Newly added folders must be indexed immediately (scan_library, metadata-only
-  // insert) so tracks are playable right away without a manual "Scan Library"
+  // insert) so tracks are playable right away without a manual "Analyze Library"
   // click -- see backend/src/service/library.rs scan_library /
   // playback.rs resolve_playback_source.
   await expect.poll(async () => page.evaluate(() => window.__scanCalls)).toBe(1);

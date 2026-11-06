@@ -39,13 +39,13 @@
 
 ## Unreleased
 
-- **Fix:** You can start an analysis at any time, and extra work waits its turn: all running analyses now
-  share one worker limit instead of piling up. A track's own Analyze button is disabled while that track
-  is being analyzed, in playlists too.
-- **Fix:** A track is analyzed by one run at a time. A run skips tracks another run is analyzing or has
-  queued, and those rows keep showing as analyzing.
-- **Fix:** Starting an analysis while another runs no longer undoes a pause or cancel, and the pause and
-  cancel buttons stay until the last analysis has ended.
+- **Improvement:** All analysis now runs as one job. You can ask for more at any time: it joins the job's
+  queue and runs in turn, with one progress bar, one pause and cancel, and one final message. Waiting tracks
+  have their own Analyze button disabled, and Reanalyze on a waiting track replaces its kept values.
+- **Improvement:** The Scan Library button is now Analyze Library, which is what it does: it checks your
+  folders for changes, then analyzes what needs it. Its scan warnings and missing folders go to the Event Log.
+- **Fix:** Analysis no longer ties up the app's database connections, so many requests at once can't freeze
+  the app for 30 seconds. A track waits for memory while others run, instead of failing.
 - **Improvement:** USB Playlists and USB History load when you open the page, and only once until the
   USB changes. If a read fails, it tries again the next time you open the page. The Import Playlists
   and Import History buttons are gone.

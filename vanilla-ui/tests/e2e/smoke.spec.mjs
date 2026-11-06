@@ -187,7 +187,7 @@ test("draws the backend's source folders as source chips", async ({ page }) => {
           if (command === "get_library_sources") {
             const folders = ["/music", "/media/library"]
               .map((path) => ({ path, label: path, parent: null, enabled: true, missing: false, fullyAnalyzed: false }));
-            return { ok: true, data: { folders, rekordboxDbEnabled: false, mixxxDbEnabled: false, everConfigured: true } };
+            return { ok: true, data: { folders, rekordboxDbEnabled: false, mixxxDbEnabled: false, everConfigured: true, analyzeButtonLabel: "Analyze Library", analyzeScanningStatus: "Scanning library files...", trackNotInLibraryStatus: "Track is not in the local library yet. Run Analyze Library first." } };
           }
           if (command === "browse_source_files") return { ok: true, data: { total: 0, items: [] } };
           return window.__e2eBackend.answer(command);

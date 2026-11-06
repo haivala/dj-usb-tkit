@@ -74,7 +74,7 @@ export function createAppContext(env) {
     withProgress handleJobEvent toggleAnalysisPause cancelAnalysis cancelTranscode scheduleProgressIdle waitForUsbJobIdle`);
   bindActions(uiCtrl, `updateModeText updateActivePlaylistIndicators updateAddToPlaylistButtons
     updateUsbNameBadge updateSelectionCount updateUsbSubNavDisabledState updateUsbEmptyState
-    updateSourceFilterIndicator updateScanLibraryButtonLabel closeSettingsDrawer updateUsbHealthDot
+    updateSourceFilterIndicator updateAnalyzeLibraryButtonLabel closeSettingsDrawer updateUsbHealthDot
     syncLibraryOnboardingMode bindEvents`);
   bindActions(settings, "persistSetting hydrateLocalStorageFromFrontendSettingsDb persistUsbRoot");
   bindActions(bootstrap, "switchView debugFrontendLog handleBackendLogEvent");
@@ -93,8 +93,8 @@ export function createAppContext(env) {
     refreshLibrarySources showExternalLibrary applyRealtimeAnalyzedTrackUpdate
     relocateSourceRoot renderSourceChips applyLibraryDurationSummary renderLibraryRows
     scheduleLibrarySearch resetAndLoadLibraryTracks
-    reloadTrackListsForKeyNotation scanLibrary reanalyzeTracks
-    scanRekordboxDb scanMixxxDb analyzeTrackIds analyzeSingleTrack setTrackAnalyzingState
+    reloadTrackListsForKeyNotation analyzeLibrary reanalyzeTracks
+    scanRekordboxDb scanMixxxDb analyzeTrackIds analyzeSingleTrack setTrackAnalyzingState setTracksWaitingState
     showTrackRow`);
   bindActions(usb, `setUsbRootControlsLocked refreshPlaylistExportStatus applyPlaylistUsbExportStatus showDiagReportView
     clearUsbDiagnostics hideUsbDiagnostics loadUsbRootFromStorage usbContentChanged

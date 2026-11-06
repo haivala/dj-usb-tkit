@@ -97,6 +97,21 @@ pub struct JobEventPayload {
     /// the frontend shows in place of the one it has.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub track: Option<Box<Track>>,
+    /// On `job.tracks_waiting` / `job.tracks_not_waiting`: which tracks.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub waiting_track_ids: Option<Vec<String>>,
+    /// On `job.tracks_waiting`: the tooltip for those rows' own button.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub waiting_tooltip: Option<String>,
+    /// On an analysis `job.completed`: entries for the Event Log.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub warnings: Option<Vec<WarningEntry>>,
+    /// On an analysis `job.completed`: how many of `warnings` are warn or error.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub warning_count: Option<usize>,
+    /// On an analysis `job.completed`: the job's summary for the Event Log.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub log_message: Option<String>,
     pub timestamp: String,
 }
 
@@ -434,27 +449,8 @@ pub struct ScanLibraryData {
     pub removed: usize,
     #[serde(default)]
     pub not_found: Vec<String>,
-    /// Tracks under the scanned roots, computed over the whole library after
-    /// the scan commits (not the page the frontend reloads). `0` for the
-    /// pre-scan validation-error / no-op returns.
-    #[serde(default)]
-    pub scoped_track_count: usize,
-    /// Distinct non-empty album names among `scoped_track_count`.
-    #[serde(default)]
-    pub album_count: usize,
-    /// How many tracks an `analyze_new_tracks` call with
-    /// `scope_to_library_filter` and no search would analyze: the library as
-    /// shown (all switched-on folders and libraries), not just the scanned
-    /// roots, minus tracks analyzed by rekordbox and files that couldn't be
-    /// indexed.
-    #[serde(default)]
-    pub unanalyzed_count: usize,
     #[serde(default)]
     pub warnings: Vec<WarningEntry>,
-    /// The warn/error entries among `warnings`, for the status line's
-    /// "(N warnings)" (`logging::count_warnings`).
-    #[serde(default)]
-    pub warning_count: usize,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -651,6 +647,12 @@ pub struct LibrarySourcesData {
     /// imported), even if none is left: the library then shows its table
     /// instead of the "add a folder" onboarding.
     pub ever_configured: bool,
+    /// The text of the button that checks these folders and analyzes them.
+    pub analyze_button_label: String,
+    /// The status line while that button's scan runs.
+    pub analyze_scanning_status: String,
+    /// The status line when a track to analyze isn't in the library.
+    pub track_not_in_library_status: String,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -2077,7 +2079,6 @@ pub struct AnalyzeNewTracksRequest {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct AnalyzeNewTracksData {
-    pub job_id: String,
     /// Tracks that came out analysis-ready (waveform + BPM + duration).
     pub analyzed: usize,
     /// Tracks whose audio decoded but analysis left something out (no BPM
@@ -2089,19 +2090,22 @@ pub struct AnalyzeNewTracksData {
     #[serde(default)]
     pub processed: usize,
     pub warnings: Vec<WarningEntry>,
-    /// The warn/error entries among `warnings`, for the status line's
-    /// "(N warnings)" (`logging::count_warnings`).
-    #[serde(default)]
-    pub warning_count: usize,
-    #[serde(default)]
-    pub items: Vec<Track>,
     /// Requested tracks left out because another run is on them: their rows
     /// stay "analyzing" until that run reports them.
     #[serde(default)]
     pub already_analyzing_track_ids: Vec<String>,
-    /// Wall-clock time the batch took, paused time included.
-    #[serde(default)]
-    pub elapsed_ms: u64,
+}
+
+/// What became of a request added to the analysis job. The job reports the rest
+/// through its events.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct AnalysisSubmittedData {
+    pub job_id: String,
+    pub queued: usize,
+    pub skipped: usize,
+    /// For the status line.
+    pub message: String,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]

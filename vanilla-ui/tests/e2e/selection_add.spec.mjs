@@ -231,7 +231,7 @@ function installSelectionMock(page, mockOpts = {}) {
           }
           if (command === "analyze_new_tracks") {
             const ids = payload?.request?.trackIds || [];
-            return { ok: true, data: { analyzed: ids.length, failed: 0, incomplete: 0, warnings: [], items: [] } };
+            return { ok: true, data: { jobId: "job-mock", queued: ids.length, skipped: 0, message: `Analyzing ${ids.length} tracks` } };
           }
           // What the selected tracks share: genres differ, the release date is shared.
           if (command === "get_tracks_metadata_summary" || command === "get_usb_tracks_metadata_summary") {
@@ -359,7 +359,7 @@ test("Selection + bulk add to playlist", async ({ page }) => {
   });
   await expect(page.locator(`${libraryBar} .selection-count`)).toContainText("3 selected");
   // The header keeps its fill-missing job; the selection has its own actions.
-  await expect(page.locator("#scanLibraryBtn")).toHaveText("Scan Library");
+  await expect(page.locator("#analyzeLibraryBtn")).toHaveText("Analyze Library");
 
   await page.evaluate(() => {
     document.querySelector('[data-selection-bar="library"] [data-selection-action="add"]')?.click();
@@ -579,7 +579,7 @@ test("the selection bar is always there; its actions wait for a selection, and R
     .find((c) => c.command === "analyze_new_tracks")?.request)
     .toMatchObject({ trackIds: ["t1", "t2"], reanalyze: true });
   // The header button never turned into a selection action.
-  await expect(page.locator("#scanLibraryBtn")).toHaveText("Scan Library");
+  await expect(page.locator("#analyzeLibraryBtn")).toHaveText("Analyze Library");
 
   await bar.locator('[data-selection-action="clear"]').click();
   await expect(bar.locator(".selection-count")).toHaveText("0 selected");

@@ -3,6 +3,7 @@
 //! its own submodule.
 
 pub(crate) mod analysis;
+pub use analysis::{AnalysisEvent, AnalysisJobSummary, AnalysisObserver, analysis_event_payload};
 pub mod anlz;
 mod anlz_seek;
 pub(crate) mod bpm_key;
@@ -81,7 +82,7 @@ use serde::{Deserialize, Serialize};
 use std::hash::{Hash, Hasher};
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
-use std::sync::atomic::{AtomicBool, AtomicUsize};
+use std::sync::atomic::AtomicBool;
 use uuid::Uuid;
 
 use base64::Engine;
@@ -255,14 +256,8 @@ pub(crate) fn has_tracks_flagged(conn: &rusqlite::Connection, column: &str) -> B
 #[derive(Debug, Clone)]
 pub struct BackendService {
     pub db: Db,
-    pub analysis_paused: Arc<AtomicBool>,
-    pub analysis_cancelled: Arc<AtomicBool>,
-    /// What all analysis runs share, so extra work waits its turn.
-    pub(crate) analysis_limits: Arc<analysis::AnalysisLimits>,
-    /// Tracks a run is analyzing or has queued, by id (see `TrackClaims`).
-    pub analysis_claimed_tracks: Arc<std::sync::Mutex<std::collections::HashSet<String>>>,
-    /// Analysis runs under way (see `AnalysisRun`).
-    pub(crate) analysis_runs_active: Arc<AtomicUsize>,
+    /// The route to the one thread that runs analysis (`analysis::coordinator`).
+    pub(crate) analysis_coordinator: Arc<analysis::AnalysisCoordinatorHandle>,
     /// Set by `cancel_transcode`; reset when a transcode job starts.
     pub(crate) transcode_cancelled: Arc<AtomicBool>,
     /// One-entry cache of the last USB stick's resolved playlists / histories,
@@ -296,11 +291,7 @@ impl BackendService {
     pub fn new(data_dir: impl AsRef<std::path::Path>) -> BackendResult<Self> {
         let svc = Self {
             db: Db::new(data_dir)?,
-            analysis_paused: Arc::new(AtomicBool::new(false)),
-            analysis_cancelled: Arc::new(AtomicBool::new(false)),
-            analysis_limits: Arc::default(),
-            analysis_claimed_tracks: Arc::default(),
-            analysis_runs_active: Arc::new(AtomicUsize::new(0)),
+            analysis_coordinator: Arc::default(),
             transcode_cancelled: Arc::new(AtomicBool::new(false)),
             usb_playlists_cache: Arc::new(std::sync::Mutex::new(None)),
             usb_histories_cache: Arc::new(std::sync::Mutex::new(None)),

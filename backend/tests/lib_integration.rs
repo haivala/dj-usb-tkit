@@ -24,7 +24,6 @@ use backend::models::{
     SetFrontendSettingRequest, SetUsbDeviceNameRequest, WarningEntry,
 };
 use backend::pdb_reader::parse_pdb;
-use backend::service::BackendService;
 use backend::service::anlz::canonical_analysis_bundle_paths;
 use backend::service::export_helpers::{
     ExportManifest, ExportManifestTrack, ExportPlaylistData, analysis_bundle_path_variants,
@@ -33,6 +32,7 @@ use backend::service::export_helpers::{
 use backend::service::usb_vendor_compat::{
     USB_ANALYSIS_DIR, USB_ARTWORK_DIR, USB_VENDOR_DB_DIR, USB_VENDOR_ROOT_DIR,
 };
+use backend::service::{AnalysisEvent, BackendService};
 
 fn test_env_lock() -> &'static Mutex<()> {
     static LOCK: OnceLock<Mutex<()>> = OnceLock::new();
@@ -3456,46 +3456,308 @@ fn restore_analysis_env(previous: SavedEnv) {
     }
 }
 
+// What a job reported, in order, through the observer the UI uses.
+fn record_analysis_events(service: &BackendService) -> Arc<Mutex<Vec<AnalysisEvent>>> {
+    let events = Arc::new(Mutex::new(Vec::new()));
+    let recorded = events.clone();
+    service.set_analysis_observer(Arc::new(move |event| {
+        recorded.lock().expect("events lock").push(event.clone());
+    }));
+    events
+}
+
+fn wait_for_job_end(events: &Mutex<Vec<AnalysisEvent>>) {
+    let deadline = std::time::Instant::now() + std::time::Duration::from_secs(60);
+    while !events
+        .lock()
+        .expect("events lock")
+        .iter()
+        .any(|event| matches!(event, AnalysisEvent::JobFinished(_)))
+    {
+        assert!(std::time::Instant::now() < deadline, "the job finishes");
+        std::thread::yield_now();
+    }
+}
+
 #[test]
-fn overlapping_runs_all_finish_and_share_the_worker_budget() {
+fn reanalyzing_a_track_does_not_count_its_length_twice_in_the_library_total() {
     let _guard = test_env_lock().lock().expect("env lock");
     let root = tempdir().expect("temp root");
-    let (service, track_ids, previous_env) = one_worker_library(root.path(), 3);
+    let (service, track_ids, previous_env) = one_worker_library(root.path(), 1);
+    let request = |reanalyze| AnalyzeNewTracksRequest {
+        track_ids: track_ids.clone(),
+        reanalyze,
+        ..Default::default()
+    };
+    let total_after = |reanalyze| {
+        let mut total = None;
+        service
+            .analyze_new_tracks_with_progress(request(reanalyze), |progress| {
+                if progress.track_ready {
+                    total = progress.library_total_duration_ms;
+                }
+            })
+            .expect("analysis succeeds");
+        total.expect("the track-ready event carries the total")
+    };
 
-    let in_flight = std::sync::atomic::AtomicUsize::new(0);
-    let most_in_flight = std::sync::atomic::AtomicUsize::new(0);
-    std::thread::scope(|scope| {
-        for track_id in &track_ids {
-            let (service, in_flight, most_in_flight) = (&service, &in_flight, &most_in_flight);
-            scope.spawn(move || {
-                let data = service
-                    .analyze_new_tracks_with_progress(
-                        AnalyzeNewTracksRequest {
-                            track_ids: vec![track_id.clone()],
-                            ..Default::default()
-                        },
-                        |progress| {
-                            use std::sync::atomic::Ordering::SeqCst;
-                            if progress.track_started {
-                                let now = in_flight.fetch_add(1, SeqCst) + 1;
-                                most_in_flight.fetch_max(now, SeqCst);
-                            } else if progress.track_ready {
-                                in_flight.fetch_sub(1, SeqCst);
-                            }
-                        },
-                    )
-                    .expect("run succeeds");
-                assert_eq!(data.processed, 1, "every run gets its turn");
-            });
-        }
-    });
-    assert_eq!(most_in_flight.into_inner(), 1);
+    let first = total_after(false);
+    assert!(first > 0);
+    assert_eq!(total_after(true), first);
 
     restore_analysis_env(previous_env);
 }
 
 #[test]
-fn waiting_runs_leave_the_database_free_and_stop_when_cancelled() {
+fn many_requests_stay_within_the_worker_budget_and_every_track_is_reported_once() {
+    let _guard = test_env_lock().lock().expect("env lock");
+    let root = tempdir().expect("temp root");
+    let (service, track_ids, previous_env) = one_worker_library(root.path(), 3);
+    let events = record_analysis_events(&service);
+
+    std::thread::scope(|scope| {
+        for track_id in &track_ids {
+            let service = &service;
+            scope.spawn(move || {
+                let data = service
+                    .analyze_new_tracks(AnalyzeNewTracksRequest {
+                        track_ids: vec![track_id.clone()],
+                        ..Default::default()
+                    })
+                    .expect("request succeeds");
+                assert_eq!(data.processed, 1, "every request gets its turn");
+            });
+        }
+    });
+
+    let (mut in_flight, mut most_in_flight, mut ready) = (0usize, 0usize, Vec::new());
+    for event in events.lock().expect("events lock").iter() {
+        if let AnalysisEvent::Track { progress, .. } = event {
+            if progress.track_started {
+                in_flight += 1;
+                most_in_flight = most_in_flight.max(in_flight);
+            } else if progress.track_ready {
+                in_flight -= 1;
+                ready.push(progress.track_id.clone());
+            }
+        }
+    }
+    assert_eq!(most_in_flight, 1);
+    ready.sort();
+    let mut expected = track_ids.clone();
+    expected.sort();
+    assert_eq!(ready, expected);
+
+    restore_analysis_env(previous_env);
+}
+
+#[test]
+fn requests_during_a_job_grow_it_and_run_in_order() {
+    let _guard = test_env_lock().lock().expect("env lock");
+    let root = tempdir().expect("temp root");
+    let (service, track_ids, previous_env) = one_worker_library(root.path(), 3);
+    let events = record_analysis_events(&service);
+
+    let mut added = false;
+    service
+        .analyze_new_tracks_with_progress(
+            AnalyzeNewTracksRequest {
+                track_ids: vec![track_ids[0].clone()],
+                ..Default::default()
+            },
+            |progress| {
+                if progress.track_started && !added {
+                    added = true;
+                    let submitted = service
+                        .submit_analysis(AnalyzeNewTracksRequest {
+                            track_ids: track_ids[1..].to_vec(),
+                            ..Default::default()
+                        })
+                        .expect("submit succeeds");
+                    assert_eq!(submitted.queued, 2);
+                }
+            },
+        )
+        .expect("first request succeeds");
+
+    // The first request is done; the job ends after the other two.
+    wait_for_job_end(&events);
+
+    let events = events.lock().expect("events lock");
+    let count =
+        |matching: fn(&AnalysisEvent) -> bool| events.iter().filter(|e| matching(e)).count();
+    let started = count(|event| matches!(event, AnalysisEvent::JobStarted { .. }));
+    let finished = count(|event| matches!(event, AnalysisEvent::JobFinished(_)));
+    assert_eq!((started, finished), (1, 1), "one job");
+    assert!(events.iter().any(|event| matches!(
+        event,
+        AnalysisEvent::TracksWaiting { track_ids: waiting, .. } if waiting == &track_ids[1..]
+    )));
+    let started_order: Vec<&String> = events
+        .iter()
+        .filter_map(|event| match event {
+            AnalysisEvent::Track { progress, .. } if progress.track_started => {
+                Some(&progress.track_id)
+            }
+            _ => None,
+        })
+        .collect();
+    assert_eq!(
+        started_order,
+        track_ids.iter().collect::<Vec<_>>(),
+        "first come, first served"
+    );
+    let Some(AnalysisEvent::JobFinished(summary)) = events.last() else {
+        panic!("the job's end comes last");
+    };
+    assert!(
+        summary.message.starts_with("Analysis finished: analyzed 3"),
+        "{}",
+        summary.message
+    );
+
+    restore_analysis_env(previous_env);
+}
+
+#[test]
+fn a_request_after_a_cancel_runs_and_the_next_job_starts_unpaused() {
+    let _guard = test_env_lock().lock().expect("env lock");
+    let root = tempdir().expect("temp root");
+    let (service, track_ids, previous_env) = one_worker_library(root.path(), 3);
+    let events = record_analysis_events(&service);
+
+    let mut late = None;
+    let first = service
+        .analyze_new_tracks_with_progress(
+            AnalyzeNewTracksRequest {
+                track_ids: track_ids[..2].to_vec(),
+                ..Default::default()
+            },
+            |progress| {
+                if progress.track_started && late.is_none() {
+                    service.set_analysis_paused(true).expect("pause");
+                    service.cancel_analysis().expect("cancel");
+                    let service = service.clone();
+                    let track_id = track_ids[2].clone();
+                    late = Some(std::thread::spawn(move || {
+                        service.analyze_new_tracks(AnalyzeNewTracksRequest {
+                            track_ids: vec![track_id],
+                            ..Default::default()
+                        })
+                    }));
+                }
+            },
+        )
+        .expect("first request returns");
+    assert_eq!(first.processed, 1, "the cancel dropped the waiting track");
+    let late = late
+        .expect("started")
+        .join()
+        .expect("late request ends")
+        .expect("late request succeeds");
+    assert_eq!(late.processed, 1, "work after a cancel runs");
+    wait_for_job_end(&events);
+    assert!(
+        events.lock().expect("events lock").iter().any(|event| matches!(
+            event,
+            AnalysisEvent::TracksNotWaiting { track_ids: stopped, .. } if stopped == &track_ids[1..2]
+        )),
+        "the UI hears the cancelled track stopped waiting"
+    );
+
+    // A pause left at the end of a job is gone with it.
+    let mut paused_once = false;
+    service
+        .analyze_new_tracks_with_progress(
+            AnalyzeNewTracksRequest {
+                track_ids: vec![track_ids[0].clone()],
+                reanalyze: true,
+                ..Default::default()
+            },
+            |progress| {
+                if progress.track_started {
+                    service.set_analysis_paused(true).expect("pause");
+                    paused_once = true;
+                }
+            },
+        )
+        .expect("paused job ends");
+    assert!(paused_once);
+    let next = service
+        .analyze_new_tracks(AnalyzeNewTracksRequest {
+            track_ids: vec![track_ids[0].clone()],
+            reanalyze: true,
+            ..Default::default()
+        })
+        .expect("next job succeeds");
+    assert_eq!(next.processed, 1);
+
+    restore_analysis_env(previous_env);
+}
+
+#[test]
+fn reanalyze_of_a_waiting_track_replaces_its_kept_values() {
+    let _guard = test_env_lock().lock().expect("env lock");
+    let root = tempdir().expect("temp root");
+    let (service, track_ids, previous_env) = one_worker_library(root.path(), 2);
+    let edited = track_ids[1].clone();
+    service
+        .db
+        .connect()
+        .expect("connect")
+        .execute(
+            "UPDATE tracks SET bpm = 141.0, bpm_analyzer = 'user' WHERE id = ?1",
+            [&edited],
+        )
+        .expect("seed edited bpm");
+
+    let mut skipped = None;
+    let mut reanalysis_started = false;
+    service
+        .analyze_new_tracks_with_progress(
+            AnalyzeNewTracksRequest {
+                track_ids: track_ids.clone(),
+                ..Default::default()
+            },
+            |progress| {
+                if !progress.track_started {
+                    return;
+                }
+                if progress.track_id == edited {
+                    reanalysis_started = progress.reanalysis;
+                } else {
+                    skipped = Some(
+                        service
+                            .submit_analysis(AnalyzeNewTracksRequest {
+                                track_ids: vec![edited.clone()],
+                                reanalyze: true,
+                                ..Default::default()
+                            })
+                            .expect("submit succeeds")
+                            .skipped,
+                    );
+                }
+            },
+        )
+        .expect("request succeeds");
+
+    assert_eq!(skipped, Some(1));
+    assert!(reanalysis_started);
+    let bpm: f64 = service
+        .db
+        .connect()
+        .expect("connect")
+        .query_row("SELECT bpm FROM tracks WHERE id = ?1", [&edited], |row| {
+            row.get(0)
+        })
+        .expect("read bpm");
+    assert_ne!(bpm, 141.0, "the Reanalyze replaced the edited BPM");
+
+    restore_analysis_env(previous_env);
+}
+
+#[test]
+fn waiting_requests_leave_the_database_free_and_stop_when_cancelled() {
     let _guard = test_env_lock().lock().expect("env lock");
     let root = tempdir().expect("temp root");
     let (service, track_ids, previous_env) = one_worker_library(root.path(), 11);
@@ -3514,7 +3776,8 @@ fn waiting_runs_leave_the_database_free_and_stop_when_cancelled() {
                 if !progress.track_started {
                     return;
                 }
-                // This run has the only worker, so these all wait.
+                // Paused, so these all wait however quickly this track finishes.
+                service.set_analysis_paused(true).expect("pause");
                 for track_id in others {
                     let (service, track_id, finished_tx) =
                         (service.clone(), track_id.clone(), finished_tx.clone());
@@ -3528,12 +3791,19 @@ fn waiting_runs_leave_the_database_free_and_stop_when_cancelled() {
                 }
                 std::thread::sleep(std::time::Duration::from_millis(500));
 
+                // The whole pool (8) is free: analysis keeps its one connection
+                // outside it, with tracks waiting.
                 let started = std::time::Instant::now();
-                service
-                    .db
-                    .connect()
-                    .expect("the app can still get a connection");
+                let whole_pool: Vec<_> = (0..8)
+                    .map(|_| {
+                        service
+                            .db
+                            .connect()
+                            .expect("the app can still get a connection")
+                    })
+                    .collect();
                 assert!(started.elapsed() < std::time::Duration::from_secs(5));
+                drop(whole_pool);
 
                 service.cancel_analysis().expect("cancel");
                 for _ in others {
@@ -3557,101 +3827,7 @@ fn waiting_runs_leave_the_database_free_and_stop_when_cancelled() {
 }
 
 #[test]
-fn a_run_starting_beside_another_keeps_its_pause_and_a_later_first_run_resets_it() {
-    let _guard = test_env_lock().lock().expect("env lock");
-    let prev_enabled = std::env::var("DJTKIT_ENABLE_ESSENTIA_JS").ok();
-    let prev_runner = std::env::var("DJTKIT_ESSENTIA_RUNNER").ok();
-    // SAFETY: tests serialize env access through a global mutex.
-    unsafe {
-        std::env::set_var("DJTKIT_ENABLE_ESSENTIA_JS", "0");
-        std::env::remove_var("DJTKIT_ESSENTIA_RUNNER");
-    }
-
-    let root = tempdir().expect("temp root");
-    let media = root.path().join("media");
-    fs::create_dir_all(&media).expect("create media");
-    write_test_pulsed_key_wav(&media.join("Artist - overlap_test.wav"), 120.0, 2_000);
-
-    let data_dir = root.path().join("data");
-    let service = BackendService::new(&data_dir).expect("create service");
-    service
-        .scan_library(ScanLibraryRequest {
-            source_roots: vec![media.to_string_lossy().to_string()],
-            incremental: true,
-        })
-        .expect("scan succeeds");
-    library_sources::show_only(
-        &service,
-        vec![media.to_string_lossy().to_string()],
-        false,
-        false,
-    );
-    let track_ids: Vec<String> = service
-        .browse_source_files(BrowseSourceFilesRequest {
-            query: String::new(),
-            limit: 50,
-            cursor: None,
-            ..Default::default()
-        })
-        .expect("search succeeds")
-        .items
-        .into_iter()
-        .map(|t| t.id)
-        .collect();
-    assert_eq!(track_ids.len(), 1);
-
-    // A run with nothing to do, started from inside the running one's callback.
-    let empty_run = || AnalyzeNewTracksRequest {
-        scope_to_library_filter: true,
-        query: "matches no track".to_string(),
-        ..Default::default()
-    };
-    let paused = |service: &BackendService| {
-        service
-            .analysis_paused
-            .load(std::sync::atomic::Ordering::SeqCst)
-    };
-
-    let mut checked = false;
-    service
-        .analyze_new_tracks_with_progress(
-            AnalyzeNewTracksRequest {
-                track_ids,
-                ..Default::default()
-            },
-            |progress| {
-                if progress.track_started {
-                    service.set_analysis_paused(true).expect("pause");
-                    let _ = service.analyze_new_tracks_with_progress(empty_run(), |_| {});
-                    assert!(paused(&service), "the overlapping run kept the pause");
-                    checked = true;
-                }
-            },
-        )
-        .expect("analysis succeeds");
-    assert!(checked);
-
-    // Nothing runs now, so the next run is a first run again.
-    assert!(paused(&service));
-    let _ = service.analyze_new_tracks_with_progress(empty_run(), |_| {});
-    assert!(!paused(&service), "a first run starts fresh");
-
-    for (name, previous) in [
-        ("DJTKIT_ENABLE_ESSENTIA_JS", prev_enabled),
-        ("DJTKIT_ESSENTIA_RUNNER", prev_runner),
-    ] {
-        // SAFETY: tests serialize env access through a global mutex.
-        unsafe {
-            match previous {
-                Some(value) => std::env::set_var(name, value),
-                None => std::env::remove_var(name),
-            }
-        }
-    }
-}
-
-#[test]
-fn a_run_skips_a_track_another_run_has_until_that_track_is_done() {
+fn a_request_skips_a_track_already_in_the_job_until_that_track_is_done() {
     let _guard = test_env_lock().lock().expect("env lock");
     let prev_enabled = std::env::var("DJTKIT_ENABLE_ESSENTIA_JS").ok();
     let prev_runner = std::env::var("DJTKIT_ESSENTIA_RUNNER").ok();
@@ -3698,16 +3874,8 @@ fn a_run_skips_a_track_another_run_has_until_that_track_is_done() {
         reanalyze: true,
         ..Default::default()
     };
-    let is_claimed = |id: &str| {
-        service
-            .analysis_claimed_tracks
-            .lock()
-            .expect("claims lock")
-            .contains(id)
-    };
 
     let mut skipped = None;
-    let mut released_when_ready = false;
     let first = service
         .analyze_new_tracks_with_progress(request(), |progress| {
             if progress.track_started {
@@ -3719,8 +3887,6 @@ fn a_run_skips_a_track_another_run_has_until_that_track_is_done() {
                 assert_eq!(second.processed, 0);
                 assert!(second.warnings.is_empty());
                 skipped = Some(second.already_analyzing_track_ids);
-            } else if progress.track_ready {
-                released_when_ready = !is_claimed(&progress.track_id);
             }
         })
         .expect("first run succeeds");
@@ -3728,20 +3894,12 @@ fn a_run_skips_a_track_another_run_has_until_that_track_is_done() {
     assert_eq!(first.processed, 1);
     assert!(first.already_analyzing_track_ids.is_empty());
     assert_eq!(skipped, Some(track_ids.clone()));
-    assert!(released_when_ready);
 
     // Once it's done, the track can be analyzed again.
     let again = service
         .analyze_new_tracks(request())
         .expect("next run succeeds");
     assert_eq!(again.processed, 1);
-    assert!(
-        service
-            .analysis_claimed_tracks
-            .lock()
-            .expect("lock")
-            .is_empty()
-    );
 
     for (name, previous) in [
         ("DJTKIT_ENABLE_ESSENTIA_JS", prev_enabled),

@@ -1,14 +1,12 @@
 //! Track analysis: BPM detection, key detection, waveform generation, cover art.
 
 use crate::utils::counted;
-use std::cell::RefCell;
 use std::collections::HashSet;
 use std::fs::File;
 use std::io::{BufRead, BufReader, Write};
 use std::path::{Path, PathBuf};
 use std::process::{Child, ChildStdin, ChildStdout, Command, Stdio};
-use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
-use std::sync::{Arc, Condvar, Mutex, MutexGuard, OnceLock, PoisonError, mpsc};
+use std::sync::{Condvar, Mutex, OnceLock};
 use std::time::Instant;
 
 use image::imageops::FilterType;
@@ -30,10 +28,7 @@ use uuid::Uuid;
 
 use crate::error::{BackendError, BackendResult};
 use crate::logging::{self, Level};
-use crate::models::{
-    AnalyzeNewTracksData, AnalyzeNewTracksRequest, GetTracksByIdsRequest, SetAnalysisPausedData,
-    WarningEntry,
-};
+use crate::models::WarningEntry;
 
 use super::anlz::{
     AnlzBundlePaths, WaveformData, atomic_write_bytes, fill_mp3_pvbr,
@@ -45,8 +40,14 @@ use super::export_helpers::{
 };
 use super::{
     BackendService, LibrarySources, SETTING_UI_ANALYSIS_ENGINE, WAVEFORM_PREVIEW_BINS,
-    has_core_analysis_fields, now, track_has_core_analysis_for_source_status,
+    has_core_analysis_fields, track_has_core_analysis_for_source_status,
 };
+
+mod coordinator;
+mod job_events;
+pub(crate) use coordinator::AnalysisCoordinatorHandle;
+pub use coordinator::{AnalysisEvent, AnalysisJobSummary, AnalysisObserver};
+pub use job_events::analysis_event_payload;
 
 pub(super) const ANALYSIS_DECODE_MAX_SAMPLES: usize = 24_000_000;
 // Reserved for the OS, the Tauri/WebKit UI process, and other running apps.
@@ -86,7 +87,7 @@ const TRACK_ANALYSIS_UPDATE_SQL: &str = r#"
 /// analysis fields. This is the exact negation of `has_core_analysis_fields`
 /// (waveform peaks path non-empty AND bpm > 0 AND duration_ms > 0), so the
 /// "N need analysis" figures shown in the UI (`Track::analysis_ready`,
-/// `GetPlaylistTracksData::unanalyzed_count`, the scan status line, the
+/// `GetPlaylistTracksData::unanalyzed_count`, the
 /// source-folder "analyzed" dot) and the set actually picked for auto-analysis
 /// always agree. A playlist's figures and analysis also count a track whose
 /// local analysis files are gone (`load_playlist_tracks_ordered`). Key (`tonality`) and embedded artwork are deliberately NOT
@@ -96,14 +97,10 @@ pub(crate) const MISSING_CORE_ANALYSIS_SQL: &str = "(COALESCE(TRIM(waveform_peak
      OR duration_ms IS NULL OR duration_ms <= 0)";
 
 /// Read the configured analysis engine from app_settings. Defaults to Stratum.
-fn resolve_analysis_engine(db: &crate::db::Db, requested: Option<&str>) -> AnalysisEngine {
+fn resolve_analysis_engine(conn: &rusqlite::Connection, requested: Option<&str>) -> AnalysisEngine {
     if let Some(raw) = requested {
         return AnalysisEngine::from_setting(raw);
     }
-    let conn = match db.connect() {
-        Ok(c) => c,
-        Err(_) => return AnalysisEngine::Stratum,
-    };
     let raw: Option<String> = conn
         .query_row(
             "SELECT value FROM app_settings WHERE key = ?1",
@@ -172,7 +169,7 @@ pub struct AnalyzeTrackProgress {
     pub bpm_analyzer: Option<String>,
     pub key: Option<String>,
     /// `key` in the user's display notation + colour group; filled once per
-    /// event by `analyze_new_tracks_with_progress` (see `key_notation`).
+    /// event by the coordinator (see `key_notation`).
     pub key_display: Option<String>,
     pub key_color: Option<u8>,
     pub artwork_path: Option<String>,
@@ -583,567 +580,48 @@ fn elapsed_ms_since(started: Instant) -> u64 {
 }
 
 impl BackendService {
-    pub fn analyze_new_tracks(
+    /// Live library-duration-total baseline: the library as filtered (its
+    /// sources plus the frontend's search query), so `on_progress` can push an
+    /// up-to-date total as each track finishes, instead of the frontend
+    /// recomputing it locally from a possibly-partial (paginated) view. A
+    /// library with no sources set opts this out at no extra cost -- the two
+    /// progress fields just stay `None`.
+    fn library_duration_context(
         &self,
-        req: AnalyzeNewTracksRequest,
-    ) -> BackendResult<AnalyzeNewTracksData> {
-        self.analyze_new_tracks_with_progress(req, |_| {})
-    }
-
-    pub fn analyze_new_tracks_with_progress<F>(
-        &self,
-        req: AnalyzeNewTracksRequest,
-        mut on_progress: F,
-    ) -> BackendResult<AnalyzeNewTracksData>
-    where
-        F: FnMut(&AnalyzeTrackProgress),
-    {
-        self.ensure_no_data_migration()?;
-        let _run = AnalysisRun::begin(self);
-        let claims = TrackClaims::new(self);
-        let batch_started = Instant::now();
-        let job_id = format!("job-analysis-{}", Uuid::now_v7());
-        // Takes a connection of its own, so before this run holds one: runs
-        // starting together that each hold one and want another would use up
-        // the pool and stall until its timeout.
-        let engine = resolve_analysis_engine(&self.db, req.analysis_engine.as_deref());
-        let conn = self.db.connect()?;
-        let auto_mode = req.track_ids.is_empty();
-        let notation = super::key_notation::key_notation_setting(&conn)?;
-        let mut on_progress = |progress: &AnalyzeTrackProgress| {
-            if progress.track_ready {
-                claims.release(&progress.track_id);
+        conn: &rusqlite::Connection,
+        query: &str,
+        in_job: &HashSet<&str>,
+    ) -> BackendResult<Option<LibraryDurationContext>> {
+        let sources = LibrarySources::load(conn)?;
+        if sources.listed_roots().is_empty() && !sources.external().any() {
+            return Ok(None);
+        }
+        let visible = self.compute_visible_library_tracks(conn, query)?;
+        let visible_track_ids: std::collections::HashSet<String> =
+            visible.iter().map(|t| t.id.clone()).collect();
+        let mut total_ms: u64 = 0;
+        let mut known_count: usize = 0;
+        for track in &visible {
+            if in_job.contains(track.id.as_str()) {
+                continue;
             }
-            if progress.key.is_none() {
-                return on_progress(progress);
-            }
-            let mut progress = progress.clone();
-            (progress.key_display, progress.key_color) =
-                super::key_notation::key_display_fields(progress.key.as_deref(), notation);
-            on_progress(&progress)
-        };
-
-        // In auto mode the caller can scope "tracks needing analysis" to one
-        // playlist or to the current library filter instead of the whole DB.
-        // We resolve the scoped id list here and feed it through the explicit-id
-        // path of `collect_tracks_for_analysis`.
-        let scoped_ids: Option<Vec<String>> = if auto_mode {
-            if let Some(playlist_id) = req
-                .playlist_id
-                .as_deref()
-                .map(str::trim)
-                .filter(|id| !id.is_empty())
-            {
-                Some(self.collect_playlist_unanalyzed_track_ids(&conn, playlist_id, &req.query)?)
-            } else if req.scope_to_library_filter {
-                Some(self.library_filter_unanalyzed_track_ids(&conn, &req.query)?)
-            } else {
-                None
-            }
-        } else {
-            None
-        };
-
-        let mut tracks = match scoped_ids {
-            // A scoped request with nothing to do must NOT fall through to
-            // `collect_tracks_for_analysis(&[])`, which would treat an empty
-            // slice as "auto-select the whole DB".
-            Some(ids) if ids.is_empty() => Vec::new(),
-            Some(ids) => collect_tracks_for_analysis(&conn, &ids)?,
-            None => collect_tracks_for_analysis(&conn, &req.track_ids)?,
-        };
-        if req.reanalyze && !req.track_ids.is_empty() {
-            for track in &mut tracks {
-                track.force_reanalysis();
+            let has_duration = track.duration_ms.map(|d| d > 0).unwrap_or(false);
+            let countable = track_has_core_analysis_for_source_status(track)
+                || (track.rekordbox_db_source && has_duration);
+            if countable && let Some(d) = track.duration_ms {
+                total_ms += d;
+                known_count += 1;
             }
         }
-        let mut already_analyzing_track_ids = Vec::new();
-        tracks.retain(|track| {
-            let claimed = claims.claim(&track.id);
-            if !claimed {
-                already_analyzing_track_ids.push(track.id.clone());
-            }
-            claimed
-        });
-        if tracks.is_empty() {
-            // Tracks another run has aren't a problem to report.
-            let warnings = if already_analyzing_track_ids.is_empty() {
-                vec![logging::log(
-                    Level::Info,
-                    "analysis",
-                    "analysis.no-eligible-tracks",
-                    "No eligible tracks found for analysis",
-                )]
-            } else {
-                Vec::new()
-            };
-            return Ok(AnalyzeNewTracksData {
-                job_id,
-                analyzed: 0,
-                incomplete: 0,
-                failed: 0,
-                processed: 0,
-                // Only an info entry, if any.
-                warning_count: 0,
-                warnings,
-                items: Vec::new(),
-                already_analyzing_track_ids,
-                elapsed_ms: elapsed_ms_since(batch_started),
-            });
-        }
-
-        // Claimed, so this run can wait its turn. A waiting run holds no
-        // connection: enough of them would starve the rest of the app.
-        drop(conn);
-        let Some(_run_permit) = self.analysis_limits.take(
-            AnalysisPermitKind::Run,
-            MAX_ACTIVE_ANALYSIS_RUNS,
-            None,
-            &self.analysis_cancelled,
-        ) else {
-            return Ok(AnalyzeNewTracksData {
-                job_id,
-                analyzed: 0,
-                incomplete: 0,
-                failed: 0,
-                processed: 0,
-                warning_count: 0,
-                warnings: vec![analysis_cancelled_warning(0, tracks.len())],
-                items: Vec::new(),
-                already_analyzing_track_ids,
-                elapsed_ms: elapsed_ms_since(batch_started),
-            });
-        };
-        let conn = self.db.connect()?;
-        let track_limit = analysis_capacity(engine);
-
-        let hydrate_track_ids = tracks
-            .iter()
-            .map(|track| track.id.clone())
-            .collect::<Vec<_>>();
-
-        let analysis_dir = self.db.data_dir().join("analysis");
-        let waveform_dir = analysis_dir.join("waveforms");
-        let artwork_dir = analysis_dir.join("artwork");
-        std::fs::create_dir_all(&waveform_dir)?;
-        std::fs::create_dir_all(&artwork_dir)?;
-
-        let mut analyzed = 0usize;
-        let mut incomplete = 0usize;
-        let mut failed = 0usize;
-        let mut warnings = Vec::<WarningEntry>::new();
-        let total = tracks.len();
-        let (bpm_min, bpm_max) =
-            resolve_analysis_bpm_range(req.bpm_range.as_deref(), req.bpm_min, req.bpm_max);
-
-        // Live library-duration-total baseline: the library as filtered (its
-        // sources plus the frontend's search query), so `on_progress` can
-        // push an up-to-date total as each track finishes, instead of the
-        // frontend recomputing it locally from a possibly-partial (paginated)
-        // view. A library with no sources set opts this out at no extra cost
-        // -- the two progress fields just stay `None`.
-        let sources = LibrarySources::load(&conn)?;
-        let mut library_context = if !sources.listed_roots().is_empty() || sources.external().any()
-        {
-            let visible = self.compute_visible_library_tracks(&conn, &req.query)?;
-            let batch_ids: std::collections::HashSet<&str> =
-                tracks.iter().map(|t| t.id.as_str()).collect();
-            let visible_track_ids: std::collections::HashSet<String> =
-                visible.iter().map(|t| t.id.clone()).collect();
-            let mut total_ms: u64 = 0;
-            let mut known_count: usize = 0;
-            for track in &visible {
-                if batch_ids.contains(track.id.as_str()) {
-                    continue;
-                }
-                let has_duration = track.duration_ms.map(|d| d > 0).unwrap_or(false);
-                let countable = track_has_core_analysis_for_source_status(track)
-                    || (track.rekordbox_db_source && has_duration);
-                if countable && let Some(d) = track.duration_ms {
-                    total_ms += d;
-                    known_count += 1;
-                }
-            }
-            Some(LibraryDurationContext {
-                visible_track_ids,
-                total_ms,
-                known_count,
-            })
-        } else {
-            None
-        };
-
-        let mut completed_count = 0usize;
-
-        if total > 1 {
-            let mut tx_db = conn.unchecked_transaction()?;
-            let mut persist_stmt = tx_db.prepare_cached(TRACK_ANALYSIS_UPDATE_SQL)?;
-            let cpu_workers = std::thread::available_parallelism()
-                .map(|n| n.get())
-                .unwrap_or(1);
-            let cap = resolve_worker_cap_for_engine(engine);
-            // Reserve ~2 cores for the OS/UI (same budget the essentia pool
-            // already uses) before bounding by track count -- without this,
-            // a high-core machine with ample RAM would spin up one worker per
-            // CPU and leave nothing for the UI thread to stay responsive.
-            let cpu_budget =
-                resolve_analysis_parallelism_budget_with_cap(cpu_workers, cap.combined);
-            let worker_count = resolve_analysis_worker_count_with_cap(total, cpu_budget, None);
-            let debug_workers = analysis_debug_workers_enabled();
-
-            if debug_workers {
-                let line = format!(
-                    "debug workers total_tracks={} cpu_workers={} memory_cap={} env_cap={} worker_count={}",
-                    total,
-                    cpu_workers,
-                    cap.memory_cap
-                        .map(|v| v.to_string())
-                        .unwrap_or_else(|| "unavailable".to_string()),
-                    cap.env_cap
-                        .map(|v| v.to_string())
-                        .unwrap_or_else(|| "none".to_string()),
-                    worker_count
-                );
-                crate::logging::emit(crate::logging::Level::Info, "analysis", &line);
-            }
-
-            let queue = Arc::new(Mutex::new(
-                tracks
-                    .drain(..)
-                    .collect::<std::collections::VecDeque<LocalTrackForAnalysis>>(),
-            ));
-
-            enum WorkerEvent {
-                Started {
-                    track: LocalTrackForAnalysis,
-                },
-                Partial {
-                    worker_idx: usize,
-                    track_id: String,
-                    track_title: String,
-                    file_path: String,
-                    update: TrackPartialUpdate,
-                },
-                Done {
-                    worker_idx: usize,
-                    elapsed_ms: u64,
-                    track: LocalTrackForAnalysis,
-                    result: BackendResult<LocalAnalysisResult>,
-                },
-            }
-            #[derive(Default, Clone)]
-            struct WorkerStats {
-                processed: usize,
-                ok: usize,
-                failed: usize,
-                elapsed_ms: u64,
-            }
-            let mut worker_stats = vec![WorkerStats::default(); worker_count];
-            let (tx, rx) = mpsc::channel::<WorkerEvent>();
-            let mut handles = Vec::with_capacity(worker_count);
-            for worker_idx in 0..worker_count {
-                let tx = tx.clone();
-                let waveform_dir = waveform_dir.clone();
-                let artwork_dir = artwork_dir.clone();
-                let queue = queue.clone();
-                let pause_flag = self.analysis_paused.clone();
-                let cancel_flag = self.analysis_cancelled.clone();
-                let limits = self.analysis_limits.clone();
-                let handle = std::thread::spawn(move || {
-                    loop {
-                        // Pausing lets a track already in flight finish, but
-                        // no worker picks up a *new* one until resumed.
-                        // Cancelling ends the wait instead of waiting for a
-                        // resume that never comes. Other runs' workers share
-                        // the slots, one track at a time.
-                        let Some(_track_permit) = limits.take(
-                            AnalysisPermitKind::Track,
-                            track_limit,
-                            Some(&pause_flag),
-                            &cancel_flag,
-                        ) else {
-                            break;
-                        };
-
-                        let track = {
-                            let mut guard = match queue.lock() {
-                                Ok(g) => g,
-                                Err(_) => break,
-                            };
-                            guard.pop_front()
-                        };
-                        let Some(track) = track else {
-                            break;
-                        };
-
-                        if tx
-                            .send(WorkerEvent::Started {
-                                track: track.clone(),
-                            })
-                            .is_err()
-                        {
-                            break;
-                        }
-                        let started = Instant::now();
-                        let track_id = track.id.clone();
-                        let track_title = track.title.clone();
-                        let file_path = track.file_path.clone();
-                        let tx_partial = tx.clone();
-                        let result = analyze_track_with_usb_fallback_with_updates(
-                            &track,
-                            &waveform_dir,
-                            &artwork_dir,
-                            BpmDetectionParams {
-                                bpm_min,
-                                bpm_max,
-                                engine,
-                            },
-                            |update| {
-                                let _ = tx_partial.send(WorkerEvent::Partial {
-                                    worker_idx,
-                                    track_id: track_id.clone(),
-                                    track_title: track_title.clone(),
-                                    file_path: file_path.clone(),
-                                    update,
-                                });
-                            },
-                        );
-                        if tx
-                            .send(WorkerEvent::Done {
-                                worker_idx,
-                                elapsed_ms: started.elapsed().as_millis() as u64,
-                                track,
-                                result,
-                            })
-                            .is_err()
-                        {
-                            break;
-                        }
-                    }
-                });
-                handles.push(handle);
-            }
-            drop(tx);
-
-            while completed_count < total {
-                let evt = match rx.recv() {
-                    Ok(evt) => evt,
-                    Err(_) => {
-                        // All workers exited early because the batch was
-                        // cancelled -- not a genuine error.
-                        if self.analysis_cancelled.load(Ordering::SeqCst) {
-                            warnings.push(analysis_cancelled_warning(completed_count, total));
-                            break;
-                        }
-                        return Err(BackendError::Internal(
-                            "analysis worker channel closed unexpectedly".to_string(),
-                        ));
-                    }
-                };
-                match evt {
-                    WorkerEvent::Started { track } => {
-                        on_progress(&build_started_progress(completed_count, total, &track));
-                    }
-                    WorkerEvent::Partial {
-                        worker_idx,
-                        track_id,
-                        track_title,
-                        file_path,
-                        update,
-                    } => {
-                        if debug_workers {
-                            crate::logging::emit(
-                                crate::logging::Level::Info,
-                                "analysis",
-                                &format!(
-                                    "debug worker={} partial track_id={}",
-                                    worker_idx, track_id
-                                ),
-                            );
-                        }
-                        on_progress(&build_partial_progress(
-                            completed_count,
-                            total,
-                            track_id,
-                            track_title,
-                            file_path,
-                            update,
-                        ));
-                    }
-                    WorkerEvent::Done {
-                        worker_idx,
-                        elapsed_ms,
-                        track,
-                        result,
-                    } => {
-                        let was_ok = result.is_ok();
-                        if let Some(stats) = worker_stats.get_mut(worker_idx) {
-                            stats.processed += 1;
-                            stats.elapsed_ms = stats.elapsed_ms.saturating_add(elapsed_ms);
-                            if was_ok {
-                                stats.ok += 1;
-                            } else {
-                                stats.failed += 1;
-                            }
-                        }
-                        persist_done_result(
-                            &tx_db,
-                            &mut persist_stmt,
-                            track,
-                            result,
-                            total,
-                            PersistDoneCounters {
-                                completed_count: &mut completed_count,
-                                analyzed: &mut analyzed,
-                                incomplete: &mut incomplete,
-                                failed: &mut failed,
-                                warnings: &mut warnings,
-                                library_context: library_context.as_mut(),
-                            },
-                            &mut on_progress,
-                        )?;
-                        // Commit after every track (not just periodically) so
-                        // the write lock is never held longer than one
-                        // track's own processing time. A track-count interval,
-                        // even a small one, doesn't bound that: slow tracks
-                        // (a dev build, a long track, a slow disk) held the
-                        // lock for minutes, past another writer's
-                        // busy_timeout. WAL commits are cheap.
-                        if completed_count < total {
-                            drop(persist_stmt);
-                            tx_db.commit()?;
-                            tx_db = conn.unchecked_transaction()?;
-                            persist_stmt = tx_db.prepare_cached(TRACK_ANALYSIS_UPDATE_SQL)?;
-                        }
-                    }
-                }
-            }
-
-            drop(persist_stmt);
-            tx_db.commit()?;
-
-            if debug_workers {
-                for (idx, stats) in worker_stats.iter().enumerate() {
-                    if stats.processed == 0 {
-                        continue;
-                    }
-                    crate::logging::emit(
-                        crate::logging::Level::Info,
-                        "analysis",
-                        &format!(
-                            "debug worker={} processed={} ok={} failed={} elapsed_ms={}",
-                            idx, stats.processed, stats.ok, stats.failed, stats.elapsed_ms
-                        ),
-                    );
-                }
-            }
-
-            for handle in handles {
-                handle.join().map_err(|panic_payload| {
-                    let msg = if let Some(s) = panic_payload.downcast_ref::<&str>() {
-                        format!("analysis worker thread panicked: {s}")
-                    } else if let Some(s) = panic_payload.downcast_ref::<String>() {
-                        format!("analysis worker thread panicked: {s}")
-                    } else {
-                        "analysis worker thread panicked".to_string()
-                    };
-                    BackendError::Internal(msg)
-                })?;
-            }
-        } else {
-            let tx_db = conn.unchecked_transaction()?;
-            let mut persist_stmt = tx_db.prepare_cached(TRACK_ANALYSIS_UPDATE_SQL)?;
-            for track in tracks.drain(..) {
-                let Some(_track_permit) = self.analysis_limits.take(
-                    AnalysisPermitKind::Track,
-                    track_limit,
-                    Some(&self.analysis_paused),
-                    &self.analysis_cancelled,
-                ) else {
-                    warnings.push(analysis_cancelled_warning(completed_count, total));
-                    break;
-                };
-                on_progress(&build_started_progress(completed_count, total, &track));
-                // A lone single-track analyze -- the common "click Analyze on
-                // this row" action -- has no worker pool sized against
-                // available memory, and the budget it waited on above was read
-                // when this run started. Memory may be too tight by now
-                // (e.g. other programs), and starting anyway can crash the
-                // process.
-                let result = if !has_memory_headroom_for_engine(engine) {
-                    Err(BackendError::Internal(format!(
-                        "Not enough available memory to start analysis right now (needs ~{} MB free). Wait for other analysis to finish and try again.",
-                        analysis_bytes_per_worker(engine) / (1024 * 1024)
-                    )))
-                } else {
-                    analyze_track_with_usb_fallback_with_updates(
-                        &track,
-                        &waveform_dir,
-                        &artwork_dir,
-                        BpmDetectionParams {
-                            bpm_min,
-                            bpm_max,
-                            engine,
-                        },
-                        |update| {
-                            on_progress(&build_partial_progress(
-                                completed_count,
-                                total,
-                                track.id.clone(),
-                                track.title.clone(),
-                                track.file_path.clone(),
-                                update,
-                            ));
-                        },
-                    )
-                };
-                persist_done_result(
-                    &tx_db,
-                    &mut persist_stmt,
-                    track,
-                    result,
-                    total,
-                    PersistDoneCounters {
-                        completed_count: &mut completed_count,
-                        analyzed: &mut analyzed,
-                        incomplete: &mut incomplete,
-                        failed: &mut failed,
-                        warnings: &mut warnings,
-                        library_context: library_context.as_mut(),
-                    },
-                    &mut on_progress,
-                )?;
-            }
-            drop(persist_stmt);
-            tx_db.commit()?;
-        }
-
-        let items = self
-            .get_tracks_by_ids_with_previews(GetTracksByIdsRequest {
-                track_ids: hydrate_track_ids,
-            })
-            .map(|data| data.items)
-            .unwrap_or_default();
-
-        Ok(AnalyzeNewTracksData {
-            job_id,
-            analyzed,
-            incomplete,
-            failed,
-            processed: analyzed + incomplete + failed,
-            warning_count: logging::count_warnings(&warnings),
-            warnings,
-            items,
-            already_analyzing_track_ids,
-            elapsed_ms: elapsed_ms_since(batch_started),
-        })
+        Ok(Some(LibraryDurationContext {
+            visible_track_ids,
+            total_ms,
+            known_count,
+        }))
     }
 
     /// The tracks a library-filter analysis (`scope_to_library_filter`) picks:
     /// the ones the library shows for `query` that still need core analysis.
-    /// `scan_library`'s `unanalyzed_count` counts the same set, so the
-    /// frontend's "anything to analyze?" check after a scan matches what the
-    /// analysis then does.
     pub(super) fn library_filter_unanalyzed_track_ids(
         &self,
         conn: &rusqlite::Connection,
@@ -1165,25 +643,13 @@ impl BackendService {
             .map(|track| track.id.clone())
             .collect())
     }
-
-    pub fn set_analysis_paused(&self, paused: bool) -> BackendResult<SetAnalysisPausedData> {
-        self.analysis_paused.store(paused, Ordering::SeqCst);
-        self.analysis_limits.wake();
-        Ok(SetAnalysisPausedData { paused })
-    }
-
-    pub fn cancel_analysis(&self) -> BackendResult<()> {
-        self.analysis_cancelled.store(true, Ordering::SeqCst);
-        self.analysis_limits.wake();
-        Ok(())
-    }
 }
 
-/// Tracks the live "library duration total" across an analysis batch: the
+/// Tracks the live "library duration total" across an analysis job: the
 /// set of track ids currently visible under the frontend's active library
 /// filter (source roots / master.db / search query), and a running
 /// total/known-count seeded from every *other* currently-countable visible
-/// track (this batch's own tracks are excluded from the seed so a
+/// track (the job's own tracks are excluded from the seed so a
 /// re-analyzed track isn't counted twice -- once from the seed, once from
 /// its own "done" event below).
 struct LibraryDurationContext {
@@ -1192,16 +658,6 @@ struct LibraryDurationContext {
     known_count: usize,
 }
 
-struct PersistDoneCounters<'a> {
-    completed_count: &'a mut usize,
-    analyzed: &'a mut usize,
-    incomplete: &'a mut usize,
-    failed: &'a mut usize,
-    warnings: &'a mut Vec<WarningEntry>,
-    library_context: Option<&'a mut LibraryDurationContext>,
-}
-
-/// What an otherwise successful analysis left out, for the Event Log.
 fn incomplete_analysis_reason(local: &LocalAnalysisResult) -> String {
     let mut missing = Vec::new();
     if !local.bpm.is_some_and(|bpm| bpm > 0.0) {
@@ -1218,102 +674,6 @@ fn incomplete_analysis_reason(local: &LocalAnalysisResult) -> String {
         missing.push("no waveform");
     }
     missing.join(", ")
-}
-
-fn persist_done_result(
-    conn: &rusqlite::Connection,
-    persist_stmt: &mut rusqlite::CachedStatement<'_>,
-    track: LocalTrackForAnalysis,
-    result: BackendResult<LocalAnalysisResult>,
-    total: usize,
-    counters: PersistDoneCounters<'_>,
-    on_progress: &mut dyn FnMut(&AnalyzeTrackProgress),
-) -> BackendResult<()> {
-    let PersistDoneCounters {
-        completed_count,
-        analyzed,
-        incomplete,
-        failed,
-        warnings,
-        mut library_context,
-    } = counters;
-    *completed_count += 1;
-    match result {
-        Ok(local) => {
-            persist_stmt.execute(params![
-                local.bpm,
-                local.key,
-                local.duration_ms,
-                local.artwork_path,
-                local.waveform_peaks_path,
-                now(),
-                track.id,
-                local.bpm_analyzer,
-                // Only a first beat this analysis placed is written; a kept
-                // one stays as it is, with its source.
-                local
-                    .first_beat_ms
-                    .filter(|_| local.first_beat_estimated)
-                    .map(|v| v as i64),
-            ])?;
-            let ready = has_core_analysis_fields(
-                local.waveform_peaks_path.as_deref(),
-                local.bpm,
-                local.duration_ms,
-            );
-            if ready {
-                *analyzed += 1;
-            } else {
-                *incomplete += 1;
-                warnings.push(logging::log(
-                    Level::Warn,
-                    "analysis",
-                    "analysis.track-incomplete",
-                    format!(
-                        "{}: {}",
-                        track.file_path,
-                        incomplete_analysis_reason(&local)
-                    ),
-                ));
-            }
-            if let Some(ctx) = library_context.as_deref_mut()
-                && ctx.visible_track_ids.contains(&track.id)
-                && ready
-            {
-                ctx.total_ms += local.duration_ms.unwrap_or(0);
-                ctx.known_count += 1;
-            }
-            let mut progress = build_done_progress_success(*completed_count, total, &track, &local);
-            progress.track =
-                super::library::track_rows(conn, std::slice::from_ref(&track.id))?.pop();
-            if let Some(ctx) = library_context.as_deref() {
-                progress.library_total_duration_ms = Some(ctx.total_ms);
-                progress.library_duration_unknown_count =
-                    Some(ctx.visible_track_ids.len().saturating_sub(ctx.known_count));
-            }
-            on_progress(&progress);
-        }
-        Err(err) => {
-            *failed += 1;
-            let err_msg = err.to_string();
-            warnings.push(logging::log(
-                Level::Error,
-                "analysis",
-                "analysis.track-failed",
-                format!("{}: {}", track.file_path, err_msg),
-            ));
-            let mut progress = build_done_progress_error(*completed_count, total, &track, err_msg);
-            progress.track =
-                super::library::track_rows(conn, std::slice::from_ref(&track.id))?.pop();
-            if let Some(ctx) = library_context.as_deref() {
-                progress.library_total_duration_ms = Some(ctx.total_ms);
-                progress.library_duration_unknown_count =
-                    Some(ctx.visible_track_ids.len().saturating_sub(ctx.known_count));
-            }
-            on_progress(&progress);
-        }
-    }
-    Ok(())
 }
 
 fn waveform_preview_if_persisted(
@@ -1518,19 +878,6 @@ where
     analyze_local_track_with_updates(track, waveform_dir, artwork_dir, bpm_params, &mut on_update)
 }
 
-pub(crate) fn resolve_analysis_worker_count_with_cap(
-    total_tracks: usize,
-    cpu_workers: usize,
-    cap: Option<usize>,
-) -> usize {
-    let tracks = total_tracks.max(1);
-    let cpus = match cap {
-        Some(c) if c > 0 => cpu_workers.max(1).min(c),
-        _ => cpu_workers.max(1),
-    };
-    tracks.min(cpus)
-}
-
 pub(crate) fn resolve_analysis_parallelism_budget_with_cap(
     cpu_workers: usize,
     cap: Option<usize>,
@@ -1539,80 +886,6 @@ pub(crate) fn resolve_analysis_parallelism_budget_with_cap(
     match cap {
         Some(c) if c > 0 => budget.min(c),
         _ => budget,
-    }
-}
-
-/// Runs that may hold a database connection at once. Each holds one for as long
-/// as it runs and briefly a second at its end, so four leave the pool (8) able
-/// to serve the rest of the app. Runs past this wait without a connection.
-const MAX_ACTIVE_ANALYSIS_RUNS: usize = 4;
-
-#[derive(Clone, Copy)]
-enum AnalysisPermitKind {
-    Run = 0,
-    Track = 1,
-}
-
-/// The limits every analysis run shares, so that any number of requests can be
-/// accepted and the work waits its turn: at most `MAX_ACTIVE_ANALYSIS_RUNS` runs
-/// at a time, and tracks at a time up to the worker budget. Whoever waits is
-/// woken by a permit coming free, or by a pause or cancel changing.
-#[derive(Debug, Default)]
-pub struct AnalysisLimits {
-    in_use: Mutex<[usize; 2]>,
-    changed: Condvar,
-}
-
-impl AnalysisLimits {
-    fn lock(&self) -> MutexGuard<'_, [usize; 2]> {
-        self.in_use.lock().unwrap_or_else(PoisonError::into_inner)
-    }
-
-    /// Wakes the waiters to look at the pause / cancel flags again. Taking the
-    /// lock means a waiter has either seen the new flag or is already waiting.
-    fn wake(&self) {
-        let _in_use = self.lock();
-        self.changed.notify_all();
-    }
-
-    /// Waits for a permit; `None` once the analysis is cancelled.
-    fn take(
-        self: &Arc<Self>,
-        kind: AnalysisPermitKind,
-        limit: usize,
-        paused: Option<&AtomicBool>,
-        cancelled: &AtomicBool,
-    ) -> Option<AnalysisPermit> {
-        let mut in_use = self.lock();
-        loop {
-            if cancelled.load(Ordering::SeqCst) {
-                return None;
-            }
-            let held_back = paused.is_some_and(|flag| flag.load(Ordering::SeqCst));
-            if !held_back && in_use[kind as usize] < limit {
-                in_use[kind as usize] += 1;
-                return Some(AnalysisPermit {
-                    limits: self.clone(),
-                    kind,
-                });
-            }
-            in_use = self
-                .changed
-                .wait(in_use)
-                .unwrap_or_else(PoisonError::into_inner);
-        }
-    }
-}
-
-struct AnalysisPermit {
-    limits: Arc<AnalysisLimits>,
-    kind: AnalysisPermitKind,
-}
-
-impl Drop for AnalysisPermit {
-    fn drop(&mut self) {
-        self.limits.lock()[self.kind as usize] -= 1;
-        self.limits.changed.notify_all();
     }
 }
 
@@ -1628,8 +901,7 @@ fn analysis_cancelled_warning(analyzed: usize, total: usize) -> WarningEntry {
     )
 }
 
-/// How many tracks may be analyzed at once, across all runs: the same budget a
-/// batch sizes its worker pool from.
+/// How many tracks may be analyzed at once.
 fn analysis_capacity(engine: AnalysisEngine) -> usize {
     let cpu_workers = std::thread::available_parallelism()
         .map(|n| n.get())
@@ -1638,75 +910,6 @@ fn analysis_capacity(engine: AnalysisEngine) -> usize {
         cpu_workers,
         resolve_worker_cap_for_engine(engine).combined,
     )
-}
-
-/// One analysis run, counted while it lasts. Runs may overlap and share the
-/// pause / cancel flags: the first starts them fresh, so a pause or cancel from
-/// an earlier run doesn't leak into it, and a later one leaves them alone, so
-/// it doesn't undo a pause or cancel of the runs still going.
-struct AnalysisRun(Arc<AtomicUsize>);
-
-impl AnalysisRun {
-    fn begin(service: &BackendService) -> Self {
-        let runs = service.analysis_runs_active.clone();
-        if runs.fetch_add(1, Ordering::SeqCst) == 0 {
-            service.analysis_paused.store(false, Ordering::SeqCst);
-            service.analysis_cancelled.store(false, Ordering::SeqCst);
-        }
-        Self(runs)
-    }
-}
-
-impl Drop for AnalysisRun {
-    fn drop(&mut self) {
-        self.0.fetch_sub(1, Ordering::SeqCst);
-    }
-}
-
-/// The tracks one run has claimed in `BackendService::analysis_claimed_tracks`.
-/// A track is analyzed by one run at a time: a run skips what another holds. A
-/// claim ends when the track is done, so it can be analyzed again while its
-/// batch goes on; a run that ends early gives back the rest when this drops.
-struct TrackClaims {
-    all: Arc<Mutex<HashSet<String>>>,
-    held: RefCell<HashSet<String>>,
-}
-
-impl TrackClaims {
-    fn new(service: &BackendService) -> Self {
-        Self {
-            all: service.analysis_claimed_tracks.clone(),
-            held: RefCell::default(),
-        }
-    }
-
-    fn lock_all(&self) -> MutexGuard<'_, HashSet<String>> {
-        self.all.lock().unwrap_or_else(PoisonError::into_inner)
-    }
-
-    /// False when a run already holds `track_id`.
-    fn claim(&self, track_id: &str) -> bool {
-        let claimed = self.lock_all().insert(track_id.to_string());
-        if claimed {
-            self.held.borrow_mut().insert(track_id.to_string());
-        }
-        claimed
-    }
-
-    fn release(&self, track_id: &str) {
-        if self.held.borrow_mut().remove(track_id) {
-            self.lock_all().remove(track_id);
-        }
-    }
-}
-
-impl Drop for TrackClaims {
-    fn drop(&mut self) {
-        let mut all = self.lock_all();
-        for track_id in self.held.borrow().iter() {
-            all.remove(track_id);
-        }
-    }
 }
 
 fn analysis_worker_cap_from_env() -> Option<usize> {
@@ -2883,9 +2086,9 @@ mod tests {
         local_analysis_bundle_paths, normalize_essentia_result,
         persist_library_artwork_thumbnail_from_image, resolve_analysis_bpm_range,
         resolve_analysis_engine, resolve_analysis_parallelism_budget_with_cap,
-        resolve_analysis_worker_count_with_cap, resolve_memory_worker_cap,
-        resolve_worker_cap_for_engine, strip_appimage_lib_path, waveform_detail_bins_for_duration,
-        waveform_detail_entries_for_duration, waveform_preview_if_persisted,
+        resolve_memory_worker_cap, resolve_worker_cap_for_engine, strip_appimage_lib_path,
+        waveform_detail_bins_for_duration, waveform_detail_entries_for_duration,
+        waveform_preview_if_persisted,
     };
     use crate::error::BackendError;
     use crate::service::WAVEFORM_PREVIEW_BINS;
@@ -3142,24 +2345,6 @@ mod tests {
     }
 
     #[test]
-    fn resolve_analysis_worker_count_uses_detected_parallelism() {
-        let workers = resolve_analysis_worker_count_with_cap(20, 24, None);
-        assert_eq!(workers, 20);
-    }
-
-    #[test]
-    fn resolve_analysis_worker_count_is_bounded_by_tracks_and_cpu() {
-        let workers = resolve_analysis_worker_count_with_cap(5, 3, None);
-        assert_eq!(workers, 3);
-    }
-
-    #[test]
-    fn resolve_analysis_worker_count_respects_explicit_cap() {
-        let workers = resolve_analysis_worker_count_with_cap(20, 24, Some(6));
-        assert_eq!(workers, 6);
-    }
-
-    #[test]
     fn resolve_analysis_parallelism_budget_reserves_two_cores_when_possible() {
         assert_eq!(resolve_analysis_parallelism_budget_with_cap(24, None), 22);
         assert_eq!(resolve_analysis_parallelism_budget_with_cap(8, None), 6);
@@ -3357,13 +2542,11 @@ mod tests {
         let cap = resolve_worker_cap_for_engine(AnalysisEngine::Stratum);
         unsafe { std::env::remove_var("DJTKIT_ANALYSIS_AVAILABLE_MEMORY_BYTES") };
         let cpu_workers = 12;
-        let total_tracks = 500;
-        let worker_count =
-            resolve_analysis_worker_count_with_cap(total_tracks, cpu_workers, cap.combined);
+        let worker_count = resolve_analysis_parallelism_budget_with_cap(cpu_workers, cap.combined);
         // The concrete proof: a memory-scarce environment must reduce the
         // real worker count below what CPU count alone would allow.
         assert!(
-            worker_count < cpu_workers,
+            worker_count < resolve_analysis_parallelism_budget_with_cap(cpu_workers, None),
             "expected memory cap to bind below cpu_workers={cpu_workers}, got worker_count={worker_count}"
         );
     }
@@ -3373,17 +2556,13 @@ mod tests {
         let _guard = env_var_lock().lock().unwrap();
         unsafe { std::env::remove_var("DJTKIT_ANALYSIS_MAX_WORKERS") };
         // Plenty of RAM, so the memory cap should never bind here -- this
-        // isolates the headroom-reservation behavior on its own. Mirrors the
-        // real call site in analyze_new_tracks_with_progress: resolve the
-        // engine cap, reserve ~2 cores via resolve_analysis_parallelism_budget_with_cap,
-        // then bound by track count.
+        // isolates the headroom-reservation behavior on its own. Mirrors
+        // `analysis_capacity`: resolve the engine cap, reserve ~2 cores.
         unsafe { std::env::set_var("DJTKIT_ANALYSIS_AVAILABLE_MEMORY_BYTES", "68719476736") };
         let cap = resolve_worker_cap_for_engine(AnalysisEngine::Stratum);
         unsafe { std::env::remove_var("DJTKIT_ANALYSIS_AVAILABLE_MEMORY_BYTES") };
         let cpu_workers = 24;
-        let total_tracks = 500;
-        let cpu_budget = resolve_analysis_parallelism_budget_with_cap(cpu_workers, cap.combined);
-        let worker_count = resolve_analysis_worker_count_with_cap(total_tracks, cpu_budget, None);
+        let worker_count = resolve_analysis_parallelism_budget_with_cap(cpu_workers, cap.combined);
         // A high-core, high-RAM machine must never spin up one worker per
         // CPU -- that starves the OS/UI thread and makes the app
         // unresponsive even though every worker has enough memory.
@@ -3697,8 +2876,9 @@ mod tests {
     fn resolve_analysis_engine_prefers_explicit_override() {
         let dir = tempdir().expect("tempdir");
         let db = crate::db::Db::new(dir.path()).expect("db init");
+        let conn = db.connect().expect("connect");
         assert_eq!(
-            resolve_analysis_engine(&db, Some("essentia")),
+            resolve_analysis_engine(&conn, Some("essentia")),
             AnalysisEngine::Essentia
         );
     }
@@ -3713,16 +2893,22 @@ mod tests {
             rusqlite::params![crate::service::SETTING_UI_ANALYSIS_ENGINE],
         )
         .expect("seed setting");
-        drop(conn);
 
-        assert_eq!(resolve_analysis_engine(&db, None), AnalysisEngine::Essentia);
+        assert_eq!(
+            resolve_analysis_engine(&conn, None),
+            AnalysisEngine::Essentia
+        );
     }
 
     #[test]
     fn resolve_analysis_engine_defaults_to_stratum_without_setting() {
         let dir = tempdir().expect("tempdir");
         let db = crate::db::Db::new(dir.path()).expect("db init");
-        assert_eq!(resolve_analysis_engine(&db, None), AnalysisEngine::Stratum);
+        let conn = db.connect().expect("connect");
+        assert_eq!(
+            resolve_analysis_engine(&conn, None),
+            AnalysisEngine::Stratum
+        );
     }
 
     // --- normalize_essentia_result ---

@@ -22,7 +22,7 @@ function installTauriMock(page) {
             };
           }
           if (command === "get_library_sources") {
-            return { ok: true, data: { folders: [], rekordboxDbEnabled: false, mixxxDbEnabled: false, everConfigured: false } };
+            return { ok: true, data: { folders: [], rekordboxDbEnabled: false, mixxxDbEnabled: false, everConfigured: false, analyzeButtonLabel: "Analyze Library", analyzeScanningStatus: "Scanning library files...", trackNotInLibraryStatus: "Track is not in the local library yet. Run Analyze Library first." } };
           }
           if (command === "inspect_usb_track") {
             const trackId = String(payload?.request?.trackId || "");

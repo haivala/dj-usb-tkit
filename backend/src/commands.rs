@@ -622,6 +622,17 @@ impl BackendCommands {
         )
     }
 
+    pub fn submit_analysis(
+        &self,
+        req: AnalyzeNewTracksRequest,
+    ) -> ApiResponse<crate::models::AnalysisSubmittedData> {
+        wrap(self.service.submit_analysis(req))
+    }
+
+    pub fn set_analysis_observer(&self, observer: crate::service::AnalysisObserver) {
+        self.service.set_analysis_observer(observer);
+    }
+
     pub fn set_analysis_paused(&self, paused: bool) -> ApiResponse<SetAnalysisPausedData> {
         wrap(self.service.set_analysis_paused(paused))
     }

@@ -944,12 +944,6 @@ impl BackendService {
             // Imports never remove tracks (see `RekordboxTrackImporter::upsert`).
             removed: 0,
             not_found: importer.not_found,
-            // rekordbox DB scan isn't scoped to source folders; the post-scan
-            // library facts are only surfaced for `scan_library`.
-            scoped_track_count: 0,
-            album_count: 0,
-            unanalyzed_count: 0,
-            warning_count: logging::count_warnings(&warnings),
             warnings,
         })
     }

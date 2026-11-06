@@ -1,4 +1,4 @@
-import { formatDurationMs, formatBpm, ANALYZE_TOOLTIP, REANALYZE_TOOLTIP } from "./track_utils.mjs";
+import { formatDurationMs, formatBpm, applyAnalyzeButtonState } from "./track_utils.mjs";
 import { cloneTemplate } from "./ui_utils.mjs";
 import { coverUrl, attachCoverFallbackHandlers } from "./components/library/actions.mjs";
 import { isTrackCurrentlyPlaying, moveActiveWaveform, updateTransportButtonsInDom } from "./components/playback/actions.mjs";
@@ -213,9 +213,8 @@ export function createTrackRow(ctx, track, options) {
     // library copy, so it doesn't belong on those lists.
     if (options.enableAnalyzeActions && options.origin !== "usb") {
       analyze.dataset.id = renderTrackId;
-      analyze.dataset.tooltip = track.analysisReady ? REANALYZE_TOOLTIP : ANALYZE_TOOLTIP;
       analyze.textContent = track.analysisReady ? "Reanalyze" : "Analyze";
-      analyze.disabled = state.analyzingTrackIds.has(String(renderTrackId));
+      applyAnalyzeButtonState(state, analyze, renderTrackId, track.analysisReady);
     } else {
       analyze.remove();
     }
