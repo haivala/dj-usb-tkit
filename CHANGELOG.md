@@ -39,76 +39,73 @@
 
 ## Unreleased
 
-- **Improvement:** All analysis now runs as one job. You can ask for more at any time: it joins the job's
-  queue and runs in turn, with one progress bar, one pause and cancel, and one final message. Waiting tracks
-  have their own Analyze button disabled, and Reanalyze on a waiting track replaces its kept values.
-- **Improvement:** The Scan Library button is now Analyze Library, which is what it does: it checks your
-  folders for changes, then analyzes what needs it. Its scan warnings and missing folders go to the Event Log.
+- **New feature:** A new analysis coordinator runs all analysis as one job. You can ask for more at any time:
+  it joins the job's queue and runs in turn, with one progress bar, one pause and cancel, and one final message.
+  A track already in the job is skipped, and its own Analyze button is disabled while it waits or is analyzed,
+  in playlists too. Reanalyze on a waiting track replaces its kept values. Cancel clears what's waiting, and
+  anything you ask for after it still runs.
 - **Fix:** Analysis no longer ties up the app's database connections, so many requests at once can't freeze
   the app for 30 seconds. A track waits for memory while others run, instead of failing.
-- **Improvement:** USB Playlists and USB History load when you open the page, and only once until the
-  USB changes. If a read fails, it tries again the next time you open the page. The Import Playlists
-  and Import History buttons are gone.
-- **Improvement:** USB Playlists and USB History open their first item when you open the page with
-  nothing open. Coming back to a page keeps what was open.
-- **Improvement:** Reordering USB playlists no longer re-reads the list, and the open playlist stays
-  open. Removing a USB playlist keeps the open one too, unless that's the one you removed.
-- **Fix:** A failed USB playlist reorder now keeps its error in the status line instead of replacing it
-  with "USB playlists loaded".
-- **Fix:** A USB playlist reorder that can't write to the stick now shows its warnings instead of a plain
-  "Playlist order saved".
-- **Fix:** Warnings from removing a USB playlist now reach the Event Log that the status line links to.
-- **Improvement:** Export Tracklist moved under the open session's tracks on USB History, where an app
-  playlist has Export to USB.
-- **Improvement:** The USB list responses no longer carry every track, and Export Tracklist is built in
-  the backend. The saved file doesn't change.
-- **Improvement:** USB History rows show the session's date on a smaller muted line under its name.
-- **Chore:** Moved the USB selection lock, stored USB, player menu, background colour, backup delete and
-  tracklist dialog tests from unit tests to e2e tests.
-- **Fix:** The USB pages' hidden menu items can no longer be reached with the keyboard when no USB is selected.
-- **Fix:** Export to USB no longer refuses with "Playlist must contain tracks" while a search has no matches.
-- **Chore:** Removed USB checks and messages that could never run, and the export button's text from the
-  frontend.
-- **Chore:** The docs' USB Playlists and USB History screenshots show the new layout.
-- **Chore:** The docs describe the USB lists loading when a page opens, Export Tracklist's new place and
-  backend build, and reorders writing both databases.
-- **Chore:** The backend now sends USB History newest first, instead of the UI reversing the list.
-- **Chore:** USB History keeps one record of the open session, instead of three.
-- **Improvement:** The list totals, track-list headings, export estimate, Backups page text, USB
-  status lines, USB selection, diagnostics, player menu and background colour text now come from the backend.
-- **Improvement:** The Player Menu editor no longer tags items as being in only one database, and its PDB fix is
-  gone with its banner, buttons and diagnostics warning: it was for a one-time error the app no longer makes.
-- **Improvement:** The Player Menu editor and background colour work on a USB with only one of its databases.
-- **Fix:** A Player Menu change now keeps rekordbox's row data in the PDB, instead of overwriting part of it.
-- **Fix:** The Player Menu editor no longer offers items that aren't browse categories, such as COMMENTS and CUE.
-- **Improvement:** DATE ADDED always stays in the player menu, and differing menus in the databases are logged.
-- **Improvement:** Selecting a USB no longer reads its databases an extra time for the export button.
-- **Improvement:** A USB with no PDB no longer gets a "Missing PDB" warning.
-- **Fix:** A failed background colour read now says so, and a read-only USB says why its colour can't change.
-- **Fix:** Removing a USB playlist no longer blanks the open playlist's track count while its table reloads.
 - **Fix:** Reordering USB playlists now saves the order in both databases for every playlist, by name.
-  Before, a playlist only in the eDB kept its old place, and always listed after the others.
-- **Fix:** Selecting the same USB again now clears its playlists and history, so a stick back from a
-  player doesn't keep showing the old lists.
+  Before, a playlist only in the eDB kept its old place, and always listed after the others. A failed reorder
+  keeps its error in the status line instead of replacing it with "USB playlists loaded", and one that can't
+  write to the stick shows its warnings instead of a plain "Playlist order saved".
+- **Fix:** Removing a USB playlist no longer blanks the open playlist's track count while its table reloads,
+  and its warnings now reach the Event Log that the status line links to.
+- **Fix:** Selecting the same USB again now clears its playlists and history, so a stick back from a player
+  doesn't keep showing the old lists. Exporting a playlist to USB now clears the old USB Playlists totals along
+  with the list.
+- **Fix:** Export to USB no longer refuses with "Playlist must contain tracks" while a search has no matches.
+- **Fix:** Exporting to a USB mounted read-only is now refused straight away with "USB is read-only", instead
+  of failing with a filesystem error. On Windows, a folder's read-only attribute no longer refuses a USB that
+  can be written.
+- **Fix:** An empty playlist no longer shows its old "Last exported" line, which could happen after removing
+  the source folder its tracks were in.
+- **Fix:** A Player Menu change now keeps rekordbox's row data in the PDB, instead of overwriting part of it,
+  and the editor no longer offers items that aren't browse categories, such as COMMENTS and CUE.
+- **Fix:** A failed background colour read now says so, and a read-only USB says why its colour can't change.
 - **Fix:** Restoring a USB backup no longer loses the "on this USB" marks and the playlist reorder lock
   until the next diagnostics run. The same goes for a repair whose follow-up diagnostics fail.
-- **Fix:** Exporting a playlist to USB now clears the old USB Playlists totals along with the list.
 - **Fix:** Diagnostics no longer warn "PDB header compatibility: value 4" on USBs exported with
   rekordbox, which writes that value itself. The next repair you run on the USB sets it to 5.
-- **Chore:** The docs' transcode, USB Playlists and USB History screenshots show the side menu open,
-  and the last two are wider so their track lists have no horizontal scrollbar. The transcode
-  screenshot's export button names the USB.
+- **Fix:** The USB pages' hidden menu items can no longer be reached with the keyboard when no USB is selected.
+- **Improvement:** The Scan Library button is now Analyze Library, which is what it does: it checks your
+  folders for changes, then analyzes what needs it. Its scan warnings and missing folders go to the Event Log,
+  and the status line no longer shows the scan's track and album counts.
+- **Improvement:** USB Playlists and USB History load when you open the page, and only once until the
+  USB changes. If a read fails, it tries again the next time you open the page. The Import Playlists
+  and Import History buttons are gone. They open their first item when you open the page with nothing open,
+  and coming back to a page keeps what was open.
+- **Improvement:** Reordering USB playlists no longer re-reads the list, and the open playlist stays
+  open. Removing a USB playlist keeps the open one too, unless that's the one you removed.
+- **Improvement:** On USB History, Export Tracklist moved under the open session's tracks, where an app
+  playlist has Export to USB, and rows show the session's date on a smaller muted line under its name.
+- **Improvement:** The USB list responses no longer carry every track, and Export Tracklist is built in
+  the backend. The saved file doesn't change.
+- **Improvement:** The Player Menu editor no longer tags items as being in only one database, and its PDB fix is
+  gone with its banner, buttons and diagnostics warning: it was for a one-time error the app no longer makes.
+  DATE ADDED always stays in the player menu, and differing menus in the databases are logged.
+- **Improvement:** The Player Menu editor and background colour work on a USB with only one of its databases.
 - **Improvement:** A blocked export's status line no longer says "Export failed: export blocked: …". When
   it's blocked by free space, formats or an internal check, it says so once, and a format block counts the
   tracks and leaves their names to the Event Log. A read-only USB is now checked when you export, instead of
   when you selected it.
-- **Fix:** An empty playlist no longer shows its old "Last exported" line, which could happen after removing
-  the source folder its tracks were in.
-- **Fix:** Exporting to a USB mounted read-only is now refused straight away with "USB is read-only", instead
-  of failing with a filesystem error. On Windows, a folder's read-only attribute no longer refuses a USB that
-  can be written.
+- **Improvement:** Selecting a USB no longer reads its databases an extra time for the export button, and a USB
+  with no PDB no longer gets a "Missing PDB" warning.
 - **Improvement:** Saving a drive's name without changing it now says "Drive name unchanged." in the status
   line.
+- **Improvement:** The list totals, track-list headings, export estimate, Backups page text, USB
+  status lines, USB selection, diagnostics, player menu and background colour text now come from the backend.
+- **Chore:** The backend now sends USB History newest first, instead of the UI reversing the list, and USB
+  History keeps one record of the open session, instead of three.
+- **Chore:** Removed USB checks and messages that could never run, and the export button's text from the
+  frontend.
+- **Chore:** Moved the USB selection lock, stored USB, player menu, background colour, backup delete and
+  tracklist dialog tests from unit tests to e2e tests.
+- **Chore:** The docs describe the USB lists loading when a page opens, Export Tracklist's new place and
+  backend build, and reorders writing both databases. The USB Playlists and USB History screenshots show the
+  new layout. Those and the transcode screenshot show the side menu open, the USB ones are wider so their track
+  lists have no horizontal scrollbar, and the transcode screenshot's export button names the USB.
 
 ## 0.5.4
 
