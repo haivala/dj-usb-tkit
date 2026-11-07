@@ -39,6 +39,13 @@
 
 ## Unreleased
 
+- **Fix:** The Player Menu editor now always lists DATE ADDED last, where the players show it. Before, items added
+  to the menu were listed below it.
+- **Fix:** A USB mounted read-only is now shown as read-only, and changing its USB audio formats or background
+  colour, or initializing it, is refused with "read-only" instead of failing with a filesystem error. On Windows,
+  a folder's read-only attribute no longer makes a USB that can be written look read-only, which hid Initialize
+  and refused USB audio format changes.
+
 ## 0.5.5
 
 **Severity:** feature

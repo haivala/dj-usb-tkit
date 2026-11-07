@@ -18,7 +18,7 @@ use crate::models::{
 
 use super::BackendService;
 use super::usb_identity::{UsbAudioFormats, read_usb_audio_formats, write_usb_audio_formats};
-use super::usb_utils::{has_write_access, resolve_usb_root};
+use super::usb_utils::{can_write_file_at, has_write_access, resolve_usb_root};
 
 fn formats_data(formats: &UsbAudioFormats, writable: bool) -> UsbAudioFormatsData {
     let ticked = formats
@@ -78,7 +78,7 @@ impl BackendService {
             .map(|item| (item.format.clone(), item.allowed))
             .collect();
         let formats = UsbAudioFormats::from_request(&items).map_err(BackendError::Validation)?;
-        if !has_write_access(&usb_root) {
+        if !can_write_file_at(&usb_root) {
             return Err(BackendError::Validation(
                 "The USB is read-only, so its USB audio formats can't be changed".to_string(),
             ));
@@ -128,6 +128,42 @@ mod tests {
             Some(UsbAudioFormat::Flac)
         );
         assert_eq!(library_usb_audio_format("/m/a.ogg", None), None);
+    }
+
+    #[test]
+    fn set_usb_audio_formats_refuses_a_usb_it_cannot_write() {
+        let dir = tempfile::tempdir().unwrap();
+        let service = BackendService::new(dir.path()).unwrap();
+        let usb = tempfile::tempdir().unwrap();
+        let root = usb.path().to_string_lossy().to_string();
+        let list = service
+            .get_usb_audio_formats(GetUsbAudioFormatsRequest {
+                usb_root: root.clone(),
+            })
+            .unwrap()
+            .formats;
+        let mut perms = std::fs::metadata(usb.path()).unwrap().permissions();
+        perms.set_readonly(true);
+        std::fs::set_permissions(usb.path(), perms.clone()).unwrap();
+        // Root writes anyway, so there's nothing to refuse.
+        let writes = can_write_file_at(usb.path());
+        let result = service.set_usb_audio_formats(SetUsbAudioFormatsRequest {
+            usb_root: root,
+            formats: list,
+        });
+        #[allow(clippy::permissions_set_readonly_false)]
+        perms.set_readonly(false);
+        std::fs::set_permissions(usb.path(), perms).unwrap();
+        if writes {
+            return;
+        }
+        match result.unwrap_err() {
+            BackendError::Validation(message) => assert_eq!(
+                message,
+                "The USB is read-only, so its USB audio formats can't be changed"
+            ),
+            other => panic!("unexpected error: {other:?}"),
+        }
     }
 
     #[test]

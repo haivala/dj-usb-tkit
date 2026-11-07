@@ -451,6 +451,16 @@ fn date_added_is_locked_and_stays_shown() {
     // The item above it has nothing it could swap with below.
     assert_eq!(menu.current_items.last().unwrap().kind, DATE_ADDED);
     assert!(!menu.current_items[menu.current_items.len() - 2].can_move_down);
+
+    // The player always shows it last, also after items are added below it.
+    const BPM: u32 = 133;
+    let add = edit_menu(&backend, &usb_root, UsbPlayerMenuEdit::Add, BPM);
+    let added = add.data.expect("add").current_items;
+    assert_eq!(added.last().unwrap().kind, DATE_ADDED);
+    assert_eq!(added[added.len() - 2].kind, BPM);
+    assert!(!added[added.len() - 2].can_move_down);
+    let reload = get_menu(&backend, &usb_root);
+    assert_eq!(menu_kinds(&reload.current_items), menu_kinds(&added));
 }
 
 #[test]

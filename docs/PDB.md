@@ -860,7 +860,7 @@ for `t17`:
 | 0-1 | `menuItem_id`, which is the `t16` row id |
 | 2-3 | `category_id` |
 | 4 | rekordbox's value for the row; it never changed in any edit |
-| 5 | flag: 1 hidden, 0 shown, 2 shown for MATCHING, 5 seen on DATE ADDED |
+| 5 | flag: 1 hidden, 0 shown, 2 shown for MATCHING, 5 DATE ADDED's fixed place (always shown, last) |
 | 6-7 | `sequenceNo` |
 
 Only rows `rowpf` marks present count. To change a row, rekordbox marks the old
@@ -869,10 +869,11 @@ live count stays the same. The app instead rewrites the live rows in place,
 keeping each row's bytes and position and changing only the flag and order, which
 is the shape of an untouched stick.
 
-DATE ADDED looks forced on: both databases list it on an untouched stick while
+DATE ADDED is forced on: the players always show it, as the last item, whatever its
+row's order value says. Both databases list it on an untouched stick while
 rekordbox's editor shows it as inactive, and rekordbox's edits leave its row out of
-step between the databases. The app always shows it, never writes its rows, and
-leaves it out when comparing them.
+step between the databases. The app always lists it last, never writes its rows, and
+leaves it out when comparing them. Its row's flag 5 is what marks that fixed place.
 
 Fresh initialized USBs seed 27 browse categories:
 

@@ -436,6 +436,10 @@ pub(crate) fn resolve_usb_side_path_text(usb_root: &Path, raw: &str) -> Option<S
     resolve_usb_side_path(usb_root, raw).map(|path| path.to_string_lossy().into_owned())
 }
 
+/// Whether the USB looks writable, without writing to it: for what the UI
+/// shows when a USB is selected or a page loads, where a write probe on slow
+/// media would cost too much. A command that writes checks with
+/// `can_write_file_at` instead, right before it writes.
 pub(crate) fn has_write_access(root: &Path) -> bool {
     let probe_dir = root.join(USB_VENDOR_ROOT_DIR).join(USB_VENDOR_DB_DIR);
     let target = if probe_dir.is_dir() {
@@ -443,11 +447,40 @@ pub(crate) fn has_write_access(root: &Path) -> bool {
     } else {
         root.to_path_buf()
     };
+    match std::fs::metadata(&target) {
+        Ok(metadata) => folder_looks_writable(&target, &metadata),
+        Err(_) => false,
+    }
+}
 
-    // Keep validation lightweight: avoid create/write probes on potentially slow/corrupt USB media.
-    std::fs::metadata(&target)
-        .map(|m| !m.permissions().readonly())
-        .unwrap_or(false)
+/// A read-only mount keeps its folders' normal permission bits, so it's asked
+/// of the filesystem (`statvfs`), which answers without touching the drive.
+#[cfg(unix)]
+fn folder_looks_writable(path: &Path, metadata: &std::fs::Metadata) -> bool {
+    !metadata.permissions().readonly() && !mount_is_read_only(path)
+}
+
+/// A Windows folder's read-only attribute doesn't stop writes to it, so only
+/// a folder that can't be read at all counts.
+#[cfg(not(unix))]
+fn folder_looks_writable(_path: &Path, _metadata: &std::fs::Metadata) -> bool {
+    true
+}
+
+#[cfg(unix)]
+fn mount_is_read_only(path: &Path) -> bool {
+    use std::os::unix::ffi::OsStrExt;
+    let Ok(c_path) = std::ffi::CString::new(path.as_os_str().as_bytes()) else {
+        return false;
+    };
+    let mut stats = std::mem::MaybeUninit::<libc::statvfs>::uninit();
+    // SAFETY: `c_path` is NUL-terminated and outlives the call, and `stats`
+    // is only read after `statvfs` reports it filled in.
+    if unsafe { libc::statvfs(c_path.as_ptr(), stats.as_mut_ptr()) } != 0 {
+        return false;
+    }
+    let stats = unsafe { stats.assume_init() };
+    stats.f_flag & libc::ST_RDONLY != 0
 }
 
 /// Whether a file can really be written at `root`. Unlike `has_write_access`
@@ -1048,6 +1081,11 @@ pub fn initialize_usb(root: &Path) -> BackendResult<crate::models::InitializeUsb
             "USB root does not exist: {}",
             root.display()
         )));
+    }
+    if !can_write_file_at(root) {
+        return Err(BackendError::Validation(
+            "The USB is read-only, so it can't be initialized.".to_string(),
+        ));
     }
 
     let dirs_to_create = [
@@ -2199,6 +2237,49 @@ mod diag_tests {
         let candidates = external_rekordbox_db_candidates();
         let expected = PathBuf::from(home).join("Library/Pioneer/rekordbox/master.db");
         assert!(candidates.contains(&expected));
+    }
+
+    /// Runs `check` on a folder whose permissions say read-only, then makes it
+    /// writable again so the temp dir can be removed.
+    fn with_read_only_folder(check: impl FnOnce(&Path)) {
+        let dir = tempfile::tempdir().expect("tempdir");
+        let mut perms = std::fs::metadata(dir.path())
+            .expect("metadata")
+            .permissions();
+        perms.set_readonly(true);
+        std::fs::set_permissions(dir.path(), perms.clone()).expect("set read-only");
+        check(dir.path());
+        #[allow(clippy::permissions_set_readonly_false)]
+        perms.set_readonly(false);
+        std::fs::set_permissions(dir.path(), perms).expect("restore permissions");
+    }
+
+    #[test]
+    fn has_write_access_looks_without_writing() {
+        let dir = tempfile::tempdir().expect("tempdir");
+        assert!(has_write_access(dir.path()));
+        assert_eq!(std::fs::read_dir(dir.path()).unwrap().count(), 0);
+        assert!(!has_write_access(&dir.path().join("missing")));
+        // A Windows folder's read-only attribute doesn't stop writes, so only
+        // Unix permission bits count.
+        with_read_only_folder(|path| assert_eq!(has_write_access(path), cfg!(windows)));
+    }
+
+    #[test]
+    fn initialize_usb_refuses_a_usb_it_cannot_write() {
+        with_read_only_folder(|path| {
+            // Root writes anyway, so there's nothing to refuse.
+            if can_write_file_at(path) {
+                return;
+            }
+            match initialize_usb(path).unwrap_err() {
+                BackendError::Validation(message) => {
+                    assert_eq!(message, "The USB is read-only, so it can't be initialized.");
+                }
+                other => panic!("unexpected error: {other:?}"),
+            }
+            assert_eq!(std::fs::read_dir(path).unwrap().count(), 0);
+        });
     }
 
     #[test]

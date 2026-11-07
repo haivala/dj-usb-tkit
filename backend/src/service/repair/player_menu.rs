@@ -12,9 +12,9 @@ use super::*;
 /// locks them, and DATE ADDED.
 pub(super) const REQUIRED_PLAYER_MENU_KINDS: &[u32] = &[131, 132, 140, 144, 145, 149];
 
-/// DATE ADDED looks forced on: both databases list it on an untouched stick while
-/// rekordbox's editor doesn't count it, and rekordbox's own edits leave its row
-/// out of step between them. So it always shows, can't be moved or removed, and
+/// DATE ADDED is forced on: the player always shows it, last, while rekordbox's
+/// editor doesn't count it, and rekordbox's own edits leave its row out of step
+/// between the databases. So it always shows last, can't be moved or removed, and
 /// its rows are never written.
 const DATE_ADDED_KIND: u32 = 140;
 const T17_FLAG_HIDDEN: u8 = 1;
@@ -277,10 +277,10 @@ pub(super) fn load_usb_player_menu_config(
 ) -> BackendResult<(Vec<UsbPlayerMenuItem>, Vec<UsbPlayerMenuItem>)> {
     let editable = menu_is_editable(usb_root)?;
     let mut rows = menu_rows(usb_root, warnings)?;
-    rows.sort_by_key(|row| (row.sequence_no, row.menu_item_id));
-    // DATE ADDED always shows. Rekordbox can leave the eDB saying it's hidden.
+    // DATE ADDED always shows, and the player shows it last whatever its order
+    // value says. Rekordbox can leave the eDB saying it's hidden.
     for row in &mut rows {
-        if row.kind == DATE_ADDED_KIND && !row.visible {
+        if row.kind == DATE_ADDED_KIND {
             row.visible = true;
             row.sequence_no = u32::MAX;
         }

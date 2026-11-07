@@ -464,7 +464,7 @@ A menu edit, either database being optional:
 With only one database, the editor reads and writes that one. If both are present
 and show different menus, the app logs it, shows the eDB's menu, and the next edit
 writes it to both. TRACK, PLAYLIST, FOLDER, SEARCH and HISTORY can't be removed, as in
-rekordbox, and DATE ADDED always shows and isn't edited. Items with no `category` row,
+rekordbox, and DATE ADDED always shows, last, as on the players, and isn't edited. Items with no `category` row,
 such as COMMENTS and CUE, aren't browse categories and aren't offered.
 
 See `docs/PDB.md` for the t16 row layout and observed kind codes.

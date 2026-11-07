@@ -62,6 +62,10 @@ Numark Mixstream Pro, the first Engine DJ player, was added on 0.4.0
 and hot cues, and keeps its play history across a rebuild. Its own import of
 `export.pdb` (Engine DJ library not written) showed tracks without an artist; the
 fix is not yet hardware-confirmed. See Known Issues.
+On 0.5.5 (2026-11-06), CDJ-2000NXS and CDJ-2000NXS2 passed the new
+`player-menu-edit` scenario: a menu and background colour set in the app show on
+the player, on a USB with and without an eDB. DATE ADDED always shows, as the last
+item.
 
 Additive export — adding tracks to a USB that was initialized by rekordbox,
 without wiping the existing library — has worked on hardware since the first
@@ -70,14 +74,17 @@ release (0.1.0) and has stayed working through every version since.
 | Device model | Test scenario | Status | Last tested app version | Last validated date | Notes |
 |---|---|---|---|---|---|
 | CDJ-2000 | everything tested | pass | 0.3.7 | 2026-10-09 | First validation on this device (fw 4.33) on 0.2.0 (2026-09-11), covering every scenario available then; `playback-start-position` (added in 0.2.4) run on 0.3.7. |
-| CDJ-2000NXS | everything tested | pass | 0.4.9 | 2026-10-30 | All scenarios run on 0.2.0 (2026-09-11); cue-editor scenarios re-run on 0.2.4; `cue-points-and-edited-beatgrid` re-run on 0.3.7 with memory cues. `strict-parity-repair` was `fail` at 0.4.8; fixed in 0.4.9. |
-| CDJ-2000NXS2 | everything tested | pass | 0.4.9 | 2026-10-30 | All scenarios run on 0.2.0 (2026-09-11); cue-editor scenarios re-run on 0.2.4; `cue-points-and-edited-beatgrid` re-run on 0.3.7 with memory cues. `more-than-16-tracks-fresh-usb-init` was `fail` at <=0.1.30; fixed in 0.1.31. `strict-parity-repair` was `fail` at 0.4.8; fixed in 0.4.9. |
+| CDJ-2000 | `player-menu-edit` | untested | 0.5.5 | | Added in 0.5.5. |
+| CDJ-2000NXS | everything tested | pass | 0.5.5 | 2026-11-06 | All scenarios run on 0.2.0 (2026-09-11); `player-menu-edit` on 0.5.5; cue-editor scenarios re-run on 0.2.4; `cue-points-and-edited-beatgrid` re-run on 0.3.7 with memory cues. `strict-parity-repair` was `fail` at 0.4.8; fixed in 0.4.9. |
+| CDJ-2000NXS2 | everything tested | pass | 0.5.5 | 2026-11-06 | All scenarios run on 0.2.0 (2026-09-11); `player-menu-edit` on 0.5.5; cue-editor scenarios re-run on 0.2.4; `cue-points-and-edited-beatgrid` re-run on 0.3.7 with memory cues. `more-than-16-tracks-fresh-usb-init` was `fail` at <=0.1.30; fixed in 0.1.31. `strict-parity-repair` was `fail` at 0.4.8; fixed in 0.4.9. |
 | XDJ-1000MK2 | everything tested | pass | 0.2.6 | 2026-09-29 | First validation on this device (fw 1.44). |
+| XDJ-1000MK2 | `player-menu-edit` | untested | 0.5.5 | | Added in 0.5.5. |
 | XDJ-AZ | `normal-export` | pass | 0.3.7-rc.3 | 2026-10-09 | First validation on this device (fw 1.30). |
 | XDJ-AZ | `beat-grid-and-beat-sync` | pass | 0.3.7-rc.3 | 2026-10-09 | `fail` at <=0.3.7-rc.1; fixed in 0.3.7-rc.3. |
 | Mixstream Pro | `engine-library` | pass | 0.4.0 | 2026-10-09 | First validation on this device and the first Engine DJ player. |
 | Mixstream Pro | `engine-pdb-import-artists` | untested | 0.4.1 | | `fail` at <=0.4.0; fix in 0.4.1 not yet run on hardware. |
 | CDJ-3000 | everything tested | pass | 0.4.0 | 2026-10-10 | Every CDJ/XDJ scenario run on 0.4.0, the first CDJ-3000 run since 0.1.36 and its first with the cue editor and memory cues. |
+| CDJ-3000 | `player-menu-edit` | untested | 0.5.5 | | Added in 0.5.5. |
 | CDJ-3000X | `normal-export` | pass | 0.1.36 | 2026-09-02 | First validation on this device (fw 1.31). |
 | CDJ-3000X | `strict-parity-repair` | pass | 0.1.36 | 2026-09-02 | First validation on this device (fw 1.31). |
 | CDJ-3000X | `non-ascii-track-string-alignment` | pass | 0.1.36 | 2026-09-02 | First validation on this device (fw 1.31). |
@@ -149,6 +156,8 @@ tested` row.
 | CDJ-2000NXS | 1.44 | 0.4.8 | `strict-parity-repair` | fail | 2026-10-27 | maintainer | Run stopped at: database mount. Same USB and repair as the CDJ-2000NXS2 row above. See Known Issues: "0.4.8 — `strict-parity-repair`". |
 | CDJ-2000NXS2 | 1.82 | 0.4.9 | `strict-parity-repair` | pass | 2026-10-30 | maintainer | Run to check the 0.4.9 fix: strict parity repair, reinsert, database mount, playlist browse, track load and playback all work. Previously `fail` at 0.4.8 (see Known Issues). |
 | CDJ-2000NXS | 1.44 | 0.4.9 | `strict-parity-repair` | pass | 2026-10-30 | maintainer | Same run as the CDJ-2000NXS2 row above. |
+| CDJ-2000NXS2 | 1.82 | 0.5.5 | `player-menu-edit` | pass | 2026-11-06 | maintainer | First hardware validation of the Player Menu editor. The edited menu and the background colour show on the player, on a USB with both databases and on one without an eDB. DATE ADDED always shows, as the last item, which the app's editor didn't match until the fix after 0.5.5. |
+| CDJ-2000NXS | 1.44 | 0.5.5 | `player-menu-edit` | pass | 2026-11-06 | maintainer | Same run as the CDJ-2000NXS2 row above. |
 
 ## Known Issues
 
@@ -344,6 +353,7 @@ the repaired database files are written.
 | `beat-grid-and-beat-sync` | USB insert, database mount, load an app-analysed track, beat grid shown, Beat Sync engages |
 | `playback-start-position` | Set "Playback starts at" in the cue editor, export, USB insert, database mount, track load, check the load position |
 | `engine-library` | Export with "Write Engine DJ library" on, USB insert on an Engine DJ player, library loads without importing again, track load without analysing again, app beat grid shown, hot cues trigger, play history kept after the library is rebuilt |
+| `player-menu-edit` | Add, remove and reorder Player Menu items in the app, USB insert, database mount, the player's browse menu shows the edited items in the app's order, set the background colour in the app, the player shows that colour; once on a USB with both databases and once without an eDB |
 | `engine-pdb-import-artists` | Export with "Write Engine DJ library" off (no `Engine Library` folder), USB insert on an Engine DJ player, player imports `export.pdb`, browse tracks, artist shown on every track that has one |
 
 ## Recording Warn Or Fail Results

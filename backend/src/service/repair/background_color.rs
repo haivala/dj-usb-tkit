@@ -76,11 +76,13 @@ fn edb_background_color(conn: &rusqlite::Connection) -> Option<u8> {
 }
 
 /// Why a color can't be set, if it can't.
+const READ_ONLY_REFUSAL: &str = "This USB is read-only, so its background colour can't be changed.";
+
 fn background_color_refusal(has_a_place: bool, writable: bool) -> Option<String> {
     if !has_a_place {
         Some("This USB has no place for a background colour.".to_string())
     } else if !writable {
-        Some("This USB is read-only, so its background colour can't be changed.".to_string())
+        Some(READ_ONLY_REFUSAL.to_string())
     } else {
         None
     }
@@ -150,6 +152,11 @@ impl BackendService {
         let before = read_background_colors(&usb_root, &pdb.bytes, &mut warnings);
         if let Some(reason) = before.reason {
             return Err(BackendError::Validation(reason));
+        }
+        // The read above only looks; this one writes, so a read-only mount is
+        // caught here instead of failing halfway through with its own error.
+        if !crate::service::usb_utils::can_write_file_at(&usb_root) {
+            return Err(BackendError::Validation(READ_ONLY_REFUSAL.to_string()));
         }
         let holds = |color: Option<u8>| color.is_none_or(|color| color == req.color);
         if holds(before.pdb_color) && holds(before.edb_color) {
