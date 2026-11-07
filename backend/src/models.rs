@@ -1660,6 +1660,11 @@ pub struct PlaylistUsbExportStatus {
     pub usb_selected: bool,
     pub same_name_exists_on_usb: bool,
     pub locks_reorder: bool,
+    /// The sidebar's mark, by its label: "On this USB" while a valid USB is
+    /// selected and holds a playlist of this name, "Exported to USB" with none
+    /// selected and the playlist exported before. `None`: no mark.
+    #[serde(default)]
+    pub mark_label: Option<String>,
     /// The export button's label: "Append to (<name>) on USB: (<dir>)" (additive
     /// export onto a same-named playlist), "Export to USB: <dir>", or with no
     /// valid USB selected "Select USB first". Built server-side (see

@@ -708,6 +708,7 @@ function installReorderTauriMock(page, { usbSameNamePlaylistName, exportPruneSta
         playlistName: playlist.name,
         usbSelected: true, sameNameExistsOnUsb,
         locksReorder,
+        markLabel: sameNameExistsOnUsb ? "On this USB" : null,
         // Backend-built label (service::export::compute_playlist_usb_export_status);
         // usb root here is "/USB" so the trailing dir is "USB".
         exportButtonText: locksReorder
@@ -760,6 +761,9 @@ function installReorderTauriMock(page, { usbSameNamePlaylistName, exportPruneSta
               usbSelected: false,
               sameNameExistsOnUsb: false,
               locksReorder: false,
+              markLabel: playlists.find((playlist) => playlist.id === status.playlistId)?.lastExportedAt
+                ? "Exported to USB"
+                : null,
               exportButtonText: "Select USB first",
               exportButtonTitle: "Select a valid USB folder first"
             });
@@ -1451,6 +1455,7 @@ test("switching away from a sorted playlist commits the sort as its real order, 
                     playlistName: playlist.name,
                     usbSelected: true, sameNameExistsOnUsb,
                     locksReorder,
+                    markLabel: sameNameExistsOnUsb ? "On this USB" : null,
                     exportButtonText: locksReorder
                       ? `Append to (${playlist.name}) on USB: (USB)`
                       : "Export to USB: USB",

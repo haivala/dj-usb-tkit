@@ -1182,7 +1182,7 @@ test("a repair whose diagnostics re-run failed still applies the export status i
             appliedFixes: payload.request.selectedFixIds,
             usbContentChanged: true,
             statusText: "Repair apply complete: 1 applied",
-            playlistUsbExportStatus: [{ playlistId: "pl-1", playlistName: "Local Set", usbSelected: true, sameNameExistsOnUsb: true }]
+            playlistUsbExportStatus: [{ playlistId: "pl-1", playlistName: "Local Set", usbSelected: true, sameNameExistsOnUsb: true, markLabel: "On this USB" }]
           }
         };
       }
@@ -1404,7 +1404,7 @@ test("USB toggle race ends in deterministic final state, with nothing left of th
       if (command === "list_playlists") {
         return { ok: true, data: { items: [{ id: "pl-1", name: "Local Set", source: "local" }] } };
       }
-      const playlistUsbExportStatus = [{ playlistId: "pl-1", playlistName: "Local Set", usbSelected: true, sameNameExistsOnUsb: true }];
+      const playlistUsbExportStatus = [{ playlistId: "pl-1", playlistName: "Local Set", usbSelected: true, sameNameExistsOnUsb: true, markLabel: "On this USB" }];
       if (command === "fetch_usb_playlists") {
         const backend = window.__e2eBackend;
         return backend.ok(backend.usbPlaylists({ items: [{ id: "usb-1", name: "Warmup", tracks: [] }], playlistUsbExportStatus }));
@@ -1716,7 +1716,7 @@ test("restoring a backup: cancel and failure change nothing; success clears the 
           data: {
             restored: true,
             statusText: "Restored eDB and PDB from backup",
-            playlistUsbExportStatus: [{ playlistId: "pl-1", playlistName: "Local Set", usbSelected: true, sameNameExistsOnUsb: true }]
+            playlistUsbExportStatus: [{ playlistId: "pl-1", playlistName: "Local Set", usbSelected: true, sameNameExistsOnUsb: true, markLabel: "On this USB" }]
           }
         };
       }

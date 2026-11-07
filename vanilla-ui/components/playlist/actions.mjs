@@ -658,18 +658,17 @@ export function createSingleSubmit(handler) {
 }
 
 // Name, "exported to USB" mark and delete button of a sidebar playlist item.
-// `usbStatus` is the playlist's backend PlaylistUsbExportStatus for the
-// connected USB: with one, the mark says whether the playlist is on that
-// stick; without (no USB scanned), it falls back to "ever exported".
+// `usbStatus` is the playlist's backend PlaylistUsbExportStatus, whose
+// `markLabel` says whether there is a mark and what it means.
 export function fillPlaylistSidebarItem(item, playlist, usbStatus) {
   item.querySelector(".nav-playlist-name").textContent = playlist.name;
   const status = item.querySelector(".nav-playlist-status");
-  const exported = usbStatus?.usbSelected ? usbStatus.sameNameExistsOnUsb : !!playlist.lastExportedAt;
-  status.classList.toggle("exported", exported);
-  status.textContent = exported ? "✓" : "";
+  const label = usbStatus?.markLabel;
+  status.classList.toggle("exported", !!label);
+  status.textContent = label ? "✓" : "";
   // No tooltip: hovering the row swaps the mark for the rename/delete buttons.
-  if (exported) {
-    status.setAttribute("aria-label", usbStatus?.usbSelected ? "On this USB" : "Exported to USB");
+  if (label) {
+    status.setAttribute("aria-label", label);
   } else {
     status.removeAttribute("aria-label");
   }

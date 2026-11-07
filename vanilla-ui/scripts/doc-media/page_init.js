@@ -343,6 +343,7 @@
                 : playlists.map((playlist) => ({
                   playlistId: playlist.id,
                   usbSelected: false,
+                  markLabel: isExported(playlist.id, playlist.tracks, playlist.imported) ? "Exported to USB" : null,
                   exportButtonText: "Select USB first",
                   exportButtonTitle: "Select a valid USB folder first",
                 })),

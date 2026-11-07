@@ -257,7 +257,8 @@ drive selection from being rendered against a newer selected drive.
 - `remove_tracks_from_playlist`
 - `reorder_playlist_tracks`
 - `refresh_playlist_export_status` — recomputes every playlist's
-  `PlaylistUsbExportStatus` (`sameNameExistsOnUsb` + `locksReorder`) against the
+  `PlaylistUsbExportStatus` (`sameNameExistsOnUsb`, `locksReorder` and the sidebar's
+  `markLabel`) against the
   connected USB and the current export sync-mode setting, reading only the
   staged PDB/eDB (no USB access). Called when the sync mode changes.
 

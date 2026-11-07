@@ -45,6 +45,8 @@
   colour, or initializing it, is refused with "read-only" instead of failing with a filesystem error. On Windows,
   a folder's read-only attribute no longer makes a USB that can be written look read-only, which hid Initialize
   and refused USB audio format changes.
+- **Chore:** The backend now decides the sidebar's export mark and its meaning, "On this USB" or "Exported to
+  USB", instead of the UI.
 
 ## 0.5.5
 

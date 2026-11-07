@@ -975,12 +975,21 @@ pub(crate) fn compute_playlist_usb_export_status(
                     "Select a valid USB folder first".to_string(),
                 )
             };
+            let marked = if usb_root.is_some() {
+                same_name_exists_on_usb.then_some("On this USB")
+            } else {
+                playlist
+                    .last_exported_at
+                    .is_some()
+                    .then_some("Exported to USB")
+            };
             PlaylistUsbExportStatus {
                 playlist_id: playlist.id.clone(),
                 playlist_name: playlist.name.clone(),
                 usb_selected: usb_root.is_some(),
                 same_name_exists_on_usb,
                 locks_reorder,
+                mark_label: marked.map(str::to_string),
                 export_button_text,
                 export_button_title,
             }
@@ -4121,6 +4130,32 @@ mod tests {
         assert_eq!(
             status[0].export_button_title,
             "Select a valid USB folder first"
+        );
+    }
+
+    #[test]
+    fn the_sidebar_mark_means_on_this_usb_or_exported_before() {
+        let exported = Playlist {
+            last_exported_at: Some("2026-04-07T10:00:00Z".to_string()),
+            ..make_playlist("p1", "My Set")
+        };
+        let playlists = vec![exported, make_playlist("p2", "Brand New")];
+        let mark = |usb_names: &[&str], usb_root: Option<&str>| -> Vec<Option<String>> {
+            let names = usb_names
+                .iter()
+                .map(|name| normalize_playlist_name_for_compare(name))
+                .collect();
+            compute_playlist_usb_export_status(&playlists, &names, true, usb_root)
+                .into_iter()
+                .map(|status| status.mark_label)
+                .collect()
+        };
+        // No USB: exported before.
+        assert_eq!(mark(&[], None), [Some("Exported to USB".to_string()), None]);
+        // A USB: only what's on it, whether or not it was exported before.
+        assert_eq!(
+            mark(&["Brand New"], Some("/media/user/USB")),
+            [None, Some("On this USB".to_string())]
         );
     }
 

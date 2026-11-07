@@ -40,7 +40,7 @@ function makeDom() {
 test("fillPlaylistSidebarItem shows the name as text and the export marker", () => {
   const { document } = makeDom().window;
   const item = document.getElementById("tplNavPlaylistItem").content.firstElementChild.cloneNode(true).firstElementChild;
-  fillPlaylistSidebarItem(item, { id: "p1", name: `<Mix & Match>`, lastExportedAt: "2026-04-07T10:00:00Z" });
+  fillPlaylistSidebarItem(item, { id: "p1", name: `<Mix & Match>` }, { markLabel: "Exported to USB" });
 
   assert.equal(item.querySelector(".nav-playlist-name").textContent, "<Mix & Match>");
   const status = item.querySelector(".nav-playlist-status");
@@ -49,18 +49,18 @@ test("fillPlaylistSidebarItem shows the name as text and the export marker", () 
   assert.equal(item.querySelector(".nav-playlist-delete").dataset.deletePlaylist, "p1");
 });
 
-test("fillPlaylistSidebarItem marks by the connected USB's status when there is one", () => {
+test("fillPlaylistSidebarItem shows the backend's mark, or none", () => {
   const { document } = makeDom().window;
   const freshItem = () => document.getElementById("tplNavPlaylistItem").content.firstElementChild.cloneNode(true).firstElementChild;
 
   const onUsb = freshItem();
-  fillPlaylistSidebarItem(onUsb, { id: "p1", name: "Warmup", lastExportedAt: null }, { usbSelected: true, sameNameExistsOnUsb: true });
+  fillPlaylistSidebarItem(onUsb, { id: "p1", name: "Warmup" }, { markLabel: "On this USB" });
   const onUsbStatus = onUsb.querySelector(".nav-playlist-status");
   assert.equal(onUsbStatus.classList.contains("exported"), true);
   assert.equal(onUsbStatus.getAttribute("aria-label"), "On this USB");
 
   const notOnUsb = freshItem();
-  fillPlaylistSidebarItem(notOnUsb, { id: "p2", name: "Peak", lastExportedAt: "2026-04-07T10:00:00Z" }, { usbSelected: true, sameNameExistsOnUsb: false });
+  fillPlaylistSidebarItem(notOnUsb, { id: "p2", name: "Peak", lastExportedAt: "2026-04-07T10:00:00Z" }, { markLabel: null });
   const notOnUsbStatus = notOnUsb.querySelector(".nav-playlist-status");
   assert.equal(notOnUsbStatus.classList.contains("exported"), false);
   assert.equal(notOnUsbStatus.textContent, "");
