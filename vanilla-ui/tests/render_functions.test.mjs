@@ -23,7 +23,6 @@ const baseRowOptions = {
   actionType: "add-library",
   compactAddButton: true,
   enableAnalyzeActions: false,
-  secondaryActionLabel: "Play",
   secondaryActionType: "play-library"
 };
 
@@ -41,7 +40,6 @@ function formatBadgeRow(track) {
   return renderRow(track, {
     origin: "usb",
     actionType: "add-usb",
-    secondaryActionLabel: undefined,
     secondaryActionType: undefined
   }, {});
 }

@@ -543,6 +543,12 @@ impl BackendService {
             },
         );
         let duration_ms = start.elapsed().as_millis() as u64;
+        let status_label = match overall_status {
+            DiagStatus::Pass => crate::i18n::tr::diagnostics_status_pass(),
+            DiagStatus::Warn => crate::i18n::tr::diagnostics_status_warn(),
+            DiagStatus::Fail => crate::i18n::tr::diagnostics_status_fail(),
+        }
+        .render();
         let data = RunUsbDiagnosticsData {
             overall_status,
             overview,
@@ -560,6 +566,7 @@ impl BackendService {
             duration_ms,
             status_text: format!("Diagnostics complete ({duration_ms}ms)"),
             duration_text: format!("Completed in {duration_ms}ms"),
+            status_label,
             playlist_usb_export_status,
         };
         Ok((data, parsed_opt.map(|(parsed, _)| parsed)))

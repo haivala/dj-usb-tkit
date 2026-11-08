@@ -93,6 +93,7 @@ function installTauriMock(page, mode) {
 
     const diagnosticsPayload = {
       overallStatus: "WARN",
+      statusLabel: "WARN",
       overview: [
         { title: "Older Pioneer players", status: "PASS", detail: "Ready: 1 playlists, 3 tracks." },
         { title: "Waveforms & beat grids", status: "WARN", detail: "Some tracks' waveform or beat grid data is missing or outdated." },
@@ -984,7 +985,7 @@ test("Rediagnose USB and Parity Report open Health & Diagnostics whatever the re
     const invoke = window.__TAURI__.core.invoke;
     window.__TAURI__.core.invoke = async (command, payload) => {
       const result = await invoke(command, payload);
-      if (command === "run_usb_diagnostics") result.data = { ...result.data, overallStatus: "PASS" };
+      if (command === "run_usb_diagnostics") result.data = { ...result.data, overallStatus: "PASS", statusLabel: "PASS" };
       if (command === "run_usb_parity_report" && window.__failParity) {
         return { ok: false, error: { code: "PARITY_FAILED", message: "parity failed" } };
       }
@@ -1787,7 +1788,7 @@ test("applying repairs that change nothing keeps the loaded USB playlists and sh
       if (command === "repair_usb_diagnostics" && payload?.request?.apply) {
         return {
           ok: true,
-          data: { failedFixes: payload.request.selectedFixIds, usbContentChanged: false, statusText: "Repair apply complete: 0 applied", diagnostics: { overallStatus: "FAIL" } }
+          data: { failedFixes: payload.request.selectedFixIds, usbContentChanged: false, statusText: "Repair apply complete: 0 applied", diagnostics: { overallStatus: "FAIL", statusLabel: "FAIL" } }
         };
       }
       return invoke(command, payload);

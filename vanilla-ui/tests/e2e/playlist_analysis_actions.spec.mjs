@@ -303,6 +303,7 @@ test("playlist analyze-missing skips already-analyzed tracks and targets the res
               ok: true,
               data: {
                 overallStatus: "PASS",
+                statusLabel: "PASS",
                 overview: [],
                 playlistUsbExportStatus: [],
                 durationMs: 1,
@@ -447,6 +448,7 @@ test("playlist actions hide Analyze Missing when unnecessary and keep Export vis
               ok: true,
               data: {
                 overallStatus: "PASS",
+                statusLabel: "PASS",
                 overview: [],
                 playlistUsbExportStatus: [],
                 durationMs: 1,
@@ -813,6 +815,7 @@ function installReorderTauriMock(page, { usbSameNamePlaylistName, exportPruneSta
               ok: true,
               data: {
                 overallStatus: "PASS",
+                statusLabel: "PASS",
                 overview: [],
                 durationMs: 1,
                 sectionGroups: [],

@@ -2347,6 +2347,9 @@ pub struct RunUsbDiagnosticsData {
     /// "Completed in 370ms", in the report's header.
     #[serde(default)]
     pub duration_text: String,
+    /// "PASS", on the report's badge.
+    #[serde(default)]
+    pub status_label: String,
     pub playlist_usb_export_status: Vec<PlaylistUsbExportStatus>,
 }
 

@@ -1,6 +1,7 @@
 // USB DB backup snapshot list/restore/delete UI logic.
 
 import { cloneTemplate } from "../../ui_utils.mjs";
+import { t } from "../../ui_texts.mjs";
 
 function showBackupsMessage(list, text) {
   const row = cloneTemplate(list.ownerDocument, "tplLogMessageRow");
@@ -15,7 +16,7 @@ export async function renderBackups(ctx) {
   try {
     data = await command("list_usb_backups", { usbRoot: state.usbRoot });
   } catch (err) {
-    el.backupsSummary.textContent = "Failed to load backups";
+    el.backupsSummary.textContent = t("ui-backups-load-failed");
     showBackupsMessage(el.backupsList, err?.message || String(err));
     return;
   }
@@ -43,9 +44,9 @@ export async function restoreUsbBackup(ctx, timestamp) {
   const { state, command, openConfirmDialog, emitStatus } = ctx;
   const backup = state.usbBackups.find((b) => b.timestamp === timestamp);
   const confirmed = await openConfirmDialog({
-    title: "Restore Backup",
+    title: t("ui-backups-restore-title"),
     message: backup.restoreConfirmText,
-    confirmLabel: "Restore"
+    confirmLabel: t("ui-backups-restore")
   });
   if (!confirmed) return;
 
@@ -53,7 +54,7 @@ export async function restoreUsbBackup(ctx, timestamp) {
   try {
     data = await command("restore_usb_backup", { usbRoot: state.usbRoot, timestamp });
   } catch (err) {
-    emitStatus(`Restore failed: ${err?.message || err}`);
+    emitStatus(t("ui-backups-restore-failed", { error: err?.message || err }));
     await renderBackups(ctx);
     return;
   }
@@ -72,9 +73,9 @@ export async function deleteUsbBackup(ctx, timestamp) {
   const { state, command, openConfirmDialog, emitStatus } = ctx;
   const backup = state.usbBackups.find((b) => b.timestamp === timestamp);
   const confirmed = await openConfirmDialog({
-    title: "Delete Backup",
+    title: t("ui-backups-delete-title"),
     message: backup.deleteConfirmText,
-    confirmLabel: "Delete"
+    confirmLabel: t("ui-backups-delete")
   });
   if (!confirmed) return;
 
@@ -82,7 +83,7 @@ export async function deleteUsbBackup(ctx, timestamp) {
     const data = await command("delete_usb_backup", { usbRoot: state.usbRoot, timestamp });
     emitStatus(data.statusText);
   } catch (err) {
-    emitStatus(`Delete failed: ${err?.message || err}`);
+    emitStatus(t("ui-backups-delete-failed", { error: err?.message || err }));
   }
   await renderBackups(ctx);
 }

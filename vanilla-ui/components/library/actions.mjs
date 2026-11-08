@@ -334,7 +334,6 @@ export function createLibraryTracksController(ctx) {
       compactAddButton: true,
       enableAnalyzeActions: true,
       origin: "local",
-      secondaryActionLabel: "Play",
       secondaryActionType: "play-library",
     }),
     buildRow: ctx.buildTrackTableRow,

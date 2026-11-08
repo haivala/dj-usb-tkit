@@ -832,7 +832,6 @@ export function createPlaylistTracksController(ctx) {
         withCheckbox: true,
         selectedIds: ctx.state.trackSelections.playlist.ids,
         origin: "local",
-        secondaryActionLabel: "Play",
         secondaryActionType: "play-library",
         enableAnalyzeActions: true,
         actionLabel: "×",

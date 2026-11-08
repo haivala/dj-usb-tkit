@@ -139,7 +139,7 @@ export function createTrackRow(ctx, track, options) {
   cell("cover").firstElementChild.prepend(coverElement(doc, coverUrl(track)));
 
   const transport = row.querySelector(".transport-btn");
-  if (options.secondaryActionLabel) {
+  if (options.secondaryActionType) {
     const playing = isTrackCurrentlyPlaying(ctx, track);
     const label = playing ? "Stop" : "Play";
     transport.classList.toggle("is-playing", playing);

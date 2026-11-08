@@ -58,6 +58,13 @@ usb-history-summary = { $sessions ->
 # $sessions: how many sessions were read.
 usb-history-loaded = USB histories loaded: { $sessions }
 
+## diagnostics
+
+# The badge on the USB diagnostics report, for its overall result.
+diagnostics-status-pass = PASS
+diagnostics-status-warn = WARN
+diagnostics-status-fail = FAIL
+
 ## settings
 
 # The error when a language that has no catalog is saved as the app's language.
@@ -76,9 +83,18 @@ ui-add-to-title = Add to playlists
 ## ui-backups
 
 ui-backups-delete = Delete
+# The status line when deleting a backup fails.
+# $error: why it failed.
+ui-backups-delete-failed = Delete failed: { $error }
+ui-backups-delete-title = Delete Backup
 ui-backups-intro = Each backup holds both of the USB's databases: legacy (PDB) and new (eDB).
+ui-backups-load-failed = Failed to load backups
 ui-backups-refresh = Refresh
 ui-backups-restore = Restore
+# The status line when restoring a backup fails.
+# $error: why it failed.
+ui-backups-restore-failed = Restore failed: { $error }
+ui-backups-restore-title = Restore Backup
 ui-backups-summary = No entries
 ui-backups-title = Backups
 
@@ -416,6 +432,7 @@ ui-track-detail-zoom-out = Zoom out
 ui-track-row-drag-to-reorder = Drag to reorder
 ui-track-row-edit-cues-aria-label = Cue points & beat grid
 ui-track-row-empty = No tracks available.
+ui-track-row-play = Play
 ui-track-row-play-from-here-tooltip = Play from here
 ui-track-row-waveform-preview-aria-label = waveform preview
 
@@ -484,9 +501,49 @@ ui-usb-select-usb-folder = Select USB Folder
 ui-usb-status = Status
 ui-usb-title = USB Browser
 
+# The status line when the automatic diagnostics after selecting a USB fail.
+# $error: why they failed.
+ui-usb-auto-diagnostics-failed = Auto-diagnostics failed: { $error }
+# The status line when an audio format ticked or unticked for the USB can't be saved.
+# $error: why it failed.
+ui-usb-audio-formats-save-failed = Save USB audio formats failed: { $error }
+ui-usb-diagnostics-running = Running USB diagnostics...
+# The status line when a playlist export can't start because the playlist's sort order wasn't saved.
+# $error: why saving it failed.
+ui-usb-export-sort-failed = Export blocked: couldn't save the current sort order ({ $error })
+# The status line while a playlist is exported.
+# $name: the playlist's name.
+ui-usb-export-running = Exporting { $name } to USB...
+ui-usb-export-starting = Starting USB export...
+# The status line when an export fails and the backend sent no status line of its own.
+# $error: why it failed, or ui-usb-export-failed-unknown when nothing says.
+ui-usb-export-failed = Export failed: { $error }. See Event Log for details.
+ui-usb-export-failed-unknown = USB export failed
+# The aria-label of the button that forgets a recent USB.
+# $path: the USB's folder.
+ui-usb-forget-path-aria-label = Forget { $path }
+# The status line when initializing the USB's folder structure fails.
+# $error: why it failed.
+ui-usb-initialize-failed = Initialize failed: { $error }
+# The status line when the connected drive's name can't be read.
+# $error: why it failed.
+ui-usb-name-check-failed = Could not check this drive's name: { $error }
+ui-usb-parity-running = Running USB parity report...
+ui-usb-repair-applying = Applying supported USB repair fixes...
+ui-usb-repair-previewing = Previewing USB repair fixes...
+ui-usb-root-cleared = USB root cleared
+# The Select USB Folder button's title while a USB operation runs.
+ui-usb-select-usb-folder-busy-title = Please wait for the current USB operation to finish
+# The status line when another USB is picked while a USB operation runs.
+ui-usb-switch-busy = Please wait for the current USB operation to finish before switching drives
+
 ## ui-usb-history
 
 ui-usb-history-export-tracklist = Export Tracklist to Text File
+# The status line when a history session's tracks can't be loaded.
+# $error: why it failed.
+ui-usb-history-load-failed = Failed to load USB history: { $error }
+ui-usb-history-loading = Loading USB history...
 ui-usb-history-search-placeholder = Search history tracks
 ui-usb-history-title = USB History
 
@@ -497,9 +554,13 @@ ui-usb-player-menu-available = Available (hidden)
 ui-usb-player-menu-available-aria-label = Available hidden player menu items
 ui-usb-player-menu-background-colour = Background colour
 ui-usb-player-menu-background-colour-aria-label = Player background colour
+# The status line when the USB's player background colour can't be read.
+# $error: why it failed.
+ui-usb-player-menu-background-colour-read-failed = Failed to read the background colour: { $error }
 ui-usb-player-menu-current = Current player menu
 ui-usb-player-menu-current-aria-label = Current visible player menu items
 ui-usb-player-menu-down = Move Down
+ui-usb-player-menu-loading = Loading player menu configuration...
 ui-usb-player-menu-remove = ← Remove
 ui-usb-player-menu-title = Player Menu Editor
 ui-usb-player-menu-up = Move Up
@@ -507,5 +568,20 @@ ui-usb-player-menu-up = Move Up
 ## ui-usb-playlists
 
 ui-usb-playlists-compared = Playlists compared
+# The status line when a USB playlist's tracks can't be loaded.
+# $error: why it failed.
+ui-usb-playlists-load-failed = Failed to load USB playlist: { $error }
+ui-usb-playlists-loading = Loading USB playlists...
+# The status line when the new order of the USB's playlists can't be saved.
+# $error: why it failed.
+ui-usb-playlists-order-failed = Failed to save playlist order: { $error }
+# The progress bar when reading the USB's playlists fails.
+ui-usb-playlists-read-failed = USB load failed
+ui-usb-playlists-reading = Reading USB database...
+ui-usb-playlists-remove = Remove
+# The status line when removing a playlist from the USB fails.
+# $error: why it failed.
+ui-usb-playlists-remove-failed = Remove USB playlist failed: { $error }
+ui-usb-playlists-remove-title = Remove USB Playlist
 ui-usb-playlists-search-placeholder = Search USB playlist tracks
 ui-usb-playlists-title = USB Playlists

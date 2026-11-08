@@ -27,7 +27,7 @@ export function isUsbRootChangeBlocked(state) {
 export function setUsbRootControlsLocked(ctx, locked) {
   const { el } = ctx;
   el.selectUsbFolderBtn.disabled = !!locked;
-  el.selectUsbFolderBtn.title = locked ? "Please wait for the current USB operation to finish" : "";
+  el.selectUsbFolderBtn.title = locked ? t("ui-usb-select-usb-folder-busy-title") : "";
   el.usbRecentList.querySelectorAll("button").forEach((btn) => { btn.disabled = !!locked; });
   if (locked) {
     el.exportPlaylistBtn.disabled = true;
@@ -127,7 +127,7 @@ export function renderDiagnosticsReport(ctx, data) {
   el.usbHealthCard.classList.remove("is-loading");
   if (data.overallStatus !== "PASS") el.usbHealthCard.open = true;
 
-  el.diagOverallStatus.textContent = data.overallStatus;
+  el.diagOverallStatus.textContent = data.statusLabel;
   el.diagOverallStatus.className = `diag-badge diag-${data.overallStatus.toLowerCase()}`;
   clearParityBadge(el);
   el.diagDuration.textContent = data.durationText;
@@ -231,11 +231,7 @@ function showDiagRepairView(ctx) {
 // the stale report should disappear, not the whole panel.
 function resetDiagnosticsContent(ctx) {
   const { el } = ctx;
-  [el.usbHealthDot, el.usbHeaderHealthDot].forEach((dot) => {
-    dot.classList.remove("health-pass", "health-warn", "health-fail");
-    dot.dataset.tooltip = "USB health: unknown";
-    dot.setAttribute("aria-label", "USB health: unknown");
-  });
+  ctx.updateUsbHealthDot(null);
   el.diagSections.replaceChildren();
   el.diagOverallStatus.textContent = "";
   el.diagOverallStatus.className = "diag-badge";
@@ -468,7 +464,7 @@ async function promptDriveNameIfUnset(ctx) {
   try {
     data = await command("get_usb_device_name", { usbRoot: state.usbRoot });
   } catch (err) {
-    emitStatus(`Could not check this drive's name: ${err?.message || err}`);
+    emitStatus(t("ui-usb-name-check-failed", { error: err?.message || err }));
     return;
   }
   state.usbNameTakenBy = data.nameTakenBy;
@@ -556,7 +552,7 @@ export async function validateAndSetUsbRoot(ctx, path) {
   const { state, el, command, emitStatus } = ctx;
 
   if (isUsbRootChangeBlocked(state)) {
-    emitStatus("Please wait for the current USB operation to finish before switching drives");
+    emitStatus(t("ui-usb-switch-busy"));
     return false;
   }
 
@@ -576,7 +572,7 @@ export async function validateAndSetUsbRoot(ctx, path) {
     ctx.updateUsbSubNavDisabledState();
     ctx.updatePlaylistExportButtons();
     ctx.loadUsbAudioFormats().catch((err) => console.warn("get_usb_audio_formats failed:", err));
-    emitStatus("USB root cleared");
+    emitStatus(t("ui-usb-root-cleared"));
     el.usbRecentRow.classList.remove("collapsed");
     await syncAssetScopePaths(ctx);
     return false;
@@ -607,7 +603,7 @@ export async function validateAndSetUsbRoot(ctx, path) {
     ctx.requestAnimationFrameFn(() => {
       ctx.runUsbDiagnostics().catch((err) => {
         ctx.warn("Auto-diagnostics failed:", err);
-        emitStatus(`Auto-diagnostics failed: ${err?.message || err}`);
+        emitStatus(t("ui-usb-auto-diagnostics-failed", { error: err?.message || err }));
         refreshExportStatusInBackground(ctx);
       });
     });
@@ -623,9 +619,9 @@ export async function validateAndSetUsbRoot(ctx, path) {
 export async function removeUsbPlaylist(ctx, playlist) {
   const { state, emitStatus } = ctx;
   const confirmed = await ctx.openConfirmDialog({
-    title: "Remove USB Playlist",
+    title: t("ui-usb-playlists-remove-title"),
     message: playlist.removeConfirmText,
-    confirmLabel: "Remove"
+    confirmLabel: t("ui-usb-playlists-remove")
   });
   if (!confirmed) return;
 
@@ -653,7 +649,7 @@ export async function reorderUsbPlaylists(ctx) {
   } catch (err) {
     // The drag already moved the row: read the real order back.
     await refreshUsb(ctx);
-    emitStatus(`Failed to save playlist order: ${err.message || err}`);
+    emitStatus(t("ui-usb-playlists-order-failed", { error: err.message || err }));
   }
 }
 // USB workflow orchestration.
@@ -718,7 +714,7 @@ export function openUsbPlaylistRow(ctx, btn) {
   // renders it, and sets the "Total time" footer from the response.
   usbPlaylistTracksCtl.load({ scopeId: playlist.id }).catch((err) => {
     console.warn("USB playlist load failed:", err);
-    emitStatus(`Failed to load USB playlist: ${err.message}`);
+    emitStatus(t("ui-usb-playlists-load-failed", { error: err.message }));
   });
   return playlist;
 }
@@ -730,7 +726,7 @@ export function openHistoryRow(ctx, btn) {
   setActiveListItem(el.historyList, btn);
   usbHistoryTracksCtl.load({ scopeId: history.id }).catch((err) => {
     console.warn("USB history load failed:", err);
-    emitStatus(`Failed to load USB history: ${err.message}`);
+    emitStatus(t("ui-usb-history-load-failed", { error: err.message }));
   });
 }
 
@@ -742,8 +738,8 @@ export function refreshUsb(ctx) {
 
 async function readUsbPlaylists(ctx, isCurrent) {
   const { state, el, setProgress, startProgressHeartbeat, stopProgressHeartbeat, emitStatus } = ctx;
-  emitStatus("Loading USB playlists...");
-  setProgress(true, 5, "Reading USB database...");
+  emitStatus(t("ui-usb-playlists-loading"));
+  setProgress(true, 5, t("ui-usb-playlists-reading"));
   startProgressHeartbeat();
   let data;
   try {
@@ -756,7 +752,7 @@ async function readUsbPlaylists(ctx, isCurrent) {
       ctx.scheduleProgressIdle(0);
       return;
     }
-    setProgress(true, 100, "USB load failed", { error: true, dismissable: true });
+    setProgress(true, 100, t("ui-usb-playlists-read-failed"), { error: true, dismissable: true });
     throw err;
   }
   stopProgressHeartbeat();
@@ -796,7 +792,7 @@ function keepOpenUsbPlaylist(ctx) {
   }
   ctl.load().catch((err) => {
     console.warn("USB playlist load failed:", err);
-    emitStatus(`Failed to load USB playlist: ${err.message}`);
+    emitStatus(t("ui-usb-playlists-load-failed", { error: err.message }));
   });
 }
 
@@ -807,7 +803,7 @@ export async function runUsbDiagnostics(ctx, { openReport = false } = {}) {
   const healthCard = ctx.el.usbHealthCard;
   healthCard.removeAttribute("open");
   healthCard.classList.add("is-loading");
-  emitStatus("Running USB diagnostics...");
+  emitStatus(t("ui-usb-diagnostics-running"));
   try {
     const data = await ctx.command("run_usb_diagnostics", {
       usbRoot: state.usbRoot
@@ -825,7 +821,7 @@ export async function runUsbDiagnostics(ctx, { openReport = false } = {}) {
 
 export async function runUsbParityReport(ctx) {
   const { state, emitStatus } = ctx;
-  emitStatus("Running USB parity report...");
+  emitStatus(t("ui-usb-parity-running"));
   try {
     const data = await ctx.command("run_usb_parity_report", {
       usbRoot: state.usbRoot
@@ -841,7 +837,7 @@ export async function runUsbParityReport(ctx) {
 
 export async function previewUsbRepairs(ctx) {
   const { state, emitStatus } = ctx;
-  emitStatus("Previewing USB repair fixes...");
+  emitStatus(t("ui-usb-repair-previewing"));
   const data = await ctx.command("repair_usb_diagnostics", {
     usbRoot: state.usbRoot
   });
@@ -852,7 +848,7 @@ export async function previewUsbRepairs(ctx) {
 
 export async function applyUsbRepairs(ctx) {
   const { state, emitStatus } = ctx;
-  emitStatus("Applying supported USB repair fixes...");
+  emitStatus(t("ui-usb-repair-applying"));
   const selectedFixIds = Array.from(state.selectedRepairFixIds);
   const data = await ctx.command("repair_usb_diagnostics", {
     usbRoot: state.usbRoot,
@@ -883,7 +879,7 @@ function syncEngineLibrarySetting(ctx, enabled) {
 
 async function readUsbHistories(ctx, isCurrent) {
   const { state, el, emitStatus } = ctx;
-  emitStatus("Loading USB history...");
+  emitStatus(t("ui-usb-history-loading"));
   let data;
   try {
     data = await ctx.command("fetch_usb_histories", { usbRoot: state.usbRoot });
@@ -1022,7 +1018,7 @@ export function syncUsbPlayerMenuEditorControls(ctx) {
 
 export async function loadUsbPlayerMenuConfig(ctx) {
   const { state, emitStatus } = ctx;
-  emitStatus("Loading player menu configuration...");
+  emitStatus(t("ui-usb-player-menu-loading"));
   const data = await ctx.command("get_usb_player_menu_config", { usbRoot: state.usbRoot });
   applyPlayerMenuConfig(ctx, data);
   emitStatus(data.statusText);
@@ -1083,7 +1079,7 @@ export async function loadUsbBackgroundColor(ctx) {
   } catch (err) {
     state.usbBackgroundColor = null;
     ctx.warn("get_usb_background_color failed:", err);
-    ctx.emitStatus(`Failed to read the background colour: ${err.message || err}`);
+    ctx.emitStatus(t("ui-usb-player-menu-background-colour-read-failed", { error: err.message || err }));
   }
   renderUsbBackgroundColor(ctx);
 }
@@ -1120,13 +1116,13 @@ async function runPlaylistExport(ctx, playlistId) {
   try {
     await ctx.commitActivePlaylistSort(playlistId);
   } catch (err) {
-    emitStatus(`Export blocked: couldn't save the current sort order (${err.message || err})`);
+    emitStatus(t("ui-usb-export-sort-failed", { error: err.message || err }));
     return;
   }
 
-  emitStatus(`Exporting ${playlist.name} to USB...`);
+  emitStatus(t("ui-usb-export-running", { name: playlist.name }));
   el.donateBtn.classList.add("exporting");
-  setProgress(true, 8, "Starting USB export...");
+  setProgress(true, 8, t("ui-usb-export-starting"));
   ctx.startProgressHeartbeat();
   await ctx.nextPaint();
   let data;
@@ -1142,14 +1138,14 @@ async function runPlaylistExport(ctx, playlistId) {
       }
     });
   } catch (error) {
-    const msg = error.message.trim() || "USB export failed";
-    emitStatus(error.details?.statusText || `Export failed: ${msg}. See Event Log for details.`);
+    const msg = error.message.trim() || t("ui-usb-export-failed-unknown");
+    emitStatus(error.details?.statusText || t("ui-usb-export-failed", { error: msg }));
     // Reported: the backend already put the reason in the Event Log, so the
     // caller must not log it again.
     return;
   } finally {
     if (!state.activeJobId) {
-      setProgress(false, 0, "Idle");
+      setProgress(false, 0, t("ui-job-idle"));
       stopProgressHeartbeat();
     }
   }
@@ -1254,7 +1250,6 @@ function createUsbTracksController(ctx, { bodyId, selectionView, fetchCommand, s
       compactAddButton: true,
       enableAnalyzeActions: true,
       origin: "usb",
-      secondaryActionLabel: "Play",
       secondaryActionType,
     }),
     buildRow: ctx.buildTrackTableRow,
@@ -1302,13 +1297,13 @@ export async function initializeUsb(ctx) {
     await validateAndSetUsbRoot(ctx, state.usbRoot);
   } catch (err) {
     ctx.logError("Initialize USB failed:", err);
-    emitStatus(`Initialize failed: ${err.message || err}`);
+    emitStatus(t("ui-usb-initialize-failed", { error: err.message || err }));
   }
 }
 
 export async function pickUsbFolder(ctx) {
   if (isUsbRootChangeBlocked(ctx.state)) {
-    ctx.emitStatus("Please wait for the current USB operation to finish before switching drives");
+    ctx.emitStatus(t("ui-usb-switch-busy"));
     return null;
   }
   const selected = await ctx.invoke("pick_usb_folder");
@@ -1391,7 +1386,7 @@ export function renderUsbRecentRoots(ctx) {
     const device = devicesByPath.get(path);
     if (device) {
       pruneBtn.dataset.usbPruneDeviceId = device.id;
-      pruneBtn.setAttribute("aria-label", `Forget ${path}`);
+      pruneBtn.setAttribute("aria-label", t("ui-usb-forget-path-aria-label", { path }));
       pruneBtn.disabled = locked;
     } else {
       pruneBtn.remove();
@@ -1404,7 +1399,7 @@ export function updateUsbRootText(ctx, path, valid = false) {
   const { el } = ctx;
   el.usbConnectionBar.classList.remove("hidden");
   if (!valid) {
-    el.usbRootPathText.textContent = "No USB selected";
+    el.usbRootPathText.textContent = t("ui-usb-root-path");
     el.usbRootPathText.classList.remove("usb-path-valid", "usb-path-invalid");
     delete el.usbRootPathText.dataset.tooltip;
     return;

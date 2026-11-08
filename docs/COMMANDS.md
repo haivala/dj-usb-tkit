@@ -384,8 +384,8 @@ The USB commands send the text the UI shows, ready to display:
   `initialize_usb`: `statusText`.
 - `set_usb_device_name`: answers `{ name, updated, statusText }`. `name` is as saved, and `updated`
   is false when the drive already had exactly that name.
-- `run_usb_diagnostics`: `statusText`, `durationText`. `run_usb_parity_report`: the same and
-  `statusLabel`. `overallStatus` stays a value, for the badge's style.
+- `run_usb_diagnostics` and `run_usb_parity_report`: `statusText`, `durationText` and
+  `statusLabel`, the badge's text. `overallStatus` stays a value, for the badge's style.
 - `repair_usb_diagnostics`: `statusText`, `nothingToFix`, and `rows`, the fix list ready to show,
   including unsupported items.
 - `get_usb_player_menu_config` / `update_usb_player_menu_config`: `statusText`, and on each item

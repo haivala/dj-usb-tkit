@@ -1028,6 +1028,11 @@ fn diagnostics_parity_and_import_counts_stay_consistent_after_repeated_exports()
         diagnostics_data.duration_text,
         format!("Completed in {}ms", diagnostics_data.duration_ms)
     );
+    assert_eq!(
+        serde_json::to_value(&diagnostics_data.overall_status).unwrap(),
+        serde_json::Value::String(diagnostics_data.status_label.clone()),
+        "the badge reads the overall status"
+    );
     let diag_playlist = diagnostics_data
         .playlist_details
         .iter()

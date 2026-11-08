@@ -103,6 +103,7 @@
         durationMs: 1,
         statusText: "mock diagnostics status",
         durationText: "mock duration",
+        statusLabel: "PASS",
         playlistUsbExportStatus: [],
         ...overrides
       };
