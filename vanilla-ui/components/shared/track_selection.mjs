@@ -35,7 +35,7 @@ export function renderSelectionBar(ctx, view) {
   const { ids } = trackSelection(ctx, view);
   const count = ids.size;
   bar.classList.toggle("is-empty", count === 0);
-  bar.querySelector(".selection-count").textContent = tCount("ui-common-selection-count", count);
+  bar.querySelector(".selection-count").textContent = tCount("ui-selection-bar-count", count);
   renderSelectionTime(ctx, view, bar, ids);
   for (const button of bar.querySelectorAll("[data-selection-action]")) {
     button.disabled = count === 0;

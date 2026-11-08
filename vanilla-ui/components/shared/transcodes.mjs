@@ -5,6 +5,7 @@
 
 import { counted } from "../../track_utils.mjs";
 import { cloneTemplate } from "../../ui_utils.mjs";
+import { t } from "../../ui_texts.mjs";
 import { createDialogLifecycle } from "./dialog_lifecycle.mjs";
 
 // The Convert… dialog. `open({ count, folder, formats })` (the backend's
@@ -28,7 +29,7 @@ export function createConvertDialogController(el, document) {
     open({ count = 0, folder = "", formats = [] }) {
       close();
       el.convertTitle.textContent = `Convert ${counted(count, "track")}`;
-      el.convertFolderText.textContent = folder;
+      el.convertFolderHint.textContent = t("ui-convert-folder-hint", { folder });
       el.convertFormatGroup.querySelectorAll("label").forEach((row) => row.remove());
       for (const choice of formats) {
         const row = cloneTemplate(document, "tplConvertFormatChoice");

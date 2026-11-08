@@ -1,6 +1,7 @@
 import { createTrackListController } from "../shared/track_list_controller.mjs";
 import { narrowTrackSelectionToLoaded } from "../shared/track_selection.mjs";
 import { cloneTemplate } from "../../ui_utils.mjs";
+import { t } from "../../ui_texts.mjs";
 import { createDialogLifecycle } from "../shared/dialog_lifecycle.mjs";
 import { catchErr } from "../shared/track_actions.mjs";
 import { setActiveListItem } from "../shell/actions.mjs";
@@ -511,7 +512,7 @@ async function openDriveNameDialog(ctx, initial) {
   for (const node of overlay.querySelectorAll("[data-drive-name-mode]")) {
     node.hidden = !node.dataset.driveNameMode.split(" ").includes(mode);
   }
-  el.driveNameTakenBy.textContent = state.usbNameTakenBy;
+  el.driveNameConflict.textContent = t("ui-drive-name-conflict", { name: state.usbNameTakenBy });
 
   // This overlay is full-viewport and intercepts every click while open, so
   // it must never be able to get stuck there -- Escape, a backdrop click,

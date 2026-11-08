@@ -1,10 +1,20 @@
+import { t } from "../../ui_texts.mjs";
+
+// A header with alternative sorts (Track: by artist, then by title) names the one in use.
+const SORT_LABELS = { artist: "ui-track-table-sort-artist", title: "ui-track-table-sort-title" };
+
+// Back to the header's own label, from the catalog.
+function resetSortLabel(header) {
+  const labelEl = header.querySelector(".sort-label");
+  if (labelEl?.dataset.text) labelEl.textContent = t(labelEl.dataset.text);
+}
+
 export function clearTrackSort(tableSortState, bodyId, grid) {
   delete tableSortState[bodyId];
   if (!grid) return;
   grid.querySelectorAll('.sortable[role="columnheader"]').forEach((h) => {
     h.classList.remove("sort-asc", "sort-desc");
-    const labelEl = h.querySelector(".sort-label");
-    if (labelEl && h.dataset.sortDefault) labelEl.textContent = h.dataset.sortDefault;
+    resetSortLabel(h);
   });
   grid.querySelector(".sort-hint")?.classList.add("hidden");
 }
@@ -53,8 +63,7 @@ export function handleSortHeaderClick(ctx, event) {
     tableSortState[bodyId] = nextState;
     grid.querySelectorAll('.sortable[role="columnheader"]').forEach((h) => {
       h.classList.remove("sort-asc", "sort-desc");
-      const labelEl = h.querySelector(".sort-label");
-      if (labelEl && h.dataset.sortDefault) labelEl.textContent = h.dataset.sortDefault;
+      resetSortLabel(h);
     });
     const ownerTh = allKeys.includes(nextState.key)
       ? th
@@ -63,7 +72,7 @@ export function handleSortHeaderClick(ctx, event) {
       ownerTh.classList.add(nextState.dir === "asc" ? "sort-asc" : "sort-desc");
       if (altKeys) {
         const labelEl = ownerTh.querySelector(".sort-label");
-        if (labelEl) labelEl.textContent = nextState.key.charAt(0).toUpperCase() + nextState.key.slice(1);
+        if (labelEl && SORT_LABELS[nextState.key]) labelEl.textContent = t(SORT_LABELS[nextState.key]);
       }
     }
     grid.querySelector(".sort-hint")?.classList.remove("hidden");

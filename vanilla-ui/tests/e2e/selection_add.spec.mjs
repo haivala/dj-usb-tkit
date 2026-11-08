@@ -608,7 +608,7 @@ test("Convert… makes transcodes of the selection, shown under the format; Remo
   await bar.locator('[data-selection-action="convert"]').click();
   await expect(page.locator("#convertOverlay")).toBeVisible();
   await expect(page.locator("#convertTitle")).toHaveText("Convert 2 tracks");
-  await expect(page.locator("#convertFolderText")).toHaveText("/data/transcodes");
+  await expect(page.locator("#convertFolderHint")).toHaveText("Saved in /data/transcodes (change it in Settings).");
   // The backend's choices, its default picked.
   await expect(page.locator("#convertFormatGroup label")).toHaveText(["MP3 320 kbps", "AIFF (lossless)", "WAV (lossless)"]);
   await expect(page.locator("#convertFormatGroup input[value='mp3']")).toBeChecked();

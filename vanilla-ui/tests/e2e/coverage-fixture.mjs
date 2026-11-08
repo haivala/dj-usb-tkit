@@ -124,6 +124,10 @@ export function uiTextCheck(page, name) {
   const file = path.join(allowlistDir, `${name}.json`);
   return {
     async collect() {
+      // The progress bar shows a finished job's text for a moment, then fades out still
+      // showing "Idle" (its visibility flips only when the fade ends): wait until it's gone,
+      // so every run sees the same.
+      await expect(page.locator("#progressFooter")).toBeHidden();
       for (const hit of await page.evaluate(collectUnwrapped, { neverTranslated: NEVER_TRANSLATED })) {
         found.add(hit);
       }

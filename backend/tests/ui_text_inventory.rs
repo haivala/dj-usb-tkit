@@ -619,6 +619,116 @@ fn every_english_string_in_the_ui_js_is_in_the_inventory() {
     );
 }
 
+/// Text `index.html` may keep: names never translated, and single keys on a keyboard.
+const INDEX_HTML_KEEP: &[&str] = &["DJ USB Tkit", "Essentia", "rekordbox", "Mixxx", "Q", "M"];
+const INDEX_HTML_ATTRIBUTES: &[&str] =
+    &["aria-label", "data-tooltip", "placeholder", "title", "alt"];
+
+/// Whether HTML text has a Latin letter, not counting character references (`&times;`).
+fn html_has_letters(text: &str) -> bool {
+    let mut rest = text;
+    while let Some(amp) = rest.find('&') {
+        if rest[..amp].chars().any(|c| c.is_ascii_alphabetic()) {
+            return true;
+        }
+        rest = &rest[amp..];
+        let reference = rest.find(';').filter(|end| {
+            rest[1..*end]
+                .chars()
+                .all(|c| c.is_ascii_alphanumeric() || c == '#')
+        });
+        rest = match reference {
+            Some(end) => &rest[end + 1..],
+            None => &rest[1..],
+        };
+    }
+    rest.chars().any(|c| c.is_ascii_alphabetic())
+}
+
+/// English left in an HTML page: each text and each label attribute with a letter in it,
+/// outside `<head>`, `<script>`, `<style>`, comments and anything marked `translate="no"`.
+fn english_in_html(html: &str) -> Vec<String> {
+    let mut found = Vec::new();
+    let mut rest = html;
+    // Tag names whose content is skipped, innermost last.
+    let mut skipping: Vec<String> = Vec::new();
+    while !rest.is_empty() {
+        let Some(open) = rest.find('<') else {
+            break;
+        };
+        let text = rest[..open]
+            .split_whitespace()
+            .collect::<Vec<_>>()
+            .join(" ");
+        if skipping.is_empty()
+            && html_has_letters(&text)
+            && !INDEX_HTML_KEEP.contains(&text.as_str())
+        {
+            found.push(text);
+        }
+        rest = &rest[open..];
+        if let Some(comment) = rest.strip_prefix("<!--") {
+            rest = comment.split_once("-->").map_or("", |(_, after)| after);
+            continue;
+        }
+        let Some(close) = rest.find('>') else {
+            break;
+        };
+        let tag = &rest[1..close];
+        rest = &rest[close + 1..];
+        let name: String = tag
+            .trim_start_matches('/')
+            .chars()
+            .take_while(|c| c.is_ascii_alphanumeric() || *c == '-')
+            .collect::<String>()
+            .to_ascii_lowercase();
+        if let Some(closing) = tag.strip_prefix('/') {
+            let closing = closing.trim().to_ascii_lowercase();
+            if skipping.last() == Some(&closing) {
+                skipping.pop();
+            }
+            continue;
+        }
+        let self_closing = tag.ends_with('/');
+        let skip = ["head", "script", "style"].contains(&name.as_str())
+            || tag.contains(r#"translate="no""#);
+        if skip && !self_closing {
+            skipping.push(name.clone());
+        } else if skipping.last() == Some(&name) && !self_closing {
+            // The same tag nested inside a skipped one: skip to its own end too.
+            skipping.push(name.clone());
+        }
+        if !skipping.is_empty() {
+            continue;
+        }
+        for attribute in INDEX_HTML_ATTRIBUTES {
+            let Some((_, after)) = tag.split_once(&format!(" {attribute}=\"")) else {
+                continue;
+            };
+            let value = after.split('"').next().unwrap_or_default();
+            if html_has_letters(value) && !INDEX_HTML_KEEP.contains(&value) {
+                found.push(format!("{attribute}: {value}"));
+            }
+        }
+    }
+    found
+}
+
+/// Piece 4: `index.html` names its texts with `data-text*`; the words are in the catalog.
+#[test]
+fn index_html_has_no_english() {
+    let path = Path::new(env!("CARGO_MANIFEST_DIR")).join("../vanilla-ui/index.html");
+    let html = std::fs::read_to_string(&path).expect("read index.html");
+    let found = english_in_html(&html);
+    assert!(
+        found.is_empty(),
+        "English in {}: put it in backend/locales/en.ftl under a `ui-` key and name it with \
+         `data-text` (or `data-text-tooltip`, `-aria-label`, `-placeholder`, `-title`, `-alt`)\n{}",
+        path.display(),
+        found.join("\n")
+    );
+}
+
 #[cfg(test)]
 mod checks {
     use super::*;
@@ -675,7 +785,7 @@ return /a"b/.test(c);
                 .collect::<Vec<_>>()
         };
         assert_eq!(found("x(counted(n, 'track'), 'click')"), ["track"]);
-        assert!(found("tCount('ui-common-selection-count', n)").is_empty());
+        assert!(found("tCount('ui-selection-bar-count', n)").is_empty());
         assert_eq!(
             found("el.textContent = 'none'; el.className = 'none'"),
             ["none"]
@@ -733,5 +843,28 @@ return /a"b/.test(c);
         assert!(parse_inventory("## stays English\nenglish\ta.mjs:1\t\"x\"\n").is_ok());
         assert!(parse_inventory("## piece 6\nmaybe\ta.mjs:1\t\"x\"\n").is_err());
         assert!(parse_inventory("## piece 6\nt\ta.mjs:1\tnot json\n").is_err());
+    }
+
+    #[test]
+    fn finds_english_in_html() {
+        let html = r#"<html><head><title>App</title></head><body>
+<!-- a comment -->
+<p data-text="ui-x"></p><p>Hello there</p>
+<button aria-label="Close" data-text-tooltip="ui-y">&times;</button>
+<svg translate="no"><text>Logo</text><svg><text>Inner</text></svg></svg>
+<kbd>Q</kbd><input placeholder="Search" /><p>&#9881; &rarr; Tom &amp; Jerry</p>
+<script>const a = "Not text";</script>
+<template><span>In a template</span></template>
+</body></html>"#;
+        assert_eq!(
+            english_in_html(html),
+            [
+                "Hello there",
+                "aria-label: Close",
+                "placeholder: Search",
+                "&#9881; &rarr; Tom &amp; Jerry",
+                "In a template"
+            ]
+        );
     }
 }

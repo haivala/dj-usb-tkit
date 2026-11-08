@@ -327,14 +327,14 @@ test("a drive carrying another drive's name is asked for its own and says which 
 
   await expect(page.locator("#driveNameOverlay")).toBeVisible();
   await expect(page.locator("#driveNameTitle")).toHaveText("Name This Drive", { useInnerText: true });
-  await expect(page.locator("#driveNameTakenBy")).toHaveText("Club Stick");
-  await expect(page.locator("#driveNameTakenBy")).toBeVisible();
+  await expect(page.locator("#driveNameConflict")).toBeVisible();
+  await expect(page.locator("#driveNameConflict")).toContainText("This drive carries the name “Club Stick”, but");
   await page.locator("#driveNameSkipBtn").click();
   await expect(page.locator("#usbNameBadgeLabel")).toHaveText("Unnamed");
 
   // Naming it later from the header still explains why.
   await page.locator("#usbNameBadgeLabel").click();
-  await expect(page.locator("#driveNameTakenBy")).toBeVisible();
+  await expect(page.locator("#driveNameConflict")).toBeVisible();
   await page.locator("#driveNameInput").fill("Booth Stick");
   await page.locator("#driveNameOkBtn").click();
   await expect(page.locator("#usbNameBadgeLabel")).toHaveText("Booth Stick");
