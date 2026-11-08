@@ -9,8 +9,8 @@ import {
   formatTimestampLocal,
   renderTrackListDurationSummary,
   counted,
-  ANALYZE_PLAYLIST_MISSING_TOOLTIP,
 } from "../../track_utils.mjs";
+import { t, tCount } from "../../ui_texts.mjs";
 
 const PLAYLIST_LOAD_LIMIT_DEFAULT = 150;
 
@@ -62,7 +62,7 @@ export function renderPlaylistList(ctx) {
     if (state.activeTab === playlist.id) btn.classList.add("active");
     if (state.currentPlaylistId === playlist.id) {
       btn.classList.add("playlist-active-mode");
-      btn.dataset.tooltip = "Active playlist";
+      btn.dataset.tooltip = t("ui-playlist-active-tooltip");
     }
     el.navPlaylistList.appendChild(li);
   });
@@ -150,7 +150,7 @@ export function startPlaylistRename(ctx, playlistId) {
         await loadPlaylists(ctx);
       } catch (err) {
         console.error("rename failed:", err);
-        emitStatus(`Rename failed: ${err.message || err}`);
+        emitStatus(t("ui-playlist-rename-failed", { error: err.message || err }));
       }
     }
     item.replaceChildren(...itemContent);
@@ -234,7 +234,7 @@ export async function reorderPlaylists(ctx, fromIndex, toIndex) {
       orderedPlaylistIds: state.playlists.map((playlist) => playlist.id)
     });
   } catch (err) {
-    ctx.emitStatus(`Save playlist order failed: ${err.message || err}`);
+    ctx.emitStatus(t("ui-playlist-order-failed", { error: err.message || err }));
     await loadPlaylists(ctx);
   }
 }
@@ -310,32 +310,29 @@ export function updatePlaylistExportButtons(ctx) {
   // The backend export gate (ensure_playlist_tracks_analysis_ready) is the
   // hard safety net.
   // Count of not-yet-analysis-ready tracks over the WHOLE playlist, computed
-  // server-side (get_playlist_tracks -> unanalyzedCount) -- the client only
-  // holds a page, so it can't count them itself.
+  // server-side (get_playlist_tracks -> unanalyzedCount, with the button's
+  // label and tooltip) -- the client only holds a page, so it can't count them
+  // itself.
   const unanalyzedCount = Number(current?.unanalyzedCount) || 0;
   const showAnalyzeMissing = unanalyzedCount > 0;
   el.analyzePlaylistMissingBtn.disabled = !showAnalyzeMissing;
   el.analyzePlaylistMissingBtn.hidden = !showAnalyzeMissing;
-  el.analyzePlaylistMissingBtn.textContent = showAnalyzeMissing
-    ? `Analyze Missing Tracks (${unanalyzedCount})`
-    : "Analyze Missing Tracks";
-  el.analyzePlaylistMissingBtn.dataset.tooltip = showAnalyzeMissing
-    ? ANALYZE_PLAYLIST_MISSING_TOOLTIP
-    : "No tracks in this playlist need analysis";
+  el.analyzePlaylistMissingBtn.textContent = current?.analyzeMissingLabel || "";
+  el.analyzePlaylistMissingBtn.dataset.tooltip = current?.analyzeMissingTooltip || "";
   el.exportPlaylistBtn.hidden = showAnalyzeMissing;
 }
 
 export async function createPlaylist(ctx, name) {
   const { state, withProgress, command, updateModeText, switchView, emitStatus } = ctx;
   if (!name) {
-    emitStatus("Playlist name is required");
+    emitStatus(t("ui-playlist-name-required"));
     return;
   }
 
-  const created = await withProgress("Creating playlist", async (progress) => {
-    progress(35, "Saving playlist...");
+  const created = await withProgress(t("ui-playlist-create-title"), async (progress) => {
+    progress(35, t("ui-playlist-create-saving"));
     const playlist = await command("create_playlist", { name });
-    progress(70, "Refreshing playlists...");
+    progress(70, t("ui-playlist-refreshing-playlists"));
     await loadPlaylists(ctx);
     const loadedPlaylists = Array.isArray(state.playlists) ? state.playlists : [];
     const createdPlaylistId = String(playlist?.playlistId || "").trim();
@@ -354,7 +351,7 @@ export async function createPlaylist(ctx, name) {
     return playlist;
   });
 
-  emitStatus(`Playlist created: ${created.name}`);
+  emitStatus(created.statusText);
 }
 
 // External libraries a playlist can be imported from. Each is offered when
@@ -376,11 +373,11 @@ const PLAYLIST_IMPORT_SOURCES = [
   }
 ];
 
-// [kind, group label]
+// [kind, group label key]
 const PLAYLIST_IMPORT_KINDS = [
-  ["playlist", "Playlists"],
-  ["crate", "Crates"],
-  ["history", "History"]
+  ["playlist", "ui-playlist-import-group-playlists"],
+  ["crate", "ui-playlist-import-group-crates"],
+  ["history", "ui-playlist-import-group-history"]
 ];
 
 // Pick any number of playlists / crates / history sessions from a detected
@@ -397,31 +394,25 @@ export async function importExternalPlaylist(ctx) {
       const data = await command(source.listCommand, { path });
       return (Array.isArray(data?.items) ? data.items : []).map((item) => ({ ...item, source, path }));
     } catch (err) {
-      emitStatus(`Could not read ${source.label} playlists: ${err?.message || err}`);
+      emitStatus(t("ui-playlist-import-list-failed", { library: source.label, error: err?.message || err }));
       return null;
     }
   }));
   // A column per library, its lists grouped by kind.
   const columns = sources.map((source, index) => ({
     label: source.label,
-    groups: PLAYLIST_IMPORT_KINDS.map(([kind, kindLabel]) => ({
-      label: kindLabel,
+    groups: PLAYLIST_IMPORT_KINDS.map(([kind, kindLabelKey]) => ({
+      label: t(kindLabelKey),
       items: (listed[index] || [])
         .filter((item) => item.kind === kind)
-        .map((item) => ({
-          ...item,
-          sourceLabel: source.label,
-          note: [
-            counted(item.trackCount, "track"),
-            // Importing a list again updates the playlist its earlier import made.
-            ...(item.existingPlaylist ? [`updates "${item.existingPlaylist.name}"`] : [])
-          ].join(" · ")
-        }))
+        // The backend's note: the track count, and the playlist an earlier
+        // import made, which importing the list again updates.
+        .map((item) => ({ ...item, sourceLabel: source.label, note: item.noteText }))
     }))
   }));
   if (!columns.some((column) => column.groups.some((group) => group.items.length))) {
     // Keep a listing error on the status line rather than hiding it.
-    if (!listed.includes(null)) emitStatus("No playlists with tracks found");
+    if (!listed.includes(null)) emitStatus(t("ui-playlist-import-none-found"));
     return;
   }
 
@@ -437,18 +428,23 @@ export async function importExternalPlaylist(ctx) {
       logWarnings(
         item.source.label,
         [{ level: "error", message: `${item.name}: ${message}`, code: "playlist_import.failed" }],
-        `${item.source.label} playlist import`
+        t("ui-playlist-import-log-context", { library: item.source.label })
       );
     }
   };
   try {
     await withProgress(
-      chosen.length === 1 ? `Importing ${chosen[0].source.label} playlist` : `Importing ${counted(chosen.length, "playlist")}`,
+      chosen.length === 1
+        ? t("ui-playlist-import-one-title", { library: chosen[0].source.label })
+        : tCount("ui-playlist-import-many-title", chosen.length),
       async (progress) => {
-        progress(5, chosen.length === 1 ? `Importing ${chosen[0].name}...` : "Importing playlists...");
+        progress(5, chosen.length === 1
+          ? t("ui-playlist-import-one-starting", { name: chosen[0].name })
+          : t("ui-playlist-import-many-starting"));
         data = await command("import_external_playlists", {
           items: chosen.map((item) => ({
             library: item.source.library,
+            name: item.name,
             path: item.path,
             kind: item.kind,
             id: item.id,
@@ -458,10 +454,10 @@ export async function importExternalPlaylist(ctx) {
         for (const [index, outcome] of (data.results || []).entries()) {
           const item = chosen[index];
           if (outcome.playlist) done.push({ item, result: outcome.playlist });
-          else failed.push({ item, message: outcome.error || "import failed" });
+          else failed.push({ item, message: outcome.error || t("ui-playlist-import-failed-unknown") });
         }
-        if (!done.length) throw new Error(failed[0]?.message || "import failed");
-        progress(80, "Refreshing playlists...");
+        if (!done.length) throw new Error(failed[0]?.message || t("ui-playlist-import-failed-unknown"));
+        progress(80, t("ui-playlist-refreshing-playlists"));
         // The imported tracks belong to those libraries: show them in the library too.
         const imported = [...new Set(done.map(({ item }) => item.source))];
         for (const source of imported) await ctx.showExternalLibrary(source.library);
@@ -476,13 +472,15 @@ export async function importExternalPlaylist(ctx) {
     );
   } catch (err) {
     logFailed();
-    const what = chosen.length === 1 ? `${chosen[0].source.label} playlist` : "Playlist";
-    emitStatus(`${what} import failed: ${err?.message || err}`);
+    const error = err?.message || err;
+    emitStatus(chosen.length === 1
+      ? t("ui-playlist-import-one-failed", { library: chosen[0].source.label, error })
+      : t("ui-playlist-import-many-failed", { error }));
     return;
   }
 
   for (const { item, result } of done) {
-    const logLabel = `${item.source.label} playlist import`;
+    const logLabel = t("ui-playlist-import-log-context", { library: item.source.label });
     const notFound = Array.isArray(result.notFound) ? result.notFound : [];
     if (notFound.length > 0) {
       logWarnings(
@@ -497,19 +495,7 @@ export async function importExternalPlaylist(ctx) {
     }
   }
   logFailed();
-
-  const skipped = Number(data.skipped || 0);
-  const suffix = skipped > 0 ? ` | ${counted(skipped, "track")} skipped (see event log)` : "";
-  if (chosen.length === 1) {
-    const { result } = done[0];
-    const verb = result.updatedExisting ? "Updated" : "Imported";
-    emitStatus(`${verb} playlist ${result.name}: ${counted(result.added, "track")}${suffix}`);
-    return;
-  }
-  const failedSuffix = data.failed
-    ? ` | ${data.failed} failed: ${failed.map(({ item }) => item.name).join(", ")} (see event log)`
-    : "";
-  emitStatus(`Imported ${data.imported} of ${counted(chosen.length, "playlist")}: ${counted(data.added, "track")}${suffix}${failedSuffix}`);
+  emitStatus(data.statusText);
 }
 
 export async function deletePlaylist(ctx, playlistId) {
@@ -519,13 +505,10 @@ export async function deletePlaylist(ctx, playlistId) {
   const playlist = state.playlists.find((p) => p.id === playlistId);
   if (!playlist) return;
 
-  const exportedHint = playlist.lastExportedAt
-    ? "\n\nThis playlist was exported before. It is easy to recreate by importing playlists from USB."
-    : "";
   const confirmed = await openConfirmDialog({
-    title: "Delete App Playlist",
-    message: `Delete "${playlist.name}"?\n\nThis removes the app playlist and its app playlist-track links.${exportedHint}`,
-    confirmLabel: "Delete"
+    title: t("ui-playlist-delete-title"),
+    message: playlist.deleteConfirmText,
+    confirmLabel: t("ui-playlist-delete")
   });
   if (!confirmed) return;
 
@@ -533,7 +516,7 @@ export async function deletePlaylist(ctx, playlistId) {
   try {
     const data = await command("delete_playlist", { playlistId });
     if (!data?.deleted) {
-      emitStatus(`Delete failed: ${playlist.name}`);
+      emitStatus(t("ui-playlist-delete-failed", { name: playlist.name }));
       return;
     }
     await loadPlaylists(ctx);
@@ -542,7 +525,7 @@ export async function deletePlaylist(ctx, playlistId) {
     }
     updateModeText();
     await switchView(state.currentPlaylistId || "library");
-    emitStatus(`Playlist deleted: ${playlist.name}`);
+    emitStatus(data.statusText);
   } finally {
     state.deletingPlaylistId = null;
   }
@@ -567,17 +550,17 @@ export async function addTracksToCurrentPlaylist(ctx, tracks) {
   if (!playlist) return;
   const candidates = Array.isArray(tracks) ? tracks : [];
   if (!candidates.length) {
-    emitStatus("No imported track IDs found to add");
+    emitStatus(t("ui-playlist-add-none-resolved"));
     return;
   }
 
-  const result = await withProgress("Adding tracks", async (progress) => {
-    progress(25, "Resolving tracks...");
+  const result = await withProgress(t("ui-playlist-add-title"), async (progress) => {
+    progress(25, t("ui-playlist-add-resolving"));
     pushEventLog({
       level: "info",
       source: "playlist-add",
       code: "playlist_add.request",
-      message: `Adding ${counted(candidates.length, "track")} to ${playlist.name}`,
+      message: tCount("ui-playlist-adding-tracks", candidates.length, { playlist: playlist.name }),
       details: `candidateIds=${candidates.map((item) => item.trackId || item.id || item.filePath || "unknown").join(",")}`
     });
     const add = await command("add_track_candidates_to_playlist", {
@@ -590,7 +573,7 @@ export async function addTracksToCurrentPlaylist(ctx, tracks) {
     if (!Number(add.resolved || 0)) {
       return add;
     }
-    progress(80, "Refreshing playlist...");
+    progress(80, t("ui-playlist-add-refreshing"));
     // The add cleared the playlist's last export.
     await loadPlaylists(ctx);
     await refreshCurrentPlaylistTracks(ctx);
@@ -598,16 +581,16 @@ export async function addTracksToCurrentPlaylist(ctx, tracks) {
       level: "info",
       source: "playlist-add",
       code: "playlist_add.result",
-      message: `Added ${counted(add.added, "track")} to ${playlist.name}`,
+      message: add.statusText,
       details: `requested=${add.requested || candidates.length} | resolved=${add.resolved || 0} | added=${add.added} | skipped=${add.skipped}`
     });
     return add;
   });
   if (!Number(result.resolved || 0)) {
-    emitStatus("No imported track IDs found to add");
+    emitStatus(t("ui-playlist-add-none-resolved"));
     return;
   }
-  emitStatus(`Added ${counted(result.added, "track")} (skipped ${result.skipped}) to ${playlist.name}`);
+  emitStatus(result.statusText);
 }
 
 // Library "Add selected" / "Add all matching": the backend enumerates the
@@ -620,12 +603,12 @@ export async function addLibrarySelectionToCurrentPlaylist(ctx, { trackIds = [],
   const playlist = requireCurrentPlaylist(ctx);
   if (!playlist) return;
   if (!allMatching && !trackIds.length) {
-    emitStatus("Select at least one track to add");
+    emitStatus(t("ui-playlist-add-select-first"));
     return;
   }
 
-  const add = await withProgress("Adding tracks", async (progress) => {
-    progress(30, "Adding tracks...");
+  const add = await withProgress(t("ui-playlist-add-title"), async (progress) => {
+    progress(30, t("ui-playlist-add-adding"));
     return command("add_library_selection_to_playlist", {
       playlistId: playlist.id,
       query: String(state.libraryQuery || "").trim(),
@@ -641,10 +624,10 @@ export async function addLibrarySelectionToCurrentPlaylist(ctx, { trackIds = [],
     level: "info",
     source: "playlist-add",
     code: "playlist_add.result",
-    message: `Added ${counted(add?.added || 0, "track")} to ${playlist.name}`,
+    message: add?.statusText,
     details: `added=${add?.added || 0} | skipped=${add?.skipped || 0} | allMatching=${allMatching}`
   });
-  emitStatus(`Added ${counted(add?.added || 0, "track")} (skipped ${add?.skipped || 0}) to ${playlist.name}`);
+  emitStatus(add?.statusText);
 }
 
 export function createSingleSubmit(handler) {
@@ -685,7 +668,7 @@ export function updatePlaylistPanelTitle(ctx, playlist) {
   const parts = [playlist.name];
   if (playlist.listSummaryText && Number(playlist.listTrackCount) > 0) parts.push(`(${playlist.listSummaryText})`);
   // Backend-derived from where the playlist was imported (see list_playlists).
-  if (playlist.importedFrom) parts.push(`· Imported from ${playlist.importedFrom}`);
+  if (playlist.importedFrom) parts.push(t("ui-playlist-imported-from", { library: playlist.importedFrom }));
   el.playlistPanelTitle.textContent = parts.join(" ");
   renderPlaylistExportSpace(ctx, playlist);
 }
@@ -767,7 +750,7 @@ export function getCurrentPlaylist(ctx) {
 function requireCurrentPlaylist(ctx) {
   const p = getCurrentPlaylist(ctx);
   if (p) return p;
-  ctx.emitStatus("Create and activate a playlist first");
+  ctx.emitStatus(t("ui-playlist-none-active"));
   return null;
 }
 
@@ -853,6 +836,8 @@ export function createPlaylistTracksController(ctx) {
         p.totalDurationMs = data.totalDurationMs;
         p.durationUnknownCount = data.durationUnknownCount;
         p.unanalyzedCount = data.unanalyzedCount;
+        p.analyzeMissingLabel = data.analyzeMissingLabel;
+        p.analyzeMissingTooltip = data.analyzeMissingTooltip;
         // Whole-playlist count from the backend, not just the loaded page(s).
         p.trackCount = data.total;
         p.listTrackCount = data.listTrackCount;
@@ -893,11 +878,11 @@ function renderPlaylistEmptyState(ctx, playlist) {
     const hasUsb = !!state.usbRoot && !!state.usbRootValid;
     renderEmptyState(el.playlistEmptyState, {
       icon: "♫",
-      heading: "Browse Library or USB to add tracks",
-      actionLabel: "Media Library",
+      heading: t("ui-playlist-empty-heading"),
+      actionLabel: t("ui-playlist-empty-library"),
       onAction: () => ctx.switchView("library").catch((err) => console.error(err)),
       extraActions: [{
-        label: hasUsb ? "USB Playlists" : "USB",
+        label: t(hasUsb ? "ui-playlist-empty-usb-playlists" : "ui-playlist-empty-usb"),
         onAction: () => ctx.switchView(hasUsb ? "usb-playlists" : "usb").catch((err) => console.error(err)),
       }],
     });

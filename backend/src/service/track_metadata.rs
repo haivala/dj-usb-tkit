@@ -11,6 +11,7 @@ use crate::edb::{
     resolve_release_date,
 };
 use crate::error::{BackendError, BackendResult};
+use crate::i18n::tr;
 use crate::logging::{self, Level};
 use crate::models::{
     GetTracksMetadataSummaryRequest, GetUsbTracksMetadataSummaryRequest,
@@ -513,7 +514,12 @@ impl BackendService {
             .collect::<BackendResult<Vec<_>>>()?;
         let ids: Vec<String> = items.iter().map(|item| item.track_id.clone()).collect();
         let tracks = super::library::track_rows(&conn, &ids)?;
-        Ok(SaveTrackMetadataEditsData { items, tracks })
+        let status_text = tr::track_details_saved(items.len()).render();
+        Ok(SaveTrackMetadataEditsData {
+            items,
+            tracks,
+            status_text,
+        })
     }
 
     /// What library tracks share, for the selection bar's Edit.
@@ -735,10 +741,12 @@ impl BackendService {
             .filter_map(|item| item.local_track_id.clone())
             .collect();
         let local_tracks = super::library::track_rows(&*self.db.connect()?, &local_ids)?;
+        let status_text = tr::track_details_saved_usb(items.len()).render();
         Ok(SaveUsbTrackMetadataEditsData {
             items,
             tracks,
             local_tracks,
+            status_text,
         })
     }
 }

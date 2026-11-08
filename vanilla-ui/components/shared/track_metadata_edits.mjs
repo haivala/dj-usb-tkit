@@ -5,7 +5,7 @@
 // path. Each save answers with the saved tracks' whole rows, which the tables
 // show as they are.
 
-import { counted } from "../../track_utils.mjs";
+import { t, tCount } from "../../ui_texts.mjs";
 import { createDialogLifecycle } from "./dialog_lifecycle.mjs";
 import { isUsbRootChangeBlocked } from "../usb/actions.mjs";
 
@@ -38,7 +38,7 @@ export async function saveUsbMetadataEdits(ctx, rows, edits) {
   // Another USB job (an export, diagnostics, another save) writes the same
   // databases on the stick: wait for it instead of dropping the edits.
   if (isUsbRootChangeBlocked(ctx.state)) {
-    ctx.emitStatus("Waiting for the running USB job to finish before saving...");
+    ctx.emitStatus(t("ui-group-edit-waiting-for-usb-job"));
     await ctx.waitForUsbJobIdle();
   }
   const saved = await ctx.command("save_usb_track_metadata_edits", {
@@ -64,13 +64,13 @@ export async function editTrackSelection(ctx, view, ids, rows) {
     : await ctx.command("get_tracks_metadata_summary", { trackIds: ids });
   const edits = await ctx.groupEditDialog.open(summary);
   if (!edits || !Object.keys(edits).length) return;
-  const count = usb ? rows.length : ids.length;
   try {
-    if (usb) await saveUsbMetadataEdits(ctx, rows, edits);
-    else await saveLibraryMetadataEdits(ctx, ids, edits);
-    ctx.emitStatus(`Saved track details for ${counted(count, "track")}${usb ? " to USB" : ""}`);
+    const saved = usb
+      ? await saveUsbMetadataEdits(ctx, rows, edits)
+      : await saveLibraryMetadataEdits(ctx, ids, edits);
+    ctx.emitStatus(saved.statusText);
   } catch (err) {
-    ctx.emitStatus(`Could not save track details: ${err.message || err}`);
+    ctx.emitStatus(t("ui-group-edit-save-failed", { error: err.message || err }));
   }
 }
 
@@ -139,17 +139,17 @@ export function createGroupEditDialogController(el, document) {
       close();
       touched = new Set();
       const count = Number(summary?.count || 0);
-      el.groupEditTitle.textContent = `Edit ${counted(count, "track")}`;
+      el.groupEditTitle.textContent = tCount("ui-group-edit-title-count", count);
       const list = el.groupEditGenreOptions;
       const { Option } = list.ownerDocument.defaultView;
       list.replaceChildren(...(summary?.genreOptions || []).map((name) => new Option(name)));
       const field = (input, shared, emptyHint = "") => {
         input.value = shared?.mixed ? "" : String(shared?.value ?? "");
-        input.placeholder = shared?.mixed ? "Mixed" : emptyHint;
+        input.placeholder = shared?.mixed ? t("ui-group-edit-mixed") : emptyHint;
         input.removeAttribute("aria-invalid");
       };
       field(el.groupEditGenre, summary?.genre);
-      field(el.groupEditReleaseDate, summary?.releaseDate, "YYYY-MM-DD");
+      field(el.groupEditReleaseDate, summary?.releaseDate, t("ui-group-edit-release-date-placeholder"));
       rating = summary?.rating?.mixed ? 0 : Number(summary?.rating?.value || 0);
       el.groupEditRatingMixed.hidden = !summary?.rating?.mixed;
       renderRating();

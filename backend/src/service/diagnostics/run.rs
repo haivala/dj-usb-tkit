@@ -549,6 +549,12 @@ impl BackendService {
             DiagStatus::Fail => crate::i18n::tr::diagnostics_status_fail(),
         }
         .render();
+        let health_text = match overall_status {
+            DiagStatus::Pass => crate::i18n::tr::diagnostics_health_good(),
+            DiagStatus::Warn => crate::i18n::tr::diagnostics_health_warnings(),
+            DiagStatus::Fail => crate::i18n::tr::diagnostics_health_issues(),
+        }
+        .render();
         let data = RunUsbDiagnosticsData {
             overall_status,
             overview,
@@ -567,6 +573,7 @@ impl BackendService {
             status_text: format!("Diagnostics complete ({duration_ms}ms)"),
             duration_text: format!("Completed in {duration_ms}ms"),
             status_label,
+            health_text,
             playlist_usb_export_status,
         };
         Ok((data, parsed_opt.map(|(parsed, _)| parsed)))

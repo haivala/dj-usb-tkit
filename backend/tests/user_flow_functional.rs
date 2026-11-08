@@ -940,10 +940,9 @@ fn save_track_analysis_edits_bakes_cues_and_first_beat_into_cached_anlz() {
         ]),
     });
     assert!(save.ok, "save failed: {save:?}");
-    assert!(
-        save.data.expect("save data").anlz_regenerated,
-        "cache should have been rewritten"
-    );
+    let save = save.data.expect("save data");
+    assert!(save.anlz_regenerated, "cache should have been rewritten");
+    assert_eq!(save.status_text, "Saved 2 cues");
 
     for path in [Path::new(&dat_path), ext_path.as_path()] {
         let bytes = fs::read(path).expect("read cached anlz");
@@ -1592,6 +1591,7 @@ fn save_usb_track_analysis_edits_writes_device_and_local_master() {
     );
     assert_eq!(saved.cues.len(), 1);
     assert_eq!(saved.cues[0].position_ms, 3_500);
+    assert_eq!(saved.status_text, "Saved 1 cue to USB");
 
     // On-device ANLZ carries the new cue (memory + hot).
     let device_cues = read_cues_from_anlz(&fs::read(only_exported_ext(&usb)).unwrap());
@@ -2356,6 +2356,7 @@ fn save_track_metadata_edits_leaves_analysis_alone() {
     });
     assert!(saved.ok, "metadata save failed: {saved:?}");
     let saved = saved.data.expect("metadata save data");
+    assert_eq!(saved.status_text, "Saved track details for 1 track");
     // The saved track's whole row, for the track tables.
     assert_eq!(
         saved

@@ -1,7 +1,6 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 import { buildTrackTableRow, finishTrackRows, renderEmptyTrackTable, setAddButtonState } from "../track_table.mjs";
-import { ANALYZE_TOOLTIP, REANALYZE_TOOLTIP } from "../track_utils.mjs";
 import { makeTestCtx } from "./test_helpers.mjs";
 
 const baseTrack = {
@@ -70,12 +69,12 @@ test("createTrackRow analyze button reflects backend track.analysisReady", async
   const notReady = (await renderRow({ id: "a-1", analysisReady: false }, { enableAnalyzeActions: true }))
     .querySelector('[data-action="analyze-track"]');
   assert.equal(notReady.textContent, "Analyze");
-  assert.equal(notReady.dataset.tooltip, ANALYZE_TOOLTIP);
+  assert.equal(notReady.dataset.tooltip, "Add the missing waveform, BPM, key and first beat; a BPM or key you edited or imported is kept");
 
   const ready = (await renderRow({ id: "a-2", analysisReady: true }, { enableAnalyzeActions: true }))
     .querySelector('[data-action="analyze-track"]');
   assert.equal(ready.textContent, "Reanalyze");
-  assert.equal(ready.dataset.tooltip, REANALYZE_TOOLTIP);
+  assert.equal(ready.dataset.tooltip, "Reset waveform, BPM, key and first beat to a fresh analysis, replacing imported or edited values (cues are kept)");
 });
 
 test("createTrackRow omits the analyze button on USB rows but keeps the cue editor", async () => {

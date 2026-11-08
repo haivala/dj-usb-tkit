@@ -1,17 +1,4 @@
 [
-  "Active playlist",
-  "Add 2 tracks to playlists",
-  "Added 2 tracks (skipped 0) to Warmup",
-  "Edit 2 tracks",
-  "No active playlist",
   "Not exported yet.",
-  "Playlist created: Warmup",
-  "Total time: 0:00",
-  "aria-label: Play",
-  "data-tooltip: Active playlist",
-  "data-tooltip: Add the missing waveform, BPM, key and first beat; a BPM or key you edited or imported is kept",
-  "data-tooltip: Add the selected tracks to Warmup",
-  "data-tooltip: Play",
-  "placeholder: Mixed",
-  "placeholder: YYYY-MM-DD"
+  "Total time: 0:00"
 ]

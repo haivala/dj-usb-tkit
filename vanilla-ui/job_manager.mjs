@@ -1,6 +1,7 @@
 // Job progress bar management: set/dismiss/heartbeat/withProgress.
 
 import { USB_ROOT_LOCKING_JOB_TYPES, isUsbRootChangeBlocked } from "./components/usb/actions.mjs";
+import { t } from "./ui_texts.mjs";
 
 export function setProgress(ctx, active, percent = 0, text = "", opts = {}) {
   const { state, el } = ctx;
@@ -9,7 +10,7 @@ export function setProgress(ctx, active, percent = 0, text = "", opts = {}) {
   el.progressFooter.classList.toggle("dismissable", !!opts.dismissable);
   const clamped = Math.max(0, Math.min(100, Number(percent) || 0));
   state.progressPercent = clamped;
-  state.progressBaseText = text || (active ? "Working..." : "Idle");
+  state.progressBaseText = text || t(active ? "ui-job-working" : "ui-job-idle");
   el.progressFill.style.width = `${clamped}%`;
   el.progressFooter
     .querySelector(".progress-track")
@@ -25,13 +26,13 @@ function elapsedSecs(state) {
 
 function renderProgressTime(ctx) {
   const { state, el } = ctx;
-  if (state.progressPausedAtMs) el.progressTime.textContent = "(paused)";
+  if (state.progressPausedAtMs) el.progressTime.textContent = t("ui-job-paused");
   else if (!state.progressHeartbeatTimer) el.progressTime.textContent = "";
   else el.progressTime.textContent = `(${elapsedSecs(state)}s)`;
 }
 
 export function dismissProgress(ctx) {
-  setProgress(ctx, false, 0, "Idle");
+  setProgress(ctx, false, 0, t("ui-job-idle"));
 }
 
 // Hide the footer `delayMs` after a job finished, so its final text stays
@@ -41,7 +42,7 @@ export function scheduleProgressIdle(ctx, delayMs) {
   clearTimeout(state.progressIdleTimer);
   state.progressIdleTimer = setTimeout(() => {
     state.progressIdleTimer = null;
-    setProgress(ctx, false, 0, "Idle");
+    setProgress(ctx, false, 0, t("ui-job-idle"));
     stopProgressHeartbeat(ctx);
   }, delayMs);
 }
@@ -111,17 +112,18 @@ export function nextPaint() {
 }
 
 export async function withProgress(ctx, label, fn) {
-  setProgress(ctx, true, 10, `${label}...`);
+  const step = t("ui-job-label-working", { label });
+  setProgress(ctx, true, 10, step);
   startProgressHeartbeat(ctx);
   await nextPaint();
   try {
-    const result = await fn((percent, text) => setProgress(ctx, true, percent, text || `${label}...`));
-    setProgress(ctx, true, 100, `${label} done`);
+    const result = await fn((percent, text) => setProgress(ctx, true, percent, text || step));
+    setProgress(ctx, true, 100, t("ui-job-label-done", { label }));
     scheduleProgressIdle(ctx, 350);
     return result;
   } catch (error) {
     stopProgressHeartbeat(ctx);
-    setProgress(ctx, true, 100, `${label} failed`, { error: true, dismissable: true });
+    setProgress(ctx, true, 100, t("ui-job-label-failed", { label }), { error: true, dismissable: true });
     throw error;
   }
 }
@@ -170,7 +172,7 @@ export function cancelTranscode(ctx) {
 }
 
 export function updateAnalysisPauseButtonAppearance(el, paused) {
-  const label = paused ? "Resume analysis" : "Pause analysis";
+  const label = t(paused ? "ui-job-resume-analysis" : "ui-job-pause-analysis");
   el.progressPauseBtn.setAttribute("aria-pressed", paused ? "true" : "false");
   el.progressPauseBtn.setAttribute("aria-label", label);
   el.progressPauseBtn.setAttribute("title", label);
@@ -251,7 +253,10 @@ export function handleJobEvent(ctx, payload) {
         source: "analysis",
         code: "analyze.track_failed",
         eventLog: {
-          text: `Track analysis failed: ${trackLabel} - ${payload.errorMessage || "unknown analysis error"}`,
+          text: t("ui-job-track-analysis-failed", {
+            track: trackLabel,
+            error: payload.errorMessage || t("ui-job-track-analysis-failed-unknown"),
+          }),
           details,
           coalesceKey: `analysis.track_failed.${String(payload.trackId)}`
         }
@@ -339,7 +344,7 @@ export function handleJobEvent(ctx, payload) {
       job.message = message;
     }
     if (ownsProgressBar) {
-      setProgress(ctx, true, percent, message || "Working...");
+      setProgress(ctx, true, percent, message || t("ui-job-working"));
     }
     if (status) {
       emitMessage({
@@ -354,7 +359,7 @@ export function handleJobEvent(ctx, payload) {
 
   if (eventName === "job.completed") {
     if (ownsProgressBar) {
-      setProgress(ctx, true, 100, message || "Done");
+      setProgress(ctx, true, 100, message || t("ui-job-done"));
     }
     if (status) {
       emitMessage({
@@ -365,7 +370,7 @@ export function handleJobEvent(ctx, payload) {
       });
     }
     if (jobType === "analysis") {
-      logWarnings("analysis", payload.warnings || [], "Analysis");
+      logWarnings("analysis", payload.warnings || [], t("ui-job-analysis-context"));
       if (payload.logMessage) {
         pushEventLog({ level: "info", source: "analysis", code: "analysis.batch_done", message: payload.logMessage });
       }
@@ -379,7 +384,7 @@ export function handleJobEvent(ctx, payload) {
 
   if (eventName === "job.failed") {
     if (ownsProgressBar) {
-      setProgress(ctx, true, 100, message || "Failed");
+      setProgress(ctx, true, 100, message || t("ui-job-failed"));
     }
     // No Event Log entry: every job fails through a failed command, and the
     // backend logs each failed command's reason once (ApiResponse::failure).
@@ -402,7 +407,7 @@ function showJobOnProgressBar(ctx, jobId) {
   const job = state.runningJobs.get(jobId);
   state.activeJobId = jobId;
   state.activeJobType = job.jobType;
-  setProgress(ctx, true, job.percent, job.message || "Working...");
+  setProgress(ctx, true, job.percent, job.message || t("ui-job-working"));
   stopProgressHeartbeat(ctx);
   startProgressHeartbeat(ctx);
   state.progressStartedAtMs = job.startedAtMs;

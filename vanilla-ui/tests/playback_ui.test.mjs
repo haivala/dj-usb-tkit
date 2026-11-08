@@ -71,7 +71,7 @@ test("stopPlaybackFromUi clears playback state and updates UI", async () => {
     playbackPath: "/music/t1.mp3",
     playbackRowKey: "row:1",
     activeWaveform: {},
-    playbackLabelContext: { sourceLabel: "Library", title: "Artist - Track" }
+    playbackStatusText: "Playing from Library: Artist - Track"
   };
   const calls = [];
 
@@ -86,9 +86,9 @@ test("stopPlaybackFromUi clears playback state and updates UI", async () => {
   assert.equal(state.playbackActive, false);
   assert.equal(state.playbackTrackId, null);
   assert.equal(state.playbackStopPromise, null);
-  // A stale label context must not survive a stop -- a later stray
+  // A stale status line must not survive a stop -- a later stray
   // playback.started would otherwise reprint a label for a track that ended.
-  assert.equal(state.playbackLabelContext, null);
+  assert.equal(state.playbackStatusText, null);
 });
 
 // A waveform element that records each playhead position it's given.

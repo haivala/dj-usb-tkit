@@ -3,6 +3,7 @@
 import { scrubRatioFromPointer } from "../playback/actions.mjs";
 import { HOTCUE_PALETTE } from "./actions.mjs";
 import { cloneTemplate } from "../../ui_utils.mjs";
+import { t } from "../../ui_texts.mjs";
 
 export function bindTrackDetailEvents(ctx) {
   const { el, trackDetailDialog } = ctx;
@@ -141,7 +142,7 @@ export function bindTrackDetailEvents(ctx) {
       .catch(() => {});
   };
   // Adding a hot cue failed: all 8 pads are taken.
-  const emitCueBlocked = () => ctx.emitStatus("Maximum 8 cue points.");
+  const emitCueBlocked = () => ctx.emitStatus(t("ui-track-detail-max-cues"));
   const playFromCue = (cue) => {
     const dur = trackDetailDialog.getWorking().durationMs;
     if (cue && dur) playFromRatio(cue.positionMs / dur);
@@ -419,7 +420,7 @@ export function bindTrackDetailEvents(ctx) {
   el.trackDetailAddCue.addEventListener("click", (event) => addCueAtPlayhead(event.shiftKey));
   const addMemoryCueAtPlayhead = (free) => {
     if (!trackDetailDialog.addMemoryCue(undefined, { free })) {
-      ctx.emitStatus("A cue is already there.");
+      ctx.emitStatus(t("ui-track-detail-cue-already-there"));
     }
   };
 
@@ -553,7 +554,7 @@ export function bindTrackDetailEvents(ctx) {
     const path = trackDetailDialog.getWorking().track?.filePath;
     if (!path) return;
     ctx.invoke("reveal_track_file", { path }).catch((err) => {
-      ctx.emitStatus(`Could not show the file: ${err?.message || err}`, { level: "error" });
+      ctx.emitStatus(t("ui-track-detail-reveal-failed", { error: err?.message || err }), { level: "error" });
     });
   });
   el.trackDetailRating.addEventListener("click", (event) => {

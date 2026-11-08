@@ -254,9 +254,11 @@
             const ids = r.trackIds || [];
             const items = r.playlistIds.map((id) => addToPlaylist(id, ids));
             const sum = (key) => items.reduce((total, item) => total + item[key], 0);
+            const names = r.playlistIds.map((id) => playlists.find((p) => p.id === id)?.name).join(", ");
             return ok({
               requested: ids.length, resolved: ids.length, unresolved: 0,
               added: sum("added"), skipped: sum("skipped"), items, resolutions: [],
+              statusText: `Added ${sum("added")} tracks (skipped ${sum("skipped")}) to ${names}`,
             });
           }
           case "get_playlist_membership": {
@@ -265,7 +267,8 @@
               const held = playlists.find((p) => p.id === id).tracks.map((t) => t.id);
               const contained = ids.filter((trackId) => held.includes(trackId)).length;
               const state = contained === 0 ? "none" : contained >= ids.length ? "all" : "some";
-              return { playlistId: id, name, contained, state };
+              const noteText = { none: "", all: "Already in", some: `${contained} of ${ids.length} in` }[state];
+              return { playlistId: id, name, contained, state, noteText };
             });
             return ok({ selected: ids.length, items });
           }
@@ -308,7 +311,7 @@
             return ok({
               updateAvailable: false, severity: "none", currentVersion: DOC_APP_VERSION, latestVersion: DOC_APP_VERSION,
               releaseUrl: "", installKind: "appimage", downloadUrl: null, canSelfUpdate: false, action: "none",
-              checkFailed: false,
+              checkFailed: false, statusText: "Up to date.", bannerText: "",
             });
           case "get_ui_texts":
             return uiTexts;

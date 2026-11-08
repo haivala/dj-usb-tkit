@@ -1,5 +1,6 @@
 import { transportIcon } from "../../track_table.mjs";
 import { isTransportButtonPlaying } from "../../playback_ui_state.mjs";
+import { t } from "../../ui_texts.mjs";
 
 export function toPlayableUrl(ctx, path) {
   const raw = String(path || "").trim();
@@ -16,8 +17,9 @@ export function updateTransportButtonsInDom(ctx, root = ctx.document) {
   root.querySelectorAll(".transport-btn").forEach((btn) => {
     const isPlaying = isTransportButtonPlaying(state, { rowKey: btn.dataset.rowKey, trackId: btn.dataset.id });
     btn.classList.toggle("is-playing", isPlaying);
-    btn.setAttribute("aria-label", isPlaying ? "Stop" : "Play");
-    btn.dataset.tooltip = isPlaying ? "Stop" : "Play";
+    const label = t(isPlaying ? "ui-track-row-stop" : "ui-track-row-play");
+    btn.setAttribute("aria-label", label);
+    btn.dataset.tooltip = label;
     btn.replaceChildren(transportIcon(btn.ownerDocument, isPlaying));
   });
 }
@@ -119,7 +121,7 @@ function resetPlaybackState(ctx) {
   state.playbackPath = null;
   state.playbackRowKey = null;
   state.activeWaveform = null;
-  state.playbackLabelContext = null;
+  state.playbackStatusText = null;
   stopPlayheadInterpolation(ctx);
   clearAllWaveformPlayheads(ctx);
 }
@@ -141,7 +143,7 @@ export function applyPauseStatus(ctx, status) {
     if (waveformEl) {
       setWaveformPlayhead(waveformEl, duration > 0 ? position / duration : 0, false, true);
     }
-    emitStatus("Paused");
+    emitStatus(t("ui-playback-paused"));
   } else {
     if (waveformEl && duration > 0) {
       startPlayheadInterpolation(ctx, {
@@ -150,10 +152,7 @@ export function applyPauseStatus(ctx, status) {
         durationMs: duration,
       });
     }
-    if (state.playbackLabelContext) {
-      const { sourceLabel, title } = state.playbackLabelContext;
-      emitStatus(`Playing from ${sourceLabel}: ${title}`);
-    }
+    if (state.playbackStatusText) emitStatus(state.playbackStatusText);
   }
   updateTransportButtonsInDom(ctx);
 }
@@ -217,7 +216,7 @@ async function stopPlayback(ctx, { fromUi }) {
   const { state, emitStatus } = ctx;
   if (state.playbackStopPromise) return state.playbackStopPromise;
   if (!state.playbackActive && state.playbackPendingKind !== "play") {
-    if (fromUi) emitStatus("Idle");
+    if (fromUi) emitStatus(t("ui-header-status"));
     return;
   }
   const generation = beginPlaybackIntent(state, "stop");
@@ -234,7 +233,7 @@ async function stopPlayback(ctx, { fromUi }) {
       clearPlaybackIntentIfCurrent(state, generation);
     }
     updateTransportButtonsInDom(ctx);
-    emitStatus("Idle");
+    emitStatus(t("ui-header-status"));
   });
   try {
     await state.playbackStopPromise;
@@ -316,9 +315,6 @@ async function playResolvedTrack(ctx, track, origin, options, generation) {
   const { state, emitStatus } = ctx;
   const trackPath = String(track?.filePath || "").trim();
   const originLower = String(origin || "").toLowerCase();
-  const artist = String(track?.artist || "").trim();
-  const titlePart = track?.title || "Unknown Title";
-  const title = artist ? `${artist} - ${titlePart}` : titlePart;
   const startRatio = Math.max(0, Math.min(1, Number(options.startRatio) || 0));
   const rawStartOffsetMs = toNumberOrNull(options.startOffsetMs);
   const startOffsetMs = rawStartOffsetMs === null ? null : Math.max(0, Math.round(rawStartOffsetMs));
@@ -362,19 +358,18 @@ async function playResolvedTrack(ctx, track, origin, options, generation) {
           setWaveformPlayhead(waveformEl, startRatio, true);
         }
       }
-      // Backend-owned: `play_resolved_track` always returns the resolved
-      // `sourceLabel` (see backend playback_source_label / mod.rs). Stash the
-      // string so later playback events re-use it verbatim rather than
+      // Backend-owned: `play_resolved_track` answers with the status line
+      // (`playingText`, naming where it resolved the track to play from).
+      // Stashed so later playback events re-use it verbatim rather than
       // re-deriving a label the frontend can't always reproduce.
-      const sourceLabel = playback?.sourceLabel || "";
       state.playbackActive = true;
       state.playbackPaused = !!playback?.paused;
       state.playbackTrackId = playback?.trackId || track?.id || null;
       state.playbackPath = playback?.path || trackPath;
       state.playbackRowKey = options.rowKey || null;
-      state.playbackLabelContext = { sourceLabel, title };
+      state.playbackStatusText = playback?.playingText || null;
       updateTransportButtonsInDom(ctx);
-      emitStatus(playback?.paused ? "Paused" : `Playing from ${sourceLabel}: ${title}`);
+      emitStatus(playback?.paused ? t("ui-playback-paused") : playback?.playingText || "");
     } catch (err) {
       if (!isGenerationCurrent(state, generation)) return;
       const message = err?.message || String(err);
@@ -382,10 +377,10 @@ async function playResolvedTrack(ctx, track, origin, options, generation) {
       // track to a playable path in the Library or the selected USB -- an
       // expected, soft outcome, not a failure.
       if (err?.code === "NOT_FOUND") {
-        emitStatus("Cannot play: track not found in Library or selected USB.", { level: "warn", source: "playback" });
+        emitStatus(t("ui-playback-not-found"), { level: "warn", source: "playback" });
         return;
       }
-      emitStatus(`Playback failed: ${message}`, { level: "error", source: "playback" });
+      emitStatus(t("ui-playback-failed", { error: message }), { level: "error", source: "playback" });
     }
   });
 }
@@ -471,10 +466,7 @@ export function handlePlaybackEvent(ctx, payload) {
     // one-shot string frozen at play-dispatch time -- reuse the backend-owned
     // label playTrackFromOrigin stashed, verbatim, so later events (e.g. a
     // seek) keep it accurate without re-deriving it here.
-    if (playing && state.playbackLabelContext) {
-      const { sourceLabel, title } = state.playbackLabelContext;
-      emitStatus(`Playing from ${sourceLabel}: ${title}`);
-    }
+    if (playing && state.playbackStatusText) emitStatus(state.playbackStatusText);
     return;
   }
 
@@ -493,12 +485,12 @@ export function handlePlaybackEvent(ctx, payload) {
     if (path !== null && path !== state.playbackPath) return;
     resetPlaybackState(ctx);
     updateTransportButtonsInDom(ctx);
-    emitStatus("Idle");
+    emitStatus(t("ui-header-status"));
     return;
   }
 
   if (eventName === "playback.error") {
-    const message = payload.message ? String(payload.message) : "Playback failed";
+    const message = payload.message ? String(payload.message) : t("ui-playback-failed-no-message");
     emitStatus(message);
   }
 }

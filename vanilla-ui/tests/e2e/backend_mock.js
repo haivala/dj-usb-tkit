@@ -103,7 +103,7 @@
         durationMs: 1,
         statusText: "mock diagnostics status",
         durationText: "mock duration",
-        statusLabel: "PASS",
+        statusLabel: "PASS", healthText: "USB health: good",
         playlistUsbExportStatus: [],
         ...overrides
       };

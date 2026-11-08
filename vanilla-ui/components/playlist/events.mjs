@@ -1,4 +1,4 @@
-import { counted } from "../../track_utils.mjs";
+import { t } from "../../ui_texts.mjs";
 import { catchErr, handleTrackAction, resolveRowActionTrack } from "../shared/track_actions.mjs";
 import { bindTrackSelection, clearTrackSelection } from "../shared/track_selection.mjs";
 import { addSelectionToPlaylists } from "../shared/add_to_playlists.mjs";
@@ -125,10 +125,10 @@ export function bindPlaylistEvents(ctx) {
       state.currentPlaylistId = playlist.id;
       updateModeText();
       await switchView(playlist.id);
-      emitStatus(`Removed ${counted(res.removed || 0, "track")} from ${playlist.name}`);
+      emitStatus(res.statusText);
     } catch (err) {
       console.error(err);
-      emitStatus(`Remove failed: ${err.message || err}`);
+      emitStatus(t("ui-playlist-remove-failed", { error: err.message || err }));
     }
   };
 
@@ -187,7 +187,7 @@ export function bindPlaylistEvents(ctx) {
     if (!playlist) return;
     exportPlaylistToUsb(playlist.id).catch((error) => {
       console.error(error);
-      emitStatus(`Export failed: ${error?.message || String(error || "unknown error")}`);
+      emitStatus(t("ui-playlist-export-failed", { error: error?.message || String(error || t("ui-playlist-export-failed-unknown")) }));
     });
   });
 
@@ -199,7 +199,7 @@ export function bindPlaylistEvents(ctx) {
     // need to force-load every page here or resolve ids client-side.
     analyzeTrackIds([], { playlistId: playlist.id }).catch((err) => {
       console.error(err);
-      emitStatus(`Analyze failed: ${err.message || err}`);
+      emitStatus(t("ui-playlist-analyze-failed", { error: err.message || err }));
     });
   });
 
@@ -228,7 +228,7 @@ export function bindPlaylistEvents(ctx) {
     dragSortCommit = (dragPlaylist && isPlaylistSortActive())
       ? Promise.resolve(commitActivePlaylistSort(dragPlaylist.id)).catch((err) => {
           console.error(err);
-          emitStatus(`Save track order failed: ${err.message || err}`);
+          emitStatus(t("ui-playlist-track-order-failed", { error: err.message || err }));
         })
       : null;
     row.classList.add("dragging");
@@ -296,7 +296,7 @@ export function bindPlaylistEvents(ctx) {
       ? (nextRow.dataset.trackId || playlistTracksCtl.view[Number(nextRow.dataset.trackIndex)]?.id || null)
       : null;
     if (nextRow && !beforeTrackId) {
-      emitStatus("Track order not saved: the list was still loading. Try again.");
+      emitStatus(t("ui-playlist-track-order-still-loading"));
       refreshCurrentPlaylistTracks().catch((e) => console.error(e));
       return;
     }
@@ -314,7 +314,7 @@ export function bindPlaylistEvents(ctx) {
         await loadPlaylists();
       } catch (err) {
         console.error(err);
-        emitStatus(`Save track order failed: ${err.message || err}`);
+        emitStatus(t("ui-playlist-track-order-failed", { error: err.message || err }));
       } finally {
         refreshCurrentPlaylistTracks().catch((e) => console.error(e));
       }

@@ -14,7 +14,7 @@
 
 import { catchErr } from "./track_actions.mjs";
 import { formatDurationMs } from "../../track_utils.mjs";
-import { tCount } from "../../ui_texts.mjs";
+import { t, tCount } from "../../ui_texts.mjs";
 
 export function trackSelection(ctx, view) {
   return ctx.state.trackSelections[view];
@@ -47,7 +47,7 @@ export function renderSelectionBar(ctx, view) {
     const playlist = ctx.getCurrentPlaylist();
     add.hidden = !playlist;
     add.querySelector(".selection-target").textContent = playlist?.name || "";
-    add.dataset.tooltip = playlist ? `Add the selected tracks to ${playlist.name}` : "";
+    add.dataset.tooltip = playlist ? t("ui-selection-bar-add-tooltip", { playlist: playlist.name }) : "";
   }
   const box = selectAllBoxOf(ctx, view);
   if (box) {
@@ -89,7 +89,7 @@ function renderSelectionTime(ctx, view, bar, ids) {
       if (target.dataset.request !== key || !data?.totalDurationMs) return;
       const unknown = data.durationUnknownCount;
       target.textContent = `· ${formatDurationMs(data.totalDurationMs)}${unknown ? "+" : ""}`;
-      if (unknown) target.dataset.tooltip = `${unknown} of the selected tracks have no length yet`;
+      if (unknown) target.dataset.tooltip = data.durationUnknownText;
     })
     .catch(() => {});
 }
@@ -167,8 +167,8 @@ export function bindTrackSelection(ctx, { view, body, ctl, selectAll, actions })
       return;
     }
     (async () => {
-      const all = await ctx.withProgress("Selecting all matching tracks", async (progress) => {
-        progress(40, "Enumerating tracks...");
+      const all = await ctx.withProgress(t("ui-selection-bar-selecting-all"), async (progress) => {
+        progress(40, t("ui-selection-bar-enumerating"));
         return selectAll();
       });
       if (!box.checked) return;

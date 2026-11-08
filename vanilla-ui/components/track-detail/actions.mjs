@@ -19,7 +19,8 @@ import { RELEASE_DATE_PATTERN, saveLibraryMetadataEdits, saveUsbMetadataEdits } 
 import { cloneTemplate } from "../../ui_utils.mjs";
 import { coverElement, markLastEditedRow } from "../../track_table.mjs";
 import { coverUrl, attachCoverFallbackHandlers } from "../library/actions.mjs";
-import { counted, formatBpm } from "../../track_utils.mjs";
+import { formatBpm } from "../../track_utils.mjs";
+import { t } from "../../ui_texts.mjs";
 import {
   STORAGE_KEY_CUE_START_ON_FIRST_BEAT,
   FRONTEND_DB_KEY_CUE_START_ON_FIRST_BEAT,
@@ -75,10 +76,6 @@ export const HOTCUE_PALETTE = [
   { id: 7, css: "#2A5BD8" },
   { id: 8, css: "#8A3FD1" },
 ];
-const START_BEAT_TOOLTIP =
-  "Adds a ▶ memory cue (no hot cue) on the first beat, so the CDJ loads there instead of on cue A";
-const START_MARKER_TOOLTIP =
-  "The CDJ loads on the ▶ start marker you placed; drag it on the waveform to move it";
 
 export function colorCssForId(colorId) {
   return HOTCUE_PALETTE.find((c) => c.id === colorId)?.css || "#8892a0";
@@ -673,9 +670,9 @@ export function createTrackDetailController(el, prefs = {}) {
       marker.dataset.tempId = cue.tempId;
       marker.textContent = labels.get(cue.tempId) || "";
       if (cue.playbackStart) {
-        marker.dataset.tooltip = `Playback start · ${formatMs(cue.positionMs)}`;
+        marker.dataset.tooltip = `${t("ui-track-detail-playback-start")} · ${formatMs(cue.positionMs)}`;
       } else if (cue.memory) {
-        marker.dataset.tooltip = ["Memory cue", cue.name, formatMs(cue.positionMs)]
+        marker.dataset.tooltip = [t("ui-track-detail-memory-cue"), cue.name, formatMs(cue.positionMs)]
           .filter(Boolean)
           .join(" · ");
       } else {
@@ -747,7 +744,7 @@ export function createTrackDetailController(el, prefs = {}) {
     const playing = isPlaying();
     if (playing === playPauseShowsPlaying) return;
     playPauseShowsPlaying = playing;
-    const label = playing ? "Pause" : "Play";
+    const label = t(playing ? "ui-track-detail-pause" : "ui-track-detail-play-pause");
     btn.classList.toggle("is-playing", playing);
     btn.setAttribute("aria-label", label);
     btn.dataset.tooltip = label;
@@ -833,7 +830,7 @@ export function createTrackDetailController(el, prefs = {}) {
     const swatch = row.querySelector(".cue-row-color");
     swatch.style.background = colorCssForId(cue.colorId);
     swatch.textContent = letter;
-    swatch.setAttribute("aria-label", `Cue ${letter} colour`);
+    swatch.setAttribute("aria-label", t("ui-track-detail-cue-colour-aria-label", { cue: letter }));
     row.querySelector(".cue-row-name").value = cue.name || "";
     return row;
   }
@@ -882,8 +879,8 @@ export function createTrackDetailController(el, prefs = {}) {
     cueBtn.disabled = beatBtn.disabled = !hasCues;
     cueBtn.setAttribute("aria-checked", String(hasCues && !start));
     beatBtn.setAttribute("aria-checked", String(hasCues && !!start));
-    beatBtn.textContent = moved ? "Start marker" : "First beat";
-    beatBtn.dataset.tooltip = moved ? START_MARKER_TOOLTIP : START_BEAT_TOOLTIP;
+    beatBtn.textContent = t(moved ? "ui-track-detail-start-marker" : "ui-track-detail-first-beat");
+    beatBtn.dataset.tooltip = t(moved ? "ui-track-detail-start-marker-tooltip" : "ui-track-detail-start-first-beat-tooltip");
     el.trackDetailStartNote.hidden = hasCues;
   }
 
@@ -907,7 +904,7 @@ export function createTrackDetailController(el, prefs = {}) {
     out.hidden = false;
     out.textContent = zoomed
       ? `${formatClock(Math.max(0, working.view.startMs))}–${formatClock(Math.min(dur, working.view.endMs))}`
-      : "Whole track";
+      : t("ui-track-detail-whole-track");
   }
 
   function renderView() {
@@ -1577,11 +1574,11 @@ export function createTrackDetailController(el, prefs = {}) {
       const openSpan = defaultViewSpanMs(working.bpm);
       applyView(0, Math.min(openSpan, working.durationMs || openSpan));
 
-      const t = working.track;
-      el.trackDetailTitle.textContent = t.title || "Track";
-      el.trackDetailSubtitle.textContent = [t.artist, t.album].filter(Boolean).join(" · ");
-      el.trackDetailRevealBtn.hidden = !t.filePath;
-      el.trackDetailRevealBtn.dataset.tooltip = `Show in folder: ${t.filePath || ""}`;
+      const shown = working.track;
+      el.trackDetailTitle.textContent = shown.title || "";
+      el.trackDetailSubtitle.textContent = [shown.artist, shown.album].filter(Boolean).join(" · ");
+      el.trackDetailRevealBtn.hidden = !shown.filePath;
+      el.trackDetailRevealBtn.dataset.tooltip = t("ui-track-detail-reveal-tooltip", { path: shown.filePath || "" });
       el.trackDetailCover.replaceChildren(coverElement(el.trackDetailCover.ownerDocument, coverSrc));
       attachCoverFallbackHandlers(el.trackDetailCover);
       el.trackDetailView.hidden = false;
@@ -1727,12 +1724,12 @@ async function openUsbTrackDetail(ctx, track, { rowKey = null } = {}) {
   const { command, trackDetailDialog, emitStatus, state } = ctx;
 
   if (!state?.usbRootValid || !state?.usbRoot) {
-    emitStatus("Connect the USB this track is on before editing its cues.");
+    emitStatus(t("ui-track-detail-connect-usb-first"));
     return;
   }
   const usbAnalysisPathRaw = track.usbAnalysisPathRaw;
   if (!usbAnalysisPathRaw) {
-    emitStatus("Analyze this track first to edit its cues.");
+    emitStatus(t("ui-track-detail-analyze-first"));
     return;
   }
 
@@ -1744,11 +1741,11 @@ async function openUsbTrackDetail(ctx, track, { rowKey = null } = {}) {
       usbMediaPathRaw: track.usbMediaPath || null,
     });
   } catch (err) {
-    emitStatus(`Could not open cue editor: ${err.message}`);
+    emitStatus(t("ui-track-detail-open-failed", { error: err.message }));
     return;
   }
   if (!detail.detailWaveform) {
-    emitStatus("Analyze this track first to edit its cues.");
+    emitStatus(t("ui-track-detail-analyze-first"));
     return;
   }
 
@@ -1772,7 +1769,7 @@ async function openUsbTrackDetail(ctx, track, { rowKey = null } = {}) {
   // Another USB job (an export, diagnostics, another save) writes the same
   // databases on the stick: wait for it instead of dropping the edits.
   if (isUsbRootChangeBlocked(state)) {
-    emitStatus("Waiting for the running USB job to finish before saving cues...");
+    emitStatus(t("ui-track-detail-waiting-for-usb-job"));
     await ctx.waitForUsbJobIdle();
   }
 
@@ -1783,10 +1780,10 @@ async function openUsbTrackDetail(ctx, track, { rowKey = null } = {}) {
   }
   if (metadataEdited) {
     try {
-      await saveUsbMetadataEdits(ctx, [track], payload.metadataEdits);
-      if (!payload.analysisEdited) emitStatus("Saved track details to USB");
+      const saved = await saveUsbMetadataEdits(ctx, [track], payload.metadataEdits);
+      if (!payload.analysisEdited) emitStatus(saved.statusText);
     } catch (err) {
-      emitStatus(`Could not save track details: ${err.message}`);
+      emitStatus(t("ui-group-edit-save-failed", { error: err.message }));
     }
   }
 }
@@ -1806,8 +1803,7 @@ async function saveUsbAnalysisEdits(ctx, track, usbAnalysisPathRaw, payload) {
       cues: payload.cuesEdited ? payload.cues : null,
       localTrackId: track.localTrackId || null,
     });
-    const n = saved.cues.length;
-    emitStatus(`Saved ${counted(n, "cue")} to USB`);
+    emitStatus(saved.statusText);
     // Every loaded USB row of this file, and the library track the backend
     // also wrote (it resolves that one itself), with the app playlists
     // holding it.
@@ -1815,7 +1811,7 @@ async function saveUsbAnalysisEdits(ctx, track, usbAnalysisPathRaw, payload) {
     ctx.showTrackRow(saved.localTrack);
     return true;
   } catch (err) {
-    emitStatus(`Could not save cues: ${err.message}`);
+    emitStatus(t("ui-track-detail-save-cues-failed", { error: err.message }));
     return false;
   }
 }
@@ -1836,7 +1832,7 @@ export async function openTrackDetail(ctx, track, opts = {}) {
     localId = null;
   }
   if (!localId) {
-    emitStatus("Analyze this track first to edit its cues.");
+    emitStatus(t("ui-track-detail-analyze-first"));
     return;
   }
 
@@ -1844,11 +1840,11 @@ export async function openTrackDetail(ctx, track, opts = {}) {
   try {
     detail = await command("get_track_detail", { trackId: localId });
   } catch (err) {
-    emitStatus(`Could not open cue editor: ${err.message}`);
+    emitStatus(t("ui-track-detail-open-failed", { error: err.message }));
     return;
   }
   if (!detail.detailWaveform) {
-    emitStatus("Analyze this track first to edit its cues.");
+    emitStatus(t("ui-track-detail-analyze-first"));
     return;
   }
 
@@ -1876,10 +1872,10 @@ export async function openTrackDetail(ctx, track, opts = {}) {
   }
   if (metadataEdited) {
     try {
-      await saveLibraryMetadataEdits(ctx, [localId], payload.metadataEdits);
-      if (!payload.analysisEdited) emitStatus("Saved track details");
+      const saved = await saveLibraryMetadataEdits(ctx, [localId], payload.metadataEdits);
+      if (!payload.analysisEdited) emitStatus(saved.statusText);
     } catch (err) {
-      emitStatus(`Could not save track details: ${err.message}`);
+      emitStatus(t("ui-group-edit-save-failed", { error: err.message }));
     }
   }
 }
@@ -1895,14 +1891,11 @@ async function saveLocalAnalysisEdits(ctx, localId, payload) {
       key: payload.key,
       cues: payload.cues,
     });
-    emitStatus(
-      `Saved ${counted(saved.cues.length, "cue")}` +
-        (saved.anlzRegenerated ? "" : " (analysis cache not updated yet)")
-    );
+    emitStatus(saved.statusText);
     ctx.showTrackRow(saved.track);
     return true;
   } catch (err) {
-    emitStatus(`Could not save cues: ${err.message}`);
+    emitStatus(t("ui-track-detail-save-cues-failed", { error: err.message }));
     return false;
   }
 }

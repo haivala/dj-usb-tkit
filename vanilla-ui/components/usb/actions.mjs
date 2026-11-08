@@ -122,7 +122,7 @@ export function renderDiagnosticsReport(ctx, data) {
   el.usbDiagnosticsCard.classList.remove("hidden");
   showDiagReportView(ctx);
   el.previewRepairsBtn.disabled = false;
-  ctx.updateUsbHealthDot(data.overallStatus);
+  ctx.updateUsbHealthDot(data.overallStatus, data.healthText);
 
   el.usbHealthCard.classList.remove("is-loading");
   if (data.overallStatus !== "PASS") el.usbHealthCard.open = true;

@@ -1,5 +1,6 @@
 import test from "node:test";
 import assert from "node:assert/strict";
+import "./test_helpers.mjs";
 import { handlePlaybackEvent } from "../components/playback/actions.mjs";
 
 function fakeRaf() {
@@ -168,7 +169,7 @@ test("handlePlaybackEvent reuses the backend source label verbatim on a seek", (
     playbackTrackId: "id-1",
     playbackRowKey: "row-1",
     activeWaveform: null,
-    playbackLabelContext: { sourceLabel: "Library", title: "Artist - Track" }
+    playbackStatusText: "Playing from Library: Artist - Track"
   };
   const { calls, deps } = eventDeps();
   handlePlaybackEvent({ state, ...deps }, started("/music/a.mp3", { event: "playback.seeked" }));

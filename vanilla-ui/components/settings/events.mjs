@@ -1,6 +1,7 @@
 import { openExternalUrl, cloneTemplate } from "../../ui_utils.mjs";
 import { normalizeAnalysisBpmRange } from "../library/actions.mjs";
 import { refreshUpdateCheck } from "../../update_check.mjs";
+import { t } from "../../ui_texts.mjs";
 import {
   STORAGE_KEY_HELP_SEEN,
   FRONTEND_DB_KEY_HELP_SEEN,
@@ -40,18 +41,18 @@ export function renderEssentiaInstallRow(ctx) {
       .addEventListener("click", (e) => { e.preventDefault(); openExternalUrl(ctx.window, NODE_JS_URL); });
     el.essentiaNodeStatus.replaceChildren(...missing.childNodes);
   } else if (essentiaInstalled) {
-    el.essentiaNodeStatus.textContent = "✓ Essentia ready";
+    el.essentiaNodeStatus.textContent = t("ui-settings-essentia-ready");
     el.essentiaNodeStatus.classList.add("essentia-ready");
     el.essentiaNodeStatus.classList.remove("essentia-warn");
   } else if (essentiaDownloading) {
-    el.essentiaNodeStatus.textContent = "Downloading...";
+    el.essentiaNodeStatus.textContent = t("ui-settings-essentia-downloading");
     el.essentiaNodeStatus.classList.remove("essentia-ready", "essentia-warn");
   } else if (essentiaDownloadError) {
-    el.essentiaNodeStatus.textContent = `Download failed: ${essentiaDownloadError}`;
+    el.essentiaNodeStatus.textContent = t("ui-settings-essentia-download-failed", { error: essentiaDownloadError });
     el.essentiaNodeStatus.classList.add("essentia-warn");
     el.essentiaNodeStatus.classList.remove("essentia-ready");
   } else {
-    el.essentiaNodeStatus.textContent = "Essentia files not installed";
+    el.essentiaNodeStatus.textContent = t("ui-settings-essentia-not-installed");
     el.essentiaNodeStatus.classList.remove("essentia-ready", "essentia-warn");
   }
 
@@ -87,7 +88,7 @@ export function bindSettingsEvents(ctx) {
     el.settingsBackdrop.classList.remove("hidden");
     loadTranscodeFolder(ctx).catch(catchTranscodeFolderError);
   });
-  const catchTranscodeFolderError = (err) => ctx.emitStatus(`Transcode folder: ${err?.message || err}`);
+  const catchTranscodeFolderError = (err) => ctx.emitStatus(t("ui-settings-transcode-folder-failed", { error: err?.message || err }));
   el.transcodeFolderChangeBtn.addEventListener("click", () => {
     (async () => {
       const picked = await ctx.invoke("pick_transcode_folder");
@@ -186,10 +187,8 @@ export function bindSettingsEvents(ctx) {
 
     emitStatus(
       willLock
-        ? `Export sync mode: additive — "${openPlaylist.name}" already exists on USB, so its track order is locked here (${sortSaveFailed ? "couldn't save the current sort first" : "current order kept"}).`
-        : state.exportPruneStale
-          ? "Export sync mode: mirror (exact match)"
-          : "Export sync mode: additive"
+        ? t(sortSaveFailed ? "ui-settings-sync-mode-additive-locked-sort-failed" : "ui-settings-sync-mode-additive-locked", { playlist: openPlaylist.name })
+        : t(state.exportPruneStale ? "ui-settings-sync-mode-mirror-saved" : "ui-settings-sync-mode-additive-saved")
     );
   });
 
@@ -200,7 +199,7 @@ export function bindSettingsEvents(ctx) {
       FRONTEND_DB_KEY_EXPORT_BACKUP,
       state.exportBackup ? "1" : "0"
     );
-    emitStatus(state.exportBackup ? "Export backup: enabled" : "Export backup: disabled");
+    emitStatus(t(state.exportBackup ? "ui-settings-export-backup-enabled" : "ui-settings-export-backup-disabled"));
   });
 
   el.exportEngineLibraryCheckbox.addEventListener("change", (event) => {
@@ -211,7 +210,7 @@ export function bindSettingsEvents(ctx) {
       state.exportEngineLibrary ? "1" : "0"
     );
     emitStatus(
-      state.exportEngineLibrary ? "Engine DJ library on export: enabled" : "Engine DJ library on export: disabled"
+      t(state.exportEngineLibrary ? "ui-settings-engine-library-enabled" : "ui-settings-engine-library-disabled")
     );
   });
 
@@ -223,7 +222,7 @@ export function bindSettingsEvents(ctx) {
       el.backupRetentionCountInput.value = String(count);
     }
     persistSetting(STORAGE_KEY_BACKUP_RETENTION_COUNT, FRONTEND_DB_KEY_BACKUP_RETENTION_COUNT, String(count));
-    emitStatus(`Backups to keep per file: ${count}`);
+    emitStatus(t("ui-settings-backup-retention-saved", { value: count }));
   });
 
   el.analysisBpmRangeSelect.addEventListener("change", (event) => {
@@ -233,7 +232,7 @@ export function bindSettingsEvents(ctx) {
       el.analysisBpmRangeSelect.value = selected;
     }
     persistSetting(STORAGE_KEY_ANALYSIS_BPM_RANGE, FRONTEND_DB_KEY_ANALYSIS_BPM_RANGE, selected);
-    emitStatus(`Analysis BPM range: ${selected}`);
+    emitStatus(t("ui-settings-bpm-range-saved", { range: selected }));
   });
 
   // Display only -- the backend renders every key label in this notation, so
@@ -244,7 +243,7 @@ export function bindSettingsEvents(ctx) {
     try {
       await persistSetting(STORAGE_KEY_KEY_NOTATION, FRONTEND_DB_KEY_KEY_NOTATION, notation);
     } catch {
-      emitStatus("Could not save key notation");
+      emitStatus(t("ui-settings-key-notation-failed"));
       return;
     }
     try {
@@ -252,7 +251,7 @@ export function bindSettingsEvents(ctx) {
     } catch (err) {
       console.error(err);
     }
-    emitStatus(`Key notation: ${notation === "camelot" ? "Camelot (8A)" : "Classic (Am)"}`);
+    emitStatus(t("ui-settings-key-notation-saved", { notation: t(notation === "camelot" ? "ui-settings-key-notation-camelot" : "ui-settings-key-notation-classic") }));
   });
 
   el.analysisEngineSelect.addEventListener("change", (event) => {
@@ -261,7 +260,7 @@ export function bindSettingsEvents(ctx) {
     if (engine !== "essentia" && state.essentiaDownloading) {
       command("cancel_essentia_download").catch(() => {});
       state.essentiaDownloading = false;
-      setProgress(false, 0, "Idle");
+      setProgress(false, 0, t("ui-job-idle"));
     }
     state.analysisEngine = engine;
     if (el.analysisEngineSelect.value !== engine) {
@@ -277,9 +276,11 @@ export function bindSettingsEvents(ctx) {
       }
     });
     renderEssentiaInstallRow(ctx);
-    const engineLabel = engine === "stratum" ? "Stratum (built-in)" : "Essentia";
-    emitStatus(`Analysis engine: ${engineLabel}`);
-    if (pushEventLog) pushEventLog({ level: "info", source: "settings", message: `Analysis engine changed to ${engineLabel}` });
+    const engineLabel = engine === "stratum" ? t("ui-settings-analysis-engine-stratum") : "Essentia";
+    emitStatus(t("ui-settings-analysis-engine-saved", { engine: engineLabel }));
+    if (pushEventLog) {
+      pushEventLog({ level: "info", source: "settings", message: t("ui-settings-analysis-engine-changed", { engine: engineLabel }) });
+    }
   });
 
   el.essentiaDownloadBtn.addEventListener("click", async () => {
@@ -287,13 +288,13 @@ export function bindSettingsEvents(ctx) {
     state.essentiaDownloading = true;
     state.essentiaDownloadError = null;
     renderEssentiaInstallRow(ctx);
-    setProgress(true, 0, "Downloading Essentia...");
+    setProgress(true, 0, t("ui-settings-essentia-downloading-progress"));
     try {
       await command("download_essentia");
     } catch (err) {
       state.essentiaDownloading = false;
       state.essentiaDownloadError = err?.message || String(err);
-      setProgress(false, 0, "Idle");
+      setProgress(false, 0, t("ui-job-idle"));
       renderEssentiaInstallRow(ctx);
     }
   });
@@ -310,9 +311,9 @@ export function bindSettingsEvents(ctx) {
       el.analysisEngineSelect.value = "stratum";
       persistSetting(STORAGE_KEY_ANALYSIS_ENGINE, FRONTEND_DB_KEY_ANALYSIS_ENGINE, "stratum");
       renderEssentiaInstallRow(ctx);
-      emitStatus("Essentia removed");
+      emitStatus(t("ui-settings-essentia-removed"));
     } catch (err) {
-      emitStatus(`Remove failed: ${err?.message || String(err)}`);
+      emitStatus(t("ui-settings-essentia-remove-failed", { error: err?.message || String(err) }));
     }
   });
 
@@ -327,16 +328,16 @@ export function bindSettingsEvents(ctx) {
           state.essentiaInstalled = true;
           state.essentiaDownloading = false;
           state.essentiaDownloadError = null;
-          setProgress(false, 0, "Idle");
+          setProgress(false, 0, t("ui-job-idle"));
           renderEssentiaInstallRow(ctx);
-          emitStatus("Essentia installed");
+          emitStatus(t("ui-settings-essentia-installed"));
         } else if (payload.error) {
           state.essentiaDownloading = false;
           state.essentiaDownloadError = payload.error;
-          setProgress(false, 0, "Idle");
+          setProgress(false, 0, t("ui-job-idle"));
           renderEssentiaInstallRow(ctx);
         } else if (typeof payload.percent === "number") {
-          setProgress(true, payload.percent, "Downloading Essentia...");
+          setProgress(true, payload.percent, t("ui-settings-essentia-downloading-progress"));
         }
       }).catch(() => {});
     }).catch(() => {});

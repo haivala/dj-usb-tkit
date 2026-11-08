@@ -10,6 +10,7 @@ use serde_json::json;
 use super::usb::UsbTrackSizes;
 use crate::edb::{open_edb_from_usb_root, open_edb_rw};
 use crate::error::{BackendError, BackendResult};
+use crate::i18n::tr;
 use crate::logging::{self, Level};
 use crate::models::{
     ExportToUsbData, ExportToUsbOptions, ExportToUsbRequest, GetPlaylistExportSpaceData,
@@ -992,6 +993,8 @@ pub(crate) fn compute_playlist_usb_export_status(
                 mark_label: marked.map(str::to_string),
                 export_button_text,
                 export_button_title,
+                reorder_lock_tooltip: locks_reorder
+                    .then(|| tr::playlist_reorder_lock_tooltip(&playlist.name).render()),
             }
         })
         .collect()
@@ -4091,6 +4094,7 @@ mod tests {
             updated_at: "2026-01-01T00:00:00Z".to_string(),
             imported_from: None,
             last_exported_usb_name: None,
+            delete_confirm_text: String::new(),
         }
     }
 
@@ -4181,6 +4185,13 @@ mod tests {
         assert!(p1.same_name_exists_on_usb);
         assert!(p1.locks_reorder);
         assert_eq!(
+            p1.reorder_lock_tooltip.as_deref(),
+            Some(
+                "Won't reorder on USB — \"My Set\" already exists there, and additive export keeps \
+                 its existing track order unchanged. New tracks are still added in your chosen order."
+            )
+        );
+        assert_eq!(
             p1.export_button_text,
             "Append to (My Set) on USB: (USB_TRY)"
         );
@@ -4190,6 +4201,7 @@ mod tests {
         );
         assert!(!p2.same_name_exists_on_usb);
         assert!(!p2.locks_reorder);
+        assert_eq!(p2.reorder_lock_tooltip, None);
         assert_eq!(p2.export_button_text, "Export to USB: USB_TRY");
         assert_eq!(
             p2.export_button_title,

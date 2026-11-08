@@ -18,7 +18,7 @@ test("createInitialState returns expected default values", () => {
   assert.equal(state.exportPruneStale, true);
   assert.equal(state.analysisBpmRange, DEFAULT_ANALYSIS_BPM_RANGE);
   assert.equal(state.activeTab, "library");
-  assert.equal(state.progressBaseText, "Idle");
+  assert.equal(state.progressBaseText, "");
   assert.equal(state.startupPhase, true);
 });
 

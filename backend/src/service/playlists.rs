@@ -1,6 +1,7 @@
 //! Local playlists and imported-playlist bookkeeping.
 
 use super::*;
+use crate::i18n::tr;
 use std::collections::{HashMap, HashSet};
 
 /// A playlist row's source icon: USB or local (`is_usb` is the track's
@@ -129,6 +130,11 @@ pub(crate) fn annotate_imported_playlists(
     for item in items {
         item.existing_playlist =
             find_imported_playlist(conn, &external_playlist_key(library, item.kind, &item.id))?;
+        item.note_text = match &item.existing_playlist {
+            Some(existing) => tr::playlist_import_note_updates(item.track_count, &existing.name),
+            None => tr::playlist_import_note(item.track_count),
+        }
+        .render();
     }
     Ok(())
 }
@@ -183,7 +189,10 @@ impl BackendService {
         req: ImportExternalPlaylistsRequest,
     ) -> BackendResult<ImportExternalPlaylistsData> {
         let mut out = ImportExternalPlaylistsData::default();
+        let picked = req.items.len();
+        let mut failed_names = Vec::new();
         for item in req.items {
+            let name = item.name.clone();
             let result = match item.library {
                 ExternalLibrary::Rekordbox => self.import_rekordbox_playlist(item.request),
                 ExternalLibrary::Mixxx => self.import_mixxx_playlist(item.request),
@@ -200,6 +209,7 @@ impl BackendService {
                 }
                 Err(err) => {
                     out.failed += 1;
+                    failed_names.push(name);
                     ImportExternalPlaylistOutcome {
                         playlist: None,
                         error: Some(crate::error::ErrorPayload::from(err).message),
@@ -207,8 +217,63 @@ impl BackendService {
                 }
             });
         }
+        out.status_text = import_status_text(&out, picked, &failed_names);
         Ok(out)
     }
+}
+
+/// An import's status line: the one list's outcome, or the totals over
+/// several, then the skipped entries and the failed lists.
+fn import_status_text(
+    out: &ImportExternalPlaylistsData,
+    picked: usize,
+    failed_names: &[String],
+) -> String {
+    let single = out
+        .results
+        .first()
+        .and_then(|outcome| outcome.playlist.as_ref())
+        .filter(|_| picked == 1);
+    let mut parts = vec![
+        match single {
+            Some(playlist) if playlist.updated_existing => {
+                tr::playlist_import_one_updated(&playlist.name, playlist.added)
+            }
+            Some(playlist) => tr::playlist_import_one_imported(&playlist.name, playlist.added),
+            None => tr::playlist_import_many(out.imported, picked, out.added),
+        }
+        .render(),
+    ];
+    if out.skipped > 0 {
+        parts.push(tr::playlist_import_skipped(out.skipped).render());
+    }
+    if picked > 1 && out.failed > 0 {
+        parts.push(tr::playlist_import_failed_lists(out.failed, failed_names.join(", ")).render());
+    }
+    parts.join(" | ")
+}
+
+/// A playlist's name, for its status lines.
+fn playlist_name(conn: &rusqlite::Connection, playlist_id: &str) -> BackendResult<String> {
+    Ok(conn
+        .query_row(
+            "SELECT name FROM playlists WHERE id = ?1",
+            params![playlist_id],
+            |row| row.get(0),
+        )
+        .optional()?
+        .unwrap_or_default())
+}
+
+/// "Added 2 tracks (skipped 0) to Warmup".
+fn tracks_added_status(
+    conn: &rusqlite::Connection,
+    playlist_id: &str,
+    added: usize,
+    skipped: usize,
+) -> BackendResult<String> {
+    let name = playlist_name(conn, playlist_id)?;
+    Ok(tr::playlist_tracks_added(added, skipped, name).render())
 }
 
 /// An external playlist import that found none of its tracks: failing beats
@@ -239,6 +304,7 @@ impl BackendService {
         Ok(CreatePlaylistData {
             playlist_id: id,
             name: name.to_string(),
+            status_text: tr::playlist_created(name).render(),
         })
     }
 
@@ -269,6 +335,7 @@ impl BackendService {
         ensure_playlist_exists(&self.db, &req.playlist_id)?;
 
         let conn = self.db.connect()?;
+        let name = playlist_name(&conn, &req.playlist_id)?;
         let deleted = conn.execute(
             "DELETE FROM playlists WHERE id = ?1",
             params![req.playlist_id.clone()],
@@ -277,6 +344,7 @@ impl BackendService {
         Ok(DeletePlaylistData {
             playlist_id: req.playlist_id,
             deleted: deleted > 0,
+            status_text: tr::playlist_deleted(name).render(),
         })
     }
 
@@ -333,11 +401,19 @@ impl BackendService {
         )?;
 
         let rows = stmt.query_map([], |row| {
+            let name: String = row.get(1)?;
+            let last_exported_at: Option<String> = row.get(3)?;
+            let delete_confirm_text = if last_exported_at.is_some() {
+                tr::playlist_delete_confirm_exported(&name)
+            } else {
+                tr::playlist_delete_confirm(&name)
+            }
+            .render();
             Ok(Playlist {
                 id: row.get(0)?,
-                name: row.get(1)?,
+                name,
                 source: row.get(2)?,
-                last_exported_at: row.get(3)?,
+                last_exported_at,
                 last_exported_usb_root: row.get(4)?,
                 last_exported_track_count: row.get(5)?,
                 created_at: row.get(6)?,
@@ -348,6 +424,7 @@ impl BackendService {
                     .and_then(imported_from_label)
                     .map(str::to_string),
                 last_exported_usb_name: row.get(9)?,
+                delete_confirm_text,
             })
         })?;
 
@@ -494,6 +571,18 @@ impl BackendService {
             total_duration_ms,
             duration_unknown_count,
             unanalyzed_count,
+            analyze_missing_label: if unanalyzed_count > 0 {
+                tr::playlist_analyze_missing(unanalyzed_count)
+            } else {
+                tr::playlist_analyze_missing_none()
+            }
+            .render(),
+            analyze_missing_tooltip: if unanalyzed_count > 0 {
+                tr::playlist_analyze_missing_tooltip()
+            } else {
+                tr::playlist_analyze_missing_none_tooltip()
+            }
+            .render(),
             list_track_count,
             list_size_bytes,
             list_summary_text: crate::utils::track_list_summary(list_track_count, list_size_bytes),
@@ -582,12 +671,14 @@ impl BackendService {
             params![now, req.playlist_id],
         )?;
 
+        let status_text = tracks_added_status(&tx, &req.playlist_id, added, skipped)?;
         tx.commit()?;
 
         Ok(AddTracksToPlaylistData {
             playlist_id: req.playlist_id,
             added,
             skipped,
+            status_text,
         })
     }
 
@@ -643,15 +734,16 @@ impl BackendService {
         ensure_playlist_exists_conn(&conn, &req.playlist_id)?;
         let track_ids =
             self.resolve_library_selection(&conn, &req.query, &req.track_ids, req.all_matching)?;
-        drop(conn);
 
         if track_ids.is_empty() {
             return Ok(AddTracksToPlaylistData {
+                status_text: tracks_added_status(&conn, &req.playlist_id, 0, 0)?,
                 playlist_id: req.playlist_id,
                 added: 0,
                 skipped: 0,
             });
         }
+        drop(conn);
 
         self.add_tracks_to_playlist(AddTracksToPlaylistRequest {
             playlist_id: req.playlist_id,
@@ -740,6 +832,7 @@ impl BackendService {
                 added: 0,
                 skipped: 0,
                 resolutions,
+                status_text: String::new(),
             });
         }
 
@@ -756,6 +849,7 @@ impl BackendService {
             added: added.added,
             skipped: added.skipped,
             resolutions,
+            status_text: added.status_text,
         })
     }
 
@@ -810,6 +904,7 @@ impl BackendService {
                     playlist_id: playlist_id.clone(),
                     added: 0,
                     skipped: 0,
+                    status_text: String::new(),
                 }
             } else {
                 self.add_tracks_to_playlist(AddTracksToPlaylistRequest {
@@ -818,6 +913,18 @@ impl BackendService {
                 })?
             });
         }
+        let status_text = if track_ids.is_empty() {
+            String::new()
+        } else {
+            let conn = self.db.connect()?;
+            let names = playlist_ids
+                .iter()
+                .map(|id| playlist_name(&conn, id))
+                .collect::<BackendResult<Vec<_>>>()?;
+            let added: usize = items.iter().map(|item| item.added).sum();
+            let skipped: usize = items.iter().map(|item| item.skipped).sum();
+            tr::playlist_tracks_added(added, skipped, names.join(", ")).render()
+        };
         Ok(AddTracksToPlaylistsData {
             requested,
             resolved: track_ids.len(),
@@ -826,6 +933,7 @@ impl BackendService {
             skipped: items.iter().map(|item| item.skipped).sum(),
             items,
             resolutions,
+            status_text,
         })
     }
 
@@ -874,11 +982,19 @@ impl BackendService {
                 } else {
                     PlaylistMembershipState::Some
                 };
+                let note_text = match state {
+                    PlaylistMembershipState::None => String::new(),
+                    PlaylistMembershipState::Some => {
+                        tr::playlist_membership_some(contained, selected).render()
+                    }
+                    PlaylistMembershipState::All => tr::playlist_membership_all().render(),
+                };
                 PlaylistMembership {
                     playlist_id: playlist.id,
                     name: playlist.name,
                     contained,
                     state,
+                    note_text,
                 }
             })
             .collect();
@@ -1049,10 +1165,13 @@ impl BackendService {
             params![now(), req.playlist_id],
         )?;
 
+        let status_text =
+            tr::playlist_tracks_removed(removed, playlist_name(&tx, &req.playlist_id)?).render();
         tx.commit()?;
         Ok(RemoveTracksFromPlaylistData {
             playlist_id: req.playlist_id,
             removed,
+            status_text,
         })
     }
 

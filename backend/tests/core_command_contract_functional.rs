@@ -290,21 +290,33 @@ fn playlist_order_remains_stable_after_remove_and_readd() {
             ..Default::default()
         });
     assert!(add_initial.ok, "initial add failed: {add_initial:?}");
+    assert_eq!(
+        add_initial.data.expect("add data").status_text,
+        "Added 3 tracks (skipped 0) to Ordering Test"
+    );
 
     let remove_middle = backend.remove_tracks_from_playlist(RemoveTracksFromPlaylistRequest {
         playlist_id: playlist_id.clone(),
         track_ids: vec![track_b.clone()],
     });
     assert!(remove_middle.ok, "remove failed: {remove_middle:?}");
-    assert_eq!(remove_middle.data.expect("remove data").removed, 1);
+    let removed = remove_middle.data.expect("remove data");
+    assert_eq!(removed.removed, 1);
+    assert_eq!(removed.status_text, "Removed 1 track from Ordering Test");
 
-    let after_remove_titles = backend
+    let after_remove = backend
         .get_playlist_tracks(GetPlaylistTracksRequest {
             playlist_id: playlist_id.clone(),
             ..Default::default()
         })
         .data
-        .expect("after remove data")
+        .expect("after remove data");
+    // None of them is analyzed: the button offers both.
+    assert_eq!(
+        after_remove.analyze_missing_label,
+        "Analyze Missing Tracks (2)"
+    );
+    let after_remove_titles = after_remove
         .items
         .into_iter()
         .map(|t| t.title)

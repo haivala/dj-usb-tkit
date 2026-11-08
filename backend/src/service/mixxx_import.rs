@@ -499,6 +499,7 @@ fn list_mixxx_playlists_from(mixxx: &Connection) -> BackendResult<Vec<ExternalPl
                 let hidden: i64 = row.get(2)?;
                 Ok(ExternalPlaylistSummary {
                     existing_playlist: None,
+                    note_text: String::new(),
                     id: row.get::<_, i64>(0)?.to_string(),
                     name: row.get::<_, Option<String>>(1)?.unwrap_or_default(),
                     kind: if hidden == MIXXX_PLAYLIST_SET_LOG {
@@ -522,6 +523,7 @@ fn list_mixxx_playlists_from(mixxx: &Connection) -> BackendResult<Vec<ExternalPl
         let rows = stmt.query_map([], |row| {
             Ok(ExternalPlaylistSummary {
                 existing_playlist: None,
+                note_text: String::new(),
                 id: row.get::<_, i64>(0)?.to_string(),
                 name: row.get::<_, Option<String>>(1)?.unwrap_or_default(),
                 kind: ExternalPlaylistKind::Crate,

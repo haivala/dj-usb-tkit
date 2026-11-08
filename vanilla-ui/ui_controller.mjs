@@ -9,7 +9,7 @@ import { bindShellEvents } from "./components/shell/events.mjs";
 import { bindTrackDetailEvents } from "./components/track-detail/events.mjs";
 import { initTooltips } from "./tooltip.mjs";
 import { cloneTemplate } from "./ui_utils.mjs";
-import { t } from "./ui_texts.mjs";
+import { t, tCount } from "./ui_texts.mjs";
 import { setAddButtonState } from "./track_table.mjs";
 import { renderEmptyState } from "./components/shell/actions.mjs";
 import { renderAllSelectionBars, renderSelectionBar } from "./components/shared/track_selection.mjs";
@@ -37,7 +37,7 @@ export function updateModeText(ctx) {
   const { el } = ctx;
   const current = ctx.getCurrentPlaylist();
   el.playlistBadge.className = current ? "playlist-badge active" : "playlist-badge inactive";
-  el.badgeLabel.textContent = current ? current.name : "No active playlist";
+  el.badgeLabel.textContent = current ? current.name : t("ui-header-badge-none");
   updateAddToPlaylistButtons(ctx);
   updateActivePlaylistIndicators(ctx);
 }
@@ -89,8 +89,8 @@ export function updateUsbEmptyState(ctx) {
   if (!hasValidRoot && !hasRecents) {
     renderEmptyState(container, {
       icon: "\u2B58",
-      heading: "Connect a USB drive to browse and export",
-      actionLabel: "Select USB Folder",
+      heading: t("ui-usb-empty-heading"),
+      actionLabel: t("ui-usb-select-usb-folder"),
       onAction: () => document.getElementById("selectUsbFolderBtn")?.click()
     });
   }
@@ -117,7 +117,8 @@ export function closeSettingsDrawer(ctx) {
   clearManualUpdateCheck(ctx);
 }
 
-export function updateUsbHealthDot(ctx, status) {
+// `text`: the diagnostics' `healthText`; none before a run.
+export function updateUsbHealthDot(ctx, status, text = "") {
   const { el } = ctx;
   const dots = [el.usbHealthDot, el.usbHeaderHealthDot].filter(Boolean);
   if (!dots.length) return;
@@ -126,11 +127,7 @@ export function updateUsbHealthDot(ctx, status) {
     status === "WARN" ? "health-warn" :
     status === "FAIL" ? "health-fail" :
     null;
-  const tooltip =
-    status === "PASS" ? "USB health: good" :
-    status === "WARN" ? "USB health: warnings" :
-    status === "FAIL" ? "USB health: issues found" :
-    "USB health: unknown";
+  const tooltip = text || t("ui-usb-health-unknown");
   dots.forEach((dot) => {
     dot.classList.remove("health-pass", "health-warn", "health-fail");
     if (className) dot.classList.add(className);
@@ -153,8 +150,8 @@ export function createConfirmDialogController(el) {
   return {
     isOpen: dialog.isOpen,
     close: (result) => dialog.close(!!result),
-    open({ title, message, confirmLabel = "Confirm" }) {
-      el.confirmTitle.textContent = title || "Confirm";
+    open({ title, message, confirmLabel = t("ui-confirm-default") }) {
+      el.confirmTitle.textContent = title || t("ui-confirm-default");
       el.confirmMessage.textContent = message || "";
       el.confirmOkBtn.textContent = confirmLabel;
       return dialog.open(el.confirmOkBtn);
@@ -192,7 +189,7 @@ export function createPlaylistImportDialogController(el, document) {
       const section = cloneTemplate(document, "tplPlaylistImportColumn");
       section.querySelector(".playlist-import-column-title").textContent = label;
       const list = section.querySelector(".add-to-list");
-      list.setAttribute("aria-label", `${label} lists`);
+      list.setAttribute("aria-label", t("ui-playlist-import-column-aria-label", { library: label }));
       list.replaceChildren(...rows);
       sections.push(section);
     }
@@ -211,11 +208,13 @@ export function createPlaylistImportDialogController(el, document) {
   function sync() {
     const chosen = checkedItems();
     el.playlistImportOkBtn.disabled = chosen.length === 0;
-    el.playlistImportOkBtn.textContent = chosen.length > 1 ? `Import ${chosen.length}` : "Import";
+    el.playlistImportOkBtn.textContent = chosen.length > 1
+      ? tCount("ui-playlist-import-ok-count", chosen.length)
+      : t("ui-playlist-import-ok");
     const sources = new Set(chosen.map((item) => item.sourceLabel));
     el.playlistImportForceLabel.textContent = sources.size === 1
-      ? `Force update track data from ${[...sources][0]}`
-      : "Force update track data";
+      ? t("ui-playlist-import-force-from", { library: [...sources][0] })
+      : t("ui-playlist-import-force");
   }
 
   return {

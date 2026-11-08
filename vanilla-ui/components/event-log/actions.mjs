@@ -1,6 +1,6 @@
 // Event log UI rendering helpers.
 
-import { counted } from "../../track_utils.mjs";
+import { t, tCount } from "../../ui_texts.mjs";
 import { cloneTemplate } from "../../ui_utils.mjs";
 
 // Stores an entry (the store normalizes it). With the Event Log open, only
@@ -35,7 +35,7 @@ export async function openEventLogFile(ctx) {
   try {
     await ctx.invoke("open_frontend_log");
   } catch (err) {
-    ctx.emitStatus(`Could not open the log file: ${err?.message || err}`, { level: "error" });
+    ctx.emitStatus(t("ui-event-log-open-file-failed", { error: err?.message || err }), { level: "error" });
   }
 }
 
@@ -48,9 +48,9 @@ export function renderEventLogBadge(ctx) {
   el.eventLogBadge.textContent = count > 99 ? "99+" : String(count);
   el.eventLogBadge.classList.toggle("hidden", count === 0);
   el.eventLogDot.classList.toggle("hidden", !dot);
-  let label = "Event Log";
-  if (count) label = `Event Log, ${counted(count, "new error")}`;
-  else if (dot) label = "Event Log, has details for the USB report";
+  let label = t("ui-header-event-log");
+  if (count) label = tCount("ui-event-log-button-new-errors", count);
+  else if (dot) label = t("ui-event-log-button-linked-details");
   el.eventLogBtn.setAttribute("aria-label", label);
 }
 
@@ -95,8 +95,8 @@ function filteredEventLogEntries(ctx) {
 function renderEventLogSummary(ctx, entries) {
   const totalOccurrences = entries.reduce((sum, item) => sum + Math.max(1, Number(item.count) || 1), 0);
   ctx.el.eventLogSummary.textContent = totalOccurrences === entries.length
-    ? counted(entries.length, "event")
-    : `${counted(entries.length, "event")} (${totalOccurrences} occurrences)`;
+    ? tCount("ui-event-log-summary-count", entries.length)
+    : tCount("ui-event-log-summary-count-repeats", entries.length, { occurrences: totalOccurrences });
 }
 
 function eventLogRow(doc, item) {
@@ -124,7 +124,7 @@ function eventLogRow(doc, item) {
   row.querySelector(".event-log-source").textContent = item.source;
   const message = row.querySelector(".event-log-message");
   if (details) message.dataset.tooltip = details;
-  row.querySelector(".event-log-code").textContent = `[${collapsedCode || "unknown"}]`;
+  row.querySelector(".event-log-code").textContent = `[${collapsedCode || t("ui-event-log-unknown-code")}]`;
   row.querySelector(".event-log-text").textContent = item.message;
   const countBadge = row.querySelector(".event-log-count");
   if (count > 1) countBadge.textContent = `x${count}`;
@@ -140,7 +140,7 @@ export function renderEventLog(ctx) {
   const doc = el.eventLogList.ownerDocument;
   if (!entries.length) {
     const row = cloneTemplate(doc, "tplLogMessageRow");
-    row.firstElementChild.textContent = "No events";
+    row.firstElementChild.textContent = t("ui-event-log-empty");
     el.eventLogList.replaceChildren(row);
     return;
   }

@@ -1,5 +1,6 @@
 import test from "node:test";
 import assert from "node:assert/strict";
+import "./test_helpers.mjs";
 
 if (typeof globalThis.window === "undefined") {
   globalThis.window = {

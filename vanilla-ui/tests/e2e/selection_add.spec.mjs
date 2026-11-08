@@ -39,11 +39,17 @@ function installSelectionMock(page, mockOpts = {}) {
     const addToPlaylists = (playlistIds, ids, requested) => {
       const items = playlistIds.map((playlistId) => addIds(playlistId, ids));
       const sum = (key) => items.reduce((total, item) => total + item[key], 0);
+      // The backend's status line: the playlists' names in request order.
+      const names = playlistIds.map((id) => playlists.find((p) => p.id === id)?.name).join(", ");
+      const added = sum("added");
+      const statusText = ids.length
+        ? `Added ${added} ${added === 1 ? "track" : "tracks"} (skipped ${sum("skipped")}) to ${names}`
+        : "";
       return {
         ok: true,
         data: {
           requested, resolved: ids.length, unresolved: requested - ids.length,
-          added: sum("added"), skipped: sum("skipped"), items, resolutions: [],
+          added, skipped: sum("skipped"), items, resolutions: [], statusText,
         },
       };
     };
@@ -58,7 +64,8 @@ function installSelectionMock(page, mockOpts = {}) {
               const held = playlistTracks.get(p.id) || [];
               const contained = ids.filter((id) => id && held.includes(id)).length;
               const state = contained === 0 ? "none" : contained >= ids.length ? "all" : "some";
-              return { playlistId: p.id, name: p.name, contained, state };
+              const noteText = { none: "", all: "Already in", some: `${contained} of ${ids.length} in` }[state];
+              return { playlistId: p.id, name: p.name, contained, state, noteText };
             });
             return { ok: true, data: { selected: ids.length, items } };
           }
@@ -90,7 +97,7 @@ function installSelectionMock(page, mockOpts = {}) {
             };
             playlists.push(row);
             playlistTracks.set(id, []);
-            return { ok: true, data: { playlistId: id, name } };
+            return { ok: true, data: { playlistId: id, name, statusText: `Playlist created: ${name}` } };
           }
           if (command === "list_matching_track_ids") {
             const q = String(payload?.request?.query || "").trim().toLowerCase();
@@ -112,7 +119,9 @@ function installSelectionMock(page, mockOpts = {}) {
               added += 1;
             }
             playlistTracks.set(playlistId, current);
-            return { ok: true, data: { playlistId, added, skipped } };
+            // As the backend words it.
+            const statusText = `Added ${added} track${added === 1 ? "" : "s"} (skipped ${skipped}) to ${playlists.find((p) => p.id === playlistId)?.name}`;
+            return { ok: true, data: { playlistId, added, skipped, statusText } };
           }
           if (command === "add_track_candidates_to_playlist") {
             const playlistId = String(payload?.request?.playlistId || "");
@@ -158,6 +167,7 @@ function installSelectionMock(page, mockOpts = {}) {
                 resolved: ids.length,
                 unresolved: candidates.length - ids.length,
                 added,
+                statusText: `Added ${added} track${added === 1 ? "" : "s"} (skipped ${ids.length - added}) to ${playlists.find((p) => p.id === playlistId)?.name}`,
                 skipped: ids.length - added,
                 resolutions: candidates.map((track, index) => ({
                   previousId: track?.trackId || track?.id || null,
@@ -180,7 +190,9 @@ function installSelectionMock(page, mockOpts = {}) {
             const current = playlistTracks.get(playlistId) || [];
             const kept = current.filter((id) => !gone.has(id));
             playlistTracks.set(playlistId, kept);
-            return { ok: true, data: { playlistId, removed: current.length - kept.length } };
+            const removed = current.length - kept.length;
+            const name = playlists.find((p) => p.id === playlistId)?.name;
+            return { ok: true, data: { playlistId, removed, statusText: `Removed ${removed} track${removed === 1 ? "" : "s"} from ${name}` } };
           }
           // Convert…: the first selected track gets a transcode, the rest are
           // skipped (the backend decides which need one).
@@ -258,6 +270,7 @@ function installSelectionMock(page, mockOpts = {}) {
               data: {
                 items: saved.map((t) => ({ trackId: t.id, genre: r.genre, rating: r.rating ?? 0, year: t.year ?? undefined })),
                 tracks: saved.map((t) => ({ ...t })),
+                statusText: `Saved track details for ${saved.length} ${saved.length === 1 ? "track" : "tracks"}`,
               },
             };
           }
@@ -273,6 +286,7 @@ function installSelectionMock(page, mockOpts = {}) {
                 items: (r.tracks || []).map((t) => ({ usbMediaPathRaw: t.usbMediaPathRaw, year: year ?? undefined })),
                 tracks: saved.map((t) => ({ ...t })),
                 localTracks: [],
+                statusText: `Saved track details for ${r.tracks.length} ${r.tracks.length === 1 ? "track" : "tracks"} to USB`,
               },
             };
           }
@@ -308,7 +322,12 @@ function installSelectionMock(page, mockOpts = {}) {
             const known = ids.filter((id) => id !== "t3").length;
             return {
               ok: true,
-              data: { totalDurationMs: known * 180_000, durationUnknownCount: ids.length - known, trackCount: ids.length },
+              data: {
+                totalDurationMs: known * 180_000, durationUnknownCount: ids.length - known, trackCount: ids.length,
+                durationUnknownText: ids.length - known
+                  ? `${ids.length - known} of the selected tracks ${ids.length - known === 1 ? "has" : "have"} no length yet`
+                  : "",
+              },
             };
           }
           return window.__e2eBackend.answer(command);
@@ -451,7 +470,7 @@ function installPaginatedLibraryMock(page, { trackCount }) {
             };
             playlists.push(row);
             playlistTracks.set(id, []);
-            return { ok: true, data: { playlistId: id, name } };
+            return { ok: true, data: { playlistId: id, name, statusText: `Playlist created: ${name}` } };
           }
           if (command === "list_matching_track_ids") {
             const ids = allTracks.map((t) => t.id);
@@ -471,7 +490,9 @@ function installPaginatedLibraryMock(page, { trackCount }) {
               added += 1;
             }
             playlistTracks.set(playlistId, current);
-            return { ok: true, data: { playlistId, added, skipped } };
+            // As the backend words it.
+            const statusText = `Added ${added} track${added === 1 ? "" : "s"} (skipped ${skipped}) to ${playlists.find((p) => p.id === playlistId)?.name}`;
+            return { ok: true, data: { playlistId, added, skipped, statusText } };
           }
           if (command === "add_track_candidates_to_playlist") {
             const playlistId = String(payload?.request?.playlistId || "");
@@ -496,6 +517,7 @@ function installPaginatedLibraryMock(page, { trackCount }) {
                 resolved: ids.length,
                 unresolved: candidates.length - ids.length,
                 added,
+                statusText: `Added ${added} track${added === 1 ? "" : "s"} (skipped ${ids.length - added}) to ${playlists.find((p) => p.id === playlistId)?.name}`,
                 skipped: ids.length - added,
                 resolutions: candidates.map((track, index) => ({
                   previousId: track?.trackId || track?.id || null,
@@ -686,6 +708,7 @@ test("the playlist view selects tracks and removes them from the playlist only",
   expect(selectAll.request.limit).toBe(0);
   // "t3" has no length: the time is a lower bound.
   await expect(bar.locator(".selection-time")).toHaveText("· 6:00+");
+  await expect(bar.locator(".selection-time")).toHaveAttribute("data-tooltip", "1 of the selected tracks has no length yet");
   const playlistTime = (await page.evaluate(() => window.__calls))
     .filter((c) => c.command === "get_selection_duration").pop();
   expect(playlistTime.request).toMatchObject({ view: "playlist", id: expect.any(String) });

@@ -9,6 +9,7 @@ import { createApiClient } from "./api_client.mjs";
 import { createAppContext } from "./app_context.mjs";
 import { bindBeforeUnloadCleanup } from "./components/playback/actions.mjs";
 import { initApp } from "./startup_bootstrap.mjs";
+import { t } from "./ui_texts.mjs";
 import { renderWaveformsIn } from "./waveform.mjs";
 
 const ctx = createAppContext({
@@ -30,5 +31,5 @@ bindBeforeUnloadCleanup(ctx);
 initApp(ctx).catch((error) => {
   ctx.state.startupPhase = false;
   console.error(error);
-  ctx.emitStatus(`Initialization failed: ${error.message}`);
+  ctx.emitStatus(t("ui-startup-init-failed", { error: error.message }));
 });

@@ -215,6 +215,20 @@ fn membership(
         .collect()
 }
 
+/// The note the "Add to…" picker shows beside each playlist, in sidebar order.
+fn membership_notes(backend: &BackendCommands, track_ids: &[Option<&str>]) -> Vec<String> {
+    backend
+        .get_playlist_membership(GetPlaylistMembershipRequest {
+            track_ids: track_ids.iter().map(|id| id.map(str::to_string)).collect(),
+        })
+        .data
+        .expect("membership")
+        .items
+        .into_iter()
+        .map(|item| item.note_text)
+        .collect()
+}
+
 #[test]
 fn add_to_picker_shows_membership_and_adds_the_selection_to_several_playlists() {
     let root = tempdir().expect("temp root");
@@ -274,6 +288,14 @@ fn add_to_picker_shows_membership_and_adds_the_selection_to_several_playlists() 
         ]
     );
     assert_eq!(
+        membership_notes(&backend, &[Some(&ids[0]), Some(&ids[1]), None]),
+        ["", "1 of 3 in"]
+    );
+    assert_eq!(
+        membership_notes(&backend, &[Some(&ids[0])]),
+        ["", "Already in"]
+    );
+    assert_eq!(
         membership(&backend, &[Some(&ids[0])]),
         vec![
             ("Peak".to_string(), 0, Neither),
@@ -313,6 +335,11 @@ fn add_to_picker_shows_membership_and_adds_the_selection_to_several_playlists() 
         (2, 2, 0)
     );
     assert_eq!((multi.added, multi.skipped), (3, 1));
+    // The playlists in request order, each once.
+    assert_eq!(
+        multi.status_text,
+        "Added 3 tracks (skipped 1) to Warmup, Peak"
+    );
     let per_playlist: Vec<_> = multi
         .items
         .iter()

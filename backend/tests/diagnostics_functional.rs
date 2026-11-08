@@ -1033,6 +1033,12 @@ fn diagnostics_parity_and_import_counts_stay_consistent_after_repeated_exports()
         serde_json::Value::String(diagnostics_data.status_label.clone()),
         "the badge reads the overall status"
     );
+    let health = match diagnostics_data.overall_status {
+        DiagStatus::Pass => "USB health: good",
+        DiagStatus::Warn => "USB health: warnings",
+        DiagStatus::Fail => "USB health: issues found",
+    };
+    assert_eq!(diagnostics_data.health_text, health);
     let diag_playlist = diagnostics_data
         .playlist_details
         .iter()

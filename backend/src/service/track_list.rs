@@ -8,6 +8,7 @@
 use std::cmp::Ordering;
 use std::collections::HashSet;
 
+use crate::i18n::tr;
 use crate::models::{GetSelectionDurationData, Track, UsbTrack};
 
 use super::key_notation;
@@ -125,6 +126,11 @@ pub(crate) fn selection_duration<T: ListTrack>(
         total_duration_ms,
         duration_unknown_count,
         track_count: selected.len(),
+        duration_unknown_text: if duration_unknown_count == 0 {
+            String::new()
+        } else {
+            tr::selection_duration_unknown(duration_unknown_count).render()
+        },
     }
 }
 
@@ -316,6 +322,10 @@ mod tests {
         assert_eq!(data.total_duration_ms, 200_000);
         assert_eq!(data.duration_unknown_count, 1);
         assert_eq!(data.track_count, 2);
+        assert_eq!(
+            data.duration_unknown_text,
+            "1 of the selected tracks has no length yet"
+        );
         // `counts` leaves a track's length out without unticking it.
         let data = selection_duration(&tracks, &ids, |track| track.id != "1");
         assert_eq!((data.total_duration_ms, data.track_count), (0, 2));

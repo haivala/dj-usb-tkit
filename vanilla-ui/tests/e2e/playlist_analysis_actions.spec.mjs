@@ -33,6 +33,8 @@ test.beforeEach(async ({ page }) => {
         totalDurationMs: rows.reduce((s, t) => s + (t.durationMs > 0 ? t.durationMs : 0), 0),
         durationUnknownCount: rows.filter((t) => !(t.durationMs > 0)).length,
         unanalyzedCount: rows.filter((t) => !t.analysisReady).length,
+        // The Analyze Missing button's label, as the backend words it.
+        analyzeMissingLabel: `Analyze Missing Tracks (${rows.filter((t) => !t.analysisReady).length})`,
         // The heading's totals cover the whole playlist, ignoring the search.
         listTrackCount: (all || []).length,
         listSizeBytes: (all || []).reduce((s, t) => s + (t.fileSizeBytes > 0 ? t.fileSizeBytes : 0), 0),
@@ -303,7 +305,7 @@ test("playlist analyze-missing skips already-analyzed tracks and targets the res
               ok: true,
               data: {
                 overallStatus: "PASS",
-                statusLabel: "PASS",
+                statusLabel: "PASS", healthText: "USB health: good",
                 overview: [],
                 playlistUsbExportStatus: [],
                 durationMs: 1,
@@ -448,7 +450,7 @@ test("playlist actions hide Analyze Missing when unnecessary and keep Export vis
               ok: true,
               data: {
                 overallStatus: "PASS",
-                statusLabel: "PASS",
+                statusLabel: "PASS", healthText: "USB health: good",
                 overview: [],
                 playlistUsbExportStatus: [],
                 durationMs: 1,
@@ -718,7 +720,10 @@ function installReorderTauriMock(page, { usbSameNamePlaylistName, exportPruneSta
           : "Export to USB: USB",
         exportButtonTitle: locksReorder
           ? `Append current playlist tracks to existing USB playlist "${playlist.name}"`
-          : "Export current playlist to selected USB"
+          : "Export current playlist to selected USB",
+        reorderLockTooltip: locksReorder
+          ? `Won't reorder on USB — "${playlist.name}" already exists there, and additive export keeps its existing track order unchanged. New tracks are still added in your chosen order.`
+          : null
       };
     });
 
@@ -815,7 +820,7 @@ function installReorderTauriMock(page, { usbSameNamePlaylistName, exportPruneSta
               ok: true,
               data: {
                 overallStatus: "PASS",
-                statusLabel: "PASS",
+                statusLabel: "PASS", healthText: "USB health: good",
                 overview: [],
                 durationMs: 1,
                 sectionGroups: [],
@@ -1464,7 +1469,10 @@ test("switching away from a sorted playlist commits the sort as its real order, 
                       : "Export to USB: USB",
                     exportButtonTitle: locksReorder
                       ? `Append current playlist tracks to existing USB playlist "${playlist.name}"`
-                      : "Export current playlist to selected USB"
+                      : "Export current playlist to selected USB",
+                    reorderLockTooltip: locksReorder
+                      ? `Won't reorder on USB — "${playlist.name}" already exists there, and additive export keeps its existing track order unchanged. New tracks are still added in your chosen order.`
+                      : null
                   };
                 })
               }

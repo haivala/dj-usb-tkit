@@ -1,5 +1,5 @@
 import { STATIC_TABS } from "./app_state.mjs";
-import { loadUiTexts } from "./ui_texts.mjs";
+import { loadUiTexts, t } from "./ui_texts.mjs";
 import { createThemeManager, createAccentManager } from "./components/settings/actions.mjs";
 import { refreshUpdateCheck, UPDATE_RECHECK_INTERVAL_MS } from "./update_check.mjs";
 import { normalizeAnalysisBpmRange, DEFAULT_ANALYSIS_BPM_RANGE } from "./components/library/actions.mjs";
@@ -22,11 +22,9 @@ import {
   STORAGE_KEY_CUE_METRONOME_MIX,
 } from "./settings_keys.mjs";
 
-const APP_VERSION_FALLBACK = "Not set";
-
 export async function hydrateAppVersionLabel(ctx) {
   const { el, tauriIsTauri, tauriGetVersion } = ctx;
-  let version = APP_VERSION_FALLBACK;
+  let version = t("ui-settings-version-not-set");
   if (tauriIsTauri()) {
     try {
       const resolved = await tauriGetVersion();
@@ -37,7 +35,7 @@ export async function hydrateAppVersionLabel(ctx) {
       // Keep fallback in browser/test mode.
     }
   }
-  el.settingsVersionText.textContent = `Version ${version}`;
+  el.settingsVersionText.textContent = t("ui-settings-version", { version });
 }
 
 export function checkForUpdate(ctx) {
@@ -191,7 +189,7 @@ export async function runDataMigrations(ctx) {
     ctx.pushEventLog({
       level: "warn",
       source: "startup",
-      message: `Data upgrade failed: ${error?.message || String(error)}`
+      message: t("ui-startup-data-upgrade-failed", { error: error?.message || String(error) })
     });
     return null;
   }
@@ -200,10 +198,10 @@ export async function runDataMigrations(ctx) {
 export function runDeferredInitialLoad(ctx) {
   const { state } = ctx;
   (ctx.setTimeoutFn || setTimeout)(() => {
-    ctx.withProgress("Initializing", async (progress) => {
-      progress(35, "Loading playlists...");
+    ctx.withProgress(t("ui-startup-initializing"), async (progress) => {
+      progress(35, t("ui-startup-loading-playlists"));
       await ctx.loadPlaylists();
-      progress(70, "Loading tracks...");
+      progress(70, t("ui-startup-loading-tracks"));
       await ctx.resetAndLoadLibraryTracks("");
 
       if (state.playlists.length > 0) {
@@ -224,7 +222,7 @@ export function runDeferredInitialLoad(ctx) {
     }).catch((error) => {
       state.startupPhase = false;
       ctx.logError(error);
-      ctx.emitStatus(`Initialization failed: ${error.message}`);
+      ctx.emitStatus(t("ui-startup-init-failed", { error: error.message }));
     });
   }, 0);
 }
@@ -249,7 +247,7 @@ export async function initApp(ctx) {
   ctx.setupRuntimeErrorLogging();
   pushEventLog({ level: "info", source: "startup", message: "Console/event logging ready" });
 
-  ctx.setProgress(false, 0, "Idle");
+  ctx.setProgress(false, 0, t("ui-job-idle"));
   await ctx.loadUsbDevices();
   // The library's folders and their switches (draws the chips, lets the
   // folders into the asset scope).
@@ -327,7 +325,7 @@ export async function switchView(ctx, viewId) {
       await ctx.commitActivePlaylistSort(state.activeTab);
     } catch (err) {
       console.error(err);
-      ctx.emitStatus(`Save track order failed: ${err.message || err}`);
+      ctx.emitStatus(t("ui-playlist-track-order-failed", { error: err.message || err }));
     }
   }
   state.activeTab = viewId;

@@ -163,7 +163,7 @@ test("source, settings, health, name badge, and onboarding helpers update compac
   });
   updateAnalyzeLibraryButtonLabel({ state: { librarySources: { folders: [{ path: "/a" }, { path: "/b" }], analyzeButtonLabel: "Analyze Libraries" } }, el });
   closeSettingsDrawer({ el });
-  updateUsbHealthDot({ el }, "WARN");
+  updateUsbHealthDot({ el }, "WARN", "USB health: warnings");
   updateUsbNameBadge({ state: { usbDeviceName: "Club Stick" }, el });
   syncLibraryOnboardingMode({ state: { activeTab: "library", librarySources: { folders: [] } }, document });
 

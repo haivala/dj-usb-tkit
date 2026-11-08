@@ -1074,10 +1074,15 @@ fn playlist_create_rename_delete_roundtrip() {
         })
         .expect("create playlist");
     assert_eq!(created.name, "My Playlist");
+    assert_eq!(created.status_text, "Playlist created: My Playlist");
 
     let listed = service.list_playlists().expect("list playlists");
     assert_eq!(listed.items.len(), 1);
     assert_eq!(listed.items[0].id, created.playlist_id);
+    assert_eq!(
+        listed.items[0].delete_confirm_text,
+        "Delete \"My Playlist\"?\n\nThis removes the app playlist and its app playlist-track links."
+    );
 
     let renamed = service
         .rename_playlist(RenamePlaylistRequest {
@@ -1093,6 +1098,7 @@ fn playlist_create_rename_delete_roundtrip() {
         })
         .expect("delete playlist");
     assert!(deleted.deleted);
+    assert_eq!(deleted.status_text, "Playlist deleted: Renamed");
 
     let err = service
         .rename_playlist(RenamePlaylistRequest {
@@ -3080,6 +3086,14 @@ fn get_tracks_by_ids_with_previews_empty_ids_returns_empty() {
 fn playback_source_label_states_only_where_playback_comes_from() {
     assert_eq!(playback_source_label(true), "Library");
     assert_eq!(playback_source_label(false), "USB");
+}
+
+#[test]
+fn playback_names_the_track_as_artist_and_title() {
+    use super::playback::playback_track_name;
+    assert_eq!(playback_track_name(" Artist ", "Title"), "Artist - Title");
+    assert_eq!(playback_track_name("", "Title"), "Title");
+    assert_eq!(playback_track_name("Artist", " "), "Artist - Unknown Title");
 }
 
 #[test]

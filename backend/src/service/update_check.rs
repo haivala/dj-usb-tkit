@@ -22,6 +22,8 @@
 
 use serde::{Deserialize, Serialize};
 
+use crate::i18n::tr;
+
 pub const RELEASES_PAGE_URL: &str = "https://github.com/haivala/dj-usb-tkit/releases";
 
 /// One entry from the GitHub Releases API response (only the fields we use).
@@ -127,6 +129,13 @@ pub struct UpdateInfo {
     pub action: UpdateAction,
     /// The releases couldn't be fetched, so "no update" means "unknown".
     pub check_failed: bool,
+    /// The settings update line: "Version 1.2.3 is available.", "Couldn't
+    /// check for updates." or "Up to date." (the UI shows the last only after
+    /// a manual check).
+    pub status_text: String,
+    /// The banner's text for a `"critical"` or `"feature"` release; empty for
+    /// any other severity (no banner).
+    pub banner_text: String,
 }
 
 impl UpdateInfo {
@@ -142,7 +151,10 @@ impl UpdateInfo {
             can_self_update: false,
             action: UpdateAction::None,
             check_failed: false,
+            status_text: String::new(),
+            banner_text: String::new(),
         }
+        .with_texts()
     }
 
     /// The check couldn't reach the releases list.
@@ -151,6 +163,26 @@ impl UpdateInfo {
             check_failed: true,
             ..Self::none(current_version, install_kind)
         }
+        .with_texts()
+    }
+
+    /// Fills `status_text` and `banner_text` from the verdict.
+    fn with_texts(mut self) -> Self {
+        let version = &self.latest_version;
+        self.status_text = if self.update_available {
+            tr::update_available(version)
+        } else if self.check_failed {
+            tr::update_check_failed()
+        } else {
+            tr::update_up_to_date()
+        }
+        .render();
+        self.banner_text = match self.severity.as_str() {
+            "critical" => tr::update_banner_critical(version).render(),
+            "feature" => tr::update_banner_feature(version).render(),
+            _ => String::new(),
+        };
+        self
     }
 }
 
@@ -278,7 +310,10 @@ pub fn evaluate(
         can_self_update,
         action,
         check_failed: false,
+        status_text: String::new(),
+        banner_text: String::new(),
     }
+    .with_texts()
 }
 
 #[cfg(test)]
@@ -399,6 +434,8 @@ mod tests {
         assert_eq!(info.severity, "critical");
         // ...but the link still points at the newest release.
         assert_eq!(info.latest_version, "0.1.37");
+        assert_eq!(info.status_text, "Version 0.1.37 is available.");
+        assert_eq!(info.banner_text, "Critical update available: 0.1.37");
     }
 
     #[test]
@@ -549,6 +586,11 @@ mod tests {
         assert!(!info.update_available);
         assert_eq!(info.action, UpdateAction::None);
         assert!(!UpdateInfo::none("0.3.0", InstallKind::AppImage).check_failed);
+        assert_eq!(info.status_text, "Couldn't check for updates.");
+        assert_eq!(
+            UpdateInfo::none("0.3.0", InstallKind::AppImage).status_text,
+            "Up to date."
+        );
     }
 
     #[test]

@@ -54,13 +54,14 @@ function installBasicTauriMock(page, opts = {}) {
               createdAt: new Date().toISOString(),
               updatedAt: new Date().toISOString()
             });
-            return { ok: true, data: { playlistId, name } };
+            return { ok: true, data: { playlistId, name, statusText: `Playlist created: ${name}` } };
           }
           if (command === "delete_playlist") {
             const playlistId = payload?.request?.playlistId || "";
             const idx = playlists.findIndex((p) => p.id === playlistId);
+            const name = playlists[idx]?.name;
             if (idx >= 0) playlists.splice(idx, 1);
-            return { ok: true, data: { playlistId, deleted: idx >= 0 } };
+            return { ok: true, data: { playlistId, deleted: idx >= 0, statusText: `Playlist deleted: ${name}` } };
           }
           if (command === "rename_playlist") {
             const playlistId = payload?.request?.playlistId || "";
@@ -361,6 +362,9 @@ const updateCheck = (severity, extra = {}) => ({
   canSelfUpdate: false,
   action: "none",
   checkFailed: false,
+  // The backend's texts for the update line and the banner.
+  statusText: "Version 0.3.0 is available.",
+  bannerText: { critical: "Critical update available: 0.3.0", feature: "New features available: 0.3.0" }[severity] || "",
   ...extra,
 });
 
@@ -500,7 +504,8 @@ test("settings update line offers one action, and the header button re-checks on
   const noUpdate = (checkFailed) => ({
     updateAvailable: false, severity: "none", currentVersion: "0.3.0", latestVersion: "0.3.0",
     releaseUrl: "https://example.test", installKind: "nsis", downloadUrl: null, canSelfUpdate: false,
-    action: "none", checkFailed
+    action: "none", checkFailed,
+    statusText: checkFailed ? "Couldn't check for updates." : "Up to date.", bannerText: "",
   });
   await page.evaluate((checks) => { window.__nextUpdateChecks = checks; }, [noUpdate(true), noUpdate(false)]);
   await checkBtn.click();

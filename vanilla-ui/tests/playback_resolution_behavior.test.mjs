@@ -1,5 +1,6 @@
 import test from "node:test";
 import assert from "node:assert/strict";
+import "./test_helpers.mjs";
 import { playTrackFromOrigin } from "../components/playback/actions.mjs";
 
 const localTrack = {
@@ -55,6 +56,7 @@ function backendPlayback(overrides = {}) {
     sourceLabel: "Library",
     libraryResolved: true,
     hasUsbContext: false,
+    playingText: "Playing from Library: Artist - Track",
     ...overrides,
   };
 }
@@ -96,10 +98,7 @@ test("playTrackFromOrigin delegates playback resolution to one backend command",
   assert.equal(state.playbackTrackId, "t-local");
   assert.equal(state.playbackPath, "/music/Track.mp3");
   assert.equal(state.playbackRowKey, "r1");
-  assert.deepEqual(state.playbackLabelContext, {
-    sourceLabel: "Library",
-    title: "Artist - Track",
-  });
+  assert.equal(state.playbackStatusText, "Playing from Library: Artist - Track");
   assert.match(status, /Playing from Library: Artist - Track/);
 });
 
@@ -119,13 +118,14 @@ test("playTrackFromOrigin commits a backend USB fallback result without local fa
         sourceLabel: "USB",
         libraryResolved: false,
         hasUsbContext: true,
+        playingText: "Playing from USB: Artist - Track",
       });
     },
   }), usbTrack, "usb", { rowKey: "r1" });
 
   assert.equal(state.playbackTrackId, "t-usb");
   assert.equal(state.playbackPath, "/usb/Contents/Track.mp3");
-  assert.equal(state.playbackLabelContext.sourceLabel, "USB");
+  assert.equal(state.playbackStatusText, "Playing from USB: Artist - Track");
   assert.match(status, /Playing from USB: Artist - Track/);
 });
 

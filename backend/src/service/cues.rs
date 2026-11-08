@@ -23,6 +23,7 @@ use rusqlite::{Connection, OptionalExtension, params};
 use uuid::Uuid;
 
 use crate::error::{BackendError, BackendResult};
+use crate::i18n::tr;
 use crate::logging::{self, Level};
 use crate::models::{
     GetTrackDetailRequest, GetUsbTrackDetailRequest, KeyOption, KeyOptionGroup,
@@ -1076,6 +1077,11 @@ impl BackendService {
         let track = super::library::track_rows(&conn, std::slice::from_ref(&track_id))?
             .pop()
             .ok_or_else(|| BackendError::NotFound(format!("track not found: {track_id}")))?;
+        let status_text = if anlz_regenerated {
+            tr::cues_saved(cues.len()).render()
+        } else {
+            tr::cues_saved_no_cache(cues.len()).render()
+        };
         Ok(SaveTrackAnalysisEditsData {
             track_id,
             first_beat_ms,
@@ -1088,6 +1094,7 @@ impl BackendService {
             key_color,
             anlz_regenerated,
             track,
+            status_text,
         })
     }
 
@@ -1385,9 +1392,11 @@ impl BackendService {
             }
             None => None,
         };
+        let cues = collapse_anlz_cues(&bytes);
+        let status_text = tr::cues_saved_usb(cues.len()).render();
         Ok(SaveUsbTrackAnalysisEditsData {
             first_beat_ms: read_first_beat_from_anlz(&bytes),
-            cues: collapse_anlz_cues(&bytes),
+            cues,
             bpm: req.bpm,
             bpm_analyzer: req.bpm.map(|_| "user".to_string()),
             key: key.clone(),
@@ -1400,6 +1409,7 @@ impl BackendService {
             local_track_id,
             track,
             local_track,
+            status_text,
         })
     }
 

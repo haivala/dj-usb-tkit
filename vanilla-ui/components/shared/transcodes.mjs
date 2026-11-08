@@ -3,9 +3,8 @@
 // which selected tracks need one and keeps the list on each track
 // (`track.transcodes`); this module only asks and shows.
 
-import { counted } from "../../track_utils.mjs";
 import { cloneTemplate } from "../../ui_utils.mjs";
-import { t } from "../../ui_texts.mjs";
+import { t, tCount } from "../../ui_texts.mjs";
 import { createDialogLifecycle } from "./dialog_lifecycle.mjs";
 
 // The Convert… dialog. `open({ count, folder, formats })` (the backend's
@@ -28,7 +27,7 @@ export function createConvertDialogController(el, document) {
     close,
     open({ count = 0, folder = "", formats = [] }) {
       close();
-      el.convertTitle.textContent = `Convert ${counted(count, "track")}`;
+      el.convertTitle.textContent = tCount("ui-convert-title-count", count);
       el.convertFolderHint.textContent = t("ui-convert-folder-hint", { folder });
       el.convertFormatGroup.querySelectorAll("label").forEach((row) => row.remove());
       for (const choice of formats) {

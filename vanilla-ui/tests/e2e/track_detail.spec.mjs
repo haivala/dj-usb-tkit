@@ -105,6 +105,7 @@ function installTrackDetailMock(page, opts = {}) {
                   trackId: t.id, genre: r.genre ?? "Techno", rating: r.rating ?? 3, year: t.year ?? undefined,
                 })),
                 tracks: saved.map(withKeyLabel),
+                statusText: `Saved track details for ${saved.length} ${saved.length === 1 ? "track" : "tracks"}`,
               },
             };
           }
@@ -173,6 +174,7 @@ function installTrackDetailMock(page, opts = {}) {
                 keySource: payload?.request?.key != null ? "user" : null,
                 ...(opts.camelot && payload?.request?.key === "F#m" ? { keyDisplay: "11A", keyColor: 10 } : {}),
                 anlzRegenerated: true,
+                statusText: `Saved ${(payload?.request?.cues ?? []).length} ${(payload?.request?.cues ?? []).length === 1 ? "cue" : "cues"}`,
               },
             };
           }
@@ -1988,6 +1990,7 @@ test("cue editor opens + saves from an app-playlist track row", async ({ page })
                 key: request?.key ?? null,
                 keySource: request?.key != null ? "user" : null,
                 anlzRegenerated: true,
+                statusText: `Saved ${(request?.cues ?? []).length} ${(request?.cues ?? []).length === 1 ? "cue" : "cues"}`,
               },
             };
           }
@@ -2158,6 +2161,7 @@ function installUsbTrackDetailMock(page, mockOpts = {}) {
                 items: (r.tracks || []).map((t) => ({ usbMediaPathRaw: t.usbMediaPathRaw, localTrackId: "local-1", year })),
                 tracks: [{ ...usbTrack }],
                 localTracks: [{ ...localTrack }],
+                statusText: `Saved track details for ${(r.tracks || []).length} ${(r.tracks || []).length === 1 ? "track" : "tracks"} to USB`,
               },
             };
           }
@@ -2191,6 +2195,7 @@ function installUsbTrackDetailMock(page, mockOpts = {}) {
                 anlzUpdated: true, edbUpdated: true, localUpdated: true,
                 // The backend resolves the library track itself (not only the hint).
                 localTrackId: "local-1",
+                statusText: `Saved ${(payload?.request?.cues ?? []).length} ${(payload?.request?.cues ?? []).length === 1 ? "cue" : "cues"} to USB`,
               },
             };
           }
@@ -2320,7 +2325,7 @@ test("a rating-only edit from a USB row saves only the rating through the USB me
     }],
     rating: 4,
   });
-  await expect(page.locator("#statusText")).toContainText("Saved track details to USB");
+  await expect(page.locator("#statusText")).toContainText("Saved track details for 1 track to USB");
 });
 
 test("clearing the release date from a USB row sends an empty date and blanks the row's year", async ({ page }) => {

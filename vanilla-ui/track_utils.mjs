@@ -1,5 +1,7 @@
 // Track formatting utilities.
 
+import { t } from "./ui_texts.mjs";
+
 // `m:ss` / `h:mm:ss` for a millisecond duration (tracks carry `durationMs`,
 // Option<u64>).
 export function formatDurationMs(value) {
@@ -22,21 +24,14 @@ export function formatDurationMs(value) {
 // What each analyze action does, for its tooltip. A first analysis only fills
 // in what's missing; analyzing an analyzed track resets it (backend
 // `kept_analysis_values`).
-export const ANALYZE_TOOLTIP =
-  "Add the missing waveform, BPM, key and first beat; a BPM or key you edited or imported is kept";
 // A row's own Analyze button: disabled while its track waits or is analyzed.
 export function applyAnalyzeButtonState(state, button, trackId, analysisReady) {
   const id = String(trackId);
   const waiting = state.analysisWaitingTrackIds.has(id);
   button.disabled = waiting || state.analyzingTrackIds.has(id);
   if (waiting) button.dataset.tooltip = state.analysisWaitingTooltip;
-  else button.dataset.tooltip = analysisReady ? REANALYZE_TOOLTIP : ANALYZE_TOOLTIP;
+  else button.dataset.tooltip = t(analysisReady ? "ui-track-row-reanalyze-tooltip" : "ui-track-row-analyze-tooltip");
 }
-
-export const REANALYZE_TOOLTIP =
-  "Reset waveform, BPM, key and first beat to a fresh analysis, replacing imported or edited values (cues are kept)";
-export const ANALYZE_PLAYLIST_MISSING_TOOLTIP =
-  "Add the missing waveform, BPM, key and first beat to this playlist's unanalyzed tracks; a BPM or key you edited or imported is kept";
 
 export function formatBpm(value) {
   const n = Number(value);
@@ -56,7 +51,8 @@ export function renderTrackListDurationSummary(target, { totalDurationMs, durati
 }
 
 // `count` followed by the singular or plural noun ("1 track" / "3 tracks").
-// Pass `many` for irregular plurals ("entry" / "entries").
+// Its last user is the playlist export status line (`formatLastExport`),
+// which piece 12 of USB_TEXT_CATALOG_PLAN.md moves; then this goes.
 export function counted(count, one, many = `${one}s`) {
   return `${count} ${count === 1 ? one : many}`;
 }

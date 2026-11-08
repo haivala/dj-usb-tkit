@@ -151,8 +151,9 @@ drive selection from being rendered against a newer selected drive.
   or the start cue's position is dropped. At most one entry may have
   `playbackStart: true`: the memory-only playback-start cue (no pad, colour or
   name, never after the first hot cue, dropped without another cue, hot or
-  memory; outside the 8). Returns the saved values and `track`, the track's
-  whole row.
+  memory; outside the 8). Returns the saved values, `track`, the track's
+  whole row, and `statusText` ("Saved 3 cues", noting when the analysis cache
+  wasn't rewritten).
 - `get_usb_track_detail` — `{ usbRoot, usbAnalysisPathRaw, usbMediaPathRaw? }` →
   reads `{ firstBeatMs, cues, detailWaveform, keyOptions }` straight off an
   **on-USB** ANLZ bundle for the cue editor opened from a USB playlist / history
@@ -176,7 +177,7 @@ drive selection from being rendered against a newer selected drive.
   track matched; `localTrackId` is the library track the backend resolved, which
   the UI refreshes), plus the whole rows: `track` (the file's stick row, absent
   when no playlist or history lists it) and `localTrack` (`localTrackId`'s
-  library row). Runs as a background `usb_write` job
+  library row), and `statusText` ("Saved 3 cues to USB"). Runs as a background `usb_write` job
   (`run_usb_job_with_progress`), so the window never freezes: `job:event`
   progress reports each write (checking, ANLZ, `export.pdb`, library,
   `exportLibrary.db`) to the footer bar. Saves are serialized by
@@ -199,8 +200,9 @@ drive selection from being rendered against a newer selected drive.
   so rescans and rekordbox / Mixxx imports keep it over the file's tag; the
   date gets `release_date_source = 'user'`, so rescans keep it and its year.
   An unknown id blocks the save. Returns `{ items: [{ trackId, genre, rating,
-  year, releaseDate }], tracks }`, `releaseDate` being the date export writes
-  (as `get_track_detail`'s) and `tracks` the saved tracks' whole rows. The cue editor sends it with one id instead of
+  year, releaseDate }], tracks, statusText }`, `releaseDate` being the date export writes
+  (as `get_track_detail`'s), `tracks` the saved tracks' whole rows and `statusText`
+  "Saved track details for 2 tracks". The cue editor sends it with one id instead of
   `save_track_analysis_edits` when only the genre / rating / release date
   changed; the selection bar's Edit sends the selection.
 - `save_usb_track_metadata_edits` — `{ usbRoot, tracks: [{ usbMediaPathRaw,
@@ -213,8 +215,9 @@ drive selection from being rendered against a newer selected drive.
   year or month. A track missing from either database blocks the save before
   anything is written, with the same error as `save_usb_track_analysis_edits`. Leaves the ANLZ bundle, BPM, key and cues alone.
   Returns `{ items: [{ usbMediaPathRaw, localTrackId?, year?, releaseDate? }],
-  tracks, localTracks }` with the PDB's year and date after the save, the
-  edited files' whole stick rows and the library tracks' whole rows. A background `usb_write`
+  tracks, localTracks, statusText }` with the PDB's year and date after the save, the
+  edited files' whole stick rows, the library tracks' whole rows and "Saved track details
+  for 2 tracks to USB". A background `usb_write`
   job, serialized by `usb_write_lock` like `save_usb_track_analysis_edits`.
 - `get_tracks_metadata_summary` — `{ trackIds }` /
   `get_usb_tracks_metadata_summary` — `{ usbRoot, usbMediaPathsRaw }` → what
@@ -224,7 +227,8 @@ drive selection from being rendered against a newer selected drive.
   adds its genres to the library's.
 - `get_selection_duration` — `{ view, trackIds, … }`, the list named by
   `view`: `library` (as its sources are set), `playlist` with `id`, `usbPlaylist` / `usbHistory` with
-  `usbRoot` and `id` → `{ totalDurationMs, durationUnknownCount, trackCount }` for
+  `usbRoot` and `id` → `{ totalDurationMs, durationUnknownCount, trackCount,
+  durationUnknownText }` (the time's tooltip, empty when every length is known) for
   the selection bar's time: the ticked tracks summed by the same rule as that
   list's Total time, over the whole list, not the searched one.
 
@@ -246,13 +250,14 @@ drive selection from being rendered against a newer selected drive.
 
 ### Playlists
 
-- `create_playlist`
+- `create_playlist` → `{ playlistId, name, statusText }`
 - `rename_playlist`
 - `reorder_playlists` — `{ orderedPlaylistIds }`, every local playlist once, top first; saves the
   sidebar order (local only, it never changes anything on the USB). `list_playlists` returns that
   order, with playlists never reordered newest first
-- `delete_playlist`
-- `list_playlists`
+- `delete_playlist` → `{ playlistId, deleted, statusText }`
+- `list_playlists` — each playlist also carries `deleteConfirmText`, what the dialog asks before
+  deleting it
 - `get_playlist_tracks` — with `usbRoot` (the selected USB), each track also carries
   `exportFile` when export puts something other than its own file on that USB:
   `{ kind: "transcode" | "convert" | "refused", badge, tooltip }`, the FMT badge's text and
@@ -270,19 +275,22 @@ drive selection from being rendered against a newer selected drive.
   don't allow; see `docs/TRANSCODES.md`), or `null`, and `formatNoticeBlocks` (a track is
   refused, so the export is blocked). `null` when it can't be made. The frontend asks
   for it after the track list is shown, so it never holds the list up
-- `add_library_selection_to_playlist`
-- `add_track_candidates_to_playlist`
+- `add_library_selection_to_playlist` / `add_track_candidates_to_playlist` — both answer with
+  `statusText` ("Added 2 tracks (skipped 0) to Warmup"), also the Event Log entry; the
+  candidates' is empty when none resolved
 - `add_library_selection_to_playlists` / `add_track_candidates_to_playlists` — the same
   selection as the two above, resolved once and added to every playlist in `playlistIds`;
-  returns what each playlist took (`items`) and the totals
+  returns what each playlist took (`items`), the totals and `statusText` ("Added 3 tracks
+  (skipped 1) to Warmup, Peak", empty when none resolved), also the Event Log entry
 - `get_playlist_membership` — `{ trackIds }`, one entry per selected track (its local id, or
   `null` for a track with no local row yet); every local playlist in sidebar order with how
-  many of them it holds (`contained`) and `state`: `none`, `some` or `all`
-- `remove_tracks_from_playlist`
+  many of them it holds (`contained`), `state`: `none`, `some` or `all`, and `noteText`
+  ("Already in", "1 of 2 in", or empty)
+- `remove_tracks_from_playlist` → `{ playlistId, removed, statusText }`
 - `reorder_playlist_tracks`
 - `refresh_playlist_export_status` — recomputes every playlist's
-  `PlaylistUsbExportStatus` (`sameNameExistsOnUsb`, `locksReorder` and the sidebar's
-  `markLabel`) against the
+  `PlaylistUsbExportStatus` (`sameNameExistsOnUsb`, `locksReorder` with its
+  `reorderLockTooltip`, and the sidebar's `markLabel`) against the
   connected USB and the current export sync-mode setting, reading only the
   staged PDB/eDB (no USB access). Called when the sync mode changes.
 
@@ -344,15 +352,17 @@ See `docs/EXTERNAL_LIBRARIES.md` for behavior and the fields read.
   library, returns the `scan_library` result shape (`indexed`, `updated`,
   `removed`, `notFound`, `warnings`, `statusText`: what the import brought in)
 - `list_rekordbox_playlists` / `list_mixxx_playlists` — `{ path? }`; returns
-  `items: [{ id, name, kind, trackCount, existingPlaylist? }]` where `id` is
+  `items: [{ id, name, kind, trackCount, existingPlaylist?, noteText }]` where `id` is
   the source library's own id as a string, `kind` is `playlist` | `crate` |
   `history` (only lists with tracks), and `existingPlaylist` (`{ id, name }`)
-  is the local playlist an earlier import of that list made
-- `import_external_playlists` — `{ items: [{ library, path?, kind, id, force? }] }`
+  is the local playlist an earlier import of that list made; `noteText` is the
+  dialog's note on the list ("3 tracks · updates "My Set"")
+- `import_external_playlists` — `{ items: [{ library, name, path?, kind, id, force? }] }`
   (`library`: `rekordbox` | `mixxx`); imports the lists one after another, a
   failed one not stopping the rest. Each imports its tracks into the playlist
   an earlier import of that list made (`updatedExisting: true`) or a new one.
-  Returns `{ results, imported, failed, added, skipped }`: `results` follows
+  Returns `{ results, imported, failed, added, skipped, statusText }`
+  (`name` only words the status line's failed lists): `results` follows
   `items`, each `{ playlist }` (`{ playlistId, name, updatedExisting, added,
   skipped, indexed, notFound, warnings }`) or `{ error }`, and the counts total
   them. `skipped` counts list entries not placed (missing or unsupported files,
@@ -399,6 +409,7 @@ The USB commands send the text the UI shows, ready to display:
   is false when the drive already had exactly that name.
 - `run_usb_diagnostics` and `run_usb_parity_report`: `statusText`, `durationText` and
   `statusLabel`, the badge's text. `overallStatus` stays a value, for the badge's style.
+  `run_usb_diagnostics` also sends `healthText` ("USB health: good"), the health dots' tooltip.
 - `repair_usb_diagnostics`: `statusText`, `nothingToFix`, and `rows`, the fix list ready to show,
   including unsupported items.
 - `get_usb_player_menu_config` / `update_usb_player_menu_config`: `statusText`, and on each item
@@ -429,7 +440,8 @@ local (app-owned) playlist, in one of three request shapes — `orderedTrackIds`
 `sortBy`/`sortDir` (server sorts the whole playlist by that column and persists it — commits a
 client column sort), or `moveTrackId` + optional `beforeTrackId` (single-move for a paginated
 drag-reorder). `get_playlist_tracks` also returns `unanalyzedCount` over the whole filtered
-playlist, since a paginated client can't count them from one page. See `docs/PLAYLISTS_PLAYBACK.md`
+playlist, since a paginated client can't count them from one page, with the Analyze Missing
+button's `analyzeMissingLabel` and `analyzeMissingTooltip`. See `docs/PLAYLISTS_PLAYBACK.md`
 for when the UI disables reordering. `fetch_usb_playlists` and `run_usb_diagnostics` both return a
 `playlistUsbExportStatus` array (one entry per local playlist) so the frontend doesn't have to
 re-derive that lock condition from raw USB-scan/export-setting state.
@@ -477,7 +489,8 @@ When `repair_usb_diagnostics` is called with `apply: true`, the response may inc
 ### Playback
 
 - `resolve_playback_source`
-- `play_resolved_track`
+- `play_resolved_track` — answers with where it plays from (`source`, `sourceLabel`) and
+  `playingText`, the status line ("Playing from Library: Artist - Title")
 - `stop_playback_native`
 - `pause_playback_native` / `resume_playback_native` — hold the loaded track at
   its position / continue it; `paused` on the returned status and events.
@@ -494,8 +507,10 @@ When `repair_usb_diagnostics` is called with `apply: true`, the response may inc
   latestVersion, releaseUrl }`. `severity` is `"none"`, `"normal"`,
   `"feature"` (a newer release's notes carry `**Severity:** feature`) or
   `"critical"` (`**Severity:** critical`; wins over `"feature"`); the last two
-  show the in-app banner. Never fails: a network/parse error logs a warning
-  and returns a "no update" verdict.
+  show the in-app banner. Also `statusText`, the settings update line ("Version 1.2.3 is
+  available.", "Couldn't check for updates." or "Up to date."), and `bannerText` (empty
+  unless the banner shows). Never fails: a network/parse error logs a warning
+  and returns a "no update" verdict with `checkFailed`.
 
 ## Host utility commands
 

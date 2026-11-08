@@ -1221,7 +1221,9 @@ fn usb_group_edit_writes_every_selected_track_and_summary_reports_mixed_values()
         |_, _, _| {},
     );
     assert!(saved.ok, "group save failed: {saved:?}");
-    let items = saved.data.expect("save data").items;
+    let saved = saved.data.expect("save data");
+    assert_eq!(saved.status_text, "Saved track details for 2 tracks to USB");
+    let items = saved.items;
     assert_eq!(items.len(), 2);
     assert!(items.iter().all(|item| item.local_track_id.is_some()));
 

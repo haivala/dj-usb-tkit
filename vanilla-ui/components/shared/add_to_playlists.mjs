@@ -3,7 +3,7 @@
 // plus a field to create a new playlist. The ticked playlists all get the
 // selection in one call, which resolves the tracks once.
 
-import { counted } from "../../track_utils.mjs";
+import { t, tCount } from "../../ui_texts.mjs";
 import { cloneTemplate } from "../../ui_utils.mjs";
 import { createDialogLifecycle } from "./dialog_lifecycle.mjs";
 import { applyAddResolutions, toAddTrackCandidatePayload } from "../playlist/actions.mjs";
@@ -26,15 +26,15 @@ export async function addSelectionToPlaylists(ctx, view, ids, rows) {
         await ctx.loadPlaylists();
         return created?.playlistId || null;
       } catch (err) {
-        emitStatus(`Could not create playlist: ${err.message || err}`);
+        emitStatus(t("ui-add-to-create-failed", { error: err.message || err }));
         return null;
       }
     },
   });
   if (!playlistIds?.length) return;
 
-  const result = await ctx.withProgress("Adding tracks", async (progress) => {
-    progress(30, "Adding tracks...");
+  const result = await ctx.withProgress(t("ui-playlist-add-title"), async (progress) => {
+    progress(30, t("ui-playlist-add-adding"));
     if (view === "library") {
       return command("add_library_selection_to_playlists", {
         playlistIds,
@@ -54,24 +54,20 @@ export async function addSelectionToPlaylists(ctx, view, ids, rows) {
   });
 
   if (!Number(result?.resolved || 0)) {
-    emitStatus("No imported track IDs found to add");
+    emitStatus(t("ui-playlist-add-none-resolved"));
     return;
   }
   // The add cleared the playlists' "exported to USB" marks.
   await ctx.loadPlaylists();
   if (playlistIds.includes(state.currentPlaylistId)) await ctx.refreshCurrentPlaylistTracks();
-  const names = playlistIds
-    .map((id) => state.playlists.find((playlist) => playlist.id === id)?.name)
-    .filter(Boolean)
-    .join(", ");
   ctx.pushEventLog({
     level: "info",
     source: "playlist-add",
     code: "playlist_add.result",
-    message: `Added ${counted(result.added, "track")} to ${names}`,
+    message: result.statusText,
     details: `requested=${result.requested} | resolved=${result.resolved} | added=${result.added} | skipped=${result.skipped}`,
   });
-  emitStatus(`Added ${counted(result.added, "track")} (skipped ${result.skipped}) to ${names}`);
+  emitStatus(result.statusText);
 }
 
 // The Add to… dialog. `open({ count, load, create })` lists what `load()`
@@ -91,7 +87,6 @@ export function createAddToDialogController(el, document) {
   }
 
   function render(data) {
-    const selected = Number(data?.selected || 0);
     const items = data?.items || [];
     const rows = items.map((item) => {
       const row = cloneTemplate(document, "tplAddToItem");
@@ -102,14 +97,12 @@ export function createAddToDialogController(el, document) {
       box.disabled = all;
       box.indeterminate = item.state === "some" && !checked.has(item.playlistId);
       row.querySelector(".add-to-name").textContent = item.name;
-      row.querySelector(".add-to-note").textContent = all
-        ? "Already in"
-        : item.state === "some" ? `${item.contained} of ${selected} in` : "";
+      row.querySelector(".add-to-note").textContent = item.noteText || "";
       return row;
     });
     if (!rows.length) {
       const empty = cloneTemplate(document, "tplMutedListItem");
-      empty.textContent = "No playlists yet: create one below.";
+      empty.textContent = t("ui-add-to-empty");
       rows.push(empty);
     }
     el.addToList.replaceChildren(...rows);
@@ -160,7 +153,7 @@ export function createAddToDialogController(el, document) {
       close();
       checked = new Set();
       el.addToNewName.value = "";
-      el.addToTitle.textContent = `Add ${counted(count, "track")} to playlists`;
+      el.addToTitle.textContent = tCount("ui-add-to-title-count", count);
       render(await load());
       request = { load, create };
       return dialog.open(el.addToList.querySelector("input:not(:disabled)") || el.addToNewName);

@@ -232,10 +232,11 @@ function installSourceChipAnalysisMock(page) {
                 items: [
                   {
                     id: "4", name: "Test playlist", kind: "playlist", trackCount: 3,
-                    existingPlaylist: { id: "pl-old", name: "My Test playlist" }
+                    existingPlaylist: { id: "pl-old", name: "My Test playlist" },
+                    noteText: '3 tracks · updates "My Test playlist"'
                   },
-                  { id: "7", name: "Peak", kind: "crate", trackCount: 2 },
-                  { id: "3", name: "2026-09-30", kind: "history", trackCount: 4 }
+                  { id: "7", name: "Peak", kind: "crate", trackCount: 2, noteText: "2 tracks" },
+                  { id: "3", name: "2026-09-30", kind: "history", trackCount: 4, noteText: "4 tracks" }
                 ]
               }
             };
@@ -245,8 +246,8 @@ function installSourceChipAnalysisMock(page) {
               ok: true,
               data: {
                 items: [
-                  { id: "1234567890", name: "Winter Party", kind: "playlist", trackCount: 40 },
-                  { id: "1122334455", name: "HISTORY 2025-01-01", kind: "history", trackCount: 7 }
+                  { id: "1234567890", name: "Winter Party", kind: "playlist", trackCount: 40, noteText: "40 tracks" },
+                  { id: "1122334455", name: "HISTORY 2025-01-01", kind: "history", trackCount: 7, noteText: "7 tracks" }
                 ]
               }
             };
@@ -271,7 +272,12 @@ function installSourceChipAnalysisMock(page) {
             });
             return {
               ok: true,
-              data: { results, imported: results.length, failed: 0, added: 2 * results.length, skipped: 0 }
+              data: {
+                results, imported: results.length, failed: 0, added: 2 * results.length, skipped: 0,
+                statusText: results.length === 1
+                  ? `Imported playlist ${results[0].playlist.name}: 2 tracks`
+                  : `Imported ${results.length} of ${results.length} playlists: ${2 * results.length} tracks`
+              }
             };
           }
           if (command === "list_playlists") {
@@ -452,7 +458,7 @@ test("Import ticks rekordbox and Mixxx playlists, imports each and opens the fir
   await okBtn.click();
   await expect(overlay).toBeHidden();
   await expect.poll(async () => page.evaluate(() => window.__playlistImports)).toEqual([
-    { library: "mixxx", path: "/home/dj/.mixxx/mixxxdb.sqlite", kind: "history", id: "3", force: false }
+    { library: "mixxx", name: "2026-09-30", path: "/home/dj/.mixxx/mixxxdb.sqlite", kind: "history", id: "3", force: false }
   ]);
   await expect(page.locator('.nav-playlist-item[data-playlist-id="pl-mixxx"]')).toHaveClass(/active/);
   await expect(page.locator("#playlistPanelTitle")).toHaveText(/ · Imported from Mixxx$/);
@@ -467,8 +473,8 @@ test("Import ticks rekordbox and Mixxx playlists, imports each and opens the fir
   await page.locator("#playlistImportForce").check();
   await okBtn.click();
   await expect.poll(async () => page.evaluate(() => window.__playlistImports.slice(1))).toEqual([
-    { library: "rekordbox", path: "/music/master.db", kind: "playlist", id: "1234567890", force: true },
-    { library: "mixxx", path: "/home/dj/.mixxx/mixxxdb.sqlite", kind: "crate", id: "7", force: true }
+    { library: "rekordbox", name: "Winter Party", path: "/music/master.db", kind: "playlist", id: "1234567890", force: true },
+    { library: "mixxx", name: "Peak", path: "/home/dj/.mixxx/mixxxdb.sqlite", kind: "crate", id: "7", force: true }
   ]);
   await expect(page.locator('.nav-playlist-item[data-playlist-id="pl-rekordbox"]')).toHaveClass(/active/);
   await expect(page.locator('.source-chip-toggle[data-rekordbox-db="true"]')).toBeChecked();

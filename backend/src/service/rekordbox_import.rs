@@ -346,6 +346,7 @@ fn list_rekordbox_playlists_from(conn: &Connection) -> BackendResult<Vec<Externa
             };
             ExternalPlaylistSummary {
                 existing_playlist: None,
+                note_text: String::new(),
                 id: node.id.clone(),
                 name,
                 kind,
@@ -1687,6 +1688,7 @@ mod tests {
         );
         let item = |id: &str| ImportExternalPlaylistsItem {
             library: ExternalLibrary::Rekordbox,
+            name: id.to_string(),
             request: ImportExternalPlaylistRequest {
                 path: path.clone(),
                 kind: ExternalPlaylistKind::Playlist,
@@ -1719,6 +1721,17 @@ mod tests {
         assert!(friday.skipped > 0, "{}", friday.skipped);
         assert_eq!(data.added, friday.added + openers.added);
         assert_eq!(data.skipped, friday.skipped + openers.skipped);
+        assert!(
+            data.status_text.starts_with(&format!(
+                "Imported 2 of 3 playlists: {} tracks | ",
+                data.added
+            )) && data.status_text.contains(" skipped (see event log)")
+                && data
+                    .status_text
+                    .ends_with(" | 1 failed: 15 (see event log)"),
+            "{}",
+            data.status_text
+        );
     }
 
     #[test]
@@ -1747,6 +1760,7 @@ mod tests {
             .iter()
             .map(|p| (p.id.as_str(), p.name.as_str(), p.kind, p.track_count))
             .collect();
+        assert_eq!(listed[0].note_text, "5 tracks");
         // Folder path in the name, tree order, no folder / smart / deleted /
         // empty lists; deleted entries and deleted tracks not counted.
         assert_eq!(

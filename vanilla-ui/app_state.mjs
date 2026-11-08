@@ -131,7 +131,7 @@ export function createInitialState() {
     playbackBackendQueue: null,
     playheadAnimationHandle: null,
     progressPercent: 0,
-    progressBaseText: "Idle",
+    progressBaseText: "",
     progressHeartbeatTimer: null,
     progressStartedAtMs: 0,
     progressPausedAtMs: null,

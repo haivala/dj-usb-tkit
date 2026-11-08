@@ -3,7 +3,7 @@ import { narrowTrackSelectionToLoaded } from "../shared/track_selection.mjs";
 import { renderEmptyState } from "../shell/actions.mjs";
 import { cssEscape, cloneTemplate } from "../../ui_utils.mjs";
 import { fillBpmCell, fillFormatCell, fillKeyCell, fillYearCell, coverElement, setCueButtonState, formatTrackDuration, trackHasWaveform } from "../../track_table.mjs";
-import { REANALYZE_TOOLTIP, applyAnalyzeButtonState } from "../../track_utils.mjs";
+import { applyAnalyzeButtonState } from "../../track_utils.mjs";
 import { t } from "../../ui_texts.mjs";
 import { renderTrackListDurationSummary } from "../../track_utils.mjs";
 import { drawWaveformCanvas, invalidateWaveformCache, setWaveformColorData } from "../../waveform.mjs";
@@ -757,7 +757,7 @@ export function patchLibraryRowCells(ctx, row, track) {
     const analyzeBtn = actionTd.querySelector("[data-action='analyze-track']");
     if (analyzeBtn && track.analysisReady) {
       analyzeBtn.textContent = t("ui-track-row-reanalyze");
-      analyzeBtn.dataset.tooltip = REANALYZE_TOOLTIP;
+      analyzeBtn.dataset.tooltip = t("ui-track-row-reanalyze-tooltip");
     }
   }
 

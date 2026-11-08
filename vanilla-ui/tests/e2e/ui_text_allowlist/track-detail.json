@@ -1,13 +1,6 @@
 [
-  "First beat",
   "H",
   "M",
-  "No active playlist",
   "Q",
-  "Total time: 0:00",
-  "aria-label: Play",
-  "data-tooltip: Adds a ▶ memory cue (no hot cue) on the first beat, so the CDJ loads there instead of on cue A",
-  "data-tooltip: Play",
-  "data-tooltip: Reset waveform, BPM, key and first beat to a fresh analysis, replacing imported or edited values (cues are kept)",
-  "data-tooltip: Show in folder: /music/one.mp3"
+  "Total time: 0:00"
 ]

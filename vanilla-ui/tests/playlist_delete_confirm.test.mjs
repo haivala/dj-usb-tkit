@@ -1,6 +1,7 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 import { deletePlaylist } from "../components/playlist/actions.mjs";
+import "./test_helpers.mjs"; // the UI texts, as startup loads them
 
 test("deletePlaylist aborts when confirmation is declined", async () => {
   let commandCalled = false;

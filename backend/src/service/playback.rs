@@ -1,6 +1,7 @@
 //! Native playback and resolving which file a track plays from.
 
 use super::*;
+use crate::i18n::tr;
 
 /// The status-line label: only *where* playback is coming from, with no
 /// qualifier about how it was resolved or what was skipped -- any fallback
@@ -8,7 +9,27 @@ use super::*;
 /// the library copy or is playing a USB copy (a request with neither errors
 /// out before it gets here), so those are the only two outcomes.
 pub(super) fn playback_source_label(library_resolved: bool) -> String {
-    if library_resolved { "Library" } else { "USB" }.to_string()
+    if library_resolved {
+        tr::playback_source_library()
+    } else {
+        tr::playback_source_usb()
+    }
+    .render()
+}
+
+/// The track as the status line names it: "Artist - Title", or the title
+/// alone with no artist.
+pub(super) fn playback_track_name(artist: &str, title: &str) -> String {
+    let title = title.trim();
+    let title = if title.is_empty() {
+        tr::track_row_unknown_title().render()
+    } else {
+        title.to_string()
+    };
+    match artist.trim() {
+        "" => title,
+        artist => format!("{artist} - {title}"),
+    }
 }
 
 pub(super) fn is_recoverable_playback_error(message: &str) -> bool {
@@ -52,6 +73,7 @@ pub(super) fn play_resolved_track_data(
 ) -> PlayResolvedTrackData {
     let library_resolved = source == PlaybackSource::Library;
     PlayResolvedTrackData {
+        playing_text: String::new(),
         path: status.path.unwrap_or_else(|| requested_path.to_string()),
         playing: status.playing,
         paused: status.paused,
@@ -68,6 +90,17 @@ pub(super) fn play_resolved_track_data(
 
 impl BackendService {
     pub fn play_resolved_track(
+        &self,
+        playback: &PlaybackController,
+        req: PlayResolvedTrackRequest,
+    ) -> BackendResult<PlayResolvedTrackData> {
+        let name = playback_track_name(&req.artist, &req.title);
+        let mut data = self.play_resolved_source(playback, req)?;
+        data.playing_text = tr::playback_playing(&data.source_label, name).render();
+        Ok(data)
+    }
+
+    fn play_resolved_source(
         &self,
         playback: &PlaybackController,
         req: PlayResolvedTrackRequest,

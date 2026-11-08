@@ -17,6 +17,7 @@
 
 import { STORAGE_KEY_UPDATE_DISMISSED } from "./settings_keys.mjs";
 import { openExternalUrl } from "./ui_utils.mjs";
+import { t } from "./ui_texts.mjs";
 
 export const RELEASES_PAGE_URL = "https://github.com/haivala/dj-usb-tkit/releases";
 
@@ -55,13 +56,12 @@ function renderUpdateActions(ctx, container) {
 function updateStatusText(state) {
   const info = state.updateCheck;
   if (!info) return "";
-  if (info.updateAvailable) {
-    return state.updateInstallFailed
-      ? `Couldn't install version ${info.latestVersion}.`
-      : `Version ${info.latestVersion} is available.`;
+  if (info.updateAvailable && state.updateInstallFailed) {
+    return t("ui-update-install-failed", { version: info.latestVersion });
   }
-  if (info.checkFailed) return "Couldn't check for updates.";
-  return state.updateCheckManual ? "Up to date." : "";
+  // "Up to date." only answers a manual check.
+  if (!info.updateAvailable && !info.checkFailed && !state.updateCheckManual) return "";
+  return info.statusText || "";
 }
 
 // The settings header's re-check button, the update line, and the
@@ -72,7 +72,7 @@ export function renderUpdateNotice(ctx) {
   const available = !!info?.updateAvailable;
 
   el.settingsUpdateDot.classList.toggle("hidden", !available);
-  el.settingsBtn.setAttribute("aria-label", available ? "Settings (update available)" : "Settings");
+  el.settingsBtn.setAttribute("aria-label", t(available ? "ui-header-settings-update-available" : "ui-header-settings"));
 
   // Only offered once a check has run (never in the browser/test build).
   const checkBtn = el.settingsUpdateCheckBtn;
@@ -134,19 +134,14 @@ export async function refreshUpdateCheck(ctx, { manual = false } = {}) {
   }
 }
 
-// The banner's wording per severity; any other severity gets no banner (just
-// the quiet settings line).
-const BANNER_TEXT = {
-  critical: (version) => `Critical update available: ${version}`,
-  feature: (version) => `New features available: ${version}`,
-};
-
 export function renderUpdateBanner(ctx) {
   const { state, el, localStorage } = ctx;
 
   renderUpdateActions(ctx, el.updateBannerActions);
   const info = state.updateCheck;
-  const bannerText = BANNER_TEXT[info?.severity];
+  // The backend words the banner for a feature or critical release; any
+  // other severity has none (just the quiet settings line).
+  const bannerText = info?.bannerText;
   if (!info || !bannerText) {
     el.updateBanner.classList.add("hidden");
     return;
@@ -167,7 +162,7 @@ export function renderUpdateBanner(ctx) {
   el.updateBanner.classList.toggle("is-critical", info.severity === "critical");
   el.updateBanner.classList.toggle("is-feature", info.severity === "feature");
   el.updateBanner.setAttribute("role", info.severity === "critical" ? "alert" : "status");
-  el.updateBannerText.querySelector(".update-banner-message").textContent = bannerText(info.latestVersion);
+  el.updateBannerText.querySelector(".update-banner-message").textContent = bannerText;
   el.updateBannerText.querySelector(".update-banner-link").onclick = (event) => {
     event.preventDefault();
     openExternalUrl(ctx.window, info.releaseUrl || RELEASES_PAGE_URL);
@@ -199,7 +194,7 @@ export async function installUpdate(ctx) {
       level: "warn",
       source: "update",
       code: "update.busy",
-      status: { text: "Finish the running job before updating." }
+      status: { text: t("ui-update-busy") }
     });
     return;
   }

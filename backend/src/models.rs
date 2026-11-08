@@ -445,6 +445,9 @@ pub struct Playlist {
     /// path may since belong to another stick, so it isn't guessed).
     #[serde(default)]
     pub last_exported_usb_name: Option<String>,
+    /// What the dialog asks before deleting the playlist.
+    #[serde(default)]
+    pub delete_confirm_text: String,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -860,6 +863,7 @@ pub struct CreatePlaylistRequest {
 pub struct CreatePlaylistData {
     pub playlist_id: String,
     pub name: String,
+    pub status_text: String,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -901,6 +905,7 @@ pub struct DeletePlaylistRequest {
 pub struct DeletePlaylistData {
     pub playlist_id: String,
     pub deleted: bool,
+    pub status_text: String,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -1005,6 +1010,11 @@ pub struct GetPlaylistTracksData {
     /// can't count them from a single loaded page).
     #[serde(default)]
     pub unanalyzed_count: usize,
+    /// The "Analyze Missing Tracks (N)" button's label and tooltip.
+    #[serde(default)]
+    pub analyze_missing_label: String,
+    #[serde(default)]
+    pub analyze_missing_tooltip: String,
     /// Whole list before the search filter -- see `track_list::list_totals`.
     #[serde(default)]
     pub list_track_count: usize,
@@ -1028,6 +1038,9 @@ pub struct AddTracksToPlaylistData {
     pub playlist_id: String,
     pub added: usize,
     pub skipped: usize,
+    /// "Added 2 tracks (skipped 0) to Warmup".
+    #[serde(default)]
+    pub status_text: String,
 }
 
 /// The ticked tracks of one track-list view, for the selection bar's total
@@ -1066,6 +1079,10 @@ pub struct GetSelectionDurationData {
     pub total_duration_ms: u64,
     pub duration_unknown_count: usize,
     pub track_count: usize,
+    /// The time's tooltip when some selected tracks have no length yet
+    /// ("2 of the selected tracks have no length yet"); empty when none.
+    #[serde(default)]
+    pub duration_unknown_text: String,
 }
 
 /// Every local track id that matches the current library filter -- so
@@ -1178,6 +1195,9 @@ pub struct AddTrackCandidatesToPlaylistData {
     pub skipped: usize,
     #[serde(default)]
     pub resolutions: Vec<AddTrackCandidateResolution>,
+    /// As `AddTracksToPlaylistData::status_text`; empty when nothing resolved.
+    #[serde(default)]
+    pub status_text: String,
 }
 
 /// The selection bar's "Add to…": the same selection as
@@ -1222,6 +1242,10 @@ pub struct AddTracksToPlaylistsData {
     pub items: Vec<AddTracksToPlaylistData>,
     #[serde(default)]
     pub resolutions: Vec<AddTrackCandidateResolution>,
+    /// "Added 2 tracks (skipped 0) to Warmup, Peak", the playlists in request
+    /// order; empty when no track resolved.
+    #[serde(default)]
+    pub status_text: String,
 }
 
 /// The "Add to…" picker: which playlists already hold the selection. One
@@ -1250,6 +1274,8 @@ pub struct PlaylistMembership {
     /// How many of the selected tracks the playlist already holds.
     pub contained: usize,
     pub state: PlaylistMembershipState,
+    /// The note beside it: "Already in", "1 of 2 in", or empty.
+    pub note_text: String,
 }
 
 /// Every local playlist in sidebar order, with how much of the selection
@@ -1273,6 +1299,7 @@ pub struct RemoveTracksFromPlaylistRequest {
 pub struct RemoveTracksFromPlaylistData {
     pub playlist_id: String,
     pub removed: usize,
+    pub status_text: String,
 }
 
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
@@ -1720,6 +1747,9 @@ pub struct PlaylistUsbExportStatus {
     pub export_button_text: String,
     /// Tooltip paired with `export_button_text`.
     pub export_button_title: String,
+    /// The sortable columns' tooltip while `locks_reorder`; `None` otherwise.
+    #[serde(default)]
+    pub reorder_lock_tooltip: Option<String>,
 }
 
 /// Request for `refresh_playlist_export_status` -- a cheap recompute of every
@@ -1958,6 +1988,8 @@ pub struct PlayResolvedTrackData {
     pub source_label: String,
     pub library_resolved: bool,
     pub has_usb_context: bool,
+    /// The status line while it plays: "Playing from Library: Artist - Title".
+    pub playing_text: String,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -2377,6 +2409,9 @@ pub struct RunUsbDiagnosticsData {
     /// "PASS", on the report's badge.
     #[serde(default)]
     pub status_label: String,
+    /// "USB health: good", the health dots' tooltip.
+    #[serde(default)]
+    pub health_text: String,
     pub playlist_usb_export_status: Vec<PlaylistUsbExportStatus>,
 }
 
@@ -2847,6 +2882,10 @@ pub struct ExternalPlaylistSummary {
     /// again updates that playlist.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub existing_playlist: Option<ImportedPlaylistRef>,
+    /// The import dialog's note on the list: its track count, and which
+    /// playlist importing it again updates.
+    #[serde(default)]
+    pub note_text: String,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -2906,6 +2945,10 @@ pub struct ImportExternalPlaylistData {
 #[serde(rename_all = "camelCase")]
 pub struct ImportExternalPlaylistsItem {
     pub library: ExternalLibrary,
+    /// The list's name as the dialog showed it, for the status line when its
+    /// import fails.
+    #[serde(default)]
+    pub name: String,
     #[serde(flatten)]
     pub request: ImportExternalPlaylistRequest,
 }
@@ -2936,6 +2979,8 @@ pub struct ImportExternalPlaylistsData {
     /// Tracks placed, and entries skipped, over every imported list.
     pub added: usize,
     pub skipped: usize,
+    /// The status line once at least one list was imported.
+    pub status_text: String,
 }
 
 // ── track cues + beat-grid editing ────────────────────────
@@ -3087,6 +3132,8 @@ pub struct SaveTrackAnalysisEditsData {
     pub anlz_regenerated: bool,
     /// The track's whole library row after the save, for the track tables.
     pub track: Track,
+    /// "Saved 3 cues", noting when the analysis cache wasn't updated.
+    pub status_text: String,
 }
 
 // ── USB-native cue editing (edits an on-device bundle directly) ────────────
@@ -3193,6 +3240,8 @@ pub struct SaveUsbTrackAnalysisEditsData {
     /// `local_track_id`'s whole library row after the save.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub local_track: Option<Track>,
+    /// "Saved 3 cues to USB".
+    pub status_text: String,
 }
 
 /// Genre / star rating / release date edit, from the cue editor (one track)
@@ -3237,6 +3286,8 @@ pub struct SaveTrackMetadataEditsData {
     pub items: Vec<TrackMetadataValues>,
     /// The saved tracks' whole library rows, for the track tables.
     pub tracks: Vec<Track>,
+    /// "Saved track details for 2 tracks".
+    pub status_text: String,
 }
 
 /// One USB track of a [`SaveUsbTrackMetadataEditsRequest`].
@@ -3297,6 +3348,8 @@ pub struct SaveUsbTrackMetadataEditsData {
     pub tracks: Vec<UsbTrack>,
     /// The library tracks the edits were also written to, whole.
     pub local_tracks: Vec<Track>,
+    /// "Saved track details for 2 tracks to USB".
+    pub status_text: String,
 }
 
 /// One field across a set of tracks: the value they all share, or `mixed`
