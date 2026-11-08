@@ -14,8 +14,30 @@ use super::{
 };
 use crate::models::UsbParityPlaylistDetail;
 
+/// A check with an English `label`, keyed like the real one when a layout lists
+/// it (so it's placed and found as the real one is), unkeyed (a playlist's row)
+/// otherwise.
+fn test_check(label: &str, status: crate::models::DiagStatus) -> crate::models::DiagCheck {
+    let listed = DISPLAY_LAYOUT
+        .iter()
+        .chain(&super::overview::PARITY_LAYOUT)
+        .flat_map(|display| display.labels.iter())
+        .chain(&super::overview::PARITY_HEADLINE_CHECKS)
+        // The Engine DJ checks the overview reads (its column lists none).
+        .chain(&[
+            crate::i18n::tr::diagnostics_check_engine_missing as fn() -> crate::i18n::Text,
+            crate::i18n::tr::diagnostics_check_engine_upkeep,
+            crate::i18n::tr::diagnostics_check_engine_sync,
+        ])
+        .find(|text| text().render_english() == label);
+    match listed {
+        Some(text) => crate::models::DiagCheck::new(text(), status, ""),
+        None => crate::models::DiagCheck::named(label.to_string(), status, ""),
+    }
+}
+
 fn diag_section(title: &str, status: &str, checks: &[(&str, &str)]) -> crate::models::DiagSection {
-    use crate::models::{DiagCheck, DiagSection, DiagStatus};
+    use crate::models::{DiagSection, DiagStatus};
     let parse = |s: &str| match s {
         "WARN" => DiagStatus::Warn,
         "FAIL" => DiagStatus::Fail,
@@ -26,12 +48,7 @@ fn diag_section(title: &str, status: &str, checks: &[(&str, &str)]) -> crate::mo
         status: parse(status),
         checks: checks
             .iter()
-            .map(|(label, st)| DiagCheck {
-                label: label.to_string(),
-                status: parse(st),
-                detail: String::new(),
-                link: None,
-            })
+            .map(|(label, st)| test_check(label, parse(st)))
             .collect(),
         counts: None,
     }
@@ -238,7 +255,7 @@ fn t19_mismatch_warns_older_players_show_zero_or_one_tracks() {
     let cdj = diag_section(
         "Player Counter Snapshot",
         "WARN",
-        &[(T19_TEMPLATE_STATE_LABEL, "WARN"), ("Shape mode", "PASS")],
+        &[("PDB history page", "WARN"), ("Shape mode", "PASS")],
     );
     let groups = regroup_sections(
         &DISPLAY_LAYOUT,
@@ -250,7 +267,7 @@ fn t19_mismatch_warns_older_players_show_zero_or_one_tracks() {
         pdb_section
             .checks
             .iter()
-            .any(|c| c.label == T19_TEMPLATE_STATE_LABEL)
+            .any(|c| c.key == T19_TEMPLATE_STATE_LABEL().key())
     );
     let overview = diagnostics_overview(
         &groups,
@@ -352,13 +369,8 @@ fn overview_uses_singular_wording_for_one() {
 
 #[test]
 fn parity_overview_explains_mismatches_in_plain_words() {
-    use crate::models::{DiagCheck, DiagStatus};
-    let check = |label: &str, status: DiagStatus| DiagCheck {
-        label: label.to_string(),
-        status,
-        detail: String::new(),
-        link: None,
-    };
+    use crate::models::DiagStatus;
+    let check = test_check;
     let checks = vec![
         check("Overall player parity status", DiagStatus::Fail),
         check("Playlist membership parity", DiagStatus::Fail),

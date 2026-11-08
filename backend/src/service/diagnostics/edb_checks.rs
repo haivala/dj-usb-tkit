@@ -1,6 +1,7 @@
 //! eDB coverage helpers: indexed paths, strict raw coverage, ratings, history rows.
 
 use super::*;
+use crate::i18n::tr;
 
 /// Audio paths the eDB `content` table indexes, as written (`path`, or
 /// `FolderPath` + `FileNameL` in older schemas). Match them with
@@ -130,21 +131,12 @@ pub(crate) fn evaluate_strict_raw_coverage_parity(
     };
     let status = DiagStatus::worst(&missing_status, &extra_status);
     let detail = match (missing_count, extra_count) {
-        (0, 0) => format!("all {total_indexed} indexed audio files present, no unindexed files"),
-        (m, 0) => format!(
-            "{m} of {} missing from USB",
-            counted(total_indexed, "indexed audio file", "indexed audio files")
-        ),
-        (0, e) => format!(
-            "{} on USB not referenced in any playlist (total indexed={total_indexed})",
-            counted(e, "audio file", "audio files")
-        ),
-        (m, e) => format!(
-            "{m} of {} missing; {} on USB",
-            counted(total_indexed, "indexed file", "indexed files"),
-            counted(e, "unindexed file", "unindexed files")
-        ),
-    };
+        (0, 0) => tr::diagnostics_check_parity_files_ok(total_indexed),
+        (m, 0) => tr::diagnostics_check_parity_files_missing(m, total_indexed),
+        (0, e) => tr::diagnostics_check_parity_files_extra(e, total_indexed),
+        (m, e) => tr::diagnostics_check_parity_files_both(m, total_indexed, e),
+    }
+    .render();
     StrictRawCoverageParity {
         missing_count,
         extra_count,

@@ -2302,11 +2302,48 @@ pub struct DiagCountsSummary {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct DiagCheck {
+    /// The catalog key of `label`: what the report's layout and overview match
+    /// a check on, so they never compare translated text. Empty for a check
+    /// named by data (a playlist's row).
+    #[serde(skip)]
+    pub key: &'static str,
     pub label: String,
     pub status: DiagStatus,
     pub detail: String,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub link: Option<String>,
+}
+
+impl DiagCheck {
+    pub fn new(
+        label: crate::i18n::Text,
+        status: DiagStatus,
+        detail: impl std::fmt::Display,
+    ) -> Self {
+        Self {
+            key: label.key(),
+            label: label.render(),
+            status,
+            detail: detail.to_string(),
+            link: None,
+        }
+    }
+
+    /// A check named by data, such as a playlist's name.
+    pub fn named(label: String, status: DiagStatus, detail: impl std::fmt::Display) -> Self {
+        Self {
+            key: "",
+            label,
+            status,
+            detail: detail.to_string(),
+            link: None,
+        }
+    }
+
+    pub fn with_link(mut self, link: impl Into<String>) -> Self {
+        self.link = Some(link.into());
+        self
+    }
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]

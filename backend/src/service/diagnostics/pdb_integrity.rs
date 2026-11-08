@@ -1,6 +1,7 @@
 //! PDB integrity checks.
 
 use super::*;
+use crate::i18n::{Text, tr};
 
 pub(crate) fn diagnose_pdb_integrity(
     pdb_path: &std::path::Path,
@@ -15,12 +16,11 @@ pub(crate) fn diagnose_pdb_integrity(
     let mut checks = Vec::new();
 
     if !pdb_path.exists() {
-        checks.push(DiagCheck {
-            label: "PDB exists".to_string(),
-            status: DiagStatus::Fail,
-            detail: format!("File not found: {}", pdb_path.display()),
-            link: None,
-        });
+        checks.push(DiagCheck::new(
+            tr::diagnostics_check_pdb_exists(),
+            DiagStatus::Fail,
+            tr::diagnostics_check_pdb_exists_missing(pdb_path.display()),
+        ));
         return (
             DiagSection {
                 title: "PDB Integrity".to_string(),
@@ -31,22 +31,20 @@ pub(crate) fn diagnose_pdb_integrity(
             None,
         );
     }
-    checks.push(DiagCheck {
-        label: "PDB exists".to_string(),
-        status: DiagStatus::Pass,
-        detail: "Found".to_string(),
-        link: None,
-    });
+    checks.push(DiagCheck::new(
+        tr::diagnostics_check_pdb_exists(),
+        DiagStatus::Pass,
+        tr::diagnostics_check_pdb_exists_found(),
+    ));
 
     let (parsed, diag) = match parse_pdb_with_diagnostics(pdb_path) {
         Ok(result) => result,
         Err(err) => {
-            checks.push(DiagCheck {
-                label: "PDB parseable".to_string(),
-                status: DiagStatus::Fail,
-                detail: format!("Parse error: {err}"),
-                link: None,
-            });
+            checks.push(DiagCheck::new(
+                tr::diagnostics_check_pdb_parseable(),
+                DiagStatus::Fail,
+                tr::diagnostics_check_pdb_parseable_error(err),
+            ));
             return (
                 DiagSection {
                     title: "PDB Integrity".to_string(),
@@ -59,21 +57,19 @@ pub(crate) fn diagnose_pdb_integrity(
         }
     };
 
-    checks.push(DiagCheck {
-        label: "PDB parseable".to_string(),
-        status: DiagStatus::Pass,
-        detail: format!(
-            "{}, {}, {}, {}, {}, {}, {}",
-            counted(parsed.tracks.len(), "track", "tracks"),
-            counted(parsed.artists.len(), "artist", "artists"),
-            counted(parsed.albums.len(), "album", "albums"),
-            counted(parsed.genres.len(), "genre", "genres"),
-            counted(parsed.labels.len(), "label", "labels"),
-            counted(parsed.keys.len(), "key", "keys"),
-            counted(parsed.artworks.len(), "artwork", "artworks"),
+    checks.push(DiagCheck::new(
+        tr::diagnostics_check_pdb_parseable(),
+        DiagStatus::Pass,
+        tr::diagnostics_check_pdb_parseable_counts(
+            parsed.tracks.len(),
+            parsed.artists.len(),
+            parsed.albums.len(),
+            parsed.genres.len(),
+            parsed.labels.len(),
+            parsed.keys.len(),
+            parsed.artworks.len(),
         ),
-        link: None,
-    });
+    ));
 
     // The detectors below all look at the same bytes; read the file once.
     let bytes = std::fs::read(pdb_path).unwrap_or_default();
@@ -94,9 +90,9 @@ pub(crate) fn diagnose_pdb_integrity(
             DiagStatus::Pass
         };
         let detail = if invalid_current {
-            format!("value {header_compat} at bytes 0x10..0x14; expected a known-compatible value")
+            tr::diagnostics_check_pdb_header_unknown(header_compat)
         } else {
-            format!("value {header_compat} at bytes 0x10..0x14")
+            tr::diagnostics_check_pdb_header_value(header_compat)
         };
         if matches!(header_compat_status, DiagStatus::Warn) {
             raw_warnings.push(logging::log(
@@ -108,12 +104,11 @@ pub(crate) fn diagnose_pdb_integrity(
                 ),
             ));
         }
-        checks.push(DiagCheck {
-            label: "PDB header compatibility".to_string(),
-            status: header_compat_status,
+        checks.push(DiagCheck::new(
+            tr::diagnostics_check_pdb_header(),
+            header_compat_status,
             detail,
-            link: None,
-        });
+        ));
     }
 
     {
@@ -124,27 +119,24 @@ pub(crate) fn diagnose_pdb_integrity(
         let bad_u5 = crate::service::repair::detect_pdb_sentinel_u5_on_data_pages(&bytes);
         let bad_flags = crate::service::repair::detect_pdb_wrong_page_flags(&bytes);
         let bad_tranrf = crate::service::repair::detect_pdb_zero_tranrf_all_tables(&bytes);
-        let mut parts = Vec::new();
+        let mut parts: Vec<Text> = Vec::new();
         if !bad_u5.is_empty() {
-            parts.push(format!(
-                "{} with sentinel u5=0x1FFF",
-                counted(bad_u5.len(), "page", "pages")
+            parts.push(tr::diagnostics_check_pdb_page_headers_sentinel_u5(
+                bad_u5.len(),
             ));
         }
         if !bad_flags.is_empty() {
-            parts.push(format!(
-                "{} with non-default page_flags",
-                counted(bad_flags.len(), "page", "pages")
+            parts.push(tr::diagnostics_check_pdb_page_headers_page_flags(
+                bad_flags.len(),
             ));
         }
         if !bad_tranrf.is_empty() {
-            parts.push(format!(
-                "{} with tranrf=0 on last-row group",
-                counted(bad_tranrf.len(), "data page", "data pages")
+            parts.push(tr::diagnostics_check_pdb_page_headers_tranrf(
+                bad_tranrf.len(),
             ));
         }
         let detail = if parts.is_empty() {
-            "u5, page_flags, and tranrf are valid on all data pages".to_string()
+            tr::diagnostics_check_pdb_page_headers_valid()
         } else {
             raw_warnings.push(logging::log(
                 Level::Info,
@@ -152,20 +144,16 @@ pub(crate) fn diagnose_pdb_integrity(
                 "usb.diagnostics.pdb-page-header-bookkeeping",
                 format!(
                     "rekordbox transaction bookkeeping on PDB data pages: {}; normalized whenever a repair runs.",
-                    parts.join("; ")
+                    join_english(&parts)
                 ),
             ));
-            format!(
-                "valid; rekordbox transaction bookkeeping: {}",
-                parts.join("; ")
-            )
+            tr::diagnostics_check_pdb_page_headers_bookkeeping(join_rendered(&parts, "; "))
         };
-        checks.push(DiagCheck {
-            label: "PDB page headers".to_string(),
-            status: DiagStatus::Pass,
+        checks.push(DiagCheck::new(
+            tr::diagnostics_check_pdb_page_headers(),
+            DiagStatus::Pass,
             detail,
-            link: None,
-        });
+        ));
     }
 
     {
@@ -181,45 +169,36 @@ pub(crate) fn diagnose_pdb_integrity(
         let torn_growth = crate::service::repair::detect_pdb_torn_growth_pages(&bytes);
 
         // Hard failures: conditions that cause player or DJ software rejection.
-        let mut fail_parts = Vec::new();
+        let mut fail_parts: Vec<Text> = Vec::new();
         // Soft warnings: player-tolerant shapes rekordbox itself never writes.
-        let mut warn_parts = Vec::new();
+        let mut warn_parts: Vec<Text> = Vec::new();
         // rekordbox transaction bookkeeping: real rekordbox exports carry these
         // and play fine, so they never warn (see the page-headers check above).
-        let mut bookkeeping_parts = Vec::new();
+        let mut bookkeeping_parts: Vec<Text> = Vec::new();
 
         if !stale_btree.is_empty() {
-            bookkeeping_parts.push(format!(
-                "{} stale b-tree",
-                counted(stale_btree.len(), "sentinel", "sentinels")
+            bookkeeping_parts.push(tr::diagnostics_check_pdb_structure_stale_btree(
+                stale_btree.len(),
             ));
         }
         if !wrong_pl_tree.is_empty() {
-            bookkeeping_parts.push(format!(
-                "{} with non-default shape",
-                counted(
-                    wrong_pl_tree.len(),
-                    "playlist_tree page",
-                    "playlist_tree pages"
-                )
+            bookkeeping_parts.push(tr::diagnostics_check_pdb_structure_playlist_tree_shape(
+                wrong_pl_tree.len(),
             ));
         }
         if !tombstoned.is_empty() {
-            bookkeeping_parts.push(format!(
-                "{} non-zero id",
-                counted(tombstoned.len(), "tombstoned row", "tombstoned rows")
+            bookkeeping_parts.push(tr::diagnostics_check_pdb_structure_tombstoned(
+                tombstoned.len(),
             ));
         }
         if !wrong_track_u5.is_empty() {
-            bookkeeping_parts.push(format!(
-                "{} with non-default shape",
-                counted(wrong_track_u5.len(), "track page", "track pages")
+            bookkeeping_parts.push(tr::diagnostics_check_pdb_structure_track_page_shape(
+                wrong_track_u5.len(),
             ));
         }
         if !t00_multipage_active.is_empty() {
-            bookkeeping_parts.push(format!(
-                "{} ACTV in multi-page chain",
-                counted(t00_multipage_active.len(), "track page", "track pages")
+            bookkeeping_parts.push(tr::diagnostics_check_pdb_structure_track_page_active(
+                t00_multipage_active.len(),
             ));
         }
         if !bookkeeping_parts.is_empty() {
@@ -229,7 +208,7 @@ pub(crate) fn diagnose_pdb_integrity(
                 "usb.diagnostics.pdb-structural-bookkeeping",
                 format!(
                     "rekordbox transaction bookkeeping in PDB tables: {}; normalized whenever a repair runs.",
-                    bookkeeping_parts.join("; ")
+                    join_english(&bookkeeping_parts)
                 ),
             ));
         }
@@ -243,9 +222,8 @@ pub(crate) fn diagnose_pdb_integrity(
                     counted(wrong_history.len(), "history page", "history pages")
                 ),
             ));
-            warn_parts.push(format!(
-                "{} wrong shape",
-                counted(wrong_history.len(), "history page", "history pages")
+            warn_parts.push(tr::diagnostics_check_pdb_structure_history_shape(
+                wrong_history.len(),
             ));
         }
         if !ec_conflicts.is_empty() {
@@ -259,9 +237,8 @@ pub(crate) fn diagnose_pdb_integrity(
                     counted(ec_conflicts.len(), "table", "tables")
                 ),
             ));
-            fail_parts.push(format!(
-                "{} write-pointer conflict",
-                counted(ec_conflicts.len(), "table", "tables")
+            fail_parts.push(tr::diagnostics_check_pdb_structure_ec_conflict(
+                ec_conflicts.len(),
             ));
         }
         if !truncated_chains.is_empty() {
@@ -275,9 +252,8 @@ pub(crate) fn diagnose_pdb_integrity(
                     counted(truncated_chains.len(), "table", "tables")
                 ),
             ));
-            fail_parts.push(format!(
-                "{} with declared last page beyond physical file end",
-                counted(truncated_chains.len(), "table", "tables")
+            fail_parts.push(tr::diagnostics_check_pdb_structure_truncated(
+                truncated_chains.len(),
             ));
         }
         if !torn_growth.is_empty() {
@@ -305,12 +281,9 @@ pub(crate) fn diagnose_pdb_integrity(
                 ),
             ));
             fail_parts.push(if ec_count > 0 {
-                format!(
-                    "{} torn from interrupted export",
-                    counted(ec_count, "empty_candidate page", "empty_candidate pages")
-                )
+                tr::diagnostics_check_pdb_structure_torn_pages(ec_count)
             } else {
-                "PDB tail torn from interrupted export".to_string()
+                tr::diagnostics_check_pdb_structure_torn_tail()
             });
         }
         let integrity_status = if !fail_parts.is_empty() {
@@ -321,43 +294,46 @@ pub(crate) fn diagnose_pdb_integrity(
             DiagStatus::Pass
         };
         let detail = if fail_parts.is_empty() && warn_parts.is_empty() {
-            let ok = "sentinel b-tree, page shapes, row IDs, and write pointers OK".to_string();
             if bookkeeping_parts.is_empty() {
-                ok
+                tr::diagnostics_check_pdb_structure_ok().render()
             } else {
-                format!(
-                    "{ok}; rekordbox transaction bookkeeping: {}",
-                    bookkeeping_parts.join("; ")
-                )
+                tr::diagnostics_check_pdb_structure_ok_bookkeeping(join_rendered(
+                    &bookkeeping_parts,
+                    "; ",
+                ))
+                .render()
             }
         } else {
             let mut segments = Vec::new();
             if !fail_parts.is_empty() {
-                segments.push(fail_parts.join("; ") + " — run repair_usb_diagnostics to fix");
+                segments.push(tr::diagnostics_check_pdb_structure_fails(join_rendered(
+                    &fail_parts,
+                    "; ",
+                )));
             }
             if !warn_parts.is_empty() {
-                segments.push(warn_parts.join("; ") + " — player-tolerant; repair available");
+                segments.push(tr::diagnostics_check_pdb_structure_warns(join_rendered(
+                    &warn_parts,
+                    "; ",
+                )));
             }
-            segments.join(" | ")
+            join_rendered(&segments, " | ")
         };
-        checks.push(DiagCheck {
-            label: "PDB structural integrity".to_string(),
-            status: integrity_status,
+        checks.push(DiagCheck::new(
+            tr::diagnostics_check_pdb_structure(),
+            integrity_status,
             detail,
-            link: None,
-        });
+        ));
     }
 
-    checks.push(DiagCheck {
-        label: "PDB playlists".to_string(),
-        status: DiagStatus::Pass,
-        detail: format!(
-            "{}, {}",
-            counted(parsed.playlist_tree.len(), "tree node", "tree nodes"),
-            counted(parsed.playlist_entries.len(), "entry", "entries"),
+    checks.push(DiagCheck::new(
+        tr::diagnostics_check_pdb_playlists(),
+        DiagStatus::Pass,
+        tr::diagnostics_check_pdb_playlists_counts(
+            parsed.playlist_tree.len(),
+            parsed.playlist_entries.len(),
         ),
-        link: None,
-    });
+    ));
 
     // History playlists in PDB. Fresh/never-played exports ship t17/t18 with
     // a fixed block of blank template/seed rows (no name, no track link)
@@ -368,50 +344,31 @@ pub(crate) fn diagnose_pdb_integrity(
     {
         let (hp, he) = count_named_history_rows(&parsed.history_playlists, &parsed.history_entries);
         let hr = parsed.history_rows.len();
-        if hp > 0 || he > 0 || hr > 0 {
-            checks.push(DiagCheck {
-                label: "PDB history".to_string(),
-                status: DiagStatus::Pass,
-                detail: format!(
-                    "{}, {}, {}",
-                    counted(hp, "playlist", "playlists"),
-                    counted(he, "entry", "entries"),
-                    counted(hr, "row", "rows")
-                ),
-                link: None,
-            });
+        let detail = if hp > 0 || he > 0 || hr > 0 {
+            tr::diagnostics_check_pdb_history_counts(hp, he, hr)
         } else {
-            checks.push(DiagCheck {
-                label: "PDB history".to_string(),
-                status: DiagStatus::Pass,
-                detail: "empty".to_string(),
-                link: None,
-            });
-        }
+            tr::diagnostics_check_pdb_history_empty()
+        };
+        checks.push(DiagCheck::new(
+            tr::diagnostics_check_pdb_history(),
+            DiagStatus::Pass,
+            detail,
+        ));
     }
 
     // num_rl=8191 is a valid external-library sentinel; treat as compatibility info.
-    checks.push(DiagCheck {
-        label: "num_rl=8191 pages".to_string(),
-        status: DiagStatus::Pass,
-        detail: format!(
-            "{} of {} (using nrs fallback)",
-            diag.pages_with_num_rl_8191,
-            counted(diag.total_pages, "page", "pages")
-        ),
-        link: None,
-    });
+    checks.push(DiagCheck::new(
+        tr::diagnostics_check_num_rl_pages(),
+        DiagStatus::Pass,
+        tr::diagnostics_check_num_rl_pages_detail(diag.pages_with_num_rl_8191, diag.total_pages),
+    ));
 
     // nrs u8 wrapping is expected on some pages; recovery is part of normal parsing.
-    checks.push(DiagCheck {
-        label: "nrs wrapping".to_string(),
-        status: DiagStatus::Pass,
-        detail: format!(
-            "{} with row count exceeding nrs header",
-            counted(diag.nrs_wrapping_pages, "page", "pages")
-        ),
-        link: None,
-    });
+    checks.push(DiagCheck::new(
+        tr::diagnostics_check_nrs_wrapping(),
+        DiagStatus::Pass,
+        tr::diagnostics_check_nrs_wrapping_detail(diag.nrs_wrapping_pages),
+    ));
 
     // Orphaned playlist entries
     let track_ids: HashSet<u32> = parsed.tracks.iter().map(|t| t.id).collect();
@@ -428,24 +385,16 @@ pub(crate) fn diagnose_pdb_integrity(
     } else {
         DiagStatus::Warn
     };
-    checks.push(DiagCheck {
-        label: "Orphaned entries".to_string(),
-        status: orphan_status,
-        detail: format!(
-            "{} referencing {} not in PDB",
-            counted(
-                parsed
-                    .playlist_entries
-                    .iter()
-                    .filter(|e| !track_ids.contains(&e.track_id))
-                    .count(),
-                "entry",
-                "entries"
-            ),
-            counted(orphaned.len(), "track ID", "track IDs")
-        ),
-        link: None,
-    });
+    let orphaned_entries = parsed
+        .playlist_entries
+        .iter()
+        .filter(|e| !track_ids.contains(&e.track_id))
+        .count();
+    checks.push(DiagCheck::new(
+        tr::diagnostics_check_orphaned_entries(),
+        orphan_status,
+        tr::diagnostics_check_orphaned_entries_detail(orphaned_entries, orphaned.len()),
+    ));
 
     // Parse warnings
     if !parsed.warnings.is_empty() {
@@ -457,15 +406,11 @@ pub(crate) fn diagnose_pdb_integrity(
                 message.clone(),
             )
         }));
-        checks.push(DiagCheck {
-            label: "Parse warnings".to_string(),
-            status: DiagStatus::Warn,
-            detail: format!(
-                "{} during parsing",
-                counted(parsed.warnings.len(), "warning", "warnings")
-            ),
-            link: None,
-        });
+        checks.push(DiagCheck::new(
+            tr::diagnostics_check_parse_warnings(),
+            DiagStatus::Warn,
+            tr::diagnostics_check_parse_warnings_detail(parsed.warnings.len()),
+        ));
     }
 
     let status = DiagStatus::worst_of(&checks.iter().map(|c| &c.status).collect::<Vec<_>>());
@@ -478,4 +423,22 @@ pub(crate) fn diagnose_pdb_integrity(
         },
         Some((parsed, diag)),
     )
+}
+
+/// `parts` rendered in the current language, joined with `separator`.
+pub(super) fn join_rendered(parts: &[Text], separator: &str) -> String {
+    parts
+        .iter()
+        .map(Text::render)
+        .collect::<Vec<_>>()
+        .join(separator)
+}
+
+/// `parts` in English, joined with "; ", for the log.
+pub(super) fn join_english(parts: &[Text]) -> String {
+    parts
+        .iter()
+        .map(Text::render_english)
+        .collect::<Vec<_>>()
+        .join("; ")
 }

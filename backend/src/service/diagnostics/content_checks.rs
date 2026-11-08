@@ -1,6 +1,7 @@
 //! eDB access, Contents, BPM/key, beat grid, analysis and playlist checks.
 
 use super::*;
+use crate::i18n::tr;
 
 pub(crate) fn diagnose_edb_access(
     edb_path: &std::path::Path,
@@ -10,32 +11,26 @@ pub(crate) fn diagnose_edb_access(
     let mut checks = Vec::new();
 
     if !edb_path.exists() {
-        checks.push(DiagCheck {
-            label: "eDB".to_string(),
-            status: DiagStatus::Warn,
-            detail: "File not found".to_string(),
-            link: None,
-        });
+        checks.push(DiagCheck::new(
+            tr::diagnostics_check_edb(),
+            DiagStatus::Warn,
+            tr::diagnostics_check_edb_missing(),
+        ));
     } else {
         let (status, detail) = if conn.is_some() {
             let key_msg = edb_warnings
                 .last()
                 .map(|w| w.message.clone())
-                .unwrap_or_else(|| "Opened successfully".to_string());
+                .unwrap_or_else(|| tr::diagnostics_check_edb_opened().render());
             (DiagStatus::Pass, key_msg)
         } else {
             let msg = edb_warnings
                 .last()
                 .map(|w| w.message.clone())
-                .unwrap_or_else(|| "Unable to open".to_string());
+                .unwrap_or_else(|| tr::diagnostics_check_edb_unable().render());
             (DiagStatus::Fail, msg)
         };
-        checks.push(DiagCheck {
-            label: "eDB".to_string(),
-            status,
-            detail,
-            link: None,
-        });
+        checks.push(DiagCheck::new(tr::diagnostics_check_edb(), status, detail));
     }
 
     let status = DiagStatus::worst_of(&checks.iter().map(|c| &c.status).collect::<Vec<_>>());
@@ -54,22 +49,21 @@ pub(crate) fn diagnose_contents_integrity(
 ) -> DiagSection {
     let mut checks = Vec::new();
 
-    checks.push(DiagCheck {
-        label: "Audio files".to_string(),
-        status: DiagStatus::Pass,
-        detail: format!("{contents_count} audio files found"),
-        link: None,
-    });
+    // Test-only, so its text stays English.
+    checks.push(DiagCheck::named(
+        "Audio files".to_string(),
+        DiagStatus::Pass,
+        format!("{contents_count} audio files found"),
+    ));
 
-    checks.push(DiagCheck {
-        label: "Indexed tracks".to_string(),
-        status: DiagStatus::Pass,
-        detail: format!(
+    checks.push(DiagCheck::named(
+        "Indexed tracks".to_string(),
+        DiagStatus::Pass,
+        format!(
             "{} in PDB/eDB",
             counted(indexed_count, "indexed track path", "indexed track paths")
         ),
-        link: None,
-    });
+    ));
 
     let mismatch = contents_count as i64 - indexed_count as i64;
     let mismatch_status = if mismatch == 0 {
@@ -79,10 +73,10 @@ pub(crate) fn diagnose_contents_integrity(
     } else {
         DiagStatus::Warn
     };
-    checks.push(DiagCheck {
-        label: "Count match".to_string(),
-        status: mismatch_status,
-        detail: if mismatch == 0 {
+    checks.push(DiagCheck::named(
+        "Count match".to_string(),
+        mismatch_status,
+        if mismatch == 0 {
             "Exact match".to_string()
         } else if mismatch > 0 {
             format!("{mismatch} audio files not playlist-referenced in PDB/eDB")
@@ -92,8 +86,7 @@ pub(crate) fn diagnose_contents_integrity(
                 mismatch.unsigned_abs()
             )
         },
-        link: None,
-    });
+    ));
 
     let status = DiagStatus::worst_of(&checks.iter().map(|c| &c.status).collect::<Vec<_>>());
     DiagSection {
@@ -117,81 +110,54 @@ pub(crate) fn diagnose_contents_integrity_db_only(
 ) -> DiagSection {
     let mut checks = Vec::new();
 
-    checks.push(DiagCheck {
-        label: "PDB indexed paths".to_string(),
-        status: DiagStatus::Pass,
-        detail: counted(
-            pdb_indexed_count,
-            "canonical track path",
-            "canonical track paths",
-        ),
-        link: None,
-    });
-    checks.push(DiagCheck {
-        label: "eDB indexed paths".to_string(),
-        status: DiagStatus::Pass,
-        detail: counted(
-            edb_indexed_count,
-            "canonical track path",
-            "canonical track paths",
-        ),
-        link: None,
-    });
+    checks.push(DiagCheck::new(
+        tr::diagnostics_check_pdb_paths(),
+        DiagStatus::Pass,
+        tr::diagnostics_check_paths_count(pdb_indexed_count),
+    ));
+    checks.push(DiagCheck::new(
+        tr::diagnostics_check_edb_paths(),
+        DiagStatus::Pass,
+        tr::diagnostics_check_paths_count(edb_indexed_count),
+    ));
 
     let disagreement_status = if pdb_only_count == 0 && edb_only_count == 0 {
         DiagStatus::Pass
     } else {
         DiagStatus::Warn
     };
-    let history_suffix = if history_only_count > 0 {
-        format!(
-            "; {}",
-            counted(
-                history_only_count,
-                "history-only track",
-                "history-only tracks"
-            )
-        )
+    let parts: Vec<crate::i18n::Text> = [
+        (
+            pdb_only_count,
+            tr::diagnostics_check_path_agreement_pdb_only as fn(usize) -> _,
+        ),
+        (
+            edb_only_count,
+            tr::diagnostics_check_path_agreement_edb_only,
+        ),
+        (
+            history_only_count,
+            tr::diagnostics_check_path_agreement_history_only,
+        ),
+    ]
+    .into_iter()
+    .filter(|(count, _)| *count > 0)
+    .map(|(count, text)| text(count))
+    .collect();
+    let disagreement_detail = if parts.is_empty() {
+        tr::diagnostics_check_path_agreement_agree().render()
     } else {
-        String::new()
+        super::pdb_integrity::join_rendered(&parts, "; ")
     };
-    let disagreement_detail =
-        if pdb_only_count == 0 && edb_only_count == 0 && history_only_count == 0 {
-            "PDB/eDB canonical-path sets agree".to_string()
-        } else if pdb_only_count == 0 && edb_only_count == 0 {
-            counted(
-                history_only_count,
-                "history-only track",
-                "history-only tracks",
-            )
-        } else if pdb_only_count > 0 && edb_only_count > 0 {
-            format!(
-                "{}; {}{history_suffix}",
-                counted(pdb_only_count, "PDB-only path", "PDB-only paths"),
-                counted(edb_only_count, "eDB-only path", "eDB-only paths")
-            )
-        } else if pdb_only_count > 0 {
-            format!(
-                "{}{history_suffix}",
-                counted(pdb_only_count, "PDB-only path", "PDB-only paths")
-            )
-        } else {
-            format!(
-                "{}{history_suffix}",
-                counted(edb_only_count, "eDB-only path", "eDB-only paths")
-            )
-        };
-    let agreement_link = if history_only_count > 0 {
-        Some("event-log".to_string())
-    } else {
-        None
-    };
-    checks.push(DiagCheck {
-        label: "PDB/eDB path agreement".to_string(),
-        status: disagreement_status,
-        detail: disagreement_detail,
-        link: agreement_link,
-    });
+    let mut agreement = DiagCheck::new(
+        tr::diagnostics_check_path_agreement(),
+        disagreement_status,
+        disagreement_detail,
+    );
+    if history_only_count > 0 {
+        agreement = agreement.with_link("event-log");
+    }
+    checks.push(agreement);
 
     let status = DiagStatus::worst_of(&checks.iter().map(|c| &c.status).collect::<Vec<_>>());
     DiagSection {
@@ -340,15 +306,10 @@ pub(crate) fn detect_bpm_key_mismatches(
 pub(super) fn diagnose_beat_grid_format(
     usb_root: &std::path::Path,
     parsed: &crate::pdb_reader::ParsedPdb,
-) -> DiagCheck {
+) -> (DiagStatus, crate::i18n::Text) {
     use std::io::Read;
 
-    let check = |status, detail: String| DiagCheck {
-        label: "Beat grid format".to_string(),
-        status,
-        detail,
-        link: None,
-    };
+    let check = |status, detail: crate::i18n::Text| (status, detail);
     // `None`: the log can't be read, so every track is a candidate.
     let candidates = match crate::service::export_log::load_export_log(usb_root) {
         Ok(Some(log)) => {
@@ -357,7 +318,7 @@ pub(super) fn diagnose_beat_grid_format(
         Ok(None) => {
             return check(
                 DiagStatus::Pass,
-                "no tracks on this USB were exported by this app".to_string(),
+                tr::diagnostics_check_beat_grid_not_exported(),
             );
         }
         Err(_) => None,
@@ -384,24 +345,18 @@ pub(super) fn diagnose_beat_grid_format(
         }
     }
     if outdated.is_empty() {
-        return check(
-            DiagStatus::Pass,
-            "every beat grid this app wrote to this USB is in the current format".to_string(),
-        );
+        return check(DiagStatus::Pass, tr::diagnostics_check_beat_grid_current());
     }
     check(
         DiagStatus::Warn,
-        format!(
-            "Tracks with a beat grid in an outdated format that some players (e.g. the \
-             XDJ-AZ) reject, so Beat Sync is unavailable on them: {}; e.g. {}; re-export or \
-             run the repair (fix_beat_grid_header) to fix",
+        tr::diagnostics_check_beat_grid_outdated(
             outdated.len(),
             outdated
                 .iter()
                 .take(3)
                 .copied()
                 .collect::<Vec<_>>()
-                .join(", ")
+                .join(", "),
         ),
     )
 }
@@ -428,30 +383,25 @@ pub(crate) fn diagnose_analysis_integrity(
             path_refs.insert(path);
         }
         let missing = total_tracks.saturating_sub(tracks_with_ref);
-        checks.push(DiagCheck {
-            label: "PDB analysis refs".to_string(),
-            status: if missing == 0 {
+        checks.push(DiagCheck::new(
+            tr::diagnostics_check_pdb_analysis(),
+            if missing == 0 {
                 DiagStatus::Pass
             } else {
                 DiagStatus::Warn
             },
-            detail: format!(
-                "{tracks_with_ref}/{total_tracks} track rows with analysis paths; {}",
-                counted(
-                    path_refs.len(),
-                    "unique bundle reference",
-                    "unique bundle references"
-                )
+            tr::diagnostics_check_pdb_analysis_detail(
+                tracks_with_ref,
+                total_tracks,
+                path_refs.len(),
             ),
-            link: None,
-        });
+        ));
     } else {
-        checks.push(DiagCheck {
-            label: "PDB analysis refs".to_string(),
-            status: DiagStatus::Fail,
-            detail: "No PDB data available".to_string(),
-            link: None,
-        });
+        checks.push(DiagCheck::new(
+            tr::diagnostics_check_pdb_analysis(),
+            DiagStatus::Fail,
+            tr::diagnostics_check_no_pdb_data(),
+        ));
     }
 
     if let Some(edb_playlist_tracks) = edb_playlist_tracks {
@@ -484,40 +434,32 @@ pub(crate) fn diagnose_analysis_integrity(
             .collect::<Vec<_>>();
         let unique_refs = refs.iter().cloned().collect::<HashSet<_>>().len();
         let missing = unique_content_rows.saturating_sub(refs.len());
-        checks.push(DiagCheck {
-            label: "eDB analysis refs".to_string(),
-            status: if missing == 0 {
+        checks.push(DiagCheck::new(
+            tr::diagnostics_check_edb_analysis(),
+            if missing == 0 {
                 DiagStatus::Pass
             } else {
                 DiagStatus::Warn
             },
-            detail: format!(
-                "{}/{} playlist-linked content rows with analysis paths; {} from {}",
+            tr::diagnostics_check_edb_analysis_detail(
                 refs.len(),
                 unique_content_rows,
-                counted(
-                    unique_refs,
-                    "unique bundle reference",
-                    "unique bundle references"
-                ),
-                counted(total_playlist_entries, "playlist entry", "playlist entries")
+                unique_refs,
+                total_playlist_entries,
             ),
-            link: None,
-        });
+        ));
     } else if edb_content_rows == Some(0) {
-        checks.push(DiagCheck {
-            label: "eDB analysis refs".to_string(),
-            status: DiagStatus::Pass,
-            detail: "No tracks in the eDB".to_string(),
-            link: None,
-        });
+        checks.push(DiagCheck::new(
+            tr::diagnostics_check_edb_analysis(),
+            DiagStatus::Pass,
+            tr::diagnostics_check_edb_analysis_no_tracks(),
+        ));
     } else {
-        checks.push(DiagCheck {
-            label: "eDB analysis refs".to_string(),
-            status: DiagStatus::Warn,
-            detail: "No eDB playlist data available".to_string(),
-            link: None,
-        });
+        checks.push(DiagCheck::new(
+            tr::diagnostics_check_edb_analysis(),
+            DiagStatus::Warn,
+            tr::diagnostics_check_edb_analysis_no_data(),
+        ));
     }
 
     let status = DiagStatus::worst_of(&checks.iter().map(|c| &c.status).collect::<Vec<_>>());
@@ -558,12 +500,11 @@ where
     let parsed = match parsed {
         Some(p) => p,
         None => {
-            checks.push(DiagCheck {
-                label: "Playlist data".to_string(),
-                status: DiagStatus::Fail,
-                detail: "No PDB data available".to_string(),
-                link: None,
-            });
+            checks.push(DiagCheck::new(
+                tr::diagnostics_check_playlist_data(),
+                DiagStatus::Fail,
+                tr::diagnostics_check_no_pdb_data(),
+            ));
             return (
                 DiagSection {
                     title: "Playlist Resolution".to_string(),
@@ -758,15 +699,11 @@ where
                 pdb_match_rate: 0.0,
                 edb_match_rate: 0.0,
             });
-            checks.push(DiagCheck {
-                label: edb_name.clone(),
-                status: DiagStatus::Fail,
-                detail: format!(
-                    "present in eDB only ({}), missing from PDB",
-                    counted(edb_entries, "entry", "entries")
-                ),
-                link: None,
-            });
+            checks.push(DiagCheck::named(
+                edb_name.clone(),
+                DiagStatus::Fail,
+                tr::diagnostics_check_playlist_edb_only(edb_entries),
+            ));
         }
     }
 
@@ -778,32 +715,28 @@ where
         1.0
     };
 
-    checks.push(DiagCheck {
-        label: "Overall resolution".to_string(),
-        status: if all_pass {
+    checks.push(DiagCheck::new(
+        tr::diagnostics_check_overall_resolution(),
+        if all_pass {
             DiagStatus::Pass
         } else if any_fail {
             DiagStatus::Fail
         } else {
             DiagStatus::Warn
         },
-        detail: format!(
-            "{total_resolved}/{total_entries} entries resolve ({:.1}%) across {}",
-            overall_rate * 100.0,
-            counted(grouped_leaves.len(), "playlist", "playlists")
+        tr::diagnostics_check_overall_resolution_detail(
+            total_resolved,
+            total_entries,
+            format!("{:.1}", overall_rate * 100.0),
+            grouped_leaves.len(),
         ),
-        link: None,
-    });
+    ));
     if edb_only_playlist_count > 0 {
-        checks.push(DiagCheck {
-            label: "DB-only playlists".to_string(),
-            status: DiagStatus::Fail,
-            detail: format!(
-                "{} in eDB but not in PDB",
-                counted(edb_only_playlist_count, "playlist", "playlists")
-            ),
-            link: None,
-        });
+        checks.push(DiagCheck::new(
+            tr::diagnostics_check_db_only_playlists(),
+            DiagStatus::Fail,
+            tr::diagnostics_check_db_only_playlists_detail(edb_only_playlist_count),
+        ));
     }
     if edb_playlist_tracks.is_some() {
         let pdb_rate = if cross_source_pdb_total > 0 {
@@ -816,45 +749,36 @@ where
         } else {
             1.0
         };
-        let status = DiagStatus::Pass;
-        let detail = format!(
-            "matched {} track keys; PDB {:.1}% ({}/{}), DB {:.1}% ({}/{})",
-            cross_source_matches_total,
-            pdb_rate * 100.0,
-            cross_source_matches_total,
-            cross_source_pdb_total,
-            edb_rate * 100.0,
-            cross_source_matches_total,
-            cross_source_edb_total
-        );
-        checks.push(DiagCheck {
-            label: "PDB vs eDB key overlap (informational)".to_string(),
-            status,
-            detail,
-            link: None,
-        });
+        checks.push(DiagCheck::new(
+            tr::diagnostics_check_key_overlap(),
+            DiagStatus::Pass,
+            tr::diagnostics_check_key_overlap_detail(
+                cross_source_matches_total,
+                format!("{:.1}", pdb_rate * 100.0),
+                cross_source_pdb_total,
+                format!("{:.1}", edb_rate * 100.0),
+                cross_source_edb_total,
+            ),
+        ));
     }
-    checks.push(DiagCheck {
-        label: "Operational interpretation".to_string(),
-        status: DiagStatus::Pass,
-        detail: "pass/warn here means operationally usable; strict parity may still fail on the same USB".to_string(),
-        link: None,
-    });
+    checks.push(DiagCheck::new(
+        tr::diagnostics_check_operational(),
+        DiagStatus::Pass,
+        tr::diagnostics_check_operational_detail(),
+    ));
 
     // List playlists with issues
     for pd in &playlist_details {
         if pd.resolution_rate < 1.0 {
-            checks.push(DiagCheck {
-                label: pd.name.clone(),
-                status: pd.status.clone(),
-                detail: format!(
-                    "{}/{} entries ({:.1}%)",
+            checks.push(DiagCheck::named(
+                pd.name.clone(),
+                pd.status.clone(),
+                tr::diagnostics_check_playlist_resolution(
                     pd.resolved_entries,
                     pd.total_entries,
-                    pd.resolution_rate * 100.0
+                    format!("{:.1}", pd.resolution_rate * 100.0),
                 ),
-                link: None,
-            });
+            ));
         }
     }
 

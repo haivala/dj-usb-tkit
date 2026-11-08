@@ -1,6 +1,7 @@
 //! The eDB↔PDB parity comparison.
 
 use super::*;
+use crate::i18n::tr;
 
 /// Report-wide counts summed over the per-playlist parity details.
 pub(super) struct ParityTotals {
@@ -962,23 +963,21 @@ pub(crate) fn build_usb_parity_comparison(
     }
 
     let mut checks = Vec::<DiagCheck>::new();
-    checks.push(DiagCheck {
-        label: "Overall player parity status".to_string(),
-        status: overall_status.clone(),
-        detail: format!(
-            "playlists checked: {}, failing playlists: {}, playlist id mismatches: {}",
+    checks.push(DiagCheck::new(
+        tr::diagnostics_check_parity_overall(),
+        overall_status.clone(),
+        tr::diagnostics_check_parity_overall_detail(
             details.len(),
             fail_playlists,
             playlist_id_mismatches,
         ),
-        link: None,
-    });
-    checks.push(DiagCheck {
-        label: "Parity-report section (required)".to_string(),
-        status: overall_status.clone(),
-        detail: "See parity summary rows for category counts.".to_string(),
-        link: None,
-    });
+    ));
+    checks.push(DiagCheck::new(
+        tr::diagnostics_check_parity_section(),
+        overall_status.clone(),
+        tr::diagnostics_check_parity_section_detail(),
+    ));
+    // Backend-only (CLI tools), so their labels stay English.
     let mut summary_rows = vec![
         DiagSummaryRow {
             label: "Failing playlists".to_string(),
@@ -1105,179 +1104,81 @@ pub(crate) fn build_usb_parity_comparison(
             count: raw_coverage.missing_count + raw_coverage.extra_count,
         });
     }
-    checks.push(DiagCheck {
-        label: "Playlist identity parity".to_string(),
-        status: if playlist_id_mismatches == 0 {
-            DiagStatus::Pass
-        } else {
-            DiagStatus::Fail
-        },
-        detail: format!(
-            "{} with mismatched or unresolved playlist ids between PDB and eDB",
-            counted(playlist_id_mismatches, "playlist", "playlists")
+    let pass_or = |ok: bool, bad: DiagStatus| if ok { DiagStatus::Pass } else { bad };
+    checks.push(DiagCheck::new(
+        tr::diagnostics_check_parity_identity(),
+        pass_or(playlist_id_mismatches == 0, DiagStatus::Fail),
+        tr::diagnostics_check_parity_identity_detail(playlist_id_mismatches),
+    ));
+    checks.push(DiagCheck::new(
+        tr::diagnostics_check_parity_membership(),
+        pass_or(
+            total_only_in_pdb == 0 && total_only_in_edb == 0,
+            DiagStatus::Fail,
         ),
-        link: None,
-    });
-    checks.push(DiagCheck {
-        label: "Playlist membership parity".to_string(),
-        status: if total_only_in_pdb == 0 && total_only_in_edb == 0 {
-            DiagStatus::Pass
-        } else {
-            DiagStatus::Fail
-        },
-        detail: format!(
-            "membership deltas: only-in-PDB={}, only-in-eDB={}",
-            total_only_in_pdb, total_only_in_edb
-        ),
-        link: None,
-    });
-    checks.push(DiagCheck {
-        label: "Playlist ordering parity".to_string(),
-        status: if order_mismatches == 0 {
-            DiagStatus::Pass
-        } else {
-            DiagStatus::Fail
-        },
-        detail: format!(
-            "entry-order mismatches={}, playlist-sort-order mismatches={}",
-            entry_order_mismatches, sort_order_mismatches
-        ),
-        link: None,
-    });
+        tr::diagnostics_check_parity_membership_detail(total_only_in_pdb, total_only_in_edb),
+    ));
+    checks.push(DiagCheck::new(
+        tr::diagnostics_check_parity_ordering(),
+        pass_or(order_mismatches == 0, DiagStatus::Fail),
+        tr::diagnostics_check_parity_ordering_detail(entry_order_mismatches, sort_order_mismatches),
+    ));
     if let Some(raw_coverage) = strict_raw_coverage.as_ref() {
-        checks.push(DiagCheck {
-            label: "Indexed audio file presence".to_string(),
-            status: raw_coverage.status.clone(),
-            detail: raw_coverage.detail.clone(),
-            // Each missing/unindexed path is logged individually.
-            link: (raw_coverage.missing_count + raw_coverage.extra_count > 0)
-                .then(|| "event-log".to_string()),
-        });
+        let check = DiagCheck::new(
+            tr::diagnostics_check_parity_files(),
+            raw_coverage.status.clone(),
+            &raw_coverage.detail,
+        );
+        // Each missing/unindexed path is logged individually.
+        checks.push(
+            if raw_coverage.missing_count + raw_coverage.extra_count > 0 {
+                check.with_link("event-log")
+            } else {
+                check
+            },
+        );
     }
-    checks.push(DiagCheck {
-        label: "Duplicate PDB entries".to_string(),
-        status: if total_duplicate_entries == 0 {
-            DiagStatus::Pass
-        } else {
-            DiagStatus::Fail
-        },
-        detail: format!(
-            "{} detected",
-            counted(
-                total_duplicate_entries,
-                "duplicate PDB playlist entry",
-                "duplicate PDB playlist entries"
-            )
-        ),
-        link: None,
-    });
-    checks.push(DiagCheck {
-        label: "PDB metadata completeness".to_string(),
-        status: if total_pdb_missing_core_metadata == 0 {
-            DiagStatus::Pass
-        } else {
-            DiagStatus::Warn
-        },
-        detail: format!(
-            "{} missing required player metadata",
-            counted(
-                total_pdb_missing_core_metadata,
-                "playlist-linked PDB track",
-                "playlist-linked PDB tracks"
-            )
-        ),
-        link: None,
-    });
-    checks.push(DiagCheck {
-        label: "Media and analysis path parity".to_string(),
-        status: if total_path_mismatches == 0 {
-            DiagStatus::Pass
-        } else {
-            DiagStatus::Fail
-        },
-        detail: format!(
-            "{} with media or analysis path mismatches",
-            counted(
-                total_path_mismatches,
-                "playlist-linked track",
-                "playlist-linked tracks"
-            )
-        ),
-        link: None,
-    });
-    checks.push(DiagCheck {
-        label: "Artwork presence parity".to_string(),
-        status: if total_artwork_mismatches == 0 {
-            DiagStatus::Pass
-        } else {
-            DiagStatus::Warn
-        },
-        detail: format!(
-            "{} with artwork in one DB but not the other",
-            counted(
-                total_artwork_mismatches,
-                "playlist-linked track",
-                "playlist-linked tracks"
-            )
-        ),
-        link: None,
-    });
-    checks.push(DiagCheck {
-        label: "PDB dictionary id resolution".to_string(),
-        status: if total_dictionary_id_issues == 0 {
-            DiagStatus::Pass
-        } else {
-            DiagStatus::Fail
-        },
-        detail: format!(
-            "{} with unresolved required PDB dictionary ids",
-            counted(
-                total_dictionary_id_issues,
-                "playlist-linked track",
-                "playlist-linked tracks"
-            )
-        ),
-        link: None,
-    });
-    checks.push(DiagCheck {
-        label: "eDB source completeness".to_string(),
-        status: if total_edb_missing_core_metadata == 0 {
-            DiagStatus::Pass
-        } else {
-            DiagStatus::Warn
-        },
-        detail: format!(
-            "{} missing metadata used by strict parity comparison",
-            counted(
-                total_edb_missing_core_metadata,
-                "playlist-linked eDB track",
-                "playlist-linked eDB tracks"
-            )
-        ),
-        link: None,
-    });
+    checks.push(DiagCheck::new(
+        tr::diagnostics_check_parity_duplicates(),
+        pass_or(total_duplicate_entries == 0, DiagStatus::Fail),
+        tr::diagnostics_check_parity_duplicates_detail(total_duplicate_entries),
+    ));
+    checks.push(DiagCheck::new(
+        tr::diagnostics_check_parity_pdb_metadata(),
+        pass_or(total_pdb_missing_core_metadata == 0, DiagStatus::Warn),
+        tr::diagnostics_check_parity_pdb_metadata_detail(total_pdb_missing_core_metadata),
+    ));
+    checks.push(DiagCheck::new(
+        tr::diagnostics_check_parity_paths(),
+        pass_or(total_path_mismatches == 0, DiagStatus::Fail),
+        tr::diagnostics_check_parity_paths_detail(total_path_mismatches),
+    ));
+    checks.push(DiagCheck::new(
+        tr::diagnostics_check_parity_artwork(),
+        pass_or(total_artwork_mismatches == 0, DiagStatus::Warn),
+        tr::diagnostics_check_parity_artwork_detail(total_artwork_mismatches),
+    ));
+    checks.push(DiagCheck::new(
+        tr::diagnostics_check_parity_dictionary(),
+        pass_or(total_dictionary_id_issues == 0, DiagStatus::Fail),
+        tr::diagnostics_check_parity_dictionary_detail(total_dictionary_id_issues),
+    ));
+    checks.push(DiagCheck::new(
+        tr::diagnostics_check_parity_edb_metadata(),
+        pass_or(total_edb_missing_core_metadata == 0, DiagStatus::Warn),
+        tr::diagnostics_check_parity_edb_metadata_detail(total_edb_missing_core_metadata),
+    ));
     // Minor (a rating or colour differs), so it doesn't count toward the overall status.
     let overall = DiagStatus::worst_of(&checks.iter().map(|c| &c.status).collect::<Vec<_>>());
-    checks.push(DiagCheck {
-        label: "Rating and colour parity".to_string(),
-        status: if rating_colour.mismatched_tracks == 0 {
-            DiagStatus::Pass
-        } else {
-            DiagStatus::Warn
-        },
-        detail: format!(
-            "{} with a different rating or colour in the PDB than in \
-             the eDB (rating differs: {}, colour differs: {})",
-            counted(
-                rating_colour.mismatched_tracks,
-                "playlist-linked track",
-                "playlist-linked tracks"
-            ),
+    checks.push(DiagCheck::new(
+        tr::diagnostics_check_parity_rating_colour(),
+        pass_or(rating_colour.mismatched_tracks == 0, DiagStatus::Warn),
+        tr::diagnostics_check_parity_rating_colour_detail(
+            rating_colour.mismatched_tracks,
             rating_colour.rating_mismatches,
-            rating_colour.colour_mismatches
+            rating_colour.colour_mismatches,
         ),
-        link: None,
-    });
+    ));
 
     (checks, summary_rows, details, overall)
 }

@@ -300,9 +300,8 @@ pub(super) fn pdb_track_by_media_path<'a>(
 pub(super) fn track_not_in_usb_database(media_path: &str) -> BackendError {
     BackendError::NotFound(format!(
         "this track is missing from one of the USB's two databases, so it can't be edited on \
-         the USB ({}). {}",
+         the USB ({}). Preview Fixes shows what can be repaired.",
         media_path.trim(),
-        super::diagnostics::PREVIEW_FIXES_HINT
     ))
 }
 

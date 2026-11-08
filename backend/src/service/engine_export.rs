@@ -4,6 +4,7 @@
 //! every time; keeps the player's history (`hm.db`) and the track ids it
 //! refers to. Format layer: [`crate::engine_db`].
 
+use crate::i18n::tr;
 use crate::utils::counted;
 use std::collections::{HashMap, HashSet};
 use std::path::Path;
@@ -117,54 +118,41 @@ impl BackendService {
             return (!enabled).then(|| DiagSection {
                 title: "Engine DJ Library".into(),
                 status: DiagStatus::Pass,
-                checks: vec![DiagCheck {
-                    label: "Not on this USB".into(),
-                    status: DiagStatus::Pass,
-                    detail: "Only needed for Denon Prime / Numark Mixstream players. Turn on \
-                             Settings → Export → \"Write Engine DJ library\" before using this USB \
-                             in one; otherwise the player imports export.pdb itself and analyzes \
-                             every track again"
-                        .into(),
-                    link: None,
-                }],
+                checks: vec![DiagCheck::new(
+                    tr::diagnostics_check_engine_missing(),
+                    DiagStatus::Pass,
+                    tr::diagnostics_check_engine_missing_detail(),
+                )],
                 counts: None,
             });
         };
         let upkeep = if enabled {
-            DiagCheck {
-                label: "Kept up to date".into(),
-                status: DiagStatus::Pass,
-                detail: "Rebuilt whenever this app changes the USB".into(),
-                link: None,
-            }
+            DiagCheck::new(
+                tr::diagnostics_check_engine_upkeep(),
+                DiagStatus::Pass,
+                tr::diagnostics_check_engine_upkeep_on(),
+            )
         } else {
-            DiagCheck {
-                label: "Kept up to date".into(),
-                status: DiagStatus::Warn,
-                detail: "\"Write Engine DJ library\" is off, so changes this app makes to the USB \
-                         don't reach Denon Prime / Numark Mixstream players. Preview Fixes can turn it on"
-                    .into(),
-                link: None,
-            }
+            DiagCheck::new(
+                tr::diagnostics_check_engine_upkeep(),
+                DiagStatus::Warn,
+                tr::diagnostics_check_engine_upkeep_off(),
+            )
         };
         let sync = match (status.library_counter, status.pdb_sequence) {
-            (Some(library), Some(pdb)) if library == i64::from(pdb) => DiagCheck {
-                label: "Matches export.pdb".into(),
-                status: DiagStatus::Pass,
-                detail: format!("Written for export.pdb #{pdb}"),
-                link: None,
-            },
-            (library, pdb) => DiagCheck {
-                label: "Matches export.pdb".into(),
-                status: DiagStatus::Warn,
-                detail: format!(
-                    "Written for export.pdb #{}, the USB has #{}. The player may import \
-                     export.pdb again and analyze the tracks itself. Preview Fixes can rebuild it",
+            (Some(library), Some(pdb)) if library == i64::from(pdb) => DiagCheck::new(
+                tr::diagnostics_check_engine_sync(),
+                DiagStatus::Pass,
+                tr::diagnostics_check_engine_sync_ok(pdb),
+            ),
+            (library, pdb) => DiagCheck::new(
+                tr::diagnostics_check_engine_sync(),
+                DiagStatus::Warn,
+                tr::diagnostics_check_engine_sync_behind(
                     library.map_or_else(|| "?".to_string(), |n| n.to_string()),
                     pdb.map_or_else(|| "?".to_string(), |n| n.to_string()),
                 ),
-                link: None,
-            },
+            ),
         };
         let checks = vec![upkeep, sync];
         let worst = checks.iter().fold(DiagStatus::Pass, |acc, c| {

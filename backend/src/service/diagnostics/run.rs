@@ -1,6 +1,7 @@
 //! The diagnostics and parity report entry points.
 
 use super::*;
+use crate::i18n::tr;
 
 impl BackendService {
     pub fn run_usb_diagnostics(
@@ -135,25 +136,16 @@ impl BackendService {
             } else {
                 (0, 0)
             };
-            if edb_h > 0 || edb_hc > 0 {
-                edb_access.checks.push(DiagCheck {
-                    label: "eDB history".to_string(),
-                    status: DiagStatus::Pass,
-                    detail: format!(
-                        "{}, {}",
-                        counted(edb_h, "playlist", "playlists"),
-                        counted(edb_hc, "entry", "entries")
-                    ),
-                    link: None,
-                });
+            let detail = if edb_h > 0 || edb_hc > 0 {
+                tr::diagnostics_check_edb_history_counts(edb_h, edb_hc)
             } else {
-                edb_access.checks.push(DiagCheck {
-                    label: "eDB history".to_string(),
-                    status: DiagStatus::Pass,
-                    detail: "empty".to_string(),
-                    link: None,
-                });
-            }
+                tr::diagnostics_check_edb_history_empty()
+            };
+            edb_access.checks.push(DiagCheck::new(
+                tr::diagnostics_check_edb_history(),
+                DiagStatus::Pass,
+                detail,
+            ));
         }
 
         note_stage("db access", &mut raw_warnings);
@@ -265,7 +257,7 @@ impl BackendService {
                 DiagStatus::Fail
             };
             let detail = if misaligned.is_empty() {
-                "All UTF-16 and long ASCII string slots are 4-byte aligned".to_string()
+                tr::diagnostics_check_string_alignment_ok()
             } else {
                 let examples = misaligned
                     .iter()
@@ -280,56 +272,41 @@ impl BackendService {
                     })
                     .collect::<Vec<_>>()
                     .join(", ");
-                format!(
-                    "{} with a misaligned UTF-16 or long ASCII string slot — \
-                     freezes/comm-errors CDJ hardware while browsing; e.g. {examples}; run repair_pdb_track_string_alignment \
-                     / repair_pdb_album_string_alignment / repair_pdb_artist_name_layout to fix",
-                    counted(misaligned.len(), "row", "rows")
-                )
+                tr::diagnostics_check_string_alignment_misaligned(misaligned.len(), examples)
             };
             if matches!(status, DiagStatus::Fail) {
                 raw_warnings.push(logging::log(
                     Level::Warn,
                     "usb-diagnostics",
                     "usb.diagnostics.pdb-string-misalignment",
-                    detail.clone(),
+                    detail.render_english(),
                 ));
             }
-            contents_integrity.checks.push(DiagCheck {
-                label: "Track/album string alignment".to_string(),
+            contents_integrity.checks.push(DiagCheck::new(
+                tr::diagnostics_check_string_alignment(),
                 status,
                 detail,
-                link: None,
-            });
+            ));
 
             // Artist rows with a short ASCII name at 12 instead of rekordbox's 10: CDJs read
             // them fine, but an Engine DJ player's own import of export.pdb shows no artist.
             let (status, detail) = if artist_layout.is_empty() {
-                (
-                    DiagStatus::Pass,
-                    "All artist names are where rekordbox puts them".to_string(),
-                )
+                (DiagStatus::Pass, tr::diagnostics_check_artist_layout_ok())
             } else {
-                let detail = format!(
-                    "{} with the name at a different offset than rekordbox uses; \
-                     an Engine DJ player importing export.pdb shows the artist's tracks without \
-                     an artist; run repair_pdb_artist_name_layout to fix",
-                    counted(artist_layout.len(), "artist row", "artist rows")
-                );
+                let detail = tr::diagnostics_check_artist_layout_moved(artist_layout.len());
                 raw_warnings.push(logging::log(
                     Level::Warn,
                     "usb-diagnostics",
                     "usb.diagnostics.pdb-artist-name-layout",
-                    detail.clone(),
+                    detail.render_english(),
                 ));
                 (DiagStatus::Warn, detail)
             };
-            contents_integrity.checks.push(DiagCheck {
-                label: "Artist name layout".to_string(),
+            contents_integrity.checks.push(DiagCheck::new(
+                tr::diagnostics_check_artist_layout(),
                 status,
                 detail,
-                link: None,
-            });
+            ));
             contents_integrity.status = DiagStatus::worst_of(
                 &contents_integrity
                     .checks
@@ -357,11 +334,7 @@ impl BackendService {
             // preview, which scans the analysis files anyway.
             let mismatches = detect_bpm_key_mismatches(&usb_root, parsed, conn, false, None);
             let (status, detail) = if mismatches.is_empty() {
-                (
-                    DiagStatus::Pass,
-                    "export.pdb and exportLibrary.db agree on BPM and key for every track"
-                        .to_string(),
-                )
+                (DiagStatus::Pass, tr::diagnostics_check_bpm_key_ok())
             } else {
                 let examples = mismatches
                     .iter()
@@ -371,13 +344,7 @@ impl BackendService {
                     .join(", ");
                 (
                     DiagStatus::Warn,
-                    format!(
-                        "{} whose BPM/key in exportLibrary.db differs from export.pdb \
-                         -- CDJs may show a different BPM/key than the app; e.g. {examples}; \
-                         run the repair (fix_bpm_key_mismatch, which also checks the ANLZ beat \
-                         grids) to fix",
-                        counted(mismatches.len(), "track", "tracks")
-                    ),
+                    tr::diagnostics_check_bpm_key_mismatch(mismatches.len(), examples),
                 )
             };
             if matches!(status, DiagStatus::Warn) {
@@ -385,15 +352,14 @@ impl BackendService {
                     Level::Warn,
                     "usb-diagnostics",
                     "usb.diagnostics.bpm-key-mismatch",
-                    detail.clone(),
+                    detail.render_english(),
                 ));
             }
-            analysis_integrity.checks.push(DiagCheck {
-                label: "BPM/key consistency".to_string(),
+            analysis_integrity.checks.push(DiagCheck::new(
+                tr::diagnostics_check_bpm_key(),
                 status,
                 detail,
-                link: None,
-            });
+            ));
             // Database-only, like the BPM check: track rows naming the same
             // bundle. The repair preview also reads each bundle's PPTH.
             let shared = scan_analysis_ownership(&usb_root, parsed, None, false).shared;
@@ -421,36 +387,35 @@ impl BackendService {
                     ),
                 ));
             }
-            analysis_integrity.checks.push(DiagCheck {
-                label: "Shared analysis files".to_string(),
-                status: if shared.is_empty() {
-                    DiagStatus::Pass
-                } else {
-                    DiagStatus::Warn
-                },
-                detail: if shared.is_empty() {
-                    "every track has its own analysis file".to_string()
-                } else {
-                    format!(
-                        "{} sharing {}, so players can show \
-                         one track's waveform and beat grid for another; run the repair \
-                         (separate_shared_analysis) to fix",
-                        counted(shared_tracks, "track", "tracks"),
-                        counted(shared.len(), "analysis file", "analysis files")
-                    )
-                },
-                link: (!shared.is_empty()).then(|| "event-log".to_string()),
-            });
-            let beat_grids = diagnose_beat_grid_format(&usb_root, parsed);
-            if matches!(beat_grids.status, DiagStatus::Warn) {
+            let shared_check = if shared.is_empty() {
+                DiagCheck::new(
+                    tr::diagnostics_check_shared_analysis(),
+                    DiagStatus::Pass,
+                    tr::diagnostics_check_shared_analysis_ok(),
+                )
+            } else {
+                DiagCheck::new(
+                    tr::diagnostics_check_shared_analysis(),
+                    DiagStatus::Warn,
+                    tr::diagnostics_check_shared_analysis_shared(shared_tracks, shared.len()),
+                )
+                .with_link("event-log")
+            };
+            analysis_integrity.checks.push(shared_check);
+            let (beat_grid_status, beat_grid_detail) = diagnose_beat_grid_format(&usb_root, parsed);
+            if matches!(beat_grid_status, DiagStatus::Warn) {
                 raw_warnings.push(logging::log(
                     Level::Warn,
                     "usb-diagnostics",
                     "usb.diagnostics.beat-grid-format",
-                    beat_grids.detail.clone(),
+                    beat_grid_detail.render_english(),
                 ));
             }
-            analysis_integrity.checks.push(beat_grids);
+            analysis_integrity.checks.push(DiagCheck::new(
+                tr::diagnostics_check_beat_grid(),
+                beat_grid_status,
+                beat_grid_detail,
+            ));
             analysis_integrity.status = DiagStatus::worst_of(
                 &analysis_integrity
                     .checks
@@ -544,9 +509,9 @@ impl BackendService {
         );
         let duration_ms = start.elapsed().as_millis() as u64;
         let status_label = match overall_status {
-            DiagStatus::Pass => crate::i18n::tr::diagnostics_status_pass(),
-            DiagStatus::Warn => crate::i18n::tr::diagnostics_status_warn(),
-            DiagStatus::Fail => crate::i18n::tr::diagnostics_status_fail(),
+            DiagStatus::Pass => tr::diagnostics_status_pass(),
+            DiagStatus::Warn => tr::diagnostics_status_warn(),
+            DiagStatus::Fail => tr::diagnostics_status_fail(),
         }
         .render();
         let health_text = match overall_status {
@@ -740,9 +705,9 @@ impl BackendService {
         note_stage("finalize", &mut raw_warnings);
         let duration_ms = start.elapsed().as_millis() as u64;
         let status_label = crate::i18n::tr::parity_status_label(match overall_status {
-            DiagStatus::Pass => crate::i18n::tr::diagnostics_status_pass(),
-            DiagStatus::Warn => crate::i18n::tr::diagnostics_status_warn(),
-            DiagStatus::Fail => crate::i18n::tr::diagnostics_status_fail(),
+            DiagStatus::Pass => tr::diagnostics_status_pass(),
+            DiagStatus::Warn => tr::diagnostics_status_warn(),
+            DiagStatus::Fail => tr::diagnostics_status_fail(),
         });
         Ok(RunUsbParityReportData {
             overall_status,

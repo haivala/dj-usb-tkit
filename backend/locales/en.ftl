@@ -12,7 +12,8 @@
 #   dialogs:  add-to, convert, drive-name, group-edit, help, playlist-import,
 #             tracklist-export
 #   JS only:  job (also the progress bar), update, playback
-#   Rust:     export, diagnostics, repair, analysis, scan, job, error
+#   Rust:     export, diagnostics, parity, repair, track-list, analysis, scan, job,
+#             error
 #   shared:   common (generic dialog buttons and words only); markup repeated on
 #             several pages: selection-bar, track-table, rating; and one area per
 #             <template> used on more than one page, named from its id
@@ -195,6 +196,556 @@ parity-complete = Parity report complete ({ $ms }ms)
 # The parity report's badge. $status: diagnostics-status-pass, -warn or -fail.
 parity-status-label = Parity { $status }
 
+# The diagnostics report's boxes, and the columns in them.
+diagnostics-group-databases = Databases
+diagnostics-group-library = Library
+diagnostics-group-low-level = Low-level
+diagnostics-group-comparison = Comparison
+diagnostics-section-pdb = PDB
+diagnostics-section-edb = eDB
+diagnostics-section-engine = Engine DJ
+diagnostics-section-playlists = Playlists
+diagnostics-section-analysis = Analysis
+diagnostics-section-player-counters = Player counters
+diagnostics-section-page-format = Page format
+diagnostics-section-track-details = Track details
+diagnostics-section-music-files = Music files
+
+# The overview rows' titles, above the diagnostics, parity and repair reports: what a DJ cares about.
+diagnostics-area-older-players = Older Pioneer players
+diagnostics-area-newer-players = Newer Pioneer players
+diagnostics-area-playlists = Playlists
+diagnostics-area-track-details = Track details
+diagnostics-area-music-files = Music files
+diagnostics-area-analysis = Waveforms & beat grids
+diagnostics-area-engine = Denon / Numark players
+# After an overview row's problems, when a repair can fix them.
+diagnostics-preview-fixes-hint = Preview Fixes shows what can be repaired.
+
+# The diagnostics overview's "Older Pioneer players" row.
+diagnostics-overview-pdb-missing = This USB has no player database, so these players won't show any music.
+diagnostics-overview-pdb-unreadable = The player database is missing or can't be read, so these players won't show any music.
+# $playlists, $tracks: what the player database holds.
+diagnostics-overview-pdb-ready = Ready: { $playlists ->
+    [one] { $playlists } playlist
+   *[other] { $playlists } playlists
+}, { $tracks ->
+    [one] { $tracks } track
+   *[other] { $tracks } tracks
+}.
+diagnostics-overview-pdb-track-count = These players will show 0 or 1 tracks: part of the player database doesn't match the music on this USB.
+diagnostics-overview-pdb-irregular = Readable, but parts of the player database are irregular and desktop DJ software may complain.
+diagnostics-overview-pdb-errors = The player database has errors that can make these players freeze or show wrong data.
+# The "Newer Pioneer players" row.
+diagnostics-overview-edb-missing = This USB has no database for newer players, so they may not show this USB's music.
+diagnostics-overview-edb-not-yet = This USB has no database for newer players yet.
+diagnostics-overview-edb-unreadable = The database newer players read can't be opened, so they may not show this USB's music.
+# $count: the tracks only the older players' database has.
+diagnostics-overview-edb-pdb-only = { $count ->
+    [one] { $count } track is missing from the database newer players read, so it may not show up there.
+   *[other] { $count } tracks are missing from the database newer players read, so they may not show up there.
+}
+# $count: the tracks only the newer players' database has.
+diagnostics-overview-edb-edb-only = { $count ->
+    [one] { $count } track is only in the newer players' database, so older Pioneer players won't show it.
+   *[other] { $count } tracks are only in the newer players' database, so older Pioneer players won't show them.
+}
+diagnostics-overview-edb-bpm-key = Some tracks may show a different BPM or key on newer players than on older ones.
+diagnostics-overview-edb-analysis = Some tracks may have no waveform or beat grid on newer players.
+diagnostics-overview-edb-irregular = Parts of the newer players' database are irregular.
+# $count: the tracks the newer players' database holds.
+diagnostics-overview-edb-ready = Ready: { $count ->
+    [one] { $count } track
+   *[other] { $count } tracks
+}.
+# The "Playlists" row. $count: the playlists.
+diagnostics-overview-playlists-ready = Every track in your { $count ->
+    [one] { $count } playlist
+   *[other] { $count } playlists
+} is found.
+# $count: the playlist tracks that can't be found.
+diagnostics-overview-playlists-missing = { $count ->
+    [one] { $count } track in your playlists can't be found.
+   *[other] { $count } tracks in your playlists can't be found.
+}
+diagnostics-overview-playlists-mismatch = Some playlist data doesn't line up between the databases.
+# The "Waveforms & beat grids" row.
+diagnostics-overview-analysis-ready = Every track has waveform and beat grid data.
+diagnostics-overview-analysis-problems = Some tracks' waveform or beat grid data is missing or outdated.
+# The "Denon / Numark players" row.
+diagnostics-overview-engine-next-change = Will be added the next time this app changes the USB.
+diagnostics-overview-engine-not-set-up = Not set up. Only needed for Denon Prime / Numark Mixstream players: turn on Settings → Export → "Write Engine DJ library".
+diagnostics-overview-engine-updates-off = Updates are turned off, so changes made in this app don't reach these players.
+diagnostics-overview-engine-out-of-date = Out of date, so the player will analyze every track again.
+diagnostics-overview-engine-ready = Ready.
+
+# The parity report's overview rows: one sentence per problem kind.
+# $count: the playlists whose ids differ.
+parity-overview-playlist-ids = { $count ->
+    [one] { $count } playlist doesn't line up between the two databases.
+   *[other] { $count } playlists don't line up between the two databases.
+}
+# $count: the playlist tracks only the older players' database has.
+parity-overview-only-in-pdb = { $count ->
+    [one] { $count } playlist track is only in the database older Pioneer players read.
+   *[other] { $count } playlist tracks are only in the database older Pioneer players read.
+}
+# $count: the playlist tracks only the newer players' database has.
+parity-overview-only-in-edb = { $count ->
+    [one] { $count } playlist track is only in the database newer Pioneer players read.
+   *[other] { $count } playlist tracks are only in the database newer Pioneer players read.
+}
+# $count: the playlists in a different order.
+parity-overview-order = { $count ->
+    [one] { $count } playlist is in a different order depending on the player.
+   *[other] { $count } playlists are in a different order depending on the player.
+}
+# $count: the tracks listed twice.
+parity-overview-duplicates = { $count ->
+    [one] { $count } track is listed twice in a playlist on older Pioneer players.
+   *[other] { $count } tracks are listed twice in a playlist on older Pioneer players.
+}
+# $count: the tracks with missing details.
+parity-overview-pdb-details = { $count ->
+    [one] { $count } track is missing track details on older Pioneer players.
+   *[other] { $count } tracks are missing track details on older Pioneer players.
+}
+# $count: the tracks with missing details.
+parity-overview-edb-details = { $count ->
+    [one] { $count } track is missing track details in the database newer Pioneer players read.
+   *[other] { $count } tracks are missing track details in the database newer Pioneer players read.
+}
+# $count: the tracks with a missing artist, album or key.
+parity-overview-dictionary = { $count ->
+    [one] { $count } track refers to an artist, album or key that's missing on older Pioneer players.
+   *[other] { $count } tracks refer to an artist, album or key that's missing on older Pioneer players.
+}
+# $count: the tracks whose artwork differs.
+parity-overview-artwork = { $count ->
+    [one] { $count } track has artwork on one kind of Pioneer player but not the other.
+   *[other] { $count } tracks have artwork on one kind of Pioneer player but not the other.
+}
+# $count: the tracks whose rating or colour differs.
+parity-overview-rating-colour = { $count ->
+    [one] { $count } track has a different rating or colour on older Pioneer players.
+   *[other] { $count } tracks have a different rating or colour on older Pioneer players.
+}
+# $count: the missing audio files.
+parity-overview-files-missing = { $count ->
+    [one] { $count } audio file is missing from the USB, so that track won't play.
+   *[other] { $count } audio files are missing from the USB, so those tracks won't play.
+}
+# $count: the audio files in no playlist.
+parity-overview-files-extra = { $count ->
+    [one] { $count } audio file on the USB isn't in any playlist.
+   *[other] { $count } audio files on the USB aren't in any playlist.
+}
+# $count: the tracks whose files differ.
+parity-overview-paths = { $count ->
+    [one] { $count } track points to a different audio or waveform file depending on the player.
+   *[other] { $count } tracks point to a different audio or waveform file depending on the player.
+}
+# The rows' text when there's no problem. $count: the playlists.
+parity-overview-playlists-ready = Both databases have the same { $count ->
+    [one] { $count } playlist
+   *[other] { $count } playlists
+}, with the same tracks in the same order.
+parity-overview-tracks-ready = Every playlist track has complete details and the same artwork in both databases.
+parity-overview-files-ready = Every playlist track's audio file is on the USB, and both databases point to the same files.
+
+# The parity report's playlist rows: short badges for each problem. $count: the tracks it affects.
+parity-issue-only-in-pdb = +PDB { $count }
+parity-issue-only-in-edb = +eDB { $count }
+parity-issue-duplicates = dup PDB { $count }
+parity-issue-pdb-gaps = PDB gaps { $count }
+parity-issue-edb-gaps = eDB gaps { $count }
+parity-issue-path-mismatch = path mismatch { $count }
+parity-issue-dictionary = dict issues { $count }
+parity-issue-artwork = art mismatch { $count }
+parity-issue-rating-colour = rating/colour mismatch { $count }
+parity-issue-field-notes = field notes { $count }
+# The same, for a playlist-wide problem.
+parity-issue-id-mismatch = id mismatch
+parity-issue-sort-mismatch = sort mismatch
+parity-issue-order-mismatch = order mismatch
+
+# The diagnostics report's checks: each check's label, then what it found. The words in
+# code style (num_rl, nrs, u5, page_flags, tranrf, empty_candidate, playlist_tree, ACTV,
+# repair_usb_diagnostics) are the PDB format's own names: keep them as they are.
+diagnostics-check-pdb-exists = PDB exists
+# $path: the file the check looked for.
+diagnostics-check-pdb-exists-missing = File not found: { $path }
+diagnostics-check-pdb-exists-found = Found
+diagnostics-check-pdb-parseable = PDB parseable
+# $error: why reading failed, in English.
+diagnostics-check-pdb-parseable-error = Parse error: { $error }
+# What the PDB holds. $tracks, $artists, $albums, $genres, $labels, $keys, $artworks: its rows of each.
+diagnostics-check-pdb-parseable-counts = { $tracks ->
+    [one] { $tracks } track
+   *[other] { $tracks } tracks
+}, { $artists ->
+    [one] { $artists } artist
+   *[other] { $artists } artists
+}, { $albums ->
+    [one] { $albums } album
+   *[other] { $albums } albums
+}, { $genres ->
+    [one] { $genres } genre
+   *[other] { $genres } genres
+}, { $labels ->
+    [one] { $labels } label
+   *[other] { $labels } labels
+}, { $keys ->
+    [one] { $keys } key
+   *[other] { $keys } keys
+}, { $artworks ->
+    [one] { $artworks } artwork
+   *[other] { $artworks } artworks
+}
+diagnostics-check-pdb-header = PDB header compatibility
+# $value: the number in the file header.
+diagnostics-check-pdb-header-value = value { $value } at bytes 0x10..0x14
+diagnostics-check-pdb-header-unknown = value { $value } at bytes 0x10..0x14; expected a known-compatible value
+diagnostics-check-pdb-page-headers = PDB page headers
+diagnostics-check-pdb-page-headers-valid = u5, page_flags, and tranrf are valid on all data pages
+# $parts: what rekordbox left, joined with "; ".
+diagnostics-check-pdb-page-headers-bookkeeping = valid; rekordbox transaction bookkeeping: { $parts }
+# The parts. $count: the pages.
+diagnostics-check-pdb-page-headers-sentinel-u5 = { $count ->
+    [one] { $count } page
+   *[other] { $count } pages
+} with sentinel u5=0x1FFF
+diagnostics-check-pdb-page-headers-page-flags = { $count ->
+    [one] { $count } page
+   *[other] { $count } pages
+} with non-default page_flags
+diagnostics-check-pdb-page-headers-tranrf = { $count ->
+    [one] { $count } data page
+   *[other] { $count } data pages
+} with tranrf=0 on last-row group
+diagnostics-check-pdb-structure = PDB structural integrity
+diagnostics-check-pdb-structure-ok = sentinel b-tree, page shapes, row IDs, and write pointers OK
+# $parts: what rekordbox left, joined with "; ".
+diagnostics-check-pdb-structure-ok-bookkeeping = sentinel b-tree, page shapes, row IDs, and write pointers OK; rekordbox transaction bookkeeping: { $parts }
+# $parts: the problems, joined with "; ". The two lines are joined with " | ".
+diagnostics-check-pdb-structure-fails = { $parts } — run repair_usb_diagnostics to fix
+diagnostics-check-pdb-structure-warns = { $parts } — player-tolerant; repair available
+# The parts. $count: what the part counts.
+diagnostics-check-pdb-structure-stale-btree = { $count ->
+    [one] { $count } sentinel
+   *[other] { $count } sentinels
+} stale b-tree
+diagnostics-check-pdb-structure-playlist-tree-shape = { $count ->
+    [one] { $count } playlist_tree page
+   *[other] { $count } playlist_tree pages
+} with non-default shape
+diagnostics-check-pdb-structure-tombstoned = { $count ->
+    [one] { $count } tombstoned row
+   *[other] { $count } tombstoned rows
+} non-zero id
+diagnostics-check-pdb-structure-track-page-shape = { $count ->
+    [one] { $count } track page
+   *[other] { $count } track pages
+} with non-default shape
+diagnostics-check-pdb-structure-track-page-active = { $count ->
+    [one] { $count } track page
+   *[other] { $count } track pages
+} ACTV in multi-page chain
+diagnostics-check-pdb-structure-history-shape = { $count ->
+    [one] { $count } history page
+   *[other] { $count } history pages
+} wrong shape
+diagnostics-check-pdb-structure-ec-conflict = { $count ->
+    [one] { $count } table
+   *[other] { $count } tables
+} write-pointer conflict
+diagnostics-check-pdb-structure-truncated = { $count ->
+    [one] { $count } table
+   *[other] { $count } tables
+} with declared last page beyond physical file end
+diagnostics-check-pdb-structure-torn-pages = { $count ->
+    [one] { $count } empty_candidate page
+   *[other] { $count } empty_candidate pages
+} torn from interrupted export
+diagnostics-check-pdb-structure-torn-tail = PDB tail torn from interrupted export
+diagnostics-check-pdb-playlists = PDB playlists
+# $nodes: the playlist tree's rows. $entries: the playlists' tracks.
+diagnostics-check-pdb-playlists-counts = { $nodes ->
+    [one] { $nodes } tree node
+   *[other] { $nodes } tree nodes
+}, { $entries ->
+    [one] { $entries } entry
+   *[other] { $entries } entries
+}
+diagnostics-check-pdb-history = PDB history
+# $playlists, $entries, $rows: the history tables' rows.
+diagnostics-check-pdb-history-counts = { $playlists ->
+    [one] { $playlists } playlist
+   *[other] { $playlists } playlists
+}, { $entries ->
+    [one] { $entries } entry
+   *[other] { $entries } entries
+}, { $rows ->
+    [one] { $rows } row
+   *[other] { $rows } rows
+}
+diagnostics-check-pdb-history-empty = empty
+diagnostics-check-num-rl-pages = num_rl=8191 pages
+# $count: the pages with the value. $total: all pages.
+diagnostics-check-num-rl-pages-detail = { $count } of { $total ->
+    [one] { $total } page
+   *[other] { $total } pages
+} (using nrs fallback)
+diagnostics-check-nrs-wrapping = nrs wrapping
+# $count: the pages.
+diagnostics-check-nrs-wrapping-detail = { $count ->
+    [one] { $count } page
+   *[other] { $count } pages
+} with row count exceeding nrs header
+diagnostics-check-orphaned-entries = Orphaned entries
+# $entries: the playlist rows. $tracks: the missing track ids they point to.
+diagnostics-check-orphaned-entries-detail = { $entries ->
+    [one] { $entries } entry
+   *[other] { $entries } entries
+} referencing { $tracks ->
+    [one] { $tracks } track ID
+   *[other] { $tracks } track IDs
+} not in PDB
+diagnostics-check-parse-warnings = Parse warnings
+# $count: the warnings.
+diagnostics-check-parse-warnings-detail = { $count ->
+    [one] { $count } warning
+   *[other] { $count } warnings
+} during parsing
+
+diagnostics-check-edb = eDB
+diagnostics-check-edb-missing = File not found
+diagnostics-check-edb-opened = Opened successfully
+diagnostics-check-edb-unable = Unable to open
+diagnostics-check-pdb-paths = PDB indexed paths
+diagnostics-check-edb-paths = eDB indexed paths
+# $count: the track paths the database lists.
+diagnostics-check-paths-count = { $count ->
+    [one] { $count } canonical track path
+   *[other] { $count } canonical track paths
+}
+diagnostics-check-path-agreement = PDB/eDB path agreement
+diagnostics-check-path-agreement-agree = PDB/eDB canonical-path sets agree
+# The parts of a disagreement, joined with "; ". $count: the paths or tracks.
+diagnostics-check-path-agreement-pdb-only = { $count ->
+    [one] { $count } PDB-only path
+   *[other] { $count } PDB-only paths
+}
+diagnostics-check-path-agreement-edb-only = { $count ->
+    [one] { $count } eDB-only path
+   *[other] { $count } eDB-only paths
+}
+diagnostics-check-path-agreement-history-only = { $count ->
+    [one] { $count } history-only track
+   *[other] { $count } history-only tracks
+}
+diagnostics-check-beat-grid = Beat grid format
+diagnostics-check-beat-grid-not-exported = no tracks on this USB were exported by this app
+diagnostics-check-beat-grid-current = every beat grid this app wrote to this USB is in the current format
+# $count: the tracks. $examples: up to three of their paths, joined with ", ".
+diagnostics-check-beat-grid-outdated = Tracks with a beat grid in an outdated format that some players (e.g. the XDJ-AZ) reject, so Beat Sync is unavailable on them: { $count }; e.g. { $examples }; re-export or run the repair (fix_beat_grid_header) to fix
+diagnostics-check-pdb-analysis = PDB analysis refs
+# $with: the track rows with an analysis path. $total: all track rows. $refs: the different analysis files they point to.
+diagnostics-check-pdb-analysis-detail = { $with }/{ $total } track rows with analysis paths; { $refs ->
+    [one] { $refs } unique bundle reference
+   *[other] { $refs } unique bundle references
+}
+diagnostics-check-no-pdb-data = No PDB data available
+diagnostics-check-edb-analysis = eDB analysis refs
+# $with: the content rows with an analysis path. $total: the playlists' content rows. $refs: the different analysis files they point to. $entries: the playlist rows.
+diagnostics-check-edb-analysis-detail = { $with }/{ $total } playlist-linked content rows with analysis paths; { $refs ->
+    [one] { $refs } unique bundle reference
+   *[other] { $refs } unique bundle references
+} from { $entries ->
+    [one] { $entries } playlist entry
+   *[other] { $entries } playlist entries
+}
+diagnostics-check-edb-analysis-no-tracks = No tracks in the eDB
+diagnostics-check-edb-analysis-no-data = No eDB playlist data available
+diagnostics-check-playlist-data = Playlist data
+# A row named after a playlist only the eDB has. $count: its tracks.
+diagnostics-check-playlist-edb-only = present in eDB only ({ $count ->
+    [one] { $count } entry
+   *[other] { $count } entries
+}), missing from PDB
+diagnostics-check-overall-resolution = Overall resolution
+# $resolved: the playlist rows whose track exists. $total: all playlist rows. $percent: the share, such as 98.5. $playlists: the playlists.
+diagnostics-check-overall-resolution-detail = { $resolved }/{ $total } entries resolve ({ $percent }%) across { $playlists ->
+    [one] { $playlists } playlist
+   *[other] { $playlists } playlists
+}
+diagnostics-check-db-only-playlists = DB-only playlists
+# $count: the playlists.
+diagnostics-check-db-only-playlists-detail = { $count ->
+    [one] { $count } playlist
+   *[other] { $count } playlists
+} in eDB but not in PDB
+diagnostics-check-key-overlap = PDB vs eDB key overlap (informational)
+# $matched: the tracks both databases list. $pdbshare, $edbshare: their share of each database's tracks, such as 98.5. $pdb, $edb: each database's tracks.
+diagnostics-check-key-overlap-detail = matched { $matched } track keys; PDB { $pdbshare }% ({ $matched }/{ $pdb }), DB { $edbshare }% ({ $matched }/{ $edb })
+diagnostics-check-operational = Operational interpretation
+diagnostics-check-operational-detail = pass/warn here means operationally usable; strict parity may still fail on the same USB
+# A row named after a playlist with missing tracks. $resolved: its rows whose track exists. $total: its rows. $percent: the share, such as 98.5.
+diagnostics-check-playlist-resolution = { $resolved }/{ $total } entries ({ $percent }%)
+
+# The player counter checks. t00, t08, t11, t12, t17, t18, t19, ec, nrs, num_rl, rowpf0 and
+# tranrf0 are the PDB format's own names: keep them as they are.
+diagnostics-check-history-page = PDB history page
+diagnostics-check-history-page-mismatch = t19 does not match the track count or the eDB's property row — older players may show 0 or 1 tracks. Repair fixes it.
+diagnostics-check-predicted-counter = Predicted player counter
+# $playlists, $songs: what a player would count. $confidence: high, medium or low (not translated).
+diagnostics-check-predicted-counter-detail = playlists { $playlists }, songs { $songs } (confidence: { $confidence })
+diagnostics-check-shape-mode = Shape mode
+# $mode: runtime, baseline-init or unknown (not translated). $baseline: diagnostics-check-yes or -no.
+diagnostics-check-shape-mode-detail = { $mode } (baseline-init-like: { $baseline })
+diagnostics-check-yes = yes
+diagnostics-check-no = no
+diagnostics-check-cross-check = Cross-check
+# $tracks: the PDB's track rows. $entries: its playlist rows.
+diagnostics-check-cross-check-detail = t00 tracks { $tracks }, t08 entries { $entries }
+diagnostics-check-history-pointers = History pointers
+diagnostics-check-primitive-signal = Primitive signal
+
+diagnostics-check-edb-history = eDB history
+# $playlists, $entries: the eDB's history rows.
+diagnostics-check-edb-history-counts = { $playlists ->
+    [one] { $playlists } playlist
+   *[other] { $playlists } playlists
+}, { $entries ->
+    [one] { $entries } entry
+   *[other] { $entries } entries
+}
+diagnostics-check-edb-history-empty = empty
+diagnostics-check-string-alignment = Track/album string alignment
+diagnostics-check-string-alignment-ok = All UTF-16 and long ASCII string slots are 4-byte aligned
+# $count: the rows. $examples: up to three, such as "track #12 (title)", joined with ", ". The repair_* names are commands: keep them.
+diagnostics-check-string-alignment-misaligned = { $count ->
+    [one] { $count } row
+   *[other] { $count } rows
+} with a misaligned UTF-16 or long ASCII string slot — freezes/comm-errors CDJ hardware while browsing; e.g. { $examples }; run repair_pdb_track_string_alignment / repair_pdb_album_string_alignment / repair_pdb_artist_name_layout to fix
+diagnostics-check-artist-layout = Artist name layout
+diagnostics-check-artist-layout-ok = All artist names are where rekordbox puts them
+# $count: the artist rows.
+diagnostics-check-artist-layout-moved = { $count ->
+    [one] { $count } artist row
+   *[other] { $count } artist rows
+} with the name at a different offset than rekordbox uses; an Engine DJ player importing export.pdb shows the artist's tracks without an artist; run repair_pdb_artist_name_layout to fix
+diagnostics-check-bpm-key = BPM/key consistency
+diagnostics-check-bpm-key-ok = export.pdb and exportLibrary.db agree on BPM and key for every track
+# $count: the tracks. $examples: up to three of their paths, joined with ", ".
+diagnostics-check-bpm-key-mismatch = { $count ->
+    [one] { $count } track
+   *[other] { $count } tracks
+} whose BPM/key in exportLibrary.db differs from export.pdb -- CDJs may show a different BPM/key than the app; e.g. { $examples }; run the repair (fix_bpm_key_mismatch, which also checks the ANLZ beat grids) to fix
+diagnostics-check-shared-analysis = Shared analysis files
+diagnostics-check-shared-analysis-ok = every track has its own analysis file
+# $tracks: the tracks. $files: the analysis files they share.
+diagnostics-check-shared-analysis-shared = { $tracks ->
+    [one] { $tracks } track
+   *[other] { $tracks } tracks
+} sharing { $files ->
+    [one] { $files } analysis file
+   *[other] { $files } analysis files
+}, so players can show one track's waveform and beat grid for another; run the repair (separate_shared_analysis) to fix
+# The Engine DJ library's checks.
+diagnostics-check-engine-missing = Not on this USB
+diagnostics-check-engine-missing-detail = Only needed for Denon Prime / Numark Mixstream players. Turn on Settings → Export → "Write Engine DJ library" before using this USB in one; otherwise the player imports export.pdb itself and analyzes every track again
+diagnostics-check-engine-upkeep = Kept up to date
+diagnostics-check-engine-upkeep-on = Rebuilt whenever this app changes the USB
+diagnostics-check-engine-upkeep-off = "Write Engine DJ library" is off, so changes this app makes to the USB don't reach Denon Prime / Numark Mixstream players. Preview Fixes can turn it on
+diagnostics-check-engine-sync = Matches export.pdb
+# $pdb: the PDB's write counter.
+diagnostics-check-engine-sync-ok = Written for export.pdb #{ $pdb }
+# $library: the counter the library was written for. $pdb: the PDB's. Either can be "?".
+diagnostics-check-engine-sync-behind = Written for export.pdb #{ $library }, the USB has #{ $pdb }. The player may import export.pdb again and analyze the tracks itself. Preview Fixes can rebuild it
+
+# The parity report's checks.
+diagnostics-check-parity-overall = Overall player parity status
+# $playlists: the playlists checked. $failing: those that fail. $ids: those whose ids differ.
+diagnostics-check-parity-overall-detail = playlists checked: { $playlists }, failing playlists: { $failing }, playlist id mismatches: { $ids }
+diagnostics-check-parity-section = Parity-report section (required)
+diagnostics-check-parity-section-detail = See parity summary rows for category counts.
+diagnostics-check-parity-identity = Playlist identity parity
+# $count: the playlists.
+diagnostics-check-parity-identity-detail = { $count ->
+    [one] { $count } playlist
+   *[other] { $count } playlists
+} with mismatched or unresolved playlist ids between PDB and eDB
+diagnostics-check-parity-membership = Playlist membership parity
+# $pdb: the playlist tracks only the PDB has. $edb: those only the eDB has.
+diagnostics-check-parity-membership-detail = membership deltas: only-in-PDB={ $pdb }, only-in-eDB={ $edb }
+diagnostics-check-parity-ordering = Playlist ordering parity
+# $entries: the playlists whose tracks are in a different order. $playlists: those sorted differently.
+diagnostics-check-parity-ordering-detail = entry-order mismatches={ $entries }, playlist-sort-order mismatches={ $playlists }
+diagnostics-check-parity-files = Indexed audio file presence
+# $total: the audio files the databases list.
+diagnostics-check-parity-files-ok = all { $total } indexed audio files present, no unindexed files
+# $missing: the listed files not on the USB. $total: the files the databases list.
+diagnostics-check-parity-files-missing = { $missing } of { $total ->
+    [one] { $total } indexed audio file
+   *[other] { $total } indexed audio files
+} missing from USB
+# $extra: the audio files no playlist lists. $total: the files the databases list.
+diagnostics-check-parity-files-extra = { $extra ->
+    [one] { $extra } audio file
+   *[other] { $extra } audio files
+} on USB not referenced in any playlist (total indexed={ $total })
+# $missing, $total, $extra: as above.
+diagnostics-check-parity-files-both = { $missing } of { $total ->
+    [one] { $total } indexed file
+   *[other] { $total } indexed files
+} missing; { $extra ->
+    [one] { $extra } unindexed file
+   *[other] { $extra } unindexed files
+} on USB
+diagnostics-check-parity-duplicates = Duplicate PDB entries
+# $count: the duplicate playlist rows.
+diagnostics-check-parity-duplicates-detail = { $count ->
+    [one] { $count } duplicate PDB playlist entry
+   *[other] { $count } duplicate PDB playlist entries
+} detected
+diagnostics-check-parity-pdb-metadata = PDB metadata completeness
+# $count: the tracks.
+diagnostics-check-parity-pdb-metadata-detail = { $count ->
+    [one] { $count } playlist-linked PDB track
+   *[other] { $count } playlist-linked PDB tracks
+} missing required player metadata
+diagnostics-check-parity-paths = Media and analysis path parity
+# $count: the tracks.
+diagnostics-check-parity-paths-detail = { $count ->
+    [one] { $count } playlist-linked track
+   *[other] { $count } playlist-linked tracks
+} with media or analysis path mismatches
+diagnostics-check-parity-artwork = Artwork presence parity
+# $count: the tracks.
+diagnostics-check-parity-artwork-detail = { $count ->
+    [one] { $count } playlist-linked track
+   *[other] { $count } playlist-linked tracks
+} with artwork in one DB but not the other
+diagnostics-check-parity-dictionary = PDB dictionary id resolution
+# $count: the tracks.
+diagnostics-check-parity-dictionary-detail = { $count ->
+    [one] { $count } playlist-linked track
+   *[other] { $count } playlist-linked tracks
+} with unresolved required PDB dictionary ids
+diagnostics-check-parity-edb-metadata = eDB source completeness
+# $count: the tracks.
+diagnostics-check-parity-edb-metadata-detail = { $count ->
+    [one] { $count } playlist-linked eDB track
+   *[other] { $count } playlist-linked eDB tracks
+} missing metadata used by strict parity comparison
+diagnostics-check-parity-rating-colour = Rating and colour parity
+# $count: the tracks. $ratings, $colours: those whose rating or colour differs.
+diagnostics-check-parity-rating-colour-detail = { $count ->
+    [one] { $count } playlist-linked track
+   *[other] { $count } playlist-linked tracks
+} with a different rating or colour in the PDB than in the eDB (rating differs: { $ratings }, colour differs: { $colours })
+
 ## repair
 
 # The status line when the repair preview is ready. $ms: how long it took, in milliseconds.
@@ -203,6 +754,44 @@ repair-preview-ready = Repair preview ready ({ $ms }ms)
 repair-apply-complete = Repair apply complete: { $applied } applied, { $failed } failed ({ $ms }ms)
 # The same, when diagnostics ran again after the fixes.
 repair-apply-complete-refreshed = Repair apply complete: { $applied } applied, { $failed } failed ({ $ms }ms). Diagnostics refreshed.
+
+# The repair preview's overview: what Apply Fixes changes, one sentence per kind of fix, under the diagnostics-area-* rows.
+repair-overview-interrupted-export = Repairs damage left in the player database by an interrupted export.
+repair-overview-track-count = Fixes older players showing 0 or 1 tracks on this USB.
+repair-overview-rekordbox-corrupted = Fixes errors that make rekordbox report the USB as corrupted.
+repair-overview-header = Fixes a database setting some players don't accept.
+repair-overview-string-alignment = Rewrites track and album text that can freeze players while browsing or stop the track list from opening.
+repair-overview-artist-names = Rewrites artist names that can freeze players or go missing on Denon / Numark players.
+repair-overview-history = Copies the play history so newer players show the same history as older ones.
+repair-overview-strict-parity = Makes every playlist the same on older and newer players.
+repair-overview-duplicate-entries = Removes tracks listed twice in a playlist by mistake.
+repair-overview-relink = Reconnects tracks to music files that were renamed or moved on the USB.
+repair-overview-unindexed = Puts music files that are in no playlist into a playlist called "Unindexed".
+repair-overview-duplicate-copies = Deletes extra copies of music files that are in no playlist.
+repair-overview-missing-audio = Removes tracks whose music file is no longer on the USB. Play history keeps them.
+repair-overview-empty-analysis = Rebuilds missing waveforms and beat grids.
+repair-overview-shared-analysis = Gives tracks that show another track's waveform their own.
+repair-overview-analysis-path = Labels waveform files so players always pick the right one.
+repair-overview-bpm-key = Makes every player show the same BPM and key.
+repair-overview-beat-grid = Updates beat grids from older app versions so Beat Sync works on every player.
+repair-overview-mp3-seek = Adds the data players need to jump to any point in MP3 tracks.
+repair-overview-flac-seek = Adds the data players need to jump to any point in FLAC tracks.
+repair-overview-engine = Rebuilds the Denon / Numark library and keeps it up to date from now on. Changes made on those players themselves are replaced.
+repair-overview-other = Fixes other errors in the player database.
+# The row for what the repair can't fix, and its text. $count: the problems.
+repair-overview-needs-attention = Needs your attention
+repair-overview-not-fixable = { $count ->
+    [one] { $count } problem can't be fixed automatically
+   *[other] { $count } problems can't be fixed automatically
+} — Technical details says what to do.
+# The headline above the repair overview.
+repair-summary-no-issues = No issues found.
+repair-summary-nothing-fixable = Nothing here can be fixed automatically.
+# $count: the problems Apply Fixes repairs.
+repair-summary = Apply Fixes repairs { $count ->
+    [one] { $count } problem
+   *[other] { $count } problems
+} on this USB. The databases are backed up first.
 
 ## export
 

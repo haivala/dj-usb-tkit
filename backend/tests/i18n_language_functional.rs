@@ -9,7 +9,10 @@ use std::sync::{Arc, Mutex, MutexGuard, PoisonError};
 
 use backend::commands::BackendCommands;
 use backend::i18n::{self, ENGLISH, TEST_LANGUAGE, tr};
-use backend::models::{FetchUsbHistoriesRequest, InitializeUsbRequest, SetFrontendSettingRequest};
+use backend::models::{
+    FetchUsbHistoriesRequest, InitializeUsbRequest, RunUsbDiagnosticsData,
+    RunUsbDiagnosticsRequest, SetFrontendSettingRequest,
+};
 use tempfile::tempdir;
 
 const LANGUAGE_SETTING: &str = "ui_language_v1";
@@ -167,4 +170,73 @@ fn an_error_shows_the_current_language_and_logs_english() {
         lines.contains(&(shown.clone(), "Unknown language: xx".to_string())),
         "{lines:?}"
     );
+}
+
+#[test]
+fn diagnostics_report_follows_the_language() {
+    let _test = LanguageTest::start();
+    let root = tempdir().expect("temp root");
+    let usb = root.path().join("usb");
+    std::fs::create_dir_all(&usb).expect("create usb dir");
+    let backend = BackendCommands::new(root.path().join("data")).expect("create backend");
+    let initialized = backend.initialize_usb(InitializeUsbRequest {
+        usb_root: usb.to_string_lossy().to_string(),
+    });
+    assert!(initialized.ok, "{initialized:?}");
+    let run = || -> RunUsbDiagnosticsData {
+        let response = backend.run_usb_diagnostics(RunUsbDiagnosticsRequest {
+            usb_root: Some(usb.to_string_lossy().to_string()),
+        });
+        response.data.expect("diagnostics data")
+    };
+    // What the report's layout decides: which boxes and columns, and each overview row's
+    // status. The overview finds its columns by their (translated) titles.
+    let shape = |data: &RunUsbDiagnosticsData| {
+        let columns: Vec<String> = data
+            .section_groups
+            .iter()
+            .flat_map(|g| g.sections.iter().map(|s| format!("{:?}", s.status)))
+            .collect();
+        let rows: Vec<String> = data
+            .overview
+            .iter()
+            .map(|item| format!("{:?}", item.status))
+            .collect();
+        (columns, rows)
+    };
+
+    let english = run();
+    assert!(!english.overview.is_empty() && !english.section_groups.is_empty());
+    assert_eq!(english.overview[0].title, "Older Pioneer players");
+
+    assert!(save_language(&backend, TEST_LANGUAGE).ok);
+    let switched = run();
+    assert_eq!(shape(&switched), shape(&english));
+    for group in &switched.section_groups {
+        assert!(is_test_language(&group.title), "{:?}", group.title);
+        for section in &group.sections {
+            assert!(is_test_language(&section.title), "{:?}", section.title);
+            // A fresh USB has no playlists, so no check is named after one.
+            for check in &section.checks {
+                assert!(is_test_language(&check.label), "{:?}", check.label);
+                // The eDB check shows its last warning, English until warnings move (piece 11).
+                let is_warning = switched.warnings.iter().any(|w| w.message == check.detail);
+                // Raw table signals ("t11 23-23 ec=24 | …"): no words to translate.
+                let is_signal = [
+                    tr::diagnostics_check_history_pointers(),
+                    tr::diagnostics_check_primitive_signal(),
+                ]
+                .iter()
+                .any(|label| label.render() == check.label);
+                assert!(
+                    is_warning || is_signal || is_test_language(&check.detail),
+                    "{check:?}"
+                );
+            }
+        }
+    }
+    for item in &switched.overview {
+        assert!(is_test_language(&item.title), "{:?}", item.title);
+        assert!(is_test_language(&item.detail), "{:?}", item.detail);
+    }
 }
