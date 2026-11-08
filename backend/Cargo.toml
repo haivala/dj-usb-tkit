@@ -43,6 +43,8 @@ reqwest = { version = "0.13", default-features = false, features = ["rustls-no-p
 flate2 = "1"
 # The text catalog (src/i18n.rs, locales/*.ftl). build.rs parses it with fluent-syntax.
 fluent-bundle = "0.16"
+# Reads the `ui-` messages' patterns for `get_ui_texts` (i18n::ui_texts); build.rs uses it too.
+fluent-syntax = "0.12"
 unic-langid = "0.9"
 tar = { version = "0.4", optional = true }
 futures-util = { version = "0.3", optional = true }

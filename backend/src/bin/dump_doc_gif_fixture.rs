@@ -2,7 +2,7 @@
 //! `vanilla-ui/scripts/doc-media/record.mjs`): scans and analyzes a source
 //! folder into a fresh data dir, then writes what the frontend would receive
 //! (`get_tracks_by_ids_with_previews` for every track, `get_track_detail` for
-//! the one opened in the editor) as JSON.
+//! the one opened in the editor, `get_ui_texts` for the labels) as JSON.
 //!
 //! With a `<usb_spec.json>` (`{ usbRoot, usbName, brokenUsbRoot, playlists:
 //! [{ name, titles }] }`) it also names the USB `usbName` and exports those
@@ -101,7 +101,10 @@ fn main() {
         })
         .unwrap_or_else(|e| fail("get_track_detail", e));
 
-    let mut json = json!({ "tracks": tracks, "detail": detail, "transcodes": transcodes });
+    // `get_ui_texts`: the UI's labels, in the language the backend starts in (English).
+    let ui_texts =
+        serde_json::to_value(ApiResponse::success(backend::i18n::ui_texts())).expect("serialize");
+    let mut json = json!({ "tracks": tracks, "detail": detail, "transcodes": transcodes, "uiTexts": ui_texts });
     if let Some(spec) = spec {
         let id_of = |title: &str| {
             tracks

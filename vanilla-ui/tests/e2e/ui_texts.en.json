@@ -1,0 +1,13 @@
+{
+  "language": "en",
+  "texts": {
+    "ui-common-selection-count": {
+      "one": "{count} selected",
+      "other": "{count} selected"
+    },
+    "ui-header-usb-name-badge-name-tooltip": "Name this drive",
+    "ui-header-usb-name-badge-not-connected": "Not connected",
+    "ui-header-usb-name-badge-rename-tooltip": "Rename this drive",
+    "ui-header-usb-name-badge-unnamed": "Unnamed"
+  }
+}

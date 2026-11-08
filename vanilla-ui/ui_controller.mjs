@@ -9,6 +9,7 @@ import { bindShellEvents } from "./components/shell/events.mjs";
 import { bindTrackDetailEvents } from "./components/track-detail/events.mjs";
 import { initTooltips } from "./tooltip.mjs";
 import { cloneTemplate } from "./ui_utils.mjs";
+import { t } from "./ui_texts.mjs";
 import { setAddButtonState } from "./track_table.mjs";
 import { renderEmptyState } from "./components/shell/actions.mjs";
 import { renderAllSelectionBars, renderSelectionBar } from "./components/shared/track_selection.mjs";
@@ -45,14 +46,18 @@ export function updateUsbNameBadge(ctx) {
   const { state, el } = ctx;
   const name = state.usbDeviceName;
   const connected = !!state.usbRoot && !!state.usbRootValid;
-  el.usbNameBadgeLabel.textContent = name || (connected ? "Unnamed" : "Not connected");
+  el.usbNameBadgeLabel.textContent =
+    name || t(connected ? "ui-header-usb-name-badge-unnamed" : "ui-header-usb-name-badge-not-connected");
   // Clicking the badge names or renames the connected drive.
   const badge = el.usbNameBadge;
   badge.classList.toggle("is-renamable", connected);
   badge.tabIndex = connected ? 0 : -1;
   badge.setAttribute("aria-disabled", connected ? "false" : "true");
-  if (connected) badge.dataset.tooltip = name ? "Rename this drive" : "Name this drive";
-  else delete badge.dataset.tooltip;
+  if (connected) {
+    badge.dataset.tooltip = t(name ? "ui-header-usb-name-badge-rename-tooltip" : "ui-header-usb-name-badge-name-tooltip");
+  } else {
+    delete badge.dataset.tooltip;
+  }
   // The USB Browser heading shows the same name.
   if (state.usbRoot && state.usbRootValid) ctx.updateUsbRootText(state.usbRoot, true);
 }

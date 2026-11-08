@@ -1,4 +1,5 @@
 import { STATIC_TABS } from "./app_state.mjs";
+import { loadUiTexts } from "./ui_texts.mjs";
 import { createThemeManager, createAccentManager } from "./components/settings/actions.mjs";
 import { refreshUpdateCheck, UPDATE_RECHECK_INTERVAL_MS } from "./update_check.mjs";
 import { normalizeAnalysisBpmRange, DEFAULT_ANALYSIS_BPM_RANGE } from "./components/library/actions.mjs";
@@ -231,6 +232,9 @@ export function runDeferredInitialLoad(ctx) {
 export async function initApp(ctx) {
   const { state, invoke, pushEventLog } = ctx;
 
+  // Before anything renders: the page's text is the backend's. The window stays hidden
+  // (tauri.conf.json `visible: false`) until `show_window` below.
+  if (!(await loadUiTexts(ctx))) return;
   pushEventLog({ level: "info", source: "startup", message: "App init started" });
   await ctx.hydrateLocalStorageFromFrontendSettingsDb();
   const themeManager = createThemeManager(ctx);

@@ -359,6 +359,11 @@ impl BackendCommands {
         wrap(self.service.reorder_playlist_tracks(req))
     }
 
+    /// The `ui-` texts in the current language (`i18n::ui_texts`).
+    pub fn get_ui_texts(&self) -> ApiResponse<crate::models::GetUiTextsData> {
+        ApiResponse::success(crate::i18n::ui_texts())
+    }
+
     pub fn get_frontend_settings(&self) -> ApiResponse<GetFrontendSettingsData> {
         wrap(self.service.get_frontend_settings())
     }

@@ -982,6 +982,7 @@ fn main() {
             backend::tauri_commands::remove_tracks_from_playlist,
             backend::tauri_commands::reorder_playlist_tracks,
             backend::tauri_commands::refresh_playlist_export_status,
+            backend::tauri_commands::get_ui_texts,
             backend::tauri_commands::get_frontend_settings,
             backend::tauri_commands::set_frontend_setting,
             backend::tauri_commands::validate_usb_root,

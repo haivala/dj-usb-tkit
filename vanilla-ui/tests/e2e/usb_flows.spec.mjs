@@ -1996,3 +1996,21 @@ test("choosing a background colour sets it on the USB and redraws from the answe
     { usbRoot: "/Volumes/USB-TEST", color: 5 }
   ]);
 });
+
+test("when the UI's texts can't be loaded, the page shows one line and the window still opens", async ({ page }) => {
+  await installTauriMock(page, "valid");
+  await page.addInitScript(() => {
+    const invoke = window.__TAURI__.core.invoke;
+    window.__showWindowCalls = 0;
+    window.__TAURI__.core.invoke = async (command, payload) => {
+      if (command === "get_ui_texts") return { ok: false, error: { code: "INTERNAL_ERROR", message: "catalog missing" } };
+      if (command === "show_window") window.__showWindowCalls += 1;
+      return invoke(command, payload);
+    };
+  });
+  await page.goto("/");
+
+  await expect(page.locator("body > .ui-texts-failed")).toHaveText(/couldn't load its texts/);
+  await expect(page.locator("body > *")).toHaveCount(1);
+  await expect.poll(() => page.evaluate(() => window.__showWindowCalls)).toBe(1);
+});

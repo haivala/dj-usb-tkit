@@ -51,7 +51,7 @@
         <div class="usb-name-badge" id="usbNameBadge" role="button" tabindex="-1" aria-disabled="true">
           <span class="usb-health-dot" id="usbHeaderHealthDot" data-tooltip="USB health unknown" aria-label="USB health unknown"></span>
           <span class="header-stat-label">USB</span>
-          <span class="header-stat-value" id="usbNameBadgeLabel">Not connected</span>
+          <span class="header-stat-value" id="usbNameBadgeLabel" data-text="ui-header-usb-name-badge-not-connected"></span>
         </div>
       </div>
       <div class="header-utility-group">
@@ -979,6 +979,7 @@
   <template id="tplIconPause"><svg viewBox="0 0 24 24" aria-hidden="true"><rect x="7" y="6" width="3.5" height="12" rx="1"></rect><rect x="13.5" y="6" width="3.5" height="12" rx="1"></rect></svg></template>
 
   <!-- Status line, library sources, sidebar playlists -->
+  <template id="tplUiTextsFailed"><p class="ui-texts-failed"></p></template>
   <template id="tplStatusWarningLink"><a href="#" class="status-warning-link"></a></template>
   <template id="tplSourceChipRekordboxDb">
     <span class="source-chip source-chip-library"><input class="source-chip-toggle" type="checkbox" data-rekordbox-db="true" aria-label="Toggle rekordbox library" /><span class="source-chip-path">rekordbox</span><button class="source-chip-import" type="button" data-import-library="rekordbox" data-tooltip="Import from rekordbox" aria-label="Import from rekordbox">&#8635;</button></span>

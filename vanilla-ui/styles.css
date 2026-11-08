@@ -247,6 +247,11 @@ body {
     radial-gradient(ellipse at 80% 100%, var(--body-glow-2) 0%, transparent 50%);
 }
 
+/* The one line shown when the UI's texts couldn't be loaded (ui_texts.mjs). */
+.ui-texts-failed {
+  padding: 24px;
+}
+
 body.library-onboarding {
   overflow: hidden;
 }

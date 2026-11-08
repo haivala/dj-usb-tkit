@@ -14,6 +14,7 @@
 
 import { catchErr } from "./track_actions.mjs";
 import { formatDurationMs } from "../../track_utils.mjs";
+import { tCount } from "../../ui_texts.mjs";
 
 export function trackSelection(ctx, view) {
   return ctx.state.trackSelections[view];
@@ -34,7 +35,7 @@ export function renderSelectionBar(ctx, view) {
   const { ids } = trackSelection(ctx, view);
   const count = ids.size;
   bar.classList.toggle("is-empty", count === 0);
-  bar.querySelector(".selection-count").textContent = `${count} selected`;
+  bar.querySelector(".selection-count").textContent = tCount("ui-common-selection-count", count);
   renderSelectionTime(ctx, view, bar, ids);
   for (const button of bar.querySelectorAll("[data-selection-action]")) {
     button.disabled = count === 0;

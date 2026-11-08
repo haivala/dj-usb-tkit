@@ -1137,6 +1137,15 @@ pub async fn reorder_playlist_tracks(
     .await)
 }
 
+/// The UI's texts, once at startup, before anything renders. Sync: it reads the parsed
+/// catalog, no I/O.
+#[tauri::command]
+pub fn get_ui_texts(
+    state: State<'_, BackendCommands>,
+) -> ApiResponse<crate::models::GetUiTextsData> {
+    state.get_ui_texts()
+}
+
 #[tauri::command]
 pub async fn get_frontend_settings(
     state: State<'_, BackendCommands>,

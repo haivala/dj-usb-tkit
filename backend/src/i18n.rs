@@ -11,12 +11,16 @@
 //! tests and the CLI tools, it's English. A key missing from another language falls back to
 //! English.
 
+use std::collections::BTreeMap;
 use std::fmt;
 use std::sync::{Arc, LazyLock, PoisonError, RwLock};
 
 use fluent_bundle::concurrent::FluentBundle;
 use fluent_bundle::{FluentArgs, FluentResource, FluentValue};
+use fluent_syntax::ast;
 use unic_langid::LanguageIdentifier;
+
+use crate::models::{GetUiTextsData, UiText};
 
 mod generated {
     include!(concat!(env!("OUT_DIR"), "/i18n_catalog.rs"));
@@ -98,11 +102,13 @@ impl fmt::Display for Text {
 /// One language's parsed catalog.
 struct Catalog {
     language: &'static str,
+    /// The `.ftl` text, for `ui_texts`, which sends patterns rather than formatted text.
+    source: &'static str,
     bundle: FluentBundle<FluentResource>,
 }
 
 impl Catalog {
-    fn parse(language: &'static str, source: &str) -> Result<Self, String> {
+    fn parse(language: &'static str, source: &'static str) -> Result<Self, String> {
         let id: LanguageIdentifier = language
             .parse()
             .map_err(|err| format!("`{language}` isn't a language code: {err}"))?;
@@ -114,7 +120,11 @@ impl Catalog {
         bundle.add_resource(resource).map_err(|errors| {
             format!("the `{language}` catalog has a duplicate key: {errors:?}")
         })?;
-        Ok(Self { language, bundle })
+        Ok(Self {
+            language,
+            source,
+            bundle,
+        })
     }
 
     /// The text in this catalog's language, or `None` when the key isn't translated.
@@ -177,6 +187,116 @@ pub fn set_language(language: &str) -> Result<(), String> {
     };
     *CURRENT.write().unwrap_or_else(PoisonError::into_inner) = catalog;
     Ok(())
+}
+
+/// Keys with this prefix are the text JS and `index.html` show, sent by `get_ui_texts`.
+pub const UI_KEY_PREFIX: &str = "ui-";
+
+/// Every `ui-` text in the current language, English where it has none: `get_ui_texts`.
+pub fn ui_texts() -> GetUiTextsData {
+    ui_texts_in(&current())
+}
+
+fn ui_texts_in(catalog: &Catalog) -> GetUiTextsData {
+    let translated = ui_patterns(catalog.source);
+    let texts = ui_patterns(ENGLISH_CATALOG.source)
+        .into_iter()
+        .map(|(key, english)| {
+            let text = translated.get(&key).cloned().unwrap_or(english);
+            (key, text)
+        })
+        .collect();
+    GetUiTextsData {
+        language: catalog.language.to_string(),
+        texts,
+    }
+}
+
+/// The `ui-` messages of one catalog, as JS fills them in (see `ui_text`).
+fn ui_patterns(source: &str) -> BTreeMap<String, UiText> {
+    // build.rs checked every catalog parses.
+    let resource = fluent_syntax::parser::parse(source).unwrap_or_else(|(resource, _)| resource);
+    resource
+        .body
+        .iter()
+        .filter_map(|entry| match entry {
+            ast::Entry::Message(message) if message.id.name.starts_with(UI_KEY_PREFIX) => Some((
+                message.id.name.to_string(),
+                ui_text(message.value.as_ref()?),
+            )),
+            _ => None,
+        })
+        .collect()
+}
+
+/// A `ui-` message for JS: its text with each variable as `{name}`, which `t` fills in. A
+/// message with a plural (build.rs allows one, on `$count`, with plural categories only) is
+/// its forms by category, the text around the plural repeated in each; `tCount` picks one.
+fn ui_text(pattern: &ast::Pattern<&str>) -> UiText {
+    let select = pattern.elements.iter().position(|element| {
+        matches!(
+            element,
+            ast::PatternElement::Placeable {
+                expression: ast::Expression::Select { .. }
+            }
+        )
+    });
+    let Some(index) = select else {
+        return UiText::Text(js_text(&pattern.elements));
+    };
+    let ast::PatternElement::Placeable {
+        expression: ast::Expression::Select { variants, .. },
+    } = &pattern.elements[index]
+    else {
+        unreachable!("found as a select above");
+    };
+    let before = js_text(&pattern.elements[..index]);
+    let after = js_text(&pattern.elements[index + 1..]);
+    UiText::Counted(
+        variants
+            .iter()
+            .map(|variant| {
+                let category = match &variant.key {
+                    ast::VariantKey::Identifier { name }
+                    | ast::VariantKey::NumberLiteral { value: name } => name.to_string(),
+                };
+                (
+                    category,
+                    format!("{before}{}{after}", js_text(&variant.value.elements)),
+                )
+            })
+            .collect(),
+    )
+}
+
+fn js_text(elements: &[ast::PatternElement<&str>]) -> String {
+    let mut out = String::new();
+    for element in elements {
+        match element {
+            ast::PatternElement::TextElement { value } => out.push_str(value),
+            ast::PatternElement::Placeable { expression } => js_expression(expression, &mut out),
+        }
+    }
+    out
+}
+
+fn js_expression(expression: &ast::Expression<&str>, out: &mut String) {
+    match expression {
+        ast::Expression::Inline(ast::InlineExpression::VariableReference { id }) => {
+            out.push('{');
+            out.push_str(id.name);
+            out.push('}');
+        }
+        ast::Expression::Inline(
+            ast::InlineExpression::StringLiteral { value }
+            | ast::InlineExpression::NumberLiteral { value },
+        ) => out.push_str(value),
+        ast::Expression::Inline(ast::InlineExpression::Placeable { expression }) => {
+            js_expression(expression, out)
+        }
+        // build.rs allows nothing else in a `ui-` message.
+        _ => {}
+    }
 }
 
 #[cfg(test)]
@@ -248,6 +368,66 @@ usb-warning-count = { $count ->
         // Nothing in the unit tests sets a language; piece 2's own test file covers switching.
         assert_eq!(current_language(), ENGLISH);
         assert_eq!(tr::usb_warning_count(2usize).to_string(), "2 warnings");
+    }
+
+    #[test]
+    fn ui_texts_send_placeholders_and_plural_forms() {
+        let texts = ui_patterns(
+            "\
+ui-test-hello = Hello { $name }!
+ui-test-count = Adding { $count ->
+    [one] { $count } track
+   *[other] { $count } tracks
+} to { $playlist }
+usb-not-for-ui = Not sent
+",
+        );
+        assert_eq!(texts.len(), 2, "{texts:?}");
+        assert_eq!(texts["ui-test-hello"], UiText::Text("Hello {name}!".into()));
+        assert_eq!(
+            texts["ui-test-count"],
+            UiText::Counted(BTreeMap::from([
+                ("one".into(), "Adding {count} track to {playlist}".into()),
+                ("other".into(), "Adding {count} tracks to {playlist}".into()),
+            ]))
+        );
+    }
+
+    #[test]
+    fn ui_texts_fall_back_to_english_per_key() {
+        let catalog = Catalog::parse("fi", "ui-header-usb-name-badge-unnamed = Nimetön\n")
+            .expect("fixture parses");
+        let data = ui_texts_in(&catalog);
+        assert_eq!(data.language, "fi");
+        assert_eq!(
+            data.texts["ui-header-usb-name-badge-unnamed"],
+            UiText::Text("Nimetön".into())
+        );
+        assert_eq!(
+            data.texts["ui-header-usb-name-badge-not-connected"],
+            UiText::Text("Not connected".into())
+        );
+        assert!(data.texts.keys().all(|key| key.starts_with(UI_KEY_PREFIX)));
+    }
+
+    /// The e2e specs' labels come from `vanilla-ui/tests/e2e/ui_texts.en.json` (loaded by
+    /// `coverage-fixture.mjs`). Rewrite it with `UPDATE_UI_TEXTS=1 cargo test -p backend --lib i18n::`.
+    #[test]
+    fn e2e_ui_texts_file_is_current() {
+        let path = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
+            .join("../vanilla-ui/tests/e2e/ui_texts.en.json");
+        let expected =
+            serde_json::to_string_pretty(&ui_texts_in(&ENGLISH_CATALOG)).expect("serialize") + "\n";
+        if std::env::var_os("UPDATE_UI_TEXTS").is_some() {
+            std::fs::write(&path, &expected).expect("write ui_texts.en.json");
+            return;
+        }
+        let actual = std::fs::read_to_string(&path).unwrap_or_default();
+        assert!(
+            actual == expected,
+            "{} is out of date: run `UPDATE_UI_TEXTS=1 cargo test -p backend --lib i18n::`",
+            path.display()
+        );
     }
 
     #[test]

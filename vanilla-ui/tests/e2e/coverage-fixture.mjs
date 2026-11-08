@@ -6,7 +6,7 @@
 // per line. Run `node scripts/report-e2e-coverage.mjs` afterwards to merge
 // those entries and print a per-source-file line-coverage table.
 import { test as base, expect } from "@playwright/test";
-import { appendFileSync, mkdirSync } from "node:fs";
+import { appendFileSync, mkdirSync, readFileSync } from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 
@@ -15,10 +15,13 @@ const COVERAGE_ENABLED = !!process.env.COVERAGE;
 const coverageOutDir = path.resolve(__dirname, "../../.coverage-e2e");
 const rawOutFile = path.join(coverageOutDir, "raw-v8-coverage.jsonl");
 const backendMockPath = path.join(__dirname, "backend_mock.js");
+// The UI's English texts (`get_ui_texts`), kept current by a backend test.
+const uiTextsEn = readFileSync(path.join(__dirname, "ui_texts.en.json"), "utf8");
 
 export const test = base.extend({
   page: async ({ page }, use) => {
     // The shared stubbed backend (window.__e2eBackend) every spec builds on.
+    await page.addInitScript({ content: `window.__e2eUiTexts = ${uiTextsEn};` });
     await page.addInitScript({ path: backendMockPath });
     if (!COVERAGE_ENABLED) {
       await use(page);

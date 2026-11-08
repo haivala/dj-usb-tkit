@@ -22,7 +22,7 @@
 // puts there (`tracksForUsb`), and its estimate is the backend's. Convert…'s
 // folder and choices are the backend's too (`fixture.transcodes`).
 (() => {
-  const { tracks, detail, sourceFolders, playlists, usb, usbHistory, transcodes } = window.__DOC_GIF_FIXTURE__;
+  const { tracks, detail, sourceFolders, playlists, usb, usbHistory, transcodes, uiTexts } = window.__DOC_GIF_FIXTURE__;
   const opts = window.__DOC_GIF_OPTS__ || {};
   const USB_ROOT = "/run/media/dj/Chiphead";
   // Never shown (the label is hidden); the update check just needs a value.
@@ -310,6 +310,8 @@
               releaseUrl: "", installKind: "appimage", downloadUrl: null, canSelfUpdate: false, action: "none",
               checkFailed: false,
             });
+          case "get_ui_texts":
+            return uiTexts;
           case "get_frontend_settings":
             return ok({ values: {}, nodeAvailable: false, essentiaInstalled: false });
           case "get_library_sources":

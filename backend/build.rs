@@ -35,6 +35,9 @@ fn main() {
         .expect("locales/en.ftl is missing");
     let english_messages = messages(&english.resource);
 
+    for catalog in &catalogs {
+        check_ui_messages(catalog);
+    }
     for catalog in catalogs
         .iter()
         .filter(|catalog| catalog.language != ENGLISH)
@@ -236,6 +239,92 @@ fn check_translation(catalog: &Catalog, english: &BTreeMap<String, MessageInfo<'
                 );
             }
         }
+    }
+}
+
+/// A `ui-` message is filled in by JS (`t`, `tCount` in vanilla-ui/ui_texts.mjs), which only
+/// replaces `{name}` and picks a plural form by category with `Intl.PluralRules`. So it may hold
+/// text, variables and literals, plus at most one plural: a top-level select on `$count`
+/// whose keys are plural categories, one of them `other`. No exact numbers (`[0]`), no
+/// functions, terms or message references.
+fn check_ui_messages(catalog: &Catalog) {
+    for entry in &catalog.resource.body {
+        let ast::Entry::Message(message) = entry else {
+            continue;
+        };
+        let id = message.id.name.as_str();
+        if !id.starts_with("ui-") {
+            continue;
+        }
+        let fail = |why: &str| -> ! { panic!("{}: `{id}`: {why}", catalog.path.display()) };
+        let Some(pattern) = &message.value else {
+            fail("a `ui-` key needs a value");
+        };
+        if !message.attributes.is_empty() {
+            fail("a `ui-` key can't have attributes; JS doesn't read them");
+        }
+        let mut selects = 0;
+        for element in &pattern.elements {
+            let ast::PatternElement::Placeable { expression } = element else {
+                continue;
+            };
+            match expression {
+                ast::Expression::Select { selector, variants } => {
+                    selects += 1;
+                    let on_count = matches!(
+                        selector,
+                        ast::InlineExpression::VariableReference { id } if id.name == "count"
+                    );
+                    if !on_count {
+                        fail("a plural in a `ui-` key selects on `$count`");
+                    }
+                    let mut has_other = false;
+                    for variant in variants {
+                        match &variant.key {
+                            ast::VariantKey::Identifier { name }
+                                if PLURAL_CATEGORIES.contains(&name.as_str()) =>
+                            {
+                                has_other |= name == "other";
+                            }
+                            _ => fail(
+                                "a plural in a `ui-` key uses plural categories only (one, other, ...), no exact numbers",
+                            ),
+                        }
+                        for inner in &variant.value.elements {
+                            if let ast::PatternElement::Placeable { expression } = inner
+                                && !simple_ui_expression(expression)
+                            {
+                                fail("a plural's forms hold text and variables only");
+                            }
+                        }
+                    }
+                    if !has_other {
+                        fail("a plural in a `ui-` key needs an `other` form");
+                    }
+                }
+                other if !simple_ui_expression(other) => {
+                    fail("only text, variables and one plural on `$count`")
+                }
+                _ => {}
+            }
+        }
+        if selects > 1 {
+            fail("at most one plural");
+        }
+    }
+}
+
+fn simple_ui_expression(expression: &ast::Expression<String>) -> bool {
+    match expression {
+        ast::Expression::Inline(
+            ast::InlineExpression::VariableReference { .. }
+            | ast::InlineExpression::StringLiteral { .. }
+            | ast::InlineExpression::NumberLiteral { .. },
+        ) => true,
+        ast::Expression::Inline(ast::InlineExpression::Placeable { expression }) => {
+            simple_ui_expression(expression)
+        }
+        _ => false,
     }
 }
 

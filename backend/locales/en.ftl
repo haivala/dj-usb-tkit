@@ -60,3 +60,21 @@ usb-history-loaded = USB histories loaded: { $sessions }
 # The error when a language that has no catalog is saved as the app's language.
 # $language: the language code that was sent.
 settings-language-unknown = Unknown language: { $language }
+
+## ui-header
+
+# The header's drive badge, when a drive is connected but has no name yet.
+ui-header-usb-name-badge-unnamed = Unnamed
+# The header's drive badge, when no drive is connected.
+ui-header-usb-name-badge-not-connected = Not connected
+ui-header-usb-name-badge-name-tooltip = Name this drive
+ui-header-usb-name-badge-rename-tooltip = Rename this drive
+
+## ui-common
+
+# The selection bar's count of ticked tracks, on every track list.
+# $count: how many tracks are ticked.
+ui-common-selection-count = { $count ->
+    [one] { $count } selected
+   *[other] { $count } selected
+}

@@ -218,7 +218,18 @@ drive selection from being rendered against a newer selected drive.
 ### Settings
 
 - `get_frontend_settings`
-- `set_frontend_setting`
+- `set_frontend_setting` — `ui_language_v1` takes a language code the app has a
+  catalog for (`i18n::languages()`) and switches the backend's language straight
+  away; an empty value is English. An unknown code is a validation error.
+
+### UI texts
+
+- `get_ui_texts` → `{ language, texts }`: every `ui-` key of the text catalog
+  (`backend/locales/<language>.ftl`) in the current language, English where it
+  has none. Called once at startup, before anything renders (`ui_texts.mjs`). A
+  text is a string with `{name}` placeholders for `t`, or, for a text with a
+  count, its forms by plural category (`{ "one": …, "other": … }`) for
+  `tCount`, which picks one with `Intl.PluralRules` for `language`.
 
 ### Playlists
 

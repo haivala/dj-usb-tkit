@@ -3,8 +3,13 @@
 import { readFileSync } from "node:fs";
 import { JSDOM } from "jsdom";
 import { createAppContext } from "../app_context.mjs";
+import { applyUiTexts, setUiTexts } from "../ui_texts.mjs";
 
 const INDEX_HTML = readFileSync(new URL("../index.html", import.meta.url), "utf8");
+
+// The UI's English texts, as the app loads them at startup (`get_ui_texts`; the file is
+// kept current by a backend test).
+setUiTexts(JSON.parse(readFileSync(new URL("./e2e/ui_texts.en.json", import.meta.url), "utf8")));
 
 // Every <template> from index.html, for tests that build their own small DOM
 // around code which clones them.
@@ -61,6 +66,7 @@ globalThis.CSS ??= { escape: (text) => String(text).replace(/["\\]/g, "\\$&") };
 export function makeTestCtx(overrides = {}) {
   const dom = new JSDOM(INDEX_HTML);
   dom.window.HTMLCanvasElement.prototype.getContext = fakeCanvasContext;
+  applyUiTexts(dom.window.document);
   const stored = new Map();
   const localStorage = {
     getItem: (key) => (stored.has(key) ? stored.get(key) : null),

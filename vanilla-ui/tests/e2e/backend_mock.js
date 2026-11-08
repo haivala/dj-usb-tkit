@@ -204,6 +204,8 @@
         case "allow_asset_paths":
           return null;
         case "get_backend_log_buffer": return [];
+        // The real English texts (ui_texts.en.json, via coverage-fixture.mjs): specs check labels.
+        case "get_ui_texts": return ok(window.__e2eUiTexts);
         case "detect_external_rekordbox_db":
         case "detect_external_mixxx_db":
           return ok({ found: false, path: null, imported: false });

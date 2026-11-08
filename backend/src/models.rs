@@ -1280,6 +1280,25 @@ pub struct ReorderPlaylistTracksData {
     pub reordered: usize,
 }
 
+/// `get_ui_texts`: every `ui-` text of the catalog, in the current language, for the text
+/// JS and `index.html` show. Sent once at startup.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct GetUiTextsData {
+    /// The language code, for `Intl.PluralRules` in `tCount`.
+    pub language: String,
+    pub texts: std::collections::BTreeMap<String, UiText>,
+}
+
+/// One `ui-` text: a string with `{name}` placeholders, or a counted text's forms by plural
+/// category (`{ "one": "{count} selected", "other": "{count} selected" }`).
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(untagged)]
+pub enum UiText {
+    Text(String),
+    Counted(std::collections::BTreeMap<String, String>),
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct GetFrontendSettingsData {
