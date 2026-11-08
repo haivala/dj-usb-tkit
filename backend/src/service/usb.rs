@@ -1,5 +1,6 @@
 //! USB validation, playlist/history fetching, track inspection.
 
+use crate::i18n::tr;
 use crate::utils::{counted, track_list_summary, warning_suffix};
 use std::collections::{HashMap, HashSet};
 use std::path::Path;
@@ -521,21 +522,29 @@ fn with_usb_selection_text(mut data: ValidateUsbRootData) -> ValidateUsbRootData
     data
 }
 
-/// The USB History panel's totals.
-fn usb_history_summary_text(sessions: usize, tracks: usize) -> String {
-    format!(
-        "{}, {}",
-        counted(sessions, "session", "sessions"),
-        counted(tracks, "track", "tracks"),
-    )
+/// A USB History read with its panel totals and status line, built when answering: the parse
+/// cache holds the data only, so a cached read answers in the current language.
+fn with_usb_history_texts(data: &FetchUsbHistoriesData) -> FetchUsbHistoriesData {
+    let mut data = data.clone();
+    data.summary_text =
+        tr::usb_history_summary(data.counts.imported_playlists, data.counts.imported_tracks)
+            .render();
+    data.status_text = format!(
+        "{}{}",
+        tr::usb_history_loaded(data.items.len()),
+        warning_suffix(data.warning_count)
+    );
+    data
 }
 
-/// The status line after a USB History read.
-fn usb_history_status_text(sessions: usize, warning_count: usize) -> String {
-    format!(
-        "USB histories loaded: {sessions}{}",
-        warning_suffix(warning_count)
-    )
+/// A USB playlist with its click and remove texts, built when answering (see
+/// `with_usb_history_texts`).
+fn with_usb_playlist_texts(playlist: &UsbPlaylist) -> UsbPlaylist {
+    let mut playlist = playlist.clone();
+    playlist.selected_text =
+        tr::usb_playlists_selected(&playlist.name, playlist.track_count).render();
+    playlist.remove_confirm_text = tr::usb_playlists_remove_confirm(&playlist.name).render();
+    playlist
 }
 
 /// Hydrates a page from `paginate_usb_tracks`. Reading each row's waveform +
@@ -1248,7 +1257,7 @@ impl BackendService {
         );
         let warning_count = logging::count_warnings(&resolved.warnings);
         Ok(FetchUsbPlaylistsData {
-            items: resolved.items.clone(),
+            items: resolved.items.iter().map(with_usb_playlist_texts).collect(),
             stats: resolved.stats.clone(),
             status_text: format!(
                 "USB playlists loaded: {playlist_count}{}",
@@ -1470,15 +1479,9 @@ impl BackendService {
                 name: candidate.display_name.clone(),
                 source: source.to_string(),
                 track_count: playlist_tracks.len(),
-                selected_text: format!(
-                    "USB playlist selected: {} ({})",
-                    candidate.display_name,
-                    counted(playlist_tracks.len(), "track", "tracks")
-                ),
-                remove_confirm_text: format!(
-                    "Remove USB playlist \"{}\" from the stick?",
-                    candidate.display_name
-                ),
+                // Built when answering: see `with_usb_playlist_texts`.
+                selected_text: String::new(),
+                remove_confirm_text: String::new(),
                 tracks: playlist_tracks,
                 total_duration_ms,
                 duration_unknown_count,
@@ -1965,7 +1968,7 @@ impl BackendService {
 
         let cache_key = self.usb_parse_cache_key(&usb_root);
         if let Some(hit) = self.usb_histories_cache_hit(&cache_key) {
-            return Ok((*hit).clone());
+            return Ok(with_usb_history_texts(&hit));
         }
 
         let pdb_path = super::usb_staging::stage_pdb(&usb_root)?;
@@ -1987,7 +1990,7 @@ impl BackendService {
                     ),
                 ),
             ];
-            return Ok(FetchUsbHistoriesData {
+            return Ok(with_usb_history_texts(&FetchUsbHistoriesData {
                 items: Vec::new(),
                 counts: UsbHistoryCounts {
                     imported_playlists: 0,
@@ -1999,11 +2002,11 @@ impl BackendService {
                     edb_history_rows: 0,
                     edb_history_content_rows: 0,
                 },
-                summary_text: usb_history_summary_text(0, 0),
-                status_text: usb_history_status_text(0, logging::count_warnings(&warnings)),
+                summary_text: String::new(),
+                status_text: String::new(),
                 warning_count: logging::count_warnings(&warnings),
                 warnings,
-            });
+            }));
         }
 
         let parsed = parse_pdb(&pdb_path)?;
@@ -2270,8 +2273,6 @@ impl BackendService {
         // `fetch_usb_playlists_with_progress`.
 
         let imported_tracks: usize = items.iter().map(|history| history.tracks.len()).sum();
-        let summary_text = usb_history_summary_text(history_playlists.len(), imported_tracks);
-        let status_text = usb_history_status_text(items.len(), logging::count_warnings(&warnings));
         let data = FetchUsbHistoriesData {
             items,
             counts: UsbHistoryCounts {
@@ -2300,8 +2301,9 @@ impl BackendService {
                 edb_history_rows,
                 edb_history_content_rows,
             },
-            summary_text,
-            status_text,
+            // Built when answering: see `with_usb_history_texts`.
+            summary_text: String::new(),
+            status_text: String::new(),
             warning_count: logging::count_warnings(&warnings),
             warnings,
         };
@@ -2309,7 +2311,7 @@ impl BackendService {
         if let Ok(mut guard) = self.usb_histories_cache.lock() {
             *guard = Some((cache_key, Arc::clone(&data)));
         }
-        Ok((*data).clone())
+        Ok(with_usb_history_texts(&data))
     }
 
     /// Fill in `local_track_id` for the tracks on one already-paginated page

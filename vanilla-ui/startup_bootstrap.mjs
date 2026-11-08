@@ -302,14 +302,14 @@ export function debugFrontendLog(ctx, message, meta = null) {
   }).catch(() => {});
 }
 
+// The desktop app already wrote the entry to the session log file, in English.
 export function handleBackendLogEvent(ctx, payload) {
   if (!payload || typeof payload !== "object") return;
-  ctx.pushEventLog({
-    level: String(payload.level || "info"),
-    source: String(payload.source || "backend"),
-    code: String(payload.code || "").trim(),
-    message: String(payload.message || "").trim(),
-    details: typeof payload.details === "string" ? payload.details : null
+  ctx.storeEventLogEntry({
+    level: payload.level,
+    source: payload.source || "backend",
+    message: payload.message,
+    inLogFile: true
   });
 }
 

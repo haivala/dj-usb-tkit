@@ -27,6 +27,10 @@ pub use generated::tr;
 /// The language every catalog falls back to, and the one logs are written in.
 pub const ENGLISH: &str = "en";
 
+/// The test language `build.rs` generates from English: every text bracketed, accented and
+/// longer (`[Ŝéééţţîîñĝš]`). Debug builds only, so a release never lists it.
+pub const TEST_LANGUAGE: &str = "en-XA";
+
 /// A text not yet rendered: a catalog key and its arguments. Made by the functions in [`tr`].
 #[derive(Debug, Clone, PartialEq)]
 pub struct Text {

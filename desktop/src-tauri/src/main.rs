@@ -19,23 +19,40 @@ const BACKEND_LOG_EVENT_CHANNEL: &str = "backend:log";
 struct BackendLogPayload {
     level: String,
     source: String,
+    /// What the Event Log shows: the current language for a catalog text.
     message: String,
     timestamp: String,
+    /// The line for the log file, in English. Written here, not by the UI, so the file stays
+    /// English and a page reload's replay of this buffer doesn't write it twice.
+    #[serde(skip)]
+    file_line: String,
 }
+
+/// Whether the session log file is ready: set once its folder is known and the file was
+/// cleared. Read and set under `BACKEND_LOG_BUFFER`'s lock, so a line is written exactly once:
+/// by `push_backend_log_entry`, or by `write_buffered_backend_log` if it came earlier.
+static BACKEND_LOG_FILE_READY: std::sync::atomic::AtomicBool =
+    std::sync::atomic::AtomicBool::new(false);
 
 fn push_backend_log_entry(
     level: &str,
     source: &str,
-    message: impl Into<String>,
+    message: String,
+    english: &str,
 ) -> BackendLogPayload {
+    let timestamp = chrono::Utc::now().to_rfc3339();
     let payload = BackendLogPayload {
         level: level.to_string(),
         source: source.to_string(),
-        message: message.into(),
-        timestamp: chrono::Utc::now().to_rfc3339(),
+        message,
+        file_line: log_file_line(&timestamp, level, &format!("[{source}] {english}")),
+        timestamp,
     };
     let buf = BACKEND_LOG_BUFFER.get_or_init(|| Mutex::new(Vec::new()));
     if let Ok(mut guard) = buf.lock() {
+        if BACKEND_LOG_FILE_READY.load(std::sync::atomic::Ordering::SeqCst) {
+            let _ = send_log_file_line(payload.file_line.clone());
+        }
         guard.push(payload.clone());
         if guard.len() > 2000 {
             let drop_count = guard.len() - 2000;
@@ -45,8 +62,23 @@ fn push_backend_log_entry(
     payload
 }
 
+/// Once the session log file is ready: writes the backend lines logged before it was, then
+/// lets every later line go straight to the file.
+fn write_buffered_backend_log() {
+    let buf = BACKEND_LOG_BUFFER.get_or_init(|| Mutex::new(Vec::new()));
+    if let Ok(guard) = buf.lock() {
+        for payload in guard.iter() {
+            let _ = send_log_file_line(payload.file_line.clone());
+        }
+        BACKEND_LOG_FILE_READY.store(true, std::sync::atomic::Ordering::SeqCst);
+    }
+}
+
+/// A backend line whose Event Log and log-file texts are the same (desktop startup lines).
 fn emit_backend_log(app: &tauri::AppHandle, level: &str, source: &str, message: impl Into<String>) {
-    let payload = push_backend_log_entry(level, source, message.into());
+    let message = message.into();
+    let english = message.clone();
+    let payload = push_backend_log_entry(level, source, message, &english);
     let _ = app.emit(BACKEND_LOG_EVENT_CHANNEL, payload);
 }
 
@@ -598,17 +630,26 @@ fn write_frontend_log_lines(rx: &mpsc::Receiver<String>) {
 
 #[tauri::command]
 fn append_frontend_log(level: String, message: String) -> Result<(), String> {
-    let sanitized_level = if VALID_LOG_LEVELS.contains(&level.as_str()) {
+    let now = chrono::Utc::now().to_rfc3339();
+    send_log_file_line(log_file_line(&now, &level, &message))
+}
+
+/// One session log line: `[time] [level] message`, on one line.
+fn log_file_line(timestamp: &str, level: &str, message: &str) -> String {
+    let level = if VALID_LOG_LEVELS.contains(&level) {
         level
     } else {
-        "info".to_string()
+        "info"
     };
-    let sanitized_message = message.replace('\n', "\\n").replace('\r', "\\r");
-    let now = chrono::Utc::now().to_rfc3339();
+    let message = message.replace('\n', "\\n").replace('\r', "\\r");
+    format!("[{timestamp}] [{level}] {message}")
+}
+
+fn send_log_file_line(line: String) -> Result<(), String> {
     frontend_log_sender()
         .lock()
         .map_err(|err| format!("log queue lock failed: {err}"))?
-        .send(format!("[{now}] [{sanitized_level}] {sanitized_message}"))
+        .send(line)
         .map_err(|err| format!("log writer stopped: {err}"))
 }
 
@@ -646,8 +687,14 @@ async fn set_theme_background(app: tauri::AppHandle, dark: bool) -> Result<(), S
 /// Install the project-wide backend log sink so `backend::logging::emit`
 /// from anywhere in the lib forwards into the UI Event Log.
 fn install_backend_log_sink(app: tauri::AppHandle) {
-    backend::logging::set_sink(Box::new(move |level, source, message| {
-        emit_backend_log(&app, level.as_str(), source, message);
+    backend::logging::set_sink(Box::new(move |line| {
+        let payload = push_backend_log_entry(
+            line.level.as_str(),
+            line.source,
+            line.message.to_string(),
+            line.english,
+        );
+        let _ = app.emit(BACKEND_LOG_EVENT_CHANNEL, payload);
     }));
 }
 
@@ -807,8 +854,12 @@ fn main() {
             if let Err(err) = clear_frontend_log() {
                 emit_backend_log(&app_handle, "warn", "startup", format!("startup: {err}"));
             }
+            write_buffered_backend_log();
 
             let commands = init_backend_commands_with_recovery(&data_dir)?;
+            // The saved language, before any command answers. Not in `BackendCommands::new`:
+            // the language is process-wide (see `apply_saved_language`).
+            let _ = commands.apply_saved_language();
             emit_backend_log(
                 &app_handle,
                 "info",

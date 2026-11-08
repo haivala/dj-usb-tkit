@@ -26,8 +26,20 @@ impl Level {
     }
 }
 
+/// One log line, as the sink receives it.
+#[derive(Debug, Clone, Copy)]
+pub struct LogLine<'a> {
+    pub level: Level,
+    pub source: &'a str,
+    /// What the Event Log shows: the current language for a catalog text.
+    pub message: &'a str,
+    /// What the log file gets: always English. The same as `message` for text that isn't from
+    /// the catalog.
+    pub english: &'a str,
+}
+
 /// Sink type. The desktop layer installs one of these at startup.
-pub type Sink = Box<dyn Fn(Level, &str, &str) + Send + Sync + 'static>;
+pub type Sink = Box<dyn Fn(&LogLine<'_>) + Send + Sync + 'static>;
 
 static SINK: OnceLock<Sink> = OnceLock::new();
 
@@ -40,10 +52,25 @@ pub fn set_sink(sink: Sink) {
 /// Emit a log line. Routes to the installed sink when present; falls back
 /// to stderr otherwise (CLI tools, tests).
 pub fn emit(level: Level, source: &str, message: &str) {
+    emit_line(&LogLine {
+        level,
+        source,
+        message,
+        english: message,
+    });
+}
+
+/// Emit a line whose shown and English texts were rendered already (`ApiResponse::failure`).
+pub fn emit_line(line: &LogLine<'_>) {
     if let Some(sink) = SINK.get() {
-        sink(level, source, message);
+        sink(line);
     } else {
-        eprintln!("[{}][{}] {}", level.as_str(), source, message);
+        eprintln!(
+            "[{}][{}] {}",
+            line.level.as_str(),
+            line.source,
+            line.english
+        );
     }
 }
 
@@ -140,11 +167,11 @@ mod tests {
         // suite, so it deterministically wins the race to install it.
         let captured: Arc<Mutex<Vec<(String, String, String)>>> = Arc::new(Mutex::new(Vec::new()));
         let captured_for_sink = captured.clone();
-        set_sink(Box::new(move |level, source, message| {
+        set_sink(Box::new(move |line| {
             captured_for_sink.lock().unwrap().push((
-                level.as_str().to_string(),
-                source.to_string(),
-                message.to_string(),
+                line.level.as_str().to_string(),
+                line.source.to_string(),
+                line.message.to_string(),
             ));
         }));
 

@@ -140,6 +140,8 @@ pub(crate) const SETTING_UI_SIDEBAR_COLLAPSED: &str = "ui_sidebar_collapsed_v1";
 pub(crate) const SETTING_UI_SIDEBAR_WIDTH: &str = "ui_sidebar_width_v1";
 pub(crate) const SETTING_UI_HELP_SEEN: &str = "ui_help_seen_v1";
 pub(crate) const SETTING_UI_KEY_NOTATION: &str = "ui_key_notation_v1";
+/// The app's language (`i18n::languages()`); English when unset.
+pub(crate) const SETTING_UI_LANGUAGE: &str = "ui_language_v1";
 pub(crate) const SETTING_UI_REKORDBOX_DB_ENABLED: &str = "ui_rekordbox_db_enabled_v1";
 pub(crate) const SETTING_UI_MIXXX_DB_ENABLED: &str = "ui_mixxx_db_enabled_v1";
 pub(crate) const SETTING_UI_SOURCES_EVER_CONFIGURED: &str = "ui_sources_ever_configured_v1";

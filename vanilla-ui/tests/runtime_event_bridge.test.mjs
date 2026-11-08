@@ -18,19 +18,18 @@ test("debugFrontendLog writes only in tauri runtime", async () => {
   assert.equal(calls[0][0], "append_frontend_log");
 });
 
-test("handleBackendLogEvent normalizes payload into event log entry", () => {
+test("handleBackendLogEvent stores the entry without writing the log file again", () => {
   const logged = [];
   handleBackendLogEvent({
-    pushEventLog: (entry) => logged.push(entry)
+    storeEventLogEntry: (entry) => logged.push(entry)
   }, {
     level: "warn",
     source: "backend",
-    code: "X1",
-    message: "Something",
-    details: "details"
+    message: "Something"
   });
 
   assert.equal(logged.length, 1);
   assert.equal(logged[0].level, "warn");
-  assert.equal(logged[0].code, "X1");
+  assert.equal(logged[0].message, "Something");
+  assert.equal(logged[0].inLogFile, true);
 });

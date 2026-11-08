@@ -103,11 +103,7 @@ fn playback_panic_response<T: serde::Serialize>(
             "timestamp": Utc::now().to_rfc3339(),
         }),
     );
-    ApiResponse::failure(ErrorPayload {
-        code: ErrorCode::InternalError,
-        message,
-        details: None,
-    })
+    ApiResponse::failure(ErrorPayload::new(ErrorCode::InternalError, message))
 }
 
 async fn run_playback_blocking<T, F>(
@@ -136,11 +132,10 @@ where
         Err(e) => {
             let message = format!("native playback {action} task failed: {e}");
             emit_playback_event(app, PlaybackEvent::Error(Some(message.clone())));
-            Err(ApiResponse::failure(ErrorPayload {
-                code: ErrorCode::InternalError,
+            Err(ApiResponse::failure(ErrorPayload::new(
+                ErrorCode::InternalError,
                 message,
-                details: None,
-            }))
+            )))
         }
     }
 }
@@ -154,16 +149,14 @@ where
         .await
     {
         Ok(Ok(r)) => r,
-        Ok(Err(e)) => ApiResponse::failure(ErrorPayload {
-            code: ErrorCode::InternalError,
-            message: format!("{label} crashed: {}", panic_message(e)),
-            details: None,
-        }),
-        Err(e) => ApiResponse::failure(ErrorPayload {
-            code: ErrorCode::InternalError,
-            message: format!("{label} task failed: {e}"),
-            details: None,
-        }),
+        Ok(Err(e)) => ApiResponse::failure(ErrorPayload::new(
+            ErrorCode::InternalError,
+            format!("{label} crashed: {}", panic_message(e)),
+        )),
+        Err(e) => ApiResponse::failure(ErrorPayload::new(
+            ErrorCode::InternalError,
+            format!("{label} task failed: {e}"),
+        )),
     }
 }
 
@@ -2252,11 +2245,10 @@ pub async fn download_essentia(
             Ok(ApiResponse {
                 ok: false,
                 data: None,
-                error: Some(crate::error::ErrorPayload {
-                    code: crate::error::ErrorCode::InternalError,
-                    message: msg,
-                    details: None,
-                }),
+                error: Some(crate::error::ErrorPayload::new(
+                    crate::error::ErrorCode::InternalError,
+                    msg,
+                )),
             })
         }
     }
@@ -2464,11 +2456,7 @@ pub async fn install_update(app: AppHandle) -> ApiResponse<()> {
     // ApiResponse::failure below puts the reason in the Event Log.
     let message = format!("Update failed: {message}");
     emit_job_failed(&app, identity, Some(message.clone()));
-    ApiResponse::failure(ErrorPayload {
-        code: ErrorCode::InternalError,
-        message,
-        details: None,
-    })
+    ApiResponse::failure(ErrorPayload::new(ErrorCode::InternalError, message))
 }
 
 /// `RUNNING_JOBS`, locked, once no job but `own_job_id` is running.

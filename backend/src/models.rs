@@ -26,11 +26,13 @@ impl<T: Serialize> ApiResponse<T> {
         // Single choke point: every error returned by any command — Tauri or
         // headless — passes through here, so this is where every failure
         // reaches the Event Log. See backend/src/logging.rs.
-        crate::logging::emit(
-            crate::logging::Level::Error,
-            error.code.as_str(),
-            &error.message,
-        );
+        // The Event Log shows the message as the user got it; the log file gets English.
+        crate::logging::emit_line(&crate::logging::LogLine {
+            level: crate::logging::Level::Error,
+            source: error.code.as_str(),
+            message: &error.message,
+            english: error.log_text(),
+        });
         Self {
             ok: false,
             data: None,

@@ -3,14 +3,15 @@
 import { counted } from "../../track_utils.mjs";
 import { cloneTemplate } from "../../ui_utils.mjs";
 
-// Stores an already-normalized entry (see message_bus.mjs emitMessage). With
-// the Event Log open, only that entry's row changes -- a busy job can log
-// many entries a second, too many for a full re-render each.
+// Stores an entry (the store normalizes it). With the Event Log open, only
+// that entry's row changes -- a busy job can log many entries a second, too
+// many for a full re-render each. `inLogFile`: the backend already wrote it to
+// the session log file (see handleBackendLogEvent).
 export function storeEventLogEntry(ctx, entry = {}) {
   const { state, eventLogStore } = ctx;
   const pushed = eventLogStore.push(entry);
   if (!pushed) return;
-  appendEventLogFile(ctx, pushed);
+  if (!entry.inLogFile) appendEventLogFile(ctx, pushed);
   if (state.activeTab === "event-log") {
     showEventLogEntry(ctx, pushed);
   } else if (pushed.level === "error") {

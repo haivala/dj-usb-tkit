@@ -2,14 +2,23 @@ use serde::Serialize;
 use serde_json::Value;
 use thiserror::Error;
 
+use crate::i18n::Text;
+
 #[derive(Debug, Error)]
 pub enum BackendError {
     #[error("validation error: {0}")]
     Validation(String),
+    /// A validation error from the text catalog: shown in the current language, logged in
+    /// English. Piece 11 of the text-catalog plan moves the `Validation(String)` sites here.
+    #[error("validation error: {}", .0.render_english())]
+    ValidationText(Text),
     #[error("validation error: {0}")]
     ValidationWithDetails(String, Value),
     #[error("not found: {0}")]
     NotFound(String),
+    /// A not-found error from the text catalog; see `ValidationText`.
+    #[error("not found: {}", .0.render_english())]
+    NotFoundText(Text),
     #[error("io error: {0}")]
     Io(#[from] std::io::Error),
     #[error("database error: {0}")]
@@ -44,34 +53,56 @@ impl ErrorCode {
 #[serde(rename_all = "camelCase")]
 pub struct ErrorPayload {
     pub code: ErrorCode,
+    /// In the current language: what the user sees.
     pub message: String,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub details: Option<Value>,
+    /// The message in English for the log file, when it differs from `message` (a catalog
+    /// text). `None` means `message` is already what the log gets.
+    #[serde(skip)]
+    pub log_message: Option<String>,
+}
+
+impl ErrorPayload {
+    /// A payload whose message is the same in the response and the log.
+    pub fn new(code: ErrorCode, message: impl Into<String>) -> Self {
+        Self {
+            code,
+            message: message.into(),
+            details: None,
+            log_message: None,
+        }
+    }
+
+    fn from_text(code: ErrorCode, text: &Text) -> Self {
+        Self {
+            code,
+            message: text.render(),
+            details: None,
+            log_message: Some(text.render_english()),
+        }
+    }
+
+    /// The message the log file gets: English.
+    pub fn log_text(&self) -> &str {
+        self.log_message.as_deref().unwrap_or(&self.message)
+    }
 }
 
 impl From<BackendError> for ErrorPayload {
     fn from(value: BackendError) -> Self {
         match value {
-            BackendError::Validation(msg) => Self {
-                code: ErrorCode::ValidationError,
-                message: msg,
-                details: None,
-            },
+            BackendError::Validation(msg) => Self::new(ErrorCode::ValidationError, msg),
+            BackendError::ValidationText(text) => {
+                Self::from_text(ErrorCode::ValidationError, &text)
+            }
             BackendError::ValidationWithDetails(msg, details) => Self {
-                code: ErrorCode::ValidationError,
-                message: msg,
                 details: Some(details),
+                ..Self::new(ErrorCode::ValidationError, msg)
             },
-            BackendError::NotFound(msg) => Self {
-                code: ErrorCode::NotFound,
-                message: msg,
-                details: None,
-            },
-            BackendError::Io(err) => Self {
-                code: ErrorCode::IoError,
-                message: err.to_string(),
-                details: None,
-            },
+            BackendError::NotFound(msg) => Self::new(ErrorCode::NotFound, msg),
+            BackendError::NotFoundText(text) => Self::from_text(ErrorCode::NotFound, &text),
+            BackendError::Io(err) => Self::new(ErrorCode::IoError, err.to_string()),
             BackendError::Db(_err) => {
                 // Release builds keep the SQLite detail out of the returned
                 // message, so put it in the Event Log -- otherwise it's lost.
@@ -84,17 +115,9 @@ impl From<BackendError> for ErrorPayload {
                 let message = format!("database failure: {_err}");
                 #[cfg(not(debug_assertions))]
                 let message = "an internal database error occurred".to_string();
-                Self {
-                    code: ErrorCode::DbError,
-                    message,
-                    details: None,
-                }
+                Self::new(ErrorCode::DbError, message)
             }
-            BackendError::Internal(msg) => Self {
-                code: ErrorCode::InternalError,
-                message: msg,
-                details: None,
-            },
+            BackendError::Internal(msg) => Self::new(ErrorCode::InternalError, msg),
         }
     }
 }

@@ -53,6 +53,21 @@ impl BackendService {
                 "unsupported frontend setting key: {key}"
             )));
         }
+        let language = (key == SETTING_UI_LANGUAGE).then(|| {
+            req.value
+                .as_deref()
+                .map(str::trim)
+                .filter(|value| !value.is_empty())
+                .unwrap_or(crate::i18n::ENGLISH)
+                .to_string()
+        });
+        if let Some(language) = &language
+            && !crate::i18n::languages().contains(&language.as_str())
+        {
+            return Err(BackendError::ValidationText(
+                crate::i18n::tr::settings_language_unknown(language),
+            ));
+        }
         let conn = self.db.connect()?;
         if let Some(raw_value) = req.value {
             let value = raw_value.trim().to_string();
@@ -72,7 +87,36 @@ impl BackendService {
         } else {
             conn.execute("DELETE FROM app_settings WHERE key = ?1", params![key])?;
         }
+        if let Some(language) = language {
+            crate::i18n::set_language(&language).map_err(BackendError::Internal)?;
+        }
         Ok(SetFrontendSettingData { saved: true })
+    }
+
+    /// Makes the saved language (`SETTING_UI_LANGUAGE`) the process's language. Called once by
+    /// the desktop app at startup, not from `new`: the language is process-wide, and tests
+    /// construct many services side by side. A saved language the app no longer has stays
+    /// English, with a warning.
+    pub fn apply_saved_language(&self) -> BackendResult<()> {
+        let conn = self.db.connect()?;
+        let saved: Option<String> = conn
+            .query_row(
+                "SELECT value FROM app_settings WHERE key = ?1",
+                params![SETTING_UI_LANGUAGE],
+                |row| row.get(0),
+            )
+            .optional()?;
+        let Some(language) = saved.filter(|value| !value.trim().is_empty()) else {
+            return Ok(());
+        };
+        if let Err(err) = crate::i18n::set_language(language.trim()) {
+            crate::logging::emit(
+                crate::logging::Level::Warn,
+                "settings",
+                &format!("saved language not used, staying in English: {err}"),
+            );
+        }
+        Ok(())
     }
 }
 
@@ -91,6 +135,7 @@ pub(super) fn frontend_ui_setting_keys() -> &'static [&'static str] {
         SETTING_UI_SIDEBAR_WIDTH,
         SETTING_UI_HELP_SEEN,
         SETTING_UI_KEY_NOTATION,
+        SETTING_UI_LANGUAGE,
         SETTING_UI_CUE_START_ON_FIRST_BEAT,
         SETTING_UI_CUE_BEATGRID_LEVEL,
         SETTING_UI_CUE_QUANTIZE,

@@ -25,3 +25,38 @@ usb-warning-count = { $count ->
     [one] { $count } warning
    *[other] { $count } warnings
 }
+
+## usb-playlists
+
+# The status line when a USB playlist is clicked.
+# $name: the playlist's name. $count: how many tracks it has.
+usb-playlists-selected = USB playlist selected: { $name } ({ $count ->
+    [one] { $count } track
+   *[other] { $count } tracks
+})
+
+# What the dialog asks before removing a playlist from the stick.
+# $name: the playlist's name.
+usb-playlists-remove-confirm = Remove USB playlist "{ $name }" from the stick?
+
+## usb-history
+
+# The USB History panel's totals.
+# $sessions: how many history sessions the stick has. $tracks: how many tracks they hold together.
+usb-history-summary = { $sessions ->
+    [one] { $sessions } session
+   *[other] { $sessions } sessions
+}, { $tracks ->
+    [one] { $tracks } track
+   *[other] { $tracks } tracks
+}
+
+# The status line after reading the stick's history; a warning count may follow.
+# $sessions: how many sessions were read.
+usb-history-loaded = USB histories loaded: { $sessions }
+
+## settings
+
+# The error when a language that has no catalog is saved as the app's language.
+# $language: the language code that was sent.
+settings-language-unknown = Unknown language: { $language }

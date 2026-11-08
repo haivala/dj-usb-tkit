@@ -4,6 +4,10 @@
 //!
 //! Also checks every catalog: it must parse cleanly, and another language may only have keys
 //! English has and only use the arguments English gives the same key.
+//!
+//! And generates the test language (`en-XA`) from English: every text wrapped in brackets,
+//! accented and about a third longer (`[Ŝéééţţîîñĝš]`), so untranslated or clipped text stands
+//! out. Debug builds only; a release never has it.
 
 use std::collections::{BTreeMap, BTreeSet};
 use std::fmt::Write as _;
@@ -13,6 +17,8 @@ use std::{env, fs};
 use fluent_syntax::ast;
 
 const ENGLISH: &str = "en";
+/// The generated test language. Kept in step with `i18n::TEST_LANGUAGE`.
+const TEST_LANGUAGE: &str = "en-XA";
 
 /// Plural categories (CLDR) and the selector keys that mean a number is selected on.
 const PLURAL_CATEGORIES: &[&str] = &["zero", "one", "two", "few", "many", "other"];
@@ -36,11 +42,15 @@ fn main() {
         check_translation(catalog, &english_messages);
     }
 
+    let out_dir = PathBuf::from(env::var("OUT_DIR").expect("OUT_DIR"));
+    let test_language_path = out_dir.join(format!("{TEST_LANGUAGE}.ftl"));
+    fs::write(&test_language_path, test_language(&english.resource))
+        .expect("write the test language");
+
     let mut out = String::new();
-    write_languages(&mut out, &catalogs);
+    write_languages(&mut out, &catalogs, &test_language_path);
     write_functions(&mut out, &english_messages);
 
-    let out_dir = PathBuf::from(env::var("OUT_DIR").expect("OUT_DIR"));
     fs::write(out_dir.join("i18n_catalog.rs"), out).expect("write i18n_catalog.rs");
 }
 
@@ -229,27 +239,113 @@ fn check_translation(catalog: &Catalog, english: &BTreeMap<String, MessageInfo<'
     }
 }
 
-fn write_languages(out: &mut String, catalogs: &[Catalog]) {
-    out.push_str("/// Each language's code and its catalog's source, English first.\n");
-    out.push_str("pub(super) const LANGUAGE_SOURCES: &[(&str, &str)] = &[\n");
-    let english_first = catalogs
+fn write_languages(out: &mut String, catalogs: &[Catalog], test_language_path: &Path) {
+    let english_first: Vec<(&str, &Path)> = catalogs
         .iter()
         .filter(|catalog| catalog.language == ENGLISH)
         .chain(
             catalogs
                 .iter()
                 .filter(|catalog| catalog.language != ENGLISH),
-        );
-    for catalog in english_first {
-        writeln!(
-            out,
-            "    ({:?}, include_str!({:?})),",
-            catalog.language,
-            catalog.path.display().to_string()
         )
-        .expect("write");
+        .map(|catalog| (catalog.language.as_str(), catalog.path.as_path()))
+        .collect();
+    let with_test_language: Vec<(&str, &Path)> = english_first
+        .iter()
+        .copied()
+        .chain([(TEST_LANGUAGE, test_language_path)])
+        .collect();
+    for (cfg, languages) in [
+        ("not(debug_assertions)", &english_first),
+        ("debug_assertions", &with_test_language),
+    ] {
+        out.push_str("/// Each language's code and its catalog's source, English first.\n");
+        writeln!(out, "#[cfg({cfg})]").expect("write");
+        out.push_str("pub(super) const LANGUAGE_SOURCES: &[(&str, &str)] = &[\n");
+        for (language, path) in languages {
+            writeln!(
+                out,
+                "    ({language:?}, include_str!({:?})),",
+                path.display().to_string()
+            )
+            .expect("write");
+        }
+        out.push_str("];\n\n");
     }
-    out.push_str("];\n\n");
+}
+
+/// The test language's catalog: English with every text element accented and lengthened, and
+/// each message and attribute wrapped in brackets. Placeables, variables and selector keys stay.
+fn test_language(english: &ast::Resource<String>) -> String {
+    let body = english
+        .body
+        .iter()
+        .filter_map(|entry| match entry {
+            ast::Entry::Message(message) => {
+                let mut message = message.clone();
+                message.comment = None;
+                if let Some(value) = &mut message.value {
+                    pseudo_pattern(value);
+                }
+                for attribute in &mut message.attributes {
+                    pseudo_pattern(&mut attribute.value);
+                }
+                Some(ast::Entry::Message(message))
+            }
+            _ => None,
+        })
+        .collect();
+    let source = fluent_syntax::serializer::serialize(&ast::Resource { body });
+    if let Err((_, errors)) = fluent_syntax::parser::parse(source.as_str()) {
+        panic!("the generated test language doesn't parse: {errors:#?}\n{source}");
+    }
+    source
+}
+
+fn pseudo_pattern(pattern: &mut ast::Pattern<String>) {
+    pseudo_elements(pattern);
+    // As string literals, so a bracket never starts a line Fluent would read as a variant.
+    let bracket = |text: &str| ast::PatternElement::Placeable {
+        expression: ast::Expression::Inline(ast::InlineExpression::StringLiteral {
+            value: text.to_string(),
+        }),
+    };
+    pattern.elements.insert(0, bracket("["));
+    pattern.elements.push(bracket("]"));
+}
+
+fn pseudo_elements(pattern: &mut ast::Pattern<String>) {
+    for element in &mut pattern.elements {
+        match element {
+            ast::PatternElement::TextElement { value } => *value = pseudo_text(value),
+            ast::PatternElement::Placeable {
+                expression: ast::Expression::Select { variants, .. },
+            } => {
+                for variant in variants {
+                    pseudo_elements(&mut variant.value);
+                }
+            }
+            ast::PatternElement::Placeable { .. } => {}
+        }
+    }
+}
+
+/// Accents every ASCII letter and doubles every vowel: about a third longer, still readable.
+fn pseudo_text(text: &str) -> String {
+    const FROM: &str = "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ";
+    const TO: &str = "áƀçðéƒĝĥîĵķļɱñöþǫŕšţûṽŵẋýžÅƁÇÐÉƑĜĤÎĴĶĻṀÑÖÞǪŔŠŢÛṼŴẊÝŽ";
+    let mut out = String::with_capacity(text.len() * 2);
+    for ch in text.chars() {
+        let accented = FROM
+            .find(ch)
+            .and_then(|index| TO.chars().nth(index))
+            .unwrap_or(ch);
+        out.push(accented);
+        if "aeiouAEIOU".contains(ch) {
+            out.push(accented);
+        }
+    }
+    out
 }
 
 fn write_functions(out: &mut String, english: &BTreeMap<String, MessageInfo<'_>>) {

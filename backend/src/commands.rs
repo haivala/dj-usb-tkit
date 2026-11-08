@@ -370,6 +370,11 @@ impl BackendCommands {
         wrap(self.service.set_frontend_setting(req))
     }
 
+    /// See `BackendService::apply_saved_language`: the desktop app calls it once at startup.
+    pub fn apply_saved_language(&self) -> ApiResponse<()> {
+        wrap(self.service.apply_saved_language())
+    }
+
     pub fn remove_essentia(&self) -> ApiResponse<()> {
         wrap(self.service.remove_essentia())
     }
