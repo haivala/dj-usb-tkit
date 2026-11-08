@@ -92,7 +92,15 @@ function installSourceRemovalMock(page) {
             for (let i = trackStore.length - 1; i >= 0; i -= 1) {
               if (underRoot(trackStore[i]?.filePath, root)) trackStore.splice(i, 1);
             }
-            return { ok: true, data: { sources: sources(), removed: before - trackStore.length } };
+            const removed = before - trackStore.length;
+            return {
+              ok: true,
+              data: {
+                sources: sources(),
+                removed,
+                statusText: `Source folders: ${window.__sourceFolders.length} | removed ${removed} tracks from library`
+              }
+            };
           }
           if (command === "pick_source_folders") {
             return window.__pickReturn || [];

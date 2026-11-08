@@ -156,7 +156,7 @@ function installTrackDetailMock(page, opts = {}) {
             const t = tracks.find((track) => track.id === r.trackId);
             Object.assign(t, {
               bpm: r.bpm ?? null,
-              bpmAnalyzer: r.bpm != null ? "user" : null,
+              bpmAnalyzer: r.bpm != null ? "user" : null, bpmSourceText: r.bpm != null ? "Manually set" : null,
               key: r.key ?? null,
               keyColor: opts.camelot && r.key === "F#m" ? 10 : t.keyColor,
             });
@@ -168,7 +168,7 @@ function installTrackDetailMock(page, opts = {}) {
                 firstBeatMs: payload?.request?.firstBeatMs ?? null,
                 cues: payload?.request?.cues ?? [],
                 bpm: payload?.request?.bpm ?? null,
-                bpmAnalyzer: payload?.request?.bpm != null ? "user" : null,
+                bpmAnalyzer: payload?.request?.bpm != null ? "user" : null, bpmSourceText: payload?.request?.bpm != null ? "Manually set" : null,
                 key: payload?.request?.key ?? null,
                 keySource: payload?.request?.key != null ? "user" : null,
                 ...(opts.camelot && payload?.request?.key === "F#m" ? { keyDisplay: "11A", keyColor: 10 } : {}),
@@ -1977,14 +1977,14 @@ test("cue editor opens + saves from an app-playlist track row", async ({ page })
                 // The saved row, whole, as the backend answers.
                 track: Object.assign(track, {
                   bpm: request?.bpm ?? null,
-                  bpmAnalyzer: request?.bpm != null ? "user" : null,
+                  bpmAnalyzer: request?.bpm != null ? "user" : null, bpmSourceText: request?.bpm != null ? "Manually set" : null,
                   key: request?.key ?? null,
                 }),
                 trackId: "local-1",
                 firstBeatMs: request?.firstBeatMs ?? null,
                 cues: request?.cues ?? [],
                 bpm: request?.bpm ?? null,
-                bpmAnalyzer: request?.bpm != null ? "user" : null,
+                bpmAnalyzer: request?.bpm != null ? "user" : null, bpmSourceText: request?.bpm != null ? "Manually set" : null,
                 key: request?.key ?? null,
                 keySource: request?.key != null ? "user" : null,
                 anlzRegenerated: true,
@@ -2173,7 +2173,7 @@ function installUsbTrackDetailMock(page, mockOpts = {}) {
               window.__emitJobEvent({ ...job, event: "job.completed", percent: 100, message: "USB: Cue edits saved" });
             }
             const r = payload?.request || {};
-            const saved = { bpm: r.bpm ?? null, bpmAnalyzer: r.bpm != null ? "user" : null, key: r.key ?? null };
+            const saved = { bpm: r.bpm ?? null, bpmAnalyzer: r.bpm != null ? "user" : null, bpmSourceText: r.bpm != null ? "Manually set" : null, key: r.key ?? null };
             Object.assign(usbTrack, saved);
             Object.assign(localTrack, saved);
             return {
@@ -2185,7 +2185,7 @@ function installUsbTrackDetailMock(page, mockOpts = {}) {
                 firstBeatMs: payload?.request?.firstBeatMs ?? null,
                 cues: payload?.request?.cues ?? [],
                 bpm: payload?.request?.bpm ?? null,
-                bpmAnalyzer: payload?.request?.bpm != null ? "user" : null,
+                bpmAnalyzer: payload?.request?.bpm != null ? "user" : null, bpmSourceText: payload?.request?.bpm != null ? "Manually set" : null,
                 key: payload?.request?.key ?? null,
                 keySource: payload?.request?.key != null ? "user" : null,
                 anlzUpdated: true, edbUpdated: true, localUpdated: true,

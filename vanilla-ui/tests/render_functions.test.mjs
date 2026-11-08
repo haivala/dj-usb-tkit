@@ -108,16 +108,19 @@ test("renderEmptyTrackTable uses one full-width grid empty cell", () => {
   assert.equal(tbody.querySelector(".track-grid-cell.track-grid-empty").textContent, "No tracks available.");
 });
 
-test("createTrackRow renders the format badge variant the backend's formatCompat asks for", async () => {
+test("createTrackRow renders the format badge the backend's formatCompat describes", async () => {
   const autofix = (await formatBadgeRow({
     filePath: "/media/track.wav",
     formatExt: "wav",
     formatCompat: {
       severity: "autofix",
-      warning: "Uses an extended WAV header (WAVE_FORMAT_EXTENSIBLE) that some CDJs reject. Will be automatically converted to standard PCM on export."
+      warning: "Will be automatically converted to standard PCM on export.",
+      badge: "WAV",
+      tooltip: "Will be automatically converted to standard PCM on export."
     }
   })).querySelector(".format-badge");
   assert.equal(autofix.className, "format-badge autofix");
+  assert.equal(autofix.textContent, "WAV ⟳");
   assert.match(autofix.dataset.tooltip, /Will be automatically converted to standard PCM on export/);
 
   const warning = (await formatBadgeRow({
@@ -125,20 +128,21 @@ test("createTrackRow renders the format badge variant the backend's formatCompat
     formatExt: "wav",
     formatCompat: {
       severity: "warn",
-      warning: "Uses an extended WAV header with a non-standard subformat - cannot be safely converted and may not play on CDJ hardware."
+      warning: "cannot be safely converted",
+      badge: "WAV",
+      tooltip: "44.1 kHz · 16-bit — cannot be safely converted"
     }
   })).querySelector(".format-badge");
   assert.equal(warning.className, "format-badge warn");
-  assert.match(warning.dataset.tooltip, /cannot be safely converted/);
+  assert.equal(warning.textContent, "WAV ⚠");
+  assert.equal(warning.dataset.tooltip, "44.1 kHz · 16-bit — cannot be safely converted");
 
   const plain = (await formatBadgeRow({
     filePath: "/media/track.wav",
     formatExt: "wav",
-    formatCompat: { severity: "ok", warning: null },
-    sampleRateHz: 44100,
-    bitDepth: 16
+    formatCompat: { severity: "ok", badge: "WAV" }
   })).querySelector(".format-badge");
   assert.equal(plain.className, "format-badge");
-  assert.equal(plain.dataset.tooltip, "44.1 kHz · 16-bit");
+  assert.equal(plain.dataset.tooltip, undefined);
   assert.equal(plain.textContent, "WAV");
 });

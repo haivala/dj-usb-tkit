@@ -4,8 +4,9 @@ use std::fs;
 
 use backend::commands::BackendCommands;
 use backend::models::{
-    AddLibrarySelectionToPlaylistRequest, AnalyzeNewTracksRequest, BrowseSourceFilesRequest,
-    CreatePlaylistRequest, GetPlaylistTracksRequest, RelocateSourceRootRequest, ScanLibraryRequest,
+    AddLibrarySelectionToPlaylistRequest, AddSourceFoldersRequest, AnalyzeNewTracksRequest,
+    BrowseSourceFilesRequest, CreatePlaylistRequest, GetPlaylistTracksRequest,
+    RelocateSourceRootRequest, ScanLibraryRequest,
 };
 use tempfile::tempdir;
 
@@ -23,6 +24,17 @@ fn scan_incremental_covers_unchanged_new_and_deleted_files() {
 
     let data_dir = root.path().join("data");
     let backend = BackendCommands::new(&data_dir).expect("create backend");
+    let add = |paths: Vec<String>| {
+        backend
+            .add_source_folders(AddSourceFoldersRequest { paths })
+            .data
+            .expect("add source folders")
+    };
+    // A new folder: the scan that indexes it says the status line.
+    assert_eq!(
+        add(vec![media.to_string_lossy().to_string()]).status_text,
+        None
+    );
 
     let first = backend.scan_library(ScanLibraryRequest {
         source_roots: vec![media.to_string_lossy().to_string()],
@@ -31,6 +43,16 @@ fn scan_incremental_covers_unchanged_new_and_deleted_files() {
     assert!(first.ok, "first scan failed: {first:?}");
     let first_data = first.data.expect("first scan data");
     assert_eq!(first_data.indexed, 2);
+    assert_eq!(
+        first_data.status_text,
+        "Source folders: 1 | indexed 2 tracks"
+    );
+    assert_eq!(
+        add(vec![media.to_string_lossy().to_string()])
+            .status_text
+            .as_deref(),
+        Some("Source folders unchanged: 1")
+    );
     assert_eq!(first_data.updated, 0);
     assert_eq!(first_data.removed, 0);
 
@@ -52,6 +74,10 @@ fn scan_incremental_covers_unchanged_new_and_deleted_files() {
     assert!(with_new.ok, "scan with new track failed: {with_new:?}");
     let with_new_data = with_new.data.expect("scan with new data");
     assert_eq!(with_new_data.indexed, 1);
+    assert_eq!(
+        with_new_data.status_text,
+        "Source folders: 1 | indexed 1 track"
+    );
     assert_eq!(with_new_data.updated, 0);
     assert_eq!(with_new_data.removed, 0);
 

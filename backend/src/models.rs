@@ -60,8 +60,10 @@ pub struct JobEventPayload {
     pub file_path: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub bpm: Option<f64>,
+    /// The BPM pill's tooltip for `bpm`: where it came from (see
+    /// `Track::bpm_source_text`).
     #[serde(skip_serializing_if = "Option::is_none")]
-    pub bpm_analyzer: Option<String>,
+    pub bpm_source_text: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub key: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -136,6 +138,11 @@ pub struct Track {
     /// `"essentia"`; a bare `"stratum"` is from before BPM refinement),
     /// `"user"` after a manual edit.
     pub bpm_analyzer: Option<String>,
+    /// The BPM pill's tooltip: where `bpm` came from ("Manually set",
+    /// "Analyzed with: stratum-v2"). Display only; set by
+    /// `service::apply_frontend_track_fields`.
+    #[serde(default)]
+    pub bpm_source_text: Option<String>,
     pub key: Option<String>,
     /// `"stratum"` / `"essentia"` for a detected value, `"user"` after a manual edit.
     pub key_source: Option<String>,
@@ -409,6 +416,13 @@ pub struct FormatCompat {
     /// Human-readable reason, present whenever `severity` isn't `Ok`.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub warning: Option<String>,
+    /// The FMT badge's text: the file's extension in capitals, or "Unknown".
+    #[serde(default)]
+    pub badge: String,
+    /// The badge's tooltip: the sample rate and bit depth or bitrate when
+    /// known, then the warning.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub tooltip: Option<String>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -453,6 +467,10 @@ pub struct ScanLibraryData {
     pub not_found: Vec<String>,
     #[serde(default)]
     pub warnings: Vec<WarningEntry>,
+    /// The status line: for a folder scan the folder count and the tracks
+    /// indexed, for a library import what it brought in.
+    #[serde(default)]
+    pub status_text: String,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -655,6 +673,9 @@ pub struct LibrarySourcesData {
     pub analyze_scanning_status: String,
     /// The status line when a track to analyze isn't in the library.
     pub track_not_in_library_status: String,
+    /// The status line after a source's switch changes: how many of the
+    /// folders and imported libraries are switched on.
+    pub filter_status_text: String,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -669,6 +690,10 @@ pub struct AddSourceFoldersData {
     pub sources: LibrarySourcesData,
     /// The paths that weren't configured yet, in the order given.
     pub added: Vec<String>,
+    /// The status line when nothing was added; otherwise the scan that
+    /// indexes the added folders answers with it.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub status_text: Option<String>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -683,6 +708,7 @@ pub struct RemoveSourceFolderData {
     pub sources: LibrarySourcesData,
     /// Tracks removed from the library with the folder.
     pub removed: usize,
+    pub status_text: String,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -808,6 +834,7 @@ pub struct RelocateSourceRootData {
     /// The source folders after the move: the old folder is replaced by the
     /// new one, or kept beside it while some of its tracks couldn't move.
     pub sources: LibrarySourcesData,
+    pub status_text: String,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]

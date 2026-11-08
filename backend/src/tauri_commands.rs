@@ -189,7 +189,7 @@ fn emit_job_event<R: tauri::Runtime>(
         track_title: None,
         file_path: None,
         bpm: None,
-        bpm_analyzer: None,
+        bpm_source_text: None,
         key: None,
         key_display: None,
         key_color: None,

@@ -1,6 +1,7 @@
 //! Frontend settings and the external tool checks.
 
 use super::*;
+use crate::i18n::tr;
 
 impl BackendService {
     pub fn get_frontend_settings(&self) -> BackendResult<GetFrontendSettingsData> {
@@ -244,6 +245,8 @@ impl UsbPathCheck {
 ///   exactly: [`UsbPathCheck`] on `file_path` only.
 /// - `key_display` / `key_color` follow the user's key notation setting
 ///   (display only; `key` itself is what gets edited and exported).
+/// - `bpm_source_text`: the BPM pill's tooltip, from `bpm_analyzer`.
+/// - An empty title or artist reads "Unknown Title" / "Unknown Artist".
 pub(crate) fn apply_frontend_track_fields(
     conn: &rusqlite::Connection,
     tracks: &mut [Track],
@@ -252,11 +255,34 @@ pub(crate) fn apply_frontend_track_fields(
     let notation = key_notation::key_notation_setting(conn)?;
     for track in tracks.iter_mut() {
         track.is_usb_path = usb_paths.is_usb_path(&track.file_path);
+        track.bpm_source_text = bpm_source_text(track.bpm_analyzer.as_deref());
+        if track.title.trim().is_empty() {
+            track.title = tr::track_row_unknown_title().render();
+        }
+        if track.artist.trim().is_empty() {
+            track.artist = tr::track_row_unknown_artist().render();
+        }
         (track.key_display, track.key_color) =
             key_notation::key_display_fields(track.key.as_deref(), notation);
     }
     super::transcode::fill_track_transcodes(conn, tracks)?;
     Ok(())
+}
+
+/// The BPM pill's tooltip for a BPM set by `analyzer` (`Track::bpm_analyzer`):
+/// "Manually set", "From Mixxx", "From rekordbox", or which of this app's
+/// analyzers found it. `None` without one.
+pub(crate) fn bpm_source_text(analyzer: Option<&str>) -> Option<String> {
+    let analyzer = analyzer.map(str::trim).filter(|value| !value.is_empty())?;
+    Some(
+        match analyzer {
+            "user" => tr::track_table_bpm_source_user(),
+            "mixxx" => tr::track_table_bpm_source_mixxx(),
+            "rekordbox" => tr::track_table_bpm_source_rekordbox(),
+            other => tr::track_table_bpm_source_analyzer(other),
+        }
+        .render(),
+    )
 }
 
 pub fn check_essentia_installed(data_dir: &std::path::Path) -> bool {

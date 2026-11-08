@@ -4,6 +4,7 @@ use crate::utils::{counted, track_list_summary};
 use std::collections::{HashMap, HashSet};
 
 use super::*;
+use crate::i18n::tr;
 use crate::scanner::{ListedAudioFile, ScannedTrack};
 
 pub(super) fn browse_path_key(path: &str) -> String {
@@ -246,6 +247,7 @@ impl BackendService {
                 removed: 0,
                 not_found,
                 warnings,
+                status_text: self.folders_indexed_status(0)?,
             });
         }
 
@@ -608,7 +610,15 @@ impl BackendService {
             removed,
             not_found,
             warnings,
+            status_text: self.folders_indexed_status(indexed)?,
         })
+    }
+
+    /// A folder scan's status line: the library's folder count and the
+    /// tracks the scan found new.
+    fn folders_indexed_status(&self, indexed: usize) -> BackendResult<String> {
+        let folders = LibrarySources::load(&*self.db.connect()?)?.roots.len();
+        Ok(tr::library_folders_indexed(folders, indexed).render())
     }
 
     /// Builds the complete library track list for a set of source roots
@@ -759,6 +769,7 @@ impl BackendService {
                 track_number: scanned.track_number,
                 bpm: None,
                 bpm_analyzer: None,
+                bpm_source_text: None,
                 key: scanned.tonality,
                 key_display: None,
                 key_color: None,
@@ -1283,6 +1294,7 @@ pub(crate) fn row_to_track(
         track_number: row.get(4)?,
         bpm,
         bpm_analyzer,
+        bpm_source_text: None,
         key: row.get(6)?,
         key_source: row.get("tonality_source").unwrap_or(None),
         file_size_bytes: row.get(8)?,

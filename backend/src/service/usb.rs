@@ -423,6 +423,12 @@ fn hydrate_usb_track_in_place(
     track.needs_hydration = !(has_waveform && has_artwork && has_bpm && has_key);
     (track.key_display, track.key_color) =
         super::key_notation::key_display_fields(track.key.as_deref(), notation);
+    if track.title.trim().is_empty() {
+        track.title = tr::track_row_unknown_title().render();
+    }
+    if track.artist.trim().is_empty() {
+        track.artist = tr::track_row_unknown_artist().render();
+    }
     counts
 }
 

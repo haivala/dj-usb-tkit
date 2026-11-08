@@ -74,6 +74,12 @@ with the waveform preview) and `UsbTrack` for a USB file (as
 USB file by its `usbMediaPath`, in every USB playlist and the history) and
 redraws those rows; it merges nothing from the old copy.
 
+Rows carry their display text ready to show: `formatCompat.badge` and
+`formatCompat.tooltip` for the FMT column (the file's details, then the
+compatibility warning), `bpmSourceText` for the BPM pill's tooltip (also on the
+analysis' BPM piece), and "Unknown Title" / "Unknown Artist" for a file with
+none.
+
 A listed file not yet in the library has its path as its row id. When playing
 or adding it gives it a library row, `resolve_track_identity` and each add
 resolution carry that row as `track` (only then), and `showTrackRow` shows it
@@ -90,7 +96,9 @@ drive selection from being rendered against a newer selected drive.
 
 ### Library
 
-- `scan_library`
+- `scan_library` — `{ sourceRoots?, incremental }` → `{ indexed, updated,
+  removed, notFound, warnings, statusText }`; `statusText` is the status line
+  after adding folders (the folder count and the tracks indexed).
 - `scan_rekordbox_db`
 - `scan_mixxx_db`
 - `browse_source_files` — lists the library as its sources are set (below);
@@ -98,25 +106,30 @@ drive selection from being rendered against a newer selected drive.
   their waveforms (`waveformPreview`, or `waveformColorData` for rekordbox
   tracks), read for that page only, as a USB page's are.
 - `get_library_sources` → `{ folders, rekordboxDbEnabled, mixxxDbEnabled,
-  everConfigured }`, each folder `{ path, enabled, missing, fullyAnalyzed }`.
+  everConfigured, filterStatusText }`, each folder `{ path, enabled, missing,
+  fullyAnalyzed }`. `filterStatusText` is the status line after a switch
+  ("Source filters: 2/3 enabled").
   The backend stores the source folders and their switches; every library
   command (`browse_source_files`, `list_matching_track_ids`,
   `get_selection_duration`, `add_library_selection_to_playlist(s)`,
   `analyze_new_tracks`, and `scan_library` without `sourceRoots`) uses the
   switched-on folders that are present plus the switched-on imported
   libraries. A library whose database is no longer found is switched off.
-- `add_source_folders` — `{ paths }` → `{ sources, added }`; `added` are the
-  paths not already configured (switched on).
-- `remove_source_folder` — `{ path }` → `{ sources, removed }`; removes the
-  folder and its tracks, keeping tracks inside another source folder.
+- `add_source_folders` — `{ paths }` → `{ sources, added, statusText? }`;
+  `added` are the paths not already configured (switched on). `statusText`
+  only when nothing was added; otherwise `scan_library` says it.
+- `remove_source_folder` — `{ path }` → `{ sources, removed, statusText }`;
+  removes the folder and its tracks, keeping tracks inside another source
+  folder.
 - `set_source_folder_enabled` — `{ path, enabled }` → the sources.
 - `set_external_library_enabled` — `{ library: "rekordbox" | "mixxx",
   enabled }` → the sources.
 - `resolve_track_identity` — `{ trackId, resolvedBy, materialized, track? }`;
   `track` is the new library row when a listed file was materialized.
 - `relocate_source_root` — `{ oldRoot, newRoot }` → the rewrite counts
-  (`unresolved` = `missingAtNewRoot` + `conflicts`) plus `sources`: once every
-  track moved, the new folder replaces the old one; otherwise both stay.
+  (`unresolved` = `missingAtNewRoot` + `conflicts`) plus `sources` and
+  `statusText`: once every track moved, the new folder replaces the old one;
+  otherwise both stay.
 - `get_track_detail` — returns `{ track, firstBeatMs, cues, detailWaveform,
   keyOptions, genre, rating, releaseDate, genreOptions }` for the cue editor
   (see `docs/CUE_EDITOR.md`). `rating` is 0–5 stars; `releaseDate` is the date
@@ -329,7 +342,7 @@ See `docs/EXTERNAL_LIBRARIES.md` for behavior and the fields read.
 - `detect_external_rekordbox_db` / `detect_external_mixxx_db` — `{ found, path }`
 - `scan_rekordbox_db` / `scan_mixxx_db` — `{ path? }`; imports every track of the
   library, returns the `scan_library` result shape (`indexed`, `updated`,
-  `removed`, `notFound`, `warnings`)
+  `removed`, `notFound`, `warnings`, `statusText`: what the import brought in)
 - `list_rekordbox_playlists` / `list_mixxx_playlists` — `{ path? }`; returns
   `items: [{ id, name, kind, trackCount, existingPlaylist? }]` where `id` is
   the source library's own id as a string, `kind` is `playlist` | `crate` |

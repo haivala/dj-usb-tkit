@@ -3,7 +3,8 @@ import { narrowTrackSelectionToLoaded } from "../shared/track_selection.mjs";
 import { renderEmptyState } from "../shell/actions.mjs";
 import { cssEscape, cloneTemplate } from "../../ui_utils.mjs";
 import { fillBpmCell, fillFormatCell, fillKeyCell, fillYearCell, coverElement, setCueButtonState, formatTrackDuration, trackHasWaveform } from "../../track_table.mjs";
-import { REANALYZE_TOOLTIP, applyAnalyzeButtonState, counted } from "../../track_utils.mjs";
+import { REANALYZE_TOOLTIP, applyAnalyzeButtonState } from "../../track_utils.mjs";
+import { t } from "../../ui_texts.mjs";
 import { renderTrackListDurationSummary } from "../../track_utils.mjs";
 import { drawWaveformCanvas, invalidateWaveformCache, setWaveformColorData } from "../../waveform.mjs";
 
@@ -15,15 +16,13 @@ export function trackArtworkChecked(track) {
 
 // The backend sends every track fully typed (models.rs `Track` / `UsbTrack`):
 // analysis readiness, format compatibility, key display, the 0-100 waveform
-// preview. This adds only what the frontend owns: the cover's asset URL
-// (Tauri's convertFileSrc), the display defaults for an untitled row, and the
+// preview, "Unknown Title" for a file with none. This adds only what the
+// frontend owns: the cover's asset URL (Tauri's convertFileSrc) and the
 // UI-side flags.
 export function normalizeTrack(ctx, track) {
   const rawArtwork = track.artworkDataUrl || track.artworkUrl || track.artworkPath || "";
   return {
     ...track,
-    title: track.title || "Unknown Title",
-    artist: track.artist || "Unknown Artist",
     // Revision-tagged so an updated cover isn't served from cache.
     artworkUrl: appendUrlRevision(ctx.toPlayableUrl(rawArtwork) || "", track.updatedAt || ""),
     artworkChecked: trackArtworkChecked(track),
@@ -50,12 +49,6 @@ export async function refreshLibrarySources(ctx) {
   } catch (err) {
     console.warn("Failed to load library sources:", err);
   }
-}
-
-// "Source folder missing: /a (+2 more). Relocate or remove it."
-function missingFoldersStatus(paths) {
-  const more = paths.length > 1 ? ` (+${paths.length - 1} more)` : "";
-  return `Source folder missing: ${paths[0]}${more}. Relocate or remove it.`;
 }
 
 // A command that changed a track answers with its whole row -- the library's
@@ -153,7 +146,7 @@ export async function relocateSourceRoot(ctx, oldRoot) {
   const sourceRoot = String(oldRoot || "").trim();
   if (!sourceRoot) return;
 
-  emitStatus(`Relocate source folder: ${sourceRoot}`);
+  emitStatus(t("ui-library-relocate-starting", { path: sourceRoot }));
   const picked = await ctx.pickSourceFolders();
   const newRoot = Array.isArray(picked)
     ? String(picked[0] || "").trim()
@@ -167,13 +160,7 @@ export async function relocateSourceRoot(ctx, oldRoot) {
   await applyLibrarySources(ctx, result.sources);
   await resetAndLoadLibraryTracks(ctx, state.libraryQuery);
   await ctx.refreshCurrentPlaylistTracks();
-
-  const unresolved = Number(result.unresolved || 0);
-  const updated = Number(result?.updated || 0);
-  const partial = unresolved > 0
-    ? ` | ${counted(unresolved, "track")} still unresolved`
-    : "";
-  emitStatus(`Source relocated: ${counted(updated, "track path")} updated${partial}`);
+  emitStatus(result.statusText);
 }
 
 // The detected DJ libraries' chips, in their own "Libraries" row. A library's
@@ -185,12 +172,12 @@ function renderLibraryChips(ctx) {
     {
       path: state.externalRekordboxDbPath, imported: state.rekordboxDbImported,
       enabled: state.librarySources.rekordboxDbEnabled,
-      template: "tplSourceChipRekordboxDb", label: "rekordbox"
+      template: "tplSourceChipRekordboxDb", notImportedTooltip: t("ui-library-chip-not-imported-rekordbox-tooltip")
     },
     {
       path: state.externalMixxxDbPath, imported: state.mixxxDbImported,
       enabled: state.librarySources.mixxxDbEnabled,
-      template: "tplSourceChipMixxxDb", label: "Mixxx"
+      template: "tplSourceChipMixxxDb", notImportedTooltip: t("ui-library-chip-not-imported-mixxx-tooltip")
     }
   ].filter((library) => library.path);
   el.libraryChipsContainer.replaceChildren();
@@ -201,7 +188,7 @@ function renderLibraryChips(ctx) {
     toggle.checked = !!library.imported && !!library.enabled;
     chip.querySelector(".source-chip-path").dataset.tooltip = library.imported
       ? library.path
-      : `Not imported yet: click ↻ to import from ${library.label}`;
+      : library.notImportedTooltip;
     el.libraryChipsContainer.appendChild(chip);
   }
   el.libraryChipsRow.classList.toggle("hidden", !libraries.length);
@@ -222,15 +209,15 @@ export function renderSourceChips(ctx) {
     chip.classList.toggle("source-chip-missing", missing);
     if (missing) {
       chip.dataset.sourceRelocateIndex = String(index);
-      chip.dataset.tooltip = "Source folder missing. Click to relocate.";
+      chip.dataset.tooltip = t("ui-library-folder-missing-tooltip");
     }
     const toggle = chip.querySelector(".source-chip-toggle");
     toggle.dataset.sourceToggleIndex = String(index);
     toggle.checked = !missing && enabled;
     toggle.disabled = missing;
-    if (missing) toggle.setAttribute("aria-label", "Source folder missing");
+    if (missing) toggle.setAttribute("aria-label", t("ui-library-folder-missing-aria-label"));
     const pathEl = chip.querySelector(".source-chip-path");
-    const pathTitle = missing ? `Folder missing. Click to relocate: ${path}` : path;
+    const pathTitle = missing ? t("ui-library-folder-missing-path-tooltip", { path }) : path;
     pathEl.textContent = label;
     pathEl.dataset.tooltip = pathTitle;
     pathEl.setAttribute("aria-label", pathTitle);
@@ -278,13 +265,13 @@ export function renderLibraryChrome(ctx) {
   el.libraryEmptyState.replaceChildren();
   if (noSources) {
     const extraActions = [
-      ...(state.externalRekordboxDbPath ? [{ label: "rekordbox library", onAction: () => scanRekordboxDb(ctx) }] : []),
-      ...(state.externalMixxxDbPath ? [{ label: "Mixxx library", onAction: () => scanMixxxDb(ctx) }] : []),
+      ...(state.externalRekordboxDbPath ? [{ label: t("ui-library-empty-import-rekordbox"), onAction: () => scanRekordboxDb(ctx) }] : []),
+      ...(state.externalMixxxDbPath ? [{ label: t("ui-library-empty-import-mixxx"), onAction: () => scanMixxxDb(ctx) }] : []),
     ];
     renderEmptyState(el.libraryEmptyState, {
       icon: "♫",
-      heading: "Add a music folder to get started",
-      actionLabel: "Add Folder",
+      heading: t("ui-library-empty-heading"),
+      actionLabel: t("ui-library-empty-add-folder"),
       onAction: () => el.addSourceBtn.click(),
       extraActions
     });
@@ -410,12 +397,9 @@ export async function analyzeLibrary(ctx) {
   emitStatus(state.librarySources.analyzeScanningStatus);
   const result = await ctx.command("scan_library", { incremental: true });
   await refreshLibrarySources(ctx);
-  // e.g. the same file found in two folders; the backend words them. In the
-  // Event Log, where the analysis' progress can't hide them.
-  ctx.logWarnings("library-scan", Array.isArray(result?.warnings) ? result.warnings : [], "Library scan");
-  if (result.notFound?.length) {
-    ctx.logWarnings("library-scan", [missingFoldersStatus(result.notFound)], "Library scan");
-  }
+  // e.g. the same file found in two folders, or a folder gone; the backend
+  // words them. In the Event Log, where the analysis' progress can't hide them.
+  ctx.logWarnings("library-scan", Array.isArray(result?.warnings) ? result.warnings : [], t("ui-library-scan-log-context"));
   await resetAndLoadLibraryTracks(ctx, "");
   await ctx.refreshCurrentPlaylistTracks();
   await analyzeTrackIds(ctx, [], { scopeToLibraryFilter: true });
@@ -434,7 +418,9 @@ export async function scanRekordboxDb(ctx) {
   await importExternalLibrary(ctx, {
     command: "scan_rekordbox_db",
     path: ctx.state.externalRekordboxDbPath,
-    label: "Desktop library",
+    startingText: t("ui-library-import-rekordbox-starting"),
+    failedText: (error) => t("ui-library-import-rekordbox-failed", { error }),
+    logLabel: t("ui-library-import-rekordbox-log-context"),
     logSource: "master.db",
     codePrefix: "rekordbox_db",
     library: "rekordbox",
@@ -446,7 +432,9 @@ export async function scanMixxxDb(ctx) {
   await importExternalLibrary(ctx, {
     command: "scan_mixxx_db",
     path: ctx.state.externalMixxxDbPath,
-    label: "Mixxx library",
+    startingText: t("ui-library-import-mixxx-starting"),
+    failedText: (error) => t("ui-library-import-mixxx-failed", { error }),
+    logLabel: t("ui-library-import-mixxx-log-context"),
     logSource: "mixxx",
     codePrefix: "mixxx_db",
     library: "mixxx",
@@ -463,17 +451,17 @@ export async function showExternalLibrary(ctx, library) {
 }
 
 // Shared by the rekordbox master.db and Mixxx imports: run the backend
-// import, turn the library's source chip on, and report the outcome.
-async function importExternalLibrary(ctx, { command, path, label, logSource, codePrefix, library, detect }) {
+// import, turn the library's source chip on, and report the outcome (the
+// backend's `statusText`).
+async function importExternalLibrary(ctx, { command, path, startingText, failedText, logLabel, logSource, codePrefix, library, detect }) {
   const { logWarnings, emitStatus } = ctx;
-  const logLabel = `${label.toLowerCase()} import`;
 
-  emitStatus(`Importing from ${label.toLowerCase()}...`);
+  emitStatus(startingText);
   let result;
   try {
     result = await ctx.command(command, { path: path || undefined });
   } catch (err) {
-    emitStatus(`${label} import failed: ${err?.message || err}`);
+    emitStatus(failedText(err?.message || err));
     return;
   }
 
@@ -506,8 +494,7 @@ async function importExternalLibrary(ctx, { command, path, label, logSource, cod
     );
   }
 
-  const suffix = notFound.length > 0 ? ` | ${counted(notFound.length, "file")} not found (see event log)` : "";
-  emitStatus(`${label} import done: ${result.indexed} new, ${result.updated} updated${suffix}`);
+  emitStatus(result.statusText);
 }
 
 // Adds to the backend's analysis job and returns at once: the job's events
@@ -666,13 +653,13 @@ export function patchTrackAnalysisFields(ctx, track, payload) {
   // brings the stored ones back if the analysis fails).
   if (payload.trackStarted && payload.reanalysis) {
     put("bpm", null);
-    put("bpmAnalyzer", null);
+    put("bpmSourceText", null);
     put("key", null);
     put("keyDisplay", "");
     put("keyColor", null);
   }
   setIfChanged("bpm", payload.bpm);
-  setIfChanged("bpmAnalyzer", payload.bpmAnalyzer);
+  setIfChanged("bpmSourceText", payload.bpmSourceText);
   if (payload.key) {
     put("key", payload.key);
     put("keyDisplay", payload.keyDisplay ?? "");
@@ -769,7 +756,7 @@ export function patchLibraryRowCells(ctx, row, track) {
   if (actionTd) {
     const analyzeBtn = actionTd.querySelector("[data-action='analyze-track']");
     if (analyzeBtn && track.analysisReady) {
-      analyzeBtn.textContent = "Reanalyze";
+      analyzeBtn.textContent = t("ui-track-row-reanalyze");
       analyzeBtn.dataset.tooltip = REANALYZE_TOOLTIP;
     }
   }

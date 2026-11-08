@@ -3,16 +3,11 @@ import { cloneTemplate } from "./ui_utils.mjs";
 import { coverUrl, attachCoverFallbackHandlers } from "./components/library/actions.mjs";
 import { isTrackCurrentlyPlaying, moveActiveWaveform, updateTransportButtonsInDom } from "./components/playback/actions.mjs";
 import { renderWaveforms, setWaveformColorData } from "./waveform.mjs";
+import { t } from "./ui_texts.mjs";
 
-// The BPM cell: the formatted value in a pill (tooltip = which analyzer set
-// it), or "-" before analysis.
-// Where a BPM came from when it wasn't this app's analysis.
-const BPM_SOURCE_TOOLTIPS = {
-  user: "Manually set",
-  mixxx: "From Mixxx",
-  rekordbox: "From rekordbox"
-};
-
+// The BPM cell: the formatted value in a pill, with the backend's
+// `bpmSourceText` (where the BPM came from) as its tooltip, or "-" before
+// analysis.
 export function fillBpmCell(cell, track) {
   const bpmText = formatBpm(track.bpm);
   if (!bpmText) {
@@ -21,9 +16,7 @@ export function fillBpmCell(cell, track) {
   }
   const pill = cloneTemplate(cell.ownerDocument, "tplBpmPill");
   pill.textContent = bpmText;
-  const tooltip = BPM_SOURCE_TOOLTIPS[track.bpmAnalyzer]
-    || (track.bpmAnalyzer ? `Analyzed with: ${track.bpmAnalyzer}` : "");
-  if (tooltip) pill.dataset.tooltip = tooltip;
+  if (track.bpmSourceText) pill.dataset.tooltip = track.bpmSourceText;
   cell.replaceChildren(pill);
 }
 
@@ -40,7 +33,7 @@ export function setCueButtonState(button, { ready = button.dataset.cueReady === 
   button.dataset.cueReady = String(!!ready);
   const enabled = !!ready && !!hasWaveform;
   button.disabled = !enabled;
-  button.dataset.tooltip = enabled ? "Edit cue points & beat grid" : "Analyze this track first";
+  button.dataset.tooltip = t(enabled ? "ui-track-row-edit-cues-tooltip" : "ui-track-row-edit-cues-analyze-first-tooltip");
 }
 
 // The key cell. The backend sends the label in the user's key notation
@@ -141,7 +134,7 @@ export function createTrackRow(ctx, track, options) {
   const transport = row.querySelector(".transport-btn");
   if (options.secondaryActionType) {
     const playing = isTrackCurrentlyPlaying(ctx, track);
-    const label = playing ? "Stop" : "Play";
+    const label = t(playing ? "ui-track-row-stop" : "ui-track-row-play");
     transport.classList.toggle("is-playing", playing);
     Object.assign(transport.dataset, {
       action: options.secondaryActionType,
@@ -199,7 +192,9 @@ export function createTrackRow(ctx, track, options) {
       primary.dataset.id = track.id;
       if (isRemoveAction) {
         const playlistName = state.playlists?.find((p) => p.id === state.currentPlaylistId)?.name;
-        primary.dataset.tooltip = playlistName ? `Remove from ${playlistName}` : "Remove from playlist";
+        primary.dataset.tooltip = playlistName
+          ? t("ui-track-row-remove-from-tooltip", { playlist: playlistName })
+          : t("ui-track-row-remove-from-playlist-tooltip");
       } else {
         setAddButtonState(primary, state.playlists?.find((p) => p.id === state.currentPlaylistId));
       }
@@ -213,7 +208,7 @@ export function createTrackRow(ctx, track, options) {
     // library copy, so it doesn't belong on those lists.
     if (options.enableAnalyzeActions && options.origin !== "usb") {
       analyze.dataset.id = renderTrackId;
-      analyze.textContent = track.analysisReady ? "Reanalyze" : "Analyze";
+      analyze.textContent = t(track.analysisReady ? "ui-track-row-reanalyze" : "ui-track-row-analyze");
       applyAnalyzeButtonState(state, analyze, renderTrackId, track.analysisReady);
     } else {
       analyze.remove();
@@ -239,8 +234,8 @@ const SKELETON_SHIMMER_MS = 1600;
 export function setAddButtonState(button, playlist) {
   button.disabled = !playlist;
   button.dataset.tooltip = playlist
-    ? `Add to ${playlist.name}`
-    : "Create and activate a playlist first, then add tracks to it.";
+    ? t("ui-track-row-add-to-tooltip", { playlist: playlist.name })
+    : t("ui-track-row-add-no-playlist-tooltip");
 }
 
 export function buildTrackTableRow(ctx, track, options) {
@@ -310,43 +305,12 @@ export function formatTrackDuration(track) {
   return formatDurationMs(rawMs);
 }
 
-function formatTrackFormatDetail(sampleRate, bitDepth, bitrate) {
-  const parts = [];
-  if (sampleRate) {
-    parts.push(`${(sampleRate / 1000).toLocaleString(undefined, { maximumFractionDigits: 1 })} kHz`);
-  }
-  if (bitDepth) {
-    parts.push(`${bitDepth}-bit`);
-  } else if (bitrate) {
-    parts.push(`${bitrate} kbps`);
-  }
-  return parts.join(" · ");
-}
-
-function describeTrackFormat(track) {
-  // Backend-owned: every track-returning command populates `formatExt` (falling
-  // back to the file-path extension server-side) and `formatCompat` (severity +
-  // warning, computed in Rust by service::format_compat). The frontend renders
-  // the badge and never re-derives the CDJ-compatibility rule.
-  const ext = String(track?.formatExt || "").trim().toLowerCase();
-  const label = ext ? ext.toUpperCase() : "Unknown";
-  const sampleRate = Number(track?.sampleRateHz || 0) || null;
-  const bitDepth = Number(track?.bitDepth || 0) || null;
-  const bitrate = Number(track?.bitrateKbps || 0) || null;
-  const detail = formatTrackFormatDetail(sampleRate, bitDepth, bitrate);
-
-  const compat = track?.formatCompat || {};
-  const severity = String(compat.severity || "ok");
-  return {
-    label,
-    detail,
-    kind: severity === "ok" ? null : severity,
-    warning: compat.warning || null,
-  };
-}
-
-// The FMT cell: the format badge (with the backend's compatibility warning),
-// then the track's transcodes. Also redraws a row already shown.
+// The FMT cell: the format badge, then the track's transcodes. Also redraws a
+// row already shown.
+//
+// Backend-owned `track.formatCompat` (see service::format_compat): the
+// badge's text and tooltip (the file's details and its CDJ-compatibility
+// warning) and the severity that picks its style.
 //
 // Backend-owned `track.exportFile` (an app playlist read for the selected
 // USB): what export puts on that USB when it isn't the track's own file. The
@@ -367,15 +331,13 @@ export function fillFormatCell(cell, track) {
       badge.textContent += " ⚠";
     }
   } else {
-    const formatInfo = describeTrackFormat(track);
-    const tooltip = formatTrackFormatTooltip(formatInfo);
-    if (tooltip) badge.dataset.tooltip = tooltip;
+    const compat = track?.formatCompat || {};
+    if (compat.tooltip) badge.dataset.tooltip = compat.tooltip;
     else delete badge.dataset.tooltip;
-    badge.textContent = formatInfo.label;
-    if (formatInfo.warning) {
-      const autofix = formatInfo.kind === "autofix";
-      badge.classList.add(autofix ? "autofix" : "warn");
-      badge.textContent += autofix ? " ⟳" : " ⚠";
+    badge.textContent = compat.badge || "";
+    if (compat.severity === "autofix" || compat.severity === "warn") {
+      badge.classList.add(compat.severity);
+      badge.textContent += compat.severity === "autofix" ? " ⟳" : " ⚠";
     }
   }
   appendTranscodeLines(badge, track);
@@ -397,9 +359,3 @@ function appendTranscodeLines(badge, track) {
     badge = line;
   }
 }
-
-function formatTrackFormatTooltip(formatInfo) {
-  if (formatInfo.warning && formatInfo.detail) return `${formatInfo.detail} — ${formatInfo.warning}`;
-  return formatInfo.warning || formatInfo.detail || "";
-}
-

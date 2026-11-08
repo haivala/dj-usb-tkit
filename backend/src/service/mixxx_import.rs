@@ -889,6 +889,15 @@ impl BackendService {
         tx.commit()?;
 
         let warnings = importer.finish_warnings();
+        let status_text = match importer.not_found.len() {
+            0 => crate::i18n::tr::library_import_done_mixxx(importer.indexed, importer.updated),
+            count => crate::i18n::tr::library_import_done_mixxx_not_found(
+                importer.indexed,
+                importer.updated,
+                count,
+            ),
+        }
+        .render();
         Ok(ScanLibraryData {
             job_id: Uuid::now_v7().to_string(),
             indexed: importer.indexed,
@@ -897,6 +906,7 @@ impl BackendService {
             removed: 0,
             not_found: importer.not_found,
             warnings,
+            status_text,
         })
     }
 
@@ -1446,6 +1456,10 @@ mod tests {
         assert!(imported());
         assert_eq!(result.indexed, 1);
         assert_eq!(result.updated, 1);
+        assert_eq!(
+            result.status_text,
+            "Mixxx library import done: 1 new, 1 updated | 1 file not found (see event log)"
+        );
         assert_eq!(result.removed, 0);
         assert_eq!(
             result.not_found,

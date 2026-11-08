@@ -71,6 +71,93 @@ diagnostics-status-fail = FAIL
 # $language: the language code that was sent.
 settings-language-unknown = Unknown language: { $language }
 
+## library
+
+# The status line after a source chip's switch changes.
+# $enabled: the folders and imported libraries switched on (a missing folder counts as off).
+# $total: all folders plus the imported libraries still found.
+library-sources-filter-status = Source filters: { $enabled }/{ $total } enabled
+
+# The status line after adding source folders and indexing them.
+# $folders: how many source folders the library has now. $count: the tracks the scan found new.
+library-folders-indexed = Source folders: { $folders } | indexed { $count ->
+    [one] { $count } track
+   *[other] { $count } tracks
+}
+
+# The status line when every folder picked was already a source folder.
+# $folders: how many source folders the library has.
+library-folders-unchanged = Source folders unchanged: { $folders }
+
+# The status line after removing a source folder.
+# $folders: how many source folders are left. $count: the tracks that left the library with it.
+library-folder-removed = Source folders: { $folders } | removed { $count ->
+    [one] { $count } track
+   *[other] { $count } tracks
+} from library
+
+# The status line after relocating a source folder, when every track found its file.
+# $count: the tracks whose path now points into the new folder.
+library-relocated = Source relocated: { $count ->
+    [one] { $count } track path
+   *[other] { $count } track paths
+} updated
+
+# The same, when some tracks still point at the old folder.
+# $count: the tracks whose path was updated. $unresolved: the tracks left pointing at the old folder.
+library-relocated-unresolved = Source relocated: { $count ->
+    [one] { $count } track path
+   *[other] { $count } track paths
+} updated | { $unresolved ->
+    [one] { $unresolved } track
+   *[other] { $unresolved } tracks
+} still unresolved
+
+# The status line after importing the tracks of rekordbox's desktop library (master.db).
+# $new: tracks new to the library. $updated: tracks already in it that were updated.
+library-import-done-rekordbox = Desktop library import done: { $new } new, { $updated } updated
+
+# The same, when some of the library's files weren't found; the Event Log lists them.
+# $new, $updated: as above. $count: the files not found.
+library-import-done-rekordbox-not-found = Desktop library import done: { $new } new, { $updated } updated | { $count ->
+    [one] { $count } file
+   *[other] { $count } files
+} not found (see event log)
+
+# The status line after importing the tracks of a Mixxx library.
+# $new: tracks new to the library. $updated: tracks already in it that were updated.
+library-import-done-mixxx = Mixxx library import done: { $new } new, { $updated } updated
+
+# The same, when some of the library's files weren't found; the Event Log lists them.
+# $new, $updated: as above. $count: the files not found.
+library-import-done-mixxx-not-found = Mixxx library import done: { $new } new, { $updated } updated | { $count ->
+    [one] { $count } file
+   *[other] { $count } files
+} not found (see event log)
+
+## track-table
+
+# The BPM pill's tooltip: where the track's BPM came from, when not from this app's analysis.
+track-table-bpm-source-user = Manually set
+track-table-bpm-source-mixxx = From Mixxx
+track-table-bpm-source-rekordbox = From rekordbox
+# The same, for a BPM this app's analysis found. $analyzer: the analyzer's id, such as stratum-v2 or essentia.
+track-table-bpm-source-analyzer = Analyzed with: { $analyzer }
+
+# The FMT badge for a file with no extension.
+track-table-format-unknown = Unknown
+# Parts of the FMT badge's tooltip ("44.1 kHz · 16-bit").
+# $khz: the sample rate in kHz, formatted. $bits: the bit depth. $kbps: the bitrate.
+track-table-format-sample-rate = { $khz } kHz
+track-table-format-bit-depth = { $bits }-bit
+track-table-format-bitrate = { $kbps } kbps
+
+## track-row
+
+# A track row's title and artist when the file has none.
+track-row-unknown-title = Unknown Title
+track-row-unknown-artist = Unknown Artist
+
 ## ui-add-to
 
 ui-add-to-apply = Add
@@ -227,6 +314,46 @@ ui-library-sources = Sources
 ui-library-title = Media Library
 ui-library-toggle-mixxx-library-aria-label = Toggle Mixxx library
 ui-library-toggle-rekordbox-library-aria-label = Toggle rekordbox library
+# The tooltip of an imported library's chip before its tracks are imported.
+ui-library-chip-not-imported-rekordbox-tooltip = Not imported yet: click ↻ to import from rekordbox
+ui-library-chip-not-imported-mixxx-tooltip = Not imported yet: click ↻ to import from Mixxx
+# A source folder chip whose folder is gone: the chip's tooltip, its switch's label,
+# and its name's tooltip. $path: the folder.
+ui-library-folder-missing-tooltip = Source folder missing. Click to relocate.
+ui-library-folder-missing-aria-label = Source folder missing
+ui-library-folder-missing-path-tooltip = Folder missing. Click to relocate: { $path }
+# The status line while picking a source folder's new place. $path: the folder that's missing.
+ui-library-relocate-starting = Relocate source folder: { $path }
+# The library before any source is set up: its heading and buttons.
+ui-library-empty-heading = Add a music folder to get started
+ui-library-empty-add-folder = Add Folder
+ui-library-empty-import-rekordbox = rekordbox library
+ui-library-empty-import-mixxx = Mixxx library
+# The progress bar's title and steps while adding source folders.
+ui-library-add-folders-title = Loading media library
+ui-library-add-folders-saving = Saving source folders...
+ui-library-add-folders-indexing = Indexing new files...
+ui-library-add-folders-building = Building track list...
+ui-library-add-folders-refreshing = Refreshing playlist views...
+# Asked before removing a source folder: the dialog's title, its text and its button.
+# $path: the folder.
+ui-library-remove-folder-title = Remove Source Folder
+ui-library-remove-folder-confirm = Remove source folder?
+
+    { $path }
+
+    All tracks from this folder will be removed from the library. Tracks that are in a local playlist will also be removed from those playlists. Tracks that are also inside another source folder stay in the library.
+ui-library-remove-folder = Remove
+# Where an Event Log entry came from, in its details ("context: Library scan").
+ui-library-scan-log-context = Library scan
+ui-library-import-rekordbox-log-context = desktop library import
+ui-library-import-mixxx-log-context = Mixxx library import
+# Importing the tracks of rekordbox's desktop library (master.db) or of Mixxx's library:
+# the status line while it runs, and when it fails. $error: the backend's message.
+ui-library-import-rekordbox-starting = Importing from desktop library...
+ui-library-import-rekordbox-failed = Desktop library import failed: { $error }
+ui-library-import-mixxx-starting = Importing from Mixxx library...
+ui-library-import-mixxx-failed = Mixxx library import failed: { $error }
 
 ## ui-playlist
 
@@ -433,6 +560,18 @@ ui-track-row-drag-to-reorder = Drag to reorder
 ui-track-row-edit-cues-aria-label = Cue points & beat grid
 ui-track-row-empty = No tracks available.
 ui-track-row-play = Play
+ui-track-row-stop = Stop
+ui-track-row-analyze = Analyze
+ui-track-row-reanalyze = Reanalyze
+# The cue editor button's tooltip: enabled, and before the track is analyzed.
+ui-track-row-edit-cues-tooltip = Edit cue points & beat grid
+ui-track-row-edit-cues-analyze-first-tooltip = Analyze this track first
+# The row's "+" button. $playlist: the active playlist's name.
+ui-track-row-add-to-tooltip = Add to { $playlist }
+ui-track-row-add-no-playlist-tooltip = Create and activate a playlist first, then add tracks to it.
+# The row's remove button in a playlist. $playlist: the playlist's name.
+ui-track-row-remove-from-tooltip = Remove from { $playlist }
+ui-track-row-remove-from-playlist-tooltip = Remove from playlist
 ui-track-row-play-from-here-tooltip = Play from here
 ui-track-row-waveform-preview-aria-label = waveform preview
 

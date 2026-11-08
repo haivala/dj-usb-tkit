@@ -2,6 +2,7 @@
 //! status, relocation and removal.
 
 use super::*;
+use crate::i18n::tr;
 
 pub(super) fn sanitize_source_roots(source_roots: Vec<String>) -> Vec<String> {
     let mut roots = Vec::<String>::new();
@@ -245,6 +246,27 @@ impl BackendService {
             })
             .collect();
         let folders: Vec<SourceFolder> = folders;
+        // The imported libraries whose chip can be switched: still found, and
+        // imported. Each is (switchable, switched on).
+        let libraries = [
+            (
+                detect_external_rekordbox_db_util().found
+                    && has_tracks_flagged(conn, "rekordbox_db_source")?,
+                sources.rekordbox_db,
+            ),
+            (
+                super::mixxx_import::detect_external_mixxx_db().found
+                    && has_tracks_flagged(conn, "mixxx_db_source")?,
+                sources.mixxx_db,
+            ),
+        ];
+        let libraries = libraries.iter().filter(|(switchable, _)| *switchable);
+        let enabled = folders
+            .iter()
+            .filter(|folder| folder.enabled && !folder.missing)
+            .count()
+            + libraries.clone().filter(|(_, on)| *on).count();
+        let total = folders.len() + libraries.count();
         let analyze_button_label = if folders.len() > 1 {
             "Analyze Libraries"
         } else {
@@ -256,6 +278,7 @@ impl BackendService {
             analyze_scanning_status: "Scanning library files...".to_string(),
             track_not_in_library_status:
                 "Track is not in the local library yet. Run Analyze Library first.".to_string(),
+            filter_status_text: tr::library_sources_filter_status(enabled, total).render(),
             rekordbox_db_enabled: sources.rekordbox_db,
             mixxx_db_enabled: sources.mixxx_db,
             ever_configured: sources.ever_configured(),
@@ -281,9 +304,13 @@ impl BackendService {
             sources.ever_configured = true;
             sources.save(&conn)?;
         }
+        let status_text = added
+            .is_empty()
+            .then(|| tr::library_folders_unchanged(sources.roots.len()).render());
         Ok(AddSourceFoldersData {
             sources: self.library_sources_data(&conn, &sources)?,
             added,
+            status_text,
         })
     }
 
@@ -410,6 +437,13 @@ impl BackendService {
         tx.commit()?;
         self.forget_source_folder_listings();
 
+        let unresolved = missing_at_new_root + conflicts;
+        let status_text = if unresolved > 0 {
+            tr::library_relocated_unresolved(updated, unresolved)
+        } else {
+            tr::library_relocated(updated)
+        }
+        .render();
         Ok(RelocateSourceRootData {
             old_root,
             new_root,
@@ -418,8 +452,9 @@ impl BackendService {
             unchanged,
             missing_at_new_root,
             conflicts,
-            unresolved: missing_at_new_root + conflicts,
+            unresolved,
             sources: self.library_sources_data(&conn, &sources)?,
+            status_text,
         })
     }
 
@@ -478,6 +513,7 @@ impl BackendService {
         Ok(RemoveSourceFolderData {
             sources: self.library_sources_data(&conn, &sources)?,
             removed,
+            status_text: tr::library_folder_removed(sources.roots.len(), removed).render(),
         })
     }
 }

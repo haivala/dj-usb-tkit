@@ -1,4 +1,4 @@
-import { counted } from "../../track_utils.mjs";
+import { t } from "../../ui_texts.mjs";
 import { catchErr, handleTrackAction, resolveRowActionTrack } from "../shared/track_actions.mjs";
 import { bindTrackSelection } from "../shared/track_selection.mjs";
 import { addSelectionToPlaylists } from "../shared/add_to_playlists.mjs";
@@ -29,22 +29,10 @@ export function bindLibraryEvents(ctx) {
   const folders = () => state.librarySources.folders;
   const folderAt = (index) => (Number.isInteger(index) ? folders()[index]?.path : undefined);
 
-  // "enabled/total" over the folder chips plus each imported library chip.
-  const emitSourceFilterCounts = () => {
-    const sources = state.librarySources;
-    const libraries = [
-      [state.externalRekordboxDbPath && state.rekordboxDbImported, sources.rekordboxDbEnabled],
-      [state.externalMixxxDbPath && state.mixxxDbImported, sources.mixxxDbEnabled],
-    ].filter(([available]) => !!available);
-    const enabled = sources.folders.filter((folder) => folder.enabled && !folder.missing).length
-      + libraries.filter(([, on]) => on).length;
-    emitStatus(`Source filters: ${enabled}/${sources.folders.length + libraries.length} enabled`);
-  };
-
   // A switch changed: the backend saved it and lists the library with it.
   const applySwitchedSources = async (sources) => {
     await applyLibrarySources(ctx, sources);
-    emitSourceFilterCounts();
+    emitStatus(sources.filterStatusText);
     await resetAndLoadLibraryTracks(state.libraryQuery);
   };
 
@@ -55,9 +43,9 @@ export function bindLibraryEvents(ctx) {
     if (!removedRoot) return;
     (async () => {
       const confirmed = await openConfirmDialog({
-        title: "Remove Source Folder",
-        message: `Remove source folder?\n\n${removedRoot}\n\nAll tracks from this folder will be removed from the library. Tracks that are in a local playlist will also be removed from those playlists. Tracks that are also inside another source folder stay in the library.`,
-        confirmLabel: "Remove"
+        title: t("ui-library-remove-folder-title"),
+        message: t("ui-library-remove-folder-confirm", { path: removedRoot }),
+        confirmLabel: t("ui-library-remove-folder")
       });
       if (!confirmed) return;
 
@@ -65,7 +53,7 @@ export function bindLibraryEvents(ctx) {
       await applyLibrarySources(ctx, result.sources);
       await resetAndLoadLibraryTracks(state.libraryQuery);
       await refreshCurrentPlaylistTracks();
-      emitStatus(`Source folders: ${folders().length} | removed ${counted(result.removed, "track")} from library`);
+      emitStatus(result.statusText);
     })().catch(catchErr(emitStatus));
   });
 
@@ -92,30 +80,31 @@ export function bindLibraryEvents(ctx) {
     pickSourceFolders()
       .then(async (picked) => {
         if (!picked.length) return;
-        let indexResult = null;
-        let added = [];
-        await withProgress("Loading media library", async (progress) => {
-          progress(20, "Saving source folders...");
+        // Nothing added: add_source_folders' status line; otherwise the scan's.
+        let statusText = "";
+        await withProgress(t("ui-library-add-folders-title"), async (progress) => {
+          progress(20, t("ui-library-add-folders-saving"));
           const result = await command("add_source_folders", { paths: picked });
-          added = result.added;
           await applyLibrarySources(ctx, result.sources);
-          if (!added.length) return;
+          if (!result.added.length) {
+            statusText = result.statusText;
+            return;
+          }
 
-          progress(45, "Indexing new files...");
-          indexResult = await command("scan_library", {
-            sourceRoots: added,
+          progress(45, t("ui-library-add-folders-indexing"));
+          const indexResult = await command("scan_library", {
+            sourceRoots: result.added,
             incremental: true
           });
+          statusText = indexResult.statusText;
 
-          progress(70, "Building track list...");
+          progress(70, t("ui-library-add-folders-building"));
           await resetAndLoadLibraryTracks(state.libraryQuery);
 
-          progress(85, "Refreshing playlist views...");
+          progress(85, t("ui-library-add-folders-refreshing"));
           await refreshCurrentPlaylistTracks();
         });
-        emitStatus(added.length
-          ? `Source folders: ${folders().length} | indexed ${counted(Number(indexResult?.indexed || 0), "track")}`
-          : `Source folders unchanged: ${folders().length}`);
+        emitStatus(statusText);
       })
       .catch(catchErr(emitStatus));
   });

@@ -4,13 +4,9 @@
   "M",
   "No active playlist",
   "Q",
-  "Reanalyze",
   "Total time: 0:00",
-  "Unknown",
   "aria-label: Play",
   "data-tooltip: Adds a ▶ memory cue (no hot cue) on the first beat, so the CDJ loads there instead of on cue A",
-  "data-tooltip: Create and activate a playlist first, then add tracks to it.",
-  "data-tooltip: Edit cue points & beat grid",
   "data-tooltip: Play",
   "data-tooltip: Reset waveform, BPM, key and first beat to a fresh analysis, replacing imported or edited values (cues are kept)",
   "data-tooltip: Show in folder: /music/one.mp3"

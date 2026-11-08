@@ -20,6 +20,7 @@ use std::path::Path;
 use crate::audio_format::{
     AudioFormat, UsbAudioFormat, UsbAudioFormatOfExtension, is_alac_file, is_player_extension,
 };
+use crate::i18n::tr;
 use crate::models::{FormatCompat, FormatCompatSeverity};
 use crate::service::usb_identity::UsbAudioFormats;
 use crate::wav_format::WavFormatIssue;
@@ -31,16 +32,14 @@ const BITS_LOSSLESS: [u8; 2] = [16, 24];
 
 impl FormatCompat {
     fn ok() -> Self {
-        Self {
-            severity: FormatCompatSeverity::Ok,
-            warning: None,
-        }
+        Self::default()
     }
 
     fn warn(message: &str) -> Self {
         Self {
             severity: FormatCompatSeverity::Warn,
             warning: Some(message.to_string()),
+            ..Self::default()
         }
     }
 
@@ -48,14 +47,83 @@ impl FormatCompat {
         Self {
             severity: FormatCompatSeverity::Autofix,
             warning: Some(message.to_string()),
+            ..Self::default()
         }
     }
+
+    /// Fills in the FMT badge and its tooltip: `details` (see
+    /// [`format_details`]), then the warning.
+    fn with_badge(mut self, format_ext: Option<&str>, details: &[String]) -> Self {
+        self.badge = format_badge(format_ext);
+        let details = (!details.is_empty()).then(|| details.join(" · "));
+        self.tooltip = match (details, &self.warning) {
+            (Some(details), Some(warning)) => Some(format!("{details} — {warning}")),
+            (details, warning) => details.or_else(|| warning.clone()),
+        };
+        self
+    }
+}
+
+/// The FMT badge's text for a file: its extension in capitals, or "Unknown".
+pub(crate) fn format_badge(format_ext: Option<&str>) -> String {
+    format_ext
+        .map(str::trim)
+        .filter(|ext| !ext.is_empty())
+        .map_or_else(
+            || tr::track_table_format_unknown().render(),
+            str::to_ascii_uppercase,
+        )
+}
+
+/// What the FMT column says about a file besides its format: `["44.1 kHz",
+/// "16-bit"]`, or the bitrate when there's no bit depth (`["320 kbps"]`).
+pub(crate) fn format_details(
+    sample_rate_hz: Option<u32>,
+    bit_depth: Option<u8>,
+    bitrate_kbps: Option<u32>,
+) -> Vec<String> {
+    let mut parts = Vec::new();
+    if let Some(rate) = sample_rate_hz.filter(|&rate| rate > 0) {
+        let khz = f64::from(rate) / 1000.0;
+        let khz = if khz.fract() == 0.0 {
+            format!("{khz:.0}")
+        } else {
+            format!("{khz:.1}")
+        };
+        parts.push(tr::track_table_format_sample_rate(khz).render());
+    }
+    if let Some(depth) = bit_depth.filter(|&depth| depth > 0) {
+        parts.push(tr::track_table_format_bit_depth(depth).render());
+    } else if let Some(bitrate) = bitrate_kbps.filter(|&rate| rate > 0) {
+        parts.push(tr::track_table_format_bitrate(bitrate).render());
+    }
+    parts
 }
 
 /// Verdict for a track's format. `wav_extensible_kind` is the stored
 /// `WavFormatIssue::as_db_str` value (`Track.wav_extensible_kind`), or `None`
 /// for non-WAV / clean WAV files.
 pub(crate) fn compute_format_compat(
+    format_ext: Option<&str>,
+    sample_rate_hz: Option<u32>,
+    bit_depth: Option<u8>,
+    bitrate_kbps: Option<u32>,
+    wav_extensible_kind: Option<&str>,
+) -> FormatCompat {
+    format_compat_verdict(
+        format_ext,
+        sample_rate_hz,
+        bit_depth,
+        bitrate_kbps,
+        wav_extensible_kind,
+    )
+    .with_badge(
+        format_ext,
+        &format_details(sample_rate_hz, bit_depth, bitrate_kbps),
+    )
+}
+
+fn format_compat_verdict(
     format_ext: Option<&str>,
     sample_rate_hz: Option<u32>,
     bit_depth: Option<u8>,
@@ -100,6 +168,14 @@ pub(crate) fn compute_format_compat(
 /// only read for an `.m4a` when the stick allows one of ALAC and AAC but not
 /// the other.
 pub(crate) fn compute_usb_format_compat(
+    format_ext: Option<&str>,
+    file_path: &Path,
+    formats: &UsbAudioFormats,
+) -> FormatCompat {
+    usb_format_compat_verdict(format_ext, file_path, formats).with_badge(format_ext, &[])
+}
+
+fn usb_format_compat_verdict(
     format_ext: Option<&str>,
     file_path: &Path,
     formats: &UsbAudioFormats,
@@ -231,6 +307,35 @@ mod tests {
             compute_format_compat(Some("mp3"), Some(44_100), Some(0), Some(320), None).severity,
             FormatCompatSeverity::Ok
         );
+    }
+
+    // The FMT cell shows these as they are: the badge, and a tooltip of the
+    // technical details followed by the warning.
+    #[test]
+    fn badge_and_tooltip_describe_the_file() {
+        let plain = compute_format_compat(Some(" wav "), Some(44_100), Some(16), None, None);
+        assert_eq!(plain.badge, "WAV");
+        assert_eq!(plain.tooltip.as_deref(), Some("44.1 kHz · 16-bit"));
+
+        let mp3 = compute_format_compat(Some("mp3"), Some(48_000), None, Some(320), None);
+        assert_eq!(mp3.tooltip.as_deref(), Some("48 kHz · 320 kbps"));
+
+        let warned = compute_format_compat(Some("flac"), Some(192_000), Some(24), None, None);
+        assert_eq!(
+            warned.tooltip.as_deref(),
+            Some("192 kHz · 24-bit — Outside FLAC support (16/24-bit, 44.1/48/88.2/96 kHz)")
+        );
+
+        let bare = compute_format_compat(Some("wav"), None, None, None, None);
+        assert_eq!(bare.tooltip, None);
+
+        let unknown = compute_format_compat(None, None, None, None, None);
+        assert_eq!(unknown.badge, "Unknown");
+        assert_eq!(unknown.tooltip.as_deref(), Some("Unlisted format"));
+
+        let usb =
+            compute_usb_format_compat(Some("mp3"), Path::new("a.mp3"), &UsbAudioFormats::default());
+        assert_eq!((usb.badge.as_str(), usb.tooltip), ("MP3", None));
     }
 
     #[test]

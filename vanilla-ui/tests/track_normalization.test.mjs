@@ -28,11 +28,3 @@ test("normalizeTrack passes backend fields through and adds the cover's asset UR
   assert.equal(normalized.artworkChecked, false);
   assert.equal(normalized.needsHydration, false);
 });
-
-test("normalizeTrack fills the display defaults for an untitled row", () => {
-  const normalized = normalizeTrack(CTX, { id: "2", title: "", artist: "" });
-  assert.equal(normalized.title, "Unknown Title");
-  assert.equal(normalized.artist, "Unknown Artist");
-  assert.equal(normalized.artworkUrl, "");
-});
-

@@ -289,7 +289,7 @@ function installScanAnalysisMock(page, opts = {}) {
         track.key = `${(Number(id.replace(/\D+/g, "")) % 12) + 1}A`;
         track.updatedAt = "2026-03-04T00:00:00Z";
         pieceEventsByPiece.bpm_key += 1;
-        emitPartial({ bpm: track.bpm, bpmAnalyzer: "mock-analyzer", key: track.key });
+        emitPartial({ bpm: track.bpm, bpmSourceText: "Analyzed with: mock-analyzer", key: track.key });
 
         analyzed += 1;
         if (isCountable(track)) {
@@ -310,6 +310,7 @@ function installScanAnalysisMock(page, opts = {}) {
           ...basePayload,
           bpm: track.bpm,
           bpmAnalyzer: "mock-analyzer",
+          bpmSourceText: "Analyzed with: mock-analyzer",
           key: track.key,
           durationMs: track.durationMs,
           artworkPath: track.artworkPath,
@@ -675,7 +676,7 @@ function installPagedMaterializeAnalyzeMock(page, opts = {}) {
         await sleep(Math.max(0, pieceDelayMs));
         row.bpm = 123;
         row.key = "8A";
-        emitPartial({ bpm: row.bpm, bpmAnalyzer: "mock-analyzer", key: row.key });
+        emitPartial({ bpm: row.bpm, bpmSourceText: "Analyzed with: mock-analyzer", key: row.key });
 
         analyzed += 1;
         if (isCountable(row)) {
@@ -696,6 +697,7 @@ function installPagedMaterializeAnalyzeMock(page, opts = {}) {
           ...basePayload,
           bpm: row.bpm,
           bpmAnalyzer: "mock-analyzer",
+          bpmSourceText: "Analyzed with: mock-analyzer",
           key: row.key,
           durationMs: row.durationMs,
           artworkPath: row.artworkPath,

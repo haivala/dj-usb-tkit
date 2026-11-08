@@ -352,6 +352,10 @@ fn scan_rekordbox_db_imports_updates_keeps_missing_and_reports_resource_warnings
         })
         .expect("scan master db");
     assert!(imported());
+    assert_eq!(
+        result.status_text,
+        "Desktop library import done: 2 new, 1 updated | 1 file not found (see event log)"
+    );
 
     assert_eq!(result.indexed, 2);
     assert_eq!(result.updated, 1);
@@ -918,6 +922,7 @@ pub(super) fn sample_track(id: &str, file_path: &str) -> Track {
         track_number: None,
         bpm: None,
         bpm_analyzer: None,
+        bpm_source_text: None,
         key: None,
         key_display: None,
         key_color: None,
@@ -2691,6 +2696,15 @@ fn relocate_source_root_replaces_the_folder_once_every_track_moved() {
     let partial = relocate();
     assert_eq!(partial.missing_at_new_root, 1);
     assert_eq!(
+        partial.status_text,
+        "Source relocated: 1 track path updated | 1 track still unresolved"
+    );
+    // "/music/other" is switched on but missing, so it counts as off.
+    assert_eq!(
+        partial.sources.filter_status_text,
+        "Source filters: 0/3 enabled"
+    );
+    assert_eq!(
         folders(&partial),
         [
             ("/music/other".to_string(), true),
@@ -2703,6 +2717,7 @@ fn relocate_source_root_replaces_the_folder_once_every_track_moved() {
     std::fs::write(new_root.path().join("left.mp3"), b"data").expect("write new file");
     let full = relocate();
     assert_eq!(full.missing_at_new_root, 0);
+    assert_eq!(full.status_text, "Source relocated: 1 track path updated");
     assert_eq!(
         folders(&full),
         [("/music/other".to_string(), true), (new_str.clone(), false)]
@@ -2945,6 +2960,10 @@ fn remove_source_folder_drops_it_and_deletes_its_tracks() {
         })
         .expect("remove source folder");
     assert_eq!(result.removed, 1);
+    assert_eq!(
+        result.status_text,
+        "Source folders: 1 | removed 1 track from library"
+    );
     let folders: Vec<&str> = result
         .sources
         .folders
@@ -3446,4 +3465,58 @@ fn resolve_playback_source_returns_none_for_blank_title_or_artist() {
         .expect("resolve playback source");
     assert_eq!(result.matched_by, crate::models::TrackMatch::NoMatch);
     assert!(result.resolved_path.is_none());
+}
+
+// The track tables show these as sent: the BPM pill's tooltip, and a title
+// and artist for a file that has none.
+#[test]
+fn track_rows_carry_the_bpm_source_and_unknown_title_texts() {
+    let (_dir, service) = test_service();
+    let conn = service.db.connect().expect("connect");
+    for (id, title, analyzer) in [
+        ("user", "", Some("user")),
+        ("mixxx", "Song", Some("mixxx")),
+        ("rekordbox", "Song", Some("rekordbox")),
+        ("analyzed", "Song", Some("stratum-v2")),
+        ("none", "Song", None),
+    ] {
+        insert_full_track(
+            &conn,
+            id,
+            title,
+            "",
+            &format!("/music/{id}.mp3"),
+            None,
+            None,
+            false,
+        );
+        conn.execute(
+            "UPDATE tracks SET bpm_analyzer = ?1 WHERE id = ?2",
+            params![analyzer, id],
+        )
+        .expect("set bpm analyzer");
+    }
+    let ids: Vec<String> = ["user", "mixxx", "rekordbox", "analyzed", "none"]
+        .map(String::from)
+        .to_vec();
+    let rows = super::library::track_rows(&conn, &ids).expect("track rows");
+    let texts: Vec<(&str, Option<&str>)> = rows
+        .iter()
+        .map(|track| (track.id.as_str(), track.bpm_source_text.as_deref()))
+        .collect();
+    assert_eq!(
+        texts,
+        [
+            ("analyzed", Some("Analyzed with: stratum-v2")),
+            ("mixxx", Some("From Mixxx")),
+            ("none", None),
+            ("rekordbox", Some("From rekordbox")),
+            ("user", Some("Manually set")),
+        ]
+    );
+    let untitled = rows.iter().find(|track| track.id == "user").expect("row");
+    assert_eq!(
+        (untitled.title.as_str(), untitled.artist.as_str()),
+        ("Unknown Title", "Unknown Artist")
+    );
 }

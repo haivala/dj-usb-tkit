@@ -937,6 +937,15 @@ impl BackendService {
         tx.commit()?;
 
         let warnings = importer.finish_warnings();
+        let status_text = match importer.not_found.len() {
+            0 => crate::i18n::tr::library_import_done_rekordbox(importer.indexed, importer.updated),
+            count => crate::i18n::tr::library_import_done_rekordbox_not_found(
+                importer.indexed,
+                importer.updated,
+                count,
+            ),
+        }
+        .render();
         Ok(ScanLibraryData {
             job_id: Uuid::now_v7().to_string(),
             indexed: importer.indexed,
@@ -945,6 +954,7 @@ impl BackendService {
             removed: 0,
             not_found: importer.not_found,
             warnings,
+            status_text,
         })
     }
 

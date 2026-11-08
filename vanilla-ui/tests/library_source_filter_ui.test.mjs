@@ -114,6 +114,7 @@ test("relocateSourceRoot shows the folders the backend answers with and reloads 
         missingAtNewRoot: 0,
         conflicts: 0,
         sources: sources([{ path: "/music/new" }]),
+        statusText: "Source relocated: 2 track paths updated",
       };
     },
     refreshCurrentPlaylistTracks: async () => { refreshedPlaylists += 1; },
@@ -128,7 +129,7 @@ test("relocateSourceRoot shows the folders the backend answers with and reloads 
   assert.equal(ctx.el.sourceChipsContainer.querySelector(".source-chip-path").textContent, "/music/new");
   assert.deepEqual(allowed, [["/music/new"]], "the new folder's covers can load");
   assert.equal(refreshedPlaylists, 1);
-  assert.ok(statuses.at(-1).includes("2 track paths updated"));
+  assert.equal(statuses.at(-1), "Source relocated: 2 track paths updated", "the backend's status line");
 });
 
 test("refreshLibrarySources draws what get_library_sources answers", async () => {
@@ -150,10 +151,11 @@ test("scanRekordboxDb reports success, failure, and structured warnings", async 
     indexed: 3,
     updated: 1,
     notFound: [],
-    warnings: []
+    warnings: [],
+    statusText: "Desktop library import done: 3 new, 1 updated"
   }));
   assert.equal(success.statuses[0], "Importing from desktop library...");
-  assert.ok(success.statuses.at(-1).startsWith("Desktop library import done:"), success.statuses.at(-1));
+  assert.equal(success.statuses.at(-1), "Desktop library import done: 3 new, 1 updated");
   assert.deepEqual(success.switched, [{ library: "rekordbox", enabled: true }]);
   assert.equal(success.ctx.state.librarySources.rekordboxDbEnabled, true);
 

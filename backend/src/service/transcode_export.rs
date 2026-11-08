@@ -25,6 +25,7 @@ use crate::error::BackendResult;
 use crate::models::{Track, TrackExportFile};
 
 use super::anlz::{atomic_write_bytes, transcode_bundle_file};
+use super::format_compat;
 use super::transcode::{
     file_facts, size_text, transcode_bundle_dir, transcode_export_bundle,
     transcode_waveform_bundle, write_transcode_waveform_bundle,
@@ -313,25 +314,12 @@ fn track_export_file(track: &Track, file: &ExportFile) -> Option<TrackExportFile
 /// A track's own file as the FMT column describes it: `"FLAC · 44.1 kHz ·
 /// 16-bit"`, `"MP3 · 44.1 kHz · 320 kbps"`.
 fn track_format_text(track: &Track) -> String {
-    let format = track
-        .format_ext
-        .as_deref()
-        .filter(|ext| !ext.is_empty())
-        .map_or_else(|| "Unknown".to_string(), str::to_ascii_uppercase);
-    let mut parts = vec![format];
-    if let Some(rate) = track.sample_rate_hz.filter(|&rate| rate > 0) {
-        let khz = f64::from(rate) / 1000.0;
-        parts.push(if khz.fract() == 0.0 {
-            format!("{khz:.0} kHz")
-        } else {
-            format!("{khz:.1} kHz")
-        });
-    }
-    if let Some(depth) = track.bit_depth.filter(|&depth| depth > 0) {
-        parts.push(format!("{depth}-bit"));
-    } else if let Some(bitrate) = track.bitrate_kbps.filter(|&rate| rate > 0) {
-        parts.push(format!("{bitrate} kbps"));
-    }
+    let mut parts = vec![format_compat::format_badge(track.format_ext.as_deref())];
+    parts.extend(format_compat::format_details(
+        track.sample_rate_hz,
+        track.bit_depth,
+        track.bitrate_kbps,
+    ));
     parts.join(" · ")
 }
 
