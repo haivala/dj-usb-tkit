@@ -259,12 +259,26 @@
     delete_usb_backup: (data) => ({ statusText: "mock delete status", ...data })
   };
 
+  // Every string the backend answered with: data and response text, which the test-language
+  // check (`uiTextCheck` in coverage-fixture.mjs) doesn't count as the UI's own text.
+  const answerStrings = new Set();
+  window.__e2eAnswerStrings = answerStrings;
+  function recordStrings(value, depth = 0) {
+    if (typeof value === "string") answerStrings.add(value);
+    else if (value && typeof value === "object" && depth < 12) {
+      for (const item of Object.values(value)) recordStrings(item, depth + 1);
+    }
+  }
+
   function shaped(invoke) {
     return async (command, payload) => {
-      const result = await invoke(command, payload);
+      const raw = await invoke(command, payload);
       const shape = SHAPES[command];
-      if (!shape || !result?.ok || !result.data || typeof result.data !== "object") return result;
-      return { ...result, data: shape(result.data) };
+      const result = !shape || !raw?.ok || !raw.data || typeof raw.data !== "object"
+        ? raw
+        : { ...raw, data: shape(raw.data) };
+      if (command !== "get_ui_texts") recordStrings(result);
+      return result;
     };
   }
 

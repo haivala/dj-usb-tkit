@@ -1,0 +1,13 @@
+{
+  "language": "en-XA",
+  "texts": {
+    "ui-common-selection-count": {
+      "one": "[{count} šééļééçţééð]",
+      "other": "[{count} šééļééçţééð]"
+    },
+    "ui-header-usb-name-badge-name-tooltip": "[Ñááɱéé ţĥîîš ðŕîîṽéé]",
+    "ui-header-usb-name-badge-not-connected": "[Ñööţ çööññééçţééð]",
+    "ui-header-usb-name-badge-rename-tooltip": "[Ŕééñááɱéé ţĥîîš ðŕîîṽéé]",
+    "ui-header-usb-name-badge-unnamed": "[ÛÛññááɱééð]"
+  }
+}

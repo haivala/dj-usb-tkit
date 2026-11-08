@@ -1,5 +1,5 @@
 # The text catalog: every user-facing text, in English. Other languages are
-# locales/<language>/backend.ftl with the same keys; a key missing there falls back
+# locales/<language>.ftl with the same keys; a key missing there falls back
 # to this file.
 #
 # Keys: [ui-]<area>-<thing>[-<variant>][-<attribute>], lowercase kebab-case.

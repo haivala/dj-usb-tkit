@@ -411,23 +411,33 @@ usb-not-for-ui = Not sent
     }
 
     /// The e2e specs' labels come from `vanilla-ui/tests/e2e/ui_texts.en.json` (loaded by
-    /// `coverage-fixture.mjs`). Rewrite it with `UPDATE_UI_TEXTS=1 cargo test -p backend --lib i18n::`.
+    /// `coverage-fixture.mjs`), and the test-language check's from `ui_texts.en-XA.json`.
+    /// Rewrite both with `UPDATE_UI_TEXTS=1 cargo test -p backend --lib i18n::`.
     #[test]
-    fn e2e_ui_texts_file_is_current() {
-        let path = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
-            .join("../vanilla-ui/tests/e2e/ui_texts.en.json");
-        let expected =
-            serde_json::to_string_pretty(&ui_texts_in(&ENGLISH_CATALOG)).expect("serialize") + "\n";
-        if std::env::var_os("UPDATE_UI_TEXTS").is_some() {
-            std::fs::write(&path, &expected).expect("write ui_texts.en.json");
-            return;
+    fn e2e_ui_texts_files_are_current() {
+        let (test_language, test_source) = generated::LANGUAGE_SOURCES
+            .iter()
+            .find(|(language, _)| *language == TEST_LANGUAGE)
+            .expect("debug builds have the test language");
+        let test_catalog = Catalog::parse(test_language, test_source).expect("generated");
+        for catalog in [&ENGLISH_CATALOG as &Catalog, &test_catalog] {
+            let path = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join(format!(
+                "../vanilla-ui/tests/e2e/ui_texts.{}.json",
+                catalog.language
+            ));
+            let expected =
+                serde_json::to_string_pretty(&ui_texts_in(catalog)).expect("serialize") + "\n";
+            if std::env::var_os("UPDATE_UI_TEXTS").is_some() {
+                std::fs::write(&path, &expected).expect("write the e2e texts file");
+                continue;
+            }
+            let actual = std::fs::read_to_string(&path).unwrap_or_default();
+            assert!(
+                actual == expected,
+                "{} is out of date: run `UPDATE_UI_TEXTS=1 cargo test -p backend --lib i18n::`",
+                path.display()
+            );
         }
-        let actual = std::fs::read_to_string(&path).unwrap_or_default();
-        assert!(
-            actual == expected,
-            "{} is out of date: run `UPDATE_UI_TEXTS=1 cargo test -p backend --lib i18n::`",
-            path.display()
-        );
     }
 
     #[test]

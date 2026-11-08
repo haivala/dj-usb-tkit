@@ -1,4 +1,4 @@
-import { test, expect } from "./coverage-fixture.mjs";
+import { test, expect, uiTextCheck, useTestLanguage } from "./coverage-fixture.mjs";
 
 // `usb`: a connected stick with one playlist of two tracks.
 function installSelectionMock(page, mockOpts = {}) {
@@ -919,4 +919,36 @@ test("Add to… from an app playlist copies its tracks to another playlist by id
   const request = await lastCall(page, "add_track_candidates_to_playlists");
   expect(request.playlistIds).toEqual(["pl-1"]);
   expect(request.tracks).toEqual([{ trackId: "t1" }, { trackId: "t2" }, { trackId: "t3" }]);
+});
+
+test("in the test language, the Library and playlist pages and their dialogs show only catalog text and data", async ({ page }) => {
+  await installSelectionMock(page);
+  await useTestLanguage(page);
+  await page.goto("/");
+  const check = uiTextCheck(page, "library-pages");
+  await expect(page.locator("#libraryTableBody .track-grid-row")).toHaveCount(3);
+  await check.collect();
+
+  await createPlaylist(page, "Warmup");
+  await tickRows(page, "libraryTableBody", 2);
+  await check.collect();
+
+  await page.locator(`${libraryBar} [data-selection-action="add-to"]`).click();
+  await expect(page.locator("#addToOverlay")).toBeVisible();
+  await check.collect();
+  await page.keyboard.press("Escape");
+  await expect(page.locator("#addToOverlay")).toBeHidden();
+
+  await page.locator(`${libraryBar} [data-selection-action="edit"]`).click();
+  await expect(page.locator("#groupEditOverlay")).toBeVisible();
+  await check.collect();
+  await page.keyboard.press("Escape");
+  await expect(page.locator("#groupEditOverlay")).toBeHidden();
+
+  await page.locator(`${libraryBar} [data-selection-action="add"]`).click();
+  await page.locator("#navPlaylistList .nav-playlist-item").first().click();
+  await expect(page.locator("#playlistTracksBody .track-grid-row")).toHaveCount(2);
+  await check.collect();
+
+  await check.expectAllowed();
 });

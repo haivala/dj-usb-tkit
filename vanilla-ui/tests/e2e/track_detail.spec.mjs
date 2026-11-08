@@ -1,4 +1,4 @@
-import { test, expect } from "./coverage-fixture.mjs";
+import { test, expect, uiTextCheck, useTestLanguage } from "./coverage-fixture.mjs";
 
 function installTrackDetailMock(page, opts = {}) {
   return page.addInitScript((opts) => {
@@ -2467,4 +2467,12 @@ test("cue button is disabled for an un-analyzed track", async ({ page }) => {
   await expect(
     page.locator('#libraryTableBody .waveform-cell [data-action="edit-track-detail"]')
   ).toBeDisabled();
+});
+
+test("in the test language, the cue editor shows only catalog text and data", async ({ page }) => {
+  await useTestLanguage(page);
+  await openCueEditor(page);
+  const check = uiTextCheck(page, "track-detail");
+  await check.collect();
+  await check.expectAllowed();
 });

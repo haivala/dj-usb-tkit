@@ -1,4 +1,4 @@
-import { test, expect } from "./coverage-fixture.mjs";
+import { test, expect, uiTextCheck, useTestLanguage } from "./coverage-fixture.mjs";
 
 // Counts the `fetch_usb_playlists` calls in `window.__playlistFetches`, and the
 // track table fetches in `window.__trackFetches`.
@@ -2013,4 +2013,77 @@ test("when the UI's texts can't be loaded, the page shows one line and the windo
   await expect(page.locator("body > .ui-texts-failed")).toHaveText(/couldn't load its texts/);
   await expect(page.locator("body > *")).toHaveCount(1);
   await expect.poll(() => page.evaluate(() => window.__showWindowCalls)).toBe(1);
+});
+
+test("in the test language, the USB pages, Backups, Event Log and Settings show only catalog text and data", async ({ page }) => {
+  await installTauriMock(page, "valid");
+  await page.addInitScript(() => {
+    const backend = window.__e2eBackend;
+    const invoke = window.__TAURI__.core.invoke;
+    const historyTracks = [{ title: "Session Opener", artist: "Made-up Artist", durationMs: 200000 }];
+    window.__TAURI__.core.invoke = async (command, payload) => {
+      if (command === "browse_source_files") return backend.ok({ total: 0, items: [] });
+      if (command === "get_transcode_folder") return backend.ok({ path: "/data/transcodes", isDefault: true });
+      if (command === "fetch_usb_histories") {
+        return backend.ok(backend.usbHistories({
+          items: [{ id: "hist-1", name: "HISTORY 001", createdAt: "2026-08-01", tracks: historyTracks }],
+          summaryText: "the histories summary"
+        }));
+      }
+      if (command === "fetch_usb_history_tracks") {
+        return backend.ok({ items: historyTracks, total: 1, listSummaryText: "the history list summary" });
+      }
+      if (command === "get_usb_player_menu_config") {
+        return backend.ok(backend.playerMenuConfig({
+          currentItems: [backend.playerMenuItem(132, { name: "PLAYLIST", removable: false, canMoveDown: true })],
+          availableItems: [backend.playerMenuItem(133, { name: "BPM" })]
+        }));
+      }
+      if (command === "list_usb_backups") {
+        return backend.ok({ summaryText: "the summary", emptyText: "none", items: [{ timestamp: "2020-01-01_00-00-00", timeText: "the time", reasonText: "the reason", detailText: "the detail", restoreConfirmText: "Restore it?", deleteConfirmText: "Delete it?", files: ["export.pdb"], reason: "export", sizeBytes: 1024, location: "usb" }] });
+      }
+      return invoke(command, payload);
+    };
+  });
+  await useTestLanguage(page);
+  await page.goto("/");
+  const check = uiTextCheck(page, "usb-pages");
+  await check.collect();
+
+  await connectUsb(page);
+  await page.locator("#usbHealthCard").evaluate((node) => { node.open = true; });
+  await check.collect();
+  await page.locator("#previewRepairsBtn").click();
+  await expect(page.locator("#diagRepairSummary")).toHaveText(/repairs 4 problems/);
+  await page.locator("#diagRepairTechnical summary").click();
+  await expect(page.locator("#diagRepairFixes")).toBeVisible();
+  await check.collect();
+
+  await page.locator('.nav-item[data-view="usb-playlists"]').click();
+  await page.locator('[data-usb-playlist="usb-1"]').click();
+  await expect(page.locator("#panel-usb-playlists")).toContainText("Track A");
+  await check.collect();
+
+  await page.locator('.nav-item[data-view="usb-history"]').click();
+  await expect(page.locator("#panel-usb-history")).toContainText("Session Opener");
+  await check.collect();
+
+  await page.locator('.nav-item[data-view="usb-player-menu"]').click();
+  await expect(page.locator("#panel-usb-player-menu")).toContainText("PLAYLIST");
+  await check.collect();
+
+  await page.locator('.nav-item[data-view="usb"]').click();
+  await page.locator("#usbBackupsBtn").click();
+  await expect(page.locator("#backupsSummary")).toHaveText("the summary");
+  await check.collect();
+
+  await page.locator("#eventLogBtn").click();
+  await expect(page.locator("#panel-event-log")).toHaveClass(/active/);
+  await check.collect();
+
+  await page.locator("#settingsBtn").click();
+  await expect(page.locator("#settingsDrawer")).toBeVisible();
+  await check.collect();
+
+  await check.expectAllowed();
 });
