@@ -41,6 +41,9 @@ stratum-dsp = "1"
 tauri = { version = "2", optional = true }
 reqwest = { version = "0.13", default-features = false, features = ["rustls-no-provider", "stream"], optional = true }
 flate2 = "1"
+# The text catalog (src/i18n.rs, locales/*.ftl). build.rs parses it with fluent-syntax.
+fluent-bundle = "0.16"
+unic-langid = "0.9"
 tar = { version = "0.4", optional = true }
 futures-util = { version = "0.3", optional = true }
 tauri-plugin-updater = { version = "2", optional = true }
@@ -52,6 +55,9 @@ alsa-sys = "0.3"
 
 [target.'cfg(unix)'.dependencies]
 libc = "0.2"
+
+[build-dependencies]
+fluent-syntax = "0.12"
 
 [dev-dependencies]
 tempfile = "3"

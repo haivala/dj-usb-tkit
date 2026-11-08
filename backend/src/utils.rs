@@ -191,7 +191,7 @@ pub fn warning_suffix(warning_count: usize) -> String {
     if warning_count == 0 {
         String::new()
     } else {
-        format!(" | ({})", counted(warning_count, "warning", "warnings"))
+        format!(" | ({})", crate::i18n::tr::usb_warning_count(warning_count))
     }
 }
 
