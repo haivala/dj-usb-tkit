@@ -7,6 +7,7 @@
 
 use super::run::{StagedPdb, write_back_both_or_neither, write_back_pdb_alone};
 use super::*;
+use crate::i18n::{Text, tr};
 use crate::models::{
     GetUsbBackgroundColorRequest, SetUsbBackgroundColorRequest, UsbBackgroundColorChip,
     UsbBackgroundColorData,
@@ -18,14 +19,23 @@ const MAX_BACKGROUND_COLOR: u8 = 8;
 
 /// The colors in rekordbox's order: the index is the stored value. The dots'
 /// colors are in `styles.css`.
-const BACKGROUND_COLORS: [&str; MAX_BACKGROUND_COLOR as usize + 1] = [
-    "Default", "Pink", "Red", "Orange", "Yellow", "Green", "Aqua", "Blue", "Purple",
+const BACKGROUND_COLORS: [fn() -> Text; MAX_BACKGROUND_COLOR as usize + 1] = [
+    tr::usb_background_color_default,
+    tr::usb_background_color_pink,
+    tr::usb_background_color_red,
+    tr::usb_background_color_orange,
+    tr::usb_background_color_yellow,
+    tr::usb_background_color_green,
+    tr::usb_background_color_aqua,
+    tr::usb_background_color_blue,
+    tr::usb_background_color_purple,
 ];
 
 fn background_color_name(color: u8) -> String {
     BACKGROUND_COLORS
         .get(usize::from(color))
-        .map_or_else(|| format!("colour {color}"), |name| (*name).to_string())
+        .map_or_else(|| tr::usb_background_color_numbered(color), |name| name())
+        .render()
 }
 
 /// A chip is selected only while both databases hold that color. With one
@@ -39,7 +49,7 @@ fn background_color_chips(pdb: Option<u8>, edb: Option<u8>) -> Vec<UsbBackground
         .zip(BACKGROUND_COLORS)
         .map(|(color, name)| UsbBackgroundColorChip {
             color,
-            label: name.to_string(),
+            label: name().render(),
             selected: selected == Some(color),
         })
         .collect()
@@ -51,11 +61,11 @@ fn background_color_note(pdb: Option<u8>, edb: Option<u8>, reason: Option<&str>)
         return reason.to_string();
     }
     match (pdb, edb) {
-        (Some(pdb), Some(edb)) if pdb != edb => format!(
-            "rekordbox set two colours: {} for older players (PDB), {} for rekordbox and the CDJ-3000 (eDB). Choosing a colour sets both.",
+        (Some(pdb), Some(edb)) if pdb != edb => tr::usb_background_color_two_colors(
             background_color_name(pdb),
             background_color_name(edb),
-        ),
+        )
+        .render(),
         _ => String::new(),
     }
 }
@@ -76,13 +86,11 @@ fn edb_background_color(conn: &rusqlite::Connection) -> Option<u8> {
 }
 
 /// Why a color can't be set, if it can't.
-const READ_ONLY_REFUSAL: &str = "This USB is read-only, so its background colour can't be changed.";
-
 fn background_color_refusal(has_a_place: bool, writable: bool) -> Option<String> {
     if !has_a_place {
-        Some("This USB has no place for a background colour.".to_string())
+        Some(tr::usb_background_color_no_place().render())
     } else if !writable {
-        Some(READ_ONLY_REFUSAL.to_string())
+        Some(tr::usb_background_color_read_only().render())
     } else {
         None
     }
@@ -156,12 +164,14 @@ impl BackendService {
         // The read above only looks; this one writes, so a read-only mount is
         // caught here instead of failing halfway through with its own error.
         if !crate::service::usb_utils::can_write_file_at(&usb_root) {
-            return Err(BackendError::Validation(READ_ONLY_REFUSAL.to_string()));
+            return Err(BackendError::Validation(
+                tr::usb_background_color_read_only().render(),
+            ));
         }
         let holds = |color: Option<u8>| color.is_none_or(|color| color == req.color);
         if holds(before.pdb_color) && holds(before.edb_color) {
             return Ok(UsbBackgroundColorData {
-                status_text: "Background colour unchanged".to_string(),
+                status_text: tr::usb_background_color_unchanged().render(),
                 warnings,
                 ..before
             });
@@ -220,10 +230,7 @@ impl BackendService {
 
         let mut data = read_background_colors(&usb_root, &pdb.bytes, &mut warnings);
         data.updated = true;
-        data.status_text = format!(
-            "Background colour set to {}",
-            background_color_name(req.color)
-        );
+        data.status_text = tr::usb_background_color_set(background_color_name(req.color)).render();
         data.warnings = warnings;
         Ok(data)
     }

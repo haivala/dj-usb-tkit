@@ -499,31 +499,37 @@ fn with_usb_selection_text(mut data: ValidateUsbRootData) -> ValidateUsbRootData
         .filter(|message| !message.is_empty())
         .collect::<Vec<_>>()
         .join(" | ");
-    let reason = if warning_text.is_empty() {
-        String::new()
-    } else {
-        format!(" ({warning_text})")
-    };
+    let warned = !warning_text.is_empty();
     data.can_initialize = data.normalized_root.is_some() && !data.valid && data.has_write_access;
     if data.valid {
-        data.status_text = format!(
-            "USB root selected: {}{reason}. Running diagnostics...",
-            data.normalized_root.as_deref().unwrap_or_default()
-        );
-    } else if data.can_initialize {
-        data.status_text =
-            "USB selected but not initialized. Click \"Initialize USB Structure\" to continue."
-                .to_string();
-        data.init_hint_text =
-            format!("USB folder is writable but missing External library structure{reason}");
-    } else {
-        let why = if warning_text.is_empty() {
-            "invalid USB root"
+        let path = data.normalized_root.as_deref().unwrap_or_default();
+        data.status_text = if warned {
+            tr::usb_root_selected_with_warnings(path, &warning_text)
         } else {
-            warning_text.as_str()
+            tr::usb_root_selected(path)
+        }
+        .render();
+    } else if data.can_initialize {
+        data.status_text = tr::usb_root_not_initialized().render();
+        data.init_hint_text = if warned {
+            tr::usb_root_init_hint_missing_structure_with_warnings(&warning_text)
+        } else {
+            tr::usb_root_init_hint_missing_structure()
+        }
+        .render();
+    } else {
+        let why = if warned {
+            warning_text.clone()
+        } else {
+            tr::usb_root_invalid_unknown().render()
         };
-        data.status_text = format!("USB root invalid: {why}");
-        data.init_hint_text = format!("USB folder is not ready for initialization{reason}");
+        data.status_text = tr::usb_root_invalid(why).render();
+        data.init_hint_text = if warned {
+            tr::usb_root_init_hint_not_ready_with_warnings(&warning_text)
+        } else {
+            tr::usb_root_init_hint_not_ready()
+        }
+        .render();
     }
     data
 }
@@ -1089,10 +1095,11 @@ impl BackendService {
 
         Ok(crate::models::SetUsbDeviceNameData {
             status_text: if updated {
-                format!("Drive renamed to {name}.")
+                tr::usb_drive_renamed(&name)
             } else {
-                "Drive name unchanged.".to_string()
-            },
+                tr::usb_drive_name_unchanged()
+            }
+            .render(),
             name,
             updated,
         })
@@ -1256,20 +1263,17 @@ impl BackendService {
         );
         let playlist_count = resolved.items.len();
         let track_total: usize = resolved.items.iter().map(|p| p.track_count).sum();
-        let summary_text = format!(
-            "{}, {}",
-            counted(playlist_count, "playlist", "playlists"),
-            counted(track_total, "track", "tracks"),
-        );
+        let summary_text = tr::usb_playlists_summary(playlist_count, track_total).render();
         let warning_count = logging::count_warnings(&resolved.warnings);
         Ok(FetchUsbPlaylistsData {
             items: resolved.items.iter().map(with_usb_playlist_texts).collect(),
             stats: resolved.stats.clone(),
             status_text: format!(
-                "USB playlists loaded: {playlist_count}{}",
+                "{}{}",
+                tr::usb_playlists_loaded(playlist_count),
                 warning_suffix(warning_count)
             ),
-            done_text: format!("Done — {summary_text}"),
+            done_text: tr::usb_playlists_done(&summary_text).render(),
             summary_text,
             warning_count,
             warnings: resolved.warnings.clone(),
@@ -1713,7 +1717,11 @@ impl BackendService {
         let warning_count = logging::count_warnings(&warnings);
         Ok(ReorderUsbPlaylistsData {
             reordered: patched.max(edb_updated),
-            status_text: format!("Playlist order saved{}", warning_suffix(warning_count)),
+            status_text: format!(
+                "{}{}",
+                tr::usb_playlists_order_saved(),
+                warning_suffix(warning_count)
+            ),
             warning_count,
             warnings,
         })
@@ -1943,7 +1951,8 @@ impl BackendService {
         let warning_count = logging::count_warnings(&warnings);
         Ok(RemoveUsbPlaylistData {
             status_text: format!(
-                "Removed USB playlist: {name} [db {removed_edb}, pdb {removed_pdb}]{}",
+                "{}{}",
+                tr::usb_playlists_removed(&name, removed_edb, removed_pdb),
                 warning_suffix(warning_count)
             ),
             playlist_name: name,

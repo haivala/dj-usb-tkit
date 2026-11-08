@@ -570,8 +570,8 @@ impl BackendService {
             engine_library_section,
             warnings: raw_warnings,
             duration_ms,
-            status_text: format!("Diagnostics complete ({duration_ms}ms)"),
-            duration_text: format!("Completed in {duration_ms}ms"),
+            status_text: crate::i18n::tr::diagnostics_complete(duration_ms).render(),
+            duration_text: crate::i18n::tr::diagnostics_duration(duration_ms).render(),
             status_label,
             health_text,
             playlist_usb_export_status,
@@ -739,11 +739,11 @@ impl BackendService {
         on_progress(95, 100, "USB: Finalizing parity report");
         note_stage("finalize", &mut raw_warnings);
         let duration_ms = start.elapsed().as_millis() as u64;
-        let status_label = match overall_status {
-            DiagStatus::Pass => "Parity PASS",
-            DiagStatus::Warn => "Parity WARN",
-            DiagStatus::Fail => "Parity FAIL",
-        };
+        let status_label = crate::i18n::tr::parity_status_label(match overall_status {
+            DiagStatus::Pass => crate::i18n::tr::diagnostics_status_pass(),
+            DiagStatus::Warn => crate::i18n::tr::diagnostics_status_warn(),
+            DiagStatus::Fail => crate::i18n::tr::diagnostics_status_fail(),
+        });
         Ok(RunUsbParityReportData {
             overall_status,
             overview,
@@ -753,9 +753,9 @@ impl BackendService {
             playlist_details,
             warnings: raw_warnings,
             duration_ms,
-            status_text: format!("Parity report complete ({duration_ms}ms)"),
-            duration_text: format!("Completed in {duration_ms}ms"),
-            status_label: status_label.to_string(),
+            status_text: crate::i18n::tr::parity_complete(duration_ms).render(),
+            duration_text: crate::i18n::tr::diagnostics_duration(duration_ms).render(),
+            status_label: status_label.render(),
         })
     }
 }

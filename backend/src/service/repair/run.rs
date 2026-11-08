@@ -1753,19 +1753,16 @@ impl BackendService {
         let (summary, overview) = repair_overview(&proposed_fixes, &unsupported_items);
         let duration_ms = start.elapsed().as_millis() as u64;
         let status_text = if req.apply {
-            format!(
-                "Repair apply complete: {} applied, {} failed ({duration_ms}ms){}",
-                outcomes.applied.len(),
-                outcomes.failed.len(),
-                if diagnostics_after_apply.is_some() {
-                    ". Diagnostics refreshed."
-                } else {
-                    ""
-                },
-            )
+            let (applied, failed) = (outcomes.applied.len(), outcomes.failed.len());
+            if diagnostics_after_apply.is_some() {
+                crate::i18n::tr::repair_apply_complete_refreshed(applied, failed, duration_ms)
+            } else {
+                crate::i18n::tr::repair_apply_complete(applied, failed, duration_ms)
+            }
         } else {
-            format!("Repair preview ready ({duration_ms}ms)")
-        };
+            crate::i18n::tr::repair_preview_ready(duration_ms)
+        }
+        .render();
         Ok(RepairUsbDiagnosticsData {
             summary,
             overview,

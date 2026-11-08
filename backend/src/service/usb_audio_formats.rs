@@ -11,6 +11,7 @@ use crate::audio_format::{
     UsbAudioFormat, UsbAudioFormatOfExtension, format_ext_from_path, m4a_is_alac_by_bit_depth,
 };
 use crate::error::{BackendError, BackendResult};
+use crate::i18n::tr;
 use crate::models::{
     GetUsbAudioFormatsRequest, SetUsbAudioFormatsRequest, UsbAudioFormatSetting,
     UsbAudioFormatsData,
@@ -38,17 +39,17 @@ fn formats_data(formats: &UsbAudioFormats, writable: bool) -> UsbAudioFormatsDat
                     label: format.label().to_string(),
                     allowed,
                     locked: !writable || last_ticked,
-                    tooltip: last_ticked.then(|| "At least one format stays ticked".to_string()),
+                    tooltip: last_ticked.then(|| tr::usb_audio_formats_last_ticked().render()),
                 }
             })
             .collect(),
         writable,
         hint: if writable {
-            "The formats export puts on this USB · drag to set the order of preference"
+            tr::usb_audio_formats_hint()
         } else {
-            "USB is read-only"
+            tr::usb_audio_formats_read_only()
         }
-        .to_string(),
+        .render(),
     }
 }
 

@@ -13,13 +13,14 @@
 //!
 //! Also backs the "Backups" UI panel: list / restore / delete.
 
-use crate::utils::{counted, plural};
+use crate::utils::plural;
 use std::collections::BTreeMap;
 use std::path::{Path, PathBuf};
 
 use rusqlite::{OptionalExtension, params};
 
 use crate::error::{BackendError, BackendResult};
+use crate::i18n::tr;
 use crate::models::{
     DeleteUsbBackupData, DeleteUsbBackupRequest, ListUsbBackupsData, ListUsbBackupsRequest,
     RefreshPlaylistExportStatusRequest, RestoreUsbBackupData, RestoreUsbBackupRequest,
@@ -268,16 +269,33 @@ fn read_backup_retention_count(conn: &rusqlite::Connection) -> u32 {
 /// What a backup holds, eDB first, for its dialogs and status lines. PDB and
 /// eDB are always backed up together, but one file can be missing.
 fn backup_files_label<'a>(stems: impl Iterator<Item = &'a str> + Clone) -> String {
-    let labels = [("exportLibrary", "eDB"), ("export", "PDB")]
-        .into_iter()
-        .filter(|(stem, _)| stems.clone().any(|file_stem| file_stem == *stem))
-        .map(|(_, label)| label)
-        .collect::<Vec<_>>();
-    if labels.is_empty() {
-        "Backup".to_string()
-    } else {
-        labels.join(" and ")
+    let has = |stem: &str| stems.clone().any(|file_stem| file_stem == stem);
+    match (has("exportLibrary"), has("export")) {
+        (true, true) => tr::backups_files_both(),
+        (true, false) => tr::backups_files_edb(),
+        (false, true) => tr::backups_files_pdb(),
+        (false, false) => tr::backups_files_none(),
     }
+    .render()
+}
+
+/// Why a backup was taken, as the list shows it. The sidecar keeps the English
+/// reason the operation passed (`backup_usb_databases_with_retention`); one not
+/// listed here shows as it is.
+fn backup_reason_text(reason: &str) -> String {
+    match reason {
+        "Before export" => tr::backups_reason_export(),
+        "Before export (mirror)" => tr::backups_reason_export_mirror(),
+        "Before export (additive)" => tr::backups_reason_export_additive(),
+        "Before playlist reorder" => tr::backups_reason_playlist_reorder(),
+        "Before playlist removal" => tr::backups_reason_playlist_removal(),
+        "Before menu update" => tr::backups_reason_menu_update(),
+        "Before background color change" => tr::backups_reason_background_color(),
+        "Before repair" => tr::backups_reason_repair(),
+        "Before restore" => tr::backups_reason_restore(),
+        other => return other.to_string(),
+    }
+    .render()
 }
 
 /// A backup's size, with a decimal: these are small and close together.
@@ -296,13 +314,13 @@ fn backup_size_text(bytes: u64) -> String {
 /// "2.5 MB · On USB · 4 playlists". Older backups have no playlist count.
 fn backup_detail_text(size_bytes: u64, location: &str, playlist_count: Option<usize>) -> String {
     let location = if location == "usb" {
-        "On USB"
+        tr::backups_on_usb()
     } else {
-        "On this computer"
+        tr::backups_on_computer()
     };
-    let mut parts = vec![backup_size_text(size_bytes), location.to_string()];
+    let mut parts = vec![backup_size_text(size_bytes), location.render()];
     if let Some(count) = playlist_count {
-        parts.push(counted(count, "playlist", "playlists"));
+        parts.push(tr::backups_playlists(count).render());
     }
     parts.join(" · ")
 }
@@ -362,13 +380,10 @@ fn entries_by_timestamp(dirs: &[(PathBuf, &str)]) -> Vec<UsbBackupEntry> {
                 reason_text: reason
                     .as_deref()
                     .filter(|reason| !reason.is_empty())
-                    .unwrap_or("—")
-                    .to_string(),
+                    .map_or_else(|| "—".to_string(), backup_reason_text),
                 detail_text: backup_detail_text(size_bytes, location, playlist_count),
-                restore_confirm_text: format!(
-                    "Restore {label} from the backup taken at {time_text}? The current files will themselves be backed up first."
-                ),
-                delete_confirm_text: format!("Delete this {label} backup permanently?"),
+                restore_confirm_text: tr::backups_restore_confirm(&label, &time_text).render(),
+                delete_confirm_text: tr::backups_delete_confirm(&label).render(),
                 time_text,
                 timestamp,
                 location: location.to_string(),
@@ -470,8 +485,8 @@ impl BackendService {
         }
         let items = entries_by_timestamp(&dirs);
         Ok(ListUsbBackupsData {
-            summary_text: counted(items.len(), "backup", "backups"),
-            empty_text: "No backups yet.".to_string(),
+            summary_text: tr::backups_summary(items.len()).render(),
+            empty_text: tr::backups_empty().render(),
             items,
         })
     }
@@ -561,7 +576,7 @@ impl BackendService {
         let restored_label = backup_files_label(files.iter().map(|(stem, _)| stem.as_str()));
         Ok(RestoreUsbBackupData {
             restored: true,
-            status_text: format!("Restored {restored_label} from backup"),
+            status_text: tr::backups_restored(&restored_label).render(),
             playlist_usb_export_status,
         })
     }
@@ -593,7 +608,7 @@ impl BackendService {
         }
         Ok(DeleteUsbBackupData {
             deleted: true,
-            status_text: format!("Deleted {label} backup"),
+            status_text: tr::backups_deleted(&label).render(),
         })
     }
 }

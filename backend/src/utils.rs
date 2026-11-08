@@ -211,12 +211,13 @@ pub fn format_byte_size(bytes: u64) -> String {
 /// "30 tracks · 412 MB" above a USB track table. The size is left out when no
 /// track in the list has a known size.
 pub fn track_list_summary(track_count: usize, size_bytes: u64) -> String {
-    let tracks = counted(track_count, "track", "tracks");
+    use crate::i18n::tr;
     if size_bytes > 0 {
-        format!("{tracks} · {}", format_byte_size(size_bytes))
+        tr::track_list_summary_size(track_count, format_byte_size(size_bytes))
     } else {
-        tracks
+        tr::track_list_summary(track_count)
     }
+    .render()
 }
 
 // ---------------------------------------------------------------------------

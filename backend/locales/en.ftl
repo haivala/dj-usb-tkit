@@ -29,7 +29,48 @@ usb-warning-count = { $count ->
    *[other] { $count } warnings
 }
 
+# The status line after choosing a USB folder that's ready. $path: the folder.
+usb-root-selected = USB root selected: { $path }. Running diagnostics...
+# The same, with what the check noticed. $warnings: the warnings, joined with " | ".
+usb-root-selected-with-warnings = USB root selected: { $path } ({ $warnings }). Running diagnostics...
+# The status line for a writable folder without the rekordbox structure, and the hint beside Initialize.
+usb-root-not-initialized = USB selected but not initialized. Click "Initialize USB Structure" to continue.
+usb-root-init-hint-missing-structure = USB folder is writable but missing External library structure
+# $warnings: what the check found, joined with " | ".
+usb-root-init-hint-missing-structure-with-warnings = USB folder is writable but missing External library structure ({ $warnings })
+# The status line for a folder that can't be used, and the hint beside Initialize.
+# $reason: what the check found, or usb-root-invalid-unknown.
+usb-root-invalid = USB root invalid: { $reason }
+usb-root-invalid-unknown = invalid USB root
+usb-root-init-hint-not-ready = USB folder is not ready for initialization
+# $warnings: what the check found, joined with " | ".
+usb-root-init-hint-not-ready-with-warnings = USB folder is not ready for initialization ({ $warnings })
+# The status line after Initialize USB Structure.
+usb-initialized = USB initialized
+# The status lines after naming the drive. $name: the new name.
+usb-drive-renamed = Drive renamed to { $name }.
+usb-drive-name-unchanged = Drive name unchanged.
+
 ## usb-playlists
+
+# The USB Playlists panel's totals. $playlists: the stick's playlists. $tracks: their tracks together.
+usb-playlists-summary = { $playlists ->
+    [one] { $playlists } playlist
+   *[other] { $playlists } playlists
+}, { $tracks ->
+    [one] { $tracks } track
+   *[other] { $tracks } tracks
+}
+# The status line after reading the stick's playlists; a warning count may follow.
+# $count: how many playlists were read.
+usb-playlists-loaded = USB playlists loaded: { $count }
+# The progress bar when the read finishes. $summary: usb-playlists-summary.
+usb-playlists-done = Done — { $summary }
+# The status line after reordering the stick's playlists; a warning count may follow.
+usb-playlists-order-saved = Playlist order saved
+# The status line after removing a playlist from the stick; a warning count may follow.
+# $name: the playlist. $edb, $pdb: the rows removed from each database.
+usb-playlists-removed = Removed USB playlist: { $name } [db { $edb }, pdb { $pdb }]
 
 # The status line when a USB playlist is clicked.
 # $name: the playlist's name. $count: how many tracks it has.
@@ -58,6 +99,84 @@ usb-history-summary = { $sessions ->
 # $sessions: how many sessions were read.
 usb-history-loaded = USB histories loaded: { $sessions }
 
+## usb-player-menu
+
+# Status lines after reading or changing the player menu.
+usb-player-menu-loaded = Player menu loaded
+usb-player-menu-updated = Player menu updated
+usb-player-menu-unchanged = Player menu unchanged
+# A menu item the databases give no name. $kind: its kind number.
+usb-player-menu-unnamed = Menu { $kind }
+
+## usb-background-color
+
+# The background colours rekordbox offers, as the chips name them.
+usb-background-color-default = Default
+usb-background-color-pink = Pink
+usb-background-color-red = Red
+usb-background-color-orange = Orange
+usb-background-color-yellow = Yellow
+usb-background-color-green = Green
+usb-background-color-aqua = Aqua
+usb-background-color-blue = Blue
+usb-background-color-purple = Purple
+# A colour number with no name. $color: the number.
+usb-background-color-numbered = colour { $color }
+# The note when the two databases hold different colours. $pdb, $edb: the colours' names.
+usb-background-color-two-colors = rekordbox set two colours: { $pdb } for older players (PDB), { $edb } for rekordbox and the CDJ-3000 (eDB). Choosing a colour sets both.
+# The note when no colour can be set.
+usb-background-color-no-place = This USB has no place for a background colour.
+usb-background-color-read-only = This USB is read-only, so its background colour can't be changed.
+# Status lines after choosing a colour. $color: its name.
+usb-background-color-set = Background colour set to { $color }
+usb-background-color-unchanged = Background colour unchanged
+
+## usb-audio-formats
+
+# The USB audio formats list's hint, and its hint when the stick can't be written.
+usb-audio-formats-hint = The formats export puts on this USB · drag to set the order of preference
+usb-audio-formats-read-only = USB is read-only
+# The tooltip of the only ticked format, which can't be unticked.
+usb-audio-formats-last-ticked = At least one format stays ticked
+
+## backups
+
+# The Backups list's count. $count: how many backups.
+backups-summary = { $count ->
+    [one] { $count } backup
+   *[other] { $count } backups
+}
+backups-empty = No backups yet.
+# What a backup holds, for the texts below.
+backups-files-both = eDB and PDB
+backups-files-edb = eDB
+backups-files-pdb = PDB
+backups-files-none = Backup
+# A backup's details: where it is, and the playlists the stick had.
+backups-on-usb = On USB
+backups-on-computer = On this computer
+# $count: the stick's playlists when the backup was taken.
+backups-playlists = { $count ->
+    [one] { $count } playlist
+   *[other] { $count } playlists
+}
+# The dialogs before restoring and deleting. $files: backups-files-*. $time: when it was taken.
+backups-restore-confirm = Restore { $files } from the backup taken at { $time }? The current files will themselves be backed up first.
+backups-delete-confirm = Delete this { $files } backup permanently?
+# Status lines after restoring and deleting. $files: backups-files-*.
+backups-restored = Restored { $files } from backup
+backups-deleted = Deleted { $files } backup
+# Why a backup was taken, as the list shows it.
+backups-reason-export = Before export
+backups-reason-export-mirror = Before export (mirror)
+backups-reason-export-additive = Before export (additive)
+backups-reason-playlist-reorder = Before playlist reorder
+backups-reason-playlist-removal = Before playlist removal
+backups-reason-menu-update = Before menu update
+backups-reason-background-color = Before background color change
+backups-reason-repair = Before repair
+backups-reason-restore = Before restore
+
 ## diagnostics
 
 # The badge on the USB diagnostics report, for its overall result.
@@ -68,6 +187,117 @@ diagnostics-status-fail = FAIL
 diagnostics-health-good = USB health: good
 diagnostics-health-warnings = USB health: warnings
 diagnostics-health-issues = USB health: issues found
+# The status line after diagnostics, and the report's header. $ms: how long it took, in milliseconds.
+diagnostics-complete = Diagnostics complete ({ $ms }ms)
+diagnostics-duration = Completed in { $ms }ms
+# The same for the parity report. $ms: how long it took, in milliseconds.
+parity-complete = Parity report complete ({ $ms }ms)
+# The parity report's badge. $status: diagnostics-status-pass, -warn or -fail.
+parity-status-label = Parity { $status }
+
+## repair
+
+# The status line when the repair preview is ready. $ms: how long it took, in milliseconds.
+repair-preview-ready = Repair preview ready ({ $ms }ms)
+# The status line after applying fixes. $applied, $failed: the fixes. $ms: how long it took.
+repair-apply-complete = Repair apply complete: { $applied } applied, { $failed } failed ({ $ms }ms)
+# The same, when diagnostics ran again after the fixes.
+repair-apply-complete-refreshed = Repair apply complete: { $applied } applied, { $failed } failed ({ $ms }ms). Diagnostics refreshed.
+
+## export
+
+# The playlist's export button with a USB selected, and its tooltip. $dir: the drive's name.
+export-button = Export to USB: { $dir }
+export-button-no-dir = Export to USB
+export-button-tooltip = Export current playlist to selected USB
+# The same when the USB already has a playlist of this name, so export appends to it.
+# $playlist: the playlist's name. $dir: the drive's name.
+export-button-append = Append to ({ $playlist }) on USB: ({ $dir })
+export-button-append-no-dir = Append to ({ $playlist }) on USB
+export-button-append-tooltip = Append current playlist tracks to existing USB playlist "{ $playlist }"
+# The export button with no USB selected, and its tooltip.
+export-button-no-usb = Select USB first
+export-button-no-usb-tooltip = Select a valid USB folder first
+# The sidebar mark: with a USB selected that has this playlist, and with none selected for one exported before.
+export-mark-on-usb = On this USB
+export-mark-exported = Exported to USB
+# The playlist heading's line about what an export would copy, its parts joined with " · ".
+# $count: the tracks to copy. $total: the playlist's tracks.
+export-space-to-copy = { $count } of { $total ->
+    [one] { $total } track
+   *[other] { $total } tracks
+} to copy
+export-space-all-on-usb = All tracks on USB
+# The playlist heading's line about the USB audio formats, its parts joined with " · ".
+# $count: the tracks the export converts.
+export-format-convert = { $count ->
+    [one] { $count } track
+   *[other] { $count } tracks
+} will be converted on export
+# $count: the tracks the export converts. $format: the format they're converted to, such as MP3 320.
+export-format-convert-to = { $count ->
+    [one] { $count } track
+   *[other] { $count } tracks
+} will be converted to { $format } on export
+# $count: the tracks the export refuses.
+export-format-refused = { $count ->
+    [one] { $count } track
+   *[other] { $count } tracks
+} can't go on this USB; export is blocked
+# $count: the tracks the export refuses. $format: their format, such as FLAC.
+export-format-refused-kind = { $count ->
+    [one] { $count } { $format } track
+   *[other] { $count } { $format } tracks
+} can't go on this USB; export is blocked
+# $size: the free space, such as 27.0 GB.
+export-space-free = { $size } free on USB
+# Before the line when the export doesn't fit. $line: the line.
+export-space-does-not-fit = Doesn't fit: { $line }
+# The status line after an export. $playlist: its name. $count: the tracks exported.
+# $skipped: the tracks left out. $warnings: a warning count (" | (2 warnings)") or nothing.
+# $mode: export-sync-mirror or export-sync-additive.
+export-complete = Export complete: { $playlist } - { $count ->
+    [one] { $count } track
+   *[other] { $count } tracks
+}, { $skipped } skipped{ $warnings } [sync: { $mode }]
+export-sync-mirror = mirror
+export-sync-additive = additive
+# Status lines when an export is refused.
+# $required, $available: sizes, such as 1.2 GB.
+export-refused-no-space = Export blocked: not enough free space on the USB drive — need about { $required }, { $available } free.
+# $count: the tracks in a format the USB's formats don't allow.
+export-refused-formats = Export blocked: { $count ->
+    [one] { $count } track
+   *[other] { $count } tracks
+} in a format this USB's formats don't allow, and only lossless files can be converted. See Event Log for details.
+# $missing: the tracks without analysis files. $total: the playlist's tracks.
+export-refused-analysis-files = Export blocked: the analysis files of { $missing } of { $total ->
+    [one] { $total } track
+   *[other] { $total } tracks
+} are missing. Select them and use Reanalyze.
+# $missing: the tracks not analyzed. $total: the playlist's tracks.
+export-refused-not-analyzed = Export blocked: { $missing } of { $total ->
+    [one] { $total } track
+   *[other] { $total } tracks
+} not analyzed yet. Use Analyze Missing Tracks.
+export-refused-read-only = USB is read-only. Remount as read-write before export.
+# $folder: the missing source folder.
+export-refused-source-missing = Export blocked: source folder is missing: { $folder }. Relocate or remove it first.
+export-refused-manifest = Export blocked: manifest invariant check failed. See Event Log for details.
+export-refused-manifest-after-prune = Export finished with errors: the stale-file prune removed a file the exported playlist still references — the USB databases were written; restore from the pre-export backup. See Event Log for details.
+
+## track-list
+
+# A track list's heading: its tracks, and their size when known.
+# $count: the tracks. $size: their size, such as 412 MB.
+track-list-summary = { $count ->
+    [one] { $count } track
+   *[other] { $count } tracks
+}
+track-list-summary-size = { $count ->
+    [one] { $count } track
+   *[other] { $count } tracks
+} · { $size }
 
 ## update
 

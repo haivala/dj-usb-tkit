@@ -141,7 +141,7 @@ pub(super) fn load_t17_encoded_rows(
 fn player_menu_label(name: &str, kind: u32) -> String {
     let name = name.trim();
     if name.is_empty() {
-        format!("Menu {kind}")
+        crate::i18n::tr::usb_player_menu_unnamed(kind).render()
     } else {
         name.to_string()
     }
@@ -567,7 +567,7 @@ impl BackendService {
             ));
         }
         Ok(GetUsbPlayerMenuConfigData {
-            status_text: "Player menu loaded".to_string(),
+            status_text: crate::i18n::tr::usb_player_menu_loaded().render(),
             current_items,
             available_items,
             warnings,
@@ -634,7 +634,7 @@ impl BackendService {
             // Nothing to write (and no backup to make).
             return Ok(UpdateUsbPlayerMenuConfigData {
                 updated: false,
-                status_text: "Player menu unchanged".to_string(),
+                status_text: crate::i18n::tr::usb_player_menu_unchanged().render(),
                 current_items: before_current,
                 available_items: before_available,
                 warnings,
@@ -779,11 +779,11 @@ impl BackendService {
         Ok(UpdateUsbPlayerMenuConfigData {
             updated,
             status_text: if updated {
-                "Player menu updated"
+                crate::i18n::tr::usb_player_menu_updated()
             } else {
-                "Player menu unchanged"
+                crate::i18n::tr::usb_player_menu_unchanged()
             }
-            .to_string(),
+            .render(),
             current_items,
             available_items,
             warnings,

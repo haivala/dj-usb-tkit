@@ -258,6 +258,15 @@ impl ManifestCheckPhase {
         }
     }
 
+    /// The status line, the error's message with a pointer to the Event Log.
+    fn status_text(self) -> String {
+        match self {
+            Self::BeforeDbWrite => tr::export_refused_manifest(),
+            Self::AfterPrune => tr::export_refused_manifest_after_prune(),
+        }
+        .render()
+    }
+
     fn error_message(self) -> &'static str {
         match self {
             Self::BeforeDbWrite => "Export blocked: manifest invariant check failed",
@@ -411,7 +420,7 @@ fn run_manifest_invariant_check(
         phase.error_message().to_string(),
         json!({
             "validationType": phase.validation_type(),
-            "statusText": format!("{}. See Event Log for details.", phase.error_message()),
+            "statusText": phase.status_text(),
             "issueCount": issues.total,
             "issues": issues.samples,
         }),
@@ -583,23 +592,21 @@ fn export_space_text(
 ) -> String {
     let mut parts = if tracks_to_copy > 0 {
         vec![
-            format!(
-                "{tracks_to_copy} of {} to copy",
-                counted(list_track_count, "track", "tracks")
-            ),
+            tr::export_space_to_copy(tracks_to_copy, list_track_count).render(),
             format_byte_size(bytes_to_copy),
         ]
     } else {
-        vec!["All tracks on USB".to_string()]
+        vec![tr::export_space_all_on_usb().render()]
     };
     if let Some(available) = available_bytes {
-        parts.push(format!("{} free on USB", format_byte_size(available)));
+        parts.push(tr::export_space_free(format_byte_size(available)).render());
     }
-    format!(
-        "{}{}",
-        if fits { "" } else { "Doesn't fit: " },
-        parts.join(" · ")
-    )
+    let line = parts.join(" · ");
+    if fits {
+        line
+    } else {
+        tr::export_space_does_not_fit(line).render()
+    }
 }
 
 #[cfg(test)]
@@ -664,25 +671,18 @@ fn format_notice(convert: &[String], refused: &[String]) -> (Option<String>, boo
     };
     let mut parts = Vec::new();
     if !convert.is_empty() {
-        let to = shared(convert)
-            .map(|label| format!(" to {label}"))
-            .unwrap_or_default();
-        parts.push(format!(
-            "{} will be converted{to} on export",
-            counted(convert.len(), "track", "tracks")
-        ));
+        parts.push(match shared(convert) {
+            Some(label) => tr::export_format_convert_to(convert.len(), label),
+            None => tr::export_format_convert(convert.len()),
+        });
     }
     if !refused.is_empty() {
-        let what = match shared(refused) {
-            Some(label) => format!(
-                "{} {label} {}",
-                refused.len(),
-                crate::utils::plural(refused.len(), "track", "tracks")
-            ),
-            None => counted(refused.len(), "track", "tracks"),
-        };
-        parts.push(format!("{what} can't go on this USB; export is blocked"));
+        parts.push(match shared(refused) {
+            Some(label) => tr::export_format_refused_kind(refused.len(), label),
+            None => tr::export_format_refused(refused.len()),
+        });
     }
+    let parts: Vec<String> = parts.iter().map(|part| part.render()).collect();
     (
         (!parts.is_empty()).then(|| parts.join(" · ")),
         !refused.is_empty(),
@@ -725,7 +725,8 @@ fn insufficient_space_error(
         format_bytes(required),
         format_bytes(available),
     );
-    let status_text = format!("{message}.");
+    let status_text =
+        tr::export_refused_no_space(format_bytes(required), format_bytes(available)).render();
     BackendError::ValidationWithDetails(
         message,
         json!({
@@ -752,7 +753,7 @@ fn refused_formats_error(refused: Vec<String>) -> BackendError {
         format!("{what}: {}", refused.join(", ")),
         json!({
             "validationType": "usb_audio_format_refused",
-            "statusText": format!("{what}. See Event Log for details."),
+            "statusText": tr::export_refused_formats(refused.len()).render(),
             "tracks": refused,
         }),
     )
@@ -808,17 +809,15 @@ fn ensure_playlist_tracks_analysis_ready(
     if missing == 0 {
         return Ok(());
     }
-    let of_total = format!("{missing} of {}", counted(total, "track", "tracks"));
     // Analyzed tracks whose analysis files aren't there (e.g. a USB-side path
     // the target stick doesn't hold): Analyze Missing Tracks skips them,
     // Reanalyze writes new files.
     let status_text = if missing_analysis_bundle == missing {
-        format!(
-            "Export blocked: the analysis files of {of_total} are missing. Select them and use Reanalyze."
-        )
+        tr::export_refused_analysis_files(missing, total)
     } else {
-        format!("Export blocked: {of_total} not analyzed yet. Use Analyze Missing Tracks.")
-    };
+        tr::export_refused_not_analyzed(missing, total)
+    }
+    .render();
     Err(BackendError::ValidationWithDetails(
         format!(
             "Export blocked: {missing}/{total} playlist tracks are missing required analysis (waveform, bpm, duration, DAT/EXT files); run analysis first"
@@ -929,20 +928,22 @@ pub(crate) fn usb_drive_label(usb_root: &str) -> Option<String> {
 /// same-named USB playlist rather than a fresh write.
 fn export_button_text(locks_reorder: bool, playlist_name: &str, usb_dir: Option<&str>) -> String {
     match (locks_reorder, usb_dir) {
-        (true, Some(dir)) => format!("Append to ({playlist_name}) on USB: ({dir})"),
-        (true, None) => format!("Append to ({playlist_name}) on USB"),
-        (false, Some(dir)) => format!("Export to USB: {dir}"),
-        (false, None) => "Export to USB".to_string(),
+        (true, Some(dir)) => tr::export_button_append(playlist_name, dir),
+        (true, None) => tr::export_button_append_no_dir(playlist_name),
+        (false, Some(dir)) => tr::export_button(dir),
+        (false, None) => tr::export_button_no_dir(),
     }
+    .render()
 }
 
 /// Tooltip paired with `export_button_text`.
 fn export_button_title(locks_reorder: bool, playlist_name: &str) -> String {
     if locks_reorder {
-        format!("Append current playlist tracks to existing USB playlist \"{playlist_name}\"")
+        tr::export_button_append_tooltip(playlist_name)
     } else {
-        "Export current playlist to selected USB".to_string()
+        tr::export_button_tooltip()
     }
+    .render()
 }
 
 /// Join every local playlist against the set of playlist names already known
@@ -972,17 +973,17 @@ pub(crate) fn compute_playlist_usb_export_status(
                 )
             } else {
                 (
-                    "Select USB first".to_string(),
-                    "Select a valid USB folder first".to_string(),
+                    tr::export_button_no_usb().render(),
+                    tr::export_button_no_usb_tooltip().render(),
                 )
             };
             let marked = if usb_root.is_some() {
-                same_name_exists_on_usb.then_some("On this USB")
+                same_name_exists_on_usb.then(tr::export_mark_on_usb)
             } else {
                 playlist
                     .last_exported_at
                     .is_some()
-                    .then_some("Exported to USB")
+                    .then(tr::export_mark_exported)
             };
             PlaylistUsbExportStatus {
                 playlist_id: playlist.id.clone(),
@@ -990,7 +991,7 @@ pub(crate) fn compute_playlist_usb_export_status(
                 usb_selected: usb_root.is_some(),
                 same_name_exists_on_usb,
                 locks_reorder,
-                mark_label: marked.map(str::to_string),
+                mark_label: marked.map(|text| text.render()),
                 export_button_text,
                 export_button_title,
                 reorder_lock_tooltip: locks_reorder
@@ -1161,7 +1162,10 @@ impl BackendService {
             let message = "USB is read-only. Remount as read-write before export.";
             return Err(BackendError::ValidationWithDetails(
                 message.to_string(),
-                json!({ "validationType": "usb_read_only", "statusText": message }),
+                json!({
+                    "validationType": "usb_read_only",
+                    "statusText": tr::export_refused_read_only().render(),
+                }),
             ));
         }
         let options = req.options.unwrap_or_default();
@@ -1201,7 +1205,7 @@ impl BackendService {
                 message.clone(),
                 json!({
                     "validationType": "source_root_missing",
-                    "statusText": message,
+                    "statusText": tr::export_refused_source_missing(missing_root).render(),
                     "missingRoots": blocking_missing_roots,
                 }),
             ));
@@ -1920,17 +1924,18 @@ impl BackendService {
 
         let warning_count = logging::count_warnings(&warnings);
         let skipped_tracks = skipped_tracks + unplayable_tracks.len();
-        let status_text = format!(
-            "Export complete: {} - {}, {skipped_tracks} skipped{} [sync: {}]",
-            playlist.name,
-            counted(exported_tracks, "track", "tracks"),
+        let status_text = tr::export_complete(
+            &playlist.name,
+            exported_tracks,
+            skipped_tracks,
             warning_suffix(warning_count),
             if options.prune_stale {
-                "mirror"
+                tr::export_sync_mirror()
             } else {
-                "additive"
+                tr::export_sync_additive()
             },
-        );
+        )
+        .render();
         Ok(ExportToUsbData {
             job_id: String::new(),
             playlist_id: playlist.id,
