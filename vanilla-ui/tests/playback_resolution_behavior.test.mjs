@@ -53,7 +53,6 @@ function backendPlayback(overrides = {}) {
     trackId: "t-local",
     matchedBy: "hash",
     source: "library",
-    sourceLabel: "Library",
     libraryResolved: true,
     hasUsbContext: false,
     playingText: "Playing from Library: Artist - Track",
@@ -72,7 +71,6 @@ test("playTrackFromOrigin delegates playback resolution to one backend command",
       calls.push({ name, payload });
       assert.equal(name, "play_resolved_track");
       return backendPlayback({
-        sourceLabel: "Library",
         hasUsbContext: true,
       });
     },
@@ -115,7 +113,6 @@ test("playTrackFromOrigin commits a backend USB fallback result without local fa
         trackId: "t-usb",
         matchedBy: "none",
         source: "usb",
-        sourceLabel: "USB",
         libraryResolved: false,
         hasUsbContext: true,
         playingText: "Playing from USB: Artist - Track",

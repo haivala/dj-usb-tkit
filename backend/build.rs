@@ -91,6 +91,16 @@ fn read_catalogs(locales_dir: &Path) -> Vec<Catalog> {
             {
                 panic!("{} has a line that isn't Fluent: {content}", path.display());
             }
+            // A second definition would silently replace the first in `messages`, and the
+            // generated `tr` function would take whichever came last.
+            let mut ids = BTreeSet::new();
+            for entry in &resource.body {
+                if let ast::Entry::Message(message) = entry
+                    && !ids.insert(message.id.name.as_str())
+                {
+                    panic!("{} defines `{}` twice", path.display(), message.id.name);
+                }
+            }
             Catalog {
                 language,
                 path,

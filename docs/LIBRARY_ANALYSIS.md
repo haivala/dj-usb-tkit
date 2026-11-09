@@ -118,8 +118,8 @@ opens relocation instead of toggling the filter. The chip remove action remains
 the explicit destructive path and uses the existing confirmation before
 `remove_source_folder` removes the folder and prunes its tracks.
 
-Scanning also treats missing folders as non-destructive. `scan_library` reports
-missing roots in `notFound`, scans only usable roots, and only prunes stale
+Scanning also treats missing folders as non-destructive. `scan_library` logs
+missing roots as a warning, scans only usable roots, and only prunes stale
 tracks for roots that currently exist. If every enabled source folder is
 missing, scan returns zero indexed/updated/removed rows with a warning.
 

@@ -118,7 +118,7 @@ function installSourceRemovalMock(page) {
                 indexed += 1;
               }
             }
-            return { ok: true, data: { indexed, updated: 0, removed: 0, notFound: [] } };
+            return { ok: true, data: { indexed, updated: 0, removed: 0 } };
           }
           return window.__e2eBackend.answer(command);
         }

@@ -43,7 +43,7 @@ function setup({ sortActive = false, commitThrows = false } = {}) {
     renderCurrentPlaylistTracksFromState: async () => {
       applyPlaylistReorderLockToGrid(
         el,
-        getCurrentPlaylist(),
+        getCurrentPlaylist().id,
         { searchActive: !!state.playlistTrackSearch },
         state.playlistUsbExportStatusById
       );

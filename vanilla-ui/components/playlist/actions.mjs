@@ -455,17 +455,7 @@ export async function importExternalPlaylist(ctx) {
     return;
   }
 
-  for (const { item, result } of done) {
-    const logLabel = t("ui-playlist-import-log-context", { library: item.source.label });
-    const notFound = Array.isArray(result.notFound) ? result.notFound : [];
-    if (notFound.length > 0) {
-      logWarnings(
-        item.source.label,
-        notFound.map((p) => ({ level: "warn", message: p, code: "playlist_import.file_not_found" })),
-        logLabel
-      );
-    }
-  }
+  // The files it couldn't find are in the Event Log already: the backend logged them.
   logFailed();
   emitStatus(data.statusText);
 }
@@ -787,7 +777,7 @@ export function createPlaylistTracksController(ctx) {
       const lock = playlist
         ? applyPlaylistReorderLockToGrid(
           ctx.el,
-          playlist,
+          playlist.id,
           { searchActive: !!ctl.query },
           ctx.state.playlistUsbExportStatusById,
         )

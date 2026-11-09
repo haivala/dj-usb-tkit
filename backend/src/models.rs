@@ -94,6 +94,9 @@ pub struct JobEventPayload {
     pub analysis_ready: Option<bool>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub error_message: Option<String>,
+    /// On a failed analysis track: the Event Log entry, "Track analysis failed: Title (id) - why".
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub failed_text: Option<String>,
     /// On an analysis track-ready event: the library footer's "Total time" line, now that
     /// the track's length is known.
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -470,7 +473,9 @@ pub struct ScanLibraryData {
     pub indexed: usize,
     pub updated: usize,
     pub removed: usize,
-    #[serde(default)]
+    /// Files the scan or import couldn't find. Not sent: each is logged as a warning (an
+    /// import's `scan.*.file-not-found`, the folder scan's missing-folders line).
+    #[serde(default, skip_serializing)]
     pub not_found: Vec<String>,
     #[serde(default)]
     pub warnings: Vec<WarningEntry>,
@@ -1294,12 +1299,10 @@ pub struct PlaylistMembership {
     pub note_text: String,
 }
 
-/// Every local playlist in sidebar order, with how much of the selection
-/// (`selected` tracks) it holds.
+/// Every local playlist in sidebar order, with how much of the selection it holds.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct GetPlaylistMembershipData {
-    pub selected: usize,
     pub items: Vec<PlaylistMembership>,
 }
 
@@ -2018,7 +2021,6 @@ pub struct PlayResolvedTrackData {
     pub track_id: Option<String>,
     pub matched_by: TrackMatch,
     pub source: PlaybackSource,
-    pub source_label: String,
     pub library_resolved: bool,
     pub has_usb_context: bool,
     /// The status line while it plays: "Playing from Library: Artist - Title".
@@ -3008,6 +3010,9 @@ pub struct ImportExternalPlaylistData {
     pub skipped: usize,
     /// Tracks new to the local library.
     pub indexed: usize,
+    /// Files the import couldn't find. Not sent: each is logged as a warning
+    /// (`scan.*.file-not-found`).
+    #[serde(default, skip_serializing)]
     pub not_found: Vec<String>,
     pub warnings: Vec<WarningEntry>,
 }

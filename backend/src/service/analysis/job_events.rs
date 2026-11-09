@@ -39,6 +39,7 @@ fn job_payload(event: &str, job_id: &str, percent: usize, message: String) -> Jo
         failed: None,
         analysis_ready: None,
         error_message: None,
+        failed_text: None,
         library_duration_text: None,
         track: None,
         waiting_track_ids: None,
@@ -77,6 +78,7 @@ fn track_payload(job_id: &str, progress: &AnalyzeTrackProgress) -> JobEventPaylo
         failed: Some(progress.failed),
         analysis_ready: Some(progress.analysis_ready),
         error_message: progress.error_message.clone(),
+        failed_text: progress.failed.then(|| failed_text(progress)),
         library_duration_text: progress.library_total_duration_ms.map(|total_ms| {
             crate::utils::track_list_total_time(
                 total_ms,
@@ -92,6 +94,23 @@ fn track_payload(job_id: &str, progress: &AnalyzeTrackProgress) -> JobEventPaylo
                 .render(),
         )
     }
+}
+
+/// The Event Log entry for a track whose analysis failed: its title and id (or the id alone)
+/// and the reason.
+fn failed_text(progress: &AnalyzeTrackProgress) -> String {
+    use crate::i18n::tr;
+    let track = if progress.track_title.is_empty() {
+        progress.track_id.clone()
+    } else {
+        format!("{} ({})", progress.track_title, progress.track_id)
+    };
+    let error = progress
+        .error_message
+        .clone()
+        .filter(|e| !e.is_empty())
+        .unwrap_or_else(|| tr::analysis_job_track_failed_unknown().render());
+    tr::analysis_job_track_failed(track, error).render()
 }
 
 /// The `job:event` an analysis event becomes; its `event` field names it.
@@ -205,6 +224,39 @@ mod tests {
         assert_eq!(track["percent"], 25);
         assert_eq!(track["message"], "Analyzing 1/4: Song.mp3");
         assert_ui_reads(&["job.progress", "payload.trackId", "payload.trackReady"]);
+    }
+
+    #[test]
+    fn a_failed_track_sends_its_event_log_line() {
+        let failed = |title: &str, error: Option<&str>| {
+            sent(&AnalysisEvent::Track {
+                job_id: "j".to_string(),
+                progress: Box::new(AnalyzeTrackProgress {
+                    track_title: title.to_string(),
+                    failed: true,
+                    error_message: error.map(str::to_string),
+                    ..progress()
+                }),
+            })
+        };
+        assert_eq!(
+            failed("Title", Some("decode error"))["failedText"],
+            "Track analysis failed: Title (t1) - decode error"
+        );
+        assert_eq!(
+            failed("", None)["failedText"],
+            "Track analysis failed: t1 - unknown analysis error"
+        );
+        // Only a failed track carries it.
+        assert!(
+            sent(&AnalysisEvent::Track {
+                job_id: "j".to_string(),
+                progress: Box::new(progress()),
+            })
+            .get("failedText")
+            .is_none()
+        );
+        assert_ui_reads(&["payload.failedText"]);
     }
 
     #[test]

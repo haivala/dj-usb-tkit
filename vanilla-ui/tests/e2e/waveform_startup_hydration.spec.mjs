@@ -224,7 +224,7 @@ function installSourceChipAnalysisMock(page) {
           if (command === "scan_mixxx_db") {
             window.__mixxxImported = true;
             window.__mixxxScanPayload = payload?.request || null;
-            return { ok: true, data: { indexed: 2, updated: 0, removed: 0, notFound: [], warnings: [] } };
+            return { ok: true, data: { indexed: 2, updated: 0, removed: 0, warnings: [] } };
           }
           if (command === "list_mixxx_playlists") {
             return {
@@ -268,7 +268,7 @@ function installSourceChipAnalysisMock(page) {
                 createdAt: "2026-03-01T00:00:00Z", updatedAt: "2026-03-01T00:00:00Z"
               });
               return {
-                playlist: { playlistId, name: playlistId, added: 2, skipped: 0, indexed: 2, notFound: [], warnings: [] }
+                playlist: { playlistId, name: playlistId, added: 2, skipped: 0, indexed: 2, warnings: [] }
               };
             });
             return {

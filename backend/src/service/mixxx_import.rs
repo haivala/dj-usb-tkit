@@ -812,6 +812,14 @@ impl<'a> MixxxTrackImporter<'a> {
             self.warnings
                 .push(logging::log_text(level, "scan-mixxx-db", code, &text));
         };
+        // Each skipped track's file, so the status line's "(see event log)" finds them.
+        for path in &self.not_found {
+            note(
+                Level::Warn,
+                "scan.mixxx-db.file-not-found",
+                tr::scan_warning_track_file_not_found(path),
+            );
+        }
         if self.unsupported > 0 {
             note(
                 Level::Info,
@@ -1441,6 +1449,17 @@ mod tests {
         assert_eq!(
             result.not_found,
             vec![missing_path.to_string_lossy().to_string()]
+        );
+        // The missing file is logged, so the status line's "(see event log)" finds it.
+        let missing = missing_path.to_string_lossy();
+        assert!(
+            result
+                .warnings
+                .iter()
+                .any(|w| w.code == "scan.mixxx-db.file-not-found"
+                    && w.message == format!("track file not found, skipped: {missing}")),
+            "{:?}",
+            result.warnings
         );
         let codes: Vec<_> = result.warnings.iter().map(|w| w.code.as_str()).collect();
         for code in [

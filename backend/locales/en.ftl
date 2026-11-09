@@ -1406,6 +1406,11 @@ analysis-waiting-tooltip = Waiting for its turn to be analyzed
 analysis-started = Analyzing selected tracks
 # $current: tracks done. $total: tracks in all. $file: the file's name.
 analysis-progress = Analyzing { $current }/{ $total }: { $file }
+# The Event Log entry when a track's analysis fails. $track: the track's title and id
+# ("Title (id)"), or its id. $error: why.
+analysis-job-track-failed = Track analysis failed: { $track } - { $error }
+# Stands in for $error above when the analysis gave no reason.
+analysis-job-track-failed-unknown = unknown analysis error
 # The status line when the job ends. $analyzed, $failed, $incomplete: track counts.
 analysis-finished = Analysis finished: analyzed { $analyzed }, failed { $failed }
 analysis-finished-incomplete = Analysis finished: analyzed { $analyzed }, failed { $failed }, incomplete { $incomplete }
@@ -1785,6 +1790,8 @@ library-warning-source-folders-missing = { $count ->
 # $path: the file the library names.
 scan-warning-analysis-not-found = analysis file not found: { $path }
 scan-warning-artwork-not-found = artwork not found: { $path }
+# A track the library lists whose audio file isn't there; the import skipped it.
+scan-warning-track-file-not-found = track file not found, skipped: { $path }
 # $track: the track's file.
 scan-warning-cover-not-found = cover file not found: { $path } (for { $track })
 # $error: the reason, from the OS.
@@ -2263,10 +2270,6 @@ ui-job-done = Done
 ui-job-failed = Failed
 # The analysis pause button's label while paused.
 ui-job-resume-analysis = Resume analysis
-# The Event Log entry when a track's analysis fails. $track: the track. $error: why.
-ui-job-track-analysis-failed = Track analysis failed: { $track } - { $error }
-# Stands in for $error above when the analysis gave no reason.
-ui-job-track-analysis-failed-unknown = unknown analysis error
 ui-job-pause-analysis = Pause analysis
 ui-job-progress = Progress
 ui-job-progress-aria-label = Operation progress
@@ -2320,9 +2323,6 @@ ui-library-remove-folder-confirm = Remove source folder?
 
     All tracks from this folder will be removed from the library. Tracks that are in a local playlist will also be removed from those playlists. Tracks that are also inside another source folder stay in the library.
 ui-library-remove-folder = Remove
-# Where an Event Log entry came from, in its details ("context: Mixxx library import").
-ui-library-import-rekordbox-log-context = desktop library import
-ui-library-import-mixxx-log-context = Mixxx library import
 # Importing the tracks of rekordbox's desktop library (master.db) or of Mixxx's library:
 # the status line while it runs, and when it fails. $error: the backend's message.
 ui-library-import-rekordbox-starting = Importing from desktop library...

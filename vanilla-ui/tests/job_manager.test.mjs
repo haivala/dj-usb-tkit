@@ -306,11 +306,13 @@ test("handleJobEvent routes analysis and job failures to the event log", () => {
       trackTitle: "Bad Track",
       failed: true,
       errorMessage: "decode failed",
+      // As the backend words it.
+      failedText: "Track analysis failed: Bad Track (t6) - decode failed",
       filePath: "/music/bad.mp3"
     });
     assert.equal(messages[0].level, "error");
     assert.equal(messages[0].source, "analysis");
-    assert.match(messages[0].eventLog.text, /Bad Track.*decode failed/);
+    assert.equal(messages[0].eventLog.text, "Track analysis failed: Bad Track (t6) - decode failed");
     assert.equal(messages[0].eventLog.details, "/music/bad.mp3");
 
     state.activeJobId = "export-1";

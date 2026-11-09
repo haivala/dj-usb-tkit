@@ -65,7 +65,7 @@ function installSelectionMock(page, mockOpts = {}) {
               const noteText = { none: "", all: "Already in", some: `${contained} of ${ids.length} in` }[state];
               return { playlistId: p.id, name: p.name, contained, state, noteText };
             });
-            return { ok: true, data: { selected: ids.length, items } };
+            return { ok: true, data: { items } };
           }
           if (command === "add_library_selection_to_playlists") {
             const r = payload?.request || {};

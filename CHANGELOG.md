@@ -51,6 +51,8 @@
   once as it happened and again when its command finished.
 - **Fix:** After an export with warnings, the "(N warnings)" link to the Event Log now comes at the end of the
   status line. Before, it sat in the middle and the sync mode after it was part of the link.
+- **Fix:** When saving a USB playlist order fails and reading the playlists back fails too, the status line now
+  shows why the save failed. Before, it showed the read's error as the reason the order wasn't saved.
 - **Improvement:** The Event Log and the "(N warnings)" counts show only what you can act on. Developer detail,
   such as stage timings, database internals and the app's startup steps, now goes only to the session log file.
 - **Improvement:** A playlist's "Last exported" line shows the date as 2026-04-07 13:00, like the Backups page,

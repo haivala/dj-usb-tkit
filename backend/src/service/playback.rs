@@ -68,7 +68,6 @@ pub(super) fn play_resolved_track_data(
     track_id: Option<String>,
     matched_by: TrackMatch,
     source: PlaybackSource,
-    source_label: String,
     has_usb_context: bool,
 ) -> PlayResolvedTrackData {
     let library_resolved = source == PlaybackSource::Library;
@@ -82,7 +81,6 @@ pub(super) fn play_resolved_track_data(
         track_id,
         matched_by,
         source,
-        source_label,
         library_resolved,
         has_usb_context,
     }
@@ -96,7 +94,8 @@ impl BackendService {
     ) -> BackendResult<PlayResolvedTrackData> {
         let name = playback_track_name(&req.artist, &req.title);
         let mut data = self.play_resolved_source(playback, req)?;
-        data.playing_text = tr::playback_playing(&data.source_label, name).render();
+        let source_label = playback_source_label(data.library_resolved);
+        data.playing_text = tr::playback_playing(&source_label, name).render();
         Ok(data)
     }
 
@@ -158,7 +157,6 @@ impl BackendService {
                         resolved.track_id.or(req.track_id),
                         matched_by,
                         PlaybackSource::Library,
-                        playback_source_label(true),
                         has_usb_context,
                     ));
                 }
@@ -186,7 +184,6 @@ impl BackendService {
                             req.track_id,
                             matched_by,
                             PlaybackSource::Usb,
-                            playback_source_label(false),
                             has_usb_context,
                         ));
                     }
@@ -209,7 +206,6 @@ impl BackendService {
                 req.track_id,
                 matched_by,
                 PlaybackSource::Usb,
-                playback_source_label(false),
                 has_usb_context,
             ));
         }

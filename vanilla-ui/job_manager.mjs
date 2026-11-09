@@ -242,9 +242,6 @@ export function handleJobEvent(ctx, payload) {
       errorMessage: payload.errorMessage ? String(payload.errorMessage) : null
     });
     if (payload.failed === true) {
-      const trackLabel = payload.trackTitle
-        ? `${String(payload.trackTitle)} (${String(payload.trackId)})`
-        : String(payload.trackId);
       const details = typeof payload.filePath === "string" && payload.filePath.trim()
         ? payload.filePath.trim()
         : null;
@@ -253,10 +250,7 @@ export function handleJobEvent(ctx, payload) {
         source: "analysis",
         code: "analyze.track_failed",
         eventLog: {
-          text: t("ui-job-track-analysis-failed", {
-            track: trackLabel,
-            error: payload.errorMessage || t("ui-job-track-analysis-failed-unknown"),
-          }),
+          text: payload.failedText,
           details,
           coalesceKey: `analysis.track_failed.${String(payload.trackId)}`
         }

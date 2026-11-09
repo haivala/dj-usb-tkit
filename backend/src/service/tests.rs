@@ -375,6 +375,7 @@ fn scan_rekordbox_db_imports_updates_keeps_missing_and_reports_resource_warnings
     for code in [
         "scan.rekordbox-db.anlz-miss-summary",
         "scan.rekordbox-db.artwork-miss-summary",
+        "scan.rekordbox-db.file-not-found",
     ] {
         assert!(
             warning_codes.contains(&code),

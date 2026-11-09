@@ -1335,6 +1335,43 @@ test("a failed USB playlist reorder restores the order and keeps the playlist op
   expect(await page.evaluate(() => window.__playlistFetches)).toBe(2);
 });
 
+test("a failed USB playlist reorder whose re-read also fails still reports the save's failure", async ({ page }) => {
+  await installTauriMock(page, "reorder");
+  await page.addInitScript(() => {
+    const invoke = window.__TAURI__.core.invoke;
+    let saveFailed = false;
+    window.__TAURI__.core.invoke = async (command, payload) => {
+      if (command === "reorder_usb_playlists") {
+        saveFailed = true;
+        return { ok: false, error: { code: "IO", message: "write failed" } };
+      }
+      // The stick went away: the read after the failed save fails too.
+      if (command === "fetch_usb_playlists" && saveFailed) {
+        return { ok: false, error: { code: "IO", message: "stick gone" } };
+      }
+      return invoke(command, payload);
+    };
+  });
+  await page.goto("/");
+
+  await page.locator('.nav-item[data-view="usb"]').click();
+  await page.locator("#usbEmptyState .empty-state-action").click();
+  await page.locator('.nav-item[data-view="usb-playlists"]').click();
+  await expect(page.locator("#usbPlaylists [data-usb-playlist]").nth(0)).toHaveClass(/active/);
+
+  await dragViaHandle(
+    page,
+    '#usbPlaylists li:nth-child(1) [data-usb-drag-handle]',
+    '#usbPlaylists li:nth-child(3)',
+    false
+  );
+
+  // The save's failure, not the read's, and the read's failure on the progress bar.
+  await expect(page.locator("#statusText")).toContainText("Failed to save playlist order: write failed");
+  await expect(page.locator("#progressText")).toHaveText("USB load failed");
+  await expect(page.locator("#progressFooter")).toHaveClass(/error/);
+});
+
 test("USB playlist drag that does not change position skips persisting order", async ({ page }) => {
   await installTauriMock(page, "reorder");
   await page.goto("/");

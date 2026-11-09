@@ -220,10 +220,8 @@ export function bindUsbEvents(ctx) {
     itemSelector: "li",
     onMove: (fromIndex, toIndex) => {
       state.usbPlaylists = moveArrayItem(state.usbPlaylists, fromIndex, toIndex);
-      reorderUsbPlaylists().catch((err) => {
-        console.error(err);
-        emitStatus(t("ui-usb-playlists-order-failed", { error: err.message }));
-      });
+      // It reports its own failure (and re-reads the real order).
+      reorderUsbPlaylists();
     }
   });
 

@@ -73,7 +73,7 @@ test("playTrackFromOrigin dedupes concurrent starts", async () => {
     command: async () => {
       starts += 1;
       await new Promise((resolve) => setTimeout(resolve, 15));
-      return { trackId: "t1", sourceLabel: "Library" };
+      return { trackId: "t1" };
     }
   });
 
@@ -94,7 +94,7 @@ test("switching tracks while a start is pending supersedes it; only the newer st
     command: async (_name, request) => {
       startedTracks.push(request.trackId);
       if (request.trackId === "A") await pendingA;
-      return { trackId: request.trackId, sourceLabel: "Library" };
+      return { trackId: request.trackId };
     }
   });
 
@@ -131,7 +131,6 @@ test("stop supersedes a pending start; the stale start's success is not committe
           trackId: "t1",
           matchedBy: "self",
           source: "library",
-          sourceLabel: "Library",
           libraryResolved: true,
           hasUsbContext: false
         };

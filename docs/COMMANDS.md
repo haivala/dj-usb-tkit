@@ -69,7 +69,9 @@ column order (artwork, waveform, length, BPM / key) as each is found, then a
 `trackReady` event. The pieces carry only their own fields; the `trackReady`
 event carries `track`, the track's whole library row as saved (or as it was,
 when the analysis failed), which the frontend shows in place of its copy, and
-`libraryDurationText`, the library footer's Total time with that track's length.
+`libraryDurationText`, the library footer's Total time with that track's length. A
+failed track's event has `failed: true` and `failedText`, its Event Log entry
+("Track analysis failed: Title (id) - why").
 
 ### Whole track rows
 
@@ -104,7 +106,7 @@ drive selection from being rendered against a newer selected drive.
 ### Library
 
 - `scan_library` — `{ sourceRoots?, incremental }` → `{ indexed, updated,
-  removed, notFound, warnings, statusText }`; `statusText` is the status line
+  removed, warnings, statusText }`; `statusText` is the status line
   after adding folders (the folder count and the tracks indexed).
 - `scan_rekordbox_db`
 - `scan_mixxx_db`
@@ -366,7 +368,9 @@ See `docs/EXTERNAL_LIBRARIES.md` for behavior and the fields read.
 - `detect_external_rekordbox_db` / `detect_external_mixxx_db` — `{ found, path }`
 - `scan_rekordbox_db` / `scan_mixxx_db` — `{ path? }`; imports every track of the
   library, returns the `scan_library` result shape (`indexed`, `updated`,
-  `removed`, `notFound`, `warnings`, `statusText`: what the import brought in)
+  `removed`, `warnings`, `statusText`: what the import brought in). Each track
+  whose file is missing is skipped and logged as a warning
+  (`scan.rekordbox-db.file-not-found` / `scan.mixxx-db.file-not-found`)
 - `list_rekordbox_playlists` / `list_mixxx_playlists` — `{ path? }`; returns
   `items: [{ id, name, kind, trackCount, existingPlaylist?, noteText }]` where `id` is
   the source library's own id as a string, `kind` is `playlist` | `crate` |
@@ -380,7 +384,7 @@ See `docs/EXTERNAL_LIBRARIES.md` for behavior and the fields read.
   Returns `{ results, imported, failed, added, skipped, statusText }`
   (`name` only words the status line's failed lists): `results` follows
   `items`, each `{ playlist }` (`{ playlistId, name, updatedExisting, added,
-  skipped, indexed, notFound, warnings }`) or `{ error }`, and the counts total
+  skipped, indexed, warnings }`) or `{ error }`, and the counts total
   them. `skipped` counts list entries not placed (missing or unsupported files,
   tracks gone from the library, repeats). `force` makes the tracks take BPM,
   key and cues from the library over the app's own values. A list none of
@@ -507,7 +511,7 @@ When `repair_usb_diagnostics` is called with `apply: true`, the response may inc
 ### Playback
 
 - `resolve_playback_source`
-- `play_resolved_track` — answers with where it plays from (`source`, `sourceLabel`) and
+- `play_resolved_track` — answers with where it plays from (`source`) and
   `playingText`, the status line ("Playing from Library: Artist - Title")
 - `stop_playback_native`
 - `pause_playback_native` / `resume_playback_native` — hold the loaded track at

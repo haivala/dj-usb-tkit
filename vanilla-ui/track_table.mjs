@@ -92,11 +92,10 @@ export function createTrackRow(ctx, track, options) {
   const row = cloneTemplate(doc, "tplTrackRow");
   const cell = (name) => row.querySelector(`.td-${name}`);
 
-  const localRenderId = options.origin === "local"
-    ? String(track.localTrackId || track.id || "")
-    : String(track.id || "");
-  const renderTrackId = localRenderId || String(track.id || options.index || "row");
-  const rowKey = `${options.origin || "unknown"}:${renderTrackId || options.index || "row"}`;
+  // Every row the backend sends has an id (`Track::id`, `UsbTrack::id`). A library row a
+  // playlist add resolved without replacing it (a listed file) is known by its new local id.
+  const renderTrackId = String(options.origin === "local" ? track.localTrackId || track.id : track.id);
+  const rowKey = `${options.origin || "unknown"}:${renderTrackId}`;
   const origin = options.origin || "usb";
   row.dataset.playbackRow = rowKey;
   row.dataset.trackId = renderTrackId;

@@ -1028,7 +1028,7 @@ impl BackendService {
                 }
             })
             .collect();
-        Ok(GetPlaylistMembershipData { selected, items })
+        Ok(GetPlaylistMembershipData { items })
     }
 
     pub(super) fn resolve_add_track_candidate(

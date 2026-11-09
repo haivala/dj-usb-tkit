@@ -150,7 +150,6 @@ test("scanRekordboxDb reports success, failure, and structured warnings", async 
   const success = await runScanRekordboxDb(async () => ({
     indexed: 3,
     updated: 1,
-    notFound: [],
     warnings: [],
     statusText: "Desktop library import done: 3 new, 1 updated"
   }));
@@ -163,21 +162,16 @@ test("scanRekordboxDb reports success, failure, and structured warnings", async 
   assert.equal(failure.statuses[0], "Importing from desktop library...");
   assert.ok(failure.statuses[1].startsWith("Desktop library import failed:"), failure.statuses[1]);
 
-  // The backend's warnings reached the Event Log when it logged them; JS only
-  // logs the files it couldn't find, which it words itself.
+  // The backend logged its warnings (missing files too) when it made them: JS logs nothing.
   const warning = await runScanRekordboxDb(async () => ({
     indexed: 3,
     updated: 1,
-    notFound: ["/music/gone.mp3"],
     warnings: [{
       level: "warn",
-      code: "rekordbox_db.scan_diag",
-      message: "3 files had unreadable ANLZ analysis",
-      source: "scan_rekordbox_db"
+      code: "scan.rekordbox-db.file-not-found",
+      message: "track file not found, skipped: /music/gone.mp3",
+      source: "scan-rekordbox-db"
     }]
   }));
-  assert.equal(warning.logged.length, 1);
-  assert.deepEqual(warning.logged[0].warnings, [
-    { level: "warn", message: "/music/gone.mp3", code: "rekordbox_db.file_not_found" }
-  ]);
+  assert.equal(warning.logged.length, 0);
 });

@@ -642,8 +642,9 @@ export async function reorderUsbPlaylists(ctx) {
     clearUsbDiagnostics(ctx);
     emitStatus(data.statusText, { warningText: data.warningText });
   } catch (err) {
-    // The drag already moved the row: read the real order back.
-    await refreshUsb(ctx);
+    // The drag already moved the row: read the real order back. A failed read shows on the
+    // progress bar itself; the status line is the save's failure either way.
+    await refreshUsb(ctx).catch((readErr) => console.error("USB playlist re-read failed:", readErr));
     emitStatus(t("ui-usb-playlists-order-failed", { error: err.message || err }));
   }
 }

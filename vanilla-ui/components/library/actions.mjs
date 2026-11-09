@@ -410,9 +410,6 @@ export async function scanRekordboxDb(ctx) {
     path: ctx.state.externalRekordboxDbPath,
     startingText: t("ui-library-import-rekordbox-starting"),
     failedText: (error) => t("ui-library-import-rekordbox-failed", { error }),
-    logLabel: t("ui-library-import-rekordbox-log-context"),
-    logSource: "master.db",
-    codePrefix: "rekordbox_db",
     library: "rekordbox",
     detect: () => ctx.detectExternalRekordboxDb(),
   });
@@ -424,9 +421,6 @@ export async function scanMixxxDb(ctx) {
     path: ctx.state.externalMixxxDbPath,
     startingText: t("ui-library-import-mixxx-starting"),
     failedText: (error) => t("ui-library-import-mixxx-failed", { error }),
-    logLabel: t("ui-library-import-mixxx-log-context"),
-    logSource: "mixxx",
-    codePrefix: "mixxx_db",
     library: "mixxx",
     detect: () => ctx.detectExternalMixxxDb(),
   });
@@ -443,8 +437,8 @@ export async function showExternalLibrary(ctx, library) {
 // Shared by the rekordbox master.db and Mixxx imports: run the backend
 // import, turn the library's source chip on, and report the outcome (the
 // backend's `statusText`).
-async function importExternalLibrary(ctx, { command, path, startingText, failedText, logLabel, logSource, codePrefix, library, detect }) {
-  const { logWarnings, emitStatus } = ctx;
+async function importExternalLibrary(ctx, { command, path, startingText, failedText, library, detect }) {
+  const { emitStatus } = ctx;
 
   emitStatus(startingText);
   let result;
@@ -464,15 +458,7 @@ async function importExternalLibrary(ctx, { command, path, startingText, failedT
 
   await ctx.refreshCurrentPlaylistTracks();
 
-  const notFound = Array.isArray(result.notFound) ? result.notFound : [];
-  if (notFound.length > 0) {
-    logWarnings(
-      logSource,
-      notFound.map((p) => ({ level: "warn", message: p, code: `${codePrefix}.file_not_found` })),
-      logLabel
-    );
-  }
-
+  // The files it couldn't find are in the Event Log already: the backend logged them.
   emitStatus(result.statusText);
 }
 

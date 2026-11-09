@@ -204,6 +204,7 @@ fn emit_job_event<R: tauri::Runtime>(
         failed: None,
         analysis_ready: None,
         error_message: None,
+        failed_text: None,
         library_duration_text: None,
         track: None,
         waiting_track_ids: None,

@@ -10,8 +10,8 @@
 // header click) and the "won't reorder" tooltip on the sortable headers. Returns
 // the two values createTrackRow() consumes. Kept free of any `state` dependency
 // -- callers pass state.playlistUsbExportStatusById as statusById.
-export function applyPlaylistReorderLockToGrid(el, playlist, { searchActive } = {}, statusById) {
-  const status = statusById instanceof Map ? statusById.get(playlist.id) : null;
+export function applyPlaylistReorderLockToGrid(el, playlistId, { searchActive } = {}, statusById) {
+  const status = statusById instanceof Map ? statusById.get(playlistId) : null;
   const locksReorder = !!status?.locksReorder;
   const enableDragReorder = !searchActive && !locksReorder;
   const tooltip = locksReorder ? status.reorderLockTooltip || null : null;

@@ -208,7 +208,6 @@ fn membership(
         })
         .data
         .expect("membership");
-    assert_eq!(data.selected, track_ids.len());
     data.items
         .into_iter()
         .map(|item| (item.name, item.contained, item.state))

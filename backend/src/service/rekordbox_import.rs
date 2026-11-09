@@ -812,6 +812,14 @@ impl<'a> RekordboxTrackImporter<'a> {
             self.warnings
                 .push(logging::log_text(level, "scan-rekordbox-db", code, &text));
         };
+        // Each skipped track's file, so the status line's "(see event log)" finds them.
+        for path in &self.not_found {
+            note(
+                Level::Warn,
+                "scan.rekordbox-db.file-not-found",
+                tr::scan_warning_track_file_not_found(path),
+            );
+        }
         if self.cue_tracks > 0 {
             note(
                 Level::Info,
@@ -1725,6 +1733,7 @@ mod tests {
         for code in [
             "scan.rekordbox-db.playlist-duplicates-skipped",
             "scan.rekordbox-db.playlist-tracks-deleted",
+            "scan.rekordbox-db.file-not-found",
         ] {
             assert!(codes.contains(&code), "expected {code}, got {codes:?}");
         }

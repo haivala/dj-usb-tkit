@@ -1274,7 +1274,7 @@ test("event log entries go to the session log file, which the Open log file butt
   await page.goto("/");
 
   await page.waitForFunction(() => window.__hasJobListener?.());
-  // A track's failure is an entry JS makes from the job's event.
+  // A track's failure is an entry JS makes from the job event's `failedText`.
   await page.evaluate(() => {
     const job = { jobId: "job-log", jobType: "analysis", stage: "analyze_new_tracks" };
     window.__emitJobEvent({ ...job, event: "job.started", percent: 0, message: "Analyzing selected tracks" });
@@ -1288,6 +1288,8 @@ test("event log entries go to the session log file, which the Open log file butt
       trackTitle: "Bad Track",
       failed: true,
       errorMessage: "decode failed",
+      // As the backend words it.
+      failedText: "Track analysis failed: Bad Track (bad-1) - decode failed",
       message: "Analyzing 1/2",
     });
   });
