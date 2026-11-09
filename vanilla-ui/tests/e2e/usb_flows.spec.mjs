@@ -441,7 +441,7 @@ function installTauriMock(page, mode) {
                   removeConfirmText: `mock remove ${p.name}?`
                 })),
                 summaryText: `${state.usbPlaylists.length} playlists`,
-                statusText: `USB playlists loaded: ${state.usbPlaylists.length}${mode === "warning-mix" ? " | (2 warnings)" : ""}`,
+                statusText: `USB playlists loaded: ${state.usbPlaylists.length}`,
                 doneText: "Done",
                 stats: {
                   indexedTracks: 0,
@@ -451,7 +451,7 @@ function installTauriMock(page, mode) {
                 playlistUsbExportStatus: [],
                 warnings,
                 // The backend counts the warn/error entries (the info one isn't).
-                warningCount: mode === "warning-mix" ? 2 : 0
+                warningText: mode === "warning-mix" ? "(2 warnings)" : ""
               }
             };
           }
@@ -495,9 +495,9 @@ function installTauriMock(page, mode) {
               ok: true,
               data: {
                 reordered: state.usbPlaylists.length,
-                statusText: "Playlist order saved | (1 warning)",
+                statusText: "Playlist order saved",
                 warnings: [{ level: "error", code: "usb.reorder.pdb-write-back-failed", message: "PDB write-back to USB failed", source: "usb-import" }],
-                warningCount: 1
+                warningText: "(1 warning)"
               }
             };
           }
@@ -517,7 +517,7 @@ function installTauriMock(page, mode) {
                 removedFromEdb: 1,
                 removedFromPdb: 1,
                 warnings,
-                warningCount: warnings.length
+                warningText: warnings.length ? `(${warnings.length} warning${warnings.length === 1 ? "" : "s"})` : ""
               }
             };
           }

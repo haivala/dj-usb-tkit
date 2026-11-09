@@ -1104,8 +1104,8 @@ test("the final message is the job's, with its warning count as the Event Log li
       ...job,
       event: "job.completed",
       percent: 100,
-      message: "Analysis finished: analyzed 3, failed 1 | (1 warning)",
-      warningCount: 1,
+      message: "Analysis finished: analyzed 3, failed 1",
+      warningText: "(1 warning)",
     });
   });
   await expect(page.locator("#statusText")).toContainText("Analysis finished: analyzed 3, failed 1");

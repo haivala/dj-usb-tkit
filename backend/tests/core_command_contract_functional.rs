@@ -1064,6 +1064,8 @@ fn save_track_analysis_edits_persists_cues_and_first_beat_and_validates() {
         .expect("detail data");
     assert_eq!(detail.first_beat_ms, Some(321));
     assert_eq!(detail.cues.len(), 3);
+    // The editor's hot-cue slots are the save's limit.
+    assert_eq!(detail.max_hot_cues, 8);
     // The key picker's options come with the detail.
     assert_eq!(
         detail

@@ -2,7 +2,7 @@
 //!
 //! The catalogs are `locales/<language>.ftl` (Fluent), embedded in the binary. `build.rs`
 //! turns each message of `locales/en.ftl` into a function in [`tr`], named after its key
-//! (`usb-warning-count` is `tr::usb_warning_count(count)`), so a wrong key, a wrong argument
+//! (`status-warning-count` is `tr::status_warning_count(count)`), so a wrong key, a wrong argument
 //! or a missing one fails the build.
 //!
 //! A [`Text`] is a key and its arguments. It becomes text only when shown: [`Text::render`]
@@ -409,7 +409,7 @@ mod tests {
     // (other tests in this process assert English).
     const OTHER_SOURCE: &str = "\
 fixture-hello = Hei { $name }!
-usb-warning-count = { $count ->
+status-warning-count = { $count ->
     [one] { $count } varoitus
    *[other] { $count } varoitusta
 }
@@ -431,10 +431,10 @@ usb-warning-count = { $count ->
 
     #[test]
     fn english_plural_for_zero_one_and_two() {
-        let english = |count: usize| tr::usb_warning_count(count).render_english();
-        assert_eq!(english(0), "0 warnings");
-        assert_eq!(english(1), "1 warning");
-        assert_eq!(english(2), "2 warnings");
+        let english = |count: usize| tr::status_warning_count(count).render_english();
+        assert_eq!(english(0), "(0 warnings)");
+        assert_eq!(english(1), "(1 warning)");
+        assert_eq!(english(2), "(2 warnings)");
     }
 
     #[test]
@@ -443,12 +443,12 @@ usb-warning-count = { $count ->
         let text = Text::new("fixture-hello", vec![("name", Arg::Text("Example".into()))]);
         let rendered = catalog.format(&text).expect("fixture key");
         assert_eq!(rendered, "Hei Example!");
-        let plural = tr::usb_warning_count(3usize).render_in(&catalog);
+        let plural = tr::status_warning_count(3usize).render_in(&catalog);
         assert_eq!(plural, "3 varoitusta");
         for output in [
             rendered,
             plural,
-            tr::usb_warning_count(2usize).render_english(),
+            tr::status_warning_count(2usize).render_english(),
         ] {
             assert!(!output.contains(ISOLATION_MARKS), "{output:?}");
         }
@@ -458,8 +458,8 @@ usb-warning-count = { $count ->
     fn a_key_missing_from_another_language_falls_back_to_english() {
         let catalog = Catalog::parse("fi", "fixture-hello = Hei!\n").expect("fixture parses");
         assert_eq!(
-            tr::usb_warning_count(1usize).render_in(&catalog),
-            "1 warning"
+            tr::status_warning_count(1usize).render_in(&catalog),
+            "(1 warning)"
         );
     }
 
@@ -467,7 +467,7 @@ usb-warning-count = { $count ->
     fn unset_language_is_english() {
         // Nothing in the unit tests sets a language; piece 2's own test file covers switching.
         assert_eq!(current_language(), ENGLISH);
-        assert_eq!(tr::usb_warning_count(2usize).to_string(), "2 warnings");
+        assert_eq!(tr::status_warning_count(2usize).to_string(), "(2 warnings)");
     }
 
     #[test]

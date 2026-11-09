@@ -297,7 +297,10 @@ async function openApp(browser, fixture, opts, { sourcesOpen = true, viewport = 
   const page = await ctx.newPage();
   page.on("console", (msg) => {
     if (msg.type() === "warning" && msg.text().startsWith("doc-media:")) console.warn(msg.text());
+    // The app's own errors: a scene that waits forever usually starts with one.
+    if (msg.type() === "error") console.error(`doc-media: page error: ${msg.text()}`);
   });
+  page.on("pageerror", (error) => console.error(`doc-media: page error: ${error.message}`));
   await page.goto(BASE_URL);
   await page.locator("#libraryTableBody .track-grid-row", { hasText: EDITOR_TITLE }).waitFor();
   if (!sourcesOpen) {

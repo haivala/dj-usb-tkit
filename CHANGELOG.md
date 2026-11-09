@@ -49,6 +49,8 @@
   and refused USB audio format changes.
 - **Fix:** Each warning now shows once in the Event Log and the session log file. Before, most showed twice:
   once as it happened and again when its command finished.
+- **Fix:** After an export with warnings, the "(N warnings)" link to the Event Log now comes at the end of the
+  status line. Before, it sat in the middle and the sync mode after it was part of the link.
 - **Improvement:** The Event Log and the "(N warnings)" counts show only what you can act on. Developer detail,
   such as stage timings, database internals and the app's startup steps, now goes only to the session log file.
 - **Improvement:** A playlist's "Last exported" line shows the date as 2026-04-07 13:00, like the Backups page,

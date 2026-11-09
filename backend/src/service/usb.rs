@@ -1,7 +1,7 @@
 //! USB validation, playlist/history fetching, track inspection.
 
 use crate::i18n::tr;
-use crate::utils::{counted, track_list_summary, warning_suffix};
+use crate::utils::{counted, track_list_summary, warning_text};
 use std::collections::{HashMap, HashSet};
 use std::path::Path;
 use std::sync::Arc;
@@ -543,11 +543,8 @@ fn with_usb_history_texts(data: &FetchUsbHistoriesData) -> FetchUsbHistoriesData
     data.summary_text =
         tr::usb_history_summary(data.counts.imported_playlists, data.counts.imported_tracks)
             .render();
-    data.status_text = format!(
-        "{}{}",
-        tr::usb_history_loaded(data.items.len()),
-        warning_suffix(data.warning_count)
-    );
+    data.status_text = tr::usb_history_loaded(data.items.len()).render();
+    data.warning_text = warning_text(data.warning_count);
     data
 }
 
@@ -1248,14 +1245,10 @@ impl BackendService {
         Ok(FetchUsbPlaylistsData {
             items: resolved.items.iter().map(with_usb_playlist_texts).collect(),
             stats: resolved.stats.clone(),
-            status_text: format!(
-                "{}{}",
-                tr::usb_playlists_loaded(playlist_count),
-                warning_suffix(warning_count)
-            ),
+            status_text: tr::usb_playlists_loaded(playlist_count).render(),
             done_text: tr::usb_playlists_done(&summary_text).render(),
             summary_text,
-            warning_count,
+            warning_text: warning_text(warning_count),
             warnings: resolved.warnings.clone(),
             playlist_usb_export_status,
         })
@@ -1693,12 +1686,8 @@ impl BackendService {
         let warning_count = logging::count_warnings(&warnings);
         Ok(ReorderUsbPlaylistsData {
             reordered: patched.max(edb_updated),
-            status_text: format!(
-                "{}{}",
-                tr::usb_playlists_order_saved(),
-                warning_suffix(warning_count)
-            ),
-            warning_count,
+            status_text: tr::usb_playlists_order_saved().render(),
+            warning_text: warning_text(warning_count),
             warnings,
         })
     }
@@ -1915,18 +1904,14 @@ impl BackendService {
 
         let warning_count = logging::count_warnings(&warnings);
         Ok(RemoveUsbPlaylistData {
-            status_text: format!(
-                "{}{}",
-                tr::usb_playlists_removed(&name, removed_edb, removed_pdb),
-                warning_suffix(warning_count)
-            ),
+            status_text: tr::usb_playlists_removed(&name, removed_edb, removed_pdb).render(),
             playlist_name: name,
             removed_from_edb: removed_edb,
             removed_from_pdb: removed_pdb,
             tracks_removed,
             files_deleted,
             tracks_kept_shared,
-            warning_count,
+            warning_text: warning_text(warning_count),
             warnings,
         })
     }
@@ -1977,6 +1962,7 @@ impl BackendService {
                 summary_text: String::new(),
                 status_text: String::new(),
                 warning_count: logging::count_warnings(&warnings),
+                warning_text: String::new(),
                 warnings,
             }));
         }
@@ -2247,6 +2233,7 @@ impl BackendService {
             summary_text: String::new(),
             status_text: String::new(),
             warning_count: logging::count_warnings(&warnings),
+            warning_text: String::new(),
             warnings,
         };
         let data = Arc::new(data);

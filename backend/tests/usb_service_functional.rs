@@ -936,13 +936,7 @@ fn fetch_usb_histories_reads_injected_pdb_history_rows_and_materializes_tracks()
         .expect("cached history data");
     assert_eq!(ids(&cached.items), ["usb-h-2", "usb-h-1"]);
     assert_eq!(data.summary_text, "2 sessions, 3 tracks");
-    assert_eq!(
-        data.status_text,
-        format!(
-            "USB histories loaded: 2{}",
-            backend::utils::warning_suffix(data.warning_count)
-        ),
-    );
+    assert_eq!(data.status_text, "USB histories loaded: 2");
     let history = &data.items[0];
     assert!(history.can_export_tracklist);
     assert_eq!(history.track_count, 2);

@@ -4,7 +4,6 @@ import assert from "node:assert/strict";
 import {
   createTrackDetailController,
   openTrackDetail,
-  MAX_CUES,
 } from "../components/track-detail/actions.mjs";
 import { base64ToBytes } from "../components/track-detail/waveform_detail.mjs";
 import { makeTestCtx } from "./test_helpers.mjs";
@@ -46,20 +45,21 @@ test("addCue adds a coloured, auto-named cue at the playhead and stops at 8", ()
     cues: [],
     durationMs: 100000,
     bpm: 120,
+    maxHotCues: 8,
   });
 
-  for (let i = 0; i < MAX_CUES; i += 1) assert.ok(c.addCue(), `cue ${i} added`);
+  for (let i = 0; i < 8; i += 1) assert.ok(c.addCue(), `cue ${i} added`);
   assert.equal(c.addCue(), null, "9th cue refused");
   assert.equal(el.trackDetailAddCue.disabled, true);
 
   // Default name + colour are assigned once, in add order, and cycle through
-  // all 8 palette colours (MAX_CUES === palette size).
+  // all 8 palette colours (the hot-cue limit is the palette size).
   const added = c.getWorking().cues;
   assert.deepEqual(added.map((x) => x.name), Array.from({ length: 8 }, (_, i) => `Cue ${i + 1}`));
   assert.deepEqual(added.map((x) => x.colorId), [1, 2, 3, 4, 5, 6, 7, 8]);
 
   const payload = c.toSavePayload();
-  assert.equal(payload.cues.length, MAX_CUES);
+  assert.equal(payload.cues.length, 8);
   assert.equal(payload.firstBeatMs, 100);
 });
 

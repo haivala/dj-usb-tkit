@@ -629,7 +629,7 @@ export async function removeUsbPlaylist(ctx, playlist) {
   });
   clearUsbDiagnostics(ctx);
   await refreshUsb(ctx);
-  emitStatus(data.statusText, { warningCount: data.warningCount });
+  emitStatus(data.statusText, { warningText: data.warningText });
 }
 
 export async function reorderUsbPlaylists(ctx) {
@@ -640,7 +640,7 @@ export async function reorderUsbPlaylists(ctx) {
       orderedPlaylistIds: state.usbPlaylists.map((p) => p.id)
     });
     clearUsbDiagnostics(ctx);
-    emitStatus(data.statusText, { warningCount: data.warningCount });
+    emitStatus(data.statusText, { warningText: data.warningText });
   } catch (err) {
     // The drag already moved the row: read the real order back.
     await refreshUsb(ctx);
@@ -771,7 +771,7 @@ async function readUsbPlaylists(ctx, isCurrent) {
   // The freshly scanned status may flip an open local playlist's reorder lock.
   await ctx.renderCurrentPlaylistTracksFromState();
   setProgress(true, 100, data.doneText);
-  emitStatus(data.statusText, { warningCount: data.warningCount });
+  emitStatus(data.statusText, { warningText: data.warningText });
   ctx.scheduleProgressIdle(1200);
 }
 
@@ -882,7 +882,7 @@ async function readUsbHistories(ctx, isCurrent) {
   el.historyCountsText.textContent = data.summaryText;
   renderHistoryList(ctx);
   ctx.usbHistoryTracksCtl.clear();
-  emitStatus(data.statusText, { warningCount: data.warningCount });
+  emitStatus(data.statusText, { warningText: data.warningText });
 }
 
 export async function exportHistoryTracklist(ctx) {
@@ -1137,7 +1137,7 @@ async function runPlaylistExport(ctx, playlistId) {
     }
   }
   clearUsbDiagnostics(ctx);
-  emitStatus(data.statusText, { warningCount: data.warningCount });
+  emitStatus(data.statusText, { warningText: data.warningText });
   await ctx.loadPlaylists();
   state.currentPlaylistId = playlistId;
   ctx.updateModeText();

@@ -208,7 +208,7 @@ fn emit_job_event<R: tauri::Runtime>(
         track: None,
         waiting_track_ids: None,
         waiting_tooltip: None,
-        warning_count: None,
+        warning_text: None,
         timestamp: Utc::now().to_rfc3339(),
     };
 

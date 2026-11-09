@@ -62,12 +62,12 @@
   const sumMs = (items) => items.reduce((ms, t) => ms + (Number(t.durationMs) || 0), 0);
   // Lengths and times as the backend words them: "3:45" / "1:02:03", "2026-09-26 21:00".
   const pad = (n) => String(n).padStart(2, "0");
-  const clock = (ms) => {
+  const durationClock = (ms) => {
     const s = Math.floor(ms / 1000);
     const h = Math.floor(s / 3600);
     return h ? `${h}:${pad(Math.floor((s % 3600) / 60))}:${pad(s % 60)}` : `${Math.floor(s / 60)}:${pad(s % 60)}`;
   };
-  const totalTime = (items) => ({ durationText: `Total time: ${clock(sumMs(items))}` });
+  const totalTime = (items) => ({ durationText: `Total time: ${durationClock(sumMs(items))}` });
   const localStamp = (iso) => {
     const d = new Date(iso);
     return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())} ${pad(d.getHours())}:${pad(d.getMinutes())}`;
@@ -427,7 +427,7 @@
               totalDurationMs: sumMs(picked),
               durationUnknownCount: picked.filter((t) => !(Number(t.durationMs) > 0)).length,
               trackCount: picked.length,
-              durationText: sumMs(picked) ? `· ${clock(sumMs(picked))}` : "",
+              durationText: sumMs(picked) ? `· ${durationClock(sumMs(picked))}` : "",
             });
           }
           case "resolve_track_identity":

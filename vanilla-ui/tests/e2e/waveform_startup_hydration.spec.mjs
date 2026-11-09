@@ -71,7 +71,8 @@ function installWaveformStartupMock(page) {
                 detailWaveform: btoa(bytes),
                 firstBeatMs: 100,
                 cues: [],
-                keyOptions: []
+                keyOptions: [],
+                maxHotCues: 8
               }
             };
           }

@@ -305,20 +305,10 @@ export async function createPlaylist(ctx, name) {
     const playlist = await command("create_playlist", { name });
     progress(70, t("ui-playlist-refreshing-playlists"));
     await loadPlaylists(ctx);
-    const loadedPlaylists = Array.isArray(state.playlists) ? state.playlists : [];
-    const createdPlaylistId = String(playlist?.playlistId || "").trim();
-    const selectedPlaylist = loadedPlaylists.find((item) => String(item?.id || "") === createdPlaylistId)
-      || (createdPlaylistId
-        ? null
-        : loadedPlaylists.find((item) => String(item?.name || "") === String(playlist?.name || "")))
-      || loadedPlaylists[0]
-      || null;
-    const selectedPlaylistId = selectedPlaylist?.id || createdPlaylistId;
-    state.currentPlaylistId = selectedPlaylistId;
+    // The new playlist becomes the active one.
+    state.currentPlaylistId = playlist.playlistId;
     updateModeText();
-    if (selectedPlaylistId) {
-      await switchView(selectedPlaylistId);
-    }
+    await switchView(playlist.playlistId);
     return playlist;
   });
 

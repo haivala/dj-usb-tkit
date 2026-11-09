@@ -298,7 +298,9 @@ pub(super) fn pdb_track_by_media_path<'a>(
 /// doesn't list: the edit would leave them disagreeing, so it is refused, and
 /// the user is pointed at the repair that adds the missing rows.
 pub(super) fn track_not_in_usb_database(media_path: &str) -> BackendError {
-    BackendError::NotFound(tr::cues_error_not_in_usb_database(media_path.trim()))
+    BackendError::NotFound(tr::track_detail_cues_error_not_in_usb_database(
+        media_path.trim(),
+    ))
 }
 
 /// Stage the device `export.pdb` and build its bytes with the t00 tempo and/or
@@ -656,9 +658,9 @@ pub fn key_option_groups(notation: KeyNotation) -> Vec<KeyOptionGroup> {
 fn normalize_key_input(key: &str) -> BackendResult<String> {
     let trimmed = key.trim();
     if !KEY_OPTIONS.contains(&trimmed) {
-        return Err(BackendError::Validation(tr::cues_error_unknown_key(
-            trimmed,
-        )));
+        return Err(BackendError::Validation(
+            tr::track_detail_cues_error_unknown_key(trimmed),
+        ));
     }
     Ok(trimmed.to_string())
 }
@@ -693,9 +695,9 @@ fn normalize_cues(
         .filter(|c| !c.playback_start && !c.memory)
         .count();
     if hot_count > MAX_HOT_CUES as usize {
-        return Err(BackendError::Validation(tr::cues_error_too_many(
-            MAX_HOT_CUES,
-        )));
+        return Err(BackendError::Validation(
+            tr::track_detail_cues_error_too_many(MAX_HOT_CUES),
+        ));
     }
     if inputs.iter().filter(|c| c.playback_start).count() > 1 {
         return Err(BackendError::Internal(
@@ -968,6 +970,7 @@ impl BackendService {
             cues,
             detail_waveform,
             key_options: key_option_groups(key_notation_setting(&conn)?),
+            max_hot_cues: MAX_HOT_CUES,
             genre: metadata.genre,
             rating: metadata.rating,
             release_date: metadata.release_date,
@@ -1009,7 +1012,9 @@ impl BackendService {
         if let Some(bpm) = req.bpm
             && !(bpm > 0.0 && bpm <= 999.0)
         {
-            return Err(BackendError::Validation(tr::cues_error_bpm_range()));
+            return Err(BackendError::Validation(
+                tr::track_detail_cues_error_bpm_range(),
+            ));
         }
 
         let key = req.key.as_deref().map(normalize_key_input).transpose()?;
@@ -1070,9 +1075,9 @@ impl BackendService {
             .pop()
             .ok_or_else(|| BackendError::NotFound(tr::error_track_not_found(&track_id)))?;
         let status_text = if anlz_regenerated {
-            tr::cues_saved(cues.len()).render()
+            tr::track_detail_cues_saved(cues.len()).render()
         } else {
-            tr::cues_saved_no_cache(cues.len()).render()
+            tr::track_detail_cues_saved_no_cache(cues.len()).render()
         };
         Ok(SaveTrackAnalysisEditsData {
             track_id,
@@ -1139,6 +1144,7 @@ impl BackendService {
             detail_waveform: read_pwv5_from_anlz(dat_path)
                 .map(|b| base64::engine::general_purpose::STANDARD.encode(b)),
             key_options: key_option_groups(notation),
+            max_hot_cues: MAX_HOT_CUES,
             genre: metadata.genre,
             rating: metadata.rating,
             release_date: metadata.release_date,
@@ -1180,7 +1186,7 @@ impl BackendService {
         on_progress(
             0,
             USB_SAVE_STEPS,
-            &tr::cues_progress_checking_track().render(),
+            &tr::track_detail_cues_progress_checking_track().render(),
         );
 
         // 1. USB connected? A failure here is the "block the save" contract.
@@ -1212,7 +1218,9 @@ impl BackendService {
         if let Some(bpm) = req.bpm
             && !(bpm > 0.0 && bpm <= 999.0)
         {
-            return Err(BackendError::Validation(tr::cues_error_bpm_range()));
+            return Err(BackendError::Validation(
+                tr::track_detail_cues_error_bpm_range(),
+            ));
         }
         let key = req.key.as_deref().map(normalize_key_input).transpose()?;
         let normalized = match req.cues.as_deref() {
@@ -1245,7 +1253,7 @@ impl BackendService {
         on_progress(
             1,
             USB_SAVE_STEPS,
-            &tr::cues_progress_writing_analysis_files().render(),
+            &tr::track_detail_cues_progress_writing_analysis_files().render(),
         );
         let anlz_cues = new_cues.as_deref().map(anlz_cues_from_track_cues);
         rewrite_anlz_bundle_files(
@@ -1259,7 +1267,11 @@ impl BackendService {
         )?;
 
         // 5b. PDB tempo/key, in place on the device.
-        on_progress(2, USB_SAVE_STEPS, &tr::cues_progress_writing_pdb().render());
+        on_progress(
+            2,
+            USB_SAVE_STEPS,
+            &tr::track_detail_cues_progress_writing_pdb().render(),
+        );
         if let Some((staged_pdb, bytes)) = pdb_patch {
             atomic_write_bytes(&staged_pdb, &bytes)?;
             super::usb_staging::write_back_if_changed(&usb_root, super::usb_staging::DbKind::Pdb)?;
@@ -1268,7 +1280,7 @@ impl BackendService {
         on_progress(
             3,
             USB_SAVE_STEPS,
-            &tr::cues_progress_updating_library_track().render(),
+            &tr::track_detail_cues_progress_updating_library_track().render(),
         );
         // 6. Local master write (mandatory when a match is found) — before the
         //    eDB commit so a local failure aborts before the device diverges.
@@ -1326,7 +1338,11 @@ impl BackendService {
         };
 
         // 7. eDB write + write-back to the device.
-        on_progress(4, USB_SAVE_STEPS, &tr::cues_progress_writing_edb().render());
+        on_progress(
+            4,
+            USB_SAVE_STEPS,
+            &tr::track_detail_cues_progress_writing_edb().render(),
+        );
         let tx = edb_conn.transaction()?;
         let content_columns = load_table_columns_tx(&tx, "content")?;
         if let Some(cues) = new_cues.as_deref() {
@@ -1368,7 +1384,7 @@ impl BackendService {
         on_progress(
             USB_SAVE_STEPS,
             USB_SAVE_STEPS,
-            &tr::cues_progress_saved().render(),
+            &tr::track_detail_cues_progress_saved().render(),
         );
         // 8. Re-read the device bundle for the response.
         let bytes = std::fs::read(dat_path.with_extension("EXT"))
@@ -1386,7 +1402,7 @@ impl BackendService {
             None => None,
         };
         let cues = collapse_anlz_cues(&bytes);
-        let status_text = tr::cues_saved_usb(cues.len()).render();
+        let status_text = tr::track_detail_cues_saved_usb(cues.len()).render();
         Ok(SaveUsbTrackAnalysisEditsData {
             first_beat_ms: read_first_beat_from_anlz(&bytes),
             cues,

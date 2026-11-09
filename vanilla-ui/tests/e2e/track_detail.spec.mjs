@@ -79,7 +79,7 @@ function installTrackDetailMock(page, opts = {}) {
                   ...(opts.seedMemory || []).map((c) => ({ ...c, memory: true })),
                 ],
                 detailWaveform: detailWaveformB64,
-                keyOptions: [MAJORS, MAJORS.map((k) => `${k}m`)].map((keys, i) => ({ label: i ? "Minor" : "Major", keys: keys.map((k) => ({ value: k, label: keyLabel(k) })) })),
+                keyOptions: [MAJORS, MAJORS.map((k) => `${k}m`)].map((keys, i) => ({ label: i ? "Minor" : "Major", keys: keys.map((k) => ({ value: k, label: keyLabel(k) })) })), maxHotCues: 8,
                 genre: "Techno",
                 rating: 3,
                 releaseDate: "2009-10-09",
@@ -1970,7 +1970,7 @@ test("cue editor opens + saves from an app-playlist track row", async ({ page })
             return { ok: true, data: { trackId: "local-1", resolvedBy: "self", materialized: false } };
           }
           if (command === "get_track_detail") {
-            return { ok: true, data: { track, firstBeatMs: 90, cues: [], detailWaveform: detailWaveformB64, keyOptions: [MAJORS, MAJORS.map((k) => `${k}m`)].map((keys, i) => ({ label: i ? "Minor" : "Major", keys: keys.map((k) => ({ value: k, label: k })) })) } };
+            return { ok: true, data: { track, firstBeatMs: 90, cues: [], detailWaveform: detailWaveformB64, keyOptions: [MAJORS, MAJORS.map((k) => `${k}m`)].map((keys, i) => ({ label: i ? "Minor" : "Major", keys: keys.map((k) => ({ value: k, label: k })) })), maxHotCues: 8 } };
           }
           if (command === "save_track_analysis_edits") {
             return {
@@ -2139,13 +2139,13 @@ function installUsbTrackDetailMock(page, mockOpts = {}) {
                 items: [{ id: "hist-1", name: "HISTORY 2024-01-01", source: "mock", trackCount: 1, tracks: [{}] }],
                 counts: { importedPlaylists: 1, importedTracks: 1 },
                 warnings: [],
-                warningCount: 0,
+                warningText: "",
               },
             };
           }
           if (command === "fetch_usb_playlist_tracks" || command === "fetch_usb_history_tracks") return tracksResponse;
           if (command === "get_usb_track_detail") {
-            return { ok: true, data: { firstBeatMs: 100, cues: [{ id: "c1", positionMs: 5000, colorId: 5, name: "Old" }], detailWaveform: detailWaveformB64, keyOptions: [MAJORS, MAJORS.map((k) => `${k}m`)].map((keys, i) => ({ label: i ? "Minor" : "Major", keys: keys.map((k) => ({ value: k, label: k })) })), genre: "House", rating: 2, releaseDate: "2015-06-01", genreOptions: ["House"] } };
+            return { ok: true, data: { firstBeatMs: 100, cues: [{ id: "c1", positionMs: 5000, colorId: 5, name: "Old" }], detailWaveform: detailWaveformB64, keyOptions: [MAJORS, MAJORS.map((k) => `${k}m`)].map((keys, i) => ({ label: i ? "Minor" : "Major", keys: keys.map((k) => ({ value: k, label: k })) })), maxHotCues: 8, genre: "House", rating: 2, releaseDate: "2015-06-01", genreOptions: ["House"] } };
           }
           if (command === "save_usb_track_metadata_edits") {
             const r = payload?.request || {};

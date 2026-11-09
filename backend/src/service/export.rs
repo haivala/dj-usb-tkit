@@ -1,6 +1,6 @@
 //! Export to USB implementation.
 
-use crate::utils::{byte_size, byte_size_precise, counted, warning_suffix};
+use crate::utils::{byte_size, byte_size_precise, counted, warning_text};
 use std::collections::{HashMap, HashSet};
 use std::path::{Path, PathBuf};
 
@@ -1884,7 +1884,6 @@ impl BackendService {
             &playlist.name,
             exported_tracks,
             skipped_tracks,
-            warning_suffix(warning_count),
             if options.prune_stale {
                 tr::export_sync_mirror()
             } else {
@@ -1902,7 +1901,7 @@ impl BackendService {
             exported_artworks,
             exported_analysis_files,
             status_text,
-            warning_count,
+            warning_text: warning_text(warning_count),
             warnings,
         })
     }

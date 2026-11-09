@@ -297,10 +297,7 @@ fn user_like_flow_imports_sources_analyzes_and_adds_from_library_usb_and_history
     assert_eq!(usb_playlists_data.done_text, format!("Done — {summary}"));
     assert_eq!(
         usb_playlists_data.status_text,
-        format!(
-            "USB playlists loaded: {playlist_count}{}",
-            backend::utils::warning_suffix(usb_playlists_data.warning_count)
-        ),
+        format!("USB playlists loaded: {playlist_count}"),
     );
     let usb_items = usb_playlists_data.items;
     let usb_playlist = usb_items
@@ -1552,6 +1549,8 @@ fn save_usb_track_analysis_edits_writes_device_and_local_master() {
         .expect("usb detail");
     assert_eq!(detail.cues.len(), 2);
     assert!(detail.detail_waveform.is_some());
+    // The editor's hot-cue slots are the save's limit.
+    assert_eq!(detail.max_hot_cues, 8);
     assert_eq!(
         detail
             .key_options

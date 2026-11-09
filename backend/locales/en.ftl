@@ -3,35 +3,37 @@
 # to this file.
 #
 # Keys: [ui-]<area>-<thing>[-<variant>][-<attribute>], lowercase kebab-case.
-# `ui-` marks a key JS or index.html reads. See "Keys and comments" in
-# USB_TEXT_CATALOG_PLAN.md until docs/ has the translator guide.
+# `ui-` marks a key JS or index.html reads. docs/TRANSLATING.md has the rules
+# for keys and comments, and how to add a language.
 #
 # Areas:
 #   pages:    library, usb, usb-playlists, usb-history, usb-player-menu, playlist,
 #             event-log, backups, track-detail, settings, header, sidebar
 #   dialogs:  add-to, convert, drive-name, group-edit, help, playlist-import,
 #             tracklist-export
-#   JS only:  job (also the progress bar), update, playback
+#   JS only:  job (also the progress bar), update, playback, startup
 #   Rust:     export, diagnostics, parity, repair, track-list, analysis, scan, job,
 #             migration, transcode, error, format (numbers and sizes)
 #   shared:   common (generic dialog buttons and words only); markup repeated on
 #             several pages: selection-bar, track-table, rating; and one area per
 #             <template> used on more than one page, named from its id
 #             (tplTrackRow is track-row): track-row, track-row-empty, cover-img
+#   status:   the status line's shared parts (the warning count), on every page
 # A piece of work that needs a new area adds it here.
+
+## status
+
+# The link to the Event Log after a status line's result ("Playlist order saved | (2 warnings)").
+# $count: how many warnings the operation logged; never 0, which shows no link.
+status-warning-count = { $count ->
+    [one] ({ $count } warning)
+   *[other] ({ $count } warnings)
+}
 
 ## usb
 
 # The native folder dialog's title, from choosing a USB.
 usb-root-dialog-title = Select USB root folder
-
-# The warning count on a USB status line, after its result
-# ("Playlist order saved | (2 warnings)").
-# $count: how many warnings the operation logged; never 0, which shows nothing.
-usb-warning-count = { $count ->
-    [one] { $count } warning
-   *[other] { $count } warnings
-}
 
 # The status line after choosing a USB folder that's ready. $path: the folder.
 usb-root-selected = USB root selected: { $path }. Running diagnostics...
@@ -1513,12 +1515,11 @@ export-space-free = { $size } free on USB
 # Before the line when the export doesn't fit. $line: the line.
 export-space-does-not-fit = Doesn't fit: { $line }
 # The status line after an export. $playlist: its name. $count: the tracks exported.
-# $skipped: the tracks left out. $warnings: a warning count (" | (2 warnings)") or nothing.
-# $mode: export-sync-mirror or export-sync-additive.
+# $skipped: the tracks left out. $mode: export-sync-mirror or export-sync-additive.
 export-complete = Export complete: { $playlist } - { $count ->
     [one] { $count } track
    *[other] { $count } tracks
-}, { $skipped } skipped{ $warnings } [sync: { $mode }]
+}, { $skipped } skipped [sync: { $mode }]
 export-sync-mirror = mirror
 export-sync-additive = additive
 # Status lines when an export is refused.
@@ -1953,80 +1954,80 @@ playlist-import-error-nothing-imported = { $count ->
    *[other] none of the { $count } tracks in "{ $playlist }" could be imported
 }: files not found on this computer or not supported
 
-## selection
+## selection-bar
 
 # The tooltip of the selection bar's time when some selected tracks have no length yet.
 # $count: how many of them.
-selection-duration-unknown = { $count ->
+selection-bar-duration-unknown = { $count ->
     [one] { $count } of the selected tracks has no length yet
    *[other] { $count } of the selected tracks have no length yet
 }
 # The selection bar's total length of the selected tracks.
 # $duration: the length, as 1:02:03 or 3:45.
-selection-duration = · { $duration }
+selection-bar-duration = · { $duration }
 # The same, when some of them have no length yet, so the total is at least this.
-selection-duration-at-least = · { $duration }+
+selection-bar-duration-at-least = · { $duration }+
 
-## track-details
+## track-detail
 
 # The status line after saving genre, rating or release date of tracks.
 # $count: the tracks saved.
-track-details-saved = Saved track details for { $count ->
+track-detail-saved = Saved track details for { $count ->
     [one] { $count } track
    *[other] { $count } tracks
 }
 # The same, for tracks on the USB.
 # $count: the tracks saved.
-track-details-saved-usb = Saved track details for { $count ->
+track-detail-saved-usb = Saved track details for { $count ->
     [one] { $count } track
    *[other] { $count } tracks
 } to USB
 
 
 # The progress bar while the job runs.
-track-details-progress-checking-tracks = USB: Checking tracks
-track-details-progress-writing-pdb = USB: Writing export.pdb
-track-details-progress-writing-edb = USB: Writing exportLibrary.db
-track-details-progress-saved = USB: Track details saved
+track-detail-progress-checking-tracks = USB: Checking tracks
+track-detail-progress-writing-pdb = USB: Writing export.pdb
+track-detail-progress-writing-edb = USB: Writing exportLibrary.db
+track-detail-progress-saved = USB: Track details saved
 
 # $min, $max: the earliest and latest year allowed.
-track-details-error-release-date = release date must be YYYY, YYYY-MM or YYYY-MM-DD, from { $min } to { $max }
+track-detail-error-release-date = release date must be YYYY, YYYY-MM or YYYY-MM-DD, from { $min } to { $max }
 
-## cues
+## track-detail-cues
 
 # The status line after saving a track's cues. $count: the cues saved.
-cues-saved = Saved { $count ->
+track-detail-cues-saved = Saved { $count ->
     [one] { $count } cue
    *[other] { $count } cues
 }
 # The same, when the track's analysis cache couldn't be rewritten yet.
 # $count: the cues saved.
-cues-saved-no-cache = Saved { $count ->
+track-detail-cues-saved-no-cache = Saved { $count ->
     [one] { $count } cue
    *[other] { $count } cues
 } (analysis cache not updated yet)
 # The same, for a track on the USB. $count: the cues saved.
-cues-saved-usb = Saved { $count ->
+track-detail-cues-saved-usb = Saved { $count ->
     [one] { $count } cue
    *[other] { $count } cues
 } to USB
 
 
 # The progress bar while the job runs.
-cues-progress-checking-track = USB: Checking track
-cues-progress-writing-analysis-files = USB: Writing analysis files
-cues-progress-writing-pdb = USB: Writing export.pdb
-cues-progress-updating-library-track = Updating library track
-cues-progress-writing-edb = USB: Writing exportLibrary.db
-cues-progress-saved = USB: Cue edits saved
+track-detail-cues-progress-checking-track = USB: Checking track
+track-detail-cues-progress-writing-analysis-files = USB: Writing analysis files
+track-detail-cues-progress-writing-pdb = USB: Writing export.pdb
+track-detail-cues-progress-updating-library-track = Updating library track
+track-detail-cues-progress-writing-edb = USB: Writing exportLibrary.db
+track-detail-cues-progress-saved = USB: Cue edits saved
 
 # Saving the cue editor. $path: the track's file on the USB.
-cues-error-not-in-usb-database = this track is missing from one of the USB's two databases, so it can't be edited on the USB ({ $path }). Preview Fixes shows what can be repaired.
+track-detail-cues-error-not-in-usb-database = this track is missing from one of the USB's two databases, so it can't be edited on the USB ({ $path }). Preview Fixes shows what can be repaired.
 # $key: the key as typed.
-cues-error-unknown-key = unknown key: { $key }
+track-detail-cues-error-unknown-key = unknown key: { $key }
 # $max: the most cue points a track can have (8).
-cues-error-too-many = at most { $max } cue points are allowed
-cues-error-bpm-range = bpm must be greater than 0 and at most 999
+track-detail-cues-error-too-many = at most { $max } cue points are allowed
+track-detail-cues-error-bpm-range = bpm must be greater than 0 and at most 999
 
 ## playback
 
@@ -2099,6 +2100,8 @@ ui-backups-title = Backups
 ## ui-common
 
 ui-common-cancel = Cancel
+# The confirm dialog's title and button when the asker names none.
+ui-common-confirm = Confirm
 ui-common-save = Save
 
 ## ui-convert
@@ -2217,8 +2220,6 @@ ui-header-playlist-badge = Playlist
 ui-header-settings = Settings
 # The Settings button's label when an update is available.
 ui-header-settings-update-available = Settings (update available)
-# The confirm dialog's title and button when the asker names none.
-ui-confirm-default = Confirm
 # The status line's text when nothing is going on: at startup, and once playback stops.
 ui-header-status = Idle
 ui-header-update-banner-dismiss-aria-label = Dismiss
@@ -2714,13 +2715,6 @@ ui-track-detail-save-cues-failed = Could not save cues: { $error }
 ui-track-detail-max-cues = Maximum 8 cue points.
 ui-track-detail-cue-already-there = A cue is already there.
 
-## ui-track-actions
-
-# Status lines when a row's action fails. $error: the error's message.
-ui-track-actions-analyze-failed = Analyze failed: { $error }
-ui-track-actions-stop-failed = Stop failed: { $error }
-ui-track-actions-playback-failed = Playback failed: { $error }
-
 ## ui-track-row
 
 ui-track-row-drag-to-reorder = Drag to reorder
@@ -2765,6 +2759,11 @@ ui-track-table-track = Track
 ui-track-table-usb-history-tracks-aria-label = USB history tracks
 ui-track-table-usb-playlist-tracks-aria-label = USB playlist tracks
 ui-track-table-year = Year
+
+# Status lines when a row's action fails. $error: the error's message.
+ui-track-table-analyze-failed = Analyze failed: { $error }
+ui-track-table-stop-failed = Stop failed: { $error }
+ui-track-table-playback-failed = Playback failed: { $error }
 
 ## ui-tracklist-export
 

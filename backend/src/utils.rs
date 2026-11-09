@@ -184,12 +184,13 @@ pub fn counted(count: usize, one: &str, many: &str) -> String {
     format!("{count} {}", if count == 1 { one } else { many })
 }
 
-/// The status line's warning note (" | (2 warnings)"), empty without warnings.
-pub fn warning_suffix(warning_count: usize) -> String {
+/// The status line's link to the Event Log ("(2 warnings)"), a field of its own beside the
+/// status text; empty without warnings, which shows no link.
+pub fn warning_text(warning_count: usize) -> String {
     if warning_count == 0 {
         String::new()
     } else {
-        format!(" | ({})", crate::i18n::tr::usb_warning_count(warning_count))
+        crate::i18n::tr::status_warning_count(warning_count).render()
     }
 }
 
@@ -306,14 +307,14 @@ pub fn suppress_console_window(cmd: &mut std::process::Command) {
 mod list_text_tests {
     use super::{
         byte_size, byte_size_precise, duration_text, local_date_time, track_list_summary,
-        track_list_total_time, warning_suffix,
+        track_list_total_time, warning_text,
     };
 
     #[test]
-    fn warning_suffix_is_empty_without_warnings_and_counts_otherwise() {
-        assert_eq!(warning_suffix(0), "");
-        assert_eq!(warning_suffix(1), " | (1 warning)");
-        assert_eq!(warning_suffix(2), " | (2 warnings)");
+    fn warning_text_is_empty_without_warnings_and_counts_otherwise() {
+        assert_eq!(warning_text(0), "");
+        assert_eq!(warning_text(1), "(1 warning)");
+        assert_eq!(warning_text(2), "(2 warnings)");
     }
 
     #[test]

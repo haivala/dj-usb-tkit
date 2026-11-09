@@ -46,7 +46,7 @@
         statusText: "mock playlists status",
         doneText: "mock done",
         warnings: [],
-        warningCount: 0,
+        warningText: "",
         playlistUsbExportStatus: [],
         ...overrides,
         items
@@ -73,7 +73,7 @@
           ...counts
         },
         warnings: [],
-        warningCount: 0,
+        warningText: "",
         ...rest,
         items
       };
@@ -191,7 +191,7 @@
         exportedArtworks: 0,
         exportedAnalysisFiles: 0,
         warnings: [],
-        warningCount: 0,
+        warningText: "",
         ...overrides
       };
     },
@@ -205,6 +205,8 @@
         case "allow_asset_paths":
           return null;
         case "get_backend_log_buffer": return [];
+        // Startup's one-time data upgrades: nothing pending.
+        case "run_data_migrations": return ok({ ran: [], retryLater: [] });
         // The real English texts (ui_texts.en.json, via coverage-fixture.mjs): specs check labels.
         case "get_ui_texts": return ok(window.__e2eUiTexts);
         case "detect_external_rekordbox_db":
@@ -254,8 +256,8 @@
     fetch_usb_history_tracks: withListSummary,
     browse_source_files: withListSummary,
     get_playlist_tracks: withListSummary,
-    reorder_usb_playlists: (data) => ({ statusText: "mock reorder status", warningCount: 0, ...data }),
-    remove_usb_playlist: (data) => ({ statusText: "mock remove status", warningCount: 0, ...data }),
+    reorder_usb_playlists: (data) => ({ statusText: "mock reorder status", warningText: "", ...data }),
+    remove_usb_playlist: (data) => ({ statusText: "mock remove status", warningText: "", ...data }),
     set_usb_device_name: (data) => ({ statusText: "mock rename status", updated: true, ...data }),
     restore_usb_backup: (data) => ({ statusText: "mock restore status", ...data }),
     delete_usb_backup: (data) => ({ statusText: "mock delete status", ...data })

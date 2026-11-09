@@ -34,7 +34,6 @@ import {
   FRONTEND_DB_KEY_CUE_FOLLOW_GRID,
 } from "../../settings_keys.mjs";
 
-export const MAX_CUES = 8;
 export const MIN_SPAN_MS = 1000;
 export const DEFAULT_SPAN_MS = 60_000;
 export const DEFAULT_VIEW_BARS = 60;
@@ -160,6 +159,8 @@ export function createTrackDetailController(el, prefs = {}) {
     key: null,
     // The key picker's `{ label, keys }` groups, from the backend's track detail.
     keyGroups: [],
+    // How many hot cues the editor offers (its A–H slots), from the backend's track detail.
+    maxHotCues: 0,
     genre: null,
     rating: 0, // stars, 0 (none) to 5
     releaseDate: null, // YYYY, YYYY-MM or YYYY-MM-DD, or null for none
@@ -843,7 +844,7 @@ export function createTrackDetailController(el, prefs = {}) {
     return slot;
   }
 
-  /// Always all eight A–H slots, so the editor keeps its height as cues come
+  /// Always every hot-cue slot (A–H), so the editor keeps its height as cues come
   /// and go. The playback-start cue sits in the "Playback starts at" row.
   function renderCueList() {
     const host = el.trackDetailCueList;
@@ -851,7 +852,7 @@ export function createTrackDetailController(el, prefs = {}) {
     const hot = hotCues().sort(byPosition);
     const labels = cueLabels();
     for (const cue of hot) host.appendChild(cueRow(cue, labels.get(cue.tempId)));
-    for (let i = hot.length; i < MAX_CUES; i++) {
+    for (let i = hot.length; i < working.maxHotCues; i++) {
       host.appendChild(emptySlot(String.fromCharCode(65 + i)));
     }
     const startHost = el.trackDetailStartCue;
@@ -861,7 +862,7 @@ export function createTrackDetailController(el, prefs = {}) {
       if (start) startHost.appendChild(cueRow(start, labels.get(start.tempId)));
       startHost.hidden = !start;
     }
-    el.trackDetailAddCue.disabled = hot.length >= MAX_CUES;
+    el.trackDetailAddCue.disabled = hot.length >= working.maxHotCues;
     renderMemorySlot();
   }
 
@@ -1215,7 +1216,7 @@ export function createTrackDetailController(el, prefs = {}) {
     /// memory point too), keeping its name and colour if it had them.
     addCue(positionMs, { free = false } = {}) {
       const ordinal = hotCues().length;
-      if (ordinal >= MAX_CUES) return null;
+      if (ordinal >= working.maxHotCues) return null;
       const dur = working.durationMs || 0;
       let ms = Number.isFinite(positionMs) ? positionMs : currentPositionMs();
       if (snaps(free)) ms = snapToBeat(ms);
@@ -1527,6 +1528,7 @@ export function createTrackDetailController(el, prefs = {}) {
       bpm,
       key,
       keyOptions: keyGroups,
+      maxHotCues,
       genre = null,
       rating = 0,
       releaseDate = null,
@@ -1546,6 +1548,7 @@ export function createTrackDetailController(el, prefs = {}) {
       working.bpm = bpm != null ? bpm : track?.bpm ?? null;
       working.key = key != null ? key : track?.key ?? null;
       working.keyGroups = Array.isArray(keyGroups) ? keyGroups : [];
+      working.maxHotCues = Number(maxHotCues) || 0;
       working.genre = genre || null;
       working.rating = Number(rating) || 0;
       working.releaseDate = releaseDate || null;
@@ -1757,6 +1760,7 @@ async function openUsbTrackDetail(ctx, track, { rowKey = null } = {}) {
     bpm: track.bpm,
     key: track.key,
     keyOptions: detail.keyOptions,
+    maxHotCues: detail.maxHotCues,
     genre: detail.genre,
     rating: detail.rating,
     releaseDate: detail.releaseDate,
@@ -1856,6 +1860,7 @@ export async function openTrackDetail(ctx, track, opts = {}) {
     bpm: detail.track?.bpm,
     key: detail.track?.key,
     keyOptions: detail.keyOptions,
+    maxHotCues: detail.maxHotCues,
     genre: detail.genre,
     rating: detail.rating,
     releaseDate: detail.releaseDate,

@@ -28,6 +28,11 @@ Failure responses follow:
 }
 ```
 
+Text a response carries (`statusText`, `message`, labels and tooltips) is in the
+app's current language, from the text catalog (`backend/locales/<language>.ftl`);
+the log file gets the same lines in English. `code`, `validationType` and other
+ids never change with the language.
+
 ### Paginated track lists
 
 `browse_source_files`, `get_playlist_tracks` and the USB per-list track
@@ -37,7 +42,8 @@ pagination shape: the request carries `query`, `sortBy` (`title` | `artist` |
 `sortDir` (`asc` | `desc`), `offset` or `cursor`, and `limit` (`0` ⇒
 unpaginated). The response carries `items`, `total` (filtered count),
 `nextCursor`, `hasMore`, plus any whole-set aggregates (`totalDurationMs`,
-`durationUnknownCount`). Filtering and sorting are server-side so they span the
+`durationUnknownCount`, and `durationText`, the footer's "Total time: 1:02:03
+(2 without length)"). Filtering and sorting are server-side so they span the
 entire list, not just the loaded page.
 
 `offset` is a position in the filtered, sorted list and takes precedence over
@@ -62,7 +68,8 @@ Analysis (`analyze_new_tracks`) reports each track on `job.progress`: a
 column order (artwork, waveform, length, BPM / key) as each is found, then a
 `trackReady` event. The pieces carry only their own fields; the `trackReady`
 event carries `track`, the track's whole library row as saved (or as it was,
-when the analysis failed), which the frontend shows in place of its copy.
+when the analysis failed), which the frontend shows in place of its copy, and
+`libraryDurationText`, the library footer's Total time with that track's length.
 
 ### Whole track rows
 
@@ -131,8 +138,9 @@ drive selection from being rendered against a newer selected drive.
   `statusText`: once every track moved, the new folder replaces the old one;
   otherwise both stay.
 - `get_track_detail` — returns `{ track, firstBeatMs, cues, detailWaveform,
-  keyOptions, genre, rating, releaseDate, genreOptions }` for the cue editor
-  (see `docs/CUE_EDITOR.md`). `rating` is 0–5 stars; `releaseDate` is the date
+  keyOptions, maxHotCues, genre, rating, releaseDate, genreOptions }` for the cue
+  editor (see `docs/CUE_EDITOR.md`). `maxHotCues` is the editor's hot-cue slots
+  (8, the save's limit); `rating` is 0–5 stars; `releaseDate` is the date
   export writes to the PDB and the eDB (the track's date, completed from its
   file timestamp as export does); `genreOptions` is every library genre,
   sorted ignoring case. `detailWaveform` is
@@ -155,7 +163,7 @@ drive selection from being rendered against a newer selected drive.
   whole row, and `statusText` ("Saved 3 cues", noting when the analysis cache
   wasn't rewritten).
 - `get_usb_track_detail` — `{ usbRoot, usbAnalysisPathRaw, usbMediaPathRaw? }` →
-  reads `{ firstBeatMs, cues, detailWaveform, keyOptions }` straight off an
+  reads `{ firstBeatMs, cues, detailWaveform, keyOptions, maxHotCues }` straight off an
   **on-USB** ANLZ bundle for the cue editor opened from a USB playlist / history
   row (no local `tracks` row need exist), plus `{ genre, rating, releaseDate }`
   from the track's PDB row at `usbMediaPathRaw` (none when it's missing; the
@@ -228,7 +236,8 @@ drive selection from being rendered against a newer selected drive.
 - `get_selection_duration` — `{ view, trackIds, … }`, the list named by
   `view`: `library` (as its sources are set), `playlist` with `id`, `usbPlaylist` / `usbHistory` with
   `usbRoot` and `id` → `{ totalDurationMs, durationUnknownCount, trackCount,
-  durationUnknownText }` (the time's tooltip, empty when every length is known) for
+  durationText, durationUnknownText }` (the time, "· 3:45" or "· 3:45+", and its
+  tooltip, empty when every length is known) for
   the selection bar's time: the ticked tracks summed by the same rule as that
   list's Total time, over the whole list, not the searched one.
 
@@ -237,16 +246,21 @@ drive selection from being rendered against a newer selected drive.
 - `get_frontend_settings`
 - `set_frontend_setting` — `ui_language_v1` takes a language code the app has a
   catalog for (`i18n::languages()`) and switches the backend's language straight
-  away; an empty value is English. An unknown code is a validation error.
+  away; an empty value is English. An unknown code is a validation error, and so
+  is a change while any job runs (USB jobs, library scan, imports, analysis,
+  Convert, update install): the UI reloads on a change, which would lose the
+  job's progress.
 
 ### UI texts
 
-- `get_ui_texts` → `{ language, texts }`: every `ui-` key of the text catalog
+- `get_ui_texts` → `{ language, texts, languages }`: every `ui-` key of the text catalog
   (`backend/locales/<language>.ftl`) in the current language, English where it
   has none. Called once at startup, before anything renders (`ui_texts.mjs`). A
   text is a string with `{name}` placeholders for `t`, or, for a text with a
   count, its forms by plural category (`{ "one": …, "other": … }`) for
-  `tCount`, which picks one with `Intl.PluralRules` for `language`.
+  `tCount`, which picks one with `Intl.PluralRules` for `language`. `languages`
+  is every language the app has, `[{ code, name }]`, English first, each named
+  in itself, for Settings' language list.
 
 ### Playlists
 
@@ -257,7 +271,8 @@ drive selection from being rendered against a newer selected drive.
   order, with playlists never reordered newest first
 - `delete_playlist` → `{ playlistId, deleted, statusText }`
 - `list_playlists` — each playlist also carries `deleteConfirmText`, what the dialog asks before
-  deleting it
+  deleting it, and `exportStatusText` / `exportStatusTooltip`, the playlist page's export
+  line ("Last exported 2026-04-07 13:00 to MYUSB (12 tracks).")
 - `get_playlist_tracks` — with `usbRoot` (the selected USB), each track also carries
   `exportFile` when export puts something other than its own file on that USB:
   `{ kind: "transcode" | "convert" | "refused", badge, tooltip }`, the FMT badge's text and
@@ -290,7 +305,8 @@ drive selection from being rendered against a newer selected drive.
 - `reorder_playlist_tracks`
 - `refresh_playlist_export_status` — recomputes every playlist's
   `PlaylistUsbExportStatus` (`sameNameExistsOnUsb`, `locksReorder` with its
-  `reorderLockTooltip`, and the sidebar's `markLabel`) against the
+  `reorderLockTooltip`, the sidebar's `markLabel`, and `exportStatusText`, the
+  export line with "On this USB." in front when it is) against the
   connected USB and the current export sync-mode setting, reading only the
   staged PDB/eDB (no USB access). Called when the sync mode changes.
 
@@ -448,13 +464,15 @@ re-derive that lock condition from raw USB-scan/export-setting state.
 
 `analyze_new_tracks` adds to the analysis job and returns at once: `jobId`, `queued`, `skipped` and
 the status line's `message`. The job's events carry the rest, including each track's saved row and,
-on `job.completed`, the final `message`, `warnings`, `warningCount` and `logMessage`. Rows waiting
+on `job.completed`, the final `message` and, when the job logged warnings, `warningText`. Rows waiting
 their turn come on `job.tracks_waiting` (`waitingTrackIds`, `waitingTooltip`) and leave on the
 track's first progress event, or on `job.tracks_not_waiting` after a cancel.
 
-`fetch_usb_playlists`, `fetch_usb_histories`,
-`remove_usb_playlist` and `export_to_usb` return `warningCount` beside `warnings`: how many of
-them are warnings or errors, for the status line's "(N warnings)" link to the Event Log.
+`fetch_usb_playlists`, `fetch_usb_histories`, `reorder_usb_playlists`,
+`remove_usb_playlist` and `export_to_usb` return `warningText` beside `statusText`: the
+status line's link to the Event Log ("(2 warnings)", counting the warnings and errors among
+`warnings`), empty when there are none. The UI shows it after the status line; nothing in
+`statusText` is parsed.
 
 `analyze_new_tracks` takes the raw
 `bpmRange` string (e.g. `"70-180"`) from the settings dropdown and parses/validates it server-side

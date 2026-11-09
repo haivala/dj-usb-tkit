@@ -129,16 +129,16 @@ pub(crate) fn selection_duration<T: ListTrack>(
         duration_unknown_text: if duration_unknown_count == 0 {
             String::new()
         } else {
-            tr::selection_duration_unknown(duration_unknown_count).render()
+            tr::selection_bar_duration_unknown(duration_unknown_count).render()
         },
         duration_text: if total_duration_ms == 0 {
             String::new()
         } else {
             let duration = crate::utils::duration_text(total_duration_ms);
             if duration_unknown_count == 0 {
-                tr::selection_duration(duration)
+                tr::selection_bar_duration(duration)
             } else {
-                tr::selection_duration_at_least(duration)
+                tr::selection_bar_duration_at_least(duration)
             }
             .render()
         },

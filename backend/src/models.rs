@@ -108,10 +108,11 @@ pub struct JobEventPayload {
     /// On `job.tracks_waiting`: the tooltip for those rows' own button.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub waiting_tooltip: Option<String>,
-    /// On an analysis `job.completed`: how many warnings and errors the job logged (they reached
-    /// the Event Log as the backend logged them).
+    /// On an analysis `job.completed` with warnings: the status line's link to the Event Log
+    /// ("(2 warnings)"), shown after `message` (the warnings reached the Event Log as the
+    /// backend logged them).
     #[serde(skip_serializing_if = "Option::is_none")]
-    pub warning_count: Option<usize>,
+    pub warning_text: Option<String>,
     pub timestamp: String,
 }
 
@@ -1810,10 +1811,10 @@ pub struct FetchUsbPlaylistsData {
     /// The progress footer's last line after the read.
     pub done_text: String,
     pub warnings: Vec<WarningEntry>,
-    /// The warn/error entries among `warnings`, for the status line's
-    /// "(N warnings)" (`logging::count_warnings`).
+    /// The status line's link to the Event Log ("(2 warnings)"), shown after `status_text`;
+    /// empty without warnings (`utils::warning_text`).
     #[serde(default)]
-    pub warning_count: usize,
+    pub warning_text: String,
     pub playlist_usb_export_status: Vec<PlaylistUsbExportStatus>,
 }
 
@@ -1840,10 +1841,10 @@ pub struct RemoveUsbPlaylistData {
     pub files_deleted: usize,
     pub tracks_kept_shared: usize,
     pub warnings: Vec<WarningEntry>,
-    /// The warn/error entries among `warnings`, for the status line's
-    /// "(N warnings)" (`logging::count_warnings`).
+    /// The status line's link to the Event Log ("(2 warnings)"), shown after `status_text`;
+    /// empty without warnings (`utils::warning_text`).
     #[serde(default)]
-    pub warning_count: usize,
+    pub warning_text: String,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -1862,10 +1863,10 @@ pub struct ReorderUsbPlaylistsData {
     #[serde(default)]
     pub status_text: String,
     pub warnings: Vec<WarningEntry>,
-    /// The warn/error entries among `warnings`, for the status line's
-    /// "(N warnings)" (`logging::count_warnings`).
+    /// The status line's link to the Event Log ("(2 warnings)"), shown after `status_text`;
+    /// empty without warnings (`utils::warning_text`).
     #[serde(default)]
-    pub warning_count: usize,
+    pub warning_text: String,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -1963,10 +1964,14 @@ pub struct FetchUsbHistoriesData {
     #[serde(default)]
     pub status_text: String,
     pub warnings: Vec<WarningEntry>,
-    /// The warn/error entries among `warnings`, for the status line's
-    /// "(N warnings)" (`logging::count_warnings`).
-    #[serde(default)]
+    /// The warn/error entries among `warnings` (`logging::count_warnings`), kept so
+    /// `warning_text` is rendered when answering, as the other texts are.
+    #[serde(default, skip_serializing)]
     pub warning_count: usize,
+    /// The status line's link to the Event Log ("(2 warnings)"), shown after `status_text`;
+    /// empty without warnings (`utils::warning_text`).
+    #[serde(default)]
+    pub warning_text: String,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -2281,10 +2286,10 @@ pub struct ExportToUsbData {
     #[serde(default)]
     pub status_text: String,
     pub warnings: Vec<WarningEntry>,
-    /// The warn/error entries among `warnings`, for the status line's
-    /// "(N warnings)" (`logging::count_warnings`).
+    /// The status line's link to the Event Log ("(2 warnings)"), shown after `status_text`;
+    /// empty without warnings (`utils::warning_text`).
     #[serde(default)]
-    pub warning_count: usize,
+    pub warning_text: String,
 }
 
 // --- USB Diagnostics ---
@@ -3128,6 +3133,8 @@ pub struct TrackDetail {
     /// The keys the cue editor offers, grouped for its picker. A save only
     /// accepts one of these.
     pub key_options: Vec<KeyOptionGroup>,
+    /// How many hot cues the editor offers (its A–H slots); a save refuses more.
+    pub max_hot_cues: u8,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub genre: Option<String>,
     /// Star rating, 0 (none) to 5.
@@ -3228,6 +3235,8 @@ pub struct UsbTrackAnalysisDetail {
     pub detail_waveform: Option<String>,
     /// Same as `TrackDetail::key_options`.
     pub key_options: Vec<KeyOptionGroup>,
+    /// Same as `TrackDetail::max_hot_cues`.
+    pub max_hot_cues: u8,
     /// The track's genre in the USB's PDB.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub genre: Option<String>,

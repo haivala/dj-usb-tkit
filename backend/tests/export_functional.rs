@@ -1945,9 +1945,8 @@ fn export_to_usb_skips_missing_source_files_and_reports_warning() {
     assert_eq!(
         data.status_text,
         format!(
-            "Export complete: {} - 1 track, 1 skipped{} [sync: additive]",
-            data.playlist_name,
-            backend::utils::warning_suffix(data.warning_count)
+            "Export complete: {} - 1 track, 1 skipped [sync: additive]",
+            data.playlist_name
         ),
     );
     assert!(
@@ -4768,13 +4767,7 @@ fn reorder_usb_playlists_persists_order_and_keeps_parity() {
     assert!(reordered.ok, "reorder usb playlists failed: {reordered:?}");
     let reordered = reordered.data.expect("reorder data");
     assert_eq!(reordered.reordered, 3);
-    assert_eq!(
-        reordered.status_text,
-        format!(
-            "Playlist order saved{}",
-            backend::utils::warning_suffix(reordered.warning_count)
-        ),
-    );
+    assert_eq!(reordered.status_text, "Playlist order saved");
 
     let refetched = backend.fetch_usb_playlists(FetchUsbPlaylistsRequest {
         usb_root: Some(usb.to_string_lossy().to_string()),

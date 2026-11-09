@@ -150,8 +150,8 @@ export function createConfirmDialogController(el) {
   return {
     isOpen: dialog.isOpen,
     close: (result) => dialog.close(!!result),
-    open({ title, message, confirmLabel = t("ui-confirm-default") }) {
-      el.confirmTitle.textContent = title || t("ui-confirm-default");
+    open({ title, message, confirmLabel = t("ui-common-confirm") }) {
+      el.confirmTitle.textContent = title || t("ui-common-confirm");
       el.confirmMessage.textContent = message || "";
       el.confirmOkBtn.textContent = confirmLabel;
       return dialog.open(el.confirmOkBtn);

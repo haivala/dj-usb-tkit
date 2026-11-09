@@ -37,7 +37,6 @@ use crate::service::bpm_key::AnalysisEngine;
 use crate::service::export_helpers::{LocalAnalysisResult, LocalTrackForAnalysis};
 use crate::service::key_notation::{self, KeyNotation};
 use crate::service::{BackendService, has_core_analysis_fields, now};
-use crate::utils::warning_suffix;
 
 /// What a job tells whoever shows it to the user.
 #[derive(Debug, Clone)]
@@ -646,7 +645,7 @@ impl Coordinator {
             job_id: self.job_id.clone(),
             warnings: std::mem::take(&mut self.warnings),
             warning_count,
-            message: finished_text(analyzed, failed, self.incomplete, warning_count),
+            message: finished_text(analyzed, failed, self.incomplete),
         });
         self.emit(&summary);
     }
@@ -739,14 +738,14 @@ fn log_text(
     }
 }
 
-/// The status line turns what follows the `|` into a link to the Event Log.
-fn finished_text(analyzed: usize, failed: usize, incomplete: usize, warnings: usize) -> String {
-    let result = if incomplete > 0 {
+/// The status line; the job event's `warning_text` follows it as a link to the Event Log.
+fn finished_text(analyzed: usize, failed: usize, incomplete: usize) -> String {
+    if incomplete > 0 {
         tr::analysis_finished_incomplete(analyzed, failed, incomplete)
     } else {
         tr::analysis_finished(analyzed, failed)
-    };
-    format!("{result}{}", warning_suffix(warnings))
+    }
+    .render()
 }
 
 fn panic_text(payload: &(dyn std::any::Any + Send)) -> String {
@@ -948,12 +947,12 @@ mod tests {
             "Analysis: 3 tracks in 0:12 (analyzed 2, failed 0, incomplete 1)"
         );
         assert_eq!(
-            finished_text(0, 1, 0, 0),
+            finished_text(0, 1, 0),
             "Analysis finished: analyzed 0, failed 1"
         );
         assert_eq!(
-            finished_text(2, 0, 1, 1),
-            "Analysis finished: analyzed 2, failed 0, incomplete 1 | (1 warning)"
+            finished_text(2, 0, 1),
+            "Analysis finished: analyzed 2, failed 0, incomplete 1"
         );
     }
 }

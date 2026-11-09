@@ -89,12 +89,15 @@ fn saving_the_language_switches_it_for_every_thread() {
 
     // Commands run on worker threads (Tauri's blocking pool, the analysis coordinator); the
     // language isn't per thread.
-    let from_worker = std::thread::spawn(|| tr::usb_warning_count(2usize).to_string())
+    let from_worker = std::thread::spawn(|| tr::status_warning_count(2usize).to_string())
         .join()
         .expect("worker thread");
     assert!(is_test_language(&from_worker), "{from_worker:?}");
     assert!(from_worker.contains('2'), "{from_worker:?}");
-    assert_eq!(tr::usb_warning_count(2usize).render_english(), "2 warnings");
+    assert_eq!(
+        tr::status_warning_count(2usize).render_english(),
+        "(2 warnings)"
+    );
 
     // Clearing the setting is English again.
     let cleared = backend.set_frontend_setting(SetFrontendSettingRequest {

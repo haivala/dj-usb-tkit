@@ -1,17 +1,16 @@
-//! The JS inventory: every English string in the UI's JS, so none is added unnoticed while the
-//! text moves to the catalog (USB_TEXT_CATALOG_PLAN.md, pieces 5 to 8).
+//! The JS inventory: every English string left in the UI's JS, so none is added unnoticed. UI
+//! text lives in the catalog (`backend/locales/en.ftl`): JS shows it through `t`/`tCount` or a
+//! response field built with `tr::`.
 //!
 //! Each string literal and template literal in `vanilla-ui/` (not its tests, scripts or
 //! build output) that looks like text must be listed in `vanilla-ui/tests/ui_text_inventory.txt`,
-//! and each entry listed there must still be in its file. So new English fails here (new UI
-//! text goes through `tr::` or `t`), and a piece that moves a string deletes its entry.
+//! and each entry listed there must still be in its file. So new English fails here.
 //!
-//! The file's lines are `<to>\t<file>:<line>\t<text as a JSON string>`, under a `## piece N`
-//! heading (`<to>` is `response` or `t`), `## not text` (`ignore`) or `## stays English`
-//! (`english`). Matching is on file and text; the line only helps a reader.
-//! `UPDATE_UI_TEXT_INVENTORY=1 cargo test -p backend --test ui_text_inventory` rewrites it:
-//! gone entries dropped, lines refreshed, new strings added as `?`, which fails the check until
-//! someone classifies them.
+//! The file's lines are `<to>\t<file>:<line>\t<text as a JSON string>`, under `## not text`
+//! (`ignore`) or `## stays English` (`english`). Matching is on file and text; the line only
+//! helps a reader. `UPDATE_UI_TEXT_INVENTORY=1 cargo test -p backend --test ui_text_inventory`
+//! rewrites it: gone entries dropped, lines refreshed, new strings added as `?` under
+//! `## unclassified`, which fails the check until each moves to the catalog or is listed.
 
 use std::collections::{BTreeMap, BTreeSet};
 use std::fmt::Write as _;
@@ -410,30 +409,6 @@ fn ui_files(ui_dir: &Path) -> Vec<PathBuf> {
     files
 }
 
-/// Which piece of the plan moves a file's text.
-fn piece(file: &str) -> &'static str {
-    let starts = |prefixes: &[&str]| prefixes.iter().any(|p| file.starts_with(p));
-    if starts(&["components/usb/", "components/backups/"]) {
-        "5"
-    } else if starts(&[
-        "components/library/",
-        "components/playlist/",
-        "components/shared/",
-        "track_table.mjs",
-    ]) {
-        "6"
-    } else if starts(&[
-        "components/track-detail/",
-        "components/playback/",
-        "waveform",
-        "playback_ui_state.mjs",
-    ]) {
-        "7"
-    } else {
-        "8"
-    }
-}
-
 /// One English string found in a file: (file, text) → first line.
 type Hits = BTreeMap<(String, String), usize>;
 
@@ -456,8 +431,8 @@ struct Entry {
 
 const NOT_TEXT: &str = "not text";
 const STAYS_ENGLISH: &str = "stays English";
-/// Under a `## piece N` heading. `?` is only what update mode writes for a new string.
-const TO_VALUES: &[&str] = &["response", "t", "?"];
+/// Where update mode writes a new string, as `?`.
+const UNCLASSIFIED: &str = "unclassified";
 
 /// Parses the inventory: `## <section>` headings, then `<to>\t<file>:<line>\t<json text>`.
 fn parse_inventory(content: &str) -> Result<Vec<(String, Entry)>, String> {
@@ -485,7 +460,8 @@ fn parse_inventory(content: &str) -> Result<Vec<(String, Entry)>, String> {
         let allowed = match section.as_str() {
             NOT_TEXT => &["ignore"][..],
             STAYS_ENGLISH => &["english"][..],
-            _ => TO_VALUES,
+            UNCLASSIFIED => &["?"][..],
+            _ => return Err(format!("{}: unknown section `## {section}`", at())),
         };
         if !allowed.contains(&to) {
             return Err(format!(
@@ -529,12 +505,11 @@ const HEADER: &str = "\
 # The JS inventory: every English string in the UI's JS. Checked by
 # backend/tests/ui_text_inventory.rs; see that file for the format.
 #
-# to: `response` (composed or counted text, or text picked by a decision on response data:
-# the response carries it, from a `tr::` function), `t` (a fixed label, or text shown before
-# any response; `tCount` with a count). `?` is a new string nobody has classified yet.
-# `## not text`: key names, codes, product names, CSS. `## stays English`: what a developer
-# reads (console messages, internal errors, runtime errors in the Event Log) and data written
-# to the stick. A piece that moves a string deletes its entry.
+# UI text belongs in the catalog (backend/locales/en.ftl), shown through `t` or a response
+# field from `tr::`; what's left in JS is listed here. `## not text`: key names, codes,
+# product names, CSS. `## stays English`: what a developer reads (console messages, internal
+# errors, runtime errors in the Event Log) and data written to the stick. `## unclassified`
+# (`?`): new strings update mode found, which fail until moved to the catalog or listed.
 ";
 
 fn render_inventory(hits: &Hits, inventory: &[(String, Entry)]) -> String {
@@ -552,7 +527,7 @@ fn render_inventory(hits: &Hits, inventory: &[(String, Entry)]) -> String {
     for ((file, text), line) in hits {
         let (section, to) = match known.get(&(file.as_str(), text.as_str())) {
             Some((section, to)) => (section.to_string(), to.to_string()),
-            None => (format!("piece {}", piece(file)), "?".to_string()),
+            None => (UNCLASSIFIED.to_string(), "?".to_string()),
         };
         let json = serde_json::to_string(text).expect("serialize");
         sections
@@ -612,8 +587,8 @@ fn every_english_string_in_the_ui_js_is_in_the_inventory() {
         .collect();
     assert!(
         unclassified.is_empty(),
-        "Not classified in {}: mark each `response` or `t`, or move it under `## not text` or \
-         `## stays English`\n{}",
+        "Not classified in {}: move each to the catalog (`t`, or a response field from `tr::`), \
+         or under `## not text` or `## stays English`\n{}",
         inventory_path.display(),
         unclassified.join("\n")
     );
@@ -815,7 +790,7 @@ return /a"b/.test(c);
 
     #[test]
     fn a_new_string_fails_and_a_listed_one_passes() {
-        let listed = inventory("## piece 5\nt\tusb.mjs:3\t\"Please wait…\"\n");
+        let listed = inventory("## stays English\nenglish\tusb.mjs:3\t\"Please wait…\"\n");
         let mut hits = Hits::new();
         hits_in("usb.mjs", "x = 'Please wait…';", &mut hits);
         assert_eq!(compare(&hits, &listed), (vec![], vec![]));
@@ -829,7 +804,7 @@ return /a"b/.test(c);
     #[test]
     fn a_listed_string_that_is_gone_fails() {
         let listed = inventory(
-            "## piece 5\nt\tusb.mjs:3\t\"Please wait…\"\n## not text\nignore\tusb.mjs:9\t\"Escape\"\n",
+            "## stays English\nenglish\tusb.mjs:3\t\"Please wait…\"\n## not text\nignore\tusb.mjs:9\t\"Escape\"\n",
         );
         let (new, gone) = compare(&Hits::new(), &listed);
         assert!(new.is_empty());
@@ -841,8 +816,10 @@ return /a"b/.test(c);
         assert!(parse_inventory("## not text\nt\ta.mjs:1\t\"x\"\n").is_err());
         assert!(parse_inventory("## stays English\nignore\ta.mjs:1\t\"x\"\n").is_err());
         assert!(parse_inventory("## stays English\nenglish\ta.mjs:1\t\"x\"\n").is_ok());
-        assert!(parse_inventory("## piece 6\nmaybe\ta.mjs:1\t\"x\"\n").is_err());
-        assert!(parse_inventory("## piece 6\nt\ta.mjs:1\tnot json\n").is_err());
+        assert!(parse_inventory("## unclassified\n?\ta.mjs:1\t\"x\"\n").is_ok());
+        assert!(parse_inventory("## unclassified\nt\ta.mjs:1\t\"x\"\n").is_err());
+        assert!(parse_inventory("## piece 6\nt\ta.mjs:1\t\"x\"\n").is_err());
+        assert!(parse_inventory("## stays English\nenglish\ta.mjs:1\tnot json\n").is_err());
     }
 
     #[test]

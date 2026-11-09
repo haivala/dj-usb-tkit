@@ -60,11 +60,16 @@ function elements(document, ids) {
   return Object.fromEntries(ids.map((id) => [id, document.getElementById(id)]));
 }
 
-test("setStatusText turns warning suffixes into event-log links", () => {
+test("setStatusText shows the backend's warning text as an event-log link after the line", () => {
   const { document } = makeDom().window;
   const statusText = document.getElementById("statusText");
 
-  setStatusText({ statusText }, "USB playlists loaded: 1 | (2 warnings)", 2);
+  // A "|" in the line itself is only text.
+  setStatusText({ statusText }, "Saved | done", "");
+  assert.equal(statusText.textContent, "Saved | done");
+  assert.equal(statusText.querySelector(".status-warning-link"), null);
+
+  setStatusText({ statusText }, "USB playlists loaded: 1", "(2 warnings)");
 
   assert.equal(statusText.textContent, "USB playlists loaded: 1 | (2 warnings)");
   assert.equal(statusText.querySelector(".status-warning-link")?.textContent, "(2 warnings)");

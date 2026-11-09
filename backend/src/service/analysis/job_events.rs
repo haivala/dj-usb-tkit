@@ -43,7 +43,7 @@ fn job_payload(event: &str, job_id: &str, percent: usize, message: String) -> Jo
         track: None,
         waiting_track_ids: None,
         waiting_tooltip: None,
-        warning_count: None,
+        warning_text: None,
         timestamp: Utc::now().to_rfc3339(),
     }
 }
@@ -122,7 +122,8 @@ pub fn analysis_event_payload(event: &AnalysisEvent) -> JobEventPayload {
         AnalysisEvent::Track { job_id, progress } => track_payload(job_id, progress),
         AnalysisEvent::JobFinished(summary) => JobEventPayload {
             current: 1,
-            warning_count: Some(summary.warning_count),
+            warning_text: Some(crate::utils::warning_text(summary.warning_count))
+                .filter(|text| !text.is_empty()),
             ..job_payload(
                 "job.completed",
                 &summary.job_id,
@@ -242,7 +243,7 @@ mod tests {
         assert_eq!(finished["event"], "job.completed");
         assert_eq!(finished["percent"], 100);
         assert_eq!(finished["message"], "Analysis finished");
-        assert_eq!(finished["warningCount"], 2);
-        assert_ui_reads(&["job.completed", "payload.warningCount"]);
+        assert_eq!(finished["warningText"], "(2 warnings)");
+        assert_ui_reads(&["job.completed", "payload.warningText"]);
     }
 }

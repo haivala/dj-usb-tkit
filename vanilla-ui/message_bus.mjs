@@ -49,9 +49,7 @@ function normalizeStatus(status) {
   if (!status || typeof status !== "object") return null;
   const text = normalizeText(status.text);
   if (!text) return null;
-  const warningCountRaw = Number(status.warningCount);
-  const warningCount = Number.isFinite(warningCountRaw) ? Math.max(0, warningCountRaw) : 0;
-  return { text, warningCount };
+  return { text, warningText: normalizeText(status.warningText) };
 }
 
 function normalizeEventLog(eventLog) {
@@ -88,23 +86,16 @@ export function normalizeUiMessage(input = {}) {
   };
 }
 
-export function setStatusText(el, text, warningCount = 0) {
+// The status line, and after it, when the backend sent one, the link to the Event Log
+// ("(2 warnings)"): its own response field, so no text is parsed here.
+export function setStatusText(el, text, warningText = "") {
   const target = el.statusText;
   const doc = target.ownerDocument;
-  target.textContent = "";
-  const str = String(text ?? "");
-  const n = Math.max(0, Number(warningCount) || 0);
-  const pipeIdx = n > 0 ? str.indexOf("|") : -1;
-  if (pipeIdx === -1) {
-    target.append(doc.createTextNode(str));
-    return;
-  }
-  const trailing = str.slice(pipeIdx + 1);
-  const leadingSpace = trailing.match(/^\s*/)[0];
-  target.append(doc.createTextNode(str.slice(0, pipeIdx + 1) + leadingSpace));
-  const link = cloneTemplate(doc, "tplStatusWarningLink");
-  link.textContent = trailing.slice(leadingSpace.length);
-  target.append(link);
+  target.replaceChildren(doc.createTextNode(String(text ?? "")));
+  if (!warningText) return;
+  const warning = cloneTemplate(doc, "tplStatusWarningLink");
+  warning.querySelector(".status-warning-link").textContent = warningText;
+  target.append(warning);
 }
 
 // The one sink every UI message goes through: status bar, progress footer
@@ -119,7 +110,7 @@ export function emitMessage(ctx, input = {}) {
   }
 
   if (message.status) {
-    setStatusText(ctx.el, message.status.text, message.status.warningCount);
+    setStatusText(ctx.el, message.status.text, message.status.warningText);
   }
 
   if (message.eventLog) {
@@ -152,7 +143,7 @@ export function emitStatus(ctx, text, meta = {}) {
     level,
     source: meta.source || "ui",
     code: meta.code || null,
-    status: { text: statusText, warningCount: meta.warningCount || 0 },
+    status: { text: statusText, warningText: meta.warningText || "" },
     eventLog,
   });
 }

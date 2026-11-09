@@ -5278,9 +5278,8 @@ fn remove_usb_playlist_deletes_playlist_from_edb() {
     assert_eq!(
         removed_data.status_text,
         format!(
-            "Removed USB playlist: My Playlist [db 1, pdb {}]{}",
-            removed_data.removed_from_pdb,
-            backend::utils::warning_suffix(removed_data.warning_count)
+            "Removed USB playlist: My Playlist [db 1, pdb {}]",
+            removed_data.removed_from_pdb
         ),
     );
 

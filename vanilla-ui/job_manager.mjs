@@ -364,7 +364,7 @@ export function handleJobEvent(ctx, payload) {
         level: "info",
         source: "job",
         code: `${jobType}.completed`,
-        status: { ...status, warningCount: payload.warningCount || 0 }
+        status: { ...status, warningText: payload.warningText || "" }
       });
     }
     if (jobType === "analysis") {

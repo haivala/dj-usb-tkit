@@ -60,7 +60,7 @@ fn validate_release_date(text: Option<&str>) -> BackendResult<ReleaseDateEdit> {
     }
     let max_year = u32::try_from(chrono::Local::now().year() + 1).unwrap_or(u32::MAX);
     let invalid =
-        || BackendError::Validation(tr::track_details_error_release_date(MIN_YEAR, max_year));
+        || BackendError::Validation(tr::track_detail_error_release_date(MIN_YEAR, max_year));
     let number = |part: &str, max_len: usize| {
         (!part.is_empty() && part.len() <= max_len && part.bytes().all(|b| b.is_ascii_digit()))
             .then(|| part.parse::<u32>().ok())
@@ -509,7 +509,7 @@ impl BackendService {
             .collect::<BackendResult<Vec<_>>>()?;
         let ids: Vec<String> = items.iter().map(|item| item.track_id.clone()).collect();
         let tracks = super::library::track_rows(&conn, &ids)?;
-        let status_text = tr::track_details_saved(items.len()).render();
+        let status_text = tr::track_detail_saved(items.len()).render();
         Ok(SaveTrackMetadataEditsData {
             items,
             tracks,
@@ -574,7 +574,7 @@ impl BackendService {
         on_progress(
             0,
             STEPS,
-            &tr::track_details_progress_checking_tracks().render(),
+            &tr::track_detail_progress_checking_tracks().render(),
         );
 
         let usb_root = resolve_usb_root(Some(&req.usb_root))?;
@@ -616,7 +616,7 @@ impl BackendService {
             .collect();
         let pdb_patch = build_pdb_metadata_patch(&usb_root, &media_paths, &edits)?;
 
-        on_progress(1, STEPS, &tr::track_details_progress_writing_pdb().render());
+        on_progress(1, STEPS, &tr::track_detail_progress_writing_pdb().render());
         if let Some((staged_pdb, bytes)) = pdb_patch.write {
             atomic_write_bytes(&staged_pdb, &bytes)?;
             super::usb_staging::write_back_if_changed(&usb_root, super::usb_staging::DbKind::Pdb)?;
@@ -663,7 +663,7 @@ impl BackendService {
         }
         tx.commit()?;
 
-        on_progress(2, STEPS, &tr::track_details_progress_writing_edb().render());
+        on_progress(2, STEPS, &tr::track_detail_progress_writing_edb().render());
         let tx = edb_conn.transaction()?;
         let content_columns = load_table_columns_tx(&tx, "content")?;
         let edb_genre_id = match &edits.genre {
@@ -720,7 +720,7 @@ impl BackendService {
         self.refresh_engine_library(&usb_root);
         self.invalidate_usb_parse_cache();
 
-        on_progress(STEPS, STEPS, &tr::track_details_progress_saved().render());
+        on_progress(STEPS, STEPS, &tr::track_detail_progress_saved().render());
         let paths: Vec<String> = items
             .iter()
             .map(|item| item.usb_media_path_raw.clone())
@@ -735,7 +735,7 @@ impl BackendService {
             .filter_map(|item| item.local_track_id.clone())
             .collect();
         let local_tracks = super::library::track_rows(&*self.db.connect()?, &local_ids)?;
-        let status_text = tr::track_details_saved_usb(items.len()).render();
+        let status_text = tr::track_detail_saved_usb(items.len()).render();
         Ok(SaveUsbTrackMetadataEditsData {
             items,
             tracks,
