@@ -1994,8 +1994,8 @@ track-detail-saved-usb = Saved track details for { $count ->
 
 # The progress bar while the job runs.
 track-detail-progress-checking-tracks = USB: Checking tracks
-track-detail-progress-writing-pdb = USB: Writing export.pdb
-track-detail-progress-writing-edb = USB: Writing exportLibrary.db
+track-detail-progress-writing-pdb = USB: Writing PDB
+track-detail-progress-writing-edb = USB: Writing eDB
 track-detail-progress-saved = USB: Track details saved
 
 # $min, $max: the earliest and latest year allowed.
@@ -2024,9 +2024,9 @@ track-detail-cues-saved-usb = Saved { $count ->
 # The progress bar while the job runs.
 track-detail-cues-progress-checking-track = USB: Checking track
 track-detail-cues-progress-writing-analysis-files = USB: Writing analysis files
-track-detail-cues-progress-writing-pdb = USB: Writing export.pdb
+track-detail-cues-progress-writing-pdb = USB: Writing PDB
 track-detail-cues-progress-updating-library-track = Updating library track
-track-detail-cues-progress-writing-edb = USB: Writing exportLibrary.db
+track-detail-cues-progress-writing-edb = USB: Writing eDB
 track-detail-cues-progress-saved = USB: Cue edits saved
 
 # Saving the cue editor. $path: the track's file on the USB.

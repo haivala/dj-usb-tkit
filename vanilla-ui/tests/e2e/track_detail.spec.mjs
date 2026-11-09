@@ -2172,7 +2172,7 @@ function installUsbTrackDetailMock(page, mockOpts = {}) {
             if (opts.tauriEvents) {
               const job = { jobId: "usb-save-1", jobType: "usb_write", stage: "save_usb_track_analysis_edits" };
               window.__emitJobEvent({ ...job, event: "job.started", percent: 0, message: "USB: Saving cue edits" });
-              window.__emitJobEvent({ ...job, event: "job.progress", percent: 40, message: "USB: Writing export.pdb" });
+              window.__emitJobEvent({ ...job, event: "job.progress", percent: 40, message: "USB: Writing PDB" });
               await usbSaveGate;
               window.__emitJobEvent({ ...job, event: "job.completed", percent: 100, message: "USB: Cue edits saved" });
             }
@@ -2384,7 +2384,7 @@ test("a USB save runs as a background job: the progress bar shows each write and
 
   // While the stick is being written, the footer shows the backend's step.
   await expect(page.locator("#progressFooter")).toHaveClass(/active/);
-  await expect(page.locator("#progressText")).toContainText("USB: Writing export.pdb");
+  await expect(page.locator("#progressText")).toContainText("USB: Writing PDB");
   // ... and the UI still responds (switch to USB history and back).
   await page.locator('.nav-item[data-view="usb-history"]').click();
   await page.locator('.nav-item[data-view="usb-playlists"]').click();

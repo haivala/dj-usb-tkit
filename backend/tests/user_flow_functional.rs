@@ -2014,9 +2014,9 @@ fn save_usb_track_analysis_edits_bpm_and_key_keep_pdb_edb_anlz_and_library_in_sy
         [
             (0, 5, "USB: Checking track"),
             (1, 5, "USB: Writing analysis files"),
-            (2, 5, "USB: Writing export.pdb"),
+            (2, 5, "USB: Writing PDB"),
             (3, 5, "Updating library track"),
-            (4, 5, "USB: Writing exportLibrary.db"),
+            (4, 5, "USB: Writing eDB"),
             (5, 5, "USB: Cue edits saved"),
         ]
         .map(|(c, t, m)| (c, t, m.to_string()))
