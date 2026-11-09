@@ -1,4 +1,4 @@
-import { test, expect } from "./coverage-fixture.mjs";
+import { test, expect, uiTextCheck, useTestLanguage } from "./coverage-fixture.mjs";
 
 function installWaveformStartupMock(page) {
   return page.addInitScript(() => {
@@ -480,4 +480,16 @@ test("Import ticks rekordbox and Mixxx playlists, imports each and opens the fir
   await expect(page.locator('.source-chip-toggle[data-rekordbox-db="true"]')).toBeChecked();
   await expect(page.locator('.source-chip-toggle[data-mixxx-db="true"]')).toBeChecked();
   await expect(page.locator("#statusText")).toContainText("Imported 2 of 2 playlists: 4 tracks");
+});
+
+test("in the test language, the playlist import dialog shows only catalog text and data", async ({ page }) => {
+  await installSourceChipAnalysisMock(page);
+  await useTestLanguage(page);
+  await page.goto("/");
+  await page.locator("#importPlaylistBtn").click();
+  await expect(page.locator("#playlistImportOverlay")).toBeVisible();
+  await expect(page.locator("#playlistImportList .playlist-import-column")).toHaveCount(2);
+  const check = uiTextCheck(page);
+  await check.collect();
+  await check.expectNoEnglish();
 });

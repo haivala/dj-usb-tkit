@@ -233,7 +233,7 @@ export async function initApp(ctx) {
   // Before anything renders: the page's text is the backend's. The window stays hidden
   // (tauri.conf.json `visible: false`) until `show_window` below.
   if (!(await loadUiTexts(ctx))) return;
-  pushEventLog({ level: "info", source: "startup", message: "App init started" });
+  ctx.logToFile({ level: "info", source: "startup", message: "App init started" });
   await ctx.hydrateLocalStorageFromFrontendSettingsDb();
   const themeManager = createThemeManager(ctx);
   const accentManager = createAccentManager(ctx, themeManager);
@@ -245,7 +245,7 @@ export async function initApp(ctx) {
   await ctx.setupConsoleFileLogging();
   ctx.logInfo("Frontend console bridge initialized");
   ctx.setupRuntimeErrorLogging();
-  pushEventLog({ level: "info", source: "startup", message: "Console/event logging ready" });
+  ctx.logToFile({ level: "info", source: "startup", message: "Console/event logging ready" });
 
   ctx.setProgress(false, 0, t("ui-job-idle"));
   await ctx.loadUsbDevices();
@@ -264,7 +264,7 @@ export async function initApp(ctx) {
   ctx.el.sourceBar.classList.remove("collapsed");
   ctx.bindEvents();
   await ctx.switchView("library");
-  pushEventLog({ level: "info", source: "startup", message: "Initial view ready" });
+  ctx.logToFile({ level: "info", source: "startup", message: "Initial view ready" });
 
   showHelpOnFirstVisit(ctx);
   invoke("show_window").catch(() => {});
@@ -279,7 +279,7 @@ export async function initApp(ctx) {
         }
       }
     } catch {}
-    pushEventLog({ level: "info", source: "startup", message: "Backend event listeners registered" });
+    ctx.logToFile({ level: "info", source: "startup", message: "Backend event listeners registered" });
   } catch (error) {
     ctx.logError("Backend event listener registration failed:", error);
     pushEventLog({

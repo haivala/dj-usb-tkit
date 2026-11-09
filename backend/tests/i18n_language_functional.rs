@@ -408,3 +408,56 @@ fn numbers_take_the_language_decimal_separator_and_english_logs_keep_the_point()
     let shown = backend::utils::track_list_summary(1234, 0);
     assert!(shown.contains("1234"), "{shown}");
 }
+
+#[test]
+fn the_language_doesnt_change_while_a_job_runs() {
+    let _test = LanguageTest::start();
+    let root = tempdir().expect("temp root");
+    let backend = BackendCommands::new(root.path().join("data")).expect("create backend");
+    let language = |value: &str| SetFrontendSettingRequest {
+        key: LANGUAGE_SETTING.to_string(),
+        value: Some(value.to_string()),
+    };
+
+    let refused = backend.set_frontend_setting_unless_job_running(language(TEST_LANGUAGE), true);
+    assert!(!refused.ok, "{refused:?}");
+    let error = refused.error.expect("error");
+    assert_eq!(
+        error.message,
+        "a job is running. Try again when it has finished."
+    );
+    assert_eq!(i18n::current_language(), ENGLISH);
+
+    // Other settings save while a job runs.
+    let other = backend.set_frontend_setting_unless_job_running(
+        SetFrontendSettingRequest {
+            key: "ui_key_notation_v1".to_string(),
+            value: Some("camelot".to_string()),
+        },
+        true,
+    );
+    assert!(other.ok, "{other:?}");
+
+    let saved = backend.set_frontend_setting_unless_job_running(language(TEST_LANGUAGE), false);
+    assert!(saved.ok, "{saved:?}");
+    assert_eq!(i18n::current_language(), TEST_LANGUAGE);
+}
+
+#[test]
+fn the_ui_texts_list_every_language_named_in_itself() {
+    let _test = LanguageTest::start();
+    let texts = i18n::ui_texts();
+    let codes: Vec<&str> = texts.languages.iter().map(|l| l.code.as_str()).collect();
+    assert_eq!(codes, i18n::languages());
+    assert_eq!(texts.languages[0].name, "English");
+    let test_language = texts
+        .languages
+        .iter()
+        .find(|l| l.code == TEST_LANGUAGE)
+        .expect("the test language, in a debug build");
+    assert!(
+        is_test_language(&test_language.name),
+        "{}",
+        test_language.name
+    );
+}

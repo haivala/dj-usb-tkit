@@ -13,6 +13,8 @@ import { cloneTemplate } from "./ui_utils.mjs";
 
 let texts = {};
 let pluralRules = new Intl.PluralRules("en");
+let language = "en";
+let languages = [];
 
 const TEXT_ATTRIBUTES = [
   ["textTooltip", "data-tooltip"],
@@ -27,8 +29,10 @@ const UI_TEXTS_FAILED = "The app couldn't load its texts. Restart it; if this ke
 
 export function setUiTexts(data) {
   texts = data?.texts && typeof data.texts === "object" ? data.texts : {};
+  language = data?.language || "en";
+  languages = Array.isArray(data?.languages) ? data.languages : [];
   try {
-    pluralRules = new Intl.PluralRules(data?.language || "en");
+    pluralRules = new Intl.PluralRules(language);
   } catch {
     pluralRules = new Intl.PluralRules("en");
   }
@@ -39,6 +43,16 @@ function fill(text, args) {
 }
 
 // A missing key shows as the key itself, so it's seen (and the test language check catches it).
+// The language the texts are in, and every language the app has (`{ code, name }`, English
+// first), for Settings' language list.
+export function uiLanguage() {
+  return language;
+}
+
+export function uiLanguages() {
+  return languages;
+}
+
 export function t(key, args = {}) {
   const text = texts[key];
   return typeof text === "string" ? fill(text, args) : key;
@@ -82,6 +96,6 @@ export async function loadUiTexts(ctx) {
     return false;
   }
   applyUiTexts(ctx.document);
-  ctx.document.documentElement.lang = data?.language || "en";
+  ctx.document.documentElement.lang = language;
   return true;
 }

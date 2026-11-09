@@ -2477,7 +2477,7 @@ test("cue button is disabled for an un-analyzed track", async ({ page }) => {
 test("in the test language, the cue editor shows only catalog text and data", async ({ page }) => {
   await useTestLanguage(page);
   await openCueEditor(page);
-  const check = uiTextCheck(page, "track-detail");
+  const check = uiTextCheck(page);
   await check.collect();
-  await check.expectAllowed();
+  await check.expectNoEnglish();
 });

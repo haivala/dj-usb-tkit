@@ -12,6 +12,9 @@
 //! messages and result, and -- for a copy of the USB at `brokenUsbRoot` with
 //! one audio file renamed, one analysis file emptied and one playlist entry
 //! dropped from the eDB only -- the diagnostics and the repair preview.
+//!
+//! `DOC_FIXTURE_LANGUAGE` (e.g. `en-XA`, debug builds only) dumps the responses in that
+//! language instead of English, to find response text that isn't from the catalog.
 use backend::models::{
     AddSourceFoldersRequest, AnalyzeNewTracksRequest, ApiResponse, BrowseSourceFilesRequest,
     GetTrackDetailRequest, GetTracksByIdsRequest, ScanLibraryRequest,
@@ -51,6 +54,9 @@ fn main() {
     }
     let (data_dir, source_dir, editor_title, out) = (&args[1], &args[2], &args[3], &args[4]);
 
+    if let Ok(language) = env::var("DOC_FIXTURE_LANGUAGE") {
+        backend::i18n::set_language(&language).unwrap_or_else(|e| fail("set_language", e));
+    }
     let svc = BackendService::new(data_dir).unwrap_or_else(|e| fail("open backend", e));
     svc.scan_library(ScanLibraryRequest {
         source_roots: vec![source_dir.clone()],

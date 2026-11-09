@@ -39,6 +39,8 @@
 
 ## Unreleased
 
+- **New feature:** Settings has a Language choice. English is the only language so far. Changing it reloads the
+  window in the new language, and isn't possible while a job such as an export or analysis runs.
 - **Fix:** The Player Menu editor now always lists DATE ADDED last, where the players show it. Before, items added
   to the menu were listed below it.
 - **Fix:** A USB mounted read-only is now shown as read-only, and changing its USB audio formats or background
@@ -48,7 +50,7 @@
 - **Fix:** Each warning now shows once in the Event Log and the session log file. Before, most showed twice:
   once as it happened and again when its command finished.
 - **Improvement:** The Event Log and the "(N warnings)" counts show only what you can act on. Developer detail,
-  such as stage timings and database internals, now goes only to the session log file.
+  such as stage timings, database internals and the app's startup steps, now goes only to the session log file.
 - **Improvement:** A playlist's "Last exported" line shows the date as 2026-04-07 13:00, like the Backups page,
   instead of in the computer's regional format. The not-enough-space message on export gives sizes in KB, MB and
   GB like the rest of the app.

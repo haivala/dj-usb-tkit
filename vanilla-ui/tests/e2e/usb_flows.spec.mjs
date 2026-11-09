@@ -822,18 +822,20 @@ test("a failed USB list read retries when the page is opened again", async ({ pa
   await expect(page.locator('[data-usb-playlist="usb-1"]')).toBeVisible();
 });
 
-test("console.log messages appear in Event Log", async ({ page }) => {
+test("console warnings appear in the Event Log, console.log lines don't", async ({ page }) => {
   await installTauriMock(page, "valid");
   await page.goto("/");
 
   const marker = `console-mirror-${Date.now()}`;
   await page.evaluate((text) => {
-    console.log(text);
+    console.warn(text);
+    console.log(`${text}-log`);
   }, marker);
 
   await page.locator("#eventLogBtn").click();
 
   await expect(page.locator("#eventLogList")).toContainText(marker);
+  await expect(page.locator("#eventLogList")).not.toContainText(`${marker}-log`);
 });
 
 test("CSP security events appear in Event Log", async ({ page }) => {
@@ -851,33 +853,32 @@ test("CSP security events appear in Event Log", async ({ page }) => {
   await expect(page.locator("#eventLogList")).toContainText("CSP violation: style-src");
 });
 
-test("startup includes console bridge message in Event Log", async ({ page }) => {
+test("startup's developer lines go to the log file, not the Event Log", async ({ page }) => {
   await installTauriMock(page, "valid");
   await page.goto("/");
 
   await page.locator("#eventLogBtn").click();
-  await expect(page.locator("#eventLogList")).toContainText("Frontend console bridge initialized");
+  await expect(page.locator("#eventLogList")).not.toContainText("Frontend console bridge initialized");
+  await expect(page.locator("#eventLogList")).not.toContainText("Initial view ready");
 });
 
 test("Event Log source filter dropdown never grows duplicate options for a repeated source", async ({ page }) => {
   await installTauriMock(page, "valid");
   await page.goto("/");
 
-  // Startup alone already logs several "startup"-sourced events; add more
-  // "console"-sourced ones on top so the same source shows up repeatedly
-  // across renders -- ensureEventLogSourceOptions must still add each
-  // distinct source to the filter dropdown only once.
+  // Repeated "console"-sourced warnings show the same source across renders --
+  // ensureEventLogSourceOptions must still add each distinct source to the
+  // filter dropdown only once. (console.log and .info go to the log file only.)
   await page.evaluate(() => {
-    console.log("dup-source-1");
-    console.log("dup-source-2");
-    console.log("dup-source-3");
+    console.warn("dup-source-1");
+    console.warn("dup-source-2");
+    console.warn("dup-source-3");
   });
 
   await page.locator("#eventLogBtn").click();
 
   await expect(page.locator("#eventLogList")).toContainText("dup-source-3");
   await expect(page.locator('#eventLogSourceFilter option[value="console"]')).toHaveCount(1);
-  await expect(page.locator('#eventLogSourceFilter option[value="startup"]')).toHaveCount(1);
 });
 
 test("USB sub-nav reveal/hide and fallback to USB panel", async ({ page }) => {
@@ -942,7 +943,7 @@ test("Event Log flood remains capped", async ({ page }) => {
   await page.goto("/");
 
   await page.evaluate(() => {
-    for (let i = 0; i < 1200; i += 1) console.log(`flood-${i}`);
+    for (let i = 0; i < 1200; i += 1) console.warn(`flood-${i}`);
   });
 
   await page.locator("#eventLogBtn").click();
@@ -955,30 +956,30 @@ test("an open Event Log updates live: new entries on top, repeats coalesce, rows
   await page.locator("#eventLogBtn").click();
 
   const rows = page.locator("#eventLogList .event-log-row");
-  await page.evaluate(() => console.log("live-first"));
+  await page.evaluate(() => console.warn("live-first"));
   await expect(rows.first()).toContainText("live-first");
   // Tag a row node: an incremental update must leave it in place.
   await rows.first().evaluate((row) => { row.__kept = true; });
 
-  await page.evaluate(() => console.log("live-second"));
+  await page.evaluate(() => console.warn("live-second"));
   await expect(rows.first()).toContainText("live-second");
   expect(await rows.nth(1).evaluate((row) => row.__kept === true && row.textContent.includes("live-first"))).toBe(true);
 
   // A repeat moves the existing entry back to the top with its count.
-  await page.evaluate(() => console.log("live-first"));
+  await page.evaluate(() => console.warn("live-first"));
   await expect(rows.first()).toContainText("live-first");
   await expect(rows.first().locator(".event-log-count")).toHaveText("x2");
   await expect(page.locator("#eventLogList .event-log-row", { hasText: "live-first" })).toHaveCount(1);
 
-  // Entries hidden by the source filter don't show up.
-  await page.locator("#eventLogSourceFilter").selectOption("startup");
-  await page.evaluate(() => console.log("live-filtered-out"));
+  // Entries hidden by the level filter don't show up.
+  await page.locator("#eventLogLevelFilter").selectOption("error");
+  await page.evaluate(() => console.warn("live-filtered-out"));
   await expect(page.locator("#eventLogList")).not.toContainText("live-filtered-out");
-  await page.locator("#eventLogSourceFilter").selectOption("all");
+  await page.locator("#eventLogLevelFilter").selectOption("all");
 
   // A flood while open stays capped at the store's 500 entries.
   await page.evaluate(() => {
-    for (let i = 0; i < 1200; i += 1) console.log(`live-flood-${i}`);
+    for (let i = 0; i < 1200; i += 1) console.warn(`live-flood-${i}`);
   });
   await expect(page.locator("#eventLogSummary")).toContainText("500 events");
   await expect(rows).toHaveCount(500);
@@ -2056,7 +2057,11 @@ test("in the test language, the USB pages, Backups, Event Log and Settings show 
   });
   await useTestLanguage(page);
   await page.goto("/");
-  const check = uiTextCheck(page, "usb-pages");
+  const check = uiTextCheck(page);
+  await check.collect();
+  // The USB page before a USB is chosen.
+  await page.locator('.nav-item[data-view="usb"]').click();
+  await expect(page.locator("#usbEmptyState")).toBeVisible();
   await check.collect();
 
   await connectUsb(page);
@@ -2094,5 +2099,5 @@ test("in the test language, the USB pages, Backups, Event Log and Settings show 
   await expect(page.locator("#settingsDrawer")).toBeVisible();
   await check.collect();
 
-  await check.expectAllowed();
+  await check.expectNoEnglish();
 });

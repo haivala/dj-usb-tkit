@@ -1,4 +1,4 @@
-import { test, expect } from "./coverage-fixture.mjs";
+import { test, expect, offerTestLanguage, uiTextCheck, useTestLanguage } from "./coverage-fixture.mjs";
 
 function installBasicTauriMock(page, opts = {}) {
   return page.addInitScript(({ opts }) => {
@@ -521,4 +521,80 @@ test("settings update line offers one action, and the header button re-checks on
   await page.locator("#settingsBtn").click();
   await expect(line).toBeHidden();
   await expect(checkBtn).toBeVisible();
+});
+
+// The mock keeps the saved language in sessionStorage, so it outlives the reload, and refuses
+// the change while `e2eJobRunning` is set, as the backend does while a job runs.
+test("changing the language reloads the window in it, and a refused change keeps the page", async ({ page }) => {
+  await offerTestLanguage(page);
+  await page.addInitScript(() => {
+    window.localStorage.setItem("djusbtkit.helpSeen", "1");
+    window.__TAURI__ = {
+      event: { listen: async () => () => {} },
+      core: {
+        invoke: async (command, payload = {}) => {
+          const request = payload?.request || payload;
+          if (command === "get_ui_texts") {
+            const testLanguage = window.sessionStorage.getItem("e2eLanguage") === "en-XA";
+            return { ok: true, data: testLanguage ? window.__e2eUiTextsTestLanguage : window.__e2eUiTexts };
+          }
+          if (command === "set_frontend_setting" && request.key === "ui_language_v1") {
+            if (window.sessionStorage.getItem("e2eJobRunning")) {
+              return { ok: false, error: { code: "VALIDATION_ERROR", message: "a job is running. Try again when it has finished." } };
+            }
+            window.sessionStorage.setItem("e2eLanguage", request.value);
+            return { ok: true, data: { saved: true } };
+          }
+          return window.__e2eBackend.answer(command);
+        }
+      }
+    };
+  });
+  await page.goto("/");
+  await expect(page.locator("html")).toHaveAttribute("lang", "en");
+  await page.locator("#settingsBtn").click();
+  const select = page.locator("#languageSelect");
+  await expect(select).toHaveValue("en");
+  // Each language named in itself, as get_ui_texts lists them.
+  await expect(select.locator("option")).toHaveText(["English", /^\[.+\]$/]);
+
+  // Refused while a job runs: the page stays, in English.
+  await page.evaluate(() => window.sessionStorage.setItem("e2eJobRunning", "1"));
+  await select.selectOption("en-XA");
+  await expect(page.locator("#statusText")).toHaveText(
+    "Could not change the language: a job is running. Try again when it has finished."
+  );
+  await expect(select).toHaveValue("en");
+  await expect(page.locator("html")).toHaveAttribute("lang", "en");
+
+  // Saved: the window reloads in the test language.
+  await page.evaluate(() => window.sessionStorage.removeItem("e2eJobRunning"));
+  await select.selectOption("en-XA");
+  await expect(page.locator("html")).toHaveAttribute("lang", "en-XA");
+  await page.locator("#settingsBtn").click();
+  await expect(page.locator("#languageSelect")).toHaveValue("en-XA");
+  await expect(page.locator('label[for="languageSelect"] span')).toHaveText(/^\[.+\]$/);
+});
+
+test("in the test language, the first-run Library, Help and the update banner and card show only catalog text and data", async ({ page }) => {
+  await installBasicTauriMock(page, { updateCheck: selfUpdatable("feature") });
+  await useTestLanguage(page);
+  await page.goto("/");
+  const check = uiTextCheck(page);
+  // No library folders yet: the Library's first-run empty state, and the update banner.
+  await expect(page.locator("#libraryEmptyState")).not.toBeEmpty();
+  await expect(page.locator("#updateBanner")).toBeVisible();
+  await check.collect();
+
+  await page.locator("#helpBtn").click();
+  await expect(page.locator("#helpOverlay")).toBeVisible();
+  await check.collect();
+  await page.locator("#helpCloseBtn").click();
+  await expect(page.locator("#helpOverlay")).toBeHidden();
+
+  await page.locator("#settingsBtn").click();
+  await expect(page.locator("#settingsUpdateSection")).toBeVisible();
+  await check.collect();
+
+  await check.expectNoEnglish();
 });

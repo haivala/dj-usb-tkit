@@ -6,7 +6,7 @@
 // per line. Run `node scripts/report-e2e-coverage.mjs` afterwards to merge
 // those entries and print a per-source-file line-coverage table.
 import { test as base, expect } from "@playwright/test";
-import { appendFileSync, existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
+import { appendFileSync, mkdirSync, readFileSync } from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 
@@ -19,7 +19,6 @@ const backendMockPath = path.join(__dirname, "backend_mock.js");
 const uiTextsEn = readFileSync(path.join(__dirname, "ui_texts.en.json"), "utf8");
 // The same texts in the test language (`[Ŝéééţţîîñĝš]`), for `uiTextCheck`.
 const uiTextsTestLanguage = readFileSync(path.join(__dirname, "ui_texts.en-XA.json"), "utf8");
-const allowlistDir = path.join(__dirname, "ui_text_allowlist");
 
 export const test = base.extend({
   page: async ({ page }, use) => {
@@ -49,8 +48,14 @@ export function useTestLanguage(page) {
   return page.addInitScript({ content: `window.__e2eUiTexts = ${uiTextsTestLanguage};` });
 }
 
+// The test language's UI texts as `window.__e2eUiTextsTestLanguage`, for a spec whose mock
+// switches to them when the language setting is saved. Call before `page.goto`.
+export function offerTestLanguage(page) {
+  return page.addInitScript({ content: `window.__e2eUiTextsTestLanguage = ${uiTextsTestLanguage};` });
+}
+
 // Text the app's UI shows in every language, so it's never in the catalog.
-const NEVER_TRANSLATED = ["DJ USB Tkit", "FLAC", "ALAC", "AIFF", "WAV", "MP3", "AAC"];
+const NEVER_TRANSLATED = ["DJ USB Tkit", "Essentia", "rekordbox", "Mixxx", "FLAC", "ALAC", "AIFF", "WAV", "MP3", "AAC"];
 
 // Collects, from the visible page, every text and label that's neither from the catalog (in
 // the test language, so wrapped in brackets) nor data. Data is a string the mocked backend
@@ -111,17 +116,13 @@ function collectUnwrapped({ neverTranslated }) {
 }
 
 // The test-language check: every text and label the visible page shows comes from the
-// catalog, or is data. English not moved yet is listed in `ui_text_allowlist/<name>.json`,
-// which may only shrink: an entry the page no longer shows fails the check, so a piece that
-// moves text deletes its entries (`UPDATE_UI_TEXT_ALLOWLIST=1` rewrites the list without
-// them, and refuses to add any).
+// catalog, or is data. English on screen fails it: new UI text goes through the catalog.
 //
-//   const check = uiTextCheck(page, "usb-pages");
+//   const check = uiTextCheck(page);
 //   await check.collect();          // on each page or state the test opens
-//   await check.expectAllowed();    // once, at the end
-export function uiTextCheck(page, name) {
+//   await check.expectNoEnglish();  // once, at the end
+export function uiTextCheck(page) {
   const found = new Set();
-  const file = path.join(allowlistDir, `${name}.json`);
   return {
     async collect() {
       // The progress bar shows a finished job's text for a moment, then fades out still
@@ -132,18 +133,8 @@ export function uiTextCheck(page, name) {
         found.add(hit);
       }
     },
-    async expectAllowed() {
-      const listed = existsSync(file) ? JSON.parse(readFileSync(file, "utf8")) : null;
-      const added = [...found].filter((text) => !listed?.includes(text)).sort();
-      if (process.env.UPDATE_UI_TEXT_ALLOWLIST) {
-        if (listed) expect(added, `English to move to the catalog, not to ${file}`).toEqual([]);
-        mkdirSync(allowlistDir, { recursive: true });
-        writeFileSync(file, JSON.stringify([...found].sort(), null, 2) + "\n");
-        return;
-      }
-      const gone = (listed || []).filter((text) => !found.has(text));
-      expect(added, `English on screen that isn't from the catalog (see ${file})`).toEqual([]);
-      expect(gone, `No longer shown: delete from ${file} (UPDATE_UI_TEXT_ALLOWLIST=1)`).toEqual([]);
+    async expectNoEnglish() {
+      expect([...found].sort(), "English on screen that isn't from the catalog").toEqual([]);
     }
   };
 }

@@ -584,7 +584,7 @@
             <button type="button" class="track-detail-playpause" id="trackDetailPlayPause" data-text-aria-label="ui-track-detail-play-pause" data-text-tooltip="ui-track-detail-play-pause"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M8 6v12l10-6z"></path></svg></button>
             <div class="track-detail-hint" id="trackDetailHint">
               <span><b data-text="ui-track-detail-hint-waveform"></b> <span data-text="ui-track-detail-hint-waveform-text"></span></span>
-              <span><b data-text="ui-track-detail-hint-cue-markers"></b> <span data-text="ui-track-detail-hint-cue-markers-drag"></span> <kbd>Q</kbd> <span data-text="ui-track-detail-hint-cue-markers-quantize"></span> <kbd data-text="ui-track-detail-hint-shift-key"></kbd> <span data-text="ui-track-detail-hint-cue-markers-free"></span> <kbd>M</kbd> <span data-text="ui-track-detail-hint-cue-markers-memory"></span></span>
+              <span><b data-text="ui-track-detail-hint-cue-markers"></b> <span data-text="ui-track-detail-hint-cue-markers-drag"></span> <kbd translate="no">Q</kbd> <span data-text="ui-track-detail-hint-cue-markers-quantize"></span> <kbd data-text="ui-track-detail-hint-shift-key"></kbd> <span data-text="ui-track-detail-hint-cue-markers-free"></span> <kbd translate="no">M</kbd> <span data-text="ui-track-detail-hint-cue-markers-memory"></span></span>
             </div>
             <span class="track-detail-hint-btn" id="trackDetailHintBtn" tabindex="0" role="note" data-text-aria-label="ui-track-detail-hint-aria-label" data-text-tooltip="ui-track-detail-hint-tooltip" hidden>?</span>
             <button type="button" class="track-detail-tool" id="trackDetailQuantize" aria-pressed="true" data-text-tooltip="ui-track-detail-quantize-tooltip" data-text="ui-track-detail-quantize"></button>
@@ -682,6 +682,10 @@
             <option value="classic" data-text="ui-settings-key-notation-classic"></option>
             <option value="camelot" data-text="ui-settings-key-notation-camelot"></option>
           </select>
+        </label>
+        <label class="usb-cfg-toggle-row" for="languageSelect">
+          <span data-text="ui-settings-language"></span>
+          <select id="languageSelect"></select>
         </label>
       </div>
       <div class="settings-section">
@@ -946,6 +950,11 @@
     </div>
   </template>
   <!-- Convert… dialog: one format choice -->
+  <!-- One language in Settings' list: value the code, text its name in itself (both the
+       backend's), so never translated. -->
+  <template id="tplLanguageOption">
+    <option translate="no"></option>
+  </template>
   <template id="tplConvertFormatChoice">
     <label class="usb-cfg-toggle-row"><input type="radio" name="convertFormat" /> <span></span></label>
   </template>
@@ -1067,7 +1076,7 @@
     <div class="event-log-row"><div class="event-log-message muted"></div></div>
   </template>
   <template id="tplEventLogRow">
-    <div class="event-log-row"><div class="event-log-time"></div><div class="event-log-level"></div><div class="event-log-source"></div><div class="event-log-message"><span class="event-log-code"></span> <span class="event-log-text"></span> <span class="event-log-count" data-text-tooltip="ui-event-log-coalesced-occurrences-tooltip"></span></div></div>
+    <div class="event-log-row"><div class="event-log-time"></div><div class="event-log-level"></div><div class="event-log-source" translate="no"></div><div class="event-log-message"><span class="event-log-code" translate="no"></span> <span class="event-log-text"></span> <span class="event-log-count" data-text-tooltip="ui-event-log-coalesced-occurrences-tooltip"></span></div></div>
   </template>
   <template id="tplBackupRow">
     <div class="event-log-row">
@@ -1088,15 +1097,15 @@
   <template id="tplBeatgridLine"><i class="beatgrid-line"></i></template>
   <template id="tplBeatgridBar"><b class="beatgrid-bar"></b></template>
   <template id="tplOverviewCue"><i class="overview-cue"></i></template>
-  <template id="tplCueMarker"><i class="cue-marker"></i></template>
+  <template id="tplCueMarker"><i class="cue-marker" translate="no"></i></template>
   <template id="tplCueRow">
-    <div class="cue-row"><button type="button" class="cue-row-play" data-action="cue-play" data-text-aria-label="ui-track-detail-play-from-cue-aria-label" data-text-tooltip="ui-track-detail-play-from-here-tooltip"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M8 6v12l10-6z"></path></svg></button><span class="cue-row-pos"></span><button type="button" class="cue-row-color" data-action="cue-color"></button><input type="text" class="cue-row-name" data-action="cue-name" data-text-placeholder="ui-track-detail-name-placeholder" /><button type="button" class="cue-row-delete" data-action="cue-delete" data-text-aria-label="ui-track-detail-delete-cue-aria-label">×</button></div>
+    <div class="cue-row"><button type="button" class="cue-row-play" data-action="cue-play" data-text-aria-label="ui-track-detail-play-from-cue-aria-label" data-text-tooltip="ui-track-detail-play-from-here-tooltip"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M8 6v12l10-6z"></path></svg></button><span class="cue-row-pos"></span><button type="button" class="cue-row-color" data-action="cue-color" translate="no"></button><input type="text" class="cue-row-name" data-action="cue-name" data-text-placeholder="ui-track-detail-name-placeholder" /><button type="button" class="cue-row-delete" data-action="cue-delete" data-text-aria-label="ui-track-detail-delete-cue-aria-label">×</button></div>
   </template>
   <template id="tplCueRowStart">
     <div class="cue-row is-playback-start"><button type="button" class="cue-row-play" data-action="cue-play" data-text-aria-label="ui-track-detail-play-from-cue-aria-label" data-text-tooltip="ui-track-detail-play-from-here-tooltip"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M8 6v12l10-6z"></path></svg></button><span class="cue-row-pos"></span><span class="cue-row-memory" data-text-tooltip="ui-track-detail-memory-cue-only-tooltip"></span><span class="cue-row-label" data-text="ui-track-detail-playback-start"></span><span class="cue-row-badge" data-text="ui-track-detail-memory-cue-badge"></span></div>
   </template>
   <template id="tplCueSlotEmpty">
-    <div class="cue-slot-empty" aria-hidden="true"><button type="button" class="cue-row-play" disabled tabindex="-1"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M8 6v12l10-6z"></path></svg></button><span class="cue-row-pos">–</span><span class="cue-row-color"></span><input type="text" class="cue-row-name" data-text-placeholder="ui-track-detail-name-placeholder" disabled tabindex="-1" /></div>
+    <div class="cue-slot-empty" aria-hidden="true"><button type="button" class="cue-row-play" disabled tabindex="-1"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M8 6v12l10-6z"></path></svg></button><span class="cue-row-pos">–</span><span class="cue-row-color" translate="no"></span><input type="text" class="cue-row-name" data-text-placeholder="ui-track-detail-name-placeholder" disabled tabindex="-1" /></div>
   </template>
   <template id="tplCueColorSwatch"><button type="button" class="cue-color-swatch"></button></template>
   <template id="tplCueColorSwatchNone"><button type="button" class="cue-color-swatch is-none" data-text-aria-label="ui-track-detail-no-colour" data-text-tooltip="ui-track-detail-no-colour"></button></template>

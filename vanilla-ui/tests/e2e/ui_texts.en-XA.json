@@ -63,6 +63,9 @@
     "ui-event-log-open-file": "[ÖÖþééñ ļööĝ ƒîîļéé]",
     "ui-event-log-open-file-failed": "[Çööûûļð ñööţ ööþééñ ţĥéé ļööĝ ƒîîļéé: {error}]",
     "ui-event-log-open-file-tooltip": "[ÖÖþééñ ţĥîîš šééššîîööñ'š ƒûûļļ ļööĝ îîñ áá ţééẋţ ṽîîééŵééŕ -- ţĥéé ļîîšţ ĥééŕéé ķééééþš ööñļý ţĥéé ñééŵééšţ ééñţŕîîééš]",
+    "ui-event-log-row-level-error": "[ééŕŕööŕ]",
+    "ui-event-log-row-level-info": "[îîñƒöö]",
+    "ui-event-log-row-level-warn": "[ŵááŕñ]",
     "ui-event-log-source": "[Šööûûŕçéé]",
     "ui-event-log-summary": "[Ñöö ééñţŕîîééš]",
     "ui-event-log-summary-count": {
@@ -324,6 +327,9 @@
     "ui-settings-key-notation-classic": "[Çļááššîîç (ÅÅɱ)]",
     "ui-settings-key-notation-failed": "[Çööûûļð ñööţ šááṽéé ķééý ñööţááţîîööñ]",
     "ui-settings-key-notation-saved": "[Ķééý ñööţááţîîööñ: {notation}]",
+    "ui-settings-language": "[Ļááñĝûûááĝéé]",
+    "ui-settings-language-failed": "[Çööûûļð ñööţ çĥááñĝéé ţĥéé ļááñĝûûááĝéé: {error}]",
+    "ui-settings-language-unsaved": "[Šááṽéé ööŕ çááñçééļ ţĥéé ţŕááçķ'š çĥááñĝééš ƀééƒööŕéé çĥááñĝîîñĝ ţĥéé ļááñĝûûááĝéé]",
     "ui-settings-node-js-missing": "[Ñööðéé.ĵš ñööţ ƒööûûñð —]",
     "ui-settings-sync-mode": "[Šýñç Ṁööðéé]",
     "ui-settings-sync-mode-additive": "[ÅÅððîîţîîṽéé þļááýļîîšţ ûûþðááţéé]",
@@ -585,5 +591,15 @@
     "ui-usb-status": "[Šţááţûûš]",
     "ui-usb-switch-busy": "[Þļééáášéé ŵááîîţ ƒööŕ ţĥéé çûûŕŕééñţ ÛÛŠƁ ööþééŕááţîîööñ ţöö ƒîîñîîšĥ ƀééƒööŕéé šŵîîţçĥîîñĝ ðŕîîṽééš]",
     "ui-usb-title": "[ÛÛŠƁ Ɓŕööŵšééŕ]"
-  }
+  },
+  "languages": [
+    {
+      "code": "en",
+      "name": "English"
+    },
+    {
+      "code": "en-XA",
+      "name": "[ÉÉñĝļîîšĥ]"
+    }
+  ]
 }

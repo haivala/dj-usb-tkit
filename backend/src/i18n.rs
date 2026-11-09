@@ -22,7 +22,7 @@ use fluent_bundle::{FluentArgs, FluentResource, FluentValue};
 use fluent_syntax::ast;
 use unic_langid::LanguageIdentifier;
 
-use crate::models::{GetUiTextsData, UiText};
+use crate::models::{GetUiTextsData, UiLanguage, UiText};
 
 mod generated {
     include!(concat!(env!("OUT_DIR"), "/i18n_catalog.rs"));
@@ -290,8 +290,27 @@ fn ui_texts_in(catalog: &Catalog) -> GetUiTextsData {
     GetUiTextsData {
         language: catalog.language.to_string(),
         texts,
+        languages: LANGUAGE_NAMES.clone(),
     }
 }
+
+/// Every language the app has, each named in itself (`settings-language-name` in its own
+/// catalog, its code when it has none).
+static LANGUAGE_NAMES: LazyLock<Vec<UiLanguage>> = LazyLock::new(|| {
+    generated::LANGUAGE_SOURCES
+        .iter()
+        .map(|(code, source)| {
+            let name = Catalog::parse(code, source)
+                .ok()
+                .and_then(|catalog| catalog.format(&tr::settings_language_name()))
+                .unwrap_or_else(|| code.to_string());
+            UiLanguage {
+                code: code.to_string(),
+                name,
+            }
+        })
+        .collect()
+});
 
 /// The `ui-` messages of one catalog, as JS fills them in (see `ui_text`).
 fn ui_patterns(source: &str) -> BTreeMap<String, UiText> {

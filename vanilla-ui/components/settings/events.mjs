@@ -1,7 +1,7 @@
 import { openExternalUrl, cloneTemplate } from "../../ui_utils.mjs";
 import { normalizeAnalysisBpmRange } from "../library/actions.mjs";
 import { refreshUpdateCheck } from "../../update_check.mjs";
-import { t } from "../../ui_texts.mjs";
+import { t, uiLanguage, uiLanguages } from "../../ui_texts.mjs";
 import {
   STORAGE_KEY_HELP_SEEN,
   FRONTEND_DB_KEY_HELP_SEEN,
@@ -18,7 +18,8 @@ import {
   STORAGE_KEY_ANALYSIS_ENGINE,
   FRONTEND_DB_KEY_ANALYSIS_ENGINE,
   STORAGE_KEY_KEY_NOTATION,
-  FRONTEND_DB_KEY_KEY_NOTATION
+  FRONTEND_DB_KEY_KEY_NOTATION,
+  FRONTEND_DB_KEY_LANGUAGE
 } from "../../settings_keys.mjs";
 
 const NODE_JS_URL = "https://nodejs.org/";
@@ -233,6 +234,37 @@ export function bindSettingsEvents(ctx) {
     }
     persistSetting(STORAGE_KEY_ANALYSIS_BPM_RANGE, FRONTEND_DB_KEY_ANALYSIS_BPM_RANGE, selected);
     emitStatus(t("ui-settings-bpm-range-saved", { range: selected }));
+  });
+
+  // The language every text is in. A change reloads the window, so everything is read
+  // again in it; the backend refuses it while any job runs, which a reload would lose.
+  el.languageSelect.replaceChildren(...uiLanguages().map(({ code, name }) => {
+    const option = cloneTemplate(ctx.document, "tplLanguageOption");
+    option.value = code;
+    option.textContent = name;
+    return option;
+  }));
+  el.languageSelect.value = uiLanguage();
+  el.languageSelect.addEventListener("change", async (event) => {
+    const select = event.currentTarget;
+    const current = uiLanguage();
+    if (select.value === current) return;
+    // The reload would drop the track editor's unsaved changes.
+    if (ctx.trackDetailDialog?.hasUnsavedChanges()) {
+      select.value = current;
+      emitStatus(t("ui-settings-language-unsaved"));
+      return;
+    }
+    try {
+      await ctx.command("set_frontend_setting", { key: FRONTEND_DB_KEY_LANGUAGE, value: select.value });
+    } catch (err) {
+      select.value = current;
+      emitStatus(t("ui-settings-language-failed", { error: err?.message || err }));
+      return;
+    }
+    // The player is the backend's: it would play on with no control on screen.
+    await ctx.stopPlaybackIfActive().catch(() => {});
+    ctx.window.location.reload();
   });
 
   // Display only -- the backend renders every key label in this notation, so

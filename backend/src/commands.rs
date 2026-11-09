@@ -375,6 +375,23 @@ impl BackendCommands {
         wrap(self.service.set_frontend_setting(req))
     }
 
+    /// `set_frontend_setting`, refusing a language change while `job_running`: the change
+    /// reloads the window, which loses a running job's progress bar, pause and cancel (no
+    /// command reconnects to one). The desktop app passes whether its job registry is empty,
+    /// and holds the registry meanwhile so no job starts mid-change.
+    pub fn set_frontend_setting_unless_job_running(
+        &self,
+        req: SetFrontendSettingRequest,
+        job_running: bool,
+    ) -> ApiResponse<SetFrontendSettingData> {
+        if job_running && req.key.trim() == crate::service::SETTING_UI_LANGUAGE {
+            return wrap(Err(crate::error::BackendError::Validation(
+                crate::i18n::tr::settings_language_job_running(),
+            )));
+        }
+        self.set_frontend_setting(req)
+    }
+
     /// See `BackendService::apply_saved_language`: the desktop app calls it once at startup.
     pub fn apply_saved_language(&self) -> ApiResponse<()> {
         wrap(self.service.apply_saved_language())

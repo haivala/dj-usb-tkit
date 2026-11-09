@@ -949,13 +949,24 @@ test("in the test language, the Library and playlist pages and their dialogs sho
   await installSelectionMock(page);
   await useTestLanguage(page);
   await page.goto("/");
-  const check = uiTextCheck(page, "library-pages");
+  const check = uiTextCheck(page);
   await expect(page.locator("#libraryTableBody .track-grid-row")).toHaveCount(3);
   await check.collect();
 
   await createPlaylist(page, "Warmup");
+  // The new playlist's page, still empty.
+  await page.locator("#navPlaylistList .nav-playlist-item").first().click();
+  await expect(page.locator("#badgeLabel")).toHaveText("Warmup");
+  await check.collect();
+  await page.locator('.nav-item[data-view="library"]').click();
   await tickRows(page, "libraryTableBody", 2);
   await check.collect();
+
+  await page.locator(`${libraryBar} [data-selection-action="convert"]`).click();
+  await expect(page.locator("#convertOverlay")).toBeVisible();
+  await check.collect();
+  await page.keyboard.press("Escape");
+  await expect(page.locator("#convertOverlay")).toBeHidden();
 
   await page.locator(`${libraryBar} [data-selection-action="add-to"]`).click();
   await expect(page.locator("#addToOverlay")).toBeVisible();
@@ -974,5 +985,12 @@ test("in the test language, the Library and playlist pages and their dialogs sho
   await expect(page.locator("#playlistTracksBody .track-grid-row")).toHaveCount(2);
   await check.collect();
 
-  await check.expectAllowed();
+  const playlistItem = page.locator("#navPlaylistList .nav-playlist-item").first();
+  await playlistItem.locator("[data-delete-playlist]").click();
+  await expect(page.locator("#confirmOverlay")).toBeVisible();
+  await check.collect();
+  await page.keyboard.press("Escape");
+  await expect(page.locator("#confirmOverlay")).toBeHidden();
+
+  await check.expectNoEnglish();
 });

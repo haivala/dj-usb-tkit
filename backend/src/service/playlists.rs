@@ -17,11 +17,12 @@ pub(crate) fn track_file_source(
         !is_usb || usb_root.is_some_and(|root| browse_path_matches_root(file_path, root));
     let found = connected && stored_file_path(file_path).is_file();
     let tooltip = match (is_usb, connected, found) {
-        (true, false, _) => format!("USB not connected: {file_path}"),
-        (true, true, true) => format!("On USB: {file_path}"),
-        (false, _, true) => format!("In local library: {file_path}"),
-        (_, _, false) => format!("File not found: {file_path}"),
-    };
+        (true, false, _) => tr::playlist_track_source_usb_not_connected(file_path),
+        (true, true, true) => tr::playlist_track_source_on_usb(file_path),
+        (false, _, true) => tr::playlist_track_source_local(file_path),
+        (_, _, false) => tr::playlist_track_source_not_found(file_path),
+    }
+    .render();
     TrackFileSource {
         kind: if is_usb { "usb" } else { "local" }.to_string(),
         missing: !found,

@@ -211,6 +211,7 @@
         case "detect_external_mixxx_db":
           return ok({ found: false, path: null, imported: false });
         case "get_library_sources": return ok(backend.librarySources());
+        case "browse_source_files": return ok({ total: 0, items: [] });
         case "list_playlists": return ok({ items: [] });
         case "get_frontend_settings": return ok({ values: {}, nodeAvailable: true, essentiaInstalled: true });
         case "set_frontend_setting": return ok({ saved: true });

@@ -2,6 +2,7 @@
 
 import { t, tCount } from "../../ui_texts.mjs";
 import { cloneTemplate } from "../../ui_utils.mjs";
+import { normalizeEventLogEntry } from "../../event_log.mjs";
 
 // Stores an entry (the store normalizes it). With the Event Log open, only
 // that entry's row changes -- a busy job can log many entries a second, too
@@ -29,6 +30,13 @@ function appendEventLogFile(ctx, item) {
     level: item.level,
     message: `[${item.source}] [${item.code}] ${item.message}${details}`
   }).catch(() => {});
+}
+
+// A developer line (startup steps, console.log/info): the session log file only. The Event
+// Log shows what a user can act on.
+export function logToFile(ctx, entry = {}) {
+  const item = normalizeEventLogEntry(entry);
+  if (item) appendEventLogFile(ctx, item);
 }
 
 export async function openEventLogFile(ctx) {
@@ -75,7 +83,10 @@ function ensureEventLogSourceOptions(ctx, sources) {
   const known = new Set([...select.options].map((opt) => String(opt.value || "")));
   for (const src of [...new Set(sources)].sort()) {
     if (known.has(src)) continue;
-    select.add(new select.ownerDocument.defaultView.Option(src, src));
+    const option = new select.ownerDocument.defaultView.Option(src, src);
+    // A source is an id, like the codes: never translated.
+    option.translate = false;
+    select.add(option);
   }
   select.value = [...select.options].some((opt) => opt.value === current) ? current : "all";
 }
@@ -99,6 +110,13 @@ function renderEventLogSummary(ctx, entries) {
     : tCount("ui-event-log-summary-count-repeats", entries.length, { occurrences: totalOccurrences });
 }
 
+// The store's levels (event_log.mjs `normalizeLevel`), as a row shows them.
+const LEVEL_TEXT = {
+  error: "ui-event-log-row-level-error",
+  warn: "ui-event-log-row-level-warn",
+  info: "ui-event-log-row-level-info"
+};
+
 function eventLogRow(doc, item) {
   const date = new Date(item.ts);
   const hh = String(date.getHours()).padStart(2, "0");
@@ -120,7 +138,7 @@ function eventLogRow(doc, item) {
   row.querySelector(".event-log-time").textContent = `${hh}:${mm}:${ss}`;
   const level = row.querySelector(".event-log-level");
   level.classList.add(`level-${item.level}`);
-  level.textContent = item.level;
+  level.textContent = LEVEL_TEXT[item.level] ? t(LEVEL_TEXT[item.level]) : item.level;
   row.querySelector(".event-log-source").textContent = item.source;
   const message = row.querySelector(".event-log-message");
   if (details) message.dataset.tooltip = details;
@@ -166,7 +184,7 @@ function showEventLogEntry(ctx, item) {
 
 // Console and runtime error logging setup.
 
-export async function setupConsoleFileLogging({ pushEventLog }) {
+export async function setupConsoleFileLogging({ pushEventLog, logToFile }) {
   const original = {
     log: console.log.bind(console),
     info: console.info.bind(console),
@@ -174,7 +192,8 @@ export async function setupConsoleFileLogging({ pushEventLog }) {
     error: console.error.bind(console)
   };
 
-  // pushEventLog also writes the session log file (storeEventLogEntry).
+  // Warnings and errors go to the Event Log, which also writes the session log file
+  // (storeEventLogEntry); log and info lines are a developer's, so only to the file.
   const forward = (level, args) => {
     const message = args.map((v) => {
       if (typeof v === "string") return v;
@@ -184,7 +203,9 @@ export async function setupConsoleFileLogging({ pushEventLog }) {
         return String(v);
       }
     }).join(" ");
-    pushEventLog({ level, source: "console", message });
+    const entry = { level, source: "console", message };
+    if (level === "warn" || level === "error") pushEventLog(entry);
+    else logToFile(entry);
   };
 
   console.log = (...args) => {

@@ -1,4 +1,4 @@
-import { test, expect } from "./coverage-fixture.mjs";
+import { test, expect, uiTextCheck, useTestLanguage } from "./coverage-fixture.mjs";
 
 // Exercises the "Name this drive" prompt and renaming end-to-end in a real browser DOM,
 // where element ids, overlay visibility, and recent-USB-pill wiring are all
@@ -339,4 +339,19 @@ test("a drive carrying another drive's name is asked for its own and says which 
   await page.locator("#driveNameInput").fill("Booth Stick");
   await page.locator("#driveNameOkBtn").click();
   await expect(page.locator("#usbNameBadgeLabel")).toHaveText("Booth Stick");
+});
+
+test("in the test language, the drive naming dialog shows only catalog text and data", async ({ page }) => {
+  await installTauriMock(page);
+  await useTestLanguage(page);
+  await page.goto("/");
+  await page.locator('.nav-item[data-view="usb"]').click();
+  const pill = page.locator('#usbRecentList button[data-usb-recent-path="/Volumes/USB-TEST"]');
+  await expect(pill).toBeVisible();
+  const check = uiTextCheck(page);
+  await check.collect();
+  await pill.click();
+  await expect(page.locator("#driveNameOverlay")).toBeVisible();
+  await check.collect();
+  await check.expectNoEnglish();
 });

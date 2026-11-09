@@ -63,6 +63,9 @@
     "ui-event-log-open-file": "Open log file",
     "ui-event-log-open-file-failed": "Could not open the log file: {error}",
     "ui-event-log-open-file-tooltip": "Open this session's full log in a text viewer -- the list here keeps only the newest entries",
+    "ui-event-log-row-level-error": "error",
+    "ui-event-log-row-level-info": "info",
+    "ui-event-log-row-level-warn": "warn",
     "ui-event-log-source": "Source",
     "ui-event-log-summary": "No entries",
     "ui-event-log-summary-count": {
@@ -324,6 +327,9 @@
     "ui-settings-key-notation-classic": "Classic (Am)",
     "ui-settings-key-notation-failed": "Could not save key notation",
     "ui-settings-key-notation-saved": "Key notation: {notation}",
+    "ui-settings-language": "Language",
+    "ui-settings-language-failed": "Could not change the language: {error}",
+    "ui-settings-language-unsaved": "Save or cancel the track's changes before changing the language",
     "ui-settings-node-js-missing": "Node.js not found —",
     "ui-settings-sync-mode": "Sync Mode",
     "ui-settings-sync-mode-additive": "Additive playlist update",
@@ -585,5 +591,15 @@
     "ui-usb-status": "Status",
     "ui-usb-switch-busy": "Please wait for the current USB operation to finish before switching drives",
     "ui-usb-title": "USB Browser"
-  }
+  },
+  "languages": [
+    {
+      "code": "en",
+      "name": "English"
+    },
+    {
+      "code": "en-XA",
+      "name": "[ÉÉñĝļîîšĥ]"
+    }
+  ]
 }

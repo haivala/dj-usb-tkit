@@ -1663,6 +1663,12 @@ update-banner-feature = New features available: { $version }
 settings-language-unknown = Unknown language: { $language }
 # The Event Log warning at startup when the saved language has no catalog any more.
 settings-warning-language-unavailable = The saved language { $language } isn't available; using English
+# This catalog's language, named in itself ("English", "Deutsch"): the settings' language list shows it.
+settings-language-name = English
+# The error when the language is changed while a job (USB, analysis, a library scan or import) runs: the
+# change reloads the window, which would lose the job's progress bar, pause and cancel. Shown after
+# ui-settings-language-failed's "Could not change the language: ".
+settings-language-job-running = a job is running. Try again when it has finished.
 # The native folder dialog's title, from the transcode folder's Change.
 settings-transcode-folder-dialog-title = Select the folder for transcodes
 
@@ -1882,6 +1888,12 @@ playlist-analyze-missing-tooltip = Add the missing waveform, BPM, key and first 
 # The same button (hidden) when no track needs analysis.
 playlist-analyze-missing-none = Analyze Missing Tracks
 playlist-analyze-missing-none-tooltip = No tracks in this playlist need analysis
+
+# The tooltip on a playlist track's source icon: where its file is. $path: the file's path.
+playlist-track-source-usb-not-connected = USB not connected: { $path }
+playlist-track-source-on-usb = On USB: { $path }
+playlist-track-source-local = In local library: { $path }
+playlist-track-source-not-found = File not found: { $path }
 
 # The Add to… dialog's note beside a playlist that holds all of the selected tracks.
 playlist-membership-all = Already in
@@ -2132,6 +2144,10 @@ ui-event-log-level-filter-error = Error
 ui-event-log-level-filter-info = Info
 ui-event-log-level-filter-log = Log
 ui-event-log-level-filter-warn = Warn
+# An Event Log row's level.
+ui-event-log-row-level-error = error
+ui-event-log-row-level-info = info
+ui-event-log-row-level-warn = warn
 ui-event-log-open-file = Open log file
 ui-event-log-open-file-tooltip = Open this session's full log in a text viewer -- the list here keeps only the newest entries
 ui-event-log-source = Source
@@ -2549,6 +2565,11 @@ ui-settings-version-not-set = Not set
 ui-settings-export = Export
 ui-settings-get-node-js = Get Node.js
 ui-settings-key-notation = Key notation
+ui-settings-language = Language
+# The status line when the language is changed while the track editor has unsaved changes.
+ui-settings-language-unsaved = Save or cancel the track's changes before changing the language
+# The status line when saving the language failed. $error: why.
+ui-settings-language-failed = Could not change the language: { $error }
 ui-settings-key-notation-camelot = Camelot (8A)
 ui-settings-key-notation-classic = Classic (Am)
 ui-settings-node-js-missing = Node.js not found —

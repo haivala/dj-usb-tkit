@@ -1191,7 +1191,9 @@ pub fn set_frontend_setting(
     state: State<'_, BackendCommands>,
     request: SetFrontendSettingRequest,
 ) -> ApiResponse<SetFrontendSettingData> {
-    state.set_frontend_setting(request)
+    // Held until the setting is saved, so no job starts during a language change.
+    let jobs = running_jobs();
+    state.set_frontend_setting_unless_job_running(request, !jobs.is_empty())
 }
 
 #[tauri::command]

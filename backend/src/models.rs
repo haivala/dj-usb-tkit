@@ -1357,6 +1357,15 @@ pub struct GetUiTextsData {
     /// The language code, for `Intl.PluralRules` in `tCount`.
     pub language: String,
     pub texts: std::collections::BTreeMap<String, UiText>,
+    /// Every language the app has, English first: the settings' language list.
+    pub languages: Vec<UiLanguage>,
+}
+
+/// One language the app has: its code and its name in itself ("English").
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct UiLanguage {
+    pub code: String,
+    pub name: String,
 }
 
 /// One `ui-` text: a string with `{name}` placeholders, or a counted text's forms by plural
