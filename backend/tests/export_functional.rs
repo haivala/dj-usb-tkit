@@ -2852,12 +2852,6 @@ fn export_to_usb_option_matrix_controls_artwork_analysis_and_prune_behavior() {
         second.exported_analysis_files, 0,
         "expected no analysis export when include_analysis=false"
     );
-    assert!(
-        second.warnings.iter().any(|w| w.source == "export"
-            && w.level == "info"
-            && w.code == "export.prune-stale-summary"),
-        "expected structured prune/export info warning"
-    );
 
     let artwork_count_after = WalkDir::new(usb.join(USB_VENDOR_ROOT_DIR).join(USB_ARTWORK_DIR))
         .into_iter()
@@ -5802,16 +5796,6 @@ fn export_mirror_prune_keeps_history_protected_track_full_shape() {
         options: mirror_opts(),
     });
     assert!(second.ok, "second mirror export failed: {second:?}");
-    let second_data = second.data.expect("second export data");
-    assert!(
-        second_data.warnings.iter().any(|w| w.source == "export"
-            && w.code == "export.orphan-tracks-removed"
-            && !w
-                .message
-                .contains("0 dropped-track content rows from eDB and 0 track rows")),
-        "expected an export.orphan-tracks-removed info warning with non-zero counts: {:?}",
-        second_data.warnings
-    );
 
     let parsed = parse_pdb(&pdb_path).expect("parse pdb after second mirror export");
     let conn = open_edb(&edb_path);

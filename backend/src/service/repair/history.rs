@@ -55,11 +55,9 @@ impl BackendService {
         usb_root: &std::path::Path,
         parsed: &crate::pdb_reader::ParsedPdb,
         edb_conn: Option<&mut rusqlite::Connection>,
-        warnings: &mut Vec<WarningEntry>,
     ) -> BackendResult<(usize, usize)> {
         let (history_rows, history_content_rows) = derive_history_sync_payload(parsed);
-        let Some(mut handle) = EdbConnHandle::acquire(edb_conn, || open_edb_rw(usb_root, warnings))
-        else {
+        let Some(mut handle) = EdbConnHandle::acquire(edb_conn, || open_edb_rw(usb_root)) else {
             return Ok((0, 0));
         };
         let conn = handle.conn();

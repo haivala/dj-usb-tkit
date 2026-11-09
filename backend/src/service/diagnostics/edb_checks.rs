@@ -6,20 +6,12 @@ use crate::i18n::tr;
 /// Audio paths the eDB `content` table indexes, as written (`path`, or
 /// `FolderPath` + `FileNameL` in older schemas). Match them with
 /// `audio_path_key`.
-pub(crate) fn collect_edb_audio_paths(
-    conn: &rusqlite::Connection,
-    warnings: &mut Vec<WarningEntry>,
-) -> Vec<String> {
+pub(crate) fn collect_edb_audio_paths(conn: &rusqlite::Connection) -> Vec<String> {
     if !table_exists(conn, "content") {
         return Vec::new();
     }
     let Ok(content_columns) = load_table_columns(conn, "content") else {
-        warnings.push(logging::log(
-            Level::Error,
-            "usb-diagnostics",
-            "usb.diagnostics.edb-content-column-scan-failed",
-            "eDB content column scan failed",
-        ));
+        logging::debug("usb-diagnostics", "eDB content column scan failed");
         return Vec::new();
     };
     let has_column = |name: &str| content_columns.iter().any(|column| column == name);
@@ -42,23 +34,19 @@ pub(crate) fn collect_edb_audio_paths(
             "folder_file",
         )
     } else {
-        warnings.push(logging::log(
-            Level::Warn,
+        logging::debug(
             "usb-diagnostics",
-            "usb.diagnostics.edb-schema-missing-path-columns",
             "eDB content schema missing path columns (expected path or FolderPath/FileNameL)",
-        ));
+        );
         return Vec::new();
     };
     let mut stmt = match conn.prepare(query_sql) {
         Ok(stmt) => stmt,
         Err(err) => {
-            warnings.push(logging::log(
-                Level::Error,
+            logging::debug(
                 "usb-diagnostics",
-                "usb.diagnostics.edb-path-query-prepare-failed",
                 format!("eDB playlist path query prepare failed: {err}"),
-            ));
+            );
             return Vec::new();
         }
     };
@@ -72,12 +60,10 @@ pub(crate) fn collect_edb_audio_paths(
     }) {
         Ok(rows) => rows,
         Err(err) => {
-            warnings.push(logging::log(
-                Level::Error,
+            logging::debug(
                 "usb-diagnostics",
-                "usb.diagnostics.edb-path-query-failed",
                 format!("eDB playlist path query failed: {err}"),
-            ));
+            );
             return Vec::new();
         }
     };

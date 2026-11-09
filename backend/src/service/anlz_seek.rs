@@ -84,6 +84,12 @@ impl SeekIndexSkip {
         }
     }
 
+    /// Whether the log line asks for the file to be reported (a layout not supported yet)
+    /// rather than replaced (damaged audio).
+    pub(super) fn asks_for_report(self) -> bool {
+        !matches!(self, Self::CorruptedAudio)
+    }
+
     /// What the log line suggests: a damaged file is the user's to replace,
     /// anything else is a layout worth reporting.
     pub(super) fn advice(self) -> &'static str {

@@ -29,6 +29,10 @@ struct BackendLogPayload {
     /// English and a page reload's replay of this buffer doesn't write it twice.
     #[serde(skip)]
     file_line: String,
+    /// False for a developer line (`logging::debug`): the log file only, never the Event Log
+    /// nor the replay after a page reload.
+    #[serde(skip)]
+    in_event_log: bool,
 }
 
 /// Whether the session log file is ready: set once its folder is known and the file was
@@ -52,6 +56,7 @@ fn push_backend_log_entry(
         message,
         file_line: log_file_line(&timestamp, level, &format!("[{source}] {english}")),
         timestamp,
+        in_event_log: level != backend::logging::Level::Debug.as_str(),
     };
     let buf = BACKEND_LOG_BUFFER.get_or_init(|| Mutex::new(Vec::new()));
     if let Ok(mut guard) = buf.lock() {
@@ -664,7 +669,11 @@ fn get_backend_log_buffer() -> Result<Vec<BackendLogPayload>, String> {
     let guard = buf
         .lock()
         .map_err(|err| format!("backend log buffer lock failed: {err}"))?;
-    Ok(guard.clone())
+    Ok(guard
+        .iter()
+        .filter(|payload| payload.in_event_log)
+        .cloned()
+        .collect())
 }
 
 #[tauri::command]
@@ -700,7 +709,9 @@ fn install_backend_log_sink(app: tauri::AppHandle) {
             line.message.to_string(),
             line.english,
         );
-        let _ = app.emit(BACKEND_LOG_EVENT_CHANNEL, payload);
+        if payload.in_event_log {
+            let _ = app.emit(BACKEND_LOG_EVENT_CHANNEL, payload);
+        }
     }));
 }
 

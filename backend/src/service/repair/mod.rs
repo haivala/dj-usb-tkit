@@ -33,7 +33,7 @@ use super::anlz::{
     read_beatgrid_tempo_from_anlz, read_first_beat_from_anlz, upgrade_bundle_beat_grid,
     with_seek_index, write_generated_anlz_bundle,
 };
-use super::anlz_seek::{SEEK_SKIP_REPORT_HINT, seek_index_for_audio};
+use super::anlz_seek::{SeekIndexSkip, seek_index_for_audio};
 use super::cues::collapse_anlz_cues;
 use super::export::APP_CONTENT_LINK_ID;
 use super::export_helpers::pdb_encoding::ARTIST_SHORT_ASCII_NAME_OFFSET;

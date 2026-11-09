@@ -47,6 +47,8 @@
   and refused USB audio format changes.
 - **Fix:** Each warning now shows once in the Event Log and the session log file. Before, most showed twice:
   once as it happened and again when its command finished.
+- **Improvement:** The Event Log and the "(N warnings)" counts show only what you can act on. Developer detail,
+  such as stage timings and database internals, now goes only to the session log file.
 - **Chore:** The backend now decides the sidebar's export mark and its meaning, "On this USB" or "Exported to
   USB", instead of the UI.
 

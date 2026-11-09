@@ -16,6 +16,7 @@ use super::deferred_close::FileCloser;
 use super::{ExportManifest, ExportTrackData};
 use crate::edb::{open_edb_rw, table_exists};
 use crate::error::{BackendError, BackendResult};
+use crate::i18n::tr;
 use crate::logging::{self, Level};
 use crate::metadata::{MAX_GRAPHEME_CLUSTER_CHARS, cap_grapheme_clusters, cap_script_diversity};
 use crate::models::WarningEntry;
@@ -289,11 +290,11 @@ pub fn export_artwork_for_player(
 ) -> BackendResult<Option<String>> {
     let source = PathBuf::from(source_path);
     if !source.is_file() {
-        warnings.push(logging::log(
+        warnings.push(logging::log_text(
             Level::Warn,
             "export",
             "export.artwork-missing",
-            format!("artwork missing: {}", source.display()),
+            &tr::export_warning_artwork_source_missing(source.display()),
         ));
         return Ok(None);
     }
@@ -301,11 +302,11 @@ pub fn export_artwork_for_player(
     let img = match image::open(&source) {
         Ok(img) => img,
         Err(err) => {
-            warnings.push(logging::log(
+            warnings.push(logging::log_text(
                 Level::Error,
                 "export",
                 "export.artwork-decode-failed",
-                format!("artwork decode failed for {}: {err}", source.display()),
+                &tr::export_warning_artwork_unreadable(source.display(), err),
             ));
             return Ok(None);
         }
@@ -333,11 +334,11 @@ pub fn export_artwork_for_player(
         let mut buf = Cursor::new(Vec::new());
         let encoder = image::codecs::jpeg::JpegEncoder::new_with_quality(&mut buf, 85);
         if let Err(err) = rgb.write_with_encoder(encoder) {
-            warnings.push(logging::log(
+            warnings.push(logging::log_text(
                 Level::Error,
                 "export",
                 "export.artwork-encode-failed",
-                format!("artwork encode failed for {}: {err}", target_path.display()),
+                &tr::export_warning_artwork_write_failed(target_path.display(), err),
             ));
             continue;
         }
@@ -481,14 +482,11 @@ pub fn export_analysis_bundle_for_track(
     let (dat_path, ext_path, twoex_path) = analysis_bundle_paths_for_track(usb_root, track_path);
 
     let Some(local_bundle_str) = track.waveform_peaks_path.as_deref() else {
-        warnings.push(logging::log(
+        warnings.push(logging::log_text(
             Level::Warn,
             "export",
             "export.analysis-bundle-missing",
-            format!(
-                "analysis bundle missing for track {} (no DAT path)",
-                track.id
-            ),
+            &tr::export_warning_analysis_not_made(&track.id),
         ));
         return Ok(None);
     };
@@ -498,15 +496,11 @@ pub fn export_analysis_bundle_for_track(
     let local_ext = local_bundle.with_extension("EXT");
     let local_twoex = local_bundle.with_extension("2EX");
     if !local_dat.is_file() || !local_ext.is_file() {
-        warnings.push(logging::log(
+        warnings.push(logging::log_text(
             Level::Warn,
             "export",
             "export.analysis-bundle-missing",
-            format!(
-                "analysis bundle missing for track {}: {}",
-                track.id,
-                local_dat.display()
-            ),
+            &tr::export_warning_analysis_files_missing(&track.id, local_dat.display()),
         ));
         return Ok(None);
     }
@@ -732,7 +726,6 @@ pub fn filter_prunable_stale_paths_for_playlist(
     usb_root: &Path,
     playlist_name: &str,
     stale_paths: &[String],
-    warnings: &mut Vec<WarningEntry>,
 ) -> BackendResult<Vec<String>> {
     let stale_normalized = stale_paths
         .iter()
@@ -745,80 +738,76 @@ pub fn filter_prunable_stale_paths_for_playlist(
     let mut protected = HashSet::<String>::new();
     let wanted_name = canonicalize_playlist_name(playlist_name);
 
-    let mut unlock_warnings = Vec::<WarningEntry>::new();
-    if let Some(conn) = open_edb_rw(usb_root, &mut unlock_warnings) {
-        if table_exists(&conn, "playlist")
-            && table_exists(&conn, "playlist_content")
-            && table_exists(&conn, "content")
-        {
-            let mut current_playlist_ids = HashSet::<i64>::new();
-            let mut stmt = conn.prepare("SELECT playlist_id, name, attribute FROM playlist")?;
-            let rows = stmt.query_map([], |row| {
-                Ok((
-                    row.get::<_, i64>(0)?,
-                    row.get::<_, String>(1)?,
-                    row.get::<_, i64>(2).unwrap_or(0),
-                ))
-            })?;
-            for row in rows {
-                let (playlist_id, name, attribute) = row?;
-                if attribute == 0 && canonicalize_playlist_name(&name) == wanted_name {
-                    current_playlist_ids.insert(playlist_id);
-                }
+    if let Some(conn) = open_edb_rw(usb_root)
+        && table_exists(&conn, "playlist")
+        && table_exists(&conn, "playlist_content")
+        && table_exists(&conn, "content")
+    {
+        let mut current_playlist_ids = HashSet::<i64>::new();
+        let mut stmt = conn.prepare("SELECT playlist_id, name, attribute FROM playlist")?;
+        let rows = stmt.query_map([], |row| {
+            Ok((
+                row.get::<_, i64>(0)?,
+                row.get::<_, String>(1)?,
+                row.get::<_, i64>(2).unwrap_or(0),
+            ))
+        })?;
+        for row in rows {
+            let (playlist_id, name, attribute) = row?;
+            if attribute == 0 && canonicalize_playlist_name(&name) == wanted_name {
+                current_playlist_ids.insert(playlist_id);
             }
+        }
 
-            let sql = if table_exists(&conn, "image") {
-                r#"
+        let sql = if table_exists(&conn, "image") {
+            r#"
                 SELECT pc.playlist_id, c.path, c.analysisDataFilePath, img.path
                 FROM playlist_content pc
                 JOIN content c ON c.content_id = pc.content_id
                 LEFT JOIN image img ON img.image_id = c.image_id
                 "#
-            } else {
-                r#"
+        } else {
+            r#"
                 SELECT pc.playlist_id, c.path, c.analysisDataFilePath, NULL AS image_path
                 FROM playlist_content pc
                 JOIN content c ON c.content_id = pc.content_id
                 "#
-            };
-            let mut stmt = conn.prepare(sql)?;
-            let rows = stmt.query_map([], |row| {
-                Ok((
-                    row.get::<_, i64>(0)?,
-                    row.get::<_, Option<String>>(1)?,
-                    row.get::<_, Option<String>>(2)?,
-                    row.get::<_, Option<String>>(3)?,
-                ))
-            })?;
-            for row in rows {
-                let (playlist_id, content_path, analysis_path, image_path) = row?;
-                if current_playlist_ids.contains(&playlist_id) {
-                    continue;
-                }
-                if let Some(path) = content_path
-                    .as_deref()
-                    .and_then(|p| normalize_owned_export_path(usb_root, p))
-                {
-                    protect_if_stale(&mut protected, &stale_normalized, path);
-                }
-                if let Some(path) = analysis_path.as_deref() {
-                    protect_analysis_variants_if_stale(
-                        &mut protected,
-                        &stale_normalized,
-                        usb_root,
-                        path,
-                    );
-                }
-                if let Some(path) = image_path
-                    .as_deref()
-                    .and_then(|p| normalize_owned_export_path(usb_root, p))
-                {
-                    protect_artwork_variants_if_stale(&mut protected, &stale_normalized, path);
-                }
+        };
+        let mut stmt = conn.prepare(sql)?;
+        let rows = stmt.query_map([], |row| {
+            Ok((
+                row.get::<_, i64>(0)?,
+                row.get::<_, Option<String>>(1)?,
+                row.get::<_, Option<String>>(2)?,
+                row.get::<_, Option<String>>(3)?,
+            ))
+        })?;
+        for row in rows {
+            let (playlist_id, content_path, analysis_path, image_path) = row?;
+            if current_playlist_ids.contains(&playlist_id) {
+                continue;
+            }
+            if let Some(path) = content_path
+                .as_deref()
+                .and_then(|p| normalize_owned_export_path(usb_root, p))
+            {
+                protect_if_stale(&mut protected, &stale_normalized, path);
+            }
+            if let Some(path) = analysis_path.as_deref() {
+                protect_analysis_variants_if_stale(
+                    &mut protected,
+                    &stale_normalized,
+                    usb_root,
+                    path,
+                );
+            }
+            if let Some(path) = image_path
+                .as_deref()
+                .and_then(|p| normalize_owned_export_path(usb_root, p))
+            {
+                protect_artwork_variants_if_stale(&mut protected, &stale_normalized, path);
             }
         }
-    } else {
-        warnings.extend(unlock_warnings);
     }
 
     let pdb_path = super::super::usb_staging::stage_pdb(usb_root)?;
@@ -903,15 +892,13 @@ pub fn filter_prunable_stale_paths_for_playlist(
     prunable.dedup();
 
     if !protected.is_empty() {
-        warnings.push(logging::log(
-            Level::Info,
+        logging::debug(
             "export",
-            "export.prune-protected",
             format!(
                 "prune stale protected {} still referenced by other USB playlists",
                 counted(protected.len(), "shared file", "shared files")
             ),
-        ));
+        );
     }
 
     Ok(prunable)
@@ -927,7 +914,6 @@ pub struct PruneResult {
 pub fn prune_stale_export_owned_files(
     usb_root: &Path,
     stale_paths: &[String],
-    warnings: &mut Vec<WarningEntry>,
 ) -> BackendResult<PruneResult> {
     let mut removed = 0usize;
     let mut missing = 0usize;
@@ -938,42 +924,34 @@ pub fn prune_stale_export_owned_files(
     for stale in ordered {
         let Some(normalized) = normalize_owned_export_path(usb_root, &stale) else {
             skipped += 1;
-            warnings.push(logging::log(
-                Level::Warn,
+            logging::debug(
                 "export",
-                "export.prune-invalid-path",
                 format!("prune stale skipped invalid path: {stale}"),
-            ));
+            );
             continue;
         };
         if !is_safe_export_owned_path(&normalized) {
             skipped += 1;
-            warnings.push(logging::log(
-                Level::Warn,
+            logging::debug(
                 "export",
-                "export.prune-unsafe-path",
                 format!("prune stale skipped unsafe path: {normalized}"),
-            ));
+            );
             continue;
         }
         let Some(abs_path) = resolve_usb_side_path(usb_root, &normalized) else {
             skipped += 1;
-            warnings.push(logging::log(
-                Level::Warn,
+            logging::debug(
                 "export",
-                "export.prune-unresolved-path",
                 format!("prune stale skipped unresolved path: {normalized}"),
-            ));
+            );
             continue;
         };
         if !abs_path.starts_with(usb_root) {
             skipped += 1;
-            warnings.push(logging::log(
-                Level::Warn,
+            logging::debug(
                 "export",
-                "export.prune-outside-root",
                 format!("prune stale skipped outside usb root: {normalized}"),
-            ));
+            );
             continue;
         }
         if !abs_path.exists() {
@@ -986,12 +964,10 @@ pub fn prune_stale_export_owned_files(
             continue;
         }
         skipped += 1;
-        warnings.push(logging::log(
-            Level::Warn,
+        logging::debug(
             "export",
-            "export.prune-non-file",
             format!("prune stale skipped non-file path: {}", abs_path.display()),
-        ));
+        );
     }
 
     Ok(PruneResult {

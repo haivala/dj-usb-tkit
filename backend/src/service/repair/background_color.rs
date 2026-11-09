@@ -99,17 +99,13 @@ fn background_color_refusal(has_a_place: bool, writable: bool) -> Option<Text> {
 /// Both databases' colors for the staged `pdb`, and whether a color can be
 /// set: either database having a place for it is enough, and the app writes to
 /// whichever have one.
-fn read_background_colors(
-    usb_root: &Path,
-    pdb: &[u8],
-    warnings: &mut Vec<WarningEntry>,
-) -> UsbBackgroundColorData {
+fn read_background_colors(usb_root: &Path, pdb: &[u8]) -> UsbBackgroundColorData {
     let pdb_color = (!pdb.is_empty())
         .then(|| crate::pdb_writer::t19_background_color(pdb, page_size_of(pdb)))
         .flatten();
     let has_edb = usb_staging::stage_edb(usb_root).is_ok_and(|path| path.is_file());
     let edb_color = has_edb
-        .then(|| open_edb_rw(usb_root, warnings))
+        .then(|| open_edb_rw(usb_root))
         .flatten()
         .and_then(|conn| edb_background_color(&conn));
     let reason = background_color_refusal(
@@ -140,10 +136,7 @@ impl BackendService {
     ) -> BackendResult<UsbBackgroundColorData> {
         let usb_root = resolve_usb_root(req.usb_root.as_deref())?;
         let pdb = StagedPdb::load(&usb_root)?;
-        let mut warnings = Vec::<WarningEntry>::new();
-        let mut data = read_background_colors(&usb_root, &pdb.bytes, &mut warnings);
-        data.warnings = warnings;
-        Ok(data)
+        Ok(read_background_colors(&usb_root, &pdb.bytes))
     }
 
     /// Sets `req.color` in both databases, in place, and saves both to the
@@ -161,7 +154,7 @@ impl BackendService {
         let usb_root = resolve_usb_root(req.usb_root.as_deref())?;
         let mut warnings = Vec::<WarningEntry>::new();
         let mut pdb = StagedPdb::load(&usb_root)?;
-        let before = read_background_colors(&usb_root, &pdb.bytes, &mut warnings);
+        let before = read_background_colors(&usb_root, &pdb.bytes);
         if !before.writable {
             return Err(BackendError::Validation(
                 background_color_refusal(
@@ -212,7 +205,7 @@ impl BackendService {
             })?;
         }
         if before.edb_color.is_some() {
-            let conn = open_edb_rw(&usb_root, &mut warnings)
+            let conn = open_edb_rw(&usb_root)
                 .ok_or_else(|| BackendError::Validation(tr::usb_background_color_error_no_edb()))?;
             conn.execute(
                 "UPDATE property SET backGroundColorType = ?1",
@@ -227,17 +220,15 @@ impl BackendService {
             }
         }
         self.invalidate_usb_parse_cache();
-        warnings.push(logging::log(
-            Level::Info,
+        logging::debug(
             "usb-background-color",
-            "usb.background-color.set",
             format!(
                 "background color set to {} (PDB was {:?}, eDB was {:?})",
                 req.color, before.pdb_color, before.edb_color
             ),
-        ));
+        );
 
-        let mut data = read_background_colors(&usb_root, &pdb.bytes, &mut warnings);
+        let mut data = read_background_colors(&usb_root, &pdb.bytes);
         data.updated = true;
         data.status_text = tr::usb_background_color_set(background_color_name(req.color)).render();
         data.warnings = warnings;

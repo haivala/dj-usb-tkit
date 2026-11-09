@@ -157,6 +157,12 @@ usb-playlists-warning-files-missing = { $count ->
 }
 # $path: a file deleted from the stick with the playlist.
 usb-playlists-warning-file-deleted = deleted: { $path }
+# Removing a playlist left a database unchanged. For the eDB, why it couldn't be opened is
+# logged just before.
+usb-playlists-warning-edb-removal-skipped = eDB playlist removal skipped: the eDB couldn't be opened
+usb-playlists-warning-pdb-removal-skipped = PDB playlist removal skipped: PDB missing
+# Reordering the stick's playlists couldn't open its eDB, so only the PDB has the new order.
+usb-playlists-warning-edb-order-skipped = reorder: unable to open eDB for playlist order
 
 ## usb-history
 
@@ -191,6 +197,10 @@ usb-player-menu-error-no-menu = this USB has no player menu in its eDB or PDB
 usb-player-menu-error-cant-change = this USB's player menu can't be changed: it has no eDB and no menu rows in its PDB
 # $name: the menu item. $kind: its number in the databases.
 usb-player-menu-error-cant-remove = Player menu item "{ $name }" (kind { $kind }) cannot be removed
+# Event Log notes for the player menu.
+usb-player-menu-warning-databases-differ = The PDB and eDB show different player menus. Showing the eDB's: the next menu change writes it to both.
+# $error: the reason. The menu change is then refused.
+usb-player-menu-warning-edb-write-failed = eDB write failed ({ $error }); restoring eDB from snapshot
 
 ## usb-background-color
 
@@ -858,6 +868,10 @@ diagnostics-warning-missing-audio = indexed audio file missing from USB: { $path
 diagnostics-warning-unindexed-audio = unindexed audio file: { $path }
 # $path: the analysis file. $tracks: the track files that name it, comma-separated.
 diagnostics-warning-shared-analysis = shared analysis file: { $path } used by { $tracks }
+# A track only a history session lists. $path: the track's file. $playlists: the sessions,
+# comma-separated.
+diagnostics-warning-history-only-track = history-only track: { $path } ({ $playlists })
+diagnostics-warning-history-only-track-unknown = history-only track: { $path } (unknown history playlist)
 # Event Log warnings for the stick's analysis folder. $path: the file or folder.
 diagnostics-warning-anlz-malformed = analysis entry malformed: { $path }
 diagnostics-warning-anlz-malformed-empty = analysis malformed entry is empty: { $path }
@@ -1093,6 +1107,53 @@ repair-progress-applying = USB: Applying { $fix }
 # $done, $total: the fix's items (files, tracks) done and in all.
 repair-progress-applying-items = USB: Applying { $fix } ({ $done }/{ $total })
 repair-progress-finished = USB: Finished { $fix }
+
+# Event Log warnings from the repair preview, the details its rows link to. $path: a file on
+# the stick, here and below.
+# $values: the tempos and key each database and analysis file holds ("PDB 128.00, DAT grid
+# 127.00, EXT grid -, eDB same"): data, not translated.
+repair-warning-bpm-key-mismatch = BPM/key mismatch: { $path } ({ $values })
+# $tracks: the track files that name it, comma-separated. $owner: the one that keeps it.
+repair-warning-shared-analysis = shared analysis file: { $path } used by { $tracks }; kept by { $owner }
+repair-warning-shared-analysis-no-owner = shared analysis file: { $path } used by { $tracks }; kept by no track (each gets its own)
+# $track: the track file the analysis file belongs to.
+repair-warning-analysis-without-track-path = analysis file without track path: { $path } ({ $track })
+# $format: MP3 or FLAC. $reason: what in the audio file stops it (technical, not translated).
+repair-warning-seek-data-unfixable = { $format } seek data can't be added ({ $reason }): { $path }
+repair-warning-seek-data-unfixable-replace = { $format } seek data can't be added ({ $reason }; replace it with an intact copy): { $path }
+repair-warning-seek-data-unfixable-report = { $format } seek data can't be added ({ $reason }; please report this file (format details, not the audio) so its seek data can be supported): { $path }
+repair-warning-missing-audio-scan-skipped = missing-audio scan skipped: Contents directory is absent or empty (DB-only snapshot)
+repair-warning-history-audio-missing = history track's audio file missing: { $path }
+# $original: the indexed file it copies.
+repair-warning-duplicate-audio = duplicate audio file: { $path } (copy of { $original })
+# $old: where the databases point. $new: where the file is now.
+repair-warning-moved-audio = moved audio: { $old } -> { $new }
+repair-warning-missing-audio = missing-audio reference: { $path }
+# $error: the reason, from the OS.
+repair-warning-save-failed = Saving the repaired databases to the USB failed: { $error }
+
+# Event Log notes while the fixes run.
+repair-warning-duplicate-audio-removed = removed duplicate audio file: { $path }
+repair-warning-beat-grid-length-unknown = beat grid not rebuilt: track length unknown for { $path }
+# $track: the track's file. $path: its new analysis file.
+repair-warning-analysis-separated = own analysis file for { $track }: { $path }
+repair-warning-beat-grid-not-constant = beat grid not rewritten (not a constant-tempo grid): { $path }
+# $format: MP3 or FLAC. $reason: what in the audio file stops it (technical, not translated).
+repair-warning-seek-data-skipped-replace = { $format } seek data not added ({ $reason }): { $path }; replace it with an intact copy
+repair-warning-seek-data-skipped-report = { $format } seek data not added ({ $reason }): { $path }; please report this file (format details, not the audio) so its seek data can be supported
+# The empty analysis files fix. $path: the empty analysis file. $audio: the track's file.
+repair-warning-empty-analysis-no-track = repair skipped (empty analysis): source audio mapping not found for { $path }
+repair-warning-empty-analysis-audio-missing = repair skipped (empty analysis): source audio missing for { $path } -> { $audio }
+repair-warning-empty-analysis-unreadable = repair failed (empty analysis): unable to analyze source audio { $audio }
+repair-warning-empty-analysis-length-unknown = repair failed (empty analysis): track length unknown for { $audio }
+# $error: the reason.
+repair-warning-empty-analysis-write-failed = repair failed (empty analysis): { $path }: { $error }
+repair-warning-relink-edb-unavailable = relink moved audio: eDB unavailable, only the PDB was updated
+# The unindexed audio fix. $error: why the file couldn't be read.
+repair-warning-unindexed-unreadable = unindexed audio skipped, unreadable: { $path }: { $error }
+repair-warning-unindexed-no-analysis = unindexed audio has no analysis files on the USB: { $path }
+repair-warning-unindexed-edb-unavailable = unindexed audio: eDB unavailable, only the PDB was updated
+repair-warning-missing-audio-edb-unavailable = repair skipped (missing audio): unable to open eDB read-write
 
 ## job
 
@@ -1367,8 +1428,8 @@ export-refused-not-analyzed = Export blocked: { $missing } of { $total ->
 export-refused-read-only = USB is read-only. Remount as read-write before export.
 # $folder: the missing source folder.
 export-refused-source-missing = Export blocked: source folder is missing: { $folder }. Relocate or remove it first.
-export-refused-manifest = Export blocked: manifest invariant check failed. See Event Log for details.
-export-refused-manifest-after-prune = Export finished with errors: the stale-file prune removed a file the exported playlist still references — the USB databases were written; restore from the pre-export backup. See Event Log for details.
+export-refused-manifest = Export blocked: manifest invariant check failed.
+export-refused-manifest-after-prune = Export finished with errors: the stale-file prune removed a file the exported playlist still references — the USB databases were written; restore from the pre-export backup.
 
 
 # The progress bar while the job runs.
@@ -1403,6 +1464,27 @@ export-error-not-analyzed = Export blocked: { $missing }/{ $total } playlist tra
 export-error-source-missing = Export blocked: source folder is missing: { $folder }. Relocate or remove it first.
 # $path: where the eDB should be.
 export-error-edb-missing = eDB not found at { $path }
+
+# Event Log warnings during an export. $path: a track's file.
+export-warning-unplayable-format = not exported, players don't play its format: { $path }
+export-warning-source-missing = missing source file: { $path }
+# The playlist was exported to the PDB but not to the eDB. $error: the reason.
+export-warning-edb-skipped = eDB update skipped: { $error }
+# After copying: a file the export wrote is not on the USB. $track: the track's id. $path: the file.
+export-warning-artwork-missing-after = export verification warning: artwork missing for track '{ $track }': { $path }
+export-warning-analysis-missing-after = export verification warning: analysis file missing for track '{ $track }': { $path }
+# A converted copy is exported without analysis. $path: the source track's file.
+export-warning-transcode-no-analysis = no analysis for the transcode of { $path }
+# A track left out because converting it failed. $path: its file. $reason: why, from the converter.
+export-warning-transcode-failed = not exported, converting it failed: { $path }: { $reason }
+export-warning-transcode-failed-unknown = not exported, converting it failed: { $path }
+# The track's cover file. $path: the file. $error: the reason, from the image library.
+export-warning-artwork-source-missing = artwork missing: { $path }
+export-warning-artwork-unreadable = artwork decode failed for { $path }: { $error }
+export-warning-artwork-write-failed = artwork encode failed for { $path }: { $error }
+# The track's analysis files aren't in the app's data. $track: the track's id. $path: the file looked for.
+export-warning-analysis-not-made = analysis bundle missing for track { $track } (no DAT path)
+export-warning-analysis-files-missing = analysis bundle missing for track { $track }: { $path }
 
 ## track-list
 

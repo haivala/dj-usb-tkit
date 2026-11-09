@@ -253,10 +253,8 @@ fn merge_full_edb_track_index(
     conn: &rusqlite::Connection,
     usb_root: &Path,
     track_by_id: &mut HashMap<u32, UsbTrack>,
-    warnings: &mut Vec<WarningEntry>,
 ) {
-    if let Some(all_edb_tracks) = try_read_track_index_from_edb_with_conn(conn, usb_root, warnings)
-    {
+    if let Some(all_edb_tracks) = try_read_track_index_from_edb_with_conn(conn, usb_root) {
         track_by_id.extend(all_edb_tracks);
     }
 }
@@ -589,10 +587,9 @@ fn hydrate_usb_page(
         }
         let track_ms = track_started.elapsed().as_millis();
         if track_ms >= 500 {
-            logging::emit(
-                Level::Warn,
+            logging::debug(
                 "usb-import",
-                &format!(
+                format!(
                     "{command}: slow USB read for '{}' ({track_ms}ms): analysis {:?}, artwork {:?}",
                     track.title, track.usb_analysis_path, track.artwork_path
                 ),
@@ -605,19 +602,17 @@ fn hydrate_usb_page(
         counts.library, counts.cache, counts.usb
     );
     if superseded {
-        logging::emit(
-            Level::Info,
+        logging::debug(
             "usb-import",
-            &format!(
+            format!(
                 "{command}: superseded by a newer load after reading {read_count} of {} in {elapsed}ms ({sources})",
                 counted(page.len(), "track", "tracks")
             ),
         );
     } else {
-        logging::emit(
-            Level::Info,
+        logging::debug(
             "usb-import",
-            &format!(
+            format!(
                 "{command}: read {} in {elapsed}ms ({sources})",
                 counted(page.len(), "track", "tracks")
             ),
@@ -687,12 +682,8 @@ fn cleanup_empty_dirs_recursive(dir: &Path) {
     }
 }
 
-fn push_usb_stage_timing(
-    warnings: &mut Vec<WarningEntry>,
-    stage: &str,
-    started: &mut std::time::Instant,
-) {
-    push_usb_stage_timing_with_threshold(warnings, stage, started, SLOW_USB_STAGE_MS);
+fn push_usb_stage_timing(stage: &str, started: &mut std::time::Instant) {
+    push_usb_stage_timing_with_threshold(stage, started, SLOW_USB_STAGE_MS);
 }
 
 /// Extra allowance for eDB-heavy stages whose wall-clock cost scales with
@@ -711,28 +702,23 @@ fn slow_stage_threshold_ms(item_count: usize) -> u128 {
 /// proportional to library size (not media speed) should pass a threshold
 /// computed via `slow_stage_threshold_ms` instead of assuming every stage
 /// costs the same regardless of how much data it reads.
+/// Logs the stage's time to the log file; returns whether it looked slow.
 fn push_usb_stage_timing_with_threshold(
-    warnings: &mut Vec<WarningEntry>,
     stage: &str,
     started: &mut std::time::Instant,
     threshold_ms: u128,
-) {
+) -> bool {
     let elapsed = started.elapsed().as_millis();
-    warnings.push(logging::log(
-        Level::Info,
-        "usb-import",
-        "usb.import.stage-timing",
-        format!("stage timing: {stage}: {elapsed}ms"),
-    ));
-    if elapsed >= threshold_ms {
-        warnings.push(logging::log(
-            Level::Warn,
+    logging::debug("usb-import", format!("stage timing: {stage}: {elapsed}ms"));
+    let slow = elapsed >= threshold_ms;
+    if slow {
+        logging::debug(
             "usb-import",
-            "usb.import.slow-media",
             format!("slow-media suspected: stage '{stage}' took {elapsed}ms"),
-        ));
+        );
     }
     *started = std::time::Instant::now();
+    slow
 }
 
 impl BackendService {
@@ -831,20 +817,10 @@ impl BackendService {
         // path. A database the USB lacks is dropped from staging. Best-effort:
         // a staging hiccup shouldn't fail validation.
         if let Err(err) = super::usb_staging::stage_pdb_on_connect(&normalized) {
-            warnings.push(logging::log(
-                Level::Warn,
-                "usb-import",
-                "usb.import.stage-pdb-failed",
-                format!("Failed to stage PDB locally: {err}"),
-            ));
+            logging::debug("usb-import", format!("Failed to stage PDB locally: {err}"));
         }
         if let Err(err) = super::usb_staging::stage_edb_on_connect(&normalized) {
-            warnings.push(logging::log(
-                Level::Warn,
-                "usb-import",
-                "usb.import.stage-edb-failed",
-                format!("Failed to stage eDB locally: {err}"),
-            ));
+            logging::debug("usb-import", format!("Failed to stage eDB locally: {err}"));
         }
 
         let has_write_access = has_write_access(&normalized);
@@ -1301,7 +1277,7 @@ impl BackendService {
         on_progress(2, 100, &tr::usb_progress_resolving_root().render());
         on_progress(10, 100, &tr::usb_progress_parsing_pdb().render());
         let usb_root = resolve_usb_root(req.usb_root.as_deref())?;
-        push_usb_stage_timing(&mut warnings, "resolve usb root", &mut stage_started);
+        push_usb_stage_timing("resolve usb root", &mut stage_started);
 
         let cache_key = self.usb_parse_cache_key(&usb_root);
         if let Some(resolved) = self.usb_playlists_cache_hit(&cache_key) {
@@ -1311,14 +1287,9 @@ impl BackendService {
         let pdb_path = super::usb_staging::stage_pdb(&usb_root)?;
         let parsed = if pdb_path.exists() {
             let parsed = parse_pdb(&pdb_path)?;
-            warnings.extend(parsed.warnings.iter().map(|message| {
-                logging::log(
-                    Level::Warn,
-                    "usb-import",
-                    "usb.import.pdb-parse",
-                    message.clone(),
-                )
-            }));
+            for message in &parsed.warnings {
+                logging::debug("usb-import", message);
+            }
             Some(parsed)
         } else {
             warnings.push(logging::log_text(
@@ -1329,16 +1300,16 @@ impl BackendService {
             ));
             None
         };
-        push_usb_stage_timing(&mut warnings, "parse PDB", &mut stage_started);
+        push_usb_stage_timing("parse PDB", &mut stage_started);
 
         on_progress(30, 100, &tr::usb_progress_reading_edb().render());
         // Open the eDB once and reuse it for every read below -- opening it
         // per-call was redundantly re-running SQLCipher key negotiation
         // (see try_read_track_index_from_edb_with_conn's doc comment).
         let edb_conn = open_edb_from_usb_root(&usb_root, &mut warnings);
-        let edb_playlists = edb_conn.as_ref().and_then(|conn| {
-            try_read_playlists_with_metadata_from_edb_with_conn(conn, &usb_root, &mut warnings)
-        });
+        let edb_playlists = edb_conn
+            .as_ref()
+            .and_then(|conn| try_read_playlists_with_metadata_from_edb_with_conn(conn, &usb_root));
         let edb_playlist_tracks = edb_playlists.as_ref().map(|m| {
             m.iter()
                 .map(|(name, playlist)| (name.clone(), playlist.tracks.clone()))
@@ -1347,7 +1318,7 @@ impl BackendService {
         let mut edb_track_by_id =
             edb_track_index_from_playlist_tracks(edb_playlist_tracks.as_ref());
         if let Some(conn) = edb_conn.as_ref() {
-            merge_full_edb_track_index(conn, &usb_root, &mut edb_track_by_id, &mut warnings);
+            merge_full_edb_track_index(conn, &usb_root, &mut edb_track_by_id);
         }
         let eedb_playlist_tracks_canonical = edb_playlist_tracks.as_ref().map(|m| {
             m.iter()
@@ -1355,7 +1326,6 @@ impl BackendService {
                 .collect::<HashMap<_, _>>()
         });
         push_usb_stage_timing_with_threshold(
-            &mut warnings,
             "read eDB",
             &mut stage_started,
             slow_stage_threshold_ms(edb_track_by_id.len()),
@@ -1498,14 +1468,12 @@ impl BackendService {
                 duration_unknown_count,
             });
         }
-        push_usb_stage_timing(&mut warnings, "resolve playlists", &mut stage_started);
+        push_usb_stage_timing("resolve playlists", &mut stage_started);
         let (deduped_items, collapsed) = dedupe_usb_playlists_by_name(items);
         items = deduped_items;
         if collapsed > 0 {
-            warnings.push(logging::log(
-                Level::Info,
+            logging::debug(
                 "usb-import",
-                "usb.playlists.collapsed-duplicates",
                 format!(
                     "collapsed {} from USB sources",
                     counted(
@@ -1514,7 +1482,7 @@ impl BackendService {
                         "duplicate playlist names"
                     )
                 ),
-            ));
+            );
         }
 
         on_progress(
@@ -1534,40 +1502,31 @@ impl BackendService {
         // ANLZ reads -- minutes on an HDD-backed stick -- for data no unviewed,
         // unadded row ever uses.
 
-        warnings.insert(
-            0,
-            logging::log(
-                Level::Info,
-                "usb-import",
-                "usb.import.root-in-use",
-                format!("USB root in use: {}", usb_root.display()),
-            ),
+        logging::debug(
+            "usb-import",
+            format!("USB root in use: {}", usb_root.display()),
         );
 
         if !source_counts.is_empty() {
             let pdb_count = source_counts.get("pdb").copied().unwrap_or(0);
             let edb_count = source_counts.get("eDB").copied().unwrap_or(0);
             if edb_count > 0 {
-                warnings.push(logging::log(
-                    Level::Info,
+                logging::debug(
                     "usb-import",
-                    "usb.playlists.source-edb",
                     format!(
                         "used eDB as playlist source for {}",
                         counted(edb_count, "playlist", "playlists")
                     ),
-                ));
+                );
             }
             if pdb_count > 0 {
-                warnings.push(logging::log(
-                    Level::Info,
+                logging::debug(
                     "usb-import",
-                    "usb.playlists.source-pdb",
                     format!(
                         "used PDB as playlist source for {}",
                         counted(pdb_count, "playlist", "playlists")
                     ),
-                ));
+                );
             }
         }
         if !empty_source_playlists.is_empty() {
@@ -1712,12 +1671,7 @@ impl BackendService {
             ));
         }
         if edb_updated == 0 {
-            warnings.push(logging::log(
-                Level::Warn,
-                "usb-import",
-                "usb.reorder.zero-rows-synced",
-                "reorder: eDB playlist order updated 0 rows",
-            ));
+            logging::debug("usb-import", "reorder: eDB playlist order updated 0 rows");
         }
         if let Err(err) =
             super::usb_staging::write_back_if_changed(&usb_root, super::usb_staging::DbKind::Edb)
@@ -1774,7 +1728,7 @@ impl BackendService {
         // Stage 1: Resolve USB root, name candidates (0-10%)
         on_progress(0, 100, &tr::usb_progress_resolving_usb_root().render());
         let usb_root = resolve_usb_root(req.usb_root.as_deref())?;
-        push_usb_stage_timing(&mut warnings, "resolve usb root", &mut stage_started);
+        push_usb_stage_timing("resolve usb root", &mut stage_started);
 
         warnings.extend(
             self.backup_usb_databases_with_retention(
@@ -1790,7 +1744,7 @@ impl BackendService {
             .into_iter()
             .map(|message| logging::log(Level::Info, "usb-import", "usb.remove.backup", message)),
         );
-        push_usb_stage_timing(&mut warnings, "backup usb databases", &mut stage_started);
+        push_usb_stage_timing("backup usb databases", &mut stage_started);
 
         on_progress(
             5,
@@ -1808,11 +1762,7 @@ impl BackendService {
                 name_candidates.push(leaf_trimmed);
             }
         }
-        push_usb_stage_timing(
-            &mut warnings,
-            "resolve playlist identifiers",
-            &mut stage_started,
-        );
+        push_usb_stage_timing("resolve playlist identifiers", &mut stage_started);
 
         // Stage 2: Remove playlist + detect shared tracks in PDB (10-30%)
         on_progress(
@@ -1826,11 +1776,7 @@ impl BackendService {
             &name_candidates,
             &mut warnings,
         )?;
-        push_usb_stage_timing(
-            &mut warnings,
-            "remove playlist and tracks from PDB",
-            &mut stage_started,
-        );
+        push_usb_stage_timing("remove playlist and tracks from PDB", &mut stage_started);
 
         let removed_pdb = pdb_result.removed_playlist_count;
         let tracks_removed = pdb_result.exclusive_tracks.len();
@@ -1897,8 +1843,7 @@ impl BackendService {
 
         let mut files_deleted = 0usize;
         if !stale_paths.is_empty() {
-            let prune_result =
-                prune_stale_export_owned_files(&usb_root, &stale_paths, &mut warnings)?;
+            let prune_result = prune_stale_export_owned_files(&usb_root, &stale_paths)?;
             files_deleted = prune_result.removed;
             if prune_result.missing > 0 {
                 warnings.push(logging::log_text(
@@ -1917,11 +1862,7 @@ impl BackendService {
                 ));
             }
         }
-        push_usb_stage_timing(
-            &mut warnings,
-            "delete exclusive track files",
-            &mut stage_started,
-        );
+        push_usb_stage_timing("delete exclusive track files", &mut stage_started);
 
         // Stage 4: Remove from eDB (65-80%)
         on_progress(65, 100, &tr::usb_progress_cleaning_edb().render());
@@ -1941,11 +1882,7 @@ impl BackendService {
                 &tr::usb_warning_edb_write_back_failed(err),
             ));
         }
-        push_usb_stage_timing(
-            &mut warnings,
-            "remove playlist from eDB",
-            &mut stage_started,
-        );
+        push_usb_stage_timing("remove playlist from eDB", &mut stage_started);
 
         // Stage 5: Clean up empty directories under Contents/ (80-95%)
         on_progress(
@@ -1957,11 +1894,7 @@ impl BackendService {
         if contents_dir.is_dir() {
             cleanup_empty_dirs_recursive(&contents_dir);
         }
-        push_usb_stage_timing(
-            &mut warnings,
-            "cleanup empty directories",
-            &mut stage_started,
-        );
+        push_usb_stage_timing("cleanup empty directories", &mut stage_started);
 
         if removed_edb == 0 && removed_pdb == 0 {
             return Err(BackendError::NotFound(tr::error_usb_playlist_not_found(
@@ -1972,11 +1905,7 @@ impl BackendService {
         // Stage 6: Finalize (95-100%)
         on_progress(95, 100, &tr::usb_progress_finalizing().render());
         warnings.extend(self.refresh_engine_library(&usb_root));
-        push_usb_stage_timing(
-            &mut warnings,
-            "finalize playlist removal",
-            &mut stage_started,
-        );
+        push_usb_stage_timing("finalize playlist removal", &mut stage_started);
         on_progress(
             100,
             100,
@@ -2010,12 +1939,11 @@ impl BackendService {
     where
         F: FnMut(usize, usize, &str),
     {
-        let mut stage_warnings = Vec::<WarningEntry>::new();
         let mut stage_started = std::time::Instant::now();
         on_progress(2, 100, &tr::usb_progress_resolving_root().render());
         on_progress(10, 100, &tr::usb_progress_parsing_pdb().render());
         let usb_root = resolve_usb_root(req.usb_root.as_deref())?;
-        push_usb_stage_timing(&mut stage_warnings, "resolve usb root", &mut stage_started);
+        push_usb_stage_timing("resolve usb root", &mut stage_started);
 
         let cache_key = self.usb_parse_cache_key(&usb_root);
         if let Some(hit) = self.usb_histories_cache_hit(&cache_key) {
@@ -2024,20 +1952,16 @@ impl BackendService {
 
         let pdb_path = super::usb_staging::stage_pdb(&usb_root)?;
         if !pdb_path.exists() {
-            let warnings = vec![
-                logging::log(
-                    Level::Info,
-                    "usb-import",
-                    "usb.import.root-in-use",
-                    format!("USB root in use: {}", usb_root.display()),
-                ),
-                logging::log_text(
-                    Level::Warn,
-                    "usb-import",
-                    "usb.histories.pdb-not-found",
-                    &tr::usb_history_warning_pdb_not_found(usb_root.display()),
-                ),
-            ];
+            logging::debug(
+                "usb-import",
+                format!("USB root in use: {}", usb_root.display()),
+            );
+            let warnings = vec![logging::log_text(
+                Level::Warn,
+                "usb-import",
+                "usb.histories.pdb-not-found",
+                &tr::usb_history_warning_pdb_not_found(usb_root.display()),
+            )];
             return Ok(with_usb_history_texts(&FetchUsbHistoriesData {
                 items: Vec::new(),
                 counts: UsbHistoryCounts {
@@ -2058,7 +1982,7 @@ impl BackendService {
         }
 
         let parsed = parse_pdb(&pdb_path)?;
-        push_usb_stage_timing(&mut stage_warnings, "parse PDB", &mut stage_started);
+        push_usb_stage_timing("parse PDB", &mut stage_started);
         on_progress(
             30,
             100,
@@ -2073,13 +1997,7 @@ impl BackendService {
         let supplemental_edb_conn = open_edb_from_usb_root(&usb_root, &mut supplemental_warnings);
         let supplemental_edb_playlist_tracks = supplemental_edb_conn
             .as_ref()
-            .and_then(|conn| {
-                try_read_playlists_with_metadata_from_edb_with_conn(
-                    conn,
-                    &usb_root,
-                    &mut supplemental_warnings,
-                )
-            })
+            .and_then(|conn| try_read_playlists_with_metadata_from_edb_with_conn(conn, &usb_root))
             .map(|m| {
                 m.into_iter()
                     .map(|(name, playlist)| (name, playlist.tracks))
@@ -2088,34 +2006,19 @@ impl BackendService {
         let mut supplemental_track_by_id =
             edb_track_index_from_playlist_tracks(supplemental_edb_playlist_tracks.as_ref());
         if let Some(conn) = supplemental_edb_conn.as_ref() {
-            merge_full_edb_track_index(
-                conn,
-                &usb_root,
-                &mut supplemental_track_by_id,
-                &mut supplemental_warnings,
-            );
+            merge_full_edb_track_index(conn, &usb_root, &mut supplemental_track_by_id);
         }
         let mut date_created_by_track_id = build_history_track_date_index(&parsed.tracks);
         if date_created_by_track_id.is_empty() {
             date_created_by_track_id = supplemental_edb_conn
                 .as_ref()
-                .and_then(|conn| {
-                    try_read_content_date_created_index_from_edb_with_conn(
-                        conn,
-                        &mut supplemental_warnings,
-                    )
-                })
+                .and_then(try_read_content_date_created_index_from_edb_with_conn)
                 .unwrap_or_default();
         }
         let export_log = match export_log::load_export_log(&usb_root) {
             Ok(log) => log,
             Err(err) => {
-                supplemental_warnings.push(logging::log(
-                    Level::Warn,
-                    "usb-import",
-                    "usb.histories.export-log-ignored",
-                    format!("USB export log ignored: {err}"),
-                ));
+                logging::debug("usb-import", format!("USB export log ignored: {err}"));
                 None
             }
         };
@@ -2150,7 +2053,6 @@ impl BackendService {
                 (0, 0)
             };
         push_usb_stage_timing_with_threshold(
-            &mut stage_warnings,
             "read supplemental databases",
             &mut stage_started,
             slow_stage_threshold_ms(supplemental_track_by_id.len()),
@@ -2173,7 +2075,7 @@ impl BackendService {
 
         on_progress(50, 100, &tr::usb_progress_building_track_index().render());
         let track_by_id = build_usb_track_index(&parsed, &usb_root);
-        push_usb_stage_timing(&mut stage_warnings, "build track index", &mut stage_started);
+        push_usb_stage_timing("build track index", &mut stage_started);
 
         on_progress(
             70,
@@ -2278,11 +2180,7 @@ impl BackendService {
                 }
             })
             .collect::<Vec<_>>();
-        push_usb_stage_timing(
-            &mut stage_warnings,
-            "resolve history entries",
-            &mut stage_started,
-        );
+        push_usb_stage_timing("resolve history entries", &mut stage_started);
 
         items.sort_by_key(|h| parse_history_numeric_id(&h.id));
         export_log::apply_history_dates_from_export_log(&mut items, export_log.as_ref());
@@ -2295,39 +2193,23 @@ impl BackendService {
             100,
             &tr::usb_progress_finalizing_history_import().render(),
         );
-        let mut warnings: Vec<WarningEntry> = parsed
-            .warnings
-            .iter()
-            .map(|message| {
-                logging::log(
-                    Level::Warn,
-                    "usb-import",
-                    "usb.import.pdb-parse",
-                    message.clone(),
-                )
-            })
-            .collect();
-        warnings.push(logging::log(
-            Level::Info,
+        for message in &parsed.warnings {
+            logging::debug("usb-import", message);
+        }
+        let mut warnings = Vec::<WarningEntry>::new();
+        logging::debug(
             "usb-import",
-            "usb.histories.selected-table-family",
             format!(
                 "history import: selected populated history table family from t11/t12 vs t17/t18: playlists={}, entries={}",
                 history_playlists.len(),
                 selected_history_entries.len()
             ),
-        ));
-        warnings.insert(
-            0,
-            logging::log(
-                Level::Info,
-                "usb-import",
-                "usb.import.root-in-use",
-                format!("USB root in use: {}", usb_root.display()),
-            ),
+        );
+        logging::debug(
+            "usb-import",
+            format!("USB root in use: {}", usb_root.display()),
         );
         warnings.extend(supplemental_warnings);
-        warnings.extend(stage_warnings);
         // Per-track materialization is deferred to `fetch_usb_history_tracks`
         // (viewed page) and the add-to-playlist path -- see the note in
         // `fetch_usb_playlists_with_progress`.
@@ -2600,10 +2482,9 @@ impl BackendService {
             Ok(in_histories.into_iter().find(is_file).cloned())
         };
         lookup().unwrap_or_else(|err| {
-            logging::emit(
-                Level::Warn,
+            logging::debug(
                 "usb-import",
-                &format!("Could not read the USB's row of {file_path}: {err}"),
+                format!("Could not read the USB's row of {file_path}: {err}"),
             );
             None
         })
@@ -2836,14 +2717,9 @@ impl BackendService {
 
         let parsed = if pdb_path.exists() {
             let parsed = parse_pdb(&pdb_path)?;
-            warnings.extend(parsed.warnings.iter().map(|message| {
-                logging::log(
-                    Level::Warn,
-                    "usb-import",
-                    "usb.import.pdb-parse",
-                    message.clone(),
-                )
-            }));
+            for message in &parsed.warnings {
+                logging::debug("usb-import", message);
+            }
             Some(parsed)
         } else {
             warnings.push(logging::log_text(
@@ -2907,10 +2783,9 @@ impl BackendService {
         req: FetchUsbTracksRequest,
     ) -> BackendResult<FetchUsbTracksData> {
         let usb_root = resolve_usb_root(req.usb_root.as_deref())?;
-        logging::emit(
-            Level::Info,
+        logging::debug(
             "usb-import",
-            &format!("fetch_usb_playlist_tracks: loading {}", req.id),
+            format!("fetch_usb_playlist_tracks: loading {}", req.id),
         );
         let generation = Arc::clone(&self.usb_playlist_page_generation);
         let this_load = generation.fetch_add(1, std::sync::atomic::Ordering::SeqCst) + 1;
@@ -2918,10 +2793,9 @@ impl BackendService {
         let resolved = self.usb_playlists_resolved(&usb_root)?;
         let resolve_ms = resolve_started.elapsed().as_millis();
         if resolve_ms >= 50 {
-            logging::emit(
-                Level::Info,
+            logging::debug(
                 "usb-import",
-                &format!("USB playlist list took {resolve_ms}ms to resolve"),
+                format!("USB playlist list took {resolve_ms}ms to resolve"),
             );
         }
         let playlist = resolved
@@ -3000,10 +2874,9 @@ impl BackendService {
         req: FetchUsbTracksRequest,
     ) -> BackendResult<FetchUsbTracksData> {
         let usb_root = resolve_usb_root(req.usb_root.as_deref())?;
-        logging::emit(
-            Level::Info,
+        logging::debug(
             "usb-import",
-            &format!("fetch_usb_history_tracks: loading {}", req.id),
+            format!("fetch_usb_history_tracks: loading {}", req.id),
         );
         let generation = Arc::clone(&self.usb_history_page_generation);
         let this_load = generation.fetch_add(1, std::sync::atomic::Ordering::SeqCst) + 1;
@@ -3011,10 +2884,9 @@ impl BackendService {
         let all = self.usb_histories_resolved(&usb_root)?;
         let resolve_ms = resolve_started.elapsed().as_millis();
         if resolve_ms >= 50 {
-            logging::emit(
-                Level::Info,
+            logging::debug(
                 "usb-import",
-                &format!("USB history list took {resolve_ms}ms to resolve"),
+                format!("USB history list took {resolve_ms}ms to resolve"),
             );
         }
         let history = all
@@ -3272,8 +3144,8 @@ mod tests {
         build_history_track_date_index, build_track_match_fingerprint, build_usb_track_index,
         cleanup_empty_dirs_recursive, edb_track_index_from_playlist_tracks,
         filter_named_history_playlists, hydrate_usb_page, hydrate_usb_track_in_place,
-        normalize_date_created, now, paginate_usb_tracks, push_usb_stage_timing,
-        push_usb_stage_timing_with_threshold, select_history_rows, slow_stage_threshold_ms,
+        normalize_date_created, now, paginate_usb_tracks, push_usb_stage_timing_with_threshold,
+        select_history_rows, slow_stage_threshold_ms,
     };
     use crate::models::{UsbHistory, UsbTrack};
     use crate::pdb_reader::{PdbHistoryEntryRow, PdbHistoryPlaylistRow, PdbTrackRow};
@@ -3984,31 +3856,21 @@ mod tests {
 
     #[test]
     fn push_usb_stage_timing_with_threshold_flags_slow_stage_at_zero_threshold() {
-        let mut warnings = Vec::new();
         let mut started = std::time::Instant::now();
-        push_usb_stage_timing_with_threshold(&mut warnings, "test-stage", &mut started, 0);
         assert!(
-            warnings.iter().any(|w| w.code == "usb.import.slow-media"),
+            push_usb_stage_timing_with_threshold("test-stage", &mut started, 0),
             "elapsed time always exceeds a zero threshold"
         );
-        assert!(warnings.iter().any(|w| w.code == "usb.import.stage-timing"));
     }
 
     #[test]
-    fn push_usb_stage_timing_with_threshold_no_warning_below_threshold() {
-        let mut warnings = Vec::new();
+    fn push_usb_stage_timing_with_threshold_not_slow_below_threshold() {
         let mut started = std::time::Instant::now();
-        push_usb_stage_timing_with_threshold(&mut warnings, "test-stage", &mut started, 60_000);
-        assert!(!warnings.iter().any(|w| w.code == "usb.import.slow-media"));
-        assert!(warnings.iter().any(|w| w.code == "usb.import.stage-timing"));
-    }
-
-    #[test]
-    fn push_usb_stage_timing_uses_default_threshold() {
-        let mut warnings = Vec::new();
-        let mut started = std::time::Instant::now();
-        push_usb_stage_timing(&mut warnings, "quick-stage", &mut started);
-        assert!(!warnings.iter().any(|w| w.code == "usb.import.slow-media"));
+        assert!(!push_usb_stage_timing_with_threshold(
+            "test-stage",
+            &mut started,
+            60_000
+        ));
     }
 
     // --- BackendService USB integration tests ---
@@ -5374,8 +5236,7 @@ mod tests {
                 .collect();
             assert_eq!(read, order);
 
-            let mut warnings = Vec::new();
-            let conn = crate::edb::open_edb_rw(&usb_root, &mut warnings).expect("open edb");
+            let conn = crate::edb::open_edb_rw(&usb_root).expect("open edb");
             for (position, name) in order.iter().enumerate() {
                 let sequence: i64 = conn
                     .query_row(

@@ -412,6 +412,21 @@ fn run_manifest_invariant_check(
         return Ok(());
     }
 
+    // For the log file: only an exporter bug trips these (a missing source file is skipped
+    // before the manifest is made).
+    for issue in &issues.samples {
+        logging::debug("export", format!("manifest check: {issue}"));
+    }
+    if issues.total > issues.samples.len() {
+        logging::debug(
+            "export",
+            format!(
+                "manifest check: {} more issues not listed",
+                issues.total - issues.samples.len()
+            ),
+        );
+    }
+
     Err(BackendError::ValidationWithDetails(
         phase.error_message(),
         json!({
@@ -1192,14 +1207,11 @@ impl BackendService {
 
         let mut warnings = Vec::<WarningEntry>::new();
         for track in &unplayable_tracks {
-            warnings.push(logging::log(
+            warnings.push(logging::log_text(
                 Level::Warn,
                 "export",
                 "export.unplayable-format",
-                format!(
-                    "not exported, players don't play its format: {}",
-                    track.file_path
-                ),
+                &tr::export_warning_unplayable_format(&track.file_path),
             ));
         }
         ensure_playlist_tracks_analysis_ready(&usb_root, &playlist)?;
@@ -1283,11 +1295,11 @@ impl BackendService {
             let source = PathBuf::from(&track.file_path);
             if !source.is_file() {
                 skipped_tracks += 1;
-                warnings.push(logging::log(
+                warnings.push(logging::log_text(
                     Level::Warn,
                     "export",
                     "export.missing-source-file",
-                    format!("missing source file: {}", source.display()),
+                    &tr::export_warning_source_missing(source.display()),
                 ));
                 continue;
             }
@@ -1588,12 +1600,10 @@ impl BackendService {
         let mut edb_playlist_id: Option<u32> = None;
         let mut edb_sort_order: Option<u32> = None;
         if export_dry_run {
-            warnings.push(logging::log(
-                Level::Info,
+            logging::debug(
                 "export",
-                "export.dry-run",
                 "dry-run enabled: media/artwork/analysis/database writes skipped",
-            ));
+            );
             match preview_pdb(
                 &usb_root,
                 &playlist,
@@ -1608,49 +1618,35 @@ impl BackendService {
                     topology_issues,
                     writer_warnings,
                 }) => {
-                    warnings.extend(writer_warnings.into_iter().map(|message| {
-                        logging::log(Level::Warn, "export", "export.pdb-writer-warning", message)
-                    }));
-                    warnings.push(logging::log(
-                        Level::Info,
+                    for message in &writer_warnings {
+                        logging::debug("export", message);
+                    }
+                    logging::debug(
                         "export",
-                        "export.pdb-preview",
-                        format!("PDB preview (tracks: {inserted_tracks}, playlists: {inserted_playlists})"),
-                    ));
+                        format!(
+                            "PDB preview (tracks: {inserted_tracks}, playlists: {inserted_playlists})"
+                        ),
+                    );
                     if topology_issues.is_empty() {
-                        warnings.push(logging::log(
-                            Level::Info,
+                        logging::debug(
                             "export",
-                            "export.pdb-preview-topology-clean",
                             "PDB preview topology: no critical table-chain delta detected",
-                        ));
+                        );
                     } else {
-                        warnings.push(logging::log(
-                            Level::Warn,
+                        logging::debug(
                             "export",
-                            "export.pdb-preview-topology-risk",
                             format!(
                                 "PDB preview topology risk: {}",
                                 counted(topology_issues.len(), "issue", "issues")
                             ),
-                        ));
-                        warnings.extend(topology_issues.into_iter().map(|issue| {
-                            logging::log(
-                                Level::Warn,
-                                "export",
-                                "export.pdb-preview-topology-issue",
-                                format!("PDB preview topology: {issue}"),
-                            )
-                        }));
+                        );
+                        for issue in &topology_issues {
+                            logging::debug("export", format!("PDB preview topology: {issue}"));
+                        }
                     }
                 }
                 Err(err) => {
-                    warnings.push(logging::log(
-                        Level::Error,
-                        "export",
-                        "export.pdb-preview-failed",
-                        format!("PDB preview failed: {err}"),
-                    ));
+                    logging::debug("export", format!("PDB preview failed: {err}"));
                 }
             }
         } else {
@@ -1679,7 +1675,7 @@ impl BackendService {
             // Write eDB first (master), then sync PDB to match eDB playlist IDs.
             // Open one RW connection here and reuse it for the immediate
             // post-write verification read below, instead of reopening.
-            let mut edb_write_conn = open_edb_rw(&usb_root, &mut warnings);
+            let mut edb_write_conn = open_edb_rw(&usb_root);
             let write_result = match edb_write_conn.as_mut() {
                 Some(conn) => write_edb_playlist_with_conn(
                     conn,
@@ -1714,19 +1710,19 @@ impl BackendService {
                         false,
                     )?;
                     warnings.extend(verify_warnings);
-                    warnings.push(logging::log(
-                        Level::Info,
+                    logging::debug(
                         "export",
-                        "export.edb-updated",
-                        format!("eDB updated (content rows: {inserted_content}, playlist entries: {linked_playlist_entries})"),
-                    ));
+                        format!(
+                            "eDB updated (content rows: {inserted_content}, playlist entries: {linked_playlist_entries})"
+                        ),
+                    );
                 }
                 Err(err) => {
-                    warnings.push(logging::log(
+                    warnings.push(logging::log_text(
                         Level::Warn,
                         "export",
                         "export.edb-update-skipped",
-                        format!("eDB update skipped: {err}"),
+                        &tr::export_warning_edb_skipped(err),
                     ));
                 }
             }
@@ -1754,15 +1750,15 @@ impl BackendService {
                         !skip_pdb_write,
                     )?;
                     warnings.extend(verify_pdb_warnings);
-                    warnings.extend(writer_warnings.into_iter().map(|message| {
-                        logging::log(Level::Warn, "export", "export.pdb-writer-warning", message)
-                    }));
-                    warnings.push(logging::log(
-                        Level::Info,
+                    for message in &writer_warnings {
+                        logging::debug("export", message);
+                    }
+                    logging::debug(
                         "export",
-                        "export.pdb-written",
-                        format!("PDB written (tracks: {inserted_tracks}, playlists: {inserted_playlists})"),
-                    ));
+                        format!(
+                            "PDB written (tracks: {inserted_tracks}, playlists: {inserted_playlists})"
+                        ),
+                    );
                 }
                 Err(err) => {
                     return Err(err);
@@ -1788,28 +1784,21 @@ impl BackendService {
                     .difference(&current_owned)
                     .cloned()
                     .collect::<Vec<_>>();
-                let prunable = filter_prunable_stale_paths_for_playlist(
-                    &usb_root,
-                    &playlist.name,
-                    &stale,
-                    &mut warnings,
-                )?;
+                let prunable =
+                    filter_prunable_stale_paths_for_playlist(&usb_root, &playlist.name, &stale)?;
                 // Before deleting the files, drop the eDB/PDB rows for tracks
                 // that fell out of this playlist and are referenced nowhere
                 // else -- otherwise the rows outlive the files and strict
                 // parity reports them as "missing from USB".
-                remove_orphaned_dropped_tracks_from_dbs(&usb_root, &prunable, &mut warnings)?;
-                let prune_result =
-                    prune_stale_export_owned_files(&usb_root, &prunable, &mut warnings)?;
-                warnings.push(logging::log(
-                    Level::Info,
+                remove_orphaned_dropped_tracks_from_dbs(&usb_root, &prunable)?;
+                let prune_result = prune_stale_export_owned_files(&usb_root, &prunable)?;
+                logging::debug(
                     "export",
-                    "export.prune-stale-summary",
                     format!(
                         "prune stale enabled: removed {}, missing {}, skipped {}",
                         prune_result.removed, prune_result.missing, prune_result.skipped
                     ),
-                ));
+                );
                 // Bookend to the pre-DB-write manifest check: prove the prune
                 // didn't delete a file the freshly-exported playlist still
                 // references. Runs before save_export_owned_files so the owned
@@ -1856,12 +1845,7 @@ impl BackendService {
                     }
                 }
                 Err(err) => {
-                    warnings.push(logging::log(
-                        Level::Warn,
-                        "export",
-                        "export.log-append-skipped",
-                        format!("USB export log append skipped: {err}"),
-                    ));
+                    logging::debug("export", format!("USB export log append skipped: {err}"));
                 }
             }
             // Additive, always-queryable counterpart to the on-drive JSON
@@ -1952,15 +1936,11 @@ impl BackendService {
                 let art_abs =
                     resolve_usb_side_path(usb_root, art).unwrap_or_else(|| PathBuf::from(art));
                 if !art_abs.is_file() {
-                    warnings.push(logging::log(
+                    warnings.push(logging::log_text(
                         Level::Warn,
                         "export",
                         "export.verify-artwork-missing",
-                        format!(
-                            "export verification warning: artwork missing for track '{}': {}",
-                            track.id,
-                            art_abs.display()
-                        ),
+                        &tr::export_warning_artwork_missing_after(&track.id, art_abs.display()),
                     ));
                 }
             }
@@ -1969,15 +1949,11 @@ impl BackendService {
                 let anlz_abs =
                     resolve_usb_side_path(usb_root, anlz).unwrap_or_else(|| PathBuf::from(anlz));
                 if !anlz_abs.is_file() {
-                    warnings.push(logging::log(
+                    warnings.push(logging::log_text(
                         Level::Warn,
                         "export",
                         "export.verify-analysis-missing",
-                        format!(
-                            "export verification warning: analysis file missing for track '{}': {}",
-                            track.id,
-                            anlz_abs.display()
-                        ),
+                        &tr::export_warning_analysis_missing_after(&track.id, anlz_abs.display()),
                     ));
                 }
             }
@@ -1993,17 +1969,15 @@ impl BackendService {
             verify_pdb_content(usb_root, playlist, manifest)?;
         }
 
-        warnings.push(logging::log(
-            Level::Info,
+        logging::debug(
             "export",
-            "export.verify-passed",
             format!(
                 "export verification passed (db: {}, pdb: {}, tracks: {})",
                 if verify_db { "checked" } else { "skipped" },
                 if verify_pdb { "checked" } else { "skipped" },
                 manifest.tracks.len()
             ),
-        ));
+        );
         Ok(warnings)
     }
 
@@ -2083,11 +2057,11 @@ impl BackendService {
                         .as_deref()
                         .and_then(|bundle| prepare_transcode_bundle(&data_dir, bundle, &file));
                     if bundle.is_none() {
-                        warnings.push(logging::log(
+                        warnings.push(logging::log_text(
                             Level::Warn,
                             "export",
                             "export.transcode-analysis-missing",
-                            format!("no analysis for the transcode of {}", track.file_path),
+                            &tr::export_warning_transcode_no_analysis(&track.file_path),
                         ));
                     }
                     use_transcode(&mut track, &file);
@@ -2095,18 +2069,17 @@ impl BackendService {
                     kept.push(track);
                 }
                 ExportFile::Make(_) | ExportFile::Refused(_) => {
-                    let reason = failures
-                        .iter()
-                        .find(|(id, _)| id == &track.id)
-                        .map_or("not converted", |(_, message)| message.as_str());
-                    warnings.push(logging::log(
+                    let failed = match failures.iter().find(|(id, _)| id == &track.id) {
+                        Some((_, reason)) => {
+                            tr::export_warning_transcode_failed(&track.file_path, reason)
+                        }
+                        None => tr::export_warning_transcode_failed_unknown(&track.file_path),
+                    };
+                    warnings.push(logging::log_text(
                         Level::Warn,
                         "export",
                         "export.transcode-failed",
-                        format!(
-                            "not exported, converting it failed: {}: {reason}",
-                            track.file_path
-                        ),
+                        &failed,
                     ));
                     dropped += 1;
                 }
@@ -3325,7 +3298,6 @@ mod tests {
                 .iter()
                 .any(|w| w.code == "export.verify-analysis-missing")
         );
-        assert!(warnings.iter().any(|w| w.code == "export.verify-passed"));
     }
 
     #[test]
@@ -3374,7 +3346,7 @@ mod tests {
                 assert_eq!(details["validationType"], "export_manifest_invariant");
                 assert_eq!(
                     details["statusText"],
-                    "Export blocked: manifest invariant check failed. See Event Log for details."
+                    "Export blocked: manifest invariant check failed."
                 );
                 assert!(
                     details["issues"]
@@ -3536,7 +3508,7 @@ mod tests {
                 assert_eq!(details["validationType"], "export_manifest_post_prune");
                 assert_eq!(
                     details["statusText"],
-                    "Export finished with errors: the stale-file prune removed a file the exported playlist still references — the USB databases were written; restore from the pre-export backup. See Event Log for details."
+                    "Export finished with errors: the stale-file prune removed a file the exported playlist still references — the USB databases were written; restore from the pre-export backup."
                 );
                 assert!(
                     details["issues"]

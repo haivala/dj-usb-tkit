@@ -47,34 +47,28 @@ impl BackendService {
         const SLOW_USB_STAGE_MS: u128 = 3_000;
         let start = std::time::Instant::now();
         let mut stage_started = std::time::Instant::now();
-        let mut note_stage = |name: &str, raw_warnings: &mut Vec<WarningEntry>| {
+        let mut note_stage = |name: &str| {
             let elapsed = stage_started.elapsed().as_millis();
-            raw_warnings.push(logging::log(
-                Level::Info,
+            logging::debug(
                 "usb-diagnostics",
-                "usb.diagnostics.stage-timing",
                 format!("stage timing: {name}: {elapsed}ms"),
-            ));
+            );
             if elapsed >= SLOW_USB_STAGE_MS {
-                raw_warnings.push(logging::log(
-                    Level::Warn,
+                logging::debug(
                     "usb-diagnostics",
-                    "usb.diagnostics.slow-media",
                     format!("slow-media suspected: stage '{name}' took {elapsed}ms"),
-                ));
+                );
             }
             stage_started = std::time::Instant::now();
         };
         on_progress(2, 100, &tr::diagnostics_progress_resolving_root().render());
         let usb_root = resolve_usb_root(req.usb_root.as_deref())?;
         let mut raw_warnings = Vec::<WarningEntry>::new();
-        raw_warnings.push(logging::log(
-            Level::Info,
+        logging::debug(
             "usb-diagnostics",
-            "usb.diagnostics.info",
             format!("USB root: {}", usb_root.display()),
-        ));
-        note_stage("resolve usb root", &mut raw_warnings);
+        );
+        note_stage("resolve usb root");
 
         let pdb_path = match staged_pdb_path {
             Some(p) => p.to_path_buf(),
@@ -87,8 +81,8 @@ impl BackendService {
             100,
             &tr::diagnostics_progress_checking_pdb_integrity().render(),
         );
-        let (pdb_integrity, parsed_opt) = diagnose_pdb_integrity(&pdb_path, &mut raw_warnings);
-        note_stage("pdb integrity", &mut raw_warnings);
+        let (pdb_integrity, parsed_opt) = diagnose_pdb_integrity(&pdb_path);
+        note_stage("pdb integrity");
 
         // --- 2. DB Access ---
         on_progress(
@@ -109,11 +103,7 @@ impl BackendService {
         let mut edb_access = diagnose_edb_access(&edb_path, conn);
         raw_warnings.append(&mut edb_open_warnings);
         let edb_playlists = conn.and_then(|c| {
-            try_read_playlists_with_metadata_from_edb_db_only_with_conn(
-                c,
-                &usb_root,
-                &mut raw_warnings,
-            )
+            try_read_playlists_with_metadata_from_edb_db_only_with_conn(c, &usb_root)
         });
         let edb_playlist_tracks = edb_playlists.map(|m| {
             m.into_iter()
@@ -156,7 +146,7 @@ impl BackendService {
             ));
         }
 
-        note_stage("db access", &mut raw_warnings);
+        note_stage("db access");
 
         // --- 3. Contents Integrity ---
         on_progress(
@@ -178,7 +168,7 @@ impl BackendService {
             .unwrap_or_default();
         let edb_indexed_paths = conn
             .map(|c| {
-                collect_edb_audio_paths(c, &mut raw_warnings)
+                collect_edb_audio_paths(c)
                     .iter()
                     .map(|p| audio_path_key(p))
                     .filter(|p| !p.is_empty())
@@ -217,16 +207,20 @@ impl BackendService {
                     .filter(|e| e.track_id == Some(track.id))
                     .filter_map(|e| hp_name.get(&e.playlist_id).copied())
                     .collect();
-                let pl_str = if pl_names.is_empty() {
-                    "unknown history playlist".to_string()
+                // The path agreement check links here for these.
+                let line = if pl_names.is_empty() {
+                    tr::diagnostics_warning_history_only_track_unknown(&norm)
                 } else {
-                    pl_names.into_iter().collect::<Vec<_>>().join(", ")
+                    tr::diagnostics_warning_history_only_track(
+                        &norm,
+                        pl_names.into_iter().collect::<Vec<_>>().join(", "),
+                    )
                 };
-                raw_warnings.push(logging::log(
+                raw_warnings.push(logging::log_text(
                     Level::Info,
                     "usb-diagnostics",
                     "usb.diagnostics.history-only",
-                    format!("history-only track: {norm} ({pl_str})"),
+                    &line,
                 ));
                 out.insert(audio_path_key(&norm));
             }
@@ -327,7 +321,7 @@ impl BackendService {
                     .collect::<Vec<_>>(),
             );
         }
-        note_stage("contents integrity", &mut raw_warnings);
+        note_stage("contents integrity");
 
         // --- 4. Analysis Integrity ---
         on_progress(
@@ -438,7 +432,7 @@ impl BackendService {
                     .collect::<Vec<_>>(),
             );
         }
-        note_stage("analysis integrity", &mut raw_warnings);
+        note_stage("analysis integrity");
 
         // --- 5. Playlist Resolution ---
         on_progress(
@@ -459,7 +453,7 @@ impl BackendService {
                     on_progress(pct, 100, message);
                 },
             );
-        note_stage("playlist resolution", &mut raw_warnings);
+        note_stage("playlist resolution");
 
         let engine_library_section = self.engine_library_section(&usb_root);
         let overall_status = DiagStatus::worst_of(&[
@@ -599,33 +593,28 @@ impl BackendService {
         const SLOW_USB_STAGE_MS: u128 = 3_000;
         let start = std::time::Instant::now();
         let mut stage_started = std::time::Instant::now();
-        let mut note_stage = |name: &str, raw_warnings: &mut Vec<WarningEntry>| {
+        let mut note_stage = |name: &str| {
             let elapsed = stage_started.elapsed().as_millis();
-            raw_warnings.push(logging::log(
-                Level::Info,
+            logging::debug(
                 "usb-diagnostics",
-                "usb.diagnostics.stage-timing",
                 format!("stage timing: {name}: {elapsed}ms"),
-            ));
+            );
             if elapsed >= SLOW_USB_STAGE_MS {
-                raw_warnings.push(logging::log(
-                    Level::Warn,
+                logging::debug(
                     "usb-diagnostics",
-                    "usb.diagnostics.slow-media",
                     format!("slow-media suspected: stage '{name}' took {elapsed}ms"),
-                ));
+                );
             }
             stage_started = std::time::Instant::now();
         };
         on_progress(2, 100, &tr::diagnostics_progress_resolving_root().render());
         let usb_root = resolve_usb_root(req.usb_root.as_deref())?;
-        let mut raw_warnings = vec![logging::log(
-            Level::Info,
+        logging::debug(
             "usb-diagnostics",
-            "usb.diagnostics.info",
             format!("USB root: {}", usb_root.display()),
-        )];
-        note_stage("resolve usb root", &mut raw_warnings);
+        );
+        let mut raw_warnings = Vec::<WarningEntry>::new();
+        note_stage("resolve usb root");
 
         on_progress(20, 100, &tr::diagnostics_progress_parsing_pdb().render());
         let pdb_path = match staged_pdb_path {
@@ -640,15 +629,10 @@ impl BackendService {
                 &owned_parsed_pdb
             }
         };
-        raw_warnings.extend(parsed.warnings.iter().map(|message| {
-            logging::log(
-                Level::Warn,
-                "usb-diagnostics",
-                "usb.diagnostics.pdb-parse",
-                message.clone(),
-            )
-        }));
-        note_stage("parse PDB", &mut raw_warnings);
+        for message in &parsed.warnings {
+            logging::debug("usb-diagnostics", message);
+        }
+        note_stage("parse PDB");
 
         on_progress(45, 100, &tr::diagnostics_progress_reading_edb().render());
         let owned_edb_conn: Option<rusqlite::Connection> = if edb_conn.is_some() {
@@ -662,23 +646,22 @@ impl BackendService {
                 "parity report requires readable eDB playlist data".to_string(),
             ));
         };
-        let edb_playlists =
-            try_read_playlists_with_metadata_from_edb_with_conn(conn, &usb_root, &mut raw_warnings)
-                .ok_or_else(|| {
-                    BackendError::Internal(
-                        "parity report requires readable eDB playlist data".to_string(),
-                    )
-                })?;
+        let edb_playlists = try_read_playlists_with_metadata_from_edb_with_conn(conn, &usb_root)
+            .ok_or_else(|| {
+                BackendError::Internal(
+                    "parity report requires readable eDB playlist data".to_string(),
+                )
+            })?;
         let rating_colour = compare_rating_colour(conn, parsed, &edb_playlists);
         let field_notes = compare_note_fields(conn, parsed, &edb_playlists);
-        note_stage("read eDB", &mut raw_warnings);
+        note_stage("read eDB");
 
         on_progress(
             58,
             100,
             &tr::diagnostics_progress_checking_audio_files().render(),
         );
-        let edb_audio_paths = collect_edb_audio_paths(conn, &mut raw_warnings);
+        let edb_audio_paths = collect_edb_audio_paths(conn);
         let presence = scan_audio_presence(&usb_root, parsed, &edb_audio_paths);
         for path in &presence.missing {
             raw_warnings.push(logging::log_text(
@@ -701,7 +684,7 @@ impl BackendService {
             presence.unindexed.len(),
             presence.indexed_count,
         );
-        note_stage("strict raw coverage check", &mut raw_warnings);
+        note_stage("strict raw coverage check");
 
         on_progress(
             70,
@@ -725,14 +708,14 @@ impl BackendService {
             playlist_details.len(),
             Some(&strict_raw_coverage),
         );
-        note_stage("compare playlist sources", &mut raw_warnings);
+        note_stage("compare playlist sources");
 
         on_progress(
             95,
             100,
             &tr::diagnostics_progress_finalizing_parity_report().render(),
         );
-        note_stage("finalize", &mut raw_warnings);
+        note_stage("finalize");
         let duration_ms = start.elapsed().as_millis() as u64;
         let status_label = crate::i18n::tr::parity_status_label(match overall_status {
             DiagStatus::Pass => tr::diagnostics_status_pass(),

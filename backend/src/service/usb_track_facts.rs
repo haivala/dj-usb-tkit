@@ -221,9 +221,7 @@ fn edb_track_rows(conn: &rusqlite::Connection) -> Vec<EdbContentTrack> {
     let rows = if has_path {
         read_edb_content_tracks(conn).unwrap_or_default()
     } else {
-        // Its schema warnings are the diagnostics' to report, not ours.
-        let mut ignored_warnings = Vec::new();
-        crate::service::diagnostics::collect_edb_audio_paths(conn, &mut ignored_warnings)
+        crate::service::diagnostics::collect_edb_audio_paths(conn)
             .into_iter()
             .map(|path| EdbContentTrack {
                 content_id: None,

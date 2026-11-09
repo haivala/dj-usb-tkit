@@ -1032,20 +1032,6 @@ fn export_to_usb_writes_canonical_outputs() {
         .filter(|e| e.file_type().is_file())
         .count();
     assert_eq!(copied_files, 1);
-    assert!(
-        data.warnings
-            .iter()
-            .any(|w| w.message.starts_with("eDB updated")),
-        "expected eDB updated warning/info in {:?}",
-        data.warnings
-    );
-    assert!(
-        data.warnings
-            .iter()
-            .any(|w| w.message.starts_with("PDB written")),
-        "expected PDB written warning/info in {:?}",
-        data.warnings
-    );
 
     let playlists = backend
         .list_playlists()
@@ -4343,6 +4329,19 @@ fn adding_usb_track_clears_stale_local_key_when_usb_key_is_missing() {
 /// the direct, observable proof the dedup landed.
 #[test]
 fn fetch_usb_histories_opens_edb_exactly_once_not_once_per_read() {
+    // The read-only open logs a developer line (file only, not in `warnings`)
+    // each time it succeeds; count this thread's.
+    thread_local! {
+        static EDB_OPENS: std::cell::Cell<usize> = const { std::cell::Cell::new(0) };
+    }
+    backend::logging::set_sink(Box::new(|line| {
+        if line.english == "eDB opened without SQLCipher key"
+            || line.english.starts_with("eDB unlocked via SQLCipher")
+        {
+            EDB_OPENS.with(|n| n.set(n.get() + 1));
+        }
+    }));
+
     let root = tempdir().expect("temp root");
     let usb = root.path().join("usb");
     fs::create_dir_all(&usb).expect("create usb");
@@ -4490,15 +4489,10 @@ fn fetch_usb_histories_opens_edb_exactly_once_not_once_per_read() {
         usb_root: Some(usb.to_string_lossy().to_string()),
     });
     assert!(histories.ok, "fetch usb histories failed: {histories:?}");
-    let warnings = histories.data.expect("histories data").warnings;
-
-    let open_success_count = warnings
-        .iter()
-        .filter(|w| w.code == "edb.open.no-key" || w.code == "edb.open.unlocked")
-        .count();
     assert_eq!(
-        open_success_count, 1,
-        "expected the eDB to be opened exactly once (reused thereafter), got warnings: {warnings:?}"
+        EDB_OPENS.with(std::cell::Cell::get),
+        1,
+        "expected the eDB to be opened exactly once (reused thereafter)"
     );
 }
 
@@ -4616,14 +4610,6 @@ fn usb_diagnostics_emits_playlist_name_progress_messages() {
             .iter()
             .any(|m| m.starts_with("Resolving playlist ")),
         "expected per-playlist progress with playlist name"
-    );
-    let report = result.data.expect("diagnostics report");
-    assert!(
-        report
-            .warnings
-            .iter()
-            .any(|w| w.message.starts_with("stage timing:")),
-        "expected stage timing entries in diagnostics warnings"
     );
 }
 

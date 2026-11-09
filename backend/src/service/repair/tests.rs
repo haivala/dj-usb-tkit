@@ -658,9 +658,8 @@ fn apply_fix_sync_edb_history_from_pdb_flushes_to_usb_when_staging_enabled() {
         ..ParsedPdb::default()
     };
 
-    let mut warnings = Vec::new();
     let (history_written, _history_content_written) = service
-        .apply_fix_sync_edb_history_from_pdb(&usb_root, &parsed, None, &mut warnings)
+        .apply_fix_sync_edb_history_from_pdb(&usb_root, &parsed, None)
         .expect("sync edb history");
     assert_eq!(history_written, 1);
 
@@ -2012,8 +2011,7 @@ fn apply_fix_sync_edb_history_from_pdb_overwrites_stale_edb_rows() {
 
     // Seed the eDB with stale history rows that must be replaced.
     {
-        let mut warnings = Vec::new();
-        let mut conn = open_edb_rw(&usb_root, &mut warnings).expect("open eDB rw");
+        let mut conn = open_edb_rw(&usb_root).expect("open eDB rw");
         let tx = conn.transaction().expect("begin tx");
         tx.execute_batch(
             "CREATE TABLE IF NOT EXISTS history(history_id integer primary key, sequenceNo integer, name varchar, attribute integer, history_id_parent integer); \
@@ -2026,9 +2024,8 @@ fn apply_fix_sync_edb_history_from_pdb_overwrites_stale_edb_rows() {
         tx.commit().expect("commit seed");
     }
 
-    let mut warnings = Vec::new();
     let (history_written, history_content_written) = service
-        .apply_fix_sync_edb_history_from_pdb(&usb_root, &parsed, None, &mut warnings)
+        .apply_fix_sync_edb_history_from_pdb(&usb_root, &parsed, None)
         .expect("sync edb history");
     assert_eq!(history_written, 1);
     assert_eq!(
@@ -2036,7 +2033,7 @@ fn apply_fix_sync_edb_history_from_pdb_overwrites_stale_edb_rows() {
         "the track_id=0 entry must be dropped"
     );
 
-    let conn = open_edb_rw(&usb_root, &mut Vec::new()).expect("re-open eDB rw");
+    let conn = open_edb_rw(&usb_root).expect("re-open eDB rw");
     let (hid, name): (i64, String) = conn
         .query_row("SELECT history_id, name FROM history", [], |r| {
             Ok((r.get(0)?, r.get(1)?))

@@ -29,7 +29,7 @@ use crate::models::{
     GetTrackDetailRequest, GetUsbTrackDetailRequest, KeyOption, KeyOptionGroup,
     ResolvePlaybackSourceRequest, SaveTrackAnalysisEditsData, SaveTrackAnalysisEditsRequest,
     SaveUsbTrackAnalysisEditsData, SaveUsbTrackAnalysisEditsRequest, TrackCue, TrackCueInput,
-    TrackDetail, UsbTrackAnalysisDetail, WarningEntry,
+    TrackDetail, UsbTrackAnalysisDetail,
 };
 use crate::pdb_reader::pdb_page_size;
 
@@ -1224,8 +1224,7 @@ impl BackendService {
 
         // 4. Open the device eDB and locate the track *before* writing
         //    anything, so a missing content row blocks cleanly.
-        let mut warnings: Vec<WarningEntry> = Vec::new();
-        let mut edb_conn = open_edb_rw(&usb_root, &mut warnings)
+        let mut edb_conn = open_edb_rw(&usb_root)
             .ok_or_else(|| BackendError::NotFound(tr::error_usb_edb_unreadable()))?;
         let content_id = find_content_id_by_path(&edb_conn, &req.usb_media_path_raw)?
             .ok_or_else(|| track_not_in_usb_database(&req.usb_media_path_raw))?;

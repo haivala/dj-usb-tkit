@@ -17,7 +17,7 @@ use crate::models::{
     GetTracksMetadataSummaryRequest, GetUsbTracksMetadataSummaryRequest,
     SaveTrackMetadataEditsData, SaveTrackMetadataEditsRequest, SaveUsbTrackMetadataEditsData,
     SaveUsbTrackMetadataEditsRequest, SharedValue, TrackMetadataValues, TracksMetadataSummary,
-    UsbMetadataEditResult, UsbMetadataEditTrack, WarningEntry,
+    UsbMetadataEditResult, UsbMetadataEditTrack,
 };
 use crate::pdb_reader::pdb_page_size;
 
@@ -601,8 +601,7 @@ impl BackendService {
             req.release_date.as_deref(),
         )?;
 
-        let mut warnings: Vec<WarningEntry> = Vec::new();
-        let mut edb_conn = open_edb_rw(&usb_root, &mut warnings)
+        let mut edb_conn = open_edb_rw(&usb_root)
             .ok_or_else(|| BackendError::NotFound(tr::error_usb_edb_unreadable()))?;
         let content_ids = tracks
             .iter()

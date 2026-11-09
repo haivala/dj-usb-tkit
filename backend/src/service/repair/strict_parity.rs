@@ -10,6 +10,7 @@
 //! the writers rebuild it from the other.
 
 use super::*;
+use crate::i18n::tr;
 use crate::service::export_helpers::{
     EdbContentFields, canonicalize_track_path_identity, read_edb_content_fields,
 };
@@ -231,12 +232,12 @@ pub(crate) fn write_edb_playlist_order(
     order_by_name: &HashMap<String, u32>,
     warnings: &mut Vec<WarningEntry>,
 ) -> BackendResult<usize> {
-    let Some(mut conn) = open_edb_rw(usb_root, warnings) else {
-        warnings.push(logging::log(
+    let Some(mut conn) = open_edb_rw(usb_root) else {
+        warnings.push(logging::log_text(
             Level::Error,
             "usb-import",
             "usb.reorder.edb-open-failed",
-            "reorder: unable to open eDB for playlist order",
+            &tr::usb_playlists_warning_edb_order_skipped(),
         ));
         return Ok(0);
     };
@@ -751,9 +752,8 @@ impl BackendService {
         usb_root: &std::path::Path,
         target_playlist_names: Option<&HashSet<String>>,
         edb_conn: Option<&mut rusqlite::Connection>,
-        warnings: &mut Vec<WarningEntry>,
     ) -> BackendResult<StrictParityUpgradeApplyResult> {
-        run_strict_parity_upgrade(usb_root, target_playlist_names, edb_conn, warnings, true)
+        run_strict_parity_upgrade(usb_root, target_playlist_names, edb_conn, true)
     }
 }
 
@@ -775,11 +775,10 @@ pub(super) fn run_strict_parity_upgrade(
     usb_root: &std::path::Path,
     target_playlist_names: Option<&HashSet<String>>,
     edb_conn: Option<&mut rusqlite::Connection>,
-    warnings: &mut Vec<WarningEntry>,
     write: bool,
 ) -> BackendResult<StrictParityUpgradeApplyResult> {
     let Some(kind) = missing_database(usb_root) else {
-        return collect_merge_write(usb_root, target_playlist_names, edb_conn, warnings, write);
+        return collect_merge_write(usb_root, target_playlist_names, edb_conn, write);
     };
     if !write {
         return Err(BackendError::Internal(
@@ -789,7 +788,7 @@ pub(super) fn run_strict_parity_upgrade(
     let staged = stage_initialized_database(usb_root, kind)?;
     // A connection opened before the eDB was staged isn't to this one.
     let edb_conn = edb_conn.filter(|_| kind != usb_staging::DbKind::Edb);
-    match collect_merge_write(usb_root, None, edb_conn, warnings, true) {
+    match collect_merge_write(usb_root, None, edb_conn, true) {
         Ok(result) => Ok(StrictParityUpgradeApplyResult {
             rebuilt_database: Some(kind),
             ..result
@@ -805,7 +804,6 @@ fn collect_merge_write(
     usb_root: &std::path::Path,
     target_playlist_names: Option<&HashSet<String>>,
     edb_conn: Option<&mut rusqlite::Connection>,
-    warnings: &mut Vec<WarningEntry>,
     write: bool,
 ) -> BackendResult<StrictParityUpgradeApplyResult> {
     let mut result = StrictParityUpgradeApplyResult::default();
@@ -813,15 +811,13 @@ fn collect_merge_write(
 
     // ── Collect ───────────────────────────────────────────────────────
     let parsed = parse_pdb(&pdb_path)?;
-    let Some(mut handle) = EdbConnHandle::acquire(edb_conn, || open_edb_rw(usb_root, warnings))
-    else {
+    let Some(mut handle) = EdbConnHandle::acquire(edb_conn, || open_edb_rw(usb_root)) else {
         return Err(BackendError::Internal(
             "strict parity upgrade: unable to open the eDB".to_string(),
         ));
     };
     let conn = handle.conn();
-    let edb_playlists =
-        try_read_playlists_with_metadata_from_edb_with_conn(conn, usb_root, warnings);
+    let edb_playlists = try_read_playlists_with_metadata_from_edb_with_conn(conn, usb_root);
     let edb_rows = read_edb_content_fields(conn)?;
 
     // ── Merge ─────────────────────────────────────────────────────────
@@ -908,16 +904,14 @@ fn collect_merge_write(
     std::fs::write(&pdb_path, &build.bytes)?;
     if let Err(err) = tx.commit() {
         if let Err(restore_err) = std::fs::write(&pdb_path, &build.before) {
-            warnings.push(logging::log(
-                Level::Error,
+            logging::debug(
                 "usb-repair",
-                "usb.repair.strict-parity.pdb-restore-failed",
                 format!(
                     "strict parity upgrade: eDB commit failed ({err}) and the staged PDB could not \
                      be put back ({restore_err}): {}",
                     pdb_path.display()
                 ),
-            ));
+            );
         }
         return Err(err.into());
     }

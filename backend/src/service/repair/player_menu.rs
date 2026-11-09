@@ -43,11 +43,8 @@ pub(super) struct EdbMenuRow {
     is_visible: bool,
 }
 
-pub(super) fn load_edb_menu_rows(
-    usb_root: &std::path::Path,
-    warnings: &mut Vec<WarningEntry>,
-) -> BackendResult<Vec<EdbMenuRow>> {
-    let Some(conn) = open_edb_rw(usb_root, warnings) else {
+pub(super) fn load_edb_menu_rows(usb_root: &std::path::Path) -> BackendResult<Vec<EdbMenuRow>> {
+    let Some(conn) = open_edb_rw(usb_root) else {
         return Err(crate::error::BackendError::Validation(
             tr::usb_player_menu_error_no_edb(),
         ));
@@ -168,11 +165,8 @@ fn t17_row_sequence(row: &[u8; 8]) -> u16 {
 
 /// The eDB's menu. An item with no `category` row isn't a browse category:
 /// COMMENTS and the like are `sort` items, and CUE is in neither.
-fn edb_menu_rows(
-    usb_root: &std::path::Path,
-    warnings: &mut Vec<WarningEntry>,
-) -> BackendResult<Vec<MenuRow>> {
-    Ok(load_edb_menu_rows(usb_root, warnings)?
+fn edb_menu_rows(usb_root: &std::path::Path) -> BackendResult<Vec<MenuRow>> {
+    Ok(load_edb_menu_rows(usb_root)?
         .into_iter()
         .filter_map(|row| {
             Some(MenuRow {
@@ -213,12 +207,9 @@ fn stick_has_edb(usb_root: &std::path::Path) -> BackendResult<bool> {
 }
 
 /// The menu rows, from the eDB when the stick has one, else from the PDB.
-fn menu_rows(
-    usb_root: &std::path::Path,
-    warnings: &mut Vec<WarningEntry>,
-) -> BackendResult<Vec<MenuRow>> {
+fn menu_rows(usb_root: &std::path::Path) -> BackendResult<Vec<MenuRow>> {
     if stick_has_edb(usb_root)? {
-        return edb_menu_rows(usb_root, warnings);
+        return edb_menu_rows(usb_root);
     }
     let rows = pdb_menu_rows(usb_root)?;
     if !rows.is_empty() {
@@ -262,11 +253,11 @@ fn compared_menu_order(rows: &[MenuRow]) -> Vec<u32> {
 }
 
 /// Whether both databases hold a menu and they show different ones.
-fn menu_databases_differ(usb_root: &std::path::Path, warnings: &mut Vec<WarningEntry>) -> bool {
+fn menu_databases_differ(usb_root: &std::path::Path) -> bool {
     if !stick_has_edb(usb_root).unwrap_or(false) {
         return false;
     }
-    let (Ok(edb), Ok(pdb)) = (edb_menu_rows(usb_root, warnings), pdb_menu_rows(usb_root)) else {
+    let (Ok(edb), Ok(pdb)) = (edb_menu_rows(usb_root), pdb_menu_rows(usb_root)) else {
         return false;
     };
     !pdb.is_empty() && compared_menu_order(&edb) != compared_menu_order(&pdb)
@@ -274,10 +265,9 @@ fn menu_databases_differ(usb_root: &std::path::Path, warnings: &mut Vec<WarningE
 
 pub(super) fn load_usb_player_menu_config(
     usb_root: &std::path::Path,
-    warnings: &mut Vec<WarningEntry>,
 ) -> BackendResult<(Vec<UsbPlayerMenuItem>, Vec<UsbPlayerMenuItem>)> {
     let editable = menu_is_editable(usb_root)?;
-    let mut rows = menu_rows(usb_root, warnings)?;
+    let mut rows = menu_rows(usb_root)?;
     // DATE ADDED always shows, and the player shows it last whatever its order
     // value says. Rekordbox can leave the eDB saying it's hidden.
     for row in &mut rows {
@@ -421,9 +411,8 @@ fn t17_rows_for_kinds(usb_root: &std::path::Path, kinds: &[u32]) -> BackendResul
 pub(super) fn mirror_edb_category_from_pdb_kinds(
     usb_root: &std::path::Path,
     pdb_kind_order: &[u32],
-    warnings: &mut Vec<WarningEntry>,
 ) -> BackendResult<bool> {
-    let Some(mut conn) = open_edb_rw(usb_root, warnings) else {
+    let Some(mut conn) = open_edb_rw(usb_root) else {
         return Err(crate::error::BackendError::Validation(
             tr::usb_player_menu_error_no_edb(),
         ));
@@ -486,12 +475,10 @@ pub(super) fn mirror_edb_category_from_pdb_kinds(
         mirrored_menu_ids.extend(date_added_menu_id);
         for (kind, seq) in &sequence_values {
             let Some(menu_id) = menu_item_id_by_kind.get(kind).copied() else {
-                warnings.push(logging::log(
-                    Level::Warn,
+                logging::debug(
                     "usb-player-menu",
-                    "usb.player-menu.pdb-kind-unmapped",
                     format!("PDB kind {kind} has no matching eDB menuItem; eDB cannot mirror it"),
-                ));
+                );
                 continue;
             };
             mirrored_menu_ids.insert(menu_id);
@@ -557,14 +544,13 @@ impl BackendService {
     ) -> BackendResult<GetUsbPlayerMenuConfigData> {
         let usb_root = resolve_usb_root(req.usb_root.as_deref())?;
         let mut warnings = Vec::<WarningEntry>::new();
-        let (current_items, available_items) =
-            load_usb_player_menu_config(&usb_root, &mut warnings)?;
-        if menu_databases_differ(&usb_root, &mut warnings) {
-            warnings.push(logging::log(
+        let (current_items, available_items) = load_usb_player_menu_config(&usb_root)?;
+        if menu_databases_differ(&usb_root) {
+            warnings.push(logging::log_text(
                 Level::Warn,
                 "usb-player-menu",
                 "usb.player-menu.databases-differ",
-                "The PDB and eDB show different player menus. Showing the eDB's: the next menu change writes it to both.",
+                &tr::usb_player_menu_warning_databases_differ(),
             ));
         }
         Ok(GetUsbPlayerMenuConfigData {
@@ -581,8 +567,7 @@ impl BackendService {
     ) -> BackendResult<UpdateUsbPlayerMenuConfigData> {
         let usb_root = resolve_usb_root(req.usb_root.as_deref())?;
         let mut warnings = Vec::<WarningEntry>::new();
-        let (before_current, before_available) =
-            load_usb_player_menu_config(&usb_root, &mut warnings)?;
+        let (before_current, before_available) = load_usb_player_menu_config(&usb_root)?;
 
         // Build lookup: (kind -> display name), preferring PDB-sourced names
         // (they came from the stick itself) and falling back to eDB names for
@@ -601,7 +586,7 @@ impl BackendService {
             ));
         }
         let has_edb = stick_has_edb(&usb_root)?;
-        let databases_differ = menu_databases_differ(&usb_root, &mut warnings);
+        let databases_differ = menu_databases_differ(&usb_root);
 
         // Reject removing a browse category the CDJ requires.
         if req.action == UsbPlayerMenuEdit::Remove
@@ -644,12 +629,10 @@ impl BackendService {
         let mut final_kinds = Vec::<u32>::with_capacity(desired_kinds.len());
         for kind in &desired_kinds {
             if !name_by_kind.contains_key(kind) {
-                warnings.push(logging::log(
-                    Level::Warn,
+                logging::debug(
                     "usb-player-menu",
-                    "usb.player-menu.dropped-unknown-kind",
                     format!("dropped unknown player menu kind {kind}: no display name available"),
-                ));
+                );
                 continue;
             }
             final_kinds.push(*kind);
@@ -681,27 +664,23 @@ impl BackendService {
                 None
             };
 
-            if let Err(err) =
-                mirror_edb_category_from_pdb_kinds(&usb_root, &final_kinds, &mut warnings)
-            {
-                warnings.push(logging::log(
+            if let Err(err) = mirror_edb_category_from_pdb_kinds(&usb_root, &final_kinds) {
+                warnings.push(logging::log_text(
                     Level::Error,
                     "usb-player-menu",
                     "usb.player-menu.edb-write-failed",
-                    format!("eDB write failed ({err}); restoring eDB from snapshot"),
+                    &tr::usb_player_menu_warning_edb_write_failed(&err),
                 ));
                 if let Some(snapshot) = edb_snapshot.as_ref()
                     && let Err(restore_err) = std::fs::write(&edb_path, snapshot)
                 {
-                    warnings.push(logging::log(
-                        Level::Error,
+                    logging::debug(
                         "usb-player-menu",
-                        "usb.player-menu.edb-restore-failed",
                         format!(
                             "eDB snapshot could not be put back ({restore_err}): {}",
                             edb_path.display()
                         ),
-                    ));
+                    );
                 }
                 // Deliberately no write_back_if_changed here: the local copy was
                 // just restored to its pre-attempt state, so the real USB drive
@@ -711,11 +690,11 @@ impl BackendService {
             if let Err(err) =
                 usb_staging::write_back_if_changed(&usb_root, usb_staging::DbKind::Edb)
             {
-                warnings.push(logging::log(
+                warnings.push(logging::log_text(
                     Level::Error,
                     "usb-player-menu",
                     "usb.player-menu.edb-write-back-failed",
-                    format!("eDB write-back to USB failed: {err}"),
+                    &tr::usb_warning_edb_write_back_failed(err),
                 ));
             }
         } else {
@@ -723,8 +702,7 @@ impl BackendService {
             crate::service::export_helpers::patch_pdb_t17_category_snapshot(&usb_root, &rows)?;
         }
 
-        let (current_items, available_items) =
-            load_usb_player_menu_config(&usb_root, &mut warnings)?;
+        let (current_items, available_items) = load_usb_player_menu_config(&usb_root)?;
         let after_kinds = current_items
             .iter()
             .map(|item| item.kind)
@@ -744,32 +722,22 @@ impl BackendService {
                 });
                 match patched {
                     Ok(true) => {
-                        warnings.push(logging::log(
-                            Level::Info,
-                            "usb-player-menu",
-                            "usb.player-menu.t17-snapshot-updated",
-                            "PDB t17 category snapshot updated",
-                        ));
+                        logging::debug("usb-player-menu", "PDB t17 category snapshot updated");
                     }
                     Ok(false) => {}
                     Err(e) => {
-                        warnings.push(logging::log(
-                            Level::Warn,
-                            "usb-player-menu",
-                            "usb.player-menu.t17-update-skipped",
-                            format!("PDB t17 update skipped: {e}"),
-                        ));
+                        logging::debug("usb-player-menu", format!("PDB t17 update skipped: {e}"));
                     }
                 }
             }
             if let Err(err) =
                 usb_staging::write_back_if_changed(&usb_root, usb_staging::DbKind::Pdb)
             {
-                warnings.push(logging::log(
+                warnings.push(logging::log_text(
                     Level::Error,
                     "usb-player-menu",
                     "usb.player-menu.pdb-write-back-failed",
-                    format!("PDB write-back to USB failed: {err}"),
+                    &tr::usb_warning_pdb_write_back_failed(err),
                 ));
             }
             warnings.extend(self.refresh_engine_library(&usb_root));

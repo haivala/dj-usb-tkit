@@ -19,16 +19,10 @@ pub fn write_edb_playlist(
         )));
     }
 
-    let mut unlock_warnings = Vec::<WarningEntry>::new();
-    let Some(mut conn) = open_edb_rw(usb_root, &mut unlock_warnings) else {
-        return Err(BackendError::Internal(format!(
-            "unable to open eDB in read-write mode ({})",
-            unlock_warnings
-                .iter()
-                .map(|w| w.message.as_str())
-                .collect::<Vec<_>>()
-                .join(" | ")
-        )));
+    let Some(mut conn) = open_edb_rw(usb_root) else {
+        return Err(BackendError::Internal(
+            "unable to open eDB in read-write mode".to_string(),
+        ));
     };
 
     write_edb_playlist_with_conn(&mut conn, playlist, manifest, mirror_playlist_entries)

@@ -2,6 +2,7 @@
 //! unindexed and missing audio.
 
 use super::*;
+use crate::i18n::tr;
 
 /// A track whose PDB path points at a missing file, paired with the
 /// unindexed file on the USB that is the same track (`relink_moved_audio`).
@@ -188,11 +189,11 @@ pub(super) fn apply_remove_duplicate_audio_copies(
         match std::fs::remove_file(&copy_abs) {
             Ok(()) => {
                 deleted += 1;
-                warnings.push(logging::log(
+                warnings.push(logging::log_text(
                     Level::Info,
                     "usb-diagnostics",
                     "usb.diagnostics.duplicate-audio-removed",
-                    format!("removed duplicate audio file: {}", copy.copy_path),
+                    &tr::repair_warning_duplicate_audio_removed(&copy.copy_path),
                 ));
             }
             Err(_) => failed.push(copy.copy_path.clone()),
@@ -225,7 +226,7 @@ pub(super) fn apply_bpm_key_mismatch_repair(
     on_item: &mut impl FnMut(usize, usize),
 ) -> BackendResult<(usize, usize)> {
     let parsed = parse_pdb(&usb_staging::stage_pdb(usb_root)?)?;
-    let mut handle = EdbConnHandle::acquire(edb_conn, || open_edb_rw(usb_root, warnings));
+    let mut handle = EdbConnHandle::acquire(edb_conn, || open_edb_rw(usb_root));
     let mismatches: Vec<BpmKeyMismatch> = detect_bpm_key_mismatches(
         usb_root,
         &parsed,
@@ -250,14 +251,11 @@ pub(super) fn apply_bpm_key_mismatch_repair(
         let Some(duration_ms) = m.duration_ms.or_else(|| {
             detect_track_duration_ms(&usb_root.join(m.track_path.trim_start_matches('/')))
         }) else {
-            warnings.push(logging::log(
+            warnings.push(logging::log_text(
                 Level::Warn,
                 "usb-repair",
                 "usb.repair.bpm-key.duration-unknown",
-                format!(
-                    "beat grid not rebuilt: track length unknown for {}",
-                    m.track_path
-                ),
+                &tr::repair_warning_beat_grid_length_unknown(&m.track_path),
             ));
             on_item(index + 1, total);
             continue;
@@ -454,11 +452,11 @@ pub(super) fn apply_separate_shared_analysis(
                 row: data,
                 changed_fields: vec!["anlz_path"],
             });
-            warnings.push(logging::log(
+            warnings.push(logging::log_text(
                 Level::Info,
                 "usb-repair",
                 "usb.repair.shared-analysis.separated",
-                format!("own analysis file for {}: {rel}", row.track_file_path),
+                &tr::repair_warning_analysis_separated(&row.track_file_path, &rel),
             ));
             moved.push((row.track_file_path.clone(), rel));
         }
@@ -487,8 +485,7 @@ pub(super) fn apply_separate_shared_analysis(
     }
 
     if !moved.is_empty()
-        && let Some(mut handle) =
-            EdbConnHandle::acquire(edb_conn, || open_edb_rw(usb_root, warnings))
+        && let Some(mut handle) = EdbConnHandle::acquire(edb_conn, || open_edb_rw(usb_root))
         && table_exists(handle.conn(), "content")
     {
         let new_by_key = moved
@@ -576,14 +573,11 @@ pub(super) fn apply_beat_grid_repair(
         match upgrade_bundle_beat_grid(&dat)? {
             GridUpgrade::Rewritten => fixed += 1,
             GridUpgrade::AlreadyCurrent => {}
-            GridUpgrade::NotRebuildable => warnings.push(logging::log(
+            GridUpgrade::NotRebuildable => warnings.push(logging::log_text(
                 Level::Warn,
                 "usb-repair",
                 "usb.repair.beat-grid.skipped",
-                format!(
-                    "beat grid not rewritten (not a constant-tempo grid): {}",
-                    dat.display()
-                ),
+                &tr::repair_warning_beat_grid_not_constant(dat.display()),
             )),
         }
         on_item(index + 1, total);
@@ -695,13 +689,36 @@ pub(super) fn detect_missing_seek_data(
     out
 }
 
+/// What a skipped seek-data line suggests doing about the file.
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub(super) enum SeekSkipAdvice {
+    Nothing,
+    /// Damaged audio: the user's to replace.
+    Replace,
+    /// A layout not supported yet: worth reporting.
+    Report,
+}
+
+impl SeekSkipAdvice {
+    fn of(skip: SeekIndexSkip) -> Self {
+        if skip.asks_for_report() {
+            Self::Report
+        } else {
+            Self::Replace
+        }
+    }
+}
+
+/// Why a file gets no seek data: its technical reason (English) and the advice.
+pub(super) type SeekSkip = (&'static str, SeekSkipAdvice);
+
 /// Split [`detect_missing_seek_data`]'s targets into the ones the fix can
 /// write an index for and the ones it would skip, each with the skip reason
 /// and advice the apply step logs. Builds the index the apply step builds, so
 /// a file the fix always skips is never proposed as fixable.
 pub(super) fn partition_fixable_seek_data(
     targets: Vec<MissingSeekData>,
-) -> (Vec<MissingSeekData>, Vec<(MissingSeekData, String)>) {
+) -> (Vec<MissingSeekData>, Vec<(MissingSeekData, SeekSkip)>) {
     let mut fixable = Vec::new();
     let mut unfixable = Vec::new();
     for target in targets {
@@ -710,13 +727,13 @@ pub(super) fn partition_fixable_seek_data(
                 .ok()
                 .and_then(|bytes| with_seek_index(&bytes, &index))
                 .is_none()
-                .then(|| format!("analysis file could not be parsed; {SEEK_SKIP_REPORT_HINT}")),
-            Ok(None) => Some("not an MP3 or FLAC".to_string()),
-            Err(skip) => Some(format!("{}; {}", skip.describe(), skip.advice())),
+                .then_some(("analysis file could not be parsed", SeekSkipAdvice::Report)),
+            Ok(None) => Some(("not an MP3 or FLAC", SeekSkipAdvice::Nothing)),
+            Err(skip) => Some((skip.describe(), SeekSkipAdvice::of(skip))),
         };
         match skip {
             None => fixable.push(target),
-            Some(reason) => unfixable.push((target, reason)),
+            Some(skip) => unfixable.push((target, skip)),
         }
     }
     (fixable, unfixable)
@@ -739,7 +756,7 @@ pub(super) fn apply_missing_seek_data_repair(
     let targets = detect_missing_seek_data(usb_root, &parsed, format);
     let total = targets.len();
     for (item_index, target) in targets.into_iter().enumerate() {
-        let (reason, advice) = match seek_index_for_audio(&target.audio_path) {
+        let (reason, report) = match seek_index_for_audio(&target.audio_path) {
             Ok(Some(index)) => {
                 let bytes = std::fs::read(&target.bundle_path)?;
                 match with_seek_index(&bytes, &index) {
@@ -749,25 +766,26 @@ pub(super) fn apply_missing_seek_data_repair(
                         on_item(item_index + 1, total);
                         continue;
                     }
-                    None => ("analysis file could not be parsed", SEEK_SKIP_REPORT_HINT),
+                    None => ("analysis file could not be parsed", true),
                 }
             }
             Ok(None) => {
                 on_item(item_index + 1, total);
                 continue;
             }
-            Err(skip) => (skip.describe(), skip.advice()),
+            Err(skip) => (skip.describe(), skip.asks_for_report()),
         };
         skipped += 1;
-        warnings.push(logging::log(
+        let line = if report {
+            tr::repair_warning_seek_data_skipped_report(format.name(), reason, &target.track_path)
+        } else {
+            tr::repair_warning_seek_data_skipped_replace(format.name(), reason, &target.track_path)
+        };
+        warnings.push(logging::log_text(
             Level::Warn,
             "usb-repair",
             "usb.repair.seek-data.skipped",
-            format!(
-                "{} seek data not added ({reason}): {}; {advice}",
-                format.name(),
-                target.track_path,
-            ),
+            &line,
         ));
         on_item(item_index + 1, total);
     }
@@ -910,22 +928,25 @@ impl BackendService {
                 .or_else(|| map_by_dir.get(&key_dir).cloned());
             let Some(target) = target else {
                 skipped += 1;
-                warnings.push(logging::log(
+                warnings.push(logging::log_text(
                     Level::Warn,
                     "usb-repair",
                     "usb.repair.empty-analysis.no-mapping",
-                    format!("repair skipped (empty analysis): source audio mapping not found for {empty_path_text}"),
+                    &tr::repair_warning_empty_analysis_no_track(&empty_path_text),
                 ));
                 continue;
             };
             let source_audio = target.source_audio;
             if !source_audio.is_file() {
                 skipped += 1;
-                warnings.push(logging::log(
+                warnings.push(logging::log_text(
                     Level::Warn,
                     "usb-repair",
                     "usb.repair.empty-analysis.source-missing",
-                    format!("repair skipped (empty analysis): source audio missing for {empty_path_text} -> {}", source_audio.display()),
+                    &tr::repair_warning_empty_analysis_audio_missing(
+                        &empty_path_text,
+                        source_audio.display(),
+                    ),
                 ));
                 continue;
             }
@@ -937,14 +958,11 @@ impl BackendService {
             .unwrap_or_else(|_| WaveformData::empty());
             if waveform.peaks.is_empty() {
                 failed += 1;
-                warnings.push(logging::log(
+                warnings.push(logging::log_text(
                     Level::Error,
                     "usb-repair",
                     "usb.repair.empty-analysis.analyze-failed",
-                    format!(
-                        "repair failed (empty analysis): unable to analyze source audio {}",
-                        source_audio.display()
-                    ),
+                    &tr::repair_warning_empty_analysis_unreadable(source_audio.display()),
                 ));
                 continue;
             }
@@ -953,14 +971,11 @@ impl BackendService {
                 .or_else(|| detect_track_duration_ms(&source_audio))
             else {
                 failed += 1;
-                warnings.push(logging::log(
+                warnings.push(logging::log_text(
                     Level::Error,
                     "usb-repair",
                     "usb.repair.empty-analysis.duration-unknown",
-                    format!(
-                        "repair failed (empty analysis): track length unknown for {}",
-                        source_audio.display()
-                    ),
+                    &tr::repair_warning_empty_analysis_length_unknown(source_audio.display()),
                 ));
                 continue;
             };
@@ -978,11 +993,11 @@ impl BackendService {
                 duration_ms,
             ) {
                 failed += 1;
-                warnings.push(logging::log(
+                warnings.push(logging::log_text(
                     Level::Error,
                     "usb-repair",
                     "usb.repair.empty-analysis.write-failed",
-                    format!("repair failed (empty analysis): {empty_path_text}: {err}"),
+                    &tr::repair_warning_empty_analysis_write_failed(&empty_path_text, err),
                 ));
                 continue;
             }
@@ -1084,13 +1099,12 @@ impl BackendService {
         }
 
         // ── eDB: same content row, new path ───────────────────────────
-        let Some(mut handle) = EdbConnHandle::acquire(edb_conn, || open_edb_rw(usb_root, warnings))
-        else {
-            warnings.push(logging::log(
+        let Some(mut handle) = EdbConnHandle::acquire(edb_conn, || open_edb_rw(usb_root)) else {
+            warnings.push(logging::log_text(
                 Level::Warn,
                 "usb-repair",
                 "usb.repair.moved-audio.edb-open-failed",
-                "relink moved audio: eDB unavailable, only the PDB was updated",
+                &tr::repair_warning_relink_edb_unavailable(),
             ));
             return Ok(relinked);
         };
@@ -1182,11 +1196,11 @@ impl BackendService {
             let scanned = match scan_audio_file(&abs) {
                 Ok(scanned) => scanned,
                 Err(err) => {
-                    warnings.push(logging::log(
+                    warnings.push(logging::log_text(
                         Level::Warn,
                         "usb-repair",
                         "usb.repair.unindexed-audio.read-failed",
-                        format!("unindexed audio skipped, unreadable: {rel}: {err}"),
+                        &tr::repair_warning_unindexed_unreadable(rel, err),
                     ));
                     continue;
                 }
@@ -1231,11 +1245,11 @@ impl BackendService {
                 )
             } else {
                 without_analysis += 1;
-                warnings.push(logging::log(
+                warnings.push(logging::log_text(
                     Level::Warn,
                     "usb-repair",
                     "usb.repair.unindexed-audio.no-analysis",
-                    format!("unindexed audio has no analysis files on the USB: {rel}"),
+                    &tr::repair_warning_unindexed_no_analysis(rel),
                 ));
                 (None, None, None, Vec::new())
             };
@@ -1344,15 +1358,15 @@ impl BackendService {
         // only the staged copies: the eDB transaction commits after the
         // staged PDB is written, and the repair run writes both back once.
         let pdb_path = usb_staging::stage_pdb(usb_root)?;
-        let mut handle = EdbConnHandle::acquire(edb_conn, || open_edb_rw(usb_root, warnings));
+        let mut handle = EdbConnHandle::acquire(edb_conn, || open_edb_rw(usb_root));
         let tx = match handle.as_mut().map(EdbConnHandle::conn) {
             Some(conn) => Some(conn.transaction()?),
             None => {
-                warnings.push(logging::log(
+                warnings.push(logging::log_text(
                     Level::Warn,
                     "usb-repair",
                     "usb.repair.unindexed-audio.edb-open-failed",
-                    "unindexed audio: eDB unavailable, only the PDB was updated",
+                    &tr::repair_warning_unindexed_edb_unavailable(),
                 ));
                 None
             }
@@ -1398,16 +1412,14 @@ impl BackendService {
             && let Err(err) = tx.commit()
         {
             if let Err(restore_err) = std::fs::write(&pdb_path, &build.before) {
-                warnings.push(logging::log(
-                    Level::Error,
+                logging::debug(
                     "usb-repair",
-                    "usb.repair.unindexed-audio.pdb-restore-failed",
                     format!(
                         "adding unindexed audio: eDB commit failed ({err}) and the staged PDB could \
                          not be put back ({restore_err}): {}",
                         pdb_path.display()
                     ),
-                ));
+                );
             }
             return Err(err.into());
         }
@@ -1437,9 +1449,7 @@ impl BackendService {
             .map(|p| audio_path_key(p))
             .collect::<HashSet<_>>();
 
-        if let Some(mut handle) =
-            EdbConnHandle::acquire(edb_conn, || open_edb_rw(usb_root, warnings))
-        {
+        if let Some(mut handle) = EdbConnHandle::acquire(edb_conn, || open_edb_rw(usb_root)) {
             let conn = handle.conn();
             let tx = conn.transaction()?;
             if table_exists(&tx, "content") {
@@ -1488,23 +1498,21 @@ impl BackendService {
                         }
                     }
                 } else {
-                    warnings.push(logging::log(
-                        Level::Warn,
+                    logging::debug(
                         "usb-repair",
-                        "usb.repair.missing-audio.no-path-column",
                         "repair skipped (missing audio): eDB content path column not found",
-                    ));
+                    );
                 }
             }
             tx.commit()?;
             let _ = conn.execute_batch("PRAGMA wal_checkpoint(TRUNCATE);");
             let _ = conn.execute_batch("PRAGMA journal_mode=WAL;");
         } else {
-            warnings.push(logging::log(
+            warnings.push(logging::log_text(
                 Level::Warn,
                 "usb-repair",
                 "usb.repair.missing-audio.edb-open-failed",
-                "repair skipped (missing audio): unable to open eDB read-write",
+                &tr::repair_warning_missing_audio_edb_unavailable(),
             ));
         }
 

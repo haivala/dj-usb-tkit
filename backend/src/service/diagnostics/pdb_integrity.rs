@@ -5,7 +5,6 @@ use crate::i18n::{Text, tr};
 
 pub(crate) fn diagnose_pdb_integrity(
     pdb_path: &std::path::Path,
-    raw_warnings: &mut Vec<WarningEntry>,
 ) -> (
     DiagSection,
     Option<(
@@ -95,14 +94,12 @@ pub(crate) fn diagnose_pdb_integrity(
             tr::diagnostics_check_pdb_header_value(header_compat)
         };
         if matches!(header_compat_status, DiagStatus::Warn) {
-            raw_warnings.push(logging::log(
-                Level::Warn,
+            logging::debug(
                 "usb-diagnostics",
-                "usb.diagnostics.pdb-header-compatibility",
                 format!(
                     "PDB header compatibility field is {header_compat}; run repair_pdb_header_compatibility_field to restore a compatible value."
                 ),
-            ));
+            );
         }
         checks.push(DiagCheck::new(
             tr::diagnostics_check_pdb_header(),
@@ -138,15 +135,13 @@ pub(crate) fn diagnose_pdb_integrity(
         let detail = if parts.is_empty() {
             tr::diagnostics_check_pdb_page_headers_valid()
         } else {
-            raw_warnings.push(logging::log(
-                Level::Info,
+            logging::debug(
                 "usb-diagnostics",
-                "usb.diagnostics.pdb-page-header-bookkeeping",
                 format!(
                     "rekordbox transaction bookkeeping on PDB data pages: {}; normalized whenever a repair runs.",
                     join_english(&parts)
                 ),
-            ));
+            );
             tr::diagnostics_check_pdb_page_headers_bookkeeping(join_rendered(&parts, "; "))
         };
         checks.push(DiagCheck::new(
@@ -202,56 +197,48 @@ pub(crate) fn diagnose_pdb_integrity(
             ));
         }
         if !bookkeeping_parts.is_empty() {
-            raw_warnings.push(logging::log(
-                Level::Info,
+            logging::debug(
                 "usb-diagnostics",
-                "usb.diagnostics.pdb-structural-bookkeeping",
                 format!(
                     "rekordbox transaction bookkeeping in PDB tables: {}; normalized whenever a repair runs.",
                     join_english(&bookkeeping_parts)
                 ),
-            ));
+            );
         }
         if !wrong_history.is_empty() {
-            raw_warnings.push(logging::log(
-                Level::Warn,
+            logging::debug(
                 "usb-diagnostics",
-                "usb.diagnostics.pdb-wrong-history-shape",
                 format!(
                     "{} with wrong u5/num_rl shape; run repair_pdb_wrong_history_page_shape to fix.",
                     counted(wrong_history.len(), "history page", "history pages")
                 ),
-            ));
+            );
             warn_parts.push(tr::diagnostics_check_pdb_structure_history_shape(
                 wrong_history.len(),
             ));
         }
         if !ec_conflicts.is_empty() {
-            raw_warnings.push(logging::log(
-                Level::Warn,
+            logging::debug(
                 "usb-diagnostics",
-                "usb.diagnostics.pdb-ec-data-page-conflict",
                 format!(
                     "{} with empty_candidate pointing to another table's data page \
                      (may cause write-pointer conflict rejection); run repair_pdb_ec_data_page_conflict to fix.",
                     counted(ec_conflicts.len(), "table", "tables")
                 ),
-            ));
+            );
             fail_parts.push(tr::diagnostics_check_pdb_structure_ec_conflict(
                 ec_conflicts.len(),
             ));
         }
         if !truncated_chains.is_empty() {
-            raw_warnings.push(logging::log(
-                Level::Warn,
+            logging::debug(
                 "usb-diagnostics",
-                "usb.diagnostics.pdb-truncated-table-chain",
                 format!(
                     "{} with a declared last page beyond the physical end of the file \
                      (interrupted export); run repair_pdb_truncated_table_chain to fix.",
                     counted(truncated_chains.len(), "table", "tables")
                 ),
-            ));
+            );
             fail_parts.push(tr::diagnostics_check_pdb_structure_truncated(
                 truncated_chains.len(),
             ));
@@ -271,15 +258,13 @@ pub(crate) fn diagnose_pdb_integrity(
             } else {
                 ""
             };
-            raw_warnings.push(logging::log(
-                Level::Warn,
+            logging::debug(
                 "usb-diagnostics",
-                "usb.diagnostics.pdb-torn-growth",
                 format!(
                     "PDB shows signs of an interrupted export (e.g. USB disconnected mid-write): \
                      {ec_desc}{tail_suffix}; run repair_pdb_torn_growth_pages to fix."
                 ),
-            ));
+            );
             fail_parts.push(if ec_count > 0 {
                 tr::diagnostics_check_pdb_structure_torn_pages(ec_count)
             } else {
@@ -398,14 +383,9 @@ pub(crate) fn diagnose_pdb_integrity(
 
     // Parse warnings
     if !parsed.warnings.is_empty() {
-        raw_warnings.extend(parsed.warnings.iter().map(|message| {
-            logging::log(
-                Level::Warn,
-                "usb-diagnostics",
-                "usb.diagnostics.pdb-parse",
-                message.clone(),
-            )
-        }));
+        for message in &parsed.warnings {
+            logging::debug("usb-diagnostics", message);
+        }
         checks.push(DiagCheck::new(
             tr::diagnostics_check_parse_warnings(),
             DiagStatus::Warn,

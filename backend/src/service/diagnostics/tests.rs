@@ -2163,8 +2163,7 @@ fn pdb_integrity_reports_rekordbox_bookkeeping_as_pass() {
     let pdb_path = td.path().join("export.pdb");
     fs::write(&pdb_path, pages.concat()).expect("write test pdb");
 
-    let mut warnings = Vec::new();
-    let (section, _) = super::pdb_integrity::diagnose_pdb_integrity(&pdb_path, &mut warnings);
+    let (section, _) = super::pdb_integrity::diagnose_pdb_integrity(&pdb_path);
     let check = section
         .checks
         .iter()

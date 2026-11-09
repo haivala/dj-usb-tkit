@@ -11,9 +11,11 @@ use super::{
     canonicalize_track_path_identity, normalize_owned_export_path,
 };
 use crate::edb::{
-    open_edb_from_usb_root, open_edb_rw, preferred_export_playlist_row_id, table_exists,
+    edb_path_from_usb_root, open_edb_from_usb_root, open_edb_rw, preferred_export_playlist_row_id,
+    table_exists,
 };
 use crate::error::{BackendError, BackendResult};
+use crate::i18n::tr;
 use crate::logging::{self, Level};
 use crate::models::WarningEntry;
 use crate::pdb_reader::parse_pdb;
@@ -48,33 +50,25 @@ pub fn remove_playlist_from_edb(
     exclusive_track_paths: &[String],
     warnings: &mut Vec<WarningEntry>,
 ) -> BackendResult<usize> {
-    let mut unlock_warnings = Vec::<WarningEntry>::new();
-    let Some(mut conn) = open_edb_rw(usb_root, &mut unlock_warnings) else {
-        if !unlock_warnings.is_empty() {
-            warnings.push(logging::log(
+    let Some(mut conn) = open_edb_rw(usb_root) else {
+        // A USB without an eDB has nothing to remove; one that has it but can't be opened is
+        // worth a warning (how the open failed is in the log file).
+        if edb_path_from_usb_root(usb_root).is_file() {
+            warnings.push(logging::log_text(
                 Level::Warn,
                 "usb-import",
                 "usb.remove.edb-open-failed",
-                format!(
-                    "eDB playlist removal skipped: {}",
-                    unlock_warnings
-                        .iter()
-                        .map(|w| w.message.as_str())
-                        .collect::<Vec<_>>()
-                        .join(" | ")
-                ),
+                &tr::usb_playlists_warning_edb_removal_skipped(),
             ));
         }
         return Ok(0);
     };
     let tx = conn.transaction()?;
     if !table_exists(&tx, "playlist") || !table_exists(&tx, "playlist_content") {
-        warnings.push(logging::log(
-            Level::Warn,
+        logging::debug(
             "usb-import",
-            "usb.remove.missing-tables",
             "eDB playlist removal skipped: missing playlist tables",
-        ));
+        );
         return Ok(0);
     }
 
@@ -116,12 +110,7 @@ pub fn remove_playlist_from_edb(
         for path in exclusive_track_paths {
             let deleted = tx.execute("DELETE FROM content WHERE path = ?1", params![path])?;
             if deleted > 0 {
-                warnings.push(logging::log(
-                    Level::Info,
-                    "usb-import",
-                    "usb.remove.db-cleaned",
-                    format!("removed content row: {path}"),
-                ));
+                logging::debug("usb-import", format!("removed content row: {path}"));
             }
         }
         // Also clean up image rows that are no longer referenced
@@ -150,11 +139,11 @@ pub fn remove_playlist_and_tracks_from_pdb(
     };
     let pdb_path = crate::service::usb_staging::stage_pdb(usb_root)?;
     if !pdb_path.is_file() {
-        warnings.push(logging::log(
+        warnings.push(logging::log_text(
             Level::Warn,
             "usb-import",
             "usb.remove.pdb-missing",
-            "PDB playlist removal skipped: PDB missing",
+            &tr::usb_playlists_warning_pdb_removal_skipped(),
         ));
         return Ok(empty_result);
     }
@@ -386,7 +375,6 @@ pub struct MirrorOrphanCleanup {
 pub fn remove_orphaned_dropped_tracks_from_dbs(
     usb_root: &Path,
     prunable_media_paths: &[String],
-    warnings: &mut Vec<WarningEntry>,
 ) -> BackendResult<MirrorOrphanCleanup> {
     let mut result = MirrorOrphanCleanup::default();
 
@@ -447,8 +435,7 @@ pub fn remove_orphaned_dropped_tracks_from_dbs(
     }
 
     // --- eDB: delete content rows for those paths, then orphaned image rows ---
-    let mut unlock_warnings = Vec::<WarningEntry>::new();
-    if let Some(conn) = open_edb_rw(usb_root, &mut unlock_warnings) {
+    if let Some(conn) = open_edb_rw(usb_root) {
         if table_exists(&conn, "content") {
             let to_delete = crate::service::usb_track_facts::read_edb_content_tracks(&conn)?
                 .into_iter()
@@ -494,8 +481,6 @@ pub fn remove_orphaned_dropped_tracks_from_dbs(
             usb_root,
             crate::service::usb_staging::DbKind::Edb,
         )?;
-    } else {
-        warnings.extend(unlock_warnings);
     }
 
     // --- PDB: tombstone track rows + now-exclusive artwork rows in place ---
@@ -540,10 +525,8 @@ pub fn remove_orphaned_dropped_tracks_from_dbs(
     }
 
     if result != MirrorOrphanCleanup::default() {
-        warnings.push(logging::log(
-            Level::Info,
+        logging::debug(
             "export",
-            "export.orphan-tracks-removed",
             format!(
                 "mirror export removed {} from eDB and {} ({}) from PDB — no other playlist or history references them",
                 counted(
@@ -554,7 +537,7 @@ pub fn remove_orphaned_dropped_tracks_from_dbs(
                 counted(result.removed_pdb_tracks, "track row", "track rows"),
                 counted(result.removed_pdb_artwork, "artwork row", "artwork rows")
             ),
-        ));
+        );
     }
 
     Ok(result)

@@ -6063,10 +6063,8 @@ fn repair_reports_parity_preview_unavailable_when_edb_unreadable() {
     );
     let data = preview.data.expect("preview data");
     assert!(
-        data.warnings
-            .iter()
-            .any(|w| w.message.contains("parity preview unavailable")),
-        "expected a parity-unavailable warning: {:#?}",
+        data.warnings.iter().any(|w| w.code == "edb.open.failed"),
+        "expected an eDB-unreadable warning: {:#?}",
         data.warnings
     );
 }

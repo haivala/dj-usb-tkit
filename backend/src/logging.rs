@@ -2,7 +2,8 @@
 //!
 //! All backend messages (warnings, errors, dropped rows, panics) are funneled
 //! through `emit` so they land in the UI Event Log instead of vanishing into
-//! stderr. The desktop entry point installs a sink during startup that
+//! stderr. What only a developer can act on goes through [`debug`] instead: the
+//! log file only, in English, never the Event Log. The desktop entry point installs a sink during startup that
 //! forwards each message as a `backend:log` Tauri event; tests and CLI
 //! binaries leave the sink uninstalled and fall back to stderr.
 
@@ -11,6 +12,8 @@ use std::sync::OnceLock;
 /// Severity level for backend messages routed to the Event Log.
 #[derive(Debug, Clone, Copy)]
 pub enum Level {
+    /// Developer diagnostics: the log file only, never the Event Log (see [`debug`]).
+    Debug,
     Info,
     Warn,
     Error,
@@ -19,6 +22,7 @@ pub enum Level {
 impl Level {
     pub fn as_str(self) -> &'static str {
         match self {
+            Level::Debug => "debug",
             Level::Info => "info",
             Level::Warn => "warn",
             Level::Error => "error",
@@ -152,6 +156,14 @@ pub fn count_warnings(entries: &[crate::models::WarningEntry]) -> usize {
         .count()
 }
 
+/// A line only a developer can act on (stage timings, file-format detail, which key opened
+/// the eDB): written to the log file, in English, and never shown in the Event Log or
+/// returned as a command's warning. Anything a user can act on (fix a file, re-export, run a
+/// repair) is catalog text through [`log_text`] instead.
+pub fn debug(source: &str, message: impl AsRef<str>) {
+    emit(Level::Debug, source, message.as_ref());
+}
+
 /// Convenience macro: `backend_log!(warn, "pdb-writer", "msg {x}")`.
 #[macro_export]
 macro_rules! backend_log {
@@ -168,6 +180,7 @@ mod tests {
 
     #[test]
     fn level_as_str_covers_every_variant() {
+        assert_eq!(Level::Debug.as_str(), "debug");
         assert_eq!(Level::Info.as_str(), "info");
         assert_eq!(Level::Warn.as_str(), "warn");
         assert_eq!(Level::Error.as_str(), "error");

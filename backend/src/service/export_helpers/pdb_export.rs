@@ -198,8 +198,7 @@ pub(super) fn validate_topology_locked_export_bytes(
 /// app's [`crate::pdb_writer::T19_DB_VERSION`] rather than the eDB's
 /// `dbVersion`. `None` when the USB has no readable eDB.
 pub(crate) fn edb_t19_property(usb_root: &Path) -> Option<crate::pdb_writer::T19Property> {
-    let mut warnings = Vec::<WarningEntry>::new();
-    let conn = open_edb_rw(usb_root, &mut warnings)?;
+    let conn = open_edb_rw(usb_root)?;
     t19_property_from_conn(&conn)
 }
 
@@ -720,8 +719,7 @@ pub(crate) fn build_pdb_for_playlists(
     let mut edb_identity_by_path =
         HashMap::<String, (Option<u32>, Option<u32>, Option<u32>, Option<u16>)>::new();
     {
-        let mut unlock_warnings = Vec::<WarningEntry>::new();
-        if let Some(conn) = open_edb_rw(usb_root, &mut unlock_warnings)
+        if let Some(conn) = open_edb_rw(usb_root)
             && table_exists(&conn, "content")
         {
             let has_key_table = table_exists(&conn, "key");

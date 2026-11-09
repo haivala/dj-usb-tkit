@@ -602,21 +602,23 @@ impl BackendService {
                 let tempo = |t: Option<u16>| {
                     t.map_or("-".to_string(), |t| format!("{:.2}", f64::from(t) / 100.0))
                 };
-                warnings.push(logging::log(
+                warnings.push(logging::log_text(
                     Level::Warn,
                     "usb-diagnostics",
                     "usb.diagnostics.bpm-key-mismatch",
-                    format!(
-                        "BPM/key mismatch: {} (PDB {:.2}, DAT grid {}, EXT grid {}, eDB {}{})",
-                        m.track_path,
-                        f64::from(m.pdb_tempo_x100) / 100.0,
-                        tempo(m.anlz_tempos_x100[0]),
-                        tempo(m.anlz_tempos_x100[1]),
-                        m.edb_bpmx100
-                            .map_or("same".to_string(), |v| format!("{:.2}", v as f64 / 100.0)),
-                        m.pdb_key_for_edb
-                            .as_deref()
-                            .map_or(String::new(), |k| format!(", eDB key differs from {k}")),
+                    &tr::repair_warning_bpm_key_mismatch(
+                        &m.track_path,
+                        format!(
+                            "PDB {:.2}, DAT grid {}, EXT grid {}, eDB {}{}",
+                            f64::from(m.pdb_tempo_x100) / 100.0,
+                            tempo(m.anlz_tempos_x100[0]),
+                            tempo(m.anlz_tempos_x100[1]),
+                            m.edb_bpmx100
+                                .map_or("same".to_string(), |v| format!("{:.2}", v as f64 / 100.0)),
+                            m.pdb_key_for_edb
+                                .as_deref()
+                                .map_or(String::new(), |k| format!(", eDB key differs from {k}")),
+                        ),
                     ),
                 ));
             }
@@ -670,18 +672,22 @@ impl BackendService {
                     .map(path_of)
                     .collect::<Vec<_>>()
                     .join(", ");
-                let owner = bundle
-                    .owner
-                    .as_ref()
-                    .map_or_else(|| "no track (each gets its own)".to_string(), path_of);
-                warnings.push(logging::log(
+                let line = match bundle.owner.as_ref() {
+                    Some(owner) => tr::repair_warning_shared_analysis(
+                        bundle_rel(&bundle.dat),
+                        &tracks,
+                        path_of(owner),
+                    ),
+                    None => tr::repair_warning_shared_analysis_no_owner(
+                        bundle_rel(&bundle.dat),
+                        &tracks,
+                    ),
+                };
+                warnings.push(logging::log_text(
                     Level::Warn,
                     "usb-diagnostics",
                     "usb.diagnostics.shared-analysis",
-                    format!(
-                        "shared analysis file: {} used by {tracks}; kept by {owner}",
-                        bundle_rel(&bundle.dat)
-                    ),
+                    &line,
                 ));
             }
         }
@@ -701,14 +707,13 @@ impl BackendService {
                 )
             });
             for bundle in &analysis_ownership.unmarked {
-                warnings.push(logging::log(
+                warnings.push(logging::log_text(
                     Level::Warn,
                     "usb-diagnostics",
                     "usb.diagnostics.analysis-without-track-path",
-                    format!(
-                        "analysis file without track path: {} ({})",
+                    &tr::repair_warning_analysis_without_track_path(
                         bundle_rel(&bundle.dat),
-                        bundle.track_path
+                        &bundle.track_path,
                     ),
                 ));
             }
@@ -755,16 +760,28 @@ impl BackendService {
                             reason: tr::repair_unsupported_seek_data_reason().render(),
                             link: Some("event-log".to_string()),
                         });
-                        for (target, reason) in &unfixable {
-                            warnings.push(logging::log(
+                        for (target, (reason, advice)) in &unfixable {
+                            let (name, path) = (format.name(), &target.track_path);
+                            let line = match advice {
+                                SeekSkipAdvice::Nothing => {
+                                    tr::repair_warning_seek_data_unfixable(name, reason, path)
+                                }
+                                SeekSkipAdvice::Replace => {
+                                    tr::repair_warning_seek_data_unfixable_replace(
+                                        name, reason, path,
+                                    )
+                                }
+                                SeekSkipAdvice::Report => {
+                                    tr::repair_warning_seek_data_unfixable_report(
+                                        name, reason, path,
+                                    )
+                                }
+                            };
+                            warnings.push(logging::log_text(
                                 Level::Warn,
                                 "usb-diagnostics",
                                 "usb.diagnostics.seek-data-unfixable",
-                                format!(
-                                    "{} seek data can't be added ({reason}): {}",
-                                    format.name(),
-                                    target.track_path
-                                ),
+                                &line,
                             ));
                         }
                     }
@@ -1076,18 +1093,18 @@ impl BackendService {
         // leaves nothing it still lists.
         let edb_audio_paths = edb_conn
             .as_ref()
-            .map(|conn| collect_edb_audio_paths(conn, &mut warnings))
+            .map(collect_edb_audio_paths)
             .unwrap_or_default();
         if let Some(parsed) = parsed_pdb.as_ref() {
             let presence = scan_audio_presence(&usb_root, parsed, &edb_audio_paths);
             if presence.indexed_on_usb.is_empty() && presence.unindexed.is_empty() {
                 // No audio under Contents/ at all: a databases-only snapshot,
                 // where "missing" can't be told apart from "never copied".
-                warnings.push(logging::log(
+                warnings.push(logging::log_text(
                     Level::Info,
                     "usb-diagnostics",
                     "usb.diagnostics.missing-audio-scan-skipped",
-                    "missing-audio scan skipped: Contents directory is absent or empty (DB-only snapshot)",
+                    &tr::repair_warning_missing_audio_scan_skipped(),
                 ));
                 if !presence.missing.is_empty() {
                     unsupported_items.push(RepairUnsupportedItem {
@@ -1178,11 +1195,11 @@ impl BackendService {
                         link: Some("event-log".to_string()),
                     });
                     for path in &in_history {
-                        warnings.push(logging::log(
+                        warnings.push(logging::log_text(
                             Level::Warn,
                             "usb-diagnostics",
                             "usb.diagnostics.missing-history-audio",
-                            format!("history track's audio file missing: {path}"),
+                            &tr::repair_warning_history_audio_missing(path),
                         ));
                     }
                 }
@@ -1217,14 +1234,11 @@ impl BackendService {
                 )
             });
             for copy in &duplicate_audio_copies {
-                warnings.push(logging::log(
+                warnings.push(logging::log_text(
                     Level::Warn,
                     "usb-diagnostics",
                     "usb.diagnostics.duplicate-audio",
-                    format!(
-                        "duplicate audio file: {} (copy of {})",
-                        copy.copy_path, copy.original_path
-                    ),
+                    &tr::repair_warning_duplicate_audio(&copy.copy_path, &copy.original_path),
                 ));
             }
         }
@@ -1246,11 +1260,11 @@ impl BackendService {
                 )
             });
             for path in &unindexed_audio_files {
-                warnings.push(logging::log(
+                warnings.push(logging::log_text(
                     Level::Warn,
                     "usb-diagnostics",
                     "usb.diagnostics.unindexed-audio",
-                    format!("unindexed audio file: {path}"),
+                    &tr::diagnostics_warning_unindexed_audio(path),
                 ));
             }
         }
@@ -1265,11 +1279,11 @@ impl BackendService {
                 )
             });
             for relink in &moved_audio_relinks {
-                warnings.push(logging::log(
+                warnings.push(logging::log_text(
                     Level::Warn,
                     "usb-diagnostics",
                     "usb.diagnostics.moved-audio",
-                    format!("moved audio: {} -> {}", relink.old_path, relink.new_path),
+                    &tr::repair_warning_moved_audio(&relink.old_path, &relink.new_path),
                 ));
             }
         }
@@ -1288,11 +1302,11 @@ impl BackendService {
                 )
             });
             for path in &missing_audio_paths {
-                warnings.push(logging::log(
+                warnings.push(logging::log_text(
                     Level::Warn,
                     "usb-diagnostics",
                     "usb.diagnostics.missing-audio",
-                    format!("missing-audio reference: {path}"),
+                    &tr::repair_warning_missing_audio(path),
                 ));
             }
         }
@@ -1368,12 +1382,10 @@ impl BackendService {
                     ));
                     // A dry run of the apply: same collect, merge and
                     // writers, eDB rolled back and PDB bytes dropped.
-                    let mut dry_run_warnings = Vec::<WarningEntry>::new();
                     let (estimated_writes, description) = match run_strict_parity_upgrade(
                         &usb_root,
                         Some(&strict_upgrade_targets),
                         None,
-                        &mut dry_run_warnings,
                         false,
                     ) {
                         Ok(dry) => (
@@ -1423,12 +1435,10 @@ impl BackendService {
                 warnings.extend(report.warnings);
             }
             Err(err) => {
-                warnings.push(logging::log(
-                    Level::Warn,
+                logging::debug(
                     "usb-diagnostics",
-                    "usb.diagnostics.parity-preview-unavailable",
                     format!("parity preview unavailable: {err}"),
-                ));
+                );
             }
         }
         if let Some(kind) = missing_database {
@@ -1609,12 +1619,10 @@ impl BackendService {
             ) {
                 Ok(data) => Some(Box::new(data)),
                 Err(err) => {
-                    warnings.push(logging::log(
-                        Level::Warn,
+                    logging::debug(
                         "usb-repair",
-                        "usb.repair.post-diagnostics-failed",
                         format!("Post-repair diagnostics failed: {err}"),
-                    ));
+                    );
                     None
                 }
             }
@@ -1630,12 +1638,10 @@ impl BackendService {
                 })
                 .map(|data| data.playlist_usb_export_status)
                 .unwrap_or_else(|err| {
-                    warnings.push(logging::log(
-                        Level::Warn,
+                    logging::debug(
                         "usb-repair",
-                        "usb.repair.export-status-failed",
                         format!("Playlist export status after repair failed: {err}"),
-                    ));
+                    );
                     Vec::new()
                 }),
             None => Vec::new(),
@@ -1755,7 +1761,7 @@ impl BackendService {
         let mut fix_edb_conn = if missing_database == Some(usb_staging::DbKind::Edb) {
             None
         } else {
-            open_edb_rw(usb_root, warnings)
+            open_edb_rw(usb_root)
         };
         let mut pdb = match StagedPdb::load(usb_root) {
             Ok(pdb) => pdb,
@@ -1898,12 +1904,7 @@ impl BackendService {
                 };
                 progress.start(&tr::repair_fix_strict_parity());
                 match pdb.on_file(|| {
-                    self.apply_strict_parity_upgrade(
-                        usb_root,
-                        target_names,
-                        fix_edb_conn.as_mut(),
-                        warnings,
-                    )
+                    self.apply_strict_parity_upgrade(usb_root, target_names, fix_edb_conn.as_mut())
                 }) {
                     Ok(result)
                         if result.merged_playlists > 0 || result.rebuilt_database.is_some() =>
@@ -2395,7 +2396,6 @@ impl BackendService {
                     usb_root,
                     parsed,
                     fix_edb_conn.as_mut(),
-                    warnings,
                 ) {
                     Ok((history_written, history_content_written)) => {
                         outcomes.applied.push(format!(
@@ -2433,11 +2433,11 @@ impl BackendService {
         let saved = write_back_both_or_neither(usb_root, &mut pdb);
         if let Err(err) = &saved {
             outcomes.not_saved(err);
-            warnings.push(logging::log(
+            warnings.push(logging::log_text(
                 Level::Error,
                 "usb-repair",
                 "usb.repair.write-back-failed",
-                format!("Saving the repaired databases to the USB failed: {err}"),
+                &tr::repair_warning_save_failed(err),
             ));
         }
 

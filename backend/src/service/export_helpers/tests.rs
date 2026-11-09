@@ -3086,8 +3086,7 @@ fn write_pdb_fresh_backfills_dictionary_ids_from_edb_when_manifest_is_thin() {
     std::fs::create_dir_all(usb_root.join(USB_VENDOR_ROOT_DIR).join(USB_VENDOR_DB_DIR)).unwrap();
     crate::service::usb_utils::initialize_usb(usb_root).expect("initialize usb skeleton");
 
-    let mut unlock_warnings = Vec::<WarningEntry>::new();
-    let conn = open_edb_rw(usb_root, &mut unlock_warnings).expect("open eDB");
+    let conn = open_edb_rw(usb_root).expect("open eDB");
     let mut seed_track = mapping_test_track();
     seed_track.exported_path = "/Contents/Fallback Artist/Fallback Album/fallback.mp3".to_string();
     seed_track.artist = "Fallback Artist".to_string();
@@ -3519,8 +3518,7 @@ fn write_edb_playlist_updates_alias_matched_content_path_in_place() {
     manifest.tracks[0].exported_path = corrected_path.to_string();
     write_edb_playlist(usb_root, &playlist, &manifest, true).expect("rewrite eDB content path");
 
-    let mut warnings = Vec::<WarningEntry>::new();
-    let conn = open_edb_rw(usb_root, &mut warnings).expect("open eDB");
+    let conn = open_edb_rw(usb_root).expect("open eDB");
     let paths = {
         let mut stmt = conn
             .prepare("SELECT path FROM content ORDER BY content_id")
@@ -3552,16 +3550,14 @@ fn write_edb_playlist_sets_device_name_from_drive_name() {
     };
     let manifest = make_test_manifest("pl-name", "Name", usb_root, &[("t1", "Song 1", "a1.mp3")]);
     let device_name = || {
-        let mut warnings = Vec::<WarningEntry>::new();
-        let conn = open_edb_rw(usb_root, &mut warnings).expect("open eDB");
+        let conn = open_edb_rw(usb_root).expect("open eDB");
         conn.query_row("SELECT deviceName FROM property", [], |row| {
             row.get::<_, String>(0)
         })
         .expect("read deviceName")
     };
     let set_device_name = |name: &str| {
-        let mut warnings = Vec::<WarningEntry>::new();
-        let conn = open_edb_rw(usb_root, &mut warnings).expect("open eDB");
+        let conn = open_edb_rw(usb_root).expect("open eDB");
         conn.execute("UPDATE property SET deviceName = ?1", [name])
             .expect("set deviceName");
     };
@@ -3626,8 +3622,7 @@ fn write_edb_playlist_matches_rekordbox_reexport_bookkeeping() {
         write_edb_playlist(usb_root, &playlist, &manifest, true).expect("export");
     };
     let row = |title: &str| -> Row {
-        let mut warnings = Vec::<WarningEntry>::new();
-        let conn = open_edb_rw(usb_root, &mut warnings).expect("open eDB");
+        let conn = open_edb_rw(usb_root).expect("open eDB");
         conn.query_row(
             "SELECT analysedBits, analysisDataUpdateCount, informationUpdateCount,
                     CAST(cueUpdateCount AS TEXT)
@@ -3689,8 +3684,7 @@ fn strict_parity_report_has_no_dictionary_id_issues_for_thin_manifest_fallback()
     std::fs::create_dir_all(usb_root.join(USB_VENDOR_ROOT_DIR).join(USB_VENDOR_DB_DIR)).unwrap();
     crate::service::usb_utils::initialize_usb(usb_root).expect("initialize usb skeleton");
 
-    let mut unlock_warnings = Vec::<WarningEntry>::new();
-    let mut conn = open_edb_rw(usb_root, &mut unlock_warnings).expect("open eDB");
+    let mut conn = open_edb_rw(usb_root).expect("open eDB");
 
     let mut seed_track = mapping_test_track();
     seed_track.exported_path = "/Contents/Fallback Artist/Fallback Album/fallback.mp3".to_string();
@@ -3773,8 +3767,7 @@ fn strict_parity_report_has_no_dictionary_id_issues_when_edb_is_thin_but_manifes
     std::fs::create_dir_all(usb_root.join(USB_VENDOR_ROOT_DIR).join(USB_VENDOR_DB_DIR)).unwrap();
     crate::service::usb_utils::initialize_usb(usb_root).expect("initialize usb skeleton");
 
-    let mut unlock_warnings = Vec::<WarningEntry>::new();
-    let mut conn = open_edb_rw(usb_root, &mut unlock_warnings).expect("open eDB");
+    let mut conn = open_edb_rw(usb_root).expect("open eDB");
 
     let mut rich_manifest_track = mapping_test_track();
     rich_manifest_track.exported_path = "/Contents/Rich Artist/Rich Album/rich.mp3".to_string();
@@ -3888,8 +3881,7 @@ fn strict_parity_additive_write_keeps_dictionary_ids_resolved_with_thin_manifest
     std::fs::create_dir_all(usb_root.join(USB_VENDOR_ROOT_DIR).join(USB_VENDOR_DB_DIR)).unwrap();
     crate::service::usb_utils::initialize_usb(usb_root).expect("initialize usb skeleton");
 
-    let mut unlock_warnings = Vec::<WarningEntry>::new();
-    let mut conn = open_edb_rw(usb_root, &mut unlock_warnings).expect("open eDB");
+    let mut conn = open_edb_rw(usb_root).expect("open eDB");
 
     let mut base_track = mapping_test_track();
     base_track.id = "t-base".to_string();
@@ -5037,8 +5029,7 @@ fn export_writes_edb_property_into_t19() {
     std::fs::create_dir_all(usb_root.join(USB_VENDOR_ROOT_DIR).join(USB_VENDOR_DB_DIR)).unwrap();
     crate::service::usb_utils::initialize_usb(usb_root).expect("initialize usb skeleton");
     {
-        let mut warnings = Vec::<WarningEntry>::new();
-        let conn = open_edb_rw(usb_root, &mut warnings).expect("open eDB");
+        let conn = open_edb_rw(usb_root).expect("open eDB");
         conn.execute(
             "UPDATE property SET deviceName = 'Test Stick', createdDate = '2026-10-22'",
             [],
