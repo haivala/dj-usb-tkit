@@ -238,7 +238,7 @@ export async function initApp(ctx) {
   // Before anything renders: the page's text is the backend's. The window stays hidden
   // (tauri.conf.json `visible: false`) until `show_window` below.
   if (!(await loadUiTexts(ctx))) return;
-  ctx.logToFile({ level: "info", source: "startup", message: "App init started" });
+  ctx.logToFile({ source: "startup", message: "App init started" });
   await ctx.hydrateLocalStorageFromFrontendSettingsDb();
   const themeManager = createThemeManager(ctx);
   const accentManager = createAccentManager(ctx, themeManager);
@@ -250,7 +250,7 @@ export async function initApp(ctx) {
   await ctx.setupConsoleFileLogging();
   ctx.logInfo("Frontend console bridge initialized");
   ctx.setupRuntimeErrorLogging();
-  ctx.logToFile({ level: "info", source: "startup", message: "Console/event logging ready" });
+  ctx.logToFile({ source: "startup", message: "Console/event logging ready" });
 
   ctx.setProgress(false, 0, t("ui-job-idle"));
   await ctx.loadUsbDevices();
@@ -269,7 +269,7 @@ export async function initApp(ctx) {
   ctx.el.sourceBar.classList.remove("collapsed");
   ctx.bindEvents();
   await ctx.switchView("library");
-  ctx.logToFile({ level: "info", source: "startup", message: "Initial view ready" });
+  ctx.logToFile({ source: "startup", message: "Initial view ready" });
 
   showHelpOnFirstVisit(ctx);
   invoke("show_window").catch(() => {});
@@ -284,7 +284,7 @@ export async function initApp(ctx) {
         }
       }
     } catch {}
-    ctx.logToFile({ level: "info", source: "startup", message: "Backend event listeners registered" });
+    ctx.logToFile({ source: "startup", message: "Backend event listeners registered" });
   } catch (error) {
     ctx.logError("Backend event listener registration failed:", error);
     pushEventLog({
@@ -299,14 +299,10 @@ export async function initApp(ctx) {
 }
 
 export function debugFrontendLog(ctx, message, meta = null) {
-  if (!ctx.isTauriRuntime()) return;
   const suffix = meta == null
     ? ""
     : ` ${typeof meta === "string" ? meta : JSON.stringify(meta)}`;
-  ctx.invoke("append_frontend_log", {
-    level: "info",
-    message: `[analysis-ui] ${message}${suffix}`
-  }).catch(() => {});
+  ctx.logToFile({ source: "analysis-ui", message: `${message}${suffix}` });
 }
 
 // The desktop app already wrote the entry to the session log file, in English.

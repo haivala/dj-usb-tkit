@@ -32,11 +32,13 @@ function appendEventLogFile(ctx, item) {
   }).catch(() => {});
 }
 
-// A developer line (startup steps, console.log/info): the session log file only. The Event
-// Log shows what a user can act on.
+// A developer line (startup steps, console.log/info, the analysis UI's trace): the session
+// log file only, always as `debug`, like the backend's developer lines. So in the file,
+// `debug` is file only and every other level was also shown in the Event Log, which shows
+// what a user can act on. Set after normalizing: the store's levels turn `debug` into `info`.
 export function logToFile(ctx, entry = {}) {
   const item = normalizeEventLogEntry(entry);
-  if (item) appendEventLogFile(ctx, item);
+  if (item) appendEventLogFile(ctx, { ...item, level: "debug" });
 }
 
 export async function openEventLogFile(ctx) {

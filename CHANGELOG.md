@@ -54,7 +54,8 @@
 - **Fix:** When saving a USB playlist order fails and reading the playlists back fails too, the status line now
   shows why the save failed. Before, it showed the read's error as the reason the order wasn't saved.
 - **Improvement:** The Event Log and the "(N warnings)" counts show only what you can act on. Developer detail,
-  such as stage timings, database internals and the app's startup steps, now goes only to the session log file.
+  such as stage timings, database internals and the app's startup steps, now goes only to the session log file,
+  where it's marked [debug]; every other line there was also shown in the Event Log.
 - **Improvement:** A playlist's "Last exported" line shows the date as 2026-04-07 13:00, like the Backups page,
   instead of in the computer's regional format. The not-enough-space message on export gives sizes in KB, MB and
   GB like the rest of the app.

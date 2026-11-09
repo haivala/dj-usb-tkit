@@ -1812,6 +1812,22 @@ button.primary-action:hover {
   gap: 6px;
 }
 
+/* A track row's last column has a fixed width: every row is its own grid, so a column
+   can't size to its content. Its buttons stay inside it: the analyze button shrinks and
+   ends its label with "…" (its tooltip says what it does) instead of making the row wider
+   than the table, which scrolled every track table sideways. */
+.td-action .action-buttons {
+  max-width: 100%;
+  min-width: 0;
+}
+
+.td-action [data-action="analyze-track"] {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
 .waveform-cell {
   display: inline-flex;
   align-items: center;
