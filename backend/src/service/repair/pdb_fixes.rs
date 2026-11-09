@@ -51,7 +51,7 @@ pub(super) fn apply_pdb_header_compatibility_repair(
     repair: &PdbHeaderCompatibilityRepair,
 ) -> BackendResult<bool> {
     let Some(current_value) = pdb_header_compatibility_value_from_bytes(bytes) else {
-        return Err(BackendError::Validation(
+        return Err(BackendError::Internal(
             "PDB is too small to patch header compatibility field".into(),
         ));
     };
@@ -1141,12 +1141,12 @@ pub(super) fn apply_pdb_torn_growth_pages_repair(
         return Ok(0);
     }
     let Some(page_size) = read_u32_le_at(bytes, 4).map(|v| v as usize) else {
-        return Err(BackendError::Validation(
+        return Err(BackendError::Internal(
             "PDB too small to read page size".into(),
         ));
     };
     if page_size == 0 {
-        return Err(BackendError::Validation("PDB has zero page size".into()));
+        return Err(BackendError::Internal("PDB has zero page size".into()));
     }
 
     let mut patched = 0usize;
@@ -1264,7 +1264,7 @@ pub(super) fn apply_pdb_track_string_alignment_repair(
             .map(|m| m.to_string())
             .collect::<Vec<_>>()
             .join(" | ");
-        return Err(BackendError::Validation(format!(
+        return Err(BackendError::Internal(format!(
             "Track string alignment repair blocked: page-header convention mismatches ({detail})"
         )));
     }
@@ -1344,12 +1344,12 @@ pub(super) fn reencode_pdb_dictionary_rows(
     let target_ids: HashSet<u32> = ids.iter().copied().collect();
     let (_ec, first, last) =
         crate::utils::table_ptr_fields(bytes, table_type).ok_or_else(|| {
-            BackendError::Validation(format!(
+            BackendError::Internal(format!(
                 "{label} repair blocked: t{table_type:02} pointer missing"
             ))
         })?;
     crate::utils::collect_chain(bytes, page_size, first, last).ok_or_else(|| {
-        BackendError::Validation(format!(
+        BackendError::Internal(format!(
             "{label} repair blocked: t{table_type:02} chain invalid"
         ))
     })?;
@@ -1408,7 +1408,7 @@ pub(super) fn reencode_pdb_dictionary_rows(
             .map(|m| m.to_string())
             .collect::<Vec<_>>()
             .join(" | ");
-        return Err(BackendError::Validation(format!(
+        return Err(BackendError::Internal(format!(
             "{label} repair blocked: page-header convention mismatches ({detail})"
         )));
     }

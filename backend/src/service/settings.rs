@@ -50,7 +50,7 @@ impl BackendService {
     ) -> BackendResult<SetFrontendSettingData> {
         let key = req.key.trim();
         if !frontend_ui_setting_keys().contains(&key) {
-            return Err(BackendError::Validation(format!(
+            return Err(BackendError::Internal(format!(
                 "unsupported frontend setting key: {key}"
             )));
         }
@@ -65,7 +65,7 @@ impl BackendService {
         if let Some(language) = &language
             && !crate::i18n::languages().contains(&language.as_str())
         {
-            return Err(BackendError::ValidationText(
+            return Err(BackendError::Validation(
                 crate::i18n::tr::settings_language_unknown(language),
             ));
         }
@@ -73,7 +73,7 @@ impl BackendService {
         if let Some(raw_value) = req.value {
             let value = raw_value.trim().to_string();
             if value.len() > 262_144 {
-                return Err(BackendError::Validation(
+                return Err(BackendError::Internal(
                     "frontend setting value too large".to_string(),
                 ));
             }

@@ -103,19 +103,19 @@ fn append_rows_to_existing_page_preserving_footer_state(
         "tt=19 must not grow through the generic append path"
     );
     if !page_size_fits_u16_fields(page_size) {
-        return Err(BackendError::Validation(format!(
+        return Err(BackendError::Internal(format!(
             "additive append: page size {page_size} too large for u16 page header fields"
         )));
     }
     let off = page_offset(page_idx, page_size).ok_or_else(|| {
-        BackendError::Validation(format!(
+        BackendError::Internal(format!(
             "additive append: page {page_idx} for table {table_type} out of bounds"
         ))
     })?;
     let page_snapshot = bytes
         .get(off..off + page_size)
         .ok_or_else(|| {
-            BackendError::Validation(format!(
+            BackendError::Internal(format!(
                 "additive append: page {page_idx} for table {table_type} out of bounds"
             ))
         })?
@@ -152,7 +152,7 @@ fn append_rows_to_existing_page_preserving_footer_state(
     }
 
     let page = bytes.get_mut(off..off + page_size).ok_or_else(|| {
-        BackendError::Validation(format!(
+        BackendError::Internal(format!(
             "additive append: page {page_idx} for table {table_type} disappeared"
         ))
     })?;
@@ -249,10 +249,10 @@ fn append_rows_to_t07_tombstone_pages_in_place(
         return Ok((0, 0));
     }
     let (_ec, first, last) = table_ptr_fields(bytes, 7).ok_or_else(|| {
-        BackendError::Validation("t07 tombstone append: table pointer missing".into())
+        BackendError::Internal("t07 tombstone append: table pointer missing".into())
     })?;
     let chain = collect_chain_pages(bytes, page_size, first, last).ok_or_else(|| {
-        BackendError::Validation(format!(
+        BackendError::Internal(format!(
             "t07 tombstone append: chain unreachable from first={first} last={last}"
         ))
     })?;
@@ -270,7 +270,7 @@ fn append_rows_to_t07_tombstone_pages_in_place(
         let page_snapshot = bytes
             .get(off..off + page_size)
             .ok_or_else(|| {
-                BackendError::Validation(format!(
+                BackendError::Internal(format!(
                     "t07 tombstone append: page {page_idx} out of bounds"
                 ))
             })?
@@ -304,7 +304,7 @@ fn append_rows_to_t07_tombstone_pages_in_place(
 /// at the file tail and links them to the chain.
 ///
 /// On success returns an `AppendOutcome` describing how the chain grew.
-/// Returns `Err(BackendError::Validation)` only when a single row's
+/// Returns `Err(BackendError::Internal)` only when a single row's
 /// encoded length exceeds `MAX_ROW_LEN` (which would be unfittable on any
 /// page); the caller should reject such rows before invoking this
 /// function.
@@ -315,13 +315,13 @@ pub(crate) fn append_rows_to_chain_in_place(
     page_size: usize,
 ) -> BackendResult<AppendOutcome> {
     if page_size != PAGE_SIZE {
-        return Err(BackendError::Validation(format!(
+        return Err(BackendError::Internal(format!(
             "additive append requires page_size {PAGE_SIZE}, got {page_size}"
         )));
     }
     if new_rows.is_empty() {
         let (ec, _first, last) = table_ptr_fields(bytes, table_type).ok_or_else(|| {
-            BackendError::Validation(format!(
+            BackendError::Internal(format!(
                 "additive append: table {table_type} pointer missing from header"
             ))
         })?;
@@ -338,7 +338,7 @@ pub(crate) fn append_rows_to_chain_in_place(
     // path total — once we start writing, we never have to abort.
     for (idx, row) in new_rows.iter().enumerate() {
         if row.len() > MAX_ROW_LEN {
-            return Err(BackendError::Validation(format!(
+            return Err(BackendError::Internal(format!(
                 "additive append: row {idx} for table {table_type} exceeds page capacity \
                  ({} bytes; max {MAX_ROW_LEN})",
                 row.len()
@@ -347,12 +347,12 @@ pub(crate) fn append_rows_to_chain_in_place(
     }
 
     let (old_ec, first, last) = table_ptr_fields(bytes, table_type).ok_or_else(|| {
-        BackendError::Validation(format!(
+        BackendError::Internal(format!(
             "additive append: table {table_type} pointer missing from header"
         ))
     })?;
     let chain = collect_chain_pages(bytes, page_size, first, last).ok_or_else(|| {
-        BackendError::Validation(format!(
+        BackendError::Internal(format!(
             "additive append: table {table_type} chain unreachable from first={first} last={last}"
         ))
     })?;
@@ -380,7 +380,7 @@ pub(crate) fn append_rows_to_chain_in_place(
             .get(off..off + page_size)
             .map(|s| s.to_vec())
             .ok_or_else(|| {
-                BackendError::Validation(format!(
+                BackendError::Internal(format!(
                     "additive append: page {page_idx} for table {table_type} \
                      out of bounds"
                 ))
@@ -465,7 +465,7 @@ pub(crate) fn append_rows_to_chain_in_place(
         // one row fits on a fresh page. If for some reason none did,
         // abort rather than loop forever.
         if fitted.is_empty() {
-            return Err(BackendError::Validation(format!(
+            return Err(BackendError::Internal(format!(
                 "additive append: failed to place row {cursor} on a fresh page \
                  for table {table_type}"
             )));
@@ -505,7 +505,7 @@ pub(crate) fn append_rows_to_chain_in_place(
 
         let ok = rewrite_variable_page_rows_in_place(bytes, new_idx, &fitted, page_size);
         if !ok {
-            return Err(BackendError::Validation(format!(
+            return Err(BackendError::Internal(format!(
                 "additive append: rewrite_variable_page_rows_in_place rejected \
                  fresh page {new_idx} for table {table_type}"
             )));
@@ -605,7 +605,7 @@ pub(crate) fn append_rows_to_chain_in_place(
     }
 
     if !set_table_ptr_fields(bytes, table_type, new_ec, first, new_last) {
-        return Err(BackendError::Validation(format!(
+        return Err(BackendError::Internal(format!(
             "additive append: set_table_ptr_fields rejected table {table_type}"
         )));
     }
@@ -1222,10 +1222,10 @@ pub(crate) fn remove_t08_entries_in_place(
     let victim_set: std::collections::HashSet<T08EntryKey> = victims.iter().copied().collect();
 
     let (_ec, first, last) = table_ptr_fields(bytes, 8).ok_or_else(|| {
-        BackendError::Validation("remove_t08_entries: table 8 pointer missing".into())
+        BackendError::Internal("remove_t08_entries: table 8 pointer missing".into())
     })?;
     let chain = collect_chain_pages(bytes, page_size, first, last).ok_or_else(|| {
-        BackendError::Validation("remove_t08_entries: t08 chain unreachable".into())
+        BackendError::Internal("remove_t08_entries: t08 chain unreachable".into())
     })?;
 
     let mut any_changed = false;
@@ -1262,7 +1262,7 @@ pub(crate) fn remove_t08_entries_in_place(
 
         let ok = rewrite_variable_page_rows_in_place(bytes, page_idx, &kept, page_size);
         if !ok {
-            return Err(BackendError::Validation(format!(
+            return Err(BackendError::Internal(format!(
                 "remove_t08_entries: rewrite failed for page {page_idx}"
             )));
         }
@@ -1297,7 +1297,7 @@ pub(crate) fn remove_t08_entries_in_place(
     if new_last != last {
         let new_ec = new_last.saturating_add(1);
         if !set_table_ptr_fields(bytes, 8, new_ec, first, new_last) {
-            return Err(BackendError::Validation(
+            return Err(BackendError::Internal(
                 "remove_t08_entries: set_table_ptr_fields failed".into(),
             ));
         }
@@ -1656,7 +1656,7 @@ pub(crate) fn sync_t19_ring_page(
     property: &T19Property,
 ) -> BackendResult<()> {
     if page_size != PAGE_SIZE {
-        return Err(BackendError::Validation(format!(
+        return Err(BackendError::Internal(format!(
             "t19 sync requires page_size {PAGE_SIZE}, got {page_size}"
         )));
     }
@@ -1666,17 +1666,17 @@ pub(crate) fn sync_t19_ring_page(
     // always pre-seeds one tt=19 data page (`seed_rb_initialized_history_shape`
     // in usb_utils.rs). Tests must mirror that pre-seeded page.
     let page_idx = t19_only_data_page(bytes, page_size).ok_or_else(|| {
-        BackendError::Validation("t19 sync: table 19 has no single data page".into())
+        BackendError::Internal("t19 sync: table 19 has no single data page".into())
     })?;
     let newest = u32::try_from(track_count)
-        .map_err(|_| BackendError::Validation("t19 sync: track count overflows u32".into()))?;
+        .map_err(|_| BackendError::Internal("t19 sync: track count overflows u32".into()))?;
     let rows = t19_ring_rows(property, newest);
     let off = page_offset(page_idx, page_size).ok_or_else(|| {
-        BackendError::Validation(format!("t19 sync: page {page_idx} out of bounds"))
+        BackendError::Internal(format!("t19 sync: page {page_idx} out of bounds"))
     })?;
 
     if !rewrite_variable_page_rows_in_place(bytes, page_idx, &rows, page_size) {
-        return Err(BackendError::Validation(format!(
+        return Err(BackendError::Internal(format!(
             "t19 sync: rows do not fit on page {page_idx}"
         )));
     }
@@ -1772,7 +1772,7 @@ pub(crate) fn set_t19_background_color(
     color: u8,
 ) -> BackendResult<bool> {
     if page_size != PAGE_SIZE {
-        return Err(BackendError::Validation(format!(
+        return Err(BackendError::Internal(format!(
             "t19 color requires page_size {PAGE_SIZE}, got {page_size}"
         )));
     }
@@ -1793,7 +1793,7 @@ pub(crate) fn set_t19_background_color(
         return Ok(true);
     }
     let rows = t19_live_rows(bytes, page_size).ok_or_else(|| {
-        BackendError::Validation("the PDB has no history (t19) page to hold the color".into())
+        BackendError::Internal("the PDB has no history (t19) page to hold the color".into())
     })?;
     let mut changed = false;
     for row in rows {
@@ -2000,7 +2000,7 @@ fn rebuild_track_row_preserving(
             out.resize(out.len().next_multiple_of(4), 0);
         }
         let offset = u16::try_from(out.len()).map_err(|_| {
-            BackendError::Validation(format!(
+            BackendError::Internal(format!(
                 "track row too large for PDB encoding (id {})",
                 mutation.row.id
             ))
@@ -2016,7 +2016,7 @@ pub(super) fn build_same_size_track_row_patch(
     mutation: &PdbTrackRowMutation,
 ) -> BackendResult<Option<Vec<u8>>> {
     if row.len() < 136 {
-        return Err(BackendError::Validation(format!(
+        return Err(BackendError::Internal(format!(
             "PDB additive track mutation blocked: t00 row {} is too short ({})",
             mutation.row.id,
             row.len()
@@ -2140,17 +2140,17 @@ fn mark_row_slot_inactive(
     page_size: usize,
 ) -> BackendResult<()> {
     let off = page_offset(page_idx, page_size).ok_or_else(|| {
-        BackendError::Validation(format!(
+        BackendError::Internal(format!(
             "PDB additive track mutation blocked: page {page_idx} out of bounds"
         ))
     })?;
     let rowpf_off = off + slot.bits_off;
     let tranrf_off = rowpf_off + 2;
     let rowpf = read_u16_le_at(bytes, rowpf_off).ok_or_else(|| {
-        BackendError::Validation("PDB additive track mutation blocked: rowpf missing".into())
+        BackendError::Internal("PDB additive track mutation blocked: rowpf missing".into())
     })?;
     let tranrf = read_u16_le_at(bytes, tranrf_off).ok_or_else(|| {
-        BackendError::Validation("PDB additive track mutation blocked: tranrf missing".into())
+        BackendError::Internal("PDB additive track mutation blocked: tranrf missing".into())
     })?;
     if rowpf & slot.bit_mask == 0 {
         return Ok(());
@@ -2191,7 +2191,7 @@ pub(crate) fn patch_playlist_tree_sort_orders_in_place(
         return Ok(0);
     }
     if page_size != PAGE_SIZE || bytes.len() < page_size || !bytes.len().is_multiple_of(page_size) {
-        return Err(BackendError::Validation(
+        return Err(BackendError::Internal(
             "PDB additive playlist-tree sort patch blocked: invalid page alignment".to_string(),
         ));
     }
@@ -2199,12 +2199,12 @@ pub(crate) fn patch_playlist_tree_sort_orders_in_place(
     let desired_by_id: std::collections::HashMap<u32, u32> =
         patches.iter().map(|p| (p.id, p.sort_order)).collect();
     let (_t07_ec, first, last) = table_ptr_fields(bytes, 7).ok_or_else(|| {
-        BackendError::Validation(
+        BackendError::Internal(
             "PDB additive playlist-tree sort patch blocked: t07 pointer missing".into(),
         )
     })?;
     let chain = collect_chain_pages(bytes, page_size, first, last).ok_or_else(|| {
-        BackendError::Validation(
+        BackendError::Internal(
             "PDB additive playlist-tree sort patch blocked: t07 chain invalid".into(),
         )
     })?;
@@ -2252,7 +2252,7 @@ pub(crate) fn patch_playlist_tree_sort_orders_in_place(
             .map(|id| id.to_string())
             .collect::<Vec<_>>()
             .join(", ");
-        return Err(BackendError::Validation(format!(
+        return Err(BackendError::Internal(format!(
             "PDB additive playlist-tree sort patch incomplete: missing t07 row(s) {missing}"
         )));
     }
@@ -2289,7 +2289,7 @@ pub(crate) fn mutate_tracks_in_place(
         return Ok(0);
     }
     if page_size != PAGE_SIZE || bytes.len() < page_size || !bytes.len().is_multiple_of(page_size) {
-        return Err(BackendError::Validation(
+        return Err(BackendError::Internal(
             "PDB additive track mutation blocked: invalid page alignment".to_string(),
         ));
     }
@@ -2297,10 +2297,10 @@ pub(crate) fn mutate_tracks_in_place(
     let desired_by_id: std::collections::HashMap<u32, &PdbTrackRowMutation> =
         mutations.iter().map(|m| (m.row.id, m)).collect();
     let (_t00_ec, first, last) = table_ptr_fields(bytes, 0).ok_or_else(|| {
-        BackendError::Validation("PDB additive track mutation blocked: t00 pointer missing".into())
+        BackendError::Internal("PDB additive track mutation blocked: t00 pointer missing".into())
     })?;
     let chain = collect_chain_pages(bytes, page_size, first, last).ok_or_else(|| {
-        BackendError::Validation("PDB additive track mutation blocked: t00 chain invalid".into())
+        BackendError::Internal("PDB additive track mutation blocked: t00 chain invalid".into())
     })?;
 
     let mut patched_ids = std::collections::HashSet::<u32>::new();
@@ -2345,7 +2345,7 @@ pub(crate) fn mutate_tracks_in_place(
             } else {
                 let replacement = rebuild_track_row_preserving(row_view, mutation, profile)?;
                 if replacement.len() > MAX_ROW_LEN {
-                    return Err(BackendError::Validation(format!(
+                    return Err(BackendError::Internal(format!(
                         "PDB additive track mutation blocked: replacement t00 row {} exceeds page capacity ({} bytes; max {MAX_ROW_LEN})",
                         mutation.row.id,
                         replacement.len()
@@ -2366,7 +2366,7 @@ pub(crate) fn mutate_tracks_in_place(
             .map(|id| id.to_string())
             .collect::<Vec<_>>()
             .join(", ");
-        return Err(BackendError::Validation(format!(
+        return Err(BackendError::Internal(format!(
             "PDB additive track mutation incomplete: missing t00 row(s) {missing}"
         )));
     }
@@ -2419,7 +2419,7 @@ pub(crate) fn realign_dictionary_rows_in_place(
         return Ok(0);
     }
     if page_size != PAGE_SIZE || bytes.len() < page_size || !bytes.len().is_multiple_of(page_size) {
-        return Err(BackendError::Validation(
+        return Err(BackendError::Internal(
             "PDB dictionary row realignment blocked: invalid page alignment".to_string(),
         ));
     }
@@ -2427,7 +2427,7 @@ pub(crate) fn realign_dictionary_rows_in_place(
     let desired_by_id: std::collections::HashMap<u32, &Vec<u8>> =
         rows.iter().map(|(id, row)| (*id, row)).collect();
     let (_ec, first, last) = table_ptr_fields(bytes, table_type).ok_or_else(|| {
-        BackendError::Validation(format!(
+        BackendError::Internal(format!(
             "PDB dictionary row realignment blocked: table {table_type} pointer missing"
         ))
     })?;
@@ -2440,7 +2440,7 @@ pub(crate) fn realign_dictionary_rows_in_place(
     // it; walking only the chain here would silently leave such rows unfixed while this function
     // still reports success.
     collect_chain_pages(bytes, page_size, first, last).ok_or_else(|| {
-        BackendError::Validation(format!(
+        BackendError::Internal(format!(
             "PDB dictionary row realignment blocked: table {table_type} chain invalid"
         ))
     })?;
@@ -2484,7 +2484,7 @@ pub(crate) fn realign_dictionary_rows_in_place(
                 continue;
             };
             if replacement.len() > MAX_ROW_LEN {
-                return Err(BackendError::Validation(format!(
+                return Err(BackendError::Internal(format!(
                     "PDB dictionary row realignment blocked: replacement table {table_type} row {id} exceeds page capacity ({} bytes; max {MAX_ROW_LEN})",
                     replacement.len()
                 )));
@@ -2503,7 +2503,7 @@ pub(crate) fn realign_dictionary_rows_in_place(
             .map(|id| id.to_string())
             .collect::<Vec<_>>()
             .join(", ");
-        return Err(BackendError::Validation(format!(
+        return Err(BackendError::Internal(format!(
             "PDB dictionary row realignment incomplete: missing table {table_type} row(s) {missing}"
         )));
     }
@@ -2551,7 +2551,7 @@ pub(crate) fn realign_dictionary_rows_in_place(
 /// whose `entry_index` changed in place.
 ///
 /// On success returns the patched bytes; on failure returns the same
-/// `BackendError::Validation` variant the caller would see from the
+/// `BackendError::Internal` variant the caller would see from the
 /// legacy path so error messages match across both write modes.
 pub(crate) fn apply_additive_diff(
     existing_bytes: &[u8],
@@ -2752,7 +2752,7 @@ pub(crate) fn try_write_pdb_additive_in_place(
             .map(|m| m.to_string())
             .collect::<Vec<_>>()
             .join(" | ");
-        return Err(BackendError::Validation(format!(
+        return Err(BackendError::Internal(format!(
             "PDB additive write blocked: page-header convention mismatches ({detail})"
         )));
     }
@@ -2906,7 +2906,7 @@ pub(crate) fn append_playlist_tree_in_place(
         append_rows_to_t07_tombstone_pages_in_place(bytes, &rows, page_size)?;
     if consumed >= rows.len() {
         let (ec, _first, last) = table_ptr_fields(bytes, 7).ok_or_else(|| {
-            BackendError::Validation(
+            BackendError::Internal(
                 "t07 append: table pointer missing after tombstone append".into(),
             )
         })?;

@@ -211,7 +211,7 @@ pub fn rebuild_engine_library(usb_root: &Path) -> BackendResult<EngineLibrarySum
     let pdb_path = usb_staging::stage_pdb(usb_root)?;
     let pdb_bytes = std::fs::read(&pdb_path)?;
     let pdb_sequence = pdb_sequence(&pdb_bytes)
-        .ok_or_else(|| BackendError::Validation("export.pdb is too short".into()))?;
+        .ok_or_else(|| BackendError::Internal("export.pdb is too short".into()))?;
     let pdb = parse_pdb_bytes(&pdb_bytes)?;
 
     let db_dir = engine_db_dir(usb_root);
@@ -249,7 +249,7 @@ pub fn rebuild_engine_library(usb_root: &Path) -> BackendResult<EngineLibrarySum
         tracks.push(track);
     }
     if engine_ids.len() != engine_ids.values().collect::<HashSet<_>>().len() {
-        return Err(BackendError::Validation(
+        return Err(BackendError::Internal(
             "two USB tracks share one file path".into(),
         ));
     }

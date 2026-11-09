@@ -200,7 +200,7 @@ impl BackendService {
             let sources = LibrarySources::load(&*self.db.connect()?)?;
             if sources.roots.is_empty() {
                 return Err(BackendError::Validation(
-                    "Add a source folder before scanning".to_string(),
+                    tr::library_error_no_source_folder(),
                 ));
             }
             source_roots = sources
@@ -211,7 +211,7 @@ impl BackendService {
                 .collect();
             if source_roots.is_empty() {
                 return Err(BackendError::Validation(
-                    "Switch on at least one source folder before scanning".to_string(),
+                    tr::library_error_no_source_enabled(),
                 ));
             }
         }
@@ -939,15 +939,15 @@ impl BackendService {
     ) -> BackendResult<MaterializeSourceTrackData> {
         let file_path = req.file_path.trim();
         if file_path.is_empty() {
-            return Err(BackendError::Validation(
+            return Err(BackendError::Internal(
                 "filePath must not be empty".to_string(),
             ));
         }
         let path = std::path::Path::new(file_path);
         if !path.is_file() {
-            return Err(BackendError::NotFound(format!(
-                "source file does not exist: {file_path}"
-            )));
+            return Err(BackendError::NotFound(
+                tr::library_error_source_file_missing(file_path),
+            ));
         }
 
         let metadata = std::fs::metadata(path)?;
@@ -1454,9 +1454,7 @@ pub(super) fn decode_track_page_cursor(
     if let Some(cursor) = &cursor
         && (cursor.file_path.trim().is_empty() || cursor.id.trim().is_empty())
     {
-        return Err(BackendError::Validation(
-            "invalid cursor payload".to_string(),
-        ));
+        return Err(BackendError::Internal("invalid cursor payload".to_string()));
     }
     Ok(cursor)
 }
@@ -1474,17 +1472,17 @@ fn decode_cursor<T: serde::de::DeserializeOwned>(
     };
     let decoded = base64::engine::general_purpose::URL_SAFE_NO_PAD
         .decode(raw)
-        .map_err(|_| BackendError::Validation("invalid cursor token".to_string()))?;
+        .map_err(|_| BackendError::Internal("invalid cursor token".to_string()))?;
     let cursor: T = serde_json::from_slice(&decoded)
-        .map_err(|_| BackendError::Validation("invalid cursor payload".to_string()))?;
+        .map_err(|_| BackendError::Internal("invalid cursor payload".to_string()))?;
     let (version, signature) = header(&cursor);
     if version != TRACK_CURSOR_VERSION {
-        return Err(BackendError::Validation(
+        return Err(BackendError::Internal(
             "unsupported cursor version".to_string(),
         ));
     }
     if signature != expected_signature {
-        return Err(BackendError::Validation(
+        return Err(BackendError::Internal(
             "cursor does not match current query".to_string(),
         ));
     }

@@ -217,7 +217,7 @@ impl BackendService {
         match req.path.as_deref().map(str::trim).filter(|p| !p.is_empty()) {
             Some(path) => {
                 if !Path::new(path).is_absolute() {
-                    return Err(BackendError::Validation(
+                    return Err(BackendError::Internal(
                         "the transcode folder must be an absolute path".to_string(),
                     ));
                 }
@@ -228,9 +228,7 @@ impl BackendService {
                     .any(|root| browse_path_matches_root(path, root))
                 {
                     return Err(BackendError::Validation(
-                        "the transcode folder can't be inside a source folder: the scan would \
-                         list the transcodes as tracks"
-                            .to_string(),
+                        tr::transcode_error_folder_in_source(),
                     ));
                 }
                 conn.execute(
@@ -269,7 +267,7 @@ impl BackendService {
         F: FnMut(&TranscodeProgress),
     {
         let format = TranscodeFormat::parse(&req.format).ok_or_else(|| {
-            BackendError::Validation(format!("unknown transcode format: {}", req.format))
+            BackendError::Internal(format!("unknown transcode format: {}", req.format))
         })?;
         self.transcode_cancelled.store(false, Ordering::SeqCst);
         let conn = self.db.connect()?;

@@ -642,7 +642,7 @@ fn inspect_usb_track_reports_not_found_when_hints_dont_match_pdb_or_edb() {
     );
     let error = inspected.error.expect("inspect error");
     assert!(matches!(error.code, ErrorCode::ValidationError));
-    assert!(error.message.contains("not found on USB metadata sources"));
+    assert!(error.message.contains("not found on the USB"));
 }
 
 #[test]
@@ -662,7 +662,7 @@ fn inspect_usb_track_rejects_non_numeric_track_id() {
     });
     assert!(!inspected.ok, "expected non-numeric trackId to be rejected");
     let error = inspected.error.expect("inspect error");
-    assert!(matches!(error.code, ErrorCode::ValidationError));
+    assert!(matches!(error.code, ErrorCode::InternalError));
     assert!(error.message.contains("must be a numeric USB track id"));
 }
 
@@ -688,7 +688,7 @@ fn inspect_usb_track_reports_not_found_for_unknown_id() {
     assert!(!inspected.ok, "expected unknown trackId to be rejected");
     let error = inspected.error.expect("inspect error");
     assert!(matches!(error.code, ErrorCode::ValidationError));
-    assert!(error.message.contains("not found on USB metadata sources"));
+    assert!(error.message.contains("not found on the USB"));
 }
 
 #[test]

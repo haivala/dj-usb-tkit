@@ -25,6 +25,7 @@ use super::{
 };
 use crate::edb::{load_table_columns, table_exists};
 use crate::error::{BackendError, BackendResult};
+use crate::i18n::tr;
 use crate::logging::{self, Level};
 use crate::models::{
     DetectExternalMixxxDbData, ExternalPlaylistKind, ExternalPlaylistSummary,
@@ -382,7 +383,7 @@ fn load_mixxx_tracks(conn: &Connection) -> BackendResult<Vec<MixxxTrack>> {
     );
     let mut stmt = conn
         .prepare(&sql)
-        .map_err(|e| BackendError::Validation(format!("Mixxx library query failed: {e}")))?;
+        .map_err(|e| BackendError::Validation(tr::library_error_mixxx_query(e)))?;
     let tracks = stmt
         .query_map([], |row| {
             let key_id: Option<i64> = row.get(6)?;
@@ -421,7 +422,7 @@ fn load_mixxx_tracks(conn: &Connection) -> BackendResult<Vec<MixxxTrack>> {
                 }),
             })
         })
-        .map_err(|e| BackendError::Validation(format!("Mixxx library row error: {e}")))?
+        .map_err(|e| BackendError::Validation(tr::library_error_mixxx_row(e)))?
         .filter_map(|r| r.ok())
         .filter(|t| !t.file_path.trim().is_empty())
         .collect();
@@ -453,20 +454,17 @@ fn open_mixxx_db(path: Option<&str>) -> BackendResult<Connection> {
         external_mixxx_db_candidates()
             .into_iter()
             .find(|c| c.is_file())
-            .ok_or_else(|| BackendError::Validation("Mixxx library not found".to_string()))?
+            .ok_or_else(|| BackendError::Validation(tr::library_error_mixxx_not_found()))?
     };
     if !mixxx_path.is_file() {
-        return Err(BackendError::Validation(format!(
-            "Mixxx library not found: {}",
-            mixxx_path.display()
-        )));
+        return Err(BackendError::Validation(
+            tr::library_error_mixxx_not_found_at(mixxx_path.display()),
+        ));
     }
     let mixxx = Connection::open_with_flags(&mixxx_path, OpenFlags::SQLITE_OPEN_READ_ONLY)
-        .map_err(|e| BackendError::Validation(format!("could not open Mixxx library: {e}")))?;
+        .map_err(|e| BackendError::Validation(tr::library_error_mixxx_open(e)))?;
     if !table_exists(&mixxx, "library") || !table_exists(&mixxx, "track_locations") {
-        return Err(BackendError::Validation(
-            "Mixxx library opened but library/track_locations tables not found".to_string(),
-        ));
+        return Err(BackendError::Validation(tr::library_error_mixxx_tables()));
     }
     Ok(mixxx)
 }
@@ -557,11 +555,11 @@ fn load_mixxx_playlist_entries(
     let name: Option<String> = mixxx
         .query_row(name_sql, params![id], |row| row.get(0))
         .optional()
-        .map_err(|e| BackendError::Validation(format!("Mixxx playlist query failed: {e}")))?
-        .ok_or_else(|| BackendError::NotFound(format!("Mixxx playlist not found: {id}")))?;
+        .map_err(|e| BackendError::Validation(tr::library_error_mixxx_playlist_query(e)))?
+        .ok_or_else(|| BackendError::NotFound(tr::library_error_mixxx_playlist_not_found(id)))?;
     let mut stmt = mixxx
         .prepare(entries_sql)
-        .map_err(|e| BackendError::Validation(format!("Mixxx playlist query failed: {e}")))?;
+        .map_err(|e| BackendError::Validation(tr::library_error_mixxx_playlist_query(e)))?;
     let ids = stmt
         .query_map(params![id], |row| row.get::<_, i64>(0))?
         .filter_map(|r| r.ok())
@@ -932,7 +930,7 @@ impl BackendService {
         req: ImportExternalPlaylistRequest,
     ) -> BackendResult<ImportExternalPlaylistData> {
         let id: i64 = req.id.trim().parse().map_err(|_| {
-            BackendError::Validation(format!("invalid Mixxx playlist id: {:?}", req.id))
+            BackendError::Internal(format!("invalid Mixxx playlist id: {:?}", req.id))
         })?;
         let mixxx = open_mixxx_db(req.path.as_deref())?;
         let (mixxx_name, entry_ids) = load_mixxx_playlist_entries(&mixxx, req.kind, id)?;

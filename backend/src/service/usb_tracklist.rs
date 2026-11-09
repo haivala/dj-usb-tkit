@@ -113,7 +113,7 @@ impl BackendService {
             .iter()
             .find(|history| history.id == id)
             .cloned()
-            .ok_or_else(|| BackendError::NotFound(format!("USB history not found: {id}")))
+            .ok_or_else(|| BackendError::NotFound(tr::error_usb_history_not_found(id)))
     }
 
     pub fn get_usb_history_tracklist_options(

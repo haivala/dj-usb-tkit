@@ -341,7 +341,7 @@ fn export_to_usb_rejects_empty_or_whitespace_playlist_id() {
     });
     assert!(!empty.ok, "expected empty playlistId export to fail");
     let empty_error = empty.error.expect("empty export error");
-    assert!(matches!(empty_error.code, ErrorCode::ValidationError));
+    assert!(matches!(empty_error.code, ErrorCode::InternalError));
 
     let whitespace = backend.export_to_usb(ExportToUsbRequest {
         usb_root: Some(usb.to_string_lossy().to_string()),
@@ -353,7 +353,7 @@ fn export_to_usb_rejects_empty_or_whitespace_playlist_id() {
         "expected whitespace-only playlistId export to fail"
     );
     let whitespace_error = whitespace.error.expect("whitespace export error");
-    assert!(matches!(whitespace_error.code, ErrorCode::ValidationError));
+    assert!(matches!(whitespace_error.code, ErrorCode::InternalError));
 }
 
 #[test]

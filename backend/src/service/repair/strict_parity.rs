@@ -782,7 +782,7 @@ pub(super) fn run_strict_parity_upgrade(
         return collect_merge_write(usb_root, target_playlist_names, edb_conn, warnings, write);
     };
     if !write {
-        return Err(BackendError::Validation(
+        return Err(BackendError::Internal(
             "strict parity upgrade: a missing database is rebuilt only when applied".to_string(),
         ));
     }

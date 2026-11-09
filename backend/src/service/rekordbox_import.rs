@@ -27,6 +27,7 @@ use super::{
 };
 use crate::edb::table_exists;
 use crate::error::{BackendError, BackendResult};
+use crate::i18n::tr;
 use crate::logging::{self, Level};
 use crate::models::{
     ExternalPlaylistKind, ExternalPlaylistSummary, ImportExternalPlaylistData,
@@ -54,26 +55,25 @@ fn open_rekordbox_db(path: Option<&str>) -> BackendResult<(PathBuf, Connection)>
         external_rekordbox_db_candidates()
             .into_iter()
             .find(|c| c.is_file())
-            .ok_or_else(|| BackendError::Validation("master.db not found".to_string()))?
+            .ok_or_else(|| BackendError::Validation(tr::library_error_rekordbox_not_found()))?
     };
 
     if !master_path.is_file() {
-        return Err(BackendError::Validation(format!(
-            "master.db not found: {}",
-            master_path.display()
-        )));
+        return Err(BackendError::Validation(
+            tr::library_error_rekordbox_not_found_at(master_path.display()),
+        ));
     }
 
     // Open read-only with SQLCipher key
     let conn = Connection::open_with_flags(&master_path, OpenFlags::SQLITE_OPEN_READ_ONLY)
-        .map_err(|e| BackendError::Validation(format!("could not open master.db: {e}")))?;
+        .map_err(|e| BackendError::Validation(tr::library_error_rekordbox_open(e)))?;
     conn.execute_batch(&format!("PRAGMA key='{}';", DEFAULT_MASTER_DB_KEY))
-        .map_err(|e| BackendError::Validation(format!("master.db key failed: {e}")))?;
+        .map_err(|e| BackendError::Validation(tr::library_error_rekordbox_key(e)))?;
 
     // Verify we can read the schema
     if !table_exists(&conn, "djmdContent") {
         return Err(BackendError::Validation(
-            "master.db opened but djmdContent table not found (wrong key or version)".to_string(),
+            tr::library_error_rekordbox_tables(),
         ));
     }
     Ok((master_path, conn))
@@ -136,7 +136,7 @@ fn load_rekordbox_db_tracks(conn: &Connection, master_path: &Path) -> BackendRes
           AND c.FolderPath IS NOT NULL
         "#,
         ))
-        .map_err(|e| BackendError::Validation(format!("master.db query failed: {e}")))?;
+        .map_err(|e| BackendError::Validation(tr::library_error_rekordbox_query(e)))?;
 
     let tracks = stmt
         .query_map([], |row| {
@@ -162,7 +162,7 @@ fn load_rekordbox_db_tracks(conn: &Connection, master_path: &Path) -> BackendRes
                     .map(str::to_string),
             })
         })
-        .map_err(|e| BackendError::Validation(format!("master.db row error: {e}")))?
+        .map_err(|e| BackendError::Validation(tr::library_error_rekordbox_row(e)))?
         .filter_map(|r| r.ok())
         .filter(|t| !t.file_path.to_string_lossy().trim().is_empty())
         .map(|mut t| {
@@ -210,7 +210,7 @@ fn rb_tables(kind: ExternalPlaylistKind) -> BackendResult<&'static RbListTables>
     match kind {
         ExternalPlaylistKind::Playlist => Ok(&RB_PLAYLIST_TABLES),
         ExternalPlaylistKind::History => Ok(&RB_HISTORY_TABLES),
-        ExternalPlaylistKind::Crate => Err(BackendError::Validation(
+        ExternalPlaylistKind::Crate => Err(BackendError::Internal(
             "rekordbox has no crates".to_string(),
         )),
     }
@@ -368,7 +368,9 @@ fn load_rb_list_entries(
     let node = nodes
         .get(id)
         .filter(|n| n.attribute == RB_ATTRIBUTE_LIST)
-        .ok_or_else(|| BackendError::NotFound(format!("rekordbox playlist not found: {id}")))?;
+        .ok_or_else(|| {
+            BackendError::NotFound(tr::library_error_rekordbox_playlist_not_found(id))
+        })?;
     let mut stmt = conn.prepare(&format!(
         "SELECT CAST(ContentID AS TEXT) FROM {entries}
          WHERE CAST({list_col} AS TEXT) = ?1 AND IFNULL(rb_local_deleted, 0) = 0

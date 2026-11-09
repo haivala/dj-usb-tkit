@@ -1049,7 +1049,7 @@ fn reorder_playlists_saves_sidebar_order_and_new_playlists_go_on_top() {
                 ordered_playlist_ids: ids,
             })
             .unwrap_err();
-        assert!(matches!(err, BackendError::Validation(_)));
+        assert!(matches!(err, BackendError::Internal(_)));
     }
     assert_eq!(listed_names(), ["D", "A", "C", "B"]);
 }
@@ -1123,7 +1123,7 @@ fn add_tracks_to_playlist_rejects_empty_ids() {
             track_ids: Vec::new(),
         })
         .unwrap_err();
-    assert!(matches!(err, BackendError::Validation(_)));
+    assert!(matches!(err, BackendError::Internal(_)));
 }
 
 #[test]
@@ -1657,7 +1657,7 @@ fn get_playlist_tracks_paginates_filters_and_sorts_server_side() {
             ..Default::default()
         })
         .unwrap_err();
-    assert!(matches!(err, BackendError::Validation(_)));
+    assert!(matches!(err, BackendError::Internal(_)));
 
     // Query filters and still reports whole-playlist... no -- total is the
     // filtered count, duration spans the filtered set.
@@ -2038,7 +2038,7 @@ fn frontend_settings_roundtrip_and_reject_unsupported_key() {
             value: Some("x".to_string()),
         })
         .unwrap_err();
-    assert!(matches!(err, BackendError::Validation(_)));
+    assert!(matches!(err, BackendError::Internal(_)));
 }
 
 #[test]

@@ -10,7 +10,7 @@ use serde_json::json;
 use super::usb::UsbTrackSizes;
 use crate::edb::{open_edb_from_usb_root, open_edb_rw};
 use crate::error::{BackendError, BackendResult};
-use crate::i18n::tr;
+use crate::i18n::{Text, tr};
 use crate::logging::{self, Level};
 use crate::models::{
     ExportToUsbData, ExportToUsbOptions, ExportToUsbRequest, GetPlaylistExportSpaceData,
@@ -267,14 +267,10 @@ impl ManifestCheckPhase {
         .render()
     }
 
-    fn error_message(self) -> &'static str {
+    fn error_message(self) -> Text {
         match self {
-            Self::BeforeDbWrite => "Export blocked: manifest invariant check failed",
-            Self::AfterPrune => {
-                "Export finished with errors: the stale-file prune removed a file the exported \
-                 playlist still references — the USB databases were written; restore from the \
-                 pre-export backup"
-            }
+            Self::BeforeDbWrite => tr::export_error_manifest(),
+            Self::AfterPrune => tr::export_error_manifest_after_prune(),
         }
     }
 }
@@ -417,7 +413,7 @@ fn run_manifest_invariant_check(
     }
 
     Err(BackendError::ValidationWithDetails(
-        phase.error_message().to_string(),
+        phase.error_message(),
         json!({
             "validationType": phase.validation_type(),
             "statusText": phase.status_text(),
@@ -720,11 +716,7 @@ fn insufficient_space_error(
     required: u64,
     available: u64,
 ) -> BackendError {
-    let message = format!(
-        "Export blocked: not enough free space on the USB drive — need about {}, {} free",
-        format_bytes(required),
-        format_bytes(available),
-    );
+    let message = tr::export_error_no_space(format_bytes(required), format_bytes(available));
     let status_text =
         tr::export_refused_no_space(format_bytes(required), format_bytes(available)).render();
     BackendError::ValidationWithDetails(
@@ -744,13 +736,8 @@ fn insufficient_space_error(
 /// The Event Log gets every refused track from the error's message; the status
 /// line only has room for how many.
 fn refused_formats_error(refused: Vec<String>) -> BackendError {
-    let what = format!(
-        "Export blocked: {} in a format this USB's formats don't allow, and only lossless files \
-         can be converted",
-        counted(refused.len(), "track", "tracks"),
-    );
     BackendError::ValidationWithDetails(
-        format!("{what}: {}", refused.join(", ")),
+        tr::export_error_formats(refused.len(), refused.join(", ")),
         json!({
             "validationType": "usb_audio_format_refused",
             "statusText": tr::export_refused_formats(refused.len()).render(),
@@ -819,9 +806,7 @@ fn ensure_playlist_tracks_analysis_ready(
     }
     .render();
     Err(BackendError::ValidationWithDetails(
-        format!(
-            "Export blocked: {missing}/{total} playlist tracks are missing required analysis (waveform, bpm, duration, DAT/EXT files); run analysis first"
-        ),
+        tr::export_error_not_analyzed(missing, total),
         json!({
             "validationType": "missing_analysis",
             "statusText": status_text,
@@ -1133,7 +1118,7 @@ impl BackendService {
     {
         let playlist_id = req.playlist_id.trim().to_string();
         if playlist_id.is_empty() {
-            return Err(BackendError::Validation(
+            return Err(BackendError::Internal(
                 "playlistId must not be empty".to_string(),
             ));
         }
@@ -1144,24 +1129,20 @@ impl BackendService {
             Ok(guard) => guard,
             Err(std::sync::TryLockError::Poisoned(poisoned)) => poisoned.into_inner(),
             Err(std::sync::TryLockError::WouldBlock) => {
-                return Err(BackendError::Validation(
-                    "Another export or change to the USB is still running. Export again once it has finished."
-                        .to_string(),
-                ));
+                return Err(BackendError::Validation(tr::export_error_busy()));
             }
         };
 
         let usb_root = resolve_usb_root(req.usb_root.as_deref())?;
         if !usb_root.exists() || !usb_root.is_dir() {
-            return Err(BackendError::NotFound(format!(
-                "USB root does not exist: {}",
-                usb_root.display()
+            return Err(BackendError::NotFound(tr::export_error_usb_missing(
+                usb_root.display(),
             )));
         }
         if !can_write_file_at(&usb_root) {
-            let message = "USB is read-only. Remount as read-write before export.";
+            // The status line's own text says it all.
             return Err(BackendError::ValidationWithDetails(
-                message.to_string(),
+                tr::export_refused_read_only(),
                 json!({
                     "validationType": "usb_read_only",
                     "statusText": tr::export_refused_read_only().render(),
@@ -1178,16 +1159,11 @@ impl BackendService {
             .unwrap_or(false);
         let mut playlist = self.load_playlist_for_export(&playlist_id)?;
         if playlist.tracks.is_empty() {
-            return Err(BackendError::Validation(
-                "playlist has no tracks to export".to_string(),
-            ));
+            return Err(BackendError::Validation(tr::export_error_no_tracks()));
         }
         let unplayable_tracks = split_off_unplayable_tracks(&mut playlist);
         if playlist.tracks.is_empty() {
-            return Err(BackendError::Validation(
-                "none of the playlist's tracks are in a format the players play (MP3, AAC, WAV, AIFF, FLAC, ALAC)"
-                    .to_string(),
-            ));
+            return Err(BackendError::Validation(tr::export_error_none_playable()));
         }
 
         let blocking_missing_roots = {
@@ -1198,11 +1174,8 @@ impl BackendService {
             )?
         };
         if let Some(missing_root) = blocking_missing_roots.first() {
-            let message = format!(
-                "Export blocked: source folder is missing: {missing_root}. Relocate or remove it first."
-            );
             return Err(BackendError::ValidationWithDetails(
-                message.clone(),
+                tr::export_error_source_missing(missing_root),
                 json!({
                     "validationType": "source_root_missing",
                     "statusText": tr::export_refused_source_missing(missing_root).render(),
@@ -1237,9 +1210,7 @@ impl BackendService {
             &mut on_progress,
         )?;
         if playlist.tracks.is_empty() {
-            return Err(BackendError::Validation(
-                "none of the playlist's tracks could be converted for this USB".to_string(),
-            ));
+            return Err(BackendError::Validation(tr::export_error_none_convertible()));
         }
         if !export_dry_run {
             // A USB without a PDB yet holds no tracks.
@@ -2164,8 +2135,8 @@ impl BackendService {
             )
             .optional()?;
         let Some(mut playlist) = playlist else {
-            return Err(BackendError::NotFound(format!(
-                "playlist not found: {playlist_id}"
+            return Err(BackendError::NotFound(tr::error_playlist_not_found(
+                playlist_id,
             )));
         };
 
@@ -2601,7 +2572,7 @@ mod tests {
         let err = ensure_playlist_tracks_analysis_ready(dir.path(), &playlist).unwrap_err();
         match err {
             BackendError::ValidationWithDetails(msg, details) => {
-                assert!(msg.contains("missing required analysis"));
+                assert!(msg.render_english().contains("missing required analysis"));
                 assert_eq!(details["validationType"], "missing_analysis");
                 assert_eq!(
                     details["requiredFields"],
@@ -2634,7 +2605,7 @@ mod tests {
         let err = ensure_playlist_tracks_analysis_ready(dir.path(), &playlist).unwrap_err();
         match err {
             BackendError::ValidationWithDetails(msg, details) => {
-                assert!(msg.contains("missing required analysis"));
+                assert!(msg.render_english().contains("missing required analysis"));
                 assert_eq!(details["validationType"], "missing_analysis");
                 assert_eq!(details["missingTrackCount"], 1);
                 assert_eq!(details["missingAnalysisBundleCount"], 1);
@@ -2697,6 +2668,7 @@ mod tests {
         let BackendError::ValidationWithDetails(message, details) = err else {
             panic!("unexpected error variant: {err:?}");
         };
+        let message = message.render_english();
         assert!(message.ends_with(": a.ogg (OGG), b.wma (WMA)"), "{message}");
         assert_eq!(details["validationType"], "usb_audio_format_refused");
         assert_eq!(
@@ -3036,7 +3008,7 @@ mod tests {
             .expect_err("a second write must not start");
 
         assert!(
-            matches!(&err, BackendError::Validation(message) if message.contains("still running")),
+            matches!(&err, BackendError::Validation(message) if message.render_english().contains("still running")),
             "{err:?}"
         );
     }
@@ -3398,7 +3370,7 @@ mod tests {
             validate_export_manifest_before_db_write(usb_dir.path(), &manifest, false).unwrap_err();
         match err {
             BackendError::ValidationWithDetails(msg, details) => {
-                assert!(msg.contains("manifest invariant"));
+                assert!(msg.render_english().contains("manifest invariant"));
                 assert_eq!(details["validationType"], "export_manifest_invariant");
                 assert_eq!(
                     details["statusText"],
@@ -3557,7 +3529,10 @@ mod tests {
         let err = validate_export_manifest_after_prune(usb_dir.path(), &manifest).unwrap_err();
         match err {
             BackendError::ValidationWithDetails(msg, details) => {
-                assert!(msg.contains("stale-file prune removed a file"));
+                assert!(
+                    msg.render_english()
+                        .contains("stale-file prune removed a file")
+                );
                 assert_eq!(details["validationType"], "export_manifest_post_prune");
                 assert_eq!(
                     details["statusText"],
@@ -3881,7 +3856,7 @@ mod tests {
                 options: None,
             })
             .unwrap_err();
-        assert!(matches!(err, BackendError::Validation(_)));
+        assert!(matches!(err, BackendError::Internal(_)));
     }
 
     #[test]

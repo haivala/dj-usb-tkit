@@ -434,7 +434,7 @@ pub fn ensure_analysis_bundle_ppth(
     closer: &FileCloser,
 ) -> BackendResult<()> {
     let dat_path = resolve_usb_side_path(usb_root, analysis_path).ok_or_else(|| {
-        BackendError::Validation(format!("invalid USB analysis path: {analysis_path}"))
+        BackendError::Internal(format!("invalid USB analysis path: {analysis_path}"))
     })?;
     let ext_path = dat_path.with_extension("EXT");
     let twoex_path = dat_path.with_extension("2EX");

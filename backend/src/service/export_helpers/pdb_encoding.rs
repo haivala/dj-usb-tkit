@@ -268,7 +268,7 @@ pub fn encode_track_row_with_profile(
     }
 
     if cursor > u16::MAX as usize {
-        return Err(BackendError::Validation(format!(
+        return Err(BackendError::Internal(format!(
             "track row too large for PDB encoding (id {})",
             track.id
         )));

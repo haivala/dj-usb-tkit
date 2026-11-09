@@ -497,9 +497,8 @@ impl BackendService {
     ) -> BackendResult<RestoreUsbBackupData> {
         let usb_root = resolve_usb_root(Some(&req.usb_root))?;
         if files_for_timestamp(&usb_root, &req.timestamp).is_empty() {
-            return Err(BackendError::NotFound(format!(
-                "backup not found: {}",
-                req.timestamp
+            return Err(BackendError::NotFound(tr::backups_error_not_found(
+                &req.timestamp,
             )));
         }
 
@@ -522,9 +521,8 @@ impl BackendService {
         // this call.
         let files = files_for_timestamp(&usb_root, &req.timestamp);
         if files.is_empty() {
-            return Err(BackendError::NotFound(format!(
-                "backup not found: {}",
-                req.timestamp
+            return Err(BackendError::NotFound(tr::backups_error_not_found(
+                &req.timestamp,
             )));
         }
 
@@ -588,9 +586,8 @@ impl BackendService {
         let usb_root = resolve_usb_root(Some(&req.usb_root))?;
         let files = files_for_timestamp(&usb_root, &req.timestamp);
         if files.is_empty() {
-            return Err(BackendError::NotFound(format!(
-                "backup not found: {}",
-                req.timestamp
+            return Err(BackendError::NotFound(tr::backups_error_not_found(
+                &req.timestamp,
             )));
         }
         let label = backup_files_label(files.iter().map(|(stem, _)| stem.as_str()));

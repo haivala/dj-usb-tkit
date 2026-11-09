@@ -86,11 +86,11 @@ fn edb_background_color(conn: &rusqlite::Connection) -> Option<u8> {
 }
 
 /// Why a color can't be set, if it can't.
-fn background_color_refusal(has_a_place: bool, writable: bool) -> Option<String> {
+fn background_color_refusal(has_a_place: bool, writable: bool) -> Option<Text> {
     if !has_a_place {
-        Some(tr::usb_background_color_no_place().render())
+        Some(tr::usb_background_color_no_place())
     } else if !writable {
-        Some(tr::usb_background_color_read_only().render())
+        Some(tr::usb_background_color_read_only())
     } else {
         None
     }
@@ -118,12 +118,16 @@ fn read_background_colors(
     );
     UsbBackgroundColorData {
         chips: background_color_chips(pdb_color, edb_color),
-        note_text: background_color_note(pdb_color, edb_color, reason.as_deref()),
+        note_text: background_color_note(
+            pdb_color,
+            edb_color,
+            reason.as_ref().map(Text::render).as_deref(),
+        ),
         status_text: String::new(),
         pdb_color,
         edb_color,
         writable: reason.is_none(),
-        reason,
+        reason: reason.as_ref().map(Text::render),
         updated: false,
         warnings: Vec::new(),
     }
@@ -149,7 +153,7 @@ impl BackendService {
         req: SetUsbBackgroundColorRequest,
     ) -> BackendResult<UsbBackgroundColorData> {
         if req.color > MAX_BACKGROUND_COLOR {
-            return Err(BackendError::Validation(format!(
+            return Err(BackendError::Internal(format!(
                 "background color {} is out of range 0..={MAX_BACKGROUND_COLOR}",
                 req.color
             )));
@@ -158,14 +162,20 @@ impl BackendService {
         let mut warnings = Vec::<WarningEntry>::new();
         let mut pdb = StagedPdb::load(&usb_root)?;
         let before = read_background_colors(&usb_root, &pdb.bytes, &mut warnings);
-        if let Some(reason) = before.reason {
-            return Err(BackendError::Validation(reason));
+        if !before.writable {
+            return Err(BackendError::Validation(
+                background_color_refusal(
+                    before.pdb_color.is_some() || before.edb_color.is_some(),
+                    false,
+                )
+                .unwrap_or_else(tr::usb_background_color_read_only),
+            ));
         }
         // The read above only looks; this one writes, so a read-only mount is
         // caught here instead of failing halfway through with its own error.
         if !crate::service::usb_utils::can_write_file_at(&usb_root) {
             return Err(BackendError::Validation(
-                tr::usb_background_color_read_only().render(),
+                tr::usb_background_color_read_only(),
             ));
         }
         let holds = |color: Option<u8>| color.is_none_or(|color| color == req.color);
@@ -202,9 +212,8 @@ impl BackendService {
             })?;
         }
         if before.edb_color.is_some() {
-            let conn = open_edb_rw(&usb_root, &mut warnings).ok_or_else(|| {
-                BackendError::Validation("unable to open the USB's eDB".to_string())
-            })?;
+            let conn = open_edb_rw(&usb_root, &mut warnings)
+                .ok_or_else(|| BackendError::Validation(tr::usb_background_color_error_no_edb()))?;
             conn.execute(
                 "UPDATE property SET backGroundColorType = ?1",
                 params![req.color],
@@ -246,11 +255,13 @@ mod text_tests {
         assert!(
             background_color_refusal(false, true)
                 .unwrap()
+                .render_english()
                 .contains("no place")
         );
         assert!(
             background_color_refusal(true, false)
                 .unwrap()
+                .render_english()
                 .contains("read-only")
         );
     }

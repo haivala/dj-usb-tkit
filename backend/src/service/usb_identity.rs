@@ -22,6 +22,8 @@ use std::sync::Mutex;
 use serde::{Deserialize, Serialize};
 
 use crate::audio_format::UsbAudioFormat;
+use crate::error::{BackendError, BackendResult};
+use crate::i18n::{Text, tr};
 
 const MARKER_DIR: &str = ".dj-usb-tkit";
 const MARKER_FILE: &str = "drive.json";
@@ -104,13 +106,17 @@ impl UsbAudioFormats {
     }
 
     /// A list the user sent: every format exactly once, at least one ticked.
-    pub(crate) fn from_request(items: &[(String, bool)]) -> Result<Self, String> {
+    /// Only "none ticked" is the user's; the others mean the UI sent a broken list.
+    pub(crate) fn from_request(items: &[(String, bool)]) -> BackendResult<Self> {
         let mut entries: Vec<(UsbAudioFormat, bool)> = Vec::new();
         for (id, allowed) in items {
-            let format =
-                UsbAudioFormat::parse(id).ok_or_else(|| format!("Unknown audio format: {id}"))?;
+            let format = UsbAudioFormat::parse(id)
+                .ok_or_else(|| BackendError::Internal(format!("Unknown audio format: {id}")))?;
             if entries.iter().any(|&(entry, _)| entry == format) {
-                return Err(format!("{} is listed twice", format.label()));
+                return Err(BackendError::Internal(format!(
+                    "{} is listed twice",
+                    format.label()
+                )));
             }
             entries.push((format, *allowed));
         }
@@ -118,10 +124,15 @@ impl UsbAudioFormats {
             .into_iter()
             .find(|format| !entries.iter().any(|&(entry, _)| entry == *format))
         {
-            return Err(format!("{} is missing from the list", missing.label()));
+            return Err(BackendError::Internal(format!(
+                "{} is missing from the list",
+                missing.label()
+            )));
         }
         if !entries.iter().any(|&(_, allowed)| allowed) {
-            return Err("At least one format stays ticked".to_string());
+            return Err(BackendError::Validation(
+                tr::usb_audio_formats_error_none_ticked(),
+            ));
         }
         Ok(Self(entries))
     }
@@ -197,15 +208,13 @@ pub(crate) fn read_drive_name(root: &Path) -> Option<String> {
 }
 
 /// Validate and normalize a user-supplied drive name (trim, non-empty, length cap).
-pub(crate) fn validate_name(name: &str) -> Result<String, String> {
+pub(crate) fn validate_name(name: &str) -> Result<String, Text> {
     let trimmed = name.trim();
     if trimmed.is_empty() {
-        return Err("Enter a name for this drive.".to_string());
+        return Err(tr::usb_error_name_empty());
     }
     if trimmed.chars().count() > MAX_NAME_LEN {
-        return Err(format!(
-            "Drive name must be {MAX_NAME_LEN} characters or fewer"
-        ));
+        return Err(tr::usb_error_name_too_long(MAX_NAME_LEN));
     }
     Ok(trimmed.to_string())
 }
@@ -214,7 +223,8 @@ pub(crate) fn validate_name(name: &str) -> Result<String, String> {
 /// if needed. Caller is responsible for uniqueness checks against other
 /// known drives (see `usb_utils::find_registered_drive`).
 pub(crate) fn write_drive_name(root: &Path, name: &str) -> std::io::Result<()> {
-    let validated = validate_name(name).map_err(std::io::Error::other)?;
+    let validated =
+        validate_name(name).map_err(|text| std::io::Error::other(text.render_english()))?;
     let mut marker = read_marker(root).unwrap_or_default();
     marker.name = validated;
     write_marker(root, &marker)
@@ -578,8 +588,10 @@ mod tests {
         };
         assert!(UsbAudioFormats::from_request(&all(true)).is_ok());
         assert_eq!(
-            UsbAudioFormats::from_request(&all(false)).unwrap_err(),
-            "At least one format stays ticked"
+            UsbAudioFormats::from_request(&all(false))
+                .unwrap_err()
+                .to_string(),
+            "validation error: At least one format stays ticked"
         );
         let mut twice = all(true);
         twice[1].0 = "flac".to_string();

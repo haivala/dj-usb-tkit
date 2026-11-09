@@ -1,6 +1,7 @@
 //! Writing the export eDB: playlists, content rows and cues.
 
 use super::*;
+use crate::i18n::tr;
 
 pub fn write_edb_playlist(
     usb_root: &Path,
@@ -13,9 +14,8 @@ pub fn write_edb_playlist(
         .join(USB_VENDOR_DB_DIR)
         .join("exportLibrary.db");
     if !db_path.is_file() {
-        return Err(BackendError::NotFound(format!(
-            "eDB not found at {}",
-            db_path.display()
+        return Err(BackendError::NotFound(tr::export_error_edb_missing(
+            db_path.display(),
         )));
     }
 

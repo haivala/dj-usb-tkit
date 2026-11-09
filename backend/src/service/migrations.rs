@@ -119,9 +119,7 @@ impl BackendService {
     /// from stale data.
     pub(crate) fn ensure_no_data_migration(&self) -> BackendResult<()> {
         if self.data_migration_running.load(Ordering::SeqCst) {
-            return Err(BackendError::Validation(
-                "Finishing a data upgrade, try again in a moment".to_string(),
-            ));
+            return Err(BackendError::Validation(tr::error_data_upgrade_running()));
         }
         Ok(())
     }
@@ -470,14 +468,14 @@ mod tests {
         // The commands that write the analysis cache.
         let analysis = svc.analyze_new_tracks(crate::models::AnalyzeNewTracksRequest::default());
         assert!(
-            matches!(&analysis, Err(BackendError::Validation(m)) if m.contains("data upgrade")),
+            matches!(&analysis, Err(BackendError::Validation(m)) if m.render_english().contains("data upgrade")),
             "{analysis:?}"
         );
         let edits: crate::models::SaveTrackAnalysisEditsRequest =
             serde_json::from_value(serde_json::json!({ "trackId": "t1" })).unwrap();
         let saved = svc.save_track_analysis_edits(edits);
         assert!(
-            matches!(&saved, Err(BackendError::Validation(m)) if m.contains("data upgrade")),
+            matches!(&saved, Err(BackendError::Validation(m)) if m.render_english().contains("data upgrade")),
             "{saved:?}"
         );
     }

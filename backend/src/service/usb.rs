@@ -1048,9 +1048,9 @@ impl BackendService {
             && !claims_name
             && let Some(taken) = usb_utils::find_registered_drive(&conn, &name)?
         {
-            return Err(BackendError::Validation(format!(
-                "Drive name '{name}' is already used by another drive ('{}')",
-                taken.name
+            return Err(BackendError::Validation(tr::usb_error_name_taken(
+                &name,
+                &taken.name,
             )));
         }
 
@@ -1147,7 +1147,7 @@ impl BackendService {
         let edb_path = super::usb_staging::stage_edb(usb_root).ok();
         let sig = (
             StagedFileSig::of(&pdb_path)
-                .ok_or_else(|| BackendError::NotFound("staged PDB is missing".to_string()))?,
+                .ok_or_else(|| BackendError::Internal("staged PDB is missing".to_string()))?,
             edb_path.as_deref().and_then(StagedFileSig::of),
         );
         if let Ok(guard) = self.usb_track_sizes_cache.lock()
@@ -1665,7 +1665,7 @@ impl BackendService {
             }
         }
         if pdb_order.is_empty() && edb_order.is_empty() {
-            return Err(BackendError::Validation(
+            return Err(BackendError::Internal(
                 "reorder_usb_playlists: no playlist ids in orderedPlaylistIds".to_string(),
             ));
         }
@@ -1711,7 +1711,7 @@ impl BackendService {
         let edb_updated =
             crate::service::repair::write_edb_playlist_order(&usb_root, &edb_order, &mut warnings)?;
         if patched == 0 && edb_updated == 0 {
-            return Err(BackendError::Validation(
+            return Err(BackendError::Internal(
                 "reorder_usb_playlists: orderedPlaylistIds matched no playlist".to_string(),
             ));
         }
@@ -1770,7 +1770,7 @@ impl BackendService {
         let mut stage_started = std::time::Instant::now();
         let name = req.playlist_name.trim().to_string();
         if name.is_empty() {
-            return Err(BackendError::Validation(
+            return Err(BackendError::Internal(
                 "playlistName must not be empty".to_string(),
             ));
         }
@@ -1971,9 +1971,8 @@ impl BackendService {
         );
 
         if removed_edb == 0 && removed_pdb == 0 {
-            return Err(BackendError::NotFound(format!(
-                "USB playlist not found: {}",
-                name
+            return Err(BackendError::NotFound(tr::error_usb_playlist_not_found(
+                &name,
             )));
         }
 
@@ -2827,7 +2826,7 @@ impl BackendService {
         req: InspectUsbTrackRequest,
     ) -> BackendResult<InspectUsbTrackData> {
         let track_id = req.track_id.trim().parse::<u32>().map_err(|_| {
-            BackendError::Validation("trackId must be a numeric USB track id".to_string())
+            BackendError::Internal("trackId must be a numeric USB track id".to_string())
         })?;
         let usb_root = resolve_usb_root(req.usb_root.as_deref())?;
         let mut warnings = Vec::<WarningEntry>::new();
@@ -2905,8 +2904,8 @@ impl BackendService {
                     warnings,
                 })
             }
-            None => Err(BackendError::Validation(format!(
-                "trackId {track_id} not found on USB metadata sources"
+            None => Err(BackendError::Validation(tr::usb_error_track_not_found(
+                track_id,
             ))),
         }
     }
@@ -2942,7 +2941,7 @@ impl BackendService {
             .items
             .iter()
             .find(|playlist| playlist.id == req.id)
-            .ok_or_else(|| BackendError::NotFound(format!("USB playlist not found: {}", req.id)))?;
+            .ok_or_else(|| BackendError::NotFound(tr::error_usb_playlist_not_found(&req.id)))?;
         let mut data = paginate_usb_tracks(
             "fetch_usb_playlist_tracks",
             &req.id,
@@ -3035,7 +3034,7 @@ impl BackendService {
             .items
             .iter()
             .find(|history| history.id == req.id)
-            .ok_or_else(|| BackendError::NotFound(format!("USB history not found: {}", req.id)))?;
+            .ok_or_else(|| BackendError::NotFound(tr::error_usb_history_not_found(&req.id)))?;
         let mut data = paginate_usb_tracks(
             "fetch_usb_history_tracks",
             &req.id,
@@ -3073,7 +3072,7 @@ impl BackendService {
                 .items
                 .iter()
                 .find(|history| history.id == id)
-                .ok_or_else(|| BackendError::NotFound(format!("USB history not found: {id}")))?;
+                .ok_or_else(|| BackendError::NotFound(tr::error_usb_history_not_found(id)))?;
             Ok(selection_duration(&history.tracks, track_ids, |_| true))
         } else {
             let resolved = self.usb_playlists_resolved(&usb_root)?;
@@ -3081,7 +3080,7 @@ impl BackendService {
                 .items
                 .iter()
                 .find(|playlist| playlist.id == id)
-                .ok_or_else(|| BackendError::NotFound(format!("USB playlist not found: {id}")))?;
+                .ok_or_else(|| BackendError::NotFound(tr::error_usb_playlist_not_found(id)))?;
             Ok(selection_duration(&playlist.tracks, track_ids, |_| true))
         }
     }
@@ -4427,7 +4426,7 @@ mod tests {
             })
             .expect_err("empty name must be rejected");
         assert!(
-            matches!(err, crate::error::BackendError::Validation(message) if message == "Enter a name for this drive.")
+            matches!(err, crate::error::BackendError::Validation(message) if message.render_english() == "Enter a name for this drive.")
         );
     }
 
@@ -4849,7 +4848,7 @@ mod tests {
                 ..Default::default()
             }))
             .unwrap_err();
-        assert!(matches!(err, crate::error::BackendError::Validation(_)));
+        assert!(matches!(err, crate::error::BackendError::Internal(_)));
 
         // Query filters server-side.
         let filtered = service
@@ -5453,7 +5452,7 @@ mod tests {
                 ordered_playlist_ids: vec!["usb-pl-name-only".to_string()],
             })
             .unwrap_err();
-        assert!(matches!(err, crate::error::BackendError::Validation(_)));
+        assert!(matches!(err, crate::error::BackendError::Internal(_)));
     }
 
     #[test]
@@ -5545,7 +5544,7 @@ mod tests {
                 playlist_name: "   ".to_string(),
             })
             .unwrap_err();
-        assert!(matches!(err, crate::error::BackendError::Validation(_)));
+        assert!(matches!(err, crate::error::BackendError::Internal(_)));
     }
 
     #[test]
@@ -5619,7 +5618,7 @@ mod tests {
                 artist: None,
             })
             .unwrap_err();
-        assert!(matches!(err, crate::error::BackendError::Validation(_)));
+        assert!(matches!(err, crate::error::BackendError::Internal(_)));
     }
 
     #[test]

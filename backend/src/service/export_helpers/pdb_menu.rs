@@ -23,7 +23,7 @@ fn load_live_table_rows(
         return Ok((Vec::new(), Vec::new()));
     };
     let chain16 = collect_chain_pages(bytes, page_size, first16, last16).ok_or_else(|| {
-        BackendError::Validation("PDB columns patch failed: invalid t16 chain".to_string())
+        BackendError::Internal("PDB columns patch failed: invalid t16 chain".to_string())
     })?;
     if chain16.len() <= 1 {
         return Ok((Vec::new(), Vec::new()));
@@ -86,14 +86,14 @@ fn rewrite_pdb_t16_rows(
                 let _ = page_rows.pop();
             }
             if page_rows.is_empty() {
-                return Err(BackendError::Validation(format!(
+                return Err(BackendError::Internal(format!(
                     "PDB columns patch failed: unable to fit any rows on t16 page {}",
                     page_idx
                 )));
             }
         }
         if !rewrite_variable_page_rows_in_place(bytes, page_idx, &page_rows, page_size) {
-            return Err(BackendError::Validation(format!(
+            return Err(BackendError::Internal(format!(
                 "PDB columns patch failed: could not rewrite t16 page {}",
                 page_idx
             )));
@@ -101,7 +101,7 @@ fn rewrite_pdb_t16_rows(
         cursor += page_rows.len();
     }
     if cursor < rows.len() {
-        return Err(BackendError::Validation(
+        return Err(BackendError::Internal(
             "PDB columns patch failed: t16 rows exceeded existing page capacity".to_string(),
         ));
     }
@@ -292,7 +292,7 @@ pub fn patch_pdb_columns_menu_set_by_kind(
     let mut bytes = std::fs::read(&pdb_path)?;
     let page_size = 4096usize;
     if bytes.len() < page_size || bytes.len() % page_size != 0 {
-        return Err(BackendError::Validation(
+        return Err(BackendError::Internal(
             "PDB columns set patch failed: invalid page alignment".to_string(),
         ));
     }
@@ -334,7 +334,7 @@ pub fn patch_pdb_columns_menu_set_by_kind(
             encode_pdb_t16_row(id, *kind, name)
         };
         if row.is_empty() {
-            return Err(BackendError::Validation(format!(
+            return Err(BackendError::Internal(format!(
                 "PDB columns set patch failed: could not encode kind {kind}"
             )));
         }
@@ -420,7 +420,7 @@ pub fn patch_pdb_t17_category_snapshot(
         return Ok(false);
     };
     let chain = collect_chain_pages(&before, page_size, first, last).ok_or_else(|| {
-        BackendError::Validation("PDB t17 category patch failed: invalid chain".to_string())
+        BackendError::Internal("PDB t17 category patch failed: invalid chain".to_string())
     })?;
     if chain.len() <= 1 {
         return Ok(false);
@@ -434,7 +434,7 @@ pub fn patch_pdb_t17_category_snapshot(
     rewrite_pdb_t16_rows(&mut bytes, page_size, first_page, &row_vecs)?;
     for page_idx in later_pages {
         if !rewrite_variable_page_rows_in_place(&mut bytes, *page_idx, &[], page_size) {
-            return Err(BackendError::Validation(format!(
+            return Err(BackendError::Internal(format!(
                 "PDB t17 category patch failed: could not empty page {page_idx}"
             )));
         }
@@ -616,7 +616,7 @@ mod tests {
         std::fs::write(db_dir.join("export.pdb"), vec![0u8; 100]).unwrap();
         let err =
             patch_pdb_columns_menu_set_by_kind(dir.path(), &[(1, "X".to_string())]).unwrap_err();
-        assert!(matches!(err, BackendError::Validation(_)));
+        assert!(matches!(err, BackendError::Internal(_)));
     }
 
     // --- encode_pdb_t17_cat_row / patch_pdb_t17_category_snapshot ---

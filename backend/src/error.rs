@@ -6,19 +6,15 @@ use crate::i18n::Text;
 
 #[derive(Debug, Error)]
 pub enum BackendError {
-    #[error("validation error: {0}")]
-    Validation(String),
-    /// A validation error from the text catalog: shown in the current language, logged in
-    /// English. Piece 11 of the text-catalog plan moves the `Validation(String)` sites here.
+    /// Something the user can act on, from the text catalog: shown in the current language,
+    /// logged in English. A bug's error is `Internal`, in English.
     #[error("validation error: {}", .0.render_english())]
-    ValidationText(Text),
-    #[error("validation error: {0}")]
-    ValidationWithDetails(String, Value),
-    #[error("not found: {0}")]
-    NotFound(String),
-    /// A not-found error from the text catalog; see `ValidationText`.
+    Validation(Text),
+    #[error("validation error: {}", .0.render_english())]
+    ValidationWithDetails(Text, Value),
+    /// Something the user asked for that isn't there; see `Validation`.
     #[error("not found: {}", .0.render_english())]
-    NotFoundText(Text),
+    NotFound(Text),
     #[error("io error: {0}")]
     Io(#[from] std::io::Error),
     #[error("database error: {0}")]
@@ -92,16 +88,12 @@ impl ErrorPayload {
 impl From<BackendError> for ErrorPayload {
     fn from(value: BackendError) -> Self {
         match value {
-            BackendError::Validation(msg) => Self::new(ErrorCode::ValidationError, msg),
-            BackendError::ValidationText(text) => {
-                Self::from_text(ErrorCode::ValidationError, &text)
-            }
-            BackendError::ValidationWithDetails(msg, details) => Self {
+            BackendError::Validation(text) => Self::from_text(ErrorCode::ValidationError, &text),
+            BackendError::ValidationWithDetails(text, details) => Self {
                 details: Some(details),
-                ..Self::new(ErrorCode::ValidationError, msg)
+                ..Self::from_text(ErrorCode::ValidationError, &text)
             },
-            BackendError::NotFound(msg) => Self::new(ErrorCode::NotFound, msg),
-            BackendError::NotFoundText(text) => Self::from_text(ErrorCode::NotFound, &text),
+            BackendError::NotFound(text) => Self::from_text(ErrorCode::NotFound, &text),
             BackendError::Io(err) => Self::new(ErrorCode::IoError, err.to_string()),
             BackendError::Db(_err) => {
                 // Release builds keep the SQLite detail out of the returned
@@ -139,26 +131,31 @@ mod tests {
 
     #[test]
     fn error_payload_from_validation_error() {
-        let payload: ErrorPayload = BackendError::Validation("bad input".to_string()).into();
+        let payload: ErrorPayload =
+            BackendError::Validation(crate::i18n::tr::playlist_error_name_empty()).into();
         assert!(matches!(payload.code, ErrorCode::ValidationError));
-        assert_eq!(payload.message, "bad input");
+        assert_eq!(payload.message, "playlist name must not be empty");
         assert!(payload.details.is_none());
     }
 
     #[test]
     fn error_payload_from_validation_with_details() {
         let details = serde_json::json!({"field": "x"});
-        let payload: ErrorPayload =
-            BackendError::ValidationWithDetails("bad input".to_string(), details.clone()).into();
+        let payload: ErrorPayload = BackendError::ValidationWithDetails(
+            crate::i18n::tr::playlist_error_name_empty(),
+            details.clone(),
+        )
+        .into();
         assert!(matches!(payload.code, ErrorCode::ValidationError));
         assert_eq!(payload.details, Some(details));
     }
 
     #[test]
     fn error_payload_from_not_found() {
-        let payload: ErrorPayload = BackendError::NotFound("missing".to_string()).into();
+        let payload: ErrorPayload =
+            BackendError::NotFound(crate::i18n::tr::error_track_not_found("t1")).into();
         assert!(matches!(payload.code, ErrorCode::NotFound));
-        assert_eq!(payload.message, "missing");
+        assert_eq!(payload.message, "track not found: t1");
     }
 
     #[test]
@@ -186,12 +183,12 @@ mod tests {
     #[test]
     fn backend_error_display_messages() {
         assert_eq!(
-            BackendError::Validation("x".to_string()).to_string(),
-            "validation error: x"
+            BackendError::Validation(crate::i18n::tr::playlist_error_name_empty()).to_string(),
+            "validation error: playlist name must not be empty"
         );
         assert_eq!(
-            BackendError::NotFound("y".to_string()).to_string(),
-            "not found: y"
+            BackendError::NotFound(crate::i18n::tr::error_track_not_found("y")).to_string(),
+            "not found: track not found: y"
         );
         assert_eq!(
             BackendError::Internal("z".to_string()).to_string(),

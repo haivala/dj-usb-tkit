@@ -332,7 +332,7 @@ pub fn validate_pdb_page_conventions(bytes: &[u8]) -> Vec<PdbPageConventionMisma
 pub fn pdb_page_size(bytes: &[u8]) -> BackendResult<usize> {
     crate::utils::read_u32_le_at(bytes, 4)
         .map(|v| v as usize)
-        .ok_or_else(|| BackendError::Validation("PDB too small to read page size".into()))
+        .ok_or_else(|| BackendError::Internal("PDB too small to read page size".into()))
 }
 
 /// Collect the `seq` (offset `0x10`) value from every non-sentinel,

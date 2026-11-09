@@ -128,7 +128,7 @@ pub(crate) fn load_export_log(usb_root: &Path) -> BackendResult<Option<UsbExport
         BackendError::Internal(format!("parse USB export log {}: {err}", path.display()))
     })?;
     if parsed.schema_version != EXPORT_LOG_SCHEMA_VERSION {
-        return Err(BackendError::Validation(format!(
+        return Err(BackendError::Internal(format!(
             "unsupported USB export log schema {} at {}",
             parsed.schema_version,
             path.display()

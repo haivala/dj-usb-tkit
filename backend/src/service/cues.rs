@@ -298,11 +298,7 @@ pub(super) fn pdb_track_by_media_path<'a>(
 /// doesn't list: the edit would leave them disagreeing, so it is refused, and
 /// the user is pointed at the repair that adds the missing rows.
 pub(super) fn track_not_in_usb_database(media_path: &str) -> BackendError {
-    BackendError::NotFound(format!(
-        "this track is missing from one of the USB's two databases, so it can't be edited on \
-         the USB ({}). Preview Fixes shows what can be repaired.",
-        media_path.trim(),
-    ))
+    BackendError::NotFound(tr::cues_error_not_in_usb_database(media_path.trim()))
 }
 
 /// Stage the device `export.pdb` and build its bytes with the t00 tempo and/or
@@ -660,7 +656,9 @@ pub fn key_option_groups(notation: KeyNotation) -> Vec<KeyOptionGroup> {
 fn normalize_key_input(key: &str) -> BackendResult<String> {
     let trimmed = key.trim();
     if !KEY_OPTIONS.contains(&trimmed) {
-        return Err(BackendError::Validation(format!("unknown key: {trimmed}")));
+        return Err(BackendError::Validation(tr::cues_error_unknown_key(
+            trimmed,
+        )));
     }
     Ok(trimmed.to_string())
 }
@@ -686,7 +684,7 @@ fn normalize_cues(
     duration_ms: Option<u64>,
 ) -> BackendResult<Vec<NormalizedCue>> {
     if inputs.iter().any(|c| c.playback_start && c.memory) {
-        return Err(BackendError::Validation(
+        return Err(BackendError::Internal(
             "a cue can't be both a memory cue and the playback start".to_string(),
         ));
     }
@@ -695,12 +693,12 @@ fn normalize_cues(
         .filter(|c| !c.playback_start && !c.memory)
         .count();
     if hot_count > MAX_HOT_CUES as usize {
-        return Err(BackendError::Validation(format!(
-            "at most {MAX_HOT_CUES} cue points are allowed"
+        return Err(BackendError::Validation(tr::cues_error_too_many(
+            MAX_HOT_CUES,
         )));
     }
     if inputs.iter().filter(|c| c.playback_start).count() > 1 {
-        return Err(BackendError::Validation(
+        return Err(BackendError::Internal(
             "at most one playback-start cue is allowed".to_string(),
         ));
     }
@@ -730,9 +728,7 @@ fn normalize_cues(
         let color_id = match input.color_id {
             Some(id) if is_valid_color_id(id) => Some(id),
             Some(id) => {
-                return Err(BackendError::Validation(format!(
-                    "unknown cue colorId {id}"
-                )));
+                return Err(BackendError::Internal(format!("unknown cue colorId {id}")));
             }
             None if input.memory => None,
             None => Some(DEFAULT_HOTCUE_COLOR_ID),
@@ -937,7 +933,7 @@ impl BackendService {
     pub fn get_track_detail(&self, req: GetTrackDetailRequest) -> BackendResult<TrackDetail> {
         let track_id = req.track_id.trim();
         if track_id.is_empty() {
-            return Err(BackendError::Validation("trackId is required".to_string()));
+            return Err(BackendError::Internal("trackId is required".to_string()));
         }
         let conn = self.db.connect()?;
 
@@ -945,7 +941,7 @@ impl BackendService {
             .prepare(&format!("SELECT {TRACK_COLS} FROM tracks WHERE id = ?1"))?
             .query_row(params![track_id], |row| row_to_track(row, true))
             .optional()?
-            .ok_or_else(|| BackendError::NotFound(format!("track not found: {track_id}")))?;
+            .ok_or_else(|| BackendError::NotFound(tr::error_track_not_found(track_id)))?;
         apply_frontend_track_fields(&conn, std::slice::from_mut(&mut track))?;
 
         let first_beat_ms: Option<u32> = conn
@@ -986,7 +982,7 @@ impl BackendService {
         self.ensure_no_data_migration()?;
         let track_id = req.track_id.trim().to_string();
         if track_id.is_empty() {
-            return Err(BackendError::Validation("trackId is required".to_string()));
+            return Err(BackendError::Internal("trackId is required".to_string()));
         }
 
         let mut conn = self.db.connect()?;
@@ -998,14 +994,14 @@ impl BackendService {
                 |row| row.get::<_, Option<i64>>(0),
             )
             .optional()?
-            .ok_or_else(|| BackendError::NotFound(format!("track not found: {track_id}")))?
+            .ok_or_else(|| BackendError::NotFound(tr::error_track_not_found(&track_id)))?
             .map(|v| v.max(0) as u64);
 
         if let Some(first_beat_ms) = req.first_beat_ms
             && let Some(dur) = duration_ms.filter(|d| *d > 0)
             && u64::from(first_beat_ms) >= dur
         {
-            return Err(BackendError::Validation(
+            return Err(BackendError::Internal(
                 "firstBeatMs must be less than the track duration".to_string(),
             ));
         }
@@ -1013,9 +1009,7 @@ impl BackendService {
         if let Some(bpm) = req.bpm
             && !(bpm > 0.0 && bpm <= 999.0)
         {
-            return Err(BackendError::Validation(
-                "bpm must be greater than 0 and at most 999".to_string(),
-            ));
+            return Err(BackendError::Validation(tr::cues_error_bpm_range()));
         }
 
         let key = req.key.as_deref().map(normalize_key_input).transpose()?;
@@ -1075,7 +1069,7 @@ impl BackendService {
             key_display_fields(key.as_deref(), key_notation_setting(&conn)?);
         let track = super::library::track_rows(&conn, std::slice::from_ref(&track_id))?
             .pop()
-            .ok_or_else(|| BackendError::NotFound(format!("track not found: {track_id}")))?;
+            .ok_or_else(|| BackendError::NotFound(tr::error_track_not_found(&track_id)))?;
         let status_text = if anlz_regenerated {
             tr::cues_saved(cues.len()).render()
         } else {
@@ -1107,22 +1101,18 @@ impl BackendService {
         let usb_root = resolve_usb_root(Some(&req.usb_root))?;
         let raw = req.usb_analysis_path_raw.trim();
         if raw.is_empty() {
-            return Err(BackendError::Validation(
+            return Err(BackendError::Internal(
                 "usbAnalysisPathRaw is required".to_string(),
             ));
         }
         let dat_abs = resolve_usb_side_path(&usb_root, raw)
-            .ok_or_else(|| BackendError::NotFound(format!("USB analysis path not found: {raw}")))?;
+            .ok_or_else(|| BackendError::NotFound(tr::error_usb_analysis_path_not_found(raw)))?;
         let dat_path = dat_abs.as_path();
         let bytes = std::fs::read(dat_path.with_extension("EXT"))
             .or_else(|_| std::fs::read(dat_path))
-            .map_err(|_| {
-                BackendError::NotFound(format!("USB analysis bundle not readable: {raw}"))
-            })?;
+            .map_err(|_| BackendError::NotFound(tr::error_usb_analysis_unreadable(raw)))?;
         if bytes.is_empty() {
-            return Err(BackendError::NotFound(format!(
-                "USB analysis bundle is empty: {raw}"
-            )));
+            return Err(BackendError::NotFound(tr::error_usb_analysis_empty(raw)));
         }
 
         // Genre and rating come from the PDB row; a track the PDB lacks still
@@ -1200,18 +1190,16 @@ impl BackendService {
 
         let raw = req.usb_analysis_path_raw.trim();
         if raw.is_empty() {
-            return Err(BackendError::Validation(
+            return Err(BackendError::Internal(
                 "usbAnalysisPathRaw is required".to_string(),
             ));
         }
         // 2. Absolute ANLZ path, must exist.
         let dat_abs = resolve_usb_side_path(&usb_root, raw)
-            .ok_or_else(|| BackendError::NotFound(format!("USB analysis path not found: {raw}")))?;
+            .ok_or_else(|| BackendError::NotFound(tr::error_usb_analysis_path_not_found(raw)))?;
         let dat_path = dat_abs.as_path();
         if !dat_path.is_file() {
-            return Err(BackendError::NotFound(format!(
-                "USB analysis bundle missing: {raw}"
-            )));
+            return Err(BackendError::NotFound(tr::error_usb_analysis_missing(raw)));
         }
 
         // 3. Validate + normalise the incoming edits.
@@ -1219,16 +1207,14 @@ impl BackendService {
             && let Some(dur) = req.duration_ms.filter(|d| *d > 0)
             && u64::from(first_beat_ms) >= dur
         {
-            return Err(BackendError::Validation(
+            return Err(BackendError::Internal(
                 "firstBeatMs must be less than the track duration".to_string(),
             ));
         }
         if let Some(bpm) = req.bpm
             && !(bpm > 0.0 && bpm <= 999.0)
         {
-            return Err(BackendError::Validation(
-                "bpm must be greater than 0 and at most 999".to_string(),
-            ));
+            return Err(BackendError::Validation(tr::cues_error_bpm_range()));
         }
         let key = req.key.as_deref().map(normalize_key_input).transpose()?;
         let normalized = match req.cues.as_deref() {
@@ -1239,11 +1225,8 @@ impl BackendService {
         // 4. Open the device eDB and locate the track *before* writing
         //    anything, so a missing content row blocks cleanly.
         let mut warnings: Vec<WarningEntry> = Vec::new();
-        let mut edb_conn = open_edb_rw(&usb_root, &mut warnings).ok_or_else(|| {
-            BackendError::NotFound(
-                "USB library database (exportLibrary.db) not found or unreadable".to_string(),
-            )
-        })?;
+        let mut edb_conn = open_edb_rw(&usb_root, &mut warnings)
+            .ok_or_else(|| BackendError::NotFound(tr::error_usb_edb_unreadable()))?;
         let content_id = find_content_id_by_path(&edb_conn, &req.usb_media_path_raw)?
             .ok_or_else(|| track_not_in_usb_database(&req.usb_media_path_raw))?;
 

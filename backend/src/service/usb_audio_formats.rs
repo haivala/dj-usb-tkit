@@ -78,10 +78,10 @@ impl BackendService {
             .iter()
             .map(|item| (item.format.clone(), item.allowed))
             .collect();
-        let formats = UsbAudioFormats::from_request(&items).map_err(BackendError::Validation)?;
+        let formats = UsbAudioFormats::from_request(&items)?;
         if !can_write_file_at(&usb_root) {
             return Err(BackendError::Validation(
-                "The USB is read-only, so its USB audio formats can't be changed".to_string(),
+                tr::usb_audio_formats_error_read_only(),
             ));
         }
         write_usb_audio_formats(&usb_root, &formats).map_err(|err| {
@@ -160,7 +160,7 @@ mod tests {
         }
         match result.unwrap_err() {
             BackendError::Validation(message) => assert_eq!(
-                message,
+                message.render_english(),
                 "The USB is read-only, so its USB audio formats can't be changed"
             ),
             other => panic!("unexpected error: {other:?}"),

@@ -33,7 +33,7 @@ fn verify_optional_export_asset_exists(
     if let Some(path) = path.filter(|v| !v.trim().is_empty()) {
         let abs = usb_root.join(path.trim_start_matches('/'));
         if !abs.is_file() {
-            return Err(BackendError::Validation(format!(
+            return Err(BackendError::Internal(format!(
                 "export verification failed: {label} file missing on disk: {}",
                 abs.display()
             )));

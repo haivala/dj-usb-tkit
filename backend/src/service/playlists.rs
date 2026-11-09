@@ -279,23 +279,14 @@ fn tracks_added_status(
 /// An external playlist import that found none of its tracks: failing beats
 /// creating an empty playlist.
 pub(crate) fn no_importable_tracks_error(name: &str, listed: usize) -> BackendError {
-    let tracks = if listed == 1 {
-        format!("the only track in {name:?} could not be imported")
-    } else {
-        format!("none of the {listed} tracks in {name:?} could be imported")
-    };
-    BackendError::Validation(format!(
-        "{tracks}: files not found on this computer or not supported"
-    ))
+    BackendError::Validation(tr::playlist_import_error_nothing_imported(listed, name))
 }
 
 impl BackendService {
     pub fn create_playlist(&self, req: CreatePlaylistRequest) -> BackendResult<CreatePlaylistData> {
         let name = req.name.trim();
         if name.is_empty() {
-            return Err(BackendError::Validation(
-                "playlist name must not be empty".to_string(),
-            ));
+            return Err(BackendError::Validation(tr::playlist_error_name_empty()));
         }
 
         let conn = self.db.connect()?;
@@ -311,9 +302,7 @@ impl BackendService {
     pub fn rename_playlist(&self, req: RenamePlaylistRequest) -> BackendResult<RenamePlaylistData> {
         let name = req.name.trim();
         if name.is_empty() {
-            return Err(BackendError::Validation(
-                "playlist name must not be empty".to_string(),
-            ));
+            return Err(BackendError::Validation(tr::playlist_error_name_empty()));
         }
 
         ensure_playlist_exists(&self.db, &req.playlist_id)?;
@@ -369,7 +358,7 @@ impl BackendService {
             || requested.len() != existing.len()
             || !requested.iter().all(|id| existing.contains(*id))
         {
-            return Err(BackendError::Validation(
+            return Err(BackendError::Internal(
                 "playlist order must list every playlist exactly once".to_string(),
             ));
         }
@@ -594,7 +583,7 @@ impl BackendService {
         req: AddTracksToPlaylistRequest,
     ) -> BackendResult<AddTracksToPlaylistData> {
         if req.track_ids.is_empty() {
-            return Err(BackendError::Validation(
+            return Err(BackendError::Internal(
                 "trackIds must contain at least one id".to_string(),
             ));
         }
@@ -636,9 +625,7 @@ impl BackendService {
 
         for track_id in &req.track_ids {
             if !existing_track_ids.contains(track_id.as_str()) {
-                return Err(BackendError::NotFound(format!(
-                    "track not found: {track_id}"
-                )));
+                return Err(BackendError::NotFound(tr::error_track_not_found(track_id)));
             }
 
             if playlist_track_ids.contains(track_id.as_str()) {
@@ -1122,7 +1109,7 @@ impl BackendService {
         req: RemoveTracksFromPlaylistRequest,
     ) -> BackendResult<RemoveTracksFromPlaylistData> {
         if req.track_ids.is_empty() {
-            return Err(BackendError::Validation(
+            return Err(BackendError::Internal(
                 "trackIds must contain at least one id".to_string(),
             ));
         }
@@ -1206,7 +1193,7 @@ impl BackendService {
             req.ordered_track_ids.clone()
         } else if let Some(move_id) = req.move_track_id.as_deref() {
             if !row_by_track_id.contains_key(move_id) {
-                return Err(BackendError::Validation(
+                return Err(BackendError::Internal(
                     "moveTrackId is not in this playlist".to_string(),
                 ));
             }
@@ -1246,14 +1233,14 @@ impl BackendService {
             TrackSort::new(req.sort_by.as_deref(), req.sort_dir.as_deref()).apply(&mut tracks);
             tracks.into_iter().map(|t| t.id).collect()
         } else {
-            return Err(BackendError::Validation(
+            return Err(BackendError::Internal(
                 "reorder_playlist_tracks needs one of orderedTrackIds, moveTrackId, or sortBy"
                     .to_string(),
             ));
         };
 
         if ordered_track_ids.is_empty() {
-            return Err(BackendError::Validation(
+            return Err(BackendError::Internal(
                 "orderedTrackIds must contain at least one id".to_string(),
             ));
         }
@@ -1262,7 +1249,7 @@ impl BackendService {
         uniq_ordered_ids.sort();
         uniq_ordered_ids.dedup();
         if uniq_ordered_ids.len() != ordered_track_ids.len() {
-            return Err(BackendError::Validation(
+            return Err(BackendError::Internal(
                 "orderedTrackIds must not contain duplicates".to_string(),
             ));
         }
@@ -1272,7 +1259,7 @@ impl BackendService {
         let requested_track_ids: std::collections::HashSet<&String> =
             ordered_track_ids.iter().collect();
         if existing_track_ids != requested_track_ids {
-            return Err(BackendError::Validation(
+            return Err(BackendError::Internal(
                 "orderedTrackIds must match the playlist's current track set".to_string(),
             ));
         }
@@ -1321,7 +1308,7 @@ fn checked_playlist_ids(
         .cloned()
         .collect();
     if ids.is_empty() {
-        return Err(BackendError::Validation(
+        return Err(BackendError::Internal(
             "playlistIds must contain at least one id".to_string(),
         ));
     }
@@ -1344,8 +1331,8 @@ pub(super) fn ensure_playlist_exists_conn(
         .optional()?;
 
     if exists.is_none() {
-        return Err(BackendError::NotFound(format!(
-            "playlist not found: {playlist_id}"
+        return Err(BackendError::NotFound(tr::error_playlist_not_found(
+            playlist_id,
         )));
     }
 

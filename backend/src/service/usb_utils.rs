@@ -9,6 +9,7 @@ use walkdir::WalkDir;
 
 use crate::edb::open_edb_from_usb_root;
 use crate::error::{BackendError, BackendResult};
+use crate::i18n::tr;
 use crate::logging::{self, Level};
 use crate::models::WarningEntry;
 use crate::pdb_page;
@@ -311,9 +312,8 @@ pub(crate) fn resolve_usb_root(requested_root: Option<&str>) -> BackendResult<Pa
                     }
                 }
             }
-            return Err(BackendError::NotFound(format!(
-                "requested usbRoot does not exist: {}",
-                candidate.display()
+            return Err(BackendError::NotFound(tr::error_usb_root_missing(
+                candidate.display(),
             )));
         }
     }
@@ -325,7 +325,7 @@ pub(crate) fn resolve_usb_root(requested_root: Option<&str>) -> BackendResult<Pa
             if candidate.exists() {
                 return Ok(normalize_usb_root_path(canonicalize_or_self(candidate)));
             }
-            return Err(BackendError::NotFound(format!(
+            return Err(BackendError::Internal(format!(
                 "{USB_ROOT_ENV_KEY} is set but path does not exist: {}",
                 candidate.display()
             )));
@@ -345,7 +345,7 @@ pub(crate) fn resolve_usb_root(requested_root: Option<&str>) -> BackendResult<Pa
         }
     }
 
-    Err(BackendError::NotFound(
+    Err(BackendError::Internal(
         "USB root not found; set usbRoot in request, DJUSBTKIT_USB_ROOT, or create project USB directory".to_string(),
     ))
 }
@@ -1083,9 +1083,7 @@ pub fn initialize_usb(root: &Path) -> BackendResult<crate::models::InitializeUsb
         )));
     }
     if !can_write_file_at(root) {
-        return Err(BackendError::Validation(
-            "The USB is read-only, so it can't be initialized.".to_string(),
-        ));
+        return Err(BackendError::Validation(tr::usb_error_read_only_init()));
     }
 
     let dirs_to_create = [
@@ -2274,7 +2272,10 @@ mod diag_tests {
             }
             match initialize_usb(path).unwrap_err() {
                 BackendError::Validation(message) => {
-                    assert_eq!(message, "The USB is read-only, so it can't be initialized.");
+                    assert_eq!(
+                        message.render_english(),
+                        "The USB is read-only, so it can't be initialized."
+                    );
                 }
                 other => panic!("unexpected error: {other:?}"),
             }

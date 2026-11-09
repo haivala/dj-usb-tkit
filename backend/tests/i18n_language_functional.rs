@@ -13,9 +13,9 @@ use std::time::Duration;
 use backend::commands::BackendCommands;
 use backend::i18n::{self, ENGLISH, TEST_LANGUAGE, tr};
 use backend::models::{
-    AnalyzeNewTracksRequest, FetchUsbHistoriesRequest, InitializeUsbRequest,
-    RepairUsbDiagnosticsRequest, RunUsbDiagnosticsData, RunUsbDiagnosticsRequest,
-    ScanLibraryRequest, SetFrontendSettingRequest,
+    AnalyzeNewTracksRequest, CreatePlaylistRequest, DeletePlaylistRequest,
+    FetchUsbHistoriesRequest, InitializeUsbRequest, RepairUsbDiagnosticsRequest,
+    RunUsbDiagnosticsData, RunUsbDiagnosticsRequest, ScanLibraryRequest, SetFrontendSettingRequest,
 };
 use backend::service::analysis_event_payload;
 use tempfile::tempdir;
@@ -170,9 +170,30 @@ fn an_error_shows_the_current_language_and_logs_english() {
         "a refused language changes nothing"
     );
 
+    // A command's own errors: the user's input, and something that isn't there.
+    let empty_name = backend.create_playlist(CreatePlaylistRequest {
+        name: "  ".to_string(),
+    });
+    let empty_name = empty_name.error.expect("empty name refused").message;
+    assert!(is_test_language(&empty_name), "{empty_name:?}");
+    let missing = backend.delete_playlist(DeletePlaylistRequest {
+        playlist_id: "no-such-playlist".to_string(),
+    });
+    let missing = missing.error.expect("missing playlist").message;
+    assert!(is_test_language(&missing), "{missing:?}");
+    assert!(missing.contains("no-such-playlist"), "{missing:?}");
+
     let lines = logged.lock().unwrap();
     assert!(
         lines.contains(&(shown.clone(), "Unknown language: xx".to_string())),
+        "{lines:?}"
+    );
+    assert!(
+        lines.contains(&(empty_name, "playlist name must not be empty".to_string())),
+        "{lines:?}"
+    );
+    assert!(
+        lines.contains(&(missing, "playlist not found: no-such-playlist".to_string())),
         "{lines:?}"
     );
 }

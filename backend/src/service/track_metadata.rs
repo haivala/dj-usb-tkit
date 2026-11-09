@@ -59,11 +59,8 @@ fn validate_release_date(text: Option<&str>) -> BackendResult<ReleaseDateEdit> {
         return Ok(Some(None));
     }
     let max_year = u32::try_from(chrono::Local::now().year() + 1).unwrap_or(u32::MAX);
-    let invalid = || {
-        BackendError::Validation(format!(
-            "release date must be YYYY, YYYY-MM or YYYY-MM-DD, from {MIN_YEAR} to {max_year}"
-        ))
-    };
+    let invalid =
+        || BackendError::Validation(tr::track_details_error_release_date(MIN_YEAR, max_year));
     let number = |part: &str, max_len: usize| {
         (!part.is_empty() && part.len() <= max_len && part.bytes().all(|b| b.is_ascii_digit()))
             .then(|| part.parse::<u32>().ok())
@@ -111,7 +108,7 @@ fn usb_release_date(edit: &str, existing: Option<&str>) -> String {
 
 fn validate_rating(rating: Option<u8>) -> BackendResult<Option<u8>> {
     match rating {
-        Some(r) if r > MAX_RATING => Err(BackendError::Validation(format!(
+        Some(r) if r > MAX_RATING => Err(BackendError::Internal(format!(
             "rating must be 0 to {MAX_RATING}"
         ))),
         other => Ok(other),
@@ -459,7 +456,7 @@ impl BackendService {
         self.ensure_no_data_migration()?;
         let track_ids = distinct_trimmed(req.track_ids.iter().map(String::as_str));
         if track_ids.is_empty() {
-            return Err(BackendError::Validation("trackIds is required".to_string()));
+            return Err(BackendError::Internal("trackIds is required".to_string()));
         }
         let edits = MetadataEdits::from_request(
             req.genre.as_deref(),
@@ -472,9 +469,7 @@ impl BackendService {
             let mut exists = conn.prepare("SELECT 1 FROM tracks WHERE id = ?1")?;
             for track_id in &track_ids {
                 if !exists.exists(params![track_id])? {
-                    return Err(BackendError::NotFound(format!(
-                        "track not found: {track_id}"
-                    )));
+                    return Err(BackendError::NotFound(tr::error_track_not_found(track_id)));
                 }
             }
         }
@@ -596,7 +591,7 @@ impl BackendService {
             })
             .collect();
         if tracks.is_empty() {
-            return Err(BackendError::Validation(
+            return Err(BackendError::Internal(
                 "tracks with a usbMediaPathRaw are required".to_string(),
             ));
         }
@@ -607,11 +602,8 @@ impl BackendService {
         )?;
 
         let mut warnings: Vec<WarningEntry> = Vec::new();
-        let mut edb_conn = open_edb_rw(&usb_root, &mut warnings).ok_or_else(|| {
-            BackendError::NotFound(
-                "USB library database (exportLibrary.db) not found or unreadable".to_string(),
-            )
-        })?;
+        let mut edb_conn = open_edb_rw(&usb_root, &mut warnings)
+            .ok_or_else(|| BackendError::NotFound(tr::error_usb_edb_unreadable()))?;
         let content_ids = tracks
             .iter()
             .map(|t| {

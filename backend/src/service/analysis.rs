@@ -1,5 +1,6 @@
 //! Track analysis: BPM detection, key detection, waveform generation, cover art.
 
+use crate::i18n::tr;
 use crate::utils::counted;
 use std::collections::HashSet;
 use std::fs::File;
@@ -1048,9 +1049,8 @@ fn analyze_local_track_with_updates(
     } = bpm_params;
     let path = PathBuf::from(file_path);
     if !path.exists() {
-        return Err(BackendError::NotFound(format!(
-            "audio file not found: {}",
-            path.display()
+        return Err(BackendError::NotFound(tr::error_audio_file_not_found(
+            path.display(),
         )));
     }
 

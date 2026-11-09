@@ -7,6 +7,7 @@ use std::time::{Duration, Instant};
 use rodio::{OutputStream, Sink, Source};
 
 use crate::error::{BackendError, BackendResult};
+use crate::i18n::tr;
 use crate::metronome::{MetronomeSettings, MetronomeSource};
 use crate::models::PlaybackStatusData;
 
@@ -724,20 +725,20 @@ fn path_text(path: Option<&Path>) -> Option<String> {
 fn normalize_and_validate_path(path: &str) -> BackendResult<PathBuf> {
     let trimmed = path.trim();
     if trimmed.is_empty() {
-        return Err(BackendError::Validation(
+        return Err(BackendError::Internal(
             "path must be a non-empty filesystem path".to_string(),
         ));
     }
 
     let as_path = Path::new(trimmed);
     if !as_path.exists() {
-        return Err(BackendError::NotFound(format!(
-            "audio file not found: {trimmed}"
+        return Err(BackendError::NotFound(tr::error_audio_file_not_found(
+            trimmed,
         )));
     }
     if !as_path.is_file() {
-        return Err(BackendError::Validation(format!(
-            "audio path is not a file: {trimmed}"
+        return Err(BackendError::Validation(tr::error_audio_path_not_file(
+            trimmed,
         )));
     }
 
@@ -880,7 +881,7 @@ mod tests {
     #[test]
     fn normalize_and_validate_path_rejects_empty_path() {
         let err = normalize_and_validate_path("   ").unwrap_err();
-        assert!(matches!(err, BackendError::Validation(_)));
+        assert!(matches!(err, BackendError::Internal(_)));
     }
 
     #[test]

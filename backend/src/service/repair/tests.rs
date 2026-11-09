@@ -518,7 +518,7 @@ fn a_page_fix_that_fails_halfway_leaves_the_staged_pdb_unchanged() {
 
     let result: BackendResult<()> = pdb.patch(|bytes| {
         bytes[0x10] = 0xAA;
-        Err(BackendError::Validation("failed halfway".into()))
+        Err(BackendError::Internal("failed halfway".into()))
     });
 
     assert!(result.is_err());

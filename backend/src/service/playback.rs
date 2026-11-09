@@ -140,9 +140,7 @@ impl BackendService {
         };
 
         if library_path.is_none() && usb_path.is_none() {
-            return Err(BackendError::NotFound(
-                "track not found in Library or selected USB".to_string(),
-            ));
+            return Err(BackendError::NotFound(tr::error_track_not_found_anywhere()));
         }
 
         if let Some(path) = library_path.as_deref() {
@@ -215,9 +213,7 @@ impl BackendService {
             ));
         }
 
-        Err(BackendError::NotFound(
-            "track not found in Library or selected USB".to_string(),
-        ))
+        Err(BackendError::NotFound(tr::error_track_not_found_anywhere()))
     }
 
     pub fn stop_playback_native(

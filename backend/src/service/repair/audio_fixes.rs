@@ -479,7 +479,7 @@ pub(super) fn apply_separate_shared_analysis(
                 .map(|m| m.to_string())
                 .collect::<Vec<_>>()
                 .join(" | ");
-            return Err(BackendError::Validation(format!(
+            return Err(BackendError::Internal(format!(
                 "separating shared analysis blocked: page-header convention mismatches ({detail})"
             )));
         }
@@ -1057,7 +1057,7 @@ impl BackendService {
                 .map(|m| m.to_string())
                 .collect::<Vec<_>>()
                 .join(" | ");
-            return Err(BackendError::Validation(format!(
+            return Err(BackendError::Internal(format!(
                 "Relink blocked: page-header convention mismatches ({detail})"
             )));
         }

@@ -78,6 +78,15 @@ usb-progress-building-track-index = USB: Building track index
 usb-progress-resolving-history-entries = USB: Resolving history entries
 usb-progress-finalizing-history-import = USB: Finalizing history import
 
+# The rename-drive dialog. $max: the longest name allowed.
+usb-error-name-empty = Enter a name for this drive.
+usb-error-name-too-long = Drive name must be { $max } characters or fewer
+# $name: the name typed. $other: the drive that has it.
+usb-error-name-taken = Drive name '{ $name }' is already used by another drive ('{ $other }')
+usb-error-read-only-init = The USB is read-only, so it can't be initialized.
+# $id: the track's id in the USB's databases.
+usb-error-track-not-found = track { $id } not found on the USB
+
 ## usb-playlists
 
 # The USB Playlists panel's totals. $playlists: the stick's playlists. $tracks: their tracks together.
@@ -135,6 +144,13 @@ usb-player-menu-unchanged = Player menu unchanged
 # A menu item the databases give no name. $kind: its kind number.
 usb-player-menu-unnamed = Menu { $kind }
 
+usb-player-menu-error-no-edb = unable to open the USB's eDB for the player menu
+usb-player-menu-error-tables = eDB missing menuItem/category tables
+usb-player-menu-error-no-menu = this USB has no player menu in its eDB or PDB
+usb-player-menu-error-cant-change = this USB's player menu can't be changed: it has no eDB and no menu rows in its PDB
+# $name: the menu item. $kind: its number in the databases.
+usb-player-menu-error-cant-remove = Player menu item "{ $name }" (kind { $kind }) cannot be removed
+
 ## usb-background-color
 
 # The background colours rekordbox offers, as the chips name them.
@@ -158,6 +174,8 @@ usb-background-color-read-only = This USB is read-only, so its background colour
 usb-background-color-set = Background colour set to { $color }
 usb-background-color-unchanged = Background colour unchanged
 
+usb-background-color-error-no-edb = unable to open the USB's eDB
+
 ## usb-audio-formats
 
 # The USB audio formats list's hint, and its hint when the stick can't be written.
@@ -165,6 +183,9 @@ usb-audio-formats-hint = The formats export puts on this USB · drag to set the 
 usb-audio-formats-read-only = USB is read-only
 # The tooltip of the only ticked format, which can't be unticked.
 usb-audio-formats-last-ticked = At least one format stays ticked
+
+usb-audio-formats-error-read-only = The USB is read-only, so its USB audio formats can't be changed
+usb-audio-formats-error-none-ticked = At least one format stays ticked
 
 ## backups
 
@@ -203,6 +224,9 @@ backups-reason-menu-update = Before menu update
 backups-reason-background-color = Before background color change
 backups-reason-repair = Before repair
 backups-reason-restore = Before restore
+
+# $backup: the backup's timestamp.
+backups-error-not-found = backup not found: { $backup }
 
 ## diagnostics
 
@@ -1138,6 +1162,8 @@ transcode-export-convert = Converted to { $format } on export — { $source }
 # $file: the track's own file, as the FMT column describes it. $format: its format's name.
 transcode-export-refused = { $file } — { $format } can't go on this USB: only lossless files can be converted
 
+transcode-error-folder-in-source = the transcode folder can't be inside a source folder: the scan would list the transcodes as tracks
+
 ## tracklist-export
 
 # USB History's Export Tracklist, the status line after saving the file. $history: the history's name.
@@ -1181,6 +1207,32 @@ analysis-log-incomplete = Analysis: { $count ->
     [one] { $count } track
    *[other] { $count } tracks
 } in { $elapsed } (analyzed { $analyzed }, failed { $failed }, incomplete { $incomplete })
+
+## error
+
+# Errors several pages show, in the status line after the command's own words ("Delete failed: …").
+# $id: the track's or playlist's id in the app's library.
+error-track-not-found = track not found: { $id }
+error-playlist-not-found = playlist not found: { $id }
+error-track-not-found-anywhere = track not found in Library or selected USB
+# $playlist: the USB playlist's name or id.
+error-usb-playlist-not-found = USB playlist not found: { $playlist }
+# $history: the USB history's id.
+error-usb-history-not-found = USB history not found: { $history }
+# $path: the audio file, here and in the next one.
+error-audio-file-not-found = audio file not found: { $path }
+error-audio-path-not-file = audio path is not a file: { $path }
+# The USB's eDB (exportLibrary.db is its file name on the stick).
+error-usb-edb-unreadable = USB library database (exportLibrary.db) not found or unreadable
+# $path: the track's analysis file as the USB lists it, here and in the next three.
+error-usb-analysis-path-not-found = USB analysis path not found: { $path }
+error-usb-analysis-unreadable = USB analysis bundle not readable: { $path }
+error-usb-analysis-empty = USB analysis bundle is empty: { $path }
+error-usb-analysis-missing = USB analysis bundle missing: { $path }
+# $path: the USB folder.
+error-usb-root-missing = requested usbRoot does not exist: { $path }
+# Refused while the data upgrade after an app update finishes.
+error-data-upgrade-running = Finishing a data upgrade, try again in a moment
 
 ## export
 
@@ -1274,6 +1326,29 @@ export-progress-waiting-for-writes = USB: Waiting for files to finish writing
 export-progress-copying = USB: Copying track { $current }/{ $total }: { $file }
 # Lossless tracks converted for this USB's formats.
 export-progress-converting = USB: Converting track { $current }/{ $total }: { $file }
+
+# Why an export was refused: the error the Event Log shows (the status line has its own text above).
+export-error-busy = Another export or change to the USB is still running. Export again once it has finished.
+# $path: the USB folder.
+export-error-usb-missing = USB root does not exist: { $path }
+export-error-no-tracks = playlist has no tracks to export
+export-error-none-playable = none of the playlist's tracks are in a format the players play (MP3, AAC, WAV, AIFF, FLAC, ALAC)
+export-error-none-convertible = none of the playlist's tracks could be converted for this USB
+export-error-manifest = Export blocked: manifest invariant check failed
+export-error-manifest-after-prune = Export finished with errors: the stale-file prune removed a file the exported playlist still references — the USB databases were written; restore from the pre-export backup
+# $needed, $free: sizes ("1.2 GB").
+export-error-no-space = Export blocked: not enough free space on the USB drive — need about { $needed }, { $free } free
+# $count: the tracks refused. $tracks: their files, joined with ", ".
+export-error-formats = Export blocked: { $count ->
+    [one] { $count } track
+   *[other] { $count } tracks
+} in a format this USB's formats don't allow, and only lossless files can be converted: { $tracks }
+# $missing: tracks without analysis. $total: the playlist's tracks.
+export-error-not-analyzed = Export blocked: { $missing }/{ $total } playlist tracks are missing required analysis (waveform, bpm, duration, DAT/EXT files); run analysis first
+# $folder: the missing source folder.
+export-error-source-missing = Export blocked: source folder is missing: { $folder }. Relocate or remove it first.
+# $path: where the eDB should be.
+export-error-edb-missing = eDB not found at { $path }
 
 ## track-list
 
@@ -1369,6 +1444,34 @@ library-import-done-mixxx-not-found = Mixxx library import done: { $new } new, {
    *[other] { $count } files
 } not found (see event log)
 
+# Scanning and importing refused.
+library-error-no-source-folder = Add a source folder before scanning
+library-error-no-source-enabled = Switch on at least one source folder before scanning
+# $path: the file.
+library-error-source-file-missing = source file does not exist: { $path }
+# $folder: the source folder, here and below.
+library-error-folder-not-configured = source folder not configured: { $folder }
+# Relocate: the folder picked is the one the tracks are in already.
+library-error-relocate-same = The new folder must be different from the old one
+library-error-relocate-missing = The new folder does not exist or is not a folder: { $folder }
+# The Mixxx and rekordbox imports. $error: SQLite's reason, in English. $path: the library's file. $id: the playlist's id there.
+library-error-mixxx-not-found = Mixxx library not found
+library-error-mixxx-not-found-at = Mixxx library not found: { $path }
+library-error-mixxx-open = could not open Mixxx library: { $error }
+library-error-mixxx-tables = Mixxx library opened but library/track_locations tables not found
+library-error-mixxx-query = Mixxx library query failed: { $error }
+library-error-mixxx-row = Mixxx library row error: { $error }
+library-error-mixxx-playlist-query = Mixxx playlist query failed: { $error }
+library-error-mixxx-playlist-not-found = Mixxx playlist not found: { $id }
+library-error-rekordbox-not-found = master.db not found
+library-error-rekordbox-not-found-at = master.db not found: { $path }
+library-error-rekordbox-open = could not open master.db: { $error }
+library-error-rekordbox-key = master.db key failed: { $error }
+library-error-rekordbox-tables = master.db opened but djmdContent table not found (wrong key or version)
+library-error-rekordbox-query = master.db query failed: { $error }
+library-error-rekordbox-row = master.db row error: { $error }
+library-error-rekordbox-playlist-not-found = rekordbox playlist not found: { $id }
+
 ## playlist
 
 # The status lines after creating and deleting a playlist. $name: the playlist's name.
@@ -1418,6 +1521,8 @@ playlist-membership-some = { $contained } of { $selected } in
 # $name: the playlist's name.
 playlist-reorder-lock-tooltip = Won't reorder on USB — "{ $name }" already exists there, and additive export keeps its existing track order unchanged. New tracks are still added in your chosen order.
 
+playlist-error-name-empty = playlist name must not be empty
+
 ## playlist-import
 
 # The import dialog's note on a list. $count: its tracks.
@@ -1458,6 +1563,12 @@ playlist-import-skipped = { $count ->
 # Added to an import's status line after " | ". $count: the lists that failed. $names: their names, comma-separated.
 playlist-import-failed-lists = { $count } failed: { $names } (see event log)
 
+# An imported list none of whose tracks could be added. $count: the tracks it lists. $playlist: its name.
+playlist-import-error-nothing-imported = { $count ->
+    [one] the only track in "{ $playlist }" could not be imported
+   *[other] none of the { $count } tracks in "{ $playlist }" could be imported
+}: files not found on this computer or not supported
+
 ## selection
 
 # The tooltip of the selection bar's time when some selected tracks have no length yet.
@@ -1489,6 +1600,9 @@ track-details-progress-writing-pdb = USB: Writing export.pdb
 track-details-progress-writing-edb = USB: Writing exportLibrary.db
 track-details-progress-saved = USB: Track details saved
 
+# $min, $max: the earliest and latest year allowed.
+track-details-error-release-date = release date must be YYYY, YYYY-MM or YYYY-MM-DD, from { $min } to { $max }
+
 ## cues
 
 # The status line after saving a track's cues. $count: the cues saved.
@@ -1516,6 +1630,14 @@ cues-progress-writing-pdb = USB: Writing export.pdb
 cues-progress-updating-library-track = Updating library track
 cues-progress-writing-edb = USB: Writing exportLibrary.db
 cues-progress-saved = USB: Cue edits saved
+
+# Saving the cue editor. $path: the track's file on the USB.
+cues-error-not-in-usb-database = this track is missing from one of the USB's two databases, so it can't be edited on the USB ({ $path }). Preview Fixes shows what can be repaired.
+# $key: the key as typed.
+cues-error-unknown-key = unknown key: { $key }
+# $max: the most cue points a track can have (8).
+cues-error-too-many = at most { $max } cue points are allowed
+cues-error-bpm-range = bpm must be greater than 0 and at most 999
 
 ## playback
 

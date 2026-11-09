@@ -98,7 +98,7 @@ pub(super) fn validate_topology_locked_export_bytes(
         || !before.len().is_multiple_of(PAGE_SIZE)
         || !after.len().is_multiple_of(PAGE_SIZE)
     {
-        return Err(BackendError::Validation(
+        return Err(BackendError::Internal(
             "PDB export blocked: non page-aligned PDB candidate".into(),
         ));
     }
@@ -186,7 +186,7 @@ pub(super) fn validate_topology_locked_export_bytes(
     if issues.is_empty() {
         Ok(())
     } else {
-        Err(BackendError::Validation(format!(
+        Err(BackendError::Internal(format!(
             "PDB export blocked: topology-locked additive guard failed ({})",
             issues.join(" | ")
         )))
@@ -1577,7 +1577,7 @@ pub(crate) fn build_pdb_for_playlists(
         .unwrap_or_else(|| "auto".to_string());
     if let Some(before) = existing_pdb_bytes_before.as_deref() {
         if pdb_write_mode == "fresh" {
-            return Err(BackendError::Validation(
+            return Err(BackendError::Internal(
                 "PDB export blocked: EXPORTER_PDB_WRITE_MODE=fresh is unsafe for existing PDBs"
                     .into(),
             ));
@@ -1617,7 +1617,7 @@ pub(crate) fn build_pdb_for_playlists(
                 });
             }
             None => {
-                return Err(BackendError::Validation(
+                return Err(BackendError::Internal(
                     "PDB export blocked: topology-locked additive writer declined this change; \
                      refusing unsafe fresh rebuild"
                         .into(),
@@ -1631,7 +1631,7 @@ pub(crate) fn build_pdb_for_playlists(
     //
     // This line is only reached if a caller skips initialize_usb entirely; all
     // production and test paths call initialize_usb first.
-    Err(BackendError::Validation(
+    Err(BackendError::Internal(
         "PDB export requires an initialized USB: call initialize_usb before export_to_usb".into(),
     ))
 }

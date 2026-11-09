@@ -6,6 +6,7 @@
 //! is never changed here. A stick with only one database uses that one.
 
 use super::*;
+use crate::i18n::tr;
 
 /// Player menu kinds that cannot be removed once present in the current menu.
 /// TRACK=131, PLAYLIST=132, FOLDER=144, SEARCH=145, HISTORY=149, as rekordbox
@@ -48,12 +49,12 @@ pub(super) fn load_edb_menu_rows(
 ) -> BackendResult<Vec<EdbMenuRow>> {
     let Some(conn) = open_edb_rw(usb_root, warnings) else {
         return Err(crate::error::BackendError::Validation(
-            "unable to open eDB for player menu config".to_string(),
+            tr::usb_player_menu_error_no_edb(),
         ));
     };
     if !table_exists(&conn, "menuItem") || !table_exists(&conn, "category") {
         return Err(crate::error::BackendError::Validation(
-            "eDB missing menuItem/category tables".to_string(),
+            tr::usb_player_menu_error_tables(),
         ));
     }
     let mut stmt = conn.prepare(
@@ -227,7 +228,7 @@ fn menu_rows(
     let catalog = crate::service::export_helpers::load_pdb_t16_decoded(usb_root)?;
     if catalog.is_empty() {
         return Err(crate::error::BackendError::Validation(
-            "this USB has no player menu in its eDB or PDB".to_string(),
+            tr::usb_player_menu_error_no_menu(),
         ));
     }
     Ok((1u32..)
@@ -424,12 +425,12 @@ pub(super) fn mirror_edb_category_from_pdb_kinds(
 ) -> BackendResult<bool> {
     let Some(mut conn) = open_edb_rw(usb_root, warnings) else {
         return Err(crate::error::BackendError::Validation(
-            "unable to open eDB for player menu update".to_string(),
+            tr::usb_player_menu_error_no_edb(),
         ));
     };
     if !table_exists(&conn, "menuItem") || !table_exists(&conn, "category") {
         return Err(crate::error::BackendError::Validation(
-            "eDB missing menuItem/category tables".to_string(),
+            tr::usb_player_menu_error_tables(),
         ));
     }
 
@@ -596,8 +597,7 @@ impl BackendService {
 
         if !menu_is_editable(&usb_root)? {
             return Err(crate::error::BackendError::Validation(
-                "this USB's player menu can't be changed: it has no eDB and no menu rows in its PDB"
-                    .to_string(),
+                tr::usb_player_menu_error_cant_change(),
             ));
         }
         let has_edb = stick_has_edb(&usb_root)?;
@@ -612,10 +612,9 @@ impl BackendService {
                 .get(&req.kind)
                 .map(|s| s.as_str())
                 .unwrap_or("?");
-            return Err(crate::error::BackendError::Validation(format!(
-                "Player menu item \"{name}\" (kind {}) cannot be removed",
-                req.kind
-            )));
+            return Err(crate::error::BackendError::Validation(
+                tr::usb_player_menu_error_cant_remove(name, req.kind),
+            ));
         }
 
         let before_kinds = before_current

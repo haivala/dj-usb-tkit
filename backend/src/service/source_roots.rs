@@ -321,10 +321,9 @@ impl BackendService {
         let conn = self.db.connect()?;
         let mut sources = LibrarySources::load(&conn)?;
         if !sources.roots.contains(&req.path) {
-            return Err(BackendError::NotFound(format!(
-                "source folder not configured: {}",
-                req.path
-            )));
+            return Err(BackendError::NotFound(
+                tr::library_error_folder_not_configured(&req.path),
+            ));
         }
         sources.enabled.insert(req.path, req.enabled);
         sources.save(&conn)?;
@@ -355,7 +354,7 @@ impl BackendService {
         let old_root = req.old_root.trim().to_string();
         let new_root = req.new_root.trim().to_string();
         if old_root.is_empty() || new_root.is_empty() {
-            return Err(BackendError::Validation(
+            return Err(BackendError::Internal(
                 "oldRoot and newRoot must not be empty".to_string(),
             ));
         }
@@ -363,15 +362,13 @@ impl BackendService {
         // count) and case-sensitively: on Linux `music` and `Music` are
         // different folders, and a root renamed to a new case is a real move.
         if Path::new(&old_root) == Path::new(&new_root) {
-            return Err(BackendError::Validation(
-                "newRoot must be different from oldRoot".to_string(),
-            ));
+            return Err(BackendError::Validation(tr::library_error_relocate_same()));
         }
         let new_root_path = PathBuf::from(&new_root);
         if !new_root_path.exists() || !new_root_path.is_dir() {
-            return Err(BackendError::Validation(format!(
-                "newRoot does not exist or is not a directory: {new_root}"
-            )));
+            return Err(BackendError::Validation(
+                tr::library_error_relocate_missing(&new_root),
+            ));
         }
 
         let mut conn = self.db.connect()?;
@@ -470,9 +467,9 @@ impl BackendService {
         let tx = conn.transaction()?;
         let mut sources = LibrarySources::load(&tx)?;
         let Some(index) = sources.roots.iter().position(|existing| existing == &root) else {
-            return Err(BackendError::NotFound(format!(
-                "source folder not configured: {root}"
-            )));
+            return Err(BackendError::NotFound(
+                tr::library_error_folder_not_configured(&root),
+            ));
         };
         sources.roots.remove(index);
         sources.save(&tx)?;
