@@ -2142,7 +2142,6 @@ ui-event-log-level = Level
 ui-event-log-level-filter-all = All
 ui-event-log-level-filter-error = Error
 ui-event-log-level-filter-info = Info
-ui-event-log-level-filter-log = Log
 ui-event-log-level-filter-warn = Warn
 # An Event Log row's level.
 ui-event-log-row-level-error = error
@@ -2566,8 +2565,6 @@ ui-settings-export = Export
 ui-settings-get-node-js = Get Node.js
 ui-settings-key-notation = Key notation
 ui-settings-language = Language
-# The status line when the language is changed while the track editor has unsaved changes.
-ui-settings-language-unsaved = Save or cancel the track's changes before changing the language
 # The status line when saving the language failed. $error: why.
 ui-settings-language-failed = Could not change the language: { $error }
 ui-settings-key-notation-camelot = Camelot (8A)

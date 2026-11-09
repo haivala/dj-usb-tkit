@@ -5,7 +5,9 @@
 //! beside the tests that assert English would break them. The tests here take `LANGUAGE_LOCK`,
 //! so they don't run in parallel with each other either, and put English back when done.
 
+mod common;
 mod library_sources;
+mod parity_fixture;
 
 use std::sync::{Arc, Mutex, MutexGuard, Once, PoisonError, mpsc};
 use std::time::Duration;
@@ -15,7 +17,8 @@ use backend::i18n::{self, ENGLISH, TEST_LANGUAGE, tr};
 use backend::models::{
     AnalyzeNewTracksRequest, CreatePlaylistRequest, DeletePlaylistRequest,
     FetchUsbHistoriesRequest, InitializeUsbRequest, RepairUsbDiagnosticsRequest,
-    RunUsbDiagnosticsData, RunUsbDiagnosticsRequest, ScanLibraryRequest, SetFrontendSettingRequest,
+    RunUsbDiagnosticsData, RunUsbDiagnosticsRequest, RunUsbParityReportData,
+    RunUsbParityReportRequest, ScanLibraryRequest, SetFrontendSettingRequest,
     ValidateUsbRootRequest,
 };
 use backend::service::analysis_event_payload;
@@ -326,6 +329,68 @@ fn diagnostics_report_follows_the_language() {
         for part in row.meta_text.split(" · ") {
             assert!(is_test_language(part), "{row:?}");
         }
+    }
+}
+
+#[test]
+fn parity_report_follows_the_language() {
+    let _test = LanguageTest::start();
+    let (_root, backend, usb, playlist_name) = parity_fixture::setup_clean_strict_parity_fixture();
+    let run = || -> RunUsbParityReportData {
+        let response = backend.run_usb_parity_report(RunUsbParityReportRequest {
+            usb_root: Some(usb.to_string_lossy().to_string()),
+        });
+        response.data.expect("parity data")
+    };
+    // What the report's layout decides, as in the diagnostics test.
+    let shape = |data: &RunUsbParityReportData| {
+        let columns: Vec<String> = data
+            .section_groups
+            .iter()
+            .flat_map(|g| g.sections.iter().map(|s| format!("{:?}", s.status)))
+            .collect();
+        let rows: Vec<String> = data
+            .overview
+            .iter()
+            .map(|item| format!("{:?}", item.status))
+            .collect();
+        (format!("{:?}", data.overall_status), columns, rows)
+    };
+
+    let english = run();
+    assert!(!english.overview.is_empty() && !english.section_groups.is_empty());
+    assert_eq!(english.playlist_details.len(), 1);
+
+    assert!(save_language(&backend, TEST_LANGUAGE).ok);
+    let switched = run();
+    assert_eq!(shape(&switched), shape(&english));
+    for text in [
+        &switched.status_text,
+        &switched.duration_text,
+        &switched.status_label,
+    ] {
+        assert!(is_test_language(text), "{text:?}");
+    }
+    for group in &switched.section_groups {
+        assert!(is_test_language(&group.title), "{:?}", group.title);
+        for section in &group.sections {
+            assert!(is_test_language(&section.title), "{:?}", section.title);
+            for check in &section.checks {
+                for text in [&check.label, &check.detail] {
+                    assert!(is_test_language(text), "{check:?}");
+                }
+            }
+        }
+    }
+    for item in &switched.overview {
+        assert!(is_test_language(&item.title), "{:?}", item.title);
+        assert!(is_test_language(&item.detail), "{:?}", item.detail);
+    }
+    // The playlist's row: its name is data, its issue badges are text.
+    let playlist = &switched.playlist_details[0];
+    assert_eq!(playlist.name, playlist_name);
+    for label in &playlist.issue_labels {
+        assert!(is_test_language(label), "{label:?}");
     }
 }
 

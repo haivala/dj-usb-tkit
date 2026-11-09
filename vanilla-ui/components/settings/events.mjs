@@ -249,12 +249,6 @@ export function bindSettingsEvents(ctx) {
     const select = event.currentTarget;
     const current = uiLanguage();
     if (select.value === current) return;
-    // The reload would drop the track editor's unsaved changes.
-    if (ctx.trackDetailDialog?.hasUnsavedChanges()) {
-      select.value = current;
-      emitStatus(t("ui-settings-language-unsaved"));
-      return;
-    }
     try {
       await ctx.command("set_frontend_setting", { key: FRONTEND_DB_KEY_LANGUAGE, value: select.value });
     } catch (err) {
