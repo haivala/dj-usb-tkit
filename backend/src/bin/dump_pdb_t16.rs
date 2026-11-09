@@ -9,7 +9,7 @@ fn main() {
 
     match backend::service::export_helpers::load_pdb_t16_decoded(usb_path) {
         Err(e) => {
-            eprintln!("Error reading PDB t16: {e}");
+            eprintln!("Error reading PDB t16: {e}", e = e.english());
             std::process::exit(1);
         }
         Ok(rows) => {

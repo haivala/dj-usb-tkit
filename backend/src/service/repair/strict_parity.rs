@@ -267,16 +267,10 @@ pub(crate) fn write_edb_playlist_order(
     Ok(updated)
 }
 
-/// One line for the repair outcome and the preview card.
-/// What a strict-parity upgrade changed, rendered by `render`: `Text::render`
-/// for the preview, `Text::render_english` for the log. (A text passed as
-/// another's argument is rendered when passed, so both parts take `render`.)
-pub(super) fn strict_parity_summary(
-    result: &StrictParityUpgradeApplyResult,
-    render: fn(&crate::i18n::Text) -> String,
-) -> String {
+/// What a strict-parity upgrade changed: one line for the repair outcome and the preview card.
+pub(super) fn strict_parity_summary(result: &StrictParityUpgradeApplyResult) -> crate::i18n::Text {
     use crate::i18n::tr;
-    let summary = render(&tr::repair_strict_parity_summary(
+    let summary = tr::repair_strict_parity_summary(
         result.merged_playlists,
         result.edb_rows_inserted,
         result.edb_rows_updated,
@@ -284,10 +278,10 @@ pub(super) fn strict_parity_summary(
         result.pdb_tracks_changed,
         result.pdb_playlists_inserted,
         result.duplicate_entries_removed,
-    ));
+    );
     match result.rebuilt_database {
-        Some(usb_staging::DbKind::Pdb) => render(&tr::repair_strict_parity_rebuilt_pdb(summary)),
-        Some(usb_staging::DbKind::Edb) => render(&tr::repair_strict_parity_rebuilt_edb(summary)),
+        Some(usb_staging::DbKind::Pdb) => tr::repair_strict_parity_rebuilt_pdb(summary),
+        Some(usb_staging::DbKind::Edb) => tr::repair_strict_parity_rebuilt_edb(summary),
         None => summary,
     }
 }

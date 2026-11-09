@@ -255,7 +255,10 @@ fn staged_edb_path(usb_root: &Path) -> Option<std::path::PathBuf> {
         Err(err) => {
             logging::debug(
                 "edb",
-                format!("failed to stage eDB locally, falling back to USB path: {err}"),
+                format!(
+                    "failed to stage eDB locally, falling back to USB path: {err}",
+                    err = err.english()
+                ),
             );
             Some(edb_path_from_usb_root(usb_root))
         }

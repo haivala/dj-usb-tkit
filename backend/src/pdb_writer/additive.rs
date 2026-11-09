@@ -828,7 +828,7 @@ pub(crate) fn compute_additive_diff(
     desired_t08_entries: Vec<T08EntryKey>,
 ) -> Result<PdbAdditiveDiff, NonAdditiveReason> {
     let parsed = crate::pdb_reader::parse_pdb_bytes(existing_bytes)
-        .map_err(|e| NonAdditiveReason::Unparseable(e.to_string()))?;
+        .map_err(|e| NonAdditiveReason::Unparseable(e.english()))?;
 
     // Older players take the song count from tt=19, not t00: 0 songs while
     // its page is still the init template (one sealed row, flags=0x24,

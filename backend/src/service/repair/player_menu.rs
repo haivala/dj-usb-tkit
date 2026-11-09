@@ -719,7 +719,10 @@ impl BackendService {
                     }
                     Ok(false) => {}
                     Err(e) => {
-                        logging::debug("usb-player-menu", format!("PDB t17 update skipped: {e}"));
+                        logging::debug(
+                            "usb-player-menu",
+                            format!("PDB t17 update skipped: {e}", e = e.english()),
+                        );
                     }
                 }
             }

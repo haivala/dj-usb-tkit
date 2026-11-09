@@ -605,8 +605,8 @@ fn repair_write_back_writes_neither_database_when_the_usb_changed_since_staging(
     let err = super::run::write_back_both_or_neither(&usb_root, &mut pdb)
         .expect_err("write-back must refuse an outside change");
     assert!(
-        err.to_string().contains("changed since it was last read"),
-        "{err}"
+        err.english().contains("changed since it was last read"),
+        "{err:?}"
     );
     assert_eq!(std::fs::read(&raw_pdb_path).unwrap(), raw_pdb_before);
     assert_eq!(

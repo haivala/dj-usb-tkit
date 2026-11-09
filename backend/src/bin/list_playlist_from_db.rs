@@ -233,8 +233,13 @@ fn list_pdb_playlists(input: &Path) {
     if !pdb_path.is_file() {
         fail(format!("PDB not found: {}", pdb_path.display()));
     }
-    let parsed = parse_pdb(&pdb_path)
-        .unwrap_or_else(|err| fail(format!("failed to parse {}: {err}", pdb_path.display())));
+    let parsed = parse_pdb(&pdb_path).unwrap_or_else(|err| {
+        fail(format!(
+            "failed to parse {}: {}",
+            pdb_path.display(),
+            err.english()
+        ))
+    });
     for row in parsed.playlist_tree {
         println!(
             "playlist|db=pdb|id={}|name={}|parent_id={}|sort_order={}|is_folder={}",

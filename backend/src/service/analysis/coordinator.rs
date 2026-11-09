@@ -561,17 +561,12 @@ impl Coordinator {
             }
             Err(err) => {
                 self.failed += 1;
-                let err_msg = err.to_string();
-                warning = Some(logging::log_composed(
+                let err_msg = err.render();
+                warning = Some(logging::log_text(
                     Level::Error,
                     "analysis",
                     "analysis.track-failed",
-                    |english| {
-                        crate::i18n::renderer(english)(&tr::analysis_track_failed(
-                            &track.file_path,
-                            err.text(english),
-                        ))
-                    },
+                    &tr::analysis_track_failed(&track.file_path, &err),
                 ));
                 build_done_progress_error(self.completed, self.total, &track, err_msg)
             }

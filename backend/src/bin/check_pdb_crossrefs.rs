@@ -23,7 +23,7 @@ fn main() {
     let parsed = match parse_pdb(&pdb_path) {
         Ok(p) => p,
         Err(e) => {
-            eprintln!("parse error: {e}");
+            eprintln!("parse error: {}", e.english());
             std::process::exit(1);
         }
     };

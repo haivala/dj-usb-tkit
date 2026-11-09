@@ -68,7 +68,10 @@ All UI text goes through the catalog; English in the UI's JS fails
 
 - **Rust:** `i18n::tr::<key_with_underscores>(args)` returns an `i18n::Text`, rendered in the
   current language for a response and in English for the log. The build generates one
-  function per key, so a wrong key or argument fails at the call site.
+  function per key, so a wrong key or argument fails at the call site. Pass a `Text` or a
+  `BackendError` to another text as it is: it renders with the outer text, in its language.
+  Neither has `Display`, so neither can end up in a `format!` in one language only; show one
+  with `render()`, log an error with `english()`.
 - **JS:** `t("ui-...", { name })` for a label or a text shown before a command answers;
   `tCount("ui-...", count)` only for a count with no response to come from. Text with a
   count, or text picked by a decision on response data, comes from the response, built

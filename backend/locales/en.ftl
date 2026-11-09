@@ -11,9 +11,10 @@
 #             event-log, backups, track-detail, settings, header, sidebar
 #   dialogs:  add-to, convert, drive-name, group-edit, help, playlist-import,
 #             tracklist-export
-#   JS only:  job (also the progress bar), update, playback, startup
-#   Rust:     export, diagnostics, parity, repair, track-list, analysis, scan, job,
+#   JS only:  startup
+#   Rust:     export, diagnostics, parity, repair, track-list, analysis, scan,
 #             migration, transcode, error, format (numbers and sizes)
+#   both:     job (also the progress bar), update, playback
 #   shared:   common (generic dialog buttons and words only); markup repeated on
 #             several pages: selection-bar, track-table, rating; and one area per
 #             <template> used on more than one page, named from its id

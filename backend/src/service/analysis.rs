@@ -1352,7 +1352,7 @@ fn detect_bpm_key_with_essentia_js(
             essentia_worker_pool().reset();
             run_essentia_request_once(&config, &args).map_err(|fallback_err| {
                 BackendError::Internal(format!(
-                    "Failed to launch BPM/key analysis runtime: worker={err}; fallback={fallback_err}"
+                    "Failed to launch BPM/key analysis runtime: worker={err}; fallback={fallback_err}", err = err.english(), fallback_err = fallback_err.english()
                 ))
             })?
         }

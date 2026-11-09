@@ -1814,7 +1814,7 @@ mod tests {
                 force: false,
             })
             .unwrap_err();
-        assert!(err.to_string().contains("the only track in"), "{err}");
+        assert!(err.english().contains("the only track in"), "{err:?}");
         let playlists: i64 = service
             .db
             .connect()

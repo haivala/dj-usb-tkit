@@ -102,9 +102,8 @@ pub fn emit_line(line: &LogLine<'_>) {
 
 /// A line a command also returns in its `Vec<WarningEntry>` response field, stating
 /// `(level, code)` where it's made, for a catalog text: the Event Log and the returned entry
-/// get the current language, the log file English. A composed message is one key holding all its values, not a `Text`
-/// passed into another (an inner `Text` is rendered when passed, so it wouldn't be English in
-/// the file).
+/// get the current language, the log file English. A `Text` or catalog error passed as one of
+/// its arguments renders with it, so the file's line is English throughout.
 pub fn log_text(
     level: Level,
     source: &str,
@@ -146,9 +145,9 @@ pub fn log_rendered(
     }
 }
 
-/// [`log_rendered`] for a line composed of several parts: `compose(false)` is the Event Log's,
-/// `compose(true)` the log file's, each part rendered in that one language
-/// (`crate::i18n::renderer`, `BackendError::text`).
+/// [`log_rendered`] for a line composed of several parts that no one text holds, such as a
+/// list joined with commas: `compose(false)` is the Event Log's, `compose(true)` the log
+/// file's, each part rendered in that one language (`crate::i18n::renderer`).
 pub fn log_composed(
     level: Level,
     source: &str,

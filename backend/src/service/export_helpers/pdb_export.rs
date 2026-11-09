@@ -180,7 +180,10 @@ pub(super) fn validate_topology_locked_export_bytes(
                 }
             }
         }
-        Err(err) => issues.push(format!("candidate PDB no longer parses: {err}")),
+        Err(err) => issues.push(format!(
+            "candidate PDB no longer parses: {err}",
+            err = err.english()
+        )),
     }
 
     if issues.is_empty() {

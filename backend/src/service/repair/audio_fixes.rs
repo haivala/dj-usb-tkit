@@ -1519,7 +1519,8 @@ impl BackendService {
             .collect::<HashSet<_>>();
         let removed_pdb = remove_tracks_from_pdb(usb_root, &missing_track_ids).map_err(|err| {
             BackendError::Internal(format!(
-                "eDB rows removed, but the PDB could not be updated: {err}"
+                "eDB rows removed, but the PDB could not be updated: {err}",
+                err = err.english()
             ))
         })?;
 

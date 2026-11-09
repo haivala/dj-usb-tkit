@@ -1647,7 +1647,10 @@ impl BackendService {
                     }
                 }
                 Err(err) => {
-                    logging::debug("export", format!("PDB preview failed: {err}"));
+                    logging::debug(
+                        "export",
+                        format!("PDB preview failed: {err}", err = err.english()),
+                    );
                 }
             }
         } else {
@@ -1842,7 +1845,10 @@ impl BackendService {
                     }
                 }
                 Err(err) => {
-                    logging::debug("export", format!("USB export log append skipped: {err}"));
+                    logging::debug(
+                        "export",
+                        format!("USB export log append skipped: {err}", err = err.english()),
+                    );
                 }
             }
             // Additive, always-queryable counterpart to the on-drive JSON

@@ -89,7 +89,7 @@ fn saving_the_language_switches_it_for_every_thread() {
 
     // Commands run on worker threads (Tauri's blocking pool, the analysis coordinator); the
     // language isn't per thread.
-    let from_worker = std::thread::spawn(|| tr::status_warning_count(2usize).to_string())
+    let from_worker = std::thread::spawn(|| tr::status_warning_count(2usize).render())
         .join()
         .expect("worker thread");
     assert!(is_test_language(&from_worker), "{from_worker:?}");

@@ -67,15 +67,11 @@ impl BackendService {
                 ));
                 warnings
             }
-            Err(err) => vec![logging::log_composed(
+            Err(err) => vec![logging::log_text(
                 Level::Warn,
                 "engine-export",
                 "engine.library-skipped",
-                |english| {
-                    crate::i18n::renderer(english)(&tr::export_engine_not_written(
-                        err.text(english),
-                    ))
-                },
+                &tr::export_engine_not_written(&err),
             )],
         }
     }

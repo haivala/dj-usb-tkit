@@ -818,10 +818,16 @@ impl BackendService {
         // path. A database the USB lacks is dropped from staging. Best-effort:
         // a staging hiccup shouldn't fail validation.
         if let Err(err) = super::usb_staging::stage_pdb_on_connect(&normalized) {
-            logging::debug("usb-import", format!("Failed to stage PDB locally: {err}"));
+            logging::debug(
+                "usb-import",
+                format!("Failed to stage PDB locally: {err}", err = err.english()),
+            );
         }
         if let Err(err) = super::usb_staging::stage_edb_on_connect(&normalized) {
-            logging::debug("usb-import", format!("Failed to stage eDB locally: {err}"));
+            logging::debug(
+                "usb-import",
+                format!("Failed to stage eDB locally: {err}", err = err.english()),
+            );
         }
 
         let has_write_access = has_write_access(&normalized);
@@ -2004,7 +2010,10 @@ impl BackendService {
         let export_log = match export_log::load_export_log(&usb_root) {
             Ok(log) => log,
             Err(err) => {
-                logging::debug("usb-import", format!("USB export log ignored: {err}"));
+                logging::debug(
+                    "usb-import",
+                    format!("USB export log ignored: {err}", err = err.english()),
+                );
                 None
             }
         };
@@ -2471,7 +2480,10 @@ impl BackendService {
         lookup().unwrap_or_else(|err| {
             logging::debug(
                 "usb-import",
-                format!("Could not read the USB's row of {file_path}: {err}"),
+                format!(
+                    "Could not read the USB's row of {file_path}: {err}",
+                    err = err.english()
+                ),
             );
             None
         })
@@ -4973,7 +4985,7 @@ mod tests {
                             ..Default::default()
                         })
                     {
-                        errs.push(format!("{e}"));
+                        errs.push(e.english());
                     }
                 }
                 errs

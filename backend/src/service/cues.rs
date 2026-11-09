@@ -1047,7 +1047,10 @@ impl BackendService {
             Err(err) => {
                 logging::debug(
                     "cues",
-                    format!("could not rewrite cached ANLZ for {track_id}: {err}"),
+                    format!(
+                        "could not rewrite cached ANLZ for {track_id}: {err}",
+                        err = err.english()
+                    ),
                 );
                 false
             }
@@ -1132,7 +1135,10 @@ impl BackendService {
             super::track_metadata::usb_metadata(&usb_root, media_path).unwrap_or_else(|err| {
                 logging::debug(
                     "cues",
-                    format!("could not read genre/rating/release date for {media_path}: {err}"),
+                    format!(
+                        "could not read genre/rating/release date for {media_path}: {err}",
+                        err = err.english()
+                    ),
                 );
                 Default::default()
             })
@@ -1320,7 +1326,10 @@ impl BackendService {
                 if let Err(err) = self.regenerate_cached_anlz_analysis_edits(&track_id) {
                     logging::debug(
                         "cues",
-                        format!("could not rewrite cached ANLZ for {track_id}: {err}"),
+                        format!(
+                            "could not rewrite cached ANLZ for {track_id}: {err}",
+                            err = err.english()
+                        ),
                     );
                 }
                 Some(track_id)
@@ -1646,13 +1655,13 @@ mod tests {
     fn normalize_rejects_more_than_8_cues() {
         let inputs: Vec<_> = (0..9).map(|i| input(i * 1000, None)).collect();
         let err = normalize_cues(&inputs, Some(300_000)).expect_err("9 cues");
-        assert!(err.to_string().contains("at most 8"));
+        assert!(err.english().contains("at most 8"));
     }
 
     #[test]
     fn normalize_rejects_unknown_color() {
         let err = normalize_cues(&[input(0, Some(99))], None).expect_err("bad color");
-        assert!(err.to_string().contains("colorId"));
+        assert!(err.english().contains("colorId"));
     }
 
     #[test]
@@ -1872,7 +1881,7 @@ mod tests {
     fn normalize_rejects_two_playback_start_cues() {
         let err = normalize_cues(&[input(4000, None), start_input(0), start_input(10)], None)
             .expect_err("two start cues");
-        assert!(err.to_string().contains("playback-start"));
+        assert!(err.english().contains("playback-start"));
     }
 
     #[test]

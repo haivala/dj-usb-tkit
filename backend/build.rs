@@ -473,7 +473,7 @@ fn write_functions(out: &mut String, english: &BTreeMap<String, MessageInfo<'_>>
                 let ty = if *numeric {
                     "impl Into<Num>"
                 } else {
-                    "impl std::fmt::Display"
+                    "impl super::super::IntoArg"
                 };
                 format!("{}: {ty}", rust_ident(name))
             })
@@ -492,7 +492,7 @@ fn write_functions(out: &mut String, english: &BTreeMap<String, MessageInfo<'_>>
                 let value = if *numeric {
                     format!("super::super::Arg::Number({}.into())", rust_ident(name))
                 } else {
-                    format!("super::super::Arg::Text({}.to_string())", rust_ident(name))
+                    format!("{}.into_arg()", rust_ident(name))
                 };
                 format!("({name:?}, {value})")
             })

@@ -973,7 +973,7 @@ mod tests {
     fn read_file_metadata_reports_path_context() {
         let missing = Path::new("/definitely/not/here/track.mp3");
         let err = read_file_metadata(missing).expect_err("missing file should fail");
-        let message = err.to_string();
+        let message = err.english();
         assert!(
             message.contains("failed to read file metadata for /definitely/not/here/track.mp3"),
             "error should include file path context, got: {message}"

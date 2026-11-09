@@ -169,9 +169,7 @@ pub(super) fn player_counter_snapshot_section(cdj: &PlayerCounterSnapshot) -> Di
         cdj.t18.last,
         cdj.t18.ec,
     );
-    let info = |label: Text, detail: &dyn std::fmt::Display| {
-        DiagCheck::new(label, DiagStatus::Pass, detail)
-    };
+    let info = |label: Text, detail: String| DiagCheck::new(label, DiagStatus::Pass, detail);
     let mut checks = Vec::new();
     if cdj.t19_template_state {
         checks.push(DiagCheck::new(
@@ -183,29 +181,31 @@ pub(super) fn player_counter_snapshot_section(cdj: &PlayerCounterSnapshot) -> Di
     checks.extend([
         info(
             tr::diagnostics_check_predicted_counter(),
-            &tr::diagnostics_check_predicted_counter_detail(
+            tr::diagnostics_check_predicted_counter_detail(
                 cdj.playlist_count_candidate,
                 cdj.song_count_candidate,
                 &cdj.confidence,
-            ),
+            )
+            .render(),
         ),
         info(
             tr::diagnostics_check_shape_mode(),
-            &tr::diagnostics_check_shape_mode_detail(
+            tr::diagnostics_check_shape_mode_detail(
                 &cdj.shape_mode,
                 if cdj.baseline_init_like {
                     tr::diagnostics_check_yes()
                 } else {
                     tr::diagnostics_check_no()
                 },
-            ),
+            )
+            .render(),
         ),
         info(
             tr::diagnostics_check_cross_check(),
-            &tr::diagnostics_check_cross_check_detail(cdj.t00_tracks, cdj.t08_entries),
+            tr::diagnostics_check_cross_check_detail(cdj.t00_tracks, cdj.t08_entries).render(),
         ),
-        info(tr::diagnostics_check_history_pointers(), &history_pointers),
-        info(tr::diagnostics_check_primitive_signal(), &t19_line),
+        info(tr::diagnostics_check_history_pointers(), history_pointers),
+        info(tr::diagnostics_check_primitive_signal(), t19_line),
     ]);
     DiagSection {
         title: "Player Counter Snapshot".to_string(),

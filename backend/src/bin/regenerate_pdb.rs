@@ -32,7 +32,7 @@ fn main() {
     let parsed = match parse_pdb(&src_pdb) {
         Ok(p) => p,
         Err(e) => {
-            eprintln!("parse error: {e}");
+            eprintln!("parse error: {e}", e = e.english());
             std::process::exit(1);
         }
     };
@@ -230,7 +230,7 @@ fn main() {
     let bytes = match write_pdb(&data) {
         Ok(b) => b,
         Err(e) => {
-            eprintln!("write error: {e}");
+            eprintln!("write error: {e}", e = e.english());
             std::process::exit(1);
         }
     };

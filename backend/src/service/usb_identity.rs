@@ -590,7 +590,7 @@ mod tests {
         assert_eq!(
             UsbAudioFormats::from_request(&all(false))
                 .unwrap_err()
-                .to_string(),
+                .english(),
             "validation error: At least one format stays ticked"
         );
         let mut twice = all(true);

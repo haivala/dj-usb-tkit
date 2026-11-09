@@ -115,7 +115,11 @@ pub(crate) fn write_transcode_waveform_bundle(dir: &Path, transcode: &Path) -> b
         Err(err) => {
             crate::logging::debug(
                 "transcode",
-                format!("no waveform for transcode {}: {err}", transcode.display()),
+                format!(
+                    "no waveform for transcode {}: {err}",
+                    transcode.display(),
+                    err = err.english()
+                ),
             );
             for path in [&paths.dat_path, &paths.ext_path, &paths.twoex_path] {
                 remove_file_if_present(path);

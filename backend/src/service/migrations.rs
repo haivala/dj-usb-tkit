@@ -110,15 +110,11 @@ impl BackendService {
     /// migration retried on the next launch; it never stops the app starting.
     pub(crate) fn run_startup_data_migrations(&self) {
         if let Err(err) = run_registry(self, MIGRATIONS, Phase::Startup, &mut |_, _, _| {}) {
-            crate::logging::log_composed(
+            crate::logging::log_text(
                 crate::logging::Level::Warn,
                 "migrations",
                 "migrations.startup-failed",
-                |english| {
-                    crate::i18n::renderer(english)(&tr::migration_warning_startup_failed(
-                        err.text(english),
-                    ))
-                },
+                &tr::migration_warning_startup_failed(&err),
             );
         }
     }
@@ -209,17 +205,11 @@ fn run_registry(
                     "migrations",
                     format!("data migration {} failed", migration.id),
                 );
-                crate::logging::log_composed(
+                crate::logging::log_text(
                     crate::logging::Level::Warn,
                     "migrations",
                     "migrations.failed",
-                    |english| {
-                        let r = crate::i18n::renderer(english);
-                        r(&tr::migration_warning_failed(
-                            r(&(migration.label)()),
-                            err.text(english),
-                        ))
-                    },
+                    &tr::migration_warning_failed((migration.label)(), &err),
                 );
                 summary.retry_later.push(migration.id.to_string());
             }
@@ -271,7 +261,11 @@ fn upgrade_cached_beat_grids(
                 retry = true;
                 crate::logging::debug(
                     "migrations",
-                    format!("cached beat grid not upgraded ({err}): {}", dat.display()),
+                    format!(
+                        "cached beat grid not upgraded ({err}): {}",
+                        dat.display(),
+                        err = err.english()
+                    ),
                 );
             }
         }

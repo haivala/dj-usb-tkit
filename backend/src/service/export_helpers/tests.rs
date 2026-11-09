@@ -1212,8 +1212,8 @@ fn verify_edb_content_fails_when_artwork_file_is_missing_on_disk() {
 
     let err = verify_edb_content(usb_root, &playlist, &manifest).unwrap_err();
     assert!(
-        err.to_string().contains("artwork file missing on disk"),
-        "unexpected error: {err}"
+        err.english().contains("artwork file missing on disk"),
+        "unexpected error: {err:?}"
     );
 }
 
@@ -2918,8 +2918,8 @@ fn topology_guard_rejects_relocated_page_on_unwritten_table() {
     let err = validate_topology_locked_export_bytes(&before, &after)
         .expect_err("an unreachable last_page must be rejected as a non-append change");
     assert!(
-        err.to_string().contains("t11"),
-        "error should name the offending table: {err}"
+        err.english().contains("t11"),
+        "error should name the offending table: {err:?}"
     );
 }
 

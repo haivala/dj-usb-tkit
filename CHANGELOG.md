@@ -39,6 +39,10 @@
 
 ## Unreleased
 
+- **Fix:** Warnings that pass on a reason, such as a failed save to the USB, a failed repair step or a failed
+  track analysis, no longer show "validation error:" in front of it, and show the reason in the app's language.
+  The log file keeps it in English.
+
 ## 0.5.6
 
 - **New feature:** Settings has a Language choice. English is the only language so far. Changing it reloads the

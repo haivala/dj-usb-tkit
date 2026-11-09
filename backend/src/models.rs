@@ -2356,24 +2356,24 @@ impl DiagCheck {
     pub fn new(
         label: crate::i18n::Text,
         status: DiagStatus,
-        detail: impl std::fmt::Display,
+        detail: impl crate::i18n::IntoArg,
     ) -> Self {
         Self {
             key: label.key(),
             label: label.render(),
             status,
-            detail: detail.to_string(),
+            detail: crate::i18n::shown(detail),
             link: None,
         }
     }
 
     /// A check named by data, such as a playlist's name.
-    pub fn named(label: String, status: DiagStatus, detail: impl std::fmt::Display) -> Self {
+    pub fn named(label: String, status: DiagStatus, detail: impl crate::i18n::IntoArg) -> Self {
         Self {
             key: "",
             label,
             status,
-            detail: detail.to_string(),
+            detail: crate::i18n::shown(detail),
             link: None,
         }
     }

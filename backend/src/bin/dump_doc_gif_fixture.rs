@@ -28,8 +28,8 @@ use std::env;
 use std::fs;
 use std::path::{Path, PathBuf};
 
-fn fail(what: &str, err: impl std::fmt::Display) -> ! {
-    eprintln!("{what} failed: {err}");
+fn fail(what: &str, err: impl backend::i18n::IntoArg) -> ! {
+    eprintln!("{what} failed: {}", backend::i18n::shown(err));
     std::process::exit(1);
 }
 

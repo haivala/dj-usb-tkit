@@ -483,7 +483,7 @@ fn append_rows_oversized_row_rejected() {
     let mut bytes = make_empty_pdb_with_artists(1);
     let huge = vec![0u8; MAX_ROW_LEN + 1];
     let err = append_rows_to_chain_in_place(&mut bytes, 2, &[huge], PAGE_SIZE).unwrap_err();
-    let msg = format!("{err}");
+    let msg = format!("{err:?}");
     assert!(
         msg.contains("exceeds page capacity"),
         "expected capacity error, got: {msg}"
@@ -2629,7 +2629,7 @@ fn additive_diff_repeated_reposition_never_accumulates_duplicates() {
             })
             .collect::<Vec<_>>();
         let (after, _) = try_write_pdb_additive_in_place(&current, &data, desired, PAGE_SIZE)
-            .unwrap_or_else(|e| panic!("cycle {cycle} export failed: {e}"))
+            .unwrap_or_else(|e| panic!("cycle {cycle} export failed: {e:?}"))
             .unwrap_or_else(|| panic!("cycle {cycle} export not accepted as additive"));
 
         let rows = collect_t08_entry_keys(&after, PAGE_SIZE);

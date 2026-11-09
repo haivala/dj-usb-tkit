@@ -526,7 +526,10 @@ impl BackendService {
             if let Err(err) = result {
                 crate::logging::debug(
                     "usb-backups",
-                    format!("Failed to re-stage {stem} after restore: {err}"),
+                    format!(
+                        "Failed to re-stage {stem} after restore: {err}",
+                        err = err.english()
+                    ),
                 );
             }
         }
@@ -542,7 +545,10 @@ impl BackendService {
             .unwrap_or_else(|err| {
                 crate::logging::debug(
                     "usb-backups",
-                    format!("Failed to compute playlist export status after restore: {err}"),
+                    format!(
+                        "Failed to compute playlist export status after restore: {err}",
+                        err = err.english()
+                    ),
                 );
                 Vec::new()
             });

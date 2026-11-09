@@ -17,8 +17,13 @@ fn main() {
     let pdb_path = PathBuf::from(&args[1]);
 
     if args[2] == "--simple" {
-        let parsed = parse_pdb(&pdb_path)
-            .unwrap_or_else(|err| fail(format!("failed to parse {}: {err}", pdb_path.display())));
+        let parsed = parse_pdb(&pdb_path).unwrap_or_else(|err| {
+            fail(format!(
+                "failed to parse {}: {err}",
+                pdb_path.display(),
+                err = err.english()
+            ))
+        });
         println!("track_id|content_link|master_content_id|master_db_id|track_file_path|anlz_path");
         for track in parsed.tracks {
             println!(
@@ -47,8 +52,13 @@ fn main() {
         .parse::<u32>()
         .unwrap_or_else(|_| fail("track_id must be numeric or use --simple"));
 
-    let rows = parse_pdb_track_debug_rows(&pdb_path)
-        .unwrap_or_else(|err| fail(format!("failed to parse {}: {err}", pdb_path.display())));
+    let rows = parse_pdb_track_debug_rows(&pdb_path).unwrap_or_else(|err| {
+        fail(format!(
+            "failed to parse {}: {err}",
+            pdb_path.display(),
+            err = err.english()
+        ))
+    });
 
     let row = rows
         .into_iter()

@@ -20,7 +20,7 @@ fn main() {
             );
         }
         Err(err) => {
-            eprintln!("error: {err}");
+            eprintln!("error: {err}", err = err.english());
             std::process::exit(1);
         }
     }

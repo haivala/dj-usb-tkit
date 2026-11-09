@@ -1,7 +1,7 @@
 //! The repair run: detect issues, propose fixes, apply the selected ones.
 
 use super::*;
-use crate::i18n::{Text, tr};
+use crate::i18n::{Arg, IntoArg as _, Text, tr};
 
 /// A supported, non-destructive proposal that writes one file -- the shape
 /// most fixes share. Fixes that differ override fields with struct-update
@@ -101,13 +101,13 @@ pub(super) fn repair_rows(
 /// bookkeeping fix's (never listed), which stay English for the CLI tools.
 fn fix_proposal(
     id: &str,
-    title: impl std::fmt::Display,
-    description: impl std::fmt::Display,
+    title: impl crate::i18n::IntoArg,
+    description: impl crate::i18n::IntoArg,
 ) -> RepairFixProposal {
     RepairFixProposal {
         id: id.to_string(),
-        title: title.to_string(),
-        description: description.to_string(),
+        title: crate::i18n::shown(title),
+        description: crate::i18n::shown(description),
         supported: true,
         destructive: false,
         estimated_writes: 1,
@@ -282,38 +282,14 @@ impl Detail {
     }
 }
 
-/// An error as both texts: `shown` for the Event Log, `english` (with `Display`'s kind prefix)
-/// for the log file and the response.
-struct ErrorTexts {
-    shown: String,
-    english: String,
-}
-
-impl From<&BackendError> for ErrorTexts {
-    fn from(err: &BackendError) -> Self {
-        Self {
-            shown: err.render(),
-            english: err.to_string(),
-        }
-    }
-}
-
-impl ErrorTexts {
-    fn get(&self, english: bool) -> String {
-        if english {
-            self.english.clone()
-        } else {
-            self.shown.clone()
-        }
-    }
-}
-
+/// A failed fix's or step's error is kept as an argument, so it renders in the language of
+/// the line it goes into.
 enum FixResult {
     Applied(Detail),
     NothingToApply,
     NotSelected,
     PdbUnavailable,
-    Failed(ErrorTexts),
+    Failed(Arg),
     /// Ran, but some of its items failed: the line is the applied one's.
     PartlyFailed(Detail),
     /// Applied to the staged copies, but saving them to the USB failed.
@@ -328,9 +304,9 @@ enum Outcome {
         result: FixResult,
     },
     /// Nothing ran: the staged PDB couldn't be read.
-    ReadFailed(ErrorTexts),
+    ReadFailed(Arg),
     /// Saving to the USB failed; its own warning is already in the Event Log.
-    SaveFailed(ErrorTexts),
+    SaveFailed(Arg),
 }
 
 #[derive(Clone, Copy, PartialEq)]
@@ -376,17 +352,15 @@ impl Outcome {
                     FixResult::NothingToApply => r(&tr::repair_outcome_nothing_to_apply(title)),
                     FixResult::NotSelected => r(&tr::repair_outcome_not_selected(title)),
                     FixResult::PdbUnavailable => r(&tr::repair_outcome_pdb_unavailable(title)),
-                    FixResult::Failed(err) => {
-                        r(&tr::repair_outcome_failed(title, err.get(english)))
-                    }
+                    FixResult::Failed(err) => r(&tr::repair_outcome_failed(title, err.clone())),
                     FixResult::NotSaved(detail) => {
                         r(&tr::repair_outcome_not_saved(applied(&title, detail)))
                     }
                     FixResult::NotRun => r(&tr::repair_outcome_not_run(title)),
                 }
             }
-            Outcome::ReadFailed(err) => r(&tr::repair_outcome_read_failed(err.get(english))),
-            Outcome::SaveFailed(err) => r(&tr::repair_outcome_save_failed(err.get(english))),
+            Outcome::ReadFailed(err) => r(&tr::repair_outcome_read_failed(err.clone())),
+            Outcome::SaveFailed(err) => r(&tr::repair_outcome_save_failed(err.clone())),
         }
     }
 }
@@ -432,7 +406,7 @@ impl FixOutcomes {
             (true, false) => FixResult::NothingToApply,
             (true, true) => match apply() {
                 Ok(detail) => FixResult::Applied(detail),
-                Err(err) => FixResult::Failed((&err).into()),
+                Err(err) => FixResult::Failed(err.into_arg()),
             },
             (false, true) => FixResult::NotSelected,
             (false, false) => return,
@@ -457,7 +431,7 @@ impl FixOutcomes {
     }
 
     fn failed(&mut self, title: Text, err: &BackendError) {
-        self.push(title, FixResult::Failed(err.into()));
+        self.push(title, FixResult::Failed(err.into_arg()));
     }
 
     /// The databases could not be saved to the USB, so nothing applied
@@ -471,7 +445,7 @@ impl FixOutcomes {
                 };
             }
         }
-        self.outcomes.push(Outcome::SaveFailed(err.into()));
+        self.outcomes.push(Outcome::SaveFailed(err.into_arg()));
     }
 
     pub(super) fn count(&self, kind: OutcomeKind) -> usize {
@@ -630,7 +604,9 @@ pub(super) fn write_back_both_or_neither(
             restage_both();
             return Err(BackendError::Internal(format!(
                 "{err}; putting the previous PDB back also failed ({undo_err}), so the USB has the \
-                 repaired PDB with the previous eDB -- restore the \"Before repair\" backup"
+                 repaired PDB with the previous eDB -- restore the \"Before repair\" backup",
+                err = err.english(),
+                undo_err = undo_err.english()
             )));
         }
         restage_both();
@@ -1604,10 +1580,7 @@ impl BackendService {
                                 + dry.pdb_tracks_changed
                                 + dry.pdb_playlists_inserted
                                 + dry.duplicate_entries_removed,
-                            tr::repair_fix_strict_parity_description(strict_parity_summary(
-                                &dry,
-                                crate::i18n::Text::render,
-                            )),
+                            tr::repair_fix_strict_parity_description(strict_parity_summary(&dry)),
                         ),
                         Err(err) => (0, tr::repair_fix_strict_parity_description_failed(err)),
                     };
@@ -1646,7 +1619,7 @@ impl BackendService {
             Err(err) => {
                 logging::debug(
                     "usb-diagnostics",
-                    format!("parity preview unavailable: {err}"),
+                    format!("parity preview unavailable: {err}", err = err.english()),
                 );
             }
         }
@@ -1799,7 +1772,7 @@ impl BackendService {
                 Err(err) => {
                     logging::debug(
                         "usb-repair",
-                        format!("Post-repair diagnostics failed: {err}"),
+                        format!("Post-repair diagnostics failed: {err}", err = err.english()),
                     );
                     None
                 }
@@ -1818,7 +1791,10 @@ impl BackendService {
                 .unwrap_or_else(|err| {
                     logging::debug(
                         "usb-repair",
-                        format!("Playlist export status after repair failed: {err}"),
+                        format!(
+                            "Playlist export status after repair failed: {err}",
+                            err = err.english()
+                        ),
                     );
                     Vec::new()
                 }),
@@ -1936,7 +1912,7 @@ impl BackendService {
         let mut pdb = match StagedPdb::load(usb_root) {
             Ok(pdb) => pdb,
             Err(err) => {
-                outcomes.outcomes.push(Outcome::ReadFailed((&err).into()));
+                outcomes.outcomes.push(Outcome::ReadFailed(err.into_arg()));
                 return outcomes;
             }
         };
@@ -2080,7 +2056,7 @@ impl BackendService {
                     {
                         outcomes.applied(
                             tr::repair_fix_strict_parity(),
-                            Detail::composed(|r| strict_parity_summary(&result, r)),
+                            Detail::Text(strict_parity_summary(&result)),
                         );
                     }
                     Ok(_) => outcomes.nothing_to_apply(tr::repair_fix_strict_parity()),

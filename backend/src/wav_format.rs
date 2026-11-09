@@ -393,7 +393,7 @@ mod tests {
         .unwrap();
         let target = dir.path().join("target.wav");
         let err = rewrite_extensible_to_pcm(&source, &target).expect_err("should reject");
-        assert!(err.to_string().contains("not a safely-convertible"));
+        assert!(err.english().contains("not a safely-convertible"));
     }
 
     #[test]

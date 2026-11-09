@@ -6,7 +6,9 @@
 //! or a missing one fails the build.
 //!
 //! A [`Text`] is a key and its arguments. It becomes text only when shown: [`Text::render`]
-//! (or `Display`) in the process's current language, [`Text::render_english`] for logs. The
+//! in the process's current language, [`Text::render_english`] for logs. A `Text` passed as
+//! another's argument stays a `Text` until the outer one renders, so it comes out in the same
+//! language; for that, `Text` has no `Display` (see [`IntoArg`]). The
 //! current language is one per process, readable from any thread; with nothing set, as in
 //! tests and the CLI tools, it's English. A key missing from another language falls back to
 //! English.
@@ -47,8 +49,62 @@ pub struct Text {
 /// One argument of a [`Text`]. Numbers stay numbers, so a translation can pick its plural form.
 #[derive(Debug, Clone, PartialEq)]
 pub enum Arg {
+    /// Data, shown as it is: a name, a path, a reason from the OS.
     Text(String),
     Number(Num),
+    /// A catalog text, rendered in the language the outer text is rendered in.
+    Inner(Box<Text>),
+}
+
+/// What a text argument of a [`tr`] function takes: anything `Display` (data, shown as it
+/// is), or a [`Text`] or catalog error, which render with the text they're passed into.
+///
+/// `Text` and `BackendError` have no `Display`, so neither can reach an argument (or a
+/// `format!`) already rendered in one language.
+pub trait IntoArg {
+    fn into_arg(self) -> Arg;
+}
+
+impl<T: fmt::Display> IntoArg for T {
+    fn into_arg(self) -> Arg {
+        Arg::Text(self.to_string())
+    }
+}
+
+impl IntoArg for Text {
+    fn into_arg(self) -> Arg {
+        Arg::Inner(Box::new(self))
+    }
+}
+
+impl IntoArg for &Text {
+    fn into_arg(self) -> Arg {
+        Arg::Inner(Box::new(self.clone()))
+    }
+}
+
+/// An argument made earlier and kept, such as an error an outcome holds.
+impl IntoArg for Arg {
+    fn into_arg(self) -> Arg {
+        self
+    }
+}
+
+impl Arg {
+    /// The argument on its own, in the current language: for a value shown outside any text.
+    pub fn render(&self) -> String {
+        match self {
+            Arg::Text(value) => value.clone(),
+            Arg::Number(value) => value.fluent().as_string().into_owned(),
+            Arg::Inner(text) => text.render(),
+        }
+    }
+}
+
+/// `value` as shown in the current language: data as it is, a [`Text`] rendered. For fields
+/// that hold either, such as a diagnostics check's detail.
+pub fn shown(value: impl IntoArg) -> String {
+    value.into_arg().render()
 }
 
 /// A number argument: any integer or float. Counts are what plural forms select on.
@@ -155,12 +211,6 @@ pub fn renderer(english: bool) -> fn(&Text) -> String {
     }
 }
 
-impl fmt::Display for Text {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        f.write_str(&self.render())
-    }
-}
-
 /// One language's parsed catalog.
 struct Catalog {
     language: &'static str,
@@ -215,6 +265,7 @@ impl Catalog {
             let value = match arg {
                 Arg::Text(value) => FluentValue::from(value.as_str()),
                 Arg::Number(value) => FluentValue::Number(value.fluent()),
+                Arg::Inner(inner) => FluentValue::from(inner.render_in(self)),
             };
             args.set(*name, value);
         }
@@ -455,6 +506,23 @@ status-warning-count = { $count ->
     }
 
     #[test]
+    fn a_text_argument_renders_in_the_outer_texts_language() {
+        let outer = Text::new(
+            "fixture-hello",
+            vec![("name", tr::status_warning_count(2usize).into_arg())],
+        );
+        assert_eq!(outer.render_in(&other_catalog()), "Hei 2 varoitusta!");
+        let logged = tr::repair_outcome_failed("Fix X", tr::status_warning_count(2usize));
+        assert_eq!(logged.render_english(), "Fix X failed: (2 warnings)");
+        // An outer text another language lacks falls back to English, inner text included,
+        // so the line stays in one language.
+        assert_eq!(
+            logged.render_in(&other_catalog()),
+            "Fix X failed: (2 warnings)"
+        );
+    }
+
+    #[test]
     fn a_key_missing_from_another_language_falls_back_to_english() {
         let catalog = Catalog::parse("fi", "fixture-hello = Hei!\n").expect("fixture parses");
         assert_eq!(
@@ -467,7 +535,7 @@ status-warning-count = { $count ->
     fn unset_language_is_english() {
         // Nothing in the unit tests sets a language; piece 2's own test file covers switching.
         assert_eq!(current_language(), ENGLISH);
-        assert_eq!(tr::status_warning_count(2usize).to_string(), "(2 warnings)");
+        assert_eq!(tr::status_warning_count(2usize).render(), "(2 warnings)");
     }
 
     #[test]

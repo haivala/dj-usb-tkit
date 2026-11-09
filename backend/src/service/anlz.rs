@@ -1001,7 +1001,8 @@ pub(super) fn fill_mp3_pvbr(dat_path: &Path, audio_path: &Path) -> BackendResult
             "anlz",
             format!(
                 "MP3 seek index not written ({err}): {}",
-                audio_path.display()
+                audio_path.display(),
+                err = err.english()
             ),
         ),
         _ => {}

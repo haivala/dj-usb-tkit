@@ -51,7 +51,7 @@ pub(super) fn play_native_with_recovery(
     match playback.play_path(path, start_offset_ms, start_ratio, start_paused) {
         Ok(status) => Ok(status),
         Err(err) => {
-            if !is_recoverable_playback_error(&err.to_string()) {
+            if !is_recoverable_playback_error(&err.english()) {
                 return Err(err);
             }
             let _ = playback.stop();
@@ -168,7 +168,8 @@ impl BackendService {
                         crate::logging::debug(
                             "playback",
                             format!(
-                                "library copy failed to play ({matched_by}), fell back to USB: {library_err} [library path: {path}]"
+                                "library copy failed to play ({matched_by}), fell back to USB: {library_err} [library path: {path}]",
+                                library_err = library_err.english()
                             ),
                         );
                         let status = play_native_with_recovery(

@@ -1875,7 +1875,7 @@ mod tests {
                 force: false,
             })
             .unwrap_err();
-        assert!(err.to_string().contains("the only track in"), "{err}");
+        assert!(err.english().contains("the only track in"), "{err:?}");
         let playlists: i64 = service
             .db
             .connect()
@@ -1892,7 +1892,7 @@ mod tests {
                 force: false,
             })
             .unwrap_err();
-        assert!(err.to_string().contains("not found"), "{err}");
+        assert!(err.english().contains("not found"), "{err:?}");
     }
 
     #[test]
@@ -2158,6 +2158,6 @@ mod tests {
                 path: Some(path.to_string_lossy().to_string()),
             })
             .unwrap_err();
-        assert!(err.to_string().contains("library/track_locations"), "{err}");
+        assert!(err.english().contains("library/track_locations"), "{err:?}");
     }
 }

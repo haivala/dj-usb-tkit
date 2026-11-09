@@ -1041,7 +1041,7 @@ mod tests {
 
         let err = ensure_tracks_column(&conn, "totally_unknown_column", "TEXT")
             .expect_err("unknown column should be rejected");
-        let msg = err.to_string();
+        let msg = err.english();
         assert!(
             msg.contains("not in allowlist"),
             "unexpected error for disallowed ensure_tracks_column: {msg}"
