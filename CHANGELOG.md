@@ -39,6 +39,8 @@
 
 ## Unreleased
 
+## 0.5.6
+
 - **New feature:** Settings has a Language choice. English is the only language so far. Changing it reloads the
   window in the new language, and isn't possible while a job such as an export or analysis runs.
 - **Fix:** The Player Menu editor now always lists DATE ADDED last, where the players show it. Before, items added
