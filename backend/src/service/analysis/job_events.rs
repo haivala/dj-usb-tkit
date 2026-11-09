@@ -46,7 +46,6 @@ fn job_payload(event: &str, job_id: &str, percent: usize, message: String) -> Jo
         waiting_tooltip: None,
         warnings: None,
         warning_count: None,
-        log_message: None,
         timestamp: Utc::now().to_rfc3339(),
     }
 }
@@ -87,10 +86,8 @@ fn track_payload(job_id: &str, progress: &AnalyzeTrackProgress) -> JobEventPaylo
             "job.progress",
             job_id,
             (progress.current * 100 / total).min(100),
-            format!(
-                "Analyzing {}/{}: {file_name}",
-                progress.current, progress.total
-            ),
+            crate::i18n::tr::analysis_progress(progress.current, progress.total, file_name)
+                .render(),
         )
     }
 }
@@ -104,7 +101,7 @@ pub fn analysis_event_payload(event: &AnalysisEvent) -> JobEventPayload {
                 "job.started",
                 job_id,
                 0,
-                "Analyzing selected tracks".to_string(),
+                crate::i18n::tr::analysis_started().render(),
             )
         },
         AnalysisEvent::TracksWaiting {
@@ -125,7 +122,6 @@ pub fn analysis_event_payload(event: &AnalysisEvent) -> JobEventPayload {
             current: 1,
             warnings: Some(summary.warnings.clone()),
             warning_count: Some(summary.warning_count),
-            log_message: summary.log_message.clone(),
             ..job_payload(
                 "job.completed",
                 &summary.job_id,
@@ -241,19 +237,12 @@ mod tests {
             warnings: Vec::new(),
             warning_count: 2,
             message: "Analysis finished".to_string(),
-            log_message: Some("Analysis: 1 track".to_string()),
         }));
         assert_eq!(finished["event"], "job.completed");
         assert_eq!(finished["percent"], 100);
         assert_eq!(finished["message"], "Analysis finished");
         assert_eq!(finished["warnings"], json!([]));
         assert_eq!(finished["warningCount"], 2);
-        assert_eq!(finished["logMessage"], "Analysis: 1 track");
-        assert_ui_reads(&[
-            "job.completed",
-            "payload.warnings",
-            "payload.warningCount",
-            "payload.logMessage",
-        ]);
+        assert_ui_reads(&["job.completed", "payload.warnings", "payload.warningCount"]);
     }
 }

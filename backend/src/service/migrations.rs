@@ -16,6 +16,7 @@ use std::sync::atomic::Ordering;
 use rusqlite::params;
 
 use crate::error::{BackendError, BackendResult};
+use crate::i18n::{Text, tr};
 use crate::models::RunDataMigrationsData;
 
 use super::BackendService;
@@ -43,7 +44,7 @@ pub(crate) struct Migration {
     pub id: &'static str,
     pub phase: Phase,
     /// Progress-bar text.
-    pub label: &'static str,
+    pub label: fn() -> Text,
     pub run: fn(&BackendService, Progress<'_>) -> BackendResult<Outcome>,
 }
 
@@ -51,7 +52,7 @@ pub(crate) const MIGRATIONS: &[Migration] = &[
     Migration {
         id: "0.2-usb-devices-from-legacy-settings",
         phase: Phase::Startup,
-        label: "Importing USB devices from old settings",
+        label: tr::migration_usb_devices,
         run: |svc, _| {
             svc.backfill_usb_devices_from_legacy_settings()
                 .map(|()| Outcome::Done)
@@ -60,13 +61,13 @@ pub(crate) const MIGRATIONS: &[Migration] = &[
     Migration {
         id: "0.2-track-match-fingerprints",
         phase: Phase::Startup,
-        label: "Filling track fingerprints",
+        label: tr::migration_fingerprints,
         run: |svc, _| svc.backfill_track_fingerprints().map(|()| Outcome::Done),
     },
     Migration {
         id: "0.2-merge-usb-placeholder-tracks",
         phase: Phase::Startup,
-        label: "Merging duplicate USB tracks",
+        label: tr::migration_merge_usb_tracks,
         run: |svc, _| {
             svc.merge_orphaned_usb_placeholder_tracks()
                 .map(|_| Outcome::Done)
@@ -75,13 +76,13 @@ pub(crate) const MIGRATIONS: &[Migration] = &[
     Migration {
         id: "0.3.7-cache-beat-grids",
         phase: Phase::Background,
-        label: "Upgrading cached beat grids",
+        label: tr::migration_beat_grids,
         run: upgrade_cached_beat_grids,
     },
     Migration {
         id: "0.3.7-cache-mp3-seek-index",
         phase: Phase::Background,
-        label: "Adding MP3 seek data",
+        label: tr::migration_mp3_seek,
         run: fill_cached_mp3_seek_indexes,
     },
 ];
@@ -171,7 +172,7 @@ fn run_registry(
             on_progress(
                 current,
                 total,
-                &format!("{}: {current}/{total}", migration.label),
+                &tr::migration_progress((migration.label)(), current, total).render(),
             );
         };
         match (migration.run)(svc, &mut progress) {
@@ -370,7 +371,7 @@ mod tests {
         Migration {
             id: "a",
             phase: Phase::Background,
-            label: "A",
+            label: tr::migration_beat_grids,
             run: |svc, progress| {
                 record("a");
                 if svc.data_migration_running.load(Ordering::SeqCst) {
@@ -384,7 +385,7 @@ mod tests {
         Migration {
             id: "b",
             phase: Phase::Background,
-            label: "B",
+            label: tr::migration_mp3_seek,
             run: |_, _| {
                 record("b");
                 if FAILS_LEFT.load(Ordering::SeqCst) > 0 {
@@ -397,7 +398,7 @@ mod tests {
         Migration {
             id: "s",
             phase: Phase::Startup,
-            label: "S",
+            label: tr::migration_usb_devices,
             run: |_, _| {
                 record("s");
                 Ok(Outcome::Done)
@@ -422,7 +423,10 @@ mod tests {
         assert_eq!(first.retry_later, ["b"]);
         assert_eq!(
             messages,
-            [(1, 2, "A: 1/2".to_string()), (2, 2, "A: 2/2".to_string())]
+            [
+                (1, 2, "Upgrading cached beat grids: 1/2".to_string()),
+                (2, 2, "Upgrading cached beat grids: 2/2".to_string())
+            ]
         );
         assert_eq!(
             SAW_GUARD.load(Ordering::SeqCst),

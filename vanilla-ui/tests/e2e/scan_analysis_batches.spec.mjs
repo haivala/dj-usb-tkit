@@ -332,7 +332,6 @@ function installScanAnalysisMock(page, opts = {}) {
         total,
         percent: 100,
         message: `Analysis finished: analyzed ${analyzed}, failed ${failed}`,
-        logMessage: `Analysis: ${ids.length} tracks in 0:01 (analyzed ${analyzed}, failed ${failed})`,
         timestamp: nowIso()
       });
 
@@ -719,7 +718,6 @@ function installPagedMaterializeAnalyzeMock(page, opts = {}) {
         total,
         percent: 100,
         message: `Analysis finished: analyzed ${analyzed}, failed ${failed}`,
-        logMessage: `Analysis: ${ids.length} tracks in 0:01 (analyzed ${analyzed}, failed ${failed})`,
         timestamp: nowIso()
       });
 
@@ -1086,14 +1084,12 @@ test("the final message is the job's, with its warning count as the Event Log li
       message: "Analysis finished: analyzed 3, failed 1 | (1 warning)",
       warnings: [{ level: "error", source: "analysis", code: "analysis.track-failed", message: "/music/bad.mp3: decode failed" }],
       warningCount: 1,
-      logMessage: "Analysis: 4 tracks in 0:12 (analyzed 3, failed 1)",
     });
   });
   await expect(page.locator("#statusText")).toContainText("Analysis finished: analyzed 3, failed 1");
   await expect(page.locator("#statusText a, #statusText button")).toContainText("(1 warning)");
   await page.locator("#eventLogBtn").click();
   await expect(page.locator("#eventLogList")).toContainText("/music/bad.mp3: decode failed");
-  await expect(page.locator("#eventLogList")).toContainText("Analysis: 4 tracks in 0:12");
 });
 
 test("a first analysis keeps the row's imported BPM and key while it runs", async ({ page }) => {
@@ -1255,13 +1251,26 @@ test("event log entries go to the session log file, which the Open log file butt
   await installScanAnalysisMock(page, { trackCount: 2, pieceDelayMs: 10 });
   await page.goto("/");
 
-  await page.locator("#analyzeLibraryBtn").click();
-  await expect(page.locator("#statusText")).toContainText("analyzed 2, failed 0");
+  await page.waitForFunction(() => window.__hasJobListener?.());
+  // A job's warnings are entries JS makes from the event.
+  await page.evaluate(() => {
+    const job = { jobId: "job-log", jobType: "analysis", stage: "analyze_new_tracks" };
+    window.__emitJobEvent({ ...job, event: "job.started", percent: 0, message: "Analyzing selected tracks" });
+    window.__emitJobEvent({
+      ...job,
+      event: "job.completed",
+      percent: 100,
+      message: "Analysis finished: analyzed 1, failed 1 | (1 warning)",
+      warnings: [{ level: "error", source: "analysis", code: "analysis.track-failed", message: "/music/bad.mp3: decode failed" }],
+      warningCount: 1,
+    });
+  });
 
   await page.locator("#eventLogBtn").click();
-  await expect(page.locator("#eventLogList")).toContainText("2 tracks in");
-  const lines = await page.evaluate(() => window.__scanTestStats.logFileLines);
-  expect(lines.some((line) => line.startsWith("[info] [analysis] [analysis.batch_done] ") && line.includes("2 tracks in"))).toBe(true);
+  await expect(page.locator("#eventLogList")).toContainText("/music/bad.mp3: decode failed");
+  await expect
+    .poll(async () => page.evaluate(() => window.__scanTestStats.logFileLines))
+    .toContainEqual(expect.stringContaining("/music/bad.mp3: decode failed"));
 
   await page.locator("#eventLogOpenFileBtn").click();
   await expect.poll(async () => page.evaluate(() => window.__scanTestStats.openLogFileCalls)).toBe(1);

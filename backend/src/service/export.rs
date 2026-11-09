@@ -1215,7 +1215,7 @@ impl BackendService {
         std::fs::create_dir_all(&media_root)?;
 
         let total_steps = playlist.tracks.len() + 1;
-        on_progress(0, total_steps, "USB: Preparing export");
+        on_progress(0, total_steps, &tr::export_progress_preparing().render());
 
         let mut warnings = Vec::<WarningEntry>::new();
         for track in &unplayable_tracks {
@@ -1305,12 +1305,8 @@ impl BackendService {
             on_progress(
                 idx + 1,
                 total_steps,
-                &format!(
-                    "USB: Copying track {}/{}: {}",
-                    idx + 1,
-                    playlist.tracks.len(),
-                    track.file_name
-                ),
+                &tr::export_progress_copying(idx + 1, playlist.tracks.len(), &track.file_name)
+                    .render(),
             );
 
             let source = PathBuf::from(&track.file_path);
@@ -1589,11 +1585,15 @@ impl BackendService {
             on_progress(
                 playlist.tracks.len(),
                 total_steps,
-                "USB: Waiting for files to finish writing",
+                &tr::export_progress_waiting_for_writes().render(),
             );
         }
         closer.finish();
-        on_progress(total_steps, total_steps, "USB: Finalizing export metadata");
+        on_progress(
+            total_steps,
+            total_steps,
+            &tr::export_progress_finalizing_export_metadata().render(),
+        );
         let manifest = ExportManifest {
             generated_at: now(),
             playlist_id: playlist.id.clone(),
@@ -1847,7 +1847,11 @@ impl BackendService {
             }
             // After the prune, which can still drop PDB rows.
             if self.engine_library_enabled() {
-                on_progress(total_steps, total_steps, "USB: Writing Engine DJ library");
+                on_progress(
+                    total_steps,
+                    total_steps,
+                    &tr::export_progress_writing_engine_dj_library().render(),
+                );
             }
             warnings.extend(self.refresh_engine_library(&usb_root));
             self.save_export_owned_files(&owned_setting_key, &current_owned)?;
@@ -2086,7 +2090,7 @@ impl BackendService {
                 on_progress(
                     done,
                     total,
-                    &format!("USB: Converting track {done}/{total}: {name}"),
+                    &tr::export_progress_converting(done, total, name).render(),
                 );
             })?
         };

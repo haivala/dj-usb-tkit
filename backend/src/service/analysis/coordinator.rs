@@ -27,6 +27,7 @@ use super::{
     resolve_worker_cap_for_engine,
 };
 use crate::error::{BackendError, BackendResult};
+use crate::i18n::{Text, tr};
 use crate::logging::{self, Level};
 use crate::models::{
     AnalysisSubmittedData, AnalyzeNewTracksData, AnalyzeNewTracksRequest, SetAnalysisPausedData,
@@ -36,9 +37,7 @@ use crate::service::bpm_key::AnalysisEngine;
 use crate::service::export_helpers::{LocalAnalysisResult, LocalTrackForAnalysis};
 use crate::service::key_notation::{self, KeyNotation};
 use crate::service::{BackendService, has_core_analysis_fields, now};
-use crate::utils::counted;
-
-const WAITING_TOOLTIP: &str = "Waiting for its turn to be analyzed";
+use crate::utils::warning_suffix;
 
 /// What a job tells whoever shows it to the user.
 #[derive(Debug, Clone)]
@@ -71,8 +70,6 @@ pub struct AnalysisJobSummary {
     pub warning_count: usize,
     /// For the status line.
     pub message: String,
-    /// For the Event Log; `None` when no track was processed.
-    pub log_message: Option<String>,
 }
 
 pub type AnalysisObserver = Arc<dyn Fn(&AnalysisEvent) + Send + Sync>;
@@ -395,7 +392,7 @@ impl Coordinator {
             self.emit(&AnalysisEvent::TracksWaiting {
                 job_id: self.job_id.clone(),
                 track_ids: queued_ids.clone(),
-                tooltip: WAITING_TOOLTIP.to_string(),
+                tooltip: tr::analysis_waiting_tooltip().render(),
             });
         }
 
@@ -625,20 +622,25 @@ impl Coordinator {
         let warning_count = logging::count_warnings(&self.warnings);
         let elapsed_ms = elapsed_ms_since(self.started_at);
         let (analyzed, failed) = (self.analyzed, self.failed);
-        let log_message = (self.completed > 0).then(|| {
-            format!(
-                "Analysis: {} in {} ({})",
-                counted(self.completed, "track", "tracks"),
-                format_elapsed(elapsed_ms),
-                result_text(analyzed, failed, self.incomplete),
-            )
-        });
+        // The job's summary for the Event Log, logged here so the file gets it in English.
+        if self.completed > 0 {
+            logging::emit_text(
+                Level::Info,
+                "analysis",
+                &log_text(
+                    self.completed,
+                    &format_elapsed(elapsed_ms),
+                    analyzed,
+                    failed,
+                    self.incomplete,
+                ),
+            );
+        }
         let summary = AnalysisEvent::JobFinished(AnalysisJobSummary {
             job_id: self.job_id.clone(),
             warnings: std::mem::take(&mut self.warnings),
             warning_count,
             message: finished_text(analyzed, failed, self.incomplete, warning_count),
-            log_message,
         });
         self.emit(&summary);
     }
@@ -708,35 +710,37 @@ fn save_result(
 
 fn submitted_message(queued: usize, skipped: usize) -> String {
     match (queued, skipped) {
-        (0, 0) => "No tracks need analysis".to_string(),
-        (0, skipped) => format!("Already analyzing {}", counted(skipped, "track", "tracks")),
-        (queued, 0) => format!("Analyzing {}", counted(queued, "track", "tracks")),
-        (queued, skipped) => format!(
-            "Analyzing {}, {skipped} already in progress",
-            counted(queued, "track", "tracks")
-        ),
+        (0, 0) => tr::analysis_submitted_none(),
+        (0, skipped) => tr::analysis_submitted_already(skipped),
+        (queued, 0) => tr::analysis_submitted(queued),
+        (queued, skipped) => tr::analysis_submitted_some_already(queued, skipped),
     }
+    .render()
 }
 
-fn result_text(analyzed: usize, failed: usize, incomplete: usize) -> String {
+/// The Event Log's line for a finished job.
+fn log_text(
+    tracks: usize,
+    elapsed: &str,
+    analyzed: usize,
+    failed: usize,
+    incomplete: usize,
+) -> Text {
     if incomplete > 0 {
-        format!("analyzed {analyzed}, failed {failed}, incomplete {incomplete}")
+        tr::analysis_log_incomplete(tracks, elapsed, analyzed, failed, incomplete)
     } else {
-        format!("analyzed {analyzed}, failed {failed}")
+        tr::analysis_log(tracks, elapsed, analyzed, failed)
     }
 }
 
 /// The status line turns what follows the `|` into a link to the Event Log.
 fn finished_text(analyzed: usize, failed: usize, incomplete: usize, warnings: usize) -> String {
-    let result = result_text(analyzed, failed, incomplete);
-    if warnings > 0 {
-        format!(
-            "Analysis finished: {result} | ({})",
-            counted(warnings, "warning", "warnings")
-        )
+    let result = if incomplete > 0 {
+        tr::analysis_finished_incomplete(analyzed, failed, incomplete)
     } else {
-        format!("Analysis finished: {result}")
-    }
+        tr::analysis_finished(analyzed, failed)
+    };
+    format!("{result}{}", warning_suffix(warnings))
 }
 
 fn format_elapsed(ms: u64) -> String {
@@ -941,6 +945,14 @@ mod tests {
         assert_eq!(format_elapsed(3_725_000), "1:02:05");
         assert_eq!(submitted_message(0, 0), "No tracks need analysis");
         assert_eq!(submitted_message(0, 1), "Already analyzing 1 track");
+        assert_eq!(
+            submitted_message(2, 1),
+            "Analyzing 2 tracks, 1 already in progress"
+        );
+        assert_eq!(
+            log_text(3, "0:12", 2, 0, 1).render(),
+            "Analysis: 3 tracks in 0:12 (analyzed 2, failed 0, incomplete 1)"
+        );
         assert_eq!(
             finished_text(0, 1, 0, 0),
             "Analysis finished: analyzed 0, failed 1"

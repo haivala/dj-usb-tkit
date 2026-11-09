@@ -576,7 +576,11 @@ impl BackendService {
             .usb_write_lock
             .lock()
             .unwrap_or_else(std::sync::PoisonError::into_inner);
-        on_progress(0, STEPS, "USB: Checking tracks");
+        on_progress(
+            0,
+            STEPS,
+            &tr::track_details_progress_checking_tracks().render(),
+        );
 
         let usb_root = resolve_usb_root(Some(&req.usb_root))?;
         let mut seen = std::collections::HashSet::new();
@@ -621,7 +625,7 @@ impl BackendService {
             .collect();
         let pdb_patch = build_pdb_metadata_patch(&usb_root, &media_paths, &edits)?;
 
-        on_progress(1, STEPS, "USB: Writing export.pdb");
+        on_progress(1, STEPS, &tr::track_details_progress_writing_pdb().render());
         if let Some((staged_pdb, bytes)) = pdb_patch.write {
             atomic_write_bytes(&staged_pdb, &bytes)?;
             super::usb_staging::write_back_if_changed(&usb_root, super::usb_staging::DbKind::Pdb)?;
@@ -669,7 +673,7 @@ impl BackendService {
         }
         tx.commit()?;
 
-        on_progress(2, STEPS, "USB: Writing exportLibrary.db");
+        on_progress(2, STEPS, &tr::track_details_progress_writing_edb().render());
         let tx = edb_conn.transaction()?;
         let content_columns = load_table_columns_tx(&tx, "content")?;
         let edb_genre_id = match &edits.genre {
@@ -726,7 +730,7 @@ impl BackendService {
         self.refresh_engine_library(&usb_root);
         self.invalidate_usb_parse_cache();
 
-        on_progress(STEPS, STEPS, "USB: Track details saved");
+        on_progress(STEPS, STEPS, &tr::track_details_progress_saved().render());
         let paths: Vec<String> = items
             .iter()
             .map(|item| item.usb_media_path_raw.clone())

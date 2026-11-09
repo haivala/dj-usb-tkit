@@ -6,6 +6,7 @@ use std::path::Path;
 use super::BackendService;
 use super::usb_utils::resolve_usb_root;
 use crate::error::{BackendError, BackendResult};
+use crate::i18n::tr;
 use crate::models::{
     BuildUsbHistoryTracklistData, BuildUsbHistoryTracklistRequest,
     GetUsbHistoryTracklistOptionsData, GetUsbHistoryTracklistOptionsRequest, TracklistTimeMode,
@@ -17,14 +18,14 @@ const START_TRACK_LABEL_MAX_CHARS: usize = 64;
 /// `Artist - Title`, with the same defaults the track tables show.
 fn track_line(track: &UsbTrack) -> String {
     let artist = if track.artist.is_empty() {
-        "Unknown Artist"
+        tr::track_row_unknown_artist().render()
     } else {
-        &track.artist
+        track.artist.clone()
     };
     let title = if track.title.is_empty() {
-        "Unknown Title"
+        tr::track_row_unknown_title().render()
     } else {
-        &track.title
+        track.title.clone()
     };
     format!("{artist} - {title}")
 }
@@ -137,8 +138,8 @@ impl BackendService {
         Ok(BuildUsbHistoryTracklistData {
             suggested_file_name: tracklist_file_name(&history.name),
             contents: tracklist_text(tracks, req.time_mode),
-            exported_text: format!("Tracklist exported: {}", history.name),
-            cancelled_text: "Tracklist export cancelled".to_string(),
+            exported_text: tr::tracklist_export_done(&history.name).render(),
+            cancelled_text: tr::tracklist_export_cancelled().render(),
         })
     }
 }

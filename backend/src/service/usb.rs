@@ -1298,8 +1298,8 @@ impl BackendService {
     {
         let mut warnings = Vec::<WarningEntry>::new();
         let mut stage_started = std::time::Instant::now();
-        on_progress(2, 100, "USB: Resolving root");
-        on_progress(10, 100, "USB: Parsing PDB");
+        on_progress(2, 100, &tr::usb_progress_resolving_root().render());
+        on_progress(10, 100, &tr::usb_progress_parsing_pdb().render());
         let usb_root = resolve_usb_root(req.usb_root.as_deref())?;
         push_usb_stage_timing(&mut warnings, "resolve usb root", &mut stage_started);
 
@@ -1334,7 +1334,7 @@ impl BackendService {
         };
         push_usb_stage_timing(&mut warnings, "parse PDB", &mut stage_started);
 
-        on_progress(30, 100, "USB: Reading eDB");
+        on_progress(30, 100, &tr::usb_progress_reading_edb().render());
         // Open the eDB once and reuse it for every read below -- opening it
         // per-call was redundantly re-running SQLCipher key negotiation
         // (see try_read_track_index_from_edb_with_conn's doc comment).
@@ -1409,7 +1409,11 @@ impl BackendService {
             }
         }
 
-        on_progress(50, 100, "USB: Resolving eDB candidates");
+        on_progress(
+            50,
+            100,
+            &tr::usb_progress_resolving_edb_candidates().render(),
+        );
         let mut seen = playlist_candidates
             .iter()
             .map(|c| canonicalize_playlist_name(&c.display_name))
@@ -1434,7 +1438,7 @@ impl BackendService {
                 .then(a.display_name.cmp(&b.display_name))
         });
 
-        on_progress(70, 100, "USB: Resolving playlists");
+        on_progress(70, 100, &tr::usb_progress_resolving_playlists().render());
         let mut items = Vec::new();
         let mut referenced_track_ids = HashSet::<u32>::new();
         let mut playlist_entries_total = 0usize;
@@ -1516,7 +1520,11 @@ impl BackendService {
             ));
         }
 
-        on_progress(90, 100, "USB: Finalizing playlist import");
+        on_progress(
+            90,
+            100,
+            &tr::usb_progress_finalizing_playlist_import().render(),
+        );
         let stats = UsbImportStats {
             indexed_tracks: parsed.as_ref().map(|p| p.tracks.len()).unwrap_or(0),
             playlist_referenced_tracks: referenced_track_ids.len(),
@@ -1621,10 +1629,14 @@ impl BackendService {
         F: FnMut(usize, usize, &str),
     {
         let mut warnings = Vec::<WarningEntry>::new();
-        on_progress(0, 100, "USB: Resolving USB root");
+        on_progress(0, 100, &tr::usb_progress_resolving_usb_root().render());
         let usb_root = resolve_usb_root(req.usb_root.as_deref())?;
 
-        on_progress(5, 100, "USB: Backing up USB databases");
+        on_progress(
+            5,
+            100,
+            &tr::usb_progress_backing_up_usb_databases().render(),
+        );
         warnings.extend(
             self.backup_usb_databases_with_retention(&usb_root, "Before playlist reorder", None)
                 .into_iter()
@@ -1633,7 +1645,11 @@ impl BackendService {
                 }),
         );
 
-        on_progress(10, 100, "USB: Computing new playlist order");
+        on_progress(
+            10,
+            100,
+            &tr::usb_progress_computing_new_playlist_order().render(),
+        );
         // Every playlist gets its place in the whole list, in both databases, so
         // a read can sort rows from either database together.
         let mut pdb_order = HashMap::<u32, u32>::new();
@@ -1654,7 +1670,11 @@ impl BackendService {
             ));
         }
 
-        on_progress(30, 100, "USB: Writing PDB playlist order");
+        on_progress(
+            30,
+            100,
+            &tr::usb_progress_writing_pdb_playlist_order().render(),
+        );
         let mut patched = 0usize;
         if !pdb_order.is_empty() {
             patched =
@@ -1683,7 +1703,11 @@ impl BackendService {
             }
         }
 
-        on_progress(70, 100, "USB: Writing eDB playlist order");
+        on_progress(
+            70,
+            100,
+            &tr::usb_progress_writing_edb_playlist_order().render(),
+        );
         let edb_updated =
             crate::service::repair::write_edb_playlist_order(&usb_root, &edb_order, &mut warnings)?;
         if patched == 0 && edb_updated == 0 {
@@ -1711,7 +1735,7 @@ impl BackendService {
         }
         warnings.extend(self.refresh_engine_library(&usb_root));
 
-        on_progress(100, 100, "USB: Playlist order saved");
+        on_progress(100, 100, &tr::usb_progress_playlist_order_saved().render());
         self.invalidate_usb_parse_cache();
 
         let warning_count = logging::count_warnings(&warnings);
@@ -1752,7 +1776,7 @@ impl BackendService {
         }
 
         // Stage 1: Resolve USB root, name candidates (0-10%)
-        on_progress(0, 100, "USB: Resolving USB root");
+        on_progress(0, 100, &tr::usb_progress_resolving_usb_root().render());
         let usb_root = resolve_usb_root(req.usb_root.as_deref())?;
         push_usb_stage_timing(&mut warnings, "resolve usb root", &mut stage_started);
 
@@ -1772,7 +1796,11 @@ impl BackendService {
         );
         push_usb_stage_timing(&mut warnings, "backup usb databases", &mut stage_started);
 
-        on_progress(5, 100, "USB: Resolving playlist identifiers");
+        on_progress(
+            5,
+            100,
+            &tr::usb_progress_resolving_playlist_identifiers().render(),
+        );
         let mut name_candidates = vec![name.clone()];
         if let Some((_, leaf)) = name.rsplit_once(" / ") {
             let leaf_trimmed = leaf.trim().to_string();
@@ -1791,7 +1819,11 @@ impl BackendService {
         );
 
         // Stage 2: Remove playlist + detect shared tracks in PDB (10-30%)
-        on_progress(10, 100, "USB: Analyzing playlists and shared tracks");
+        on_progress(
+            10,
+            100,
+            &tr::usb_progress_analyzing_shared_tracks().render(),
+        );
         let pdb_result = remove_playlist_and_tracks_from_pdb(
             &usb_root,
             req.playlist_id.as_deref(),
@@ -1818,7 +1850,11 @@ impl BackendService {
         }
 
         // Stage 3: Delete exclusive track files (30-65%)
-        on_progress(30, 100, "USB: Deleting exclusive track files");
+        on_progress(
+            30,
+            100,
+            &tr::usb_progress_deleting_exclusive_track_files().render(),
+        );
         let mut stale_paths = Vec::<String>::new();
         let mut exclusive_track_file_paths = Vec::<String>::new();
 
@@ -1895,7 +1931,7 @@ impl BackendService {
         );
 
         // Stage 4: Remove from eDB (65-80%)
-        on_progress(65, 100, "USB: Cleaning eDB");
+        on_progress(65, 100, &tr::usb_progress_cleaning_edb().render());
         let removed_edb = remove_playlist_from_edb(
             &usb_root,
             &name_candidates,
@@ -1919,7 +1955,11 @@ impl BackendService {
         );
 
         // Stage 5: Clean up empty directories under Contents/ (80-95%)
-        on_progress(80, 100, "USB: Cleaning empty directories");
+        on_progress(
+            80,
+            100,
+            &tr::usb_progress_cleaning_empty_directories().render(),
+        );
         let contents_dir = usb_root.join("Contents");
         if contents_dir.is_dir() {
             cleanup_empty_dirs_recursive(&contents_dir);
@@ -1938,14 +1978,18 @@ impl BackendService {
         }
 
         // Stage 6: Finalize (95-100%)
-        on_progress(95, 100, "USB: Finalizing");
+        on_progress(95, 100, &tr::usb_progress_finalizing().render());
         warnings.extend(self.refresh_engine_library(&usb_root));
         push_usb_stage_timing(
             &mut warnings,
             "finalize playlist removal",
             &mut stage_started,
         );
-        on_progress(100, 100, "USB: Playlist removal completed");
+        on_progress(
+            100,
+            100,
+            &tr::usb_progress_playlist_removal_completed().render(),
+        );
         self.invalidate_usb_parse_cache();
 
         let warning_count = logging::count_warnings(&warnings);
@@ -1976,8 +2020,8 @@ impl BackendService {
     {
         let mut stage_warnings = Vec::<WarningEntry>::new();
         let mut stage_started = std::time::Instant::now();
-        on_progress(2, 100, "USB: Resolving root");
-        on_progress(10, 100, "USB: Parsing PDB");
+        on_progress(2, 100, &tr::usb_progress_resolving_root().render());
+        on_progress(10, 100, &tr::usb_progress_parsing_pdb().render());
         let usb_root = resolve_usb_root(req.usb_root.as_deref())?;
         push_usb_stage_timing(&mut stage_warnings, "resolve usb root", &mut stage_started);
 
@@ -2026,7 +2070,11 @@ impl BackendService {
 
         let parsed = parse_pdb(&pdb_path)?;
         push_usb_stage_timing(&mut stage_warnings, "parse PDB", &mut stage_started);
-        on_progress(30, 100, "USB: Reading supplemental databases");
+        on_progress(
+            30,
+            100,
+            &tr::usb_progress_reading_supplemental_databases().render(),
+        );
         let mut supplemental_warnings = Vec::<WarningEntry>::new();
         // Open the eDB once and reuse it for every read below -- opening it
         // per-call was redundantly re-running SQLCipher key negotiation up
@@ -2134,11 +2182,15 @@ impl BackendService {
             },
         );
 
-        on_progress(50, 100, "USB: Building track index");
+        on_progress(50, 100, &tr::usb_progress_building_track_index().render());
         let track_by_id = build_usb_track_index(&parsed, &usb_root);
         push_usb_stage_timing(&mut stage_warnings, "build track index", &mut stage_started);
 
-        on_progress(70, 100, "USB: Resolving history entries");
+        on_progress(
+            70,
+            100,
+            &tr::usb_progress_resolving_history_entries().render(),
+        );
         let (history_playlists, selected_history_entries) =
             select_history_rows(&parsed.history_playlists, &parsed.history_entries);
         let history_playlists = filter_named_history_playlists(history_playlists);
@@ -2249,7 +2301,11 @@ impl BackendService {
         // Newest first. Only now: the date carry-forward above needs ascending order.
         items.reverse();
 
-        on_progress(90, 100, "USB: Finalizing history import");
+        on_progress(
+            90,
+            100,
+            &tr::usb_progress_finalizing_history_import().render(),
+        );
         let mut warnings: Vec<WarningEntry> = parsed
             .warnings
             .iter()

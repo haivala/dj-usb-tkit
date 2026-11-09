@@ -22,6 +22,7 @@ use crate::audio_encode::TranscodeFormat;
 use crate::audio_format::{UsbAudioFormat, format_ext_from_path, track_rekordbox_file_type};
 use crate::edb::ExportTrackData;
 use crate::error::BackendResult;
+use crate::i18n::tr;
 use crate::models::{Track, TrackExportFile};
 
 use super::anlz::{atomic_write_bytes, transcode_bundle_file};
@@ -277,31 +278,28 @@ fn choose_export_file(
 
 /// What the FMT column shows for `file`; `None` for the track's own file.
 fn track_export_file(track: &Track, file: &ExportFile) -> Option<TrackExportFile> {
-    let source = format!("source: {}", track_format_text(track));
+    let source = tr::transcode_export_source(track_format_text(track)).render();
     let (kind, badge, tooltip) = match file {
         ExportFile::Source => return None,
         ExportFile::Transcode(file) => (
             "transcode",
             file.format.as_str().to_ascii_uppercase(),
-            format!(
-                "{} transcode · {}, exported to this USB — {source}",
+            tr::transcode_export_exported(
                 file.format.label(),
-                size_text(file.file_size_bytes)
-            ),
+                size_text(file.file_size_bytes),
+                &source,
+            )
+            .render(),
         ),
         ExportFile::Make(format) => (
             "convert",
             format.as_str().to_ascii_uppercase(),
-            format!("Converted to {} on export — {source}", format.label()),
+            tr::transcode_export_convert(format.label(), &source).render(),
         ),
         ExportFile::Refused(format) => (
             "refused",
             format.label().to_string(),
-            format!(
-                "{} — {} can't go on this USB: only lossless files can be converted",
-                track_format_text(track),
-                format.label()
-            ),
+            tr::transcode_export_refused(track_format_text(track), format.label()).render(),
         ),
     };
     Some(TrackExportFile {

@@ -65,7 +65,7 @@ impl BackendService {
             }
             stage_started = std::time::Instant::now();
         };
-        on_progress(2, 100, "USB: Resolving root");
+        on_progress(2, 100, &tr::diagnostics_progress_resolving_root().render());
         let usb_root = resolve_usb_root(req.usb_root.as_deref())?;
         let mut raw_warnings = Vec::<WarningEntry>::new();
         raw_warnings.push(logging::log(
@@ -82,12 +82,20 @@ impl BackendService {
         };
 
         // --- 1. PDB Integrity ---
-        on_progress(10, 100, "USB: Checking PDB integrity");
+        on_progress(
+            10,
+            100,
+            &tr::diagnostics_progress_checking_pdb_integrity().render(),
+        );
         let (pdb_integrity, parsed_opt) = diagnose_pdb_integrity(&pdb_path, &mut raw_warnings);
         note_stage("pdb integrity", &mut raw_warnings);
 
         // --- 2. DB Access ---
-        on_progress(30, 100, "USB: Checking database access");
+        on_progress(
+            30,
+            100,
+            &tr::diagnostics_progress_checking_database_access().render(),
+        );
         let edb_path = vendor_edb_path(&usb_root);
         let mut edb_open_warnings = Vec::<WarningEntry>::new();
         let owned_edb_conn: Option<rusqlite::Connection> = if edb_conn.is_some() {
@@ -151,7 +159,11 @@ impl BackendService {
         note_stage("db access", &mut raw_warnings);
 
         // --- 3. Contents Integrity ---
-        on_progress(50, 100, "USB: Checking contents integrity (DB-only)");
+        on_progress(
+            50,
+            100,
+            &tr::diagnostics_progress_checking_contents_integrity().render(),
+        );
         let pdb_indexed_paths = parsed_opt
             .as_ref()
             .map(|p| {
@@ -318,7 +330,11 @@ impl BackendService {
         note_stage("contents integrity", &mut raw_warnings);
 
         // --- 4. Analysis Integrity ---
-        on_progress(70, 100, "USB: Checking analysis references");
+        on_progress(
+            70,
+            100,
+            &tr::diagnostics_progress_checking_analysis_references().render(),
+        );
         let edb_content_rows = conn.and_then(|c| {
             c.query_row("SELECT COUNT(*) FROM content", [], |r| r.get::<_, i64>(0))
                 .ok()
@@ -427,7 +443,11 @@ impl BackendService {
         note_stage("analysis integrity", &mut raw_warnings);
 
         // --- 5. Playlist Resolution ---
-        on_progress(85, 100, "USB: Checking playlist resolution");
+        on_progress(
+            85,
+            100,
+            &tr::diagnostics_progress_checking_playlist_resolution().render(),
+        );
         let (playlist_resolution, playlist_details) =
             diagnose_playlist_resolution_with_edb_internal(
                 parsed_opt.as_ref().map(|p| &p.0),
@@ -599,7 +619,7 @@ impl BackendService {
             }
             stage_started = std::time::Instant::now();
         };
-        on_progress(2, 100, "USB: Resolving root");
+        on_progress(2, 100, &tr::diagnostics_progress_resolving_root().render());
         let usb_root = resolve_usb_root(req.usb_root.as_deref())?;
         let mut raw_warnings = vec![logging::log(
             Level::Info,
@@ -609,7 +629,7 @@ impl BackendService {
         )];
         note_stage("resolve usb root", &mut raw_warnings);
 
-        on_progress(20, 100, "USB: Parsing PDB");
+        on_progress(20, 100, &tr::diagnostics_progress_parsing_pdb().render());
         let pdb_path = match staged_pdb_path {
             Some(p) => p.to_path_buf(),
             None => crate::service::usb_staging::stage_pdb(&usb_root)?,
@@ -632,7 +652,7 @@ impl BackendService {
         }));
         note_stage("parse PDB", &mut raw_warnings);
 
-        on_progress(45, 100, "USB: Reading eDB");
+        on_progress(45, 100, &tr::diagnostics_progress_reading_edb().render());
         let owned_edb_conn: Option<rusqlite::Connection> = if edb_conn.is_some() {
             None
         } else {
@@ -655,7 +675,11 @@ impl BackendService {
         let field_notes = compare_note_fields(conn, parsed, &edb_playlists);
         note_stage("read eDB", &mut raw_warnings);
 
-        on_progress(58, 100, "USB: Checking indexed audio file presence");
+        on_progress(
+            58,
+            100,
+            &tr::diagnostics_progress_checking_audio_files().render(),
+        );
         let edb_audio_paths = collect_edb_audio_paths(conn, &mut raw_warnings);
         let presence = scan_audio_presence(&usb_root, parsed, &edb_audio_paths);
         for path in &presence.missing {
@@ -681,7 +705,11 @@ impl BackendService {
         );
         note_stage("strict raw coverage check", &mut raw_warnings);
 
-        on_progress(70, 100, "USB: Comparing playlist sources");
+        on_progress(
+            70,
+            100,
+            &tr::diagnostics_progress_comparing_playlist_sources().render(),
+        );
         let (checks, summary_rows, playlist_details, overall_status) = build_usb_parity_comparison(
             parsed,
             &edb_playlists,
@@ -701,7 +729,11 @@ impl BackendService {
         );
         note_stage("compare playlist sources", &mut raw_warnings);
 
-        on_progress(95, 100, "USB: Finalizing parity report");
+        on_progress(
+            95,
+            100,
+            &tr::diagnostics_progress_finalizing_parity_report().render(),
+        );
         note_stage("finalize", &mut raw_warnings);
         let duration_ms = start.elapsed().as_millis() as u64;
         let status_label = crate::i18n::tr::parity_status_label(match overall_status {

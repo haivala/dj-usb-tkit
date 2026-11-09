@@ -13,7 +13,7 @@
 #             tracklist-export
 #   JS only:  job (also the progress bar), update, playback
 #   Rust:     export, diagnostics, parity, repair, track-list, analysis, scan, job,
-#             error
+#             migration, transcode, error
 #   shared:   common (generic dialog buttons and words only); markup repeated on
 #             several pages: selection-bar, track-table, rating; and one area per
 #             <template> used on more than one page, named from its id
@@ -51,6 +51,32 @@ usb-initialized = USB initialized
 # The status lines after naming the drive. $name: the new name.
 usb-drive-renamed = Drive renamed to { $name }.
 usb-drive-name-unchanged = Drive name unchanged.
+
+
+# The progress bar while the job runs.
+usb-progress-resolving-root = USB: Resolving root
+usb-progress-parsing-pdb = USB: Parsing PDB
+usb-progress-reading-edb = USB: Reading eDB
+usb-progress-resolving-edb-candidates = USB: Resolving eDB candidates
+usb-progress-resolving-playlists = USB: Resolving playlists
+usb-progress-finalizing-playlist-import = USB: Finalizing playlist import
+usb-progress-resolving-usb-root = USB: Resolving USB root
+usb-progress-backing-up-usb-databases = USB: Backing up USB databases
+usb-progress-computing-new-playlist-order = USB: Computing new playlist order
+usb-progress-writing-pdb-playlist-order = USB: Writing PDB playlist order
+usb-progress-writing-edb-playlist-order = USB: Writing eDB playlist order
+usb-progress-playlist-order-saved = USB: Playlist order saved
+usb-progress-resolving-playlist-identifiers = USB: Resolving playlist identifiers
+usb-progress-analyzing-shared-tracks = USB: Analyzing playlists and shared tracks
+usb-progress-deleting-exclusive-track-files = USB: Deleting exclusive track files
+usb-progress-cleaning-edb = USB: Cleaning eDB
+usb-progress-cleaning-empty-directories = USB: Cleaning empty directories
+usb-progress-finalizing = USB: Finalizing
+usb-progress-playlist-removal-completed = USB: Playlist removal completed
+usb-progress-reading-supplemental-databases = USB: Reading supplemental databases
+usb-progress-building-track-index = USB: Building track index
+usb-progress-resolving-history-entries = USB: Resolving history entries
+usb-progress-finalizing-history-import = USB: Finalizing history import
 
 ## usb-playlists
 
@@ -746,6 +772,22 @@ diagnostics-check-parity-rating-colour-detail = { $count ->
    *[other] { $count } playlist-linked tracks
 } with a different rating or colour in the PDB than in the eDB (rating differs: { $ratings }, colour differs: { $colours })
 
+
+# The progress bar while the job runs.
+diagnostics-progress-resolving-root = USB: Resolving root
+diagnostics-progress-checking-pdb-integrity = USB: Checking PDB integrity
+diagnostics-progress-checking-database-access = USB: Checking database access
+diagnostics-progress-checking-contents-integrity = USB: Checking contents integrity (DB-only)
+diagnostics-progress-checking-analysis-references = USB: Checking analysis references
+diagnostics-progress-checking-playlist-resolution = USB: Checking playlist resolution
+diagnostics-progress-parsing-pdb = USB: Parsing PDB
+diagnostics-progress-reading-edb = USB: Reading eDB
+diagnostics-progress-checking-audio-files = USB: Checking indexed audio file presence
+diagnostics-progress-comparing-playlist-sources = USB: Comparing playlist sources
+diagnostics-progress-finalizing-parity-report = USB: Finalizing parity report
+# $current: playlists done. $total: playlists in all. $playlist: its name.
+diagnostics-progress-resolving-playlist = Resolving playlist { $current }/{ $total }: { $playlist }
+
 ## repair
 
 # The status line when the repair preview is ready. $ms: how long it took, in milliseconds.
@@ -792,6 +834,353 @@ repair-summary = Apply Fixes repairs { $count ->
     [one] { $count } problem
    *[other] { $count } problems
 } on this USB. The databases are backed up first.
+
+# The repair preview's fix list: each fix's title, then what it does. The words in code style
+# (DAT, EXT, 2EX, ANLZ, PPTH, PVBR, PVB2, tt=…, u5, num_rl, nrs, empty_candidate,
+# next_unused_page, seqdb, playlist_entries, history_content) are file-format names: keep them.
+repair-fix-empty-analysis = Fix Empty Analysis Files
+repair-fix-empty-analysis-description = Regenerate missing/empty DAT/EXT/2EX bundles when source audio is resolvable.
+repair-fix-bpm-key = Fix BPM/Key Mismatch
+repair-fix-bpm-key-description = Rebuild the ANLZ beat grid and set the eDB BPM and key from each track's PDB row, so every player reads the same BPM and key. Waveforms, cues and the first beat are kept. See Event Log for the tracks.
+repair-fix-shared-analysis = Give Tracks Their Own Analysis Files
+# $count: the tracks.
+repair-fix-shared-analysis-description = Tracks using another track's analysis file: { $count }. Players can show that track's waveform and beat grid instead. Each gets its own file in its folder (ANLZ0001 and on, as rekordbox names them), analysed from its audio with its BPM; the file's own track keeps it. Old cues stay with the other track. See Event Log for the list.
+repair-fix-analysis-path = Add Track Path to Analysis Files
+# $count: the analysis files.
+repair-fix-analysis-path-description = Analysis files not naming their track (PPTH): { $count }. Players use that path to find a track's file when two tracks hash to the same folder. Writes the track path into each; nothing else changes. See Event Log for the list.
+repair-fix-beat-grid = Fix Beat Grid
+repair-fix-beat-grid-description = Rewrite beat grids from app versions before 0.3.7 in rekordbox's format: the .DAT header value two bytes off, and the .EXT extended grid without its checksum and sub-millisecond beat times. Some players (e.g. the XDJ-AZ) refuse Beat Sync on those. Beat positions stay within 1 ms; cues and waveforms are kept.
+repair-fix-mp3-seek = Add Missing MP3 Seek Data
+repair-fix-mp3-seek-description = Read each MP3 on the USB and write the seek index rekordbox writes for it (PVBR in the .DAT), byte for byte as rekordbox does. Beat grids, cues and waveforms are kept. Files whose index can't be reproduced exactly are skipped and named in the Event Log.
+repair-fix-flac-seek = Add Missing FLAC Seek Data
+repair-fix-flac-seek-description = Read each FLAC on the USB and write a seek index (PVB2 in the .EXT). For long tracks about 98% of its entries match rekordbox's; the rest are one frame later. Beat grids, cues and waveforms are kept. Files that don't parse cleanly are skipped and named in the Event Log.
+repair-fix-history-shape = Repair PDB History/Columns Page Footer Shape
+# $count: the pages.
+repair-fix-history-shape-description = Patch u5/num_rl footer fields on { $count ->
+    [one] { $count } tt=16/17/18 data page
+   *[other] { $count } tt=16/17/18 data pages
+} from the wrong (1, nrs-1) shape to the correct (nrs, 0) convention.
+repair-fix-ec-conflict = Repair Table Write-Pointer Conflict
+# $count: the tables.
+repair-fix-ec-conflict-description = Tables whose empty_candidate pointer targets a page already used as data by a different table: { $count }. The DJ software validates this invariant and reports 'database corrupted' when it finds a conflict. The repair reassigns each conflicting empty_candidate to a free page beyond the physical file and updates next_unused_page in the header.
+repair-fix-truncated = Repair Truncated Table Chain
+# $count: the tables.
+repair-fix-truncated-description = Tables declaring a last page that does not physically exist in the file: { $count } (an additive-growth write was interrupted after the table pointer was advanced but before the new pages were flushed to disk). The repair points the table's last/empty_candidate fields back at the real last written page; no page content is changed. This is a structural prerequisite and always runs before other repairs, including the strict-parity upgrade.
+repair-fix-torn-growth = Repair Torn Growth Pages (Interrupted Export)
+# $count: the pages. The second form is for a file also left longer than its pages.
+repair-fix-torn-growth-description = The export was interrupted (e.g. USB disconnected) while rekordbox was growing the PDB: table empty_candidate pages earmarked as the next slot to write ({ $count }) never received data, leaving non-zero garbage instead of the blank page the writer requires before reuse. This zeroes each such page and recomputes seqdb. No table chain, page index, or transaction history is touched. This is a structural prerequisite and always runs before other repairs, including the strict-parity upgrade: parity's additive writes can grow the file, and this repair's tail-truncation boundary would otherwise go stale and cut off tracks/playlists parity had just written.
+repair-fix-torn-growth-description-tail = The export was interrupted (e.g. USB disconnected) while rekordbox was growing the PDB: table empty_candidate pages earmarked as the next slot to write ({ $count }) never received data, leaving non-zero garbage instead of the blank page the writer requires before reuse and left the file extended past next_unused_page with unpopulated content. This zeroes each such page and truncates the never-populated tail and recomputes seqdb. No table chain, page index, or transaction history is touched. This is a structural prerequisite and always runs before other repairs, including the strict-parity upgrade: parity's additive writes can grow the file, and this repair's tail-truncation boundary would otherwise go stale and cut off tracks/playlists parity had just written.
+repair-fix-t19 = Activate PDB History Page
+repair-fix-t19-description = The tt=19 page still has the single sealed row of a never-exported USB, the fixed two rows an older version wrote, or no USB name although the USB has one, so older players count 0 or 1 tracks. Rewrite it as the ring of one row per track rekordbox keeps, with the USB's name, keeping the template row, and mark the page active. No other page is changed.
+repair-fix-track-alignment = Repair Track String Alignment
+# $count: the track rows.
+repair-fix-track-alignment-description = Re-encode { $count ->
+    [one] { $count } track row
+   *[other] { $count } track rows
+} whose title/filename/comment/other UTF-16 or long ASCII string slot doesn't start at a 4-byte aligned offset. MIPS-based CDJ hardware requires 4-byte aligned reads for that 4-byte string header; a misaligned slot freezes/comm-errors the player while browsing, or as soon as the track list opens.
+repair-fix-album-alignment = Repair Album String Alignment
+# $count: the album rows.
+repair-fix-album-alignment-description = Re-encode { $count ->
+    [one] { $count } album row
+   *[other] { $count } album rows
+} whose UTF-16 name slot doesn't start at a 4-byte aligned offset. Same class of issue as the track string alignment repair.
+repair-fix-artist-layout = Repair Artist Name Layout
+# $count: the artist rows.
+repair-fix-artist-layout-description = Re-encode { $count ->
+    [one] { $count } artist row
+   *[other] { $count } artist rows
+} the way rekordbox writes artist rows: a plain ASCII name at offset 10, a UTF-16 name at the 4-byte aligned offset 12. Older versions of this app put every artist name at 12, which an Engine DJ player's own import of export.pdb reads as no artist.
+repair-fix-header = Repair PDB Header Compatibility Field
+# $current: the value in the file. $target: the value the repair writes.
+repair-fix-header-description = Patch only bytes 0x10..0x14 from { $current } to the built-in compatibility value { $target }.
+repair-fix-duplicate-copies = Remove Duplicate Audio Copies
+# $count: the copies.
+repair-fix-duplicate-copies-description = Audio files on the USB in no playlist, each a byte-for-byte copy of a track in the same folder: { $count }. Deletes each copy; the original track keeps its playlists, cues and analysis. See Event Log for the file list.
+repair-fix-unindexed = Add Unindexed Audio to a Playlist
+# $count: the files. $playlist: the playlist's name on the USB (Unindexed; not translated, it's what the USB stores).
+repair-fix-unindexed-description = Audio files on the USB in no playlist (e.g. after restoring the databases from a backup): { $count }. Adds each to a USB playlist "{ $playlist }", reusing its analysis files; nothing is copied or deleted. See Event Log for the file list.
+repair-fix-relink = Relink Moved Audio Files
+# $count: the tracks.
+repair-fix-relink-description = Tracks pointing to a missing file while the same track is on the USB under another name or folder: { $count }. Points each to the file found; it keeps its playlists, cues and analysis. See Event Log for the list.
+repair-fix-missing-audio = Remove Missing Audio References
+# $count: the files.
+repair-fix-missing-audio-description = Audio files no longer on the USB: { $count }. Removes their tracks from both databases (track and content rows, playlist entries). Tracks in a history playlist are kept. See Event Log for the file list.
+repair-fix-history-sync = Sync eDB History Tables From PDB
+repair-fix-history-sync-description = Optional fix: replace eDB history/history_content rows using current PDB history payload mapping.
+repair-fix-strict-parity = Upgrade Export Data To Strict Parity
+# $summary: repair-strict-parity-summary, what a dry run would change.
+repair-fix-strict-parity-description = Collect the failing playlists from both eDB and PDB, merge metadata from both sides, and write both databases once through the export writers. { $summary }.
+# $error: why the dry run failed, in English.
+repair-fix-strict-parity-description-failed = Collect the failing playlists from both eDB and PDB, merge metadata from both sides, and write both databases once through the export writers. Dry run failed: { $error }.
+repair-fix-strict-parity-pdb-missing = This USB has an eDB but no PDB, so older players show no music. Creates the PDB as Initialize USB does and writes every eDB playlist into it.
+repair-fix-strict-parity-edb-missing = This USB has a PDB but no eDB, so newer players and rekordbox show no music. Creates the eDB as Initialize USB does and writes every PDB playlist into it.
+# What the strict-parity upgrade changes. $playlists: the playlists merged. $edbadded, $edbchanged: eDB rows. $tracks, $trackschanged: PDB tracks. $pdbplaylists: PDB playlists added. $duplicates: duplicate entries removed.
+repair-strict-parity-summary = merged { $playlists ->
+    [one] { $playlists } playlist
+   *[other] { $playlists } playlists
+}; eDB: { $edbadded ->
+    [one] { $edbadded } row
+   *[other] { $edbadded } rows
+} added, { $edbchanged } changed; PDB: { $tracks ->
+    [one] { $tracks } track
+   *[other] { $tracks } tracks
+} added, { $trackschanged } changed, { $pdbplaylists ->
+    [one] { $pdbplaylists } playlist
+   *[other] { $pdbplaylists } playlists
+} added, { $duplicates ->
+    [one] { $duplicates } duplicate entry
+   *[other] { $duplicates } duplicate entries
+} removed
+# The same, when one database was missing. $summary: the line above.
+repair-strict-parity-rebuilt-pdb = rebuilt the missing PDB from the eDB; { $summary }
+repair-strict-parity-rebuilt-edb = rebuilt the missing eDB from the PDB; { $summary }
+repair-fix-duplicate-entries = Remove Duplicate PDB Playlist Entries
+# $count: the rows.
+repair-fix-duplicate-entries-description = Remove { $count ->
+    [one] { $count } stale duplicate playlist_entries row
+   *[other] { $count } stale duplicate playlist_entries rows
+} left behind on shared pages from repeated exports of the same playlist over time. This only cleans up duplicate rows already in the PDB — it does not merge playlists between eDB and PDB or otherwise rewrite the export. For that broader repair, use "{ repair-fix-strict-parity }" instead (or in addition).
+repair-fix-engine = Keep Engine DJ Library Up to Date
+repair-fix-engine-description = This USB has an Engine DJ library (Denon Prime, Numark Mixstream). Turns on "Write Engine DJ library" and rebuilds it now from this USB's rekordbox data; from then on it's rebuilt whenever this app changes a USB. Play history is kept, but changes made on the player itself (cues, loops, playlists created there) are replaced every time.
+
+# The rows for what the repair can't fix: the problem, then what to do.
+# $count: the entries.
+repair-unsupported-malformed-analysis = { $count ->
+    [one] { $count } malformed USBANLZ entry
+   *[other] { $count } malformed USBANLZ entries
+}
+repair-unsupported-malformed-analysis-reason = These indicate USB analysis directory corruption or stray files. Inspect Event Log entries tagged 'analysis entry malformed' and re-export affected tracks (or rebuild USB analysis data).
+# $count: the tracks. $format: MP3 or FLAC.
+repair-unsupported-seek-data = { $count } { $format } { $count ->
+    [one] track
+   *[other] tracks
+} without seek data that can't be added
+repair-unsupported-seek-data-reason = The seek index can't be built from these files (Event Log names each one and why). A damaged file needs an intact copy.
+# $count: the files.
+repair-unsupported-no-audio = { $count ->
+    [one] { $count } indexed audio file
+   *[other] { $count } indexed audio files
+} missing: the USB has no audio under Contents
+repair-unsupported-no-audio-reason = Looks like a copy of the databases without the music. Copy the audio files back instead of removing every track.
+# $count: the tracks.
+repair-unsupported-history-audio = { $count ->
+    [one] { $count } track
+   *[other] { $count } tracks
+} in a history playlist with missing audio files
+repair-unsupported-history-audio-reason = Tracks in a history playlist are not removed. Copy the files back to the USB (Event Log lists them).
+
+# A fix row's details line, its parts joined with " · ".
+repair-meta-supported = ✓ supported
+repair-meta-preview-only = ✗ preview-only
+repair-meta-destructive = destructive
+repair-meta-safe = safe
+# $count: the files the fix writes or deletes.
+repair-meta-writes = { $count ->
+    [one] { $count } write
+   *[other] { $count } writes
+}
+repair-meta-deletes = { $count ->
+    [one] { $count } delete
+   *[other] { $count } deletes
+}
+repair-meta-always-applied = always applied
+# The tooltip on an always-applied fix's ticked checkbox.
+repair-meta-always-applied-tooltip = Always applied — required for other repairs to complete safely
+
+
+# The fixes rekordbox's bookkeeping needs, run with every repair and never listed: their titles show
+# in the apply progress. Their descriptions are for the CLI tool only and stay English.
+repair-fix-zero-tranrf = Repair Data Pages With Zero tranrf
+repair-fix-page-flags = Repair PDB Data Page Flags
+repair-fix-sentinel-u5 = Repair PDB Data Pages With Sentinel u5
+repair-fix-track-shape = Repair PDB Track Page Footer Shape
+repair-fix-t00-multipage = Repair Track Page Flag (Multi-Page Chain)
+repair-fix-tombstoned = Repair Tombstoned Row IDs
+repair-fix-stale-btree = Repair Stale Sentinel B-Tree Index
+repair-fix-playlist-tree-shape = Repair PDB Playlist-Tree Page Footer Shape
+
+# The progress bar while repairing.
+repair-progress-baseline = USB: Running diagnostics baseline
+repair-progress-parity = USB: Building parity guidance
+repair-progress-collect = USB: Collecting repair opportunities
+repair-progress-apply = USB: Applying selected fixes
+repair-progress-backup = USB: Backing up databases before repair
+repair-progress-open = USB: Opening repair databases
+repair-progress-save = USB: Saving repaired databases
+repair-progress-rerun = USB: Re-running diagnostics after repair
+repair-progress-applied = USB: Repair apply complete
+repair-progress-preview-ready = USB: Repair preview ready
+# $fix: the fix's title (repair-fix-…), here and below.
+repair-progress-applying = USB: Applying { $fix }
+# $done, $total: the fix's items (files, tracks) done and in all.
+repair-progress-applying-items = USB: Applying { $fix } ({ $done }/{ $total })
+repair-progress-finished = USB: Finished { $fix }
+
+## job
+
+# The progress bar's texts while a backend job runs: job-<command>-started when it starts,
+# -progress for a step, -completed when it ends. A failed job shows its error instead.
+
+# When a job fails without a message.
+job-failed-unknown = Operation failed
+job-save-usb-track-metadata-edits-started = USB: Saving track details
+job-save-usb-track-metadata-edits-completed = USB: Track details saved
+job-save-usb-track-analysis-edits-started = USB: Saving cue edits
+job-save-usb-track-analysis-edits-completed = USB: Cue edits saved
+job-validate-usb-root-started = USB: Validating root
+job-validate-usb-root-completed = USB: Root validation complete
+job-validate-usb-root-progress = USB: Checking folders and permissions
+job-migrate-started = Upgrading analysis data
+job-migrate-completed = Analysis data upgraded
+job-fetch-usb-playlists-started = USB: Reading playlists
+job-fetch-usb-playlists-completed = USB: Playlist read complete
+job-fetch-usb-histories-started = USB: Reading history
+job-fetch-usb-histories-completed = USB: History read complete
+job-get-usb-player-menu-config-started = USB: Loading player menu
+job-get-usb-player-menu-config-completed = USB: Player menu loaded
+job-get-usb-player-menu-config-progress = USB: Reading menu configuration
+job-update-usb-player-menu-config-started = USB: Updating player menu
+job-update-usb-player-menu-config-completed = USB: Player menu updated
+job-update-usb-player-menu-config-progress = USB: Writing menu configuration
+job-get-usb-background-color-started = USB: Loading background color
+job-get-usb-background-color-completed = USB: Background color loaded
+job-get-usb-background-color-progress = USB: Reading background color
+job-set-usb-background-color-started = USB: Setting background color
+job-set-usb-background-color-completed = USB: Background color set
+job-set-usb-background-color-progress = USB: Writing background color
+job-remove-usb-playlist-started = USB: Removing playlist
+job-remove-usb-playlist-completed = USB: Playlist removal complete
+job-reorder-usb-playlists-started = USB: Saving playlist order
+job-reorder-usb-playlists-completed = USB: Playlist order saved
+job-export-to-usb-started = USB: Exporting playlist
+job-export-to-usb-completed = USB: Export complete
+job-run-usb-diagnostics-started = USB: Running diagnostics
+job-run-usb-diagnostics-completed = USB: Diagnostics complete
+job-run-usb-parity-report-started = USB: Running parity report
+job-run-usb-parity-report-completed = USB: Parity report complete
+job-repair-usb-diagnostics-started = USB: Planning repair fixes
+job-repair-usb-diagnostics-completed = USB: Repair planning complete
+job-initialize-usb-started = USB: Initializing structure
+job-initialize-usb-completed = USB: Initialization complete
+job-initialize-usb-progress = USB: Creating External library directories
+job-scan-library-started = Scanning media library
+job-scan-library-progress = Discovering audio files
+job-scan-library-completed = Library scan completed
+# $indexed, $updated, $removed: track counts.
+job-scan-library-completed-counts = Library scan completed: indexed { $indexed }, updated { $updated }, removed { $removed }
+job-scan-rekordbox-db-started = Importing from desktop library
+job-scan-rekordbox-db-progress = Reading desktop library database
+job-scan-rekordbox-db-completed = Desktop library import completed
+# $indexed, $updated: track counts.
+job-scan-rekordbox-db-completed-counts = Desktop library import completed: indexed { $indexed }, updated { $updated }
+job-scan-mixxx-db-started = Importing from Mixxx library
+job-scan-mixxx-db-progress = Reading Mixxx library database
+job-scan-mixxx-db-completed = Mixxx library import completed
+# $indexed, $updated: track counts.
+job-scan-mixxx-db-completed-counts = Mixxx library import completed: indexed { $indexed }, updated { $updated }
+job-transcode-tracks-started = Converting selected tracks
+# Convert…, one per finished track. $current: tracks done. $total: tracks in all. $file: the file's name.
+job-transcode-tracks-progress = Converting { $current }/{ $total }: { $file }
+# $converted, $skipped, $failed: track counts.
+job-transcode-tracks-completed = Converting finished: { $converted } converted, { $skipped } skipped, { $failed } failed
+# $converted: tracks converted before the cancel.
+job-transcode-tracks-cancelled = Converting cancelled: { $converted } converted
+job-install-update-started = Checking for update...
+# $version: the new version (1.2.3), here and below.
+job-install-update-downloading = Downloading update { $version }...
+job-install-update-waiting = Update { $version } downloaded, waiting for the running job to finish...
+job-install-update-installing = Installing update { $version } and restarting...
+# $error: the updater's reason, in English.
+job-install-update-failed = Update failed: { $error }
+
+## migration
+
+# The data upgrades run once after an app update. Their names, shown in the progress bar.
+migration-usb-devices = Importing USB devices from old settings
+migration-fingerprints = Filling track fingerprints
+migration-merge-usb-tracks = Merging duplicate USB tracks
+migration-beat-grids = Upgrading cached beat grids
+migration-mp3-seek = Adding MP3 seek data
+# The progress bar during an upgrade. $migration: one of the names above. $current, $total: items done and in all.
+migration-progress = { $migration }: { $current }/{ $total }
+
+## transcode
+
+# Convert…'s choices. $format: AIFF or WAV.
+transcode-choice-lossless = { $format } (lossless)
+transcode-choice-mp3 = MP3 320 kbps
+# The status line after Convert…. $parts: the counts below, joined with ", ".
+transcode-summary-done = Converting done: { $parts }
+transcode-summary-cancelled = Converting cancelled: { $parts }
+# $count: tracks, here and in the next two.
+transcode-summary-converted = { $count ->
+    [one] { $count } track converted
+   *[other] { $count } tracks converted
+}
+transcode-summary-skipped = { $count } skipped
+transcode-summary-failed = { $count } failed
+# The status line after removing transcodes. $count: the transcodes removed.
+transcode-removed = Removed { $count ->
+    [one] { $count } transcode
+   *[other] { $count } transcodes
+}
+# A transcode's tooltip in the track's details. $format: MP3 320, AIFF or WAV. $size: its size ("9 MB").
+transcode-tooltip = { $format } transcode · { $size }
+# $about: transcode-tooltip.
+transcode-tooltip-outdated = { $about } — out of date: the source file changed since. Convert again to update it
+# The FMT column's tooltip when a USB is set: which file goes to the USB.
+# $format: the track's own file, as the FMT column describes it ("FLAC · 44.1 kHz · 16-bit").
+transcode-export-source = source: { $format }
+# $format: MP3 320, AIFF or WAV. $size: its size. $source: transcode-export-source.
+transcode-export-exported = { $format } transcode · { $size }, exported to this USB — { $source }
+# $format: what it's converted to. $source: transcode-export-source.
+transcode-export-convert = Converted to { $format } on export — { $source }
+# $file: the track's own file, as the FMT column describes it. $format: its format's name.
+transcode-export-refused = { $file } — { $format } can't go on this USB: only lossless files can be converted
+
+## tracklist-export
+
+# USB History's Export Tracklist, the status line after saving the file. $history: the history's name.
+tracklist-export-done = Tracklist exported: { $history }
+tracklist-export-cancelled = Tracklist export cancelled
+
+## analysis
+
+# The status line after asking for analysis. $count: the tracks queued.
+analysis-submitted = Analyzing { $count ->
+    [one] { $count } track
+   *[other] { $count } tracks
+}
+# $count: tracks asked for that are already being analyzed.
+analysis-submitted-already = Already analyzing { $count ->
+    [one] { $count } track
+   *[other] { $count } tracks
+}
+# $count: the tracks queued. $already: tracks asked for that are already being analyzed.
+analysis-submitted-some-already = Analyzing { $count ->
+    [one] { $count } track
+   *[other] { $count } tracks
+}, { $already } already in progress
+analysis-submitted-none = No tracks need analysis
+# A queued track's tooltip.
+analysis-waiting-tooltip = Waiting for its turn to be analyzed
+# The progress bar.
+analysis-started = Analyzing selected tracks
+# $current: tracks done. $total: tracks in all. $file: the file's name.
+analysis-progress = Analyzing { $current }/{ $total }: { $file }
+# The status line when the job ends. $analyzed, $failed, $incomplete: track counts.
+analysis-finished = Analysis finished: analyzed { $analyzed }, failed { $failed }
+analysis-finished-incomplete = Analysis finished: analyzed { $analyzed }, failed { $failed }, incomplete { $incomplete }
+# The Event Log's line when the job ends. $count: tracks processed. $elapsed: how long it took ("1:05").
+# $analyzed, $failed, $incomplete: track counts.
+analysis-log = Analysis: { $count ->
+    [one] { $count } track
+   *[other] { $count } tracks
+} in { $elapsed } (analyzed { $analyzed }, failed { $failed })
+analysis-log-incomplete = Analysis: { $count ->
+    [one] { $count } track
+   *[other] { $count } tracks
+} in { $elapsed } (analyzed { $analyzed }, failed { $failed }, incomplete { $incomplete })
 
 ## export
 
@@ -874,6 +1263,17 @@ export-refused-read-only = USB is read-only. Remount as read-write before export
 export-refused-source-missing = Export blocked: source folder is missing: { $folder }. Relocate or remove it first.
 export-refused-manifest = Export blocked: manifest invariant check failed. See Event Log for details.
 export-refused-manifest-after-prune = Export finished with errors: the stale-file prune removed a file the exported playlist still references — the USB databases were written; restore from the pre-export backup. See Event Log for details.
+
+
+# The progress bar while the job runs.
+export-progress-preparing = USB: Preparing export
+export-progress-finalizing-export-metadata = USB: Finalizing export metadata
+export-progress-writing-engine-dj-library = USB: Writing Engine DJ library
+export-progress-waiting-for-writes = USB: Waiting for files to finish writing
+# $current: tracks done. $total: tracks in all. $file: the track's file name. Here and below.
+export-progress-copying = USB: Copying track { $current }/{ $total }: { $file }
+# Lossless tracks converted for this USB's formats.
+export-progress-converting = USB: Converting track { $current }/{ $total }: { $file }
 
 ## track-list
 
@@ -1082,6 +1482,13 @@ track-details-saved-usb = Saved track details for { $count ->
    *[other] { $count } tracks
 } to USB
 
+
+# The progress bar while the job runs.
+track-details-progress-checking-tracks = USB: Checking tracks
+track-details-progress-writing-pdb = USB: Writing export.pdb
+track-details-progress-writing-edb = USB: Writing exportLibrary.db
+track-details-progress-saved = USB: Track details saved
+
 ## cues
 
 # The status line after saving a track's cues. $count: the cues saved.
@@ -1100,6 +1507,15 @@ cues-saved-usb = Saved { $count ->
     [one] { $count } cue
    *[other] { $count } cues
 } to USB
+
+
+# The progress bar while the job runs.
+cues-progress-checking-track = USB: Checking track
+cues-progress-writing-analysis-files = USB: Writing analysis files
+cues-progress-writing-pdb = USB: Writing export.pdb
+cues-progress-updating-library-track = Updating library track
+cues-progress-writing-edb = USB: Writing exportLibrary.db
+cues-progress-saved = USB: Cue edits saved
 
 ## playback
 

@@ -267,26 +267,28 @@ pub(crate) fn write_edb_playlist_order(
 }
 
 /// One line for the repair outcome and the preview card.
-pub(super) fn strict_parity_summary(result: &StrictParityUpgradeApplyResult) -> String {
-    let rebuilt = match result.rebuilt_database {
-        Some(usb_staging::DbKind::Pdb) => "rebuilt the missing PDB from the eDB; ",
-        Some(usb_staging::DbKind::Edb) => "rebuilt the missing eDB from the PDB; ",
-        None => "",
-    };
-    format!(
-        "{rebuilt}merged {}; eDB: {} added, {} changed; PDB: {} added, {} changed, {} added, {} removed",
-        counted(result.merged_playlists, "playlist", "playlists"),
-        counted(result.edb_rows_inserted, "row", "rows"),
+/// What a strict-parity upgrade changed, rendered by `render`: `Text::render`
+/// for the preview, `Text::render_english` for the log. (A text passed as
+/// another's argument is rendered when passed, so both parts take `render`.)
+pub(super) fn strict_parity_summary(
+    result: &StrictParityUpgradeApplyResult,
+    render: fn(&crate::i18n::Text) -> String,
+) -> String {
+    use crate::i18n::tr;
+    let summary = render(&tr::repair_strict_parity_summary(
+        result.merged_playlists,
+        result.edb_rows_inserted,
         result.edb_rows_updated,
-        counted(result.pdb_tracks_inserted, "track", "tracks"),
+        result.pdb_tracks_inserted,
         result.pdb_tracks_changed,
-        counted(result.pdb_playlists_inserted, "playlist", "playlists"),
-        counted(
-            result.duplicate_entries_removed,
-            "duplicate entry",
-            "duplicate entries"
-        ),
-    )
+        result.pdb_playlists_inserted,
+        result.duplicate_entries_removed,
+    ));
+    match result.rebuilt_database {
+        Some(usb_staging::DbKind::Pdb) => render(&tr::repair_strict_parity_rebuilt_pdb(summary)),
+        Some(usb_staging::DbKind::Edb) => render(&tr::repair_strict_parity_rebuilt_edb(summary)),
+        None => summary,
+    }
 }
 
 /// The first non-empty of the eDB's and the PDB's text.

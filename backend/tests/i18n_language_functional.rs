@@ -5,14 +5,19 @@
 //! beside the tests that assert English would break them. The tests here take `LANGUAGE_LOCK`,
 //! so they don't run in parallel with each other either, and put English back when done.
 
-use std::sync::{Arc, Mutex, MutexGuard, PoisonError};
+mod library_sources;
+
+use std::sync::{Arc, Mutex, MutexGuard, PoisonError, mpsc};
+use std::time::Duration;
 
 use backend::commands::BackendCommands;
 use backend::i18n::{self, ENGLISH, TEST_LANGUAGE, tr};
 use backend::models::{
-    FetchUsbHistoriesRequest, InitializeUsbRequest, RunUsbDiagnosticsData,
-    RunUsbDiagnosticsRequest, SetFrontendSettingRequest,
+    AnalyzeNewTracksRequest, FetchUsbHistoriesRequest, InitializeUsbRequest,
+    RepairUsbDiagnosticsRequest, RunUsbDiagnosticsData, RunUsbDiagnosticsRequest,
+    ScanLibraryRequest, SetFrontendSettingRequest,
 };
+use backend::service::analysis_event_payload;
 use tempfile::tempdir;
 
 const LANGUAGE_SETTING: &str = "ui_language_v1";
@@ -238,5 +243,92 @@ fn diagnostics_report_follows_the_language() {
     for item in &switched.overview {
         assert!(is_test_language(&item.title), "{:?}", item.title);
         assert!(is_test_language(&item.detail), "{:?}", item.detail);
+    }
+
+    // An audio file in no playlist: the preview offers a fix for it.
+    let contents = usb.join("Contents");
+    std::fs::create_dir_all(&contents).expect("create Contents");
+    std::fs::write(contents.join("stray.mp3"), [0u8; 64]).expect("write stray file");
+    let repair = backend.repair_usb_diagnostics(RepairUsbDiagnosticsRequest {
+        usb_root: Some(usb.to_string_lossy().to_string()),
+        apply: false,
+        selected_fix_ids: Vec::new(),
+    });
+    let repair = repair.data.expect("repair preview");
+    assert!(is_test_language(&repair.summary), "{:?}", repair.summary);
+    assert!(!repair.rows.is_empty(), "{repair:?}");
+    for row in &repair.rows {
+        for text in [&row.title, &row.description] {
+            assert!(is_test_language(text), "{row:?}");
+        }
+        // The details line's parts, joined with " · ".
+        for part in row.meta_text.split(" · ") {
+            assert!(is_test_language(part), "{row:?}");
+        }
+    }
+}
+
+#[test]
+fn the_analysis_coordinator_answers_in_the_current_language() {
+    let _test = LanguageTest::start();
+    let root = tempdir().expect("temp root");
+    let media = root.path().join("media");
+    std::fs::create_dir_all(&media).expect("create media dir");
+    // Not real audio: its analysis fails, which also gives the job a warning.
+    std::fs::write(media.join("Artist - Title.mp3"), b"audio").expect("write track");
+    let backend = BackendCommands::new(root.path().join("data")).expect("create backend");
+    let scanned = backend.scan_library(ScanLibraryRequest {
+        source_roots: vec![media.to_string_lossy().to_string()],
+        incremental: true,
+    });
+    assert!(scanned.ok, "{scanned:?}");
+    library_sources::show_only(
+        &backend,
+        vec![media.to_string_lossy().to_string()],
+        false,
+        false,
+    );
+    let (sender, events) = mpsc::channel();
+    let sender = Mutex::new(sender);
+    backend.set_analysis_observer(Arc::new(move |event| {
+        let _ = sender
+            .lock()
+            .unwrap_or_else(PoisonError::into_inner)
+            .send(analysis_event_payload(event));
+    }));
+    assert!(save_language(&backend, TEST_LANGUAGE).ok);
+
+    let submitted = backend
+        .submit_analysis(AnalyzeNewTracksRequest {
+            scope_to_library_filter: true,
+            ..Default::default()
+        })
+        .data
+        .expect("submitted");
+    assert_eq!(submitted.queued, 1, "{submitted:?}");
+    assert!(is_test_language(&submitted.message), "{submitted:?}");
+
+    // The job's events, made on the coordinator's thread.
+    let mut seen = Vec::new();
+    loop {
+        let payload = events
+            .recv_timeout(Duration::from_secs(60))
+            .expect("analysis event");
+        let done = payload.event == "job.completed";
+        seen.push(payload.event.clone());
+        // The status line's " | (1 warning)" is the Event Log link's text, translated apart.
+        for part in payload.message.split(" | ").filter(|part| !part.is_empty()) {
+            let part = part.trim_start_matches('(').trim_end_matches(')');
+            assert!(is_test_language(part), "{payload:?}");
+        }
+        if let Some(tooltip) = &payload.waiting_tooltip {
+            assert!(is_test_language(tooltip), "{payload:?}");
+        }
+        if done {
+            break;
+        }
+    }
+    for event in ["job.started", "job.tracks_waiting", "job.progress"] {
+        assert!(seen.iter().any(|seen| seen == event), "{event}: {seen:?}");
     }
 }

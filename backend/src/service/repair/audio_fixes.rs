@@ -618,6 +618,14 @@ impl SeekFormat {
         }
     }
 
+    /// The fix's title, as the preview row and the apply progress show it.
+    pub(super) fn title_text(self) -> crate::i18n::Text {
+        match self {
+            Self::Mp3 => crate::i18n::tr::repair_fix_mp3_seek(),
+            Self::Flac => crate::i18n::tr::repair_fix_flac_seek(),
+        }
+    }
+
     pub(super) fn title(self) -> &'static str {
         match self {
             Self::Mp3 => "Add Missing MP3 Seek Data",

@@ -71,11 +71,11 @@ impl TranscodeFormat {
     }
 
     /// Its choice in the Convert… dialog.
-    pub fn choice_label(self) -> &'static str {
+    pub fn choice_label(self) -> crate::i18n::Text {
+        use crate::i18n::tr;
         match self {
-            Self::Aiff => "AIFF (lossless)",
-            Self::Wav => "WAV (lossless)",
-            Self::Mp3 => "MP3 320 kbps",
+            Self::Aiff | Self::Wav => tr::transcode_choice_lossless(self.label()),
+            Self::Mp3 => tr::transcode_choice_mp3(),
         }
     }
 }

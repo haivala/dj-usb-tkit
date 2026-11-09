@@ -12,6 +12,7 @@ use uuid::Uuid;
 
 use crate::commands::BackendCommands;
 use crate::error::{ErrorCode, ErrorPayload};
+use crate::i18n::{Text, tr};
 use crate::models::{
     AddLibrarySelectionToPlaylistRequest, AddLibrarySelectionToPlaylistsRequest,
     AddSourceFoldersData, AddSourceFoldersRequest, AddTrackCandidatesToPlaylistData,
@@ -210,7 +211,6 @@ fn emit_job_event<R: tauri::Runtime>(
         waiting_tooltip: None,
         warnings: None,
         warning_count: None,
-        log_message: None,
         timestamp: Utc::now().to_rfc3339(),
     };
 
@@ -252,7 +252,7 @@ fn emit_job_failed<R: tauri::Runtime>(
         0,
         1,
         100,
-        response_message.unwrap_or_else(|| "Operation failed".to_string()),
+        response_message.unwrap_or_else(|| tr::job_failed_unknown().render()),
     );
 }
 
@@ -260,9 +260,9 @@ async fn run_usb_job<T, F>(
     app: &AppHandle,
     job_type: &str,
     stage: &str,
-    started_message: &str,
-    completed_message: &str,
-    initial_progress: Option<(usize, String)>,
+    started_message: Text,
+    completed_message: Text,
+    initial_progress: Option<(usize, Text)>,
     task: F,
 ) -> Result<ApiResponse<T>, String>
 where
@@ -275,9 +275,25 @@ where
         job_type,
         stage,
     };
-    emit_job_event(app, "job.started", identity, 0, 1, 0, started_message);
+    emit_job_event(
+        app,
+        "job.started",
+        identity,
+        0,
+        1,
+        0,
+        started_message.render(),
+    );
     if let Some((percent, message)) = initial_progress {
-        emit_job_event(app, "job.progress", identity, 0, 1, percent, message);
+        emit_job_event(
+            app,
+            "job.progress",
+            identity,
+            0,
+            1,
+            percent,
+            message.render(),
+        );
     }
 
     let response = match tauri::async_runtime::spawn_blocking(task).await {
@@ -288,7 +304,15 @@ where
     };
 
     if response.ok {
-        emit_job_event(app, "job.completed", identity, 1, 1, 100, completed_message);
+        emit_job_event(
+            app,
+            "job.completed",
+            identity,
+            1,
+            1,
+            100,
+            completed_message.render(),
+        );
     } else {
         emit_job_failed(
             app,
@@ -304,8 +328,8 @@ async fn run_usb_job_with_progress<T, F>(
     app: &AppHandle,
     job_type: &str,
     stage: &str,
-    started_message: &str,
-    completed_message: &str,
+    started_message: Text,
+    completed_message: Text,
     task: F,
 ) -> Result<ApiResponse<T>, String>
 where
@@ -318,13 +342,21 @@ where
         job_type,
         stage,
     };
-    emit_job_event(app, "job.started", identity, 0, 1, 0, started_message);
+    let fallback_message = started_message.render();
+    emit_job_event(
+        app,
+        "job.started",
+        identity,
+        0,
+        1,
+        0,
+        fallback_message.clone(),
+    );
 
     let app_for_task = app.clone();
     let job_id_for_task = job_id.clone();
     let job_type_for_task = job_type.to_string();
     let stage_for_task = stage.to_string();
-    let fallback_message = started_message.to_string();
     let response = match tauri::async_runtime::spawn_blocking(move || {
         let progress = Box::new(move |current: usize, total: usize, message: &str| {
             let denom = total.max(1);
@@ -362,7 +394,15 @@ where
     };
 
     if response.ok {
-        emit_job_event(app, "job.completed", identity, 1, 1, 100, completed_message);
+        emit_job_event(
+            app,
+            "job.completed",
+            identity,
+            1,
+            1,
+            100,
+            completed_message.render(),
+        );
     } else {
         emit_job_failed(
             app,
@@ -522,7 +562,7 @@ pub async fn scan_library(
         0,
         1,
         0,
-        "Scanning media library",
+        tr::job_scan_library_started().render(),
     );
     emit_job_event(
         &app,
@@ -531,7 +571,7 @@ pub async fn scan_library(
         0,
         1,
         30,
-        "Discovering audio files",
+        tr::job_scan_library_progress().render(),
     );
 
     let commands = state.inner().clone();
@@ -548,12 +588,9 @@ pub async fn scan_library(
             .data
             .as_ref()
             .map(|d| {
-                format!(
-                    "Library scan completed: indexed {}, updated {}, removed {}",
-                    d.indexed, d.updated, d.removed
-                )
+                tr::job_scan_library_completed_counts(d.indexed, d.updated, d.removed).render()
             })
-            .unwrap_or_else(|| "Library scan completed".to_string());
+            .unwrap_or_else(|| tr::job_scan_library_completed().render());
         emit_job_event(&app, "job.completed", identity, 1, 1, 100, summary);
     } else {
         emit_job_failed(
@@ -585,7 +622,7 @@ pub async fn scan_rekordbox_db(
         0,
         1,
         0,
-        "Importing from desktop library",
+        tr::job_scan_rekordbox_db_started().render(),
     );
     emit_job_event(
         &app,
@@ -594,7 +631,7 @@ pub async fn scan_rekordbox_db(
         0,
         1,
         30,
-        "Reading desktop library database",
+        tr::job_scan_rekordbox_db_progress().render(),
     );
 
     let commands = state.inner().clone();
@@ -614,13 +651,8 @@ pub async fn scan_rekordbox_db(
         let summary = response
             .data
             .as_ref()
-            .map(|d| {
-                format!(
-                    "Desktop library import completed: indexed {}, updated {}",
-                    d.indexed, d.updated
-                )
-            })
-            .unwrap_or_else(|| "Desktop library import completed".to_string());
+            .map(|d| tr::job_scan_rekordbox_db_completed_counts(d.indexed, d.updated).render())
+            .unwrap_or_else(|| tr::job_scan_rekordbox_db_completed().render());
         emit_job_event(&app, "job.completed", identity, 1, 1, 100, summary);
     } else {
         emit_job_failed(
@@ -652,7 +684,7 @@ pub async fn scan_mixxx_db(
         0,
         1,
         0,
-        "Importing from Mixxx library",
+        tr::job_scan_mixxx_db_started().render(),
     );
     emit_job_event(
         &app,
@@ -661,7 +693,7 @@ pub async fn scan_mixxx_db(
         0,
         1,
         30,
-        "Reading Mixxx library database",
+        tr::job_scan_mixxx_db_progress().render(),
     );
 
     let commands = state.inner().clone();
@@ -677,13 +709,8 @@ pub async fn scan_mixxx_db(
         let summary = response
             .data
             .as_ref()
-            .map(|d| {
-                format!(
-                    "Mixxx library import completed: indexed {}, updated {}",
-                    d.indexed, d.updated
-                )
-            })
-            .unwrap_or_else(|| "Mixxx library import completed".to_string());
+            .map(|d| tr::job_scan_mixxx_db_completed_counts(d.indexed, d.updated).render())
+            .unwrap_or_else(|| tr::job_scan_mixxx_db_completed().render());
         emit_job_event(&app, "job.completed", identity, 1, 1, 100, summary);
     } else {
         emit_job_failed(
@@ -862,8 +889,8 @@ pub async fn save_usb_track_metadata_edits(
         &app,
         "usb_write",
         "save_usb_track_metadata_edits",
-        "USB: Saving track details",
-        "USB: Track details saved",
+        tr::job_save_usb_track_metadata_edits_started(),
+        tr::job_save_usb_track_metadata_edits_completed(),
         move |mut progress| {
             commands.save_usb_track_metadata_edits_with_progress(request, move |c, t, m| {
                 progress(c, t, m);
@@ -899,8 +926,8 @@ pub async fn save_usb_track_analysis_edits(
         &app,
         "usb_write",
         "save_usb_track_analysis_edits",
-        "USB: Saving cue edits",
-        "USB: Cue edits saved",
+        tr::job_save_usb_track_analysis_edits_started(),
+        tr::job_save_usb_track_analysis_edits_completed(),
         move |mut progress| {
             commands.save_usb_track_analysis_edits_with_progress(request, move |c, t, m| {
                 progress(c, t, m);
@@ -1180,9 +1207,9 @@ pub async fn validate_usb_root(
         &app,
         "usb_read",
         "validate_usb_root",
-        "USB: Validating root",
-        "USB: Root validation complete",
-        Some((30, "USB: Checking folders and permissions".to_string())),
+        tr::job_validate_usb_root_started(),
+        tr::job_validate_usb_root_completed(),
+        Some((30, tr::job_validate_usb_root_progress())),
         move || commands.validate_usb_root(request),
     )
     .await
@@ -1317,8 +1344,8 @@ pub async fn run_data_migrations(
         &app,
         "migration",
         "migrate",
-        "Upgrading analysis data",
-        "Analysis data upgraded",
+        tr::job_migrate_started(),
+        tr::job_migrate_completed(),
         move |mut progress| {
             commands.run_data_migrations_with_progress(move |c, t, m| progress(c, t, m))
         },
@@ -1337,8 +1364,8 @@ pub async fn fetch_usb_playlists(
         &app,
         "usb_read",
         "fetch_usb_playlists",
-        "USB: Reading playlists",
-        "USB: Playlist read complete",
+        tr::job_fetch_usb_playlists_started(),
+        tr::job_fetch_usb_playlists_completed(),
         move |mut progress| {
             commands.fetch_usb_playlists_with_progress(request, move |c, t, m| {
                 progress(c, t, m);
@@ -1359,8 +1386,8 @@ pub async fn fetch_usb_histories(
         &app,
         "usb_read",
         "fetch_usb_histories",
-        "USB: Reading history",
-        "USB: History read complete",
+        tr::job_fetch_usb_histories_started(),
+        tr::job_fetch_usb_histories_completed(),
         move |mut progress| {
             commands.fetch_usb_histories_with_progress(request, move |c, t, m| {
                 progress(c, t, m);
@@ -1381,9 +1408,9 @@ pub async fn get_usb_player_menu_config(
         &app,
         "usb_read",
         "get_usb_player_menu_config",
-        "USB: Loading player menu",
-        "USB: Player menu loaded",
-        Some((40, "USB: Reading menu configuration".to_string())),
+        tr::job_get_usb_player_menu_config_started(),
+        tr::job_get_usb_player_menu_config_completed(),
+        Some((40, tr::job_get_usb_player_menu_config_progress())),
         move || commands.get_usb_player_menu_config(request),
     )
     .await
@@ -1400,9 +1427,9 @@ pub async fn update_usb_player_menu_config(
         &app,
         "usb_write",
         "update_usb_player_menu_config",
-        "USB: Updating player menu",
-        "USB: Player menu updated",
-        Some((45, "USB: Writing menu configuration".to_string())),
+        tr::job_update_usb_player_menu_config_started(),
+        tr::job_update_usb_player_menu_config_completed(),
+        Some((45, tr::job_update_usb_player_menu_config_progress())),
         move || commands.update_usb_player_menu_config(request),
     )
     .await
@@ -1419,9 +1446,9 @@ pub async fn get_usb_background_color(
         &app,
         "usb_read",
         "get_usb_background_color",
-        "USB: Loading background color",
-        "USB: Background color loaded",
-        Some((40, "USB: Reading background color".to_string())),
+        tr::job_get_usb_background_color_started(),
+        tr::job_get_usb_background_color_completed(),
+        Some((40, tr::job_get_usb_background_color_progress())),
         move || commands.get_usb_background_color(request),
     )
     .await
@@ -1438,9 +1465,9 @@ pub async fn set_usb_background_color(
         &app,
         "usb_write",
         "set_usb_background_color",
-        "USB: Setting background color",
-        "USB: Background color set",
-        Some((45, "USB: Writing background color".to_string())),
+        tr::job_set_usb_background_color_started(),
+        tr::job_set_usb_background_color_completed(),
+        Some((45, tr::job_set_usb_background_color_progress())),
         move || commands.set_usb_background_color(request),
     )
     .await
@@ -1457,8 +1484,8 @@ pub async fn remove_usb_playlist(
         &app,
         "usb_write",
         "remove_usb_playlist",
-        "USB: Removing playlist",
-        "USB: Playlist removal complete",
+        tr::job_remove_usb_playlist_started(),
+        tr::job_remove_usb_playlist_completed(),
         move |mut progress| {
             commands.remove_usb_playlist_with_progress(request, move |c, t, m| {
                 progress(c, t, m);
@@ -1479,8 +1506,8 @@ pub async fn reorder_usb_playlists(
         &app,
         "usb_write",
         "reorder_usb_playlists",
-        "USB: Saving playlist order",
-        "USB: Playlist order saved",
+        tr::job_reorder_usb_playlists_started(),
+        tr::job_reorder_usb_playlists_completed(),
         move |mut progress| {
             commands.reorder_usb_playlists_with_progress(request, move |c, t, m| {
                 progress(c, t, m);
@@ -1772,7 +1799,7 @@ pub async fn transcode_tracks(
         0,
         1,
         0,
-        "Converting selected tracks",
+        tr::job_transcode_tracks_started().render(),
     );
     let commands = state.inner().clone();
     let app_for_task = app.clone();
@@ -1796,10 +1823,8 @@ pub async fn transcode_tracks(
                 progress.current,
                 total,
                 progress.current * 100 / total,
-                format!(
-                    "Converting {}/{}: {file_name}",
-                    progress.current, progress.total
-                ),
+                tr::job_transcode_tracks_progress(progress.current, progress.total, file_name)
+                    .render(),
             );
         })
     })
@@ -1814,14 +1839,11 @@ pub async fn transcode_tracks(
     if let Some(data) = response.data.as_mut() {
         data.job_id = job_id.clone();
         let message = if data.cancelled {
-            format!("Converting cancelled: {} converted", data.transcoded)
+            tr::job_transcode_tracks_cancelled(data.transcoded)
         } else {
-            format!(
-                "Converting finished: {} converted, {} skipped, {} failed",
-                data.transcoded, data.skipped, data.failed
-            )
+            tr::job_transcode_tracks_completed(data.transcoded, data.skipped, data.failed)
         };
-        emit_job_event(&app, "job.completed", identity, 1, 1, 100, message);
+        emit_job_event(&app, "job.completed", identity, 1, 1, 100, message.render());
     } else {
         emit_job_failed(
             &app,
@@ -1890,8 +1912,8 @@ pub async fn export_to_usb(
         &app,
         "export",
         "export_to_usb",
-        "USB: Exporting playlist",
-        "USB: Export complete",
+        tr::job_export_to_usb_started(),
+        tr::job_export_to_usb_completed(),
         move |mut progress| {
             commands.export_to_usb_with_progress(request, move |c, t, m| {
                 progress(c, t, m);
@@ -1912,8 +1934,8 @@ pub async fn run_usb_diagnostics(
         &app,
         "diagnostics",
         "run_usb_diagnostics",
-        "USB: Running diagnostics",
-        "USB: Diagnostics complete",
+        tr::job_run_usb_diagnostics_started(),
+        tr::job_run_usb_diagnostics_completed(),
         move |mut progress| {
             commands.run_usb_diagnostics_with_progress(request, move |c, t, m| {
                 progress(c, t, m);
@@ -1934,8 +1956,8 @@ pub async fn run_usb_parity_report(
         &app,
         "diagnostics",
         "run_usb_parity_report",
-        "USB: Running parity report",
-        "USB: Parity report complete",
+        tr::job_run_usb_parity_report_started(),
+        tr::job_run_usb_parity_report_completed(),
         move |mut progress| {
             commands.run_usb_parity_report_with_progress(request, move |c, t, m| {
                 progress(c, t, m);
@@ -1956,8 +1978,8 @@ pub async fn repair_usb_diagnostics(
         &app,
         "diagnostics",
         "repair_usb_diagnostics",
-        "USB: Planning repair fixes",
-        "USB: Repair planning complete",
+        tr::job_repair_usb_diagnostics_started(),
+        tr::job_repair_usb_diagnostics_completed(),
         move |mut progress| {
             commands.repair_usb_diagnostics_with_progress(request, move |c, t, m| {
                 progress(c, t, m);
@@ -2046,9 +2068,9 @@ pub async fn initialize_usb(
         &app,
         "usb_read",
         "initialize_usb",
-        "USB: Initializing structure",
-        "USB: Initialization complete",
-        Some((40, "USB: Creating External library directories".to_string())),
+        tr::job_initialize_usb_started(),
+        tr::job_initialize_usb_completed(),
+        Some((40, tr::job_initialize_usb_progress())),
         move || commands.initialize_usb(request),
     )
     .await
@@ -2376,7 +2398,7 @@ pub async fn install_update(app: AppHandle) -> ApiResponse<()> {
         0,
         1,
         0,
-        "Checking for update...",
+        tr::job_install_update_started().render(),
     );
 
     // Only ever ends in an error: success restarts the app.
@@ -2411,7 +2433,7 @@ pub async fn install_update(app: AppHandle) -> ApiResponse<()> {
                             downloaded as usize,
                             content_len.unwrap_or(0) as usize,
                             percent,
-                            format!("Downloading update {version}..."),
+                            tr::job_install_update_downloading(&version).render(),
                         );
                     }
                 },
@@ -2434,9 +2456,7 @@ pub async fn install_update(app: AppHandle) -> ApiResponse<()> {
                     1,
                     1,
                     100,
-                    format!(
-                        "Update {version} downloaded, waiting for the running job to finish..."
-                    ),
+                    tr::job_install_update_waiting(&version).render(),
                 );
             }
             let _ = tauri::async_runtime::spawn_blocking(|| {
@@ -2454,7 +2474,7 @@ pub async fn install_update(app: AppHandle) -> ApiResponse<()> {
             1,
             1,
             100,
-            format!("Installing update {version} and restarting..."),
+            tr::job_install_update_installing(&version).render(),
         );
         update.install(bytes).map_err(|e| e.to_string())?;
         app.restart()
@@ -2463,9 +2483,14 @@ pub async fn install_update(app: AppHandle) -> ApiResponse<()> {
 
     let Err(message) = result;
     // ApiResponse::failure below puts the reason in the Event Log.
-    let message = format!("Update failed: {message}");
-    emit_job_failed(&app, identity, Some(message.clone()));
-    ApiResponse::failure(ErrorPayload::new(ErrorCode::InternalError, message))
+    // The reason is the updater's own text (English); the words around it are the catalog's.
+    let text = tr::job_install_update_failed(&message);
+    let payload = ErrorPayload {
+        log_message: Some(text.render_english()),
+        ..ErrorPayload::new(ErrorCode::InternalError, text.render())
+    };
+    emit_job_failed(&app, identity, Some(payload.message.clone()));
+    ApiResponse::failure(payload)
 }
 
 /// `RUNNING_JOBS`, locked, once no job but `own_job_id` is running.

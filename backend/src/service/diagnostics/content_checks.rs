@@ -587,7 +587,7 @@ where
         on_playlist_progress(
             done,
             total,
-            &format!("Resolving playlist {done}/{total}: {display_name}"),
+            &tr::diagnostics_progress_resolving_playlist(done, total, display_name).render(),
         );
         let mut unique_track_ids = HashSet::<u32>::new();
         let mut pdb_ids = HashSet::<String>::new();

@@ -60,6 +60,18 @@ pub fn emit(level: Level, source: &str, message: &str) {
     });
 }
 
+/// Emit a catalog text: the Event Log gets the current language, the log file English.
+pub fn emit_text(level: Level, source: &str, text: &crate::i18n::Text) {
+    let message = text.render();
+    let english = text.render_english();
+    emit_line(&LogLine {
+        level,
+        source,
+        message: &message,
+        english: &english,
+    });
+}
+
 /// Emit a line whose shown and English texts were rendered already (`ApiResponse::failure`).
 pub fn emit_line(line: &LogLine<'_>) {
     if let Some(sink) = SINK.get() {

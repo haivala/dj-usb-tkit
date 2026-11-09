@@ -113,9 +113,6 @@ pub struct JobEventPayload {
     /// On an analysis `job.completed`: how many of `warnings` are warn or error.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub warning_count: Option<usize>,
-    /// On an analysis `job.completed`: the job's summary for the Event Log.
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub log_message: Option<String>,
     pub timestamp: String,
 }
 

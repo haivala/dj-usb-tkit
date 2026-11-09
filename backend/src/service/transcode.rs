@@ -21,13 +21,13 @@ use super::{
 use crate::audio_encode::{TranscodeError, TranscodeFormat, TranscodeTags, transcode_file};
 use crate::audio_format::AudioFormat;
 use crate::error::{BackendError, BackendResult};
+use crate::i18n::tr;
 use crate::logging::Level;
 use crate::models::{
     MaterializeSourceTrackRequest, RemoveTrackTranscodesData, RemoveTrackTranscodesRequest,
     ReplacedTrackRow, SetTranscodeFolderRequest, Track, TrackTranscode, TranscodeFolderData,
     TranscodeFormatChoice, TranscodeFormatsData, TranscodeTracksData, TranscodeTracksRequest,
 };
-use crate::utils::counted;
 
 pub(crate) const SETTING_TRANSCODE_DIR: &str = "transcode_dir_v1";
 const DEFAULT_DIR_NAME: &str = "transcodes";
@@ -191,7 +191,7 @@ impl BackendService {
                 .into_iter()
                 .map(|format| TranscodeFormatChoice {
                     format: format.as_str().to_string(),
-                    label: format.choice_label().to_string(),
+                    label: format.choice_label().render(),
                     is_default: format == TranscodeFormat::Mp3,
                 })
                 .collect(),
@@ -538,7 +538,7 @@ impl BackendService {
         Ok(RemoveTrackTranscodesData {
             removed,
             tracks: track_rows(&conn, &req.track_ids)?,
-            summary: format!("Removed {}", counted(removed, "transcode", "transcodes")),
+            summary: tr::transcode_removed(removed).render(),
         })
     }
 }
@@ -552,22 +552,20 @@ fn note(data: &mut TranscodeTracksData, level: Level, line: String) {
 
 /// Convert…'s line for the status bar.
 fn convert_summary(data: &TranscodeTracksData) -> String {
-    let mut parts = vec![format!(
-        "{} converted",
-        counted(data.transcoded, "track", "tracks")
-    )];
+    let mut parts = vec![tr::transcode_summary_converted(data.transcoded).render()];
     if data.skipped > 0 {
-        parts.push(format!("{} skipped", data.skipped));
+        parts.push(tr::transcode_summary_skipped(data.skipped).render());
     }
     if data.failed > 0 {
-        parts.push(format!("{} failed", data.failed));
+        parts.push(tr::transcode_summary_failed(data.failed).render());
     }
-    let what = if data.cancelled {
-        "Converting cancelled"
+    let parts = parts.join(", ");
+    if data.cancelled {
+        tr::transcode_summary_cancelled(parts)
     } else {
-        "Converting done"
-    };
-    format!("{what}: {}", parts.join(", "))
+        tr::transcode_summary_done(parts)
+    }
+    .render()
 }
 
 /// A file size as the track tables show sizes (`"9 MB"`, `"1.2 GB"`).
@@ -916,7 +914,7 @@ pub(crate) fn fill_track_transcodes(
                 let parsed = TranscodeFormat::parse(&format)?;
                 let outdated = source_size.is_some()
                     && (source_size != stored_size || source_modified_at != stored_modified);
-                let about = format!("{} transcode · {}", parsed.label(), size_text(size));
+                let about = tr::transcode_tooltip(parsed.label(), size_text(size)).render();
                 Some(TrackTranscode {
                     format: parsed.as_str().to_string(),
                     label: parsed.label().to_string(),
@@ -926,10 +924,7 @@ pub(crate) fn fill_track_transcodes(
                     exported: false,
                     badge: parsed.as_str().to_ascii_uppercase(),
                     tooltip: if outdated {
-                        format!(
-                            "{about} — out of date: the source file changed since. Convert again \
-                             to update it"
-                        )
+                        tr::transcode_tooltip_outdated(&about).render()
                     } else {
                         about
                     },
