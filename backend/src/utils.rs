@@ -175,15 +175,13 @@ pub fn collect_chain_lenient(bytes: &[u8], page_size: usize, first: u32, last: u
 // Counted text
 // ---------------------------------------------------------------------------
 
-/// `count` followed by the singular or plural phrase ("1 track" / "3 tracks").
+/// `count` followed by the singular or plural phrase ("1 track" / "3 tracks"),
+/// English's plural rule. Only for English-only text: log-file lines
+/// (`logging::debug`), a repair's file-format detail, `detected_issues`,
+/// `Internal` errors. A text a user reads is a catalog key, whose plural forms
+/// a translation picks.
 pub fn counted(count: usize, one: &str, many: &str) -> String {
-    format!("{count} {}", plural(count, one, many))
-}
-
-/// The singular or plural form for `count`, for a word that doesn't follow the
-/// number or a verb that agrees with it ("1 track has" / "3 tracks have").
-pub fn plural<'a>(count: usize, one: &'a str, many: &'a str) -> &'a str {
-    if count == 1 { one } else { many }
+    format!("{count} {}", if count == 1 { one } else { many })
 }
 
 /// The status line's warning note (" | (2 warnings)"), empty without warnings.

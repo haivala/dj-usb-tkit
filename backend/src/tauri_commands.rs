@@ -2360,7 +2360,7 @@ pub async fn check_for_update() -> ApiResponse<crate::service::update_check::Upd
             ApiResponse::success(update_check::evaluate(current, install_kind, &releases))
         }
         Err(message) => {
-            crate::backend_log!(Warn, "update-check", "update check failed: {message}");
+            crate::logging::debug("update-check", format!("update check failed: {message}"));
             ApiResponse::success(UpdateInfo::failed(current, install_kind))
         }
     }

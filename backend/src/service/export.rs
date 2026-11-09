@@ -1662,15 +1662,11 @@ impl BackendService {
                 } else {
                     "Before export (additive)"
                 };
-                warnings.extend(
-                    self.backup_usb_databases_with_retention(
-                        &usb_root,
-                        backup_reason,
-                        playlist_count,
-                    )
-                    .into_iter()
-                    .map(|message| logging::log(Level::Info, "export", "export.backup", message)),
-                );
+                warnings.extend(self.backup_usb_databases_with_retention(
+                    &usb_root,
+                    backup_reason,
+                    playlist_count,
+                ));
             }
             // Write eDB first (master), then sync PDB to match eDB playlist IDs.
             // Open one RW connection here and reuse it for the immediate

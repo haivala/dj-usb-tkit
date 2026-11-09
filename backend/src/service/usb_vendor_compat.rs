@@ -1,3 +1,4 @@
+use crate::models::WarningEntry;
 use std::path::{Path, PathBuf};
 
 use serde::{Deserialize, Serialize};
@@ -62,17 +63,27 @@ pub(crate) fn backup_reason_path(backup_dir: &Path, timestamp: &str) -> PathBuf 
     backup_dir.join(format!("{timestamp}.reason.json"))
 }
 
+/// Copies the USB's databases into its backups folder. Each copy and failure
+/// is logged (Event Log and file) and returned for the command's warnings.
 pub(crate) fn backup_usb_databases(
     usb_root: &Path,
     reason: &str,
     playlist_count: Option<usize>,
-) -> Vec<String> {
+) -> Vec<WarningEntry> {
+    use crate::i18n::tr;
+    use crate::logging::{self, Level};
+    let warn = |code: &str, text: crate::i18n::Text| {
+        logging::log_text(Level::Warn, "usb-backups", code, &text)
+    };
     let timestamp = chrono::Local::now().format("%Y-%m-%d_%H-%M-%S").to_string();
     let backup_dir = vendor_db_dir(usb_root).join("backups");
     let mut notes = Vec::new();
 
     if let Err(e) = std::fs::create_dir_all(&backup_dir) {
-        notes.push(format!("Backup skipped: could not create backups dir: {e}"));
+        notes.push(warn(
+            "usb.backup.folder-failed",
+            tr::backups_warning_folder_failed(e),
+        ));
         return notes;
     }
 
@@ -88,12 +99,19 @@ pub(crate) fn backup_usb_databases(
         match std::fs::copy(&src, &dest) {
             Ok(_) => {
                 any_copied = true;
-                notes.push(format!(
-                    "Backup: {}",
-                    dest.file_name().unwrap_or_default().to_string_lossy()
+                notes.push(logging::log_text(
+                    Level::Info,
+                    "usb-backups",
+                    "usb.backup.written",
+                    &tr::backups_note_written(
+                        dest.file_name().unwrap_or_default().to_string_lossy(),
+                    ),
                 ));
             }
-            Err(e) => notes.push(format!("Backup failed for {stem}.{ext}: {e}")),
+            Err(e) => notes.push(warn(
+                "usb.backup.copy-failed",
+                tr::backups_warning_copy_failed(format!("{stem}.{ext}"), e),
+            )),
         }
     }
 
@@ -105,7 +123,7 @@ pub(crate) fn backup_usb_databases(
         if let Ok(encoded) = serde_json::to_string(&marker)
             && let Err(e) = std::fs::write(backup_reason_path(&backup_dir, &timestamp), encoded)
         {
-            notes.push(format!("Backup reason not recorded: {e}"));
+            logging::debug("usb-backups", format!("Backup reason not recorded: {e}"));
         }
     }
     notes

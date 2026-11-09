@@ -1,6 +1,6 @@
 //! Track library: scanning, search, listing, browsing, track identity and paging.
 
-use crate::utils::{counted, track_list_summary};
+use crate::utils::track_list_summary;
 use std::collections::{HashMap, HashSet};
 
 use super::*;
@@ -24,14 +24,11 @@ pub(super) fn stored_file_path(path: &str) -> &Path {
 }
 
 fn duplicate_file_warning(duplicate_path: &str, kept_path: &str) -> WarningEntry {
-    logging::log(
+    logging::log_text(
         Level::Warn,
         "library-scan",
         "scan.duplicate-file",
-        format!(
-            "Same file in two places: {duplicate_path} is identical to {kept_path}. \
-             The library keeps one; delete the extra copy."
-        ),
+        &tr::library_warning_duplicate_file(duplicate_path, kept_path),
     )
 }
 
@@ -227,15 +224,11 @@ impl BackendService {
         }
         let mut warnings = Vec::<WarningEntry>::new();
         if !not_found.is_empty() {
-            warnings.push(logging::log(
+            warnings.push(logging::log_text(
                 Level::Warn,
                 "library-scan",
                 "scan.source-folders-missing",
-                format!(
-                    "{} missing or not directories: {}",
-                    counted(not_found.len(), "source folder", "source folders"),
-                    not_found.join(", ")
-                ),
+                &tr::library_warning_source_folders_missing(not_found.len(), not_found.join(", ")),
             ));
         }
 

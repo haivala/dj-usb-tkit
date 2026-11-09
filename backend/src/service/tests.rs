@@ -371,15 +371,10 @@ fn scan_rekordbox_db_imports_updates_keeps_missing_and_reports_resource_warnings
         .iter()
         .map(|warning| warning.code.as_str())
         .collect::<Vec<_>>();
+    // The resolved/sample counts are file only; the user gets what's missing.
     for code in [
-        "scan.rekordbox-db.anlz-sample",
-        "scan.rekordbox-db.image-sample",
-        "scan.rekordbox-db.anlz-null",
         "scan.rekordbox-db.anlz-miss-summary",
-        "scan.rekordbox-db.anlz-ok",
-        "scan.rekordbox-db.artwork-null",
         "scan.rekordbox-db.artwork-miss-summary",
-        "scan.rekordbox-db.artwork-ok",
     ] {
         assert!(
             warning_codes.contains(&code),

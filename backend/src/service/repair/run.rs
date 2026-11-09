@@ -250,30 +250,169 @@ mod progress_tests {
     }
 }
 
-/// One line per fix: applied, skipped or failed.
+/// What a fix did, after its title.
+pub(super) enum Detail {
+    /// What a user reads: one catalog key holding all its values.
+    Text(Text),
+    /// What a user reads, composed of several catalog texts: rendered both ways up front, each
+    /// part in the same language (see [`Detail::composed`]).
+    Rendered { shown: String, english: String },
+    /// File-format detail (pages, tables, rows): English, for the log file and the response
+    /// only. The Event Log line names the fix without it.
+    File(String),
+}
+
+impl Detail {
+    /// A detail built from several catalog texts by `compose`, which renders each with the
+    /// renderer it gets.
+    pub(super) fn composed(compose: impl Fn(fn(&Text) -> String) -> String) -> Self {
+        Self::Rendered {
+            shown: compose(Text::render),
+            english: compose(Text::render_english),
+        }
+    }
+
+    /// `None` for file-format detail when it's left out (the Event Log).
+    fn render(&self, english: bool, with_file_detail: bool) -> Option<String> {
+        match self {
+            Self::Text(text) => Some(crate::i18n::renderer(english)(text)),
+            Self::Rendered { shown, english: en } => Some(if english { en } else { shown }.clone()),
+            Self::File(detail) => with_file_detail.then(|| detail.clone()),
+        }
+    }
+}
+
+/// An error as both texts: `shown` for the Event Log, `english` (with `Display`'s kind prefix)
+/// for the log file and the response.
+struct ErrorTexts {
+    shown: String,
+    english: String,
+}
+
+impl From<&BackendError> for ErrorTexts {
+    fn from(err: &BackendError) -> Self {
+        Self {
+            shown: err.render(),
+            english: err.to_string(),
+        }
+    }
+}
+
+impl ErrorTexts {
+    fn get(&self, english: bool) -> String {
+        if english {
+            self.english.clone()
+        } else {
+            self.shown.clone()
+        }
+    }
+}
+
+enum FixResult {
+    Applied(Detail),
+    NothingToApply,
+    NotSelected,
+    PdbUnavailable,
+    Failed(ErrorTexts),
+    /// Ran, but some of its items failed: the line is the applied one's.
+    PartlyFailed(Detail),
+    /// Applied to the staged copies, but saving them to the USB failed.
+    NotSaved(Detail),
+    /// Never run: the repaired databases weren't saved.
+    NotRun,
+}
+
+enum Outcome {
+    Fix {
+        title: Text,
+        result: FixResult,
+    },
+    /// Nothing ran: the staged PDB couldn't be read.
+    ReadFailed(ErrorTexts),
+    /// Saving to the USB failed; its own warning is already in the Event Log.
+    SaveFailed(ErrorTexts),
+}
+
+#[derive(Clone, Copy, PartialEq)]
+pub(super) enum OutcomeKind {
+    Applied,
+    Skipped,
+    Failed,
+}
+
+impl Outcome {
+    fn kind(&self) -> OutcomeKind {
+        match self {
+            Outcome::Fix { result, .. } => match result {
+                FixResult::Applied(_) => OutcomeKind::Applied,
+                FixResult::NothingToApply | FixResult::NotSelected | FixResult::PdbUnavailable => {
+                    OutcomeKind::Skipped
+                }
+                FixResult::Failed(_)
+                | FixResult::PartlyFailed(_)
+                | FixResult::NotSaved(_)
+                | FixResult::NotRun => OutcomeKind::Failed,
+            },
+            Outcome::ReadFailed(_) | Outcome::SaveFailed(_) => OutcomeKind::Failed,
+        }
+    }
+
+    /// The outcome's line, every part rendered in one language. The Event Log's leaves out
+    /// file-format detail.
+    fn render(&self, english: bool, with_file_detail: bool) -> String {
+        let r = crate::i18n::renderer(english);
+        let applied = |title: &str, detail: &Detail| match detail.render(english, with_file_detail)
+        {
+            Some(detail) => r(&tr::repair_outcome_applied(title, detail)),
+            None => title.to_string(),
+        };
+        match self {
+            Outcome::Fix { title, result } => {
+                let title = r(title);
+                match result {
+                    FixResult::Applied(detail) | FixResult::PartlyFailed(detail) => {
+                        applied(&title, detail)
+                    }
+                    FixResult::NothingToApply => r(&tr::repair_outcome_nothing_to_apply(title)),
+                    FixResult::NotSelected => r(&tr::repair_outcome_not_selected(title)),
+                    FixResult::PdbUnavailable => r(&tr::repair_outcome_pdb_unavailable(title)),
+                    FixResult::Failed(err) => {
+                        r(&tr::repair_outcome_failed(title, err.get(english)))
+                    }
+                    FixResult::NotSaved(detail) => {
+                        r(&tr::repair_outcome_not_saved(applied(&title, detail)))
+                    }
+                    FixResult::NotRun => r(&tr::repair_outcome_not_run(title)),
+                }
+            }
+            Outcome::ReadFailed(err) => r(&tr::repair_outcome_read_failed(err.get(english))),
+            Outcome::SaveFailed(err) => r(&tr::repair_outcome_save_failed(err.get(english))),
+        }
+    }
+}
+
+/// One outcome per fix: applied, skipped or failed. Each keeps its parts, so the Event Log
+/// line is all in the current language and the log file's all English.
 #[derive(Default)]
 pub(super) struct FixOutcomes {
-    pub(super) applied: Vec<String>,
-    pub(super) skipped: Vec<String>,
-    pub(super) failed: Vec<String>,
+    outcomes: Vec<Outcome>,
 }
 
 impl FixOutcomes {
     /// Report the fix that is about to run, then record its outcome. Skipped
     /// fixes do not consume a progress step.
-    fn record_with_progress<E: std::fmt::Display>(
+    fn record_with_progress(
         &mut self,
         progress: &mut ApplyProgress<'_>,
         title: Text,
         selected: bool,
         found: bool,
-        apply: impl FnOnce() -> Result<String, E>,
+        apply: impl FnOnce() -> BackendResult<Detail>,
     ) {
         if selected && found {
             progress.start(&title);
         }
-        // The outcomes go to the log file: English.
-        self.record(&title.render_english(), selected, found, apply);
+        self.record(title, selected, found, apply);
         if selected && found {
             progress.finish();
         }
@@ -281,34 +420,102 @@ impl FixOutcomes {
 
     /// Records one fix of the common shape: "not selected" when it was found
     /// but not picked, "nothing to apply" when picked but not found, otherwise
-    /// the result of `apply`, whose `Ok` text follows "<title>: ".
-    pub(super) fn record<E: std::fmt::Display>(
+    /// the result of `apply`.
+    pub(super) fn record(
         &mut self,
-        title: &str,
+        title: Text,
         selected: bool,
         found: bool,
-        apply: impl FnOnce() -> Result<String, E>,
+        apply: impl FnOnce() -> BackendResult<Detail>,
     ) {
-        match (selected, found) {
-            (true, false) => self.skipped.push(format!("{title}: nothing to apply")),
+        let result = match (selected, found) {
+            (true, false) => FixResult::NothingToApply,
             (true, true) => match apply() {
-                Ok(detail) => self.applied.push(format!("{title}: {detail}")),
-                Err(err) => self.failed.push(format!("{title} failed: {err}")),
+                Ok(detail) => FixResult::Applied(detail),
+                Err(err) => FixResult::Failed((&err).into()),
             },
-            (false, true) => self.skipped.push(format!("{title}: not selected")),
-            (false, false) => {}
-        }
+            (false, true) => FixResult::NotSelected,
+            (false, false) => return,
+        };
+        self.push(title, result);
+    }
+
+    fn push(&mut self, title: Text, result: FixResult) {
+        self.outcomes.push(Outcome::Fix { title, result });
+    }
+
+    fn applied(&mut self, title: Text, detail: Detail) {
+        self.push(title, FixResult::Applied(detail));
+    }
+
+    fn nothing_to_apply(&mut self, title: Text) {
+        self.push(title, FixResult::NothingToApply);
+    }
+
+    fn not_selected(&mut self, title: Text) {
+        self.push(title, FixResult::NotSelected);
+    }
+
+    fn failed(&mut self, title: Text, err: &BackendError) {
+        self.push(title, FixResult::Failed(err.into()));
     }
 
     /// The databases could not be saved to the USB, so nothing applied
     /// reached it: every applied fix is reported as failed.
     fn not_saved(&mut self, err: &BackendError) {
-        for fix in self.applied.drain(..) {
-            self.failed.push(format!("{fix} (not saved to the USB)"));
+        for outcome in &mut self.outcomes {
+            if let Outcome::Fix { result, .. } = outcome {
+                *result = match std::mem::replace(result, FixResult::NotRun) {
+                    FixResult::Applied(detail) => FixResult::NotSaved(detail),
+                    other => other,
+                };
+            }
         }
-        self.failed.push(format!(
-            "Saving the repaired databases to the USB failed, the USB's databases are unchanged: {err}"
-        ));
+        self.outcomes.push(Outcome::SaveFailed(err.into()));
+    }
+
+    pub(super) fn count(&self, kind: OutcomeKind) -> usize {
+        self.outcomes.iter().filter(|o| o.kind() == kind).count()
+    }
+
+    /// The English lines of one kind, for the response (the CLI tools print them).
+    pub(super) fn lines(&self, kind: OutcomeKind) -> Vec<String> {
+        self.outcomes
+            .iter()
+            .filter(|o| o.kind() == kind)
+            .map(|o| o.render(true, true))
+            .collect()
+    }
+
+    /// One Event Log line per outcome, so a log a user sends shows what the
+    /// repair did. The file gets English with the file-format detail. A failed save is
+    /// left out: its warning is already there.
+    pub(super) fn log(&self, warnings: &mut Vec<WarningEntry>) {
+        for outcome in &self.outcomes {
+            if matches!(outcome, Outcome::SaveFailed(_)) {
+                continue;
+            }
+            let (level, code, wrap): (Level, &str, fn(String) -> Text) = match outcome.kind() {
+                OutcomeKind::Applied => (Level::Info, "usb.repair.applied", |o| {
+                    tr::repair_log_applied(o)
+                }),
+                OutcomeKind::Skipped => (Level::Info, "usb.repair.skipped", |o| {
+                    tr::repair_log_skipped(o)
+                }),
+                OutcomeKind::Failed => (Level::Error, "usb.repair.failed", |o| {
+                    tr::repair_log_failed(o)
+                }),
+            };
+            let shown = wrap(outcome.render(false, false)).render();
+            let english = wrap(outcome.render(true, true)).render_english();
+            warnings.push(logging::log_rendered(
+                level,
+                "usb-repair",
+                code,
+                shown,
+                &english,
+            ));
+        }
     }
 }
 
@@ -793,10 +1000,12 @@ impl BackendService {
                 continue;
             }
             detected_issues.push(format!(
-                "{} {} {} without the seek data rekordbox writes",
-                missing.len(),
-                format.name(),
-                plural(missing.len(), "track", "tracks")
+                "{} without the seek data rekordbox writes",
+                counted(
+                    missing.len(),
+                    &format!("{} track", format.name()),
+                    &format!("{} tracks", format.name())
+                )
             ));
             let (title, description) = match format {
                 SeekFormat::Mp3 => (
@@ -1571,39 +1780,8 @@ impl BackendService {
             unsupported_items.retain(|item| seen.insert(format!("{}|{}", item.issue, item.reason)));
         }
 
-        // The outcome of every fix also goes to the Event Log, so a log a user
-        // sends shows what the repair actually did.
         if req.apply {
-            let outcomes = [
-                (
-                    Level::Info,
-                    "usb.repair.applied",
-                    "applied",
-                    &outcomes.applied,
-                ),
-                (
-                    Level::Info,
-                    "usb.repair.skipped",
-                    "skipped",
-                    &outcomes.skipped,
-                ),
-                (
-                    Level::Error,
-                    "usb.repair.failed",
-                    "failed",
-                    &outcomes.failed,
-                ),
-            ];
-            for (level, code, outcome, fixes) in outcomes {
-                for fix in fixes {
-                    warnings.push(logging::log(
-                        level,
-                        "usb-repair",
-                        code,
-                        format!("repair {outcome}: {fix}"),
-                    ));
-                }
-            }
+            outcomes.log(&mut warnings);
         }
 
         let diagnostics_after_apply = if req.apply {
@@ -1646,7 +1824,7 @@ impl BackendService {
                 }),
             None => Vec::new(),
         };
-        let usb_content_changed = req.apply && !outcomes.applied.is_empty();
+        let usb_content_changed = req.apply && outcomes.count(OutcomeKind::Applied) > 0;
 
         on_progress(
             100,
@@ -1663,7 +1841,10 @@ impl BackendService {
         let (summary, overview) = repair_overview(&proposed_fixes, &unsupported_items);
         let duration_ms = start.elapsed().as_millis() as u64;
         let status_text = if req.apply {
-            let (applied, failed) = (outcomes.applied.len(), outcomes.failed.len());
+            let (applied, failed) = (
+                outcomes.count(OutcomeKind::Applied),
+                outcomes.count(OutcomeKind::Failed),
+            );
             if diagnostics_after_apply.is_some() {
                 crate::i18n::tr::repair_apply_complete_refreshed(applied, failed, duration_ms)
             } else {
@@ -1681,9 +1862,9 @@ impl BackendService {
             detected_issues,
             proposed_fixes,
             unsupported_items,
-            applied_fixes: outcomes.applied,
-            skipped_fixes: outcomes.skipped,
-            failed_fixes: outcomes.failed,
+            applied_fixes: outcomes.lines(OutcomeKind::Applied),
+            skipped_fixes: outcomes.lines(OutcomeKind::Skipped),
+            failed_fixes: outcomes.lines(OutcomeKind::Failed),
             estimated_file_writes,
             estimated_file_deletes,
             warnings,
@@ -1738,18 +1919,7 @@ impl BackendService {
         let mut outcomes = FixOutcomes::default();
 
         progress.report(70, tr::repair_progress_backup());
-        warnings.extend(
-            self.backup_usb_databases_with_retention(usb_root, "Before repair", None)
-                .into_iter()
-                .map(|message| {
-                    logging::log(
-                        Level::Info,
-                        "usb-diagnostics",
-                        "usb.diagnostics.backup",
-                        message,
-                    )
-                }),
-        );
+        warnings.extend(self.backup_usb_databases_with_retention(usb_root, "Before repair", None));
 
         // Open the eDB read-write once for every fix below instead of
         // each fix independently re-staging/re-opening it -- SQLCipher
@@ -1766,9 +1936,7 @@ impl BackendService {
         let mut pdb = match StagedPdb::load(usb_root) {
             Ok(pdb) => pdb,
             Err(err) => {
-                outcomes.failed.push(format!(
-                    "Reading the staged PDB failed, nothing was applied: {err}"
-                ));
+                outcomes.outcomes.push(Outcome::ReadFailed((&err).into()));
                 return outcomes;
             }
         };
@@ -1787,28 +1955,28 @@ impl BackendService {
                 Ok((fixed, skipped, failed, write_count)) => {
                     *estimated_file_writes = (*estimated_file_writes).max(write_count);
                     if failed > 0 {
-                        outcomes.failed.push(format!(
-                            "Fix Empty Analysis Files: fixed {fixed}, skipped {skipped}, failed {failed}"
-                        ));
+                        outcomes.push(
+                            tr::repair_fix_empty_analysis(),
+                            FixResult::PartlyFailed(Detail::Text(
+                                tr::repair_outcome_detail_fixed_skipped_failed(
+                                    fixed, skipped, failed,
+                                ),
+                            )),
+                        );
                     } else if fixed > 0 {
-                        outcomes.applied.push(format!(
-                            "Fix Empty Analysis Files: fixed {fixed}, skipped {skipped}"
-                        ));
+                        outcomes.applied(
+                            tr::repair_fix_empty_analysis(),
+                            Detail::Text(tr::repair_outcome_detail_fixed_skipped(fixed, skipped)),
+                        );
                     } else {
-                        outcomes
-                            .skipped
-                            .push("Fix Empty Analysis Files: nothing to apply".to_string());
+                        outcomes.nothing_to_apply(tr::repair_fix_empty_analysis());
                     }
                 }
-                Err(err) => outcomes
-                    .failed
-                    .push(format!("Fix Empty Analysis Files failed: {err}")),
+                Err(err) => outcomes.failed(tr::repair_fix_empty_analysis(), &err),
             }
             progress.finish();
         } else if !empty_analysis_paths.is_empty() {
-            outcomes
-                .skipped
-                .push("Fix Empty Analysis Files: not selected".to_string());
+            outcomes.not_selected(tr::repair_fix_empty_analysis());
         }
 
         // Unlike the other structural repairs (which are safe to run after
@@ -1828,7 +1996,7 @@ impl BackendService {
                 pdb.patch(|bytes| {
                     apply_pdb_truncated_table_chain_repair(bytes, &pdb_truncated_chains)
                 })
-                .map(|n| format!("fixed {}", counted(n, "table", "tables")))
+                .map(|n| Detail::File(format!("fixed {}", counted(n, "table", "tables"))))
             },
         );
 
@@ -1851,7 +2019,7 @@ impl BackendService {
             || {
                 pdb.patch(|bytes| apply_pdb_torn_growth_pages_repair(bytes, &pdb_torn_growth))
                     .map(|n| {
-                        format!(
+                        Detail::File(format!(
                             "zeroed {}{}",
                             counted(n, "page", "pages"),
                             if pdb_torn_growth.truncate_to_pages.is_some() {
@@ -1859,7 +2027,7 @@ impl BackendService {
                             } else {
                                 ""
                             }
-                        )
+                        ))
                     })
             },
         );
@@ -1877,11 +2045,14 @@ impl BackendService {
                 let property = crate::service::export_helpers::edb_t19_property(usb_root);
                 pdb.patch(|bytes| apply_pdb_t19_template_state_repair(bytes, property.as_ref()))
                     .map(|activated| {
-                        if activated {
-                            "rewrote tt=19 page for the track count".to_string()
-                        } else {
-                            "already matches the track count".to_string()
-                        }
+                        Detail::File(
+                            if activated {
+                                "rewrote tt=19 page for the track count"
+                            } else {
+                                "already matches the track count"
+                            }
+                            .to_string(),
+                        )
                     })
             },
         );
@@ -1893,9 +2064,7 @@ impl BackendService {
         if selected.contains(STRICT_PARITY_UPGRADE_FIX_ID) {
             let force_all = strict_repair_force_all_enabled();
             if strict_upgrade_targets.is_empty() && !force_all && missing_database.is_none() {
-                outcomes
-                    .skipped
-                    .push("Upgrade Export Data To Strict Parity: nothing to apply".to_string());
+                outcomes.nothing_to_apply(tr::repair_fix_strict_parity());
             } else {
                 let target_names = if force_all {
                     None
@@ -1909,45 +2078,33 @@ impl BackendService {
                     Ok(result)
                         if result.merged_playlists > 0 || result.rebuilt_database.is_some() =>
                     {
-                        outcomes.applied.push(format!(
-                            "Upgrade Export Data To Strict Parity: {}",
-                            strict_parity_summary(&result, crate::i18n::Text::render_english)
-                        ));
+                        outcomes.applied(
+                            tr::repair_fix_strict_parity(),
+                            Detail::composed(|r| strict_parity_summary(&result, r)),
+                        );
                     }
-                    Ok(_) => outcomes
-                        .skipped
-                        .push("Upgrade Export Data To Strict Parity: nothing to apply".to_string()),
-                    Err(err) => outcomes.failed.push(format!(
-                        "Upgrade Export Data To Strict Parity failed: {err}"
-                    )),
+                    Ok(_) => outcomes.nothing_to_apply(tr::repair_fix_strict_parity()),
+                    Err(err) => outcomes.failed(tr::repair_fix_strict_parity(), &err),
                 }
                 progress.finish();
             }
         } else if !strict_upgrade_targets.is_empty() {
-            outcomes
-                .skipped
-                .push("Upgrade Export Data To Strict Parity: not selected".to_string());
+            outcomes.not_selected(tr::repair_fix_strict_parity());
         }
 
         if selected.contains(PDB_DUPLICATE_PLAYLIST_ENTRIES_FIX_ID) {
             progress.start(&tr::repair_fix_duplicate_entries());
             match pdb.patch(|bytes| apply_pdb_duplicate_playlist_entries_repair(bytes)) {
-                Ok(0) => outcomes
-                    .skipped
-                    .push("Remove Duplicate PDB Playlist Entries: nothing to apply".to_string()),
-                Ok(n) => outcomes.applied.push(format!(
-                    "Remove Duplicate PDB Playlist Entries: removed {}",
-                    counted(n, "duplicate entry", "duplicate entries")
-                )),
-                Err(err) => outcomes.failed.push(format!(
-                    "Remove Duplicate PDB Playlist Entries failed: {err}"
-                )),
+                Ok(0) => outcomes.nothing_to_apply(tr::repair_fix_duplicate_entries()),
+                Ok(n) => outcomes.applied(
+                    tr::repair_fix_duplicate_entries(),
+                    Detail::Text(tr::repair_outcome_detail_duplicate_entries(n)),
+                ),
+                Err(err) => outcomes.failed(tr::repair_fix_duplicate_entries(), &err),
             }
             progress.finish();
         } else if pdb_duplicate_entry_count > 0 {
-            outcomes
-                .skipped
-                .push("Remove Duplicate PDB Playlist Entries: not selected".to_string());
+            outcomes.not_selected(tr::repair_fix_duplicate_entries());
         }
 
         // rekordbox bookkeeping runs with every apply, so it always follows
@@ -1993,7 +2150,7 @@ impl BackendService {
             !pdb_zero_tranrf_pages.is_empty(),
             || {
                 pdb.patch(|bytes| apply_pdb_zero_tranrf_repair(bytes, &pdb_zero_tranrf_pages))
-                    .map(|n| format!("patched {}", counted(n, "page", "pages")))
+                    .map(|n| Detail::File(format!("patched {}", counted(n, "page", "pages"))))
             },
         );
 
@@ -2004,7 +2161,7 @@ impl BackendService {
             !pdb_wrong_flags_pages.is_empty(),
             || {
                 pdb.patch(|bytes| apply_pdb_wrong_page_flags_repair(bytes, &pdb_wrong_flags_pages))
-                    .map(|n| format!("patched {}", counted(n, "page", "pages")))
+                    .map(|n| Detail::File(format!("patched {}", counted(n, "page", "pages"))))
             },
         );
 
@@ -2015,7 +2172,7 @@ impl BackendService {
             !pdb_sentinel_u5_pages.is_empty(),
             || {
                 pdb.patch(|bytes| apply_pdb_sentinel_u5_repair(bytes, &pdb_sentinel_u5_pages))
-                    .map(|n| format!("patched {}", counted(n, "page", "pages")))
+                    .map(|n| Detail::File(format!("patched {}", counted(n, "page", "pages"))))
             },
         );
 
@@ -2028,7 +2185,7 @@ impl BackendService {
                 pdb.patch(|bytes| {
                     apply_pdb_wrong_history_page_shape_repair(bytes, &pdb_wrong_history_shape_pages)
                 })
-                .map(|n| format!("patched {}", counted(n, "page", "pages")))
+                .map(|n| Detail::File(format!("patched {}", counted(n, "page", "pages"))))
             },
         );
 
@@ -2039,7 +2196,7 @@ impl BackendService {
             !pdb_wrong_track_u5_pages.is_empty(),
             || {
                 pdb.patch(|bytes| apply_pdb_wrong_track_u5_repair(bytes, &pdb_wrong_track_u5_pages))
-                    .map(|n| format!("patched {}", counted(n, "page", "pages")))
+                    .map(|n| Detail::File(format!("patched {}", counted(n, "page", "pages"))))
             },
         );
 
@@ -2052,7 +2209,7 @@ impl BackendService {
                 pdb.patch(|bytes| {
                     apply_pdb_t00_multipage_active_repair(bytes, &pdb_t00_multipage_active_pages)
                 })
-                .map(|n| format!("patched {}", counted(n, "page", "pages")))
+                .map(|n| Detail::File(format!("patched {}", counted(n, "page", "pages"))))
             },
         );
 
@@ -2068,7 +2225,7 @@ impl BackendService {
                         &pdb_tombstoned_playlist_ids,
                     )
                 })
-                .map(|n| format!("zeroed id in {}", counted(n, "slot", "slots")))
+                .map(|n| Detail::File(format!("zeroed id in {}", counted(n, "slot", "slots"))))
             },
         );
 
@@ -2084,7 +2241,7 @@ impl BackendService {
                         &pdb_wrong_playlist_tree_shape_pages,
                     )
                 })
-                .map(|n| format!("patched {}", counted(n, "page", "pages")))
+                .map(|n| Detail::File(format!("patched {}", counted(n, "page", "pages"))))
             },
         );
 
@@ -2100,7 +2257,12 @@ impl BackendService {
                 pdb.patch(|bytes| {
                     apply_pdb_stale_sentinel_btree_repair(bytes, &pdb_stale_sentinel_btree_pages)
                 })
-                .map(|n| format!("reset {}", counted(n, "sentinel page", "sentinel pages")))
+                .map(|n| {
+                    Detail::File(format!(
+                        "reset {}",
+                        counted(n, "sentinel page", "sentinel pages")
+                    ))
+                })
             },
         );
 
@@ -2111,7 +2273,7 @@ impl BackendService {
             !pdb_ec_conflicts.is_empty(),
             || {
                 pdb.patch(|bytes| apply_pdb_ec_data_page_conflict_repair(bytes, &pdb_ec_conflicts))
-                    .map(|n| format!("fixed {}", counted(n, "table", "tables")))
+                    .map(|n| Detail::File(format!("fixed {}", counted(n, "table", "tables"))))
             },
         );
 
@@ -2124,7 +2286,7 @@ impl BackendService {
                 pdb.patch(|bytes| {
                     apply_pdb_track_string_alignment_repair(bytes, &pdb_misaligned_track_ids)
                 })
-                .map(|n| format!("fixed {}", counted(n, "row", "rows")))
+                .map(|n| Detail::File(format!("fixed {}", counted(n, "row", "rows"))))
             },
         );
 
@@ -2137,7 +2299,7 @@ impl BackendService {
                 pdb.patch(|bytes| {
                     apply_pdb_album_string_alignment_repair(bytes, &pdb_misaligned_album_ids)
                 })
-                .map(|n| format!("fixed {}", counted(n, "row", "rows")))
+                .map(|n| Detail::File(format!("fixed {}", counted(n, "row", "rows"))))
             },
         );
 
@@ -2150,7 +2312,7 @@ impl BackendService {
                 pdb.patch(|bytes| {
                     apply_pdb_artist_name_layout_repair(bytes, &pdb_misaligned_artist_ids)
                 })
-                .map(|n| format!("fixed {}", counted(n, "row", "rows")))
+                .map(|n| Detail::File(format!("fixed {}", counted(n, "row", "rows"))))
             },
         );
 
@@ -2158,27 +2320,22 @@ impl BackendService {
             if let Some(repair) = pdb_header_compatibility_repair.as_ref() {
                 progress.start(&tr::repair_fix_header());
                 match pdb.patch(|bytes| apply_pdb_header_compatibility_repair(bytes, repair)) {
-                    Ok(true) => outcomes.applied.push(format!(
-                        "Repair PDB Header Compatibility Field: wrote 0x10..0x14 {}->{}",
-                        repair.current_value, repair.target_value,
-                    )),
-                    Ok(false) => outcomes.skipped.push(
-                        "Repair PDB Header Compatibility Field: nothing to apply".to_string(),
+                    Ok(true) => outcomes.applied(
+                        tr::repair_fix_header(),
+                        Detail::File(format!(
+                            "wrote 0x10..0x14 {}->{}",
+                            repair.current_value, repair.target_value,
+                        )),
                     ),
-                    Err(err) => outcomes.failed.push(format!(
-                        "Repair PDB Header Compatibility Field failed: {err}"
-                    )),
+                    Ok(false) => outcomes.nothing_to_apply(tr::repair_fix_header()),
+                    Err(err) => outcomes.failed(tr::repair_fix_header(), &err),
                 }
                 progress.finish();
             } else {
-                outcomes
-                    .skipped
-                    .push("Repair PDB Header Compatibility Field: nothing to apply".to_string());
+                outcomes.nothing_to_apply(tr::repair_fix_header());
             }
         } else if pdb_header_compatibility_repair.is_some() {
-            outcomes
-                .skipped
-                .push("Repair PDB Header Compatibility Field: not selected".to_string());
+            outcomes.not_selected(tr::repair_fix_header());
         }
 
         outcomes.record_with_progress(
@@ -2195,7 +2352,7 @@ impl BackendService {
                         warnings,
                     )
                 })
-                .map(|relinked| format!("relinked {}", counted(relinked, "track", "tracks")))
+                .map(|relinked| Detail::Text(tr::repair_outcome_detail_relinked(relinked)))
             },
         );
 
@@ -2214,22 +2371,29 @@ impl BackendService {
                     )
                 })
                 .map(|(added, analysed, without_analysis)| {
-                    let mut notes = Vec::new();
-                    if analysed > 0 {
-                        notes.push(format!("{analysed} analysed from the audio"));
-                    }
-                    if without_analysis > 0 {
-                        notes.push(format!("{without_analysis} without analysis files"));
-                    }
-                    let note = if notes.is_empty() {
-                        String::new()
-                    } else {
-                        format!(" ({})", notes.join(", "))
-                    };
-                    format!(
-                        "added {} to \"{UNINDEXED_AUDIO_PLAYLIST_NAME}\"{note}",
-                        counted(added, "track", "tracks")
-                    )
+                    Detail::composed(|r| {
+                        let detail = r(&tr::repair_outcome_detail_unindexed(
+                            added,
+                            UNINDEXED_AUDIO_PLAYLIST_NAME,
+                        ));
+                        let mut notes = Vec::new();
+                        if analysed > 0 {
+                            notes.push(r(&tr::repair_outcome_detail_unindexed_analysed(analysed)));
+                        }
+                        if without_analysis > 0 {
+                            notes.push(r(&tr::repair_outcome_detail_unindexed_without_analysis(
+                                without_analysis,
+                            )));
+                        }
+                        if notes.is_empty() {
+                            detail
+                        } else {
+                            r(&tr::repair_outcome_detail_unindexed_notes(
+                                detail,
+                                notes.join(", "),
+                            ))
+                        }
+                    })
                 })
             },
         );
@@ -2241,7 +2405,9 @@ impl BackendService {
             !duplicate_audio_copies.is_empty(),
             || {
                 apply_remove_duplicate_audio_copies(usb_root, &duplicate_audio_copies, warnings)
-                    .map(|deleted| format!("deleted {}", counted(deleted, "file", "files")))
+                    .map(|deleted| {
+                        Detail::Text(tr::repair_outcome_detail_duplicate_copies(deleted))
+                    })
             },
         );
 
@@ -2260,25 +2426,22 @@ impl BackendService {
                         || removed_db_playlist_links > 0
                         || removed_pdb != PdbTrackRemoval::default()
                     {
-                        outcomes.applied.push(format!(
-                                "Remove Missing Audio References: removed content rows {removed_db_content}, playlist_content rows {removed_db_playlist_links}, PDB playlist entries {}, PDB track rows {}",
+                        outcomes.applied(
+                            tr::repair_fix_missing_audio(),
+                            Detail::File(format!(
+                                "removed content rows {removed_db_content}, playlist_content rows {removed_db_playlist_links}, PDB playlist entries {}, PDB track rows {}",
                                 removed_pdb.playlist_entries, removed_pdb.track_rows
-                            ));
+                            )),
+                        );
                     } else {
-                        outcomes
-                            .skipped
-                            .push("Remove Missing Audio References: nothing to apply".to_string());
+                        outcomes.nothing_to_apply(tr::repair_fix_missing_audio());
                     }
                 }
-                Err(err) => outcomes
-                    .failed
-                    .push(format!("Remove Missing Audio References failed: {err}")),
+                Err(err) => outcomes.failed(tr::repair_fix_missing_audio(), &err),
             }
             progress.finish();
         } else if !missing_audio_paths.is_empty() {
-            outcomes
-                .skipped
-                .push("Remove Missing Audio References: not selected".to_string());
+            outcomes.not_selected(tr::repair_fix_missing_audio());
         }
 
         outcomes.record_with_progress(
@@ -2296,10 +2459,7 @@ impl BackendService {
                     )
                 })
                 .map(|(moved, kept)| {
-                    format!(
-                        "gave {} a new analysis file, {kept} kept the original",
-                        counted(moved, "track", "tracks")
-                    )
+                    Detail::Text(tr::repair_outcome_detail_shared_analysis(moved, kept))
                 })
             },
         );
@@ -2310,12 +2470,7 @@ impl BackendService {
             !analysis_ownership.unmarked.is_empty(),
             || {
                 pdb.on_file(|| apply_add_analysis_track_path(usb_root, app_master_db_id))
-                    .map(|stamped| {
-                        format!(
-                            "named the track in {}",
-                            counted(stamped, "analysis file", "analysis files")
-                        )
-                    })
+                    .map(|stamped| Detail::Text(tr::repair_outcome_detail_analysis_path(stamped)))
             },
         );
 
@@ -2324,7 +2479,7 @@ impl BackendService {
         if bpm_selected && bpm_found {
             progress.start(&tr::repair_fix_bpm_key());
         }
-        outcomes.record("Fix BPM/Key Mismatch", bpm_selected, bpm_found, || {
+        outcomes.record(tr::repair_fix_bpm_key(), bpm_selected, bpm_found, || {
             pdb.on_file(|| {
                 apply_bpm_key_mismatch_repair(
                     usb_root,
@@ -2335,11 +2490,7 @@ impl BackendService {
                 )
             })
             .map(|(anlz_fixed, edb_fixed)| {
-                format!(
-                    "rebuilt {}, updated {}",
-                    counted(anlz_fixed, "beat grid", "beat grids"),
-                    counted(edb_fixed, "eDB row", "eDB rows")
-                )
+                Detail::Text(tr::repair_outcome_detail_bpm_key(anlz_fixed, edb_fixed))
             })
         });
         if bpm_selected && bpm_found {
@@ -2351,14 +2502,19 @@ impl BackendService {
         if grid_selected && grid_found {
             progress.start(&tr::repair_fix_beat_grid());
         }
-        outcomes.record("Fix Beat Grid", grid_selected, grid_found, || {
-            pdb.on_file(|| {
-                apply_beat_grid_repair(usb_root, warnings, &mut |done, total| {
-                    progress.item_done(done, total)
+        outcomes.record(
+            tr::repair_fix_beat_grid(),
+            grid_selected,
+            grid_found,
+            || {
+                pdb.on_file(|| {
+                    apply_beat_grid_repair(usb_root, warnings, &mut |done, total| {
+                        progress.item_done(done, total)
+                    })
                 })
-            })
-            .map(|fixed| format!("fixed {}", counted(fixed, "bundle", "bundles")))
-        });
+                .map(|fixed| Detail::Text(tr::repair_outcome_detail_beat_grid(fixed)))
+            },
+        );
         if grid_selected && grid_found {
             progress.finish();
         }
@@ -2369,7 +2525,7 @@ impl BackendService {
             if selected_format && found {
                 progress.start(&format.title_text());
             }
-            outcomes.record(format.title(), selected_format, found, || {
+            outcomes.record(format.title_text(), selected_format, found, || {
                 pdb.on_file(|| {
                     apply_missing_seek_data_repair(
                         usb_root,
@@ -2378,7 +2534,9 @@ impl BackendService {
                         &mut |done, total| progress.item_done(done, total),
                     )
                 })
-                .map(|(fixed, skipped)| format!("fixed {fixed}, skipped {skipped}"))
+                .map(|(fixed, skipped)| {
+                    Detail::Text(tr::repair_outcome_detail_fixed_skipped(fixed, skipped))
+                })
             });
             if selected_format && found {
                 progress.finish();
@@ -2387,9 +2545,7 @@ impl BackendService {
 
         if selected.contains(SYNC_EDB_HISTORY_FROM_PDB_FIX_ID) {
             if !sync_edb_history_supported || !sync_edb_history_needed {
-                outcomes
-                    .skipped
-                    .push("Sync eDB History Tables From PDB: nothing to apply".to_string());
+                outcomes.nothing_to_apply(tr::repair_fix_history_sync());
             } else if let Some(parsed) = parsed_pdb.as_ref() {
                 progress.start(&tr::repair_fix_history_sync());
                 match self.apply_fix_sync_edb_history_from_pdb(
@@ -2398,24 +2554,21 @@ impl BackendService {
                     fix_edb_conn.as_mut(),
                 ) {
                     Ok((history_written, history_content_written)) => {
-                        outcomes.applied.push(format!(
-                            "Sync eDB History Tables From PDB: wrote history {history_written}, history_content {history_content_written}"
-                        ));
+                        outcomes.applied(
+                            tr::repair_fix_history_sync(),
+                            Detail::File(format!(
+                                "wrote history {history_written}, history_content {history_content_written}"
+                            )),
+                        );
                     }
-                    Err(err) => outcomes
-                        .failed
-                        .push(format!("Sync eDB History Tables From PDB failed: {err}")),
+                    Err(err) => outcomes.failed(tr::repair_fix_history_sync(), &err),
                 }
                 progress.finish();
             } else {
-                outcomes
-                    .skipped
-                    .push("Sync eDB History Tables From PDB: PDB unavailable".to_string());
+                outcomes.push(tr::repair_fix_history_sync(), FixResult::PdbUnavailable);
             }
         } else if sync_edb_history_needed {
-            outcomes
-                .skipped
-                .push("Sync eDB History Tables From PDB: not selected".to_string());
+            outcomes.not_selected(tr::repair_fix_history_sync());
         }
 
         // Checkpoint the shared eDB connection's WAL into the main db
@@ -2444,10 +2597,7 @@ impl BackendService {
         // After the write-back, so it reads the repaired PDB.
         if saved.is_err() {
             if selected.contains(ENGINE_LIBRARY_FIX_ID) && engine_library_fix_needed {
-                outcomes.failed.push(
-                    "Keep Engine DJ Library Up to Date: not run, the repaired databases were not saved"
-                        .to_string(),
-                );
+                outcomes.push(tr::repair_fix_engine(), FixResult::NotRun);
             }
         } else if selected.contains(ENGINE_LIBRARY_FIX_ID) && engine_library_fix_needed {
             // Its own step at 95%, outside the per-fix window.
@@ -2461,21 +2611,19 @@ impl BackendService {
             {
                 Ok(summary) => {
                     warnings.extend(summary.warnings);
-                    outcomes.applied.push(format!(
-                        "Keep Engine DJ Library Up to Date: setting on, rebuilt ({}, {})",
-                        counted(summary.tracks, "track", "tracks"),
-                        counted(summary.playlists, "playlist", "playlists")
-                    ));
+                    outcomes.applied(
+                        tr::repair_fix_engine(),
+                        Detail::Text(tr::repair_outcome_detail_engine(
+                            summary.tracks,
+                            summary.playlists,
+                        )),
+                    );
                 }
-                Err(err) => outcomes
-                    .failed
-                    .push(format!("Keep Engine DJ Library Up to Date failed: {err}")),
+                Err(err) => outcomes.failed(tr::repair_fix_engine(), &err),
             }
         } else {
             if engine_library_fix_needed {
-                outcomes
-                    .skipped
-                    .push("Keep Engine DJ Library Up to Date: not selected".to_string());
+                outcomes.not_selected(tr::repair_fix_engine());
             }
             warnings.extend(self.refresh_engine_library(usb_root));
         }

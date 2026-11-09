@@ -14,11 +14,6 @@ pub(super) const PVBR_PAYLOAD_LEN: usize = PVBR_ENTRIES * 4 + 4;
 const PVB2_ENTRIES: usize = 400;
 const MP3_SAMPLES_PER_FRAME: u32 = 1152;
 
-/// Appended to a "seek data not added" log line for a file layout the
-/// parsers don't cover yet, worth a bug report.
-pub(super) const SEEK_SKIP_REPORT_HINT: &str = "please report this file (format details, not \
-     the audio) so its seek data can be supported";
-
 /// A zero-filled run this long inside the audio is damage, not an encoder
 /// layout: far more than any frame (at most 1441 bytes) or padding.
 const CORRUPT_ZERO_RUN: usize = 64 * 1024;
@@ -88,15 +83,6 @@ impl SeekIndexSkip {
     /// rather than replaced (damaged audio).
     pub(super) fn asks_for_report(self) -> bool {
         !matches!(self, Self::CorruptedAudio)
-    }
-
-    /// What the log line suggests: a damaged file is the user's to replace,
-    /// anything else is a layout worth reporting.
-    pub(super) fn advice(self) -> &'static str {
-        match self {
-            Self::CorruptedAudio => "replace it with an intact copy",
-            _ => SEEK_SKIP_REPORT_HINT,
-        }
     }
 }
 
@@ -808,10 +794,7 @@ mod tests {
         ] {
             assert_eq!(parse_mp3_pvbr(&bytes), Err(SeekIndexSkip::CorruptedAudio));
         }
-        assert_ne!(
-            SeekIndexSkip::CorruptedAudio.advice(),
-            SEEK_SKIP_REPORT_HINT
-        );
+        assert!(!SeekIndexSkip::CorruptedAudio.asks_for_report());
         // Zeros at the very end are tail fill, not damage.
         let tail = [frames.clone(), zeros].concat();
         assert_eq!(total(&parse_mp3_pvbr(&tail).unwrap()), 3 * 1152);

@@ -5,7 +5,6 @@
 //! refers to. Format layer: [`crate::engine_db`].
 
 use crate::i18n::tr;
-use crate::utils::counted;
 use std::collections::{HashMap, HashSet};
 use std::path::Path;
 
@@ -56,22 +55,27 @@ impl BackendService {
         match rebuild_engine_library(usb_root) {
             Ok(summary) => {
                 let mut warnings = summary.warnings;
-                warnings.push(logging::log(
+                warnings.push(logging::log_text(
                     Level::Info,
                     "engine-export",
                     "engine.library-written",
-                    format!(
-                        "Engine DJ library written (tracks: {}, analyzed: {}, playlists: {})",
-                        summary.tracks, summary.analyzed_tracks, summary.playlists
+                    &tr::export_engine_written(
+                        summary.tracks,
+                        summary.analyzed_tracks,
+                        summary.playlists,
                     ),
                 ));
                 warnings
             }
-            Err(err) => vec![logging::log(
+            Err(err) => vec![logging::log_composed(
                 Level::Warn,
                 "engine-export",
                 "engine.library-skipped",
-                format!("Engine DJ library not written: {err}"),
+                |english| {
+                    crate::i18n::renderer(english)(&tr::export_engine_not_written(
+                        err.text(english),
+                    ))
+                },
             )],
         }
     }
@@ -256,15 +260,13 @@ pub fn rebuild_engine_library(usb_root: &Path) -> BackendResult<EngineLibrarySum
 
     let analyzed_tracks = tracks.iter().filter(|t| t.is_analyzed()).count();
     if analyzed_tracks < tracks.len() {
-        warnings.push(logging::log(
+        warnings.push(logging::log_text(
             Level::Warn,
             "engine-export",
             "engine.tracks-without-analysis",
-            format!(
-                "{} of {} without a usable beat grid or waveform on the USB; \
-                 the Engine player analyzes those itself on load",
+            &tr::export_engine_tracks_without_analysis(
                 tracks.len() - analyzed_tracks,
-                counted(tracks.len(), "track", "tracks")
+                tracks.len(),
             ),
         ));
     }

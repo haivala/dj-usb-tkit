@@ -13,7 +13,7 @@
 //!
 //! Also backs the "Backups" UI panel: list / restore / delete.
 
-use crate::utils::plural;
+use crate::models::WarningEntry;
 use std::collections::BTreeMap;
 use std::path::{Path, PathBuf};
 
@@ -136,20 +136,16 @@ pub(super) fn move_file(src: &Path, dest: &Path) -> std::io::Result<()> {
 /// Splits USB-side snapshots (keep newest, archive the rest to the HDD
 /// cache when a cache dir is available) then prunes the combined USB+cache
 /// count for each stem down to `retention_count`, oldest cache-side entries
-/// first. Returns human-readable notes for the caller's warning log, same
-/// shape as `backup_usb_databases`'s own return value. Best-effort
+/// first. What it moved or pruned, and any failure, goes to the log file only
+/// (nothing for the user to do). Best-effort
 /// throughout: a stat/move/delete failure is noted, never propagated as a
 /// hard error -- this runs after the backup copy itself already succeeded
 /// or failed, and must never turn a successful backup into a failed one.
-fn reconcile_backups(
-    usb_root: &Path,
-    retention_count: u32,
-    protect_timestamp: Option<&str>,
-) -> Vec<String> {
+fn reconcile_backups(usb_root: &Path, retention_count: u32, protect_timestamp: Option<&str>) {
     let retention_count = retention_count.max(1) as usize;
     let usb_dir = usb_backups_dir(usb_root);
     let cache_dir = cache_backups_dir(usb_root);
-    let mut notes = Vec::new();
+    let note = |message: String| crate::logging::debug("usb-backups", message);
 
     for (stem, ext) in STEMS {
         let mut usb_files = list_stem_files(&usb_dir, stem, ext);
@@ -161,16 +157,15 @@ fn reconcile_backups(
                 let dest = cache_dir.join(old.file_name().unwrap_or_default());
                 match move_file(&old, &dest) {
                     Ok(()) => archived += 1,
-                    Err(e) => notes.push(format!(
+                    Err(e) => note(format!(
                         "Backup archive failed for {}: {e}",
                         old.file_name().unwrap_or_default().to_string_lossy()
                     )),
                 }
             }
             if archived > 0 {
-                notes.push(format!(
-                    "Archived {archived} older {stem} {} to local cache",
-                    plural(archived, "backup", "backups")
+                note(format!(
+                    "Archived older {stem} backups to local cache: {archived}"
                 ));
             }
         }
@@ -204,16 +199,15 @@ fn reconcile_backups(
             for path in prunable.take(overflow) {
                 match std::fs::remove_file(&path) {
                     Ok(()) => pruned += 1,
-                    Err(e) => notes.push(format!(
+                    Err(e) => note(format!(
                         "Backup prune failed for {}: {e}",
                         path.file_name().unwrap_or_default().to_string_lossy()
                     )),
                 }
             }
             if pruned > 0 {
-                notes.push(format!(
-                    "Pruned {pruned} old {stem} {} beyond retention limit",
-                    plural(pruned, "backup", "backups")
+                note(format!(
+                    "Pruned old {stem} backups beyond retention limit: {pruned}"
                 ));
             }
         }
@@ -241,8 +235,6 @@ fn reconcile_backups(
             }
         }
     }
-
-    notes
 }
 
 fn read_backup_retention_count(conn: &rusqlite::Connection) -> u32 {
@@ -441,7 +433,7 @@ impl BackendService {
         usb_root: &Path,
         reason: &str,
         playlist_count: Option<usize>,
-    ) -> Vec<String> {
+    ) -> Vec<WarningEntry> {
         self.backup_usb_databases_with_retention_protecting(usb_root, reason, playlist_count, None)
     }
 
@@ -456,9 +448,9 @@ impl BackendService {
         reason: &str,
         playlist_count: Option<usize>,
         protect_timestamp: Option<&str>,
-    ) -> Vec<String> {
+    ) -> Vec<WarningEntry> {
         let playlist_count = playlist_count.or_else(|| most_recent_backup_playlist_count(usb_root));
-        let mut notes =
+        let notes =
             super::usb_vendor_compat::backup_usb_databases(usb_root, reason, playlist_count);
         let retention_count = self
             .db
@@ -466,11 +458,7 @@ impl BackendService {
             .ok()
             .map(|conn| read_backup_retention_count(&conn))
             .unwrap_or(DEFAULT_BACKUP_RETENTION_COUNT);
-        notes.extend(reconcile_backups(
-            usb_root,
-            retention_count,
-            protect_timestamp,
-        ));
+        reconcile_backups(usb_root, retention_count, protect_timestamp);
         notes
     }
 
@@ -546,10 +534,9 @@ impl BackendService {
                 _ => continue,
             };
             if let Err(err) = result {
-                crate::logging::emit(
-                    crate::logging::Level::Warn,
+                crate::logging::debug(
                     "usb-backups",
-                    &format!("Failed to re-stage {stem} after restore: {err}"),
+                    format!("Failed to re-stage {stem} after restore: {err}"),
                 );
             }
         }
@@ -563,10 +550,9 @@ impl BackendService {
             })
             .map(|data| data.playlist_usb_export_status)
             .unwrap_or_else(|err| {
-                crate::logging::emit(
-                    crate::logging::Level::Warn,
+                crate::logging::debug(
                     "usb-backups",
-                    &format!("Failed to compute playlist export status after restore: {err}"),
+                    format!("Failed to compute playlist export status after restore: {err}"),
                 );
                 Vec::new()
             });

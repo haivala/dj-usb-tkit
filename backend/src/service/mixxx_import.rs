@@ -25,7 +25,7 @@ use super::{
 };
 use crate::edb::{load_table_columns, table_exists};
 use crate::error::{BackendError, BackendResult};
-use crate::i18n::tr;
+use crate::i18n::{Text, tr};
 use crate::logging::{self, Level};
 use crate::models::{
     DetectExternalMixxxDbData, ExternalPlaylistKind, ExternalPlaylistSummary,
@@ -33,7 +33,6 @@ use crate::models::{
     ListExternalPlaylistsRequest, ScanLibraryData, ScanMixxxDbRequest, TrackCue, WarningEntry,
 };
 use crate::scanner::is_library_audio_file;
-use crate::utils::counted;
 
 pub(crate) const MIXXX_DB_ENV_KEY: &str = "DJUSBTKIT_MIXXX_DB_PATH";
 /// `playlists.import_source` prefix of playlists imported from Mixxx.
@@ -751,11 +750,11 @@ impl<'a> MixxxTrackImporter<'a> {
         let location = t.cover_location.as_deref()?;
         let Some(src) = resolve_mixxx_cover_file(&t.file_path, location) else {
             self.artwork_miss += 1;
-            self.warnings.push(logging::log(
+            self.warnings.push(logging::log_text(
                 Level::Warn,
                 "scan-mixxx-db",
                 "scan.mixxx-db.artwork-not-found",
-                format!("cover file not found ({location:?} for {:?})", t.file_path),
+                &tr::scan_warning_cover_not_found(location, &t.file_path),
             ));
             return None;
         };
@@ -768,11 +767,11 @@ impl<'a> MixxxTrackImporter<'a> {
             }
             Err(e) => {
                 self.artwork_miss += 1;
-                self.warnings.push(logging::log(
+                self.warnings.push(logging::log_text(
                     Level::Error,
                     "scan-mixxx-db",
                     "scan.mixxx-db.artwork-copy-failed",
-                    format!("cover copy failed {src:?} -> {dest:?}: {e}"),
+                    &tr::scan_warning_artwork_copy_failed(src.display(), e),
                 ));
                 None
             }
@@ -809,58 +808,42 @@ impl<'a> MixxxTrackImporter<'a> {
 
     /// The summary log entries, appended after the per-track warnings.
     fn finish_warnings(&mut self) -> Vec<WarningEntry> {
-        let mut summary = |level, code: &str, message: String| {
+        let mut note = |level, code: &str, text: Text| {
             self.warnings
-                .push(logging::log(level, "scan-mixxx-db", code, message));
+                .push(logging::log_text(level, "scan-mixxx-db", code, &text));
         };
         if self.unsupported > 0 {
-            summary(
+            note(
                 Level::Info,
                 "scan.mixxx-db.unsupported-skipped",
-                format!(
-                    "{} skipped: not a supported audio file",
-                    counted(self.unsupported, "track", "tracks")
-                ),
+                tr::scan_note_unsupported_skipped(self.unsupported),
             );
         }
         if self.cue_tracks > 0 {
-            summary(
+            note(
                 Level::Info,
                 "scan.mixxx-db.cues-imported",
-                format!(
-                    "hot cues imported for {}",
-                    counted(self.cue_tracks, "track", "tracks")
-                ),
+                tr::scan_note_hot_cues_imported(self.cue_tracks),
             );
         }
         if self.cue_tracks_kept_local > 0 {
-            summary(
+            note(
                 Level::Info,
                 "scan.mixxx-db.cues-kept-local",
-                format!(
-                    "existing cues kept for {}; their Mixxx cues were not imported",
-                    counted(self.cue_tracks_kept_local, "track", "tracks")
-                ),
-            );
-        }
-        if self.artwork_ok > 0 {
-            summary(
-                Level::Info,
-                "scan.mixxx-db.artwork-ok",
-                format!(
-                    "{} copied OK",
-                    counted(self.artwork_ok, "cover file", "cover files")
-                ),
+                tr::scan_note_cues_kept_local(self.cue_tracks_kept_local, "Mixxx"),
             );
         }
         if self.artwork_miss > 0 {
-            summary(
+            note(
                 Level::Warn,
                 "scan.mixxx-db.artwork-miss-summary",
-                format!(
-                    "{} not found or copy failed",
-                    counted(self.artwork_miss, "cover file", "cover files")
-                ),
+                tr::scan_warning_cover_missing(self.artwork_miss),
+            );
+        }
+        if self.artwork_ok > 0 {
+            logging::debug(
+                "scan-mixxx-db",
+                format!("cover files copied: {}", self.artwork_ok),
             );
         }
         std::mem::take(&mut self.warnings)
@@ -979,25 +962,19 @@ impl BackendService {
 
         let mut warnings = importer.finish_warnings();
         if duplicates > 0 {
-            warnings.push(logging::log(
+            warnings.push(logging::log_text(
                 Level::Info,
                 "scan-mixxx-db",
                 "scan.mixxx-db.playlist-duplicates-skipped",
-                format!(
-                    "{} in {name:?} added once",
-                    counted(duplicates, "repeated track", "repeated tracks")
-                ),
+                &tr::scan_note_playlist_duplicates(duplicates, &name),
             ));
         }
         if deleted_in_mixxx > 0 {
-            warnings.push(logging::log(
+            warnings.push(logging::log_text(
                 Level::Warn,
                 "scan-mixxx-db",
                 "scan.mixxx-db.playlist-tracks-deleted",
-                format!(
-                    "{} in {name:?} no longer in the Mixxx library",
-                    counted(deleted_in_mixxx, "track", "tracks")
-                ),
+                &tr::scan_warning_playlist_tracks_deleted(deleted_in_mixxx, &name, "Mixxx"),
             ));
         }
         Ok(ImportExternalPlaylistData {
@@ -1469,7 +1446,6 @@ mod tests {
         for code in [
             "scan.mixxx-db.cues-imported",
             "scan.mixxx-db.cues-kept-local",
-            "scan.mixxx-db.artwork-ok",
             "scan.mixxx-db.unsupported-skipped",
         ] {
             assert!(codes.contains(&code), "expected {code}, got {codes:?}");

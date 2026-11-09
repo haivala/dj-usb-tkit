@@ -638,18 +638,11 @@ impl BackendService {
             final_kinds.push(*kind);
         }
 
-        warnings.extend(
-            self.backup_usb_databases_with_retention(&usb_root, "Before menu update", None)
-                .into_iter()
-                .map(|message| {
-                    logging::log(
-                        Level::Info,
-                        "usb-player-menu",
-                        "usb.player-menu.backup",
-                        message,
-                    )
-                }),
-        );
+        warnings.extend(self.backup_usb_databases_with_retention(
+            &usb_root,
+            "Before menu update",
+            None,
+        ));
 
         if has_edb {
             // Snapshot eDB for rollback if the write fails. Staged path: this must

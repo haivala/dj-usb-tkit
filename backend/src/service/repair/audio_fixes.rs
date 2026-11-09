@@ -620,13 +620,6 @@ impl SeekFormat {
         }
     }
 
-    pub(super) fn title(self) -> &'static str {
-        match self {
-            Self::Mp3 => "Add Missing MP3 Seek Data",
-            Self::Flac => "Add Missing FLAC Seek Data",
-        }
-    }
-
     pub(super) fn name(self) -> &'static str {
         match self {
             Self::Mp3 => "MP3",

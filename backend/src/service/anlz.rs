@@ -982,19 +982,27 @@ pub(super) enum PvbrFill {
 pub(super) fn fill_mp3_pvbr(dat_path: &Path, audio_path: &Path) -> BackendResult<PvbrFill> {
     let fill = try_fill_mp3_pvbr(dat_path, audio_path);
     match &fill {
-        Ok(PvbrFill::Skipped(skip)) => crate::backend_log!(
-            Warn,
+        Ok(PvbrFill::Skipped(skip)) => {
+            let path = audio_path.display();
+            crate::logging::emit_text(
+                crate::logging::Level::Warn,
+                "anlz",
+                &if skip.asks_for_report() {
+                    crate::i18n::tr::analysis_warning_mp3_seek_skipped_report(skip.describe(), path)
+                } else {
+                    crate::i18n::tr::analysis_warning_mp3_seek_skipped_replace(
+                        skip.describe(),
+                        path,
+                    )
+                },
+            );
+        }
+        Err(err) => crate::logging::debug(
             "anlz",
-            "MP3 seek data not added ({}): {}; {}",
-            skip.describe(),
-            audio_path.display(),
-            skip.advice()
-        ),
-        Err(err) => crate::backend_log!(
-            Warn,
-            "anlz",
-            "MP3 seek index not written ({err}): {}",
-            audio_path.display()
+            format!(
+                "MP3 seek index not written ({err}): {}",
+                audio_path.display()
+            ),
         ),
         _ => {}
     }

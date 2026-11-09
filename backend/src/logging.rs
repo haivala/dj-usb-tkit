@@ -100,36 +100,9 @@ pub fn emit_line(line: &LogLine<'_>) {
     }
 }
 
-/// The one way to produce a log line that a command also wants to return in
-/// its own `Vec<WarningEntry>` response field: state `(level, code)`
-/// explicitly at the point the message is created, emit it live via
-/// `emit()`, and get back the `WarningEntry` to push. Replaces the old
-/// pattern of building a bare `String` and re-classifying it later by
-/// guessing from substrings.
-pub fn log(
-    level: Level,
-    source: &str,
-    code: &str,
-    message: impl Into<String>,
-) -> crate::models::WarningEntry {
-    let message = message.into();
-    emit_line(&LogLine {
-        level,
-        source,
-        code,
-        message: &message,
-        english: &message,
-    });
-    crate::models::WarningEntry {
-        level: level.as_str().to_string(),
-        code: code.to_string(),
-        message,
-        source: source.to_string(),
-    }
-}
-
-/// [`log`] for a catalog text: the Event Log and the returned entry get the current language,
-/// the log file English. A composed message is one key holding all its values, not a `Text`
+/// A line a command also returns in its `Vec<WarningEntry>` response field, stating
+/// `(level, code)` where it's made, for a catalog text: the Event Log and the returned entry
+/// get the current language, the log file English. A composed message is one key holding all its values, not a `Text`
 /// passed into another (an inner `Text` is rendered when passed, so it wouldn't be English in
 /// the file).
 pub fn log_text(
@@ -147,6 +120,44 @@ pub fn log_text(
     }
 }
 
+/// [`log_text`] for a line rendered twice by its caller: `shown` for the Event Log and the returned
+/// entry, `english` for the log file. For a line composed of several catalog texts, each part
+/// rendered in the same language; `english` may also add file-format detail the Event Log
+/// leaves out.
+pub fn log_rendered(
+    level: Level,
+    source: &str,
+    code: &str,
+    shown: String,
+    english: &str,
+) -> crate::models::WarningEntry {
+    emit_line(&LogLine {
+        level,
+        source,
+        code,
+        message: &shown,
+        english,
+    });
+    crate::models::WarningEntry {
+        level: level.as_str().to_string(),
+        code: code.to_string(),
+        message: shown,
+        source: source.to_string(),
+    }
+}
+
+/// [`log_rendered`] for a line composed of several parts: `compose(false)` is the Event Log's,
+/// `compose(true)` the log file's, each part rendered in that one language
+/// (`crate::i18n::renderer`, `BackendError::text`).
+pub fn log_composed(
+    level: Level,
+    source: &str,
+    code: &str,
+    compose: impl Fn(bool) -> String,
+) -> crate::models::WarningEntry {
+    log_rendered(level, source, code, compose(false), &compose(true))
+}
+
 /// How many of `entries` are warnings or errors: the "(N warnings)" a
 /// command's status line reports and links to the Event Log.
 pub fn count_warnings(entries: &[crate::models::WarningEntry]) -> usize {
@@ -162,15 +173,6 @@ pub fn count_warnings(entries: &[crate::models::WarningEntry]) -> usize {
 /// repair) is catalog text through [`log_text`] instead.
 pub fn debug(source: &str, message: impl AsRef<str>) {
     emit(Level::Debug, source, message.as_ref());
-}
-
-/// Convenience macro: `backend_log!(warn, "pdb-writer", "msg {x}")`.
-#[macro_export]
-macro_rules! backend_log {
-    ($level:ident, $source:expr, $($arg:tt)*) => {{
-        let __msg = format!($($arg)*);
-        $crate::logging::emit($crate::logging::Level::$level, $source, &__msg);
-    }};
 }
 
 #[cfg(test)]
@@ -191,7 +193,13 @@ mod tests {
         // No sink is guaranteed to be installed in this test binary (installation
         // is process-wide and idempotent -- see `set_sink`), so this also
         // exercises the stderr fallback path in `emit` whenever it runs first.
-        let entry = log(Level::Warn, "test-source", "test.code", "hello world");
+        let entry = log_rendered(
+            Level::Warn,
+            "test-source",
+            "test.code",
+            "hello world".to_string(),
+            "hello world (file)",
+        );
         assert_eq!(entry.level, "warn");
         assert_eq!(entry.source, "test-source");
         assert_eq!(entry.code, "test.code");
@@ -200,23 +208,10 @@ mod tests {
 
     #[test]
     fn count_warnings_counts_warn_and_error_entries_only() {
-        let entries = [
-            log(Level::Info, "src", "code", "info"),
-            log(Level::Warn, "src", "code", "warn"),
-            log(Level::Error, "src", "code", "error"),
-        ];
+        let entry = |level| log_rendered(level, "src", "code", "line".to_string(), "line");
+        let entries = [entry(Level::Info), entry(Level::Warn), entry(Level::Error)];
         assert_eq!(count_warnings(&entries), 2);
         assert_eq!(count_warnings(&[]), 0);
-    }
-
-    #[test]
-    fn log_accepts_owned_string_and_str_messages() {
-        let from_str = log(Level::Info, "src", "code", "static message");
-        assert_eq!(from_str.message, "static message");
-
-        let owned = format!("dynamic {}", 42);
-        let from_string = log(Level::Error, "src", "code", owned.clone());
-        assert_eq!(from_string.message, owned);
     }
 
     #[test]

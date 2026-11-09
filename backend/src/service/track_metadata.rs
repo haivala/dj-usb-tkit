@@ -12,7 +12,7 @@ use crate::edb::{
 };
 use crate::error::{BackendError, BackendResult};
 use crate::i18n::tr;
-use crate::logging::{self, Level};
+use crate::logging;
 use crate::models::{
     GetTracksMetadataSummaryRequest, GetUsbTracksMetadataSummaryRequest,
     SaveTrackMetadataEditsData, SaveTrackMetadataEditsRequest, SaveUsbTrackMetadataEditsData,
@@ -646,10 +646,9 @@ impl BackendService {
                     &edits.release_date,
                     &now,
                 )?,
-                None => logging::emit(
-                    Level::Warn,
-                    "track-metadata.usb-save.no-local-match",
-                    &format!(
+                None => logging::debug(
+                    "track-metadata",
+                    format!(
                         "USB genre/rating/release date edit for {} matched no local track; device written, local master not",
                         track.usb_media_path_raw
                     ),

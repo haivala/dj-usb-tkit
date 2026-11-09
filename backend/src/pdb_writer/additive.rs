@@ -2697,10 +2697,9 @@ pub(crate) fn try_write_pdb_additive_in_place(
     let diff = match compute_additive_diff(existing_bytes, new_data, desired_t08_entries) {
         Ok(d) => d,
         Err(reason) => {
-            crate::logging::emit(
-                crate::logging::Level::Info,
+            crate::logging::debug(
                 "pdb-additive",
-                &format!("non-additive diff: {reason}; topology-locked export will stop"),
+                format!("non-additive diff: {reason}; topology-locked export will stop"),
             );
             return Ok(None);
         }

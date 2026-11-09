@@ -114,6 +114,25 @@ impl From<BackendError> for ErrorPayload {
     }
 }
 
+impl BackendError {
+    /// What a user reads: a catalog text in the current language, without the English kind
+    /// prefix `Display` adds; any other error as `Display` has it.
+    pub fn render(&self) -> String {
+        self.text(false)
+    }
+
+    /// [`Self::render`], or with `english` the log file's text (`Display`, prefix included).
+    pub fn text(&self, english: bool) -> String {
+        match self {
+            _ if english => self.to_string(),
+            BackendError::Validation(text)
+            | BackendError::ValidationWithDetails(text, _)
+            | BackendError::NotFound(text) => text.render(),
+            other => other.to_string(),
+        }
+    }
+}
+
 pub type BackendResult<T> = Result<T, BackendError>;
 
 #[cfg(test)]

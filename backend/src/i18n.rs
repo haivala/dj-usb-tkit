@@ -93,6 +93,16 @@ impl Text {
     }
 }
 
+/// The renderer for one of the two languages a line is written in: English for the log file,
+/// else the current language. For composing a line of several texts with one renderer.
+pub fn renderer(english: bool) -> fn(&Text) -> String {
+    if english {
+        Text::render_english
+    } else {
+        Text::render
+    }
+}
+
 impl fmt::Display for Text {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         f.write_str(&self.render())

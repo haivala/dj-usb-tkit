@@ -351,11 +351,11 @@ impl Coordinator {
         if new_tracks.is_empty() {
             // Tracks already being analyzed aren't a problem to report.
             if skipped_ids.is_empty() {
-                warnings.push(logging::log(
+                warnings.push(logging::log_text(
                     Level::Info,
                     "analysis",
                     "analysis.no-eligible-tracks",
-                    "No eligible tracks found for analysis",
+                    &tr::analysis_no_eligible_tracks(),
                 ));
             }
         } else {
@@ -416,10 +416,9 @@ impl Coordinator {
         let budget = analysis_capacity(engine);
         if analysis_debug_workers_enabled() {
             let cap = resolve_worker_cap_for_engine(engine);
-            logging::emit(
-                Level::Info,
+            logging::debug(
                 "analysis",
-                &format!(
+                format!(
                     "debug workers budget={budget} memory_cap={:?} env_cap={:?}",
                     cap.memory_cap, cap.env_cap
                 ),
@@ -539,15 +538,17 @@ impl Coordinator {
                     self.analyzed += 1;
                 } else {
                     self.incomplete += 1;
-                    warning = Some(logging::log(
+                    warning = Some(logging::log_composed(
                         Level::Warn,
                         "analysis",
                         "analysis.track-incomplete",
-                        format!(
-                            "{}: {}",
-                            track.file_path,
-                            incomplete_analysis_reason(&local)
-                        ),
+                        |english| {
+                            let r = crate::i18n::renderer(english);
+                            r(&tr::analysis_track_incomplete(
+                                &track.file_path,
+                                incomplete_analysis_reason(&local, r),
+                            ))
+                        },
                     ));
                 }
                 if let Some(library) = self.library.as_mut()
@@ -562,11 +563,16 @@ impl Coordinator {
             Err(err) => {
                 self.failed += 1;
                 let err_msg = err.to_string();
-                warning = Some(logging::log(
+                warning = Some(logging::log_composed(
                     Level::Error,
                     "analysis",
                     "analysis.track-failed",
-                    format!("{}: {err_msg}", track.file_path),
+                    |english| {
+                        crate::i18n::renderer(english)(&tr::analysis_track_failed(
+                            &track.file_path,
+                            err.text(english),
+                        ))
+                    },
                 ));
                 build_done_progress_error(self.completed, self.total, &track, err_msg)
             }

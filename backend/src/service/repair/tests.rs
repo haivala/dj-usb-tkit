@@ -41,21 +41,63 @@ fn match_moved_audio_pairs_by_fingerprint_then_file_name() {
 
 #[test]
 fn fix_outcomes_record_covers_every_selected_found_combination() {
-    use super::run::FixOutcomes;
+    use super::run::{Detail, FixOutcomes, OutcomeKind};
+    use crate::i18n::tr;
 
     let mut outcomes = FixOutcomes::default();
-    let ok = || Ok::<_, String>("fixed 2 rows".to_string());
-    outcomes.record("Fix A", true, true, ok);
-    outcomes.record("Fix B", true, true, || Err::<String, _>("disk full"));
-    outcomes.record("Fix C", true, false, ok);
-    outcomes.record("Fix D", false, true, ok);
-    outcomes.record("Fix E", false, false, ok);
+    let ok = || Ok(Detail::File("fixed 2 rows".to_string()));
+    outcomes.record(tr::repair_fix_beat_grid(), true, true, ok);
+    outcomes.record(tr::repair_fix_bpm_key(), true, true, || {
+        Err(BackendError::Internal("disk full".to_string()))
+    });
+    outcomes.record(tr::repair_fix_relink(), true, false, ok);
+    outcomes.record(tr::repair_fix_unindexed(), false, true, ok);
+    outcomes.record(tr::repair_fix_engine(), false, false, ok);
 
-    assert_eq!(outcomes.applied, vec!["Fix A: fixed 2 rows"]);
-    assert_eq!(outcomes.failed, vec!["Fix B failed: disk full"]);
     assert_eq!(
-        outcomes.skipped,
-        vec!["Fix C: nothing to apply", "Fix D: not selected"]
+        outcomes.lines(OutcomeKind::Applied),
+        vec!["Fix Beat Grid: fixed 2 rows"]
+    );
+    assert_eq!(
+        outcomes.lines(OutcomeKind::Failed),
+        vec!["Fix BPM/Key Mismatch failed: internal error: disk full"]
+    );
+    assert_eq!(
+        outcomes.lines(OutcomeKind::Skipped),
+        vec![
+            "Relink Moved Audio Files: nothing to apply",
+            "Add Unindexed Audio to a Playlist: not selected"
+        ]
+    );
+}
+
+#[test]
+fn fix_outcomes_event_log_names_a_fix_without_its_file_format_detail() {
+    use super::run::{Detail, FixOutcomes, OutcomeKind};
+    use crate::i18n::tr;
+
+    let mut outcomes = FixOutcomes::default();
+    outcomes.record(tr::repair_fix_page_flags(), true, true, || {
+        Ok(Detail::File("patched 3 pages".to_string()))
+    });
+    outcomes.record(tr::repair_fix_relink(), true, true, || {
+        Ok(Detail::Text(tr::repair_outcome_detail_relinked(1)))
+    });
+    let mut warnings = Vec::new();
+    outcomes.log(&mut warnings);
+
+    let shown: Vec<&str> = warnings.iter().map(|w| w.message.as_str()).collect();
+    assert_eq!(
+        shown,
+        vec![
+            "repair applied: Repair PDB Data Page Flags",
+            "repair applied: Relink Moved Audio Files: relinked 1 track"
+        ]
+    );
+    // The response keeps the detail.
+    assert_eq!(
+        outcomes.lines(OutcomeKind::Applied)[0],
+        "Repair PDB Data Page Flags: patched 3 pages"
     );
 }
 

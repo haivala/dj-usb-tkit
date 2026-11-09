@@ -357,10 +357,9 @@ fn stage_file_with_root(
     let device_dir_is_new = !device_dir.is_dir();
     std::fs::create_dir_all(&local_dir)?;
     if device_dir_is_new {
-        crate::logging::emit(
-            crate::logging::Level::Info,
+        crate::logging::debug(
             "usb-staging",
-            &format!("USB local staging folder: {}", device_dir.display()),
+            format!("USB local staging folder: {}", device_dir.display()),
         );
     }
 
@@ -380,10 +379,9 @@ fn stage_file_with_root(
     }
 
     std::fs::copy(source, &local_path)?;
-    crate::logging::emit(
-        crate::logging::Level::Info,
+    crate::logging::debug(
         "usb-staging",
-        &format!(
+        format!(
             "Staged {} locally: {}",
             kind.filename(),
             local_path.display()
@@ -515,10 +513,9 @@ fn commit_local_to_usb(
     let tmp = dest.with_extension(format!("tmp-{}", std::process::id()));
     std::fs::copy(local_path, &tmp)?;
     std::fs::rename(&tmp, &dest)?;
-    crate::logging::emit(
-        crate::logging::Level::Info,
+    crate::logging::debug(
         "usb-staging",
-        &format!("Wrote {} back to USB: {}", kind.filename(), dest.display()),
+        format!("Wrote {} back to USB: {}", kind.filename(), dest.display()),
     );
 
     let local_stat = stat(local_path)?;

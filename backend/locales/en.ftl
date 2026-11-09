@@ -279,6 +279,14 @@ backups-reason-restore = Before restore
 # $backup: the backup's timestamp.
 backups-error-not-found = backup not found: { $backup }
 
+# Event Log notes when a command backs up the USB's databases before changing them.
+# $file: the backup file's name.
+backups-note-written = Backup: { $file }
+# $error: the reason, from the OS.
+backups-warning-folder-failed = Backup skipped: could not create the backups folder: { $error }
+# $file: the database (export.pdb or exportLibrary.db).
+backups-warning-copy-failed = Backup failed for { $file }: { $error }
+
 ## diagnostics
 
 # The badge on the USB diagnostics report, for its overall result.
@@ -1155,6 +1163,75 @@ repair-warning-unindexed-no-analysis = unindexed audio has no analysis files on 
 repair-warning-unindexed-edb-unavailable = unindexed audio: eDB unavailable, only the PDB was updated
 repair-warning-missing-audio-edb-unavailable = repair skipped (missing audio): unable to open eDB read-write
 
+# What each fix did, one Event Log line per fix after an apply. $outcome: one of the repair-outcome-* lines
+# below.
+repair-log-applied = repair applied: { $outcome }
+repair-log-skipped = repair skipped: { $outcome }
+repair-log-failed = repair failed: { $outcome }
+# $fix: the fix's title. $detail: one of the repair-outcome-detail-* lines.
+repair-outcome-applied = { $fix }: { $detail }
+repair-outcome-nothing-to-apply = { $fix }: nothing to apply
+repair-outcome-not-selected = { $fix }: not selected
+repair-outcome-pdb-unavailable = { $fix }: PDB unavailable
+# $error: the reason.
+repair-outcome-failed = { $fix } failed: { $error }
+# $outcome: the fix's repair-outcome-applied line, which the USB never got.
+repair-outcome-not-saved = { $outcome } (not saved to the USB)
+repair-outcome-not-run = { $fix }: not run, the repaired databases were not saved
+repair-outcome-read-failed = Reading the PDB failed, nothing was applied: { $error }
+repair-outcome-save-failed = Saving the repaired databases to the USB failed, the USB's databases are unchanged: { $error }
+# Analysis files (empty analysis files) or tracks (seek data).
+repair-outcome-detail-fixed-skipped = fixed { $fixed }, skipped { $skipped }
+repair-outcome-detail-fixed-skipped-failed = fixed { $fixed }, skipped { $skipped }, failed { $failed }
+repair-outcome-detail-duplicate-entries = removed { $count ->
+    [one] { $count } duplicate entry
+   *[other] { $count } duplicate entries
+}
+repair-outcome-detail-relinked = relinked { $count ->
+    [one] { $count } track
+   *[other] { $count } tracks
+}
+# $playlist: the USB playlist they were added to.
+repair-outcome-detail-unindexed = added { $count ->
+    [one] { $count } track
+   *[other] { $count } tracks
+} to "{ $playlist }"
+# $detail: repair-outcome-detail-unindexed. $notes: the lines below, joined with ", ".
+repair-outcome-detail-unindexed-notes = { $detail } ({ $notes })
+repair-outcome-detail-unindexed-analysed = { $count } analysed from the audio
+repair-outcome-detail-unindexed-without-analysis = { $count } without analysis files
+repair-outcome-detail-duplicate-copies = deleted { $count ->
+    [one] { $count } file
+   *[other] { $count } files
+}
+# $kept: tracks that keep the file they shared.
+repair-outcome-detail-shared-analysis = gave { $count ->
+    [one] { $count } track
+   *[other] { $count } tracks
+} a new analysis file, { $kept } kept the original
+repair-outcome-detail-analysis-path = named the track in { $count ->
+    [one] { $count } analysis file
+   *[other] { $count } analysis files
+}
+repair-outcome-detail-bpm-key = rebuilt { $grids ->
+    [one] { $grids } beat grid
+   *[other] { $grids } beat grids
+}, updated { $rows ->
+    [one] { $rows } eDB row
+   *[other] { $rows } eDB rows
+}
+repair-outcome-detail-beat-grid = fixed { $count ->
+    [one] { $count } bundle
+   *[other] { $count } bundles
+}
+repair-outcome-detail-engine = setting on, rebuilt ({ $tracks ->
+    [one] { $tracks } track
+   *[other] { $tracks } tracks
+}, { $playlists ->
+    [one] { $playlists } playlist
+   *[other] { $playlists } playlists
+})
+
 ## job
 
 # The progress bar's texts while a backend job runs: job-<command>-started when it starts,
@@ -1243,6 +1320,10 @@ migration-mp3-seek = Adding MP3 seek data
 # The progress bar during an upgrade. $migration: one of the names above. $current, $total: items done and in all.
 migration-progress = { $migration }: { $current }/{ $total }
 
+# Event Log warnings when a data upgrade fails. $migration: the upgrade (migration-*). $error: the reason.
+migration-warning-failed = { $migration } failed ({ $error }); it runs again next launch
+migration-warning-startup-failed = Data upgrades at startup failed ({ $error }); they run again next launch
+
 ## transcode
 
 # Convert…'s choices. $format: AIFF or WAV.
@@ -1278,6 +1359,14 @@ transcode-export-convert = Converted to { $format } on export — { $source }
 transcode-export-refused = { $file } — { $format } can't go on this USB: only lossless files can be converted
 
 transcode-error-folder-in-source = the transcode folder can't be inside a source folder: the scan would list the transcodes as tracks
+
+# Event Log notes per track. $file: the source file's name.
+transcode-skipped-not-found = { $file }: file not found
+transcode-skipped-already-format = { $file }: already this format
+transcode-skipped-not-lossless = { $file }: not a lossless file
+transcode-skipped-up-to-date = { $file }: already has an up-to-date transcode
+# $reason: why the encoder failed (from the encoder, not translated).
+transcode-failed = { $file }: { $reason }
 
 ## tracklist-export
 
@@ -1322,6 +1411,25 @@ analysis-log-incomplete = Analysis: { $count ->
     [one] { $count } track
    *[other] { $count } tracks
 } in { $elapsed } (analyzed { $analyzed }, failed { $failed }, incomplete { $incomplete })
+
+# Event Log notes from an analysis job.
+# $analyzed: tracks analyzed before the cancel. $total: tracks the job had.
+analysis-cancelled = Analysis cancelled: { $analyzed } of { $total ->
+    [one] { $total } track
+   *[other] { $total } tracks
+} analyzed
+analysis-no-eligible-tracks = No eligible tracks found for analysis
+# $path: the track's file. $reasons: analysis-incomplete-* joined with ", ".
+analysis-track-incomplete = { $path }: { $reasons }
+analysis-incomplete-no-bpm = no BPM detected
+analysis-incomplete-no-duration = no duration
+analysis-incomplete-no-waveform = no waveform
+# $error: why it failed.
+analysis-track-failed = { $path }: { $error }
+# An analysed MP3's seek data couldn't be made. $reason: what in the file stops it (technical, not
+# translated). Same advice as the repair's repair-warning-seek-data-skipped-*.
+analysis-warning-mp3-seek-skipped-replace = MP3 seek data not added ({ $reason }): { $path }; replace it with an intact copy
+analysis-warning-mp3-seek-skipped-report = MP3 seek data not added ({ $reason }): { $path }; please report this file (format details, not the audio) so its seek data can be supported
 
 ## error
 
@@ -1486,6 +1594,17 @@ export-warning-artwork-write-failed = artwork encode failed for { $path }: { $er
 export-warning-analysis-not-made = analysis bundle missing for track { $track } (no DAT path)
 export-warning-analysis-files-missing = analysis bundle missing for track { $track }: { $path }
 
+# Event Log notes after writing the Engine DJ library to the USB.
+# $analyzed: tracks with a beat grid and waveform.
+export-engine-written = Engine DJ library written (tracks: { $tracks }, analyzed: { $analyzed }, playlists: { $playlists })
+# $error: the reason.
+export-engine-not-written = Engine DJ library not written: { $error }
+# $missing: tracks without analysis. $total: all tracks.
+export-engine-tracks-without-analysis = { $missing } of { $total ->
+    [one] { $total } track
+   *[other] { $total } tracks
+} without a usable beat grid or waveform on the USB; the Engine player analyzes those itself on load
+
 ## track-list
 
 # A track list's heading: its tracks, and their size when known.
@@ -1515,6 +1634,8 @@ update-banner-feature = New features available: { $version }
 # The error when a language that has no catalog is saved as the app's language.
 # $language: the language code that was sent.
 settings-language-unknown = Unknown language: { $language }
+# The Event Log warning at startup when the saved language has no catalog any more.
+settings-warning-language-unavailable = The saved language { $language } isn't available; using English
 
 ## library
 
@@ -1607,6 +1728,65 @@ library-error-rekordbox-tables = master.db opened but djmdContent table not foun
 library-error-rekordbox-query = master.db query failed: { $error }
 library-error-rekordbox-row = master.db row error: { $error }
 library-error-rekordbox-playlist-not-found = rekordbox playlist not found: { $id }
+
+# Event Log warnings from a scan. $duplicate: the file left out. $kept: the identical file the library keeps.
+library-warning-duplicate-file = Same file in two places: { $duplicate } is identical to { $kept }. The library keeps one; delete the extra copy.
+# $folders: the folders, comma-separated.
+library-warning-source-folders-missing = { $count ->
+    [one] { $count } source folder
+   *[other] { $count } source folders
+} missing or not directories: { $folders }. Relocate or remove { $count ->
+    [one] it
+   *[other] them
+}.
+
+## scan
+
+# Event Log notes after importing from rekordbox's or Mixxx's library. $library: rekordbox or Mixxx.
+# $path: the file the library names.
+scan-warning-analysis-not-found = analysis file not found: { $path }
+scan-warning-artwork-not-found = artwork not found: { $path }
+# $track: the track's file.
+scan-warning-cover-not-found = cover file not found: { $path } (for { $track })
+# $error: the reason, from the OS.
+scan-warning-artwork-copy-failed = artwork copy failed: { $path }: { $error }
+scan-note-cues-imported = cues imported for { $count ->
+    [one] { $count } track
+   *[other] { $count } tracks
+}
+scan-note-hot-cues-imported = hot cues imported for { $count ->
+    [one] { $count } track
+   *[other] { $count } tracks
+}
+scan-note-cues-kept-local = existing cues kept for { $count ->
+    [one] { $count } track
+   *[other] { $count } tracks
+}; their { $library } cues were not imported
+scan-note-unsupported-skipped = { $count ->
+    [one] { $count } track
+   *[other] { $count } tracks
+} skipped: not a supported audio file
+scan-warning-analysis-missing = { $count ->
+    [one] { $count } analysis file
+   *[other] { $count } analysis files
+} not found on disk
+scan-warning-artwork-missing = { $count ->
+    [one] { $count } artwork file
+   *[other] { $count } artwork files
+} not found or copy failed
+scan-warning-cover-missing = { $count ->
+    [one] { $count } cover file
+   *[other] { $count } cover files
+} not found or copy failed
+# $playlist: the imported playlist.
+scan-note-playlist-duplicates = { $count ->
+    [one] { $count } repeated track
+   *[other] { $count } repeated tracks
+} in "{ $playlist }" added once
+scan-warning-playlist-tracks-deleted = { $count ->
+    [one] { $count } track
+   *[other] { $count } tracks
+} in "{ $playlist }" no longer in the { $library } library
 
 ## playlist
 

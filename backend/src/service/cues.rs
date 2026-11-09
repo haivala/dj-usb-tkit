@@ -24,7 +24,7 @@ use uuid::Uuid;
 
 use crate::error::{BackendError, BackendResult};
 use crate::i18n::tr;
-use crate::logging::{self, Level};
+use crate::logging;
 use crate::models::{
     GetTrackDetailRequest, GetUsbTrackDetailRequest, KeyOption, KeyOptionGroup,
     ResolvePlaybackSourceRequest, SaveTrackAnalysisEditsData, SaveTrackAnalysisEditsRequest,
@@ -1040,10 +1040,9 @@ impl BackendService {
         let anlz_regenerated = match self.regenerate_cached_anlz_analysis_edits(&track_id) {
             Ok(regenerated) => regenerated,
             Err(err) => {
-                logging::emit(
-                    Level::Warn,
-                    "cues.anlz-regenerate-failed",
-                    &format!("could not rewrite cached ANLZ for {track_id}: {err}"),
+                logging::debug(
+                    "cues",
+                    format!("could not rewrite cached ANLZ for {track_id}: {err}"),
                 );
                 false
             }
@@ -1126,10 +1125,9 @@ impl BackendService {
             Default::default()
         } else {
             super::track_metadata::usb_metadata(&usb_root, media_path).unwrap_or_else(|err| {
-                logging::emit(
-                    Level::Warn,
-                    "cues.usb-detail.no-pdb-metadata",
-                    &format!("could not read genre/rating/release date for {media_path}: {err}"),
+                logging::debug(
+                    "cues",
+                    format!("could not read genre/rating/release date for {media_path}: {err}"),
                 );
                 Default::default()
             })
@@ -1308,19 +1306,17 @@ impl BackendService {
                 )?;
                 tx.commit()?;
                 if let Err(err) = self.regenerate_cached_anlz_analysis_edits(&track_id) {
-                    logging::emit(
-                        Level::Warn,
-                        "cues.usb-save.local-anlz-regenerate-failed",
-                        &format!("could not rewrite cached ANLZ for {track_id}: {err}"),
+                    logging::debug(
+                        "cues",
+                        format!("could not rewrite cached ANLZ for {track_id}: {err}"),
                     );
                 }
                 Some(track_id)
             }
             None => {
-                logging::emit(
-                    Level::Warn,
-                    "cues.usb-save.no-local-match",
-                    &format!(
+                logging::debug(
+                    "cues",
+                    format!(
                         "USB cue edit for {} matched no local track; device written, local master not",
                         req.usb_media_path_raw
                     ),

@@ -112,11 +112,11 @@ impl BackendService {
         let Some(language) = saved.filter(|value| !value.trim().is_empty()) else {
             return Ok(());
         };
-        if let Err(err) = crate::i18n::set_language(language.trim()) {
-            crate::logging::emit(
+        if crate::i18n::set_language(language.trim()).is_err() {
+            crate::logging::emit_text(
                 crate::logging::Level::Warn,
                 "settings",
-                &format!("saved language not used, staying in English: {err}"),
+                &crate::i18n::tr::settings_warning_language_unavailable(language.trim()),
             );
         }
         Ok(())

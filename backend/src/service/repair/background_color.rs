@@ -180,22 +180,11 @@ impl BackendService {
             });
         }
 
-        warnings.extend(
-            self.backup_usb_databases_with_retention(
-                &usb_root,
-                "Before background color change",
-                None,
-            )
-            .into_iter()
-            .map(|message| {
-                logging::log(
-                    Level::Info,
-                    "usb-background-color",
-                    "usb.background-color.backup",
-                    message,
-                )
-            }),
-        );
+        warnings.extend(self.backup_usb_databases_with_retention(
+            &usb_root,
+            "Before background color change",
+            None,
+        ));
 
         // The PDB change stays in memory until the eDB one has succeeded.
         if before.pdb_color.is_some() {

@@ -1592,13 +1592,11 @@ impl BackendService {
             100,
             &tr::usb_progress_backing_up_usb_databases().render(),
         );
-        warnings.extend(
-            self.backup_usb_databases_with_retention(&usb_root, "Before playlist reorder", None)
-                .into_iter()
-                .map(|message| {
-                    logging::log(Level::Info, "usb-import", "usb.reorder.backup", message)
-                }),
-        );
+        warnings.extend(self.backup_usb_databases_with_retention(
+            &usb_root,
+            "Before playlist reorder",
+            None,
+        ));
 
         on_progress(
             10,
@@ -1740,9 +1738,7 @@ impl BackendService {
                 super::usb_staging::stage_pdb(&usb_root)
                     .ok()
                     .and_then(|p| count_pdb_playlists(&p)),
-            )
-            .into_iter()
-            .map(|message| logging::log(Level::Info, "usb-import", "usb.remove.backup", message)),
+            ),
         );
         push_usb_stage_timing("backup usb databases", &mut stage_started);
 

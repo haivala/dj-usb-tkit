@@ -363,7 +363,7 @@ fn configure_desktop_analysis_runtime(_app: &tauri::AppHandle) -> Result<(), Str
     if !essentia_enabled {
         emit_backend_log(
             _app,
-            "info",
+            "debug",
             "startup",
             "analysis runtime setup skipped: DJTKIT_ENABLE_ESSENTIA_JS=0",
         );
@@ -476,7 +476,7 @@ fn configure_desktop_analysis_runtime(_app: &tauri::AppHandle) -> Result<(), Str
 
     emit_backend_log(
         _app,
-        "info",
+        "debug",
         "startup",
         format!(
             "analysis runtime resolved: node={} runner={} modules={}",
@@ -821,7 +821,7 @@ fn main() {
 
             emit_backend_log(
                 &app_handle,
-                "info",
+                "debug",
                 "startup",
                 backend::service::BackendService::system_resource_summary(),
             );
@@ -833,7 +833,7 @@ fn main() {
             let data_dir = app.path().app_data_dir().unwrap_or(fallback);
             emit_backend_log(
                 &app_handle,
-                "info",
+                "debug",
                 "startup",
                 format!("app data dir: {}", data_dir.display()),
             );
@@ -879,7 +879,7 @@ fn main() {
             let _ = commands.apply_saved_language();
             emit_backend_log(
                 &app_handle,
-                "info",
+                "debug",
                 "startup",
                 "startup: backend initialized",
             );
@@ -890,7 +890,7 @@ fn main() {
                 );
                 emit_backend_log(
                     &app_handle,
-                    "info",
+                    "debug",
                     "startup",
                     "startup: playback transition relay started",
                 );
@@ -908,7 +908,7 @@ fn main() {
             ));
             emit_backend_log(
                 &app_handle,
-                "info",
+                "debug",
                 "startup",
                 "startup: backend state managed",
             );
@@ -921,7 +921,7 @@ fn main() {
                 let _ = window.set_background_color(Some(Color(12, 10, 18, 255)));
                 emit_backend_log(
                     &app_handle,
-                    "info",
+                    "debug",
                     "startup",
                     "startup: window background set",
                 );
@@ -940,7 +940,7 @@ fn main() {
                         } else {
                             emit_backend_log(
                                 &app_handle,
-                                "info",
+                                "debug",
                                 "startup",
                                 "startup: window icon set",
                             );
@@ -954,7 +954,7 @@ fn main() {
                     ),
                 }
             }
-            emit_backend_log(&app_handle, "info", "startup", "startup: setup completed");
+            emit_backend_log(&app_handle, "debug", "startup", "startup: setup completed");
 
             Ok(())
         })

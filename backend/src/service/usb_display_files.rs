@@ -18,7 +18,7 @@ use std::path::{Path, PathBuf};
 
 use rusqlite::{Connection, OptionalExtension, params};
 
-use crate::logging::{self, Level};
+use crate::logging;
 use crate::models::UsbTrack;
 
 use super::browse_path_matches_root;
@@ -105,10 +105,9 @@ impl UsbDisplaySource {
         let cache = match open_cache(&data_dir.join(CACHE_FILE_NAME)) {
             Ok(conn) => Some(ReadCache { conn, device_key }),
             Err(err) => {
-                logging::emit(
-                    Level::Warn,
+                logging::debug(
                     "usb-import",
-                    &format!("USB read cache unavailable, reading from the USB: {err}"),
+                    format!("USB read cache unavailable, reading from the USB: {err}"),
                 );
                 None
             }
@@ -194,10 +193,9 @@ impl UsbDisplaySource {
                 return data;
             }
             Ok(None) => {}
-            Err(err) => logging::emit(
-                Level::Warn,
+            Err(err) => logging::debug(
                 "usb-import",
-                &format!("USB read cache lookup failed for {usb_path}: {err}"),
+                format!("USB read cache lookup failed for {usb_path}: {err}"),
             ),
         }
         counts.usb += 1;
@@ -205,10 +203,9 @@ impl UsbDisplaySource {
         // A file with nothing usable is cached too (as NULL), so it isn't
         // re-read on every visit.
         if let Err(err) = store_read(cache, kind, &usb_path, &sig, data.as_deref()) {
-            logging::emit(
-                Level::Warn,
+            logging::debug(
                 "usb-import",
-                &format!("USB read cache store failed for {usb_path}: {err}"),
+                format!("USB read cache store failed for {usb_path}: {err}"),
             );
         }
         data

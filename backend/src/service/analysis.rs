@@ -1,7 +1,6 @@
 //! Track analysis: BPM detection, key detection, waveform generation, cover art.
 
-use crate::i18n::tr;
-use crate::utils::counted;
+use crate::i18n::{Text, tr};
 use std::collections::HashSet;
 use std::fs::File;
 use std::io::{BufRead, BufReader, Write};
@@ -659,20 +658,20 @@ struct LibraryDurationContext {
     known_count: usize,
 }
 
-fn incomplete_analysis_reason(local: &LocalAnalysisResult) -> String {
+fn incomplete_analysis_reason(local: &LocalAnalysisResult, render: fn(&Text) -> String) -> String {
     let mut missing = Vec::new();
     if !local.bpm.is_some_and(|bpm| bpm > 0.0) {
-        missing.push("no BPM detected");
+        missing.push(render(&tr::analysis_incomplete_no_bpm()));
     }
     if !local.duration_ms.is_some_and(|ms| ms > 0) {
-        missing.push("no duration");
+        missing.push(render(&tr::analysis_incomplete_no_duration()));
     }
     if local
         .waveform_peaks_path
         .as_deref()
         .is_none_or(|p| p.trim().is_empty())
     {
-        missing.push("no waveform");
+        missing.push(render(&tr::analysis_incomplete_no_waveform()));
     }
     missing.join(", ")
 }
@@ -891,14 +890,11 @@ pub(crate) fn resolve_analysis_parallelism_budget_with_cap(
 }
 
 fn analysis_cancelled_warning(analyzed: usize, total: usize) -> WarningEntry {
-    logging::log(
+    logging::log_text(
         Level::Info,
         "analysis",
         "analysis.cancelled",
-        format!(
-            "Analysis cancelled: {analyzed} of {} analyzed",
-            counted(total, "track", "tracks")
-        ),
+        &tr::analysis_cancelled(analyzed, total),
     )
 }
 
@@ -1363,10 +1359,9 @@ fn detect_bpm_key_with_essentia_js(
     };
     let _ = std::fs::remove_file(&tmp_path);
     if debug {
-        crate::logging::emit(
-            crate::logging::Level::Info,
+        crate::logging::debug(
             "essentia-js",
-            &format!("stdout={}", String::from_utf8_lossy(&output)),
+            format!("stdout={}", String::from_utf8_lossy(&output)),
         );
     }
     let parsed: EssentiaResult = match serde_json::from_slice(&output) {
@@ -1384,10 +1379,9 @@ fn detect_bpm_key_with_essentia_js(
         }
     };
     if debug {
-        crate::logging::emit(
-            crate::logging::Level::Info,
+        crate::logging::debug(
             "essentia-js",
-            &format!(
+            format!(
                 "parsed ok={} bpm={:?} key={:?}",
                 parsed.ok, parsed.bpm, parsed.key
             ),
@@ -1464,7 +1458,7 @@ fn resolve_essentia_worker_config() -> BackendResult<EssentiaWorkerConfig> {
                 .unwrap_or_else(|| "none".to_string()),
             pool_size
         );
-        crate::logging::emit(crate::logging::Level::Info, "analysis", &line);
+        crate::logging::debug("analysis", line);
     }
     Ok(EssentiaWorkerConfig {
         node_bin,

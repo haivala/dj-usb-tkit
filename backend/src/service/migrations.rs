@@ -110,7 +110,16 @@ impl BackendService {
     /// migration retried on the next launch; it never stops the app starting.
     pub(crate) fn run_startup_data_migrations(&self) {
         if let Err(err) = run_registry(self, MIGRATIONS, Phase::Startup, &mut |_, _, _| {}) {
-            crate::backend_log!(Warn, "migrations", "startup data migrations failed: {err}");
+            crate::logging::log_composed(
+                crate::logging::Level::Warn,
+                "migrations",
+                "migrations.startup-failed",
+                |english| {
+                    crate::i18n::renderer(english)(&tr::migration_warning_startup_failed(
+                        err.text(english),
+                    ))
+                },
+            );
         }
     }
 
@@ -179,24 +188,38 @@ fn run_registry(
                     "INSERT OR IGNORE INTO data_migrations (id, applied_at) VALUES (?1, ?2)",
                     params![migration.id, super::now()],
                 )?;
-                crate::backend_log!(Info, "migrations", "data migration done: {}", migration.id);
+                crate::logging::debug(
+                    "migrations",
+                    format!("data migration done: {}", migration.id),
+                );
                 summary.ran.push(migration.id.to_string());
             }
             Ok(Outcome::RetryLater) => {
-                crate::backend_log!(
-                    Warn,
+                crate::logging::debug(
                     "migrations",
-                    "data migration {} incomplete; it runs again next launch",
-                    migration.id
+                    format!(
+                        "data migration {} incomplete; it runs again next launch",
+                        migration.id
+                    ),
                 );
                 summary.retry_later.push(migration.id.to_string());
             }
             Err(err) => {
-                crate::backend_log!(
-                    Warn,
+                crate::logging::debug(
                     "migrations",
-                    "data migration {} failed ({err}); it runs again next launch",
-                    migration.id
+                    format!("data migration {} failed", migration.id),
+                );
+                crate::logging::log_composed(
+                    crate::logging::Level::Warn,
+                    "migrations",
+                    "migrations.failed",
+                    |english| {
+                        let r = crate::i18n::renderer(english);
+                        r(&tr::migration_warning_failed(
+                            r(&(migration.label)()),
+                            err.text(english),
+                        ))
+                    },
                 );
                 summary.retry_later.push(migration.id.to_string());
             }
@@ -237,29 +260,29 @@ fn upgrade_cached_beat_grids(
         match upgrade_bundle_beat_grid(dat) {
             Ok(GridUpgrade::Rewritten) => rewritten += 1,
             Ok(GridUpgrade::AlreadyCurrent) => {}
-            Ok(GridUpgrade::NotRebuildable) => crate::backend_log!(
-                Warn,
+            Ok(GridUpgrade::NotRebuildable) => crate::logging::debug(
                 "migrations",
-                "cached beat grid left as it is (not a constant-tempo grid): {}",
-                dat.display()
+                format!(
+                    "cached beat grid left as it is (not a constant-tempo grid): {}",
+                    dat.display()
+                ),
             ),
             Err(err) => {
                 retry = true;
-                crate::backend_log!(
-                    Warn,
+                crate::logging::debug(
                     "migrations",
-                    "cached beat grid not upgraded ({err}): {}",
-                    dat.display()
+                    format!("cached beat grid not upgraded ({err}): {}", dat.display()),
                 );
             }
         }
         progress(i + 1, total, "");
     }
-    crate::backend_log!(
-        Info,
+    crate::logging::debug(
         "migrations",
-        "rewrote {} in the 0.3.7 format",
-        counted(rewritten, "cached beat grid", "cached beat grids")
+        format!(
+            "rewrote {} in the 0.3.7 format",
+            counted(rewritten, "cached beat grid", "cached beat grids")
+        ),
     );
     Ok(if retry {
         Outcome::RetryLater
@@ -331,12 +354,13 @@ fn fill_cached_mp3_seek_indexes(
         }
         progress(i + 1, total, "");
     }
-    crate::backend_log!(
-        Info,
+    crate::logging::debug(
         "migrations",
-        "added the MP3 seek index to {}; marked {} for analysis (file not found)",
-        counted(filled, "cached bundle", "cached bundles"),
-        counted(missing, "track", "tracks")
+        format!(
+            "added the MP3 seek index to {}; marked {} for analysis (file not found)",
+            counted(filled, "cached bundle", "cached bundles"),
+            counted(missing, "track", "tracks")
+        ),
     );
     Ok(if retry {
         Outcome::RetryLater

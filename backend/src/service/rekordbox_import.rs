@@ -27,7 +27,7 @@ use super::{
 };
 use crate::edb::table_exists;
 use crate::error::{BackendError, BackendResult};
-use crate::i18n::tr;
+use crate::i18n::{Text, tr};
 use crate::logging::{self, Level};
 use crate::models::{
     ExternalPlaylistKind, ExternalPlaylistSummary, ImportExternalPlaylistData,
@@ -35,7 +35,6 @@ use crate::models::{
     ScanLibraryData, ScanRekordboxDbRequest, TrackCue, WarningEntry,
 };
 use crate::scanner::is_library_audio_file;
-use crate::utils::counted;
 
 // `djmdPlaylist.Attribute` / `djmdHistory.Attribute`: a list of tracks (as
 // opposed to a folder, 1, or a smart playlist, 4, whose tracks rekordbox
@@ -756,11 +755,11 @@ impl<'a> RekordboxTrackImporter<'a> {
             Some(anlz_abs)
         } else {
             self.anlz_miss += 1;
-            self.warnings.push(logging::log(
+            self.warnings.push(logging::log_text(
                 Level::Warn,
                 "scan-rekordbox-db",
                 "scan.rekordbox-db.anlz-not-found",
-                format!("ANLZ not found (AnalysisDataPath={anlz_rel:?})"),
+                &tr::scan_warning_analysis_not_found(anlz_rel),
             ));
             None
         }
@@ -779,11 +778,11 @@ impl<'a> RekordboxTrackImporter<'a> {
             resolve_rekordbox_db_resource_path(&self.master_path, img_rel, |p| p.is_file())
         else {
             self.artwork_miss += 1;
-            self.warnings.push(logging::log(
+            self.warnings.push(logging::log_text(
                 Level::Warn,
                 "scan-rekordbox-db",
                 "scan.rekordbox-db.artwork-not-found",
-                format!("artwork not found (ImagePath={img_rel:?})"),
+                &tr::scan_warning_artwork_not_found(img_rel),
             ));
             return None;
         };
@@ -796,11 +795,11 @@ impl<'a> RekordboxTrackImporter<'a> {
             }
             Err(e) => {
                 self.artwork_miss += 1;
-                self.warnings.push(logging::log(
+                self.warnings.push(logging::log_text(
                     Level::Error,
                     "scan-rekordbox-db",
                     "scan.rekordbox-db.artwork-copy-failed",
-                    format!("artwork copy failed {src:?} -> {dest:?}: {e}"),
+                    &tr::scan_warning_artwork_copy_failed(src.display(), e),
                 ));
                 None
             }
@@ -809,118 +808,59 @@ impl<'a> RekordboxTrackImporter<'a> {
 
     /// The summary log entries, appended after the per-track warnings.
     fn finish_warnings(&mut self) -> Vec<WarningEntry> {
-        let mut summary = |level, code: &str, message: String| {
+        let mut note = |level, code: &str, text: Text| {
             self.warnings
-                .push(logging::log(level, "scan-rekordbox-db", code, message));
+                .push(logging::log_text(level, "scan-rekordbox-db", code, &text));
         };
-        if let Some(p) = &self.sample_anlz {
-            summary(
-                Level::Info,
-                "scan.rekordbox-db.anlz-sample",
-                format!("AnalysisDataPath sample: {p}"),
-            );
-        }
-        if let Some(p) = &self.sample_img {
-            summary(
-                Level::Info,
-                "scan.rekordbox-db.image-sample",
-                format!("ImagePath sample: {p}"),
-            );
-        }
         if self.cue_tracks > 0 {
-            summary(
+            note(
                 Level::Info,
                 "scan.rekordbox-db.cues-imported",
-                format!(
-                    "cues imported for {}",
-                    counted(self.cue_tracks, "track", "tracks")
-                ),
+                tr::scan_note_cues_imported(self.cue_tracks),
             );
         }
         if self.cue_tracks_kept_local > 0 {
-            summary(
+            note(
                 Level::Info,
                 "scan.rekordbox-db.cues-kept-local",
-                format!(
-                    "existing cues kept for {}; their rekordbox cues were not imported",
-                    counted(self.cue_tracks_kept_local, "track", "tracks")
-                ),
+                tr::scan_note_cues_kept_local(self.cue_tracks_kept_local, "rekordbox"),
             );
         }
         if self.unsupported > 0 {
-            summary(
+            note(
                 Level::Info,
                 "scan.rekordbox-db.unsupported-skipped",
-                format!(
-                    "{} skipped: not a supported audio file",
-                    counted(self.unsupported, "track", "tracks")
-                ),
-            );
-        }
-        if self.anlz_null > 0 {
-            summary(
-                Level::Info,
-                "scan.rekordbox-db.anlz-null",
-                format!(
-                    "{} without AnalysisDataPath",
-                    counted(self.anlz_null, "track", "tracks")
-                ),
+                tr::scan_note_unsupported_skipped(self.unsupported),
             );
         }
         if self.anlz_miss > 0 {
-            summary(
+            note(
                 Level::Warn,
                 "scan.rekordbox-db.anlz-miss-summary",
-                format!(
-                    "{} not found on disk",
-                    counted(self.anlz_miss, "ANLZ path", "ANLZ paths")
-                ),
-            );
-        }
-        if self.anlz_ok > 0 {
-            summary(
-                Level::Info,
-                "scan.rekordbox-db.anlz-ok",
-                format!(
-                    "{} resolved OK",
-                    counted(self.anlz_ok, "ANLZ path", "ANLZ paths")
-                ),
-            );
-        }
-        if self.artwork_null > 0 {
-            summary(
-                Level::Info,
-                "scan.rekordbox-db.artwork-null",
-                format!(
-                    "{} without ImagePath",
-                    counted(self.artwork_null, "track", "tracks")
-                ),
+                tr::scan_warning_analysis_missing(self.anlz_miss),
             );
         }
         if self.artwork_miss > 0 {
-            summary(
+            note(
                 Level::Warn,
                 "scan.rekordbox-db.artwork-miss-summary",
-                format!(
-                    "{} not found or copy failed",
-                    counted(
-                        self.artwork_miss,
-                        "artwork source file",
-                        "artwork source files"
-                    )
-                ),
+                tr::scan_warning_artwork_missing(self.artwork_miss),
             );
         }
-        if self.artwork_ok > 0 {
-            summary(
-                Level::Info,
-                "scan.rekordbox-db.artwork-ok",
-                format!(
-                    "{} copied OK",
-                    counted(self.artwork_ok, "artwork file", "artwork files")
-                ),
-            );
-        }
+        // What the importer resolved: for a bug report, not the user.
+        logging::debug(
+            "scan-rekordbox-db",
+            format!(
+                "AnalysisDataPath sample: {:?}, ImagePath sample: {:?}; ANLZ paths: {} resolved, \
+                 {} tracks without one; artwork: {} copied, {} tracks without one",
+                self.sample_anlz,
+                self.sample_img,
+                self.anlz_ok,
+                self.anlz_null,
+                self.artwork_ok,
+                self.artwork_null
+            ),
+        );
         std::mem::take(&mut self.warnings)
     }
 }
@@ -1027,25 +967,19 @@ impl BackendService {
 
         let mut warnings = importer.finish_warnings();
         if duplicates > 0 {
-            warnings.push(logging::log(
+            warnings.push(logging::log_text(
                 Level::Info,
                 "scan-rekordbox-db",
                 "scan.rekordbox-db.playlist-duplicates-skipped",
-                format!(
-                    "{} in {name:?} added once",
-                    counted(duplicates, "repeated track", "repeated tracks")
-                ),
+                &tr::scan_note_playlist_duplicates(duplicates, &name),
             ));
         }
         if deleted_in_rekordbox > 0 {
-            warnings.push(logging::log(
+            warnings.push(logging::log_text(
                 Level::Warn,
                 "scan-rekordbox-db",
                 "scan.rekordbox-db.playlist-tracks-deleted",
-                format!(
-                    "{} in {name:?} no longer in the rekordbox library",
-                    counted(deleted_in_rekordbox, "track", "tracks")
-                ),
+                &tr::scan_warning_playlist_tracks_deleted(deleted_in_rekordbox, &name, "rekordbox"),
             ));
         }
         Ok(ImportExternalPlaylistData {

@@ -249,7 +249,7 @@ pub(super) fn pack_rows_into_pages(
                 row.len(),
                 solo_capacity
             );
-            crate::logging::emit(crate::logging::Level::Warn, "pdb-writer", &msg);
+            crate::logging::debug("pdb-writer", &msg);
             warnings.push(msg);
             continue;
         }
@@ -386,10 +386,9 @@ pub(super) fn build_data_page(
         apply_page_local_index_shift(table_type, &mut row_bytes, row_slot);
         let start = HEAP_START + heap_offset;
         if start.saturating_add(row_bytes.len()) > PAGE_SIZE {
-            crate::logging::emit(
-                crate::logging::Level::Error,
+            crate::logging::debug(
                 "pdb-writer",
-                &format!(
+                format!(
                     "dropping row in table {table_type} that does not fit on page ({} bytes at offset {})",
                     row_bytes.len(),
                     start

@@ -21,7 +21,7 @@ use super::{
 use crate::audio_encode::{TranscodeError, TranscodeFormat, TranscodeTags, transcode_file};
 use crate::audio_format::AudioFormat;
 use crate::error::{BackendError, BackendResult};
-use crate::i18n::tr;
+use crate::i18n::{Text, tr};
 use crate::logging::Level;
 use crate::models::{
     MaterializeSourceTrackRequest, RemoveTrackTranscodesData, RemoveTrackTranscodesRequest,
@@ -113,10 +113,9 @@ pub(crate) fn write_transcode_waveform_bundle(dir: &Path, transcode: &Path) -> b
     match super::analysis::write_waveform_bundle_for_audio(transcode, &paths) {
         Ok(()) => true,
         Err(err) => {
-            crate::logging::emit(
-                crate::logging::Level::Warn,
+            crate::logging::debug(
                 "transcode",
-                &format!("no waveform for transcode {}: {err}", transcode.display()),
+                format!("no waveform for transcode {}: {err}", transcode.display()),
             );
             for path in [&paths.dat_path, &paths.ext_path, &paths.twoex_path] {
                 remove_file_if_present(path);
@@ -287,23 +286,23 @@ impl BackendService {
                 .map(|n| n.to_string_lossy().to_string())
                 .unwrap_or_else(|| track.file_path.clone());
             let skip = if !source.is_file() {
-                Some("file not found")
+                Some(tr::transcode_skipped_not_found(&name))
             } else if source_is_format(&source, format) {
-                Some("already this format")
+                Some(tr::transcode_skipped_already_format(&name))
             } else if !is_lossless_source(&source) {
-                Some("not a lossless file")
+                Some(tr::transcode_skipped_not_lossless(&name))
             } else if track
                 .transcodes
                 .iter()
                 .any(|t| t.format == format.as_str() && !t.outdated)
             {
-                Some("already has an up-to-date transcode")
+                Some(tr::transcode_skipped_up_to_date(&name))
             } else {
                 None
             };
             if let Some(reason) = skip {
                 data.skipped += 1;
-                note(&mut data, Level::Info, format!("{name}: {reason}"));
+                note(&mut data, Level::Info, &reason);
                 continue;
             }
             jobs.push(plan_job(
@@ -343,7 +342,11 @@ impl BackendService {
                 }
                 Err(TranscodeError::Failed(message)) => {
                     data.failed += 1;
-                    note(&mut data, Level::Warn, format!("{name}: {message}"));
+                    note(
+                        &mut data,
+                        Level::Warn,
+                        &tr::transcode_failed(&name, &message),
+                    );
                     true
                 }
             };
@@ -543,9 +546,9 @@ impl BackendService {
 
 /// One skipped or failed track: in the response's `messages` and the Event
 /// Log.
-fn note(data: &mut TranscodeTracksData, level: Level, line: String) {
-    crate::logging::emit(level, "transcode", &line);
-    data.messages.push(line);
+fn note(data: &mut TranscodeTracksData, level: Level, line: &Text) {
+    crate::logging::emit_text(level, "transcode", line);
+    data.messages.push(line.render());
 }
 
 /// Convert…'s line for the status bar.
@@ -616,10 +619,9 @@ fn remove_transcode_files(conn: &rusqlite::Connection, path: &Path) {
         if let Err(err) = std::fs::remove_dir_all(&dir)
             && err.kind() != std::io::ErrorKind::NotFound
         {
-            crate::logging::emit(
-                crate::logging::Level::Warn,
+            crate::logging::debug(
                 "transcode",
-                &format!("could not remove {}: {err}", dir.display()),
+                format!("could not remove {}: {err}", dir.display()),
             );
         }
     }
@@ -665,10 +667,9 @@ fn remove_file_if_present(path: &Path) {
     if let Err(err) = std::fs::remove_file(path)
         && err.kind() != std::io::ErrorKind::NotFound
     {
-        crate::logging::emit(
-            crate::logging::Level::Warn,
+        crate::logging::debug(
             "transcode",
-            &format!("could not remove transcode {}: {err}", path.display()),
+            format!("could not remove transcode {}: {err}", path.display()),
         );
     }
 }

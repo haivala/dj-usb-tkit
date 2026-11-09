@@ -167,10 +167,11 @@ impl BackendService {
                         .as_deref()
                         .filter(|usb_path| browse_path_key(usb_path) != browse_path_key(path))
                     {
-                        crate::backend_log!(
-                            Warn,
+                        crate::logging::debug(
                             "playback",
-                            "library copy failed to play ({matched_by}), fell back to USB: {library_err} [library path: {path}]"
+                            format!(
+                                "library copy failed to play ({matched_by}), fell back to USB: {library_err} [library path: {path}]"
+                            ),
                         );
                         let status = play_native_with_recovery(
                             playback,
