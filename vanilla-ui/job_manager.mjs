@@ -269,8 +269,8 @@ export function handleJobEvent(ctx, payload) {
     // rows show "analyzing" at once as there are active workers) rather than
     // marking the whole submitted batch as analyzing for the entire call.
     setTrackAnalyzingState(String(payload.trackId), payload.trackReady !== true);
-    if (payload.trackReady === true && typeof payload.libraryTotalDurationMs === "number") {
-      applyLibraryDurationSummary(payload.libraryTotalDurationMs, payload.libraryDurationUnknownCount);
+    if (payload.trackReady === true && typeof payload.libraryDurationText === "string") {
+      applyLibraryDurationSummary(payload.libraryDurationText);
     }
     // A pause click only stops workers from picking up a *new* track --
     // whichever track(s) were already in flight keep going, so the elapsed

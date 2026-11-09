@@ -14,7 +14,7 @@ function listResponder(total, { idPrefix = "" } = {}) {
   return ({ offset, limit }) => {
     const items = [];
     for (let i = offset; i < Math.min(total, offset + limit); i += 1) items.push({ id: `${idPrefix}${i}` });
-    return { items, total, totalDurationMs: 10, durationUnknownCount: 2 };
+    return { items, total, durationText: "Total time: 0:00 (2 without length)" };
   };
 }
 
@@ -73,7 +73,7 @@ test("load fetches the top page, keeps one slot per track, and renders the loade
   assert.equal(ctl.total, 3);
   assert.equal(ctl.items.length, 3);
   assert.deepEqual(calls.fetch[0], { scopeId: "pl-1", query: "", sortBy: null, sortDir: null, offset: 0, limit: 2 });
-  assert.deepEqual(calls.duration[0], { totalDurationMs: 10, durationUnknownCount: 2 });
+  assert.equal(calls.duration[0], "Total time: 0:00 (2 without length)");
   assert.deepEqual(calls.pages[0], { n: 2, first: true });
   // The rest of the window is fetched straight away, not on a scroll.
   await settle();
@@ -257,7 +257,7 @@ test("clear empties the list, renders an empty table, and zeroes the footer", as
   assert.equal(ctl.scopeId, null);
   assert.equal(ctl.total, 0);
   assert.equal(body.querySelectorAll(".empty").length, 1);
-  assert.deepEqual(calls.duration.at(-1), { totalDurationMs: 0, durationUnknownCount: 0 });
+  assert.equal(calls.duration.at(-1), "Total time: 0:00");
 });
 
 test("items are backed by an external store when getItems/setItems are given", async () => {

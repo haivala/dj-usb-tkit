@@ -13,7 +13,6 @@
 // (`get_selection_duration`) by the same rule as the list's "Total time".
 
 import { catchErr } from "./track_actions.mjs";
-import { formatDurationMs } from "../../track_utils.mjs";
 import { t, tCount } from "../../ui_texts.mjs";
 
 export function trackSelection(ctx, view) {
@@ -86,10 +85,9 @@ function renderSelectionTime(ctx, view, bar, ids) {
   ctx
     .command("get_selection_duration", request)
     .then((data) => {
-      if (target.dataset.request !== key || !data?.totalDurationMs) return;
-      const unknown = data.durationUnknownCount;
-      target.textContent = `· ${formatDurationMs(data.totalDurationMs)}${unknown ? "+" : ""}`;
-      if (unknown) target.dataset.tooltip = data.durationUnknownText;
+      if (target.dataset.request !== key || !data?.durationText) return;
+      target.textContent = data.durationText;
+      if (data.durationUnknownText) target.dataset.tooltip = data.durationUnknownText;
     })
     .catch(() => {});
 }

@@ -13,7 +13,7 @@
 #             tracklist-export
 #   JS only:  job (also the progress bar), update, playback
 #   Rust:     export, diagnostics, parity, repair, track-list, analysis, scan, job,
-#             migration, transcode, error
+#             migration, transcode, error, format (numbers and sizes)
 #   shared:   common (generic dialog buttons and words only); markup repeated on
 #             several pages: selection-bar, track-table, rating; and one area per
 #             <template> used on more than one page, named from its id
@@ -21,6 +21,9 @@
 # A piece of work that needs a new area adds it here.
 
 ## usb
+
+# The native folder dialog's title, from choosing a USB.
+usb-root-dialog-title = Select USB root folder
 
 # The warning count on a USB status line, after its result
 # ("Playlist order saved | (2 warnings)").
@@ -684,7 +687,7 @@ diagnostics-check-playlist-edb-only = present in eDB only ({ $count ->
 }), missing from PDB
 diagnostics-check-overall-resolution = Overall resolution
 # $resolved: the playlist rows whose track exists. $total: all playlist rows. $percent: the share, such as 98.5. $playlists: the playlists.
-diagnostics-check-overall-resolution-detail = { $resolved }/{ $total } entries resolve ({ $percent }%) across { $playlists ->
+diagnostics-check-overall-resolution-detail = { $resolved }/{ $total } entries resolve ({ NUMBER($percent) }%) across { $playlists ->
     [one] { $playlists } playlist
    *[other] { $playlists } playlists
 }
@@ -696,11 +699,11 @@ diagnostics-check-db-only-playlists-detail = { $count ->
 } in eDB but not in PDB
 diagnostics-check-key-overlap = PDB vs eDB key overlap (informational)
 # $matched: the tracks both databases list. $pdbshare, $edbshare: their share of each database's tracks, such as 98.5. $pdb, $edb: each database's tracks.
-diagnostics-check-key-overlap-detail = matched { $matched } track keys; PDB { $pdbshare }% ({ $matched }/{ $pdb }), DB { $edbshare }% ({ $matched }/{ $edb })
+diagnostics-check-key-overlap-detail = matched { $matched } track keys; PDB { NUMBER($pdbshare) }% ({ $matched }/{ $pdb }), DB { NUMBER($edbshare) }% ({ $matched }/{ $edb })
 diagnostics-check-operational = Operational interpretation
 diagnostics-check-operational-detail = pass/warn here means operationally usable; strict parity may still fail on the same USB
 # A row named after a playlist with missing tracks. $resolved: its rows whose track exists. $total: its rows. $percent: the share, such as 98.5.
-diagnostics-check-playlist-resolution = { $resolved }/{ $total } entries ({ $percent }%)
+diagnostics-check-playlist-resolution = { $resolved }/{ $total } entries ({ NUMBER($percent) }%)
 
 # The player counter checks. t00, t08, t11, t12, t17, t18, t19, ec, nrs, num_rl, rowpf0 and
 # tranrf0 are the PDB format's own names: keep them as they are.
@@ -1373,6 +1376,9 @@ transcode-failed = { $file }: { $reason }
 # USB History's Export Tracklist, the status line after saving the file. $history: the history's name.
 tracklist-export-done = Tracklist exported: { $history }
 tracklist-export-cancelled = Tracklist export cancelled
+# The native save dialog's title, and its filter for .txt files.
+tracklist-export-dialog-title = Save tracklist
+tracklist-export-dialog-filter-text = Text
 
 ## analysis
 
@@ -1617,6 +1623,27 @@ track-list-summary-size = { $count ->
     [one] { $count } track
    *[other] { $count } tracks
 } · { $size }
+# A track list's footer: the total length of its tracks.
+# $duration: the length, as 1:02:03 or 3:45.
+track-list-total-time = Total time: { $duration }
+# The same, when some tracks have no known length. $count: how many.
+track-list-total-time-unknown = Total time: { $duration } ({ $count ->
+    [one] { $count } without length
+   *[other] { $count } without length
+})
+
+## format
+
+# The decimal separator in every number the app shows ("2.5 MB", "98.5%"): one character.
+# No language groups digits, so a count and an id read alike.
+format-decimal-separator = .
+
+# A size in binary units, as file managers show a USB stick's (1 KB is 1024 bytes).
+# $size: the number, already rounded to the decimals the place shows.
+format-size-b = { NUMBER($size) } B
+format-size-kb = { NUMBER($size) } KB
+format-size-mb = { NUMBER($size) } MB
+format-size-gb = { NUMBER($size) } GB
 
 ## update
 
@@ -1636,8 +1663,13 @@ update-banner-feature = New features available: { $version }
 settings-language-unknown = Unknown language: { $language }
 # The Event Log warning at startup when the saved language has no catalog any more.
 settings-warning-language-unavailable = The saved language { $language } isn't available; using English
+# The native folder dialog's title, from the transcode folder's Change.
+settings-transcode-folder-dialog-title = Select the folder for transcodes
 
 ## library
+
+# The native folder dialog's title, from Add Folder.
+library-source-folders-dialog-title = Select media source folders
 
 # The status line after a source chip's switch changes.
 # $enabled: the folders and imported libraries switched on (a missing folder counts as off).
@@ -1805,6 +1837,30 @@ playlist-delete-confirm-exported = Delete "{ $name }"?
 
     This playlist was exported before. It is easy to recreate by importing playlists from USB.
 
+# The line under a playlist's title: its last export to a USB.
+# $date: when, as 2026-04-07 12:00. $drive: the USB's name, or its folder.
+# $count: the tracks exported.
+playlist-export-last = Last exported { $date } to { $drive } ({ $count ->
+    [one] { $count } track
+   *[other] { $count } tracks
+}).
+# The same, for an export that recorded no USB.
+playlist-export-last-no-drive = Last exported { $date } ({ $count ->
+    [one] { $count } track
+   *[other] { $count } tracks
+}).
+# The same, for an export that recorded no track count.
+playlist-export-last-unknown-count = Last exported { $date } to { $drive } (unknown track count).
+playlist-export-last-no-drive-unknown-count = Last exported { $date } (unknown track count).
+# The line for a playlist never exported.
+playlist-export-never = Not exported yet.
+# The line while a USB is selected: whether a playlist of this name is on it.
+playlist-export-on-usb = On this USB.
+playlist-export-not-on-usb = Not on this USB.
+# The same, followed by the last export. $usb: one of the two lines above.
+# $last: the last export, as "Last exported …".
+playlist-export-usb-and-last = { $usb } { $last }
+
 # The status line after adding tracks to a playlist.
 # $count: the tracks added. $skipped: the tracks already in it. $name: the playlist's name.
 playlist-tracks-added = Added { $count ->
@@ -1893,6 +1949,11 @@ selection-duration-unknown = { $count ->
     [one] { $count } of the selected tracks has no length yet
    *[other] { $count } of the selected tracks have no length yet
 }
+# The selection bar's total length of the selected tracks.
+# $duration: the length, as 1:02:03 or 3:45.
+selection-duration = · { $duration }
+# The same, when some of them have no length yet, so the total is at least this.
+selection-duration-at-least = · { $duration }+
 
 ## track-details
 
@@ -1976,8 +2037,8 @@ track-table-bpm-source-analyzer = Analyzed with: { $analyzer }
 # The FMT badge for a file with no extension.
 track-table-format-unknown = Unknown
 # Parts of the FMT badge's tooltip ("44.1 kHz · 16-bit").
-# $khz: the sample rate in kHz, formatted. $bits: the bit depth. $kbps: the bitrate.
-track-table-format-sample-rate = { $khz } kHz
+# $khz: the sample rate in kHz. $bits: the bit depth. $kbps: the bitrate.
+track-table-format-sample-rate = { NUMBER($khz) } kHz
 track-table-format-bit-depth = { $bits }-bit
 track-table-format-bitrate = { $kbps } kbps
 

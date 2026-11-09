@@ -290,19 +290,6 @@ fn backup_reason_text(reason: &str) -> String {
     .render()
 }
 
-/// A backup's size, with a decimal: these are small and close together.
-fn backup_size_text(bytes: u64) -> String {
-    const KIB: f64 = 1024.0;
-    let n = bytes as f64;
-    if n < KIB {
-        format!("{bytes} B")
-    } else if n < KIB * KIB {
-        format!("{:.1} KB", n / KIB)
-    } else {
-        format!("{:.1} MB", n / (KIB * KIB))
-    }
-}
-
 /// "2.5 MB · On USB · 4 playlists". Older backups have no playlist count.
 fn backup_detail_text(size_bytes: u64, location: &str, playlist_count: Option<usize>) -> String {
     let location = if location == "usb" {
@@ -310,7 +297,10 @@ fn backup_detail_text(size_bytes: u64, location: &str, playlist_count: Option<us
     } else {
         tr::backups_on_computer()
     };
-    let mut parts = vec![backup_size_text(size_bytes), location.render()];
+    let mut parts = vec![
+        crate::utils::byte_size_precise(size_bytes).render(),
+        location.render(),
+    ];
     if let Some(count) = playlist_count {
         parts.push(tr::backups_playlists(count).render());
     }

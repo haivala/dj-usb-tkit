@@ -69,8 +69,10 @@ export function applyUiTexts(root) {
 // Loads the texts and fills in the page. False when they couldn't be loaded: the page then
 // shows only the one English line, and the window is shown so the app doesn't seem to hang.
 export async function loadUiTexts(ctx) {
+  let data;
   try {
-    setUiTexts(await ctx.command("get_ui_texts"));
+    data = await ctx.command("get_ui_texts");
+    setUiTexts(data);
   } catch (err) {
     console.error("get_ui_texts failed:", err);
     const line = cloneTemplate(ctx.document, "tplUiTextsFailed");
@@ -80,5 +82,6 @@ export async function loadUiTexts(ctx) {
     return false;
   }
   applyUiTexts(ctx.document);
+  ctx.document.documentElement.lang = data?.language || "en";
   return true;
 }

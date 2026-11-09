@@ -11,11 +11,13 @@
 //! tests and the CLI tools, it's English. A key missing from another language falls back to
 //! English.
 
+use std::cell::Cell;
 use std::collections::BTreeMap;
 use std::fmt;
 use std::sync::{Arc, LazyLock, PoisonError, RwLock};
 
 use fluent_bundle::concurrent::FluentBundle;
+use fluent_bundle::types::{FluentNumber, FluentNumberOptions};
 use fluent_bundle::{FluentArgs, FluentResource, FluentValue};
 use fluent_syntax::ast;
 use unic_langid::LanguageIdentifier;
@@ -46,23 +48,73 @@ pub struct Text {
 #[derive(Debug, Clone, PartialEq)]
 pub enum Arg {
     Text(String),
-    Number(f64),
+    Number(Num),
 }
 
 /// A number argument: any integer or float. Counts are what plural forms select on.
+///
+/// Shown with the language's decimal separator (`format-decimal-separator`) and no digit
+/// grouping, so "1234 tracks" and a track id read the same in every language. A float shows
+/// its shortest form ("2.5"); [`Num::fixed`] gives it a set number of decimals.
 #[derive(Debug, Clone, Copy, PartialEq)]
-pub struct Num(pub f64);
+pub struct Num {
+    value: f64,
+    fraction_digits: Option<usize>,
+}
+
+impl Num {
+    /// `value` rounded to exactly `digits` decimals: `Num::fixed(27.0, 1)` shows "27.0".
+    pub fn fixed(value: f64, digits: usize) -> Self {
+        Self {
+            value,
+            fraction_digits: Some(digits),
+        }
+    }
+
+    fn fluent(self) -> FluentNumber {
+        let options = FluentNumberOptions {
+            minimum_fraction_digits: self.fraction_digits,
+            maximum_fraction_digits: self.fraction_digits,
+            ..FluentNumberOptions::default()
+        };
+        FluentNumber::new(self.value, options)
+    }
+}
 
 macro_rules! num_from {
     ($($ty:ty)+) => {
         $(impl From<$ty> for Num {
             fn from(value: $ty) -> Self {
-                Num(value as f64)
+                Num { value: value as f64, fraction_digits: None }
             }
         })+
     };
 }
 num_from!(u8 u16 u32 u64 usize i8 i16 i32 i64 isize f32 f64);
+
+thread_local! {
+    /// The decimal separator of the catalog formatting on this thread, for [`format_number`],
+    /// which Fluent calls with no way to reach the catalog.
+    static DECIMAL_SEPARATOR: Cell<char> = const { Cell::new('.') };
+}
+
+/// Every number Fluent shows: `maximumFractionDigits` decimals when set (rounded), else the
+/// shortest form, then the language's decimal separator.
+fn format_number<M>(value: &FluentValue, _intls: &M) -> Option<String> {
+    let FluentValue::Number(number) = value else {
+        return None;
+    };
+    let text = match number.options.maximum_fraction_digits {
+        Some(digits) => format!("{:.*}", digits, number.value),
+        None => number.as_string().into_owned(),
+    };
+    let separator = DECIMAL_SEPARATOR.get();
+    Some(if separator == '.' {
+        text
+    } else {
+        text.replace('.', &separator.to_string())
+    })
+}
 
 impl Text {
     /// For the generated functions in [`tr`]; everything else gets a `Text` from those.
@@ -115,6 +167,8 @@ struct Catalog {
     /// The `.ftl` text, for `ui_texts`, which sends patterns rather than formatted text.
     source: &'static str,
     bundle: FluentBundle<FluentResource>,
+    /// `format-decimal-separator`'s first character; `.` when the catalog has none.
+    decimal_separator: char,
 }
 
 impl Catalog {
@@ -127,13 +181,29 @@ impl Catalog {
         let mut bundle = FluentBundle::new_concurrent(vec![id]);
         // Fluent puts invisible bidi isolation marks around every argument by default.
         bundle.set_use_isolating(false);
+        bundle.set_formatter(Some(format_number));
+        bundle
+            .add_builtins()
+            .map_err(|err| format!("adding Fluent's NUMBER(): {err:?}"))?;
         bundle.add_resource(resource).map_err(|errors| {
             format!("the `{language}` catalog has a duplicate key: {errors:?}")
         })?;
+        let decimal_separator = bundle
+            .get_message("format-decimal-separator")
+            .and_then(|message| message.value())
+            .and_then(|pattern| {
+                let mut errors = Vec::new();
+                bundle
+                    .format_pattern(pattern, None, &mut errors)
+                    .chars()
+                    .next()
+            })
+            .unwrap_or('.');
         Ok(Self {
             language,
             source,
             bundle,
+            decimal_separator,
         })
     }
 
@@ -144,11 +214,12 @@ impl Catalog {
         for (name, arg) in &text.args {
             let value = match arg {
                 Arg::Text(value) => FluentValue::from(value.as_str()),
-                Arg::Number(value) => FluentValue::from(*value),
+                Arg::Number(value) => FluentValue::Number(value.fluent()),
             };
             args.set(*name, value);
         }
         let mut errors = Vec::new();
+        DECIMAL_SEPARATOR.set(self.decimal_separator);
         let rendered = self
             .bundle
             .format_pattern(pattern, Some(&args), &mut errors);

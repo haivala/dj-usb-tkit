@@ -483,6 +483,10 @@ fn paginate_usb_tracks(
         list_track_count,
         list_size_bytes,
         list_summary_text: track_list_summary(list_track_count, list_size_bytes),
+        duration_text: crate::utils::track_list_total_time(
+            total_duration_ms,
+            duration_unknown_count,
+        ),
         warnings,
     })
 }

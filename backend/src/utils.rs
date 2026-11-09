@@ -193,16 +193,38 @@ pub fn warning_suffix(warning_count: usize) -> String {
     }
 }
 
-/// Binary units, like file managers and `df` show a USB stick's size.
-pub fn format_byte_size(bytes: u64) -> String {
-    const KIB: f64 = 1024.0;
+const KIB: f64 = 1024.0;
+const MIB: f64 = KIB * KIB;
+const GIB: f64 = MIB * KIB;
+
+/// A size as the track tables and headings show it: whole KB and MB, GB with one decimal
+/// ("2 KB", "412 MB", "1.2 GB"). Binary units, like file managers and `df` show a USB
+/// stick's size.
+pub fn byte_size(bytes: u64) -> crate::i18n::Text {
+    use crate::i18n::{Num, tr};
     let n = bytes as f64;
-    if n >= KIB * KIB * KIB {
-        format!("{:.1} GB", n / (KIB * KIB * KIB))
-    } else if n >= KIB * KIB {
-        format!("{} MB", (n / (KIB * KIB)).round())
+    if n >= GIB {
+        tr::format_size_gb(Num::fixed(n / GIB, 1))
+    } else if n >= MIB {
+        tr::format_size_mb(Num::fixed((n / MIB).round(), 0))
     } else {
-        format!("{} KB", (n / KIB).round())
+        tr::format_size_kb(Num::fixed((n / KIB).round(), 0))
+    }
+}
+
+/// A size with one decimal from KB up, and bytes below that ("512 B", "2.5 KB", "3.0 GB"):
+/// for sizes that are small or close together.
+pub fn byte_size_precise(bytes: u64) -> crate::i18n::Text {
+    use crate::i18n::{Num, tr};
+    let n = bytes as f64;
+    if n >= GIB {
+        tr::format_size_gb(Num::fixed(n / GIB, 1))
+    } else if n >= MIB {
+        tr::format_size_mb(Num::fixed(n / MIB, 1))
+    } else if n >= KIB {
+        tr::format_size_kb(Num::fixed(n / KIB, 1))
+    } else {
+        tr::format_size_b(bytes)
     }
 }
 
@@ -211,11 +233,49 @@ pub fn format_byte_size(bytes: u64) -> String {
 pub fn track_list_summary(track_count: usize, size_bytes: u64) -> String {
     use crate::i18n::tr;
     if size_bytes > 0 {
-        tr::track_list_summary_size(track_count, format_byte_size(size_bytes))
+        tr::track_list_summary_size(track_count, byte_size(size_bytes))
     } else {
         tr::track_list_summary(track_count)
     }
     .render()
+}
+
+/// A length as `m:ss`, or `h:mm:ss` from an hour ("3:45", "1:02:03"), the same in every
+/// language. Rounded down to the second.
+pub fn duration_text(ms: u64) -> String {
+    let seconds = ms / 1000;
+    let (hours, minutes, seconds) = (seconds / 3600, seconds % 3600 / 60, seconds % 60);
+    if hours > 0 {
+        format!("{hours}:{minutes:02}:{seconds:02}")
+    } else {
+        format!("{minutes}:{seconds:02}")
+    }
+}
+
+/// A track list's footer: "Total time: 1:02:03", with "(2 without length)" when some
+/// tracks have none.
+pub fn track_list_total_time(total_ms: u64, unknown_count: usize) -> String {
+    use crate::i18n::tr;
+    let duration = duration_text(total_ms);
+    if unknown_count == 0 {
+        tr::track_list_total_time(duration)
+    } else {
+        tr::track_list_total_time_unknown(duration, unknown_count)
+    }
+    .render()
+}
+
+/// A stored RFC 3339 time in the computer's time zone, as "2026-04-07 13:00": the same in
+/// every language, like the Backups page's times. Text that isn't such a time comes back
+/// as it is.
+pub fn local_date_time(rfc3339: &str) -> String {
+    chrono::DateTime::parse_from_rfc3339(rfc3339.trim())
+        .map(|time| {
+            time.with_timezone(&chrono::Local)
+                .format("%Y-%m-%d %H:%M")
+                .to_string()
+        })
+        .unwrap_or_else(|_| rfc3339.to_string())
 }
 
 // ---------------------------------------------------------------------------
@@ -244,7 +304,10 @@ pub fn suppress_console_window(cmd: &mut std::process::Command) {
 
 #[cfg(test)]
 mod list_text_tests {
-    use super::{format_byte_size, track_list_summary, warning_suffix};
+    use super::{
+        byte_size, byte_size_precise, duration_text, local_date_time, track_list_summary,
+        track_list_total_time, warning_suffix,
+    };
 
     #[test]
     fn warning_suffix_is_empty_without_warnings_and_counts_otherwise() {
@@ -254,11 +317,44 @@ mod list_text_tests {
     }
 
     #[test]
-    fn format_byte_size_uses_kb_mb_and_gb_like_the_ui() {
-        assert_eq!(format_byte_size(0), "0 KB");
-        assert_eq!(format_byte_size(1536), "2 KB");
-        assert_eq!(format_byte_size(412 * 1024 * 1024), "412 MB");
-        assert_eq!(format_byte_size(1288490189), "1.2 GB");
+    fn byte_size_uses_kb_mb_and_gb_like_the_ui() {
+        let size = |bytes| byte_size(bytes).render();
+        assert_eq!(size(0), "0 KB");
+        assert_eq!(size(1536), "2 KB");
+        assert_eq!(size(2560), "3 KB");
+        assert_eq!(size(412 * 1024 * 1024), "412 MB");
+        assert_eq!(size(1288490189), "1.2 GB");
+        assert_eq!(size(27 * 1024 * 1024 * 1024), "27.0 GB");
+    }
+
+    #[test]
+    fn byte_size_precise_has_a_decimal_from_kb_up() {
+        let size = |bytes| byte_size_precise(bytes).render();
+        assert_eq!(size(512), "512 B");
+        assert_eq!(size(1024), "1.0 KB");
+        assert_eq!(size(2560), "2.5 KB");
+        assert_eq!(size(5 * 1024 * 1024), "5.0 MB");
+        assert_eq!(size(3 * 1024 * 1024 * 1024), "3.0 GB");
+    }
+
+    #[test]
+    fn durations_are_minutes_and_seconds_with_hours_from_an_hour() {
+        assert_eq!(duration_text(0), "0:00");
+        assert_eq!(duration_text(65_999), "1:05");
+        assert_eq!(duration_text(3_661_000), "1:01:01");
+        assert_eq!(track_list_total_time(180_000, 0), "Total time: 3:00");
+        assert_eq!(
+            track_list_total_time(180_000, 2),
+            "Total time: 3:00 (2 without length)"
+        );
+    }
+
+    #[test]
+    fn local_date_time_shows_minutes_and_keeps_text_it_cant_read() {
+        let shown = local_date_time("2026-04-07T10:00:00Z");
+        assert_eq!(shown.len(), "2026-04-07 10:00".len(), "{shown}");
+        assert!(shown.starts_with("2026-04-0"), "{shown}");
+        assert_eq!(local_date_time("yesterday"), "yesterday");
     }
 
     #[test]

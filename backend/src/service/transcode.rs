@@ -570,17 +570,8 @@ fn convert_summary(data: &TranscodeTracksData) -> String {
 }
 
 /// A file size as the track tables show sizes (`"9 MB"`, `"1.2 GB"`).
-pub(crate) fn size_text(bytes: i64) -> String {
-    let bytes = bytes.max(0) as f64;
-    const MB: f64 = 1024.0 * 1024.0;
-    const GB: f64 = MB * 1024.0;
-    if bytes >= GB {
-        format!("{:.1} GB", bytes / GB)
-    } else if bytes >= MB {
-        format!("{:.0} MB", bytes / MB)
-    } else {
-        format!("{:.0} KB", bytes / 1024.0)
-    }
+pub(crate) fn size_text(bytes: i64) -> crate::i18n::Text {
+    crate::utils::byte_size(bytes.max(0) as u64)
 }
 
 fn run_job(job: &Job, cancel: &AtomicBool) -> JobResult {

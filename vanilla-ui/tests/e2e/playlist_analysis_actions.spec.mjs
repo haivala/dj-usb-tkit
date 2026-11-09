@@ -32,6 +32,13 @@ test.beforeEach(async ({ page }) => {
         hasMore: nextOff < rows.length,
         totalDurationMs: rows.reduce((s, t) => s + (t.durationMs > 0 ? t.durationMs : 0), 0),
         durationUnknownCount: rows.filter((t) => !(t.durationMs > 0)).length,
+        // The footer line, as the backend words it.
+        durationText: (() => {
+          const seconds = Math.floor(rows.reduce((s, t) => s + (t.durationMs > 0 ? t.durationMs : 0), 0) / 1000);
+          const unknown = rows.filter((t) => !(t.durationMs > 0)).length;
+          const time = `${Math.floor(seconds / 60)}:${String(seconds % 60).padStart(2, "0")}`;
+          return `Total time: ${time}${unknown ? ` (${unknown} without length)` : ""}`;
+        })(),
         unanalyzedCount: rows.filter((t) => !t.analysisReady).length,
         // The Analyze Missing button's label, as the backend words it.
         analyzeMissingLabel: `Analyze Missing Tracks (${rows.filter((t) => !t.analysisReady).length})`,
@@ -723,7 +730,14 @@ function installReorderTauriMock(page, { usbSameNamePlaylistName, exportPruneSta
           : "Export current playlist to selected USB",
         reorderLockTooltip: locksReorder
           ? `Won't reorder on USB — "${playlist.name}" already exists there, and additive export keeps its existing track order unchanged. New tracks are still added in your chosen order.`
-          : null
+          : null,
+        // The line under the title, as the backend words it.
+        exportStatusText: [
+          sameNameExistsOnUsb ? "On this USB." : "Not on this USB.",
+          playlist.lastExportedAt
+            ? `Last exported ${playlist.lastExportedAt} to ${playlist.lastExportedUsbRoot} (${playlist.lastExportedTrackCount} tracks).`
+            : null
+        ].filter(Boolean).join(" ")
       };
     });
 

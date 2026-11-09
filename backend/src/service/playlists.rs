@@ -1,7 +1,7 @@
 //! Local playlists and imported-playlist bookkeeping.
 
 use super::*;
-use crate::i18n::tr;
+use crate::i18n::{Text, tr};
 use std::collections::{HashMap, HashSet};
 
 /// A playlist row's source icon: USB or local (`is_usb` is the track's
@@ -179,6 +179,38 @@ pub(crate) fn save_imported_playlist(
         },
         false,
     ))
+}
+
+fn non_empty(text: Option<&str>) -> Option<&str> {
+    text.map(str::trim).filter(|text| !text.is_empty())
+}
+
+/// "Last exported 2026-04-07 13:00 to MY USB (12 tracks).", naming the USB by its name, else
+/// its folder; `None` for a playlist never exported.
+pub(crate) fn last_export_text(playlist: &Playlist) -> Option<Text> {
+    let date = crate::utils::local_date_time(non_empty(playlist.last_exported_at.as_deref())?);
+    let drive = non_empty(playlist.last_exported_usb_name.as_deref())
+        .or_else(|| non_empty(playlist.last_exported_usb_root.as_deref()));
+    Some(match (drive, playlist.last_exported_track_count) {
+        (Some(drive), Some(count)) => tr::playlist_export_last(date, drive, count),
+        (None, Some(count)) => tr::playlist_export_last_no_drive(date, count),
+        (Some(drive), None) => tr::playlist_export_last_unknown_count(date, drive),
+        (None, None) => tr::playlist_export_last_no_drive_unknown_count(date),
+    })
+}
+
+/// The line under the playlist's title with no USB selected.
+pub(crate) fn export_status_text(playlist: &Playlist) -> String {
+    last_export_text(playlist)
+        .unwrap_or_else(tr::playlist_export_never)
+        .render()
+}
+
+/// The USB's folder, when the line names the USB by its name.
+pub(crate) fn export_status_tooltip(playlist: &Playlist) -> Option<String> {
+    non_empty(playlist.last_exported_at.as_deref())?;
+    non_empty(playlist.last_exported_usb_name.as_deref())?;
+    non_empty(playlist.last_exported_usb_root.as_deref()).map(str::to_string)
 }
 
 impl BackendService {
@@ -414,10 +446,16 @@ impl BackendService {
                     .map(str::to_string),
                 last_exported_usb_name: row.get(9)?,
                 delete_confirm_text,
+                export_status_text: String::new(),
+                export_status_tooltip: None,
             })
         })?;
 
-        let items = rows.collect::<Result<Vec<_>, _>>()?;
+        let mut items = rows.collect::<Result<Vec<_>, _>>()?;
+        for playlist in &mut items {
+            playlist.export_status_text = export_status_text(playlist);
+            playlist.export_status_tooltip = export_status_tooltip(playlist);
+        }
         Ok(ListPlaylistsData { items })
     }
 
@@ -575,6 +613,10 @@ impl BackendService {
             list_track_count,
             list_size_bytes,
             list_summary_text: crate::utils::track_list_summary(list_track_count, list_size_bytes),
+            duration_text: crate::utils::track_list_total_time(
+                total_duration_ms,
+                duration_unknown_count,
+            ),
         })
     }
 

@@ -38,28 +38,3 @@ export function formatBpm(value) {
   if (!Number.isFinite(n) || n <= 0) return "";
   return n.toFixed(2);
 }
-
-// The single "Total time: … (N without length)" renderer for every track-list
-// footer (app playlist, library, USB playlist/history). Both numbers are the
-// backend's (`totalDurationMs`, `durationUnknownCount`), passed straight
-// through -- no client-side summing or counting.
-export function renderTrackListDurationSummary(target, { totalDurationMs, durationUnknownCount } = {}) {
-  if (!target) return;
-  const unknown = Number(durationUnknownCount) || 0;
-  const suffix = unknown > 0 ? ` (${unknown} without length)` : "";
-  target.textContent = `Total time: ${formatDurationMs(totalDurationMs)}${suffix}`;
-}
-
-// `count` followed by the singular or plural noun ("1 track" / "3 tracks").
-// Its last user is the playlist export status line (`formatLastExport`),
-// which piece 12 of USB_TEXT_CATALOG_PLAN.md moves; then this goes.
-export function counted(count, one, many = `${one}s`) {
-  return `${count} ${count === 1 ? one : many}`;
-}
-
-export function formatTimestampLocal(value) {
-  const date = new Date(value);
-  if (Number.isNaN(date.getTime())) return value;
-  return date.toLocaleString();
-}
-

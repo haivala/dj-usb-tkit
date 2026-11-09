@@ -20,7 +20,7 @@ use std::path::Path;
 use crate::audio_format::{
     AudioFormat, UsbAudioFormat, UsbAudioFormatOfExtension, is_alac_file, is_player_extension,
 };
-use crate::i18n::tr;
+use crate::i18n::{Num, tr};
 use crate::models::{FormatCompat, FormatCompatSeverity};
 use crate::service::usb_identity::UsbAudioFormats;
 use crate::wav_format::WavFormatIssue;
@@ -85,11 +85,7 @@ pub(crate) fn format_details(
     let mut parts = Vec::new();
     if let Some(rate) = sample_rate_hz.filter(|&rate| rate > 0) {
         let khz = f64::from(rate) / 1000.0;
-        let khz = if khz.fract() == 0.0 {
-            format!("{khz:.0}")
-        } else {
-            format!("{khz:.1}")
-        };
+        let khz = Num::fixed(khz, if khz.fract() == 0.0 { 0 } else { 1 });
         parts.push(tr::track_table_format_sample_rate(khz).render());
     }
     if let Some(depth) = bit_depth.filter(|&depth| depth > 0) {

@@ -1,6 +1,6 @@
 //! Export to USB implementation.
 
-use crate::utils::{counted, format_byte_size, warning_suffix};
+use crate::utils::{byte_size, byte_size_precise, counted, warning_suffix};
 use std::collections::{HashMap, HashSet};
 use std::path::{Path, PathBuf};
 
@@ -604,13 +604,13 @@ fn export_space_text(
     let mut parts = if tracks_to_copy > 0 {
         vec![
             tr::export_space_to_copy(tracks_to_copy, list_track_count).render(),
-            format_byte_size(bytes_to_copy),
+            byte_size(bytes_to_copy).render(),
         ]
     } else {
         vec![tr::export_space_all_on_usb().render()]
     };
     if let Some(available) = available_bytes {
-        parts.push(tr::export_space_free(format_byte_size(available)).render());
+        parts.push(tr::export_space_free(byte_size(available)).render());
     }
     let line = parts.join(" · ");
     if fits {
@@ -652,21 +652,6 @@ mod export_space_text_tests {
             export_space_text(0, 3, 0, Some(27 * GB), true),
             "All tracks on USB · 27.0 GB free on USB"
         );
-    }
-}
-
-fn format_bytes(bytes: u64) -> String {
-    const UNITS: [&str; 5] = ["B", "KiB", "MiB", "GiB", "TiB"];
-    let mut value = bytes as f64;
-    let mut unit = 0;
-    while value >= 1024.0 && unit < UNITS.len() - 1 {
-        value /= 1024.0;
-        unit += 1;
-    }
-    if unit == 0 {
-        format!("{bytes} B")
-    } else {
-        format!("{value:.1} {}", UNITS[unit])
     }
 }
 
@@ -731,9 +716,11 @@ fn insufficient_space_error(
     required: u64,
     available: u64,
 ) -> BackendError {
-    let message = tr::export_error_no_space(format_bytes(required), format_bytes(available));
+    let message =
+        tr::export_error_no_space(byte_size_precise(required), byte_size_precise(available));
     let status_text =
-        tr::export_refused_no_space(format_bytes(required), format_bytes(available)).render();
+        tr::export_refused_no_space(byte_size_precise(required), byte_size_precise(available))
+            .render();
     BackendError::ValidationWithDetails(
         message,
         json!({
@@ -985,6 +972,19 @@ pub(crate) fn compute_playlist_usb_export_status(
                     .is_some()
                     .then(tr::export_mark_exported)
             };
+            let export_status_text = if usb_root.is_some() {
+                let on_usb = if same_name_exists_on_usb {
+                    tr::playlist_export_on_usb()
+                } else {
+                    tr::playlist_export_not_on_usb()
+                };
+                match super::playlists::last_export_text(playlist) {
+                    Some(last) => tr::playlist_export_usb_and_last(on_usb, last).render(),
+                    None => on_usb.render(),
+                }
+            } else {
+                super::playlists::export_status_text(playlist)
+            };
             PlaylistUsbExportStatus {
                 playlist_id: playlist.id.clone(),
                 playlist_name: playlist.name.clone(),
@@ -996,6 +996,7 @@ pub(crate) fn compute_playlist_usb_export_status(
                 export_button_title,
                 reorder_lock_tooltip: locks_reorder
                     .then(|| tr::playlist_reorder_lock_tooltip(&playlist.name).render()),
+                export_status_text,
             }
         })
         .collect()
@@ -2383,7 +2384,7 @@ mod tests {
         BackendService, ContentFingerprint, UsbTrackSizes, compute_playlist_usb_export_status,
         content_fingerprint_key, ensure_playlist_tracks_analysis_ready, estimate_export_new_bytes,
         estimate_playlist_copy, existing_usb_relative_if_file, existing_usb_relative_if_present,
-        export_space_shortfall, format_bytes, has_required_analysis, has_required_analysis_fields,
+        export_space_shortfall, has_required_analysis, has_required_analysis_fields,
         insufficient_space_error, normalize_playlist_name_for_compare,
         playlist_locks_reorder_on_export, refused_formats_error,
         resolve_collision_free_media_target, usb_drive_label,
@@ -2625,8 +2626,7 @@ mod tests {
             details["statusText"],
             format!(
                 "Export blocked: not enough free space on the USB drive — need about {}, {} free.",
-                format_bytes(2_000_000_000),
-                format_bytes(1_000_000_000),
+                "1.9 GB", "953.7 MB",
             )
         );
     }
@@ -3567,14 +3567,6 @@ mod tests {
     }
 
     #[test]
-    fn format_bytes_scales_units() {
-        assert_eq!(format_bytes(512), "512 B");
-        assert_eq!(format_bytes(1024), "1.0 KiB");
-        assert_eq!(format_bytes(5 * 1024 * 1024), "5.0 MiB");
-        assert_eq!(format_bytes(3 * 1024 * 1024 * 1024), "3.0 GiB");
-    }
-
-    #[test]
     fn estimate_export_new_bytes_counts_new_audio_and_skips_files_already_on_usb() {
         let root = tempdir().expect("root");
         let media_src = root.path().join("src");
@@ -4047,6 +4039,8 @@ mod tests {
             imported_from: None,
             last_exported_usb_name: None,
             delete_confirm_text: String::new(),
+            export_status_text: String::new(),
+            export_status_tooltip: None,
         }
     }
 
@@ -4112,6 +4106,70 @@ mod tests {
         assert_eq!(
             mark(&["Brand New"], Some("/media/user/USB")),
             [None, Some("On this USB".to_string())]
+        );
+    }
+
+    #[test]
+    fn the_export_status_line_says_where_and_when_the_playlist_was_exported() {
+        use crate::service::playlists::{export_status_text, export_status_tooltip};
+        let exported_at = "2026-04-07T10:00:00Z";
+        let when = crate::utils::local_date_time(exported_at);
+        let exported = Playlist {
+            last_exported_at: Some(exported_at.to_string()),
+            last_exported_usb_root: Some("/OTHER_USB".to_string()),
+            last_exported_track_count: Some(2),
+            ..make_playlist("p1", "My Set")
+        };
+        let named = Playlist {
+            last_exported_usb_name: Some("GIG STICK".to_string()),
+            last_exported_track_count: Some(1),
+            ..exported.clone()
+        };
+        let unknown = Playlist {
+            last_exported_usb_root: None,
+            last_exported_track_count: None,
+            ..exported.clone()
+        };
+        let fresh = make_playlist("p2", "Brand New");
+
+        assert_eq!(
+            export_status_text(&exported),
+            format!("Last exported {when} to /OTHER_USB (2 tracks).")
+        );
+        assert_eq!(
+            export_status_text(&named),
+            format!("Last exported {when} to GIG STICK (1 track).")
+        );
+        assert_eq!(
+            export_status_text(&unknown),
+            format!("Last exported {when} (unknown track count).")
+        );
+        assert_eq!(export_status_text(&fresh), "Not exported yet.");
+        // The folder is the tooltip only when the line names the USB.
+        assert_eq!(export_status_tooltip(&exported), None);
+        assert_eq!(export_status_tooltip(&named).as_deref(), Some("/OTHER_USB"));
+
+        let playlists = vec![exported, fresh];
+        let lines = |usb_root: Option<&str>| -> Vec<String> {
+            let names = [normalize_playlist_name_for_compare("Brand New")].into();
+            compute_playlist_usb_export_status(&playlists, &names, true, usb_root)
+                .into_iter()
+                .map(|status| status.export_status_text)
+                .collect()
+        };
+        assert_eq!(
+            lines(None),
+            [
+                format!("Last exported {when} to /OTHER_USB (2 tracks)."),
+                "Not exported yet.".to_string()
+            ]
+        );
+        assert_eq!(
+            lines(Some("/media/user/USB")),
+            [
+                format!("Not on this USB. Last exported {when} to /OTHER_USB (2 tracks)."),
+                "On this USB.".to_string()
+            ]
         );
     }
 

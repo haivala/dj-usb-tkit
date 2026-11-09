@@ -49,6 +49,9 @@
   once as it happened and again when its command finished.
 - **Improvement:** The Event Log and the "(N warnings)" counts show only what you can act on. Developer detail,
   such as stage timings and database internals, now goes only to the session log file.
+- **Improvement:** A playlist's "Last exported" line shows the date as 2026-04-07 13:00, like the Backups page,
+  instead of in the computer's regional format. The not-enough-space message on export gives sizes in KB, MB and
+  GB like the rest of the app.
 - **Chore:** The backend now decides the sidebar's export mark and its meaning, "On this USB" or "Exported to
   USB", instead of the UI.
 

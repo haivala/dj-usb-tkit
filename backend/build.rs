@@ -373,7 +373,14 @@ fn test_language(english: &ast::Resource<String>) -> String {
             ast::Entry::Message(message) => {
                 let mut message = message.clone();
                 message.comment = None;
-                if let Some(value) = &mut message.value {
+                if message.id.name == "format-decimal-separator" {
+                    // A different separator, so a test sees numbers follow the language.
+                    message.value = Some(ast::Pattern {
+                        elements: vec![ast::PatternElement::TextElement {
+                            value: ",".to_string(),
+                        }],
+                    });
+                } else if let Some(value) = &mut message.value {
                     pseudo_pattern(value);
                 }
                 for attribute in &mut message.attributes {
@@ -473,7 +480,7 @@ fn write_functions(out: &mut String, english: &BTreeMap<String, MessageInfo<'_>>
             .iter()
             .map(|(name, numeric)| {
                 let value = if *numeric {
-                    format!("super::super::Arg::Number({}.into().0)", rust_ident(name))
+                    format!("super::super::Arg::Number({}.into())", rust_ident(name))
                 } else {
                     format!("super::super::Arg::Text({}.to_string())", rust_ident(name))
                 };

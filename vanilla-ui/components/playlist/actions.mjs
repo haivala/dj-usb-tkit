@@ -5,11 +5,6 @@ import { moveArrayItem } from "../shared/list_drag_reorder.mjs";
 import { clearTrackSort, renderEmptyState } from "../shell/actions.mjs";
 import { isUsbRootChangeBlocked } from "../usb/actions.mjs";
 import { cssEscape, cloneTemplate } from "../../ui_utils.mjs";
-import {
-  formatTimestampLocal,
-  renderTrackListDurationSummary,
-  counted,
-} from "../../track_utils.mjs";
 import { t, tCount } from "../../ui_texts.mjs";
 
 const PLAYLIST_LOAD_LIMIT_DEFAULT = 150;
@@ -176,40 +171,16 @@ export function startPlaylistRename(ctx, playlistId) {
   });
 }
 
-// `usbStatus` is the playlist's backend PlaylistUsbExportStatus for the
-// connected USB (see fillPlaylistSidebarItem): with one, the line leads with
-// whether the playlist is on that stick, then the last export, if any.
-export function formatPlaylistExportStatus(playlist, usbStatus) {
-  const lastExport = formatLastExport(playlist);
-  if (usbStatus?.usbSelected) {
-    const onUsb = usbStatus.sameNameExistsOnUsb ? "On this USB." : "Not on this USB.";
-    return lastExport ? `${onUsb} ${lastExport}` : onUsb;
-  }
-  return lastExport || "Not exported yet.";
-}
-
-function formatLastExport(playlist) {
-  const when = String(playlist?.lastExportedAt || "").trim();
-  if (!when) return null;
-  const formattedWhen = formatTimestampLocal(when);
-  const root = String(playlist?.lastExportedUsbRoot || "").trim();
-  // The drive's name (backend-resolved) reads better than its mount path.
-  const drive = String(playlist?.lastExportedUsbName || "").trim() || root;
-  const count = Number(playlist?.lastExportedTrackCount);
-  const countText = Number.isFinite(count) && count >= 0 ? counted(count, "track") : "unknown track count";
-  const driveText = drive ? ` to ${drive}` : "";
-  return `Last exported ${formattedWhen}${driveText} (${countText}).`;
-}
-
-// The export status line, with the drive's mount path as its tooltip when
-// the line names the drive instead.
+// The export status line, the backend's: the playlist's PlaylistUsbExportStatus
+// line while it has one (it says whether the playlist is on the selected USB),
+// else the playlist's own. Its tooltip is the drive's mount path when the line
+// names the drive instead.
 function renderPlaylistExportStatus(ctx, playlist) {
   const status = ctx.el.playlistExportStatus;
   const usbStatus = ctx.state.playlistUsbExportStatusById?.get(playlist?.id);
-  status.textContent = formatPlaylistExportStatus(playlist, usbStatus);
-  const root = String(playlist?.lastExportedUsbRoot || "").trim();
-  if (playlist?.lastExportedAt && playlist?.lastExportedUsbName && root) {
-    status.dataset.tooltip = root;
+  status.textContent = usbStatus?.exportStatusText || playlist?.exportStatusText || "";
+  if (playlist?.exportStatusTooltip) {
+    status.dataset.tooltip = playlist.exportStatusTooltip;
   } else {
     delete status.dataset.tooltip;
   }
@@ -824,7 +795,6 @@ export function createPlaylistTracksController(ctx) {
     buildRow: ctx.buildTrackTableRow,
     renderEmpty: ctx.renderEmptyTrackTable,
     finishRows: ctx.finishTrackRows,
-    renderDurationSummary: renderTrackListDurationSummary,
     getTableSortState: () => ctx.tableSortState,
     onResponse: (data) => {
       const p = getCurrentPlaylist(ctx);

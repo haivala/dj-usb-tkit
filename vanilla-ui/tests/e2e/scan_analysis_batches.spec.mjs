@@ -141,6 +141,12 @@ function installScanAnalysisMock(page, opts = {}) {
     const isCountable = (track) => Number.isFinite(track.bpm) && track.bpm > 0
       && !!track.waveformPeaksPath
       && Number.isFinite(track.durationMs) && track.durationMs > 0;
+    // The footer's "Total time" line, as the backend words it.
+    const totalTimeText = (totalMs, unknown) => {
+      const seconds = Math.floor(totalMs / 1000);
+      const time = `${Math.floor(seconds / 60)}:${String(seconds % 60).padStart(2, "0")}`;
+      return `Total time: ${time}${unknown ? ` (${unknown} without length)` : ""}`;
+    };
     const computeDurationTotals = (list) => {
       let totalMs = 0;
       let knownCount = 0;
@@ -316,8 +322,10 @@ function installScanAnalysisMock(page, opts = {}) {
           artworkPath: track.artworkPath,
           waveformPeaksPath: track.waveformPeaksPath,
           waveformPreview: track.waveformPreview,
-          libraryTotalDurationMs,
-          libraryDurationUnknownCount: Math.max(0, tracks.length - libraryDurationKnownCount),
+          libraryDurationText: totalTimeText(
+            libraryTotalDurationMs,
+            Math.max(0, tracks.length - libraryDurationKnownCount)
+          ),
           // The track's row as saved, whole, as the backend sends it.
           track: { ...track, analysisReady: isCountable(track) },
         });
@@ -372,7 +380,7 @@ function installScanAnalysisMock(page, opts = {}) {
             const { totalMs, knownCount } = computeDurationTotals(filtered);
             return {
               ok: true,
-              data: { total: filtered.length, items: withAnalysisReady(filtered), totalDurationMs: totalMs, durationUnknownCount: filtered.length - knownCount }
+              data: { total: filtered.length, items: withAnalysisReady(filtered), durationText: totalTimeText(totalMs, filtered.length - knownCount) }
             };
           }
           if (command === "resolve_track_identity") {
@@ -551,6 +559,12 @@ function installPagedMaterializeAnalyzeMock(page, opts = {}) {
     const isCountable = (track) => Number.isFinite(track.bpm) && track.bpm > 0
       && !!track.waveformPeaksPath
       && Number.isFinite(track.durationMs) && track.durationMs > 0;
+    // The footer's "Total time" line, as the backend words it.
+    const totalTimeText = (totalMs, unknown) => {
+      const seconds = Math.floor(totalMs / 1000);
+      const time = `${Math.floor(seconds / 60)}:${String(seconds % 60).padStart(2, "0")}`;
+      return `Total time: ${time}${unknown ? ` (${unknown} without length)` : ""}`;
+    };
     const computeDurationTotals = (list) => {
       let totalMs = 0;
       let knownCount = 0;
@@ -587,8 +601,7 @@ function installPagedMaterializeAnalyzeMock(page, opts = {}) {
         items,
         nextCursor: hasMore ? String(nextOffset) : null,
         hasMore,
-        totalDurationMs: totalMs,
-        durationUnknownCount: rows.length - knownCount
+        durationText: totalTimeText(totalMs, rows.length - knownCount)
       };
     };
 
@@ -708,8 +721,10 @@ function installPagedMaterializeAnalyzeMock(page, opts = {}) {
           artworkPath: row.artworkPath,
           waveformPeaksPath: row.waveformPeaksPath,
           waveformPreview: row.waveformPreview,
-          libraryTotalDurationMs,
-          libraryDurationUnknownCount: Math.max(0, tracks.length - libraryDurationKnownCount),
+          libraryDurationText: totalTimeText(
+            libraryTotalDurationMs,
+            Math.max(0, tracks.length - libraryDurationKnownCount)
+          ),
           // The track's row as saved, whole, as the backend sends it.
           track: { ...row, analysisReady: isCountable(row) },
         });

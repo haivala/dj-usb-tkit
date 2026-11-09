@@ -4,7 +4,6 @@ import { JSDOM } from "jsdom";
 
 import {
   commitActivePlaylistSort,
-  formatPlaylistExportStatus,
   renderPlaylistPanelChrome,
   renderPlaylistList
 } from "../components/playlist/actions.mjs";
@@ -82,29 +81,6 @@ test("renderPlaylistList marks active tabs and active playlist mode", () => {
   assert.deepEqual([...buttons].map((b) => b.dataset.playlistId), ["p1", "p2"]);
   assert.equal(buttons[1].classList.contains("active"), true);
   assert.equal(buttons[0].classList.contains("playlist-active-mode"), true);
-});
-
-test("formatPlaylistExportStatus describes the last export", () => {
-  assert.equal(formatPlaylistExportStatus({}), "Not exported yet.");
-  assert.match(formatPlaylistExportStatus({
-    lastExportedAt: "2026-01-01T00:00:00Z",
-    lastExportedUsbRoot: "/usb",
-    lastExportedTrackCount: 5
-  }), /^Last exported .+ to \/usb \(5 tracks\)\.$/);
-});
-
-test("formatPlaylistExportStatus leads with whether the playlist is on the connected USB", () => {
-  const exported = {
-    lastExportedAt: "2026-01-01T00:00:00Z",
-    lastExportedUsbRoot: "/other",
-    lastExportedTrackCount: 5
-  };
-  assert.equal(formatPlaylistExportStatus({}, { usbSelected: true, sameNameExistsOnUsb: true }), "On this USB.");
-  assert.equal(formatPlaylistExportStatus({}, { usbSelected: true, sameNameExistsOnUsb: false }), "Not on this USB.");
-  assert.match(
-    formatPlaylistExportStatus(exported, { usbSelected: true, sameNameExistsOnUsb: false }),
-    /^Not on this USB\. Last exported .+ to \/other \(5 tracks\)\.$/
-  );
 });
 
 // The active playlist sort lives in tableSortState; committing always clears

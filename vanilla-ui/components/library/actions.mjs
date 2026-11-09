@@ -5,7 +5,6 @@ import { cssEscape, cloneTemplate } from "../../ui_utils.mjs";
 import { fillBpmCell, fillFormatCell, fillKeyCell, fillYearCell, coverElement, setCueButtonState, formatTrackDuration, trackHasWaveform } from "../../track_table.mjs";
 import { applyAnalyzeButtonState } from "../../track_utils.mjs";
 import { t } from "../../ui_texts.mjs";
-import { renderTrackListDurationSummary } from "../../track_utils.mjs";
 import { drawWaveformCanvas, invalidateWaveformCache, setWaveformColorData } from "../../waveform.mjs";
 
 const LIBRARY_SEARCH_DEBOUNCE_MS = 180;
@@ -238,20 +237,13 @@ export function renderSourceChips(ctx) {
   ctx.updateSourceFilterIndicator();
 }
 
-// The library's duration total/unknown-count are computed entirely by the
-// backend (which knows the true filtered library, not just whatever page
-// happens to be loaded client-side) and pushed here: once per fresh
-// browse_source_files response (the library TrackListController), and live per
-// track via job.progress events during an analysis batch (job_manager.mjs). This is
-// a pure setter -- no track iteration, no countability logic, no filtering.
-export function applyLibraryDurationSummary(ctx, totalMs, unknownCount) {
-  const { state, el } = ctx;
-  state.libraryDurationTotalMs = Number(totalMs) || 0;
-  state.libraryDurationUnknownCount = Number(unknownCount) || 0;
-  renderTrackListDurationSummary(el.libraryTotalDuration, {
-    totalDurationMs: state.libraryDurationTotalMs,
-    durationUnknownCount: state.libraryDurationUnknownCount,
-  });
+// The library footer's "Total time" line is the backend's (which knows the true
+// filtered library, not just whatever page happens to be loaded client-side),
+// shown here: once per fresh browse_source_files response (the library
+// TrackListController), and live per track via job.progress events during an
+// analysis batch (job_manager.mjs).
+export function applyLibraryDurationSummary(ctx, durationText) {
+  ctx.el.libraryTotalDuration.textContent = durationText;
 }
 
 // The library track table is fetched/paginated/searched/sorted by the shared
@@ -326,8 +318,7 @@ export function createLibraryTracksController(ctx) {
     buildRow: ctx.buildTrackTableRow,
     renderEmpty: ctx.renderEmptyTrackTable,
     finishRows: ctx.finishTrackRows,
-    renderDurationSummary: (_target, summary) =>
-      applyLibraryDurationSummary(ctx, summary.totalDurationMs, summary.durationUnknownCount),
+    renderDurationSummary: (_target, durationText) => applyLibraryDurationSummary(ctx, durationText),
     getTableSortState: () => ctx.tableSortState,
     onError: (err) => {
       console.error(err);

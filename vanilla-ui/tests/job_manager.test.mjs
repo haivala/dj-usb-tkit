@@ -254,8 +254,8 @@ test("handleJobEvent applies analysis progress, duration totals, and delayed pau
         if (active) state.analyzingTrackIds.add(trackId);
         else state.analyzingTrackIds.delete(trackId);
       },
-      applyLibraryDurationSummary: (totalMs, unknownCount) => {
-        durationSummaries.push([totalMs, unknownCount]);
+      applyLibraryDurationSummary: (durationText) => {
+        durationSummaries.push(durationText);
       }
     };
 
@@ -279,13 +279,12 @@ test("handleJobEvent applies analysis progress, duration totals, and delayed pau
       stage: "analyze_new_tracks",
       trackId: "track-2",
       trackReady: true,
-      libraryTotalDurationMs: 3000,
-      libraryDurationUnknownCount: 1
+      libraryDurationText: "Total time: 0:03 (1 without length)"
     });
     assert.equal(state.analyzingTrackIds.size, 0);
     assert.ok(state.progressPausedAtMs > 0);
     assert.equal(el.progressTime.textContent, "(paused)");
-    assert.deepEqual(durationSummaries, [[3000, 1]]);
+    assert.deepEqual(durationSummaries, ["Total time: 0:03 (1 without length)"]);
   });
 });
 

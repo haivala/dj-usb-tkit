@@ -4,6 +4,7 @@ use std::sync::{Mutex, OnceLock, mpsc};
 use std::{fs, io::Write, path::Path, path::PathBuf, process::Command};
 
 use backend::commands::BackendCommands;
+use backend::i18n::tr;
 use serde::Serialize;
 use tauri::Emitter;
 use tauri::Manager;
@@ -123,7 +124,7 @@ async fn pick_source_folders(app: tauri::AppHandle) -> Result<Vec<String>, Strin
 
     app.dialog()
         .file()
-        .set_title("Select media source folders")
+        .set_title(tr::library_source_folders_dialog_title().render())
         .pick_folders(move |folders| {
             let _ = tx.send(folders);
         });
@@ -158,7 +159,7 @@ async fn pick_transcode_folder(app: tauri::AppHandle) -> Result<Option<String>, 
 
     app.dialog()
         .file()
-        .set_title("Select the folder for transcodes")
+        .set_title(tr::settings_transcode_folder_dialog_title().render())
         .pick_folder(move |folder| {
             let _ = tx.send(folder);
         });
@@ -180,7 +181,7 @@ async fn pick_usb_folder(app: tauri::AppHandle) -> Result<Option<String>, String
 
     app.dialog()
         .file()
-        .set_title("Select USB root folder")
+        .set_title(tr::usb_root_dialog_title().render())
         .pick_folder(move |folder| {
             let _ = tx.send(folder);
         });
@@ -214,8 +215,8 @@ async fn save_text_file(
 
     app.dialog()
         .file()
-        .set_title("Save tracklist")
-        .add_filter("Text", &["txt"])
+        .set_title(tr::tracklist_export_dialog_title().render())
+        .add_filter(tr::tracklist_export_dialog_filter_text().render(), &["txt"])
         .set_file_name(&suggested_file_name)
         .save_file(move |path| {
             let _ = tx.send(path);

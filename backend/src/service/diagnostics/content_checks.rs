@@ -1,7 +1,7 @@
 //! eDB access, Contents, BPM/key, beat grid, analysis and playlist checks.
 
 use super::*;
-use crate::i18n::tr;
+use crate::i18n::{Num, tr};
 
 pub(crate) fn diagnose_edb_access(
     edb_path: &std::path::Path,
@@ -719,7 +719,7 @@ where
         tr::diagnostics_check_overall_resolution_detail(
             total_resolved,
             total_entries,
-            format!("{:.1}", overall_rate * 100.0),
+            Num::fixed(overall_rate * 100.0, 1),
             grouped_leaves.len(),
         ),
     ));
@@ -746,9 +746,9 @@ where
             DiagStatus::Pass,
             tr::diagnostics_check_key_overlap_detail(
                 cross_source_matches_total,
-                format!("{:.1}", pdb_rate * 100.0),
+                Num::fixed(pdb_rate * 100.0, 1),
                 cross_source_pdb_total,
-                format!("{:.1}", edb_rate * 100.0),
+                Num::fixed(edb_rate * 100.0, 1),
                 cross_source_edb_total,
             ),
         ));
@@ -768,7 +768,7 @@ where
                 tr::diagnostics_check_playlist_resolution(
                     pd.resolved_entries,
                     pd.total_entries,
-                    format!("{:.1}", pd.resolution_rate * 100.0),
+                    Num::fixed(pd.resolution_rate * 100.0, 1),
                 ),
             ));
         }

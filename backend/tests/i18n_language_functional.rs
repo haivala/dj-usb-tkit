@@ -393,3 +393,18 @@ fn the_analysis_coordinator_answers_in_the_current_language() {
         assert!(seen.iter().any(|seen| seen == event), "{event}: {seen:?}");
     }
 }
+
+#[test]
+fn numbers_take_the_language_decimal_separator_and_english_logs_keep_the_point() {
+    let _language = LanguageTest::start();
+    let size = backend::utils::byte_size(1_288_490_189);
+    assert_eq!(size.render(), "1.2 GB");
+    i18n::set_language(TEST_LANGUAGE).expect("test language");
+    let shown = size.render();
+    assert!(is_test_language(&shown), "{shown}");
+    assert!(shown.contains("1,2"), "{shown}");
+    assert_eq!(size.render_english(), "1.2 GB");
+    // Whole numbers have no separator and no grouping.
+    let shown = backend::utils::track_list_summary(1234, 0);
+    assert!(shown.contains("1234"), "{shown}");
+}

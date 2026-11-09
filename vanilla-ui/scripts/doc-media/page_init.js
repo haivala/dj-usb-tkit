@@ -60,6 +60,18 @@
   });
   const ok = (data) => ({ ok: true, data });
   const sumMs = (items) => items.reduce((ms, t) => ms + (Number(t.durationMs) || 0), 0);
+  // Lengths and times as the backend words them: "3:45" / "1:02:03", "2026-09-26 21:00".
+  const pad = (n) => String(n).padStart(2, "0");
+  const clock = (ms) => {
+    const s = Math.floor(ms / 1000);
+    const h = Math.floor(s / 3600);
+    return h ? `${h}:${pad(Math.floor((s % 3600) / 60))}:${pad(s % 60)}` : `${Math.floor(s / 60)}:${pad(s % 60)}`;
+  };
+  const totalTime = (items) => ({ durationText: `Total time: ${clock(sumMs(items))}` });
+  const localStamp = (iso) => {
+    const d = new Date(iso);
+    return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())} ${pad(d.getHours())}:${pad(d.getMinutes())}`;
+  };
   // A list's heading totals, as the backend's `track_list::list_totals`
   // counts them: every track, and the sizes that are known.
   // What the backend sends about a list's size.
@@ -99,6 +111,7 @@
     totalDurationMs: sumMs(items),
     durationUnknownCount: 0,
     ...listTotals(items),
+    ...totalTime(items),
   });
   const historySessions = (usbHistory || []).map(({ id, name, createdAt, titles }) => {
     const items = titles.map((title) => usbTracksByTitle.get(title)).filter(Boolean);
@@ -183,6 +196,10 @@
     lastExportedTrackCount: isExported(id, items, imported) ? items.length : null,
     trackCount: items.length,
     totalDurationMs: sumMs(items),
+    // The line under the title, as the backend words it.
+    exportStatusText: isExported(id, items, imported)
+      ? `Last exported ${localStamp(exportedAt)} to ${USB_ROOT} (${items.length} ${items.length === 1 ? "track" : "tracks"}).`
+      : "Not exported yet.",
     createdAt: exportedAt,
     updatedAt: exportedAt,
   }));
@@ -288,6 +305,7 @@
               totalDurationMs: sumMs(items),
               durationUnknownCount: 0,
               ...listTotals(items),
+              ...totalTime(items),
             });
           }
           case "get_playlist_export_space": {
@@ -399,6 +417,7 @@
               totalDurationMs: sumMs(items),
               durationUnknownCount: 0,
               ...listTotals(items),
+              ...totalTime(items),
             });
           }
           case "get_selection_duration": {
@@ -408,6 +427,7 @@
               totalDurationMs: sumMs(picked),
               durationUnknownCount: picked.filter((t) => !(Number(t.durationMs) > 0)).length,
               trackCount: picked.length,
+              durationText: sumMs(picked) ? `· ${clock(sumMs(picked))}` : "",
             });
           }
           case "resolve_track_identity":

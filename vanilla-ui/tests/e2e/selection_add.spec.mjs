@@ -327,6 +327,7 @@ function installSelectionMock(page, mockOpts = {}) {
                 durationUnknownText: ids.length - known
                   ? `${ids.length - known} of the selected tracks ${ids.length - known === 1 ? "has" : "have"} no length yet`
                   : "",
+                durationText: known ? `· ${known * 3}:00${ids.length - known ? "+" : ""}` : "",
               },
             };
           }

@@ -94,10 +94,10 @@ pub struct JobEventPayload {
     pub analysis_ready: Option<bool>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub error_message: Option<String>,
+    /// On an analysis track-ready event: the library footer's "Total time" line, now that
+    /// the track's length is known.
     #[serde(skip_serializing_if = "Option::is_none")]
-    pub library_total_duration_ms: Option<u64>,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub library_duration_unknown_count: Option<usize>,
+    pub library_duration_text: Option<String>,
     /// On an analysis track-ready event: the track's whole library row, which
     /// the frontend shows in place of the one it has.
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -444,6 +444,13 @@ pub struct Playlist {
     /// What the dialog asks before deleting the playlist.
     #[serde(default)]
     pub delete_confirm_text: String,
+    /// The line under the playlist's title with no USB selected: "Last exported
+    /// 2026-04-07 13:00 to MY USB (12 tracks)." or "Not exported yet."
+    #[serde(default)]
+    pub export_status_text: String,
+    /// That line's tooltip: the USB's folder, when the line names the USB by its name.
+    #[serde(default)]
+    pub export_status_tooltip: Option<String>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -631,6 +638,10 @@ pub struct BrowseSourceFilesData {
     /// "30 tracks · 412 MB", from the two values above.
     #[serde(default)]
     pub list_summary_text: String,
+    /// The footer, "Total time: 1:02:03 (2 without length)", from `total_duration_ms` and
+    /// `duration_unknown_count`.
+    #[serde(default)]
+    pub duration_text: String,
 }
 
 /// One configured library source folder, as its chip shows it.
@@ -1019,6 +1030,10 @@ pub struct GetPlaylistTracksData {
     /// "30 tracks · 412 MB", from the two values above.
     #[serde(default)]
     pub list_summary_text: String,
+    /// The footer, "Total time: 1:02:03 (2 without length)", from `total_duration_ms` and
+    /// `duration_unknown_count`.
+    #[serde(default)]
+    pub duration_text: String,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -1079,6 +1094,10 @@ pub struct GetSelectionDurationData {
     /// ("2 of the selected tracks have no length yet"); empty when none.
     #[serde(default)]
     pub duration_unknown_text: String,
+    /// The selection bar's time, "· 3:45", with "+" when some have no length yet; empty
+    /// when no selected track has a length.
+    #[serde(default)]
+    pub duration_text: String,
 }
 
 /// Every local track id that matches the current library filter -- so
@@ -1746,6 +1765,10 @@ pub struct PlaylistUsbExportStatus {
     /// The sortable columns' tooltip while `locks_reorder`; `None` otherwise.
     #[serde(default)]
     pub reorder_lock_tooltip: Option<String>,
+    /// The line under the playlist's title: with a USB selected, whether it's on it
+    /// ("On this USB. Last exported …"); without, `Playlist::export_status_text`.
+    #[serde(default)]
+    pub export_status_text: String,
 }
 
 /// Request for `refresh_playlist_export_status` -- a cheap recompute of every
@@ -2116,6 +2139,9 @@ pub struct FetchUsbTracksData {
     pub list_size_bytes: u64,
     /// "30 tracks · 412 MB", from the two values above.
     pub list_summary_text: String,
+    /// The footer, "Total time: 1:02:03 (2 without length)", from `total_duration_ms` and
+    /// `duration_unknown_count`.
+    pub duration_text: String,
     pub warnings: Vec<WarningEntry>,
 }
 

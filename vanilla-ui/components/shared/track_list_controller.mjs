@@ -4,7 +4,7 @@
 // footer, sorting (column headers) and row-action dispatch are shared too.
 //
 // Every backing command returns the same envelope:
-//   { items, total, totalDurationMs?, durationUnknownCount? }
+//   { items, total, durationText? }
 // for `query` / `sortBy` / `sortDir` / `offset` / `limit` request params, so
 // filtering and sorting run server-side over the whole list. Changing the
 // search text or the column sort reloads from the top.
@@ -17,6 +17,8 @@
 // scrollbar is sized and placed for the whole list from the start.
 //
 // A view supplies a small config; the controller owns all the mechanics.
+
+import { t } from "../../ui_texts.mjs";
 
 const DEFAULT_PAGE_SIZE = 150;
 // Rows built beyond each edge of the viewport, so a short scroll shows rows
@@ -56,8 +58,8 @@ export function createTrackListController(config = {}) {
     renderEmpty = () => {},
     // (rows) -> Promise  -- wire up rows just put in the DOM
     finishRows = async () => {},
-    // (target, { totalDurationMs, durationUnknownCount }) -> void
-    renderDurationSummary = () => {},
+    // (target, text) -> void  -- the footer's "Total time" line, the backend's
+    renderDurationSummary = (target, text) => { if (target) target.textContent = text; },
     // (pageTracks, { first }) -> void  (e.g. library kicks off bg preview hydration)
     onPage = () => {},
     // (envelope) -> void  (e.g. the library's track-count heading)
@@ -301,10 +303,7 @@ export function createTrackListController(config = {}) {
   }
 
   function renderSummary(data) {
-    renderDurationSummary(getElements().durationTarget, {
-      totalDurationMs: data.totalDurationMs,
-      durationUnknownCount: data.durationUnknownCount,
-    });
+    renderDurationSummary(getElements().durationTarget, data.durationText || "");
   }
 
   // Fetch every page with an empty slot in the rendered window.
@@ -454,7 +453,7 @@ export function createTrackListController(config = {}) {
     updateLoadingIndicator();
     resetRows();
     await renderWindow();
-    renderDurationSummary(getElements().durationTarget, { totalDurationMs: 0, durationUnknownCount: 0 });
+    renderDurationSummary(getElements().durationTarget, t("ui-track-table-total-time"));
   };
 
   ctl.setSearch = (value) => {

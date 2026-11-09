@@ -6,9 +6,6 @@ import { createDialogLifecycle } from "../shared/dialog_lifecycle.mjs";
 import { catchErr } from "../shared/track_actions.mjs";
 import { setActiveListItem } from "../shell/actions.mjs";
 import { STORAGE_KEY_USB_ROOT, STORAGE_KEY_EXPORT_ENGINE_LIBRARY } from "../../settings_keys.mjs";
-import {
-  renderTrackListDurationSummary,
-} from "../../track_utils.mjs";
 
 // Job types that scope a Tauri command to state.usbRoot -- while one of
 // these is running, the currently-selected root must not change underneath
@@ -1244,7 +1241,6 @@ function createUsbTracksController(ctx, { bodyId, selectionView, fetchCommand, s
     buildRow: ctx.buildTrackTableRow,
     renderEmpty: ctx.renderEmptyTrackTable,
     finishRows: ctx.finishTrackRows,
-    renderDurationSummary: renderTrackListDurationSummary,
     getTableSortState: () => ctx.tableSortState,
     onPage: (_page, { first }) => {
       if (first) narrowTrackSelectionToLoaded(ctx, selectionView, ctl.items);

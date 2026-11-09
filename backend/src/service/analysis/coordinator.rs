@@ -635,7 +635,7 @@ impl Coordinator {
                 "analysis",
                 &log_text(
                     self.completed,
-                    &format_elapsed(elapsed_ms),
+                    &crate::utils::duration_text(elapsed_ms),
                     analyzed,
                     failed,
                     self.incomplete,
@@ -747,16 +747,6 @@ fn finished_text(analyzed: usize, failed: usize, incomplete: usize, warnings: us
         tr::analysis_finished(analyzed, failed)
     };
     format!("{result}{}", warning_suffix(warnings))
-}
-
-fn format_elapsed(ms: u64) -> String {
-    let seconds = ms / 1000;
-    let (hours, minutes, seconds) = (seconds / 3600, seconds % 3600 / 60, seconds % 60);
-    if hours > 0 {
-        format!("{hours}:{minutes:02}:{seconds:02}")
-    } else {
-        format!("{minutes}:{seconds:02}")
-    }
 }
 
 fn panic_text(payload: &(dyn std::any::Any + Send)) -> String {
@@ -946,9 +936,7 @@ mod tests {
     }
 
     #[test]
-    fn elapsed_and_submitted_texts() {
-        assert_eq!(format_elapsed(65_000), "1:05");
-        assert_eq!(format_elapsed(3_725_000), "1:02:05");
+    fn submitted_texts() {
         assert_eq!(submitted_message(0, 0), "No tracks need analysis");
         assert_eq!(submitted_message(0, 1), "Already analyzing 1 track");
         assert_eq!(

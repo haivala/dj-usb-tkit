@@ -39,8 +39,7 @@ fn job_payload(event: &str, job_id: &str, percent: usize, message: String) -> Jo
         failed: None,
         analysis_ready: None,
         error_message: None,
-        library_total_duration_ms: None,
-        library_duration_unknown_count: None,
+        library_duration_text: None,
         track: None,
         waiting_track_ids: None,
         waiting_tooltip: None,
@@ -78,8 +77,12 @@ fn track_payload(job_id: &str, progress: &AnalyzeTrackProgress) -> JobEventPaylo
         failed: Some(progress.failed),
         analysis_ready: Some(progress.analysis_ready),
         error_message: progress.error_message.clone(),
-        library_total_duration_ms: progress.library_total_duration_ms,
-        library_duration_unknown_count: progress.library_duration_unknown_count,
+        library_duration_text: progress.library_total_duration_ms.map(|total_ms| {
+            crate::utils::track_list_total_time(
+                total_ms,
+                progress.library_duration_unknown_count.unwrap_or(0),
+            )
+        }),
         track: progress.track.clone().map(Box::new),
         ..job_payload(
             "job.progress",
