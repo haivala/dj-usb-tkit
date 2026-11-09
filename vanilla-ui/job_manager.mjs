@@ -111,19 +111,21 @@ export function nextPaint() {
   });
 }
 
-export async function withProgress(ctx, label, fn) {
-  const step = t("ui-job-label-working", { label });
-  setProgress(ctx, true, 10, step);
+// Runs `fn` under the progress bar. `texts` are the job's own three texts, already
+// rendered (`working`, `done`, `failed`): each is its own key, so a language can word
+// them as whole sentences. A step with no text of its own shows `working`.
+export async function withProgress(ctx, { working, done, failed }, fn) {
+  setProgress(ctx, true, 10, working);
   startProgressHeartbeat(ctx);
   await nextPaint();
   try {
-    const result = await fn((percent, text) => setProgress(ctx, true, percent, text || step));
-    setProgress(ctx, true, 100, t("ui-job-label-done", { label }));
+    const result = await fn((percent, text) => setProgress(ctx, true, percent, text || working));
+    setProgress(ctx, true, 100, done);
     scheduleProgressIdle(ctx, 350);
     return result;
   } catch (error) {
     stopProgressHeartbeat(ctx);
-    setProgress(ctx, true, 100, t("ui-job-label-failed", { label }), { error: true, dismissable: true });
+    setProgress(ctx, true, 100, failed, { error: true, dismissable: true });
     throw error;
   }
 }

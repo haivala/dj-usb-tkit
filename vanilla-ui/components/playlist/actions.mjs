@@ -300,7 +300,12 @@ export async function createPlaylist(ctx, name) {
     return;
   }
 
-  const created = await withProgress(t("ui-playlist-create-title"), async (progress) => {
+  const texts = {
+    working: t("ui-playlist-create-progress"),
+    done: t("ui-playlist-create-progress-done"),
+    failed: t("ui-playlist-create-progress-failed")
+  };
+  const created = await withProgress(texts, async (progress) => {
     progress(35, t("ui-playlist-create-saving"));
     const playlist = await command("create_playlist", { name });
     progress(70, t("ui-playlist-refreshing-playlists"));
@@ -394,10 +399,20 @@ export async function importExternalPlaylist(ctx) {
     }
   };
   try {
+    const library = chosen.length === 1 ? chosen[0].source.label : null;
+    const texts = library != null
+      ? {
+          working: t("ui-playlist-import-one-progress", { library }),
+          done: t("ui-playlist-import-one-progress-done", { library }),
+          failed: t("ui-playlist-import-one-progress-failed", { library })
+        }
+      : {
+          working: tCount("ui-playlist-import-many-progress", chosen.length),
+          done: tCount("ui-playlist-import-many-progress-done", chosen.length),
+          failed: tCount("ui-playlist-import-many-progress-failed", chosen.length)
+        };
     await withProgress(
-      chosen.length === 1
-        ? t("ui-playlist-import-one-title", { library: chosen[0].source.label })
-        : tCount("ui-playlist-import-many-title", chosen.length),
+      texts,
       async (progress) => {
         progress(5, chosen.length === 1
           ? t("ui-playlist-import-one-starting", { name: chosen[0].name })
@@ -491,6 +506,15 @@ export async function deletePlaylist(ctx, playlistId) {
 // An add's per-candidate resolutions, onto the rows it was sent from: each
 // row learns its local track id, and a listed file given its library row
 // shows that row in place of its own.
+// The progress bar's texts for adding tracks to a playlist, shared by every add.
+export function addTracksProgressTexts() {
+  return {
+    working: t("ui-playlist-add-progress"),
+    done: t("ui-playlist-add-progress-done"),
+    failed: t("ui-playlist-add-progress-failed")
+  };
+}
+
 export function applyAddResolutions(ctx, tracks, resolutions) {
   (resolutions || []).forEach((resolution, i) => {
     const resolvedId = String(resolution?.trackId || "").trim();
@@ -511,7 +535,7 @@ export async function addTracksToCurrentPlaylist(ctx, tracks) {
     return;
   }
 
-  const result = await withProgress(t("ui-playlist-add-title"), async (progress) => {
+  const result = await withProgress(addTracksProgressTexts(), async (progress) => {
     progress(25, t("ui-playlist-add-resolving"));
     pushEventLog({
       level: "info",
@@ -564,7 +588,7 @@ export async function addLibrarySelectionToCurrentPlaylist(ctx, { trackIds = [],
     return;
   }
 
-  const add = await withProgress(t("ui-playlist-add-title"), async (progress) => {
+  const add = await withProgress(addTracksProgressTexts(), async (progress) => {
     progress(30, t("ui-playlist-add-adding"));
     return command("add_library_selection_to_playlist", {
       playlistId: playlist.id,

@@ -15,17 +15,15 @@ function installSelectionMock(page, mockOpts = {}) {
       album: "Stick Album",
       filePath: `/Volumes/USB-TEST/Contents/stick-${i}.mp3`,
       usbMediaPath: `/Contents/stick-${i}.mp3`,
-      // The first is matched to a library track; the second never was.
+      // The first is matched to a library track and analyzed; the second neither.
       localTrackId: i === 0 ? "t1" : null,
+      bpm: i === 0 ? 128 : null,
     }));
 
     const tracks = [
       { id: "t1", title: "Sel One", artist: "Artist", album: "Album", filePath: "/music/one.mp3" },
       { id: "t2", title: "Sel Two", artist: "Artist", album: "Album", filePath: "/music/two.mp3" },
-      // No bpm field -- mirrors a real not-yet-analyzed library track. Regression coverage for
-      // the "invalid type: string \"\", expected f64" crash: add_track_candidates_to_playlist
-      // below rejects a non-numeric bpm the way the real Rust backend's serde does, so this only
-      // stays green if the frontend never forwards a UI display sentinel like "" as bpm.
+      // No bpm field: a not-yet-analyzed library track.
       { id: "t3", title: "Sel Three", artist: "Artist", album: "Album", filePath: "/music/three.mp3" }
     ];
     const playlists = [];
@@ -149,7 +147,9 @@ function installSelectionMock(page, mockOpts = {}) {
             }
             const ids = candidates
               .map((track) => String(track?.localTrackId || track?.trackId || track?.id || "").trim())
-              .filter(Boolean);
+              .filter(Boolean)
+              // `unresolvedAdd`: the backend matched none of them to a library track.
+              .filter(() => !opts.unresolvedAdd);
             const current = playlistTracks.get(playlistId) || [];
             let added = 0;
             for (const id of ids) {
@@ -369,8 +369,7 @@ test("Selection + bulk add to playlist", async ({ page }) => {
 
   await expect(page.locator("#libraryTableBody .track-grid-row")).toHaveCount(3);
   await page.evaluate(() => {
-    // Select every row, including the unanalyzed (no-bpm) "Sel Three" track -- regression
-    // coverage for the bpm-crash fix (see the mock's add_track_candidates_to_playlist handler).
+    // Select every row, including the unanalyzed (no-bpm) "Sel Three" track.
     const checkboxes = document.querySelectorAll('#libraryTableBody .track-grid-row input[type="checkbox"]');
     checkboxes.forEach((checkbox) => {
       checkbox.checked = true;
@@ -744,9 +743,53 @@ test("USB playlist rows are selected and added to the active playlist in list or
   await expect(bar.locator(".selection-count")).toHaveText("2 selected");
   await bar.locator('[data-selection-action="add"]').click();
 
-  await expect.poll(async () => (await page.evaluate(() => window.__calls))
-    .find((c) => c.command === "add_track_candidates_to_playlist")?.request?.tracks?.map((t) => t.title))
-    .toEqual(["Stick A", "Stick B"]);
+  // The mock rejects what real serde would (both `id` and `trackId`, a non-numeric bpm),
+  // so the backend's status line means the request went through.
+  await expect(page.locator("#statusText")).toContainText("Added 2 tracks (skipped 0) to From Stick");
+  const calls = await page.evaluate(() => window.__calls);
+  const addAt = calls.findIndex((c) => c.command === "add_track_candidates_to_playlist");
+  const request = calls[addAt].request;
+  expect(request).toMatchObject({ playlistId: "pl-1", usbRoot: "/Volumes/USB-TEST", usbRootValid: true });
+  expect(request.tracks.map((t) => t.title)).toEqual(["Stick A", "Stick B"]);
+  expect(request.tracks.map((t) => t.trackId)).toEqual(["101", "102"]);
+  expect(request.tracks.map((t) => t.localTrackId)).toEqual(["t1", null]);
+  expect(request.tracks.map((t) => t.bpm)).toEqual([128, null]);
+  expect(request.tracks.some((t) => "id" in t)).toBe(false);
+  // A resolved add re-reads the playlists (it cleared the last export) and the open list.
+  const after = calls.slice(addAt + 1).map((c) => c.command);
+  expect(after).toContain("list_playlists");
+  expect(after).toContain("get_playlist_tracks");
+});
+
+test("USB rows can't be added without an active playlist, and rows the backend can't resolve aren't added", async ({ page }) => {
+  await installSelectionMock(page, { usb: true, unresolvedAdd: true });
+  await page.goto("/");
+
+  await page.locator('.nav-item[data-view="usb"]').click();
+  await page.locator("#usbEmptyState .empty-state-action").click();
+  await page.locator('.nav-item[data-view="usb-playlists"]').click();
+  await expect(page.locator("#usbPlaylistTracks .track-grid-row")).toHaveCount(2);
+  const bar = page.locator('[data-selection-bar="usbPlaylist"]');
+  const firstRow = page.locator("#usbPlaylistTracks .track-grid-row").nth(0);
+
+  // No playlist yet: the bar's "+ Add to" is gone (Add to… picks one) and the row's + waits.
+  await firstRow.locator(".td-select input").check();
+  await expect(bar.locator('[data-selection-action="add"]')).toBeHidden();
+  await expect(firstRow.locator('[data-action="add-usb"]')).toBeDisabled();
+
+  await createPlaylist(page, "Nowhere");
+  await page.locator('.nav-item[data-view="usb-playlists"]').click();
+  await expect(page.locator("#usbPlaylistTracks .track-grid-row")).toHaveCount(2);
+  await firstRow.locator('[data-action="add-usb"]').click();
+
+  await expect(page.locator("#statusText")).toContainText("No imported track IDs found to add");
+  const calls = await page.evaluate(() => window.__calls);
+  const addAt = calls.findIndex((c) => c.command === "add_track_candidates_to_playlist");
+  expect(addAt).toBeGreaterThanOrEqual(0);
+  // Nothing was added, so nothing is re-read.
+  const after = calls.slice(addAt + 1).map((c) => c.command);
+  expect(after).not.toContain("list_playlists");
+  expect(after).not.toContain("get_playlist_tracks");
 });
 
 test("Edit… shows what the selection shares and saves only the changed fields for every selected track", async ({ page }) => {

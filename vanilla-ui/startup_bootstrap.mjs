@@ -198,7 +198,12 @@ export async function runDataMigrations(ctx) {
 export function runDeferredInitialLoad(ctx) {
   const { state } = ctx;
   (ctx.setTimeoutFn || setTimeout)(() => {
-    ctx.withProgress(t("ui-startup-initializing"), async (progress) => {
+    const texts = {
+      working: t("ui-startup-progress"),
+      done: t("ui-startup-progress-done"),
+      failed: t("ui-startup-progress-failed")
+    };
+    ctx.withProgress(texts, async (progress) => {
       progress(35, t("ui-startup-loading-playlists"));
       await ctx.loadPlaylists();
       progress(70, t("ui-startup-loading-tracks"));

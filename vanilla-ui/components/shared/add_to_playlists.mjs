@@ -6,7 +6,7 @@
 import { t, tCount } from "../../ui_texts.mjs";
 import { cloneTemplate } from "../../ui_utils.mjs";
 import { createDialogLifecycle } from "./dialog_lifecycle.mjs";
-import { applyAddResolutions, toAddTrackCandidatePayload } from "../playlist/actions.mjs";
+import { addTracksProgressTexts, applyAddResolutions, toAddTrackCandidatePayload } from "../playlist/actions.mjs";
 
 const USB_VIEWS = new Set(["usbPlaylist", "usbHistory"]);
 
@@ -33,7 +33,7 @@ export async function addSelectionToPlaylists(ctx, view, ids, rows) {
   });
   if (!playlistIds?.length) return;
 
-  const result = await ctx.withProgress(t("ui-playlist-add-title"), async (progress) => {
+  const result = await ctx.withProgress(addTracksProgressTexts(), async (progress) => {
     progress(30, t("ui-playlist-add-adding"));
     if (view === "library") {
       return command("add_library_selection_to_playlists", {

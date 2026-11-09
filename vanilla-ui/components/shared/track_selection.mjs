@@ -165,7 +165,12 @@ export function bindTrackSelection(ctx, { view, body, ctl, selectAll, actions })
       return;
     }
     (async () => {
-      const all = await ctx.withProgress(t("ui-selection-bar-selecting-all"), async (progress) => {
+      const texts = {
+        working: t("ui-selection-bar-select-all-progress"),
+        done: t("ui-selection-bar-select-all-progress-done"),
+        failed: t("ui-selection-bar-select-all-progress-failed")
+      };
+      const all = await ctx.withProgress(texts, async (progress) => {
         progress(40, t("ui-selection-bar-enumerating"));
         return selectAll();
       });

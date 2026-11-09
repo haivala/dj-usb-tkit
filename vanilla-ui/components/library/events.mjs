@@ -82,7 +82,12 @@ export function bindLibraryEvents(ctx) {
         if (!picked.length) return;
         // Nothing added: add_source_folders' status line; otherwise the scan's.
         let statusText = "";
-        await withProgress(t("ui-library-add-folders-title"), async (progress) => {
+        const texts = {
+          working: t("ui-library-add-folders-progress"),
+          done: t("ui-library-add-folders-progress-done"),
+          failed: t("ui-library-add-folders-progress-failed")
+        };
+        await withProgress(texts, async (progress) => {
           progress(20, t("ui-library-add-folders-saving"));
           const result = await command("add_source_folders", { paths: picked });
           await applyLibrarySources(ctx, result.sources);

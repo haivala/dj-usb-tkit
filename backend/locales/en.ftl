@@ -2258,11 +2258,7 @@ ui-job-idle = Idle
 ui-job-working = Working...
 # After the elapsed time while analysis is paused.
 ui-job-paused = (paused)
-# A job's progress bar: running, finished, failed. $label: the job's title, such as "Adding tracks".
-ui-job-label-working = { $label }...
-ui-job-label-done = { $label } done
-ui-job-label-failed = { $label } failed
-# The same, for a backend job that sent no message.
+# A backend job's progress bar when it finished or failed without a message.
 ui-job-done = Done
 ui-job-failed = Failed
 # The analysis pause button's label while paused.
@@ -2307,8 +2303,10 @@ ui-library-empty-heading = Add a music folder to get started
 ui-library-empty-add-folder = Add Folder
 ui-library-empty-import-rekordbox = rekordbox library
 ui-library-empty-import-mixxx = Mixxx library
-# The progress bar's title and steps while adding source folders.
-ui-library-add-folders-title = Loading media library
+# The progress bar while adding source folders: running, done, failed, then its steps.
+ui-library-add-folders-progress = Loading media library...
+ui-library-add-folders-progress-done = Loading media library done
+ui-library-add-folders-progress-failed = Loading media library failed
 ui-library-add-folders-saving = Saving source folders...
 ui-library-add-folders-indexing = Indexing new files...
 ui-library-add-folders-building = Building track list...
@@ -2362,9 +2360,12 @@ ui-playlist-export-failed-unknown = unknown error
 ui-playlist-analyze-failed = Analyze failed: { $error }
 ui-playlist-track-order-failed = Save track order failed: { $error }
 ui-playlist-track-order-still-loading = Track order not saved: the list was still loading. Try again.
-# Creating a playlist: the status line without a name, then the progress bar's title and steps.
+# Creating a playlist: the status line without a name, then the progress bar (running, done,
+# failed) and its steps.
 ui-playlist-name-required = Playlist name is required
-ui-playlist-create-title = Creating playlist
+ui-playlist-create-progress = Creating playlist...
+ui-playlist-create-progress-done = Creating playlist done
+ui-playlist-create-progress-failed = Creating playlist failed
 ui-playlist-create-saving = Saving playlist...
 ui-playlist-refreshing-playlists = Refreshing playlists...
 # Asked before deleting a playlist: the dialog's title and its button.
@@ -2372,9 +2373,11 @@ ui-playlist-delete-title = Delete App Playlist
 ui-playlist-delete = Delete
 # The status line when the backend didn't delete the playlist. $name: the playlist's name.
 ui-playlist-delete-failed = Delete failed: { $name }
-# Adding tracks to the active playlist: the progress bar's title and steps, and the status
-# line when none of the tracks could be found or none is ticked.
-ui-playlist-add-title = Adding tracks
+# Adding tracks to a playlist: the progress bar (running, done, failed) and its steps, and the
+# status line when none of the tracks could be found or none is ticked.
+ui-playlist-add-progress = Adding tracks...
+ui-playlist-add-progress-done = Adding tracks done
+ui-playlist-add-progress-failed = Adding tracks failed
 ui-playlist-add-resolving = Resolving tracks...
 ui-playlist-add-adding = Adding tracks...
 ui-playlist-add-refreshing = Refreshing playlist...
@@ -2417,13 +2420,24 @@ ui-playlist-import-list-failed = Could not read { $library } playlists: { $error
 ui-playlist-import-none-found = No playlists with tracks found
 # Where an Event Log entry came from, in its details. $library: rekordbox or Mixxx.
 ui-playlist-import-log-context = { $library } playlist import
-# The progress bar while importing one list. $library: rekordbox or Mixxx. $name: the list's name.
-ui-playlist-import-one-title = Importing { $library } playlist
+# The progress bar while importing one list (running, done, failed), then its first step.
+# $library: rekordbox or Mixxx. $name: the list's name.
+ui-playlist-import-one-progress = Importing { $library } playlist...
+ui-playlist-import-one-progress-done = Importing { $library } playlist done
+ui-playlist-import-one-progress-failed = Importing { $library } playlist failed
 ui-playlist-import-one-starting = Importing { $name }...
 # The same for several lists. $count: how many.
-ui-playlist-import-many-title = { $count ->
-    [one] Importing { $count } playlist
-   *[other] Importing { $count } playlists
+ui-playlist-import-many-progress = { $count ->
+    [one] Importing { $count } playlist...
+   *[other] Importing { $count } playlists...
+}
+ui-playlist-import-many-progress-done = { $count ->
+    [one] Importing { $count } playlist done
+   *[other] Importing { $count } playlists done
+}
+ui-playlist-import-many-progress-failed = { $count ->
+    [one] Importing { $count } playlist failed
+   *[other] Importing { $count } playlists failed
 }
 ui-playlist-import-many-starting = Importing playlists...
 # Stands in for a failed list's error when the backend gave none.
@@ -2447,8 +2461,10 @@ ui-playback-failed-no-message = Playback failed
 
 # The status line when the app couldn't start. $error: why.
 ui-startup-init-failed = Initialization failed: { $error }
-# The progress bar while the first lists load: its title and steps.
-ui-startup-initializing = Initializing
+# The progress bar while the first lists load: running, done, failed, then its steps.
+ui-startup-progress = Initializing...
+ui-startup-progress-done = Initializing done
+ui-startup-progress-failed = Initializing failed
 ui-startup-loading-playlists = Loading playlists...
 ui-startup-loading-tracks = Loading tracks...
 # The Event Log entry when a data upgrade fails at startup. $error: why.
@@ -2485,8 +2501,10 @@ ui-selection-bar-add-to-target = Add to
 ui-selection-bar-add-to-tooltip = Pick one or more playlists to add the selected tracks to
 # The tooltip of "+ Add to" the active playlist. $playlist: its name.
 ui-selection-bar-add-tooltip = Add the selected tracks to { $playlist }
-# Selecting every track of the list: the progress bar's title and step.
-ui-selection-bar-selecting-all = Selecting all matching tracks
+# Selecting every track of the list: the progress bar (running, done, failed) and its step.
+ui-selection-bar-select-all-progress = Selecting all matching tracks...
+ui-selection-bar-select-all-progress-done = Selecting all matching tracks done
+ui-selection-bar-select-all-progress-failed = Selecting all matching tracks failed
 ui-selection-bar-enumerating = Enumerating tracks...
 ui-selection-bar-clear-selection = Clear selection
 ui-selection-bar-convert = Convert…

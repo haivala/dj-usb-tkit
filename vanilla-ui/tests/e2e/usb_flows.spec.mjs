@@ -160,6 +160,9 @@ function installTauriMock(page, mode) {
             }
             return "/Volumes/USB-TEST";
           }
+          if (command === "create_playlist" && mode === "create-fails") {
+            return { ok: false, error: { code: "INTERNAL", message: "disk full (mock)" } };
+          }
           if (command === "create_playlist" && mode === "progress-race") {
             // Still saving well past the previous job's footer-hide delay.
             await new Promise((resolve) => setTimeout(resolve, 2500));
@@ -1509,6 +1512,13 @@ test("a job started right after another finished keeps its progress footer", asy
   // The read finished; its footer is due to hide 1.2s from now.
   await expect(page.locator("#progressText")).toContainText("Done");
 
+  // Every text the footer shows, in order: the done text is up for only 350 ms.
+  await page.evaluate(() => {
+    const node = document.getElementById("progressText");
+    window.__progressTexts = [];
+    new MutationObserver(() => window.__progressTexts.push(node.textContent))
+      .observe(node, { childList: true, characterData: true, subtree: true });
+  });
   await page.locator("#addPlaylistBtn").click();
   await page.locator(".nav-new-input").fill("Race");
   await page.locator(".nav-new-input").press("Enter");
@@ -1518,6 +1528,25 @@ test("a job started right after another finished keeps its progress footer", asy
   await page.waitForTimeout(1500);
   await expect(page.locator("#progressFooter")).toHaveClass(/active/);
   await expect(page.locator("#progressText")).toContainText("Saving playlist");
+
+  // The job's own texts: running first, done once the save is in.
+  await expect.poll(() => page.evaluate(() => window.__progressTexts)).toContain("Creating playlist done");
+  const texts = await page.evaluate(() => window.__progressTexts);
+  expect(texts.indexOf("Creating playlist...")).toBeGreaterThanOrEqual(0);
+  expect(texts.indexOf("Creating playlist...")).toBeLessThan(texts.indexOf("Creating playlist done"));
+});
+
+test("a failed playlist create leaves its failed text on the progress footer", async ({ page }) => {
+  await installTauriMock(page, "create-fails");
+  await page.goto("/");
+
+  await page.locator("#addPlaylistBtn").click();
+  await page.locator(".nav-new-input").fill("Doomed");
+  await page.locator(".nav-new-input").press("Enter");
+
+  await expect(page.locator("#progressText")).toHaveText("Creating playlist failed");
+  await expect(page.locator("#progressFooter")).toHaveClass(/error/);
+  await expect(page.locator("#progressFooter")).toHaveClass(/dismissable/);
 });
 
 test("USB audio formats: ticks and drag order are saved, and the last ticked format can't be unticked", async ({ page }) => {
