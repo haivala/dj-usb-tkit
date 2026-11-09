@@ -31,6 +31,8 @@ impl Level {
 pub struct LogLine<'a> {
     pub level: Level,
     pub source: &'a str,
+    /// The warning's code (`usb.import.read-only`), empty for a plain line.
+    pub code: &'a str,
     /// What the Event Log shows: the current language for a catalog text.
     pub message: &'a str,
     /// What the log file gets: always English. The same as `message` for text that isn't from
@@ -55,6 +57,7 @@ pub fn emit(level: Level, source: &str, message: &str) {
     emit_line(&LogLine {
         level,
         source,
+        code: "",
         message,
         english: message,
     });
@@ -62,14 +65,21 @@ pub fn emit(level: Level, source: &str, message: &str) {
 
 /// Emit a catalog text: the Event Log gets the current language, the log file English.
 pub fn emit_text(level: Level, source: &str, text: &crate::i18n::Text) {
+    emit_rendered(level, source, "", text);
+}
+
+/// Emits both texts and returns the shown one.
+fn emit_rendered(level: Level, source: &str, code: &str, text: &crate::i18n::Text) -> String {
     let message = text.render();
     let english = text.render_english();
     emit_line(&LogLine {
         level,
         source,
+        code,
         message: &message,
         english: &english,
     });
+    message
 }
 
 /// Emit a line whose shown and English texts were rendered already (`ApiResponse::failure`).
@@ -99,7 +109,32 @@ pub fn log(
     message: impl Into<String>,
 ) -> crate::models::WarningEntry {
     let message = message.into();
-    emit(level, source, &message);
+    emit_line(&LogLine {
+        level,
+        source,
+        code,
+        message: &message,
+        english: &message,
+    });
+    crate::models::WarningEntry {
+        level: level.as_str().to_string(),
+        code: code.to_string(),
+        message,
+        source: source.to_string(),
+    }
+}
+
+/// [`log`] for a catalog text: the Event Log and the returned entry get the current language,
+/// the log file English. A composed message is one key holding all its values, not a `Text`
+/// passed into another (an inner `Text` is rendered when passed, so it wouldn't be English in
+/// the file).
+pub fn log_text(
+    level: Level,
+    source: &str,
+    code: &str,
+    text: &crate::i18n::Text,
+) -> crate::models::WarningEntry {
+    let message = emit_rendered(level, source, code, text);
     crate::models::WarningEntry {
         level: level.as_str().to_string(),
         code: code.to_string(),

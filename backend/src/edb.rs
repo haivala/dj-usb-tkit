@@ -9,6 +9,7 @@ use rusqlite::{OptionalExtension, params, types::Value};
 use serde::Serialize;
 
 use crate::error::{BackendError, BackendResult};
+use crate::i18n::tr;
 use crate::logging::{self, Level};
 use crate::metadata::sanitize_metadata;
 use crate::models::{UsbTrack, WarningEntry};
@@ -251,14 +252,11 @@ pub fn open_edb(path: &Path, warnings: &mut Vec<WarningEntry>) -> Option<rusqlit
             return Some(candidate);
         }
     }
-    warnings.push(logging::log(
+    warnings.push(logging::log_text(
         Level::Warn,
         "edb",
         "edb.open.failed",
-        format!(
-            "eDB unreadable after trying {}",
-            counted(attempts, "SQLCipher key", "SQLCipher keys")
-        ),
+        &tr::usb_warning_edb_unreadable(attempts),
     ));
     None
 }

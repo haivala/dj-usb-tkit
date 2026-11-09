@@ -212,7 +212,6 @@ export function handleJobEvent(ctx, payload) {
     setTrackAnalyzingState,
     setTracksWaitingState,
     setUsbRootControlsLocked,
-    logWarnings,
     refreshCurrentPlaylistTracks,
   } = ctx;
   if (!payload || typeof payload !== "object") return;
@@ -369,7 +368,6 @@ export function handleJobEvent(ctx, payload) {
       });
     }
     if (jobType === "analysis") {
-      logWarnings("analysis", payload.warnings || [], t("ui-job-analysis-context"));
       refreshCurrentPlaylistTracks();
     }
     // A folder may now be fully analyzed.

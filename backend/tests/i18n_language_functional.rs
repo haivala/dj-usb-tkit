@@ -1,5 +1,5 @@
 //! The process-wide language: saving it switches every thread, cached USB reads answer in it,
-//! and errors show it while the log gets English.
+//! and errors and warnings show it while the log gets English.
 //!
 //! In its own test binary (its own process) because the language is process-wide: switching it
 //! beside the tests that assert English would break them. The tests here take `LANGUAGE_LOCK`,
@@ -7,7 +7,7 @@
 
 mod library_sources;
 
-use std::sync::{Arc, Mutex, MutexGuard, PoisonError, mpsc};
+use std::sync::{Arc, Mutex, MutexGuard, Once, PoisonError, mpsc};
 use std::time::Duration;
 
 use backend::commands::BackendCommands;
@@ -16,6 +16,7 @@ use backend::models::{
     AnalyzeNewTracksRequest, CreatePlaylistRequest, DeletePlaylistRequest,
     FetchUsbHistoriesRequest, InitializeUsbRequest, RepairUsbDiagnosticsRequest,
     RunUsbDiagnosticsData, RunUsbDiagnosticsRequest, ScanLibraryRequest, SetFrontendSettingRequest,
+    ValidateUsbRootRequest,
 };
 use backend::service::analysis_event_payload;
 use tempfile::tempdir;
@@ -51,6 +52,22 @@ fn save_language(
         key: LANGUAGE_SETTING.to_string(),
         value: Some(language.to_string()),
     })
+}
+
+/// Every line logged in this test binary, as (Event Log text, log file text). The sink is
+/// process-wide and installed once, so the tests share it and look for their own lines.
+fn logged_lines() -> &'static Mutex<Vec<(String, String)>> {
+    static LINES: Mutex<Vec<(String, String)>> = Mutex::new(Vec::new());
+    static SINK: Once = Once::new();
+    SINK.call_once(|| {
+        backend::logging::set_sink(Box::new(|line| {
+            LINES
+                .lock()
+                .unwrap_or_else(PoisonError::into_inner)
+                .push((line.message.to_string(), line.english.to_string()));
+        }));
+    });
+    &LINES
 }
 
 fn is_test_language(text: &str) -> bool {
@@ -126,7 +143,8 @@ fn a_cached_usb_read_answers_in_the_current_language() {
     assert_eq!(english.summary_text, "0 sessions, 0 tracks");
     assert_eq!(english.status_text, "USB histories loaded: 0");
 
-    // The stick hasn't changed, so this read comes from the parse cache.
+    // Saving the language clears the parse cache, whose warnings were logged in the old one;
+    // the texts are made when answering either way.
     assert!(save_language(&backend, TEST_LANGUAGE).ok);
     let switched = read();
     assert!(
@@ -147,15 +165,7 @@ fn a_cached_usb_read_answers_in_the_current_language() {
 #[test]
 fn an_error_shows_the_current_language_and_logs_english() {
     let _test = LanguageTest::start();
-    let logged: Arc<Mutex<Vec<(String, String)>>> = Arc::default();
-    let sink_lines = Arc::clone(&logged);
-    // The only sink in this test binary.
-    backend::logging::set_sink(Box::new(move |line| {
-        sink_lines
-            .lock()
-            .unwrap()
-            .push((line.message.to_string(), line.english.to_string()));
-    }));
+    let logged = logged_lines();
     let root = tempdir().expect("temp root");
     let backend = BackendCommands::new(root.path().join("data")).expect("create backend");
     assert!(save_language(&backend, TEST_LANGUAGE).ok);
@@ -183,7 +193,7 @@ fn an_error_shows_the_current_language_and_logs_english() {
     assert!(is_test_language(&missing), "{missing:?}");
     assert!(missing.contains("no-such-playlist"), "{missing:?}");
 
-    let lines = logged.lock().unwrap();
+    let lines = logged.lock().unwrap_or_else(PoisonError::into_inner);
     assert!(
         lines.contains(&(shown.clone(), "Unknown language: xx".to_string())),
         "{lines:?}"
@@ -194,6 +204,41 @@ fn an_error_shows_the_current_language_and_logs_english() {
     );
     assert!(
         lines.contains(&(missing, "playlist not found: no-such-playlist".to_string())),
+        "{lines:?}"
+    );
+}
+
+#[test]
+fn a_warning_shows_the_current_language_and_logs_english() {
+    let _test = LanguageTest::start();
+    let logged = logged_lines();
+    let root = tempdir().expect("temp root");
+    let backend = BackendCommands::new(root.path().join("data")).expect("create backend");
+    assert!(save_language(&backend, TEST_LANGUAGE).ok);
+
+    let missing = root.path().join("no-such-usb");
+    let validated = backend
+        .validate_usb_root(ValidateUsbRootRequest {
+            path: missing.to_string_lossy().to_string(),
+        })
+        .data
+        .expect("validation data");
+    assert!(!validated.valid);
+    let warning = validated
+        .warnings
+        .iter()
+        .find(|warning| warning.code == "usb.import.path-not-found")
+        .expect("path warning");
+    assert!(is_test_language(&warning.message), "{warning:?}");
+    let shown_path = missing.display().to_string();
+    assert!(warning.message.contains(&shown_path), "{warning:?}");
+
+    let lines = logged.lock().unwrap_or_else(PoisonError::into_inner);
+    assert!(
+        lines.contains(&(
+            warning.message.clone(),
+            format!("Path does not exist: {shown_path}")
+        )),
         "{lines:?}"
     );
 }
@@ -245,8 +290,6 @@ fn diagnostics_report_follows_the_language() {
             // A fresh USB has no playlists, so no check is named after one.
             for check in &section.checks {
                 assert!(is_test_language(&check.label), "{:?}", check.label);
-                // The eDB check shows its last warning, English until warnings move (piece 11).
-                let is_warning = switched.warnings.iter().any(|w| w.message == check.detail);
                 // Raw table signals ("t11 23-23 ec=24 | …"): no words to translate.
                 let is_signal = [
                     tr::diagnostics_check_history_pointers(),
@@ -254,10 +297,7 @@ fn diagnostics_report_follows_the_language() {
                 ]
                 .iter()
                 .any(|label| label.render() == check.label);
-                assert!(
-                    is_warning || is_signal || is_test_language(&check.detail),
-                    "{check:?}"
-                );
+                assert!(is_signal || is_test_language(&check.detail), "{check:?}");
             }
         }
     }

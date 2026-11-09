@@ -30,6 +30,7 @@ impl<T: Serialize> ApiResponse<T> {
         crate::logging::emit_line(&crate::logging::LogLine {
             level: crate::logging::Level::Error,
             source: error.code.as_str(),
+            code: "",
             message: &error.message,
             english: error.log_text(),
         });
@@ -107,10 +108,8 @@ pub struct JobEventPayload {
     /// On `job.tracks_waiting`: the tooltip for those rows' own button.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub waiting_tooltip: Option<String>,
-    /// On an analysis `job.completed`: entries for the Event Log.
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub warnings: Option<Vec<WarningEntry>>,
-    /// On an analysis `job.completed`: how many of `warnings` are warn or error.
+    /// On an analysis `job.completed`: how many warnings and errors the job logged (they reached
+    /// the Event Log as the backend logged them).
     #[serde(skip_serializing_if = "Option::is_none")]
     pub warning_count: Option<usize>,
     pub timestamp: String,

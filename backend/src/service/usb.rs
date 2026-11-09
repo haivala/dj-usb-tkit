@@ -743,11 +743,11 @@ impl BackendService {
         let mut warnings = Vec::<WarningEntry>::new();
         let trimmed = req.path.trim();
         if trimmed.is_empty() {
-            warnings.push(logging::log(
+            warnings.push(logging::log_text(
                 Level::Warn,
                 "usb-import",
                 "usb.import.path-empty",
-                "USB path is empty",
+                &tr::usb_warning_path_empty(),
             ));
             return Ok(with_usb_selection_text(ValidateUsbRootData {
                 valid: false,
@@ -773,11 +773,11 @@ impl BackendService {
             raw
         };
         if !candidate.exists() {
-            warnings.push(logging::log(
+            warnings.push(logging::log_text(
                 Level::Warn,
                 "usb-import",
                 "usb.import.path-not-found",
-                format!("Path does not exist: {}", candidate.display()),
+                &tr::usb_warning_path_not_found(candidate.display()),
             ));
             return Ok(with_usb_selection_text(ValidateUsbRootData {
                 valid: false,
@@ -807,19 +807,19 @@ impl BackendService {
         let has_edb = vendor_edb_path(&normalized).is_file();
 
         if !has_vendor_root {
-            warnings.push(logging::log(
+            warnings.push(logging::log_text(
                 Level::Warn,
                 "usb-import",
                 "usb.import.missing-vendor-root",
-                "Missing vendor root directory",
+                &tr::usb_warning_missing_vendor_root(),
             ));
         }
         if !has_contents {
-            warnings.push(logging::log(
+            warnings.push(logging::log_text(
                 Level::Warn,
                 "usb-import",
                 "usb.import.missing-contents",
-                "Missing contents directory",
+                &tr::usb_warning_missing_contents(),
             ));
         }
 
@@ -849,11 +849,11 @@ impl BackendService {
 
         let has_write_access = has_write_access(&normalized);
         if !has_write_access {
-            warnings.push(logging::log(
+            warnings.push(logging::log_text(
                 Level::Warn,
                 "usb-import",
                 "usb.import.read-only",
-                "USB appears read-only: imports may work but export will fail",
+                &tr::usb_warning_read_only(),
             ));
         }
 
@@ -1321,14 +1321,11 @@ impl BackendService {
             }));
             Some(parsed)
         } else {
-            warnings.push(logging::log(
+            warnings.push(logging::log_text(
                 Level::Warn,
                 "usb-import",
                 "usb.import.pdb-not-found",
-                format!(
-                    "PDB not found under {}; continuing with eDB-only mode",
-                    usb_root.display()
-                ),
+                &tr::usb_warning_pdb_not_found_edb_only(usb_root.display()),
             ));
             None
         };
@@ -1574,14 +1571,13 @@ impl BackendService {
             }
         }
         if !empty_source_playlists.is_empty() {
-            warnings.push(logging::log(
+            warnings.push(logging::log_text(
                 Level::Warn,
                 "usb-import",
                 "usb.playlists.empty-source",
-                format!(
-                    "{} with zero static track entries in export data: {}",
-                    counted(empty_source_playlists.len(), "playlist", "playlists"),
-                    empty_source_playlists.join(", ")
+                &tr::usb_playlists_warning_empty_source(
+                    empty_source_playlists.len(),
+                    empty_source_playlists.join(", "),
                 ),
             ));
         }
@@ -1683,11 +1679,11 @@ impl BackendService {
                 &usb_root,
                 super::usb_staging::DbKind::Pdb,
             ) {
-                warnings.push(logging::log(
+                warnings.push(logging::log_text(
                     Level::Error,
                     "usb-import",
                     "usb.reorder.pdb-write-back-failed",
-                    format!("PDB write-back to USB failed: {err}"),
+                    &tr::usb_warning_pdb_write_back_failed(err),
                 ));
             }
             let parsed = crate::pdb_reader::parse_pdb(&super::usb_staging::stage_pdb(&usb_root)?)?;
@@ -1726,11 +1722,11 @@ impl BackendService {
         if let Err(err) =
             super::usb_staging::write_back_if_changed(&usb_root, super::usb_staging::DbKind::Edb)
         {
-            warnings.push(logging::log(
+            warnings.push(logging::log_text(
                 Level::Error,
                 "usb-import",
                 "usb.reorder.edb-write-back-failed",
-                format!("eDB write-back to USB failed: {err}"),
+                &tr::usb_warning_edb_write_back_failed(err),
             ));
         }
         warnings.extend(self.refresh_engine_library(&usb_root));
@@ -1841,11 +1837,11 @@ impl BackendService {
         let tracks_kept_shared = pdb_result.shared_track_count;
 
         if tracks_kept_shared > 0 {
-            warnings.push(logging::log(
+            warnings.push(logging::log_text(
                 Level::Info,
                 "usb-import",
                 "usb.remove.shared-tracks-preserved",
-                format!("{tracks_kept_shared} shared tracks preserved (used by other playlists)"),
+                &tr::usb_playlists_warning_shared_tracks_kept(tracks_kept_shared),
             ));
         }
 
@@ -1905,22 +1901,19 @@ impl BackendService {
                 prune_stale_export_owned_files(&usb_root, &stale_paths, &mut warnings)?;
             files_deleted = prune_result.removed;
             if prune_result.missing > 0 {
-                warnings.push(logging::log(
+                warnings.push(logging::log_text(
                     Level::Warn,
                     "usb-import",
                     "usb.remove.file-missing",
-                    format!(
-                        "{} already missing from USB",
-                        counted(prune_result.missing, "file", "files")
-                    ),
+                    &tr::usb_playlists_warning_files_missing(prune_result.missing),
                 ));
             }
             for path in &stale_paths {
-                warnings.push(logging::log(
+                warnings.push(logging::log_text(
                     Level::Info,
                     "usb-import",
                     "usb.remove.file-deleted",
-                    format!("deleted: {path}"),
+                    &tr::usb_playlists_warning_file_deleted(path),
                 ));
             }
         }
@@ -1941,11 +1934,11 @@ impl BackendService {
         if let Err(err) =
             super::usb_staging::write_back_if_changed(&usb_root, super::usb_staging::DbKind::Edb)
         {
-            warnings.push(logging::log(
+            warnings.push(logging::log_text(
                 Level::Error,
                 "usb-import",
                 "usb.remove.edb-write-back-failed",
-                format!("eDB write-back to USB failed: {err}"),
+                &tr::usb_warning_edb_write_back_failed(err),
             ));
         }
         push_usb_stage_timing(
@@ -2038,14 +2031,11 @@ impl BackendService {
                     "usb.import.root-in-use",
                     format!("USB root in use: {}", usb_root.display()),
                 ),
-                logging::log(
+                logging::log_text(
                     Level::Warn,
                     "usb-import",
                     "usb.histories.pdb-not-found",
-                    format!(
-                        "PDB not found under {}; history import requires PDB",
-                        usb_root.display()
-                    ),
+                    &tr::usb_history_warning_pdb_not_found(usb_root.display()),
                 ),
             ];
             return Ok(with_usb_history_texts(&FetchUsbHistoriesData {
@@ -2856,14 +2846,11 @@ impl BackendService {
             }));
             Some(parsed)
         } else {
-            warnings.push(logging::log(
+            warnings.push(logging::log_text(
                 Level::Warn,
                 "usb-import",
                 "usb.import.pdb-not-found",
-                format!(
-                    "PDB not found under {}; using DB fallback only",
-                    usb_root.display()
-                ),
+                &tr::usb_warning_pdb_not_found_db_fallback(usb_root.display()),
             ));
             None
         };

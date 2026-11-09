@@ -90,6 +90,8 @@ impl BackendService {
         }
         if let Some(language) = language {
             crate::i18n::set_language(&language).map_err(BackendError::Internal)?;
+            // The USB caches hold warnings rendered in the old language.
+            self.invalidate_usb_parse_cache();
         }
         Ok(SetFrontendSettingData { saved: true })
     }

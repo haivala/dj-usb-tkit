@@ -310,6 +310,7 @@ export function handleBackendLogEvent(ctx, payload) {
   ctx.storeEventLogEntry({
     level: payload.level,
     source: payload.source || "backend",
+    code: payload.code,
     message: payload.message,
     inLogFile: true
   });

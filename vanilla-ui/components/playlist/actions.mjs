@@ -489,10 +489,6 @@ export async function importExternalPlaylist(ctx) {
         logLabel
       );
     }
-    const warnings = Array.isArray(result.warnings) ? result.warnings : [];
-    if (warnings.length > 0) {
-      logWarnings(item.source.label, warnings, logLabel);
-    }
   }
   logFailed();
   emitStatus(data.statusText);

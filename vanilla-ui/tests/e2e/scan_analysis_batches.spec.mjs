@@ -349,6 +349,8 @@ function installScanAnalysisMock(page, opts = {}) {
             return null;
           }
           if (command === "scan_library") {
+            // The backend logs each warning as it makes it (`logging::log`).
+            for (const warning of scanWarnings) window.__emitBackendLog?.(warning);
             // Backend-owned post-scan library facts (see ScanLibraryData).
             return {
               ok: true,
@@ -438,6 +440,10 @@ function installScanAnalysisMock(page, opts = {}) {
 
     // Lets a test run a job of its own (an export) alongside the analysis.
     window.__emitJobEvent = emitJobEvent;
+    // What the backend's `logging::log` sends as it makes a warning.
+    window.__emitBackendLog = (logPayload) => {
+      for (const cb of (listeners.get("backend:log") || []).slice()) cb({ event: "backend:log", payload: logPayload });
+    };
     window.__hasJobListener = () => (listeners.get("job:event") || []).length > 0;
 
     window.__scanTestStats = {
@@ -1077,12 +1083,13 @@ test("the final message is the job's, with its warning count as the Event Log li
   await page.evaluate(() => {
     const job = { jobId: "job-end", jobType: "analysis", stage: "analyze_new_tracks" };
     window.__emitJobEvent({ ...job, event: "job.started", percent: 0, message: "Analyzing selected tracks" });
+    // The warning reaches the Event Log as the backend logs it, not from the event.
+    window.__emitBackendLog({ level: "error", source: "analysis", code: "analysis.track-failed", message: "/music/bad.mp3: decode failed" });
     window.__emitJobEvent({
       ...job,
       event: "job.completed",
       percent: 100,
       message: "Analysis finished: analyzed 3, failed 1 | (1 warning)",
-      warnings: [{ level: "error", source: "analysis", code: "analysis.track-failed", message: "/music/bad.mp3: decode failed" }],
       warningCount: 1,
     });
   });
@@ -1252,25 +1259,29 @@ test("event log entries go to the session log file, which the Open log file butt
   await page.goto("/");
 
   await page.waitForFunction(() => window.__hasJobListener?.());
-  // A job's warnings are entries JS makes from the event.
+  // A track's failure is an entry JS makes from the job's event.
   await page.evaluate(() => {
     const job = { jobId: "job-log", jobType: "analysis", stage: "analyze_new_tracks" };
     window.__emitJobEvent({ ...job, event: "job.started", percent: 0, message: "Analyzing selected tracks" });
     window.__emitJobEvent({
       ...job,
-      event: "job.completed",
-      percent: 100,
-      message: "Analysis finished: analyzed 1, failed 1 | (1 warning)",
-      warnings: [{ level: "error", source: "analysis", code: "analysis.track-failed", message: "/music/bad.mp3: decode failed" }],
-      warningCount: 1,
+      event: "job.progress",
+      percent: 50,
+      current: 1,
+      total: 2,
+      trackId: "bad-1",
+      trackTitle: "Bad Track",
+      failed: true,
+      errorMessage: "decode failed",
+      message: "Analyzing 1/2",
     });
   });
 
   await page.locator("#eventLogBtn").click();
-  await expect(page.locator("#eventLogList")).toContainText("/music/bad.mp3: decode failed");
+  await expect(page.locator("#eventLogList")).toContainText("Track analysis failed: Bad Track (bad-1) - decode failed");
   await expect
     .poll(async () => page.evaluate(() => window.__scanTestStats.logFileLines))
-    .toContainEqual(expect.stringContaining("/music/bad.mp3: decode failed"));
+    .toContainEqual(expect.stringContaining("Track analysis failed: Bad Track (bad-1) - decode failed"));
 
   await page.locator("#eventLogOpenFileBtn").click();
   await expect.poll(async () => page.evaluate(() => window.__scanTestStats.openLogFileCalls)).toBe(1);

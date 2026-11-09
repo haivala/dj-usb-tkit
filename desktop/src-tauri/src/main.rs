@@ -19,6 +19,9 @@ const BACKEND_LOG_EVENT_CHANNEL: &str = "backend:log";
 struct BackendLogPayload {
     level: String,
     source: String,
+    /// A warning's code, so the Event Log entry keeps it; empty for a plain line.
+    #[serde(skip_serializing_if = "String::is_empty")]
+    code: String,
     /// What the Event Log shows: the current language for a catalog text.
     message: String,
     timestamp: String,
@@ -37,6 +40,7 @@ static BACKEND_LOG_FILE_READY: std::sync::atomic::AtomicBool =
 fn push_backend_log_entry(
     level: &str,
     source: &str,
+    code: &str,
     message: String,
     english: &str,
 ) -> BackendLogPayload {
@@ -44,6 +48,7 @@ fn push_backend_log_entry(
     let payload = BackendLogPayload {
         level: level.to_string(),
         source: source.to_string(),
+        code: code.to_string(),
         message,
         file_line: log_file_line(&timestamp, level, &format!("[{source}] {english}")),
         timestamp,
@@ -78,7 +83,7 @@ fn write_buffered_backend_log() {
 fn emit_backend_log(app: &tauri::AppHandle, level: &str, source: &str, message: impl Into<String>) {
     let message = message.into();
     let english = message.clone();
-    let payload = push_backend_log_entry(level, source, message, &english);
+    let payload = push_backend_log_entry(level, source, "", message, &english);
     let _ = app.emit(BACKEND_LOG_EVENT_CHANNEL, payload);
 }
 
@@ -691,6 +696,7 @@ fn install_backend_log_sink(app: tauri::AppHandle) {
         let payload = push_backend_log_entry(
             line.level.as_str(),
             line.source,
+            line.code,
             line.message.to_string(),
             line.english,
         );

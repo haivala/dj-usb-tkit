@@ -106,7 +106,7 @@ impl BackendService {
             None
         };
         let conn: Option<&rusqlite::Connection> = edb_conn.or(owned_edb_conn.as_ref());
-        let mut edb_access = diagnose_edb_access(&edb_path, conn, &edb_open_warnings);
+        let mut edb_access = diagnose_edb_access(&edb_path, conn);
         raw_warnings.append(&mut edb_open_warnings);
         let edb_playlists = conn.and_then(|c| {
             try_read_playlists_with_metadata_from_edb_db_only_with_conn(
@@ -287,11 +287,11 @@ impl BackendService {
                 tr::diagnostics_check_string_alignment_misaligned(misaligned.len(), examples)
             };
             if matches!(status, DiagStatus::Fail) {
-                raw_warnings.push(logging::log(
+                raw_warnings.push(logging::log_text(
                     Level::Warn,
                     "usb-diagnostics",
                     "usb.diagnostics.pdb-string-misalignment",
-                    detail.render_english(),
+                    &detail,
                 ));
             }
             contents_integrity.checks.push(DiagCheck::new(
@@ -306,11 +306,11 @@ impl BackendService {
                 (DiagStatus::Pass, tr::diagnostics_check_artist_layout_ok())
             } else {
                 let detail = tr::diagnostics_check_artist_layout_moved(artist_layout.len());
-                raw_warnings.push(logging::log(
+                raw_warnings.push(logging::log_text(
                     Level::Warn,
                     "usb-diagnostics",
                     "usb.diagnostics.pdb-artist-name-layout",
-                    detail.render_english(),
+                    &detail,
                 ));
                 (DiagStatus::Warn, detail)
             };
@@ -364,11 +364,11 @@ impl BackendService {
                 )
             };
             if matches!(status, DiagStatus::Warn) {
-                raw_warnings.push(logging::log(
+                raw_warnings.push(logging::log_text(
                     Level::Warn,
                     "usb-diagnostics",
                     "usb.diagnostics.bpm-key-mismatch",
-                    detail.render_english(),
+                    &detail,
                 ));
             }
             analysis_integrity.checks.push(DiagCheck::new(
@@ -388,19 +388,17 @@ impl BackendService {
                     .map(|t| t.track_file_path.as_str())
                     .collect::<Vec<_>>()
                     .join(", ");
-                raw_warnings.push(logging::log(
+                let dat = bundle
+                    .dat
+                    .strip_prefix(&usb_root)
+                    .unwrap_or(&bundle.dat)
+                    .to_string_lossy()
+                    .replace('\\', "/");
+                raw_warnings.push(logging::log_text(
                     Level::Warn,
                     "usb-diagnostics",
                     "usb.diagnostics.shared-analysis",
-                    format!(
-                        "shared analysis file: /{} used by {tracks}",
-                        bundle
-                            .dat
-                            .strip_prefix(&usb_root)
-                            .unwrap_or(&bundle.dat)
-                            .to_string_lossy()
-                            .replace('\\', "/")
-                    ),
+                    &tr::diagnostics_warning_shared_analysis(format!("/{dat}"), tracks),
                 ));
             }
             let shared_check = if shared.is_empty() {
@@ -420,11 +418,11 @@ impl BackendService {
             analysis_integrity.checks.push(shared_check);
             let (beat_grid_status, beat_grid_detail) = diagnose_beat_grid_format(&usb_root, parsed);
             if matches!(beat_grid_status, DiagStatus::Warn) {
-                raw_warnings.push(logging::log(
+                raw_warnings.push(logging::log_text(
                     Level::Warn,
                     "usb-diagnostics",
                     "usb.diagnostics.beat-grid-format",
-                    beat_grid_detail.render_english(),
+                    &beat_grid_detail,
                 ));
             }
             analysis_integrity.checks.push(DiagCheck::new(
@@ -683,19 +681,19 @@ impl BackendService {
         let edb_audio_paths = collect_edb_audio_paths(conn, &mut raw_warnings);
         let presence = scan_audio_presence(&usb_root, parsed, &edb_audio_paths);
         for path in &presence.missing {
-            raw_warnings.push(logging::log(
+            raw_warnings.push(logging::log_text(
                 Level::Warn,
                 "usb-diagnostics",
                 "usb.diagnostics.missing-indexed-audio",
-                format!("indexed audio file missing from USB: {path}"),
+                &tr::diagnostics_warning_missing_audio(path),
             ));
         }
         for path in &presence.unindexed {
-            raw_warnings.push(logging::log(
+            raw_warnings.push(logging::log_text(
                 Level::Warn,
                 "usb-diagnostics",
                 "usb.diagnostics.unindexed-audio",
-                format!("unindexed audio file: {path}"),
+                &tr::diagnostics_warning_unindexed_audio(path),
             ));
         }
         let strict_raw_coverage = evaluate_strict_raw_coverage_parity(

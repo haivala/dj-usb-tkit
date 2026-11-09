@@ -87,6 +87,26 @@ usb-error-read-only-init = The USB is read-only, so it can't be initialized.
 # $id: the track's id in the USB's databases.
 usb-error-track-not-found = track { $id } not found on the USB
 
+# Event Log warnings while connecting a USB (choosing its folder).
+usb-warning-path-empty = USB path is empty
+# $path: the folder chosen.
+usb-warning-path-not-found = Path does not exist: { $path }
+usb-warning-missing-vendor-root = Missing vendor root directory
+usb-warning-missing-contents = Missing contents directory
+usb-warning-read-only = USB appears read-only: imports may work but export will fail
+# Event Log warnings while reading the stick. $root: the USB's folder.
+usb-warning-pdb-not-found-edb-only = PDB not found under { $root }; continuing with eDB-only mode
+usb-warning-pdb-not-found-db-fallback = PDB not found under { $root }; using DB fallback only
+# $attempts: how many keys were tried.
+usb-warning-edb-unreadable = eDB unreadable after trying { $attempts ->
+    [one] { $attempts } SQLCipher key
+   *[other] { $attempts } SQLCipher keys
+}
+# Event Log errors after changing the stick, when the changed database couldn't be copied
+# back to it. $error: the reason, from the OS.
+usb-warning-pdb-write-back-failed = PDB write-back to USB failed: { $error }
+usb-warning-edb-write-back-failed = eDB write-back to USB failed: { $error }
+
 ## usb-playlists
 
 # The USB Playlists panel's totals. $playlists: the stick's playlists. $tracks: their tracks together.
@@ -119,6 +139,25 @@ usb-playlists-selected = USB playlist selected: { $name } ({ $count ->
 # $name: the playlist's name.
 usb-playlists-remove-confirm = Remove USB playlist "{ $name }" from the stick?
 
+# Event Log notes while reading or removing the stick's playlists.
+# $count: how many playlists. $names: their names, comma-separated.
+usb-playlists-warning-empty-source = { $count ->
+    [one] { $count } playlist
+   *[other] { $count } playlists
+} with zero static track entries in export data: { $names }
+# $count: tracks of the removed playlist kept because other playlists use them.
+usb-playlists-warning-shared-tracks-kept = { $count ->
+    [one] { $count } shared track preserved (used by other playlists)
+   *[other] { $count } shared tracks preserved (used by other playlists)
+}
+# $count: files the removal would have deleted that were already gone.
+usb-playlists-warning-files-missing = { $count ->
+    [one] { $count } file already missing from USB
+   *[other] { $count } files already missing from USB
+}
+# $path: a file deleted from the stick with the playlist.
+usb-playlists-warning-file-deleted = deleted: { $path }
+
 ## usb-history
 
 # The USB History panel's totals.
@@ -134,6 +173,8 @@ usb-history-summary = { $sessions ->
 # The status line after reading the stick's history; a warning count may follow.
 # $sessions: how many sessions were read.
 usb-history-loaded = USB histories loaded: { $sessions }
+# Event Log warning when the stick has no PDB. $root: the USB's folder.
+usb-history-warning-pdb-not-found = PDB not found under { $root }; history import requires PDB
 
 ## usb-player-menu
 
@@ -811,6 +852,19 @@ diagnostics-progress-comparing-playlist-sources = USB: Comparing playlist source
 diagnostics-progress-finalizing-parity-report = USB: Finalizing parity report
 # $current: playlists done. $total: playlists in all. $playlist: its name.
 diagnostics-progress-resolving-playlist = Resolving playlist { $current }/{ $total }: { $playlist }
+
+# Event Log warnings from diagnostics and the parity report. $path: a file on the stick.
+diagnostics-warning-missing-audio = indexed audio file missing from USB: { $path }
+diagnostics-warning-unindexed-audio = unindexed audio file: { $path }
+# $path: the analysis file. $tracks: the track files that name it, comma-separated.
+diagnostics-warning-shared-analysis = shared analysis file: { $path } used by { $tracks }
+# Event Log warnings for the stick's analysis folder. $path: the file or folder.
+diagnostics-warning-anlz-malformed = analysis entry malformed: { $path }
+diagnostics-warning-anlz-malformed-empty = analysis malformed entry is empty: { $path }
+diagnostics-warning-anlz-empty = analysis file appears empty: { $path }
+# $error: the reason, from the OS.
+diagnostics-warning-anlz-unreadable = failed to read analysis file metadata { $path }: { $error }
+diagnostics-warning-anlz-walk-failed = failed to walk USBANLZ analysis directory: { $error }
 
 ## repair
 
@@ -1878,8 +1932,6 @@ ui-job-resume-analysis = Resume analysis
 ui-job-track-analysis-failed = Track analysis failed: { $track } - { $error }
 # Stands in for $error above when the analysis gave no reason.
 ui-job-track-analysis-failed-unknown = unknown analysis error
-# The context in the details of analysis warnings in the Event Log.
-ui-job-analysis-context = Analysis
 ui-job-pause-analysis = Pause analysis
 ui-job-progress = Progress
 ui-job-progress-aria-label = Operation progress
@@ -1931,8 +1983,7 @@ ui-library-remove-folder-confirm = Remove source folder?
 
     All tracks from this folder will be removed from the library. Tracks that are in a local playlist will also be removed from those playlists. Tracks that are also inside another source folder stay in the library.
 ui-library-remove-folder = Remove
-# Where an Event Log entry came from, in its details ("context: Library scan").
-ui-library-scan-log-context = Library scan
+# Where an Event Log entry came from, in its details ("context: Mixxx library import").
 ui-library-import-rekordbox-log-context = desktop library import
 ui-library-import-mixxx-log-context = Mixxx library import
 # Importing the tracks of rekordbox's desktop library (master.db) or of Mixxx's library:

@@ -708,14 +708,11 @@ pub(crate) fn scan_anlz(usb_root: &Path) -> AnlzScan {
             Ok(e) => {
                 // Surface malformed/anomalous entries under USBANLZ as diagnostics warnings.
                 if is_malformed_anlz_entry_name(e.path()) {
-                    warnings.push(logging::log(
+                    warnings.push(logging::log_text(
                         Level::Warn,
                         "usb-analysis",
                         "usb.analysis.entry-malformed",
-                        format!(
-                            "analysis entry malformed: {}",
-                            sanitize_warning_path(e.path())
-                        ),
+                        &tr::diagnostics_warning_anlz_malformed(sanitize_warning_path(e.path())),
                     ));
                 }
 
@@ -738,24 +735,20 @@ pub(crate) fn scan_anlz(usb_root: &Path) -> AnlzScan {
                         && md.len() == 0
                     {
                         scan.empty_malformed_entries.push(e.path().to_path_buf());
-                        warnings.push(logging::log(
+                        warnings.push(logging::log_text(
                             Level::Warn,
                             "usb-analysis",
                             "usb.analysis.malformed-entry-empty",
-                            format!(
-                                "analysis malformed entry is empty: {}",
-                                sanitize_warning_path(e.path())
-                            ),
+                            &tr::diagnostics_warning_anlz_malformed_empty(sanitize_warning_path(
+                                e.path(),
+                            )),
                         ));
                     }
-                    warnings.push(logging::log(
+                    warnings.push(logging::log_text(
                         Level::Warn,
                         "usb-analysis",
                         "usb.analysis.entry-malformed",
-                        format!(
-                            "analysis entry malformed: {}",
-                            sanitize_warning_path(e.path())
-                        ),
+                        &tr::diagnostics_warning_anlz_malformed(sanitize_warning_path(e.path())),
                     ));
                     continue;
                 }
@@ -763,33 +756,32 @@ pub(crate) fn scan_anlz(usb_root: &Path) -> AnlzScan {
                     Ok(md) => {
                         if md.len() == 0 {
                             scan.empty_files.push(e.path().to_path_buf());
-                            warnings.push(logging::log(
+                            warnings.push(logging::log_text(
                                 Level::Warn,
                                 "usb-analysis",
                                 "usb.analysis.file-empty",
-                                format!(
-                                    "analysis file appears empty: {}",
-                                    sanitize_warning_path(e.path())
-                                ),
+                                &tr::diagnostics_warning_anlz_empty(sanitize_warning_path(
+                                    e.path(),
+                                )),
                             ));
                         }
                     }
-                    Err(err) => warnings.push(logging::log(
+                    Err(err) => warnings.push(logging::log_text(
                         Level::Error,
                         "usb-analysis",
                         "usb.analysis.metadata-read-failed",
-                        format!(
-                            "failed to read analysis file metadata {}: {err}",
-                            sanitize_warning_path(e.path())
+                        &tr::diagnostics_warning_anlz_unreadable(
+                            sanitize_warning_path(e.path()),
+                            err,
                         ),
                     )),
                 }
             }
-            Err(err) => warnings.push(logging::log(
+            Err(err) => warnings.push(logging::log_text(
                 Level::Error,
                 "usb-analysis",
                 "usb.analysis.walk-failed",
-                format!("failed to walk USBANLZ analysis directory: {err}"),
+                &tr::diagnostics_warning_anlz_walk_failed(err),
             )),
         }
     }

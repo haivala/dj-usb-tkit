@@ -632,7 +632,6 @@ export async function removeUsbPlaylist(ctx, playlist) {
   });
   clearUsbDiagnostics(ctx);
   await refreshUsb(ctx);
-  ctx.logWarnings("usb-import", data.warnings, "remove_usb_playlist");
   emitStatus(data.statusText, { warningCount: data.warningCount });
 }
 
@@ -644,7 +643,6 @@ export async function reorderUsbPlaylists(ctx) {
       orderedPlaylistIds: state.usbPlaylists.map((p) => p.id)
     });
     clearUsbDiagnostics(ctx);
-    ctx.logWarnings("usb-import", data.warnings, "reorder_usb_playlists");
     emitStatus(data.statusText, { warningCount: data.warningCount });
   } catch (err) {
     // The drag already moved the row: read the real order back.
@@ -775,8 +773,6 @@ async function readUsbPlaylists(ctx, isCurrent) {
   keepOpenUsbPlaylist(ctx);
   // The freshly scanned status may flip an open local playlist's reorder lock.
   await ctx.renderCurrentPlaylistTracksFromState();
-
-  ctx.logWarnings("usb-import", data.warnings, "fetch_usb_playlists");
   setProgress(true, 100, data.doneText);
   emitStatus(data.statusText, { warningCount: data.warningCount });
   ctx.scheduleProgressIdle(1200);
@@ -811,7 +807,6 @@ export async function runUsbDiagnostics(ctx, { openReport = false } = {}) {
     applyPlaylistUsbExportStatus(ctx, data.playlistUsbExportStatus);
     await ctx.renderCurrentPlaylistTracksFromState();
     renderDiagnosticsReport(ctx, data);
-    ctx.logWarnings("usb-diagnostics", data.warnings, "run_usb_diagnostics");
     emitStatus(data.statusText);
   } finally {
     healthCard.classList.remove("is-loading");
@@ -827,7 +822,6 @@ export async function runUsbParityReport(ctx) {
       usbRoot: state.usbRoot
     });
     renderParityReport(ctx, data);
-    ctx.logWarnings("usb-diagnostics", data.warnings, "run_usb_parity_report");
     emitStatus(data.statusText);
   } finally {
     // Only ever run from its button: show the result, whatever it is.
@@ -842,7 +836,6 @@ export async function previewUsbRepairs(ctx) {
     usbRoot: state.usbRoot
   });
   renderRepairPreview(ctx, data);
-  ctx.logWarnings("usb-diagnostics", data.warnings, "repair_usb_diagnostics preview");
   emitStatus(data.statusText);
 }
 
@@ -858,12 +851,10 @@ export async function applyUsbRepairs(ctx) {
   if (data.usbContentChanged) usbContentChanged(ctx);
   // The Engine library fix turns the setting on backend-side.
   syncEngineLibrarySetting(ctx, data.engineLibraryEnabled);
-  ctx.logWarnings("usb-diagnostics", data.warnings, "repair_usb_diagnostics apply");
   applyPlaylistUsbExportStatus(ctx, data.playlistUsbExportStatus);
   await ctx.renderCurrentPlaylistTracksFromState();
   if (data.diagnostics) {
     renderDiagnosticsReport(ctx, data.diagnostics);
-    ctx.logWarnings("usb-diagnostics", data.diagnostics.warnings, "run_usb_diagnostics");
   }
   emitStatus(data.statusText);
 }
@@ -894,7 +885,6 @@ async function readUsbHistories(ctx, isCurrent) {
   el.historyCountsText.textContent = data.summaryText;
   renderHistoryList(ctx);
   ctx.usbHistoryTracksCtl.clear();
-  ctx.logWarnings("usb-import", data.warnings, "fetch_usb_histories");
   emitStatus(data.statusText, { warningCount: data.warningCount });
 }
 
@@ -1150,7 +1140,6 @@ async function runPlaylistExport(ctx, playlistId) {
     }
   }
   clearUsbDiagnostics(ctx);
-  ctx.logWarnings("export", data.warnings, "export_to_usb");
   emitStatus(data.statusText, { warningCount: data.warningCount });
   await ctx.loadPlaylists();
   state.currentPlaylistId = playlistId;

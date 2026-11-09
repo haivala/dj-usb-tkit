@@ -395,11 +395,10 @@ export async function reloadTrackListsForKeyNotation(ctx) {
 export async function analyzeLibrary(ctx) {
   const { state, emitStatus } = ctx;
   emitStatus(state.librarySources.analyzeScanningStatus);
-  const result = await ctx.command("scan_library", { incremental: true });
+  await ctx.command("scan_library", { incremental: true });
   await refreshLibrarySources(ctx);
-  // e.g. the same file found in two folders, or a folder gone; the backend
-  // words them. In the Event Log, where the analysis' progress can't hide them.
-  ctx.logWarnings("library-scan", Array.isArray(result?.warnings) ? result.warnings : [], t("ui-library-scan-log-context"));
+  // Its warnings (the same file in two folders, a folder gone) are already in
+  // the Event Log: the backend logged them.
   await resetAndLoadLibraryTracks(ctx, "");
   await ctx.refreshCurrentPlaylistTracks();
   await analyzeTrackIds(ctx, [], { scopeToLibraryFilter: true });
@@ -479,17 +478,6 @@ async function importExternalLibrary(ctx, { command, path, startingText, failedT
     logWarnings(
       logSource,
       notFound.map((p) => ({ level: "warn", message: p, code: `${codePrefix}.file_not_found` })),
-      logLabel
-    );
-  }
-
-  const scanWarnings = Array.isArray(result.warnings) ? result.warnings : [];
-  if (scanWarnings.length > 0) {
-    logWarnings(
-      logSource,
-      scanWarnings.map((entry) => (entry && typeof entry === "object"
-        ? entry
-        : { level: "info", message: entry, code: `${codePrefix}.scan_diag` })),
       logLabel
     );
   }

@@ -163,10 +163,12 @@ test("scanRekordboxDb reports success, failure, and structured warnings", async 
   assert.equal(failure.statuses[0], "Importing from desktop library...");
   assert.ok(failure.statuses[1].startsWith("Desktop library import failed:"), failure.statuses[1]);
 
+  // The backend's warnings reached the Event Log when it logged them; JS only
+  // logs the files it couldn't find, which it words itself.
   const warning = await runScanRekordboxDb(async () => ({
     indexed: 3,
     updated: 1,
-    notFound: [],
+    notFound: ["/music/gone.mp3"],
     warnings: [{
       level: "warn",
       code: "rekordbox_db.scan_diag",
@@ -175,8 +177,7 @@ test("scanRekordboxDb reports success, failure, and structured warnings", async 
     }]
   }));
   assert.equal(warning.logged.length, 1);
-  assert.equal(warning.logged[0].warnings.length, 1);
-  assert.equal(warning.logged[0].warnings[0].level, "warn");
-  assert.equal(warning.logged[0].warnings[0].message, "3 files had unreadable ANLZ analysis");
-  assert.notEqual(typeof warning.logged[0].warnings[0].message, "object");
+  assert.deepEqual(warning.logged[0].warnings, [
+    { level: "warn", message: "/music/gone.mp3", code: "rekordbox_db.file_not_found" }
+  ]);
 });

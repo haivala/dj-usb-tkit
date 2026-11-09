@@ -35,18 +35,22 @@ function holdEmptyLists(page) {
   });
 }
 
-// Subscribes the app to `job:event`: `window.__emitJobEvent` fires one.
-function listenForJobEvents(page) {
+// Subscribes the app to the backend's events: `window.__emitJobEvent` fires a
+// `job:event`, `window.__emitBackendLog` a `backend:log` (what the backend's
+// `logging::log` sends for each warning it makes).
+function listenForBackendEvents(page) {
   return page.addInitScript(() => {
-    const listeners = [];
-    window.__emitJobEvent = (payload) => {
-      for (const callback of listeners.slice()) callback({ event: "job:event", payload });
+    const listeners = new Map();
+    const emit = (eventName, payload) => {
+      for (const callback of (listeners.get(eventName) || []).slice()) callback({ event: eventName, payload });
     };
+    window.__emitJobEvent = (payload) => emit("job:event", payload);
+    window.__emitBackendLog = (payload) => emit("backend:log", payload);
     window.isTauri = true;
     window.__TAURI_INTERNALS__ = { invoke: (cmd, args) => window.__TAURI__.core.invoke(cmd, args) };
     window.__TAURI__.event = {
       listen: async (eventName, callback) => {
-        if (eventName === "job:event") listeners.push(callback);
+        listeners.set(eventName, [...(listeners.get(eventName) || []), callback]);
         return () => {};
       }
     };
@@ -500,6 +504,11 @@ function installTauriMock(page, mode) {
           if (command === "remove_usb_playlist") {
             const playlistId = String(payload?.request?.playlistId || "");
             state.usbPlaylists = state.usbPlaylists.filter((p) => String(p.id) !== playlistId);
+            const warnings = mode === "reorder"
+              ? [{ level: "warn", code: "usb.remove.kept-file", message: "Removal kept a shared file", source: "usb-import" }]
+              : [];
+            // The backend logged them as it made them.
+            for (const warning of warnings) window.__emitBackendLog?.(warning);
             return {
               ok: true,
               data: {
@@ -507,10 +516,8 @@ function installTauriMock(page, mode) {
                 statusText: `Removed USB playlist: ${payload?.request?.playlistName || ""}`,
                 removedFromEdb: 1,
                 removedFromPdb: 1,
-                warnings: mode === "reorder"
-                  ? [{ level: "warn", code: "usb.remove.kept-file", message: "Removal kept a shared file", source: "usb-import" }]
-                  : [],
-                warningCount: mode === "reorder" ? 1 : 0
+                warnings,
+                warningCount: warnings.length
               }
             };
           }
@@ -731,6 +738,7 @@ test("USB lists read after leaving their pages open the first item on return, an
 
 test("removing a USB playlist keeps the open one; removing the open one opens nothing, even clicking its page again, until the page is opened again", async ({ page }) => {
   await installTauriMock(page, "reorder");
+  await listenForBackendEvents(page);
   await countPlaylistFetches(page);
   await page.addInitScript(() => {
     const invoke = window.__TAURI__.core.invoke;
@@ -1571,7 +1579,7 @@ async function connectUsb(page) {
 
 test("a running USB job locks the USB selection and export until it ends; other jobs don't", async ({ page }) => {
   await installTauriMock(page, "valid");
-  await listenForJobEvents(page);
+  await listenForBackendEvents(page);
   await page.addInitScript(() => {
     const invoke = window.__TAURI__.core.invoke;
     window.__picks = 0;

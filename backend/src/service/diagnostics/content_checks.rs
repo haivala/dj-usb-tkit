@@ -6,7 +6,6 @@ use crate::i18n::tr;
 pub(crate) fn diagnose_edb_access(
     edb_path: &std::path::Path,
     conn: Option<&rusqlite::Connection>,
-    edb_warnings: &[WarningEntry],
 ) -> DiagSection {
     let mut checks = Vec::new();
 
@@ -17,18 +16,11 @@ pub(crate) fn diagnose_edb_access(
             tr::diagnostics_check_edb_missing(),
         ));
     } else {
+        // How it was opened, or why it couldn't be, is in the Event Log (`open_edb`'s warnings).
         let (status, detail) = if conn.is_some() {
-            let key_msg = edb_warnings
-                .last()
-                .map(|w| w.message.clone())
-                .unwrap_or_else(|| tr::diagnostics_check_edb_opened().render());
-            (DiagStatus::Pass, key_msg)
+            (DiagStatus::Pass, tr::diagnostics_check_edb_opened())
         } else {
-            let msg = edb_warnings
-                .last()
-                .map(|w| w.message.clone())
-                .unwrap_or_else(|| tr::diagnostics_check_edb_unable().render());
-            (DiagStatus::Fail, msg)
+            (DiagStatus::Fail, tr::diagnostics_check_edb_unable())
         };
         checks.push(DiagCheck::new(tr::diagnostics_check_edb(), status, detail));
     }
