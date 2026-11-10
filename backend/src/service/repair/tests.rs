@@ -184,6 +184,10 @@ fn playlist_requires_strict_upgrade_detects_failure_cases() {
     pdb_only.only_in_pdb = 1;
     assert!(playlist_requires_strict_upgrade(&pdb_only));
 
+    let mut noted = make_strict_repair_detail("Field Notes");
+    noted.field_note_tracks = 1;
+    assert!(playlist_requires_strict_upgrade(&noted));
+
     let clean = make_strict_repair_detail("Clean");
     assert!(!playlist_requires_strict_upgrade(&clean));
 }

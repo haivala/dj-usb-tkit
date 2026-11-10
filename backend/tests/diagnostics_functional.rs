@@ -1401,6 +1401,83 @@ fn strict_repair_preview_and_apply_repopulate_edb_for_exported_playlist_gap_case
     assert!(after_playlist.sort_order_match);
 }
 
+/// An older strict parity repair wrote 1970-01-01 as the eDB's date added
+/// for tracks it had no date for. Parity notes it, the repair is offered for
+/// the playlist although nothing else differs, and one pass puts the PDB's
+/// real date in the eDB instead of copying the placeholder into the PDB.
+#[test]
+fn strict_repair_replaces_placeholder_edb_dates_with_the_pdb_date() {
+    let (_root, backend, usb, playlist_name) = setup_clean_strict_parity_fixture();
+    let usb_root = Some(usb.to_string_lossy().to_string());
+    let pdb_date = || {
+        let parsed = parse_pdb(&vendor_db_dir(&usb).join("export.pdb")).expect("parse PDB");
+        assert_eq!(parsed.tracks.len(), 1);
+        parsed.tracks[0].date_added.clone()
+    };
+    let real_date = pdb_date().expect("export writes a date added");
+    assert!(!real_date.starts_with("1970"));
+
+    let conn = open_edb(&vendor_db_dir(&usb).join("exportLibrary.db"));
+    conn.execute(
+        "UPDATE content SET dateAdded = '1970-01-01', dateCreated = '1970-01-01'",
+        [],
+    )
+    .expect("write placeholder dates");
+    drop(conn);
+
+    let field_notes = || {
+        let parity = backend.run_usb_parity_report(RunUsbParityReportRequest {
+            usb_root: usb_root.clone(),
+        });
+        parity
+            .data
+            .expect("parity data")
+            .playlist_details
+            .into_iter()
+            .find(|d| d.name == playlist_name)
+            .expect("playlist detail")
+            .field_note_tracks
+    };
+    assert_eq!(field_notes(), 1, "the placeholder date should be noted");
+
+    let preview = backend.repair_usb_diagnostics(backend::models::RepairUsbDiagnosticsRequest {
+        usb_root: usb_root.clone(),
+        apply: false,
+        selected_fix_ids: Vec::new(),
+    });
+    let preview = preview.data.expect("preview data").data;
+    assert!(
+        preview
+            .proposed_fixes
+            .iter()
+            .any(|fix| fix.id == "upgrade_export_data_to_strict_parity"),
+        "a playlist with field notes should get the strict parity repair: {:?}",
+        preview.proposed_fixes
+    );
+
+    let repair = backend.repair_usb_diagnostics(backend::models::RepairUsbDiagnosticsRequest {
+        usb_root: usb_root.clone(),
+        apply: true,
+        selected_fix_ids: vec!["upgrade_export_data_to_strict_parity".to_string()],
+    });
+    let repair = repair.data.expect("repair data").data;
+    assert!(repair.failed_fixes.is_empty(), "{:?}", repair.failed_fixes);
+
+    assert_eq!(field_notes(), 0, "one repair pass should leave no notes");
+    assert_eq!(pdb_date().as_deref(), Some(real_date.as_str()));
+    let conn = open_edb(&vendor_db_dir(&usb).join("exportLibrary.db"));
+    let (date_added, date_created): (String, Option<String>) = conn
+        .query_row("SELECT dateAdded, dateCreated FROM content", [], |row| {
+            Ok((row.get(0)?, row.get(1)?))
+        })
+        .expect("eDB dates");
+    assert_eq!(date_added, real_date);
+    assert!(
+        date_created.is_some_and(|d| !d.starts_with("1970")),
+        "the placeholder creation date should be replaced"
+    );
+}
+
 #[test]
 fn strict_repair_leaves_unrelated_playlists_unchanged() {
     let (_root, backend, usb, target_playlist, control_playlist) =

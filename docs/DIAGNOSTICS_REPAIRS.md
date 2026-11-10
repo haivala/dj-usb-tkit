@@ -338,7 +338,13 @@ Parity diagnostics report differences in the other synced fields (comment,
 ISRC, genre, label, remixer, composer, release year and date, date added,
 bitrate, sample rate, bit depth, file size) only as notes: the "Other track
 field differences (note)" summary row and a per-playlist `field notes N`
-label. They never fail parity.
+label. They never fail parity, but Preview Fixes offers the strict parity
+repair for a playlist that has them: its merge fills a value one side lacks
+and makes both carry the eDB's otherwise. A 1970-01-01 date added or created
+is the placeholder an older strict parity repair wrote and counts as no date,
+so the other side's real date replaces it. Genre, label and artist names
+that differ only in case or punctuation aren't noted: the writers match
+dictionary names that way, so they keep each side's spelling.
 
 ## Implementation Anchors
 

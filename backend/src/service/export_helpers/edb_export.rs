@@ -653,7 +653,7 @@ pub fn update_existing_content_row(
     )?;
     let is_empty = |v: &Value| match v {
         Value::Null => true,
-        Value::Text(t) => t.trim().is_empty(),
+        Value::Text(t) => t.trim().is_empty() || super::field_table::is_placeholder_date(t),
         _ => false,
     };
     let changes: Vec<(&'static str, Value)> = desired

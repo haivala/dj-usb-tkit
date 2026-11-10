@@ -12,7 +12,8 @@
 use super::*;
 use crate::i18n::tr;
 use crate::service::export_helpers::{
-    EdbContentFields, canonicalize_track_path_identity, read_edb_content_fields,
+    EdbContentFields, canonicalize_track_path_identity, is_placeholder_date,
+    read_edb_content_fields,
 };
 
 #[derive(Debug, Default, Clone)]
@@ -100,6 +101,8 @@ pub(crate) fn playlist_requires_strict_upgrade(detail: &UsbParityPlaylistDetail)
         || detail.pdb_missing_core_metadata > 0
         || detail.artwork_mismatch_tracks > 0
         || detail.rating_colour_mismatch_tracks > 0
+        // Notes don't fail parity, but the merge is what makes them agree.
+        || detail.field_note_tracks > 0
         || !detail.playlist_id_match
         || !detail.sort_order_match
 }
@@ -303,9 +306,10 @@ fn merged_number(edb: Option<i64>, pdb: Option<i64>) -> Option<i64> {
 
 /// One track as the repair hands it to the writers: per field, a non-empty
 /// eDB value wins, else the PDB's. A side without a value never blanks the
-/// other. Nothing is derived, except the creation date of a track the eDB
-/// doesn't have yet (the audio file's date on the USB, else its PDB date
-/// added).
+/// other. Nothing is derived, except the creation date of a track whose eDB
+/// row has none (the audio file's date on the USB, else its PDB date
+/// added). A 1970-01-01 placeholder date on either side counts as none
+/// ([`is_placeholder_date`]).
 pub(super) fn merged_manifest_track(
     usb_root: &std::path::Path,
     edb: Option<&EdbContentFields>,
@@ -330,10 +334,10 @@ pub(super) fn merged_manifest_track(
     .unwrap_or_default();
     let date_added = merged_text(
         e(|r| r.date_added.as_deref()),
-        p_text(|t| t.date_added.as_deref()),
+        p_text(|t| t.date_added.as_deref()).filter(|d| !is_placeholder_date(d)),
     );
-    let date_created = match edb {
-        Some(row) => row.date_created.clone(),
+    let date_created = match edb.and_then(|row| row.date_created.clone()) {
+        Some(date) => Some(date),
         None => {
             let on_usb = usb_root.join(exported_path.trim_start_matches('/'));
             std::fs::metadata(&on_usb)

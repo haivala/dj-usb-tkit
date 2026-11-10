@@ -15,7 +15,7 @@ mod tests;
 
 pub use deferred_close::FileCloser;
 pub use edb_export::*;
-pub(crate) use field_table::{EdbContentFields, read_edb_content_fields};
+pub(crate) use field_table::{EdbContentFields, is_placeholder_date, read_edb_content_fields};
 pub use pdb_export::*;
 
 // Re-export submodule items at this level for backward compatibility.

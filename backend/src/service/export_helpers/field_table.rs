@@ -215,8 +215,18 @@ pub(crate) struct EdbContentFields {
     pub(crate) content_link: Option<i64>,
 }
 
+/// Whether a date added/created is the 1970-01-01 placeholder the strict
+/// parity repair wrote to the eDB before it used the export writers, for
+/// tracks it had no date for (and later merges copied into the PDB).
+/// rekordbox never writes it, so it means "no date" on either side: the
+/// other database's or the export's date replaces it.
+pub(crate) fn is_placeholder_date(date: &str) -> bool {
+    date.trim().starts_with("1970-01-01")
+}
+
 /// Every eDB `content` row's [`EdbContentFields`], by `content_id`. Reads
-/// raw values: nothing is substituted for a missing one.
+/// raw values: nothing is substituted for a missing one, and a placeholder
+/// date ([`is_placeholder_date`]) reads as missing.
 pub(crate) fn read_edb_content_fields(
     conn: &rusqlite::Connection,
 ) -> BackendResult<HashMap<i64, EdbContentFields>> {
@@ -335,8 +345,8 @@ pub(crate) fn read_edb_content_fields(
             analysis_path: text(v(11)?),
             comment: text(v(12)?),
             isrc: text(v(13)?),
-            date_added: text(v(14)?),
-            date_created: text(v(15)?),
+            date_added: text(v(14)?).filter(|d| !is_placeholder_date(d)),
+            date_created: text(v(15)?).filter(|d| !is_placeholder_date(d)),
             release_date: text(v(16)?),
             bpmx100: int(v(17)?),
             length: int(v(18)?),
@@ -391,6 +401,14 @@ pub(crate) fn note_field_differences(
     }
     let text_differs = |e: Option<&str>, p: Option<&str>| present(e) != present(p);
     let num_differs = |e: Option<i64>, p: Option<i64>| known(e) != known(p);
+    // Genre, label and artist names are dictionary rows that the PDB writer
+    // matches by `canonicalize_playlist_name` (and the eDB's by case), so a
+    // name that differs only in case or punctuation is one the writers keep
+    // as it is on each side.
+    let name_differs = |e: Option<&str>, p: Option<&str>| {
+        present(e).map(super::canonicalize_playlist_name)
+            != present(p).map(super::canonicalize_playlist_name)
+    };
     let mut out = Vec::new();
     let checks: [(&'static str, bool); 13] = [
         (
@@ -403,22 +421,22 @@ pub(crate) fn note_field_differences(
         ),
         (
             "genre",
-            text_differs(edb.genre.as_deref(), name(&parsed.genres, pdb.genre_id)),
+            name_differs(edb.genre.as_deref(), name(&parsed.genres, pdb.genre_id)),
         ),
         (
             "label",
-            text_differs(edb.label.as_deref(), name(&parsed.labels, pdb.label_id)),
+            name_differs(edb.label.as_deref(), name(&parsed.labels, pdb.label_id)),
         ),
         (
             "remixer",
-            text_differs(
+            name_differs(
                 edb.remixer.as_deref(),
                 name(&parsed.artists, pdb.remixer_id),
             ),
         ),
         (
             "composer",
-            text_differs(
+            name_differs(
                 edb.composer.as_deref(),
                 name(&parsed.artists, pdb.composer_id),
             ),
@@ -433,7 +451,12 @@ pub(crate) fn note_field_differences(
         ),
         (
             "dateAdded",
-            text_differs(edb.date_added.as_deref(), pdb.date_added.as_deref()),
+            text_differs(
+                edb.date_added.as_deref(),
+                pdb.date_added
+                    .as_deref()
+                    .filter(|d| !is_placeholder_date(d)),
+            ),
         ),
         (
             "bitrate",
@@ -463,6 +486,32 @@ pub(crate) fn note_field_differences(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn notes_skip_differences_the_writers_cannot_resolve() {
+        let mut parsed = crate::pdb_reader::ParsedPdb::default();
+        parsed.genres.insert(61, "drum & Bass".to_string());
+        parsed.artists.insert(7, "PHOTEK-ISH".to_string());
+        let pdb = crate::pdb_reader::PdbTrackRow {
+            genre_id: 61,
+            composer_id: 7,
+            date_added: Some("1970-01-01".to_string()),
+            ..Default::default()
+        };
+        let mut edb = EdbContentFields {
+            genre: Some("Drum & Bass".to_string()),
+            composer: Some("photek ish".to_string()),
+            ..Default::default()
+        };
+        assert!(note_field_differences(&edb, &pdb, &parsed).is_empty());
+
+        edb.genre = Some("Jungle".to_string());
+        edb.date_added = Some("2020-09-18".to_string());
+        assert_eq!(
+            note_field_differences(&edb, &pdb, &parsed),
+            vec!["genre", "dateAdded"]
+        );
+    }
 
     #[test]
     fn every_edb_template_content_column_is_mapped_or_listed_as_not_synced() {
