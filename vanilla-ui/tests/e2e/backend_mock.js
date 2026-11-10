@@ -287,7 +287,8 @@
     "reorder_playlist_tracks", "add_track_candidates_to_playlist", "add_track_candidates_to_playlists",
     "add_library_selection_to_playlist", "add_library_selection_to_playlists",
     "import_external_playlists", "export_to_usb", "set_usb_device_name", "select_usb",
-    "restore_usb_backup", "set_export_sync_mode"
+    "restore_usb_backup", "set_export_sync_mode",
+    "fetch_usb_playlists", "run_usb_diagnostics", "repair_usb_diagnostics"
   ]);
 
   // Answers given their playlists here, not by a spec, carry this mark (kept
@@ -300,7 +301,13 @@
     if (!PLAYLIST_CHANGES.has(command) || !raw?.ok || !raw.data || typeof raw.data !== "object") return raw;
     if ("playlists" in raw.data && !raw.data[FILLED]) return raw;
     const listed = await invoke("list_playlists", {});
-    return listed?.ok ? { ...raw, data: { ...raw.data, ...listed.data, [FILLED]: true } } : raw;
+    if (!listed?.ok) return raw;
+    // A spec's own export status (its answer without playlists) stays: it is
+    // what that spec tests. A re-fill takes the outer spec's list as a whole.
+    const data = raw.data[FILLED]
+      ? { ...raw.data, ...listed.data }
+      : { ...listed.data, ...raw.data };
+    return { ...raw, data: { ...data, [FILLED]: true } };
   }
 
   function shaped(invoke) {

@@ -62,6 +62,9 @@
   and the reason in one line. An add logs only its result; the "Adding N tracks" entry before it is gone.
 - **Improvement:** Changing the export sync mode saves an open playlist's column sort, the mode and the playlists'
   reorder locks in one step. If the mode can't be saved, the choice in Settings goes back to the mode in use.
+- **Improvement:** The sidebar's "On this USB" marks come from one place for every action. Before, reading the USB
+  Playlists page, running diagnostics and repairing worked them out on their own, and a repair whose follow-up
+  check failed cleared them.
 - **Chore:** The app window can no longer widen the set of folders it may load files from. The backend lets in
   the library's source folders and the selected USB itself.
 

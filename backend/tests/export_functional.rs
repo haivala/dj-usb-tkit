@@ -2594,6 +2594,7 @@ fn export_import_add_roundtrip_for_noart_fixture_keeps_exact_track_without_key_o
     let usb_playlist = usb_playlists
         .data
         .expect("usb playlist data")
+        .data
         .items
         .into_iter()
         .find(|p| p.name == "No Art Roundtrip Source")
@@ -3381,6 +3382,7 @@ fn export_to_usb_does_not_use_post_write_parity_merge() {
     let testi = imported
         .data
         .expect("usb import data")
+        .data
         .items
         .into_iter()
         .find(|pl| pl.name == "Testi")
@@ -4106,6 +4108,12 @@ fn fetch_usb_playlists_reports_reorder_lock_only_for_additive_same_name_collisio
         "add to never-exported playlist failed: {added_never_exported:?}"
     );
 
+    // The status is the selected USB's, as in the app: the USB is selected first.
+    let selected = backend.select_usb(SelectUsbRequest {
+        path: usb.to_string_lossy().to_string(),
+    });
+    assert!(selected.data.expect("select data").data.usb.valid);
+
     let status_by_id = |backend: &BackendCommands| -> BTreeMap<String, (bool, bool)> {
         let fetched = backend.fetch_usb_playlists(FetchUsbPlaylistsRequest {
             usb_root: Some(usb.to_string_lossy().to_string()),
@@ -4114,6 +4122,7 @@ fn fetch_usb_playlists_reports_reorder_lock_only_for_additive_same_name_collisio
         fetched
             .data
             .expect("fetch data")
+            .state
             .playlist_usb_export_status
             .into_iter()
             .map(|s| (s.playlist_id, (s.same_name_exists_on_usb, s.locks_reorder)))
@@ -4177,6 +4186,9 @@ fn fetch_usb_playlists_reports_reorder_lock_only_for_additive_same_name_collisio
             .find(|status| status.playlist_id == id)
             .map(|status| (status.usb_selected, status.same_name_exists_on_usb))
     };
+    backend.select_usb(SelectUsbRequest {
+        path: String::new(),
+    });
     let listed = backend.list_playlists().data.expect("list data");
     assert_eq!(on_usb(&listed, &exported_id), Some((false, false)));
 
@@ -4593,6 +4605,7 @@ fn export_writes_engine_library_and_keeps_history_on_re_export() {
             })
             .data
             .expect("diagnostics data")
+            .data
             .engine_library_section
     };
     let section = engine_section().expect("note while the setting is off");
@@ -4625,12 +4638,13 @@ fn export_writes_engine_library_and_keeps_history_on_re_export() {
         .data
         .expect("repair preview");
     let fix = preview
+        .data
         .proposed_fixes
         .iter()
         .find(|f| f.id == "keep_engine_library_up_to_date")
         .expect("Engine library fix proposed");
     assert!(fix.description.contains("changes made on the player"));
-    assert!(!preview.engine_library_enabled);
+    assert!(!preview.data.engine_library_enabled);
 
     let applied = backend
         .repair_usb_diagnostics(RepairUsbDiagnosticsRequest {
@@ -4640,11 +4654,11 @@ fn export_writes_engine_library_and_keeps_history_on_re_export() {
         })
         .data
         .expect("repair apply");
-    assert!(applied.engine_library_enabled, "{applied:?}");
+    assert!(applied.data.engine_library_enabled, "{applied:?}");
     assert!(
-        applied.failed_fixes.is_empty(),
+        applied.data.failed_fixes.is_empty(),
         "{:?}",
-        applied.failed_fixes
+        applied.data.failed_fixes
     );
     let section = engine_section().expect("Engine library section");
     assert!(
@@ -5031,6 +5045,7 @@ fn reorder_usb_playlists_persists_order_and_keeps_parity() {
     let mut ids = fetched
         .data
         .expect("usb playlist data")
+        .data
         .items
         .into_iter()
         .filter(|p| p.name.starts_with("Reorder Playlist"))
@@ -5060,6 +5075,7 @@ fn reorder_usb_playlists_persists_order_and_keeps_parity() {
     let refetched_ids = refetched
         .data
         .expect("re-fetch usb playlist data")
+        .data
         .items
         .into_iter()
         .filter(|p| p.name.starts_with("Reorder Playlist"))
@@ -6729,7 +6745,7 @@ fn add_usb_row_to_new_playlist(backend: &BackendCommands, usb: &Path, name: &str
     let row = backend
         .fetch_usb_playlist_tracks(FetchUsbTracksRequest {
             usb_root: Some(root.clone()),
-            id: lists.items[0].id.clone(),
+            id: lists.data.items[0].id.clone(),
             ..Default::default()
         })
         .data

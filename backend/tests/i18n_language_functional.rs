@@ -278,7 +278,7 @@ fn diagnostics_report_follows_the_language() {
         let response = backend.run_usb_diagnostics(RunUsbDiagnosticsRequest {
             usb_root: Some(usb.to_string_lossy().to_string()),
         });
-        response.data.expect("diagnostics data")
+        response.data.expect("diagnostics data").data
     };
     // What the report's layout decides: which boxes and columns, and each overview row's
     // status. The overview finds its columns by their (translated) titles.
@@ -336,9 +336,13 @@ fn diagnostics_report_follows_the_language() {
         selected_fix_ids: Vec::new(),
     });
     let repair = repair.data.expect("repair preview");
-    assert!(is_test_language(&repair.summary), "{:?}", repair.summary);
-    assert!(!repair.rows.is_empty(), "{repair:?}");
-    for row in &repair.rows {
+    assert!(
+        is_test_language(&repair.data.summary),
+        "{:?}",
+        repair.data.summary
+    );
+    assert!(!repair.data.rows.is_empty(), "{repair:?}");
+    for row in &repair.data.rows {
         for text in [&row.title, &row.description] {
             assert!(is_test_language(text), "{row:?}");
         }

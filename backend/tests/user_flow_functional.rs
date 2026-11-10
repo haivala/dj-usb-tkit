@@ -267,8 +267,9 @@ fn user_like_flow_imports_sources_analyzes_and_adds_from_library_usb_and_history
     );
     let usb_playlists_data = usb_playlists.data.expect("usb playlist data");
     // The header's track figure is the sum of per-playlist counts.
-    let playlist_count = usb_playlists_data.items.len();
+    let playlist_count = usb_playlists_data.data.items.len();
     let track_total = usb_playlists_data
+        .data
         .items
         .iter()
         .map(|p| p.track_count)
@@ -278,9 +279,9 @@ fn user_like_flow_imports_sources_analyzes_and_adds_from_library_usb_and_history
         backend::utils::counted(playlist_count, "playlist", "playlists"),
         backend::utils::counted(track_total, "track", "tracks"),
     );
-    assert_eq!(usb_playlists_data.summary_text, summary);
+    assert_eq!(usb_playlists_data.data.summary_text, summary);
     // The UI reads tracks in pages: the list response doesn't carry them.
-    let first = &usb_playlists_data.items[0];
+    let first = &usb_playlists_data.data.items[0];
     let sent = serde_json::to_value(first).expect("serialize usb playlist");
     assert_eq!(sent["trackCount"], first.track_count);
     assert!(sent.get("tracks").is_none());
@@ -296,12 +297,15 @@ fn user_like_flow_imports_sources_analyzes_and_adds_from_library_usb_and_history
         first.remove_confirm_text,
         format!("Remove USB playlist \"{}\" from the stick?", first.name),
     );
-    assert_eq!(usb_playlists_data.done_text, format!("Done — {summary}"));
     assert_eq!(
-        usb_playlists_data.status_text,
+        usb_playlists_data.data.done_text,
+        format!("Done — {summary}")
+    );
+    assert_eq!(
+        usb_playlists_data.data.status_text,
         format!("USB playlists loaded: {playlist_count}"),
     );
-    let usb_items = usb_playlists_data.items;
+    let usb_items = usb_playlists_data.data.items;
     let usb_playlist = usb_items
         .iter()
         .find(|p| p.name == "Flow Source Playlist" && !p.tracks.is_empty())
@@ -1166,6 +1170,7 @@ fn export_to_usb_writes_cues_into_anlz_and_edb() {
     let imported_playlist = imported
         .data
         .expect("imported usb playlists")
+        .data
         .items
         .into_iter()
         .find(|p| !p.tracks.is_empty())
@@ -1292,6 +1297,7 @@ fn add_never_viewed_usb_track_materializes_row_and_imports_anlz_cues() {
         })
         .data
         .expect("usb playlists")
+        .data
         .items
         .into_iter()
         .flat_map(|p| p.tracks)
@@ -1522,6 +1528,7 @@ fn first_usb_playlist_track(backend: &BackendCommands, usb: &Path) -> backend::m
         })
         .data
         .expect("fetch usb playlists")
+        .data
         .items
         .into_iter()
         .flat_map(|p| p.tracks)
@@ -1734,6 +1741,7 @@ fn export_converts_a_track_the_stick_cant_play_and_keeps_its_timing() {
         })
         .data
         .expect("usb playlists")
+        .data
         .items
         .pop()
         .expect("usb playlist");

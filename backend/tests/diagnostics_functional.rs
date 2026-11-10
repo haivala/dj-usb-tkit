@@ -151,17 +151,18 @@ fn assert_no_pdb_structural_repairs(backend: &BackendCommands, usb: &Path) {
     assert!(preview.ok, "repair preview failed: {preview:?}");
     let preview_data = preview.data.expect("preview data");
     assert_eq!(
-        preview_data.status_text,
-        format!("Repair preview ready ({}ms)", preview_data.duration_ms)
+        preview_data.data.status_text,
+        format!("Repair preview ready ({}ms)", preview_data.data.duration_ms)
     );
     assert_eq!(
-        preview_data.rows.len(),
+        preview_data.data.rows.len(),
         preview_data
+            .data
             .proposed_fixes
             .iter()
             .filter(|fix| !fix.bookkeeping)
             .count()
-            + preview_data.unsupported_items.len()
+            + preview_data.data.unsupported_items.len()
     );
     let sent = serde_json::to_value(&preview_data).expect("serialize");
     for field in [
@@ -173,6 +174,7 @@ fn assert_no_pdb_structural_repairs(backend: &BackendCommands, usb: &Path) {
         assert!(sent.get(field).is_none(), "{field} isn't sent to the UI");
     }
     let structural: Vec<String> = preview_data
+        .data
         .proposed_fixes
         .iter()
         .filter(|f| f.id.starts_with("repair_pdb_") && f.supported)
@@ -867,13 +869,14 @@ fn diagnostics_parity_and_import_counts_stay_consistent_after_repeated_exports()
     assert!(imported.ok, "fetch usb playlists failed: {imported:?}");
     let imported_data = imported.data.expect("imported data");
     let imported_playlist = imported_data
+        .data
         .items
         .iter()
         .find(|p| p.name == playlist_name)
         .unwrap_or_else(|| {
             panic!(
                 "playlist not found in import view: {:?}",
-                imported_data.items
+                imported_data.data.items
             )
         });
     let imported_count = imported_playlist.track_count;
@@ -885,32 +888,36 @@ fn diagnostics_parity_and_import_counts_stay_consistent_after_repeated_exports()
     assert!(diagnostics.ok, "diagnostics failed: {diagnostics:?}");
     let diagnostics_data = diagnostics.data.expect("diagnostics data");
     assert_eq!(
-        diagnostics_data.status_text,
-        format!("Diagnostics complete ({}ms)", diagnostics_data.duration_ms)
+        diagnostics_data.data.status_text,
+        format!(
+            "Diagnostics complete ({}ms)",
+            diagnostics_data.data.duration_ms
+        )
     );
     assert_eq!(
-        diagnostics_data.duration_text,
-        format!("Completed in {}ms", diagnostics_data.duration_ms)
+        diagnostics_data.data.duration_text,
+        format!("Completed in {}ms", diagnostics_data.data.duration_ms)
     );
     assert_eq!(
-        serde_json::to_value(&diagnostics_data.overall_status).unwrap(),
-        serde_json::Value::String(diagnostics_data.status_label.clone()),
+        serde_json::to_value(&diagnostics_data.data.overall_status).unwrap(),
+        serde_json::Value::String(diagnostics_data.data.status_label.clone()),
         "the badge reads the overall status"
     );
-    let health = match diagnostics_data.overall_status {
+    let health = match diagnostics_data.data.overall_status {
         DiagStatus::Pass => "USB health: good",
         DiagStatus::Warn => "USB health: warnings",
         DiagStatus::Fail => "USB health: issues found",
     };
-    assert_eq!(diagnostics_data.health_text, health);
+    assert_eq!(diagnostics_data.data.health_text, health);
     let diag_playlist = diagnostics_data
+        .data
         .playlist_details
         .iter()
         .find(|d| d.name == playlist_name)
         .unwrap_or_else(|| {
             panic!(
                 "playlist not found in diagnostics view: {:?}",
-                diagnostics_data.playlist_details
+                diagnostics_data.data.playlist_details
             )
         });
 
@@ -1114,6 +1121,7 @@ fn diagnostics_and_repair_pdb_header_compatibility_without_previous_snapshot() {
     assert!(diagnostics.ok, "diagnostics failed: {diagnostics:?}");
     let diagnostics_data = diagnostics.data.expect("diagnostics data");
     let header_check = diagnostics_data
+        .data
         .pdb_integrity
         .checks
         .iter()
@@ -1135,8 +1143,9 @@ fn diagnostics_and_repair_pdb_header_compatibility_without_previous_snapshot() {
     });
     assert!(preview.ok, "repair preview failed: {preview:?}");
     let preview_data = preview.data.expect("preview data");
-    assert!(!preview_data.usb_content_changed);
+    assert!(!preview_data.data.usb_content_changed);
     let proposal = preview_data
+        .data
         .proposed_fixes
         .iter()
         .find(|fix| fix.id == PDB_HEADER_COMPATIBILITY_FIX_ID)
@@ -1161,20 +1170,21 @@ fn diagnostics_and_repair_pdb_header_compatibility_without_previous_snapshot() {
     let repair_data = repair.data.expect("repair data");
     assert!(
         repair_data
+            .data
             .applied_fixes
             .iter()
             .any(|line| line.contains("Repair PDB Header Compatibility Field")),
         "repair should apply: {repair_data:?}"
     );
-    assert!(repair_data.usb_content_changed);
+    assert!(repair_data.data.usb_content_changed);
     assert_eq!(
-        repair_data.status_text,
+        repair_data.data.status_text,
         format!(
             "Repair apply complete: {} applied, {} failed ({}ms){}",
-            repair_data.applied_fixes.len(),
-            repair_data.failed_fixes.len(),
-            repair_data.duration_ms,
-            if repair_data.diagnostics.is_some() {
+            repair_data.data.applied_fixes.len(),
+            repair_data.data.failed_fixes.len(),
+            repair_data.data.duration_ms,
+            if repair_data.data.diagnostics.is_some() {
                 ". Diagnostics refreshed."
             } else {
                 ""
@@ -1182,7 +1192,7 @@ fn diagnostics_and_repair_pdb_header_compatibility_without_previous_snapshot() {
         ),
     );
     assert!(
-        !repair_data.playlist_usb_export_status.is_empty(),
+        !repair_data.state.playlist_usb_export_status.is_empty(),
         "an applied repair carries the export status of the fixture's playlist"
     );
     assert_eq!(read_pdb_header_compatibility_value(&pdb_path), 5);
@@ -1210,6 +1220,7 @@ fn diagnostics_and_repair_pdb_header_compatibility_ignores_backup_snapshot_drift
     assert!(diagnostics.ok, "diagnostics failed: {diagnostics:?}");
     let diagnostics_data = diagnostics.data.expect("diagnostics data");
     let header_check = diagnostics_data
+        .data
         .pdb_integrity
         .checks
         .iter()
@@ -1229,11 +1240,12 @@ fn diagnostics_and_repair_pdb_header_compatibility_ignores_backup_snapshot_drift
     let preview_data = preview.data.expect("preview data");
     assert!(
         !preview_data
+            .data
             .proposed_fixes
             .iter()
             .any(|fix| fix.id == PDB_HEADER_COMPATIBILITY_FIX_ID),
         "no repair should be proposed for a known-compatible value: {:?}",
-        preview_data.proposed_fixes
+        preview_data.data.proposed_fixes
     );
     assert_eq!(read_pdb_header_compatibility_value(&pdb_path), 5);
 }
@@ -1252,6 +1264,7 @@ fn rekordbox_pdb_header_compatibility_value_4_never_warns_and_rides_along_with_a
     assert!(diagnostics.ok, "diagnostics failed: {diagnostics:?}");
     let diagnostics_data = diagnostics.data.expect("diagnostics data");
     let header_check = diagnostics_data
+        .data
         .pdb_integrity
         .checks
         .iter()
@@ -1270,6 +1283,7 @@ fn rekordbox_pdb_header_compatibility_value_4_never_warns_and_rides_along_with_a
     assert!(preview.ok, "repair preview failed: {preview:?}");
     let preview_data = preview.data.expect("preview data");
     let proposal = preview_data
+        .data
         .proposed_fixes
         .iter()
         .find(|fix| fix.id == PDB_HEADER_COMPATIBILITY_FIX_ID)
@@ -1280,11 +1294,12 @@ fn rekordbox_pdb_header_compatibility_value_4_never_warns_and_rides_along_with_a
     );
     assert!(
         !preview_data
+            .data
             .detected_issues
             .iter()
             .any(|issue| issue.contains("compatibility")),
         "value 4 must not count as an issue: {:#?}",
-        preview_data.detected_issues
+        preview_data.data.detected_issues
     );
     assert_eq!(read_pdb_header_compatibility_value(&pdb_path), 4);
 
@@ -1354,6 +1369,7 @@ fn strict_repair_preview_and_apply_repopulate_edb_for_exported_playlist_gap_case
     let repair_data = repair.data.expect("repair data");
     assert!(
         repair_data
+            .data
             .applied_fixes
             .iter()
             .any(|line| line.contains("merged 1 playlist")),
@@ -1361,7 +1377,7 @@ fn strict_repair_preview_and_apply_repopulate_edb_for_exported_playlist_gap_case
     );
 
     assert!(
-        repair_data.failed_fixes.is_empty(),
+        repair_data.data.failed_fixes.is_empty(),
         "strict repair should not report failed fixes: {repair_data:?}"
     );
 
@@ -1444,6 +1460,7 @@ fn strict_repair_leaves_unrelated_playlists_unchanged() {
     let repair_data = repair.data.expect("repair data");
     assert!(
         repair_data
+            .data
             .applied_fixes
             .iter()
             .any(|line| line.contains("Upgrade Export Data To Strict Parity")),
@@ -1577,6 +1594,7 @@ fn strict_repair_is_idempotent_after_successful_upgrade() {
     let first_repair_data = first_repair.data.expect("first repair data");
     assert!(
         first_repair_data
+            .data
             .applied_fixes
             .iter()
             .any(|line| line.contains("Upgrade Export Data To Strict Parity")),
@@ -1593,6 +1611,7 @@ fn strict_repair_is_idempotent_after_successful_upgrade() {
     let second_repair_data = second_repair.data.expect("second repair data");
     assert!(
         !second_repair_data
+            .data
             .applied_fixes
             .iter()
             .any(|line| line.contains("Upgrade Export Data To Strict Parity")),
@@ -1600,13 +1619,14 @@ fn strict_repair_is_idempotent_after_successful_upgrade() {
     );
     assert!(
         second_repair_data
+            .data
             .skipped_fixes
             .iter()
             .any(|line| line.contains("Upgrade Export Data To Strict Parity: nothing to apply")),
         "second strict repair run should explicitly report nothing to apply: {second_repair_data:?}"
     );
     assert!(
-        second_repair_data.failed_fixes.is_empty(),
+        second_repair_data.data.failed_fixes.is_empty(),
         "second strict repair run should not fail: {second_repair_data:?}"
     );
 
@@ -1680,13 +1700,14 @@ fn strict_repair_pdb_primary_repopulates_thin_edb_and_restores_strict_parity() {
     let repair_data = repair.data.expect("repair data");
     assert!(
         repair_data
+            .data
             .applied_fixes
             .iter()
             .any(|line| line.contains("merged 1 playlist")),
         "strict repair should take the PDB-primary repopulation path: {repair_data:?}"
     );
     assert!(
-        repair_data.failed_fixes.is_empty(),
+        repair_data.data.failed_fixes.is_empty(),
         "strict repair should not report failures in the PDB-primary path: {repair_data:?}"
     );
 
@@ -1747,6 +1768,7 @@ fn strict_repair_carries_the_edb_rating_and_colour_into_the_pdb() {
     let repair_data = repair.data.expect("repair data");
     assert!(
         repair_data
+            .data
             .applied_fixes
             .iter()
             .any(|line| line.contains("merged 1 playlist")),
@@ -1821,7 +1843,7 @@ fn preview_repair(
         selected_fix_ids: vec![],
     });
     assert!(preview.ok, "preview failed: {preview:?}");
-    preview.data.expect("preview data")
+    preview.data.expect("preview data").data
 }
 
 /// Deletes one database from the two-playlist fixture, previews (which must
@@ -1903,7 +1925,7 @@ fn apply_strict_repair(
         selected_fix_ids: vec!["upgrade_export_data_to_strict_parity".to_string()],
     });
     assert!(repair.ok, "repair failed: {repair:?}");
-    repair.data.expect("repair data")
+    repair.data.expect("repair data").data
 }
 
 #[test]
@@ -2079,6 +2101,7 @@ fn strict_repair_avoids_playlist_id_collisions_with_existing_pdb_folders() {
     let repair_data = repair.data.expect("repair data");
     assert!(
         repair_data
+            .data
             .applied_fixes
             .iter()
             .any(|line| line.contains("Upgrade Export Data To Strict Parity")),
@@ -2261,27 +2284,30 @@ fn operational_diagnostics_do_not_walk_usbanlz_files() {
     let data = diagnostics.data.expect("diagnostics data");
 
     assert!(
-        data.warnings
+        data.data
+            .warnings
             .iter()
             .all(|warning| !warning.message.contains("analysis file appears empty")),
         "operational diagnostics should not scan raw USBANLZ files: {:?}",
-        data.warnings
+        data.data.warnings
     );
     assert!(
-        data.analysis_integrity
+        data.data
+            .analysis_integrity
             .checks
             .iter()
             .any(|check| check.label == "PDB analysis refs"),
         "diagnostics should report DB-only PDB analysis refs: {:?}",
-        data.analysis_integrity
+        data.data.analysis_integrity
     );
     assert!(
-        data.analysis_integrity
+        data.data
+            .analysis_integrity
             .checks
             .iter()
             .any(|check| check.label == "eDB analysis refs"),
         "diagnostics should report DB-only eDB analysis refs: {:?}",
-        data.analysis_integrity
+        data.data.analysis_integrity
     );
     for forbidden_label in [
         "USBANLZ directory",
@@ -2291,12 +2317,13 @@ fn operational_diagnostics_do_not_walk_usbanlz_files() {
         "Track analysis refs",
     ] {
         assert!(
-            data.analysis_integrity
+            data.data
+                .analysis_integrity
                 .checks
                 .iter()
                 .all(|check| check.label != forbidden_label),
             "operational diagnostics should not expose filesystem ANLZ check '{forbidden_label}': {:?}",
-            data.analysis_integrity
+            data.data.analysis_integrity
         );
     }
 }
@@ -2356,6 +2383,7 @@ fn strict_repair_chooses_richer_side_when_membership_matches_but_metadata_differ
         .expect("PDB-primary metadata-only repair data");
     assert!(
         repair_pdb_data
+            .data
             .applied_fixes
             .iter()
             .any(|line| line.contains("merged 1 playlist")),
@@ -2395,6 +2423,7 @@ fn strict_repair_chooses_richer_side_when_membership_matches_but_metadata_differ
         .expect("eDB-primary metadata-only repair data");
     assert!(
         repair_edb_data
+            .data
             .applied_fixes
             .iter()
             .any(|line| line.contains("merged 1 playlist")),
@@ -2590,6 +2619,7 @@ fn strict_repair_restores_path_only_pdb_mismatch_from_edb() {
     let repair_data = repair.data.expect("path-only repair data");
     assert!(
         repair_data
+            .data
             .applied_fixes
             .iter()
             .any(|line| line.contains("merged 1 playlist")),
@@ -2696,6 +2726,7 @@ fn strict_repair_restores_unresolved_pdb_dictionary_ids_from_edb() {
     let repair_data = repair.data.expect("dictionary-id repair data");
     assert!(
         repair_data
+            .data
             .applied_fixes
             .iter()
             .any(|line| line.contains("merged 1 playlist")),
@@ -2775,6 +2806,7 @@ fn strict_repair_source_selection_matrix_uses_supported_deltas() {
     let repair_edb_data = repair_edb.data.expect("matrix eDB-primary repair data");
     assert!(
         repair_edb_data
+            .data
             .applied_fixes
             .iter()
             .any(|line| line.contains("merged 1 playlist")),
@@ -2830,6 +2862,7 @@ fn strict_repair_source_selection_matrix_uses_supported_deltas() {
     let repair_pdb_data = repair_pdb.data.expect("matrix PDB-primary repair data");
     assert!(
         repair_pdb_data
+            .data
             .applied_fixes
             .iter()
             .any(|line| line.contains("merged 1 playlist")),
@@ -2892,13 +2925,14 @@ fn strict_repair_source_selection_matrix_uses_supported_deltas() {
     );
     let repair_none_data = repair_none.data.expect("matrix neither repair data");
     assert!(
-        repair_none_data.applied_fixes.is_empty(),
+        repair_none_data.data.applied_fixes.is_empty(),
         "matrix neither case should not apply repair: {repair_none_data:?}"
     );
     // When no playlists exist on either side, parity has nothing to fail,
     // so the merge fix is not proposed at all ("not selected" skip).
     assert!(
         repair_none_data
+            .data
             .skipped_fixes
             .iter()
             .any(|line| line.contains("Upgrade Export Data To Strict Parity")),
@@ -3368,6 +3402,7 @@ fn playlist_resolution_stays_passable_for_partial_cross_source_match() {
     let diagnostics_data = diagnostics.data.expect("diagnostics data");
 
     let playlist = diagnostics_data
+        .data
         .playlist_details
         .iter()
         .find(|d| d.name == playlist_name)
@@ -3383,6 +3418,7 @@ fn playlist_resolution_stays_passable_for_partial_cross_source_match() {
         playlist
     );
     let full_playlist = diagnostics_data
+        .data
         .playlist_details
         .iter()
         .find(|d| d.name == full_playlist_name)
@@ -3514,6 +3550,7 @@ fn playlist_resolution_warns_for_partially_resolved_playlist() {
     let diagnostics_data = diagnostics.data.expect("diagnostics data");
 
     let playlist = diagnostics_data
+        .data
         .playlist_details
         .iter()
         .find(|d| d.name == playlist_name)
@@ -3545,6 +3582,7 @@ fn playlist_resolution_warns_for_partially_resolved_playlist() {
     );
 
     let overall_resolution = diagnostics_data
+        .data
         .playlist_resolution
         .checks
         .iter()
@@ -3559,6 +3597,7 @@ fn playlist_resolution_warns_for_partially_resolved_playlist() {
     );
 
     let overlap_check = diagnostics_data
+        .data
         .playlist_resolution
         .checks
         .iter()
@@ -3899,9 +3938,9 @@ fn assert_fix_proposed(backend: &BackendCommands, usb: &Path, fix_id: &str) {
     assert!(preview.ok, "repair preview failed: {preview:?}");
     let data = preview.data.expect("preview data");
     assert!(
-        data.proposed_fixes.iter().any(|f| f.id == fix_id),
+        data.data.proposed_fixes.iter().any(|f| f.id == fix_id),
         "expected fix '{fix_id}' to be proposed: {:#?}",
-        data.proposed_fixes
+        data.data.proposed_fixes
     );
 }
 
@@ -3914,9 +3953,9 @@ fn assert_fix_not_proposed(backend: &BackendCommands, usb: &Path, fix_id: &str) 
     assert!(preview.ok, "repair preview failed: {preview:?}");
     let data = preview.data.expect("preview data");
     assert!(
-        !data.proposed_fixes.iter().any(|f| f.id == fix_id),
+        !data.data.proposed_fixes.iter().any(|f| f.id == fix_id),
         "expected fix '{fix_id}' to no longer be proposed: {:#?}",
-        data.proposed_fixes
+        data.data.proposed_fixes
     );
 }
 
@@ -3929,13 +3968,14 @@ fn apply_fix_and_assert_applied(backend: &BackendCommands, usb: &Path, fix_id: &
     assert!(repair.ok, "repair apply failed: {repair:?}");
     let data = repair.data.expect("repair data");
     assert!(
-        data.applied_fixes.iter().any(|m| !m.is_empty()) && !data.applied_fixes.is_empty(),
+        data.data.applied_fixes.iter().any(|m| !m.is_empty())
+            && !data.data.applied_fixes.is_empty(),
         "expected '{fix_id}' to be applied: {data:#?}"
     );
     assert!(
-        data.failed_fixes.is_empty(),
+        data.data.failed_fixes.is_empty(),
         "unexpected repair failures: {:#?}",
-        data.failed_fixes
+        data.data.failed_fixes
     );
 }
 
@@ -4119,19 +4159,20 @@ fn repair_pdb_fix_not_in_selected_ids_is_skipped_not_applied() {
     assert!(repair.ok, "repair apply failed: {repair:?}");
     let data = repair.data.expect("repair data");
     assert!(
-        data.skipped_fixes.iter().any(|m| {
+        data.data.skipped_fixes.iter().any(|m| {
             m.contains("Repair PDB History/Columns Page Footer Shape") && m.contains("not selected")
         }),
         "expected the unselected fix to be reported as skipped: {:#?}",
-        data.skipped_fixes
+        data.data.skipped_fixes
     );
     assert!(
         !data
+            .data
             .applied_fixes
             .iter()
             .any(|m| m.contains("History/Columns")),
         "unselected fix must not have been applied: {:#?}",
-        data.applied_fixes
+        data.data.applied_fixes
     );
 
     // The corruption must still be present since the fix wasn't applied.
@@ -4157,6 +4198,7 @@ fn rekordbox_bookkeeping_never_warns_and_rides_along_with_any_repair() {
     let page_headers = diagnostics
         .data
         .expect("diagnostics data")
+        .data
         .pdb_integrity
         .checks
         .into_iter()
@@ -4175,6 +4217,7 @@ fn rekordbox_bookkeeping_never_warns_and_rides_along_with_any_repair() {
     assert!(preview.ok, "repair preview failed: {preview:?}");
     let preview = preview.data.expect("preview data");
     let fix = preview
+        .data
         .proposed_fixes
         .iter()
         .find(|f| f.id == PDB_WRONG_PAGE_FLAGS_FIX_ID)
@@ -4185,11 +4228,12 @@ fn rekordbox_bookkeeping_never_warns_and_rides_along_with_any_repair() {
     );
     assert!(
         !preview
+            .data
             .detected_issues
             .iter()
             .any(|i| i.contains("page_flags")),
         "bookkeeping must not count as an issue: {:#?}",
-        preview.detected_issues
+        preview.data.detected_issues
     );
 
     // A repair for something else normalizes the bookkeeping too.
@@ -4202,11 +4246,12 @@ fn rekordbox_bookkeeping_never_warns_and_rides_along_with_any_repair() {
     assert!(repair.ok, "repair apply failed: {repair:?}");
     let data = repair.data.expect("repair data");
     assert!(
-        data.applied_fixes
+        data.data
+            .applied_fixes
             .iter()
             .any(|m| m.contains("Repair PDB Data Page Flags")),
         "bookkeeping must ride along with the selected repair: {:#?}",
-        data.applied_fixes
+        data.data.applied_fixes
     );
     assert_fix_not_proposed(&backend, &usb, PDB_WRONG_PAGE_FLAGS_FIX_ID);
 }
@@ -4251,11 +4296,12 @@ fn repair_fix_empty_analysis_files_regenerates_from_source_audio() {
     // scan_anlz_warnings reports each bundle member (.DAT/.EXT/.2EX)
     // separately, so a single regenerated bundle counts as 3 "fixed".
     assert!(
-        data.applied_fixes
+        data.data
+            .applied_fixes
             .iter()
             .any(|m| m.contains("Fix Empty Analysis Files") && m.contains("fixed 3")),
         "expected the empty bundle to be reported fixed: {:#?}",
-        data.applied_fixes
+        data.data.applied_fixes
     );
 
     let regenerated_len = fs::metadata(&dat_path)
@@ -4297,18 +4343,20 @@ fn repair_fix_empty_analysis_files_skips_unmapped_stray_bundle() {
     // than `applied_fixes` — see `repair_usb_diagnostics_with_progress`'s
     // fixed/failed/else dispatch for "fix_empty_analysis_files".
     assert!(
-        data.skipped_fixes
+        data.data
+            .skipped_fixes
             .iter()
             .any(|m| m.contains("Fix Empty Analysis Files") && m.contains("nothing to apply")),
         "expected the stray bundle to be reported as skipped: {:#?}",
-        data.skipped_fixes
+        data.data.skipped_fixes
     );
     assert!(
-        data.warnings
+        data.data
+            .warnings
             .iter()
             .any(|w| w.message.contains("source audio mapping not found")),
         "expected a skip-reason warning for the unmapped stray bundle: {:#?}",
-        data.warnings
+        data.data.warnings
     );
 }
 
@@ -4322,6 +4370,7 @@ fn bpm_key_check_status(backend: &BackendCommands, usb: &Path) -> backend::model
     diagnostics
         .data
         .expect("diagnostics data")
+        .data
         .analysis_integrity
         .checks
         .into_iter()
@@ -4403,11 +4452,12 @@ fn repair_fix_bpm_key_mismatch_aligns_anlz_and_edb_to_pdb_in_one_pass() {
     assert!(repair.ok, "repair failed: {repair:?}");
     let data = repair.data.expect("repair data");
     assert!(
-        data.applied_fixes
+        data.data
+            .applied_fixes
             .iter()
             .any(|m| m.contains("Fix BPM/Key Mismatch") && m.contains("updated 1 eDB row")),
         "expected the mismatch to be fixed: {:#?}",
-        data.applied_fixes
+        data.data.applied_fixes
     );
 
     for path in [dat_path.clone(), dat_path.with_extension("EXT")] {
@@ -4474,20 +4524,24 @@ fn repair_fix_beat_grid_rewrites_pre_0_3_7_grids_once() {
     assert!(repair.ok, "repair failed: {repair:?}");
     let data = repair.data.expect("repair data");
     assert!(
-        data.applied_fixes
+        data.data
+            .applied_fixes
             .iter()
             .any(|m| m == "Fix Beat Grid: fixed 1 bundle"),
         "expected the grid to be rewritten: {:#?} {:#?}",
-        data.applied_fixes,
-        data.warnings
+        data.data.applied_fixes,
+        data.data.warnings
     );
     // The outcome is in the Event Log too, not only in the repair dialog.
     assert!(
-        data.warnings.iter().any(|w| w.code == "usb.repair.applied"
-            && w.level == "info"
-            && w.message == "repair applied: Fix Beat Grid: fixed 1 bundle"),
+        data.data
+            .warnings
+            .iter()
+            .any(|w| w.code == "usb.repair.applied"
+                && w.level == "info"
+                && w.message == "repair applied: Fix Beat Grid: fixed 1 bundle"),
         "expected the applied fix in the log: {:#?}",
-        data.warnings
+        data.data.warnings
     );
     assert_eq!(fs::read(&dat_path).expect("read DAT"), dat);
     assert_eq!(fs::read(&ext_path).expect("read EXT"), ext);
@@ -4502,6 +4556,7 @@ fn analysis_check(backend: &BackendCommands, usb: &Path, label: &str) -> Option<
     diagnostics
         .data
         .expect("diagnostics data")
+        .data
         .analysis_integrity
         .checks
         .into_iter()
@@ -4615,12 +4670,13 @@ fn repair_add_missing_mp3_seek_data_fills_an_empty_pvbr_once() {
     )));
     let data = repair.data.expect("repair data");
     assert!(
-        data.applied_fixes
+        data.data
+            .applied_fixes
             .iter()
             .any(|m| m == "Add Missing MP3 Seek Data: fixed 1, skipped 0"),
         "expected the seek data to be added: {:#?} {:#?}",
-        data.applied_fixes,
-        data.warnings
+        data.data.applied_fixes,
+        data.data.warnings
     );
 
     let patched = fs::read(&dat_path).expect("read DAT");
@@ -4704,13 +4760,15 @@ fn repair_remove_missing_audio_references_deletes_dangling_track_refs() {
     let preview_data = preview.data.expect("preview data");
     assert!(
         preview_data
+            .data
             .detected_issues
             .iter()
             .any(|i| i.contains("missing audio")),
         "expected missing-audio issue detected: {:#?}",
-        preview_data.detected_issues
+        preview_data.data.detected_issues
     );
     let proposal = preview_data
+        .data
         .proposed_fixes
         .iter()
         .find(|f| f.id == "remove_missing_audio_references")
@@ -4728,11 +4786,12 @@ fn repair_remove_missing_audio_references_deletes_dangling_track_refs() {
     assert!(repair.ok, "repair failed: {repair:?}");
     let data = repair.data.expect("repair data");
     assert!(
-        data.applied_fixes
+        data.data
+            .applied_fixes
             .iter()
             .any(|m| m.contains("Remove Missing Audio References")),
         "expected the fix to be applied: {:#?}",
-        data.applied_fixes
+        data.data.applied_fixes
     );
 
     let conn = open_edb(&vendor_db_dir(&usb).join("exportLibrary.db"));
@@ -4796,6 +4855,7 @@ fn repair_relinks_a_renamed_audio_file_instead_of_removing_it() {
         .data
         .expect("preview data");
     let ids: Vec<&str> = preview
+        .data
         .proposed_fixes
         .iter()
         .map(|f| f.id.as_str())
@@ -4805,6 +4865,7 @@ fn repair_relinks_a_renamed_audio_file_instead_of_removing_it() {
     assert!(!ids.contains(&"remove_missing_audio_references"), "{ids:?}");
     // The moved-audio pairs are in the Event Log, so the fix links to it.
     let relink = preview
+        .data
         .proposed_fixes
         .iter()
         .find(|f| f.id == "relink_moved_audio")
@@ -4820,14 +4881,19 @@ fn repair_relinks_a_renamed_audio_file_instead_of_removing_it() {
     assert!(repair.ok, "repair failed: {repair:?}");
     let data = repair.data.expect("repair data");
     assert!(
-        data.applied_fixes
+        data.data
+            .applied_fixes
             .iter()
             .any(|m| m == "Relink Moved Audio Files: relinked 1 track"),
         "applied {:#?} failed {:#?}",
-        data.applied_fixes,
-        data.failed_fixes
+        data.data.applied_fixes,
+        data.data.failed_fixes
     );
-    assert!(data.failed_fixes.is_empty(), "{:#?}", data.failed_fixes);
+    assert!(
+        data.data.failed_fixes.is_empty(),
+        "{:#?}",
+        data.data.failed_fixes
+    );
 
     // Same PDB row and eDB row, new path, still in the original playlist.
     let parsed = parse_pdb(&pdb_path).expect("parse pdb");
@@ -4871,14 +4937,14 @@ fn repair_relinks_a_renamed_audio_file_instead_of_removing_it() {
         .data
         .expect("preview data");
     assert!(
-        !after.proposed_fixes.iter().any(|f| matches!(
+        !after.data.proposed_fixes.iter().any(|f| matches!(
             f.id.as_str(),
             "relink_moved_audio"
                 | "add_unindexed_audio_playlist"
                 | "remove_missing_audio_references"
         )),
         "{:#?}",
-        after.proposed_fixes
+        after.data.proposed_fixes
     );
 }
 
@@ -4908,25 +4974,35 @@ fn repair_removes_missing_and_adds_unrelated_unindexed_audio_in_one_pass() {
     });
     assert!(repair.ok, "repair failed: {repair:?}");
     let data = repair.data.expect("repair data");
-    assert!(data.failed_fixes.is_empty(), "{:#?}", data.failed_fixes);
     assert!(
-        data.applied_fixes
+        data.data.failed_fixes.is_empty(),
+        "{:#?}",
+        data.data.failed_fixes
+    );
+    assert!(
+        data.data
+            .applied_fixes
             .iter()
             .any(|m| m.starts_with("Add Unindexed Audio to a Playlist: added 1 track")),
         "{:#?}",
-        data.applied_fixes
+        data.data.applied_fixes
     );
     assert!(
-        data.applied_fixes
+        data.data
+            .applied_fixes
             .iter()
             .any(|m| m.starts_with("Remove Missing Audio References: removed")),
         "{:#?}",
-        data.applied_fixes
+        data.data.applied_fixes
     );
     assert!(
-        !data.applied_fixes.iter().any(|m| m.starts_with("Relink")),
+        !data
+            .data
+            .applied_fixes
+            .iter()
+            .any(|m| m.starts_with("Relink")),
         "{:#?}",
-        data.applied_fixes
+        data.data.applied_fixes
     );
 
     let failing = failing_parity_checks(&backend, &usb);
@@ -4941,14 +5017,14 @@ fn repair_removes_missing_and_adds_unrelated_unindexed_audio_in_one_pass() {
         .data
         .expect("preview data");
     assert!(
-        !after.proposed_fixes.iter().any(|f| matches!(
+        !after.data.proposed_fixes.iter().any(|f| matches!(
             f.id.as_str(),
             "relink_moved_audio"
                 | "add_unindexed_audio_playlist"
                 | "remove_missing_audio_references"
         )),
         "{:#?}",
-        after.proposed_fixes
+        after.data.proposed_fixes
     );
 }
 
@@ -4976,6 +5052,7 @@ fn proposed_fix_ids(backend: &BackendCommands, usb: &Path) -> Vec<String> {
         })
         .data
         .expect("preview data")
+        .data
         .proposed_fixes
         .into_iter()
         .map(|f| f.id)
@@ -5013,20 +5090,22 @@ fn repair_deletes_unindexed_copy_of_an_indexed_audio_file() {
         .data
         .expect("preview data");
     let fix = preview
+        .data
         .proposed_fixes
         .iter()
         .find(|f| f.id == "remove_duplicate_audio_copies")
-        .unwrap_or_else(|| panic!("{:#?}", preview.proposed_fixes));
+        .unwrap_or_else(|| panic!("{:#?}", preview.data.proposed_fixes));
     assert!(fix.destructive);
     assert_eq!(fix.estimated_deletes, 1);
     assert_eq!(fix.link.as_deref(), Some("event-log"));
     assert!(
         !preview
+            .data
             .proposed_fixes
             .iter()
             .any(|f| f.id == "add_unindexed_audio_playlist"),
         "{:#?}",
-        preview.proposed_fixes
+        preview.data.proposed_fixes
     );
 
     let repair = backend.repair_usb_diagnostics(RepairUsbDiagnosticsRequest {
@@ -5036,13 +5115,18 @@ fn repair_deletes_unindexed_copy_of_an_indexed_audio_file() {
     });
     assert!(repair.ok, "repair failed: {repair:?}");
     let data = repair.data.expect("repair data");
-    assert!(data.failed_fixes.is_empty(), "{:#?}", data.failed_fixes);
     assert!(
-        data.applied_fixes
+        data.data.failed_fixes.is_empty(),
+        "{:#?}",
+        data.data.failed_fixes
+    );
+    assert!(
+        data.data
+            .applied_fixes
             .iter()
             .any(|m| m == "Remove Duplicate Audio Copies: deleted 1 file"),
         "{:#?}",
-        data.applied_fixes
+        data.data.applied_fixes
     );
     assert!(!copy.exists(), "copy must be deleted");
     assert!(original.exists(), "indexed file must be kept");
@@ -5142,12 +5226,16 @@ fn assert_one_repair_pass_clears_parity(backend: &BackendCommands, usb: &Path) {
     });
     assert!(repair.ok, "repair failed: {repair:?}");
     let data = repair.data.expect("repair data");
-    assert!(data.failed_fixes.is_empty(), "{:#?}", data.failed_fixes);
+    assert!(
+        data.data.failed_fixes.is_empty(),
+        "{:#?}",
+        data.data.failed_fixes
+    );
     let failing = failing_parity_checks(backend, usb);
     assert!(
         failing.is_empty(),
         "parity still flags after one pass: {failing:#?}\napplied: {:#?}",
-        data.applied_fixes
+        data.data.applied_fixes
     );
 }
 
@@ -5257,19 +5345,21 @@ fn repair_keeps_tracks_in_edb_history_when_their_file_is_missing() {
         .expect("preview data");
     assert!(
         !preview
+            .data
             .proposed_fixes
             .iter()
             .any(|f| f.id == "remove_missing_audio_references"),
         "{:#?}",
-        preview.proposed_fixes
+        preview.data.proposed_fixes
     );
     assert!(
         preview
+            .data
             .unsupported_items
             .iter()
             .any(|u| u.issue.contains("in a history playlist")),
         "{:#?}",
-        preview.unsupported_items
+        preview.data.unsupported_items
     );
 }
 
@@ -5637,22 +5727,24 @@ fn repair_lists_mp3_whose_seek_data_cant_be_built_instead_of_proposing_it() {
         .expect("preview data");
     assert!(
         !preview
+            .data
             .proposed_fixes
             .iter()
             .any(|f| f.id == "add_missing_mp3_seek_data"),
         "{:#?}",
-        preview.proposed_fixes
+        preview.data.proposed_fixes
     );
     assert!(
-        preview.unsupported_items.iter().any(|u| u
+        preview.data.unsupported_items.iter().any(|u| u
             .issue
             .contains("without seek data that can't be added")
             && u.link.as_deref() == Some("event-log")),
         "{:#?}",
-        preview.unsupported_items
+        preview.data.unsupported_items
     );
     assert!(
         preview
+            .data
             .warnings
             .iter()
             .any(|w| w.message.contains("zero-filled region")),
@@ -5671,12 +5763,14 @@ fn repair_lists_mp3_whose_seek_data_cant_be_built_instead_of_proposing_it() {
         .expect("apply data");
     assert!(
         applied
+            .data
             .applied_fixes
             .iter()
             .any(|fix| fix == "Add Missing MP3 Seek Data: fixed 0, skipped 1")
     );
     assert!(
         applied
+            .data
             .warnings
             .iter()
             .any(|warning| warning.code == "usb.repair.seek-data.skipped")
@@ -5709,14 +5803,15 @@ fn repair_detects_unindexed_audio_under_contents() {
     let data = preview.data.expect("preview data");
 
     assert!(
-        data.detected_issues
+        data.data
+            .detected_issues
             .iter()
             .any(|i| i.contains("missing from the canonical-path indexed set")),
         "expected unindexed-audio issue detected: {:#?}",
-        data.detected_issues
+        data.data.detected_issues
     );
     assert!(
-        data.proposed_fixes.iter().any(|f| {
+        data.data.proposed_fixes.iter().any(|f| {
             f.id == "add_unindexed_audio_playlist"
                 && f.supported
                 && !f.destructive
@@ -5727,7 +5822,7 @@ fn repair_detects_unindexed_audio_under_contents() {
                 && f.link.as_deref() == Some("event-log")
         }),
         "expected the unindexed-audio playlist fix: {:#?}",
-        data.proposed_fixes
+        data.data.proposed_fixes
     );
 }
 
@@ -5754,16 +5849,21 @@ fn repair_adds_unindexed_audio_to_usb_playlist_in_one_pass() {
     assert!(repair.ok, "repair failed: {repair:?}");
     let data = repair.data.expect("repair data");
     assert!(
-        data.applied_fixes
+        data.data
+            .applied_fixes
             .iter()
             .any(|m| m.contains("added 1 track")
                 && m.contains("\"Unindexed\"")
                 && m.contains("1 analysed from the audio")),
         "expected the fix to report the added track: applied {:#?} failed {:#?}",
-        data.applied_fixes,
-        data.failed_fixes
+        data.data.applied_fixes,
+        data.data.failed_fixes
     );
-    assert!(data.failed_fixes.is_empty(), "{:#?}", data.failed_fixes);
+    assert!(
+        data.data.failed_fixes.is_empty(),
+        "{:#?}",
+        data.data.failed_fixes
+    );
 
     // Both databases now carry the playlist with the stray file; the
     // existing playlist is untouched.
@@ -5829,11 +5929,12 @@ fn repair_adds_unindexed_audio_to_usb_playlist_in_one_pass() {
         .expect("preview data");
     assert!(
         !after
+            .data
             .proposed_fixes
             .iter()
             .any(|f| f.id == "add_unindexed_audio_playlist"),
         "unindexed audio still reported: {:#?}",
-        after.detected_issues
+        after.data.detected_issues
     );
 }
 
@@ -5874,12 +5975,13 @@ fn repair_unindexed_audio_playlist_reuses_the_files_analysis_bundle() {
     assert!(repair.ok, "repair failed: {repair:?}");
     let data = repair.data.expect("repair data");
     assert!(
-        data.applied_fixes
+        data.data
+            .applied_fixes
             .iter()
             .any(|m| m.contains("added 1 track") && !m.contains("without analysis")),
         "applied {:#?} failed {:#?}",
-        data.applied_fixes,
-        data.failed_fixes
+        data.data.applied_fixes,
+        data.data.failed_fixes
     );
 
     let parsed = parse_pdb(&pdb_path).expect("parse pdb");
@@ -5907,11 +6009,11 @@ fn repair_reports_missing_audio_scan_skipped_when_contents_absent() {
     assert!(preview.ok, "preview failed: {preview:?}");
     let data = preview.data.expect("preview data");
     assert!(
-        data.warnings.iter().any(|w| w
+        data.data.warnings.iter().any(|w| w
             .message
             .contains("missing-audio scan skipped: Contents directory is absent or empty")),
         "expected the DB-only-snapshot warning: {:#?}",
-        data.warnings
+        data.data.warnings
     );
 }
 
@@ -5936,9 +6038,12 @@ fn repair_reports_parity_preview_unavailable_when_edb_unreadable() {
     );
     let data = preview.data.expect("preview data");
     assert!(
-        data.warnings.iter().any(|w| w.code == "edb.open.failed"),
+        data.data
+            .warnings
+            .iter()
+            .any(|w| w.code == "edb.open.failed"),
         "expected an eDB-unreadable warning: {:#?}",
-        data.warnings
+        data.data.warnings
     );
 }
 
@@ -5975,11 +6080,12 @@ fn repair_apply_reports_failure_when_pdb_is_read_only() {
     );
     let data = repair.data.expect("repair data");
     assert!(
-        data.failed_fixes
+        data.data
+            .failed_fixes
             .iter()
             .any(|m| m.contains("Repair PDB Data Page Flags")),
         "expected the write failure to be reported in failed_fixes: {:#?}",
-        data.failed_fixes
+        data.data.failed_fixes
     );
 }
 
@@ -6020,11 +6126,12 @@ fn strict_repair_picks_up_pdb_only_playlist_with_no_edb_counterpart() {
     assert!(repair.ok, "repair failed: {repair:?}");
     let data = repair.data.expect("repair data");
     assert!(
-        data.applied_fixes
+        data.data
+            .applied_fixes
             .iter()
             .any(|m| m.contains("Upgrade Export Data To Strict Parity")),
         "expected strict parity upgrade to apply: {:#?}",
-        data.applied_fixes
+        data.data.applied_fixes
     );
 
     // The PDB-only playlist must have been written back into eDB.
@@ -6072,9 +6179,9 @@ fn strict_repair_skips_orphaned_playlist_tree_entry_without_erroring() {
     );
     let data = repair.data.expect("repair data");
     assert!(
-        data.failed_fixes.is_empty(),
+        data.data.failed_fixes.is_empty(),
         "orphaned entry must be skipped, not reported as a failure: {:#?}",
-        data.failed_fixes
+        data.data.failed_fixes
     );
 }
 
@@ -6130,10 +6237,11 @@ fn strict_repair_reports_failure_when_pdb_rewrite_cannot_be_written() {
     );
     let data = repair.data.expect("repair data");
     assert!(
-        data.failed_fixes
+        data.data
+            .failed_fixes
             .iter()
             .any(|m| m.contains("Upgrade Export Data To Strict Parity")),
         "expected the PDB write failure to be reported: {:#?}",
-        data.failed_fixes
+        data.data.failed_fixes
     );
 }

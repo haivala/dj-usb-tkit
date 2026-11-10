@@ -70,7 +70,8 @@ fn main() {
         preview
             .data
             .map(|d| {
-                d.proposed_fixes
+                d.data
+                    .proposed_fixes
                     .into_iter()
                     .filter(|f| f.supported)
                     .map(|f| f.id)
@@ -103,34 +104,35 @@ fn main() {
 
     let data = resp.data.unwrap();
 
-    println!("detected_issues ({}):", data.detected_issues.len());
-    for s in &data.detected_issues {
+    println!("detected_issues ({}):", data.data.detected_issues.len());
+    for s in &data.data.detected_issues {
         println!("  {s}");
     }
     println!();
-    println!("proposed_fixes ({}):", data.proposed_fixes.len());
-    for f in &data.proposed_fixes {
+    println!("proposed_fixes ({}):", data.data.proposed_fixes.len());
+    for f in &data.data.proposed_fixes {
         println!("  [{}] {}", f.id, f.title);
     }
     println!();
     if apply {
-        println!("applied ({}):", data.applied_fixes.len());
-        for s in &data.applied_fixes {
+        println!("applied ({}):", data.data.applied_fixes.len());
+        for s in &data.data.applied_fixes {
             println!("  {s}");
         }
-        println!("skipped ({}):", data.skipped_fixes.len());
-        for s in &data.skipped_fixes {
+        println!("skipped ({}):", data.data.skipped_fixes.len());
+        for s in &data.data.skipped_fixes {
             println!("  {s}");
         }
-        if !data.failed_fixes.is_empty() {
-            println!("FAILED ({}):", data.failed_fixes.len());
-            for s in &data.failed_fixes {
+        if !data.data.failed_fixes.is_empty() {
+            println!("FAILED ({}):", data.data.failed_fixes.len());
+            for s in &data.data.failed_fixes {
                 println!("  {s}");
             }
         }
     }
     println!();
     let errors: Vec<_> = data
+        .data
         .warnings
         .iter()
         .filter(|w| w.level == "error")

@@ -222,6 +222,10 @@ fn dump_usb(
         "run_usb_diagnostics",
         svc.run_usb_diagnostics(request("run_usb_diagnostics", root)),
     );
+    // The playlists' export status, against the USB selected as the app selects it.
+    svc.select_usb(request("select_usb", json!({ "path": usb_root })))
+        .unwrap_or_else(|e| fail("select_usb", e));
+    let export_status = response("playlists_state", svc.playlists_state());
 
     break_usb_copy(Path::new(usb_root), Path::new(broken_root));
     let broken = json!({ "usbRoot": broken_root });
@@ -245,6 +249,7 @@ fn dump_usb(
         "playerMenu": player_menu,
         "backgroundColor": background_color,
         "diagnostics": diagnostics,
+        "exportStatus": export_status,
         "brokenDiagnostics": broken_diagnostics,
         "repairPreview": repair_preview,
         "audioFormats": audio_formats,
@@ -370,11 +375,8 @@ fn dump_audio_formats(
             json!({ "playlistId": created.playlist_id, "usbRoot": usb_root }),
         )),
     );
-    // Asked after the playlist exists: the diagnostics dump predates it.
-    let export_status = response(
-        "refresh_playlist_export_status",
-        svc.refresh_playlist_export_status(request("refresh_playlist_export_status", root)),
-    );
+    // Asked after the playlist exists: the dump beside the diagnostics predates it.
+    let export_status = response("playlists_state", svc.playlists_state());
     json!({
         "allTicked": all_ticked,
         "unticked": unticked,

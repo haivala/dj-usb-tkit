@@ -1847,22 +1847,6 @@ pub struct PlaylistUsbExportStatus {
     pub export_status_text: String,
 }
 
-/// Request for `refresh_playlist_export_status` -- a cheap recompute of every
-/// playlist's `PlaylistUsbExportStatus` (staged PDB/eDB only, no USB access)
-/// for when the export sync-mode setting changes.
-#[derive(Debug, Clone, Default, Serialize, Deserialize)]
-#[serde(rename_all = "camelCase")]
-pub struct RefreshPlaylistExportStatusRequest {
-    #[serde(default)]
-    pub usb_root: Option<String>,
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize)]
-#[serde(rename_all = "camelCase")]
-pub struct RefreshPlaylistExportStatusData {
-    pub playlist_usb_export_status: Vec<PlaylistUsbExportStatus>,
-}
-
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct FetchUsbPlaylistsData {
@@ -1881,7 +1865,6 @@ pub struct FetchUsbPlaylistsData {
     /// empty without warnings (`utils::warning_text`).
     #[serde(default)]
     pub warning_text: String,
-    pub playlist_usb_export_status: Vec<PlaylistUsbExportStatus>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -2587,7 +2570,6 @@ pub struct RunUsbDiagnosticsData {
     /// "USB health: good", the health dots' tooltip.
     #[serde(default)]
     pub health_text: String,
-    pub playlist_usb_export_status: Vec<PlaylistUsbExportStatus>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -2981,10 +2963,6 @@ pub struct RepairUsbDiagnosticsData {
     pub status_text: String,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub diagnostics: Option<Box<RunUsbDiagnosticsData>>,
-    /// On apply: from `diagnostics`, or computed separately if that run failed.
-    /// Empty on preview, or if computing it failed too (in `warnings`).
-    #[serde(default)]
-    pub playlist_usb_export_status: Vec<PlaylistUsbExportStatus>,
     /// Whether an apply may have changed what the USB lists and player menu
     /// show, so the UI must stop showing what it has loaded.
     #[serde(default)]

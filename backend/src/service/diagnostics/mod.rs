@@ -18,9 +18,7 @@ use crate::utils::{
 };
 
 use super::BackendService;
-use super::export::{compute_playlist_usb_export_status, usb_playlist_names_for_export_compare};
 use super::export_helpers::{load_table_columns, table_exists};
-use super::export_prune_stale_setting;
 use super::usb_helpers::is_named_history_playlist;
 use super::usb_utils::{
     canonicalize_playlist_name, collect_contents_files, repair_utf8_mojibake, resolve_usb_root,

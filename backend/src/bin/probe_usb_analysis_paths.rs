@@ -104,7 +104,7 @@ fn main() {
         .unwrap_or_else(|| fail("missing fetch_usb_playlists response data"));
 
     let mut tracks = BTreeMap::<String, TrackProbeRow>::new();
-    for playlist in data.items {
+    for playlist in data.data.items {
         for track in playlist.tracks {
             let key = track
                 .usb_media_path

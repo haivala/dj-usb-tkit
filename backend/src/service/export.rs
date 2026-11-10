@@ -1078,39 +1078,6 @@ impl BackendService {
         self.export_to_usb_with_progress(req, |_, _, _| {})
     }
 
-    /// Recompute every local playlist's `PlaylistUsbExportStatus` against the
-    /// connected USB's playlist names and the current export sync-mode setting.
-    /// Reads only the *staged* PDB/eDB (local cache, no access to the USB
-    /// drive), so the frontend can call it from the settings sync-mode toggle
-    /// instead of re-deriving `locksReorder` itself. With no (or no longer
-    /// valid) `usb_root`, every playlist comes back unlocked -- there is
-    /// nothing on a device to collide with.
-    pub fn refresh_playlist_export_status(
-        &self,
-        req: crate::models::RefreshPlaylistExportStatusRequest,
-    ) -> BackendResult<crate::models::RefreshPlaylistExportStatusData> {
-        let conn = self.db.connect()?;
-        let prune_stale = export_prune_stale_setting(&conn)?;
-        let local_playlists = self.list_playlists()?.items;
-
-        let usb_playlist_names = req
-            .usb_root
-            .as_deref()
-            .map(str::trim)
-            .filter(|root| !root.is_empty())
-            .map(|root| self.usb_playlist_names(std::path::Path::new(root)))
-            .unwrap_or_default();
-
-        Ok(crate::models::RefreshPlaylistExportStatusData {
-            playlist_usb_export_status: compute_playlist_usb_export_status(
-                &local_playlists,
-                &usb_playlist_names,
-                prune_stale,
-                req.usb_root.as_deref(),
-            ),
-        })
-    }
-
     /// The playlists as they are, with their export status against the selected USB: what
     /// `list_playlists` answers, and every command that changes the playlists.
     pub fn playlists_state(&self) -> BackendResult<crate::models::PlaylistsState> {
@@ -3982,7 +3949,7 @@ mod tests {
     }
 
     #[test]
-    fn refresh_playlist_export_status_with_no_usb_root_reports_every_playlist_unlocked() {
+    fn playlists_state_without_a_selected_usb_reports_every_playlist_unlocked() {
         let (_dir, service) = test_service();
         service
             .create_playlist(CreatePlaylistRequest {
@@ -3990,14 +3957,10 @@ mod tests {
             })
             .expect("create playlist");
 
-        let data = service
-            .refresh_playlist_export_status(crate::models::RefreshPlaylistExportStatusRequest {
-                usb_root: None,
-            })
-            .expect("refresh status");
+        let state = service.playlists_state().expect("playlists state");
 
-        assert_eq!(data.playlist_usb_export_status.len(), 1);
-        let status = &data.playlist_usb_export_status[0];
+        assert_eq!(state.playlist_usb_export_status.len(), 1);
+        let status = &state.playlist_usb_export_status[0];
         assert!(!status.same_name_exists_on_usb);
         assert!(!status.locks_reorder);
     }

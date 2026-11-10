@@ -152,12 +152,12 @@ fn main() {
     let usb_data = usb
         .data
         .unwrap_or_else(|| fail_with_cleanup("missing fetch_usb_playlists data", &data_dir));
-    if usb_data.items.is_empty() {
+    if usb_data.data.items.is_empty() {
         fail_with_cleanup("no USB playlists found to export", &data_dir);
     }
 
     let mut exported_count = 0usize;
-    for usb_playlist in usb_data.items {
+    for usb_playlist in usb_data.data.items {
         let create = backend.create_playlist(backend::models::CreatePlaylistRequest {
             name: usb_playlist.name.clone(),
         });

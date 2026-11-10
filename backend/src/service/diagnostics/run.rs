@@ -472,22 +472,6 @@ impl BackendService {
         let cdj_counter_section = cdj_counter_snapshot
             .as_ref()
             .map(player_counter_snapshot_section);
-        let usb_playlist_names = usb_playlist_names_for_export_compare(
-            parsed_pdb,
-            edb_playlist_tracks
-                .as_ref()
-                .into_iter()
-                .flat_map(|m| m.keys().cloned()),
-        );
-        let local_playlists = self.list_playlists()?.items;
-        let conn = self.db.connect()?;
-        let prune_stale = export_prune_stale_setting(&conn)?;
-        let playlist_usb_export_status = compute_playlist_usb_export_status(
-            &local_playlists,
-            &usb_playlist_names,
-            prune_stale,
-            Some(usb_root.to_string_lossy().as_ref()),
-        );
         let mut display_sources = vec![
             (&pdb_integrity, DISPLAY_PDB),
             (&playlist_resolution, DISPLAY_PLAYLISTS),
@@ -546,7 +530,6 @@ impl BackendService {
             duration_text: crate::i18n::tr::diagnostics_duration(duration_ms).render(),
             status_label,
             health_text,
-            playlist_usb_export_status,
         };
         Ok(data)
     }

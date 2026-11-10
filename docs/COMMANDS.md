@@ -281,8 +281,9 @@ drive selection from being rendered against a newer selected drive.
 Every command that changes playlists (`create_playlist`, `rename_playlist`, `delete_playlist`,
 `remove_tracks_from_playlist`, `reorder_playlist_tracks`, the `add_*_to_playlist(s)` commands,
 `import_external_playlists`, `export_to_usb`, `export_to_usb_with_progress`,
-`set_usb_device_name`, `restore_usb_backup`, and `select_usb` and `set_export_sync_mode`, which
-change the export status) also answers with the whole playlist state, the same fields
+`set_usb_device_name`, `restore_usb_backup`, and `select_usb`, `set_export_sync_mode`,
+`fetch_usb_playlists`, `run_usb_diagnostics` and `repair_usb_diagnostics`, which change or re-read
+the export status) also answers with the whole playlist state, the same fields
 `list_playlists` returns, next to its own: `playlists` and `playlistUsbExportStatus`. The UI
 applies them as they come and never asks for the list again after a change.
 
@@ -498,9 +499,9 @@ selected USB), or `moveTrackId` + optional `beforeTrackId` (single-move for a pa
 drag-reorder). `get_playlist_tracks` also returns `unanalyzedCount` over the whole filtered
 playlist, since a paginated client can't count them from one page, with the Analyze Missing
 button's `analyzeMissingLabel` and `analyzeMissingTooltip`. See `docs/PLAYLISTS_PLAYBACK.md`
-for when the UI disables reordering. `fetch_usb_playlists` and `run_usb_diagnostics` both return a
-`playlistUsbExportStatus` array (one entry per local playlist) so the frontend doesn't have to
-re-derive that lock condition from raw USB-scan/export-setting state.
+for when the UI disables reordering. `fetch_usb_playlists`, `run_usb_diagnostics` and
+`repair_usb_diagnostics` answer with the playlist state (`WithPlaylists`), so the frontend doesn't
+have to re-derive that lock condition from raw USB-scan/export-setting state.
 
 `analyze_new_tracks` adds to the analysis job and returns at once: `jobId`, `queued`, `skipped` and
 the status line's `message`. The job's events carry the rest, including each track's saved row and,

@@ -1435,6 +1435,7 @@ fn usb_playlist_rows_carry_the_exported_release_year() {
         })
         .data
         .expect("usb playlists")
+        .data
         .items
         .remove(0);
     assert_eq!(playlist.source, "eDB");

@@ -88,7 +88,7 @@ fn usb_tracks_via_pages(
     });
     assert!(list.ok, "fetch usb playlists failed: {list:?}");
     let mut out = Vec::new();
-    for playlist in list.data.expect("usb playlist data").items {
+    for playlist in list.data.expect("usb playlist data").data.items {
         let page = backend.fetch_usb_playlist_tracks(FetchUsbTracksRequest {
             usb_root: Some(root.clone()),
             id: playlist.id,
@@ -1526,6 +1526,7 @@ fn export_to_usb_mirror_prune_keeps_shared_audio_referenced_by_other_playlists()
         })
         .data
         .expect("usb playlists data")
+        .data
         .items;
     let imported_b = usb_playlists
         .iter()
@@ -4650,6 +4651,7 @@ fn repair_usb_diagnostics_preview_lists_missing_audio_references_fix() {
 
     assert!(
         preview
+            .data
             .proposed_fixes
             .iter()
             .any(|f| f.id == "remove_missing_audio_references" && f.supported),
@@ -4657,6 +4659,7 @@ fn repair_usb_diagnostics_preview_lists_missing_audio_references_fix() {
     );
     assert!(
         preview
+            .data
             .warnings
             .iter()
             .any(|w| w.message.starts_with("missing-audio reference: ")),
@@ -4664,6 +4667,7 @@ fn repair_usb_diagnostics_preview_lists_missing_audio_references_fix() {
     );
     assert!(
         preview
+            .data
             .warnings
             .iter()
             .any(|w| w.code == "usb.diagnostics.missing-audio" && w.level == "warn"),
@@ -4693,6 +4697,7 @@ fn repair_usb_diagnostics_preview_lists_unindexed_audio_paths_in_warnings() {
 
     assert!(
         preview
+            .data
             .warnings
             .iter()
             .any(|w| w.message == format!("unindexed audio file: {unindexed_path}")),
@@ -4700,6 +4705,7 @@ fn repair_usb_diagnostics_preview_lists_unindexed_audio_paths_in_warnings() {
     );
     assert!(
         preview
+            .data
             .warnings
             .iter()
             .any(|w| w.code == "usb.diagnostics.unindexed-audio" && w.level == "warn"),
@@ -5009,6 +5015,7 @@ fn repair_usb_diagnostics_strict_upgrade_rewrites_pdb_from_edb() {
     let preview = preview_response.data.expect("repair preview");
     assert!(
         preview
+            .data
             .proposed_fixes
             .iter()
             .any(|f| f.id == "upgrade_export_data_to_strict_parity"
@@ -5029,6 +5036,7 @@ fn repair_usb_diagnostics_strict_upgrade_rewrites_pdb_from_edb() {
     let applied = applied_response.data.expect("repair apply");
     assert!(
         applied
+            .data
             .applied_fixes
             .iter()
             .any(|line| line.starts_with("Upgrade Export Data To Strict Parity:")),
@@ -5187,6 +5195,7 @@ fn repair_usb_diagnostics_strict_upgrade_is_not_proposed_when_neither_side_is_ri
     // end up with the same data (parity), regardless of richness.
     assert!(
         preview
+            .data
             .proposed_fixes
             .iter()
             .any(|fix| fix.id == "upgrade_export_data_to_strict_parity" && fix.supported),

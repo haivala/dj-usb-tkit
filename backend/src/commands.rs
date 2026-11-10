@@ -581,21 +581,23 @@ impl BackendCommands {
     pub fn fetch_usb_playlists(
         &self,
         req: FetchUsbPlaylistsRequest,
-    ) -> ApiResponse<FetchUsbPlaylistsData> {
-        wrap(self.service.fetch_usb_playlists(req))
+    ) -> ApiResponse<WithPlaylists<FetchUsbPlaylistsData>> {
+        wrap(self.with_playlists(self.service.fetch_usb_playlists(req)))
     }
 
     pub fn fetch_usb_playlists_with_progress<F>(
         &self,
         req: FetchUsbPlaylistsRequest,
         on_progress: F,
-    ) -> ApiResponse<FetchUsbPlaylistsData>
+    ) -> ApiResponse<WithPlaylists<FetchUsbPlaylistsData>>
     where
         F: FnMut(usize, usize, &str),
     {
         wrap(
-            self.service
-                .fetch_usb_playlists_with_progress(req, on_progress),
+            self.with_playlists(
+                self.service
+                    .fetch_usb_playlists_with_progress(req, on_progress),
+            ),
         )
     }
 
@@ -871,21 +873,23 @@ impl BackendCommands {
     pub fn run_usb_diagnostics(
         &self,
         req: RunUsbDiagnosticsRequest,
-    ) -> ApiResponse<RunUsbDiagnosticsData> {
-        wrap(self.service.run_usb_diagnostics(req))
+    ) -> ApiResponse<WithPlaylists<RunUsbDiagnosticsData>> {
+        wrap(self.with_playlists(self.service.run_usb_diagnostics(req)))
     }
 
     pub fn run_usb_diagnostics_with_progress<F>(
         &self,
         req: RunUsbDiagnosticsRequest,
         on_progress: F,
-    ) -> ApiResponse<RunUsbDiagnosticsData>
+    ) -> ApiResponse<WithPlaylists<RunUsbDiagnosticsData>>
     where
         F: FnMut(usize, usize, &str),
     {
         wrap(
-            self.service
-                .run_usb_diagnostics_with_progress(req, on_progress),
+            self.with_playlists(
+                self.service
+                    .run_usb_diagnostics_with_progress(req, on_progress),
+            ),
         )
     }
 
@@ -913,21 +917,23 @@ impl BackendCommands {
     pub fn repair_usb_diagnostics(
         &self,
         req: RepairUsbDiagnosticsRequest,
-    ) -> ApiResponse<RepairUsbDiagnosticsData> {
-        wrap(self.service.repair_usb_diagnostics(req))
+    ) -> ApiResponse<WithPlaylists<RepairUsbDiagnosticsData>> {
+        wrap(self.with_playlists(self.service.repair_usb_diagnostics(req)))
     }
 
     pub fn repair_usb_diagnostics_with_progress<F>(
         &self,
         req: RepairUsbDiagnosticsRequest,
         on_progress: F,
-    ) -> ApiResponse<RepairUsbDiagnosticsData>
+    ) -> ApiResponse<WithPlaylists<RepairUsbDiagnosticsData>>
     where
         F: FnMut(usize, usize, &str),
     {
         wrap(
-            self.service
-                .repair_usb_diagnostics_with_progress(req, on_progress),
+            self.with_playlists(
+                self.service
+                    .repair_usb_diagnostics_with_progress(req, on_progress),
+            ),
         )
     }
 

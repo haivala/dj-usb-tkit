@@ -51,17 +51,17 @@ fn main() {
     }
 
     let payload = json!({
-        "overallStatus": data.overall_status,
-        "warnings": data.warnings,
-        "cdjCounterSnapshot": data.cdj_counter_snapshot,
-        "playlistDetailCount": data.playlist_details.len(),
+        "overallStatus": data.data.overall_status,
+        "warnings": data.data.warnings,
+        "cdjCounterSnapshot": data.data.cdj_counter_snapshot,
+        "playlistDetailCount": data.data.playlist_details.len(),
         "sections": {
-            "pdbIntegrity": section_json(&data.pdb_integrity),
-            "edbAccess": section_json(&data.edb_access),
-            "contentsIntegrity": section_json(&data.contents_integrity),
-            "analysisIntegrity": section_json(&data.analysis_integrity),
-            "playlistResolution": section_json(&data.playlist_resolution),
-            "cdjCounter": data.cdj_counter_section.as_ref().map(section_json),
+            "pdbIntegrity": section_json(&data.data.pdb_integrity),
+            "edbAccess": section_json(&data.data.edb_access),
+            "contentsIntegrity": section_json(&data.data.contents_integrity),
+            "analysisIntegrity": section_json(&data.data.analysis_integrity),
+            "playlistResolution": section_json(&data.data.playlist_resolution),
+            "cdjCounter": data.data.cdj_counter_section.as_ref().map(section_json),
         },
     });
     println!("{}", serde_json::to_string_pretty(&payload).unwrap());

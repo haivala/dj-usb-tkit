@@ -26,7 +26,6 @@ use crate::pdb_reader::{
 };
 
 use super::analysis::normalize_text;
-use super::export::{compute_playlist_usb_export_status, usb_playlist_names_for_export_compare};
 use super::export_helpers::{
     analysis_bundle_path_variants, prune_stale_export_owned_files,
     remove_playlist_and_tracks_from_pdb, remove_playlist_from_edb,
@@ -54,7 +53,7 @@ use super::usb_vendor_compat::{
 };
 use super::{
     BackendService, browse_path_matches_root, build_track_match_fingerprint, export_log,
-    export_prune_stale_setting, find_confident_fingerprint_match, now, untainted_usb_root_paths,
+    find_confident_fingerprint_match, now, untainted_usb_root_paths,
 };
 
 const SLOW_USB_STAGE_MS: u128 = 8_000;
@@ -101,7 +100,6 @@ pub(crate) struct CachedUsbPlaylists {
     items: Vec<UsbPlaylist>,
     stats: UsbImportStats,
     warnings: Vec<WarningEntry>,
-    usb_playlist_names: HashSet<String>,
 }
 
 /// One-entry parse cache: `(key, resolved playlists)`, guarded for sharing
@@ -1412,22 +1410,11 @@ impl BackendService {
         })
     }
 
-    /// Build the `FetchUsbPlaylistsData` response from a resolved parse: adds
-    /// the per-call, local-DB-derived export-status comparison.
+    /// Build the `FetchUsbPlaylistsData` response from a resolved parse.
     fn finish_usb_playlists(
         &self,
         resolved: &CachedUsbPlaylists,
-        usb_root: &Path,
     ) -> BackendResult<FetchUsbPlaylistsData> {
-        let local_playlists = self.list_playlists()?.items;
-        let conn = self.db.connect()?;
-        let prune_stale = export_prune_stale_setting(&conn)?;
-        let playlist_usb_export_status = compute_playlist_usb_export_status(
-            &local_playlists,
-            &resolved.usb_playlist_names,
-            prune_stale,
-            Some(usb_root.to_string_lossy().as_ref()),
-        );
         let playlist_count = resolved.items.len();
         let track_total: usize = resolved.items.iter().map(|p| p.track_count).sum();
         let summary_text = tr::usb_playlists_summary(playlist_count, track_total).render();
@@ -1440,7 +1427,6 @@ impl BackendService {
             summary_text,
             warning_text: warning_text(warning_count),
             warnings: resolved.warnings.clone(),
-            playlist_usb_export_status,
         })
     }
 
@@ -1468,7 +1454,7 @@ impl BackendService {
 
         let cache_key = self.usb_parse_cache_key(&usb_root);
         if let Some(resolved) = self.usb_playlists_cache_hit(&cache_key) {
-            return self.finish_usb_playlists(&resolved, &usb_root);
+            return self.finish_usb_playlists(&resolved);
         }
 
         let pdb_path = super::usb_staging::stage_pdb(&usb_root)?;
@@ -1725,24 +1711,15 @@ impl BackendService {
             ));
         }
 
-        let usb_playlist_names = usb_playlist_names_for_export_compare(
-            parsed,
-            edb_playlists
-                .as_ref()
-                .into_iter()
-                .flat_map(|m| m.keys().cloned()),
-        );
-
         let resolved = Arc::new(CachedUsbPlaylists {
             items,
             stats,
             warnings,
-            usb_playlist_names,
         });
         if let Ok(mut guard) = self.usb_playlists_cache.lock() {
             *guard = Some((cache_key, Arc::clone(&resolved)));
         }
-        self.finish_usb_playlists(&resolved, &usb_root)
+        self.finish_usb_playlists(&resolved)
     }
 
     pub fn fetch_usb_histories(

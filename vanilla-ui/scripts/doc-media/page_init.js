@@ -123,11 +123,11 @@
   };
   const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
   // With `opts.audioFormats`, the status the backend gave once that shot's
-  // playlist existed: the diagnostics dump predates it.
+  // playlist existed: the one dumped beside the diagnostics predates it.
   const exportStatusList = () =>
     opts.audioFormats
       ? usb.audioFormats.exportStatus.data.playlistUsbExportStatus
-      : usb?.diagnostics?.data?.playlistUsbExportStatus;
+      : usb?.exportStatus?.data?.playlistUsbExportStatus;
   const exportedNow = new Set();
   // Playlists added to since: their "exported to USB" marks are cleared.
   const changedNow = new Set();
@@ -385,15 +385,12 @@
               ...playlistsState(),
             });
           case "run_usb_diagnostics":
-            if (!usb) return ok({ overallStatus: "PASS", durationMs: 842, warnings: [], checks: [], playlistUsbExportStatus: [] });
-            if (opts.audioFormats) {
-              return ok({ ...usb.diagnostics.data, playlistUsbExportStatus: exportStatusList() });
-            }
-            return opts.brokenUsb ? usb.brokenDiagnostics : usb.diagnostics;
+            if (!usb) return ok({ overallStatus: "PASS", durationMs: 842, warnings: [], checks: [], ...playlistsState() });
+            return ok({ ...(opts.brokenUsb ? usb.brokenDiagnostics : usb.diagnostics).data, ...playlistsState() });
           case "repair_usb_diagnostics":
-            return usb.repairPreview;
+            return ok({ ...usb.repairPreview.data, ...playlistsState() });
           case "fetch_usb_playlists":
-            return usb ? usb.playlists : ok({ items: [], warnings: [] });
+            return ok({ ...(usb ? usb.playlists.data : { items: [], warnings: [] }), ...playlistsState() });
           case "fetch_usb_playlist_tracks":
             return usb.playlistTracks[r.id];
           case "fetch_usb_histories":

@@ -1194,6 +1194,7 @@ test("a repair whose diagnostics re-run failed still applies the export status i
             appliedFixes: payload.request.selectedFixIds,
             usbContentChanged: true,
             statusText: "Repair apply complete: 1 applied",
+            playlists: [{ id: "pl-1", name: "Local Set", source: "local" }],
             playlistUsbExportStatus: [{ playlistId: "pl-1", playlistName: "Local Set", usbSelected: true, sameNameExistsOnUsb: true, markLabel: "On this USB" }]
           }
         };
@@ -1205,11 +1206,11 @@ test("a repair whose diagnostics re-run failed still applies the export status i
   await connectUsb(page);
   const mark = page.locator('#navPlaylistList .nav-playlist-item[data-playlist-id="pl-1"] .nav-playlist-status');
   await expect(mark).not.toHaveClass(/exported/);
-  // The repair must not need a second command to refresh the export status.
-  const loadsBeforeRepair = await page.evaluate(() => window.__playlistLoads);
-
   await page.locator("#usbHealthCard").evaluate((node) => { node.open = true; });
   await page.locator("#previewRepairsBtn").click();
+  await expect(page.locator("#applyRepairsBtn")).toBeEnabled();
+  // The repair must not need a second command to refresh the export status.
+  const loadsBeforeRepair = await page.evaluate(() => window.__playlistLoads);
   await page.locator("#applyRepairsBtn").click();
   await expect(page.locator("#statusText")).toContainText("Repair apply complete");
   await expect(page.locator("#statusText")).not.toContainText("Diagnostics refreshed");

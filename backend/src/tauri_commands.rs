@@ -1484,7 +1484,7 @@ pub async fn fetch_usb_playlists(
     app: AppHandle,
     state: State<'_, BackendCommands>,
     request: FetchUsbPlaylistsRequest,
-) -> Result<ApiResponse<FetchUsbPlaylistsData>, String> {
+) -> Result<ApiResponse<crate::models::WithPlaylists<FetchUsbPlaylistsData>>, String> {
     let commands = state.inner().clone();
     run_usb_job_with_progress(
         &app,
@@ -2054,7 +2054,7 @@ pub async fn run_usb_diagnostics(
     app: AppHandle,
     state: State<'_, BackendCommands>,
     request: RunUsbDiagnosticsRequest,
-) -> Result<ApiResponse<RunUsbDiagnosticsData>, String> {
+) -> Result<ApiResponse<crate::models::WithPlaylists<RunUsbDiagnosticsData>>, String> {
     let commands = state.inner().clone();
     run_usb_job_with_progress(
         &app,
@@ -2098,7 +2098,7 @@ pub async fn repair_usb_diagnostics(
     app: AppHandle,
     state: State<'_, BackendCommands>,
     request: RepairUsbDiagnosticsRequest,
-) -> Result<ApiResponse<RepairUsbDiagnosticsData>, String> {
+) -> Result<ApiResponse<crate::models::WithPlaylists<RepairUsbDiagnosticsData>>, String> {
     let commands = state.inner().clone();
     run_usb_job_with_progress(
         &app,

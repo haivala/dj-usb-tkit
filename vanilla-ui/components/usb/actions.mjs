@@ -717,7 +717,7 @@ async function readUsbPlaylists(ctx, isCurrent) {
   state.usbPlaylists = data.items;
   const stillOpen = findByScopeId(state.usbPlaylists, tracksCtl.scopeId);
   if (stillOpen) stillOpen.listSummaryText = openSummary;
-  applyPlaylistUsbExportStatus(ctx, data.playlistUsbExportStatus);
+  ctx.applyPlaylistsState(data);
 
   el.usbCountsText.textContent = data.summaryText;
   renderUsbPlaylists(ctx);
@@ -755,7 +755,7 @@ export async function runUsbDiagnostics(ctx, { openReport = false } = {}) {
     const data = await ctx.command("run_usb_diagnostics", {
       usbRoot: state.usbRoot
     });
-    applyPlaylistUsbExportStatus(ctx, data.playlistUsbExportStatus);
+    ctx.applyPlaylistsState(data);
     await ctx.renderCurrentPlaylistTracksFromState();
     renderDiagnosticsReport(ctx, data);
     emitStatus(data.statusText);
@@ -802,7 +802,7 @@ export async function applyUsbRepairs(ctx) {
   if (data.usbContentChanged) usbContentChanged(ctx);
   // The Engine library fix turns the setting on backend-side.
   syncEngineLibrarySetting(ctx, data.engineLibraryEnabled);
-  applyPlaylistUsbExportStatus(ctx, data.playlistUsbExportStatus);
+  ctx.applyPlaylistsState(data);
   await ctx.renderCurrentPlaylistTracksFromState();
   if (data.diagnostics) {
     renderDiagnosticsReport(ctx, data.diagnostics);
