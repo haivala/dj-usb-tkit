@@ -15,7 +15,7 @@ use crate::metadata::sanitize_metadata;
 use crate::models::{UsbTrack, WarningEntry};
 use crate::service::usb_utils::resolve_usb_side_path_text;
 use crate::service::usb_vendor_compat::{
-    DEFAULT_MASTER_DB_KEY, DEFAULT_USB_EDB_KEY, USB_VENDOR_DB_DIR, USB_VENDOR_ROOT_DIR,
+    DEFAULT_USB_EDB_KEY, USB_VENDOR_DB_DIR, USB_VENDOR_ROOT_DIR,
 };
 
 // -----------------------------------------------------------------------------
@@ -170,11 +170,6 @@ pub struct ExportDbPlaylist {
 // eDB open/unlock helpers
 // -----------------------------------------------------------------------------
 
-/// Validate that a SQLCipher key contains only safe characters (alphanumeric).
-pub fn is_safe_sqlcipher_key(key: &str) -> bool {
-    !key.is_empty() && key.chars().all(|c| c.is_ascii_alphanumeric())
-}
-
 pub fn edb_path_from_usb_root(usb_root: &Path) -> std::path::PathBuf {
     usb_root
         .join(USB_VENDOR_ROOT_DIR)
@@ -182,9 +177,12 @@ pub fn edb_path_from_usb_root(usb_root: &Path) -> std::path::PathBuf {
         .join("exportLibrary.db")
 }
 
+/// Whether `conn` sees a schema: at least one table or view of its own. A
+/// wrong key reads the file as garbage and sees none.
 fn has_schema(conn: &rusqlite::Connection) -> bool {
     conn.query_row(
-        "SELECT COUNT(1) FROM sqlite_master WHERE type IN ('table','view')",
+        "SELECT COUNT(1) FROM sqlite_master
+         WHERE type IN ('table','view') AND name NOT LIKE 'sqlite_%'",
         [],
         |row| row.get::<_, i64>(0),
     )
@@ -193,60 +191,127 @@ fn has_schema(conn: &rusqlite::Connection) -> bool {
         > 0
 }
 
-fn effective_sqlcipher_keys() -> Vec<String> {
-    vec![
-        DEFAULT_USB_EDB_KEY.to_string(),
-        DEFAULT_MASTER_DB_KEY.to_string(),
-    ]
+/// SQLCipher 4's defaults, which the eDB uses: PBKDF2-HMAC-SHA512 over
+/// 256 000 iterations, a 32-byte key and the file's first 16 bytes as salt.
+const SQLCIPHER_KDF_ITERATIONS: i32 = 256_000;
+const SQLCIPHER_SALT_LEN: usize = 16;
+const SQLITE_PLAIN_HEADER: &[u8; SQLCIPHER_SALT_LEN] = b"SQLite format 3\0";
+
+/// eDB keys derived from `DEFAULT_USB_EDB_KEY`, by the file's salt. Deriving
+/// one is what makes opening the eDB slow (tens of ms), and commands that run
+/// together each open it; a rewritten eDB keeps its salt, so a key derived
+/// once opens it from then on. Same salt, same key: a memo, not state.
+static EDB_KEY_BY_SALT: std::sync::OnceLock<
+    std::sync::Mutex<HashMap<[u8; SQLCIPHER_SALT_LEN], [u8; 32]>>,
+> = std::sync::OnceLock::new();
+
+fn edb_salt(path: &Path) -> Option<[u8; SQLCIPHER_SALT_LEN]> {
+    use std::io::Read;
+    let mut salt = [0u8; SQLCIPHER_SALT_LEN];
+    std::fs::File::open(path).ok()?.read_exact(&mut salt).ok()?;
+    (&salt != SQLITE_PLAIN_HEADER).then_some(salt)
+}
+
+fn derive_edb_key(salt: &[u8; SQLCIPHER_SALT_LEN]) -> Option<[u8; 32]> {
+    let pass = DEFAULT_USB_EDB_KEY.as_bytes();
+    let mut key = [0u8; 32];
+    // SAFETY: every pointer is to a live buffer of the length passed with it,
+    // and `EVP_sha512` returns a static digest description.
+    let ok = unsafe {
+        openssl_sys::PKCS5_PBKDF2_HMAC(
+            pass.as_ptr().cast(),
+            i32::try_from(pass.len()).ok()?,
+            salt.as_ptr(),
+            SQLCIPHER_SALT_LEN as i32,
+            SQLCIPHER_KDF_ITERATIONS,
+            openssl_sys::EVP_sha512(),
+            key.len() as i32,
+            key.as_mut_ptr(),
+        )
+    };
+    (ok == 1).then_some(key)
+}
+
+fn edb_key_for_salt(salt: &[u8; SQLCIPHER_SALT_LEN]) -> Option<[u8; 32]> {
+    let memo = EDB_KEY_BY_SALT.get_or_init(Default::default);
+    if let Some(key) = memo.lock().ok().and_then(|m| m.get(salt).copied()) {
+        return Some(key);
+    }
+    derive_edb_key(salt)
+}
+
+/// Open the eDB at `path` with `flags`: as plain SQLite, else with its key.
+/// The key comes derived from the memo (`EDB_KEY_BY_SALT`); an eDB it
+/// doesn't open (other SQLCipher settings) is opened with the passphrase.
+fn open_edb_with_flags(path: &Path, flags: rusqlite::OpenFlags) -> Option<rusqlite::Connection> {
+    let open = || rusqlite::Connection::open_with_flags(path, flags).ok();
+    let read_write = flags.contains(rusqlite::OpenFlags::SQLITE_OPEN_READ_WRITE);
+    let unlocked = |how: &str| {
+        logging::debug(
+            "edb",
+            if read_write {
+                format!("eDB opened read-write with SQLCipher key ({how})")
+            } else {
+                format!("eDB unlocked via SQLCipher with {how}")
+            },
+        );
+    };
+    if let Some(plain) = open()
+        && has_schema(&plain)
+    {
+        logging::debug(
+            "edb",
+            if read_write {
+                "eDB opened read-write without SQLCipher key"
+            } else {
+                "eDB opened without SQLCipher key"
+            },
+        );
+        return Some(plain);
+    }
+
+    let salt = edb_salt(path)?;
+    if let Some(key) = edb_key_for_salt(&salt) {
+        let hex: String = key.iter().map(|b| format!("{b:02x}")).collect();
+        if let Some(conn) = open()
+            && conn
+                .execute_batch(&format!("PRAGMA key = \"x'{hex}'\";"))
+                .is_ok()
+            && has_schema(&conn)
+        {
+            let memo = EDB_KEY_BY_SALT.get_or_init(Default::default);
+            if let Ok(mut memo) = memo.lock() {
+                memo.insert(salt, key);
+            }
+            unlocked("its derived key");
+            return Some(conn);
+        }
+    }
+
+    let conn = open()?;
+    conn.execute_batch(&format!("PRAGMA key='{DEFAULT_USB_EDB_KEY}';"))
+        .ok()?;
+    if has_schema(&conn) {
+        unlocked("the USB export key");
+        return Some(conn);
+    }
+    None
 }
 
 pub fn open_edb(path: &Path, warnings: &mut Vec<WarningEntry>) -> Option<rusqlite::Connection> {
     if !path.exists() {
         return None;
     }
-
-    let open_ro =
-        || rusqlite::Connection::open_with_flags(path, rusqlite::OpenFlags::SQLITE_OPEN_READ_ONLY);
-    if let Ok(plain) = open_ro()
-        && has_schema(&plain)
-    {
-        logging::debug("edb", "eDB opened without SQLCipher key");
-        return Some(plain);
+    let conn = open_edb_with_flags(path, rusqlite::OpenFlags::SQLITE_OPEN_READ_ONLY);
+    if conn.is_none() {
+        warnings.push(logging::log_text(
+            Level::Warn,
+            "edb",
+            "edb.open.failed",
+            &tr::usb_warning_edb_unreadable(),
+        ));
     }
-
-    let merged_keys = effective_sqlcipher_keys();
-    let mut attempts = 0usize;
-    for raw_key in &merged_keys {
-        if !is_safe_sqlcipher_key(raw_key) {
-            logging::debug("edb", "skipping SQLCipher key with unsafe characters");
-            continue;
-        }
-        attempts += 1;
-        let batch = format!("PRAGMA key='{raw_key}';");
-        let Ok(candidate) = open_ro() else { continue };
-        if candidate.execute_batch(&batch).is_err() {
-            continue;
-        }
-        if has_schema(&candidate) {
-            let key_label = if raw_key == DEFAULT_USB_EDB_KEY {
-                "default USB export"
-            } else {
-                "default master"
-            };
-            logging::debug(
-                "edb",
-                format!("eDB unlocked via SQLCipher with {key_label} key"),
-            );
-            return Some(candidate);
-        }
-    }
-    warnings.push(logging::log_text(
-        Level::Warn,
-        "edb",
-        "edb.open.failed",
-        &tr::usb_warning_edb_unreadable(attempts),
-    ));
-    None
+    conn
 }
 
 fn staged_edb_path(usb_root: &Path) -> Option<std::path::PathBuf> {
@@ -278,48 +343,7 @@ pub fn open_edb_rw(usb_root: &Path) -> Option<rusqlite::Connection> {
     if !db_path.exists() {
         return None;
     }
-
-    let open_rw = || {
-        rusqlite::Connection::open_with_flags(&db_path, rusqlite::OpenFlags::SQLITE_OPEN_READ_WRITE)
-    };
-    let has_schema = |conn: &rusqlite::Connection| {
-        conn.query_row(
-            "SELECT COUNT(1)
-             FROM sqlite_master
-             WHERE type IN ('table','view')
-               AND name NOT LIKE 'sqlite_%'",
-            [],
-            |row| row.get::<_, i64>(0),
-        )
-        .ok()
-        .unwrap_or(0)
-            > 0
-    };
-
-    if let Ok(plain) = open_rw()
-        && has_schema(&plain)
-    {
-        logging::debug("edb", "eDB opened read-write without SQLCipher key");
-        return Some(plain);
-    }
-
-    let merged_keys = effective_sqlcipher_keys();
-    for raw_key in &merged_keys {
-        if !is_safe_sqlcipher_key(raw_key) {
-            logging::debug("edb", "skipping SQLCipher key with unsafe characters");
-            continue;
-        }
-        let batch = format!("PRAGMA key='{raw_key}';");
-        let Ok(candidate) = open_rw() else { continue };
-        if candidate.execute_batch(&batch).is_err() {
-            continue;
-        }
-        if has_schema(&candidate) {
-            logging::debug("edb", "eDB opened read-write with SQLCipher key");
-            return Some(candidate);
-        }
-    }
-    None
+    open_edb_with_flags(&db_path, rusqlite::OpenFlags::SQLITE_OPEN_READ_WRITE)
 }
 
 /// `c.<column>` when the eDB's `content` table has `column`, else `NULL`, so
@@ -1891,9 +1915,42 @@ mod tests {
         assert!(
             warnings
                 .iter()
-                .any(|w| w.message.starts_with("eDB unreadable after trying")),
+                .any(|w| w.message.starts_with("eDB unreadable")),
             "expected unreadable warning: {warnings:?}"
         );
+    }
+
+    #[test]
+    fn encrypted_edb_opens_with_its_derived_key_read_only_and_read_write() {
+        let temp = tempdir().expect("tempdir");
+        let db_path = export_db_path(temp.path());
+        crate::service::usb_utils::initialize_fullshape_edb(&db_path, "2026-01-01")
+            .expect("create eDB");
+        let salt = super::edb_salt(&db_path).expect("an encrypted eDB has a salt");
+
+        let mut warnings = Vec::new();
+        let ro = open_edb(&db_path, &mut warnings).expect("read-only open");
+        assert!(warnings.is_empty(), "{warnings:?}");
+        // Only an open with the derived key adds it.
+        let memo = super::EDB_KEY_BY_SALT.get().expect("memo");
+        assert!(memo.lock().unwrap().contains_key(&salt));
+        let tables = |conn: &rusqlite::Connection| -> i64 {
+            conn.query_row("SELECT COUNT(1) FROM sqlite_master", [], |r| r.get(0))
+                .unwrap()
+        };
+        let rw = super::open_edb_with_flags(&db_path, rusqlite::OpenFlags::SQLITE_OPEN_READ_WRITE)
+            .expect("read-write open");
+        assert_eq!(tables(&ro), tables(&rw));
+        rw.execute("UPDATE property SET deviceName = 'STICK'", [])
+            .expect("write through the derived key");
+        drop(rw);
+        drop(ro);
+        let mut warnings = Vec::new();
+        let again = open_edb(&db_path, &mut warnings).expect("reopen after a write");
+        let name: String = again
+            .query_row("SELECT deviceName FROM property", [], |r| r.get(0))
+            .unwrap();
+        assert_eq!(name, "STICK");
     }
 
     fn export_db_with_schema(root: &std::path::Path) -> std::path::PathBuf {

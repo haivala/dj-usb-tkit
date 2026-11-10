@@ -626,6 +626,7 @@ fn make_usb_track(id: &str, title: &str, artist: &str, file_path: &str) -> UsbTr
 
 fn make_pdb_track(id: u32, title: &str, artist_id: u32, file_path: &str) -> PdbTrackRow {
     PdbTrackRow {
+        header_flags: 0,
         content_link: None,
         sample_rate_hz: None,
         file_size_bytes: None,

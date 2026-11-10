@@ -2111,6 +2111,7 @@ fn apply_fix_empty_analysis_files_bakes_real_pdb_tempo_not_120_default() {
 
     let parsed = ParsedPdb {
         tracks: vec![PdbTrackRow {
+            header_flags: 0,
             content_link: None,
             sample_rate_hz: None,
             file_size_bytes: None,
@@ -2184,6 +2185,7 @@ fn apply_fix_empty_analysis_files_keeps_folders_with_the_same_letters_apart() {
         write_sine_wav(&audio_path, 1_000);
         std::fs::create_dir_all(usb_root.join("PIONEER/USBANLZ").join(anlz_dir)).unwrap();
         PdbTrackRow {
+            header_flags: 0,
             content_link: None,
             sample_rate_hz: None,
             file_size_bytes: None,
@@ -2275,6 +2277,7 @@ fn apply_fix_empty_analysis_files_fails_when_source_audio_cannot_be_decoded() {
 
     let parsed = ParsedPdb {
         tracks: vec![PdbTrackRow {
+            header_flags: 0,
             content_link: None,
             sample_rate_hz: None,
             file_size_bytes: None,
@@ -2367,6 +2370,7 @@ fn write_sine_wav(path: &Path, duration_ms: u32) {
 
 fn history_test_track(id: u32, path: &str) -> PdbTrackRow {
     PdbTrackRow {
+        header_flags: 0,
         content_link: None,
         sample_rate_hz: None,
         file_size_bytes: None,

@@ -524,23 +524,12 @@ pub(crate) fn build_pdb_for_playlists(
     } else {
         None
     };
-    let existing_header_flags_by_track_id = if pdb_path.is_file() {
-        crate::pdb_reader::parse_pdb_track_debug_rows(&pdb_path)
-            .ok()
-            .map(|rows| {
-                rows.into_iter()
-                    .filter_map(|r| {
-                        r.fixed_fields
-                            .get("header_flags_u32")
-                            .and_then(|v| v.parse::<u32>().ok())
-                            .map(|flags| (r.id, flags))
-                    })
-                    .collect::<HashMap<u32, u32>>()
-            })
-            .unwrap_or_default()
-    } else {
-        HashMap::new()
-    };
+    // A repeated track id takes its last row's flags.
+    let existing_header_flags_by_track_id = existing
+        .iter()
+        .flat_map(|parsed| &parsed.tracks)
+        .map(|track| (track.id, track.header_flags))
+        .collect::<HashMap<u32, u32>>();
     let existing_pdb_bytes_before = if pdb_path.is_file() {
         std::fs::read(&pdb_path).ok()
     } else {

@@ -19,27 +19,6 @@ itself: a row outside every source folder, not from the Mixxx or rekordbox
 library, and in no playlist or history goes. Tracks whose files are in the
 media library stay, also when they are on a USB too.
 
-## Check: the same file read again by commands that run together
-
-Selecting a USB used to read its PDB and its eDB several times. The selection,
-the diagnostics that follow and the USB Playlists page each read them again.
-Now one cached read serves them all (`parsed_staged_pdb` and `staged_edb` in
-`backend/src/service/usb.rs`). Each cache is keyed by the file's path, size
-and modification time (`StagedFileSig`), and every write to the stick drops it
-(`invalidate_usb_parse_cache`). Look for the same pattern elsewhere: a file or
-database that commands running one after another each open and read in full,
-or a reader that loads more than its caller keeps. Places to check:
-
-- ANLZ files: a track's USB details, the diagnostics and the export estimate;
-- the Engine DB on the stick, and the library-side rekordbox and Mixxx
-  databases;
-- the USB audio-format and device-name reads;
-- library queries that run once per row instead of once per list.
-
-Only cache what is read again without a write in between. Measure first:
-a re-read that costs nothing next to the command's other work isn't worth a
-cache.
-
 ## Startup: parallel commands, maybe a boot payload
 
 `initApp` (`vanilla-ui/startup_bootstrap.mjs`) awaits its startup commands one

@@ -46,7 +46,8 @@ use super::key_notation::{self, KeyNotation, key_display_fields, key_notation_se
 use super::track_matching::{content_fingerprint_key, pdb_track_fingerprint};
 use super::transcode_export::transcode_offset_for_usb_file;
 use super::usb_utils::{
-    read_pwv5_from_anlz, resolve_usb_root, resolve_usb_side_path, resolve_usb_side_path_text,
+    pwv5_from_ext_bytes, read_pwv5_from_anlz, resolve_usb_root, resolve_usb_side_path,
+    resolve_usb_side_path_text,
 };
 use super::{
     BackendService, TRACK_COLS, apply_frontend_track_fields, local_cache_bundle_dat, now,
@@ -1115,9 +1116,18 @@ impl BackendService {
         let dat_abs = resolve_usb_side_path(&usb_root, raw)
             .ok_or_else(|| BackendError::NotFound(tr::error_usb_analysis_path_not_found(raw)))?;
         let dat_path = dat_abs.as_path();
-        let bytes = std::fs::read(dat_path.with_extension("EXT"))
-            .or_else(|_| std::fs::read(dat_path))
-            .map_err(|_| BackendError::NotFound(tr::error_usb_analysis_unreadable(raw)))?;
+        // The `.EXT` carries the cues and the colour waveform; a bundle
+        // without one has its cues in the `.DAT` and no colour waveform.
+        let ext_bytes = std::fs::read(dat_path.with_extension("EXT")).ok();
+        let dat_bytes;
+        let bytes: &[u8] = match ext_bytes.as_deref() {
+            Some(ext) => ext,
+            None => {
+                dat_bytes = std::fs::read(dat_path)
+                    .map_err(|_| BackendError::NotFound(tr::error_usb_analysis_unreadable(raw)))?;
+                &dat_bytes
+            }
+        };
         if bytes.is_empty() {
             return Err(BackendError::NotFound(tr::error_usb_analysis_empty(raw)));
         }
@@ -1145,9 +1155,11 @@ impl BackendService {
         };
         let notation = self.key_notation()?;
         Ok(UsbTrackAnalysisDetail {
-            first_beat_ms: read_first_beat_from_anlz(&bytes),
-            cues: cues_for_editor(collapse_anlz_cues(&bytes)),
-            detail_waveform: read_pwv5_from_anlz(dat_path)
+            first_beat_ms: read_first_beat_from_anlz(bytes),
+            cues: cues_for_editor(collapse_anlz_cues(bytes)),
+            detail_waveform: ext_bytes
+                .as_deref()
+                .and_then(pwv5_from_ext_bytes)
                 .map(|b| base64::engine::general_purpose::STANDARD.encode(b)),
             key_options: key_option_groups(notation),
             max_hot_cues: MAX_HOT_CUES,

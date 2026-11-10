@@ -269,6 +269,7 @@ dependencies = [
  "libc",
  "lofty",
  "mp3lame-encoder",
+ "openssl-sys",
  "r2d2",
  "r2d2_sqlite",
  "reqwest",

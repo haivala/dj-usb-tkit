@@ -4439,6 +4439,12 @@ fn pdb_writer_keeps_dictionary_rows_that_differ_only_in_case() {
     )
     .expect("store seed");
     let rows_before = crate::pdb_reader::parse_pdb_track_debug_rows(&pdb_path).expect("rows");
+    let parsed = crate::pdb_reader::parse_pdb(&pdb_path).expect("parse seed");
+    assert_eq!(
+        Some(parsed.tracks[0].header_flags.to_string()).as_ref(),
+        rows_before[0].fixed_fields.get("header_flags_u32"),
+        "the parse keeps the row's header flags the build writes back"
+    );
 
     let playlist = ExportPlaylistData {
         id: "pl".to_string(),

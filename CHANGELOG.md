@@ -52,6 +52,10 @@
   together with the selection, instead of one after another.
 - **Improvement:** Selecting a USB reads its PDB and its eDB once. Before, the selection, the diagnostics that
   follow and the USB Playlists page each read them again.
+- **Improvement:** Opening the eDB is quicker after its first open. Selecting a USB, its diagnostics, history,
+  export and repairs each opened it again, and every open worked out its key anew.
+- **Improvement:** Exporting a playlist and repairs that rewrite the PDB read the existing PDB faster.
+- **Improvement:** Opening a USB track's details reads its analysis file once instead of twice.
 - **Improvement:** Adding a source folder saves and indexes it in one step. If the indexing fails, the folder
   stays added, the status line says the indexing failed, and the next scan indexes it.
 - **Improvement:** Relocating a missing source folder also indexes the new folder, so files only it has join

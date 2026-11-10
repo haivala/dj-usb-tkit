@@ -5,6 +5,9 @@ use crate::error::{BackendError, BackendResult};
 
 #[derive(Debug, Clone, Default)]
 pub struct PdbTrackRow {
+    /// The row's first `u32` (subtype and index shift), kept so a rewrite
+    /// writes it back unchanged.
+    pub header_flags: u32,
     pub content_link: Option<u32>,
     pub sample_rate_hz: Option<u32>,
     pub file_size_bytes: Option<u32>,
@@ -636,6 +639,7 @@ fn parse_page_rows(
 }
 
 fn parse_track_row(row: &[u8]) -> Option<PdbTrackRow> {
+    let header_flags = read_u32_le(row, 0)?;
     let content_link = read_u32_le(row, 4).filter(|v| *v > 0);
     let sample_rate_hz = read_u32_le(row, 8).filter(|v| *v > 0);
     let file_size_bytes = read_u32_le(row, 16).filter(|v| *v > 0);
@@ -682,6 +686,7 @@ fn parse_track_row(row: &[u8]) -> Option<PdbTrackRow> {
         decode_track_string_slot(row, &offsets, 7).filter(|value| !value.is_empty());
 
     Some(PdbTrackRow {
+        header_flags,
         content_link,
         sample_rate_hz,
         file_size_bytes,

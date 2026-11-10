@@ -3425,6 +3425,7 @@ mod tests {
 
     fn make_pdb_track(id: u32, date_added: Option<&str>) -> PdbTrackRow {
         PdbTrackRow {
+            header_flags: 0,
             content_link: None,
             sample_rate_hz: None,
             file_size_bytes: None,
@@ -3862,6 +3863,7 @@ mod tests {
         anlz_path: &str,
     ) -> PdbTrackRow {
         PdbTrackRow {
+            header_flags: 0,
             content_link: None,
             sample_rate_hz: None,
             file_size_bytes: Some(4096),

@@ -567,9 +567,18 @@ fn read_ext_chunk(dat_path: &Path, tag: &str) -> Option<Vec<u8>> {
     } else {
         dat_path.with_extension("EXT")
     };
-    let bytes = std::fs::read(&ext_path).ok()?;
-    let container = find_anlz_chunk_payload(&bytes, "PMAI").unwrap_or(&bytes);
+    ext_chunk_from_bytes(&std::fs::read(&ext_path).ok()?, tag)
+}
+
+/// The raw `tag` chunk payload from an ANLZ file's bytes.
+fn ext_chunk_from_bytes(bytes: &[u8], tag: &str) -> Option<Vec<u8>> {
+    let container = find_anlz_chunk_payload(bytes, "PMAI").unwrap_or(bytes);
     find_anlz_chunk_payload(container, tag).map(<[u8]>::to_vec)
+}
+
+/// [`read_pwv5_from_anlz`] from `.EXT` bytes already read.
+pub(crate) fn pwv5_from_ext_bytes(bytes: &[u8]) -> Option<Vec<u8>> {
+    ext_chunk_from_bytes(bytes, "PWV5").filter(|p| p.len() >= 4)
 }
 
 pub(crate) fn extract_waveform_preview_from_anlz_bytes(
@@ -1977,6 +1986,7 @@ mod diag_tests {
 
     fn make_track(id: u32) -> PdbTrackRow {
         PdbTrackRow {
+            header_flags: 0,
             content_link: None,
             sample_rate_hz: None,
             file_size_bytes: None,

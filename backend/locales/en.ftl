@@ -105,11 +105,7 @@ usb-warning-read-only = USB appears read-only: imports may work but export will 
 # Event Log warnings while reading the stick. $root: the USB's folder.
 usb-warning-pdb-not-found-edb-only = PDB not found under { $root }; continuing with eDB-only mode
 usb-warning-pdb-not-found-db-fallback = PDB not found under { $root }; using DB fallback only
-# $attempts: how many keys were tried.
-usb-warning-edb-unreadable = eDB unreadable after trying { $attempts ->
-    [one] { $attempts } SQLCipher key
-   *[other] { $attempts } SQLCipher keys
-}
+usb-warning-edb-unreadable = eDB unreadable: neither plain SQLite nor opened by the USB export key
 # Event Log errors after changing the stick, when the changed database couldn't be copied
 # back to it. $error: the reason, from the OS.
 usb-warning-pdb-write-back-failed = PDB write-back to USB failed: { $error }
