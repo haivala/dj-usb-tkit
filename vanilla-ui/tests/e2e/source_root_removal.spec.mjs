@@ -4,21 +4,8 @@ function installSourceRemovalMock(page) {
   return page.addInitScript(() => {
     // The backend's source folders (a test may set its own before load).
     window.__sourceFolders = window.__sourceFolders || ["/music/a", "/music/b"];
-    window.localStorage.setItem("djusbtkit.helpSeen", "1");
     window.__scanCalls = [];
     window.__indexedOnAdd = [];
-
-    const listeners = new Map();
-    const listen = async (eventName, callback) => {
-      const key = String(eventName || "");
-      const arr = listeners.get(key) || [];
-      arr.push(callback);
-      listeners.set(key, arr);
-      return () => {
-        const current = listeners.get(key) || [];
-        listeners.set(key, current.filter((fn) => fn !== callback));
-      };
-    };
 
     const trackStore = [
       {
@@ -76,65 +63,55 @@ function installSourceRemovalMock(page) {
       return !!r && (p === r || p.startsWith(`${r}/`));
     };
 
-    window.__TAURI__ = {
-      core: {
-        invoke: async (command, payload = {}) => {
-          const sources = () => ({
-            folders: window.__sourceFolders.map((path) => ({ path, label: path, parent: null, enabled: true, missing: false, fullyAnalyzed: false })),
-            rekordboxDbEnabled: false,
-            mixxxDbEnabled: false,
-            everConfigured: true,
-            analyzeButtonLabel: "Analyze Library",
-            analyzeScanningStatus: "Scanning library files...",
-            trackNotInLibraryStatus: "Track is not in the local library yet. Run Analyze Library first.",
-          });
-          if (command === "get_library_sources") return { ok: true, data: sources() };
-          if (command === "add_source_folders") {
-            const added = payload.request.paths.filter((path) => !window.__sourceFolders.includes(path));
-            window.__sourceFolders.push(...added);
-            // Adding a folder indexes it.
-            window.__indexedOnAdd.push(added);
-            const indexed = indexRoots(added);
-            const statusText = added.length
-              ? `Source folders: ${window.__sourceFolders.length} | indexed ${indexed} tracks`
-              : `Source folders unchanged: ${window.__sourceFolders.length}`;
-            return { ok: true, data: { sources: sources(), added, statusText } };
-          }
-          if (command === "browse_source_files") {
-            return { ok: true, data: { total: trackStore.length, items: trackStore } };
-          }
-          if (command === "remove_source_folder") {
-            const root = payload.request.path;
-            window.__sourceFolders = window.__sourceFolders.filter((path) => path !== root);
-            const before = trackStore.length;
-            for (let i = trackStore.length - 1; i >= 0; i -= 1) {
-              if (underRoot(trackStore[i]?.filePath, root)) trackStore.splice(i, 1);
-            }
-            const removed = before - trackStore.length;
-            return {
-              ok: true,
-              data: {
-                sources: sources(),
-                removed,
-                statusText: `Source folders: ${window.__sourceFolders.length} | removed ${removed} tracks from library`
-              }
-            };
-          }
-          if (command === "pick_source_folders") {
-            return window.__pickReturn || [];
-          }
-          if (command === "scan_library") {
-            const roots = Array.isArray(payload?.request?.sourceRoots)
-              ? payload.request.sourceRoots.map((v) => String(v || "").trim()).filter(Boolean)
-              : [];
-            window.__scanCalls.push(roots);
-            return { ok: true, data: { indexed: indexRoots(roots), updated: 0, removed: 0 } };
-          }
-          return window.__e2eBackend.answer(command);
+    const backend = window.__e2eBackend;
+    backend.seed({ tracks: trackStore });
+    backend.install((command, request, payload) => {
+      const sources = () => ({
+        folders: window.__sourceFolders.map((path) => ({ path, label: path, parent: null, enabled: true, missing: false, fullyAnalyzed: false })),
+        rekordboxDbEnabled: false,
+        mixxxDbEnabled: false,
+        everConfigured: true,
+        analyzeButtonLabel: "Analyze Library",
+        analyzeScanningStatus: "Scanning library files...",
+        trackNotInLibraryStatus: "Track is not in the local library yet. Run Analyze Library first.",
+      });
+      if (command === "get_library_sources") return { ok: true, data: sources() };
+      if (command === "add_source_folders") {
+        const added = payload.request.paths.filter((path) => !window.__sourceFolders.includes(path));
+        window.__sourceFolders.push(...added);
+        // Adding a folder indexes it.
+        window.__indexedOnAdd.push(added);
+        const indexed = indexRoots(added);
+        const statusText = added.length
+          ? `Source folders: ${window.__sourceFolders.length} | indexed ${indexed} tracks`
+          : `Source folders unchanged: ${window.__sourceFolders.length}`;
+        return { ok: true, data: { sources: sources(), added, statusText } };
+      }
+      if (command === "remove_source_folder") {
+        const root = payload.request.path;
+        window.__sourceFolders = window.__sourceFolders.filter((path) => path !== root);
+        const before = trackStore.length;
+        for (let i = trackStore.length - 1; i >= 0; i -= 1) {
+          if (underRoot(trackStore[i]?.filePath, root)) trackStore.splice(i, 1);
         }
-      },
-      event: { listen }
-    };
+        const removed = before - trackStore.length;
+        return backend.ok({
+          sources: sources(),
+          removed,
+          statusText: `Source folders: ${window.__sourceFolders.length} | removed ${removed} tracks from library`
+        });
+      }
+      if (command === "pick_source_folders") {
+        return window.__pickReturn || [];
+      }
+      if (command === "scan_library") {
+        const roots = Array.isArray(payload?.request?.sourceRoots)
+          ? payload.request.sourceRoots.map((v) => String(v || "").trim()).filter(Boolean)
+          : [];
+        window.__scanCalls.push(roots);
+        return { ok: true, data: { indexed: indexRoots(roots), updated: 0, removed: 0 } };
+      }
+    });
   });
 }
 

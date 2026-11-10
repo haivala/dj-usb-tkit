@@ -4,82 +4,31 @@
 // into an array that may no longer match rendered (sorted) order.
 import { test, expect } from "./coverage-fixture.mjs";
 
-function baseTauriMock() {
-  return {
-    clear_frontend_log: async () => "",
-    append_frontend_log: async () => null,
-    show_window: async () => null,
-    get_backend_log_buffer: async () => [],
-    detect_external_rekordbox_db: async () => ({ ok: true, data: { found: false, path: null } }),
-    set_frontend_setting: async (request) => ({ ok: true, data: { key: request.key, value: request.value } }),
-    get_frontend_settings: async () => ({ ok: true, data: { settings: {} } }),
-    resolve_playback_source: async () => ({ ok: true, data: { resolvedPath: null, matchedBy: "none", trackId: null } }),
-    select_usb: async () => ({
-      ok: true,
-      data: {
-        valid: false,
-        normalizedRoot: "",
-        warnings: []
-      }
-    }),
-    fetch_usb_playlists: async () => ({ ok: true, data: { items: [], warnings: [] } }),
-    fetch_usb_histories: async () => ({ ok: true, data: { items: [], warnings: [] } })
-  };
+// Seeds the library and/or one app playlist ("Test Playlist") with `tracks`:
+// analyzed, 3 minutes long, at the BPM each one gives (default 120).
+function installTracks(page, { library = [], playlist = [] }) {
+  return page.addInitScript(({ library, playlist }) => {
+    const song = ([id, title, album, bpm = 120]) => ({
+      id, title, artist: "Artist", album, filePath: `/music/${id}.mp3`, waveformPeaksPath: "", waveformPreview: [],
+      durationMs: 180000, bpm, key: "8A", analysisReady: true
+    });
+    window.__e2eSourceFolders = ["/music"];
+    window.__e2eBackend.seed({
+      tracks: library.map(song),
+      playlists: playlist.length ? [{ id: "pl-1", name: "Test Playlist", tracks: playlist.map(song) }] : []
+    });
+    window.__e2eBackend.install();
+  }, { library, playlist });
 }
 
+// The requests the app sent with `command`.
+const requests = (page, command) =>
+  page.evaluate((command) => window.__calls.filter((c) => c.command === command).map((c) => c.request), command);
+
+const SONGS = [["t1", "Song One", "Zulu Album"], ["t2", "Song Two", "Alpha Album"], ["t3", "Song Three", "Mike Album"]];
+
 test("Library: scrub-play after column sort plays the clicked row's track, not the pre-sort one", async ({ page }) => {
-  await page.addInitScript(({ base }) => {
-    window.localStorage.setItem("djusbtkit.helpSeen", "1");
-    // The library\'s source folders, as `get_library_sources` answers.
-    window.__e2eSourceFolders = ["/music"];
-
-    // Insertion order deliberately differs from album-sorted order, so a
-    // stale index lookup after sorting resolves to the wrong track.
-    const tracks = [
-      { id: "t1", title: "Song One", artist: "Artist", album: "Zulu Album", filePath: "/music/one.mp3", waveformPreview: [], durationMs: 180000, bpm: 120, key: "8A", analysisReady: true },
-      { id: "t2", title: "Song Two", artist: "Artist", album: "Alpha Album", filePath: "/music/two.mp3", waveformPreview: [], durationMs: 180000, bpm: 120, key: "8A", analysisReady: true },
-      { id: "t3", title: "Song Three", artist: "Artist", album: "Mike Album", filePath: "/music/three.mp3", waveformPreview: [], durationMs: 180000, bpm: 120, key: "8A", analysisReady: true }
-    ];
-
-    window.__playResolvedCalls = [];
-
-    const handlers = {
-      ...base,
-      list_playlists: async () => ({ ok: true, data: { playlists: [], playlistUsbExportStatus: [] } }),
-      // Library column sort is a backend query param now (shared TrackListController).
-      browse_source_files: async (request = {}) => {
-        let rows = tracks.slice();
-        const q = String(request.query || "").trim().toLowerCase();
-        if (q) rows = rows.filter((t) => `${t.title} ${t.artist} ${t.album || ""}`.toLowerCase().includes(q));
-        if (request.sortBy) {
-          const m = request.sortDir === "desc" ? -1 : 1;
-          const key = request.sortBy;
-          rows = rows.slice().sort((a, b) => {
-            if (key === "bpm" || key === "durationMs") return m * ((Number(a[key]) || 0) - (Number(b[key]) || 0));
-            const av = key === "artist" ? `${a.artist} ${a.title}` : String(a[key] ?? "");
-            const bv = key === "artist" ? `${b.artist} ${b.title}` : String(b[key] ?? "");
-            return av < bv ? -m : av > bv ? m : 0;
-          });
-        }
-        return { ok: true, data: { total: rows.length, items: rows, nextCursor: null, hasMore: false } };
-      },
-      play_resolved_track: async (request) => {
-        window.__playResolvedCalls.push(request);
-        return { ok: true, data: { path: request.filePath, trackId: request.trackId, durationMs: 0, positionMs: 0 } };
-      }
-    };
-
-    window.__TAURI__ = {
-      core: {
-        invoke: async (command, payload = {}) => {
-          const request = payload?.request || payload;
-          const handler = handlers[command];
-          if (handler) return handler(request);
-          return window.__e2eBackend.answer(command);
-        }
-      }
-    };
-  }, { base: {} });
+  await installTracks(page, { library: SONGS });
 
   await page.goto("/");
   await expect(page.locator("#libraryTableBody .track-grid-row")).toHaveCount(3);
@@ -98,89 +47,14 @@ test("Library: scrub-play after column sort plays the clicked row's track, not t
     .locator(".waveform")
     .click();
 
-  await expect.poll(() => page.evaluate(() => window.__playResolvedCalls.length)).toBeGreaterThan(0);
-  const call = await page.evaluate(() => window.__playResolvedCalls[0]);
+  await expect.poll(async () => (await requests(page, "play_resolved_track")).length).toBeGreaterThan(0);
+  const [call] = await requests(page, "play_resolved_track");
   expect(call.trackId).toBe("t2");
-  expect(call.filePath).toBe("/music/two.mp3");
+  expect(call.filePath).toBe("/music/t2.mp3");
 });
 
 test("Playlist: Play and Remove after column sort act on the clicked row's track", async ({ page }) => {
-  await page.addInitScript(({ base }) => {
-    window.localStorage.setItem("djusbtkit.helpSeen", "1");
-
-    const playlists = [{
-      id: "pl-1",
-      name: "Test Playlist",
-      source: "local",
-      lastExportedAt: null,
-      lastExportedUsbRoot: null,
-      lastExportedTrackCount: null,
-      createdAt: new Date().toISOString(),
-      updatedAt: new Date().toISOString()
-    }];
-
-    const playlistTracks = {
-      "pl-1": [
-        { id: "t1", title: "Song One", artist: "Artist", album: "Zulu Album", filePath: "/music/one.mp3", waveformPeaksPath: "", waveformPreview: [], durationMs: 180000, bpm: 120, key: "8A", analysisReady: true },
-        { id: "t2", title: "Song Two", artist: "Artist", album: "Alpha Album", filePath: "/music/two.mp3", waveformPeaksPath: "", waveformPreview: [], durationMs: 180000, bpm: 120, key: "8A", analysisReady: true },
-        { id: "t3", title: "Song Three", artist: "Artist", album: "Mike Album", filePath: "/music/three.mp3", waveformPeaksPath: "", waveformPreview: [], durationMs: 180000, bpm: 120, key: "8A", analysisReady: true }
-      ]
-    };
-
-    window.__playResolvedCalls = [];
-    window.__removeTrackCalls = [];
-
-    const handlers = {
-      ...base,
-      list_playlists: async () => ({ ok: true, data: { playlists, playlistUsbExportStatus: [] } }),
-      get_playlist_tracks: async (request) => {
-        // App playlist list is server-sorted/paginated now (shared controller).
-        let items = (playlistTracks[request.playlistId] || []).slice();
-        if (request.sortBy) {
-          const m = request.sortDir === "desc" ? -1 : 1;
-          const k = request.sortBy;
-          items = items.sort((a, b) => {
-            if (k === "bpm" || k === "durationMs") return m * ((Number(a[k]) || 0) - (Number(b[k]) || 0));
-            const av = k === "artist" ? `${a.artist} ${a.title}` : String(a[k] ?? "");
-            const bv = k === "artist" ? `${b.artist} ${b.title}` : String(b[k] ?? "");
-            return av < bv ? -m : av > bv ? m : 0;
-          });
-        }
-        const totalDurationMs = items.reduce((sum, t) => sum + (t.durationMs > 0 ? t.durationMs : 0), 0);
-        const durationUnknownCount = items.filter((t) => !(t.durationMs > 0)).length;
-        return {
-          ok: true,
-          data: {
-            playlistId: request.playlistId, items, total: items.length,
-            nextCursor: null, hasMore: false, totalDurationMs, durationUnknownCount,
-            unanalyzedCount: items.filter((t) => !t.analysisReady).length,
-          },
-        };
-      },
-      browse_source_files: async () => ({ ok: true, data: { total: 0, items: [] } }),
-      play_resolved_track: async (request) => {
-        window.__playResolvedCalls.push(request);
-        return { ok: true, data: { path: request.filePath, trackId: request.trackId, durationMs: 0, positionMs: 0 } };
-      },
-      remove_tracks_from_playlist: async (request) => {
-        window.__removeTrackCalls.push(request);
-        playlistTracks[request.playlistId] = (playlistTracks[request.playlistId] || [])
-          .filter((t) => !request.trackIds.includes(t.id));
-        return { ok: true, data: { removed: request.trackIds.length } };
-      }
-    };
-
-    window.__TAURI__ = {
-      core: {
-        invoke: async (command, payload = {}) => {
-          const request = payload?.request || payload;
-          const handler = handlers[command];
-          if (handler) return handler(request);
-          return window.__e2eBackend.answer(command);
-        }
-      }
-    };
-  }, { base: {} });
+  await installTracks(page, { playlist: SONGS });
 
   await page.goto("/");
   await page.locator("#navPlaylistList .nav-playlist-item").first().click();
@@ -198,83 +72,22 @@ test("Playlist: Play and Remove after column sort act on the clicked row's track
   await page.locator('#playlistTracksBody .track-grid-row', { hasText: "Song Two" })
     .locator('[data-action="play-library"]')
     .click();
-  await expect.poll(() => page.evaluate(() => window.__playResolvedCalls.length)).toBeGreaterThan(0);
-  const playCall = await page.evaluate(() => window.__playResolvedCalls[0]);
+  await expect.poll(async () => (await requests(page, "play_resolved_track")).length).toBeGreaterThan(0);
+  const [playCall] = await requests(page, "play_resolved_track");
   expect(playCall.trackId).toBe("t2");
-  expect(playCall.filePath).toBe("/music/two.mp3");
+  expect(playCall.filePath).toBe("/music/t2.mp3");
 
   // Remove the row now showing "Song Three" (array index 1 post-sort, index 2 pre-sort).
   await page.locator('#playlistTracksBody .track-grid-row', { hasText: "Song Three" })
     .locator('[data-action="remove-playlist-track"]')
     .click();
-  await expect.poll(() => page.evaluate(() => window.__removeTrackCalls.length)).toBeGreaterThan(0);
-  const removeCall = await page.evaluate(() => window.__removeTrackCalls[0]);
+  await expect.poll(async () => (await requests(page, "remove_tracks_from_playlist")).length).toBeGreaterThan(0);
+  const [removeCall] = await requests(page, "remove_tracks_from_playlist");
   expect(removeCall.trackIds).toEqual(["t3"]);
 });
 
 test("Playlist: header click shows and clears the sorted-by hint like other tracklists", async ({ page }) => {
-  await page.addInitScript(({ base }) => {
-    window.localStorage.setItem("djusbtkit.helpSeen", "1");
-
-    const playlists = [{
-      id: "pl-1",
-      name: "Test Playlist",
-      source: "local",
-      lastExportedAt: null,
-      lastExportedUsbRoot: null,
-      lastExportedTrackCount: null,
-      createdAt: new Date().toISOString(),
-      updatedAt: new Date().toISOString()
-    }];
-
-    const playlistTracks = {
-      "pl-1": [
-        { id: "t1", title: "Song One", artist: "Artist", album: "Zulu Album", filePath: "/music/one.mp3", waveformPeaksPath: "", waveformPreview: [], durationMs: 180000, bpm: 120, key: "8A", analysisReady: true },
-        { id: "t2", title: "Song Two", artist: "Artist", album: "Alpha Album", filePath: "/music/two.mp3", waveformPeaksPath: "", waveformPreview: [], durationMs: 180000, bpm: 120, key: "8A", analysisReady: true }
-      ]
-    };
-
-    const handlers = {
-      ...base,
-      list_playlists: async () => ({ ok: true, data: { playlists, playlistUsbExportStatus: [] } }),
-      get_playlist_tracks: async (request) => {
-        // App playlist list is server-sorted/paginated now (shared controller).
-        let items = (playlistTracks[request.playlistId] || []).slice();
-        if (request.sortBy) {
-          const m = request.sortDir === "desc" ? -1 : 1;
-          const k = request.sortBy;
-          items = items.sort((a, b) => {
-            if (k === "bpm" || k === "durationMs") return m * ((Number(a[k]) || 0) - (Number(b[k]) || 0));
-            const av = k === "artist" ? `${a.artist} ${a.title}` : String(a[k] ?? "");
-            const bv = k === "artist" ? `${b.artist} ${b.title}` : String(b[k] ?? "");
-            return av < bv ? -m : av > bv ? m : 0;
-          });
-        }
-        const totalDurationMs = items.reduce((sum, t) => sum + (t.durationMs > 0 ? t.durationMs : 0), 0);
-        const durationUnknownCount = items.filter((t) => !(t.durationMs > 0)).length;
-        return {
-          ok: true,
-          data: {
-            playlistId: request.playlistId, items, total: items.length,
-            nextCursor: null, hasMore: false, totalDurationMs, durationUnknownCount,
-            unanalyzedCount: items.filter((t) => !t.analysisReady).length,
-          },
-        };
-      },
-      browse_source_files: async () => ({ ok: true, data: { total: 0, items: [] } })
-    };
-
-    window.__TAURI__ = {
-      core: {
-        invoke: async (command, payload = {}) => {
-          const request = payload?.request || payload;
-          const handler = handlers[command];
-          if (handler) return handler(request);
-          return window.__e2eBackend.answer(command);
-        }
-      }
-    };
-  }, { base: {} });
+  await installTracks(page, { playlist: SONGS.slice(0, 2) });
 
   await page.goto("/");
   await page.locator("#navPlaylistList .nav-playlist-item").first().click();
@@ -301,53 +114,14 @@ test("Playlist: header click shows and clears the sorted-by hint like other trac
 });
 
 test("Library: sorting by BPM column actually orders rows by numeric BPM value", async ({ page }) => {
-  await page.addInitScript(({ base }) => {
-    window.localStorage.setItem("djusbtkit.helpSeen", "1");
-    // The library\'s source folders, as `get_library_sources` answers.
-    window.__e2eSourceFolders = ["/music"];
-
-    // BPM values are deliberately non-monotonic with insertion order and
-    // include decimals/duplicates, so a broken comparator (e.g. lexicographic
-    // string compare, or a comparator applied to the wrong array) reorders
-    // rows without the BPM column actually ending up sorted.
-    const tracks = [
-      { id: "t1", title: "Track A", artist: "Artist", album: "Album", filePath: "/music/a.mp3", waveformPreview: [], durationMs: 180000, bpm: 128, key: "8A", analysisReady: true },
-      { id: "t2", title: "Track B", artist: "Artist", album: "Album", filePath: "/music/b.mp3", waveformPreview: [], durationMs: 180000, bpm: 90, key: "8A", analysisReady: true },
-      { id: "t3", title: "Track C", artist: "Artist", album: "Album", filePath: "/music/c.mp3", waveformPreview: [], durationMs: 180000, bpm: 174, key: "8A", analysisReady: true },
-      { id: "t4", title: "Track D", artist: "Artist", album: "Album", filePath: "/music/d.mp3", waveformPreview: [], durationMs: 180000, bpm: 9, key: "8A", analysisReady: true },
-      { id: "t5", title: "Track E", artist: "Artist", album: "Album", filePath: "/music/e.mp3", waveformPreview: [], durationMs: 180000, bpm: 128.5, key: "8A", analysisReady: true }
-    ];
-
-    const handlers = {
-      ...base,
-      list_playlists: async () => ({ ok: true, data: { playlists: [], playlistUsbExportStatus: [] } }),
-      browse_source_files: async (request = {}) => {
-        let rows = tracks.slice();
-        if (request.sortBy) {
-          const m = request.sortDir === "desc" ? -1 : 1;
-          const key = request.sortBy;
-          rows = rows.slice().sort((a, b) => {
-            if (key === "bpm" || key === "durationMs") return m * ((Number(a[key]) || 0) - (Number(b[key]) || 0));
-            const av = key === "artist" ? `${a.artist} ${a.title}` : String(a[key] ?? "");
-            const bv = key === "artist" ? `${b.artist} ${b.title}` : String(b[key] ?? "");
-            return av < bv ? -m : av > bv ? m : 0;
-          });
-        }
-        return { ok: true, data: { total: rows.length, items: rows, nextCursor: null, hasMore: false } };
-      }
-    };
-
-    window.__TAURI__ = {
-      core: {
-        invoke: async (command, payload = {}) => {
-          const request = payload?.request || payload;
-          const handler = handlers[command];
-          if (handler) return handler(request);
-          return window.__e2eBackend.answer(command);
-        }
-      }
-    };
-  }, { base: {} });
+  // BPM values are deliberately non-monotonic with insertion order and
+  // include decimals/duplicates, so a broken comparator (e.g. lexicographic
+  // string compare, or a comparator applied to the wrong array) reorders
+  // rows without the BPM column actually ending up sorted.
+  await installTracks(page, {
+    library: [["t1", "Track A", "Album", 128], ["t2", "Track B", "Album", 90], ["t3", "Track C", "Album", 174],
+      ["t4", "Track D", "Album", 9], ["t5", "Track E", "Album", 128.5]]
+  });
 
   await page.goto("/");
   await expect(page.locator("#libraryTableBody .track-grid-row")).toHaveCount(5);

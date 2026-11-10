@@ -2,41 +2,16 @@ import { test, expect } from "./coverage-fixture.mjs";
 
 function installSortMock(page) {
   return page.addInitScript(() => {
-    window.localStorage.setItem("djusbtkit.helpSeen", "1");
-    // The library\'s source folders, as `get_library_sources` answers.
     window.__e2eSourceFolders = ["/music"];
-
-    const tracks = [
-      { id: "t1", title: "Zeta", artist: "Bob", album: "A", year: 2021, filePath: "/music/zeta.mp3" },
-      { id: "t2", title: "Alpha", artist: "Bob", album: "A", year: 1994, filePath: "/music/alpha.mp3" },
-      { id: "t3", title: "Beta", artist: "Alice", album: "A", filePath: "/music/beta.mp3" },
-      { id: "t4", title: "Gamma", artist: "Cara", album: "A", year: 2008, filePath: "/music/gamma.mp3" }
-    ];
-
-    window.__TAURI__ = {
-      core: {
-        invoke: async (command, payload = {}) => {
-          if (command === "browse_source_files") {
-            // Library search + column sort are backend query params now
-            // (shared TrackListController) -- mirror the server here.
-            const req = payload?.request || {};
-            let rows = tracks.slice();
-            const q = String(req.query || "").trim().toLowerCase();
-            if (q) rows = rows.filter((t) => `${t.title} ${t.artist} ${t.album || ""}`.toLowerCase().includes(q));
-            if (req.sortBy) {
-              const m = req.sortDir === "desc" ? -1 : 1;
-              rows = rows.slice().sort((a, b) => {
-                const av = req.sortBy === "artist" ? `${a.artist} ${a.title}` : String(a[req.sortBy] ?? "");
-                const bv = req.sortBy === "artist" ? `${b.artist} ${b.title}` : String(b[req.sortBy] ?? "");
-                return av < bv ? -m : av > bv ? m : 0;
-              });
-            }
-            return { ok: true, data: { total: rows.length, items: rows, nextCursor: null, hasMore: false } };
-          }
-          return window.__e2eBackend.answer(command);
-        }
-      }
-    };
+    window.__e2eBackend.seed({
+      tracks: [
+        { id: "t1", title: "Zeta", artist: "Bob", album: "A", year: 2021, filePath: "/music/zeta.mp3" },
+        { id: "t2", title: "Alpha", artist: "Bob", album: "A", year: 1994, filePath: "/music/alpha.mp3" },
+        { id: "t3", title: "Beta", artist: "Alice", album: "A", filePath: "/music/beta.mp3" },
+        { id: "t4", title: "Gamma", artist: "Cara", album: "A", year: 2008, filePath: "/music/gamma.mp3" }
+      ]
+    });
+    window.__e2eBackend.install();
   });
 }
 

@@ -1,127 +1,31 @@
-import { test, expect } from "./coverage-fixture.mjs";
+import { test, expect, openUsb } from "./coverage-fixture.mjs";
 
-// The app-playlist track list is server-paginated/searched/sorted via
-// `get_playlist_tracks` (shared TrackListController), and drag-reorder + the
-// sort-commit are single-move / sort-mode `reorder_playlist_tracks` calls.
-// These helpers let every mock below implement that contract in one line.
-test.beforeEach(async ({ page }) => {
-  await page.addInitScript(() => {
-    window.__playlistTracksPage = (all, request) => {
-      let rows = (all || []).slice();
-      const q = String(request.query || "").trim().toLowerCase();
-      if (q) rows = rows.filter((t) => `${t.title} ${t.artist} ${t.album || ""}`.toLowerCase().includes(q));
-      if (request.sortBy) {
-        const m = request.sortDir === "desc" ? -1 : 1;
-        const k = request.sortBy;
-        rows = rows.slice().sort((a, b) => {
-          if (k === "bpm" || k === "durationMs") return m * ((Number(a[k]) || 0) - (Number(b[k]) || 0));
-          const av = k === "artist" ? `${a.artist} ${a.title}` : String(a[k] ?? "");
-          const bv = k === "artist" ? `${b.artist} ${b.title}` : String(b[k] ?? "");
-          return av < bv ? -m : av > bv ? m : 0;
-        });
-      }
-      const off = Number(request.offset || 0);
-      const lim = Number(request.limit || 0) || rows.length;
-      const slice = rows.slice(off, off + lim);
-      const nextOff = off + slice.length;
-      return {
-        playlistId: request.playlistId,
-        items: slice,
-        total: rows.length,
-        nextCursor: nextOff < rows.length ? String(nextOff) : null,
-        hasMore: nextOff < rows.length,
-        totalDurationMs: rows.reduce((s, t) => s + (t.durationMs > 0 ? t.durationMs : 0), 0),
-        durationUnknownCount: rows.filter((t) => !(t.durationMs > 0)).length,
-        // The footer line, as the backend words it.
-        durationText: (() => {
-          const seconds = Math.floor(rows.reduce((s, t) => s + (t.durationMs > 0 ? t.durationMs : 0), 0) / 1000);
-          const unknown = rows.filter((t) => !(t.durationMs > 0)).length;
-          const time = `${Math.floor(seconds / 60)}:${String(seconds % 60).padStart(2, "0")}`;
-          return `Total time: ${time}${unknown ? ` (${unknown} without length)` : ""}`;
-        })(),
-        unanalyzedCount: rows.filter((t) => !t.analysisReady).length,
-        // The Analyze Missing button's label, as the backend words it.
-        analyzeMissingLabel: `Analyze Missing Tracks (${rows.filter((t) => !t.analysisReady).length})`,
-        // The heading's totals cover the whole playlist, ignoring the search.
-        listTrackCount: (all || []).length,
-        listSizeBytes: (all || []).reduce((s, t) => s + (t.fileSizeBytes > 0 ? t.fileSizeBytes : 0), 0),
-      };
-    };
-    window.__applyReorder = (cur, request) => {
-      const list = (cur || []).slice();
-      const byId = new Map(list.map((t) => [t.id, t]));
-      let ids;
-      if (Array.isArray(request.orderedTrackIds) && request.orderedTrackIds.length) {
-        ids = request.orderedTrackIds;
-      } else if (request.sortBy) {
-        const m = request.sortDir === "desc" ? -1 : 1;
-        const k = request.sortBy;
-        ids = list.sort((a, b) => {
-          const av = k === "artist" ? `${a.artist} ${a.title}` : String(a[k] ?? "");
-          const bv = k === "artist" ? `${b.artist} ${b.title}` : String(b[k] ?? "");
-          return av < bv ? -m : av > bv ? m : 0;
-        }).map((t) => t.id);
-      } else if (request.moveTrackId) {
-        ids = list.map((t) => t.id).filter((id) => id !== request.moveTrackId);
-        const at = request.beforeTrackId ? ids.indexOf(request.beforeTrackId) : -1;
-        ids.splice(at < 0 ? ids.length : at, 0, request.moveTrackId);
-      } else {
-        ids = list.map((t) => t.id);
-      }
-      return ids.map((id) => byId.get(id)).filter(Boolean);
-    };
-  });
-});
+// The `reorder_playlist_tracks` requests the app sent.
+const reorderRequests = (page) =>
+  page.evaluate(() => window.__calls.filter((c) => c.command === "reorder_playlist_tracks").map((c) => c.request));
+
+// A playlist's tracks: analyzed, with a length, at 120 BPM.
+const songs = (...rows) => rows.map(([id, title, album = ""]) => ({
+  id, title, artist: "Artist", album, filePath: `/music/${id}.mp3`, waveformPeaksPath: "", waveformPreview: [],
+  durationMs: 180000, bpm: 120, key: "8A", analysisReady: true
+}));
 
 test("playlist analyze-missing skips already-analyzed tracks and targets the rest", async ({ page }) => {
   await page.addInitScript(() => {
-    // registerBackendJobEvents() only calls listen("job:event", ...) when
-    // window.isTauri is truthy (see components/playback/actions.mjs). Without
-    // this, the app never subscribes to job:event and the per-row
-    // "analyzing" state (now driven entirely by job:event, see
-    // job_manager.mjs handleJobEvent) would never update.
-    window.isTauri = true;
-    // @tauri-apps/api's real invoke()/isTauri() (bundled into main.js) route
-    // through window.__TAURI_INTERNALS__.invoke once window.isTauri is set,
-    // bypassing window.__TAURI__.core.invoke entirely. Forward it to our mock
-    // so every invoke call -- not just event listener registration -- reaches
-    // the mock regardless of which path the bundled API code takes.
-    window.__TAURI_INTERNALS__ = {
-      invoke: (cmd, args) => window.__TAURI__.core.invoke(cmd, args)
-    };
-    window.localStorage.setItem("djusbtkit.helpSeen", "1");
-    // The library\'s source folders, as `get_library_sources` answers.
+    const backend = window.__e2eBackend;
     window.__e2eSourceFolders = ["/music"];
-
-    const playlists = [{
-      id: "pl-1",
-      name: "Testi",
-      source: "local",
-      lastExportedAt: null,
-      lastExportedUsbRoot: null,
-      lastExportedTrackCount: null,
-      createdAt: new Date().toISOString(),
-      updatedAt: new Date().toISOString()
-    }];
-
-    const playlistTracks = {
-      "pl-1": [
-        {
-          id: "playlist-entry-1",
-          localTrackId: "local-missing-1",
-          title: "Local Missing",
-          artist: "Artist A",
-          album: "Album A",
-          filePath: "/music/local-missing.mp3",
-          fileSizeBytes: 1.5 * 1024 ** 3,
-          waveformPeaksPath: "",
-          waveformPreview: [],
-          durationMs: null,
-          bpm: null,
-          key: null,
-          analysisReady: false
-        },
-        {
+    const missing = {
+      title: "Local Missing", artist: "Artist A", album: "Album A", filePath: "/music/local-missing.mp3",
+      waveformPeaksPath: "", waveformPreview: [], durationMs: null, bpm: null, key: null, analysisReady: false
+    };
+    const entry = { id: "playlist-entry-1", localTrackId: "local-missing-1", ...missing, fileSizeBytes: 1.5 * 1024 ** 3 };
+    const libraryTrack = { id: "local-missing-1", ...missing };
+    backend.seed({
+      tracks: [libraryTrack],
+      playlists: [{
+        id: "pl-1",
+        name: "Testi",
+        tracks: [entry, {
           id: "usb-track-1",
           localTrackId: "usb-track-1",
           title: "USB Ready",
@@ -136,208 +40,63 @@ test("playlist analyze-missing skips already-analyzed tracks and targets the res
           bpm: 128,
           key: null,
           analysisReady: true
-        }
-      ]
-    };
-
-    const libraryTracks = [
-      {
-        id: "local-missing-1",
-        title: "Local Missing",
-        artist: "Artist A",
-        album: "Album A",
-        filePath: "/music/local-missing.mp3",
-        waveformPeaksPath: "",
-        waveformPreview: [],
-        durationMs: null,
-        bpm: null,
-        key: null,
-        analysisReady: false
-      }
-    ];
-
-    const hydratedTrack = () => ({
-      ...libraryTracks[0]
+        }]
+      }]
     });
 
     const analyzedRequests = [];
     // The analysis holds until the test releases it, so its transient
-    // "analyzing" row state is guaranteed observable (a fixed 200 ms window
-    // was missed under parallel load: the poll came after it had cleared).
+    // "analyzing" row state is guaranteed observable.
     let releaseAnalysis = null;
-    const listeners = new Map();
-    const nowIso = () => new Date().toISOString();
-
-    const listen = async (eventName, callback) => {
-      const key = String(eventName || "");
-      const arr = listeners.get(key) || [];
-      arr.push(callback);
-      listeners.set(key, arr);
-      return () => {
-        const current = listeners.get(key) || [];
-        listeners.set(key, current.filter((fn) => fn !== callback));
-      };
-    };
-
-    const emitJobEvent = (jobPayload) => {
-      const cbs = listeners.get("job:event") || [];
-      for (const cb of cbs.slice()) {
-        try {
-          cb({ event: "job:event", payload: jobPayload });
-        } catch (_) {
-          // ignore listener errors in mock
-        }
+    const analyzed = { durationMs: 180000, waveformPeaksPath: "/tmp/local-missing.DAT", waveformPreview: [5, 10, 20], bpm: 128, analysisReady: true };
+    const job = { jobId: "job-analysis-mock", jobType: "analysis", stage: "analyze_new_tracks" };
+    backend.install((command, request) => {
+      if (command !== "analyze_new_tracks") return undefined;
+      // "Analyze Missing" sends no ids + a playlistId; the backend picks the
+      // playlist's unanalyzed local tracks.
+      let ids = (request.trackIds || []).map(String);
+      if (!ids.length && request.playlistId) {
+        ids = backend.store.playlistTracks.get(request.playlistId)
+          .filter((t) => !t.analysisReady).map((t) => String(t.localTrackId || t.id));
       }
-    };
-
-    window.__TAURI__ = {
-      core: {
-        invoke: async (command, payload = {}) => {
-          const request = payload?.request || payload;
-          if (command === "list_playlists") {
-            return { ok: true, data: { playlists: playlists, playlistUsbExportStatus: [] } };
-          }
-          if (command === "get_playlist_tracks") {
-            return { ok: true, data: window.__playlistTracksPage(playlistTracks[request.playlistId], request) };
-          }
-          if (command === "browse_source_files") {
-            return { ok: true, data: { total: libraryTracks.length, items: libraryTracks } };
-          }
-          if (command === "analyze_new_tracks") {
-            // "Analyze Missing" now sends no ids + a playlistId; the backend
-            // picks the playlist's unanalyzed local tracks. Mirror that here.
-            let ids = Array.isArray(request.trackIds) ? request.trackIds.map(String) : [];
-            if (!ids.length && request.playlistId) {
-              ids = (playlistTracks[request.playlistId] || [])
-                .filter((t) => !t.analysisReady)
-                .map((t) => String(t.localTrackId || t.id));
-            }
-            analyzedRequests.push({ trackIds: ids, playlistId: request.playlistId || null });
-            const jobId = "job-analysis-mock";
-            (async () => {
-            emitJobEvent({
-              event: "job.started",
-              jobId,
-              jobType: "analysis",
-              stage: "analyze_new_tracks",
-              current: 0,
-              total: Math.max(1, ids.length),
-              percent: 0,
-              message: "Analyzing selected tracks",
-              timestamp: nowIso()
-            });
-            for (const trackId of ids) {
-              if (trackId !== "local-missing-1") continue;
-              emitJobEvent({
-                event: "job.progress",
-                jobId,
-                jobType: "analysis",
-                stage: "analyze_new_tracks",
-                trackId,
-                current: 0,
-                total: 1,
-                percent: 0,
-                message: "Analyzing 1/1: Local Missing",
-                trackReady: false,
-                timestamp: nowIso()
-              });
-            }
-            await new Promise((resolve) => { releaseAnalysis = resolve; });
-            for (const trackId of ids) {
-              if (trackId !== "local-missing-1") continue;
-              playlistTracks["pl-1"][0].durationMs = 180000;
-              playlistTracks["pl-1"][0].waveformPeaksPath = "/tmp/local-missing.DAT";
-              playlistTracks["pl-1"][0].waveformPreview = [5, 10, 20];
-              playlistTracks["pl-1"][0].bpm = 128;
-              playlistTracks["pl-1"][0].analysisReady = true;
-              libraryTracks[0].durationMs = 180000;
-              libraryTracks[0].waveformPeaksPath = "/tmp/local-missing.DAT";
-              libraryTracks[0].waveformPreview = [5, 10, 20];
-              libraryTracks[0].bpm = 128;
-              libraryTracks[0].analysisReady = true;
-              emitJobEvent({
-                event: "job.progress",
-                jobId,
-                jobType: "analysis",
-                stage: "analyze_new_tracks",
-                trackId,
-                trackTitle: "Local Missing",
-                filePath: "/music/local-missing.mp3",
-                current: 1,
-                total: 1,
-                percent: 100,
-                message: "Analyzing 1/1: Local Missing",
-                trackReady: true,
-                failed: false,
-                analysisReady: true,
-                bpm: 128,
-                bpmAnalyzer: "mock-analyzer",
-                durationMs: 180000,
-                waveformPeaksPath: "/tmp/local-missing.DAT",
-                waveformPreview: [5, 10, 20],
-                // The track's row as saved, whole, as the backend sends it.
-                track: hydratedTrack(),
-                timestamp: nowIso()
-              });
-            }
-            emitJobEvent({
-              event: "job.completed",
-              jobId,
-              jobType: "analysis",
-              stage: "analyze_new_tracks",
-              current: ids.length,
-              total: Math.max(1, ids.length),
-              percent: 100,
-              message: `Analysis finished: analyzed ${ids.length}, failed 0`,
-              timestamp: nowIso()
-            });
-            })();
-            return { ok: true, data: { jobId, queued: ids.length, skipped: 0, message: `Analyzing ${ids.length} tracks` } };
-          }
-          if (command === "resolve_playback_source") {
-            return { ok: true, data: { resolvedPath: null, matchedBy: "none", trackId: null } };
-          }
-          if (command === "select_usb") {
-            return {
-              ok: true,
-              data: {
-                valid: true,
-                normalizedRoot: "/USB",
-                warnings: []
-              }
-            };
-          }
-          if (command === "run_usb_diagnostics") {
-            return {
-              ok: true,
-              data: {
-                overallStatus: "PASS",
-                statusLabel: "PASS", healthText: "USB health: good",
-                overview: [],
-                playlistUsbExportStatus: [],
-                durationMs: 1,
-                sectionGroups: [],
-                playlistDetails: [],
-                warnings: []
-              }
-            };
-          }
-          return window.__e2eBackend.answer(command);
+      analyzedRequests.push({ trackIds: ids, playlistId: request.playlistId || null });
+      const ours = ids.filter((id) => id === "local-missing-1");
+      const total = Math.max(1, ids.length);
+      (async () => {
+        window.__emitJobEvent({ ...job, event: "job.started", current: 0, total, percent: 0, message: "Analyzing selected tracks" });
+        for (const trackId of ours) {
+          window.__emitJobEvent({
+            ...job, event: "job.progress", trackId, current: 0, total: 1, percent: 0,
+            message: "Analyzing 1/1: Local Missing", trackReady: false
+          });
         }
-      },
-      event: { listen }
-    };
+        await new Promise((resolve) => { releaseAnalysis = resolve; });
+        for (const trackId of ours) {
+          Object.assign(entry, analyzed);
+          Object.assign(libraryTrack, analyzed);
+          window.__emitJobEvent({
+            ...job, ...analyzed, event: "job.progress", trackId, trackTitle: "Local Missing", filePath: missing.filePath,
+            current: 1, total: 1, percent: 100, message: "Analyzing 1/1: Local Missing",
+            trackReady: true, failed: false, bpmAnalyzer: "mock-analyzer",
+            // The track's row as saved, whole, as the backend sends it.
+            track: { ...libraryTrack }
+          });
+        }
+        window.__emitJobEvent({
+          ...job, event: "job.completed", current: ids.length, total, percent: 100,
+          message: `Analysis finished: analyzed ${ids.length}, failed 0`
+        });
+      })();
+      return backend.ok({ jobId: job.jobId, queued: ids.length, skipped: 0, message: `Analyzing ${ids.length} tracks` });
+    }, { tauriRuntime: true });
 
-    window.__playlistAnalysisTest = {
-      analyzedRequests,
-      releaseAnalysis: () => releaseAnalysis?.(),
-    };
+    window.__playlistAnalysisTest = { analyzedRequests, releaseAnalysis: () => releaseAnalysis?.() };
   });
 
   await page.goto("/");
 
   await page.locator("#navPlaylistList .nav-playlist-item").first().click();
-  await expect(page.locator("#playlistPanelTitle")).toContainText("Testi (mock list summary)");
+  await expect(page.locator("#playlistPanelTitle")).toContainText("Testi (2 tracks)");
   // Footer total comes straight from the backend (get_playlist_tracks), not a
   // client-side sum -- 1 of the 2 tracks has no known length.
   await expect(page.locator("#playlistTotalDuration")).toHaveText("Total time: 3:00 (1 without length)");
@@ -345,7 +104,7 @@ test("playlist analyze-missing skips already-analyzed tracks and targets the res
   // playlist: that's what an export copies.
   await page.locator("#playlistSearchInput").fill("USB Ready");
   await expect(page.locator("#playlistTotalDuration")).toHaveText("Total time: 3:00");
-  await expect(page.locator("#playlistPanelTitle")).toContainText("Testi (mock list summary)");
+  await expect(page.locator("#playlistPanelTitle")).toContainText("Testi (2 tracks)");
   await page.locator("#playlistSearchInput").fill("");
   await expect(page.locator("#playlistTotalDuration")).toHaveText("Total time: 3:00 (1 without length)");
   await expect(page.locator("#analyzePlaylistMissingBtn")).toHaveText("Analyze Missing Tracks (1)");
@@ -389,93 +148,32 @@ test("playlist analyze-missing skips already-analyzed tracks and targets the res
 
 test("playlist actions hide Analyze Missing when unnecessary and keep Export visible", async ({ page }) => {
   await page.addInitScript(() => {
-    window.localStorage.setItem("djusbtkit.helpSeen", "1");
-
-    const playlists = [{
-      id: "pl-1",
-      name: "Ready Playlist",
-      source: "local",
-      lastExportedAt: null,
-      lastExportedUsbRoot: null,
-      lastExportedTrackCount: null,
-      createdAt: new Date().toISOString(),
-      updatedAt: new Date().toISOString()
-    }];
-
-    const playlistTracks = {
-      "pl-1": [
-        {
-          id: "local-ready-1",
-          title: "Local Ready",
-          artist: "Artist A",
-          album: "Album A",
-          filePath: "/music/local-ready.mp3",
-          waveformPeaksPath: "/tmp/local-ready.dat",
-          waveformPreview: [10, 20, 30],
-          durationMs: 180000,
-          bpm: 128,
-          key: "8A",
+    const backend = window.__e2eBackend;
+    backend.seed({
+      playlists: [{
+        id: "pl-1",
+        name: "Ready Playlist",
+        tracks: [{
+          id: "local-ready-1", title: "Local Ready", artist: "Artist A", album: "Album A", filePath: "/music/local-ready.mp3",
+          waveformPeaksPath: "/tmp/local-ready.dat", waveformPreview: [10, 20, 30], durationMs: 180000, bpm: 128, key: "8A",
           analysisReady: true
-        }
-      ]
-    };
-
-    window.__TAURI__ = {
-      core: {
-        invoke: async (command, payload = {}) => {
-          const request = payload?.request || payload;
-          if (command === "list_playlists") {
-            return {
-              ok: true,
-              data: {
-                playlists,
-                playlistUsbExportStatus: [{ playlistId: "pl-1", usbSelected: false, exportButtonText: "Select USB first", exportButtonTitle: "Select a valid USB folder first" }]
-              }
-            };
-          }
-          if (command === "get_playlist_tracks") {
-            return { ok: true, data: window.__playlistTracksPage(playlistTracks[request.playlistId], request) };
-          }
-          if (command === "browse_source_files") {
-            return { ok: true, data: { total: 0, items: [] } };
-          }
-          if (command === "resolve_playback_source") {
-            return { ok: true, data: { resolvedPath: null, matchedBy: "none", trackId: null } };
-          }
-          if (command === "select_usb") {
-            return {
-              ok: true,
-              data: {
-                valid: false,
-                normalizedRoot: "",
-                warnings: []
-              }
-            };
-          }
-          if (command === "run_usb_diagnostics") {
-            return {
-              ok: true,
-              data: {
-                overallStatus: "PASS",
-                statusLabel: "PASS", healthText: "USB health: good",
-                overview: [],
-                playlistUsbExportStatus: [],
-                durationMs: 1,
-                sectionGroups: [],
-                playlistDetails: [],
-                warnings: []
-              }
-            };
-          }
-          return window.__e2eBackend.answer(command);
-        }
+        }]
+      }]
+    });
+    backend.install((command, request, payload) => {
+      if (command === "list_playlists") {
+        const answer = backend.answer(command, payload);
+        answer.data.playlistUsbExportStatus = [
+          { playlistId: "pl-1", usbSelected: false, exportButtonText: "Select USB first", exportButtonTitle: "Select a valid USB folder first" }
+        ];
+        return answer;
       }
-    };
+    });
   });
 
   await page.goto("/");
   await page.locator("#navPlaylistList .nav-playlist-item").first().click();
-  await expect(page.locator("#playlistPanelTitle")).toContainText("Ready Playlist (mock list summary)");
+  await expect(page.locator("#playlistPanelTitle")).toContainText("Ready Playlist (1 track)");
   await expect(page.locator("#analyzePlaylistMissingBtn")).toBeHidden();
   await expect(page.locator("#exportPlaylistBtn")).toBeVisible();
   await expect(page.locator("#exportPlaylistBtn")).toHaveText("Select USB first");
@@ -487,119 +185,39 @@ test("playlist analyze-missing offers unanalyzed tracks that live on a USB drive
   // analyzable library track -- the playlist must offer "Analyze Missing Tracks"
   // for it, not hide the button and let the backend export gate reject it later.
   await page.addInitScript(() => {
-    window.isTauri = true;
-    window.__TAURI_INTERNALS__ = {
-      invoke: (cmd, args) => window.__TAURI__.core.invoke(cmd, args)
-    };
-    window.localStorage.setItem("djusbtkit.helpSeen", "1");
-    // The library\'s source folders, as `get_library_sources` answers.
+    const backend = window.__e2eBackend;
     window.__e2eSourceFolders = ["/music"];
-
-    const playlists = [{
-      id: "pl-1",
-      name: "USB Import Playlist",
-      source: "local",
-      lastExportedAt: null,
-      lastExportedUsbRoot: null,
-      lastExportedTrackCount: null,
-      createdAt: new Date().toISOString(),
-      updatedAt: new Date().toISOString()
-    }];
-
-    const playlistTracks = {
-      "pl-1": [
-        {
-          id: "local-ready-entry",
-          localTrackId: "local-ready-1",
-          title: "Local Ready",
-          artist: "Artist A",
-          album: "Album A",
-          filePath: "/music/local-ready.mp3",
-          waveformPeaksPath: "/tmp/local-ready.dat",
-          waveformPreview: [10, 20, 30],
-          durationMs: 180000,
-          bpm: 128,
-          key: "8A",
-          analysisReady: true
-        },
-        {
-          id: "usb-import-entry",
-          localTrackId: "usb-import-1",
-          title: "USB Import",
-          artist: "Artist B",
-          album: "Album B",
-          filePath: "/USB/MP3/usb-import.mp3",
-          isUsbPath: true,
-          waveformPeaksPath: "",
-          waveformPreview: [],
-          durationMs: null,
-          bpm: null,
-          key: null,
-          analysisReady: false
-        }
-      ]
-    };
-
+    backend.seed({
+      playlists: [{
+        id: "pl-1",
+        name: "USB Import Playlist",
+        tracks: [
+          {
+            id: "local-ready-entry", localTrackId: "local-ready-1", title: "Local Ready", artist: "Artist A", album: "Album A",
+            filePath: "/music/local-ready.mp3", waveformPeaksPath: "/tmp/local-ready.dat", waveformPreview: [10, 20, 30],
+            durationMs: 180000, bpm: 128, key: "8A", analysisReady: true
+          },
+          {
+            id: "usb-import-entry", localTrackId: "usb-import-1", title: "USB Import", artist: "Artist B", album: "Album B",
+            filePath: "/USB/MP3/usb-import.mp3", isUsbPath: true, waveformPeaksPath: "", waveformPreview: [],
+            durationMs: null, bpm: null, key: null, analysisReady: false
+          }
+        ]
+      }]
+    });
     const analyzedRequests = [];
-    const listeners = new Map();
-    const listen = async (eventName, callback) => {
-      const key = String(eventName || "");
-      const arr = listeners.get(key) || [];
-      arr.push(callback);
-      listeners.set(key, arr);
-      return () => {
-        const current = listeners.get(key) || [];
-        listeners.set(key, current.filter((fn) => fn !== callback));
-      };
-    };
-
-    window.__TAURI__ = {
-      core: {
-        invoke: async (command, payload = {}) => {
-          const request = payload?.request || payload;
-          if (command === "list_playlists") {
-            return { ok: true, data: { playlists: playlists, playlistUsbExportStatus: [] } };
-          }
-          if (command === "get_playlist_tracks") {
-            return { ok: true, data: window.__playlistTracksPage(playlistTracks[request.playlistId], request) };
-          }
-          if (command === "browse_source_files") {
-            return { ok: true, data: { total: 0, items: [] } };
-          }
-          if (command === "analyze_new_tracks") {
-            // "Analyze Missing" sends the playlist id, not an id list; the
-            // backend resolves it to that playlist's unanalyzed local tracks.
-            let ids = Array.isArray(request.trackIds) ? request.trackIds.map(String) : [];
-            if (!ids.length && request.playlistId) {
-              ids = (playlistTracks[request.playlistId] || [])
-                .filter((t) => !t.analysisReady)
-                .map((t) => String(t.localTrackId || t.id));
-            }
-            analyzedRequests.push({ trackIds: ids, playlistId: request.playlistId || null });
-            return {
-              ok: true,
-              data: { jobId: "job-mock", queued: ids.length, skipped: 0, message: `Analyzing ${ids.length} tracks` }
-            };
-          }
-          if (command === "resolve_playback_source") {
-            return { ok: true, data: { resolvedPath: null, matchedBy: "none", trackId: null } };
-          }
-          if (command === "select_usb") {
-            return {
-              ok: true,
-              data: {
-                valid: false,
-                normalizedRoot: "",
-                warnings: []
-              }
-            };
-          }
-          return window.__e2eBackend.answer(command);
-        }
-      },
-      event: { listen }
-    };
-
+    backend.install((command, request) => {
+      if (command !== "analyze_new_tracks") return undefined;
+      // "Analyze Missing" sends the playlist id, not an id list; the backend
+      // resolves it to that playlist's unanalyzed local tracks.
+      let ids = (request.trackIds || []).map(String);
+      if (!ids.length && request.playlistId) {
+        ids = backend.store.playlistTracks.get(request.playlistId)
+          .filter((t) => !t.analysisReady).map((t) => String(t.localTrackId || t.id));
+      }
+      analyzedRequests.push({ trackIds: ids, playlistId: request.playlistId || null });
+      return backend.ok({ jobId: "job-mock", queued: ids.length, skipped: 0, message: `Analyzing ${ids.length} tracks` });
+    }, { tauriRuntime: true });
     window.__playlistAnalysisTest = { analyzedRequests };
   });
 
@@ -625,37 +243,20 @@ test("selecting a playlist with tracks right after an empty one still paints its
   // again -- every waveform came up blank when the previously-selected
   // playlist was empty. The wrap must be revealed before the rows render.
   await page.addInitScript(() => {
-    window.localStorage.setItem("djusbtkit.helpSeen", "1");
-
-    const playlists = [
-      { id: "pl-empty", name: "Empty Playlist", source: "local", lastExportedAt: null, lastExportedUsbRoot: null, lastExportedTrackCount: null, createdAt: new Date().toISOString(), updatedAt: new Date().toISOString() },
-      { id: "pl-full", name: "Full Playlist", source: "local", lastExportedAt: null, lastExportedUsbRoot: null, lastExportedTrackCount: null, createdAt: new Date().toISOString(), updatedAt: new Date().toISOString() }
-    ];
-
-    const playlistTracks = {
-      "pl-empty": [],
-      "pl-full": [
-        { id: "t1", title: "Song A", artist: "Artist", album: "Album", filePath: "/music/a.mp3", waveformPeaksPath: "/tmp/a.dat", waveformPreview: [8, 20, 42, 65, 30, 55], durationMs: 180000, bpm: 120, key: "8A", analysisReady: true },
-        { id: "t2", title: "Song B", artist: "Artist", album: "Album", filePath: "/music/b.mp3", waveformPeaksPath: "/tmp/b.dat", waveformPreview: [7, 19, 43, 61, 34, 57], durationMs: 180000, bpm: 122, key: "9A", analysisReady: true }
-      ]
-    };
-
-    window.__TAURI__ = {
-      core: {
-        invoke: async (command, payload = {}) => {
-          const request = payload?.request || payload;
-          if (command === "list_playlists") return { ok: true, data: { playlists, playlistUsbExportStatus: [] } };
-          if (command === "get_playlist_tracks") {
-            return { ok: true, data: window.__playlistTracksPage(playlistTracks[request.playlistId] || [], request) };
-          }
-          if (command === "browse_source_files") return { ok: true, data: { total: 0, items: [] } };
-          if (command === "resolve_playback_source") {
-            return { ok: true, data: { resolvedPath: null, matchedBy: "none", trackId: null } };
-          }
-          return window.__e2eBackend.answer(command);
+    window.__e2eBackend.seed({
+      playlists: [
+        { id: "pl-empty", name: "Empty Playlist" },
+        {
+          id: "pl-full",
+          name: "Full Playlist",
+          tracks: [
+            { id: "t1", title: "Song A", artist: "Artist", album: "Album", filePath: "/music/a.mp3", waveformPeaksPath: "/tmp/a.dat", waveformPreview: [8, 20, 42, 65, 30, 55], durationMs: 180000, bpm: 120, key: "8A", analysisReady: true },
+            { id: "t2", title: "Song B", artist: "Artist", album: "Album", filePath: "/music/b.mp3", waveformPeaksPath: "/tmp/b.dat", waveformPreview: [7, 19, 43, 61, 34, 57], durationMs: 180000, bpm: 122, key: "9A", analysisReady: true }
+          ]
         }
-      }
-    };
+      ]
+    });
+    window.__e2eBackend.install();
   });
 
   await page.goto("/");
@@ -677,43 +278,37 @@ test("selecting a playlist with tracks right after an empty one still paints its
   })).toBe(true);
 });
 
-function installReorderTauriMock(page, { usbSameNamePlaylistName, exportPruneStale, extraPlaylists = [] } = {}) {
-  return page.addInitScript(({ usbSameNamePlaylistName, exportPruneStale, extraPlaylists }) => {
-    window.localStorage.setItem("djusbtkit.helpSeen", "1");
+// The app's playlists (by default one, "Reorder Playlist") and, when
+// `usbSameNamePlaylistName` is set, a USB holding a playlist of that name: in
+// additive export mode (`exportPruneStale: false`), the same-name playlist's
+// order is locked.
+function installReorderTauriMock(page, {
+  usbSameNamePlaylistName,
+  exportPruneStale,
+  playlists = [{
+    id: "pl-1",
+    name: "Reorder Playlist",
+    tracks: [["t1", "Song A", "Nina"], ["t2", "Song B", "Alex"], ["t3", "Song C", "Max"]].map(([id, title, artist]) => ({
+      ...songs([id, title])[0], artist, filePath: `/music/${title.at(-1).toLowerCase()}.mp3`
+    }))
+  }]
+} = {}) {
+  return page.addInitScript(({ usbSameNamePlaylistName, exportPruneStale, playlists }) => {
+    const backend = window.__e2eBackend;
     if (exportPruneStale !== undefined) {
       window.localStorage.setItem("djusbtkit.exportPruneStale", exportPruneStale ? "1" : "0");
     }
-
-    const playlists = [{
-      id: "pl-1",
-      name: "Reorder Playlist",
-      source: "local",
-      lastExportedAt: null,
-      lastExportedUsbRoot: null,
-      lastExportedTrackCount: null,
-      createdAt: new Date().toISOString(),
-      updatedAt: new Date().toISOString()
-    }, ...extraPlaylists];
-
-    const playlistTracks = {
-      "pl-1": [
-        { id: "t1", title: "Song A", artist: "Nina", album: "", filePath: "/music/a.mp3", waveformPeaksPath: "", waveformPreview: [], durationMs: 180000, bpm: 120, key: "8A", analysisReady: true },
-        { id: "t2", title: "Song B", artist: "Alex", album: "", filePath: "/music/b.mp3", waveformPeaksPath: "", waveformPreview: [], durationMs: 180000, bpm: 120, key: "8A", analysisReady: true },
-        { id: "t3", title: "Song C", artist: "Max", album: "", filePath: "/music/c.mp3", waveformPeaksPath: "", waveformPreview: [], durationMs: 180000, bpm: 120, key: "8A", analysisReady: true }
-      ]
-    };
-
-    window.__reorderPlaylistTrackCalls = [];
+    backend.seed({ playlists });
 
     // Mirrors the backend's export_prune_stale setting: seeded from the param,
     // updated by set_export_sync_mode, read by list_playlists / fetch_usb_playlists.
     let currentPruneStale = exportPruneStale !== false;
     // The backend's selected USB: set by a valid select_usb.
     let usbSelected = false;
-    const exportStatusFor = () => playlists.map((playlist) => {
-      const sameNameExistsOnUsb = !!usbSameNamePlaylistName
-        && String(playlist.name || "").trim().toLowerCase()
-          === String(usbSameNamePlaylistName).trim().toLowerCase();
+    const sameName = (name) => !!usbSameNamePlaylistName
+      && String(name || "").trim().toLowerCase() === String(usbSameNamePlaylistName).trim().toLowerCase();
+    const exportStatusFor = () => backend.store.playlists.map((playlist) => {
+      const sameNameExistsOnUsb = sameName(playlist.name);
       const locksReorder = !currentPruneStale && sameNameExistsOnUsb;
       return {
         playlistId: playlist.id,
@@ -742,140 +337,82 @@ function installReorderTauriMock(page, { usbSameNamePlaylistName, exportPruneSta
       };
     });
 
-    window.__TAURI__ = {
-      core: {
-        invoke: async (command, payload = {}) => {
-          const request = payload?.request || payload;
-          if (command === "get_playlist_tracks") {
-            // Read for a USB, each track carries what export puts on it
-            // (`__exportFiles`, by track id), as the backend sends it.
-            const items = (playlistTracks[request.playlistId] || []).map((track) => {
-              const exportFile = request.usbRoot ? window.__exportFiles?.[track.id] : null;
-              return exportFile ? { ...track, exportFile } : track;
-            });
-            return { ok: true, data: window.__playlistTracksPage(items, request) };
-          }
-          if (command === "get_playlist_export_space") {
-            // `__exportSpaceGate` (a promise) holds the answer back, to show
-            // the track list doesn't wait for it.
-            return Promise.resolve(window.__exportSpaceGate).then(() => ({
-              ok: true,
-              data: { exportSpace: window.__exportSpace || null },
-            }));
-          }
-          if (command === "reorder_playlist_tracks") {
-            window.__reorderPlaylistTrackCalls.push(request);
-            playlistTracks[request.playlistId] = window.__applyReorder(playlistTracks[request.playlistId] || [], request);
-            return { ok: true, data: { playlistId: request.playlistId, reordered: playlistTracks[request.playlistId].length } };
-          }
-          if (command === "browse_source_files") {
-            return { ok: true, data: { total: 0, items: [] } };
-          }
-          if (command === "set_export_sync_mode") {
-            window.__syncModeRequests = [...(window.__syncModeRequests || []), request];
-            // As the backend: the open playlist's sort is saved first when the new
-            // mode locks its order.
-            const lockedAfter = (pruneStale) => {
-              const before = currentPruneStale;
-              currentPruneStale = pruneStale;
-              const status = exportStatusFor().find((entry) => entry.playlistId === request.playlistId);
-              currentPruneStale = before;
-              return usbSelected && !!status?.locksReorder;
-            };
-            const locked = lockedAfter(request.pruneStale);
-            if (locked && request.sort && !lockedAfter(currentPruneStale)) {
-              playlistTracks[request.playlistId] = window.__applyReorder(
-                playlistTracks[request.playlistId] || [],
-                { playlistId: request.playlistId, ...request.sort }
-              );
-            }
-            currentPruneStale = request.pruneStale;
-            const open = playlists.find((playlist) => playlist.id === request.playlistId);
-            return {
-              ok: true,
-              data: {
-                pruneStale: currentPruneStale,
-                locked,
-                statusText: locked
-                  ? `Export sync mode: additive — "${open.name}" already exists on USB, so its track order is locked here (current order kept).`
-                  : currentPruneStale ? "Export sync mode: mirror (exact match)" : "Export sync mode: additive"
-              }
-            };
-          }
-          if (command === "list_playlists") {
-            const noUsb = (status) => ({
-              ...status,
-              usbSelected: false,
-              sameNameExistsOnUsb: false,
-              locksReorder: false,
-              markLabel: playlists.find((playlist) => playlist.id === status.playlistId)?.lastExportedAt
-                ? "Exported to USB"
-                : null,
-              exportButtonText: "Select USB first",
-              exportButtonTitle: "Select a valid USB folder first"
-            });
-            const statuses = exportStatusFor();
-            return { ok: true, data: { playlists, playlistUsbExportStatus: usbSelected ? statuses : statuses.map(noUsb) } };
-          }
-          if (command === "resolve_playback_source") {
-            return { ok: true, data: { resolvedPath: null, matchedBy: "none", trackId: null } };
-          }
-          if (command === "pick_usb_folder") {
-            return usbSameNamePlaylistName ? "/USB" : null;
-          }
-          if (command === "select_usb") {
-            const valid = !!usbSameNamePlaylistName;
-            usbSelected = valid;
-            return {
-              ok: true,
-              data: {
-                valid,
-                normalizedRoot: valid ? "/USB" : "",
-                warnings: []
-              }
-            };
-          }
-          if (command === "fetch_usb_playlists") {
-            const items = usbSameNamePlaylistName
-              ? [{
-                  id: "usb-pl-1",
-                  name: usbSameNamePlaylistName,
-                  source: "mock-tauri",
-                  tracks: [{ title: "USB Track" }],
-                  trackCount: 1
-                }]
-              : [];
-            return {
-              ok: true,
-              data: {
-                items,
-                stats: { indexedTracks: 0, playlistReferencedTracks: 0, playlistEntries: items.length },
-                playlistUsbExportStatus: [],
-                warnings: [],
-                playlistUsbExportStatus: exportStatusFor()
-              }
-            };
-          }
-          if (command === "run_usb_diagnostics") {
-            return {
-              ok: true,
-              data: {
-                overallStatus: "PASS",
-                statusLabel: "PASS", healthText: "USB health: good",
-                overview: [],
-                durationMs: 1,
-                sectionGroups: [],
-                playlistDetails: [],
-                warnings: [],
-                playlistUsbExportStatus: []
-              }
-            };
-          }
-          return window.__e2eBackend.answer(command);
-        }
+    backend.install(async (command, request, payload) => {
+      if (command === "get_playlist_tracks" && request.usbRoot) {
+        // Read for a USB, each track carries what export puts on it
+        // (`__exportFiles`, by track id), as the backend sends it.
+        const answer = backend.answer(command, payload);
+        answer.data.items = answer.data.items.map((track) => {
+          const exportFile = window.__exportFiles?.[track.id];
+          return exportFile ? { ...track, exportFile } : track;
+        });
+        return answer;
       }
-    };
-  }, { usbSameNamePlaylistName, exportPruneStale, extraPlaylists });
+      if (command === "get_playlist_export_space") {
+        // `__exportSpaceGate` (a promise) holds the answer back, to show
+        // the track list doesn't wait for it.
+        await window.__exportSpaceGate;
+        return backend.ok({ exportSpace: window.__exportSpace || null });
+      }
+      if (command === "set_export_sync_mode") {
+        // As the backend: the open playlist's sort is saved first when the new
+        // mode locks its order.
+        const lockedAfter = (pruneStale) => {
+          const before = currentPruneStale;
+          currentPruneStale = pruneStale;
+          const status = exportStatusFor().find((entry) => entry.playlistId === request.playlistId);
+          currentPruneStale = before;
+          return usbSelected && !!status?.locksReorder;
+        };
+        const locked = lockedAfter(request.pruneStale);
+        if (locked && request.sort && !lockedAfter(currentPruneStale)) {
+          const tracks = backend.store.playlistTracks;
+          tracks.set(request.playlistId, backend.applyReorder(tracks.get(request.playlistId) || [], request.sort));
+        }
+        currentPruneStale = request.pruneStale;
+        const open = backend.store.playlists.find((playlist) => playlist.id === request.playlistId);
+        return backend.ok({
+          pruneStale: currentPruneStale,
+          locked,
+          statusText: locked
+            ? `Export sync mode: additive — "${open.name}" already exists on USB, so its track order is locked here (current order kept).`
+            : currentPruneStale ? "Export sync mode: mirror (exact match)" : "Export sync mode: additive"
+        });
+      }
+      if (command === "list_playlists") {
+        const noUsb = (status) => ({
+          ...status,
+          usbSelected: false,
+          sameNameExistsOnUsb: false,
+          locksReorder: false,
+          markLabel: backend.store.playlists.find((playlist) => playlist.id === status.playlistId)?.lastExportedAt
+            ? "Exported to USB"
+            : null,
+          exportButtonText: "Select USB first",
+          exportButtonTitle: "Select a valid USB folder first"
+        });
+        const answer = backend.answer(command, payload);
+        const statuses = exportStatusFor();
+        answer.data.playlistUsbExportStatus = usbSelected ? statuses : statuses.map(noUsb);
+        return answer;
+      }
+      if (command === "pick_usb_folder") return usbSameNamePlaylistName ? "/USB" : null;
+      if (command === "select_usb") {
+        usbSelected = !!usbSameNamePlaylistName;
+        return backend.ok({ valid: usbSelected, normalizedRoot: usbSelected ? "/USB" : "", warnings: [] });
+      }
+      if (command === "fetch_usb_playlists") {
+        const items = usbSameNamePlaylistName
+          ? [{ id: "usb-pl-1", name: usbSameNamePlaylistName, source: "mock-tauri", tracks: [{ title: "USB Track" }], trackCount: 1 }]
+          : [];
+        return backend.ok({
+          items,
+          stats: { indexedTracks: 0, playlistReferencedTracks: 0, playlistEntries: items.length },
+          playlistUsbExportStatus: exportStatusFor()
+        });
+      }
+    });
+  }, { usbSameNamePlaylistName, exportPruneStale, playlists });
 }
 
 async function dragPlaylistTrackRow(page, fromTrackId, toTrackId, dropNearTop) {
@@ -909,7 +446,7 @@ test("playlist track drag-and-drop reorder persists the new order", async ({ pag
   await expect(rows.nth(1)).toHaveAttribute("data-track-id", "t3");
   await expect(rows.nth(2)).toHaveAttribute("data-track-id", "t1");
 
-  const calls = await page.evaluate(() => window.__reorderPlaylistTrackCalls);
+  const calls = await reorderRequests(page);
   expect(calls.length).toBeGreaterThan(0);
   expect(calls[calls.length - 1]).toEqual({ playlistId: "pl-1", moveTrackId: "t1", beforeTrackId: null });
 });
@@ -930,7 +467,7 @@ test("playlist track drag that does not change position skips persisting order",
   await page.mouse.up();
 
   await expect(rows.nth(0)).toHaveAttribute("data-track-id", "t1");
-  const calls = await page.evaluate(() => window.__reorderPlaylistTrackCalls);
+  const calls = await reorderRequests(page);
   expect(calls).toEqual([]);
 });
 
@@ -967,7 +504,7 @@ test("dragging a playlist track while sorted commits the sorted order first, the
 
   // The sorted view is persisted FIRST (sort-commit), then the single move --
   // so `beforeTrackId` lines up with what the user actually saw.
-  const calls = await page.evaluate(() => window.__reorderPlaylistTrackCalls);
+  const calls = await reorderRequests(page);
   expect(calls).toEqual([
     { playlistId: "pl-1", sortBy: "artist", sortDir: "asc" },
     { playlistId: "pl-1", moveTrackId: "t2", beforeTrackId: null },
@@ -1000,26 +537,16 @@ test("playlist track drag handle is hidden while a search filter is active", asy
 });
 
 async function connectUsbAndFetchPlaylists(page) {
-  await page.locator('.nav-item[data-view="usb"]').click();
-  await page.locator("#usbEmptyState .empty-state-action").click();
-  await page.locator('.nav-item[data-view="usb-playlists"]').click();
+  await openUsb(page, "usb-playlists");
   await expect(page.locator("#usbPlaylists [data-usb-playlist]")).toHaveCount(1);
 }
 
 test("sidebar checkmarks show which playlists are on the connected USB", async ({ page }) => {
-  await installReorderTauriMock(page, {
-    usbSameNamePlaylistName: "Reorder Playlist",
-    extraPlaylists: [{
-      id: "pl-2",
-      name: "Elsewhere Set",
-      source: "local",
-      lastExportedAt: "2026-04-07T10:00:00Z",
-      lastExportedUsbRoot: "/OTHER_USB",
-      lastExportedTrackCount: 2,
-      createdAt: new Date().toISOString(),
-      updatedAt: new Date().toISOString()
-    }]
-  });
+  await installReorderTauriMock(page, { usbSameNamePlaylistName: "Reorder Playlist" });
+  await page.addInitScript(() => window.__e2eBackend.store.playlists.push({
+    id: "pl-2", name: "Elsewhere Set",
+    lastExportedAt: "2026-04-07T10:00:00Z", lastExportedUsbRoot: "/OTHER_USB", lastExportedTrackCount: 2
+  }));
   await page.goto("/");
 
   const statusOf = (id) => page.locator(`#navPlaylistList .nav-playlist-item[data-playlist-id="${id}"] .nav-playlist-status`);
@@ -1079,7 +606,7 @@ test("playlist track drag handle is disabled with a tooltip when additive export
   await page.mouse.up();
 
   await expect(rows.nth(0)).toHaveAttribute("data-track-id", "t1");
-  const calls = await page.evaluate(() => window.__reorderPlaylistTrackCalls);
+  const calls = await reorderRequests(page);
   expect(calls).toEqual([]);
 });
 
@@ -1225,14 +752,14 @@ test("export is disabled from the click until the export finishes, so a double c
   await expect(page.locator("#playlistTracksBody .track-grid-row")).toHaveCount(3);
   // Hold export_to_usb open until the test releases it, counting the calls.
   await page.evaluate(() => {
-    const invoke = window.__TAURI__.core.invoke;
     window.__exportCalls = 0;
-    window.__TAURI__.core.invoke = async (command, payload) => {
-      if (command !== "export_to_usb") return invoke(command, payload);
+    const backend = window.__e2eBackend;
+    backend.override(async (command, request, payload, next) => {
+      if (command !== "export_to_usb") return next();
       window.__exportCalls += 1;
       await new Promise((resolve) => { window.__finishExport = resolve; });
       return { ok: false, error: { code: "INTERNAL", message: "stopped by test" } };
-    };
+    });
   });
 
   const exportBtn = page.locator("#exportPlaylistBtn");
@@ -1251,18 +778,17 @@ test("export is disabled from the click until the export finishes, so a double c
 // `window.__exportFlow`; `window.__playlistReads` counts list_playlists.
 async function answerExports(page, answer) {
   await page.evaluate((answer) => {
-    const invoke = window.__TAURI__.core.invoke;
     window.__exportFlow = [];
     window.__exportAnswer = answer;
-    window.__TAURI__.core.invoke = async (command, payload) => {
+    const backend = window.__e2eBackend;
+    backend.override(async (command, request, payload, next) => {
       if (command === "export_to_usb") {
         window.__exportFlow.push({ command, options: payload?.request?.options, sort: payload?.request?.sort });
         return window.__exportAnswer;
       }
       if (command === "reorder_playlist_tracks") window.__exportFlow.push({ command });
       if (command === "list_playlists") window.__playlistReads = (window.__playlistReads || 0) + 1;
-      return invoke(command, payload);
-    };
+    });
   }, answer);
 }
 
@@ -1275,22 +801,18 @@ test("a successful export clears the stale diagnostics report and sends the back
   await installReorderTauriMock(page, { usbSameNamePlaylistName: "Reorder Playlist" });
   await page.addInitScript(() => {
     window.localStorage.setItem("djusbtkit.exportBackup", "0");
-    const invoke = window.__TAURI__.core.invoke;
     window.__historyReads = 0;
-    window.__TAURI__.core.invoke = async (command, payload) => {
+    const backend = window.__e2eBackend;
+    backend.override(async (command, request, payload, next) => {
       if (command === "fetch_usb_histories") {
         window.__historyReads += 1;
-        return {
-          ok: true,
-          data: {
-            items: [{ id: "h-1", name: "HISTORY 001", tracks: [] }],
-            summaryText: "1 session, 3 tracks", counts: { importedPlaylists: 1, importedTracks: 3 },
-            warnings: []
-          }
-        };
+        return backend.ok({
+          items: [{ id: "h-1", name: "HISTORY 001", tracks: [] }],
+          summaryText: "1 session, 3 tracks", counts: { importedPlaylists: 1, importedTracks: 3 },
+          warnings: []
+        });
       }
-      return invoke(command, payload);
-    };
+    });
   });
   await page.goto("/");
   await connectUsbAndFetchPlaylists(page);
@@ -1428,12 +950,13 @@ test("changing the export sync mode releases and re-engages the open playlist's 
   await expect(page.locator("#exportPlaylistBtn")).toHaveText("Append to (Reorder Playlist) on USB: (USB)");
 
   // The mode change carries the sort along: the backend saves it before the lock.
-  const requests = await page.evaluate(() => window.__syncModeRequests);
+  const requests = await page.evaluate(() =>
+    window.__calls.filter((c) => c.command === "set_export_sync_mode").map((c) => c.request));
   expect(requests).toEqual([
     { pruneStale: true, playlistId: "pl-1", sort: null },
     { pruneStale: false, playlistId: "pl-1", sort: { sortBy: "artist", sortDir: "asc" } }
   ]);
-  expect(await page.evaluate(() => window.__reorderPlaylistTrackCalls)).toEqual([]);
+  expect(await reorderRequests(page)).toEqual([]);
   await expect(page.locator("#statusText")).toContainText('"Reorder Playlist" already exists on USB, so its track order is locked here');
 });
 
@@ -1456,91 +979,14 @@ test("switching away from a sorted playlist commits the sort as its real order, 
   // the view. The playlist panel's header/table DOM is shared across every
   // playlist, so the *next* playlist viewed must never show a leftover
   // hint/arrow from a sort that belonged to a different one.
-  await page.addInitScript(() => {
-    window.localStorage.setItem("djusbtkit.helpSeen", "1");
-    window.localStorage.setItem("djusbtkit.exportPruneStale", "0");
-
-    const playlists = [
-      { id: "pl-free", name: "Free Playlist", source: "local", lastExportedAt: null, lastExportedUsbRoot: null, lastExportedTrackCount: null, createdAt: new Date().toISOString(), updatedAt: new Date().toISOString() },
-      { id: "pl-locked", name: "Locked Playlist", source: "local", lastExportedAt: null, lastExportedUsbRoot: null, lastExportedTrackCount: null, createdAt: new Date().toISOString(), updatedAt: new Date().toISOString() }
-    ];
-
-    const playlistTracks = {
-      "pl-free": [
-        { id: "t1", title: "Song A", artist: "Artist", album: "Zulu Album", filePath: "/music/a.mp3", waveformPeaksPath: "", waveformPreview: [], durationMs: 180000, bpm: 120, key: "8A", analysisReady: true },
-        { id: "t2", title: "Song B", artist: "Artist", album: "Alpha Album", filePath: "/music/b.mp3", waveformPeaksPath: "", waveformPreview: [], durationMs: 180000, bpm: 120, key: "8A", analysisReady: true }
-      ],
-      "pl-locked": [
-        { id: "t3", title: "Song C", artist: "Artist", album: "Zulu Album", filePath: "/music/c.mp3", waveformPeaksPath: "", waveformPreview: [], durationMs: 180000, bpm: 120, key: "8A", analysisReady: true },
-        { id: "t4", title: "Song D", artist: "Artist", album: "Alpha Album", filePath: "/music/d.mp3", waveformPeaksPath: "", waveformPreview: [], durationMs: 180000, bpm: 120, key: "8A", analysisReady: true }
-      ]
-    };
-
-    window.__reorderPlaylistTrackCalls = [];
-
-    window.__TAURI__ = {
-      core: {
-        invoke: async (command, payload = {}) => {
-          const request = payload?.request || payload;
-          if (command === "list_playlists") return { ok: true, data: { playlists, playlistUsbExportStatus: [] } };
-          if (command === "get_playlist_tracks") {
-            return { ok: true, data: window.__playlistTracksPage(playlistTracks[request.playlistId], request) };
-          }
-          if (command === "reorder_playlist_tracks") {
-            window.__reorderPlaylistTrackCalls.push(request);
-            playlistTracks[request.playlistId] = window.__applyReorder(playlistTracks[request.playlistId], request);
-            return { ok: true, data: { playlistId: request.playlistId, reordered: playlistTracks[request.playlistId].length } };
-          }
-          if (command === "browse_source_files") return { ok: true, data: { total: 0, items: [] } };
-          if (command === "resolve_playback_source") {
-            return { ok: true, data: { resolvedPath: null, matchedBy: "none", trackId: null } };
-          }
-          if (command === "pick_usb_folder") return "/USB";
-          if (command === "select_usb") {
-            return {
-              ok: true,
-              data: { valid: true, normalizedRoot: "/USB", warnings: [] }
-            };
-          }
-          if (command === "fetch_usb_playlists") {
-            const items = [{ id: "usb-pl-1", name: "Locked Playlist", source: "mock-tauri", tracks: [{ title: "USB Track" }], trackCount: 1 }];
-            const usbNames = new Set(items.map((item) => String(item.name || "").trim().toLowerCase()));
-            return {
-              ok: true,
-              data: {
-                items,
-                stats: { indexedTracks: 0, playlistReferencedTracks: 0, playlistEntries: items.length },
-                playlistUsbExportStatus: [],
-                warnings: [],
-                playlistUsbExportStatus: playlists.map((playlist) => {
-                  const sameNameExistsOnUsb = usbNames.has(String(playlist.name || "").trim().toLowerCase());
-                  const locksReorder = sameNameExistsOnUsb;
-                  return {
-                    playlistId: playlist.id,
-                    playlistName: playlist.name,
-                    usbSelected: true, sameNameExistsOnUsb,
-                    locksReorder,
-                    markLabel: sameNameExistsOnUsb ? "On this USB" : null,
-                    exportButtonText: locksReorder
-                      ? `Append to (${playlist.name}) on USB: (USB)`
-                      : "Export to USB: USB",
-                    exportButtonTitle: locksReorder
-                      ? `Append current playlist tracks to existing USB playlist "${playlist.name}"`
-                      : "Export current playlist to selected USB",
-                    reorderLockTooltip: locksReorder
-                      ? `Won't reorder on USB — "${playlist.name}" already exists there, and additive export keeps its existing track order unchanged. New tracks are still added in your chosen order.`
-                      : null
-                  };
-                })
-              }
-            };
-          }
-          return window.__e2eBackend.answer(command);
-        }
-      }
-    };
+  await installReorderTauriMock(page, {
+    usbSameNamePlaylistName: "Locked Playlist",
+    exportPruneStale: false,
+    playlists: [
+      { id: "pl-free", name: "Free Playlist", tracks: songs(["t1", "Song A", "Zulu Album"], ["t2", "Song B", "Alpha Album"]) },
+      { id: "pl-locked", name: "Locked Playlist", tracks: songs(["t3", "Song C", "Zulu Album"], ["t4", "Song D", "Alpha Album"]) }
+    ]
   });
-
   await page.goto("/");
   await connectUsbAndFetchPlaylists(page);
 
@@ -1552,14 +998,14 @@ test("switching away from a sorted playlist commits the sort as its real order, 
   await expect(page.locator("#playlistTracksBody .track-grid-row .track-title")).toHaveText(["Song B", "Song A"]);
 
   // Sorting alone must not have committed anything yet.
-  expect(await page.evaluate(() => window.__reorderPlaylistTrackCalls.length)).toBe(0);
+  expect(await reorderRequests(page).then((calls) => calls.length)).toBe(0);
 
   // Switch to the locked playlist -- leaving Free Playlist commits its sort.
   await page.locator("#navPlaylistList .nav-playlist-item", { hasText: "Locked Playlist" }).click();
   const lockedRows = page.locator("#playlistTracksBody .track-grid-row");
   await expect(lockedRows).toHaveCount(2);
 
-  const reorderCalls = await page.evaluate(() => window.__reorderPlaylistTrackCalls);
+  const reorderCalls = await reorderRequests(page);
   expect(reorderCalls).toEqual([{ playlistId: "pl-free", sortBy: "album", sortDir: "asc" }]);
 
   // The locked playlist must not inherit the sort -- it was never sorted itself.
@@ -1570,48 +1016,11 @@ test("switching away from a sorted playlist commits the sort as its real order, 
 });
 
 function installTwoPlaylistTauriMock(page) {
-  return page.addInitScript(() => {
-    window.localStorage.setItem("djusbtkit.helpSeen", "1");
-
-    const playlists = [
-      { id: "pl-a", name: "Playlist A", source: "local", lastExportedAt: null, lastExportedUsbRoot: null, lastExportedTrackCount: null, createdAt: new Date().toISOString(), updatedAt: new Date().toISOString() },
-      { id: "pl-b", name: "Playlist B", source: "local", lastExportedAt: null, lastExportedUsbRoot: null, lastExportedTrackCount: null, createdAt: new Date().toISOString(), updatedAt: new Date().toISOString() }
-    ];
-
-    const playlistTracks = {
-      "pl-a": [
-        { id: "t1", title: "Song A", artist: "Artist", album: "Zulu Album", filePath: "/music/a.mp3", waveformPeaksPath: "", waveformPreview: [], durationMs: 180000, bpm: 120, key: "8A", analysisReady: true },
-        { id: "t2", title: "Song B", artist: "Artist", album: "Alpha Album", filePath: "/music/b.mp3", waveformPeaksPath: "", waveformPreview: [], durationMs: 180000, bpm: 120, key: "8A", analysisReady: true }
-      ],
-      "pl-b": [
-        { id: "t3", title: "Song C", artist: "Artist", album: "Zulu Album", filePath: "/music/c.mp3", waveformPeaksPath: "", waveformPreview: [], durationMs: 180000, bpm: 120, key: "8A", analysisReady: true },
-        { id: "t4", title: "Song D", artist: "Artist", album: "Alpha Album", filePath: "/music/d.mp3", waveformPeaksPath: "", waveformPreview: [], durationMs: 180000, bpm: 120, key: "8A", analysisReady: true }
-      ]
-    };
-
-    window.__reorderPlaylistTrackCalls = [];
-
-    window.__TAURI__ = {
-      core: {
-        invoke: async (command, payload = {}) => {
-          const request = payload?.request || payload;
-          if (command === "list_playlists") return { ok: true, data: { playlists, playlistUsbExportStatus: [] } };
-          if (command === "get_playlist_tracks") {
-            return { ok: true, data: window.__playlistTracksPage(playlistTracks[request.playlistId], request) };
-          }
-          if (command === "reorder_playlist_tracks") {
-            window.__reorderPlaylistTrackCalls.push(request);
-            playlistTracks[request.playlistId] = window.__applyReorder(playlistTracks[request.playlistId], request);
-            return { ok: true, data: { playlistId: request.playlistId, reordered: playlistTracks[request.playlistId].length } };
-          }
-          if (command === "browse_source_files") return { ok: true, data: { total: 0, items: [] } };
-          if (command === "resolve_playback_source") {
-            return { ok: true, data: { resolvedPath: null, matchedBy: "none", trackId: null } };
-          }
-          return window.__e2eBackend.answer(command);
-        }
-      }
-    };
+  return installReorderTauriMock(page, {
+    playlists: [
+      { id: "pl-a", name: "Playlist A", tracks: songs(["t1", "Song A", "Zulu Album"], ["t2", "Song B", "Alpha Album"]) },
+      { id: "pl-b", name: "Playlist B", tracks: songs(["t3", "Song C", "Zulu Album"], ["t4", "Song D", "Alpha Album"]) }
+    ]
   });
 }
 
@@ -1629,7 +1038,7 @@ test("switching between two unlocked playlists commits the outgoing sort and doe
   const rowsB = page.locator("#playlistTracksBody .track-grid-row");
   await expect(rowsB).toHaveCount(2);
 
-  const reorderCalls = await page.evaluate(() => window.__reorderPlaylistTrackCalls);
+  const reorderCalls = await reorderRequests(page);
   expect(reorderCalls).toEqual([{ playlistId: "pl-a", sortBy: "album", sortDir: "asc" }]);
 
   await expect(page.locator("#panel-playlist .sort-hint")).toBeHidden();
@@ -1648,8 +1057,8 @@ test("switching to a non-playlist view (Library) also commits an active playlist
   await expect(page.locator("#panel-playlist .sort-hint")).toBeVisible();
 
   await page.locator('.nav-item[data-view="library"]').click();
-  await expect.poll(() => page.evaluate(() => window.__reorderPlaylistTrackCalls.length)).toBeGreaterThan(0);
-  const reorderCalls = await page.evaluate(() => window.__reorderPlaylistTrackCalls);
+  await expect.poll(() => reorderRequests(page).then((calls) => calls.length)).toBeGreaterThan(0);
+  const reorderCalls = await reorderRequests(page);
   expect(reorderCalls).toEqual([{ playlistId: "pl-a", sortBy: "album", sortDir: "asc" }]);
 });
 
@@ -1671,5 +1080,5 @@ test("a same-playlist refresh (search) does not clear or commit an active sort",
   await expect(page.locator("#panel-playlist .sort-hint")).toBeVisible();
   await expect(page.locator('#panel-playlist .sortable[data-sort-key="album"]')).toHaveClass(/sort-asc/);
   await expect(page.locator("#playlistTracksBody .track-grid-row .track-title")).toHaveText(["Song B", "Song A"]);
-  expect(await page.evaluate(() => window.__reorderPlaylistTrackCalls.length)).toBe(0);
+  expect(await reorderRequests(page).then((calls) => calls.length)).toBe(0);
 });

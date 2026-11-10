@@ -390,5 +390,4 @@ Relevant test areas:
 - `backend/src/service/diagnostics/tests.rs` unit tests
 - `backend/src/service/repair/tests.rs` unit tests
 - `backend/src/edb.rs` unit tests
-- `vanilla-ui/tests/diagnostics_ui_behavior.test.mjs`
-- `vanilla-ui/tests/usb_parity_detail.test.mjs`
+- `vanilla-ui/tests/e2e/usb_flows.spec.mjs`

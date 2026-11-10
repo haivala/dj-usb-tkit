@@ -138,3 +138,11 @@ export function uiTextCheck(page) {
     }
   };
 }
+
+// Opens the USB page and picks its folder (the stubbed backend's stick), then
+// the USB sub-view `view` (e.g. "usb-playlists"), if given.
+export async function openUsb(page, view) {
+  await page.locator('.nav-item[data-view="usb"]').click();
+  await page.locator("#usbEmptyState .empty-state-action").click();
+  if (view) await page.locator(`.nav-item[data-view="${view}"]`).click();
+}

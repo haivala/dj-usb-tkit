@@ -1,8 +1,8 @@
-import { test, expect } from "./coverage-fixture.mjs";
+import { test, expect, openUsb } from "./coverage-fixture.mjs";
 
 function installTauriMock(page) {
   return page.addInitScript(() => {
-    window.localStorage.setItem("djusbtkit.helpSeen", "1");
+    const backend = window.__e2eBackend;
     window.__tracklistOptionRequests = [];
     window.__tracklistBuilds = [];
     const historyTracks = [
@@ -11,116 +11,41 @@ function installTauriMock(page) {
       { id: "3", title: "Closer", artist: "DJ Three", durationMs: 300000 },
       { id: "4", title: "x".repeat(200), artist: "DJ Four", durationMs: 200000 }
     ];
-    window.__TAURI__ = {
-      core: {
-        invoke: async (command, payload = {}) => {
-          if (command === "pick_usb_folder") return "/Volumes/USB-TEST";
-          if (command === "browse_source_files") {
-            return {
-              ok: true,
-              data: { items: [], total: 0, nextCursor: null, hasMore: false, totalDurationMs: 0, durationUnknownCount: 0, listTrackCount: 0, listSizeBytes: 0, warnings: [] }
-            };
-          }
-          if (command === "get_library_sources") {
-            return { ok: true, data: { folders: [], rekordboxDbEnabled: false, mixxxDbEnabled: false, everConfigured: false, analyzeButtonLabel: "Analyze Library", analyzeScanningStatus: "Scanning library files...", trackNotInLibraryStatus: "Track is not in the local library yet. Run Analyze Library first." } };
-          }
-          if (command === "inspect_usb_track") {
-            const trackId = String(payload?.request?.trackId || "");
-            const track = historyTracks.find((t) => t.id === trackId);
-            return { ok: true, data: { track: track ? { ...track, artworkChecked: true } : {}, warnings: [] } };
-          }
-          if (command === "select_usb") {
-            return {
-              ok: true,
-              data: {
-                valid: true,
-                normalizedRoot: "/Volumes/USB-TEST",
-                warnings: []
-              }
-            };
-          }
-          if (command === "run_usb_diagnostics") {
-            return {
-              ok: true,
-              data: {
-                overallStatus: "PASS",
-                statusLabel: "PASS", healthText: "USB health: good",
-                overview: [],
-                playlistUsbExportStatus: [],
-                sectionGroups: [],
-                playlistDetails: [],
-                warnings: [],
-                durationMs: 5
-              }
-            };
-          }
-          if (command === "get_usb_history_tracklist_options") {
-            window.__tracklistOptionRequests.push(payload.request);
-            return {
-              ok: true,
-              data: { startTracks: ["1. DJ One - Opener", "2. DJ Two - Peak Time", "3. DJ Three - Closer", "4. DJ Four - cut by the backend…"] }
-            };
-          }
-          if (command === "build_usb_history_tracklist") {
-            window.__tracklistBuilds.push(payload.request);
-            return {
-              ok: true,
-              data: {
-                suggestedFileName: "from the backend.txt",
-                contents: "the backend's tracklist",
-                exportedText: "Exported, says the backend",
-                cancelledText: "Cancelled, says the backend"
-              }
-            };
-          }
-          if (command === "fetch_usb_histories") {
-            return {
-              ok: true,
-              data: {
-                items: [
-                  {
-                    id: "hist-1",
-                    name: "HISTORY 001",
-                    createdAt: "2026-08-01",
-                    tracks: historyTracks
-                  },
-                  {
-                    id: "hist-0",
-                    name: "HISTORY 000",
-                    createdAt: null,
-                    tracks: historyTracks.slice(0, 1)
-                  }
-                ],
-                counts: { importedPlaylists: 2, importedTracks: 5 },
-                summaryText: "2 sessions, 5 tracks",
-                statusText: "USB histories loaded: 2",
-                warnings: []
-              }
-            };
-          }
-          if (command === "fetch_usb_history_tracks") {
-            return {
-              ok: true,
-              data: {
-                items: historyTracks.map((t) => ({ ...t, bpm: 120, key: "8A", waveformPreview: [10, 20, 10] })),
-                total: historyTracks.length,
-                hasMore: false,
-                nextCursor: null,
-                totalDurationMs: historyTracks.reduce((s, t) => s + (t.durationMs || 0), 0),
-                listSummaryText: "4 tracks",
-                durationUnknownCount: 0,
-                warnings: []
-              }
-            };
-          }
-          return window.__e2eBackend.answer(command);
-        },
-        convertFileSrc: (path) => path
-      },
-      event: {
-        listen: async () => () => {}
+    backend.install((command, request) => {
+      switch (command) {
+        case "inspect_usb_track": {
+          const track = historyTracks.find((t) => t.id === String(request.trackId || ""));
+          return backend.ok({ track: track ? { ...track, artworkChecked: true } : {}, warnings: [] });
+        }
+        case "get_usb_history_tracklist_options":
+          window.__tracklistOptionRequests.push(request);
+          return backend.ok({ startTracks: ["1. DJ One - Opener", "2. DJ Two - Peak Time", "3. DJ Three - Closer", "4. DJ Four - cut by the backend…"] });
+        case "build_usb_history_tracklist":
+          window.__tracklistBuilds.push(request);
+          return backend.ok({
+            suggestedFileName: "from the backend.txt",
+            contents: "the backend's tracklist",
+            exportedText: "Exported, says the backend",
+            cancelledText: "Cancelled, says the backend"
+          });
+        case "fetch_usb_histories":
+          return backend.ok({
+            items: [
+              { id: "hist-1", name: "HISTORY 001", createdAt: "2026-08-01", tracks: historyTracks },
+              { id: "hist-0", name: "HISTORY 000", createdAt: null, tracks: historyTracks.slice(0, 1) }
+            ],
+            counts: { importedPlaylists: 2, importedTracks: 5 },
+            summaryText: "2 sessions, 5 tracks",
+            statusText: "USB histories loaded: 2"
+          });
+        case "fetch_usb_history_tracks":
+          return backend.ok({
+            ...backend.listPage(historyTracks.map((t) => ({ ...t, bpm: 120, key: "8A", waveformPreview: [10, 20, 10] }))),
+            listSummaryText: "4 tracks"
+          });
+        default: return undefined;
       }
-    };
+    });
   });
 }
 
@@ -128,9 +53,7 @@ test("Export Tracklist dialog's start-track select is populated from the selecte
   await installTauriMock(page);
   await page.goto("/");
 
-  await page.locator('.nav-item[data-view="usb"]').click();
-  await page.locator("#usbEmptyState .empty-state-action").click();
-  await page.locator('.nav-item[data-view="usb-history"]').click();
+  await openUsb(page, "usb-history");
 
   // The list shows the sessions in the order the backend sends: newest first.
   const rows = page.locator("#historyList li");
@@ -201,19 +124,17 @@ test("Export Tracklist dialog's start-track select is populated from the selecte
 test("Export Tracklist saves the session from the chosen start track, and reports a dismissed save", async ({ page }) => {
   await installTauriMock(page);
   await page.addInitScript(() => {
-    const invoke = window.__TAURI__.core.invoke;
     window.__saves = [];
     window.__saveAccepted = true;
-    window.__TAURI__.core.invoke = async (command, payload) => {
-      if (command !== "save_text_file") return invoke(command, payload);
+    const backend = window.__e2eBackend;
+    backend.override(async (command, request, payload, next) => {
+      if (command !== "save_text_file") return next();
       window.__saves.push(payload);
       return window.__saveAccepted;
-    };
+    });
   });
   await page.goto("/");
-  await page.locator('.nav-item[data-view="usb"]').click();
-  await page.locator("#usbEmptyState .empty-state-action").click();
-  await page.locator('.nav-item[data-view="usb-history"]').click();
+  await openUsb(page, "usb-history");
   const status = page.locator("#statusText");
 
   // A cancelled dialog saves nothing. It opens with times on, placed before the track.
@@ -255,25 +176,19 @@ test("a session the backend says can't export disables Export Tracklist, and a l
   await installTauriMock(page);
   const longName = `HISTORY ${"very long session name ".repeat(20)}`;
   await page.addInitScript((name) => {
-    const invoke = window.__TAURI__.core.invoke;
-    window.__TAURI__.core.invoke = async (command, payload) => {
+    const backend = window.__e2eBackend;
+    backend.override(async (command, request, payload, next) => {
       if (command === "fetch_usb_histories") {
-        return {
-          ok: true,
-          data: {
-            items: [{ id: "hist-1", name, createdAt: "2026-08-01", canExportTracklist: false, tracks: [] }],
-            counts: { importedPlaylists: 1, importedTracks: 0 },
-            warnings: []
-          }
-        };
+        return backend.ok({
+          items: [{ id: "hist-1", name, createdAt: "2026-08-01", canExportTracklist: false, tracks: [] }],
+          counts: { importedPlaylists: 1, importedTracks: 0 },
+          warnings: []
+        });
       }
-      return invoke(command, payload);
-    };
+    });
   }, longName);
   await page.goto("/");
-  await page.locator('.nav-item[data-view="usb"]').click();
-  await page.locator("#usbEmptyState .empty-state-action").click();
-  await page.locator('.nav-item[data-view="usb-history"]').click();
+  await openUsb(page, "usb-history");
 
   await expect(page.locator("#historyHeading .track-list-heading-name")).toHaveText(longName.trim());
   const button = page.locator("#exportHistoryTracklistBtn");

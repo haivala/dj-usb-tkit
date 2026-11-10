@@ -2,118 +2,36 @@ import { test, expect, offerTestLanguage, uiTextCheck, useTestLanguage } from ".
 
 function installBasicTauriMock(page, opts = {}) {
   return page.addInitScript(({ opts }) => {
-    window.localStorage.setItem("djusbtkit.helpSeen", "1");
-
-    const playlists = [];
-    const failRename = !!opts?.failRename;
-    let nextPlaylistId = 1;
+    const backend = window.__e2eBackend;
     // Playlist track loads still in flight (see `playlistTracksDelayMs`).
     window.__pendingTrackLoads = 0;
-    window.__calls = [];
-    const listeners = new Map();
-    // Lets a test push backend events (job:event) at the app.
-    window.__emitEvent = (name, payload) => {
-      for (const cb of listeners.get(name) || []) cb({ event: name, payload });
-    };
-
-    if (opts?.updateCheck) {
-      // The update check only runs under the Tauri runtime (isTauriRuntime()
-      // reads window.isTauri); the bundled @tauri-apps/api then invokes via
-      // __TAURI_INTERNALS__, so forward that to the mock below.
-      window.isTauri = true;
-      window.__TAURI_INTERNALS__ = {
-        invoke: (cmd, args) => window.__TAURI__.core.invoke(cmd, args)
-      };
-    }
-
-    window.__TAURI__ = {
-      event: {
-        listen: async (name, cb) => {
-          listeners.set(name, [...(listeners.get(name) || []), cb]);
-          return () => listeners.set(name, (listeners.get(name) || []).filter((fn) => fn !== cb));
-        }
-      },
-      core: {
-        invoke: async (command, payload = {}) => {
-          window.__calls.push({ command, payload });
-          if (command === "list_playlists") {
-            return { ok: true, data: { playlists: playlists, playlistUsbExportStatus: [] } };
-          }
-          if (command === "create_playlist") {
-            const name = payload?.request?.name || "Untitled";
-            const playlistId = `pl-${nextPlaylistId++}`;
-            // Like the backend: new playlists go to the top of the sidebar order.
-            playlists.unshift({
-              id: playlistId,
-              name,
-              source: "local",
-              lastExportedAt: null,
-              lastExportedUsbRoot: null,
-              lastExportedTrackCount: null,
-              tracks: [],
-              createdAt: new Date().toISOString(),
-              updatedAt: new Date().toISOString()
-            });
-            return { ok: true, data: { playlistId, name, statusText: `Playlist created: ${name}` } };
-          }
-          if (command === "delete_playlist") {
-            const playlistId = payload?.request?.playlistId || "";
-            const idx = playlists.findIndex((p) => p.id === playlistId);
-            const name = playlists[idx]?.name;
-            if (idx >= 0) playlists.splice(idx, 1);
-            return { ok: true, data: { playlistId, deleted: idx >= 0, statusText: `Playlist deleted: ${name}` } };
-          }
-          if (command === "rename_playlist") {
-            const playlistId = payload?.request?.playlistId || "";
-            const name = String(payload?.request?.name || "").trim();
-            if (failRename) {
-              return { ok: false, error: { code: "INTERNAL", message: "Rename failed: disk full (mock)" } };
-            }
-            const row = playlists.find((p) => p.id === playlistId);
-            if (!row || !name) {
-              return { ok: false, error: { code: "VALIDATION", message: "rename failed" } };
-            }
-            row.name = name;
-            return { ok: true, data: { playlistId, name } };
-          }
-          if (command === "reorder_playlists") {
-            const ids = payload?.request?.orderedPlaylistIds || [];
-            const byId = new Map(playlists.map((p) => [p.id, p]));
-            playlists.splice(0, playlists.length, ...ids.map((id) => byId.get(id)));
-            return { ok: true, data: { reordered: ids.length } };
-          }
-          if (command === "set_frontend_setting") {
-            return { ok: true, data: { saved: true } };
-          }
-          if (command === "get_playlist_tracks") {
-            const data = { playlistId: payload?.request?.playlistId || "", items: [] };
-            if (!opts?.playlistTracksDelayMs) return { ok: true, data };
-            window.__pendingTrackLoads += 1;
-            await new Promise((resolve) => setTimeout(resolve, opts.playlistTracksDelayMs));
-            window.__pendingTrackLoads -= 1;
-            return { ok: true, data };
-          }
-          if (command === "check_for_update" && opts?.updateCheck) {
-            // `nextUpdateChecks` (set by a test) answers the later re-checks.
-            const next = window.__nextUpdateChecks?.shift();
-            return { ok: true, data: next || opts.updateCheck };
-          }
-          if (command === "install_update") {
-            const job = { jobId: "job-update-1", jobType: "update", stage: "install_update", current: 0, total: 1 };
-            window.__emitEvent("job:event", { ...job, event: "job.started", percent: 0, message: "Checking for update..." });
-            window.__emitEvent("job:event", { ...job, event: "job.progress", percent: 40, message: "Downloading update 0.3.0..." });
-            if (opts?.installFails) {
-              const message = "Update failed: signature mismatch (mock)";
-              window.__emitEvent("job:event", { ...job, event: "job.failed", percent: 100, message });
-              return { ok: false, error: { code: "INTERNAL_ERROR", message } };
-            }
-            // A real install restarts the app; the call never comes back.
-            return new Promise(() => {});
-          }
-          return window.__e2eBackend.answer(command);
-        }
+    // The update check only runs under the Tauri runtime.
+    if (opts?.updateCheck) backend.useTauriRuntime();
+    backend.install(async (command, request, payload) => {
+      if (command === "rename_playlist" && opts?.failRename) return backend.fail("Rename failed: disk full (mock)");
+      if (command === "get_playlist_tracks" && opts?.playlistTracksDelayMs) {
+        window.__pendingTrackLoads += 1;
+        await new Promise((resolve) => setTimeout(resolve, opts.playlistTracksDelayMs));
+        window.__pendingTrackLoads -= 1;
+        return backend.answer(command, payload);
       }
-    };
+      if (command === "check_for_update" && opts?.updateCheck) {
+        // `nextUpdateChecks` (set by a test) answers the later re-checks.
+        return backend.ok(window.__nextUpdateChecks?.shift() || opts.updateCheck);
+      }
+      if (command === "install_update") {
+        const job = { jobId: "job-update-1", jobType: "update", stage: "install_update", current: 0, total: 1 };
+        window.__emitJobEvent({ ...job, event: "job.started", percent: 0, message: "Checking for update..." });
+        window.__emitJobEvent({ ...job, event: "job.progress", percent: 40, message: "Downloading update 0.3.0..." });
+        if (opts?.installFails) {
+          const message = "Update failed: signature mismatch (mock)";
+          window.__emitJobEvent({ ...job, event: "job.failed", percent: 100, message });
+          return backend.fail(message, "INTERNAL_ERROR");
+        }
+        // A real install restarts the app; the call never comes back.
+        return new Promise(() => {});
+      }
+    });
   }, { opts });
 }
 
@@ -181,21 +99,8 @@ test("usb panel shows when clicking USB nav item", async ({ page }) => {
 
 test("draws the backend's source folders as source chips", async ({ page }) => {
   await page.addInitScript(() => {
-    window.localStorage.setItem("djusbtkit.helpSeen", "1");
-    window.__TAURI__ = {
-      core: {
-        invoke: async (command) => {
-          if (command === "get_library_sources") {
-            const folders = ["/music", "/media/library"]
-              .map((path) => ({ path, label: path, parent: null, enabled: true, missing: false, fullyAnalyzed: false }));
-            return { ok: true, data: { folders, rekordboxDbEnabled: false, mixxxDbEnabled: false, everConfigured: true, analyzeButtonLabel: "Analyze Library", analyzeScanningStatus: "Scanning library files...", trackNotInLibraryStatus: "Track is not in the local library yet. Run Analyze Library first." } };
-          }
-          if (command === "browse_source_files") return { ok: true, data: { total: 0, items: [] } };
-          return window.__e2eBackend.answer(command);
-        }
-      },
-      event: { listen: async () => () => {} }
-    };
+    window.__e2eSourceFolders = ["/music", "/media/library"];
+    window.__e2eBackend.install();
   });
   await page.goto("/");
 
@@ -471,7 +376,7 @@ test("Update & restart waits for a running job instead of cutting it short", asy
   await page.goto("/");
   await expect(page.locator("#updateBannerActions .update-install-btn")).toBeVisible();
 
-  await page.evaluate(() => window.__emitEvent("job:event", {
+  await page.evaluate(() => window.__emitJobEvent({
     event: "job.started", jobId: "job-export-1", jobType: "export", stage: "export_to_usb",
     current: 0, total: 1, percent: 0, message: "Exporting..."
   }));
@@ -528,27 +433,20 @@ test("settings update line offers one action, and the header button re-checks on
 test("changing the language reloads the window in it, and a refused change keeps the page", async ({ page }) => {
   await offerTestLanguage(page);
   await page.addInitScript(() => {
-    window.localStorage.setItem("djusbtkit.helpSeen", "1");
-    window.__TAURI__ = {
-      event: { listen: async () => () => {} },
-      core: {
-        invoke: async (command, payload = {}) => {
-          const request = payload?.request || payload;
-          if (command === "get_ui_texts") {
-            const testLanguage = window.sessionStorage.getItem("e2eLanguage") === "en-XA";
-            return { ok: true, data: testLanguage ? window.__e2eUiTextsTestLanguage : window.__e2eUiTexts };
-          }
-          if (command === "set_language") {
-            if (window.sessionStorage.getItem("e2eJobRunning")) {
-              return { ok: false, error: { code: "VALIDATION_ERROR", message: "Could not change the language: a job is running. Try again when it has finished." } };
-            }
-            window.sessionStorage.setItem("e2eLanguage", request.language);
-            return { ok: true, data: { language: request.language } };
-          }
-          return window.__e2eBackend.answer(command);
-        }
+    const backend = window.__e2eBackend;
+    backend.install((command, request) => {
+      if (command === "get_ui_texts") {
+        const testLanguage = window.sessionStorage.getItem("e2eLanguage") === "en-XA";
+        return backend.ok(testLanguage ? window.__e2eUiTextsTestLanguage : window.__e2eUiTexts);
       }
-    };
+      if (command === "set_language") {
+        if (window.sessionStorage.getItem("e2eJobRunning")) {
+          return backend.fail("Could not change the language: a job is running. Try again when it has finished.", "VALIDATION_ERROR");
+        }
+        window.sessionStorage.setItem("e2eLanguage", request.language);
+        return backend.ok({ language: request.language });
+      }
+    });
   });
   await page.goto("/");
   await expect(page.locator("html")).toHaveAttribute("lang", "en");

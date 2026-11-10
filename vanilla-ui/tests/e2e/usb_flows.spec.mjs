@@ -1,27 +1,25 @@
-import { test, expect, uiTextCheck, useTestLanguage } from "./coverage-fixture.mjs";
+import { test, expect, openUsb, uiTextCheck, useTestLanguage } from "./coverage-fixture.mjs";
 
 // Counts the `fetch_usb_playlists` calls in `window.__playlistFetches`, and the
 // track table fetches in `window.__trackFetches`.
 function countPlaylistFetches(page) {
   return page.addInitScript(() => {
-    const invoke = window.__TAURI__.core.invoke;
     window.__playlistFetches = 0;
     window.__trackFetches = 0;
-    window.__TAURI__.core.invoke = async (command, payload) => {
+    const backend = window.__e2eBackend;
+    backend.override(async (command, request, payload, next) => {
       if (command === "fetch_usb_playlists") window.__playlistFetches += 1;
       if (command === "fetch_usb_playlist_tracks" || command === "fetch_usb_history_tracks") window.__trackFetches += 1;
-      return invoke(command, payload);
-    };
+    });
   });
 }
 
 // Empty USB lists, answered only once the test calls `window.__releaseLists()`.
 function holdEmptyLists(page) {
   return page.addInitScript(() => {
-    const invoke = window.__TAURI__.core.invoke;
     const released = new Promise((resolve) => { window.__releaseLists = resolve; });
-    window.__TAURI__.core.invoke = async (command, payload) => {
-      const backend = window.__e2eBackend;
+    const backend = window.__e2eBackend;
+    backend.override(async (command, request, payload, next) => {
       if (command === "fetch_usb_playlists") {
         await released;
         return backend.ok(backend.usbPlaylists());
@@ -30,8 +28,7 @@ function holdEmptyLists(page) {
         await released;
         return backend.ok(backend.usbHistories());
       }
-      return invoke(command, payload);
-    };
+    });
   });
 }
 
@@ -39,53 +36,24 @@ function holdEmptyLists(page) {
 // `job:event`, `window.__emitBackendLog` a `backend:log` (what the backend's
 // `logging::log` sends for each warning it makes).
 function listenForBackendEvents(page) {
-  return page.addInitScript(() => {
-    const listeners = new Map();
-    const emit = (eventName, payload) => {
-      for (const callback of (listeners.get(eventName) || []).slice()) callback({ event: eventName, payload });
-    };
-    window.__emitJobEvent = (payload) => emit("job:event", payload);
-    window.__emitBackendLog = (payload) => emit("backend:log", payload);
-    window.isTauri = true;
-    window.__TAURI_INTERNALS__ = { invoke: (cmd, args) => window.__TAURI__.core.invoke(cmd, args) };
-    window.__TAURI__.event = {
-      listen: async (eventName, callback) => {
-        listeners.set(eventName, [...(listeners.get(eventName) || []), callback]);
-        return () => {};
-      }
-    };
-  });
+  return page.addInitScript(() => window.__e2eBackend.useTauriRuntime());
 }
 
 function installTauriMock(page, mode) {
   return page.addInitScript(({ mode }) => {
-    window.localStorage.setItem("djusbtkit.helpSeen", "1");
+    const backend = window.__e2eBackend;
     const state = {
-      initialized: mode === "valid" || mode === "warning-mix" || mode === "toggle-usb" || mode === "reorder" || mode === "reorder-scroll" || mode === "progress-race",
+      initialized: ["valid", "warning-mix", "toggle-usb", "reorder", "reorder-scroll", "progress-race"].includes(mode),
       pickCount: 0,
       usbPlaylists: mode === "valid" || mode === "warning-mix"
-        ? [
-            {
-              id: "usb-1",
-              name: "Warmup",
-              source: "mock-tauri",
-              tracks: [
-                { title: "Track A", artist: "Artist 1", album: "Album X", bpm: 124, key: "8A" }
-              ]
-            }
-          ]
+        ? [{ id: "usb-1", name: "Warmup", source: "mock-tauri", tracks: [{ title: "Track A", artist: "Artist 1", album: "Album X", bpm: 124, key: "8A" }] }]
         : mode === "reorder"
-        ? [
-            { id: "usb-pl-1", name: "Alpha", source: "mock-tauri", tracks: [{ title: "Track A" }] },
-            { id: "usb-pl-2", name: "Bravo", source: "mock-tauri", tracks: [{ title: "Track B" }] },
-            { id: "usb-pl-3", name: "Charlie", source: "mock-tauri", tracks: [{ title: "Track C" }] }
-          ]
+        ? ["Alpha", "Bravo", "Charlie"].map((name, i) => ({
+            id: `usb-pl-${i + 1}`, name, source: "mock-tauri", tracks: [{ title: `Track ${"ABC"[i]}` }]
+          }))
         : mode === "reorder-scroll"
         ? Array.from({ length: 40 }, (_, i) => ({
-            id: `usb-pl-${i}`,
-            name: `Playlist ${String(i).padStart(2, "0")}`,
-            source: "mock-tauri",
-            tracks: [{ title: "Track" }]
+            id: `usb-pl-${i}`, name: `Playlist ${String(i).padStart(2, "0")}`, source: "mock-tauri", tracks: [{ title: "Track" }]
           }))
         : []
     };
@@ -162,370 +130,323 @@ function installTauriMock(page, mode) {
       playlistUsbExportStatus: []
     };
 
-    window.__TAURI__ = {
-      core: {
-        invoke: async (command, payload = {}) => {
-          if (command === "pick_usb_folder") {
-            if (mode === "toggle-usb") {
-              state.pickCount += 1;
-              return state.pickCount % 2 === 1 ? "/Volumes/USB-TEST" : "/Volumes/USB-INVALID";
-            }
-            return "/Volumes/USB-TEST";
-          }
-          if (command === "create_playlist" && mode === "create-fails") {
-            return { ok: false, error: { code: "INTERNAL", message: "disk full (mock)" } };
-          }
-          if (command === "create_playlist" && mode === "progress-race") {
-            // Still saving well past the previous job's footer-hide delay.
-            await new Promise((resolve) => setTimeout(resolve, 2500));
-            return { ok: true, data: { playlistId: "p-new", name: payload?.request?.name } };
-          }
-          if (command === "list_usb_devices") {
-            return { ok: true, data: { items: [] } };
-          }
-          if (command === "prune_usb_device") {
-            return { ok: true, data: { pruned: true, devices: [] } };
-          }
-          if (command === "run_usb_diagnostics") {
-            return { ok: true, data: diagnosticsPayload };
-          }
-          if (command === "run_usb_parity_report") {
-            return {
-              ok: true,
-              data: {
-                overallStatus: "FAIL",
-                statusLabel: "Parity FAIL",
-                statusText: "Parity report complete",
-                durationText: "Completed in 1ms",
-                overview: [
-                  { title: "Playlists", status: "PASS", detail: "Both databases have the same 1 playlists, with the same tracks in the same order." },
-                  { title: "Track details", status: "FAIL", detail: "1 tracks are missing track details on older Pioneer players." },
-                  { title: "Music files", status: "FAIL", detail: "1 tracks point to a different audio or waveform file depending on the player." }
-                ],
-                sectionGroups: [
-                  {
-                    title: "Comparison",
-                    sections: [
-                      {
-                        title: "Track details",
-                        status: "FAIL",
-                        checks: [
-                          {
-                            label: "PDB metadata completeness",
-                            status: "FAIL",
-                            detail: "1 playlist-linked PDB track missing required player metadata",
-                            link: "event-log"
-                          }
-                        ]
-                      },
-                      {
-                        title: "Music files",
-                        status: "FAIL",
-                        checks: [
-                          {
-                            label: "Media and analysis path parity",
-                            status: "FAIL",
-                            detail: "1 playlist-linked track with media/analysis path mismatches"
-                          }
-                        ]
-                      }
-                    ]
-                  }
-                ],
-                playlistDetails: [
-                  {
-                    name: "Warmup",
-                    pdbTracks: 3,
-                    edbTracks: 3,
-                    matchedTracks: 3,
-                    onlyInPdb: 0,
-                    onlyInEdb: 0,
-                    orderMismatch: false,
-                    pdbDuplicateEntries: 0,
-                    pdbMissingCoreMetadata: 1,
-                    edbMissingCoreMetadata: 0,
-                    artworkMismatchTracks: 1,
-                    pathMismatchTracks: 1,
-                    dictionaryIdIssueTracks: 1,
-                    playlistIdMatch: true,
-                    sortOrderMatch: true,
-                    sampleOnlyInPdb: [],
-                    sampleOnlyInEdb: [],
-                    sampleMetadataMismatches: ["Track A [analysisPath, artworkPath, artistDictId, pdbRequiredMetadata]"],
-                    status: "FAIL",
-                    // Backend-computed (service::diagnostics::parity_issue_labels).
-                    issueLabels: ["PDB gaps 1", "path mismatch 1", "dict issues 1", "art mismatch 1"]
-                  }
-                ],
-                warnings: [],
-                durationMs: 10
-              }
-            };
-          }
-          if (command === "repair_usb_diagnostics") {
-            if (payload?.request?.apply) {
-              return {
-                ok: true,
-                data: {
-                  appliedFixes: payload.request.selectedFixIds || [],
-                  failedFixes: [],
-                  warnings: [],
-                  durationMs: 1,
-                  diagnostics: diagnosticsPayload,
-                  usbContentChanged: (payload.request.selectedFixIds || []).length > 0,
-                  engineLibraryEnabled: (payload.request.selectedFixIds || []).includes("keep_engine_library_up_to_date")
-                }
-              };
-            }
-            return {
-              ok: true,
-              data: {
-                summary: "Apply Fixes repairs 4 problems on this USB. The databases are backed up first.",
-                overview: [
-                  { title: "Older Pioneer players", status: "WARN", detail: "Repairs damage left in the player database by an interrupted export." },
-                  { title: "Denon / Numark players", status: "WARN", detail: "Rebuilds the Denon / Numark library." },
-                  { title: "Needs your attention", status: "FAIL", detail: "1 problem can't be fixed automatically." }
-                ],
-                detectedIssues: [
-                  "1 table with a declared last page beyond the physical end of the file",
-                  "PDB shows signs of a torn additive-growth write",
-                  "1 PDB history/columns page with wrong u5/num_rl shape"
-                ],
-                rows: [
-                  {
-                    id: "repair_pdb_truncated_table_chain",
-                    title: "Repair Truncated Table Chain",
-                    description: "Structural prerequisite fix.",
-                    metaText: "✓ supported · safe · always applied",
-                    selectable: true,
-                    checked: true,
-                    locked: true,
-                    lockedTooltip: "Always applied"
-                  },
-                  {
-                    id: "repair_pdb_torn_growth_pages",
-                    title: "Repair Torn Growth Pages (Interrupted Export)",
-                    description: "Structural prerequisite fix.",
-                    metaText: "✓ supported · safe · always applied",
-                    selectable: true,
-                    checked: true,
-                    locked: true,
-                    lockedTooltip: "Always applied"
-                  },
-                  {
-                    id: "repair_pdb_wrong_history_page_shape",
-                    title: "Repair PDB History/Columns Page Footer Shape",
-                    description: "Ordinary structural fix, not a prerequisite.",
-                    metaText: "✓ supported · safe",
-                    selectable: true,
-                    checked: true,
-                    locked: false
-                  },
-                  {
-                    id: "keep_engine_library_up_to_date",
-                    title: "Keep Engine DJ Library Up to Date",
-                    description: "Turns on \"Write Engine DJ library\" and rebuilds it now.",
-                    metaText: "✓ supported · destructive",
-                    selectable: true,
-                    checked: true,
-                    locked: false
-                  },
-                  {
-                    id: "unsupported:malformed",
-                    title: "2 malformed USBANLZ entry/entries",
-                    description: "Inspect Event Log entries tagged 'analysis entry malformed'.",
-                    metaText: "✗ preview-only · safe",
-                    selectable: false,
-                    checked: false,
-                    locked: false,
-                    link: "event-log"
-                  }
-                ],
-                estimatedFileWrites: 3,
-                estimatedFileDeletes: 0,
-                warnings: []
-              }
-            };
-          }
-          if (command === "select_usb") {
-            const path = String(payload?.request?.path || "");
-            if (!path) {
-              return {
-                ok: true,
-                data: {
-                  valid: false,
-                  normalizedRoot: null,
-                  warnings: ["USB path is empty"]
-                }
-              };
-            }
-            if (state.initialized) {
-              const forceInvalid = mode === "toggle-usb" && String(path).includes("INVALID");
-              if (forceInvalid) {
-                return {
-                  ok: true,
-                  data: {
-                    valid: false,
-                    normalizedRoot: path,
-                    canInitialize: true,
-                    statusText: "USB selected but not initialized.",
-                    initHintText: "USB folder is writable but missing External library structure (Missing vendor root folder)",
-                    warnings: ["Missing vendor root folder"]
-                  }
-                };
-              }
-              return {
-                ok: true,
-                data: {
-                  valid: true,
-                  normalizedRoot: path,
-                  audioFormats: formatsData(),
-                  warnings: []
-                }
-              };
-            }
-            const warnings = mode === "needs-init-structured"
-              ? [
-                  {
-                    level: "warn",
-                    code: "usb.validate.missing-vendor-root",
-                    message: "Missing vendor root folder",
-                    source: "usb-validate"
-                  },
-                  {
-                    level: "warn",
-                    code: "usb.validate.missing-contents",
-                    message: "Missing Contents directory",
-                    source: "usb-validate"
-                  }
-                ]
-              : ["missing External library structure"];
-            return {
-              ok: true,
-              data: {
-                valid: false,
-                normalizedRoot: path,
-                canInitialize: true,
-                statusText: "USB selected but not initialized.",
-                initHintText: mode === "needs-init-structured"
-                  ? "Missing vendor root folder | Missing Contents directory"
-                  : "missing External library structure",
-                warnings
-              }
-            };
-          }
-          if (command === "initialize_usb") {
-            state.initialized = true;
-            return {
-              ok: true,
-              data: {
-                path: payload?.request?.usbRoot || "",
-                createdDirs: ["vendor-db", "Contents"]
-              }
-            };
-          }
-          if (command === "fetch_usb_playlists") {
-            const warnings = mode === "warning-mix"
-              ? [
-                  {
-                    level: "info",
-                    code: "usb.playlists.info",
-                    message: "USB root in use: /Volumes/USB-TEST",
-                    source: "usb-import"
-                  },
-                  {
-                    level: "warn",
-                    code: "usb.playlists.partial",
-                    message: "Some analysis files are missing",
-                    source: "usb-import"
-                  },
-                  {
-                    level: "error",
-                    code: "usb.playlists.timeout",
-                    message: "Timed out reading artwork index",
-                    source: "usb-import"
-                  }
-                ]
-              : [];
-            return {
-              ok: true,
-              data: {
-                items: state.usbPlaylists.map((p) => ({
-                  ...p,
-                  trackCount: p.tracks.length,
-                  selectedText: `USB playlist selected: ${p.name}`,
-                  removeConfirmText: `mock remove ${p.name}?`
-                })),
-                summaryText: `${state.usbPlaylists.length} playlists`,
-                statusText: `USB playlists loaded: ${state.usbPlaylists.length}`,
-                doneText: "Done",
-                stats: {
-                  indexedTracks: 0,
-                  playlistReferencedTracks: 0,
-                  playlistEntries: state.usbPlaylists.reduce((sum, p) => sum + p.tracks.length, 0)
-                },
-                playlistUsbExportStatus: [],
-                warnings,
-                // The backend counts the warn/error entries (the info one isn't).
-                warningText: mode === "warning-mix" ? "(2 warnings)" : ""
-              }
-            };
-          }
-          if (command === "fetch_usb_playlist_tracks") {
-            const id = String(payload?.request?.id);
-            const tracks = state.usbPlaylists.find((p) => String(p.id) === id)?.tracks || [];
-            return { ok: true, data: { items: tracks, total: tracks.length, listSummaryText: `${tracks.length} listed` } };
-          }
-          if (command === "set_usb_audio_formats") {
-            const sent = payload?.request?.formats || [];
-            window.__usbAudioFormatCalls.push(sent);
-            const labels = new Map(usbAudioFormats.map((item) => [item.format, item.label]));
-            usbAudioFormats = sent.map(({ format, allowed }) => ({ format, allowed, label: labels.get(format) }));
-            return { ok: true, data: formatsData() };
-          }
-          if (command === "reorder_usb_playlists") {
-            const orderedIds = Array.isArray(payload?.request?.orderedPlaylistIds)
-              ? payload.request.orderedPlaylistIds
-              : [];
-            window.__reorderCalls.push(orderedIds);
-            const byId = new Map(state.usbPlaylists.map((p) => [String(p.id), p]));
-            state.usbPlaylists = orderedIds
-              .map((id) => byId.get(String(id)))
-              .filter((p) => p !== undefined);
-            return {
-              ok: true,
-              data: {
-                reordered: state.usbPlaylists.length,
-                statusText: "Playlist order saved",
-                warnings: [{ level: "error", code: "usb.reorder.pdb-write-back-failed", message: "PDB write-back to USB failed", source: "usb-import" }],
-                warningText: "(1 warning)"
-              }
-            };
-          }
-          if (command === "remove_usb_playlist") {
-            const playlistId = String(payload?.request?.playlistId || "");
-            state.usbPlaylists = state.usbPlaylists.filter((p) => String(p.id) !== playlistId);
-            const warnings = mode === "reorder"
-              ? [{ level: "warn", code: "usb.remove.kept-file", message: "Removal kept a shared file", source: "usb-import" }]
-              : [];
-            // The backend logged them as it made them.
-            for (const warning of warnings) window.__emitBackendLog?.(warning);
-            return {
-              ok: true,
-              data: {
-                playlistName: payload?.request?.playlistName || "",
-                statusText: `Removed USB playlist: ${payload?.request?.playlistName || ""}`,
-                removedFromEdb: 1,
-                removedFromPdb: 1,
-                warnings,
-                warningText: warnings.length ? `(${warnings.length} warning${warnings.length === 1 ? "" : "s"})` : ""
-              }
-            };
-          }
-          return window.__e2eBackend.answer(command);
-        }
+    backend.install(async (command, request, payload) => {
+      if (command === "pick_usb_folder" && mode === "toggle-usb") {
+        state.pickCount += 1;
+        return state.pickCount % 2 === 1 ? "/Volumes/USB-TEST" : "/Volumes/USB-INVALID";
       }
-    };
+      if (command === "create_playlist" && mode === "create-fails") {
+        return { ok: false, error: { code: "INTERNAL", message: "disk full (mock)" } };
+      }
+      if (command === "create_playlist" && mode === "progress-race") {
+        // Still saving well past the previous job's footer-hide delay.
+        await new Promise((resolve) => setTimeout(resolve, 2500));
+        return { ok: true, data: { playlistId: "p-new", name: payload?.request?.name } };
+      }
+      if (command === "run_usb_diagnostics") {
+        return { ok: true, data: diagnosticsPayload };
+      }
+      if (command === "run_usb_parity_report") {
+        return backend.ok({
+          overallStatus: "FAIL",
+          statusLabel: "Parity FAIL",
+          statusText: "Parity report complete",
+          durationText: "Completed in 1ms",
+          overview: [
+            { title: "Playlists", status: "PASS", detail: "Both databases have the same 1 playlists, with the same tracks in the same order." },
+            { title: "Track details", status: "FAIL", detail: "1 tracks are missing track details on older Pioneer players." },
+            { title: "Music files", status: "FAIL", detail: "1 tracks point to a different audio or waveform file depending on the player." }
+          ],
+          sectionGroups: [
+            {
+              title: "Comparison",
+              sections: [
+                {
+                  title: "Track details",
+                  status: "FAIL",
+                  checks: [
+                    {
+                      label: "PDB metadata completeness",
+                      status: "FAIL",
+                      detail: "1 playlist-linked PDB track missing required player metadata",
+                      link: "event-log"
+                    }
+                  ]
+                },
+                {
+                  title: "Music files",
+                  status: "FAIL",
+                  checks: [
+                    {
+                      label: "Media and analysis path parity",
+                      status: "FAIL",
+                      detail: "1 playlist-linked track with media/analysis path mismatches"
+                    }
+                  ]
+                }
+              ]
+            }
+          ],
+          playlistDetails: [
+            {
+              name: "Warmup",
+              pdbTracks: 3,
+              edbTracks: 3,
+              matchedTracks: 3,
+              onlyInPdb: 0,
+              onlyInEdb: 0,
+              orderMismatch: false,
+              pdbDuplicateEntries: 0,
+              pdbMissingCoreMetadata: 1,
+              edbMissingCoreMetadata: 0,
+              artworkMismatchTracks: 1,
+              pathMismatchTracks: 1,
+              dictionaryIdIssueTracks: 1,
+              playlistIdMatch: true,
+              sortOrderMatch: true,
+              sampleOnlyInPdb: [],
+              sampleOnlyInEdb: [],
+              sampleMetadataMismatches: ["Track A [analysisPath, artworkPath, artistDictId, pdbRequiredMetadata]"],
+              status: "FAIL",
+              // Backend-computed (service::diagnostics::parity_issue_labels).
+              issueLabels: ["PDB gaps 1", "path mismatch 1", "dict issues 1", "art mismatch 1"]
+            }
+          ],
+          warnings: [],
+          durationMs: 10
+        });
+      }
+      if (command === "repair_usb_diagnostics") {
+        if (payload?.request?.apply) {
+          return backend.ok({
+            appliedFixes: payload.request.selectedFixIds || [],
+            failedFixes: [],
+            warnings: [],
+            durationMs: 1,
+            diagnostics: diagnosticsPayload,
+            usbContentChanged: (payload.request.selectedFixIds || []).length > 0,
+            engineLibraryEnabled: (payload.request.selectedFixIds || []).includes("keep_engine_library_up_to_date")
+          });
+        }
+        return backend.ok({
+          summary: "Apply Fixes repairs 4 problems on this USB. The databases are backed up first.",
+          overview: [
+            { title: "Older Pioneer players", status: "WARN", detail: "Repairs damage left in the player database by an interrupted export." },
+            { title: "Denon / Numark players", status: "WARN", detail: "Rebuilds the Denon / Numark library." },
+            { title: "Needs your attention", status: "FAIL", detail: "1 problem can't be fixed automatically." }
+          ],
+          detectedIssues: [
+            "1 table with a declared last page beyond the physical end of the file",
+            "PDB shows signs of a torn additive-growth write",
+            "1 PDB history/columns page with wrong u5/num_rl shape"
+          ],
+          rows: [
+            {
+              id: "repair_pdb_truncated_table_chain",
+              title: "Repair Truncated Table Chain",
+              description: "Structural prerequisite fix.",
+              metaText: "✓ supported · safe · always applied",
+              selectable: true,
+              checked: true,
+              locked: true,
+              lockedTooltip: "Always applied"
+            },
+            {
+              id: "repair_pdb_torn_growth_pages",
+              title: "Repair Torn Growth Pages (Interrupted Export)",
+              description: "Structural prerequisite fix.",
+              metaText: "✓ supported · safe · always applied",
+              selectable: true,
+              checked: true,
+              locked: true,
+              lockedTooltip: "Always applied"
+            },
+            {
+              id: "repair_pdb_wrong_history_page_shape",
+              title: "Repair PDB History/Columns Page Footer Shape",
+              description: "Ordinary structural fix, not a prerequisite.",
+              metaText: "✓ supported · safe",
+              selectable: true,
+              checked: true,
+              locked: false
+            },
+            {
+              id: "keep_engine_library_up_to_date",
+              title: "Keep Engine DJ Library Up to Date",
+              description: "Turns on \"Write Engine DJ library\" and rebuilds it now.",
+              metaText: "✓ supported · destructive",
+              selectable: true,
+              checked: true,
+              locked: false
+            },
+            {
+              id: "unsupported:malformed",
+              title: "2 malformed USBANLZ entry/entries",
+              description: "Inspect Event Log entries tagged 'analysis entry malformed'.",
+              metaText: "✗ preview-only · safe",
+              selectable: false,
+              checked: false,
+              locked: false,
+              link: "event-log"
+            }
+          ],
+          estimatedFileWrites: 3,
+          estimatedFileDeletes: 0,
+          warnings: []
+        });
+      }
+      if (command === "select_usb") {
+        const path = String(payload?.request?.path || "");
+        if (!path) {
+          return backend.ok({
+            valid: false,
+            normalizedRoot: null,
+            warnings: ["USB path is empty"]
+          });
+        }
+        if (state.initialized) {
+          const forceInvalid = mode === "toggle-usb" && String(path).includes("INVALID");
+          if (forceInvalid) {
+            return backend.ok({
+              valid: false,
+              normalizedRoot: path,
+              canInitialize: true,
+              statusText: "USB selected but not initialized.",
+              initHintText: "USB folder is writable but missing External library structure (Missing vendor root folder)",
+              warnings: ["Missing vendor root folder"]
+            });
+          }
+          return backend.ok({
+            valid: true,
+            normalizedRoot: path,
+            audioFormats: formatsData(),
+            warnings: []
+          });
+        }
+        const warnings = mode === "needs-init-structured"
+          ? [
+              {
+                level: "warn",
+                code: "usb.validate.missing-vendor-root",
+                message: "Missing vendor root folder",
+                source: "usb-validate"
+              },
+              {
+                level: "warn",
+                code: "usb.validate.missing-contents",
+                message: "Missing Contents directory",
+                source: "usb-validate"
+              }
+            ]
+          : ["missing External library structure"];
+        return backend.ok({
+          valid: false,
+          normalizedRoot: path,
+          canInitialize: true,
+          statusText: "USB selected but not initialized.",
+          initHintText: mode === "needs-init-structured"
+            ? "Missing vendor root folder | Missing Contents directory"
+            : "missing External library structure",
+          warnings
+        });
+      }
+      if (command === "initialize_usb") {
+        state.initialized = true;
+        return backend.ok({
+          path: payload?.request?.usbRoot || "",
+          createdDirs: ["vendor-db", "Contents"]
+        });
+      }
+      if (command === "fetch_usb_playlists") {
+        const warnings = mode === "warning-mix"
+          ? [
+              {
+                level: "info",
+                code: "usb.playlists.info",
+                message: "USB root in use: /Volumes/USB-TEST",
+                source: "usb-import"
+              },
+              {
+                level: "warn",
+                code: "usb.playlists.partial",
+                message: "Some analysis files are missing",
+                source: "usb-import"
+              },
+              {
+                level: "error",
+                code: "usb.playlists.timeout",
+                message: "Timed out reading artwork index",
+                source: "usb-import"
+              }
+            ]
+          : [];
+        return backend.ok({
+          items: state.usbPlaylists.map((p) => ({
+            ...p,
+            trackCount: p.tracks.length,
+            selectedText: `USB playlist selected: ${p.name}`,
+            removeConfirmText: `mock remove ${p.name}?`
+          })),
+          summaryText: `${state.usbPlaylists.length} playlists`,
+          statusText: `USB playlists loaded: ${state.usbPlaylists.length}`,
+          doneText: "Done",
+          stats: {
+            indexedTracks: 0,
+            playlistReferencedTracks: 0,
+            playlistEntries: state.usbPlaylists.reduce((sum, p) => sum + p.tracks.length, 0)
+          },
+          playlistUsbExportStatus: [],
+          warnings,
+          // The backend counts the warn/error entries (the info one isn't).
+          warningText: mode === "warning-mix" ? "(2 warnings)" : ""
+        });
+      }
+      if (command === "fetch_usb_playlist_tracks") {
+        const id = String(payload?.request?.id);
+        const tracks = state.usbPlaylists.find((p) => String(p.id) === id)?.tracks || [];
+        return { ok: true, data: { items: tracks, total: tracks.length, listSummaryText: `${tracks.length} listed` } };
+      }
+      if (command === "set_usb_audio_formats") {
+        const sent = payload?.request?.formats || [];
+        window.__usbAudioFormatCalls.push(sent);
+        const labels = new Map(usbAudioFormats.map((item) => [item.format, item.label]));
+        usbAudioFormats = sent.map(({ format, allowed }) => ({ format, allowed, label: labels.get(format) }));
+        return { ok: true, data: formatsData() };
+      }
+      if (command === "reorder_usb_playlists") {
+        const orderedIds = Array.isArray(payload?.request?.orderedPlaylistIds)
+          ? payload.request.orderedPlaylistIds
+          : [];
+        window.__reorderCalls.push(orderedIds);
+        const byId = new Map(state.usbPlaylists.map((p) => [String(p.id), p]));
+        state.usbPlaylists = orderedIds
+          .map((id) => byId.get(String(id)))
+          .filter((p) => p !== undefined);
+        return backend.ok({
+          reordered: state.usbPlaylists.length,
+          statusText: "Playlist order saved",
+          warnings: [{ level: "error", code: "usb.reorder.pdb-write-back-failed", message: "PDB write-back to USB failed", source: "usb-import" }],
+          warningText: "(1 warning)"
+        });
+      }
+      if (command === "remove_usb_playlist") {
+        const playlistId = String(payload?.request?.playlistId || "");
+        state.usbPlaylists = state.usbPlaylists.filter((p) => String(p.id) !== playlistId);
+        const warnings = mode === "reorder"
+          ? [{ level: "warn", code: "usb.remove.kept-file", message: "Removal kept a shared file", source: "usb-import" }]
+          : [];
+        // The backend logged them as it made them.
+        for (const warning of warnings) window.__emitBackendLog?.(warning);
+        return backend.ok({
+          playlistName: payload?.request?.playlistName || "",
+          statusText: `Removed USB playlist: ${payload?.request?.playlistName || ""}`,
+          removedFromEdb: 1,
+          removedFromPdb: 1,
+          warnings,
+          warningText: warnings.length ? `(${warnings.length} warning${warnings.length === 1 ? "" : "s"})` : ""
+        });
+      }
+    });
   }, { mode });
 }
 
@@ -556,13 +477,12 @@ test("USB initialize flow: invalid-but-writable root can be initialized and unlo
 test("a repair preview with nothing to fix hides the list and turns Preview Fixes off", async ({ page }) => {
   await installTauriMock(page, "valid");
   await page.addInitScript(() => {
-    const invoke = window.__TAURI__.core.invoke;
-    window.__TAURI__.core.invoke = async (command, payload) => {
+    const backend = window.__e2eBackend;
+    backend.override(async (command, request, payload, next) => {
       if (command === "repair_usb_diagnostics" && !payload?.request?.apply) {
         return { ok: true, data: { summary: "Nothing to repair.", overview: [], rows: [], nothingToFix: true } };
       }
-      return invoke(command, payload);
-    };
+    });
   });
   await page.goto("/");
   await connectUsb(page);
@@ -578,8 +498,7 @@ test("USB initialize hint and status show what the backend sends", async ({ page
   await installTauriMock(page, "needs-init-structured");
   await page.goto("/");
 
-  await page.locator('.nav-item[data-view="usb"]').click();
-  await page.locator("#usbEmptyState .empty-state-action").click();
+  await openUsb(page);
 
   await expect(page.locator("#usbInitRow")).not.toHaveClass(/hidden/);
   await expect(page.locator("#usbInitHint")).toContainText("Missing vendor root folder");
@@ -592,8 +511,7 @@ test("USB playlist removal confirm path handles cancel and confirm", async ({ pa
   await page.goto("/");
 
   // Navigate to USB, select folder, then go to playlists
-  await page.locator('.nav-item[data-view="usb"]').click();
-  await page.locator("#usbEmptyState .empty-state-action").click();
+  await openUsb(page);
 
   // Open a diagnostics report first -- a successful removal must clear it,
   // since it no longer reflects the (now stale) playlist set it reported on.
@@ -626,47 +544,32 @@ test("USB playlist removal confirm path handles cancel and confirm", async ({ pa
   await expect(page.locator("#diagOverallStatus")).toBeEmpty();
 });
 
-test("USB playlists tab shows the empty text only after a read finds nothing", async ({ page }) => {
+test("USB playlists and history tabs show their empty text only after a read finds nothing", async ({ page }) => {
   await installTauriMock(page, "valid");
   await holdEmptyLists(page);
   await countPlaylistFetches(page);
   await page.goto("/");
 
-  await page.locator('.nav-item[data-view="usb"]').click();
-  await page.locator("#usbEmptyState .empty-state-action").click();
-  await page.locator('.nav-item[data-view="usb-playlists"]').click();
-
-  await expect(page.locator("#panel-usb-playlists")).toHaveClass(/active/);
-  await expect(page.locator("#usbPlaylists")).toBeEmpty();
-  await expect(page.locator("#usbPlaylists")).not.toHaveAttribute("data-loaded");
-
-  await page.evaluate(() => window.__releaseLists());
-  await expect(page.locator("#usbPlaylists")).toHaveAttribute("data-loaded");
-  await expect(page.locator("#usbPlaylists")).toBeEmpty();
-  expect(await page.locator("#usbPlaylists").evaluate((node) => getComputedStyle(node, "::before").content)).toBe('"No playlists on this USB."');
-  await expect(page.locator("#panel-usb-playlists .split > .right")).toBeHidden();
-  expect(await page.evaluate(() => window.__trackFetches)).toBe(0);
-});
-
-test("USB history tab shows the empty text only after a read finds nothing", async ({ page }) => {
-  await installTauriMock(page, "valid");
-  await holdEmptyLists(page);
-  await countPlaylistFetches(page);
-  await page.goto("/");
-
-  await page.locator('.nav-item[data-view="usb"]').click();
-  await page.locator("#usbEmptyState .empty-state-action").click();
-  await page.locator('.nav-item[data-view="usb-history"]').click();
-
-  await expect(page.locator("#panel-usb-history")).toHaveClass(/active/);
-  await expect(page.locator("#historyList")).toBeEmpty();
-  await expect(page.locator("#historyList")).not.toHaveAttribute("data-loaded");
+  await openUsb(page);
+  const tabs = [
+    { view: "usb-playlists", list: "#usbPlaylists", empty: "No playlists on this USB." },
+    { view: "usb-history", list: "#historyList", empty: "No history on this USB." }
+  ];
+  for (const { view, list } of tabs) {
+    await page.locator(`.nav-item[data-view="${view}"]`).click();
+    await expect(page.locator(`#panel-${view}`)).toHaveClass(/active/);
+    await expect(page.locator(list)).toBeEmpty();
+    await expect(page.locator(list)).not.toHaveAttribute("data-loaded");
+  }
 
   await page.evaluate(() => window.__releaseLists());
-  await expect(page.locator("#historyList")).toHaveAttribute("data-loaded");
-  await expect(page.locator("#historyList")).toBeEmpty();
-  expect(await page.locator("#historyList").evaluate((node) => getComputedStyle(node, "::before").content)).toBe('"No history on this USB."');
-  await expect(page.locator("#panel-usb-history .split > .right")).toBeHidden();
+  for (const { view, list, empty } of tabs) {
+    await page.locator(`.nav-item[data-view="${view}"]`).click();
+    await expect(page.locator(list)).toHaveAttribute("data-loaded");
+    await expect(page.locator(list)).toBeEmpty();
+    expect(await page.locator(list).evaluate((node) => getComputedStyle(node, "::before").content)).toBe(`"${empty}"`);
+    await expect(page.locator(`#panel-${view} .split > .right`)).toBeHidden();
+  }
   await expect(page.locator("#exportHistoryTracklistBtn")).toBeHidden();
   expect(await page.evaluate(() => window.__trackFetches)).toBe(0);
 });
@@ -675,9 +578,7 @@ test("USB playlists status shows the backend's warning count, linked to the Even
   await installTauriMock(page, "warning-mix");
   await page.goto("/");
 
-  await page.locator('.nav-item[data-view="usb"]').click();
-  await page.locator("#usbEmptyState .empty-state-action").click();
-  await page.locator('.nav-item[data-view="usb-playlists"]').click();
+  await openUsb(page, "usb-playlists");
 
   // The first playlist opens by itself, and that doesn't replace the status.
   await expect(page.locator('[data-usb-playlist="usb-1"]')).toHaveClass(/active/);
@@ -690,18 +591,16 @@ test("USB playlists status shows the backend's warning count, linked to the Even
 test("USB lists read after leaving their pages open the first item on return, and keep it on the next return", async ({ page }) => {
   await installTauriMock(page, "valid");
   await page.addInitScript(() => {
-    const invoke = window.__TAURI__.core.invoke;
     const released = new Promise((resolve) => { window.__releaseReads = resolve; });
-    window.__TAURI__.core.invoke = async (command, payload) => {
-      const backend = window.__e2eBackend;
+    const backend = window.__e2eBackend;
+    backend.override(async (command, request, payload, next) => {
       if (command === "fetch_usb_playlists") await released;
       if (command === "fetch_usb_histories") {
         await released;
         return backend.ok(backend.usbHistories({ items: [{ id: "h-1", name: "HISTORY 001", tracks: [{ title: "Track A" }] }] }));
       }
       if (command === "fetch_usb_history_tracks") return backend.ok({ items: [{ title: "Track A" }], total: 1 });
-      return invoke(command, payload);
-    };
+    });
   });
   await countPlaylistFetches(page);
   await page.goto("/");
@@ -742,17 +641,15 @@ test("removing a USB playlist keeps the open one; removing the open one opens no
   await listenForBackendEvents(page);
   await countPlaylistFetches(page);
   await page.addInitScript(() => {
-    const invoke = window.__TAURI__.core.invoke;
-    window.__TAURI__.core.invoke = async (command, payload) => {
+    const backend = window.__e2eBackend;
+    backend.override(async (command, request, payload, next) => {
       if (command === "fetch_usb_playlist_tracks") await window.__tracksGate;
-      return invoke(command, payload);
-    };
+    });
   });
   await page.goto("/");
 
   const nav = page.locator('.nav-item[data-view="usb-playlists"]');
-  await page.locator('.nav-item[data-view="usb"]').click();
-  await page.locator("#usbEmptyState .empty-state-action").click();
+  await openUsb(page);
   await nav.click();
   const first = page.locator('[data-usb-playlist="usb-pl-1"]');
   await expect(first).toHaveClass(/active/);
@@ -800,19 +697,17 @@ test("removing a USB playlist keeps the open one; removing the open one opens no
 test("a failed USB list read retries when the page is opened again", async ({ page }) => {
   await installTauriMock(page, "valid");
   await page.addInitScript(() => {
-    const invoke = window.__TAURI__.core.invoke;
     let fetches = 0;
-    window.__TAURI__.core.invoke = async (command, payload) => {
+    const backend = window.__e2eBackend;
+    backend.override(async (command, request, payload, next) => {
       if (command === "fetch_usb_playlists") {
         fetches += 1;
         if (fetches === 1) return { ok: false, error: { code: "IO", message: "read failed" } };
       }
-      return invoke(command, payload);
-    };
+    });
   });
   await page.goto("/");
-  await page.locator('.nav-item[data-view="usb"]').click();
-  await page.locator("#usbEmptyState .empty-state-action").click();
+  await openUsb(page);
 
   await page.locator('.nav-item[data-view="usb-playlists"]').click();
   await expect(page.locator("#statusText")).toContainText("read failed");
@@ -823,62 +718,29 @@ test("a failed USB list read retries when the page is opened again", async ({ pa
   await expect(page.locator('[data-usb-playlist="usb-1"]')).toBeVisible();
 });
 
-test("console warnings appear in the Event Log, console.log lines don't", async ({ page }) => {
+test("the Event Log shows console warnings and CSP events, not console.log or startup's developer lines, with one filter option per source", async ({ page }) => {
   await installTauriMock(page, "valid");
   await page.goto("/");
 
   const marker = `console-mirror-${Date.now()}`;
   await page.evaluate((text) => {
+    // Repeated "console"-sourced warnings: the source filter still lists it once.
     console.warn(text);
+    console.warn(`${text}-again`);
     console.log(`${text}-log`);
-  }, marker);
-
-  await page.locator("#eventLogBtn").click();
-
-  await expect(page.locator("#eventLogList")).toContainText(marker);
-  await expect(page.locator("#eventLogList")).not.toContainText(`${marker}-log`);
-});
-
-test("CSP security events appear in Event Log", async ({ page }) => {
-  await installTauriMock(page, "valid");
-  await page.goto("/");
-
-  await page.evaluate(() => {
     const evt = new Event("securitypolicyviolation");
     Object.defineProperty(evt, "violatedDirective", { value: "style-src", configurable: true });
     Object.defineProperty(evt, "blockedURI", { value: "inline", configurable: true });
     window.dispatchEvent(evt);
-  });
+  }, marker);
 
   await page.locator("#eventLogBtn").click();
-  await expect(page.locator("#eventLogList")).toContainText("CSP violation: style-src");
-});
-
-test("startup's developer lines go to the log file, not the Event Log", async ({ page }) => {
-  await installTauriMock(page, "valid");
-  await page.goto("/");
-
-  await page.locator("#eventLogBtn").click();
-  await expect(page.locator("#eventLogList")).not.toContainText("Frontend console bridge initialized");
-  await expect(page.locator("#eventLogList")).not.toContainText("Initial view ready");
-});
-
-test("Event Log source filter dropdown never grows duplicate options for a repeated source", async ({ page }) => {
-  await installTauriMock(page, "valid");
-  await page.goto("/");
-
-  // Repeated "console"-sourced warnings show the same source across renders --
-  // ensureEventLogSourceOptions must still add each distinct source to the
-  // filter dropdown only once. (console.log and .info go to the log file only.)
-  await page.evaluate(() => {
-    console.warn("dup-source-1");
-    console.warn("dup-source-2");
-    console.warn("dup-source-3");
-  });
-
-  await page.locator("#eventLogBtn").click();
-
-  await expect(page.locator("#eventLogList")).toContainText("dup-source-3");
+  const list = page.locator("#eventLogList");
+  await expect(list).toContainText(`${marker}-again`);
+  await expect(list).toContainText("CSP violation: style-src");
+  await expect(list).not.toContainText(`${marker}-log`);
+  await expect(list).not.toContainText("Frontend console bridge initialized");
+  await expect(list).not.toContainText("Initial view ready");
   await expect(page.locator('#eventLogSourceFilter option[value="console"]')).toHaveCount(1);
 });
 
@@ -890,8 +752,7 @@ test("USB sub-nav reveal/hide and fallback to USB panel", async ({ page }) => {
   await expect(usbPlaylistsNav).not.toHaveClass(/revealed/);
   await expect(usbPlaylistsNav).toBeHidden(); // Keyboard can't reach it either.
 
-  await page.locator('.nav-item[data-view="usb"]').click();
-  await page.locator("#usbEmptyState .empty-state-action").click();
+  await openUsb(page);
   await expect(usbPlaylistsNav).toHaveClass(/revealed/);
 
   await usbPlaylistsNav.click();
@@ -992,20 +853,19 @@ test("Rediagnose USB and Parity Report open Health & Diagnostics whatever the re
   // A passing diagnostics run, which the automatic run on USB select leaves
   // collapsed, and a failing parity report run.
   await page.addInitScript(() => {
-    const invoke = window.__TAURI__.core.invoke;
-    window.__TAURI__.core.invoke = async (command, payload) => {
-      const result = await invoke(command, payload);
+    const backend = window.__e2eBackend;
+    backend.override(async (command, request, payload, next) => {
+      const result = await next();
       if (command === "run_usb_diagnostics") result.data = { ...result.data, overallStatus: "PASS", statusLabel: "PASS", healthText: "USB health: good" };
       if (command === "run_usb_parity_report" && window.__failParity) {
         return { ok: false, error: { code: "PARITY_FAILED", message: "parity failed" } };
       }
       return result;
-    };
+    });
   });
   await page.goto("/");
 
-  await page.locator('.nav-item[data-view="usb"]').click();
-  await page.locator("#usbEmptyState .empty-state-action").click();
+  await openUsb(page);
   const usbHealthCard = page.locator("#usbHealthCard");
   await expect(page.locator("#diagOverallStatus")).toHaveText("PASS");
   await expect(usbHealthCard).not.toHaveAttribute("open");
@@ -1029,8 +889,7 @@ test("Diagnostics and parity render without warning panel", async ({ page }) => 
   await installTauriMock(page, "valid");
   await page.goto("/");
 
-  await page.locator('.nav-item[data-view="usb"]').click();
-  await page.locator("#usbEmptyState .empty-state-action").click();
+  await openUsb(page);
   const usbHealthCard = page.locator("#usbHealthCard");
   await usbHealthCard.evaluate((node) => {
     node.open = true;
@@ -1101,8 +960,7 @@ test("Repair preview shows the backend's rows and locks structural-prerequisite 
   await countPlaylistFetches(page);
   await page.goto("/");
 
-  await page.locator('.nav-item[data-view="usb"]').click();
-  await page.locator("#usbEmptyState .empty-state-action").click();
+  await openUsb(page);
 
   // Load playlists first -- a successful repair apply must clear them, since
   // an applied fix may have rewritten the PDB playlist tree they came from.
@@ -1180,27 +1038,23 @@ test("Repair preview shows the backend's rows and locks structural-prerequisite 
 test("a repair whose diagnostics re-run failed still applies the export status it returns", async ({ page }) => {
   await installTauriMock(page, "valid");
   await page.addInitScript(() => {
-    const invoke = window.__TAURI__.core.invoke;
     window.__playlistLoads = 0;
-    window.__TAURI__.core.invoke = async (command, payload) => {
+    const backend = window.__e2eBackend;
+    backend.override(async (command, request, payload, next) => {
       if (command === "list_playlists") {
         window.__playlistLoads += 1;
         return { ok: true, data: { playlists: [{ id: "pl-1", name: "Local Set", source: "local" }], playlistUsbExportStatus: [] } };
       }
       if (command === "repair_usb_diagnostics" && payload?.request?.apply) {
-        return {
-          ok: true,
-          data: {
-            appliedFixes: payload.request.selectedFixIds,
-            usbContentChanged: true,
-            statusText: "Repair apply complete: 1 applied",
-            playlists: [{ id: "pl-1", name: "Local Set", source: "local" }],
-            playlistUsbExportStatus: [{ playlistId: "pl-1", playlistName: "Local Set", usbSelected: true, sameNameExistsOnUsb: true, markLabel: "On this USB" }]
-          }
-        };
+        return backend.ok({
+          appliedFixes: payload.request.selectedFixIds,
+          usbContentChanged: true,
+          statusText: "Repair apply complete: 1 applied",
+          playlists: [{ id: "pl-1", name: "Local Set", source: "local" }],
+          playlistUsbExportStatus: [{ playlistId: "pl-1", playlistName: "Local Set", usbSelected: true, sameNameExistsOnUsb: true, markLabel: "On this USB" }]
+        });
       }
-      return invoke(command, payload);
-    };
+    });
   });
   await page.goto("/");
   await connectUsb(page);
@@ -1240,8 +1094,7 @@ test("USB playlist drag-and-drop reorder persists the new order", async ({ page 
   await countPlaylistFetches(page);
   await page.goto("/");
 
-  await page.locator('.nav-item[data-view="usb"]').click();
-  await page.locator("#usbEmptyState .empty-state-action").click();
+  await openUsb(page);
 
   // Open a diagnostics report first -- a successful reorder must clear it,
   // since it no longer reflects the (now stale) playlist order it reported on.
@@ -1296,33 +1149,32 @@ test("USB playlist drag-and-drop reorder persists the new order", async ({ page 
   await expect(page.locator("#usbPlaylistTracks .track-grid-row")).toContainText("Track B");
 });
 
-test("a failed USB playlist reorder restores the order and keeps the playlist open", async ({ page }) => {
+test("a failed USB playlist reorder restores the order and keeps the playlist open, and reports the save's failure even when the re-read fails", async ({ page }) => {
   await installTauriMock(page, "reorder");
   await page.addInitScript(() => {
-    const invoke = window.__TAURI__.core.invoke;
-    window.__TAURI__.core.invoke = async (command, payload) => {
-      if (command === "reorder_usb_playlists") return { ok: false, error: { code: "IO", message: "Failed to save playlist order: write failed" } };
-      return invoke(command, payload);
-    };
+    const backend = window.__e2eBackend;
+    backend.override(async (command) => {
+      if (command === "reorder_usb_playlists") return backend.fail("Failed to save playlist order: write failed", "IO");
+      // `__stickGone`: the read after the failed save fails too.
+      if (command === "fetch_usb_playlists" && window.__stickGone) return backend.fail("stick gone", "IO");
+    });
   });
   await countPlaylistFetches(page);
   await page.goto("/");
 
-  await page.locator('.nav-item[data-view="usb"]').click();
-  await page.locator("#usbEmptyState .empty-state-action").click();
-  await page.locator('.nav-item[data-view="usb-playlists"]').click();
+  await openUsb(page, "usb-playlists");
 
   const rows = page.locator("#usbPlaylists [data-usb-playlist]");
   await expect(rows.nth(0)).toHaveClass(/active/);
   await expect(page.locator("#usbPlaylistTracks .track-grid-row")).toHaveCount(1);
-
-  await dragViaHandle(
+  const dragFirstToLast = () => dragViaHandle(
     page,
     '#usbPlaylists li:nth-child(1) [data-usb-drag-handle]',
     '#usbPlaylists li:nth-child(3)',
     false
   );
 
+  await dragFirstToLast();
   await expect(page.locator("#statusText")).toContainText("Failed to save playlist order: write failed");
   await expect(rows.nth(0)).toContainText("Alpha");
   await expect(rows.nth(1)).toContainText("Bravo");
@@ -1331,52 +1183,21 @@ test("a failed USB playlist reorder restores the order and keeps the playlist op
   await expect(page.locator("#usbPlaylistHeading .track-list-heading-name")).toHaveText("Alpha");
   await expect(page.locator("#usbPlaylistTracks .track-grid-row")).toContainText("Track A");
   expect(await page.evaluate(() => window.__playlistFetches)).toBe(2);
-});
 
-test("a failed USB playlist reorder whose re-read also fails still reports the save's failure", async ({ page }) => {
-  await installTauriMock(page, "reorder");
-  await page.addInitScript(() => {
-    const invoke = window.__TAURI__.core.invoke;
-    let saveFailed = false;
-    window.__TAURI__.core.invoke = async (command, payload) => {
-      if (command === "reorder_usb_playlists") {
-        saveFailed = true;
-        return { ok: false, error: { code: "IO", message: "Failed to save playlist order: write failed" } };
-      }
-      // The stick went away: the read after the failed save fails too.
-      if (command === "fetch_usb_playlists" && saveFailed) {
-        return { ok: false, error: { code: "IO", message: "stick gone" } };
-      }
-      return invoke(command, payload);
-    };
-  });
-  await page.goto("/");
-
-  await page.locator('.nav-item[data-view="usb"]').click();
-  await page.locator("#usbEmptyState .empty-state-action").click();
-  await page.locator('.nav-item[data-view="usb-playlists"]').click();
-  await expect(page.locator("#usbPlaylists [data-usb-playlist]").nth(0)).toHaveClass(/active/);
-
-  await dragViaHandle(
-    page,
-    '#usbPlaylists li:nth-child(1) [data-usb-drag-handle]',
-    '#usbPlaylists li:nth-child(3)',
-    false
-  );
-
-  // The save's failure, not the read's, and the read's failure on the progress bar.
-  await expect(page.locator("#statusText")).toContainText("Failed to save playlist order: write failed");
+  // The stick went away: the save's failure, not the read's, and the read's
+  // failure on the progress bar.
+  await page.evaluate(() => { window.__stickGone = true; });
+  await dragFirstToLast();
   await expect(page.locator("#progressText")).toHaveText("USB load failed");
   await expect(page.locator("#progressFooter")).toHaveClass(/error/);
+  await expect(page.locator("#statusText")).toContainText("Failed to save playlist order: write failed");
 });
 
 test("USB playlist drag that does not change position skips persisting order", async ({ page }) => {
   await installTauriMock(page, "reorder");
   await page.goto("/");
 
-  await page.locator('.nav-item[data-view="usb"]').click();
-  await page.locator("#usbEmptyState .empty-state-action").click();
-  await page.locator('.nav-item[data-view="usb-playlists"]').click();
+  await openUsb(page, "usb-playlists");
 
   const rows = page.locator("#usbPlaylists [data-usb-playlist]");
   await expect(rows).toHaveCount(3);
@@ -1398,9 +1219,7 @@ test("USB playlist drag auto-scrolls the list when held near its bottom edge", a
   await installTauriMock(page, "reorder-scroll");
   await page.goto("/");
 
-  await page.locator('.nav-item[data-view="usb"]').click();
-  await page.locator("#usbEmptyState .empty-state-action").click();
-  await page.locator('.nav-item[data-view="usb-playlists"]').click();
+  await openUsb(page, "usb-playlists");
 
   const list = page.locator("#usbPlaylists");
   await expect(page.locator("#usbPlaylists [data-usb-playlist]")).toHaveCount(40);
@@ -1447,8 +1266,8 @@ test("USB playlist drag auto-scrolls the list when held near its bottom edge", a
 test("USB toggle race ends in deterministic final state, with nothing left of the previous USB", async ({ page }) => {
   await installTauriMock(page, "toggle-usb");
   await page.addInitScript(() => {
-    const invoke = window.__TAURI__.core.invoke;
-    window.__TAURI__.core.invoke = async (command, payload) => {
+    const backend = window.__e2eBackend;
+    backend.override(async (command, request, payload, next) => {
       if (command === "list_playlists") {
         return { ok: true, data: { playlists: [{ id: "pl-1", name: "Local Set", source: "local" }], playlistUsbExportStatus: [] } };
       }
@@ -1457,12 +1276,12 @@ test("USB toggle race ends in deterministic final state, with nothing left of th
         const backend = window.__e2eBackend;
         return backend.ok(backend.usbPlaylists({ items: [{ id: "usb-1", name: "Warmup", tracks: [] }], playlistUsbExportStatus }));
       }
-      const result = await invoke(command, payload);
+      const result = await next();
       if (command === "run_usb_diagnostics") {
         result.data = { ...result.data, playlistUsbExportStatus };
       }
       return result;
-    };
+    });
   });
   await page.goto("/");
 
@@ -1501,18 +1320,17 @@ test("USB toggle race ends in deterministic final state, with nothing left of th
 test("a USB list read overtaken by a USB change drops its late response", async ({ page }) => {
   await installTauriMock(page, "toggle-usb");
   await page.addInitScript(() => {
-    const invoke = window.__TAURI__.core.invoke;
     const backend = window.__e2eBackend;
     const playlist = (name) => ({ id: name, name, source: "mock-tauri", tracks: [] });
     const released = new Promise((resolve) => { window.__releaseFirstRead = resolve; });
     let fetches = 0;
-    window.__TAURI__.core.invoke = async (command, payload) => {
-      if (command !== "fetch_usb_playlists") return invoke(command, payload);
+    backend.override(async (command, request, payload, next) => {
+      if (command !== "fetch_usb_playlists") return next();
       fetches += 1;
       if (fetches > 1) return backend.ok(backend.usbPlaylists({ items: [playlist("Fresh")] }));
       await released;
       return backend.ok(backend.usbPlaylists({ items: [playlist("Stale")] }));
-    };
+    });
   });
   await page.goto("/");
 
@@ -1541,9 +1359,7 @@ test("a job started right after another finished keeps its progress footer", asy
   await installTauriMock(page, "progress-race");
   await page.goto("/");
 
-  await page.locator('.nav-item[data-view="usb"]').click();
-  await page.locator("#usbEmptyState .empty-state-action").click();
-  await page.locator('.nav-item[data-view="usb-playlists"]').click();
+  await openUsb(page, "usb-playlists");
   // The read finished; its footer is due to hide 1.2s from now.
   await expect(page.locator("#progressText")).toContainText("Done");
 
@@ -1588,8 +1404,7 @@ test("USB audio formats: ticks and drag order are saved, and the last ticked for
   await installTauriMock(page, "valid");
   await page.goto("/");
 
-  await page.locator('.nav-item[data-view="usb"]').click();
-  await page.locator("#usbEmptyState .empty-state-action").click();
+  await openUsb(page);
 
   const chips = page.locator("#usbAudioFormatsList .usb-cfg-audio-format-chip");
   const names = page.locator("#usbAudioFormatsList .usb-cfg-audio-format-name");
@@ -1637,8 +1452,7 @@ test("USB audio formats: ticks and drag order are saved, and the last ticked for
 });
 
 async function connectUsb(page) {
-  await page.locator('.nav-item[data-view="usb"]').click();
-  await page.locator("#usbEmptyState .empty-state-action").click();
+  await openUsb(page);
   await expect(page.locator("#diagOverallStatus")).toHaveText("WARN");
 }
 
@@ -1646,10 +1460,10 @@ test("a running USB job locks the USB selection and export until it ends; other 
   await installTauriMock(page, "valid");
   await listenForBackendEvents(page);
   await page.addInitScript(() => {
-    const invoke = window.__TAURI__.core.invoke;
     window.__picks = 0;
     window.__validates = 0;
-    window.__TAURI__.core.invoke = async (command, payload) => {
+    const backend = window.__e2eBackend;
+    backend.override(async (command, request, payload, next) => {
       if (command === "list_playlists") {
         return { ok: true, data: { playlists: [{ id: "pl-1", name: "Local Set", source: "local" }], playlistUsbExportStatus: [] } };
       }
@@ -1657,11 +1471,10 @@ test("a running USB job locks the USB selection and export until it ends; other 
       if (command === "select_usb") {
         window.__validates += 1;
         // Another drive shows up as recent once the first is connected.
-        const selected = await invoke(command, payload);
+        const selected = await next();
         return { ...selected, data: { ...selected.data, devices: [{ id: "dev-1", rootPath: "/Volumes/OTHER", label: "Other", mounted: false }] } };
       }
-      return invoke(command, payload);
-    };
+    });
   });
   await page.goto("/");
   await connectUsb(page);
@@ -1731,12 +1544,11 @@ test("a stored USB isn't shown as selected, or read, until it's validated", asyn
   await installTauriMock(page, "valid");
   await page.addInitScript(() => {
     window.localStorage.setItem("djusbtkit.usbRoot", "/Volumes/USB-TEST");
-    const invoke = window.__TAURI__.core.invoke;
     window.__validates = 0;
-    window.__TAURI__.core.invoke = async (command, payload) => {
+    const backend = window.__e2eBackend;
+    backend.override(async (command, request, payload, next) => {
       if (command === "select_usb") window.__validates += 1;
-      return invoke(command, payload);
-    };
+    });
   });
   await page.goto("/");
   await page.locator('.nav-item[data-view="usb"]').click();
@@ -1751,14 +1563,14 @@ test("a stored USB isn't shown as selected, or read, until it's validated", asyn
 test("restoring a backup: cancel and failure change nothing; success clears the report and lists and applies the playlists and backups it answers with", async ({ page }) => {
   await installTauriMock(page, "valid");
   await page.addInitScript(() => {
-    const invoke = window.__TAURI__.core.invoke;
     window.__playlistReads = 0;
     window.__restores = 0;
     window.__deletes = [];
     window.__backupLists = 0;
     const backup = { timestamp: "2020-01-01_00-00-00", timeText: "the time", reasonText: "the reason", detailText: "the detail", restoreConfirmText: "Restore it?", deleteConfirmText: "Delete it?", files: ["export.pdb"], reason: "export", sizeBytes: 1024, location: "usb" };
     const backups = (summaryText) => ({ summaryText, emptyText: "none", items: [backup] });
-    window.__TAURI__.core.invoke = async (command, payload) => {
+    const backend = window.__e2eBackend;
+    backend.override(async (command, request, payload, next) => {
       if (command === "list_playlists") {
         return { ok: true, data: { playlists: [{ id: "pl-1", name: "Local Set", source: "local" }], playlistUsbExportStatus: [] } };
       }
@@ -1774,19 +1586,15 @@ test("restoring a backup: cancel and failure change nothing; success clears the 
       if (command === "restore_usb_backup") {
         window.__restores += 1;
         if (window.__failRestore) return { ok: false, error: { code: "IO", message: "Restore failed: disk gone" } };
-        return {
-          ok: true,
-          data: {
-            restored: true,
-            statusText: "Restored eDB and PDB from backup",
-            backups: backups("after the restore"),
-            playlists: [{ id: "pl-1", name: "Local Set", source: "local" }],
-            playlistUsbExportStatus: [{ playlistId: "pl-1", playlistName: "Local Set", usbSelected: true, sameNameExistsOnUsb: true, markLabel: "On this USB" }]
-          }
-        };
+        return backend.ok({
+          restored: true,
+          statusText: "Restored eDB and PDB from backup",
+          backups: backups("after the restore"),
+          playlists: [{ id: "pl-1", name: "Local Set", source: "local" }],
+          playlistUsbExportStatus: [{ playlistId: "pl-1", playlistName: "Local Set", usbSelected: true, sameNameExistsOnUsb: true, markLabel: "On this USB" }]
+        });
       }
-      return invoke(command, payload);
-    };
+    });
   });
   await page.goto("/");
   await connectUsb(page);
@@ -1854,16 +1662,15 @@ test("applying repairs that change nothing keeps the loaded USB playlists and sh
   await installTauriMock(page, "valid");
   await countPlaylistFetches(page);
   await page.addInitScript(() => {
-    const invoke = window.__TAURI__.core.invoke;
-    window.__TAURI__.core.invoke = async (command, payload) => {
+    const backend = window.__e2eBackend;
+    backend.override(async (command, request, payload, next) => {
       if (command === "repair_usb_diagnostics" && payload?.request?.apply) {
         return {
           ok: true,
           data: { failedFixes: payload.request.selectedFixIds, usbContentChanged: false, statusText: "Repair apply complete: 0 applied", diagnostics: { overallStatus: "FAIL", statusLabel: "FAIL", healthText: "USB health: issues found" } }
         };
       }
-      return invoke(command, payload);
-    };
+    });
   });
   await page.goto("/");
   await connectUsb(page);
@@ -1890,7 +1697,6 @@ test("a player-menu edit clears the diagnostics report only when it changed the 
   await installTauriMock(page, "valid");
   await page.addInitScript(() => {
     const backend = window.__e2eBackend;
-    const invoke = window.__TAURI__.core.invoke;
     window.__menuUpdated = false;
     const config = (updated, statusText) => ({
       ok: true,
@@ -1901,13 +1707,12 @@ test("a player-menu edit clears the diagnostics report only when it changed the 
         availableItems: [backend.playerMenuItem(132, { name: "PLAYLIST" })],
       }
     });
-    window.__TAURI__.core.invoke = async (command, payload) => {
+    backend.override(async (command, request, payload, next) => {
       if (command === "get_usb_player_menu_config") return config(false, "Player menu loaded");
       if (command === "update_usb_player_menu_config") {
         return config(window.__menuUpdated, window.__menuUpdated ? "Player menu updated" : "Player menu unchanged");
       }
-      return invoke(command, payload);
-    };
+    });
   });
   await page.goto("/");
   await connectUsb(page);
@@ -1934,8 +1739,7 @@ test("the player menu editor selects in one list at a time, and its buttons foll
   await installTauriMock(page, "valid");
   await page.addInitScript(() => {
     const backend = window.__e2eBackend;
-    const invoke = window.__TAURI__.core.invoke;
-    window.__TAURI__.core.invoke = async (command, payload) => {
+    backend.override(async (command, request, payload, next) => {
       if (command === "get_usb_player_menu_config") {
         return backend.ok({
           currentItems: [
@@ -1948,8 +1752,7 @@ test("the player menu editor selects in one list at a time, and its buttons foll
           ]
         });
       }
-      return invoke(command, payload);
-    };
+    });
   });
   await page.goto("/");
   await connectUsb(page);
@@ -1984,15 +1787,14 @@ test("the player menu editor selects in one list at a time, and its buttons foll
 test("background colour shows nothing selected when the databases differ, and a stick that can't take one says why", async ({ page }) => {
   await installTauriMock(page, "valid");
   await page.addInitScript(() => {
-    const invoke = window.__TAURI__.core.invoke;
     window.__color = { pdbColor: 6, edbColor: 6, writable: true };
-    window.__TAURI__.core.invoke = async (command, payload) => {
+    const backend = window.__e2eBackend;
+    backend.override(async (command, request, payload, next) => {
       if (command === "get_usb_background_color") {
         if (window.__colorFails) return { ok: false, error: { code: "IO", message: "Failed to read the background colour: colour read failed" } };
         return { ok: true, data: window.__color };
       }
-      return invoke(command, payload);
-    };
+    });
   });
   await page.goto("/");
   await connectUsb(page);
@@ -2031,10 +1833,10 @@ test("background colour shows nothing selected when the databases differ, and a 
 test("choosing a background colour sets it on the USB and redraws from the answer", async ({ page }) => {
   await installTauriMock(page, "valid");
   await page.addInitScript(() => {
-    const invoke = window.__TAURI__.core.invoke;
     window.__colorCalls = [];
     window.__colorUpdated = false;
-    window.__TAURI__.core.invoke = async (command, payload) => {
+    const backend = window.__e2eBackend;
+    backend.override(async (command, request, payload, next) => {
       if (command === "get_usb_background_color") return { ok: true, data: { pdbColor: 0, edbColor: 0 } };
       if (command === "set_usb_background_color") {
         const { color } = payload.request;
@@ -2043,8 +1845,7 @@ test("choosing a background colour sets it on the USB and redraws from the answe
         const statusText = window.__colorUpdated ? "Background colour set to Green" : "Background colour unchanged";
         return { ok: true, data: { pdbColor: now, edbColor: now, updated: window.__colorUpdated, statusText } };
       }
-      return invoke(command, payload);
-    };
+    });
   });
   await page.goto("/");
   await connectUsb(page);
@@ -2072,13 +1873,12 @@ test("choosing a background colour sets it on the USB and redraws from the answe
 test("when the UI's texts can't be loaded, the page shows one line and the window still opens", async ({ page }) => {
   await installTauriMock(page, "valid");
   await page.addInitScript(() => {
-    const invoke = window.__TAURI__.core.invoke;
     window.__showWindowCalls = 0;
-    window.__TAURI__.core.invoke = async (command, payload) => {
+    const backend = window.__e2eBackend;
+    backend.override(async (command, request, payload, next) => {
       if (command === "get_ui_texts") return { ok: false, error: { code: "INTERNAL_ERROR", message: "catalog missing" } };
       if (command === "show_window") window.__showWindowCalls += 1;
-      return invoke(command, payload);
-    };
+    });
   });
   await page.goto("/");
 
@@ -2091,9 +1891,8 @@ test("in the test language, the USB pages, Backups, Event Log and Settings show 
   await installTauriMock(page, "valid");
   await page.addInitScript(() => {
     const backend = window.__e2eBackend;
-    const invoke = window.__TAURI__.core.invoke;
     const historyTracks = [{ title: "Session Opener", artist: "Made-up Artist", durationMs: 200000 }];
-    window.__TAURI__.core.invoke = async (command, payload) => {
+    backend.override(async (command, request, payload, next) => {
       if (command === "browse_source_files") return backend.ok({ total: 0, items: [] });
       if (command === "get_transcode_folder") return backend.ok({ path: "/data/transcodes", isDefault: true });
       if (command === "fetch_usb_histories") {
@@ -2114,8 +1913,7 @@ test("in the test language, the USB pages, Backups, Event Log and Settings show 
       if (command === "list_usb_backups") {
         return backend.ok({ summaryText: "the summary", emptyText: "none", items: [{ timestamp: "2020-01-01_00-00-00", timeText: "the time", reasonText: "the reason", detailText: "the detail", restoreConfirmText: "Restore it?", deleteConfirmText: "Delete it?", files: ["export.pdb"], reason: "export", sizeBytes: 1024, location: "usb" }] });
       }
-      return invoke(command, payload);
-    };
+    });
   });
   await useTestLanguage(page);
   await page.goto("/");

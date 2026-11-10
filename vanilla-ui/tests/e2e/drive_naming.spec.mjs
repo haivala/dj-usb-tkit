@@ -8,109 +8,48 @@ function installTauriMock(
   { deviceName = null, suggestedName = null, getNameMode = "normal", takenName = null, nameTakenBy = null } = {}
 ) {
   return page.addInitScript(({ deviceName, suggestedName, getNameMode, takenName, nameTakenBy }) => {
-    window.localStorage.setItem("djusbtkit.helpSeen", "1");
+    const backend = window.__e2eBackend;
+    // The names saved: the backend took them.
     window.__setNameCalls = [];
     let storedName = deviceName;
     const usbRoot = "/Volumes/USB-TEST";
-    window.__deviceLists = 0;
-    window.__prunes = [];
     let forgotten = false;
-    const devices = () => forgotten ? [] : [
-      {
-        id: "dev-1",
-        rootPath: usbRoot,
-        label: storedName,
-        mounted: false,
-        firstSeenAt: "2024-01-01T00:00:00Z",
-        lastSeenAt: "2024-01-01T00:00:00Z"
-      }
-    ];
+    const devices = () => forgotten ? [] : [{
+      id: "dev-1", rootPath: usbRoot, label: storedName, mounted: false,
+      firstSeenAt: "2024-01-01T00:00:00Z", lastSeenAt: "2024-01-01T00:00:00Z"
+    }];
 
-    window.__TAURI__ = {
-      core: {
-        invoke: async (command, payload = {}) => {
-          if (command === "fetch_usb_histories") {
-            return { ok: true, data: { items: [], warnings: [] } };
-          }
-          if (command === "fetch_usb_playlists") {
-            return {
-              ok: true,
-              data: {
-                items: [],
-                stats: { indexedTracks: 0, playlistReferencedTracks: 0, playlistEntries: 0 },
-                playlistUsbExportStatus: [],
-                warnings: []
-              }
-            };
-          }
-          if (command === "list_usb_devices") {
-            window.__deviceLists += 1;
-            return { ok: true, data: { items: devices() } };
-          }
-          if (command === "prune_usb_device") {
-            window.__prunes.push(payload?.request?.id);
-            forgotten = true;
-            return { ok: true, data: { pruned: true, devices: devices() } };
-          }
-          if (command === "select_usb") {
-            const path = String(payload?.request?.path || "");
-            return {
-              ok: true,
-              data: {
-                valid: true,
-                normalizedRoot: path,
-                warnings: [],
-                devices: devices(),
-                // The name couldn't be read ("throw"): the backend logs why and sends none.
-                deviceName: getNameMode === "throw" ? null : {
-                  name: storedName,
-                  suggestedName: storedName ? null : suggestedName,
-                  nameTakenBy: storedName ? null : nameTakenBy
-                }
-              }
-            };
-          }
-          if (command === "set_usb_device_name") {
-            const name = payload?.request?.name || "";
-            if (!name.trim()) {
-              return { ok: false, error: { code: "VALIDATION", message: "mock empty name" } };
+    backend.install((command, r) => {
+      switch (command) {
+        case "list_usb_devices": return backend.ok({ items: devices() });
+        case "prune_usb_device":
+          forgotten = true;
+          return backend.ok({ pruned: true, devices: devices() });
+        case "select_usb":
+          return backend.ok({
+            normalizedRoot: String(r.path || ""),
+            devices: devices(),
+            // The name couldn't be read ("throw"): the backend logs why and sends none.
+            deviceName: getNameMode === "throw" ? null : {
+              name: storedName,
+              suggestedName: storedName ? null : suggestedName,
+              nameTakenBy: storedName ? null : nameTakenBy
             }
-            if (name === takenName) {
-              return {
-                ok: false,
-                error: {
-                  code: "VALIDATION",
-                  message: `Drive name '${name}' is already used by another drive ('${takenName}')`
-                }
-              };
-            }
-            const updated = name !== storedName;
-            storedName = name;
-            window.__setNameCalls.push({ usbRoot: payload?.request?.usbRoot, name });
-            return {
-              ok: true,
-              data: { name, updated, statusText: updated ? `mock renamed to ${name}` : "mock name unchanged" }
-            };
+          });
+        case "set_usb_device_name": {
+          const name = r.name || "";
+          if (!name.trim()) return backend.fail("mock empty name", "VALIDATION");
+          if (name === takenName) {
+            return backend.fail(`Drive name '${name}' is already used by another drive ('${takenName}')`, "VALIDATION");
           }
-          if (command === "run_usb_diagnostics") {
-            return {
-              ok: true,
-              data: {
-                overallStatus: "PASS",
-                statusLabel: "PASS", healthText: "USB health: good",
-                overview: [],
-                playlistUsbExportStatus: [],
-                sectionGroups: [],
-                playlistDetails: [],
-                warnings: [],
-                durationMs: 1
-              }
-            };
-          }
-          return window.__e2eBackend.answer(command);
+          const updated = name !== storedName;
+          storedName = name;
+          window.__setNameCalls.push({ usbRoot: r.usbRoot, name });
+          return backend.ok({ name, updated, statusText: updated ? `mock renamed to ${name}` : "mock name unchanged" });
         }
+        default: return undefined;
       }
-    };
+    });
   }, { deviceName, suggestedName, getNameMode, takenName, nameTakenBy });
 }
 
@@ -154,13 +93,13 @@ test("forgetting a recent USB drops it from the list the prune answers with", as
   await page.locator('.nav-item[data-view="usb"]').click();
   const pill = page.locator('#usbRecentList button[data-usb-recent-path="/Volumes/USB-TEST"]');
   await expect(pill).toBeVisible();
-  const lists = await page.evaluate(() => window.__deviceLists);
+  const lists = await page.evaluate(() => window.__calls.filter((c) => c.command === "list_usb_devices").length);
 
   await page.locator("#usbRecentList .usb-cfg-recent-prune-btn").click();
   await expect(pill).toHaveCount(0);
-  expect(await page.evaluate(() => window.__prunes)).toEqual(["dev-1"]);
+  expect(await page.evaluate(() => window.__calls.filter((c) => c.command === "prune_usb_device").map((c) => c.request.id))).toEqual(["dev-1"]);
   // The list came with the prune's answer: no second read.
-  expect(await page.evaluate(() => window.__deviceLists)).toBe(lists);
+  expect(await page.evaluate(() => window.__calls.filter((c) => c.command === "list_usb_devices").length)).toBe(lists);
 });
 
 test("clicking a recent USB pill for an already-named drive does not reopen the naming prompt, and shows the name in the status-line badge", async ({ page }) => {
@@ -183,14 +122,13 @@ test("clicking a recent USB pill for an already-named drive does not reopen the 
 test("selecting the same USB again picks up a session recorded since the last read", async ({ page }) => {
   await installTauriMock(page, { deviceName: "Club Stick" });
   await page.addInitScript(() => {
-    const invoke = window.__TAURI__.core.invoke;
     window.__sessions = [{ id: "h-1", name: "HISTORY 001", tracks: [] }];
-    window.__TAURI__.core.invoke = async (command, payload) => {
+    const backend = window.__e2eBackend;
+    backend.override(async (command, request, payload, next) => {
       if (command === "fetch_usb_histories") {
         return window.__e2eBackend.ok(window.__e2eBackend.usbHistories({ items: window.__sessions }));
       }
-      return invoke(command, payload);
-    };
+    });
   });
   await page.goto("/");
   const pill = page.locator('#usbRecentList button[data-usb-recent-path="/Volumes/USB-TEST"]');

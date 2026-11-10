@@ -1,13 +1,11 @@
-import { test, expect, uiTextCheck, useTestLanguage } from "./coverage-fixture.mjs";
+import { test, expect, openUsb, uiTextCheck, useTestLanguage } from "./coverage-fixture.mjs";
 
 // `usb`: a connected stick with one playlist of two tracks.
 function installSelectionMock(page, mockOpts = {}) {
   return page.addInitScript((opts) => {
-    window.localStorage.setItem("djusbtkit.helpSeen", "1");
-    // The library\'s source folders, as `get_library_sources` answers.
+    const backend = window.__e2eBackend;
     window.__e2eSourceFolders = ["/music"];
     if (opts.usb) window.localStorage.setItem("djusbtkit.usbRoot", "/Volumes/USB-TEST");
-    window.__calls = [];
     const usbTracks = ["Stick A", "Stick B"].map((title, i) => ({
       id: String(101 + i),
       title,
@@ -26,315 +24,135 @@ function installSelectionMock(page, mockOpts = {}) {
       // No bpm field: a not-yet-analyzed library track.
       { id: "t3", title: "Sel Three", artist: "Artist", album: "Album", filePath: "/music/three.mp3" }
     ];
-    const playlists = [];
-    const playlistTracks = new Map();
-    const addIds = (playlistId, ids) => {
-      const current = playlistTracks.get(playlistId) || [];
-      const fresh = ids.filter((id, i) => !current.includes(id) && ids.indexOf(id) === i);
-      playlistTracks.set(playlistId, [...current, ...fresh]);
-      return { playlistId, added: fresh.length, skipped: ids.length - fresh.length };
-    };
-    const addToPlaylists = (playlistIds, ids, requested) => {
-      const items = playlistIds.map((playlistId) => addIds(playlistId, ids));
-      const sum = (key) => items.reduce((total, item) => total + item[key], 0);
-      // The backend's status line: the playlists' names in request order.
-      const names = playlistIds.map((id) => playlists.find((p) => p.id === id)?.name).join(", ");
-      const added = sum("added");
-      const statusText = ids.length
-        ? `Added ${added} ${added === 1 ? "track" : "tracks"} (skipped ${sum("skipped")}) to ${names}`
-        : "";
-      return {
-        ok: true,
-        data: {
-          requested, resolved: ids.length, unresolved: requested - ids.length,
-          added, skipped: sum("skipped"), items, resolutions: [], statusText,
-        },
-      };
-    };
+    backend.seed({ tracks });
 
-    window.__TAURI__ = {
-      core: {
-        invoke: async (command, payload = {}) => {
-          window.__calls.push({ command, request: payload?.request ?? null });
-          if (command === "get_playlist_membership") {
-            const ids = payload?.request?.trackIds || [];
-            const items = playlists.map((p) => {
-              const held = playlistTracks.get(p.id) || [];
-              const contained = ids.filter((id) => id && held.includes(id)).length;
-              const state = contained === 0 ? "none" : contained >= ids.length ? "all" : "some";
-              const noteText = { none: "", all: "Already in", some: `${contained} of ${ids.length} in` }[state];
-              return { playlistId: p.id, name: p.name, contained, state, noteText };
-            });
-            return { ok: true, data: { items } };
+    backend.install(async (command, request, payload) => {
+      if (command === "add_track_candidates_to_playlist") {
+        for (const track of request.tracks || []) {
+          // Real serde rejects a non-numeric bpm on AddTrackCandidate -- a UI display
+          // sentinel like bpm: "" forwarded by mistake fails this test too.
+          const bpm = track?.bpm;
+          if (bpm !== null && bpm !== undefined && typeof bpm !== "number") {
+            return backend.fail(`invalid type: string "${bpm}", expected f64`, "INVALID_ARGS");
           }
-          if (command === "add_library_selection_to_playlists") {
-            const r = payload?.request || {};
-            return addToPlaylists(r.playlistIds, r.trackIds.map(String), r.trackIds.length);
+          // `id` is a serde alias of `trackId`: sending both is "duplicate field trackId".
+          if (track && typeof track === "object" && "id" in track) {
+            return backend.fail("duplicate field trackId", "INVALID_ARGS");
           }
-          if (command === "add_track_candidates_to_playlists") {
-            const r = payload?.request || {};
-            const ids = r.tracks.map((t) => String(t.localTrackId || t.trackId || "")).filter(Boolean);
-            return addToPlaylists(r.playlistIds, ids, r.tracks.length);
-          }
-          if (command === "list_playlists") return { ok: true, data: { playlists, playlistUsbExportStatus: [] } };
-          if (command === "browse_source_files") {
-            // Library search is a backend query param now (shared TrackListController).
-            const q = String(payload?.request?.query || "").trim().toLowerCase();
-            const rows = q
-              ? tracks.filter((t) => `${t.title} ${t.artist} ${t.album || ""}`.toLowerCase().includes(q))
-              : tracks;
-            return { ok: true, data: { total: rows.length, items: rows, nextCursor: null, hasMore: false } };
-          }
-          if (command === "create_playlist") {
-            const name = String(payload?.request?.name || "Untitled");
-            const id = `pl-${playlists.length + 1}`;
-            const row = {
-              id, name, source: "local",
-              lastExportedAt: null, lastExportedUsbRoot: null, lastExportedTrackCount: null,
-              tracks: []
-            };
-            playlists.push(row);
-            playlistTracks.set(id, []);
-            return { ok: true, data: { playlistId: id, name, statusText: `Playlist created: ${name}` } };
-          }
-          if (command === "list_matching_track_ids") {
-            const q = String(payload?.request?.query || "").trim().toLowerCase();
-            const rows = q
-              ? tracks.filter((t) => `${t.title} ${t.artist} ${t.album || ""}`.toLowerCase().includes(q))
-              : tracks;
-            const ids = rows.map((t) => t.id);
-            return { ok: true, data: { trackIds: ids, total: ids.length } };
-          }
-          if (command === "add_library_selection_to_playlist") {
-            const playlistId = String(payload?.request?.playlistId || "");
-            const wanted = Array.isArray(payload?.request?.trackIds) ? payload.request.trackIds.map(String) : [];
-            const current = playlistTracks.get(playlistId) || [];
-            let added = 0;
-            let skipped = 0;
-            for (const id of wanted) {
-              if (current.includes(id)) { skipped += 1; continue; }
-              current.push(id);
-              added += 1;
-            }
-            playlistTracks.set(playlistId, current);
-            // As the backend words it.
-            const statusText = `Added ${added} track${added === 1 ? "" : "s"} (skipped ${skipped}) to ${playlists.find((p) => p.id === playlistId)?.name}`;
-            return { ok: true, data: { playlistId, added, skipped, statusText } };
-          }
-          if (command === "add_track_candidates_to_playlist") {
-            const playlistId = String(payload?.request?.playlistId || "");
-            const candidates = Array.isArray(payload?.request?.tracks) ? payload.request.tracks : [];
-            // Real serde rejects a non-numeric bpm on AddTrackCandidate with
-            // "invalid type: string \"\", expected f64" -- mimic that here so a regression
-            // (e.g. forwarding a UI display sentinel like bpm: "") fails this test too.
-            for (const track of candidates) {
-              const bpm = track?.bpm;
-              if (bpm !== null && bpm !== undefined && typeof bpm !== "number") {
-                return {
-                  ok: false,
-                  error: { code: "INVALID_ARGS", message: `invalid type: string "${bpm}", expected f64` }
-                };
-              }
-              // AddTrackCandidate.track_id declares `id` as a serde alias of `trackId` --
-              // sending both keys at once makes the real backend reject the request with
-              // "duplicate field trackId". Mimic that here so a regression fails this test too.
-              if (track && typeof track === "object" && "id" in track) {
-                return {
-                  ok: false,
-                  error: { code: "INVALID_ARGS", message: "duplicate field trackId" }
-                };
-              }
-            }
-            const ids = candidates
-              .map((track) => String(track?.localTrackId || track?.trackId || track?.id || "").trim())
-              .filter(Boolean)
-              // `unresolvedAdd`: the backend matched none of them to a library track.
-              .filter(() => !opts.unresolvedAdd);
-            const current = playlistTracks.get(playlistId) || [];
-            let added = 0;
-            for (const id of ids) {
-              if (!current.includes(id)) {
-                current.push(id);
-                added += 1;
-              }
-            }
-            playlistTracks.set(playlistId, current);
-            return {
-              ok: true,
-              data: {
-                playlistId,
-                requested: candidates.length,
-                resolved: ids.length,
-                unresolved: candidates.length - ids.length,
-                added,
-                statusText: `Added ${added} track${added === 1 ? "" : "s"} (skipped ${ids.length - added}) to ${playlists.find((p) => p.id === playlistId)?.name}`,
-                skipped: ids.length - added,
-                resolutions: candidates.map((track, index) => ({
-                  previousId: track?.trackId || track?.id || null,
-                  trackId: ids[index] || null,
-                  resolvedBy: ids[index] ? "self" : "none",
-                  materialized: false
-                }))
-              }
-            };
-          }
-          if (command === "get_playlist_tracks") {
-            const playlistId = String(payload?.request?.playlistId || "");
-            const ids = playlistTracks.get(playlistId) || [];
-            const items = tracks.filter((t) => ids.includes(t.id));
-            return { ok: true, data: { playlistId, items, total: items.length } };
-          }
-          if (command === "remove_tracks_from_playlist") {
-            const playlistId = String(payload?.request?.playlistId || "");
-            const gone = new Set((payload?.request?.trackIds || []).map(String));
-            const current = playlistTracks.get(playlistId) || [];
-            const kept = current.filter((id) => !gone.has(id));
-            playlistTracks.set(playlistId, kept);
-            const removed = current.length - kept.length;
-            const name = playlists.find((p) => p.id === playlistId)?.name;
-            return { ok: true, data: { playlistId, removed, statusText: `Removed ${removed} track${removed === 1 ? "" : "s"} from ${name}` } };
-          }
-          // Convert…: the first selected track gets a transcode, the rest are
-          // skipped (the backend decides which need one).
-          if (command === "get_transcode_formats") {
-            return {
-              ok: true,
-              data: {
-                formats: [
-                  { format: "mp3", label: "MP3 320 kbps", isDefault: true },
-                  { format: "aiff", label: "AIFF (lossless)", isDefault: false },
-                  { format: "wav", label: "WAV (lossless)", isDefault: false },
-                ],
-              },
-            };
-          }
-          if (command === "get_transcode_folder") {
-            return { ok: true, data: window.__transcodeFolder || { path: "/data/transcodes", isDefault: true } };
-          }
-          if (command === "pick_transcode_folder") return "/converted";
-          if (command === "set_transcode_folder") {
-            const path = payload?.request?.path;
-            window.__transcodeFolder = path ? { path, isDefault: false } : null;
-            return { ok: true, data: window.__transcodeFolder || { path: "/data/transcodes", isDefault: true } };
-          }
-          if (command === "transcode_tracks") {
-            const { trackIds = [], format } = payload?.request || {};
-            const converted = { ...tracks.find((t) => t.id === trackIds[0]) };
-            converted.transcodes = [{
-              format, label: format.toUpperCase(), filePath: `/data/transcodes/x.${format}`,
-              sizeBytes: 30 * 1024 * 1024, outdated: false,
-              badge: format.toUpperCase(), tooltip: `${format.toUpperCase()} transcode · 30 MB`,
-            }];
-            Object.assign(tracks.find((t) => t.id === trackIds[0]), converted);
-            return {
-              ok: true,
-              data: {
-                jobId: "j1", transcoded: 1, skipped: trackIds.length - 1, failed: 0, cancelled: false,
-                messages: trackIds.slice(1).map(() => "two.mp3: not a lossless file"),
-                tracks: [converted],
-                summary: `Converting done: 1 track converted, ${trackIds.length - 1} skipped`,
-              },
-            };
-          }
-          if (command === "remove_track_transcodes") {
-            const ids = payload?.request?.trackIds || [];
-            const cleared = tracks.filter((t) => ids.includes(t.id)).map((t) => Object.assign(t, { transcodes: [] }));
-            return { ok: true, data: { removed: 1, tracks: cleared, summary: "Removed 1 transcode" } };
-          }
-          if (command === "analyze_new_tracks") {
-            const ids = payload?.request?.trackIds || [];
-            return { ok: true, data: { jobId: "job-mock", queued: ids.length, skipped: 0, message: `Analyzing ${ids.length} tracks` } };
-          }
-          // What the selected tracks share: genres differ, the release date is shared.
-          if (command === "get_tracks_metadata_summary" || command === "get_usb_tracks_metadata_summary") {
-            const count = (payload?.request?.trackIds || payload?.request?.usbMediaPathsRaw || []).length;
-            return {
-              ok: true,
-              data: {
-                count,
-                genre: { mixed: true },
-                rating: { value: 0, mixed: false },
-                releaseDate: { value: "2001-04-02", mixed: false },
-                genreOptions: ["House", "Techno"],
-              },
-            };
-          }
-          // The saves answer with the edited rows, whole, as the backend does.
-          if (command === "save_track_metadata_edits") {
-            const r = payload?.request || {};
-            const year = Number(r.releaseDate?.slice(0, 4)) || null;
-            const saved = tracks.filter((t) => (r.trackIds || []).includes(t.id));
-            if (r.releaseDate !== undefined) for (const t of saved) t.year = year;
-            return {
-              ok: true,
-              data: {
-                items: saved.map((t) => ({ trackId: t.id, genre: r.genre, rating: r.rating ?? 0, year: t.year ?? undefined })),
-                tracks: saved.map((t) => ({ ...t })),
-                statusText: `Saved track details for ${saved.length} ${saved.length === 1 ? "track" : "tracks"}`,
-              },
-            };
-          }
-          if (command === "save_usb_track_metadata_edits") {
-            const r = payload?.request || {};
-            const year = Number(r.releaseDate?.slice(0, 4)) || null;
-            const paths = (r.tracks || []).map((t) => t.usbMediaPathRaw);
-            const saved = usbTracks.filter((t) => paths.includes(t.usbMediaPath));
-            if (r.releaseDate !== undefined) for (const t of saved) t.year = year;
-            return {
-              ok: true,
-              data: {
-                items: (r.tracks || []).map((t) => ({ usbMediaPathRaw: t.usbMediaPathRaw, year: year ?? undefined })),
-                tracks: saved.map((t) => ({ ...t })),
-                localTracks: [],
-                statusText: `Saved track details for ${r.tracks.length} ${r.tracks.length === 1 ? "track" : "tracks"} to USB`,
-              },
-            };
-          }
-          if (opts.usb) {
-            if (command === "pick_usb_folder") return "/Volumes/USB-TEST";
-            if (command === "select_usb") {
-              return {
-                ok: true,
-                data: {
-                  valid: true, normalizedRoot: "/Volumes/USB-TEST",
-                  warnings: [],
-                },
-              };
-            }
-            if (command === "fetch_usb_playlists") {
-              return {
-                ok: true,
-                data: {
-                  items: [{ id: "usb-1", name: "Stick Set", source: "mock", trackCount: 2, tracks: [{}, {}] }],
-                  stats: { indexedTracks: 2, playlistReferencedTracks: 2, playlistEntries: 2 },
-                  playlistUsbExportStatus: [],
-                  warnings: [],
-                },
-              };
-            }
-            if (command === "fetch_usb_playlist_tracks") {
-              return { ok: true, data: { items: usbTracks, total: usbTracks.length, totalDurationMs: 0, durationUnknownCount: usbTracks.length, warnings: [] } };
-            }
-          }
-          // Three minutes per ticked track; "t3" has no length.
-          if (command === "get_selection_duration") {
-            const ids = payload?.request?.trackIds || [];
-            const known = ids.filter((id) => id !== "t3").length;
-            return {
-              ok: true,
-              data: {
-                totalDurationMs: known * 180_000, durationUnknownCount: ids.length - known, trackCount: ids.length,
-                durationUnknownText: ids.length - known
-                  ? `${ids.length - known} of the selected tracks ${ids.length - known === 1 ? "has" : "have"} no length yet`
-                  : "",
-                durationText: known ? `· ${known * 3}:00${ids.length - known ? "+" : ""}` : "",
-              },
-            };
-          }
-          return window.__e2eBackend.answer(command);
+        }
+        // `unresolvedAdd`: the backend matched none of them to a library track.
+        if (opts.unresolvedAdd) {
+          const unresolved = request.tracks.map((t) => ({ ...t, localTrackId: null, trackId: null }));
+          return backend.answer(command, { request: { ...request, tracks: unresolved } });
         }
       }
-    };
+      // Convert…: the first selected track gets a transcode, the rest are
+      // skipped (the backend decides which need one).
+      if (command === "get_transcode_formats") {
+        return backend.ok({
+          formats: [
+            { format: "mp3", label: "MP3 320 kbps", isDefault: true },
+            { format: "aiff", label: "AIFF (lossless)", isDefault: false },
+            { format: "wav", label: "WAV (lossless)", isDefault: false },
+          ],
+        });
+      }
+      if (command === "get_transcode_folder") {
+        return { ok: true, data: window.__transcodeFolder || { path: "/data/transcodes", isDefault: true } };
+      }
+      if (command === "pick_transcode_folder") return "/converted";
+      if (command === "set_transcode_folder") {
+        const path = payload?.request?.path;
+        window.__transcodeFolder = path ? { path, isDefault: false } : null;
+        return { ok: true, data: window.__transcodeFolder || { path: "/data/transcodes", isDefault: true } };
+      }
+      if (command === "transcode_tracks") {
+        const { trackIds = [], format } = payload?.request || {};
+        const converted = { ...tracks.find((t) => t.id === trackIds[0]) };
+        converted.transcodes = [{
+          format, label: format.toUpperCase(), filePath: `/data/transcodes/x.${format}`,
+          sizeBytes: 30 * 1024 * 1024, outdated: false,
+          badge: format.toUpperCase(), tooltip: `${format.toUpperCase()} transcode · 30 MB`,
+        }];
+        Object.assign(tracks.find((t) => t.id === trackIds[0]), converted);
+        return backend.ok({
+          jobId: "j1", transcoded: 1, skipped: trackIds.length - 1, failed: 0, cancelled: false,
+          messages: trackIds.slice(1).map(() => "two.mp3: not a lossless file"),
+          tracks: [converted],
+          summary: `Converting done: 1 track converted, ${trackIds.length - 1} skipped`,
+        });
+      }
+      if (command === "remove_track_transcodes") {
+        const ids = payload?.request?.trackIds || [];
+        const cleared = tracks.filter((t) => ids.includes(t.id)).map((t) => Object.assign(t, { transcodes: [] }));
+        return { ok: true, data: { removed: 1, tracks: cleared, summary: "Removed 1 transcode" } };
+      }
+      if (command === "analyze_new_tracks") {
+        const ids = payload?.request?.trackIds || [];
+        return { ok: true, data: { jobId: "job-mock", queued: ids.length, skipped: 0, message: `Analyzing ${ids.length} tracks` } };
+      }
+      // What the selected tracks share: genres differ, the release date is shared.
+      if (command === "get_tracks_metadata_summary" || command === "get_usb_tracks_metadata_summary") {
+        const count = (payload?.request?.trackIds || payload?.request?.usbMediaPathsRaw || []).length;
+        return backend.ok({
+          count,
+          genre: { mixed: true },
+          rating: { value: 0, mixed: false },
+          releaseDate: { value: "2001-04-02", mixed: false },
+          genreOptions: ["House", "Techno"],
+        });
+      }
+      // The saves answer with the edited rows, whole, as the backend does.
+      if (command === "save_track_metadata_edits") {
+        const r = payload?.request || {};
+        const year = Number(r.releaseDate?.slice(0, 4)) || null;
+        const saved = tracks.filter((t) => (r.trackIds || []).includes(t.id));
+        if (r.releaseDate !== undefined) for (const t of saved) t.year = year;
+        return backend.ok({
+          items: saved.map((t) => ({ trackId: t.id, genre: r.genre, rating: r.rating ?? 0, year: t.year ?? undefined })),
+          tracks: saved.map((t) => ({ ...t })),
+          statusText: `Saved track details for ${saved.length} ${saved.length === 1 ? "track" : "tracks"}`,
+        });
+      }
+      if (command === "save_usb_track_metadata_edits") {
+        const r = payload?.request || {};
+        const year = Number(r.releaseDate?.slice(0, 4)) || null;
+        const paths = (r.tracks || []).map((t) => t.usbMediaPathRaw);
+        const saved = usbTracks.filter((t) => paths.includes(t.usbMediaPath));
+        if (r.releaseDate !== undefined) for (const t of saved) t.year = year;
+        return backend.ok({
+          items: (r.tracks || []).map((t) => ({ usbMediaPathRaw: t.usbMediaPathRaw, year: year ?? undefined })),
+          tracks: saved.map((t) => ({ ...t })),
+          localTracks: [],
+          statusText: `Saved track details for ${r.tracks.length} ${r.tracks.length === 1 ? "track" : "tracks"} to USB`,
+        });
+      }
+      if (opts.usb) {
+        if (command === "fetch_usb_playlists") {
+          return backend.ok({
+            items: [{ id: "usb-1", name: "Stick Set", source: "mock", trackCount: 2, tracks: [{}, {}] }],
+            stats: { indexedTracks: 2, playlistReferencedTracks: 2, playlistEntries: 2 },
+            playlistUsbExportStatus: [],
+            warnings: [],
+          });
+        }
+        if (command === "fetch_usb_playlist_tracks") {
+          return { ok: true, data: { items: usbTracks, total: usbTracks.length, totalDurationMs: 0, durationUnknownCount: usbTracks.length, warnings: [] } };
+        }
+      }
+      // Three minutes per ticked track; "t3" has no length.
+      if (command === "get_selection_duration") {
+        const ids = payload?.request?.trackIds || [];
+        const known = ids.filter((id) => id !== "t3").length;
+        return backend.ok({
+          totalDurationMs: known * 180_000, durationUnknownCount: ids.length - known, trackCount: ids.length,
+          durationUnknownText: ids.length - known
+            ? `${ids.length - known} of the selected tracks ${ids.length - known === 1 ? "has" : "have"} no length yet`
+            : "",
+          durationText: known ? `· ${known * 3}:00${ids.length - known ? "+" : ""}` : "",
+        });
+      }
+    });
   }, mockOpts);
 }
 
@@ -431,115 +249,17 @@ test("Selection state stays correct when filtering visible rows", async ({ page 
 // that regression can't sneak back in unnoticed.
 function installPaginatedLibraryMock(page, { trackCount }) {
   return page.addInitScript(({ trackCount }) => {
-    window.localStorage.setItem("djusbtkit.helpSeen", "1");
-    // The library\'s source folders, as `get_library_sources` answers.
     window.__e2eSourceFolders = ["/music"];
-
-    const allTracks = Array.from({ length: trackCount }, (_, i) => ({
-      id: `t${i + 1}`,
-      title: `Track ${String(i + 1).padStart(4, "0")}`,
-      artist: "Artist",
-      album: "Album",
-      filePath: `/music/track-${i + 1}.mp3`
-    }));
-    const playlists = [];
-    const playlistTracks = new Map();
-
-    window.__TAURI__ = {
-      core: {
-        invoke: async (command, payload = {}) => {
-          if (command === "list_playlists") return { ok: true, data: { playlists, playlistUsbExportStatus: [] } };
-          if (command === "browse_source_files") {
-            const limit = Number(payload?.request?.limit) || allTracks.length;
-            const offset = Number(payload?.request?.offset) || 0;
-            const page = allTracks.slice(offset, offset + limit);
-            const nextOffset = offset + page.length;
-            const hasMore = nextOffset < allTracks.length;
-            return {
-              ok: true,
-              data: { total: allTracks.length, items: page, nextCursor: hasMore ? String(nextOffset) : null, hasMore }
-            };
-          }
-          if (command === "create_playlist") {
-            const name = String(payload?.request?.name || "Untitled");
-            const id = `pl-${Date.now()}`;
-            const row = {
-              id, name, source: "local",
-              lastExportedAt: null, lastExportedUsbRoot: null, lastExportedTrackCount: null,
-              tracks: []
-            };
-            playlists.push(row);
-            playlistTracks.set(id, []);
-            return { ok: true, data: { playlistId: id, name, statusText: `Playlist created: ${name}` } };
-          }
-          if (command === "list_matching_track_ids") {
-            const ids = allTracks.map((t) => t.id);
-            return { ok: true, data: { trackIds: ids, total: ids.length } };
-          }
-          if (command === "add_library_selection_to_playlist") {
-            const playlistId = String(payload?.request?.playlistId || "");
-            const wanted = payload?.request?.allMatching
-              ? allTracks.map((t) => t.id)
-              : (Array.isArray(payload?.request?.trackIds) ? payload.request.trackIds.map(String) : []);
-            const current = playlistTracks.get(playlistId) || [];
-            let added = 0;
-            let skipped = 0;
-            for (const id of wanted) {
-              if (current.includes(id)) { skipped += 1; continue; }
-              current.push(id);
-              added += 1;
-            }
-            playlistTracks.set(playlistId, current);
-            // As the backend words it.
-            const statusText = `Added ${added} track${added === 1 ? "" : "s"} (skipped ${skipped}) to ${playlists.find((p) => p.id === playlistId)?.name}`;
-            return { ok: true, data: { playlistId, added, skipped, statusText } };
-          }
-          if (command === "add_track_candidates_to_playlist") {
-            const playlistId = String(payload?.request?.playlistId || "");
-            const candidates = Array.isArray(payload?.request?.tracks) ? payload.request.tracks : [];
-            const ids = candidates
-              .map((track) => String(track?.localTrackId || track?.trackId || track?.id || "").trim())
-              .filter(Boolean);
-            const current = playlistTracks.get(playlistId) || [];
-            let added = 0;
-            for (const id of ids) {
-              if (!current.includes(id)) {
-                current.push(id);
-                added += 1;
-              }
-            }
-            playlistTracks.set(playlistId, current);
-            return {
-              ok: true,
-              data: {
-                playlistId,
-                requested: candidates.length,
-                resolved: ids.length,
-                unresolved: candidates.length - ids.length,
-                added,
-                statusText: `Added ${added} track${added === 1 ? "" : "s"} (skipped ${ids.length - added}) to ${playlists.find((p) => p.id === playlistId)?.name}`,
-                skipped: ids.length - added,
-                resolutions: candidates.map((track, index) => ({
-                  previousId: track?.trackId || track?.id || null,
-                  trackId: ids[index] || null,
-                  resolvedBy: ids[index] ? "self" : "none",
-                  materialized: false
-                }))
-              }
-            };
-          }
-          if (command === "get_playlist_tracks") {
-            const playlistId = String(payload?.request?.playlistId || "");
-            const ids = playlistTracks.get(playlistId) || [];
-            return {
-              ok: true,
-              data: { playlistId, items: allTracks.filter((t) => ids.includes(t.id)), listTrackCount: ids.length, listSummaryText: `${ids.length} tracks` }
-            };
-          }
-          return window.__e2eBackend.answer(command);
-        }
-      }
-    };
+    window.__e2eBackend.seed({
+      tracks: Array.from({ length: trackCount }, (_, i) => ({
+        id: `t${i + 1}`,
+        title: `Track ${String(i + 1).padStart(4, "0")}`,
+        artist: "Artist",
+        album: "Album",
+        filePath: `/music/track-${i + 1}.mp3`
+      }))
+    });
+    window.__e2eBackend.install();
   }, { trackCount });
 }
 
@@ -730,9 +450,7 @@ test("USB playlist rows are selected and added to the active playlist in list or
   await page.goto("/");
   await createPlaylist(page, "From Stick");
 
-  await page.locator('.nav-item[data-view="usb"]').click();
-  await page.locator("#usbEmptyState .empty-state-action").click();
-  await page.locator('.nav-item[data-view="usb-playlists"]').click();
+  await openUsb(page, "usb-playlists");
   await expect(page.locator("#usbPlaylistTracks .track-grid-row")).toHaveCount(2);
 
   const bar = page.locator('[data-selection-bar="usbPlaylist"]');
@@ -764,9 +482,7 @@ test("USB rows can't be added without an active playlist, and rows the backend c
   await installSelectionMock(page, { usb: true, unresolvedAdd: true });
   await page.goto("/");
 
-  await page.locator('.nav-item[data-view="usb"]').click();
-  await page.locator("#usbEmptyState .empty-state-action").click();
-  await page.locator('.nav-item[data-view="usb-playlists"]').click();
+  await openUsb(page, "usb-playlists");
   await expect(page.locator("#usbPlaylistTracks .track-grid-row")).toHaveCount(2);
   const bar = page.locator('[data-selection-bar="usbPlaylist"]');
   const firstRow = page.locator("#usbPlaylistTracks .track-grid-row").nth(0);
@@ -839,9 +555,7 @@ test("Edit… shows what the selection shares and saves only the changed fields 
 test("Edit… on USB playlist rows writes them to the stick and shows the new year in the rows", async ({ page }) => {
   await installSelectionMock(page, { usb: true });
   await page.goto("/");
-  await page.locator('.nav-item[data-view="usb"]').click();
-  await page.locator("#usbEmptyState .empty-state-action").click();
-  await page.locator('.nav-item[data-view="usb-playlists"]').click();
+  await openUsb(page, "usb-playlists");
   await expect(page.locator("#usbPlaylistTracks .track-grid-row")).toHaveCount(2);
 
   await page.locator('[data-select-all="usbPlaylist"]').check();
@@ -915,9 +629,10 @@ test("+ Add to names the active playlist; Add to… shows what each playlist hol
   await page.locator("#addToApplyBtn").click();
   await expect(dialog).toBeHidden();
 
-  await expect(page.locator("#statusText")).toContainText("Added 3 tracks (skipped 1) to Warmup, Late");
+  // In sidebar order, newest first.
+  await expect(page.locator("#statusText")).toContainText("Added 3 tracks (skipped 1) to Late, Warmup");
   const request = await lastCall(page, "add_library_selection_to_playlists");
-  expect(request.playlistIds).toEqual(["pl-1", "pl-3"]);
+  expect(request.playlistIds).toEqual(["pl-3", "pl-1"]);
   expect(request.trackIds).toEqual(["t1", "t2"]);
 
   // Both now hold the whole selection: shown ticked, and can't be ticked off.
@@ -944,9 +659,7 @@ test("Add to… from a USB playlist sends the rows' library matches and the rows
   await installSelectionMock(page, { usb: true });
   await page.goto("/");
   await createPlaylist(page, "From Stick");
-  await page.locator('.nav-item[data-view="usb"]').click();
-  await page.locator("#usbEmptyState .empty-state-action").click();
-  await page.locator('.nav-item[data-view="usb-playlists"]').click();
+  await openUsb(page, "usb-playlists");
   await expect(page.locator("#usbPlaylistTracks .track-grid-row")).toHaveCount(2);
 
   await page.locator('[data-select-all="usbPlaylist"]').check();

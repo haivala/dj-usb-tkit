@@ -1,16 +1,19 @@
-import { test, expect, uiTextCheck, useTestLanguage } from "./coverage-fixture.mjs";
+import { test, expect, openUsb, uiTextCheck, useTestLanguage } from "./coverage-fixture.mjs";
 
+// `playlist`: the track is also in an app playlist, "My Set".
 function installTrackDetailMock(page, opts = {}) {
   return page.addInitScript((opts) => {
-    window.localStorage.setItem("djusbtkit.helpSeen", "1");
-    // The library\'s source folders, as `get_library_sources` answers.
+    const backend = window.__e2eBackend;
     window.__e2eSourceFolders = ["/music"];
     if (opts.startOnFirstBeat) window.localStorage.setItem("djusbtkit.cueStartOnFirstBeat", "1");
     // Quantize defaults on; tests that place cues at exact spots turn it off.
     if (opts.quantize === false) window.localStorage.setItem("djusbtkit.cueQuantize", "0");
     if (opts.followGrid) window.localStorage.setItem("djusbtkit.cueFollowGrid", "1");
-    window.__calls = [];
 
+    // What the backend's key_notation renders for the keys these tests use.
+    const CAMELOT = { "Am": "8A", "F#m": "11A", "C": "8B" };
+    const keyLabel = (k) => (opts.camelot && CAMELOT[k]) || k;
+    const withKeyLabel = (t) => ({ ...t, keyDisplay: keyLabel(t.key) });
     const tracks = [
       {
         id: "t1",
@@ -30,171 +33,112 @@ function installTrackDetailMock(page, opts = {}) {
     if (opts.secondTrack) {
       tracks.push({ ...tracks[0], id: "t2", title: "Other Track", filePath: "/music/two.mp3" });
     }
-    // What the backend's key_notation renders for the keys these tests use.
-    const CAMELOT = { "Am": "8A", "F#m": "11A", "C": "8B" };
-    const keyLabel = (k) => (opts.camelot && CAMELOT[k]) || k;
-    const withKeyLabel = (t) => ({ ...t, keyDisplay: keyLabel(t.key) });
+    backend.seed({ tracks, playlists: opts.playlist ? [{ id: "pl-1", name: "My Set", tracks: [tracks[0]] }] : [] });
+    if (opts.tauriEvents) backend.useTauriRuntime();
 
-    // Base64 of a small PWV5 payload (2 bytes/entry).
-    const pwv5 = new Uint8Array(4000);
-    for (let i = 0; i < pwv5.length; i += 2) {
-      const h = 8 + (i % 20);
-      const v = (2 << 13) | (3 << 10) | (5 << 7) | (h << 2);
-      pwv5[i] = (v >> 8) & 0xff;
-      pwv5[i + 1] = v & 0xff;
-    }
-    const detailWaveformB64 = btoa(String.fromCharCode.apply(null, pwv5));
+    // Tiny stand-in for the backend player clock, so pause/resume
+    // report a real (advancing, then frozen) position like player.rs does.
+    const clock = { offsetMs: 0, startedAt: null, loaded: false };
+    const positionMs = () =>
+      Math.min(180000, clock.offsetMs + (clock.startedAt == null ? 0 : Date.now() - clock.startedAt));
+    const status = () => ({
+      path: "/music/one.mp3",
+      playing: clock.loaded && clock.startedAt != null,
+      paused: clock.loaded && clock.startedAt == null,
+      positionMs: positionMs(),
+      durationMs: 180000,
+    });
 
-    const MAJORS = ["C", "C#", "D", "D#", "E", "F", "F#", "G", "G#", "A", "A#", "B"];
-    if (opts.tauriEvents) {
-      // registerBackendJobEvents() only listens when window.isTauri is set, and
-      // the bundled invoke then routes through __TAURI_INTERNALS__.
-      window.isTauri = true;
-      window.__TAURI_INTERNALS__ = { invoke: (cmd, args) => window.__TAURI__.core.invoke(cmd, args) };
-    }
-    window.__TAURI__ = {
-      core: {
-        invoke: async (command, payload = {}) => {
-          window.__calls.push({ command, request: payload?.request ?? null });
-          if (command === "set_frontend_setting") {
-            const r = payload?.request || {};
-            if (r.key === "ui_key_notation_v1") opts.camelot = r.value === "camelot";
-            return { ok: true, data: null };
+    backend.install((command, r, payload) => {
+      switch (command) {
+        case "set_frontend_setting":
+          if (r.key === "ui_key_notation_v1") opts.camelot = r.value === "camelot";
+          return backend.ok(null);
+        case "browse_source_files": {
+          const answer = backend.answer(command, payload);
+          answer.data.items = answer.data.items.map(withKeyLabel);
+          return answer;
+        }
+        case "resolve_track_identity": return backend.ok({ trackId: "t1", resolvedBy: "self", materialized: false });
+        case "get_track_detail":
+          return backend.ok(backend.trackDetail({
+            track: tracks[0],
+            firstBeatMs: 120,
+            cues: [
+              ...(opts.seedStart != null ? [{ positionMs: opts.seedStart, playbackStart: true }] : []),
+              ...(opts.seedCues || []).map((positionMs) => ({ positionMs, colorId: 5, name: "" })),
+              ...(opts.seedMemory || []).map((c) => ({ ...c, memory: true })),
+            ],
+            genre: "Techno",
+            rating: 3,
+            releaseDate: "2009-10-09",
+            genreOptions: ["Breakbeat", "Techno"],
+          }, keyLabel));
+        case "reveal_track_file":
+          window.__revealed = payload?.path ?? null;
+          return null;
+        case "save_track_metadata_edits": {
+          // The saved rows, whole, as the backend answers.
+          const saved = tracks.filter((t) => (r.trackIds || []).includes(t.id));
+          if (r.releaseDate !== undefined) {
+            for (const t of saved) t.year = Number(r.releaseDate.slice(0, 4)) || null;
           }
-          if (command === "browse_source_files") {
-            return { ok: true, data: { total: tracks.length, items: tracks.map(withKeyLabel), nextCursor: null, hasMore: false } };
-          }
-          if (command === "resolve_track_identity") {
-            return { ok: true, data: { trackId: "t1", resolvedBy: "self", materialized: false } };
-          }
-          if (command === "get_track_detail") {
-            return {
-              ok: true,
-              data: {
-                track: tracks[0],
-                firstBeatMs: 120,
-                cues: [
-                  ...(opts.seedStart != null ? [{ positionMs: opts.seedStart, playbackStart: true }] : []),
-                  ...(opts.seedCues || []).map((positionMs) => ({ positionMs, colorId: 5, name: "" })),
-                  ...(opts.seedMemory || []).map((c) => ({ ...c, memory: true })),
-                ],
-                detailWaveform: detailWaveformB64,
-                keyOptions: [MAJORS, MAJORS.map((k) => `${k}m`)].map((keys, i) => ({ label: i ? "Minor" : "Major", keys: keys.map((k) => ({ value: k, label: keyLabel(k) })) })), maxHotCues: 8,
-                genre: "Techno",
-                rating: 3,
-                releaseDate: "2009-10-09",
-                genreOptions: ["Breakbeat", "Techno"],
-              },
-            };
-          }
-          if (command === "reveal_track_file") {
-            window.__revealed = payload?.path ?? null;
-            return null;
-          }
-          if (command === "save_track_metadata_edits") {
-            const r = payload?.request || {};
-            // The saved rows, whole, as the backend answers.
-            const saved = tracks.filter((t) => (r.trackIds || []).includes(t.id));
-            if (r.releaseDate !== undefined) {
-              for (const t of saved) t.year = Number(r.releaseDate.slice(0, 4)) || null;
-            }
-            return {
-              ok: true,
-              data: {
-                items: saved.map((t) => ({
-                  trackId: t.id, genre: r.genre ?? "Techno", rating: r.rating ?? 3, year: t.year ?? undefined,
-                })),
-                tracks: saved.map(withKeyLabel),
-                statusText: `Saved track details for ${saved.length} ${saved.length === 1 ? "track" : "tracks"}`,
-              },
-            };
-          }
-          // Tiny stand-in for the backend player clock, so pause/resume
-          // report a real (advancing, then frozen) position like player.rs does.
-          const clock = (window.__playerClock ||= { offsetMs: 0, startedAt: null, loaded: false });
-          const positionMs = () =>
-            Math.min(180000, clock.offsetMs + (clock.startedAt == null ? 0 : Date.now() - clock.startedAt));
-          const status = () => ({
-            path: "/music/one.mp3",
-            playing: clock.loaded && clock.startedAt != null,
-            paused: clock.loaded && clock.startedAt == null,
-            positionMs: positionMs(),
-            durationMs: 180000,
+          return backend.ok({
+            items: saved.map((t) => ({ trackId: t.id, genre: r.genre ?? "Techno", rating: r.rating ?? 3, year: t.year ?? undefined })),
+            tracks: saved.map(withKeyLabel),
+            statusText: `Saved track details for ${saved.length} ${saved.length === 1 ? "track" : "tracks"}`,
           });
-          if (command === "play_resolved_track") {
-            const paused = !!payload?.request?.startPaused;
-            clock.offsetMs = Math.round((payload?.request?.startRatio || 0) * 180000);
-            clock.startedAt = paused ? null : Date.now();
-            clock.loaded = true;
-            return { ok: true, data: { playing: !paused, paused, positionMs: clock.offsetMs, durationMs: 180000 } };
-          }
-          if (command === "pause_playback_native") {
-            if (clock.loaded && clock.startedAt != null) {
-              clock.offsetMs = positionMs();
-              clock.startedAt = null;
-            }
-            return { ok: true, data: status() };
-          }
-          if (command === "resume_playback_native") {
-            if (clock.loaded && clock.startedAt == null) clock.startedAt = Date.now();
-            return { ok: true, data: status() };
-          }
-          if (command === "stop_playback_native") {
-            clock.loaded = false;
+        }
+        case "play_resolved_track": {
+          const paused = !!r.startPaused;
+          clock.offsetMs = Math.round((r.startRatio || 0) * 180000);
+          clock.startedAt = paused ? null : Date.now();
+          clock.loaded = true;
+          return backend.ok({ playing: !paused, paused, positionMs: clock.offsetMs, durationMs: 180000 });
+        }
+        case "pause_playback_native":
+          if (clock.loaded && clock.startedAt != null) {
+            clock.offsetMs = positionMs();
             clock.startedAt = null;
-            return { ok: true, data: { stopped: true, previousPath: null } };
           }
-          if (command === "get_playback_status_native") {
-            return { ok: true, data: status() };
-          }
-          if (command === "set_playback_metronome") {
-            const r = payload?.request || {};
-            return { ok: true, data: { enabled: !!r.enabled && r.bpm > 0 } };
-          }
-          if (command === "save_track_analysis_edits") {
-            const r = payload?.request || {};
-            // The saved row, whole, as the backend answers.
-            const t = tracks.find((track) => track.id === r.trackId);
-            Object.assign(t, {
-              bpm: r.bpm ?? null,
-              bpmAnalyzer: r.bpm != null ? "user" : null, bpmSourceText: r.bpm != null ? "Manually set" : null,
-              key: r.key ?? null,
-              keyColor: opts.camelot && r.key === "F#m" ? 10 : t.keyColor,
-            });
-            return {
-              ok: true,
-              data: {
-                track: withKeyLabel(t),
-                trackId: "t1",
-                firstBeatMs: payload?.request?.firstBeatMs ?? null,
-                cues: payload?.request?.cues ?? [],
-                bpm: payload?.request?.bpm ?? null,
-                bpmAnalyzer: payload?.request?.bpm != null ? "user" : null, bpmSourceText: payload?.request?.bpm != null ? "Manually set" : null,
-                key: payload?.request?.key ?? null,
-                keySource: payload?.request?.key != null ? "user" : null,
-                ...(opts.camelot && payload?.request?.key === "F#m" ? { keyDisplay: "11A", keyColor: 10 } : {}),
-                anlzRegenerated: true,
-                statusText: `Saved ${(payload?.request?.cues ?? []).length} ${(payload?.request?.cues ?? []).length === 1 ? "cue" : "cues"}`,
-              },
-            };
-          }
-          return window.__e2eBackend.answer(command);
-        },
-      },
-      event: {
-        // Kept so a test can play the backend's events (`window.__emit`).
-        listen: async (eventName, callback) => {
-          const listeners = (window.__eventListeners ||= {});
-          (listeners[eventName] ||= []).push(callback);
-          return () => {
-            listeners[eventName] = listeners[eventName].filter((fn) => fn !== callback);
-          };
-        },
-      },
-    };
-    window.__emit = (eventName, payload) => {
-      for (const fn of window.__eventListeners?.[eventName] || []) fn({ payload });
-    };
+          return backend.ok(status());
+        case "resume_playback_native":
+          if (clock.loaded && clock.startedAt == null) clock.startedAt = Date.now();
+          return backend.ok(status());
+        case "stop_playback_native":
+          clock.loaded = false;
+          clock.startedAt = null;
+          return backend.ok({ stopped: true, previousPath: null });
+        case "get_playback_status_native": return backend.ok(status());
+        case "set_playback_metronome": return backend.ok({ enabled: !!r.enabled && r.bpm > 0 });
+        case "save_track_analysis_edits": {
+          // The saved row, whole, as the backend answers.
+          const t = tracks.find((track) => track.id === r.trackId);
+          const bpmSet = r.bpm != null;
+          Object.assign(t, {
+            bpm: r.bpm ?? null,
+            bpmAnalyzer: bpmSet ? "user" : null, bpmSourceText: bpmSet ? "Manually set" : null,
+            key: r.key ?? null,
+            keyColor: opts.camelot && r.key === "F#m" ? 10 : t.keyColor,
+          });
+          const cues = r.cues ?? [];
+          return backend.ok({
+            track: withKeyLabel(t),
+            trackId: t.id,
+            firstBeatMs: r.firstBeatMs ?? null,
+            cues,
+            bpm: r.bpm ?? null,
+            bpmAnalyzer: t.bpmAnalyzer, bpmSourceText: t.bpmSourceText,
+            key: r.key ?? null,
+            keySource: r.key != null ? "user" : null,
+            ...(opts.camelot && r.key === "F#m" ? { keyDisplay: "11A", keyColor: 10 } : {}),
+            anlzRegenerated: true,
+            statusText: `Saved ${cues.length} ${cues.length === 1 ? "cue" : "cues"}`,
+          });
+        }
+        default: return undefined;
+      }
+    });
   }, opts);
 }
 
@@ -784,7 +728,7 @@ test("beat grid lines sit on whole device pixels, evenly spaced, at a fractional
   expect(Math.max(...gaps) - Math.min(...gaps)).toBeLessThanOrEqual(1 / dpr + 1e-6);
 });
 
-test("the themed ▲/▼ arrows step the input itself: 0.01 BPM and 1 ms, not a whole beat", async ({ page }) => {
+test("BPM and first-beat steppers: ÷2/×2 fix a half/double tempo; −/+ and the ▲/▼ arrows step by 0.01 BPM and 1 ms", async ({ page }) => {
   await openCueEditor(page);
   const bpm = page.locator("#trackDetailBpm");
   const firstBeat = page.locator("#trackDetailFirstBeatMs");
@@ -793,34 +737,34 @@ test("the themed ▲/▼ arrows step the input itself: 0.01 BPM and 1 ms, not a 
   await expect(bpm).toHaveValue("128.00");
   await expect(firstBeat).toHaveValue("120");
 
-  await arrow(bpm, 1).click();
-  await expect(bpm).toHaveValue("128.01");
-  await arrow(bpm, -1).click();
-  await arrow(bpm, -1).click();
-  await expect(bpm).toHaveValue("127.99");
-
-  await arrow(firstBeat, 1).click();
-  await expect(firstBeat).toHaveValue("121");
-  await arrow(firstBeat, -1).click();
-  await arrow(firstBeat, -1).click();
-  await expect(firstBeat).toHaveValue("119");
-  // The arrows go through the same change handling as typing: they're saved.
-  const saved = await savedCues(page);
-  expect(saved.bpm).toBe(127.99);
-  expect(saved.firstBeatMs).toBe(119);
-});
-
-test("÷2 and ×2 fix a half/double-tempo BPM in one click", async ({ page }) => {
-  await openCueEditor(page);
-  const bpm = page.locator("#trackDetailBpm");
-  await expect(bpm).toHaveValue("128.00");
   await page.locator("#trackDetailBpmHalf").click();
   await expect(bpm).toHaveValue("64.00");
   await page.locator("#trackDetailBpmDouble").click();
   await page.locator("#trackDetailBpmDouble").click();
   await expect(bpm).toHaveValue("256.00");
-  // The grid follows: twice as many beat lines as at 128.
-  expect((await savedCues(page)).bpm).toBe(256);
+
+  await page.locator("#trackDetailBpmPlus").click();
+  await expect(bpm).toHaveValue("256.01");
+  await page.locator("#trackDetailBpmMinus").click();
+  await page.locator("#trackDetailBpmMinus").click();
+  await expect(bpm).toHaveValue("255.99");
+
+  // The themed arrows step the input itself, not a whole beat.
+  await arrow(bpm, 1).click();
+  await expect(bpm).toHaveValue("256.00");
+  await arrow(bpm, -1).click();
+  await arrow(bpm, -1).click();
+  await expect(bpm).toHaveValue("255.98");
+  await arrow(firstBeat, 1).click();
+  await expect(firstBeat).toHaveValue("121");
+  await arrow(firstBeat, -1).click();
+  await arrow(firstBeat, -1).click();
+  await expect(firstBeat).toHaveValue("119");
+
+  // They all go through the same change handling as typing: they're saved.
+  const saved = await savedCues(page);
+  expect(saved.bpm).toBe(255.98);
+  expect(saved.firstBeatMs).toBe(119);
 });
 
 test("keyboard: Space plays/pauses (never presses the focused Save), C adds a cue, 1–8 jump, ←/→ move the selected cue", async ({ page }) => {
@@ -1099,20 +1043,6 @@ test("key stepper steps through the backend's key options and wraps at the ends"
   // Wrap the other way: stepping back from the first major (C) lands on Bm.
   await page.locator("#trackDetailKeyMinus").click();
   await expect(page.locator("#trackDetailKey")).toHaveValue("Bm");
-});
-
-test("BPM stepper nudges by 0.01 and clamps to a positive value", async ({ page }) => {
-  await installTrackDetailMock(page);
-  await page.goto("/");
-  await page.locator('#libraryTableBody .waveform-cell [data-action="edit-track-detail"]').click();
-  await expect(page.locator("#trackDetailView")).toBeVisible();
-
-  await expect(page.locator("#trackDetailBpm")).toHaveValue("128.00");
-  await page.locator("#trackDetailBpmPlus").click();
-  await expect(page.locator("#trackDetailBpm")).toHaveValue("128.01");
-  await page.locator("#trackDetailBpmMinus").click();
-  await page.locator("#trackDetailBpmMinus").click();
-  await expect(page.locator("#trackDetailBpm")).toHaveValue("127.99");
 });
 
 // Grid as opened: first beat 120 ms at 128 BPM (468.75 ms a beat). One cue on
@@ -1923,84 +1853,7 @@ test("cue editor opens + saves from an app-playlist track row", async ({ page })
   // Regression: the app-playlist panel click handler only routed play/scrub
   // actions to handleTrackAction, so the cue button (added to every track list)
   // was inert there — clicking it did nothing.
-  await page.addInitScript(() => {
-    window.localStorage.setItem("djusbtkit.helpSeen", "1");
-    // The library\'s source folders, as `get_library_sources` answers.
-    window.__e2eSourceFolders = ["/music"];
-    window.__calls = [];
-
-    const pwv5 = new Uint8Array(4000);
-    for (let i = 0; i < pwv5.length; i += 2) {
-      const h = 8 + (i % 20);
-      const v = (2 << 13) | (3 << 10) | (5 << 7) | (h << 2);
-      pwv5[i] = (v >> 8) & 0xff;
-      pwv5[i + 1] = v & 0xff;
-    }
-    const detailWaveformB64 = btoa(String.fromCharCode.apply(null, pwv5));
-
-    const track = {
-      // An app playlist's rows carry their library track's id.
-      id: "local-1",
-      title: "Playlist Cue Track",
-      artist: "Artist",
-      album: "Album",
-      filePath: "/music/one.mp3",
-      bpm: 128,
-      durationMs: 180000,
-      analysisReady: true,
-      waveformPreview: Array.from({ length: 80 }, (_, i) => (i % 7) * 12),
-    };
-
-    const MAJORS = ["C", "C#", "D", "D#", "E", "F", "F#", "G", "G#", "A", "A#", "B"];
-    window.__TAURI__ = {
-      core: {
-        invoke: async (command, payload = {}) => {
-          const request = payload?.request ?? payload;
-          window.__calls.push({ command, request: request ?? null });
-          if (command === "list_playlists") {
-            return { ok: true, data: { playlists: [{ id: "pl-1", name: "My Set", source: "local", createdAt: new Date().toISOString(), updatedAt: new Date().toISOString() }], playlistUsbExportStatus: [] } };
-          }
-          if (command === "get_playlist_tracks") {
-            return { ok: true, data: { playlistId: "pl-1", items: [track], total: 1, nextCursor: null, hasMore: false, totalDurationMs: 180000, durationUnknownCount: 0, unanalyzedCount: 0 } };
-          }
-          if (command === "browse_source_files") {
-            return { ok: true, data: { total: 0, items: [], nextCursor: null, hasMore: false } };
-          }
-          if (command === "resolve_track_identity") {
-            return { ok: true, data: { trackId: "local-1", resolvedBy: "self", materialized: false } };
-          }
-          if (command === "get_track_detail") {
-            return { ok: true, data: { track, firstBeatMs: 90, cues: [], detailWaveform: detailWaveformB64, keyOptions: [MAJORS, MAJORS.map((k) => `${k}m`)].map((keys, i) => ({ label: i ? "Minor" : "Major", keys: keys.map((k) => ({ value: k, label: k })) })), maxHotCues: 8 } };
-          }
-          if (command === "save_track_analysis_edits") {
-            return {
-              ok: true,
-              data: {
-                // The saved row, whole, as the backend answers.
-                track: Object.assign(track, {
-                  bpm: request?.bpm ?? null,
-                  bpmAnalyzer: request?.bpm != null ? "user" : null, bpmSourceText: request?.bpm != null ? "Manually set" : null,
-                  key: request?.key ?? null,
-                }),
-                trackId: "local-1",
-                firstBeatMs: request?.firstBeatMs ?? null,
-                cues: request?.cues ?? [],
-                bpm: request?.bpm ?? null,
-                bpmAnalyzer: request?.bpm != null ? "user" : null, bpmSourceText: request?.bpm != null ? "Manually set" : null,
-                key: request?.key ?? null,
-                keySource: request?.key != null ? "user" : null,
-                anlzRegenerated: true,
-                statusText: `Saved ${(request?.cues ?? []).length} ${(request?.cues ?? []).length === 1 ? "cue" : "cues"}`,
-              },
-            };
-          }
-          if (command === "stop_playback_native" || command === "get_playback_status_native") return { ok: true, data: {} };
-          return window.__e2eBackend.answer(command);
-        },
-      },
-      event: { listen: async () => () => {} },
-    };
-  });
+  await installTrackDetailMock(page, { playlist: true });
   await page.goto("/");
 
   await page.locator("#navPlaylistList .nav-playlist-item").first().click();
@@ -2009,7 +1862,7 @@ test("cue editor opens + saves from an app-playlist track row", async ({ page })
 
   await row.locator('[data-action="edit-track-detail"]').click();
   await expect(page.locator("#trackDetailView")).toBeVisible();
-  await expect(page.locator("#trackDetailFirstBeatMs")).toHaveValue("90");
+  await expect(page.locator("#trackDetailFirstBeatMs")).toHaveValue("120");
 
   await page.locator("#trackDetailAddCue").click();
   await expect(page.locator("#trackDetailCueList .cue-row")).toHaveCount(1);
@@ -2022,7 +1875,7 @@ test("cue editor opens + saves from an app-playlist track row", async ({ page })
 
   const saveCall = await page.evaluate(() => window.__calls.find((c) => c.command === "save_track_analysis_edits"));
   expect(saveCall).toBeTruthy();
-  expect(saveCall.request.trackId).toBe("local-1");
+  expect(saveCall.request.trackId).toBe("t1");
   expect(saveCall.request.cues).toHaveLength(1);
 
   // The open playlist's row redraws without a reload.
@@ -2044,33 +1897,13 @@ test("cue editor opens + saves from an app-playlist track row", async ({ page })
 // emits the backend's usb_write job progress.
 function installUsbTrackDetailMock(page, mockOpts = {}) {
   return page.addInitScript((opts) => {
-    const listeners = new Map();
-    window.__emitJobEvent = (payload) => {
-      for (const cb of (listeners.get("job:event") || []).slice()) cb({ event: "job:event", payload });
-    };
+    const backend = window.__e2eBackend;
     let releaseUsbSave = () => {};
     const usbSaveGate = new Promise((resolve) => { releaseUsbSave = resolve; });
     window.__releaseUsbSave = () => releaseUsbSave();
-    if (opts.tauriEvents) {
-      // registerBackendJobEvents() only listens when window.isTauri is set, and
-      // the bundled invoke then routes through __TAURI_INTERNALS__.
-      window.isTauri = true;
-      window.__TAURI_INTERNALS__ = { invoke: (cmd, args) => window.__TAURI__.core.invoke(cmd, args) };
-    }
-    window.localStorage.setItem("djusbtkit.helpSeen", "1");
-    // The library\'s source folders, as `get_library_sources` answers.
     window.__e2eSourceFolders = ["/music"];
     window.localStorage.setItem("djusbtkit.usbRoot", "/Volumes/USB-TEST");
-    window.__calls = [];
-
-    const pwv5 = new Uint8Array(4000);
-    for (let i = 0; i < pwv5.length; i += 2) {
-      const h = 8 + (i % 20);
-      const v = (2 << 13) | (3 << 10) | (5 << 7) | (h << 2);
-      pwv5[i] = (v >> 8) & 0xff;
-      pwv5[i + 1] = v & 0xff;
-    }
-    const detailWaveformB64 = btoa(String.fromCharCode.apply(null, pwv5));
+    backend.seed({ tracks: opts.libraryTracks || [] });
 
     const usbTrack = {
       id: "usbrow-1",
@@ -2088,13 +1921,6 @@ function installUsbTrackDetailMock(page, mockOpts = {}) {
       usbAnalysisPathRaw: "/PIONEER/USBANLZ/P001/0000A1B2/ANLZ0000.DAT",
       waveformPreview: Array.from({ length: 80 }, (_, i) => (i % 7) * 12),
     };
-    const tracksResponse = {
-      ok: true,
-      data: {
-        items: [usbTrack], total: 1, nextCursor: null, hasMore: false,
-        totalDurationMs: 200000, durationUnknownCount: 0, warnings: [],
-      },
-    };
 
     // When set, save_usb_track_analysis_edits fails (USB yanked mid-edit).
     window.__usbSaveFails = false;
@@ -2102,129 +1928,80 @@ function installUsbTrackDetailMock(page, mockOpts = {}) {
     const localTrack = (opts.libraryTracks || []).find((t) => t.id === "local-1")
       || { id: "local-1", title: usbTrack.title, artist: usbTrack.artist, filePath: "/music/track.mp3" };
 
-    const MAJORS = ["C", "C#", "D", "D#", "E", "F", "F#", "G", "G#", "A", "A#", "B"];
-    window.__TAURI__ = {
-      core: {
-        invoke: async (command, payload = {}) => {
-          window.__calls.push({ command, request: payload?.request ?? null });
-          if (command === "browse_source_files") {
-            const items = opts.libraryTracks || [];
-            return { ok: true, data: { total: items.length, items, nextCursor: null, hasMore: false } };
+    backend.install(async (command, r) => {
+      switch (command) {
+        case "fetch_usb_playlists":
+          return backend.ok({
+            items: [{ id: "usb-1", name: "Warmup", source: "mock", trackCount: 1, tracks: [{}] }],
+            stats: { indexedTracks: 1, playlistReferencedTracks: 1, playlistEntries: 1 },
+          });
+        case "fetch_usb_histories":
+          return backend.ok({
+            items: [{ id: "hist-1", name: "HISTORY 2024-01-01", source: "mock", trackCount: 1, tracks: [{}] }],
+            counts: { importedPlaylists: 1, importedTracks: 1 },
+          });
+        case "fetch_usb_playlist_tracks":
+        case "fetch_usb_history_tracks":
+          return backend.ok(backend.listPage([usbTrack]));
+        case "get_usb_track_detail":
+          return backend.ok({
+            firstBeatMs: 100, cues: [{ id: "c1", positionMs: 5000, colorId: 5, name: "Old" }],
+            genre: "House", rating: 2, releaseDate: "2015-06-01", genreOptions: ["House"]
+          });
+        case "save_usb_track_metadata_edits": {
+          const year = r.releaseDate ? Number(r.releaseDate.slice(0, 4)) : undefined;
+          if (r.releaseDate !== undefined) {
+            usbTrack.year = year ?? null;
+            localTrack.year = year ?? null;
           }
-          if (command === "pick_usb_folder") return "/Volumes/USB-TEST";
-          if (command === "select_usb") {
-            return {
-              ok: true,
-              data: {
-                valid: true, normalizedRoot: "/Volumes/USB-TEST",
-                warnings: [],
-              },
-            };
+          const count = (r.tracks || []).length;
+          // The edited rows, whole, as the backend answers.
+          return backend.ok({
+            items: (r.tracks || []).map((t) => ({ usbMediaPathRaw: t.usbMediaPathRaw, localTrackId: "local-1", year })),
+            tracks: [{ ...usbTrack }],
+            localTracks: [{ ...localTrack }],
+            statusText: `Saved track details for ${count} ${count === 1 ? "track" : "tracks"} to USB`,
+          });
+        }
+        case "save_usb_track_analysis_edits": {
+          if (window.__usbSaveFails) return backend.fail("USB disconnected mid-edit", "NOT_FOUND");
+          if (opts.tauriEvents) {
+            const job = { jobId: "usb-save-1", jobType: "usb_write", stage: "save_usb_track_analysis_edits" };
+            window.__emitJobEvent({ ...job, event: "job.started", percent: 0, message: "USB: Saving cue edits" });
+            window.__emitJobEvent({ ...job, event: "job.progress", percent: 40, message: "USB: Writing PDB" });
+            await usbSaveGate;
+            window.__emitJobEvent({ ...job, event: "job.completed", percent: 100, message: "USB: Cue edits saved" });
           }
-          if (command === "fetch_usb_playlists") {
-            return {
-              ok: true,
-              data: {
-                items: [{ id: "usb-1", name: "Warmup", source: "mock", trackCount: 1, tracks: [{}] }],
-                stats: { indexedTracks: 1, playlistReferencedTracks: 1, playlistEntries: 1 },
-                playlistUsbExportStatus: [],
-                warnings: [],
-              },
-            };
-          }
-          if (command === "fetch_usb_histories") {
-            return {
-              ok: true,
-              data: {
-                items: [{ id: "hist-1", name: "HISTORY 2024-01-01", source: "mock", trackCount: 1, tracks: [{}] }],
-                counts: { importedPlaylists: 1, importedTracks: 1 },
-                warnings: [],
-                warningText: "",
-              },
-            };
-          }
-          if (command === "fetch_usb_playlist_tracks" || command === "fetch_usb_history_tracks") return tracksResponse;
-          if (command === "get_usb_track_detail") {
-            return { ok: true, data: { firstBeatMs: 100, cues: [{ id: "c1", positionMs: 5000, colorId: 5, name: "Old" }], detailWaveform: detailWaveformB64, keyOptions: [MAJORS, MAJORS.map((k) => `${k}m`)].map((keys, i) => ({ label: i ? "Minor" : "Major", keys: keys.map((k) => ({ value: k, label: k })) })), maxHotCues: 8, genre: "House", rating: 2, releaseDate: "2015-06-01", genreOptions: ["House"] } };
-          }
-          if (command === "save_usb_track_metadata_edits") {
-            const r = payload?.request || {};
-            const year = r.releaseDate ? Number(r.releaseDate.slice(0, 4)) : undefined;
-            if (r.releaseDate !== undefined) {
-              usbTrack.year = year ?? null;
-              localTrack.year = year ?? null;
-            }
+          const bpmSet = r.bpm != null;
+          const saved = { bpm: r.bpm ?? null, bpmAnalyzer: bpmSet ? "user" : null, bpmSourceText: bpmSet ? "Manually set" : null, key: r.key ?? null };
+          Object.assign(usbTrack, saved);
+          Object.assign(localTrack, saved);
+          const cues = r.cues ?? [];
+          return backend.ok({
+            ...saved,
             // The edited rows, whole, as the backend answers.
-            return {
-              ok: true,
-              data: {
-                items: (r.tracks || []).map((t) => ({ usbMediaPathRaw: t.usbMediaPathRaw, localTrackId: "local-1", year })),
-                tracks: [{ ...usbTrack }],
-                localTracks: [{ ...localTrack }],
-                statusText: `Saved track details for ${(r.tracks || []).length} ${(r.tracks || []).length === 1 ? "track" : "tracks"} to USB`,
-              },
-            };
-          }
-          if (command === "save_usb_track_analysis_edits") {
-            if (window.__usbSaveFails) {
-              return { ok: false, error: { code: "NOT_FOUND", message: "USB disconnected mid-edit" } };
-            }
-            if (opts.tauriEvents) {
-              const job = { jobId: "usb-save-1", jobType: "usb_write", stage: "save_usb_track_analysis_edits" };
-              window.__emitJobEvent({ ...job, event: "job.started", percent: 0, message: "USB: Saving cue edits" });
-              window.__emitJobEvent({ ...job, event: "job.progress", percent: 40, message: "USB: Writing PDB" });
-              await usbSaveGate;
-              window.__emitJobEvent({ ...job, event: "job.completed", percent: 100, message: "USB: Cue edits saved" });
-            }
-            const r = payload?.request || {};
-            const saved = { bpm: r.bpm ?? null, bpmAnalyzer: r.bpm != null ? "user" : null, bpmSourceText: r.bpm != null ? "Manually set" : null, key: r.key ?? null };
-            Object.assign(usbTrack, saved);
-            Object.assign(localTrack, saved);
-            return {
-              ok: true,
-              data: {
-                // The edited rows, whole, as the backend answers.
-                track: { ...usbTrack },
-                localTrack: { ...localTrack },
-                firstBeatMs: payload?.request?.firstBeatMs ?? null,
-                cues: payload?.request?.cues ?? [],
-                bpm: payload?.request?.bpm ?? null,
-                bpmAnalyzer: payload?.request?.bpm != null ? "user" : null, bpmSourceText: payload?.request?.bpm != null ? "Manually set" : null,
-                key: payload?.request?.key ?? null,
-                keySource: payload?.request?.key != null ? "user" : null,
-                anlzUpdated: true, edbUpdated: true, localUpdated: true,
-                // The backend resolves the library track itself (not only the hint).
-                localTrackId: "local-1",
-                statusText: `Saved ${(payload?.request?.cues ?? []).length} ${(payload?.request?.cues ?? []).length === 1 ? "cue" : "cues"} to USB`,
-              },
-            };
-          }
-          if (command === "stop_playback_native" || command === "get_playback_status_native") return { ok: true, data: {} };
-          return window.__e2eBackend.answer(command);
-        },
-      },
-      event: {
-        listen: async (eventName, callback) => {
-          const key = String(eventName || "");
-          listeners.set(key, [...(listeners.get(key) || []), callback]);
-          return () => listeners.set(key, (listeners.get(key) || []).filter((fn) => fn !== callback));
-        },
-      },
-    };
+            track: { ...usbTrack },
+            localTrack: { ...localTrack },
+            firstBeatMs: r.firstBeatMs ?? null,
+            cues,
+            keySource: r.key != null ? "user" : null,
+            anlzUpdated: true, edbUpdated: true, localUpdated: true,
+            // The backend resolves the library track itself (not only the hint).
+            localTrackId: "local-1",
+            statusText: `Saved ${cues.length} ${cues.length === 1 ? "cue" : "cues"} to USB`,
+          });
+        }
+        default: return undefined;
+      }
+    }, { tauriRuntime: !!opts.tauriEvents });
   }, mockOpts);
 }
 
-async function openUsbView(page, subView) {
-  await page.locator('.nav-item[data-view="usb"]').click();
-  await page.locator("#usbEmptyState .empty-state-action").click();
-  await page.locator(`.nav-item[data-view="${subView}"]`).click();
-}
-
-test("cue editor opens + saves from a USB playlist row through the USB commands", async ({ page }) => {
+test("cue editor opens + saves cues and key from a USB playlist row through the USB commands", async ({ page }) => {
   await installUsbTrackDetailMock(page);
   await page.goto("/");
 
-  await openUsbView(page, "usb-playlists");
+  await openUsb(page, "usb-playlists");
 
   const row = page.locator("#usbPlaylistTracks .track-grid-row");
   await expect(row).toHaveCount(1);
@@ -2233,10 +2010,12 @@ test("cue editor opens + saves from a USB playlist row through the USB commands"
 
   await expect(page.locator("#trackDetailView")).toBeVisible();
   await expect(page.locator("#trackDetailCueList .cue-row")).toHaveCount(1);
+  await expect(page.locator("#trackDetailKey")).toHaveValue("Bm");
   const detailCall = await page.evaluate(() => window.__calls.find((c) => c.command === "get_usb_track_detail"));
   expect(detailCall.request.usbAnalysisPathRaw).toBe("/PIONEER/USBANLZ/P001/0000A1B2/ANLZ0000.DAT");
 
   await page.locator("#trackDetailAddCue").click();
+  await page.locator("#trackDetailKey").selectOption("Dm");
   await page.locator("#trackDetailSaveBtn").click();
   await expect(page.locator("#trackDetailView")).toBeHidden();
 
@@ -2245,10 +2024,12 @@ test("cue editor opens + saves from a USB playlist row through the USB commands"
   expect(saveCall.request.usbMediaPathRaw).toBe("/Contents/USB Artist/USB Album/track.mp3");
   expect(saveCall.request.localTrackId).toBe("local-1");
   expect(saveCall.request.cues).toHaveLength(2);
-  // A cue-only USB edit still carries the current (unedited) bpm -- the
+  expect(saveCall.request.key).toBe("Dm");
+  // A USB edit without a BPM change still carries the current bpm -- the
   // on-device beat-grid rewrite always needs a real value, not null.
   expect(saveCall.request.bpm).toBe(126);
   await expect(page.locator("#statusText")).toContainText("to USB");
+  await expect(row.locator(".td-key .key-pill")).toHaveText("Dm");
 });
 
 test("cue editor edits BPM from a USB playlist row, saves it through the USB commands, and every view updates", async ({ page }) => {
@@ -2272,7 +2053,7 @@ test("cue editor edits BPM from a USB playlist row, saves it through the USB com
   const libraryBpm = page.locator('#libraryTableBody .track-grid-row[data-track-id="local-1"] .td-bpm .bpm-pill');
   await expect(libraryBpm).toHaveText("126.00");
 
-  await openUsbView(page, "usb-playlists");
+  await openUsb(page, "usb-playlists");
 
   const row = page.locator("#usbPlaylistTracks .track-grid-row");
   await row.locator('[data-action="edit-track-detail"]').click();
@@ -2295,19 +2076,25 @@ test("cue editor edits BPM from a USB playlist row, saves it through the USB com
   await expect(libraryBpm).toHaveText("128.50");
 });
 
-test("a rating-only edit from a USB row saves only the rating through the USB metadata command", async ({ page }) => {
+test("a details-only edit from a USB row saves only the changed fields through the USB metadata command", async ({ page }) => {
   await installUsbTrackDetailMock(page);
   await page.goto("/");
-  await openUsbView(page, "usb-playlists");
-  await page.locator('#usbPlaylistTracks .track-grid-row [data-action="edit-track-detail"]').click();
+  await openUsb(page, "usb-playlists");
+  const row = page.locator("#usbPlaylistTracks .track-grid-row");
+  await expect(row.locator(".td-year")).toHaveText("2015");
+  await row.locator('[data-action="edit-track-detail"]').click();
   await expect(page.locator("#trackDetailView")).toBeVisible();
 
   const detailCall = await page.evaluate(() => window.__calls.find((c) => c.command === "get_usb_track_detail"));
   expect(detailCall.request.usbMediaPathRaw).toBe("/Contents/USB Artist/USB Album/track.mp3");
   await expect(page.locator("#trackDetailGenre")).toHaveValue("House");
   await expect(page.locator("#trackDetailRating .is-on")).toHaveCount(2);
+  await expect(page.locator("#trackDetailReleaseDate")).toHaveValue("2015-06-01");
 
+  // A new rating, and the release date cleared.
   await page.locator("#trackDetailRating [data-rating='4']").click();
+  await page.locator("#trackDetailReleaseDate").fill("");
+  await page.locator("#trackDetailReleaseDate").dispatchEvent("change");
   await page.locator("#trackDetailSaveBtn").click();
   await expect(page.locator("#trackDetailView")).toBeHidden();
 
@@ -2324,57 +2111,17 @@ test("a rating-only edit from a USB row saves only the rating through the USB me
       album: "USB Album",
     }],
     rating: 4,
+    releaseDate: "",
   });
   await expect(page.locator("#statusText")).toContainText("Saved track details for 1 track to USB");
-});
-
-test("clearing the release date from a USB row sends an empty date and blanks the row's year", async ({ page }) => {
-  await installUsbTrackDetailMock(page);
-  await page.goto("/");
-  await openUsbView(page, "usb-playlists");
-  const row = page.locator("#usbPlaylistTracks .track-grid-row");
-  await expect(row.locator(".td-year")).toHaveText("2015");
-  await row.locator('[data-action="edit-track-detail"]').click();
-  await expect(page.locator("#trackDetailReleaseDate")).toHaveValue("2015-06-01");
-
-  await page.locator("#trackDetailReleaseDate").fill("");
-  await page.locator("#trackDetailReleaseDate").dispatchEvent("change");
-  await page.locator("#trackDetailSaveBtn").click();
-  await expect(page.locator("#trackDetailView")).toBeHidden();
-
-  const calls = await page.evaluate(() => window.__calls);
-  expect(calls.some((c) => c.command === "save_usb_track_analysis_edits")).toBe(false);
-  const save = calls.find((c) => c.command === "save_usb_track_metadata_edits");
-  expect(save.request.releaseDate).toBe("");
-  expect(save.request.rating).toBeUndefined();
   await expect(row.locator(".td-year")).toHaveText("");
-});
-
-test("cue editor edits the musical key from a USB playlist row and saves it through the USB commands", async ({ page }) => {
-  await installUsbTrackDetailMock(page);
-  await page.goto("/");
-
-  await openUsbView(page, "usb-playlists");
-
-  const row = page.locator("#usbPlaylistTracks .track-grid-row");
-  await row.locator('[data-action="edit-track-detail"]').click();
-  await expect(page.locator("#trackDetailView")).toBeVisible();
-  await expect(page.locator("#trackDetailKey")).toHaveValue("Bm");
-
-  await page.locator("#trackDetailKey").selectOption("Dm");
-  await page.locator("#trackDetailSaveBtn").click();
-  await expect(page.locator("#trackDetailView")).toBeHidden();
-
-  const saveCall = await page.evaluate(() => window.__calls.find((c) => c.command === "save_usb_track_analysis_edits"));
-  expect(saveCall.request.key).toBe("Dm");
-  await expect(row.locator(".td-key .key-pill")).toHaveText("Dm");
 });
 
 test("a USB save runs as a background job: the progress bar shows each write and the window stays usable", async ({ page }) => {
   await installUsbTrackDetailMock(page, { tauriEvents: true });
   await page.goto("/");
 
-  await openUsbView(page, "usb-playlists");
+  await openUsb(page, "usb-playlists");
   const row = page.locator("#usbPlaylistTracks .track-grid-row");
   await row.locator('[data-action="edit-track-detail"]').click();
   await page.locator("#trackDetailBpm").fill("128.5");
@@ -2398,7 +2145,7 @@ test("a USB save waits for a running USB job instead of writing alongside it", a
   await installUsbTrackDetailMock(page, { tauriEvents: true });
   await page.goto("/");
 
-  await openUsbView(page, "usb-playlists");
+  await openUsb(page, "usb-playlists");
   const row = page.locator("#usbPlaylistTracks .track-grid-row");
   await row.locator('[data-action="edit-track-detail"]').click();
   await page.locator("#trackDetailAddCue").click();
@@ -2422,7 +2169,7 @@ test("cue editor also opens from a USB history row", async ({ page }) => {
   await installUsbTrackDetailMock(page);
   await page.goto("/");
 
-  await openUsbView(page, "usb-history");
+  await openUsb(page, "usb-history");
 
   const row = page.locator("#historyTracks .track-grid-row");
   await expect(row).toHaveCount(1);
@@ -2437,7 +2184,7 @@ test("a USB-side save that fails on the device is surfaced, not silently dropped
   await installUsbTrackDetailMock(page);
   await page.goto("/");
 
-  await openUsbView(page, "usb-playlists");
+  await openUsb(page, "usb-playlists");
   await page.locator('#usbPlaylistTracks .track-grid-row [data-action="edit-track-detail"]').click();
   await expect(page.locator("#trackDetailView")).toBeVisible();
 
@@ -2451,21 +2198,9 @@ test("a USB-side save that fails on the device is surfaced, not silently dropped
 
 test("cue button is disabled for an un-analyzed track", async ({ page }) => {
   await page.addInitScript(() => {
-    window.localStorage.setItem("djusbtkit.helpSeen", "1");
-    // The library\'s source folders, as `get_library_sources` answers.
     window.__e2eSourceFolders = ["/music"];
-    const tracks = [{ id: "t1", title: "Raw", artist: "A", filePath: "/music/raw.mp3", analysisReady: false }];
-    window.__TAURI__ = {
-      core: {
-        invoke: async (command) => {
-          if (command === "browse_source_files") {
-            return { ok: true, data: { total: tracks.length, items: tracks, nextCursor: null, hasMore: false } };
-          }
-          return window.__e2eBackend.answer(command);
-        },
-      },
-      event: { listen: async () => () => {} },
-    };
+    window.__e2eBackend.seed({ tracks: [{ id: "t1", title: "Raw", artist: "A", filePath: "/music/raw.mp3", analysisReady: false }] });
+    window.__e2eBackend.install();
   });
   await page.goto("/");
   await expect(page.locator("#libraryTableBody .track-grid-row")).toHaveCount(1);

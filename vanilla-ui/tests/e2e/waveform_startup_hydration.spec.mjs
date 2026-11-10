@@ -2,85 +2,40 @@ import { test, expect, uiTextCheck, useTestLanguage } from "./coverage-fixture.m
 
 function installWaveformStartupMock(page) {
   return page.addInitScript(() => {
-    // The library\'s source folders, as `get_library_sources` answers.
+    const backend = window.__e2eBackend;
     window.__e2eSourceFolders = ["/music"];
-    window.localStorage.setItem("djusbtkit.helpSeen", "1");
-
-    const listeners = new Map();
-    const listen = async (eventName, callback) => {
-      const key = String(eventName || "");
-      const arr = listeners.get(key) || [];
-      arr.push(callback);
-      listeners.set(key, arr);
-      return () => {
-        const current = listeners.get(key) || [];
-        listeners.set(key, current.filter((fn) => fn !== callback));
-      };
-    };
-
-    const baseTracks = [
-      {
-        id: "t-1",
-        title: "Track One",
-        artist: "Artist",
-        album: "Album",
-        filePath: "/music/Track One.mp3",
-        fileSizeBytes: 1000,
-        waveformPeaksPath: "/tmp/t-1.DAT",
-        // The page carries its rows' waveforms.
-        waveformPreview: [8, 20, 42, 65, 30, 55],
-        analysisReady: true,
-        createdAt: "2026-03-01T00:00:00Z",
-        updatedAt: "2026-03-01T00:00:00Z"
-      },
-      {
-        id: "t-2",
-        title: "Track Two",
-        artist: "Artist",
-        album: "Album",
-        filePath: "/music/Track Two.mp3",
-        fileSizeBytes: 1001,
-        waveformPeaksPath: "/tmp/t-2.DAT",
-        waveformPreview: [8, 20, 42, 65, 30, 55],
-        createdAt: "2026-03-01T00:00:00Z",
-        updatedAt: "2026-03-01T00:00:00Z"
-      }
-    ];
-
-    window.__TAURI__ = {
-      core: {
-        invoke: async (command, payload = {}) => {
-          if (command === "browse_source_files") {
-            return { ok: true, data: { total: baseTracks.length, items: baseTracks } };
-          }
-          if (command === "resolve_track_identity") {
-            return { ok: true, data: { trackId: payload?.request?.trackId ?? null } };
-          }
-          if (command === "get_track_detail") {
-            // Two minutes of PWV5 detail entries (2 bytes each, ~150/s):
-            // R(3) G(3) B(3) height(5), with a varying height.
-            let bytes = "";
-            for (let i = 0; i < 120 * 150; i += 1) {
-              const entry = (7 << 13) | (5 << 10) | (3 << 7) | ((4 + ((i * 7) % 28)) << 2);
-              bytes += String.fromCharCode(entry >> 8, entry & 0xff);
-            }
-            return {
-              ok: true,
-              data: {
-                track: { ...baseTracks[0], durationMs: 120_000, bpm: 120 },
-                detailWaveform: btoa(bytes),
-                firstBeatMs: 100,
-                cues: [],
-                keyOptions: [],
-                maxHotCues: 8
-              }
-            };
-          }
-          return window.__e2eBackend.answer(command);
+    const track = (n, extra) => ({
+      id: `t-${n}`,
+      title: `Track ${n === 1 ? "One" : "Two"}`,
+      artist: "Artist",
+      album: "Album",
+      filePath: `/music/Track ${n === 1 ? "One" : "Two"}.mp3`,
+      fileSizeBytes: 999 + n,
+      waveformPeaksPath: `/tmp/t-${n}.DAT`,
+      // The page carries its rows' waveforms.
+      waveformPreview: [8, 20, 42, 65, 30, 55],
+      ...extra
+    });
+    const tracks = [track(1, { analysisReady: true }), track(2)];
+    backend.seed({ tracks });
+    backend.install((command, r) => {
+      if (command === "resolve_track_identity") return backend.ok({ trackId: r.trackId ?? null });
+      if (command === "get_track_detail") {
+        // Two minutes of PWV5 detail entries (2 bytes each, ~150/s):
+        // R(3) G(3) B(3) height(5), with a varying height.
+        let bytes = "";
+        for (let i = 0; i < 120 * 150; i += 1) {
+          const entry = (7 << 13) | (5 << 10) | (3 << 7) | ((4 + ((i * 7) % 28)) << 2);
+          bytes += String.fromCharCode(entry >> 8, entry & 0xff);
         }
-      },
-      event: { listen }
-    };
+        return backend.ok({
+          track: { ...tracks[0], durationMs: 120_000, bpm: 120 },
+          detailWaveform: btoa(bytes),
+          firstBeatMs: 100,
+          keyOptions: []
+        });
+      }
+    });
   });
 }
 
@@ -130,7 +85,6 @@ test("the cue editor draws the track's detail waveform", async ({ page }) => {
 
 function installSourceChipAnalysisMock(page) {
   return page.addInitScript(() => {
-    window.localStorage.setItem("djusbtkit.helpSeen", "1");
     // The backend's library sources; the source commands below change them
     // as the real backend does.
     const folder = (path) => ({ path, label: path, parent: null, enabled: true, missing: false, fullyAnalyzed: true });
@@ -143,18 +97,6 @@ function installSourceChipAnalysisMock(page) {
     window.__scanCalls = 0;
     window.__addPayloads = [];
     window.__picked = false;
-
-    const listeners = new Map();
-    const listen = async (eventName, callback) => {
-      const key = String(eventName || "");
-      const arr = listeners.get(key) || [];
-      arr.push(callback);
-      listeners.set(key, arr);
-      return () => {
-        const current = listeners.get(key) || [];
-        listeners.set(key, current.filter((fn) => fn !== callback));
-      };
-    };
 
     const tracks = [
       {
@@ -189,138 +131,116 @@ function installSourceChipAnalysisMock(page) {
       }
     ];
 
-    window.__TAURI__ = {
-      core: {
-        invoke: async (command, payload = {}) => {
-          const sources = window.__sources;
-          if (command === "get_library_sources") return { ok: true, data: sources };
-          if (command === "add_source_folders") {
-            const known = new Set(sources.folders.map((f) => f.path));
-            const added = payload.request.paths.filter((path) => !known.has(path));
-            sources.folders.push(...added.map(folder));
-            window.__addPayloads.push(payload.request);
-            return {
-              ok: true,
-              data: { sources, added, statusText: `Source folders: ${sources.folders.length} | indexed 1 track` }
-            };
-          }
-          if (command === "set_source_folder_enabled") {
-            const { path, enabled } = payload.request;
-            window.__folderToggles.push({ path, enabled });
-            sources.folders.find((f) => f.path === path).enabled = enabled;
-            return { ok: true, data: sources };
-          }
-          if (command === "set_external_library_enabled") {
-            const { library, enabled } = payload.request;
-            window.__libraryToggles.push({ library, enabled });
-            sources[library === "mixxx" ? "mixxxDbEnabled" : "rekordboxDbEnabled"] = enabled;
-            return { ok: true, data: sources };
-          }
-          if (command === "detect_external_rekordbox_db") {
-            return { ok: true, data: { found: true, path: "/music/master.db", imported: true } };
-          }
-          if (command === "detect_external_mixxx_db") {
-            // Not imported until "Import from Mixxx" (the chip's ↻) runs.
-            return {
-              ok: true,
-              data: { found: true, path: "/home/dj/.mixxx/mixxxdb.sqlite", imported: !!window.__mixxxImported }
-            };
-          }
-          if (command === "scan_mixxx_db") {
-            window.__mixxxImported = true;
-            window.__mixxxScanPayload = payload?.request || null;
-            return { ok: true, data: { indexed: 2, updated: 0, removed: 0, warnings: [] } };
-          }
-          if (command === "list_mixxx_playlists") {
-            return {
-              ok: true,
-              data: {
-                items: [
-                  {
-                    id: "4", name: "Test playlist", kind: "playlist", trackCount: 3,
-                    existingPlaylist: { id: "pl-old", name: "My Test playlist" },
-                    noteText: '3 tracks · updates "My Test playlist"'
-                  },
-                  { id: "7", name: "Peak", kind: "crate", trackCount: 2, noteText: "2 tracks" },
-                  { id: "3", name: "2026-09-30", kind: "history", trackCount: 4, noteText: "4 tracks" }
-                ]
-              }
-            };
-          }
-          if (command === "list_rekordbox_playlists") {
-            return {
-              ok: true,
-              data: {
-                items: [
-                  { id: "1234567890", name: "Winter Party", kind: "playlist", trackCount: 40, noteText: "40 tracks" },
-                  { id: "1122334455", name: "HISTORY 2025-01-01", kind: "history", trackCount: 7, noteText: "7 tracks" }
-                ]
-              }
-            };
-          }
-          window.__importedPlaylists = window.__importedPlaylists || [];
-          if (command === "import_external_playlists") {
-            const items = payload?.request?.items || [];
-            if (window.__failImports) {
-              // None imported: the backend logs each failure and says the first.
-              window.__failedImports = [...(window.__failedImports || []), ...items];
-              return {
-                ok: true,
-                data: {
-                  results: items.map(() => ({ error: "the reason" })),
-                  imported: 0, failed: items.length, added: 0, skipped: 0,
-                  statusText: "rekordbox playlist import failed: the reason"
-                }
-              };
-            }
-            const results = items.map((item) => {
-              const mixxx = item.library === "mixxx";
-              const playlistId = mixxx ? "pl-mixxx" : "pl-rekordbox";
-              // Its tracks are Mixxx-library tracks now, as the real backend reports.
-              if (mixxx) window.__mixxxImported = true;
-              window.__playlistImports = [...(window.__playlistImports || []), item];
-              window.__importedPlaylists.push({
-                id: playlistId, name: playlistId, trackCount: 2,
-                importedFrom: mixxx ? "Mixxx" : "rekordbox",
-                createdAt: "2026-03-01T00:00:00Z", updatedAt: "2026-03-01T00:00:00Z"
-              });
-              return {
-                playlist: { playlistId, name: playlistId, added: 2, skipped: 0, indexed: 2, warnings: [] }
-              };
-            });
-            return {
-              ok: true,
-              data: {
-                results, imported: results.length, failed: 0, added: 2 * results.length, skipped: 0,
-                statusText: results.length === 1
-                  ? `Imported playlist ${results[0].playlist.name}: 2 tracks`
-                  : `Imported ${results.length} of ${results.length} playlists: ${2 * results.length} tracks`
-              }
-            };
-          }
-          if (command === "list_playlists") {
-            return { ok: true, data: { playlists: window.__importedPlaylists, playlistUsbExportStatus: [] } };
-          }
-          if (command === "get_playlist_tracks") {
-            return { ok: true, data: { total: 0, items: [], hasMore: false, nextCursor: null } };
-          }
-          if (command === "pick_source_folders") {
-            window.__picked = true;
-            return ["/music2"];
-          }
-          if (command === "scan_library") {
-            window.__scanCalls += 1;
-            return { ok: true, data: { indexed: 1, updated: 0, removed: 0 } };
-          }
-          if (command === "browse_source_files") {
-            window.__browseCalls += 1;
-            return { ok: true, data: { total: tracks.length, items: tracks } };
-          }
-          return window.__e2eBackend.answer(command);
+    window.__e2eBackend.seed({ tracks });
+    const backend = window.__e2eBackend;
+    backend.install((command, request, payload) => {
+      const sources = window.__sources;
+      if (command === "get_library_sources") return { ok: true, data: sources };
+      if (command === "add_source_folders") {
+        const known = new Set(sources.folders.map((f) => f.path));
+        const added = payload.request.paths.filter((path) => !known.has(path));
+        sources.folders.push(...added.map(folder));
+        window.__addPayloads.push(payload.request);
+        return {
+          ok: true,
+          data: { sources, added, statusText: `Source folders: ${sources.folders.length} | indexed 1 track` }
+        };
+      }
+      if (command === "set_source_folder_enabled") {
+        const { path, enabled } = payload.request;
+        window.__folderToggles.push({ path, enabled });
+        sources.folders.find((f) => f.path === path).enabled = enabled;
+        return { ok: true, data: sources };
+      }
+      if (command === "set_external_library_enabled") {
+        const { library, enabled } = payload.request;
+        window.__libraryToggles.push({ library, enabled });
+        sources[library === "mixxx" ? "mixxxDbEnabled" : "rekordboxDbEnabled"] = enabled;
+        return { ok: true, data: sources };
+      }
+      if (command === "detect_external_rekordbox_db") {
+        return { ok: true, data: { found: true, path: "/music/master.db", imported: true } };
+      }
+      if (command === "detect_external_mixxx_db") {
+        // Not imported until "Import from Mixxx" (the chip's ↻) runs.
+        return {
+          ok: true,
+          data: { found: true, path: "/home/dj/.mixxx/mixxxdb.sqlite", imported: !!window.__mixxxImported }
+        };
+      }
+      if (command === "scan_mixxx_db") {
+        window.__mixxxImported = true;
+        window.__mixxxScanPayload = payload?.request || null;
+        return { ok: true, data: { indexed: 2, updated: 0, removed: 0, warnings: [] } };
+      }
+      if (command === "list_mixxx_playlists") {
+        return backend.ok({
+          items: [
+            {
+              id: "4", name: "Test playlist", kind: "playlist", trackCount: 3,
+              existingPlaylist: { id: "pl-old", name: "My Test playlist" },
+              noteText: '3 tracks · updates "My Test playlist"'
+            },
+            { id: "7", name: "Peak", kind: "crate", trackCount: 2, noteText: "2 tracks" },
+            { id: "3", name: "2026-09-30", kind: "history", trackCount: 4, noteText: "4 tracks" }
+          ]
+        });
+      }
+      if (command === "list_rekordbox_playlists") {
+        return backend.ok({
+          items: [
+            { id: "1234567890", name: "Winter Party", kind: "playlist", trackCount: 40, noteText: "40 tracks" },
+            { id: "1122334455", name: "HISTORY 2025-01-01", kind: "history", trackCount: 7, noteText: "7 tracks" }
+          ]
+        });
+      }
+      window.__importedPlaylists = window.__importedPlaylists || [];
+      if (command === "import_external_playlists") {
+        const items = payload?.request?.items || [];
+        if (window.__failImports) {
+          // None imported: the backend logs each failure and says the first.
+          window.__failedImports = [...(window.__failedImports || []), ...items];
+          return backend.ok({
+            results: items.map(() => ({ error: "the reason" })),
+            imported: 0, failed: items.length, added: 0, skipped: 0,
+            statusText: "rekordbox playlist import failed: the reason"
+          });
         }
-      },
-      event: { listen }
-    };
+        const results = items.map((item) => {
+          const mixxx = item.library === "mixxx";
+          const playlistId = mixxx ? "pl-mixxx" : "pl-rekordbox";
+          // Its tracks are Mixxx-library tracks now, as the real backend reports.
+          if (mixxx) window.__mixxxImported = true;
+          window.__playlistImports = [...(window.__playlistImports || []), item];
+          window.__importedPlaylists.push({
+            id: playlistId, name: playlistId, trackCount: 2,
+            importedFrom: mixxx ? "Mixxx" : "rekordbox",
+            createdAt: "2026-03-01T00:00:00Z", updatedAt: "2026-03-01T00:00:00Z"
+          });
+          return {
+            playlist: { playlistId, name: playlistId, added: 2, skipped: 0, indexed: 2, warnings: [] }
+          };
+        });
+        return backend.ok({
+          results, imported: results.length, failed: 0, added: 2 * results.length, skipped: 0,
+          statusText: results.length === 1
+            ? `Imported playlist ${results[0].playlist.name}: 2 tracks`
+            : `Imported ${results.length} of ${results.length} playlists: ${2 * results.length} tracks`
+        });
+      }
+      if (command === "list_playlists") {
+        return { ok: true, data: { playlists: window.__importedPlaylists, playlistUsbExportStatus: [] } };
+      }
+      if (command === "pick_source_folders") {
+        window.__picked = true;
+        return ["/music2"];
+      }
+      if (command === "scan_library") {
+        window.__scanCalls += 1;
+        return { ok: true, data: { indexed: 1, updated: 0, removed: 0 } };
+      }
+      if (command === "browse_source_files") window.__browseCalls += 1;
+    });
   });
 }
 

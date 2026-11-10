@@ -3,8 +3,10 @@
 // like the backend's structs (backend/src/models.rs): the frontend reads them
 // without re-checking their shape.
 //
-// A spec's `invoke` handles the commands it cares about and ends with
-// `return window.__e2eBackend.answer(command);`. A spec's own answer only
+// A spec seeds the library and playlists (`seed`) and installs its own
+// handler for the commands it cares about (`install`); every other command
+// gets the default answer (`answer`), which reads and changes what was seeded
+// as the backend does. A spec's own answer only
 // needs the fields it tests: every successful answer to a command in `SHAPES`
 // is filled out to the struct's full shape (see `shapeAnswers`).
 (() => {
@@ -18,8 +20,285 @@
 
   const AUDIO_FORMATS = ["flac", "alac", "aiff", "wav", "mp3", "aac"];
 
+  // Every page starts past the first-visit help.
+  window.localStorage.setItem("djusbtkit.helpSeen", "1");
+
+  // The backend's events: `emit` plays one at the app's `listen` callbacks.
+  const listeners = new Map();
+  const listen = async (eventName, callback) => {
+    listeners.set(eventName, [...(listeners.get(eventName) || []), callback]);
+    return () => listeners.set(eventName, (listeners.get(eventName) || []).filter((fn) => fn !== callback));
+  };
+  const emit = (eventName, payload) => {
+    for (const callback of (listeners.get(eventName) || []).slice()) callback({ event: eventName, payload });
+  };
+  window.__emit = emit;
+  window.__emitJobEvent = (payload) => emit("job:event", payload);
+  // What the backend's `logging::log` sends for each warning it makes.
+  window.__emitBackendLog = (payload) => emit("backend:log", payload);
+  window.__hasJobListener = () => (listeners.get("job:event") || []).length > 0;
+
+  // The footer's "Total time" line, as the backend words it.
+  const totalTimeText = (totalMs, unknown) => {
+    const seconds = Math.floor(totalMs / 1000);
+    const time = `${Math.floor(seconds / 60)}:${String(seconds % 60).padStart(2, "0")}`;
+    return `Total time: ${time}${unknown ? ` (${unknown} without length)` : ""}`;
+  };
+  const hasLength = (track) => track.durationMs > 0;
+
+  // The backend's TrackSort: numbers by value, "artist" ties broken by title.
+  const sortRows = (rows, sortBy, sortDir) => {
+    if (!sortBy) return rows.slice();
+    const m = sortDir === "desc" ? -1 : 1;
+    const value = (t) => (sortBy === "artist" ? `${t.artist}\0${t.title}` : t[sortBy]);
+    return rows.slice().sort((a, b) => {
+      const av = value(a);
+      const bv = value(b);
+      if (typeof av === "number" || typeof bv === "number") return m * ((Number(av) || 0) - (Number(bv) || 0));
+      const as = String(av ?? "");
+      const bs = String(bv ?? "");
+      return as < bs ? -m : as > bs ? m : 0;
+    });
+  };
+
+  // The rows matching a search (title, artist, album), as the backend's queries do.
+  const searchRows = (rows, query) => {
+    const q = String(query || "").trim().toLowerCase();
+    return q ? rows.filter((t) => `${t.title} ${t.artist} ${t.album || ""}`.toLowerCase().includes(q)) : rows.slice();
+  };
+
+  // One page of a track list (browse_source_files, get_playlist_tracks,
+  // fetch_usb_*_tracks): searched, sorted and paged by the request, with the
+  // footer's totals. `countable` decides which tracks count toward the total
+  // time; `map` shapes each row on the page.
+  function listPage(all, request = {}, { pageSize, countable = hasLength, map = (t) => t } = {}) {
+    const rows = sortRows(searchRows(all || [], request.query), request.sortBy, request.sortDir);
+    const offset = Number(request.offset || 0) || 0;
+    const limit = pageSize || Number(request.limit || 0) || rows.length;
+    const items = rows.slice(offset, offset + limit).map(map);
+    const next = offset + items.length;
+    const counted = rows.filter(countable);
+    const totalDurationMs = counted.reduce((sum, t) => sum + t.durationMs, 0);
+    return {
+      total: rows.length,
+      items,
+      nextCursor: next < rows.length ? String(next) : null,
+      hasMore: next < rows.length,
+      totalDurationMs,
+      durationUnknownCount: rows.length - counted.length,
+      durationText: totalTimeText(totalDurationMs, rows.length - counted.length)
+    };
+  }
+
+  // A playlist's track order after `reorder_playlist_tracks`: a whole order,
+  // a sort, or one track moved before another.
+  function applyReorder(list, request) {
+    const byId = new Map(list.map((t) => [t.id, t]));
+    let ids = list.map((t) => t.id);
+    if (request.orderedTrackIds?.length) ids = request.orderedTrackIds;
+    else if (request.sortBy) ids = sortRows(list, request.sortBy, request.sortDir).map((t) => t.id);
+    else if (request.moveTrackId) {
+      ids = ids.filter((id) => id !== request.moveTrackId);
+      const at = request.beforeTrackId ? ids.indexOf(request.beforeTrackId) : -1;
+      ids.splice(at < 0 ? ids.length : at, 0, request.moveTrackId);
+    }
+    return ids.map((id) => byId.get(id)).filter(Boolean);
+  }
+
+  // The library and the app's playlists, as `seed` sets them; the default
+  // answers below read and change them as the backend does.
+  const store = { tracks: [], playlists: [], playlistTracks: new Map(), created: 0 };
+  const playlistRow = (playlist) => ({
+    source: "local", lastExportedAt: null, lastExportedUsbRoot: null, lastExportedTrackCount: null, ...playlist
+  });
+  const playlistName = (id) => store.playlists.find((p) => p.id === id)?.name;
+  const tracksText = (n) => `${n} ${n === 1 ? "track" : "tracks"}`;
+  // Adds library tracks (by id) to a playlist, skipping ones already in it.
+  const addToPlaylist = (playlistId, ids) => {
+    const current = store.playlistTracks.get(playlistId) || [];
+    const fresh = ids.filter((id, i) => ids.indexOf(id) === i && !current.some((t) => t.id === id))
+      .map((id) => store.tracks.find((t) => t.id === id) || { id });
+    store.playlistTracks.set(playlistId, [...current, ...fresh]);
+    return { playlistId, added: fresh.length, skipped: ids.length - fresh.length };
+  };
+  const addedText = (added, skipped, names) => `Added ${tracksText(added)} (skipped ${skipped}) to ${names}`;
+  const candidateIds = (tracks) => (tracks || [])
+    .map((t) => String(t?.localTrackId || t?.trackId || "").trim()).filter(Boolean);
+
+  // The default answers that read the store (undefined: not one of them).
+  function storeAnswer(command, r = {}) {
+    switch (command) {
+      case "browse_source_files": return ok(listPage(store.tracks, r));
+      case "list_matching_track_ids": {
+        const trackIds = searchRows(store.tracks, r.query).map((t) => t.id);
+        return ok({ trackIds, total: trackIds.length });
+      }
+      case "list_playlists":
+        return ok({ playlists: store.playlists.map(playlistRow), playlistUsbExportStatus: [] });
+      case "get_playlist_tracks": {
+        const all = store.playlistTracks.get(r.playlistId) || [];
+        const unanalyzed = searchRows(all, r.query).filter((t) => !t.analysisReady).length;
+        return ok({
+          playlistId: r.playlistId,
+          ...listPage(all, r),
+          unanalyzedCount: unanalyzed,
+          analyzeMissingLabel: `Analyze Missing Tracks (${unanalyzed})`,
+          // The heading's totals cover the whole playlist, ignoring the search.
+          listTrackCount: all.length,
+          listSummaryText: tracksText(all.length),
+          listSizeBytes: all.reduce((sum, t) => sum + (t.fileSizeBytes > 0 ? t.fileSizeBytes : 0), 0)
+        });
+      }
+      case "create_playlist": {
+        const name = String(r.name || "Untitled");
+        store.created += 1;
+        const playlistId = `pl-${store.created}`;
+        // New playlists go to the top of the sidebar order.
+        store.playlists.unshift({ id: playlistId, name });
+        store.playlistTracks.set(playlistId, []);
+        return ok({ playlistId, name, statusText: `Playlist created: ${name}` });
+      }
+      case "rename_playlist": {
+        const row = store.playlists.find((p) => p.id === r.playlistId);
+        const name = String(r.name || "").trim();
+        if (!row || !name) return { ok: false, error: { code: "VALIDATION", message: "rename failed" } };
+        row.name = name;
+        return ok({ playlistId: r.playlistId, name });
+      }
+      case "delete_playlist": {
+        const name = playlistName(r.playlistId);
+        store.playlists = store.playlists.filter((p) => p.id !== r.playlistId);
+        return ok({ playlistId: r.playlistId, deleted: name !== undefined, statusText: `Playlist deleted: ${name}` });
+      }
+      case "reorder_playlists": {
+        const ids = r.orderedPlaylistIds || [];
+        store.playlists = ids.map((id) => store.playlists.find((p) => p.id === id)).filter(Boolean);
+        return ok({ reordered: ids.length });
+      }
+      case "reorder_playlist_tracks": {
+        const reordered = applyReorder(store.playlistTracks.get(r.playlistId) || [], r);
+        store.playlistTracks.set(r.playlistId, reordered);
+        return ok({ playlistId: r.playlistId, reordered: reordered.length });
+      }
+      case "remove_tracks_from_playlist": {
+        const gone = new Set((r.trackIds || []).map(String));
+        const current = store.playlistTracks.get(r.playlistId) || [];
+        const kept = current.filter((t) => !gone.has(String(t.id)));
+        store.playlistTracks.set(r.playlistId, kept);
+        const removed = current.length - kept.length;
+        return ok({ playlistId: r.playlistId, removed, statusText: `Removed ${tracksText(removed)} from ${playlistName(r.playlistId)}` });
+      }
+      case "get_playlist_membership": {
+        const ids = r.trackIds || [];
+        const items = store.playlists.map((p) => {
+          const held = (store.playlistTracks.get(p.id) || []).map((t) => t.id);
+          const contained = ids.filter((id) => id && held.includes(id)).length;
+          const state = contained === 0 ? "none" : contained >= ids.length ? "all" : "some";
+          const noteText = { none: "", all: "Already in", some: `${contained} of ${ids.length} in` }[state];
+          return { playlistId: p.id, name: p.name, contained, state, noteText };
+        });
+        return ok({ items });
+      }
+      case "add_library_selection_to_playlist": {
+        // `allMatching`: every track the library search matches.
+        const ids = r.allMatching ? searchRows(store.tracks, r.query).map((t) => t.id) : (r.trackIds || []).map(String);
+        const result = addToPlaylist(r.playlistId, ids);
+        return ok({ ...result, statusText: addedText(result.added, result.skipped, playlistName(r.playlistId)) });
+      }
+      case "add_track_candidates_to_playlist": {
+        const ids = candidateIds(r.tracks);
+        const result = addToPlaylist(r.playlistId, ids);
+        return ok({
+          ...result,
+          requested: (r.tracks || []).length, resolved: ids.length, unresolved: (r.tracks || []).length - ids.length,
+          statusText: addedText(result.added, result.skipped, playlistName(r.playlistId)),
+          resolutions: (r.tracks || []).map((t) => {
+            const trackId = candidateIds([t])[0] || null;
+            return { previousId: t?.trackId || null, trackId, resolvedBy: trackId ? "self" : "none", materialized: false };
+          })
+        });
+      }
+      case "add_library_selection_to_playlists":
+      case "add_track_candidates_to_playlists": {
+        const library = command === "add_library_selection_to_playlists";
+        const ids = library ? (r.trackIds || []).map(String) : candidateIds(r.tracks);
+        const requested = library ? ids.length : (r.tracks || []).length;
+        const items = (r.playlistIds || []).map((id) => addToPlaylist(id, ids));
+        const sum = (key) => items.reduce((total, item) => total + item[key], 0);
+        // The playlists' names in request order.
+        const names = (r.playlistIds || []).map(playlistName).join(", ");
+        return ok({
+          requested, resolved: ids.length, unresolved: requested - ids.length,
+          added: sum("added"), skipped: sum("skipped"), items, resolutions: [],
+          statusText: ids.length ? addedText(sum("added"), sum("skipped"), names) : ""
+        });
+      }
+      default: return undefined;
+    }
+  }
+
   const backend = {
     ok,
+    // An error answer, as the backend's `AppError` arrives.
+    fail: (message, code = "INTERNAL") => ({ ok: false, error: { code, message } }),
+    emit,
+    listPage,
+    applyReorder,
+    totalTimeText,
+    store,
+
+    // Sets the library's tracks and the app's playlists the default answers
+    // use. A playlist's `tracks` are its rows, in order.
+    seed({ tracks, playlists } = {}) {
+      if (tracks) store.tracks = tracks;
+      if (playlists) {
+        store.playlists = playlists.map(({ tracks: rows, ...playlist }) => playlist);
+        store.playlistTracks = new Map(playlists.map((p) => [p.id, p.tracks || []]));
+      }
+    },
+
+    // The real Tauri runtime: the app then subscribes to the backend's events,
+    // and the bundled @tauri-apps/api invokes through `__TAURI_INTERNALS__`.
+    useTauriRuntime() {
+      window.isTauri = true;
+      window.__TAURI_INTERNALS__ = {
+        invoke: (cmd, args) => window.__TAURI__.core.invoke(cmd, args),
+        transformCallback: (callback) => callback,
+        convertFileSrc: (filePath) => filePath
+      };
+    },
+
+    // Installs the stubbed backend. `handle(command, request, payload)`
+    // answers the commands a spec cares about; whatever it leaves undefined
+    // gets the default answer. Every call lands in `window.__calls`.
+    install(handle, { tauriRuntime = false } = {}) {
+      window.__calls = [];
+      if (tauriRuntime) backend.useTauriRuntime();
+      window.__TAURI__ = {
+        core: {
+          invoke: async (command, payload = {}) => {
+            const request = payload?.request ?? payload ?? {};
+            window.__calls.push({ command, payload, request: payload?.request ?? null });
+            const answer = handle ? await handle(command, request, payload) : undefined;
+            return answer === undefined ? backend.answer(command, payload) : answer;
+          },
+          convertFileSrc: (path) => path
+        },
+        event: { listen }
+      };
+    },
+
+    // Answers some commands differently from the backend installed before:
+    // `handle(command, request, payload, next)` returns an answer, or
+    // undefined to pass the command on (`next()` asks the one before).
+    override(handle) {
+      const inner = window.__TAURI__.core.invoke;
+      window.__TAURI__.core.invoke = async (command, payload = {}) => {
+        const next = () => inner(command, payload);
+        const answer = await handle(command, payload?.request ?? payload ?? {}, payload, next);
+        return answer === undefined ? next() : answer;
+      };
+    },
 
     // `LibrarySourcesData` (get_library_sources). Defaults to the folders a
     // spec put in `window.__e2eSourceFolders`.
@@ -203,7 +482,10 @@
     },
 
     // What every page needs answered, and an error for anything else.
-    answer(command) {
+    answer(command, payload = {}) {
+      const request = payload?.request ?? {};
+      const stored = storeAnswer(command, request);
+      if (stored !== undefined) return stored;
       switch (command) {
         case "clear_frontend_log": return "";
         case "append_frontend_log":
@@ -218,9 +500,6 @@
         case "detect_external_mixxx_db":
           return ok({ found: false, path: null, imported: false });
         case "get_library_sources": return ok(backend.librarySources());
-        case "browse_source_files": return ok({ total: 0, items: [] });
-        case "list_playlists":
-          return ok({ playlists: [], playlistUsbExportStatus: [] });
         case "get_frontend_settings": return ok({ values: {}, nodeAvailable: true, essentiaInstalled: true });
         case "set_frontend_setting": return ok({ saved: true });
         case "list_usb_devices": return ok({ items: [] });
@@ -231,6 +510,18 @@
           return ok({ items: [], total: 0 });
         case "get_usb_player_menu_config": return ok(backend.playerMenuConfig());
         case "get_usb_background_color": return ok(backend.usbBackgroundColor());
+        case "pick_usb_folder": return "/Volumes/USB-TEST";
+        // The picked folder is an initialized stick; no folder, no USB.
+        case "select_usb": {
+          const path = String(request.path || "");
+          return ok(path ? backend.selectUsb({ normalizedRoot: path }) : backend.selectUsb({ valid: false, normalizedRoot: null }));
+        }
+        case "run_usb_diagnostics": return ok(backend.usbDiagnostics());
+        case "resolve_playback_source": return ok({ resolvedPath: null, matchedBy: "none", trackId: null });
+        case "play_resolved_track": return ok({ playing: true, paused: false, positionMs: 0, durationMs: 0 });
+        case "stop_playback_native":
+        case "get_playback_status_native":
+          return ok({});
         default:
           return { ok: false, error: { code: "UNKNOWN", message: `Unhandled: ${command}` } };
       }
@@ -238,6 +529,28 @@
   };
 
   const withListSummary = (data) => ({ listSummaryText: "mock list summary", ...data });
+
+  // A small PWV5 detail waveform (2 bytes per entry), base64.
+  const pwv5 = new Uint8Array(4000);
+  for (let i = 0; i < pwv5.length; i += 2) {
+    const v = (2 << 13) | (3 << 10) | (5 << 7) | ((8 + (i % 20)) << 2);
+    pwv5[i] = (v >> 8) & 0xff;
+    pwv5[i + 1] = v & 0xff;
+  }
+  const detailWaveform = btoa(String.fromCharCode.apply(null, pwv5));
+  const MAJORS = ["C", "C#", "D", "D#", "E", "F", "F#", "G", "G#", "A", "A#", "B"];
+  // `TrackDetailData` (get_track_detail, get_usb_track_detail). `keyLabel`
+  // renders a key in the notation the spec's settings pick.
+  backend.trackDetail = (data, keyLabel = (k) => k) => ({
+    firstBeatMs: null,
+    cues: [],
+    detailWaveform,
+    keyOptions: [MAJORS, MAJORS.map((k) => `${k}m`)].map((keys, i) => ({
+      label: i ? "Minor" : "Major", keys: keys.map((k) => ({ value: k, label: keyLabel(k) }))
+    })),
+    maxHotCues: 8,
+    ...data
+  });
 
   // The builders that fill out a spec's own answer to each command.
   const noBackups = { summaryText: "", emptyText: "", items: [] };
@@ -259,6 +572,8 @@
     fetch_usb_playlist_tracks: withListSummary,
     fetch_usb_history_tracks: withListSummary,
     browse_source_files: withListSummary,
+    get_track_detail: (data) => backend.trackDetail(data),
+    get_usb_track_detail: (data) => backend.trackDetail(data),
     get_playlist_tracks: withListSummary,
     reorder_usb_playlists: (data) => ({ statusText: "mock reorder status", warningText: "", ...data }),
     remove_usb_playlist: (data) => ({ statusText: "mock remove status", warningText: "", ...data }),

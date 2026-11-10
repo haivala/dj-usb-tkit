@@ -13,54 +13,18 @@ import { test, expect } from "./coverage-fixture.mjs";
 // job_manager.mjs handleJobEvent()/applyRealtimeAnalyzedTrackUpdate() codepath
 // is exercised exactly as it is in production.
 
+// `pageSize`: the library pages that many rows at a time. `unmaterialized`:
+// the rows are files the library hasn't given an id yet (their id is their
+// path) until `resolve_track_identity` materializes them (`materializeFails`:
+// it can't).
 function installScanAnalysisMock(page, opts = {}) {
-  const trackCount = Number(opts?.trackCount || 40);
-  const pieceDelayMs = Number(opts?.pieceDelayMs || 60);
-  const workers = Number(opts?.workers || 6);
-  const seedExistingWaveform = !!opts?.seedExistingWaveform;
-  const seedDuration = !!opts?.seedDuration;
-  const seedArtwork = !!opts?.seedArtwork;
-  const variedArtists = !!opts?.variedArtists;
-  const analysisBpmRange = String(opts?.analysisBpmRange || "70-180");
-  const pauseBeforeBpmKey = !!opts?.pauseBeforeBpmKey;
-  const holdAfterTrackStart = !!opts?.holdAfterTrackStart;
-  const seedBpmKey = !!opts?.seedBpmKey;
-  const scanWarnings = Array.isArray(opts?.scanWarnings) ? opts.scanWarnings : [];
-  return page.addInitScript(({
-    trackCount,
-    pieceDelayMs,
-    workers,
-    seedExistingWaveform,
-    seedDuration,
-    seedArtwork,
-    variedArtists,
-    analysisBpmRange,
-    pauseBeforeBpmKey,
-    holdAfterTrackStart,
-    seedBpmKey,
-    scanWarnings
-  }) => {
-    // registerBackendJobEvents() (components/playback/actions.mjs) gates the
-    // "job:event" listen() call behind isTauriRuntime(), which checks
-    // window.isTauri (a plain boolean flag set by the real Tauri runtime),
-    // not just the presence of window.__TAURI__.event.listen. Without this,
-    // the app never subscribes to job:event and our simulated per-piece
-    // progress events would be emitted to zero listeners.
-    window.isTauri = true;
-    // @tauri-apps/api's real invoke()/isTauri() (bundled into main.js) route
-    // through window.__TAURI_INTERNALS__.invoke once window.isTauri is set,
-    // bypassing window.__TAURI__.core.invoke entirely. Forward it to our mock
-    // so every invoke call -- not just event listener registration -- reaches
-    // the mock regardless of which path the bundled API code takes.
-    window.__TAURI_INTERNALS__ = {
-      invoke: (cmd, args) => window.__TAURI__.core.invoke(cmd, args)
-    };
-    // The library\'s source folders, as `get_library_sources` answers.
+  return page.addInitScript((opts) => {
+    const backend = window.__e2eBackend;
+    const trackCount = Math.max(1, Number(opts.trackCount || 40));
+    const pieceDelayMs = Number(opts.pieceDelayMs ?? 60);
     window.__e2eSourceFolders = ["/music"];
-    window.localStorage.setItem("djusbtkit.helpSeen", "1");
-    window.localStorage.setItem("djusbtkit.analysisBpmRange", analysisBpmRange);
+    window.localStorage.setItem("djusbtkit.analysisBpmRange", String(opts.analysisBpmRange || "70-180"));
 
-    const listeners = new Map();
     let analyzeNewTracksCalls = 0;
     const claimedTrackIds = new Set();
     const pieceEventsByPiece = { duration: 0, artwork: 0, waveform: 0, bpm_key: 0 };
@@ -70,70 +34,30 @@ function installScanAnalysisMock(page, opts = {}) {
     const logFileLines = [];
     let openLogFileCalls = 0;
     const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
-    const nowIso = () => new Date().toISOString();
 
-    const listen = async (eventName, callback) => {
-      const key = String(eventName || "");
-      const arr = listeners.get(key) || [];
-      arr.push(callback);
-      listeners.set(key, arr);
-      return () => {
-        const current = listeners.get(key) || [];
-        listeners.set(key, current.filter((fn) => fn !== callback));
-      };
-    };
-
-    const emitJobEvent = (jobPayload) => {
-      const cbs = listeners.get("job:event") || [];
-      for (const cb of cbs.slice()) {
-        try {
-          cb({ event: "job:event", payload: jobPayload });
-        } catch (_) {
-          // ignore listener errors in mock
-        }
-      }
-    };
-
-    const tracks = Array.from({ length: Math.max(1, trackCount) }, (_, index) => {
-      const n = String(index + 1).padStart(2, "0");
+    const tracks = Array.from({ length: trackCount }, (_, index) => {
+      const n = String(index + 1).padStart(trackCount > 99 ? 4 : 2, "0");
+      const filePath = `/music/Batch Artist - Track ${n}.wav`;
+      const id = opts.unmaterialized ? filePath : `track-${n}`;
       return {
-        id: `track-${n}`,
+        id,
+        localTrackId: opts.unmaterialized ? null : id,
         title: `Track ${n}`,
-        artist: variedArtists ? (index % 2 === 0 ? "B Artist" : "A Artist") : "Batch Artist",
+        artist: opts.variedArtists ? (index % 2 === 0 ? "B Artist" : "A Artist") : "Batch Artist",
         album: "Batch Album",
-        bpm: null,
-        key: null,
-        filePath: `/music/Batch Artist - Track ${n}.wav`,
+        bpm: opts.seedBpmKey ? 99 : null,
+        key: opts.seedBpmKey ? "8B" : null,
+        filePath,
         fileSizeBytes: 1000 + index,
-        durationMs: null,
-        artworkPath: null,
-        waveformPeaksPath: null,
+        durationMs: opts.seedDuration ? 180000 : null,
+        artworkPath: opts.seedArtwork ? `/tmp/${id}.jpg` : null,
+        waveformPeaksPath: opts.seedExistingWaveform ? `/tmp/${id}.DAT` : null,
         waveformPreview: [],
         createdAt: "2026-03-01T00:00:00Z",
         updatedAt: "2026-03-01T00:00:00Z"
       };
     });
-    if (seedExistingWaveform) {
-      for (const track of tracks) {
-        track.waveformPeaksPath = `/tmp/${track.id}.DAT`;
-      }
-    }
-    if (seedDuration) {
-      for (const track of tracks) {
-        track.durationMs = 180000;
-      }
-    }
-    if (seedArtwork) {
-      for (const track of tracks) {
-        track.artworkPath = `/tmp/${track.id}.jpg`;
-      }
-    }
-    if (seedBpmKey) {
-      for (const track of tracks) {
-        track.bpm = 99;
-        track.key = "8B";
-      }
-    }
+    const findRow = (id) => tracks.find((t) => t.localTrackId === id || t.id === id);
 
     // Mirrors track_has_core_analysis_for_source_status
     // (backend/src/service/source_roots.rs): a track counts toward the library
@@ -141,158 +65,93 @@ function installScanAnalysisMock(page, opts = {}) {
     const isCountable = (track) => Number.isFinite(track.bpm) && track.bpm > 0
       && !!track.waveformPeaksPath
       && Number.isFinite(track.durationMs) && track.durationMs > 0;
-    // The footer's "Total time" line, as the backend words it.
-    const totalTimeText = (totalMs, unknown) => {
-      const seconds = Math.floor(totalMs / 1000);
-      const time = `${Math.floor(seconds / 60)}:${String(seconds % 60).padStart(2, "0")}`;
-      return `Total time: ${time}${unknown ? ` (${unknown} without length)` : ""}`;
-    };
-    const computeDurationTotals = (list) => {
-      let totalMs = 0;
-      let knownCount = 0;
-      for (const track of list) {
-        if (isCountable(track)) {
-          totalMs += track.durationMs;
-          knownCount += 1;
-        }
-      }
-      return { totalMs, knownCount };
-    };
-
-    // Backend stamps analysisReady on every Track row (has_core_analysis_fields).
-    const withAnalysisReady = (list) => list.map((t) => ({ ...t, analysisReady: isCountable(t) }));
+    const countedMs = (list) => list.filter(isCountable).reduce((sum, t) => sum + t.durationMs, 0);
+    // A row as the backend sends it: its library id, and analysisReady from its fields.
+    const asRow = ({ localTrackId, ...row }) => ({ ...row, id: localTrackId || row.id, analysisReady: isCountable(row) });
 
     // Simulates the real backend's analyze_new_tracks_with_progress worker:
-    // for each requested track id, emits 4 progressive partial job:event
-    // updates (duration, artwork, waveform, bpm_key - trackReady:false, one
-    // field group each, matching backend/src/service/analysis.rs's
-    // TrackPartialUpdate/on_update sequence) followed by one final
-    // trackReady:true event carrying all fields (matching
-    // build_done_progress_success). The command itself has returned by then,
-    // as the real one does; `job.completed` carries the result.
-    const runAnalyzeNewTracks = async (jobId, ids, bpmMin, bpmMax) => {
+    // for each requested track, a trackStarted event as a worker picks it up,
+    // one trackReady:false event per piece (artwork, waveform, duration,
+    // bpm_key -- backend/src/service/analysis.rs's TrackPartialUpdate), then one
+    // trackReady:true event carrying all fields (build_done_progress_success).
+    // The command itself has returned by then, as the real one does;
+    // `job.completed` carries the result.
+    const runAnalyzeNewTracks = async (jobId, ids) => {
       const total = Math.max(1, ids.length);
-      // Every new batch starts fresh, matching the real backend's
-      // reset-at-start-of-batch behavior for its pause/cancel flags.
+      const job = { jobId, jobType: "analysis", stage: "analyze_new_tracks", total };
+      // Every new batch starts fresh, as the backend's pause/cancel flags do.
       analysisPaused = false;
       analysisCancelled = false;
-      // Live library-duration-total baseline (mirrors
-      // analyze_new_tracks_with_progress in backend/src/service/analysis.rs):
-      // seeded from every *other* track that's already countable, excluding
-      // this batch's own tracks so a re-analyzed track isn't double-counted.
-      const idSet = new Set(ids.map(String));
-      const { totalMs: baselineTotalMs, knownCount: baselineKnownCount } =
-        computeDurationTotals(tracks.filter((t) => !idSet.has(t.id)));
-      let libraryTotalDurationMs = baselineTotalMs;
-      let libraryDurationKnownCount = baselineKnownCount;
-      emitJobEvent({
-        event: "job.started",
-        jobId,
-        jobType: "analysis",
-        stage: "analyze_new_tracks",
-        current: 0,
-        total,
-        percent: 0,
-        message: "Analyzing selected tracks",
-        timestamp: nowIso()
-      });
+      // Live library-duration-total baseline: every *other* track that's
+      // already countable, so a re-analyzed track isn't double-counted.
+      const batch = new Set(ids.map(findRow));
+      const others = tracks.filter((t) => !batch.has(t));
+      let libraryTotalDurationMs = countedMs(others);
+      let libraryDurationKnownCount = others.filter(isCountable).length;
+      window.__emitJobEvent({ ...job, event: "job.started", current: 0, percent: 0, message: "Analyzing selected tracks" });
 
       let analyzed = 0;
       let failed = 0;
+      const finish = (current) => window.__emitJobEvent({
+        ...job, event: "job.completed", current, percent: Math.round((current / total) * 100),
+        message: `Analysis finished: analyzed ${analyzed}, failed ${failed}`
+      });
 
       for (let i = 0; i < ids.length; i += 1) {
-        // Simulates the real worker pool: a pause blocks picking up the
-        // next track (the current one, if any, already finished), and a
-        // cancel breaks out permanently instead of waiting for a resume.
-        while (analysisPaused && !analysisCancelled) {
-          await sleep(15);
-        }
-        if (analysisCancelled) {
-          emitJobEvent({
-            event: "job.completed",
-            jobId,
-            jobType: "analysis",
-            stage: "analyze_new_tracks",
-            current: i,
-            total,
-            percent: Math.round((i / total) * 100),
-            message: `Analysis finished: analyzed ${analyzed}, failed ${failed}`,
-            timestamp: nowIso()
-          });
-          return;
-        }
+        // A pause blocks picking up the next track; a cancel ends the batch.
+        while (analysisPaused && !analysisCancelled) await sleep(15);
+        if (analysisCancelled) return finish(i);
 
         const id = ids[i];
-        const track = tracks.find((t) => t.id === id);
+        const track = findRow(id);
         if (!track) {
           failed += 1;
           continue;
         }
-
-        const basePayload = {
-          jobType: "analysis",
-          stage: "analyze_new_tracks",
-          trackId: id,
-          trackTitle: track.title,
-          filePath: track.filePath
+        const progress = {
+          ...job, event: "job.progress", trackId: id, trackTitle: track.title, filePath: track.filePath,
+          message: `Analyzing ${i + 1}/${ids.length}: ${track.title}`
         };
-        const emitPartial = (extra) => {
-          emitJobEvent({
-            event: "job.progress",
-            jobId,
-            current: i,
-            total,
-            percent: Math.round((i / total) * 100),
-            message: `Analyzing ${i + 1}/${ids.length}: ${track.title}`,
-            trackReady: false,
-            timestamp: nowIso(),
-            ...basePayload,
-            ...extra
-          });
-        };
+        const emitPartial = (extra) => window.__emitJobEvent({
+          ...progress, current: i, percent: Math.round((i / total) * 100), trackReady: false, ...extra
+        });
 
-        // A worker picked the track up (build_started_progress): sent before
-        // the decode, and a reanalysis when the track already has a waveform.
+        // A worker picked the track up (build_started_progress): a reanalysis
+        // when the track already has a waveform.
         emitPartial({ trackStarted: true, reanalysis: !!track.waveformPeaksPath });
-        if (holdAfterTrackStart) {
+        if (opts.holdAfterTrackStart) {
           // Stands in for the decode + BPM/key detection, where the real
-          // backend emits nothing: held until the test releases it, so it can
-          // assert the row's state while the track is being worked on.
+          // backend emits nothing: held until the test releases it.
           await new Promise((resolve) => { window.__heldTrack = { id, release: resolve }; });
           window.__heldTrack = null;
         }
 
-        await sleep(Math.max(0, pieceDelayMs));
+        await sleep(pieceDelayMs);
         track.artworkPath = `/tmp/${id}.jpg`;
         pieceEventsByPiece.artwork += 1;
         emitPartial({ artworkPath: track.artworkPath });
 
-        await sleep(Math.max(0, pieceDelayMs));
+        await sleep(pieceDelayMs);
         track.waveformPeaksPath = `/tmp/${id}.DAT`;
         track.waveformPreview = [8, 20, 42, 65, 30, 55];
         pieceEventsByPiece.waveform += 1;
-        emitPartial({
-          waveformPeaksPath: track.waveformPeaksPath,
-          waveformPreview: track.waveformPreview
-        });
+        emitPartial({ waveformPeaksPath: track.waveformPeaksPath, waveformPreview: track.waveformPreview });
 
-        await sleep(Math.max(0, pieceDelayMs));
+        await sleep(pieceDelayMs);
         track.durationMs = 180000;
         pieceEventsByPiece.duration += 1;
         emitPartial({ durationMs: track.durationMs });
 
-        if (pauseBeforeBpmKey) {
-          // Holds here instead of racing a fixed delay against whatever the
-          // test does next -- the test releases this explicitly (via
-          // window.__releaseBeforeBpmKey) once it's done asserting the
-          // track is still not-ready, so that assertion can never lose a
-          // timing race against this mock's own progress under load.
+        if (opts.pauseBeforeBpmKey) {
+          // Held until the test has asserted the track is still not ready
+          // (window.__releaseBeforeBpmKey), so that can't lose a race.
           await new Promise((resolve) => { window.__releaseBeforeBpmKey = resolve; });
         }
 
-        await sleep(Math.max(0, pieceDelayMs));
-        track.bpm = 120 + (Number(id.replace(/\D+/g, "")) % 4);
-        track.key = `${(Number(id.replace(/\D+/g, "")) % 12) + 1}A`;
+        await sleep(pieceDelayMs);
+        const number = Number(String(track.title).replace(/\D+/g, ""));
+        track.bpm = 120 + (number % 4);
+        track.key = `${(number % 12) + 1}A`;
         track.updatedAt = "2026-03-04T00:00:00Z";
         pieceEventsByPiece.bpm_key += 1;
         emitPartial({ bpm: track.bpm, bpmSourceText: "Analyzed with: mock-analyzer", key: track.key });
@@ -302,18 +161,13 @@ function installScanAnalysisMock(page, opts = {}) {
           libraryTotalDurationMs += track.durationMs;
           libraryDurationKnownCount += 1;
         }
-        emitJobEvent({
-          event: "job.progress",
-          jobId,
+        window.__emitJobEvent({
+          ...progress,
           current: i + 1,
-          total,
           percent: Math.round(((i + 1) / total) * 100),
-          message: `Analyzing ${i + 1}/${ids.length}: ${track.title}`,
           trackReady: true,
           failed: false,
           analysisReady: isCountable(track),
-          timestamp: nowIso(),
-          ...basePayload,
           bpm: track.bpm,
           bpmAnalyzer: "mock-analyzer",
           bpmSourceText: "Analyzed with: mock-analyzer",
@@ -322,508 +176,89 @@ function installScanAnalysisMock(page, opts = {}) {
           artworkPath: track.artworkPath,
           waveformPeaksPath: track.waveformPeaksPath,
           waveformPreview: track.waveformPreview,
-          libraryDurationText: totalTimeText(
+          libraryDurationText: backend.totalTimeText(
             libraryTotalDurationMs,
             Math.max(0, tracks.length - libraryDurationKnownCount)
           ),
           // The track's row as saved, whole, as the backend sends it.
-          track: { ...track, analysisReady: isCountable(track) },
+          track: asRow(track),
         });
       }
-
-      emitJobEvent({
-        event: "job.completed",
-        jobId,
-        jobType: "analysis",
-        stage: "analyze_new_tracks",
-        current: ids.length,
-        total,
-        percent: 100,
-        message: `Analysis finished: analyzed ${analyzed}, failed ${failed}`,
-        timestamp: nowIso()
-      });
-
+      finish(ids.length);
     };
 
-    window.__TAURI__ = {
-      core: {
-        invoke: async (command, payload = {}) => {
-          if (command === "append_frontend_log") {
-            logFileLines.push(`[${payload?.level}] ${payload?.message}`);
-            return null;
-          }
-          if (command === "open_frontend_log") {
-            openLogFileCalls += 1;
-            return null;
-          }
-          if (command === "scan_library") {
-            // The backend logs each warning as it makes it (`logging::log`).
-            for (const warning of scanWarnings) window.__emitBackendLog?.(warning);
-            // Backend-owned post-scan library facts (see ScanLibraryData).
-            return {
-              ok: true,
-              data: {
-                jobId: "job-scan-mock",
-                indexed: tracks.length,
-                updated: 0,
-                removed: 0,
-                warnings: scanWarnings
-              }
-            };
-          }
-          if (command === "browse_source_files") {
-            const query = String(payload?.request?.query ?? payload?.query ?? "").toLowerCase();
-            const filtered = tracks.filter((t) => {
-              if (!query) return true;
-              return `${t.title} ${t.artist} ${t.album}`.toLowerCase().includes(query);
-            });
-            const { totalMs, knownCount } = computeDurationTotals(filtered);
-            return {
-              ok: true,
-              data: { total: filtered.length, items: withAnalysisReady(filtered), durationText: totalTimeText(totalMs, filtered.length - knownCount) }
-            };
-          }
-          if (command === "resolve_track_identity") {
-            const id = String(payload?.request?.trackId ?? payload?.trackId ?? "");
-            return { ok: true, data: { trackId: tracks.some((t) => t.id === id) ? id : null } };
-          }
-          if (command === "analyze_new_tracks") {
-            analyzeNewTracksCalls += 1;
-            const req = payload?.request || {};
-            let ids = Array.isArray(req.trackIds) ? req.trackIds.map((v) => String(v)) : [];
-            // Backend-scoped request: the caller sends no ids, the backend picks
-            // the tracks that still need core analysis (here: the whole library).
-            if (!ids.length && (req.scopeToLibraryFilter || req.playlistId)) {
-              ids = tracks.filter((t) => !isCountable(t)).map((t) => String(t.id));
-            }
-            // Backend parses the `bpmRange` string (service::analysis); mirror that.
-            const [rangeMin, rangeMax] = String(req.bpmRange || "").split("-").map((n) => Number(n.trim()));
-            bpmRangeSeen = {
-              min: Number.isFinite(rangeMin) ? rangeMin : Number(req.bpmMin || 0),
-              max: Number.isFinite(rangeMax) ? rangeMax : Number(req.bpmMax || 0)
-            };
-            // A track already in the job is skipped, as the backend's coordinator does.
-            const alreadyAnalyzingTrackIds = ids.filter((id) => claimedTrackIds.has(id));
-            ids = ids.filter((id) => !claimedTrackIds.has(id));
-            ids.forEach((id) => claimedTrackIds.add(id));
-            const jobId = `job-analysis-mock-${analyzeNewTracksCalls}`;
-            if (ids.length) {
-              runAnalyzeNewTracks(jobId, ids, bpmRangeSeen.min, bpmRangeSeen.max)
-                .finally(() => ids.forEach((id) => claimedTrackIds.delete(id)));
-            }
-            const data = {
-              jobId,
-              queued: ids.length,
-              skipped: alreadyAnalyzingTrackIds.length,
-              message: ids.length
-                ? `Analyzing ${ids.length} tracks`
-                : alreadyAnalyzingTrackIds.length ? "Already analyzing 1 track" : "No tracks need analysis",
-            };
-            return { ok: true, data };
-          }
-          if (command === "set_analysis_paused") {
-            analysisPaused = !!(payload?.request?.paused);
-            return { ok: true, data: { paused: analysisPaused } };
-          }
-          if (command === "cancel_analysis") {
-            analysisCancelled = true;
-            return { ok: true, data: null };
-          }
-          return window.__e2eBackend.answer(command);
+    const scanWarnings = opts.scanWarnings || [];
+    backend.install((command, r, payload) => {
+      switch (command) {
+        case "append_frontend_log":
+          logFileLines.push(`[${payload?.level}] ${payload?.message}`);
+          return null;
+        case "open_frontend_log":
+          openLogFileCalls += 1;
+          return null;
+        case "scan_library":
+          // The backend logs each warning as it makes it (`logging::log`).
+          for (const warning of scanWarnings) window.__emitBackendLog(warning);
+          return backend.ok({ jobId: "job-scan-mock", indexed: tracks.length, updated: 0, removed: 0, warnings: scanWarnings });
+        case "browse_source_files":
+          return backend.ok(backend.listPage(tracks, r, { pageSize: opts.pageSize, countable: isCountable, map: asRow }));
+        case "resolve_track_identity": {
+          if (opts.materializeFails) return backend.fail("materialize failed", "INTERNAL_ERROR");
+          const row = tracks.find((t) => (r.filePath && t.filePath === r.filePath) || (r.trackId && findRow(String(r.trackId)) === t));
+          if (!row) return backend.ok({ trackId: null, resolvedBy: "none", materialized: false });
+          if (row.localTrackId) return backend.ok({ trackId: row.localTrackId, resolvedBy: "self", materialized: false });
+          row.localTrackId = `ml-${row.title.replace(/\D+/g, "")}`;
+          return backend.ok({ trackId: row.localTrackId, resolvedBy: "materialized", materialized: true });
         }
-      },
-      event: { listen }
-    };
-    // The bundled @tauri-apps/api/core `invoke`/`isTauri` (imported directly
-    // by api_client.mjs, not read off window.__TAURI__) is what actually
-    // gets called once window.isTauri is true - see api_client.mjs's
-    // invoke(): `if (isTauriRuntime()) return tauriInvoke(...)`, which reads
-    // window.__TAURI_INTERNALS__.invoke, entirely bypassing
-    // window.__TAURI__.core.invoke. Bridge it to the same mock handler.
-    window.__TAURI_INTERNALS__ = {
-      invoke: (cmd, args, options) => window.__TAURI__.core.invoke(cmd, args, options),
-      transformCallback: (callback) => callback,
-      convertFileSrc: (filePath) => filePath
-    };
-
-    // Lets a test run a job of its own (an export) alongside the analysis.
-    window.__emitJobEvent = emitJobEvent;
-    // What the backend's `logging::log` sends as it makes a warning.
-    window.__emitBackendLog = (logPayload) => {
-      for (const cb of (listeners.get("backend:log") || []).slice()) cb({ event: "backend:log", payload: logPayload });
-    };
-    window.__hasJobListener = () => (listeners.get("job:event") || []).length > 0;
-
-    window.__scanTestStats = {
-      get analyzeNewTracksCalls() {
-        return analyzeNewTracksCalls;
-      },
-      get pieceEventsByPiece() {
-        return pieceEventsByPiece;
-      },
-      get bpmRangeSeen() {
-        return bpmRangeSeen;
-      },
-      get analysisPaused() {
-        return analysisPaused;
-      },
-      get analysisCancelled() {
-        return analysisCancelled;
-      },
-      get logFileLines() {
-        return logFileLines;
-      },
-      get openLogFileCalls() {
-        return openLogFileCalls;
-      }
-    };
-  }, { trackCount, pieceDelayMs, workers, seedExistingWaveform, seedDuration, seedArtwork, variedArtists, analysisBpmRange, pauseBeforeBpmKey, holdAfterTrackStart, seedBpmKey, scanWarnings });
-}
-
-function installPagedMaterializeAnalyzeMock(page, opts = {}) {
-  const trackCount = Number(opts?.trackCount || 260);
-  const pageSize = Number(opts?.pageSize || 200);
-  const pieceDelayMs = Number(opts?.pieceDelayMs || 80);
-  const materializedIds = !!opts?.materializedIds;
-  const materializeFails = !!opts?.materializeFails;
-  return page.addInitScript(({ trackCount, pageSize, pieceDelayMs, materializedIds, materializeFails }) => {
-    // See installScanAnalysisMock for why this is required: registerBackendJobEvents()
-    // only calls listen("job:event", ...) when window.isTauri is truthy.
-    window.isTauri = true;
-    // @tauri-apps/api's real invoke()/isTauri() (bundled into main.js) route
-    // through window.__TAURI_INTERNALS__.invoke once window.isTauri is set,
-    // bypassing window.__TAURI__.core.invoke entirely. Forward it to our mock
-    // so every invoke call -- not just event listener registration -- reaches
-    // the mock regardless of which path the bundled API code takes.
-    window.__TAURI_INTERNALS__ = {
-      invoke: (cmd, args) => window.__TAURI__.core.invoke(cmd, args)
-    };
-    // The library\'s source folders, as `get_library_sources` answers.
-    window.__e2eSourceFolders = ["/music"];
-    window.localStorage.setItem("djusbtkit.helpSeen", "1");
-
-    const listeners = new Map();
-    const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
-    const nowIso = () => new Date().toISOString();
-    let browseQueryCount = 0;
-    let analyzeCalls = 0;
-    let materializeCalls = 0;
-
-    const tracks = Array.from({ length: Math.max(1, trackCount) }, (_, index) => {
-      const n = String(index + 1).padStart(4, "0");
-      const filePath = `/music/Auto Artist - Track ${n}.wav`;
-      return {
-        id: materializedIds ? `ml-${n}` : filePath,
-        localTrackId: materializedIds ? `ml-${n}` : null,
-        title: `Track ${n}`,
-        artist: "Auto Artist",
-        album: "Auto Album",
-        bpm: null,
-        key: null,
-        filePath,
-        fileSizeBytes: 10_000 + index,
-        durationMs: null,
-        artworkPath: null,
-        waveformPeaksPath: null,
-        waveformPreview: [],
-        createdAt: "2026-03-01T00:00:00Z",
-        updatedAt: "2026-03-01T00:00:00Z"
-      };
-    });
-
-    const toTrackDto = (row) => {
-      const id = row.localTrackId || row.id;
-      return {
-        id,
-        title: row.title,
-        artist: row.artist,
-        album: row.album,
-        bpm: row.bpm,
-        key: row.key,
-        filePath: row.filePath,
-        fileSizeBytes: row.fileSizeBytes,
-        durationMs: row.durationMs,
-        artworkPath: row.artworkPath,
-        waveformPeaksPath: row.waveformPeaksPath,
-        waveformPreview: row.waveformPreview,
-        createdAt: row.createdAt,
-        updatedAt: row.updatedAt,
-        // Backend computes analysisReady from DB fields (has_core_analysis_fields).
-        analysisReady: isCountable(row)
-      };
-    };
-
-    // Mirrors track_has_core_analysis_for_source_status
-    // (backend/src/service/source_roots.rs): a track counts toward the library
-    // duration total only once it has all three of bpm/waveform/duration.
-    const isCountable = (track) => Number.isFinite(track.bpm) && track.bpm > 0
-      && !!track.waveformPeaksPath
-      && Number.isFinite(track.durationMs) && track.durationMs > 0;
-    // The footer's "Total time" line, as the backend words it.
-    const totalTimeText = (totalMs, unknown) => {
-      const seconds = Math.floor(totalMs / 1000);
-      const time = `${Math.floor(seconds / 60)}:${String(seconds % 60).padStart(2, "0")}`;
-      return `Total time: ${time}${unknown ? ` (${unknown} without length)` : ""}`;
-    };
-    const computeDurationTotals = (list) => {
-      let totalMs = 0;
-      let knownCount = 0;
-      for (const track of list) {
-        if (isCountable(track)) {
-          totalMs += track.durationMs;
-          knownCount += 1;
-        }
-      }
-      return { totalMs, knownCount };
-    };
-
-    const listPage = (cursorValue, query = "", sortBy = null, sortDir = null) => {
-      const q = String(query || "").toLowerCase().trim();
-      let rows = q
-        ? tracks.filter((t) => `${t.title} ${t.artist} ${t.album}`.toLowerCase().includes(q))
-        : tracks.slice();
-      if (sortBy) {
-        // Mirrors the backend TrackSort: "artist" ties break by title.
-        const m = sortDir === "desc" ? -1 : 1;
-        rows = rows.slice().sort((a, b) => {
-          const av = sortBy === "artist" ? `${a.artist} ${a.title}` : String(a[sortBy] ?? "");
-          const bv = sortBy === "artist" ? `${b.artist} ${b.title}` : String(b[sortBy] ?? "");
-          return av < bv ? -m : av > bv ? m : 0;
-        });
-      }
-      const offset = Number(String(cursorValue || "0")) || 0;
-      const items = rows.slice(offset, offset + pageSize).map(toTrackDto);
-      const nextOffset = offset + items.length;
-      const hasMore = nextOffset < rows.length;
-      const { totalMs, knownCount } = computeDurationTotals(rows);
-      return {
-        total: rows.length,
-        items,
-        nextCursor: hasMore ? String(nextOffset) : null,
-        hasMore,
-        durationText: totalTimeText(totalMs, rows.length - knownCount)
-      };
-    };
-
-    const findRowByAnalysisId = (id) => tracks.find((t) => (t.localTrackId || t.id) === id || t.id === id || t.localTrackId === id);
-
-    const emitJobEvent = (jobPayload) => {
-      const cbs = listeners.get("job:event") || [];
-      for (const cb of cbs.slice()) {
-        try {
-          cb({ event: "job:event", payload: jobPayload });
-        } catch (_) {
-          // ignore listener errors in mock
-        }
-      }
-    };
-
-    // Same progressive-per-piece simulation as installScanAnalysisMock,
-    // adapted to look rows up via findRowByAnalysisId (id may be a
-    // filePath before materialization, or an ml-* localTrackId after).
-    const runAnalyzeNewTracks = async (jobId, ids) => {
-      const total = Math.max(1, ids.length);
-      emitJobEvent({
-        event: "job.started",
-        jobId,
-        jobType: "analysis",
-        stage: "analyze_new_tracks",
-        current: 0,
-        total,
-        percent: 0,
-        message: "Analyzing selected tracks",
-        timestamp: nowIso()
-      });
-
-      let analyzed = 0;
-      let failed = 0;
-
-      // Live library-duration-total baseline (mirrors
-      // analyze_new_tracks_with_progress in backend/src/service/analysis.rs):
-      // seeded from every *other* track that's already countable, excluding
-      // this batch's own tracks so a re-analyzed track isn't double-counted.
-      const batchRows = new Set(ids.map((id) => findRowByAnalysisId(id)).filter(Boolean));
-      const { totalMs: baselineTotalMs, knownCount: baselineKnownCount } =
-        computeDurationTotals(tracks.filter((t) => !batchRows.has(t)));
-      let libraryTotalDurationMs = baselineTotalMs;
-      let libraryDurationKnownCount = baselineKnownCount;
-
-      for (let i = 0; i < ids.length; i += 1) {
-        const id = ids[i];
-        const row = findRowByAnalysisId(id);
-        if (!row) {
-          failed += 1;
-          continue;
-        }
-
-        const basePayload = {
-          jobType: "analysis",
-          stage: "analyze_new_tracks",
-          trackId: id,
-          trackTitle: row.title,
-          filePath: row.filePath
-        };
-        const emitPartial = (extra) => {
-          emitJobEvent({
-            event: "job.progress",
+        case "analyze_new_tracks": {
+          analyzeNewTracksCalls += 1;
+          let ids = (r.trackIds || []).map(String);
+          // Backend-scoped request: the caller sends no ids, the backend picks
+          // the tracks that still need core analysis (here: the whole library).
+          if (!ids.length && (r.scopeToLibraryFilter || r.playlistId)) {
+            ids = tracks.filter((t) => !isCountable(t)).map((t) => String(t.localTrackId || t.id));
+          }
+          // The backend parses the `bpmRange` string (service::analysis).
+          const [min, max] = String(r.bpmRange || "").split("-").map((n) => Number(n.trim()));
+          bpmRangeSeen = { min, max };
+          // A track already in the job is skipped, as the backend's coordinator does.
+          const alreadyAnalyzing = ids.filter((id) => claimedTrackIds.has(id));
+          ids = ids.filter((id) => !claimedTrackIds.has(id));
+          ids.forEach((id) => claimedTrackIds.add(id));
+          const jobId = `job-analysis-mock-${analyzeNewTracksCalls}`;
+          if (ids.length) runAnalyzeNewTracks(jobId, ids).finally(() => ids.forEach((id) => claimedTrackIds.delete(id)));
+          return backend.ok({
             jobId,
-            current: i,
-            total,
-            percent: Math.round((i / total) * 100),
-            message: `Analyzing ${i + 1}/${ids.length}: ${row.title}`,
-            trackReady: false,
-            timestamp: nowIso(),
-            ...basePayload,
-            ...extra
+            queued: ids.length,
+            skipped: alreadyAnalyzing.length,
+            message: ids.length
+              ? `Analyzing ${ids.length} tracks`
+              : alreadyAnalyzing.length ? "Already analyzing 1 track" : "No tracks need analysis",
           });
-        };
-
-        await sleep(Math.max(0, pieceDelayMs));
-        row.durationMs = 182000;
-        emitPartial({ durationMs: row.durationMs });
-
-        await sleep(Math.max(0, pieceDelayMs));
-        row.artworkPath = `/tmp/${id}.jpg`;
-        emitPartial({ artworkPath: row.artworkPath });
-
-        await sleep(Math.max(0, pieceDelayMs));
-        row.waveformPeaksPath = `/tmp/${id}.DAT`;
-        row.waveformPreview = [10, 25, 45, 70, 50, 30];
-        emitPartial({ waveformPeaksPath: row.waveformPeaksPath, waveformPreview: row.waveformPreview });
-
-        await sleep(Math.max(0, pieceDelayMs));
-        row.bpm = 123;
-        row.key = "8A";
-        emitPartial({ bpm: row.bpm, bpmSourceText: "Analyzed with: mock-analyzer", key: row.key });
-
-        analyzed += 1;
-        if (isCountable(row)) {
-          libraryTotalDurationMs += row.durationMs;
-          libraryDurationKnownCount += 1;
         }
-        emitJobEvent({
-          event: "job.progress",
-          jobId,
-          current: i + 1,
-          total,
-          percent: Math.round(((i + 1) / total) * 100),
-          message: `Analyzing ${i + 1}/${ids.length}: ${row.title}`,
-          trackReady: true,
-          failed: false,
-          analysisReady: isCountable(row),
-          timestamp: nowIso(),
-          ...basePayload,
-          bpm: row.bpm,
-          bpmAnalyzer: "mock-analyzer",
-          bpmSourceText: "Analyzed with: mock-analyzer",
-          key: row.key,
-          durationMs: row.durationMs,
-          artworkPath: row.artworkPath,
-          waveformPeaksPath: row.waveformPeaksPath,
-          waveformPreview: row.waveformPreview,
-          libraryDurationText: totalTimeText(
-            libraryTotalDurationMs,
-            Math.max(0, tracks.length - libraryDurationKnownCount)
-          ),
-          // The track's row as saved, whole, as the backend sends it.
-          track: { ...row, analysisReady: isCountable(row) },
-        });
+        case "set_analysis_paused":
+          analysisPaused = !!r.paused;
+          return backend.ok({ paused: analysisPaused });
+        case "cancel_analysis":
+          analysisCancelled = true;
+          return backend.ok(null);
+        default: return undefined;
       }
+    }, { tauriRuntime: true });
 
-      emitJobEvent({
-        event: "job.completed",
-        jobId,
-        jobType: "analysis",
-        stage: "analyze_new_tracks",
-        current: ids.length,
-        total,
-        percent: 100,
-        message: `Analysis finished: analyzed ${analyzed}, failed ${failed}`,
-        timestamp: nowIso()
-      });
-
+    const callCount = (command) => window.__calls.filter((c) => c.command === command).length;
+    window.__scanTestStats = {
+      get analyzeNewTracksCalls() { return analyzeNewTracksCalls; },
+      get browseCalls() { return callCount("browse_source_files"); },
+      get materializeCalls() { return callCount("resolve_track_identity"); },
+      get pieceEventsByPiece() { return pieceEventsByPiece; },
+      get bpmRangeSeen() { return bpmRangeSeen; },
+      get analysisPaused() { return analysisPaused; },
+      get analysisCancelled() { return analysisCancelled; },
+      get logFileLines() { return logFileLines; },
+      get openLogFileCalls() { return openLogFileCalls; }
     };
-
-    window.__TAURI__ = {
-      core: {
-        invoke: async (command, payload = {}) => {
-          if (command === "get_system_parallelism") {
-            return { ok: true, data: { workers: 6 } };
-          }
-          if (command === "browse_source_files") {
-            browseQueryCount += 1;
-            const query = payload?.request?.query ?? "";
-            const cursor = payload?.request?.offset ?? null;
-            const sortBy = payload?.request?.sortBy ?? null;
-            const sortDir = payload?.request?.sortDir ?? null;
-            return { ok: true, data: listPage(cursor, query, sortBy, sortDir) };
-          }
-          if (command === "resolve_track_identity") {
-            materializeCalls += 1;
-            if (materializeFails) {
-              return { ok: false, error: { code: "INTERNAL_ERROR", message: "materialize failed" } };
-            }
-            const filePath = String(payload?.request?.filePath || "");
-            const row = tracks.find((t) => t.filePath === filePath);
-            if (!row) {
-              return { ok: true, data: { trackId: null, resolvedBy: "none", materialized: false } };
-            }
-            if (!row.localTrackId) {
-              const suffix = String(row.filePath).replace(/[^0-9]+/g, "") || "1";
-              row.localTrackId = `ml-${suffix}`;
-            }
-            return {
-              ok: true,
-              data: { trackId: row.localTrackId, resolvedBy: "materialized", materialized: true }
-            };
-          }
-          if (command === "analyze_new_tracks") {
-            const req = payload?.request || {};
-            const ids = Array.isArray(req.trackIds) ? req.trackIds.map((v) => String(v)) : [];
-            analyzeCalls += 1;
-            const jobId = `job-paged-analysis-mock-${analyzeCalls}`;
-            if (ids.length) runAnalyzeNewTracks(jobId, ids);
-            return { ok: true, data: { jobId, queued: ids.length, skipped: 0, message: `Analyzing ${ids.length} tracks` } };
-          }
-          if (command === "scan_library") {
-            return {
-              ok: true,
-              data: { jobId: "job-scan-mock", indexed: tracks.length, updated: 0, removed: 0 }
-            };
-          }
-          return window.__e2eBackend.answer(command);
-        }
-      },
-      event: { listen: async (eventName, callback) => {
-        const key = String(eventName || "");
-        const arr = listeners.get(key) || [];
-        arr.push(callback);
-        listeners.set(key, arr);
-        return () => {
-          const current = listeners.get(key) || [];
-          listeners.set(key, current.filter((fn) => fn !== callback));
-        };
-      } }
-    };
-    // See installScanAnalysisMock for why this bridge is required.
-    window.__TAURI_INTERNALS__ = {
-      invoke: (cmd, args, options) => window.__TAURI__.core.invoke(cmd, args, options),
-      transformCallback: (callback) => callback,
-      convertFileSrc: (filePath) => filePath
-    };
-
-    window.__pagedAnalyzeStats = {
-      get browseQueryCount() {
-        return browseQueryCount;
-      },
-      get analyzeCalls() {
-        return analyzeCalls;
-      },
-      get materializeCalls() {
-        return materializeCalls;
-      }
-    };
-  }, { trackCount, pageSize, pieceDelayMs, materializedIds, materializeFails });
+  }, opts);
 }
 
 test("scan applies per-piece row updates before track-ready status", async ({ page }) => {
@@ -1202,7 +637,7 @@ test("analysis populates BPM and key cells for all tracks", async ({ page }) => 
 });
 
 test("library total duration advances only when each track is fully ready", async ({ page }) => {
-  await installScanAnalysisMock(page, { trackCount: 2, pieceDelayMs: 120, workers: 3 });
+  await installScanAnalysisMock(page, { trackCount: 2, pieceDelayMs: 120 });
   await page.goto("/");
 
   await page.locator("#analyzeLibraryBtn").click();
@@ -1503,7 +938,7 @@ function libraryRowAt(page, index) {
 }
 
 test("analyze on auto-loaded non-materialized track resolves local id", async ({ page }) => {
-  await installPagedMaterializeAnalyzeMock(page, { trackCount: 260, pageSize: 200, pieceDelayMs: 120 });
+  await installScanAnalysisMock(page, { trackCount: 260, pageSize: 200, pieceDelayMs: 120, unmaterialized: true });
   await page.goto("/");
 
   await scrollLibraryToRow(page, 230);
@@ -1512,16 +947,16 @@ test("analyze on auto-loaded non-materialized track resolves local id", async ({
 
   await expect(page.locator("#statusText")).not.toContainText("Track is not in the local library yet");
   await expect.poll(async () => {
-    return page.evaluate(() => Number(window.__pagedAnalyzeStats?.materializeCalls || 0));
+    return page.evaluate(() => Number(window.__scanTestStats?.materializeCalls || 0));
   }).toBeGreaterThan(0);
   await expect.poll(async () => {
-    return page.evaluate(() => Number(window.__pagedAnalyzeStats?.analyzeCalls || 0));
+    return page.evaluate(() => Number(window.__scanTestStats?.analyzeNewTracksCalls || 0));
   }).toBeGreaterThan(0);
 });
 
 test("analyze reports the not-in-local-library message when materializing the track fails", async ({ page }) => {
-  await installPagedMaterializeAnalyzeMock(page, {
-    trackCount: 260, pageSize: 200, pieceDelayMs: 120, materializeFails: true
+  await installScanAnalysisMock(page, {
+    trackCount: 260, pageSize: 200, pieceDelayMs: 120, unmaterialized: true, materializeFails: true
   });
   await page.goto("/");
 
@@ -1532,23 +967,18 @@ test("analyze reports the not-in-local-library message when materializing the tr
   await expect(page.locator("#statusText")).toContainText(
     "Track is not in the local library yet. Run Analyze Library first."
   );
-  const analyzeCalls = await page.evaluate(() => Number(window.__pagedAnalyzeStats?.analyzeCalls || 0));
+  const analyzeCalls = await page.evaluate(() => Number(window.__scanTestStats?.analyzeNewTracksCalls || 0));
   expect(analyzeCalls).toBe(0);
 });
 
 test("analyze on auto-loaded track updates row in place without full reload", async ({ page }) => {
-  await installPagedMaterializeAnalyzeMock(page, {
-    trackCount: 260,
-    pageSize: 200,
-    pieceDelayMs: 120,
-    materializedIds: true
-  });
+  await installScanAnalysisMock(page, { trackCount: 260, pageSize: 200, pieceDelayMs: 120 });
   await page.goto("/");
 
   await scrollLibraryToRow(page, 230);
 
   const beforeStats = await page.evaluate(() => ({
-    browse: Number(window.__pagedAnalyzeStats?.browseQueryCount || 0)
+    browse: Number(window.__scanTestStats?.browseCalls || 0)
   }));
 
   const targetRow = libraryRowAt(page, 230);
@@ -1556,7 +986,7 @@ test("analyze on auto-loaded track updates row in place without full reload", as
     trackId: String(row.getAttribute("data-track-id") || ""),
     hasBpmPill: !!row.querySelector(".bpm-pill")
   }));
-  expect(before.trackId.startsWith("ml-")).toBeTruthy();
+  expect(before.trackId.startsWith("track-")).toBeTruthy();
   expect(before.hasBpmPill).toBeFalsy();
 
   await targetRow.locator('[data-action="analyze-track"]').click();
@@ -1568,16 +998,9 @@ test("analyze on auto-loaded track updates row in place without full reload", as
   expect(afterTrackId).toBe(before.trackId);
 
   const afterStats = await page.evaluate(() => ({
-    browse: Number(window.__pagedAnalyzeStats?.browseQueryCount || 0),
-    analyzeCalls: Number(window.__pagedAnalyzeStats?.analyzeCalls || 0)
+    browse: Number(window.__scanTestStats?.browseCalls || 0),
+    analyzeCalls: Number(window.__scanTestStats?.analyzeNewTracksCalls || 0)
   }));
   expect(afterStats.analyzeCalls).toBeGreaterThan(0);
   expect(afterStats.browse).toBeGreaterThanOrEqual(beforeStats.browse);
 });
-
-// A single-track library with analyze_new_tracks's response fully under the
-// test's control (no per-piece job:event choreography needed -- that's not
-// what these two tests are about) for exercising status-line formatting of
-// unusual `analyze_new_tracks` response shapes: a partial-failure count, and
-// a structured WarningEntry object (as opposed to a plain string) that must
-// still render its `message`, not "[object Object]".

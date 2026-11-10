@@ -1,4 +1,4 @@
-import { test, expect } from "./coverage-fixture.mjs";
+import { test, expect, openUsb } from "./coverage-fixture.mjs";
 
 // The USB-playlist track view is driven by the shared TrackListController
 // (vanilla-ui/components/shared/track_list_controller.mjs) over the
@@ -21,127 +21,58 @@ const SORT_TARGET_TITLE = "AAAA Sort First";
 const SEARCH_TARGET_INDEX = 320;
 const SEARCH_TARGET_TITLE = "ZZZZ Unique Search Target";
 
-// One `fetch_usb_playlist_tracks` implementation shared by the mocks below.
-// `hydrate(track)` decides what a returned (page) row looks like.
-function playlistTracksResponder(tracks, hydrate) {
-  return (payload) => {
-    const req = payload?.request || {};
-    let rows = tracks.slice();
-    const q = String(req.query || "").trim().toLowerCase();
-    if (q) {
-      rows = rows.filter((t) => `${t.title} ${t.artist} ${t.album || ""}`.toLowerCase().includes(q));
-    }
-    if (req.sortBy) {
-      const dir = req.sortDir === "desc" ? -1 : 1;
-      rows = rows.slice().sort((a, b) => {
-        // Mirrors the backend TrackSort: "artist" ties break by title.
-        const av = req.sortBy === "artist" ? `${a.artist}\0${a.title}` : String(a[req.sortBy] ?? "");
-        const bv = req.sortBy === "artist" ? `${b.artist}\0${b.title}` : String(b[req.sortBy] ?? "");
-        return av < bv ? -dir : av > bv ? dir : 0;
-      });
-    }
-    const total = rows.length;
-    const listSummaryText = `${tracks.length} tracks`;
-    const offset = Number(req.offset || 0);
-    const limit = Number(req.limit || 0) || total;
-    const page = rows.slice(offset, offset + limit).map((t) => hydrate(t));
-    const nextOffset = offset + page.length;
-    return {
-      ok: true,
-      data: {
-        items: page,
-        total,
-        hasMore: nextOffset < total,
-        nextCursor: nextOffset < total ? String(nextOffset) : null,
-        totalDurationMs: 0,
-        durationUnknownCount: 0,
-        listSummaryText,
-        warnings: [],
-      },
-    };
-  };
-}
-
-function baseUsbCommands(payload, command) {
-  if (command === "pick_usb_folder") return "/Volumes/USB-TEST";
-  if (command === "select_usb") {
-    const path = String(payload?.request?.path || "");
-    return {
-      ok: true,
-      data: path
-        ? { valid: true, normalizedRoot: path, warnings: [] }
-        : { valid: false, normalizedRoot: null, warnings: ["USB path is empty"] },
-    };
-  }
-  return undefined;
-}
-
-// `gateFetches`: every `fetch_usb_playlist_tracks` waits until the test calls
-// `window.__releaseFetch()` -- a slow USB stick (Windows Defender scanning
-// each opened file) frozen mid-load.
-function installTauriMock(page, { trackCount, gateFetches = false }) {
-  return page.addInitScript(({ trackCount, gateFetches, sortTargetIndex, sortTargetTitle, searchTargetIndex, searchTargetTitle }) => {
-    window.localStorage.setItem("djusbtkit.helpSeen", "1");
-    window.__fetchCalls = [];
-
+// A USB stick with one playlist of `trackCount` tracks, each page arriving
+// already hydrated (bpm/key/waveform). `gateFetches`: every page waits until
+// the test calls `window.__releaseFetch()` -- a slow USB stick (Windows
+// Defender scanning each opened file) frozen mid-load. `unhydratedId`: that
+// row arrives un-hydrated, and clicking it re-hydrates it via
+// `inspect_usb_track`, held until `window.__releaseInspectUsbTrack()`.
+function installTauriMock(page, { trackCount, gateFetches = false, unhydratedId = null }) {
+  return page.addInitScript(({ trackCount, gateFetches, unhydratedId, targets }) => {
+    const backend = window.__e2eBackend;
     const tracks = Array.from({ length: trackCount }, (_, i) => {
       let title = `Track ${String(i).padStart(4, "0")}`;
-      if (i === sortTargetIndex) title = sortTargetTitle;
-      if (i === searchTargetIndex) title = searchTargetTitle;
-      return { id: String(i + 1), title, artist: "Same Artist", album: "Album" };
+      if (i === targets.sortIndex) title = targets.sortTitle;
+      if (i === targets.searchIndex) title = targets.searchTitle;
+      return {
+        id: String(i + 1), title, artist: "Same Artist", album: "Album",
+        usbMediaPath: `/Contents/Same Artist/Album/track${i + 1}.mp3`
+      };
     });
-
-    const base = window.__usbSpecHelpers.baseUsbCommands;
-    const responder = window.__usbSpecHelpers.playlistTracksResponder(
-      tracks,
-      (t) => ({ ...t, bpm: 120, key: "8A", waveformPreview: [10, 20, 30, 40, 30, 20, 10] })
-    );
-
-    window.__TAURI__ = {
-      core: {
-        invoke: async (command, payload = {}) => {
-          const b = base(payload, command);
-          if (b !== undefined) return b;
-          if (command === "fetch_usb_playlists") {
-            return {
-              ok: true,
-              data: {
-                items: [{ id: "usb-1", name: "Big Playlist", source: "mock-tauri", trackCount: tracks.length, tracks: [], totalDurationMs: 0, durationUnknownCount: 0 }],
-                stats: { indexedTracks: tracks.length, playlistReferencedTracks: tracks.length, playlistEntries: tracks.length },
-                summaryText: `1 playlist, ${tracks.length} tracks`,
-                playlistUsbExportStatus: [],
-                warnings: [],
-              },
-            };
-          }
-          if (command === "fetch_usb_playlist_tracks") {
-            window.__fetchCalls.push({ ...(payload?.request || {}) });
-            if (gateFetches) await new Promise((resolve) => { window.__releaseFetch = resolve; });
-            return responder(payload);
-          }
-          return window.__e2eBackend.answer(command);
-        },
-      },
-    };
-  }, { trackCount, gateFetches, sortTargetIndex: SORT_TARGET_INDEX, sortTargetTitle: SORT_TARGET_TITLE, searchTargetIndex: SEARCH_TARGET_INDEX, searchTargetTitle: SEARCH_TARGET_TITLE });
+    const hydrate = (t) => (t.id === unhydratedId
+      ? { ...t, needsHydration: true }
+      : { ...t, bpm: 120, key: "8A", waveformPreview: [10, 20, 30, 40, 30, 20, 10], needsHydration: false });
+    backend.install(async (command, r) => {
+      if (command === "fetch_usb_playlists") {
+        return backend.ok({
+          items: [{ id: "usb-1", name: "Big Playlist", source: "mock-tauri", trackCount: tracks.length, tracks: [], totalDurationMs: 0, durationUnknownCount: 0 }],
+          stats: { indexedTracks: tracks.length, playlistReferencedTracks: tracks.length, playlistEntries: tracks.length },
+          summaryText: `1 playlist, ${tracks.length} tracks`
+        });
+      }
+      if (command === "fetch_usb_playlist_tracks") {
+        if (gateFetches) await new Promise((resolve) => { window.__releaseFetch = resolve; });
+        return backend.ok({ ...backend.listPage(tracks, r, { map: hydrate }), listSummaryText: `${tracks.length} tracks` });
+      }
+      if (command === "inspect_usb_track" && unhydratedId) {
+        await new Promise((resolve) => { window.__releaseInspectUsbTrack = resolve; });
+        // The whole row, as the backend answers.
+        const row = tracks.find((t) => t.id === r.trackId);
+        return backend.ok({ source: "pdb", track: { ...row, bpm: 128, key: "5A", waveformPreview: [5, 15, 25, 15, 5], needsHydration: false } });
+      }
+    });
+  }, {
+    trackCount, gateFetches, unhydratedId,
+    targets: { sortIndex: SORT_TARGET_INDEX, sortTitle: SORT_TARGET_TITLE, searchIndex: SEARCH_TARGET_INDEX, searchTitle: SEARCH_TARGET_TITLE }
+  });
 }
 
-// The spec helpers (plain functions) can't cross into addInitScript's serialized
-// closure, so re-expose them on window from a second init script.
-function installSpecHelpers(page) {
-  return page.addInitScript(`
-    window.__usbSpecHelpers = {
-      baseUsbCommands: ${baseUsbCommands.toString()},
-      playlistTracksResponder: ${playlistTracksResponder.toString()},
-    };
-  `);
-}
+const fetchCalls = (page) =>
+  page.evaluate(() => window.__calls.filter((c) => c.command === "fetch_usb_playlist_tracks").map((c) => c.request));
 
 async function selectBigPlaylist(page) {
   await page.goto("/");
-  await page.locator('.nav-item[data-view="usb"]').click();
-  await page.locator("#usbEmptyState .empty-state-action").click();
-  await page.locator('.nav-item[data-view="usb-playlists"]').click();
+  await openUsb(page, "usb-playlists");
   await expect(page.locator('[data-usb-playlist="usb-1"]')).toBeVisible();
   await expect(page.locator("#usbPlaylistTracks .track-grid-row").first()).toBeVisible();
 }
@@ -155,10 +86,9 @@ function scrollToEnd(page) {
     .evaluate((el) => { el.scrollTop = el.scrollHeight; });
 }
 
-const fetchOffsets = (page) => page.evaluate(() => window.__fetchCalls.map((c) => c.offset));
+const fetchOffsets = (page) => fetchCalls(page).then((calls) => calls.map((c) => c.offset));
 
 test("selecting a large playlist renders the top of the first hydrated page", async ({ page }) => {
-  await installSpecHelpers(page);
   await installTauriMock(page, { trackCount: PLAYLIST_SIZE });
   await selectBigPlaylist(page);
 
@@ -179,7 +109,6 @@ test("selecting a large playlist renders the top of the first hydrated page", as
 });
 
 test("the scrollbar spans the whole playlist from the start", async ({ page }) => {
-  await installSpecHelpers(page);
   await installTauriMock(page, { trackCount: PLAYLIST_SIZE });
   await selectBigPlaylist(page);
 
@@ -190,7 +119,6 @@ test("the scrollbar spans the whole playlist from the start", async ({ page }) =
 });
 
 test("jumping to the end loads just the end of the playlist, hydrated", async ({ page }) => {
-  await installSpecHelpers(page);
   await installTauriMock(page, { trackCount: PLAYLIST_SIZE });
   await selectBigPlaylist(page);
   await expect(rowByTitle(page, "Track 0000")).toBeVisible();
@@ -206,11 +134,10 @@ test("jumping to the end loads just the end of the playlist, hydrated", async ({
 });
 
 test("searching re-queries the backend and shows the filtered-in track, hydrated", async ({ page }) => {
-  await installSpecHelpers(page);
   await installTauriMock(page, { trackCount: PLAYLIST_SIZE });
   await selectBigPlaylist(page);
 
-  const queriesBefore = await page.evaluate(() => window.__fetchCalls.map((c) => c.query || ""));
+  const queriesBefore = (await fetchCalls(page)).map((c) => c.query || "");
   expect(queriesBefore.every((q) => q === "")).toBe(true);
 
   await page.locator("#usbTrackSearch").fill(SEARCH_TARGET_TITLE);
@@ -218,12 +145,11 @@ test("searching re-queries the backend and shows the filtered-in track, hydrated
   const resultRow = rowByTitle(page, SEARCH_TARGET_TITLE);
   await expect(resultRow).toHaveCount(1);
   await expect(resultRow.locator(".bpm-pill")).toBeVisible();
-  const queriesAfter = await page.evaluate(() => window.__fetchCalls.map((c) => c.query || ""));
+  const queriesAfter = (await fetchCalls(page)).map((c) => c.query || "");
   expect(queriesAfter).toContain(SEARCH_TARGET_TITLE);
 });
 
 test("sorting re-queries the backend so the new first page is hydrated", async ({ page }) => {
-  await installSpecHelpers(page);
   await installTauriMock(page, { trackCount: PLAYLIST_SIZE });
   await selectBigPlaylist(page);
 
@@ -235,12 +161,11 @@ test("sorting re-queries the backend so the new first page is hydrated", async (
   await expect(sortedRow).toHaveCount(1);
   await expect(page.locator("#usbPlaylistTracks .track-grid-row").first()).toHaveText(new RegExp(SORT_TARGET_TITLE));
   await expect(sortedRow.locator(".bpm-pill")).toBeVisible();
-  const sortedCalls = await page.evaluate(() => window.__fetchCalls.map((c) => c.sortBy || ""));
+  const sortedCalls = (await fetchCalls(page)).map((c) => c.sortBy || "");
   expect(sortedCalls).toContain("artist");
 });
 
 test("a small playlist loads in one page with no further fetch", async ({ page }) => {
-  await installSpecHelpers(page);
   await installTauriMock(page, { trackCount: 80 });
   await selectBigPlaylist(page);
 
@@ -259,12 +184,9 @@ async function releaseFetch(page) {
 }
 
 test("a slow page load shows the loading indicator instead of stale rows", async ({ page }) => {
-  await installSpecHelpers(page);
   await installTauriMock(page, { trackCount: PLAYLIST_SIZE, gateFetches: true });
   await page.goto("/");
-  await page.locator('.nav-item[data-view="usb"]').click();
-  await page.locator("#usbEmptyState .empty-state-action").click();
-  await page.locator('.nav-item[data-view="usb-playlists"]').click();
+  await openUsb(page, "usb-playlists");
 
   const body = page.locator("#usbPlaylistTracks");
   const indicator = page.locator("#usbPlaylistTracks + .track-grid-loading");
@@ -294,65 +216,12 @@ test("a slow page load shows the loading indicator instead of stale rows", async
 
 // A row that somehow still isn't fully hydrated: clicking it re-hydrates via
 // `inspect_usb_track` (singular), which answers with the whole row, patched
-// into just that row's cells. Track id "3" is left un-hydrated by the page
-// fetch.
+// into just that row's cells.
 function installRowClickMock(page) {
-  return page.addInitScript(() => {
-    window.localStorage.setItem("djusbtkit.helpSeen", "1");
-    window.__singleInspectCalls = [];
-
-    const tracks = Array.from({ length: 5 }, (_, i) => ({
-      id: String(i + 1), title: `Track ${String(i).padStart(4, "0")}`, artist: "Same Artist", album: "Album",
-      usbMediaPath: `/Contents/Same Artist/Album/track${i + 1}.mp3`,
-    }));
-    const base = window.__usbSpecHelpers.baseUsbCommands;
-    const responder = window.__usbSpecHelpers.playlistTracksResponder(
-      tracks,
-      (t) => (t.id === "3"
-        ? { ...t, needsHydration: true }
-        : { ...t, bpm: 120, key: "8A", waveformPreview: [10, 20, 30, 20, 10], needsHydration: false })
-    );
-
-    window.__TAURI__ = {
-      core: {
-        invoke: async (command, payload = {}) => {
-          const b = base(payload, command);
-          if (b !== undefined) return b;
-          if (command === "fetch_usb_playlists") {
-            return {
-              ok: true,
-              data: {
-                items: [{ id: "usb-1", name: "Small Playlist", source: "mock-tauri", trackCount: tracks.length, tracks: [], totalDurationMs: 0, durationUnknownCount: 0 }],
-                stats: { indexedTracks: tracks.length, playlistReferencedTracks: tracks.length, playlistEntries: tracks.length },
-                summaryText: `1 playlist, ${tracks.length} tracks`,
-                playlistUsbExportStatus: [],
-                warnings: [],
-              },
-            };
-          }
-          if (command === "fetch_usb_playlist_tracks") return responder(payload);
-          if (command === "inspect_usb_track") {
-            window.__singleInspectCalls.push(payload?.request?.trackId);
-            await new Promise((resolve) => { window.__releaseInspectUsbTrack = resolve; });
-            // The whole row, as the backend answers.
-            const row = tracks.find((t) => t.id === payload?.request?.trackId);
-            return {
-              ok: true,
-              data: {
-                source: "pdb",
-                track: { ...row, bpm: 128, key: "5A", waveformPreview: [5, 15, 25, 15, 5], needsHydration: false },
-              },
-            };
-          }
-          return window.__e2eBackend.answer(command);
-        },
-      },
-    };
-  });
+  return installTauriMock(page, { trackCount: 5, unhydratedId: "3" });
 }
 
 test("clicking an unhydrated track row patches it in place instead of re-rendering the table", async ({ page }) => {
-  await installSpecHelpers(page);
   await installRowClickMock(page);
   await selectBigPlaylist(page);
   await expect(page.locator("#usbPlaylistTracks .track-grid-row")).toHaveCount(5);
@@ -373,6 +242,7 @@ test("clicking an unhydrated track row patches it in place instead of re-renderi
   await expect(targetRow.locator(".td-waveform .transport-btn")).toHaveCount(0);
 
   await expect(siblingRow).toHaveAttribute("data-test-marker", "keep");
-  const singleCalls = await page.evaluate(() => window.__singleInspectCalls);
+  const singleCalls = await page.evaluate(() =>
+    window.__calls.filter((c) => c.command === "inspect_usb_track").map((c) => c.request.trackId));
   expect(singleCalls).toEqual(["3"]);
 });

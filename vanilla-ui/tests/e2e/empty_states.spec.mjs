@@ -2,36 +2,17 @@ import { test, expect } from "./coverage-fixture.mjs";
 
 function installEmptyStateMock(page) {
   return page.addInitScript(() => {
-    window.localStorage.setItem("djusbtkit.helpSeen", "1");
-
-    const playlists = [];
-
-    window.__TAURI__ = {
-      core: {
-        invoke: async (command, payload = {}) => {
-          if (command === "list_playlists") return { ok: true, data: { playlists, playlistUsbExportStatus: [] } };
-          if (command === "browse_source_files") {
-            return { ok: true, data: { total: 0, items: [] } };
-          }
-          if (command === "create_playlist") {
-            const name = String(payload?.request?.name || "Untitled");
-            const id = `pl-${Date.now()}`;
-            playlists.push({
-              id, name, source: "local",
-              // Its tracks can go after an export, with a removed source folder.
-              lastExportedAt: "2026-08-06T21:03:26Z", lastExportedUsbRoot: "/usb", lastExportedTrackCount: 52,
-              tracks: []
-            });
-            return { ok: true, data: { playlistId: id, name } };
-          }
-          if (command === "get_playlist_tracks") {
-            const playlistId = String(payload?.request?.playlistId || "");
-            return { ok: true, data: { playlistId, items: [] } };
-          }
-          return window.__e2eBackend.answer(command);
-        }
+    const backend = window.__e2eBackend;
+    backend.install((command, request) => {
+      if (command === "create_playlist") {
+        const answer = backend.answer(command, { request });
+        // Its tracks can go after an export, with a removed source folder.
+        Object.assign(backend.store.playlists[0], {
+          lastExportedAt: "2026-08-06T21:03:26Z", lastExportedUsbRoot: "/usb", lastExportedTrackCount: 52
+        });
+        return answer;
       }
-    };
+    });
   });
 }
 
@@ -75,44 +56,20 @@ test("Configured source folders with zero indexed tracks prompt scan and keep co
 
 test("A playlist with tracks shows loading, never the empty screen", async ({ page }) => {
   await page.addInitScript(() => {
-    window.localStorage.setItem("djusbtkit.helpSeen", "1");
-    const playlist = (id, name) => ({
-      id, name, source: "local",
-      lastExportedAt: null, lastExportedUsbRoot: null, lastExportedTrackCount: null,
-      tracks: []
-    });
+    const backend = window.__e2eBackend;
     const tracks = [
       { id: "t1", title: "Loaded One", artist: "Artist", album: "Album", filePath: "/music/one.mp3" },
       { id: "t2", title: "Loaded Two", artist: "Artist", album: "Album", filePath: "/music/two.mp3" }
     ];
+    backend.seed({ playlists: [{ id: "pl-empty", name: "Nothing Yet" }, { id: "pl-full", name: "Has Tracks", tracks }] });
     // The full playlist's tracks arrive only when the test releases them.
     let release = null;
     window.__releaseFullPlaylist = () => release?.();
-
-    window.__TAURI__ = {
-      core: {
-        invoke: async (command, payload = {}) => {
-          if (command === "list_playlists") {
-            return { ok: true, data: { playlists: [playlist("pl-empty", "Nothing Yet"), playlist("pl-full", "Has Tracks")], playlistUsbExportStatus: [] } };
-          }
-          if (command === "browse_source_files") return { ok: true, data: { total: 0, items: [] } };
-          if (command === "get_playlist_tracks") {
-            const playlistId = String(payload?.request?.playlistId || "");
-            if (playlistId !== "pl-full") {
-              return { ok: true, data: { playlistId, items: [], total: 0, listTrackCount: 0 } };
-            }
-            const query = String(payload?.request?.query || "");
-            if (query) {
-              // A search that matches nothing in a playlist that has tracks.
-              return { ok: true, data: { playlistId, items: [], total: 0, listTrackCount: tracks.length } };
-            }
-            await new Promise((resolve) => { release = resolve; });
-            return { ok: true, data: { playlistId, items: tracks, total: tracks.length, listTrackCount: tracks.length } };
-          }
-          return window.__e2eBackend.answer(command);
-        }
+    backend.install(async (command, request) => {
+      if (command === "get_playlist_tracks" && request.playlistId === "pl-full" && !request.query) {
+        await new Promise((resolve) => { release = resolve; });
       }
-    };
+    });
   });
   await page.goto("/");
 
