@@ -287,7 +287,7 @@
     "reorder_playlist_tracks", "add_track_candidates_to_playlist", "add_track_candidates_to_playlists",
     "add_library_selection_to_playlist", "add_library_selection_to_playlists",
     "import_external_playlists", "export_to_usb", "set_usb_device_name", "select_usb",
-    "restore_usb_backup"
+    "restore_usb_backup", "set_export_sync_mode"
   ]);
 
   // Answers given their playlists here, not by a spec, carry this mark (kept

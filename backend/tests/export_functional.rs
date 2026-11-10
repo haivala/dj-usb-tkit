@@ -15,7 +15,8 @@ use backend::models::{
     MaterializeSourceTrackRequest, PlaylistTrackSort, PlaylistsState,
     RemoveTracksFromPlaylistRequest, RenamePlaylistRequest, ReorderPlaylistTracksRequest,
     ReorderUsbPlaylistsRequest, RepairUsbDiagnosticsRequest, RunUsbDiagnosticsRequest,
-    RunUsbParityReportRequest, ScanLibraryRequest, SelectUsbRequest, SetFrontendSettingRequest,
+    RunUsbParityReportRequest, ScanLibraryRequest, SelectUsbRequest, SetExportSyncModeRequest,
+    SetFrontendSettingRequest,
 };
 use backend::pdb_reader::parse_pdb;
 use backend::service::usb_vendor_compat::DEFAULT_USB_EDB_KEY;
@@ -4134,9 +4135,10 @@ fn fetch_usb_playlists_reports_reorder_lock_only_for_additive_same_name_collisio
 
     // Switch to additive (prune_stale=false): the same-name collision now
     // locks reorder, since additive export never rewrites existing entries.
-    let set_additive = backend.set_frontend_setting(SetFrontendSettingRequest {
-        key: "ui_export_prune_stale_v1".to_string(),
-        value: Some("0".to_string()),
+    let set_additive = backend.set_export_sync_mode(SetExportSyncModeRequest {
+        prune_stale: false,
+        playlist_id: None,
+        sort: None,
     });
     assert!(
         set_additive.ok,
@@ -4154,9 +4156,10 @@ fn fetch_usb_playlists_reports_reorder_lock_only_for_additive_same_name_collisio
 
     // Switch back to mirror explicitly: reorder unlocks again even though the
     // same-name collision is still present.
-    let set_mirror = backend.set_frontend_setting(SetFrontendSettingRequest {
-        key: "ui_export_prune_stale_v1".to_string(),
-        value: Some("1".to_string()),
+    let set_mirror = backend.set_export_sync_mode(SetExportSyncModeRequest {
+        prune_stale: true,
+        playlist_id: None,
+        sort: None,
     });
     assert!(set_mirror.ok, "set mirror mode failed: {set_mirror:?}");
     let mirror_status = status_by_id(&backend);
@@ -4321,31 +4324,65 @@ fn export_saves_the_sort_it_is_given_unless_the_order_is_locked_on_the_usb() {
     export(&backend, true, "asc");
     assert_eq!(titles(&backend), ascending);
 
-    // Additive, with the playlist already on the USB, the export keeps the USB's order:
-    // the sort stays a view, in the export and in a sort saved on its own.
-    let set_additive = backend.set_frontend_setting(SetFrontendSettingRequest {
-        key: "ui_export_prune_stale_v1".to_string(),
-        value: Some("0".to_string()),
-    });
-    assert!(
-        set_additive.ok,
-        "set additive mode failed: {set_additive:?}"
-    );
-    export(&backend, false, "desc");
-    assert_eq!(titles(&backend), ascending);
-
     let validated = backend.select_usb(SelectUsbRequest {
         path: usb.to_string_lossy().to_string(),
     });
     assert!(validated.data.expect("validate data").data.usb.valid);
+
+    // Switching to additive with the playlist already on the USB locks its order: its column
+    // sort is saved first, while mirror still allows it.
+    let additive = backend
+        .set_export_sync_mode(SetExportSyncModeRequest {
+            prune_stale: false,
+            playlist_id: Some(playlist_id.clone()),
+            sort: Some(PlaylistTrackSort {
+                sort_by: "title".to_string(),
+                sort_dir: Some("desc".to_string()),
+            }),
+        })
+        .data
+        .expect("set additive mode");
+    assert!(additive.data.locked);
+    assert_eq!(
+        additive.data.status_text,
+        "Export sync mode: additive — \"Sorted Set\" already exists on USB, so its track order is locked here (current order kept)."
+    );
+    let status = additive
+        .state
+        .playlist_usb_export_status
+        .iter()
+        .find(|status| status.playlist_id == playlist_id)
+        .expect("its export status");
+    assert!(status.locks_reorder);
+    assert_eq!(titles(&backend), descending);
+
+    // Additive, the export keeps the USB's order: the sort stays a view, in the export and
+    // in a sort saved on its own.
+    export(&backend, false, "asc");
+    assert_eq!(titles(&backend), descending);
     let reordered = backend.reorder_playlist_tracks(ReorderPlaylistTracksRequest {
         playlist_id: playlist_id.clone(),
         sort_by: Some("title".to_string()),
-        sort_dir: Some("desc".to_string()),
+        sort_dir: Some("asc".to_string()),
         ..Default::default()
     });
     assert_eq!(reordered.data.expect("reorder data").data.reordered, 0);
-    assert_eq!(titles(&backend), ascending);
+    assert_eq!(titles(&backend), descending);
+
+    // Back to mirror: nothing locked, and the status line says the mode.
+    let mirror = backend
+        .set_export_sync_mode(SetExportSyncModeRequest {
+            prune_stale: true,
+            playlist_id: Some(playlist_id.clone()),
+            sort: None,
+        })
+        .data
+        .expect("set mirror mode");
+    assert!(!mirror.data.locked);
+    assert_eq!(
+        mirror.data.status_text,
+        "Export sync mode: mirror (exact match)"
+    );
 }
 
 fn usb_playlist_track_paths(usb_root: &Path, playlist_name: &str) -> Vec<String> {

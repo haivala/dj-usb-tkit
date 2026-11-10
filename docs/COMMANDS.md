@@ -252,6 +252,12 @@ drive selection from being rendered against a newer selected drive.
 
 - `get_frontend_settings`
 - `set_frontend_setting` — the UI's own settings (theme, sidebar, export options, ...).
+- `set_export_sync_mode` — `{ pruneStale, playlistId?, sort? }` → `{ pruneStale, locked,
+  statusText }` plus the playlists state. Saves the export sync mode
+  (`ui_export_prune_stale_v1`, which `set_frontend_setting` refuses). When the new mode locks
+  the open playlist's order (additive, same name on the selected USB), its column `sort`
+  (`{ sortBy, sortDir }`) is saved as its order first; `locked` says the order is locked now,
+  and `statusText` says whether the sort couldn't be saved.
   Not the language: `ui_language_v1` is refused here.
 - `set_language` — `{ language }`, a language code the app has a catalog for
   (`i18n::languages()`): saves it and switches the backend's language straight away.
@@ -275,7 +281,8 @@ drive selection from being rendered against a newer selected drive.
 Every command that changes playlists (`create_playlist`, `rename_playlist`, `delete_playlist`,
 `remove_tracks_from_playlist`, `reorder_playlist_tracks`, the `add_*_to_playlist(s)` commands,
 `import_external_playlists`, `export_to_usb`, `export_to_usb_with_progress`,
-`set_usb_device_name`, and `select_usb`, which changes the export status) also answers with the whole playlist state, the same fields
+`set_usb_device_name`, `restore_usb_backup`, and `select_usb` and `set_export_sync_mode`, which
+change the export status) also answers with the whole playlist state, the same fields
 `list_playlists` returns, next to its own: `playlists` and `playlistUsbExportStatus`. The UI
 applies them as they come and never asks for the list again after a change.
 

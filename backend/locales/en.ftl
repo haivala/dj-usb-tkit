@@ -1706,6 +1706,14 @@ settings-transcode-folder-dialog-title = Select the folder for transcodes
 # read or changed. $error: why it failed.
 settings-essentia-remove-failed = Remove failed: { $error }
 settings-transcode-folder-failed = Transcode folder: { $error }
+# Status lines after changing the export sync mode.
+settings-sync-mode-mirror-saved = Export sync mode: mirror (exact match)
+settings-sync-mode-additive-saved = Export sync mode: additive
+# The same, when the open playlist is already on the USB, so additive export locks its order.
+# $playlist: the open playlist's name.
+settings-sync-mode-additive-locked = Export sync mode: additive — "{ $playlist }" already exists on USB, so its track order is locked here (current order kept).
+# The same, when its column sort couldn't be saved first. $playlist: the open playlist's name.
+settings-sync-mode-additive-locked-sort-failed = Export sync mode: additive — "{ $playlist }" already exists on USB, so its track order is locked here (couldn't save the current sort first).
 
 ## library
 
@@ -2588,14 +2596,6 @@ ui-settings-essentia-downloading-progress = Downloading Essentia...
 # Status lines after installing or removing Essentia.
 ui-settings-essentia-installed = Essentia installed
 ui-settings-essentia-removed = Essentia removed
-# Status lines after changing the export sync mode.
-ui-settings-sync-mode-mirror-saved = Export sync mode: mirror (exact match)
-ui-settings-sync-mode-additive-saved = Export sync mode: additive
-# The same, when the open playlist is already on the USB, so additive export locks its order.
-# $playlist: the open playlist's name.
-ui-settings-sync-mode-additive-locked = Export sync mode: additive — "{ $playlist }" already exists on USB, so its track order is locked here (current order kept).
-# The same, when its column sort couldn't be saved first. $playlist: the open playlist's name.
-ui-settings-sync-mode-additive-locked-sort-failed = Export sync mode: additive — "{ $playlist }" already exists on USB, so its track order is locked here (couldn't save the current sort first).
 # Status lines after the export checkboxes change.
 ui-settings-export-backup-enabled = Export backup: enabled
 ui-settings-export-backup-disabled = Export backup: disabled

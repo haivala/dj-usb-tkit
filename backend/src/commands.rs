@@ -510,6 +510,14 @@ impl BackendCommands {
         wrap(self.service.prune_usb_device(req))
     }
 
+    pub fn set_export_sync_mode(
+        &self,
+        req: crate::models::SetExportSyncModeRequest,
+    ) -> ApiResponse<WithPlaylists<crate::models::SetExportSyncModeData>> {
+        // The mode changes which playlists' order is locked.
+        wrap(self.with_playlists(self.service.set_export_sync_mode(req)))
+    }
+
     pub fn set_usb_device_name(
         &self,
         req: SetUsbDeviceNameRequest,

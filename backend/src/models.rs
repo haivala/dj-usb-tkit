@@ -2341,6 +2341,30 @@ pub struct ExportToUsbRequest {
 }
 
 /// A column sort of a playlist's tracks, as `get_playlist_tracks` sorts them.
+/// The export sync mode Settings saves: mirror (`prune_stale`) or additive.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct SetExportSyncModeRequest {
+    pub prune_stale: bool,
+    /// The open playlist, whose order the new mode may lock.
+    #[serde(default)]
+    pub playlist_id: Option<String>,
+    /// Its active column sort, saved as its order before the mode locks it.
+    #[serde(default)]
+    pub sort: Option<PlaylistTrackSort>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct SetExportSyncModeData {
+    pub prune_stale: bool,
+    /// The open playlist's order is locked in the new mode: its column sort
+    /// can't be saved any more (it was saved first, or `status_text` says it
+    /// couldn't be).
+    pub locked: bool,
+    pub status_text: String,
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct PlaylistTrackSort {

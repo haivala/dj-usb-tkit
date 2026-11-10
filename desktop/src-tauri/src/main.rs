@@ -953,6 +953,7 @@ fn main() {
             backend::tauri_commands::get_frontend_settings,
             backend::tauri_commands::set_frontend_setting,
             backend::tauri_commands::set_language,
+            backend::tauri_commands::set_export_sync_mode,
             backend::tauri_commands::select_usb,
             backend::tauri_commands::list_usb_devices,
             backend::tauri_commands::prune_usb_device,

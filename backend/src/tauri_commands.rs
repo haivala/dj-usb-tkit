@@ -1373,6 +1373,19 @@ pub async fn prune_usb_device(
 }
 
 #[tauri::command]
+pub async fn set_export_sync_mode(
+    state: State<'_, BackendCommands>,
+    request: crate::models::SetExportSyncModeRequest,
+) -> Result<ApiResponse<crate::models::WithPlaylists<crate::models::SetExportSyncModeData>>, String>
+{
+    let commands = state.inner().clone();
+    Ok(run_blocking_command("set_export_sync_mode", move || {
+        commands.set_export_sync_mode(request)
+    })
+    .await)
+}
+
+#[tauri::command]
 pub async fn set_usb_device_name(
     state: State<'_, BackendCommands>,
     request: SetUsbDeviceNameRequest,

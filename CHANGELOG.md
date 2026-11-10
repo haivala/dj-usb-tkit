@@ -60,6 +60,8 @@
   action's own answer instead of reading it again.
 - **Improvement:** The Event Log entry for each list a playlist import couldn't bring in names its library, the list
   and the reason in one line. An add logs only its result; the "Adding N tracks" entry before it is gone.
+- **Improvement:** Changing the export sync mode saves an open playlist's column sort, the mode and the playlists'
+  reorder locks in one step. If the mode can't be saved, the choice in Settings goes back to the mode in use.
 - **Chore:** The app window can no longer widen the set of folders it may load files from. The backend lets in
   the library's source folders and the selected USB itself.
 

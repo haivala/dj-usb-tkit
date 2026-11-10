@@ -706,8 +706,7 @@ function installReorderTauriMock(page, { usbSameNamePlaylistName, exportPruneSta
     window.__reorderPlaylistTrackCalls = [];
 
     // Mirrors the backend's export_prune_stale setting: seeded from the param,
-    // updated when the sync-mode toggle persists it via set_frontend_setting,
-    // read by list_playlists / fetch_usb_playlists.
+    // updated by set_export_sync_mode, read by list_playlists / fetch_usb_playlists.
     let currentPruneStale = exportPruneStale !== false;
     // The backend's selected USB: set by a valid select_usb.
     let usbSelected = false;
@@ -772,8 +771,36 @@ function installReorderTauriMock(page, { usbSameNamePlaylistName, exportPruneSta
           if (command === "browse_source_files") {
             return { ok: true, data: { total: 0, items: [] } };
           }
-          if (command === "set_frontend_setting" && request.key === "ui_export_prune_stale_v1") {
-            currentPruneStale = request.value === "1";
+          if (command === "set_export_sync_mode") {
+            window.__syncModeRequests = [...(window.__syncModeRequests || []), request];
+            // As the backend: the open playlist's sort is saved first when the new
+            // mode locks its order.
+            const lockedAfter = (pruneStale) => {
+              const before = currentPruneStale;
+              currentPruneStale = pruneStale;
+              const status = exportStatusFor().find((entry) => entry.playlistId === request.playlistId);
+              currentPruneStale = before;
+              return usbSelected && !!status?.locksReorder;
+            };
+            const locked = lockedAfter(request.pruneStale);
+            if (locked && request.sort && !lockedAfter(currentPruneStale)) {
+              playlistTracks[request.playlistId] = window.__applyReorder(
+                playlistTracks[request.playlistId] || [],
+                { playlistId: request.playlistId, ...request.sort }
+              );
+            }
+            currentPruneStale = request.pruneStale;
+            const open = playlists.find((playlist) => playlist.id === request.playlistId);
+            return {
+              ok: true,
+              data: {
+                pruneStale: currentPruneStale,
+                locked,
+                statusText: locked
+                  ? `Export sync mode: additive — "${open.name}" already exists on USB, so its track order is locked here (current order kept).`
+                  : currentPruneStale ? "Export sync mode: mirror (exact match)" : "Export sync mode: additive"
+              }
+            };
           }
           if (command === "list_playlists") {
             const noUsb = (status) => ({
@@ -1400,9 +1427,14 @@ test("changing the export sync mode releases and re-engages the open playlist's 
   await expect(page.locator("#panel-playlist .sort-hint")).toBeHidden();
   await expect(page.locator("#exportPlaylistBtn")).toHaveText("Append to (Reorder Playlist) on USB: (USB)");
 
-  const calls = await page.evaluate(() => window.__reorderPlaylistTrackCalls);
-  expect(calls.length).toBe(1);
-  expect(calls[0]).toEqual({ playlistId: "pl-1", sortBy: "artist", sortDir: "asc" });
+  // The mode change carries the sort along: the backend saves it before the lock.
+  const requests = await page.evaluate(() => window.__syncModeRequests);
+  expect(requests).toEqual([
+    { pruneStale: true, playlistId: "pl-1", sort: null },
+    { pruneStale: false, playlistId: "pl-1", sort: { sortBy: "artist", sortDir: "asc" } }
+  ]);
+  expect(await page.evaluate(() => window.__reorderPlaylistTrackCalls)).toEqual([]);
+  await expect(page.locator("#statusText")).toContainText('"Reorder Playlist" already exists on USB, so its track order is locked here');
 });
 
 test("playlist track drag handle stays enabled in additive mode when no same-name USB playlist exists", async ({ page }) => {

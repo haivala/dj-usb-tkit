@@ -2,7 +2,10 @@
 
 use super::*;
 use crate::i18n::tr;
-use crate::models::{SetLanguageData, SetLanguageRequest};
+use crate::models::{
+    ReorderPlaylistTracksRequest, SetExportSyncModeData, SetExportSyncModeRequest, SetLanguageData,
+    SetLanguageRequest,
+};
 
 impl BackendService {
     pub fn get_frontend_settings(&self) -> BackendResult<GetFrontendSettingsData> {
@@ -50,8 +53,11 @@ impl BackendService {
         req: SetFrontendSettingRequest,
     ) -> BackendResult<SetFrontendSettingData> {
         let key = req.key.trim();
-        // The USB folder is saved by `select_usb`.
-        if !frontend_ui_setting_keys().contains(&key) || key == SETTING_UI_USB_ROOT {
+        // The USB folder is saved by `select_usb`, the sync mode by `set_export_sync_mode`.
+        if !frontend_ui_setting_keys().contains(&key)
+            || key == SETTING_UI_USB_ROOT
+            || key == SETTING_UI_EXPORT_PRUNE_STALE
+        {
             return Err(BackendError::Internal(format!(
                 "unsupported frontend setting key: {key}"
             )));
@@ -92,6 +98,87 @@ impl BackendService {
             params![SETTING_UI_USB_ROOT, root.unwrap_or_default(), now()],
         )?;
         Ok(())
+    }
+
+    /// Saves the export sync mode. In additive mode a playlist whose name the
+    /// selected USB has keeps its order there, so its order is locked here
+    /// (`playlist_sort_locked`): the open playlist's column sort is saved as
+    /// its order first, while the old mode still allows it. The mode is saved
+    /// even if that fails; the status line says so.
+    pub fn set_export_sync_mode(
+        &self,
+        req: SetExportSyncModeRequest,
+    ) -> BackendResult<SetExportSyncModeData> {
+        let usb_root = self.selected_usb_root();
+        let open = req.playlist_id.as_deref().filter(|id| !id.is_empty());
+        let locked = match open {
+            Some(id) => self.playlist_sort_locked(id, usb_root.as_deref(), req.prune_stale)?,
+            None => false,
+        };
+        let mut sort_failed = false;
+        if let (true, Some(id), Some(sort)) = (locked, open, req.sort) {
+            let prune_stale_now = export_prune_stale_setting(&*self.db.connect()?)?;
+            if !self.playlist_sort_locked(id, usb_root.as_deref(), prune_stale_now)? {
+                let saved = self.save_playlist_track_order(ReorderPlaylistTracksRequest {
+                    playlist_id: id.to_string(),
+                    ordered_track_ids: Vec::new(),
+                    sort_by: Some(sort.sort_by),
+                    sort_dir: sort.sort_dir,
+                    move_track_id: None,
+                    before_track_id: None,
+                });
+                if let Err(err) = saved {
+                    crate::logging::debug(
+                        "settings",
+                        format!(
+                            "Saving the sort before the sync mode failed: {}",
+                            err.english()
+                        ),
+                    );
+                    sort_failed = true;
+                }
+            }
+        }
+
+        let conn = self.db.connect()?;
+        conn.execute(
+            r#"
+            INSERT INTO app_settings (key, value, updated_at)
+            VALUES (?1, ?2, ?3)
+            ON CONFLICT(key) DO UPDATE SET value = excluded.value, updated_at = excluded.updated_at
+            "#,
+            params![
+                SETTING_UI_EXPORT_PRUNE_STALE,
+                if req.prune_stale { "1" } else { "0" },
+                now()
+            ],
+        )?;
+
+        let status_text = match open.filter(|_| locked) {
+            Some(id) => {
+                let name: String = conn
+                    .query_row(
+                        "SELECT name FROM playlists WHERE id = ?1",
+                        params![id],
+                        |row| row.get(0),
+                    )
+                    .optional()?
+                    .unwrap_or_default();
+                if sort_failed {
+                    tr::settings_sync_mode_additive_locked_sort_failed(name)
+                } else {
+                    tr::settings_sync_mode_additive_locked(name)
+                }
+            }
+            None if req.prune_stale => tr::settings_sync_mode_mirror_saved(),
+            None => tr::settings_sync_mode_additive_saved(),
+        }
+        .render();
+        Ok(SetExportSyncModeData {
+            prune_stale: req.prune_stale,
+            locked,
+            status_text,
+        })
     }
 
     /// Saves the language and makes it the process's language. Not a frontend setting: it

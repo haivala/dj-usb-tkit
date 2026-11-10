@@ -6,7 +6,6 @@ import {
   STORAGE_KEY_HELP_SEEN,
   FRONTEND_DB_KEY_HELP_SEEN,
   STORAGE_KEY_EXPORT_PRUNE_STALE,
-  FRONTEND_DB_KEY_EXPORT_PRUNE_STALE,
   STORAGE_KEY_EXPORT_BACKUP,
   FRONTEND_DB_KEY_EXPORT_BACKUP,
   STORAGE_KEY_EXPORT_ENGINE_LIBRARY,
@@ -78,9 +77,6 @@ export function bindSettingsEvents(ctx) {
     updatePlaylistExportButtons,
     getCurrentPlaylist,
     renderCurrentPlaylistTracksFromState,
-    commitActivePlaylistSort,
-    isPlaylistSortActive,
-    loadPlaylists,
     reloadTrackListsForKeyNotation
   } = ctx;
   el.settingsBtn.addEventListener("click", () => {
@@ -139,49 +135,35 @@ export function bindSettingsEvents(ctx) {
   el.exportSyncModeGroup.addEventListener("change", async (event) => {
     const mode = String(event?.target?.value || "").toLowerCase();
     const pruneStale = mode !== "additive";
-
     const openPlaylist = getCurrentPlaylist();
-    // Predict whether additive mode is about to lock the open playlist purely
-    // to sequence the sort commit below -- `sameNameExistsOnUsb` is a
-    // backend-provided fact already on the status map. The authoritative
-    // `locksReorder` comes from the backend right after.
-    const willLock = !!openPlaylist
-      && !pruneStale
-      && !!state.playlistUsbExportStatusById?.get(openPlaylist.id)?.sameNameExistsOnUsb;
+    // The open playlist's column sort: the backend saves it as its order first
+    // when the new mode would lock that order.
+    const sort = openPlaylist ? ctx.tableSortState.playlistTracksBody : null;
 
-    // Switching mirror -> additive would freeze an in-progress column sort where
-    // it can never be committed, so commit it first, while the saved mode still
-    // lets the backend save it. The mode change is a global preference and
-    // always goes through -- if the save fails we just say so and carry on (the
-    // sort was only a view).
-    let sortSaveFailed = false;
-    if (willLock && isPlaylistSortActive()) {
-      try {
-        await commitActivePlaylistSort(openPlaylist.id);
-      } catch (err) {
-        console.error(err);
-        sortSaveFailed = true;
-      }
-    }
-
-    state.exportPruneStale = pruneStale;
+    let data;
     try {
-      await persistSetting(
-        STORAGE_KEY_EXPORT_PRUNE_STALE,
-        FRONTEND_DB_KEY_EXPORT_PRUNE_STALE,
-        pruneStale ? "1" : "0"
-      );
+      data = await command("set_export_sync_mode", {
+        pruneStale,
+        playlistId: openPlaylist?.id || null,
+        sort: sort?.key ? { sortBy: sort.key, sortDir: sort.dir || "asc" } : null
+      });
     } catch (err) {
-      console.error(err);
+      // Not saved: the choice shows the mode still in use.
+      const kept = state.exportPruneStale ? "mirror" : "additive";
+      const input = el.exportSyncModeGroup.querySelector(`input[value="${kept}"]`);
+      if (input) input.checked = true;
+      emitStatus(err?.message || String(err));
+      return;
     }
 
-    // The setting is now persisted; the playlists' reorder locks follow it.
+    state.exportPruneStale = data.pruneStale;
     try {
-      await loadPlaylists();
-    } catch (err) {
-      console.error(err);
-    }
-
+      ctx.localStorage.setItem(STORAGE_KEY_EXPORT_PRUNE_STALE, data.pruneStale ? "1" : "0");
+    } catch {}
+    // A locked order takes no sort any more: it was saved first, or the
+    // status line says it couldn't be.
+    if (data.locked) ctx.clearPlaylistTrackSort();
+    ctx.applyPlaylistsState(data);
     if (openPlaylist) {
       try {
         await renderCurrentPlaylistTracksFromState();
@@ -190,12 +172,7 @@ export function bindSettingsEvents(ctx) {
       }
     }
     updatePlaylistExportButtons();
-
-    emitStatus(
-      willLock
-        ? t(sortSaveFailed ? "ui-settings-sync-mode-additive-locked-sort-failed" : "ui-settings-sync-mode-additive-locked", { playlist: openPlaylist.name })
-        : t(state.exportPruneStale ? "ui-settings-sync-mode-mirror-saved" : "ui-settings-sync-mode-additive-saved")
-    );
+    emitStatus(data.statusText);
   });
 
   el.exportBackupCheckbox.addEventListener("change", (event) => {
