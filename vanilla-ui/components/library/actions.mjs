@@ -145,10 +145,7 @@ export async function relocateSourceRoot(ctx, oldRoot) {
   if (!sourceRoot) return;
 
   emitStatus(t("ui-library-relocate-starting", { path: sourceRoot }));
-  const picked = await ctx.pickSourceFolders();
-  const newRoot = Array.isArray(picked)
-    ? String(picked[0] || "").trim()
-    : String(picked || "").trim();
+  const [newRoot] = await ctx.pickSourceFolders();
   if (!newRoot) return;
 
   const result = await ctx.command("relocate_source_root", {
@@ -233,7 +230,7 @@ export function renderSourceChips(ctx) {
 
   el.importPlaylistItem.classList.toggle("hidden", !state.externalRekordboxDbPath && !state.externalMixxxDbPath);
   ctx.updateAnalyzeLibraryButtonLabel();
-  ctx.updateSourceFilterIndicator();
+  el.sourceFilterIndicator.classList.toggle("active", state.librarySources.filtering);
 }
 
 // The library footer's "Total time" line is the backend's (which knows the true
@@ -305,12 +302,9 @@ export function createLibraryTracksController(ctx) {
     getItems: () => ctx.state.tracks,
     setItems: (value) => { ctx.state.tracks = value; },
     rowOptions: () => ({
-      withCheckbox: true,
       selectedIds: ctx.state.selectedTrackIds,
       actionLabel: "+",
       actionType: "add-library",
-      compactAddButton: true,
-      enableAnalyzeActions: true,
       origin: "local",
       secondaryActionType: "play-library",
     }),

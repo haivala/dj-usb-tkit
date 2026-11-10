@@ -177,7 +177,15 @@ async function createPlaylist(page, name) {
   await page.locator('.nav-item[data-view="library"]').click();
 }
 
-test("Selection + bulk add to playlist; Selection state stays correct when filtering visible rows; the selection bar is always there; its actions wait for a selection, and Reanalyze sends the picked tracks; Convert… makes transcodes of the selection, shown under the format; Remove deletes them; Settings shows the transcode folder; Change picks one and Use default goes back; the playlist view selects tracks and removes them from the playlist only; Edit… shows what the selection shares and saves only the changed fields for every selected track; + Add to names the active playlist; Add to… shows what each playlist holds and adds to several, new ones too; Add to… from an app playlist copies its tracks to another playlist by id", async ({ page }) => {
+// Selection + bulk add to playlist; Selection state stays correct when filtering visible rows; the
+// selection bar is always there; its actions wait for a selection, and Reanalyze sends the picked
+// tracks; Convert… makes transcodes of the selection, shown under the format; Remove deletes them;
+// Settings shows the transcode folder; Change picks one and Use default goes back; the playlist
+// view selects tracks and removes them from the playlist only; Edit… shows what the selection
+// shares and saves only the changed fields for every selected track; + Add to names the active
+// playlist; Add to… shows what each playlist holds and adds to several, new ones too; Add to… from
+// an app playlist copies its tracks to another playlist by id.
+test("library selection and bulk add", async ({ page }) => {
   await installSelectionMock(page);
   await page.goto("/");
   {
@@ -580,9 +588,10 @@ test("select all loads and adds every matching track across multiple pages, not 
   await expect(page.locator("#playlistPanelTitle")).toContainText(`(${trackCount} tracks)`, { timeout: 15000 });
 });
 
-test("USB playlist rows are selected and added to the active playlist in list order; Edit… on USB playlist rows writes them to the stick and shows the new year in the rows; Add to… from a USB playlist sends the rows' library matches and the rows themselves", async ({ page }) => {
+test("USB playlist row selection", async ({ page }) => {
   await installSelectionMock(page, { usb: true });
   await page.goto("/");
+  // USB playlist rows are selected and added to the active playlist in list order.
   {
     await createPlaylist(page, "From Stick");
 
@@ -615,6 +624,7 @@ test("USB playlist rows are selected and added to the active playlist in list or
   }
 
   await page.reload();
+  // Edit… on USB playlist rows writes them to the stick and shows the new year in the rows.
   {
     await openUsb(page, "usb-playlists");
     await expect(page.locator("#usbPlaylistTracks .track-grid-row")).toHaveCount(2);
@@ -639,6 +649,7 @@ test("USB playlist rows are selected and added to the active playlist in list or
   }
 
   await page.reload();
+  // Add to… from a USB playlist sends the rows' library matches and the rows themselves.
   {
     await createPlaylist(page, "From Stick");
     await openUsb(page, "usb-playlists");

@@ -88,9 +88,10 @@ function scrollToEnd(page) {
 
 const fetchOffsets = (page) => fetchCalls(page).then((calls) => calls.map((c) => c.offset));
 
-test("selecting a large playlist renders the top of the first hydrated page; the scrollbar spans the whole playlist from the start; jumping to the end loads just the end of the playlist, hydrated; searching re-queries the backend and shows the filtered-in track, hydrated; sorting re-queries the backend so the new first page is hydrated", async ({ page }) => {
+test("large USB playlist paging", async ({ page }) => {
   await installTauriMock(page, { trackCount: PLAYLIST_SIZE });
   await selectBigPlaylist(page);
+  // Selecting a large playlist renders the top of the first hydrated page.
   {
     await expect(rowByTitle(page, "Track 0000").locator(".bpm-pill")).toBeVisible();
     // Only the rows around the viewport are in the DOM.
@@ -109,6 +110,7 @@ test("selecting a large playlist renders the top of the first hydrated page; the
   }
 
   await selectBigPlaylist(page);
+  // The scrollbar spans the whole playlist from the start.
   {
     const body = page.locator("#usbPlaylistTracks");
     const rowHeight = await body.locator(".track-grid-row").first().evaluate((row) => row.getBoundingClientRect().height);
@@ -117,6 +119,7 @@ test("selecting a large playlist renders the top of the first hydrated page; the
   }
 
   await selectBigPlaylist(page);
+  // Jumping to the end loads just the end of the playlist, hydrated.
   {
     await expect(rowByTitle(page, "Track 0000")).toBeVisible();
 
@@ -131,6 +134,7 @@ test("selecting a large playlist renders the top of the first hydrated page; the
   }
 
   await selectBigPlaylist(page);
+  // Searching re-queries the backend and shows the filtered-in track, hydrated.
   {
     const queriesBefore = (await fetchCalls(page)).map((c) => c.query || "");
     expect(queriesBefore.every((q) => q === "")).toBe(true);
@@ -145,6 +149,7 @@ test("selecting a large playlist renders the top of the first hydrated page; the
   }
 
   await selectBigPlaylist(page);
+  // Sorting re-queries the backend so the new first page is hydrated.
   {
     // The "Track" column sorts by artist then title (see TrackSort) -- all
     // mock tracks share an artist, so SORT_TARGET_TITLE ("AAAA...") lands first.

@@ -330,9 +330,11 @@ function finishMockExport(page) {
   }));
 }
 
-test("an analysis run during an export keeps its pause/cancel but leaves the export's progress bar and timer alone; the progress bar passes to an analysis still running when the export ends", async ({ page }) => {
+test("analysis during an export", async ({ page }) => {
   await installScanAnalysisMock(page, { trackCount: 1, pieceDelayMs: 50, pauseBeforeBpmKey: true });
   await page.goto("/");
+  // An analysis run during an export keeps its pause/cancel but leaves the export's progress bar
+  // and timer alone.
   {
     await startMockExport(page);
 
@@ -361,6 +363,7 @@ test("an analysis run during an export keeps its pause/cancel but leaves the exp
   }
 
   await page.reload();
+  // The progress bar passes to an analysis still running when the export ends.
   {
     await startMockExport(page);
 
@@ -438,9 +441,11 @@ test("reanalyze clears the row's BPM and key until the fresh values arrive", asy
   await expect(row.locator(".td-key .key-pill")).toHaveText("2A");
 });
 
-test("while a track is analyzed everything can still start an analysis, except that track's own button; tracks waiting in the job have their own button disabled, and new work after a cancel brings the controls back", async ({ page }) => {
+test("analyze buttons during a job", async ({ page }) => {
   await installScanAnalysisMock(page, { trackCount: 2, pieceDelayMs: 0, holdAfterTrackStart: true });
   await page.goto("/");
+  // While a track is analyzed everything can still start an analysis, except that track's own
+  // button.
   {
     const rows = page.locator("#libraryTableBody .track-grid-row");
     const analyzeButtons = page.locator('#libraryTableBody [data-action="analyze-track"]');
@@ -470,6 +475,8 @@ test("while a track is analyzed everything can still start an analysis, except t
   }
 
   await page.reload();
+  // Tracks waiting in the job have their own button disabled, and new work after a cancel brings
+  // the controls back.
   {
     const analyzeButtons = page.locator('#libraryTableBody [data-action="analyze-track"]');
     const waitingId = await page.locator("#libraryTableBody .track-grid-row").nth(1).getAttribute("data-track-id");
@@ -504,9 +511,10 @@ test("while a track is analyzed everything can still start an analysis, except t
   }
 });
 
-test("a request for a track already in the job leaves that row analyzing; the final message is the job's, with its warning count as the Event Log link", async ({ page }) => {
+test("repeat requests and the final message", async ({ page }) => {
   await installScanAnalysisMock(page, { trackCount: 1, pieceDelayMs: 0, holdAfterTrackStart: true });
   await page.goto("/");
+  // A request for a track already in the job leaves that row analyzing.
   {
     const row = page.locator("#libraryTableBody .track-grid-row").first();
     await row.locator(".td-select input").check();
@@ -527,6 +535,7 @@ test("a request for a track already in the job leaves that row analyzing; the fi
   }
 
   await page.reload();
+  // The final message is the job's, with its warning count as the Event Log link.
   {
     await page.waitForFunction(() => window.__hasJobListener?.());
     await page.evaluate(() => {
@@ -721,6 +730,7 @@ test("event log entries go to the session log file, which the Open log file butt
       total: 2,
       trackId: "bad-1",
       trackTitle: "Bad Track",
+      filePath: "/music/bad-track.flac",
       failed: true,
       errorMessage: "decode failed",
       // As the backend words it.
@@ -731,17 +741,21 @@ test("event log entries go to the session log file, which the Open log file butt
 
   await page.locator("#eventLogBtn").click();
   await expect(page.locator("#eventLogList")).toContainText("Track analysis failed: Bad Track (bad-1) - decode failed");
+  // The track's file is the entry's details: its tooltip, and in the log file.
+  await expect(page.locator("#eventLogList .event-log-message", { hasText: "Bad Track" }))
+    .toHaveAttribute("data-tooltip", "/music/bad-track.flac");
   await expect
     .poll(async () => page.evaluate(() => window.__scanTestStats.logFileLines))
-    .toContainEqual(expect.stringContaining("Track analysis failed: Bad Track (bad-1) - decode failed"));
+    .toContainEqual(expect.stringContaining("Track analysis failed: Bad Track (bad-1) - decode failed | /music/bad-track.flac"));
 
   await page.locator("#eventLogOpenFileBtn").click();
   await expect.poll(async () => page.evaluate(() => window.__scanTestStats.openLogFileCalls)).toBe(1);
 });
 
-test("pause clicked mid-track keeps the elapsed timer counting until that track actually finishes; pause clicked between tracks unfreezes the timer if the next track was already picked up", async ({ page }) => {
+test("pause and the elapsed timer", async ({ page }) => {
   await installScanAnalysisMock(page, { trackCount: 3, pieceDelayMs: 300 });
   await page.goto("/");
+  // Pause clicked mid-track keeps the elapsed timer counting until that track actually finishes.
   {
     await page.locator("#analyzeLibraryBtn").click();
     await expect(page.locator("#progressPauseBtn")).toBeVisible();
@@ -772,6 +786,7 @@ test("pause clicked mid-track keeps the elapsed timer counting until that track 
   }
 
   await page.reload();
+  // Pause clicked between tracks unfreezes the timer if the next track was already picked up.
   {
     await page.locator("#analyzeLibraryBtn").click();
     await expect(page.locator("#progressPauseBtn")).toBeVisible();

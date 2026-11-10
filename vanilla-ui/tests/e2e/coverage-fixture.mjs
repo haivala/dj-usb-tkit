@@ -1,9 +1,9 @@
 // Drop-in test/expect replacement for @playwright/test. Every page gets the
 // shared stubbed backend (backend_mock.js) installed first. When COVERAGE is
 // unset nothing else changes. When COVERAGE=1, it wraps each test's page
-// in V8 JS coverage collection and appends the raw per-test coverage entry
-// for dist/main.js to .coverage-e2e/raw-v8-coverage.jsonl, one JSON object
-// per line. Run `node scripts/report-e2e-coverage.mjs` afterwards to merge
+// in V8 JS coverage collection and appends the raw coverage entry for
+// dist/main.js of each load of the page to .coverage-e2e/raw-v8-coverage.jsonl,
+// one JSON object per line. Run `node scripts/report-e2e-coverage.mjs` afterwards to merge
 // those entries and print a per-source-file line-coverage table.
 import { test as base, expect } from "@playwright/test";
 import { appendFileSync, mkdirSync, readFileSync } from "node:fs";
@@ -29,14 +29,32 @@ export const test = base.extend({
       await use(page);
       return;
     }
+    // V8 keeps coverage only for the page load that is still open, so each
+    // load's is written before the test navigates away (goto or reload); a
+    // reload the app makes itself (a language change) isn't seen.
+    const save = async () => {
+      const coverage = await page.coverage.stopJSCoverage();
+      const entries = coverage.filter((e) => e.url.endsWith("/main.js"));
+      if (entries.length) {
+        mkdirSync(coverageOutDir, { recursive: true });
+        appendFileSync(rawOutFile, entries.map((e) => JSON.stringify(e) + "\n").join(""));
+      }
+    };
+    let loaded = false;
+    for (const method of ["goto", "reload"]) {
+      const navigate = page[method].bind(page);
+      page[method] = async (...args) => {
+        if (loaded) {
+          await save();
+          await page.coverage.startJSCoverage({ resetOnNavigation: false });
+        }
+        loaded = true;
+        return navigate(...args);
+      };
+    }
     await page.coverage.startJSCoverage({ resetOnNavigation: false });
     await use(page);
-    const coverage = await page.coverage.stopJSCoverage();
-    const entry = coverage.find((e) => e.url.endsWith("/main.js"));
-    if (entry) {
-      mkdirSync(coverageOutDir, { recursive: true });
-      appendFileSync(rawOutFile, JSON.stringify(entry) + "\n");
-    }
+    await save();
   }
 });
 

@@ -1,4 +1,4 @@
-// Merges the per-test raw V8 coverage entries collected by
+// Merges the per-page-load raw V8 coverage entries collected by
 // tests/e2e/coverage-fixture.mjs (one JSON object per line, written when
 // COVERAGE=1) into a single coverage set, maps it back to original source
 // files via dist/main.js.map through v8-to-istanbul, and prints a per-file
@@ -22,35 +22,32 @@ if (!existsSync(rawFile)) {
 const lines = readFileSync(rawFile, "utf8").split("\n").filter((l) => l.trim());
 const entries = lines.map((l) => JSON.parse(l));
 
-function mergeV8Coverage(allEntries) {
-  const base = allEntries[0];
-  const countByRangeKey = new Map();
-  for (const entry of allEntries) {
-    for (const fn of entry.functions) {
-      for (const range of fn.ranges) {
-        const key = `${range.startOffset}:${range.endOffset}`;
-        countByRangeKey.set(key, (countByRangeKey.get(key) || 0) + range.count);
-      }
-    }
-  }
-  return {
-    ...base,
-    functions: base.functions.map((fn) => ({
-      ...fn,
-      ranges: fn.ranges.map((r) => ({
-        ...r,
-        count: countByRangeKey.get(`${r.startOffset}:${r.endOffset}`) ?? r.count
-      }))
-    }))
-  };
+// Each entry (one page load) is mapped on its own and the hit counts added up
+// per statement, function and branch: merging the raw V8 ranges first would
+// keep only the first entry's ranges, and V8 reports ranges only for the code
+// a load ran, so code only later loads ran would count as never run.
+async function toIstanbul(entry) {
+  const converter = v8toIstanbul(mainJsPath, 0, { source: entry.source });
+  await converter.load();
+  converter.applyCoverage(entry.functions);
+  return converter.toIstanbul();
 }
 
-const merged = mergeV8Coverage(entries);
-
-const converter = v8toIstanbul(mainJsPath, 0, { source: merged.source });
-await converter.load();
-converter.applyCoverage(merged.functions);
-const istanbulData = converter.toIstanbul();
+const istanbulData = {};
+for (const entry of entries) {
+  for (const [file, fc] of Object.entries(await toIstanbul(entry))) {
+    const merged = istanbulData[file];
+    if (!merged) {
+      istanbulData[file] = fc;
+      continue;
+    }
+    for (const id of Object.keys(fc.s)) merged.s[id] = (merged.s[id] || 0) + fc.s[id];
+    for (const id of Object.keys(fc.f)) merged.f[id] = (merged.f[id] || 0) + fc.f[id];
+    for (const id of Object.keys(fc.b)) {
+      merged.b[id] = (merged.b[id] || fc.b[id].map(() => 0)).map((n, i) => n + (fc.b[id][i] || 0));
+    }
+  }
+}
 
 const rows = [];
 for (const [file, fc] of Object.entries(istanbulData)) {
@@ -83,7 +80,7 @@ for (const [file, fc] of Object.entries(istanbulData)) {
 
 rows.sort((a, b) => a.file.localeCompare(b.file));
 
-console.log(`\nE2e coverage (from ${entries.length} test run${entries.length === 1 ? "" : "s"}, merged):\n`);
+console.log(`\nE2e coverage (from ${entries.length} page load${entries.length === 1 ? "" : "s"}, merged):\n`);
 console.log("file".padEnd(50), "line %".padStart(8), "branch %".padStart(10), "func %".padStart(8));
 for (const r of rows) {
   console.log(

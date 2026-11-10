@@ -362,23 +362,9 @@ export function usbSelectionChanged(ctx) {
   hideUsbDiagnostics(ctx);
 }
 
+// The folders picked in the system dialog; none when it's cancelled.
 export async function pickSourceFolders(ctx) {
-  const selected = await ctx.invoke("pick_source_folders");
-  if (!selected) return [];
-
-  const rawItems = Array.isArray(selected) ? selected : [selected];
-  return rawItems
-    .map((item) => {
-      if (typeof item === "string") return item;
-      if (!item || typeof item !== "object") return "";
-      if (typeof item.path === "string") return item.path;
-      if (typeof item.Path === "string") return item.Path;
-      if (typeof item.url === "string") return item.url;
-      if (typeof item.Url === "string") return item.Url;
-      if (typeof item.filePath === "string") return item.filePath;
-      return "";
-    })
-    .filter(Boolean);
+  return ctx.invoke("pick_source_folders");
 }
 export function updateUsbConfigControlsVisibility(ctx) {
   const { state, el } = ctx;
@@ -1186,12 +1172,9 @@ function createUsbTracksController(ctx, { bodyId, selectionView, fetchCommand, s
       }),
     normalize: (track) => ctx.normalizeTrack(track),
     rowOptions: () => ({
-      withCheckbox: true,
       selectedIds: ctx.state.trackSelections[selectionView].ids,
       actionLabel: "+",
       actionType,
-      compactAddButton: true,
-      enableAnalyzeActions: true,
       origin: "usb",
       secondaryActionType,
     }),
@@ -1290,16 +1273,14 @@ export async function loadUsbDevices(ctx) {
   } catch (err) {
     console.warn("Failed to load USB devices:", err);
   }
-  return applyUsbDevices(ctx, items);
+  applyUsbDevices(ctx, items);
 }
 
 // The known drives, for the recent list.
 function applyUsbDevices(ctx, devices) {
   const { state } = ctx;
   state.usbDevices = devices || [];
-  state.usbRecentRoots = state.usbDevices.map((item) => item.rootPath);
   renderUsbRecentRoots(ctx);
-  return state.usbRecentRoots;
 }
 
 export async function pruneUsbDevice(ctx, id) {
@@ -1315,12 +1296,12 @@ export async function pruneUsbDevice(ctx, id) {
 export function renderUsbRecentRoots(ctx) {
   const { state, el, document } = ctx;
   el.usbRecentList.replaceChildren();
-  const rows = state.usbRecentRoots;
-  el.usbRecentRow.classList.toggle("hidden", !rows.length);
-  if (!rows.length) return;
+  const devices = state.usbDevices;
+  el.usbRecentRow.classList.toggle("hidden", !devices.length);
+  if (!devices.length) return;
   const locked = isUsbRootChangeBlocked(state);
-  const devicesByPath = new Map(state.usbDevices.map((d) => [d.rootPath, d]));
-  rows.forEach((path) => {
+  devices.forEach((device) => {
+    const path = device.rootPath;
     const row = cloneTemplate(document, "tplUsbRecentItem");
     const btn = row.querySelector(".usb-cfg-recent-btn");
     btn.dataset.usbRecentPath = path;
@@ -1329,14 +1310,9 @@ export function renderUsbRecentRoots(ctx) {
     btn.disabled = locked;
 
     const pruneBtn = row.querySelector(".usb-cfg-recent-prune-btn");
-    const device = devicesByPath.get(path);
-    if (device) {
-      pruneBtn.dataset.usbPruneDeviceId = device.id;
-      pruneBtn.setAttribute("aria-label", t("ui-usb-forget-path-aria-label", { path }));
-      pruneBtn.disabled = locked;
-    } else {
-      pruneBtn.remove();
-    }
+    pruneBtn.dataset.usbPruneDeviceId = device.id;
+    pruneBtn.setAttribute("aria-label", t("ui-usb-forget-path-aria-label", { path }));
+    pruneBtn.disabled = locked;
     el.usbRecentList.appendChild(row);
   });
 }

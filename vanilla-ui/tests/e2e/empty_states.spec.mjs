@@ -18,7 +18,14 @@ function installEmptyStateMock(page) {
 
 test("Empty states render correctly", async ({ page }) => {
   await installEmptyStateMock(page);
+  // A first visit: Help opens by itself, and closing it is remembered.
+  await page.addInitScript(() => window.localStorage.removeItem("djusbtkit.helpSeen"));
   await page.goto("/");
+  await expect(page.locator("#helpOverlay")).toBeVisible();
+  await page.locator("#helpCloseBtn").click();
+  await expect(page.locator("#helpOverlay")).toBeHidden();
+  await expect.poll(() => page.evaluate(() => window.__calls.some((c) =>
+    c.command === "set_frontend_setting" && c.request?.key === "ui_help_seen_v1" && c.request?.value === "1"))).toBe(true);
 
   await expect(page.locator("#libraryEmptyState")).toContainText("Add a music folder to get started");
   await expect(page.locator("body")).toHaveClass(/library-onboarding/);

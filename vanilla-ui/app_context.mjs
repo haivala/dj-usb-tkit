@@ -74,7 +74,7 @@ export function createAppContext(env) {
     withProgress handleJobEvent toggleAnalysisPause cancelAnalysis cancelTranscode scheduleProgressIdle waitForUsbJobIdle`);
   bindActions(uiCtrl, `updateModeText updateActivePlaylistIndicators updateAddToPlaylistButtons
     updateUsbNameBadge updateSelectionCount updateUsbSubNavDisabledState updateUsbEmptyState
-    updateSourceFilterIndicator updateAnalyzeLibraryButtonLabel closeSettingsDrawer updateUsbHealthDot
+    updateAnalyzeLibraryButtonLabel closeSettingsDrawer updateUsbHealthDot
     syncLibraryOnboardingMode bindEvents`);
   bindActions(settings, "persistSetting hydrateLocalStorageFromFrontendSettingsDb");
   bindActions(bootstrap, "switchView debugFrontendLog handleBackendLogEvent");

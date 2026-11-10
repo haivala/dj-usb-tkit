@@ -5,8 +5,11 @@ function installBasicTauriMock(page, opts = {}) {
     const backend = window.__e2eBackend;
     // Playlist track loads still in flight (see `playlistTracksDelayMs`).
     window.__pendingTrackLoads = 0;
+    // The update check's answer: the one a test's `showUpdate` set, else `opts`.
+    const updateCheck = JSON.parse(sessionStorage.getItem("updateCheck") || "null") || opts?.updateCheck;
+    const installFails = !!sessionStorage.getItem("installFails");
     // The update check only runs under the Tauri runtime.
-    if (opts?.updateCheck) backend.useTauriRuntime();
+    if (updateCheck) backend.useTauriRuntime();
     backend.install(async (command, request, payload) => {
       if (command === "rename_playlist" && opts?.failRename) return backend.fail("Rename failed: disk full (mock)");
       if (command === "get_playlist_tracks" && opts?.playlistTracksDelayMs) {
@@ -15,15 +18,15 @@ function installBasicTauriMock(page, opts = {}) {
         window.__pendingTrackLoads -= 1;
         return backend.answer(command, payload);
       }
-      if (command === "check_for_update" && opts?.updateCheck) {
+      if (command === "check_for_update" && updateCheck) {
         // `nextUpdateChecks` (set by a test) answers the later re-checks.
-        return backend.ok(window.__nextUpdateChecks?.shift() || opts.updateCheck);
+        return backend.ok(window.__nextUpdateChecks?.shift() || updateCheck);
       }
       if (command === "install_update") {
         const job = { jobId: "job-update-1", jobType: "update", stage: "install_update", current: 0, total: 1 };
         window.__emitJobEvent({ ...job, event: "job.started", percent: 0, message: "Checking for update..." });
         window.__emitJobEvent({ ...job, event: "job.progress", percent: 40, message: "Downloading update 0.3.0..." });
-        if (opts?.installFails) {
+        if (installFails) {
           const message = "Update failed: signature mismatch (mock)";
           window.__emitJobEvent({ ...job, event: "job.failed", percent: 100, message });
           return backend.fail(message, "INTERNAL_ERROR");
@@ -35,9 +38,10 @@ function installBasicTauriMock(page, opts = {}) {
   }, { opts });
 }
 
-test("loads shell with library active and sidebar nav; can create and delete playlist via sidebar; usb panel shows when clicking USB nav item; sidebar playlist rename via the hover pencil; sidebar playlists reorder by dragging and new ones go on top; sidebar resizes by dragging its edge, saves the width, and double-click resets it", async ({ page }) => {
+test("shell and sidebar", async ({ page }) => {
   await installBasicTauriMock(page);
   await page.goto("/");
+  // Loads shell with library active and sidebar nav.
   {
     await expect(page.getByRole("heading", { name: "DJ USB Tkit" })).toBeVisible();
     await expect(page.locator("#panel-library")).toHaveClass(/active/);
@@ -49,6 +53,7 @@ test("loads shell with library active and sidebar nav; can create and delete pla
   }
 
   await page.reload();
+  // Can create and delete playlist via sidebar.
   {
     await page.locator("#addPlaylistBtn").click();
 
@@ -87,6 +92,7 @@ test("loads shell with library active and sidebar nav; can create and delete pla
   }
 
   await page.reload();
+  // Usb panel shows when clicking USB nav item.
   {
     await page.locator('.nav-item[data-view="usb"]').click();
     await expect(page.locator("#panel-usb")).toHaveClass(/active/);
@@ -94,6 +100,7 @@ test("loads shell with library active and sidebar nav; can create and delete pla
   }
 
   await page.reload();
+  // Sidebar playlist rename via the hover pencil.
   {
     await createSidebarPlaylists(page, ["Pencil Me"]);
 
@@ -112,6 +119,7 @@ test("loads shell with library active and sidebar nav; can create and delete pla
   }
 
   await page.reload();
+  // Sidebar playlists reorder by dragging and new ones go on top.
   {
     await createSidebarPlaylists(page, ["Alpha", "Bravo", "Charlie"]);
 
@@ -135,6 +143,7 @@ test("loads shell with library active and sidebar nav; can create and delete pla
   }
 
   await page.reload();
+  // Sidebar resizes by dragging its edge, saves the width, and double-click resets it.
   {
     const sidebar = page.locator("#navSidebar");
     const resizer = page.locator("#navSidebarResizer");
@@ -173,7 +182,9 @@ test("loads shell with library active and sidebar nav; can create and delete pla
   }
 });
 
-test("draws the backend's source folders as source chips, with its Analyze label; the filter mark shows only while a folder's tracks are hidden", async ({ page }) => {
+// Draws the backend's source folders as source chips, with its Analyze label; the filter mark shows
+// while the backend says tracks are hidden.
+test("source chips", async ({ page }) => {
   await page.addInitScript(() => {
     window.__e2eSourceFolders = ["/music", "/media/library"];
     const backend = window.__e2eBackend;
@@ -184,6 +195,7 @@ test("draws the backend's source folders as source chips, with its Analyze label
         if (sessionStorage.getItem("folderMissing")) {
           sources.folders[0] = { ...sources.folders[0], enabled: false };
           sources.folders[1] = { ...sources.folders[1], missing: true };
+          sources.filtering = true;
         }
         return backend.ok(sources);
       }
@@ -351,152 +363,160 @@ const selfUpdatable = (severity) => updateCheck(severity, {
   action: "install",
 });
 
-test("a feature release shows the new-features banner; dismissing it sticks for that version", async ({ page }) => {
-  await installBasicTauriMock(page, { updateCheck: updateCheck("feature") });
-  await page.goto("/");
-
-  const banner = page.locator("#updateBanner");
-  await expect(banner).toBeVisible();
-  await expect(banner).toHaveClass(/is-feature/);
-  await expect(banner).not.toHaveClass(/is-critical/);
-  await expect(banner).toHaveAttribute("role", "status");
-  await expect(page.locator("#updateBannerText")).toHaveText("New features available: 0.3.0 — view release");
-
-  await page.locator("#updateBannerDismissBtn").click();
-  await expect(banner).toBeHidden();
+// Each part starts the app with the update check answering `check` (the
+// mock reads it from sessionStorage), with a banner never dismissed.
+async function showUpdate(page, check, { installFails = false } = {}) {
+  await page.evaluate(({ check, installFails }) => {
+    window.localStorage.clear();
+    window.sessionStorage.setItem("updateCheck", JSON.stringify(check));
+    window.sessionStorage.setItem("installFails", installFails ? "1" : "");
+  }, { check, installFails });
   await page.reload();
-  await expect(page.locator("#panel-library")).toHaveClass(/active/);
-  await expect(banner).toBeHidden();
-});
+}
 
-test("a critical release shows the critical banner", async ({ page }) => {
-  await installBasicTauriMock(page, { updateCheck: updateCheck("critical") });
+test("update check", async ({ page }) => {
+  await installBasicTauriMock(page);
   await page.goto("/");
 
-  const banner = page.locator("#updateBanner");
-  await expect(banner).toBeVisible();
-  await expect(banner).toHaveClass(/is-critical/);
-  await expect(banner).toHaveAttribute("role", "alert");
-  await expect(page.locator("#updateBannerText")).toHaveText("Critical update available: 0.3.0 — view release");
-});
-
-test("a normal release shows no banner", async ({ page }) => {
-  await installBasicTauriMock(page, { updateCheck: updateCheck("normal") });
-  await page.goto("/");
-
-  // The check has landed (the settings update line and the dot show it)…
-  await expect(page.locator("#settingsUpdateStatus")).toHaveText("Version 0.3.0 is available.");
-  await expect(page.locator("#settingsUpdateDot")).toBeVisible();
-  // …and a routine release stays out of the way.
-  await expect(page.locator("#updateBanner")).toBeHidden();
-});
-
-test("a package-manager install gets a direct download link, not the in-app updater", async ({ page }) => {
   const debUrl = "https://example.test/dl/DJ_USB_Tkit_0.3.0_amd64.deb";
-  await installBasicTauriMock(page, {
-    updateCheck: updateCheck("feature", { installKind: "deb", downloadUrl: debUrl, action: "download" })
-  });
-  await page.goto("/");
+  // A critical release: the critical banner.
+  await showUpdate(page, updateCheck("critical"));
+  {
+    const banner = page.locator("#updateBanner");
+    await expect(banner).toBeVisible();
+    await expect(banner).toHaveClass(/is-critical/);
+    await expect(banner).toHaveAttribute("role", "alert");
+    await expect(page.locator("#updateBannerText")).toHaveText("Critical update available: 0.3.0 — view release");
+  }
 
-  const bannerActions = page.locator("#updateBannerActions");
-  await expect(page.locator("#updateBanner")).toBeVisible();
-  await expect(bannerActions.locator(".update-download-link")).toBeVisible();
-  await expect(bannerActions.locator(".update-install-btn")).toBeHidden();
-  await expect(page.locator("#settingsUpdateActions .update-install-btn")).toBeHidden();
+  // A normal release: the settings line and dot, no banner.
+  await showUpdate(page, updateCheck("normal"));
+  {
+    // The check has landed (the settings update line and the dot show it)…
+    await expect(page.locator("#settingsUpdateStatus")).toHaveText("Version 0.3.0 is available.");
+    await expect(page.locator("#settingsUpdateDot")).toBeVisible();
+    // …and a routine release stays out of the way.
+    await expect(page.locator("#updateBanner")).toBeHidden();
+  }
 
-  await bannerActions.locator(".update-download-link").click();
-  await expect
-    .poll(() => page.evaluate(() => window.__calls.find((c) => c.command === "plugin:opener|open_url")?.payload?.url))
-    .toBe(debUrl);
-});
+  // A package-manager install: a direct download link, not the in-app updater.
+  await showUpdate(page, updateCheck("feature", { installKind: "deb", downloadUrl: debUrl, action: "download" }));
+  {
+    const bannerActions = page.locator("#updateBannerActions");
+    await expect(page.locator("#updateBanner")).toBeVisible();
+    await expect(bannerActions.locator(".update-download-link")).toBeVisible();
+    await expect(bannerActions.locator(".update-install-btn")).toBeHidden();
+    await expect(page.locator("#settingsUpdateActions .update-install-btn")).toBeHidden();
 
-test("Update & restart runs the update as a job on the footer progress bar", async ({ page }) => {
-  await installBasicTauriMock(page, { updateCheck: selfUpdatable("critical") });
-  await page.goto("/");
+    await bannerActions.locator(".update-download-link").click();
+    await expect
+      .poll(() => page.evaluate(() => window.__calls.find((c) => c.command === "plugin:opener|open_url")?.payload?.url))
+      .toBe(debUrl);
+  }
 
-  const install = page.locator("#updateBannerActions .update-install-btn");
-  await expect(install).toBeVisible();
-  await install.click();
+  // Update & restart: the update runs as a job on the footer progress bar.
+  await showUpdate(page, selfUpdatable("critical"));
+  {
+    const install = page.locator("#updateBannerActions .update-install-btn");
+    await expect(install).toBeVisible();
+    await install.click();
 
-  await expect(page.locator("#updateBanner")).toBeHidden();
-  await expect(page.locator("#progressFooter")).toHaveClass(/active/);
-  await expect(page.locator("#progressText")).toContainText("Downloading update 0.3.0...");
-  await expect(page.locator("#progressFill")).toHaveAttribute("style", /width: 40%/);
-  // No second install while the first one runs.
-  await expect(page.locator("#settingsUpdateActions .update-install-btn")).toBeDisabled();
-});
+    await expect(page.locator("#updateBanner")).toBeHidden();
+    await expect(page.locator("#progressFooter")).toHaveClass(/active/);
+    await expect(page.locator("#progressText")).toContainText("Downloading update 0.3.0...");
+    await expect(page.locator("#progressFill")).toHaveAttribute("style", /width: 40%/);
+    // No second install while the first one runs.
+    await expect(page.locator("#settingsUpdateActions .update-install-btn")).toBeDisabled();
+  }
 
-test("a failed update shows the reason in the footer and can be retried", async ({ page }) => {
-  await installBasicTauriMock(page, { updateCheck: selfUpdatable("feature"), installFails: true });
-  await page.goto("/");
+  // A failed update: the reason in the footer, and it can be retried.
+  await showUpdate(page, selfUpdatable("feature"), { installFails: true });
+  {
+    await page.locator("#updateBannerActions .update-install-btn").click();
 
-  await page.locator("#updateBannerActions .update-install-btn").click();
+    await expect(page.locator("#progressFooter")).toHaveClass(/active/);
+    await expect(page.locator("#progressText")).toContainText("Update failed: signature mismatch (mock)");
+    await expect(page.locator("#settingsUpdateActions .update-install-btn")).toBeEnabled();
+    // The banner comes back with the retry button.
+    await expect(page.locator("#updateBanner")).toBeVisible();
+    await expect(page.locator("#updateBannerActions .update-install-btn")).toBeEnabled();
+    // The direct download stays on offer as the fallback (settings drawer is closed here).
+    await expect(page.locator("#settingsUpdateActions .update-download-link")).not.toHaveClass(/hidden/);
+  }
 
-  await expect(page.locator("#progressFooter")).toHaveClass(/active/);
-  await expect(page.locator("#progressText")).toContainText("Update failed: signature mismatch (mock)");
-  await expect(page.locator("#settingsUpdateActions .update-install-btn")).toBeEnabled();
-  // The banner comes back with the retry button.
-  await expect(page.locator("#updateBanner")).toBeVisible();
-  await expect(page.locator("#updateBannerActions .update-install-btn")).toBeEnabled();
-  // The direct download stays on offer as the fallback (settings drawer is closed here).
-  await expect(page.locator("#settingsUpdateActions .update-download-link")).not.toHaveClass(/hidden/);
-});
+  // Update & restart waits for a running job instead of cutting it short.
+  await showUpdate(page, selfUpdatable("feature"));
+  {
+    await expect(page.locator("#updateBannerActions .update-install-btn")).toBeVisible();
 
-test("Update & restart waits for a running job instead of cutting it short", async ({ page }) => {
-  await installBasicTauriMock(page, { updateCheck: selfUpdatable("feature") });
-  await page.goto("/");
-  await expect(page.locator("#updateBannerActions .update-install-btn")).toBeVisible();
+    await page.evaluate(() => window.__emitJobEvent({
+      event: "job.started", jobId: "job-export-1", jobType: "export", stage: "export_to_usb",
+      current: 0, total: 1, percent: 0, message: "Exporting..."
+    }));
+    await expect(page.locator("#progressText")).toContainText("Exporting...");
 
-  await page.evaluate(() => window.__emitJobEvent({
-    event: "job.started", jobId: "job-export-1", jobType: "export", stage: "export_to_usb",
-    current: 0, total: 1, percent: 0, message: "Exporting..."
-  }));
-  await expect(page.locator("#progressText")).toContainText("Exporting...");
+    await page.locator("#updateBannerActions .update-install-btn").click();
+    await expect(page.locator("#statusText")).toContainText("Finish the running job before updating.");
+    expect(await page.evaluate(() => window.__calls.some((c) => c.command === "install_update"))).toBe(false);
+  }
 
-  await page.locator("#updateBannerActions .update-install-btn").click();
-  await expect(page.locator("#statusText")).toContainText("Finish the running job before updating.");
-  expect(await page.evaluate(() => window.__calls.some((c) => c.command === "install_update"))).toBe(false);
-});
+  // The settings update line offers one action; its button re-checks on demand.
+  await showUpdate(page, selfUpdatable("normal"));
+  {
+    await expect(page.locator("#settingsUpdateDot")).toBeVisible();
+    await expect(page.locator("#settingsBtn")).toHaveAttribute("aria-label", "Settings (update available)");
 
-test("settings update line offers one action, and the header button re-checks on demand", async ({ page }) => {
-  await installBasicTauriMock(page, { updateCheck: selfUpdatable("normal") });
-  await page.goto("/");
-  await expect(page.locator("#settingsUpdateDot")).toBeVisible();
-  await expect(page.locator("#settingsBtn")).toHaveAttribute("aria-label", "Settings (update available)");
+    await page.locator("#settingsBtn").click();
+    const line = page.locator("#settingsUpdateSection");
+    const checkBtn = page.locator(".settings-header #settingsUpdateCheckBtn");
+    // The update line is the first thing in the body.
+    await expect(page.locator(".settings-body > :first-child")).toHaveId("settingsUpdateSection");
+    await expect(line).toBeVisible();
+    await expect(line.locator("#settingsUpdateStatus")).toHaveText("Version 0.3.0 is available.");
+    await expect(line.locator("#settingsUpdateReleaseLink")).toBeVisible();
+    // A self-updating install gets the in-app update only, not the download too.
+    await expect(line.locator(".update-install-btn")).toBeVisible();
+    await expect(line.locator(".update-download-link")).toBeHidden();
 
-  await page.locator("#settingsBtn").click();
-  const line = page.locator("#settingsUpdateSection");
-  const checkBtn = page.locator(".settings-header #settingsUpdateCheckBtn");
-  // The update line is the first thing in the body.
-  await expect(page.locator(".settings-body > :first-child")).toHaveId("settingsUpdateSection");
-  await expect(line).toBeVisible();
-  await expect(line.locator("#settingsUpdateStatus")).toHaveText("Version 0.3.0 is available.");
-  await expect(line.locator("#settingsUpdateReleaseLink")).toBeVisible();
-  // A self-updating install gets the in-app update only, not the download too.
-  await expect(line.locator(".update-install-btn")).toBeVisible();
-  await expect(line.locator(".update-download-link")).toBeHidden();
+    // A re-check that can't reach GitHub says so instead of "up to date"…
+    const noUpdate = (checkFailed) => ({
+      updateAvailable: false, severity: "none", currentVersion: "0.3.0", latestVersion: "0.3.0",
+      releaseUrl: "https://example.test", installKind: "nsis", downloadUrl: null, canSelfUpdate: false,
+      action: "none", checkFailed,
+      statusText: checkFailed ? "Couldn't check for updates." : "Up to date.", bannerText: "",
+    });
+    await page.evaluate((checks) => { window.__nextUpdateChecks = checks; }, [noUpdate(true), noUpdate(false)]);
+    await checkBtn.click();
+    await expect(line.locator("#settingsUpdateStatus")).toHaveText("Couldn't check for updates.");
+    await expect(line.locator("#settingsUpdateReleaseLink")).toBeHidden();
 
-  // A re-check that can't reach GitHub says so instead of "up to date"…
-  const noUpdate = (checkFailed) => ({
-    updateAvailable: false, severity: "none", currentVersion: "0.3.0", latestVersion: "0.3.0",
-    releaseUrl: "https://example.test", installKind: "nsis", downloadUrl: null, canSelfUpdate: false,
-    action: "none", checkFailed,
-    statusText: checkFailed ? "Couldn't check for updates." : "Up to date.", bannerText: "",
-  });
-  await page.evaluate((checks) => { window.__nextUpdateChecks = checks; }, [noUpdate(true), noUpdate(false)]);
-  await checkBtn.click();
-  await expect(line.locator("#settingsUpdateStatus")).toHaveText("Couldn't check for updates.");
-  await expect(line.locator("#settingsUpdateReleaseLink")).toBeHidden();
+    // …and a manual re-check answers "Up to date" until the drawer closes.
+    await checkBtn.click();
+    await expect(line.locator("#settingsUpdateStatus")).toHaveText("Up to date.");
+    await expect(line.locator(".update-install-btn")).toBeHidden();
+    await expect(page.locator("#settingsUpdateDot")).toBeHidden();
+    await page.locator("#settingsCloseBtn").click();
+    await page.locator("#settingsBtn").click();
+    await expect(line).toBeHidden();
+    await expect(checkBtn).toBeVisible();
+  }
 
-  // …and a manual re-check answers "Up to date" until the drawer closes.
-  await checkBtn.click();
-  await expect(line.locator("#settingsUpdateStatus")).toHaveText("Up to date.");
-  await expect(line.locator(".update-install-btn")).toBeHidden();
-  await expect(page.locator("#settingsUpdateDot")).toBeHidden();
-  await page.locator("#settingsCloseBtn").click();
-  await page.locator("#settingsBtn").click();
-  await expect(line).toBeHidden();
-  await expect(checkBtn).toBeVisible();
+  // A feature release: the new-features banner; dismissing it sticks for that version.
+  await showUpdate(page, updateCheck("feature"));
+  {
+    const banner = page.locator("#updateBanner");
+    await expect(banner).toBeVisible();
+    await expect(banner).toHaveClass(/is-feature/);
+    await expect(banner).not.toHaveClass(/is-critical/);
+    await expect(banner).toHaveAttribute("role", "status");
+    await expect(page.locator("#updateBannerText")).toHaveText("New features available: 0.3.0 — view release");
+
+    await page.locator("#updateBannerDismissBtn").click();
+    await expect(banner).toBeHidden();
+    await page.reload();
+    await expect(page.locator("#panel-library")).toHaveClass(/active/);
+    await expect(banner).toBeHidden();
+  }
 });
 
 // The mock keeps the saved language in sessionStorage, so it outlives the reload, and refuses
@@ -545,7 +565,9 @@ test("changing the language reloads the window in it, and a refused change keeps
   await expect(page.locator('label[for="languageSelect"] span')).toHaveText(/^\[.+\]$/);
 });
 
-test("in the test language, the first-run Library, Help and the update banner and card show only catalog text and data", async ({ page }) => {
+// In the test language, the first-run Library, Help and the update banner and card show only
+// catalog text and data.
+test("test language: first run, Help, update", async ({ page }) => {
   await installBasicTauriMock(page, { updateCheck: selfUpdatable("feature") });
   await useTestLanguage(page);
   await page.goto("/");
@@ -568,7 +590,9 @@ test("in the test language, the first-run Library, Help and the update banner an
   await check.expectNoEnglish();
 });
 
-test("a library row shows the backend's source icon, format badge, waveform and analyze state; its + waits for an active playlist", async ({ page }) => {
+// A library row shows the backend's source icon, format badge, waveform and analyze state; its +
+// waits for an active playlist.
+test("library row", async ({ page }) => {
   await page.addInitScript(() => {
     const backend = window.__e2eBackend;
     window.__e2eSourceFolders = ["/music"];
@@ -663,7 +687,11 @@ test("a library row shows the backend's source icon, format badge, waveform and 
   expect(await creates()).toBe(2);
 });
 
-test("startup: defaults backup on and Engine library off, opens the top playlist, runs the data migrations after the first load and logs their failure; a changed setting goes to the settings database, and a start with only that database restores every stored setting", async ({ page }) => {
+// Startup: defaults backup on and Engine library off, opens the top playlist, runs the data
+// migrations after the first load and logs their failure; a changed setting goes to the settings
+// database, and a start with only that database restores every stored setting; a failed first load
+// says so.
+test("startup and settings", async ({ page }) => {
   await page.addInitScript(() => {
     const backend = window.__e2eBackend;
     backend.seed({ playlists: [{ id: "pl-top", name: "Top Set" }, { id: "pl-2", name: "Second" }] });
@@ -677,6 +705,10 @@ test("startup: defaults backup on and Engine library off, opens the top playlist
           nodeAvailable: true, essentiaInstalled: true,
         });
       }
+      if (command === "get_frontend_settings" && sessionStorage.getItem("startFails")) {
+        return backend.ok({ values: { ui_analysis_bpm_range_v1: "fast" }, nodeAvailable: true, essentiaInstalled: true });
+      }
+      if (command === "list_playlists" && sessionStorage.getItem("startFails")) return backend.fail("database locked");
       if (command === "run_data_migrations") return backend.fail("Data upgrade failed: disk full");
     });
   });
@@ -710,9 +742,21 @@ test("startup: defaults backup on and Engine library off, opens the top playlist
   await expect(page.locator("#exportSyncModeAdditive")).toBeChecked();
   await expect(page.locator("#analysisBpmRangeSelect")).toHaveValue("58-115");
   expect(await page.evaluate(() => localStorage.getItem("djusbtkit.exportBackup"))).toBe("0");
+
+  // A first load that fails says so, and the migrations wait for a load that
+  // works; a stored BPM range the app doesn't offer falls back to the default.
+  await page.evaluate(() => { localStorage.clear(); sessionStorage.removeItem("fromDb"); sessionStorage.setItem("startFails", "1"); });
+  await page.reload();
+  await expect(page.locator("#statusText")).toHaveText("Initialization failed: database locked");
+  await expect(page.locator("#progressText")).toHaveText("Initializing failed");
+  await expect(page.locator("#progressFooter")).toHaveClass(/error/);
+  expect(await page.evaluate(() => window.__calls.some((c) => c.command === "run_data_migrations"))).toBe(false);
+  await expect(page.locator("#analysisBpmRangeSelect")).toHaveValue("70-180");
 });
 
-test("analysis engine: choosing Essentia shows its install row; download, cancel, a missing Node.js and remove each show what they do and choosing is saved", async ({ page }) => {
+// Analysis engine: choosing Essentia shows its install row; download, cancel, a missing Node.js and
+// remove each show what they do and choosing is saved.
+test("analysis engine", async ({ page }) => {
   await page.addInitScript(() => {
     const backend = window.__e2eBackend;
     const flag = (key) => sessionStorage.getItem(key);

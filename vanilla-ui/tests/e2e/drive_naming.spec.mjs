@@ -63,7 +63,9 @@ async function openRecentUsbNamingPrompt(page, opts = {}) {
   return pill;
 }
 
-test("clicking a recent USB pill for an unnamed drive opens the naming prompt, saves the name, and shows it in the status-line badge", async ({ page }) => {
+// Clicking a recent USB pill for an unnamed drive opens the naming prompt, saves the name, and
+// shows it in the status-line badge.
+test("naming an unnamed drive from its recent pill", async ({ page }) => {
   await openRecentUsbNamingPrompt(page);
 
   await expect(page.locator("#driveNameOverlay")).toBeVisible();
@@ -102,7 +104,9 @@ test("forgetting a recent USB drops it from the list the prune answers with", as
   expect(await page.evaluate(() => window.__calls.filter((c) => c.command === "list_usb_devices").length)).toBe(lists);
 });
 
-test("clicking a recent USB pill for an already-named drive does not reopen the naming prompt, and shows the name in the status-line badge", async ({ page }) => {
+// Clicking a recent USB pill for an already-named drive does not reopen the naming prompt, and
+// shows the name in the status-line badge.
+test("an already-named drive from its recent pill", async ({ page }) => {
   await installTauriMock(page, { deviceName: "Club Stick" });
   await page.goto("/");
 

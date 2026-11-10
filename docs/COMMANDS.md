@@ -115,9 +115,11 @@ drive selection from being rendered against a newer selected drive.
   their waveforms (`waveformPreview`, or `waveformColorData` for rekordbox
   tracks), read for that page only, as a USB page's are.
 - `get_library_sources` → `{ folders, rekordboxDbEnabled, mixxxDbEnabled,
-  everConfigured, filterStatusText }`, each folder `{ path, enabled, missing,
-  fullyAnalyzed }`. `filterStatusText` is the status line after a switch
-  ("Source filters: 2/3 enabled").
+  everConfigured, filterStatusText, filtering }`, each folder `{ path, enabled,
+  missing, fullyAnalyzed }`. `filterStatusText` is the status line after a switch
+  ("Source filters: 2/3 enabled"); `filtering` is on while some source's tracks
+  are hidden (a folder off or missing, an imported library off), which the
+  library's filter mark shows.
   The backend stores the source folders and their switches; every library
   command (`browse_source_files`, `list_matching_track_ids`,
   `get_selection_duration`, `add_library_selection_to_playlist(s)`,

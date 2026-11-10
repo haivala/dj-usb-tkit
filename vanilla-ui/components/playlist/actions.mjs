@@ -746,14 +746,11 @@ export function createPlaylistTracksController(ctx) {
         )
         : {};
       return {
-        withCheckbox: true,
         selectedIds: ctx.state.trackSelections.playlist.ids,
         origin: "local",
         secondaryActionType: "play-library",
-        enableAnalyzeActions: true,
         actionLabel: "×",
         actionType: "remove-playlist-track",
-        compactAddButton: true,
         reservesDragColumn: true,
         enableDragReorder: lock.enableDragReorder,
         dragDisabledTooltip: lock.dragDisabledTooltip,

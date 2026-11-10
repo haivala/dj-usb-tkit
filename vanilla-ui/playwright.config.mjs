@@ -2,6 +2,8 @@ import { defineConfig, devices } from "@playwright/test";
 
 export default defineConfig({
   testDir: "./tests/e2e",
+  // Stops a run whose dist/ bundle is older than the sources.
+  globalSetup: "./tests/e2e/dist-fresh.mjs",
   timeout: 30_000,
   expect: {
     timeout: 5_000

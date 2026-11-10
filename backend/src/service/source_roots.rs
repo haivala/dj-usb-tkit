@@ -279,6 +279,7 @@ impl BackendService {
             track_not_in_library_status:
                 "Track is not in the local library yet. Run Analyze Library first.".to_string(),
             filter_status_text: tr::library_sources_filter_status(enabled, total).render(),
+            filtering: enabled < total,
             rekordbox_db_enabled: sources.rekordbox_db,
             mixxx_db_enabled: sources.mixxx_db,
             ever_configured: sources.ever_configured(),

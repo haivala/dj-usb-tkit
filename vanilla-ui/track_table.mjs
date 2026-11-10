@@ -118,36 +118,27 @@ export function createTrackRow(ctx, track, options) {
     }
   }
 
-  const selectCell = cell("select");
-  if (options.withCheckbox) {
-    const checkbox = selectCell.firstElementChild;
-    checkbox.dataset.id = track.id;
-    checkbox.checked = !!options.selectedIds?.has(track.id);
-  } else {
-    selectCell.remove();
-  }
+  const checkbox = cell("select").firstElementChild;
+  checkbox.dataset.id = track.id;
+  checkbox.checked = !!options.selectedIds?.has(track.id);
 
   // The play button sits over the cover (see .cover-play).
   cell("cover").firstElementChild.prepend(coverElement(doc, coverUrl(track)));
 
   const transport = row.querySelector(".transport-btn");
-  if (options.secondaryActionType) {
-    const playing = isTrackCurrentlyPlaying(ctx, track);
-    const label = t(playing ? "ui-track-row-stop" : "ui-track-row-play");
-    transport.classList.toggle("is-playing", playing);
-    Object.assign(transport.dataset, {
-      action: options.secondaryActionType,
-      index: String(options.index),
-      id: renderTrackId,
-      rowKey,
-      origin,
-      tooltip: label,
-    });
-    transport.setAttribute("aria-label", label);
-    transport.append(transportIcon(doc, playing));
-  } else {
-    transport.remove();
-  }
+  const playing = isTrackCurrentlyPlaying(ctx, track);
+  const label = t(playing ? "ui-track-row-stop" : "ui-track-row-play");
+  transport.classList.toggle("is-playing", playing);
+  Object.assign(transport.dataset, {
+    action: options.secondaryActionType,
+    index: String(options.index),
+    id: renderTrackId,
+    rowKey,
+    origin,
+    tooltip: label,
+  });
+  transport.setAttribute("aria-label", label);
+  transport.append(transportIcon(doc, playing));
 
   const waveform = row.querySelector(".waveform");
   Object.assign(waveform.dataset, { index: String(options.index), id: renderTrackId, origin });
@@ -159,16 +150,12 @@ export function createTrackRow(ctx, track, options) {
   }
 
   const cueButton = row.querySelector(".waveform-detail-btn");
-  if (options.enableAnalyzeActions) {
-    // Cue editing readiness is per-origin: local rows carry `analysisReady`;
-    // USB rows (playlist/history) carry the serialized on-USB ANLZ path instead.
-    const cueReady = options.origin === "usb" ? !!track.usbAnalysisPath : !!track.analysisReady;
-    cueButton.dataset.index = String(options.index);
-    cueButton.dataset.id = renderTrackId;
-    setCueButtonState(cueButton, { ready: cueReady, hasWaveform });
-  } else {
-    cueButton.remove();
-  }
+  // Cue editing readiness is per-origin: local rows carry `analysisReady`;
+  // USB rows (playlist/history) carry the serialized on-USB ANLZ path instead.
+  const cueReady = options.origin === "usb" ? !!track.usbAnalysisPath : !!track.analysisReady;
+  cueButton.dataset.index = String(options.index);
+  cueButton.dataset.id = renderTrackId;
+  setCueButtonState(cueButton, { ready: cueReady, hasWaveform });
 
   row.querySelector(".track-title").textContent = track.title ?? "";
   row.querySelector(".track-artist").textContent = track.artist ?? "";
@@ -181,39 +168,27 @@ export function createTrackRow(ctx, track, options) {
   fillBpmCell(cell("bpm"), track);
   fillKeyCell(cell("key"), track);
 
-  const actionCell = cell("action");
-  if (options.actionLabel || options.enableAnalyzeActions) {
-    const [primary, analyze] = actionCell.querySelectorAll("button");
-    if (options.actionLabel) {
-      const isRemoveAction = options.actionType === "remove-playlist-track";
-      primary.dataset.action = options.actionType;
-      primary.dataset.index = String(options.index);
-      primary.dataset.id = track.id;
-      if (isRemoveAction) {
-        const playlistName = state.playlists?.find((p) => p.id === state.currentPlaylistId)?.name;
-        primary.dataset.tooltip = playlistName
-          ? t("ui-track-row-remove-from-tooltip", { playlist: playlistName })
-          : t("ui-track-row-remove-from-playlist-tooltip");
-      } else {
-        setAddButtonState(primary, state.playlists?.find((p) => p.id === state.currentPlaylistId));
-      }
-      primary.textContent = options.actionLabel;
-      if (!options.compactAddButton) primary.removeAttribute("class");
-    } else {
-      primary.remove();
-    }
-    // USB playlist / history rows (`origin: "usb"`) keep `enableAnalyzeActions`
-    // on for the cue-editor button, but per-track analyze acts only on a local
-    // library copy, so it doesn't belong on those lists.
-    if (options.enableAnalyzeActions && options.origin !== "usb") {
-      analyze.dataset.id = renderTrackId;
-      analyze.textContent = t(track.analysisReady ? "ui-track-row-reanalyze" : "ui-track-row-analyze");
-      applyAnalyzeButtonState(state, analyze, renderTrackId, track.analysisReady);
-    } else {
-      analyze.remove();
-    }
+  const [primary, analyze] = cell("action").querySelectorAll("button");
+  primary.dataset.action = options.actionType;
+  primary.dataset.index = String(options.index);
+  primary.dataset.id = track.id;
+  if (options.actionType === "remove-playlist-track") {
+    const playlistName = state.playlists?.find((p) => p.id === state.currentPlaylistId)?.name;
+    primary.dataset.tooltip = playlistName
+      ? t("ui-track-row-remove-from-tooltip", { playlist: playlistName })
+      : t("ui-track-row-remove-from-playlist-tooltip");
   } else {
-    actionCell.textContent = "-";
+    setAddButtonState(primary, state.playlists?.find((p) => p.id === state.currentPlaylistId));
+  }
+  primary.textContent = options.actionLabel;
+  // Per-track analyze acts only on a local library copy, so USB playlist /
+  // history rows don't get it.
+  if (options.origin !== "usb") {
+    analyze.dataset.id = renderTrackId;
+    analyze.textContent = t(track.analysisReady ? "ui-track-row-reanalyze" : "ui-track-row-analyze");
+    applyAnalyzeButtonState(state, analyze, renderTrackId, track.analysisReady);
+  } else {
+    analyze.remove();
   }
 
   return row;
@@ -252,7 +227,6 @@ export function buildTrackTableRow(ctx, track, options) {
     } catch (error) {
       row = cloneTemplate(ctx.document, "tplTrackRowFallback");
       if (!options.reservesDragColumn) row.querySelector(".td-drag").remove();
-      if (!options.withCheckbox) row.querySelector(".td-select").remove();
       row.querySelector(".td-track").textContent = track.title ?? "";
       ctx.emitStatus(`Track render fallback used: ${error?.message || "unknown render error"}`);
     }

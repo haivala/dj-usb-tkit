@@ -74,9 +74,6 @@ export function updateUsbSubNavDisabledState(ctx) {
   });
   el.backupsRefreshBtn.disabled = !hasRoot;
   el.usbBackupsBtn.disabled = !hasRoot;
-  if (!hasRoot && (state.activeTab === "usb-playlists" || state.activeTab === "usb-history" || state.activeTab === "usb-player-menu" || state.activeTab === "backups")) {
-    ctx.switchView("usb").catch(() => {});
-  }
 }
 
 export function updateUsbEmptyState(ctx) {
@@ -84,7 +81,7 @@ export function updateUsbEmptyState(ctx) {
   const container = document.getElementById("usbEmptyState");
   if (!container) return;
   const hasValidRoot = !!state.usbRoot && !!state.usbRootValid;
-  const hasRecents = Array.isArray(state.usbRecentRoots) && state.usbRecentRoots.length > 0;
+  const hasRecents = state.usbDevices.length > 0;
   container.replaceChildren();
   if (!hasValidRoot && !hasRecents) {
     renderEmptyState(container, {
@@ -94,16 +91,6 @@ export function updateUsbEmptyState(ctx) {
       onAction: () => document.getElementById("selectUsbFolderBtn")?.click()
     });
   }
-}
-
-export function updateSourceFilterIndicator(ctx) {
-  const { state, el } = ctx;
-  const sources = state.librarySources;
-  const folderHidden = sources.folders.some((folder) => !folder.enabled || folder.missing);
-  // Only an imported library can be filtered out; one never imported isn't.
-  const rekordboxDbFiltered = !!(state.externalRekordboxDbPath && state.rekordboxDbImported && !sources.rekordboxDbEnabled);
-  const mixxxDbFiltered = !!(state.externalMixxxDbPath && state.mixxxDbImported && !sources.mixxxDbEnabled);
-  el.sourceFilterIndicator.classList.toggle("active", folderHidden || rekordboxDbFiltered || mixxxDbFiltered);
 }
 
 export function updateAnalyzeLibraryButtonLabel(ctx) {

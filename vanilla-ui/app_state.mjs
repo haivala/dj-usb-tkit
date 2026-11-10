@@ -12,11 +12,10 @@ export function createInitialState() {
     // ({ path, label, parent, enabled, missing, fullyAnalyzed }, in tree
     // order: a folder after the one it lies inside) and the imported
     // libraries' switches.
-    librarySources: { folders: [], rekordboxDbEnabled: false, mixxxDbEnabled: false, everConfigured: false, analyzeButtonLabel: "", analyzeScanningStatus: "", trackNotInLibraryStatus: "" },
+    librarySources: { folders: [], rekordboxDbEnabled: false, mixxxDbEnabled: false, everConfigured: false, analyzeButtonLabel: "", analyzeScanningStatus: "", trackNotInLibraryStatus: "", filtering: false },
     usbRoot: null,
     // Known drives (`list_usb_devices`) and their root paths, for the recent list.
     usbDevices: [],
-    usbRecentRoots: [],
     usbRootValid: false,
     usbDeviceName: null,
     // The name a connected drive carries that belongs to another drive.

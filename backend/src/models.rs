@@ -692,6 +692,10 @@ pub struct LibrarySourcesData {
     /// The status line after a source's switch changes: how many of the
     /// folders and imported libraries are switched on.
     pub filter_status_text: String,
+    /// Some source's tracks are hidden from the library: a folder switched off
+    /// or missing, or an imported library switched off. The library's filter
+    /// mark shows it.
+    pub filtering: bool,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]

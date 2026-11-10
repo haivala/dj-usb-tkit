@@ -52,9 +52,10 @@ function canvasesDrawn(page, selector) {
   );
 }
 
-test("startup draws the waveforms the library page carries; the cue editor draws the track's detail waveform", async ({ page }) => {
+test("waveforms at startup and in the cue editor", async ({ page }) => {
   await installWaveformStartupMock(page);
   await page.goto("/");
+  // Startup draws the waveforms the library page carries.
   {
     await expect(page.locator("#libraryTableBody .track-grid-row")).toHaveCount(2);
 
@@ -70,6 +71,7 @@ test("startup draws the waveforms the library page carries; the cue editor draws
   }
 
   await page.reload();
+  // The cue editor draws the track's detail waveform.
   {
     const row = page.locator("#libraryTableBody .track-grid-row").first();
     await row.hover();
@@ -247,9 +249,10 @@ function installSourceChipAnalysisMock(page) {
   });
 }
 
-test("source chips show analyzed green on startup and adding a source indexes it; Import ticks rekordbox and Mixxx playlists, imports each and opens the first", async ({ page }) => {
+test("source chips and playlist import", async ({ page }) => {
   await installSourceChipAnalysisMock(page);
   await page.goto("/");
+  // Source chips show analyzed green on startup and adding a source indexes it.
   {
     await expect(page.locator(".source-chip.source-chip-analyzed")).toHaveCount(1);
     await page.locator("#addSourceBtn").click();
@@ -314,6 +317,7 @@ test("source chips show analyzed green on startup and adding a source indexes it
   }
 
   await page.reload();
+  // Import ticks rekordbox and Mixxx playlists, imports each and opens the first.
   {
     const importBtn = page.locator("#importPlaylistBtn");
     await expect(importBtn).toBeVisible();

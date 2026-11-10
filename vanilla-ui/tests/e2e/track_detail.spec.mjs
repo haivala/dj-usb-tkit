@@ -348,9 +348,10 @@ function installUsbTrackDetailMock(page, mockOpts = {}) {
   }, mockOpts);
 }
 
-test("the cue editor covers its page, and the edited row stays marked after closing; opening the editor while another track plays stops that track; opening the editor on the track already playing from its row shows it playing, and hands it back on close", async ({ page }) => {
+test("cue editor page and playback hand-off", async ({ page }) => {
   await installTrackDetailMock(page, { secondTrack: true });
   await page.goto("/");
+  // The cue editor covers its page, and the edited row stays marked after closing.
   {
     const view = page.locator("#trackDetailView");
     const rows = page.locator("#libraryTableBody .track-grid-row");
@@ -381,6 +382,7 @@ test("the cue editor covers its page, and the edited row stays marked after clos
   }
 
   await closeEditor(page);
+  // Opening the editor while another track plays stops that track.
   {
     const calls = (command) =>
       page.evaluate((command) => window.__calls.filter((c) => c.command === command), command);
@@ -389,6 +391,12 @@ test("the cue editor covers its page, and the edited row stays marked after clos
     const other = rows.filter({ hasText: "Other Track" });
 
     await other.locator('[data-action="play-library"]').click();
+    await expect(other.locator(".waveform")).toHaveClass(/is-playing/);
+    // Rows drawn again (a search typed, no click) keep the playhead on the
+    // playing track's new row.
+    const before = await other.elementHandle();
+    await page.locator("#librarySearch").fill("Track");
+    await expect.poll(() => before.evaluate((n) => n.isConnected)).toBe(false);
     await expect(other.locator(".waveform")).toHaveClass(/is-playing/);
 
     await rows.filter({ hasText: "Cue Track" }).locator('[data-action="edit-track-detail"]').click();
@@ -399,6 +407,8 @@ test("the cue editor covers its page, and the edited row stays marked after clos
   }
 
   await closeEditor(page);
+  // Opening the editor on the track already playing from its row shows it playing, and hands it
+  // back on close.
   {
     const calls = (command) =>
       page.evaluate((command) => window.__calls.filter((c) => c.command === command), command);
@@ -445,7 +455,16 @@ test("the cue editor covers its page, and the edited row stays marked after clos
   }
 });
 
-test("Escape closes the cue editor only when nothing is unsaved; dragging on the waveform, a cue marker or the overview never selects text; shortcuts stay out of text fields: typing c/1/Space in a cue name only types; undo/redo: buttons and Ctrl+Z / Ctrl+Shift+Z step through edits; a name typed is one step; a marker tooltip never jumps to the corner when the markers re-render under the pointer; a first memory cue on the first beat is where the CDJ loads: no start cue is added; dragging a cue marker moves it without playing; Quantize (Q, on by default) snaps it, Shift places it freely; the first memory cue adds the playback-start cue, which stays while any cue remains; an existing track's start cue drives the choice, not the remembered setting; choosing First cue remembers it", async ({ page }) => {
+// Escape closes the cue editor only when nothing is unsaved; dragging on the waveform, a cue marker
+// or the overview never selects text; shortcuts stay out of text fields: typing c/1/Space in a cue
+// name only types; undo/redo: buttons and Ctrl+Z / Ctrl+Shift+Z step through edits; a name typed is
+// one step; a marker tooltip never jumps to the corner when the markers re-render under the
+// pointer; a first memory cue on the first beat is where the CDJ loads: no start cue is added;
+// dragging a cue marker moves it without playing; Quantize (Q, on by default) snaps it, Shift
+// places it freely; the first memory cue adds the playback-start cue, which stays while any cue
+// remains; an existing track's start cue drives the choice, not the remembered setting; choosing
+// First cue remembers it.
+test("cue editor input", async ({ page }) => {
   await openCueEditor(page, { seedCues: [30000] });
   {
     const view = page.locator("#trackDetailView");
@@ -745,7 +764,10 @@ test("Escape closes the cue editor only when nothing is unsaved; dragging on the
   }
 });
 
-test("cue list rows carry the same letter as their waveform marker, in position order; the modal opens zoomed to 60 bars; Fit shows the whole track; zoom windows cue markers; the overview strip shows the visible window and moves the view", async ({ page }) => {
+// Cue list rows carry the same letter as their waveform marker, in position order; the modal opens
+// zoomed to 60 bars; Fit shows the whole track; zoom windows cue markers; the overview strip shows
+// the visible window and moves the view.
+test("cue list, zoom and pads", async ({ page }) => {
   await openCueEditor(page, { seedCues: [170000, 30000] });
   {
     const rows = page.locator("#trackDetailCueList .cue-row");
@@ -895,8 +917,10 @@ test("the playback-start cue follows an untouched first beat and is never after 
   expect(start.positionMs).toBe(hot.positionMs);
 });
 
-test("keyboard: Space plays/pauses (never presses the focused Save), C adds a cue, 1–8 jump, ←/→ move the selected cue; a cue row's play button and its waveform marker both play from that cue's position", async ({ page }) => {
+test("cue editor keyboard", async ({ page }) => {
   await openCueEditor(page, { seedCues: [30000, 90000] });
+  // Keyboard: Space plays/pauses (never presses the focused Save), C adds a cue, 1–8 jump, ←/→ move
+  // the selected cue.
   {
     const calls = (command) =>
       page.evaluate((command) => window.__calls.filter((c) => c.command === command), command);
@@ -939,6 +963,7 @@ test("keyboard: Space plays/pauses (never presses the focused Save), C adds a cu
   }
 
   await reopen(page);
+  // A cue row's play button and its waveform marker both play from that cue's position.
   {
     await expect(page.locator("#trackDetailCueList .cue-row")).toHaveCount(2);
 
@@ -984,8 +1009,9 @@ test("Camelot notation shows the backend's labels but saves the classic key", as
   await expect(keyPill).toHaveClass(/key-pill--h10/);
 });
 
-test("cues follow grid is off by default: BPM and first-beat edits leave cues where they are; cues follow grid: BPM and first-beat edits keep every cue on its beat, undoably, without drift; cues follow grid is remembered and leaves a hand-moved cue's new spot alone", async ({ page }) => {
+test("cues follow grid", async ({ page }) => {
   await openCueEditor(page, FOLLOW_GRID_SEED);
+  // Cues follow grid is off by default: BPM and first-beat edits leave cues where they are.
   {
     await expect(page.locator("#trackDetailFollowGrid")).toHaveAttribute("aria-pressed", "false");
 
@@ -997,6 +1023,7 @@ test("cues follow grid is off by default: BPM and first-beat edits leave cues wh
   }
 
   await reopen(page);
+  // Cues follow grid: BPM and first-beat edits keep every cue on its beat, undoably, without drift.
   {
     const toggle = page.locator("#trackDetailFollowGrid");
     await toggle.click();
@@ -1042,6 +1069,7 @@ test("cues follow grid is off by default: BPM and first-beat edits leave cues wh
   }
 
   await reopen(page);
+  // Cues follow grid is remembered and leaves a hand-moved cue's new spot alone.
   {
     await expect(page.locator("#trackDetailFollowGrid")).toHaveAttribute("aria-pressed", "true");
 
@@ -1060,8 +1088,9 @@ test("cues follow grid is off by default: BPM and first-beat edits leave cues wh
   }
 });
 
-test("memory cues show as ▼ flags without a letter, outside the 8 pads, and are saved as they are; the memory-cue slot: M and + add one, ◀ ▶ step through them, rename, colour and delete", async ({ page }) => {
+test("memory cues", async ({ page }) => {
   await openCueEditor(page, { seedCues: [30000], seedMemory: MEMORY_SEED });
+  // Memory cues show as ▼ flags without a letter, outside the 8 pads, and are saved as they are.
   {
     const memoryMarkers = page.locator("#trackDetailCueMarkers .cue-marker.is-memory");
     await expect(memoryMarkers).toHaveCount(3);
@@ -1101,6 +1130,7 @@ test("memory cues show as ▼ flags without a letter, outside the 8 pads, and ar
   // Quantize off (remembered), then open the track afresh.
   await page.locator("#trackDetailQuantize").click();
   await reopen(page);
+  // The memory-cue slot: M and + add one, ◀ ▶ step through them, rename, colour and delete.
   {
     const slot = page.locator("#trackDetailMemoryCue");
 
@@ -1150,8 +1180,9 @@ test("memory cues show as ▼ flags without a letter, outside the 8 pads, and ar
   }
 });
 
-test("a memory cue never lands on another cue: a drag stops short; a hot cue added on a memory cue turns it into that hot cue, keeping its name and colour", async ({ page }) => {
+test("memory cue collisions", async ({ page }) => {
   await openCueEditor(page, { seedCues: [30120], seedMemory: [{ positionMs: 120, name: "Intro", colorId: 3 }] });
+  // A memory cue never lands on another cue: a drag stops short.
   {
     // Quantize on: the hot cue sits on beat 64 (30120 ms), the memory cue on
     // the first beat (120 ms).
@@ -1180,6 +1211,7 @@ test("a memory cue never lands on another cue: a drag stops short; a hot cue add
   }
 
   await reopen(page);
+  // A hot cue added on a memory cue turns it into that hot cue, keeping its name and colour.
   {
     // C at the stopped playhead snaps to the first beat, where the memory cue is.
     await page.keyboard.press("c");
@@ -1196,7 +1228,24 @@ test("a memory cue never lands on another cue: a drag stops short; a hot cue add
   }
 });
 
-test("double-click the waveform adds a cue at that position without starting playback; track-detail modal adds a cue at the playhead and saves it; usage hints show until the track has a cue, then fold into a ? tooltip; with Q on, a double-clicked cue lands on the nearest beat; Shift+double-click places it freely; cue names default to 'Cue N' and stay editable without losing focus; the Beat grid slider sets how strongly the grid shows, and is remembered; bar numbers label the grid without crowding, down to every bar when zoomed in; beat grid lines sit on whole device pixels, evenly spaced, at a fractional-pixel tempo; the metronome has the native engine click on the grid, following grid edits and the mix, off on close; key stepper steps through the backend's key options and wraps at the ends; the folder button shows the track's file in its folder; switching key notation in settings persists it and re-fetches the backend's labels; genre, star rating and release date: a change to only them saves only them, leaving the beat grid, key and cues alone; a rating edit alongside a BPM edit saves both, each with only its own fields; BPM and first-beat steppers: ÷2/×2 fix a half/double tempo; −/+ and the ▲/▼ arrows step by 0.01 BPM and 1 ms; track-detail modal edits BPM, saves it, and the library row/tooltip update; track-detail modal edits the musical key, saves it, and the library row updates; playback-start choice: informational with no cues, then applies the remembered (default First cue) setting; remembered start-on-first-beat: the first cue adds the start cue; deleting the last cue removes it", async ({ page }) => {
+// Double-click the waveform adds a cue at that position without starting playback; track-detail
+// modal adds a cue at the playhead and saves it; usage hints show until the track has a cue, then
+// fold into a ? tooltip; with Q on, a double-clicked cue lands on the nearest beat; Shift+double-
+// click places it freely; cue names default to 'Cue N' and stay editable without losing focus; the
+// Beat grid slider sets how strongly the grid shows, and is remembered; bar numbers label the grid
+// without crowding, down to every bar when zoomed in; beat grid lines sit on whole device pixels,
+// evenly spaced, at a fractional-pixel tempo; the metronome has the native engine click on the
+// grid, following grid edits and the mix, off on close; key stepper steps through the backend's key
+// options and wraps at the ends; the folder button shows the track's file in its folder; switching
+// key notation in settings persists it and re-fetches the backend's labels; genre, star rating and
+// release date: a change to only them saves only them, leaving the beat grid, key and cues alone; a
+// rating edit alongside a BPM edit saves both, each with only its own fields; BPM and first-beat
+// steppers: ÷2/×2 fix a half/double tempo; −/+ and the ▲/▼ arrows step by 0.01 BPM and 1 ms; track-
+// detail modal edits BPM, saves it, and the library row/tooltip update; track-detail modal edits
+// the musical key, saves it, and the library row updates; playback-start choice: informational with
+// no cues, then applies the remembered (default First cue) setting; remembered start-on-first-beat:
+// the first cue adds the start cue; deleting the last cue removes it.
+test("adding, editing and saving cues", async ({ page }) => {
   await openCueEditor(page);
   {
     // Default view is 60 bars (0–112.5 s) of the 180 s track; x≈300/1227 ≈ 24 % ⇒ ~28 s.
@@ -1790,7 +1839,11 @@ test("double-click the waveform adds a cue at that position without starting pla
   }
 });
 
-test("play/pause pauses in the backend, freezes the playhead, and + Hot cue lands on the paused spot; play/pause resumes in the backend from where it was paused; play after the track played to its end starts it over; a waveform click parks the playhead without playing; dragging the waveform under the centred playhead plays along", async ({ page }) => {
+// Play/pause pauses in the backend, freezes the playhead, and + Hot cue lands on the paused spot;
+// play/pause resumes in the backend from where it was paused; play after the track played to its
+// end starts it over; a waveform click parks the playhead without playing; dragging the waveform
+// under the centred playhead plays along.
+test("cue editor playback", async ({ page }) => {
   await openCueEditor(page, { quantize: false, tauriEvents: true });
   {
     const btn = page.locator("#trackDetailPlayPause");
@@ -1991,10 +2044,11 @@ test("cue editor opens + saves from an app-playlist track row", async ({ page })
   await expect(row.locator(".td-key .key-pill")).toHaveText("Em");
 });
 
-test("the cue editor opens from a USB history row; a details-only edit from a USB row saves only the changed fields through the USB metadata command; cues and key save from a USB playlist row through the USB commands; a save that fails on the device is surfaced, not silently dropped", async ({ page }) => {
+test("cue editor on USB rows", async ({ page }) => {
   await installUsbTrackDetailMock(page);
   await page.goto("/");
   await openUsb(page, "usb-history");
+  // The cue editor opens from a USB history row.
   {
     const row = page.locator("#historyTracks .track-grid-row");
     await expect(row).toHaveCount(1);
@@ -2005,6 +2059,8 @@ test("the cue editor opens from a USB history row; a details-only edit from a US
     expect(detailCall.request.usbAnalysisPathRaw).toBe("/PIONEER/USBANLZ/P001/0000A1B2/ANLZ0000.DAT");
   }
   await page.locator("#trackDetailCancelBtn").click();
+  // A details-only edit from a USB row saves only the changed fields through the USB metadata
+  // command.
   {
     await page.locator('.nav-item[data-view="usb-playlists"]').click();
     const row = page.locator("#usbPlaylistTracks .track-grid-row");
@@ -2043,6 +2099,7 @@ test("the cue editor opens from a USB history row; a details-only edit from a US
     await expect(page.locator("#statusText")).toContainText("Saved track details for 1 track to USB");
     await expect(row.locator(".td-year")).toHaveText("");
   }
+  // Cues and key save from a USB playlist row through the USB commands.
   {
     const row = page.locator("#usbPlaylistTracks .track-grid-row");
     await expect(row).toHaveCount(1);
@@ -2072,6 +2129,7 @@ test("the cue editor opens from a USB history row; a details-only edit from a US
     await expect(page.locator("#statusText")).toContainText("to USB");
     await expect(row.locator(".td-key .key-pill")).toHaveText("Dm");
   }
+  // A save that fails on the device is surfaced, not silently dropped.
   {
     await page.locator('#usbPlaylistTracks .track-grid-row [data-action="edit-track-detail"]').click();
     await expect(page.locator("#trackDetailView")).toBeVisible();
@@ -2128,7 +2186,9 @@ test("cue editor edits BPM from a USB playlist row, saves it through the USB com
   await expect(libraryBpm).toHaveText("128.50");
 });
 
-test("a USB save runs as a background job: the progress bar shows each write and the window stays usable; and waits for a running USB job instead of writing alongside it", async ({ page }) => {
+// A USB save runs as a background job: the progress bar shows each write and the window stays
+// usable; and waits for a running USB job instead of writing alongside it.
+test("USB save as a job", async ({ page }) => {
   await installUsbTrackDetailMock(page, { tauriEvents: true });
   await page.goto("/");
 

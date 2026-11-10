@@ -435,7 +435,9 @@ function installTauriMock(page, mode) {
   }, { mode });
 }
 
-test("USB initialize flow: an invalid-but-writable root shows the backend's hint and status, and can be initialized and unlocked", async ({ page }) => {
+// USB initialize flow: an invalid-but-writable root shows the backend's hint and status, and can be
+// initialized and unlocked.
+test("USB initialize", async ({ page }) => {
   await installTauriMock(page, "needs-init");
   await page.goto("/");
 
@@ -476,7 +478,13 @@ test("a repair preview with nothing to fix hides the list and turns Preview Fixe
   await expect(page.locator("#applyRepairsBtn")).toBeDisabled();
 });
 
-test("USB playlist removal confirm path handles cancel and confirm; the Event Log header button counts errors logged while closed; the log shows console warnings and CSP events, not console.log or startup's developer lines, with one filter option per source; an open Event Log updates live: new entries on top, repeats coalesce, rows are kept; Diagnostics and parity render without warning panel; USB audio formats: ticks and drag order are saved, and the last ticked format can't be unticked", async ({ page }) => {
+// USB playlist removal confirm path handles cancel and confirm; the Event Log header button counts
+// errors logged while closed; the log shows console warnings and CSP events, not console.log or
+// startup's developer lines, with one filter option per source; an open Event Log updates live: new
+// entries on top, repeats coalesce, rows are kept; Diagnostics and parity render without warning
+// panel; USB audio formats: ticks and drag order are saved, and the last ticked format can't be
+// unticked.
+test("USB playlist removal and the Event Log", async ({ page }) => {
   await installTauriMock(page, "valid");
   await page.goto("/");
   {
@@ -811,7 +819,9 @@ test("USB lists read after leaving their pages open the first item on return, an
   expect(await page.evaluate(() => window.__playlistFetches)).toBe(1);
 });
 
-test("removing a USB playlist keeps the open one; removing the open one opens nothing, even clicking its page again, until the page is opened again", async ({ page }) => {
+// Removing a USB playlist keeps the open one; removing the open one opens nothing, even clicking
+// its page again, until the page is opened again.
+test("removing the open USB playlist", async ({ page }) => {
   await installTauriMock(page, "reorder");
   await listenForBackendEvents(page);
   await countPlaylistFetches(page);
@@ -957,7 +967,9 @@ test("Rediagnose USB and Parity Report open Health & Diagnostics whatever the re
   await expect(usbHealthCard).toHaveAttribute("open");
 });
 
-test("Repair preview shows the backend's rows and locks structural-prerequisite fix checkboxes; the Engine fix turns the setting on", async ({ page }) => {
+// Repair preview shows the backend's rows and locks structural-prerequisite fix checkboxes; the
+// Engine fix turns the setting on.
+test("repair preview", async ({ page }) => {
   await installTauriMock(page, "valid");
   await countPlaylistFetches(page);
   await page.goto("/");
@@ -1089,7 +1101,9 @@ async function dragViaHandle(page, fromHandleSelector, toRowSelector, dropNearTo
   await page.mouse.up();
 }
 
-test("USB playlist drag-and-drop reorder persists the new order; a drag back onto its own row saves nothing", async ({ page }) => {
+// USB playlist drag-and-drop reorder persists the new order; a drag back onto its own row saves
+// nothing.
+test("USB playlist reorder", async ({ page }) => {
   await installTauriMock(page, "reorder");
   await countPlaylistFetches(page);
   await page.goto("/");
@@ -1158,7 +1172,9 @@ test("USB playlist drag-and-drop reorder persists the new order; a drag back ont
   expect(await page.evaluate(() => window.__reorderCalls.length)).toBe(reorderCalls.length);
 });
 
-test("a failed USB playlist reorder restores the order and keeps the playlist open, and reports the save's failure even when the re-read fails", async ({ page }) => {
+// A failed USB playlist reorder restores the order and keeps the playlist open, and reports the
+// save's failure even when the re-read fails.
+test("failed USB playlist reorder", async ({ page }) => {
   await installTauriMock(page, "reorder");
   await page.addInitScript(() => {
     const backend = window.__e2eBackend;
@@ -1200,6 +1216,9 @@ test("a failed USB playlist reorder restores the order and keeps the playlist op
   await expect(page.locator("#progressText")).toHaveText("USB load failed");
   await expect(page.locator("#progressFooter")).toHaveClass(/error/);
   await expect(page.locator("#statusText")).toContainText("Failed to save playlist order: write failed");
+  // The failure stays until its × closes it.
+  await page.locator("#progressDismiss").click();
+  await expect(page.locator("#progressFooter")).not.toHaveClass(/active/);
 });
 
 test("USB playlist drag auto-scrolls the list when held near its bottom edge", async ({ page }) => {
@@ -1390,7 +1409,8 @@ async function connectUsb(page) {
   await expect(page.locator("#diagOverallStatus")).toHaveText("WARN");
 }
 
-test("a running USB job locks the USB selection and export until it ends; other jobs don't", async ({ page }) => {
+// A running USB job locks the USB selection and export until it ends; other jobs don't.
+test("USB job locks", async ({ page }) => {
   await installTauriMock(page, "valid");
   await listenForBackendEvents(page);
   await page.addInitScript(() => {
@@ -1483,7 +1503,9 @@ test("a running USB job locks the USB selection and export until it ends; other 
   await expect(page.locator("#eventLogList")).not.toContainText("Export failed: disk gone");
 });
 
-test("a stored USB isn't shown as selected, or read, until it's validated, and the drive name badge does nothing meanwhile", async ({ page }) => {
+// A stored USB isn't shown as selected, or read, until it's validated, and the drive name badge
+// does nothing meanwhile.
+test("stored USB before validation", async ({ page }) => {
   await installTauriMock(page, "valid");
   await page.addInitScript(() => {
     window.localStorage.setItem("djusbtkit.usbRoot", "/Volumes/USB-TEST");
@@ -1509,7 +1531,9 @@ test("a stored USB isn't shown as selected, or read, until it's validated, and t
   await expect(page.locator("#driveNameOverlay")).toBeHidden();
 });
 
-test("restoring a backup: cancel and failure change nothing; success clears the report and lists and applies the playlists and backups it answers with", async ({ page }) => {
+// Restoring a backup: cancel and failure change nothing; success clears the report and lists and
+// applies the playlists and backups it answers with.
+test("restoring a backup", async ({ page }) => {
   await installTauriMock(page, "valid");
   await page.addInitScript(() => {
     window.__playlistReads = 0;
@@ -1639,7 +1663,9 @@ test("applying repairs that change nothing keeps the loaded USB playlists and sh
   expect(await page.evaluate(() => window.__trackFetches)).toBe(1);
 });
 
-test("the player menu editor selects in one list at a time, its buttons follow the selected item, and an edit clears the diagnostics report only when it changed the stick", async ({ page }) => {
+// The player menu editor selects in one list at a time, its buttons follow the selected item, and
+// an edit clears the diagnostics report only when it changed the stick.
+test("player menu editor", async ({ page }) => {
   await installTauriMock(page, "valid");
   await page.addInitScript(() => {
     window.__menuUpdated = false;
@@ -1708,7 +1734,9 @@ test("the player menu editor selects in one list at a time, its buttons follow t
   await expect(report).toHaveText("");
 });
 
-test("background colour shows nothing selected when the databases differ, a stick that can't take one says why, and choosing one sets it and redraws from the answer", async ({ page }) => {
+// Background colour shows nothing selected when the databases differ, a stick that can't take one
+// says why, and choosing one sets it and redraws from the answer.
+test("background colour", async ({ page }) => {
   await installTauriMock(page, "valid");
   await page.addInitScript(() => {
     window.__color = { pdbColor: 6, edbColor: 6, writable: true };
@@ -1876,7 +1904,9 @@ test("in the test language, the USB pages, Backups, Event Log and Settings show 
   await check.expectNoEnglish();
 });
 
-test("backend log entries: level, source and spacing are normalized, so repeats coalesce; different messages with the same details don't; Clear empties the log", async ({ page }) => {
+// Backend log entries: level, source and spacing are normalized, so repeats coalesce; different
+// messages with the same details don't; Clear empties the log.
+test("backend log entries", async ({ page }) => {
   await installTauriMock(page, "valid");
   await listenForBackendEvents(page);
   await page.goto("/");
@@ -1907,7 +1937,9 @@ test("backend log entries: level, source and spacing are normalized, so repeats 
   await expect(page.locator("#eventLogList")).toHaveText("No events");
 });
 
-test("logging: console.log/info go to the log file only, warnings (any arguments) and uncaught errors and rejections to the Event Log; a backend entry isn't written to the file again", async ({ page }) => {
+// Logging: console.log/info go to the log file only, warnings (any arguments) and uncaught errors
+// and rejections to the Event Log; a backend entry isn't written to the file again.
+test("frontend logging", async ({ page }) => {
   await installTauriMock(page, "valid");
   await listenForBackendEvents(page);
   await page.goto("/");
@@ -1921,6 +1953,8 @@ test("logging: console.log/info go to the log file only, warnings (any arguments
     console.warn("count:", 42, { key: "val" });
     setTimeout(() => { throw new Error("thrown-uncaught"); });
     Promise.reject(new Error("async failure"));
+    // A Tauri command's error arrives as a plain string.
+    Promise.reject("command refused");
     window.__emitBackendLog({ level: "warn", source: "backend", code: "backend.thing", message: "from the backend" });
   });
   await page.locator("#eventLogBtn").click();
@@ -1928,6 +1962,7 @@ test("logging: console.log/info go to the log file only, warnings (any arguments
   await expect(list).toContainText('count: 42 {"key":"val"}');
   await expect(list).toContainText("thrown-uncaught");
   await expect(list).toContainText("async failure");
+  await expect(list).toContainText("command refused");
   await expect(list).toContainText("from the backend");
   await expect(list).not.toContainText("file-only-log");
   await expect(list).not.toContainText("file-only-info");

@@ -19,9 +19,10 @@ async function rowTitles(page) {
   return page.locator("#libraryTableBody .track-grid-row .track-title").allTextContents();
 }
 
-test("Sort cycling on Track column; Year column shows the release year and sorts by it", async ({ page }) => {
+test("sort cycling and the Year column", async ({ page }) => {
   await installSortMock(page);
   await page.goto("/");
+  // Sort cycling on Track column.
   {
     await expect(page.locator("#libraryTableBody .track-grid-row")).toHaveCount(4);
 
@@ -44,6 +45,7 @@ test("Sort cycling on Track column; Year column shows the release year and sorts
   }
 
   await page.reload();
+  // Year column shows the release year and sorts by it.
   {
     await expect(page.locator("#libraryTableBody .track-grid-row")).toHaveCount(4);
     await expect(page.locator("#libraryTableBody .track-grid-row .td-year"))
