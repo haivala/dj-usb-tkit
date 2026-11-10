@@ -128,7 +128,7 @@ export function bindPlaylistEvents(ctx) {
       emitStatus(res.statusText);
     } catch (err) {
       console.error(err);
-      emitStatus(t("ui-playlist-remove-failed", { error: err.message || err }));
+      emitStatus(err?.message || String(err));
     }
   };
 
@@ -228,7 +228,7 @@ export function bindPlaylistEvents(ctx) {
     dragSortCommit = (dragPlaylist && isPlaylistSortActive())
       ? Promise.resolve(commitActivePlaylistSort(dragPlaylist.id)).catch((err) => {
           console.error(err);
-          emitStatus(t("ui-playlist-track-order-failed", { error: err.message || err }));
+          emitStatus(err?.message || String(err));
         })
       : null;
     row.classList.add("dragging");
@@ -314,7 +314,7 @@ export function bindPlaylistEvents(ctx) {
         await loadPlaylists();
       } catch (err) {
         console.error(err);
-        emitStatus(t("ui-playlist-track-order-failed", { error: err.message || err }));
+        emitStatus(err?.message || String(err));
       } finally {
         refreshCurrentPlaylistTracks().catch((e) => console.error(e));
       }

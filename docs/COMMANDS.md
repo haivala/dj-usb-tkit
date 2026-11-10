@@ -246,12 +246,13 @@ drive selection from being rendered against a newer selected drive.
 ### Settings
 
 - `get_frontend_settings`
-- `set_frontend_setting` — `ui_language_v1` takes a language code the app has a
-  catalog for (`i18n::languages()`) and switches the backend's language straight
-  away; an empty value is English. An unknown code is a validation error, and so
-  is a change while any job runs (USB jobs, library scan, imports, analysis,
-  Convert, update install): the UI reloads on a change, which would lose the
-  job's progress.
+- `set_frontend_setting` — the UI's own settings (theme, sidebar, export options, ...).
+  Not the language: `ui_language_v1` is refused here.
+- `set_language` — `{ language }`, a language code the app has a catalog for
+  (`i18n::languages()`): saves it and switches the backend's language straight away.
+  An unknown code is a validation error, and so is a change while any job runs (USB
+  jobs, library scan, imports, analysis, Convert, update install): the UI reloads on
+  a change, which would lose the job's progress.
 
 ### UI texts
 
@@ -545,6 +546,10 @@ These are desktop host commands, not backend API envelope commands:
 - `pick_usb_folder`
 - `pick_transcode_folder`
 - `save_text_file`
-- `allow_asset_paths`
 - `show_window`
 - `set_theme_background`
+
+No command lets the window widen the asset protocol's scope (the files it may load, such
+as covers). Beyond what `tauri.conf.json` allows, the backend lets in the library's source
+folders (at startup, and after `add_source_folders` / `relocate_source_root`) and a USB
+root `validate_usb_root` found valid.

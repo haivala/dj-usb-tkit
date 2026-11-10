@@ -363,10 +363,15 @@ impl BackendService {
             params![req.playlist_id.clone()],
         )?;
 
+        let status_text = if deleted > 0 {
+            tr::playlist_deleted(name)
+        } else {
+            tr::playlist_delete_failed(name)
+        };
         Ok(DeletePlaylistData {
             playlist_id: req.playlist_id,
             deleted: deleted > 0,
-            status_text: tr::playlist_deleted(name).render(),
+            status_text: status_text.render(),
         })
     }
 

@@ -18,8 +18,7 @@ import {
   STORAGE_KEY_ANALYSIS_ENGINE,
   FRONTEND_DB_KEY_ANALYSIS_ENGINE,
   STORAGE_KEY_KEY_NOTATION,
-  FRONTEND_DB_KEY_KEY_NOTATION,
-  FRONTEND_DB_KEY_LANGUAGE
+  FRONTEND_DB_KEY_KEY_NOTATION
 } from "../../settings_keys.mjs";
 
 const NODE_JS_URL = "https://nodejs.org/";
@@ -89,7 +88,7 @@ export function bindSettingsEvents(ctx) {
     el.settingsBackdrop.classList.remove("hidden");
     loadTranscodeFolder(ctx).catch(catchTranscodeFolderError);
   });
-  const catchTranscodeFolderError = (err) => ctx.emitStatus(t("ui-settings-transcode-folder-failed", { error: err?.message || err }));
+  const catchTranscodeFolderError = (err) => ctx.emitStatus(err?.message || String(err));
   el.transcodeFolderChangeBtn.addEventListener("click", () => {
     (async () => {
       const picked = await ctx.invoke("pick_transcode_folder");
@@ -250,10 +249,10 @@ export function bindSettingsEvents(ctx) {
     const current = uiLanguage();
     if (select.value === current) return;
     try {
-      await ctx.command("set_frontend_setting", { key: FRONTEND_DB_KEY_LANGUAGE, value: select.value });
+      await ctx.command("set_language", { language: select.value });
     } catch (err) {
       select.value = current;
-      emitStatus(t("ui-settings-language-failed", { error: err?.message || err }));
+      emitStatus(err?.message || String(err));
       return;
     }
     // The player is the backend's: it would play on with no control on screen.
@@ -339,7 +338,7 @@ export function bindSettingsEvents(ctx) {
       renderEssentiaInstallRow(ctx);
       emitStatus(t("ui-settings-essentia-removed"));
     } catch (err) {
-      emitStatus(t("ui-settings-essentia-remove-failed", { error: err?.message || String(err) }));
+      emitStatus(err?.message || String(err));
     }
   });
 

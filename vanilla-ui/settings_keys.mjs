@@ -39,8 +39,6 @@ export const FRONTEND_DB_KEY_CUE_QUANTIZE = "ui_cue_quantize_v1";
 export const FRONTEND_DB_KEY_CUE_METRONOME_MIX = "ui_cue_metronome_mix_v1";
 export const FRONTEND_DB_KEY_CUE_FOLLOW_GRID = "ui_cue_follow_grid_v1";
 export const FRONTEND_DB_KEY_KEY_NOTATION = "ui_key_notation_v1";
-// Only the backend keeps the language (no localStorage copy): the UI reads it from get_ui_texts.
-export const FRONTEND_DB_KEY_LANGUAGE = "ui_language_v1";
 
 export const FRONTEND_SETTING_BINDINGS = [
   { storageKey: STORAGE_KEY_THEME, dbKey: FRONTEND_DB_KEY_THEME },

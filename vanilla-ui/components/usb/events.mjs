@@ -1,4 +1,3 @@
-import { t } from "../../ui_texts.mjs";
 import { catchErr, handleTrackAction, resolveRowActionTrack } from "../shared/track_actions.mjs";
 import { bindListDragReorder, moveArrayItem } from "../shared/list_drag_reorder.mjs";
 import { bindUsbAudioFormatEvents } from "./audio_formats.mjs";
@@ -202,7 +201,7 @@ export function bindUsbEvents(ctx) {
       const playlist = state.usbPlaylists.find((item) => String(item.id) === String(removeId));
       removeUsbPlaylist(playlist).catch((err) => {
         console.error(err);
-        emitStatus(t("ui-usb-playlists-remove-failed", { error: err.message }));
+        emitStatus(err?.message || String(err));
       });
       return;
     }

@@ -145,7 +145,7 @@ export function startPlaylistRename(ctx, playlistId) {
         await loadPlaylists(ctx);
       } catch (err) {
         console.error("rename failed:", err);
-        emitStatus(t("ui-playlist-rename-failed", { error: err.message || err }));
+        emitStatus(err?.message || String(err));
       }
     }
     item.replaceChildren(...itemContent);
@@ -205,7 +205,7 @@ export async function reorderPlaylists(ctx, fromIndex, toIndex) {
       orderedPlaylistIds: state.playlists.map((playlist) => playlist.id)
     });
   } catch (err) {
-    ctx.emitStatus(t("ui-playlist-order-failed", { error: err.message || err }));
+    ctx.emitStatus(err?.message || String(err));
     await loadPlaylists(ctx);
   }
 }
@@ -360,7 +360,7 @@ export async function importExternalPlaylist(ctx) {
       const data = await command(source.listCommand, { path });
       return (Array.isArray(data?.items) ? data.items : []).map((item) => ({ ...item, source, path }));
     } catch (err) {
-      emitStatus(t("ui-playlist-import-list-failed", { library: source.label, error: err?.message || err }));
+      emitStatus(err?.message || String(err));
       return null;
     }
   }));
@@ -478,7 +478,7 @@ export async function deletePlaylist(ctx, playlistId) {
   try {
     const data = await command("delete_playlist", { playlistId });
     if (!data?.deleted) {
-      emitStatus(t("ui-playlist-delete-failed", { name: playlist.name }));
+      emitStatus(data?.statusText);
       return;
     }
     await loadPlaylists(ctx);

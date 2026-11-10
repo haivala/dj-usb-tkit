@@ -31,7 +31,7 @@ export function bindLibraryEvents(ctx) {
 
   // A switch changed: the backend saved it and lists the library with it.
   const applySwitchedSources = async (sources) => {
-    await applyLibrarySources(ctx, sources);
+    applyLibrarySources(ctx, sources);
     emitStatus(sources.filterStatusText);
     await resetAndLoadLibraryTracks(state.libraryQuery);
   };
@@ -50,7 +50,7 @@ export function bindLibraryEvents(ctx) {
       if (!confirmed) return;
 
       const result = await command("remove_source_folder", { path: removedRoot });
-      await applyLibrarySources(ctx, result.sources);
+      applyLibrarySources(ctx, result.sources);
       await resetAndLoadLibraryTracks(state.libraryQuery);
       await refreshCurrentPlaylistTracks();
       emitStatus(result.statusText);
@@ -90,7 +90,7 @@ export function bindLibraryEvents(ctx) {
         await withProgress(texts, async (progress) => {
           progress(20, t("ui-library-add-folders-saving"));
           const result = await command("add_source_folders", { paths: picked });
-          await applyLibrarySources(ctx, result.sources);
+          applyLibrarySources(ctx, result.sources);
           if (!result.added.length) {
             statusText = result.statusText;
             return;

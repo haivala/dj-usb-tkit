@@ -4,7 +4,6 @@
 // module only shows the list and sends the user's changes.
 
 import { cloneTemplate } from "../../ui_utils.mjs";
-import { t } from "../../ui_texts.mjs";
 import { bindListDragReorder, moveArrayItem } from "../shared/list_drag_reorder.mjs";
 
 
@@ -72,7 +71,7 @@ export function bindUsbAudioFormatEvents(ctx) {
   const { state, el } = ctx;
   const fail = (err) => {
     console.error(err);
-    ctx.emitStatus(t("ui-usb-audio-formats-save-failed", { error: err?.message || err }));
+    ctx.emitStatus(err?.message || String(err));
   };
 
   el.usbAudioFormatsHeader.addEventListener("click", () => {

@@ -1787,7 +1787,7 @@ async function openUsbTrackDetail(ctx, track, { rowKey = null } = {}) {
       const saved = await saveUsbMetadataEdits(ctx, [track], payload.metadataEdits);
       if (!payload.analysisEdited) emitStatus(saved.statusText);
     } catch (err) {
-      emitStatus(t("ui-group-edit-save-failed", { error: err.message }));
+      emitStatus(err?.message || String(err));
     }
   }
 }
@@ -1815,7 +1815,7 @@ async function saveUsbAnalysisEdits(ctx, track, usbAnalysisPathRaw, payload) {
     ctx.showTrackRow(saved.localTrack);
     return true;
   } catch (err) {
-    emitStatus(t("ui-track-detail-save-cues-failed", { error: err.message }));
+    emitStatus(err?.message || String(err));
     return false;
   }
 }
@@ -1880,7 +1880,7 @@ export async function openTrackDetail(ctx, track, opts = {}) {
       const saved = await saveLibraryMetadataEdits(ctx, [localId], payload.metadataEdits);
       if (!payload.analysisEdited) emitStatus(saved.statusText);
     } catch (err) {
-      emitStatus(t("ui-group-edit-save-failed", { error: err.message }));
+      emitStatus(err?.message || String(err));
     }
   }
 }
@@ -1900,7 +1900,7 @@ async function saveLocalAnalysisEdits(ctx, localId, payload) {
     ctx.showTrackRow(saved.track);
     return true;
   } catch (err) {
-    emitStatus(t("ui-track-detail-save-cues-failed", { error: err.message }));
+    emitStatus(err?.message || String(err));
     return false;
   }
 }

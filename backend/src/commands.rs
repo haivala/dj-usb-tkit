@@ -3,6 +3,7 @@ use std::sync::{Arc, Mutex, mpsc};
 
 use crate::error::BackendResult;
 use crate::error::ErrorPayload;
+use crate::i18n::{Arg, Text, tr};
 use crate::models::{
     AddLibrarySelectionToPlaylistRequest, AddLibrarySelectionToPlaylistsRequest,
     AddSourceFoldersData, AddSourceFoldersRequest, AddTrackCandidatesToPlaylistData,
@@ -56,6 +57,17 @@ fn wrap<T: serde::Serialize>(result: BackendResult<T>) -> ApiResponse<T> {
         .unwrap_or_else(|err| ApiResponse::failure(err.into()))
 }
 
+/// [`wrap`], with a failure's message inside `context`, a text saying what failed
+/// ("Rename failed: …"): the status line shows the message as it is.
+fn wrap_failed<T: serde::Serialize>(
+    result: BackendResult<T>,
+    context: impl FnOnce(Arg) -> Text,
+) -> ApiResponse<T> {
+    result
+        .map(ApiResponse::success)
+        .unwrap_or_else(|err| ApiResponse::failure(ErrorPayload::within(err, context)))
+}
+
 #[derive(Debug, Clone)]
 pub struct BackendCommands {
     service: BackendService,
@@ -93,7 +105,9 @@ impl BackendCommands {
         &self,
         req: ListExternalPlaylistsRequest,
     ) -> ApiResponse<ListExternalPlaylistsData> {
-        wrap(self.service.list_rekordbox_playlists(req))
+        wrap_failed(self.service.list_rekordbox_playlists(req), |error| {
+            tr::playlist_import_list_failed("rekordbox", error)
+        })
     }
 
     pub fn scan_mixxx_db(&self, req: ScanMixxxDbRequest) -> ApiResponse<ScanLibraryData> {
@@ -104,7 +118,9 @@ impl BackendCommands {
         &self,
         req: ListExternalPlaylistsRequest,
     ) -> ApiResponse<ListExternalPlaylistsData> {
-        wrap(self.service.list_mixxx_playlists(req))
+        wrap_failed(self.service.list_mixxx_playlists(req), |error| {
+            tr::playlist_import_list_failed("Mixxx", error)
+        })
     }
 
     pub fn import_external_playlists(
@@ -175,14 +191,20 @@ impl BackendCommands {
         &self,
         req: SaveTrackAnalysisEditsRequest,
     ) -> ApiResponse<SaveTrackAnalysisEditsData> {
-        wrap(self.service.save_track_analysis_edits(req))
+        wrap_failed(
+            self.service.save_track_analysis_edits(req),
+            tr::track_detail_save_cues_failed,
+        )
     }
 
     pub fn save_track_metadata_edits(
         &self,
         req: SaveTrackMetadataEditsRequest,
     ) -> ApiResponse<SaveTrackMetadataEditsData> {
-        wrap(self.service.save_track_metadata_edits(req))
+        wrap_failed(
+            self.service.save_track_metadata_edits(req),
+            tr::group_edit_save_failed,
+        )
     }
 
     pub fn get_tracks_metadata_summary(
@@ -207,9 +229,10 @@ impl BackendCommands {
     where
         F: FnMut(usize, usize, &str),
     {
-        wrap(
+        wrap_failed(
             self.service
                 .save_usb_track_metadata_edits_with_progress(req, on_progress),
+            tr::group_edit_save_failed,
         )
     }
 
@@ -224,7 +247,10 @@ impl BackendCommands {
         &self,
         req: SaveUsbTrackAnalysisEditsRequest,
     ) -> ApiResponse<SaveUsbTrackAnalysisEditsData> {
-        wrap(self.service.save_usb_track_analysis_edits(req))
+        wrap_failed(
+            self.service.save_usb_track_analysis_edits(req),
+            tr::track_detail_save_cues_failed,
+        )
     }
 
     pub fn save_usb_track_analysis_edits_with_progress<F>(
@@ -256,18 +282,27 @@ impl BackendCommands {
     }
 
     pub fn create_playlist(&self, req: CreatePlaylistRequest) -> ApiResponse<CreatePlaylistData> {
-        wrap(self.service.create_playlist(req))
+        wrap_failed(
+            self.service.create_playlist(req),
+            tr::playlist_create_failed,
+        )
     }
 
     pub fn rename_playlist(&self, req: RenamePlaylistRequest) -> ApiResponse<RenamePlaylistData> {
-        wrap(self.service.rename_playlist(req))
+        wrap_failed(
+            self.service.rename_playlist(req),
+            tr::playlist_rename_failed,
+        )
     }
 
     pub fn reorder_playlists(
         &self,
         req: ReorderPlaylistsRequest,
     ) -> ApiResponse<ReorderPlaylistsData> {
-        wrap(self.service.reorder_playlists(req))
+        wrap_failed(
+            self.service.reorder_playlists(req),
+            tr::playlist_order_failed,
+        )
     }
 
     pub fn delete_playlist(&self, req: DeletePlaylistRequest) -> ApiResponse<DeletePlaylistData> {
@@ -349,14 +384,20 @@ impl BackendCommands {
         &self,
         req: RemoveTracksFromPlaylistRequest,
     ) -> ApiResponse<RemoveTracksFromPlaylistData> {
-        wrap(self.service.remove_tracks_from_playlist(req))
+        wrap_failed(
+            self.service.remove_tracks_from_playlist(req),
+            tr::playlist_remove_failed,
+        )
     }
 
     pub fn reorder_playlist_tracks(
         &self,
         req: ReorderPlaylistTracksRequest,
     ) -> ApiResponse<ReorderPlaylistTracksData> {
-        wrap(self.service.reorder_playlist_tracks(req))
+        wrap_failed(
+            self.service.reorder_playlist_tracks(req),
+            tr::playlist_track_order_failed,
+        )
     }
 
     /// The `ui-` texts in the current language (`i18n::ui_texts`).
@@ -375,21 +416,23 @@ impl BackendCommands {
         wrap(self.service.set_frontend_setting(req))
     }
 
-    /// `set_frontend_setting`, refusing a language change while `job_running`: the change
-    /// reloads the window, which loses a running job's progress bar, pause and cancel (no
-    /// command reconnects to one). The desktop app passes whether its job registry is empty,
-    /// and holds the registry meanwhile so no job starts mid-change.
-    pub fn set_frontend_setting_unless_job_running(
+    /// Changes the language, refused while `job_running`: the change reloads the window,
+    /// which loses a running job's progress bar, pause and cancel (no command reconnects to
+    /// one). The desktop app passes whether its job registry is empty, and holds the registry
+    /// meanwhile so no job starts mid-change.
+    pub fn set_language(
         &self,
-        req: SetFrontendSettingRequest,
+        req: crate::models::SetLanguageRequest,
         job_running: bool,
-    ) -> ApiResponse<SetFrontendSettingData> {
-        if job_running && req.key.trim() == crate::service::SETTING_UI_LANGUAGE {
-            return wrap(Err(crate::error::BackendError::Validation(
-                crate::i18n::tr::settings_language_job_running(),
-            )));
-        }
-        self.set_frontend_setting(req)
+    ) -> ApiResponse<crate::models::SetLanguageData> {
+        let result = if job_running {
+            Err(crate::error::BackendError::Validation(
+                tr::settings_language_job_running(),
+            ))
+        } else {
+            self.service.set_language(req)
+        };
+        wrap_failed(result, tr::settings_language_failed)
     }
 
     /// See `BackendService::apply_saved_language`: the desktop app calls it once at startup.
@@ -398,7 +441,10 @@ impl BackendCommands {
     }
 
     pub fn remove_essentia(&self) -> ApiResponse<()> {
-        wrap(self.service.remove_essentia())
+        wrap_failed(
+            self.service.remove_essentia(),
+            tr::settings_essentia_remove_failed,
+        )
     }
 
     pub fn data_dir(&self) -> std::path::PathBuf {
@@ -424,7 +470,10 @@ impl BackendCommands {
         &self,
         req: GetUsbDeviceNameRequest,
     ) -> ApiResponse<GetUsbDeviceNameData> {
-        wrap(self.service.get_usb_device_name(req))
+        wrap_failed(
+            self.service.get_usb_device_name(req),
+            tr::usb_name_check_failed,
+        )
     }
 
     pub fn set_usb_device_name(
@@ -445,7 +494,10 @@ impl BackendCommands {
         &self,
         req: crate::models::SetUsbAudioFormatsRequest,
     ) -> ApiResponse<crate::models::UsbAudioFormatsData> {
-        wrap(self.service.set_usb_audio_formats(req))
+        wrap_failed(
+            self.service.set_usb_audio_formats(req),
+            tr::usb_audio_formats_save_failed,
+        )
     }
 
     pub fn list_usb_backups(&self, req: ListUsbBackupsRequest) -> ApiResponse<ListUsbBackupsData> {
@@ -456,19 +508,25 @@ impl BackendCommands {
         &self,
         req: RestoreUsbBackupRequest,
     ) -> ApiResponse<RestoreUsbBackupData> {
-        wrap(self.service.restore_usb_backup(req))
+        wrap_failed(
+            self.service.restore_usb_backup(req),
+            tr::backups_restore_failed,
+        )
     }
 
     pub fn delete_usb_backup(
         &self,
         req: DeleteUsbBackupRequest,
     ) -> ApiResponse<DeleteUsbBackupData> {
-        wrap(self.service.delete_usb_backup(req))
+        wrap_failed(
+            self.service.delete_usb_backup(req),
+            tr::backups_delete_failed,
+        )
     }
 
     /// Ids of the background data migrations still to run.
     pub fn pending_data_migrations(&self) -> ApiResponse<Vec<String>> {
-        wrap(self.service.pending_data_migrations())
+        wrap_failed(self.service.pending_data_migrations(), tr::migration_failed)
     }
 
     pub fn run_data_migrations_with_progress<F>(
@@ -478,7 +536,10 @@ impl BackendCommands {
     where
         F: FnMut(usize, usize, &str),
     {
-        wrap(self.service.run_data_migrations(on_progress))
+        wrap_failed(
+            self.service.run_data_migrations(on_progress),
+            tr::migration_failed,
+        )
     }
 
     pub fn fetch_usb_playlists(
@@ -541,7 +602,10 @@ impl BackendCommands {
         &self,
         req: GetUsbBackgroundColorRequest,
     ) -> ApiResponse<UsbBackgroundColorData> {
-        wrap(self.service.get_usb_background_color(req))
+        wrap_failed(
+            self.service.get_usb_background_color(req),
+            tr::usb_background_color_read_failed,
+        )
     }
 
     pub fn set_usb_background_color(
@@ -555,7 +619,10 @@ impl BackendCommands {
         &self,
         req: RemoveUsbPlaylistRequest,
     ) -> ApiResponse<RemoveUsbPlaylistData> {
-        wrap(self.service.remove_usb_playlist(req))
+        wrap_failed(
+            self.service.remove_usb_playlist(req),
+            tr::usb_playlists_remove_failed,
+        )
     }
 
     pub fn remove_usb_playlist_with_progress<F>(
@@ -576,7 +643,10 @@ impl BackendCommands {
         &self,
         req: ReorderUsbPlaylistsRequest,
     ) -> ApiResponse<ReorderUsbPlaylistsData> {
-        wrap(self.service.reorder_usb_playlists(req))
+        wrap_failed(
+            self.service.reorder_usb_playlists(req),
+            tr::usb_playlists_order_failed,
+        )
     }
 
     pub fn reorder_usb_playlists_with_progress<F>(
@@ -698,14 +768,20 @@ impl BackendCommands {
     }
 
     pub fn get_transcode_folder(&self) -> ApiResponse<crate::models::TranscodeFolderData> {
-        wrap(self.service.transcode_folder())
+        wrap_failed(
+            self.service.transcode_folder(),
+            tr::settings_transcode_folder_failed,
+        )
     }
 
     pub fn set_transcode_folder(
         &self,
         req: crate::models::SetTranscodeFolderRequest,
     ) -> ApiResponse<crate::models::TranscodeFolderData> {
-        wrap(self.service.set_transcode_folder(req))
+        wrap_failed(
+            self.service.set_transcode_folder(req),
+            tr::settings_transcode_folder_failed,
+        )
     }
 
     pub fn export_to_usb(&self, req: ExportToUsbRequest) -> ApiResponse<ExportToUsbData> {
@@ -832,6 +908,6 @@ impl BackendCommands {
     }
 
     pub fn initialize_usb(&self, req: InitializeUsbRequest) -> ApiResponse<InitializeUsbData> {
-        wrap(self.service.initialize_usb(req))
+        wrap_failed(self.service.initialize_usb(req), tr::usb_initialize_failed)
     }
 }

@@ -70,7 +70,7 @@ export async function editTrackSelection(ctx, view, ids, rows) {
       : await saveLibraryMetadataEdits(ctx, ids, edits);
     ctx.emitStatus(saved.statusText);
   } catch (err) {
-    ctx.emitStatus(t("ui-group-edit-save-failed", { error: err.message || err }));
+    ctx.emitStatus(err?.message || String(err));
   }
 }
 

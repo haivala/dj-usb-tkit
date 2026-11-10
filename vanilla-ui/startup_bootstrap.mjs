@@ -189,7 +189,7 @@ export async function runDataMigrations(ctx) {
     ctx.pushEventLog({
       level: "warn",
       source: "startup",
-      message: t("ui-startup-data-upgrade-failed", { error: error?.message || String(error) })
+      message: error?.message || String(error)
     });
     return null;
   }
@@ -327,7 +327,7 @@ export async function switchView(ctx, viewId) {
       await ctx.commitActivePlaylistSort(state.activeTab);
     } catch (err) {
       console.error(err);
-      ctx.emitStatus(t("ui-playlist-track-order-failed", { error: err.message || err }));
+      ctx.emitStatus(err?.message || String(err));
     }
   }
   state.activeTab = viewId;

@@ -26,7 +26,7 @@ export async function addSelectionToPlaylists(ctx, view, ids, rows) {
         await ctx.loadPlaylists();
         return created?.playlistId || null;
       } catch (err) {
-        emitStatus(t("ui-add-to-create-failed", { error: err.message || err }));
+        emitStatus(err?.message || String(err));
         return null;
       }
     },

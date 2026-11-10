@@ -18,12 +18,13 @@ use backend::models::{
     AnalyzeNewTracksRequest, CreatePlaylistRequest, DeletePlaylistRequest,
     FetchUsbHistoriesRequest, InitializeUsbRequest, RepairUsbDiagnosticsRequest,
     RunUsbDiagnosticsData, RunUsbDiagnosticsRequest, RunUsbParityReportData,
-    RunUsbParityReportRequest, ScanLibraryRequest, SetFrontendSettingRequest,
+    RunUsbParityReportRequest, ScanLibraryRequest, SetFrontendSettingRequest, SetLanguageRequest,
     ValidateUsbRootRequest,
 };
 use backend::service::analysis_event_payload;
 use tempfile::tempdir;
 
+/// Where the language is saved; not a setting `set_frontend_setting` takes.
 const LANGUAGE_SETTING: &str = "ui_language_v1";
 
 static LANGUAGE_LOCK: Mutex<()> = Mutex::new(());
@@ -50,11 +51,13 @@ impl Drop for LanguageTest {
 fn save_language(
     backend: &BackendCommands,
     language: &str,
-) -> backend::models::ApiResponse<backend::models::SetFrontendSettingData> {
-    backend.set_frontend_setting(SetFrontendSettingRequest {
-        key: LANGUAGE_SETTING.to_string(),
-        value: Some(language.to_string()),
-    })
+) -> backend::models::ApiResponse<backend::models::SetLanguageData> {
+    backend.set_language(
+        SetLanguageRequest {
+            language: language.to_string(),
+        },
+        false,
+    )
 }
 
 /// Every line logged in this test binary, as (Event Log text, log file text). The sink is
@@ -99,12 +102,15 @@ fn saving_the_language_switches_it_for_every_thread() {
         "(2 warnings)"
     );
 
-    // Clearing the setting is English again.
-    let cleared = backend.set_frontend_setting(SetFrontendSettingRequest {
+    // The language isn't a frontend setting: the generic command refuses it.
+    let generic = backend.set_frontend_setting(SetFrontendSettingRequest {
         key: LANGUAGE_SETTING.to_string(),
-        value: None,
+        value: Some(ENGLISH.to_string()),
     });
-    assert!(cleared.ok, "{cleared:?}");
+    assert!(!generic.ok, "{generic:?}");
+    assert_eq!(i18n::current_language(), TEST_LANGUAGE);
+
+    assert!(save_language(&backend, ENGLISH).ok);
     assert_eq!(i18n::current_language(), ENGLISH);
 }
 
@@ -201,11 +207,17 @@ fn an_error_shows_the_current_language_and_logs_english() {
 
     let lines = logged.lock().unwrap_or_else(PoisonError::into_inner);
     assert!(
-        lines.contains(&(shown.clone(), "Unknown language: xx".to_string())),
+        lines.contains(&(
+            shown.clone(),
+            "Could not change the language: Unknown language: xx".to_string()
+        )),
         "{lines:?}"
     );
     assert!(
-        lines.contains(&(empty_name, "playlist name must not be empty".to_string())),
+        lines.contains(&(
+            empty_name,
+            "Could not create playlist: playlist name must not be empty".to_string()
+        )),
         "{lines:?}"
     );
     assert!(
@@ -482,31 +494,20 @@ fn the_language_doesnt_change_while_a_job_runs() {
     let _test = LanguageTest::start();
     let root = tempdir().expect("temp root");
     let backend = BackendCommands::new(root.path().join("data")).expect("create backend");
-    let language = |value: &str| SetFrontendSettingRequest {
-        key: LANGUAGE_SETTING.to_string(),
-        value: Some(value.to_string()),
+    let language = |value: &str| SetLanguageRequest {
+        language: value.to_string(),
     };
 
-    let refused = backend.set_frontend_setting_unless_job_running(language(TEST_LANGUAGE), true);
+    let refused = backend.set_language(language(TEST_LANGUAGE), true);
     assert!(!refused.ok, "{refused:?}");
     let error = refused.error.expect("error");
     assert_eq!(
         error.message,
-        "a job is running. Try again when it has finished."
+        "Could not change the language: a job is running. Try again when it has finished."
     );
     assert_eq!(i18n::current_language(), ENGLISH);
 
-    // Other settings save while a job runs.
-    let other = backend.set_frontend_setting_unless_job_running(
-        SetFrontendSettingRequest {
-            key: "ui_key_notation_v1".to_string(),
-            value: Some("camelot".to_string()),
-        },
-        true,
-    );
-    assert!(other.ok, "{other:?}");
-
-    let saved = backend.set_frontend_setting_unless_job_running(language(TEST_LANGUAGE), false);
+    let saved = backend.set_language(language(TEST_LANGUAGE), false);
     assert!(saved.ok, "{saved:?}");
     assert_eq!(i18n::current_language(), TEST_LANGUAGE);
 }

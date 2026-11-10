@@ -98,7 +98,7 @@ export function createAppContext(env) {
     showTrackRow`);
   bindActions(usb, `setUsbRootControlsLocked refreshPlaylistExportStatus applyPlaylistUsbExportStatus showDiagReportView
     clearUsbDiagnostics hideUsbDiagnostics loadUsbRootFromStorage usbContentChanged
-    syncAssetScopePaths pickSourceFolders detectExternalRekordboxDb detectExternalMixxxDb
+    pickSourceFolders detectExternalRekordboxDb detectExternalMixxxDb
     validateAndSetUsbRoot renameDrive
     removeUsbPlaylist reorderUsbPlaylists refreshUsb ensureUsbListLoaded openUsbPlaylistRow openHistoryRow
     runUsbDiagnostics runUsbParityReport

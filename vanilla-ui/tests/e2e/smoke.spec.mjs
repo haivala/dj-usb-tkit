@@ -67,7 +67,7 @@ function installBasicTauriMock(page, opts = {}) {
             const playlistId = payload?.request?.playlistId || "";
             const name = String(payload?.request?.name || "").trim();
             if (failRename) {
-              return { ok: false, error: { code: "INTERNAL", message: "rename failed (mock)" } };
+              return { ok: false, error: { code: "INTERNAL", message: "Rename failed: disk full (mock)" } };
             }
             const row = playlists.find((p) => p.id === playlistId);
             if (!row || !name) {
@@ -538,12 +538,12 @@ test("changing the language reloads the window in it, and a refused change keeps
             const testLanguage = window.sessionStorage.getItem("e2eLanguage") === "en-XA";
             return { ok: true, data: testLanguage ? window.__e2eUiTextsTestLanguage : window.__e2eUiTexts };
           }
-          if (command === "set_frontend_setting" && request.key === "ui_language_v1") {
+          if (command === "set_language") {
             if (window.sessionStorage.getItem("e2eJobRunning")) {
-              return { ok: false, error: { code: "VALIDATION_ERROR", message: "a job is running. Try again when it has finished." } };
+              return { ok: false, error: { code: "VALIDATION_ERROR", message: "Could not change the language: a job is running. Try again when it has finished." } };
             }
-            window.sessionStorage.setItem("e2eLanguage", request.value);
-            return { ok: true, data: { saved: true } };
+            window.sessionStorage.setItem("e2eLanguage", request.language);
+            return { ok: true, data: { language: request.language } };
           }
           return window.__e2eBackend.answer(command);
         }

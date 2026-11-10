@@ -375,20 +375,6 @@ export function usbSelectionChanged(ctx) {
   hideUsbDiagnostics(ctx);
 }
 
-export async function syncAssetScopePaths(ctx) {
-  const { state } = ctx;
-  const paths = state.librarySources.folders.map((folder) => folder.path);
-  const usbRoot = String(state.usbRoot || "").trim();
-  if (usbRoot) paths.push(usbRoot);
-  if (!paths.length) return;
-
-  try {
-    await ctx.invoke("allow_asset_paths", { paths });
-  } catch (err) {
-    ctx.warn("allow_asset_paths failed:", err);
-  }
-}
-
 export async function pickSourceFolders(ctx) {
   const selected = await ctx.invoke("pick_source_folders");
   if (!selected) return [];
@@ -461,7 +447,7 @@ async function promptDriveNameIfUnset(ctx) {
   try {
     data = await command("get_usb_device_name", { usbRoot: state.usbRoot });
   } catch (err) {
-    emitStatus(t("ui-usb-name-check-failed", { error: err?.message || err }));
+    emitStatus(err?.message || String(err));
     return;
   }
   state.usbNameTakenBy = data.nameTakenBy;
@@ -571,7 +557,6 @@ export async function validateAndSetUsbRoot(ctx, path) {
     ctx.loadUsbAudioFormats().catch((err) => console.warn("get_usb_audio_formats failed:", err));
     emitStatus(t("ui-usb-root-cleared"));
     el.usbRecentRow.classList.remove("collapsed");
-    await syncAssetScopePaths(ctx);
     return false;
   }
 
@@ -606,7 +591,6 @@ export async function validateAndSetUsbRoot(ctx, path) {
     });
   }
   if (state.usbRoot) await loadUsbDevices(ctx);
-  await syncAssetScopePaths(ctx);
   // The recent list is for picking a drive: close it once one is selected
   // (its header reopens it).
   if (valid) el.usbRecentRow.classList.add("collapsed");
@@ -645,7 +629,7 @@ export async function reorderUsbPlaylists(ctx) {
     // The drag already moved the row: read the real order back. A failed read shows on the
     // progress bar itself; the status line is the save's failure either way.
     await refreshUsb(ctx).catch((readErr) => console.error("USB playlist re-read failed:", readErr));
-    emitStatus(t("ui-usb-playlists-order-failed", { error: err.message || err }));
+    emitStatus(err?.message || String(err));
   }
 }
 // USB workflow orchestration.
@@ -1067,7 +1051,7 @@ export async function loadUsbBackgroundColor(ctx) {
   } catch (err) {
     state.usbBackgroundColor = null;
     ctx.warn("get_usb_background_color failed:", err);
-    ctx.emitStatus(t("ui-usb-player-menu-background-colour-read-failed", { error: err.message || err }));
+    ctx.emitStatus(err?.message || String(err));
   }
   renderUsbBackgroundColor(ctx);
 }
@@ -1283,7 +1267,7 @@ export async function initializeUsb(ctx) {
     await validateAndSetUsbRoot(ctx, state.usbRoot);
   } catch (err) {
     ctx.logError("Initialize USB failed:", err);
-    emitStatus(t("ui-usb-initialize-failed", { error: err.message || err }));
+    emitStatus(err?.message || String(err));
   }
 }
 

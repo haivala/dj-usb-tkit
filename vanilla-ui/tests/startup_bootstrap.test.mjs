@@ -153,13 +153,13 @@ test("runDeferredInitialLoad runs the data migrations after the initial load", a
 test("runDataMigrations logs a failure instead of throwing", async () => {
   const logs = [];
   const result = await runDataMigrations({
-    command: async () => { throw new Error("disk full"); },
+    command: async () => { throw new Error("Data upgrade failed: disk full"); },
     pushEventLog: (entry) => logs.push(entry)
   });
   assert.equal(result, null);
   assert.equal(logs.length, 1);
   assert.equal(logs[0].level, "warn");
-  assert.match(logs[0].message, /Data upgrade failed: disk full/);
+  assert.equal(logs[0].message, "Data upgrade failed: disk full");
 });
 
 // Every collaborator switchView touches, as no-ops; tests override the ones
@@ -215,11 +215,11 @@ test("switchView still completes the switch when the sort commit fails", async (
   // here since we're deliberately exercising that path, so silence it to
   // keep the test run's terminal output clean.
   await withSilencedConsole(() => switchView(switchViewCtx(state, el, {
-    commitActivePlaylistSort: async () => { throw new Error("boom"); },
+    commitActivePlaylistSort: async () => { throw new Error("Save track order failed: boom"); },
     emitStatus: (text) => statusMessages.push(text)
   }), "library"));
 
   assert.equal(state.activeTab, "library");
   assert.equal(statusMessages.length, 1);
-  assert.match(statusMessages[0], /Save track order failed: boom/);
+  assert.equal(statusMessages[0], "Save track order failed: boom");
 });

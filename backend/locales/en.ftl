@@ -112,6 +112,10 @@ usb-warning-edb-unreadable = eDB unreadable after trying { $attempts ->
 # back to it. $error: the reason, from the OS.
 usb-warning-pdb-write-back-failed = PDB write-back to USB failed: { $error }
 usb-warning-edb-write-back-failed = eDB write-back to USB failed: { $error }
+# The status line when the connected drive's name can't be read. $error: why it failed.
+usb-name-check-failed = Could not check this drive's name: { $error }
+# The status line when initializing the USB's folder structure fails. $error: why it failed.
+usb-initialize-failed = Initialize failed: { $error }
 
 ## usb-playlists
 
@@ -169,6 +173,10 @@ usb-playlists-warning-edb-removal-skipped = eDB playlist removal skipped: the eD
 usb-playlists-warning-pdb-removal-skipped = PDB playlist removal skipped: PDB missing
 # Reordering the stick's playlists couldn't open its eDB, so only the PDB has the new order.
 usb-playlists-warning-edb-order-skipped = reorder: unable to open eDB for playlist order
+# Status lines when the new order of the USB's playlists can't be saved, and when removing a
+# playlist from the USB fails. $error: why it failed.
+usb-playlists-order-failed = Failed to save playlist order: { $error }
+usb-playlists-remove-failed = Remove USB playlist failed: { $error }
 
 ## usb-history
 
@@ -232,6 +240,8 @@ usb-background-color-set = Background colour set to { $color }
 usb-background-color-unchanged = Background colour unchanged
 
 usb-background-color-error-no-edb = unable to open the USB's eDB
+# The status line when the USB's player background colour can't be read. $error: why it failed.
+usb-background-color-read-failed = Failed to read the background colour: { $error }
 
 ## usb-audio-formats
 
@@ -243,6 +253,9 @@ usb-audio-formats-last-ticked = At least one format stays ticked
 
 usb-audio-formats-error-read-only = The USB is read-only, so its USB audio formats can't be changed
 usb-audio-formats-error-none-ticked = At least one format stays ticked
+# The status line when an audio format ticked or unticked for the USB can't be saved.
+# $error: why it failed.
+usb-audio-formats-save-failed = Save USB audio formats failed: { $error }
 
 ## backups
 
@@ -292,6 +305,9 @@ backups-note-written = Backup: { $file }
 backups-warning-folder-failed = Backup skipped: could not create the backups folder: { $error }
 # $file: the database (export.pdb or exportLibrary.db).
 backups-warning-copy-failed = Backup failed for { $file }: { $error }
+# Status lines when restoring or deleting a backup fails. $error: why it failed.
+backups-restore-failed = Restore failed: { $error }
+backups-delete-failed = Delete failed: { $error }
 
 ## diagnostics
 
@@ -1329,6 +1345,8 @@ migration-progress = { $migration }: { $current }/{ $total }
 # Event Log warnings when a data upgrade fails. $migration: the upgrade (migration-*). $error: the reason.
 migration-warning-failed = { $migration } failed ({ $error }); it runs again next launch
 migration-warning-startup-failed = Data upgrades at startup failed ({ $error }); they run again next launch
+# The Event Log entry when a data upgrade fails at startup. $error: why.
+migration-failed = Data upgrade failed: { $error }
 
 ## transcode
 
@@ -1674,10 +1692,16 @@ settings-warning-language-unavailable = The saved language { $language } isn't a
 settings-language-name = English
 # The error when the language is changed while a job (USB, analysis, a library scan or import) runs: the
 # change reloads the window, which would lose the job's progress bar, pause and cancel. Shown after
-# ui-settings-language-failed's "Could not change the language: ".
+# settings-language-failed's "Could not change the language: ".
 settings-language-job-running = a job is running. Try again when it has finished.
+# The status line when saving the language failed. $error: why.
+settings-language-failed = Could not change the language: { $error }
 # The native folder dialog's title, from the transcode folder's Change.
 settings-transcode-folder-dialog-title = Select the folder for transcodes
+# Status lines when removing the Essentia files fails, and when the transcode folder can't be
+# read or changed. $error: why it failed.
+settings-essentia-remove-failed = Remove failed: { $error }
+settings-transcode-folder-failed = Transcode folder: { $error }
 
 ## library
 
@@ -1915,6 +1939,14 @@ playlist-membership-some = { $contained } of { $selected } in
 playlist-reorder-lock-tooltip = Won't reorder on USB — "{ $name }" already exists there, and additive export keeps its existing track order unchanged. New tracks are still added in your chosen order.
 
 playlist-error-name-empty = playlist name must not be empty
+# Status lines when a playlist action fails. $error: why it failed.
+playlist-create-failed = Could not create playlist: { $error }
+playlist-rename-failed = Rename failed: { $error }
+playlist-order-failed = Save playlist order failed: { $error }
+playlist-remove-failed = Remove failed: { $error }
+playlist-track-order-failed = Save track order failed: { $error }
+# The status line when the playlist wasn't deleted after all. $name: the playlist's name.
+playlist-delete-failed = Delete failed: { $name }
 
 ## playlist-import
 
@@ -1961,6 +1993,8 @@ playlist-import-error-nothing-imported = { $count ->
     [one] the only track in "{ $playlist }" could not be imported
    *[other] none of the { $count } tracks in "{ $playlist }" could be imported
 }: files not found on this computer or not supported
+# The status line when a library's lists can't be read. $library: rekordbox or Mixxx. $error: why.
+playlist-import-list-failed = Could not read { $library } playlists: { $error }
 
 ## selection-bar
 
@@ -1975,6 +2009,11 @@ selection-bar-duration-unknown = { $count ->
 selection-bar-duration = · { $duration }
 # The same, when some of them have no length yet, so the total is at least this.
 selection-bar-duration-at-least = · { $duration }+
+
+## group-edit
+
+# The status line when saving track details fails. $error: why it failed.
+group-edit-save-failed = Could not save track details: { $error }
 
 ## track-detail
 
@@ -2036,6 +2075,8 @@ track-detail-cues-error-unknown-key = unknown key: { $key }
 # $max: the most cue points a track can have (8).
 track-detail-cues-error-too-many = at most { $max } cue points are allowed
 track-detail-cues-error-bpm-range = bpm must be greater than 0 and at most 999
+# The status line when saving the cues fails. $error: why it failed.
+track-detail-save-cues-failed = Could not save cues: { $error }
 
 ## playback
 
@@ -2084,23 +2125,15 @@ ui-add-to-title-count = { $count ->
 }
 # The list when there are no playlists.
 ui-add-to-empty = No playlists yet: create one below.
-# The status line when creating a playlist fails. $error: the backend's message.
-ui-add-to-create-failed = Could not create playlist: { $error }
 
 ## ui-backups
 
 ui-backups-delete = Delete
-# The status line when deleting a backup fails.
-# $error: why it failed.
-ui-backups-delete-failed = Delete failed: { $error }
 ui-backups-delete-title = Delete Backup
 ui-backups-intro = Each backup holds both of the USB's databases: legacy (PDB) and new (eDB).
 ui-backups-load-failed = Failed to load backups
 ui-backups-refresh = Refresh
 ui-backups-restore = Restore
-# The status line when restoring a backup fails.
-# $error: why it failed.
-ui-backups-restore-failed = Restore failed: { $error }
 ui-backups-restore-title = Restore Backup
 ui-backups-summary = No entries
 ui-backups-title = Backups
@@ -2209,8 +2242,6 @@ ui-group-edit-title-count = { $count ->
 }
 # The status line while a USB save waits for another USB job.
 ui-group-edit-waiting-for-usb-job = Waiting for the running USB job to finish before saving...
-# The status line when the save fails. $error: the backend's message.
-ui-group-edit-save-failed = Could not save track details: { $error }
 
 ## ui-header
 
@@ -2352,14 +2383,10 @@ ui-playlist-none-active = Create and activate a playlist first
 # After the title, for a playlist imported from another library. $library: rekordbox or Mixxx.
 ui-playlist-imported-from = · Imported from { $library }
 # Status lines when an action fails. $error: the backend's message.
-ui-playlist-rename-failed = Rename failed: { $error }
-ui-playlist-order-failed = Save playlist order failed: { $error }
-ui-playlist-remove-failed = Remove failed: { $error }
 ui-playlist-export-failed = Export failed: { $error }
 # Stands in for $error above when the failure has no message.
 ui-playlist-export-failed-unknown = unknown error
 ui-playlist-analyze-failed = Analyze failed: { $error }
-ui-playlist-track-order-failed = Save track order failed: { $error }
 ui-playlist-track-order-still-loading = Track order not saved: the list was still loading. Try again.
 # Creating a playlist: the status line without a name, then the progress bar (running, done,
 # failed) and its steps.
@@ -2372,8 +2399,6 @@ ui-playlist-refreshing-playlists = Refreshing playlists...
 # Asked before deleting a playlist: the dialog's title and its button.
 ui-playlist-delete-title = Delete App Playlist
 ui-playlist-delete = Delete
-# The status line when the backend didn't delete the playlist. $name: the playlist's name.
-ui-playlist-delete-failed = Delete failed: { $name }
 # Adding tracks to a playlist: the progress bar (running, done, failed) and its steps, and the
 # status line when none of the tracks could be found or none is ticked.
 ui-playlist-add-progress = Adding tracks...
@@ -2415,8 +2440,6 @@ ui-playlist-import-title = Import Playlists
 ui-playlist-import-group-playlists = Playlists
 ui-playlist-import-group-crates = Crates
 ui-playlist-import-group-history = History
-# The status line when a library's lists can't be read. $library: rekordbox or Mixxx. $error: the backend's message.
-ui-playlist-import-list-failed = Could not read { $library } playlists: { $error }
 # The status line when no library has a list with tracks.
 ui-playlist-import-none-found = No playlists with tracks found
 # Where an Event Log entry came from, in its details. $library: rekordbox or Mixxx.
@@ -2468,8 +2491,6 @@ ui-startup-progress-done = Initializing done
 ui-startup-progress-failed = Initializing failed
 ui-startup-loading-playlists = Loading playlists...
 ui-startup-loading-tracks = Loading tracks...
-# The Event Log entry when a data upgrade fails at startup. $error: why.
-ui-startup-data-upgrade-failed = Data upgrade failed: { $error }
 
 ## ui-update
 
@@ -2551,10 +2572,6 @@ ui-settings-essentia-downloading-progress = Downloading Essentia...
 # Status lines after installing or removing Essentia.
 ui-settings-essentia-installed = Essentia installed
 ui-settings-essentia-removed = Essentia removed
-# $error: the backend's message.
-ui-settings-essentia-remove-failed = Remove failed: { $error }
-# The status line when the transcode folder can't be read or changed. $error: the backend's message.
-ui-settings-transcode-folder-failed = Transcode folder: { $error }
 # Status lines after changing the export sync mode.
 ui-settings-sync-mode-mirror-saved = Export sync mode: mirror (exact match)
 ui-settings-sync-mode-additive-saved = Export sync mode: additive
@@ -2585,8 +2602,6 @@ ui-settings-export = Export
 ui-settings-get-node-js = Get Node.js
 ui-settings-key-notation = Key notation
 ui-settings-language = Language
-# The status line when saving the language failed. $error: why.
-ui-settings-language-failed = Could not change the language: { $error }
 ui-settings-key-notation-camelot = Camelot (8A)
 ui-settings-key-notation-classic = Classic (Am)
 ui-settings-node-js-missing = Node.js not found —
@@ -2728,8 +2743,6 @@ ui-track-detail-analyze-first = Analyze this track first to edit its cues.
 ui-track-detail-open-failed = Could not open cue editor: { $error }
 # The status line while a USB save waits for another USB job.
 ui-track-detail-waiting-for-usb-job = Waiting for the running USB job to finish before saving cues...
-# The status line when saving the cues fails. $error: the backend's message.
-ui-track-detail-save-cues-failed = Could not save cues: { $error }
 # Status lines when a cue can't be added: all hot cue pads are taken, or a cue is at that spot.
 ui-track-detail-max-cues = Maximum 8 cue points.
 ui-track-detail-cue-already-there = A cue is already there.
@@ -2834,13 +2847,10 @@ ui-usb-title = USB Browser
 # The status line when the automatic diagnostics after selecting a USB fail.
 # $error: why they failed.
 ui-usb-auto-diagnostics-failed = Auto-diagnostics failed: { $error }
-# The status line when an audio format ticked or unticked for the USB can't be saved.
-# $error: why it failed.
-ui-usb-audio-formats-save-failed = Save USB audio formats failed: { $error }
 ui-usb-diagnostics-running = Running USB diagnostics...
 # The status line when a playlist export can't start because the playlist's sort order wasn't saved.
-# $error: why saving it failed.
-ui-usb-export-sort-failed = Export blocked: couldn't save the current sort order ({ $error })
+# $error: why saving it failed (it says so).
+ui-usb-export-sort-failed = Export blocked: { $error }
 # The status line while a playlist is exported.
 # $name: the playlist's name.
 ui-usb-export-running = Exporting { $name } to USB...
@@ -2852,12 +2862,6 @@ ui-usb-export-failed-unknown = USB export failed
 # The aria-label of the button that forgets a recent USB.
 # $path: the USB's folder.
 ui-usb-forget-path-aria-label = Forget { $path }
-# The status line when initializing the USB's folder structure fails.
-# $error: why it failed.
-ui-usb-initialize-failed = Initialize failed: { $error }
-# The status line when the connected drive's name can't be read.
-# $error: why it failed.
-ui-usb-name-check-failed = Could not check this drive's name: { $error }
 ui-usb-parity-running = Running USB parity report...
 ui-usb-repair-applying = Applying supported USB repair fixes...
 ui-usb-repair-previewing = Previewing USB repair fixes...
@@ -2884,9 +2888,6 @@ ui-usb-player-menu-available = Available (hidden)
 ui-usb-player-menu-available-aria-label = Available hidden player menu items
 ui-usb-player-menu-background-colour = Background colour
 ui-usb-player-menu-background-colour-aria-label = Player background colour
-# The status line when the USB's player background colour can't be read.
-# $error: why it failed.
-ui-usb-player-menu-background-colour-read-failed = Failed to read the background colour: { $error }
 ui-usb-player-menu-current = Current player menu
 ui-usb-player-menu-current-aria-label = Current visible player menu items
 ui-usb-player-menu-down = Move Down
@@ -2902,16 +2903,10 @@ ui-usb-playlists-compared = Playlists compared
 # $error: why it failed.
 ui-usb-playlists-load-failed = Failed to load USB playlist: { $error }
 ui-usb-playlists-loading = Loading USB playlists...
-# The status line when the new order of the USB's playlists can't be saved.
-# $error: why it failed.
-ui-usb-playlists-order-failed = Failed to save playlist order: { $error }
 # The progress bar when reading the USB's playlists fails.
 ui-usb-playlists-read-failed = USB load failed
 ui-usb-playlists-reading = Reading USB database...
 ui-usb-playlists-remove = Remove
-# The status line when removing a playlist from the USB fails.
-# $error: why it failed.
-ui-usb-playlists-remove-failed = Remove USB playlist failed: { $error }
 ui-usb-playlists-remove-title = Remove USB Playlist
 ui-usb-playlists-search-placeholder = Search USB playlist tracks
 ui-usb-playlists-title = USB Playlists

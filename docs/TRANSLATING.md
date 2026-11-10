@@ -75,7 +75,9 @@ All UI text goes through the catalog; English in the UI's JS fails
 - **JS:** `t("ui-...", { name })` for a label or a text shown before a command answers;
   `tCount("ui-...", count)` only for a count with no response to come from. Text with a
   count, or text picked by a decision on response data, comes from the response, built
-  with `tr::`.
+  with `tr::`. A command whose failure shows on the status line wraps its error in a text saying
+  what failed (`wrap_failed(result, tr::playlist_rename_failed)` in `commands.rs`); JS shows
+  `err.message` as it is.
 - **`index.html`:** `data-text="ui-..."`, and `data-text-tooltip`, `-aria-label`,
   `-placeholder`, `-title`, `-alt` for attributes. Text that's never translated gets
   `translate="no"`.

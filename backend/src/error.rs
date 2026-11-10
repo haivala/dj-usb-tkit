@@ -110,6 +110,25 @@ impl ErrorPayload {
     pub fn log_text(&self) -> &str {
         self.log_message.as_deref().unwrap_or(&self.message)
     }
+
+    /// `error`'s payload with its message inside `context`, a text saying what failed
+    /// ("Rename failed: …"), in the response's language and in English for the log. The code
+    /// and details stay `error`'s.
+    pub fn within(error: BackendError, context: impl FnOnce(Arg) -> Text) -> Self {
+        let catalog_text = match &error {
+            BackendError::Validation(text)
+            | BackendError::ValidationWithDetails(text, _)
+            | BackendError::NotFound(text) => Some(text.into_arg()),
+            _ => None,
+        };
+        let payload = Self::from(error);
+        let text = context(catalog_text.unwrap_or_else(|| Arg::Text(payload.message.clone())));
+        Self {
+            message: text.render(),
+            log_message: Some(text.render_english()),
+            ..payload
+        }
+    }
 }
 
 impl From<BackendError> for ErrorPayload {
@@ -246,6 +265,33 @@ mod tests {
             tr::repair_outcome_failed("Fix X", io_error).render(),
             "Fix X failed: io error: disk gone"
         );
+    }
+
+    #[test]
+    fn an_error_within_its_context_keeps_its_code_and_details() {
+        use crate::i18n::tr;
+        let details = serde_json::json!({"field": "x"});
+        let payload = ErrorPayload::within(
+            BackendError::ValidationWithDetails(tr::playlist_error_name_empty(), details.clone()),
+            tr::playlist_rename_failed,
+        );
+        assert!(matches!(payload.code, ErrorCode::ValidationError));
+        assert_eq!(payload.details, Some(details));
+        assert_eq!(
+            payload.message,
+            "Rename failed: playlist name must not be empty"
+        );
+        assert_eq!(
+            payload.log_text(),
+            "Rename failed: playlist name must not be empty"
+        );
+
+        let payload = ErrorPayload::within(
+            BackendError::Internal("oops".to_string()),
+            tr::playlist_rename_failed,
+        );
+        assert!(matches!(payload.code, ErrorCode::InternalError));
+        assert_eq!(payload.message, "Rename failed: oops");
     }
 
     #[test]

@@ -2,6 +2,7 @@
 
 use super::*;
 use crate::i18n::tr;
+use crate::models::{SetLanguageData, SetLanguageRequest};
 
 impl BackendService {
     pub fn get_frontend_settings(&self) -> BackendResult<GetFrontendSettingsData> {
@@ -54,21 +55,6 @@ impl BackendService {
                 "unsupported frontend setting key: {key}"
             )));
         }
-        let language = (key == SETTING_UI_LANGUAGE).then(|| {
-            req.value
-                .as_deref()
-                .map(str::trim)
-                .filter(|value| !value.is_empty())
-                .unwrap_or(crate::i18n::ENGLISH)
-                .to_string()
-        });
-        if let Some(language) = &language
-            && !crate::i18n::languages().contains(&language.as_str())
-        {
-            return Err(BackendError::Validation(
-                crate::i18n::tr::settings_language_unknown(language),
-            ));
-        }
         let conn = self.db.connect()?;
         if let Some(raw_value) = req.value {
             let value = raw_value.trim().to_string();
@@ -88,12 +74,33 @@ impl BackendService {
         } else {
             conn.execute("DELETE FROM app_settings WHERE key = ?1", params![key])?;
         }
-        if let Some(language) = language {
-            crate::i18n::set_language(&language).map_err(BackendError::Internal)?;
-            // The USB caches hold warnings rendered in the old language.
-            self.invalidate_usb_parse_cache();
-        }
         Ok(SetFrontendSettingData { saved: true })
+    }
+
+    /// Saves the language and makes it the process's language. Not a frontend setting: it
+    /// changes every text the backend renders, so the caches holding rendered text go too.
+    pub fn set_language(&self, req: SetLanguageRequest) -> BackendResult<SetLanguageData> {
+        let language = req.language.trim();
+        if !crate::i18n::languages().contains(&language) {
+            return Err(BackendError::Validation(
+                crate::i18n::tr::settings_language_unknown(language),
+            ));
+        }
+        let conn = self.db.connect()?;
+        conn.execute(
+            r#"
+            INSERT INTO app_settings (key, value, updated_at)
+            VALUES (?1, ?2, ?3)
+            ON CONFLICT(key) DO UPDATE SET value = excluded.value, updated_at = excluded.updated_at
+            "#,
+            params![SETTING_UI_LANGUAGE, language, now()],
+        )?;
+        crate::i18n::set_language(language).map_err(BackendError::Internal)?;
+        // The USB caches hold warnings rendered in the old language.
+        self.invalidate_usb_parse_cache();
+        Ok(SetLanguageData {
+            language: language.to_string(),
+        })
     }
 
     /// Makes the saved language (`SETTING_UI_LANGUAGE`) the process's language. Called once by
@@ -138,7 +145,6 @@ pub(super) fn frontend_ui_setting_keys() -> &'static [&'static str] {
         SETTING_UI_SIDEBAR_WIDTH,
         SETTING_UI_HELP_SEEN,
         SETTING_UI_KEY_NOTATION,
-        SETTING_UI_LANGUAGE,
         SETTING_UI_CUE_START_ON_FIRST_BEAT,
         SETTING_UI_CUE_BEATGRID_LEVEL,
         SETTING_UI_CUE_QUANTIZE,

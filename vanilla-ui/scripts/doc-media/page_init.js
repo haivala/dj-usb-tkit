@@ -342,8 +342,6 @@
             return ok(librarySources);
           case "set_theme_background":
             return null;
-          case "allow_asset_paths":
-            return 0;
           case "list_usb_backups":
             return ok({ items: opts.backups || [], summaryText: `${(opts.backups || []).length} backups`, emptyText: "No backups yet." });
           case "list_usb_devices":

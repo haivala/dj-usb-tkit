@@ -34,17 +34,16 @@ export function normalizeTrack(ctx, track) {
 // The library's sources are the backend's (`get_library_sources`): the
 // folders with their switch and missing / analyzed state, and the imported
 // libraries' switches. Every change goes through a command that answers with
-// the new sources; they're stored here, drawn as chips, and the folders are
-// let into the asset scope (covers).
+// the new sources; they're stored here and drawn as chips. The backend lets
+// the folders into the asset scope (covers) itself.
 export function applyLibrarySources(ctx, sources) {
   ctx.state.librarySources = sources;
   renderSourceChips(ctx);
-  return ctx.syncAssetScopePaths().catch(() => {});
 }
 
 export async function refreshLibrarySources(ctx) {
   try {
-    await applyLibrarySources(ctx, await ctx.command("get_library_sources"));
+    applyLibrarySources(ctx, await ctx.command("get_library_sources"));
   } catch (err) {
     console.warn("Failed to load library sources:", err);
   }
@@ -156,7 +155,7 @@ export async function relocateSourceRoot(ctx, oldRoot) {
     oldRoot: sourceRoot,
     newRoot
   });
-  await applyLibrarySources(ctx, result.sources);
+  applyLibrarySources(ctx, result.sources);
   await resetAndLoadLibraryTracks(ctx, state.libraryQuery);
   await ctx.refreshCurrentPlaylistTracks();
   emitStatus(result.statusText);
@@ -428,7 +427,7 @@ export async function scanMixxxDb(ctx) {
 
 // An imported library's tracks join the library (its chip switched on).
 export async function showExternalLibrary(ctx, library) {
-  await applyLibrarySources(
+  applyLibrarySources(
     ctx,
     await ctx.command("set_external_library_enabled", { library, enabled: true }),
   );

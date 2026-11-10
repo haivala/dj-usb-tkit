@@ -1303,7 +1303,7 @@ test("a failed USB playlist reorder restores the order and keeps the playlist op
   await page.addInitScript(() => {
     const invoke = window.__TAURI__.core.invoke;
     window.__TAURI__.core.invoke = async (command, payload) => {
-      if (command === "reorder_usb_playlists") return { ok: false, error: { code: "IO", message: "write failed" } };
+      if (command === "reorder_usb_playlists") return { ok: false, error: { code: "IO", message: "Failed to save playlist order: write failed" } };
       return invoke(command, payload);
     };
   });
@@ -1343,7 +1343,7 @@ test("a failed USB playlist reorder whose re-read also fails still reports the s
     window.__TAURI__.core.invoke = async (command, payload) => {
       if (command === "reorder_usb_playlists") {
         saveFailed = true;
-        return { ok: false, error: { code: "IO", message: "write failed" } };
+        return { ok: false, error: { code: "IO", message: "Failed to save playlist order: write failed" } };
       }
       // The stick went away: the read after the failed save fails too.
       if (command === "fetch_usb_playlists" && saveFailed) {
@@ -1749,22 +1749,6 @@ test("a stored USB isn't shown as selected, or read, until it's validated", asyn
   expect(await page.evaluate(() => window.__validates)).toBe(0);
 });
 
-test("selecting a USB lets its folder and the library's into the asset scope", async ({ page }) => {
-  await installTauriMock(page, "valid");
-  await page.addInitScript(() => {
-    const invoke = window.__TAURI__.core.invoke;
-    window.__assetPaths = [];
-    window.__TAURI__.core.invoke = async (command, payload) => {
-      if (command === "get_library_sources") return window.__e2eBackend.ok(window.__e2eBackend.librarySources(["/music"]));
-      if (command === "allow_asset_paths") window.__assetPaths.push(payload.paths);
-      return invoke(command, payload);
-    };
-  });
-  await page.goto("/");
-  await connectUsb(page);
-  expect((await page.evaluate(() => window.__assetPaths)).at(-1)).toEqual(["/music", "/Volumes/USB-TEST"]);
-});
-
 test("restoring a backup: cancel and failure change nothing; success clears the report and lists and applies the export status", async ({ page }) => {
   await installTauriMock(page, "valid");
   await page.addInitScript(() => {
@@ -1786,7 +1770,7 @@ test("restoring a backup: cancel and failure change nothing; success clears the 
       }
       if (command === "restore_usb_backup") {
         window.__restores += 1;
-        if (window.__failRestore) return { ok: false, error: { code: "IO", message: "disk gone" } };
+        if (window.__failRestore) return { ok: false, error: { code: "IO", message: "Restore failed: disk gone" } };
         return {
           ok: true,
           data: {
@@ -1992,7 +1976,7 @@ test("background colour shows nothing selected when the databases differ, and a 
     window.__color = { pdbColor: 6, edbColor: 6, writable: true };
     window.__TAURI__.core.invoke = async (command, payload) => {
       if (command === "get_usb_background_color") {
-        if (window.__colorFails) return { ok: false, error: { code: "IO", message: "colour read failed" } };
+        if (window.__colorFails) return { ok: false, error: { code: "IO", message: "Failed to read the background colour: colour read failed" } };
         return { ok: true, data: window.__color };
       }
       return invoke(command, payload);

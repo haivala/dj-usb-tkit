@@ -1399,6 +1399,19 @@ pub struct SetFrontendSettingRequest {
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
+pub struct SetLanguageRequest {
+    /// A catalog's language code, as `get_ui_texts` lists them.
+    pub language: String,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct SetLanguageData {
+    pub language: String,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
 pub struct SetFrontendSettingData {
     pub saved: bool,
 }

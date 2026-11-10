@@ -93,31 +93,6 @@ fn emit_backend_log(app: &tauri::AppHandle, level: &str, source: &str, message: 
     let _ = app.emit(BACKEND_LOG_EVENT_CHANNEL, payload);
 }
 
-fn normalize_selected_path(value: &str) -> Option<PathBuf> {
-    let trimmed = value.trim();
-    if trimmed.is_empty() {
-        return None;
-    }
-    if let Ok(url) = url::Url::parse(trimmed)
-        && url.scheme() == "file"
-        && let Ok(path) = url.to_file_path()
-    {
-        return Some(path);
-    }
-    Some(PathBuf::from(trimmed))
-}
-
-fn allow_asset_scope_path(app: &tauri::AppHandle, path: &Path) -> Result<(), String> {
-    let scope = app.asset_protocol_scope();
-    let candidate = fs::canonicalize(path).unwrap_or_else(|_| path.to_path_buf());
-    scope.allow_directory(&candidate, true).map_err(|err| {
-        format!(
-            "allow asset scope failed for {}: {err}",
-            candidate.display()
-        )
-    })
-}
-
 #[tauri::command]
 async fn pick_source_folders(app: tauri::AppHandle) -> Result<Vec<String>, String> {
     let (tx, rx) = mpsc::channel::<Option<Vec<FilePath>>>();
@@ -135,21 +110,13 @@ async fn pick_source_folders(app: tauri::AppHandle) -> Result<Vec<String>, Strin
         .map_err(|err| format!("dialog response failed: {err}"))?
         .unwrap_or_default();
 
-    let paths = selected
+    Ok(selected
         .into_iter()
         .map(|path| match path {
             FilePath::Path(path_buf) => path_buf.to_string_lossy().to_string(),
             FilePath::Url(url) => url.to_string(),
         })
-        .collect::<Vec<_>>();
-
-    for path in &paths {
-        if let Some(pb) = normalize_selected_path(path) {
-            let _ = allow_asset_scope_path(&app, &pb);
-        }
-    }
-
-    Ok(paths)
+        .collect())
 }
 
 /// The Settings drawer's "Change" for the transcode folder.
@@ -191,18 +158,10 @@ async fn pick_usb_folder(app: tauri::AppHandle) -> Result<Option<String>, String
         .map_err(|err| format!("dialog task failed: {err}"))?
         .map_err(|err| format!("dialog response failed: {err}"))?;
 
-    let path = selected.map(|path| match path {
+    Ok(selected.map(|path| match path {
         FilePath::Path(path_buf) => path_buf.to_string_lossy().to_string(),
         FilePath::Url(url) => url.to_string(),
-    });
-
-    if let Some(ref selected_path) = path
-        && let Some(pb) = normalize_selected_path(selected_path)
-    {
-        let _ = allow_asset_scope_path(&app, &pb);
-    }
-
-    Ok(path)
+    }))
 }
 
 #[tauri::command]
@@ -242,20 +201,6 @@ async fn save_text_file(
         .map_err(|err| format!("failed to write {}: {err}", path_buf.display()))?;
 
     Ok(true)
-}
-
-#[tauri::command]
-async fn allow_asset_paths(app: tauri::AppHandle, paths: Vec<String>) -> Result<usize, String> {
-    let mut allowed = 0usize;
-    for value in paths {
-        let Some(path) = normalize_selected_path(&value) else {
-            continue;
-        };
-        if allow_asset_scope_path(&app, &path).is_ok() {
-            allowed += 1;
-        }
-    }
-    Ok(allowed)
 }
 
 fn log_dir() -> PathBuf {
@@ -878,6 +823,11 @@ fn main() {
             // The saved language, before any command answers. Not in `BackendCommands::new`:
             // the language is process-wide (see `apply_saved_language`).
             let _ = commands.apply_saved_language();
+            // The source folders the covers come from, before the window asks for one. A USB
+            // gets in when it's validated.
+            if let Some(sources) = commands.get_library_sources().data {
+                backend::tauri_commands::allow_library_sources_asset_scope(app.handle(), &sources);
+            }
             emit_backend_log(
                 &app_handle,
                 "debug",
@@ -1003,6 +953,7 @@ fn main() {
             backend::tauri_commands::get_ui_texts,
             backend::tauri_commands::get_frontend_settings,
             backend::tauri_commands::set_frontend_setting,
+            backend::tauri_commands::set_language,
             backend::tauri_commands::validate_usb_root,
             backend::tauri_commands::list_usb_devices,
             backend::tauri_commands::prune_usb_device,
@@ -1062,7 +1013,6 @@ fn main() {
             pick_source_folders,
             pick_usb_folder,
             save_text_file,
-            allow_asset_paths,
             show_window,
             set_theme_background
         ])

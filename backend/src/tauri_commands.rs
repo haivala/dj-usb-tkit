@@ -749,14 +749,19 @@ pub async fn get_library_sources(
 
 #[tauri::command]
 pub async fn add_source_folders(
+    app: AppHandle,
     state: State<'_, BackendCommands>,
     request: AddSourceFoldersRequest,
 ) -> Result<ApiResponse<AddSourceFoldersData>, String> {
     let commands = state.inner().clone();
-    Ok(run_blocking_command("add_source_folders", move || {
+    let response = run_blocking_command("add_source_folders", move || {
         commands.add_source_folders(request)
     })
-    .await)
+    .await;
+    if let Some(data) = &response.data {
+        allow_library_sources_asset_scope(&app, &data.sources);
+    }
+    Ok(response)
 }
 
 #[tauri::command]
@@ -938,14 +943,19 @@ pub async fn save_usb_track_analysis_edits(
 
 #[tauri::command]
 pub async fn relocate_source_root(
+    app: AppHandle,
     state: State<'_, BackendCommands>,
     request: RelocateSourceRootRequest,
 ) -> Result<ApiResponse<RelocateSourceRootData>, String> {
     let commands = state.inner().clone();
-    Ok(run_blocking_command("relocate_source_root", move || {
+    let response = run_blocking_command("relocate_source_root", move || {
         commands.relocate_source_root(request)
     })
-    .await)
+    .await;
+    if let Some(data) = &response.data {
+        allow_library_sources_asset_scope(&app, &data.sources);
+    }
+    Ok(response)
 }
 
 #[tauri::command]
@@ -1192,9 +1202,18 @@ pub fn set_frontend_setting(
     state: State<'_, BackendCommands>,
     request: SetFrontendSettingRequest,
 ) -> ApiResponse<SetFrontendSettingData> {
-    // Held until the setting is saved, so no job starts during a language change.
+    state.set_frontend_setting(request)
+}
+
+/// Sync, so the job registry can be held until the language is saved: no job starts during
+/// the change.
+#[tauri::command]
+pub fn set_language(
+    state: State<'_, BackendCommands>,
+    request: crate::models::SetLanguageRequest,
+) -> ApiResponse<crate::models::SetLanguageData> {
     let jobs = running_jobs();
-    state.set_frontend_setting_unless_job_running(request, !jobs.is_empty())
+    state.set_language(request, !jobs.is_empty())
 }
 
 #[tauri::command]
@@ -1204,7 +1223,7 @@ pub async fn validate_usb_root(
     request: ValidateUsbRootRequest,
 ) -> Result<ApiResponse<ValidateUsbRootData>, String> {
     let commands = state.inner().clone();
-    run_usb_job(
+    let response = run_usb_job(
         &app,
         "usb_read",
         "validate_usb_root",
@@ -1213,7 +1232,50 @@ pub async fn validate_usb_root(
         Some((30, tr::job_validate_usb_root_progress())),
         move || commands.validate_usb_root(request),
     )
-    .await
+    .await?;
+    if let Some(root) = response
+        .data
+        .as_ref()
+        .filter(|data| data.valid)
+        .and_then(|data| data.normalized_root.as_deref())
+    {
+        allow_asset_scope(&app, [root]);
+    }
+    Ok(response)
+}
+
+/// Lets the window load files (covers, artwork) from each of `paths` and below: the asset
+/// protocol's scope. Only folders the backend itself holds go in, the library's source
+/// folders and a validated USB, never a path the page names. `tauri.conf.json` covers the
+/// usual places; this adds the ones elsewhere, such as another drive.
+pub fn allow_asset_scope<P: AsRef<std::path::Path>>(
+    app: &AppHandle,
+    paths: impl IntoIterator<Item = P>,
+) {
+    let scope = app.asset_protocol_scope();
+    for path in paths {
+        let path = path.as_ref();
+        let candidate = std::fs::canonicalize(path).unwrap_or_else(|_| path.to_path_buf());
+        if let Err(err) = scope.allow_directory(&candidate, true) {
+            crate::logging::emit(
+                crate::logging::Level::Warn,
+                "asset-scope",
+                &format!(
+                    "allow asset scope failed for {}: {err}",
+                    candidate.display()
+                ),
+            );
+        }
+    }
+}
+
+/// The library's source folders into the asset scope: at startup, and after a command that
+/// can add one.
+pub fn allow_library_sources_asset_scope(
+    app: &AppHandle,
+    sources: &crate::models::LibrarySourcesData,
+) {
+    allow_asset_scope(app, sources.folders.iter().map(|folder| &folder.path));
 }
 
 #[tauri::command]

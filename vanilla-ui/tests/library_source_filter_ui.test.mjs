@@ -97,11 +97,9 @@ test("relocateSourceRoot shows the folders the backend answers with and reloads 
   const calls = [];
   const statuses = [];
   let refreshedPlaylists = 0;
-  const allowed = [];
 
   const ctx = makeTestCtx({
     pickSourceFolders: async () => ["/music/new"],
-    invoke: async (name, payload) => { if (name === "allow_asset_paths") allowed.push(payload.paths); },
     command: async (name, payload) => {
       calls.push({ name, payload });
       if (name !== "relocate_source_root") return {};
@@ -127,7 +125,6 @@ test("relocateSourceRoot shows the folders the backend answers with and reloads 
   assert.deepEqual(calls[0], { name: "relocate_source_root", payload: { oldRoot: "/music/old", newRoot: "/music/new" } });
   assert.ok(calls.some((c) => c.name === "browse_source_files"), "the library reloads from the new root");
   assert.equal(ctx.el.sourceChipsContainer.querySelector(".source-chip-path").textContent, "/music/new");
-  assert.deepEqual(allowed, [["/music/new"]], "the new folder's covers can load");
   assert.equal(refreshedPlaylists, 1);
   assert.equal(statuses.at(-1), "Source relocated: 2 track paths updated", "the backend's status line");
 });

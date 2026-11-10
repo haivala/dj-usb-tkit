@@ -42,6 +42,10 @@
 - **Fix:** Warnings that pass on a reason, such as a failed save to the USB, a failed repair step or a failed
   track analysis, no longer show "validation error:" in front of it, and show the reason in the app's language.
   The log file keeps it in English.
+- **Improvement:** The Event Log entry for a failed action, such as renaming a playlist, saving cues or restoring a
+  backup, now says what failed, as the status line does, instead of only the reason.
+- **Chore:** The app window can no longer widen the set of folders it may load files from. The backend lets in
+  the library's source folders and the selected USB itself.
 
 ## 0.5.6
 

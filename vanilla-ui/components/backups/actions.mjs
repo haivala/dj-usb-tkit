@@ -54,7 +54,7 @@ export async function restoreUsbBackup(ctx, timestamp) {
   try {
     data = await command("restore_usb_backup", { usbRoot: state.usbRoot, timestamp });
   } catch (err) {
-    emitStatus(t("ui-backups-restore-failed", { error: err?.message || err }));
+    emitStatus(err?.message || String(err));
     await renderBackups(ctx);
     return;
   }
@@ -83,7 +83,7 @@ export async function deleteUsbBackup(ctx, timestamp) {
     const data = await command("delete_usb_backup", { usbRoot: state.usbRoot, timestamp });
     emitStatus(data.statusText);
   } catch (err) {
-    emitStatus(t("ui-backups-delete-failed", { error: err?.message || err }));
+    emitStatus(err?.message || String(err));
   }
   await renderBackups(ctx);
 }

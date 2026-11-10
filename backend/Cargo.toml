@@ -37,7 +37,7 @@ unicode-segmentation = "1"
 uuid = { version = "1", features = ["v7", "serde"] }
 walkdir = "2"
 stratum-dsp = "1"
-tauri = { version = "2", optional = true }
+tauri = { version = "2", optional = true, features = ["protocol-asset"] }
 reqwest = { version = "0.13", default-features = false, features = ["rustls-no-provider", "stream"], optional = true }
 flate2 = "1"
 # The text catalog (src/i18n.rs, locales/*.ftl). build.rs parses it with fluent-syntax.

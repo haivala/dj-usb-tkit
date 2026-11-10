@@ -1234,7 +1234,7 @@ async function answerExports(page, answer) {
       }
       if (command === "reorder_playlist_tracks") {
         window.__exportFlow.push({ command });
-        if (window.__failSortCommit) return { ok: false, error: { code: "IO", message: "disk full" } };
+        if (window.__failSortCommit) return { ok: false, error: { code: "IO", message: "Save track order failed: disk full" } };
       }
       return invoke(command, payload);
     };
@@ -1340,7 +1340,7 @@ test("export commits an active column sort first, and a failed commit blocks the
   await page.evaluate(() => { window.__failSortCommit = true; window.__exportFlow = []; });
   await artistHeader.click();
   await page.locator("#exportPlaylistBtn").click();
-  await expect(page.locator("#statusText")).toContainText("Export blocked: couldn't save the current sort order (disk full)");
+  await expect(page.locator("#statusText")).toContainText("Export blocked: Save track order failed: disk full");
   expect(await page.evaluate(() => window.__exportFlow.map((call) => call.command))).toEqual(["reorder_playlist_tracks"]);
 });
 

@@ -202,7 +202,6 @@
         case "clear_frontend_log": return "";
         case "append_frontend_log":
         case "show_window":
-        case "allow_asset_paths":
           return null;
         case "get_backend_log_buffer": return [];
         // Startup's one-time data upgrades: nothing pending.
