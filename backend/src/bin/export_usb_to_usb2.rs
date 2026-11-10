@@ -6,7 +6,6 @@ use backend::commands::BackendCommands;
 use backend::models::{
     AddSourceFoldersRequest, AddTrackCandidate, AddTrackCandidatesToPlaylistRequest,
     BrowseSourceFilesRequest, ExportToUsbRequest, FetchUsbPlaylistsRequest, InitializeUsbRequest,
-    ScanLibraryRequest,
 };
 
 fn fail(message: impl AsRef<str>) -> ! {
@@ -89,28 +88,17 @@ fn main() {
     }
 
     let source_contents = source_root.join("Contents");
-    let scan = backend.scan_library(ScanLibraryRequest {
-        source_roots: vec![source_contents.to_string_lossy().to_string()],
-        incremental: true,
-    });
-    if !scan.ok {
-        fail_with_cleanup(
-            format!(
-                "scan_library failed: {}",
-                scan.error
-                    .as_ref()
-                    .map(|e| e.message.as_str())
-                    .unwrap_or("unknown error")
-            ),
-            &data_dir,
-        );
-    }
-
     let add = backend.add_source_folders(AddSourceFoldersRequest {
         paths: vec![source_contents.to_string_lossy().to_string()],
     });
-    if !add.ok {
-        fail_with_cleanup("add_source_folders failed", &data_dir);
+    // Adding the folder indexes it.
+    match add.data.as_ref().filter(|_| add.ok) {
+        None => fail_with_cleanup("add_source_folders failed", &data_dir),
+        Some(data) if data.scan.is_none() => fail_with_cleanup(
+            format!("indexing the source folder failed: {}", data.status_text),
+            &data_dir,
+        ),
+        Some(_) => {}
     }
 
     // The library view's pages (at most 5000 rows each), until the last one.
@@ -188,7 +176,7 @@ fn main() {
         let playlist_id = create
             .data
             .as_ref()
-            .map(|d| d.playlist_id.clone())
+            .map(|d| d.data.playlist_id.clone())
             .unwrap_or_else(|| fail_with_cleanup("missing create_playlist data", &data_dir));
 
         let mut ids = Vec::<String>::new();
@@ -255,7 +243,8 @@ fn main() {
         }
         let data = export
             .data
-            .unwrap_or_else(|| fail_with_cleanup("missing export_to_usb data", &data_dir));
+            .unwrap_or_else(|| fail_with_cleanup("missing export_to_usb data", &data_dir))
+            .data;
         exported_count += 1;
         println!(
             "exported '{}' -> {} (tracks={}, skipped={})",

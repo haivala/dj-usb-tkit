@@ -1,7 +1,7 @@
 use super::*;
 use crate::models::ScanRekordboxDbRequest;
 
-/// The library's sources as the app sets them: `roots` added (switched on),
+/// The library's sources: `roots` configured (switched on), not indexed, and
 /// the imported libraries switched on or off as given.
 pub(super) fn set_library_sources(
     service: &BackendService,
@@ -9,19 +9,19 @@ pub(super) fn set_library_sources(
     rekordbox_db: bool,
     mixxx_db: bool,
 ) {
-    service
-        .add_source_folders(AddSourceFoldersRequest {
-            paths: roots.iter().map(|root| root.to_string()).collect(),
-        })
-        .expect("add source folders");
-    for (library, enabled) in [
-        (ExternalLibrary::Rekordbox, rekordbox_db),
-        (ExternalLibrary::Mixxx, mixxx_db),
-    ] {
-        service
-            .set_external_library_enabled(SetExternalLibraryEnabledRequest { library, enabled })
-            .expect("switch library");
+    // Saved directly, like the tracks these tests insert: adding a folder
+    // through `add_source_folders` would index it and rewrite those rows.
+    let conn = service.db.connect().expect("connect");
+    let mut sources = LibrarySources::load(&conn).expect("load sources");
+    for root in roots {
+        if !sources.roots.iter().any(|known| known == root) {
+            sources.roots.push(root.to_string());
+        }
     }
+    sources.rekordbox_db = rekordbox_db;
+    sources.mixxx_db = mixxx_db;
+    sources.ever_configured |= !roots.is_empty() || rekordbox_db || mixxx_db;
+    sources.save(&conn).expect("save sources");
 }
 
 // --- build_track_match_fingerprint ---

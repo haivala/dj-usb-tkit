@@ -139,7 +139,6 @@
     "ui-library-add-folders-progress-done": "Loading media library done",
     "ui-library-add-folders-progress-failed": "Loading media library failed",
     "ui-library-add-folders-refreshing": "Refreshing playlist views...",
-    "ui-library-add-folders-saving": "Saving source folders...",
     "ui-library-add-source": "+ Add Folder",
     "ui-library-analyze-library": "Analyze Library",
     "ui-library-chip-not-imported-mixxx-tooltip": "Not imported yet: click ↻ to import from Mixxx",

@@ -285,11 +285,21 @@ impl BackendService {
         })
     }
 
-    /// Adds the folders not configured yet, switched on. Indexing them is
-    /// `scan_library`'s job.
+    /// Adds the folders not configured yet, switched on, and indexes them
+    /// (indexing only: analysis stays a job the user starts).
     pub fn add_source_folders(
         &self,
         req: AddSourceFoldersRequest,
+    ) -> BackendResult<AddSourceFoldersData> {
+        self.add_source_folders_with_progress(req, || {})
+    }
+
+    /// `add_source_folders`, calling `on_indexing` once the folders are saved
+    /// and the scan of the added ones starts.
+    pub fn add_source_folders_with_progress(
+        &self,
+        req: AddSourceFoldersRequest,
+        on_indexing: impl FnOnce(),
     ) -> BackendResult<AddSourceFoldersData> {
         let conn = self.db.connect()?;
         let mut sources = LibrarySources::load(&conn)?;
@@ -304,14 +314,55 @@ impl BackendService {
             sources.ever_configured = true;
             sources.save(&conn)?;
         }
-        let status_text = added
-            .is_empty()
-            .then(|| tr::library_folders_unchanged(sources.roots.len()).render());
+        if added.is_empty() {
+            return Ok(AddSourceFoldersData {
+                sources: self.library_sources_data(&conn, &sources)?,
+                added,
+                scan: None,
+                status_text: tr::library_folders_unchanged(sources.roots.len()).render(),
+            });
+        }
+        drop(conn);
+        let (scan, status_text) = match self.index_new_source_folders(added.clone(), on_indexing) {
+            Ok(scan) => {
+                let status_text = scan.status_text.clone();
+                (Some(scan), status_text)
+            }
+            Err(reason) => {
+                let entry = logging::log_text(
+                    Level::Warn,
+                    "library-scan",
+                    "scan.added-folders-failed",
+                    &tr::library_folders_added_index_failed(added.len(), reason),
+                );
+                (None, entry.message)
+            }
+        };
+        // After the scan: a chip's analyzed mark counts the tracks it indexed.
+        let conn = self.db.connect()?;
         Ok(AddSourceFoldersData {
             sources: self.library_sources_data(&conn, &sources)?,
             added,
+            scan,
             status_text,
         })
+    }
+
+    /// Indexes folders the user just added or moved to (indexing only:
+    /// analysis stays a job the user starts). `on_indexing` runs as the scan
+    /// starts. A failed scan answers its reason: the folders stay, and the
+    /// next scan indexes them.
+    fn index_new_source_folders(
+        &self,
+        roots: Vec<String>,
+        on_indexing: impl FnOnce(),
+    ) -> Result<ScanLibraryData, String> {
+        on_indexing();
+        self.scan_library(ScanLibraryRequest {
+            source_roots: roots,
+            incremental: true,
+        })
+        .map_err(|error| error.render())
     }
 
     pub fn set_source_folder_enabled(
@@ -350,6 +401,17 @@ impl BackendService {
     pub fn relocate_source_root(
         &self,
         req: RelocateSourceRootRequest,
+    ) -> BackendResult<RelocateSourceRootData> {
+        self.relocate_source_root_with_progress(req, || {})
+    }
+
+    /// Points the old folder's tracks at the same files under the new folder,
+    /// then indexes the new folder, so files only it has join the library.
+    /// `on_indexing` runs as that scan starts.
+    pub fn relocate_source_root_with_progress(
+        &self,
+        req: RelocateSourceRootRequest,
+        on_indexing: impl FnOnce(),
     ) -> BackendResult<RelocateSourceRootData> {
         let old_root = req.old_root.trim().to_string();
         let new_root = req.new_root.trim().to_string();
@@ -435,13 +497,32 @@ impl BackendService {
         self.forget_source_folder_listings();
 
         let unresolved = missing_at_new_root + conflicts;
-        let status_text = if unresolved > 0 {
+        let relocated = if unresolved > 0 {
             tr::library_relocated_unresolved(updated, unresolved)
         } else {
             tr::library_relocated(updated)
         }
         .render();
+        let (scan, status_text) =
+            match self.index_new_source_folders(vec![new_root.clone()], on_indexing) {
+                Ok(scan) if scan.indexed > 0 => {
+                    let status_text =
+                        tr::library_relocated_and_indexed(&relocated, scan.indexed).render();
+                    (Some(scan), status_text)
+                }
+                Ok(scan) => (Some(scan), relocated),
+                Err(reason) => {
+                    let entry = logging::log_text(
+                        Level::Warn,
+                        "library-scan",
+                        "scan.relocated-folder-failed",
+                        &tr::library_relocated_index_failed(&relocated, reason),
+                    );
+                    (None, entry.message)
+                }
+            };
         Ok(RelocateSourceRootData {
+            scan,
             old_root,
             new_root,
             matched,

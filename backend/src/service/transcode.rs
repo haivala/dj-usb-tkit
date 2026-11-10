@@ -1007,8 +1007,7 @@ mod tests {
             .add_source_folders(AddSourceFoldersRequest {
                 paths: vec![music.to_string_lossy().to_string()],
             })
-            .expect("add source folder");
-        scan(&service);
+            .expect("add source folder (indexes it)");
         service
             .set_transcode_folder(SetTranscodeFolderRequest {
                 path: Some(out.to_string_lossy().to_string()),

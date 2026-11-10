@@ -6,15 +6,15 @@ use std::path::PathBuf;
 
 use backend::commands::BackendCommands;
 use backend::models::{
-    AddLibrarySelectionToPlaylistRequest, AddTrackCandidate, AddTrackCandidatesToPlaylistRequest,
-    AnalyzeNewTracksRequest, BrowseSourceFilesRequest, CreatePlaylistRequest, ExportToUsbOptions,
-    ExportToUsbRequest, FetchUsbHistoriesRequest, FetchUsbPlaylistsRequest, FetchUsbTracksRequest,
-    GetPlaylistTracksRequest, GetTrackDetailRequest, GetUsbTrackDetailRequest,
-    InitializeUsbRequest, MaterializeSourceTrackRequest, SaveTrackAnalysisEditsRequest,
-    SaveTrackMetadataEditsRequest, SaveUsbTrackAnalysisEditsRequest,
-    SaveUsbTrackMetadataEditsRequest, ScanLibraryRequest, SelectUsbRequest,
-    SetFrontendSettingRequest, SetUsbAudioFormatsRequest, TrackCueInput, UsbMetadataEditTrack,
-    UsbTrack,
+    AddLibrarySelectionToPlaylistRequest, AddSourceFoldersRequest, AddTrackCandidate,
+    AddTrackCandidatesToPlaylistRequest, AnalyzeNewTracksRequest, BrowseSourceFilesRequest,
+    CreatePlaylistRequest, ExportToUsbOptions, ExportToUsbRequest, FetchUsbHistoriesRequest,
+    FetchUsbPlaylistsRequest, FetchUsbTracksRequest, GetPlaylistTracksRequest,
+    GetTrackDetailRequest, GetUsbTrackDetailRequest, InitializeUsbRequest,
+    MaterializeSourceTrackRequest, SaveTrackAnalysisEditsRequest, SaveTrackMetadataEditsRequest,
+    SaveUsbTrackAnalysisEditsRequest, SaveUsbTrackMetadataEditsRequest, ScanLibraryRequest,
+    SelectUsbRequest, SetFrontendSettingRequest, SetUsbAudioFormatsRequest, TrackCueInput,
+    UsbMetadataEditTrack, UsbTrack,
 };
 use backend::pdb_reader::parse_pdb;
 use backend::service::anlz::{
@@ -66,23 +66,19 @@ fn user_like_flow_imports_sources_analyzes_and_adds_from_library_usb_and_history
     let data_dir = root.path().join("data");
     let backend = BackendCommands::new(&data_dir).expect("create backend");
 
-    // As in the app: the folders are added to the library, then scanned.
-    library_sources::show_only(
-        &backend,
-        vec![
+    // As in the app: adding the folders to the library indexes them.
+    let added = backend.add_source_folders(AddSourceFoldersRequest {
+        paths: vec![
             source_a.to_string_lossy().to_string(),
             source_b.to_string_lossy().to_string(),
         ],
-        false,
-        false,
-    );
-
-    let scan_all = backend.scan_library(ScanLibraryRequest {
-        source_roots: Vec::new(),
-        incremental: true,
     });
-    assert!(scan_all.ok, "scan all failed: {scan_all:?}");
-    let scan_all_data = scan_all.data.expect("scan all data");
+    assert!(added.ok, "add source folders failed: {added:?}");
+    let scan_all_data = added
+        .data
+        .expect("add source folders data")
+        .scan
+        .expect("the added folders' scan");
     assert_eq!(scan_all_data.indexed, 4, "expected 4 indexed tracks");
     // Scanning one folder (as adding a folder does) still counts what a Scan
     // Library analysis would pick: the whole library as shown.
@@ -3520,14 +3516,6 @@ fn browse_only_track_can_be_materialized_and_added_without_scan_or_analysis() {
     let source = root.path().join("source");
     fs::create_dir_all(&source).expect("create source dir");
 
-    let mp3 = source.join("Artist One - Track One - 01 Track One.mp3");
-    fs::copy(
-        PathBuf::from(env!("CARGO_MANIFEST_DIR"))
-            .join("tests/fixtures/audio/noart/track_no_art.mp3"),
-        &mp3,
-    )
-    .expect("copy fixture track");
-
     let backend = BackendCommands::new(&data_dir).expect("create backend");
     library_sources::show_only(
         &backend,
@@ -3535,6 +3523,16 @@ fn browse_only_track_can_be_materialized_and_added_without_scan_or_analysis() {
         false,
         false,
     );
+    // A file that reaches the folder after it was added (and indexed) is
+    // listed by its path once the window regains focus, but not indexed.
+    let mp3 = source.join("Artist One - Track One - 01 Track One.mp3");
+    fs::copy(
+        PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+            .join("tests/fixtures/audio/noart/track_no_art.mp3"),
+        &mp3,
+    )
+    .expect("copy fixture track");
+    backend.forget_source_folder_listings();
     let browsed = backend
         .browse_source_files(BrowseSourceFilesRequest {
             query: String::new(),

@@ -30,28 +30,18 @@ fn scan_incremental_covers_unchanged_new_and_deleted_files() {
             .data
             .expect("add source folders")
     };
-    // A new folder: the scan that indexes it says the status line.
-    assert_eq!(
-        add(vec![media.to_string_lossy().to_string()]).status_text,
-        None
-    );
-
-    let first = backend.scan_library(ScanLibraryRequest {
-        source_roots: vec![media.to_string_lossy().to_string()],
-        incremental: true,
-    });
-    assert!(first.ok, "first scan failed: {first:?}");
-    let first_data = first.data.expect("first scan data");
-    assert_eq!(first_data.indexed, 2);
+    // A new folder is indexed as it is added; its scan says the status line.
+    let first_data = add(vec![media.to_string_lossy().to_string()]);
+    assert_eq!(first_data.added.len(), 1);
     assert_eq!(
         first_data.status_text,
         "Source folders: 1 | indexed 2 tracks"
     );
+    let first_data = first_data.scan.expect("the added folder's scan");
+    assert_eq!(first_data.indexed, 2);
     assert_eq!(
-        add(vec![media.to_string_lossy().to_string()])
-            .status_text
-            .as_deref(),
-        Some("Source folders unchanged: 1")
+        add(vec![media.to_string_lossy().to_string()]).status_text,
+        "Source folders unchanged: 1"
     );
     assert_eq!(first_data.updated, 0);
     assert_eq!(first_data.removed, 0);
@@ -121,9 +111,11 @@ fn scan_analysis_skips_unindexed_files() {
     fs::write(media.join("Artist - Indexed.mp3"), b"audio-a").expect("write indexed");
     let backend = BackendCommands::new(root.path().join("data")).expect("create backend");
     let roots = vec![media.to_string_lossy().to_string()];
-    scan(&backend, &media);
-    fs::write(media.join("Artist - Unindexed.mp3"), b"audio-b").expect("write unindexed");
+    // Adding the folder indexes the file in it; the one written after isn't.
     library_sources::show_only(&backend, roots.clone(), false, false);
+    fs::write(media.join("Artist - Unindexed.mp3"), b"audio-b").expect("write unindexed");
+    // The window regaining focus: the folders may have changed outside the app.
+    backend.forget_source_folder_listings();
     let listed = backend
         .browse_source_files(BrowseSourceFilesRequest {
             limit: 10,
@@ -215,12 +207,7 @@ fn relocate_source_root_rewrites_paths_and_preserves_playlist_membership() {
     let backend = BackendCommands::new(&data_dir).expect("create backend");
     let old_root = media.to_string_lossy().to_string();
 
-    let scan = backend.scan_library(ScanLibraryRequest {
-        source_roots: vec![old_root.clone()],
-        incremental: true,
-    });
-    assert!(scan.ok, "scan failed: {scan:?}");
-
+    // Adding the folder indexes it.
     library_sources::show_only(&backend, vec![old_root.clone()], false, false);
     let tracks = backend
         .browse_source_files(BrowseSourceFilesRequest {
@@ -251,6 +238,8 @@ fn relocate_source_root_rewrites_paths_and_preserves_playlist_membership() {
     let new_media = root.path().join("relocated");
     fs::rename(&media, &new_media).expect("move media dir");
     let new_root = new_media.to_string_lossy().to_string();
+    // A file only the new folder has: relocating indexes it.
+    fs::write(new_media.join("Artist - B.mp3"), b"audio-b").expect("write track b");
 
     let relocated = backend.relocate_source_root(RelocateSourceRootRequest {
         old_root: old_root.clone(),
@@ -262,6 +251,10 @@ fn relocate_source_root_rewrites_paths_and_preserves_playlist_membership() {
     assert_eq!(relocated_data.updated, 1);
     assert_eq!(relocated_data.missing_at_new_root, 0);
     assert_eq!(relocated_data.conflicts, 0);
+    assert_eq!(
+        relocated_data.status_text,
+        "Source relocated: 1 track path updated | indexed 1 new track"
+    );
 
     library_sources::show_only(&backend, vec![new_root.clone()], false, false);
     let tracks_after = backend
@@ -273,9 +266,25 @@ fn relocate_source_root_rewrites_paths_and_preserves_playlist_membership() {
         })
         .data
         .expect("search data after relocation");
-    assert_eq!(tracks_after.total, 1);
-    assert_eq!(tracks_after.items[0].id, track_id);
-    assert!(tracks_after.items[0].file_path.starts_with(&new_root));
+    assert_eq!(tracks_after.total, 2);
+    assert!(
+        tracks_after
+            .items
+            .iter()
+            .all(|track| track.file_path.starts_with(&new_root))
+    );
+    let moved = tracks_after
+        .items
+        .iter()
+        .find(|track| track.id == track_id)
+        .expect("the moved track keeps its id");
+    assert!(moved.file_path.ends_with("Artist - A.mp3"));
+    let found = tracks_after
+        .items
+        .iter()
+        .find(|track| track.id != track_id)
+        .expect("the new folder's own file");
+    assert_ne!(found.id, found.file_path, "indexed, not only listed");
 
     let playlist_tracks = backend
         .get_playlist_tracks(GetPlaylistTracksRequest {

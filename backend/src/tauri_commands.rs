@@ -2,7 +2,8 @@
 
 use std::collections::BTreeSet;
 use std::panic::{self, AssertUnwindSafe};
-use std::sync::{Mutex, MutexGuard, PoisonError};
+use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::{Arc, Mutex, MutexGuard, PoisonError};
 use std::thread;
 
 use chrono::Utc;
@@ -745,20 +746,99 @@ pub async fn get_library_sources(
     .await)
 }
 
+/// The indexing a source-folder command runs (adding a folder, relocating
+/// one), reported as a scan job like `scan_library`'s: started when the scan
+/// starts, finished only if it did.
+struct SourceFolderScanJob {
+    app: AppHandle,
+    job_id: String,
+    running: AtomicBool,
+}
+
+impl SourceFolderScanJob {
+    fn new(app: AppHandle) -> Self {
+        Self {
+            app,
+            job_id: Uuid::now_v7().to_string(),
+            running: AtomicBool::new(false),
+        }
+    }
+
+    fn identity(&self) -> JobIdentity<'_> {
+        JobIdentity {
+            job_id: &self.job_id,
+            job_type: "scan",
+            stage: "scan_library",
+        }
+    }
+
+    fn started(&self) {
+        self.running.store(true, Ordering::SeqCst);
+        emit_job_event(
+            &self.app,
+            "job.started",
+            self.identity(),
+            0,
+            1,
+            0,
+            tr::job_scan_library_started().render(),
+        );
+        emit_job_event(
+            &self.app,
+            "job.progress",
+            self.identity(),
+            0,
+            1,
+            30,
+            tr::job_scan_library_progress().render(),
+        );
+    }
+
+    /// `scan` is the finished scan, `None` when it failed with `failure`.
+    fn finished(&self, scan: Option<&ScanLibraryData>, failure: Option<String>) {
+        if !self.running.load(Ordering::SeqCst) {
+            return;
+        }
+        match scan {
+            Some(scan) => emit_job_event(
+                &self.app,
+                "job.completed",
+                self.identity(),
+                1,
+                1,
+                100,
+                tr::job_scan_library_completed_counts(scan.indexed, scan.updated, scan.removed)
+                    .render(),
+            ),
+            None => emit_job_failed(&self.app, self.identity(), failure),
+        }
+    }
+}
+
 #[tauri::command]
 pub async fn add_source_folders(
     app: AppHandle,
     state: State<'_, BackendCommands>,
     request: AddSourceFoldersRequest,
 ) -> Result<ApiResponse<AddSourceFoldersData>, String> {
+    let job = Arc::new(SourceFolderScanJob::new(app.clone()));
     let commands = state.inner().clone();
+    let scan_job = Arc::clone(&job);
     let response = run_blocking_command("add_source_folders", move || {
-        commands.add_source_folders(request)
+        commands.add_source_folders_with_progress(request, || scan_job.started())
     })
     .await;
     if let Some(data) = &response.data {
         allow_library_sources_asset_scope(&app, &data.sources);
     }
+    job.finished(
+        response.data.as_ref().and_then(|data| data.scan.as_ref()),
+        response
+            .data
+            .as_ref()
+            .map(|data| data.status_text.clone())
+            .or_else(|| response.error.as_ref().map(|e| e.message.clone())),
+    );
     Ok(response)
 }
 
@@ -945,14 +1025,24 @@ pub async fn relocate_source_root(
     state: State<'_, BackendCommands>,
     request: RelocateSourceRootRequest,
 ) -> Result<ApiResponse<RelocateSourceRootData>, String> {
+    let job = Arc::new(SourceFolderScanJob::new(app.clone()));
     let commands = state.inner().clone();
+    let scan_job = Arc::clone(&job);
     let response = run_blocking_command("relocate_source_root", move || {
-        commands.relocate_source_root(request)
+        commands.relocate_source_root_with_progress(request, || scan_job.started())
     })
     .await;
     if let Some(data) = &response.data {
         allow_library_sources_asset_scope(&app, &data.sources);
     }
+    job.finished(
+        response.data.as_ref().and_then(|data| data.scan.as_ref()),
+        response
+            .data
+            .as_ref()
+            .map(|data| data.status_text.clone())
+            .or_else(|| response.error.as_ref().map(|e| e.message.clone())),
+    );
     Ok(response)
 }
 

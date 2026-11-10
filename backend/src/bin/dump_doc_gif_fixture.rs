@@ -17,7 +17,7 @@
 //! language instead of English, to find response text that isn't from the catalog.
 use backend::models::{
     AddSourceFoldersRequest, AnalyzeNewTracksRequest, ApiResponse, BrowseSourceFilesRequest,
-    GetTrackDetailRequest, GetTracksByIdsRequest, ScanLibraryRequest,
+    GetTrackDetailRequest, GetTracksByIdsRequest,
 };
 use backend::service::BackendService;
 use backend::service::usb_vendor_compat::DEFAULT_USB_EDB_KEY;
@@ -58,11 +58,7 @@ fn main() {
         backend::i18n::set_language(&language).unwrap_or_else(|e| fail("set_language", e));
     }
     let svc = BackendService::new(data_dir).unwrap_or_else(|e| fail("open backend", e));
-    svc.scan_library(ScanLibraryRequest {
-        source_roots: vec![source_dir.clone()],
-        incremental: false,
-    })
-    .unwrap_or_else(|e| fail("scan_library", e));
+    // Adding the folder indexes it.
     svc.add_source_folders(AddSourceFoldersRequest {
         paths: vec![source_dir.clone()],
     })

@@ -1724,6 +1724,13 @@ library-folders-indexed = Source folders: { $folders } | indexed { $count ->
    *[other] { $count } tracks
 }
 
+# The status line when adding source folders saved them but indexing them failed.
+# $count: the folders added. $error: why the scan failed.
+library-folders-added-index-failed = { $count ->
+    [one] Added { $count } source folder
+   *[other] Added { $count } source folders
+}, but indexing failed: { $error }
+
 # The status line when every folder picked was already a source folder.
 # $folders: how many source folders the library has.
 library-folders-unchanged = Source folders unchanged: { $folders }
@@ -1751,6 +1758,18 @@ library-relocated-unresolved = Source relocated: { $count ->
     [one] { $unresolved } track
    *[other] { $unresolved } tracks
 } still unresolved
+
+# The relocation's status line, when indexing the new folder found files the library didn't have.
+# $relocated: the relocation's own line (library-relocated or library-relocated-unresolved).
+# $count: the tracks the scan indexed.
+library-relocated-and-indexed = { $relocated } | indexed { $count ->
+    [one] { $count } new track
+   *[other] { $count } new tracks
+}
+
+# The relocation's status line, when indexing the new folder failed.
+# $relocated: the relocation's own line. $error: why the scan failed.
+library-relocated-index-failed = { $relocated } | indexing the new folder failed: { $error }
 
 # The status line after importing the tracks of rekordbox's desktop library (master.db).
 # $new: tracks new to the library. $updated: tracks already in it that were updated.
@@ -2346,7 +2365,6 @@ ui-library-empty-import-mixxx = Mixxx library
 ui-library-add-folders-progress = Loading media library...
 ui-library-add-folders-progress-done = Loading media library done
 ui-library-add-folders-progress-failed = Loading media library failed
-ui-library-add-folders-saving = Saving source folders...
 ui-library-add-folders-indexing = Indexing new files...
 ui-library-add-folders-building = Building track list...
 ui-library-add-folders-refreshing = Refreshing playlist views...

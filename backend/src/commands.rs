@@ -156,6 +156,17 @@ impl BackendCommands {
         wrap(self.service.add_source_folders(req))
     }
 
+    pub fn add_source_folders_with_progress(
+        &self,
+        req: AddSourceFoldersRequest,
+        on_indexing: impl FnOnce(),
+    ) -> ApiResponse<AddSourceFoldersData> {
+        wrap(
+            self.service
+                .add_source_folders_with_progress(req, on_indexing),
+        )
+    }
+
     pub fn remove_source_folder(
         &self,
         req: RemoveSourceFolderRequest,
@@ -280,6 +291,17 @@ impl BackendCommands {
         req: RelocateSourceRootRequest,
     ) -> ApiResponse<RelocateSourceRootData> {
         wrap(self.service.relocate_source_root(req))
+    }
+
+    pub fn relocate_source_root_with_progress(
+        &self,
+        req: RelocateSourceRootRequest,
+        on_indexing: impl FnOnce(),
+    ) -> ApiResponse<RelocateSourceRootData> {
+        wrap(
+            self.service
+                .relocate_source_root_with_progress(req, on_indexing),
+        )
     }
 
     pub fn resolve_playback_source(

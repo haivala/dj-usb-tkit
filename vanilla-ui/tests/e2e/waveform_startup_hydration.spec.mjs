@@ -141,6 +141,7 @@ function installSourceChipAnalysisMock(page) {
     window.__folderToggles = [];
     window.__browseCalls = 0;
     window.__scanCalls = 0;
+    window.__addPayloads = [];
     window.__picked = false;
 
     const listeners = new Map();
@@ -197,7 +198,11 @@ function installSourceChipAnalysisMock(page) {
             const known = new Set(sources.folders.map((f) => f.path));
             const added = payload.request.paths.filter((path) => !known.has(path));
             sources.folders.push(...added.map(folder));
-            return { ok: true, data: { sources, added } };
+            window.__addPayloads.push(payload.request);
+            return {
+              ok: true,
+              data: { sources, added, statusText: `Source folders: ${sources.folders.length} | indexed 1 track` }
+            };
           }
           if (command === "set_source_folder_enabled") {
             const { path, enabled } = payload.request;
@@ -293,7 +298,6 @@ function installSourceChipAnalysisMock(page) {
           }
           if (command === "scan_library") {
             window.__scanCalls += 1;
-            window.__lastScanPayload = payload?.request || null;
             return { ok: true, data: { indexed: 1, updated: 0, removed: 0 } };
           }
           if (command === "browse_source_files") {
@@ -308,21 +312,19 @@ function installSourceChipAnalysisMock(page) {
   });
 }
 
-test("source chips show analyzed green on startup and adding a source indexes it via scan_library", async ({ page }) => {
+test("source chips show analyzed green on startup and adding a source indexes it", async ({ page }) => {
   await installSourceChipAnalysisMock(page);
   await page.goto("/");
 
   await expect(page.locator(".source-chip.source-chip-analyzed")).toHaveCount(1);
   await page.locator("#addSourceBtn").click();
-  // Newly added folders must be indexed immediately (scan_library, metadata-only
-  // insert) so tracks are playable right away without a manual "Analyze Library"
-  // click -- see backend/src/service/library.rs scan_library /
-  // playback.rs resolve_playback_source.
-  await expect.poll(async () => page.evaluate(() => window.__scanCalls)).toBe(1);
-  await expect.poll(async () => page.evaluate(() => window.__lastScanPayload)).toEqual({
-    sourceRoots: ["/music2"],
-    incremental: true
-  });
+  // Adding a folder indexes it in the same command (metadata only, no
+  // analysis), so its tracks are playable right away without a manual
+  // "Analyze Library" click -- see backend/src/service/source_roots.rs
+  // add_source_folders. No separate scan follows.
+  await expect.poll(async () => page.evaluate(() => window.__addPayloads)).toEqual([{ paths: ["/music2"] }]);
+  await expect(page.locator("#statusText")).toContainText("indexed 1 track");
+  expect(await page.evaluate(() => window.__scanCalls)).toBe(0);
   await expect(page.locator(".source-chip.source-chip-analyzed")).toHaveCount(2);
 
   // The library chips sit in their own "Libraries" row, not among the folders.
@@ -340,7 +342,7 @@ test("source chips show analyzed green on startup and adding a source indexes it
   await rekordboxDbToggle.check();
   await expect(rekordboxDbToggle).toBeChecked();
   await expect.poll(async () => page.evaluate(() => window.__browseCalls)).toBeGreaterThan(browseCalls);
-  await expect.poll(async () => page.evaluate(() => window.__scanCalls)).toBe(1);
+  await expect.poll(async () => page.evaluate(() => window.__scanCalls)).toBe(0);
 
   // Mixxx isn't imported yet: its checkbox is disabled until the chip's ↻ runs
   // the import, which then switches it on.
@@ -364,7 +366,7 @@ test("source chips show analyzed green on startup and adding a source indexes it
     { library: "mixxx", enabled: true },
     { library: "mixxx", enabled: false },
   ]);
-  await expect.poll(async () => page.evaluate(() => window.__scanCalls)).toBe(1);
+  await expect.poll(async () => page.evaluate(() => window.__scanCalls)).toBe(0);
 });
 
 test("source folders inside another one show grouped under its chip", async ({ page }) => {

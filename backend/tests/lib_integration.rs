@@ -18,10 +18,10 @@ use backend::models::{
     AnalyzeNewTracksRequest, BrowseSourceFilesRequest, CreatePlaylistRequest, ExportToUsbOptions,
     ExportToUsbRequest, FetchUsbHistoriesRequest, FetchUsbPlaylistsRequest, FetchUsbTracksRequest,
     GetPlaylistTracksRequest, GetTrackDetailRequest, InitializeUsbRequest,
-    MaterializeSourceTrackRequest, RemoveSourceFolderRequest, RemoveTracksFromPlaylistRequest,
-    RemoveUsbPlaylistRequest, RepairUsbDiagnosticsRequest, ResolvePlaybackSourceRequest,
-    RunUsbDiagnosticsRequest, RunUsbParityReportRequest, ScanLibraryRequest,
-    SetFrontendSettingRequest, SetUsbDeviceNameRequest, WarningEntry,
+    RemoveSourceFolderRequest, RemoveTracksFromPlaylistRequest, RemoveUsbPlaylistRequest,
+    RepairUsbDiagnosticsRequest, ResolvePlaybackSourceRequest, RunUsbDiagnosticsRequest,
+    RunUsbParityReportRequest, ScanLibraryRequest, SetFrontendSettingRequest,
+    SetUsbDeviceNameRequest, WarningEntry,
 };
 use backend::pdb_reader::parse_pdb;
 use backend::service::anlz::canonical_analysis_bundle_paths;
@@ -6588,21 +6588,28 @@ fn export_to_usb_fingerprint_fallback_reuses_foreign_scheme_track_instead_of_dup
     let source_path = source_dir.join("Steadfast.mp3");
     fs::write(&source_path, audio_bytes).expect("write local source audio");
 
-    let materialized = backend.materialize_source_track(MaterializeSourceTrackRequest {
-        file_path: source_path.to_string_lossy().to_string(),
-        title: "Steadfast".to_string(),
-        artist: "Kuro".to_string(),
-        album: Some("TESTO".to_string()),
-        track_number: None,
-        key: None,
-        file_size_bytes: None,
-        format_ext: Some("mp3".to_string()),
-        sample_rate_hz: None,
-        bit_depth: None,
-        bitrate_kbps: None,
-    });
-    assert!(materialized.ok, "materialize failed: {materialized:?}");
-    let track_id = materialized.data.expect("materialize data").track_id;
+    library_sources::show_only(
+        &backend,
+        vec![source_dir.to_string_lossy().to_string()],
+        false,
+        false,
+    );
+    // Adding the folder indexed the file; the test gives the row the tags
+    // the fake file lacks.
+    let track_id = backend
+        .browse_source_files(BrowseSourceFilesRequest {
+            query: String::new(),
+            limit: 10,
+            cursor: None,
+            ..Default::default()
+        })
+        .data
+        .expect("browse source files")
+        .items
+        .into_iter()
+        .find(|track| Path::new(&track.file_path) == source_path)
+        .expect("the added folder's file is indexed")
+        .id;
 
     // Analysis is required for export regardless of include_analysis, so seed a
     // minimal (dummy-content) DAT/EXT/2EX bundle and point the local track at it.
@@ -6617,7 +6624,10 @@ fn export_to_usb_fingerprint_fallback_reuses_foreign_scheme_track_instead_of_dup
     conn.execute(
         r#"
         UPDATE tracks
-        SET bpm = 86.0,
+        SET title = 'Steadfast',
+            artist = 'Kuro',
+            album = 'TESTO',
+            bpm = 86.0,
             duration_ms = 163000,
             waveform_peaks_path = ?1
         WHERE id = ?2
@@ -6633,18 +6643,13 @@ fn export_to_usb_fingerprint_fallback_reuses_foreign_scheme_track_instead_of_dup
     assert!(created.ok, "create failed: {created:?}");
     let playlist_id = created.data.expect("playlist data").data.playlist_id;
 
-    library_sources::show_only(
-        &backend,
-        vec![source_dir.to_string_lossy().to_string()],
-        false,
-        false,
-    );
     let added = backend.add_library_selection_to_playlist(AddLibrarySelectionToPlaylistRequest {
         playlist_id: playlist_id.clone(),
         track_ids: vec![track_id],
         ..Default::default()
     });
     assert!(added.ok, "add failed: {added:?}");
+    eprintln!("DEBUG add: {:?}", added.data.as_ref().map(|d| &d.data));
 
     let contents_before = WalkDir::new(usb.join("Contents"))
         .into_iter()

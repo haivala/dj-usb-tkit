@@ -80,7 +80,6 @@ export function bindLibraryEvents(ctx) {
     pickSourceFolders()
       .then(async (picked) => {
         if (!picked.length) return;
-        // Nothing added: add_source_folders' status line; otherwise the scan's.
         let statusText = "";
         const texts = {
           working: t("ui-library-add-folders-progress"),
@@ -88,20 +87,12 @@ export function bindLibraryEvents(ctx) {
           failed: t("ui-library-add-folders-progress-failed")
         };
         await withProgress(texts, async (progress) => {
-          progress(20, t("ui-library-add-folders-saving"));
+          // Adding the folders indexes them too.
+          progress(20, t("ui-library-add-folders-indexing"));
           const result = await command("add_source_folders", { paths: picked });
           applyLibrarySources(ctx, result.sources);
-          if (!result.added.length) {
-            statusText = result.statusText;
-            return;
-          }
-
-          progress(45, t("ui-library-add-folders-indexing"));
-          const indexResult = await command("scan_library", {
-            sourceRoots: result.added,
-            incremental: true
-          });
-          statusText = indexResult.statusText;
+          statusText = result.statusText;
+          if (!result.added.length) return;
 
           progress(70, t("ui-library-add-folders-building"));
           await resetAndLoadLibraryTracks(state.libraryQuery);

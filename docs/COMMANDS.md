@@ -124,9 +124,12 @@ drive selection from being rendered against a newer selected drive.
   `analyze_new_tracks`, and `scan_library` without `sourceRoots`) uses the
   switched-on folders that are present plus the switched-on imported
   libraries. A library whose database is no longer found is switched off.
-- `add_source_folders` — `{ paths }` → `{ sources, added, statusText? }`;
-  `added` are the paths not already configured (switched on). `statusText`
-  only when nothing was added; otherwise `scan_library` says it.
+- `add_source_folders` — `{ paths }` → `{ sources, added, statusText }`;
+  `added` are the paths not already configured (switched on), indexed in the
+  same command (indexing only, no analysis; reported as a `scan` job).
+  `statusText` is that scan's line, or the folder count when nothing was
+  added. If the indexing fails the folders stay added and `statusText` says
+  so; the next scan indexes them.
 - `remove_source_folder` — `{ path }` → `{ sources, removed, statusText }`;
   removes the folder and its tracks, keeping tracks inside another source
   folder.
@@ -138,7 +141,9 @@ drive selection from being rendered against a newer selected drive.
 - `relocate_source_root` — `{ oldRoot, newRoot }` → the rewrite counts
   (`unresolved` = `missingAtNewRoot` + `conflicts`) plus `sources` and
   `statusText`: once every track moved, the new folder replaces the old one;
-  otherwise both stay.
+  otherwise both stay. Then it indexes the new folder (indexing only, reported
+  as a `scan` job), and `statusText` adds the files that indexed, or that the
+  indexing failed.
 - `get_track_detail` — returns `{ track, firstBeatMs, cues, detailWaveform,
   keyOptions, maxHotCues, genre, rating, releaseDate, genreOptions }` for the cue
   editor (see `docs/CUE_EDITOR.md`). `maxHotCues` is the editor's hot-cue slots

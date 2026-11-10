@@ -706,10 +706,14 @@ pub struct AddSourceFoldersData {
     pub sources: LibrarySourcesData,
     /// The paths that weren't configured yet, in the order given.
     pub added: Vec<String>,
-    /// The status line when nothing was added; otherwise the scan that
-    /// indexes the added folders answers with it.
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub status_text: Option<String>,
+    /// The scan that indexed the added folders; `None` when nothing was
+    /// added or the scan failed. Not sent: the Tauri command reports it as a
+    /// scan job.
+    #[serde(default, skip_serializing)]
+    pub scan: Option<ScanLibraryData>,
+    /// The scan's status line, the failed scan's, or (nothing added) the
+    /// folder count.
+    pub status_text: String,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -850,6 +854,11 @@ pub struct RelocateSourceRootData {
     /// The source folders after the move: the old folder is replaced by the
     /// new one, or kept beside it while some of its tracks couldn't move.
     pub sources: LibrarySourcesData,
+    /// The scan that indexed the new folder; `None` when it failed. Not
+    /// sent: the Tauri command reports it as a scan job.
+    #[serde(default, skip_serializing)]
+    pub scan: Option<ScanLibraryData>,
+    /// The relocation's line, with the files the scan indexed or why it failed.
     pub status_text: String,
 }
 

@@ -144,7 +144,7 @@ fn list_app_playlists(input: &Path) {
     let data = list
         .data
         .unwrap_or_else(|| fail("missing list_playlists data"));
-    for p in data.items {
+    for p in data.playlists {
         println!("playlist|db=app|id={}|name={}", p.id, p.name);
     }
 }

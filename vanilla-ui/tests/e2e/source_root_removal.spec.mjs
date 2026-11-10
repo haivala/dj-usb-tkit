@@ -6,6 +6,7 @@ function installSourceRemovalMock(page) {
     window.__sourceFolders = window.__sourceFolders || ["/music/a", "/music/b"];
     window.localStorage.setItem("djusbtkit.helpSeen", "1");
     window.__scanCalls = [];
+    window.__indexedOnAdd = [];
 
     const listeners = new Map();
     const listen = async (eventName, callback) => {
@@ -54,9 +55,20 @@ function installSourceRemovalMock(page) {
 
     // Ground-truth files that exist on disk under /music/a and /music/b --
     // independent of trackStore (the DB state), which remove_source_folder
-    // empties out. scan_library "rediscovers" these and assigns fresh ids, just
+    // empties out. Indexing "rediscovers" these and assigns fresh ids, just
     // like the real backend does on re-scan (it never reuses a deleted row's id).
     const filesOnDisk = trackStore.map((t) => ({ ...t, id: `${t.id}-rescanned` }));
+    const indexRoots = (roots) => {
+      let indexed = 0;
+      for (const seed of filesOnDisk) {
+        const alreadyIndexed = trackStore.some((t) => t.filePath === seed.filePath);
+        if (!alreadyIndexed && roots.some((root) => underRoot(seed.filePath, root))) {
+          trackStore.push({ ...seed });
+          indexed += 1;
+        }
+      }
+      return indexed;
+    };
 
     const underRoot = (filePath, root) => {
       const p = String(filePath || "").replace(/\\/g, "/");
@@ -80,7 +92,13 @@ function installSourceRemovalMock(page) {
           if (command === "add_source_folders") {
             const added = payload.request.paths.filter((path) => !window.__sourceFolders.includes(path));
             window.__sourceFolders.push(...added);
-            return { ok: true, data: { sources: sources(), added } };
+            // Adding a folder indexes it.
+            window.__indexedOnAdd.push(added);
+            const indexed = indexRoots(added);
+            const statusText = added.length
+              ? `Source folders: ${window.__sourceFolders.length} | indexed ${indexed} tracks`
+              : `Source folders unchanged: ${window.__sourceFolders.length}`;
+            return { ok: true, data: { sources: sources(), added, statusText } };
           }
           if (command === "browse_source_files") {
             return { ok: true, data: { total: trackStore.length, items: trackStore } };
@@ -110,15 +128,7 @@ function installSourceRemovalMock(page) {
               ? payload.request.sourceRoots.map((v) => String(v || "").trim()).filter(Boolean)
               : [];
             window.__scanCalls.push(roots);
-            let indexed = 0;
-            for (const seed of filesOnDisk) {
-              const alreadyIndexed = trackStore.some((t) => t.filePath === seed.filePath);
-              if (!alreadyIndexed && roots.some((root) => underRoot(seed.filePath, root))) {
-                trackStore.push({ ...seed });
-                indexed += 1;
-              }
-            }
-            return { ok: true, data: { indexed, updated: 0, removed: 0 } };
+            return { ok: true, data: { indexed: indexRoots(roots), updated: 0, removed: 0 } };
           }
           return window.__e2eBackend.answer(command);
         }
@@ -195,9 +205,8 @@ test("after removing source A, reloading tracks still filters by remaining roots
 // "track not found in Library or selected USB" until the user separately
 // clicked "Analyze Library". The fix indexes newly (re-)added folders
 // immediately as part of "Add Source" -- see
-// vanilla-ui/components/library/events.mjs addSourceBtn handler and
-// backend/src/service/library.rs scan_library.
-test("re-adding a removed source folder indexes it via scan_library so tracks are usable again", async ({ page }) => {
+// backend/src/service/source_roots.rs add_source_folders.
+test("re-adding a removed source folder indexes it so tracks are usable again", async ({ page }) => {
   await installSourceRemovalMock(page);
   await page.goto("/");
 
@@ -211,9 +220,10 @@ test("re-adding a removed source folder indexes it via scan_library so tracks ar
   await page.evaluate(() => { window.__pickReturn = ["/music/a"]; });
   await page.locator("#addSourceBtn").click();
 
-  await expect.poll(async () => page.evaluate(() => window.__scanCalls.length)).toBe(1);
-  const lastScanRoots = await page.evaluate(() => window.__scanCalls[window.__scanCalls.length - 1]);
-  expect(lastScanRoots).toEqual(["/music/a"]);
+  // Adding the folder indexes it: no separate scan.
+  await expect.poll(async () => page.evaluate(() => window.__indexedOnAdd)).toEqual([["/music/a"]]);
+  await expect(page.locator("#statusText")).toContainText("indexed 2 tracks");
+  expect(await page.evaluate(() => window.__scanCalls)).toEqual([]);
 
   await expect(page.locator("#sourceChipsContainer .source-chip")).toHaveCount(2);
   await expect(page.locator("#libraryTableBody .track-grid-row")).toHaveCount(3);
@@ -221,7 +231,7 @@ test("re-adding a removed source folder indexes it via scan_library so tracks ar
   await expect(page.locator("#libraryTableBody")).toContainText("A Two");
 
   // The re-indexed tracks must carry real, freshly-assigned ids from
-  // scan_library -- not the raw file path (the pre-fix placeholder id) and
+  // the indexing -- not the raw file path (the pre-fix placeholder id) and
   // not the old, now-deleted row's id -- so playback/resolve_playback_source
   // can find them by id immediately.
   const restoredRow = page.locator("#libraryTableBody .track-grid-row", { hasText: "A One" });
