@@ -45,3 +45,13 @@ test("showTrackRow with replaces shows a listed file's new library row in place 
   assert.equal(row.dataset.trackId, "lib-1");
   for (const node of row.querySelectorAll("[data-id]")) assert.equal(node.dataset.id, "lib-1");
 });
+
+test("showTrackRow keeps the source a playlist's copy was read with", () => {
+  const ctx = makeTestCtx();
+  const usbOff = { kind: "usb", missing: true, tooltip: "USB not connected: /stick/a.mp3" };
+  const copy = { id: "a", title: "Old", fileSource: usbOff };
+  ctx.state.playlists = [{ id: "p1", name: "P1", tracks: [copy] }];
+  showTrackRow(ctx, { id: "a", title: "New" });
+  assert.equal(copy.title, "New");
+  assert.deepEqual(copy.fileSource, usbOff);
+});

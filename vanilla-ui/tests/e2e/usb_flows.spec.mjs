@@ -323,31 +323,16 @@ function installTauriMock(page, mode) {
             warnings: []
           });
         }
-        const warnings = mode === "needs-init-structured"
-          ? [
-              {
-                level: "warn",
-                code: "usb.validate.missing-vendor-root",
-                message: "Missing vendor root folder",
-                source: "usb-validate"
-              },
-              {
-                level: "warn",
-                code: "usb.validate.missing-contents",
-                message: "Missing Contents directory",
-                source: "usb-validate"
-              }
-            ]
-          : ["missing External library structure"];
         return backend.ok({
           valid: false,
           normalizedRoot: path,
           canInitialize: true,
           statusText: "USB selected but not initialized.",
-          initHintText: mode === "needs-init-structured"
-            ? "Missing vendor root folder | Missing Contents directory"
-            : "missing External library structure",
-          warnings
+          initHintText: "Missing vendor root folder | Missing Contents directory",
+          warnings: [
+            { level: "warn", code: "usb.validate.missing-vendor-root", message: "Missing vendor root folder", source: "usb-validate" },
+            { level: "warn", code: "usb.validate.missing-contents", message: "Missing Contents directory", source: "usb-validate" }
+          ]
         });
       }
       if (command === "initialize_usb") {
@@ -450,19 +435,16 @@ function installTauriMock(page, mode) {
   }, { mode });
 }
 
-test("USB initialize flow: invalid-but-writable root can be initialized and unlocked", async ({ page }) => {
+test("USB initialize flow: an invalid-but-writable root shows the backend's hint and status, and can be initialized and unlocked", async ({ page }) => {
   await installTauriMock(page, "needs-init");
   await page.goto("/");
 
-  // Navigate to USB panel via sidebar
-  await page.locator('.nav-item[data-view="usb"]').click();
-  // USB connection bar is hidden until a folder is picked;
-  // click the empty-state action button which delegates to #selectUsbFolderBtn
-  await page.locator("#usbEmptyState .empty-state-action").click();
+  await openUsb(page);
 
   await expect(page.locator("#usbInitRow")).not.toHaveClass(/hidden/);
   await expect(page.locator("#initializeUsbBtn")).toBeEnabled();
-  await expect(page.locator("#usbInitHint")).toContainText("missing External library structure");
+  await expect(page.locator("#usbInitHint")).toHaveText("Missing vendor root folder | Missing Contents directory");
+  await expect(page.locator("#statusText")).toContainText("USB selected but not initialized.");
   // The heading's diagnostics buttons only show for a usable USB.
   await expect(page.locator("#usbDiagToolbar")).toBeHidden();
 
@@ -494,54 +476,247 @@ test("a repair preview with nothing to fix hides the list and turns Preview Fixe
   await expect(page.locator("#applyRepairsBtn")).toBeDisabled();
 });
 
-test("USB initialize hint and status show what the backend sends", async ({ page }) => {
-  await installTauriMock(page, "needs-init-structured");
-  await page.goto("/");
-
-  await openUsb(page);
-
-  await expect(page.locator("#usbInitRow")).not.toHaveClass(/hidden/);
-  await expect(page.locator("#usbInitHint")).toContainText("Missing vendor root folder");
-  await expect(page.locator("#usbInitHint")).toContainText("Missing Contents directory");
-  await expect(page.locator("#statusText")).toContainText("USB selected but not initialized.");
-});
-
-test("USB playlist removal confirm path handles cancel and confirm", async ({ page }) => {
+test("USB playlist removal confirm path handles cancel and confirm; the Event Log header button counts errors logged while closed; the log shows console warnings and CSP events, not console.log or startup's developer lines, with one filter option per source; an open Event Log updates live: new entries on top, repeats coalesce, rows are kept; Diagnostics and parity render without warning panel; USB audio formats: ticks and drag order are saved, and the last ticked format can't be unticked", async ({ page }) => {
   await installTauriMock(page, "valid");
   await page.goto("/");
+  {
+    // Navigate to USB, select folder, then go to playlists
+    await openUsb(page);
 
-  // Navigate to USB, select folder, then go to playlists
-  await openUsb(page);
+    // Open a diagnostics report first -- a successful removal must clear it,
+    // since it no longer reflects the (now stale) playlist set it reported on.
+    const usbHealthCard = page.locator("#usbHealthCard");
+    await usbHealthCard.evaluate((node) => { node.open = true; });
+    await page.locator("#reDiagnoseBtn").click();
+    await expect(page.locator("#diagSections")).not.toBeEmpty();
 
-  // Open a diagnostics report first -- a successful removal must clear it,
-  // since it no longer reflects the (now stale) playlist set it reported on.
-  const usbHealthCard = page.locator("#usbHealthCard");
-  await usbHealthCard.evaluate((node) => { node.open = true; });
-  await page.locator("#reDiagnoseBtn").click();
-  await expect(page.locator("#diagSections")).not.toBeEmpty();
+    await page.locator('.nav-item[data-view="usb-playlists"]').click();
+    await expect(page.locator('[data-usb-playlist="usb-1"]')).toBeVisible();
 
-  await page.locator('.nav-item[data-view="usb-playlists"]').click();
-  await expect(page.locator('[data-usb-playlist="usb-1"]')).toBeVisible();
+    // The remove × only shows on the hovered row.
+    await expect(page.locator('[data-usb-remove-playlist="usb-1"]')).toBeHidden();
+    await page.locator('[data-usb-playlist="usb-1"]').hover();
+    await page.locator('[data-usb-remove-playlist="usb-1"]').click();
+    await expect(page.locator("#confirmOverlay")).toBeVisible();
+    await expect(page.locator("#confirmMessage")).toHaveText("mock remove Warmup?");
+    await page.locator("#confirmCancelBtn").click();
+    await expect(page.locator("#confirmOverlay")).toBeHidden();
+    await expect(page.locator('[data-usb-playlist="usb-1"]')).toBeVisible();
 
-  // The remove × only shows on the hovered row.
-  await expect(page.locator('[data-usb-remove-playlist="usb-1"]')).toBeHidden();
-  await page.locator('[data-usb-playlist="usb-1"]').hover();
-  await page.locator('[data-usb-remove-playlist="usb-1"]').click();
-  await expect(page.locator("#confirmOverlay")).toBeVisible();
-  await expect(page.locator("#confirmMessage")).toHaveText("mock remove Warmup?");
-  await page.locator("#confirmCancelBtn").click();
-  await expect(page.locator("#confirmOverlay")).toBeHidden();
-  await expect(page.locator('[data-usb-playlist="usb-1"]')).toBeVisible();
+    await page.locator('[data-usb-playlist="usb-1"]').hover();
+    await page.locator('[data-usb-remove-playlist="usb-1"]').click();
+    await page.locator("#confirmOkBtn").click();
 
-  await page.locator('[data-usb-playlist="usb-1"]').hover();
-  await page.locator('[data-usb-remove-playlist="usb-1"]').click();
-  await page.locator("#confirmOkBtn").click();
+    await expect(page.locator("#statusText")).toContainText("Removed USB playlist: Warmup");
+    await expect(page.locator("#usbPlaylists")).toBeEmpty();
+    await expect(page.locator("#usbPlaylists")).toHaveAttribute("data-loaded");
+    await expect(page.locator("#diagSections")).toBeEmpty();
+    await expect(page.locator("#diagOverallStatus")).toBeEmpty();
+  }
 
-  await expect(page.locator("#statusText")).toContainText("Removed USB playlist: Warmup");
-  await expect(page.locator("#usbPlaylists")).toBeEmpty();
-  await expect(page.locator("#usbPlaylists")).toHaveAttribute("data-loaded");
-  await expect(page.locator("#diagSections")).toBeEmpty();
-  await expect(page.locator("#diagOverallStatus")).toBeEmpty();
+  await page.reload();
+  {
+    const badge = page.locator("#eventLogBadge");
+    await page.locator("#eventLogBtn").click();
+    await expect(badge).toBeHidden();
+    await page.locator('.nav-item[data-view="library"]').click();
+
+    await page.evaluate(() => console.warn("badge-test-warning"));
+    await expect(badge).toBeHidden();
+
+    await page.evaluate(() => {
+      console.error("badge-test-error-1");
+      console.error("badge-test-error-2");
+    });
+    await expect(badge).toHaveText("2");
+    await expect(page.locator("#eventLogBtn")).toHaveAttribute("aria-label", "Event Log, 2 new errors");
+
+    await page.locator("#eventLogBtn").click();
+    await expect(badge).toBeHidden();
+    await expect(page.locator("#eventLogBtn")).toHaveClass(/active/);
+
+    // Errors logged while the log is open are seen, not counted.
+    await page.evaluate(() => console.error("badge-test-error-3"));
+    await page.locator('.nav-item[data-view="library"]').click();
+    await expect(badge).toBeHidden();
+
+    const marker = `console-mirror-${Date.now()}`;
+    await page.evaluate((text) => {
+      // Repeated "console"-sourced warnings: the source filter still lists it once.
+      console.warn(text);
+      console.warn(`${text}-again`);
+      console.log(`${text}-log`);
+      const evt = new Event("securitypolicyviolation");
+      Object.defineProperty(evt, "violatedDirective", { value: "style-src", configurable: true });
+      Object.defineProperty(evt, "blockedURI", { value: "inline", configurable: true });
+      window.dispatchEvent(evt);
+    }, marker);
+
+    await page.locator("#eventLogBtn").click();
+    const list = page.locator("#eventLogList");
+    await expect(list).toContainText(`${marker}-again`);
+    await expect(list).toContainText("CSP violation: style-src");
+    await expect(list).not.toContainText(`${marker}-log`);
+    await expect(list).not.toContainText("Frontend console bridge initialized");
+    await expect(list).not.toContainText("Initial view ready");
+    await expect(page.locator('#eventLogSourceFilter option[value="console"]')).toHaveCount(1);
+  }
+
+  await page.reload();
+  {
+    await page.locator("#eventLogBtn").click();
+
+    const rows = page.locator("#eventLogList .event-log-row");
+    await page.evaluate(() => console.warn("live-first"));
+    await expect(rows.first()).toContainText("live-first");
+    // Tag a row node: an incremental update must leave it in place.
+    await rows.first().evaluate((row) => { row.__kept = true; });
+
+    await page.evaluate(() => console.warn("live-second"));
+    await expect(rows.first()).toContainText("live-second");
+    expect(await rows.nth(1).evaluate((row) => row.__kept === true && row.textContent.includes("live-first"))).toBe(true);
+
+    // A repeat moves the existing entry back to the top with its count.
+    await page.evaluate(() => console.warn("live-first"));
+    await expect(rows.first()).toContainText("live-first");
+    await expect(rows.first().locator(".event-log-count")).toHaveText("x2");
+    await expect(page.locator("#eventLogList .event-log-row", { hasText: "live-first" })).toHaveCount(1);
+
+    // Entries hidden by the level filter don't show up.
+    await page.locator("#eventLogLevelFilter").selectOption("error");
+    await page.evaluate(() => console.warn("live-filtered-out"));
+    await expect(page.locator("#eventLogList")).not.toContainText("live-filtered-out");
+    await page.locator("#eventLogLevelFilter").selectOption("all");
+
+    // A flood while open stays capped at the store's 500 entries.
+    await page.evaluate(() => {
+      for (let i = 0; i < 1200; i += 1) console.warn(`live-flood-${i}`);
+    });
+    await expect(page.locator("#eventLogSummary")).toContainText("500 events");
+    await expect(rows).toHaveCount(500);
+    await expect(rows.first()).toContainText("live-flood-1199");
+  }
+
+  await page.reload();
+  {
+    await openUsb(page);
+    const usbHealthCard = page.locator("#usbHealthCard");
+    await usbHealthCard.evaluate((node) => {
+      node.open = true;
+    });
+    await page.locator("#reDiagnoseBtn").click();
+    await expect(page.locator("#diagSections .diag-overview-title")).toHaveText([
+      "Older Pioneer players",
+      "Waveforms & beat grids",
+      "Denon / Numark players"
+    ]);
+    await expect(page.locator("#diagSections .diag-overview-item.diag-check-na .diag-indicator")).toHaveText("–");
+    const technical = page.locator("#diagSections .diag-technical");
+    await expect(technical).not.toHaveAttribute("open");
+    await technical.locator("summary").click();
+    await expect(page.locator("#diagSections .diag-group-title")).toHaveText(["Databases", "Library"]);
+    await expect(page.locator("#diagSections .diag-group").first().locator(".diag-section-title")).toHaveText(["PDB", "Engine DJ"]);
+    await expect(page.locator("#diagSections")).toContainText("Overall resolution");
+    await expect(page.locator("#diagSections")).toContainText("Kept up to date");
+    await expect(page.locator("#diagSections")).not.toContainText("Playlists compared");
+    await expect(page.locator("#diagRawWarnings")).toHaveCount(0);
+    await expect(page.locator("#eventLogDot")).toBeHidden();
+    // The health dots show the result, with the backend's text.
+    await expect(page.locator("#usbHealthDot")).toHaveClass(/health-warn/);
+    await expect(page.locator("#usbHealthDot")).toHaveAttribute("data-tooltip", "USB health: warnings");
+    await expect(page.locator("#usbHeaderHealthDot")).toHaveClass(/health-warn/);
+    // Errors the mock logged take the badge's place; see them so the dot can show.
+    await page.locator("#eventLogBtn").click();
+    await page.locator('.nav-item[data-view="usb"]').click();
+
+    await page.locator("#runUsbParityBtn").click();
+    // Parity report: heading, plain-language rows, then the collapsed technical details
+    await expect(page.locator("#diagSections .diag-intro h3")).toHaveText("Parity Report");
+    // The parity result gets its own badge; the health badge stays as diagnostics left it.
+    await expect(page.locator("#diagParityStatus")).toHaveText("Parity FAIL");
+    await expect(page.locator("#diagOverallStatus")).toHaveText("WARN");
+    await expect(page.locator("#diagSections .diag-overview-title")).toHaveText([
+      "Playlists",
+      "Track details",
+      "Music files"
+    ]);
+    await expect(page.locator("#diagSections .diag-overview-item.diag-check-fail")).toHaveCount(2);
+    const parityTechnical = page.locator("#diagSections .diag-technical");
+    await expect(parityTechnical).not.toHaveAttribute("open");
+    await parityTechnical.locator("summary").click();
+    await expect(page.locator("#diagSections .diag-group-title")).toHaveText(["Comparison", "Playlists compared"]);
+    await expect(parityTechnical).toContainText("PDB metadata completeness");
+    // Diagnostics content should not leak into parity
+    await expect(page.locator("#diagSections")).not.toContainText("Databases");
+    await expect(page.locator("#diagSections")).not.toContainText("Older Pioneer players");
+    // Per-playlist comparison table
+    const playlistRows = parityTechnical.locator("tbody");
+    await expect(playlistRows).toContainText("Warmup");
+    await expect(playlistRows).toContainText("path mismatch 1");
+    await expect(playlistRows).toContainText("dict issues 1");
+    await expect(playlistRows).toContainText("PDB gaps 1");
+    // A check that links to the Event Log puts a dot on the header button until the log is opened.
+    const eventLogDot = page.locator("#eventLogDot");
+    await expect(eventLogDot).toBeVisible();
+    await parityTechnical.locator(".diag-log-link").click();
+    await expect(page.locator("#panel-event-log")).toHaveClass(/active/);
+    await expect(eventLogDot).toBeHidden();
+    await page.locator('.nav-item[data-view="usb"]').click();
+    // Back to diagnostics: the parity badge goes away with the parity report.
+    await page.locator("#reDiagnoseBtn").click();
+    await expect(page.locator("#diagSections .diag-intro")).toHaveCount(0);
+    await expect(page.locator("#diagParityStatus")).toBeEmpty();
+    await expect(page.locator("#diagRawWarnings")).toHaveCount(0);
+  }
+
+  await page.reload();
+  {
+    await openUsb(page);
+
+    const chips = page.locator("#usbAudioFormatsList .usb-cfg-audio-format-chip");
+    const names = page.locator("#usbAudioFormatsList .usb-cfg-audio-format-name");
+    await expect(page.locator("#usbAudioFormatsRow")).toBeVisible();
+    await expect(names).toHaveText(["FLAC", "ALAC", "AIFF", "WAV", "MP3", "AAC"]);
+    const boxes = page.locator("#usbAudioFormatsList .usb-cfg-audio-format-check");
+    for (let i = 0; i < 6; i += 1) await expect(boxes.nth(i)).toBeChecked();
+
+    const lastCall = () => page.evaluate(() => window.__usbAudioFormatCalls.at(-1));
+
+    await boxes.nth(0).uncheck();
+    await expect.poll(lastCall).toEqual([
+      { format: "flac", allowed: false },
+      { format: "alac", allowed: true },
+      { format: "aiff", allowed: true },
+      { format: "wav", allowed: true },
+      { format: "mp3", allowed: true },
+      { format: "aac", allowed: true },
+    ]);
+
+    // Untick all but AAC: its box is then the last ticked one and locks.
+    for (const index of [1, 2, 3, 4]) {
+      await boxes.nth(index).uncheck();
+      await expect(boxes.nth(index)).not.toBeChecked();
+    }
+    await expect(boxes.nth(5)).toBeChecked();
+    await expect(boxes.nth(5)).toBeDisabled();
+    await expect(chips.nth(5).locator(".usb-cfg-audio-format-label")).toHaveAttribute("data-tooltip", "At least one format stays ticked");
+    await boxes.nth(4).check();
+    await expect(boxes.nth(5)).toBeEnabled();
+
+    // Drag MP3 (chip 4) to the left half of FLAC (chip 0): it goes first.
+    const handle = chips.nth(4).locator("[data-usb-audio-format-drag-handle]");
+    const sourceBox = await handle.boundingBox();
+    const targetBox = await chips.nth(0).boundingBox();
+    await page.mouse.move(sourceBox.x + sourceBox.width / 2, sourceBox.y + sourceBox.height / 2);
+    await page.mouse.down();
+    await page.mouse.move(sourceBox.x + sourceBox.width / 2 - 10, sourceBox.y + sourceBox.height / 2, { steps: 5 });
+    await page.mouse.move(targetBox.x + targetBox.width * 0.25, targetBox.y + targetBox.height / 2, { steps: 10 });
+    await page.mouse.up();
+
+    await expect(names).toHaveText(["MP3", "FLAC", "ALAC", "AIFF", "WAV", "AAC"]);
+    await expect.poll(async () => (await lastCall()).map((item) => item.format))
+      .toEqual(["mp3", "flac", "alac", "aiff", "wav", "aac"]);
+  }
 });
 
 test("USB playlists and history tabs show their empty text only after a read finds nothing", async ({ page }) => {
@@ -718,32 +893,6 @@ test("a failed USB list read retries when the page is opened again", async ({ pa
   await expect(page.locator('[data-usb-playlist="usb-1"]')).toBeVisible();
 });
 
-test("the Event Log shows console warnings and CSP events, not console.log or startup's developer lines, with one filter option per source", async ({ page }) => {
-  await installTauriMock(page, "valid");
-  await page.goto("/");
-
-  const marker = `console-mirror-${Date.now()}`;
-  await page.evaluate((text) => {
-    // Repeated "console"-sourced warnings: the source filter still lists it once.
-    console.warn(text);
-    console.warn(`${text}-again`);
-    console.log(`${text}-log`);
-    const evt = new Event("securitypolicyviolation");
-    Object.defineProperty(evt, "violatedDirective", { value: "style-src", configurable: true });
-    Object.defineProperty(evt, "blockedURI", { value: "inline", configurable: true });
-    window.dispatchEvent(evt);
-  }, marker);
-
-  await page.locator("#eventLogBtn").click();
-  const list = page.locator("#eventLogList");
-  await expect(list).toContainText(`${marker}-again`);
-  await expect(list).toContainText("CSP violation: style-src");
-  await expect(list).not.toContainText(`${marker}-log`);
-  await expect(list).not.toContainText("Frontend console bridge initialized");
-  await expect(list).not.toContainText("Initial view ready");
-  await expect(page.locator('#eventLogSourceFilter option[value="console"]')).toHaveCount(1);
-});
-
 test("USB sub-nav reveal/hide and fallback to USB panel", async ({ page }) => {
   await installTauriMock(page, "toggle-usb");
   await page.goto("/");
@@ -769,83 +918,6 @@ test("USB sub-nav reveal/hide and fallback to USB panel", async ({ page }) => {
   await page.locator("#selectUsbFolderBtn").click();
   await expect(usbPlaylistsNav).not.toHaveClass(/revealed/);
   await expect(page.locator("#panel-usb")).toHaveClass(/active/);
-});
-
-test("Event Log header button counts errors logged while closed", async ({ page }) => {
-  await installTauriMock(page, "valid");
-  await page.goto("/");
-
-  const badge = page.locator("#eventLogBadge");
-  await page.locator("#eventLogBtn").click();
-  await expect(badge).toBeHidden();
-  await page.locator('.nav-item[data-view="library"]').click();
-
-  await page.evaluate(() => console.warn("badge-test-warning"));
-  await expect(badge).toBeHidden();
-
-  await page.evaluate(() => {
-    console.error("badge-test-error-1");
-    console.error("badge-test-error-2");
-  });
-  await expect(badge).toHaveText("2");
-  await expect(page.locator("#eventLogBtn")).toHaveAttribute("aria-label", "Event Log, 2 new errors");
-
-  await page.locator("#eventLogBtn").click();
-  await expect(badge).toBeHidden();
-  await expect(page.locator("#eventLogBtn")).toHaveClass(/active/);
-
-  // Errors logged while the log is open are seen, not counted.
-  await page.evaluate(() => console.error("badge-test-error-3"));
-  await page.locator('.nav-item[data-view="library"]').click();
-  await expect(badge).toBeHidden();
-});
-
-test("Event Log flood remains capped", async ({ page }) => {
-  await installTauriMock(page, "valid");
-  await page.goto("/");
-
-  await page.evaluate(() => {
-    for (let i = 0; i < 1200; i += 1) console.warn(`flood-${i}`);
-  });
-
-  await page.locator("#eventLogBtn").click();
-  await expect(page.locator("#eventLogSummary")).toContainText("500 events");
-});
-
-test("an open Event Log updates live: new entries on top, repeats coalesce, rows are kept", async ({ page }) => {
-  await installTauriMock(page, "valid");
-  await page.goto("/");
-  await page.locator("#eventLogBtn").click();
-
-  const rows = page.locator("#eventLogList .event-log-row");
-  await page.evaluate(() => console.warn("live-first"));
-  await expect(rows.first()).toContainText("live-first");
-  // Tag a row node: an incremental update must leave it in place.
-  await rows.first().evaluate((row) => { row.__kept = true; });
-
-  await page.evaluate(() => console.warn("live-second"));
-  await expect(rows.first()).toContainText("live-second");
-  expect(await rows.nth(1).evaluate((row) => row.__kept === true && row.textContent.includes("live-first"))).toBe(true);
-
-  // A repeat moves the existing entry back to the top with its count.
-  await page.evaluate(() => console.warn("live-first"));
-  await expect(rows.first()).toContainText("live-first");
-  await expect(rows.first().locator(".event-log-count")).toHaveText("x2");
-  await expect(page.locator("#eventLogList .event-log-row", { hasText: "live-first" })).toHaveCount(1);
-
-  // Entries hidden by the level filter don't show up.
-  await page.locator("#eventLogLevelFilter").selectOption("error");
-  await page.evaluate(() => console.warn("live-filtered-out"));
-  await expect(page.locator("#eventLogList")).not.toContainText("live-filtered-out");
-  await page.locator("#eventLogLevelFilter").selectOption("all");
-
-  // A flood while open stays capped at the store's 500 entries.
-  await page.evaluate(() => {
-    for (let i = 0; i < 1200; i += 1) console.warn(`live-flood-${i}`);
-  });
-  await expect(page.locator("#eventLogSummary")).toContainText("500 events");
-  await expect(rows).toHaveCount(500);
-  await expect(rows.first()).toContainText("live-flood-1199");
 });
 
 test("Rediagnose USB and Parity Report open Health & Diagnostics whatever the result", async ({ page }) => {
@@ -883,76 +955,6 @@ test("Rediagnose USB and Parity Report open Health & Diagnostics whatever the re
   await page.evaluate(() => { window.__failParity = true; });
   await page.locator("#runUsbParityBtn").click();
   await expect(usbHealthCard).toHaveAttribute("open");
-});
-
-test("Diagnostics and parity render without warning panel", async ({ page }) => {
-  await installTauriMock(page, "valid");
-  await page.goto("/");
-
-  await openUsb(page);
-  const usbHealthCard = page.locator("#usbHealthCard");
-  await usbHealthCard.evaluate((node) => {
-    node.open = true;
-  });
-  await page.locator("#reDiagnoseBtn").click();
-  await expect(page.locator("#diagSections .diag-overview-title")).toHaveText([
-    "Older Pioneer players",
-    "Waveforms & beat grids",
-    "Denon / Numark players"
-  ]);
-  await expect(page.locator("#diagSections .diag-overview-item.diag-check-na .diag-indicator")).toHaveText("–");
-  const technical = page.locator("#diagSections .diag-technical");
-  await expect(technical).not.toHaveAttribute("open");
-  await technical.locator("summary").click();
-  await expect(page.locator("#diagSections .diag-group-title")).toHaveText(["Databases", "Library"]);
-  await expect(page.locator("#diagSections .diag-group").first().locator(".diag-section-title")).toHaveText(["PDB", "Engine DJ"]);
-  await expect(page.locator("#diagSections")).toContainText("Overall resolution");
-  await expect(page.locator("#diagSections")).toContainText("Kept up to date");
-  await expect(page.locator("#diagSections")).not.toContainText("Playlists compared");
-  await expect(page.locator("#diagRawWarnings")).toHaveCount(0);
-  await expect(page.locator("#eventLogDot")).toBeHidden();
-  // Errors the mock logged take the badge's place; see them so the dot can show.
-  await page.locator("#eventLogBtn").click();
-  await page.locator('.nav-item[data-view="usb"]').click();
-
-  await page.locator("#runUsbParityBtn").click();
-  // Parity report: heading, plain-language rows, then the collapsed technical details
-  await expect(page.locator("#diagSections .diag-intro h3")).toHaveText("Parity Report");
-  // The parity result gets its own badge; the health badge stays as diagnostics left it.
-  await expect(page.locator("#diagParityStatus")).toHaveText("Parity FAIL");
-  await expect(page.locator("#diagOverallStatus")).toHaveText("WARN");
-  await expect(page.locator("#diagSections .diag-overview-title")).toHaveText([
-    "Playlists",
-    "Track details",
-    "Music files"
-  ]);
-  await expect(page.locator("#diagSections .diag-overview-item.diag-check-fail")).toHaveCount(2);
-  const parityTechnical = page.locator("#diagSections .diag-technical");
-  await expect(parityTechnical).not.toHaveAttribute("open");
-  await parityTechnical.locator("summary").click();
-  await expect(page.locator("#diagSections .diag-group-title")).toHaveText(["Comparison", "Playlists compared"]);
-  await expect(parityTechnical).toContainText("PDB metadata completeness");
-  // Diagnostics content should not leak into parity
-  await expect(page.locator("#diagSections")).not.toContainText("Databases");
-  await expect(page.locator("#diagSections")).not.toContainText("Older Pioneer players");
-  // Per-playlist comparison table
-  const playlistRows = parityTechnical.locator("tbody");
-  await expect(playlistRows).toContainText("Warmup");
-  await expect(playlistRows).toContainText("path mismatch 1");
-  await expect(playlistRows).toContainText("dict issues 1");
-  await expect(playlistRows).toContainText("PDB gaps 1");
-  // A check that links to the Event Log puts a dot on the header button until the log is opened.
-  const eventLogDot = page.locator("#eventLogDot");
-  await expect(eventLogDot).toBeVisible();
-  await parityTechnical.locator(".diag-log-link").click();
-  await expect(page.locator("#panel-event-log")).toHaveClass(/active/);
-  await expect(eventLogDot).toBeHidden();
-  await page.locator('.nav-item[data-view="usb"]').click();
-  // Back to diagnostics: the parity badge goes away with the parity report.
-  await page.locator("#reDiagnoseBtn").click();
-  await expect(page.locator("#diagSections .diag-intro")).toHaveCount(0);
-  await expect(page.locator("#diagParityStatus")).toBeEmpty();
-  await expect(page.locator("#diagRawWarnings")).toHaveCount(0);
 });
 
 test("Repair preview shows the backend's rows and locks structural-prerequisite fix checkboxes; the Engine fix turns the setting on", async ({ page }) => {
@@ -1040,11 +1042,9 @@ test("a repair whose diagnostics re-run failed still applies the export status i
   await page.addInitScript(() => {
     window.__playlistLoads = 0;
     const backend = window.__e2eBackend;
+    backend.seed({ playlists: [{ id: "pl-1", name: "Local Set" }] });
     backend.override(async (command, request, payload, next) => {
-      if (command === "list_playlists") {
-        window.__playlistLoads += 1;
-        return { ok: true, data: { playlists: [{ id: "pl-1", name: "Local Set", source: "local" }], playlistUsbExportStatus: [] } };
-      }
+      if (command === "list_playlists") window.__playlistLoads += 1;
       if (command === "repair_usb_diagnostics" && payload?.request?.apply) {
         return backend.ok({
           appliedFixes: payload.request.selectedFixIds,
@@ -1089,7 +1089,7 @@ async function dragViaHandle(page, fromHandleSelector, toRowSelector, dropNearTo
   await page.mouse.up();
 }
 
-test("USB playlist drag-and-drop reorder persists the new order", async ({ page }) => {
+test("USB playlist drag-and-drop reorder persists the new order; a drag back onto its own row saves nothing", async ({ page }) => {
   await installTauriMock(page, "reorder");
   await countPlaylistFetches(page);
   await page.goto("/");
@@ -1147,6 +1147,15 @@ test("USB playlist drag-and-drop reorder persists the new order", async ({ page 
   await expect(page.locator("#statusText")).toContainText("USB playlist selected: Bravo");
   await expect(page.locator("#usbPlaylistHeading .track-list-heading-name")).toHaveText("Bravo");
   await expect(page.locator("#usbPlaylistTracks .track-grid-row")).toContainText("Track B");
+
+  // A drag dropped back within its own row saves nothing.
+  const box = await page.locator('#usbPlaylists li:nth-child(1) [data-usb-drag-handle]').boundingBox();
+  await page.mouse.move(box.x + box.width / 2, box.y + box.height / 2);
+  await page.mouse.down();
+  await page.mouse.move(box.x + box.width / 2, box.y + box.height / 2 + 2, { steps: 3 });
+  await page.mouse.up();
+  await expect(rows.nth(0)).toContainText("Bravo");
+  expect(await page.evaluate(() => window.__reorderCalls.length)).toBe(reorderCalls.length);
 });
 
 test("a failed USB playlist reorder restores the order and keeps the playlist open, and reports the save's failure even when the re-read fails", async ({ page }) => {
@@ -1191,28 +1200,6 @@ test("a failed USB playlist reorder restores the order and keeps the playlist op
   await expect(page.locator("#progressText")).toHaveText("USB load failed");
   await expect(page.locator("#progressFooter")).toHaveClass(/error/);
   await expect(page.locator("#statusText")).toContainText("Failed to save playlist order: write failed");
-});
-
-test("USB playlist drag that does not change position skips persisting order", async ({ page }) => {
-  await installTauriMock(page, "reorder");
-  await page.goto("/");
-
-  await openUsb(page, "usb-playlists");
-
-  const rows = page.locator("#usbPlaylists [data-usb-playlist]");
-  await expect(rows).toHaveCount(3);
-
-  // Drag row 0's handle a few pixels and drop back within the same row.
-  const handle = page.locator('#usbPlaylists li:nth-child(1) [data-usb-drag-handle]');
-  const box = await handle.boundingBox();
-  await page.mouse.move(box.x + box.width / 2, box.y + box.height / 2);
-  await page.mouse.down();
-  await page.mouse.move(box.x + box.width / 2, box.y + box.height / 2 + 2, { steps: 3 });
-  await page.mouse.up();
-
-  await expect(rows.nth(0)).toContainText("Alpha");
-  const reorderCalls = await page.evaluate(() => window.__reorderCalls);
-  expect(reorderCalls).toEqual([]);
 });
 
 test("USB playlist drag auto-scrolls the list when held near its bottom edge", async ({ page }) => {
@@ -1267,10 +1254,8 @@ test("USB toggle race ends in deterministic final state, with nothing left of th
   await installTauriMock(page, "toggle-usb");
   await page.addInitScript(() => {
     const backend = window.__e2eBackend;
+    backend.seed({ playlists: [{ id: "pl-1", name: "Local Set" }] });
     backend.override(async (command, request, payload, next) => {
-      if (command === "list_playlists") {
-        return { ok: true, data: { playlists: [{ id: "pl-1", name: "Local Set", source: "local" }], playlistUsbExportStatus: [] } };
-      }
       const playlistUsbExportStatus = [{ playlistId: "pl-1", playlistName: "Local Set", usbSelected: true, sameNameExistsOnUsb: true, markLabel: "On this USB" }];
       if (command === "fetch_usb_playlists") {
         const backend = window.__e2eBackend;
@@ -1400,57 +1385,6 @@ test("a failed playlist create leaves its failed text on the progress footer", a
   await expect(page.locator("#progressFooter")).toHaveClass(/dismissable/);
 });
 
-test("USB audio formats: ticks and drag order are saved, and the last ticked format can't be unticked", async ({ page }) => {
-  await installTauriMock(page, "valid");
-  await page.goto("/");
-
-  await openUsb(page);
-
-  const chips = page.locator("#usbAudioFormatsList .usb-cfg-audio-format-chip");
-  const names = page.locator("#usbAudioFormatsList .usb-cfg-audio-format-name");
-  await expect(page.locator("#usbAudioFormatsRow")).toBeVisible();
-  await expect(names).toHaveText(["FLAC", "ALAC", "AIFF", "WAV", "MP3", "AAC"]);
-  const boxes = page.locator("#usbAudioFormatsList .usb-cfg-audio-format-check");
-  for (let i = 0; i < 6; i += 1) await expect(boxes.nth(i)).toBeChecked();
-
-  const lastCall = () => page.evaluate(() => window.__usbAudioFormatCalls.at(-1));
-
-  await boxes.nth(0).uncheck();
-  await expect.poll(lastCall).toEqual([
-    { format: "flac", allowed: false },
-    { format: "alac", allowed: true },
-    { format: "aiff", allowed: true },
-    { format: "wav", allowed: true },
-    { format: "mp3", allowed: true },
-    { format: "aac", allowed: true },
-  ]);
-
-  // Untick all but AAC: its box is then the last ticked one and locks.
-  for (const index of [1, 2, 3, 4]) {
-    await boxes.nth(index).uncheck();
-    await expect(boxes.nth(index)).not.toBeChecked();
-  }
-  await expect(boxes.nth(5)).toBeChecked();
-  await expect(boxes.nth(5)).toBeDisabled();
-  await expect(chips.nth(5).locator(".usb-cfg-audio-format-label")).toHaveAttribute("data-tooltip", "At least one format stays ticked");
-  await boxes.nth(4).check();
-  await expect(boxes.nth(5)).toBeEnabled();
-
-  // Drag MP3 (chip 4) to the left half of FLAC (chip 0): it goes first.
-  const handle = chips.nth(4).locator("[data-usb-audio-format-drag-handle]");
-  const sourceBox = await handle.boundingBox();
-  const targetBox = await chips.nth(0).boundingBox();
-  await page.mouse.move(sourceBox.x + sourceBox.width / 2, sourceBox.y + sourceBox.height / 2);
-  await page.mouse.down();
-  await page.mouse.move(sourceBox.x + sourceBox.width / 2 - 10, sourceBox.y + sourceBox.height / 2, { steps: 5 });
-  await page.mouse.move(targetBox.x + targetBox.width * 0.25, targetBox.y + targetBox.height / 2, { steps: 10 });
-  await page.mouse.up();
-
-  await expect(names).toHaveText(["MP3", "FLAC", "ALAC", "AIFF", "WAV", "AAC"]);
-  await expect.poll(async () => (await lastCall()).map((item) => item.format))
-    .toEqual(["mp3", "flac", "alac", "aiff", "wav", "aac"]);
-});
-
 async function connectUsb(page) {
   await openUsb(page);
   await expect(page.locator("#diagOverallStatus")).toHaveText("WARN");
@@ -1463,10 +1397,8 @@ test("a running USB job locks the USB selection and export until it ends; other 
     window.__picks = 0;
     window.__validates = 0;
     const backend = window.__e2eBackend;
+    backend.seed({ playlists: [{ id: "pl-1", name: "Local Set" }] });
     backend.override(async (command, request, payload, next) => {
-      if (command === "list_playlists") {
-        return { ok: true, data: { playlists: [{ id: "pl-1", name: "Local Set", source: "local" }], playlistUsbExportStatus: [] } };
-      }
       if (command === "pick_usb_folder") window.__picks += 1;
       if (command === "select_usb") {
         window.__validates += 1;
@@ -1528,19 +1460,30 @@ test("a running USB job locks the USB selection and export until it ends; other 
   await page.waitForTimeout(100);
   await expect(select).toBeEnabled();
   await expect(exportBtn).toBeEnabled();
-});
 
-test("the drive name badge does nothing with no USB selected", async ({ page }) => {
-  await installTauriMock(page, "valid");
-  await page.goto("/");
-  await expect(page.locator("#usbNameBadgeLabel")).toHaveText("Not connected");
-  // A real mouse still lands on it: Playwright only refuses because of aria-disabled.
-  await page.locator("#usbNameBadgeLabel").click({ force: true });
+  // The footer follows the running job only, its percent kept within 0–100;
+  // a failed job's reason is on the status line (the backend logs it itself).
+  const job = (jobId, event, percent, message) => page.evaluate(
+    (e) => window.__emitJobEvent(e),
+    { jobId, jobType: "export", stage: "copy", event, percent, message }
+  );
+  const fill = page.locator("#progressFill");
+  await emit("analysis", "job.completed");
+  await job("export-9", "job.started", 5, "Copying files");
+  await expect(fill).toHaveAttribute("style", /width: 5%/);
+  await job("other-job", "job.progress", 80, "Wrong job");
   await page.waitForTimeout(100);
-  await expect(page.locator("#driveNameOverlay")).toBeHidden();
+  await expect(fill).toHaveAttribute("style", /width: 5%/);
+  await expect(page.locator("#progressText")).not.toContainText("Wrong job");
+  await job("export-9", "job.progress", 150, "Copying files");
+  await expect(fill).toHaveAttribute("style", /width: 100%/);
+  await job("export-9", "job.failed", 100, "Export failed: disk gone");
+  await expect(page.locator("#statusText")).toContainText("Export failed: disk gone");
+  await page.locator("#eventLogBtn").click();
+  await expect(page.locator("#eventLogList")).not.toContainText("Export failed: disk gone");
 });
 
-test("a stored USB isn't shown as selected, or read, until it's validated", async ({ page }) => {
+test("a stored USB isn't shown as selected, or read, until it's validated, and the drive name badge does nothing meanwhile", async ({ page }) => {
   await installTauriMock(page, "valid");
   await page.addInitScript(() => {
     window.localStorage.setItem("djusbtkit.usbRoot", "/Volumes/USB-TEST");
@@ -1558,6 +1501,12 @@ test("a stored USB isn't shown as selected, or read, until it's validated", asyn
   await expect(page.locator("#usbInitRow")).toBeHidden();
   await expect(page.locator('.nav-sub-item[data-view="usb-playlists"]')).not.toHaveClass(/revealed/);
   expect(await page.evaluate(() => window.__validates)).toBe(0);
+
+  await expect(page.locator("#usbNameBadgeLabel")).toHaveText("Not connected");
+  // A real mouse still lands on it: Playwright only refuses because of aria-disabled.
+  await page.locator("#usbNameBadgeLabel").click({ force: true });
+  await page.waitForTimeout(100);
+  await expect(page.locator("#driveNameOverlay")).toBeHidden();
 });
 
 test("restoring a backup: cancel and failure change nothing; success clears the report and lists and applies the playlists and backups it answers with", async ({ page }) => {
@@ -1570,10 +1519,8 @@ test("restoring a backup: cancel and failure change nothing; success clears the 
     const backup = { timestamp: "2020-01-01_00-00-00", timeText: "the time", reasonText: "the reason", detailText: "the detail", restoreConfirmText: "Restore it?", deleteConfirmText: "Delete it?", files: ["export.pdb"], reason: "export", sizeBytes: 1024, location: "usb" };
     const backups = (summaryText) => ({ summaryText, emptyText: "none", items: [backup] });
     const backend = window.__e2eBackend;
+    backend.seed({ playlists: [{ id: "pl-1", name: "Local Set" }] });
     backend.override(async (command, request, payload, next) => {
-      if (command === "list_playlists") {
-        return { ok: true, data: { playlists: [{ id: "pl-1", name: "Local Set", source: "local" }], playlistUsbExportStatus: [] } };
-      }
       if (command === "list_usb_backups") {
         window.__backupLists += 1;
         return { ok: true, data: backups("the summary") };
@@ -1590,7 +1537,6 @@ test("restoring a backup: cancel and failure change nothing; success clears the 
           restored: true,
           statusText: "Restored eDB and PDB from backup",
           backups: backups("after the restore"),
-          playlists: [{ id: "pl-1", name: "Local Set", source: "local" }],
           playlistUsbExportStatus: [{ playlistId: "pl-1", playlistName: "Local Set", usbSelected: true, sameNameExistsOnUsb: true, markLabel: "On this USB" }]
         });
       }
@@ -1693,64 +1639,27 @@ test("applying repairs that change nothing keeps the loaded USB playlists and sh
   expect(await page.evaluate(() => window.__trackFetches)).toBe(1);
 });
 
-test("a player-menu edit clears the diagnostics report only when it changed the stick", async ({ page }) => {
+test("the player menu editor selects in one list at a time, its buttons follow the selected item, and an edit clears the diagnostics report only when it changed the stick", async ({ page }) => {
   await installTauriMock(page, "valid");
   await page.addInitScript(() => {
-    const backend = window.__e2eBackend;
     window.__menuUpdated = false;
-    const config = (updated, statusText) => ({
-      ok: true,
-      data: {
-        updated,
-        statusText,
-        currentItems: [backend.playerMenuItem(131, { name: "ARTIST" })],
-        availableItems: [backend.playerMenuItem(132, { name: "PLAYLIST" })],
-      }
-    });
-    backend.override(async (command, request, payload, next) => {
-      if (command === "get_usb_player_menu_config") return config(false, "Player menu loaded");
-      if (command === "update_usb_player_menu_config") {
-        return config(window.__menuUpdated, window.__menuUpdated ? "Player menu updated" : "Player menu unchanged");
-      }
-    });
-  });
-  await page.goto("/");
-  await connectUsb(page);
-  const report = page.locator("#diagOverallStatus");
-  const status = page.locator("#statusText");
-  const menuNav = page.locator('.nav-item[data-view="usb-player-menu"]');
-  const addPlaylistCategory = async () => {
-    await page.locator("#usbPlayerMenuAvailable .player-menu-item[data-menu-kind='132']").click();
-    await page.locator("#usbPlayerMenuAddBtn").click();
-  };
-
-  await menuNav.click();
-  await addPlaylistCategory();
-  await expect(status).toContainText("Player menu unchanged");
-  await expect(report).toHaveText("WARN");
-
-  await page.evaluate(() => { window.__menuUpdated = true; });
-  await addPlaylistCategory();
-  await expect(status).toContainText("Player menu updated");
-  await expect(report).toHaveText("");
-});
-
-test("the player menu editor selects in one list at a time, and its buttons follow the selected item", async ({ page }) => {
-  await installTauriMock(page, "valid");
-  await page.addInitScript(() => {
     const backend = window.__e2eBackend;
-    backend.override(async (command, request, payload, next) => {
-      if (command === "get_usb_player_menu_config") {
-        return backend.ok({
-          currentItems: [
-            backend.playerMenuItem(132, { name: "PLAYLIST", removable: false, canMoveDown: true }),
-            backend.playerMenuItem(139, { name: "KEY", canMoveUp: true })
-          ],
-          availableItems: [
-            backend.playerMenuItem(133, { name: "BPM", removable: false }),
-            backend.playerMenuItem(134, { name: "RATING" })
-          ]
-        });
+    const config = (extra) => backend.ok({
+      currentItems: [
+        backend.playerMenuItem(132, { name: "PLAYLIST", removable: false, canMoveDown: true }),
+        backend.playerMenuItem(139, { name: "KEY", canMoveUp: true })
+      ],
+      availableItems: [
+        backend.playerMenuItem(133, { name: "BPM", removable: false }),
+        backend.playerMenuItem(134, { name: "RATING" })
+      ],
+      ...extra
+    });
+    backend.override(async (command) => {
+      if (command === "get_usb_player_menu_config") return config({ updated: false, statusText: "Player menu loaded" });
+      if (command === "update_usb_player_menu_config") {
+        const updated = window.__menuUpdated;
+        return config({ updated, statusText: updated ? "Player menu updated" : "Player menu unchanged" });
       }
     });
   });
@@ -1782,17 +1691,41 @@ test("the player menu editor selects in one list at a time, and its buttons foll
   await expect(item("usbPlayerMenuCurrent", 132)).toHaveClass(/is-selected/);
   await expect(remove).toBeDisabled();
   await expect(page.locator("#usbPlayerMenuDownBtn")).toBeEnabled();
+
+  const report = page.locator("#diagOverallStatus");
+  const status = page.locator("#statusText");
+  const addRating = async () => {
+    await item("usbPlayerMenuAvailable", 134).click();
+    await add.click();
+  };
+  await addRating();
+  await expect(status).toContainText("Player menu unchanged");
+  await expect(report).toHaveText("WARN");
+
+  await page.evaluate(() => { window.__menuUpdated = true; });
+  await addRating();
+  await expect(status).toContainText("Player menu updated");
+  await expect(report).toHaveText("");
 });
 
-test("background colour shows nothing selected when the databases differ, and a stick that can't take one says why", async ({ page }) => {
+test("background colour shows nothing selected when the databases differ, a stick that can't take one says why, and choosing one sets it and redraws from the answer", async ({ page }) => {
   await installTauriMock(page, "valid");
   await page.addInitScript(() => {
     window.__color = { pdbColor: 6, edbColor: 6, writable: true };
+    window.__colorCalls = [];
+    window.__colorUpdated = false;
     const backend = window.__e2eBackend;
     backend.override(async (command, request, payload, next) => {
       if (command === "get_usb_background_color") {
-        if (window.__colorFails) return { ok: false, error: { code: "IO", message: "Failed to read the background colour: colour read failed" } };
-        return { ok: true, data: window.__color };
+        if (window.__colorFails) return backend.fail("Failed to read the background colour: colour read failed", "IO");
+        return backend.ok(window.__color);
+      }
+      if (command === "set_usb_background_color") {
+        const { color } = payload.request;
+        window.__colorCalls.push(payload.request);
+        const now = window.__colorUpdated ? color : 0;
+        const statusText = window.__colorUpdated ? "Background colour set to Green" : "Background colour unchanged";
+        return backend.ok({ pdbColor: now, edbColor: now, updated: window.__colorUpdated, statusText });
       }
     });
   });
@@ -1828,31 +1761,12 @@ test("background colour shows nothing selected when the databases differ, and a 
   await page.locator('.nav-item[data-view="usb-player-menu"]').click();
   await expect(chips).toHaveCount(0);
   await expect(page.locator("#statusText")).toContainText("Failed to read the background colour: colour read failed");
-});
 
-test("choosing a background colour sets it on the USB and redraws from the answer", async ({ page }) => {
-  await installTauriMock(page, "valid");
-  await page.addInitScript(() => {
-    window.__colorCalls = [];
-    window.__colorUpdated = false;
-    const backend = window.__e2eBackend;
-    backend.override(async (command, request, payload, next) => {
-      if (command === "get_usb_background_color") return { ok: true, data: { pdbColor: 0, edbColor: 0 } };
-      if (command === "set_usb_background_color") {
-        const { color } = payload.request;
-        window.__colorCalls.push(payload.request);
-        const now = window.__colorUpdated ? color : 0;
-        const statusText = window.__colorUpdated ? "Background colour set to Green" : "Background colour unchanged";
-        return { ok: true, data: { pdbColor: now, edbColor: now, updated: window.__colorUpdated, statusText } };
-      }
-    });
-  });
-  await page.goto("/");
-  await connectUsb(page);
-  await page.locator('.nav-item[data-view="usb-player-menu"]').click();
+  // Choosing one: an unchanged answer keeps the old chip and the report.
+  await page.evaluate(() => { window.__colorFails = false; });
+  await openMenu({ pdbColor: 0, edbColor: 0, writable: true });
   const chip = (color) => page.locator(`#usbBackgroundColorChips .bg-color-chip[data-color='${color}']`);
   await expect(chip(0)).toHaveClass(/is-selected/);
-
   await chip(5).click();
   await expect(page.locator("#statusText")).toContainText("Background colour unchanged");
   await expect(chip(0)).toHaveClass(/is-selected/);
@@ -1960,4 +1874,72 @@ test("in the test language, the USB pages, Backups, Event Log and Settings show 
   await check.collect();
 
   await check.expectNoEnglish();
+});
+
+test("backend log entries: level, source and spacing are normalized, so repeats coalesce; different messages with the same details don't; Clear empties the log", async ({ page }) => {
+  await installTauriMock(page, "valid");
+  await listenForBackendEvents(page);
+  await page.goto("/");
+  await page.locator("#eventLogBtn").click();
+  const rows = page.locator("#eventLogList .event-log-row");
+  await page.evaluate(() => {
+    const log = window.__emitBackendLog;
+    log({ level: "WARNING", source: "USB-Diagnostics", code: "USB.DIAG.EMPTY", message: "  analysis file appears empty  " });
+    log({ level: "warn", source: "usb-diagnostics", code: "usb.diag.empty", message: "analysis   file appears empty" });
+    log({ level: "warn", source: "usb-diagnostics", code: "usb.diagnostics.unindexed-audio", message: "unindexed audio file: /Contents/A/one.mp3", details: "context: preview" });
+    log({ level: "warn", source: "usb-diagnostics", code: "usb.diagnostics.unindexed-audio", message: "unindexed audio file: /Contents/B/two.mp3", details: "context: preview" });
+  });
+  const empty = rows.filter({ hasText: "analysis file appears empty" });
+  await expect(empty).toHaveCount(1);
+  await expect(empty.locator(".event-log-count")).toHaveText("x2");
+  // The code lower-cased, the message trimmed.
+  await expect(empty.locator(".event-log-message")).toHaveText("[usb.diag.empty] analysis file appears empty x2");
+  await expect(rows.filter({ hasText: "unindexed audio file" })).toHaveCount(2);
+  // "WARNING" and "USB-Diagnostics" are the warn level and the usb-diagnostics source.
+  await page.locator("#eventLogLevelFilter").selectOption("warn");
+  await page.locator("#eventLogSourceFilter").selectOption("usb-diagnostics");
+  await expect(rows).toHaveCount(3);
+  await page.locator("#eventLogLevelFilter").selectOption("all");
+  await page.locator("#eventLogSourceFilter").selectOption("all");
+
+  await page.locator("#eventLogClearBtn").click();
+  await expect(page.locator("#eventLogSummary")).toHaveText("0 events");
+  await expect(page.locator("#eventLogList")).toHaveText("No events");
+});
+
+test("logging: console.log/info go to the log file only, warnings (any arguments) and uncaught errors and rejections to the Event Log; a backend entry isn't written to the file again", async ({ page }) => {
+  await installTauriMock(page, "valid");
+  await listenForBackendEvents(page);
+  await page.goto("/");
+  const fileLines = () => page.evaluate(() => window.__calls
+    .filter((c) => c.command === "append_frontend_log")
+    .map((c) => `${c.payload?.level ?? c.request?.level} ${c.payload?.message ?? c.request?.message}`));
+
+  await page.evaluate(() => {
+    console.log("file-only-log");
+    console.info("file-only-info");
+    console.warn("count:", 42, { key: "val" });
+    setTimeout(() => { throw new Error("thrown-uncaught"); });
+    Promise.reject(new Error("async failure"));
+    window.__emitBackendLog({ level: "warn", source: "backend", code: "backend.thing", message: "from the backend" });
+  });
+  await page.locator("#eventLogBtn").click();
+  const list = page.locator("#eventLogList");
+  await expect(list).toContainText('count: 42 {"key":"val"}');
+  await expect(list).toContainText("thrown-uncaught");
+  await expect(list).toContainText("async failure");
+  await expect(list).toContainText("from the backend");
+  await expect(list).not.toContainText("file-only-log");
+  await expect(list).not.toContainText("file-only-info");
+  // Uncaught ones are errors.
+  await page.locator("#eventLogLevelFilter").selectOption("error");
+  await expect(list).toContainText("async failure");
+  await expect(list).toContainText("thrown-uncaught");
+  await expect(list).not.toContainText("count: 42");
+
+  const lines = await fileLines();
+  expect(lines).toContainEqual("debug [console] [console.event] file-only-log");
+  expect(lines).toContainEqual("debug [console] [console.event] file-only-info");
+  expect(lines).toContainEqual('warn [console] [console.event] count: 42 {"key":"val"}');
+  expect(lines.some((line) => line.includes("from the backend"))).toBe(false);
 });

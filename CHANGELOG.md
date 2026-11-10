@@ -39,6 +39,11 @@
 
 ## Unreleased
 
+- **Fix:** Clicking another playlist while typing a new playlist's name saves the new playlist and then opens the
+  one you clicked. Before, the new playlist opened instead.
+- **Chore:** The UI's end-to-end tests share one mock backend that answers like the real one, and tests that use the
+  same setup run as one test. Unit tests whose checks the end-to-end tests now make are removed.
+
 ## 0.5.7
 
 **Severity:** critical — see item(s) marked **(CRITICAL)** below.

@@ -115,26 +115,86 @@ function installSourceRemovalMock(page) {
   });
 }
 
-test("removing a source folder deletes corresponding tracks from the library", async ({ page }) => {
+test("removing a source folder deletes corresponding tracks from the library; after removing source A, reloading tracks still filters by remaining roots; re-adding a removed source folder indexes it so tracks are usable again; a folder picker answer in any of its shapes adds every folder", async ({ page }) => {
   await installSourceRemovalMock(page);
   await page.goto("/");
+  {
+    await expect(page.locator("#sourceChipsContainer .source-chip")).toHaveCount(2);
+    await expect(page.locator("#libraryTableBody .track-grid-row")).toHaveCount(3);
+    expect(await page.locator("#libraryTableBody .track-grid-row").first().getAttribute("style")).toBeNull();
+    await expect(
+      page.locator("#libraryTableBody .track-grid-row", { hasText: "B One" }).locator(".td-album")
+    ).toHaveText("Album B & <b>Two</b>");
 
-  await expect(page.locator("#sourceChipsContainer .source-chip")).toHaveCount(2);
-  await expect(page.locator("#libraryTableBody .track-grid-row")).toHaveCount(3);
-  expect(await page.locator("#libraryTableBody .track-grid-row").first().getAttribute("style")).toBeNull();
-  await expect(
-    page.locator("#libraryTableBody .track-grid-row", { hasText: "B One" }).locator(".td-album")
-  ).toHaveText("Album B & <b>Two</b>");
+    await page.locator("#sourceChipsContainer .source-chip-remove").first().click();
+    await page.locator("#confirmOkBtn").click();
 
-  await page.locator("#sourceChipsContainer .source-chip-remove").first().click();
-  await page.locator("#confirmOkBtn").click();
+    await expect(page.locator("#sourceChipsContainer .source-chip")).toHaveCount(1);
+    await expect(page.locator("#libraryTableBody .track-grid-row")).toHaveCount(1);
+    await expect(page.locator("#libraryTableBody")).toContainText("B One");
+    await expect(page.locator("#libraryTableBody")).not.toContainText("A One");
+    await expect(page.locator("#libraryTableBody")).not.toContainText("A Two");
+    await expect(page.locator("#statusText")).toContainText("removed 2 tracks");
+  }
 
-  await expect(page.locator("#sourceChipsContainer .source-chip")).toHaveCount(1);
-  await expect(page.locator("#libraryTableBody .track-grid-row")).toHaveCount(1);
-  await expect(page.locator("#libraryTableBody")).toContainText("B One");
-  await expect(page.locator("#libraryTableBody")).not.toContainText("A One");
-  await expect(page.locator("#libraryTableBody")).not.toContainText("A Two");
-  await expect(page.locator("#statusText")).toContainText("removed 2 tracks");
+  await page.reload();
+  {
+    await expect(page.locator("#libraryTableBody .track-grid-row")).toHaveCount(3);
+
+    // Remove source A
+    await page.locator("#sourceChipsContainer .source-chip-remove").first().click();
+    await page.locator("#confirmOkBtn").click();
+    await expect(page.locator("#libraryTableBody .track-grid-row")).toHaveCount(1);
+
+    // Simulate a UI action that triggers loadTracks (e.g. search)
+    const searchInput = page.locator("#librarySearch");
+    if (await searchInput.isVisible()) {
+      await searchInput.fill("B");
+      await page.waitForTimeout(300); // debounce
+      await expect(page.locator("#libraryTableBody")).toContainText("B One");
+      await expect(page.locator("#libraryTableBody")).not.toContainText("A One");
+    }
+  }
+
+  await page.reload();
+  {
+    await expect(page.locator("#libraryTableBody .track-grid-row")).toHaveCount(3);
+
+    await page.locator("#sourceChipsContainer .source-chip-remove").first().click();
+    await page.locator("#confirmOkBtn").click();
+    await expect(page.locator("#sourceChipsContainer .source-chip")).toHaveCount(1);
+    await expect(page.locator("#libraryTableBody .track-grid-row")).toHaveCount(1);
+
+    await page.evaluate(() => { window.__pickReturn = ["/music/a"]; });
+    await page.locator("#addSourceBtn").click();
+
+    // Adding the folder indexes it: no separate scan.
+    await expect.poll(async () => page.evaluate(() => window.__indexedOnAdd)).toEqual([["/music/a"]]);
+    await expect(page.locator("#statusText")).toContainText("indexed 2 tracks");
+    expect(await page.evaluate(() => window.__scanCalls)).toEqual([]);
+
+    await expect(page.locator("#sourceChipsContainer .source-chip")).toHaveCount(2);
+    await expect(page.locator("#libraryTableBody .track-grid-row")).toHaveCount(3);
+    await expect(page.locator("#libraryTableBody")).toContainText("A One");
+    await expect(page.locator("#libraryTableBody")).toContainText("A Two");
+
+    // The re-indexed tracks must carry real, freshly-assigned ids from
+    // the indexing -- not the raw file path (the pre-fix placeholder id) and
+    // not the old, now-deleted row's id -- so playback/resolve_playback_source
+    // can find them by id immediately.
+    const restoredRow = page.locator("#libraryTableBody .track-grid-row", { hasText: "A One" });
+    await expect(restoredRow).toHaveAttribute("data-track-id", "a-1-rescanned");
+  }
+
+  await page.reload();
+  {
+    await page.evaluate(() => {
+      window.__sourceFolders = [];
+      window.__pickReturn = ["/x/a", { path: "/x/b" }, { Path: "/x/c" }, { url: "/x/d" }, { Url: "/x/e" }, { filePath: "/x/f" }, null];
+    });
+    await page.locator("#addSourceBtn").click();
+    await expect.poll(() => page.evaluate(() => window.__sourceFolders)).toEqual(["/x/a", "/x/b", "/x/c", "/x/d", "/x/e", "/x/f"]);
+  }
 });
 
 test("a long source folder path wraps inside the confirm dialog", async ({ page }) => {
@@ -155,27 +215,6 @@ test("a long source folder path wraps inside the confirm dialog", async ({ page 
   expect(fits).toBe(true);
 });
 
-test("after removing source A, reloading tracks still filters by remaining roots", async ({ page }) => {
-  await installSourceRemovalMock(page);
-  await page.goto("/");
-
-  await expect(page.locator("#libraryTableBody .track-grid-row")).toHaveCount(3);
-
-  // Remove source A
-  await page.locator("#sourceChipsContainer .source-chip-remove").first().click();
-  await page.locator("#confirmOkBtn").click();
-  await expect(page.locator("#libraryTableBody .track-grid-row")).toHaveCount(1);
-
-  // Simulate a UI action that triggers loadTracks (e.g. search)
-  const searchInput = page.locator("#librarySearch");
-  if (await searchInput.isVisible()) {
-    await searchInput.fill("B");
-    await page.waitForTimeout(300); // debounce
-    await expect(page.locator("#libraryTableBody")).toContainText("B One");
-    await expect(page.locator("#libraryTableBody")).not.toContainText("A One");
-  }
-});
-
 // Regression coverage for: removing a source folder then re-adding the same
 // folder left its tracks visible in the browse view (via a live filesystem
 // scan) but with no backing row in the tracks DB, so playback failed with
@@ -183,45 +222,4 @@ test("after removing source A, reloading tracks still filters by remaining roots
 // clicked "Analyze Library". The fix indexes newly (re-)added folders
 // immediately as part of "Add Source" -- see
 // backend/src/service/source_roots.rs add_source_folders.
-test("re-adding a removed source folder indexes it so tracks are usable again", async ({ page }) => {
-  await installSourceRemovalMock(page);
-  await page.goto("/");
 
-  await expect(page.locator("#libraryTableBody .track-grid-row")).toHaveCount(3);
-
-  await page.locator("#sourceChipsContainer .source-chip-remove").first().click();
-  await page.locator("#confirmOkBtn").click();
-  await expect(page.locator("#sourceChipsContainer .source-chip")).toHaveCount(1);
-  await expect(page.locator("#libraryTableBody .track-grid-row")).toHaveCount(1);
-
-  await page.evaluate(() => { window.__pickReturn = ["/music/a"]; });
-  await page.locator("#addSourceBtn").click();
-
-  // Adding the folder indexes it: no separate scan.
-  await expect.poll(async () => page.evaluate(() => window.__indexedOnAdd)).toEqual([["/music/a"]]);
-  await expect(page.locator("#statusText")).toContainText("indexed 2 tracks");
-  expect(await page.evaluate(() => window.__scanCalls)).toEqual([]);
-
-  await expect(page.locator("#sourceChipsContainer .source-chip")).toHaveCount(2);
-  await expect(page.locator("#libraryTableBody .track-grid-row")).toHaveCount(3);
-  await expect(page.locator("#libraryTableBody")).toContainText("A One");
-  await expect(page.locator("#libraryTableBody")).toContainText("A Two");
-
-  // The re-indexed tracks must carry real, freshly-assigned ids from
-  // the indexing -- not the raw file path (the pre-fix placeholder id) and
-  // not the old, now-deleted row's id -- so playback/resolve_playback_source
-  // can find them by id immediately.
-  const restoredRow = page.locator("#libraryTableBody .track-grid-row", { hasText: "A One" });
-  await expect(restoredRow).toHaveAttribute("data-track-id", "a-1-rescanned");
-});
-
-test("a folder picker answer in any of its shapes adds every folder", async ({ page }) => {
-  await installSourceRemovalMock(page);
-  await page.goto("/");
-  await page.evaluate(() => {
-    window.__sourceFolders = [];
-    window.__pickReturn = ["/x/a", { path: "/x/b" }, { Path: "/x/c" }, { url: "/x/d" }, { Url: "/x/e" }, { filePath: "/x/f" }, null];
-  });
-  await page.locator("#addSourceBtn").click();
-  await expect.poll(() => page.evaluate(() => window.__sourceFolders)).toEqual(["/x/a", "/x/b", "/x/c", "/x/d", "/x/e", "/x/f"]);
-});

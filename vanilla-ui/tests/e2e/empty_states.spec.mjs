@@ -21,6 +21,7 @@ test("Empty states render correctly", async ({ page }) => {
   await page.goto("/");
 
   await expect(page.locator("#libraryEmptyState")).toContainText("Add a music folder to get started");
+  await expect(page.locator("body")).toHaveClass(/library-onboarding/);
   await expect(page.getByRole("button", { name: "Add Folder" })).toBeVisible();
 
   await page.locator('.nav-item[data-view="usb"]').click();
@@ -37,6 +38,15 @@ test("Empty states render correctly", async ({ page }) => {
   await page.locator("#navPlaylistList .nav-playlist-item").first().click();
   await page.locator("#playlistEmptyState").getByRole("button", { name: "Media Library" }).click();
   await expect(page.locator('.nav-item[data-view="library"]')).toHaveClass(/active/);
+
+  // With a USB selected, the second link goes to its playlists.
+  await page.locator('.nav-item[data-view="usb"]').click();
+  await page.locator("#usbEmptyState .empty-state-action").click();
+  await expect(page.locator('.nav-sub-item[data-view="usb-playlists"]')).toHaveClass(/revealed/);
+  await page.locator("#navPlaylistList .nav-playlist-item").first().click();
+  await expect(page.locator("#playlistEmptyState .empty-state-action")).toHaveText(["Media Library", "USB Playlists"]);
+  await page.locator("#playlistEmptyState").getByRole("button", { name: "USB Playlists" }).click();
+  await expect(page.locator("#panel-usb-playlists")).toHaveClass(/active/);
 });
 
 test("Configured source folders with zero indexed tracks prompt scan and keep controls visible", async ({ page }) => {

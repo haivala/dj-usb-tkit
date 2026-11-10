@@ -428,112 +428,105 @@ async function dragPlaylistTrackRow(page, fromTrackId, toTrackId, dropNearTop) {
   await page.mouse.up();
 }
 
-test("playlist track drag-and-drop reorder persists the new order", async ({ page }) => {
+test("playlist track drag-and-drop reorder persists the new order; playlist track drag that does not change position skips persisting order; playlist track drag handle stays enabled while a column sort is active; dragging a playlist track while sorted commits the sorted order first, then applies the manual move; playlist track drag handle is hidden while a search filter is active", async ({ page }) => {
   await installReorderTauriMock(page);
   await page.goto("/");
+  {
+    await page.locator("#navPlaylistList .nav-playlist-item").first().click();
+    const rows = page.locator("#playlistTracksBody .track-grid-row");
+    await expect(rows).toHaveCount(3);
+    await expect(rows.nth(0)).toHaveAttribute("data-track-id", "t1");
+    await expect(rows.nth(1)).toHaveAttribute("data-track-id", "t2");
+    await expect(rows.nth(2)).toHaveAttribute("data-track-id", "t3");
 
-  await page.locator("#navPlaylistList .nav-playlist-item").first().click();
-  const rows = page.locator("#playlistTracksBody .track-grid-row");
-  await expect(rows).toHaveCount(3);
-  await expect(rows.nth(0)).toHaveAttribute("data-track-id", "t1");
-  await expect(rows.nth(1)).toHaveAttribute("data-track-id", "t2");
-  await expect(rows.nth(2)).toHaveAttribute("data-track-id", "t3");
+    // Drag "Song A" (t1, row 0) to below "Song C" (t3, row 2).
+    await dragPlaylistTrackRow(page, "t1", "t3", false);
 
-  // Drag "Song A" (t1, row 0) to below "Song C" (t3, row 2).
-  await dragPlaylistTrackRow(page, "t1", "t3", false);
+    await expect(rows.nth(0)).toHaveAttribute("data-track-id", "t2");
+    await expect(rows.nth(1)).toHaveAttribute("data-track-id", "t3");
+    await expect(rows.nth(2)).toHaveAttribute("data-track-id", "t1");
 
-  await expect(rows.nth(0)).toHaveAttribute("data-track-id", "t2");
-  await expect(rows.nth(1)).toHaveAttribute("data-track-id", "t3");
-  await expect(rows.nth(2)).toHaveAttribute("data-track-id", "t1");
+    const calls = await reorderRequests(page);
+    expect(calls.length).toBeGreaterThan(0);
+    expect(calls[calls.length - 1]).toEqual({ playlistId: "pl-1", moveTrackId: "t1", beforeTrackId: null });
+  }
 
-  const calls = await reorderRequests(page);
-  expect(calls.length).toBeGreaterThan(0);
-  expect(calls[calls.length - 1]).toEqual({ playlistId: "pl-1", moveTrackId: "t1", beforeTrackId: null });
-});
+  await page.reload();
+  {
+    await page.locator("#navPlaylistList .nav-playlist-item").first().click();
+    const rows = page.locator("#playlistTracksBody .track-grid-row");
+    await expect(rows).toHaveCount(3);
 
-test("playlist track drag that does not change position skips persisting order", async ({ page }) => {
-  await installReorderTauriMock(page);
-  await page.goto("/");
+    const handle = page.locator('#playlistTracksBody .track-grid-row[data-track-id="t1"] [data-playlist-track-drag-handle]');
+    const box = await handle.boundingBox();
+    await page.mouse.move(box.x + box.width / 2, box.y + box.height / 2);
+    await page.mouse.down();
+    await page.mouse.move(box.x + box.width / 2, box.y + box.height / 2 + 2, { steps: 3 });
+    await page.mouse.up();
 
-  await page.locator("#navPlaylistList .nav-playlist-item").first().click();
-  const rows = page.locator("#playlistTracksBody .track-grid-row");
-  await expect(rows).toHaveCount(3);
+    await expect(rows.nth(0)).toHaveAttribute("data-track-id", "t1");
+    const calls = await reorderRequests(page);
+    expect(calls).toEqual([]);
+  }
 
-  const handle = page.locator('#playlistTracksBody .track-grid-row[data-track-id="t1"] [data-playlist-track-drag-handle]');
-  const box = await handle.boundingBox();
-  await page.mouse.move(box.x + box.width / 2, box.y + box.height / 2);
-  await page.mouse.down();
-  await page.mouse.move(box.x + box.width / 2, box.y + box.height / 2 + 2, { steps: 3 });
-  await page.mouse.up();
+  await page.reload();
+  {
+    await page.locator("#navPlaylistList .nav-playlist-item").first().click();
+    await expect(page.locator("#playlistTracksBody .track-grid-row")).toHaveCount(3);
+    await expect(page.locator("#playlistTracksBody [data-playlist-track-drag-handle]")).toHaveCount(3);
 
-  await expect(rows.nth(0)).toHaveAttribute("data-track-id", "t1");
-  const calls = await reorderRequests(page);
-  expect(calls).toEqual([]);
-});
+    await page.locator('#panel-playlist .track-grid-cell.sortable[data-sort-key="artist"]').click();
+    await expect(page.locator("#playlistTracksBody [data-playlist-track-drag-handle]")).toHaveCount(3);
+  }
 
-test("playlist track drag handle stays enabled while a column sort is active", async ({ page }) => {
-  await installReorderTauriMock(page);
-  await page.goto("/");
+  await page.reload();
+  {
+    await page.locator("#navPlaylistList .nav-playlist-item").first().click();
+    const rows = page.locator("#playlistTracksBody .track-grid-row");
+    await expect(rows).toHaveCount(3);
 
-  await page.locator("#navPlaylistList .nav-playlist-item").first().click();
-  await expect(page.locator("#playlistTracksBody .track-grid-row")).toHaveCount(3);
-  await expect(page.locator("#playlistTracksBody [data-playlist-track-drag-handle]")).toHaveCount(3);
+    // Sort by artist -> view becomes [t2 (Alex), t3 (Max), t1 (Nina)], distinct
+    // from the persisted insertion order [t1, t2, t3].
+    await page.locator('#panel-playlist .track-grid-cell.sortable[data-sort-key="artist"]').click();
+    await expect(page.locator("#panel-playlist .sort-hint")).toBeVisible();
+    await expect(rows.nth(0)).toHaveAttribute("data-track-id", "t2");
+    await expect(rows.nth(1)).toHaveAttribute("data-track-id", "t3");
+    await expect(rows.nth(2)).toHaveAttribute("data-track-id", "t1");
 
-  await page.locator('#panel-playlist .track-grid-cell.sortable[data-sort-key="artist"]').click();
-  await expect(page.locator("#playlistTracksBody [data-playlist-track-drag-handle]")).toHaveCount(3);
-});
+    // Drag "Alex" (t2, row 0) down past "Nina" (t1, row 2) while sorted.
+    await dragPlaylistTrackRow(page, "t2", "t1", false);
 
-test("dragging a playlist track while sorted commits the sorted order first, then applies the manual move", async ({ page }) => {
-  await installReorderTauriMock(page);
-  await page.goto("/");
+    // The sorted view is persisted FIRST (sort-commit), then the single move --
+    // so `beforeTrackId` lines up with what the user actually saw.
+    const calls = await reorderRequests(page);
+    expect(calls).toEqual([
+      { playlistId: "pl-1", sortBy: "artist", sortDir: "asc" },
+      { playlistId: "pl-1", moveTrackId: "t2", beforeTrackId: null },
+    ]);
 
-  await page.locator("#navPlaylistList .nav-playlist-item").first().click();
-  const rows = page.locator("#playlistTracksBody .track-grid-row");
-  await expect(rows).toHaveCount(3);
+    // Sort indicator cleared the moment the drag started; nothing jumps around --
+    // final order is the sorted order with just t2 dragged to the end.
+    await expect(page.locator("#panel-playlist .sort-hint")).toBeHidden();
+    await expect(page.locator("#panel-playlist .sortable.sort-asc, #panel-playlist .sortable.sort-desc")).toHaveCount(0);
+    await expect(rows.nth(0)).toHaveAttribute("data-track-id", "t3");
+    await expect(rows.nth(1)).toHaveAttribute("data-track-id", "t1");
+    await expect(rows.nth(2)).toHaveAttribute("data-track-id", "t2");
+  }
 
-  // Sort by artist -> view becomes [t2 (Alex), t3 (Max), t1 (Nina)], distinct
-  // from the persisted insertion order [t1, t2, t3].
-  await page.locator('#panel-playlist .track-grid-cell.sortable[data-sort-key="artist"]').click();
-  await expect(page.locator("#panel-playlist .sort-hint")).toBeVisible();
-  await expect(rows.nth(0)).toHaveAttribute("data-track-id", "t2");
-  await expect(rows.nth(1)).toHaveAttribute("data-track-id", "t3");
-  await expect(rows.nth(2)).toHaveAttribute("data-track-id", "t1");
+  await page.reload();
+  {
+    await page.locator("#navPlaylistList .nav-playlist-item").first().click();
+    await expect(page.locator("#playlistTracksBody .track-grid-row")).toHaveCount(3);
+    await expect(page.locator("#playlistTracksBody [data-playlist-track-drag-handle]")).toHaveCount(3);
+    await expect(page.locator("#playlistTotalDuration")).toHaveText("Total time: 9:00");
 
-  // Drag "Alex" (t2, row 0) down past "Nina" (t1, row 2) while sorted.
-  await dragPlaylistTrackRow(page, "t2", "t1", false);
-
-  // The sorted view is persisted FIRST (sort-commit), then the single move --
-  // so `beforeTrackId` lines up with what the user actually saw.
-  const calls = await reorderRequests(page);
-  expect(calls).toEqual([
-    { playlistId: "pl-1", sortBy: "artist", sortDir: "asc" },
-    { playlistId: "pl-1", moveTrackId: "t2", beforeTrackId: null },
-  ]);
-
-  // Sort indicator cleared the moment the drag started; nothing jumps around --
-  // final order is the sorted order with just t2 dragged to the end.
-  await expect(page.locator("#panel-playlist .sort-hint")).toBeHidden();
-  await expect(page.locator("#panel-playlist .sortable.sort-asc, #panel-playlist .sortable.sort-desc")).toHaveCount(0);
-  await expect(rows.nth(0)).toHaveAttribute("data-track-id", "t3");
-  await expect(rows.nth(1)).toHaveAttribute("data-track-id", "t1");
-  await expect(rows.nth(2)).toHaveAttribute("data-track-id", "t2");
-});
-
-test("playlist track drag handle is hidden while a search filter is active", async ({ page }) => {
-  await installReorderTauriMock(page);
-  await page.goto("/");
-
-  await page.locator("#navPlaylistList .nav-playlist-item").first().click();
-  await expect(page.locator("#playlistTracksBody .track-grid-row")).toHaveCount(3);
-  await expect(page.locator("#playlistTracksBody [data-playlist-track-drag-handle]")).toHaveCount(3);
-  await expect(page.locator("#playlistTotalDuration")).toHaveText("Total time: 9:00");
-
-  await page.locator("#playlistSearchInput").fill("Song A");
-  await expect(page.locator("#playlistTracksBody .track-grid-row")).toHaveCount(1);
-  await expect(page.locator("#playlistTracksBody [data-playlist-track-drag-handle]")).toHaveCount(0);
-  // Search is a backend query param now (like the library and USB views), so
-  // the footer total tracks the filtered set -- one 3:00 track here.
-  await expect(page.locator("#playlistTotalDuration")).toHaveText("Total time: 3:00");
+    await page.locator("#playlistSearchInput").fill("Song A");
+    await expect(page.locator("#playlistTracksBody .track-grid-row")).toHaveCount(1);
+    await expect(page.locator("#playlistTracksBody [data-playlist-track-drag-handle]")).toHaveCount(0);
+    // Search is a backend query param now (like the library and USB views), so
+    // the footer total tracks the filtered set -- one 3:00 track here.
+    await expect(page.locator("#playlistTotalDuration")).toHaveText("Total time: 3:00");
+  }
 });
 
 async function connectUsbAndFetchPlaylists(page) {
@@ -571,69 +564,122 @@ test("sidebar checkmarks show which playlists are on the connected USB", async (
   await expect(page.locator("#playlistExportStatus")).toHaveText(/^Not on this USB\. Last exported .+ to \/OTHER_USB \(2 tracks\)\.$/);
 });
 
-test("playlist track drag handle is disabled with a tooltip when additive export won't reorder it on the USB", async ({ page }) => {
+test("playlist track drag handle is disabled with a tooltip when additive export won't reorder it on the USB; playlist header sort is disabled with a tooltip when additive export won't reorder it on the USB; changing the export sync mode releases and re-engages the open playlist's reorder lock without a USB rescan", async ({ page }) => {
   await installReorderTauriMock(page, { usbSameNamePlaylistName: "Reorder Playlist", exportPruneStale: false });
   await page.goto("/");
+  {
+    await connectUsbAndFetchPlaylists(page);
 
-  await connectUsbAndFetchPlaylists(page);
+    await page.locator("#navPlaylistList .nav-playlist-item").first().click();
+    const rows = page.locator("#playlistTracksBody .track-grid-row");
+    await expect(rows).toHaveCount(3);
+    await expect(page.locator("#playlistTracksBody [data-playlist-track-drag-handle]")).toHaveCount(0);
 
-  await page.locator("#navPlaylistList .nav-playlist-item").first().click();
-  const rows = page.locator("#playlistTracksBody .track-grid-row");
-  await expect(rows).toHaveCount(3);
-  await expect(page.locator("#playlistTracksBody [data-playlist-track-drag-handle]")).toHaveCount(0);
+    const disabledHandles = page.locator("#playlistTracksBody .drag-handle.disabled");
+    await expect(disabledHandles).toHaveCount(3);
+    await expect(disabledHandles.first()).toHaveAttribute(
+      "data-tooltip",
+      "Won't reorder on USB — \"Reorder Playlist\" already exists there, and additive export keeps its existing track order unchanged. New tracks are still added in your chosen order."
+    );
 
-  const disabledHandles = page.locator("#playlistTracksBody .drag-handle.disabled");
-  await expect(disabledHandles).toHaveCount(3);
-  await expect(disabledHandles.first()).toHaveAttribute(
-    "data-tooltip",
-    "Won't reorder on USB — \"Reorder Playlist\" already exists there, and additive export keeps its existing track order unchanged. New tracks are still added in your chosen order."
-  );
+    // Same backend-computed collision also drives the Export button into
+    // "append" mode -- one flag, two UI spots.
+    await expect(page.locator("#exportPlaylistBtn")).toHaveText("Append to (Reorder Playlist) on USB: (USB)");
+    await expect(page.locator("#exportPlaylistBtn")).toHaveAttribute(
+      "data-tooltip",
+      'Append current playlist tracks to existing USB playlist "Reorder Playlist"'
+    );
 
-  // Same backend-computed collision also drives the Export button into
-  // "append" mode -- one flag, two UI spots.
-  await expect(page.locator("#exportPlaylistBtn")).toHaveText("Append to (Reorder Playlist) on USB: (USB)");
-  await expect(page.locator("#exportPlaylistBtn")).toHaveAttribute(
-    "data-tooltip",
-    'Append current playlist tracks to existing USB playlist "Reorder Playlist"'
-  );
+    // Dragging the disabled handle is a no-op -- it isn't draggable, so no
+    // dragstart/reorder ever fires.
+    const box = await disabledHandles.first().boundingBox();
+    await page.mouse.move(box.x + box.width / 2, box.y + box.height / 2);
+    await page.mouse.down();
+    await page.mouse.move(box.x + box.width / 2, box.y + box.height / 2 + 40, { steps: 5 });
+    await page.mouse.up();
 
-  // Dragging the disabled handle is a no-op -- it isn't draggable, so no
-  // dragstart/reorder ever fires.
-  const box = await disabledHandles.first().boundingBox();
-  await page.mouse.move(box.x + box.width / 2, box.y + box.height / 2);
-  await page.mouse.down();
-  await page.mouse.move(box.x + box.width / 2, box.y + box.height / 2 + 40, { steps: 5 });
-  await page.mouse.up();
+    await expect(rows.nth(0)).toHaveAttribute("data-track-id", "t1");
+    const calls = await reorderRequests(page);
+    expect(calls).toEqual([]);
+  }
 
-  await expect(rows.nth(0)).toHaveAttribute("data-track-id", "t1");
-  const calls = await reorderRequests(page);
-  expect(calls).toEqual([]);
-});
+  await page.reload();
+  {
+    await connectUsbAndFetchPlaylists(page);
 
-test("playlist header sort is disabled with a tooltip when additive export won't reorder it on the USB", async ({ page }) => {
-  await installReorderTauriMock(page, { usbSameNamePlaylistName: "Reorder Playlist", exportPruneStale: false });
-  await page.goto("/");
+    await page.locator("#navPlaylistList .nav-playlist-item").first().click();
+    const rows = page.locator("#playlistTracksBody .track-grid-row");
+    await expect(rows).toHaveCount(3);
 
-  await connectUsbAndFetchPlaylists(page);
+    const artistHeader = page.locator('#panel-playlist .track-grid-cell.sortable[data-sort-key="artist"]');
+    await expect(artistHeader).toHaveAttribute(
+      "data-tooltip",
+      "Won't reorder on USB — \"Reorder Playlist\" already exists there, and additive export keeps its existing track order unchanged. New tracks are still added in your chosen order."
+    );
 
-  await page.locator("#navPlaylistList .nav-playlist-item").first().click();
-  const rows = page.locator("#playlistTracksBody .track-grid-row");
-  await expect(rows).toHaveCount(3);
+    await artistHeader.click();
 
-  const artistHeader = page.locator('#panel-playlist .track-grid-cell.sortable[data-sort-key="artist"]');
-  await expect(artistHeader).toHaveAttribute(
-    "data-tooltip",
-    "Won't reorder on USB — \"Reorder Playlist\" already exists there, and additive export keeps its existing track order unchanged. New tracks are still added in your chosen order."
-  );
+    // Clicking a locked header is a no-op: no hint, no sort classes, no reorder of rows.
+    await expect(page.locator("#panel-playlist .sort-hint")).toBeHidden();
+    await expect(artistHeader).not.toHaveClass(/sort-asc|sort-desc/);
+    await expect(rows.nth(0)).toHaveAttribute("data-track-id", "t1");
+    await expect(rows.nth(1)).toHaveAttribute("data-track-id", "t2");
+    await expect(rows.nth(2)).toHaveAttribute("data-track-id", "t3");
+  }
 
-  await artistHeader.click();
+  await page.reload();
+  {
+    await connectUsbAndFetchPlaylists(page);
+    await page.locator("#navPlaylistList .nav-playlist-item").first().click();
 
-  // Clicking a locked header is a no-op: no hint, no sort classes, no reorder of rows.
-  await expect(page.locator("#panel-playlist .sort-hint")).toBeHidden();
-  await expect(artistHeader).not.toHaveClass(/sort-asc|sort-desc/);
-  await expect(rows.nth(0)).toHaveAttribute("data-track-id", "t1");
-  await expect(rows.nth(1)).toHaveAttribute("data-track-id", "t2");
-  await expect(rows.nth(2)).toHaveAttribute("data-track-id", "t3");
+    const grid = page.locator('[data-track-grid][data-body-id="playlistTracksBody"]');
+    const dragHandles = page.locator("#playlistTracksBody [data-playlist-track-drag-handle]");
+    const artistHeader = page.locator('#panel-playlist .track-grid-cell.sortable[data-sort-key="artist"]');
+    const lockedTooltip =
+      "Won't reorder on USB — \"Reorder Playlist\" already exists there, and additive export keeps its existing track order unchanged. New tracks are still added in your chosen order.";
+
+    await expect(page.locator("#playlistTracksBody .track-grid-row")).toHaveCount(3);
+
+    // additive + same name on USB -> locked
+    await expect(grid).toHaveAttribute("data-sort-locked", "true");
+    await expect(dragHandles).toHaveCount(0);
+    await expect(artistHeader).toHaveAttribute("data-tooltip", lockedTooltip);
+    await expect(page.locator("#exportPlaylistBtn")).toHaveText("Append to (Reorder Playlist) on USB: (USB)");
+
+    // switch to mirror -> lock releases immediately (no fetch_usb_playlists rerun)
+    await page.locator("#settingsBtn").click();
+    await page.locator("#exportSyncModeMirror").check({ force: true });
+    await page.locator("#settingsCloseBtn").click();
+
+    await expect(grid).toHaveAttribute("data-sort-locked", "false");
+    await expect(dragHandles).toHaveCount(3);
+    await expect(artistHeader).not.toHaveAttribute("data-tooltip", /.+/);
+    await expect(page.locator("#exportPlaylistBtn")).toHaveText("Export to USB: USB");
+
+    // a view-only column sort is now allowed
+    await artistHeader.click();
+    await expect(page.locator("#panel-playlist .sort-hint")).toBeVisible();
+
+    // switch back to additive -> lock re-engages, active sort committed
+    await page.locator("#settingsBtn").click();
+    await page.locator("#exportSyncModeAdditive").check({ force: true });
+    await page.locator("#settingsCloseBtn").click();
+
+    await expect(grid).toHaveAttribute("data-sort-locked", "true");
+    await expect(dragHandles).toHaveCount(0);
+    await expect(page.locator("#panel-playlist .sort-hint")).toBeHidden();
+    await expect(page.locator("#exportPlaylistBtn")).toHaveText("Append to (Reorder Playlist) on USB: (USB)");
+
+    // The mode change carries the sort along: the backend saves it before the lock.
+    const requests = await page.evaluate(() =>
+      window.__calls.filter((c) => c.command === "set_export_sync_mode").map((c) => c.request));
+    expect(requests).toEqual([
+      { pruneStale: true, playlistId: "pl-1", sort: null },
+      { pruneStale: false, playlistId: "pl-1", sort: { sortBy: "artist", sortDir: "asc" } }
+    ]);
+    expect(await reorderRequests(page)).toEqual([]);
+    await expect(page.locator("#statusText")).toContainText('"Reorder Playlist" already exists on USB, so its track order is locked here');
+  }
 });
 
 test("the playlist heading shows what an export would copy against the USB's free space", async ({ page }) => {
@@ -705,28 +751,116 @@ test("the playlist heading shows what an export would copy against the USB's fre
   await expect(formatWarning).toHaveClass(/is-warning/);
 });
 
-test("with a USB connected, the FMT column shows what export puts on it, as the backend says", async ({ page }) => {
+test("with a USB connected, the FMT column shows what export puts on it, as the backend says; export is disabled from the click until the export finishes, so a double click starts one export; the backend's export gate rejection is shown in the status bar; a search with no matches doesn't change what Export to USB does; export sends an active column sort along, and a failed export keeps it on screen", async ({ page }) => {
   await installReorderTauriMock(page, { usbSameNamePlaylistName: "Reorder Playlist" });
   await page.goto("/");
-  await page.evaluate(() => {
-    window.__exportFiles = {
-      t1: { kind: "transcode", badge: "AIFF", tooltip: "AIFF transcode · 40 MB, exported to this USB — source: FLAC · 44.1 kHz · 16-bit" },
-      t2: { kind: "convert", badge: "MP3", tooltip: "Converted to MP3 320 on export — source: FLAC · 44.1 kHz · 16-bit" },
-      t3: { kind: "refused", badge: "AAC", tooltip: "M4A · 48 kHz · 256 kbps — AAC can't go on this USB" },
-    };
-  });
-  await connectUsbAndFetchPlaylists(page);
-  await page.locator("#navPlaylistList .nav-playlist-item").first().click();
-  const badge = (id) => page.locator(`#playlistTracksBody .track-grid-row[data-track-id="${id}"] .format-badge`);
-  await expect(badge("t1")).toHaveText("AIFF");
-  await expect(badge("t1")).toHaveAttribute("data-tooltip", /^AIFF transcode · 40 MB, exported to this USB — source: FLAC/);
-  await expect(badge("t1")).not.toHaveClass(/export-convert|warn/);
-  await expect(badge("t2")).toHaveText("MP3");
-  await expect(badge("t2")).toHaveClass(/export-convert/);
-  await expect(badge("t2")).toHaveAttribute("data-tooltip", /^Converted to MP3 320 on export — source: FLAC/);
-  await expect(badge("t3")).toHaveText("AAC ⚠");
-  await expect(badge("t3")).toHaveClass(/warn/);
-  await expect(badge("t3")).toHaveAttribute("data-tooltip", /AAC can't go on this USB/);
+  {
+    await page.evaluate(() => {
+      window.__exportFiles = {
+        t1: { kind: "transcode", badge: "AIFF", tooltip: "AIFF transcode · 40 MB, exported to this USB — source: FLAC · 44.1 kHz · 16-bit" },
+        t2: { kind: "convert", badge: "MP3", tooltip: "Converted to MP3 320 on export — source: FLAC · 44.1 kHz · 16-bit" },
+        t3: { kind: "refused", badge: "AAC", tooltip: "M4A · 48 kHz · 256 kbps — AAC can't go on this USB" },
+      };
+    });
+    await connectUsbAndFetchPlaylists(page);
+    await page.locator("#navPlaylistList .nav-playlist-item").first().click();
+    const badge = (id) => page.locator(`#playlistTracksBody .track-grid-row[data-track-id="${id}"] .format-badge`);
+    await expect(badge("t1")).toHaveText("AIFF");
+    await expect(badge("t1")).toHaveAttribute("data-tooltip", /^AIFF transcode · 40 MB, exported to this USB — source: FLAC/);
+    await expect(badge("t1")).not.toHaveClass(/export-convert|warn/);
+    await expect(badge("t2")).toHaveText("MP3");
+    await expect(badge("t2")).toHaveClass(/export-convert/);
+    await expect(badge("t2")).toHaveAttribute("data-tooltip", /^Converted to MP3 320 on export — source: FLAC/);
+    await expect(badge("t3")).toHaveText("AAC ⚠");
+    await expect(badge("t3")).toHaveClass(/warn/);
+    await expect(badge("t3")).toHaveAttribute("data-tooltip", /AAC can't go on this USB/);
+  }
+
+  await page.reload();
+  {
+    await connectUsbAndFetchPlaylists(page);
+    await page.locator("#navPlaylistList .nav-playlist-item").first().click();
+    await expect(page.locator("#playlistTracksBody .track-grid-row")).toHaveCount(3);
+    // Hold export_to_usb open until the test releases it, counting the calls.
+    await page.evaluate(() => {
+      window.__exportCalls = 0;
+      const backend = window.__e2eBackend;
+      backend.override(async (command, request, payload, next) => {
+        if (command !== "export_to_usb") return next();
+        window.__exportCalls += 1;
+        await new Promise((resolve) => { window.__finishExport = resolve; });
+        return { ok: false, error: { code: "INTERNAL", message: "stopped by test" } };
+      });
+    });
+
+    const exportBtn = page.locator("#exportPlaylistBtn");
+    await exportBtn.dblclick();
+    await expect(exportBtn).toBeDisabled();
+    expect(await page.evaluate(() => window.__exportCalls)).toBe(1);
+
+    await page.evaluate(() => window.__finishExport());
+    await expect(page.locator("#statusText")).toContainText("stopped by test");
+    await expect(exportBtn).toBeEnabled();
+    expect(await page.evaluate(() => window.__exportCalls)).toBe(1);
+  }
+
+  await page.reload();
+  {
+    await connectUsbAndFetchPlaylists(page);
+    await openReorderPlaylist(page);
+    await answerExports(page, {
+      ok: false,
+      error: { code: "VALIDATION", message: "the log's wording", details: { statusText: "mock export blocked text" } }
+    });
+
+    await page.locator("#exportPlaylistBtn").click();
+    await expect(page.locator("#statusText")).toHaveText("mock export blocked text");
+  }
+
+  await page.reload();
+  {
+    await connectUsbAndFetchPlaylists(page);
+    await openReorderPlaylist(page);
+    await answerExports(page, { ok: true, data: { exportedTracks: 3, statusText: "Export complete" } });
+
+    await page.locator("#playlistSearchInput").fill("no such track");
+    await expect(page.locator("#playlistTotalDuration")).toHaveText("Total time: 0:00");
+    await page.locator("#exportPlaylistBtn").click();
+    await expect(page.locator("#statusText")).toContainText("Export complete");
+  }
+
+  await page.reload();
+  {
+    await connectUsbAndFetchPlaylists(page);
+    await openReorderPlaylist(page);
+    const artistHeader = page.locator('#panel-playlist .track-grid-cell.sortable[data-sort-key="artist"]');
+    await answerExports(page, { ok: true, data: { exportedTracks: 3, statusText: "Export complete" } });
+
+    // The backend saves the sort as the order and exports, in one command.
+    await artistHeader.click();
+    await expect(artistHeader).toHaveClass(/sort-asc/);
+    await page.locator("#exportPlaylistBtn").click();
+    await expect(page.locator("#statusText")).toContainText("Export complete");
+    const flow = await page.evaluate(() => window.__exportFlow);
+    expect(flow.map((call) => call.command)).toEqual(["export_to_usb"]);
+    expect(flow[0].sort).toEqual({ sortBy: "artist", sortDir: "asc" });
+    // The page shows the order it exported, with no sort left over.
+    await expect(artistHeader).not.toHaveClass(/sort-asc/);
+
+    // A failed export says so once; the sort stays, and the playlists are read
+    // again (the export may have saved the sort or changed the USB).
+    const readsBefore = await page.evaluate(() => {
+      window.__exportFlow = [];
+      window.__exportAnswer = { ok: false, error: { code: "IO", message: "disk full" } };
+      return window.__playlistReads || 0;
+    });
+    await artistHeader.click();
+    await page.locator("#exportPlaylistBtn").click();
+    await expect(page.locator("#statusText")).toHaveText("Export failed: disk full. See Event Log for details.");
+    await expect(artistHeader).toHaveClass(/sort-asc/);
+    expect(await page.evaluate(() => window.__exportFlow.map((call) => call.command))).toEqual(["export_to_usb"]);
+    await expect.poll(() => page.evaluate(() => window.__playlistReads)).toBe(readsBefore + 1);
+  }
 });
 
 test("a failed export is reported in the status bar and left to the backend's one Event Log entry", async ({ page }) => {
@@ -742,35 +876,6 @@ test("a failed export is reported in the status bar and left to the backend's on
   await expect(page.locator("#statusText")).toContainText("Export failed: Unhandled: export_to_usb. See Event Log for details.");
   await page.locator("#eventLogBtn").click();
   await expect(page.locator("#eventLogList")).not.toContainText("export_to_usb");
-});
-
-test("export is disabled from the click until the export finishes, so a double click starts one export", async ({ page }) => {
-  await installReorderTauriMock(page, { usbSameNamePlaylistName: "Reorder Playlist" });
-  await page.goto("/");
-  await connectUsbAndFetchPlaylists(page);
-  await page.locator("#navPlaylistList .nav-playlist-item").first().click();
-  await expect(page.locator("#playlistTracksBody .track-grid-row")).toHaveCount(3);
-  // Hold export_to_usb open until the test releases it, counting the calls.
-  await page.evaluate(() => {
-    window.__exportCalls = 0;
-    const backend = window.__e2eBackend;
-    backend.override(async (command, request, payload, next) => {
-      if (command !== "export_to_usb") return next();
-      window.__exportCalls += 1;
-      await new Promise((resolve) => { window.__finishExport = resolve; });
-      return { ok: false, error: { code: "INTERNAL", message: "stopped by test" } };
-    });
-  });
-
-  const exportBtn = page.locator("#exportPlaylistBtn");
-  await exportBtn.dblclick();
-  await expect(exportBtn).toBeDisabled();
-  expect(await page.evaluate(() => window.__exportCalls)).toBe(1);
-
-  await page.evaluate(() => window.__finishExport());
-  await expect(page.locator("#statusText")).toContainText("stopped by test");
-  await expect(exportBtn).toBeEnabled();
-  expect(await page.evaluate(() => window.__exportCalls)).toBe(1);
 });
 
 // Answers export_to_usb with `window.__exportAnswer` (first `answer`) and
@@ -843,123 +948,6 @@ test("a successful export clears the stale diagnostics report and sends the back
   expect(await page.evaluate(() => window.__historyReads)).toBe(1);
 });
 
-test("the backend's export gate rejection is shown in the status bar", async ({ page }) => {
-  await installReorderTauriMock(page, { usbSameNamePlaylistName: "Reorder Playlist" });
-  await page.goto("/");
-  await connectUsbAndFetchPlaylists(page);
-  await openReorderPlaylist(page);
-  await answerExports(page, {
-    ok: false,
-    error: { code: "VALIDATION", message: "the log's wording", details: { statusText: "mock export blocked text" } }
-  });
-
-  await page.locator("#exportPlaylistBtn").click();
-  await expect(page.locator("#statusText")).toHaveText("mock export blocked text");
-});
-
-test("a search with no matches doesn't change what Export to USB does", async ({ page }) => {
-  await installReorderTauriMock(page, { usbSameNamePlaylistName: "Reorder Playlist" });
-  await page.goto("/");
-  await connectUsbAndFetchPlaylists(page);
-  await openReorderPlaylist(page);
-  await answerExports(page, { ok: true, data: { exportedTracks: 3, statusText: "Export complete" } });
-
-  await page.locator("#playlistSearchInput").fill("no such track");
-  await expect(page.locator("#playlistTotalDuration")).toHaveText("Total time: 0:00");
-  await page.locator("#exportPlaylistBtn").click();
-  await expect(page.locator("#statusText")).toContainText("Export complete");
-});
-
-test("export sends an active column sort along, and a failed export keeps it on screen", async ({ page }) => {
-  await installReorderTauriMock(page, { usbSameNamePlaylistName: "Reorder Playlist" });
-  await page.goto("/");
-  await connectUsbAndFetchPlaylists(page);
-  await openReorderPlaylist(page);
-  const artistHeader = page.locator('#panel-playlist .track-grid-cell.sortable[data-sort-key="artist"]');
-  await answerExports(page, { ok: true, data: { exportedTracks: 3, statusText: "Export complete" } });
-
-  // The backend saves the sort as the order and exports, in one command.
-  await artistHeader.click();
-  await expect(artistHeader).toHaveClass(/sort-asc/);
-  await page.locator("#exportPlaylistBtn").click();
-  await expect(page.locator("#statusText")).toContainText("Export complete");
-  const flow = await page.evaluate(() => window.__exportFlow);
-  expect(flow.map((call) => call.command)).toEqual(["export_to_usb"]);
-  expect(flow[0].sort).toEqual({ sortBy: "artist", sortDir: "asc" });
-  // The page shows the order it exported, with no sort left over.
-  await expect(artistHeader).not.toHaveClass(/sort-asc/);
-
-  // A failed export says so once; the sort stays, and the playlists are read
-  // again (the export may have saved the sort or changed the USB).
-  const readsBefore = await page.evaluate(() => {
-    window.__exportFlow = [];
-    window.__exportAnswer = { ok: false, error: { code: "IO", message: "disk full" } };
-    return window.__playlistReads || 0;
-  });
-  await artistHeader.click();
-  await page.locator("#exportPlaylistBtn").click();
-  await expect(page.locator("#statusText")).toHaveText("Export failed: disk full. See Event Log for details.");
-  await expect(artistHeader).toHaveClass(/sort-asc/);
-  expect(await page.evaluate(() => window.__exportFlow.map((call) => call.command))).toEqual(["export_to_usb"]);
-  await expect.poll(() => page.evaluate(() => window.__playlistReads)).toBe(readsBefore + 1);
-});
-
-test("changing the export sync mode releases and re-engages the open playlist's reorder lock without a USB rescan", async ({ page }) => {
-  await installReorderTauriMock(page, { usbSameNamePlaylistName: "Reorder Playlist", exportPruneStale: false });
-  await page.goto("/");
-
-  await connectUsbAndFetchPlaylists(page);
-  await page.locator("#navPlaylistList .nav-playlist-item").first().click();
-
-  const grid = page.locator('[data-track-grid][data-body-id="playlistTracksBody"]');
-  const dragHandles = page.locator("#playlistTracksBody [data-playlist-track-drag-handle]");
-  const artistHeader = page.locator('#panel-playlist .track-grid-cell.sortable[data-sort-key="artist"]');
-  const lockedTooltip =
-    "Won't reorder on USB — \"Reorder Playlist\" already exists there, and additive export keeps its existing track order unchanged. New tracks are still added in your chosen order.";
-
-  await expect(page.locator("#playlistTracksBody .track-grid-row")).toHaveCount(3);
-
-  // additive + same name on USB -> locked
-  await expect(grid).toHaveAttribute("data-sort-locked", "true");
-  await expect(dragHandles).toHaveCount(0);
-  await expect(artistHeader).toHaveAttribute("data-tooltip", lockedTooltip);
-  await expect(page.locator("#exportPlaylistBtn")).toHaveText("Append to (Reorder Playlist) on USB: (USB)");
-
-  // switch to mirror -> lock releases immediately (no fetch_usb_playlists rerun)
-  await page.locator("#settingsBtn").click();
-  await page.locator("#exportSyncModeMirror").check({ force: true });
-  await page.locator("#settingsCloseBtn").click();
-
-  await expect(grid).toHaveAttribute("data-sort-locked", "false");
-  await expect(dragHandles).toHaveCount(3);
-  await expect(artistHeader).not.toHaveAttribute("data-tooltip", /.+/);
-  await expect(page.locator("#exportPlaylistBtn")).toHaveText("Export to USB: USB");
-
-  // a view-only column sort is now allowed
-  await artistHeader.click();
-  await expect(page.locator("#panel-playlist .sort-hint")).toBeVisible();
-
-  // switch back to additive -> lock re-engages, active sort committed
-  await page.locator("#settingsBtn").click();
-  await page.locator("#exportSyncModeAdditive").check({ force: true });
-  await page.locator("#settingsCloseBtn").click();
-
-  await expect(grid).toHaveAttribute("data-sort-locked", "true");
-  await expect(dragHandles).toHaveCount(0);
-  await expect(page.locator("#panel-playlist .sort-hint")).toBeHidden();
-  await expect(page.locator("#exportPlaylistBtn")).toHaveText("Append to (Reorder Playlist) on USB: (USB)");
-
-  // The mode change carries the sort along: the backend saves it before the lock.
-  const requests = await page.evaluate(() =>
-    window.__calls.filter((c) => c.command === "set_export_sync_mode").map((c) => c.request));
-  expect(requests).toEqual([
-    { pruneStale: true, playlistId: "pl-1", sort: null },
-    { pruneStale: false, playlistId: "pl-1", sort: { sortBy: "artist", sortDir: "asc" } }
-  ]);
-  expect(await reorderRequests(page)).toEqual([]);
-  await expect(page.locator("#statusText")).toContainText('"Reorder Playlist" already exists on USB, so its track order is locked here');
-});
-
 test("playlist track drag handle stays enabled in additive mode when no same-name USB playlist exists", async ({ page }) => {
   await installReorderTauriMock(page, { usbSameNamePlaylistName: "Some Other Playlist", exportPruneStale: false });
   await page.goto("/");
@@ -1013,6 +1001,21 @@ test("switching away from a sorted playlist commits the sort as its real order, 
   await expect(page.locator('#panel-playlist .sortable[data-sort-key="album"]')).not.toHaveClass(/sort-asc|sort-desc/);
   await expect(lockedRows.nth(0)).toHaveAttribute("data-track-id", "t3");
   await expect(lockedRows.nth(1)).toHaveAttribute("data-track-id", "t4");
+
+  // A sort whose save fails still lets the view change, and says why.
+  await page.evaluate(() => {
+    const backend = window.__e2eBackend;
+    backend.override(async (command) => {
+      if (command === "reorder_playlist_tracks") return backend.fail("Save track order failed: boom");
+    });
+  });
+  await page.locator("#navPlaylistList .nav-playlist-item", { hasText: "Free Playlist" }).click();
+  await expect(page.locator("#playlistTracksBody .track-grid-row")).toHaveCount(2);
+  await page.locator('#panel-playlist .sortable[data-sort-key="album"]').click();
+  await expect(page.locator("#panel-playlist .sort-hint")).toBeVisible();
+  await page.locator('.nav-item[data-view="library"]').click();
+  await expect(page.locator("#panel-library")).toHaveClass(/active/);
+  await expect(page.locator("#statusText")).toContainText("Save track order failed: boom");
 });
 
 function installTwoPlaylistTauriMock(page) {
@@ -1024,61 +1027,59 @@ function installTwoPlaylistTauriMock(page) {
   });
 }
 
-test("switching between two unlocked playlists commits the outgoing sort and doesn't carry it into the next", async ({ page }) => {
+test("switching between two unlocked playlists commits the outgoing sort and doesn't carry it into the next; switching to a non-playlist view (Library) also commits an active playlist sort; a same-playlist refresh (search) does not clear or commit an active sort", async ({ page }) => {
   await installTwoPlaylistTauriMock(page);
   await page.goto("/");
+  {
+    await page.locator("#navPlaylistList .nav-playlist-item", { hasText: "Playlist A" }).click();
+    await expect(page.locator("#playlistTracksBody .track-grid-row")).toHaveCount(2);
+    await page.locator('#panel-playlist .sortable[data-sort-key="album"]').click();
+    await expect(page.locator("#panel-playlist .sort-hint")).toBeVisible();
+    await expect(page.locator("#playlistTracksBody .track-grid-row .track-title")).toHaveText(["Song B", "Song A"]);
 
-  await page.locator("#navPlaylistList .nav-playlist-item", { hasText: "Playlist A" }).click();
-  await expect(page.locator("#playlistTracksBody .track-grid-row")).toHaveCount(2);
-  await page.locator('#panel-playlist .sortable[data-sort-key="album"]').click();
-  await expect(page.locator("#panel-playlist .sort-hint")).toBeVisible();
-  await expect(page.locator("#playlistTracksBody .track-grid-row .track-title")).toHaveText(["Song B", "Song A"]);
+    await page.locator("#navPlaylistList .nav-playlist-item", { hasText: "Playlist B" }).click();
+    const rowsB = page.locator("#playlistTracksBody .track-grid-row");
+    await expect(rowsB).toHaveCount(2);
 
-  await page.locator("#navPlaylistList .nav-playlist-item", { hasText: "Playlist B" }).click();
-  const rowsB = page.locator("#playlistTracksBody .track-grid-row");
-  await expect(rowsB).toHaveCount(2);
+    const reorderCalls = await reorderRequests(page);
+    expect(reorderCalls).toEqual([{ playlistId: "pl-a", sortBy: "album", sortDir: "asc" }]);
 
-  const reorderCalls = await reorderRequests(page);
-  expect(reorderCalls).toEqual([{ playlistId: "pl-a", sortBy: "album", sortDir: "asc" }]);
+    await expect(page.locator("#panel-playlist .sort-hint")).toBeHidden();
+    await expect(page.locator('#panel-playlist .sortable[data-sort-key="album"]')).not.toHaveClass(/sort-asc|sort-desc/);
+    await expect(rowsB.nth(0)).toHaveAttribute("data-track-id", "t3");
+    await expect(rowsB.nth(1)).toHaveAttribute("data-track-id", "t4");
+  }
 
-  await expect(page.locator("#panel-playlist .sort-hint")).toBeHidden();
-  await expect(page.locator('#panel-playlist .sortable[data-sort-key="album"]')).not.toHaveClass(/sort-asc|sort-desc/);
-  await expect(rowsB.nth(0)).toHaveAttribute("data-track-id", "t3");
-  await expect(rowsB.nth(1)).toHaveAttribute("data-track-id", "t4");
+  await page.reload();
+  {
+    await page.locator("#navPlaylistList .nav-playlist-item", { hasText: "Playlist A" }).click();
+    await expect(page.locator("#playlistTracksBody .track-grid-row")).toHaveCount(2);
+    await page.locator('#panel-playlist .sortable[data-sort-key="album"]').click();
+    await expect(page.locator("#panel-playlist .sort-hint")).toBeVisible();
+
+    await page.locator('.nav-item[data-view="library"]').click();
+    await expect.poll(() => reorderRequests(page).then((calls) => calls.length)).toBeGreaterThan(0);
+    const reorderCalls = await reorderRequests(page);
+    expect(reorderCalls).toEqual([{ playlistId: "pl-a", sortBy: "album", sortDir: "asc" }]);
+  }
+
+  await page.reload();
+  {
+    await page.locator("#navPlaylistList .nav-playlist-item", { hasText: "Playlist A" }).click();
+    await expect(page.locator("#playlistTracksBody .track-grid-row")).toHaveCount(2);
+    await page.locator('#panel-playlist .sortable[data-sort-key="album"]').click();
+    await expect(page.locator("#panel-playlist .sort-hint")).toBeVisible();
+    await expect(page.locator("#playlistTracksBody .track-grid-row .track-title")).toHaveText(["Song B", "Song A"]);
+
+    // Typing in the playlist search box refreshes the same playlist's view --
+    // the sort must survive that (still just a view op), and search alone
+    // must never trigger a commit (it would only submit the filtered subset).
+    await page.locator("#playlistSearchInput").fill("Song");
+    await expect(page.locator("#playlistTracksBody .track-grid-row")).toHaveCount(2);
+    await expect(page.locator("#panel-playlist .sort-hint")).toBeVisible();
+    await expect(page.locator('#panel-playlist .sortable[data-sort-key="album"]')).toHaveClass(/sort-asc/);
+    await expect(page.locator("#playlistTracksBody .track-grid-row .track-title")).toHaveText(["Song B", "Song A"]);
+    expect(await reorderRequests(page).then((calls) => calls.length)).toBe(0);
+  }
 });
 
-test("switching to a non-playlist view (Library) also commits an active playlist sort", async ({ page }) => {
-  await installTwoPlaylistTauriMock(page);
-  await page.goto("/");
-
-  await page.locator("#navPlaylistList .nav-playlist-item", { hasText: "Playlist A" }).click();
-  await expect(page.locator("#playlistTracksBody .track-grid-row")).toHaveCount(2);
-  await page.locator('#panel-playlist .sortable[data-sort-key="album"]').click();
-  await expect(page.locator("#panel-playlist .sort-hint")).toBeVisible();
-
-  await page.locator('.nav-item[data-view="library"]').click();
-  await expect.poll(() => reorderRequests(page).then((calls) => calls.length)).toBeGreaterThan(0);
-  const reorderCalls = await reorderRequests(page);
-  expect(reorderCalls).toEqual([{ playlistId: "pl-a", sortBy: "album", sortDir: "asc" }]);
-});
-
-test("a same-playlist refresh (search) does not clear or commit an active sort", async ({ page }) => {
-  await installTwoPlaylistTauriMock(page);
-  await page.goto("/");
-
-  await page.locator("#navPlaylistList .nav-playlist-item", { hasText: "Playlist A" }).click();
-  await expect(page.locator("#playlistTracksBody .track-grid-row")).toHaveCount(2);
-  await page.locator('#panel-playlist .sortable[data-sort-key="album"]').click();
-  await expect(page.locator("#panel-playlist .sort-hint")).toBeVisible();
-  await expect(page.locator("#playlistTracksBody .track-grid-row .track-title")).toHaveText(["Song B", "Song A"]);
-
-  // Typing in the playlist search box refreshes the same playlist's view --
-  // the sort must survive that (still just a view op), and search alone
-  // must never trigger a commit (it would only submit the filtered subset).
-  await page.locator("#playlistSearchInput").fill("Song");
-  await expect(page.locator("#playlistTracksBody .track-grid-row")).toHaveCount(2);
-  await expect(page.locator("#panel-playlist .sort-hint")).toBeVisible();
-  await expect(page.locator('#panel-playlist .sortable[data-sort-key="album"]')).toHaveClass(/sort-asc/);
-  await expect(page.locator("#playlistTracksBody .track-grid-row .track-title")).toHaveText(["Song B", "Song A"]);
-  expect(await reorderRequests(page).then((calls) => calls.length)).toBe(0);
-});

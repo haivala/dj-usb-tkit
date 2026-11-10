@@ -52,35 +52,34 @@ function canvasesDrawn(page, selector) {
   );
 }
 
-test("startup draws the waveforms the library page carries", async ({ page }) => {
+test("startup draws the waveforms the library page carries; the cue editor draws the track's detail waveform", async ({ page }) => {
   await installWaveformStartupMock(page);
   await page.goto("/");
+  {
+    await expect(page.locator("#libraryTableBody .track-grid-row")).toHaveCount(2);
 
-  await expect(page.locator("#libraryTableBody .track-grid-row")).toHaveCount(2);
+    await expect.poll(async () => {
+      return page.locator("#libraryTableBody .waveform.waveform-canvas").count();
+    }).toBe(2);
 
-  await expect.poll(async () => {
-    return page.locator("#libraryTableBody .waveform.waveform-canvas").count();
-  }).toBe(2);
+    // The waveforms are actually drawn, not just laid out: both row canvases
+    // have visible pixels.
+    await expect
+      .poll(() => canvasesDrawn(page, "#libraryTableBody .waveform-canvas-el"))
+      .toEqual([true, true]);
+  }
 
-  // The waveforms are actually drawn, not just laid out: both row canvases
-  // have visible pixels.
-  await expect
-    .poll(() => canvasesDrawn(page, "#libraryTableBody .waveform-canvas-el"))
-    .toEqual([true, true]);
-});
+  await page.reload();
+  {
+    const row = page.locator("#libraryTableBody .track-grid-row").first();
+    await row.hover();
+    await row.locator('[data-action="edit-track-detail"]').click();
+    await expect(page.locator("#trackDetailView")).toBeVisible();
 
-test("the cue editor draws the track's detail waveform", async ({ page }) => {
-  await installWaveformStartupMock(page);
-  await page.goto("/");
-
-  const row = page.locator("#libraryTableBody .track-grid-row").first();
-  await row.hover();
-  await row.locator('[data-action="edit-track-detail"]').click();
-  await expect(page.locator("#trackDetailView")).toBeVisible();
-
-  await expect
-    .poll(() => canvasesDrawn(page, "#trackDetailWaveform > .waveform-canvas-el"))
-    .toEqual([true]);
+    await expect
+      .poll(() => canvasesDrawn(page, "#trackDetailWaveform > .waveform-canvas-el"))
+      .toEqual([true]);
+  }
 });
 
 function installSourceChipAnalysisMock(page) {
@@ -168,6 +167,10 @@ function installSourceChipAnalysisMock(page) {
           data: { found: true, path: "/home/dj/.mixxx/mixxxdb.sqlite", imported: !!window.__mixxxImported }
         };
       }
+      if (command === "scan_rekordbox_db") {
+        if (window.__failRekordboxScan) return backend.fail("db locked");
+        return backend.ok({ indexed: 3, updated: 1, warnings: [], statusText: "Desktop library import done: 3 new, 1 updated" });
+      }
       if (command === "scan_mixxx_db") {
         window.__mixxxImported = true;
         window.__mixxxScanPayload = payload?.request || null;
@@ -244,61 +247,157 @@ function installSourceChipAnalysisMock(page) {
   });
 }
 
-test("source chips show analyzed green on startup and adding a source indexes it", async ({ page }) => {
+test("source chips show analyzed green on startup and adding a source indexes it; Import ticks rekordbox and Mixxx playlists, imports each and opens the first", async ({ page }) => {
   await installSourceChipAnalysisMock(page);
   await page.goto("/");
+  {
+    await expect(page.locator(".source-chip.source-chip-analyzed")).toHaveCount(1);
+    await page.locator("#addSourceBtn").click();
+    // Adding a folder indexes it in the same command (metadata only, no
+    // analysis), so its tracks are playable right away without a manual
+    // "Analyze Library" click -- see backend/src/service/source_roots.rs
+    // add_source_folders. No separate scan follows.
+    await expect.poll(async () => page.evaluate(() => window.__addPayloads)).toEqual([{ paths: ["/music2"] }]);
+    await expect(page.locator("#statusText")).toContainText("indexed 1 track");
+    expect(await page.evaluate(() => window.__scanCalls)).toBe(0);
+    await expect(page.locator(".source-chip.source-chip-analyzed")).toHaveCount(2);
 
-  await expect(page.locator(".source-chip.source-chip-analyzed")).toHaveCount(1);
-  await page.locator("#addSourceBtn").click();
-  // Adding a folder indexes it in the same command (metadata only, no
-  // analysis), so its tracks are playable right away without a manual
-  // "Analyze Library" click -- see backend/src/service/source_roots.rs
-  // add_source_folders. No separate scan follows.
-  await expect.poll(async () => page.evaluate(() => window.__addPayloads)).toEqual([{ paths: ["/music2"] }]);
-  await expect(page.locator("#statusText")).toContainText("indexed 1 track");
-  expect(await page.evaluate(() => window.__scanCalls)).toBe(0);
-  await expect(page.locator(".source-chip.source-chip-analyzed")).toHaveCount(2);
+    // The library chips sit in their own "Libraries" row, not among the folders.
+    await expect(page.locator("#libraryChipsRow")).toBeVisible();
+    await expect(page.locator("#sourceChipsContainer .source-chip-toggle[data-rekordbox-db]")).toHaveCount(0);
 
-  // The library chips sit in their own "Libraries" row, not among the folders.
-  await expect(page.locator("#libraryChipsRow")).toBeVisible();
-  await expect(page.locator("#sourceChipsContainer .source-chip-toggle[data-rekordbox-db]")).toHaveCount(0);
+    // The rekordbox chip's checkbox (imported library) is a pure browse-filter
+    // toggle -- it must never trigger a rescan, only the switch and a reload of
+    // what's already indexed.
+    const rekordboxDbToggle = page.locator('#libraryChipsContainer .source-chip-toggle[data-rekordbox-db="true"]');
+    await expect(rekordboxDbToggle).toBeVisible();
+    await expect(rekordboxDbToggle).toHaveAttribute("aria-label", "Toggle rekordbox library");
+    await expect(rekordboxDbToggle).toBeEnabled();
+    const browseCalls = await page.evaluate(() => window.__browseCalls);
+    await rekordboxDbToggle.check();
+    await expect(rekordboxDbToggle).toBeChecked();
+    await expect.poll(async () => page.evaluate(() => window.__browseCalls)).toBeGreaterThan(browseCalls);
+    await expect.poll(async () => page.evaluate(() => window.__scanCalls)).toBe(0);
 
-  // The rekordbox chip's checkbox (imported library) is a pure browse-filter
-  // toggle -- it must never trigger a rescan, only the switch and a reload of
-  // what's already indexed.
-  const rekordboxDbToggle = page.locator('#libraryChipsContainer .source-chip-toggle[data-rekordbox-db="true"]');
-  await expect(rekordboxDbToggle).toBeVisible();
-  await expect(rekordboxDbToggle).toHaveAttribute("aria-label", "Toggle rekordbox library");
-  await expect(rekordboxDbToggle).toBeEnabled();
-  const browseCalls = await page.evaluate(() => window.__browseCalls);
-  await rekordboxDbToggle.check();
-  await expect(rekordboxDbToggle).toBeChecked();
-  await expect.poll(async () => page.evaluate(() => window.__browseCalls)).toBeGreaterThan(browseCalls);
-  await expect.poll(async () => page.evaluate(() => window.__scanCalls)).toBe(0);
+    // Mixxx isn't imported yet: its checkbox is disabled until the chip's ↻ runs
+    // the import, which then switches it on.
+    const mixxxToggle = page.locator('#libraryChipsContainer .source-chip-toggle[data-mixxx-db="true"]');
+    await expect(mixxxToggle).toHaveAttribute("aria-label", "Toggle Mixxx library");
+    await expect(mixxxToggle).toBeDisabled();
+    await expect(mixxxToggle).not.toBeChecked();
+    await page.locator('#libraryChipsContainer .source-chip-import[data-import-library="mixxx"]').click();
+    await expect.poll(async () => page.evaluate(() => window.__mixxxScanPayload)).toEqual({
+      path: "/home/dj/.mixxx/mixxxdb.sqlite"
+    });
+    await expect(mixxxToggle).toBeEnabled();
+    await expect(mixxxToggle).toBeChecked();
+    await expect(rekordboxDbToggle).toBeChecked();
 
-  // Mixxx isn't imported yet: its checkbox is disabled until the chip's ↻ runs
-  // the import, which then switches it on.
-  const mixxxToggle = page.locator('#libraryChipsContainer .source-chip-toggle[data-mixxx-db="true"]');
-  await expect(mixxxToggle).toHaveAttribute("aria-label", "Toggle Mixxx library");
-  await expect(mixxxToggle).toBeDisabled();
-  await expect(mixxxToggle).not.toBeChecked();
-  await page.locator('#libraryChipsContainer .source-chip-import[data-import-library="mixxx"]').click();
-  await expect.poll(async () => page.evaluate(() => window.__mixxxScanPayload)).toEqual({
-    path: "/home/dj/.mixxx/mixxxdb.sqlite"
-  });
-  await expect(mixxxToggle).toBeEnabled();
-  await expect(mixxxToggle).toBeChecked();
-  await expect(rekordboxDbToggle).toBeChecked();
+    // Unticking only switches it off: no import.
+    await mixxxToggle.uncheck();
+    await expect(mixxxToggle).not.toBeChecked();
+    await expect.poll(async () => page.evaluate(() => window.__libraryToggles)).toEqual([
+      { library: "rekordbox", enabled: true },
+      { library: "mixxx", enabled: true },
+      { library: "mixxx", enabled: false },
+    ]);
+    await expect.poll(async () => page.evaluate(() => window.__scanCalls)).toBe(0);
 
-  // Unticking only switches it off: no import.
-  await mixxxToggle.uncheck();
-  await expect(mixxxToggle).not.toBeChecked();
-  await expect.poll(async () => page.evaluate(() => window.__libraryToggles)).toEqual([
-    { library: "rekordbox", enabled: true },
-    { library: "mixxx", enabled: true },
-    { library: "mixxx", enabled: false },
-  ]);
-  await expect.poll(async () => page.evaluate(() => window.__scanCalls)).toBe(0);
+    // Importing from rekordbox again: the backend's status line, or why it failed.
+    const rekordboxImport = page.locator('#libraryChipsContainer .source-chip-import[data-import-library="rekordbox"]');
+    await rekordboxImport.click();
+    await expect(page.locator("#statusText")).toContainText("Desktop library import done: 3 new, 1 updated");
+    await page.evaluate(() => { window.__failRekordboxScan = true; });
+    await rekordboxImport.click();
+    await expect(page.locator("#statusText")).toContainText("Desktop library import failed:");
+    await expect(page.locator("#statusText")).toContainText("db locked");
+  }
+
+  await page.reload();
+  {
+    const importBtn = page.locator("#importPlaylistBtn");
+    await expect(importBtn).toBeVisible();
+    await importBtn.click();
+
+    const overlay = page.locator("#playlistImportOverlay");
+    const list = page.locator("#playlistImportList");
+    const row = (name) => list.locator("li", { hasText: name });
+    const okBtn = page.locator("#playlistImportOkBtn");
+    const forceLabel = page.locator("#playlistImportForceLabel");
+    await expect(overlay).toBeVisible();
+    // A column per library, its lists grouped by kind.
+    await expect(list.locator(".playlist-import-column-title")).toHaveText(["rekordbox", "Mixxx"]);
+    const column = (label) => list.locator(".playlist-import-column", { hasText: label });
+    await expect(column("rekordbox").locator(".check-list-group")).toHaveText(["Playlists", "History"]);
+    await expect(column("Mixxx").locator(".check-list-group")).toHaveText(["Playlists", "Crates", "History"]);
+    await expect(row("Peak").locator(".add-to-note")).toHaveText("2 tracks");
+    // A list imported before says which playlist importing it again updates.
+    await expect(row("Test playlist").locator(".add-to-note")).toHaveText('3 tracks · updates "My Test playlist"');
+    // Nothing ticked: nothing to import.
+    await expect(okBtn).toBeDisabled();
+    await expect(forceLabel).toHaveText("Force update track data");
+    await expect(page.locator("#playlistImportForce")).not.toBeChecked();
+    // The force option names the library when every ticked list comes from one.
+    await row("Peak").locator("input").check();
+    await expect(okBtn).toBeEnabled();
+    await expect(okBtn).toHaveText("Import");
+    await expect(forceLabel).toHaveText("Force update track data from Mixxx");
+    await row("Winter Party").locator("input").check();
+    await expect(okBtn).toHaveText("Import 2");
+    await expect(forceLabel).toHaveText("Force update track data");
+
+    // Escape cancels without importing.
+    await page.keyboard.press("Escape");
+    await expect(overlay).toBeHidden();
+    expect(await page.evaluate(() => window.__playlistImports || null)).toBeNull();
+    await expect(importBtn).toBeFocused();
+
+    await importBtn.click();
+    await overlay.click({ position: { x: 5, y: 5 } });
+    await expect(overlay).toBeHidden();
+    await expect(importBtn).toBeFocused();
+    expect(await page.evaluate(() => window.__playlistImports || null)).toBeNull();
+
+    // One list: imported and opened.
+    await importBtn.click();
+    await expect(okBtn).toBeDisabled();
+    await row("2026-09-30").locator("input").check();
+    await okBtn.click();
+    await expect(overlay).toBeHidden();
+    await expect.poll(async () => page.evaluate(() => window.__playlistImports)).toEqual([
+      { library: "mixxx", name: "2026-09-30", path: "/home/dj/.mixxx/mixxxdb.sqlite", kind: "history", id: "3", force: false }
+    ]);
+    await expect(page.locator('.nav-playlist-item[data-playlist-id="pl-mixxx"]')).toHaveClass(/active/);
+    await expect(page.locator("#playlistPanelTitle")).toHaveText(/ · Imported from Mixxx$/);
+    await expect(page.locator('.source-chip-toggle[data-mixxx-db="true"]')).toBeChecked();
+
+    // Several lists from both libraries: each imported in list order, with
+    // force for all; the first opens, and both libraries' chips turn on.
+    await importBtn.click();
+    await expect(page.locator("#playlistImportForce")).not.toBeChecked();
+    await row("Peak").locator("input").check();
+    await row("Winter Party").locator("input").check();
+    await page.locator("#playlistImportForce").check();
+    await okBtn.click();
+    await expect.poll(async () => page.evaluate(() => window.__playlistImports.slice(1))).toEqual([
+      { library: "rekordbox", name: "Winter Party", path: "/music/master.db", kind: "playlist", id: "1234567890", force: true },
+      { library: "mixxx", name: "Peak", path: "/home/dj/.mixxx/mixxxdb.sqlite", kind: "crate", id: "7", force: true }
+    ]);
+    await expect(page.locator('.nav-playlist-item[data-playlist-id="pl-rekordbox"]')).toHaveClass(/active/);
+    await expect(page.locator('.source-chip-toggle[data-rekordbox-db="true"]')).toBeChecked();
+    await expect(page.locator('.source-chip-toggle[data-mixxx-db="true"]')).toBeChecked();
+    await expect(page.locator("#statusText")).toContainText("Imported 2 of 2 playlists: 4 tracks");
+
+    // Nothing imported: the backend's status line says why, and the open
+    // playlist stays.
+    await page.evaluate(() => { window.__failImports = true; });
+    await importBtn.click();
+    await row("Winter Party").locator("input").check();
+    await okBtn.click();
+    await expect.poll(async () => page.evaluate(() => (window.__failedImports || []).length)).toBe(1);
+    await expect(page.locator("#statusText")).toHaveText("rekordbox playlist import failed: the reason");
+    await expect(page.locator('.nav-playlist-item[data-playlist-id="pl-rekordbox"]')).toHaveClass(/active/);
+  }
 });
 
 test("source folders inside another one show grouped under its chip", async ({ page }) => {
@@ -337,94 +436,6 @@ test("source folders inside another one show grouped under its chip", async ({ p
   await expect.poll(async () => page.evaluate(() => window.__folderToggles)).toEqual([
     { path: "/mnt/raid/music/techno", enabled: true },
   ]);
-});
-
-test("Import ticks rekordbox and Mixxx playlists, imports each and opens the first", async ({ page }) => {
-  await installSourceChipAnalysisMock(page);
-  await page.goto("/");
-
-  const importBtn = page.locator("#importPlaylistBtn");
-  await expect(importBtn).toBeVisible();
-  await importBtn.click();
-
-  const overlay = page.locator("#playlistImportOverlay");
-  const list = page.locator("#playlistImportList");
-  const row = (name) => list.locator("li", { hasText: name });
-  const okBtn = page.locator("#playlistImportOkBtn");
-  const forceLabel = page.locator("#playlistImportForceLabel");
-  await expect(overlay).toBeVisible();
-  // A column per library, its lists grouped by kind.
-  await expect(list.locator(".playlist-import-column-title")).toHaveText(["rekordbox", "Mixxx"]);
-  const column = (label) => list.locator(".playlist-import-column", { hasText: label });
-  await expect(column("rekordbox").locator(".check-list-group")).toHaveText(["Playlists", "History"]);
-  await expect(column("Mixxx").locator(".check-list-group")).toHaveText(["Playlists", "Crates", "History"]);
-  await expect(row("Peak").locator(".add-to-note")).toHaveText("2 tracks");
-  // A list imported before says which playlist importing it again updates.
-  await expect(row("Test playlist").locator(".add-to-note")).toHaveText('3 tracks · updates "My Test playlist"');
-  // Nothing ticked: nothing to import.
-  await expect(okBtn).toBeDisabled();
-  await expect(forceLabel).toHaveText("Force update track data");
-  await expect(page.locator("#playlistImportForce")).not.toBeChecked();
-  // The force option names the library when every ticked list comes from one.
-  await row("Peak").locator("input").check();
-  await expect(okBtn).toBeEnabled();
-  await expect(okBtn).toHaveText("Import");
-  await expect(forceLabel).toHaveText("Force update track data from Mixxx");
-  await row("Winter Party").locator("input").check();
-  await expect(okBtn).toHaveText("Import 2");
-  await expect(forceLabel).toHaveText("Force update track data");
-
-  // Escape cancels without importing.
-  await page.keyboard.press("Escape");
-  await expect(overlay).toBeHidden();
-  expect(await page.evaluate(() => window.__playlistImports || null)).toBeNull();
-  await expect(importBtn).toBeFocused();
-
-  await importBtn.click();
-  await overlay.click({ position: { x: 5, y: 5 } });
-  await expect(overlay).toBeHidden();
-  await expect(importBtn).toBeFocused();
-  expect(await page.evaluate(() => window.__playlistImports || null)).toBeNull();
-
-  // One list: imported and opened.
-  await importBtn.click();
-  await expect(okBtn).toBeDisabled();
-  await row("2026-09-30").locator("input").check();
-  await okBtn.click();
-  await expect(overlay).toBeHidden();
-  await expect.poll(async () => page.evaluate(() => window.__playlistImports)).toEqual([
-    { library: "mixxx", name: "2026-09-30", path: "/home/dj/.mixxx/mixxxdb.sqlite", kind: "history", id: "3", force: false }
-  ]);
-  await expect(page.locator('.nav-playlist-item[data-playlist-id="pl-mixxx"]')).toHaveClass(/active/);
-  await expect(page.locator("#playlistPanelTitle")).toHaveText(/ · Imported from Mixxx$/);
-  await expect(page.locator('.source-chip-toggle[data-mixxx-db="true"]')).toBeChecked();
-
-  // Several lists from both libraries: each imported in list order, with
-  // force for all; the first opens, and both libraries' chips turn on.
-  await importBtn.click();
-  await expect(page.locator("#playlistImportForce")).not.toBeChecked();
-  await row("Peak").locator("input").check();
-  await row("Winter Party").locator("input").check();
-  await page.locator("#playlistImportForce").check();
-  await okBtn.click();
-  await expect.poll(async () => page.evaluate(() => window.__playlistImports.slice(1))).toEqual([
-    { library: "rekordbox", name: "Winter Party", path: "/music/master.db", kind: "playlist", id: "1234567890", force: true },
-    { library: "mixxx", name: "Peak", path: "/home/dj/.mixxx/mixxxdb.sqlite", kind: "crate", id: "7", force: true }
-  ]);
-  await expect(page.locator('.nav-playlist-item[data-playlist-id="pl-rekordbox"]')).toHaveClass(/active/);
-  await expect(page.locator('.source-chip-toggle[data-rekordbox-db="true"]')).toBeChecked();
-  await expect(page.locator('.source-chip-toggle[data-mixxx-db="true"]')).toBeChecked();
-  await expect(page.locator("#statusText")).toContainText("Imported 2 of 2 playlists: 4 tracks");
-
-  // Nothing imported: the backend's status line says why, and the open
-  // playlist stays.
-  await page.evaluate(() => { window.__failImports = true; });
-  await importBtn.click();
-  await row("Winter Party").locator("input").check();
-  await okBtn.click();
-  await expect.poll(async () => page.evaluate(() => (window.__failedImports || []).length)).toBe(1);
-  await expect(page.locator("#statusText")).toHaveText("rekordbox playlist import failed: the reason");
-  await expect(page.locator('.nav-playlist-item[data-playlist-id="pl-rekordbox"]')).toHaveClass(/active/);
 });
 
 test("in the test language, the playlist import dialog shows only catalog text and data", async ({ page }) => {

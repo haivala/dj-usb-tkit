@@ -88,81 +88,75 @@ function scrollToEnd(page) {
 
 const fetchOffsets = (page) => fetchCalls(page).then((calls) => calls.map((c) => c.offset));
 
-test("selecting a large playlist renders the top of the first hydrated page", async ({ page }) => {
+test("selecting a large playlist renders the top of the first hydrated page; the scrollbar spans the whole playlist from the start; jumping to the end loads just the end of the playlist, hydrated; searching re-queries the backend and shows the filtered-in track, hydrated; sorting re-queries the backend so the new first page is hydrated", async ({ page }) => {
   await installTauriMock(page, { trackCount: PLAYLIST_SIZE });
   await selectBigPlaylist(page);
+  {
+    await expect(rowByTitle(page, "Track 0000").locator(".bpm-pill")).toBeVisible();
+    // Only the rows around the viewport are in the DOM.
+    const rendered = await page.locator("#usbPlaylistTracks .track-grid-row[data-track-id]").count();
+    expect(rendered).toBeGreaterThan(0);
+    expect(rendered).toBeLessThan(PAGE_SIZE);
+    await expect(rowByTitle(page, SORT_TARGET_TITLE)).toHaveCount(0);
+    expect(await fetchOffsets(page)).toEqual([0]);
 
-  await expect(rowByTitle(page, "Track 0000").locator(".bpm-pill")).toBeVisible();
-  // Only the rows around the viewport are in the DOM.
-  const rendered = await page.locator("#usbPlaylistTracks .track-grid-row[data-track-id]").count();
-  expect(rendered).toBeGreaterThan(0);
-  expect(rendered).toBeLessThan(PAGE_SIZE);
-  await expect(rowByTitle(page, SORT_TARGET_TITLE)).toHaveCount(0);
-  expect(await fetchOffsets(page)).toEqual([0]);
+    // The list shows names only; the open playlist's count is in its heading,
+    // and the totals sit on the header line.
+    await expect(page.locator('[data-usb-playlist="usb-1"] .playlist-label')).toHaveText("Big Playlist");
+    await expect(page.locator("#usbPlaylistHeading .track-list-heading-name")).toHaveText("Big Playlist");
+    await expect(page.locator("#usbPlaylistHeading .track-list-heading-count")).toHaveText(`${PLAYLIST_SIZE} tracks`);
+    await expect(page.locator(".panel-header #usbCountsText")).toHaveText(/^1 playlist, \d+ tracks?$/);
+  }
 
-  // The list shows names only; the open playlist's count is in its heading,
-  // and the totals sit on the header line.
-  await expect(page.locator('[data-usb-playlist="usb-1"] .playlist-label')).toHaveText("Big Playlist");
-  await expect(page.locator("#usbPlaylistHeading .track-list-heading-name")).toHaveText("Big Playlist");
-  await expect(page.locator("#usbPlaylistHeading .track-list-heading-count")).toHaveText(`${PLAYLIST_SIZE} tracks`);
-  await expect(page.locator(".panel-header #usbCountsText")).toHaveText(/^1 playlist, \d+ tracks?$/);
-});
-
-test("the scrollbar spans the whole playlist from the start", async ({ page }) => {
-  await installTauriMock(page, { trackCount: PLAYLIST_SIZE });
   await selectBigPlaylist(page);
+  {
+    const body = page.locator("#usbPlaylistTracks");
+    const rowHeight = await body.locator(".track-grid-row").first().evaluate((row) => row.getBoundingClientRect().height);
+    const bodyHeight = await body.evaluate((el) => el.getBoundingClientRect().height);
+    expect(Math.abs(bodyHeight - PLAYLIST_SIZE * rowHeight)).toBeLessThan(2);
+  }
 
-  const body = page.locator("#usbPlaylistTracks");
-  const rowHeight = await body.locator(".track-grid-row").first().evaluate((row) => row.getBoundingClientRect().height);
-  const bodyHeight = await body.evaluate((el) => el.getBoundingClientRect().height);
-  expect(Math.abs(bodyHeight - PLAYLIST_SIZE * rowHeight)).toBeLessThan(2);
-});
-
-test("jumping to the end loads just the end of the playlist, hydrated", async ({ page }) => {
-  await installTauriMock(page, { trackCount: PLAYLIST_SIZE });
   await selectBigPlaylist(page);
-  await expect(rowByTitle(page, "Track 0000")).toBeVisible();
+  {
+    await expect(rowByTitle(page, "Track 0000")).toBeVisible();
 
-  await scrollToEnd(page);
+    await scrollToEnd(page);
 
-  const lastRow = rowByTitle(page, `Track ${String(PLAYLIST_SIZE - 1).padStart(4, "0")}`);
-  await expect(lastRow).toBeVisible();
-  await expect(lastRow.locator(".bpm-pill")).toBeVisible();
-  // The page in between is never fetched, and the top rows are gone.
-  expect(await fetchOffsets(page)).not.toContain(PAGE_SIZE);
-  await expect(rowByTitle(page, "Track 0000")).toHaveCount(0);
-});
+    const lastRow = rowByTitle(page, `Track ${String(PLAYLIST_SIZE - 1).padStart(4, "0")}`);
+    await expect(lastRow).toBeVisible();
+    await expect(lastRow.locator(".bpm-pill")).toBeVisible();
+    // The page in between is never fetched, and the top rows are gone.
+    expect(await fetchOffsets(page)).not.toContain(PAGE_SIZE);
+    await expect(rowByTitle(page, "Track 0000")).toHaveCount(0);
+  }
 
-test("searching re-queries the backend and shows the filtered-in track, hydrated", async ({ page }) => {
-  await installTauriMock(page, { trackCount: PLAYLIST_SIZE });
   await selectBigPlaylist(page);
+  {
+    const queriesBefore = (await fetchCalls(page)).map((c) => c.query || "");
+    expect(queriesBefore.every((q) => q === "")).toBe(true);
 
-  const queriesBefore = (await fetchCalls(page)).map((c) => c.query || "");
-  expect(queriesBefore.every((q) => q === "")).toBe(true);
+    await page.locator("#usbTrackSearch").fill(SEARCH_TARGET_TITLE);
 
-  await page.locator("#usbTrackSearch").fill(SEARCH_TARGET_TITLE);
+    const resultRow = rowByTitle(page, SEARCH_TARGET_TITLE);
+    await expect(resultRow).toHaveCount(1);
+    await expect(resultRow.locator(".bpm-pill")).toBeVisible();
+    const queriesAfter = (await fetchCalls(page)).map((c) => c.query || "");
+    expect(queriesAfter).toContain(SEARCH_TARGET_TITLE);
+  }
 
-  const resultRow = rowByTitle(page, SEARCH_TARGET_TITLE);
-  await expect(resultRow).toHaveCount(1);
-  await expect(resultRow.locator(".bpm-pill")).toBeVisible();
-  const queriesAfter = (await fetchCalls(page)).map((c) => c.query || "");
-  expect(queriesAfter).toContain(SEARCH_TARGET_TITLE);
-});
-
-test("sorting re-queries the backend so the new first page is hydrated", async ({ page }) => {
-  await installTauriMock(page, { trackCount: PLAYLIST_SIZE });
   await selectBigPlaylist(page);
+  {
+    // The "Track" column sorts by artist then title (see TrackSort) -- all
+    // mock tracks share an artist, so SORT_TARGET_TITLE ("AAAA...") lands first.
+    await page.locator('[data-track-grid][data-body-id="usbPlaylistTracks"] .track-grid-cell.sortable[data-sort-key="artist"]').click();
 
-  // The "Track" column sorts by artist then title (see TrackSort) -- all
-  // mock tracks share an artist, so SORT_TARGET_TITLE ("AAAA...") lands first.
-  await page.locator('[data-track-grid][data-body-id="usbPlaylistTracks"] .track-grid-cell.sortable[data-sort-key="artist"]').click();
-
-  const sortedRow = rowByTitle(page, SORT_TARGET_TITLE);
-  await expect(sortedRow).toHaveCount(1);
-  await expect(page.locator("#usbPlaylistTracks .track-grid-row").first()).toHaveText(new RegExp(SORT_TARGET_TITLE));
-  await expect(sortedRow.locator(".bpm-pill")).toBeVisible();
-  const sortedCalls = (await fetchCalls(page)).map((c) => c.sortBy || "");
-  expect(sortedCalls).toContain("artist");
+    const sortedRow = rowByTitle(page, SORT_TARGET_TITLE);
+    await expect(sortedRow).toHaveCount(1);
+    await expect(page.locator("#usbPlaylistTracks .track-grid-row").first()).toHaveText(new RegExp(SORT_TARGET_TITLE));
+    await expect(sortedRow.locator(".bpm-pill")).toBeVisible();
+    const sortedCalls = (await fetchCalls(page)).map((c) => c.sortBy || "");
+    expect(sortedCalls).toContain("artist");
+  }
 });
 
 test("a small playlist loads in one page with no further fetch", async ({ page }) => {

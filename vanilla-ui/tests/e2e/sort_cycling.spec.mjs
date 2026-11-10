@@ -19,36 +19,38 @@ async function rowTitles(page) {
   return page.locator("#libraryTableBody .track-grid-row .track-title").allTextContents();
 }
 
-test("Sort cycling on Track column", async ({ page }) => {
+test("Sort cycling on Track column; Year column shows the release year and sorts by it", async ({ page }) => {
   await installSortMock(page);
   await page.goto("/");
-  await expect(page.locator("#libraryTableBody .track-grid-row")).toHaveCount(4);
+  {
+    await expect(page.locator("#libraryTableBody .track-grid-row")).toHaveCount(4);
 
-  const header = page.locator('#panel-library .sortable[data-sort-key="artist"]');
+    const header = page.locator('#panel-library .sortable[data-sort-key="artist"]');
 
-  await header.click();
-  await expect.poll(() => rowTitles(page)).toEqual(["Beta", "Alpha", "Zeta", "Gamma"]);
+    await header.click();
+    await expect.poll(() => rowTitles(page)).toEqual(["Beta", "Alpha", "Zeta", "Gamma"]);
 
-  await header.click();
-  await expect.poll(() => rowTitles(page)).toEqual(["Gamma", "Zeta", "Alpha", "Beta"]);
+    await header.click();
+    await expect.poll(() => rowTitles(page)).toEqual(["Gamma", "Zeta", "Alpha", "Beta"]);
 
-  await header.click();
-  await expect.poll(() => rowTitles(page)).toEqual(["Alpha", "Beta", "Gamma", "Zeta"]);
+    await header.click();
+    await expect.poll(() => rowTitles(page)).toEqual(["Alpha", "Beta", "Gamma", "Zeta"]);
 
-  await header.click();
-  await expect.poll(() => rowTitles(page)).toEqual(["Zeta", "Gamma", "Beta", "Alpha"]);
+    await header.click();
+    await expect.poll(() => rowTitles(page)).toEqual(["Zeta", "Gamma", "Beta", "Alpha"]);
 
-  await header.click();
-  await expect.poll(() => rowTitles(page)).toEqual(["Zeta", "Alpha", "Beta", "Gamma"]);
+    await header.click();
+    await expect.poll(() => rowTitles(page)).toEqual(["Zeta", "Alpha", "Beta", "Gamma"]);
+  }
+
+  await page.reload();
+  {
+    await expect(page.locator("#libraryTableBody .track-grid-row")).toHaveCount(4);
+    await expect(page.locator("#libraryTableBody .track-grid-row .td-year"))
+      .toHaveText(["2021", "1994", "", "2008"]);
+
+    await page.locator('#panel-library .sortable[data-sort-key="year"]').click();
+    await expect.poll(() => rowTitles(page)).toEqual(["Beta", "Alpha", "Gamma", "Zeta"]);
+  }
 });
 
-test("Year column shows the release year and sorts by it", async ({ page }) => {
-  await installSortMock(page);
-  await page.goto("/");
-  await expect(page.locator("#libraryTableBody .track-grid-row")).toHaveCount(4);
-  await expect(page.locator("#libraryTableBody .track-grid-row .td-year"))
-    .toHaveText(["2021", "1994", "", "2008"]);
-
-  await page.locator('#panel-library .sortable[data-sort-key="year"]').click();
-  await expect.poll(() => rowTitles(page)).toEqual(["Beta", "Alpha", "Gamma", "Zeta"]);
-});

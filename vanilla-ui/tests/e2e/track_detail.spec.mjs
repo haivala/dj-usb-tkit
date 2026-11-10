@@ -33,6 +33,9 @@ function installTrackDetailMock(page, opts = {}) {
     if (opts.secondTrack) {
       tracks.push({ ...tracks[0], id: "t2", title: "Other Track", filePath: "/music/two.mp3" });
     }
+    // The detail answer is the track as it was: a save in one part of a test
+    // doesn't change what the next part opens.
+    const detailTrack = { ...tracks[0] };
     backend.seed({ tracks, playlists: opts.playlist ? [{ id: "pl-1", name: "My Set", tracks: [tracks[0]] }] : [] });
     if (opts.tauriEvents) backend.useTauriRuntime();
 
@@ -62,7 +65,7 @@ function installTrackDetailMock(page, opts = {}) {
         case "resolve_track_identity": return backend.ok({ trackId: "t1", resolvedBy: "self", materialized: false });
         case "get_track_detail":
           return backend.ok(backend.trackDetail({
-            track: tracks[0],
+            track: detailTrack,
             firstBeatMs: 120,
             cues: [
               ...(opts.seedStart != null ? [{ positionMs: opts.seedStart, playbackStart: true }] : []),
@@ -142,87 +145,26 @@ function installTrackDetailMock(page, opts = {}) {
   }, opts);
 }
 
-test("track-detail modal adds a cue at the playhead and saves it", async ({ page }) => {
-  await installTrackDetailMock(page);
-  await page.goto("/");
-
-  await expect(page.locator("#libraryTableBody .track-grid-row")).toHaveCount(1);
-  await page.locator('#libraryTableBody .waveform-cell [data-action="edit-track-detail"]').click();
-
-  await expect(page.locator("#trackDetailView")).toBeVisible();
-  await expect(page.locator("#trackDetailFirstBeatMs")).toHaveValue("120");
-
-  // Clicking the waveform parks the playhead there.
-  await page.locator("#trackDetailWaveform").click({ position: { x: 40, y: 20 } });
-  await expect
-    .poll(() => page.evaluate(() => window.__calls.some((c) => c.command === "play_resolved_track")))
-    .toBe(true);
-  await expect(page.locator("#trackDetailPlayhead")).toBeVisible();
-
-  // All eight A–H slots are always there, so adding a cue doesn't change the height.
-  const cells = page.locator("#trackDetailCueList > *");
-  await expect(cells).toHaveCount(8);
-  const listHeight = (await page.locator("#trackDetailCueList").boundingBox()).height;
-  await page.locator("#trackDetailAddCue").click();
-  await expect(page.locator("#trackDetailCueList .cue-row")).toHaveCount(1);
-  await expect(cells).toHaveCount(8);
-  await expect(page.locator("#trackDetailCueList .cue-slot-empty").first().locator(".cue-row-color")).toHaveText("B");
-  expect((await page.locator("#trackDetailCueList").boundingBox()).height).toBe(listHeight);
-
-  await page.locator("#trackDetailSaveBtn").click();
-  await expect(page.locator("#trackDetailView")).toBeHidden();
-
-  const saveCall = await page.evaluate(() =>
-    window.__calls.find((c) => c.command === "save_track_analysis_edits")
-  );
-  expect(saveCall).toBeTruthy();
-  expect(Array.isArray(saveCall.request.cues)).toBe(true);
-  expect(saveCall.request.cues).toHaveLength(1);
-  expect(Object.keys(saveCall.request.cues[0]).sort()).toEqual([
-    "colorId",
-    "memory",
-    "name",
-    "playbackStart",
-    "positionMs",
-  ]);
-  expect(saveCall.request.cues[0].playbackStart).toBe(false);
-});
-
-test("the cue editor covers its page, and the edited row stays marked after closing", async ({ page }) => {
-  await installTrackDetailMock(page, { secondTrack: true });
-  await page.goto("/");
-  const view = page.locator("#trackDetailView");
-  const rows = page.locator("#libraryTableBody .track-grid-row");
-  const inert = () =>
-    page.evaluate(() =>
-      ["#panel-library", "#navSidebar", ".topbar"].map((sel) => document.querySelector(sel).inert)
-    );
-
-  await rows.nth(0).locator('[data-action="edit-track-detail"]').click();
-  await expect(view).toBeVisible();
-  // It covers the page and the sidebar; only the editor is usable while it's open.
-  expect(await view.evaluate((n) => n.parentElement.className)).toBe("app-layout");
-  expect(await inert()).toEqual([true, true, true]);
-
-  await page.locator("#trackDetailCancelBtn").click();
-  await expect(view).toBeHidden();
-  expect(await inert()).toEqual([false, false, false]);
-  await expect(rows.nth(0)).toHaveClass(/is-last-edited/);
-  await expect(rows.nth(1)).not.toHaveClass(/is-last-edited/);
-
-  // Editing another track moves the mark.
-  await rows.nth(1).locator('[data-action="edit-track-detail"]').click();
-  await expect(view).toBeVisible();
-  await page.keyboard.press("Escape");
-  await expect(view).toBeHidden();
-  await expect(rows.nth(1)).toHaveClass(/is-last-edited/);
-  await expect(rows.nth(0)).not.toHaveClass(/is-last-edited/);
-});
-
 async function openCueEditor(page, opts) {
   await installTrackDetailMock(page, opts);
   await page.goto("/");
   await page.locator('#libraryTableBody .waveform-cell [data-action="edit-track-detail"]').click();
+  await expect(page.locator("#trackDetailView")).toBeVisible();
+}
+
+// Between the parts of a test: closes the editor unsaved (Cancel discards) and
+// clears the recorded calls, so each part counts only its own.
+async function closeEditor(page) {
+  const view = page.locator("#trackDetailView");
+  if (await view.isVisible()) await page.locator("#trackDetailCancelBtn").click();
+  await expect(view).toBeHidden();
+  await page.evaluate(() => { window.__calls.length = 0; });
+}
+
+// ...and opens the first track's editor again, as the backend has it.
+async function reopen(page) {
+  await closeEditor(page);
+  await page.locator('#libraryTableBody .waveform-cell [data-action="edit-track-detail"]').first().click();
   await expect(page.locator("#trackDetailView")).toBeVisible();
 }
 
@@ -242,443 +184,6 @@ const preStartEdge = (page) =>
     return shade.hidden ? null : shade.getBoundingClientRect().right - wf.left;
   });
 
-test("playback-start choice: informational with no cues, then applies the remembered (default First cue) setting", async ({ page }) => {
-  await openCueEditor(page);
-  const firstCue = page.locator("#trackDetailStartFirstCue");
-  const firstBeat = page.locator("#trackDetailStartFirstBeat");
-  const note = page.locator("#trackDetailStartNote");
-  // No cues: neither choice applies (the CDJ starts at the first audio), the note says so.
-  await expect(firstCue).toBeDisabled();
-  await expect(firstBeat).toBeDisabled();
-  await expect(firstCue).toHaveAttribute("aria-checked", "false");
-  await expect(firstBeat).toHaveAttribute("aria-checked", "false");
-  await expect(note).toBeVisible();
-  // No cues: the CDJ starts at the first audio, nothing is greyed out.
-  await expect(page.locator("#trackDetailPreStart")).toBeHidden();
-
-  await page.locator("#trackDetailWaveform").dblclick({ position: { x: 300, y: 100 } });
-  await expect(firstBeat).toBeEnabled();
-  await expect(note).toBeHidden();
-  await expect(firstCue).toHaveAttribute("aria-checked", "true");
-  // Starting from the first cue point: greyed up to cue A (snapped to the grid).
-  await expect.poll(() => preStartEdge(page)).toBeGreaterThan(290);
-  expect(await preStartEdge(page)).toBeLessThan(310);
-  await expect(firstBeat).toHaveAttribute("aria-checked", "false");
-  await expect(page.locator("#trackDetailCueList .cue-row")).toHaveCount(1);
-  await expect(page.locator("#trackDetailStartCue .cue-row.is-playback-start")).toHaveCount(0);
-
-  // Choosing First beat adds the memory-only start cue there (120 ms), shown
-  // in the "Playback starts at" row rather than among the A–H slots.
-  await firstBeat.click();
-  await expect(firstBeat).toHaveAttribute("aria-checked", "true");
-  await expect(firstCue).toHaveAttribute("aria-checked", "false");
-  await expect(firstBeat).toHaveText("First beat");
-  const rows = page.locator("#trackDetailCueList .cue-row");
-  await expect(rows).toHaveCount(1);
-  const start = page.locator("#trackDetailStartCue .cue-row.is-playback-start");
-  await expect(start).toHaveCount(1);
-  await expect(start.locator(".cue-row-pos")).toHaveText("0:00.12");
-  await expect(start.locator(".cue-row-delete")).toHaveCount(0);
-  await expect(start.locator(".cue-row-color")).toHaveCount(0);
-  await expect(start.locator(".cue-row-name")).toHaveCount(0);
-  await expect(start.locator(".cue-row-label")).toHaveText("Playback start");
-  await expect(page.locator("#trackDetailCueMarkers .cue-marker.is-playback-start")).toHaveCount(1);
-  // …and the greyed-out part shrinks to the first beat.
-  await expect.poll(() => preStartEdge(page)).toBeLessThan(10);
-  // Hot cues keep their A.. lettering, the same in the list as on the waveform.
-  await expect(page.locator("#trackDetailCueMarkers .cue-marker:not(.is-playback-start)")).toHaveText("A");
-  await expect(rows.first().locator(".cue-row-color")).toHaveText("A");
-  await expect(start.locator(".cue-row-memory")).toHaveText("▶");
-
-  // …and remembers the choice.
-  expect(await page.evaluate(() => localStorage.getItem("djusbtkit.cueStartOnFirstBeat"))).toBe("1");
-  await expect.poll(async () => (await startPersistCalls(page)).length).toBe(1);
-
-  await page.locator("#trackDetailSaveBtn").click();
-  const saveCall = await page.evaluate(() =>
-    window.__calls.find((c) => c.command === "save_track_analysis_edits")
-  );
-  expect(saveCall.request.cues).toHaveLength(2);
-  expect(saveCall.request.cues[0]).toEqual({
-    positionMs: 120,
-    colorId: null,
-    name: null,
-    playbackStart: true,
-    memory: false,
-  });
-  expect(saveCall.request.cues[1].playbackStart).toBe(false);
-});
-
-test("Escape closes the cue editor only when nothing is unsaved", async ({ page }) => {
-  await openCueEditor(page, { seedCues: [30000] });
-  const view = page.locator("#trackDetailView");
-
-  // View-only changes (zoom, beat-grid slider) aren't edits.
-  await page.locator("#trackDetailZoomFit").click();
-  await page.locator("#trackDetailGridLevel").fill("80");
-  await page.keyboard.press("Escape");
-  await expect(view).toBeHidden();
-
-  await page.locator('#libraryTableBody .waveform-cell [data-action="edit-track-detail"]').click();
-  await expect(view).toBeVisible();
-  await page.locator("#trackDetailAddCue").click();
-  // The highlight removes itself when its animation ends, so record it appearing.
-  await page.evaluate(() => {
-    const save = document.querySelector("#trackDetailSaveBtn");
-    new MutationObserver(() => {
-      if (save.classList.contains("is-attention")) window.__saveHighlighted = true;
-    }).observe(save, { attributes: true, attributeFilter: ["class"] });
-  });
-  await page.keyboard.press("Escape");
-  await expect(view).toBeVisible();
-  await expect.poll(() => page.evaluate(() => window.__saveHighlighted)).toBe(true);
-
-  // Undoing the edit makes it clean again: Escape closes.
-  await page
-    .locator("#trackDetailCueList .cue-row")
-    .filter({ hasNot: page.locator(".cue-row-pos", { hasText: "0:30.00" }) })
-    .locator(".cue-row-delete")
-    .click();
-  await page.keyboard.press("Escape");
-  await expect(view).toBeHidden();
-  const saves = await page.evaluate(() =>
-    window.__calls.filter((c) => c.command === "save_track_analysis_edits")
-  );
-  expect(saves).toHaveLength(0);
-});
-
-test("cue list rows carry the same letter as their waveform marker, in position order", async ({ page }) => {
-  await openCueEditor(page, { seedCues: [60000, 30000] });
-  const rows = page.locator("#trackDetailCueList .cue-row");
-  await expect(rows.locator(".cue-row-pos")).toHaveText(["0:30.00", "1:00.00"]);
-  await expect(rows.locator(".cue-row-color")).toHaveText(["A", "B"]);
-  await expect(page.locator("#trackDetailCueMarkers .cue-marker")).toHaveText(["A", "B"]);
-});
-
-test("the Beat grid slider sets how strongly the grid shows, and is remembered", async ({ page }) => {
-  await openCueEditor(page);
-  const slider = page.locator("#trackDetailGridLevel");
-  // The opening 60-bar view only draws bar lines; zooming in spreads the
-  // beats far enough apart to draw them too, and the bars far enough apart
-  // for full-width bar lines even at the thickest setting.
-  await page.locator("#trackDetailZoomIn").click();
-  await page.locator("#trackDetailZoomIn").click();
-  const lineWidth = (selector) =>
-    page
-      .locator(`#trackDetailBeatgrid .beatgrid-line${selector}`)
-      .first()
-      .evaluate((n) => n.getBoundingClientRect().width);
-  const gridOpacity = () =>
-    page
-      .locator("#trackDetailBeatgrid .beatgrid-line:not(.is-downbeat)")
-      .first()
-      .evaluate((n) => Number(getComputedStyle(n).opacity));
-  const downbeatOpacity = () =>
-    page
-      .locator("#trackDetailBeatgrid .beatgrid-line.is-downbeat")
-      .first()
-      .evaluate((n) => Number(getComputedStyle(n).opacity));
-  await expect(slider).toHaveValue("35");
-  const defaultOpacity = await gridOpacity();
-  const defaultBeatWidth = await lineWidth(":not(.is-downbeat)");
-  const defaultBarWidth = await lineWidth(".is-downbeat");
-
-  // The thumb follows the pointer: a click lands on the matching value
-  // (no inherited text-input padding skewing the track).
-  const box = await slider.boundingBox();
-  await slider.click({ position: { x: box.width * 0.75, y: box.height / 2 } });
-  expect(Math.abs(Number(await slider.inputValue()) - 75)).toBeLessThanOrEqual(6);
-  await slider.click({ position: { x: box.width * 0.25, y: box.height / 2 } });
-  expect(Math.abs(Number(await slider.inputValue()) - 25)).toBeLessThanOrEqual(6);
-
-  await slider.fill("100");
-  await expect.poll(gridOpacity).toBe(1);
-  // The slider drives thickness too.
-  expect(await lineWidth(":not(.is-downbeat)")).toBeGreaterThan(defaultBeatWidth);
-  expect(await lineWidth(".is-downbeat")).toBeGreaterThan(defaultBarWidth);
-  expect(await page.evaluate(() => localStorage.getItem("djusbtkit.cueBeatgridLevel"))).toBe("100");
-
-  await slider.fill("0");
-  const faint = await gridOpacity();
-  expect(faint).toBeGreaterThan(0);
-  expect(faint).toBeLessThan(defaultOpacity);
-  expect(await lineWidth(":not(.is-downbeat)")).toBeLessThan(defaultBeatWidth);
-  // Bar starts stay visible even with the slider at 0.
-  expect(await downbeatOpacity()).toBeGreaterThanOrEqual(0.6);
-  expect(await page.evaluate(() => localStorage.getItem("djusbtkit.cueBeatgridLevel"))).toBe("0");
-
-  // The grid overflows the waveform into a strip above and below it.
-  const canvasBox = await page.locator("#trackDetailWaveform .waveform-canvas-el").boundingBox();
-  const lineBox = await page.locator("#trackDetailBeatgrid .beatgrid-line").first().boundingBox();
-  expect(lineBox.y).toBeLessThan(canvasBox.y);
-  expect(lineBox.y + lineBox.height).toBeGreaterThan(canvasBox.y + canvasBox.height);
-});
-
-test("remembered start-on-first-beat: the first cue adds the start cue; deleting the last cue removes it", async ({ page }) => {
-  await openCueEditor(page, { startOnFirstBeat: true });
-  const firstBeat = page.locator("#trackDetailStartFirstBeat");
-
-  await page.locator("#trackDetailWaveform").dblclick({ position: { x: 300, y: 100 } });
-  const rows = page.locator("#trackDetailCueList .cue-row");
-  await expect(rows).toHaveCount(1);
-  await expect(page.locator("#trackDetailStartCue .cue-row.is-playback-start")).toHaveCount(1);
-  await expect(firstBeat).toHaveAttribute("aria-checked", "true");
-  await expect(firstBeat).toBeEnabled();
-
-  // A second cue doesn't add another start cue, nor count it toward the 8.
-  await page.locator("#trackDetailAddCue").click();
-  await expect(rows).toHaveCount(2);
-  await expect(page.locator("#trackDetailStartCue .cue-row.is-playback-start")).toHaveCount(1);
-
-  for (let i = 0; i < 2; i += 1) {
-    await page.locator("#trackDetailCueList .cue-row:not(.is-playback-start) .cue-row-delete").first().click();
-  }
-  await expect(page.locator("#trackDetailCueList .cue-row")).toHaveCount(0);
-  await expect(page.locator("#trackDetailStartCue .cue-row")).toHaveCount(0);
-  await expect(page.locator("#trackDetailCueMarkers .cue-marker")).toHaveCount(0);
-  await expect(firstBeat).toBeDisabled();
-  await expect(page.locator("#trackDetailStartNote")).toBeVisible();
-  // Losing the cues is not a user choice: the remembered setting stays on.
-  expect(await page.evaluate(() => localStorage.getItem("djusbtkit.cueStartOnFirstBeat"))).toBe("1");
-});
-
-test("an existing track's start cue drives the choice, not the remembered setting; choosing First cue remembers it", async ({ page }) => {
-  await openCueEditor(page, { startOnFirstBeat: true, seedCues: [30000] });
-  const firstCue = page.locator("#trackDetailStartFirstCue");
-  const firstBeat = page.locator("#trackDetailStartFirstBeat");
-  await expect(firstCue).toHaveAttribute("aria-checked", "true");
-  await expect(page.locator("#trackDetailStartCue .cue-row.is-playback-start")).toHaveCount(0);
-
-  await firstBeat.click();
-  await expect(page.locator("#trackDetailStartCue .cue-row.is-playback-start")).toHaveCount(1);
-  await firstCue.click();
-  await expect(page.locator("#trackDetailStartCue .cue-row.is-playback-start")).toHaveCount(0);
-  expect(await page.evaluate(() => localStorage.getItem("djusbtkit.cueStartOnFirstBeat"))).toBe("0");
-});
-
-test("the playback-start cue follows an untouched first beat and is never after a hot cue", async ({ page }) => {
-  await openCueEditor(page, { seedCues: [30000], seedStart: 120, quantize: false });
-  const firstBeat = page.locator("#trackDetailStartFirstBeat");
-  await expect(firstBeat).toHaveAttribute("aria-checked", "true");
-
-  await expect(firstBeat).toHaveText("First beat");
-  const startPos = page.locator("#trackDetailStartCue .cue-row.is-playback-start .cue-row-pos");
-  const hotPos = page.locator("#trackDetailCueList .cue-row:not(.is-playback-start) .cue-row-pos");
-  await expect(startPos).toHaveText("0:00.12");
-
-  // Untouched: follows the first beat (+1 beat at 128 BPM = 468.75 ms).
-  await page.locator("#trackDetailFirstBeatPlus").click();
-  await expect(page.locator("#trackDetailFirstBeatMs")).toHaveValue("589");
-  await expect(startPos).toHaveText("0:00.58");
-  await expect(firstBeat).toHaveText("First beat");
-
-  const wfBox = await page.locator("#trackDetailWaveform").boundingBox();
-  const drag = async (marker, ratio) => {
-    const box = await marker.boundingBox();
-    const y = box.y + box.height / 2;
-    await page.mouse.move(box.x + 2, y);
-    const targetX = wfBox.x + wfBox.width * ratio;
-    await page.mouse.down();
-    // Monotonic toward the target: an overshoot would legitimately push the start cue.
-    await page.mouse.move((box.x + 2 + targetX) / 2, y, { steps: 5 });
-    await page.mouse.move(targetX, y, { steps: 5 });
-    await page.mouse.up();
-  };
-
-  // Dragging it past the 30 s hot cue stops it on the hot cue.
-  await drag(page.locator("#trackDetailCueMarkers .cue-marker.is-playback-start"), 0.5);
-  await expect(startPos).toHaveText("0:30.00");
-  // Off the first beat, the choice names the placed marker instead.
-  await expect(firstBeat).toHaveText("Start marker");
-  await expect(firstBeat).toHaveAttribute("aria-checked", "true");
-  // The grey-out follows the dragged start cue.
-  const startBox = await page.locator("#trackDetailCueMarkers .cue-marker.is-playback-start").boundingBox();
-  expect(Math.abs((await preStartEdge(page)) - (startBox.x + 1 - wfBox.x))).toBeLessThan(3);
-
-  // Dragging the hot cue before it pushes it back too.
-  await drag(page.locator("#trackDetailCueMarkers .cue-marker:not(.is-playback-start)"), 0.1);
-  const hotText = await hotPos.textContent();
-  expect(hotText).toMatch(/^0:1[12]\./);
-  await expect(startPos).toHaveText(hotText);
-
-  // Once dragged it no longer follows the first beat.
-  await page.locator("#trackDetailFirstBeatMinus").click();
-  await expect(startPos).toHaveText(hotText);
-
-  await page.locator("#trackDetailSaveBtn").click();
-  const saveCall = await page.evaluate(() =>
-    window.__calls.find((c) => c.command === "save_track_analysis_edits")
-  );
-  const [start, hot] = saveCall.request.cues;
-  expect(start.playbackStart).toBe(true);
-  expect(hot.playbackStart).toBe(false);
-  expect(start.positionMs).toBe(hot.positionMs);
-});
-
-test("bar numbers label the grid without crowding, down to every bar when zoomed in", async ({ page }) => {
-  await openCueEditor(page);
-  const labels = page.locator("#trackDetailBeatgrid .beatgrid-bar");
-  const barState = () =>
-    labels.evaluateAll((nodes) => ({
-      numbers: nodes.map((n) => Number(n.textContent)),
-      xs: nodes.map((n) => n.getBoundingClientRect().left),
-    }));
-
-  // The opening view is 60 bars: ~5 px a beat is too dense for beat lines,
-  // so only bar lines are drawn -- every 2nd bar, at beat-line width, since
-  // ~20 px a bar is too tight for a full-width line on every bar.
-  const beatLines = page.locator("#trackDetailBeatgrid .beatgrid-line:not(.is-downbeat)");
-  const barLines = page.locator("#trackDetailBeatgrid .beatgrid-line.is-downbeat");
-  await expect(beatLines).toHaveCount(0);
-  const openingXs = await barLines.evaluateAll((nodes) =>
-    nodes.map((n) => n.getBoundingClientRect().left)
-  );
-  expect(openingXs.length).toBeGreaterThanOrEqual(30);
-  expect(openingXs.length).toBeLessThan(60);
-  const barLineWidth = () =>
-    barLines.first().evaluate((n) => n.getBoundingClientRect().width);
-  const thinBarWidth = await barLineWidth();
-
-  // Labelled every Nth bar, never closer than 36 px.
-  let { numbers, xs } = await barState();
-  expect(numbers[0]).toBe(1);
-  const step = numbers[1] - numbers[0];
-  expect(step).toBeGreaterThan(1);
-  for (let i = 1; i < numbers.length; i += 1) {
-    expect(numbers[i] - numbers[i - 1]).toBe(step);
-    expect(xs[i] - xs[i - 1]).toBeGreaterThanOrEqual(35);
-  }
-
-  for (let i = 0; i < 4; i += 1) await page.locator("#trackDetailZoomIn").click();
-  await expect.poll(async () => {
-    ({ numbers } = await barState());
-    return numbers.length > 1 ? numbers[1] - numbers[0] : 0;
-  }).toBe(1);
-  // Zoomed in, every beat has its line again, and bar lines are full width.
-  expect(await beatLines.count()).toBeGreaterThan(0);
-  expect(await barLineWidth()).toBeGreaterThan(thinBarWidth);
-
-  // Packed tighter than 8 px a bar (whole 3:00 track at 512 BPM = 384 bars,
-  // ~3 px each), bar lines thin to every Nth bar too.
-  await page.locator("#trackDetailZoomFit").click();
-  await page.locator("#trackDetailBpmDouble").click();
-  await page.locator("#trackDetailBpmDouble").click();
-  await expect(page.locator("#trackDetailBpm")).toHaveValue("512.00");
-  const barXs = await barLines.evaluateAll((nodes) =>
-    nodes.map((n) => n.getBoundingClientRect().left)
-  );
-  expect(barXs.length).toBeGreaterThan(20);
-  expect(barXs.length).toBeLessThan(384 / 2);
-  for (let i = 1; i < barXs.length; i += 1) {
-    expect(barXs[i] - barXs[i - 1]).toBeGreaterThanOrEqual(7.5);
-  }
-});
-
-test("the overview strip shows the visible window and moves the view", async ({ page }) => {
-  await openCueEditor(page, { seedCues: [30000, 170000] });
-  const overview = page.locator("#trackDetailOverview");
-  const windowBox = page.locator("#trackDetailOverviewWindow");
-  await expect(page.locator("#trackDetailOverviewCues .overview-cue")).toHaveCount(2);
-
-  // The modal opens on 60 bars at 128 BPM (112.5 s) of a 3:00 track: the box covers 5/8.
-  const ov = await overview.boundingBox();
-  let box = await windowBox.boundingBox();
-  expect(Math.abs(box.x - ov.x)).toBeLessThan(2);
-  expect(Math.abs(box.width - (ov.width * 5) / 8)).toBeLessThan(3);
-
-  // Zoom in, then click near the end: the view (same zoom) centres there.
-  for (let i = 0; i < 3; i += 1) await page.locator("#trackDetailZoomIn").click();
-  const zoomedWidth = (ov.width * 112.5) / 8 / 180; // 112.5 s / 2^3 of 180 s
-  await expect.poll(async () => (await windowBox.boundingBox()).width).toBeCloseTo(zoomedWidth, 0);
-  // 94% of 3:00 is 2:49, so the 14 s view (2:42–2:56) takes in the 2:50 cue.
-  await overview.click({ position: { x: ov.width * 0.94, y: ov.height / 2 } });
-  await expect.poll(async () => {
-    const b = await windowBox.boundingBox();
-    return b.x + b.width / 2 - ov.x;
-  }).toBeGreaterThan(ov.width * 0.92);
-  box = await windowBox.boundingBox();
-  expect(Math.abs(box.width - zoomedWidth)).toBeLessThan(2);
-  await expect(page.locator("#trackDetailZoomRange")).toHaveText(/^2:\d\d–2:\d\d$/);
-  // The view followed: the 170 s cue is now on the main waveform.
-  await expect(page.locator("#trackDetailCueMarkers .cue-marker:not(.off-view)")).toHaveText("B");
-
-  // Dragging moves it back.
-  await page.mouse.move(ov.x + ov.width * 0.94, ov.y + ov.height / 2);
-  await page.mouse.down();
-  await page.mouse.move(ov.x + ov.width * 0.2, ov.y + ov.height / 2, { steps: 6 });
-  await page.mouse.up();
-  await expect.poll(async () => {
-    const b = await windowBox.boundingBox();
-    return b.x + b.width / 2 - ov.x;
-  }).toBeLessThan(ov.width * 0.22);
-
-  await page.locator("#trackDetailZoomFit").click();
-  await expect.poll(async () => (await windowBox.boundingBox()).width).toBeGreaterThan(ov.width - 2);
-});
-
-test("dragging on the waveform, a cue marker or the overview never selects text", async ({ page }) => {
-  await openCueEditor(page, { seedCues: [30000] });
-  const selected = () => page.evaluate(() => String(window.getSelection()));
-  // Drag from inside `from` across the title, the time footer and the cue list.
-  const dragAcrossText = async (x, y) => {
-    const title = await page.locator("#trackDetailTitle").boundingBox();
-    const list = await page.locator("#trackDetailCueList").boundingBox();
-    await page.mouse.move(x, y);
-    await page.mouse.down();
-    await page.mouse.move(list.x + 40, list.y + list.height / 2, { steps: 8 });
-    await page.mouse.move(title.x + 10, title.y + title.height / 2, { steps: 8 });
-    await page.mouse.move(list.x + list.width - 40, list.y + list.height - 4, { steps: 8 });
-    await page.mouse.up();
-  };
-
-  const wf = await page.locator("#trackDetailWaveform").boundingBox();
-  await dragAcrossText(wf.x + wf.width * 0.6, wf.y + wf.height / 2);
-  expect(await selected()).toBe("");
-
-  const marker = await page.locator("#trackDetailCueMarkers .cue-marker").first().boundingBox();
-  await dragAcrossText(marker.x + 2, marker.y + marker.height / 2);
-  expect(await selected()).toBe("");
-
-  const ov = await page.locator("#trackDetailOverview").boundingBox();
-  await dragAcrossText(ov.x + ov.width * 0.3, ov.y + ov.height / 2);
-  expect(await selected()).toBe("");
-
-  // Engine-independent guard (the Tauri build renders with WebKitGTK): while
-  // held, the page is marked unselectable and `selectstart` is cancelled; a
-  // release anywhere, even outside the dialog, lifts it.
-  const guard = () =>
-    page.evaluate(() => {
-      const ev = new Event("selectstart", { bubbles: true, cancelable: true });
-      document.getElementById("trackDetailTitle").dispatchEvent(ev);
-      return {
-        marked: document.documentElement.classList.contains("is-ui-dragging"),
-        blocked: ev.defaultPrevented,
-      };
-    });
-  await page.mouse.move(wf.x + wf.width * 0.5, wf.y + wf.height / 2);
-  await page.mouse.down();
-  await page.mouse.move(wf.x + wf.width * 0.5, 2, { steps: 4 });
-  expect(await guard()).toEqual({ marked: true, blocked: true });
-  await page.mouse.up();
-  expect(await guard()).toEqual({ marked: false, blocked: false });
-});
-
-test("usage hints show until the track has a cue, then fold into a ? tooltip", async ({ page }) => {
-  await openCueEditor(page);
-  const hint = page.locator("#trackDetailHint");
-  const hintBtn = page.locator("#trackDetailHintBtn");
-  await expect(hint).toBeVisible();
-  await expect(hintBtn).toBeHidden();
-
-  await page.locator("#trackDetailWaveform").dblclick({ position: { x: 300, y: 100 } });
-  await expect(hint).toBeHidden();
-  await expect(hintBtn).toBeVisible();
-  await expect(hintBtn).toHaveAttribute("data-tooltip", /double-click to add a cue/);
-
-  await page.locator("#trackDetailCueList .cue-row-delete").click();
-  await expect(hint).toBeVisible();
-});
-
 const BEAT_MS = 60000 / 128; // mock track: firstBeatMs 120, 128 BPM
 const offBeat = (ms) => {
   const beats = (ms - 120) / BEAT_MS;
@@ -692,426 +197,10 @@ const savedCues = async (page) => {
   return call.request;
 };
 
-test("with Q on, a double-clicked cue lands on the nearest beat; Shift+double-click places it freely", async ({ page }) => {
-  await openCueEditor(page);
-  const wf = page.locator("#trackDetailWaveform");
-  const wfBox = await wf.boundingBox();
-  // The opening view is 60 bars at 128 BPM = 112.5 s.
-  await wf.dblclick({ position: { x: wfBox.width * (30 / 112.5), y: 100 } });
-  await wf.dblclick({ position: { x: wfBox.width * 0.62, y: 100 }, modifiers: ["Shift"] });
-  const { cues } = await savedCues(page);
-  expect(cues).toHaveLength(2);
-  expect(Math.abs(cues[0].positionMs - 30000)).toBeLessThan(BEAT_MS);
-  expect(offBeat(cues[0].positionMs)).toBeLessThanOrEqual(1);
-  expect(Math.abs(cues[1].positionMs - 0.62 * 112500)).toBeLessThan(400);
-  expect(offBeat(cues[1].positionMs)).toBeGreaterThan(1);
-});
-
-test("beat grid lines sit on whole device pixels, evenly spaced, at a fractional-pixel tempo", async ({ page }) => {
-  await openCueEditor(page);
-  // 119 BPM at this zoom puts the beats a fractional number of pixels apart.
-  await page.locator("#trackDetailBpm").fill("119");
-  await page.locator("#trackDetailBpm").press("Enter");
-  await page.locator("#trackDetailZoomIn").click();
-  const { lefts, dpr } = await page.evaluate(() => ({
-    dpr: window.devicePixelRatio || 1,
-    lefts: [...document.querySelectorAll("#trackDetailBeatgrid .beatgrid-line")]
-      .map((n) => parseFloat(n.style.left))
-  }));
-  expect(lefts.length).toBeGreaterThan(20);
-  for (const left of lefts) {
-    expect(Math.abs(left * dpr - Math.round(left * dpr))).toBeLessThan(1e-6);
-  }
-  // Snapping moves a line at most half a device pixel, so neighbours stay
-  // within one device pixel of the true beat spacing.
-  const gaps = lefts.slice(1).map((l, i) => l - lefts[i]);
-  expect(Math.max(...gaps) - Math.min(...gaps)).toBeLessThanOrEqual(1 / dpr + 1e-6);
-});
-
-test("BPM and first-beat steppers: ÷2/×2 fix a half/double tempo; −/+ and the ▲/▼ arrows step by 0.01 BPM and 1 ms", async ({ page }) => {
-  await openCueEditor(page);
-  const bpm = page.locator("#trackDetailBpm");
-  const firstBeat = page.locator("#trackDetailFirstBeatMs");
-  const arrow = (input, dir) =>
-    input.locator(`xpath=..`).locator(`.number-stepper-btns button[data-step="${dir}"]`);
-  await expect(bpm).toHaveValue("128.00");
-  await expect(firstBeat).toHaveValue("120");
-
-  await page.locator("#trackDetailBpmHalf").click();
-  await expect(bpm).toHaveValue("64.00");
-  await page.locator("#trackDetailBpmDouble").click();
-  await page.locator("#trackDetailBpmDouble").click();
-  await expect(bpm).toHaveValue("256.00");
-
-  await page.locator("#trackDetailBpmPlus").click();
-  await expect(bpm).toHaveValue("256.01");
-  await page.locator("#trackDetailBpmMinus").click();
-  await page.locator("#trackDetailBpmMinus").click();
-  await expect(bpm).toHaveValue("255.99");
-
-  // The themed arrows step the input itself, not a whole beat.
-  await arrow(bpm, 1).click();
-  await expect(bpm).toHaveValue("256.00");
-  await arrow(bpm, -1).click();
-  await arrow(bpm, -1).click();
-  await expect(bpm).toHaveValue("255.98");
-  await arrow(firstBeat, 1).click();
-  await expect(firstBeat).toHaveValue("121");
-  await arrow(firstBeat, -1).click();
-  await arrow(firstBeat, -1).click();
-  await expect(firstBeat).toHaveValue("119");
-
-  // They all go through the same change handling as typing: they're saved.
-  const saved = await savedCues(page);
-  expect(saved.bpm).toBe(255.98);
-  expect(saved.firstBeatMs).toBe(119);
-});
-
-test("keyboard: Space plays/pauses (never presses the focused Save), C adds a cue, 1–8 jump, ←/→ move the selected cue", async ({ page }) => {
-  await openCueEditor(page, { seedCues: [30000, 90000] });
-  const calls = (command) =>
-    page.evaluate((command) => window.__calls.filter((c) => c.command === command), command);
-  await expect(page.locator("#trackDetailSaveBtn")).toBeFocused();
-
-  await page.keyboard.press("Space");
-  await expect.poll(async () => (await calls("play_resolved_track")).length).toBe(1);
-  await page.keyboard.press("Space");
-  await expect.poll(async () => (await calls("pause_playback_native")).length).toBe(1);
-  expect(await calls("save_track_analysis_edits")).toHaveLength(0);
-  await expect(page.locator("#trackDetailView")).toBeVisible();
-
-  // C: a cue at the paused spot (on the nearest beat, Q is on), selected.
-  await page.keyboard.press("c");
-  const rows = page.locator("#trackDetailCueList .cue-row");
-  await expect(rows).toHaveCount(3);
-  await expect(page.locator("#trackDetailCueList .cue-row.is-selected")).toHaveCount(1);
-  await expect(page.locator("#trackDetailCueMarkers .cue-marker.is-selected")).toHaveCount(1);
-
-  // The new cue sits near the start, so it is A; 3 jumps to the 90 s cue
-  // (now C, at 90 s of 180 s) and selects it.
-  await page.keyboard.press("3");
-  await expect.poll(async () => (await calls("play_resolved_track")).length).toBe(2);
-  expect((await calls("play_resolved_track"))[1].request.startRatio).toBeCloseTo(0.5, 3);
-  const selectedPos = page.locator("#trackDetailCueList .cue-row.is-selected .cue-row-pos");
-  await expect(selectedPos).toHaveText("1:30.00");
-
-  // →: onto the next beat line; ← twice: two beats back; Shift+→: 10 ms.
-  const next = 120 + Math.ceil((90000 - 120) / BEAT_MS) * BEAT_MS; // 90120
-  await page.keyboard.press("ArrowRight");
-  await expect(selectedPos).toHaveText("1:30.12");
-  await page.keyboard.press("ArrowLeft");
-  await page.keyboard.press("ArrowLeft");
-  const twoBack = Math.round(next - 2 * BEAT_MS); // 89182.5 → 89183
-  await expect(selectedPos).toHaveText(`1:29.${String(Math.floor((twoBack % 1000) / 10)).padStart(2, "0")}`);
-  await page.keyboard.press("Shift+ArrowRight");
-  const { cues } = await savedCues(page);
-  const moved = cues.find((c) => c.positionMs > 80000);
-  expect(moved.positionMs).toBe(twoBack + 10);
-});
-
-test("shortcuts stay out of text fields: typing c/1/Space in a cue name only types", async ({ page }) => {
-  await openCueEditor(page, { seedCues: [30000] });
-  const name = page.locator("#trackDetailCueList .cue-row .cue-row-name").first();
-  await name.click();
-  await name.press("End");
-  await page.keyboard.type(" c1 ");
-  await expect(name).toHaveValue(/ c1 $/);
-  await expect(page.locator("#trackDetailCueList .cue-row")).toHaveCount(1);
-  expect(
-    await page.evaluate(() => window.__calls.some((c) => c.command === "play_resolved_track"))
-  ).toBe(false);
-});
-
-test("undo/redo: buttons and Ctrl+Z / Ctrl+Shift+Z step through edits; a name typed is one step", async ({ page }) => {
-  await openCueEditor(page, { seedCues: [30000] });
-  const undo = page.locator("#trackDetailUndo");
-  const redo = page.locator("#trackDetailRedo");
-  const rows = page.locator("#trackDetailCueList .cue-row");
-  const bpm = page.locator("#trackDetailBpm");
-  await expect(undo).toBeDisabled();
-  await expect(redo).toBeDisabled();
-
-  await page.locator("#trackDetailWaveform").dblclick({ position: { x: 700, y: 100 } });
-  await expect(rows).toHaveCount(2);
-  await page.locator("#trackDetailBpmDouble").click();
-  await expect(bpm).toHaveValue("256.00");
-  const name = page.locator("#trackDetailCueList .cue-row .cue-row-name").first();
-  const originalName = await name.inputValue();
-  await name.fill("");
-  await name.pressSequentially("Intro");
-  await page.locator("#trackDetailTitle").click();
-
-  await page.keyboard.press("Control+z"); // the whole name at once
-  await expect(page.locator("#trackDetailCueList .cue-row .cue-row-name").first()).toHaveValue(originalName);
-  await page.keyboard.press("Control+z");
-  await expect(bpm).toHaveValue("128.00");
-  await undo.click();
-  await expect(rows).toHaveCount(1);
-  await expect(undo).toBeDisabled();
-  await expect(redo).toBeEnabled();
-
-  await page.keyboard.press("Control+Shift+z");
-  await expect(rows).toHaveCount(2);
-  await redo.click();
-  await expect(bpm).toHaveValue("256.00");
-
-  // A new edit clears the redo steps.
-  await page.locator("#trackDetailBpmHalf").click();
-  await expect(redo).toBeDisabled();
-
-  // Undoing everything leaves nothing unsaved: Escape closes.
-  for (let i = 0; i < 3; i += 1) await page.keyboard.press("Control+z");
-  await expect(undo).toBeDisabled();
-  await page.keyboard.press("Escape");
-  await expect(page.locator("#trackDetailView")).toBeHidden();
-});
-
-test("the metronome has the native engine click on the grid, following grid edits and the mix, off on close", async ({ page }) => {
-  await openCueEditor(page);
-  const sent = () =>
-    page.evaluate(() =>
-      window.__calls
-        .filter((c) => c.command === "set_playback_metronome")
-        .map((c) => c.request)
-    );
-  const last = async () => (await sent()).at(-1);
-  const metronome = page.locator("#trackDetailMetronome");
-  await expect(metronome).toHaveAttribute("aria-pressed", "false");
-  // The Mix slider only shows while the metronome is on.
-  const mix = page.locator("#trackDetailMetronomeMix");
-  await expect(mix).toBeHidden();
-  // Never on by surprise: opening reports it off (or says nothing at all).
-  expect((await sent()).every((r) => r.enabled === false)).toBe(true);
-
-  await metronome.click();
-  await expect(metronome).toHaveAttribute("aria-pressed", "true");
-  await expect(mix).toBeVisible();
-  await expect.poll(last).toEqual({ enabled: true, firstBeatMs: 120, bpm: 128, mix: 0.5 });
-
-  // Grid edits (and their undo) reach the engine while it's on.
-  await page.locator("#trackDetailBpmDouble").click();
-  await expect.poll(last).toEqual({ enabled: true, firstBeatMs: 120, bpm: 256, mix: 0.5 });
-  await page.locator("#trackDetailFirstBeatPlus").click();
-  await expect.poll(async () => (await last()).firstBeatMs).toBeGreaterThan(120);
-  await page.keyboard.press("Control+z");
-  await expect.poll(last).toEqual({ enabled: true, firstBeatMs: 120, bpm: 256, mix: 0.5 });
-
-  // No repeat sends when nothing changed (e.g. zooming).
-  const count = (await sent()).length;
-  await page.locator("#trackDetailZoomIn").click();
-  expect((await sent()).length).toBe(count);
-
-  // The Mix slider (both at full level in the middle) reaches the engine live
-  // and is remembered.
-  await expect(mix).toHaveValue("50");
-  await mix.fill("80");
-  await expect.poll(async () => (await last()).mix).toBe(0.8);
-  expect((await last()).enabled).toBe(true);
-  expect(await page.evaluate(() => localStorage.getItem("djusbtkit.cueMetronomeMix"))).toBe("80");
-
-  await metronome.click();
-  await expect.poll(async () => (await last()).enabled).toBe(false);
-  await expect(mix).toBeHidden();
-
-  // Closing the editor turns it off in the engine.
-  await metronome.click();
-  await expect.poll(async () => (await last()).enabled).toBe(true);
-  await page.locator("#trackDetailCancelBtn").click();
-  await expect.poll(async () => (await last()).enabled).toBe(false);
-
-  // Reopened, the metronome is off (so Mix is hidden) and the mix is where it was left.
-  await page.locator('#libraryTableBody .waveform-cell [data-action="edit-track-detail"]').click();
-  await expect(mix).toBeHidden();
-  await metronome.click();
-  await expect(mix).toHaveValue("80");
-});
-
-test("track-detail modal edits BPM, saves it, and the library row/tooltip update", async ({ page }) => {
-  await installTrackDetailMock(page);
-  await page.goto("/");
-
-  await expect(page.locator("#libraryTableBody .track-grid-row")).toHaveCount(1);
-  await page.locator('#libraryTableBody .waveform-cell [data-action="edit-track-detail"]').click();
-
-  await expect(page.locator("#trackDetailView")).toBeVisible();
-  await expect(page.locator("#trackDetailBpm")).toHaveValue("128.00");
-
-  await page.locator("#trackDetailBpm").fill("140.25");
-  await page.locator("#trackDetailBpm").dispatchEvent("change");
-  await page.locator("#trackDetailSaveBtn").click();
-  await expect(page.locator("#trackDetailView")).toBeHidden();
-
-  const saveCall = await page.evaluate(() =>
-    window.__calls.find((c) => c.command === "save_track_analysis_edits")
-  );
-  expect(saveCall.request.bpm).toBe(140.25);
-
-  const bpmPill = page.locator('#libraryTableBody .track-grid-row .td-bpm .bpm-pill');
-  await expect(bpmPill).toHaveText("140.25");
-  await expect(bpmPill).toHaveAttribute("data-tooltip", "Manually set");
-});
-
-test("track-detail modal edits the musical key, saves it, and the library row updates", async ({ page }) => {
-  await installTrackDetailMock(page);
-  await page.goto("/");
-
-  await page.locator('#libraryTableBody .waveform-cell [data-action="edit-track-detail"]').click();
-  await expect(page.locator("#trackDetailView")).toBeVisible();
-  await expect(page.locator("#trackDetailKey")).toHaveValue("Am");
-
-  await page.locator("#trackDetailKey").selectOption("F#m");
-  await page.locator("#trackDetailSaveBtn").click();
-  await expect(page.locator("#trackDetailView")).toBeHidden();
-
-  const saveCall = await page.evaluate(() =>
-    window.__calls.find((c) => c.command === "save_track_analysis_edits")
-  );
-  expect(saveCall.request.key).toBe("F#m");
-
-  const keyPill = page.locator('#libraryTableBody .track-grid-row .td-key .key-pill');
-  await expect(keyPill).toHaveText("F#m");
-});
-
-test("Camelot notation shows the backend's labels but saves the classic key", async ({ page }) => {
-  await installTrackDetailMock(page, { camelot: true });
-  await page.goto("/");
-
-  const keyPill = page.locator('#libraryTableBody .track-grid-row .td-key .key-pill');
-  await expect(keyPill).toHaveText("8A");
-  await expect(keyPill).toHaveClass(/key-pill--h7/);
-
-  await page.locator('#libraryTableBody .waveform-cell [data-action="edit-track-detail"]').click();
-  await expect(page.locator("#trackDetailView")).toBeVisible();
-  await expect(page.locator("#trackDetailKey")).toHaveValue("Am");
-  await expect(page.locator("#trackDetailKey option:checked")).toHaveText("8A");
-
-  await page.locator("#trackDetailKey").selectOption({ label: "11A" });
-  await page.locator("#trackDetailSaveBtn").click();
-  await expect(page.locator("#trackDetailView")).toBeHidden();
-
-  const saveCall = await page.evaluate(() =>
-    window.__calls.find((c) => c.command === "save_track_analysis_edits")
-  );
-  expect(saveCall.request.key).toBe("F#m");
-  await expect(keyPill).toHaveText("11A");
-  await expect(keyPill).toHaveClass(/key-pill--h10/);
-});
-
-test("switching key notation in settings persists it and re-fetches the backend's labels", async ({ page }) => {
-  await installTrackDetailMock(page);
-  await page.goto("/");
-
-  const keyPill = page.locator('#libraryTableBody .track-grid-row .td-key .key-pill');
-  await expect(keyPill).toHaveText("Am");
-
-  await page.locator("#settingsBtn").click();
-  await expect(page.locator("#keyNotationSelect")).toHaveValue("classic");
-  await page.locator("#keyNotationSelect").selectOption("camelot");
-  await page.locator("#settingsCloseBtn").click();
-
-  await expect(keyPill).toHaveText("8A");
-  const saved = await page.evaluate(() =>
-    window.__calls.filter((c) => c.command === "set_frontend_setting" && c.request?.key === "ui_key_notation_v1")
-  );
-  expect(saved.map((c) => c.request.value)).toEqual(["camelot"]);
-  expect(await page.evaluate(() => localStorage.getItem("djusbtkit.keyNotation"))).toBe("camelot");
-
-  await page.locator("#settingsBtn").click();
-  await page.locator("#keyNotationSelect").selectOption("classic");
-  await page.locator("#settingsCloseBtn").click();
-  await expect(keyPill).toHaveText("Am");
-});
-
-test("key stepper steps through the backend's key options and wraps at the ends", async ({ page }) => {
-  await installTrackDetailMock(page);
-  await page.goto("/");
-  await page.locator('#libraryTableBody .waveform-cell [data-action="edit-track-detail"]').click();
-  await expect(page.locator("#trackDetailView")).toBeVisible();
-
-  // Fixture key is "Am" (index 21 of 24: majors C..B, then minors Cm..Bm).
-  await expect(page.locator("#trackDetailKey")).toHaveValue("Am");
-  await page.locator("#trackDetailKeyPlus").click();
-  await expect(page.locator("#trackDetailKey")).toHaveValue("A#m");
-  await page.locator("#trackDetailKeyMinus").click();
-  await page.locator("#trackDetailKeyMinus").click();
-  await expect(page.locator("#trackDetailKey")).toHaveValue("G#m");
-
-  // Wrap: stepping past the last minor (Bm) lands back on the first major (C).
-  await page.locator("#trackDetailKey").selectOption("Bm");
-  await page.locator("#trackDetailKeyPlus").click();
-  await expect(page.locator("#trackDetailKey")).toHaveValue("C");
-  // Wrap the other way: stepping back from the first major (C) lands on Bm.
-  await page.locator("#trackDetailKeyMinus").click();
-  await expect(page.locator("#trackDetailKey")).toHaveValue("Bm");
-});
-
 // Grid as opened: first beat 120 ms at 128 BPM (468.75 ms a beat). One cue on
 // beat 64 (30120 ms), one off the grid (60000 ms = beat 127.744), and the
 // start cue on the first beat.
 const FOLLOW_GRID_SEED = { seedCues: [30120, 60000], seedStart: 120, quantize: false };
-
-test("genre, star rating and release date: a change to only them saves only them, leaving the beat grid, key and cues alone", async ({ page }) => {
-  await openCueEditor(page);
-  await expect(page.locator("#trackDetailGenre")).toHaveValue("Techno");
-  await expect(page.locator("#trackDetailGenreOptions option")).toHaveCount(2);
-  const stars = page.locator("#trackDetailRating [data-rating]");
-  await expect(page.locator("#trackDetailRating .is-on")).toHaveCount(3);
-
-  await page.locator("#trackDetailGenre").fill("  Breakbeat ");
-  await page.locator("#trackDetailGenre").dispatchEvent("change");
-  await stars.nth(4).click();
-  await expect(page.locator("#trackDetailRating .is-on")).toHaveCount(5);
-  await expect(stars.nth(4)).toHaveAttribute("aria-checked", "true");
-  // Clicking the current rating's star clears it; undo brings it back.
-  await stars.nth(4).click();
-  await expect(page.locator("#trackDetailRating .is-on")).toHaveCount(0);
-  await page.keyboard.press("Control+z");
-  await expect(page.locator("#trackDetailRating .is-on")).toHaveCount(5);
-
-  // The release date takes YYYY, YYYY-MM or YYYY-MM-DD; anything else puts
-  // the field back.
-  const date = page.locator("#trackDetailReleaseDate");
-  await expect(date).toHaveValue("2009-10-09");
-  await date.fill("19x");
-  await date.dispatchEvent("change");
-  await expect(date).toHaveValue("2009-10-09");
-  await date.fill("1994-3-7");
-  await date.dispatchEvent("change");
-  await expect(date).toHaveValue("1994-3-7");
-
-  await page.locator("#trackDetailSaveBtn").click();
-  await expect(page.locator("#trackDetailView")).toBeHidden();
-  const calls = await page.evaluate(() => window.__calls);
-  expect(calls.some((c) => c.command === "save_track_analysis_edits")).toBe(false);
-  const save = calls.find((c) => c.command === "save_track_metadata_edits");
-  expect(save.request).toEqual({ trackIds: ["t1"], genre: "Breakbeat", rating: 5, releaseDate: "1994-3-7" });
-  await expect(page.locator("#statusText")).toContainText("Saved track details");
-  // The library row shows the year the save returned.
-  await expect(page.locator("#libraryTableBody .track-grid-row .td-year")).toHaveText("1994");
-});
-
-test("the folder button shows the track's file in its folder", async ({ page }) => {
-  await openCueEditor(page);
-  await expect(page.locator("#trackDetailRevealBtn")).toHaveAttribute("data-tooltip", "Show in folder: /music/one.mp3");
-  await page.locator("#trackDetailRevealBtn").click();
-  await expect.poll(() => page.evaluate(() => window.__revealed)).toBe("/music/one.mp3");
-  // Not an edit: Escape still closes the dialog without pointing at Save.
-  await page.keyboard.press("Escape");
-  await expect(page.locator("#trackDetailView")).toBeHidden();
-});
-
-test("a rating edit alongside a BPM edit saves both, each with only its own fields", async ({ page }) => {
-  await openCueEditor(page);
-  await setBpmInput(page, "130");
-  await page.locator("#trackDetailRating [data-rating='1']").click();
-  await page.locator("#trackDetailSaveBtn").click();
-  await expect(page.locator("#trackDetailView")).toBeHidden();
-
-  const calls = await page.evaluate(() => window.__calls);
-  expect(calls.find((c) => c.command === "save_track_analysis_edits").request.bpm).toBe(130);
-  // Genre wasn't touched: only the rating is sent.
-  expect(calls.find((c) => c.command === "save_track_metadata_edits").request).toEqual({ trackIds: ["t1"], rating: 1 });
-});
 
 async function setBpmInput(page, value) {
   await page.locator("#trackDetailBpm").fill(value);
@@ -1131,443 +220,11 @@ async function savedCuePositions(page) {
   };
 }
 
-test("cues follow grid is off by default: BPM and first-beat edits leave cues where they are", async ({ page }) => {
-  await openCueEditor(page, FOLLOW_GRID_SEED);
-  await expect(page.locator("#trackDetailFollowGrid")).toHaveAttribute("aria-pressed", "false");
-
-  await setBpmInput(page, "120");
-  await page.locator("#trackDetailFirstBeatPlus").click();
-
-  // The untouched start cue still follows the first beat, as before.
-  expect(await savedCuePositions(page)).toEqual({ bpm: 120, firstBeatMs: 620, positions: [620, 30120, 60000] });
-});
-
-test("cues follow grid: BPM and first-beat edits keep every cue on its beat, undoably, without drift", async ({ page }) => {
-  await openCueEditor(page, FOLLOW_GRID_SEED);
-  const toggle = page.locator("#trackDetailFollowGrid");
-  await toggle.click();
-  await expect(toggle).toHaveAttribute("aria-pressed", "true");
-  const persisted = await page.evaluate(() => ({
-    local: window.localStorage.getItem("djusbtkit.cueFollowGrid"),
-    db: window.__calls
-      .filter((c) => c.command === "set_frontend_setting")
-      .map((c) => c.request)
-      .filter((r) => r?.key === "ui_cue_follow_grid_v1")
-      .map((r) => r.value),
-  }));
-  expect(persisted).toEqual({ local: "1", db: ["1"] });
-
-  const startPos = page.locator("#trackDetailStartCue .cue-row.is-playback-start .cue-row-pos");
-  const hotPos = page.locator("#trackDetailCueList .cue-row:not(.is-playback-start) .cue-row-pos");
-
-  // 128 -> 120 BPM (500 ms a beat): beat 64 is now 32120 ms, beat 127.744 63992 ms.
-  await setBpmInput(page, "120");
-  await expect(hotPos).toHaveText(["0:32.12", "1:03.99"]);
-  await expect(startPos).toHaveText("0:00.12");
-
-  // One undo puts the grid and the cues back; redo moves them again.
-  await page.locator("#trackDetailUndo").click();
-  await expect(page.locator("#trackDetailBpm")).toHaveValue("128.00");
-  await expect(hotPos).toHaveText(["0:30.12", "1:00.00"]);
-  await page.locator("#trackDetailRedo").click();
-  await expect(hotPos).toHaveText(["0:32.12", "1:03.99"]);
-
-  // A first-beat nudge moves every cue by one beat (500 ms), the start cue once.
-  await page.locator("#trackDetailFirstBeatPlus").click();
-  await expect(page.locator("#trackDetailFirstBeatMs")).toHaveValue("620");
-  await expect(hotPos).toHaveText(["0:32.62", "1:04.49"]);
-  await expect(startPos).toHaveText("0:00.62");
-
-  // Many 0.01 BPM steps up and back down land on the exact same ms.
-  for (let i = 0; i < 40; i += 1) await page.locator("#trackDetailBpmPlus").click();
-  await expect(page.locator("#trackDetailBpm")).toHaveValue("120.40");
-  for (let i = 0; i < 40; i += 1) await page.locator("#trackDetailBpmMinus").click();
-  await expect(page.locator("#trackDetailBpm")).toHaveValue("120.00");
-
-  expect(await savedCuePositions(page)).toEqual({ bpm: 120, firstBeatMs: 620, positions: [620, 32620, 64492] });
-});
-
-test("cues follow grid is remembered and leaves a hand-moved cue's new spot alone", async ({ page }) => {
-  await openCueEditor(page, { ...FOLLOW_GRID_SEED, followGrid: true });
-  await expect(page.locator("#trackDetailFollowGrid")).toHaveAttribute("aria-pressed", "true");
-
-  await setBpmInput(page, "120");
-  // Move the first hot cue by hand: 1 selects it, Shift+→ moves it 10 ms.
-  // (Shortcuts stay out of the BPM field, so leave it first.)
-  await page.locator("#trackDetailBpm").blur();
-  await page.keyboard.press("1");
-  await page.keyboard.press("Shift+ArrowRight");
-  const hotPos = page.locator("#trackDetailCueList .cue-row:not(.is-playback-start) .cue-row-pos");
-  await expect(hotPos).toHaveText(["0:32.13", "1:03.99"]);
-
-  // Back to 128 BPM: the moved cue keeps its new beat (64.02), the other its old one.
-  await setBpmInput(page, "128");
-  expect(await savedCuePositions(page)).toEqual({ bpm: 128, firstBeatMs: 120, positions: [120, 30129, 60000] });
-});
-
 const MEMORY_SEED = [
   { positionMs: 2000, colorId: 3, name: "Intro" },
   { positionMs: 40000 },
   { positionMs: 90000, name: "Outro" },
 ];
-
-test("memory cues show as ▼ flags without a letter, outside the 8 pads, and are saved as they are", async ({ page }) => {
-  await openCueEditor(page, { seedCues: [30000], seedMemory: MEMORY_SEED });
-
-  const memoryMarkers = page.locator("#trackDetailCueMarkers .cue-marker.is-memory");
-  await expect(memoryMarkers).toHaveCount(3);
-  await expect(memoryMarkers.first()).toHaveText("");
-  await expect(memoryMarkers.first()).toHaveAttribute("data-tooltip", "Memory cue · Intro · 0:02.00");
-  await expect(page.locator("#trackDetailCueMarkers .cue-marker:not(.is-memory)")).toHaveText(["A"]);
-  await expect(page.locator("#trackDetailOverviewCues .overview-cue.is-memory")).toHaveCount(3);
-  await expect(page.locator("#trackDetailMemoryCue")).toContainText("Memory cues: 3");
-
-  // The CDJ loads on the earliest memory point: here the 2 s memory cue.
-  const wfBox = await page.locator("#trackDetailWaveform").boundingBox();
-  const introBox = await memoryMarkers.first().boundingBox();
-  expect(Math.abs((await preStartEdge(page)) - (introBox.x - wfBox.x))).toBeLessThan(3);
-
-  // All 8 pads stay available.
-  for (let i = 0; i < 7; i += 1) await page.locator("#trackDetailAddCue").click();
-  await expect(page.locator("#trackDetailAddCue")).toBeDisabled();
-
-  // Deleting every hot cue keeps the memory cues.
-  for (let i = 0; i < 8; i += 1) {
-    await page.locator("#trackDetailCueList .cue-row .cue-row-delete").first().click();
-  }
-  await expect(memoryMarkers).toHaveCount(3);
-
-  await page.locator("#trackDetailSaveBtn").click();
-  const saveCall = await page.evaluate(() =>
-    window.__calls.find((c) => c.command === "save_track_analysis_edits")
-  );
-  expect(saveCall.request.cues).toEqual([
-    { positionMs: 2000, colorId: 3, name: "Intro", playbackStart: false, memory: true },
-    { positionMs: 40000, colorId: null, name: null, playbackStart: false, memory: true },
-    { positionMs: 90000, colorId: null, name: "Outro", playbackStart: false, memory: true },
-  ]);
-});
-
-test("the memory-cue slot: M and + add one, ◀ ▶ step through them, rename, colour and delete", async ({ page }) => {
-  await openCueEditor(page, { seedCues: [30000], seedMemory: MEMORY_SEED, quantize: false });
-  const slot = page.locator("#trackDetailMemoryCue");
-
-  // M adds one at the (stopped) playhead and selects it; a second one there
-  // isn't possible.
-  await page.keyboard.press("m");
-  await expect(slot.locator(".cue-row-pos")).toHaveText("0:00.00");
-  await expect(slot.locator(".memory-slot-count")).toHaveText("1/4");
-  await slot.locator("[data-action='memory-add']").click();
-  await expect(slot.locator(".memory-slot-count")).toHaveText("1/4");
-  await expect(page.locator("#statusText")).toContainText("A cue is already there.");
-
-  // ▶ steps to the next memory cue and plays from it.
-  await slot.locator("[data-action='memory-next']").click();
-  await expect(slot.locator(".cue-row-pos")).toHaveText("0:02.00");
-  await expect(slot.locator(".cue-row-name")).toHaveValue("Intro");
-  await expect(slot.locator(".memory-slot-count")).toHaveText("2/4");
-  const played = await page.evaluate(() =>
-    window.__calls.filter((c) => c.command === "play_resolved_track").at(-1)?.request?.startRatio
-  );
-  expect(played).toBeCloseTo(2000 / 180000, 5);
-  await slot.locator("[data-action='memory-next']").click();
-  await expect(slot.locator(".cue-row-pos")).toHaveText("0:40.00");
-
-  // Rename and colour the 40 s one.
-  await slot.locator(".cue-row-name").fill("Break");
-  await slot.locator(".cue-row-color").click();
-  await page.locator("#trackDetailColorPopover .cue-color-swatch").nth(5).click(); // id 6
-  await expect(slot.locator(".cue-row-name")).toHaveValue("Break");
-  await expect(slot.locator(".cue-row-color")).not.toHaveClass(/is-uncoloured/);
-
-  // ◀ back to the 2 s one; × deletes it.
-  await slot.locator("[data-action='memory-prev']").click();
-  await expect(slot.locator(".cue-row-pos")).toHaveText("0:02.00");
-  await slot.locator(".cue-row-delete").click();
-  await expect(slot).toContainText("Memory cues: 3");
-
-  await page.locator("#trackDetailSaveBtn").click();
-  const saveCall = await page.evaluate(() =>
-    window.__calls.find((c) => c.command === "save_track_analysis_edits")
-  );
-  expect(saveCall.request.cues.filter((c) => c.memory)).toEqual([
-    { positionMs: 0, colorId: null, name: null, playbackStart: false, memory: true },
-    { positionMs: 40000, colorId: 6, name: "Break", playbackStart: false, memory: true },
-    { positionMs: 90000, colorId: null, name: "Outro", playbackStart: false, memory: true },
-  ]);
-});
-
-test("the first memory cue adds the playback-start cue, which stays while any cue remains", async ({ page }) => {
-  // "First cue" is the remembered choice, yet the first memory cue adds the
-  // start cue on the first beat (120 ms).
-  await openCueEditor(page, { seedCues: [30000], quantize: false });
-  const startPos = page.locator("#trackDetailStartCue .cue-row.is-playback-start .cue-row-pos");
-  await expect(page.locator("#trackDetailStartFirstCue")).toHaveAttribute("aria-checked", "true");
-  await page.keyboard.press("m"); // at the stopped playhead: 0 ms
-  await expect(startPos).toHaveText("0:00.12");
-  // The start cue has its own place: the ▶ marker and the start row, never
-  // the memory-cue slot or a ▼ flag.
-  await expect(page.locator("#trackDetailMemoryCue .memory-slot-count")).toHaveText("1/1");
-  await expect(page.locator("#trackDetailCueMarkers .cue-marker.is-memory")).toHaveCount(1);
-  await expect(page.locator("#trackDetailCueMarkers .cue-marker.is-playback-start")).toHaveText("▶");
-  await expect(page.locator("#trackDetailStartFirstBeat")).toHaveAttribute("aria-checked", "true");
-
-  // A second memory cue changes nothing; one undo removes both.
-  await page.locator("#trackDetailUndo").click();
-  await expect(page.locator("#trackDetailStartCue")).toBeHidden();
-  await page.locator("#trackDetailRedo").click();
-  await expect(startPos).toHaveText("0:00.12");
-
-  // Without hot cues the start cue stays for the memory cue; with no cue
-  // left it goes.
-  await page.locator("#trackDetailCueList .cue-row .cue-row-delete").first().click();
-  await expect(startPos).toHaveText("0:00.12");
-  // Redo leaves nothing selected; › from the stopped playhead (0) reaches it.
-  await page.locator("#trackDetailMemoryCue [data-action='memory-next']").click();
-  await page.locator("#trackDetailMemoryCue .cue-row-delete").click();
-  await expect(page.locator("#trackDetailStartCue")).toBeHidden();
-});
-
-test("a first memory cue on the first beat is where the CDJ loads: no start cue is added", async ({ page }) => {
-  // Q on: M at the stopped playhead snaps to the first beat.
-  await openCueEditor(page, { seedCues: [30000] });
-  await page.keyboard.press("m");
-  await expect(page.locator("#trackDetailMemoryCue .cue-row-pos")).toHaveText("0:00.12");
-  await expect(page.locator("#trackDetailStartCue")).toBeHidden();
-});
-
-test("a hot cue added on a memory cue turns it into that hot cue, keeping its name and colour", async ({ page }) => {
-  await openCueEditor(page, {
-    seedCues: [30120],
-    seedMemory: [{ positionMs: 120, name: "Intro", colorId: 3 }],
-  });
-
-  // C at the stopped playhead snaps to the first beat, where the memory cue is.
-  await page.keyboard.press("c");
-  await expect(page.locator("#trackDetailCueMarkers .cue-marker.is-memory")).toHaveCount(0);
-  await expect(page.locator("#trackDetailCueMarkers .cue-marker:not(.is-memory)")).toHaveCount(2);
-
-  await page.locator("#trackDetailSaveBtn").click();
-  const saveCall = await page.evaluate(() =>
-    window.__calls.find((c) => c.command === "save_track_analysis_edits")
-  );
-  const at120 = saveCall.request.cues.filter((c) => c.positionMs === 120);
-  expect(at120).toHaveLength(1);
-  expect(at120[0]).toMatchObject({ memory: false, name: "Intro", colorId: 3 });
-});
-
-test("a memory cue never lands on another cue: a drag stops short", async ({ page }) => {
-  // Quantize on: the hot cue sits on beat 64 (30120 ms), the memory cue on
-  // the first beat (120 ms).
-  await openCueEditor(page, { seedCues: [30120], seedMemory: [{ positionMs: 120 }] });
-
-  // Drag the memory cue onto the hot cue: it stops on the beat before.
-  const memory = page.locator("#trackDetailCueMarkers .cue-marker.is-memory");
-  const hot = page.locator("#trackDetailCueMarkers .cue-marker:not(.is-memory)");
-  const from = await memory.boundingBox();
-  const to = await hot.boundingBox();
-  const y = from.y + 5;
-  await page.mouse.move(from.x, y);
-  await page.mouse.down();
-  await page.mouse.move(to.x - 20, y, { steps: 8 });
-  await page.mouse.move(to.x + 1, y, { steps: 4 });
-  await page.mouse.up();
-
-  await page.locator("#trackDetailSaveBtn").click();
-  const saveCall = await page.evaluate(() =>
-    window.__calls.find((c) => c.command === "save_track_analysis_edits")
-  );
-  const positions = saveCall.request.cues.map((c) => [c.positionMs, c.memory]);
-  expect(positions).toContainEqual([30120, false]);
-  const moved = positions.find(([, m]) => m)[0];
-  expect(moved).toBeGreaterThan(120);
-  expect(moved).toBeLessThan(30120);
-});
-
-test("double-click the waveform adds a cue at that position without starting playback", async ({ page }) => {
-  await installTrackDetailMock(page);
-  await page.goto("/");
-  await page.locator('#libraryTableBody .waveform-cell [data-action="edit-track-detail"]').click();
-  await expect(page.locator("#trackDetailView")).toBeVisible();
-
-  // Default view is 60 bars (0–112.5 s) of the 180 s track; x≈300/1227 ≈ 24 % ⇒ ~28 s.
-  await page.locator("#trackDetailWaveform").dblclick({ position: { x: 300, y: 100 } });
-  await expect(page.locator("#trackDetailCueList .cue-row")).toHaveCount(1);
-
-  await page.locator("#trackDetailSaveBtn").click();
-  const saveCall = await page.evaluate(() =>
-    window.__calls.find((c) => c.command === "save_track_analysis_edits")
-  );
-  expect(saveCall.request.cues).toHaveLength(1);
-  expect(saveCall.request.cues[0].positionMs).toBeGreaterThan(15000);
-  expect(saveCall.request.cues[0].positionMs).toBeLessThan(45000);
-  // A cue-only edit still carries the track's current (unedited) bpm, not
-  // null -- the on-device beat-grid rewrite needs a real bpm value even when
-  // bpm itself wasn't touched this save.
-  expect(saveCall.request.bpm).toBe(128);
-  expect(
-    await page.evaluate(() => window.__calls.some((c) => c.command === "play_resolved_track"))
-  ).toBe(false);
-});
-
-test("cue names default to 'Cue N' and stay editable without losing focus", async ({ page }) => {
-  await installTrackDetailMock(page);
-  await page.goto("/");
-  await page.locator('#libraryTableBody .waveform-cell [data-action="edit-track-detail"]').click();
-  await expect(page.locator("#trackDetailView")).toBeVisible();
-
-  await page.locator("#trackDetailAddCue").click();
-  await page.locator("#trackDetailAddCue").click();
-  const rows = page.locator("#trackDetailCueList .cue-row");
-  await expect(rows).toHaveCount(2);
-  await expect(rows.nth(0).locator(".cue-row-name")).toHaveValue("Cue 1");
-  await expect(rows.nth(1).locator(".cue-row-name")).toHaveValue("Cue 2");
-
-  // Typing character-by-character must not lose focus (regression: the cue
-  // list used to fully rebuild its DOM on every keystroke).
-  const nameInput = rows.nth(0).locator(".cue-row-name");
-  await nameInput.click();
-  await nameInput.fill("");
-  await nameInput.pressSequentially("Intro Drop", { delay: 15 });
-  await expect(nameInput).toHaveValue("Intro Drop");
-  expect(await nameInput.evaluate((el) => el === document.activeElement)).toBe(true);
-
-  await page.locator("#trackDetailSaveBtn").click();
-  const saveCall = await page.evaluate(() =>
-    window.__calls.find((c) => c.command === "save_track_analysis_edits")
-  );
-  expect(saveCall.request.cues.map((c) => c.name).sort()).toEqual(["Cue 2", "Intro Drop"]);
-});
-
-test("a cue row's play button and its waveform marker both play from that cue's position", async ({ page }) => {
-  await installTrackDetailMock(page, { seedCues: [90000] });
-  await page.goto("/");
-  await page.locator('#libraryTableBody .waveform-cell [data-action="edit-track-detail"]').click();
-  await expect(page.locator("#trackDetailView")).toBeVisible();
-  await expect(page.locator("#trackDetailCueList .cue-row")).toHaveCount(1);
-
-  const playCalls = () =>
-    page.evaluate(() => window.__calls.filter((c) => c.command === "play_resolved_track"));
-
-  await page.locator("#trackDetailCueList .cue-row .cue-row-play").click();
-  await expect.poll(async () => (await playCalls()).length).toBe(1);
-  expect((await playCalls()).at(-1).request.startRatio).toBeCloseTo(90000 / 180000, 2);
-
-  // Playing, the marker scrolls with the waveform; paused, it holds still
-  // right under the centred playhead and is still clickable there.
-  await page.locator("#trackDetailPlayPause").click();
-  await expect(page.locator("#trackDetailPlayPause")).toHaveAttribute("aria-label", "Play");
-  await page.locator("#trackDetailCueMarkers .cue-marker").first().click();
-  await expect.poll(async () => (await playCalls()).length).toBe(2);
-  expect((await playCalls()).at(-1).request.startRatio).toBeCloseTo(90000 / 180000, 2);
-});
-
-test("dragging a cue marker moves it without playing; Quantize (Q, on by default) snaps it, Shift places it freely", async ({ page }) => {
-  await installTrackDetailMock(page, { seedCues: [30000] });
-  await page.goto("/");
-  await page.locator('#libraryTableBody .waveform-cell [data-action="edit-track-detail"]').click();
-  await expect(page.locator("#trackDetailView")).toBeVisible();
-  const quantize = page.locator("#trackDetailQuantize");
-  await expect(quantize).toHaveAttribute("aria-pressed", "true");
-
-  const interval = 60000 / 128; // firstBeatMs 120, 128 BPM
-  const offBeatMs = (ms) => {
-    const beats = (ms - 120) / interval;
-    return Math.abs(beats - Math.round(beats)) * interval;
-  };
-  const wfBox = await page.locator("#trackDetailWaveform").boundingBox();
-  const marker = page.locator("#trackDetailCueMarkers .cue-marker").first();
-  const dragTo = async (ratio, { shift = false } = {}) => {
-    const box = await marker.boundingBox();
-    const y = box.y + box.height / 2;
-    if (shift) await page.keyboard.down("Shift");
-    await page.mouse.move(box.x + 2, y);
-    await page.mouse.down();
-    await page.mouse.move(wfBox.x + wfBox.width * (ratio - 0.03), y, { steps: 5 });
-    await page.mouse.move(wfBox.x + wfBox.width * ratio, y, { steps: 5 });
-    await page.mouse.up();
-    if (shift) await page.keyboard.up("Shift");
-  };
-  const listedMs = async () => {
-    const text = await page.locator("#trackDetailCueList .cue-row .cue-row-pos").first().textContent();
-    const [m, rest] = text.split(":");
-    return Number(m) * 60000 + Number(rest) * 1000;
-  };
-
-  // Default view is 60 bars (0–112.5 s): drag the 30 s marker to ≈60 s: on a beat.
-  await dragTo(60 / 112.5);
-  let ms = await listedMs();
-  expect(ms).toBeGreaterThan(59000);
-  expect(ms).toBeLessThan(61000);
-  expect(offBeatMs(ms)).toBeLessThanOrEqual(10); // list shows centiseconds
-  expect(
-    await page.evaluate(() => window.__calls.some((c) => c.command === "play_resolved_track"))
-  ).toBe(false);
-
-  // Shift: placed where the pointer is (≈37.1 s), not pulled to a beat.
-  await dragTo(0.33, { shift: true });
-  ms = await listedMs();
-  expect(Math.abs(ms - 0.33 * 112500)).toBeLessThan(400);
-
-  // Q off (remembered): a plain drag is free, Shift snaps.
-  await quantize.click();
-  await expect(quantize).toHaveAttribute("aria-pressed", "false");
-  expect(await page.evaluate(() => localStorage.getItem("djusbtkit.cueQuantize"))).toBe("0");
-  await dragTo(0.3, { shift: true });
-
-  await page.locator("#trackDetailSaveBtn").click();
-  const saveCall = await page.evaluate(() =>
-    window.__calls.find((c) => c.command === "save_track_analysis_edits")
-  );
-  expect(saveCall.request.cues).toHaveLength(1);
-  const snapped = saveCall.request.cues[0].positionMs;
-  expect(snapped).toBeGreaterThan(33000);
-  expect(snapped).toBeLessThan(34500);
-  expect(offBeatMs(snapped)).toBeLessThanOrEqual(1);
-});
-
-test("a marker tooltip never jumps to the corner when the markers re-render under the pointer", async ({ page }) => {
-  await installTrackDetailMock(page, { seedCues: [30000] });
-  await page.goto("/");
-  await page.locator('#libraryTableBody .waveform-cell [data-action="edit-track-detail"]').click();
-  await expect(page.locator("#trackDetailView")).toBeVisible();
-
-  // Hover a marker, then re-render the markers (a BPM edit) inside the
-  // tooltip's show delay, so the hovered element is replaced mid-delay. The
-  // hover is a synthetic `mouseover` so Chromium can't re-dispatch one onto
-  // the replacement marker -- the desktop app's WebKitGTK webview doesn't,
-  // and there the stale timer used to anchor on the detached marker (0,0).
-  const tip = page.locator("#app-tooltip");
-  await page.evaluate(() => {
-    const marker = document.querySelector("#trackDetailCueMarkers .cue-marker");
-    marker.dispatchEvent(new MouseEvent("mouseover", { bubbles: true }));
-    const bpm = document.getElementById("trackDetailBpm");
-    bpm.value = "129";
-    bpm.dispatchEvent(new Event("change"));
-  });
-  await page.waitForTimeout(400);
-  await expect(tip).not.toHaveClass(/app-tooltip--visible/);
-
-  // A tooltip whose marker is re-rendered while it is showing is dropped
-  // (or re-anchored on the replacement marker) -- never left at the corner.
-  const marker = page.locator("#trackDetailCueMarkers .cue-marker").first();
-  const nearMarker = async () => {
-    const box = await marker.boundingBox();
-    const tipBox = await tip.boundingBox();
-    expect(Math.abs(tipBox.x + tipBox.width / 2 - (box.x + box.width / 2))).toBeLessThan(40);
-    expect(tipBox.y).toBeGreaterThan(box.y - 60);
-  };
-  await marker.hover();
-  await expect(tip).toHaveClass(/app-tooltip--visible/);
-  await nearMarker();
-  await page.evaluate(() => {
-    const bpm = document.getElementById("trackDetailBpm");
-    bpm.value = "130";
-    bpm.dispatchEvent(new Event("change"));
-  });
-  await page.waitForTimeout(400);
-  if (/app-tooltip--visible/.test((await tip.getAttribute("class")) || "")) await nearMarker();
-});
 
 // Whole-track playhead position (ms) the shared playback module projects onto
 // the modal waveform.
@@ -1576,312 +233,6 @@ const modalPlayheadMs = (page) =>
     const wf = document.getElementById("trackDetailWaveform");
     return (parseFloat(wf.style.getPropertyValue("--playhead-position")) || 0) / 100 * 180000;
   });
-
-test("play/pause pauses in the backend, freezes the playhead, and + Hot cue lands on the paused spot", async ({ page }) => {
-  await installTrackDetailMock(page, { quantize: false });
-  await page.goto("/");
-  await page.locator('#libraryTableBody .waveform-cell [data-action="edit-track-detail"]').click();
-  await expect(page.locator("#trackDetailView")).toBeVisible();
-
-  const btn = page.locator("#trackDetailPlayPause");
-  const calls = (command) =>
-    page.evaluate((command) => window.__calls.filter((c) => c.command === command), command);
-
-  // Nothing loaded yet: Play starts at the left edge of the visible window (0 s).
-  await expect(btn).toHaveAttribute("aria-label", "Play");
-  await btn.click();
-  await expect.poll(async () => (await calls("play_resolved_track")).length).toBe(1);
-  expect((await calls("play_resolved_track"))[0].request.startRatio).toBe(0);
-  await expect(btn).toHaveAttribute("aria-label", "Pause");
-  await expect.poll(() => modalPlayheadMs(page)).toBeGreaterThan(200);
-  // Playing, the playhead stays in the middle and the waveform scrolls under
-  // it, blank before the track's start.
-  const wfBox = await page.locator("#trackDetailWaveform").boundingBox();
-  const ph = await page.locator("#trackDetailPlayhead").boundingBox();
-  expect(Math.abs(ph.x + ph.width / 2 - (wfBox.x + wfBox.width / 2))).toBeLessThan(4);
-  await expect(page.locator("#trackDetailZoomRange")).toHaveText(/^0:00–0:5\d$/);
-
-  // Pause goes to the backend -- not a stop + replay.
-  await btn.click();
-  await expect(btn).toHaveAttribute("aria-label", "Play");
-  expect(await calls("pause_playback_native")).toHaveLength(1);
-  expect(await calls("stop_playback_native")).toHaveLength(0);
-  expect(await calls("play_resolved_track")).toHaveLength(1);
-  await expect(page.locator("#trackDetailWaveform")).toHaveClass(/is-paused/);
-  await expect(page.locator("#trackDetailPlayhead")).toBeVisible();
-
-  // The playhead holds at the backend's paused position.
-  const pausedMs = await modalPlayheadMs(page);
-  expect(pausedMs).toBeGreaterThan(200);
-  await page.waitForTimeout(300); // prove it does NOT move while paused
-  expect(await modalPlayheadMs(page)).toBeCloseTo(pausedMs, 0);
-
-  // "+ Hot cue" while paused lands at the paused spot, not at 0.
-  await page.locator("#trackDetailAddCue").click();
-  await page.locator("#trackDetailSaveBtn").click();
-  const saveCall = (await calls("save_track_analysis_edits"))[0];
-  expect(Math.abs(saveCall.request.cues[0].positionMs - pausedMs)).toBeLessThan(50);
-  // Leaving the editor still releases the paused track.
-  await expect.poll(async () => (await calls("stop_playback_native")).length).toBe(1);
-});
-
-test("play after the track played to its end starts it over", async ({ page }) => {
-  await installTrackDetailMock(page, { tauriEvents: true });
-  await page.goto("/");
-  await page.locator('#libraryTableBody .waveform-cell [data-action="edit-track-detail"]').click();
-  const btn = page.locator("#trackDetailPlayPause");
-  const playCalls = () =>
-    page.evaluate(() =>
-      window.__calls.filter((c) => c.command === "play_resolved_track").map((c) => c.request)
-    );
-
-  await btn.click();
-  await expect(btn).toHaveAttribute("aria-label", "Pause");
-  // The backend runs the track out: last position at its end, then stopped.
-  await page.evaluate(() => {
-    window.__emit("playback:event", {
-      event: "playback.seeked", path: null, playing: true, positionMs: 179990, durationMs: 180000,
-    });
-  });
-  await expect.poll(() => modalPlayheadMs(page)).toBeGreaterThan(179000);
-  await page.evaluate(() => {
-    window.__emit("playback:event", { event: "playback.stopped", path: null, playing: false, durationMs: 180000 });
-  });
-  await expect(btn).toHaveAttribute("aria-label", "Play");
-
-  await btn.click();
-  await expect.poll(async () => (await playCalls()).length).toBe(2);
-  expect((await playCalls())[1].startRatio).toBe(0);
-});
-
-test("play/pause resumes in the backend from where it was paused", async ({ page }) => {
-  await installTrackDetailMock(page);
-  await page.goto("/");
-  await page.locator('#libraryTableBody .waveform-cell [data-action="edit-track-detail"]').click();
-  const btn = page.locator("#trackDetailPlayPause");
-  const calls = (command) =>
-    page.evaluate((command) => window.__calls.filter((c) => c.command === command), command);
-
-  await btn.click();
-  await expect(btn).toHaveAttribute("aria-label", "Pause");
-  await expect.poll(() => modalPlayheadMs(page)).toBeGreaterThan(200);
-  await btn.click();
-  await expect(btn).toHaveAttribute("aria-label", "Play");
-  const pausedMs = await modalPlayheadMs(page);
-
-  await btn.click();
-  await expect(btn).toHaveAttribute("aria-label", "Pause");
-  expect(await calls("resume_playback_native")).toHaveLength(1);
-  expect(await calls("play_resolved_track")).toHaveLength(1);
-  await expect(page.locator("#trackDetailWaveform")).not.toHaveClass(/is-paused/);
-  // The playhead carries on from the paused spot.
-  await expect.poll(() => modalPlayheadMs(page)).toBeGreaterThan(pausedMs);
-  expect(await modalPlayheadMs(page)).toBeLessThan(pausedMs + 2000);
-});
-
-test("a waveform click parks the playhead without playing; dragging the waveform under the centred playhead plays along", async ({ page }) => {
-  await installTrackDetailMock(page, { quantize: false });
-  await page.goto("/");
-  await page.locator('#libraryTableBody .waveform-cell [data-action="edit-track-detail"]').click();
-  await expect(page.locator("#trackDetailView")).toBeVisible();
-  const wf = page.locator("#trackDetailWaveform");
-  const btn = page.locator("#trackDetailPlayPause");
-  const playhead = page.locator("#trackDetailPlayhead");
-  const playCalls = () =>
-    page.evaluate(() =>
-      window.__calls.filter((c) => c.command === "play_resolved_track").map((c) => c.request)
-    );
-  const wfBox = await wf.boundingBox();
-  const viewMs = 112500; // the default 60-bar view starts at 0
-
-  // A click loads the track paused at that spot: playhead there, no audio.
-  await wf.click({ position: { x: wfBox.width * 0.4, y: 100 } });
-  await expect.poll(async () => (await playCalls()).length).toBe(1);
-  const [placed] = await playCalls();
-  expect(placed.startPaused).toBe(true);
-  expect(Math.abs(placed.startRatio * 180000 - 0.4 * viewMs)).toBeLessThan(500);
-  await expect(wf).toHaveClass(/is-paused/);
-  await expect(btn).toHaveAttribute("aria-label", "Play");
-  await expect(playhead).toBeVisible();
-
-  // Play carries on from there (a resume, not a new load).
-  await btn.click();
-  await expect(btn).toHaveAttribute("aria-label", "Pause");
-  expect(await playCalls()).toHaveLength(1);
-
-  // A click while playing jumps there and keeps playing.
-  await wf.click({ position: { x: wfBox.width * 0.2, y: 100 } });
-  await expect.poll(async () => (await playCalls()).length).toBe(2);
-  expect((await playCalls())[1].startPaused).toBe(false);
-  await expect(btn).toHaveAttribute("aria-label", "Pause");
-
-  // Paused, the playhead sits in the middle; dragging the waveform moves it
-  // under the playhead (left goes forward): it plays while moving, holds
-  // paused while the pointer rests, and parks at the drop point.
-  await btn.click();
-  await expect(btn).toHaveAttribute("aria-label", "Play");
-  const centreX = wfBox.x + wfBox.width * 0.5;
-  const centred = async () => {
-    const ph = await playhead.boundingBox();
-    expect(Math.abs(ph.x + ph.width / 2 - centreX)).toBeLessThan(4);
-  };
-  await centred();
-  const startMs = await modalPlayheadMs(page);
-  const y = wfBox.y + 100;
-  const x0 = wfBox.x + wfBox.width * 0.6;
-  const before = (await playCalls()).length;
-  await page.mouse.move(x0, y);
-  await page.mouse.down();
-  await page.mouse.move(x0 - wfBox.width * 0.1, y, { steps: 8 });
-  await expect.poll(async () => (await playCalls()).length).toBeGreaterThan(before);
-  expect((await playCalls()).slice(before)[0].startPaused).toBe(false);
-  // Resting: paused at the spot dragged under the playhead.
-  await expect.poll(async () => (await playCalls()).at(-1).startPaused).toBe(true);
-  expect(Math.abs((await playCalls()).at(-1).startRatio * 180000 - (startMs + 0.1 * viewMs))).toBeLessThan(500);
-  await expect(wf).toHaveClass(/is-paused/);
-  await centred();
-  // Moving again plays again.
-  const beforeMove = (await playCalls()).length;
-  await page.mouse.move(x0 - wfBox.width * 0.3, y, { steps: 4 });
-  await expect.poll(async () => (await playCalls()).length).toBeGreaterThan(beforeMove);
-  expect((await playCalls())[beforeMove].startPaused).toBe(false);
-  await page.mouse.up();
-  await expect.poll(async () => (await playCalls()).at(-1).startPaused).toBe(true);
-  expect(Math.abs((await playCalls()).at(-1).startRatio * 180000 - (startMs + 0.3 * viewMs))).toBeLessThan(500);
-  await expect(wf).toHaveClass(/is-paused/);
-  await expect(btn).toHaveAttribute("aria-label", "Play");
-  await centred();
-});
-
-test("opening the editor on the track already playing from its row shows it playing, and hands it back on close", async ({ page }) => {
-  await installTrackDetailMock(page);
-  await page.goto("/");
-  const calls = (command) =>
-    page.evaluate((command) => window.__calls.filter((c) => c.command === command), command);
-  const row = page.locator("#libraryTableBody .track-grid-row").first();
-
-  await row.locator('[data-action="play-library"]').click();
-  await expect(row.locator(".waveform")).toHaveClass(/is-playing/);
-  await page.waitForTimeout(400);
-
-  await row.locator('[data-action="edit-track-detail"]').click();
-  await expect(page.locator("#trackDetailView")).toBeVisible();
-  const btn = page.locator("#trackDetailPlayPause");
-  // Still the same playback -- shown here, not restarted or stopped.
-  await expect(btn).toHaveAttribute("aria-label", "Pause");
-  await expect(page.locator("#trackDetailWaveform")).toHaveClass(/is-playing/);
-  await expect.poll(() => modalPlayheadMs(page)).toBeGreaterThan(300);
-  expect(await calls("play_resolved_track")).toHaveLength(1);
-  expect(await calls("stop_playback_native")).toHaveLength(0);
-
-  // Pause works on the adopted playback.
-  await btn.click();
-  await expect(btn).toHaveAttribute("aria-label", "Play");
-  expect(await calls("pause_playback_native")).toHaveLength(1);
-  await btn.click();
-  await expect(btn).toHaveAttribute("aria-label", "Pause");
-
-  // Closing leaves it playing, back on the row.
-  await page.locator("#trackDetailCloseBtn").click();
-  await expect(page.locator("#trackDetailView")).toBeHidden();
-  await expect(row.locator(".waveform")).toHaveClass(/is-playing/);
-  expect(await calls("stop_playback_native")).toHaveLength(0);
-});
-
-test("opening the editor while another track plays stops that track", async ({ page }) => {
-  await installTrackDetailMock(page, { secondTrack: true });
-  await page.goto("/");
-  const calls = (command) =>
-    page.evaluate((command) => window.__calls.filter((c) => c.command === command), command);
-  const rows = page.locator("#libraryTableBody .track-grid-row");
-  await expect(rows).toHaveCount(2);
-  const other = rows.filter({ hasText: "Other Track" });
-
-  await other.locator('[data-action="play-library"]').click();
-  await expect(other.locator(".waveform")).toHaveClass(/is-playing/);
-
-  await rows.filter({ hasText: "Cue Track" }).locator('[data-action="edit-track-detail"]').click();
-  await expect(page.locator("#trackDetailView")).toBeVisible();
-  await expect.poll(async () => (await calls("stop_playback_native")).length).toBe(1);
-  await expect(page.locator("#trackDetailPlayPause")).toHaveAttribute("aria-label", "Play");
-  await expect(other.locator(".waveform")).not.toHaveClass(/is-playing/);
-});
-
-test("the modal opens zoomed to 60 bars; Fit shows the whole track; zoom windows cue markers", async ({ page }) => {
-  // durationMs 180000; one cue inside the default 2-min view, one past it.
-  await installTrackDetailMock(page, { seedCues: [30000, 170000] });
-  await page.goto("/");
-  await page.locator('#libraryTableBody .waveform-cell [data-action="edit-track-detail"]').click();
-  await expect(page.locator("#trackDetailView")).toBeVisible();
-  await expect(page.locator("#trackDetailCueList .cue-row")).toHaveCount(2);
-
-  const visibleMarkers = page.locator("#trackDetailCueMarkers .cue-marker:not(.off-view)");
-  // Default view is 60 bars at 128 BPM (0–112.5 s), so only the 30 s cue is on screen.
-  await expect(visibleMarkers).toHaveCount(1);
-
-  // The zoom-range readout makes the initial zoomed-in view unmistakable: it
-  // names the visible window, centred under the waveform; the 3-min total
-  // sits at the footer's right end.
-  const zoomRange = page.locator("#trackDetailZoomRange");
-  const totalTime = page.locator("#trackDetailTotalTime");
-  await expect(zoomRange).toBeVisible();
-  await expect(zoomRange).toHaveClass(/is-zoomed/);
-  await expect(zoomRange).toHaveText("0:00–1:53");
-  await expect(totalTime).toHaveText("3:00");
-  const wfBox = await page.locator("#trackDetailWaveform").boundingBox();
-  const rangeBox = await zoomRange.boundingBox();
-  const totalBox = await totalTime.boundingBox();
-  expect(rangeBox.y).toBeGreaterThanOrEqual(wfBox.y + wfBox.height);
-  expect(Math.abs(rangeBox.x + rangeBox.width / 2 - (wfBox.x + wfBox.width / 2))).toBeLessThan(4);
-  expect(totalBox.y).toBeGreaterThanOrEqual(wfBox.y + wfBox.height);
-  expect(wfBox.x + wfBox.width - (totalBox.x + totalBox.width)).toBeLessThan(16);
-
-  await page.locator("#trackDetailZoomFit").click();
-  await expect(visibleMarkers).toHaveCount(2);
-  // Fully zoomed out, the readout switches to a plain "whole track" state.
-  await expect(zoomRange).not.toHaveClass(/is-zoomed/);
-  await expect(zoomRange).toHaveText("Whole track");
-  await expect(totalTime).toHaveText("3:00");
-
-  // Scroll-wheel zoom toward the left edge → the 170 s cue leaves the view again.
-  await page.locator("#trackDetailWaveform").hover({ position: { x: 15, y: 100 } });
-  await page.mouse.wheel(0, -500);
-  await expect(visibleMarkers).toHaveCount(1);
-});
-
-test("cue editor opens + saves from an app-playlist track row", async ({ page }) => {
-  // Regression: the app-playlist panel click handler only routed play/scrub
-  // actions to handleTrackAction, so the cue button (added to every track list)
-  // was inert there — clicking it did nothing.
-  await installTrackDetailMock(page, { playlist: true });
-  await page.goto("/");
-
-  await page.locator("#navPlaylistList .nav-playlist-item").first().click();
-  const row = page.locator("#playlistTracksBody .track-grid-row");
-  await expect(row).toHaveCount(1);
-
-  await row.locator('[data-action="edit-track-detail"]').click();
-  await expect(page.locator("#trackDetailView")).toBeVisible();
-  await expect(page.locator("#trackDetailFirstBeatMs")).toHaveValue("120");
-
-  await page.locator("#trackDetailAddCue").click();
-  await expect(page.locator("#trackDetailCueList .cue-row")).toHaveCount(1);
-  await page.locator("#trackDetailBpm").fill("131.5");
-  await page.locator("#trackDetailBpm").dispatchEvent("change");
-  await page.locator("#trackDetailKey").selectOption("Em");
-
-  await page.locator("#trackDetailSaveBtn").click();
-  await expect(page.locator("#trackDetailView")).toBeHidden();
-
-  const saveCall = await page.evaluate(() => window.__calls.find((c) => c.command === "save_track_analysis_edits"));
-  expect(saveCall).toBeTruthy();
-  expect(saveCall.request.trackId).toBe("t1");
-  expect(saveCall.request.cues).toHaveLength(1);
-
-  // The open playlist's row redraws without a reload.
-  await expect(row.locator(".td-bpm .bpm-pill")).toHaveText("131.50");
-  await expect(row.locator(".td-key .key-pill")).toHaveText("Em");
-});
 
 // --- Cue editor opened from a USB view (playlists / history) ---------------
 //
@@ -1997,41 +348,1742 @@ function installUsbTrackDetailMock(page, mockOpts = {}) {
   }, mockOpts);
 }
 
-test("cue editor opens + saves cues and key from a USB playlist row through the USB commands", async ({ page }) => {
-  await installUsbTrackDetailMock(page);
+test("the cue editor covers its page, and the edited row stays marked after closing; opening the editor while another track plays stops that track; opening the editor on the track already playing from its row shows it playing, and hands it back on close", async ({ page }) => {
+  await installTrackDetailMock(page, { secondTrack: true });
+  await page.goto("/");
+  {
+    const view = page.locator("#trackDetailView");
+    const rows = page.locator("#libraryTableBody .track-grid-row");
+    const inert = () =>
+      page.evaluate(() =>
+        ["#panel-library", "#navSidebar", ".topbar"].map((sel) => document.querySelector(sel).inert)
+      );
+
+    await rows.nth(0).locator('[data-action="edit-track-detail"]').click();
+    await expect(view).toBeVisible();
+    // It covers the page and the sidebar; only the editor is usable while it's open.
+    expect(await view.evaluate((n) => n.parentElement.className)).toBe("app-layout");
+    expect(await inert()).toEqual([true, true, true]);
+
+    await page.locator("#trackDetailCancelBtn").click();
+    await expect(view).toBeHidden();
+    expect(await inert()).toEqual([false, false, false]);
+    await expect(rows.nth(0)).toHaveClass(/is-last-edited/);
+    await expect(rows.nth(1)).not.toHaveClass(/is-last-edited/);
+
+    // Editing another track moves the mark.
+    await rows.nth(1).locator('[data-action="edit-track-detail"]').click();
+    await expect(view).toBeVisible();
+    await page.keyboard.press("Escape");
+    await expect(view).toBeHidden();
+    await expect(rows.nth(1)).toHaveClass(/is-last-edited/);
+    await expect(rows.nth(0)).not.toHaveClass(/is-last-edited/);
+  }
+
+  await closeEditor(page);
+  {
+    const calls = (command) =>
+      page.evaluate((command) => window.__calls.filter((c) => c.command === command), command);
+    const rows = page.locator("#libraryTableBody .track-grid-row");
+    await expect(rows).toHaveCount(2);
+    const other = rows.filter({ hasText: "Other Track" });
+
+    await other.locator('[data-action="play-library"]').click();
+    await expect(other.locator(".waveform")).toHaveClass(/is-playing/);
+
+    await rows.filter({ hasText: "Cue Track" }).locator('[data-action="edit-track-detail"]').click();
+    await expect(page.locator("#trackDetailView")).toBeVisible();
+    await expect.poll(async () => (await calls("stop_playback_native")).length).toBe(1);
+    await expect(page.locator("#trackDetailPlayPause")).toHaveAttribute("aria-label", "Play");
+    await expect(other.locator(".waveform")).not.toHaveClass(/is-playing/);
+  }
+
+  await closeEditor(page);
+  {
+    const calls = (command) =>
+      page.evaluate((command) => window.__calls.filter((c) => c.command === command), command);
+    const row = page.locator("#libraryTableBody .track-grid-row").first();
+
+    await row.locator('[data-action="play-library"]').click();
+    await expect(row.locator(".waveform")).toHaveClass(/is-playing/);
+    await page.waitForTimeout(400);
+
+    await row.locator('[data-action="edit-track-detail"]').click();
+    await expect(page.locator("#trackDetailView")).toBeVisible();
+    const btn = page.locator("#trackDetailPlayPause");
+    // Still the same playback -- shown here, not restarted or stopped.
+    await expect(btn).toHaveAttribute("aria-label", "Pause");
+    await expect(page.locator("#trackDetailWaveform")).toHaveClass(/is-playing/);
+    await expect.poll(() => modalPlayheadMs(page)).toBeGreaterThan(300);
+    expect(await calls("play_resolved_track")).toHaveLength(1);
+    expect(await calls("stop_playback_native")).toHaveLength(0);
+
+    // Pause works on the adopted playback.
+    await btn.click();
+    await expect(btn).toHaveAttribute("aria-label", "Play");
+    expect(await calls("pause_playback_native")).toHaveLength(1);
+    await btn.click();
+    await expect(btn).toHaveAttribute("aria-label", "Pause");
+
+    // Closing leaves it playing, back on the row.
+    await page.locator("#trackDetailCloseBtn").click();
+    await expect(page.locator("#trackDetailView")).toBeHidden();
+    await expect(row.locator(".waveform")).toHaveClass(/is-playing/);
+    expect(await calls("stop_playback_native")).toHaveLength(0);
+
+    // A click elsewhere in the playing row keeps it playing; another row's
+    // play switches to that row; a click away from any row stops it.
+    await row.locator(".track-title").click();
+    await page.waitForTimeout(100);
+    await expect(row.locator(".waveform")).toHaveClass(/is-playing/);
+    const other = page.locator("#libraryTableBody .track-grid-row").nth(1);
+    await other.locator('[data-action="play-library"]').click();
+    await expect(other.locator(".waveform")).toHaveClass(/is-playing/);
+    await expect(row.locator(".waveform")).not.toHaveClass(/is-playing/);
+    await page.locator("#sourceChipsContainer").click({ position: { x: 2, y: 2 } });
+    await expect(other.locator(".waveform")).not.toHaveClass(/is-playing/);
+  }
+});
+
+test("Escape closes the cue editor only when nothing is unsaved; dragging on the waveform, a cue marker or the overview never selects text; shortcuts stay out of text fields: typing c/1/Space in a cue name only types; undo/redo: buttons and Ctrl+Z / Ctrl+Shift+Z step through edits; a name typed is one step; a marker tooltip never jumps to the corner when the markers re-render under the pointer; a first memory cue on the first beat is where the CDJ loads: no start cue is added; dragging a cue marker moves it without playing; Quantize (Q, on by default) snaps it, Shift places it freely; the first memory cue adds the playback-start cue, which stays while any cue remains; an existing track's start cue drives the choice, not the remembered setting; choosing First cue remembers it", async ({ page }) => {
+  await openCueEditor(page, { seedCues: [30000] });
+  {
+    const view = page.locator("#trackDetailView");
+
+    // View-only changes (zoom, beat-grid slider) aren't edits.
+    await page.locator("#trackDetailZoomFit").click();
+    await page.locator("#trackDetailGridLevel").fill("80");
+    await page.keyboard.press("Escape");
+    await expect(view).toBeHidden();
+
+    await page.locator('#libraryTableBody .waveform-cell [data-action="edit-track-detail"]').click();
+    await expect(view).toBeVisible();
+    await page.locator("#trackDetailAddCue").click();
+    // The highlight removes itself when its animation ends, so record it appearing.
+    await page.evaluate(() => {
+      const save = document.querySelector("#trackDetailSaveBtn");
+      new MutationObserver(() => {
+        if (save.classList.contains("is-attention")) window.__saveHighlighted = true;
+      }).observe(save, { attributes: true, attributeFilter: ["class"] });
+    });
+    await page.keyboard.press("Escape");
+    await expect(view).toBeVisible();
+    await expect.poll(() => page.evaluate(() => window.__saveHighlighted)).toBe(true);
+
+    // Undoing the edit makes it clean again: Escape closes.
+    await page
+      .locator("#trackDetailCueList .cue-row")
+      .filter({ hasNot: page.locator(".cue-row-pos", { hasText: "0:30.00" }) })
+      .locator(".cue-row-delete")
+      .click();
+    await page.keyboard.press("Escape");
+    await expect(view).toBeHidden();
+    const saves = await page.evaluate(() =>
+      window.__calls.filter((c) => c.command === "save_track_analysis_edits")
+    );
+    expect(saves).toHaveLength(0);
+  }
+
+  await reopen(page);
+  {
+    const selected = () => page.evaluate(() => String(window.getSelection()));
+    // Drag from inside `from` across the title, the time footer and the cue list.
+    const dragAcrossText = async (x, y) => {
+      const title = await page.locator("#trackDetailTitle").boundingBox();
+      const list = await page.locator("#trackDetailCueList").boundingBox();
+      await page.mouse.move(x, y);
+      await page.mouse.down();
+      await page.mouse.move(list.x + 40, list.y + list.height / 2, { steps: 8 });
+      await page.mouse.move(title.x + 10, title.y + title.height / 2, { steps: 8 });
+      await page.mouse.move(list.x + list.width - 40, list.y + list.height - 4, { steps: 8 });
+      await page.mouse.up();
+    };
+
+    const wf = await page.locator("#trackDetailWaveform").boundingBox();
+    await dragAcrossText(wf.x + wf.width * 0.6, wf.y + wf.height / 2);
+    expect(await selected()).toBe("");
+
+    const marker = await page.locator("#trackDetailCueMarkers .cue-marker").first().boundingBox();
+    await dragAcrossText(marker.x + 2, marker.y + marker.height / 2);
+    expect(await selected()).toBe("");
+
+    const ov = await page.locator("#trackDetailOverview").boundingBox();
+    await dragAcrossText(ov.x + ov.width * 0.3, ov.y + ov.height / 2);
+    expect(await selected()).toBe("");
+
+    // Engine-independent guard (the Tauri build renders with WebKitGTK): while
+    // held, the page is marked unselectable and `selectstart` is cancelled; a
+    // release anywhere, even outside the dialog, lifts it.
+    const guard = () =>
+      page.evaluate(() => {
+        const ev = new Event("selectstart", { bubbles: true, cancelable: true });
+        document.getElementById("trackDetailTitle").dispatchEvent(ev);
+        return {
+          marked: document.documentElement.classList.contains("is-ui-dragging"),
+          blocked: ev.defaultPrevented,
+        };
+      });
+    await page.mouse.move(wf.x + wf.width * 0.5, wf.y + wf.height / 2);
+    await page.mouse.down();
+    await page.mouse.move(wf.x + wf.width * 0.5, 2, { steps: 4 });
+    expect(await guard()).toEqual({ marked: true, blocked: true });
+    await page.mouse.up();
+    expect(await guard()).toEqual({ marked: false, blocked: false });
+  }
+
+  await reopen(page);
+  {
+    const name = page.locator("#trackDetailCueList .cue-row .cue-row-name").first();
+    await name.click();
+    await name.press("End");
+    await page.keyboard.type(" c1 ");
+    await expect(name).toHaveValue(/ c1 $/);
+    await expect(page.locator("#trackDetailCueList .cue-row")).toHaveCount(1);
+    expect(
+      await page.evaluate(() => window.__calls.some((c) => c.command === "play_resolved_track"))
+    ).toBe(false);
+  }
+
+  await reopen(page);
+  {
+    const undo = page.locator("#trackDetailUndo");
+    const redo = page.locator("#trackDetailRedo");
+    const rows = page.locator("#trackDetailCueList .cue-row");
+    const bpm = page.locator("#trackDetailBpm");
+    await expect(undo).toBeDisabled();
+    await expect(redo).toBeDisabled();
+
+    await page.locator("#trackDetailWaveform").dblclick({ position: { x: 700, y: 100 } });
+    await expect(rows).toHaveCount(2);
+    await page.locator("#trackDetailBpmDouble").click();
+    await expect(bpm).toHaveValue("256.00");
+    const name = page.locator("#trackDetailCueList .cue-row .cue-row-name").first();
+    const originalName = await name.inputValue();
+    await name.fill("");
+    await name.pressSequentially("Intro");
+    await page.locator("#trackDetailTitle").click();
+
+    await page.keyboard.press("Control+z"); // the whole name at once
+    await expect(page.locator("#trackDetailCueList .cue-row .cue-row-name").first()).toHaveValue(originalName);
+    await page.keyboard.press("Control+z");
+    await expect(bpm).toHaveValue("128.00");
+    await undo.click();
+    await expect(rows).toHaveCount(1);
+    await expect(undo).toBeDisabled();
+    await expect(redo).toBeEnabled();
+
+    await page.keyboard.press("Control+Shift+z");
+    await expect(rows).toHaveCount(2);
+    await redo.click();
+    await expect(bpm).toHaveValue("256.00");
+
+    // A new edit clears the redo steps.
+    await page.locator("#trackDetailBpmHalf").click();
+    await expect(redo).toBeDisabled();
+
+    // Undoing everything leaves nothing unsaved: Escape closes.
+    for (let i = 0; i < 3; i += 1) await page.keyboard.press("Control+z");
+    await expect(undo).toBeDisabled();
+    await page.keyboard.press("Escape");
+    await expect(page.locator("#trackDetailView")).toBeHidden();
+  }
+
+  await reopen(page);
+  {
+    // Hover a marker, then re-render the markers (a BPM edit) inside the
+    // tooltip's show delay, so the hovered element is replaced mid-delay. The
+    // hover is a synthetic `mouseover` so Chromium can't re-dispatch one onto
+    // the replacement marker -- the desktop app's WebKitGTK webview doesn't,
+    // and there the stale timer used to anchor on the detached marker (0,0).
+    const tip = page.locator("#app-tooltip");
+    await page.evaluate(() => {
+      const marker = document.querySelector("#trackDetailCueMarkers .cue-marker");
+      marker.dispatchEvent(new MouseEvent("mouseover", { bubbles: true }));
+      const bpm = document.getElementById("trackDetailBpm");
+      bpm.value = "129";
+      bpm.dispatchEvent(new Event("change"));
+    });
+    await page.waitForTimeout(400);
+    await expect(tip).not.toHaveClass(/app-tooltip--visible/);
+
+    // A tooltip whose marker is re-rendered while it is showing is dropped
+    // (or re-anchored on the replacement marker) -- never left at the corner.
+    const marker = page.locator("#trackDetailCueMarkers .cue-marker").first();
+    const nearMarker = async () => {
+      const box = await marker.boundingBox();
+      const tipBox = await tip.boundingBox();
+      expect(Math.abs(tipBox.x + tipBox.width / 2 - (box.x + box.width / 2))).toBeLessThan(40);
+      expect(tipBox.y).toBeGreaterThan(box.y - 60);
+    };
+    await marker.hover();
+    await expect(tip).toHaveClass(/app-tooltip--visible/);
+    await nearMarker();
+    await page.evaluate(() => {
+      const bpm = document.getElementById("trackDetailBpm");
+      bpm.value = "130";
+      bpm.dispatchEvent(new Event("change"));
+    });
+    await page.waitForTimeout(400);
+    if (/app-tooltip--visible/.test((await tip.getAttribute("class")) || "")) await nearMarker();
+  }
+
+  await reopen(page);
+  {
+    // Q on: M at the stopped playhead snaps to the first beat.
+    await page.keyboard.press("m");
+    await expect(page.locator("#trackDetailMemoryCue .cue-row-pos")).toHaveText("0:00.12");
+    await expect(page.locator("#trackDetailStartCue")).toBeHidden();
+  }
+
+  await reopen(page);
+  {
+    const quantize = page.locator("#trackDetailQuantize");
+    await expect(quantize).toHaveAttribute("aria-pressed", "true");
+
+    const interval = 60000 / 128; // firstBeatMs 120, 128 BPM
+    const offBeatMs = (ms) => {
+      const beats = (ms - 120) / interval;
+      return Math.abs(beats - Math.round(beats)) * interval;
+    };
+    const wfBox = await page.locator("#trackDetailWaveform").boundingBox();
+    const marker = page.locator("#trackDetailCueMarkers .cue-marker").first();
+    const dragTo = async (ratio, { shift = false } = {}) => {
+      const box = await marker.boundingBox();
+      const y = box.y + box.height / 2;
+      if (shift) await page.keyboard.down("Shift");
+      await page.mouse.move(box.x + 2, y);
+      await page.mouse.down();
+      await page.mouse.move(wfBox.x + wfBox.width * (ratio - 0.03), y, { steps: 5 });
+      await page.mouse.move(wfBox.x + wfBox.width * ratio, y, { steps: 5 });
+      await page.mouse.up();
+      if (shift) await page.keyboard.up("Shift");
+    };
+    const listedMs = async () => {
+      const text = await page.locator("#trackDetailCueList .cue-row .cue-row-pos").first().textContent();
+      const [m, rest] = text.split(":");
+      return Number(m) * 60000 + Number(rest) * 1000;
+    };
+
+    // Default view is 60 bars (0–112.5 s): drag the 30 s marker to ≈60 s: on a beat.
+    await dragTo(60 / 112.5);
+    let ms = await listedMs();
+    expect(ms).toBeGreaterThan(59000);
+    expect(ms).toBeLessThan(61000);
+    expect(offBeatMs(ms)).toBeLessThanOrEqual(10); // list shows centiseconds
+    expect(
+      await page.evaluate(() => window.__calls.some((c) => c.command === "play_resolved_track"))
+    ).toBe(false);
+
+    // Shift: placed where the pointer is (≈37.1 s), not pulled to a beat.
+    await dragTo(0.33, { shift: true });
+    ms = await listedMs();
+    expect(Math.abs(ms - 0.33 * 112500)).toBeLessThan(400);
+
+    // Q off (remembered): a plain drag is free, Shift snaps.
+    await quantize.click();
+    await expect(quantize).toHaveAttribute("aria-pressed", "false");
+    expect(await page.evaluate(() => localStorage.getItem("djusbtkit.cueQuantize"))).toBe("0");
+    await dragTo(0.3, { shift: true });
+
+    await page.locator("#trackDetailSaveBtn").click();
+    const saveCall = await page.evaluate(() =>
+      window.__calls.find((c) => c.command === "save_track_analysis_edits")
+    );
+    expect(saveCall.request.cues).toHaveLength(1);
+    const snapped = saveCall.request.cues[0].positionMs;
+    expect(snapped).toBeGreaterThan(33000);
+    expect(snapped).toBeLessThan(34500);
+    expect(offBeatMs(snapped)).toBeLessThanOrEqual(1);
+  }
+
+  await reopen(page);
+  {
+    // "First cue" is the remembered choice, yet the first memory cue adds the
+    // start cue on the first beat (120 ms).
+    const startPos = page.locator("#trackDetailStartCue .cue-row.is-playback-start .cue-row-pos");
+    await expect(page.locator("#trackDetailStartFirstCue")).toHaveAttribute("aria-checked", "true");
+    await page.keyboard.press("m"); // at the stopped playhead: 0 ms
+    await expect(startPos).toHaveText("0:00.12");
+    // The start cue has its own place: the ▶ marker and the start row, never
+    // the memory-cue slot or a ▼ flag.
+    await expect(page.locator("#trackDetailMemoryCue .memory-slot-count")).toHaveText("1/1");
+    await expect(page.locator("#trackDetailCueMarkers .cue-marker.is-memory")).toHaveCount(1);
+    await expect(page.locator("#trackDetailCueMarkers .cue-marker.is-playback-start")).toHaveText("▶");
+    await expect(page.locator("#trackDetailStartFirstBeat")).toHaveAttribute("aria-checked", "true");
+
+    // A second memory cue changes nothing; one undo removes both.
+    await page.locator("#trackDetailUndo").click();
+    await expect(page.locator("#trackDetailStartCue")).toBeHidden();
+    await page.locator("#trackDetailRedo").click();
+    await expect(startPos).toHaveText("0:00.12");
+
+    // Without hot cues the start cue stays for the memory cue; with no cue
+    // left it goes.
+    await page.locator("#trackDetailCueList .cue-row .cue-row-delete").first().click();
+    await expect(startPos).toHaveText("0:00.12");
+    // Redo leaves nothing selected; › from the stopped playhead (0) reaches it.
+    await page.locator("#trackDetailMemoryCue [data-action='memory-next']").click();
+    await page.locator("#trackDetailMemoryCue .cue-row-delete").click();
+    await expect(page.locator("#trackDetailStartCue")).toBeHidden();
+  }
+
+  await reopen(page);
+  // Remember First beat, then open the track afresh.
+  await page.locator("#trackDetailStartFirstBeat").click();
+  await reopen(page);
+  {
+    const firstCue = page.locator("#trackDetailStartFirstCue");
+    const firstBeat = page.locator("#trackDetailStartFirstBeat");
+    await expect(firstCue).toHaveAttribute("aria-checked", "true");
+    await expect(page.locator("#trackDetailStartCue .cue-row.is-playback-start")).toHaveCount(0);
+
+    await firstBeat.click();
+    await expect(page.locator("#trackDetailStartCue .cue-row.is-playback-start")).toHaveCount(1);
+    await firstCue.click();
+    await expect(page.locator("#trackDetailStartCue .cue-row.is-playback-start")).toHaveCount(0);
+    expect(await page.evaluate(() => localStorage.getItem("djusbtkit.cueStartOnFirstBeat"))).toBe("0");
+  }
+});
+
+test("cue list rows carry the same letter as their waveform marker, in position order; the modal opens zoomed to 60 bars; Fit shows the whole track; zoom windows cue markers; the overview strip shows the visible window and moves the view", async ({ page }) => {
+  await openCueEditor(page, { seedCues: [170000, 30000] });
+  {
+    const rows = page.locator("#trackDetailCueList .cue-row");
+    await expect(rows.locator(".cue-row-pos")).toHaveText(["0:30.00", "2:50.00"]);
+    await expect(rows.locator(".cue-row-color")).toHaveText(["A", "B"]);
+    await expect(page.locator("#trackDetailCueMarkers .cue-marker")).toHaveText(["A", "B"]);
+  }
+
+  await reopen(page);
+  {
+    // durationMs 180000; one cue inside the default 2-min view, one past it.
+    await expect(page.locator("#trackDetailCueList .cue-row")).toHaveCount(2);
+
+    const visibleMarkers = page.locator("#trackDetailCueMarkers .cue-marker:not(.off-view)");
+    // Default view is 60 bars at 128 BPM (0–112.5 s), so only the 30 s cue is on screen.
+    await expect(visibleMarkers).toHaveCount(1);
+
+    // The zoom-range readout makes the initial zoomed-in view unmistakable: it
+    // names the visible window, centred under the waveform; the 3-min total
+    // sits at the footer's right end.
+    const zoomRange = page.locator("#trackDetailZoomRange");
+    const totalTime = page.locator("#trackDetailTotalTime");
+    await expect(zoomRange).toBeVisible();
+    await expect(zoomRange).toHaveClass(/is-zoomed/);
+    await expect(zoomRange).toHaveText("0:00–1:53");
+    await expect(totalTime).toHaveText("3:00");
+    const wfBox = await page.locator("#trackDetailWaveform").boundingBox();
+    const rangeBox = await zoomRange.boundingBox();
+    const totalBox = await totalTime.boundingBox();
+    expect(rangeBox.y).toBeGreaterThanOrEqual(wfBox.y + wfBox.height);
+    expect(Math.abs(rangeBox.x + rangeBox.width / 2 - (wfBox.x + wfBox.width / 2))).toBeLessThan(4);
+    expect(totalBox.y).toBeGreaterThanOrEqual(wfBox.y + wfBox.height);
+    expect(wfBox.x + wfBox.width - (totalBox.x + totalBox.width)).toBeLessThan(16);
+
+    await page.locator("#trackDetailZoomFit").click();
+    await expect(visibleMarkers).toHaveCount(2);
+    // Fully zoomed out, the readout switches to a plain "whole track" state.
+    await expect(zoomRange).not.toHaveClass(/is-zoomed/);
+    await expect(zoomRange).toHaveText("Whole track");
+    await expect(totalTime).toHaveText("3:00");
+
+    // Scroll-wheel zoom toward the left edge → the 170 s cue leaves the view again.
+    await page.locator("#trackDetailWaveform").hover({ position: { x: 15, y: 100 } });
+    await page.mouse.wheel(0, -500);
+    await expect(visibleMarkers).toHaveCount(1);
+  }
+
+  await reopen(page);
+  {
+    const overview = page.locator("#trackDetailOverview");
+    const windowBox = page.locator("#trackDetailOverviewWindow");
+    await expect(page.locator("#trackDetailOverviewCues .overview-cue")).toHaveCount(2);
+
+    // The modal opens on 60 bars at 128 BPM (112.5 s) of a 3:00 track: the box covers 5/8.
+    const ov = await overview.boundingBox();
+    let box = await windowBox.boundingBox();
+    expect(Math.abs(box.x - ov.x)).toBeLessThan(2);
+    expect(Math.abs(box.width - (ov.width * 5) / 8)).toBeLessThan(3);
+
+    // Zoom in, then click near the end: the view (same zoom) centres there.
+    for (let i = 0; i < 3; i += 1) await page.locator("#trackDetailZoomIn").click();
+    const zoomedWidth = (ov.width * 112.5) / 8 / 180; // 112.5 s / 2^3 of 180 s
+    await expect.poll(async () => (await windowBox.boundingBox()).width).toBeCloseTo(zoomedWidth, 0);
+    // 94% of 3:00 is 2:49, so the 14 s view (2:42–2:56) takes in the 2:50 cue.
+    await overview.click({ position: { x: ov.width * 0.94, y: ov.height / 2 } });
+    await expect.poll(async () => {
+      const b = await windowBox.boundingBox();
+      return b.x + b.width / 2 - ov.x;
+    }).toBeGreaterThan(ov.width * 0.92);
+    box = await windowBox.boundingBox();
+    expect(Math.abs(box.width - zoomedWidth)).toBeLessThan(2);
+    await expect(page.locator("#trackDetailZoomRange")).toHaveText(/^2:\d\d–2:\d\d$/);
+    // The view followed: the 170 s cue is now on the main waveform.
+    await expect(page.locator("#trackDetailCueMarkers .cue-marker:not(.off-view)")).toHaveText("B");
+
+    // Dragging moves it back.
+    await page.mouse.move(ov.x + ov.width * 0.94, ov.y + ov.height / 2);
+    await page.mouse.down();
+    await page.mouse.move(ov.x + ov.width * 0.2, ov.y + ov.height / 2, { steps: 6 });
+    await page.mouse.up();
+    await expect.poll(async () => {
+      const b = await windowBox.boundingBox();
+      return b.x + b.width / 2 - ov.x;
+    }).toBeLessThan(ov.width * 0.22);
+
+    await page.locator("#trackDetailZoomFit").click();
+    await expect.poll(async () => (await windowBox.boundingBox()).width).toBeGreaterThan(ov.width - 2);
+  }
+});
+
+test("the playback-start cue follows an untouched first beat and is never after a hot cue", async ({ page }) => {
+  await openCueEditor(page, { seedCues: [30000], seedStart: 120, quantize: false });
+  const firstBeat = page.locator("#trackDetailStartFirstBeat");
+  await expect(firstBeat).toHaveAttribute("aria-checked", "true");
+
+  await expect(firstBeat).toHaveText("First beat");
+  const startPos = page.locator("#trackDetailStartCue .cue-row.is-playback-start .cue-row-pos");
+  const hotPos = page.locator("#trackDetailCueList .cue-row:not(.is-playback-start) .cue-row-pos");
+  await expect(startPos).toHaveText("0:00.12");
+
+  // Untouched: follows the first beat (+1 beat at 128 BPM = 468.75 ms).
+  await page.locator("#trackDetailFirstBeatPlus").click();
+  await expect(page.locator("#trackDetailFirstBeatMs")).toHaveValue("589");
+  await expect(startPos).toHaveText("0:00.58");
+  await expect(firstBeat).toHaveText("First beat");
+
+  const wfBox = await page.locator("#trackDetailWaveform").boundingBox();
+  const drag = async (marker, ratio) => {
+    const box = await marker.boundingBox();
+    const y = box.y + box.height / 2;
+    await page.mouse.move(box.x + 2, y);
+    const targetX = wfBox.x + wfBox.width * ratio;
+    await page.mouse.down();
+    // Monotonic toward the target: an overshoot would legitimately push the start cue.
+    await page.mouse.move((box.x + 2 + targetX) / 2, y, { steps: 5 });
+    await page.mouse.move(targetX, y, { steps: 5 });
+    await page.mouse.up();
+  };
+
+  // Dragging it past the 30 s hot cue stops it on the hot cue.
+  await drag(page.locator("#trackDetailCueMarkers .cue-marker.is-playback-start"), 0.5);
+  await expect(startPos).toHaveText("0:30.00");
+  // Off the first beat, the choice names the placed marker instead.
+  await expect(firstBeat).toHaveText("Start marker");
+  await expect(firstBeat).toHaveAttribute("aria-checked", "true");
+  // The grey-out follows the dragged start cue.
+  const startBox = await page.locator("#trackDetailCueMarkers .cue-marker.is-playback-start").boundingBox();
+  expect(Math.abs((await preStartEdge(page)) - (startBox.x + 1 - wfBox.x))).toBeLessThan(3);
+
+  // Dragging the hot cue before it pushes it back too.
+  await drag(page.locator("#trackDetailCueMarkers .cue-marker:not(.is-playback-start)"), 0.1);
+  const hotText = await hotPos.textContent();
+  expect(hotText).toMatch(/^0:1[12]\./);
+  await expect(startPos).toHaveText(hotText);
+
+  // Once dragged it no longer follows the first beat.
+  await page.locator("#trackDetailFirstBeatMinus").click();
+  await expect(startPos).toHaveText(hotText);
+
+  await page.locator("#trackDetailSaveBtn").click();
+  const saveCall = await page.evaluate(() =>
+    window.__calls.find((c) => c.command === "save_track_analysis_edits")
+  );
+  const [start, hot] = saveCall.request.cues;
+  expect(start.playbackStart).toBe(true);
+  expect(hot.playbackStart).toBe(false);
+  expect(start.positionMs).toBe(hot.positionMs);
+});
+
+test("keyboard: Space plays/pauses (never presses the focused Save), C adds a cue, 1–8 jump, ←/→ move the selected cue; a cue row's play button and its waveform marker both play from that cue's position", async ({ page }) => {
+  await openCueEditor(page, { seedCues: [30000, 90000] });
+  {
+    const calls = (command) =>
+      page.evaluate((command) => window.__calls.filter((c) => c.command === command), command);
+    await expect(page.locator("#trackDetailSaveBtn")).toBeFocused();
+
+    await page.keyboard.press("Space");
+    await expect.poll(async () => (await calls("play_resolved_track")).length).toBe(1);
+    await page.keyboard.press("Space");
+    await expect.poll(async () => (await calls("pause_playback_native")).length).toBe(1);
+    expect(await calls("save_track_analysis_edits")).toHaveLength(0);
+    await expect(page.locator("#trackDetailView")).toBeVisible();
+
+    // C: a cue at the paused spot (on the nearest beat, Q is on), selected.
+    await page.keyboard.press("c");
+    const rows = page.locator("#trackDetailCueList .cue-row");
+    await expect(rows).toHaveCount(3);
+    await expect(page.locator("#trackDetailCueList .cue-row.is-selected")).toHaveCount(1);
+    await expect(page.locator("#trackDetailCueMarkers .cue-marker.is-selected")).toHaveCount(1);
+
+    // The new cue sits near the start, so it is A; 3 jumps to the 90 s cue
+    // (now C, at 90 s of 180 s) and selects it.
+    await page.keyboard.press("3");
+    await expect.poll(async () => (await calls("play_resolved_track")).length).toBe(2);
+    expect((await calls("play_resolved_track"))[1].request.startRatio).toBeCloseTo(0.5, 3);
+    const selectedPos = page.locator("#trackDetailCueList .cue-row.is-selected .cue-row-pos");
+    await expect(selectedPos).toHaveText("1:30.00");
+
+    // →: onto the next beat line; ← twice: two beats back; Shift+→: 10 ms.
+    const next = 120 + Math.ceil((90000 - 120) / BEAT_MS) * BEAT_MS; // 90120
+    await page.keyboard.press("ArrowRight");
+    await expect(selectedPos).toHaveText("1:30.12");
+    await page.keyboard.press("ArrowLeft");
+    await page.keyboard.press("ArrowLeft");
+    const twoBack = Math.round(next - 2 * BEAT_MS); // 89182.5 → 89183
+    await expect(selectedPos).toHaveText(`1:29.${String(Math.floor((twoBack % 1000) / 10)).padStart(2, "0")}`);
+    await page.keyboard.press("Shift+ArrowRight");
+    const { cues } = await savedCues(page);
+    const moved = cues.find((c) => c.positionMs > 80000);
+    expect(moved.positionMs).toBe(twoBack + 10);
+  }
+
+  await reopen(page);
+  {
+    await expect(page.locator("#trackDetailCueList .cue-row")).toHaveCount(2);
+
+    const playCalls = () =>
+      page.evaluate(() => window.__calls.filter((c) => c.command === "play_resolved_track"));
+
+    await page.locator("#trackDetailCueList .cue-row", { hasText: "1:30.00" }).locator(".cue-row-play").click();
+    await expect.poll(async () => (await playCalls()).length).toBe(1);
+    expect((await playCalls()).at(-1).request.startRatio).toBeCloseTo(90000 / 180000, 2);
+
+    // Playing, the marker scrolls with the waveform; paused, it holds still
+    // right under the centred playhead and is still clickable there.
+    await page.locator("#trackDetailPlayPause").click();
+    await expect(page.locator("#trackDetailPlayPause")).toHaveAttribute("aria-label", "Play");
+    await page.locator("#trackDetailCueMarkers .cue-marker").nth(1).click();
+    await expect.poll(async () => (await playCalls()).length).toBe(2);
+    expect((await playCalls()).at(-1).request.startRatio).toBeCloseTo(90000 / 180000, 2);
+  }
+});
+
+test("Camelot notation shows the backend's labels but saves the classic key", async ({ page }) => {
+  await installTrackDetailMock(page, { camelot: true });
   await page.goto("/");
 
-  await openUsb(page, "usb-playlists");
+  const keyPill = page.locator('#libraryTableBody .track-grid-row .td-key .key-pill');
+  await expect(keyPill).toHaveText("8A");
+  await expect(keyPill).toHaveClass(/key-pill--h7/);
 
-  const row = page.locator("#usbPlaylistTracks .track-grid-row");
-  await expect(row).toHaveCount(1);
-  await expect(row.locator('[data-action="analyze-track"]')).toHaveCount(0);
-  await row.locator('[data-action="edit-track-detail"]').click();
-
+  await page.locator('#libraryTableBody .waveform-cell [data-action="edit-track-detail"]').click();
   await expect(page.locator("#trackDetailView")).toBeVisible();
-  await expect(page.locator("#trackDetailCueList .cue-row")).toHaveCount(1);
-  await expect(page.locator("#trackDetailKey")).toHaveValue("Bm");
-  const detailCall = await page.evaluate(() => window.__calls.find((c) => c.command === "get_usb_track_detail"));
-  expect(detailCall.request.usbAnalysisPathRaw).toBe("/PIONEER/USBANLZ/P001/0000A1B2/ANLZ0000.DAT");
+  await expect(page.locator("#trackDetailKey")).toHaveValue("Am");
+  await expect(page.locator("#trackDetailKey option:checked")).toHaveText("8A");
 
-  await page.locator("#trackDetailAddCue").click();
-  await page.locator("#trackDetailKey").selectOption("Dm");
+  await page.locator("#trackDetailKey").selectOption({ label: "11A" });
   await page.locator("#trackDetailSaveBtn").click();
   await expect(page.locator("#trackDetailView")).toBeHidden();
 
-  const saveCall = await page.evaluate(() => window.__calls.find((c) => c.command === "save_usb_track_analysis_edits"));
-  expect(saveCall.request.usbAnalysisPathRaw).toBe("/PIONEER/USBANLZ/P001/0000A1B2/ANLZ0000.DAT");
-  expect(saveCall.request.usbMediaPathRaw).toBe("/Contents/USB Artist/USB Album/track.mp3");
-  expect(saveCall.request.localTrackId).toBe("local-1");
-  expect(saveCall.request.cues).toHaveLength(2);
-  expect(saveCall.request.key).toBe("Dm");
-  // A USB edit without a BPM change still carries the current bpm -- the
-  // on-device beat-grid rewrite always needs a real value, not null.
-  expect(saveCall.request.bpm).toBe(126);
-  await expect(page.locator("#statusText")).toContainText("to USB");
-  await expect(row.locator(".td-key .key-pill")).toHaveText("Dm");
+  const saveCall = await page.evaluate(() =>
+    window.__calls.find((c) => c.command === "save_track_analysis_edits")
+  );
+  expect(saveCall.request.key).toBe("F#m");
+  await expect(keyPill).toHaveText("11A");
+  await expect(keyPill).toHaveClass(/key-pill--h10/);
 });
 
+test("cues follow grid is off by default: BPM and first-beat edits leave cues where they are; cues follow grid: BPM and first-beat edits keep every cue on its beat, undoably, without drift; cues follow grid is remembered and leaves a hand-moved cue's new spot alone", async ({ page }) => {
+  await openCueEditor(page, FOLLOW_GRID_SEED);
+  {
+    await expect(page.locator("#trackDetailFollowGrid")).toHaveAttribute("aria-pressed", "false");
+
+    await setBpmInput(page, "120");
+    await page.locator("#trackDetailFirstBeatPlus").click();
+
+    // The untouched start cue still follows the first beat, as before.
+    expect(await savedCuePositions(page)).toEqual({ bpm: 120, firstBeatMs: 620, positions: [620, 30120, 60000] });
+  }
+
+  await reopen(page);
+  {
+    const toggle = page.locator("#trackDetailFollowGrid");
+    await toggle.click();
+    await expect(toggle).toHaveAttribute("aria-pressed", "true");
+    const persisted = await page.evaluate(() => ({
+      local: window.localStorage.getItem("djusbtkit.cueFollowGrid"),
+      db: window.__calls
+        .filter((c) => c.command === "set_frontend_setting")
+        .map((c) => c.request)
+        .filter((r) => r?.key === "ui_cue_follow_grid_v1")
+        .map((r) => r.value),
+    }));
+    expect(persisted).toEqual({ local: "1", db: ["1"] });
+
+    const startPos = page.locator("#trackDetailStartCue .cue-row.is-playback-start .cue-row-pos");
+    const hotPos = page.locator("#trackDetailCueList .cue-row:not(.is-playback-start) .cue-row-pos");
+
+    // 128 -> 120 BPM (500 ms a beat): beat 64 is now 32120 ms, beat 127.744 63992 ms.
+    await setBpmInput(page, "120");
+    await expect(hotPos).toHaveText(["0:32.12", "1:03.99"]);
+    await expect(startPos).toHaveText("0:00.12");
+
+    // One undo puts the grid and the cues back; redo moves them again.
+    await page.locator("#trackDetailUndo").click();
+    await expect(page.locator("#trackDetailBpm")).toHaveValue("128.00");
+    await expect(hotPos).toHaveText(["0:30.12", "1:00.00"]);
+    await page.locator("#trackDetailRedo").click();
+    await expect(hotPos).toHaveText(["0:32.12", "1:03.99"]);
+
+    // A first-beat nudge moves every cue by one beat (500 ms), the start cue once.
+    await page.locator("#trackDetailFirstBeatPlus").click();
+    await expect(page.locator("#trackDetailFirstBeatMs")).toHaveValue("620");
+    await expect(hotPos).toHaveText(["0:32.62", "1:04.49"]);
+    await expect(startPos).toHaveText("0:00.62");
+
+    // Many 0.01 BPM steps up and back down land on the exact same ms.
+    for (let i = 0; i < 40; i += 1) await page.locator("#trackDetailBpmPlus").click();
+    await expect(page.locator("#trackDetailBpm")).toHaveValue("120.40");
+    for (let i = 0; i < 40; i += 1) await page.locator("#trackDetailBpmMinus").click();
+    await expect(page.locator("#trackDetailBpm")).toHaveValue("120.00");
+
+    expect(await savedCuePositions(page)).toEqual({ bpm: 120, firstBeatMs: 620, positions: [620, 32620, 64492] });
+  }
+
+  await reopen(page);
+  {
+    await expect(page.locator("#trackDetailFollowGrid")).toHaveAttribute("aria-pressed", "true");
+
+    await setBpmInput(page, "120");
+    // Move the first hot cue by hand: 1 selects it, Shift+→ moves it 10 ms.
+    // (Shortcuts stay out of the BPM field, so leave it first.)
+    await page.locator("#trackDetailBpm").blur();
+    await page.keyboard.press("1");
+    await page.keyboard.press("Shift+ArrowRight");
+    const hotPos = page.locator("#trackDetailCueList .cue-row:not(.is-playback-start) .cue-row-pos");
+    await expect(hotPos).toHaveText(["0:32.13", "1:03.99"]);
+
+    // Back to 128 BPM: the moved cue keeps its new beat (64.02), the other its old one.
+    await setBpmInput(page, "128");
+    expect(await savedCuePositions(page)).toEqual({ bpm: 128, firstBeatMs: 120, positions: [120, 30129, 60000] });
+  }
+});
+
+test("memory cues show as ▼ flags without a letter, outside the 8 pads, and are saved as they are; the memory-cue slot: M and + add one, ◀ ▶ step through them, rename, colour and delete", async ({ page }) => {
+  await openCueEditor(page, { seedCues: [30000], seedMemory: MEMORY_SEED });
+  {
+    const memoryMarkers = page.locator("#trackDetailCueMarkers .cue-marker.is-memory");
+    await expect(memoryMarkers).toHaveCount(3);
+    await expect(memoryMarkers.first()).toHaveText("");
+    await expect(memoryMarkers.first()).toHaveAttribute("data-tooltip", "Memory cue · Intro · 0:02.00");
+    await expect(page.locator("#trackDetailCueMarkers .cue-marker:not(.is-memory)")).toHaveText(["A"]);
+    await expect(page.locator("#trackDetailOverviewCues .overview-cue.is-memory")).toHaveCount(3);
+    await expect(page.locator("#trackDetailMemoryCue")).toContainText("Memory cues: 3");
+
+    // The CDJ loads on the earliest memory point: here the 2 s memory cue.
+    const wfBox = await page.locator("#trackDetailWaveform").boundingBox();
+    const introBox = await memoryMarkers.first().boundingBox();
+    expect(Math.abs((await preStartEdge(page)) - (introBox.x - wfBox.x))).toBeLessThan(3);
+
+    // All 8 pads stay available.
+    for (let i = 0; i < 7; i += 1) await page.locator("#trackDetailAddCue").click();
+    await expect(page.locator("#trackDetailAddCue")).toBeDisabled();
+
+    // Deleting every hot cue keeps the memory cues.
+    for (let i = 0; i < 8; i += 1) {
+      await page.locator("#trackDetailCueList .cue-row .cue-row-delete").first().click();
+    }
+    await expect(memoryMarkers).toHaveCount(3);
+
+    await page.locator("#trackDetailSaveBtn").click();
+    const saveCall = await page.evaluate(() =>
+      window.__calls.find((c) => c.command === "save_track_analysis_edits")
+    );
+    expect(saveCall.request.cues).toEqual([
+      { positionMs: 2000, colorId: 3, name: "Intro", playbackStart: false, memory: true },
+      { positionMs: 40000, colorId: null, name: null, playbackStart: false, memory: true },
+      { positionMs: 90000, colorId: null, name: "Outro", playbackStart: false, memory: true },
+    ]);
+  }
+
+  await reopen(page);
+  // Quantize off (remembered), then open the track afresh.
+  await page.locator("#trackDetailQuantize").click();
+  await reopen(page);
+  {
+    const slot = page.locator("#trackDetailMemoryCue");
+
+    // M adds one at the (stopped) playhead and selects it; a second one there
+    // isn't possible.
+    await page.keyboard.press("m");
+    await expect(slot.locator(".cue-row-pos")).toHaveText("0:00.00");
+    await expect(slot.locator(".memory-slot-count")).toHaveText("1/4");
+    await slot.locator("[data-action='memory-add']").click();
+    await expect(slot.locator(".memory-slot-count")).toHaveText("1/4");
+    await expect(page.locator("#statusText")).toContainText("A cue is already there.");
+
+    // ▶ steps to the next memory cue and plays from it.
+    await slot.locator("[data-action='memory-next']").click();
+    await expect(slot.locator(".cue-row-pos")).toHaveText("0:02.00");
+    await expect(slot.locator(".cue-row-name")).toHaveValue("Intro");
+    await expect(slot.locator(".memory-slot-count")).toHaveText("2/4");
+    const played = await page.evaluate(() =>
+      window.__calls.filter((c) => c.command === "play_resolved_track").at(-1)?.request?.startRatio
+    );
+    expect(played).toBeCloseTo(2000 / 180000, 5);
+    await slot.locator("[data-action='memory-next']").click();
+    await expect(slot.locator(".cue-row-pos")).toHaveText("0:40.00");
+
+    // Rename and colour the 40 s one.
+    await slot.locator(".cue-row-name").fill("Break");
+    await slot.locator(".cue-row-color").click();
+    await page.locator("#trackDetailColorPopover .cue-color-swatch").nth(5).click(); // id 6
+    await expect(slot.locator(".cue-row-name")).toHaveValue("Break");
+    await expect(slot.locator(".cue-row-color")).not.toHaveClass(/is-uncoloured/);
+
+    // ◀ back to the 2 s one; × deletes it.
+    await slot.locator("[data-action='memory-prev']").click();
+    await expect(slot.locator(".cue-row-pos")).toHaveText("0:02.00");
+    await slot.locator(".cue-row-delete").click();
+    await expect(slot).toContainText("Memory cues: 3");
+
+    await page.locator("#trackDetailSaveBtn").click();
+    const saveCall = await page.evaluate(() =>
+      window.__calls.find((c) => c.command === "save_track_analysis_edits")
+    );
+    expect(saveCall.request.cues.filter((c) => c.memory)).toEqual([
+      { positionMs: 0, colorId: null, name: null, playbackStart: false, memory: true },
+      { positionMs: 40000, colorId: 6, name: "Break", playbackStart: false, memory: true },
+      { positionMs: 90000, colorId: null, name: "Outro", playbackStart: false, memory: true },
+    ]);
+  }
+});
+
+test("a memory cue never lands on another cue: a drag stops short; a hot cue added on a memory cue turns it into that hot cue, keeping its name and colour", async ({ page }) => {
+  await openCueEditor(page, { seedCues: [30120], seedMemory: [{ positionMs: 120, name: "Intro", colorId: 3 }] });
+  {
+    // Quantize on: the hot cue sits on beat 64 (30120 ms), the memory cue on
+    // the first beat (120 ms).
+
+    // Drag the memory cue onto the hot cue: it stops on the beat before.
+    const memory = page.locator("#trackDetailCueMarkers .cue-marker.is-memory");
+    const hot = page.locator("#trackDetailCueMarkers .cue-marker:not(.is-memory)");
+    const from = await memory.boundingBox();
+    const to = await hot.boundingBox();
+    const y = from.y + 5;
+    await page.mouse.move(from.x, y);
+    await page.mouse.down();
+    await page.mouse.move(to.x - 20, y, { steps: 8 });
+    await page.mouse.move(to.x + 1, y, { steps: 4 });
+    await page.mouse.up();
+
+    await page.locator("#trackDetailSaveBtn").click();
+    const saveCall = await page.evaluate(() =>
+      window.__calls.find((c) => c.command === "save_track_analysis_edits")
+    );
+    const positions = saveCall.request.cues.map((c) => [c.positionMs, c.memory]);
+    expect(positions).toContainEqual([30120, false]);
+    const moved = positions.find(([, m]) => m)[0];
+    expect(moved).toBeGreaterThan(120);
+    expect(moved).toBeLessThan(30120);
+  }
+
+  await reopen(page);
+  {
+    // C at the stopped playhead snaps to the first beat, where the memory cue is.
+    await page.keyboard.press("c");
+    await expect(page.locator("#trackDetailCueMarkers .cue-marker.is-memory")).toHaveCount(0);
+    await expect(page.locator("#trackDetailCueMarkers .cue-marker:not(.is-memory)")).toHaveCount(2);
+
+    await page.locator("#trackDetailSaveBtn").click();
+    const saveCall = await page.evaluate(() =>
+      window.__calls.find((c) => c.command === "save_track_analysis_edits")
+    );
+    const at120 = saveCall.request.cues.filter((c) => c.positionMs === 120);
+    expect(at120).toHaveLength(1);
+    expect(at120[0]).toMatchObject({ memory: false, name: "Intro", colorId: 3 });
+  }
+});
+
+test("double-click the waveform adds a cue at that position without starting playback; track-detail modal adds a cue at the playhead and saves it; usage hints show until the track has a cue, then fold into a ? tooltip; with Q on, a double-clicked cue lands on the nearest beat; Shift+double-click places it freely; cue names default to 'Cue N' and stay editable without losing focus; the Beat grid slider sets how strongly the grid shows, and is remembered; bar numbers label the grid without crowding, down to every bar when zoomed in; beat grid lines sit on whole device pixels, evenly spaced, at a fractional-pixel tempo; the metronome has the native engine click on the grid, following grid edits and the mix, off on close; key stepper steps through the backend's key options and wraps at the ends; the folder button shows the track's file in its folder; switching key notation in settings persists it and re-fetches the backend's labels; genre, star rating and release date: a change to only them saves only them, leaving the beat grid, key and cues alone; a rating edit alongside a BPM edit saves both, each with only its own fields; BPM and first-beat steppers: ÷2/×2 fix a half/double tempo; −/+ and the ▲/▼ arrows step by 0.01 BPM and 1 ms; track-detail modal edits BPM, saves it, and the library row/tooltip update; track-detail modal edits the musical key, saves it, and the library row updates; playback-start choice: informational with no cues, then applies the remembered (default First cue) setting; remembered start-on-first-beat: the first cue adds the start cue; deleting the last cue removes it", async ({ page }) => {
+  await openCueEditor(page);
+  {
+    // Default view is 60 bars (0–112.5 s) of the 180 s track; x≈300/1227 ≈ 24 % ⇒ ~28 s.
+    await page.locator("#trackDetailWaveform").dblclick({ position: { x: 300, y: 100 } });
+    await expect(page.locator("#trackDetailCueList .cue-row")).toHaveCount(1);
+
+    await page.locator("#trackDetailSaveBtn").click();
+    const saveCall = await page.evaluate(() =>
+      window.__calls.find((c) => c.command === "save_track_analysis_edits")
+    );
+    expect(saveCall.request.cues).toHaveLength(1);
+    expect(saveCall.request.cues[0].positionMs).toBeGreaterThan(15000);
+    expect(saveCall.request.cues[0].positionMs).toBeLessThan(45000);
+    // A cue-only edit still carries the track's current (unedited) bpm, not
+    // null -- the on-device beat-grid rewrite needs a real bpm value even when
+    // bpm itself wasn't touched this save.
+    expect(saveCall.request.bpm).toBe(128);
+    expect(
+      await page.evaluate(() => window.__calls.some((c) => c.command === "play_resolved_track"))
+    ).toBe(false);
+  }
+
+  await reopen(page);
+  {
+    await expect(page.locator("#trackDetailFirstBeatMs")).toHaveValue("120");
+
+    // Clicking the waveform parks the playhead there.
+    await page.locator("#trackDetailWaveform").click({ position: { x: 40, y: 20 } });
+    await expect
+      .poll(() => page.evaluate(() => window.__calls.some((c) => c.command === "play_resolved_track")))
+      .toBe(true);
+    await expect(page.locator("#trackDetailPlayhead")).toBeVisible();
+
+    // All eight A–H slots are always there, so adding a cue doesn't change the height.
+    const cells = page.locator("#trackDetailCueList > *");
+    await expect(cells).toHaveCount(8);
+    const listHeight = (await page.locator("#trackDetailCueList").boundingBox()).height;
+    await page.locator("#trackDetailAddCue").click();
+    await expect(page.locator("#trackDetailCueList .cue-row")).toHaveCount(1);
+    await expect(cells).toHaveCount(8);
+    await expect(page.locator("#trackDetailCueList .cue-slot-empty").first().locator(".cue-row-color")).toHaveText("B");
+    expect((await page.locator("#trackDetailCueList").boundingBox()).height).toBe(listHeight);
+
+    await page.locator("#trackDetailSaveBtn").click();
+    await expect(page.locator("#trackDetailView")).toBeHidden();
+
+    const saveCall = await page.evaluate(() =>
+      window.__calls.find((c) => c.command === "save_track_analysis_edits")
+    );
+    expect(saveCall).toBeTruthy();
+    expect(Array.isArray(saveCall.request.cues)).toBe(true);
+    expect(saveCall.request.cues).toHaveLength(1);
+    expect(Object.keys(saveCall.request.cues[0]).sort()).toEqual([
+      "colorId",
+      "memory",
+      "name",
+      "playbackStart",
+      "positionMs",
+    ]);
+    expect(saveCall.request.cues[0].playbackStart).toBe(false);
+  }
+
+  await reopen(page);
+  {
+    const hint = page.locator("#trackDetailHint");
+    const hintBtn = page.locator("#trackDetailHintBtn");
+    await expect(hint).toBeVisible();
+    await expect(hintBtn).toBeHidden();
+
+    await page.locator("#trackDetailWaveform").dblclick({ position: { x: 300, y: 100 } });
+    await expect(hint).toBeHidden();
+    await expect(hintBtn).toBeVisible();
+    await expect(hintBtn).toHaveAttribute("data-tooltip", /double-click to add a cue/);
+
+    await page.locator("#trackDetailCueList .cue-row-delete").click();
+    await expect(hint).toBeVisible();
+  }
+
+  await reopen(page);
+  {
+    const wf = page.locator("#trackDetailWaveform");
+    const wfBox = await wf.boundingBox();
+    // The opening view is 60 bars at 128 BPM = 112.5 s.
+    await wf.dblclick({ position: { x: wfBox.width * (30 / 112.5), y: 100 } });
+    await wf.dblclick({ position: { x: wfBox.width * 0.62, y: 100 }, modifiers: ["Shift"] });
+    const { cues } = await savedCues(page);
+    expect(cues).toHaveLength(2);
+    expect(Math.abs(cues[0].positionMs - 30000)).toBeLessThan(BEAT_MS);
+    expect(offBeat(cues[0].positionMs)).toBeLessThanOrEqual(1);
+    expect(Math.abs(cues[1].positionMs - 0.62 * 112500)).toBeLessThan(400);
+    expect(offBeat(cues[1].positionMs)).toBeGreaterThan(1);
+  }
+
+  await reopen(page);
+  {
+    await page.locator("#trackDetailAddCue").click();
+    await page.locator("#trackDetailAddCue").click();
+    const rows = page.locator("#trackDetailCueList .cue-row");
+    await expect(rows).toHaveCount(2);
+    await expect(rows.nth(0).locator(".cue-row-name")).toHaveValue("Cue 1");
+    await expect(rows.nth(1).locator(".cue-row-name")).toHaveValue("Cue 2");
+
+    // Typing character-by-character must not lose focus (regression: the cue
+    // list used to fully rebuild its DOM on every keystroke).
+    const nameInput = rows.nth(0).locator(".cue-row-name");
+    await nameInput.click();
+    await nameInput.fill("");
+    await nameInput.pressSequentially("Intro Drop", { delay: 15 });
+    await expect(nameInput).toHaveValue("Intro Drop");
+    expect(await nameInput.evaluate((el) => el === document.activeElement)).toBe(true);
+
+    await page.locator("#trackDetailSaveBtn").click();
+    const saveCall = await page.evaluate(() =>
+      window.__calls.find((c) => c.command === "save_track_analysis_edits")
+    );
+    expect(saveCall.request.cues.map((c) => c.name).sort()).toEqual(["Cue 2", "Intro Drop"]);
+  }
+
+  await reopen(page);
+  {
+    const slider = page.locator("#trackDetailGridLevel");
+    // The opening 60-bar view only draws bar lines; zooming in spreads the
+    // beats far enough apart to draw them too, and the bars far enough apart
+    // for full-width bar lines even at the thickest setting.
+    await page.locator("#trackDetailZoomIn").click();
+    await page.locator("#trackDetailZoomIn").click();
+    const lineWidth = (selector) =>
+      page
+        .locator(`#trackDetailBeatgrid .beatgrid-line${selector}`)
+        .first()
+        .evaluate((n) => n.getBoundingClientRect().width);
+    const gridOpacity = () =>
+      page
+        .locator("#trackDetailBeatgrid .beatgrid-line:not(.is-downbeat)")
+        .first()
+        .evaluate((n) => Number(getComputedStyle(n).opacity));
+    const downbeatOpacity = () =>
+      page
+        .locator("#trackDetailBeatgrid .beatgrid-line.is-downbeat")
+        .first()
+        .evaluate((n) => Number(getComputedStyle(n).opacity));
+    await expect(slider).toHaveValue("35");
+    const defaultOpacity = await gridOpacity();
+    const defaultBeatWidth = await lineWidth(":not(.is-downbeat)");
+    const defaultBarWidth = await lineWidth(".is-downbeat");
+
+    // The thumb follows the pointer: a click lands on the matching value
+    // (no inherited text-input padding skewing the track).
+    const box = await slider.boundingBox();
+    await slider.click({ position: { x: box.width * 0.75, y: box.height / 2 } });
+    expect(Math.abs(Number(await slider.inputValue()) - 75)).toBeLessThanOrEqual(6);
+    await slider.click({ position: { x: box.width * 0.25, y: box.height / 2 } });
+    expect(Math.abs(Number(await slider.inputValue()) - 25)).toBeLessThanOrEqual(6);
+
+    await slider.fill("100");
+    await expect.poll(gridOpacity).toBe(1);
+    // The slider drives thickness too.
+    expect(await lineWidth(":not(.is-downbeat)")).toBeGreaterThan(defaultBeatWidth);
+    expect(await lineWidth(".is-downbeat")).toBeGreaterThan(defaultBarWidth);
+    expect(await page.evaluate(() => localStorage.getItem("djusbtkit.cueBeatgridLevel"))).toBe("100");
+
+    await slider.fill("0");
+    const faint = await gridOpacity();
+    expect(faint).toBeGreaterThan(0);
+    expect(faint).toBeLessThan(defaultOpacity);
+    expect(await lineWidth(":not(.is-downbeat)")).toBeLessThan(defaultBeatWidth);
+    // Bar starts stay visible even with the slider at 0.
+    expect(await downbeatOpacity()).toBeGreaterThanOrEqual(0.6);
+    expect(await page.evaluate(() => localStorage.getItem("djusbtkit.cueBeatgridLevel"))).toBe("0");
+
+    // The grid overflows the waveform into a strip above and below it.
+    const canvasBox = await page.locator("#trackDetailWaveform .waveform-canvas-el").boundingBox();
+    const lineBox = await page.locator("#trackDetailBeatgrid .beatgrid-line").first().boundingBox();
+    expect(lineBox.y).toBeLessThan(canvasBox.y);
+    expect(lineBox.y + lineBox.height).toBeGreaterThan(canvasBox.y + canvasBox.height);
+  }
+
+  await reopen(page);
+  {
+    const labels = page.locator("#trackDetailBeatgrid .beatgrid-bar");
+    const barState = () =>
+      labels.evaluateAll((nodes) => ({
+        numbers: nodes.map((n) => Number(n.textContent)),
+        xs: nodes.map((n) => n.getBoundingClientRect().left),
+      }));
+
+    // The opening view is 60 bars: ~5 px a beat is too dense for beat lines,
+    // so only bar lines are drawn -- every 2nd bar, at beat-line width, since
+    // ~20 px a bar is too tight for a full-width line on every bar.
+    const beatLines = page.locator("#trackDetailBeatgrid .beatgrid-line:not(.is-downbeat)");
+    const barLines = page.locator("#trackDetailBeatgrid .beatgrid-line.is-downbeat");
+    await expect(beatLines).toHaveCount(0);
+    const openingXs = await barLines.evaluateAll((nodes) =>
+      nodes.map((n) => n.getBoundingClientRect().left)
+    );
+    expect(openingXs.length).toBeGreaterThanOrEqual(30);
+    expect(openingXs.length).toBeLessThan(60);
+    const barLineWidth = () =>
+      barLines.first().evaluate((n) => n.getBoundingClientRect().width);
+    const thinBarWidth = await barLineWidth();
+
+    // Labelled every Nth bar, never closer than 36 px.
+    let { numbers, xs } = await barState();
+    expect(numbers[0]).toBe(1);
+    const step = numbers[1] - numbers[0];
+    expect(step).toBeGreaterThan(1);
+    for (let i = 1; i < numbers.length; i += 1) {
+      expect(numbers[i] - numbers[i - 1]).toBe(step);
+      expect(xs[i] - xs[i - 1]).toBeGreaterThanOrEqual(35);
+    }
+
+    for (let i = 0; i < 4; i += 1) await page.locator("#trackDetailZoomIn").click();
+    await expect.poll(async () => {
+      ({ numbers } = await barState());
+      return numbers.length > 1 ? numbers[1] - numbers[0] : 0;
+    }).toBe(1);
+    // Zoomed in, every beat has its line again, and bar lines are full width.
+    expect(await beatLines.count()).toBeGreaterThan(0);
+    expect(await barLineWidth()).toBeGreaterThan(thinBarWidth);
+
+    // Packed tighter than 8 px a bar (whole 3:00 track at 512 BPM = 384 bars,
+    // ~3 px each), bar lines thin to every Nth bar too.
+    await page.locator("#trackDetailZoomFit").click();
+    await page.locator("#trackDetailBpmDouble").click();
+    await page.locator("#trackDetailBpmDouble").click();
+    await expect(page.locator("#trackDetailBpm")).toHaveValue("512.00");
+    const barXs = await barLines.evaluateAll((nodes) =>
+      nodes.map((n) => n.getBoundingClientRect().left)
+    );
+    expect(barXs.length).toBeGreaterThan(20);
+    expect(barXs.length).toBeLessThan(384 / 2);
+    for (let i = 1; i < barXs.length; i += 1) {
+      expect(barXs[i] - barXs[i - 1]).toBeGreaterThanOrEqual(7.5);
+    }
+  }
+
+  await reopen(page);
+  {
+    // 119 BPM at this zoom puts the beats a fractional number of pixels apart.
+    await page.locator("#trackDetailBpm").fill("119");
+    await page.locator("#trackDetailBpm").press("Enter");
+    await page.locator("#trackDetailZoomIn").click();
+    const { lefts, dpr } = await page.evaluate(() => ({
+      dpr: window.devicePixelRatio || 1,
+      lefts: [...document.querySelectorAll("#trackDetailBeatgrid .beatgrid-line")]
+        .map((n) => parseFloat(n.style.left))
+    }));
+    expect(lefts.length).toBeGreaterThan(20);
+    for (const left of lefts) {
+      expect(Math.abs(left * dpr - Math.round(left * dpr))).toBeLessThan(1e-6);
+    }
+    // Snapping moves a line at most half a device pixel, so neighbours stay
+    // within one device pixel of the true beat spacing.
+    const gaps = lefts.slice(1).map((l, i) => l - lefts[i]);
+    expect(Math.max(...gaps) - Math.min(...gaps)).toBeLessThanOrEqual(1 / dpr + 1e-6);
+  }
+
+  await reopen(page);
+  {
+    const sent = () =>
+      page.evaluate(() =>
+        window.__calls
+          .filter((c) => c.command === "set_playback_metronome")
+          .map((c) => c.request)
+      );
+    const last = async () => (await sent()).at(-1);
+    const metronome = page.locator("#trackDetailMetronome");
+    await expect(metronome).toHaveAttribute("aria-pressed", "false");
+    // The Mix slider only shows while the metronome is on.
+    const mix = page.locator("#trackDetailMetronomeMix");
+    await expect(mix).toBeHidden();
+    // Never on by surprise: opening reports it off (or says nothing at all).
+    expect((await sent()).every((r) => r.enabled === false)).toBe(true);
+
+    await metronome.click();
+    await expect(metronome).toHaveAttribute("aria-pressed", "true");
+    await expect(mix).toBeVisible();
+    await expect.poll(last).toEqual({ enabled: true, firstBeatMs: 120, bpm: 128, mix: 0.5 });
+
+    // Grid edits (and their undo) reach the engine while it's on.
+    await page.locator("#trackDetailBpmDouble").click();
+    await expect.poll(last).toEqual({ enabled: true, firstBeatMs: 120, bpm: 256, mix: 0.5 });
+    await page.locator("#trackDetailFirstBeatPlus").click();
+    await expect.poll(async () => (await last()).firstBeatMs).toBeGreaterThan(120);
+    await page.keyboard.press("Control+z");
+    await expect.poll(last).toEqual({ enabled: true, firstBeatMs: 120, bpm: 256, mix: 0.5 });
+
+    // No repeat sends when nothing changed (e.g. zooming).
+    const count = (await sent()).length;
+    await page.locator("#trackDetailZoomIn").click();
+    expect((await sent()).length).toBe(count);
+
+    // The Mix slider (both at full level in the middle) reaches the engine live
+    // and is remembered.
+    await expect(mix).toHaveValue("50");
+    await mix.fill("80");
+    await expect.poll(async () => (await last()).mix).toBe(0.8);
+    expect((await last()).enabled).toBe(true);
+    expect(await page.evaluate(() => localStorage.getItem("djusbtkit.cueMetronomeMix"))).toBe("80");
+
+    await metronome.click();
+    await expect.poll(async () => (await last()).enabled).toBe(false);
+    await expect(mix).toBeHidden();
+
+    // Closing the editor turns it off in the engine.
+    await metronome.click();
+    await expect.poll(async () => (await last()).enabled).toBe(true);
+    await page.locator("#trackDetailCancelBtn").click();
+    await expect.poll(async () => (await last()).enabled).toBe(false);
+
+    // Reopened, the metronome is off (so Mix is hidden) and the mix is where it was left.
+    await page.locator('#libraryTableBody .waveform-cell [data-action="edit-track-detail"]').click();
+    await expect(mix).toBeHidden();
+    await metronome.click();
+    await expect(mix).toHaveValue("80");
+  }
+
+  await reopen(page);
+  {
+    // Fixture key is "Am" (index 21 of 24: majors C..B, then minors Cm..Bm).
+    await expect(page.locator("#trackDetailKey")).toHaveValue("Am");
+    await page.locator("#trackDetailKeyPlus").click();
+    await expect(page.locator("#trackDetailKey")).toHaveValue("A#m");
+    await page.locator("#trackDetailKeyMinus").click();
+    await page.locator("#trackDetailKeyMinus").click();
+    await expect(page.locator("#trackDetailKey")).toHaveValue("G#m");
+
+    // Wrap: stepping past the last minor (Bm) lands back on the first major (C).
+    await page.locator("#trackDetailKey").selectOption("Bm");
+    await page.locator("#trackDetailKeyPlus").click();
+    await expect(page.locator("#trackDetailKey")).toHaveValue("C");
+    // Wrap the other way: stepping back from the first major (C) lands on Bm.
+    await page.locator("#trackDetailKeyMinus").click();
+    await expect(page.locator("#trackDetailKey")).toHaveValue("Bm");
+  }
+
+  await reopen(page);
+  {
+    await expect(page.locator("#trackDetailRevealBtn")).toHaveAttribute("data-tooltip", "Show in folder: /music/one.mp3");
+    await page.locator("#trackDetailRevealBtn").click();
+    await expect.poll(() => page.evaluate(() => window.__revealed)).toBe("/music/one.mp3");
+    // Not an edit: Escape still closes the dialog without pointing at Save.
+    await page.keyboard.press("Escape");
+    await expect(page.locator("#trackDetailView")).toBeHidden();
+  }
+
+  await closeEditor(page);
+  {
+    const keyPill = page.locator('#libraryTableBody .track-grid-row .td-key .key-pill');
+    await expect(keyPill).toHaveText("Am");
+
+    await page.locator("#settingsBtn").click();
+    await expect(page.locator("#keyNotationSelect")).toHaveValue("classic");
+    await page.locator("#keyNotationSelect").selectOption("camelot");
+    await page.locator("#settingsCloseBtn").click();
+
+    await expect(keyPill).toHaveText("8A");
+    const saved = await page.evaluate(() =>
+      window.__calls.filter((c) => c.command === "set_frontend_setting" && c.request?.key === "ui_key_notation_v1")
+    );
+    expect(saved.map((c) => c.request.value)).toEqual(["camelot"]);
+    expect(await page.evaluate(() => localStorage.getItem("djusbtkit.keyNotation"))).toBe("camelot");
+
+    await page.locator("#settingsBtn").click();
+    await page.locator("#keyNotationSelect").selectOption("classic");
+    await page.locator("#settingsCloseBtn").click();
+    await expect(keyPill).toHaveText("Am");
+  }
+
+  await reopen(page);
+  {
+    await expect(page.locator("#trackDetailGenre")).toHaveValue("Techno");
+    await expect(page.locator("#trackDetailGenreOptions option")).toHaveCount(2);
+    const stars = page.locator("#trackDetailRating [data-rating]");
+    await expect(page.locator("#trackDetailRating .is-on")).toHaveCount(3);
+
+    await page.locator("#trackDetailGenre").fill("  Breakbeat ");
+    await page.locator("#trackDetailGenre").dispatchEvent("change");
+    await stars.nth(4).click();
+    await expect(page.locator("#trackDetailRating .is-on")).toHaveCount(5);
+    await expect(stars.nth(4)).toHaveAttribute("aria-checked", "true");
+    // Clicking the current rating's star clears it; undo brings it back.
+    await stars.nth(4).click();
+    await expect(page.locator("#trackDetailRating .is-on")).toHaveCount(0);
+    await page.keyboard.press("Control+z");
+    await expect(page.locator("#trackDetailRating .is-on")).toHaveCount(5);
+
+    // The release date takes YYYY, YYYY-MM or YYYY-MM-DD; anything else puts
+    // the field back.
+    const date = page.locator("#trackDetailReleaseDate");
+    await expect(date).toHaveValue("2009-10-09");
+    await date.fill("19x");
+    await date.dispatchEvent("change");
+    await expect(date).toHaveValue("2009-10-09");
+    await date.fill("1994-3-7");
+    await date.dispatchEvent("change");
+    await expect(date).toHaveValue("1994-3-7");
+
+    await page.locator("#trackDetailSaveBtn").click();
+    await expect(page.locator("#trackDetailView")).toBeHidden();
+    const calls = await page.evaluate(() => window.__calls);
+    expect(calls.some((c) => c.command === "save_track_analysis_edits")).toBe(false);
+    const save = calls.find((c) => c.command === "save_track_metadata_edits");
+    expect(save.request).toEqual({ trackIds: ["t1"], genre: "Breakbeat", rating: 5, releaseDate: "1994-3-7" });
+    await expect(page.locator("#statusText")).toContainText("Saved track details");
+    // The library row shows the year the save returned.
+    await expect(page.locator("#libraryTableBody .track-grid-row .td-year")).toHaveText("1994");
+  }
+
+  await reopen(page);
+  {
+    await setBpmInput(page, "130");
+    await page.locator("#trackDetailRating [data-rating='1']").click();
+    await page.locator("#trackDetailSaveBtn").click();
+    await expect(page.locator("#trackDetailView")).toBeHidden();
+
+    const calls = await page.evaluate(() => window.__calls);
+    expect(calls.find((c) => c.command === "save_track_analysis_edits").request.bpm).toBe(130);
+    // Genre wasn't touched: only the rating is sent.
+    expect(calls.find((c) => c.command === "save_track_metadata_edits").request).toEqual({ trackIds: ["t1"], rating: 1 });
+  }
+
+  await reopen(page);
+  {
+    const bpm = page.locator("#trackDetailBpm");
+    const firstBeat = page.locator("#trackDetailFirstBeatMs");
+    const arrow = (input, dir) =>
+      input.locator(`xpath=..`).locator(`.number-stepper-btns button[data-step="${dir}"]`);
+    await expect(bpm).toHaveValue("128.00");
+    await expect(firstBeat).toHaveValue("120");
+
+    await page.locator("#trackDetailBpmHalf").click();
+    await expect(bpm).toHaveValue("64.00");
+    await page.locator("#trackDetailBpmDouble").click();
+    await page.locator("#trackDetailBpmDouble").click();
+    await expect(bpm).toHaveValue("256.00");
+
+    await page.locator("#trackDetailBpmPlus").click();
+    await expect(bpm).toHaveValue("256.01");
+    await page.locator("#trackDetailBpmMinus").click();
+    await page.locator("#trackDetailBpmMinus").click();
+    await expect(bpm).toHaveValue("255.99");
+
+    // The themed arrows step the input itself, not a whole beat.
+    await arrow(bpm, 1).click();
+    await expect(bpm).toHaveValue("256.00");
+    await arrow(bpm, -1).click();
+    await arrow(bpm, -1).click();
+    await expect(bpm).toHaveValue("255.98");
+    await arrow(firstBeat, 1).click();
+    await expect(firstBeat).toHaveValue("121");
+    await arrow(firstBeat, -1).click();
+    await arrow(firstBeat, -1).click();
+    await expect(firstBeat).toHaveValue("119");
+
+    // They all go through the same change handling as typing: they're saved.
+    const saved = await savedCues(page);
+    expect(saved.bpm).toBe(255.98);
+    expect(saved.firstBeatMs).toBe(119);
+  }
+
+  await reopen(page);
+  {
+    await expect(page.locator("#trackDetailBpm")).toHaveValue("128.00");
+
+    await page.locator("#trackDetailBpm").fill("140.25");
+    await page.locator("#trackDetailBpm").dispatchEvent("change");
+    await page.locator("#trackDetailSaveBtn").click();
+    await expect(page.locator("#trackDetailView")).toBeHidden();
+
+    const saveCall = await page.evaluate(() =>
+      window.__calls.find((c) => c.command === "save_track_analysis_edits")
+    );
+    expect(saveCall.request.bpm).toBe(140.25);
+
+    const bpmPill = page.locator('#libraryTableBody .track-grid-row .td-bpm .bpm-pill');
+    await expect(bpmPill).toHaveText("140.25");
+    await expect(bpmPill).toHaveAttribute("data-tooltip", "Manually set");
+  }
+
+  await reopen(page);
+  {
+    await expect(page.locator("#trackDetailKey")).toHaveValue("Am");
+
+    await page.locator("#trackDetailKey").selectOption("F#m");
+    await page.locator("#trackDetailSaveBtn").click();
+    await expect(page.locator("#trackDetailView")).toBeHidden();
+
+    const saveCall = await page.evaluate(() =>
+      window.__calls.find((c) => c.command === "save_track_analysis_edits")
+    );
+    expect(saveCall.request.key).toBe("F#m");
+
+    const keyPill = page.locator('#libraryTableBody .track-grid-row .td-key .key-pill');
+    await expect(keyPill).toHaveText("F#m");
+  }
+
+  await reopen(page);
+  {
+    const firstCue = page.locator("#trackDetailStartFirstCue");
+    const firstBeat = page.locator("#trackDetailStartFirstBeat");
+    const note = page.locator("#trackDetailStartNote");
+    // No cues: neither choice applies (the CDJ starts at the first audio), the note says so.
+    await expect(firstCue).toBeDisabled();
+    await expect(firstBeat).toBeDisabled();
+    await expect(firstCue).toHaveAttribute("aria-checked", "false");
+    await expect(firstBeat).toHaveAttribute("aria-checked", "false");
+    await expect(note).toBeVisible();
+    // No cues: the CDJ starts at the first audio, nothing is greyed out.
+    await expect(page.locator("#trackDetailPreStart")).toBeHidden();
+
+    await page.locator("#trackDetailWaveform").dblclick({ position: { x: 300, y: 100 } });
+    await expect(firstBeat).toBeEnabled();
+    await expect(note).toBeHidden();
+    await expect(firstCue).toHaveAttribute("aria-checked", "true");
+    // Starting from the first cue point: greyed up to cue A (snapped to the grid).
+    await expect.poll(() => preStartEdge(page)).toBeGreaterThan(290);
+    expect(await preStartEdge(page)).toBeLessThan(310);
+    await expect(firstBeat).toHaveAttribute("aria-checked", "false");
+    await expect(page.locator("#trackDetailCueList .cue-row")).toHaveCount(1);
+    await expect(page.locator("#trackDetailStartCue .cue-row.is-playback-start")).toHaveCount(0);
+
+    // Choosing First beat adds the memory-only start cue there (120 ms), shown
+    // in the "Playback starts at" row rather than among the A–H slots.
+    await firstBeat.click();
+    await expect(firstBeat).toHaveAttribute("aria-checked", "true");
+    await expect(firstCue).toHaveAttribute("aria-checked", "false");
+    await expect(firstBeat).toHaveText("First beat");
+    const rows = page.locator("#trackDetailCueList .cue-row");
+    await expect(rows).toHaveCount(1);
+    const start = page.locator("#trackDetailStartCue .cue-row.is-playback-start");
+    await expect(start).toHaveCount(1);
+    await expect(start.locator(".cue-row-pos")).toHaveText("0:00.12");
+    await expect(start.locator(".cue-row-delete")).toHaveCount(0);
+    await expect(start.locator(".cue-row-color")).toHaveCount(0);
+    await expect(start.locator(".cue-row-name")).toHaveCount(0);
+    await expect(start.locator(".cue-row-label")).toHaveText("Playback start");
+    await expect(page.locator("#trackDetailCueMarkers .cue-marker.is-playback-start")).toHaveCount(1);
+    // …and the greyed-out part shrinks to the first beat.
+    await expect.poll(() => preStartEdge(page)).toBeLessThan(10);
+    // Hot cues keep their A.. lettering, the same in the list as on the waveform.
+    await expect(page.locator("#trackDetailCueMarkers .cue-marker:not(.is-playback-start)")).toHaveText("A");
+    await expect(rows.first().locator(".cue-row-color")).toHaveText("A");
+    await expect(start.locator(".cue-row-memory")).toHaveText("▶");
+
+    // …and remembers the choice.
+    expect(await page.evaluate(() => localStorage.getItem("djusbtkit.cueStartOnFirstBeat"))).toBe("1");
+    await expect.poll(async () => (await startPersistCalls(page)).length).toBe(1);
+
+    await page.locator("#trackDetailSaveBtn").click();
+    const saveCall = await page.evaluate(() =>
+      window.__calls.find((c) => c.command === "save_track_analysis_edits")
+    );
+    expect(saveCall.request.cues).toHaveLength(2);
+    expect(saveCall.request.cues[0]).toEqual({
+      positionMs: 120,
+      colorId: null,
+      name: null,
+      playbackStart: true,
+      memory: false,
+    });
+    expect(saveCall.request.cues[1].playbackStart).toBe(false);
+  }
+
+  await reopen(page);
+  {
+    const firstBeat = page.locator("#trackDetailStartFirstBeat");
+
+    await page.locator("#trackDetailWaveform").dblclick({ position: { x: 300, y: 100 } });
+    const rows = page.locator("#trackDetailCueList .cue-row");
+    await expect(rows).toHaveCount(1);
+    await expect(page.locator("#trackDetailStartCue .cue-row.is-playback-start")).toHaveCount(1);
+    await expect(firstBeat).toHaveAttribute("aria-checked", "true");
+    await expect(firstBeat).toBeEnabled();
+
+    // A second cue doesn't add another start cue, nor count it toward the 8.
+    await page.locator("#trackDetailAddCue").click();
+    await expect(rows).toHaveCount(2);
+    await expect(page.locator("#trackDetailStartCue .cue-row.is-playback-start")).toHaveCount(1);
+
+    for (let i = 0; i < 2; i += 1) {
+      await page.locator("#trackDetailCueList .cue-row:not(.is-playback-start) .cue-row-delete").first().click();
+    }
+    await expect(page.locator("#trackDetailCueList .cue-row")).toHaveCount(0);
+    await expect(page.locator("#trackDetailStartCue .cue-row")).toHaveCount(0);
+    await expect(page.locator("#trackDetailCueMarkers .cue-marker")).toHaveCount(0);
+    await expect(firstBeat).toBeDisabled();
+    await expect(page.locator("#trackDetailStartNote")).toBeVisible();
+    // Losing the cues is not a user choice: the remembered setting stays on.
+    expect(await page.evaluate(() => localStorage.getItem("djusbtkit.cueStartOnFirstBeat"))).toBe("1");
+  }
+});
+
+test("play/pause pauses in the backend, freezes the playhead, and + Hot cue lands on the paused spot; play/pause resumes in the backend from where it was paused; play after the track played to its end starts it over; a waveform click parks the playhead without playing; dragging the waveform under the centred playhead plays along", async ({ page }) => {
+  await openCueEditor(page, { quantize: false, tauriEvents: true });
+  {
+    const btn = page.locator("#trackDetailPlayPause");
+    const calls = (command) =>
+      page.evaluate((command) => window.__calls.filter((c) => c.command === command), command);
+
+    // Nothing loaded yet: Play starts at the left edge of the visible window (0 s).
+    await expect(btn).toHaveAttribute("aria-label", "Play");
+    await btn.click();
+    await expect.poll(async () => (await calls("play_resolved_track")).length).toBe(1);
+    expect((await calls("play_resolved_track"))[0].request.startRatio).toBe(0);
+    await expect(btn).toHaveAttribute("aria-label", "Pause");
+    await expect.poll(() => modalPlayheadMs(page)).toBeGreaterThan(200);
+    // Playing, the playhead stays in the middle and the waveform scrolls under
+    // it, blank before the track's start.
+    const wfBox = await page.locator("#trackDetailWaveform").boundingBox();
+    const ph = await page.locator("#trackDetailPlayhead").boundingBox();
+    expect(Math.abs(ph.x + ph.width / 2 - (wfBox.x + wfBox.width / 2))).toBeLessThan(4);
+    await expect(page.locator("#trackDetailZoomRange")).toHaveText(/^0:00–0:5\d$/);
+
+    // Pause goes to the backend -- not a stop + replay.
+    await btn.click();
+    await expect(btn).toHaveAttribute("aria-label", "Play");
+    expect(await calls("pause_playback_native")).toHaveLength(1);
+    expect(await calls("stop_playback_native")).toHaveLength(0);
+    expect(await calls("play_resolved_track")).toHaveLength(1);
+    await expect(page.locator("#trackDetailWaveform")).toHaveClass(/is-paused/);
+    await expect(page.locator("#trackDetailPlayhead")).toBeVisible();
+
+    // The playhead holds at the backend's paused position.
+    const pausedMs = await modalPlayheadMs(page);
+    expect(pausedMs).toBeGreaterThan(200);
+    await page.waitForTimeout(300); // prove it does NOT move while paused
+    expect(await modalPlayheadMs(page)).toBeCloseTo(pausedMs, 0);
+
+    // "+ Hot cue" while paused lands at the paused spot, not at 0.
+    await page.locator("#trackDetailAddCue").click();
+    await page.locator("#trackDetailSaveBtn").click();
+    const saveCall = (await calls("save_track_analysis_edits"))[0];
+    expect(Math.abs(saveCall.request.cues[0].positionMs - pausedMs)).toBeLessThan(50);
+    // Leaving the editor still releases the paused track.
+    await expect.poll(async () => (await calls("stop_playback_native")).length).toBe(1);
+  }
+
+  await reopen(page);
+  {
+    const btn = page.locator("#trackDetailPlayPause");
+    const calls = (command) =>
+      page.evaluate((command) => window.__calls.filter((c) => c.command === command), command);
+
+    await btn.click();
+    await expect(btn).toHaveAttribute("aria-label", "Pause");
+    await expect.poll(() => modalPlayheadMs(page)).toBeGreaterThan(200);
+    await btn.click();
+    await expect(btn).toHaveAttribute("aria-label", "Play");
+    const pausedMs = await modalPlayheadMs(page);
+
+    await btn.click();
+    await expect(btn).toHaveAttribute("aria-label", "Pause");
+    expect(await calls("resume_playback_native")).toHaveLength(1);
+    expect(await calls("play_resolved_track")).toHaveLength(1);
+    await expect(page.locator("#trackDetailWaveform")).not.toHaveClass(/is-paused/);
+    // The playhead carries on from the paused spot.
+    await expect.poll(() => modalPlayheadMs(page)).toBeGreaterThan(pausedMs);
+    expect(await modalPlayheadMs(page)).toBeLessThan(pausedMs + 2000);
+  }
+
+  await reopen(page);
+  {
+    const btn = page.locator("#trackDetailPlayPause");
+    const playCalls = () =>
+      page.evaluate(() =>
+        window.__calls.filter((c) => c.command === "play_resolved_track").map((c) => c.request)
+      );
+
+    await btn.click();
+    await expect(btn).toHaveAttribute("aria-label", "Pause");
+    // The backend runs the track out: last position at its end, then stopped.
+    await page.evaluate(() => {
+      window.__emit("playback:event", {
+        event: "playback.seeked", path: null, playing: true, positionMs: 179990, durationMs: 180000,
+      });
+    });
+    await expect.poll(() => modalPlayheadMs(page)).toBeGreaterThan(179000);
+    await page.evaluate(() => {
+      window.__emit("playback:event", { event: "playback.stopped", path: null, playing: false, durationMs: 180000 });
+    });
+    await expect(btn).toHaveAttribute("aria-label", "Play");
+
+    await btn.click();
+    await expect.poll(async () => (await playCalls()).length).toBe(2);
+    expect((await playCalls())[1].startRatio).toBe(0);
+  }
+
+  await reopen(page);
+  {
+    const wf = page.locator("#trackDetailWaveform");
+    const btn = page.locator("#trackDetailPlayPause");
+    const playhead = page.locator("#trackDetailPlayhead");
+    const playCalls = () =>
+      page.evaluate(() =>
+        window.__calls.filter((c) => c.command === "play_resolved_track").map((c) => c.request)
+      );
+    const wfBox = await wf.boundingBox();
+    const viewMs = 112500; // the default 60-bar view starts at 0
+
+    // A click loads the track paused at that spot: playhead there, no audio.
+    await wf.click({ position: { x: wfBox.width * 0.4, y: 100 } });
+    await expect.poll(async () => (await playCalls()).length).toBe(1);
+    const [placed] = await playCalls();
+    expect(placed.startPaused).toBe(true);
+    expect(Math.abs(placed.startRatio * 180000 - 0.4 * viewMs)).toBeLessThan(500);
+    await expect(wf).toHaveClass(/is-paused/);
+    await expect(btn).toHaveAttribute("aria-label", "Play");
+    await expect(playhead).toBeVisible();
+
+    // Play carries on from there (a resume, not a new load).
+    await btn.click();
+    await expect(btn).toHaveAttribute("aria-label", "Pause");
+    expect(await playCalls()).toHaveLength(1);
+
+    // A click while playing jumps there and keeps playing.
+    await wf.click({ position: { x: wfBox.width * 0.2, y: 100 } });
+    await expect.poll(async () => (await playCalls()).length).toBe(2);
+    expect((await playCalls())[1].startPaused).toBe(false);
+    await expect(btn).toHaveAttribute("aria-label", "Pause");
+
+    // Paused, the playhead sits in the middle; dragging the waveform moves it
+    // under the playhead (left goes forward): it plays while moving, holds
+    // paused while the pointer rests, and parks at the drop point.
+    await btn.click();
+    await expect(btn).toHaveAttribute("aria-label", "Play");
+    const centreX = wfBox.x + wfBox.width * 0.5;
+    const centred = async () => {
+      const ph = await playhead.boundingBox();
+      expect(Math.abs(ph.x + ph.width / 2 - centreX)).toBeLessThan(4);
+    };
+    await centred();
+    const startMs = await modalPlayheadMs(page);
+    const y = wfBox.y + 100;
+    const x0 = wfBox.x + wfBox.width * 0.6;
+    const before = (await playCalls()).length;
+    await page.mouse.move(x0, y);
+    await page.mouse.down();
+    await page.mouse.move(x0 - wfBox.width * 0.1, y, { steps: 8 });
+    await expect.poll(async () => (await playCalls()).length).toBeGreaterThan(before);
+    expect((await playCalls()).slice(before)[0].startPaused).toBe(false);
+    // Resting: paused at the spot dragged under the playhead.
+    await expect.poll(async () => (await playCalls()).at(-1).startPaused).toBe(true);
+    expect(Math.abs((await playCalls()).at(-1).startRatio * 180000 - (startMs + 0.1 * viewMs))).toBeLessThan(500);
+    await expect(wf).toHaveClass(/is-paused/);
+    await centred();
+    // Moving again plays again.
+    const beforeMove = (await playCalls()).length;
+    await page.mouse.move(x0 - wfBox.width * 0.3, y, { steps: 4 });
+    await expect.poll(async () => (await playCalls()).length).toBeGreaterThan(beforeMove);
+    expect((await playCalls())[beforeMove].startPaused).toBe(false);
+    await page.mouse.up();
+    await expect.poll(async () => (await playCalls()).at(-1).startPaused).toBe(true);
+    expect(Math.abs((await playCalls()).at(-1).startRatio * 180000 - (startMs + 0.3 * viewMs))).toBeLessThan(500);
+    await expect(wf).toHaveClass(/is-paused/);
+    await expect(btn).toHaveAttribute("aria-label", "Play");
+    await centred();
+  }
+});
+
+test("cue editor opens + saves from an app-playlist track row", async ({ page }) => {
+  // Regression: the app-playlist panel click handler only routed play/scrub
+  // actions to handleTrackAction, so the cue button (added to every track list)
+  // was inert there — clicking it did nothing.
+  await installTrackDetailMock(page, { playlist: true });
+  await page.goto("/");
+
+  await page.locator("#navPlaylistList .nav-playlist-item").first().click();
+  const row = page.locator("#playlistTracksBody .track-grid-row");
+  await expect(row).toHaveCount(1);
+
+  await row.locator('[data-action="edit-track-detail"]').click();
+  await expect(page.locator("#trackDetailView")).toBeVisible();
+  await expect(page.locator("#trackDetailFirstBeatMs")).toHaveValue("120");
+
+  await page.locator("#trackDetailAddCue").click();
+  await expect(page.locator("#trackDetailCueList .cue-row")).toHaveCount(1);
+  await page.locator("#trackDetailBpm").fill("131.5");
+  await page.locator("#trackDetailBpm").dispatchEvent("change");
+  await page.locator("#trackDetailKey").selectOption("Em");
+
+  await page.locator("#trackDetailSaveBtn").click();
+  await expect(page.locator("#trackDetailView")).toBeHidden();
+
+  const saveCall = await page.evaluate(() => window.__calls.find((c) => c.command === "save_track_analysis_edits"));
+  expect(saveCall).toBeTruthy();
+  expect(saveCall.request.trackId).toBe("t1");
+  expect(saveCall.request.cues).toHaveLength(1);
+
+  // The open playlist's row redraws without a reload.
+  await expect(row.locator(".td-bpm .bpm-pill")).toHaveText("131.50");
+  await expect(row.locator(".td-key .key-pill")).toHaveText("Em");
+});
+
+test("the cue editor opens from a USB history row; a details-only edit from a USB row saves only the changed fields through the USB metadata command; cues and key save from a USB playlist row through the USB commands; a save that fails on the device is surfaced, not silently dropped", async ({ page }) => {
+  await installUsbTrackDetailMock(page);
+  await page.goto("/");
+  await openUsb(page, "usb-history");
+  {
+    const row = page.locator("#historyTracks .track-grid-row");
+    await expect(row).toHaveCount(1);
+    await expect(row.locator('[data-action="analyze-track"]')).toHaveCount(0);
+    await row.locator('[data-action="edit-track-detail"]').click();
+    await expect(page.locator("#trackDetailView")).toBeVisible();
+    const detailCall = await page.evaluate(() => window.__calls.find((c) => c.command === "get_usb_track_detail"));
+    expect(detailCall.request.usbAnalysisPathRaw).toBe("/PIONEER/USBANLZ/P001/0000A1B2/ANLZ0000.DAT");
+  }
+  await page.locator("#trackDetailCancelBtn").click();
+  {
+    await page.locator('.nav-item[data-view="usb-playlists"]').click();
+    const row = page.locator("#usbPlaylistTracks .track-grid-row");
+    await expect(row.locator(".td-year")).toHaveText("2015");
+    await row.locator('[data-action="edit-track-detail"]').click();
+    await expect(page.locator("#trackDetailView")).toBeVisible();
+
+    const detailCall = await page.evaluate(() => window.__calls.findLast((c) => c.command === "get_usb_track_detail"));
+    expect(detailCall.request.usbMediaPathRaw).toBe("/Contents/USB Artist/USB Album/track.mp3");
+    await expect(page.locator("#trackDetailGenre")).toHaveValue("House");
+    await expect(page.locator("#trackDetailRating .is-on")).toHaveCount(2);
+    await expect(page.locator("#trackDetailReleaseDate")).toHaveValue("2015-06-01");
+
+    // A new rating, and the release date cleared.
+    await page.locator("#trackDetailRating [data-rating='4']").click();
+    await page.locator("#trackDetailReleaseDate").fill("");
+    await page.locator("#trackDetailReleaseDate").dispatchEvent("change");
+    await page.locator("#trackDetailSaveBtn").click();
+    await expect(page.locator("#trackDetailView")).toBeHidden();
+
+    const calls = await page.evaluate(() => window.__calls);
+    expect(calls.some((c) => c.command === "save_usb_track_analysis_edits")).toBe(false);
+    const save = calls.find((c) => c.command === "save_usb_track_metadata_edits");
+    expect(save.request).toEqual({
+      usbRoot: "/Volumes/USB-TEST",
+      tracks: [{
+        usbMediaPathRaw: "/Contents/USB Artist/USB Album/track.mp3",
+        localTrackId: "local-1",
+        title: "USB Cue Track",
+        artist: "USB Artist",
+        album: "USB Album",
+      }],
+      rating: 4,
+      releaseDate: "",
+    });
+    await expect(page.locator("#statusText")).toContainText("Saved track details for 1 track to USB");
+    await expect(row.locator(".td-year")).toHaveText("");
+  }
+  {
+    const row = page.locator("#usbPlaylistTracks .track-grid-row");
+    await expect(row).toHaveCount(1);
+    await expect(row.locator('[data-action="analyze-track"]')).toHaveCount(0);
+    await row.locator('[data-action="edit-track-detail"]').click();
+
+    await expect(page.locator("#trackDetailView")).toBeVisible();
+    await expect(page.locator("#trackDetailCueList .cue-row")).toHaveCount(1);
+    await expect(page.locator("#trackDetailKey")).toHaveValue("Bm");
+    const detailCall = await page.evaluate(() => window.__calls.findLast((c) => c.command === "get_usb_track_detail"));
+    expect(detailCall.request.usbAnalysisPathRaw).toBe("/PIONEER/USBANLZ/P001/0000A1B2/ANLZ0000.DAT");
+
+    await page.locator("#trackDetailAddCue").click();
+    await page.locator("#trackDetailKey").selectOption("Dm");
+    await page.locator("#trackDetailSaveBtn").click();
+    await expect(page.locator("#trackDetailView")).toBeHidden();
+
+    const saveCall = await page.evaluate(() => window.__calls.findLast((c) => c.command === "save_usb_track_analysis_edits"));
+    expect(saveCall.request.usbAnalysisPathRaw).toBe("/PIONEER/USBANLZ/P001/0000A1B2/ANLZ0000.DAT");
+    expect(saveCall.request.usbMediaPathRaw).toBe("/Contents/USB Artist/USB Album/track.mp3");
+    expect(saveCall.request.localTrackId).toBe("local-1");
+    expect(saveCall.request.cues).toHaveLength(2);
+    expect(saveCall.request.key).toBe("Dm");
+    // A USB edit without a BPM change still carries the current bpm -- the
+    // on-device beat-grid rewrite always needs a real value, not null.
+    expect(saveCall.request.bpm).toBe(126);
+    await expect(page.locator("#statusText")).toContainText("to USB");
+    await expect(row.locator(".td-key .key-pill")).toHaveText("Dm");
+  }
+  {
+    await page.locator('#usbPlaylistTracks .track-grid-row [data-action="edit-track-detail"]').click();
+    await expect(page.locator("#trackDetailView")).toBeVisible();
+
+    // USB yanked between open and save: the command errors.
+    await page.evaluate(() => { window.__usbSaveFails = true; });
+    await page.locator("#trackDetailAddCue").click();
+    await page.locator("#trackDetailSaveBtn").click();
+
+    await expect(page.locator("#statusText")).toContainText("USB disconnected mid-edit");
+  }
+});
 test("cue editor edits BPM from a USB playlist row, saves it through the USB commands, and every view updates", async ({ page }) => {
   // The row doesn't know its library track: the save response names it, and
   // that library row must update too.
@@ -2076,48 +2128,7 @@ test("cue editor edits BPM from a USB playlist row, saves it through the USB com
   await expect(libraryBpm).toHaveText("128.50");
 });
 
-test("a details-only edit from a USB row saves only the changed fields through the USB metadata command", async ({ page }) => {
-  await installUsbTrackDetailMock(page);
-  await page.goto("/");
-  await openUsb(page, "usb-playlists");
-  const row = page.locator("#usbPlaylistTracks .track-grid-row");
-  await expect(row.locator(".td-year")).toHaveText("2015");
-  await row.locator('[data-action="edit-track-detail"]').click();
-  await expect(page.locator("#trackDetailView")).toBeVisible();
-
-  const detailCall = await page.evaluate(() => window.__calls.find((c) => c.command === "get_usb_track_detail"));
-  expect(detailCall.request.usbMediaPathRaw).toBe("/Contents/USB Artist/USB Album/track.mp3");
-  await expect(page.locator("#trackDetailGenre")).toHaveValue("House");
-  await expect(page.locator("#trackDetailRating .is-on")).toHaveCount(2);
-  await expect(page.locator("#trackDetailReleaseDate")).toHaveValue("2015-06-01");
-
-  // A new rating, and the release date cleared.
-  await page.locator("#trackDetailRating [data-rating='4']").click();
-  await page.locator("#trackDetailReleaseDate").fill("");
-  await page.locator("#trackDetailReleaseDate").dispatchEvent("change");
-  await page.locator("#trackDetailSaveBtn").click();
-  await expect(page.locator("#trackDetailView")).toBeHidden();
-
-  const calls = await page.evaluate(() => window.__calls);
-  expect(calls.some((c) => c.command === "save_usb_track_analysis_edits")).toBe(false);
-  const save = calls.find((c) => c.command === "save_usb_track_metadata_edits");
-  expect(save.request).toEqual({
-    usbRoot: "/Volumes/USB-TEST",
-    tracks: [{
-      usbMediaPathRaw: "/Contents/USB Artist/USB Album/track.mp3",
-      localTrackId: "local-1",
-      title: "USB Cue Track",
-      artist: "USB Artist",
-      album: "USB Album",
-    }],
-    rating: 4,
-    releaseDate: "",
-  });
-  await expect(page.locator("#statusText")).toContainText("Saved track details for 1 track to USB");
-  await expect(row.locator(".td-year")).toHaveText("");
-});
-
-test("a USB save runs as a background job: the progress bar shows each write and the window stays usable", async ({ page }) => {
+test("a USB save runs as a background job: the progress bar shows each write and the window stays usable; and waits for a running USB job instead of writing alongside it", async ({ page }) => {
   await installUsbTrackDetailMock(page, { tauriEvents: true });
   await page.goto("/");
 
@@ -2139,17 +2150,11 @@ test("a USB save runs as a background job: the progress bar shows each write and
   await page.evaluate(() => window.__releaseUsbSave());
   await expect(row.locator(".td-bpm .bpm-pill")).toHaveText("128.50");
   await expect(page.locator("#progressFooter")).not.toHaveClass(/active/, { timeout: 3000 });
-});
 
-test("a USB save waits for a running USB job instead of writing alongside it", async ({ page }) => {
-  await installUsbTrackDetailMock(page, { tauriEvents: true });
-  await page.goto("/");
-
-  await openUsb(page, "usb-playlists");
-  const row = page.locator("#usbPlaylistTracks .track-grid-row");
+  // A second save, while an export runs.
+  await page.evaluate(() => { window.__calls.length = 0; });
   await row.locator('[data-action="edit-track-detail"]').click();
   await page.locator("#trackDetailAddCue").click();
-
   // An export starts while the editor is open.
   const exportJob = { jobId: "export-1", jobType: "export", stage: "export_to_usb" };
   await page.evaluate((job) => window.__emitJobEvent({ ...job, event: "job.started", percent: 0, message: "USB: Exporting playlist" }), exportJob);
@@ -2164,38 +2169,6 @@ test("a USB save waits for a running USB job instead of writing alongside it", a
   await page.evaluate(() => window.__releaseUsbSave());
   await expect(page.locator("#statusText")).toContainText("to USB");
 });
-
-test("cue editor also opens from a USB history row", async ({ page }) => {
-  await installUsbTrackDetailMock(page);
-  await page.goto("/");
-
-  await openUsb(page, "usb-history");
-
-  const row = page.locator("#historyTracks .track-grid-row");
-  await expect(row).toHaveCount(1);
-  await expect(row.locator('[data-action="analyze-track"]')).toHaveCount(0);
-  await row.locator('[data-action="edit-track-detail"]').click();
-  await expect(page.locator("#trackDetailView")).toBeVisible();
-  const detailCall = await page.evaluate(() => window.__calls.find((c) => c.command === "get_usb_track_detail"));
-  expect(detailCall.request.usbAnalysisPathRaw).toBe("/PIONEER/USBANLZ/P001/0000A1B2/ANLZ0000.DAT");
-});
-
-test("a USB-side save that fails on the device is surfaced, not silently dropped", async ({ page }) => {
-  await installUsbTrackDetailMock(page);
-  await page.goto("/");
-
-  await openUsb(page, "usb-playlists");
-  await page.locator('#usbPlaylistTracks .track-grid-row [data-action="edit-track-detail"]').click();
-  await expect(page.locator("#trackDetailView")).toBeVisible();
-
-  // USB yanked between open and save: the command errors.
-  await page.evaluate(() => { window.__usbSaveFails = true; });
-  await page.locator("#trackDetailAddCue").click();
-  await page.locator("#trackDetailSaveBtn").click();
-
-  await expect(page.locator("#statusText")).toContainText("USB disconnected mid-edit");
-});
-
 test("cue button is disabled for an un-analyzed track", async ({ page }) => {
   await page.addInitScript(() => {
     window.__e2eSourceFolders = ["/music"];

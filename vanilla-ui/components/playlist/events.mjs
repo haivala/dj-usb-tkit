@@ -62,8 +62,13 @@ export function bindPlaylistEvents(ctx) {
     if (event.target.closest(".nav-rename-input")) return;
     const item = event.target.closest(".nav-playlist-item");
     if (!item) return;
-    if (el.navPlaylistList.querySelector(".nav-new-input-wrap")) return;
-    switchView(item.dataset.playlistId).catch(catchErr(emitStatus));
+    // A new playlist's name still being typed is saved first (leaving the
+    // field submits it); the clicked playlist opens once that save is done.
+    el.navPlaylistList.querySelector(".nav-new-input-wrap .nav-new-input")?.blur();
+    const playlistId = item.dataset.playlistId;
+    Promise.resolve(state.playlistCreating)
+      .then(() => switchView(playlistId))
+      .catch(catchErr(emitStatus));
   });
 
   el.navPlaylistList.addEventListener("dblclick", (event) => {

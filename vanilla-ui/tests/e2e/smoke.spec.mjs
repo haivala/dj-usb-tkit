@@ -35,78 +35,232 @@ function installBasicTauriMock(page, opts = {}) {
   }, { opts });
 }
 
-test("loads shell with library active and sidebar nav", async ({ page }) => {
+test("loads shell with library active and sidebar nav; can create and delete playlist via sidebar; usb panel shows when clicking USB nav item; sidebar playlist rename via the hover pencil; sidebar playlists reorder by dragging and new ones go on top; sidebar resizes by dragging its edge, saves the width, and double-click resets it", async ({ page }) => {
   await installBasicTauriMock(page);
   await page.goto("/");
-
-  await expect(page.getByRole("heading", { name: "DJ USB Tkit" })).toBeVisible();
-  await expect(page.locator("#panel-library")).toHaveClass(/active/);
-  await expect(page.locator("#panel-usb")).not.toHaveClass(/active/);
-  await expect(page.locator('.nav-item[data-view="library"]')).toHaveAttribute("aria-current", "true");
-  await expect(page.locator('.nav-item[data-view="usb"]')).not.toHaveAttribute("aria-current", "true");
-  // No DJ library found: no "Libraries" row.
-  await expect(page.locator("#libraryChipsRow")).toHaveClass(/hidden/);
-});
-
-test("can create and delete playlist via sidebar", async ({ page }) => {
-  await installBasicTauriMock(page);
-  await page.goto("/");
-
-  await page.locator("#addPlaylistBtn").click();
-
-  const nameInput = page.locator("#navPlaylistList .nav-new-input");
-  await expect(nameInput).toBeVisible();
-  await nameInput.fill("Smoke Playlist");
-  await nameInput.press("Enter");
-
-  const playlistItem = page.locator("#navPlaylistList .nav-playlist-item").first();
-  await expect(playlistItem).toBeVisible();
-  await expect(playlistItem).toContainText("Smoke Playlist");
-  await expect(page.locator("#badgeLabel")).toHaveText("Smoke Playlist");
-
-  // Delete the playlist
-  // Sidebar icon clicks suppress mousedown focus; establish the focus to restore.
-  await playlistItem.locator("[data-delete-playlist]").focus();
-  await playlistItem.locator("[data-delete-playlist]").click();
-  const confirmOverlay = page.locator("#confirmOverlay");
-  await expect(confirmOverlay).toBeVisible();
-  for (const dismissal of ["Escape", "backdrop", "Cancel"]) {
-    await expect(page.locator("#confirmOkBtn")).toBeFocused();
-    if (dismissal === "Escape") await page.keyboard.press("Escape");
-    else if (dismissal === "backdrop") await confirmOverlay.click({ position: { x: 5, y: 5 } });
-    else await page.locator("#confirmCancelBtn").click();
-    await expect(confirmOverlay).toBeHidden();
-    await expect(playlistItem.locator("[data-delete-playlist]")).toBeFocused();
-    await expect(playlistItem).toBeVisible();
-    expect(await page.evaluate(() => window.__calls.filter((c) => c.command === "delete_playlist"))).toHaveLength(0);
-    await playlistItem.locator("[data-delete-playlist]").click();
+  {
+    await expect(page.getByRole("heading", { name: "DJ USB Tkit" })).toBeVisible();
+    await expect(page.locator("#panel-library")).toHaveClass(/active/);
+    await expect(page.locator("#panel-usb")).not.toHaveClass(/active/);
+    await expect(page.locator('.nav-item[data-view="library"]')).toHaveAttribute("aria-current", "true");
+    await expect(page.locator('.nav-item[data-view="usb"]')).not.toHaveAttribute("aria-current", "true");
+    // No DJ library found: no "Libraries" row.
+    await expect(page.locator("#libraryChipsRow")).toHaveClass(/hidden/);
   }
-  await page.locator("#confirmOkBtn").click();
 
-  await expect(page.locator("#navPlaylistList .nav-playlist-item")).toHaveCount(0);
-  await expect(page.locator("#statusText")).toContainText("Playlist deleted");
-  await expect(page.locator("#statusText")).toContainText("Playlist deleted");
+  await page.reload();
+  {
+    await page.locator("#addPlaylistBtn").click();
+
+    const nameInput = page.locator("#navPlaylistList .nav-new-input");
+    await expect(nameInput).toBeVisible();
+    await nameInput.fill("Smoke Playlist");
+    await nameInput.press("Enter");
+
+    const playlistItem = page.locator("#navPlaylistList .nav-playlist-item").first();
+    await expect(playlistItem).toBeVisible();
+    await expect(playlistItem).toContainText("Smoke Playlist");
+    await expect(page.locator("#badgeLabel")).toHaveText("Smoke Playlist");
+
+    // Delete the playlist
+    // Sidebar icon clicks suppress mousedown focus; establish the focus to restore.
+    await playlistItem.locator("[data-delete-playlist]").focus();
+    await playlistItem.locator("[data-delete-playlist]").click();
+    const confirmOverlay = page.locator("#confirmOverlay");
+    await expect(confirmOverlay).toBeVisible();
+    for (const dismissal of ["Escape", "backdrop", "Cancel"]) {
+      await expect(page.locator("#confirmOkBtn")).toBeFocused();
+      if (dismissal === "Escape") await page.keyboard.press("Escape");
+      else if (dismissal === "backdrop") await confirmOverlay.click({ position: { x: 5, y: 5 } });
+      else await page.locator("#confirmCancelBtn").click();
+      await expect(confirmOverlay).toBeHidden();
+      await expect(playlistItem.locator("[data-delete-playlist]")).toBeFocused();
+      await expect(playlistItem).toBeVisible();
+      expect(await page.evaluate(() => window.__calls.filter((c) => c.command === "delete_playlist"))).toHaveLength(0);
+      await playlistItem.locator("[data-delete-playlist]").click();
+    }
+    await page.locator("#confirmOkBtn").click();
+
+    await expect(page.locator("#navPlaylistList .nav-playlist-item")).toHaveCount(0);
+    await expect(page.locator("#statusText")).toContainText("Playlist deleted");
+    await expect(page.locator("#statusText")).toContainText("Playlist deleted");
+  }
+
+  await page.reload();
+  {
+    await page.locator('.nav-item[data-view="usb"]').click();
+    await expect(page.locator("#panel-usb")).toHaveClass(/active/);
+    await expect(page.locator("#panel-library")).not.toHaveClass(/active/);
+  }
+
+  await page.reload();
+  {
+    await createSidebarPlaylists(page, ["Pencil Me"]);
+
+    const item = page.locator("#navPlaylistList .nav-playlist-item").first();
+    const pencil = item.locator("[data-rename-playlist]");
+    await expect(pencil).toHaveCSS("opacity", "0");
+    await item.hover();
+    await expect(pencil).toHaveCSS("opacity", "1");
+    await pencil.click();
+
+    const renameInput = page.locator("#navPlaylistList .nav-rename-input");
+    await expect(renameInput).toBeFocused();
+    await renameInput.fill("Penciled");
+    await renameInput.press("Enter");
+    await expect(item).toContainText("Penciled");
+  }
+
+  await page.reload();
+  {
+    await createSidebarPlaylists(page, ["Alpha", "Bravo", "Charlie"]);
+
+    const names = page.locator("#navPlaylistList .nav-playlist-name");
+    await expect(names).toHaveText(["Charlie", "Bravo", "Alpha"]);
+
+    const items = page.locator("#navPlaylistList li[data-nav-playlist-li]");
+    await items.nth(2).hover();
+    await items.nth(2).locator("[data-nav-playlist-drag-handle]").dragTo(items.nth(0), {
+      targetPosition: { x: 20, y: 2 }
+    });
+    await expect(names).toHaveText(["Alpha", "Charlie", "Bravo"]);
+
+    const reorderCalls = await page.evaluate(() =>
+      window.__calls.filter((c) => c.command === "reorder_playlists").map((c) => c.payload.request)
+    );
+    expect(reorderCalls).toEqual([{ orderedPlaylistIds: ["pl-1", "pl-3", "pl-2"] }]);
+
+    await createSidebarPlaylists(page, ["Delta"]);
+    await expect(names).toHaveText(["Delta", "Alpha", "Charlie", "Bravo"]);
+  }
+
+  await page.reload();
+  {
+    const sidebar = page.locator("#navSidebar");
+    const resizer = page.locator("#navSidebarResizer");
+    const width = async () => (await sidebar.boundingBox()).width;
+    expect(await width()).toBe(220);
+
+    const box = await resizer.boundingBox();
+    const y = box.y + box.height / 2;
+    await page.mouse.move(box.x + box.width / 2, y);
+    await page.mouse.down();
+    await page.mouse.move(box.x + 100, y, { steps: 5 });
+    await page.mouse.up();
+    const dragged = await width();
+    expect(dragged).toBeGreaterThan(300);
+    expect(dragged).toBeLessThan(330);
+
+    // Dragging far past the limit stops at the maximum.
+    const box2 = await resizer.boundingBox();
+    await page.mouse.move(box2.x + box2.width / 2, y);
+    await page.mouse.down();
+    await page.mouse.move(box2.x + 2000, y, { steps: 5 });
+    await page.mouse.up();
+    expect(await width()).toBe(480);
+
+    const saved = await page.evaluate(() =>
+      window.__calls
+        .filter((c) => c.command === "set_frontend_setting" && c.payload.request.key === "ui_sidebar_width_v1")
+        .map((c) => c.payload.request.value)
+    );
+    expect(saved.at(-1)).toBe("480");
+    expect(await page.evaluate(() => localStorage.getItem("djusbtkit.sidebarWidth"))).toBe("480");
+
+    await resizer.dblclick();
+    // The reset animates (only live dragging skips the width transition).
+    await expect.poll(width).toBe(220);
+  }
 });
 
-test("usb panel shows when clicking USB nav item", async ({ page }) => {
-  await installBasicTauriMock(page);
-  await page.goto("/");
-
-  await page.locator('.nav-item[data-view="usb"]').click();
-  await expect(page.locator("#panel-usb")).toHaveClass(/active/);
-  await expect(page.locator("#panel-library")).not.toHaveClass(/active/);
-});
-
-test("draws the backend's source folders as source chips", async ({ page }) => {
+test("draws the backend's source folders as source chips, with its Analyze label; the filter mark shows only while a folder's tracks are hidden", async ({ page }) => {
   await page.addInitScript(() => {
     window.__e2eSourceFolders = ["/music", "/media/library"];
-    window.__e2eBackend.install();
+    const backend = window.__e2eBackend;
+    backend.install((command, request) => {
+      if (command === "get_library_sources") {
+        const sources = backend.librarySources();
+        sources.folders[0] = { ...sources.folders[0], fullyAnalyzed: true };
+        if (sessionStorage.getItem("folderMissing")) {
+          sources.folders[0] = { ...sources.folders[0], enabled: false };
+          sources.folders[1] = { ...sources.folders[1], missing: true };
+        }
+        return backend.ok(sources);
+      }
+      if (command === "pick_source_folders") return ["/media/moved"];
+      if (command === "relocate_source_root") {
+        return backend.ok({
+          oldRoot: request.oldRoot, newRoot: request.newRoot, matched: 2, updated: 2, unchanged: 0, missingAtNewRoot: 0, conflicts: 0,
+          sources: backend.librarySources(["/music", "/media/moved"]),
+          statusText: "Source relocated: 2 track paths updated",
+        });
+      }
+    });
   });
   await page.goto("/");
 
   await expect(page.locator("#sourceChipsContainer .source-chip")).toHaveCount(2);
   await expect(page.locator("#sourceChipsContainer")).toContainText("/music");
   await expect(page.locator("#sourceChipsContainer")).toContainText("/media/library");
+  await expect(page.locator("#analyzeLibraryBtn")).toHaveText("Analyze Libraries");
+  await expect(page.locator("#sourceFilterIndicator")).not.toHaveClass(/active/);
+  await expect(page.locator("body")).not.toHaveClass(/library-onboarding/);
+
+  await page.evaluate(() => sessionStorage.setItem("folderMissing", "1"));
+  await page.reload();
+  const chips = page.locator("#sourceChipsContainer .source-chip");
+  await expect(chips).toHaveCount(2);
+  await expect(page.locator("#sourceFilterIndicator")).toHaveClass(/active/);
+  // The backend's folder facts: analyzed, switched off, missing.
+  await expect(chips.nth(0)).toHaveClass(/source-chip-analyzed/);
+  await expect(chips.nth(1)).not.toHaveClass(/source-chip-analyzed/);
+  await expect(chips.nth(0).locator(".source-chip-toggle")).not.toBeChecked();
+  const missing = chips.nth(1);
+  await expect(missing).toHaveClass(/source-chip-missing/);
+  await expect(missing.locator(".source-chip-toggle")).toBeDisabled();
+  await expect(missing.locator(".source-chip-toggle")).not.toBeChecked();
+  await expect(missing.locator(".source-chip-toggle")).toHaveAttribute("aria-label", "Source folder missing");
+  await expect(missing.locator(".source-chip-path")).toHaveAttribute("data-tooltip", /Click to relocate/);
+
+  // Clicking it relocates it: the backend's folders and status line, the library read again.
+  await page.evaluate(() => { window.__calls.length = 0; });
+  await missing.locator(".source-chip-path").click();
+  await expect(page.locator("#statusText")).toContainText("Source relocated: 2 track paths updated");
+  await expect(chips.nth(1).locator(".source-chip-path")).toHaveText("/media/moved");
+  const calls = await page.evaluate(() => window.__calls.map((c) => ({ command: c.command, request: c.request })));
+  expect(calls.find((c) => c.command === "relocate_source_root").request).toEqual({ oldRoot: "/media/library", newRoot: "/media/moved" });
+  expect(calls.some((c) => c.command === "browse_source_files")).toBe(true);
+});
+
+test("tooltips show after a hover delay and on focus, Escape and leaving hide them, and they stay inside the window", async ({ page }) => {
+  await page.addInitScript(() => window.__e2eBackend.install());
+  await page.goto("/");
+  await page.evaluate(() => {
+    document.body.insertAdjacentHTML("beforeend",
+      '<button id="tipTarget" data-tooltip="Full detail text" style="position:fixed;left:300px;top:300px">Hover me</button>' +
+      '<span id="tipEdge" data-tooltip="A tooltip far wider than the little space to the left of its target" style="position:fixed;left:2px;top:5px">x</span>');
+  });
+  const tip = page.locator("#app-tooltip");
+  const target = page.locator("#tipTarget");
+
+  await target.hover();
+  await expect(tip).toHaveClass(/app-tooltip--visible/);
+  await expect(tip).toHaveText("Full detail text");
+  await expect(target).toHaveAttribute("aria-describedby", "app-tooltip");
+  await page.mouse.move(600, 600);
+  await expect(tip).not.toHaveClass(/app-tooltip--visible/);
+  await expect(target).not.toHaveAttribute("aria-describedby");
+
+  await target.focus();
+  await expect(tip).toHaveClass(/app-tooltip--visible/);
+  await page.keyboard.press("Escape");
+  await expect(tip).not.toHaveClass(/app-tooltip--visible/);
+
+  await page.locator("#tipEdge").hover();
+  await expect(tip).toHaveClass(/app-tooltip--visible/);
+  const box = await tip.boundingBox();
+  expect(box.x).toBeGreaterThanOrEqual(8);
+  expect(box.y).toBeGreaterThan(25); // below its target, not off the top
 });
 
 test("sidebar playlist rename updates sidebar and badge", async ({ page }) => {
@@ -165,89 +319,6 @@ async function createSidebarPlaylists(page, names) {
     await expect(page.locator("#navPlaylistList .nav-playlist-name").first()).toHaveText(name);
   }
 }
-
-test("sidebar playlist rename via the hover pencil", async ({ page }) => {
-  await installBasicTauriMock(page);
-  await page.goto("/");
-  await createSidebarPlaylists(page, ["Pencil Me"]);
-
-  const item = page.locator("#navPlaylistList .nav-playlist-item").first();
-  const pencil = item.locator("[data-rename-playlist]");
-  await expect(pencil).toHaveCSS("opacity", "0");
-  await item.hover();
-  await expect(pencil).toHaveCSS("opacity", "1");
-  await pencil.click();
-
-  const renameInput = page.locator("#navPlaylistList .nav-rename-input");
-  await expect(renameInput).toBeFocused();
-  await renameInput.fill("Penciled");
-  await renameInput.press("Enter");
-  await expect(item).toContainText("Penciled");
-});
-
-test("sidebar playlists reorder by dragging and new ones go on top", async ({ page }) => {
-  await installBasicTauriMock(page);
-  await page.goto("/");
-  await createSidebarPlaylists(page, ["Alpha", "Bravo", "Charlie"]);
-
-  const names = page.locator("#navPlaylistList .nav-playlist-name");
-  await expect(names).toHaveText(["Charlie", "Bravo", "Alpha"]);
-
-  const items = page.locator("#navPlaylistList li[data-nav-playlist-li]");
-  await items.nth(2).hover();
-  await items.nth(2).locator("[data-nav-playlist-drag-handle]").dragTo(items.nth(0), {
-    targetPosition: { x: 20, y: 2 }
-  });
-  await expect(names).toHaveText(["Alpha", "Charlie", "Bravo"]);
-
-  const reorderCalls = await page.evaluate(() =>
-    window.__calls.filter((c) => c.command === "reorder_playlists").map((c) => c.payload.request)
-  );
-  expect(reorderCalls).toEqual([{ orderedPlaylistIds: ["pl-1", "pl-3", "pl-2"] }]);
-
-  await createSidebarPlaylists(page, ["Delta"]);
-  await expect(names).toHaveText(["Delta", "Alpha", "Charlie", "Bravo"]);
-});
-
-test("sidebar resizes by dragging its edge, saves the width, and double-click resets it", async ({ page }) => {
-  await installBasicTauriMock(page);
-  await page.goto("/");
-
-  const sidebar = page.locator("#navSidebar");
-  const resizer = page.locator("#navSidebarResizer");
-  const width = async () => (await sidebar.boundingBox()).width;
-  expect(await width()).toBe(220);
-
-  const box = await resizer.boundingBox();
-  const y = box.y + box.height / 2;
-  await page.mouse.move(box.x + box.width / 2, y);
-  await page.mouse.down();
-  await page.mouse.move(box.x + 100, y, { steps: 5 });
-  await page.mouse.up();
-  const dragged = await width();
-  expect(dragged).toBeGreaterThan(300);
-  expect(dragged).toBeLessThan(330);
-
-  // Dragging far past the limit stops at the maximum.
-  const box2 = await resizer.boundingBox();
-  await page.mouse.move(box2.x + box2.width / 2, y);
-  await page.mouse.down();
-  await page.mouse.move(box2.x + 2000, y, { steps: 5 });
-  await page.mouse.up();
-  expect(await width()).toBe(480);
-
-  const saved = await page.evaluate(() =>
-    window.__calls
-      .filter((c) => c.command === "set_frontend_setting" && c.payload.request.key === "ui_sidebar_width_v1")
-      .map((c) => c.payload.request.value)
-  );
-  expect(saved.at(-1)).toBe("480");
-  expect(await page.evaluate(() => localStorage.getItem("djusbtkit.sidebarWidth"))).toBe("480");
-
-  await resizer.dblclick();
-  // The reset animates (only live dragging skips the width transition).
-  await expect.poll(width).toBe(220);
-});
 
 test("sidebar width is restored on startup", async ({ page }) => {
   await installBasicTauriMock(page);
@@ -495,4 +566,217 @@ test("in the test language, the first-run Library, Help and the update banner an
   await check.collect();
 
   await check.expectNoEnglish();
+});
+
+test("a library row shows the backend's source icon, format badge, waveform and analyze state; its + waits for an active playlist", async ({ page }) => {
+  await page.addInitScript(() => {
+    const backend = window.__e2eBackend;
+    window.__e2eSourceFolders = ["/music"];
+    const track = (id, extra) => ({ id, title: `Track ${id}`, artist: "Made-up Artist", filePath: `/music/${id}.wav`, ...extra });
+    backend.seed({ tracks: [
+      track("usb", { fileSource: { kind: "usb", missing: false, tooltip: "On USB: /stick/a.mp3" }, analysisReady: true }),
+      track("usb-off", { fileSource: { kind: "usb", missing: true, tooltip: "USB not connected: /stick/a.mp3" } }),
+      track("local", {
+        fileSource: { kind: "local", missing: false, tooltip: "In local library: /music/b.mp3" },
+        // PWV4 colour data only: still drawn on a canvas.
+        waveformColorData: [1, 2, 3, 4, 5, 6], waveformPeaksPath: "/x/ANLZ0000.EXT",
+      }),
+      track("autofix", { formatExt: "wav", formatCompat: { severity: "autofix", badge: "WAV", tooltip: "Will be automatically converted to standard PCM on export." } }),
+      track("warn", { formatExt: "wav", formatCompat: { severity: "warn", badge: "WAV", tooltip: "44.1 kHz · 16-bit — cannot be safely converted" } }),
+      track("ok", { formatExt: "wav", formatCompat: { severity: "ok", badge: "WAV" } }),
+    ] });
+    backend.install();
+  });
+  await page.goto("/");
+  const row = (id) => page.locator(`#libraryTableBody .track-grid-row[data-track-id="${id}"]`);
+  await expect(page.locator("#libraryTableBody .track-grid-row")).toHaveCount(6);
+
+  // Source icon: the backend's tooltip; red when the USB isn't there; USB and
+  // local look different; none without the backend's field.
+  const icon = (id) => row(id).locator(".td-select .track-source");
+  await expect(icon("usb")).toHaveAttribute("data-tooltip", "On USB: /stick/a.mp3");
+  await expect(icon("usb")).not.toHaveClass(/is-missing/);
+  await expect(icon("usb-off")).toHaveClass(/is-missing/);
+  await expect(icon("usb-off")).toHaveAttribute("data-tooltip", "USB not connected: /stick/a.mp3");
+  expect(await icon("usb").innerHTML()).not.toBe(await icon("local").innerHTML());
+  await expect(icon("ok")).toHaveCount(0);
+
+  // Format badge, as the backend's formatCompat describes it.
+  const badge = (id) => row(id).locator(".format-badge");
+  await expect(badge("autofix")).toHaveText("WAV ⟳");
+  await expect(badge("autofix")).toHaveClass("format-badge autofix");
+  await expect(badge("autofix")).toHaveAttribute("data-tooltip", /Will be automatically converted to standard PCM on export/);
+  await expect(badge("warn")).toHaveText("WAV ⚠");
+  await expect(badge("warn")).toHaveClass("format-badge warn");
+  await expect(badge("warn")).toHaveAttribute("data-tooltip", "44.1 kHz · 16-bit — cannot be safely converted");
+  await expect(badge("ok")).toHaveText("WAV");
+  await expect(badge("ok")).toHaveClass("format-badge");
+  await expect(badge("ok")).not.toHaveAttribute("data-tooltip");
+
+  await expect(row("local").locator(".waveform.waveform-canvas .waveform-canvas-el")).toHaveCount(1);
+
+  // Analyze or Reanalyze, from the backend's analysisReady.
+  const analyze = (id) => row(id).locator('[data-action="analyze-track"]');
+  await expect(analyze("usb-off")).toHaveText("Analyze");
+  await expect(analyze("usb-off")).toHaveAttribute("data-tooltip", "Add the missing waveform, BPM, key and first beat; a BPM or key you edited or imported is kept");
+  await expect(analyze("usb")).toHaveText("Reanalyze");
+  await expect(analyze("usb")).toHaveAttribute("data-tooltip", "Reset waveform, BPM, key and first beat to a fresh analysis, replacing imported or edited values (cues are kept)");
+
+  // No playlist yet: + is off and says why; a new (active) playlist turns it on.
+  const add = row("ok").locator('[data-action="add-library"]');
+  await expect(add).toBeDisabled();
+  await expect(add).toHaveAttribute("data-tooltip", "Create and activate a playlist first, then add tracks to it.");
+  await page.locator("#addPlaylistBtn").click();
+  await page.locator(".nav-new-input").fill("<Mix & Match>");
+  await page.locator(".nav-new-input").press("Enter");
+  await expect(add).toBeEnabled();
+  // Enter, then the input's blur: one playlist.
+  expect(await page.evaluate(() => window.__calls.filter((c) => c.command === "create_playlist").length)).toBe(1);
+  await expect(add).toHaveAttribute("data-tooltip", "Add to <Mix & Match>");
+
+  // The sidebar shows the name as text, marks it the active playlist, and
+  // with no export status, no export mark.
+  const item = page.locator("#navPlaylistList .nav-playlist-item").first();
+  await expect(item.locator(".nav-playlist-name")).toHaveText("<Mix & Match>");
+  await expect(item).toHaveClass(/playlist-active-mode/);
+  await expect(item.locator(".nav-playlist-status")).not.toHaveClass(/exported/);
+  await expect(item.locator(".nav-playlist-status")).not.toHaveAttribute("aria-label");
+
+  // Clicking another playlist while a new one's name is typed saves the new
+  // one, then opens the clicked one; with no name typed it only opens it.
+  const items = page.locator("#navPlaylistList .nav-playlist-item");
+  const creates = () => page.evaluate(() => window.__calls.filter((c) => c.command === "create_playlist").length);
+  await page.locator("#addPlaylistBtn").click();
+  await page.locator(".nav-new-input").fill("Second");
+  await items.filter({ hasText: "<Mix & Match>" }).click();
+  await expect(items.filter({ hasText: "Second" })).toHaveCount(1);
+  expect(await creates()).toBe(2);
+  await expect(page.locator("#panel-playlist")).toHaveClass(/active/);
+  await expect(page.locator("#playlistPanelTitle")).toHaveText(/^<Mix & Match>/);
+  await page.waitForTimeout(300);
+  await expect(page.locator("#playlistPanelTitle")).toHaveText(/^<Mix & Match>/);
+
+  await page.locator("#addPlaylistBtn").click();
+  await items.filter({ hasText: "Second" }).click();
+  await expect(page.locator("#playlistPanelTitle")).toHaveText(/^Second/);
+  await expect(page.locator(".nav-new-input")).toHaveCount(0);
+  expect(await creates()).toBe(2);
+});
+
+test("startup: defaults backup on and Engine library off, opens the top playlist, runs the data migrations after the first load and logs their failure; a changed setting goes to the settings database, and a start with only that database restores every stored setting", async ({ page }) => {
+  await page.addInitScript(() => {
+    const backend = window.__e2eBackend;
+    backend.seed({ playlists: [{ id: "pl-top", name: "Top Set" }, { id: "pl-2", name: "Second" }] });
+    backend.install((command) => {
+      if (command === "get_frontend_settings" && sessionStorage.getItem("fromDb")) {
+        return backend.ok({
+          values: {
+            ui_sidebar_collapsed_v1: "1", ui_export_backup_v1: "0", ui_export_prune_stale_v1: "0",
+            ui_export_engine_library_v1: "1", ui_analysis_bpm_range_v1: "58-115",
+          },
+          nodeAvailable: true, essentiaInstalled: true,
+        });
+      }
+      if (command === "run_data_migrations") return backend.fail("Data upgrade failed: disk full");
+    });
+  });
+  await page.goto("/");
+
+  await expect(page.locator("#exportBackupCheckbox")).toBeChecked();
+  await expect(page.locator("#exportEngineLibraryCheckbox")).not.toBeChecked();
+  await expect(page.locator("#exportSyncModeMirror")).toBeChecked();
+  await expect(page.locator("#navSidebar")).not.toHaveClass(/collapsed/);
+  await expect(page.locator('#navPlaylistList .nav-playlist-item[data-playlist-id="pl-top"]')).toHaveClass(/playlist-active-mode/);
+  await expect(page.locator("#settingsVersionText")).toHaveText(/^Version /);
+
+  await expect.poll(() => page.evaluate(() => window.__calls.some((c) => c.command === "run_data_migrations"))).toBe(true);
+  const order = await page.evaluate(() => window.__calls.map((c) => c.command));
+  expect(order.indexOf("run_data_migrations")).toBeGreaterThan(order.indexOf("browse_source_files"));
+  await page.locator("#eventLogBtn").click();
+  await expect(page.locator("#eventLogList")).toContainText("Data upgrade failed: disk full");
+
+  await page.locator("#sidebarCollapseBtn").click();
+  await expect(page.locator("#navSidebar")).toHaveClass(/collapsed/);
+  expect(await page.evaluate(() => window.__calls
+    .filter((c) => c.command === "set_frontend_setting" && c.request?.key === "ui_sidebar_collapsed_v1")
+    .map((c) => c.request.value))).toEqual(["1"]);
+
+  await page.evaluate(() => { localStorage.clear(); sessionStorage.setItem("fromDb", "1"); });
+  await page.reload();
+  await expect(page.locator("#navSidebar")).toHaveClass(/collapsed/);
+  await expect(page.locator("#sidebarExpandBtn")).toHaveClass(/visible/);
+  await expect(page.locator("#exportBackupCheckbox")).not.toBeChecked();
+  await expect(page.locator("#exportEngineLibraryCheckbox")).toBeChecked();
+  await expect(page.locator("#exportSyncModeAdditive")).toBeChecked();
+  await expect(page.locator("#analysisBpmRangeSelect")).toHaveValue("58-115");
+  expect(await page.evaluate(() => localStorage.getItem("djusbtkit.exportBackup"))).toBe("0");
+});
+
+test("analysis engine: choosing Essentia shows its install row; download, cancel, a missing Node.js and remove each show what they do and choosing is saved", async ({ page }) => {
+  await page.addInitScript(() => {
+    const backend = window.__e2eBackend;
+    const flag = (key) => sessionStorage.getItem(key);
+    backend.install(async (command) => {
+      if (command === "get_frontend_settings") {
+        return backend.ok({ values: {}, nodeAvailable: !flag("noNode"), essentiaInstalled: !!flag("installed") });
+      }
+      if (command === "download_essentia") {
+        await new Promise((resolve) => { window.__finishDownload = resolve; });
+        return backend.fail("download cancelled");
+      }
+      if (command === "cancel_essentia_download") {
+        window.__finishDownload?.();
+        return backend.ok(null);
+      }
+      if (command === "remove_essentia") return backend.ok(null);
+    });
+  });
+  await page.goto("/");
+  const engine = page.locator("#analysisEngineSelect");
+  const row = page.locator("#essentiaInstallRow");
+  const status = page.locator("#essentiaNodeStatus");
+  const download = page.locator("#essentiaDownloadBtn");
+  const cancel = page.locator("#essentiaCancelBtn");
+  const remove = page.locator("#essentiaRemoveBtn");
+  const savedEngines = () => page.evaluate(() => window.__calls
+    .filter((c) => c.command === "set_frontend_setting" && c.request?.key === "ui_analysis_engine_v1")
+    .map((c) => c.request.value));
+
+  await page.locator("#settingsBtn").click();
+  expect(await engine.locator("option").evaluateAll((options) => options.map((o) => o.value))).toEqual(["stratum", "essentia"]);
+  await expect(row).toBeHidden();
+  await engine.selectOption("essentia");
+  await expect(row).toBeVisible();
+  await expect(status).toHaveText("Essentia files not installed");
+  expect(await savedEngines()).toEqual(["essentia"]);
+
+  await download.click();
+  await expect(status).toHaveText("Downloading...");
+  await expect(download).toBeHidden();
+  await expect(cancel).toBeVisible();
+  await expect(remove).toBeHidden();
+  await cancel.click();
+  await expect(status).toContainText("download cancelled");
+  await expect(status).toHaveClass(/essentia-warn/);
+  expect(await page.evaluate(() => window.__calls.some((c) => c.command === "cancel_essentia_download"))).toBe(true);
+
+  // Without Node.js the row says where to get it.
+  await page.evaluate(() => sessionStorage.setItem("noNode", "1"));
+  await page.reload();
+  await page.locator("#settingsBtn").click();
+  await expect(status.locator(".essentia-node-link")).toBeVisible();
+  await expect(download).toBeVisible();
+
+  // Installed: ready, and Remove goes back to stratum.
+  await page.evaluate(() => { sessionStorage.removeItem("noNode"); sessionStorage.setItem("installed", "1"); });
+  await page.reload();
+  await page.locator("#settingsBtn").click();
+  await expect(status).toHaveText("✓ Essentia ready");
+  await expect(status).toHaveClass(/essentia-ready/);
+  await expect(download).toBeHidden();
+  await remove.click();
+  await expect(engine).toHaveValue("stratum");
+  await expect(row).toBeHidden();
+  expect(await page.evaluate(() => window.__calls.some((c) => c.command === "remove_essentia"))).toBe(true);
+  expect(await savedEngines()).toEqual(["stratum"]);
 });

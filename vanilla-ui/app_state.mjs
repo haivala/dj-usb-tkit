@@ -73,6 +73,8 @@ export function createInitialState() {
     },
     playlists: [],
     currentPlaylistId: null,
+    // A new playlist's create_playlist still running (promptNewPlaylist).
+    playlistCreating: null,
     playlistTrackSearch: "",
     usbPlaylists: [],
     // Keyed by local playlist id -- { sameNameExistsOnUsb, locksReorder },

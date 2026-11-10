@@ -231,5 +231,5 @@ Implementation anchors:
 - Backend analysis coverage: `backend/tests/anlz_pipeline_functional.rs`
 - Backend command contract coverage: `backend/tests/core_command_contract_functional.rs`
 - Engine behavior coverage: `backend/tests/lib_integration.rs`
-- Frontend analysis and hydration coverage: `vanilla-ui/tests/analysis_hydration.test.mjs`, `vanilla-ui/tests/job_manager.test.mjs`
+- Frontend analysis and hydration coverage: `vanilla-ui/tests/e2e/scan_analysis_batches.spec.mjs`, `vanilla-ui/tests/e2e/waveform_startup_hydration.spec.mjs`
 - Pause/resume/cancel coverage: `backend/tests/lib_integration.rs` (`analyze_new_tracks_pauses_and_resumes_between_tracks`, `analyze_new_tracks_cancel_stops_early_without_hanging`), `vanilla-ui/tests/e2e/scan_analysis_batches.spec.mjs`

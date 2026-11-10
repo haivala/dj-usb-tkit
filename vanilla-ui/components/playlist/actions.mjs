@@ -94,10 +94,16 @@ export function promptNewPlaylist(ctx) {
     const name = input.value.trim();
     cleanup();
     if (name) {
-      createPlaylist(ctx, name).catch((err) => {
-        console.error(err);
-        emitStatus(err.message || String(err));
-      });
+      // Kept while saving, so a click on another playlist opens it only after.
+      const creating = createPlaylist(ctx, name)
+        .catch((err) => {
+          console.error(err);
+          emitStatus(err.message || String(err));
+        })
+        .finally(() => {
+          if (ctx.state.playlistCreating === creating) ctx.state.playlistCreating = null;
+        });
+      ctx.state.playlistCreating = creating;
     }
   });
 

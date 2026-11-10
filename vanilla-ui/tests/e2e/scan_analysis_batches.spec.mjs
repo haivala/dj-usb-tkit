@@ -330,51 +330,52 @@ function finishMockExport(page) {
   }));
 }
 
-test("an analysis run during an export keeps its pause/cancel but leaves the export's progress bar and timer alone", async ({ page }) => {
+test("an analysis run during an export keeps its pause/cancel but leaves the export's progress bar and timer alone; the progress bar passes to an analysis still running when the export ends", async ({ page }) => {
   await installScanAnalysisMock(page, { trackCount: 1, pieceDelayMs: 50, pauseBeforeBpmKey: true });
   await page.goto("/");
-  await startMockExport(page);
+  {
+    await startMockExport(page);
 
-  await page.locator("#analyzeLibraryBtn").click();
-  await page.waitForFunction(() => typeof window.__releaseBeforeBpmKey === "function");
-  await expect(page.locator("#progressText")).toHaveText("USB: Exporting playlist");
-  // The analysis keeps its own controls while the export holds the bar, and
-  // pausing it leaves the export's clock running.
-  await expect(page.locator("#progressPauseBtn")).toBeVisible();
-  await expect(page.locator("#progressPauseBtn")).toHaveAttribute("title", "Pause analysis");
-  await expect(page.locator("#progressCancelAnalysisBtn")).toBeVisible();
-  await page.locator("#progressPauseBtn").click();
-  await expect(page.locator("#progressPauseBtn")).toHaveAttribute("title", "Resume analysis");
+    await page.locator("#analyzeLibraryBtn").click();
+    await page.waitForFunction(() => typeof window.__releaseBeforeBpmKey === "function");
+    await expect(page.locator("#progressText")).toHaveText("USB: Exporting playlist");
+    // The analysis keeps its own controls while the export holds the bar, and
+    // pausing it leaves the export's clock running.
+    await expect(page.locator("#progressPauseBtn")).toBeVisible();
+    await expect(page.locator("#progressPauseBtn")).toHaveAttribute("title", "Pause analysis");
+    await expect(page.locator("#progressCancelAnalysisBtn")).toBeVisible();
+    await page.locator("#progressPauseBtn").click();
+    await expect(page.locator("#progressPauseBtn")).toHaveAttribute("title", "Resume analysis");
 
-  await page.evaluate(() => window.__releaseBeforeBpmKey());
-  await expect(page.locator("#statusText")).toContainText("analyzed 1, failed 0");
-  await expect(page.locator("#progressFooter")).toHaveClass(/active/);
-  await expect(page.locator("#progressText")).toHaveText("USB: Exporting playlist");
-  await expect(page.locator("#progressTime")).toHaveText(/^\(\d+s\)$/);
-  await expect(page.locator("#progressPauseBtn")).toBeHidden();
-  await expect(page.locator("#selectUsbFolderBtn")).toBeDisabled();
+    await page.evaluate(() => window.__releaseBeforeBpmKey());
+    await expect(page.locator("#statusText")).toContainText("analyzed 1, failed 0");
+    await expect(page.locator("#progressFooter")).toHaveClass(/active/);
+    await expect(page.locator("#progressText")).toHaveText("USB: Exporting playlist");
+    await expect(page.locator("#progressTime")).toHaveText(/^\(\d+s\)$/);
+    await expect(page.locator("#progressPauseBtn")).toBeHidden();
+    await expect(page.locator("#selectUsbFolderBtn")).toBeDisabled();
 
-  await finishMockExport(page);
-  await expect(page.locator("#progressFooter")).not.toHaveClass(/active/);
-  await expect(page.locator("#selectUsbFolderBtn")).toBeEnabled();
-});
+    await finishMockExport(page);
+    await expect(page.locator("#progressFooter")).not.toHaveClass(/active/);
+    await expect(page.locator("#selectUsbFolderBtn")).toBeEnabled();
+  }
 
-test("the progress bar passes to an analysis still running when the export ends", async ({ page }) => {
-  await installScanAnalysisMock(page, { trackCount: 1, pieceDelayMs: 50, pauseBeforeBpmKey: true });
-  await page.goto("/");
-  await startMockExport(page);
+  await page.reload();
+  {
+    await startMockExport(page);
 
-  await page.locator("#analyzeLibraryBtn").click();
-  await page.waitForFunction(() => typeof window.__releaseBeforeBpmKey === "function");
+    await page.locator("#analyzeLibraryBtn").click();
+    await page.waitForFunction(() => typeof window.__releaseBeforeBpmKey === "function");
 
-  await finishMockExport(page);
-  await expect(page.locator("#progressText")).toHaveText("Analyzing selected tracks");
-  await expect(page.locator("#progressTime")).toHaveText(/^\(\d+s\)$/);
-  await expect(page.locator("#progressPauseBtn")).toBeVisible();
+    await finishMockExport(page);
+    await expect(page.locator("#progressText")).toHaveText("Analyzing selected tracks");
+    await expect(page.locator("#progressTime")).toHaveText(/^\(\d+s\)$/);
+    await expect(page.locator("#progressPauseBtn")).toBeVisible();
 
-  await page.evaluate(() => window.__releaseBeforeBpmKey());
-  await expect(page.locator("#statusText")).toContainText("analyzed 1, failed 0");
-  await expect(page.locator("#progressFooter")).not.toHaveClass(/active/);
+    await page.evaluate(() => window.__releaseBeforeBpmKey());
+    await expect(page.locator("#statusText")).toContainText("analyzed 1, failed 0");
+    await expect(page.locator("#progressFooter")).not.toHaveClass(/active/);
+  }
 });
 
 test("every track in a large batch pulses as analyzing while a worker is on it", async ({ page }, testInfo) => {
@@ -437,116 +438,115 @@ test("reanalyze clears the row's BPM and key until the fresh values arrive", asy
   await expect(row.locator(".td-key .key-pill")).toHaveText("2A");
 });
 
-test("while a track is analyzed everything can still start an analysis, except that track's own button", async ({ page }) => {
+test("while a track is analyzed everything can still start an analysis, except that track's own button; tracks waiting in the job have their own button disabled, and new work after a cancel brings the controls back", async ({ page }) => {
   await installScanAnalysisMock(page, { trackCount: 2, pieceDelayMs: 0, holdAfterTrackStart: true });
   await page.goto("/");
+  {
+    const rows = page.locator("#libraryTableBody .track-grid-row");
+    const analyzeButtons = page.locator('#libraryTableBody [data-action="analyze-track"]');
+    const reanalyze = page.locator('[data-selection-bar="library"] [data-selection-action="reanalyze"]');
+    await rows.nth(1).locator(".td-select input").check();
 
-  const rows = page.locator("#libraryTableBody .track-grid-row");
-  const analyzeButtons = page.locator('#libraryTableBody [data-action="analyze-track"]');
-  const reanalyze = page.locator('[data-selection-bar="library"] [data-selection-action="reanalyze"]');
-  await rows.nth(1).locator(".td-select input").check();
+    await analyzeButtons.first().click();
+    await page.waitForFunction(() => !!window.__heldTrack);
 
-  await analyzeButtons.first().click();
-  await page.waitForFunction(() => !!window.__heldTrack);
+    await expect(analyzeButtons.first()).toBeDisabled();
+    await expect(analyzeButtons.nth(1)).toBeEnabled();
+    await expect(reanalyze).toBeEnabled();
+    await expect(page.locator("#analyzeLibraryBtn")).toBeEnabled();
 
-  await expect(analyzeButtons.first()).toBeDisabled();
-  await expect(analyzeButtons.nth(1)).toBeEnabled();
-  await expect(reanalyze).toBeEnabled();
-  await expect(page.locator("#analyzeLibraryBtn")).toBeEnabled();
+    // The row drawn again during the analysis still has its button disabled.
+    const firstTitle = await rows.first().locator(".track-title").textContent();
+    await page.locator("#librarySearch").fill(firstTitle);
+    await expect(rows).toHaveCount(1);
+    await expect(analyzeButtons.first()).toBeDisabled();
+    await page.locator("#librarySearch").fill("");
+    await expect(rows).toHaveCount(2);
+    await expect(analyzeButtons.first()).toBeDisabled();
+    await expect(analyzeButtons.nth(1)).toBeEnabled();
 
-  // The row drawn again during the analysis still has its button disabled.
-  const firstTitle = await rows.first().locator(".track-title").textContent();
-  await page.locator("#librarySearch").fill(firstTitle);
-  await expect(rows).toHaveCount(1);
-  await expect(analyzeButtons.first()).toBeDisabled();
-  await page.locator("#librarySearch").fill("");
-  await expect(rows).toHaveCount(2);
-  await expect(analyzeButtons.first()).toBeDisabled();
-  await expect(analyzeButtons.nth(1)).toBeEnabled();
+    await page.evaluate(() => window.__heldTrack.release());
+    await expect(analyzeButtons.first()).toBeEnabled();
+  }
 
-  await page.evaluate(() => window.__heldTrack.release());
-  await expect(analyzeButtons.first()).toBeEnabled();
+  await page.reload();
+  {
+    const analyzeButtons = page.locator('#libraryTableBody [data-action="analyze-track"]');
+    const waitingId = await page.locator("#libraryTableBody .track-grid-row").nth(1).getAttribute("data-track-id");
+    await analyzeButtons.first().click();
+    await page.waitForFunction(() => !!window.__heldTrack);
+    const job = { jobId: "job-grows", jobType: "analysis", stage: "analyze_new_tracks" };
+    const pause = page.locator("#progressPauseBtn");
+    await pause.click();
+
+    await page.evaluate(([run, id]) => window.__emitJobEvent({
+      ...run, event: "job.tracks_waiting", waitingTrackIds: [id], waitingTooltip: "Waiting for its turn", message: "", percent: 0
+    }), [job, waitingId]);
+    const waitingButton = page.locator(`#libraryTableBody .track-grid-row[data-track-id="${waitingId}"] [data-action="analyze-track"]`);
+    await expect(waitingButton).toBeDisabled();
+    await expect(waitingButton).toHaveAttribute("data-tooltip", "Waiting for its turn");
+    await expect(pause).toHaveAttribute("title", "Resume analysis");
+    await expect(page.locator("#analyzeLibraryBtn")).toBeEnabled();
+
+    await page.evaluate(([run, id]) => window.__emitJobEvent({
+      ...run, event: "job.tracks_not_waiting", waitingTrackIds: [id], message: "", percent: 0
+    }), [job, waitingId]);
+    await expect(waitingButton).toBeEnabled();
+    await expect(waitingButton).not.toHaveAttribute("data-tooltip", "Waiting for its turn");
+
+    await page.locator("#progressCancelAnalysisBtn").click();
+    await expect(pause).toBeHidden();
+    await page.evaluate(([run, id]) => window.__emitJobEvent({
+      ...run, event: "job.tracks_waiting", waitingTrackIds: [id], waitingTooltip: "Waiting for its turn", message: "", percent: 0
+    }), [job, waitingId]);
+    await expect(pause).toBeVisible();
+    await expect(page.locator("#progressCancelAnalysisBtn")).toBeVisible();
+  }
 });
 
-test("a request for a track already in the job leaves that row analyzing", async ({ page }) => {
+test("a request for a track already in the job leaves that row analyzing; the final message is the job's, with its warning count as the Event Log link", async ({ page }) => {
   await installScanAnalysisMock(page, { trackCount: 1, pieceDelayMs: 0, holdAfterTrackStart: true });
   await page.goto("/");
+  {
+    const row = page.locator("#libraryTableBody .track-grid-row").first();
+    await row.locator(".td-select input").check();
+    await row.locator('[data-action="analyze-track"]').click();
+    await page.waitForFunction(() => !!window.__heldTrack);
+    await expect(row).toHaveClass(/is-analyzing/);
 
-  const row = page.locator("#libraryTableBody .track-grid-row").first();
-  await row.locator(".td-select input").check();
-  await row.locator('[data-action="analyze-track"]').click();
-  await page.waitForFunction(() => !!window.__heldTrack);
-  await expect(row).toHaveClass(/is-analyzing/);
+    await page.locator('[data-selection-bar="library"] [data-selection-action="reanalyze"]').click();
+    await expect(page.locator("#statusText")).toContainText("Already analyzing 1 track");
+    await expect(row).toHaveClass(/is-analyzing/);
+    await expect(row.locator('[data-action="analyze-track"]')).toBeDisabled();
+    await expect(page.locator("#progressPauseBtn")).toBeVisible();
 
-  await page.locator('[data-selection-bar="library"] [data-selection-action="reanalyze"]').click();
-  await expect(page.locator("#statusText")).toContainText("Already analyzing 1 track");
-  await expect(row).toHaveClass(/is-analyzing/);
-  await expect(row.locator('[data-action="analyze-track"]')).toBeDisabled();
-  await expect(page.locator("#progressPauseBtn")).toBeVisible();
+    await page.evaluate(() => window.__heldTrack.release());
+    await expect(row).not.toHaveClass(/is-analyzing/);
+    await expect(row.locator('[data-action="analyze-track"]')).toBeEnabled();
+    expect(await page.evaluate(() => window.__scanTestStats.analyzeNewTracksCalls)).toBe(2);
+  }
 
-  await page.evaluate(() => window.__heldTrack.release());
-  await expect(row).not.toHaveClass(/is-analyzing/);
-  await expect(row.locator('[data-action="analyze-track"]')).toBeEnabled();
-  expect(await page.evaluate(() => window.__scanTestStats.analyzeNewTracksCalls)).toBe(2);
-});
-
-test("tracks waiting in the job have their own button disabled, and new work after a cancel brings the controls back", async ({ page }) => {
-  await installScanAnalysisMock(page, { trackCount: 2, pieceDelayMs: 0, holdAfterTrackStart: true });
-  await page.goto("/");
-
-  const analyzeButtons = page.locator('#libraryTableBody [data-action="analyze-track"]');
-  const waitingId = await page.locator("#libraryTableBody .track-grid-row").nth(1).getAttribute("data-track-id");
-  await analyzeButtons.first().click();
-  await page.waitForFunction(() => !!window.__heldTrack);
-  const job = { jobId: "job-grows", jobType: "analysis", stage: "analyze_new_tracks" };
-  const pause = page.locator("#progressPauseBtn");
-  await pause.click();
-
-  await page.evaluate(([run, id]) => window.__emitJobEvent({
-    ...run, event: "job.tracks_waiting", waitingTrackIds: [id], waitingTooltip: "Waiting for its turn", message: "", percent: 0
-  }), [job, waitingId]);
-  const waitingButton = page.locator(`#libraryTableBody .track-grid-row[data-track-id="${waitingId}"] [data-action="analyze-track"]`);
-  await expect(waitingButton).toBeDisabled();
-  await expect(waitingButton).toHaveAttribute("data-tooltip", "Waiting for its turn");
-  await expect(pause).toHaveAttribute("title", "Resume analysis");
-  await expect(page.locator("#analyzeLibraryBtn")).toBeEnabled();
-
-  await page.evaluate(([run, id]) => window.__emitJobEvent({
-    ...run, event: "job.tracks_not_waiting", waitingTrackIds: [id], message: "", percent: 0
-  }), [job, waitingId]);
-  await expect(waitingButton).toBeEnabled();
-  await expect(waitingButton).not.toHaveAttribute("data-tooltip", "Waiting for its turn");
-
-  await page.locator("#progressCancelAnalysisBtn").click();
-  await expect(pause).toBeHidden();
-  await page.evaluate(([run, id]) => window.__emitJobEvent({
-    ...run, event: "job.tracks_waiting", waitingTrackIds: [id], waitingTooltip: "Waiting for its turn", message: "", percent: 0
-  }), [job, waitingId]);
-  await expect(pause).toBeVisible();
-  await expect(page.locator("#progressCancelAnalysisBtn")).toBeVisible();
-});
-
-test("the final message is the job's, with its warning count as the Event Log link", async ({ page }) => {
-  await installScanAnalysisMock(page, { trackCount: 1, pieceDelayMs: 0, holdAfterTrackStart: true });
-  await page.goto("/");
-  await page.waitForFunction(() => window.__hasJobListener?.());
-  await page.evaluate(() => {
-    const job = { jobId: "job-end", jobType: "analysis", stage: "analyze_new_tracks" };
-    window.__emitJobEvent({ ...job, event: "job.started", percent: 0, message: "Analyzing selected tracks" });
-    // The warning reaches the Event Log as the backend logs it, not from the event.
-    window.__emitBackendLog({ level: "error", source: "analysis", code: "analysis.track-failed", message: "/music/bad.mp3: decode failed" });
-    window.__emitJobEvent({
-      ...job,
-      event: "job.completed",
-      percent: 100,
-      message: "Analysis finished: analyzed 3, failed 1",
-      warningText: "(1 warning)",
+  await page.reload();
+  {
+    await page.waitForFunction(() => window.__hasJobListener?.());
+    await page.evaluate(() => {
+      const job = { jobId: "job-end", jobType: "analysis", stage: "analyze_new_tracks" };
+      window.__emitJobEvent({ ...job, event: "job.started", percent: 0, message: "Analyzing selected tracks" });
+      // The warning reaches the Event Log as the backend logs it, not from the event.
+      window.__emitBackendLog({ level: "error", source: "analysis", code: "analysis.track-failed", message: "/music/bad.mp3: decode failed" });
+      window.__emitJobEvent({
+        ...job,
+        event: "job.completed",
+        percent: 100,
+        message: "Analysis finished: analyzed 3, failed 1",
+        warningText: "(1 warning)",
+      });
     });
-  });
-  await expect(page.locator("#statusText")).toContainText("Analysis finished: analyzed 3, failed 1");
-  await expect(page.locator("#statusText a, #statusText button")).toContainText("(1 warning)");
-  await page.locator("#eventLogBtn").click();
-  await expect(page.locator("#eventLogList")).toContainText("/music/bad.mp3: decode failed");
+    await expect(page.locator("#statusText")).toContainText("Analysis finished: analyzed 3, failed 1");
+    await expect(page.locator("#statusText a, #statusText button")).toContainText("(1 warning)");
+    await page.locator("#eventLogBtn").click();
+    await expect(page.locator("#eventLogList")).toContainText("/music/bad.mp3: decode failed");
+  }
 });
 
 test("a first analysis keeps the row's imported BPM and key while it runs", async ({ page }) => {
@@ -739,65 +739,64 @@ test("event log entries go to the session log file, which the Open log file butt
   await expect.poll(async () => page.evaluate(() => window.__scanTestStats.openLogFileCalls)).toBe(1);
 });
 
-test("pause clicked mid-track keeps the elapsed timer counting until that track actually finishes", async ({ page }) => {
+test("pause clicked mid-track keeps the elapsed timer counting until that track actually finishes; pause clicked between tracks unfreezes the timer if the next track was already picked up", async ({ page }) => {
   await installScanAnalysisMock(page, { trackCount: 3, pieceDelayMs: 300 });
   await page.goto("/");
+  {
+    await page.locator("#analyzeLibraryBtn").click();
+    await expect(page.locator("#progressPauseBtn")).toBeVisible();
 
-  await page.locator("#analyzeLibraryBtn").click();
-  await expect(page.locator("#progressPauseBtn")).toBeVisible();
+    // Click pause partway through track 1's own pieces (after "waveform", one
+    // piece before it would report ready) so it's guaranteed to still be
+    // in-flight when the click lands. Dispatched as a direct in-page DOM
+    // click (not Playwright's locator.click()) so the timing isn't at the
+    // mercy of actionability/stability retries while the table is actively
+    // repainting -- those can add hundreds of ms of real time and blow past
+    // the very window this test is trying to land in.
+    await page.waitForFunction(() => (window.__scanTestStats?.pieceEventsByPiece?.waveform || 0) >= 1);
+    await page.evaluate(() => document.getElementById("progressPauseBtn").click());
 
-  // Click pause partway through track 1's own pieces (after "waveform", one
-  // piece before it would report ready) so it's guaranteed to still be
-  // in-flight when the click lands. Dispatched as a direct in-page DOM
-  // click (not Playwright's locator.click()) so the timing isn't at the
-  // mercy of actionability/stability retries while the table is actively
-  // repainting -- those can add hundreds of ms of real time and blow past
-  // the very window this test is trying to land in.
-  await page.waitForFunction(() => (window.__scanTestStats?.pieceEventsByPiece?.waveform || 0) >= 1);
-  await page.evaluate(() => document.getElementById("progressPauseBtn").click());
+    // The in-flight track hasn't reported ready yet, so the batch hasn't
+    // really stopped -- the timer must still be ticking, not frozen.
+    await expect(page.locator("#progressTime")).not.toHaveText("(paused)");
 
-  // The in-flight track hasn't reported ready yet, so the batch hasn't
-  // really stopped -- the timer must still be ticking, not frozen.
-  await expect(page.locator("#progressTime")).not.toHaveText("(paused)");
+    // Once that track finishes (its bpm/key piece lands), nothing else starts
+    // because we're paused, so now it has genuinely stopped.
+    await expect(page.locator("#progressTime")).toHaveText("(paused)");
+    const settledCount = await page.locator("#libraryTableBody .bpm-pill").count();
+    expect(settledCount).toBeLessThan(3);
 
-  // Once that track finishes (its bpm/key piece lands), nothing else starts
-  // because we're paused, so now it has genuinely stopped.
-  await expect(page.locator("#progressTime")).toHaveText("(paused)");
-  const settledCount = await page.locator("#libraryTableBody .bpm-pill").count();
-  expect(settledCount).toBeLessThan(3);
+    // Stays stopped -- no further tracks pick up.
+    await page.waitForTimeout(300);
+    await expect(page.locator("#libraryTableBody .bpm-pill")).toHaveCount(settledCount);
+  }
 
-  // Stays stopped -- no further tracks pick up.
-  await page.waitForTimeout(300);
-  await expect(page.locator("#libraryTableBody .bpm-pill")).toHaveCount(settledCount);
-});
+  await page.reload();
+  {
+    await page.locator("#analyzeLibraryBtn").click();
+    await expect(page.locator("#progressPauseBtn")).toBeVisible();
 
-test("pause clicked between tracks unfreezes the timer if the next track was already picked up", async ({ page }) => {
-  await installScanAnalysisMock(page, { trackCount: 3, pieceDelayMs: 300 });
-  await page.goto("/");
+    // Click pause the moment track 1 is ready. By then the mock (like a real
+    // backend worker) is already past its pause check and working on track 2,
+    // but track 2's first piece hasn't been reported yet -- so with no rows
+    // analyzing, the UI freezes on "(paused)" right away.
+    await page.waitForFunction(() => {
+      if ((window.__scanTestStats?.pieceEventsByPiece?.bpm_key || 0) < 1) return false;
+      document.getElementById("progressPauseBtn").click();
+      return true;
+    });
 
-  await page.locator("#analyzeLibraryBtn").click();
-  await expect(page.locator("#progressPauseBtn")).toBeVisible();
+    // Track 2's first piece shows it was in flight after all, so the timer
+    // must go back to counting instead of staying frozen.
+    await page.waitForFunction(() => (window.__scanTestStats?.pieceEventsByPiece?.artwork || 0) >= 2);
+    await expect(page.locator("#progressTime")).not.toHaveText("(paused)");
 
-  // Click pause the moment track 1 is ready. By then the mock (like a real
-  // backend worker) is already past its pause check and working on track 2,
-  // but track 2's first piece hasn't been reported yet -- so with no rows
-  // analyzing, the UI freezes on "(paused)" right away.
-  await page.waitForFunction(() => {
-    if ((window.__scanTestStats?.pieceEventsByPiece?.bpm_key || 0) < 1) return false;
-    document.getElementById("progressPauseBtn").click();
-    return true;
-  });
-
-  // Track 2's first piece shows it was in flight after all, so the timer
-  // must go back to counting instead of staying frozen.
-  await page.waitForFunction(() => (window.__scanTestStats?.pieceEventsByPiece?.artwork || 0) >= 2);
-  await expect(page.locator("#progressTime")).not.toHaveText("(paused)");
-
-  // Once track 2 finishes, nothing else starts, so it's genuinely stopped.
-  await expect(page.locator("#progressTime")).toHaveText("(paused)");
-  await expect(page.locator("#libraryTableBody .bpm-pill")).toHaveCount(2);
-  await page.waitForTimeout(400);
-  await expect(page.locator("#libraryTableBody .bpm-pill")).toHaveCount(2);
+    // Once track 2 finishes, nothing else starts, so it's genuinely stopped.
+    await expect(page.locator("#progressTime")).toHaveText("(paused)");
+    await expect(page.locator("#libraryTableBody .bpm-pill")).toHaveCount(2);
+    await page.waitForTimeout(400);
+    await expect(page.locator("#libraryTableBody .bpm-pill")).toHaveCount(2);
+  }
 });
 
 test("cancel button stops the batch early and reports how many tracks completed", async ({ page }) => {
