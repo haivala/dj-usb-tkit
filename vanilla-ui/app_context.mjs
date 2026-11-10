@@ -76,7 +76,7 @@ export function createAppContext(env) {
     updateUsbNameBadge updateSelectionCount updateUsbSubNavDisabledState updateUsbEmptyState
     updateSourceFilterIndicator updateAnalyzeLibraryButtonLabel closeSettingsDrawer updateUsbHealthDot
     syncLibraryOnboardingMode bindEvents`);
-  bindActions(settings, "persistSetting hydrateLocalStorageFromFrontendSettingsDb persistUsbRoot");
+  bindActions(settings, "persistSetting hydrateLocalStorageFromFrontendSettingsDb");
   bindActions(bootstrap, "switchView debugFrontendLog handleBackendLogEvent");
   bindActions(shell, "handleSortHeaderClick");
   bindActions(playback, `toPlayableUrl updateTransportButtonsInDom clearAllWaveformPlayheads
@@ -109,7 +109,7 @@ export function createAppContext(env) {
     removeUsbPlayerMenuItems moveUsbPlayerMenuItems exportPlaylistToUsb
     initializeUsb pickUsbFolder hydrateUsbTrackMetadata loadUsbDevices
     pruneUsbDevice updateUsbRootText`);
-  bindActions(usbAudioFormats, "loadUsbAudioFormats renderUsbAudioFormats");
+  bindActions(usbAudioFormats, "applyUsbAudioFormats renderUsbAudioFormats");
   bindActions(trackTable, "buildTrackTableRow renderEmptyTrackTable finishTrackRows");
   bindActions(trackDetail, "openTrackDetail");
 

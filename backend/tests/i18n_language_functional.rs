@@ -18,8 +18,8 @@ use backend::models::{
     AnalyzeNewTracksRequest, CreatePlaylistRequest, DeletePlaylistRequest,
     FetchUsbHistoriesRequest, InitializeUsbRequest, RepairUsbDiagnosticsRequest,
     RunUsbDiagnosticsData, RunUsbDiagnosticsRequest, RunUsbParityReportData,
-    RunUsbParityReportRequest, ScanLibraryRequest, SetFrontendSettingRequest, SetLanguageRequest,
-    ValidateUsbRootRequest,
+    RunUsbParityReportRequest, ScanLibraryRequest, SelectUsbRequest, SetFrontendSettingRequest,
+    SetLanguageRequest,
 };
 use backend::service::analysis_event_payload;
 use tempfile::tempdir;
@@ -236,11 +236,13 @@ fn a_warning_shows_the_current_language_and_logs_english() {
 
     let missing = root.path().join("no-such-usb");
     let validated = backend
-        .validate_usb_root(ValidateUsbRootRequest {
+        .select_usb(SelectUsbRequest {
             path: missing.to_string_lossy().to_string(),
         })
         .data
-        .expect("validation data");
+        .expect("validation data")
+        .data
+        .usb;
     assert!(!validated.valid);
     let warning = validated
         .warnings

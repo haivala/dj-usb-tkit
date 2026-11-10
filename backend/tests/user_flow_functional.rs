@@ -9,11 +9,12 @@ use backend::models::{
     AddLibrarySelectionToPlaylistRequest, AddTrackCandidate, AddTrackCandidatesToPlaylistRequest,
     AnalyzeNewTracksRequest, BrowseSourceFilesRequest, CreatePlaylistRequest, ExportToUsbOptions,
     ExportToUsbRequest, FetchUsbHistoriesRequest, FetchUsbPlaylistsRequest, FetchUsbTracksRequest,
-    GetPlaylistTracksRequest, GetTrackDetailRequest, GetUsbAudioFormatsRequest,
-    GetUsbTrackDetailRequest, InitializeUsbRequest, MaterializeSourceTrackRequest,
-    SaveTrackAnalysisEditsRequest, SaveTrackMetadataEditsRequest, SaveUsbTrackAnalysisEditsRequest,
-    SaveUsbTrackMetadataEditsRequest, ScanLibraryRequest, SetFrontendSettingRequest,
-    SetUsbAudioFormatsRequest, TrackCueInput, UsbMetadataEditTrack, UsbTrack,
+    GetPlaylistTracksRequest, GetTrackDetailRequest, GetUsbTrackDetailRequest,
+    InitializeUsbRequest, MaterializeSourceTrackRequest, SaveTrackAnalysisEditsRequest,
+    SaveTrackMetadataEditsRequest, SaveUsbTrackAnalysisEditsRequest,
+    SaveUsbTrackMetadataEditsRequest, ScanLibraryRequest, SelectUsbRequest,
+    SetFrontendSettingRequest, SetUsbAudioFormatsRequest, TrackCueInput, UsbMetadataEditTrack,
+    UsbTrack,
 };
 use backend::pdb_reader::parse_pdb;
 use backend::service::anlz::{
@@ -1442,10 +1443,13 @@ fn export_one_track_with_cues_to(
     });
     if !unticked.is_empty() {
         let mut formats = backend
-            .get_usb_audio_formats(GetUsbAudioFormatsRequest {
-                usb_root: usb.to_string_lossy().to_string(),
+            .select_usb(SelectUsbRequest {
+                path: usb.to_string_lossy().to_string(),
             })
             .data
+            .expect("select data")
+            .data
+            .audio_formats
             .expect("usb formats")
             .formats;
         for item in &mut formats {
@@ -1818,10 +1822,13 @@ fn re_export_as_a_transcode_keeps_the_tracks_old_file_on_the_stick() {
     assert_eq!(export_file().export_file, None);
 
     let mut formats = backend
-        .get_usb_audio_formats(GetUsbAudioFormatsRequest {
-            usb_root: usb_text.clone(),
+        .select_usb(SelectUsbRequest {
+            path: usb_text.clone(),
         })
         .data
+        .expect("select data")
+        .data
+        .audio_formats
         .expect("usb formats")
         .formats;
     for item in &mut formats {

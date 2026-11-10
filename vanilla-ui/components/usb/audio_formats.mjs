@@ -7,19 +7,13 @@ import { cloneTemplate } from "../../ui_utils.mjs";
 import { bindListDragReorder, moveArrayItem } from "../shared/list_drag_reorder.mjs";
 
 
-export async function loadUsbAudioFormats(ctx) {
-  const { state } = ctx;
-  const usbRoot = state.usbRoot;
-  state.usbAudioFormats = null;
+// The selected USB's audio formats (`select_usb`'s `audioFormats`; null without
+// a valid USB).
+export function applyUsbAudioFormats(ctx, data) {
+  ctx.state.usbAudioFormats = data || null;
   renderUsbAudioFormats(ctx);
   // Another USB (or none): the open playlist follows it.
   ctx.reloadPlaylistForUsb();
-  if (!usbRoot || !state.usbRootValid) return;
-  const data = await ctx.command("get_usb_audio_formats", { usbRoot });
-  // A switched stick while this was loading: its own load lands instead.
-  if (state.usbRoot !== usbRoot) return;
-  state.usbAudioFormats = data;
-  renderUsbAudioFormats(ctx);
 }
 
 export function renderUsbAudioFormats(ctx) {

@@ -297,7 +297,7 @@ test("playlist analyze-missing skips already-analyzed tracks and targets the res
           if (command === "resolve_playback_source") {
             return { ok: true, data: { resolvedPath: null, matchedBy: "none", trackId: null } };
           }
-          if (command === "validate_usb_root") {
+          if (command === "select_usb") {
             return {
               ok: true,
               data: {
@@ -442,7 +442,7 @@ test("playlist actions hide Analyze Missing when unnecessary and keep Export vis
           if (command === "resolve_playback_source") {
             return { ok: true, data: { resolvedPath: null, matchedBy: "none", trackId: null } };
           }
-          if (command === "validate_usb_root") {
+          if (command === "select_usb") {
             return {
               ok: true,
               data: {
@@ -584,7 +584,7 @@ test("playlist analyze-missing offers unanalyzed tracks that live on a USB drive
           if (command === "resolve_playback_source") {
             return { ok: true, data: { resolvedPath: null, matchedBy: "none", trackId: null } };
           }
-          if (command === "validate_usb_root") {
+          if (command === "select_usb") {
             return {
               ok: true,
               data: {
@@ -709,7 +709,7 @@ function installReorderTauriMock(page, { usbSameNamePlaylistName, exportPruneSta
     // updated when the sync-mode toggle persists it via set_frontend_setting,
     // read by list_playlists / fetch_usb_playlists.
     let currentPruneStale = exportPruneStale !== false;
-    // The backend's selected USB: set by a valid validate_usb_root.
+    // The backend's selected USB: set by a valid select_usb.
     let usbSelected = false;
     const exportStatusFor = () => playlists.map((playlist) => {
       const sameNameExistsOnUsb = !!usbSameNamePlaylistName
@@ -796,7 +796,7 @@ function installReorderTauriMock(page, { usbSameNamePlaylistName, exportPruneSta
           if (command === "pick_usb_folder") {
             return usbSameNamePlaylistName ? "/USB" : null;
           }
-          if (command === "validate_usb_root") {
+          if (command === "select_usb") {
             const valid = !!usbSameNamePlaylistName;
             usbSelected = valid;
             return {
@@ -1464,7 +1464,7 @@ test("switching away from a sorted playlist commits the sort as its real order, 
             return { ok: true, data: { resolvedPath: null, matchedBy: "none", trackId: null } };
           }
           if (command === "pick_usb_folder") return "/USB";
-          if (command === "validate_usb_root") {
+          if (command === "select_usb") {
             return {
               ok: true,
               data: { valid: true, normalizedRoot: "/USB", warnings: [] }

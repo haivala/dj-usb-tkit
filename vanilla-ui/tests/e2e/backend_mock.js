@@ -79,15 +79,21 @@
       };
     },
 
-    // `ValidateUsbRootData` (validate_usb_root): an initialized, writable stick.
-    validateUsbRoot(overrides = {}) {
+    // `SelectUsbData` (select_usb): an initialized, writable stick with every
+    // audio format allowed, its name unread (no naming prompt) and no known
+    // drives. Without a valid USB, no audio formats.
+    selectUsb(overrides = {}) {
+      const valid = overrides.valid ?? true;
       return {
-        valid: true,
+        valid,
         normalizedRoot: "/Volumes/USB-TEST",
         canInitialize: false,
         statusText: "mock selection status",
         initHintText: "",
         warnings: [],
+        audioFormats: valid ? backend.usbAudioFormats() : null,
+        deviceName: null,
+        devices: [],
         ...overrides
       };
     },
@@ -166,7 +172,7 @@
       return { chips, noteText: "", statusText: "mock colour status", pdbColor: 0, edbColor: 0, writable: true, reason: null, updated: false, warnings: [], ...overrides };
     },
 
-    // `UsbAudioFormatsData` (get/set_usb_audio_formats): every format allowed.
+    // `UsbAudioFormatsData` (select_usb's audioFormats, set_usb_audio_formats): every format allowed.
     usbAudioFormats(overrides = {}) {
       return {
         formats: AUDIO_FORMATS.map((format) => ({
@@ -214,7 +220,6 @@
         case "get_library_sources": return ok(backend.librarySources());
         case "browse_source_files": return ok({ total: 0, items: [] });
         case "list_playlists":
-        case "clear_usb_root":
           return ok({ playlists: [], playlistUsbExportStatus: [] });
         case "get_frontend_settings": return ok({ values: {}, nodeAvailable: true, essentiaInstalled: true });
         case "set_frontend_setting": return ok({ saved: true });
@@ -224,7 +229,6 @@
         case "fetch_usb_playlist_tracks":
         case "fetch_usb_history_tracks":
           return ok({ items: [], total: 0 });
-        case "get_usb_audio_formats": return ok(backend.usbAudioFormats());
         case "get_usb_player_menu_config": return ok(backend.playerMenuConfig());
         case "get_usb_background_color": return ok(backend.usbBackgroundColor());
         default:
@@ -240,7 +244,7 @@
     get_library_sources: (data) => backend.librarySources([], data),
     fetch_usb_playlists: backend.usbPlaylists,
     fetch_usb_histories: backend.usbHistories,
-    validate_usb_root: backend.validateUsbRoot,
+    select_usb: backend.selectUsb,
     run_usb_diagnostics: backend.usbDiagnostics,
     repair_usb_diagnostics: (data) => backend.repair(
       data.diagnostics ? { ...data, diagnostics: backend.usbDiagnostics(data.diagnostics) } : data
@@ -249,7 +253,6 @@
     update_usb_player_menu_config: backend.playerMenuConfig,
     get_usb_background_color: backend.usbBackgroundColor,
     set_usb_background_color: backend.usbBackgroundColor,
-    get_usb_audio_formats: backend.usbAudioFormats,
     set_usb_audio_formats: backend.usbAudioFormats,
     export_to_usb: backend.exportToUsb,
     fetch_usb_playlist_tracks: withListSummary,
@@ -281,14 +284,20 @@
     "create_playlist", "rename_playlist", "delete_playlist", "remove_tracks_from_playlist",
     "reorder_playlist_tracks", "add_track_candidates_to_playlist", "add_track_candidates_to_playlists",
     "add_library_selection_to_playlist", "add_library_selection_to_playlists",
-    "import_external_playlists", "export_to_usb", "set_usb_device_name"
+    "import_external_playlists", "export_to_usb", "set_usb_device_name", "select_usb"
   ]);
+
+  // Answers given their playlists here, not by a spec, carry this mark (kept
+  // through a spec's spread): a spec's invoke that passes the command on to the
+  // one it replaced got them from that one's list_playlists, so they're taken
+  // again from the spec's own.
+  const FILLED = "__mockFilledPlaylists";
 
   async function withPlaylists(invoke, command, raw) {
     if (!PLAYLIST_CHANGES.has(command) || !raw?.ok || !raw.data || typeof raw.data !== "object") return raw;
-    if ("playlists" in raw.data) return raw;
+    if ("playlists" in raw.data && !raw.data[FILLED]) return raw;
     const listed = await invoke("list_playlists", {});
-    return listed?.ok ? { ...raw, data: { ...raw.data, ...listed.data } } : raw;
+    return listed?.ok ? { ...raw, data: { ...raw.data, ...listed.data, [FILLED]: true } } : raw;
   }
 
   function shaped(invoke) {

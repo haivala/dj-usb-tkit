@@ -29,7 +29,7 @@ function installTauriMock(page) {
             const track = historyTracks.find((t) => t.id === trackId);
             return { ok: true, data: { track: track ? { ...track, artworkChecked: true } : {}, warnings: [] } };
           }
-          if (command === "validate_usb_root") {
+          if (command === "select_usb") {
             return {
               ok: true,
               data: {

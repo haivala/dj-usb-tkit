@@ -354,7 +354,7 @@ layer described in `docs/USB_EXPORT.md`'s "Local HDD staging" section, same as e
 is always staged transparently regardless of caller (`edb::open_edb_from_usb_root`/`open_edb_rw`).
 
 The `repair` module's PDB/eDB reads and writes go through the same staging layer. Both databases are
-staged when the USB is connected (`validate_usb_root`). The PDB detectors (`detect_pdb_*`) take PDB
+staged when the USB is connected (`select_usb`). The PDB detectors (`detect_pdb_*`) take PDB
 bytes, so a diagnostics pass reads the staged PDB once. A `repair_usb_diagnostics` apply request
 works like this:
 

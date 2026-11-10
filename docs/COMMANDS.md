@@ -270,7 +270,7 @@ drive selection from being rendered against a newer selected drive.
 Every command that changes playlists (`create_playlist`, `rename_playlist`, `delete_playlist`,
 `remove_tracks_from_playlist`, `reorder_playlist_tracks`, the `add_*_to_playlist(s)` commands,
 `import_external_playlists`, `export_to_usb`, `export_to_usb_with_progress`,
-`set_usb_device_name`) also answers with the whole playlist state, the same fields
+`set_usb_device_name`, and `select_usb`, which changes the export status) also answers with the whole playlist state, the same fields
 `list_playlists` returns, next to its own: `playlists` and `playlistUsbExportStatus`. The UI
 applies them as they come and never asks for the list again after a change.
 
@@ -321,14 +321,18 @@ applies them as they come and never asks for the list again after a change.
 
 ### USB import/export
 
-- `validate_usb_root` — a valid root becomes the backend's selected USB, the one playlist export
-  status is worked out against; an invalid one leaves no USB selected
-- `clear_usb_root` — no USB selected; answers `{ playlists, playlistUsbExportStatus }`
+- `select_usb` — `{ path }`: selects the USB, everything the USB page needs in one answer. It
+  checks the folder (`valid`, `normalizedRoot`, `statusText`, `initHintText`, `canInitialize`);
+  a valid root becomes the backend's selected USB, the one playlist export status is worked out
+  against, and an invalid one or an empty `path` leaves none selected. It saves the folder as
+  the one the app shows at startup (`ui_usb_root_v1`, which `set_frontend_setting` refuses). For a
+  valid USB it also answers `audioFormats` (below) and `deviceName` (`{ name, suggestedName,
+  nameTakenBy }`), each `null` when it can't be read (an Event Log warning says why); `devices`
+  is the known drives, as `list_usb_devices` lists them. Plus the playlist state (see Playlists)
 - `list_usb_devices`
 - `prune_usb_device`
-- `get_usb_device_name`
 - `set_usb_device_name`
-- `get_usb_audio_formats` — `{ usbRoot }` →
+- `audioFormats` (`select_usb`) →
   `{ formats: [{ format, label, allowed, locked, tooltip }], writable, hint }`: the USB's Player
   formats (`flac`, `alac`, `aiff`, `wav`, `mp3`, `aac`) in its order of preference, from the
   stick's `.dj-usb-tkit/drive.json`. A stick without the setting gets all six ticked. `locked`:
@@ -419,9 +423,9 @@ library (`Engine Library/Database2`), keeping the player's play history. The
 adds a warning (see `docs/ENGINE_DJ.md`). `repair_usb_diagnostics` returns the setting as
 `engineLibraryEnabled`, since its `keep_engine_library_up_to_date` fix turns it on.
 
-`get_usb_device_name`/`set_usb_device_name` read/write the user-assigned drive identity (see
-`docs/USB_EXPORT.md`'s "USB drive naming" section); `get_usb_device_name` also returns a
-best-effort `suggestedName` drawn from the OS filesystem label when the drive is unnamed.
+`select_usb`'s `deviceName` and `set_usb_device_name` read/write the user-assigned drive identity
+(see `docs/USB_EXPORT.md`'s "USB drive naming" section); `deviceName` also carries a best-effort
+`suggestedName` drawn from the OS filesystem label when the drive is unnamed.
 
 `fetch_usb_playlist_tracks` / `fetch_usb_history_tracks` return one
 paginated/searched/sorted page of a selected USB playlist or history session
@@ -436,7 +440,7 @@ They also send the panel's text (`summaryText`, `statusText`), and each playlist
 
 The USB commands send the text the UI shows, ready to display:
 
-- `validate_usb_root`: `statusText`, `initHintText`, and `canInitialize` for the Initialize button.
+- `select_usb`: `statusText`, `initHintText`, and `canInitialize` for the Initialize button.
   `initialize_usb`: `statusText`.
 - `set_usb_device_name`: answers `{ name, updated, statusText }`. `name` is as saved, and `updated`
   is false when the drive already had exactly that name.
@@ -565,4 +569,4 @@ These are desktop host commands, not backend API envelope commands:
 No command lets the window widen the asset protocol's scope (the files it may load, such
 as covers). Beyond what `tauri.conf.json` allows, the backend lets in the library's source
 folders (at startup, and after `add_source_folders` / `relocate_source_root`) and a USB
-root `validate_usb_root` found valid.
+root `select_usb` found valid.

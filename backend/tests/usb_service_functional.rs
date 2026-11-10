@@ -15,11 +15,11 @@ use backend::models::{
     AddLibrarySelectionToPlaylistRequest, BrowseSourceFilesRequest,
     BuildUsbHistoryTracklistRequest, CreatePlaylistRequest, ExportToUsbOptions, ExportToUsbRequest,
     FetchUsbHistoriesRequest, FetchUsbPlaylistsRequest, FetchUsbTracksRequest,
-    GetTracksMetadataSummaryRequest, GetUsbDeviceNameRequest, GetUsbHistoryTracklistOptionsRequest,
+    GetTracksMetadataSummaryRequest, GetUsbHistoryTracklistOptionsRequest,
     GetUsbTracksMetadataSummaryRequest, InitializeUsbRequest, InspectUsbTrackRequest,
     SaveTrackMetadataEditsRequest, SaveUsbTrackMetadataEditsRequest, ScanLibraryRequest,
-    SetUsbDeviceNameRequest, SharedValue, TracklistTimeMode, UsbMetadataEditTrack,
-    ValidateUsbRootRequest,
+    SelectUsbRequest, SetFrontendSettingRequest, SetUsbDeviceNameRequest, SharedValue,
+    TracklistTimeMode, UsbMetadataEditTrack,
 };
 use backend::pdb_reader::parse_pdb;
 use tempfile::tempdir;
@@ -256,26 +256,52 @@ fn scan_and_export_tracks(
 // --- validate_usb_root -------------------------------------------------
 
 #[test]
-fn validate_usb_root_reports_empty_path_as_invalid() {
+fn select_usb_saves_the_folder_and_an_empty_path_clears_it() {
     let root = tempdir().expect("temp root");
     let data_dir = root.path().join("data");
     let backend = BackendCommands::new(&data_dir).expect("create backend");
 
-    let result = backend.validate_usb_root(ValidateUsbRootRequest {
+    let missing = root.path().join("no-such-usb");
+    let selected = backend.select_usb(SelectUsbRequest {
+        path: missing.to_string_lossy().to_string(),
+    });
+    assert!(selected.ok, "{selected:?}");
+    let saved = |backend: &BackendCommands| {
+        backend
+            .get_frontend_settings()
+            .data
+            .expect("settings")
+            .values
+            .get("ui_usb_root_v1")
+            .cloned()
+    };
+    // Even a folder that isn't a USB is the one the app shows when it starts again.
+    assert_eq!(saved(&backend), Some(missing.to_string_lossy().to_string()));
+    // The folder is saved by selecting it, never as a plain setting.
+    let set_directly = backend.set_frontend_setting(SetFrontendSettingRequest {
+        key: "ui_usb_root_v1".to_string(),
+        value: Some("/elsewhere".to_string()),
+    });
+    assert!(!set_directly.ok, "{set_directly:?}");
+
+    // An empty path selects no USB and forgets the folder (saved empty), without a warning.
+    let result = backend.select_usb(SelectUsbRequest {
         path: "   ".to_string(),
     });
-    assert!(result.ok, "validate should succeed even for an empty path");
-    let data = result.data.expect("validate data");
-    assert!(!data.valid);
-    assert!(!data.has_write_access);
-    assert_eq!(data.normalized_root, None);
+    assert!(result.ok, "{result:?}");
+    let data = result.data.expect("select data");
+    assert!(!data.data.usb.valid);
+    assert_eq!(data.data.usb.normalized_root, None);
+    assert_eq!(data.data.usb.status_text, "USB root cleared");
+    assert!(data.data.usb.warnings.is_empty());
+    assert!(data.data.audio_formats.is_none() && data.data.device_name.is_none());
     assert!(
-        data.warnings
+        data.state
+            .playlist_usb_export_status
             .iter()
-            .any(|w| w.code == "usb.import.path-empty"),
-        "expected empty-path warning, got {:?}",
-        data.warnings
+            .all(|status| !status.usb_selected)
     );
+    assert_eq!(saved(&backend), Some(String::new()));
 }
 
 #[test]
@@ -285,11 +311,11 @@ fn validate_usb_root_reports_missing_path_as_invalid() {
     let backend = BackendCommands::new(&data_dir).expect("create backend");
     let missing = root.path().join("does-not-exist");
 
-    let result = backend.validate_usb_root(ValidateUsbRootRequest {
+    let result = backend.select_usb(SelectUsbRequest {
         path: missing.to_string_lossy().to_string(),
     });
     assert!(result.ok);
-    let data = result.data.expect("validate data");
+    let data = result.data.expect("validate data").data.usb;
     assert!(!data.valid);
     assert_eq!(data.normalized_root, None);
     assert!(
@@ -309,11 +335,11 @@ fn validate_usb_root_reports_uninitialized_directory_as_invalid() {
     let data_dir = root.path().join("data");
     let backend = BackendCommands::new(&data_dir).expect("create backend");
 
-    let result = backend.validate_usb_root(ValidateUsbRootRequest {
+    let result = backend.select_usb(SelectUsbRequest {
         path: usb.to_string_lossy().to_string(),
     });
     assert!(result.ok);
-    let data = result.data.expect("validate data");
+    let data = result.data.expect("validate data").data.usb;
     assert!(
         !data.valid,
         "a bare directory without PIONEER/Contents should be invalid"
@@ -347,11 +373,11 @@ fn validate_usb_root_reports_initialized_root_as_valid_with_pdb_and_edb() {
     });
     assert!(initialized.ok, "initialize usb failed: {initialized:?}");
 
-    let result = backend.validate_usb_root(ValidateUsbRootRequest {
+    let result = backend.select_usb(SelectUsbRequest {
         path: usb.to_string_lossy().to_string(),
     });
     assert!(result.ok);
-    let data = result.data.expect("validate data");
+    let data = result.data.expect("validate data").data.usb;
     assert!(data.valid, "freshly initialized USB root should be valid");
     assert!(data.has_vendor_root);
     assert!(data.has_contents);
@@ -384,14 +410,15 @@ fn connect_and_get_name(
     backend: &BackendCommands,
     usb: &Path,
 ) -> backend::models::GetUsbDeviceNameData {
-    let validated = backend.validate_usb_root(ValidateUsbRootRequest {
+    let selected = backend.select_usb(SelectUsbRequest {
         path: usb.to_string_lossy().to_string(),
     });
-    assert!(validated.ok, "validate failed: {validated:?}");
-    let name = backend.get_usb_device_name(GetUsbDeviceNameRequest {
-        usb_root: usb.to_string_lossy().to_string(),
-    });
-    name.data.expect("name data")
+    selected
+        .data
+        .expect("select data")
+        .data
+        .device_name
+        .expect("a valid USB's name")
 }
 
 #[test]
@@ -786,11 +813,13 @@ fn validate_usb_root_says_what_a_folder_is_and_what_to_do() {
     let backend = BackendCommands::new(root.path().join("data")).expect("create backend");
     let validate = |path: &Path| {
         backend
-            .validate_usb_root(ValidateUsbRootRequest {
+            .select_usb(SelectUsbRequest {
                 path: path.to_string_lossy().to_string(),
             })
             .data
             .expect("validate data")
+            .data
+            .usb
     };
 
     let missing = validate(&root.path().join("no-such-folder"));

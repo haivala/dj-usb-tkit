@@ -1,7 +1,7 @@
 use std::path::Path;
 
 use backend::commands::BackendCommands;
-use backend::models::ValidateUsbRootRequest;
+use backend::models::SelectUsbRequest;
 use rusqlite::{Connection, OptionalExtension};
 use tempfile::tempdir;
 
@@ -167,7 +167,7 @@ fn validate_usb_root_marks_device_mounted() {
     std::fs::create_dir_all(&usb_dir).expect("create usb dir");
 
     let backend = BackendCommands::new(&data_dir).expect("init");
-    let resp = backend.validate_usb_root(ValidateUsbRootRequest {
+    let resp = backend.select_usb(SelectUsbRequest {
         path: usb_dir.to_string_lossy().to_string(),
     });
     assert!(
@@ -199,11 +199,11 @@ fn validate_usb_root_unmounts_previously_mounted_device() {
     std::fs::create_dir_all(&usb_b).expect("create usb-b");
 
     let backend = BackendCommands::new(&data_dir).expect("init");
-    let resp_a = backend.validate_usb_root(ValidateUsbRootRequest {
+    let resp_a = backend.select_usb(SelectUsbRequest {
         path: usb_a.to_string_lossy().to_string(),
     });
     assert!(resp_a.ok);
-    let resp_b = backend.validate_usb_root(ValidateUsbRootRequest {
+    let resp_b = backend.select_usb(SelectUsbRequest {
         path: usb_b.to_string_lossy().to_string(),
     });
     assert!(resp_b.ok);

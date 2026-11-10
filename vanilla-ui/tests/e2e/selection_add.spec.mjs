@@ -292,7 +292,7 @@ function installSelectionMock(page, mockOpts = {}) {
           }
           if (opts.usb) {
             if (command === "pick_usb_folder") return "/Volumes/USB-TEST";
-            if (command === "validate_usb_root") {
+            if (command === "select_usb") {
               return {
                 ok: true,
                 data: {

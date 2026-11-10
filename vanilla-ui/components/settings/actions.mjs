@@ -1,8 +1,6 @@
 // Settings persistence and hydration helpers.
 
 import {
-  STORAGE_KEY_USB_ROOT,
-  FRONTEND_DB_KEY_USB_ROOT,
   FRONTEND_SETTING_BINDINGS,
   STORAGE_KEY_THEME, FRONTEND_DB_KEY_THEME,
   STORAGE_KEY_ACCENT_HUE, FRONTEND_DB_KEY_ACCENT_HUE
@@ -56,14 +54,6 @@ export async function hydrateLocalStorageFromFrontendSettingsDb(ctx) {
       ctx.localStorage.setItem(binding.storageKey, String(values[binding.dbKey] ?? ""));
     } catch {}
   }
-}
-
-export function persistUsbRoot(ctx, path) {
-  if (!path) {
-    persistSetting(ctx, STORAGE_KEY_USB_ROOT, FRONTEND_DB_KEY_USB_ROOT, null);
-    return;
-  }
-  persistSetting(ctx, STORAGE_KEY_USB_ROOT, FRONTEND_DB_KEY_USB_ROOT, String(path));
 }
 
 const ACCENT_DEFAULT_HUE = 270;

@@ -572,7 +572,6 @@
     "ui-usb-repair-applying": "Applying supported USB repair fixes...",
     "ui-usb-repair-previewing": "Previewing USB repair fixes...",
     "ui-usb-repair-technical-details": "Technical details",
-    "ui-usb-root-cleared": "USB root cleared",
     "ui-usb-root-path": "No USB selected",
     "ui-usb-select-usb-folder": "Select USB Folder",
     "ui-usb-select-usb-folder-busy-title": "Please wait for the current USB operation to finish",

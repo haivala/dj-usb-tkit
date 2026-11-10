@@ -1158,9 +1158,66 @@ impl BackendService {
     }
 
     /// No USB selected any more: the window cleared its choice.
-    pub fn clear_usb_root(&self) -> BackendResult<crate::models::PlaylistsState> {
-        self.set_selected_usb_root(None);
-        self.playlists_state()
+    /// Selects the USB at `req.path` (none when empty): checks it, makes it the selected USB
+    /// when valid, saves it as the folder the app reopens with, and answers with what the USB
+    /// page shows for it.
+    pub fn select_usb(
+        &self,
+        req: crate::models::SelectUsbRequest,
+    ) -> BackendResult<crate::models::SelectUsbData> {
+        let path = req.path.trim();
+        let usb = if path.is_empty() {
+            self.set_selected_usb_root(None);
+            ValidateUsbRootData {
+                valid: false,
+                normalized_root: None,
+                has_write_access: false,
+                has_vendor_root: false,
+                has_contents: false,
+                has_pdb: false,
+                has_edb: false,
+                can_initialize: false,
+                status_text: tr::usb_root_cleared().render(),
+                init_hint_text: String::new(),
+                warnings: Vec::new(),
+            }
+        } else {
+            self.validate_usb_root(ValidateUsbRootRequest {
+                path: path.to_string(),
+            })?
+        };
+        let saved_root = usb
+            .normalized_root
+            .clone()
+            .or_else(|| (!path.is_empty()).then(|| path.to_string()));
+        self.save_usb_root_setting(saved_root.as_deref())?;
+
+        let valid_root = usb.normalized_root.clone().filter(|_| usb.valid);
+        let audio_formats = valid_root.as_ref().and_then(|root| {
+            self.get_usb_audio_formats(crate::models::GetUsbAudioFormatsRequest {
+                usb_root: root.clone(),
+            })
+            .map_err(|err| {
+                logging::emit_text(Level::Warn, "usb", &tr::usb_audio_formats_read_failed(&err));
+            })
+            .ok()
+        });
+        let device_name = valid_root.as_ref().and_then(|root| {
+            self.get_usb_device_name(crate::models::GetUsbDeviceNameRequest {
+                usb_root: root.clone(),
+            })
+            .map_err(|err| {
+                logging::emit_text(Level::Warn, "usb", &tr::usb_name_check_failed(&err));
+            })
+            .ok()
+        });
+        let devices = self.list_usb_devices()?.items;
+        Ok(crate::models::SelectUsbData {
+            usb,
+            audio_formats,
+            device_name,
+            devices,
+        })
     }
 
     /// The names of the playlists on `usb_root`, for the export status. From the parse

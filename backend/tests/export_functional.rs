@@ -15,8 +15,7 @@ use backend::models::{
     MaterializeSourceTrackRequest, PlaylistTrackSort, PlaylistsState,
     RemoveTracksFromPlaylistRequest, RenamePlaylistRequest, ReorderPlaylistTracksRequest,
     ReorderUsbPlaylistsRequest, RepairUsbDiagnosticsRequest, RunUsbDiagnosticsRequest,
-    RunUsbParityReportRequest, ScanLibraryRequest, SetFrontendSettingRequest,
-    ValidateUsbRootRequest,
+    RunUsbParityReportRequest, ScanLibraryRequest, SelectUsbRequest, SetFrontendSettingRequest,
 };
 use backend::pdb_reader::parse_pdb;
 use backend::service::usb_vendor_compat::DEFAULT_USB_EDB_KEY;
@@ -4178,11 +4177,11 @@ fn fetch_usb_playlists_reports_reorder_lock_only_for_additive_same_name_collisio
     let listed = backend.list_playlists().data.expect("list data");
     assert_eq!(on_usb(&listed, &exported_id), Some((false, false)));
 
-    let validated = backend.validate_usb_root(ValidateUsbRootRequest {
+    let validated = backend.select_usb(SelectUsbRequest {
         path: usb.to_string_lossy().to_string(),
     });
     assert!(
-        validated.data.expect("validate data").valid,
+        validated.data.expect("validate data").data.usb.valid,
         "the USB is valid"
     );
     let listed = backend.list_playlists().data.expect("list data");
@@ -4204,7 +4203,13 @@ fn fetch_usb_playlists_reports_reorder_lock_only_for_additive_same_name_collisio
     );
     assert_eq!(on_usb(&renamed, &exported_id), Some((true, false)));
 
-    let cleared = backend.clear_usb_root().data.expect("clear data");
+    let cleared = backend
+        .select_usb(SelectUsbRequest {
+            path: String::new(),
+        })
+        .data
+        .expect("clear data")
+        .state;
     assert_eq!(on_usb(&cleared, &exported_id), Some((false, false)));
 }
 
@@ -4329,10 +4334,10 @@ fn export_saves_the_sort_it_is_given_unless_the_order_is_locked_on_the_usb() {
     export(&backend, false, "desc");
     assert_eq!(titles(&backend), ascending);
 
-    let validated = backend.validate_usb_root(ValidateUsbRootRequest {
+    let validated = backend.select_usb(SelectUsbRequest {
         path: usb.to_string_lossy().to_string(),
     });
-    assert!(validated.data.expect("validate data").valid);
+    assert!(validated.data.expect("validate data").data.usb.valid);
     let reordered = backend.reorder_playlist_tracks(ReorderPlaylistTracksRequest {
         playlist_id: playlist_id.clone(),
         sort_by: Some("title".to_string()),

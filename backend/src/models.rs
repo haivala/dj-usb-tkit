@@ -1471,6 +1471,26 @@ pub struct ValidateUsbRootData {
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
+pub struct SelectUsbRequest {
+    /// The folder to select; empty selects no USB.
+    pub path: String,
+}
+
+/// `select_usb`: the folder's check (`valid`, `normalizedRoot`, `statusText`, `canInitialize`,
+/// `initHintText`) and, for a valid USB, its audio formats and drive name. `devices` is the
+/// list of known drives, which the selection may have added to.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct SelectUsbData {
+    #[serde(flatten)]
+    pub usb: ValidateUsbRootData,
+    pub audio_formats: Option<UsbAudioFormatsData>,
+    pub device_name: Option<GetUsbDeviceNameData>,
+    pub devices: Vec<UsbDeviceSummary>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
 pub struct InitializeUsbRequest {
     pub usb_root: String,
 }

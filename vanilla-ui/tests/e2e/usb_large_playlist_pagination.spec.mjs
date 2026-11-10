@@ -64,7 +64,7 @@ function playlistTracksResponder(tracks, hydrate) {
 
 function baseUsbCommands(payload, command) {
   if (command === "pick_usb_folder") return "/Volumes/USB-TEST";
-  if (command === "validate_usb_root") {
+  if (command === "select_usb") {
     const path = String(payload?.request?.path || "");
     return {
       ok: true,

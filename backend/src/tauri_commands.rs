@@ -28,16 +28,15 @@ use crate::models::{
     GetPlaylistMembershipData, GetPlaylistMembershipRequest, GetPlaylistTracksData,
     GetPlaylistTracksRequest, GetSelectionDurationData, GetSelectionDurationRequest,
     GetTrackDetailRequest, GetTracksMetadataSummaryRequest, GetUsbBackgroundColorRequest,
-    GetUsbDeviceNameData, GetUsbDeviceNameRequest, GetUsbHistoryTracklistOptionsData,
-    GetUsbHistoryTracklistOptionsRequest, GetUsbPlayerMenuConfigData,
-    GetUsbPlayerMenuConfigRequest, GetUsbTrackDetailRequest, GetUsbTracksMetadataSummaryRequest,
-    ImportExternalPlaylistsData, ImportExternalPlaylistsRequest, InitializeUsbData,
-    InitializeUsbRequest, InspectUsbTrackData, InspectUsbTrackRequest, JobEventPayload,
-    LibrarySourcesData, ListExternalPlaylistsData, ListExternalPlaylistsRequest,
-    ListMatchingTrackIdsData, ListMatchingTrackIdsRequest, ListUsbBackupsData,
-    ListUsbBackupsRequest, ListUsbDevicesData, PlayResolvedTrackData, PlayResolvedTrackRequest,
-    PlaybackEventPayload, PlaybackMetronomeData, PlaybackStatusData, PruneUsbDeviceData,
-    PruneUsbDeviceRequest, RelocateSourceRootData, RelocateSourceRootRequest,
+    GetUsbHistoryTracklistOptionsData, GetUsbHistoryTracklistOptionsRequest,
+    GetUsbPlayerMenuConfigData, GetUsbPlayerMenuConfigRequest, GetUsbTrackDetailRequest,
+    GetUsbTracksMetadataSummaryRequest, ImportExternalPlaylistsData,
+    ImportExternalPlaylistsRequest, InitializeUsbData, InitializeUsbRequest, InspectUsbTrackData,
+    InspectUsbTrackRequest, JobEventPayload, LibrarySourcesData, ListExternalPlaylistsData,
+    ListExternalPlaylistsRequest, ListMatchingTrackIdsData, ListMatchingTrackIdsRequest,
+    ListUsbBackupsData, ListUsbBackupsRequest, ListUsbDevicesData, PlayResolvedTrackData,
+    PlayResolvedTrackRequest, PlaybackEventPayload, PlaybackMetronomeData, PlaybackStatusData,
+    PruneUsbDeviceData, PruneUsbDeviceRequest, RelocateSourceRootData, RelocateSourceRootRequest,
     RemoveSourceFolderData, RemoveSourceFolderRequest, RemoveTracksFromPlaylistData,
     RemoveTracksFromPlaylistRequest, RemoveUsbPlaylistData, RemoveUsbPlaylistRequest,
     RenamePlaylistData, RenamePlaylistRequest, ReorderPlaylistTracksData,
@@ -56,7 +55,6 @@ use crate::models::{
     SetUsbBackgroundColorRequest, SetUsbDeviceNameData, SetUsbDeviceNameRequest, StopPlaybackData,
     TrackDetail, TracksMetadataSummary, UpdateUsbPlayerMenuConfigData,
     UpdateUsbPlayerMenuConfigRequest, UsbBackgroundColorData, UsbTrackAnalysisDetail,
-    ValidateUsbRootData, ValidateUsbRootRequest,
 };
 use crate::service::{AnalysisEvent, analysis_event_payload};
 
@@ -1018,14 +1016,6 @@ pub async fn list_playlists(
 }
 
 #[tauri::command]
-pub async fn clear_usb_root(
-    state: State<'_, BackendCommands>,
-) -> Result<ApiResponse<crate::models::PlaylistsState>, String> {
-    let commands = state.inner().clone();
-    Ok(run_blocking_command("clear_usb_root", move || commands.clear_usb_root()).await)
-}
-
-#[tauri::command]
 pub async fn get_playlist_tracks(
     state: State<'_, BackendCommands>,
     request: GetPlaylistTracksRequest,
@@ -1211,27 +1201,27 @@ pub fn set_language(
 }
 
 #[tauri::command]
-pub async fn validate_usb_root(
+pub async fn select_usb(
     app: AppHandle,
     state: State<'_, BackendCommands>,
-    request: ValidateUsbRootRequest,
-) -> Result<ApiResponse<ValidateUsbRootData>, String> {
+    request: crate::models::SelectUsbRequest,
+) -> Result<ApiResponse<crate::models::WithPlaylists<crate::models::SelectUsbData>>, String> {
     let commands = state.inner().clone();
     let response = run_usb_job(
         &app,
         "usb_read",
-        "validate_usb_root",
+        "select_usb",
         tr::job_validate_usb_root_started(),
         tr::job_validate_usb_root_completed(),
         Some((30, tr::job_validate_usb_root_progress())),
-        move || commands.validate_usb_root(request),
+        move || commands.select_usb(request),
     )
     .await?;
     if let Some(root) = response
         .data
         .as_ref()
-        .filter(|data| data.valid)
-        .and_then(|data| data.normalized_root.as_deref())
+        .filter(|data| data.data.usb.valid)
+        .and_then(|data| data.data.usb.normalized_root.as_deref())
     {
         allow_asset_scope(&app, [root]);
     }
@@ -1293,18 +1283,6 @@ pub async fn prune_usb_device(
 }
 
 #[tauri::command]
-pub async fn get_usb_device_name(
-    state: State<'_, BackendCommands>,
-    request: GetUsbDeviceNameRequest,
-) -> Result<ApiResponse<GetUsbDeviceNameData>, String> {
-    let commands = state.inner().clone();
-    Ok(run_blocking_command("get_usb_device_name", move || {
-        commands.get_usb_device_name(request)
-    })
-    .await)
-}
-
-#[tauri::command]
 pub async fn set_usb_device_name(
     state: State<'_, BackendCommands>,
     request: SetUsbDeviceNameRequest,
@@ -1312,18 +1290,6 @@ pub async fn set_usb_device_name(
     let commands = state.inner().clone();
     Ok(run_blocking_command("set_usb_device_name", move || {
         commands.set_usb_device_name(request)
-    })
-    .await)
-}
-
-#[tauri::command]
-pub async fn get_usb_audio_formats(
-    state: State<'_, BackendCommands>,
-    request: crate::models::GetUsbAudioFormatsRequest,
-) -> Result<ApiResponse<crate::models::UsbAudioFormatsData>, String> {
-    let commands = state.inner().clone();
-    Ok(run_blocking_command("get_usb_audio_formats", move || {
-        commands.get_usb_audio_formats(request)
     })
     .await)
 }

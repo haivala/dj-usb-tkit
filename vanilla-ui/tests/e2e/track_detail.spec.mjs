@@ -2112,7 +2112,7 @@ function installUsbTrackDetailMock(page, mockOpts = {}) {
             return { ok: true, data: { total: items.length, items, nextCursor: null, hasMore: false } };
           }
           if (command === "pick_usb_folder") return "/Volumes/USB-TEST";
-          if (command === "validate_usb_root") {
+          if (command === "select_usb") {
             return {
               ok: true,
               data: {

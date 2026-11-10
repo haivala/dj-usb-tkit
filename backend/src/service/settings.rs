@@ -50,7 +50,8 @@ impl BackendService {
         req: SetFrontendSettingRequest,
     ) -> BackendResult<SetFrontendSettingData> {
         let key = req.key.trim();
-        if !frontend_ui_setting_keys().contains(&key) {
+        // The USB folder is saved by `select_usb`.
+        if !frontend_ui_setting_keys().contains(&key) || key == SETTING_UI_USB_ROOT {
             return Err(BackendError::Internal(format!(
                 "unsupported frontend setting key: {key}"
             )));
@@ -75,6 +76,22 @@ impl BackendService {
             conn.execute("DELETE FROM app_settings WHERE key = ?1", params![key])?;
         }
         Ok(SetFrontendSettingData { saved: true })
+    }
+
+    /// Saves the folder the app shows as the USB when it starts (`ui_usb_root_v1`, read back by
+    /// `get_frontend_settings`). `None` saves it empty rather than removing it: the frontend
+    /// copies the saved settings at startup, and a missing one would leave its old copy.
+    pub(super) fn save_usb_root_setting(&self, root: Option<&str>) -> BackendResult<()> {
+        let conn = self.db.connect()?;
+        conn.execute(
+            r#"
+            INSERT INTO app_settings (key, value, updated_at)
+            VALUES (?1, ?2, ?3)
+            ON CONFLICT(key) DO UPDATE SET value = excluded.value, updated_at = excluded.updated_at
+            "#,
+            params![SETTING_UI_USB_ROOT, root.unwrap_or_default(), now()],
+        )?;
+        Ok(())
     }
 
     /// Saves the language and makes it the process's language. Not a frontend setting: it

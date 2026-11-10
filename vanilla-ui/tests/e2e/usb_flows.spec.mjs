@@ -94,6 +94,18 @@ function installTauriMock(page, mode) {
     let usbAudioFormats = [
       ["flac", "FLAC"], ["alac", "ALAC"], ["aiff", "AIFF"], ["wav", "WAV"], ["mp3", "MP3"], ["aac", "AAC"]
     ].map(([format, label]) => ({ format, label, allowed: true }));
+    // As the backend sends them: the last ticked box locked, the hint.
+    const formatsData = () => {
+      const ticked = usbAudioFormats.filter((item) => item.allowed).length;
+      return {
+        formats: usbAudioFormats.map((item) => {
+          const last = item.allowed && ticked === 1;
+          return { ...item, locked: last, tooltip: last ? "At least one format stays ticked" : null };
+        }),
+        writable: true,
+        hint: "The formats export puts on this USB · drag to set the order of preference",
+      };
+    };
 
     const diagnosticsPayload = {
       overallStatus: "WARN",
@@ -335,7 +347,7 @@ function installTauriMock(page, mode) {
               }
             };
           }
-          if (command === "validate_usb_root") {
+          if (command === "select_usb") {
             const path = String(payload?.request?.path || "");
             if (!path) {
               return {
@@ -367,6 +379,7 @@ function installTauriMock(page, mode) {
                 data: {
                   valid: true,
                   normalizedRoot: path,
+                  audioFormats: formatsData(),
                   warnings: []
                 }
               };
@@ -458,25 +471,10 @@ function installTauriMock(page, mode) {
               }
             };
           }
-          // As the backend sends them: the last ticked box locked, the hint.
-          const formatsData = () => {
-            const ticked = usbAudioFormats.filter((item) => item.allowed).length;
-            return {
-              formats: usbAudioFormats.map((item) => {
-                const last = item.allowed && ticked === 1;
-                return { ...item, locked: last, tooltip: last ? "At least one format stays ticked" : null };
-              }),
-              writable: true,
-              hint: "The formats export puts on this USB · drag to set the order of preference",
-            };
-          };
           if (command === "fetch_usb_playlist_tracks") {
             const id = String(payload?.request?.id);
             const tracks = state.usbPlaylists.find((p) => String(p.id) === id)?.tracks || [];
             return { ok: true, data: { items: tracks, total: tracks.length, listSummaryText: `${tracks.length} listed` } };
-          }
-          if (command === "get_usb_audio_formats") {
-            return { ok: true, data: formatsData() };
           }
           if (command === "set_usb_audio_formats") {
             const sent = payload?.request?.formats || [];
@@ -1654,12 +1652,13 @@ test("a running USB job locks the USB selection and export until it ends; other 
       if (command === "list_playlists") {
         return { ok: true, data: { playlists: [{ id: "pl-1", name: "Local Set", source: "local" }], playlistUsbExportStatus: [] } };
       }
-      // Another drive shows up as recent once the first is connected.
-      if (command === "list_usb_devices" && window.__validates > 0) {
-        return { ok: true, data: { items: [{ id: "dev-1", rootPath: "/Volumes/OTHER", label: "Other", mounted: false }] } };
-      }
       if (command === "pick_usb_folder") window.__picks += 1;
-      if (command === "validate_usb_root") window.__validates += 1;
+      if (command === "select_usb") {
+        window.__validates += 1;
+        // Another drive shows up as recent once the first is connected.
+        const selected = await invoke(command, payload);
+        return { ...selected, data: { ...selected.data, devices: [{ id: "dev-1", rootPath: "/Volumes/OTHER", label: "Other", mounted: false }] } };
+      }
       return invoke(command, payload);
     };
   });
@@ -1734,7 +1733,7 @@ test("a stored USB isn't shown as selected, or read, until it's validated", asyn
     const invoke = window.__TAURI__.core.invoke;
     window.__validates = 0;
     window.__TAURI__.core.invoke = async (command, payload) => {
-      if (command === "validate_usb_root") window.__validates += 1;
+      if (command === "select_usb") window.__validates += 1;
       return invoke(command, payload);
     };
   });

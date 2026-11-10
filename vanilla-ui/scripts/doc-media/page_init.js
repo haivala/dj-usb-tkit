@@ -183,7 +183,7 @@
     };
   };
 
-  // The backend's selected USB: the root validate_usb_root found valid.
+  // The backend's selected USB: the root select_usb found valid.
   let usbSelected = false;
   // The playlists and their export status against the selected USB, as
   // list_playlists and every playlist change answer with them.
@@ -279,9 +279,6 @@
           }
           case "list_playlists":
             return ok(playlistsState());
-          case "clear_usb_root":
-            usbSelected = false;
-            return ok(playlistsState());
           case "create_playlist": {
             const id = `pl-new-${playlists.length}`;
             playlists.push({ id, name: r.name, tracks: [] });
@@ -340,7 +337,6 @@
             const items = playlists.find((p) => p.id === r.playlistId)?.tracks || [];
             return ok({ exportSpace: exportSpace(items) });
           }
-          case "get_usb_audio_formats":
           case "set_usb_audio_formats":
             return opts.audioFormats ? usb.audioFormats.unticked : usb.audioFormats.allTicked;
           case "get_transcode_folder":
@@ -368,7 +364,14 @@
             return ok({ items: opts.backups || [], summaryText: `${(opts.backups || []).length} backups`, emptyText: "No backups yet." });
           case "list_usb_devices":
             return ok({ items: [{ id: "usb-chiphead", rootPath: USB_ROOT }] });
-          case "validate_usb_root":
+          case "select_usb":
+            if (!r.path) {
+              usbSelected = false;
+              return ok({
+                valid: false, statusText: "USB root cleared", initHintText: "", normalizedRoot: null, warnings: [],
+                audioFormats: null, deviceName: null, devices: [], ...playlistsState(),
+              });
+            }
             usbSelected = true;
             return ok({
               valid: true,
@@ -376,9 +379,11 @@
               initHintText: "",
               normalizedRoot: USB_ROOT,
               warnings: [],
+              audioFormats: usb ? (opts.audioFormats ? usb.audioFormats.unticked : usb.audioFormats.allTicked).data : null,
+              deviceName: { name: "Chiphead" },
+              devices: [{ id: "usb-chiphead", rootPath: USB_ROOT }],
+              ...playlistsState(),
             });
-          case "get_usb_device_name":
-            return ok({ name: "Chiphead" });
           case "run_usb_diagnostics":
             if (!usb) return ok({ overallStatus: "PASS", durationMs: 842, warnings: [], checks: [], playlistUsbExportStatus: [] });
             if (opts.audioFormats) {

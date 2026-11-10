@@ -14,7 +14,7 @@ function baseTauriMock() {
     set_frontend_setting: async (request) => ({ ok: true, data: { key: request.key, value: request.value } }),
     get_frontend_settings: async () => ({ ok: true, data: { settings: {} } }),
     resolve_playback_source: async () => ({ ok: true, data: { resolvedPath: null, matchedBy: "none", trackId: null } }),
-    validate_usb_root: async () => ({
+    select_usb: async () => ({
       ok: true,
       data: {
         valid: false,

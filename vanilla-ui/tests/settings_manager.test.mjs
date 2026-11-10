@@ -3,16 +3,13 @@ import assert from "node:assert/strict";
 
 import {
   hydrateLocalStorageFromFrontendSettingsDb,
-  persistSetting,
-  persistUsbRoot
+  persistSetting
 } from "../components/settings/actions.mjs";
 import {
   FRONTEND_DB_KEY_ANALYSIS_ENGINE,
   FRONTEND_DB_KEY_THEME,
-  FRONTEND_DB_KEY_USB_ROOT,
   STORAGE_KEY_ANALYSIS_ENGINE,
-  STORAGE_KEY_THEME,
-  STORAGE_KEY_USB_ROOT
+  STORAGE_KEY_THEME
 } from "../settings_keys.mjs";
 
 function installLocalStorage() {
@@ -35,16 +32,12 @@ test("persistence helpers mirror localStorage values to the frontend settings DB
   const ctx = { command, localStorage };
 
   await persistSetting(ctx, STORAGE_KEY_THEME, FRONTEND_DB_KEY_THEME, "dark");
-  localStorage.setItem(STORAGE_KEY_USB_ROOT, "/tmp/usb");
-  await persistSetting(ctx, STORAGE_KEY_USB_ROOT, FRONTEND_DB_KEY_USB_ROOT, "");
-  persistUsbRoot(ctx, "/usb/root");
+  await persistSetting(ctx, STORAGE_KEY_THEME, FRONTEND_DB_KEY_THEME, "");
 
-  assert.equal(localStorage.getItem(STORAGE_KEY_THEME), "dark");
-  assert.equal(localStorage.getItem(STORAGE_KEY_USB_ROOT), "/usb/root");
+  assert.equal(localStorage.getItem(STORAGE_KEY_THEME), null);
   assert.deepEqual(calls.map((call) => call.payload), [
     { key: FRONTEND_DB_KEY_THEME, value: "dark" },
-    { key: FRONTEND_DB_KEY_USB_ROOT, value: null },
-    { key: FRONTEND_DB_KEY_USB_ROOT, value: "/usb/root" }
+    { key: FRONTEND_DB_KEY_THEME, value: null }
   ]);
 });
 

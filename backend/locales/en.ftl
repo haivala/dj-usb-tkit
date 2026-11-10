@@ -38,6 +38,8 @@ usb-root-dialog-title = Select USB root folder
 
 # The status line after choosing a USB folder that's ready. $path: the folder.
 usb-root-selected = USB root selected: { $path }. Running diagnostics...
+# The status line after the USB selection is cleared.
+usb-root-cleared = USB root cleared
 # The same, with what the check noticed. $warnings: the warnings, joined with " | ".
 usb-root-selected-with-warnings = USB root selected: { $path } ({ $warnings }). Running diagnostics...
 # The status line for a writable folder without the rekordbox structure, and the hint beside Initialize.
@@ -114,6 +116,8 @@ usb-warning-pdb-write-back-failed = PDB write-back to USB failed: { $error }
 usb-warning-edb-write-back-failed = eDB write-back to USB failed: { $error }
 # The status line when the connected drive's name can't be read. $error: why it failed.
 usb-name-check-failed = Could not check this drive's name: { $error }
+# The Event Log warning when the selected USB's audio formats can't be read. $error: why it failed.
+usb-audio-formats-read-failed = Could not read the USB's audio formats: { $error }
 # The status line when initializing the USB's folder structure fails. $error: why it failed.
 usb-initialize-failed = Initialize failed: { $error }
 
@@ -2861,7 +2865,6 @@ ui-usb-forget-path-aria-label = Forget { $path }
 ui-usb-parity-running = Running USB parity report...
 ui-usb-repair-applying = Applying supported USB repair fixes...
 ui-usb-repair-previewing = Previewing USB repair fixes...
-ui-usb-root-cleared = USB root cleared
 # The Select USB Folder button's title while a USB operation runs.
 ui-usb-select-usb-folder-busy-title = Please wait for the current USB operation to finish
 # The status line when another USB is picked while a USB operation runs.

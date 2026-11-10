@@ -9,13 +9,12 @@ use backend::models::{
     AddLibrarySelectionToPlaylistRequest, AddSourceFoldersRequest, BrowseSourceFilesRequest,
     CreatePlaylistRequest, DeleteUsbBackupRequest, ExportToUsbRequest, FetchUsbHistoriesRequest,
     FetchUsbPlaylistsRequest, GetPlaylistTracksRequest, GetTrackDetailRequest,
-    GetUsbDeviceNameRequest, InitializeUsbRequest, ListUsbBackupsRequest, PlayResolvedTrackRequest,
-    PruneUsbDeviceRequest, RemoveTracksFromPlaylistRequest, RemoveUsbPlaylistRequest,
-    RenamePlaylistRequest, ReorderPlaylistTracksRequest, ReorderUsbPlaylistsRequest,
-    ResolveTrackIdentityRequest, RestoreUsbBackupRequest, RunUsbDiagnosticsRequest,
-    RunUsbParityReportRequest, SaveTrackAnalysisEditsRequest, ScanLibraryRequest,
-    ScanRekordboxDbRequest, SetPlaybackMetronomeRequest, SetUsbDeviceNameRequest, TrackCueInput,
-    ValidateUsbRootRequest,
+    InitializeUsbRequest, ListUsbBackupsRequest, PlayResolvedTrackRequest, PruneUsbDeviceRequest,
+    RemoveTracksFromPlaylistRequest, RemoveUsbPlaylistRequest, RenamePlaylistRequest,
+    ReorderPlaylistTracksRequest, ReorderUsbPlaylistsRequest, ResolveTrackIdentityRequest,
+    RestoreUsbBackupRequest, RunUsbDiagnosticsRequest, RunUsbParityReportRequest,
+    SaveTrackAnalysisEditsRequest, ScanLibraryRequest, ScanRekordboxDbRequest, SelectUsbRequest,
+    SetPlaybackMetronomeRequest, SetUsbDeviceNameRequest, TrackCueInput,
 };
 use backend::service::usb_vendor_compat::DEFAULT_USB_EDB_KEY;
 use tempfile::tempdir;
@@ -182,11 +181,17 @@ fn command_surface_covers_usb_name_backup_identity_refresh_and_preflight_wrapper
         listed.playlists.len()
     );
 
-    let get_name = backend.get_usb_device_name(GetUsbDeviceNameRequest {
-        usb_root: usb_root_string.clone(),
+    let selected = backend.select_usb(SelectUsbRequest {
+        path: usb_root_string.clone(),
     });
-    assert!(get_name.ok, "get name wrapper failed: {get_name:?}");
-    assert!(get_name.data.expect("get name data").name.is_none());
+    assert!(selected.ok, "select wrapper failed: {selected:?}");
+    let selected = selected.data.expect("select data");
+    assert!(
+        selected
+            .data
+            .device_name
+            .is_none_or(|device_name| device_name.name.is_none())
+    );
 
     let set_empty_name = backend.set_usb_device_name(SetUsbDeviceNameRequest {
         usb_root: usb_root_string.clone(),
@@ -705,7 +710,7 @@ fn list_usb_devices_and_prune_usb_device_roundtrip() {
     });
     assert!(init.ok, "initialize usb failed: {init:?}");
 
-    let validated = backend.validate_usb_root(ValidateUsbRootRequest {
+    let validated = backend.select_usb(SelectUsbRequest {
         path: usb_root.to_string_lossy().to_string(),
     });
     assert!(validated.ok, "validate usb root failed: {validated:?}");

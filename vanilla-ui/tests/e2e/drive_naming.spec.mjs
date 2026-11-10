@@ -12,6 +12,16 @@ function installTauriMock(
     window.__setNameCalls = [];
     let storedName = deviceName;
     const usbRoot = "/Volumes/USB-TEST";
+    const devices = () => [
+      {
+        id: "dev-1",
+        rootPath: usbRoot,
+        label: storedName,
+        mounted: false,
+        firstSeenAt: "2024-01-01T00:00:00Z",
+        lastSeenAt: "2024-01-01T00:00:00Z"
+      }
+    ];
 
     window.__TAURI__ = {
       core: {
@@ -31,46 +41,26 @@ function installTauriMock(
             };
           }
           if (command === "list_usb_devices") {
-            return {
-              ok: true,
-              data: {
-                items: [
-                  {
-                    id: "dev-1",
-                    rootPath: usbRoot,
-                    label: storedName,
-                    mounted: false,
-                    firstSeenAt: "2024-01-01T00:00:00Z",
-                    lastSeenAt: "2024-01-01T00:00:00Z"
-                  }
-                ]
-              }
-            };
+            return { ok: true, data: { items: devices() } };
           }
           if (command === "prune_usb_device") {
             return { ok: true, data: { pruned: true } };
           }
-          if (command === "validate_usb_root") {
+          if (command === "select_usb") {
             const path = String(payload?.request?.path || "");
             return {
               ok: true,
               data: {
                 valid: true,
                 normalizedRoot: path,
-                warnings: []
-              }
-            };
-          }
-          if (command === "get_usb_device_name") {
-            if (getNameMode === "throw") {
-              throw new Error("usb root not found");
-            }
-            return {
-              ok: true,
-              data: {
-                name: storedName,
-                suggestedName: storedName ? null : suggestedName,
-                nameTakenBy: storedName ? null : nameTakenBy
+                warnings: [],
+                devices: devices(),
+                // The name couldn't be read ("throw"): the backend logs why and sends none.
+                deviceName: getNameMode === "throw" ? null : {
+                  name: storedName,
+                  suggestedName: storedName ? null : suggestedName,
+                  nameTakenBy: storedName ? null : nameTakenBy
+                }
               }
             };
           }

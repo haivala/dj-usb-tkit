@@ -428,15 +428,11 @@ export async function detectExternalMixxxDb(ctx) {
 // a replug or a different computer, where the OS-assigned mount path can't.
 // Best-effort: any failure to even check/show the prompt just lets the user
 // continue unnamed rather than blocking USB use entirely.
-async function promptDriveNameIfUnset(ctx) {
-  const { state, command, emitStatus } = ctx;
-  let data;
-  try {
-    data = await command("get_usb_device_name", { usbRoot: state.usbRoot });
-  } catch (err) {
-    emitStatus(err?.message || String(err));
-    return;
-  }
+// `data` is select_usb's `deviceName`, null when it couldn't be read (the
+// backend logged why).
+async function promptDriveNameIfUnset(ctx, data) {
+  const { state } = ctx;
+  if (!data) return;
   state.usbNameTakenBy = data.nameTakenBy;
   if (data.name) {
     state.usbDeviceName = data.name;
@@ -530,49 +526,28 @@ export async function validateAndSetUsbRoot(ctx, path) {
   if (input && previousRoot && input !== previousRoot) {
     hideUsbDiagnostics(ctx);
   }
-  if (!input) {
-    state.usbRoot = null;
-    state.usbRootValid = false;
-    ctx.persistUsbRoot(null);
-    updateUsbRootText(ctx, null, false);
-    el.usbInitRow.classList.add("hidden");
-    usbSelectionChanged(ctx);
-    // The backend's selected USB too; it answers with the export status without one.
-    try {
-      ctx.applyPlaylistsState(await command("clear_usb_root"));
-    } catch (err) {
-      ctx.warn("clear_usb_root failed:", err);
-    }
-    updateUsbConfigControlsVisibility(ctx);
-    ctx.updateUsbSubNavDisabledState();
-    ctx.updatePlaylistExportButtons();
-    ctx.loadUsbAudioFormats().catch((err) => console.warn("get_usb_audio_formats failed:", err));
-    emitStatus(t("ui-usb-root-cleared"));
-    el.usbRecentRow.classList.remove("collapsed");
-    return false;
-  }
 
-  const result = await command("validate_usb_root", { path: input });
-  const { valid, canInitialize } = result;
+  // Checks the folder, makes it the backend's selected USB (none for an empty
+  // path) and saves it as the folder the app reopens with.
+  const data = await command("select_usb", { path: input });
+  const { valid, canInitialize } = data;
   state.usbRootValid = valid;
-  state.usbRoot = result.normalizedRoot || input;
-  ctx.persistUsbRoot(state.usbRoot);
+  state.usbRoot = input ? data.normalizedRoot || input : null;
   updateUsbRootText(ctx, state.usbRoot, valid);
   el.usbInitRow.classList.toggle("hidden", !canInitialize);
-  el.usbInitHint.textContent = result.initHintText;
+  el.usbInitHint.textContent = data.initHintText;
   el.initializeUsbBtn.disabled = !canInitialize;
   // Also when it's the same USB: selecting it again is how changes made on a
   // player show up (the backend just re-staged its databases).
   usbSelectionChanged(ctx);
-  // A valid USB gets its export status from the diagnostics run that follows,
-  // so this doesn't read its databases twice.
-  if (!valid) refreshExportStatusInBackground(ctx);
+  ctx.applyPlaylistsState(data);
+  applyUsbDevices(ctx, data.devices);
+  ctx.applyUsbAudioFormats(data.audioFormats);
   updateUsbConfigControlsVisibility(ctx);
   ctx.updateUsbSubNavDisabledState();
   ctx.updatePlaylistExportButtons();
-  ctx.loadUsbAudioFormats().catch((err) => console.warn("get_usb_audio_formats failed:", err));
-  if (valid) await promptDriveNameIfUnset(ctx);
-  emitStatus(result.statusText);
+  if (valid) await promptDriveNameIfUnset(ctx, data.deviceName);
+  emitStatus(data.statusText);
   if (valid) {
     el.usbHealthCard.removeAttribute("open");
     el.usbHealthCard.classList.add("is-loading");
@@ -581,14 +556,13 @@ export async function validateAndSetUsbRoot(ctx, path) {
       ctx.runUsbDiagnostics().catch((err) => {
         ctx.warn("Auto-diagnostics failed:", err);
         emitStatus(t("ui-usb-auto-diagnostics-failed", { error: err?.message || err }));
-        refreshExportStatusInBackground(ctx);
       });
     });
   }
-  if (state.usbRoot) await loadUsbDevices(ctx);
   // The recent list is for picking a drive: close it once one is selected
-  // (its header reopens it).
+  // (its header reopens it), open it when none is.
   if (valid) el.usbRecentRow.classList.add("collapsed");
+  if (!input) el.usbRecentRow.classList.remove("collapsed");
   return valid;
 }
 
@@ -1310,16 +1284,20 @@ export async function hydrateUsbTrackMetadata(ctx, track) {
 // live query against the usb_devices table -- so mount state and pruning
 // are always accurate, not a client-side cache that can drift from it.
 export async function loadUsbDevices(ctx) {
-  const { state } = ctx;
+  let items = [];
   try {
-    const { items } = await ctx.command("list_usb_devices");
-    state.usbDevices = items;
-    state.usbRecentRoots = items.map((item) => item.rootPath);
+    ({ items } = await ctx.command("list_usb_devices"));
   } catch (err) {
     console.warn("Failed to load USB devices:", err);
-    state.usbDevices = [];
-    state.usbRecentRoots = [];
   }
+  return applyUsbDevices(ctx, items);
+}
+
+// The known drives, for the recent list.
+function applyUsbDevices(ctx, devices) {
+  const { state } = ctx;
+  state.usbDevices = devices || [];
+  state.usbRecentRoots = state.usbDevices.map((item) => item.rootPath);
   renderUsbRecentRoots(ctx);
   return state.usbRecentRoots;
 }
