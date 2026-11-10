@@ -37,20 +37,6 @@ pub(crate) fn lookup_playlist_tracks<'a>(
         })
 }
 
-pub(crate) fn build_usb_track_id_index(
-    source: &HashMap<String, Vec<UsbTrack>>,
-) -> HashMap<u32, UsbTrack> {
-    let mut out = HashMap::<u32, UsbTrack>::new();
-    for tracks in source.values() {
-        for track in tracks {
-            if let Ok(id) = track.id.parse::<u32>() {
-                out.entry(id).or_insert_with(|| track.clone());
-            }
-        }
-    }
-    out
-}
-
 pub(crate) fn merge_playlist_tracks(
     pdb_tracks: &[UsbTrack],
     export_tracks: &[UsbTrack],
@@ -619,43 +605,5 @@ mod tests {
     fn lookup_returns_none_when_no_match() {
         let result = lookup_playlist_tracks(&None, &None, "none", "none");
         assert!(result.is_none());
-    }
-
-    // --- build_usb_track_id_index ---
-
-    #[test]
-    fn track_id_index_numeric_ids() {
-        let tracks = vec![
-            make_track("42", "A", "X", "/a.mp3"),
-            make_track("7", "B", "Y", "/b.mp3"),
-        ];
-        let map = HashMap::from([("set".to_string(), tracks)]);
-        let idx = build_usb_track_id_index(&map);
-        assert_eq!(idx.len(), 2);
-        assert_eq!(idx.get(&42).unwrap().title, "A");
-        assert_eq!(idx.get(&7).unwrap().title, "B");
-    }
-
-    #[test]
-    fn track_id_index_skips_non_numeric() {
-        let tracks = vec![
-            make_track("not-a-number", "A", "X", "/a.mp3"),
-            make_track("5", "B", "Y", "/b.mp3"),
-        ];
-        let map = HashMap::from([("set".to_string(), tracks)]);
-        let idx = build_usb_track_id_index(&map);
-        assert_eq!(idx.len(), 1);
-        assert!(idx.contains_key(&5));
-    }
-
-    #[test]
-    fn track_id_index_first_wins_on_duplicate() {
-        let tracks1 = vec![make_track("1", "First", "X", "/a.mp3")];
-        let tracks2 = vec![make_track("1", "Second", "Y", "/b.mp3")];
-        let map = HashMap::from([("set1".to_string(), tracks1), ("set2".to_string(), tracks2)]);
-        let idx = build_usb_track_id_index(&map);
-        assert_eq!(idx.len(), 1);
-        // HashMap iteration order is non-deterministic, so just check one entry exists
-        assert!(idx.contains_key(&1));
     }
 }

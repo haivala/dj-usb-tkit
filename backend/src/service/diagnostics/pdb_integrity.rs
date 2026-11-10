@@ -3,14 +3,15 @@
 use super::*;
 use crate::i18n::{Text, tr};
 
+/// `parse` reads the PDB at `pdb_path` (the service's shared parse).
 pub(crate) fn diagnose_pdb_integrity(
     pdb_path: &std::path::Path,
+    parse: impl FnOnce(
+        &std::path::Path,
+    ) -> BackendResult<std::sync::Arc<crate::service::usb::StagedPdbParse>>,
 ) -> (
     DiagSection,
-    Option<(
-        crate::pdb_reader::ParsedPdb,
-        crate::pdb_reader::PdbDiagnostics,
-    )>,
+    Option<std::sync::Arc<crate::service::usb::StagedPdbParse>>,
 ) {
     let mut checks = Vec::new();
 
@@ -36,8 +37,8 @@ pub(crate) fn diagnose_pdb_integrity(
         tr::diagnostics_check_pdb_exists_found(),
     ));
 
-    let (parsed, diag) = match parse_pdb_with_diagnostics(pdb_path) {
-        Ok(result) => result,
+    let staged = match parse(pdb_path) {
+        Ok(staged) => staged,
         Err(err) => {
             checks.push(DiagCheck::new(
                 tr::diagnostics_check_pdb_parseable(),
@@ -55,6 +56,8 @@ pub(crate) fn diagnose_pdb_integrity(
             );
         }
     };
+    let parsed = &*staged.parsed;
+    let diag = &staged.diagnostics;
 
     checks.push(DiagCheck::new(
         tr::diagnostics_check_pdb_parseable(),
@@ -401,7 +404,7 @@ pub(crate) fn diagnose_pdb_integrity(
             checks,
             counts: None,
         },
-        Some((parsed, diag)),
+        Some(staged),
     )
 }
 

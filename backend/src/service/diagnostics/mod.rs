@@ -3,11 +3,7 @@
 
 use std::collections::{HashMap, HashSet};
 
-use crate::edb::{
-    ExportDbPlaylist, open_edb_from_usb_root,
-    try_read_playlists_with_metadata_from_edb_db_only_with_conn,
-    try_read_playlists_with_metadata_from_edb_with_conn,
-};
+use crate::edb::{ExportDbPlaylist, open_edb_from_usb_root};
 use crate::error::{BackendError, BackendResult};
 use crate::logging::{self, Level};
 use crate::models::{
@@ -16,8 +12,6 @@ use crate::models::{
     RunUsbDiagnosticsData, RunUsbDiagnosticsRequest, RunUsbParityReportData,
     RunUsbParityReportRequest, UsbParityPlaylistDetail, UsbTrack, WarningEntry,
 };
-use crate::pdb_reader::parse_pdb;
-use crate::pdb_reader::parse_pdb_with_diagnostics;
 use crate::utils::{
     collect_chain_lenient as collect_chain, counted, page_offset, read_u8_at, read_u16_le_at,
     read_u32_le_at, table_ptr_fields,

@@ -322,14 +322,6 @@ pub fn open_edb_rw(usb_root: &Path) -> Option<rusqlite::Connection> {
     None
 }
 
-pub fn try_read_track_index_from_edb(
-    usb_root: &Path,
-    warnings: &mut Vec<WarningEntry>,
-) -> Option<HashMap<u32, UsbTrack>> {
-    let conn = open_edb_from_usb_root(usb_root, warnings)?;
-    try_read_track_index_from_edb_with_conn(&conn, usb_root)
-}
-
 /// `c.<column>` when the eDB's `content` table has `column`, else `NULL`, so
 /// a read works across eDB schema versions.
 pub(crate) fn content_column_or_null(conn: &rusqlite::Connection, column: &str) -> String {
@@ -355,42 +347,153 @@ fn edb_release_year(value: Option<i64>) -> Option<u32> {
         .filter(|year| *year > 0)
 }
 
-/// Same as `try_read_track_index_from_edb`, but reuses an already-open eDB
-/// connection instead of opening/decrypting a fresh one. Callers that need
-/// several eDB reads in the same operation (e.g. `fetch_usb_playlists`,
-/// `fetch_usb_histories`) should open once via `open_edb_from_usb_root` and
-/// pass the same connection to every `_with_conn` helper -- re-opening per
-/// read was previously responsible for redundant SQLCipher key-negotiation
-/// work that could dominate wall time on a large eDB even on fast media.
-pub fn try_read_track_index_from_edb_with_conn(
-    conn: &rusqlite::Connection,
-    usb_root: &Path,
-) -> Option<HashMap<u32, UsbTrack>> {
-    let has_length_col = conn
-        .query_row(
-            "SELECT COUNT(1) FROM pragma_table_info('content') WHERE name = 'length'",
-            [],
-            |row| row.get::<_, i64>(0),
-        )
-        .ok()
-        .unwrap_or(0)
-        > 0;
-    let length_expr = if has_length_col { "c.length" } else { "NULL" };
+// -----------------------------------------------------------------------------
+// eDB read
+// -----------------------------------------------------------------------------
+
+/// What [`read_edb`] reads.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+pub struct EdbRead {
+    /// Every track (`EdbLibrary::tracks`).
+    pub tracks: bool,
+    /// The playlists with their tracks (`EdbLibrary::playlists`).
+    pub playlists: bool,
+    /// Each track's `dateCreated` (`EdbLibrary::date_created`).
+    pub date_created: bool,
+    /// Track file, artwork and analysis paths resolved against the USB root
+    /// (which looks each one up on disk), instead of as the eDB stores them.
+    pub resolve_paths: bool,
+}
+
+impl EdbRead {
+    /// Everything, paths as stored: what the service caches for the staged eDB.
+    pub const ALL: Self = Self {
+        tracks: true,
+        playlists: true,
+        date_created: true,
+        resolve_paths: false,
+    };
+}
+
+/// An eDB's tracks and playlists, as [`read_edb`] read them; what it wasn't
+/// asked for is empty.
+#[derive(Debug, Clone, Default)]
+pub struct EdbLibrary {
+    /// Every track, by `content_id`.
+    pub tracks: HashMap<u32, UsbTrack>,
+    /// The playlists by name, each with its tracks in order. Playlists that
+    /// share a name are one, under the first one's id, without repeats.
+    pub playlists: HashMap<String, ExportDbPlaylist>,
+    /// `content_id` -> `dateCreated`, for the tracks that have one.
+    pub date_created: HashMap<u32, String>,
+}
+
+impl EdbLibrary {
+    /// The same library with its paths resolved against `usb_root`, as a
+    /// `resolve_paths` read gives them.
+    pub fn resolved(&self, usb_root: &Path) -> Self {
+        Self {
+            tracks: self.resolved_tracks(usb_root),
+            playlists: self.resolved_playlists(usb_root),
+            date_created: self.date_created.clone(),
+        }
+    }
+
+    /// The tracks with their paths resolved against `usb_root`.
+    pub fn resolved_tracks(&self, usb_root: &Path) -> HashMap<u32, UsbTrack> {
+        self.tracks
+            .iter()
+            .map(|(id, track)| (*id, resolve_track_paths(track.clone(), usb_root)))
+            .collect()
+    }
+
+    /// The playlists with their tracks' paths resolved against `usb_root`.
+    pub fn resolved_playlists(&self, usb_root: &Path) -> HashMap<String, ExportDbPlaylist> {
+        self.playlists
+            .iter()
+            .map(|(name, playlist)| {
+                (
+                    name.clone(),
+                    ExportDbPlaylist {
+                        playlist_id: playlist.playlist_id,
+                        sort_order: playlist.sort_order,
+                        tracks: playlist
+                            .tracks
+                            .iter()
+                            .map(|track| resolve_track_paths(track.clone(), usb_root))
+                            .collect(),
+                    },
+                )
+            })
+            .collect()
+    }
+
+    /// The playlists, or `None` when there are none (or they weren't read).
+    pub fn playlists_or_none(&self) -> Option<&HashMap<String, ExportDbPlaylist>> {
+        (!self.playlists.is_empty()).then_some(&self.playlists)
+    }
+}
+
+/// `track` (read with its paths as stored) with them resolved against `usb_root`.
+fn resolve_track_paths(mut track: UsbTrack, usb_root: &Path) -> UsbTrack {
+    let resolve = |path: Option<&str>| path.and_then(|p| resolve_usb_side_path_text(usb_root, p));
+    track.file_path = resolve(track.usb_media_path.as_deref()).unwrap_or_default();
+    track.artwork_path = resolve(track.artwork_path.as_deref());
+    let analysis = resolve(track.usb_analysis_path_raw.as_deref());
+    track.waveform_peaks_path = analysis.clone();
+    track.usb_analysis_path = analysis;
+    track
+}
+
+/// Reads what `what` asks for from an open eDB: the one reader of its tracks
+/// and playlists. `None` when the eDB has no readable content or playlist
+/// table.
+pub fn read_edb(conn: &rusqlite::Connection, usb_root: &Path, what: EdbRead) -> Option<EdbLibrary> {
+    let mut library = EdbLibrary::default();
+    if !(what.tracks || what.playlists || what.date_created) {
+        return Some(library);
+    }
+    for (content_id, track, date_created) in read_edb_content(conn)? {
+        if what.date_created
+            && let Some(date) = date_created
+        {
+            library.date_created.insert(content_id, date);
+        }
+        if what.tracks || what.playlists {
+            library.tracks.insert(content_id, track);
+        }
+    }
+    if what.playlists {
+        library.playlists = read_edb_playlists(conn, &library.tracks)?;
+        logging::debug(
+            "edb",
+            format!(
+                "loaded {} from eDB",
+                counted(library.playlists.len(), "playlist", "playlists")
+            ),
+        );
+    }
+    if !what.tracks {
+        library.tracks.clear();
+    }
+    // Resolving looks each path up on disk: only for the tracks returned.
+    if what.resolve_paths {
+        library = library.resolved(usb_root);
+    }
+    Some(library)
+}
+
+/// Every `content` row as a track (paths as stored), with its `dateCreated`.
+fn read_edb_content(conn: &rusqlite::Connection) -> Option<Vec<(u32, UsbTrack, Option<String>)>> {
+    let length_expr = content_column_or_null(conn, "length");
+    let track_no_expr = content_column_or_null(conn, "trackNo");
     let release_year_expr = content_column_or_null(conn, "releaseYear");
     let file_size_expr = content_column_or_null(conn, "fileSize");
-    let image_fk_col = if conn
-        .query_row(
-            "SELECT COUNT(1) FROM pragma_table_info('content') WHERE name = 'imageFilePath_id'",
-            [],
-            |row| row.get::<_, i64>(0),
-        )
-        .ok()
-        .unwrap_or(0)
-        > 0
-    {
-        "c.imageFilePath_id"
-    } else {
+    let date_created_expr = content_column_or_null(conn, "dateCreated");
+    let image_fk_col = if content_column_or_null(conn, "imageFilePath_id") == "NULL" {
         "c.image_id"
+    } else {
+        "c.imageFilePath_id"
     };
     let sql = format!(
         r#"
@@ -405,8 +508,10 @@ pub fn try_read_track_index_from_edb_with_conn(
           img.path AS image_path,
           c.analysisDataFilePath,
           {length_expr} AS length_seconds,
+          {track_no_expr} AS track_no,
           {release_year_expr} AS release_year,
-          CAST({file_size_expr} AS INTEGER) AS file_size
+          CAST({file_size_expr} AS INTEGER) AS file_size,
+          {date_created_expr} AS date_created
         FROM content c
         LEFT JOIN artist ar ON ar.artist_id = c.artist_id_artist
         LEFT JOIN album al ON al.album_id = c.album_id
@@ -421,7 +526,6 @@ pub fn try_read_track_index_from_edb_with_conn(
             return None;
         }
     };
-
     let rows = match stmt.query_map([], |row| {
         let content_id: i64 = row.get(0)?;
         let title: Option<String> = row.get(1)?;
@@ -433,59 +537,52 @@ pub fn try_read_track_index_from_edb_with_conn(
         let image_path: Option<String> = row.get(7)?;
         let analysis_path: Option<String> = row.get(8)?;
         let length_seconds: Option<i64> = row.get(9)?;
-        let release_year: Option<i64> = row.get(10)?;
-        let file_size: Option<i64> = row.get(11)?;
-        let resolved_file_path = path
-            .as_deref()
-            .and_then(|p| resolve_usb_side_path_text(usb_root, p))
-            .unwrap_or_default();
+        let track_no: Option<i64> = row.get(10)?;
+        let release_year: Option<i64> = row.get(11)?;
+        let file_size: Option<i64> = row.get(12)?;
+        let date_created: Option<String> = row.get(13)?;
         let format_ext = path
             .as_deref()
             .and_then(crate::audio_format::format_ext_from_path);
-        Ok((
-            content_id,
-            UsbTrack {
-                id: content_id.to_string(),
-                local_track_id: None,
-                title: title.unwrap_or_else(|| "Unknown Title".to_string()),
-                artist: artist.unwrap_or_else(|| "Unknown Artist".to_string()),
-                album,
-                year: edb_release_year(release_year),
-                genre: None,
-                track_number: None,
-                bpm: bpmx100.map(|v| v as f64 / 100.0),
-                key: key_name,
-                key_display: None,
-                key_color: None,
-                file_path: resolved_file_path,
-                needs_hydration: false,
-                format_compat: crate::service::format_compat::compute_format_compat(
-                    format_ext.as_deref(),
-                    None,
-                    None,
-                    None,
-                    None,
-                ),
-                format_ext,
-                usb_media_path: path,
-                artwork_path: image_path
-                    .as_deref()
-                    .and_then(|p| resolve_usb_side_path_text(usb_root, p)),
-                artwork_data_url: None,
-                waveform_peaks_path: analysis_path
-                    .as_deref()
-                    .and_then(|p| resolve_usb_side_path_text(usb_root, p)),
-                usb_analysis_path: analysis_path
-                    .as_deref()
-                    .and_then(|p| resolve_usb_side_path_text(usb_root, p)),
-                usb_analysis_path_raw: analysis_path,
-                waveform_preview: None,
-                duration_ms: length_seconds
-                    .filter(|v| *v > 0)
-                    .map(|v| (v as u64).saturating_mul(1000)),
-                file_size_bytes: file_size.filter(|size| *size > 0),
-            },
-        ))
+        let track = UsbTrack {
+            id: content_id.to_string(),
+            local_track_id: None,
+            title: title.unwrap_or_else(|| "Unknown Title".to_string()),
+            artist: artist.unwrap_or_else(|| "Unknown Artist".to_string()),
+            album,
+            year: edb_release_year(release_year),
+            genre: None,
+            track_number: track_no.and_then(|value| u32::try_from(value).ok()),
+            bpm: bpmx100.map(|v| v as f64 / 100.0),
+            key: key_name,
+            key_display: None,
+            key_color: None,
+            file_path: path.clone().unwrap_or_default(),
+            needs_hydration: false,
+            format_compat: crate::service::format_compat::compute_format_compat(
+                format_ext.as_deref(),
+                None,
+                None,
+                None,
+                None,
+            ),
+            format_ext,
+            usb_media_path: path,
+            artwork_data_url: None,
+            artwork_path: image_path,
+            waveform_peaks_path: analysis_path.clone(),
+            usb_analysis_path: analysis_path.clone(),
+            usb_analysis_path_raw: analysis_path,
+            waveform_preview: None,
+            duration_ms: length_seconds
+                .filter(|v| *v > 0)
+                .map(|v| (v as u64).saturating_mul(1000)),
+            file_size_bytes: file_size.filter(|size| *size > 0),
+        };
+        let date_created = date_created
+            .map(|date| date.trim().to_string())
+            .filter(|date| !date.is_empty());
+        Ok((content_id, track, date_created))
     }) {
         Ok(r) => r,
         Err(err) => {
@@ -493,178 +590,27 @@ pub fn try_read_track_index_from_edb_with_conn(
             return None;
         }
     };
-
-    let mut index = HashMap::<u32, UsbTrack>::new();
-    for row in rows {
-        let Ok((content_id, track)) = row else {
-            continue;
-        };
-        if content_id <= 0 {
-            continue;
-        }
-        index.insert(content_id as u32, track);
-    }
-
-    if !index.is_empty() {
-        logging::debug(
-            "edb",
-            format!(
-                "loaded {} track metadata rows from eDB content index",
-                index.len()
-            ),
-        );
-        Some(index)
-    } else {
-        None
-    }
+    let tracks = rows
+        .flatten()
+        .filter_map(|(content_id, track, date_created)| {
+            u32::try_from(content_id)
+                .ok()
+                .filter(|id| *id > 0)
+                .map(|id| (id, track, date_created))
+        })
+        .collect::<Vec<_>>();
+    logging::debug(
+        "edb",
+        format!("loaded {} track rows from eDB content", tracks.len()),
+    );
+    Some(tracks)
 }
 
-// -----------------------------------------------------------------------------
-// eDB read/index helpers
-// -----------------------------------------------------------------------------
-
-/// `content_id` -> `dateCreated` from an open eDB connection.
-pub fn try_read_content_date_created_index_from_edb_with_conn(
+/// The playlists (not folders), each with its tracks from `tracks` in order.
+fn read_edb_playlists(
     conn: &rusqlite::Connection,
-) -> Option<HashMap<u32, String>> {
-    let has_date_created_col = conn
-        .query_row(
-            "SELECT COUNT(1) FROM pragma_table_info('content') WHERE name = 'dateCreated'",
-            [],
-            |row| row.get::<_, i64>(0),
-        )
-        .ok()
-        .unwrap_or(0)
-        > 0;
-    if !has_date_created_col {
-        logging::debug("edb", "eDB content.dateCreated column not found");
-        return None;
-    }
-
-    let mut stmt = match conn.prepare(
-        r#"
-        SELECT content_id, dateCreated
-        FROM content
-        WHERE dateCreated IS NOT NULL AND TRIM(dateCreated) != ''
-        "#,
-    ) {
-        Ok(s) => s,
-        Err(err) => {
-            logging::debug("edb", format!("eDB dateCreated query failed: {err}"));
-            return None;
-        }
-    };
-
-    let rows = match stmt.query_map([], |row| {
-        Ok((row.get::<_, i64>(0)?, row.get::<_, String>(1)?))
-    }) {
-        Ok(r) => r,
-        Err(err) => {
-            logging::debug("edb", format!("eDB dateCreated row mapping failed: {err}"));
-            return None;
-        }
-    };
-
-    let mut out = HashMap::<u32, String>::new();
-    for row in rows.flatten() {
-        let (content_id, date_created) = row;
-        if content_id <= 0 {
-            continue;
-        }
-        let trimmed = date_created.trim();
-        if trimmed.is_empty() {
-            continue;
-        }
-        out.insert(content_id as u32, trimmed.to_string());
-    }
-
-    if !out.is_empty() {
-        logging::debug(
-            "edb",
-            format!(
-                "loaded {} from eDB content index",
-                counted(out.len(), "dateCreated value", "dateCreated values")
-            ),
-        );
-        Some(out)
-    } else {
-        None
-    }
-}
-
-pub fn try_read_playlists_with_metadata_from_edb_db_only(
-    usb_root: &Path,
-    warnings: &mut Vec<WarningEntry>,
+    tracks: &HashMap<u32, UsbTrack>,
 ) -> Option<HashMap<String, ExportDbPlaylist>> {
-    let conn = open_edb_from_usb_root(usb_root, warnings)?;
-    try_read_playlists_with_metadata_from_edb_internal_with_conn(&conn, usb_root, false)
-}
-
-/// Same as `try_read_playlists_with_metadata_from_edb_db_only`, but reuses an
-/// already-open eDB connection. See `try_read_track_index_from_edb_with_conn`
-/// for why this exists.
-pub fn try_read_playlists_with_metadata_from_edb_db_only_with_conn(
-    conn: &rusqlite::Connection,
-    usb_root: &Path,
-) -> Option<HashMap<String, ExportDbPlaylist>> {
-    try_read_playlists_with_metadata_from_edb_internal_with_conn(conn, usb_root, false)
-}
-
-/// Like `try_read_playlists_with_metadata_from_edb_db_only_with_conn`, but
-/// resolves USB-relative media paths against `usb_root`.
-pub fn try_read_playlists_with_metadata_from_edb_with_conn(
-    conn: &rusqlite::Connection,
-    usb_root: &Path,
-) -> Option<HashMap<String, ExportDbPlaylist>> {
-    try_read_playlists_with_metadata_from_edb_internal_with_conn(conn, usb_root, true)
-}
-
-fn try_read_playlists_with_metadata_from_edb_internal_with_conn(
-    conn: &rusqlite::Connection,
-    usb_root: &Path,
-    resolve_paths: bool,
-) -> Option<HashMap<String, ExportDbPlaylist>> {
-    let has_length_col = conn
-        .query_row(
-            "SELECT COUNT(1) FROM pragma_table_info('content') WHERE name = 'length'",
-            [],
-            |row| row.get::<_, i64>(0),
-        )
-        .ok()
-        .unwrap_or(0)
-        > 0;
-    let length_expr = if has_length_col { "c.length" } else { "NULL" };
-    let has_track_no_col = conn
-        .query_row(
-            "SELECT COUNT(1) FROM pragma_table_info('content') WHERE name = 'trackNo'",
-            [],
-            |row| row.get::<_, i64>(0),
-        )
-        .ok()
-        .unwrap_or(0)
-        > 0;
-    let track_no_expr = if has_track_no_col {
-        "c.trackNo"
-    } else {
-        "NULL"
-    };
-    let release_year_expr = content_column_or_null(conn, "releaseYear");
-    let file_size_expr = content_column_or_null(conn, "fileSize");
-    let image_fk_col = if conn
-        .query_row(
-            "SELECT COUNT(1) FROM pragma_table_info('content') WHERE name = 'imageFilePath_id'",
-            [],
-            |row| row.get::<_, i64>(0),
-        )
-        .ok()
-        .unwrap_or(0)
-        > 0
-    {
-        "c.imageFilePath_id"
-    } else {
-        "c.image_id"
-    };
-
     let mut playlist_stmt = match conn.prepare(
         r#"
         SELECT playlist_id, name, COALESCE(sequenceNo, 0)
@@ -679,7 +625,6 @@ fn try_read_playlists_with_metadata_from_edb_internal_with_conn(
             return None;
         }
     };
-
     let playlist_rows = match playlist_stmt.query_map([], |row| {
         Ok((
             row.get::<_, i64>(0)?,
@@ -687,131 +632,30 @@ fn try_read_playlists_with_metadata_from_edb_internal_with_conn(
             row.get::<_, i64>(2)?,
         ))
     }) {
-        Ok(r) => r,
+        Ok(rows) => rows.flatten().collect::<Vec<_>>(),
         Err(err) => {
             logging::debug("edb", format!("eDB playlist query failed: {err}"));
             return None;
         }
     };
 
-    let mut out = HashMap::<String, ExportDbPlaylist>::new();
-    for playlist_row in playlist_rows {
-        let Ok((playlist_id, playlist_name, sort_order)) = playlist_row else {
-            continue;
-        };
-        let mut tracks = Vec::<UsbTrack>::new();
-        let track_sql = format!(
-            r#"
-            SELECT
-              c.content_id,
-              c.title,
-              ar.name AS artist_name,
-              al.name AS album_name,
-              c.bpmx100,
-              k.name AS key_name,
-              c.path,
-              img.path AS image_path,
-              c.analysisDataFilePath,
-              {length_expr} AS length_seconds,
-              {track_no_expr} AS track_no,
-              {release_year_expr} AS release_year,
-              CAST({file_size_expr} AS INTEGER) AS file_size
-            FROM playlist_content pc
-            JOIN content c ON c.content_id = pc.content_id
-            LEFT JOIN artist ar ON ar.artist_id = c.artist_id_artist
-            LEFT JOIN album al ON al.album_id = c.album_id
-            LEFT JOIN "key" k ON k.key_id = c.key_id
-            LEFT JOIN image img ON img.image_id = {image_fk_col}
-            WHERE pc.playlist_id = ?1
-            ORDER BY pc.sequenceNo ASC
-            "#
-        );
-        let mut track_stmt = match conn.prepare(&track_sql) {
-            Ok(s) => s,
-            Err(_) => continue,
-        };
-
-        let rows = match track_stmt.query_map([playlist_id], |row| {
-            let content_id: i64 = row.get(0)?;
-            let title: Option<String> = row.get(1)?;
-            let artist: Option<String> = row.get(2)?;
-            let album: Option<String> = row.get(3)?;
-            let bpmx100: Option<i64> = row.get(4)?;
-            let key_name: Option<String> = row.get(5)?;
-            let path: Option<String> = row.get(6)?;
-            let image_path: Option<String> = row.get(7)?;
-            let analysis_path: Option<String> = row.get(8)?;
-            let length_seconds: Option<i64> = row.get(9)?;
-            let track_no: Option<i64> = row.get(10)?;
-            let release_year: Option<i64> = row.get(11)?;
-            let file_size: Option<i64> = row.get(12)?;
-            let resolved_image_path = if resolve_paths {
-                image_path
-                    .as_deref()
-                    .and_then(|p| resolve_usb_side_path_text(usb_root, p))
-            } else {
-                image_path.clone()
-            };
-            let resolved_analysis_path = if resolve_paths {
-                analysis_path
-                    .as_deref()
-                    .and_then(|p| resolve_usb_side_path_text(usb_root, p))
-            } else {
-                analysis_path.clone()
-            };
-            let resolved_file_path = if resolve_paths {
-                path.as_deref()
-                    .and_then(|p| resolve_usb_side_path_text(usb_root, p))
-                    .unwrap_or_default()
-            } else {
-                path.clone().unwrap_or_default()
-            };
-            let format_ext = path
-                .as_deref()
-                .and_then(crate::audio_format::format_ext_from_path);
-            Ok(UsbTrack {
-                id: content_id.to_string(),
-                local_track_id: None,
-                title: title.unwrap_or_else(|| "Unknown Title".to_string()),
-                artist: artist.unwrap_or_else(|| "Unknown Artist".to_string()),
-                album,
-                year: edb_release_year(release_year),
-                genre: None,
-                track_number: track_no.and_then(|value| u32::try_from(value).ok()),
-                bpm: bpmx100.map(|v| v as f64 / 100.0),
-                key: key_name,
-                key_display: None,
-                key_color: None,
-                file_path: resolved_file_path,
-                needs_hydration: false,
-                format_compat: crate::service::format_compat::compute_format_compat(
-                    format_ext.as_deref(),
-                    None,
-                    None,
-                    None,
-                    None,
-                ),
-                format_ext,
-                usb_media_path: path,
-                artwork_data_url: None,
-                artwork_path: resolved_image_path,
-                waveform_peaks_path: resolved_analysis_path.clone(),
-                usb_analysis_path: resolved_analysis_path,
-                usb_analysis_path_raw: analysis_path,
-                waveform_preview: None,
-                duration_ms: length_seconds
-                    .filter(|v| *v > 0)
-                    .map(|v| (v as u64).saturating_mul(1000)),
-                file_size_bytes: file_size.filter(|size| *size > 0),
-            })
-        }) {
-            Ok(r) => r,
-            Err(_) => continue,
-        };
-
-        for track in rows.flatten() {
-            tracks.push(track);
+    // Every playlist's content ids in order, in one query.
+    let mut content_by_playlist = HashMap::<i64, Vec<i64>>::new();
+    if let Ok(mut stmt) = conn.prepare(
+        "SELECT playlist_id, content_id FROM playlist_content ORDER BY playlist_id, sequenceNo ASC",
+    ) && let Ok(rows) =
+        stmt.query_map([], |row| Ok((row.get::<_, i64>(0)?, row.get::<_, i64>(1)?)))
+    {
+        for (playlist_id, content_id) in rows.flatten() {
+            content_by_playlist
+                .entry(playlist_id)
+                .or_default()
+                .push(content_id);
         }
+    }
+
+    let mut out = HashMap::<String, ExportDbPlaylist>::new();
+    for (playlist_id, playlist_name, sort_order) in playlist_rows {
         let existing = out
             .entry(playlist_name)
             .or_insert_with(|| ExportDbPlaylist {
@@ -830,25 +674,23 @@ fn try_read_playlists_with_metadata_from_edb_internal_with_conn(
             .iter()
             .map(|track| track.id.clone())
             .collect::<std::collections::HashSet<_>>();
-        for track in tracks {
+        let content_ids = content_by_playlist
+            .get(&playlist_id)
+            .map(Vec::as_slice)
+            .unwrap_or_default();
+        for content_id in content_ids {
+            let Some(track) = u32::try_from(*content_id)
+                .ok()
+                .and_then(|id| tracks.get(&id))
+            else {
+                continue;
+            };
             if seen.insert(track.id.clone()) {
-                existing.tracks.push(track);
+                existing.tracks.push(track.clone());
             }
         }
     }
-
-    if !out.is_empty() {
-        logging::debug(
-            "edb",
-            format!(
-                "loaded {} from eDB",
-                counted(out.len(), "playlist", "playlists")
-            ),
-        );
-        Some(out)
-    } else {
-        None
-    }
+    Some(out)
 }
 
 pub fn table_exists(conn: &rusqlite::Connection, table: &str) -> bool {
@@ -1996,12 +1838,8 @@ pub fn dynamic_insert(
 #[cfg(test)]
 mod tests {
     use super::{
-        ExportPlaylistData, open_edb, open_edb_from_usb_root, open_edb_rw,
-        replace_export_playlist_row_with_identity,
-        try_read_content_date_created_index_from_edb_with_conn,
-        try_read_playlists_with_metadata_from_edb_db_only,
-        try_read_playlists_with_metadata_from_edb_with_conn, try_read_track_index_from_edb,
-        upsert_export_playlist_row,
+        EdbRead, ExportPlaylistData, open_edb, open_edb_from_usb_root, open_edb_rw, read_edb,
+        replace_export_playlist_row_with_identity, upsert_export_playlist_row,
     };
     use crate::service::usb_vendor_compat::{USB_VENDOR_DB_DIR, USB_VENDOR_ROOT_DIR};
     use tempfile::tempdir;
@@ -2394,7 +2232,7 @@ mod tests {
     }
 
     #[test]
-    fn try_read_track_index_from_edb_reads_basic_track_data() {
+    fn read_edb_reads_basic_track_data() {
         let temp = tempdir().expect("tempdir");
         let db_path = export_db_path(temp.path());
         let conn = rusqlite::Connection::open(&db_path).expect("create sqlite db");
@@ -2433,7 +2271,15 @@ mod tests {
         .expect("seed eDB");
 
         let mut warnings = Vec::new();
-        let index = try_read_track_index_from_edb(temp.path(), &mut warnings).expect("track index");
+        let conn = open_edb_from_usb_root(temp.path(), &mut warnings).expect("open eDB");
+        let tracks = EdbRead {
+            tracks: true,
+            resolve_paths: true,
+            ..EdbRead::default()
+        };
+        let library = read_edb(&conn, temp.path(), tracks).expect("eDB read");
+        assert!(library.playlists.is_empty(), "only what was asked for");
+        let index = library.tracks;
         let track = index.get(&10).expect("content id 10");
         assert_eq!(track.title, "Track");
         assert_eq!(track.artist, "Artist");
@@ -2445,7 +2291,7 @@ mod tests {
     }
 
     #[test]
-    fn try_read_playlists_and_date_created_from_edb_reads_expected_values() {
+    fn read_edb_reads_playlists_and_date_created() {
         let temp = tempdir().expect("tempdir");
         let db_path = export_db_path(temp.path());
         let conn = rusqlite::Connection::open(&db_path).expect("create sqlite db");
@@ -2497,8 +2343,14 @@ mod tests {
         let mut warnings = Vec::new();
         let conn = open_edb_from_usb_root(temp.path(), &mut warnings)
             .expect("open_edb_from_usb_root should resolve path");
-        let playlists = try_read_playlists_with_metadata_from_edb_with_conn(&conn, temp.path())
-            .expect("playlists");
+        let resolved = EdbRead {
+            playlists: true,
+            resolve_paths: true,
+            ..EdbRead::default()
+        };
+        let library = read_edb(&conn, temp.path(), resolved).expect("eDB read");
+        assert!(library.tracks.is_empty() && library.date_created.is_empty());
+        let playlists = library.playlists;
         let set_a = playlists.get("Set A").expect("Set A playlist");
         assert_eq!(set_a.playlist_id, 2);
         assert_eq!(set_a.tracks.len(), 1);
@@ -2514,10 +2366,14 @@ mod tests {
             set_a.tracks[0]
         );
 
-        let mut db_only_warnings = Vec::new();
-        let db_only_playlists =
-            try_read_playlists_with_metadata_from_edb_db_only(temp.path(), &mut db_only_warnings)
-                .expect("DB-only playlists");
+        // Everything, paths as stored; resolving them afterwards gives what a
+        // resolving read gives.
+        let all = read_edb(&conn, temp.path(), EdbRead::ALL).expect("eDB read");
+        assert_eq!(
+            all.resolved_playlists(temp.path())["Set A"].tracks[0].file_path,
+            set_a.tracks[0].file_path
+        );
+        let db_only_playlists = &all.playlists;
         let db_only_set_a = db_only_playlists.get("Set A").expect("Set A playlist");
         assert_eq!(db_only_set_a.tracks.len(), 1);
         let db_only_track = &db_only_set_a.tracks[0];
@@ -2531,8 +2387,7 @@ mod tests {
             Some("/PIONEER/USBANLZ/P001/A/ANLZ0000.DAT")
         );
 
-        let dates = try_read_content_date_created_index_from_edb_with_conn(&conn)
-            .expect("dateCreated index");
+        let dates = &all.date_created;
         assert_eq!(dates.get(&42).map(String::as_str), Some("2024-02-10"));
     }
 }

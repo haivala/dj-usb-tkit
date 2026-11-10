@@ -1948,9 +1948,17 @@ mod diag_tests {
 
         let mut warnings = Vec::new();
         let conn = crate::edb::open_edb_from_usb_root(tmp.path(), &mut warnings).unwrap();
-        let playlists =
-            crate::edb::try_read_playlists_with_metadata_from_edb_with_conn(&conn, tmp.path())
-                .unwrap();
+        let playlists = crate::edb::read_edb(
+            &conn,
+            tmp.path(),
+            crate::edb::EdbRead {
+                playlists: true,
+                resolve_paths: true,
+                ..crate::edb::EdbRead::default()
+            },
+        )
+        .unwrap()
+        .playlists;
         let testi = playlists.get("Testi").expect("merged playlist");
         assert_eq!(
             testi.playlist_id, 1,
@@ -3142,9 +3150,20 @@ mod diag_tests {
 
         // Use the function that reads tracks from export DB
         let mut warnings = Vec::new();
-        let playlists = crate::edb::open_edb_from_usb_root(&tmp, &mut warnings).and_then(|conn| {
-            crate::edb::try_read_playlists_with_metadata_from_edb_with_conn(&conn, &tmp)
-        });
+        let playlists = crate::edb::open_edb_from_usb_root(&tmp, &mut warnings)
+            .and_then(|conn| {
+                crate::edb::read_edb(
+                    &conn,
+                    &tmp,
+                    crate::edb::EdbRead {
+                        playlists: true,
+                        resolve_paths: true,
+                        ..crate::edb::EdbRead::default()
+                    },
+                )
+            })
+            .map(|library| library.playlists)
+            .filter(|playlists| !playlists.is_empty());
         assert!(
             playlists.is_some(),
             "should read playlists from export db, warnings: {warnings:?}"

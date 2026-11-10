@@ -811,7 +811,18 @@ fn collect_merge_write(
         ));
     };
     let conn = handle.conn();
-    let edb_playlists = try_read_playlists_with_metadata_from_edb_with_conn(conn, usb_root);
+    // The eDB as this repair has changed it so far: read from the connection, not the cache.
+    let edb_playlists = read_edb(
+        conn,
+        usb_root,
+        EdbRead {
+            playlists: true,
+            resolve_paths: true,
+            ..EdbRead::default()
+        },
+    )
+    .map(|library| library.playlists)
+    .filter(|playlists| !playlists.is_empty());
     let edb_rows = read_edb_content_fields(conn)?;
 
     // ── Merge ─────────────────────────────────────────────────────────

@@ -271,10 +271,13 @@ pub struct BackendService {
     /// The staged PDB's track files and sizes, for the playlist heading's
     /// export estimate. Shared across `.clone()`s of the service.
     pub(crate) usb_track_sizes_cache: Arc<usb::UsbTrackSizesCache>,
-    /// The USB's playlist names, for the playlists' export status; same key as
-    /// `usb_playlists_cache`, filled by a names-only read when that one is empty.
-    pub(crate) usb_playlist_names_cache: Arc<usb::UsbPlaylistNamesCache>,
-    /// The USB the window has selected: the root `validate_usb_root` last found valid,
+    /// The last staged eDB's tracks and playlists (`staged_edb`), shared like
+    /// `parsed_pdb_cache`.
+    pub(crate) edb_library_cache: Arc<usb::EdbLibraryCache>,
+    /// The last staged PDB's parse (`parsed_staged_pdb`), shared by the commands that read
+    /// it, so selecting a USB, its diagnostics and its playlists parse it once.
+    pub(crate) parsed_pdb_cache: Arc<usb::ParsedPdbCache>,
+    /// The USB the window has selected: the root `select_usb` last found valid,
     /// or none. The playlists' export status is against it.
     pub(crate) selected_usb_root: Arc<std::sync::Mutex<Option<std::path::PathBuf>>>,
     /// Serializes cue-editor saves to a USB: they run as background jobs, and
@@ -304,7 +307,8 @@ impl BackendService {
             usb_playlists_cache: Arc::new(std::sync::Mutex::new(None)),
             usb_histories_cache: Arc::new(std::sync::Mutex::new(None)),
             usb_track_sizes_cache: Arc::new(std::sync::Mutex::new(None)),
-            usb_playlist_names_cache: Arc::new(std::sync::Mutex::new(None)),
+            edb_library_cache: Arc::new(std::sync::Mutex::new(None)),
+            parsed_pdb_cache: Arc::new(std::sync::Mutex::new(None)),
             selected_usb_root: Arc::new(std::sync::Mutex::new(None)),
             usb_write_lock: Arc::new(std::sync::Mutex::new(())),
             usb_playlist_page_generation: Arc::new(std::sync::atomic::AtomicU64::new(0)),

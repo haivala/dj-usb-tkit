@@ -70,6 +70,14 @@ first and are committed back to the drive only if the local copy actually change
 temp-file-plus-rename so a crash or drive removal mid-write can't leave a half-written database on
 the USB.
 
+The staged PDB is parsed once per version of the file: the commands that only read it (selecting
+the USB, its diagnostics and parity report, the USB playlists and history lists, the export
+estimate, a track's USB details, a repair's baseline) share one cached parse, kept while the staged
+file's size and modification time are unchanged and dropped by every write to the stick.
+The staged eDB works the same way: one read of its tracks, playlists and track dates serves
+selecting the USB, its diagnostics and parity report, the USB playlists and history lists and a
+track's USB details. A repair reads the eDB itself, on the connection it writes through.
+
 `<device-key>` is the slugged form of the drive's user-assigned name (see "USB drive naming"
 below) when the drive has one, so the same physical drive reuses the same cache directory
 regardless of which port or computer's mount path the OS assigns it this time. An unnamed drive

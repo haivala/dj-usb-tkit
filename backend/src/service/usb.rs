@@ -10,11 +10,7 @@ use chrono::NaiveDate;
 use rusqlite::{OptionalExtension, params};
 use uuid::Uuid;
 
-use crate::edb::{
-    open_edb_from_usb_root, table_exists, try_read_content_date_created_index_from_edb_with_conn,
-    try_read_playlists_with_metadata_from_edb_with_conn, try_read_track_index_from_edb,
-    try_read_track_index_from_edb_with_conn,
-};
+use crate::edb::{open_edb_from_usb_root, table_exists};
 use crate::error::{BackendError, BackendResult};
 use crate::logging::{self, Level};
 use crate::models::{
@@ -26,7 +22,7 @@ use crate::models::{
     WarningEntry,
 };
 use crate::pdb_reader::{
-    ParsedPdb, PdbHistoryEntryRow, PdbHistoryPlaylistRow, count_pdb_playlists, parse_pdb,
+    ParsedPdb, PdbHistoryEntryRow, PdbHistoryPlaylistRow, count_pdb_playlists,
 };
 
 use super::analysis::normalize_text;
@@ -42,9 +38,9 @@ use super::usb_display_files::{
     DisplayReadCounts, LibraryDisplayFiles, UsbDisplaySource, library_files_off_usb,
 };
 use super::usb_helpers::{
-    PlaylistCandidate, build_usb_track_id_index, decode_history_playlist_id,
-    decode_history_track_id, dedupe_usb_playlists_by_name, history_entry_sort_key,
-    is_named_history_playlist, lookup_playlist_tracks, merge_playlist_tracks, normalize_packed_id,
+    PlaylistCandidate, decode_history_playlist_id, decode_history_track_id,
+    dedupe_usb_playlists_by_name, history_entry_sort_key, is_named_history_playlist,
+    lookup_playlist_tracks, merge_playlist_tracks, normalize_packed_id,
     parse_history_name_numeric_id, parse_history_slot_id, sanitize_history_name, sanitize_text,
 };
 use super::usb_identity::UsbAudioFormats;
@@ -112,9 +108,35 @@ pub(crate) struct CachedUsbPlaylists {
 /// across `BackendService` clones.
 pub(crate) type UsbPlaylistsCache =
     std::sync::Mutex<Option<(UsbParseCacheKey, Arc<CachedUsbPlaylists>)>>;
-/// One-entry cache of a stick's playlist names (`BackendService::usb_playlist_names`).
-pub(crate) type UsbPlaylistNamesCache =
-    std::sync::Mutex<Option<(UsbParseCacheKey, Arc<HashSet<String>>)>>;
+/// One-entry cache of a staged eDB's full read (`EdbRead::ALL`), keyed by its
+/// path and signature.
+pub(crate) type EdbLibraryCache = std::sync::Mutex<
+    Option<(
+        std::path::PathBuf,
+        StagedFileSig,
+        Arc<crate::edb::EdbLibrary>,
+    )>,
+>;
+/// A staged PDB parsed, with the page statistics the diagnostics report.
+#[derive(Debug)]
+pub(crate) struct StagedPdbParse {
+    pub(crate) parsed: Arc<crate::pdb_reader::ParsedPdb>,
+    pub(crate) diagnostics: crate::pdb_reader::PdbDiagnostics,
+}
+
+impl StagedPdbParse {
+    pub(crate) fn read(pdb_path: &Path) -> BackendResult<Self> {
+        let (parsed, diagnostics) = crate::pdb_reader::parse_pdb_with_diagnostics(pdb_path)?;
+        Ok(Self {
+            parsed: Arc::new(parsed),
+            diagnostics,
+        })
+    }
+}
+
+/// One-entry cache of a staged PDB's parse, keyed by its path and signature.
+pub(crate) type ParsedPdbCache =
+    std::sync::Mutex<Option<(std::path::PathBuf, StagedFileSig, Arc<StagedPdbParse>)>>;
 /// One-entry parse cache for USB histories.
 pub(crate) type UsbHistoriesCache =
     std::sync::Mutex<Option<(UsbParseCacheKey, Arc<crate::models::FetchUsbHistoriesData>)>>;
@@ -242,24 +264,6 @@ fn build_usb_track_index(
             )
         })
         .collect()
-}
-
-fn edb_track_index_from_playlist_tracks(
-    playlist_tracks: Option<&HashMap<String, Vec<UsbTrack>>>,
-) -> HashMap<u32, UsbTrack> {
-    playlist_tracks
-        .map(build_usb_track_id_index)
-        .unwrap_or_default()
-}
-
-fn merge_full_edb_track_index(
-    conn: &rusqlite::Connection,
-    usb_root: &Path,
-    track_by_id: &mut HashMap<u32, UsbTrack>,
-) {
-    if let Some(all_edb_tracks) = try_read_track_index_from_edb_with_conn(conn, usb_root) {
-        track_by_id.extend(all_edb_tracks);
-    }
 }
 
 fn select_history_rows(
@@ -1137,9 +1141,34 @@ impl BackendService {
         if let Ok(mut guard) = self.usb_track_sizes_cache.lock() {
             *guard = None;
         }
-        if let Ok(mut guard) = self.usb_playlist_names_cache.lock() {
+        if let Ok(mut guard) = self.edb_library_cache.lock() {
             *guard = None;
         }
+        if let Ok(mut guard) = self.parsed_pdb_cache.lock() {
+            *guard = None;
+        }
+    }
+
+    /// The parse of the staged PDB at `pdb_path`, from the cache while the file is unchanged
+    /// (same size and modification time); else parsed and kept. Every reader of a staged PDB
+    /// that doesn't change it goes through here, so one stick is parsed once.
+    pub(crate) fn parsed_staged_pdb(&self, pdb_path: &Path) -> BackendResult<Arc<StagedPdbParse>> {
+        let sig = StagedFileSig::of(pdb_path);
+        if let Some(sig) = &sig
+            && let Ok(guard) = self.parsed_pdb_cache.lock()
+            && let Some((path, cached_sig, parsed)) = guard.as_ref()
+            && path == pdb_path
+            && cached_sig == sig
+        {
+            return Ok(Arc::clone(parsed));
+        }
+        let parsed = Arc::new(StagedPdbParse::read(pdb_path)?);
+        if let Some(sig) = sig
+            && let Ok(mut guard) = self.parsed_pdb_cache.lock()
+        {
+            *guard = Some((pdb_path.to_path_buf(), sig, Arc::clone(&parsed)));
+        }
+        Ok(parsed)
     }
 
     /// The selected USB (`selected_usb_root`), if any.
@@ -1224,21 +1253,54 @@ impl BackendService {
     /// caches while the staged databases are unchanged, so a playlist change doesn't read
     /// the USB again; else a names-only read of the staged PDB and eDB.
     pub(crate) fn usb_playlist_names(&self, usb_root: &Path) -> Arc<HashSet<String>> {
-        let key = self.usb_parse_cache_key(usb_root);
-        if let Some(full) = self.usb_playlists_cache_hit(&key) {
-            return Arc::new(full.usb_playlist_names.clone());
-        }
-        if let Ok(guard) = self.usb_playlist_names_cache.lock()
-            && let Some((cached_key, names)) = guard.as_ref()
-            && *cached_key == key
+        let parsed = super::usb_staging::stage_pdb(usb_root)
+            .ok()
+            .and_then(|path| self.parsed_staged_pdb(&path).ok());
+        let edb = self.staged_edb(usb_root, None, &mut Vec::new());
+        Arc::new(super::export::usb_playlist_names_for_export_compare(
+            parsed.as_deref().map(|staged| &*staged.parsed),
+            edb.iter()
+                .flat_map(|library| library.playlists.keys().cloned()),
+        ))
+    }
+
+    /// The staged eDB's tracks and playlists (`EdbRead::ALL`, paths as stored), from the
+    /// cache while the file is unchanged; else read, through `conn` when the caller has it
+    /// open (opening it adds its warnings to `warnings`). `None` without a readable eDB.
+    /// Every reader of the staged eDB's tracks or playlists that doesn't change it goes
+    /// through here, so one stick is read once.
+    pub(crate) fn staged_edb(
+        &self,
+        usb_root: &Path,
+        conn: Option<&rusqlite::Connection>,
+        warnings: &mut Vec<WarningEntry>,
+    ) -> Option<Arc<crate::edb::EdbLibrary>> {
+        let edb_path = super::usb_staging::stage_edb(usb_root).ok()?;
+        let sig = StagedFileSig::of(&edb_path)?;
+        if let Ok(guard) = self.edb_library_cache.lock()
+            && let Some((path, cached_sig, library)) = guard.as_ref()
+            && *path == edb_path
+            && *cached_sig == sig
         {
-            return Arc::clone(names);
+            return Some(Arc::clone(library));
         }
-        let names = Arc::new(super::export::read_usb_playlist_names(usb_root));
-        if let Ok(mut guard) = self.usb_playlist_names_cache.lock() {
-            *guard = Some((key, Arc::clone(&names)));
+        let owned_conn;
+        let conn = match conn {
+            Some(conn) => conn,
+            None => {
+                owned_conn = open_edb_from_usb_root(usb_root, warnings)?;
+                &owned_conn
+            }
+        };
+        let library = Arc::new(crate::edb::read_edb(
+            conn,
+            usb_root,
+            crate::edb::EdbRead::ALL,
+        )?);
+        if let Ok(mut guard) = self.edb_library_cache.lock() {
+            *guard = Some((edb_path, sig, Arc::clone(&library)));
         }
-        names
+        Some(library)
     }
 
     /// The staged databases' track files and sizes (see `UsbTrackSizes`).
@@ -1259,12 +1321,13 @@ impl BackendService {
         {
             return Ok(Arc::clone(sizes));
         }
-        let parsed = parse_pdb(&pdb_path)?;
+        let staged = self.parsed_staged_pdb(&pdb_path)?;
+        let parsed = &staged.parsed;
         // Its open warnings are the USB view's to report, not the estimate's.
         let edb = edb_path
             .as_deref()
             .and_then(|path| crate::edb::open_edb(path, &mut Vec::new()));
-        let facts = super::usb_track_facts::UsbTrackFacts::read(Some(&parsed), edb.as_ref());
+        let facts = super::usb_track_facts::UsbTrackFacts::read(Some(parsed), edb.as_ref());
         let mut sizes = UsbTrackSizes::default();
         for fact in facts.by_path.into_values() {
             let Some(size) = fact.size else {
@@ -1407,12 +1470,12 @@ impl BackendService {
         }
 
         let pdb_path = super::usb_staging::stage_pdb(&usb_root)?;
-        let parsed = if pdb_path.exists() {
-            let parsed = parse_pdb(&pdb_path)?;
-            for message in &parsed.warnings {
+        let staged_parse = if pdb_path.exists() {
+            let staged = self.parsed_staged_pdb(&pdb_path)?;
+            for message in &staged.parsed.warnings {
                 logging::debug("usb-import", message);
             }
-            Some(parsed)
+            Some(staged)
         } else {
             warnings.push(logging::log_text(
                 Level::Warn,
@@ -1422,26 +1485,23 @@ impl BackendService {
             ));
             None
         };
+        let parsed: Option<&ParsedPdb> = staged_parse.as_deref().map(|staged| &*staged.parsed);
         push_usb_stage_timing("parse PDB", &mut stage_started);
 
         on_progress(30, 100, &tr::usb_progress_reading_edb().render());
-        // Open the eDB once and reuse it for every read below -- opening it
-        // per-call was redundantly re-running SQLCipher key negotiation
-        // (see try_read_track_index_from_edb_with_conn's doc comment).
-        let edb_conn = open_edb_from_usb_root(&usb_root, &mut warnings);
-        let edb_playlists = edb_conn
-            .as_ref()
-            .and_then(|conn| try_read_playlists_with_metadata_from_edb_with_conn(conn, &usb_root));
+        let (edb_track_by_id, edb_playlists) = self
+            .staged_edb(&usb_root, None, &mut warnings)
+            .map(|library| {
+                let library = library.resolved(&usb_root);
+                let playlists = (!library.playlists.is_empty()).then_some(library.playlists);
+                (library.tracks, playlists)
+            })
+            .unwrap_or_default();
         let edb_playlist_tracks = edb_playlists.as_ref().map(|m| {
             m.iter()
                 .map(|(name, playlist)| (name.clone(), playlist.tracks.clone()))
                 .collect::<HashMap<_, _>>()
         });
-        let mut edb_track_by_id =
-            edb_track_index_from_playlist_tracks(edb_playlist_tracks.as_ref());
-        if let Some(conn) = edb_conn.as_ref() {
-            merge_full_edb_track_index(conn, &usb_root, &mut edb_track_by_id);
-        }
         let eedb_playlist_tracks_canonical = edb_playlist_tracks.as_ref().map(|m| {
             m.iter()
                 .map(|(name, tracks)| (canonicalize_playlist_name(name), tracks.clone()))
@@ -1458,7 +1518,7 @@ impl BackendService {
             HashMap::<u32, Vec<crate::pdb_reader::PdbPlaylistEntryRow>>::new();
         let mut playlist_candidates = Vec::<PlaylistCandidate>::new();
 
-        if let Some(parsed) = &parsed {
+        if let Some(parsed) = parsed {
             track_by_id = build_usb_track_index(parsed, &usb_root);
 
             entries_by_playlist =
@@ -1613,7 +1673,7 @@ impl BackendService {
             &tr::usb_progress_finalizing_playlist_import().render(),
         );
         let stats = UsbImportStats {
-            indexed_tracks: parsed.as_ref().map(|p| p.tracks.len()).unwrap_or(0),
+            indexed_tracks: parsed.map(|p| p.tracks.len()).unwrap_or(0),
             playlist_referenced_tracks: referenced_track_ids.len(),
             playlist_entries: playlist_entries_total,
         };
@@ -1664,7 +1724,7 @@ impl BackendService {
         }
 
         let usb_playlist_names = usb_playlist_names_for_export_compare(
-            parsed.as_ref(),
+            parsed,
             edb_playlists
                 .as_ref()
                 .into_iter()
@@ -1939,7 +1999,8 @@ impl BackendService {
         if !exclusive_artwork_ids.is_empty() {
             let pdb_path = super::usb_staging::stage_pdb(&usb_root)?;
             if pdb_path.is_file()
-                && let Ok(parsed) = parse_pdb(&pdb_path)
+                && let Ok(staged) = self.parsed_staged_pdb(&pdb_path)
+                && let parsed = &staged.parsed
             {
                 for art_id in &exclusive_artwork_ids {
                     if let Some(art_path) = parsed.artworks.get(art_id) {
@@ -2092,7 +2153,8 @@ impl BackendService {
             }));
         }
 
-        let parsed = parse_pdb(&pdb_path)?;
+        let staged = self.parsed_staged_pdb(&pdb_path)?;
+        let parsed = &staged.parsed;
         push_usb_stage_timing("parse PDB", &mut stage_started);
         on_progress(
             30,
@@ -2106,24 +2168,18 @@ impl BackendService {
         // doc comment), which could dominate wall time on a large eDB even
         // on fast media and misdiagnose as "slow media suspected".
         let supplemental_edb_conn = open_edb_from_usb_root(&usb_root, &mut supplemental_warnings);
-        let supplemental_edb_playlist_tracks = supplemental_edb_conn
+        let supplemental_edb = supplemental_edb_conn
             .as_ref()
-            .and_then(|conn| try_read_playlists_with_metadata_from_edb_with_conn(conn, &usb_root))
-            .map(|m| {
-                m.into_iter()
-                    .map(|(name, playlist)| (name, playlist.tracks))
-                    .collect::<HashMap<_, _>>()
-            });
-        let mut supplemental_track_by_id =
-            edb_track_index_from_playlist_tracks(supplemental_edb_playlist_tracks.as_ref());
-        if let Some(conn) = supplemental_edb_conn.as_ref() {
-            merge_full_edb_track_index(conn, &usb_root, &mut supplemental_track_by_id);
-        }
+            .and_then(|conn| self.staged_edb(&usb_root, Some(conn), &mut supplemental_warnings));
+        let supplemental_track_by_id = supplemental_edb
+            .as_deref()
+            .map(|library| library.resolved_tracks(&usb_root))
+            .unwrap_or_default();
         let mut date_created_by_track_id = build_history_track_date_index(&parsed.tracks);
         if date_created_by_track_id.is_empty() {
-            date_created_by_track_id = supplemental_edb_conn
-                .as_ref()
-                .and_then(try_read_content_date_created_index_from_edb_with_conn)
+            date_created_by_track_id = supplemental_edb
+                .as_deref()
+                .map(|library| library.date_created.clone())
                 .unwrap_or_default();
         }
         let export_log = match export_log::load_export_log(&usb_root) {
@@ -2188,7 +2244,7 @@ impl BackendService {
         );
 
         on_progress(50, 100, &tr::usb_progress_building_track_index().render());
-        let track_by_id = build_usb_track_index(&parsed, &usb_root);
+        let track_by_id = build_usb_track_index(parsed, &usb_root);
         push_usb_stage_timing("build track index", &mut stage_started);
 
         on_progress(
@@ -2833,12 +2889,12 @@ impl BackendService {
             .map(normalize_text)
             .unwrap_or_default();
 
-        let parsed = if pdb_path.exists() {
-            let parsed = parse_pdb(&pdb_path)?;
-            for message in &parsed.warnings {
+        let staged_parse = if pdb_path.exists() {
+            let staged = self.parsed_staged_pdb(&pdb_path)?;
+            for message in &staged.parsed.warnings {
                 logging::debug("usb-import", message);
             }
-            Some(parsed)
+            Some(staged)
         } else {
             warnings.push(logging::log_text(
                 Level::Warn,
@@ -2848,10 +2904,14 @@ impl BackendService {
             ));
             None
         };
+        let parsed: Option<&ParsedPdb> = staged_parse.as_deref().map(|staged| &*staged.parsed);
 
-        let pdb_track_index = build_pdb_track_index(parsed.as_ref());
-        let pdb = parsed.as_ref().zip(pdb_track_index.as_ref());
-        let edb_index = try_read_track_index_from_edb(&usb_root, &mut warnings);
+        let pdb_track_index = build_pdb_track_index(parsed);
+        let pdb = parsed.zip(pdb_track_index.as_ref());
+        let edb_index = self
+            .staged_edb(&usb_root, None, &mut warnings)
+            .map(|library| library.resolved_tracks(&usb_root))
+            .filter(|tracks| !tracks.is_empty());
 
         match resolve_usb_track_from_sources(
             track_id,
@@ -3260,10 +3320,9 @@ mod tests {
     use super::{
         SLOW_USB_STAGE_MS, UsbDisplaySource, apply_history_dates_from_track_date_created,
         build_history_track_date_index, build_track_match_fingerprint, build_usb_track_index,
-        cleanup_empty_dirs_recursive, edb_track_index_from_playlist_tracks,
-        filter_named_history_playlists, hydrate_usb_page, hydrate_usb_track_in_place,
-        normalize_date_created, now, paginate_usb_tracks, push_usb_stage_timing_with_threshold,
-        select_history_rows, slow_stage_threshold_ms,
+        cleanup_empty_dirs_recursive, filter_named_history_playlists, hydrate_usb_page,
+        hydrate_usb_track_in_place, normalize_date_created, now, paginate_usb_tracks,
+        push_usb_stage_timing_with_threshold, select_history_rows, slow_stage_threshold_ms,
     };
     use crate::models::{UsbHistory, UsbTrack};
     use crate::pdb_reader::{PdbHistoryEntryRow, PdbHistoryPlaylistRow, PdbTrackRow};
@@ -3808,7 +3867,7 @@ mod tests {
         assert_eq!((at_2000 - baseline), (at_1000 - baseline) * 2);
     }
 
-    // --- build_usb_track_index / edb_track_index_from_playlist_tracks ---
+    // --- build_usb_track_index ---
 
     #[allow(clippy::too_many_arguments)]
     fn make_indexed_pdb_track(
@@ -3933,26 +3992,6 @@ mod tests {
         assert!(track.usb_analysis_path.is_none());
     }
 
-    #[test]
-    fn edb_track_index_from_playlist_tracks_none_returns_empty() {
-        assert!(edb_track_index_from_playlist_tracks(None).is_empty());
-    }
-
-    #[test]
-    fn edb_track_index_from_playlist_tracks_dedupes_by_parsed_id() {
-        let map = HashMap::from([
-            (
-                "Playlist A".to_string(),
-                vec![make_track("7", "/a.mp3"), make_track("7", "/dup.mp3")],
-            ),
-            ("Playlist B".to_string(), vec![make_track("9", "/b.mp3")]),
-        ]);
-        let index = edb_track_index_from_playlist_tracks(Some(&map));
-        assert_eq!(index.len(), 2);
-        assert!(index.contains_key(&7));
-        assert!(index.contains_key(&9));
-    }
-
     // --- cleanup_empty_dirs_recursive ---
 
     #[test]
@@ -4005,6 +4044,65 @@ mod tests {
         std::fs::create_dir_all(&usb_root).expect("create usb root");
         crate::service::initialize_usb(&usb_root).expect("initialize usb");
         (td, usb_root)
+    }
+
+    #[test]
+    fn selecting_a_usb_its_diagnostics_and_playlists_share_one_pdb_parse_and_edb_read() {
+        let (_data, service) = test_service();
+        let (_usb, usb_root) = test_usb_root();
+        let root_text = usb_root.to_string_lossy().to_string();
+        let cached = |service: &crate::service::BackendService| {
+            service
+                .parsed_pdb_cache
+                .lock()
+                .expect("cache lock")
+                .as_ref()
+                .map(|(_, _, staged)| std::sync::Arc::clone(staged))
+                .expect("a cached parse")
+        };
+        let cached_edb = |service: &crate::service::BackendService| {
+            service
+                .edb_library_cache
+                .lock()
+                .expect("cache lock")
+                .as_ref()
+                .map(|(_, _, library)| std::sync::Arc::clone(library))
+                .expect("a cached eDB read")
+        };
+
+        let selected = service
+            .select_usb(crate::models::SelectUsbRequest {
+                path: root_text.clone(),
+            })
+            .expect("select usb");
+        assert!(selected.usb.valid);
+        // The playlist state reads the names from the parse.
+        service.playlists_state().expect("playlists state");
+        let first = cached(&service);
+        let first_edb = cached_edb(&service);
+
+        service
+            .run_usb_diagnostics(crate::models::RunUsbDiagnosticsRequest {
+                usb_root: Some(root_text.clone()),
+            })
+            .expect("diagnostics");
+        service
+            .fetch_usb_playlists(crate::models::FetchUsbPlaylistsRequest {
+                usb_root: Some(root_text.clone()),
+            })
+            .expect("fetch playlists");
+        assert!(std::sync::Arc::ptr_eq(&first, &cached(&service)));
+        assert!(std::sync::Arc::ptr_eq(&first_edb, &cached_edb(&service)));
+
+        // A write to the stick drops it: the next reader parses the new file.
+        service.invalidate_usb_parse_cache();
+        service
+            .run_usb_diagnostics(crate::models::RunUsbDiagnosticsRequest {
+                usb_root: Some(root_text),
+            })
+            .expect("diagnostics again");
+        assert!(!std::sync::Arc::ptr_eq(&first, &cached(&service)));
+        assert!(!std::sync::Arc::ptr_eq(&first_edb, &cached_edb(&service)));
     }
 
     fn make_export_track(id: &str, title: &str, filename: &str) -> crate::edb::ExportTrackData {

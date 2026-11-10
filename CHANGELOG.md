@@ -50,6 +50,8 @@
   step. If that fails, the status line says once that the export failed, and the sort stays on screen.
 - **Improvement:** Selecting a USB shows its audio formats, its name and the sidebar's "On this USB" marks
   together with the selection, instead of one after another.
+- **Improvement:** Selecting a USB reads its PDB and its eDB once. Before, the selection, the diagnostics that
+  follow and the USB Playlists page each read them again.
 - **Chore:** The app window can no longer widen the set of folders it may load files from. The backend lets in
   the library's source folders and the selected USB itself.
 

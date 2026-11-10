@@ -121,7 +121,7 @@ fn fix_proposal(
 /// What the detect phase found, handed to the apply phase.
 struct DetectedRepairs {
     empty_analysis_paths: Vec<std::path::PathBuf>,
-    parsed_pdb: Option<ParsedPdb>,
+    parsed_pdb: Option<std::sync::Arc<ParsedPdb>>,
     bpm_key_mismatches: Vec<BpmKeyMismatch>,
     analysis_ownership: AnalysisOwnership,
     app_master_db_id: Option<u32>,
@@ -645,18 +645,17 @@ impl BackendService {
         let staged_pdb_path = usb_staging::stage_pdb(&usb_root)?;
 
         on_progress(5, 100, &tr::repair_progress_baseline().render());
-        let (diagnostics, parsed_pdb_from_diagnostics) = self
-            .run_usb_diagnostics_with_progress_impl(
-                RunUsbDiagnosticsRequest {
-                    usb_root: Some(usb_root.to_string_lossy().to_string()),
-                },
-                edb_conn.as_ref(),
-                Some(&staged_pdb_path),
-                |c, t, m| {
-                    let pct = 5 + ((c * 45) / t.max(1)).min(45);
-                    on_progress(pct, 100, m);
-                },
-            )?;
+        let diagnostics = self.run_usb_diagnostics_with_progress_impl(
+            RunUsbDiagnosticsRequest {
+                usb_root: Some(usb_root.to_string_lossy().to_string()),
+            },
+            edb_conn.as_ref(),
+            Some(&staged_pdb_path),
+            |c, t, m| {
+                let pct = 5 + ((c * 45) / t.max(1)).min(45);
+                on_progress(pct, 100, m);
+            },
+        )?;
 
         on_progress(55, 100, &tr::repair_progress_parity().render());
         let parity = self.run_usb_parity_report_with_progress_impl(
@@ -665,7 +664,6 @@ impl BackendService {
             },
             edb_conn.as_ref(),
             Some(&staged_pdb_path),
-            parsed_pdb_from_diagnostics.as_ref(),
             |c, t, m| {
                 let pct = 55 + ((c * 10) / t.max(1)).min(10);
                 on_progress(pct, 100, m);
@@ -730,11 +728,12 @@ impl BackendService {
             });
         }
 
-        // Reuse the PDB the diagnostics baseline above already parsed instead
-        // of parsing it a third time (once for diagnostics, once for parity,
-        // and this one) -- only falls back to a fresh parse if diagnostics'
-        // own parse failed.
-        let parsed_pdb = parsed_pdb_from_diagnostics.or_else(|| parse_pdb(&staged_pdb_path).ok());
+        // The parse the diagnostics and parity baselines above read
+        // (`parsed_staged_pdb`): the staged PDB hasn't changed since.
+        let parsed_pdb = self
+            .parsed_staged_pdb(&staged_pdb_path)
+            .ok()
+            .map(|staged| std::sync::Arc::clone(&staged.parsed));
         // This app's export id: the owner of a bundle it shares with another
         // track (`scan_analysis_ownership`).
         let app_master_db_id = self
@@ -1924,7 +1923,7 @@ impl BackendService {
                     usb_root,
                     &empty_analysis_paths,
                     fix_edb_conn.as_mut(),
-                    parsed_pdb.as_ref(),
+                    parsed_pdb.as_deref(),
                     warnings,
                 )
             }) {

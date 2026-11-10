@@ -20,7 +20,6 @@ impl BackendService {
         F: FnMut(usize, usize, &str),
     {
         self.run_usb_diagnostics_with_progress_impl(req, None, None, on_progress)
-            .map(|(data, _)| data)
     }
 
     /// Same as `run_usb_diagnostics_with_progress`, but lets a caller that
@@ -28,19 +27,16 @@ impl BackendService {
     /// (e.g. `repair_usb_diagnostics_with_progress`, which runs this as a
     /// baseline alongside its own eDB/PDB reads) share them instead of each
     /// paying the USB stat/copy/key-negotiation cost separately. Passing
-    /// `None` for either opens/stages it internally exactly as before.
-    /// Returns the diagnostics report alongside the `ParsedPdb` it parsed
-    /// internally (if parsing succeeded), so a caller like
-    /// `repair_usb_diagnostics_with_progress` that needs the parsed PDB for
-    /// further work can reuse it instead of re-parsing the same unchanged
-    /// file a second time.
+    /// `None` for either opens/stages it internally exactly as before. The
+    /// PDB's parse comes from `parsed_staged_pdb`, so a caller that reads the
+    /// same staged PDB afterwards gets the same parse.
     pub(crate) fn run_usb_diagnostics_with_progress_impl<F>(
         &self,
         req: RunUsbDiagnosticsRequest,
         edb_conn: Option<&rusqlite::Connection>,
         staged_pdb_path: Option<&std::path::Path>,
         mut on_progress: F,
-    ) -> BackendResult<(RunUsbDiagnosticsData, Option<crate::pdb_reader::ParsedPdb>)>
+    ) -> BackendResult<RunUsbDiagnosticsData>
     where
         F: FnMut(usize, usize, &str),
     {
@@ -81,7 +77,10 @@ impl BackendService {
             100,
             &tr::diagnostics_progress_checking_pdb_integrity().render(),
         );
-        let (pdb_integrity, parsed_opt) = diagnose_pdb_integrity(&pdb_path);
+        let (pdb_integrity, staged_parse) =
+            diagnose_pdb_integrity(&pdb_path, |path| self.parsed_staged_pdb(path));
+        let parsed_pdb: Option<&crate::pdb_reader::ParsedPdb> =
+            staged_parse.as_deref().map(|staged| &*staged.parsed);
         note_stage("pdb integrity");
 
         // --- 2. DB Access ---
@@ -102,14 +101,15 @@ impl BackendService {
         let conn: Option<&rusqlite::Connection> = edb_conn.or(owned_edb_conn.as_ref());
         let mut edb_access = diagnose_edb_access(&edb_path, conn);
         raw_warnings.append(&mut edb_open_warnings);
-        let edb_playlists = conn.and_then(|c| {
-            try_read_playlists_with_metadata_from_edb_db_only_with_conn(c, &usb_root)
-        });
-        let edb_playlist_tracks = edb_playlists.map(|m| {
-            m.into_iter()
-                .map(|(name, playlist)| (name, playlist.tracks))
-                .collect::<HashMap<_, _>>()
-        });
+        let edb_library = conn.and_then(|c| self.staged_edb(&usb_root, Some(c), &mut raw_warnings));
+        let edb_playlist_tracks = edb_library
+            .as_deref()
+            .and_then(crate::edb::EdbLibrary::playlists_or_none)
+            .map(|m| {
+                m.iter()
+                    .map(|(name, playlist)| (name.clone(), playlist.tracks.clone()))
+                    .collect::<HashMap<_, _>>()
+            });
 
         // eDB history counts
         {
@@ -154,10 +154,8 @@ impl BackendService {
             100,
             &tr::diagnostics_progress_checking_contents_integrity().render(),
         );
-        let pdb_indexed_paths = parsed_opt
-            .as_ref()
-            .map(|p| {
-                let parsed = &p.0;
+        let pdb_indexed_paths = parsed_pdb
+            .map(|parsed| {
                 parsed
                     .tracks
                     .iter()
@@ -178,7 +176,7 @@ impl BackendService {
 
         // Identify tracks that exist in PDB history playlists but not in any regular playlist.
         // These are written by players during playback and are expected to be absent from eDB.
-        let history_only_pdb_paths = if let Some((parsed, _)) = parsed_opt.as_ref() {
+        let history_only_pdb_paths = if let Some(parsed) = parsed_pdb {
             let regular_ids: HashSet<u32> =
                 parsed.playlist_entries.iter().map(|e| e.track_id).collect();
             let history_only_ids: HashSet<u32> = parsed
@@ -334,12 +332,9 @@ impl BackendService {
                 .ok()
                 .map(|n| n.max(0) as usize)
         });
-        let mut analysis_integrity = diagnose_analysis_integrity(
-            parsed_opt.as_ref().map(|p| &p.0),
-            edb_playlist_tracks.as_ref(),
-            edb_content_rows,
-        );
-        if let Some((parsed, _)) = parsed_opt.as_ref() {
+        let mut analysis_integrity =
+            diagnose_analysis_integrity(parsed_pdb, edb_playlist_tracks.as_ref(), edb_content_rows);
+        if let Some(parsed) = parsed_pdb {
             // Database-only: the ANLZ beat grids are compared by the repair
             // preview, which scans the analysis files anyway.
             let mismatches = detect_bpm_key_mismatches(&usb_root, parsed, conn, false, None);
@@ -442,7 +437,7 @@ impl BackendService {
         );
         let (playlist_resolution, playlist_details) =
             diagnose_playlist_resolution_with_edb_internal(
-                parsed_opt.as_ref().map(|p| &p.0),
+                parsed_pdb,
                 edb_playlist_tracks.as_ref(),
                 |done, total, message| {
                     let pct = if total == 0 {
@@ -467,7 +462,7 @@ impl BackendService {
                 .map_or(&DiagStatus::Pass, |section| &section.status),
         ]);
 
-        let cdj_counter_snapshot = parsed_opt.as_ref().and_then(|(parsed, _)| {
+        let cdj_counter_snapshot = parsed_pdb.and_then(|parsed| {
             compute_player_counter_snapshot(
                 &pdb_path,
                 parsed,
@@ -478,7 +473,7 @@ impl BackendService {
             .as_ref()
             .map(player_counter_snapshot_section);
         let usb_playlist_names = usb_playlist_names_for_export_compare(
-            parsed_opt.as_ref().map(|p| &p.0),
+            parsed_pdb,
             edb_playlist_tracks
                 .as_ref()
                 .into_iter()
@@ -507,7 +502,7 @@ impl BackendService {
             &section_groups,
             &OverviewFacts {
                 edb_file_present: edb_path.exists(),
-                pdb_tracks: parsed_opt.as_ref().map_or(0, |(p, _)| p.tracks.len()),
+                pdb_tracks: parsed_pdb.map_or(0, |p| p.tracks.len()),
                 edb_tracks: edb_indexed_paths.len(),
                 pdb_only_tracks: true_pdb_only_count,
                 edb_only_tracks: edb_only_count,
@@ -553,7 +548,7 @@ impl BackendService {
             health_text,
             playlist_usb_export_status,
         };
-        Ok((data, parsed_opt.map(|(parsed, _)| parsed)))
+        Ok(data)
     }
 
     pub fn run_usb_parity_report(
@@ -571,20 +566,19 @@ impl BackendService {
     where
         F: FnMut(usize, usize, &str),
     {
-        self.run_usb_parity_report_with_progress_impl(req, None, None, None, on_progress)
+        self.run_usb_parity_report_with_progress_impl(req, None, None, on_progress)
     }
 
     /// Same as `run_usb_parity_report_with_progress`, but lets a caller that
-    /// already has an open eDB connection, a locally-staged PDB path, and/or
-    /// an already-parsed PDB (e.g. from `run_usb_diagnostics_with_progress_impl`)
-    /// share them instead of each paying the USB stat/copy/key-negotiation/parse
-    /// cost separately. See `run_usb_diagnostics_with_progress_impl`.
+    /// already has an open eDB connection and/or a locally-staged PDB path
+    /// share them instead of each paying the USB stat/copy/key-negotiation
+    /// cost separately; the parse is `parsed_staged_pdb`'s. See
+    /// `run_usb_diagnostics_with_progress_impl`.
     pub(crate) fn run_usb_parity_report_with_progress_impl<F>(
         &self,
         req: RunUsbParityReportRequest,
         edb_conn: Option<&rusqlite::Connection>,
         staged_pdb_path: Option<&std::path::Path>,
-        parsed_pdb: Option<&crate::pdb_reader::ParsedPdb>,
         mut on_progress: F,
     ) -> BackendResult<RunUsbParityReportData>
     where
@@ -621,14 +615,8 @@ impl BackendService {
             Some(p) => p.to_path_buf(),
             None => crate::service::usb_staging::stage_pdb(&usb_root)?,
         };
-        let owned_parsed_pdb;
-        let parsed: &crate::pdb_reader::ParsedPdb = match parsed_pdb {
-            Some(parsed) => parsed,
-            None => {
-                owned_parsed_pdb = parse_pdb(&pdb_path)?;
-                &owned_parsed_pdb
-            }
-        };
+        let staged = self.parsed_staged_pdb(&pdb_path)?;
+        let parsed = &*staged.parsed;
         for message in &parsed.warnings {
             logging::debug("usb-diagnostics", message);
         }
@@ -646,14 +634,15 @@ impl BackendService {
                 "parity report requires readable eDB playlist data".to_string(),
             ));
         };
-        let edb_playlists = try_read_playlists_with_metadata_from_edb_with_conn(conn, &usb_root)
-            .ok_or_else(|| {
-                BackendError::Internal(
-                    "parity report requires readable eDB playlist data".to_string(),
-                )
-            })?;
-        let rating_colour = compare_rating_colour(conn, parsed, &edb_playlists);
-        let field_notes = compare_note_fields(conn, parsed, &edb_playlists);
+        let edb_playlists = self
+            .staged_edb(&usb_root, Some(conn), &mut raw_warnings)
+            .map(|library| library.resolved_playlists(&usb_root))
+            .filter(|playlists| !playlists.is_empty());
+        let edb_playlists = edb_playlists.as_ref().ok_or_else(|| {
+            BackendError::Internal("parity report requires readable eDB playlist data".to_string())
+        })?;
+        let rating_colour = compare_rating_colour(conn, parsed, edb_playlists);
+        let field_notes = compare_note_fields(conn, parsed, edb_playlists);
         note_stage("read eDB");
 
         on_progress(
@@ -693,7 +682,7 @@ impl BackendService {
         );
         let (checks, summary_rows, playlist_details, overall_status) = build_usb_parity_comparison(
             parsed,
-            &edb_playlists,
+            edb_playlists,
             &rating_colour,
             &field_notes,
             Some(strict_raw_coverage.clone()),

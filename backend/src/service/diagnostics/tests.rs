@@ -2163,7 +2163,9 @@ fn pdb_integrity_reports_rekordbox_bookkeeping_as_pass() {
     let pdb_path = td.path().join("export.pdb");
     fs::write(&pdb_path, pages.concat()).expect("write test pdb");
 
-    let (section, _) = super::pdb_integrity::diagnose_pdb_integrity(&pdb_path);
+    let (section, _) = super::pdb_integrity::diagnose_pdb_integrity(&pdb_path, |path| {
+        crate::service::usb::StagedPdbParse::read(path).map(std::sync::Arc::new)
+    });
     let check = section
         .checks
         .iter()

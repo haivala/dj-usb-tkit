@@ -8,8 +8,7 @@ use std::path::Path;
 use rusqlite::params;
 
 use crate::edb::{
-    ExportDbPlaylist, find_key_id_by_name, open_edb_from_usb_root, open_edb_rw,
-    try_read_playlists_with_metadata_from_edb_with_conn,
+    EdbRead, ExportDbPlaylist, find_key_id_by_name, open_edb_from_usb_root, open_edb_rw, read_edb,
 };
 use crate::error::{BackendError, BackendResult};
 use crate::logging::{self, Level};

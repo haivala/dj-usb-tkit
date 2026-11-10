@@ -939,19 +939,6 @@ fn export_button_title(locks_reorder: bool, playlist_name: &str) -> String {
 /// frontend never re-derives this from raw state. `usb_root` is the connected
 /// drive's path (if any), used only to name the drive in the export button
 /// label (see `usb_drive_label`).
-/// The names of the playlists in `usb_root`'s staged PDB and eDB, read for nothing else.
-pub(super) fn read_usb_playlist_names(usb_root: &std::path::Path) -> HashSet<String> {
-    let mut warnings = Vec::new();
-    let parsed = super::usb_staging::stage_pdb(usb_root)
-        .ok()
-        .and_then(|path| crate::pdb_reader::parse_pdb(&path).ok());
-    let edb_names =
-        crate::edb::try_read_playlists_with_metadata_from_edb_db_only(usb_root, &mut warnings)
-            .map(|by_name| by_name.into_keys().collect::<Vec<_>>())
-            .unwrap_or_default();
-    usb_playlist_names_for_export_compare(parsed.as_ref(), edb_names)
-}
-
 pub(crate) fn compute_playlist_usb_export_status(
     local_playlists: &[Playlist],
     usb_playlist_names: &HashSet<String>,
