@@ -39,10 +39,14 @@
 
 ## Unreleased
 
-- **Fix:** The strict parity repair no longer replaces a track's real date added in the PDB with 1970-01-01. The
-  repair in versions before 0.4.10 wrote that date into the eDB for tracks it had no date for, and later repairs
-  copied it into the PDB. It now counts as no date, so the repair puts the PDB's real date into the eDB, and an
-  export fills it in as it does an empty date.
+## 0.5.7
+
+**Severity:** critical — see item(s) marked **(CRITICAL)** below.
+
+- **Fix (CRITICAL):** The strict parity repair no longer replaces a track's real date added in the PDB with
+  1970-01-01. The repair in versions before 0.4.10 wrote that date into the eDB for tracks it had no date for, and
+  later repairs copied it into the PDB. It now counts as no date, so the repair puts the PDB's real date into the
+  eDB, and an export fills it in as it does an empty date.
 - **Fix:** Preview Fixes offers the strict parity repair for playlists whose only parity findings are notes (other
   track fields that differ between the PDB and the eDB), so one repair leaves no notes. A genre, label or artist
   name that differs only in upper and lower case is no longer noted, since the PDB and the eDB keep one entry
