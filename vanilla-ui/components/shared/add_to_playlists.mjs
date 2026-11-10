@@ -60,13 +60,7 @@ export async function addSelectionToPlaylists(ctx, view, ids, rows) {
   // The add cleared the playlists' "exported to USB" marks.
   ctx.applyPlaylistsState(result);
   if (playlistIds.includes(state.currentPlaylistId)) await ctx.refreshCurrentPlaylistTracks();
-  ctx.pushEventLog({
-    level: "info",
-    source: "playlist-add",
-    code: "playlist_add.result",
-    message: result.statusText,
-    details: `requested=${result.requested} | resolved=${result.resolved} | added=${result.added} | skipped=${result.skipped}`,
-  });
+  // The backend logged the result in the Event Log.
   emitStatus(result.statusText);
 }
 

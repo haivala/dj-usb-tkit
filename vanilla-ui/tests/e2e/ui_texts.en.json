@@ -184,10 +184,6 @@
     "ui-playlist-add-refreshing": "Refreshing playlist...",
     "ui-playlist-add-resolving": "Resolving tracks...",
     "ui-playlist-add-select-first": "Select at least one track to add",
-    "ui-playlist-adding-tracks": {
-      "one": "Adding {count} track to {playlist}",
-      "other": "Adding {count} tracks to {playlist}"
-    },
     "ui-playlist-analyze-failed": "Analyze failed: {error}",
     "ui-playlist-analyze-missing": "Analyze Missing Tracks",
     "ui-playlist-create-progress": "Creating playlist...",
@@ -209,7 +205,6 @@
     "ui-playlist-export-status": "Not exported yet.",
     "ui-playlist-format-warning-tooltip": "Follows the USB's Audio formats (USB view). Only lossless tracks can be converted",
     "ui-playlist-import-column-aria-label": "{library} lists",
-    "ui-playlist-import-failed-unknown": "import failed",
     "ui-playlist-import-force": "Force update track data",
     "ui-playlist-import-force-from": "Force update track data from {library}",
     "ui-playlist-import-force-note": "Replaces the BPM, key and cues of the playlists' tracks, including your own edits.",
@@ -217,8 +212,6 @@
     "ui-playlist-import-group-history": "History",
     "ui-playlist-import-group-playlists": "Playlists",
     "ui-playlist-import-intro": "Each is imported as a new playlist. Tracks not yet in the library are imported with it.",
-    "ui-playlist-import-log-context": "{library} playlist import",
-    "ui-playlist-import-many-failed": "Playlist import failed: {error}",
     "ui-playlist-import-many-progress": {
       "one": "Importing {count} playlist...",
       "other": "Importing {count} playlists..."
@@ -238,7 +231,6 @@
       "one": "Import {count}",
       "other": "Import {count}"
     },
-    "ui-playlist-import-one-failed": "{library} playlist import failed: {error}",
     "ui-playlist-import-one-progress": "Importing {library} playlist...",
     "ui-playlist-import-one-progress-done": "Importing {library} playlist done",
     "ui-playlist-import-one-progress-failed": "Importing {library} playlist failed",

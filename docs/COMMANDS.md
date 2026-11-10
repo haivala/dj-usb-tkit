@@ -311,12 +311,13 @@ applies them as they come and never asks for the list again after a change.
   refused, so the export is blocked). `null` when it can't be made. The frontend asks
   for it after the track list is shown, so it never holds the list up
 - `add_library_selection_to_playlist` / `add_track_candidates_to_playlist` — both answer with
-  `statusText` ("Added 2 tracks (skipped 0) to Warmup"), also the Event Log entry; the
-  candidates' is empty when none resolved
+  `statusText` ("Added 2 tracks (skipped 0) to Warmup"), which the backend also logs as the
+  Event Log entry (`playlist_add.result`, its counts in the log file); the candidates' is
+  empty when none resolved
 - `add_library_selection_to_playlists` / `add_track_candidates_to_playlists` — the same
   selection as the two above, resolved once and added to every playlist in `playlistIds`;
   returns what each playlist took (`items`), the totals and `statusText` ("Added 3 tracks
-  (skipped 1) to Warmup, Peak", empty when none resolved), also the Event Log entry
+  (skipped 1) to Warmup, Peak", empty when none resolved), also logged as the Event Log entry
 - `get_playlist_membership` — `{ trackIds }`, one entry per selected track (its local id, or
   `null` for a track with no local row yet); every local playlist in sidebar order with how
   many of them it holds (`contained`), `state`: `none`, `some` or `all`, and `noteText`
@@ -407,7 +408,9 @@ See `docs/EXTERNAL_LIBRARIES.md` for behavior and the fields read.
   them. `skipped` counts list entries not placed (missing or unsupported files,
   tracks gone from the library, repeats). `force` makes the tracks take BPM,
   key and cues from the library over the app's own values. A list none of
-  whose tracks can be imported fails, changing nothing
+  whose tracks can be imported fails, changing nothing. Each failed list is
+  logged in the Event Log (`playlist_import.failed`) with its reason; when none
+  imported, `statusText` is the first failure's reason
 
 `export_to_usb` takes `sort` (`{ sortBy, sortDir }`, or `null`), the open playlist's column
 sort: it is saved as the playlist's track order before the export, as `reorder_playlist_tracks`'s

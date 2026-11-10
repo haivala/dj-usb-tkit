@@ -344,7 +344,7 @@ const PLAYLIST_IMPORT_KINDS = [
 // imports their tracks too, one list after another, and totals the outcome),
 // then open the first one imported.
 export async function importExternalPlaylist(ctx) {
-  const { state, withProgress, command, updateModeText, switchView, logWarnings, emitStatus } = ctx;
+  const { state, withProgress, command, updateModeText, switchView, emitStatus } = ctx;
 
   const sources = PLAYLIST_IMPORT_SOURCES.filter((source) => state[source.pathKey]);
   const listed = await Promise.all(sources.map(async (source) => {
@@ -378,19 +378,10 @@ export async function importExternalPlaylist(ctx) {
   const chosen = await ctx.playlistImportDialog.open({ columns });
   if (!chosen?.length) return;
 
-  // `results` follows `chosen`: each list's playlist, or why it failed.
+  // `results` follows `chosen`: each list's playlist, or why it failed (the
+  // backend logged each failure).
   let data = null;
   const done = [];
-  const failed = [];
-  const logFailed = () => {
-    for (const { item, message } of failed) {
-      logWarnings(
-        item.source.label,
-        [{ level: "error", message: `${item.name}: ${message}`, code: "playlist_import.failed" }],
-        t("ui-playlist-import-log-context", { library: item.source.label })
-      );
-    }
-  };
   try {
     const library = chosen.length === 1 ? chosen[0].source.label : null;
     const texts = library != null
@@ -421,11 +412,10 @@ export async function importExternalPlaylist(ctx) {
           }))
         });
         for (const [index, outcome] of (data.results || []).entries()) {
-          const item = chosen[index];
-          if (outcome.playlist) done.push({ item, result: outcome.playlist });
-          else failed.push({ item, message: outcome.error || t("ui-playlist-import-failed-unknown") });
+          if (outcome.playlist) done.push({ item: chosen[index], result: outcome.playlist });
         }
-        if (!done.length) throw new Error(failed[0]?.message || t("ui-playlist-import-failed-unknown"));
+        // None imported: the status line says why.
+        if (!done.length) throw new Error(data.statusText);
         applyPlaylistsState(ctx, data);
         // The imported tracks belong to those libraries: show them in the library too.
         const imported = [...new Set(done.map(({ item }) => item.source))];
@@ -439,16 +429,12 @@ export async function importExternalPlaylist(ctx) {
       }
     );
   } catch (err) {
-    logFailed();
-    const error = err?.message || err;
-    emitStatus(chosen.length === 1
-      ? t("ui-playlist-import-one-failed", { library: chosen[0].source.label, error })
-      : t("ui-playlist-import-many-failed", { error }));
+    emitStatus(err?.message || String(err));
     return;
   }
 
-  // The files it couldn't find are in the Event Log already: the backend logged them.
-  logFailed();
+  // The files it couldn't find and the lists that failed are in the Event Log
+  // already: the backend logged them.
   emitStatus(data.statusText);
 }
 
@@ -507,7 +493,7 @@ export function applyAddResolutions(ctx, tracks, resolutions) {
 }
 
 export async function addTracksToCurrentPlaylist(ctx, tracks) {
-  const { state, pushEventLog, withProgress, command, emitStatus } = ctx;
+  const { state, withProgress, command, emitStatus } = ctx;
 
   const playlist = requireCurrentPlaylist(ctx);
   if (!playlist) return;
@@ -519,13 +505,6 @@ export async function addTracksToCurrentPlaylist(ctx, tracks) {
 
   const result = await withProgress(addTracksProgressTexts(), async (progress) => {
     progress(25, t("ui-playlist-add-resolving"));
-    pushEventLog({
-      level: "info",
-      source: "playlist-add",
-      code: "playlist_add.request",
-      message: tCount("ui-playlist-adding-tracks", candidates.length, { playlist: playlist.name }),
-      details: `candidateIds=${candidates.map((item) => item.trackId || item.id || item.filePath || "unknown").join(",")}`
-    });
     const add = await command("add_track_candidates_to_playlist", {
       playlistId: playlist.id,
       tracks: candidates.map(toAddTrackCandidatePayload),
@@ -540,13 +519,6 @@ export async function addTracksToCurrentPlaylist(ctx, tracks) {
     applyPlaylistsState(ctx, add);
     progress(80, t("ui-playlist-add-refreshing"));
     await refreshCurrentPlaylistTracks(ctx);
-    pushEventLog({
-      level: "info",
-      source: "playlist-add",
-      code: "playlist_add.result",
-      message: add.statusText,
-      details: `requested=${add.requested || candidates.length} | resolved=${add.resolved || 0} | added=${add.added} | skipped=${add.skipped}`
-    });
     return add;
   });
   if (!Number(result.resolved || 0)) {
@@ -561,7 +533,7 @@ export async function addTracksToCurrentPlaylist(ctx, tracks) {
 // the user scrolled past is not lost), materializes any browse-only rows, and
 // appends -- the frontend just forwards the ids / `allMatching` flag.
 export async function addLibrarySelectionToCurrentPlaylist(ctx, { trackIds = [], allMatching = false } = {}) {
-  const { state, pushEventLog, withProgress, command, emitStatus } = ctx;
+  const { state, withProgress, command, emitStatus } = ctx;
 
   const playlist = requireCurrentPlaylist(ctx);
   if (!playlist) return;
@@ -583,13 +555,6 @@ export async function addLibrarySelectionToCurrentPlaylist(ctx, { trackIds = [],
   // The add cleared the playlist's last export.
   applyPlaylistsState(ctx, add);
   await refreshCurrentPlaylistTracks(ctx);
-  pushEventLog({
-    level: "info",
-    source: "playlist-add",
-    code: "playlist_add.result",
-    message: add?.statusText,
-    details: `added=${add?.added || 0} | skipped=${add?.skipped || 0} | allMatching=${allMatching}`
-  });
   emitStatus(add?.statusText);
 }
 

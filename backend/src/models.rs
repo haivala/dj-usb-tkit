@@ -3133,7 +3133,8 @@ pub struct ImportExternalPlaylistsData {
     /// Tracks placed, and entries skipped, over every imported list.
     pub added: usize,
     pub skipped: usize,
-    /// The status line once at least one list was imported.
+    /// The status line: the imported lists, or (none imported) why the first
+    /// one failed.
     pub status_text: String,
 }
 

@@ -93,6 +93,14 @@ pub(crate) fn external_playlist_key(library: &str, kind: ExternalPlaylistKind, i
     format!("{library}:{kind}:{}", id.trim())
 }
 
+/// The library's name as the app shows it.
+pub(super) fn external_library_label(library: ExternalLibrary) -> &'static str {
+    match library {
+        ExternalLibrary::Rekordbox => "rekordbox",
+        ExternalLibrary::Mixxx => "Mixxx",
+    }
+}
+
 /// The library name shown for a playlist's `import_source` (see
 /// [`external_playlist_key`]).
 pub(super) fn imported_from_label(import_source: &str) -> Option<&'static str> {
@@ -223,9 +231,15 @@ impl BackendService {
     ) -> BackendResult<ImportExternalPlaylistsData> {
         let mut out = ImportExternalPlaylistsData::default();
         let picked = req.items.len();
+        let single_library = match req.items.as_slice() {
+            [only] => Some(only.library),
+            _ => None,
+        };
         let mut failed_names = Vec::new();
+        let mut first_error = None;
         for item in req.items {
             let name = item.name.clone();
+            let library = item.library;
             let result = match item.library {
                 ExternalLibrary::Rekordbox => self.import_rekordbox_playlist(item.request),
                 ExternalLibrary::Mixxx => self.import_mixxx_playlist(item.request),
@@ -242,15 +256,39 @@ impl BackendService {
                 }
                 Err(err) => {
                     out.failed += 1;
+                    let error = err.render();
+                    // The Event Log keeps each failed list's reason; the status
+                    // line names them.
+                    logging::log_text(
+                        Level::Error,
+                        "playlist-import",
+                        "playlist_import.failed",
+                        &tr::playlist_import_item_failed(
+                            external_library_label(library),
+                            &name,
+                            error.clone(),
+                        ),
+                    );
                     failed_names.push(name);
+                    first_error.get_or_insert_with(|| error.clone());
                     ImportExternalPlaylistOutcome {
                         playlist: None,
-                        error: Some(crate::error::ErrorPayload::from(err).message),
+                        error: Some(error),
                     }
                 }
             });
         }
-        out.status_text = import_status_text(&out, picked, &failed_names);
+        out.status_text = match first_error {
+            // Nothing imported: the first failure is the status line.
+            Some(error) if out.imported == 0 => match single_library {
+                Some(library) => {
+                    tr::playlist_import_one_failed(external_library_label(library), error)
+                }
+                None => tr::playlist_import_many_failed(error),
+            }
+            .render(),
+            _ => import_status_text(&out, picked, &failed_names),
+        };
         Ok(out)
     }
 }
@@ -307,6 +345,25 @@ fn tracks_added_status(
 ) -> BackendResult<String> {
     let name = playlist_name(conn, playlist_id)?;
     Ok(tr::playlist_tracks_added(added, skipped, name).render())
+}
+
+/// An add's result in the Event Log (`playlist_add.result`): the status line
+/// over `playlist_ids`, which it returns, and its counts in the log file.
+fn log_playlist_add(
+    conn: &rusqlite::Connection,
+    playlist_ids: &[String],
+    added: usize,
+    skipped: usize,
+    counts: String,
+) -> BackendResult<Text> {
+    let names = playlist_ids
+        .iter()
+        .map(|id| playlist_name(conn, id))
+        .collect::<BackendResult<Vec<_>>>()?;
+    let text = tr::playlist_tracks_added(added, skipped, names.join(", "));
+    logging::log_text(Level::Info, "playlist-add", "playlist_add.result", &text);
+    logging::debug("playlist-add", counts);
+    Ok(text)
 }
 
 /// An external playlist import that found none of its tracks: failing beats
@@ -780,10 +837,21 @@ impl BackendService {
         }
         drop(conn);
 
-        self.add_tracks_to_playlist(AddTracksToPlaylistRequest {
+        let added = self.add_tracks_to_playlist(AddTracksToPlaylistRequest {
             playlist_id: req.playlist_id,
             track_ids,
-        })
+        })?;
+        log_playlist_add(
+            &*self.db.connect()?,
+            std::slice::from_ref(&added.playlist_id),
+            added.added,
+            added.skipped,
+            format!(
+                "added={} | skipped={} | allMatching={}",
+                added.added, added.skipped, req.all_matching
+            ),
+        )?;
+        Ok(added)
     }
 
     /// The selection bar's "Add to…": the ticked library tracks, resolved
@@ -875,6 +943,16 @@ impl BackendService {
             playlist_id: req.playlist_id,
             track_ids,
         })?;
+        log_playlist_add(
+            &*self.db.connect()?,
+            std::slice::from_ref(&added.playlist_id),
+            added.added,
+            added.skipped,
+            format!(
+                "requested={requested} | resolved={resolved} | added={} | skipped={}",
+                added.added, added.skipped
+            ),
+        )?;
 
         Ok(AddTrackCandidatesToPlaylistData {
             playlist_id: added.playlist_id,
@@ -952,13 +1030,19 @@ impl BackendService {
             String::new()
         } else {
             let conn = self.db.connect()?;
-            let names = playlist_ids
-                .iter()
-                .map(|id| playlist_name(&conn, id))
-                .collect::<BackendResult<Vec<_>>>()?;
             let added: usize = items.iter().map(|item| item.added).sum();
             let skipped: usize = items.iter().map(|item| item.skipped).sum();
-            tr::playlist_tracks_added(added, skipped, names.join(", ")).render()
+            log_playlist_add(
+                &conn,
+                playlist_ids,
+                added,
+                skipped,
+                format!(
+                    "requested={requested} | resolved={} | added={added} | skipped={skipped}",
+                    track_ids.len()
+                ),
+            )?
+            .render()
         };
         Ok(AddTracksToPlaylistsData {
             requested,

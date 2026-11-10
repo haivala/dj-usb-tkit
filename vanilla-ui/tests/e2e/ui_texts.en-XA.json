@@ -184,10 +184,6 @@
     "ui-playlist-add-refreshing": "[Ŕééƒŕééšĥîîñĝ þļááýļîîšţ...]",
     "ui-playlist-add-resolving": "[Ŕééšööļṽîîñĝ ţŕááçķš...]",
     "ui-playlist-add-select-first": "[Šééļééçţ ááţ ļééáášţ ööñéé ţŕááçķ ţöö ááðð]",
-    "ui-playlist-adding-tracks": {
-      "one": "[ÅÅððîîñĝ {count} ţŕááçķ ţöö {playlist}]",
-      "other": "[ÅÅððîîñĝ {count} ţŕááçķš ţöö {playlist}]"
-    },
     "ui-playlist-analyze-failed": "[ÅÅñááļýžéé ƒááîîļééð: {error}]",
     "ui-playlist-analyze-missing": "[ÅÅñááļýžéé Ṁîîššîîñĝ Ţŕááçķš]",
     "ui-playlist-create-progress": "[Çŕééááţîîñĝ þļááýļîîšţ...]",
@@ -209,7 +205,6 @@
     "ui-playlist-export-status": "[Ñööţ ééẋþööŕţééð ýééţ.]",
     "ui-playlist-format-warning-tooltip": "[Ƒööļļööŵš ţĥéé ÛÛŠƁ'š ÅÅûûðîîöö ƒööŕɱááţš (ÛÛŠƁ ṽîîééŵ). ÖÖñļý ļööššļééšš ţŕááçķš çááñ ƀéé çööñṽééŕţééð]",
     "ui-playlist-import-column-aria-label": "[{library} ļîîšţš]",
-    "ui-playlist-import-failed-unknown": "[îîɱþööŕţ ƒááîîļééð]",
     "ui-playlist-import-force": "[Ƒööŕçéé ûûþðááţéé ţŕááçķ ðááţáá]",
     "ui-playlist-import-force-from": "[Ƒööŕçéé ûûþðááţéé ţŕááçķ ðááţáá ƒŕööɱ {library}]",
     "ui-playlist-import-force-note": "[Ŕééþļááçééš ţĥéé ƁÞṀ, ķééý ááñð çûûééš ööƒ ţĥéé þļááýļîîšţš' ţŕááçķš, îîñçļûûðîîñĝ ýööûûŕ ööŵñ ééðîîţš.]",
@@ -217,8 +212,6 @@
     "ui-playlist-import-group-history": "[Ĥîîšţööŕý]",
     "ui-playlist-import-group-playlists": "[Þļááýļîîšţš]",
     "ui-playlist-import-intro": "[ÉÉááçĥ îîš îîɱþööŕţééð ááš áá ñééŵ þļááýļîîšţ. Ţŕááçķš ñööţ ýééţ îîñ ţĥéé ļîîƀŕááŕý ááŕéé îîɱþööŕţééð ŵîîţĥ îîţ.]",
-    "ui-playlist-import-log-context": "[{library} þļááýļîîšţ îîɱþööŕţ]",
-    "ui-playlist-import-many-failed": "[Þļááýļîîšţ îîɱþööŕţ ƒááîîļééð: {error}]",
     "ui-playlist-import-many-progress": {
       "one": "[ÎÎɱþööŕţîîñĝ {count} þļááýļîîšţ...]",
       "other": "[ÎÎɱþööŕţîîñĝ {count} þļááýļîîšţš...]"
@@ -238,7 +231,6 @@
       "one": "[ÎÎɱþööŕţ {count}]",
       "other": "[ÎÎɱþööŕţ {count}]"
     },
-    "ui-playlist-import-one-failed": "[{library} þļááýļîîšţ îîɱþööŕţ ƒááîîļééð: {error}]",
     "ui-playlist-import-one-progress": "[ÎÎɱþööŕţîîñĝ {library} þļááýļîîšţ...]",
     "ui-playlist-import-one-progress-done": "[ÎÎɱþööŕţîîñĝ {library} þļááýļîîšţ ðööñéé]",
     "ui-playlist-import-one-progress-failed": "[ÎÎɱþööŕţîîñĝ {library} þļááýļîîšţ ƒááîîļééð]",

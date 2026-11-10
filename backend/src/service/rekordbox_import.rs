@@ -1676,6 +1676,26 @@ mod tests {
             "{}",
             data.status_text
         );
+
+        // Nothing imported: the status line is the first failure, with its
+        // library when there was only one list.
+        let failed = |items| {
+            service
+                .import_external_playlists(ImportExternalPlaylistsRequest { items })
+                .expect("import playlists")
+        };
+        let one = failed(vec![item("15")]);
+        assert_eq!((one.imported, one.failed), (0, 1));
+        let reason = one.results[0].error.clone().expect("its reason");
+        assert_eq!(
+            one.status_text,
+            format!("rekordbox playlist import failed: {reason}")
+        );
+        let both = failed(vec![item("15"), item("15")]);
+        assert_eq!(
+            both.status_text,
+            format!("Playlist import failed: {reason}")
+        );
     }
 
     #[test]

@@ -2019,6 +2019,13 @@ playlist-import-error-nothing-imported = { $count ->
 # The status line when a library's lists can't be read. $library: rekordbox or Mixxx. $error: why.
 playlist-import-list-failed = Could not read { $library } playlists: { $error }
 
+# The Event Log entry for one list that could not be imported.
+# $library: rekordbox or Mixxx. $playlist: the list's name. $error: why.
+playlist-import-item-failed = { $library } playlist import: { $playlist }: { $error }
+# The status line when no list could be imported. $library: rekordbox or Mixxx. $error: the first failure's reason.
+playlist-import-one-failed = { $library } playlist import failed: { $error }
+playlist-import-many-failed = Playlist import failed: { $error }
+
 ## selection-bar
 
 # The tooltip of the selection bar's time when some selected tracks have no length yet.
@@ -2430,11 +2437,6 @@ ui-playlist-add-adding = Adding tracks...
 ui-playlist-add-refreshing = Refreshing playlist...
 ui-playlist-add-none-resolved = No imported track IDs found to add
 ui-playlist-add-select-first = Select at least one track to add
-# The Event Log entry as the add starts. $count: the tracks sent. $playlist: the playlist's name.
-ui-playlist-adding-tracks = { $count ->
-    [one] Adding { $count } track to { $playlist }
-   *[other] Adding { $count } tracks to { $playlist }
-}
 # An empty playlist: its heading and the buttons that lead to tracks to add.
 ui-playlist-empty-heading = Browse Library or USB to add tracks
 ui-playlist-empty-library = Media Library
@@ -2463,8 +2465,6 @@ ui-playlist-import-group-crates = Crates
 ui-playlist-import-group-history = History
 # The status line when no library has a list with tracks.
 ui-playlist-import-none-found = No playlists with tracks found
-# Where an Event Log entry came from, in its details. $library: rekordbox or Mixxx.
-ui-playlist-import-log-context = { $library } playlist import
 # The progress bar while importing one list (running, done, failed), then its first step.
 # $library: rekordbox or Mixxx. $name: the list's name.
 ui-playlist-import-one-progress = Importing { $library } playlist...
@@ -2485,11 +2485,6 @@ ui-playlist-import-many-progress-failed = { $count ->
    *[other] Importing { $count } playlists failed
 }
 ui-playlist-import-many-starting = Importing playlists...
-# Stands in for a failed list's error when the backend gave none.
-ui-playlist-import-failed-unknown = import failed
-# The status line when no list could be imported. $library: rekordbox or Mixxx. $error: the first failure's message.
-ui-playlist-import-one-failed = { $library } playlist import failed: { $error }
-ui-playlist-import-many-failed = Playlist import failed: { $error }
 
 ## ui-playback
 

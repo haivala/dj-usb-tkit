@@ -261,6 +261,18 @@ function installSourceChipAnalysisMock(page) {
           window.__importedPlaylists = window.__importedPlaylists || [];
           if (command === "import_external_playlists") {
             const items = payload?.request?.items || [];
+            if (window.__failImports) {
+              // None imported: the backend logs each failure and says the first.
+              window.__failedImports = [...(window.__failedImports || []), ...items];
+              return {
+                ok: true,
+                data: {
+                  results: items.map(() => ({ error: "the reason" })),
+                  imported: 0, failed: items.length, added: 0, skipped: 0,
+                  statusText: "rekordbox playlist import failed: the reason"
+                }
+              };
+            }
             const results = items.map((item) => {
               const mixxx = item.library === "mixxx";
               const playlistId = mixxx ? "pl-mixxx" : "pl-rekordbox";
@@ -483,6 +495,16 @@ test("Import ticks rekordbox and Mixxx playlists, imports each and opens the fir
   await expect(page.locator('.source-chip-toggle[data-rekordbox-db="true"]')).toBeChecked();
   await expect(page.locator('.source-chip-toggle[data-mixxx-db="true"]')).toBeChecked();
   await expect(page.locator("#statusText")).toContainText("Imported 2 of 2 playlists: 4 tracks");
+
+  // Nothing imported: the backend's status line says why, and the open
+  // playlist stays.
+  await page.evaluate(() => { window.__failImports = true; });
+  await importBtn.click();
+  await row("Winter Party").locator("input").check();
+  await okBtn.click();
+  await expect.poll(async () => page.evaluate(() => (window.__failedImports || []).length)).toBe(1);
+  await expect(page.locator("#statusText")).toHaveText("rekordbox playlist import failed: the reason");
+  await expect(page.locator('.nav-playlist-item[data-playlist-id="pl-rekordbox"]')).toHaveClass(/active/);
 });
 
 test("in the test language, the playlist import dialog shows only catalog text and data", async ({ page }) => {

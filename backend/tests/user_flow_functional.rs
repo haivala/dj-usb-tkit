@@ -3603,3 +3603,56 @@ fn browse_only_track_can_be_materialized_and_added_without_scan_or_analysis() {
         mp3.to_string_lossy().to_string()
     );
 }
+
+/// A playlist add writes its result to the Event Log itself: the status line
+/// it answers with, as an info entry under `playlist_add.result`.
+#[test]
+fn a_playlist_add_logs_its_result_in_the_event_log() {
+    thread_local! {
+        static ADD_LINES: std::cell::RefCell<Vec<(String, String)>> =
+            const { std::cell::RefCell::new(Vec::new()) };
+    }
+    backend::logging::set_sink(Box::new(|line| {
+        if line.code == "playlist_add.result" {
+            ADD_LINES.with(|lines| {
+                lines
+                    .borrow_mut()
+                    .push((line.level.as_str().to_string(), line.message.to_string()))
+            });
+        }
+    }));
+
+    let root = tempdir().expect("temp root");
+    let source = root.path().join("source");
+    fs::create_dir_all(&source).expect("create source");
+    write_test_pulsed_key_wav(&source.join("Artist - Log.wav"), 120.0, 5_000);
+    let backend = BackendCommands::new(root.path().join("data")).expect("create backend");
+    library_sources::show_only(
+        &backend,
+        vec![source.to_string_lossy().to_string()],
+        false,
+        false,
+    );
+    let playlist_id = backend
+        .create_playlist(CreatePlaylistRequest {
+            name: "Logged".to_string(),
+        })
+        .data
+        .expect("create playlist")
+        .data
+        .playlist_id;
+
+    let added = backend
+        .add_library_selection_to_playlist(AddLibrarySelectionToPlaylistRequest {
+            playlist_id,
+            all_matching: true,
+            ..Default::default()
+        })
+        .data
+        .expect("add");
+    assert_eq!(added.data.added, 1);
+    assert_eq!(
+        ADD_LINES.with(|lines| lines.borrow().clone()),
+        vec![("info".to_string(), added.data.status_text.clone())]
+    );
+}

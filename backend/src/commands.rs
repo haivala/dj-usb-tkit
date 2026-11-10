@@ -135,7 +135,10 @@ impl BackendCommands {
         &self,
         req: ImportExternalPlaylistsRequest,
     ) -> ApiResponse<WithPlaylists<ImportExternalPlaylistsData>> {
-        wrap(self.with_playlists(self.service.import_external_playlists(req)))
+        wrap_failed(
+            self.with_playlists(self.service.import_external_playlists(req)),
+            tr::playlist_import_many_failed,
+        )
     }
 
     pub fn browse_source_files(
