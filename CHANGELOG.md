@@ -46,7 +46,7 @@
 - **Chore:** The UI's end-to-end tests share one mock backend that answers like the real one, and tests that use the
   same setup run as one test. Unit tests whose checks the end-to-end tests now make are removed, and so is UI code
   that only those unit tests reached. The end-to-end coverage report counts every page load of a test, and an
-  end-to-end run stops when the built UI is older than its sources.
+  end-to-end run stops when the built UI is older than its sources or is the coverage build.
 
 ## 0.5.7
 

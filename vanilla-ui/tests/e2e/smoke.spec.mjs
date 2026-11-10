@@ -3,18 +3,22 @@ import { test, expect, offerTestLanguage, uiTextCheck, useTestLanguage } from ".
 function installBasicTauriMock(page, opts = {}) {
   return page.addInitScript(({ opts }) => {
     const backend = window.__e2eBackend;
-    // Playlist track loads still in flight (see `playlistTracksDelayMs`).
+    // Playlist track loads still in flight (see `slowTracks`).
     window.__pendingTrackLoads = 0;
+    // Set by a test for the loads after a reload: playlist tracks answer
+    // slowly, and a rename fails.
+    const slowTracks = !!sessionStorage.getItem("slowTracks");
+    const failRename = !!sessionStorage.getItem("failRename");
     // The update check's answer: the one a test's `showUpdate` set, else `opts`.
     const updateCheck = JSON.parse(sessionStorage.getItem("updateCheck") || "null") || opts?.updateCheck;
     const installFails = !!sessionStorage.getItem("installFails");
     // The update check only runs under the Tauri runtime.
     if (updateCheck) backend.useTauriRuntime();
     backend.install(async (command, request, payload) => {
-      if (command === "rename_playlist" && opts?.failRename) return backend.fail("Rename failed: disk full (mock)");
-      if (command === "get_playlist_tracks" && opts?.playlistTracksDelayMs) {
+      if (command === "rename_playlist" && failRename) return backend.fail("Rename failed: disk full (mock)");
+      if (command === "get_playlist_tracks" && slowTracks) {
         window.__pendingTrackLoads += 1;
-        await new Promise((resolve) => setTimeout(resolve, opts.playlistTracksDelayMs));
+        await new Promise((resolve) => setTimeout(resolve, 150));
         window.__pendingTrackLoads -= 1;
         return backend.answer(command, payload);
       }
@@ -180,6 +184,59 @@ test("shell and sidebar", async ({ page }) => {
     // The reset animates (only live dragging skips the width transition).
     await expect.poll(width).toBe(220);
   }
+
+  // The sidebar width is restored on startup.
+  await page.evaluate(() => localStorage.setItem("djusbtkit.sidebarWidth", "300"));
+  await page.reload();
+  await expect.poll(async () => (await page.locator("#navSidebar").boundingBox()).width).toBe(300);
+
+  // Rename from the sidebar updates the sidebar and the badge.
+  await page.evaluate(() => sessionStorage.setItem("slowTracks", "1"));
+  await page.reload();
+  {
+    await page.locator("#addPlaylistBtn").click();
+    await page.locator("#navPlaylistList .nav-new-input").fill("Rename Me");
+    await page.locator("#navPlaylistList .nav-new-input").press("Enter");
+
+    const item = page.locator("#navPlaylistList .nav-playlist-item").first();
+    await expect(item).toBeVisible();
+    await expect(item).toContainText("Rename Me");
+    // A real double-click: its clicks switch to the playlist, whose (slow)
+    // track load re-renders the sidebar; the rename field must survive that.
+    await item.locator(".nav-playlist-name").dblclick();
+    await page.waitForFunction(() => window.__pendingTrackLoads === 0);
+    const renameInput = page.locator("#navPlaylistList .nav-rename-input");
+    await expect(renameInput).toBeVisible();
+    await renameInput.fill("Renamed Playlist");
+    await renameInput.press("Enter");
+
+    await expect(item).toContainText("Renamed Playlist");
+    await expect(page.locator("#badgeLabel")).toHaveText("Renamed Playlist");
+  }
+
+  // A failed rename keeps the original name and says why.
+  await page.evaluate(() => sessionStorage.setItem("failRename", "1"));
+  await page.reload();
+  {
+    await page.locator("#addPlaylistBtn").click();
+    await page.locator("#navPlaylistList .nav-new-input").fill("Rename Fail");
+    await page.locator("#navPlaylistList .nav-new-input").press("Enter");
+
+    const item = page.locator("#navPlaylistList .nav-playlist-item").first();
+    await expect(item).toBeVisible();
+    await expect(item).toContainText("Rename Fail");
+    // A real double-click: its clicks switch to the playlist, whose (slow)
+    // track load re-renders the sidebar; the rename field must survive that.
+    await item.locator(".nav-playlist-name").dblclick();
+    await page.waitForFunction(() => window.__pendingTrackLoads === 0);
+    const renameInput = page.locator("#navPlaylistList .nav-rename-input");
+    await expect(renameInput).toBeVisible();
+    await renameInput.fill("Should Not Save");
+    await renameInput.press("Enter");
+
+    await expect(item).toContainText("Rename Fail");
+    await expect(page.locator("#statusText")).toContainText("Rename failed");
+  }
 });
 
 // Draws the backend's source folders as source chips, with its Analyze label; the filter mark shows
@@ -275,54 +332,6 @@ test("tooltips show after a hover delay and on focus, Escape and leaving hide th
   expect(box.y).toBeGreaterThan(25); // below its target, not off the top
 });
 
-test("sidebar playlist rename updates sidebar and badge", async ({ page }) => {
-  await installBasicTauriMock(page, { playlistTracksDelayMs: 150 });
-  await page.goto("/");
-
-  await page.locator("#addPlaylistBtn").click();
-  await page.locator("#navPlaylistList .nav-new-input").fill("Rename Me");
-  await page.locator("#navPlaylistList .nav-new-input").press("Enter");
-
-  const item = page.locator("#navPlaylistList .nav-playlist-item").first();
-  await expect(item).toBeVisible();
-  await expect(item).toContainText("Rename Me");
-  // A real double-click: its clicks switch to the playlist, whose (slow)
-  // track load re-renders the sidebar; the rename field must survive that.
-  await item.locator(".nav-playlist-name").dblclick();
-  await page.waitForFunction(() => window.__pendingTrackLoads === 0);
-  const renameInput = page.locator("#navPlaylistList .nav-rename-input");
-  await expect(renameInput).toBeVisible();
-  await renameInput.fill("Renamed Playlist");
-  await renameInput.press("Enter");
-
-  await expect(item).toContainText("Renamed Playlist");
-  await expect(page.locator("#badgeLabel")).toHaveText("Renamed Playlist");
-});
-
-test("sidebar playlist rename failure keeps original name and sets status", async ({ page }) => {
-  await installBasicTauriMock(page, { failRename: true, playlistTracksDelayMs: 150 });
-  await page.goto("/");
-
-  await page.locator("#addPlaylistBtn").click();
-  await page.locator("#navPlaylistList .nav-new-input").fill("Rename Fail");
-  await page.locator("#navPlaylistList .nav-new-input").press("Enter");
-
-  const item = page.locator("#navPlaylistList .nav-playlist-item").first();
-  await expect(item).toBeVisible();
-  await expect(item).toContainText("Rename Fail");
-  // A real double-click: its clicks switch to the playlist, whose (slow)
-  // track load re-renders the sidebar; the rename field must survive that.
-  await item.locator(".nav-playlist-name").dblclick();
-  await page.waitForFunction(() => window.__pendingTrackLoads === 0);
-  const renameInput = page.locator("#navPlaylistList .nav-rename-input");
-  await expect(renameInput).toBeVisible();
-  await renameInput.fill("Should Not Save");
-  await renameInput.press("Enter");
-
-  await expect(item).toContainText("Rename Fail");
-  await expect(page.locator("#statusText")).toContainText("Rename failed");
-});
-
 async function createSidebarPlaylists(page, names) {
   for (const name of names) {
     await page.locator("#addPlaylistBtn").click();
@@ -331,13 +340,6 @@ async function createSidebarPlaylists(page, names) {
     await expect(page.locator("#navPlaylistList .nav-playlist-name").first()).toHaveText(name);
   }
 }
-
-test("sidebar width is restored on startup", async ({ page }) => {
-  await installBasicTauriMock(page);
-  await page.addInitScript(() => window.localStorage.setItem("djusbtkit.sidebarWidth", "300"));
-  await page.goto("/");
-  await expect.poll(async () => (await page.locator("#navSidebar").boundingBox()).width).toBe(300);
-});
 
 const updateCheck = (severity, extra = {}) => ({
   updateAvailable: true,

@@ -11,7 +11,8 @@ function installTauriMock(
     const backend = window.__e2eBackend;
     // The names saved: the backend took them.
     window.__setNameCalls = [];
-    let storedName = deviceName;
+    // A name saved before a reload (`sessionStorage`) is the drive's from the start.
+    let storedName = sessionStorage.getItem("deviceName") || deviceName;
     const usbRoot = "/Volumes/USB-TEST";
     let forgotten = false;
     const devices = () => forgotten ? [] : [{
@@ -63,9 +64,9 @@ async function openRecentUsbNamingPrompt(page, opts = {}) {
   return pill;
 }
 
-// Clicking a recent USB pill for an unnamed drive opens the naming prompt, saves the name, and
-// shows it in the status-line badge.
-test("naming an unnamed drive from its recent pill", async ({ page }) => {
+test("naming a drive from its recent pill", async ({ page }) => {
+  // An unnamed drive's pill opens the naming prompt, saves the name, and shows
+  // it in the status-line badge.
   await openRecentUsbNamingPrompt(page);
 
   await expect(page.locator("#driveNameOverlay")).toBeVisible();
@@ -87,6 +88,23 @@ test("naming an unnamed drive from its recent pill", async ({ page }) => {
   await page.locator("#usbRecentHeader").click();
   await expect(page.locator("#usbRecentRow")).not.toHaveClass(/collapsed/);
   await expect(page.locator('#usbRecentList button[data-usb-recent-path="/Volumes/USB-TEST"]')).toBeVisible();
+
+  // An already-named drive's pill doesn't open the prompt, and the badge shows its name.
+  await page.evaluate(() => sessionStorage.setItem("deviceName", "Club Stick"));
+  await page.reload();
+  {
+    await page.locator('.nav-item[data-view="usb"]').click();
+    await page.locator('#usbRecentList button[data-usb-recent-path="/Volumes/USB-TEST"]').click();
+
+    // Give the (skipped) async naming check a turn to run before asserting
+    // it stayed closed, rather than just checking the initial synchronous state.
+    await expect(page.locator("#usbRootPathText")).toHaveText("Club Stick");
+    await expect(page.locator("#usbRootPathText")).toHaveAttribute("data-tooltip", "/Volumes/USB-TEST");
+    await expect(page.locator("#usbRootPathText")).toHaveClass(/usb-path-valid/);
+    await expect(page.locator("#driveNameOverlay")).toBeHidden();
+    await expect(page.locator("#usbNameBadge")).toBeVisible();
+    await expect(page.locator("#usbNameBadgeLabel")).toHaveText("Club Stick");
+  }
 });
 
 test("forgetting a recent USB drops it from the list the prune answers with", async ({ page }) => {
@@ -102,25 +120,6 @@ test("forgetting a recent USB drops it from the list the prune answers with", as
   expect(await page.evaluate(() => window.__calls.filter((c) => c.command === "prune_usb_device").map((c) => c.request.id))).toEqual(["dev-1"]);
   // The list came with the prune's answer: no second read.
   expect(await page.evaluate(() => window.__calls.filter((c) => c.command === "list_usb_devices").length)).toBe(lists);
-});
-
-// Clicking a recent USB pill for an already-named drive does not reopen the naming prompt, and
-// shows the name in the status-line badge.
-test("an already-named drive from its recent pill", async ({ page }) => {
-  await installTauriMock(page, { deviceName: "Club Stick" });
-  await page.goto("/");
-
-  await page.locator('.nav-item[data-view="usb"]').click();
-  await page.locator('#usbRecentList button[data-usb-recent-path="/Volumes/USB-TEST"]').click();
-
-  // Give the (skipped) async naming check a turn to run before asserting
-  // it stayed closed, rather than just checking the initial synchronous state.
-  await expect(page.locator("#usbRootPathText")).toHaveText("Club Stick");
-  await expect(page.locator("#usbRootPathText")).toHaveAttribute("data-tooltip", "/Volumes/USB-TEST");
-  await expect(page.locator("#usbRootPathText")).toHaveClass(/usb-path-valid/);
-  await expect(page.locator("#driveNameOverlay")).toBeHidden();
-  await expect(page.locator("#usbNameBadge")).toBeVisible();
-  await expect(page.locator("#usbNameBadgeLabel")).toHaveText("Club Stick");
 });
 
 test("selecting the same USB again picks up a session recorded since the last read", async ({ page }) => {

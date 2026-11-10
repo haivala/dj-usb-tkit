@@ -165,10 +165,8 @@ export function createTrackListController(config = {}) {
 
   function rowHeight() {
     const { body } = getElements();
-    const view = body?.ownerDocument?.defaultView;
-    const css = view?.getComputedStyle
-      ? parseFloat(view.getComputedStyle(body).getPropertyValue("--track-row-height"))
-      : NaN;
+    const css = parseFloat(body.ownerDocument.defaultView.getComputedStyle(body).getPropertyValue("--track-row-height"));
+    // Before the stylesheet applies, the variable is unset.
     return css > 0 ? css : FALLBACK_ROW_HEIGHT_PX;
   }
 

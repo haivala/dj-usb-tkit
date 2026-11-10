@@ -298,11 +298,9 @@ export async function initApp(ctx) {
   runDeferredInitialLoad(ctx);
 }
 
-export function debugFrontendLog(ctx, message, meta = null) {
-  const suffix = meta == null
-    ? ""
-    : ` ${typeof meta === "string" ? meta : JSON.stringify(meta)}`;
-  ctx.logToFile({ source: "analysis-ui", message: `${message}${suffix}` });
+// An analysis debug line for the log file: `message` and its `meta` object.
+export function debugFrontendLog(ctx, message, meta) {
+  ctx.logToFile({ source: "analysis-ui", message: `${message} ${JSON.stringify(meta)}` });
 }
 
 // The desktop app already wrote the entry to the session log file, in English.

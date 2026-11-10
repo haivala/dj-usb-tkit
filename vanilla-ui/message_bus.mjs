@@ -34,17 +34,6 @@ function normalizeTs(value) {
   return Number.isFinite(ts) && ts > 0 ? ts : Date.now();
 }
 
-function normalizeProgress(progress) {
-  if (!progress || typeof progress !== "object") return null;
-  const text = normalizeText(progress.text);
-  if (!text) return null;
-  const percentRaw = Number(progress.percent);
-  const percent = Number.isFinite(percentRaw)
-    ? Math.max(0, Math.min(100, percentRaw))
-    : null;
-  return { text, percent };
-}
-
 function normalizeStatus(status) {
   if (!status || typeof status !== "object") return null;
   const text = normalizeText(status.text);
@@ -65,22 +54,20 @@ function normalizeEventLog(eventLog) {
   };
 }
 
-export function normalizeUiMessage(input = {}) {
+function normalizeUiMessage(input = {}) {
   if (!input || typeof input !== "object") return null;
   const level = normalizeLevel(input.level);
   const source = normalizeSource(input.source);
   const code = normalizeCode(input.code);
   const ts = normalizeTs(input.ts);
-  const progress = normalizeProgress(input.progress);
   const status = normalizeStatus(input.status);
   const eventLog = normalizeEventLog(input.eventLog);
-  if (!progress && !status && !eventLog) return null;
+  if (!status && !eventLog) return null;
   return {
     level,
     source,
     code,
     ts,
-    progress,
     status,
     eventLog
   };
@@ -98,16 +85,10 @@ export function setStatusText(el, text, warningText = "") {
   target.append(warning);
 }
 
-// The one sink every UI message goes through: status bar, progress footer
-// and the event log.
+// The one sink every UI message goes through: status bar and the event log.
 export function emitMessage(ctx, input = {}) {
   const message = normalizeUiMessage(input);
   if (!message) return null;
-
-  if (message.progress) {
-    const percent = Number(message.progress.percent);
-    ctx.setProgress(true, Number.isFinite(percent) ? percent : ctx.state.progressPercent, message.progress.text);
-  }
 
   if (message.status) {
     setStatusText(ctx.el, message.status.text, message.status.warningText);

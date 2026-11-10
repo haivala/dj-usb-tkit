@@ -7,19 +7,12 @@ import {
 } from "../../settings_keys.mjs";
 import { WAVEFORM_COLORS, deriveWaveformColors } from "../../waveform.mjs";
 
+// `value` is the setting's text; every setting has one.
 export function persistSetting(ctx, storageKey, dbKey, value) {
-  if (!storageKey || !dbKey) return;
   try {
-    if (value === null || value === undefined || value === "") {
-      ctx.localStorage.removeItem(storageKey);
-    } else {
-      ctx.localStorage.setItem(storageKey, String(value));
-    }
+    ctx.localStorage.setItem(storageKey, value);
   } catch {}
-  return ctx.command("set_frontend_setting", {
-    key: dbKey,
-    value: value === null || value === undefined || value === "" ? null : String(value)
-  }).catch((err) => {
+  return ctx.command("set_frontend_setting", { key: dbKey, value }).catch((err) => {
     console.warn(`Failed to persist setting ${dbKey}:`, err);
     throw err;
   });
@@ -27,16 +20,9 @@ export function persistSetting(ctx, storageKey, dbKey, value) {
 
 export async function hydrateLocalStorageFromFrontendSettingsDb(ctx) {
   const { command, state } = ctx;
-  let values = {};
-  let nodeAvailable = false;
-  let essentiaInstalled = false;
+  let values, nodeAvailable, essentiaInstalled;
   try {
-    const data = await command("get_frontend_settings");
-    values = data && typeof data.values === "object" && data.values
-      ? data.values
-      : {};
-    nodeAvailable = !!data?.nodeAvailable;
-    essentiaInstalled = !!data?.essentiaInstalled;
+    ({ values, nodeAvailable, essentiaInstalled } = await command("get_frontend_settings"));
   } catch (err) {
     console.warn("Failed to hydrate frontend settings from DB:", err);
     return;
@@ -48,10 +34,9 @@ export async function hydrateLocalStorageFromFrontendSettingsDb(ctx) {
   }
 
   for (const binding of FRONTEND_SETTING_BINDINGS) {
-    const hasValue = Object.prototype.hasOwnProperty.call(values, binding.dbKey);
-    if (!hasValue) continue;
+    if (!Object.hasOwn(values, binding.dbKey)) continue;
     try {
-      ctx.localStorage.setItem(binding.storageKey, String(values[binding.dbKey] ?? ""));
+      ctx.localStorage.setItem(binding.storageKey, values[binding.dbKey]);
     } catch {}
   }
 }
