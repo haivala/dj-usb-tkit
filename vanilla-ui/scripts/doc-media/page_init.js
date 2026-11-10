@@ -183,6 +183,25 @@
     };
   };
 
+  // The backend's selected USB: the root validate_usb_root found valid.
+  let usbSelected = false;
+  // The playlists and their export status against the selected USB, as
+  // list_playlists and every playlist change answer with them.
+  const playlistsState = () => ({
+    playlists: playlistRows(),
+    playlistUsbExportStatus: usbSelected
+      ? exportStatusList() || []
+      : playlists.map((playlist) => ({
+        playlistId: playlist.id,
+        usbSelected: false,
+        markLabel: isExported(playlist.id, playlist.tracks, playlist.imported) ? "Exported to USB" : null,
+        exportButtonText: "Select USB first",
+        exportButtonTitle: "Select a valid USB folder first",
+      })),
+  });
+  const withPlaylists = (response) =>
+    response?.ok ? { ...response, data: { ...response.data, ...playlistsState() } } : response;
+
   const listExternal = (source) =>
     ok({ items: external[source].map(({ id, name, kind, titles }) => ({ id, name, kind, trackCount: titles.length })) });
 
@@ -250,33 +269,36 @@
           case "import_external_playlists": {
             // Every ticked list in one call, as the backend imports them.
             const results = r.items.map((item) => ({ playlist: importPlaylist(item.library, item) }));
-            return ok({
+            return withPlaylists(ok({
               results,
               imported: results.length,
               failed: 0,
               added: results.reduce((n, { playlist }) => n + playlist.added, 0),
               skipped: 0,
-            });
+            }));
           }
           case "list_playlists":
-            return ok({ items: playlistRows() });
+            return ok(playlistsState());
+          case "clear_usb_root":
+            usbSelected = false;
+            return ok(playlistsState());
           case "create_playlist": {
             const id = `pl-new-${playlists.length}`;
             playlists.push({ id, name: r.name, tracks: [] });
-            return ok({ playlistId: id, name: r.name });
+            return withPlaylists(ok({ playlistId: id, name: r.name }));
           }
           case "add_library_selection_to_playlist":
-            return ok(addToPlaylist(r.playlistId, r.trackIds || []));
+            return withPlaylists(ok(addToPlaylist(r.playlistId, r.trackIds || [])));
           case "add_library_selection_to_playlists": {
             const ids = r.trackIds || [];
             const items = r.playlistIds.map((id) => addToPlaylist(id, ids));
             const sum = (key) => items.reduce((total, item) => total + item[key], 0);
             const names = r.playlistIds.map((id) => playlists.find((p) => p.id === id)?.name).join(", ");
-            return ok({
+            return withPlaylists(ok({
               requested: ids.length, resolved: ids.length, unresolved: 0,
               added: sum("added"), skipped: sum("skipped"), items, resolutions: [],
               statusText: `Added ${sum("added")} tracks (skipped ${sum("skipped")}) to ${names}`,
-            });
+            }));
           }
           case "get_playlist_membership": {
             const ids = r.trackIds || [];
@@ -347,6 +369,7 @@
           case "list_usb_devices":
             return ok({ items: [{ id: "usb-chiphead", rootPath: USB_ROOT }] });
           case "validate_usb_root":
+            usbSelected = true;
             return ok({
               valid: true,
               statusText: `USB root selected: ${USB_ROOT}. Running diagnostics...`,
@@ -356,19 +379,6 @@
             });
           case "get_usb_device_name":
             return ok({ name: "Chiphead" });
-          case "refresh_playlist_export_status":
-            // With no USB, the backend answers for every playlist.
-            return ok({
-              playlistUsbExportStatus: r.usbRoot
-                ? exportStatusList() || []
-                : playlists.map((playlist) => ({
-                  playlistId: playlist.id,
-                  usbSelected: false,
-                  markLabel: isExported(playlist.id, playlist.tracks, playlist.imported) ? "Exported to USB" : null,
-                  exportButtonText: "Select USB first",
-                  exportButtonTitle: "Select a valid USB folder first",
-                })),
-            });
           case "run_usb_diagnostics":
             if (!usb) return ok({ overallStatus: "PASS", durationMs: 842, warnings: [], checks: [], playlistUsbExportStatus: [] });
             if (opts.audioFormats) {
@@ -403,7 +413,7 @@
           case "get_usb_background_color":
             return usb.backgroundColor;
           case "export_to_usb":
-            return replayExport(r.playlistId);
+            return withPlaylists(await replayExport(r.playlistId));
           case "browse_source_files": {
             // Only the switched-on folders' tracks, as the backend lists them.
             const items = tracks.filter((t) => shownRoots.some((root) => t.filePath.startsWith(`${root}/`)));

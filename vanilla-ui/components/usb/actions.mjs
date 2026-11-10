@@ -44,19 +44,6 @@ export function playlistUsbExportStatusById(statusList) {
   return new Map(statusList.map((entry) => [entry.playlistId, entry]));
 }
 
-// Cheap backend recompute of every playlist's `PlaylistUsbExportStatus` (staged
-// PDB/eDB only, no USB access) -- used after the export sync-mode setting
-// changes so the reorder lock reflects the new mode without a full USB rescan
-// and without the frontend re-deriving the rule.
-export async function refreshPlaylistExportStatus(ctx) {
-  const { state } = ctx;
-  const usbRoot = state.usbRootValid ? state.usbRoot : null;
-  const data = await ctx.command("refresh_playlist_export_status", { usbRoot });
-  // The USB changed while this was running: its own refresh lands instead.
-  if ((state.usbRootValid ? state.usbRoot : null) !== usbRoot) return state.playlistUsbExportStatusById;
-  return applyPlaylistUsbExportStatus(ctx, data.playlistUsbExportStatus);
-}
-
 // Store a fresh backend status list and re-render what shows it: the export
 // button label, the sidebar's "on this USB" marks and the open playlist's
 // export status line.
@@ -358,8 +345,11 @@ export function usbContentChanged(ctx) {
   clearUsbMenuViews(ctx);
 }
 
+// The playlists and their export status against the USB now selected (none
+// for one that isn't valid). Fire-and-forget: a failed read only leaves the
+// marks stale.
 function refreshExportStatusInBackground(ctx) {
-  refreshPlaylistExportStatus(ctx).catch((err) => console.warn("refresh_playlist_export_status failed:", err));
+  ctx.loadPlaylists().catch((err) => console.warn("list_playlists failed:", err));
 }
 
 // A USB was selected, re-selected or cleared: nothing on screen applies any more.
@@ -369,9 +359,6 @@ export function usbSelectionChanged(ctx) {
   ctx.updateUsbNameBadge();
   usbContentChanged(ctx);
   applyPlaylistUsbExportStatus(ctx, []);
-  // A valid USB gets its status from the diagnostics run that follows, so this
-  // doesn't read its databases twice.
-  if (!ctx.state.usbRootValid) refreshExportStatusInBackground(ctx);
   hideUsbDiagnostics(ctx);
 }
 
@@ -470,9 +457,6 @@ export async function renameDrive(ctx) {
   ctx.emitStatus(saved.statusText);
   if (!saved.updated) return;
   try {
-    // Playlists carry the backend-resolved name of the drive they were
-    // exported to, and loadPlaylists refreshes the export status too.
-    await ctx.loadPlaylists();
     if (state.currentPlaylistId) await ctx.refreshCurrentPlaylistTracks();
     await loadUsbDevices(ctx);
   } catch (err) {
@@ -508,6 +492,8 @@ async function openDriveNameDialog(ctx, initial) {
   const onSave = async () => {
     try {
       const data = await command("set_usb_device_name", { usbRoot: state.usbRoot, name: el.driveNameInput.value });
+      // Playlists carry the name of the drive they were exported to.
+      ctx.applyPlaylistsState(data);
       state.usbDeviceName = data.name;
       state.usbNameTakenBy = null;
       ctx.updateUsbNameBadge();
@@ -551,6 +537,12 @@ export async function validateAndSetUsbRoot(ctx, path) {
     updateUsbRootText(ctx, null, false);
     el.usbInitRow.classList.add("hidden");
     usbSelectionChanged(ctx);
+    // The backend's selected USB too; it answers with the export status without one.
+    try {
+      ctx.applyPlaylistsState(await command("clear_usb_root"));
+    } catch (err) {
+      ctx.warn("clear_usb_root failed:", err);
+    }
     updateUsbConfigControlsVisibility(ctx);
     ctx.updateUsbSubNavDisabledState();
     ctx.updatePlaylistExportButtons();
@@ -572,6 +564,9 @@ export async function validateAndSetUsbRoot(ctx, path) {
   // Also when it's the same USB: selecting it again is how changes made on a
   // player show up (the backend just re-staged its databases).
   usbSelectionChanged(ctx);
+  // A valid USB gets its export status from the diagnostics run that follows,
+  // so this doesn't read its databases twice.
+  if (!valid) refreshExportStatusInBackground(ctx);
   updateUsbConfigControlsVisibility(ctx);
   ctx.updateUsbSubNavDisabledState();
   ctx.updatePlaylistExportButtons();
@@ -1123,7 +1118,7 @@ async function runPlaylistExport(ctx, playlistId) {
   }
   clearUsbDiagnostics(ctx);
   emitStatus(data.statusText, { warningText: data.warningText });
-  await ctx.loadPlaylists();
+  ctx.applyPlaylistsState(data);
   state.currentPlaylistId = playlistId;
   ctx.updateModeText();
   await ctx.switchView(playlistId);

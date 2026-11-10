@@ -37,7 +37,7 @@ function installBasicTauriMock(page, opts = {}) {
         invoke: async (command, payload = {}) => {
           window.__calls.push({ command, payload });
           if (command === "list_playlists") {
-            return { ok: true, data: { items: playlists } };
+            return { ok: true, data: { playlists: playlists, playlistUsbExportStatus: [] } };
           }
           if (command === "create_playlist") {
             const name = payload?.request?.name || "Untitled";

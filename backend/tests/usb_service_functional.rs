@@ -130,7 +130,7 @@ fn scan_and_export_single_track(
         name: playlist_name.to_string(),
     });
     assert!(created.ok, "create playlist failed: {created:?}");
-    let playlist_id = created.data.expect("playlist data").playlist_id;
+    let playlist_id = created.data.expect("playlist data").data.playlist_id;
 
     library_sources::show_only(
         &backend,
@@ -156,7 +156,7 @@ fn scan_and_export_single_track(
         }),
     });
     assert!(exported.ok, "export failed: {exported:?}");
-    assert_eq!(exported.data.expect("export data").exported_tracks, 1);
+    assert_eq!(exported.data.expect("export data").data.exported_tracks, 1);
 
     (track_id, title, artist)
 }
@@ -217,7 +217,7 @@ fn scan_and_export_tracks(
         name: playlist_name.to_string(),
     });
     assert!(created.ok, "create playlist failed: {created:?}");
-    let playlist_id = created.data.expect("playlist data").playlist_id;
+    let playlist_id = created.data.expect("playlist data").data.playlist_id;
 
     library_sources::show_only(
         &backend,
@@ -244,7 +244,7 @@ fn scan_and_export_tracks(
     });
     assert!(exported.ok, "export failed: {exported:?}");
     assert_eq!(
-        exported.data.expect("export data").exported_tracks,
+        exported.data.expect("export data").data.exported_tracks,
         files.len()
     );
 

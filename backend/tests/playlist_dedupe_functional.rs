@@ -56,6 +56,7 @@ fn adding_a_track_already_in_the_playlist_skips_it() {
         })
         .data
         .expect("playlist data")
+        .data
         .playlist_id;
 
     library_sources::show_only(
@@ -72,8 +73,8 @@ fn adding_a_track_already_in_the_playlist_skips_it() {
         });
     assert!(add_first.ok, "add failed: {add_first:?}");
     let add_first_data = add_first.data.expect("add data");
-    assert_eq!(add_first_data.added, 1);
-    assert_eq!(add_first_data.skipped, 0);
+    assert_eq!(add_first_data.data.added, 1);
+    assert_eq!(add_first_data.data.skipped, 0);
 
     library_sources::show_only(
         &backend,
@@ -89,8 +90,8 @@ fn adding_a_track_already_in_the_playlist_skips_it() {
         });
     assert!(add_again.ok, "add again failed: {add_again:?}");
     let add_again_data = add_again.data.expect("add again data");
-    assert_eq!(add_again_data.added, 0);
-    assert_eq!(add_again_data.skipped, 1);
+    assert_eq!(add_again_data.data.added, 0);
+    assert_eq!(add_again_data.data.skipped, 1);
 
     let playlist_tracks = backend
         .get_playlist_tracks(GetPlaylistTracksRequest {
@@ -142,6 +143,7 @@ fn library_selection_is_enumerated_and_added_entirely_server_side() {
         })
         .data
         .expect("playlist data")
+        .data
         .playlist_id;
 
     // `all_matching` adds the whole filtered set even though the caller passed
@@ -156,7 +158,7 @@ fn library_selection_is_enumerated_and_added_entirely_server_side() {
         })
         .data
         .expect("add-all data");
-    assert_eq!(added_all.added, 3);
+    assert_eq!(added_all.data.added, 3);
 
     // A second call with explicit ids is fully de-duped.
     library_sources::show_only(&backend, roots, false, false);
@@ -169,8 +171,8 @@ fn library_selection_is_enumerated_and_added_entirely_server_side() {
         })
         .data
         .expect("add-again data");
-    assert_eq!(added_again.added, 0);
-    assert_eq!(added_again.skipped, 3);
+    assert_eq!(added_again.data.added, 0);
+    assert_eq!(added_again.data.skipped, 3);
 
     let count = backend
         .get_playlist_tracks(GetPlaylistTracksRequest {
@@ -261,6 +263,7 @@ fn add_to_picker_shows_membership_and_adds_the_selection_to_several_playlists() 
             })
             .data
             .expect("playlist")
+            .data
             .playlist_id
     };
     let warmup = create("Warmup");
@@ -274,7 +277,7 @@ fn add_to_picker_shows_membership_and_adds_the_selection_to_several_playlists() 
         })
         .data
         .expect("add first");
-    assert_eq!(added.added, 1);
+    assert_eq!(added.data.added, 1);
 
     // Sidebar order (newest first). A track with no local row (`None`)
     // counts toward the selection but is in no playlist.
@@ -330,16 +333,21 @@ fn add_to_picker_shows_membership_and_adds_the_selection_to_several_playlists() 
         .data
         .expect("add to playlists");
     assert_eq!(
-        (multi.requested, multi.resolved, multi.unresolved),
+        (
+            multi.data.requested,
+            multi.data.resolved,
+            multi.data.unresolved
+        ),
         (2, 2, 0)
     );
-    assert_eq!((multi.added, multi.skipped), (3, 1));
+    assert_eq!((multi.data.added, multi.data.skipped), (3, 1));
     // The playlists in request order, each once.
     assert_eq!(
-        multi.status_text,
+        multi.data.status_text,
         "Added 3 tracks (skipped 1) to Warmup, Peak"
     );
     let per_playlist: Vec<_> = multi
+        .data
         .items
         .iter()
         .map(|item| (item.playlist_id.clone(), item.added, item.skipped))
@@ -371,6 +379,7 @@ fn add_to_picker_resolves_track_candidates_once_for_every_playlist() {
                 })
                 .data
                 .expect("playlist")
+                .data
                 .playlist_id
         })
         .collect();
@@ -390,10 +399,16 @@ fn add_to_picker_resolves_track_candidates_once_for_every_playlist() {
         })
         .data
         .expect("add candidates");
-    assert_eq!((added.requested, added.resolved, added.added), (1, 1, 2));
-    assert_eq!(added.resolutions.len(), 1);
-    assert!(added.resolutions[0].materialized);
-    let local_id = added.resolutions[0].track_id.clone().expect("resolved id");
+    assert_eq!(
+        (added.data.requested, added.data.resolved, added.data.added),
+        (1, 1, 2)
+    );
+    assert_eq!(added.data.resolutions.len(), 1);
+    assert!(added.data.resolutions[0].materialized);
+    let local_id = added.data.resolutions[0]
+        .track_id
+        .clone()
+        .expect("resolved id");
     for playlist_id in &playlist_ids {
         assert_eq!(
             playlist_track_ids(&backend, playlist_id),
@@ -501,6 +516,7 @@ fn scan_merges_identical_tracks_already_in_the_library_into_the_one_in_more_play
             })
             .data
             .expect("playlist data")
+            .data
             .playlist_id;
         library_sources::show_only(
             &backend,

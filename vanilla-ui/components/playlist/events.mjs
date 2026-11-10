@@ -20,7 +20,6 @@ export function bindPlaylistEvents(ctx) {
     playlistImportDialog,
     command,
     getCurrentPlaylist,
-    loadPlaylists,
     updateModeText,
     exportPlaylistToUsb,
     analyzeTrackIds,
@@ -121,7 +120,7 @@ export function bindPlaylistEvents(ctx) {
         trackIds
       });
       await clearTrackSelection(ctx, "playlist");
-      await loadPlaylists();
+      ctx.applyPlaylistsState(res);
       state.currentPlaylistId = playlist.id;
       updateModeText();
       await switchView(playlist.id);
@@ -305,13 +304,12 @@ export function bindPlaylistEvents(ctx) {
     (async () => {
       try {
         if (pendingCommit) await pendingCommit; // sorted order must land before the single move
-        await command("reorder_playlist_tracks", {
+        // The reorder cleared the playlist's last export.
+        ctx.applyPlaylistsState(await command("reorder_playlist_tracks", {
           playlistId: playlist.id,
           moveTrackId,
           beforeTrackId
-        });
-        // The reorder cleared the playlist's last export.
-        await loadPlaylists();
+        }));
       } catch (err) {
         console.error(err);
         emitStatus(err?.message || String(err));

@@ -76,7 +76,7 @@ function installSelectionMock(page, mockOpts = {}) {
             const ids = r.tracks.map((t) => String(t.localTrackId || t.trackId || "")).filter(Boolean);
             return addToPlaylists(r.playlistIds, ids, r.tracks.length);
           }
-          if (command === "list_playlists") return { ok: true, data: { items: playlists } };
+          if (command === "list_playlists") return { ok: true, data: { playlists, playlistUsbExportStatus: [] } };
           if (command === "browse_source_files") {
             // Library search is a backend query param now (shared TrackListController).
             const q = String(payload?.request?.query || "").trim().toLowerCase();
@@ -448,7 +448,7 @@ function installPaginatedLibraryMock(page, { trackCount }) {
     window.__TAURI__ = {
       core: {
         invoke: async (command, payload = {}) => {
-          if (command === "list_playlists") return { ok: true, data: { items: playlists } };
+          if (command === "list_playlists") return { ok: true, data: { playlists, playlistUsbExportStatus: [] } };
           if (command === "browse_source_files") {
             const limit = Number(payload?.request?.limit) || allTracks.length;
             const offset = Number(payload?.request?.offset) || 0;
@@ -755,9 +755,8 @@ test("USB playlist rows are selected and added to the active playlist in list or
   expect(request.tracks.map((t) => t.localTrackId)).toEqual(["t1", null]);
   expect(request.tracks.map((t) => t.bpm)).toEqual([128, null]);
   expect(request.tracks.some((t) => "id" in t)).toBe(false);
-  // A resolved add re-reads the playlists (it cleared the last export) and the open list.
+  // A resolved add re-reads the open list (the playlists come with its answer).
   const after = calls.slice(addAt + 1).map((c) => c.command);
-  expect(after).toContain("list_playlists");
   expect(after).toContain("get_playlist_tracks");
 });
 
@@ -786,9 +785,8 @@ test("USB rows can't be added without an active playlist, and rows the backend c
   const calls = await page.evaluate(() => window.__calls);
   const addAt = calls.findIndex((c) => c.command === "add_track_candidates_to_playlist");
   expect(addAt).toBeGreaterThanOrEqual(0);
-  // Nothing was added, so nothing is re-read.
+  // Nothing was added, so the open list isn't re-read.
   const after = calls.slice(addAt + 1).map((c) => c.command);
-  expect(after).not.toContain("list_playlists");
   expect(after).not.toContain("get_playlist_tracks");
 });
 

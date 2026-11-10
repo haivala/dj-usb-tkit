@@ -1183,10 +1183,11 @@ test("a repair whose diagnostics re-run failed still applies the export status i
   await installTauriMock(page, "valid");
   await page.addInitScript(() => {
     const invoke = window.__TAURI__.core.invoke;
-    window.__statusRefreshes = 0;
+    window.__playlistLoads = 0;
     window.__TAURI__.core.invoke = async (command, payload) => {
       if (command === "list_playlists") {
-        return { ok: true, data: { items: [{ id: "pl-1", name: "Local Set", source: "local" }] } };
+        window.__playlistLoads += 1;
+        return { ok: true, data: { playlists: [{ id: "pl-1", name: "Local Set", source: "local" }], playlistUsbExportStatus: [] } };
       }
       if (command === "repair_usb_diagnostics" && payload?.request?.apply) {
         return {
@@ -1199,7 +1200,6 @@ test("a repair whose diagnostics re-run failed still applies the export status i
           }
         };
       }
-      if (command === "refresh_playlist_export_status") window.__statusRefreshes += 1;
       return invoke(command, payload);
     };
   });
@@ -1207,9 +1207,8 @@ test("a repair whose diagnostics re-run failed still applies the export status i
   await connectUsb(page);
   const mark = page.locator('#navPlaylistList .nav-playlist-item[data-playlist-id="pl-1"] .nav-playlist-status');
   await expect(mark).not.toHaveClass(/exported/);
-  // Selecting the USB refreshed the status. The repair must not need a second command.
-  await expect.poll(() => page.evaluate(() => window.__statusRefreshes)).toBeGreaterThan(0);
-  const refreshesBeforeRepair = await page.evaluate(() => window.__statusRefreshes);
+  // The repair must not need a second command to refresh the export status.
+  const loadsBeforeRepair = await page.evaluate(() => window.__playlistLoads);
 
   await page.locator("#usbHealthCard").evaluate((node) => { node.open = true; });
   await page.locator("#previewRepairsBtn").click();
@@ -1221,7 +1220,7 @@ test("a repair whose diagnostics re-run failed still applies the export status i
 
   await expect(mark).toHaveClass(/exported/);
   await expect(mark).toHaveAttribute("aria-label", "On this USB");
-  expect(await page.evaluate(() => window.__statusRefreshes)).toBe(refreshesBeforeRepair);
+  expect(await page.evaluate(() => window.__playlistLoads)).toBe(loadsBeforeRepair);
 });
 
 async function dragViaHandle(page, fromHandleSelector, toRowSelector, dropNearTop) {
@@ -1452,7 +1451,7 @@ test("USB toggle race ends in deterministic final state, with nothing left of th
     const invoke = window.__TAURI__.core.invoke;
     window.__TAURI__.core.invoke = async (command, payload) => {
       if (command === "list_playlists") {
-        return { ok: true, data: { items: [{ id: "pl-1", name: "Local Set", source: "local" }] } };
+        return { ok: true, data: { playlists: [{ id: "pl-1", name: "Local Set", source: "local" }], playlistUsbExportStatus: [] } };
       }
       const playlistUsbExportStatus = [{ playlistId: "pl-1", playlistName: "Local Set", usbSelected: true, sameNameExistsOnUsb: true, markLabel: "On this USB" }];
       if (command === "fetch_usb_playlists") {
@@ -1653,7 +1652,7 @@ test("a running USB job locks the USB selection and export until it ends; other 
     window.__validates = 0;
     window.__TAURI__.core.invoke = async (command, payload) => {
       if (command === "list_playlists") {
-        return { ok: true, data: { items: [{ id: "pl-1", name: "Local Set", source: "local" }] } };
+        return { ok: true, data: { playlists: [{ id: "pl-1", name: "Local Set", source: "local" }], playlistUsbExportStatus: [] } };
       }
       // Another drive shows up as recent once the first is connected.
       if (command === "list_usb_devices" && window.__validates > 0) {
@@ -1758,7 +1757,7 @@ test("restoring a backup: cancel and failure change nothing; success clears the 
     window.__deletes = [];
     window.__TAURI__.core.invoke = async (command, payload) => {
       if (command === "list_playlists") {
-        return { ok: true, data: { items: [{ id: "pl-1", name: "Local Set", source: "local" }] } };
+        return { ok: true, data: { playlists: [{ id: "pl-1", name: "Local Set", source: "local" }], playlistUsbExportStatus: [] } };
       }
       if (command === "list_usb_backups") {
         return { ok: true, data: { summaryText: "the summary", emptyText: "none", items: [{ timestamp: "2020-01-01_00-00-00", timeText: "the time", reasonText: "the reason", detailText: "the detail", restoreConfirmText: "Restore it?", deleteConfirmText: "Delete it?", files: ["export.pdb"], reason: "export", sizeBytes: 1024, location: "usb" }] } };

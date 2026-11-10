@@ -282,7 +282,7 @@ function installSourceChipAnalysisMock(page) {
             };
           }
           if (command === "list_playlists") {
-            return { ok: true, data: { items: window.__importedPlaylists } };
+            return { ok: true, data: { playlists: window.__importedPlaylists, playlistUsbExportStatus: [] } };
           }
           if (command === "get_playlist_tracks") {
             return { ok: true, data: { total: 0, items: [], hasMore: false, nextCursor: null } };

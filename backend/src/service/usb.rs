@@ -112,6 +112,9 @@ pub(crate) struct CachedUsbPlaylists {
 /// across `BackendService` clones.
 pub(crate) type UsbPlaylistsCache =
     std::sync::Mutex<Option<(UsbParseCacheKey, Arc<CachedUsbPlaylists>)>>;
+/// One-entry cache of a stick's playlist names (`BackendService::usb_playlist_names`).
+pub(crate) type UsbPlaylistNamesCache =
+    std::sync::Mutex<Option<(UsbParseCacheKey, Arc<HashSet<String>>)>>;
 /// One-entry parse cache for USB histories.
 pub(crate) type UsbHistoriesCache =
     std::sync::Mutex<Option<(UsbParseCacheKey, Arc<crate::models::FetchUsbHistoriesData>)>>;
@@ -723,10 +726,24 @@ fn push_usb_stage_timing_with_threshold(
 }
 
 impl BackendService {
+    /// Checks the USB at `req.path`, and makes it the selected USB when it's valid (no USB
+    /// selected otherwise).
     pub fn validate_usb_root(
         &self,
         req: ValidateUsbRootRequest,
     ) -> BackendResult<ValidateUsbRootData> {
+        let result = self.check_usb_root(req);
+        let selected = result
+            .as_ref()
+            .ok()
+            .filter(|data| data.valid)
+            .and_then(|data| data.normalized_root.as_ref())
+            .map(std::path::PathBuf::from);
+        self.set_selected_usb_root(selected);
+        result
+    }
+
+    fn check_usb_root(&self, req: ValidateUsbRootRequest) -> BackendResult<ValidateUsbRootData> {
         let mut warnings = Vec::<WarningEntry>::new();
         let trimmed = req.path.trim();
         if trimmed.is_empty() {
@@ -1120,6 +1137,51 @@ impl BackendService {
         if let Ok(mut guard) = self.usb_track_sizes_cache.lock() {
             *guard = None;
         }
+        if let Ok(mut guard) = self.usb_playlist_names_cache.lock() {
+            *guard = None;
+        }
+    }
+
+    /// The selected USB (`selected_usb_root`), if any.
+    pub(crate) fn selected_usb_root(&self) -> Option<std::path::PathBuf> {
+        self.selected_usb_root
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
+            .clone()
+    }
+
+    fn set_selected_usb_root(&self, root: Option<std::path::PathBuf>) {
+        *self
+            .selected_usb_root
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner) = root;
+    }
+
+    /// No USB selected any more: the window cleared its choice.
+    pub fn clear_usb_root(&self) -> BackendResult<crate::models::PlaylistsState> {
+        self.set_selected_usb_root(None);
+        self.playlists_state()
+    }
+
+    /// The names of the playlists on `usb_root`, for the export status. From the parse
+    /// caches while the staged databases are unchanged, so a playlist change doesn't read
+    /// the USB again; else a names-only read of the staged PDB and eDB.
+    pub(crate) fn usb_playlist_names(&self, usb_root: &Path) -> Arc<HashSet<String>> {
+        let key = self.usb_parse_cache_key(usb_root);
+        if let Some(full) = self.usb_playlists_cache_hit(&key) {
+            return Arc::new(full.usb_playlist_names.clone());
+        }
+        if let Ok(guard) = self.usb_playlist_names_cache.lock()
+            && let Some((cached_key, names)) = guard.as_ref()
+            && *cached_key == key
+        {
+            return Arc::clone(names);
+        }
+        let names = Arc::new(super::export::read_usb_playlist_names(usb_root));
+        if let Ok(mut guard) = self.usb_playlist_names_cache.lock() {
+            *guard = Some((key, Arc::clone(&names)));
+        }
+        names
     }
 
     /// The staged databases' track files and sizes (see `UsbTrackSizes`).

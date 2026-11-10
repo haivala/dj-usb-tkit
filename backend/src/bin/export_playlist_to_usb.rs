@@ -104,7 +104,7 @@ fn main() {
     let items = playlists
         .data
         .unwrap_or_else(|| fail("missing list_playlists data"))
-        .items;
+        .playlists;
     let exact_matches = items
         .iter()
         .filter(|p| p.name == playlist_name)
@@ -200,16 +200,23 @@ fn main() {
     if dry_run {
         println!(
             "dry-run '{}' -> {} (tracks={}, skipped={})",
-            data.playlist_name, data.usb_root, data.exported_tracks, data.skipped_tracks
+            data.data.playlist_name,
+            data.data.usb_root,
+            data.data.exported_tracks,
+            data.data.skipped_tracks
         );
     } else {
         println!(
             "exported '{}' -> {} (tracks={}, skipped={})",
-            data.playlist_name, data.usb_root, data.exported_tracks, data.skipped_tracks
+            data.data.playlist_name,
+            data.data.usb_root,
+            data.data.exported_tracks,
+            data.data.skipped_tracks
         );
     }
-    if !data.warnings.is_empty() {
+    if !data.data.warnings.is_empty() {
         let warnings = data
+            .data
             .warnings
             .iter()
             .map(|w| w.message.as_str())

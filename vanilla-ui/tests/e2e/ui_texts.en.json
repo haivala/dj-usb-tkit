@@ -249,7 +249,6 @@
     "ui-playlist-name-placeholder": "Playlist name...",
     "ui-playlist-name-required": "Playlist name is required",
     "ui-playlist-none-active": "Create and activate a playlist first",
-    "ui-playlist-refreshing-playlists": "Refreshing playlists...",
     "ui-playlist-rename-aria-label": "Rename playlist",
     "ui-playlist-rename-tooltip": "Rename playlist (or double-click the name)",
     "ui-playlist-search-placeholder": "Search playlist tracks",

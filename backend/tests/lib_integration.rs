@@ -115,7 +115,7 @@ fn add_usb_track_to_new_playlist(
     assert!(created.ok, "create playlist failed: {created:?}");
     let root = usb_root.to_string_lossy().to_string();
     let added = backend.add_track_candidates_to_playlist(AddTrackCandidatesToPlaylistRequest {
-        playlist_id: created.data.expect("playlist data").playlist_id,
+        playlist_id: created.data.expect("playlist data").data.playlist_id,
         tracks: vec![AddTrackCandidate {
             track_id: Some(track.id.clone()),
             local_track_id: track.local_track_id.clone(),
@@ -137,6 +137,7 @@ fn add_usb_track_to_new_playlist(
     added
         .data
         .expect("add data")
+        .data
         .resolutions
         .into_iter()
         .next()
@@ -590,11 +591,11 @@ fn milestone_one_flow_works() {
         name: "Test Playlist".to_string(),
     });
     assert!(created.ok, "create failed: {created:?}");
-    let playlist_id = created.data.expect("playlist data").playlist_id;
+    let playlist_id = created.data.expect("playlist data").data.playlist_id;
 
     let list = backend.list_playlists();
     assert!(list.ok, "list playlists failed: {list:?}");
-    assert_eq!(list.data.expect("list data").items.len(), 1);
+    assert_eq!(list.data.expect("list data").playlists.len(), 1);
 
     let track_ids = search_data
         .items
@@ -614,7 +615,7 @@ fn milestone_one_flow_works() {
         ..Default::default()
     });
     assert!(add.ok, "add tracks failed: {add:?}");
-    assert_eq!(add.data.expect("add data").added, 2);
+    assert_eq!(add.data.expect("add data").data.added, 2);
 
     library_sources::show_only(
         &backend,
@@ -629,7 +630,7 @@ fn milestone_one_flow_works() {
             ..Default::default()
         });
     assert!(add_again.ok, "add tracks second time failed: {add_again:?}");
-    assert_eq!(add_again.data.expect("add data second").skipped, 2);
+    assert_eq!(add_again.data.expect("add data second").data.skipped, 2);
 
     let tracks = backend.get_playlist_tracks(GetPlaylistTracksRequest {
         playlist_id: playlist_id.clone(),
@@ -744,7 +745,7 @@ fn playlist_tracks_persist_across_backend_restart() {
             name: "Persisted Playlist".to_string(),
         });
         assert!(created.ok, "create failed: {created:?}");
-        let playlist_id = created.data.expect("playlist data").playlist_id;
+        let playlist_id = created.data.expect("playlist data").data.playlist_id;
 
         library_sources::show_only(
             &backend,
@@ -758,13 +759,13 @@ fn playlist_tracks_persist_across_backend_restart() {
             ..Default::default()
         });
         assert!(add.ok, "add failed: {add:?}");
-        assert_eq!(add.data.expect("add data").added, 2);
+        assert_eq!(add.data.expect("add data").data.added, 2);
     }
 
     let backend = BackendCommands::new(&data_dir).expect("recreate backend");
     let list = backend.list_playlists();
     assert!(list.ok, "list failed after restart: {list:?}");
-    let playlists = list.data.expect("list data").items;
+    let playlists = list.data.expect("list data").playlists;
     assert_eq!(playlists.len(), 1, "expected playlist to persist");
     let playlist_id = playlists[0].id.clone();
 
@@ -1002,7 +1003,7 @@ fn export_to_usb_writes_canonical_outputs() {
         name: "Export Test".to_string(),
     });
     assert!(created.ok, "create failed: {created:?}");
-    let playlist_id = created.data.expect("playlist data").playlist_id;
+    let playlist_id = created.data.expect("playlist data").data.playlist_id;
     library_sources::show_only(
         &backend,
         vec![media.to_string_lossy().to_string()],
@@ -1024,8 +1025,8 @@ fn export_to_usb_writes_canonical_outputs() {
     });
     assert!(exported.ok, "export failed: {exported:?}");
     let data = exported.data.expect("export data");
-    assert_eq!(data.playlist_id, playlist_id);
-    assert_eq!(data.exported_tracks, 1);
+    assert_eq!(data.data.playlist_id, playlist_id);
+    assert_eq!(data.data.exported_tracks, 1);
     let copied_files = WalkDir::new(usb.join("Contents"))
         .into_iter()
         .filter_map(Result::ok)
@@ -1037,7 +1038,7 @@ fn export_to_usb_writes_canonical_outputs() {
         .list_playlists()
         .data
         .expect("list playlists after export")
-        .items;
+        .playlists;
     let exported_playlist = playlists
         .iter()
         .find(|p| p.id == playlist_id)
@@ -1063,13 +1064,13 @@ fn export_to_usb_writes_canonical_outputs() {
         track_ids: vec![track_id.clone()],
     });
     assert!(removed.ok, "remove tracks failed: {removed:?}");
-    assert_eq!(removed.data.expect("remove data").removed, 1);
+    assert_eq!(removed.data.expect("remove data").data.removed, 1);
 
     let playlists = backend
         .list_playlists()
         .data
         .expect("list playlists after remove")
-        .items;
+        .playlists;
     let edited_playlist = playlists
         .iter()
         .find(|p| p.id == playlist_id)
@@ -1146,7 +1147,7 @@ fn export_to_usb_copies_anlz_bundle_for_fixture_mp3() {
         name: "ANLZ Test".to_string(),
     });
     assert!(created.ok, "create failed: {created:?}");
-    let playlist_id = created.data.expect("playlist data").playlist_id;
+    let playlist_id = created.data.expect("playlist data").data.playlist_id;
     library_sources::show_only(
         &backend,
         vec![media.to_string_lossy().to_string()],
@@ -1168,11 +1169,11 @@ fn export_to_usb_copies_anlz_bundle_for_fixture_mp3() {
     });
     assert!(exported.ok, "export failed: {exported:?}");
     let data = exported.data.expect("export data");
-    assert_eq!(data.exported_tracks, 1);
+    assert_eq!(data.data.exported_tracks, 1);
     assert!(
-        data.exported_analysis_files >= 3,
+        data.data.exported_analysis_files >= 3,
         "expected copied DAT/EXT/2EX files, got {}",
-        data.exported_analysis_files
+        data.data.exported_analysis_files
     );
 
     let mut dat = 0usize;
@@ -1274,7 +1275,7 @@ fn export_to_usb_prunes_stale_owned_assets_when_enabled() {
         name: "Prune Test".to_string(),
     });
     assert!(created.ok, "create failed: {created:?}");
-    let playlist_id = created.data.expect("playlist data").playlist_id;
+    let playlist_id = created.data.expect("playlist data").data.playlist_id;
     library_sources::show_only(
         &backend,
         vec![media.to_string_lossy().to_string()],
@@ -1410,7 +1411,7 @@ fn export_to_usb_mirror_prune_keeps_shared_audio_referenced_by_other_playlists()
         name: "Mirror A".to_string(),
     });
     assert!(created_a.ok, "create playlist A failed: {created_a:?}");
-    let playlist_a_id = created_a.data.expect("playlist A data").playlist_id;
+    let playlist_a_id = created_a.data.expect("playlist A data").data.playlist_id;
     library_sources::show_only(
         &backend,
         vec![media.to_string_lossy().to_string()],
@@ -1428,7 +1429,7 @@ fn export_to_usb_mirror_prune_keeps_shared_audio_referenced_by_other_playlists()
         name: "Mirror B".to_string(),
     });
     assert!(created_b.ok, "create playlist B failed: {created_b:?}");
-    let playlist_b_id = created_b.data.expect("playlist B data").playlist_id;
+    let playlist_b_id = created_b.data.expect("playlist B data").data.playlist_id;
     library_sources::show_only(
         &backend,
         vec![media.to_string_lossy().to_string()],
@@ -1607,7 +1608,7 @@ fn export_to_usb_mirror_prune_keeps_shared_artwork_referenced_by_other_playlists
         name: "Mirror Art A".to_string(),
     });
     assert!(created_a.ok, "create playlist A failed: {created_a:?}");
-    let playlist_a_id = created_a.data.expect("playlist A data").playlist_id;
+    let playlist_a_id = created_a.data.expect("playlist A data").data.playlist_id;
     library_sources::show_only(
         &backend,
         vec![media.to_string_lossy().to_string()],
@@ -1625,7 +1626,7 @@ fn export_to_usb_mirror_prune_keeps_shared_artwork_referenced_by_other_playlists
         name: "Mirror Art B".to_string(),
     });
     assert!(created_b.ok, "create playlist B failed: {created_b:?}");
-    let playlist_b_id = created_b.data.expect("playlist B data").playlist_id;
+    let playlist_b_id = created_b.data.expect("playlist B data").data.playlist_id;
     library_sources::show_only(
         &backend,
         vec![media.to_string_lossy().to_string()],
@@ -1774,7 +1775,7 @@ fn export_to_usb_mirror_prune_keeps_shared_analysis_referenced_by_other_playlist
         name: "Mirror Analysis A".to_string(),
     });
     assert!(created_a.ok, "create playlist A failed: {created_a:?}");
-    let playlist_a_id = created_a.data.expect("playlist A data").playlist_id;
+    let playlist_a_id = created_a.data.expect("playlist A data").data.playlist_id;
     library_sources::show_only(
         &backend,
         vec![media.to_string_lossy().to_string()],
@@ -1792,7 +1793,7 @@ fn export_to_usb_mirror_prune_keeps_shared_analysis_referenced_by_other_playlist
         name: "Mirror Analysis B".to_string(),
     });
     assert!(created_b.ok, "create playlist B failed: {created_b:?}");
-    let playlist_b_id = created_b.data.expect("playlist B data").playlist_id;
+    let playlist_b_id = created_b.data.expect("playlist B data").data.playlist_id;
     library_sources::show_only(
         &backend,
         vec![media.to_string_lossy().to_string()],
@@ -1919,7 +1920,7 @@ fn export_to_usb_preserves_existing_export_db_metadata_when_local_track_is_thin(
         name: "Thin Meta Export".to_string(),
     });
     assert!(created.ok, "create failed: {created:?}");
-    let playlist_id = created.data.expect("playlist data").playlist_id;
+    let playlist_id = created.data.expect("playlist data").data.playlist_id;
 
     library_sources::show_only(
         &backend,
@@ -2140,7 +2141,7 @@ fn export_to_usb_additive_does_not_overwrite_existing_cover_art_by_playlist_posi
         name: "Testi".to_string(),
     });
     assert!(created.ok, "create playlist failed: {created:?}");
-    let playlist_id = created.data.expect("playlist data").playlist_id;
+    let playlist_id = created.data.expect("playlist data").data.playlist_id;
 
     library_sources::show_only(
         &backend,
@@ -5364,7 +5365,7 @@ fn export_to_usb_test_matches_expected_usb_content_rows_for_exported_tracks() {
         name: "USB Test Playlist".to_string(),
     });
     assert!(created.ok, "create playlist failed: {created:?}");
-    let playlist_id = created.data.expect("create playlist data").playlist_id;
+    let playlist_id = created.data.expect("create playlist data").data.playlist_id;
 
     library_sources::show_only(
         &backend,
@@ -5648,7 +5649,7 @@ fn export_to_usb_produces_identical_content_and_pdb_rows_across_two_runs() {
         name: "DeterminismCheck".to_string(),
     });
     assert!(created.ok, "create playlist failed: {created:?}");
-    let playlist_id = created.data.expect("create playlist data").playlist_id;
+    let playlist_id = created.data.expect("create playlist data").data.playlist_id;
 
     library_sources::show_only(
         &backend,
@@ -5898,7 +5899,7 @@ fn fetch_usb_playlists_matches_existing_local_track_by_fingerprint_without_touch
         name: "Dedup Roundtrip Playlist".to_string(),
     });
     assert!(created.ok, "create playlist failed: {created:?}");
-    let playlist_id = created.data.expect("playlist data").playlist_id;
+    let playlist_id = created.data.expect("playlist data").data.playlist_id;
 
     library_sources::show_only(
         &backend,
@@ -6044,7 +6045,7 @@ fn export_to_usb_records_usb_device_export_history() {
     let created = backend.create_playlist(CreatePlaylistRequest {
         name: "Export History Playlist".to_string(),
     });
-    let playlist_id = created.data.expect("playlist data").playlist_id;
+    let playlist_id = created.data.expect("playlist data").data.playlist_id;
     library_sources::show_only(
         &backend,
         vec![media.to_string_lossy().to_string()],
@@ -6148,7 +6149,7 @@ fn adding_usb_track_creates_placeholder_when_no_local_match() {
     let created = backend.create_playlist(CreatePlaylistRequest {
         name: "Placeholder Case Playlist".to_string(),
     });
-    let playlist_id = created.data.expect("playlist data").playlist_id;
+    let playlist_id = created.data.expect("playlist data").data.playlist_id;
     library_sources::show_only(
         &backend,
         vec![media.to_string_lossy().to_string()],
@@ -6611,7 +6612,7 @@ fn export_to_usb_fingerprint_fallback_reuses_foreign_scheme_track_instead_of_dup
         name: "Fingerprint Fallback".to_string(),
     });
     assert!(created.ok, "create failed: {created:?}");
-    let playlist_id = created.data.expect("playlist data").playlist_id;
+    let playlist_id = created.data.expect("playlist data").data.playlist_id;
 
     library_sources::show_only(
         &backend,

@@ -124,7 +124,7 @@ pub fn setup_clean_strict_parity_fixture_with_local_key(
         name: playlist_name.clone(),
     });
     assert!(created.ok, "create failed: {created:?}");
-    let playlist_id = created.data.expect("playlist data").playlist_id;
+    let playlist_id = created.data.expect("playlist data").data.playlist_id;
     library_sources::show_only(
         &backend,
         vec![media.to_string_lossy().to_string()],
@@ -137,7 +137,7 @@ pub fn setup_clean_strict_parity_fixture_with_local_key(
         ..Default::default()
     });
     assert!(added.ok, "add failed: {added:?}");
-    assert_eq!(added.data.expect("add data").added, 1);
+    assert_eq!(added.data.expect("add data").data.added, 1);
 
     let export = backend.export_to_usb(ExportToUsbRequest {
         usb_root: Some(usb.to_string_lossy().to_string()),

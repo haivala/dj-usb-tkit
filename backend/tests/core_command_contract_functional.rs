@@ -10,12 +10,12 @@ use backend::models::{
     CreatePlaylistRequest, DeleteUsbBackupRequest, ExportToUsbRequest, FetchUsbHistoriesRequest,
     FetchUsbPlaylistsRequest, GetPlaylistTracksRequest, GetTrackDetailRequest,
     GetUsbDeviceNameRequest, InitializeUsbRequest, ListUsbBackupsRequest, PlayResolvedTrackRequest,
-    PruneUsbDeviceRequest, RefreshPlaylistExportStatusRequest, RemoveTracksFromPlaylistRequest,
-    RemoveUsbPlaylistRequest, RenamePlaylistRequest, ReorderPlaylistTracksRequest,
-    ReorderUsbPlaylistsRequest, ResolveTrackIdentityRequest, RestoreUsbBackupRequest,
-    RunUsbDiagnosticsRequest, RunUsbParityReportRequest, SaveTrackAnalysisEditsRequest,
-    ScanLibraryRequest, ScanRekordboxDbRequest, SetPlaybackMetronomeRequest,
-    SetUsbDeviceNameRequest, TrackCueInput, ValidateUsbRootRequest,
+    PruneUsbDeviceRequest, RemoveTracksFromPlaylistRequest, RemoveUsbPlaylistRequest,
+    RenamePlaylistRequest, ReorderPlaylistTracksRequest, ReorderUsbPlaylistsRequest,
+    ResolveTrackIdentityRequest, RestoreUsbBackupRequest, RunUsbDiagnosticsRequest,
+    RunUsbParityReportRequest, SaveTrackAnalysisEditsRequest, ScanLibraryRequest,
+    ScanRekordboxDbRequest, SetPlaybackMetronomeRequest, SetUsbDeviceNameRequest, TrackCueInput,
+    ValidateUsbRootRequest,
 };
 use backend::service::usb_vendor_compat::DEFAULT_USB_EDB_KEY;
 use tempfile::tempdir;
@@ -174,15 +174,12 @@ fn command_surface_covers_usb_name_backup_identity_refresh_and_preflight_wrapper
     assert_eq!(identity.resolved_by, backend::models::ResolvedBy::NoMatch);
     assert!(!identity.materialized);
 
-    let refreshed = backend
-        .refresh_playlist_export_status(RefreshPlaylistExportStatusRequest { usb_root: None });
-    assert!(refreshed.ok, "refresh wrapper failed: {refreshed:?}");
-    assert!(
-        refreshed
-            .data
-            .expect("refresh data")
-            .playlist_usb_export_status
-            .is_empty()
+    let listed = backend.list_playlists();
+    assert!(listed.ok, "list wrapper failed: {listed:?}");
+    let listed = listed.data.expect("list data");
+    assert_eq!(
+        listed.playlist_usb_export_status.len(),
+        listed.playlists.len()
     );
 
     let get_name = backend.get_usb_device_name(GetUsbDeviceNameRequest {
@@ -275,6 +272,7 @@ fn playlist_order_remains_stable_after_remove_and_readd() {
         })
         .data
         .expect("playlist data")
+        .data
         .playlist_id;
 
     library_sources::show_only(
@@ -291,7 +289,7 @@ fn playlist_order_remains_stable_after_remove_and_readd() {
         });
     assert!(add_initial.ok, "initial add failed: {add_initial:?}");
     assert_eq!(
-        add_initial.data.expect("add data").status_text,
+        add_initial.data.expect("add data").data.status_text,
         "Added 3 tracks (skipped 0) to Ordering Test"
     );
 
@@ -301,8 +299,11 @@ fn playlist_order_remains_stable_after_remove_and_readd() {
     });
     assert!(remove_middle.ok, "remove failed: {remove_middle:?}");
     let removed = remove_middle.data.expect("remove data");
-    assert_eq!(removed.removed, 1);
-    assert_eq!(removed.status_text, "Removed 1 track from Ordering Test");
+    assert_eq!(removed.data.removed, 1);
+    assert_eq!(
+        removed.data.status_text,
+        "Removed 1 track from Ordering Test"
+    );
 
     let after_remove = backend
         .get_playlist_tracks(GetPlaylistTracksRequest {
@@ -335,7 +336,7 @@ fn playlist_order_remains_stable_after_remove_and_readd() {
         ..Default::default()
     });
     assert!(readd.ok, "re-add failed: {readd:?}");
-    assert_eq!(readd.data.expect("re-add data").added, 1);
+    assert_eq!(readd.data.expect("re-add data").data.added, 1);
 
     let final_titles = backend
         .get_playlist_tracks(GetPlaylistTracksRequest {
@@ -404,6 +405,7 @@ fn reorder_playlist_tracks_persists_a_custom_order() {
         })
         .data
         .expect("playlist data")
+        .data
         .playlist_id;
 
     library_sources::show_only(
@@ -426,7 +428,7 @@ fn reorder_playlist_tracks_persists_a_custom_order() {
         ..Default::default()
     });
     assert!(reorder.ok, "reorder failed: {reorder:?}");
-    assert_eq!(reorder.data.expect("reorder data").reordered, 3);
+    assert_eq!(reorder.data.expect("reorder data").data.reordered, 3);
 
     let reordered_titles = backend
         .get_playlist_tracks(GetPlaylistTracksRequest {
@@ -669,21 +671,21 @@ fn rename_playlist_updates_the_stored_name() {
         name: "Original Name".to_string(),
     });
     assert!(created.ok, "create playlist failed: {created:?}");
-    let playlist_id = created.data.expect("playlist data").playlist_id;
+    let playlist_id = created.data.expect("playlist data").data.playlist_id;
 
     let renamed = backend.rename_playlist(RenamePlaylistRequest {
         playlist_id: playlist_id.clone(),
         name: "New Name".to_string(),
     });
     assert!(renamed.ok, "rename failed: {renamed:?}");
-    assert_eq!(renamed.data.expect("rename data").name, "New Name");
+    assert_eq!(renamed.data.expect("rename data").data.name, "New Name");
 
     let listed = backend.list_playlists();
     assert!(listed.ok, "list_playlists failed: {listed:?}");
     let found = listed
         .data
         .expect("list data")
-        .items
+        .playlists
         .into_iter()
         .find(|p| p.id == playlist_id)
         .expect("renamed playlist should still be present");

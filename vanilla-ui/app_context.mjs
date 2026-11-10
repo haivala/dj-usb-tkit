@@ -83,7 +83,7 @@ export function createAppContext(env) {
     pausePlaybackFromUi resumePlaybackFromUi moveActiveWaveform stopPlaybackFromUi stopPlaybackIfActive
     resolveLocalTrackIdAsync isTrackCurrentlyPlaying playTrackFromOrigin handlePlaybackEvent
     registerBackendJobEvents unregisterBackendJobEvents`);
-  bindActions(playlist, `renderPlaylistList promptNewPlaylist startPlaylistRename reorderPlaylists loadPlaylists
+  bindActions(playlist, `renderPlaylistList promptNewPlaylist startPlaylistRename reorderPlaylists loadPlaylists applyPlaylistsState
     commitActivePlaylistSort updatePlaylistExportButtons createPlaylist deletePlaylist
     addTracksToCurrentPlaylist addLibrarySelectionToCurrentPlaylist populatePlaylistPanel
     getCurrentPlaylist isPlaylistSortActive renderCurrentPlaylistTracksFromState
@@ -96,7 +96,7 @@ export function createAppContext(env) {
     reloadTrackListsForKeyNotation analyzeLibrary reanalyzeTracks
     scanRekordboxDb scanMixxxDb analyzeTrackIds analyzeSingleTrack setTrackAnalyzingState setTracksWaitingState
     showTrackRow`);
-  bindActions(usb, `setUsbRootControlsLocked refreshPlaylistExportStatus applyPlaylistUsbExportStatus showDiagReportView
+  bindActions(usb, `setUsbRootControlsLocked applyPlaylistUsbExportStatus showDiagReportView
     clearUsbDiagnostics hideUsbDiagnostics loadUsbRootFromStorage usbContentChanged
     pickSourceFolders detectExternalRekordboxDb detectExternalMixxxDb
     validateAndSetUsbRoot renameDrive

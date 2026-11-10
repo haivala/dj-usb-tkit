@@ -195,7 +195,7 @@ test("playlist analyze-missing skips already-analyzed tracks and targets the res
         invoke: async (command, payload = {}) => {
           const request = payload?.request || payload;
           if (command === "list_playlists") {
-            return { ok: true, data: { items: playlists } };
+            return { ok: true, data: { playlists: playlists, playlistUsbExportStatus: [] } };
           }
           if (command === "get_playlist_tracks") {
             return { ok: true, data: window.__playlistTracksPage(playlistTracks[request.playlistId], request) };
@@ -424,14 +424,14 @@ test("playlist actions hide Analyze Missing when unnecessary and keep Export vis
       core: {
         invoke: async (command, payload = {}) => {
           const request = payload?.request || payload;
-          if (command === "refresh_playlist_export_status") {
+          if (command === "list_playlists") {
             return {
               ok: true,
-              data: { playlistUsbExportStatus: [{ playlistId: "pl-1", usbSelected: false, exportButtonText: "Select USB first", exportButtonTitle: "Select a valid USB folder first" }] }
+              data: {
+                playlists,
+                playlistUsbExportStatus: [{ playlistId: "pl-1", usbSelected: false, exportButtonText: "Select USB first", exportButtonTitle: "Select a valid USB folder first" }]
+              }
             };
-          }
-          if (command === "list_playlists") {
-            return { ok: true, data: { items: playlists } };
           }
           if (command === "get_playlist_tracks") {
             return { ok: true, data: window.__playlistTracksPage(playlistTracks[request.playlistId], request) };
@@ -558,7 +558,7 @@ test("playlist analyze-missing offers unanalyzed tracks that live on a USB drive
         invoke: async (command, payload = {}) => {
           const request = payload?.request || payload;
           if (command === "list_playlists") {
-            return { ok: true, data: { items: playlists } };
+            return { ok: true, data: { playlists: playlists, playlistUsbExportStatus: [] } };
           }
           if (command === "get_playlist_tracks") {
             return { ok: true, data: window.__playlistTracksPage(playlistTracks[request.playlistId], request) };
@@ -644,7 +644,7 @@ test("selecting a playlist with tracks right after an empty one still paints its
       core: {
         invoke: async (command, payload = {}) => {
           const request = payload?.request || payload;
-          if (command === "list_playlists") return { ok: true, data: { items: playlists } };
+          if (command === "list_playlists") return { ok: true, data: { playlists, playlistUsbExportStatus: [] } };
           if (command === "get_playlist_tracks") {
             return { ok: true, data: window.__playlistTracksPage(playlistTracks[request.playlistId] || [], request) };
           }
@@ -707,8 +707,10 @@ function installReorderTauriMock(page, { usbSameNamePlaylistName, exportPruneSta
 
     // Mirrors the backend's export_prune_stale setting: seeded from the param,
     // updated when the sync-mode toggle persists it via set_frontend_setting,
-    // read by refresh_playlist_export_status / fetch_usb_playlists.
+    // read by list_playlists / fetch_usb_playlists.
     let currentPruneStale = exportPruneStale !== false;
+    // The backend's selected USB: set by a valid validate_usb_root.
+    let usbSelected = false;
     const exportStatusFor = () => playlists.map((playlist) => {
       const sameNameExistsOnUsb = !!usbSameNamePlaylistName
         && String(playlist.name || "").trim().toLowerCase()
@@ -745,9 +747,6 @@ function installReorderTauriMock(page, { usbSameNamePlaylistName, exportPruneSta
       core: {
         invoke: async (command, payload = {}) => {
           const request = payload?.request || payload;
-          if (command === "list_playlists") {
-            return { ok: true, data: { items: playlists } };
-          }
           if (command === "get_playlist_tracks") {
             // Read for a USB, each track carries what export puts on it
             // (`__exportFiles`, by track id), as the backend sends it.
@@ -776,7 +775,7 @@ function installReorderTauriMock(page, { usbSameNamePlaylistName, exportPruneSta
           if (command === "set_frontend_setting" && request.key === "ui_export_prune_stale_v1") {
             currentPruneStale = request.value === "1";
           }
-          if (command === "refresh_playlist_export_status") {
+          if (command === "list_playlists") {
             const noUsb = (status) => ({
               ...status,
               usbSelected: false,
@@ -789,7 +788,7 @@ function installReorderTauriMock(page, { usbSameNamePlaylistName, exportPruneSta
               exportButtonTitle: "Select a valid USB folder first"
             });
             const statuses = exportStatusFor();
-            return { ok: true, data: { playlistUsbExportStatus: payload?.request?.usbRoot ? statuses : statuses.map(noUsb) } };
+            return { ok: true, data: { playlists, playlistUsbExportStatus: usbSelected ? statuses : statuses.map(noUsb) } };
           }
           if (command === "resolve_playback_source") {
             return { ok: true, data: { resolvedPath: null, matchedBy: "none", trackId: null } };
@@ -799,6 +798,7 @@ function installReorderTauriMock(page, { usbSameNamePlaylistName, exportPruneSta
           }
           if (command === "validate_usb_root") {
             const valid = !!usbSameNamePlaylistName;
+            usbSelected = valid;
             return {
               ok: true,
               data: {
@@ -1439,7 +1439,7 @@ test("switching away from a sorted playlist commits the sort as its real order, 
       core: {
         invoke: async (command, payload = {}) => {
           const request = payload?.request || payload;
-          if (command === "list_playlists") return { ok: true, data: { items: playlists } };
+          if (command === "list_playlists") return { ok: true, data: { playlists, playlistUsbExportStatus: [] } };
           if (command === "get_playlist_tracks") {
             return { ok: true, data: window.__playlistTracksPage(playlistTracks[request.playlistId], request) };
           }
@@ -1552,7 +1552,7 @@ function installTwoPlaylistTauriMock(page) {
       core: {
         invoke: async (command, payload = {}) => {
           const request = payload?.request || payload;
-          if (command === "list_playlists") return { ok: true, data: { items: playlists } };
+          if (command === "list_playlists") return { ok: true, data: { playlists, playlistUsbExportStatus: [] } };
           if (command === "get_playlist_tracks") {
             return { ok: true, data: window.__playlistTracksPage(playlistTracks[request.playlistId], request) };
           }

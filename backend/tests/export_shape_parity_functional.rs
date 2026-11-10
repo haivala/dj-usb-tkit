@@ -301,7 +301,7 @@ fn strict_shape_compare_detects_match_and_mismatch_on_generated_usb_roots() {
         name: "ShapeCompareExport".to_string(),
     });
     assert!(created.ok, "create playlist failed: {created:?}");
-    let playlist_id = created.data.unwrap().playlist_id;
+    let playlist_id = created.data.unwrap().data.playlist_id;
 
     library_sources::show_only(
         &backend,
@@ -562,7 +562,7 @@ fn export_preserves_full_20_table_family() {
         name: "ShapeTest".to_string(),
     });
     assert!(created.ok, "create playlist failed: {created:?}");
-    let playlist_id = created.data.unwrap().playlist_id;
+    let playlist_id = created.data.unwrap().data.playlist_id;
 
     library_sources::show_only(
         &backend,

@@ -9,7 +9,7 @@ function installEmptyStateMock(page) {
     window.__TAURI__ = {
       core: {
         invoke: async (command, payload = {}) => {
-          if (command === "list_playlists") return { ok: true, data: { items: playlists } };
+          if (command === "list_playlists") return { ok: true, data: { playlists, playlistUsbExportStatus: [] } };
           if (command === "browse_source_files") {
             return { ok: true, data: { total: 0, items: [] } };
           }
@@ -93,7 +93,7 @@ test("A playlist with tracks shows loading, never the empty screen", async ({ pa
       core: {
         invoke: async (command, payload = {}) => {
           if (command === "list_playlists") {
-            return { ok: true, data: { items: [playlist("pl-empty", "Nothing Yet"), playlist("pl-full", "Has Tracks")] } };
+            return { ok: true, data: { playlists: [playlist("pl-empty", "Nothing Yet"), playlist("pl-full", "Has Tracks")], playlistUsbExportStatus: [] } };
           }
           if (command === "browse_source_files") return { ok: true, data: { total: 0, items: [] } };
           if (command === "get_playlist_tracks") {

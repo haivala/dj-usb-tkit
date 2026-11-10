@@ -54,9 +54,9 @@ function setup({ sortActive = false, commitThrows = false } = {}) {
       if (commitThrows) throw new Error("disk full");
     },
     isPlaylistSortActive: () => sortActive,
-    // Stand-in for the `refresh_playlist_export_status` backend command: applies
-    // the same rule the backend does (`!pruneStale && sameNameExistsOnUsb`).
-    refreshPlaylistExportStatus: async () => {
+    // Stand-in for `list_playlists`' export status: applies the same rule the
+    // backend does (`!pruneStale && sameNameExistsOnUsb`).
+    loadPlaylists: async () => {
       const next = new Map();
       for (const [id, entry] of state.playlistUsbExportStatusById) {
         next.set(id, {

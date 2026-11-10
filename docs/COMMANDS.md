@@ -267,13 +267,25 @@ drive selection from being rendered against a newer selected drive.
 
 ### Playlists
 
+Every command that changes playlists (`create_playlist`, `rename_playlist`, `delete_playlist`,
+`remove_tracks_from_playlist`, `reorder_playlist_tracks`, the `add_*_to_playlist(s)` commands,
+`import_external_playlists`, `export_to_usb`, `export_to_usb_with_progress`,
+`set_usb_device_name`) also answers with the whole playlist state, the same fields
+`list_playlists` returns, next to its own: `playlists` and `playlistUsbExportStatus`. The UI
+applies them as they come and never asks for the list again after a change.
+
 - `create_playlist` → `{ playlistId, name, statusText }`
 - `rename_playlist`
 - `reorder_playlists` — `{ orderedPlaylistIds }`, every local playlist once, top first; saves the
   sidebar order (local only, it never changes anything on the USB). `list_playlists` returns that
   order, with playlists never reordered newest first
 - `delete_playlist` → `{ playlistId, deleted, statusText }`
-- `list_playlists` — each playlist also carries `deleteConfirmText`, what the dialog asks before
+- `list_playlists` → `{ playlists, playlistUsbExportStatus }`. `playlistUsbExportStatus` is each
+  playlist's `PlaylistUsbExportStatus` (`sameNameExistsOnUsb`, `locksReorder` with its
+  `reorderLockTooltip`, the sidebar's `markLabel`, and `exportStatusText`, the export line with
+  "On this USB." in front when it is) against the selected USB and the current export sync-mode
+  setting, reading only the staged PDB/eDB (no USB access). The UI calls it at startup and when
+  the sync mode changes. Each playlist also carries `deleteConfirmText`, what the dialog asks before
   deleting it, and `exportStatusText` / `exportStatusTooltip`, the playlist page's export
   line ("Last exported 2026-04-07 13:00 to MYUSB (12 tracks).")
 - `get_playlist_tracks` — with `usbRoot` (the selected USB), each track also carries
@@ -306,16 +318,12 @@ drive selection from being rendered against a newer selected drive.
   ("Already in", "1 of 2 in", or empty)
 - `remove_tracks_from_playlist` → `{ playlistId, removed, statusText }`
 - `reorder_playlist_tracks`
-- `refresh_playlist_export_status` — recomputes every playlist's
-  `PlaylistUsbExportStatus` (`sameNameExistsOnUsb`, `locksReorder` with its
-  `reorderLockTooltip`, the sidebar's `markLabel`, and `exportStatusText`, the
-  export line with "On this USB." in front when it is) against the
-  connected USB and the current export sync-mode setting, reading only the
-  staged PDB/eDB (no USB access). Called when the sync mode changes.
 
 ### USB import/export
 
-- `validate_usb_root`
+- `validate_usb_root` — a valid root becomes the backend's selected USB, the one playlist export
+  status is worked out against; an invalid one leaves no USB selected
+- `clear_usb_root` — no USB selected; answers `{ playlists, playlistUsbExportStatus }`
 - `list_usb_devices`
 - `prune_usb_device`
 - `get_usb_device_name`

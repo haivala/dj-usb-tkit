@@ -236,7 +236,9 @@ fn add_from_library(
     backend: &BackendCommands,
     playlist_id: &str,
     track_ids: &[String],
-) -> backend::models::ApiResponse<backend::models::AddTracksToPlaylistData> {
+) -> backend::models::ApiResponse<
+    backend::models::WithPlaylists<backend::models::AddTracksToPlaylistData>,
+> {
     let mut source_roots = track_ids
         .iter()
         .map(|id| {
@@ -274,7 +276,7 @@ fn export_playlist(
         name: name.to_string(),
     });
     assert!(created.ok, "create_playlist failed: {created:?}");
-    let playlist_id = created.data.expect("playlist data").playlist_id;
+    let playlist_id = created.data.expect("playlist data").data.playlist_id;
 
     let added = add_from_library(backend, &playlist_id, track_ids);
     assert!(added.ok, "add_tracks failed: {added:?}");

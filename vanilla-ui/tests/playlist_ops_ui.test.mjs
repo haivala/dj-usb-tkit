@@ -85,15 +85,14 @@ test("renderPlaylistList marks active tabs and active playlist mode", () => {
 
 // The active playlist sort lives in tableSortState; committing always clears
 // it (recorded as "clear") before deciding whether to persist it.
-// After a persisted reorder the playlist rows are re-read (`list_playlists`).
+// A persisted reorder answers with the playlists as they now are.
 function commitCtx(state, sort = { key: "artist", dir: "desc" }) {
   const calls = [];
   const tableSortState = sort ? { playlistTracksBody: sort } : {};
   const ctx = makeTestCtx({
     command: async (cmd, payload) => {
-      if (cmd === "refresh_playlist_export_status") return { playlistUsbExportStatus: [] };
       calls.push(payload === undefined ? [cmd] : [cmd, payload]);
-      return cmd === "list_playlists" ? { items: state.playlists.map(({ tracks: _t, ...row }) => row) } : {};
+      return { playlists: state.playlists.map(({ tracks: _t, ...row }) => row), playlistUsbExportStatus: [] };
     },
     tableSortState: new Proxy(tableSortState, {
       deleteProperty(target, key) {
@@ -117,8 +116,7 @@ test("commitActivePlaylistSort sends the active sort to the backend to persist a
 
   assert.deepEqual(calls, [
     ["clear"],
-    ["reorder_playlist_tracks", { playlistId: "p1", sortBy: "artist", sortDir: "desc" }],
-    ["list_playlists"]
+    ["reorder_playlist_tracks", { playlistId: "p1", sortBy: "artist", sortDir: "desc" }]
   ]);
 });
 

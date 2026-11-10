@@ -25,10 +25,10 @@ use crate::models::{
     ImportExternalPlaylistsData, ImportExternalPlaylistsRequest, InitializeUsbData,
     InitializeUsbRequest, InspectUsbTrackData, InspectUsbTrackRequest, LibrarySourcesData,
     ListExternalPlaylistsData, ListExternalPlaylistsRequest, ListMatchingTrackIdsData,
-    ListMatchingTrackIdsRequest, ListPlaylistsData, ListUsbBackupsData, ListUsbBackupsRequest,
-    ListUsbDevicesData, MaterializeSourceTrackData, MaterializeSourceTrackRequest,
-    PlayResolvedTrackData, PlayResolvedTrackRequest, PlaybackMetronomeData, PlaybackStatusData,
-    PruneUsbDeviceData, PruneUsbDeviceRequest, RelocateSourceRootData, RelocateSourceRootRequest,
+    ListMatchingTrackIdsRequest, ListUsbBackupsData, ListUsbBackupsRequest, ListUsbDevicesData,
+    MaterializeSourceTrackData, MaterializeSourceTrackRequest, PlayResolvedTrackData,
+    PlayResolvedTrackRequest, PlaybackMetronomeData, PlaybackStatusData, PruneUsbDeviceData,
+    PruneUsbDeviceRequest, RelocateSourceRootData, RelocateSourceRootRequest,
     RemoveSourceFolderData, RemoveSourceFolderRequest, RemoveTracksFromPlaylistData,
     RemoveTracksFromPlaylistRequest, RemoveUsbPlaylistData, RemoveUsbPlaylistRequest,
     RenamePlaylistData, RenamePlaylistRequest, ReorderPlaylistTracksData,
@@ -47,6 +47,7 @@ use crate::models::{
     SetUsbDeviceNameData, SetUsbDeviceNameRequest, StopPlaybackData, TrackDetail,
     TracksMetadataSummary, UpdateUsbPlayerMenuConfigData, UpdateUsbPlayerMenuConfigRequest,
     UsbBackgroundColorData, UsbTrackAnalysisDetail, ValidateUsbRootData, ValidateUsbRootRequest,
+    WithPlaylists,
 };
 use crate::player::{PlaybackController, PlaybackTransition};
 use crate::service::BackendService;
@@ -76,6 +77,15 @@ pub struct BackendCommands {
 }
 
 impl BackendCommands {
+    /// A playlist change's result with the playlists as they now are.
+    fn with_playlists<T>(&self, result: BackendResult<T>) -> BackendResult<WithPlaylists<T>> {
+        let data = result?;
+        Ok(WithPlaylists {
+            data,
+            state: self.service.playlists_state()?,
+        })
+    }
+
     pub fn new(data_dir: impl AsRef<Path>) -> Result<Self, ErrorPayload> {
         let service = BackendService::new(data_dir).map_err(ErrorPayload::from)?;
         let (playback, transition_rx) = PlaybackController::new();
@@ -126,8 +136,8 @@ impl BackendCommands {
     pub fn import_external_playlists(
         &self,
         req: ImportExternalPlaylistsRequest,
-    ) -> ApiResponse<ImportExternalPlaylistsData> {
-        wrap(self.service.import_external_playlists(req))
+    ) -> ApiResponse<WithPlaylists<ImportExternalPlaylistsData>> {
+        wrap(self.with_playlists(self.service.import_external_playlists(req)))
     }
 
     pub fn browse_source_files(
@@ -281,16 +291,22 @@ impl BackendCommands {
         wrap(self.service.resolve_playback_source(req))
     }
 
-    pub fn create_playlist(&self, req: CreatePlaylistRequest) -> ApiResponse<CreatePlaylistData> {
+    pub fn create_playlist(
+        &self,
+        req: CreatePlaylistRequest,
+    ) -> ApiResponse<WithPlaylists<CreatePlaylistData>> {
         wrap_failed(
-            self.service.create_playlist(req),
+            self.with_playlists(self.service.create_playlist(req)),
             tr::playlist_create_failed,
         )
     }
 
-    pub fn rename_playlist(&self, req: RenamePlaylistRequest) -> ApiResponse<RenamePlaylistData> {
+    pub fn rename_playlist(
+        &self,
+        req: RenamePlaylistRequest,
+    ) -> ApiResponse<WithPlaylists<RenamePlaylistData>> {
         wrap_failed(
-            self.service.rename_playlist(req),
+            self.with_playlists(self.service.rename_playlist(req)),
             tr::playlist_rename_failed,
         )
     }
@@ -305,12 +321,21 @@ impl BackendCommands {
         )
     }
 
-    pub fn delete_playlist(&self, req: DeletePlaylistRequest) -> ApiResponse<DeletePlaylistData> {
-        wrap(self.service.delete_playlist(req))
+    pub fn delete_playlist(
+        &self,
+        req: DeletePlaylistRequest,
+    ) -> ApiResponse<WithPlaylists<DeletePlaylistData>> {
+        wrap(self.with_playlists(self.service.delete_playlist(req)))
     }
 
-    pub fn list_playlists(&self) -> ApiResponse<ListPlaylistsData> {
-        wrap(self.service.list_playlists())
+    /// The playlists, with their export status against the selected USB.
+    pub fn list_playlists(&self) -> ApiResponse<crate::models::PlaylistsState> {
+        wrap(self.service.playlists_state())
+    }
+
+    /// No USB selected any more; answers with the playlists' export status without one.
+    pub fn clear_usb_root(&self) -> ApiResponse<crate::models::PlaylistsState> {
+        wrap(self.service.clear_usb_root())
     }
 
     pub fn get_playlist_tracks(
@@ -330,8 +355,8 @@ impl BackendCommands {
     pub fn add_track_candidates_to_playlist(
         &self,
         req: AddTrackCandidatesToPlaylistRequest,
-    ) -> ApiResponse<AddTrackCandidatesToPlaylistData> {
-        wrap(self.service.add_track_candidates_to_playlist(req))
+    ) -> ApiResponse<WithPlaylists<AddTrackCandidatesToPlaylistData>> {
+        wrap(self.with_playlists(self.service.add_track_candidates_to_playlist(req)))
     }
 
     pub fn forget_source_folder_listings(&self) {
@@ -355,22 +380,22 @@ impl BackendCommands {
     pub fn add_library_selection_to_playlist(
         &self,
         req: AddLibrarySelectionToPlaylistRequest,
-    ) -> ApiResponse<AddTracksToPlaylistData> {
-        wrap(self.service.add_library_selection_to_playlist(req))
+    ) -> ApiResponse<WithPlaylists<AddTracksToPlaylistData>> {
+        wrap(self.with_playlists(self.service.add_library_selection_to_playlist(req)))
     }
 
     pub fn add_library_selection_to_playlists(
         &self,
         req: AddLibrarySelectionToPlaylistsRequest,
-    ) -> ApiResponse<AddTracksToPlaylistsData> {
-        wrap(self.service.add_library_selection_to_playlists(req))
+    ) -> ApiResponse<WithPlaylists<AddTracksToPlaylistsData>> {
+        wrap(self.with_playlists(self.service.add_library_selection_to_playlists(req)))
     }
 
     pub fn add_track_candidates_to_playlists(
         &self,
         req: AddTrackCandidatesToPlaylistsRequest,
-    ) -> ApiResponse<AddTracksToPlaylistsData> {
-        wrap(self.service.add_track_candidates_to_playlists(req))
+    ) -> ApiResponse<WithPlaylists<AddTracksToPlaylistsData>> {
+        wrap(self.with_playlists(self.service.add_track_candidates_to_playlists(req)))
     }
 
     pub fn get_playlist_membership(
@@ -383,9 +408,9 @@ impl BackendCommands {
     pub fn remove_tracks_from_playlist(
         &self,
         req: RemoveTracksFromPlaylistRequest,
-    ) -> ApiResponse<RemoveTracksFromPlaylistData> {
+    ) -> ApiResponse<WithPlaylists<RemoveTracksFromPlaylistData>> {
         wrap_failed(
-            self.service.remove_tracks_from_playlist(req),
+            self.with_playlists(self.service.remove_tracks_from_playlist(req)),
             tr::playlist_remove_failed,
         )
     }
@@ -393,9 +418,9 @@ impl BackendCommands {
     pub fn reorder_playlist_tracks(
         &self,
         req: ReorderPlaylistTracksRequest,
-    ) -> ApiResponse<ReorderPlaylistTracksData> {
+    ) -> ApiResponse<WithPlaylists<ReorderPlaylistTracksData>> {
         wrap_failed(
-            self.service.reorder_playlist_tracks(req),
+            self.with_playlists(self.service.reorder_playlist_tracks(req)),
             tr::playlist_track_order_failed,
         )
     }
@@ -479,8 +504,8 @@ impl BackendCommands {
     pub fn set_usb_device_name(
         &self,
         req: SetUsbDeviceNameRequest,
-    ) -> ApiResponse<SetUsbDeviceNameData> {
-        wrap(self.service.set_usb_device_name(req))
+    ) -> ApiResponse<WithPlaylists<SetUsbDeviceNameData>> {
+        wrap(self.with_playlists(self.service.set_usb_device_name(req)))
     }
 
     pub fn get_usb_audio_formats(
@@ -784,26 +809,22 @@ impl BackendCommands {
         )
     }
 
-    pub fn export_to_usb(&self, req: ExportToUsbRequest) -> ApiResponse<ExportToUsbData> {
-        wrap(self.service.export_to_usb(req))
-    }
-
-    pub fn refresh_playlist_export_status(
+    pub fn export_to_usb(
         &self,
-        req: crate::models::RefreshPlaylistExportStatusRequest,
-    ) -> ApiResponse<crate::models::RefreshPlaylistExportStatusData> {
-        wrap(self.service.refresh_playlist_export_status(req))
+        req: ExportToUsbRequest,
+    ) -> ApiResponse<WithPlaylists<ExportToUsbData>> {
+        wrap(self.with_playlists(self.service.export_to_usb(req)))
     }
 
     pub fn export_to_usb_with_progress<F>(
         &self,
         req: ExportToUsbRequest,
         on_progress: F,
-    ) -> ApiResponse<ExportToUsbData>
+    ) -> ApiResponse<WithPlaylists<ExportToUsbData>>
     where
         F: FnMut(usize, usize, &str),
     {
-        wrap(self.service.export_to_usb_with_progress(req, on_progress))
+        wrap(self.with_playlists(self.service.export_to_usb_with_progress(req, on_progress)))
     }
 
     pub fn play_resolved_track(

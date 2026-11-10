@@ -1958,7 +1958,7 @@ test("cue editor opens + saves from an app-playlist track row", async ({ page })
           const request = payload?.request ?? payload;
           window.__calls.push({ command, request: request ?? null });
           if (command === "list_playlists") {
-            return { ok: true, data: { items: [{ id: "pl-1", name: "My Set", source: "local", createdAt: new Date().toISOString(), updatedAt: new Date().toISOString() }] } };
+            return { ok: true, data: { playlists: [{ id: "pl-1", name: "My Set", source: "local", createdAt: new Date().toISOString(), updatedAt: new Date().toISOString() }], playlistUsbExportStatus: [] } };
           }
           if (command === "get_playlist_tracks") {
             return { ok: true, data: { playlistId: "pl-1", items: [track], total: 1, nextCursor: null, hasMore: false, totalDurationMs: 180000, durationUnknownCount: 0, unanalyzedCount: 0 } };

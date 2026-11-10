@@ -213,13 +213,14 @@
           return ok({ found: false, path: null, imported: false });
         case "get_library_sources": return ok(backend.librarySources());
         case "browse_source_files": return ok({ total: 0, items: [] });
-        case "list_playlists": return ok({ items: [] });
+        case "list_playlists":
+        case "clear_usb_root":
+          return ok({ playlists: [], playlistUsbExportStatus: [] });
         case "get_frontend_settings": return ok({ values: {}, nodeAvailable: true, essentiaInstalled: true });
         case "set_frontend_setting": return ok({ saved: true });
         case "list_usb_devices": return ok({ items: [] });
         case "fetch_usb_playlists": return ok(backend.usbPlaylists());
         case "fetch_usb_histories": return ok(backend.usbHistories());
-        case "refresh_playlist_export_status": return ok({ playlistUsbExportStatus: [] });
         case "fetch_usb_playlist_tracks":
         case "fetch_usb_history_tracks":
           return ok({ items: [], total: 0 });
@@ -273,9 +274,26 @@
     }
   }
 
+  // The commands that change the playlists: the backend answers each with the
+  // playlists as they now are (`WithPlaylists`), i.e. what list_playlists
+  // answers. A spec's answer that leaves them out gets its own list_playlists'.
+  const PLAYLIST_CHANGES = new Set([
+    "create_playlist", "rename_playlist", "delete_playlist", "remove_tracks_from_playlist",
+    "reorder_playlist_tracks", "add_track_candidates_to_playlist", "add_track_candidates_to_playlists",
+    "add_library_selection_to_playlist", "add_library_selection_to_playlists",
+    "import_external_playlists", "export_to_usb", "set_usb_device_name"
+  ]);
+
+  async function withPlaylists(invoke, command, raw) {
+    if (!PLAYLIST_CHANGES.has(command) || !raw?.ok || !raw.data || typeof raw.data !== "object") return raw;
+    if ("playlists" in raw.data) return raw;
+    const listed = await invoke("list_playlists", {});
+    return listed?.ok ? { ...raw, data: { ...raw.data, ...listed.data } } : raw;
+  }
+
   function shaped(invoke) {
     return async (command, payload) => {
-      const raw = await invoke(command, payload);
+      const raw = await withPlaylists(invoke, command, await invoke(command, payload));
       const shape = SHAPES[command];
       const result = !shape || !raw?.ok || !raw.data || typeof raw.data !== "object"
         ? raw

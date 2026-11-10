@@ -141,8 +141,7 @@ export function startPlaylistRename(ctx, playlistId) {
     const newName = input.value.trim();
     if (save && newName && newName !== originalName) {
       try {
-        await command("rename_playlist", { playlistId, name: newName });
-        await loadPlaylists(ctx);
+        applyPlaylistsState(ctx, await command("rename_playlist", { playlistId, name: newName }));
       } catch (err) {
         console.error("rename failed:", err);
         emitStatus(err?.message || String(err));
@@ -214,28 +213,24 @@ export async function reorderPlaylists(ctx, fromIndex, toIndex) {
 // what a playlist's track list loaded onto it (its tracks, totals) is kept, so
 // a re-read after a change doesn't empty the open playlist.
 export async function loadPlaylists(ctx) {
-  const data = await ctx.command("list_playlists");
+  applyPlaylistsState(ctx, await ctx.command("list_playlists"));
+}
+
+// The playlists as the backend has them, with their export status against the
+// selected USB: what list_playlists answers, and every command that changes the
+// playlists answers with them too.
+export function applyPlaylistsState(ctx, data) {
   const loaded = new Map(ctx.state.playlists.map((playlist) => [playlist.id, playlist]));
-  ctx.state.playlists = (data.items || []).map((playlist) => ({
+  ctx.state.playlists = (data.playlists || []).map((playlist) => ({
     tracks: [],
     ...loaded.get(playlist.id),
     ...playlist,
   }));
-  renderPlaylistList(ctx);
-  updatePlaylistExportButtons(ctx);
+  // Draws the sidebar, the export button and the open playlist's status line.
+  ctx.applyPlaylistUsbExportStatus(data.playlistUsbExportStatus);
   // The active playlist's name is known now (or changed): the header and the
   // rows' "+" say it.
   ctx.updateModeText();
-  refreshUsbExportStatusInBackground(ctx);
-}
-
-// The USB export status matches playlists by name, so a create, rename,
-// delete or export leaves it stale; the backend recompute is cheap (staged
-// PDB/eDB only). Fire-and-forget: a failed refresh only leaves the marks stale.
-function refreshUsbExportStatusInBackground(ctx) {
-  Promise.resolve()
-    .then(() => ctx.refreshPlaylistExportStatus())
-    .catch((err) => console.warn("refresh_playlist_export_status failed:", err));
 }
 
 // Column-sort on the app playlist tracklist is a free, reversible view-only
@@ -255,13 +250,12 @@ export async function commitActivePlaylistSort(ctx, playlistId) {
   // Sort-commit mode: the backend reorders the whole playlist by these keys
   // (same comparator get_playlist_tracks uses) and persists it as the new
   // position order -- no need for the client to hold every track.
-  await command("reorder_playlist_tracks", {
+  // The reorder cleared the playlist's last export.
+  applyPlaylistsState(ctx, await command("reorder_playlist_tracks", {
     playlistId,
     sortBy: sort.key,
     sortDir: sort.dir || "asc",
-  });
-  // The reorder cleared the playlist's last export.
-  await loadPlaylists(ctx);
+  }));
 }
 
 export function updatePlaylistExportButtons(ctx) {
@@ -308,8 +302,7 @@ export async function createPlaylist(ctx, name) {
   const created = await withProgress(texts, async (progress) => {
     progress(35, t("ui-playlist-create-saving"));
     const playlist = await command("create_playlist", { name });
-    progress(70, t("ui-playlist-refreshing-playlists"));
-    await loadPlaylists(ctx);
+    applyPlaylistsState(ctx, playlist);
     // The new playlist becomes the active one.
     state.currentPlaylistId = playlist.playlistId;
     updateModeText();
@@ -433,14 +426,13 @@ export async function importExternalPlaylist(ctx) {
           else failed.push({ item, message: outcome.error || t("ui-playlist-import-failed-unknown") });
         }
         if (!done.length) throw new Error(failed[0]?.message || t("ui-playlist-import-failed-unknown"));
-        progress(80, t("ui-playlist-refreshing-playlists"));
+        applyPlaylistsState(ctx, data);
         // The imported tracks belong to those libraries: show them in the library too.
         const imported = [...new Set(done.map(({ item }) => item.source))];
         for (const source of imported) await ctx.showExternalLibrary(source.library);
         // Re-detect: each library now counts as imported, unlocking its chip.
         for (const source of imported) await source.detect(ctx);
         await ctx.resetAndLoadLibraryTracks(state.libraryQuery || "");
-        await loadPlaylists(ctx);
         state.currentPlaylistId = done[0].result.playlistId;
         updateModeText();
         await switchView(done[0].result.playlistId);
@@ -481,7 +473,7 @@ export async function deletePlaylist(ctx, playlistId) {
       emitStatus(data?.statusText);
       return;
     }
-    await loadPlaylists(ctx);
+    applyPlaylistsState(ctx, data);
     if (state.currentPlaylistId === playlistId) {
       state.currentPlaylistId = state.playlists[0]?.id || null;
     }
@@ -544,9 +536,9 @@ export async function addTracksToCurrentPlaylist(ctx, tracks) {
     if (!Number(add.resolved || 0)) {
       return add;
     }
-    progress(80, t("ui-playlist-add-refreshing"));
     // The add cleared the playlist's last export.
-    await loadPlaylists(ctx);
+    applyPlaylistsState(ctx, add);
+    progress(80, t("ui-playlist-add-refreshing"));
     await refreshCurrentPlaylistTracks(ctx);
     pushEventLog({
       level: "info",
@@ -589,7 +581,7 @@ export async function addLibrarySelectionToCurrentPlaylist(ctx, { trackIds = [],
   });
 
   // The add cleared the playlist's last export.
-  await loadPlaylists(ctx);
+  applyPlaylistsState(ctx, add);
   await refreshCurrentPlaylistTracks(ctx);
   pushEventLog({
     level: "info",

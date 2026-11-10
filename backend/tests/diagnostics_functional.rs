@@ -455,7 +455,7 @@ fn setup_clean_strict_parity_fixture_with_artwork() -> (TempDir, BackendCommands
         name: playlist_name.clone(),
     });
     assert!(created.ok, "create failed: {created:?}");
-    let playlist_id = created.data.expect("playlist data").playlist_id;
+    let playlist_id = created.data.expect("playlist data").data.playlist_id;
     library_sources::show_only(
         &backend,
         vec![media.to_string_lossy().to_string()],
@@ -468,7 +468,7 @@ fn setup_clean_strict_parity_fixture_with_artwork() -> (TempDir, BackendCommands
         ..Default::default()
     });
     assert!(added.ok, "add failed: {added:?}");
-    assert_eq!(added.data.expect("add data").added, 1);
+    assert_eq!(added.data.expect("add data").data.added, 1);
 
     let export = backend.export_to_usb(ExportToUsbRequest {
         usb_root: Some(usb.to_string_lossy().to_string()),
@@ -592,7 +592,7 @@ fn setup_two_playlist_strict_parity_fixture() -> (TempDir, BackendCommands, Path
             name: playlist_name.clone(),
         });
         assert!(created.ok, "create failed: {created:?}");
-        let playlist_id = created.data.expect("playlist data").playlist_id;
+        let playlist_id = created.data.expect("playlist data").data.playlist_id;
         library_sources::show_only(
             &backend,
             vec![media.to_string_lossy().to_string()],
@@ -606,7 +606,7 @@ fn setup_two_playlist_strict_parity_fixture() -> (TempDir, BackendCommands, Path
                 ..Default::default()
             });
         assert!(added.ok, "add failed: {added:?}");
-        assert_eq!(added.data.expect("add data").added, 1);
+        assert_eq!(added.data.expect("add data").data.added, 1);
 
         let export = backend.export_to_usb(ExportToUsbRequest {
             usb_root: Some(usb.to_string_lossy().to_string()),
@@ -823,7 +823,7 @@ fn diagnostics_parity_and_import_counts_stay_consistent_after_repeated_exports()
         name: playlist_name.to_string(),
     });
     assert!(created.ok, "create failed: {created:?}");
-    let playlist_id = created.data.expect("playlist data").playlist_id;
+    let playlist_id = created.data.expect("playlist data").data.playlist_id;
     library_sources::show_only(
         &backend,
         vec![media.to_string_lossy().to_string()],
@@ -836,7 +836,7 @@ fn diagnostics_parity_and_import_counts_stay_consistent_after_repeated_exports()
         ..Default::default()
     });
     assert!(added.ok, "add failed: {added:?}");
-    assert_eq!(added.data.expect("add data").added, 2);
+    assert_eq!(added.data.expect("add data").data.added, 2);
 
     let options = Some(ExportToUsbOptions {
         include_artwork: false,
@@ -2953,7 +2953,7 @@ fn parity_report_overall_status_and_required_summary_use_strict_player_wording()
         name: playlist_name.to_string(),
     });
     assert!(created.ok, "create failed: {created:?}");
-    let playlist_id = created.data.expect("playlist data").playlist_id;
+    let playlist_id = created.data.expect("playlist data").data.playlist_id;
     library_sources::show_only(
         &backend,
         vec![media.to_string_lossy().to_string()],
@@ -2966,7 +2966,7 @@ fn parity_report_overall_status_and_required_summary_use_strict_player_wording()
         ..Default::default()
     });
     assert!(added.ok, "add failed: {added:?}");
-    assert_eq!(added.data.expect("add data").added, 2);
+    assert_eq!(added.data.expect("add data").data.added, 2);
 
     let export = backend.export_to_usb(ExportToUsbRequest {
         usb_root: Some(usb.to_string_lossy().to_string()),
@@ -3101,7 +3101,7 @@ fn parity_report_fails_when_membership_exists_only_in_pdb() {
         name: playlist_name.to_string(),
     });
     assert!(created.ok, "create failed: {created:?}");
-    let playlist_id = created.data.expect("playlist data").playlist_id;
+    let playlist_id = created.data.expect("playlist data").data.playlist_id;
     library_sources::show_only(
         &backend,
         vec![media.to_string_lossy().to_string()],
@@ -3114,7 +3114,7 @@ fn parity_report_fails_when_membership_exists_only_in_pdb() {
         ..Default::default()
     });
     assert!(added.ok, "add failed: {added:?}");
-    assert_eq!(added.data.expect("add data").added, 2);
+    assert_eq!(added.data.expect("add data").data.added, 2);
 
     let export = backend.export_to_usb(ExportToUsbRequest {
         usb_root: Some(usb.to_string_lossy().to_string()),
@@ -3255,7 +3255,7 @@ fn playlist_resolution_stays_passable_for_partial_cross_source_match() {
         name: full_playlist_name.to_string(),
     });
     assert!(full_created.ok, "create failed: {full_created:?}");
-    let full_playlist_id = full_created.data.expect("playlist data").playlist_id;
+    let full_playlist_id = full_created.data.expect("playlist data").data.playlist_id;
     let full_track_id = scanned_tracks
         .iter()
         .find(|(file_path, _)| file_path.contains("Resolution Full.mp3"))
@@ -3274,14 +3274,14 @@ fn playlist_resolution_stays_passable_for_partial_cross_source_match() {
             ..Default::default()
         });
     assert!(full_added.ok, "add failed: {full_added:?}");
-    assert_eq!(full_added.data.expect("add data").added, 1);
+    assert_eq!(full_added.data.expect("add data").data.added, 1);
 
     let playlist_name = "Resolution Partial";
     let created = backend.create_playlist(CreatePlaylistRequest {
         name: playlist_name.to_string(),
     });
     assert!(created.ok, "create failed: {created:?}");
-    let playlist_id = created.data.expect("playlist data").playlist_id;
+    let playlist_id = created.data.expect("playlist data").data.playlist_id;
     let partial_track_ids = scanned_tracks
         .iter()
         .filter(|(file_path, _)| file_path.contains("Resolution Partial"))
@@ -3304,7 +3304,7 @@ fn playlist_resolution_stays_passable_for_partial_cross_source_match() {
         ..Default::default()
     });
     assert!(added.ok, "add failed: {added:?}");
-    assert_eq!(added.data.expect("add data").added, 2);
+    assert_eq!(added.data.expect("add data").data.added, 2);
 
     let full_export = backend.export_to_usb(ExportToUsbRequest {
         usb_root: Some(usb.to_string_lossy().to_string()),
@@ -3449,7 +3449,7 @@ fn playlist_resolution_warns_for_partially_resolved_playlist() {
         name: playlist_name.to_string(),
     });
     assert!(created.ok, "create failed: {created:?}");
-    let playlist_id = created.data.expect("playlist data").playlist_id;
+    let playlist_id = created.data.expect("playlist data").data.playlist_id;
     library_sources::show_only(
         &backend,
         vec![media.to_string_lossy().to_string()],
@@ -3462,7 +3462,7 @@ fn playlist_resolution_warns_for_partially_resolved_playlist() {
         ..Default::default()
     });
     assert!(added.ok, "add failed: {added:?}");
-    assert_eq!(added.data.expect("add data").added, 5);
+    assert_eq!(added.data.expect("add data").data.added, 5);
 
     let export = backend.export_to_usb(ExportToUsbRequest {
         usb_root: Some(usb.to_string_lossy().to_string()),
@@ -3614,7 +3614,7 @@ fn parity_report_flags_player_quality_metadata_gaps_and_required_section() {
         name: playlist_name.to_string(),
     });
     assert!(created.ok, "create failed: {created:?}");
-    let playlist_id = created.data.expect("playlist data").playlist_id;
+    let playlist_id = created.data.expect("playlist data").data.playlist_id;
     library_sources::show_only(
         &backend,
         vec![media.to_string_lossy().to_string()],
@@ -3627,7 +3627,7 @@ fn parity_report_flags_player_quality_metadata_gaps_and_required_section() {
         ..Default::default()
     });
     assert!(added.ok, "add failed: {added:?}");
-    assert_eq!(added.data.expect("add data").added, 1);
+    assert_eq!(added.data.expect("add data").data.added, 1);
 
     let export = backend.export_to_usb(ExportToUsbRequest {
         usb_root: Some(usb.to_string_lossy().to_string()),
@@ -3813,7 +3813,7 @@ fn multi_track_export_produces_structurally_clean_pdb() {
         name: "Structural Check".to_string(),
     });
     assert!(created.ok, "create playlist: {created:?}");
-    let playlist_id = created.data.expect("playlist data").playlist_id;
+    let playlist_id = created.data.expect("playlist data").data.playlist_id;
 
     library_sources::show_only(
         &backend,
@@ -5557,7 +5557,7 @@ fn export_never_overwrites_another_tracks_analysis_file() {
         .list_playlists()
         .data
         .expect("playlists")
-        .items
+        .playlists
         .into_iter()
         .find(|p| p.name == playlist_name)
         .expect("playlist")

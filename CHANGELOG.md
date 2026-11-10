@@ -44,6 +44,8 @@
   The log file keeps it in English.
 - **Improvement:** The Event Log entry for a failed action, such as renaming a playlist, saving cues or restoring a
   backup, now says what failed, as the status line does, instead of only the reason.
+- **Improvement:** After a playlist change, such as a rename, an add or an export, the sidebar's "On this USB" marks
+  update together with the change instead of a moment after it.
 - **Chore:** The app window can no longer widen the set of folders it may load files from. The backend lets in
   the library's source folders and the selected USB itself.
 

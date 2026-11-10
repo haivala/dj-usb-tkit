@@ -45,7 +45,7 @@ test("Library: scrub-play after column sort plays the clicked row's track, not t
 
     const handlers = {
       ...base,
-      list_playlists: async () => ({ ok: true, data: { items: [] } }),
+      list_playlists: async () => ({ ok: true, data: { playlists: [], playlistUsbExportStatus: [] } }),
       // Library column sort is a backend query param now (shared TrackListController).
       browse_source_files: async (request = {}) => {
         let rows = tracks.slice();
@@ -132,7 +132,7 @@ test("Playlist: Play and Remove after column sort act on the clicked row's track
 
     const handlers = {
       ...base,
-      list_playlists: async () => ({ ok: true, data: { items: playlists } }),
+      list_playlists: async () => ({ ok: true, data: { playlists, playlistUsbExportStatus: [] } }),
       get_playlist_tracks: async (request) => {
         // App playlist list is server-sorted/paginated now (shared controller).
         let items = (playlistTracks[request.playlistId] || []).slice();
@@ -236,7 +236,7 @@ test("Playlist: header click shows and clears the sorted-by hint like other trac
 
     const handlers = {
       ...base,
-      list_playlists: async () => ({ ok: true, data: { items: playlists } }),
+      list_playlists: async () => ({ ok: true, data: { playlists, playlistUsbExportStatus: [] } }),
       get_playlist_tracks: async (request) => {
         // App playlist list is server-sorted/paginated now (shared controller).
         let items = (playlistTracks[request.playlistId] || []).slice();
@@ -320,7 +320,7 @@ test("Library: sorting by BPM column actually orders rows by numeric BPM value",
 
     const handlers = {
       ...base,
-      list_playlists: async () => ({ ok: true, data: { items: [] } }),
+      list_playlists: async () => ({ ok: true, data: { playlists: [], playlistUsbExportStatus: [] } }),
       browse_source_files: async (request = {}) => {
         let rows = tracks.slice();
         if (request.sortBy) {

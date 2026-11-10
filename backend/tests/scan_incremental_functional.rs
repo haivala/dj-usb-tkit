@@ -242,7 +242,7 @@ fn relocate_source_root_rewrites_paths_and_preserves_playlist_membership() {
         .expect("playlist data");
     library_sources::show_only(&backend, vec![old_root.clone()], false, false);
     let added = backend.add_library_selection_to_playlist(AddLibrarySelectionToPlaylistRequest {
-        playlist_id: playlist.playlist_id.clone(),
+        playlist_id: playlist.data.playlist_id.clone(),
         track_ids: vec![track_id.clone()],
         ..Default::default()
     });
@@ -279,7 +279,7 @@ fn relocate_source_root_rewrites_paths_and_preserves_playlist_membership() {
 
     let playlist_tracks = backend
         .get_playlist_tracks(GetPlaylistTracksRequest {
-            playlist_id: playlist.playlist_id,
+            playlist_id: playlist.data.playlist_id,
             ..Default::default()
         })
         .data

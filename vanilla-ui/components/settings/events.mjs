@@ -80,7 +80,7 @@ export function bindSettingsEvents(ctx) {
     renderCurrentPlaylistTracksFromState,
     commitActivePlaylistSort,
     isPlaylistSortActive,
-    refreshPlaylistExportStatus,
+    loadPlaylists,
     reloadTrackListsForKeyNotation
   } = ctx;
   el.settingsBtn.addEventListener("click", () => {
@@ -168,10 +168,9 @@ export function bindSettingsEvents(ctx) {
       }
     }
 
-    // The setting is now persisted; ask the backend to recompute every
-    // playlist's reorder lock against it (cheap -- staged PDB/eDB, no USB scan).
+    // The setting is now persisted; the playlists' reorder locks follow it.
     try {
-      await refreshPlaylistExportStatus();
+      await loadPlaylists();
     } catch (err) {
       console.error(err);
     }

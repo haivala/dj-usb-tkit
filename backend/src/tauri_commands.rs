@@ -34,7 +34,7 @@ use crate::models::{
     ImportExternalPlaylistsData, ImportExternalPlaylistsRequest, InitializeUsbData,
     InitializeUsbRequest, InspectUsbTrackData, InspectUsbTrackRequest, JobEventPayload,
     LibrarySourcesData, ListExternalPlaylistsData, ListExternalPlaylistsRequest,
-    ListMatchingTrackIdsData, ListMatchingTrackIdsRequest, ListPlaylistsData, ListUsbBackupsData,
+    ListMatchingTrackIdsData, ListMatchingTrackIdsRequest, ListUsbBackupsData,
     ListUsbBackupsRequest, ListUsbDevicesData, PlayResolvedTrackData, PlayResolvedTrackRequest,
     PlaybackEventPayload, PlaybackMetronomeData, PlaybackStatusData, PruneUsbDeviceData,
     PruneUsbDeviceRequest, RelocateSourceRootData, RelocateSourceRootRequest,
@@ -974,7 +974,7 @@ pub async fn resolve_playback_source(
 pub async fn create_playlist(
     state: State<'_, BackendCommands>,
     request: CreatePlaylistRequest,
-) -> Result<ApiResponse<CreatePlaylistData>, String> {
+) -> Result<ApiResponse<crate::models::WithPlaylists<CreatePlaylistData>>, String> {
     let commands = state.inner().clone();
     Ok(run_blocking_command("create_playlist", move || commands.create_playlist(request)).await)
 }
@@ -983,7 +983,7 @@ pub async fn create_playlist(
 pub async fn rename_playlist(
     state: State<'_, BackendCommands>,
     request: RenamePlaylistRequest,
-) -> Result<ApiResponse<RenamePlaylistData>, String> {
+) -> Result<ApiResponse<crate::models::WithPlaylists<RenamePlaylistData>>, String> {
     let commands = state.inner().clone();
     Ok(run_blocking_command("rename_playlist", move || commands.rename_playlist(request)).await)
 }
@@ -1004,7 +1004,7 @@ pub async fn reorder_playlists(
 pub async fn delete_playlist(
     state: State<'_, BackendCommands>,
     request: DeletePlaylistRequest,
-) -> Result<ApiResponse<DeletePlaylistData>, String> {
+) -> Result<ApiResponse<crate::models::WithPlaylists<DeletePlaylistData>>, String> {
     let commands = state.inner().clone();
     Ok(run_blocking_command("delete_playlist", move || commands.delete_playlist(request)).await)
 }
@@ -1012,9 +1012,17 @@ pub async fn delete_playlist(
 #[tauri::command]
 pub async fn list_playlists(
     state: State<'_, BackendCommands>,
-) -> Result<ApiResponse<ListPlaylistsData>, String> {
+) -> Result<ApiResponse<crate::models::PlaylistsState>, String> {
     let commands = state.inner().clone();
     Ok(run_blocking_command("list_playlists", move || commands.list_playlists()).await)
+}
+
+#[tauri::command]
+pub async fn clear_usb_root(
+    state: State<'_, BackendCommands>,
+) -> Result<ApiResponse<crate::models::PlaylistsState>, String> {
+    let commands = state.inner().clone();
+    Ok(run_blocking_command("clear_usb_root", move || commands.clear_usb_root()).await)
 }
 
 #[tauri::command]
@@ -1045,7 +1053,7 @@ pub async fn get_playlist_export_space(
 pub async fn add_track_candidates_to_playlist(
     state: State<'_, BackendCommands>,
     request: AddTrackCandidatesToPlaylistRequest,
-) -> Result<ApiResponse<AddTrackCandidatesToPlaylistData>, String> {
+) -> Result<ApiResponse<crate::models::WithPlaylists<AddTrackCandidatesToPlaylistData>>, String> {
     let commands = state.inner().clone();
     Ok(
         run_blocking_command("add_track_candidates_to_playlist", move || {
@@ -1083,7 +1091,7 @@ pub async fn get_selection_duration(
 pub async fn add_library_selection_to_playlist(
     state: State<'_, BackendCommands>,
     request: AddLibrarySelectionToPlaylistRequest,
-) -> Result<ApiResponse<AddTracksToPlaylistData>, String> {
+) -> Result<ApiResponse<crate::models::WithPlaylists<AddTracksToPlaylistData>>, String> {
     let commands = state.inner().clone();
     Ok(
         run_blocking_command("add_library_selection_to_playlist", move || {
@@ -1097,7 +1105,7 @@ pub async fn add_library_selection_to_playlist(
 pub async fn add_library_selection_to_playlists(
     state: State<'_, BackendCommands>,
     request: AddLibrarySelectionToPlaylistsRequest,
-) -> Result<ApiResponse<AddTracksToPlaylistsData>, String> {
+) -> Result<ApiResponse<crate::models::WithPlaylists<AddTracksToPlaylistsData>>, String> {
     let commands = state.inner().clone();
     Ok(
         run_blocking_command("add_library_selection_to_playlists", move || {
@@ -1111,7 +1119,7 @@ pub async fn add_library_selection_to_playlists(
 pub async fn add_track_candidates_to_playlists(
     state: State<'_, BackendCommands>,
     request: AddTrackCandidatesToPlaylistsRequest,
-) -> Result<ApiResponse<AddTracksToPlaylistsData>, String> {
+) -> Result<ApiResponse<crate::models::WithPlaylists<AddTracksToPlaylistsData>>, String> {
     let commands = state.inner().clone();
     Ok(
         run_blocking_command("add_track_candidates_to_playlists", move || {
@@ -1137,7 +1145,7 @@ pub async fn get_playlist_membership(
 pub async fn remove_tracks_from_playlist(
     state: State<'_, BackendCommands>,
     request: RemoveTracksFromPlaylistRequest,
-) -> Result<ApiResponse<RemoveTracksFromPlaylistData>, String> {
+) -> Result<ApiResponse<crate::models::WithPlaylists<RemoveTracksFromPlaylistData>>, String> {
     let commands = state.inner().clone();
     Ok(
         run_blocking_command("remove_tracks_from_playlist", move || {
@@ -1148,24 +1156,10 @@ pub async fn remove_tracks_from_playlist(
 }
 
 #[tauri::command]
-pub async fn refresh_playlist_export_status(
-    state: State<'_, BackendCommands>,
-    request: crate::models::RefreshPlaylistExportStatusRequest,
-) -> Result<ApiResponse<crate::models::RefreshPlaylistExportStatusData>, String> {
-    let commands = state.inner().clone();
-    Ok(
-        run_blocking_command("refresh_playlist_export_status", move || {
-            commands.refresh_playlist_export_status(request)
-        })
-        .await,
-    )
-}
-
-#[tauri::command]
 pub async fn reorder_playlist_tracks(
     state: State<'_, BackendCommands>,
     request: ReorderPlaylistTracksRequest,
-) -> Result<ApiResponse<ReorderPlaylistTracksData>, String> {
+) -> Result<ApiResponse<crate::models::WithPlaylists<ReorderPlaylistTracksData>>, String> {
     let commands = state.inner().clone();
     Ok(run_blocking_command("reorder_playlist_tracks", move || {
         commands.reorder_playlist_tracks(request)
@@ -1314,7 +1308,7 @@ pub async fn get_usb_device_name(
 pub async fn set_usb_device_name(
     state: State<'_, BackendCommands>,
     request: SetUsbDeviceNameRequest,
-) -> Result<ApiResponse<SetUsbDeviceNameData>, String> {
+) -> Result<ApiResponse<crate::models::WithPlaylists<SetUsbDeviceNameData>>, String> {
     let commands = state.inner().clone();
     Ok(run_blocking_command("set_usb_device_name", move || {
         commands.set_usb_device_name(request)
@@ -1969,7 +1963,7 @@ pub async fn export_to_usb(
     app: AppHandle,
     state: State<'_, BackendCommands>,
     request: ExportToUsbRequest,
-) -> Result<ApiResponse<ExportToUsbData>, String> {
+) -> Result<ApiResponse<crate::models::WithPlaylists<ExportToUsbData>>, String> {
     let commands = state.inner().clone();
     run_usb_job_with_progress(
         &app,
@@ -2093,7 +2087,7 @@ pub async fn list_rekordbox_playlists(
 pub async fn import_external_playlists(
     state: State<'_, BackendCommands>,
     request: ImportExternalPlaylistsRequest,
-) -> Result<ApiResponse<ImportExternalPlaylistsData>, String> {
+) -> Result<ApiResponse<crate::models::WithPlaylists<ImportExternalPlaylistsData>>, String> {
     let commands = state.inner().clone();
     Ok(
         tauri::async_runtime::spawn_blocking(move || commands.import_external_playlists(request))

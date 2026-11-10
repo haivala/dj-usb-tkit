@@ -927,6 +927,25 @@ pub struct ListPlaylistsData {
     pub items: Vec<Playlist>,
 }
 
+/// The playlists as they are, with their export status against the selected USB: what
+/// `list_playlists` answers.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct PlaylistsState {
+    pub playlists: Vec<Playlist>,
+    pub playlist_usb_export_status: Vec<PlaylistUsbExportStatus>,
+}
+
+/// The response of a command that changed the playlists: its own `data`, and the playlists
+/// as they now are, so the window redraws from them instead of asking again.
+#[derive(Debug, Clone, Serialize)]
+pub struct WithPlaylists<T> {
+    #[serde(flatten)]
+    pub data: T,
+    #[serde(flatten)]
+    pub state: PlaylistsState,
+}
+
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct GetPlaylistTracksRequest {

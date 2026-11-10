@@ -23,7 +23,7 @@ export async function addSelectionToPlaylists(ctx, view, ids, rows) {
     create: async (name) => {
       try {
         const created = await command("create_playlist", { name });
-        await ctx.loadPlaylists();
+        ctx.applyPlaylistsState(created);
         return created?.playlistId || null;
       } catch (err) {
         emitStatus(err?.message || String(err));
@@ -58,7 +58,7 @@ export async function addSelectionToPlaylists(ctx, view, ids, rows) {
     return;
   }
   // The add cleared the playlists' "exported to USB" marks.
-  await ctx.loadPlaylists();
+  ctx.applyPlaylistsState(result);
   if (playlistIds.includes(state.currentPlaylistId)) await ctx.refreshCurrentPlaylistTracks();
   ctx.pushEventLog({
     level: "info",

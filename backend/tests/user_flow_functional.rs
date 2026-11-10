@@ -200,6 +200,7 @@ fn user_like_flow_imports_sources_analyzes_and_adds_from_library_usb_and_history
     let source_playlist_id = source_playlist
         .data
         .expect("source playlist data")
+        .data
         .playlist_id;
 
     library_sources::show_only(
@@ -218,7 +219,10 @@ fn user_like_flow_imports_sources_analyzes_and_adds_from_library_usb_and_history
             ..Default::default()
         });
     assert!(add_source_tracks.ok, "add source tracks failed");
-    assert_eq!(add_source_tracks.data.expect("add source data").added, 3);
+    assert_eq!(
+        add_source_tracks.data.expect("add source data").data.added,
+        3
+    );
 
     // Playlist-scoped "Analyze Missing": every track in this playlist is already
     // analyzed, so backend auto-selection scoped to the playlist finds nothing
@@ -244,7 +248,7 @@ fn user_like_flow_imports_sources_analyzes_and_adds_from_library_usb_and_history
         }),
     });
     assert!(export.ok, "export failed: {export:?}");
-    assert_eq!(export.data.expect("export data").exported_tracks, 3);
+    assert_eq!(export.data.expect("export data").data.exported_tracks, 3);
 
     let parsed = parse_pdb(&pdb_path(&usb)).expect("parse exported pdb");
     let history_track_ids = parsed
@@ -388,6 +392,7 @@ fn user_like_flow_imports_sources_analyzes_and_adds_from_library_usb_and_history
     let target_playlist_id = target_playlist
         .data
         .expect("target playlist data")
+        .data
         .playlist_id;
 
     library_sources::show_only(
@@ -406,7 +411,10 @@ fn user_like_flow_imports_sources_analyzes_and_adds_from_library_usb_and_history
             ..Default::default()
         });
     assert!(add_from_library.ok, "add from library failed");
-    assert_eq!(add_from_library.data.expect("add library data").added, 1);
+    assert_eq!(
+        add_from_library.data.expect("add library data").data.added,
+        1
+    );
 
     // A USB playlist or history row's "+" sends the row itself, as the app's
     // `toAddTrackCandidatePayload` builds it.
@@ -437,11 +445,14 @@ fn user_like_flow_imports_sources_analyzes_and_adds_from_library_usb_and_history
     };
     let add_from_usb = add_usb_row(&usb_row);
     assert!(add_from_usb.ok, "add from usb failed: {add_from_usb:?}");
-    assert_eq!(add_from_usb.data.expect("add usb data").added, 1);
+    assert_eq!(add_from_usb.data.expect("add usb data").data.added, 1);
 
     let add_from_history = add_usb_row(&history_row);
     assert!(add_from_history.ok, "add from history failed");
-    assert_eq!(add_from_history.data.expect("add history data").added, 1);
+    assert_eq!(
+        add_from_history.data.expect("add history data").data.added,
+        1
+    );
 
     let target_tracks = backend.get_playlist_tracks(GetPlaylistTracksRequest {
         playlist_id: target_playlist_id,
@@ -1064,6 +1075,7 @@ fn export_to_usb_writes_cues_into_anlz_and_edb() {
         })
         .data
         .expect("playlist")
+        .data
         .playlist_id;
     library_sources::show_only(
         &backend,
@@ -1182,6 +1194,7 @@ fn export_to_usb_writes_cues_into_anlz_and_edb() {
         })
         .data
         .expect("fresh playlist")
+        .data
         .playlist_id;
     let add_reimported =
         fresh.add_track_candidates_to_playlist(AddTrackCandidatesToPlaylistRequest {
@@ -1204,7 +1217,10 @@ fn export_to_usb_writes_cues_into_anlz_and_edb() {
         add_reimported.ok,
         "add reimported failed: {add_reimported:?}"
     );
-    assert_eq!(add_reimported.data.expect("add reimported data").added, 1);
+    assert_eq!(
+        add_reimported.data.expect("add reimported data").data.added,
+        1
+    );
 
     let fresh_db = rusqlite::Connection::open(fresh_data_dir.join("backend.db")).expect("open db2");
     let (imported_track_id, imported_first_beat): (String, Option<i64>) = fresh_db
@@ -1293,6 +1309,7 @@ fn add_never_viewed_usb_track_materializes_row_and_imports_anlz_cues() {
         })
         .data
         .expect("playlist")
+        .data
         .playlist_id;
     let added = fresh.add_track_candidates_to_playlist(AddTrackCandidatesToPlaylistRequest {
         playlist_id: playlist_id.clone(),
@@ -1311,14 +1328,14 @@ fn add_never_viewed_usb_track_materializes_row_and_imports_anlz_cues() {
     assert!(added.ok, "add candidate failed: {added:?}");
     let added = added.data.expect("add data");
     assert_eq!(
-        added.added, 1,
+        added.data.added, 1,
         "never-viewed usb track should still be added"
     );
     assert_eq!(
-        added.resolutions[0].resolved_by,
+        added.data.resolutions[0].resolved_by,
         backend::models::ResolvedBy::UsbMaterialized
     );
-    let materialized_id = added.resolutions[0]
+    let materialized_id = added.data.resolutions[0]
         .track_id
         .clone()
         .expect("materialized local id");
@@ -1444,6 +1461,7 @@ fn export_one_track_with_cues_to(
         })
         .data
         .expect("playlist")
+        .data
         .playlist_id;
     library_sources::show_only(
         &backend,
@@ -3542,7 +3560,7 @@ fn browse_only_track_can_be_materialized_and_added_without_scan_or_analysis() {
         name: "Browse Only".to_string(),
     });
     assert!(created.ok, "create failed: {created:?}");
-    let playlist_id = created.data.expect("playlist data").playlist_id;
+    let playlist_id = created.data.expect("playlist data").data.playlist_id;
 
     library_sources::show_only(
         &backend,
@@ -3556,7 +3574,7 @@ fn browse_only_track_can_be_materialized_and_added_without_scan_or_analysis() {
         ..Default::default()
     });
     assert!(added.ok, "add failed: {added:?}");
-    assert_eq!(added.data.expect("add data").added, 1);
+    assert_eq!(added.data.expect("add data").data.added, 1);
 
     let playlist_tracks = backend
         .get_playlist_tracks(GetPlaylistTracksRequest {

@@ -1,10 +1,7 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 
-import {
-  playlistUsbExportStatusById,
-  refreshPlaylistExportStatus
-} from "../components/usb/actions.mjs";
+import { playlistUsbExportStatusById } from "../components/usb/actions.mjs";
 
 // Append-vs-export text for a real reorder-locking / non-colliding playlist
 // is covered end-to-end via the Tauri stubs in
@@ -25,41 +22,4 @@ test("playlistUsbExportStatusById indexes the backend's per-playlist status by p
   assert.equal(statusById.get("p1").sameNameExistsOnUsb, true);
   assert.equal(statusById.get("p2").locksReorder, false);
   assert.equal(statusById.get("missing"), undefined);
-});
-
-test("refreshPlaylistExportStatus re-indexes state from the backend command's response", async () => {
-  const state = { usbRootValid: true, usbRoot: "/media/usb", playlistUsbExportStatusById: new Map() };
-  const calls = [];
-  const command = async (name, payload) => {
-    calls.push({ name, payload });
-    return {
-      playlistUsbExportStatus: [
-        { playlistId: "p1", playlistName: "Testi", usbSelected: true, sameNameExistsOnUsb: true, locksReorder: true },
-        { playlistId: "p2", playlistName: "House", usbSelected: true, sameNameExistsOnUsb: false, locksReorder: false }
-      ]
-    };
-  };
-
-  const rendered = [];
-  const byId = await refreshPlaylistExportStatus({
-    state,
-    command,
-    updatePlaylistExportButtons: () => rendered.push("buttons"),
-    renderPlaylistList: () => rendered.push("sidebar"),
-    renderOpenPlaylistExportStatus: () => rendered.push("status line")
-  });
-
-  assert.deepEqual(calls, [{ name: "refresh_playlist_export_status", payload: { usbRoot: "/media/usb" } }]);
-  assert.deepEqual(rendered, ["buttons", "sidebar", "status line"]);
-  assert.equal(byId, state.playlistUsbExportStatusById);
-  assert.equal(state.playlistUsbExportStatusById.get("p1").locksReorder, true);
-  assert.equal(state.playlistUsbExportStatusById.get("p2").locksReorder, false);
-});
-
-test("refreshPlaylistExportStatus passes null usbRoot when none is connected", async () => {
-  const state = { usbRoot: null, playlistUsbExportStatusById: new Map([["p1", {}]]) };
-  const command = async () => ({ playlistUsbExportStatus: [] });
-
-  await refreshPlaylistExportStatus({ state, command, updatePlaylistExportButtons() {}, renderPlaylistList() {}, renderOpenPlaylistExportStatus() {} });
-  assert.equal(state.playlistUsbExportStatusById.size, 0);
 });
