@@ -242,16 +242,14 @@ export function handleJobEvent(ctx, payload) {
       errorMessage: payload.errorMessage ? String(payload.errorMessage) : null
     });
     if (payload.failed === true) {
-      const details = typeof payload.filePath === "string" && payload.filePath.trim()
-        ? payload.filePath.trim()
-        : null;
       emitMessage({
         level: "error",
         source: "analysis",
         code: "analyze.track_failed",
         eventLog: {
           text: payload.failedText,
-          details,
+          // The track's file: a track's progress event always carries it.
+          details: payload.filePath,
           coalesceKey: `analysis.track_failed.${String(payload.trackId)}`
         }
       });
