@@ -28,9 +28,9 @@ use super::analysis::{build_waveform_preview_from_audio, detect_track_duration_m
 use super::anlz::{
     AnlzAnalysisEdits, AnlzBundlePaths, GridUpgrade, WaveformData, analysis_bundle_paths_for_track,
     apply_analysis_edits_to_anlz, atomic_write_bytes, ensure_ppth_chunk, fill_mp3_pvbr,
-    has_misplaced_pqtz_header, has_pvb2_chunk, pqt2_checksum_ok, pvbr_total_samples,
-    read_beatgrid_tempo_from_anlz, read_first_beat_from_anlz, upgrade_bundle_beat_grid,
-    with_seek_index, write_generated_anlz_bundle,
+    has_pvb2_chunk, pvbr_total_samples, read_anlz_chunks, read_beatgrid_tempo_from_anlz,
+    read_first_beat_from_anlz, upgrade_bundle_beat_grid, with_seek_index,
+    write_generated_anlz_bundle,
 };
 use super::anlz_seek::{SeekIndexSkip, seek_index_for_audio};
 use super::cues::collapse_anlz_cues;
@@ -53,7 +53,6 @@ use super::usb_utils::{
 };
 #[cfg(test)]
 use super::usb_vendor_compat::vendor_pdb_path;
-use super::usb_vendor_compat::{USB_ANALYSIS_DIR, USB_VENDOR_ROOT_DIR};
 use crate::audio_format::same_format_extension;
 use crate::scanner::scan_audio_file;
 use crate::utils::counted;

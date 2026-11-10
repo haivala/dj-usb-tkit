@@ -10,6 +10,7 @@ use chrono::NaiveDate;
 use rusqlite::{OptionalExtension, params};
 use uuid::Uuid;
 
+use super::diagnostics::{OutdatedBeatGrid, detect_outdated_beat_grids};
 use crate::edb::{open_edb_from_usb_root, table_exists};
 use crate::error::{BackendError, BackendResult};
 use crate::logging::{self, Level};
@@ -46,7 +47,7 @@ use super::usb_identity::UsbAudioFormats;
 use super::usb_utils::{
     self, artwork_path_to_data_url, canonicalize_or_self, canonicalize_playlist_name,
     has_write_access, load_waveform_preview_from_analysis_path, normalize_usb_root_path,
-    parse_history_numeric_id, resolve_usb_root, resolve_usb_side_path_text,
+    parse_history_numeric_id, resolve_usb_root, resolve_usb_side_path_lexical_text,
 };
 use super::usb_vendor_compat::{
     USB_CONTENTS_DIR, USB_VENDOR_ROOT_DIR, vendor_edb_path, vendor_pdb_path,
@@ -180,6 +181,19 @@ pub(crate) type UsbTrackSizesCache = std::sync::Mutex<
     )>,
 >;
 
+/// One-entry cache of `detect_outdated_beat_grids`: keyed by the staged
+/// PDB's path and signature and the export log's signature (which tracks are
+/// candidates), so selecting a stick again doesn't re-read its analysis files.
+/// A change to the files themselves comes with a write this app makes (which
+/// clears it) or a rewritten PDB.
+pub(crate) type BeatGridCache = std::sync::Mutex<
+    Option<(
+        std::path::PathBuf,
+        (StagedFileSig, Option<StagedFileSig>),
+        Arc<Option<Vec<OutdatedBeatGrid>>>,
+    )>,
+>;
+
 /// Lookup key for a file under the USB root: its root-relative path with `/`
 /// separators, lowercased (FAT32 and exFAT names are case-insensitive).
 pub(crate) fn usb_track_size_key(relative_path: &str) -> String {
@@ -207,10 +221,11 @@ fn build_usb_track_index(
             let artwork_path = parsed
                 .artworks
                 .get(&t.artwork_id)
-                .and_then(|p| resolve_usb_side_path_text(usb_root, p));
-            let resolved_file_path = resolve_usb_side_path_text(usb_root, &t.track_file_path)
-                .unwrap_or_else(|| t.track_file_path.clone());
-            let usb_analysis_path = resolve_usb_side_path_text(usb_root, &t.anlz_path);
+                .and_then(|p| resolve_usb_side_path_lexical_text(usb_root, p));
+            let resolved_file_path =
+                resolve_usb_side_path_lexical_text(usb_root, &t.track_file_path)
+                    .unwrap_or_else(|| t.track_file_path.clone());
+            let usb_analysis_path = resolve_usb_side_path_lexical_text(usb_root, &t.anlz_path);
             let format_ext =
                 crate::audio_format::format_ext_from_path(&t.track_file_path).or_else(|| {
                     t.file_name
@@ -714,12 +729,24 @@ fn push_usb_stage_timing_with_threshold(
     started: &mut std::time::Instant,
     threshold_ms: u128,
 ) -> bool {
+    log_stage_timing("usb-import", stage, started, threshold_ms)
+}
+
+/// Logs how long `stage` took since `started` under `category`, flags it as
+/// slow media at `threshold_ms` or more, and restarts `started` for the next
+/// stage. Returns whether it looked slow.
+pub(crate) fn log_stage_timing(
+    category: &str,
+    stage: &str,
+    started: &mut std::time::Instant,
+    threshold_ms: u128,
+) -> bool {
     let elapsed = started.elapsed().as_millis();
-    logging::debug("usb-import", format!("stage timing: {stage}: {elapsed}ms"));
+    logging::debug(category, format!("stage timing: {stage}: {elapsed}ms"));
     let slow = elapsed >= threshold_ms;
     if slow {
         logging::debug(
-            "usb-import",
+            category,
             format!("slow-media suspected: stage '{stage}' took {elapsed}ms"),
         );
     }
@@ -1132,6 +1159,9 @@ impl BackendService {
     /// the stick; the staged-signature key catches most changes on its own,
     /// this is the belt-and-suspenders.
     pub(crate) fn invalidate_usb_parse_cache(&self) {
+        if let Ok(mut guard) = self.beat_grid_cache.lock() {
+            *guard = None;
+        }
         if let Ok(mut guard) = self.usb_playlists_cache.lock() {
             *guard = None;
         }
@@ -1301,6 +1331,38 @@ impl BackendService {
             *guard = Some((edb_path, sig, Arc::clone(&library)));
         }
         Some(library)
+    }
+
+    /// [`detect_outdated_beat_grids`] for the stick whose staged PDB is
+    /// `pdb_path`, from the cache while that PDB and the export log are
+    /// unchanged.
+    pub(crate) fn outdated_beat_grids(
+        &self,
+        usb_root: &Path,
+        pdb_path: &Path,
+        parsed: &ParsedPdb,
+    ) -> Arc<Option<Vec<OutdatedBeatGrid>>> {
+        let sig = StagedFileSig::of(pdb_path).map(|pdb| {
+            (
+                pdb,
+                StagedFileSig::of(&super::export_log::export_log_path(usb_root)),
+            )
+        });
+        if let Some(sig) = sig.as_ref()
+            && let Ok(guard) = self.beat_grid_cache.lock()
+            && let Some((path, cached_sig, found)) = guard.as_ref()
+            && path == pdb_path
+            && cached_sig == sig
+        {
+            return Arc::clone(found);
+        }
+        let found = Arc::new(detect_outdated_beat_grids(usb_root, parsed));
+        if let Some(sig) = sig
+            && let Ok(mut guard) = self.beat_grid_cache.lock()
+        {
+            *guard = Some((pdb_path.to_path_buf(), sig, Arc::clone(&found)));
+        }
+        found
     }
 
     /// The staged databases' track files and sizes (see `UsbTrackSizes`).
@@ -3159,8 +3221,9 @@ fn resolve_usb_track_from_sources(
                 .get(&t.artist_id)
                 .cloned()
                 .unwrap_or_else(|| "Unknown Artist".to_string());
-            let resolved_file_path = resolve_usb_side_path_text(usb_root, &t.track_file_path)
-                .unwrap_or_else(|| t.track_file_path.clone());
+            let resolved_file_path =
+                resolve_usb_side_path_lexical_text(usb_root, &t.track_file_path)
+                    .unwrap_or_else(|| t.track_file_path.clone());
             let mut score = 0i32;
             if !file_hint.is_empty() {
                 let candidate = normalize_text(&resolved_file_path);
@@ -3201,10 +3264,11 @@ fn resolve_usb_track_from_sources(
                 let artwork_path = parsed
                     .artworks
                     .get(&t.artwork_id)
-                    .and_then(|p| resolve_usb_side_path_text(usb_root, p));
-                let resolved_file_path = resolve_usb_side_path_text(usb_root, &t.track_file_path)
-                    .unwrap_or_else(|| t.track_file_path.clone());
-                let usb_analysis_path = resolve_usb_side_path_text(usb_root, &t.anlz_path);
+                    .and_then(|p| resolve_usb_side_path_lexical_text(usb_root, p));
+                let resolved_file_path =
+                    resolve_usb_side_path_lexical_text(usb_root, &t.track_file_path)
+                        .unwrap_or_else(|| t.track_file_path.clone());
+                let usb_analysis_path = resolve_usb_side_path_lexical_text(usb_root, &t.anlz_path);
                 let waveform_preview = usb_analysis_path
                     .as_deref()
                     .map(Path::new)

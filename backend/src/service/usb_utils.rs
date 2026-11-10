@@ -436,6 +436,14 @@ pub(crate) fn resolve_usb_side_path_text(usb_root: &Path, raw: &str) -> Option<S
     resolve_usb_side_path(usb_root, raw).map(|path| path.to_string_lossy().into_owned())
 }
 
+/// [`resolve_usb_side_path_lexical`] as text: for loops over every track of a
+/// stick that build display paths and lookup keys. `usb_root` comes
+/// canonical from `resolve_usb_root` and player sticks hold no symlinks, so
+/// an existing file gets the same path as [`resolve_usb_side_path_text`].
+pub(crate) fn resolve_usb_side_path_lexical_text(usb_root: &Path, raw: &str) -> Option<String> {
+    resolve_usb_side_path_lexical(usb_root, raw).map(|path| path.to_string_lossy().into_owned())
+}
+
 /// Whether the USB looks writable, without writing to it: for what the UI
 /// shows when a USB is selected or a page loads, where a write probe on slow
 /// media would cost too much. A command that writes checks with
@@ -3297,6 +3305,22 @@ mod diag_tests {
         assert!(result.is_some(), "absolute paths are passed through");
 
         std::fs::remove_dir_all(&tmp).ok();
+    }
+
+    #[test]
+    fn lexical_text_matches_the_canonical_path_of_a_file_on_the_stick() {
+        let tmp = tempfile::tempdir().unwrap();
+        let root = canonicalize_or_self(tmp.path().to_path_buf());
+        let file = root.join("Contents/Artist/Album/track.mp3");
+        std::fs::create_dir_all(file.parent().unwrap()).unwrap();
+        std::fs::write(&file, b"x").unwrap();
+
+        let raw = "/Contents/Artist/Album/track.mp3";
+        assert_eq!(
+            resolve_usb_side_path_lexical_text(&root, raw),
+            resolve_usb_side_path_text(&root, raw)
+        );
+        assert!(resolve_usb_side_path_lexical_text(&root, "/Contents/../../x").is_none());
     }
 
     #[test]

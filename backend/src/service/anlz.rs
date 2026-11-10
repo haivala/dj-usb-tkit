@@ -1125,7 +1125,7 @@ const PQTZ_HEADER_MISPLACED: [u8; 8] = [0, 0, 0, 0x08, 0, 0, 0, 0];
 
 /// Whether a `.DAT`'s `PQTZ` header has the pre-0.3.7 misplaced layout.
 /// Works on the start of the file too: `PQTZ` follows `PPTH` and `PVBR`,
-/// about 2 KB in, so diagnostics read only the first [`PQTZ_PROBE_BYTES`].
+/// about 2 KB in.
 pub(crate) fn has_misplaced_pqtz_header(dat: &[u8]) -> bool {
     if dat.get(0..4) != Some(b"PMAI") {
         return false;
@@ -1146,8 +1146,61 @@ pub(crate) fn has_misplaced_pqtz_header(dat: &[u8]) -> bool {
     false
 }
 
-/// How much of a `.DAT` [`has_misplaced_pqtz_header`] needs to see.
-pub(crate) const PQTZ_PROBE_BYTES: u64 = 4096;
+/// The ANLZ file at `path` with only the `tags` chunks kept: its 28-byte
+/// header followed by those chunks in file order. The other chunks are
+/// skipped by their length, so a check that needs the beat grid doesn't read
+/// the waveforms (most of an `.EXT`). Every reader in this module gives the
+/// same answer on the result as on the whole file: a file that doesn't walk
+/// cleanly ends in a few bytes no chunk header fits in, where its walk failed,
+/// so a whole-file walk ([`anlz_chunk_ranges`]) still fails and a first-match
+/// walk still finds what comes before. `None` when the file can't be read.
+pub(crate) fn read_anlz_chunks(path: &Path, tags: &[[u8; 4]]) -> Option<Vec<u8>> {
+    use std::io::Read;
+    const BROKEN_TAIL: [u8; 4] = [0; 4];
+    // Reads go through one buffer this size, and skips stay inside it: the
+    // header and the chunks before the waveforms (where the beat grid is)
+    // arrive in one read. Small reads at scattered offsets would each go to
+    // the drive and cost more than reading the whole file.
+    const READ_SIZE: usize = 64 * 1024;
+
+    let file = std::fs::File::open(path).ok()?;
+    let len = file.metadata().ok()?.len();
+    let mut file = std::io::BufReader::with_capacity(READ_SIZE, file);
+    let mut out = vec![0u8; 28];
+    file.read_exact(&mut out).ok()?;
+    if out.get(0..4) != Some(b"PMAI") {
+        return Some(out);
+    }
+    let mut pos = 28u64;
+    while pos < len {
+        let mut head = [0u8; 12];
+        if len - pos < 12 || file.read_exact(&mut head).is_err() {
+            out.extend_from_slice(&BROKEN_TAIL);
+            break;
+        }
+        let header_len = u64::from(u32::from_be_bytes([head[4], head[5], head[6], head[7]]));
+        let total_len = u64::from(u32::from_be_bytes([head[8], head[9], head[10], head[11]]));
+        if header_len < 12 || total_len < header_len || pos + total_len > len {
+            out.extend_from_slice(&BROKEN_TAIL);
+            break;
+        }
+        let rest = total_len - 12;
+        if tags.iter().any(|tag| head[..4] == tag[..]) {
+            let mut body = vec![0u8; usize::try_from(rest).ok()?];
+            if file.read_exact(&mut body).is_err() {
+                out.extend_from_slice(&BROKEN_TAIL);
+                break;
+            }
+            out.extend_from_slice(&head);
+            out.extend_from_slice(&body);
+        } else if file.seek_relative(i64::try_from(rest).ok()?).is_err() {
+            out.extend_from_slice(&BROKEN_TAIL);
+            break;
+        }
+        pos += total_len;
+    }
+    Some(out)
+}
 
 fn append_pqtz_chunk(file: &mut Vec<u8>, bpm: Option<f64>, duration_ms: u64, first_beat_ms: u32) {
     if let Some(grid) = BeatGrid::from_tempo(bpm, duration_ms, first_beat_ms) {
@@ -2502,17 +2555,65 @@ mod tests {
     }
 
     #[test]
-    fn misplaced_pqtz_header_is_found_in_the_first_4_kb() {
-        let (dat, _) = bundle_at(120.0, 437);
+    fn checks_on_the_chunks_read_match_checks_on_the_whole_file() {
+        let (dat, ext) = bundle_at(120.0, 437);
         let pqtz = dat.windows(4).position(|w| w == b"PQTZ").unwrap();
-        let mut old = dat.clone();
-        old[pqtz + 12..pqtz + 20].copy_from_slice(&PQTZ_HEADER_MISPLACED);
-        let probe = PQTZ_PROBE_BYTES as usize;
-        assert!(has_misplaced_pqtz_header(&old[..probe]));
-        assert!(!has_misplaced_pqtz_header(&dat[..probe]));
-        assert!(
-            !has_misplaced_pqtz_header(&old[..pqtz + 16]),
-            "header cut off"
+        let mut old_dat = dat.clone();
+        old_dat[pqtz + 12..pqtz + 20].copy_from_slice(&PQTZ_HEADER_MISPLACED);
+        let pqt2 = ext.windows(4).position(|w| w == b"PQT2").unwrap();
+        let mut zero_sum_ext = ext.clone();
+        zero_sum_ext[pqt2 + 44..pqt2 + 48].fill(0);
+        // Cut inside the last chunk: a whole-file walk fails on it.
+        let truncated_ext = ext[..ext.len() - 3].to_vec();
+        // Bytes after the last chunk too few for a chunk header.
+        let mut trailing_ext = ext.clone();
+        trailing_ext.extend_from_slice(&[1, 2, 3]);
+
+        let dir = tempfile::tempdir().unwrap();
+        let file = |name: &str, bytes: &[u8]| {
+            let path = dir.path().join(name);
+            std::fs::write(&path, bytes).unwrap();
+            path
+        };
+        let all = [*b"PQTZ", *b"PQT2", *b"PVBR", *b"PVB2"];
+        for (dat_bytes, ext_bytes) in [
+            (&dat, &ext),
+            (&old_dat, &zero_sum_ext),
+            (&dat, &truncated_ext),
+            (&dat, &trailing_ext),
+        ] {
+            let dat_read = read_anlz_chunks(&file("t.DAT", dat_bytes), &all).unwrap();
+            let ext_read = read_anlz_chunks(&file("t.EXT", ext_bytes), &all).unwrap();
+            assert!(
+                dat_read.len() < dat_bytes.len(),
+                "the waveforms were skipped"
+            );
+            assert_eq!(
+                has_misplaced_pqtz_header(&dat_read),
+                has_misplaced_pqtz_header(dat_bytes)
+            );
+            assert_eq!(
+                read_beatgrid_tempo_from_anlz(&dat_read),
+                read_beatgrid_tempo_from_anlz(dat_bytes)
+            );
+            assert_eq!(
+                read_beatgrid_tempo_from_anlz(&ext_read),
+                read_beatgrid_tempo_from_anlz(ext_bytes)
+            );
+            assert_eq!(
+                pqt2_checksum_ok(&dat_read, &ext_read),
+                pqt2_checksum_ok(dat_bytes, ext_bytes)
+            );
+            assert_eq!(has_pvb2_chunk(&ext_read), has_pvb2_chunk(ext_bytes));
+            assert_eq!(pvbr_total_samples(&dat_read), pvbr_total_samples(dat_bytes));
+        }
+        assert!(has_misplaced_pqtz_header(
+            &read_anlz_chunks(&file("o.DAT", &old_dat), &[*b"PQTZ"]).unwrap()
+        ));
+        assert_eq!(
+            pqt2_checksum_ok(&dat, &truncated_ext),
+            None,
+            "the truncated case is one a whole-file walk rejects"
         );
     }
 

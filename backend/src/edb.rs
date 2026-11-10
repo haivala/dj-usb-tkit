@@ -13,7 +13,7 @@ use crate::i18n::tr;
 use crate::logging::{self, Level};
 use crate::metadata::sanitize_metadata;
 use crate::models::{UsbTrack, WarningEntry};
-use crate::service::usb_utils::resolve_usb_side_path_text;
+use crate::service::usb_utils::resolve_usb_side_path_lexical_text;
 use crate::service::usb_vendor_compat::{
     DEFAULT_USB_EDB_KEY, USB_VENDOR_DB_DIR, USB_VENDOR_ROOT_DIR,
 };
@@ -460,7 +460,8 @@ impl EdbLibrary {
 
 /// `track` (read with its paths as stored) with them resolved against `usb_root`.
 fn resolve_track_paths(mut track: UsbTrack, usb_root: &Path) -> UsbTrack {
-    let resolve = |path: Option<&str>| path.and_then(|p| resolve_usb_side_path_text(usb_root, p));
+    let resolve =
+        |path: Option<&str>| path.and_then(|p| resolve_usb_side_path_lexical_text(usb_root, p));
     track.file_path = resolve(track.usb_media_path.as_deref()).unwrap_or_default();
     track.artwork_path = resolve(track.artwork_path.as_deref());
     let analysis = resolve(track.usb_analysis_path_raw.as_deref());

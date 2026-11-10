@@ -44,18 +44,12 @@ impl BackendService {
         let start = std::time::Instant::now();
         let mut stage_started = std::time::Instant::now();
         let mut note_stage = |name: &str| {
-            let elapsed = stage_started.elapsed().as_millis();
-            logging::debug(
+            crate::service::usb::log_stage_timing(
                 "usb-diagnostics",
-                format!("stage timing: {name}: {elapsed}ms"),
+                name,
+                &mut stage_started,
+                SLOW_USB_STAGE_MS,
             );
-            if elapsed >= SLOW_USB_STAGE_MS {
-                logging::debug(
-                    "usb-diagnostics",
-                    format!("slow-media suspected: stage '{name}' took {elapsed}ms"),
-                );
-            }
-            stage_started = std::time::Instant::now();
         };
         on_progress(2, 100, &tr::diagnostics_progress_resolving_root().render());
         let usb_root = resolve_usb_root(req.usb_root.as_deref())?;
@@ -365,6 +359,7 @@ impl BackendService {
                 status,
                 detail,
             ));
+            note_stage("BPM/key check");
             // Database-only, like the BPM check: track rows naming the same
             // bundle. The repair preview also reads each bundle's PPTH.
             let shared = scan_analysis_ownership(&usb_root, parsed, None, false).shared;
@@ -405,7 +400,11 @@ impl BackendService {
                 .with_link("event-log")
             };
             analysis_integrity.checks.push(shared_check);
-            let (beat_grid_status, beat_grid_detail) = diagnose_beat_grid_format(&usb_root, parsed);
+            note_stage("shared analysis check");
+            let beat_grids = self.outdated_beat_grids(&usb_root, &pdb_path, parsed);
+            let (beat_grid_status, beat_grid_detail) =
+                diagnose_beat_grid_format(beat_grids.as_deref());
+            note_stage("beat grid check");
             if matches!(beat_grid_status, DiagStatus::Warn) {
                 raw_warnings.push(logging::log_text(
                     Level::Warn,
@@ -571,18 +570,12 @@ impl BackendService {
         let start = std::time::Instant::now();
         let mut stage_started = std::time::Instant::now();
         let mut note_stage = |name: &str| {
-            let elapsed = stage_started.elapsed().as_millis();
-            logging::debug(
+            crate::service::usb::log_stage_timing(
                 "usb-diagnostics",
-                format!("stage timing: {name}: {elapsed}ms"),
+                name,
+                &mut stage_started,
+                SLOW_USB_STAGE_MS,
             );
-            if elapsed >= SLOW_USB_STAGE_MS {
-                logging::debug(
-                    "usb-diagnostics",
-                    format!("slow-media suspected: stage '{name}' took {elapsed}ms"),
-                );
-            }
-            stage_started = std::time::Instant::now();
         };
         on_progress(2, 100, &tr::diagnostics_progress_resolving_root().render());
         let usb_root = resolve_usb_root(req.usb_root.as_deref())?;

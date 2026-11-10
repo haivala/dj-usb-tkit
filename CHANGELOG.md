@@ -56,6 +56,16 @@
   export and repairs each opened it again, and every open worked out its key anew.
 - **Improvement:** Exporting a playlist and repairs that rewrite the PDB read the existing PDB faster.
 - **Improvement:** Opening a USB track's details reads its analysis file once instead of twice.
+- **Improvement:** On a large USB, the USB Playlists and History pages, the parity check and a USB track's details
+  open much faster. They no longer look up every track's files on the stick to work out their paths.
+- **Improvement:** The diagnostics' Beat grid format check runs once per USB until something on it changes, so
+  selecting the USB again doesn't read its analysis files again. It reads only the beat grid of the tracks the
+  export log names, in folder order.
+- **Improvement:** USB repair offers Fix Beat Grid for exactly the tracks the diagnostics' Beat grid format line
+  flags. Before, the two looked for outdated beat grids each in their own way.
+- **Improvement:** Checking a USB for repairs reads only the parts of the analysis files its BPM, beat grid and
+  seek data checks need, not their waveforms.
+- **Chore:** The log file times each diagnostics and repair check on its own.
 - **Improvement:** Adding a source folder saves and indexes it in one step. If the indexing fails, the folder
   stays added, the status line says the indexing failed, and the next scan indexes it.
 - **Improvement:** Relocating a missing source folder also indexes the new folder, so files only it has join

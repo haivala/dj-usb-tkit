@@ -528,38 +528,25 @@ pub(super) fn apply_separate_shared_analysis(
     }
 }
 
-/// `.DAT` files under `USBANLZ` whose beat grid is in the format the app
-/// wrote before 0.3.7 (`fix_beat_grid_header`): a `PQTZ` header with its
-/// value two bytes early, or an `.EXT` `PQT2` whose checksum doesn't match the
-/// `PQTZ` beats. rekordbox's own bundles never match. The files are found on
-/// disk, not through the PDB, so a bundle the database doesn't point at yet is
-/// still fixed.
-pub(super) fn detect_app_beat_grids(usb_root: &Path) -> Vec<std::path::PathBuf> {
-    walkdir::WalkDir::new(usb_root.join(USB_VENDOR_ROOT_DIR).join(USB_ANALYSIS_DIR))
-        .into_iter()
-        .filter_map(Result::ok)
-        .filter(|entry| entry.file_type().is_file())
-        .map(walkdir::DirEntry::into_path)
-        .filter(|path| {
-            path.extension()
-                .and_then(|value| value.to_str())
-                .is_some_and(|ext| ext.eq_ignore_ascii_case("DAT"))
-        })
-        .filter(|dat| {
-            let Ok(dat_bytes) = std::fs::read(dat) else {
-                return false;
-            };
-            has_misplaced_pqtz_header(&dat_bytes)
-                || std::fs::read(dat.with_extension("EXT"))
-                    .is_ok_and(|ext| pqt2_checksum_ok(&dat_bytes, &ext) == Some(false))
-        })
-        .collect()
+/// The `.DAT` files [`detect_outdated_beat_grids`] finds, each once (tracks
+/// can share a bundle), for `fix_beat_grid_header`.
+pub(super) fn outdated_beat_grid_bundles(
+    found: Option<&[super::super::diagnostics::OutdatedBeatGrid]>,
+) -> Vec<std::path::PathBuf> {
+    let mut dats = found
+        .unwrap_or_default()
+        .iter()
+        .map(|bundle| bundle.dat.clone())
+        .collect::<Vec<_>>();
+    dats.sort();
+    dats.dedup();
+    dats
 }
 
-/// Rewrite the grids found by [`detect_app_beat_grids`] in rekordbox's
+/// Rewrite the grids [`detect_outdated_beat_grids`] finds in rekordbox's
 /// format: `PQTZ` in the `.DAT` and `PQT2` in the `.EXT`, both from the grid
-/// the `.DAT` already holds. Re-detected so earlier fixes in the same pass are
-/// accounted for. A grid that isn't one constant tempo is left alone with a
+/// the `.DAT` already holds. Re-detected through the staged PDB as this pass
+/// left it, so earlier fixes in the same pass are accounted for. A grid that isn't one constant tempo is left alone with a
 /// warning. Returns the number of bundles written.
 pub(super) fn apply_beat_grid_repair(
     usb_root: &Path,
@@ -567,7 +554,10 @@ pub(super) fn apply_beat_grid_repair(
     on_item: &mut impl FnMut(usize, usize),
 ) -> BackendResult<usize> {
     let mut fixed = 0usize;
-    let targets = detect_app_beat_grids(usb_root);
+    let parsed = parse_pdb(&usb_staging::stage_pdb(usb_root)?)?;
+    let targets = outdated_beat_grid_bundles(
+        super::super::diagnostics::detect_outdated_beat_grids(usb_root, &parsed).as_deref(),
+    );
     let total = targets.len();
     for (index, dat) in targets.into_iter().enumerate() {
         match upgrade_bundle_beat_grid(&dat)? {
@@ -664,7 +654,8 @@ pub(super) fn detect_missing_seek_data(
             SeekFormat::Mp3 => dat,
             SeekFormat::Flac => dat.with_extension("EXT"),
         };
-        let Ok(bytes) = std::fs::read(&bundle_path) else {
+        // Only the seek index chunk: an `.EXT` is mostly waveforms.
+        let Some(bytes) = read_anlz_chunks(&bundle_path, &[*b"PVBR", *b"PVB2"]) else {
             continue;
         };
         let missing = match format {

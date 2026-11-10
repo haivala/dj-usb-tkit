@@ -271,6 +271,9 @@ pub struct BackendService {
     /// The staged PDB's track files and sizes, for the playlist heading's
     /// export estimate. Shared across `.clone()`s of the service.
     pub(crate) usb_track_sizes_cache: Arc<usb::UsbTrackSizesCache>,
+    /// The last stick's outdated beat grids (`outdated_beat_grids`), shared
+    /// like the caches above.
+    pub(crate) beat_grid_cache: Arc<usb::BeatGridCache>,
     /// The last staged eDB's tracks and playlists (`staged_edb`), shared like
     /// `parsed_pdb_cache`.
     pub(crate) edb_library_cache: Arc<usb::EdbLibraryCache>,
@@ -307,6 +310,7 @@ impl BackendService {
             usb_playlists_cache: Arc::new(std::sync::Mutex::new(None)),
             usb_histories_cache: Arc::new(std::sync::Mutex::new(None)),
             usb_track_sizes_cache: Arc::new(std::sync::Mutex::new(None)),
+            beat_grid_cache: Arc::new(std::sync::Mutex::new(None)),
             edb_library_cache: Arc::new(std::sync::Mutex::new(None)),
             parsed_pdb_cache: Arc::new(std::sync::Mutex::new(None)),
             selected_usb_root: Arc::new(std::sync::Mutex::new(None)),

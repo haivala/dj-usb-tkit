@@ -242,9 +242,9 @@ pub(crate) fn detect_bpm_key_mismatches(
             .then(|| crate::service::usb_utils::resolve_usb_side_path(usb_root, &track.anlz_path))
             .flatten();
         let anlz_tempos_x100 = dat.as_ref().map_or([None, None], |dat| {
+            // Only the beat-grid chunks: an `.EXT` is mostly waveforms.
             [dat.clone(), dat.with_extension("EXT")].map(|p| {
-                std::fs::read(p)
-                    .ok()
+                crate::service::anlz::read_anlz_chunks(&p, &[*b"PQTZ", *b"PQT2"])
                     .and_then(|bytes| crate::service::anlz::read_beatgrid_tempo_from_anlz(&bytes))
             })
         });
@@ -289,53 +289,80 @@ pub(crate) fn detect_bpm_key_mismatches(
     out
 }
 
-/// Older app versions wrote beat grids in a format some players (e.g. the
-/// XDJ-AZ) reject. Only tracks this app exported can have one, and the stick's
-/// export log says which were last exported by such a version (a record
-/// without `app_version`), so only those tracks' `.DAT` files are read, and
-/// only their first few KB. When the log can't be read, every track's
-/// `.DAT` is checked instead. rekordbox-made bundles never match.
-pub(super) fn diagnose_beat_grid_format(
+/// A track whose analysis bundle has a beat grid in the format older app
+/// versions wrote (see [`detect_outdated_beat_grids`]).
+#[derive(Debug, Clone)]
+pub(crate) struct OutdatedBeatGrid {
+    pub(crate) track_path: String,
+    pub(crate) dat: std::path::PathBuf,
+}
+
+/// The tracks whose beat grid is in a format app versions before 0.3.7 wrote
+/// and some players (e.g. the XDJ-AZ) reject. The one detector the
+/// diagnostics line and the repair both use. Only tracks this app exported
+/// can have one, and the stick's export log says which were last exported by
+/// such a version (a record without `app_version`), so only those tracks'
+/// `.DAT` files are read, and of those only the `PQTZ` chunk. Its misplaced
+/// header is the mark: the `.EXT` `PQT2` without its checksum was fixed
+/// earlier (0.3.7-rc.3) than the header (0.3.7), so every bundle with the old
+/// `PQT2` has the old header too, and the repair rewrites both. When the log
+/// can't be read, every track's bundle is checked. rekordbox-made bundles
+/// never match. `None` when the stick has no export log: this app never
+/// exported to it.
+pub(crate) fn detect_outdated_beat_grids(
     usb_root: &std::path::Path,
     parsed: &crate::pdb_reader::ParsedPdb,
-) -> (DiagStatus, crate::i18n::Text) {
-    use std::io::Read;
+) -> Option<Vec<OutdatedBeatGrid>> {
+    use crate::service::anlz::{has_misplaced_pqtz_header, read_anlz_chunks};
 
-    let check = |status, detail: crate::i18n::Text| (status, detail);
     // `None`: the log can't be read, so every track is a candidate.
     let candidates = match crate::service::export_log::load_export_log(usb_root) {
         Ok(Some(log)) => {
             Some(crate::service::export_log::fingerprints_last_exported_before_versioning(&log))
         }
-        Ok(None) => {
-            return check(
-                DiagStatus::Pass,
-                tr::diagnostics_check_beat_grid_not_exported(),
-            );
-        }
+        Ok(None) => return None,
         Err(_) => None,
     };
-    let mut outdated = Vec::new();
-    for track in &parsed.tracks {
-        if candidates.as_ref().is_some_and(|candidates| {
-            !candidates.contains(&track_identity_key(&track.track_file_path, "", "", None))
-        }) {
-            continue;
-        }
-        let Some(dat) =
-            crate::service::usb_utils::resolve_usb_side_path(usb_root, &track.anlz_path)
-        else {
-            continue;
-        };
-        let mut prefix = Vec::new();
-        let read = std::fs::File::open(&dat).and_then(|file| {
-            file.take(crate::service::anlz::PQTZ_PROBE_BYTES)
-                .read_to_end(&mut prefix)
-        });
-        if read.is_ok() && crate::service::anlz::has_misplaced_pqtz_header(&prefix) {
-            outdated.push(track.track_file_path.as_str());
-        }
-    }
+    let mut bundles = parsed
+        .tracks
+        .iter()
+        .filter(|track| {
+            candidates.as_ref().is_none_or(|candidates| {
+                candidates.contains(&track_identity_key(&track.track_file_path, "", "", None))
+            })
+        })
+        .filter_map(|track| {
+            crate::service::usb_utils::resolve_usb_side_path_lexical(usb_root, &track.anlz_path)
+                .map(|dat| OutdatedBeatGrid {
+                    track_path: track.track_file_path.clone(),
+                    dat,
+                })
+        })
+        .collect::<Vec<_>>();
+    // Folder by folder, not in PDB order: fewer seeks on a cold stick.
+    bundles.sort_by(|a, b| a.dat.cmp(&b.dat));
+    bundles.retain(|bundle| {
+        read_anlz_chunks(&bundle.dat, &[*b"PQTZ"])
+            .is_some_and(|dat| has_misplaced_pqtz_header(&dat))
+    });
+    Some(bundles)
+}
+
+/// The diagnostics line for what [`detect_outdated_beat_grids`] found.
+pub(super) fn diagnose_beat_grid_format(
+    found: Option<&[OutdatedBeatGrid]>,
+) -> (DiagStatus, crate::i18n::Text) {
+    let check = |status, detail: crate::i18n::Text| (status, detail);
+    let Some(found) = found else {
+        return check(
+            DiagStatus::Pass,
+            tr::diagnostics_check_beat_grid_not_exported(),
+        );
+    };
+    let outdated = found
+        .iter()
+        .map(|bundle| bundle.track_path.as_str())
+        .collect::<Vec<_>>();
     if outdated.is_empty() {
         return check(DiagStatus::Pass, tr::diagnostics_check_beat_grid_current());
     }

@@ -4514,6 +4514,8 @@ fn repair_fix_beat_grid_rewrites_pre_0_3_7_grids_once() {
     }
     fs::write(&dat_path, &old_dat).expect("write DAT");
     fs::write(&ext_path, &old_ext).expect("write EXT");
+    // Only a pre-0.3.7 export writes these grids, and it logged no appVersion.
+    log_export_as_pre_versioning(&usb);
 
     assert_fix_proposed(&backend, &usb, "fix_beat_grid_header");
     let repair = backend.repair_usb_diagnostics(RepairUsbDiagnosticsRequest {
@@ -4546,6 +4548,19 @@ fn repair_fix_beat_grid_rewrites_pre_0_3_7_grids_once() {
     assert_eq!(fs::read(&dat_path).expect("read DAT"), dat);
     assert_eq!(fs::read(&ext_path).expect("read EXT"), ext);
     assert_fix_not_proposed(&backend, &usb, "fix_beat_grid_header");
+}
+
+/// The stick's export log as a pre-0.3.7 app wrote it: no `appVersion`.
+fn log_export_as_pre_versioning(usb: &Path) {
+    let log_path = usb
+        .join(".dj-usb-tkit")
+        .join("dj_usb_tkit_export_log.v1.json");
+    let log = fs::read_to_string(&log_path).expect("export log");
+    let mut value: serde_json::Value = serde_json::from_str(&log).expect("parse log");
+    for record in value["records"].as_array_mut().expect("records") {
+        record.as_object_mut().expect("record").remove("appVersion");
+    }
+    fs::write(&log_path, serde_json::to_string(&value).unwrap()).expect("write log");
 }
 
 fn analysis_check(backend: &BackendCommands, usb: &Path, label: &str) -> Option<(String, String)> {
@@ -4596,11 +4611,7 @@ fn diagnostics_flag_outdated_beat_grids_only_on_tracks_last_exported_by_older_ve
     assert!(detail.contains("current format"), "{detail}");
 
     // The same export as a pre-0.3.7 app logged it: no appVersion.
-    let mut value: serde_json::Value = serde_json::from_str(&log).expect("parse log");
-    for record in value["records"].as_array_mut().expect("records") {
-        record.as_object_mut().expect("record").remove("appVersion");
-    }
-    fs::write(&log_path, serde_json::to_string(&value).unwrap()).expect("write log");
+    log_export_as_pre_versioning(&usb);
     let (status, detail) = analysis_check(&backend, &usb, "Beat grid format").expect("check");
     assert_eq!(status, "Warn");
     assert!(
@@ -4610,8 +4621,27 @@ fn diagnostics_flag_outdated_beat_grids_only_on_tracks_last_exported_by_older_ve
         "{detail}"
     );
 
-    // Once fixed, the old export record alone isn't enough to flag it.
-    fs::write(&dat_path, &dat).expect("write DAT");
+    // Once fixed, the old export record alone isn't enough to flag it, and
+    // the repair's own check after it already reads the rewritten grid.
+    let repair = backend.repair_usb_diagnostics(RepairUsbDiagnosticsRequest {
+        usb_root: Some(usb.to_string_lossy().to_string()),
+        apply: true,
+        selected_fix_ids: vec!["fix_beat_grid_header".to_string()],
+    });
+    assert!(repair.ok, "repair failed: {repair:?}");
+    let after = repair
+        .data
+        .expect("repair data")
+        .data
+        .diagnostics
+        .expect("diagnostics after the repair");
+    let check = after
+        .analysis_integrity
+        .checks
+        .iter()
+        .find(|c| c.label == "Beat grid format")
+        .expect("check");
+    assert_eq!(format!("{:?}", check.status), "Pass", "{}", check.detail);
     let (status, _) = analysis_check(&backend, &usb, "Beat grid format").expect("check");
     assert_eq!(status, "Pass");
 
@@ -4622,10 +4652,8 @@ fn diagnostics_flag_outdated_beat_grids_only_on_tracks_last_exported_by_older_ve
     assert_eq!(detail, "no tracks on this USB were exported by this app");
 
     // An unreadable log: every track's .DAT is checked instead.
-    fs::write(&log_path, "not json").expect("write log");
-    let (status, _) = analysis_check(&backend, &usb, "Beat grid format").expect("check");
-    assert_eq!(status, "Pass");
     fs::write(&dat_path, &old_dat).expect("write DAT");
+    fs::write(&log_path, "not json").expect("write log");
     let (status, detail) = analysis_check(&backend, &usb, "Beat grid format").expect("check");
     assert_eq!(status, "Warn");
     assert!(detail.contains(&track_path), "{detail}");

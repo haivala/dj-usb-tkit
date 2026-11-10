@@ -671,6 +671,10 @@ impl BackendService {
         );
 
         on_progress(68, 100, &tr::repair_progress_collect().render());
+        let mut stage_started = std::time::Instant::now();
+        let mut note_stage = |name: &str| {
+            crate::service::usb::log_stage_timing("usb-repair", name, &mut stage_started, 3_000);
+        };
         let mut detected_issues = Vec::<String>::new();
         let mut proposed_fixes = Vec::<RepairFixProposal>::new();
         let mut unsupported_items = Vec::<RepairUnsupportedItem>::new();
@@ -688,6 +692,7 @@ impl BackendService {
         let mut sync_edb_history_needed = false;
 
         let anlz_scan = scan_anlz(&usb_root);
+        note_stage("scan analysis folder");
         warnings.extend(anlz_scan.warnings);
         let empty_analysis_paths = anlz_scan.empty_files;
         let malformed_analysis_entries = anlz_scan.empty_malformed_entries;
@@ -757,6 +762,7 @@ impl BackendService {
                 )
             })
             .unwrap_or_default();
+        note_stage("BPM/key check with analysis files");
         if !bpm_key_mismatches.is_empty() {
             detected_issues.push(format!(
                 "{} with ANLZ beat-grid tempo or eDB BPM/key differing from the PDB",
@@ -810,6 +816,7 @@ impl BackendService {
             .as_ref()
             .map(|parsed| scan_analysis_ownership(&usb_root, parsed, app_master_db_id, true))
             .unwrap_or_default();
+        note_stage("analysis ownership check");
         let bundle_rel = |dat: &std::path::Path| {
             usb_relative_path(&usb_root, dat).unwrap_or_else(|| dat.to_string_lossy().to_string())
         };
@@ -900,7 +907,14 @@ impl BackendService {
                 ));
             }
         }
-        let app_beat_grids = detect_app_beat_grids(&usb_root);
+        let app_beat_grids = outdated_beat_grid_bundles(
+            parsed_pdb
+                .as_ref()
+                .map(|parsed| self.outdated_beat_grids(&usb_root, &staged_pdb_path, parsed))
+                .as_deref()
+                .and_then(|found| found.as_deref()),
+        );
+        note_stage("beat grid check");
         if !app_beat_grids.is_empty() {
             detected_issues.push(format!(
                 "{} with a beat grid in the pre-0.3.7 format",
@@ -997,6 +1011,7 @@ impl BackendService {
                 ..fix_proposal(format.fix_id(), title, description)
             });
         }
+        note_stage("seek data check");
         // Every PDB detector below reads the same staged bytes.
         let staged_pdb_bytes = std::fs::read(&staged_pdb_path).unwrap_or_default();
         let pdb_sentinel_u5_pages = detect_pdb_sentinel_u5_on_data_pages(&staged_pdb_bytes);
@@ -1023,6 +1038,7 @@ impl BackendService {
         let pdb_misaligned_track_ids = misaligned_row_ids(&pdb_misaligned_slots, 0);
         let pdb_misaligned_album_ids = misaligned_row_ids(&pdb_misaligned_slots, 3);
         let pdb_misaligned_artist_ids = misaligned_row_ids(&pdb_misaligned_slots, 2);
+        note_stage("PDB checks");
         // rekordbox transaction bookkeeping (see `fix_is_bookkeeping`): no
         // detected issue and no write of its own -- it rides along with the
         // PDB write of whatever repair runs.
@@ -1754,6 +1770,9 @@ impl BackendService {
 
         if req.apply {
             outcomes.log(&mut warnings);
+            // A fix that rewrote only analysis files changed no signature the
+            // caches are keyed by, so the check below must not read them.
+            self.invalidate_usb_parse_cache();
         }
 
         let diagnostics_after_apply = if req.apply {
