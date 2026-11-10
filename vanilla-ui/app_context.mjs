@@ -86,7 +86,7 @@ export function createAppContext(env) {
   bindActions(playlist, `renderPlaylistList promptNewPlaylist startPlaylistRename reorderPlaylists loadPlaylists applyPlaylistsState
     commitActivePlaylistSort updatePlaylistExportButtons createPlaylist deletePlaylist
     addTracksToCurrentPlaylist addLibrarySelectionToCurrentPlaylist populatePlaylistPanel
-    getCurrentPlaylist isPlaylistSortActive renderCurrentPlaylistTracksFromState
+    getCurrentPlaylist isPlaylistSortActive clearPlaylistTrackSort renderCurrentPlaylistTracksFromState
     refreshCurrentPlaylistTracks importExternalPlaylist renderOpenPlaylistExportStatus
     refreshPlaylistExportSpace reloadPlaylistForUsb`);
   bindActions(library, `normalizeTrack applyLibrarySources

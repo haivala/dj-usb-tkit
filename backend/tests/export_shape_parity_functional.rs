@@ -327,6 +327,7 @@ fn strict_shape_compare_detects_match_and_mismatch_on_generated_usb_roots() {
             prune_stale: false,
             ..Default::default()
         }),
+        sort: None,
     });
     assert!(
         export_expected.ok,
@@ -342,6 +343,7 @@ fn strict_shape_compare_detects_match_and_mismatch_on_generated_usb_roots() {
             prune_stale: false,
             ..Default::default()
         }),
+        sort: None,
     });
     assert!(export_actual.ok, "export actual failed: {export_actual:?}");
 
@@ -589,6 +591,7 @@ fn export_preserves_full_20_table_family() {
             prune_stale: false,
             ..Default::default()
         }),
+        sort: None,
     });
     assert!(exported.ok, "export failed: {exported:?}");
 

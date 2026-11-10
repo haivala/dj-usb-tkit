@@ -479,6 +479,7 @@ fn setup_clean_strict_parity_fixture_with_artwork() -> (TempDir, BackendCommands
             prune_stale: false,
             ..Default::default()
         }),
+        sort: None,
     });
     assert!(export.ok, "export failed: {export:?}");
 
@@ -617,6 +618,7 @@ fn setup_two_playlist_strict_parity_fixture() -> (TempDir, BackendCommands, Path
                 prune_stale: false,
                 ..Default::default()
             }),
+            sort: None,
         });
         assert!(export.ok, "export failed: {export:?}");
     }
@@ -848,12 +850,14 @@ fn diagnostics_parity_and_import_counts_stay_consistent_after_repeated_exports()
         usb_root: Some(usb.to_string_lossy().to_string()),
         playlist_id: playlist_id.clone(),
         options: options.clone(),
+        sort: None,
     });
     assert!(export_one.ok, "first export failed: {export_one:?}");
     let export_two = backend.export_to_usb(ExportToUsbRequest {
         usb_root: Some(usb.to_string_lossy().to_string()),
         playlist_id,
         options,
+        sort: None,
     });
     assert!(export_two.ok, "second export failed: {export_two:?}");
 
@@ -2977,6 +2981,7 @@ fn parity_report_overall_status_and_required_summary_use_strict_player_wording()
             prune_stale: false,
             ..Default::default()
         }),
+        sort: None,
     });
     assert!(export.ok, "export failed: {export:?}");
     let vendor_db = vendor_db_dir(&usb).join("exportLibrary.db");
@@ -3125,6 +3130,7 @@ fn parity_report_fails_when_membership_exists_only_in_pdb() {
             prune_stale: false,
             ..Default::default()
         }),
+        sort: None,
     });
     assert!(export.ok, "export failed: {export:?}");
 
@@ -3315,6 +3321,7 @@ fn playlist_resolution_stays_passable_for_partial_cross_source_match() {
             prune_stale: false,
             ..Default::default()
         }),
+        sort: None,
     });
     assert!(full_export.ok, "full export failed: {full_export:?}");
 
@@ -3327,6 +3334,7 @@ fn playlist_resolution_stays_passable_for_partial_cross_source_match() {
             prune_stale: false,
             ..Default::default()
         }),
+        sort: None,
     });
     assert!(export.ok, "export failed: {export:?}");
 
@@ -3473,6 +3481,7 @@ fn playlist_resolution_warns_for_partially_resolved_playlist() {
             prune_stale: false,
             ..Default::default()
         }),
+        sort: None,
     });
     assert!(export.ok, "export failed: {export:?}");
     let vendor_db = vendor_db_dir(&usb).join("exportLibrary.db");
@@ -3638,6 +3647,7 @@ fn parity_report_flags_player_quality_metadata_gaps_and_required_section() {
             prune_stale: false,
             ..Default::default()
         }),
+        sort: None,
     });
     assert!(export.ok, "export failed: {export:?}");
 
@@ -3837,6 +3847,7 @@ fn multi_track_export_produces_structurally_clean_pdb() {
             prune_stale: false,
             ..Default::default()
         }),
+        sort: None,
     });
     assert!(export.ok, "first export: {export:?}");
 
@@ -3854,6 +3865,7 @@ fn multi_track_export_produces_structurally_clean_pdb() {
             prune_stale: false,
             ..Default::default()
         }),
+        sort: None,
     });
     assert!(export2.ok, "second export: {export2:?}");
 
@@ -5571,6 +5583,7 @@ fn export_never_overwrites_another_tracks_analysis_file() {
             prune_stale: false,
             ..Default::default()
         }),
+        sort: None,
     });
     assert!(export.ok, "export failed: {export:?}");
 

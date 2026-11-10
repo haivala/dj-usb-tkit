@@ -68,7 +68,8 @@ The playlist command layer is intentionally CRUD-oriented:
   in one of three modes: `orderedTrackIds` (the complete order, must match the
   current set), `sortBy`/`sortDir` (server sorts the whole playlist by that
   column — the same comparator `get_playlist_tracks` uses — and persists it;
-  this is how a client column sort is committed on navigate-away / export), or
+  this is how a client column sort is committed on navigate-away; an export takes
+  the sort itself, as `export_to_usb`'s `sort`), or
   `moveTrackId` + optional `beforeTrackId` (reposition one track relative to a
   neighbour, so a paginated client can drag-reorder without holding every row).
 
@@ -81,8 +82,9 @@ without an explicit user decision.
 Track rows within an app playlist can be reordered by dragging. A column sort
 is a reversible view op while browsing (it re-queries the page sorted, like
 every other list) and only becomes the playlist's persisted order when
-committed — on navigate-away or export — via `reorder_playlist_tracks`'s
-`sortBy` mode. Dragging while sorted is allowed; the drop clears the sort and
+committed: on navigate-away via `reorder_playlist_tracks`'s `sortBy` mode, on
+export as the export's own first step (`export_to_usb`'s `sort`). While the
+order is locked (below), the backend leaves a committed sort unsaved. Dragging while sorted is allowed; the drop clears the sort and
 sends a single-move. Dragging is disabled while a search filter is active
 (the rendered rows are a filtered subset). It is also locked when the current
 export sync mode is additive

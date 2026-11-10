@@ -290,6 +290,7 @@ fn export_playlist(
             prune_stale: false,
             ..Default::default()
         }),
+        sort: None,
     });
     assert!(export.ok, "export failed: {export:?}");
     playlist_id
@@ -472,6 +473,7 @@ fn pdb_re_export_same_playlist_preserves_track_ids() {
             prune_stale: false,
             ..Default::default()
         }),
+        sort: None,
     });
     assert!(export.ok, "re-export failed");
 

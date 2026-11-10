@@ -2303,6 +2303,19 @@ pub struct ExportToUsbRequest {
     pub playlist_id: String,
     #[serde(default)]
     pub options: Option<ExportToUsbOptions>,
+    /// The playlist's column sort, saved as its track order before the export, unless the
+    /// export can't change the order on the USB (`reorder_playlist_tracks`'s lock).
+    #[serde(default)]
+    pub sort: Option<PlaylistTrackSort>,
+}
+
+/// A column sort of a playlist's tracks, as `get_playlist_tracks` sorts them.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct PlaylistTrackSort {
+    pub sort_by: String,
+    #[serde(default)]
+    pub sort_dir: Option<String>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]

@@ -1192,6 +1192,18 @@ impl BackendService {
             ));
         }
         let options = req.options.unwrap_or_default();
+        if let Some(sort) = req.sort
+            && !self.playlist_sort_locked(&playlist_id, Some(&usb_root), options.prune_stale)?
+        {
+            self.save_playlist_track_order(crate::models::ReorderPlaylistTracksRequest {
+                playlist_id: playlist_id.clone(),
+                ordered_track_ids: Vec::new(),
+                sort_by: Some(sort.sort_by),
+                sort_dir: sort.sort_dir,
+                move_track_id: None,
+                before_track_id: None,
+            })?;
+        }
         let export_dry_run = std::env::var("USB_EXPORT_DRY_RUN")
             .ok()
             .map(|v| {
@@ -3004,6 +3016,7 @@ mod tests {
                 usb_root: None,
                 playlist_id: "p1".to_string(),
                 options: None,
+                sort: None,
             })
             .expect_err("a second write must not start");
 
@@ -3845,6 +3858,7 @@ mod tests {
                 usb_root: None,
                 playlist_id: "   ".to_string(),
                 options: None,
+                sort: None,
             })
             .unwrap_err();
         assert!(matches!(err, BackendError::Internal(_)));
@@ -3859,6 +3873,7 @@ mod tests {
                 usb_root: Some(file.path().to_string_lossy().to_string()),
                 playlist_id: "pl1".to_string(),
                 options: None,
+                sort: None,
             })
             .unwrap_err();
         assert!(matches!(err, BackendError::NotFound(_)));
@@ -3878,6 +3893,7 @@ mod tests {
                 usb_root: Some(usb_dir.path().to_string_lossy().to_string()),
                 playlist_id: playlist.playlist_id,
                 options: None,
+                sort: None,
             })
             .unwrap_err();
         assert!(matches!(err, BackendError::Validation(_)));
@@ -3923,6 +3939,7 @@ mod tests {
                 usb_root: Some(usb_dir.path().to_string_lossy().to_string()),
                 playlist_id: playlist.playlist_id,
                 options: None,
+                sort: None,
             })
             .unwrap_err();
         match err {
@@ -3956,6 +3973,7 @@ mod tests {
             usb_root: Some(usb_dir.path().to_string_lossy().to_string()),
             playlist_id: "any".to_string(),
             options: None,
+            sort: None,
         });
 
         #[allow(clippy::permissions_set_readonly_false)]

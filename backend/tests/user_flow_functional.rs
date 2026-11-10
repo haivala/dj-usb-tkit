@@ -246,6 +246,7 @@ fn user_like_flow_imports_sources_analyzes_and_adds_from_library_usb_and_history
             prune_stale: false,
             ..Default::default()
         }),
+        sort: None,
     });
     assert!(export.ok, "export failed: {export:?}");
     assert_eq!(export.data.expect("export data").data.exported_tracks, 3);
@@ -1098,6 +1099,7 @@ fn export_to_usb_writes_cues_into_anlz_and_edb() {
             prune_stale: false,
             ..Default::default()
         }),
+        sort: None,
     });
     assert!(export.ok, "export failed: {export:?}");
 
@@ -1483,6 +1485,7 @@ fn export_one_track_with_cues_to(
             prune_stale: false,
             ..Default::default()
         }),
+        sort: None,
     });
     assert!(export.ok, "export failed: {export:?}");
 
@@ -1848,6 +1851,7 @@ fn re_export_as_a_transcode_keeps_the_tracks_old_file_on_the_stick() {
             prune_stale: false,
             ..Default::default()
         }),
+        sort: None,
     });
     assert!(export.ok, "re-export failed: {export:?}");
     // The export made the MP3: it goes as that transcode now.
@@ -2327,6 +2331,7 @@ fn save_usb_track_metadata_edits_writes_only_genre_rating_and_release_date() {
             prune_stale: false,
             ..Default::default()
         }),
+        sort: None,
     });
     assert!(export.ok, "re-export failed: {export:?}");
     let parsed = parse_pdb(&pdb_path(&usb)).expect("parse pdb");
@@ -2868,6 +2873,7 @@ fn usb_memory_cue_edits_reach_the_stick_the_library_and_a_re_export() {
             prune_stale: false,
             ..Default::default()
         }),
+        sort: None,
     });
     assert!(export.ok, "re-export failed: {export:?}");
     assert_eq!(
@@ -3297,6 +3303,7 @@ fn re_export_reconciles_on_usb_bundle_to_edited_local_master() {
                 prune_stale: false,
                 ..Default::default()
             }),
+            sort: None,
         });
         assert!(out.ok, "re-export failed: {out:?}");
     };

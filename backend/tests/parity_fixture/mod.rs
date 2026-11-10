@@ -148,6 +148,7 @@ pub fn setup_clean_strict_parity_fixture_with_local_key(
             prune_stale: false,
             ..Default::default()
         }),
+        sort: None,
     });
     assert!(export.ok, "export failed: {export:?}");
 

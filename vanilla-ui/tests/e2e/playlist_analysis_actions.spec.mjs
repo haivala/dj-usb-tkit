@@ -1219,9 +1219,9 @@ test("export is disabled from the click until the export finishes, so a double c
   expect(await page.evaluate(() => window.__exportCalls)).toBe(1);
 });
 
-// Answers export_to_usb with `answer` and records it and the sort commits
-// (reorder_playlist_tracks) in `window.__exportFlow`; `window.__failSortCommit`
-// makes a sort commit fail.
+// Answers export_to_usb with `window.__exportAnswer` (first `answer`) and
+// records it and sort commits (reorder_playlist_tracks) in
+// `window.__exportFlow`; `window.__playlistReads` counts list_playlists.
 async function answerExports(page, answer) {
   await page.evaluate((answer) => {
     const invoke = window.__TAURI__.core.invoke;
@@ -1229,13 +1229,11 @@ async function answerExports(page, answer) {
     window.__exportAnswer = answer;
     window.__TAURI__.core.invoke = async (command, payload) => {
       if (command === "export_to_usb") {
-        window.__exportFlow.push({ command, options: payload?.request?.options });
+        window.__exportFlow.push({ command, options: payload?.request?.options, sort: payload?.request?.sort });
         return window.__exportAnswer;
       }
-      if (command === "reorder_playlist_tracks") {
-        window.__exportFlow.push({ command });
-        if (window.__failSortCommit) return { ok: false, error: { code: "IO", message: "Save track order failed: disk full" } };
-      }
+      if (command === "reorder_playlist_tracks") window.__exportFlow.push({ command });
+      if (command === "list_playlists") window.__playlistReads = (window.__playlistReads || 0) + 1;
       return invoke(command, payload);
     };
   }, answer);
@@ -1323,7 +1321,7 @@ test("a search with no matches doesn't change what Export to USB does", async ({
   await expect(page.locator("#statusText")).toContainText("Export complete");
 });
 
-test("export commits an active column sort first, and a failed commit blocks the export", async ({ page }) => {
+test("export sends an active column sort along, and a failed export keeps it on screen", async ({ page }) => {
   await installReorderTauriMock(page, { usbSameNamePlaylistName: "Reorder Playlist" });
   await page.goto("/");
   await connectUsbAndFetchPlaylists(page);
@@ -1331,17 +1329,30 @@ test("export commits an active column sort first, and a failed commit blocks the
   const artistHeader = page.locator('#panel-playlist .track-grid-cell.sortable[data-sort-key="artist"]');
   await answerExports(page, { ok: true, data: { exportedTracks: 3, statusText: "Export complete" } });
 
+  // The backend saves the sort as the order and exports, in one command.
   await artistHeader.click();
+  await expect(artistHeader).toHaveClass(/sort-asc/);
   await page.locator("#exportPlaylistBtn").click();
   await expect(page.locator("#statusText")).toContainText("Export complete");
-  expect(await page.evaluate(() => window.__exportFlow.map((call) => call.command)))
-    .toEqual(["reorder_playlist_tracks", "export_to_usb"]);
+  const flow = await page.evaluate(() => window.__exportFlow);
+  expect(flow.map((call) => call.command)).toEqual(["export_to_usb"]);
+  expect(flow[0].sort).toEqual({ sortBy: "artist", sortDir: "asc" });
+  // The page shows the order it exported, with no sort left over.
+  await expect(artistHeader).not.toHaveClass(/sort-asc/);
 
-  await page.evaluate(() => { window.__failSortCommit = true; window.__exportFlow = []; });
+  // A failed export says so once; the sort stays, and the playlists are read
+  // again (the export may have saved the sort or changed the USB).
+  const readsBefore = await page.evaluate(() => {
+    window.__exportFlow = [];
+    window.__exportAnswer = { ok: false, error: { code: "IO", message: "disk full" } };
+    return window.__playlistReads || 0;
+  });
   await artistHeader.click();
   await page.locator("#exportPlaylistBtn").click();
-  await expect(page.locator("#statusText")).toContainText("Export blocked: Save track order failed: disk full");
-  expect(await page.evaluate(() => window.__exportFlow.map((call) => call.command))).toEqual(["reorder_playlist_tracks"]);
+  await expect(page.locator("#statusText")).toHaveText("Export failed: disk full. See Event Log for details.");
+  await expect(artistHeader).toHaveClass(/sort-asc/);
+  expect(await page.evaluate(() => window.__exportFlow.map((call) => call.command))).toEqual(["export_to_usb"]);
+  await expect.poll(() => page.evaluate(() => window.__playlistReads)).toBe(readsBefore + 1);
 });
 
 test("changing the export sync mode releases and re-engages the open playlist's reorder lock without a USB rescan", async ({ page }) => {

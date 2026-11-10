@@ -1080,12 +1080,9 @@ async function runPlaylistExport(ctx, playlistId) {
   const { state, el, setProgress, stopProgressHeartbeat, emitStatus } = ctx;
   const playlist = state.playlists.find((item) => item.id === playlistId);
   if (!playlist) return;
-  try {
-    await ctx.commitActivePlaylistSort(playlistId);
-  } catch (err) {
-    emitStatus(t("ui-usb-export-sort-failed", { error: err.message || err }));
-    return;
-  }
+  // An active column sort becomes the exported order: the backend saves it
+  // first (unless the export can't change the order on the USB).
+  const sort = state.activeTab === playlistId ? ctx.tableSortState.playlistTracksBody : null;
 
   emitStatus(t("ui-usb-export-running", { name: playlist.name }));
   el.donateBtn.classList.add("exporting");
@@ -1102,11 +1099,14 @@ async function runPlaylistExport(ctx, playlistId) {
         includeAnalysis: true,
         pruneStale: !!state.exportPruneStale,
         backupBeforeExport: !!state.exportBackup
-      }
+      },
+      sort: sort?.key ? { sortBy: sort.key, sortDir: sort.dir || "asc" } : null
     });
   } catch (error) {
     const msg = error.message.trim() || t("ui-usb-export-failed-unknown");
     emitStatus(error.details?.statusText || t("ui-usb-export-failed", { error: msg }));
+    // The failed export may still have saved the sort or changed the USB.
+    refreshExportStatusInBackground(ctx);
     // Reported: the backend already put the reason in the Event Log, so the
     // caller must not log it again.
     return;
@@ -1118,6 +1118,9 @@ async function runPlaylistExport(ctx, playlistId) {
   }
   clearUsbDiagnostics(ctx);
   emitStatus(data.statusText, { warningText: data.warningText });
+  // The sort is the playlist's order now (or, locked, stays only a view the
+  // export didn't use): the page shows the order it exported.
+  if (sort) ctx.clearPlaylistTrackSort();
   ctx.applyPlaylistsState(data);
   state.currentPlaylistId = playlistId;
   ctx.updateModeText();

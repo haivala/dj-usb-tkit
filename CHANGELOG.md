@@ -46,6 +46,8 @@
   backup, now says what failed, as the status line does, instead of only the reason.
 - **Improvement:** After a playlist change, such as a rename, an add or an export, the sidebar's "On this USB" marks
   update together with the change instead of a moment after it.
+- **Improvement:** Exporting a playlist with a column sort active saves the sort as its order and exports in one
+  step. If that fails, the status line says once that the export failed, and the sort stays on screen.
 - **Chore:** The app window can no longer widen the set of folders it may load files from. The backend lets in
   the library's source folders and the selected USB itself.
 

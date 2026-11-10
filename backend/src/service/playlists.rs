@@ -1210,7 +1210,63 @@ impl BackendService {
         })
     }
 
+    /// Saves a new track order. A sort (`sortBy`) is the open playlist's column sort, saved
+    /// as its order; it is left unsaved, `reordered` 0, while exporting the playlist to the
+    /// selected USB couldn't change its order there (`playlist_sort_locked`).
     pub fn reorder_playlist_tracks(
+        &self,
+        req: ReorderPlaylistTracksRequest,
+    ) -> BackendResult<ReorderPlaylistTracksData> {
+        let sort_mode = req.ordered_track_ids.is_empty()
+            && req.move_track_id.is_none()
+            && req.sort_by.is_some();
+        if sort_mode {
+            let prune_stale = export_prune_stale_setting(&*self.db.connect()?)?;
+            let usb_root = self.selected_usb_root();
+            if self.playlist_sort_locked(&req.playlist_id, usb_root.as_deref(), prune_stale)? {
+                return Ok(ReorderPlaylistTracksData {
+                    playlist_id: req.playlist_id,
+                    reordered: 0,
+                });
+            }
+        }
+        self.save_playlist_track_order(req)
+    }
+
+    /// Whether a column sort of `playlist_id` stays a view: exporting it to `usb_root` with
+    /// `prune_stale` adds to the USB's playlist of the same name, whose order the export
+    /// never changes (`playlist_locks_reorder_on_export`).
+    pub(crate) fn playlist_sort_locked(
+        &self,
+        playlist_id: &str,
+        usb_root: Option<&std::path::Path>,
+        prune_stale: bool,
+    ) -> BackendResult<bool> {
+        let Some(usb_root) = usb_root else {
+            return Ok(false);
+        };
+        let conn = self.db.connect()?;
+        let name: Option<String> = conn
+            .query_row(
+                "SELECT name FROM playlists WHERE id = ?1",
+                params![playlist_id],
+                |row| row.get(0),
+            )
+            .optional()?;
+        let Some(name) = name else {
+            return Ok(false);
+        };
+        let same_name_exists_on_usb = self
+            .usb_playlist_names(usb_root)
+            .contains(&super::export::normalize_playlist_name_for_compare(&name));
+        Ok(super::export::playlist_locks_reorder_on_export(
+            prune_stale,
+            same_name_exists_on_usb,
+        ))
+    }
+
+    /// `reorder_playlist_tracks` without the sort lock.
+    pub(crate) fn save_playlist_track_order(
         &self,
         req: ReorderPlaylistTracksRequest,
     ) -> BackendResult<ReorderPlaylistTracksData> {

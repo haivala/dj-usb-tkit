@@ -524,7 +524,6 @@
     "ui-usb-export-failed": "Export failed: {error}. See Event Log for details.",
     "ui-usb-export-failed-unknown": "USB export failed",
     "ui-usb-export-running": "Exporting {name} to USB...",
-    "ui-usb-export-sort-failed": "Export blocked: {error}",
     "ui-usb-export-starting": "Starting USB export...",
     "ui-usb-forget-path-aria-label": "Forget {path}",
     "ui-usb-forget-tooltip": "Forget this USB device",

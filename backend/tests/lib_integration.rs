@@ -1022,6 +1022,7 @@ fn export_to_usb_writes_canonical_outputs() {
         usb_root: Some(usb.to_string_lossy().to_string()),
         playlist_id: playlist_id.clone(),
         options: None,
+        sort: None,
     });
     assert!(exported.ok, "export failed: {exported:?}");
     let data = exported.data.expect("export data");
@@ -1166,6 +1167,7 @@ fn export_to_usb_copies_anlz_bundle_for_fixture_mp3() {
         usb_root: Some(usb.to_string_lossy().to_string()),
         playlist_id,
         options: None,
+        sort: None,
     });
     assert!(exported.ok, "export failed: {exported:?}");
     let data = exported.data.expect("export data");
@@ -1298,6 +1300,7 @@ fn export_to_usb_prunes_stale_owned_assets_when_enabled() {
             prune_stale: false,
             ..Default::default()
         }),
+        sort: None,
     });
     assert!(export_one.ok, "first export failed: {export_one:?}");
 
@@ -1320,6 +1323,7 @@ fn export_to_usb_prunes_stale_owned_assets_when_enabled() {
             prune_stale: true,
             ..Default::default()
         }),
+        sort: None,
     });
     assert!(export_two.ok, "second export failed: {export_two:?}");
 
@@ -1452,6 +1456,7 @@ fn export_to_usb_mirror_prune_keeps_shared_audio_referenced_by_other_playlists()
             prune_stale: false,
             ..Default::default()
         }),
+        sort: None,
     });
     assert!(export_a.ok, "export A failed: {export_a:?}");
 
@@ -1464,6 +1469,7 @@ fn export_to_usb_mirror_prune_keeps_shared_audio_referenced_by_other_playlists()
             prune_stale: false,
             ..Default::default()
         }),
+        sort: None,
     });
     assert!(export_b.ok, "export B failed: {export_b:?}");
 
@@ -1502,6 +1508,7 @@ fn export_to_usb_mirror_prune_keeps_shared_audio_referenced_by_other_playlists()
             prune_stale: true,
             ..Default::default()
         }),
+        sort: None,
     });
     assert!(
         export_a_mirror.ok,
@@ -1650,6 +1657,7 @@ fn export_to_usb_mirror_prune_keeps_shared_artwork_referenced_by_other_playlists
                 prune_stale: false,
                 ..Default::default()
             }),
+            sort: None,
         });
         assert!(exported.ok, "export failed: {exported:?}");
     }
@@ -1694,6 +1702,7 @@ fn export_to_usb_mirror_prune_keeps_shared_artwork_referenced_by_other_playlists
             prune_stale: true,
             ..Default::default()
         }),
+        sort: None,
     });
     assert!(
         export_a_mirror.ok,
@@ -1817,6 +1826,7 @@ fn export_to_usb_mirror_prune_keeps_shared_analysis_referenced_by_other_playlist
                 prune_stale: false,
                 ..Default::default()
             }),
+            sort: None,
         });
         assert!(exported.ok, "export failed: {exported:?}");
     }
@@ -1858,6 +1868,7 @@ fn export_to_usb_mirror_prune_keeps_shared_analysis_referenced_by_other_playlist
             prune_stale: true,
             ..Default::default()
         }),
+        sort: None,
     });
     assert!(
         export_a_mirror.ok,
@@ -2001,6 +2012,7 @@ fn export_to_usb_preserves_existing_export_db_metadata_when_local_track_is_thin(
             prune_stale: false,
             ..Default::default()
         }),
+        sort: None,
     });
     assert!(exported.ok, "export failed: {exported:?}");
 
@@ -2165,6 +2177,7 @@ fn export_to_usb_additive_does_not_overwrite_existing_cover_art_by_playlist_posi
             prune_stale: false,
             ..Default::default()
         }),
+        sort: None,
     });
     assert!(export_old.ok, "initial export failed: {export_old:?}");
 
@@ -2215,6 +2228,7 @@ fn export_to_usb_additive_does_not_overwrite_existing_cover_art_by_playlist_posi
             prune_stale: false,
             ..Default::default()
         }),
+        sort: None,
     });
     assert!(export_new.ok, "additive export failed: {export_new:?}");
 
@@ -5389,6 +5403,7 @@ fn export_to_usb_test_matches_expected_usb_content_rows_for_exported_tracks() {
             prune_stale: false,
             ..Default::default()
         }),
+        sort: None,
     });
     assert!(exported.ok, "export failed: {exported:?}");
 
@@ -5680,6 +5695,7 @@ fn export_to_usb_produces_identical_content_and_pdb_rows_across_two_runs() {
                 prune_stale: false,
                 ..Default::default()
             }),
+            sort: None,
         });
         assert!(exported.ok, "export to {usb_root:?} failed: {exported:?}");
     }
@@ -5923,6 +5939,7 @@ fn fetch_usb_playlists_matches_existing_local_track_by_fingerprint_without_touch
             prune_stale: false,
             ..Default::default()
         }),
+        sort: None,
     });
     assert!(exported.ok, "export failed: {exported:?}");
 
@@ -6066,6 +6083,7 @@ fn export_to_usb_records_usb_device_export_history() {
             prune_stale: false,
             ..Default::default()
         }),
+        sort: None,
     });
     assert!(exported.ok, "export failed: {exported:?}");
 
@@ -6170,6 +6188,7 @@ fn adding_usb_track_creates_placeholder_when_no_local_match() {
             prune_stale: false,
             ..Default::default()
         }),
+        sort: None,
     });
     assert!(exported.ok, "export failed: {exported:?}");
 
@@ -6642,6 +6661,7 @@ fn export_to_usb_fingerprint_fallback_reuses_foreign_scheme_track_instead_of_dup
             prune_stale: false,
             ..Default::default()
         }),
+        sort: None,
     });
     assert!(exported.ok, "export failed: {exported:?}");
 

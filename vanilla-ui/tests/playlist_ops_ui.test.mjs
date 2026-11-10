@@ -132,18 +132,6 @@ test("commitActivePlaylistSort no-ops (still clears) when no sort is active", as
   assert.deepEqual(calls, [["clear"]]);
 });
 
-test("commitActivePlaylistSort no-ops when the playlist is now additive-export-locked", async () => {
-  const state = {
-    playlists: [{ id: "p1", name: "A", tracks: [{ id: "t1" }] }],
-    playlistUsbExportStatusById: new Map([["p1", { locksReorder: true }]])
-  };
-  const { calls, ctx } = commitCtx(state);
-
-  await commitActivePlaylistSort(ctx, "p1");
-
-  assert.deepEqual(calls, [["clear"]]);
-});
-
 test("commitActivePlaylistSort no-ops for a missing/empty playlist id", async () => {
   const state = { playlists: [], playlistUsbExportStatusById: new Map() };
   const { calls, ctx } = commitCtx(state);

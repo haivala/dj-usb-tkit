@@ -154,6 +154,7 @@ fn scan_and_export_single_track(
             prune_stale: false,
             ..Default::default()
         }),
+        sort: None,
     });
     assert!(exported.ok, "export failed: {exported:?}");
     assert_eq!(exported.data.expect("export data").data.exported_tracks, 1);
@@ -241,6 +242,7 @@ fn scan_and_export_tracks(
             prune_stale: false,
             ..Default::default()
         }),
+        sort: None,
     });
     assert!(exported.ok, "export failed: {exported:?}");
     assert_eq!(

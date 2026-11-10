@@ -870,6 +870,7 @@ fn export_to_usb_with_progress_reports_validation_error_for_empty_playlist_id() 
             usb_root: None,
             playlist_id: String::new(),
             options: None,
+            sort: None,
         },
         |_, _, _| {
             progress_events += 1;

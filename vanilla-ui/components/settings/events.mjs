@@ -138,26 +138,22 @@ export function bindSettingsEvents(ctx) {
 
   el.exportSyncModeGroup.addEventListener("change", async (event) => {
     const mode = String(event?.target?.value || "").toLowerCase();
-    state.exportPruneStale = mode !== "additive";
-    persistSetting(
-      STORAGE_KEY_EXPORT_PRUNE_STALE,
-      FRONTEND_DB_KEY_EXPORT_PRUNE_STALE,
-      state.exportPruneStale ? "1" : "0"
-    );
+    const pruneStale = mode !== "additive";
 
     const openPlaylist = getCurrentPlaylist();
     // Predict whether additive mode is about to lock the open playlist purely
     // to sequence the sort commit below -- `sameNameExistsOnUsb` is a
     // backend-provided fact already on the status map. The authoritative
-    // `locksReorder` comes from the backend refresh right after.
+    // `locksReorder` comes from the backend right after.
     const willLock = !!openPlaylist
-      && !state.exportPruneStale
+      && !pruneStale
       && !!state.playlistUsbExportStatusById?.get(openPlaylist.id)?.sameNameExistsOnUsb;
 
     // Switching mirror -> additive would freeze an in-progress column sort where
-    // it can never be committed, so commit it first, while still unlocked. The
-    // mode change is a global preference and always goes through -- if the save
-    // fails we just say so and carry on (the sort was only a view).
+    // it can never be committed, so commit it first, while the saved mode still
+    // lets the backend save it. The mode change is a global preference and
+    // always goes through -- if the save fails we just say so and carry on (the
+    // sort was only a view).
     let sortSaveFailed = false;
     if (willLock && isPlaylistSortActive()) {
       try {
@@ -166,6 +162,17 @@ export function bindSettingsEvents(ctx) {
         console.error(err);
         sortSaveFailed = true;
       }
+    }
+
+    state.exportPruneStale = pruneStale;
+    try {
+      await persistSetting(
+        STORAGE_KEY_EXPORT_PRUNE_STALE,
+        FRONTEND_DB_KEY_EXPORT_PRUNE_STALE,
+        pruneStale ? "1" : "0"
+      );
+    } catch (err) {
+      console.error(err);
     }
 
     // The setting is now persisted; the playlists' reorder locks follow it.

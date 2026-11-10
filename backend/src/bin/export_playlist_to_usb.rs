@@ -181,6 +181,7 @@ fn main() {
         usb_root: Some(usb_root.to_string_lossy().to_string()),
         playlist_id,
         options: None,
+        sort: None,
     });
     if !export.ok {
         let error = export.error.as_ref();

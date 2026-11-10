@@ -246,10 +246,10 @@ export async function commitActivePlaylistSort(ctx, playlistId) {
   clearPlaylistTrackSort(ctx);
   const playlist = (state.playlists || []).find((p) => p.id === playlistId);
   if (!playlistId || !playlist || !sort?.key) return;
-  if (state.playlistUsbExportStatusById?.get(playlistId)?.locksReorder) return;
   // Sort-commit mode: the backend reorders the whole playlist by these keys
   // (same comparator get_playlist_tracks uses) and persists it as the new
-  // position order -- no need for the client to hold every track.
+  // position order -- no need for the client to hold every track. It leaves
+  // the order alone while the playlist's export can't change it on the USB.
   // The reorder cleared the playlist's last export.
   applyPlaylistsState(ctx, await command("reorder_playlist_tracks", {
     playlistId,

@@ -399,6 +399,10 @@ See `docs/EXTERNAL_LIBRARIES.md` for behavior and the fields read.
   key and cues from the library over the app's own values. A list none of
   whose tracks can be imported fails, changing nothing
 
+`export_to_usb` takes `sort` (`{ sortBy, sortDir }`, or `null`), the open playlist's column
+sort: it is saved as the playlist's track order before the export, as `reorder_playlist_tracks`'s
+`sortBy` mode saves it, unless the order is locked on the USB (see below).
+
 `export_to_usb` options:
 
 - `pruneStale = true` -> mirror mode (target playlist membership rewritten from current manifest)
@@ -467,7 +471,8 @@ to playlist membership insertion. Each resolution names the candidate's `previou
 `reorder_playlist_tracks` persists a new order to the `playlist_tracks.position` column for a
 local (app-owned) playlist, in one of three request shapes — `orderedTrackIds` (the full order),
 `sortBy`/`sortDir` (server sorts the whole playlist by that column and persists it — commits a
-client column sort), or `moveTrackId` + optional `beforeTrackId` (single-move for a paginated
+client column sort; left unsaved, `reordered` 0, while the playlist's order is locked on the
+selected USB), or `moveTrackId` + optional `beforeTrackId` (single-move for a paginated
 drag-reorder). `get_playlist_tracks` also returns `unanalyzedCount` over the whole filtered
 playlist, since a paginated client can't count them from one page, with the Analyze Missing
 button's `analyzeMissingLabel` and `analyzeMissingTooltip`. See `docs/PLAYLISTS_PLAYBACK.md`

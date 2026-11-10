@@ -2847,9 +2847,6 @@ ui-usb-title = USB Browser
 # $error: why they failed.
 ui-usb-auto-diagnostics-failed = Auto-diagnostics failed: { $error }
 ui-usb-diagnostics-running = Running USB diagnostics...
-# The status line when a playlist export can't start because the playlist's sort order wasn't saved.
-# $error: why saving it failed (it says so).
-ui-usb-export-sort-failed = Export blocked: { $error }
 # The status line while a playlist is exported.
 # $name: the playlist's name.
 ui-usb-export-running = Exporting { $name } to USB...

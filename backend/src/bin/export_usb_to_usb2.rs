@@ -239,6 +239,7 @@ fn main() {
             usb_root: Some(target_root.to_string_lossy().to_string()),
             playlist_id: playlist_id.clone(),
             options: None,
+            sort: None,
         });
         if !export.ok {
             eprintln!(
