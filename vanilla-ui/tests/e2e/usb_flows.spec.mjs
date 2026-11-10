@@ -184,7 +184,7 @@ function installTauriMock(page, mode) {
             return { ok: true, data: { items: [] } };
           }
           if (command === "prune_usb_device") {
-            return { ok: true, data: { pruned: true } };
+            return { ok: true, data: { pruned: true, devices: [] } };
           }
           if (command === "run_usb_diagnostics") {
             return { ok: true, data: diagnosticsPayload };
@@ -1747,24 +1747,28 @@ test("a stored USB isn't shown as selected, or read, until it's validated", asyn
   expect(await page.evaluate(() => window.__validates)).toBe(0);
 });
 
-test("restoring a backup: cancel and failure change nothing; success clears the report and lists and applies the export status", async ({ page }) => {
+test("restoring a backup: cancel and failure change nothing; success clears the report and lists and applies the playlists and backups it answers with", async ({ page }) => {
   await installTauriMock(page, "valid");
   await page.addInitScript(() => {
     const invoke = window.__TAURI__.core.invoke;
     window.__playlistReads = 0;
     window.__restores = 0;
     window.__deletes = [];
+    window.__backupLists = 0;
+    const backup = { timestamp: "2020-01-01_00-00-00", timeText: "the time", reasonText: "the reason", detailText: "the detail", restoreConfirmText: "Restore it?", deleteConfirmText: "Delete it?", files: ["export.pdb"], reason: "export", sizeBytes: 1024, location: "usb" };
+    const backups = (summaryText) => ({ summaryText, emptyText: "none", items: [backup] });
     window.__TAURI__.core.invoke = async (command, payload) => {
       if (command === "list_playlists") {
         return { ok: true, data: { playlists: [{ id: "pl-1", name: "Local Set", source: "local" }], playlistUsbExportStatus: [] } };
       }
       if (command === "list_usb_backups") {
-        return { ok: true, data: { summaryText: "the summary", emptyText: "none", items: [{ timestamp: "2020-01-01_00-00-00", timeText: "the time", reasonText: "the reason", detailText: "the detail", restoreConfirmText: "Restore it?", deleteConfirmText: "Delete it?", files: ["export.pdb"], reason: "export", sizeBytes: 1024, location: "usb" }] } };
+        window.__backupLists += 1;
+        return { ok: true, data: backups("the summary") };
       }
       if (command === "fetch_usb_playlists") window.__playlistReads += 1;
       if (command === "delete_usb_backup") {
         window.__deletes.push(payload.request.timestamp);
-        return { ok: true, data: { deleted: true, statusText: "Deleted PDB backup" } };
+        return { ok: true, data: { deleted: true, statusText: "Deleted PDB backup", backups: backups("after the delete") } };
       }
       if (command === "restore_usb_backup") {
         window.__restores += 1;
@@ -1774,6 +1778,8 @@ test("restoring a backup: cancel and failure change nothing; success clears the 
           data: {
             restored: true,
             statusText: "Restored eDB and PDB from backup",
+            backups: backups("after the restore"),
+            playlists: [{ id: "pl-1", name: "Local Set", source: "local" }],
             playlistUsbExportStatus: [{ playlistId: "pl-1", playlistName: "Local Set", usbSelected: true, sameNameExistsOnUsb: true, markLabel: "On this USB" }]
           }
         };
@@ -1811,6 +1817,9 @@ test("restoring a backup: cancel and failure change nothing; success clears the 
   await expect(page.locator("#statusText")).toContainText("Deleted PDB backup");
   expect(await page.evaluate(() => window.__deletes)).toEqual(["2020-01-01_00-00-00"]);
   await expect(report).toHaveText("WARN");
+  // The list came with the delete's answer: no second read.
+  await expect(page.locator("#backupsSummary")).toHaveText("after the delete");
+  expect(await page.evaluate(() => window.__backupLists)).toBe(1);
 
   await page.evaluate(() => { window.__failRestore = true; });
   await restoreBtn.click();
@@ -1829,6 +1838,10 @@ test("restoring a backup: cancel and failure change nothing; success clears the 
   await expect(usbRow).toHaveCount(0);
   await expect(mark).toHaveClass(/exported/);
   await expect(mark).toHaveAttribute("aria-label", "On this USB");
+  await expect(page.locator("#backupsSummary")).toHaveText("after the restore");
+  // Opening the list, then the failed restore's re-read; the successful one
+  // brought its list along.
+  expect(await page.evaluate(() => window.__backupLists)).toBe(2);
 
   // Opening the page reads the restored list.
   await page.locator('.nav-item[data-view="usb-playlists"]').click();

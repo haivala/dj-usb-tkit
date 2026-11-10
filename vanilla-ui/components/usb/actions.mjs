@@ -1305,11 +1305,11 @@ function applyUsbDevices(ctx, devices) {
 export async function pruneUsbDevice(ctx, id) {
   if (!id) return;
   try {
-    await ctx.command("prune_usb_device", { id });
+    const data = await ctx.command("prune_usb_device", { id });
+    applyUsbDevices(ctx, data.devices);
   } catch (err) {
     console.warn(`Failed to prune USB device ${id}:`, err);
   }
-  await loadUsbDevices(ctx);
 }
 
 export function renderUsbRecentRoots(ctx) {

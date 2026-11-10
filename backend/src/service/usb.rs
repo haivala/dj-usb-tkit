@@ -921,8 +921,10 @@ impl BackendService {
         if let Some(label) = label.filter(|label| !label.trim().is_empty()) {
             usb_utils::forget_drive_name(&conn, label.trim())?;
         }
+        drop(conn);
         Ok(crate::models::PruneUsbDeviceData {
             pruned: changed > 0,
+            devices: self.list_usb_devices()?.items,
         })
     }
 
@@ -4395,11 +4397,7 @@ mod tests {
             .prune_usb_device(crate::models::PruneUsbDeviceRequest { id: id.clone() })
             .expect("prune");
         assert!(pruned.pruned);
-
-        let after = service
-            .list_usb_devices()
-            .expect("list devices after prune");
-        assert!(after.items.is_empty());
+        assert!(pruned.devices.is_empty(), "the list comes back without it");
 
         let pruned_again = service
             .prune_usb_device(crate::models::PruneUsbDeviceRequest { id })

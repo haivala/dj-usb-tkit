@@ -20,7 +20,12 @@ export async function renderBackups(ctx) {
     showBackupsMessage(el.backupsList, err?.message || String(err));
     return;
   }
+  applyBackups(ctx, data);
+}
 
+// A backups list as list_usb_backups, a restore or a delete answers it.
+function applyBackups(ctx, data) {
+  const { state, el } = ctx;
   const { items } = data;
   state.usbBackups = items;
   el.backupsSummary.textContent = data.summaryText;
@@ -64,9 +69,9 @@ export async function restoreUsbBackup(ctx, timestamp) {
   // again when their page opens.
   ctx.clearUsbDiagnostics();
   ctx.usbContentChanged();
-  ctx.applyPlaylistUsbExportStatus(data.playlistUsbExportStatus);
+  ctx.applyPlaylistsState(data);
   await ctx.renderCurrentPlaylistTracksFromState();
-  await renderBackups(ctx);
+  applyBackups(ctx, data.backups);
 }
 
 export async function deleteUsbBackup(ctx, timestamp) {
@@ -79,11 +84,15 @@ export async function deleteUsbBackup(ctx, timestamp) {
   });
   if (!confirmed) return;
 
+  let data;
   try {
-    const data = await command("delete_usb_backup", { usbRoot: state.usbRoot, timestamp });
-    emitStatus(data.statusText);
+    data = await command("delete_usb_backup", { usbRoot: state.usbRoot, timestamp });
   } catch (err) {
     emitStatus(err?.message || String(err));
+    // Some of its files may be gone: show the list as it is now.
+    await renderBackups(ctx);
+    return;
   }
-  await renderBackups(ctx);
+  emitStatus(data.statusText);
+  applyBackups(ctx, data.backups);
 }

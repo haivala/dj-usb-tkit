@@ -1412,7 +1412,7 @@ pub async fn list_usb_backups(
 pub async fn restore_usb_backup(
     state: State<'_, BackendCommands>,
     request: RestoreUsbBackupRequest,
-) -> Result<ApiResponse<RestoreUsbBackupData>, String> {
+) -> Result<ApiResponse<crate::models::WithPlaylists<RestoreUsbBackupData>>, String> {
     let commands = state.inner().clone();
     Ok(run_blocking_command("restore_usb_backup", move || {
         commands.restore_usb_backup(request)

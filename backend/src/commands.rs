@@ -531,9 +531,10 @@ impl BackendCommands {
     pub fn restore_usb_backup(
         &self,
         req: RestoreUsbBackupRequest,
-    ) -> ApiResponse<RestoreUsbBackupData> {
+    ) -> ApiResponse<WithPlaylists<RestoreUsbBackupData>> {
+        // The restored databases change what the playlists' USB marks show.
         wrap_failed(
-            self.service.restore_usb_backup(req),
+            self.with_playlists(self.service.restore_usb_backup(req)),
             tr::backups_restore_failed,
         )
     }

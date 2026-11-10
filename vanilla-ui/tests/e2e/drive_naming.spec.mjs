@@ -12,7 +12,10 @@ function installTauriMock(
     window.__setNameCalls = [];
     let storedName = deviceName;
     const usbRoot = "/Volumes/USB-TEST";
-    const devices = () => [
+    window.__deviceLists = 0;
+    window.__prunes = [];
+    let forgotten = false;
+    const devices = () => forgotten ? [] : [
       {
         id: "dev-1",
         rootPath: usbRoot,
@@ -41,10 +44,13 @@ function installTauriMock(
             };
           }
           if (command === "list_usb_devices") {
+            window.__deviceLists += 1;
             return { ok: true, data: { items: devices() } };
           }
           if (command === "prune_usb_device") {
-            return { ok: true, data: { pruned: true } };
+            window.__prunes.push(payload?.request?.id);
+            forgotten = true;
+            return { ok: true, data: { pruned: true, devices: devices() } };
           }
           if (command === "select_usb") {
             const path = String(payload?.request?.path || "");
@@ -140,6 +146,21 @@ test("clicking a recent USB pill for an unnamed drive opens the naming prompt, s
   await page.locator("#usbRecentHeader").click();
   await expect(page.locator("#usbRecentRow")).not.toHaveClass(/collapsed/);
   await expect(page.locator('#usbRecentList button[data-usb-recent-path="/Volumes/USB-TEST"]')).toBeVisible();
+});
+
+test("forgetting a recent USB drops it from the list the prune answers with", async ({ page }) => {
+  await installTauriMock(page);
+  await page.goto("/");
+  await page.locator('.nav-item[data-view="usb"]').click();
+  const pill = page.locator('#usbRecentList button[data-usb-recent-path="/Volumes/USB-TEST"]');
+  await expect(pill).toBeVisible();
+  const lists = await page.evaluate(() => window.__deviceLists);
+
+  await page.locator("#usbRecentList .usb-cfg-recent-prune-btn").click();
+  await expect(pill).toHaveCount(0);
+  expect(await page.evaluate(() => window.__prunes)).toEqual(["dev-1"]);
+  // The list came with the prune's answer: no second read.
+  expect(await page.evaluate(() => window.__deviceLists)).toBe(lists);
 });
 
 test("clicking a recent USB pill for an already-named drive does not reopen the naming prompt, and shows the name in the status-line badge", async ({ page }) => {

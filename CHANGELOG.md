@@ -56,6 +56,8 @@
   stays added, the status line says the indexing failed, and the next scan indexes it.
 - **Improvement:** Relocating a missing source folder also indexes the new folder, so files only it has join
   the library without a separate scan.
+- **Improvement:** Restoring or deleting a backup and forgetting a recent USB update their list from the
+  action's own answer instead of reading it again.
 - **Chore:** The app window can no longer widen the set of folders it may load files from. The backend lets in
   the library's source folders and the selected USB itself.
 

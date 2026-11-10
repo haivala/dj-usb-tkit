@@ -1560,10 +1560,12 @@ pub struct PruneUsbDeviceRequest {
     pub id: String,
 }
 
-#[derive(Debug, Clone, Default, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct PruneUsbDeviceData {
     pub pruned: bool,
+    /// The known drives after the prune (`list_usb_devices`).
+    pub devices: Vec<UsbDeviceSummary>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -1675,10 +1677,8 @@ pub struct RestoreUsbBackupData {
     /// The status line after the restore.
     #[serde(default)]
     pub status_text: String,
-    /// Computed from the restored databases. Empty if that failed (logged),
-    /// because the restore itself has already succeeded.
-    #[serde(default)]
-    pub playlist_usb_export_status: Vec<PlaylistUsbExportStatus>,
+    /// The backups list after the restore (it took a "Before restore" backup).
+    pub backups: ListUsbBackupsData,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -1695,6 +1695,8 @@ pub struct DeleteUsbBackupData {
     /// The status line after the delete.
     #[serde(default)]
     pub status_text: String,
+    /// The backups list without the deleted one.
+    pub backups: ListUsbBackupsData,
 }
 
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]

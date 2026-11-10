@@ -335,7 +335,8 @@ applies them as they come and never asks for the list again after a change.
   nameTakenBy }`), each `null` when it can't be read (an Event Log warning says why); `devices`
   is the known drives, as `list_usb_devices` lists them. Plus the playlist state (see Playlists)
 - `list_usb_devices`
-- `prune_usb_device`
+- `prune_usb_device` — `{ id }` → `{ pruned, devices }`: `devices` is the list
+  `list_usb_devices` would answer after the prune.
 - `set_usb_device_name`
 - `audioFormats` (`select_usb`) →
   `{ formats: [{ format, label, allowed, locked, tooltip }], writable, hint }`: the USB's Player
@@ -464,7 +465,9 @@ The USB commands send the text the UI shows, ready to display:
 `list_usb_backups`/`restore_usb_backup`/`delete_usb_backup` back the Backups panel described in
 `docs/USB_BACKUPS.md` — listing, restoring, and deleting the timestamped
 PDB+eDB snapshot pairs taken before every USB-mutating operation. The list sends its summary, and each
-backup its row and dialog text.
+backup its row and dialog text. A restore and a delete answer with the list as it is afterwards
+(`backups`); a restore also with the playlists state (`WithPlaylists`), since the restored
+databases change the playlists' USB marks.
 
 ### Diagnostics and repairs
 

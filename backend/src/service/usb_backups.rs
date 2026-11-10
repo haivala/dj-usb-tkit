@@ -23,8 +23,7 @@ use crate::error::{BackendError, BackendResult};
 use crate::i18n::tr;
 use crate::models::{
     DeleteUsbBackupData, DeleteUsbBackupRequest, ListUsbBackupsData, ListUsbBackupsRequest,
-    RefreshPlaylistExportStatusRequest, RestoreUsbBackupData, RestoreUsbBackupRequest,
-    UsbBackupEntry, UsbBackupFile,
+    RestoreUsbBackupData, RestoreUsbBackupRequest, UsbBackupEntry, UsbBackupFile,
 };
 
 use super::usb_utils::resolve_usb_root;
@@ -537,27 +536,13 @@ impl BackendService {
         // The response has no warnings; the log has them.
         self.refresh_engine_library(&usb_root);
 
-        let playlist_usb_export_status = self
-            .refresh_playlist_export_status(RefreshPlaylistExportStatusRequest {
-                usb_root: Some(usb_root.to_string_lossy().to_string()),
-            })
-            .map(|data| data.playlist_usb_export_status)
-            .unwrap_or_else(|err| {
-                crate::logging::debug(
-                    "usb-backups",
-                    format!(
-                        "Failed to compute playlist export status after restore: {err}",
-                        err = err.english()
-                    ),
-                );
-                Vec::new()
-            });
-
         let restored_label = backup_files_label(files.iter().map(|(stem, _)| stem.as_str()));
         Ok(RestoreUsbBackupData {
             restored: true,
             status_text: tr::backups_restored(&restored_label).render(),
-            playlist_usb_export_status,
+            backups: self.list_usb_backups(ListUsbBackupsRequest {
+                usb_root: req.usb_root,
+            })?,
         })
     }
 
@@ -588,6 +573,9 @@ impl BackendService {
         Ok(DeleteUsbBackupData {
             deleted: true,
             status_text: tr::backups_deleted(&label).render(),
+            backups: self.list_usb_backups(ListUsbBackupsRequest {
+                usb_root: req.usb_root,
+            })?,
         })
     }
 }
@@ -1122,7 +1110,7 @@ mod tests {
     }
 
     #[test]
-    fn restore_usb_backup_returns_the_playlist_export_status() {
+    fn restore_usb_backup_returns_the_backups_list() {
         let (_dir, service) = test_service();
         let usb = tempdir().unwrap();
         let cache = tempdir().unwrap();
@@ -1140,12 +1128,6 @@ mod tests {
             "2020-01-01_00-00-00",
             b"restored",
         );
-        let playlist = service
-            .create_playlist(crate::models::CreatePlaylistRequest {
-                name: "Set A".to_string(),
-            })
-            .expect("create playlist");
-
         let result = service
             .restore_usb_backup(RestoreUsbBackupRequest {
                 usb_root: usb_root.to_string_lossy().to_string(),
@@ -1153,10 +1135,15 @@ mod tests {
             })
             .expect("restore");
 
-        assert_eq!(result.playlist_usb_export_status.len(), 1);
-        assert_eq!(
-            result.playlist_usb_export_status[0].playlist_id,
-            playlist.playlist_id
+        // The restored snapshot and the "Before restore" backup it took.
+        assert_eq!(result.backups.items.len(), 2);
+        assert_eq!(result.backups.summary_text, "2 backups");
+        assert!(
+            result
+                .backups
+                .items
+                .iter()
+                .any(|item| item.reason_text == "Before restore")
         );
     }
 
@@ -1254,6 +1241,10 @@ mod tests {
             })
             .expect("delete");
         assert!(result.deleted);
+        assert!(
+            result.backups.items.is_empty(),
+            "the list comes back without it"
+        );
         assert!(!pdb_snapshot.is_file());
         assert!(!edb_snapshot.is_file());
 

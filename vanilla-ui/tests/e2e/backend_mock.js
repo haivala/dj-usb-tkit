@@ -240,6 +240,7 @@
   const withListSummary = (data) => ({ listSummaryText: "mock list summary", ...data });
 
   // The builders that fill out a spec's own answer to each command.
+  const noBackups = { summaryText: "", emptyText: "", items: [] };
   const SHAPES = {
     get_library_sources: (data) => backend.librarySources([], data),
     fetch_usb_playlists: backend.usbPlaylists,
@@ -262,8 +263,9 @@
     reorder_usb_playlists: (data) => ({ statusText: "mock reorder status", warningText: "", ...data }),
     remove_usb_playlist: (data) => ({ statusText: "mock remove status", warningText: "", ...data }),
     set_usb_device_name: (data) => ({ statusText: "mock rename status", updated: true, ...data }),
-    restore_usb_backup: (data) => ({ statusText: "mock restore status", ...data }),
-    delete_usb_backup: (data) => ({ statusText: "mock delete status", ...data })
+    restore_usb_backup: (data) => ({ statusText: "mock restore status", backups: noBackups, ...data }),
+    delete_usb_backup: (data) => ({ statusText: "mock delete status", backups: noBackups, ...data }),
+    prune_usb_device: (data) => ({ pruned: true, devices: [], ...data })
   };
 
   // Every string the backend answered with: data and response text, which the test-language
@@ -284,7 +286,8 @@
     "create_playlist", "rename_playlist", "delete_playlist", "remove_tracks_from_playlist",
     "reorder_playlist_tracks", "add_track_candidates_to_playlist", "add_track_candidates_to_playlists",
     "add_library_selection_to_playlist", "add_library_selection_to_playlists",
-    "import_external_playlists", "export_to_usb", "set_usb_device_name", "select_usb"
+    "import_external_playlists", "export_to_usb", "set_usb_device_name", "select_usb",
+    "restore_usb_backup"
   ]);
 
   // Answers given their playlists here, not by a spec, carry this mark (kept
