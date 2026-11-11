@@ -7,8 +7,8 @@ import { catchErr } from "../shared/track_actions.mjs";
 import { setActiveListItem } from "../shell/actions.mjs";
 import { STORAGE_KEY_USB_ROOT, STORAGE_KEY_EXPORT_ENGINE_LIBRARY } from "../../settings_keys.mjs";
 import {
-  applyUsbOrderEdit, applyUsbOrderSortClick, dropUsbOrderEdit, forgetUsbOrderSort, isUsbOrderEditing,
-  refuseWhileUsbOrderEditing, renderUsbOrderEditControls, settleUsbOrderEditBeforeLeaving
+  applyUsbOrderEdit, applyUsbOrderSortClick, forgetUsbOrderSort, isUsbOrderEditing,
+  refuseWhileUsbOrderEditing, renderUsbOrderEditControls
 } from "./order_edit.mjs";
 
 // Job types that scope a Tauri command to state.usbRoot -- while one of
@@ -516,8 +516,6 @@ export async function validateAndSetUsbRoot(ctx, path) {
 
   const input = String(path || "").trim();
   const previousRoot = state.usbRoot;
-  // Another stick (or none): an order edit on this one is saved, discarded or kept.
-  if (input !== (previousRoot || "") && !(await settleUsbOrderEditBeforeLeaving(ctx))) return false;
   if (input && previousRoot && input !== previousRoot) {
     hideUsbDiagnostics(ctx);
   }
@@ -526,8 +524,6 @@ export async function validateAndSetUsbRoot(ctx, path) {
   // path) and saves it as the folder the app reopens with.
   const data = await command("select_usb", { path: input });
   const { valid, canInitialize } = data;
-  // The same stick, gone: its order edit can't be saved any more.
-  if (!valid) await dropUsbOrderEdit(ctx);
   state.usbRootValid = valid;
   state.usbRoot = input ? data.normalizedRoot || input : null;
   updateUsbRootText(ctx, state.usbRoot, valid);
@@ -565,7 +561,6 @@ export async function validateAndSetUsbRoot(ctx, path) {
 
 export async function removeUsbPlaylist(ctx, playlist) {
   const { state, emitStatus } = ctx;
-  if (refuseWhileUsbOrderEditing(ctx)) return;
   const confirmed = await ctx.openConfirmDialog({
     title: t("ui-usb-playlists-remove-title"),
     message: playlist.removeConfirmText,
@@ -768,7 +763,6 @@ export async function runUsbParityReport(ctx) {
 
 export async function previewUsbRepairs(ctx) {
   const { state, emitStatus } = ctx;
-  if (refuseWhileUsbOrderEditing(ctx)) return;
   emitStatus(t("ui-usb-repair-previewing"));
   const data = await ctx.command("repair_usb_diagnostics", {
     usbRoot: state.usbRoot
@@ -779,7 +773,6 @@ export async function previewUsbRepairs(ctx) {
 
 export async function applyUsbRepairs(ctx) {
   const { state, emitStatus } = ctx;
-  if (refuseWhileUsbOrderEditing(ctx)) return;
   emitStatus(t("ui-usb-repair-applying"));
   const selectedFixIds = Array.from(state.selectedRepairFixIds);
   const data = await ctx.command("repair_usb_diagnostics", {
@@ -958,7 +951,6 @@ export async function loadUsbPlayerMenuConfig(ctx) {
 // item stays selected, in whichever list it is now in.
 async function editUsbPlayerMenu(ctx, action, kind, side) {
   const { state, emitStatus } = ctx;
-  if (refuseWhileUsbOrderEditing(ctx)) return;
   const data = await ctx.command("update_usb_player_menu_config", {
     usbRoot: state.usbRoot,
     action,
@@ -1016,7 +1008,6 @@ export async function loadUsbBackgroundColor(ctx) {
 
 export async function setUsbBackgroundColor(ctx, color) {
   const { state, emitStatus } = ctx;
-  if (refuseWhileUsbOrderEditing(ctx)) return;
   const data = await ctx.command("set_usb_background_color", { usbRoot: state.usbRoot, color });
   state.usbBackgroundColor = data;
   if (data.updated) clearUsbDiagnostics(ctx);
@@ -1029,7 +1020,7 @@ export async function setUsbBackgroundColor(ctx, color) {
 // export too).
 export async function exportPlaylistToUsb(ctx, playlistId) {
   const { state } = ctx;
-  if (state.exportStarting || isUsbRootChangeBlocked(state) || refuseWhileUsbOrderEditing(ctx)) return;
+  if (state.exportStarting || isUsbRootChangeBlocked(state)) return;
   state.exportStarting = true;
   ctx.updatePlaylistExportButtons();
   try {
@@ -1234,7 +1225,6 @@ export function createUsbHistoryTracksController(ctx) {
 
 export async function initializeUsb(ctx) {
   const { state, el, emitStatus } = ctx;
-  if (refuseWhileUsbOrderEditing(ctx)) return;
   try {
     const data = await ctx.command("initialize_usb", { usbRoot: state.usbRoot });
     emitStatus(data.statusText);

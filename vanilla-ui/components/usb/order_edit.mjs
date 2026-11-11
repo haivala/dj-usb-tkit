@@ -8,17 +8,16 @@ import { clearUsbDiagnostics, isUsbRootChangeBlocked, refreshUsb, renderUsbPlayl
 // `commit_usb_order_edit`). Nothing is written to the stick until Save order.
 // `state.usbOrderEdit` is the backend's `UsbOrderEditState`, as last answered.
 
-// The pages that show the selected USB: the order edit stays on across them.
-const USB_VIEWS = new Set(["usb", "usb-playlists", "usb-history", "usb-player-menu", "backups"]);
-
 const BODY_ID = "usbPlaylistTracks";
 
 export function isUsbOrderEditing(state) {
   return !!state.usbOrderEdit?.active;
 }
 
-// USB writes (export, repair, remove, player menu…) wait for the edit to end.
-// True (with the reason on the status line) when one must not start.
+// The edit lives on the USB Playlists page, which can't be left with it on.
+// What can still be reached from there and writes the USB (renaming the drive
+// from the header) waits for it to end: true, with the reason on the status
+// line, when it must not start.
 export function refuseWhileUsbOrderEditing(ctx) {
   if (!isUsbOrderEditing(ctx.state)) return false;
   ctx.emitStatus(t("ui-usb-playlists-order-edit-blocks-jobs"));
@@ -37,7 +36,6 @@ export function applyUsbOrderEdit(ctx, orderEdit, blockedText) {
   if (wasEditing && !isUsbOrderEditing(state)) forgetUsbOrderSort(ctx);
   renderUsbOrderEditControls(ctx);
   renderUsbPlaylists(ctx);
-  ctx.updatePlaylistExportButtons();
   // The track rows' drag handles show only while editing.
   if (wasEditing !== isUsbOrderEditing(state)) ctx.usbPlaylistTracksCtl.rerender();
 }
@@ -97,9 +95,9 @@ export async function saveUsbOrderEdit(ctx) {
   return true;
 }
 
-// Leaving the USB pages (or switching sticks) with an edit on. With nothing
-// changed the edit just ends; otherwise the user saves, discards or stays.
-// True when the caller may go ahead.
+// Leaving the USB Playlists page with an edit on, for any other page. With
+// nothing changed the edit just ends; otherwise the user saves, discards or
+// stays. True when the caller may go ahead.
 export async function settleUsbOrderEditBeforeLeaving(ctx) {
   const { state } = ctx;
   if (!isUsbOrderEditing(state)) return true;
@@ -120,21 +118,6 @@ export async function settleUsbOrderEditBeforeLeaving(ctx) {
     return true;
   }
   return false;
-}
-
-export function leavesUsbViews(viewId) {
-  return !USB_VIEWS.has(viewId);
-}
-
-// The stick went away with an edit on: nothing can be saved, so no question.
-// The backend's edit ends too (it may still hold it when the folder is there
-// but no longer a USB).
-export async function dropUsbOrderEdit(ctx) {
-  if (!isUsbOrderEditing(ctx.state)) return;
-  applyUsbOrderEdit(ctx, null);
-  await ctx.command("cancel_usb_order_edit", { usbRoot: ctx.state.usbRoot })
-    .catch((err) => console.warn("cancel_usb_order_edit failed:", err));
-  ctx.emitStatus(t("ui-usb-playlists-order-dropped"));
 }
 
 // A playlist row dropped at a new index in the list.

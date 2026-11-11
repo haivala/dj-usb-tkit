@@ -105,9 +105,9 @@ inside a playlist (not while searching), or click a column sort to make it that 
 The backend holds the pending order and the pages show it; playlists whose track order changed
 get a mark. Nothing is written until **Save order**, which saves it all in one write (see
 `commit_usb_order_edit` in `docs/COMMANDS.md`); **Cancel** drops it. A failed save keeps the edit
-on. Leaving the USB pages or selecting another stick with unsaved changes asks to save, discard
-or stay; a stick that's gone drops the edit. Other USB writes (export, repair, removing a
-playlist, the player menu) wait until the edit ends. The app playlist and the USB playlist share
+on. Going to any other page with unsaved changes asks to save, discard or stay (with nothing
+changed, the edit just ends), so the other USB pages' writes and selecting another stick only
+happen once the edit is over. The app playlist and the USB playlist share
 the track-row drag code (`components/shared/track_drag_reorder.mjs`), both committing a view sort
 the moment a drag starts.
 

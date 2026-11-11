@@ -2951,8 +2951,6 @@ ui-usb-playlists-leave-title = Unsaved order
 ui-usb-playlists-leave-message = The new order of this USB's playlists isn't saved yet.
 ui-usb-playlists-leave-discard = Discard changes
 ui-usb-playlists-leave-stay = Stay
-# The status line when the USB went away during an order edit.
-ui-usb-playlists-order-dropped = USB disconnected: the unsaved order was dropped
 # The status line when a USB playlist's tracks can't be loaded.
 # $error: why it failed.
 ui-usb-playlists-load-failed = Failed to load USB playlist: { $error }

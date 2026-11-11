@@ -1177,28 +1177,16 @@ function sentRequests(page, command) {
   return page.evaluate((command) => window.__calls.filter((c) => c.command === command).map((c) => c.request), command);
 }
 
-// Answers select_usb with another known drive, so the recent list offers a stick switch.
-function offerOtherStick(page) {
-  return page.addInitScript(() => {
-    window.__e2eBackend.override(async (command, request, payload, next) => {
-      if (command !== "select_usb") return undefined;
-      const selected = await next();
-      return { ...selected, data: { ...selected.data, devices: [{ id: "dev-1", rootPath: "/Volumes/OTHER", label: "Other", mounted: true }] } };
-    });
-  });
-}
-
 const usbTrackIds = (page) => page.locator("#usbPlaylistTracks .track-grid-row[data-track-id]")
   .evaluateAll((rows) => rows.map((row) => row.dataset.trackId));
 const usbTrackHandle = (trackId) => `#usbPlaylistTracks .track-grid-row[data-track-id="${trackId}"] [data-playlist-track-drag-handle]`;
 const usbTrackRow = (trackId) => `#usbPlaylistTracks .track-grid-row[data-track-id="${trackId}"]`;
 
 // Edit order: playlists and tracks are put in a new order (drag or sort) and nothing is sent to
-// be written until Save order; Cancel drops it. Leaving the USB pages or switching sticks with
-// unsaved changes asks to save, discard or stay.
+// be written until Save order; Cancel drops it. Going to any other page with unsaved changes,
+// the other USB pages too, asks to save, discard or stay.
 test("USB playlist reorder", async ({ page }) => {
   await installTauriMock(page, "reorder");
-  await offerOtherStick(page);
   await countPlaylistFetches(page);
   await page.goto("/");
 
@@ -1315,36 +1303,27 @@ test("USB playlist reorder", async ({ page }) => {
   await page.locator("#usbTrackSearch").fill("");
   await expect(page.locator("#usbPlaylistTracks [data-playlist-track-drag-handle]")).toHaveCount(3);
 
-  // Leaving with unsaved changes: Escape, a backdrop click and Stay keep the edit and the page,
-  // for a view switch and a stick switch alike.
+  // Leaving with unsaved changes, for any page: Escape, a backdrop click and Stay keep the edit
+  // and the page.
   const libraryNav = page.locator('.nav-item[data-view="library"]');
-  const recent = page.locator('#usbRecentList button[data-usb-recent-path="/Volumes/OTHER"]');
-  const selectsBefore = (await sentRequests(page, "select_usb")).length;
-  for (const [leave, page_] of [[() => libraryNav.click(), "usb-playlists"], [() => recent.click(), "usb"]]) {
-    if (page_ === "usb") {
-      await page.locator('.nav-item[data-view="usb"]').click();
-      await page.locator("#usbRecentRow").evaluate((row) => row.classList.remove("collapsed"));
-    }
-    for (const dismiss of [
-      () => page.keyboard.press("Escape"),
-      () => dialog.click({ position: { x: 5, y: 5 } }),
-      () => page.locator("#confirmCancelBtn").click(),
-    ]) {
-      await leave();
-      await expect(dialog).toBeVisible();
-      await expect(page.locator("#confirmTitle")).toHaveText("Unsaved order");
-      await expect(page.locator("#confirmOkBtn")).toHaveText("Save order");
-      await expect(page.locator("#confirmAltBtn")).toHaveText("Discard changes");
-      await expect(page.locator("#confirmCancelBtn")).toHaveText("Stay");
-      await dismiss();
-      await expect(dialog).toBeHidden();
-      await expect(page.locator(`#panel-${page_}`)).toHaveClass(/active/);
-    }
+  const dismissals = [
+    () => page.keyboard.press("Escape"),
+    () => dialog.click({ position: { x: 5, y: 5 } }),
+    () => page.locator("#confirmCancelBtn").click(),
+  ];
+  for (const [i, view] of ["library", "usb", "usb-history", "usb-player-menu"].entries()) {
+    await page.locator(`.nav-item[data-view="${view}"]`).click();
+    await expect(dialog).toBeVisible();
+    await expect(page.locator("#confirmTitle")).toHaveText("Unsaved order");
+    await expect(page.locator("#confirmOkBtn")).toHaveText("Save order");
+    await expect(page.locator("#confirmAltBtn")).toHaveText("Discard changes");
+    await expect(page.locator("#confirmCancelBtn")).toHaveText("Stay");
+    await dismissals[i % dismissals.length]();
+    await expect(dialog).toBeHidden();
+    await expect(page.locator("#panel-usb-playlists")).toHaveClass(/active/);
   }
-  expect(await sentRequests(page, "select_usb")).toHaveLength(selectsBefore);
   expect(await sentRequests(page, "commit_usb_order_edit")).toHaveLength(0);
   expect(await sentRequests(page, "cancel_usb_order_edit")).toHaveLength(0);
-  await page.locator('.nav-item[data-view="usb-playlists"]').click();
   await expect(editText).toContainText("changed");
 
   // Discard: the edit is cancelled, then the view switches.

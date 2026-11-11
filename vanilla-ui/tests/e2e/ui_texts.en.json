@@ -554,7 +554,6 @@
     "ui-usb-playlists-leave-title": "Unsaved order",
     "ui-usb-playlists-load-failed": "Failed to load USB playlist: {error}",
     "ui-usb-playlists-loading": "Loading USB playlists...",
-    "ui-usb-playlists-order-dropped": "USB disconnected: the unsaved order was dropped",
     "ui-usb-playlists-order-edit-blocks-jobs": "Save or cancel the order edit first",
     "ui-usb-playlists-order-edited": "Track order changed",
     "ui-usb-playlists-read-failed": "USB load failed",

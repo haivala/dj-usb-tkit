@@ -2,7 +2,6 @@
 
 import { cloneTemplate } from "../../ui_utils.mjs";
 import { t } from "../../ui_texts.mjs";
-import { refuseWhileUsbOrderEditing } from "../usb/order_edit.mjs";
 
 function showBackupsMessage(list, text) {
   const row = cloneTemplate(list.ownerDocument, "tplLogMessageRow");
@@ -48,7 +47,6 @@ function applyBackups(ctx, data) {
 
 export async function restoreUsbBackup(ctx, timestamp) {
   const { state, command, openConfirmDialog, emitStatus } = ctx;
-  if (refuseWhileUsbOrderEditing(ctx)) return;
   const backup = state.usbBackups.find((b) => b.timestamp === timestamp);
   const confirmed = await openConfirmDialog({
     title: t("ui-backups-restore-title"),

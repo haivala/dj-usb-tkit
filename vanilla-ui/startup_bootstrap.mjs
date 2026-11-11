@@ -1,4 +1,4 @@
-import { leavesUsbViews, settleUsbOrderEditBeforeLeaving } from "./components/usb/order_edit.mjs";
+import { settleUsbOrderEditBeforeLeaving } from "./components/usb/order_edit.mjs";
 import { STATIC_TABS } from "./app_state.mjs";
 import { loadUiTexts, t } from "./ui_texts.mjs";
 import { createThemeManager, createAccentManager } from "./components/settings/actions.mjs";
@@ -320,8 +320,9 @@ export async function switchView(ctx, viewId) {
   const { state, el, document } = ctx;
 
   const viewChanged = viewId !== state.activeTab;
-  // An unsaved USB order edit is saved, discarded or kept (staying here).
-  if (viewChanged && leavesUsbViews(viewId) && !(await settleUsbOrderEditBeforeLeaving(ctx))) return;
+  // Leaving the USB Playlists page with an order edit on: it's saved,
+  // discarded or kept (staying here).
+  if (viewChanged && !(await settleUsbOrderEditBeforeLeaving(ctx))) return;
   if (viewChanged) {
     await ctx.stopPlaybackIfActive();
     try {
