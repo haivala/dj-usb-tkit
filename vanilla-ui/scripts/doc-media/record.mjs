@@ -592,9 +592,10 @@ function scenes(fixture) {
     },
     {
       // docs/EXTERNAL_LIBRARIES.md: Import under New, tick two rekordbox
-      // playlists in the grouped list, and the first opens as a new playlist.
+      // playlists in the grouped list and every Mixxx crate with its group's
+      // box, and the first opens as a new playlist.
       name: "import-playlist",
-      caption: "Importing two rekordbox playlists: the first opens as a new playlist",
+      caption: "Importing two rekordbox playlists and all Mixxx crates: the first opens as a new playlist",
       editor: false,
       opts: {
         externalLibraries: {
@@ -606,6 +607,7 @@ function scenes(fixture) {
           mixxx: [
             { id: "4", name: "Late Night", kind: "playlist", titles: ["Afterglow", "Last Ferry"] },
             { id: "2", name: "Peak Time", kind: "crate", titles: ["White Nights", "Last Ferry", "Pier Lights"] },
+            { id: "5", name: "Sunrise", kind: "crate", titles: ["Northbound", "Frost Line"] },
             { id: "7", name: "2026-09-26", kind: "history", titles: ["Sauna Talk", "Driftwood"] },
           ],
         },
@@ -616,10 +618,16 @@ function scenes(fixture) {
         await record(async () => {
           await page.waitForTimeout(600);
           await clickOn(page, page.locator("#importPlaylistBtn"), 900);
-          // Tick two lists, then import them together.
-          const pick = (index) => page.locator("#playlistImportList input").nth(index);
+          // Tick two rekordbox lists, then every Mixxx crate with its
+          // group's box, and import them together.
+          const pick = (index) => page.locator("#playlistImportList input[data-group]").nth(index);
           await clickOn(page, pick(0), 700);
           await clickOn(page, pick(1), 700);
+          const mixxxCrates = page.locator("#playlistImportList .playlist-import-column")
+            .filter({ has: page.locator(".playlist-import-column-title", { hasText: "Mixxx" }) })
+            .locator(".check-list-group", { hasText: "Crates" })
+            .locator("input");
+          await clickOn(page, mixxxCrates, 900);
           await page.waitForTimeout(500);
           await clickOn(page, page.locator("#playlistImportOkBtn"), 300);
           await page.locator("#playlistTracksBody .track-grid-row").first().waitFor();

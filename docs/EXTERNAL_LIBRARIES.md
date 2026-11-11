@@ -113,7 +113,9 @@ when either library is found. It opens a checklist with a column per library:
 Only lists with tracks are shown, each with its track count. rekordbox smart
 playlists aren't listed, because rekordbox doesn't store their tracks.
 
-Tick any number of lists, from either library, and click **Import**. Each
+Tick any number of lists, from either library, and click **Import**. The box
+on a group's heading (Playlists, Crates, History) ticks or unticks every list
+in that group; it shows half-ticked when only some are. Each
 ticked list becomes a new playlist with the same name and track order (Mixxx
 crates have no order, so their tracks are sorted by artist and title). Its
 tracks are imported into the library the same way as with the chip's ↻, and
@@ -122,7 +124,7 @@ the checklist's order; one that fails doesn't stop the rest, and the status
 line names it. When they are done, the first imported playlist opens. A track
 listed twice in a list is added to its playlist once.
 
-![Import under New, ticking two playlists, and the first imported playlist opening](assets/import-playlist.webp)
+![Import under New, ticking two rekordbox playlists and all Mixxx crates, and the first imported playlist opening](assets/import-playlist.webp)
 
 An imported playlist's header says where it came from, e.g. `Friday Set (5 tracks, Total time: 14:05) · Imported from
 rekordbox`.
