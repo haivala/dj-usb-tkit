@@ -33,6 +33,7 @@ use crate::pdb_reader::{ParsedPdb, PdbPlaylistEntryRow, parse_pdb_bytes, pdb_pag
 use crate::utils::warning_text;
 
 use super::BackendService;
+use super::diagnostics::{FieldNoteParity, RatingColourParity, build_usb_parity_comparison};
 use super::export_helpers::canonicalize_track_path_identity;
 use super::repair::{
     restore_pdb_playlist_sort_orders, write_edb_playlist_order, write_edb_playlist_track_order,
@@ -190,6 +191,62 @@ fn order_edit_state(edit: &UsbOrderEdit) -> UsbOrderEditState {
         edited_playlist_ids,
         editing_text: editing_text.render(),
     }
+}
+
+/// Checks, on the staged copies, that the PDB and the eDB agree on the order
+/// the edit changed: each edited playlist's tracks (those both databases
+/// list) and, when the list was reordered, each moved playlist's place. The
+/// comparison is the parity report's (`build_usb_parity_comparison`), read
+/// only for those playlists. A mismatch fails the save before any write-back,
+/// with a hint at the strict parity repair.
+fn verify_saved_order(
+    usb_root: &Path,
+    pending: &PendingOrder,
+    parsed: &ParsedPdb,
+) -> BackendResult<()> {
+    let conn = crate::edb::open_edb_rw(usb_root)
+        .ok_or_else(|| BackendError::Validation(tr::usb_order_edit_edb_open_failed()))?;
+    let edb_playlists = crate::edb::read_edb(&conn, usb_root, crate::edb::EdbRead::ALL)
+        .map(|library| library.resolved_playlists(usb_root))
+        .unwrap_or_default();
+    drop(conn);
+    let (_, _, details, _) = build_usb_parity_comparison(
+        parsed,
+        &edb_playlists,
+        &RatingColourParity::default(),
+        &FieldNoteParity::default(),
+        None,
+    );
+    let names_of = |id: &str| -> HashSet<String> {
+        edb_playlist_names(id, Some(parsed)).into_iter().collect()
+    };
+    let track_edited: HashSet<String> = pending.tracks.keys().flat_map(|id| names_of(id)).collect();
+    let moved: HashSet<String> = pending
+        .playlists
+        .iter()
+        .flatten()
+        .flat_map(|id| names_of(id))
+        .collect();
+    let mut differing: Vec<String> = details
+        .iter()
+        .filter(|detail| {
+            let key = canonicalize_playlist_name(&detail.name);
+            let tracks_differ = track_edited.contains(&key) && detail.order_mismatch;
+            let place_differs = moved.contains(&key)
+                && detail.pdb_sort_order.is_some()
+                && detail.edb_sort_order.is_some()
+                && !detail.sort_order_match;
+            tracks_differ || place_differs
+        })
+        .map(|detail| detail.name.clone())
+        .collect();
+    if differing.is_empty() {
+        return Ok(());
+    }
+    differing.sort();
+    Err(BackendError::Validation(tr::usb_order_edit_verify_failed(
+        differing.join(", "),
+    )))
 }
 
 /// The edit of `usb_root`, when one is on and not being saved.
@@ -788,6 +845,16 @@ impl BackendService {
         }
         if pdb_changed && let Some((path, bytes)) = &pdb {
             std::fs::write(path, bytes)?;
+        }
+
+        // Nothing reaches the stick unless both databases now hold the same
+        // order for what the edit changed.
+        if let Some((_, bytes)) = &pdb
+            && vendor_edb_path(usb_root).is_file()
+            && (pdb_changed || edb_changed)
+        {
+            on_progress(60, 100, &tr::usb_progress_order_edit_verify().render());
+            verify_saved_order(usb_root, pending, &parse_pdb_bytes(bytes)?)?;
         }
 
         // Every write-back is checked before any starts, so a stick changed

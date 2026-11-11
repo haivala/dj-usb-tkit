@@ -5721,6 +5721,58 @@ mod tests {
     }
 
     #[test]
+    fn usb_order_edit_that_comes_out_different_in_the_two_databases_is_not_saved() {
+        let cache_dir = tempfile::tempdir().expect("cache dir").keep();
+        let _guard = crate::service::usb_staging::set_cache_root_for_test(Some(cache_dir));
+        let (_dir, service) = test_service();
+        let (_usb_dir, usb_root) = order_edit_usb();
+        // The eDB files "Song A" under another path than the PDB does (what the
+        // strict parity repair fixes): the edit's order, keyed by path, can't
+        // place it in the PDB, where it ends up last.
+        let conn = crate::edb::open_edb_rw(&usb_root).expect("open edb");
+        conn.execute(
+            "UPDATE content SET path = replace(path, 'a.mp3', 'a-moved.mp3') WHERE path LIKE '%a.mp3'",
+            [],
+        )
+        .expect("move a.mp3 in the edb");
+        drop(conn);
+        crate::service::usb_staging::write_back_if_changed(
+            &usb_root,
+            crate::service::usb_staging::DbKind::Edb,
+        )
+        .expect("write the edb back");
+        service
+            .validate_usb_root(crate::models::ValidateUsbRootRequest {
+                path: usb_root.to_string_lossy().to_string(),
+            })
+            .expect("validate usb");
+        let playlist_id = only_playlist_id(&service, &usb_root);
+
+        begin_order_edit(&service, &usb_root);
+        move_file(
+            &service,
+            &usb_root,
+            &playlist_id,
+            "c.mp3",
+            Some("a-moved.mp3"),
+        )
+        .expect("move");
+        let before = usb_db_bytes(&usb_root);
+        let err = commit_order_edit(&service, &usb_root).expect_err("orders differ");
+        let message = err.english();
+        assert!(
+            message.contains("My Playlist")
+                && message.contains("Upgrade Export Data To Strict Parity"),
+            "{message}"
+        );
+        assert_eq!(usb_db_bytes(&usb_root), before, "nothing written back");
+        assert!(
+            service.usb_order_edit_state(&usb_root).changed,
+            "the edit stays on"
+        );
+    }
+
+    #[test]
     fn usb_order_edit_refuses_changes_while_it_saves() {
         let (_dir, service) = test_service();
         let (_usb_dir, usb_root) = order_edit_usb();

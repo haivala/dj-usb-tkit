@@ -399,7 +399,10 @@ applies them as they come and never asks for the list again after a change.
 - `commit_usb_order_edit` — `{ usbRoot }`, a USB write job: one backup ("Before order edit",
   replacing the previous one of the same reason), the new playlist order and track order written
   to the PDB (t07 sort orders, t08 `entry_index`) and to the eDB (`playlist.sequenceNo`,
-  `playlist_content.sequenceNo`), each saved to the USB once, then one Engine DJ rebuild. A
+  `playlist_content.sequenceNo`), each saved to the USB once, then one Engine DJ rebuild. Before
+  saving, it checks with the parity report's comparison that the two databases hold the same order
+  for what the edit changed (an edited playlist's shared tracks, a moved playlist's place); if
+  not, nothing is saved and the error points at the strict parity repair. A
   failure keeps the edit on (Save again retries on fresh USB data); a failure after the PDB was
   saved but before the eDB was says so (`partial`). The move, sort, cancel and begin commands
   answer `{ orderEdit, statusText, warnings, warningText }`, as this one does.

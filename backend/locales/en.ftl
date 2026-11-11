@@ -72,6 +72,7 @@ usb-progress-resolving-usb-root = USB: Resolving USB root
 usb-progress-backing-up-usb-databases = USB: Backing up USB databases
 usb-progress-order-edit-pdb = USB: Writing the new order to the PDB
 usb-progress-order-edit-edb = USB: Writing the new order to the eDB
+usb-progress-order-edit-verify = USB: Checking the new order in both databases
 usb-progress-order-edit-write-back = USB: Saving the databases to the USB
 usb-progress-order-edit-engine = USB: Updating the Engine DJ library
 usb-progress-order-edit-saved = USB: Order saved
@@ -203,6 +204,9 @@ usb-order-edit-edb-open-failed = The USB's eDB couldn't be opened, so nothing wa
 usb-order-edit-edb-checkpoint-failed = The eDB couldn't finish writing its changes, so nothing was saved
 # Saving the order failed. $error: why.
 usb-order-edit-save-failed = Failed to save the order: { $error }
+# The save's check found the PDB and the eDB in a different order after writing; nothing was saved.
+# $playlists: the playlists, comma-separated.
+usb-order-edit-verify-failed = The new order came out different in the PDB and the eDB for { $playlists }, so nothing was saved to the USB. Run Preview Fixes in Health & Diagnostics and apply "Upgrade Export Data To Strict Parity", then save the order again.
 # A save wrote one database and then failed on the other. $saved, $failed: "PDB" or "eDB".
 # $error: why.
 usb-order-edit-partial-save = The new order was saved to the { $saved } only: writing the { $failed } failed ({ $error }). Save order again to finish, or Cancel to leave the USB as it is now.
