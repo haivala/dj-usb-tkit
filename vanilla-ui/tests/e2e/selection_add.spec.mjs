@@ -186,6 +186,9 @@ async function createPlaylist(page, name) {
 // playlist; Add to… shows what each playlist holds and adds to several, new ones too; Add to… from
 // an app playlist copies its tracks to another playlist by id.
 test("library selection and bulk add", async ({ page }) => {
+  // Many steps in one test (~200): about 13 s alone, but past the 30 s default with every
+  // spec running in parallel. Three times the time; nothing in it waits on a timer.
+  test.slow();
   await installSelectionMock(page);
   await page.goto("/");
   {

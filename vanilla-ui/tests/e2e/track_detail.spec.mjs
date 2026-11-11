@@ -465,6 +465,9 @@ test("cue editor page and playback hand-off", async ({ page }) => {
 // remains; an existing track's start cue drives the choice, not the remembered setting; choosing
 // First cue remembers it.
 test("cue editor input", async ({ page }) => {
+  // Many steps in one test (~200): about 13 s alone, but past the 30 s default with every
+  // spec running in parallel. Three times the time; nothing in it waits on a timer.
+  test.slow();
   await openCueEditor(page, { seedCues: [30000] });
   {
     const view = page.locator("#trackDetailView");

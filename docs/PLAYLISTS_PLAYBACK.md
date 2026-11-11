@@ -34,6 +34,8 @@ always come first and the row's buttons last. The layout is one for all four tra
 a column you hide goes back to its own order. While a USB playlist's order is being edited the
 button is off: save or cancel the edit first.
 
+![The column editor: Album and Fmt hidden, BPM moved before Year, and the same columns on a USB playlist](assets/track-columns.webp)
+
 The backend owns which columns exist and the saved layout, and cleans every layout it gets
 (`get_track_columns` / `set_track_columns` in `docs/COMMANDS.md`). The UI applies one to the
 row templates and each grid's header row (`components/shared/track_columns.mjs`): the cells are
