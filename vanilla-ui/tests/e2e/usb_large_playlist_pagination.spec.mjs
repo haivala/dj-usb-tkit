@@ -191,7 +191,7 @@ test("a slow page load shows the loading indicator instead of stale rows", async
   const indicator = page.locator("#usbPlaylistTracks + .track-grid-loading");
   // Switching playlists shows it at once: nothing from a previous list lingers.
   await expect(indicator).toBeVisible();
-  await expect(indicator).toHaveText("Loading tracks…");
+  await expect(indicator).toHaveText("Loading tracks...");
   await expect(body).toHaveAttribute("aria-busy", "true");
   await expect(body.locator(".track-grid-row:visible")).toHaveCount(0);
 

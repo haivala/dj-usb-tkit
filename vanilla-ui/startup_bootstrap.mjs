@@ -207,7 +207,7 @@ export function runDeferredInitialLoad(ctx) {
     ctx.withProgress(texts, async (progress) => {
       progress(35, t("ui-startup-loading-playlists"));
       await ctx.loadPlaylists();
-      progress(70, t("ui-startup-loading-tracks"));
+      progress(70, t("ui-common-loading-tracks"));
       await ctx.resetAndLoadLibraryTracks("");
 
       if (state.playlists.length > 0) {

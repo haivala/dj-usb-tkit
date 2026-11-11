@@ -632,7 +632,63 @@ usb-not-for-ui = Not sent
         &["ui-playlist-import-group-history", "ui-sidebar-history"],
         // A text field's placeholder vs a button.
         &["ui-add-to-new-name-placeholder", "ui-sidebar-new-playlist"],
+        // A button that opens a dialog ("…") vs a button that acts, or vs words before a
+        // playlist's name ("+ Add to Set 1"), or vs a Settings section.
+        &["ui-selection-bar-add-to", "ui-selection-bar-add-to-target"],
+        &["ui-convert-apply", "ui-selection-bar-convert"],
+        &["ui-settings-export", "ui-tracklist-export-ok"],
+        // The variable is a different thing: why it failed vs the playlist that wasn't deleted.
+        &["backups-delete-failed", "playlist-delete-failed"],
+        // A diagnostics check's result vs a sentence in the playlist's heading.
+        &["diagnostics-check-engine-missing", "playlist-export-not-on-usb"],
+        // The sidebar's short mark vs a sentence in the playlist's heading.
+        &["export-mark-on-usb", "playlist-export-on-usb"],
+        // Only variables around a colon: a word order each language picks per message.
+        &[
+            "analysis-track-failed",
+            "analysis-track-incomplete",
+            "repair-outcome-applied",
+            "transcode-failed",
+        ],
     ];
+
+    /// A message's English as the duplicate check compares it: each variable is `{$}`
+    /// whatever its name, and a trailing `.`, `...` or `…` is dropped, so "Not saved." and
+    /// "Not saved", or "{ $error }" and "{ $reason }", are the same text.
+    fn comparable_text(pattern: &ast::Pattern<&str>) -> String {
+        fn expression(expression: &ast::Expression<&str>) -> String {
+            match expression {
+                ast::Expression::Inline(ast::InlineExpression::VariableReference { .. }) => {
+                    "{$}".to_string()
+                }
+                ast::Expression::Select { variants, .. } => {
+                    let variants: Vec<String> = variants
+                        .iter()
+                        .map(|variant| {
+                            format!("{:?}={}", variant.key, comparable_text(&variant.value))
+                        })
+                        .collect();
+                    format!("{{$ -> {}}}", variants.join("|"))
+                }
+                other => format!("{{{other:?}}}"),
+            }
+        }
+        let mut text = String::new();
+        for element in &pattern.elements {
+            match element {
+                ast::PatternElement::TextElement { value } => text.push_str(value),
+                ast::PatternElement::Placeable { expression: inner } => {
+                    text.push_str(&expression(inner))
+                }
+            }
+        }
+        let text = text.trim_end();
+        ["...", "…", "."]
+            .iter()
+            .find_map(|end| text.strip_suffix(end))
+            .unwrap_or(text)
+            .to_string()
+    }
 
     #[test]
     fn no_two_keys_share_their_english_text() {
@@ -644,7 +700,7 @@ usb-not-for-ui = Not sent
                 && let Some(value) = &message.value
             {
                 keys_by_text
-                    .entry(format!("{value:?}"))
+                    .entry(comparable_text(value))
                     .or_default()
                     .push(message.id.name);
             }

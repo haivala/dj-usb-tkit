@@ -1333,12 +1333,10 @@ job-scan-library-progress = Discovering audio files
 job-scan-library-completed = Library scan completed
 # $indexed, $updated, $removed: track counts.
 job-scan-library-completed-counts = Library scan completed: indexed { $indexed }, updated { $updated }, removed { $removed }
-job-scan-rekordbox-db-started = Importing from desktop library
 job-scan-rekordbox-db-progress = Reading desktop library database
 job-scan-rekordbox-db-completed = Desktop library import completed
 # $indexed, $updated: track counts.
 job-scan-rekordbox-db-completed-counts = Desktop library import completed: indexed { $indexed }, updated { $updated }
-job-scan-mixxx-db-started = Importing from Mixxx library
 job-scan-mixxx-db-progress = Reading Mixxx library database
 job-scan-mixxx-db-completed = Mixxx library import completed
 # $indexed, $updated: track counts.
@@ -1576,7 +1574,8 @@ export-complete = Export complete: { $playlist } - { $count ->
 }, { $skipped } skipped [sync: { $mode }]
 export-sync-mirror = mirror
 export-sync-additive = additive
-# Status lines when an export is refused.
+# Status lines when an export is refused. The ones without an export-error-* key below
+# (no space, the manifest checks) are also the error the Event Log shows.
 # $required, $available: sizes, such as 1.2 GB.
 export-refused-no-space = Export blocked: not enough free space on the USB drive — need about { $required }, { $available } free.
 # $count: the tracks in a format the USB's formats don't allow.
@@ -1616,10 +1615,6 @@ export-error-usb-missing = USB root does not exist: { $path }
 export-error-no-tracks = playlist has no tracks to export
 export-error-none-playable = none of the playlist's tracks are in a format the players play (MP3, AAC, WAV, AIFF, FLAC, ALAC)
 export-error-none-convertible = none of the playlist's tracks could be converted for this USB
-export-error-manifest = Export blocked: manifest invariant check failed
-export-error-manifest-after-prune = Export finished with errors: the stale-file prune removed a file the exported playlist still references — the USB databases were written; restore from the pre-export backup
-# $needed, $free: sizes ("1.2 GB").
-export-error-no-space = Export blocked: not enough free space on the USB drive — need about { $needed }, { $free } free
 # $count: the tracks refused. $tracks: their files, joined with ", ".
 export-error-formats = Export blocked: { $count ->
     [one] { $count } track
@@ -2227,6 +2222,8 @@ ui-common-settings = Settings
 ui-common-media-library = Media Library
 ui-common-usb-playlists = USB Playlists
 ui-common-usb = USB
+# Tracks are loading: the startup progress bar and a track table's placeholder.
+ui-common-loading-tracks = Loading tracks...
 ui-common-cancel = Cancel
 # The confirm dialog's title and button when the asker names none.
 ui-common-confirm = Confirm
@@ -2424,7 +2421,8 @@ ui-library-remove-folder-confirm = Remove source folder?
 
     All tracks from this folder will be removed from the library. Tracks that are in a local playlist will also be removed from those playlists. Tracks that are also inside another source folder stay in the library.
 # Importing the tracks of rekordbox's desktop library (master.db) or of Mixxx's library:
-# the status line while it runs, and when it fails. $error: the backend's message.
+# the status line and the progress bar while it runs, and the status line when it fails.
+# $error: the backend's message.
 ui-library-import-rekordbox-starting = Importing from desktop library...
 ui-library-import-rekordbox-failed = Desktop library import failed: { $error }
 ui-library-import-mixxx-starting = Importing from Mixxx library...
@@ -2537,7 +2535,6 @@ ui-startup-progress = Initializing...
 ui-startup-progress-done = Initializing done
 ui-startup-progress-failed = Initializing failed
 ui-startup-loading-playlists = Loading playlists...
-ui-startup-loading-tracks = Loading tracks...
 
 ## ui-update
 
@@ -2816,7 +2813,6 @@ ui-track-table-genre = Genre
 ui-track-table-key = Key
 ui-track-table-length = Length
 ui-track-table-library-tracks-aria-label = Library tracks
-ui-track-table-loading-tracks = Loading tracks…
 ui-track-table-playlist-tracks-aria-label = Playlist tracks
 ui-track-table-select-all-aria-label = Select all
 ui-track-table-sort-hint = sorted by →

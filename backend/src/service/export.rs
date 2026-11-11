@@ -258,19 +258,11 @@ impl ManifestCheckPhase {
         }
     }
 
-    /// The status line, the error's message with a pointer to the Event Log.
-    fn status_text(self) -> String {
+    /// The error's message, which is also the status line.
+    fn error_message(self) -> Text {
         match self {
             Self::BeforeDbWrite => tr::export_refused_manifest(),
             Self::AfterPrune => tr::export_refused_manifest_after_prune(),
-        }
-        .render()
-    }
-
-    fn error_message(self) -> Text {
-        match self {
-            Self::BeforeDbWrite => tr::export_error_manifest(),
-            Self::AfterPrune => tr::export_error_manifest_after_prune(),
         }
     }
 }
@@ -431,7 +423,7 @@ fn run_manifest_invariant_check(
         phase.error_message(),
         json!({
             "validationType": phase.validation_type(),
-            "statusText": phase.status_text(),
+            "statusText": phase.error_message().render(),
             "issueCount": issues.total,
             "issues": issues.samples,
         }),
@@ -717,10 +709,8 @@ fn insufficient_space_error(
     available: u64,
 ) -> BackendError {
     let message =
-        tr::export_error_no_space(byte_size_precise(required), byte_size_precise(available));
-    let status_text =
-        tr::export_refused_no_space(byte_size_precise(required), byte_size_precise(available))
-            .render();
+        tr::export_refused_no_space(byte_size_precise(required), byte_size_precise(available));
+    let status_text = message.render();
     BackendError::ValidationWithDetails(
         message,
         json!({

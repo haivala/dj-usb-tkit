@@ -110,7 +110,8 @@ digits, hyphens).
   differ: a status word and a button ("Done"), a placeholder and a button ("New playlist"),
   a narrow column header and a field's label ("BPM"). Such keys are listed, with why, in
   `SAME_ENGLISH_KEPT_APART` in `backend/src/i18n.rs`; its test fails on any other two keys
-  with the same English.
+  with the same English, counting texts that differ only in a trailing `.`, `...` or `…`,
+  or in a variable's name, as the same.
 - Every key with a variable, and every key whose use isn't obvious from its name, gets a
   `#` comment saying where it shows and what each variable is.
 - Once a language other than English exists, keys aren't renamed: a rename drops that key

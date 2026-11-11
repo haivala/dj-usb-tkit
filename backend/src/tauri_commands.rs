@@ -619,7 +619,7 @@ pub async fn scan_rekordbox_db(
         0,
         1,
         0,
-        tr::job_scan_rekordbox_db_started().render(),
+        tr::ui_library_import_rekordbox_starting().render(),
     );
     emit_job_event(
         &app,
@@ -681,7 +681,7 @@ pub async fn scan_mixxx_db(
         0,
         1,
         0,
-        tr::job_scan_mixxx_db_started().render(),
+        tr::ui_library_import_mixxx_starting().render(),
     );
     emit_job_event(
         &app,
