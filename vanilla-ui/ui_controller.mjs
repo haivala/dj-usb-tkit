@@ -161,25 +161,33 @@ export function createConfirmDialogController(el) {
 }
 
 // The Import Playlists dialog: every importable list, a column per library
-// grouped by kind, to tick any number of. Resolves with the ticked items in
-// list order (each with `force`), or null on cancel.
+// grouped by kind, to tick any number of; each group's heading ticks the whole
+// group. Resolves with the ticked items in list order (each with `force`), or
+// null on cancel.
 export function createPlaylistImportDialogController(el, document) {
   const dialog = createDialogLifecycle(el.playlistImportOverlay);
   let items = [];
 
   function populate(columns) {
     items = [];
+    let groupCount = 0;
     const sections = [];
     for (const { label, groups } of columns) {
       const rows = [];
       for (const { label: groupLabel, items: groupItems } of groups) {
         if (!groupItems?.length) continue;
+        const group = String(groupCount++);
         const heading = cloneTemplate(document, "tplCheckListGroup");
-        heading.textContent = groupLabel;
+        heading.querySelector(".check-list-group-name").textContent = groupLabel;
+        const toggle = heading.querySelector("input");
+        toggle.dataset.groupToggle = group;
+        toggle.setAttribute("aria-label", t("ui-playlist-import-group-select-all", { group: groupLabel }));
         rows.push(heading);
         for (const item of groupItems) {
           const row = cloneTemplate(document, "tplAddToItem");
-          row.querySelector("input").value = String(items.length);
+          const box = row.querySelector("input");
+          box.value = String(items.length);
+          box.dataset.group = group;
           row.querySelector(".add-to-name").textContent = item.name;
           row.querySelector(".add-to-note").textContent = item.note || "";
           rows.push(row);
@@ -199,14 +207,25 @@ export function createPlaylistImportDialogController(el, document) {
   }
 
   function checkedItems() {
-    return [...el.playlistImportList.querySelectorAll("input:checked")]
+    return [...el.playlistImportList.querySelectorAll("input[data-group]:checked")]
       .map((box) => items[Number(box.value)])
       .filter(Boolean);
   }
 
-  /// The Import button counts the ticked lists; the force option names their
-  /// library when they all come from one.
+  function groupBoxes(group) {
+    return [...el.playlistImportList.querySelectorAll(`input[data-group="${group}"]`)];
+  }
+
+  /// Each group heading's box is ticked when all its lists are, half-ticked
+  /// when some are. The Import button counts the ticked lists; the force
+  /// option names their library when they all come from one.
   function sync() {
+    for (const toggle of el.playlistImportList.querySelectorAll("input[data-group-toggle]")) {
+      const boxes = groupBoxes(toggle.dataset.groupToggle);
+      const ticked = boxes.filter((box) => box.checked).length;
+      toggle.checked = ticked > 0 && ticked === boxes.length;
+      toggle.indeterminate = ticked > 0 && ticked < boxes.length;
+    }
     const chosen = checkedItems();
     el.playlistImportOkBtn.disabled = chosen.length === 0;
     el.playlistImportOkBtn.textContent = chosen.length > 1
@@ -219,7 +238,14 @@ export function createPlaylistImportDialogController(el, document) {
   }
 
   return {
-    sync,
+    // A ticked or unticked box: a group heading's sets every list in its group.
+    changed(target) {
+      const group = target?.dataset?.groupToggle;
+      if (group != null) {
+        for (const box of groupBoxes(group)) box.checked = target.checked;
+      }
+      sync();
+    },
     isOpen: dialog.isOpen,
     close(confirmed) {
       if (!dialog.isOpen()) return;

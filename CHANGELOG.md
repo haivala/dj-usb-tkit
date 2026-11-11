@@ -41,6 +41,8 @@
 
 - **New feature:** USB playlists and the tracks in them can be put in a new order (Edit order → drag or sort → Save
   order), saved straight to the USB.
+- **New feature:** In the Import Playlists dialog, each group heading (Playlists, Crates, History) has a box that
+  ticks or unticks every list in that group, for rekordbox and Mixxx alike.
 - **Fix:** Clicking another playlist while typing a new playlist's name saves the new playlist and then opens the
   one you clicked. Before, the new playlist opened instead.
 - **Improvement:** The library's filter mark comes from the backend, which already knows which folders and imported

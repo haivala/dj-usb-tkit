@@ -187,6 +187,7 @@ function installSourceChipAnalysisMock(page) {
               noteText: '3 tracks · updates "My Test playlist"'
             },
             { id: "7", name: "Peak", kind: "crate", trackCount: 2, noteText: "2 tracks" },
+            { id: "8", name: "Warmup", kind: "crate", trackCount: 5, noteText: "5 tracks" },
             { id: "3", name: "2026-09-30", kind: "history", trackCount: 4, noteText: "4 tracks" }
           ]
         });
@@ -349,6 +350,27 @@ test("source chips and playlist import", async ({ page }) => {
     await row("Winter Party").locator("input").check();
     await expect(okBtn).toHaveText("Import 2");
     await expect(forceLabel).toHaveText("Force update track data");
+    // A group heading's box ticks the whole group, shows when some of it is
+    // ticked, and unticks it again.
+    const groupBox = (label, group) =>
+      column(label).locator(".check-list-group", { hasText: group }).locator("input");
+    const crates = groupBox("Mixxx", "Crates");
+    await expect(crates).toHaveAttribute("aria-label", "Select all Crates");
+    await expect(crates).toBeChecked({ indeterminate: true });
+    await expect(groupBox("rekordbox", "Playlists")).toBeChecked();
+    await expect(groupBox("Mixxx", "Playlists")).not.toBeChecked();
+    await crates.check();
+    await expect(row("Peak").locator("input")).toBeChecked();
+    await expect(row("Warmup").locator("input")).toBeChecked();
+    await expect(okBtn).toHaveText("Import 3");
+    await row("Warmup").locator("input").uncheck();
+    await expect(crates).toBeChecked({ indeterminate: true });
+    await row("Warmup").locator("input").check();
+    await expect(crates).toBeChecked();
+    await crates.uncheck();
+    await expect(row("Peak").locator("input")).not.toBeChecked();
+    await expect(row("Warmup").locator("input")).not.toBeChecked();
+    await expect(okBtn).toHaveText("Import");
 
     // Escape cancels without importing.
     await page.keyboard.press("Escape");

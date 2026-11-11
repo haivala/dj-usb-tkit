@@ -211,6 +211,7 @@
     "ui-playlist-import-group-crates": "Crates",
     "ui-playlist-import-group-history": "History",
     "ui-playlist-import-group-playlists": "Playlists",
+    "ui-playlist-import-group-select-all": "Select all {group}",
     "ui-playlist-import-intro": "Each is imported as a new playlist. Tracks not yet in the library are imported with it.",
     "ui-playlist-import-many-progress": {
       "one": "Importing {count} playlist...",

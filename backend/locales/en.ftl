@@ -2503,6 +2503,8 @@ ui-playlist-import-title = Import Playlists
 ui-playlist-import-group-playlists = Playlists
 ui-playlist-import-group-crates = Crates
 ui-playlist-import-group-history = History
+# The tick box on a group heading that ticks every list in that group. $group: Playlists, Crates or History.
+ui-playlist-import-group-select-all = Select all { $group }
 # The status line when no library has a list with tracks.
 ui-playlist-import-none-found = No playlists with tracks found
 # The progress bar while importing one list (running, done, failed), then its first step.

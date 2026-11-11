@@ -4542,6 +4542,14 @@ td button[data-action]:disabled,
   background: color-mix(in srgb, var(--ink) 5%, var(--bg));
 }
 
+/* The heading's box ticks every list in its group. */
+.check-list-group-toggle {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  cursor: pointer;
+}
+
 .add-to-item {
   display: flex;
   align-items: center;

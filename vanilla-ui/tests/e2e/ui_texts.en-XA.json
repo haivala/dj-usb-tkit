@@ -211,6 +211,7 @@
     "ui-playlist-import-group-crates": "[Çŕááţééš]",
     "ui-playlist-import-group-history": "[Ĥîîšţööŕý]",
     "ui-playlist-import-group-playlists": "[Þļááýļîîšţš]",
+    "ui-playlist-import-group-select-all": "[Šééļééçţ ááļļ {group}]",
     "ui-playlist-import-intro": "[ÉÉááçĥ îîš îîɱþööŕţééð ááš áá ñééŵ þļááýļîîšţ. Ţŕááçķš ñööţ ýééţ îîñ ţĥéé ļîîƀŕááŕý ááŕéé îîɱþööŕţééð ŵîîţĥ îîţ.]",
     "ui-playlist-import-many-progress": {
       "one": "[ÎÎɱþööŕţîîñĝ {count} þļááýļîîšţ...]",

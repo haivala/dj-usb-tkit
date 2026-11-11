@@ -94,7 +94,7 @@ export function bindPlaylistEvents(ctx) {
   el.importPlaylistBtn.addEventListener("click", () => {
     importExternalPlaylist().catch(catchErr(emitStatus));
   });
-  el.playlistImportList.addEventListener("change", () => playlistImportDialog?.sync());
+  el.playlistImportList.addEventListener("change", (event) => playlistImportDialog?.changed(event.target));
   el.playlistImportOkBtn.addEventListener("click", () => {
     playlistImportDialog?.close(true);
   });
