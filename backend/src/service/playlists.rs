@@ -20,7 +20,7 @@ pub(crate) fn track_file_source(
         (true, false, _) => tr::playlist_track_source_usb_not_connected(file_path),
         (true, true, true) => tr::playlist_track_source_on_usb(file_path),
         (false, _, true) => tr::playlist_track_source_local(file_path),
-        (_, _, false) => tr::playlist_track_source_not_found(file_path),
+        (_, _, false) => tr::error_file_not_found(file_path),
     }
     .render();
     TrackFileSource {
@@ -141,7 +141,7 @@ pub(crate) fn annotate_imported_playlists(
             find_imported_playlist(conn, &external_playlist_key(library, item.kind, &item.id))?;
         item.note_text = match &item.existing_playlist {
             Some(existing) => tr::playlist_import_note_updates(item.track_count, &existing.name),
-            None => tr::playlist_import_note(item.track_count),
+            None => tr::format_track_count(item.track_count),
         }
         .render();
     }
@@ -211,7 +211,7 @@ pub(crate) fn last_export_text(playlist: &Playlist) -> Option<Text> {
 /// The line under the playlist's title with no USB selected.
 pub(crate) fn export_status_text(playlist: &Playlist) -> String {
     last_export_text(playlist)
-        .unwrap_or_else(tr::playlist_export_never)
+        .unwrap_or_else(tr::ui_playlist_export_status)
         .render()
 }
 
@@ -664,7 +664,7 @@ impl BackendService {
             analyze_missing_label: if unanalyzed_count > 0 {
                 tr::playlist_analyze_missing(unanalyzed_count)
             } else {
-                tr::playlist_analyze_missing_none()
+                tr::ui_playlist_analyze_missing()
             }
             .render(),
             analyze_missing_tooltip: if unanalyzed_count > 0 {

@@ -701,7 +701,11 @@ impl BackendService {
         }
         self.invalidate_usb_parse_cache();
         *self.order_edit_slot() = None;
-        on_progress(100, 100, &tr::usb_progress_order_edit_saved().render());
+        on_progress(
+            100,
+            100,
+            &tr::job_commit_usb_order_edit_completed().render(),
+        );
 
         let warning_count = logging::count_warnings(&warnings);
         Ok(UsbOrderEditData {

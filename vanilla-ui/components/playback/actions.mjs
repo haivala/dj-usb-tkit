@@ -17,7 +17,7 @@ export function updateTransportButtonsInDom(ctx, root = ctx.document) {
   root.querySelectorAll(".transport-btn").forEach((btn) => {
     const isPlaying = isTransportButtonPlaying(state, { rowKey: btn.dataset.rowKey, trackId: btn.dataset.id });
     btn.classList.toggle("is-playing", isPlaying);
-    const label = t(isPlaying ? "ui-track-row-stop" : "ui-track-row-play");
+    const label = t(isPlaying ? "ui-track-row-stop" : "ui-common-play");
     btn.setAttribute("aria-label", label);
     btn.dataset.tooltip = label;
     btn.replaceChildren(transportIcon(btn.ownerDocument, isPlaying));
@@ -216,7 +216,7 @@ async function stopPlayback(ctx, { fromUi }) {
   const { state, emitStatus } = ctx;
   if (state.playbackStopPromise) return state.playbackStopPromise;
   if (!state.playbackActive && state.playbackPendingKind !== "play") {
-    if (fromUi) emitStatus(t("ui-header-status"));
+    if (fromUi) emitStatus(t("ui-common-idle"));
     return;
   }
   const generation = beginPlaybackIntent(state, "stop");
@@ -233,7 +233,7 @@ async function stopPlayback(ctx, { fromUi }) {
       clearPlaybackIntentIfCurrent(state, generation);
     }
     updateTransportButtonsInDom(ctx);
-    emitStatus(t("ui-header-status"));
+    emitStatus(t("ui-common-idle"));
   });
   try {
     await state.playbackStopPromise;
@@ -380,7 +380,7 @@ async function playResolvedTrack(ctx, track, origin, options, generation) {
         emitStatus(t("ui-playback-not-found"), { level: "warn", source: "playback" });
         return;
       }
-      emitStatus(t("ui-playback-failed", { error: message }), { level: "error", source: "playback" });
+      emitStatus(t("ui-common-playback-failed", { error: message }), { level: "error", source: "playback" });
     }
   });
 }
@@ -485,7 +485,7 @@ export function handlePlaybackEvent(ctx, payload) {
     if (path !== null && path !== state.playbackPath) return;
     resetPlaybackState(ctx);
     updateTransportButtonsInDom(ctx);
-    emitStatus(t("ui-header-status"));
+    emitStatus(t("ui-common-idle"));
     return;
   }
 

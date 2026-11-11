@@ -430,7 +430,7 @@ impl BackendCommands {
     ) -> ApiResponse<WithPlaylists<RemoveTracksFromPlaylistData>> {
         wrap_failed(
             self.with_playlists(self.service.remove_tracks_from_playlist(req)),
-            tr::playlist_remove_failed,
+            tr::error_remove_failed,
         )
     }
 
@@ -496,10 +496,7 @@ impl BackendCommands {
     }
 
     pub fn remove_essentia(&self) -> ApiResponse<()> {
-        wrap_failed(
-            self.service.remove_essentia(),
-            tr::settings_essentia_remove_failed,
-        )
+        wrap_failed(self.service.remove_essentia(), tr::error_remove_failed)
     }
 
     pub fn data_dir(&self) -> std::path::PathBuf {

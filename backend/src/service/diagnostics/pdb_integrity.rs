@@ -19,7 +19,7 @@ pub(crate) fn diagnose_pdb_integrity(
         checks.push(DiagCheck::new(
             tr::diagnostics_check_pdb_exists(),
             DiagStatus::Fail,
-            tr::diagnostics_check_pdb_exists_missing(pdb_path.display()),
+            tr::error_file_not_found(pdb_path.display()),
         ));
         return (
             DiagSection {
@@ -337,7 +337,7 @@ pub(crate) fn diagnose_pdb_integrity(
         let detail = if hp > 0 || he > 0 || hr > 0 {
             tr::diagnostics_check_pdb_history_counts(hp, he, hr)
         } else {
-            tr::diagnostics_check_pdb_history_empty()
+            tr::diagnostics_check_history_empty()
         };
         checks.push(DiagCheck::new(
             tr::diagnostics_check_pdb_history(),

@@ -58,7 +58,7 @@ export function renderEventLogBadge(ctx) {
   el.eventLogBadge.textContent = count > 99 ? "99+" : String(count);
   el.eventLogBadge.classList.toggle("hidden", count === 0);
   el.eventLogDot.classList.toggle("hidden", !dot);
-  let label = t("ui-header-event-log");
+  let label = t("ui-common-event-log");
   if (count) label = tCount("ui-event-log-button-new-errors", count);
   else if (dot) label = t("ui-event-log-button-linked-details");
   el.eventLogBtn.setAttribute("aria-label", label);

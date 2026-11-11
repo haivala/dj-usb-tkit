@@ -454,7 +454,7 @@ export async function deletePlaylist(ctx, playlistId) {
   const confirmed = await openConfirmDialog({
     title: t("ui-playlist-delete-title"),
     message: playlist.deleteConfirmText,
-    confirmLabel: t("ui-playlist-delete")
+    confirmLabel: t("ui-common-delete")
   });
   if (!confirmed) return;
 
@@ -483,7 +483,7 @@ export async function deletePlaylist(ctx, playlistId) {
 // The progress bar's texts for adding tracks to a playlist, shared by every add.
 export function addTracksProgressTexts() {
   return {
-    working: t("ui-playlist-add-progress"),
+    working: t("ui-playlist-add-adding"),
     done: t("ui-playlist-add-progress-done"),
     failed: t("ui-playlist-add-progress-failed")
   };
@@ -809,10 +809,10 @@ function renderPlaylistEmptyState(ctx, playlist) {
     renderEmptyState(el.playlistEmptyState, {
       icon: "♫",
       heading: t("ui-playlist-empty-heading"),
-      actionLabel: t("ui-playlist-empty-library"),
+      actionLabel: t("ui-common-media-library"),
       onAction: () => ctx.switchView("library").catch((err) => console.error(err)),
       extraActions: [{
-        label: t(hasUsb ? "ui-playlist-empty-usb-playlists" : "ui-playlist-empty-usb"),
+        label: t(hasUsb ? "ui-common-usb-playlists" : "ui-common-usb"),
         onAction: () => ctx.switchView(hasUsb ? "usb-playlists" : "usb").catch((err) => console.error(err)),
       }],
     });

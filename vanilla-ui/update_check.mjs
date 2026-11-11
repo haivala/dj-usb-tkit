@@ -72,7 +72,7 @@ export function renderUpdateNotice(ctx) {
   const available = !!info?.updateAvailable;
 
   el.settingsUpdateDot.classList.toggle("hidden", !available);
-  el.settingsBtn.setAttribute("aria-label", t(available ? "ui-header-settings-update-available" : "ui-header-settings"));
+  el.settingsBtn.setAttribute("aria-label", t(available ? "ui-header-settings-update-available" : "ui-common-settings"));
 
   // Only offered once a check has run (never in the browser/test build).
   const checkBtn = el.settingsUpdateCheckBtn;

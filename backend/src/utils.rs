@@ -236,7 +236,7 @@ pub fn track_list_summary(track_count: usize, size_bytes: u64) -> String {
     if size_bytes > 0 {
         tr::track_list_summary_size(track_count, byte_size(size_bytes))
     } else {
-        tr::track_list_summary(track_count)
+        tr::format_track_count(track_count)
     }
     .render()
 }

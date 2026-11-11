@@ -80,7 +80,7 @@ export async function deleteUsbBackup(ctx, timestamp) {
   const confirmed = await openConfirmDialog({
     title: t("ui-backups-delete-title"),
     message: backup.deleteConfirmText,
-    confirmLabel: t("ui-backups-delete")
+    confirmLabel: t("ui-common-delete")
   });
   if (!confirmed) return;
 

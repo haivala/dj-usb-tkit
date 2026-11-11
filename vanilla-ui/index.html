@@ -41,7 +41,7 @@
       </svg>
     </h1>
     <div class="status-wrap">
-      <div class="status" id="statusText" data-text="ui-header-status"></div>
+      <div class="status" id="statusText" data-text="ui-common-idle"></div>
       <div class="header-export-stack">
         <div class="playlist-badge inactive" id="playlistBadge">
           <span class="playlist-header-dot"></span>
@@ -50,14 +50,14 @@
         </div>
         <div class="usb-name-badge" id="usbNameBadge" role="button" tabindex="-1" aria-disabled="true">
           <span class="usb-health-dot" id="usbHeaderHealthDot" data-text-tooltip="ui-usb-health-unknown" data-text-aria-label="ui-usb-health-unknown"></span>
-          <span class="header-stat-label" data-text="ui-header-usb-name-badge"></span>
+          <span class="header-stat-label" data-text="ui-common-usb"></span>
           <span class="header-stat-value" id="usbNameBadgeLabel" data-text="ui-header-usb-name-badge-not-connected"></span>
         </div>
       </div>
       <div class="header-utility-group">
         <button class="help-btn" id="helpBtn" data-text-tooltip="ui-header-help" data-text-aria-label="ui-header-help">?</button>
-        <button class="settings-btn" id="settingsBtn" data-text-tooltip="ui-header-settings" data-text-aria-label="ui-header-settings">&#9881;<span class="settings-btn-dot hidden" id="settingsUpdateDot"></span></button>
-        <button class="help-btn event-log-btn" id="eventLogBtn" data-text-tooltip="ui-header-event-log" data-text-aria-label="ui-header-event-log">&#9776;<span class="event-log-badge hidden" id="eventLogBadge"></span><span class="settings-btn-dot hidden" id="eventLogDot"></span></button>
+        <button class="settings-btn" id="settingsBtn" data-text-tooltip="ui-common-settings" data-text-aria-label="ui-common-settings">&#9881;<span class="settings-btn-dot hidden" id="settingsUpdateDot"></span></button>
+        <button class="help-btn event-log-btn" id="eventLogBtn" data-text-tooltip="ui-common-event-log" data-text-aria-label="ui-common-event-log">&#9776;<span class="event-log-badge hidden" id="eventLogBadge"></span><span class="settings-btn-dot hidden" id="eventLogDot"></span></button>
       </div>
     </div>
   </header>
@@ -65,10 +65,10 @@
   <div class="update-banner hidden" id="updateBanner" role="alert">
     <span id="updateBannerText"><span class="update-banner-message"></span> — <a href="#" class="update-banner-link" data-text="ui-header-update-banner-view-release"></a></span>
     <span class="update-actions" id="updateBannerActions">
-      <button class="update-install-btn hidden" type="button" data-text="ui-header-update-banner-restart"></button>
-      <a href="#" class="update-download-link hidden" data-text="ui-header-update-banner-download"></a>
+      <button class="update-install-btn hidden" type="button" data-text="ui-common-update-restart"></button>
+      <a href="#" class="update-download-link hidden" data-text="ui-common-update-download"></a>
     </span>
-    <button class="update-banner-dismiss" id="updateBannerDismissBtn" data-text-aria-label="ui-header-update-banner-dismiss-aria-label">&times;</button>
+    <button class="update-banner-dismiss" id="updateBannerDismissBtn" data-text-aria-label="ui-common-dismiss">&times;</button>
   </div>
 
   <div class="app-layout">
@@ -84,7 +84,7 @@
         </button>
         <button class="nav-item" data-view="usb">
           <span class="nav-icon">&#9921;</span>
-          <span class="nav-label" data-text="ui-sidebar-usb"></span>
+          <span class="nav-label" data-text="ui-common-usb"></span>
         </button>
         <button class="nav-item nav-sub-item" data-view="usb-playlists">
           <span class="nav-label" data-text="ui-sidebar-playlists"></span>
@@ -107,7 +107,7 @@
           <li class="hidden" id="importPlaylistItem">
             <button class="nav-item nav-add-playlist" id="importPlaylistBtn" data-text-tooltip="ui-sidebar-import-playlist-tooltip" data-text-aria-label="ui-sidebar-import-playlist-aria-label">
               <span class="nav-icon">&#8615;</span>
-              <span class="nav-label" data-text="ui-sidebar-import-playlist"></span>
+              <span class="nav-label" data-text="ui-common-import"></span>
             </button>
           </li>
           <!-- dynamic playlist items inserted here by JS -->
@@ -131,7 +131,7 @@
         <div id="libraryEmptyState"></div>
         <div id="libraryContent">
           <div class="panel-header">
-            <h2 data-text="ui-library-title"></h2>
+            <h2 data-text="ui-common-media-library"></h2>
             <div class="panel-header-actions">
               <button id="addSourceBtn" data-text="ui-library-add-source"></button>
               <button id="analyzeLibraryBtn" data-primary data-text="ui-library-analyze-library"></button>
@@ -171,7 +171,7 @@
               <span class="selection-hint" data-text="ui-selection-bar-hint-library"></span>
               <button type="button" data-selection-action="add" data-primary disabled hidden>+ <span class="selection-label-long" data-text="ui-selection-bar-add-to-target"></span> <span class="selection-target"></span></button>
               <button type="button" data-selection-action="add-to" disabled data-text-tooltip="ui-selection-bar-add-to-tooltip" data-text="ui-selection-bar-add-to"></button>
-              <button type="button" data-selection-action="reanalyze" disabled data-text-tooltip="ui-selection-bar-reanalyze-tooltip" data-text="ui-selection-bar-reanalyze"></button>
+              <button type="button" data-selection-action="reanalyze" disabled data-text-tooltip="ui-selection-bar-reanalyze-tooltip" data-text="ui-common-reanalyze"></button>
               <button type="button" data-selection-action="convert" disabled data-text-tooltip="ui-selection-bar-convert-tooltip" data-text="ui-selection-bar-convert"></button>
               <button type="button" data-selection-action="edit" disabled data-text-tooltip="ui-selection-bar-edit-tooltip"><span class="selection-label-long" data-text="ui-selection-bar-edit-details"></span><span class="selection-label-short" data-text="ui-selection-bar-edit-short"></span></button>
               <button type="button" class="selection-clear" data-selection-action="clear" disabled data-text-aria-label="ui-selection-bar-clear-selection" data-text-tooltip="ui-selection-bar-clear-selection">&times;</button>
@@ -203,7 +203,7 @@
               <span class="usb-cfg-toolbar-sep"></span>
               <button id="previewRepairsBtn" data-text="ui-usb-preview-repairs"></button>
               <span class="usb-cfg-toolbar-sep"></span>
-              <button id="usbBackupsBtn" data-text-tooltip="ui-usb-backups-tooltip" data-text="ui-usb-backups"></button>
+              <button id="usbBackupsBtn" data-text-tooltip="ui-usb-backups-tooltip" data-text="ui-common-backups"></button>
             </div>
           </div>
           <div class="source-bar usb-cfg-recent-bar" id="usbRecentRow">
@@ -274,7 +274,7 @@
       <!-- USB Playlists panel -->
       <section class="panel" id="panel-usb-playlists" role="tabpanel" aria-hidden="true">
         <div class="panel-header">
-          <h2 data-text="ui-usb-playlists-title"></h2>
+          <h2 data-text="ui-common-usb-playlists"></h2>
           <span class="muted panel-header-meta" id="usbCountsText"></span>
           <!-- Edit order: the playlists' and their tracks' order, saved in one write. -->
           <div class="panel-header-end usb-order-edit hidden" id="usbOrderEditBar">
@@ -400,8 +400,8 @@
             <span class="selection-time"></span>
             <span class="selection-hint" data-text="ui-selection-bar-hint-playlist"></span>
             <button type="button" data-selection-action="add-to" disabled data-text-tooltip="ui-selection-bar-add-to-tooltip" data-text="ui-selection-bar-add-to"></button>
-            <button type="button" data-selection-action="remove" disabled data-text-tooltip="ui-selection-bar-remove-tooltip"><span class="selection-label-long" data-text="ui-selection-bar-remove-from-playlist"></span><span class="selection-label-short" data-text="ui-selection-bar-remove"></span></button>
-            <button type="button" data-selection-action="reanalyze" disabled data-text-tooltip="ui-selection-bar-reanalyze-tooltip" data-text="ui-selection-bar-reanalyze"></button>
+            <button type="button" data-selection-action="remove" disabled data-text-tooltip="ui-selection-bar-remove-tooltip"><span class="selection-label-long" data-text="ui-common-remove-from-playlist"></span><span class="selection-label-short" data-text="ui-common-remove"></span></button>
+            <button type="button" data-selection-action="reanalyze" disabled data-text-tooltip="ui-selection-bar-reanalyze-tooltip" data-text="ui-common-reanalyze"></button>
             <button type="button" data-selection-action="convert" disabled data-text-tooltip="ui-selection-bar-convert-tooltip" data-text="ui-selection-bar-convert"></button>
             <button type="button" data-selection-action="edit" disabled data-text-tooltip="ui-selection-bar-edit-tooltip"><span class="selection-label-long" data-text="ui-selection-bar-edit-details"></span><span class="selection-label-short" data-text="ui-selection-bar-edit-short"></span></button>
             <button type="button" class="selection-clear" data-selection-action="clear" disabled data-text-aria-label="ui-selection-bar-clear-selection" data-text-tooltip="ui-selection-bar-clear-selection">&times;</button>
@@ -425,7 +425,7 @@
       </section>
 
       <section class="panel" id="panel-event-log" role="tabpanel" aria-hidden="true">
-        <h2 data-text="ui-event-log-title"></h2>
+        <h2 data-text="ui-common-event-log"></h2>
         <div class="event-log-toolbar">
           <label>
             <span class="muted" data-text="ui-event-log-level"></span>
@@ -445,19 +445,19 @@
           <button id="eventLogClearBtn" data-text="ui-event-log-clear"></button>
           <button id="eventLogOpenFileBtn" data-text-tooltip="ui-event-log-open-file-tooltip" data-text="ui-event-log-open-file"></button>
         </div>
-        <p class="muted" id="eventLogSummary" data-text="ui-event-log-summary"></p>
+        <p class="muted" id="eventLogSummary" data-text="ui-common-no-entries"></p>
         <div class="event-log-list" id="eventLogList" role="log" aria-live="polite"></div>
       </section>
 
       <section class="panel" id="panel-backups" role="tabpanel" aria-hidden="true">
         <div class="panel-header">
-          <h2 data-text="ui-backups-title"></h2>
+          <h2 data-text="ui-common-backups"></h2>
           <div class="panel-header-actions">
             <button id="backupsRefreshBtn" disabled data-text="ui-backups-refresh"></button>
           </div>
         </div>
         <p class="muted" data-text="ui-backups-intro"></p>
-        <p class="muted" id="backupsSummary" data-text="ui-backups-summary"></p>
+        <p class="muted" id="backupsSummary" data-text="ui-common-no-entries"></p>
         <div class="event-log-list" id="backupsList" role="log" aria-live="polite"></div>
       </section>
     </main>
@@ -474,10 +474,10 @@
           </div>
           <!-- Right of the title; under it on a narrow window. -->
           <div class="track-detail-meta">
-            <div class="track-detail-rating" id="trackDetailRating" role="radiogroup" data-text-aria-label="ui-rating-aria-label" data-text-tooltip="ui-rating-tooltip"><button type="button" role="radio" aria-checked="false" data-rating="1" data-text-aria-label="ui-rating-1-star-aria-label">&#9733;</button><button type="button" role="radio" aria-checked="false" data-rating="2" data-text-aria-label="ui-rating-2-stars-aria-label">&#9733;</button><button type="button" role="radio" aria-checked="false" data-rating="3" data-text-aria-label="ui-rating-3-stars-aria-label">&#9733;</button><button type="button" role="radio" aria-checked="false" data-rating="4" data-text-aria-label="ui-rating-4-stars-aria-label">&#9733;</button><button type="button" role="radio" aria-checked="false" data-rating="5" data-text-aria-label="ui-rating-5-stars-aria-label">&#9733;</button></div>
-            <input type="text" id="trackDetailGenre" class="track-detail-genre" list="trackDetailGenreOptions" maxlength="64" autocomplete="off" spellcheck="false" data-text-placeholder="ui-track-detail-genre" data-text-aria-label="ui-track-detail-genre" data-text-tooltip="ui-track-detail-genre-tooltip" />
+            <div class="track-detail-rating" id="trackDetailRating" role="radiogroup" data-text-aria-label="ui-common-rating" data-text-tooltip="ui-rating-tooltip"><button type="button" role="radio" aria-checked="false" data-rating="1" data-text-aria-label="ui-rating-1-star-aria-label">&#9733;</button><button type="button" role="radio" aria-checked="false" data-rating="2" data-text-aria-label="ui-rating-2-stars-aria-label">&#9733;</button><button type="button" role="radio" aria-checked="false" data-rating="3" data-text-aria-label="ui-rating-3-stars-aria-label">&#9733;</button><button type="button" role="radio" aria-checked="false" data-rating="4" data-text-aria-label="ui-rating-4-stars-aria-label">&#9733;</button><button type="button" role="radio" aria-checked="false" data-rating="5" data-text-aria-label="ui-rating-5-stars-aria-label">&#9733;</button></div>
+            <input type="text" id="trackDetailGenre" class="track-detail-genre" list="trackDetailGenreOptions" maxlength="64" autocomplete="off" spellcheck="false" data-text-placeholder="ui-common-genre" data-text-aria-label="ui-common-genre" data-text-tooltip="ui-track-detail-genre-tooltip" />
             <datalist id="trackDetailGenreOptions"><!-- from the track detail's genreOptions --></datalist>
-            <input type="text" id="trackDetailReleaseDate" class="track-detail-release-date" maxlength="10" autocomplete="off" spellcheck="false" data-text-placeholder="ui-track-detail-release-date" data-text-aria-label="ui-track-detail-release-date" data-text-tooltip="ui-track-detail-release-date-tooltip" />
+            <input type="text" id="trackDetailReleaseDate" class="track-detail-release-date" maxlength="10" autocomplete="off" spellcheck="false" data-text-placeholder="ui-common-release-date" data-text-aria-label="ui-common-release-date" data-text-tooltip="ui-track-detail-release-date-tooltip" />
             <button type="button" class="track-detail-reveal" id="trackDetailRevealBtn" data-text-aria-label="ui-track-detail-reveal-aria-label"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M3 6.5A1.5 1.5 0 0 1 4.5 5h4.6l2 2.2h8.4A1.5 1.5 0 0 1 21 8.7v9.8a1.5 1.5 0 0 1-1.5 1.5h-15A1.5 1.5 0 0 1 3 18.5z"></path></svg></button>
           </div>
           <button class="settings-close" id="trackDetailCloseBtn" data-text-aria-label="ui-track-detail-close-aria-label">&times;</button>
@@ -526,7 +526,7 @@
 
         <div class="track-detail-waveform-wrap">
           <div class="track-detail-zoom">
-            <button type="button" class="track-detail-playpause" id="trackDetailPlayPause" data-text-aria-label="ui-track-detail-play-pause" data-text-tooltip="ui-track-detail-play-pause"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M8 6v12l10-6z"></path></svg></button>
+            <button type="button" class="track-detail-playpause" id="trackDetailPlayPause" data-text-aria-label="ui-common-play" data-text-tooltip="ui-common-play"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M8 6v12l10-6z"></path></svg></button>
             <div class="track-detail-hint" id="trackDetailHint">
               <span><b data-text="ui-track-detail-hint-waveform"></b> <span data-text="ui-track-detail-hint-waveform-text"></span></span>
               <span><b data-text="ui-track-detail-hint-cue-markers"></b> <span data-text="ui-track-detail-hint-cue-markers-drag"></span> <kbd translate="no">Q</kbd> <span data-text="ui-track-detail-hint-cue-markers-quantize"></span> <kbd data-text="ui-track-detail-hint-shift-key"></kbd> <span data-text="ui-track-detail-hint-cue-markers-free"></span> <kbd translate="no">M</kbd> <span data-text="ui-track-detail-hint-cue-markers-memory"></span></span>
@@ -587,9 +587,9 @@
 
   <!-- Settings Drawer -->
   <div class="settings-backdrop hidden" id="settingsBackdrop"></div>
-  <aside class="settings-drawer hidden" id="settingsDrawer" role="dialog" data-text-aria-label="ui-settings-title">
+  <aside class="settings-drawer hidden" id="settingsDrawer" role="dialog" data-text-aria-label="ui-common-settings">
     <div class="settings-header">
-      <h2 data-text="ui-settings-title"></h2>
+      <h2 data-text="ui-common-settings"></h2>
       <div class="settings-meta">
         <span class="settings-version" id="settingsVersionText"></span>
         <button class="settings-update-check-btn hidden" id="settingsUpdateCheckBtn" type="button" data-text-tooltip="ui-settings-update-check" data-text-aria-label="ui-settings-update-check"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M20 12a8 8 0 1 1-2.34-5.66"></path><polyline points="20 4 20 9 15 9"></polyline></svg></button>
@@ -603,8 +603,8 @@
         <span class="settings-update-status" id="settingsUpdateStatus"></span>
         <a href="#" class="update-note-link hidden" id="settingsUpdateReleaseLink" data-text="ui-settings-update-release-link"></a>
         <span class="update-actions" id="settingsUpdateActions">
-          <button class="update-install-btn hidden" type="button" data-text="ui-settings-update-restart"></button>
-          <a href="#" class="update-download-link hidden" data-text="ui-settings-update-download"></a>
+          <button class="update-install-btn hidden" type="button" data-text="ui-common-update-restart"></button>
+          <a href="#" class="update-download-link hidden" data-text="ui-common-update-download"></a>
         </span>
       </div>
       <div class="settings-section">
@@ -662,7 +662,7 @@
           <div class="essentia-install-actions">
             <button id="essentiaDownloadBtn" class="essentia-btn" data-text="ui-settings-essentia-download"></button>
             <button id="essentiaCancelBtn" class="essentia-btn hidden" data-text="ui-common-cancel"></button>
-            <button id="essentiaRemoveBtn" class="essentia-btn hidden" data-text="ui-settings-essentia-remove"></button>
+            <button id="essentiaRemoveBtn" class="essentia-btn hidden" data-text="ui-common-remove"></button>
           </div>
         </div>
       </div>
@@ -698,7 +698,7 @@
         <span class="muted settings-hint" data-text="ui-settings-transcode-folder-hint"></span>
       </div>
       <div class="settings-section">
-        <div class="settings-section-label" data-text="ui-settings-backups"></div>
+        <div class="settings-section-label" data-text="ui-common-backups"></div>
         <label class="usb-cfg-toggle-row" for="exportBackupCheckbox">
           <input type="checkbox" id="exportBackupCheckbox" checked />
           <span data-text="ui-settings-backup-before-export"></span>
@@ -717,11 +717,11 @@
     <div class="progress-meta">
       <span id="progressLabel" data-text="ui-job-progress"></span>
       <span id="progressTime"></span>
-      <span id="progressText" data-text="ui-job-idle"></span>
+      <span id="progressText" data-text="ui-common-idle"></span>
       <button class="progress-pause" id="progressPauseBtn" data-text-aria-label="ui-job-pause-analysis" data-text-title="ui-job-pause-analysis" aria-pressed="false" hidden>&#10074;&#10074;</button>
       <button class="progress-cancel" id="progressCancelAnalysisBtn" data-text-aria-label="ui-job-cancel-analysis" data-text-title="ui-job-cancel-analysis" hidden>&times;</button>
       <button class="progress-cancel" id="progressCancelTranscodeBtn" data-text-aria-label="ui-job-cancel-transcode-aria-label" data-text-title="ui-job-cancel-transcode-title" hidden>&times;</button>
-      <button class="progress-dismiss" id="progressDismiss" data-text-aria-label="ui-job-dismiss-aria-label">&times;</button>
+      <button class="progress-dismiss" id="progressDismiss" data-text-aria-label="ui-common-dismiss">&times;</button>
     </div>
     <div class="progress-track" role="progressbar" aria-valuemin="0" aria-valuemax="100" aria-valuenow="0" data-text-aria-label="ui-job-progress-aria-label">
       <div class="progress-fill" id="progressFill"></div>
@@ -760,14 +760,14 @@
     <div class="confirm-dialog group-edit-dialog" role="dialog" aria-modal="true" aria-labelledby="groupEditTitle">
       <h3 id="groupEditTitle" data-text="ui-group-edit-title"></h3>
       <div class="group-edit-fields">
-        <label for="groupEditGenre" data-text="ui-group-edit-genre"></label>
+        <label for="groupEditGenre" data-text="ui-common-genre"></label>
         <input type="text" id="groupEditGenre" list="groupEditGenreOptions" maxlength="64" autocomplete="off" spellcheck="false" />
         <datalist id="groupEditGenreOptions"><!-- from the summary's genreOptions --></datalist>
-        <label for="groupEditReleaseDate" data-text="ui-group-edit-release-date"></label>
+        <label for="groupEditReleaseDate" data-text="ui-common-release-date"></label>
         <input type="text" id="groupEditReleaseDate" maxlength="10" autocomplete="off" spellcheck="false" data-text-tooltip="ui-group-edit-release-date-tooltip" />
-        <span data-text="ui-group-edit-rating"></span>
+        <span data-text="ui-common-rating"></span>
         <div class="group-edit-rating-row">
-          <div class="track-detail-rating" id="groupEditRating" role="radiogroup" data-text-aria-label="ui-rating-aria-label" data-text-tooltip="ui-rating-tooltip"><button type="button" role="radio" aria-checked="false" data-rating="1" data-text-aria-label="ui-rating-1-star-aria-label">&#9733;</button><button type="button" role="radio" aria-checked="false" data-rating="2" data-text-aria-label="ui-rating-2-stars-aria-label">&#9733;</button><button type="button" role="radio" aria-checked="false" data-rating="3" data-text-aria-label="ui-rating-3-stars-aria-label">&#9733;</button><button type="button" role="radio" aria-checked="false" data-rating="4" data-text-aria-label="ui-rating-4-stars-aria-label">&#9733;</button><button type="button" role="radio" aria-checked="false" data-rating="5" data-text-aria-label="ui-rating-5-stars-aria-label">&#9733;</button></div>
+          <div class="track-detail-rating" id="groupEditRating" role="radiogroup" data-text-aria-label="ui-common-rating" data-text-tooltip="ui-rating-tooltip"><button type="button" role="radio" aria-checked="false" data-rating="1" data-text-aria-label="ui-rating-1-star-aria-label">&#9733;</button><button type="button" role="radio" aria-checked="false" data-rating="2" data-text-aria-label="ui-rating-2-stars-aria-label">&#9733;</button><button type="button" role="radio" aria-checked="false" data-rating="3" data-text-aria-label="ui-rating-3-stars-aria-label">&#9733;</button><button type="button" role="radio" aria-checked="false" data-rating="4" data-text-aria-label="ui-rating-4-stars-aria-label">&#9733;</button><button type="button" role="radio" aria-checked="false" data-rating="5" data-text-aria-label="ui-rating-5-stars-aria-label">&#9733;</button></div>
           <span class="muted" id="groupEditRatingMixed" hidden data-text="ui-group-edit-mixed"></span>
         </div>
       </div>
@@ -784,7 +784,7 @@
     <div class="confirm-dialog track-columns-dialog" role="dialog" aria-modal="true" aria-labelledby="trackColumnsTitle">
       <h3 id="trackColumnsTitle" data-text="ui-track-columns-title"></h3>
       <p class="muted" data-text="ui-track-columns-intro"></p>
-      <ul class="add-to-list track-columns-list" id="trackColumnsList" data-text-aria-label="ui-track-columns-list-aria-label"><!-- tplTrackColumnItem per optional column --></ul>
+      <ul class="add-to-list track-columns-list" id="trackColumnsList" data-text-aria-label="ui-track-columns-title"><!-- tplTrackColumnItem per optional column --></ul>
       <div class="row confirm-actions">
         <button type="button" id="trackColumnsResetBtn" data-text="ui-track-columns-reset"></button>
         <button type="button" id="trackColumnsDoneBtn" data-primary data-text="ui-track-columns-done"></button>
@@ -868,7 +868,7 @@
       </div>
       <div class="row confirm-actions">
         <button id="playlistImportCancelBtn" data-text="ui-common-cancel"></button>
-        <button id="playlistImportOkBtn" data-primary disabled data-text="ui-playlist-import-ok"></button>
+        <button id="playlistImportOkBtn" data-primary disabled data-text="ui-common-import"></button>
       </div>
     </div>
   </div>
@@ -912,19 +912,19 @@
         <div class="track-grid-cell td-key sortable" data-width="58px" role="columnheader" data-sort-key="key"><span class="sort-label" data-text="ui-track-table-key"></span></div>
         <div class="track-grid-cell td-length sortable" data-width="8ch" role="columnheader" data-sort-key="durationMs"><span class="sort-label" data-text="ui-track-table-length"></span></div>
         <div class="track-grid-cell td-format sortable" data-width="72px" role="columnheader" data-sort-key="format"><span class="sort-label" data-text="ui-track-table-fmt"></span></div>
-        <div class="track-grid-cell td-action" data-width="minmax(5ch, 14ch)" role="columnheader"><button type="button" class="track-columns-btn" data-track-columns-button data-text-tooltip="ui-track-columns-button-tooltip" data-text-aria-label="ui-track-columns-button-aria-label"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="3" y="4" width="18" height="16" rx="2"></rect><line x1="9" y1="4" x2="9" y2="20"></line><line x1="15" y1="4" x2="15" y2="20"></line></svg></button></div>
+        <div class="track-grid-cell td-action" data-width="minmax(5ch, 14ch)" role="columnheader"><button type="button" class="track-columns-btn" data-track-columns-button data-text-tooltip="ui-track-columns-button-tooltip" data-text-aria-label="ui-track-columns-title"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="3" y="4" width="18" height="16" rx="2"></rect><line x1="9" y1="4" x2="9" y2="20"></line><line x1="15" y1="4" x2="15" y2="20"></line></svg></button></div>
       </div>
     </div>
   </template>
   <template id="tplTrackColumnItem">
-    <li class="track-columns-item"><span class="drag-handle" data-track-column-drag-handle draggable="true" data-text-tooltip="ui-track-columns-drag" data-text-aria-label="ui-track-columns-drag">&#10495;</span><label class="add-to-item"><input type="checkbox" /><span class="add-to-name"></span></label></li>
+    <li class="track-columns-item"><span class="drag-handle" data-track-column-drag-handle draggable="true" data-text-tooltip="ui-common-drag-to-reorder" data-text-aria-label="ui-common-drag-to-reorder">&#10495;</span><label class="add-to-item"><input type="checkbox" /><span class="add-to-name"></span></label></li>
   </template>
   <template id="tplTrackRow">
     <div role="row" class="track-grid-row">
-      <div role="cell" class="track-grid-cell td-drag"><span class="drag-handle" data-playlist-track-drag-handle draggable="true" data-text-tooltip="ui-track-row-drag-to-reorder" data-text-aria-label="ui-track-row-drag-to-reorder">⠿</span></div>
+      <div role="cell" class="track-grid-cell td-drag"><span class="drag-handle" data-playlist-track-drag-handle draggable="true" data-text-tooltip="ui-common-drag-to-reorder" data-text-aria-label="ui-common-drag-to-reorder">⠿</span></div>
       <div role="cell" class="track-grid-cell td-select"><input type="checkbox" /></div>
       <div role="cell" class="track-grid-cell td-cover"><div class="cover-play"><button class="transport-btn"></button></div></div>
-      <div role="cell" class="track-grid-cell td-waveform"><div class="waveform-cell"><div class="waveform" data-action="scrub-play" data-text-aria-label="ui-track-row-waveform-preview-aria-label" data-text-tooltip="ui-track-row-play-from-here-tooltip"><i class="waveform-playhead" aria-hidden="true"></i></div><button class="waveform-detail-btn" data-action="edit-track-detail" data-text-aria-label="ui-track-row-edit-cues-aria-label"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><line x1="7" y1="3" x2="7" y2="21"></line><path d="M7 4h10l-3 4 3 4H7z" fill="currentColor"></path></svg></button></div></div>
+      <div role="cell" class="track-grid-cell td-waveform"><div class="waveform-cell"><div class="waveform" data-action="scrub-play" data-text-aria-label="ui-track-row-waveform-preview-aria-label" data-text-tooltip="ui-common-play-from-here-tooltip"><i class="waveform-playhead" aria-hidden="true"></i></div><button class="waveform-detail-btn" data-action="edit-track-detail" data-text-aria-label="ui-track-row-edit-cues-aria-label"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><line x1="7" y1="3" x2="7" y2="21"></line><path d="M7 4h10l-3 4 3 4H7z" fill="currentColor"></path></svg></button></div></div>
       <div role="cell" class="track-grid-cell td-track"><div class="track-info-cell">
         <span class="track-title"></span>
         <span class="track-artist"></span>
@@ -988,7 +988,7 @@
     <span class="source-chip source-chip-library"><input class="source-chip-toggle" type="checkbox" data-mixxx-db="true" data-text-aria-label="ui-library-toggle-mixxx-library-aria-label" /><span class="source-chip-path">Mixxx</span><button class="source-chip-import" type="button" data-import-library="mixxx" data-text-tooltip="ui-library-import-from-mixxx" data-text-aria-label="ui-library-import-from-mixxx">&#8635;</button></span>
   </template>
   <template id="tplSourceChip">
-    <span class="source-chip"><input class="source-chip-toggle" type="checkbox" data-text-aria-label="ui-library-filter-source-aria-label" /><span class="source-chip-path"></span><button class="source-chip-remove" data-text-aria-label="ui-library-remove-aria-label">&times;</button></span>
+    <span class="source-chip"><input class="source-chip-toggle" type="checkbox" data-text-aria-label="ui-library-filter-source-aria-label" /><span class="source-chip-path"></span><button class="source-chip-remove" data-text-aria-label="ui-common-remove">&times;</button></span>
   </template>
   <template id="tplSourceChipGroup">
     <div class="source-chip-group"><div class="source-chip-children"></div></div>
@@ -1004,7 +1004,7 @@
   </template>
   <template id="tplNavPlaylistItem">
     <li data-nav-playlist-li><button class="nav-playlist-item">
-      <span class="drag-handle nav-playlist-hover-only" data-nav-playlist-drag-handle draggable="true" data-text-tooltip="ui-playlist-drag-to-reorder" data-text-aria-label="ui-playlist-drag-to-reorder">&#10495;</span>
+      <span class="drag-handle nav-playlist-hover-only" data-nav-playlist-drag-handle draggable="true" data-text-tooltip="ui-common-drag-to-reorder" data-text-aria-label="ui-common-drag-to-reorder">&#10495;</span>
       <span class="nav-playlist-name"></span>
       <span class="nav-playlist-status"></span>
       <span class="nav-playlist-icon-btn nav-playlist-rename nav-playlist-hover-only" data-text-tooltip="ui-playlist-rename-tooltip" data-text-aria-label="ui-playlist-rename-aria-label" role="button" tabindex="0">&#9998;</span>
@@ -1019,11 +1019,11 @@
   <!-- USB panels -->
   <template id="tplMutedListItem"><li class="muted"></li></template>
   <template id="tplUsbPlaylistItem">
-    <li><button><span class="drag-handle" data-usb-drag-handle draggable="true" data-text-tooltip="ui-usb-drag-to-reorder" data-text-aria-label="ui-usb-drag-to-reorder">&#10495;</span><span class="playlist-label"></span><span class="playlist-order-edited hidden" data-text-tooltip="ui-usb-playlists-order-edited" data-text-aria-label="ui-usb-playlists-order-edited">&#9679;</span><span class="playlist-remove" data-text-tooltip="ui-usb-remove" data-text-aria-label="ui-usb-remove">&times;</span></button></li>
+    <li><button><span class="drag-handle" data-usb-drag-handle draggable="true" data-text-tooltip="ui-common-drag-to-reorder" data-text-aria-label="ui-common-drag-to-reorder">&#10495;</span><span class="playlist-label"></span><span class="playlist-order-edited hidden" data-text-tooltip="ui-usb-playlists-order-edited" data-text-aria-label="ui-usb-playlists-order-edited">&#9679;</span><span class="playlist-remove" data-text-tooltip="ui-common-remove" data-text-aria-label="ui-common-remove">&times;</span></button></li>
   </template>
   <template id="tplHistoryItem"><li><button><span class="playlist-label"></span><span class="history-date muted"></span></button></li></template>
   <template id="tplUsbAudioFormatChip">
-    <span class="usb-cfg-recent-item usb-cfg-audio-format-chip"><span class="drag-handle" data-usb-audio-format-drag-handle draggable="true" data-text-tooltip="ui-usb-drag-to-set-tooltip" data-text-aria-label="ui-usb-drag-to-reorder">&#10495;</span><label class="usb-cfg-audio-format-label"><input type="checkbox" class="usb-cfg-audio-format-check"><span class="usb-cfg-audio-format-name"></span></label></span>
+    <span class="usb-cfg-recent-item usb-cfg-audio-format-chip"><span class="drag-handle" data-usb-audio-format-drag-handle draggable="true" data-text-tooltip="ui-usb-drag-to-set-tooltip" data-text-aria-label="ui-common-drag-to-reorder">&#10495;</span><label class="usb-cfg-audio-format-label"><input type="checkbox" class="usb-cfg-audio-format-check"><span class="usb-cfg-audio-format-name"></span></label></span>
   </template>
   <template id="tplUsbRecentItem">
     <span class="usb-cfg-recent-item"><button type="button" class="usb-cfg-recent-btn" style="direction: rtl; text-align: left;"></button><button type="button" class="usb-cfg-recent-prune-btn" data-text-tooltip="ui-usb-forget-tooltip">×</button></span>
@@ -1077,7 +1077,7 @@
       <div class="event-log-message"></div>
       <div class="backups-row-actions">
         <button type="button" class="backups-restore-btn" data-text="ui-backups-restore"></button>
-        <button type="button" class="backups-delete-btn" data-text="ui-backups-delete"></button>
+        <button type="button" class="backups-delete-btn" data-text="ui-common-delete"></button>
       </div>
     </div>
   </template>
@@ -1091,10 +1091,10 @@
   <template id="tplOverviewCue"><i class="overview-cue"></i></template>
   <template id="tplCueMarker"><i class="cue-marker" translate="no"></i></template>
   <template id="tplCueRow">
-    <div class="cue-row"><button type="button" class="cue-row-play" data-action="cue-play" data-text-aria-label="ui-track-detail-play-from-cue-aria-label" data-text-tooltip="ui-track-detail-play-from-here-tooltip"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M8 6v12l10-6z"></path></svg></button><span class="cue-row-pos"></span><button type="button" class="cue-row-color" data-action="cue-color" translate="no"></button><input type="text" class="cue-row-name" data-action="cue-name" data-text-placeholder="ui-track-detail-name-placeholder" /><button type="button" class="cue-row-delete" data-action="cue-delete" data-text-aria-label="ui-track-detail-delete-cue-aria-label">×</button></div>
+    <div class="cue-row"><button type="button" class="cue-row-play" data-action="cue-play" data-text-aria-label="ui-track-detail-play-from-cue-aria-label" data-text-tooltip="ui-common-play-from-here-tooltip"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M8 6v12l10-6z"></path></svg></button><span class="cue-row-pos"></span><button type="button" class="cue-row-color" data-action="cue-color" translate="no"></button><input type="text" class="cue-row-name" data-action="cue-name" data-text-placeholder="ui-track-detail-name-placeholder" /><button type="button" class="cue-row-delete" data-action="cue-delete" data-text-aria-label="ui-track-detail-delete-cue-aria-label">×</button></div>
   </template>
   <template id="tplCueRowStart">
-    <div class="cue-row is-playback-start"><button type="button" class="cue-row-play" data-action="cue-play" data-text-aria-label="ui-track-detail-play-from-cue-aria-label" data-text-tooltip="ui-track-detail-play-from-here-tooltip"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M8 6v12l10-6z"></path></svg></button><span class="cue-row-pos"></span><span class="cue-row-memory" data-text-tooltip="ui-track-detail-memory-cue-only-tooltip"></span><span class="cue-row-label" data-text="ui-track-detail-playback-start"></span><span class="cue-row-badge" data-text="ui-track-detail-memory-cue-badge"></span></div>
+    <div class="cue-row is-playback-start"><button type="button" class="cue-row-play" data-action="cue-play" data-text-aria-label="ui-track-detail-play-from-cue-aria-label" data-text-tooltip="ui-common-play-from-here-tooltip"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M8 6v12l10-6z"></path></svg></button><span class="cue-row-pos"></span><span class="cue-row-memory" data-text-tooltip="ui-track-detail-memory-cue-only-tooltip"></span><span class="cue-row-label" data-text="ui-track-detail-playback-start"></span><span class="cue-row-badge" data-text="ui-track-detail-memory-cue-badge"></span></div>
   </template>
   <template id="tplCueSlotEmpty">
     <div class="cue-slot-empty" aria-hidden="true"><button type="button" class="cue-row-play" disabled tabindex="-1"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M8 6v12l10-6z"></path></svg></button><span class="cue-row-pos">–</span><span class="cue-row-color" translate="no"></span><input type="text" class="cue-row-name" data-text-placeholder="ui-track-detail-name-placeholder" disabled tabindex="-1" /></div>
@@ -1102,7 +1102,7 @@
   <template id="tplCueColorSwatch"><button type="button" class="cue-color-swatch"></button></template>
   <template id="tplCueColorSwatchNone"><button type="button" class="cue-color-swatch is-none" data-text-aria-label="ui-track-detail-no-colour" data-text-tooltip="ui-track-detail-no-colour"></button></template>
   <template id="tplMemorySlot">
-    <div class="cue-row memory-slot"><button type="button" class="memory-step" data-action="memory-prev" data-text-aria-label="ui-track-detail-previous-memory-cue" data-text-tooltip="ui-track-detail-previous-memory-cue"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M15 5l-7 7 7 7"></path></svg></button><button type="button" class="memory-step" data-action="memory-next" data-text-aria-label="ui-track-detail-next-memory-cue" data-text-tooltip="ui-track-detail-next-memory-cue"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M9 5l7 7-7 7"></path></svg></button><button type="button" class="cue-row-play" data-action="cue-play" data-text-aria-label="ui-track-detail-play-from-memory-cue-aria-label" data-text-tooltip="ui-track-detail-play-from-here-tooltip"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M8 6v12l10-6z"></path></svg></button><span class="cue-row-pos"></span><button type="button" class="cue-row-color" data-action="cue-color" data-text-aria-label="ui-track-detail-memory-cue-colour-aria-label">&#9660;</button><input type="text" class="cue-row-name" data-action="cue-name" data-text-placeholder="ui-track-detail-name-placeholder" /><button type="button" class="cue-row-delete" data-action="cue-delete" data-text-aria-label="ui-track-detail-delete-memory-cue-aria-label">×</button><span class="memory-slot-count"></span><button type="button" class="memory-add" data-action="memory-add" data-text-aria-label="ui-track-detail-add-memory-cue-aria-label" data-text-tooltip="ui-track-detail-add-memory-cue-tooltip"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 5v14M5 12h14"></path></svg></button></div>
+    <div class="cue-row memory-slot"><button type="button" class="memory-step" data-action="memory-prev" data-text-aria-label="ui-track-detail-previous-memory-cue" data-text-tooltip="ui-track-detail-previous-memory-cue"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M15 5l-7 7 7 7"></path></svg></button><button type="button" class="memory-step" data-action="memory-next" data-text-aria-label="ui-track-detail-next-memory-cue" data-text-tooltip="ui-track-detail-next-memory-cue"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M9 5l7 7-7 7"></path></svg></button><button type="button" class="cue-row-play" data-action="cue-play" data-text-aria-label="ui-track-detail-play-from-memory-cue-aria-label" data-text-tooltip="ui-common-play-from-here-tooltip"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M8 6v12l10-6z"></path></svg></button><span class="cue-row-pos"></span><button type="button" class="cue-row-color" data-action="cue-color" data-text-aria-label="ui-track-detail-memory-cue-colour-aria-label">&#9660;</button><input type="text" class="cue-row-name" data-action="cue-name" data-text-placeholder="ui-track-detail-name-placeholder" /><button type="button" class="cue-row-delete" data-action="cue-delete" data-text-aria-label="ui-track-detail-delete-memory-cue-aria-label">×</button><span class="memory-slot-count"></span><button type="button" class="memory-add" data-action="memory-add" data-text-aria-label="ui-track-detail-add-memory-cue-aria-label" data-text-tooltip="ui-track-detail-add-memory-cue-tooltip"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 5v14M5 12h14"></path></svg></button></div>
   </template>
   <template id="tplMemorySlotEmpty">
     <div class="memory-slot is-empty"><span class="memory-slot-label"><span data-text="ui-track-detail-memory-cues"></span> <b class="memory-slot-count"></b></span><button type="button" class="memory-step" data-action="memory-prev" data-text-aria-label="ui-track-detail-previous-memory-cue" data-text-tooltip="ui-track-detail-previous-memory-cue"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M15 5l-7 7 7 7"></path></svg></button><button type="button" class="memory-step" data-action="memory-next" data-text-aria-label="ui-track-detail-next-memory-cue" data-text-tooltip="ui-track-detail-next-memory-cue"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M9 5l7 7-7 7"></path></svg></button><button type="button" class="memory-add" data-action="memory-add" data-text-aria-label="ui-track-detail-add-memory-cue-aria-label" data-text-tooltip="ui-track-detail-add-memory-cue-tooltip"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 5v14M5 12h14"></path></svg></button></div>

@@ -127,7 +127,7 @@ export function createTrackRow(ctx, track, options) {
 
   const transport = row.querySelector(".transport-btn");
   const playing = isTrackCurrentlyPlaying(ctx, track);
-  const label = t(playing ? "ui-track-row-stop" : "ui-track-row-play");
+  const label = t(playing ? "ui-track-row-stop" : "ui-common-play");
   transport.classList.toggle("is-playing", playing);
   Object.assign(transport.dataset, {
     action: options.secondaryActionType,
@@ -177,7 +177,7 @@ export function createTrackRow(ctx, track, options) {
     const playlistName = state.playlists?.find((p) => p.id === state.currentPlaylistId)?.name;
     primary.dataset.tooltip = playlistName
       ? t("ui-track-row-remove-from-tooltip", { playlist: playlistName })
-      : t("ui-track-row-remove-from-playlist-tooltip");
+      : t("ui-common-remove-from-playlist");
   } else {
     setAddButtonState(primary, state.playlists?.find((p) => p.id === state.currentPlaylistId));
   }
@@ -186,7 +186,7 @@ export function createTrackRow(ctx, track, options) {
   // history rows don't get it.
   if (options.origin !== "usb") {
     analyze.dataset.id = renderTrackId;
-    analyze.textContent = t(track.analysisReady ? "ui-track-row-reanalyze" : "ui-track-row-analyze");
+    analyze.textContent = t(track.analysisReady ? "ui-common-reanalyze" : "ui-track-row-analyze");
     applyAnalyzeButtonState(state, analyze, renderTrackId, track.analysisReady);
   } else {
     analyze.remove();

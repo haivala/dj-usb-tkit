@@ -918,7 +918,7 @@ fn export_button_text(locks_reorder: bool, playlist_name: &str, usb_dir: Option<
         (true, Some(dir)) => tr::export_button_append(playlist_name, dir),
         (true, None) => tr::export_button_append_no_dir(playlist_name),
         (false, Some(dir)) => tr::export_button(dir),
-        (false, None) => tr::export_button_no_dir(),
+        (false, None) => tr::ui_playlist_export(),
     }
     .render()
 }
@@ -1186,7 +1186,7 @@ impl BackendService {
                 tr::export_error_source_missing(missing_root),
                 json!({
                     "validationType": "source_root_missing",
-                    "statusText": tr::export_refused_source_missing(missing_root).render(),
+                    "statusText": tr::export_error_source_missing(missing_root).render(),
                     "missingRoots": blocking_missing_roots,
                 }),
             ));

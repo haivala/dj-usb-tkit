@@ -587,6 +587,88 @@ usb-not-for-ui = Not sent
         assert_eq!(ui_texts_in(&ENGLISH_CATALOG).decimal_separator, ".");
     }
 
+    /// One English text, one key: a text with the same role in several places is one
+    /// `ui-common-*` key (docs/TRANSLATING.md), so a translator translates it once. These
+    /// share their English but not their role, and may translate differently.
+    const SAME_ENGLISH_KEPT_APART: &[&[&str]] = &[
+        // The sidebar's heading, the Add to… list, the import dialog's group, a diagnostics area.
+        &[
+            "diagnostics-area-playlists",
+            "ui-add-to-list-aria-label",
+            "ui-playlist-import-group-playlists",
+            "ui-sidebar-playlists",
+        ],
+        // The database's name: a backup's file, a diagnostics section and check, a table column.
+        &[
+            "backups-files-edb",
+            "diagnostics-section-edb",
+            "diagnostics-check-edb",
+            "ui-usb-edb",
+        ],
+        &["backups-files-pdb", "diagnostics-section-pdb", "ui-usb-pdb"],
+        // A diagnostics group, where playback came from, the sidebar's page.
+        &[
+            "diagnostics-group-library",
+            "playback-source-library",
+            "ui-sidebar-library",
+        ],
+        // Where playback came from vs the USB page.
+        &["playback-source-usb", "ui-common-usb"],
+        // The header's badge, the playlist page's title, a parity table's column.
+        &[
+            "ui-header-playlist-badge",
+            "ui-playlist-title",
+            "ui-usb-playlist",
+        ],
+        // A diagnostics section vs a Settings section.
+        &["diagnostics-section-analysis", "ui-settings-analysis"],
+        // A narrow column header (may be abbreviated, like "Fmt") vs a field's label.
+        &["ui-track-detail-bpm", "ui-track-table-bpm"],
+        &["ui-track-detail-key", "ui-track-table-key"],
+        &["ui-common-genre", "ui-track-table-genre"],
+        // A status word vs a button.
+        &["ui-job-done", "ui-track-columns-done"],
+        // A library's history lists vs the USB History page.
+        &["ui-playlist-import-group-history", "ui-sidebar-history"],
+        // A text field's placeholder vs a button.
+        &["ui-add-to-new-name-placeholder", "ui-sidebar-new-playlist"],
+    ];
+
+    #[test]
+    fn no_two_keys_share_their_english_text() {
+        let resource = fluent_syntax::parser::parse(ENGLISH_CATALOG.source)
+            .unwrap_or_else(|(resource, _)| resource);
+        let mut keys_by_text: BTreeMap<String, Vec<&str>> = BTreeMap::new();
+        for entry in &resource.body {
+            if let ast::Entry::Message(message) = entry
+                && let Some(value) = &message.value
+            {
+                keys_by_text
+                    .entry(format!("{value:?}"))
+                    .or_default()
+                    .push(message.id.name);
+            }
+        }
+        let shared: Vec<Vec<&str>> = keys_by_text
+            .into_values()
+            .filter(|keys| keys.len() > 1)
+            .filter(|keys| {
+                !SAME_ENGLISH_KEPT_APART.iter().any(|kept| {
+                    let mut kept = kept.to_vec();
+                    let mut keys = keys.clone();
+                    kept.sort_unstable();
+                    keys.sort_unstable();
+                    kept == keys
+                })
+            })
+            .collect();
+        assert!(
+            shared.is_empty(),
+            "keys with the same English text: make each one key (ui-common-* when it's used in \
+             several areas), or list it in SAME_ENGLISH_KEPT_APART with why: {shared:?}"
+        );
+    }
+
     /// The e2e specs' labels come from `vanilla-ui/tests/e2e/ui_texts.en.json` (loaded by
     /// `coverage-fixture.mjs`), and the test-language check's from `ui_texts.en-XA.json`.
     /// Rewrite both with `UPDATE_UI_TEXTS=1 cargo test -p backend --lib i18n::`.

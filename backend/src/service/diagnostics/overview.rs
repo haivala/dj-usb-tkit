@@ -60,7 +60,7 @@ pub(super) const DISPLAY_LAYOUT: [DisplaySection; 7] = [
     },
     DisplaySection {
         group: tr::diagnostics_group_library,
-        title: tr::diagnostics_section_playlists,
+        title: tr::diagnostics_area_playlists,
         labels: &[
             tr::diagnostics_check_playlist_data,
             tr::diagnostics_check_overall_resolution,
@@ -363,7 +363,7 @@ pub(super) const PARITY_FILES: usize = 2;
 pub(super) const PARITY_LAYOUT: [DisplaySection; 3] = [
     DisplaySection {
         group: tr::diagnostics_group_comparison,
-        title: tr::diagnostics_section_playlists,
+        title: tr::diagnostics_area_playlists,
         labels: &[
             tr::diagnostics_check_parity_identity,
             tr::diagnostics_check_parity_membership,
@@ -373,7 +373,7 @@ pub(super) const PARITY_LAYOUT: [DisplaySection; 3] = [
     },
     DisplaySection {
         group: tr::diagnostics_group_comparison,
-        title: tr::diagnostics_section_track_details,
+        title: tr::diagnostics_area_track_details,
         labels: &[
             tr::diagnostics_check_parity_pdb_metadata,
             tr::diagnostics_check_parity_edb_metadata,
@@ -384,7 +384,7 @@ pub(super) const PARITY_LAYOUT: [DisplaySection; 3] = [
     },
     DisplaySection {
         group: tr::diagnostics_group_comparison,
-        title: tr::diagnostics_section_music_files,
+        title: tr::diagnostics_area_music_files,
         labels: &[
             tr::diagnostics_check_parity_files,
             tr::diagnostics_check_parity_paths,

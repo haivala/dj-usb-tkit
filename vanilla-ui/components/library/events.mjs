@@ -45,7 +45,7 @@ export function bindLibraryEvents(ctx) {
       const confirmed = await openConfirmDialog({
         title: t("ui-library-remove-folder-title"),
         message: t("ui-library-remove-folder-confirm", { path: removedRoot }),
-        confirmLabel: t("ui-library-remove-folder")
+        confirmLabel: t("ui-common-remove")
       });
       if (!confirmed) return;
 

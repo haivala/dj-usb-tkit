@@ -130,9 +130,7 @@ impl UsbAudioFormats {
             )));
         }
         if !entries.iter().any(|&(_, allowed)| allowed) {
-            return Err(BackendError::Validation(
-                tr::usb_audio_formats_error_none_ticked(),
-            ));
+            return Err(BackendError::Validation(tr::usb_audio_formats_last_ticked()));
         }
         Ok(Self(entries))
     }

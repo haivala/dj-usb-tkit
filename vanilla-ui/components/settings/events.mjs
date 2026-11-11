@@ -268,7 +268,7 @@ export function bindSettingsEvents(ctx) {
     if (engine !== "essentia" && state.essentiaDownloading) {
       command("cancel_essentia_download").catch(() => {});
       state.essentiaDownloading = false;
-      setProgress(false, 0, t("ui-job-idle"));
+      setProgress(false, 0, t("ui-common-idle"));
     }
     state.analysisEngine = engine;
     if (el.analysisEngineSelect.value !== engine) {
@@ -302,7 +302,7 @@ export function bindSettingsEvents(ctx) {
     } catch (err) {
       state.essentiaDownloading = false;
       state.essentiaDownloadError = err?.message || String(err);
-      setProgress(false, 0, t("ui-job-idle"));
+      setProgress(false, 0, t("ui-common-idle"));
       renderEssentiaInstallRow(ctx);
     }
   });
@@ -336,13 +336,13 @@ export function bindSettingsEvents(ctx) {
           state.essentiaInstalled = true;
           state.essentiaDownloading = false;
           state.essentiaDownloadError = null;
-          setProgress(false, 0, t("ui-job-idle"));
+          setProgress(false, 0, t("ui-common-idle"));
           renderEssentiaInstallRow(ctx);
           emitStatus(t("ui-settings-essentia-installed"));
         } else if (payload.error) {
           state.essentiaDownloading = false;
           state.essentiaDownloadError = payload.error;
-          setProgress(false, 0, t("ui-job-idle"));
+          setProgress(false, 0, t("ui-common-idle"));
           renderEssentiaInstallRow(ctx);
         } else if (typeof payload.percent === "number") {
           setProgress(true, payload.percent, t("ui-settings-essentia-downloading-progress"));

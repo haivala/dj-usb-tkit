@@ -203,7 +203,7 @@ export function bindPlaylistEvents(ctx) {
     // need to force-load every page here or resolve ids client-side.
     analyzeTrackIds([], { playlistId: playlist.id }).catch((err) => {
       console.error(err);
-      emitStatus(t("ui-playlist-analyze-failed", { error: err.message || err }));
+      emitStatus(t("ui-common-analyze-failed", { error: err.message || err }));
     });
   });
 

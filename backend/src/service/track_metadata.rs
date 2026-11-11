@@ -720,7 +720,11 @@ impl BackendService {
         self.refresh_engine_library(&usb_root);
         self.invalidate_usb_parse_cache();
 
-        on_progress(STEPS, STEPS, &tr::track_detail_progress_saved().render());
+        on_progress(
+            STEPS,
+            STEPS,
+            &tr::job_save_usb_track_metadata_edits_completed().render(),
+        );
         let paths: Vec<String> = items
             .iter()
             .map(|item| item.usb_media_path_raw.clone())

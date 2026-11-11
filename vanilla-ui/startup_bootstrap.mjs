@@ -253,7 +253,7 @@ export async function initApp(ctx) {
   ctx.setupRuntimeErrorLogging();
   ctx.logToFile({ source: "startup", message: "Console/event logging ready" });
 
-  ctx.setProgress(false, 0, t("ui-job-idle"));
+  ctx.setProgress(false, 0, t("ui-common-idle"));
   await ctx.loadUsbDevices();
   // The library's folders and their switches (draws the chips, lets the
   // folders into the asset scope).

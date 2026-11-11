@@ -564,7 +564,7 @@ export async function removeUsbPlaylist(ctx, playlist) {
   const confirmed = await ctx.openConfirmDialog({
     title: t("ui-usb-playlists-remove-title"),
     message: playlist.removeConfirmText,
-    confirmLabel: t("ui-usb-playlists-remove")
+    confirmLabel: t("ui-common-remove")
   });
   if (!confirmed) return;
 
@@ -1067,7 +1067,7 @@ async function runPlaylistExport(ctx, playlistId) {
     return;
   } finally {
     if (!state.activeJobId) {
-      setProgress(false, 0, t("ui-job-idle"));
+      setProgress(false, 0, t("ui-common-idle"));
       stopProgressHeartbeat();
     }
   }

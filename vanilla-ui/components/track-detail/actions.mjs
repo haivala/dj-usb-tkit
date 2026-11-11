@@ -746,7 +746,7 @@ export function createTrackDetailController(el, prefs = {}) {
     const playing = isPlaying();
     if (playing === playPauseShowsPlaying) return;
     playPauseShowsPlaying = playing;
-    const label = t(playing ? "ui-track-detail-pause" : "ui-track-detail-play-pause");
+    const label = t(playing ? "ui-track-detail-pause" : "ui-common-play");
     btn.classList.toggle("is-playing", playing);
     btn.setAttribute("aria-label", label);
     btn.dataset.tooltip = label;

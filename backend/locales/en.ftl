@@ -15,7 +15,8 @@
 #   Rust:     export, diagnostics, parity, repair, track-list, analysis, scan,
 #             migration, transcode, error, format (numbers and sizes)
 #   both:     job (also the progress bar), update, playback
-#   shared:   common (generic dialog buttons and words only); markup repeated on
+#   shared:   common (a text with the same role in several areas: dialog buttons, actions
+#             such as Remove, page names, track fields); markup repeated on
 #             several pages: selection-bar, track-table, rating; and one area per
 #             <template> used on more than one page, named from its id
 #             (tplTrackRow is track-row): track-row, track-row-empty, cover-img
@@ -75,7 +76,6 @@ usb-progress-order-edit-edb = USB: Writing the new order to the eDB
 usb-progress-order-edit-verify = USB: Checking the new order in both databases
 usb-progress-order-edit-write-back = USB: Saving the databases to the USB
 usb-progress-order-edit-engine = USB: Updating the Engine DJ library
-usb-progress-order-edit-saved = USB: Order saved
 usb-progress-resolving-playlist-identifiers = USB: Resolving playlist identifiers
 usb-progress-analyzing-shared-tracks = USB: Analyzing playlists and shared tracks
 usb-progress-deleting-exclusive-track-files = USB: Deleting exclusive track files
@@ -287,7 +287,6 @@ usb-audio-formats-read-only = USB is read-only
 usb-audio-formats-last-ticked = At least one format stays ticked
 
 usb-audio-formats-error-read-only = The USB is read-only, so its USB audio formats can't be changed
-usb-audio-formats-error-none-ticked = At least one format stays ticked
 # The status line when an audio format ticked or unticked for the USB can't be saved.
 # $error: why it failed.
 usb-audio-formats-save-failed = Save USB audio formats failed: { $error }
@@ -371,12 +370,9 @@ diagnostics-group-comparison = Comparison
 diagnostics-section-pdb = PDB
 diagnostics-section-edb = eDB
 diagnostics-section-engine = Engine DJ
-diagnostics-section-playlists = Playlists
 diagnostics-section-analysis = Analysis
 diagnostics-section-player-counters = Player counters
 diagnostics-section-page-format = Page format
-diagnostics-section-track-details = Track details
-diagnostics-section-music-files = Music files
 
 # The overview rows' titles, above the diagnostics, parity and repair reports: what a DJ cares about.
 diagnostics-area-older-players = Older Pioneer players
@@ -540,8 +536,6 @@ parity-issue-order-mismatch = order mismatch
 # code style (num_rl, nrs, u5, page_flags, tranrf, empty_candidate, playlist_tree, ACTV,
 # repair_usb_diagnostics) are the PDB format's own names: keep them as they are.
 diagnostics-check-pdb-exists = PDB exists
-# $path: the file the check looked for.
-diagnostics-check-pdb-exists-missing = File not found: { $path }
 diagnostics-check-pdb-exists-found = Found
 diagnostics-check-pdb-parseable = PDB parseable
 # $error: why reading failed, in English.
@@ -656,7 +650,8 @@ diagnostics-check-pdb-history-counts = { $playlists ->
     [one] { $rows } row
    *[other] { $rows } rows
 }
-diagnostics-check-pdb-history-empty = empty
+# A history check's detail when the database has no history.
+diagnostics-check-history-empty = empty
 diagnostics-check-num-rl-pages = num_rl=8191 pages
 # $count: the pages with the value. $total: all pages.
 diagnostics-check-num-rl-pages-detail = { $count } of { $total ->
@@ -787,7 +782,6 @@ diagnostics-check-edb-history-counts = { $playlists ->
     [one] { $entries } entry
    *[other] { $entries } entries
 }
-diagnostics-check-edb-history-empty = empty
 diagnostics-check-string-alignment = Track/album string alignment
 diagnostics-check-string-alignment-ok = All UTF-16 and long ASCII string slots are 4-byte aligned
 # $count: the rows. $examples: up to three, such as "track #12 (title)", joined with ", ". The repair_* names are commands: keep them.
@@ -913,16 +907,13 @@ diagnostics-check-parity-rating-colour-detail = { $count ->
    *[other] { $count } playlist-linked tracks
 } with a different rating or colour in the PDB than in the eDB (rating differs: { $ratings }, colour differs: { $colours })
 
-
-# The progress bar while the job runs.
-diagnostics-progress-resolving-root = USB: Resolving root
+# The progress bar while the job runs; its first steps are usb-progress-resolving-root,
+# usb-progress-parsing-pdb and usb-progress-reading-edb.
 diagnostics-progress-checking-pdb-integrity = USB: Checking PDB integrity
 diagnostics-progress-checking-database-access = USB: Checking database access
 diagnostics-progress-checking-contents-integrity = USB: Checking contents integrity (DB-only)
 diagnostics-progress-checking-analysis-references = USB: Checking analysis references
 diagnostics-progress-checking-playlist-resolution = USB: Checking playlist resolution
-diagnostics-progress-parsing-pdb = USB: Parsing PDB
-diagnostics-progress-reading-edb = USB: Reading eDB
 diagnostics-progress-checking-audio-files = USB: Checking indexed audio file presence
 diagnostics-progress-comparing-playlist-sources = USB: Comparing playlist sources
 diagnostics-progress-finalizing-parity-report = USB: Finalizing parity report
@@ -1510,6 +1501,10 @@ error-track-not-found-anywhere = track not found in Library or selected USB
 error-usb-playlist-not-found = USB playlist not found: { $playlist }
 # $history: the USB history's id.
 error-usb-history-not-found = USB history not found: { $history }
+# A remove that failed (a playlist, the Essentia engine). $error: why.
+error-remove-failed = Remove failed: { $error }
+# $path: the file that isn't there.
+error-file-not-found = File not found: { $path }
 # $path: the audio file, here and in the next one.
 error-audio-file-not-found = audio file not found: { $path }
 error-audio-path-not-file = audio path is not a file: { $path }
@@ -1529,7 +1524,6 @@ error-data-upgrade-running = Finishing a data upgrade, try again in a moment
 
 # The playlist's export button with a USB selected, and its tooltip. $dir: the drive's name.
 export-button = Export to USB: { $dir }
-export-button-no-dir = Export to USB
 export-button-tooltip = Export current playlist to selected USB
 # The same when the USB already has a playlist of this name, so export appends to it.
 # $playlist: the playlist's name. $dir: the drive's name.
@@ -1601,8 +1595,6 @@ export-refused-not-analyzed = Export blocked: { $missing } of { $total ->
    *[other] { $total } tracks
 } not analyzed yet. Use Analyze Missing Tracks.
 export-refused-read-only = USB is read-only. Remount as read-write before export.
-# $folder: the missing source folder.
-export-refused-source-missing = Export blocked: source folder is missing: { $folder }. Relocate or remove it first.
 export-refused-manifest = Export blocked: manifest invariant check failed.
 export-refused-manifest-after-prune = Export finished with errors: the stale-file prune removed a file the exported playlist still references — the USB databases were written; restore from the pre-export backup.
 
@@ -1674,12 +1666,8 @@ export-engine-tracks-without-analysis = { $missing } of { $total ->
 
 ## track-list
 
-# A track list's heading: its tracks, and their size when known.
+# A track list's heading when its size is known (without it, format-track-count).
 # $count: the tracks. $size: their size, such as 412 MB.
-track-list-summary = { $count ->
-    [one] { $count } track
-   *[other] { $count } tracks
-}
 track-list-summary-size = { $count ->
     [one] { $count } track
    *[other] { $count } tracks
@@ -1698,6 +1686,12 @@ track-list-total-time-unknown = Total time: { $duration } ({ $count ->
 # The decimal separator in every number the app shows ("2.5 MB", "98.5%"): one character.
 # No language groups digits, so a count and an id read alike.
 format-decimal-separator = .
+
+# A number of tracks (a list's heading, the import dialog's note on a list).
+format-track-count = { $count ->
+    [one] { $count } track
+   *[other] { $count } tracks
+}
 
 # A size in binary units, as file managers show a USB stick's (1 KB is 1024 bytes).
 # $size: the number, already rounded to the decimals the place shows.
@@ -1734,9 +1728,7 @@ settings-language-job-running = a job is running. Try again when it has finished
 settings-language-failed = Could not change the language: { $error }
 # The native folder dialog's title, from the transcode folder's Change.
 settings-transcode-folder-dialog-title = Select the folder for transcodes
-# Status lines when removing the Essentia files fails, and when the transcode folder can't be
-# read or changed. $error: why it failed.
-settings-essentia-remove-failed = Remove failed: { $error }
+# The status line when the transcode folder can't be read or changed. $error: why it failed.
 settings-transcode-folder-failed = Transcode folder: { $error }
 # Status lines after changing the export sync mode.
 settings-sync-mode-mirror-saved = Export sync mode: mirror (exact match)
@@ -1954,8 +1946,6 @@ playlist-export-last-no-drive = Last exported { $date } ({ $count ->
 # The same, for an export that recorded no track count.
 playlist-export-last-unknown-count = Last exported { $date } to { $drive } (unknown track count).
 playlist-export-last-no-drive-unknown-count = Last exported { $date } (unknown track count).
-# The line for a playlist never exported.
-playlist-export-never = Not exported yet.
 # The line while a USB is selected: whether a playlist of this name is on it.
 playlist-export-on-usb = On this USB.
 playlist-export-not-on-usb = Not on this USB.
@@ -1981,15 +1971,13 @@ playlist-tracks-removed = Removed { $count ->
 # $count: how many tracks of the playlist need analysis.
 playlist-analyze-missing = Analyze Missing Tracks ({ $count })
 playlist-analyze-missing-tooltip = Add the missing waveform, BPM, key and first beat to this playlist's unanalyzed tracks; a BPM or key you edited or imported is kept
-# The same button (hidden) when no track needs analysis.
-playlist-analyze-missing-none = Analyze Missing Tracks
+# The button's tooltip (it's hidden) when no track needs analysis.
 playlist-analyze-missing-none-tooltip = No tracks in this playlist need analysis
 
 # The tooltip on a playlist track's source icon: where its file is. $path: the file's path.
 playlist-track-source-usb-not-connected = USB not connected: { $path }
 playlist-track-source-on-usb = On USB: { $path }
 playlist-track-source-local = In local library: { $path }
-playlist-track-source-not-found = File not found: { $path }
 
 # The Add to… dialog's note beside a playlist that holds all of the selected tracks.
 playlist-membership-all = Already in
@@ -2006,19 +1994,14 @@ playlist-error-name-empty = playlist name must not be empty
 playlist-create-failed = Could not create playlist: { $error }
 playlist-rename-failed = Rename failed: { $error }
 playlist-order-failed = Save playlist order failed: { $error }
-playlist-remove-failed = Remove failed: { $error }
 playlist-track-order-failed = Save track order failed: { $error }
 # The status line when the playlist wasn't deleted after all. $name: the playlist's name.
 playlist-delete-failed = Delete failed: { $name }
 
 ## playlist-import
 
-# The import dialog's note on a list. $count: its tracks.
-playlist-import-note = { $count ->
-    [one] { $count } track
-   *[other] { $count } tracks
-}
-# The same, for a list imported before. $count: its tracks. $name: the playlist importing it again updates.
+# The import dialog's note on a list imported before (one not imported yet: format-track-count).
+# $count: its tracks. $name: the playlist importing it again updates.
 playlist-import-note-updates = { $count ->
     [one] { $count } track
    *[other] { $count } tracks
@@ -2105,7 +2088,6 @@ track-detail-saved-usb = Saved track details for { $count ->
 track-detail-progress-checking-tracks = USB: Checking tracks
 track-detail-progress-writing-pdb = USB: Writing PDB
 track-detail-progress-writing-edb = USB: Writing eDB
-track-detail-progress-saved = USB: Track details saved
 
 # $min, $max: the earliest and latest year allowed.
 track-detail-error-release-date = release date must be YYYY, YYYY-MM or YYYY-MM-DD, from { $min } to { $max }
@@ -2133,10 +2115,7 @@ track-detail-cues-saved-usb = Saved { $count ->
 # The progress bar while the job runs.
 track-detail-cues-progress-checking-track = USB: Checking track
 track-detail-cues-progress-writing-analysis-files = USB: Writing analysis files
-track-detail-cues-progress-writing-pdb = USB: Writing PDB
 track-detail-cues-progress-updating-library-track = Updating library track
-track-detail-cues-progress-writing-edb = USB: Writing eDB
-track-detail-cues-progress-saved = USB: Cue edits saved
 
 # Saving the cue editor. $path: the track's file on the USB.
 track-detail-cues-error-not-in-usb-database = this track is missing from one of the USB's two databases, so it can't be edited on the USB ({ $path }). Preview Fixes shows what can be repaired.
@@ -2198,18 +2177,56 @@ ui-add-to-empty = No playlists yet: create one below.
 
 ## ui-backups
 
-ui-backups-delete = Delete
 ui-backups-delete-title = Delete Backup
 ui-backups-intro = Each backup holds both of the USB's databases: legacy (PDB) and new (eDB).
 ui-backups-load-failed = Failed to load backups
 ui-backups-refresh = Refresh
 ui-backups-restore = Restore
 ui-backups-restore-title = Restore Backup
-ui-backups-summary = No entries
-ui-backups-title = Backups
 
 ## ui-common
 
+# A remove action: a button, or the × on a chip or list row (its tooltip and aria-label).
+ui-common-remove = Remove
+# A delete action's button (a playlist, a backup).
+ui-common-delete = Delete
+# The × that closes a banner or the progress bar (its aria-label).
+ui-common-dismiss = Dismiss
+# A drag handle's tooltip and aria-label: playlists, track rows, the column editor's rows.
+ui-common-drag-to-reorder = Drag to reorder
+# A play button: a track row's, and the cue editor's while paused.
+ui-common-play = Play
+# A waveform's or cue's tooltip: clicking plays from that point.
+ui-common-play-from-here-tooltip = Play from here
+# Analyzes again: the selection bar's button and an analyzed track row's.
+ui-common-reanalyze = Reanalyze
+# Removes tracks from the open playlist: the selection bar's button, a row's button tooltip.
+ui-common-remove-from-playlist = Remove from playlist
+# The status line when analyzing fails. $error: the error's message.
+ui-common-analyze-failed = Analyze failed: { $error }
+# The status line when playback fails. $error: the error's message.
+ui-common-playback-failed = Playback failed: { $error }
+# An empty list's summary (Backups, Event Log).
+ui-common-no-entries = No entries
+# Imports playlists: the sidebar's button that opens the import dialog, and the dialog's button.
+ui-common-import = Import
+# Nothing is going on: the status line (at startup, once playback stops) and the progress bar.
+ui-common-idle = Idle
+# Opens the newer version's download page (update banner, Settings).
+ui-common-update-download = Download
+# Installs the newer version and restarts the app (update banner, Settings).
+ui-common-update-restart = Update & restart
+# A track's fields, as labels in the cue editor and the selection bar's Edit… dialog.
+ui-common-genre = Genre
+ui-common-release-date = Release date
+ui-common-rating = Rating
+# The pages' names, wherever a page is named: its title, the button or link that opens it.
+ui-common-backups = Backups
+ui-common-event-log = Event Log
+ui-common-settings = Settings
+ui-common-media-library = Media Library
+ui-common-usb-playlists = USB Playlists
+ui-common-usb = USB
 ui-common-cancel = Cancel
 # The confirm dialog's title and button when the asker names none.
 ui-common-confirm = Confirm
@@ -2264,8 +2281,6 @@ ui-event-log-row-level-warn = warn
 ui-event-log-open-file = Open log file
 ui-event-log-open-file-tooltip = Open this session's full log in a text viewer -- the list here keeps only the newest entries
 ui-event-log-source = Source
-ui-event-log-summary = No entries
-ui-event-log-title = Event Log
 # The header Event Log button's label with errors logged while it was closed.
 # $count: how many.
 ui-event-log-button-new-errors = { $count ->
@@ -2295,12 +2310,9 @@ ui-event-log-open-file-failed = Could not open the log file: { $error }
 ## ui-group-edit
 
 ui-group-edit-apply = Apply
-ui-group-edit-genre = Genre
 ui-group-edit-intro = Only the fields you change are written; the rest stay as they are on each track. An empty field clears it.
-ui-group-edit-rating = Rating
 # A field's placeholder, or beside the rating, when the selected tracks differ.
 ui-group-edit-mixed = Mixed
-ui-group-edit-release-date = Release date
 ui-group-edit-release-date-tooltip = YYYY-MM-DD, or just YYYY-MM or YYYY: export completes a month or year
 # The release date field's placeholder when the selected tracks share no date.
 ui-group-edit-release-date-placeholder = YYYY-MM-DD
@@ -2323,19 +2335,11 @@ ui-header-usb-name-badge-name-tooltip = Name this drive
 ui-header-usb-name-badge-rename-tooltip = Rename this drive
 
 ui-header-badge-none = No active playlist
-ui-header-event-log = Event Log
 ui-header-help = Help
 ui-header-playlist-badge = Playlist
-ui-header-settings = Settings
 # The Settings button's label when an update is available.
 ui-header-settings-update-available = Settings (update available)
-# The status line's text when nothing is going on: at startup, and once playback stops.
-ui-header-status = Idle
-ui-header-update-banner-dismiss-aria-label = Dismiss
-ui-header-update-banner-download = Download
-ui-header-update-banner-restart = Update & restart
 ui-header-update-banner-view-release = view release
-ui-header-usb-name-badge = USB
 
 ## ui-help
 
@@ -2361,8 +2365,6 @@ ui-help-title = Quick Start
 ui-job-cancel-analysis = Cancel analysis
 ui-job-cancel-transcode-aria-label = Cancel converting
 ui-job-cancel-transcode-title = Cancel converting (finished files are kept)
-ui-job-dismiss-aria-label = Dismiss
-ui-job-idle = Idle
 # The progress bar's text while a job runs with no step of its own.
 ui-job-working = Working...
 # After the elapsed time while analysis is paused.
@@ -2386,11 +2388,9 @@ ui-library-folders = Folders
 ui-library-import-from-mixxx = Import from Mixxx
 ui-library-import-from-rekordbox = Import from rekordbox
 ui-library-libraries = Libraries
-ui-library-remove-aria-label = Remove
 ui-library-search-placeholder = Search title, artist, album, genre, year
 ui-library-source-filter-indicator = Filtered
 ui-library-sources = Sources
-ui-library-title = Media Library
 ui-library-toggle-mixxx-library-aria-label = Toggle Mixxx library
 ui-library-toggle-rekordbox-library-aria-label = Toggle rekordbox library
 # The tooltip of an imported library's chip before its tracks are imported.
@@ -2423,7 +2423,6 @@ ui-library-remove-folder-confirm = Remove source folder?
     { $path }
 
     All tracks from this folder will be removed from the library. Tracks that are in a local playlist will also be removed from those playlists. Tracks that are also inside another source folder stay in the library.
-ui-library-remove-folder = Remove
 # Importing the tracks of rekordbox's desktop library (master.db) or of Mixxx's library:
 # the status line while it runs, and when it fails. $error: the backend's message.
 ui-library-import-rekordbox-starting = Importing from desktop library...
@@ -2435,7 +2434,6 @@ ui-library-import-mixxx-failed = Mixxx library import failed: { $error }
 
 ui-playlist-analyze-missing = Analyze Missing Tracks
 ui-playlist-delete-playlist = Delete playlist
-ui-playlist-drag-to-reorder = Drag to reorder
 ui-playlist-export = Export to USB
 ui-playlist-export-space-tooltip = The size to copy includes the tracks' analysis files and artwork, so it can be larger than the audio size in the title
 ui-playlist-export-status = Not exported yet.
@@ -2455,7 +2453,6 @@ ui-playlist-imported-from = · Imported from { $library }
 ui-playlist-export-failed = Export failed: { $error }
 # Stands in for $error above when the failure has no message.
 ui-playlist-export-failed-unknown = unknown error
-ui-playlist-analyze-failed = Analyze failed: { $error }
 ui-playlist-track-order-still-loading = Track order not saved: the list was still loading. Try again.
 # Creating a playlist: the status line without a name, then the progress bar (running, done,
 # failed) and its steps.
@@ -2466,10 +2463,8 @@ ui-playlist-create-progress-failed = Creating playlist failed
 ui-playlist-create-saving = Saving playlist...
 # Asked before deleting a playlist: the dialog's title and its button.
 ui-playlist-delete-title = Delete App Playlist
-ui-playlist-delete = Delete
-# Adding tracks to a playlist: the progress bar (running, done, failed) and its steps, and the
-# status line when none of the tracks could be found or none is ticked.
-ui-playlist-add-progress = Adding tracks...
+# Adding tracks to a playlist: the progress bar (done, failed; while running, ui-playlist-add-adding)
+# and its steps, and the status line when none of the tracks could be found or none is ticked.
 ui-playlist-add-progress-done = Adding tracks done
 ui-playlist-add-progress-failed = Adding tracks failed
 ui-playlist-add-resolving = Resolving tracks...
@@ -2479,16 +2474,12 @@ ui-playlist-add-none-resolved = No imported track IDs found to add
 ui-playlist-add-select-first = Select at least one track to add
 # An empty playlist: its heading and the buttons that lead to tracks to add.
 ui-playlist-empty-heading = Browse Library or USB to add tracks
-ui-playlist-empty-library = Media Library
-ui-playlist-empty-usb-playlists = USB Playlists
-ui-playlist-empty-usb = USB
 
 ## ui-playlist-import
 
 ui-playlist-import-force = Force update track data
 ui-playlist-import-force-note = Replaces the BPM, key and cues of the playlists' tracks, including your own edits.
 ui-playlist-import-intro = Each is imported as a new playlist. Tracks not yet in the library are imported with it.
-ui-playlist-import-ok = Import
 # The import button with more than one list ticked. $count: how many.
 ui-playlist-import-ok-count = { $count ->
     [one] Import { $count }
@@ -2534,9 +2525,7 @@ ui-playlist-import-many-starting = Importing playlists...
 ui-playback-paused = Paused
 # The status line when the track to play is in neither the library nor the selected USB.
 ui-playback-not-found = Cannot play: track not found in Library or selected USB.
-# The status line when playback fails. $error: the error's message.
-ui-playback-failed = Playback failed: { $error }
-# The same, when the player gave no message.
+# The status line when playback fails and the player gave no message.
 ui-playback-failed-no-message = Playback failed
 
 ## ui-startup
@@ -2564,7 +2553,6 @@ ui-rating-2-stars-aria-label = 2 stars
 ui-rating-3-stars-aria-label = 3 stars
 ui-rating-4-stars-aria-label = 4 stars
 ui-rating-5-stars-aria-label = 5 stars
-ui-rating-aria-label = Rating
 ui-rating-tooltip = Click a star to rate; click the same star again to clear
 
 ## ui-selection-bar
@@ -2596,10 +2584,7 @@ ui-selection-bar-edit-tooltip = Edit genre, release date and rating of the selec
 ui-selection-bar-hint-library = Select tracks to add, reanalyze, convert or edit them
 ui-selection-bar-hint-playlist = Select tracks to add, remove, reanalyze, convert or edit them
 ui-selection-bar-hint-usb = Select tracks to add to a playlist or edit them
-ui-selection-bar-reanalyze = Reanalyze
 ui-selection-bar-reanalyze-tooltip = Reset waveform, BPM, key and first beat of the selected tracks to a fresh analysis, replacing imported or edited values (cues are kept)
-ui-selection-bar-remove = Remove
-ui-selection-bar-remove-from-playlist = Remove from playlist
 ui-selection-bar-remove-tooltip = Remove the selected tracks from this playlist (they stay in the library)
 
 ## ui-settings
@@ -2610,7 +2595,6 @@ ui-settings-analysis-engine = BPM/Key engine
 ui-settings-analysis-engine-stratum = Stratum (built-in)
 ui-settings-backup-before-export = Back up PDB and eDB before export
 ui-settings-backup-before-export-hint = Before each export, copies the PDB and eDB into a timestamped backups folder alongside the originals.
-ui-settings-backups = Backups
 ui-settings-backups-to-keep = Backups to keep per file
 ui-settings-backups-to-keep-hint = The newest backup always stays on the USB; older ones are archived on this computer up to this count, then pruned.
 ui-settings-bpm-range = BPM range
@@ -2618,7 +2602,6 @@ ui-settings-close-aria-label = Close settings
 ui-settings-engine-library = Write Engine DJ library
 ui-settings-engine-library-hint = Whenever this app changes a USB, rebuilds the library Denon Prime and Numark Mixstream players read, so they use its beat grids, cues and playlists without importing and analyzing again. Play history is kept; changes made on the player itself (cues, loops, playlists) are replaced.
 ui-settings-essentia-download = Download ~5 MB
-ui-settings-essentia-remove = Remove
 # The Essentia row's status.
 ui-settings-essentia-ready = ✓ Essentia ready
 ui-settings-essentia-downloading = Downloading...
@@ -2664,16 +2647,13 @@ ui-settings-theme = Theme
 ui-settings-theme-auto = Auto
 ui-settings-theme-dark = Dark
 ui-settings-theme-light = Light
-ui-settings-title = Settings
 ui-settings-transcode-folder-change = Change…
 ui-settings-transcode-folder-default-tag = Default folder
 ui-settings-transcode-folder-hint = Where Convert… saves the AIFF, WAV and MP3 files it makes. Keep it outside your music folders, so other music apps don't list the files twice. A new folder only applies to new files.
 ui-settings-transcode-folder-reset = Use default
 ui-settings-transcodes = Transcodes
 ui-settings-update-check = Check for updates
-ui-settings-update-download = Download
 ui-settings-update-release-link = What's new ↗
-ui-settings-update-restart = Update & restart
 
 ## ui-sidebar
 
@@ -2683,7 +2663,6 @@ ui-sidebar-donate = Donate
 ui-sidebar-donate-tooltip = Please consider donating
 ui-sidebar-expand = Expand sidebar
 ui-sidebar-history = History
-ui-sidebar-import-playlist = Import
 ui-sidebar-import-playlist-aria-label = Import playlists
 ui-sidebar-import-playlist-tooltip = Import playlists from rekordbox or Mixxx
 ui-sidebar-library = Library
@@ -2693,7 +2672,6 @@ ui-sidebar-new-playlist = New playlist
 ui-sidebar-player-menu = Player Menu
 ui-sidebar-playlists = Playlists
 ui-sidebar-resizer-tooltip = Drag to resize · double-click to reset
-ui-sidebar-usb = USB
 ui-sidebar-website = Website
 
 ## ui-track-detail
@@ -2716,7 +2694,6 @@ ui-track-detail-first-beat-minus-tooltip = Back one beat
 ui-track-detail-first-beat-plus-tooltip = Forward one beat
 ui-track-detail-follow-grid-aria-label = Cues follow grid
 ui-track-detail-follow-grid-tooltip = Cues follow grid: changing BPM or the first beat moves every cue so it stays on its beat. Off, cues keep their place in the audio, as in rekordbox
-ui-track-detail-genre = Genre
 ui-track-detail-genre-tooltip = Genre: type one or pick one the library already has
 ui-track-detail-grid-level-tooltip = How strongly the beat grid shows over the waveform
 ui-track-detail-hint-aria-label = How to use the waveform
@@ -2746,16 +2723,13 @@ ui-track-detail-next-memory-cue = Next memory cue
 ui-track-detail-no-colour = No colour
 ui-track-detail-overview-aria-label = Whole track: click or drag to move the view
 ui-track-detail-play-from-cue-aria-label = Play from this cue
-ui-track-detail-play-from-here-tooltip = Play from here
 ui-track-detail-play-from-memory-cue-aria-label = Play from this memory cue
-ui-track-detail-play-pause = Play
 ui-track-detail-playback-start = Playback start
 ui-track-detail-previous-memory-cue = Previous memory cue
 ui-track-detail-quantize = Q
 ui-track-detail-quantize-tooltip = Quantize: new and dragged cues snap to the nearest beat (hold Shift to place freely)
 ui-track-detail-redo = Redo
 ui-track-detail-redo-tooltip = Redo (Ctrl+Shift+Z)
-ui-track-detail-release-date = Release date
 ui-track-detail-release-date-tooltip = Release date: YYYY-MM-DD, or just YYYY-MM or YYYY (export completes a month or year); empty for none
 ui-track-detail-reveal-aria-label = Show in folder
 ui-track-detail-start = Playback starts at
@@ -2807,25 +2781,19 @@ ui-track-detail-cue-already-there = A cue is already there.
 # The column editor: the button in every track list's last header cell, and its dialog. The
 # layout is one for every track list.
 ui-track-columns-button-tooltip = Show, hide and reorder columns
-ui-track-columns-button-aria-label = Columns
 # The button's tooltip while a USB playlist's order is being edited.
 ui-track-columns-blocked-order-edit = Save or cancel the order edit first to change the columns
 ui-track-columns-title = Columns
 ui-track-columns-intro = Tick the columns to show and drag them into order. Every track list uses this layout.
-ui-track-columns-list-aria-label = Columns
-ui-track-columns-drag = Drag to reorder
 ui-track-columns-reset = Reset to default
 ui-track-columns-done = Done
 
 ## ui-track-row
 
-ui-track-row-drag-to-reorder = Drag to reorder
 ui-track-row-edit-cues-aria-label = Cue points & beat grid
 ui-track-row-empty = No tracks available.
-ui-track-row-play = Play
 ui-track-row-stop = Stop
 ui-track-row-analyze = Analyze
-ui-track-row-reanalyze = Reanalyze
 # The Analyze and Reanalyze buttons' tooltips.
 ui-track-row-analyze-tooltip = Add the missing waveform, BPM, key and first beat; a BPM or key you edited or imported is kept
 ui-track-row-reanalyze-tooltip = Reset waveform, BPM, key and first beat to a fresh analysis, replacing imported or edited values (cues are kept)
@@ -2837,8 +2805,6 @@ ui-track-row-add-to-tooltip = Add to { $playlist }
 ui-track-row-add-no-playlist-tooltip = Create and activate a playlist first, then add tracks to it.
 # The row's remove button in a playlist. $playlist: the playlist's name.
 ui-track-row-remove-from-tooltip = Remove from { $playlist }
-ui-track-row-remove-from-playlist-tooltip = Remove from playlist
-ui-track-row-play-from-here-tooltip = Play from here
 ui-track-row-waveform-preview-aria-label = waveform preview
 
 ## ui-track-table
@@ -2863,10 +2829,8 @@ ui-track-table-usb-history-tracks-aria-label = USB history tracks
 ui-track-table-usb-playlist-tracks-aria-label = USB playlist tracks
 ui-track-table-year = Year
 
-# Status lines when a row's action fails. $error: the error's message.
-ui-track-table-analyze-failed = Analyze failed: { $error }
+# The status line when a row's stop fails. $error: the error's message.
 ui-track-table-stop-failed = Stop failed: { $error }
-ui-track-table-playback-failed = Playback failed: { $error }
 
 ## ui-tracklist-export
 
@@ -2883,11 +2847,9 @@ ui-tracklist-export-title = Export Tracklist
 
 ui-usb-apply-repairs = Apply Fixes
 ui-usb-audio-formats = Audio formats
-ui-usb-backups = Backups
 ui-usb-backups-tooltip = List, restore and delete backups of this USB's databases
 ui-usb-diag-back-to-report = Back to Report
 ui-usb-diag-log-link = → event log
-ui-usb-drag-to-reorder = Drag to reorder
 ui-usb-drag-to-set-tooltip = Drag to set the order of preference
 ui-usb-edb = eDB
 ui-usb-forget-tooltip = Forget this USB device
@@ -2908,7 +2870,6 @@ ui-usb-playlist = Playlist
 ui-usb-preview-repairs = Preview Fixes
 ui-usb-re-diagnose = Rediagnose USB
 ui-usb-recent = Recent USBs
-ui-usb-remove = Remove
 ui-usb-repair-technical-details = Technical details
 ui-usb-root-path = No USB selected
 ui-usb-select-usb-folder = Select USB Folder
@@ -2985,7 +2946,5 @@ ui-usb-playlists-loading = Loading USB playlists...
 # The progress bar when reading the USB's playlists fails.
 ui-usb-playlists-read-failed = USB load failed
 ui-usb-playlists-reading = Reading USB database...
-ui-usb-playlists-remove = Remove
 ui-usb-playlists-remove-title = Remove USB Playlist
 ui-usb-playlists-search-placeholder = Search USB playlist tracks
-ui-usb-playlists-title = USB Playlists

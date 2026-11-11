@@ -231,7 +231,7 @@ export function createPlaylistImportDialogController(el, document) {
     el.playlistImportOkBtn.disabled = chosen.length === 0;
     el.playlistImportOkBtn.textContent = chosen.length > 1
       ? tCount("ui-playlist-import-ok-count", chosen.length)
-      : t("ui-playlist-import-ok");
+      : t("ui-common-import");
     const sources = new Set(chosen.map((item) => item.sourceLabel));
     el.playlistImportForceLabel.textContent = sources.size === 1
       ? t("ui-playlist-import-force-from", { library: [...sources][0] })

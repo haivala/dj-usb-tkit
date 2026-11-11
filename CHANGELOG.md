@@ -57,6 +57,9 @@
   one you clicked. Before, the new playlist opened instead.
 - **Improvement:** The library's filter mark comes from the backend, which already knows which folders and imported
   libraries are switched off or missing.
+- **Chore:** The text catalog has one key per English text: a text with the same role on several pages (Remove,
+  Drag to reorder, page names, track fields) is one `ui-common-*` key, so a translation translates it once. A test
+  fails on a new duplicate unless it's listed with why it stays apart.
 - **Chore:** The four longest end-to-end tests get three times the default time: with every spec running in parallel
   they ran past it, though no step hung.
 - **Chore:** The UI's end-to-end tests share one mock backend that answers like the real one, and tests that use the

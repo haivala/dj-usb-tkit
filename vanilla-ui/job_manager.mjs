@@ -10,7 +10,7 @@ export function setProgress(ctx, active, percent = 0, text = "", opts = {}) {
   el.progressFooter.classList.toggle("dismissable", !!opts.dismissable);
   const clamped = Math.max(0, Math.min(100, Number(percent) || 0));
   state.progressPercent = clamped;
-  state.progressBaseText = text || t(active ? "ui-job-working" : "ui-job-idle");
+  state.progressBaseText = text || t(active ? "ui-job-working" : "ui-common-idle");
   el.progressFill.style.width = `${clamped}%`;
   el.progressFooter
     .querySelector(".progress-track")
@@ -32,7 +32,7 @@ function renderProgressTime(ctx) {
 }
 
 export function dismissProgress(ctx) {
-  setProgress(ctx, false, 0, t("ui-job-idle"));
+  setProgress(ctx, false, 0, t("ui-common-idle"));
 }
 
 // Hide the footer `delayMs` after a job finished, so its final text stays
@@ -42,7 +42,7 @@ export function scheduleProgressIdle(ctx, delayMs) {
   clearTimeout(state.progressIdleTimer);
   state.progressIdleTimer = setTimeout(() => {
     state.progressIdleTimer = null;
-    setProgress(ctx, false, 0, t("ui-job-idle"));
+    setProgress(ctx, false, 0, t("ui-common-idle"));
     stopProgressHeartbeat(ctx);
   }, delayMs);
 }

@@ -102,8 +102,15 @@ digits, hyphens).
 - **`<variant>`** for a state or kind of the same thing: `-none`, `-confirm`, `-failed`.
 - **`<attribute>`** last, for text that isn't an element's content: `-tooltip`,
   `-aria-label`, `-placeholder`, `-title`, `-alt`.
-- The same English in one area and one use shares a key. Different areas, or uses that
-  could translate differently (a button label and a status word), get their own keys.
+- One English text, one key, so it's translated once. A text with the same role in
+  several areas (a Remove button, a drag handle's tooltip, a page's name wherever it's
+  named) is a `ui-common-*` key; Rust renders those too (`tr::ui_common_remove()`) rather
+  than keep its own copy. Within one area, one use is one key.
+- The same English with a different role gets its own key, because a translation may
+  differ: a status word and a button ("Done"), a placeholder and a button ("New playlist"),
+  a narrow column header and a field's label ("BPM"). Such keys are listed, with why, in
+  `SAME_ENGLISH_KEPT_APART` in `backend/src/i18n.rs`; its test fails on any other two keys
+  with the same English.
 - Every key with a variable, and every key whose use isn't obvious from its name, gets a
   `#` comment saying where it shows and what each variable is.
 - Once a language other than English exists, keys aren't renamed: a rename drops that key

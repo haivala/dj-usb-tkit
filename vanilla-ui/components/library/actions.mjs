@@ -714,7 +714,7 @@ export function patchLibraryRowCells(ctx, row, track) {
   if (actionTd) {
     const analyzeBtn = actionTd.querySelector("[data-action='analyze-track']");
     if (analyzeBtn && track.analysisReady) {
-      analyzeBtn.textContent = t("ui-track-row-reanalyze");
+      analyzeBtn.textContent = t("ui-common-reanalyze");
       analyzeBtn.dataset.tooltip = t("ui-track-row-reanalyze-tooltip");
     }
   }

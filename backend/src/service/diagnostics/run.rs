@@ -51,7 +51,7 @@ impl BackendService {
                 SLOW_USB_STAGE_MS,
             );
         };
-        on_progress(2, 100, &tr::diagnostics_progress_resolving_root().render());
+        on_progress(2, 100, &tr::usb_progress_resolving_root().render());
         let usb_root = resolve_usb_root(req.usb_root.as_deref())?;
         let mut raw_warnings = Vec::<WarningEntry>::new();
         logging::debug(
@@ -131,7 +131,7 @@ impl BackendService {
             let detail = if edb_h > 0 || edb_hc > 0 {
                 tr::diagnostics_check_edb_history_counts(edb_h, edb_hc)
             } else {
-                tr::diagnostics_check_edb_history_empty()
+                tr::diagnostics_check_history_empty()
             };
             edb_access.checks.push(DiagCheck::new(
                 tr::diagnostics_check_edb_history(),
@@ -577,7 +577,7 @@ impl BackendService {
                 SLOW_USB_STAGE_MS,
             );
         };
-        on_progress(2, 100, &tr::diagnostics_progress_resolving_root().render());
+        on_progress(2, 100, &tr::usb_progress_resolving_root().render());
         let usb_root = resolve_usb_root(req.usb_root.as_deref())?;
         logging::debug(
             "usb-diagnostics",
@@ -586,7 +586,7 @@ impl BackendService {
         let mut raw_warnings = Vec::<WarningEntry>::new();
         note_stage("resolve usb root");
 
-        on_progress(20, 100, &tr::diagnostics_progress_parsing_pdb().render());
+        on_progress(20, 100, &tr::usb_progress_parsing_pdb().render());
         let pdb_path = match staged_pdb_path {
             Some(p) => p.to_path_buf(),
             None => crate::service::usb_staging::stage_pdb(&usb_root)?,
@@ -598,7 +598,7 @@ impl BackendService {
         }
         note_stage("parse PDB");
 
-        on_progress(45, 100, &tr::diagnostics_progress_reading_edb().render());
+        on_progress(45, 100, &tr::usb_progress_reading_edb().render());
         let owned_edb_conn: Option<rusqlite::Connection> = if edb_conn.is_some() {
             None
         } else {

@@ -54,7 +54,7 @@ export function handleTrackAction({ action, track, origin, target, event, state,
   if (action === "analyze-track") {
     analyzeSingleTrack(track).catch((err) => {
       console.error(err);
-      emitStatus(t("ui-track-table-analyze-failed", { error: err?.message || err }));
+      emitStatus(t("ui-common-analyze-failed", { error: err?.message || err }));
     });
     return true;
   }
@@ -78,7 +78,7 @@ export function handleTrackAction({ action, track, origin, target, event, state,
     const waveformEl = target.closest(".track-grid-row")?.querySelector(".waveform");
     playTrackFromOrigin(track, origin, { waveformEl, rowKey }).catch((err) => {
       console.error(err);
-      emitStatus(t("ui-track-table-playback-failed", { error: err?.message }));
+      emitStatus(t("ui-common-playback-failed", { error: err?.message }));
     });
     return true;
   }
@@ -88,7 +88,7 @@ export function handleTrackAction({ action, track, origin, target, event, state,
     const startRatio = scrubRatioFromPointer(event, waveformEl);
     playTrackFromOrigin(track, target?.dataset?.origin || origin, { startRatio, waveformEl, rowKey }).catch((err) => {
       console.error(err);
-      emitStatus(t("ui-track-table-playback-failed", { error: err?.message }));
+      emitStatus(t("ui-common-playback-failed", { error: err?.message }));
     });
     return true;
   }

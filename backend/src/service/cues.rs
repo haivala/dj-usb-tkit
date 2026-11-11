@@ -1288,7 +1288,7 @@ impl BackendService {
         on_progress(
             2,
             USB_SAVE_STEPS,
-            &tr::track_detail_cues_progress_writing_pdb().render(),
+            &tr::track_detail_progress_writing_pdb().render(),
         );
         if let Some((staged_pdb, bytes)) = pdb_patch {
             atomic_write_bytes(&staged_pdb, &bytes)?;
@@ -1362,7 +1362,7 @@ impl BackendService {
         on_progress(
             4,
             USB_SAVE_STEPS,
-            &tr::track_detail_cues_progress_writing_edb().render(),
+            &tr::track_detail_progress_writing_edb().render(),
         );
         let tx = edb_conn.transaction()?;
         let content_columns = load_table_columns_tx(&tx, "content")?;
@@ -1405,7 +1405,7 @@ impl BackendService {
         on_progress(
             USB_SAVE_STEPS,
             USB_SAVE_STEPS,
-            &tr::track_detail_cues_progress_saved().render(),
+            &tr::job_save_usb_track_analysis_edits_completed().render(),
         );
         // 8. Re-read the device bundle for the response.
         let bytes = std::fs::read(dat_path.with_extension("EXT"))
