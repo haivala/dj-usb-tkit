@@ -466,7 +466,7 @@ test("cue editor page and playback hand-off", async ({ page }) => {
 // First cue remembers it.
 test("cue editor input", async ({ page }) => {
   // Many steps in one test (~200): about 13 s alone, but past the 30 s default with every
-  // spec running in parallel. Three times the time; nothing in it waits on a timer.
+  // spec running in parallel (each step just runs slower; none hangs). Three times the time.
   test.slow();
   await openCueEditor(page, { seedCues: [30000] });
   {

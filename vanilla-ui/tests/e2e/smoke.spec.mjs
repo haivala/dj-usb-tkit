@@ -43,6 +43,9 @@ function installBasicTauriMock(page, opts = {}) {
 }
 
 test("shell and sidebar", async ({ page }) => {
+  // Many steps in one test: past 20 s with every spec running in parallel, close to the
+  // 30 s default (each step just runs slower; none hangs). Three times the time.
+  test.slow();
   await installBasicTauriMock(page);
   await page.goto("/");
   // Loads shell with library active and sidebar nav.

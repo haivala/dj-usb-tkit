@@ -713,6 +713,9 @@ test("additive export reorder lock", async ({ page }) => {
 // change what Export to USB does; export sends an active column sort along, and a failed export
 // keeps it on screen.
 test("playlist export", async ({ page }) => {
+  // Many steps in one test: past 20 s with every spec running in parallel, close to the
+  // 30 s default (each step just runs slower; none hangs). Three times the time.
+  test.slow();
   await installReorderTauriMock(page, { usbSameNamePlaylistName: "Reorder Playlist" });
   await page.goto("/");
   {

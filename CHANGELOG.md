@@ -52,6 +52,8 @@
   one you clicked. Before, the new playlist opened instead.
 - **Improvement:** The library's filter mark comes from the backend, which already knows which folders and imported
   libraries are switched off or missing.
+- **Chore:** The four longest end-to-end tests get three times the default time: with every spec running in parallel
+  they ran past it, though no step hung.
 - **Chore:** The UI's end-to-end tests share one mock backend that answers like the real one, and tests that use the
   same setup run as one test. Unit tests whose checks the end-to-end tests now make are removed, and so is UI code
   that only those unit tests reached. The end-to-end coverage report counts every page load of a test, and an
