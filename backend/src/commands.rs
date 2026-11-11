@@ -460,6 +460,17 @@ impl BackendCommands {
         wrap(self.service.set_frontend_setting(req))
     }
 
+    pub fn get_track_columns(&self) -> ApiResponse<crate::models::GetTrackColumnsData> {
+        wrap(self.service.get_track_columns())
+    }
+
+    pub fn set_track_columns(
+        &self,
+        req: crate::models::SetTrackColumnsRequest,
+    ) -> ApiResponse<crate::models::SetTrackColumnsData> {
+        wrap(self.service.set_track_columns(req))
+    }
+
     /// Changes the language, refused while `job_running`: the change reloads the window,
     /// which loses a running job's progress bar, pause and cancel (no command reconnects to
     /// one). The desktop app passes whether its job registry is empty, and holds the registry

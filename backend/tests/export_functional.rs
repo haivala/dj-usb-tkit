@@ -5324,7 +5324,10 @@ fn usb_order_edit_persists_order_and_keeps_parity() {
         }),
         "sort",
     );
-    assert_eq!(sorted.order_edit.edited_playlist_ids, std::slice::from_ref(&target));
+    assert_eq!(
+        sorted.order_edit.edited_playlist_ids,
+        std::slice::from_ref(&target)
+    );
     assert_eq!(
         names(&usb_view_rows(&backend, &usb, &target)),
         file_names(&[3, 2, 1, 0])

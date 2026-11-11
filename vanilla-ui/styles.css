@@ -2054,10 +2054,72 @@ td.num, th.num {
 }
 
 /* App and USB playlist tracks reserve a leading column for the
-   drag-to-reorder handle, before the selection checkbox. */
-.track-grid[data-body-id="playlistTracksBody"],
-.track-grid[data-body-id="usbPlaylistTracks"] {
+   drag-to-reorder handle, before the selection checkbox. These defaults are
+   the default layout; track_columns.mjs sets each grid's own from its width
+   table once the saved layout is known. */
+.track-grid[data-drag-column] {
   --track-grid-cols: 24px 44px 52px 178px minmax(100px, 1.6fr) minmax(100px, 1.2fr) 64px 78px 58px 8ch 72px minmax(5ch, 14ch);
+}
+
+/* A column the layout hides (track_columns.mjs) keeps its cell, marked
+   `hidden`; some cells set their own display. */
+.track-grid-row > .track-grid-cell[hidden] {
+  display: none;
+}
+
+/* The columns button, in the action column's header cell. */
+.track-grid-head .td-action {
+  display: flex;
+  justify-content: flex-end;
+  padding-top: 0;
+  padding-bottom: 0;
+}
+
+.track-grid-head .track-columns-btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 24px;
+  height: 22px;
+  padding: 0;
+  border: 0;
+  background: none;
+  color: var(--muted);
+}
+
+.track-grid-head .track-columns-btn:hover:not(:disabled) {
+  background: none;
+  color: var(--accent);
+}
+
+.track-grid-head .track-columns-btn:disabled {
+  cursor: not-allowed;
+  opacity: 0.5;
+}
+
+.track-grid-head .track-columns-btn svg {
+  width: 15px;
+  height: 15px;
+}
+
+/* The column editor: the add-to list's rows, with a drag handle in front. */
+.track-columns-dialog {
+  width: min(360px, 100%);
+}
+
+.track-columns-item {
+  display: flex;
+  align-items: center;
+  padding-left: 8px;
+}
+
+.track-columns-item .add-to-item {
+  flex: 1;
+  min-width: 0;
+}
+
+.track-columns-item.dragging {
+  opacity: 0.5;
 }
 
 .track-grid-row {

@@ -56,6 +56,8 @@ export function renderUsbOrderEditControls(ctx) {
   el.usbSaveOrderBtn.disabled = busy || !state.usbOrderEdit?.changed;
   el.usbCancelOrderBtn.disabled = busy;
   el.usbPlaylists.classList.toggle("is-order-editing", editing);
+  // No column changes while editing (track_columns.mjs).
+  ctx.renderTrackColumnsButtons();
 }
 
 export async function beginUsbOrderEdit(ctx) {

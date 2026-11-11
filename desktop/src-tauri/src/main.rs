@@ -952,6 +952,8 @@ fn main() {
             backend::tauri_commands::get_ui_texts,
             backend::tauri_commands::get_frontend_settings,
             backend::tauri_commands::set_frontend_setting,
+            backend::tauri_commands::get_track_columns,
+            backend::tauri_commands::set_track_columns,
             backend::tauri_commands::set_language,
             backend::tauri_commands::set_export_sync_mode,
             backend::tauri_commands::select_usb,

@@ -1278,6 +1278,23 @@ pub fn set_frontend_setting(
     state.set_frontend_setting(request)
 }
 
+#[tauri::command]
+pub fn get_track_columns(
+    state: State<'_, BackendCommands>,
+) -> ApiResponse<crate::models::GetTrackColumnsData> {
+    state.get_track_columns()
+}
+
+/// Sync (main thread), like `set_frontend_setting`: sync commands run in call order, so of
+/// quick changes in a row the last one sent is the last one saved.
+#[tauri::command]
+pub fn set_track_columns(
+    state: State<'_, BackendCommands>,
+    request: crate::models::SetTrackColumnsRequest,
+) -> ApiResponse<crate::models::SetTrackColumnsData> {
+    state.set_track_columns(request)
+}
+
 /// Sync, so the job registry can be held until the language is saved: no job starts during
 /// the change.
 #[tauri::command]

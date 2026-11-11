@@ -44,6 +44,7 @@ mod settings;
 mod source_roots;
 #[cfg(test)]
 mod tests;
+mod track_columns;
 mod track_list;
 mod track_matching;
 mod track_metadata;
@@ -130,6 +131,8 @@ pub(crate) const SETTING_UI_ACCENT_HUE: &str = "ui_accent_hue_v1";
 pub(crate) const SETTING_UI_SOURCE_ROOTS: &str = "ui_source_roots_v1";
 pub(crate) const SETTING_UI_SOURCE_ROOT_ENABLED: &str = "ui_source_root_enabled_v1";
 pub(crate) const SETTING_UI_USB_ROOT: &str = "ui_usb_root_v1";
+/// The track table's column layout (`track_columns`), written only by `set_track_columns`.
+pub(crate) const SETTING_UI_TRACK_COLUMNS: &str = "ui_track_columns_v1";
 pub(crate) const SETTING_UI_EXPORT_PRUNE_STALE: &str = "ui_export_prune_stale_v1";
 pub(crate) const SETTING_UI_EXPORT_BACKUP: &str = "ui_export_backup_v1";
 pub(crate) const SETTING_UI_EXPORT_ENGINE_LIBRARY: &str = "ui_export_engine_library_v1";

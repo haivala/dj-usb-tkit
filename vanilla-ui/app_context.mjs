@@ -18,6 +18,7 @@ import { renderWaveformsIn } from "./waveform.mjs";
 import { createGroupEditDialogController } from "./components/shared/track_metadata_edits.mjs";
 import { createAddToDialogController } from "./components/shared/add_to_playlists.mjs";
 import { createConvertDialogController } from "./components/shared/transcodes.mjs";
+import * as trackColumns from "./components/shared/track_columns.mjs";
 
 // Every element with an `id` in index.html, by id (`el.statusText`, …). Ids
 // inside <template>s aren't part of the document, so they're never collected.
@@ -42,6 +43,8 @@ function collectElements(document) {
 // every module action, bound so each is callable as `ctx.action(...args)`.
 export function createAppContext(env) {
   const { document, window } = env;
+  // The header rows go in first: they hold elements `el` collects.
+  trackColumns.buildTrackGridHeads(document);
   const ctx = {
     state: createInitialState(),
     el: collectElements(document),
@@ -112,6 +115,7 @@ export function createAppContext(env) {
   bindActions(usbAudioFormats, "applyUsbAudioFormats renderUsbAudioFormats");
   bindActions(trackTable, "buildTrackTableRow renderEmptyTrackTable finishTrackRows");
   bindActions(trackDetail, "openTrackDetail");
+  bindActions(trackColumns, "applyTrackColumns renderTrackColumnsButtons");
 
   ctx.confirmDialog = uiCtrl.createConfirmDialogController(ctx.el);
   ctx.openConfirmDialog = (opts) => ctx.confirmDialog.open(opts);
@@ -120,6 +124,7 @@ export function createAppContext(env) {
   ctx.groupEditDialog = createGroupEditDialogController(ctx.el, ctx.document);
   ctx.addToDialog = createAddToDialogController(ctx.el, ctx.document);
   ctx.convertDialog = createConvertDialogController(ctx.el, ctx.document);
+  ctx.trackColumnsDialog = trackColumns.createTrackColumnsDialogController(ctx);
   ctx.trackDetailDialog = trackDetail.createAppTrackDetailController(ctx);
   ctx.libraryTracksCtl = library.createLibraryTracksController(ctx);
   ctx.playlistTracksCtl = playlist.createPlaylistTracksController(ctx);

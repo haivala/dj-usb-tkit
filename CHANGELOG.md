@@ -39,6 +39,9 @@
 
 ## Unreleased
 
+- **New feature:** The track lists' columns can be hidden and put in a new order, from the button at the right end
+  of any track list's header. The layout applies to every track list (Library, playlists, USB playlists and history)
+  and is kept between runs.
 - **New feature:** USB playlists and the tracks in them can be put in a new order (Edit order → drag or sort → Save
   order), saved straight to the USB.
 - **New feature:** In the Import Playlists dialog, each group heading (Playlists, Crates, History) has a box that

@@ -15,6 +15,7 @@ import { renderEmptyState } from "./components/shell/actions.mjs";
 import { renderAllSelectionBars, renderSelectionBar } from "./components/shared/track_selection.mjs";
 import { clearManualUpdateCheck } from "./update_check.mjs";
 import { createDialogLifecycle } from "./components/shared/dialog_lifecycle.mjs";
+import { bindTrackColumnsEvents } from "./components/shared/track_columns.mjs";
 
 export function updateActivePlaylistIndicators(ctx) {
   const { state, el } = ctx;
@@ -311,4 +312,5 @@ export function bindEvents(ctx) {
   bindUsbEvents(ctx);
   bindPlaylistEvents(ctx);
   bindTrackDetailEvents(ctx);
+  bindTrackColumnsEvents(ctx);
 }

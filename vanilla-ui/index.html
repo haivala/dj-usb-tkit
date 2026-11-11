@@ -178,22 +178,7 @@
             </div>
           </div>
           <div class="table-wrap" id="libraryTableWrap">
-            <div class="track-grid" data-track-grid data-body-id="libraryTableBody" role="table" data-text-aria-label="ui-track-table-library-tracks-aria-label">
-              <div class="track-grid-head" role="rowgroup">
-                <div class="track-grid-row" role="row">
-                  <div class="track-grid-cell" role="columnheader"><input type="checkbox" id="selectAllTracks" data-select-all="library" data-text-aria-label="ui-track-table-select-all-aria-label" /></div>
-                  <div class="track-grid-cell" role="columnheader"></div>
-                  <div class="track-grid-cell th-waveform" role="columnheader"><span class="sort-hint hidden" data-text="ui-track-table-sort-hint"></span></div>
-                  <div class="track-grid-cell sortable" role="columnheader" data-sort-key="artist" data-sort-alt="title"><span class="sort-label" data-text="ui-track-table-track"></span></div>
-                  <div class="track-grid-cell sortable" role="columnheader" data-sort-key="album"><span class="sort-label" data-text="ui-track-table-album"></span></div>
-                  <div class="track-grid-cell sortable" role="columnheader" data-sort-key="year"><span class="sort-label" data-text="ui-track-table-year"></span></div>
-                  <div class="track-grid-cell sortable" role="columnheader" data-sort-key="bpm"><span class="sort-label" data-text="ui-track-table-bpm"></span></div>
-                  <div class="track-grid-cell sortable" role="columnheader" data-sort-key="key"><span class="sort-label" data-text="ui-track-table-key"></span></div>
-                  <div class="track-grid-cell sortable" role="columnheader" data-sort-key="durationMs"><span class="sort-label" data-text="ui-track-table-length"></span></div>
-                  <div class="track-grid-cell sortable" role="columnheader" data-sort-key="format"><span class="sort-label" data-text="ui-track-table-fmt"></span></div>
-                  <div class="track-grid-cell" role="columnheader"></div>
-                </div>
-              </div>
+            <div class="track-grid" data-track-grid data-body-id="libraryTableBody" data-select-all-view="library" data-select-all-id="selectAllTracks" role="table" data-text-aria-label="ui-track-table-library-tracks-aria-label">
               <div class="track-grid-body" id="libraryTableBody" role="rowgroup"></div>
               <div class="track-grid-loading" role="status"><span class="spinner" aria-hidden="true"></span><span data-text="ui-track-table-loading-tracks"></span></div>
             </div>
@@ -321,23 +306,7 @@
               </div>
             </div>
             <div class="table-wrap">
-              <div class="track-grid" data-track-grid data-body-id="usbPlaylistTracks" role="table" data-text-aria-label="ui-track-table-usb-playlist-tracks-aria-label">
-                <div class="track-grid-head" role="rowgroup">
-                  <div class="track-grid-row" role="row">
-                    <div class="track-grid-cell" role="columnheader"></div>
-                    <div class="track-grid-cell" role="columnheader"><input type="checkbox" data-select-all="usbPlaylist" data-text-aria-label="ui-track-table-select-all-aria-label" /></div>
-                    <div class="track-grid-cell" role="columnheader"></div>
-                    <div class="track-grid-cell th-waveform" role="columnheader"><span class="sort-hint hidden" data-text="ui-track-table-sort-hint"></span></div>
-                    <div class="track-grid-cell sortable" role="columnheader" data-sort-key="artist" data-sort-alt="title"><span class="sort-label" data-text="ui-track-table-track"></span></div>
-                    <div class="track-grid-cell sortable" role="columnheader" data-sort-key="album"><span class="sort-label" data-text="ui-track-table-album"></span></div>
-                    <div class="track-grid-cell sortable" role="columnheader" data-sort-key="year"><span class="sort-label" data-text="ui-track-table-year"></span></div>
-                    <div class="track-grid-cell sortable" role="columnheader" data-sort-key="bpm"><span class="sort-label" data-text="ui-track-table-bpm"></span></div>
-                    <div class="track-grid-cell sortable" role="columnheader" data-sort-key="key"><span class="sort-label" data-text="ui-track-table-key"></span></div>
-                    <div class="track-grid-cell sortable" role="columnheader" data-sort-key="durationMs"><span class="sort-label" data-text="ui-track-table-length"></span></div>
-                    <div class="track-grid-cell sortable" role="columnheader" data-sort-key="format"><span class="sort-label" data-text="ui-track-table-fmt"></span></div>
-                    <div class="track-grid-cell" role="columnheader"></div>
-                  </div>
-                </div>
+              <div class="track-grid" data-track-grid data-body-id="usbPlaylistTracks" data-select-all-view="usbPlaylist" data-drag-column role="table" data-text-aria-label="ui-track-table-usb-playlist-tracks-aria-label">
                 <div class="track-grid-body" id="usbPlaylistTracks" role="rowgroup"></div>
                 <div class="track-grid-loading" role="status"><span class="spinner" aria-hidden="true"></span><span data-text="ui-track-table-loading-tracks"></span></div>
               </div>
@@ -375,22 +344,7 @@
               </div>
             </div>
             <div class="table-wrap">
-              <div class="track-grid" data-track-grid data-body-id="historyTracks" role="table" data-text-aria-label="ui-track-table-usb-history-tracks-aria-label">
-                <div class="track-grid-head" role="rowgroup">
-                  <div class="track-grid-row" role="row">
-                    <div class="track-grid-cell" role="columnheader"><input type="checkbox" data-select-all="usbHistory" data-text-aria-label="ui-track-table-select-all-aria-label" /></div>
-                    <div class="track-grid-cell" role="columnheader"></div>
-                    <div class="track-grid-cell th-waveform" role="columnheader"><span class="sort-hint hidden" data-text="ui-track-table-sort-hint"></span></div>
-                    <div class="track-grid-cell sortable" role="columnheader" data-sort-key="artist" data-sort-alt="title"><span class="sort-label" data-text="ui-track-table-track"></span></div>
-                    <div class="track-grid-cell sortable" role="columnheader" data-sort-key="album"><span class="sort-label" data-text="ui-track-table-album"></span></div>
-                    <div class="track-grid-cell sortable" role="columnheader" data-sort-key="year"><span class="sort-label" data-text="ui-track-table-year"></span></div>
-                    <div class="track-grid-cell sortable" role="columnheader" data-sort-key="bpm"><span class="sort-label" data-text="ui-track-table-bpm"></span></div>
-                    <div class="track-grid-cell sortable" role="columnheader" data-sort-key="key"><span class="sort-label" data-text="ui-track-table-key"></span></div>
-                    <div class="track-grid-cell sortable" role="columnheader" data-sort-key="durationMs"><span class="sort-label" data-text="ui-track-table-length"></span></div>
-                    <div class="track-grid-cell sortable" role="columnheader" data-sort-key="format"><span class="sort-label" data-text="ui-track-table-fmt"></span></div>
-                    <div class="track-grid-cell" role="columnheader"></div>
-                  </div>
-                </div>
+              <div class="track-grid" data-track-grid data-body-id="historyTracks" data-select-all-view="usbHistory" role="table" data-text-aria-label="ui-track-table-usb-history-tracks-aria-label">
                 <div class="track-grid-body" id="historyTracks" role="rowgroup"></div>
                 <div class="track-grid-loading" role="status"><span class="spinner" aria-hidden="true"></span><span data-text="ui-track-table-loading-tracks"></span></div>
               </div>
@@ -455,23 +409,7 @@
         </div>
         <div id="playlistEmptyState"></div>
         <div class="table-wrap" id="playlistTableWrap">
-          <div class="track-grid" data-track-grid data-body-id="playlistTracksBody" role="table" data-text-aria-label="ui-track-table-playlist-tracks-aria-label">
-            <div class="track-grid-head" role="rowgroup">
-              <div class="track-grid-row" role="row">
-                <div class="track-grid-cell" role="columnheader"></div>
-                <div class="track-grid-cell" role="columnheader"><input type="checkbox" data-select-all="playlist" data-text-aria-label="ui-track-table-select-all-aria-label" /></div>
-                <div class="track-grid-cell" role="columnheader"></div>
-                <div class="track-grid-cell th-waveform" role="columnheader"><span class="sort-hint hidden" data-text="ui-track-table-sort-hint"></span></div>
-                <div class="track-grid-cell sortable" role="columnheader" data-sort-key="artist" data-sort-alt="title"><span class="sort-label" data-text="ui-track-table-track"></span></div>
-                <div class="track-grid-cell sortable" role="columnheader" data-sort-key="album"><span class="sort-label" data-text="ui-track-table-album"></span></div>
-                <div class="track-grid-cell sortable" role="columnheader" data-sort-key="year"><span class="sort-label" data-text="ui-track-table-year"></span></div>
-                <div class="track-grid-cell sortable" role="columnheader" data-sort-key="bpm"><span class="sort-label" data-text="ui-track-table-bpm"></span></div>
-                <div class="track-grid-cell sortable" role="columnheader" data-sort-key="key"><span class="sort-label" data-text="ui-track-table-key"></span></div>
-                <div class="track-grid-cell sortable" role="columnheader" data-sort-key="durationMs"><span class="sort-label" data-text="ui-track-table-length"></span></div>
-                <div class="track-grid-cell sortable" role="columnheader" data-sort-key="format"><span class="sort-label" data-text="ui-track-table-fmt"></span></div>
-                <div class="track-grid-cell" role="columnheader"></div>
-              </div>
-            </div>
+          <div class="track-grid" data-track-grid data-body-id="playlistTracksBody" data-select-all-view="playlist" data-drag-column role="table" data-text-aria-label="ui-track-table-playlist-tracks-aria-label">
             <div class="track-grid-body" id="playlistTracksBody" role="rowgroup"></div>
             <div class="track-grid-loading" role="status"><span class="spinner" aria-hidden="true"></span><span data-text="ui-track-table-loading-tracks"></span></div>
           </div>
@@ -841,6 +779,19 @@
     </div>
   </div>
 
+  <!-- A track list header's columns button: show, hide and reorder the optional columns of every track list -->
+  <div class="confirm-overlay" id="trackColumnsOverlay" hidden>
+    <div class="confirm-dialog track-columns-dialog" role="dialog" aria-modal="true" aria-labelledby="trackColumnsTitle">
+      <h3 id="trackColumnsTitle" data-text="ui-track-columns-title"></h3>
+      <p class="muted" data-text="ui-track-columns-intro"></p>
+      <ul class="add-to-list track-columns-list" id="trackColumnsList" data-text-aria-label="ui-track-columns-list-aria-label"><!-- tplTrackColumnItem per optional column --></ul>
+      <div class="row confirm-actions">
+        <button type="button" id="trackColumnsResetBtn" data-text="ui-track-columns-reset"></button>
+        <button type="button" id="trackColumnsDoneBtn" data-primary data-text="ui-track-columns-done"></button>
+      </div>
+    </div>
+  </div>
+
   <!-- Selection bar "Add to…": the playlists to add the selection to -->
   <div class="confirm-overlay" id="addToOverlay" hidden>
     <div class="confirm-dialog add-to-dialog" role="dialog" aria-modal="true" aria-labelledby="addToTitle">
@@ -938,6 +889,31 @@
        text/attributes, dropping the optional parts an instance doesn't use. -->
 
   <!-- Track tables (library, app playlist, USB playlist, USB history) -->
+  <!-- Every track list's header row, cloned into each [data-track-grid] at startup
+       (track_columns.mjs): the select-all checkbox is set from the grid's
+       data-select-all-view / data-select-all-id, and the drag cell is kept only on a grid
+       with data-drag-column. Each cell carries its column's td-* class, as the row cells do. -->
+  <template id="tplTrackGridHead">
+    <div class="track-grid-head" role="rowgroup">
+      <div class="track-grid-row" role="row">
+        <div class="track-grid-cell td-drag" role="columnheader"></div>
+        <div class="track-grid-cell td-select" role="columnheader"><input type="checkbox" data-select-all data-text-aria-label="ui-track-table-select-all-aria-label" /></div>
+        <div class="track-grid-cell td-cover" role="columnheader"></div>
+        <div class="track-grid-cell td-waveform th-waveform" role="columnheader"><span class="sort-hint hidden" data-text="ui-track-table-sort-hint"></span></div>
+        <div class="track-grid-cell td-track sortable" role="columnheader" data-sort-key="artist" data-sort-alt="title"><span class="sort-label" data-text="ui-track-table-track"></span></div>
+        <div class="track-grid-cell td-album sortable" role="columnheader" data-sort-key="album"><span class="sort-label" data-text="ui-track-table-album"></span></div>
+        <div class="track-grid-cell td-year sortable" role="columnheader" data-sort-key="year"><span class="sort-label" data-text="ui-track-table-year"></span></div>
+        <div class="track-grid-cell td-bpm sortable" role="columnheader" data-sort-key="bpm"><span class="sort-label" data-text="ui-track-table-bpm"></span></div>
+        <div class="track-grid-cell td-key sortable" role="columnheader" data-sort-key="key"><span class="sort-label" data-text="ui-track-table-key"></span></div>
+        <div class="track-grid-cell td-length sortable" role="columnheader" data-sort-key="durationMs"><span class="sort-label" data-text="ui-track-table-length"></span></div>
+        <div class="track-grid-cell td-format sortable" role="columnheader" data-sort-key="format"><span class="sort-label" data-text="ui-track-table-fmt"></span></div>
+        <div class="track-grid-cell td-action" role="columnheader"><button type="button" class="track-columns-btn" data-track-columns-button data-text-tooltip="ui-track-columns-button-tooltip" data-text-aria-label="ui-track-columns-button-aria-label"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="3" y="4" width="18" height="16" rx="2"></rect><line x1="9" y1="4" x2="9" y2="20"></line><line x1="15" y1="4" x2="15" y2="20"></line></svg></button></div>
+      </div>
+    </div>
+  </template>
+  <template id="tplTrackColumnItem">
+    <li class="track-columns-item"><span class="drag-handle" data-track-column-drag-handle draggable="true" data-text-tooltip="ui-track-columns-drag" data-text-aria-label="ui-track-columns-drag">&#10495;</span><label class="add-to-item"><input type="checkbox" /><span class="add-to-name"></span></label></li>
+  </template>
   <template id="tplTrackRow">
     <div role="row" class="track-grid-row">
       <div role="cell" class="track-grid-cell td-drag"><span class="drag-handle" data-playlist-track-drag-handle draggable="true" data-text-tooltip="ui-track-row-drag-to-reorder" data-text-aria-label="ui-track-row-drag-to-reorder">⠿</span></div>

@@ -1417,8 +1417,55 @@ pub enum UiText {
 #[serde(rename_all = "camelCase")]
 pub struct GetFrontendSettingsData {
     pub values: HashMap<String, String>,
+    /// The track table's saved column layout, cleaned (`track_columns`). Not in `values`,
+    /// which holds only what `set_frontend_setting` writes.
+    pub track_columns: TrackColumnLayout,
     pub node_available: bool,
     pub essentia_installed: bool,
+}
+
+/// The track table's optional columns (`service::track_columns`): their order between the
+/// Track and action columns, and which are hidden. Column ids are strings here: a saved or
+/// sent layout may hold ids this build doesn't know, which cleaning drops.
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct TrackColumnLayout {
+    #[serde(default)]
+    pub order: Vec<String>,
+    #[serde(default)]
+    pub hidden: Vec<String>,
+}
+
+/// One column of the track table, for the column editor.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct TrackColumnInfo {
+    pub id: String,
+    /// The `ui-` text key of its header; none for the unlabeled columns.
+    pub label_key: Option<String>,
+    pub sortable: bool,
+    /// Always shown, in a fixed place: not in the editor or a layout.
+    pub locked: bool,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct GetTrackColumnsData {
+    pub columns: Vec<TrackColumnInfo>,
+    pub layout: TrackColumnLayout,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct SetTrackColumnsRequest {
+    pub layout: TrackColumnLayout,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct SetTrackColumnsData {
+    /// What was saved: the sent layout, cleaned.
+    pub layout: TrackColumnLayout,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]

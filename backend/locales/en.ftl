@@ -2797,6 +2797,21 @@ ui-track-detail-waiting-for-usb-job = Waiting for the running USB job to finish 
 ui-track-detail-max-cues = Maximum 8 cue points.
 ui-track-detail-cue-already-there = A cue is already there.
 
+## ui-track-columns
+
+# The column editor: the button in every track list's last header cell, and its dialog. The
+# layout is one for every track list.
+ui-track-columns-button-tooltip = Show, hide and reorder columns
+ui-track-columns-button-aria-label = Columns
+# The button's tooltip while a USB playlist's order is being edited.
+ui-track-columns-blocked-order-edit = Save or cancel the order edit first to change the columns
+ui-track-columns-title = Columns
+ui-track-columns-intro = Tick the columns to show and drag them into order. Every track list uses this layout.
+ui-track-columns-list-aria-label = Columns
+ui-track-columns-drag = Drag to reorder
+ui-track-columns-reset = Reset to default
+ui-track-columns-done = Done
+
 ## ui-track-row
 
 ui-track-row-drag-to-reorder = Drag to reorder

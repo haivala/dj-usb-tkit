@@ -249,6 +249,12 @@ impl SortColumn {
     }
 }
 
+/// Whether `key` is a column sort key `TrackSort` sorts by.
+#[cfg(test)]
+pub(crate) fn is_sort_key(key: &str) -> bool {
+    SortColumn::parse(key).is_some()
+}
+
 /// A requested column sort: `sort_by` is one of `title` | `artist` | `album` |
 /// `year` | `format` | `bpm` | `durationMs` | `key`, `sort_dir` is `asc` (default) or
 /// `desc`. An absent or unknown column leaves the caller's natural order

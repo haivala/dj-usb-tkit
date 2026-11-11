@@ -20,9 +20,9 @@ export function persistSetting(ctx, storageKey, dbKey, value) {
 
 export async function hydrateLocalStorageFromFrontendSettingsDb(ctx) {
   const { command, state } = ctx;
-  let values, nodeAvailable, essentiaInstalled;
+  let values, nodeAvailable, essentiaInstalled, trackColumns;
   try {
-    ({ values, nodeAvailable, essentiaInstalled } = await command("get_frontend_settings"));
+    ({ values, nodeAvailable, essentiaInstalled, trackColumns } = await command("get_frontend_settings"));
   } catch (err) {
     console.warn("Failed to hydrate frontend settings from DB:", err);
     return;
@@ -32,6 +32,9 @@ export async function hydrateLocalStorageFromFrontendSettingsDb(ctx) {
     state.nodeAvailable = nodeAvailable;
     state.essentiaInstalled = essentiaInstalled;
   }
+
+  // Before the first table paint, so the tables never show the full column set first.
+  ctx.applyTrackColumns(trackColumns);
 
   for (const binding of FRONTEND_SETTING_BINDINGS) {
     if (!Object.hasOwn(values, binding.dbKey)) continue;

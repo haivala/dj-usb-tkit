@@ -26,8 +26,10 @@ impl BackendService {
         }
         let node_available = check_node_available();
         let essentia_installed = check_essentia_installed(&self.db.data_dir());
+        let track_columns = super::track_columns::track_columns_setting(&conn)?;
         Ok(GetFrontendSettingsData {
             values,
+            track_columns,
             node_available,
             essentia_installed,
         })
@@ -53,7 +55,8 @@ impl BackendService {
         req: SetFrontendSettingRequest,
     ) -> BackendResult<SetFrontendSettingData> {
         let key = req.key.trim();
-        // The USB folder is saved by `select_usb`, the sync mode by `set_export_sync_mode`.
+        // The USB folder is saved by `select_usb`, the sync mode by `set_export_sync_mode`,
+        // the track columns (`ui_track_columns_v1`, not a key here) by `set_track_columns`.
         if !frontend_ui_setting_keys().contains(&key)
             || key == SETTING_UI_USB_ROOT
             || key == SETTING_UI_EXPORT_PRUNE_STALE

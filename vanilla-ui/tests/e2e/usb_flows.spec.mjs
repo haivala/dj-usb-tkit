@@ -1226,9 +1226,14 @@ test("USB playlist reorder", async ({ page }) => {
   await expect.poll(() => usbTrackIds(page)).toEqual(["t-b", "t-k", "t-l"]);
   await rows.nth(0).click();
 
+  // The columns can't change while editing (a header sort is the pending order then).
+  const columnsBtn = page.locator('#panel-usb-playlists [data-track-columns-button]');
+  await expect(columnsBtn).toBeEnabled();
   await editBtn.click();
   await expect(editText).toHaveText("Editing order: nothing changed yet");
   await expect(saveBtn).toBeDisabled();
+  await expect(columnsBtn).toBeDisabled();
+  await expect(columnsBtn).toHaveAttribute("data-tooltip", "Save or cancel the order edit first to change the columns");
   await expect(cancelBtn).toBeVisible();
   await expect(page.locator("#usbPlaylists [data-usb-drag-handle]").first()).toBeVisible();
   await expect(page.locator("#usbPlaylistTracks [data-playlist-track-drag-handle]")).toHaveCount(1);
@@ -1367,6 +1372,7 @@ test("USB playlist reorder", async ({ page }) => {
   await expect(page.locator("#diagSections")).toBeEmpty();
   await expect(page.locator("#diagOverallStatus")).toBeEmpty();
   await expect(editBtn).toBeVisible();
+  await expect(columnsBtn).toBeEnabled();
   await expect(rows.nth(0)).toContainText("Alpha");
 
   // Cancel: the order on the stick comes back.
@@ -1377,6 +1383,8 @@ test("USB playlist reorder", async ({ page }) => {
   await expect(page.locator("#statusText")).toContainText("Order changes discarded");
   await expect(rows.nth(0)).toContainText("Alpha");
   await expect(editBtn).toBeVisible();
+  await expect(columnsBtn).toBeEnabled();
+  await expect(columnsBtn).toHaveAttribute("data-tooltip", "Show, hide and reorder columns");
   expect(await sentRequests(page, "cancel_usb_order_edit")).toHaveLength(3);
 
   // A view sort from before the edit becomes the pending order when a drag starts, then the

@@ -21,7 +21,7 @@ use backend::models::{
     RemoveSourceFolderRequest, RemoveTracksFromPlaylistRequest, RemoveUsbPlaylistRequest,
     RepairUsbDiagnosticsRequest, ResolvePlaybackSourceRequest, RunUsbDiagnosticsRequest,
     RunUsbParityReportRequest, ScanLibraryRequest, SetFrontendSettingRequest,
-    SetUsbDeviceNameRequest, WarningEntry,
+    SetTrackColumnsRequest, SetUsbDeviceNameRequest, TrackColumnLayout, WarningEntry,
 };
 use backend::pdb_reader::parse_pdb;
 use backend::service::anlz::canonical_analysis_bundle_paths;
@@ -6389,6 +6389,52 @@ fn frontend_setting_analysis_engine_persists_and_reads_back() {
         value: Some("test".to_string()),
     });
     assert!(!set_bad.ok, "unknown key should be rejected: {set_bad:?}");
+
+    // The track column layout: saved cleaned, by its own command only.
+    let strings = |ids: &[&str]| ids.iter().map(|id| id.to_string()).collect::<Vec<_>>();
+    let default_layout = TrackColumnLayout {
+        order: strings(&["album", "year", "bpm", "key", "length", "format"]),
+        hidden: Vec::new(),
+    };
+    let columns = backend.get_track_columns();
+    let columns = columns.data.expect("track columns");
+    assert_eq!(columns.layout, default_layout);
+    assert!(
+        columns
+            .columns
+            .iter()
+            .any(|column| column.id == "waveform" && column.locked)
+    );
+    let set_columns = backend.set_track_columns(SetTrackColumnsRequest {
+        layout: TrackColumnLayout {
+            order: strings(&["bpm", "nope", "waveform", "album", "bpm"]),
+            hidden: strings(&["waveform", "year", "year", "nope"]),
+        },
+    });
+    let cleaned = TrackColumnLayout {
+        order: strings(&["bpm", "key", "length", "format", "album", "year"]),
+        hidden: strings(&["year"]),
+    };
+    assert_eq!(set_columns.data.expect("set track columns").layout, cleaned);
+    let set_raw = backend.set_frontend_setting(SetFrontendSettingRequest {
+        key: "ui_track_columns_v1".to_string(),
+        value: Some("{}".to_string()),
+    });
+    assert!(!set_raw.ok, "the layout has one write path: {set_raw:?}");
+    let saved_layouts = |backend: &BackendCommands| {
+        (
+            backend.get_track_columns().data.expect("columns").layout,
+            backend
+                .get_frontend_settings()
+                .data
+                .expect("settings")
+                .track_columns,
+        )
+    };
+    assert_eq!(saved_layouts(&backend), (cleaned.clone(), cleaned.clone()));
+    drop(backend);
+    let reopened = BackendCommands::new(&data_dir).expect("reopen backend");
+    assert_eq!(saved_layouts(&reopened), (cleaned.clone(), cleaned));
 }
 
 // ── Essentia install helpers ──────────────────────────────────────────────────

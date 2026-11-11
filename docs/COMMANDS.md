@@ -252,8 +252,21 @@ drive selection from being rendered against a newer selected drive.
 
 ### Settings
 
-- `get_frontend_settings`
+- `get_frontend_settings` → `{ values, trackColumns, nodeAvailable, essentiaInstalled }`:
+  `values` holds what `set_frontend_setting` writes; `trackColumns` is the track lists' saved
+  column layout, cleaned as `set_track_columns` cleans it (the default one when none is saved),
+  so the UI has it before the first table paint.
 - `set_frontend_setting` — the UI's own settings (theme, sidebar, export options, ...).
+  Not the track columns: `ui_track_columns_v1` is refused here.
+- `get_track_columns` → `{ columns, layout }`: every column of the track lists
+  (`[{ id, labelKey, sortable, locked }]`, `labelKey` the header's `ui-` text key) and the saved
+  layout. A locked column (`drag`, `select`, `cover`, `waveform`, `track`, `action`) is always
+  shown in its fixed place; a layout holds only the others: `{ order, hidden }`, column ids.
+- `set_track_columns` — `{ layout: { order, hidden } }` → `{ layout }`: saves the layout for
+  every track list (`ui_track_columns_v1`) and answers with what was saved. It is cleaned first:
+  unknown, locked and repeated ids are dropped, and a column the layout lacks goes in after the
+  column it follows by default, so an empty layout is the default one. Sync, so quick changes
+  are saved in the order sent.
 - `set_export_sync_mode` — `{ pruneStale, playlistId?, sort? }` → `{ pruneStale, locked,
   statusText }` plus the playlists state. Saves the export sync mode
   (`ui_export_prune_stale_v1`, which `set_frontend_setting` refuses). When the new mode locks

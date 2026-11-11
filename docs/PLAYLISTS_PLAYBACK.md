@@ -23,6 +23,24 @@ Playlists can also be imported from a rekordbox or Mixxx library with the
 **Import** button under **New** in the sidebar: tick as many as you like. Each
 becomes an ordinary local playlist; see `docs/EXTERNAL_LIBRARIES.md`.
 
+### Track list columns
+
+The button at the right end of a track list's header row opens the column editor. Untick a
+column to hide it and drag the rows to put the columns in a new order; each change shows at
+once, and **Reset to default** brings back every column in its first place. Album, Year, BPM,
+Key, Length and Fmt can be hidden or moved; the checkbox, cover, waveform and Track columns
+always come first and the row's buttons last. The layout is one for all four track lists
+(Library, playlists, USB playlists and USB history) and is kept between runs. A list sorted by
+a column you hide goes back to its own order. While a USB playlist's order is being edited the
+button is off: save or cancel the edit first.
+
+The backend owns which columns exist and the saved layout, and cleans every layout it gets
+(`get_track_columns` / `set_track_columns` in `docs/COMMANDS.md`). The UI applies one to the
+row templates and each grid's header row (`components/shared/track_columns.mjs`): the cells are
+put in the layout's order and a hidden one is marked `hidden`, so filling a row never misses a
+cell; the rows on screen are then built again. The startup layout comes with
+`get_frontend_settings`, before the first table paint.
+
 ### Adding selected tracks
 
 Every track list has a checkbox on each row and a select-all box in its header. The selection

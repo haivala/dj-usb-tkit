@@ -107,7 +107,18 @@
 
   // The library and the app's playlists, as `seed` sets them; the default
   // answers below read and change them as the backend does.
-  const store = { tracks: [], playlists: [], playlistTracks: new Map(), created: 0 };
+  // `trackColumns`: the column layout (set_track_columns keeps what it gets; an empty one is the default).
+  const TRACK_COLUMNS = ["album", "year", "bpm", "key", "length", "format"];
+  const defaultTrackColumns = () => ({ order: TRACK_COLUMNS.slice(), hidden: [] });
+  const store = { tracks: [], playlists: [], playlistTracks: new Map(), created: 0, trackColumns: defaultTrackColumns() };
+  const trackColumnCatalog = () => [
+    ...["drag", "select", "cover", "waveform"].map((id) => ({ id, labelKey: null, sortable: false, locked: true })),
+    { id: "track", labelKey: "ui-track-table-track", sortable: true, locked: true },
+    ...TRACK_COLUMNS.map((id) => ({
+      id, labelKey: `ui-track-table-${id === "format" ? "fmt" : id}`, sortable: true, locked: false
+    })),
+    { id: "action", labelKey: null, sortable: false, locked: true },
+  ];
   const playlistRow = (playlist) => ({
     source: "local", lastExportedAt: null, lastExportedUsbRoot: null, lastExportedTrackCount: null, ...playlist
   });
@@ -132,6 +143,16 @@
       case "list_matching_track_ids": {
         const trackIds = searchRows(store.tracks, r.query).map((t) => t.id);
         return ok({ trackIds, total: trackIds.length });
+      }
+      case "get_frontend_settings":
+        return ok({ values: {}, trackColumns: store.trackColumns, nodeAvailable: true, essentiaInstalled: true });
+      case "get_track_columns": return ok({ columns: trackColumnCatalog(), layout: store.trackColumns });
+      case "set_track_columns": {
+        const layout = r.layout || {};
+        store.trackColumns = layout.order?.length
+          ? { order: layout.order.slice(), hidden: (layout.hidden || []).slice() }
+          : defaultTrackColumns();
+        return ok({ layout: store.trackColumns });
       }
       case "list_playlists":
         return ok({ playlists: store.playlists.map(playlistRow), playlistUsbExportStatus: [] });
@@ -247,10 +268,11 @@
     totalTimeText,
     store,
 
-    // Sets the library's tracks and the app's playlists the default answers
-    // use. A playlist's `tracks` are its rows, in order.
-    seed({ tracks, playlists } = {}) {
+    // Sets the library's tracks, the app's playlists and the column layout
+    // the default answers use. A playlist's `tracks` are its rows, in order.
+    seed({ tracks, playlists, trackColumns } = {}) {
       if (tracks) store.tracks = tracks;
+      if (trackColumns) store.trackColumns = trackColumns;
       if (playlists) {
         store.playlists = playlists.map(({ tracks: rows, ...playlist }) => playlist);
         store.playlistTracks = new Map(playlists.map((p) => [p.id, p.tracks || []]));
@@ -520,7 +542,6 @@
         case "detect_external_mixxx_db":
           return ok({ found: false, path: null, imported: false });
         case "get_library_sources": return ok(backend.librarySources());
-        case "get_frontend_settings": return ok({ values: {}, nodeAvailable: true, essentiaInstalled: true });
         case "set_frontend_setting": return ok({ saved: true });
         case "list_usb_devices": return ok({ items: [] });
         case "fetch_usb_playlists": return ok(backend.usbPlaylists());
