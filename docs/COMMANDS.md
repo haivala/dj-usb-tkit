@@ -280,18 +280,22 @@ drive selection from being rendered against a newer selected drive.
   (`i18n::languages()`): saves it and switches the backend's language straight away.
   An unknown code is a validation error, and so is a change while any job runs (USB
   jobs, library scan, imports, analysis, Convert, update install): the UI reloads on
-  a change, which would lose the job's progress.
+  a change, which would lose the job's progress. Until a language is saved, the app
+  starts in the computer's first preferred language it has a catalog for
+  (`i18n::system_language`: `fr-CA` picks `fr`), else English; that one isn't saved.
 
 ### UI texts
 
-- `get_ui_texts` → `{ language, texts, languages }`: every `ui-` key of the text catalog
+- `get_ui_texts` → `{ language, texts, languages, languageChoice }`: every `ui-` key of the text catalog
   (`backend/locales/<language>.ftl`) in the current language, English where it
   has none. Called once at startup, before anything renders (`ui_texts.mjs`). A
   text is a string with `{name}` placeholders for `t`, or, for a text with a
   count, its forms by plural category (`{ "one": …, "other": … }`) for
   `tCount`, which picks one with `Intl.PluralRules` for `language`. `languages`
   is every language the app has, `[{ code, name }]`, English first, each named
-  in itself, for Settings' language list.
+  in itself, for the language lists in Settings and Quick Start (which a first run
+  opens). `languageChoice` says whether there's more than one: both lists show only
+  then.
 
 ### Playlists
 

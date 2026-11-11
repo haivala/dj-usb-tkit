@@ -132,6 +132,27 @@ fn the_saved_language_is_applied_at_startup() {
 }
 
 #[test]
+fn with_no_saved_language_the_computers_is_applied_at_startup() {
+    let _test = LanguageTest::start();
+    let root = tempdir().expect("temp root");
+    let backend = BackendCommands::new(root.path().join("data")).expect("create backend");
+    let applied = backend.apply_saved_language();
+    assert!(applied.ok, "{applied:?}");
+    // The computer running the test decides which: whichever it is, it isn't saved.
+    assert_eq!(
+        i18n::current_language(),
+        i18n::system_language().unwrap_or(ENGLISH)
+    );
+    i18n::set_language(ENGLISH).expect("English");
+    let restarted = BackendCommands::new(root.path().join("data")).expect("create backend again");
+    assert!(restarted.apply_saved_language().ok);
+    assert_eq!(
+        i18n::current_language(),
+        i18n::system_language().unwrap_or(ENGLISH)
+    );
+}
+
+#[test]
 fn a_cached_usb_read_answers_in_the_current_language() {
     let _test = LanguageTest::start();
     let root = tempdir().expect("temp root");

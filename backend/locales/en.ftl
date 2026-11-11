@@ -2222,6 +2222,8 @@ ui-common-settings = Settings
 ui-common-media-library = Media Library
 ui-common-usb-playlists = USB Playlists
 ui-common-usb = USB
+# The language choice: Settings and the Quick Start dialog.
+ui-common-language = Language
 # Tracks are loading: the startup progress bar and a track table's placeholder.
 ui-common-loading-tracks = Loading tracks...
 ui-common-cancel = Cancel
@@ -2631,7 +2633,6 @@ ui-settings-version-not-set = Not set
 ui-settings-export = Export
 ui-settings-get-node-js = Get Node.js
 ui-settings-key-notation = Key notation
-ui-settings-language = Language
 ui-settings-key-notation-camelot = Camelot (8A)
 ui-settings-key-notation-classic = Classic (Am)
 ui-settings-node-js-missing = Node.js not found —

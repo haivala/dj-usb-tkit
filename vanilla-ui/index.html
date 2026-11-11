@@ -628,8 +628,8 @@
             <option value="camelot" data-text="ui-settings-key-notation-camelot"></option>
           </select>
         </label>
-        <label class="usb-cfg-toggle-row" for="languageSelect">
-          <span data-text="ui-settings-language"></span>
+        <label class="usb-cfg-toggle-row" id="settingsLanguageRow" for="languageSelect">
+          <span data-text="ui-common-language"></span>
           <select id="languageSelect"></select>
         </label>
       </div>
@@ -940,7 +940,7 @@
     </div>
   </template>
   <!-- Convert… dialog: one format choice -->
-  <!-- One language in Settings' list: value the code, text its name in itself (both the
+  <!-- One language in a language list (Settings, Quick Start): value the code, text its name in itself (both the
        backend's), so never translated. -->
   <template id="tplLanguageOption">
     <option translate="no"></option>
@@ -1116,6 +1116,10 @@
         <h2 data-text="ui-help-title"></h2>
         <button class="help-close" id="helpCloseBtn" data-text-aria-label="ui-help-close-aria-label">&times;</button>
       </div>
+      <label class="usb-cfg-toggle-row help-language-row" id="helpLanguageRow" for="helpLanguageSelect">
+        <span data-text="ui-common-language"></span>
+        <select id="helpLanguageSelect"></select>
+      </label>
       <ol class="help-steps">
         <li><strong data-text="ui-help-step-folders"></strong> <span data-text="ui-help-step-folders-text"></span></li>
         <li><strong data-text="ui-help-step-analyze"></strong> <span data-text="ui-help-step-analyze-text"></span></li>

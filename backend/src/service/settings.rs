@@ -210,8 +210,10 @@ impl BackendService {
         })
     }
 
-    /// Makes the saved language (`SETTING_UI_LANGUAGE`) the process's language. Called once by
-    /// the desktop app at startup, not from `new`: the language is process-wide, and tests
+    /// Makes the saved language (`SETTING_UI_LANGUAGE`) the process's language, or with none
+    /// saved, the computer's when the app has it (`i18n::system_language`); that one isn't
+    /// saved, so it follows the computer until a language is chosen. Called once by the
+    /// desktop app at startup, not from `new`: the language is process-wide, and tests
     /// construct many services side by side. A saved language the app no longer has stays
     /// English, with a warning.
     pub fn apply_saved_language(&self) -> BackendResult<()> {
@@ -224,6 +226,9 @@ impl BackendService {
             )
             .optional()?;
         let Some(language) = saved.filter(|value| !value.trim().is_empty()) else {
+            if let Some(language) = crate::i18n::system_language() {
+                crate::i18n::set_language(language).map_err(BackendError::Internal)?;
+            }
             return Ok(());
         };
         if crate::i18n::set_language(language.trim()).is_err() {

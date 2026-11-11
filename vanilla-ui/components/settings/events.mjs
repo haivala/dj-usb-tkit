@@ -1,7 +1,7 @@
 import { openExternalUrl, cloneTemplate } from "../../ui_utils.mjs";
 import { normalizeAnalysisBpmRange } from "../library/actions.mjs";
 import { refreshUpdateCheck } from "../../update_check.mjs";
-import { t, uiLanguage, uiLanguages } from "../../ui_texts.mjs";
+import { t, uiLanguage, uiLanguageChoice, uiLanguages } from "../../ui_texts.mjs";
 import {
   STORAGE_KEY_HELP_SEEN,
   FRONTEND_DB_KEY_HELP_SEEN,
@@ -218,30 +218,36 @@ export function bindSettingsEvents(ctx) {
     emitStatus(t("ui-settings-bpm-range-saved", { range: selected }));
   });
 
-  // The language every text is in. A change reloads the window, so everything is read
-  // again in it; the backend refuses it while any job runs, which a reload would lose.
-  el.languageSelect.replaceChildren(...uiLanguages().map(({ code, name }) => {
-    const option = cloneTemplate(ctx.document, "tplLanguageOption");
-    option.value = code;
-    option.textContent = name;
-    return option;
-  }));
-  el.languageSelect.value = uiLanguage();
-  el.languageSelect.addEventListener("change", async (event) => {
-    const select = event.currentTarget;
-    const current = uiLanguage();
-    if (select.value === current) return;
-    try {
-      await ctx.command("set_language", { language: select.value });
-    } catch (err) {
-      select.value = current;
-      emitStatus(err?.message || String(err));
-      return;
-    }
-    // The player is the backend's: it would play on with no control on screen.
-    await ctx.stopPlaybackIfActive().catch(() => {});
-    ctx.window.location.reload();
-  });
+  // A language list, in Settings and in Quick Start (which a first run opens): the language
+  // every text is in, shown only when there's one to choose. A change reloads the window, so
+  // everything is read again in it; the backend refuses it while any job runs, which a
+  // reload would lose.
+  function bindLanguageSelect(row, select) {
+    row.hidden = !uiLanguageChoice();
+    select.replaceChildren(...uiLanguages().map(({ code, name }) => {
+      const option = cloneTemplate(ctx.document, "tplLanguageOption");
+      option.value = code;
+      option.textContent = name;
+      return option;
+    }));
+    select.value = uiLanguage();
+    select.addEventListener("change", async () => {
+      const current = uiLanguage();
+      if (select.value === current) return;
+      try {
+        await ctx.command("set_language", { language: select.value });
+      } catch (err) {
+        select.value = current;
+        emitStatus(err?.message || String(err));
+        return;
+      }
+      // The player is the backend's: it would play on with no control on screen.
+      await ctx.stopPlaybackIfActive().catch(() => {});
+      ctx.window.location.reload();
+    });
+  }
+  bindLanguageSelect(el.settingsLanguageRow, el.languageSelect);
+  bindLanguageSelect(el.helpLanguageRow, el.helpLanguageSelect);
 
   // Display only -- the backend renders every key label in this notation, so
   // save it first, then re-fetch the loaded track lists.

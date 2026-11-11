@@ -570,6 +570,50 @@ test("changing the language reloads the window in it, and a refused change keeps
   await expect(page.locator('label[for="languageSelect"] span')).toHaveText(/^\[.+\]$/);
 });
 
+// A first run opens Quick Start with the same language list as Settings, so the language can be
+// chosen before anything else; the window reloads in it and Quick Start opens again, since it
+// was never closed. With one language there's nothing to choose, and neither list shows.
+test("Quick Start on a first run offers the language, and hides it with only one", async ({ page }) => {
+  await offerTestLanguage(page);
+  await page.addInitScript(() => {
+    window.localStorage.removeItem("djusbtkit.helpSeen");
+    const backend = window.__e2eBackend;
+    backend.install((command, request) => {
+      if (command === "get_ui_texts") {
+        if (window.sessionStorage.getItem("e2eOneLanguage")) {
+          const english = window.__e2eUiTexts;
+          return backend.ok({ ...english, languages: english.languages.slice(0, 1), languageChoice: false });
+        }
+        const testLanguage = window.sessionStorage.getItem("e2eLanguage") === "en-XA";
+        return backend.ok(testLanguage ? window.__e2eUiTextsTestLanguage : window.__e2eUiTexts);
+      }
+      if (command === "set_language") {
+        window.sessionStorage.setItem("e2eLanguage", request.language);
+        return backend.ok({ language: request.language });
+      }
+    });
+  });
+  await page.goto("/");
+  await expect(page.locator("#helpOverlay")).toBeVisible();
+  const select = page.locator("#helpLanguageSelect");
+  await expect(select).toHaveValue("en");
+  await expect(select.locator("option")).toHaveText(["English", /^\[.+\]$/]);
+
+  await select.selectOption("en-XA");
+  await expect(page.locator("html")).toHaveAttribute("lang", "en-XA");
+  await expect(page.locator("#helpOverlay")).toBeVisible();
+  await expect(page.locator("#helpLanguageSelect")).toHaveValue("en-XA");
+  await expect(page.locator('label[for="helpLanguageSelect"] span')).toHaveText(/^\[.+\]$/);
+
+  await page.evaluate(() => window.sessionStorage.setItem("e2eOneLanguage", "1"));
+  await page.reload();
+  await expect(page.locator("#helpOverlay")).toBeVisible();
+  await expect(page.locator("#helpLanguageRow")).toBeHidden();
+  await page.locator("#helpCloseBtn").click();
+  await page.locator("#settingsBtn").click();
+  await expect(page.locator("#settingsLanguageRow")).toBeHidden();
+});
+
 // In the test language, the first-run Library, Help and the update banner and card show only
 // catalog text and data.
 test("test language: first run, Help, update", async ({ page }) => {

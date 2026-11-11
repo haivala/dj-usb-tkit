@@ -15,6 +15,7 @@ let texts = {};
 let pluralRules = new Intl.PluralRules("en");
 let language = "en";
 let languages = [];
+let languageChoice = false;
 let decimalSeparator = ".";
 
 const TEXT_ATTRIBUTES = [
@@ -32,6 +33,7 @@ export function setUiTexts(data) {
   texts = data?.texts && typeof data.texts === "object" ? data.texts : {};
   language = data?.language || "en";
   languages = Array.isArray(data?.languages) ? data.languages : [];
+  languageChoice = data?.languageChoice === true;
   decimalSeparator = data?.decimalSeparator || ".";
   try {
     pluralRules = new Intl.PluralRules(language);
@@ -45,14 +47,19 @@ function fill(text, args) {
 }
 
 // A missing key shows as the key itself, so it's seen (and the test language check catches it).
-// The language the texts are in, and every language the app has (`{ code, name }`, English
-// first), for Settings' language list.
+// The language the texts are in, every language the app has (`{ code, name }`, English
+// first), and whether there's one to choose (the backend's `languageChoice`), for the
+// language lists in Settings and Quick Start.
 export function uiLanguage() {
   return language;
 }
 
 export function uiLanguages() {
   return languages;
+}
+
+export function uiLanguageChoice() {
+  return languageChoice;
 }
 
 // `value` with `digits` decimals and the language's decimal separator (the backend's

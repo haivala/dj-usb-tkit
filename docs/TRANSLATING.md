@@ -10,12 +10,17 @@ English (`en.ftl`) is the source: every other language translates its keys.
    language's BCP 47 code (`de`, `fr`, `pt-BR`). The file name is the code.
 2. Translate the text after each `=`. Keep the keys (the part before `=`) as they are.
 3. Set `settings-language-name` to the language's name in itself ("Deutsch", "Français"):
-   Settings' language list shows it.
+   the language lists show it.
 4. Set `format-decimal-separator` to the language's decimal separator (`.` or `,`). Every
    decimal the app shows uses it: the backend's numbers (sizes, percentages, kHz) and the
    ones the window formats itself (BPM), which `get_ui_texts` sends it for.
 5. Build the app. The build checks the file (see below), and the new language appears in
-   Settings → Language.
+   Settings → Language and in Quick Start, which opens on a first run. Both lists show only
+   when the app has more than one language.
+
+Until someone picks a language, the app starts in the computer's: the first of its
+preferred languages the app has a catalog for, by the whole code (`pt-BR`) or by the
+language alone (`fr-CA` gets `fr`). With none, it's English.
 
 A key you leave out falls back to English, so a catalog can be finished bit by bit. Delete
 untranslated keys instead of keeping English copies: a copy doesn't follow later changes to

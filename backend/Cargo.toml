@@ -47,6 +47,8 @@ fluent-bundle = "0.16"
 # Reads the `ui-` messages' patterns for `get_ui_texts` (i18n::ui_texts); build.rs uses it too.
 fluent-syntax = "0.12"
 unic-langid = "0.9"
+# The computer's languages, for the app's language until one is chosen (i18n::system_language).
+sys-locale = "0.3"
 tar = { version = "0.4", optional = true }
 futures-util = { version = "0.3", optional = true }
 tauri-plugin-updater = { version = "2", optional = true }

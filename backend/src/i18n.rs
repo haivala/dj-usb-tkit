@@ -321,6 +321,36 @@ pub fn set_language(language: &str) -> Result<(), String> {
     Ok(())
 }
 
+/// The language for the computer's languages (most preferred first), until one is chosen:
+/// see [`matching_language`]. `None` leaves the app in English.
+pub fn system_language() -> Option<&'static str> {
+    let locales: Vec<String> = sys_locale::get_locales().collect();
+    matching_language(locales.iter().map(String::as_str), &languages())
+}
+
+/// The first of `preferred` (locale names, most preferred first) the app has a catalog for:
+/// by the whole code (`pt-BR`), else by its language alone (`fr-CA` is `fr`). Case, `_` for
+/// `-` and a POSIX `.UTF-8` or `@euro` ending don't matter. The test language never matches.
+fn matching_language<'a>(
+    preferred: impl IntoIterator<Item = &'a str>,
+    available: &[&'static str],
+) -> Option<&'static str> {
+    let available: Vec<&'static str> = available
+        .iter()
+        .copied()
+        .filter(|code| *code != TEST_LANGUAGE)
+        .collect();
+    preferred.into_iter().find_map(|locale| {
+        let locale = locale.split(['.', '@']).next().unwrap_or_default().replace('_', "-");
+        let base = locale.split('-').next().unwrap_or_default();
+        available
+            .iter()
+            .find(|code| code.eq_ignore_ascii_case(&locale))
+            .or_else(|| available.iter().find(|code| code.eq_ignore_ascii_case(base)))
+            .copied()
+    })
+}
+
 /// Keys with this prefix are the text JS and `index.html` show, sent by `get_ui_texts`.
 pub const UI_KEY_PREFIX: &str = "ui-";
 
@@ -343,6 +373,7 @@ fn ui_texts_in(catalog: &Catalog) -> GetUiTextsData {
         decimal_separator: catalog.decimal_separator.to_string(),
         texts,
         languages: LANGUAGE_NAMES.clone(),
+        language_choice: LANGUAGE_NAMES.len() > 1,
     }
 }
 
@@ -753,6 +784,23 @@ usb-not-for-ui = Not sent
                 path.display()
             );
         }
+    }
+
+    #[test]
+    fn the_first_preferred_language_with_a_catalog_wins() {
+        let available = ["en", "fr", "pt-BR", TEST_LANGUAGE];
+        assert_eq!(matching_language(["de-DE", "fr-CA", "en-US"], &available), Some("fr"));
+        assert_eq!(matching_language(["en-GB", "fr-FR"], &available), Some("en"));
+        assert_eq!(matching_language(["pt-BR"], &available), Some("pt-BR"));
+        assert_eq!(matching_language(["pt_br.UTF-8"], &available), Some("pt-BR"));
+        assert_eq!(matching_language(["fr_FR@euro"], &available), Some("fr"));
+        assert_eq!(matching_language(["de-DE", "ja"], &available), None);
+        assert_eq!(matching_language([], &available), None);
+    }
+
+    #[test]
+    fn the_test_language_is_never_the_systems() {
+        assert_eq!(matching_language(["en-XA"], &["en", TEST_LANGUAGE]), Some("en"));
     }
 
     #[test]

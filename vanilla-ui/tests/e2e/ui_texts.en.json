@@ -30,6 +30,7 @@
     "ui-common-genre": "Genre",
     "ui-common-idle": "Idle",
     "ui-common-import": "Import",
+    "ui-common-language": "Language",
     "ui-common-loading-tracks": "Loading tracks...",
     "ui-common-media-library": "Media Library",
     "ui-common-no-entries": "No entries",
@@ -308,7 +309,6 @@
     "ui-settings-key-notation-classic": "Classic (Am)",
     "ui-settings-key-notation-failed": "Could not save key notation",
     "ui-settings-key-notation-saved": "Key notation: {notation}",
-    "ui-settings-language": "Language",
     "ui-settings-node-js-missing": "Node.js not found —",
     "ui-settings-sync-mode": "Sync Mode",
     "ui-settings-sync-mode-additive": "Additive playlist update",
@@ -565,5 +565,6 @@
       "code": "en-XA",
       "name": "[ÉÉñĝļîîšĥ]"
     }
-  ]
+  ],
+  "languageChoice": true
 }

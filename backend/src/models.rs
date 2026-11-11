@@ -1398,6 +1398,9 @@ pub struct GetUiTextsData {
     pub texts: std::collections::BTreeMap<String, UiText>,
     /// Every language the app has, English first: the settings' language list.
     pub languages: Vec<UiLanguage>,
+    /// Whether there's a language to choose: more than one in `languages`. The language
+    /// lists (Settings, Quick Start) show only then.
+    pub language_choice: bool,
 }
 
 /// One language the app has: its code and its name in itself ("English").

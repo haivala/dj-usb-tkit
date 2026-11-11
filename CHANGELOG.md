@@ -48,6 +48,10 @@
   order), saved straight to the USB.
 - **New feature:** In the Import Playlists dialog, each group heading (Playlists, Crates, History) has a box that
   ticks or unticks every list in that group, for rekordbox and Mixxx alike.
+- **New feature:** Until you pick a language, the app starts in your computer's language when it has it, and in
+  English otherwise.
+- **Improvement:** Quick Start, which opens on the first run, has the same language choice as Settings, so the
+  language can be picked before anything else. Both show only when the app has more than one language.
 - **Improvement:** The cue editor shows cue positions to the millisecond (`1:23.456`), the precision they are saved
   with.
 - **Improvement:** Ready for translations: BPM values use the language's decimal separator, as the backend's numbers

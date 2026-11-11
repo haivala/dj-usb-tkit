@@ -3616,6 +3616,10 @@ td button[data-action]:disabled,
   font-weight: 500;
 }
 
+.usb-cfg-toggle-row[hidden] {
+  display: none;
+}
+
 .usb-cfg-toggle-row input[type="checkbox"] {
   min-width: 16px;
 }
@@ -4798,6 +4802,11 @@ td button[data-action]:disabled,
   border-color: var(--muted);
   background: var(--bg-raised);
   box-shadow: none;
+}
+
+.help-language-row {
+  padding: 12px 20px;
+  border-bottom: 1px solid var(--line);
 }
 
 .help-steps {

@@ -30,6 +30,7 @@
     "ui-common-genre": "[Ĝééñŕéé]",
     "ui-common-idle": "[ÎÎðļéé]",
     "ui-common-import": "[ÎÎɱþööŕţ]",
+    "ui-common-language": "[Ļááñĝûûááĝéé]",
     "ui-common-loading-tracks": "[Ļööááðîîñĝ ţŕááçķš...]",
     "ui-common-media-library": "[Ṁééðîîáá Ļîîƀŕááŕý]",
     "ui-common-no-entries": "[Ñöö ééñţŕîîééš]",
@@ -308,7 +309,6 @@
     "ui-settings-key-notation-classic": "[Çļááššîîç (ÅÅɱ)]",
     "ui-settings-key-notation-failed": "[Çööûûļð ñööţ šááṽéé ķééý ñööţááţîîööñ]",
     "ui-settings-key-notation-saved": "[Ķééý ñööţááţîîööñ: {notation}]",
-    "ui-settings-language": "[Ļááñĝûûááĝéé]",
     "ui-settings-node-js-missing": "[Ñööðéé.ĵš ñööţ ƒööûûñð —]",
     "ui-settings-sync-mode": "[Šýñç Ṁööðéé]",
     "ui-settings-sync-mode-additive": "[ÅÅððîîţîîṽéé þļááýļîîšţ ûûþðááţéé]",
@@ -565,5 +565,6 @@
       "code": "en-XA",
       "name": "[ÉÉñĝļîîšĥ]"
     }
-  ]
+  ],
+  "languageChoice": true
 }
