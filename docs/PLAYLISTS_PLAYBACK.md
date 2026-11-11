@@ -27,8 +27,8 @@ becomes an ordinary local playlist; see `docs/EXTERNAL_LIBRARIES.md`.
 
 The button at the right end of a track list's header row opens the column editor. Untick a
 column to hide it and drag the rows to put the columns in a new order; each change shows at
-once, and **Reset to default** brings back every column in its first place. Album, Year, BPM,
-Key, Length and Fmt can be hidden or moved; the checkbox, cover, waveform and Track columns
+once, and **Reset to default** brings back every column in its first place. Album, Genre, Year,
+BPM, Key, Length and Fmt can be hidden or moved; Genre is hidden until you tick it; the checkbox, cover, waveform and Track columns
 always come first and the row's buttons last. The layout is one for all four track lists
 (Library, playlists, USB playlists and USB history) and is kept between runs. A list sorted by
 a column you hide goes back to its own order. While a USB playlist's order is being edited the

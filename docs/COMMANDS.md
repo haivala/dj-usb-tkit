@@ -38,7 +38,7 @@ ids never change with the language.
 `browse_source_files`, `get_playlist_tracks` and the USB per-list track
 commands (`fetch_usb_playlist_tracks`, `fetch_usb_history_tracks`) share a
 pagination shape: the request carries `query`, `sortBy` (`title` | `artist` |
-`album` | `format` | `bpm` | `durationMs` | `key`; absent ⇒ natural order),
+`album` | `genre` | `year` | `format` | `bpm` | `durationMs` | `key`; absent ⇒ natural order),
 `sortDir` (`asc` | `desc`), `offset` or `cursor`, and `limit` (`0` ⇒
 unpaginated). The response carries `items`, `total` (filtered count),
 `nextCursor`, `hasMore`, plus any whole-set aggregates (`totalDurationMs`,
@@ -261,11 +261,13 @@ drive selection from being rendered against a newer selected drive.
 - `get_track_columns` → `{ columns, layout }`: every column of the track lists
   (`[{ id, labelKey, sortable, locked }]`, `labelKey` the header's `ui-` text key) and the saved
   layout. A locked column (`drag`, `select`, `cover`, `waveform`, `track`, `action`) is always
-  shown in its fixed place; a layout holds only the others: `{ order, hidden }`, column ids.
+  shown in its fixed place; a layout holds only the others (`album`, `genre`, `year`, `bpm`,
+  `key`, `length`, `format`): `{ order, hidden }`, column ids. `genre` is hidden by default.
 - `set_track_columns` — `{ layout: { order, hidden } }` → `{ layout }`: saves the layout for
   every track list (`ui_track_columns_v1`) and answers with what was saved. It is cleaned first:
   unknown, locked and repeated ids are dropped, and a column the layout lacks goes in after the
-  column it follows by default, so an empty layout is the default one. Sync, so quick changes
+  column it follows by default (hidden, if it is hidden by default: a layout saved before Genre
+  existed gets Genre hidden, after Album), so an empty layout is the default one. Sync, so quick changes
   are saved in the order sent.
 - `set_export_sync_mode` — `{ pruneStale, playlistId?, sort? }` → `{ pruneStale, locked,
   statusText }` plus the playlists state. Saves the export sync mode

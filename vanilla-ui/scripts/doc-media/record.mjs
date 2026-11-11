@@ -1,5 +1,5 @@
 // Records the docs media in docs/assets/ -- the cue-editor, playlist-import,
-// export, selection-toolbar and USB playlist order animations (WebP) and the
+// export, selection-toolbar, USB playlist order and track column animations (WebP) and the
 // README / cue-editor / Backups / USB / transcode screenshots -- from the real
 // frontend build.
 //
@@ -707,6 +707,35 @@ function scenes(fixture) {
           await waitProgressHidden(page);
           await moveTo(page, 900, 300, 20);
           await page.waitForTimeout(2200);
+        }, { fullWindow: true });
+      },
+    },
+    {
+      // docs/PLAYLISTS_PLAYBACK.md: the column editor -- columns hidden and
+      // one moved in the Library, then the same layout on a USB playlist.
+      name: "track-columns",
+      caption: "Hide and reorder the columns: one layout for every track list",
+      editor: false,
+      opts: {},
+      viewport: WIDE_VIEWPORT,
+      async run(page, _wf, record) {
+        await connectUsbAndPickPlaylist(page, fixture);
+        await page.mouse.move(900, 300);
+        await page.waitForTimeout(300);
+        const item = (label) => page.locator("#trackColumnsList .track-columns-item", { hasText: label });
+        await record(async () => {
+          await page.waitForTimeout(700);
+          await clickOn(page, page.locator("#panel-library [data-track-columns-button]"), 1200);
+          await clickOn(page, item("Album").locator("input"), 900);
+          await clickOn(page, item("Fmt").locator("input"), 900);
+          // BPM to the top, before Year.
+          await dragRow(page, item("BPM").locator("[data-track-column-drag-handle]"), item("Year"), true);
+          await page.waitForTimeout(1200);
+          await clickOn(page, page.locator("#trackColumnsDoneBtn"), 1400);
+          await openNav(page, "usb-playlists");
+          await openUsbListItem(page, { list: "#usbPlaylists", name: "Bass", heading: "#usbPlaylistHeading", body: "#usbPlaylistTracks" });
+          await moveTo(page, 900, 300, 20);
+          await page.waitForTimeout(2400);
         }, { fullWindow: true });
       },
     },

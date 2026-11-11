@@ -161,6 +161,7 @@ export function createTrackRow(ctx, track, options) {
   row.querySelector(".track-artist").textContent = track.artist ?? "";
   fillTrackSource(row, track);
   cell("album").textContent = track.album ?? "";
+  cell("genre").textContent = track.genre ?? "";
   fillYearCell(cell("year"), track);
 
   fillFormatCell(row.querySelector(".td-format"), track);

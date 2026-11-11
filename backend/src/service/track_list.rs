@@ -196,6 +196,7 @@ enum SortColumn {
     Title,
     Artist,
     Album,
+    Genre,
     Year,
     Format,
     Bpm,
@@ -209,6 +210,7 @@ impl SortColumn {
             "title" => Self::Title,
             "artist" => Self::Artist,
             "album" => Self::Album,
+            "genre" => Self::Genre,
             "year" => Self::Year,
             "format" => Self::Format,
             "bpm" => Self::Bpm,
@@ -230,6 +232,9 @@ impl SortColumn {
                 .then_with(|| ci(a.title()).cmp(&ci(b.title()))),
             Self::Album => {
                 ci(a.album().unwrap_or_default()).cmp(&ci(b.album().unwrap_or_default()))
+            }
+            Self::Genre => {
+                ci(a.genre().unwrap_or_default()).cmp(&ci(b.genre().unwrap_or_default()))
             }
             Self::Year => a.year().unwrap_or(0).cmp(&b.year().unwrap_or(0)),
             Self::Format => {
@@ -256,7 +261,7 @@ pub(crate) fn is_sort_key(key: &str) -> bool {
 }
 
 /// A requested column sort: `sort_by` is one of `title` | `artist` | `album` |
-/// `year` | `format` | `bpm` | `durationMs` | `key`, `sort_dir` is `asc` (default) or
+/// `genre` | `year` | `format` | `bpm` | `durationMs` | `key`, `sort_dir` is `asc` (default) or
 /// `desc`. An absent or unknown column leaves the caller's natural order
 /// (file path, playlist position or PDB entry order) untouched.
 #[derive(Debug, Clone, Copy)]
@@ -443,6 +448,23 @@ mod tests {
         ];
         TrackSort::new(Some("year"), None).apply(&mut items);
         assert_eq!(titles(&items), ["unknown", "older", "newer"]);
+    }
+
+    #[test]
+    fn genre_is_case_insensitive_with_missing_first() {
+        let with_genre = |title: &str, genre: Option<&str>| UsbTrack {
+            genre: genre.map(str::to_string),
+            ..track(title, "", None, None)
+        };
+        let mut items = vec![
+            with_genre("techno", Some("Techno")),
+            with_genre("unknown", None),
+            with_genre("house", Some("house")),
+        ];
+        TrackSort::new(Some("genre"), None).apply(&mut items);
+        assert_eq!(titles(&items), ["unknown", "house", "techno"]);
+        TrackSort::new(Some("genre"), Some("desc")).apply(&mut items);
+        assert_eq!(titles(&items), ["techno", "house", "unknown"]);
     }
 
     #[test]

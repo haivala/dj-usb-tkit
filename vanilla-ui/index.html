@@ -892,7 +892,9 @@
   <!-- Every track list's header row, cloned into each [data-track-grid] at startup
        (track_columns.mjs): the select-all checkbox is set from the grid's
        data-select-all-view / data-select-all-id, and the drag cell is kept only on a grid
-       with data-drag-column. Each cell carries its column's td-* class, as the row cells do. -->
+       with data-drag-column. Each cell carries its column's td-* class, as the row cells do.
+       A column hidden in the default layout (Genre) is `hidden` here and in the row templates,
+       so the grids match the default --track-grid-cols until a layout is applied. -->
   <template id="tplTrackGridHead">
     <div class="track-grid-head" role="rowgroup">
       <div class="track-grid-row" role="row">
@@ -902,6 +904,7 @@
         <div class="track-grid-cell td-waveform th-waveform" role="columnheader"><span class="sort-hint hidden" data-text="ui-track-table-sort-hint"></span></div>
         <div class="track-grid-cell td-track sortable" role="columnheader" data-sort-key="artist" data-sort-alt="title"><span class="sort-label" data-text="ui-track-table-track"></span></div>
         <div class="track-grid-cell td-album sortable" role="columnheader" data-sort-key="album"><span class="sort-label" data-text="ui-track-table-album"></span></div>
+        <div class="track-grid-cell td-genre sortable" role="columnheader" data-sort-key="genre" hidden><span class="sort-label" data-text="ui-track-table-genre"></span></div>
         <div class="track-grid-cell td-year sortable" role="columnheader" data-sort-key="year"><span class="sort-label" data-text="ui-track-table-year"></span></div>
         <div class="track-grid-cell td-bpm sortable" role="columnheader" data-sort-key="bpm"><span class="sort-label" data-text="ui-track-table-bpm"></span></div>
         <div class="track-grid-cell td-key sortable" role="columnheader" data-sort-key="key"><span class="sort-label" data-text="ui-track-table-key"></span></div>
@@ -925,6 +928,7 @@
         <span class="track-artist"></span>
       </div></div>
       <div role="cell" class="track-grid-cell td-album"></div>
+      <div role="cell" class="track-grid-cell td-genre" hidden></div>
       <div role="cell" class="track-grid-cell td-year"></div>
       <div role="cell" class="track-grid-cell td-bpm"></div>
       <div role="cell" class="track-grid-cell td-key"></div>
@@ -960,7 +964,7 @@
     <div role="row" class="track-grid-row track-grid-row-skeleton" aria-busy="true"><div role="cell" class="track-grid-cell track-grid-skeleton"></div></div>
   </template>
   <template id="tplTrackRowFallback">
-    <div role="row" class="track-grid-row"><div role="cell" class="track-grid-cell td-drag">-</div><div role="cell" class="track-grid-cell td-select">-</div><div role="cell" class="track-grid-cell td-cover">-</div><div role="cell" class="track-grid-cell td-waveform">-</div><div role="cell" class="track-grid-cell td-track"></div><div role="cell" class="track-grid-cell td-album">-</div><div role="cell" class="track-grid-cell td-year">-</div><div role="cell" class="track-grid-cell td-bpm">-</div><div role="cell" class="track-grid-cell td-key">-</div><div role="cell" class="track-grid-cell td-length">-</div><div role="cell" class="track-grid-cell td-format">-</div><div role="cell" class="track-grid-cell td-action">-</div></div>
+    <div role="row" class="track-grid-row"><div role="cell" class="track-grid-cell td-drag">-</div><div role="cell" class="track-grid-cell td-select">-</div><div role="cell" class="track-grid-cell td-cover">-</div><div role="cell" class="track-grid-cell td-waveform">-</div><div role="cell" class="track-grid-cell td-track"></div><div role="cell" class="track-grid-cell td-album">-</div><div role="cell" class="track-grid-cell td-genre" hidden>-</div><div role="cell" class="track-grid-cell td-year">-</div><div role="cell" class="track-grid-cell td-bpm">-</div><div role="cell" class="track-grid-cell td-key">-</div><div role="cell" class="track-grid-cell td-length">-</div><div role="cell" class="track-grid-cell td-format">-</div><div role="cell" class="track-grid-cell td-action">-</div></div>
   </template>
   <template id="tplCoverImg"><img class="cover-thumb" data-text-alt="ui-cover-img-alt" loading="lazy" /></template>
   <template id="tplCoverPlaceholder"><div class="cover-thumb" aria-hidden="true"></div></template>

@@ -11,7 +11,8 @@
 // damaged copy's diagnostics. History sessions, which only a player writes,
 // are made from those USB tracks (`fixture.usbHistory`). Edit order on the
 // USB Playlists page keeps a pending order that Save order makes the USB's
-// (both answered here, as the backend would). Exporting replays
+// (both answered here, as the backend would), and so does the column editor's
+// layout. Exporting replays
 // the real export's progress messages as job events; `opts.unexported`
 // playlists show as not exported until then. `opts.tauriRuntime` makes the
 // page pass for the Tauri runtime (as tests/e2e/smoke.spec.mjs does), which
@@ -24,12 +25,16 @@
 // puts there (`tracksForUsb`), and its estimate is the backend's. Convert…'s
 // folder and choices are the backend's too (`fixture.transcodes`).
 (() => {
-  const { tracks, detail, sourceFolders, playlists, usb, usbHistory, transcodes, uiTexts } = window.__DOC_GIF_FIXTURE__;
+  const { tracks, detail, sourceFolders, playlists, usb, usbHistory, transcodes, uiTexts, trackColumns } = window.__DOC_GIF_FIXTURE__;
   const opts = window.__DOC_GIF_OPTS__ || {};
   const USB_ROOT = "/run/media/dj/Chiphead";
   // Never shown (the label is hidden); the update check just needs a value.
   const DOC_APP_VERSION = "0.0.0";
   const ls = window.localStorage;
+  // The column layout: the backend's default, then what the column editor saves. The editor
+  // sends whole layouts, already clean; an empty one (Reset) is the default, as the backend has it.
+  const defaultColumns = trackColumns.data.layout;
+  let columnLayout = defaultColumns;
   // The backend's library sources: the folders (some switched off, some
   // inside another) and, when shown, an imported Mixxx library switched on
   // in the Libraries row.
@@ -392,7 +397,12 @@
           case "get_ui_texts":
             return uiTexts;
           case "get_frontend_settings":
-            return ok({ values: {}, nodeAvailable: false, essentiaInstalled: false });
+            return ok({ values: {}, trackColumns: columnLayout, nodeAvailable: false, essentiaInstalled: false });
+          case "get_track_columns":
+            return ok({ columns: trackColumns.data.columns, layout: columnLayout });
+          case "set_track_columns":
+            columnLayout = r.layout?.order?.length ? r.layout : defaultColumns;
+            return ok({ layout: columnLayout });
           case "get_library_sources":
             return ok(librarySources);
           case "set_external_library_enabled":

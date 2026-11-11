@@ -21,6 +21,7 @@ pub(crate) enum TrackColumn {
     /// Artist and title.
     Track,
     Album,
+    Genre,
     Year,
     Bpm,
     Key,
@@ -31,13 +32,14 @@ pub(crate) enum TrackColumn {
 
 impl TrackColumn {
     /// Every column, in the default order.
-    pub(crate) const ALL: [Self; 12] = [
+    pub(crate) const ALL: [Self; 13] = [
         Self::Drag,
         Self::Select,
         Self::Cover,
         Self::Waveform,
         Self::Track,
         Self::Album,
+        Self::Genre,
         Self::Year,
         Self::Bpm,
         Self::Key,
@@ -54,6 +56,7 @@ impl TrackColumn {
             Self::Waveform => "waveform",
             Self::Track => "track",
             Self::Album => "album",
+            Self::Genre => "genre",
             Self::Year => "year",
             Self::Bpm => "bpm",
             Self::Key => "key",
@@ -72,6 +75,7 @@ impl TrackColumn {
         match self {
             Self::Track => Some("artist"),
             Self::Album => Some("album"),
+            Self::Genre => Some("genre"),
             Self::Year => Some("year"),
             Self::Bpm => Some("bpm"),
             Self::Key => Some("key"),
@@ -85,6 +89,7 @@ impl TrackColumn {
         match self {
             Self::Track => Some("ui-track-table-track"),
             Self::Album => Some("ui-track-table-album"),
+            Self::Genre => Some("ui-track-table-genre"),
             Self::Year => Some("ui-track-table-year"),
             Self::Bpm => Some("ui-track-table-bpm"),
             Self::Key => Some("ui-track-table-key"),
@@ -106,7 +111,7 @@ impl TrackColumn {
 
     /// Hidden until the user shows it: what a column added later starts as.
     fn hidden_by_default(self) -> bool {
-        false
+        matches!(self, Self::Genre)
     }
 
     fn optional() -> impl Iterator<Item = Self> {
@@ -262,8 +267,8 @@ mod tests {
         assert_eq!(
             cleaned,
             layout(
-                &["album", "bpm", "key", "length", "format", "year"],
-                &["album"],
+                &["album", "genre", "bpm", "key", "length", "format", "year"],
+                &["album", "genre"],
             )
         );
     }
@@ -273,8 +278,9 @@ mod tests {
         let cleaned = normalize(&layout(&["format", "key", "album"], &[]));
         assert_eq!(
             cleaned.order,
-            ["format", "key", "length", "album", "year", "bpm"]
+            ["format", "key", "length", "album", "genre", "year", "bpm"]
         );
+        assert_eq!(cleaned.hidden, ["genre"]);
         assert_eq!(normalize(&TrackColumnLayout::default()), default_layout());
     }
 
@@ -284,6 +290,22 @@ mod tests {
             &["format", "album", "year", "bpm", "key", "length"],
             &["album", "format"],
         ));
-        assert_eq!(cleaned.hidden, ["format", "album"]);
+        assert_eq!(cleaned.hidden, ["format", "album", "genre"]);
+    }
+
+    #[test]
+    fn genre_starts_hidden_and_stays_shown_once_shown() {
+        assert_eq!(default_layout().hidden, ["genre"]);
+        // A layout saved before Genre existed: it comes in hidden, after Album.
+        let older = normalize(&layout(
+            &["album", "year", "bpm", "key", "length", "format"],
+            &[],
+        ));
+        assert_eq!(older, default_layout());
+        let shown = layout(
+            &["genre", "album", "year", "bpm", "key", "length", "format"],
+            &[],
+        );
+        assert_eq!(normalize(&shown), shown);
     }
 }

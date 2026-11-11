@@ -2841,6 +2841,7 @@ ui-track-row-waveform-preview-aria-label = waveform preview
 ui-track-table-album = Album
 ui-track-table-bpm = BPM
 ui-track-table-fmt = Fmt
+ui-track-table-genre = Genre
 ui-track-table-key = Key
 ui-track-table-length = Length
 ui-track-table-library-tracks-aria-label = Library tracks

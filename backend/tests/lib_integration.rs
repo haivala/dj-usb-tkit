@@ -6393,8 +6393,8 @@ fn frontend_setting_analysis_engine_persists_and_reads_back() {
     // The track column layout: saved cleaned, by its own command only.
     let strings = |ids: &[&str]| ids.iter().map(|id| id.to_string()).collect::<Vec<_>>();
     let default_layout = TrackColumnLayout {
-        order: strings(&["album", "year", "bpm", "key", "length", "format"]),
-        hidden: Vec::new(),
+        order: strings(&["album", "genre", "year", "bpm", "key", "length", "format"]),
+        hidden: strings(&["genre"]),
     };
     let columns = backend.get_track_columns();
     let columns = columns.data.expect("track columns");
@@ -6412,8 +6412,8 @@ fn frontend_setting_analysis_engine_persists_and_reads_back() {
         },
     });
     let cleaned = TrackColumnLayout {
-        order: strings(&["bpm", "key", "length", "format", "album", "year"]),
-        hidden: strings(&["year"]),
+        order: strings(&["bpm", "key", "length", "format", "album", "genre", "year"]),
+        hidden: strings(&["genre", "year"]),
     };
     assert_eq!(set_columns.data.expect("set track columns").layout, cleaned);
     let set_raw = backend.set_frontend_setting(SetFrontendSettingRequest {

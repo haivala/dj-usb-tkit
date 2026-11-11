@@ -108,8 +108,8 @@
   // The library and the app's playlists, as `seed` sets them; the default
   // answers below read and change them as the backend does.
   // `trackColumns`: the column layout (set_track_columns keeps what it gets; an empty one is the default).
-  const TRACK_COLUMNS = ["album", "year", "bpm", "key", "length", "format"];
-  const defaultTrackColumns = () => ({ order: TRACK_COLUMNS.slice(), hidden: [] });
+  const TRACK_COLUMNS = ["album", "genre", "year", "bpm", "key", "length", "format"];
+  const defaultTrackColumns = () => ({ order: TRACK_COLUMNS.slice(), hidden: ["genre"] });
   const store = { tracks: [], playlists: [], playlistTracks: new Map(), created: 0, trackColumns: defaultTrackColumns() };
   const trackColumnCatalog = () => [
     ...["drag", "select", "cover", "waveform"].map((id) => ({ id, labelKey: null, sortable: false, locked: true })),

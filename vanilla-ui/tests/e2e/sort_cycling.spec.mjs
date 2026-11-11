@@ -63,8 +63,8 @@ function installColumnsMock(page, trackColumns) {
   return page.addInitScript((trackColumns) => {
     window.__e2eSourceFolders = ["/music"];
     const backend = window.__e2eBackend;
-    const track = (id, title, bpm) => ({ id, title, artist: "Bob", album: "A", year: 2000, bpm, filePath: `/music/${id}.mp3` });
-    backend.seed({ tracks: [track("t1", "One", 120), track("t2", "Two", 90)], trackColumns });
+    const track = (id, title, bpm, genre) => ({ id, title, artist: "Bob", album: "A", genre, year: 2000, bpm, filePath: `/music/${id}.mp3` });
+    backend.seed({ tracks: [track("t1", "One", 120, "Techno"), track("t2", "Two", 90, "House")], trackColumns });
     backend.install();
     const usbRows = [track("u1", "Usb One", 128)];
     const historyRows = [track("h1", "Late", 140), track("h2", "Early", 100), track("h3", "Mid", 120)];
@@ -116,7 +116,9 @@ test("the column editor hides and reorders the columns of every track list", asy
   const dialog = page.locator("#trackColumnsOverlay");
   await expect(dialog).toBeVisible();
   const item = (id) => page.locator(`#trackColumnsList [data-track-column="${id}"]`);
-  await expect(page.locator("#trackColumnsList .add-to-name")).toHaveText(["Album", "Year", "BPM", "Key", "Length", "Fmt"]);
+  await expect(page.locator("#trackColumnsList .add-to-name")).toHaveText(["Album", "Genre", "Year", "BPM", "Key", "Length", "Fmt"]);
+  // Genre starts hidden.
+  await expect(item("genre").locator("input")).not.toBeChecked();
 
   // Hide Album: gone from the library and from the USB lists too.
   await item("album").locator("input").uncheck();
@@ -138,7 +140,17 @@ test("the column editor hides and reorders the columns of every track list", asy
   await expect.poll(() => shownColumns(page, "libraryTableBody")).toEqual(reordered);
   expect(await shownRowCells(page, "libraryTableBody")).toEqual(reordered);
   expect(await page.evaluate(() => window.__calls.filter((c) => c.command === "set_track_columns").at(-1).request))
-    .toEqual({ layout: { order: ["album", "bpm", "year", "key", "length", "format"], hidden: ["album"] } });
+    .toEqual({ layout: { order: ["album", "genre", "bpm", "year", "key", "length", "format"], hidden: ["album", "genre"] } });
+
+  // Show Genre: its cells hold the genre, and it sorts.
+  await item("genre").locator("input").check();
+  await expect.poll(() => shownColumns(page, "libraryTableBody"))
+    .toEqual(["select", "cover", "waveform", "track", "genre", "bpm", "year", "key", "length", "format", "action"]);
+  await expect(page.locator("#libraryTableBody .track-grid-row .td-genre")).toHaveText(["Techno", "House"]);
+  await page.locator("#trackColumnsDoneBtn").click();
+  await page.locator('#panel-library .sortable[data-sort-key="genre"]').click();
+  await expect.poll(() => rowTitles(page)).toEqual(["Two", "One"]);
+  await page.locator('#panel-library [data-track-columns-button]').click();
 
   // Hide BPM: the history sorted by it goes back to its own order, its arrow gone.
   await item("bpm").locator("input").uncheck();
@@ -149,13 +161,14 @@ test("the column editor hides and reorders the columns of every track list", asy
   await expect(page.locator('[data-body-id="historyTracks"] .sort-asc, [data-body-id="historyTracks"] .sort-desc')).toHaveCount(0);
   await expect(page.locator('[data-body-id="historyTracks"] .sort-hint')).toBeHidden();
   expect(await shownColumns(page, "historyTracks"))
-    .toEqual(["select", "cover", "waveform", "track", "year", "key", "length", "format", "action"]);
+    .toEqual(["select", "cover", "waveform", "track", "genre", "year", "key", "length", "format", "action"]);
 
   // Reset to default brings every column back in its place.
   await page.locator('#panel-usb-history [data-track-columns-button]').click();
   await page.locator("#trackColumnsResetBtn").click();
   await expect.poll(() => shownColumns(page, "historyTracks")).toEqual(all);
-  await expect(page.locator("#trackColumnsList .track-columns-item input:not(:checked)")).toHaveCount(0);
+  await expect(page.locator("#trackColumnsList .track-columns-item input:not(:checked)")).toHaveCount(1);
+  await expect(item("genre").locator("input")).not.toBeChecked();
 });
 
 test("the saved column layout is there at the first paint", async ({ page }) => {

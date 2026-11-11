@@ -28,6 +28,7 @@ export const TRACK_COLUMN_WIDTHS = {
   waveform: "178px",
   track: "minmax(100px, 1.6fr)",
   album: "minmax(100px, 1.2fr)",
+  genre: "minmax(80px, 0.8fr)",
   year: "64px",
   bpm: "78px",
   key: "58px",

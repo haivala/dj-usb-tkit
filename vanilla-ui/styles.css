@@ -2043,7 +2043,7 @@ td.num, th.num {
 }
 
 /* Columns: selection checkbox, cover, waveform, identity (track, album,
-   year), then mixing data (BPM, key, length), then the file format. BPM and
+   genre -- hidden by default -- and year), then mixing data (BPM, key, length), then the file format. BPM and
    key are fixed widths that fit their widest pill plus the cell padding:
    "107.97" and "12A" in the 12px mono pill font; year fits its header label
    and sort arrows, format the widest badge ("AIFF ⚠" with its box). */
@@ -2116,6 +2116,15 @@ td.num, th.num {
 .track-columns-item .add-to-item {
   flex: 1;
   min-width: 0;
+}
+
+/* The whole row lights up, handle included. */
+.track-columns-item:hover {
+  background: var(--card-hover);
+}
+
+.track-columns-item .add-to-item:hover {
+  background: none;
 }
 
 .track-columns-item.dragging {
@@ -3110,11 +3119,16 @@ ul[data-loaded]:empty::before {
   white-space: nowrap;
 }
 
-.td-album {
-  min-width: 100px;
+.td-album,
+.td-genre {
+  min-width: 0;
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
+}
+
+.td-album {
+  min-width: 100px;
 }
 
 .td-track {

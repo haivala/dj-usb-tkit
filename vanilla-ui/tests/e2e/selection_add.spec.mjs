@@ -701,7 +701,7 @@ test("USB rows can't be added without an active playlist, and rows the backend c
 const lastCall = async (page, command) => (await page.evaluate(() => window.__calls))
   .filter((c) => c.command === command).pop()?.request;
 
-test("in the test language, the Library and playlist pages and their dialogs show only catalog text and data", async ({ page }) => {
+test("in the test language, the Library and playlist pages and their dialogs (the column editor too) show only catalog text and data", async ({ page }) => {
   await installSelectionMock(page);
   await useTestLanguage(page);
   await page.goto("/");
@@ -735,6 +735,13 @@ test("in the test language, the Library and playlist pages and their dialogs sho
   await check.collect();
   await page.keyboard.press("Escape");
   await expect(page.locator("#groupEditOverlay")).toBeHidden();
+
+  await page.locator("#panel-library [data-track-columns-button]").click();
+  await expect(page.locator("#trackColumnsOverlay")).toBeVisible();
+  await expect(page.locator("#trackColumnsList .track-columns-item")).toHaveCount(7);
+  await check.collect();
+  await page.keyboard.press("Escape");
+  await expect(page.locator("#trackColumnsOverlay")).toBeHidden();
 
   await page.locator(`${libraryBar} [data-selection-action="add"]`).click();
   await page.locator("#navPlaylistList .nav-playlist-item").first().click();
