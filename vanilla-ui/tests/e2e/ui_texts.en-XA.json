@@ -1,5 +1,6 @@
 {
   "language": "en-XA",
+  "decimalSeparator": ",",
   "texts": {
     "ui-add-to-apply": "[ÅÅðð]",
     "ui-add-to-create": "[Çŕééááţéé]",
@@ -411,8 +412,11 @@
     "ui-track-detail-key": "[Ķééý]",
     "ui-track-detail-key-minus-tooltip": "[Þŕééṽîîööûûš ķééý]",
     "ui-track-detail-key-plus-tooltip": "[Ñééẋţ ķééý]",
+    "ui-track-detail-marker-hot-cue-tooltip": "[{cue} · {time}]",
+    "ui-track-detail-marker-memory-cue-named-tooltip": "[Ṁééɱööŕý çûûéé · {name} · {time}]",
+    "ui-track-detail-marker-memory-cue-tooltip": "[Ṁééɱööŕý çûûéé · {time}]",
+    "ui-track-detail-marker-playback-start-tooltip": "[Þļááýƀááçķ šţááŕţ · {time}]",
     "ui-track-detail-max-cues": "[Ṁááẋîîɱûûɱ 8 çûûéé þööîîñţš.]",
-    "ui-track-detail-memory-cue": "[Ṁééɱööŕý çûûéé]",
     "ui-track-detail-memory-cue-badge": "[ɱééɱööŕý çûûéé]",
     "ui-track-detail-memory-cue-colour-aria-label": "[Ṁééɱööŕý çûûéé çööļööûûŕ]",
     "ui-track-detail-memory-cue-only-tooltip": "[Ṁééɱööŕý çûûéé ööñļý (ñöö ĥööţ çûûéé)]",

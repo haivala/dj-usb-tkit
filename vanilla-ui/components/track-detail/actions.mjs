@@ -19,7 +19,6 @@ import { RELEASE_DATE_PATTERN, saveLibraryMetadataEdits, saveUsbMetadataEdits } 
 import { cloneTemplate } from "../../ui_utils.mjs";
 import { coverElement, markLastEditedRow } from "../../track_table.mjs";
 import { coverUrl, attachCoverFallbackHandlers } from "../library/actions.mjs";
-import { formatBpm } from "../../track_utils.mjs";
 import { t } from "../../ui_texts.mjs";
 import {
   STORAGE_KEY_CUE_START_ON_FIRST_BEAT,
@@ -87,12 +86,13 @@ function hasOwnColor(cue) {
   return !cue.playbackStart && (!cue.memory || cue.colorId != null);
 }
 
+// m:ss.mmm, to the millisecond a cue is stored at. The same in every language, as
+// dates are: a colon before the fraction would read as frames (a player's m:s:f).
 function formatMs(ms) {
   const total = Math.max(0, Math.round(ms));
   const m = Math.floor(total / 60000);
   const s = Math.floor((total % 60000) / 1000);
-  const cs = Math.floor((total % 1000) / 10);
-  return `${m}:${String(s).padStart(2, "0")}.${String(cs).padStart(2, "0")}`;
+  return `${m}:${String(s).padStart(2, "0")}.${String(total % 1000).padStart(3, "0")}`;
 }
 
 // m:ss, for the zoom-range readout (no centiseconds — it's a coarse orientation cue).
@@ -670,14 +670,15 @@ export function createTrackDetailController(el, prefs = {}) {
       if (hasOwnColor(cue)) marker.style.setProperty("--cue-color", colorCssForId(cue.colorId));
       marker.dataset.tempId = cue.tempId;
       marker.textContent = labels.get(cue.tempId) || "";
+      const time = formatMs(cue.positionMs);
       if (cue.playbackStart) {
-        marker.dataset.tooltip = `${t("ui-track-detail-playback-start")} · ${formatMs(cue.positionMs)}`;
+        marker.dataset.tooltip = t("ui-track-detail-marker-playback-start-tooltip", { time });
       } else if (cue.memory) {
-        marker.dataset.tooltip = [t("ui-track-detail-memory-cue"), cue.name, formatMs(cue.positionMs)]
-          .filter(Boolean)
-          .join(" · ");
+        marker.dataset.tooltip = cue.name
+          ? t("ui-track-detail-marker-memory-cue-named-tooltip", { name: cue.name, time })
+          : t("ui-track-detail-marker-memory-cue-tooltip", { time });
       } else {
-        marker.dataset.tooltip = `${marker.textContent} · ${formatMs(cue.positionMs)}`;
+        marker.dataset.tooltip = t("ui-track-detail-marker-hot-cue-tooltip", { cue: marker.textContent, time });
       }
       host.appendChild(marker);
     }
@@ -1009,8 +1010,9 @@ export function createTrackDetailController(el, prefs = {}) {
     if (!open) return;
     el.trackDetailFirstBeatMs.value =
       working.firstBeatMs == null ? "" : String(working.firstBeatMs);
-    // Two decimals, as in the track list (the ▲/▼ step is 0.01).
-    el.trackDetailBpm.value = working.bpm == null ? "" : formatBpm(working.bpm);
+    // Two decimals, as in the track list (the ▲/▼ step is 0.01). A number input's value
+    // takes `.` only; the field shows it as the system's locale does.
+    el.trackDetailBpm.value = working.bpm == null ? "" : working.bpm.toFixed(2);
     syncKeySelect();
     renderGenre();
     renderReleaseDate();

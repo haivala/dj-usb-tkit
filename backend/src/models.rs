@@ -1392,6 +1392,9 @@ pub struct ReorderPlaylistTracksData {
 pub struct GetUiTextsData {
     /// The language code, for `Intl.PluralRules` in `tCount`.
     pub language: String,
+    /// The language's decimal separator (`format-decimal-separator`), for the numbers JS
+    /// formats itself (BPM, cue times), so they match the ones the backend renders.
+    pub decimal_separator: String,
     pub texts: std::collections::BTreeMap<String, UiText>,
     /// Every language the app has, English first: the settings' language list.
     pub languages: Vec<UiLanguage>,
@@ -2598,6 +2601,11 @@ pub struct DiagSummaryRow {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct DiagSection {
+    /// The catalog key of `title` for a report's display section: what the overview finds
+    /// a section by, so it never compares translated text. Empty for the sections the
+    /// checks build, before they're laid out.
+    #[serde(skip)]
+    pub key: &'static str,
     pub title: String,
     pub status: DiagStatus,
     pub checks: Vec<DiagCheck>,

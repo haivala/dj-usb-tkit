@@ -340,6 +340,7 @@ fn ui_texts_in(catalog: &Catalog) -> GetUiTextsData {
         .collect();
     GetUiTextsData {
         language: catalog.language.to_string(),
+        decimal_separator: catalog.decimal_separator.to_string(),
         texts,
         languages: LANGUAGE_NAMES.clone(),
     }
@@ -576,6 +577,14 @@ usb-not-for-ui = Not sent
             UiText::Text("Not connected".into())
         );
         assert!(data.texts.keys().all(|key| key.starts_with(UI_KEY_PREFIX)));
+    }
+
+    #[test]
+    fn ui_texts_send_the_languages_decimal_separator() {
+        let catalog =
+            Catalog::parse("fi", "format-decimal-separator = ,\n").expect("fixture parses");
+        assert_eq!(ui_texts_in(&catalog).decimal_separator, ",");
+        assert_eq!(ui_texts_in(&ENGLISH_CATALOG).decimal_separator, ".");
     }
 
     /// The e2e specs' labels come from `vanilla-ui/tests/e2e/ui_texts.en.json` (loaded by

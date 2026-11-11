@@ -48,6 +48,11 @@
   order), saved straight to the USB.
 - **New feature:** In the Import Playlists dialog, each group heading (Playlists, Crates, History) has a box that
   ticks or unticks every list in that group, for rekordbox and Mixxx alike.
+- **Improvement:** The cue editor shows cue positions to the millisecond (`1:23.456`), the precision they are saved
+  with.
+- **Improvement:** Ready for translations: BPM values use the language's decimal separator, as the backend's numbers
+  already did; cue positions keep a dot in every language. The cue markers' tooltips are whole texts a translation
+  can reorder, and the diagnostics overview finds its sections by key instead of by their translated titles.
 - **Fix:** Clicking another playlist while typing a new playlist's name saves the new playlist and then opens the
   one you clicked. Before, the new playlist opened instead.
 - **Improvement:** The library's filter mark comes from the backend, which already knows which folders and imported

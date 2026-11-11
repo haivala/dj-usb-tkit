@@ -2771,8 +2771,13 @@ ui-track-detail-zoom-in = Zoom in
 ui-track-detail-zoom-out = Zoom out
 # The play button's label and tooltip while playing.
 ui-track-detail-pause = Pause
-# Starts a memory cue marker's tooltip, before its name and position.
-ui-track-detail-memory-cue = Memory cue
+# A cue marker's tooltip on the waveform. $time: the cue's position (m:ss.mmm).
+ui-track-detail-marker-playback-start-tooltip = Playback start · { $time }
+ui-track-detail-marker-memory-cue-tooltip = Memory cue · { $time }
+# A named memory cue's marker. $name: the name the user gave it; $time: its position.
+ui-track-detail-marker-memory-cue-named-tooltip = Memory cue · { $name } · { $time }
+# A hot cue's marker. $cue: the cue's letter (A to H); $time: its position.
+ui-track-detail-marker-hot-cue-tooltip = { $cue } · { $time }
 # A hot cue's colour button. $cue: the cue's letter (A to H).
 ui-track-detail-cue-colour-aria-label = Cue { $cue } colour
 # "Playback starts at": the button that adds a start marker on the first beat, and its tooltip.

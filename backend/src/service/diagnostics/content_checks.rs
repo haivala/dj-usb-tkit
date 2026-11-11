@@ -27,6 +27,7 @@ pub(crate) fn diagnose_edb_access(
 
     let status = DiagStatus::worst_of(&checks.iter().map(|c| &c.status).collect::<Vec<_>>());
     DiagSection {
+        key: "",
         title: "Database Access".to_string(),
         status,
         checks,
@@ -82,6 +83,7 @@ pub(crate) fn diagnose_contents_integrity(
 
     let status = DiagStatus::worst_of(&checks.iter().map(|c| &c.status).collect::<Vec<_>>());
     DiagSection {
+        key: "",
         title: "Contents Integrity".to_string(),
         status,
         checks,
@@ -153,6 +155,7 @@ pub(crate) fn diagnose_contents_integrity_db_only(
 
     let status = DiagStatus::worst_of(&checks.iter().map(|c| &c.status).collect::<Vec<_>>());
     DiagSection {
+        key: "",
         title: "Contents Integrity".to_string(),
         status,
         checks,
@@ -483,6 +486,7 @@ pub(crate) fn diagnose_analysis_integrity(
 
     let status = DiagStatus::worst_of(&checks.iter().map(|c| &c.status).collect::<Vec<_>>());
     DiagSection {
+        key: "",
         title: "Analysis Files".to_string(),
         status,
         checks,
@@ -526,6 +530,7 @@ where
             ));
             return (
                 DiagSection {
+                    key: "",
                     title: "Playlist Resolution".to_string(),
                     status: DiagStatus::Fail,
                     checks,
@@ -804,6 +809,7 @@ where
     let status = DiagStatus::worst_of(&checks.iter().map(|c| &c.status).collect::<Vec<_>>());
     (
         DiagSection {
+            key: "",
             title: "Playlist Resolution".to_string(),
             status,
             checks,

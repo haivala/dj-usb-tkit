@@ -2042,23 +2042,14 @@ td.num, th.num {
   text-align: right;
 }
 
-/* Columns: selection checkbox, cover, waveform, identity (track, album,
-   genre -- hidden by default -- and year), then mixing data (BPM, key, length), then the file format. BPM and
-   key are fixed widths that fit their widest pill plus the cell padding:
-   "107.97" and "12A" in the 12px mono pill font; year fits its header label
-   and sort arrows, format the widest badge ("AIFF ⚠" with its box). */
+/* Columns (their widths: data-width in index.html's tplTrackGridHead, set
+   as --track-grid-cols by track_columns.mjs): selection checkbox, cover,
+   waveform, identity (track, album, genre -- hidden by default -- and year),
+   then mixing data (BPM, key, length), then the file format. The column
+   editor hides and reorders all but the first four and the last. */
 .track-grid {
   width: 100%;
   box-sizing: border-box;
-  --track-grid-cols: 44px 52px 178px minmax(100px, 1.6fr) minmax(100px, 1.2fr) 64px 78px 58px 8ch 72px minmax(5ch, 14ch);
-}
-
-/* App and USB playlist tracks reserve a leading column for the
-   drag-to-reorder handle, before the selection checkbox. These defaults are
-   the default layout; track_columns.mjs sets each grid's own from its width
-   table once the saved layout is known. */
-.track-grid[data-drag-column] {
-  --track-grid-cols: 24px 44px 52px 178px minmax(100px, 1.6fr) minmax(100px, 1.2fr) 64px 78px 58px 8ch 72px minmax(5ch, 14ch);
 }
 
 /* A column the layout hides (track_columns.mjs) keeps its cell, marked

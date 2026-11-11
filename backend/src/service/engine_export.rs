@@ -116,6 +116,7 @@ impl BackendService {
         let enabled = self.engine_library_enabled();
         let Some(status) = engine_library_status(usb_root) else {
             return (!enabled).then(|| DiagSection {
+                key: "",
                 title: "Engine DJ Library".into(),
                 status: DiagStatus::Pass,
                 checks: vec![DiagCheck::new(
@@ -159,6 +160,7 @@ impl BackendService {
             DiagStatus::worst(&acc, &c.status)
         });
         Some(DiagSection {
+            key: "",
             title: "Engine DJ Library".into(),
             status: worst,
             checks,

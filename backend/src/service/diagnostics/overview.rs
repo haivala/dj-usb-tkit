@@ -140,25 +140,30 @@ pub(super) fn regroup_sections(
         }
     }
     let mut groups: Vec<DiagSectionGroup> = Vec::new();
+    // The catalog key of the last group's title: sections join it by key, not translated text.
+    let mut last_group_key = "";
     for (display, (mut checks, statuses)) in layout.iter().zip(grouped.into_iter().zip(statuses)) {
         if checks.is_empty() {
             continue;
         }
         checks.sort_by_key(|(rank, _)| *rank);
+        let title = (display.title)();
         let section = DiagSection {
-            title: (display.title)().render(),
+            key: title.key(),
+            title: title.render(),
             status: DiagStatus::worst_of(&statuses.iter().collect::<Vec<_>>()),
             checks: checks.into_iter().map(|(_, c)| c).collect(),
             counts: None,
         };
-        let group = (display.group)().render();
+        let group = (display.group)();
         match groups.last_mut() {
-            Some(last) if last.title == group => last.sections.push(section),
+            Some(last) if last_group_key == group.key() => last.sections.push(section),
             _ => groups.push(DiagSectionGroup {
-                title: group,
+                title: group.render(),
                 sections: vec![section],
             }),
         }
+        last_group_key = group.key();
     }
     groups
 }
@@ -188,7 +193,7 @@ pub(super) fn diagnostics_overview(
         groups
             .iter()
             .flat_map(|g| &g.sections)
-            .find(|s| s.title == (DISPLAY_LAYOUT[index].title)().render())
+            .find(|s| s.key == (DISPLAY_LAYOUT[index].title)().key())
     };
     let check_status = |sec: Option<&DiagSection>, label: fn() -> Text| {
         let key = label().key();
@@ -396,6 +401,7 @@ pub(super) const PARITY_HEADLINE_CHECKS: [fn() -> Text; 2] = [
 /// The strict-parity checks regrouped into `PARITY_LAYOUT` columns.
 pub(super) fn parity_section_groups(checks: &[DiagCheck]) -> Vec<DiagSectionGroup> {
     let source = DiagSection {
+        key: "",
         title: "Strict parity".to_string(),
         status: DiagStatus::Pass,
         checks: checks
@@ -424,7 +430,7 @@ pub(super) fn parity_overview(
         groups
             .iter()
             .flat_map(|g| &g.sections)
-            .find(|s| s.title == (PARITY_LAYOUT[index].title)().render())
+            .find(|s| s.key == (PARITY_LAYOUT[index].title)().key())
     };
     let status_of = |index: usize| {
         DiagStatus::worst_of(

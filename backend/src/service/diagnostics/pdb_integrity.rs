@@ -23,6 +23,7 @@ pub(crate) fn diagnose_pdb_integrity(
         ));
         return (
             DiagSection {
+                key: "",
                 title: "PDB Integrity".to_string(),
                 status: DiagStatus::Fail,
                 checks,
@@ -47,6 +48,7 @@ pub(crate) fn diagnose_pdb_integrity(
             ));
             return (
                 DiagSection {
+                    key: "",
                     title: "PDB Integrity".to_string(),
                     status: DiagStatus::Fail,
                     checks,
@@ -399,6 +401,7 @@ pub(crate) fn diagnose_pdb_integrity(
     let status = DiagStatus::worst_of(&checks.iter().map(|c| &c.status).collect::<Vec<_>>());
     (
         DiagSection {
+            key: "",
             title: "PDB Integrity".to_string(),
             status,
             checks,

@@ -15,6 +15,7 @@ let texts = {};
 let pluralRules = new Intl.PluralRules("en");
 let language = "en";
 let languages = [];
+let decimalSeparator = ".";
 
 const TEXT_ATTRIBUTES = [
   ["textTooltip", "data-tooltip"],
@@ -31,6 +32,7 @@ export function setUiTexts(data) {
   texts = data?.texts && typeof data.texts === "object" ? data.texts : {};
   language = data?.language || "en";
   languages = Array.isArray(data?.languages) ? data.languages : [];
+  decimalSeparator = data?.decimalSeparator || ".";
   try {
     pluralRules = new Intl.PluralRules(language);
   } catch {
@@ -51,6 +53,13 @@ export function uiLanguage() {
 
 export function uiLanguages() {
   return languages;
+}
+
+// `value` with `digits` decimals and the language's decimal separator (the backend's
+// `format-decimal-separator`), for numbers JS formats itself: they then read like the
+// ones the backend renders. Never for an <input type="number">, which takes `.` only.
+export function formatDecimal(value, digits) {
+  return Number(value).toFixed(digits).replace(".", decimalSeparator);
 }
 
 export function t(key, args = {}) {

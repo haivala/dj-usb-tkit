@@ -44,6 +44,7 @@ fn diag_section(title: &str, status: &str, checks: &[(&str, &str)]) -> crate::mo
         _ => DiagStatus::Pass,
     };
     DiagSection {
+        key: "",
         title: title.to_string(),
         status: parse(status),
         checks: checks

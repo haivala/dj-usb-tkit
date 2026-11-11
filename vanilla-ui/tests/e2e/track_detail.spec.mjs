@@ -495,7 +495,7 @@ test("cue editor input", async ({ page }) => {
     // Undoing the edit makes it clean again: Escape closes.
     await page
       .locator("#trackDetailCueList .cue-row")
-      .filter({ hasNot: page.locator(".cue-row-pos", { hasText: "0:30.00" }) })
+      .filter({ hasNot: page.locator(".cue-row-pos", { hasText: "0:30.000" }) })
       .locator(".cue-row-delete")
       .click();
     await page.keyboard.press("Escape");
@@ -653,7 +653,7 @@ test("cue editor input", async ({ page }) => {
   {
     // Q on: M at the stopped playhead snaps to the first beat.
     await page.keyboard.press("m");
-    await expect(page.locator("#trackDetailMemoryCue .cue-row-pos")).toHaveText("0:00.12");
+    await expect(page.locator("#trackDetailMemoryCue .cue-row-pos")).toHaveText("0:00.120");
     await expect(page.locator("#trackDetailStartCue")).toBeHidden();
   }
 
@@ -725,7 +725,7 @@ test("cue editor input", async ({ page }) => {
     const startPos = page.locator("#trackDetailStartCue .cue-row.is-playback-start .cue-row-pos");
     await expect(page.locator("#trackDetailStartFirstCue")).toHaveAttribute("aria-checked", "true");
     await page.keyboard.press("m"); // at the stopped playhead: 0 ms
-    await expect(startPos).toHaveText("0:00.12");
+    await expect(startPos).toHaveText("0:00.120");
     // The start cue has its own place: the ▶ marker and the start row, never
     // the memory-cue slot or a ▼ flag.
     await expect(page.locator("#trackDetailMemoryCue .memory-slot-count")).toHaveText("1/1");
@@ -737,12 +737,12 @@ test("cue editor input", async ({ page }) => {
     await page.locator("#trackDetailUndo").click();
     await expect(page.locator("#trackDetailStartCue")).toBeHidden();
     await page.locator("#trackDetailRedo").click();
-    await expect(startPos).toHaveText("0:00.12");
+    await expect(startPos).toHaveText("0:00.120");
 
     // Without hot cues the start cue stays for the memory cue; with no cue
     // left it goes.
     await page.locator("#trackDetailCueList .cue-row .cue-row-delete").first().click();
-    await expect(startPos).toHaveText("0:00.12");
+    await expect(startPos).toHaveText("0:00.120");
     // Redo leaves nothing selected; › from the stopped playhead (0) reaches it.
     await page.locator("#trackDetailMemoryCue [data-action='memory-next']").click();
     await page.locator("#trackDetailMemoryCue .cue-row-delete").click();
@@ -774,7 +774,7 @@ test("cue list, zoom and pads", async ({ page }) => {
   await openCueEditor(page, { seedCues: [170000, 30000] });
   {
     const rows = page.locator("#trackDetailCueList .cue-row");
-    await expect(rows.locator(".cue-row-pos")).toHaveText(["0:30.00", "2:50.00"]);
+    await expect(rows.locator(".cue-row-pos")).toHaveText(["0:30.000", "2:50.000"]);
     await expect(rows.locator(".cue-row-color")).toHaveText(["A", "B"]);
     await expect(page.locator("#trackDetailCueMarkers .cue-marker")).toHaveText(["A", "B"]);
   }
@@ -869,12 +869,12 @@ test("the playback-start cue follows an untouched first beat and is never after 
   await expect(firstBeat).toHaveText("First beat");
   const startPos = page.locator("#trackDetailStartCue .cue-row.is-playback-start .cue-row-pos");
   const hotPos = page.locator("#trackDetailCueList .cue-row:not(.is-playback-start) .cue-row-pos");
-  await expect(startPos).toHaveText("0:00.12");
+  await expect(startPos).toHaveText("0:00.120");
 
   // Untouched: follows the first beat (+1 beat at 128 BPM = 468.75 ms).
   await page.locator("#trackDetailFirstBeatPlus").click();
   await expect(page.locator("#trackDetailFirstBeatMs")).toHaveValue("589");
-  await expect(startPos).toHaveText("0:00.58");
+  await expect(startPos).toHaveText("0:00.589");
   await expect(firstBeat).toHaveText("First beat");
 
   const wfBox = await page.locator("#trackDetailWaveform").boundingBox();
@@ -892,7 +892,7 @@ test("the playback-start cue follows an untouched first beat and is never after 
 
   // Dragging it past the 30 s hot cue stops it on the hot cue.
   await drag(page.locator("#trackDetailCueMarkers .cue-marker.is-playback-start"), 0.5);
-  await expect(startPos).toHaveText("0:30.00");
+  await expect(startPos).toHaveText("0:30.000");
   // Off the first beat, the choice names the placed marker instead.
   await expect(firstBeat).toHaveText("Start marker");
   await expect(firstBeat).toHaveAttribute("aria-checked", "true");
@@ -949,16 +949,16 @@ test("cue editor keyboard", async ({ page }) => {
     await expect.poll(async () => (await calls("play_resolved_track")).length).toBe(2);
     expect((await calls("play_resolved_track"))[1].request.startRatio).toBeCloseTo(0.5, 3);
     const selectedPos = page.locator("#trackDetailCueList .cue-row.is-selected .cue-row-pos");
-    await expect(selectedPos).toHaveText("1:30.00");
+    await expect(selectedPos).toHaveText("1:30.000");
 
     // →: onto the next beat line; ← twice: two beats back; Shift+→: 10 ms.
     const next = 120 + Math.ceil((90000 - 120) / BEAT_MS) * BEAT_MS; // 90120
     await page.keyboard.press("ArrowRight");
-    await expect(selectedPos).toHaveText("1:30.12");
+    await expect(selectedPos).toHaveText("1:30.120");
     await page.keyboard.press("ArrowLeft");
     await page.keyboard.press("ArrowLeft");
     const twoBack = Math.round(next - 2 * BEAT_MS); // 89182.5 → 89183
-    await expect(selectedPos).toHaveText(`1:29.${String(Math.floor((twoBack % 1000) / 10)).padStart(2, "0")}`);
+    await expect(selectedPos).toHaveText(`1:29.${String(twoBack % 1000).padStart(3, "0")}`);
     await page.keyboard.press("Shift+ArrowRight");
     const { cues } = await savedCues(page);
     const moved = cues.find((c) => c.positionMs > 80000);
@@ -973,7 +973,7 @@ test("cue editor keyboard", async ({ page }) => {
     const playCalls = () =>
       page.evaluate(() => window.__calls.filter((c) => c.command === "play_resolved_track"));
 
-    await page.locator("#trackDetailCueList .cue-row", { hasText: "1:30.00" }).locator(".cue-row-play").click();
+    await page.locator("#trackDetailCueList .cue-row", { hasText: "1:30.000" }).locator(".cue-row-play").click();
     await expect.poll(async () => (await playCalls()).length).toBe(1);
     expect((await playCalls()).at(-1).request.startRatio).toBeCloseTo(90000 / 180000, 2);
 
@@ -1046,21 +1046,21 @@ test("cues follow grid", async ({ page }) => {
 
     // 128 -> 120 BPM (500 ms a beat): beat 64 is now 32120 ms, beat 127.744 63992 ms.
     await setBpmInput(page, "120");
-    await expect(hotPos).toHaveText(["0:32.12", "1:03.99"]);
-    await expect(startPos).toHaveText("0:00.12");
+    await expect(hotPos).toHaveText(["0:32.120", "1:03.992"]);
+    await expect(startPos).toHaveText("0:00.120");
 
     // One undo puts the grid and the cues back; redo moves them again.
     await page.locator("#trackDetailUndo").click();
     await expect(page.locator("#trackDetailBpm")).toHaveValue("128.00");
-    await expect(hotPos).toHaveText(["0:30.12", "1:00.00"]);
+    await expect(hotPos).toHaveText(["0:30.120", "1:00.000"]);
     await page.locator("#trackDetailRedo").click();
-    await expect(hotPos).toHaveText(["0:32.12", "1:03.99"]);
+    await expect(hotPos).toHaveText(["0:32.120", "1:03.992"]);
 
     // A first-beat nudge moves every cue by one beat (500 ms), the start cue once.
     await page.locator("#trackDetailFirstBeatPlus").click();
     await expect(page.locator("#trackDetailFirstBeatMs")).toHaveValue("620");
-    await expect(hotPos).toHaveText(["0:32.62", "1:04.49"]);
-    await expect(startPos).toHaveText("0:00.62");
+    await expect(hotPos).toHaveText(["0:32.620", "1:04.492"]);
+    await expect(startPos).toHaveText("0:00.620");
 
     // Many 0.01 BPM steps up and back down land on the exact same ms.
     for (let i = 0; i < 40; i += 1) await page.locator("#trackDetailBpmPlus").click();
@@ -1083,7 +1083,7 @@ test("cues follow grid", async ({ page }) => {
     await page.keyboard.press("1");
     await page.keyboard.press("Shift+ArrowRight");
     const hotPos = page.locator("#trackDetailCueList .cue-row:not(.is-playback-start) .cue-row-pos");
-    await expect(hotPos).toHaveText(["0:32.13", "1:03.99"]);
+    await expect(hotPos).toHaveText(["0:32.130", "1:03.992"]);
 
     // Back to 128 BPM: the moved cue keeps its new beat (64.02), the other its old one.
     await setBpmInput(page, "128");
@@ -1098,7 +1098,7 @@ test("memory cues", async ({ page }) => {
     const memoryMarkers = page.locator("#trackDetailCueMarkers .cue-marker.is-memory");
     await expect(memoryMarkers).toHaveCount(3);
     await expect(memoryMarkers.first()).toHaveText("");
-    await expect(memoryMarkers.first()).toHaveAttribute("data-tooltip", "Memory cue · Intro · 0:02.00");
+    await expect(memoryMarkers.first()).toHaveAttribute("data-tooltip", "Memory cue · Intro · 0:02.000");
     await expect(page.locator("#trackDetailCueMarkers .cue-marker:not(.is-memory)")).toHaveText(["A"]);
     await expect(page.locator("#trackDetailOverviewCues .overview-cue.is-memory")).toHaveCount(3);
     await expect(page.locator("#trackDetailMemoryCue")).toContainText("Memory cues: 3");
@@ -1140,7 +1140,7 @@ test("memory cues", async ({ page }) => {
     // M adds one at the (stopped) playhead and selects it; a second one there
     // isn't possible.
     await page.keyboard.press("m");
-    await expect(slot.locator(".cue-row-pos")).toHaveText("0:00.00");
+    await expect(slot.locator(".cue-row-pos")).toHaveText("0:00.000");
     await expect(slot.locator(".memory-slot-count")).toHaveText("1/4");
     await slot.locator("[data-action='memory-add']").click();
     await expect(slot.locator(".memory-slot-count")).toHaveText("1/4");
@@ -1148,7 +1148,7 @@ test("memory cues", async ({ page }) => {
 
     // ▶ steps to the next memory cue and plays from it.
     await slot.locator("[data-action='memory-next']").click();
-    await expect(slot.locator(".cue-row-pos")).toHaveText("0:02.00");
+    await expect(slot.locator(".cue-row-pos")).toHaveText("0:02.000");
     await expect(slot.locator(".cue-row-name")).toHaveValue("Intro");
     await expect(slot.locator(".memory-slot-count")).toHaveText("2/4");
     const played = await page.evaluate(() =>
@@ -1156,7 +1156,7 @@ test("memory cues", async ({ page }) => {
     );
     expect(played).toBeCloseTo(2000 / 180000, 5);
     await slot.locator("[data-action='memory-next']").click();
-    await expect(slot.locator(".cue-row-pos")).toHaveText("0:40.00");
+    await expect(slot.locator(".cue-row-pos")).toHaveText("0:40.000");
 
     // Rename and colour the 40 s one.
     await slot.locator(".cue-row-name").fill("Break");
@@ -1167,7 +1167,7 @@ test("memory cues", async ({ page }) => {
 
     // ◀ back to the 2 s one; × deletes it.
     await slot.locator("[data-action='memory-prev']").click();
-    await expect(slot.locator(".cue-row-pos")).toHaveText("0:02.00");
+    await expect(slot.locator(".cue-row-pos")).toHaveText("0:02.000");
     await slot.locator(".cue-row-delete").click();
     await expect(slot).toContainText("Memory cues: 3");
 
@@ -1781,7 +1781,7 @@ test("adding, editing and saving cues", async ({ page }) => {
     await expect(rows).toHaveCount(1);
     const start = page.locator("#trackDetailStartCue .cue-row.is-playback-start");
     await expect(start).toHaveCount(1);
-    await expect(start.locator(".cue-row-pos")).toHaveText("0:00.12");
+    await expect(start.locator(".cue-row-pos")).toHaveText("0:00.120");
     await expect(start.locator(".cue-row-delete")).toHaveCount(0);
     await expect(start.locator(".cue-row-color")).toHaveCount(0);
     await expect(start.locator(".cue-row-name")).toHaveCount(0);
@@ -2247,8 +2247,13 @@ test("cue button is disabled for an un-analyzed track", async ({ page }) => {
 
 test("in the test language, the cue editor shows only catalog text and data", async ({ page }) => {
   await useTestLanguage(page);
-  await openCueEditor(page);
+  await openCueEditor(page, { seedCues: [30000] });
   const check = uiTextCheck(page);
   await check.collect();
   await check.expectNoEnglish();
+  // The test language's decimal separator is a comma: the BPM the window formats
+  // follows it; the BPM field (a number input) and cue positions keep a dot.
+  await expect(page.locator("#libraryTableBody .td-bpm").first()).toHaveText("128,00");
+  await expect(page.locator("#trackDetailBpm")).toHaveValue("128.00");
+  await expect(page.locator("#trackDetailCueList .cue-row-pos").first()).toHaveText("0:30.000");
 });

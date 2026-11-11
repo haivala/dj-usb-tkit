@@ -1,5 +1,6 @@
 {
   "language": "en",
+  "decimalSeparator": ".",
   "texts": {
     "ui-add-to-apply": "Add",
     "ui-add-to-create": "Create",
@@ -411,8 +412,11 @@
     "ui-track-detail-key": "Key",
     "ui-track-detail-key-minus-tooltip": "Previous key",
     "ui-track-detail-key-plus-tooltip": "Next key",
+    "ui-track-detail-marker-hot-cue-tooltip": "{cue} · {time}",
+    "ui-track-detail-marker-memory-cue-named-tooltip": "Memory cue · {name} · {time}",
+    "ui-track-detail-marker-memory-cue-tooltip": "Memory cue · {time}",
+    "ui-track-detail-marker-playback-start-tooltip": "Playback start · {time}",
     "ui-track-detail-max-cues": "Maximum 8 cue points.",
-    "ui-track-detail-memory-cue": "Memory cue",
     "ui-track-detail-memory-cue-badge": "memory cue",
     "ui-track-detail-memory-cue-colour-aria-label": "Memory cue colour",
     "ui-track-detail-memory-cue-only-tooltip": "Memory cue only (no hot cue)",

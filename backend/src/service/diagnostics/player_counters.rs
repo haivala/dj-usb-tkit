@@ -208,6 +208,7 @@ pub(super) fn player_counter_snapshot_section(cdj: &PlayerCounterSnapshot) -> Di
         info(tr::diagnostics_check_primitive_signal(), t19_line),
     ]);
     DiagSection {
+        key: "",
         title: "Player Counter Snapshot".to_string(),
         status: if cdj.confidence.eq_ignore_ascii_case("high") {
             DiagStatus::Pass

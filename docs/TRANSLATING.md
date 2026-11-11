@@ -11,7 +11,9 @@ English (`en.ftl`) is the source: every other language translates its keys.
 2. Translate the text after each `=`. Keep the keys (the part before `=`) as they are.
 3. Set `settings-language-name` to the language's name in itself ("Deutsch", "Français"):
    Settings' language list shows it.
-4. Set `format-decimal-separator` to the language's decimal separator (`.` or `,`).
+4. Set `format-decimal-separator` to the language's decimal separator (`.` or `,`). Every
+   decimal the app shows uses it: the backend's numbers (sizes, percentages, kHz) and the
+   ones the window formats itself (BPM), which `get_ui_texts` sends it for.
 5. Build the app. The build checks the file (see below), and the new language appears in
    Settings → Language.
 
@@ -41,7 +43,8 @@ the English text.
 - **`ui-` keys** are the texts the window's own labels and buttons show. They may hold text,
   variables and at most one plural on `$count`, using plural categories only (no `[0]`), and
   no other Fluent functions or references.
-- **Dates** are shown as `2026-04-07 13:00` in every language, and digits are never grouped.
+- **Dates and times** are shown as `2026-04-07 13:00` in every language, lengths as `3:45`
+  and cue positions as `1:23.456` (always with a dot), and digits are never grouped.
 - **Never translated:** the app's name (DJ USB Tkit), product and format names (rekordbox,
   Mixxx, Essentia, Engine DJ, MP3, FLAC, AIFF, WAV, ALAC, AAC), player models, the PDB/eDB
   table notation in the diagnostics' technical details (`t11`, `num_rl`, `ec=24`), and
