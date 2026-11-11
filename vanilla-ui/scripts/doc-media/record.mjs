@@ -1,6 +1,7 @@
 // Records the docs media in docs/assets/ -- the cue-editor, playlist-import,
-// export and selection-toolbar animations (WebP) and the README / cue-editor /
-// Backups / USB / transcode screenshots -- from the real frontend build.
+// export, selection-toolbar and USB playlist order animations (WebP) and the
+// README / cue-editor / Backups / USB / transcode screenshots -- from the real
+// frontend build.
 //
 //   npm run docs:media           (from vanilla-ui/; needs cargo and ffmpeg)
 //   npm run docs:media -- cue-editor cue-editor-drag-cues   (only those)
@@ -404,7 +405,24 @@ async function dragMarker(page, marker, dx, { shift = false, steps = 60, stepDel
   }
 }
 
-const FULL_WINDOW = { x: 0, y: 0, width: VIEWPORT.width, height: VIEWPORT.height };
+// Drags a row by its `handle` onto `target`, into its upper or lower half, slowly
+// enough for the animation (the rows move as it goes).
+async function dragRow(page, handle, target, before) {
+  const [x0, y0] = await center(handle);
+  await moveTo(page, x0, y0, 20);
+  await page.waitForTimeout(250);
+  await page.mouse.down();
+  await page.mouse.move(x0, y0 + 6, { steps: 4 });
+  const b = await target.boundingBox();
+  const y1 = b.y + b.height * (before ? 0.25 : 0.75);
+  const steps = 30;
+  for (let i = 1; i <= steps; i += 1) {
+    await page.mouse.move(x0, y0 + ((y1 - y0) * i) / steps);
+    await page.waitForTimeout(25);
+  }
+  await page.waitForTimeout(300);
+  await page.mouse.up();
+}
 
 // Captures PNG frames over CDP while `scene` runs; returns the frame list and,
 // for cropping, the union of the editor dialog's boxes before and after (it
@@ -413,7 +431,7 @@ async function capture(page, framesDir, scene, { fullWindow = false } = {}) {
   rmSync(framesDir, { recursive: true, force: true });
   mkdirSync(framesDir, { recursive: true });
   const dialog = page.locator("#trackDetailView > *").first();
-  const cropBox = async () => (fullWindow ? FULL_WINDOW : dialog.boundingBox());
+  const cropBox = async () => (fullWindow ? { x: 0, y: 0, ...page.viewportSize() } : dialog.boundingBox());
   const boxes = [await cropBox()];
   const cdp = await page.context().newCDPSession(page);
   const frames = [];
@@ -641,6 +659,45 @@ function scenes(fixture) {
           await clickOn(page, page.locator("#addToApplyBtn"), 300);
           await page.locator("#statusText", { hasText: "Friday" }).waitFor();
           await moveTo(page, 820, 520, 20);
+          await page.waitForTimeout(2200);
+        }, { fullWindow: true });
+      },
+    },
+    {
+      // docs/PLAYLISTS_PLAYBACK.md: Edit order on the USB Playlists page -- a
+      // playlist dragged, a track dragged, a column sort made the order, then
+      // Save order.
+      name: "usb-playlist-order",
+      caption: "Edit order on the USB: drag playlists and tracks, or sort by a column, then Save order",
+      editor: false,
+      opts: {},
+      viewport: WIDE_VIEWPORT,
+      async run(page, _wf, record) {
+        await connectUsbAndPickPlaylist(page, fixture);
+        await openNav(page, "usb-playlists");
+        await openUsbListItem(page, { list: "#usbPlaylists", name: "Bass", heading: "#usbPlaylistHeading", body: "#usbPlaylistTracks" });
+        await page.mouse.move(900, 300);
+        await page.waitForTimeout(300);
+        const playlistRow = (name) => page.locator("#usbPlaylists li", { hasText: name });
+        const trackRows = page.locator("#usbPlaylistTracks .track-grid-row[data-track-id]");
+        await record(async () => {
+          await page.waitForTimeout(700);
+          await clickOn(page, page.locator("#usbEditOrderBtn"), 1200);
+          // The last playlist to the top.
+          const lastName = (await page.locator("#usbPlaylists li").last().locator(".playlist-label").textContent()).trim();
+          await dragRow(page, playlistRow(lastName).locator("[data-usb-drag-handle]"), page.locator("#usbPlaylists li").first(), true);
+          await page.waitForTimeout(1200);
+          // Bass's last track to the top.
+          await clickOn(page, playlistRow("Bass").locator("button"), 900);
+          await trackRows.first().waitFor();
+          await dragRow(page, trackRows.last().locator("[data-playlist-track-drag-handle]"), trackRows.first(), true);
+          await page.waitForTimeout(1200);
+          // A column sort is the new order too.
+          await clickOn(page, page.locator('[data-body-id="usbPlaylistTracks"] [role="columnheader"][data-sort-key="bpm"]'), 1600);
+          await clickOn(page, page.locator("#usbSaveOrderBtn"), 300);
+          await page.locator("#statusText", { hasText: "Order saved to the USB" }).waitFor();
+          await waitProgressHidden(page);
+          await moveTo(page, 900, 300, 20);
           await page.waitForTimeout(2200);
         }, { fullWindow: true });
       },
@@ -933,7 +990,7 @@ try {
   const wanted = (name) => !only.length || only.includes(name);
   for (const scene of scenes(fixture)) {
     if (!wanted(scene.name)) continue;
-    const view = { sourcesOpen: false };
+    const view = { sourcesOpen: false, viewport: scene.viewport ?? VIEWPORT };
     const { ctx, page, wf } = scene.editor === false
       ? await openApp(browser, fixture, scene.opts, view)
       : await openSession(browser, fixture, scene.opts, view);

@@ -42,10 +42,9 @@ use crate::models::{
     RemoveTracksFromPlaylistRequest, RemoveUsbPlaylistData, RemoveUsbPlaylistRequest,
     RenamePlaylistData, RenamePlaylistRequest, ReorderPlaylistTracksData,
     ReorderPlaylistTracksRequest, ReorderPlaylistsData, ReorderPlaylistsRequest,
-    ReorderUsbPlaylistsData, ReorderUsbPlaylistsRequest, RepairUsbDiagnosticsData,
-    RepairUsbDiagnosticsRequest, ResolvePlaybackSourceData, ResolvePlaybackSourceRequest,
-    ResolveTrackIdentityData, ResolveTrackIdentityRequest, RestoreUsbBackupData,
-    RestoreUsbBackupRequest, RunDataMigrationsData, RunUsbDiagnosticsData,
+    RepairUsbDiagnosticsData, RepairUsbDiagnosticsRequest, ResolvePlaybackSourceData,
+    ResolvePlaybackSourceRequest, ResolveTrackIdentityData, ResolveTrackIdentityRequest,
+    RestoreUsbBackupData, RestoreUsbBackupRequest, RunDataMigrationsData, RunUsbDiagnosticsData,
     RunUsbDiagnosticsRequest, RunUsbParityReportData, RunUsbParityReportRequest,
     SaveTrackAnalysisEditsData, SaveTrackAnalysisEditsRequest, SaveTrackMetadataEditsData,
     SaveTrackMetadataEditsRequest, SaveUsbTrackAnalysisEditsData, SaveUsbTrackAnalysisEditsRequest,
@@ -1622,20 +1621,80 @@ pub async fn remove_usb_playlist(
 }
 
 #[tauri::command]
-pub async fn reorder_usb_playlists(
+pub async fn begin_usb_order_edit(
+    state: State<'_, BackendCommands>,
+    request: crate::models::UsbOrderEditRequest,
+) -> Result<ApiResponse<crate::models::UsbOrderEditData>, String> {
+    let commands = state.inner().clone();
+    Ok(run_blocking_command("begin_usb_order_edit", move || {
+        commands.begin_usb_order_edit(request)
+    })
+    .await)
+}
+
+#[tauri::command]
+pub async fn move_usb_playlist(
+    state: State<'_, BackendCommands>,
+    request: crate::models::MoveUsbPlaylistRequest,
+) -> Result<ApiResponse<crate::models::UsbOrderEditData>, String> {
+    let commands = state.inner().clone();
+    Ok(run_blocking_command("move_usb_playlist", move || {
+        commands.move_usb_playlist(request)
+    })
+    .await)
+}
+
+#[tauri::command]
+pub async fn move_usb_playlist_track(
+    state: State<'_, BackendCommands>,
+    request: crate::models::MoveUsbPlaylistTrackRequest,
+) -> Result<ApiResponse<crate::models::UsbOrderEditData>, String> {
+    let commands = state.inner().clone();
+    Ok(run_blocking_command("move_usb_playlist_track", move || {
+        commands.move_usb_playlist_track(request)
+    })
+    .await)
+}
+
+#[tauri::command]
+pub async fn sort_usb_playlist_tracks(
+    state: State<'_, BackendCommands>,
+    request: crate::models::SortUsbPlaylistTracksRequest,
+) -> Result<ApiResponse<crate::models::UsbOrderEditData>, String> {
+    let commands = state.inner().clone();
+    Ok(run_blocking_command("sort_usb_playlist_tracks", move || {
+        commands.sort_usb_playlist_tracks(request)
+    })
+    .await)
+}
+
+#[tauri::command]
+pub async fn cancel_usb_order_edit(
+    state: State<'_, BackendCommands>,
+    request: crate::models::UsbOrderEditRequest,
+) -> Result<ApiResponse<crate::models::UsbOrderEditData>, String> {
+    let commands = state.inner().clone();
+    Ok(run_blocking_command("cancel_usb_order_edit", move || {
+        commands.cancel_usb_order_edit(request)
+    })
+    .await)
+}
+
+#[tauri::command]
+pub async fn commit_usb_order_edit(
     app: AppHandle,
     state: State<'_, BackendCommands>,
-    request: ReorderUsbPlaylistsRequest,
-) -> Result<ApiResponse<ReorderUsbPlaylistsData>, String> {
+    request: crate::models::UsbOrderEditRequest,
+) -> Result<ApiResponse<crate::models::UsbOrderEditData>, String> {
     let commands = state.inner().clone();
     run_usb_job_with_progress(
         &app,
         "usb_write",
-        "reorder_usb_playlists",
-        tr::job_reorder_usb_playlists_started(),
-        tr::job_reorder_usb_playlists_completed(),
+        "commit_usb_order_edit",
+        tr::job_commit_usb_order_edit_started(),
+        tr::job_commit_usb_order_edit_completed(),
         move |mut progress| {
-            commands.reorder_usb_playlists_with_progress(request, move |c, t, m| {
+            commands.commit_usb_order_edit_with_progress(request, move |c, t, m| {
                 progress(c, t, m);
             })
         },

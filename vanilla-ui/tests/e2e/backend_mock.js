@@ -328,8 +328,27 @@
         warnings: [],
         warningText: "",
         playlistUsbExportStatus: [],
+        orderEdit: backend.orderEditState(),
+        orderEditBlockedText: null,
         ...overrides,
         items
+      };
+    },
+
+    // `UsbOrderEditState`: Edit order on the USB Playlists page (off by default).
+    orderEditState(overrides = {}) {
+      return { active: false, changed: false, editedPlaylistIds: [], editingText: "", ...overrides };
+    },
+
+    // `UsbOrderEditData` (begin/move/sort/cancel/commit of a USB order edit).
+    orderEdit(overrides = {}) {
+      const { orderEdit, ...rest } = overrides;
+      return {
+        statusText: "",
+        warnings: [],
+        warningText: "",
+        ...rest,
+        orderEdit: backend.orderEditState(orderEdit)
       };
     },
 
@@ -576,7 +595,12 @@
     get_track_detail: (data) => backend.trackDetail(data),
     get_usb_track_detail: (data) => backend.trackDetail(data),
     get_playlist_tracks: withListSummary,
-    reorder_usb_playlists: (data) => ({ statusText: "mock reorder status", warningText: "", ...data }),
+    begin_usb_order_edit: backend.orderEdit,
+    move_usb_playlist: backend.orderEdit,
+    move_usb_playlist_track: backend.orderEdit,
+    sort_usb_playlist_tracks: backend.orderEdit,
+    cancel_usb_order_edit: backend.orderEdit,
+    commit_usb_order_edit: backend.orderEdit,
     remove_usb_playlist: (data) => ({ statusText: "mock remove status", warningText: "", ...data }),
     set_usb_device_name: (data) => ({ statusText: "mock rename status", updated: true, ...data }),
     restore_usb_backup: (data) => ({ statusText: "mock restore status", backups: noBackups, ...data }),

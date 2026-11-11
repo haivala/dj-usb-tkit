@@ -232,11 +232,14 @@ Export writes eDB from one canonical playlist/track model, including:
 Export writes eDB before PDB. The PDB writer then uses the eDB playlist id and
 sort order so both database surfaces describe the same exported playlist.
 
-Outside of export, the user-triggered `reorder_usb_playlists` command (see
-`docs/PDB.md` "Playlist Reordering") writes every leaf playlist's position in
-the whole list to `playlist.sequenceNo`, matched by name, including playlists
-with no PDB row — a flat, non-parent-scoped order, unlike the per-parent order
-export assigns to a newly exported playlist.
+Outside of export, the user-triggered `commit_usb_order_edit` command (Edit
+order on the USB Playlists page, see `docs/PDB.md` "Playlist Reordering") writes
+every leaf playlist's position in the whole list to `playlist.sequenceNo`,
+matched by name, including playlists with no PDB row — a flat,
+non-parent-scoped order, unlike the per-parent order export assigns to a newly
+exported playlist. An edited playlist's track order goes to
+`playlist_content.sequenceNo`, renumbered from the playlist's lowest one, in the
+same transaction; the eDB is checkpointed before it is saved to the USB.
 
 ## Repair and Parity Behavior
 

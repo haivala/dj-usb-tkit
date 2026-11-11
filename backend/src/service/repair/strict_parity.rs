@@ -10,7 +10,6 @@
 //! the writers rebuild it from the other.
 
 use super::*;
-use crate::i18n::tr;
 use crate::service::export_helpers::{
     EdbContentFields, canonicalize_track_path_identity, is_placeholder_date,
     read_edb_content_fields,
@@ -196,19 +195,16 @@ pub(super) fn strict_repair_ordered_playlist_names(
     out
 }
 
+/// Patches the PDB playlists' `sort_order` (playlist_tree, t07) in `bytes`:
+/// `desired_sort_by_id` is keyed by PDB playlist id. Returns the rows patched.
 pub(crate) fn restore_pdb_playlist_sort_orders(
-    usb_root: &std::path::Path,
+    bytes: &mut [u8],
     desired_sort_by_id: &HashMap<u32, u32>,
 ) -> BackendResult<usize> {
     if desired_sort_by_id.is_empty() {
         return Ok(0);
     }
-    let pdb_path = usb_staging::stage_pdb(usb_root)?;
-    if !pdb_path.is_file() {
-        return Ok(0);
-    }
-    let mut bytes = std::fs::read(&pdb_path)?;
-    let page_size = pdb_page_size(&bytes)?;
+    let page_size = pdb_page_size(bytes)?;
     let patches = desired_sort_by_id
         .iter()
         .map(
@@ -218,55 +214,97 @@ pub(crate) fn restore_pdb_playlist_sort_orders(
             },
         )
         .collect::<Vec<_>>();
-    let patched = crate::pdb_writer::patch_playlist_tree_sort_orders_in_place(
-        &mut bytes, &patches, page_size,
-    )?;
-    if patched > 0 {
-        std::fs::write(&pdb_path, &bytes)?;
-    }
-    Ok(patched)
+    crate::pdb_writer::patch_playlist_tree_sort_orders_in_place(bytes, &patches, page_size)
 }
 
-/// Writes a USB playlist order to the eDB. `order_by_name` is keyed by canonical
-/// playlist name, because the USB playlist list pairs eDB rows with PDB rows by
-/// name, and a playlist may have a row in only one database.
+/// Writes a USB playlist order to the eDB, in the caller's transaction.
+/// `order_by_name` is keyed by canonical playlist name, because the USB
+/// playlist list pairs eDB rows with PDB rows by name, and a playlist may have
+/// a row in only one database. Returns the rows updated.
 pub(crate) fn write_edb_playlist_order(
-    usb_root: &std::path::Path,
+    tx: &rusqlite::Transaction<'_>,
     order_by_name: &HashMap<String, u32>,
-    warnings: &mut Vec<WarningEntry>,
 ) -> BackendResult<usize> {
-    let Some(mut conn) = open_edb_rw(usb_root) else {
-        warnings.push(logging::log_text(
-            Level::Error,
-            "usb-import",
-            "usb.reorder.edb-open-failed",
-            &tr::usb_playlists_warning_edb_order_skipped(),
-        ));
-        return Ok(0);
-    };
-    if !table_exists(&conn, "playlist") {
+    if order_by_name.is_empty() || !table_exists(tx, "playlist") {
         return Ok(0);
     }
-    let tx = conn.transaction()?;
-    let rows = {
-        let mut stmt = tx.prepare("SELECT playlist_id, name FROM playlist WHERE attribute = 0")?;
-        stmt.query_map([], |row| {
-            Ok((row.get::<_, i64>(0)?, row.get::<_, String>(1)?))
-        })?
-        .collect::<Result<Vec<_>, _>>()?
-    };
     let mut updated = 0usize;
-    for (playlist_id, name) in rows {
+    for (playlist_id, name) in edb_playlist_names(tx)? {
         if let Some(position) = order_by_name.get(&canonicalize_playlist_name(&name)) {
             updated += tx.execute(
-                "UPDATE playlist SET sequenceNo = ?1 WHERE playlist_id = ?2 AND attribute = 0",
+                "UPDATE playlist SET sequenceNo = ?1 WHERE playlist_id = ?2 AND attribute = 0 \
+                 AND sequenceNo IS NOT ?1",
                 params![i64::from(*position), playlist_id],
             )?;
         }
     }
-    tx.commit()?;
-    let _ = conn.execute_batch("PRAGMA wal_checkpoint(TRUNCATE);");
-    let _ = conn.execute_batch("PRAGMA journal_mode=WAL;");
+    Ok(updated)
+}
+
+/// The eDB's playlists (not folders): `(playlist_id, name)`.
+fn edb_playlist_names(tx: &rusqlite::Transaction<'_>) -> BackendResult<Vec<(i64, String)>> {
+    let mut stmt = tx.prepare("SELECT playlist_id, name FROM playlist WHERE attribute = 0")?;
+    let rows = stmt
+        .query_map([], |row| {
+            Ok((row.get::<_, i64>(0)?, row.get::<_, String>(1)?))
+        })?
+        .collect::<Result<Vec<_>, _>>()?;
+    Ok(rows)
+}
+
+/// Writes a USB playlist's track order to the eDB, in the caller's
+/// transaction: each eDB playlist whose canonical name is in `names` gets its
+/// own `playlist_content` rows put in `order` (`order_rows` with the content's
+/// path as the key), renumbered from the playlist's lowest `sequenceNo`.
+/// Matching by path, not by row id, is what lets one pending order (keyed by
+/// media path) order the eDB's rows and the PDB's alike. Returns the rows
+/// updated.
+pub(crate) fn write_edb_playlist_track_order(
+    tx: &rusqlite::Transaction<'_>,
+    names: &HashSet<String>,
+    order_rows: impl Fn(&mut Vec<(i64, i64, String)>),
+) -> BackendResult<usize> {
+    if names.is_empty()
+        || !table_exists(tx, "playlist")
+        || !table_exists(tx, "playlist_content")
+        || !table_exists(tx, "content")
+    {
+        return Ok(0);
+    }
+    let mut updated = 0usize;
+    for (playlist_id, name) in edb_playlist_names(tx)? {
+        if !names.contains(&canonicalize_playlist_name(&name)) {
+            continue;
+        }
+        // (rowid, sequenceNo, path), in the eDB's current order.
+        let mut rows = {
+            let mut stmt = tx.prepare(
+                "SELECT pc.rowid, COALESCE(pc.sequenceNo, 0), COALESCE(c.path, '') \
+                 FROM playlist_content pc LEFT JOIN content c ON c.content_id = pc.content_id \
+                 WHERE pc.playlist_id = ?1 ORDER BY pc.sequenceNo, pc.rowid",
+            )?;
+            stmt.query_map(params![playlist_id], |row| {
+                Ok((
+                    row.get::<_, i64>(0)?,
+                    row.get::<_, i64>(1)?,
+                    row.get::<_, String>(2)?,
+                ))
+            })?
+            .collect::<Result<Vec<_>, _>>()?
+        };
+        let Some(base) = rows.iter().map(|(_, sequence, _)| *sequence).min() else {
+            continue;
+        };
+        order_rows(&mut rows);
+        for ((rowid, sequence, _), new_sequence) in rows.iter().zip(base..) {
+            if *sequence != new_sequence {
+                updated += tx.execute(
+                    "UPDATE playlist_content SET sequenceNo = ?1 WHERE rowid = ?2",
+                    params![new_sequence, rowid],
+                )?;
+            }
+        }
+    }
     Ok(updated)
 }
 

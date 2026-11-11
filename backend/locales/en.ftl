@@ -70,10 +70,11 @@ usb-progress-resolving-playlists = USB: Resolving playlists
 usb-progress-finalizing-playlist-import = USB: Finalizing playlist import
 usb-progress-resolving-usb-root = USB: Resolving USB root
 usb-progress-backing-up-usb-databases = USB: Backing up USB databases
-usb-progress-computing-new-playlist-order = USB: Computing new playlist order
-usb-progress-writing-pdb-playlist-order = USB: Writing PDB playlist order
-usb-progress-writing-edb-playlist-order = USB: Writing eDB playlist order
-usb-progress-playlist-order-saved = USB: Playlist order saved
+usb-progress-order-edit-pdb = USB: Writing the new order to the PDB
+usb-progress-order-edit-edb = USB: Writing the new order to the eDB
+usb-progress-order-edit-write-back = USB: Saving the databases to the USB
+usb-progress-order-edit-engine = USB: Updating the Engine DJ library
+usb-progress-order-edit-saved = USB: Order saved
 usb-progress-resolving-playlist-identifiers = USB: Resolving playlist identifiers
 usb-progress-analyzing-shared-tracks = USB: Analyzing playlists and shared tracks
 usb-progress-deleting-exclusive-track-files = USB: Deleting exclusive track files
@@ -132,8 +133,6 @@ usb-playlists-summary = { $playlists ->
 usb-playlists-loaded = USB playlists loaded: { $count }
 # The progress bar when the read finishes. $summary: usb-playlists-summary.
 usb-playlists-done = Done — { $summary }
-# The status line after reordering the stick's playlists; a warning count may follow.
-usb-playlists-order-saved = Playlist order saved
 # The status line after removing a playlist from the stick; a warning count may follow.
 # $name: the playlist. $edb, $pdb: the rows removed from each database.
 usb-playlists-removed = Removed USB playlist: { $name } [db { $edb }, pdb { $pdb }]
@@ -171,12 +170,44 @@ usb-playlists-warning-file-deleted = deleted: { $path }
 # logged just before.
 usb-playlists-warning-edb-removal-skipped = eDB playlist removal skipped: the eDB couldn't be opened
 usb-playlists-warning-pdb-removal-skipped = PDB playlist removal skipped: PDB missing
-# Reordering the stick's playlists couldn't open its eDB, so only the PDB has the new order.
-usb-playlists-warning-edb-order-skipped = reorder: unable to open eDB for playlist order
-# Status lines when the new order of the USB's playlists can't be saved, and when removing a
-# playlist from the USB fails. $error: why it failed.
-usb-playlists-order-failed = Failed to save playlist order: { $error }
+# The status line when removing a playlist from the USB fails. $error: why it failed.
 usb-playlists-remove-failed = Remove USB playlist failed: { $error }
+
+# The USB view's order edit (Edit order → drag or sort → Save order).
+# The line beside the buttons while editing. $count: playlists whose track order changed.
+usb-order-edit-editing = Editing order: nothing changed yet
+usb-order-edit-editing-changed = Editing order: { $count ->
+    [one] { $count } playlist changed
+   *[other] { $count } playlists changed
+}
+usb-order-edit-editing-list-changed = Editing order: playlist order changed
+usb-order-edit-editing-list-and-changed = Editing order: playlist order and { $count ->
+    [one] { $count } playlist changed
+   *[other] { $count } playlists changed
+}
+# Status lines after starting, saving and cancelling the edit.
+usb-order-edit-started = Editing the order: drag playlists and tracks, or sort a playlist by a column. Nothing is written until Save order.
+usb-order-edit-saved = Order saved to the USB
+usb-order-edit-unchanged = Order unchanged: nothing to save
+usb-order-edit-cancelled = Order changes discarded
+usb-order-edit-cancelled-after-partial-save = Unsaved order changes discarded. What the failed save already wrote stays on the USB.
+# Why an order edit command was refused.
+usb-order-edit-not-active = Order editing isn't on for this USB
+usb-order-edit-saving = The new order is being saved to the USB; wait for it to finish
+usb-order-edit-busy = Another USB write is running; try again when it's done
+usb-order-edit-read-only = This USB can't be written to, so its order can't be changed
+usb-order-edit-history-refused = A history list's order is the play order; it can't be changed
+# $id: the row that isn't in the playlist.
+usb-order-edit-track-not-found = Track { $id } isn't in this USB playlist
+usb-order-edit-edb-open-failed = The USB's eDB couldn't be opened, so nothing was saved
+usb-order-edit-edb-checkpoint-failed = The eDB couldn't finish writing its changes, so nothing was saved
+# Saving the order failed. $error: why.
+usb-order-edit-save-failed = Failed to save the order: { $error }
+# A save wrote one database and then failed on the other. $saved, $failed: "PDB" or "eDB".
+# $error: why.
+usb-order-edit-partial-save = The new order was saved to the { $saved } only: writing the { $failed } failed ({ $error }). Save order again to finish, or Cancel to leave the USB as it is now.
+# Event Log: a playlist whose PDB holds a track twice keeps its PDB order. $playlist: its id.
+usb-order-edit-warning-pdb-duplicates = PDB track order not changed for { $playlist }: the PDB lists a track twice in it (USB diagnostics can repair that)
 
 ## usb-history
 
@@ -289,6 +320,7 @@ backups-reason-export = Before export
 backups-reason-export-mirror = Before export (mirror)
 backups-reason-export-additive = Before export (additive)
 backups-reason-playlist-reorder = Before playlist reorder
+backups-reason-order-edit = Before order edit
 backups-reason-playlist-removal = Before playlist removal
 backups-reason-menu-update = Before menu update
 backups-reason-background-color = Before background color change
@@ -1288,8 +1320,8 @@ job-set-usb-background-color-completed = USB: Background color set
 job-set-usb-background-color-progress = USB: Writing background color
 job-remove-usb-playlist-started = USB: Removing playlist
 job-remove-usb-playlist-completed = USB: Playlist removal complete
-job-reorder-usb-playlists-started = USB: Saving playlist order
-job-reorder-usb-playlists-completed = USB: Playlist order saved
+job-commit-usb-order-edit-started = USB: Saving the new order
+job-commit-usb-order-edit-completed = USB: Order saved
 job-export-to-usb-started = USB: Exporting playlist
 job-export-to-usb-completed = USB: Export complete
 job-run-usb-diagnostics-started = USB: Running diagnostics
@@ -2907,6 +2939,20 @@ ui-usb-player-menu-up = Move Up
 ## ui-usb-playlists
 
 ui-usb-playlists-compared = Playlists compared
+# The USB playlists page's order edit: its buttons, the tooltips and the leave dialog.
+ui-usb-playlists-edit-order = Edit order
+ui-usb-playlists-edit-order-tooltip = Change the order of the playlists and of the tracks in them; nothing is written until Save order
+ui-usb-playlists-edit-order-busy = Wait for the running USB job to finish
+ui-usb-playlists-order-edit-blocks-jobs = Save or cancel the order edit first
+ui-usb-playlists-save-order = Save order
+ui-usb-playlists-order-edited = Track order changed
+ui-usb-playlists-drag-search-active = Clear the search to drag tracks
+ui-usb-playlists-leave-title = Unsaved order
+ui-usb-playlists-leave-message = The new order of this USB's playlists isn't saved yet.
+ui-usb-playlists-leave-discard = Discard changes
+ui-usb-playlists-leave-stay = Stay
+# The status line when the USB went away during an order edit.
+ui-usb-playlists-order-dropped = USB disconnected: the unsaved order was dropped
 # The status line when a USB playlist's tracks can't be loaded.
 # $error: why it failed.
 ui-usb-playlists-load-failed = Failed to load USB playlist: { $error }

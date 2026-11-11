@@ -39,6 +39,8 @@
 
 ## Unreleased
 
+- **New feature:** USB playlists and the tracks in them can be put in a new order (Edit order → drag or sort → Save
+  order), saved straight to the USB.
 - **Fix:** Clicking another playlist while typing a new playlist's name saves the new playlist and then opens the
   one you clicked. Before, the new playlist opened instead.
 - **Improvement:** The library's filter mark comes from the backend, which already knows which folders and imported

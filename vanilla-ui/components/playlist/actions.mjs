@@ -4,6 +4,7 @@ import { applyPlaylistReorderLockToGrid } from "../shared/export_reorder_lock.mj
 import { moveArrayItem } from "../shared/list_drag_reorder.mjs";
 import { clearTrackSort, renderEmptyState } from "../shell/actions.mjs";
 import { isUsbRootChangeBlocked } from "../usb/actions.mjs";
+import { isUsbOrderEditing } from "../usb/order_edit.mjs";
 import { cssEscape, cloneTemplate } from "../../ui_utils.mjs";
 import { t, tCount } from "../../ui_texts.mjs";
 
@@ -269,7 +270,9 @@ export function updatePlaylistExportButtons(ctx) {
   const current = getCurrentPlaylist(ctx);
   const status = state.playlistUsbExportStatusById.get(current?.id);
 
-  el.exportPlaylistBtn.disabled = isUsbRootChangeBlocked(state) || !!state.exportStarting;
+  // An order edit on the USB ends (Save or Cancel) before an export writes it.
+  el.exportPlaylistBtn.disabled = isUsbRootChangeBlocked(state) || !!state.exportStarting
+    || isUsbOrderEditing(state);
   if (status) {
     el.exportPlaylistBtn.textContent = status.exportButtonText;
     el.exportPlaylistBtn.dataset.tooltip = status.exportButtonTitle;

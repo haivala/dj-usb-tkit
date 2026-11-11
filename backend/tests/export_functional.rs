@@ -12,11 +12,12 @@ use backend::models::{
     BrowseSourceFilesRequest, CreatePlaylistRequest, DiagStatus, ExportToUsbOptions,
     ExportToUsbRequest, FetchUsbPlaylistsRequest, FetchUsbTracksRequest,
     GetPlaylistExportSpaceRequest, GetPlaylistTracksRequest, InitializeUsbRequest,
-    MaterializeSourceTrackRequest, PlaylistTrackSort, PlaylistsState,
+    ListUsbBackupsRequest, MaterializeSourceTrackRequest, MoveUsbPlaylistRequest,
+    MoveUsbPlaylistTrackRequest, PlaylistTrackSort, PlaylistsState,
     RemoveTracksFromPlaylistRequest, RenamePlaylistRequest, ReorderPlaylistTracksRequest,
-    ReorderUsbPlaylistsRequest, RepairUsbDiagnosticsRequest, RunUsbDiagnosticsRequest,
-    RunUsbParityReportRequest, ScanLibraryRequest, SelectUsbRequest, SetExportSyncModeRequest,
-    SetFrontendSettingRequest,
+    RepairUsbDiagnosticsRequest, RunUsbDiagnosticsRequest, RunUsbParityReportRequest,
+    ScanLibraryRequest, SelectUsbRequest, SetExportSyncModeRequest, SetFrontendSettingRequest,
+    SortUsbPlaylistTracksRequest, UsbOrderEditRequest,
 };
 use backend::pdb_reader::parse_pdb;
 use backend::service::usb_vendor_compat::DEFAULT_USB_EDB_KEY;
@@ -4950,15 +4951,193 @@ fn export_backup_skipped_when_disabled() {
     );
 }
 
+/// The USB playlist ids with this name prefix, in the order the USB view lists them.
+fn usb_playlist_ids(backend: &BackendCommands, usb: &Path, prefix: &str) -> Vec<(String, String)> {
+    let fetched = backend.fetch_usb_playlists(FetchUsbPlaylistsRequest {
+        usb_root: Some(usb.to_string_lossy().to_string()),
+    });
+    assert!(fetched.ok, "fetch usb playlists failed: {fetched:?}");
+    fetched
+        .data
+        .expect("usb playlist data")
+        .data
+        .items
+        .into_iter()
+        .filter(|p| p.name.starts_with(prefix))
+        .map(|p| (p.id, p.name))
+        .collect()
+}
+
+fn file_name(path: &str) -> String {
+    path.replace('\\', "/")
+        .rsplit('/')
+        .next()
+        .unwrap_or_default()
+        .to_string()
+}
+
+/// A USB playlist's rows as the USB view shows them: `(file name, row id)`.
+fn usb_view_rows(
+    backend: &BackendCommands,
+    usb: &Path,
+    playlist_id: &str,
+) -> Vec<(String, String)> {
+    let page = backend.fetch_usb_playlist_tracks(FetchUsbTracksRequest {
+        usb_root: Some(usb.to_string_lossy().to_string()),
+        id: playlist_id.to_string(),
+        ..Default::default()
+    });
+    assert!(page.ok, "fetch usb playlist tracks failed: {page:?}");
+    page.data
+        .expect("usb tracks")
+        .items
+        .into_iter()
+        .map(|track| (file_name(track.identity_path()), track.id))
+        .collect()
+}
+
+fn names(rows: &[(String, String)]) -> Vec<String> {
+    rows.iter().map(|(name, _)| name.clone()).collect()
+}
+
+/// The eDB playlist's files by `sequenceNo`.
+fn edb_playlist_files(usb: &Path, playlist_name: &str) -> Vec<String> {
+    let conn = open_edb(
+        &usb.join(USB_VENDOR_ROOT_DIR)
+            .join(USB_VENDOR_DB_DIR)
+            .join("exportLibrary.db"),
+    );
+    let mut stmt = conn
+        .prepare(
+            "SELECT c.path FROM playlist_content pc
+             JOIN playlist p ON p.playlist_id = pc.playlist_id
+             JOIN content c ON c.content_id = pc.content_id
+             WHERE p.name = ?1 AND p.attribute = 0 ORDER BY pc.sequenceNo",
+        )
+        .expect("prepare");
+    stmt.query_map([playlist_name], |row| row.get::<_, String>(0))
+        .expect("query")
+        .map(|path| file_name(&path.expect("path")))
+        .collect()
+}
+
+/// The PDB playlist's files by `entry_index`, and whether every entry has its own index.
+fn pdb_playlist_files(usb: &Path, playlist_name: &str) -> (Vec<String>, bool) {
+    let pdb = usb
+        .join(USB_VENDOR_ROOT_DIR)
+        .join(USB_VENDOR_DB_DIR)
+        .join("export.pdb");
+    let (playlist_id, paths) = ordered_target_playlist_paths(&pdb, playlist_name);
+    let parsed = parse_pdb(&pdb).expect("parse pdb");
+    let indexes: Vec<u32> = parsed
+        .playlist_entries
+        .iter()
+        .filter(|e| e.playlist_id == playlist_id)
+        .map(|e| e.entry_index)
+        .collect();
+    let distinct: std::collections::HashSet<u32> = indexes.iter().copied().collect();
+    (
+        paths.iter().map(|path| file_name(path)).collect(),
+        distinct.len() == indexes.len(),
+    )
+}
+
+fn order_edit_ok(
+    response: backend::models::ApiResponse<backend::models::UsbOrderEditData>,
+    what: &str,
+) -> backend::models::UsbOrderEditData {
+    assert!(response.ok, "{what} failed: {response:?}");
+    response.data.expect("order edit data")
+}
+
+fn usb_order_edit_request(usb: &Path) -> UsbOrderEditRequest {
+    UsbOrderEditRequest {
+        usb_root: Some(usb.to_string_lossy().to_string()),
+    }
+}
+
+/// Moves the row of `file` before the row of `before` (`None`: to the end).
+fn move_usb_row(
+    backend: &BackendCommands,
+    usb: &Path,
+    playlist_id: &str,
+    file: &str,
+    before: Option<&str>,
+) -> backend::models::UsbOrderEditData {
+    let rows = usb_view_rows(backend, usb, playlist_id);
+    let id_of = |name: &str| {
+        rows.iter()
+            .find(|(file, _)| file == name)
+            .map(|(_, id)| id.clone())
+            .unwrap_or_else(|| panic!("no row for {name} in {rows:?}"))
+    };
+    order_edit_ok(
+        backend.move_usb_playlist_track(MoveUsbPlaylistTrackRequest {
+            usb_root: Some(usb.to_string_lossy().to_string()),
+            playlist_id: playlist_id.to_string(),
+            move_track_id: id_of(file),
+            before_track_id: before.map(id_of),
+        }),
+        "move track",
+    )
+}
+
+fn usb_db_files(usb: &Path) -> (Option<Vec<u8>>, Option<Vec<u8>>) {
+    let dir = usb.join(USB_VENDOR_ROOT_DIR).join(USB_VENDOR_DB_DIR);
+    (
+        fs::read(dir.join("export.pdb")).ok(),
+        fs::read(dir.join("exportLibrary.db")).ok(),
+    )
+}
+
+fn copy_dir(from: &Path, to: &Path) {
+    for entry in WalkDir::new(from) {
+        let entry = entry.expect("walk usb");
+        let target = to.join(entry.path().strip_prefix(from).expect("inside usb"));
+        if entry.file_type().is_dir() {
+            fs::create_dir_all(&target).expect("copy dir");
+        } else {
+            fs::copy(entry.path(), &target).expect("copy file");
+        }
+    }
+}
+
+/// Byte ranges a PDB page's differences may fall in when only its rows'
+/// fields changed in place: anything but the page header, except its
+/// sequence number (0x10..0x14).
+fn pdb_page_diff_is_in_place(before: &[u8], after: &[u8]) -> bool {
+    before
+        .iter()
+        .zip(after)
+        .enumerate()
+        .filter(|(_, (a, b))| a != b)
+        .all(|(offset, _)| (0x10..0x14).contains(&offset) || offset >= 0x28)
+}
+
+/// Backups are named by the second they're taken in, so one taken in the
+/// same second as the last would replace it: wait for the next second.
+fn wait_for_next_backup_second() {
+    let second = || {
+        std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .expect("clock")
+            .as_secs()
+    };
+    let start = second();
+    while second() == start {
+        std::thread::sleep(std::time::Duration::from_millis(20));
+    }
+}
+
 #[test]
-fn reorder_usb_playlists_persists_order_and_keeps_parity() {
+fn usb_order_edit_persists_order_and_keeps_parity() {
     let root = tempdir().expect("temp root");
     let media = root.path().join("media");
     let usb = root.path().join("usb");
     fs::create_dir_all(&media).expect("create media dir");
     fs::create_dir_all(&usb).expect("create usb dir");
 
-    for i in 0..3usize {
+    for i in 0..4usize {
         copy_audio_fixture(
             &media,
             "formats/track_format_wav.wav",
@@ -4986,7 +5165,7 @@ fn reorder_usb_playlists_persists_order_and_keeps_parity() {
         false,
         false,
     );
-    let all_tracks = backend
+    let mut all_tracks = backend
         .browse_source_files(BrowseSourceFilesRequest {
             query: "reorder".to_string(),
             limit: 50,
@@ -4996,12 +5175,13 @@ fn reorder_usb_playlists_persists_order_and_keeps_parity() {
         .data
         .expect("search data")
         .items;
-    assert_eq!(all_tracks.len(), 3, "expected 3 reorder tracks");
+    all_tracks.sort_by(|a, b| a.file_path.cmp(&b.file_path));
+    assert_eq!(all_tracks.len(), 4, "expected 4 reorder tracks");
     let all_ids: Vec<_> = all_tracks.iter().map(|t| t.id.clone()).collect();
     seed_tracks_as_analyzed(&data_dir, &all_ids);
 
     let mut playlist_ids = Vec::with_capacity(3);
-    for (i, id) in all_ids.iter().enumerate() {
+    for (i, id) in all_ids.iter().take(3).enumerate() {
         let created = backend.create_playlist(CreatePlaylistRequest {
             name: format!("Reorder Playlist {i}"),
         });
@@ -5022,6 +5202,16 @@ fn reorder_usb_playlists_persists_order_and_keeps_parity() {
         assert!(added.ok, "add tracks to playlist {i} failed: {added:?}");
         playlist_ids.push(pid);
     }
+    // "Reorder Playlist 0" holds all four tracks, for the track order edits.
+    let added = backend.add_library_selection_to_playlist(AddLibrarySelectionToPlaylistRequest {
+        playlist_id: playlist_ids[0].clone(),
+        track_ids: all_ids[1..].to_vec(),
+        ..Default::default()
+    });
+    assert!(
+        added.ok,
+        "add the other tracks to playlist 0 failed: {added:?}"
+    );
 
     for (i, pid) in playlist_ids.iter().enumerate() {
         let exported = backend.export_to_usb(ExportToUsbRequest {
@@ -5037,54 +5227,343 @@ fn reorder_usb_playlists_persists_order_and_keeps_parity() {
         });
         assert!(exported.ok, "export playlist {i} failed: {exported:?}");
     }
+    let backups = || {
+        backend
+            .list_usb_backups(ListUsbBackupsRequest {
+                usb_root: usb.to_string_lossy().to_string(),
+            })
+            .data
+            .expect("backups")
+            .items
+    };
+    let export_backups: Vec<String> = backups().into_iter().map(|b| b.timestamp).collect();
 
-    let fetched = backend.fetch_usb_playlists(FetchUsbPlaylistsRequest {
-        usb_root: Some(usb.to_string_lossy().to_string()),
-    });
-    assert!(fetched.ok, "fetch usb playlists failed: {fetched:?}");
-    let mut ids = fetched
-        .data
-        .expect("usb playlist data")
-        .data
-        .items
+    // Playlist order: reverse the device-native order in one edit.
+    let mut ids: Vec<String> = usb_playlist_ids(&backend, &usb, "Reorder Playlist")
         .into_iter()
-        .filter(|p| p.name.starts_with("Reorder Playlist"))
-        .map(|p| p.id)
-        .collect::<Vec<_>>();
+        .map(|(id, _)| id)
+        .collect();
     assert_eq!(
         ids.len(),
         3,
         "expected 3 reorder playlists on device: {ids:?}"
     );
-
-    // Reverse the device-native order and persist it via the new command.
     ids.reverse();
-    let reordered = backend.reorder_usb_playlists(ReorderUsbPlaylistsRequest {
-        usb_root: Some(usb.to_string_lossy().to_string()),
-        ordered_playlist_ids: ids.clone(),
-    });
-    assert!(reordered.ok, "reorder usb playlists failed: {reordered:?}");
-    let reordered = reordered.data.expect("reorder data");
-    assert_eq!(reordered.reordered, 3);
-    assert_eq!(reordered.status_text, "Playlist order saved");
-
-    let refetched = backend.fetch_usb_playlists(FetchUsbPlaylistsRequest {
-        usb_root: Some(usb.to_string_lossy().to_string()),
-    });
-    assert!(refetched.ok, "re-fetch usb playlists failed: {refetched:?}");
-    let refetched_ids = refetched
-        .data
-        .expect("re-fetch usb playlist data")
-        .data
-        .items
-        .into_iter()
-        .filter(|p| p.name.starts_with("Reorder Playlist"))
-        .map(|p| p.id)
-        .collect::<Vec<_>>();
-    assert_eq!(
-        refetched_ids, ids,
-        "USB playlist order should reflect the persisted reorder"
+    order_edit_ok(
+        backend.begin_usb_order_edit(usb_order_edit_request(&usb)),
+        "begin",
     );
+    for id in &ids {
+        order_edit_ok(
+            backend.move_usb_playlist(MoveUsbPlaylistRequest {
+                usb_root: Some(usb.to_string_lossy().to_string()),
+                playlist_id: id.clone(),
+                before_playlist_id: None,
+            }),
+            "move playlist",
+        );
+    }
+    wait_for_next_backup_second();
+    let saved = order_edit_ok(
+        backend.commit_usb_order_edit(usb_order_edit_request(&usb)),
+        "commit playlist order",
+    );
+    assert_eq!(saved.status_text, "Order saved to the USB");
+    assert!(!saved.order_edit.active, "a save ends the edit");
+    let read: Vec<String> = usb_playlist_ids(&backend, &usb, "Reorder Playlist")
+        .into_iter()
+        .map(|(id, _)| id)
+        .collect();
+    assert_eq!(
+        read, ids,
+        "USB playlist order should reflect the saved order"
+    );
+    let after_first = backups();
+    assert_eq!(after_first.len(), export_backups.len() + 1);
+    assert_eq!(after_first[0].reason.as_deref(), Some("Before order edit"));
+
+    // Track order, in one edit: a move to the middle, one to the end, a sort,
+    // one more move.
+    let (target, _) = usb_playlist_ids(&backend, &usb, "Reorder Playlist 0")
+        .into_iter()
+        .next()
+        .expect("playlist 0");
+    let file = |i: usize| format!("Reorder Artist {i} - Reorder Track {i}.wav");
+    let file_names = |order: &[usize]| order.iter().map(|i| file(*i)).collect::<Vec<_>>();
+    assert_eq!(
+        names(&usb_view_rows(&backend, &usb, &target)),
+        file_names(&[0, 1, 2, 3])
+    );
+    let pdb_path = usb
+        .join(USB_VENDOR_ROOT_DIR)
+        .join(USB_VENDOR_DB_DIR)
+        .join("export.pdb");
+    let pdb_before = fs::read(&pdb_path).expect("pdb");
+    let dbs_before = usb_db_files(&usb);
+
+    order_edit_ok(
+        backend.begin_usb_order_edit(usb_order_edit_request(&usb)),
+        "begin",
+    );
+    move_usb_row(&backend, &usb, &target, &file(3), Some(&file(1)));
+    assert_eq!(
+        names(&usb_view_rows(&backend, &usb, &target)),
+        file_names(&[0, 3, 1, 2])
+    );
+    move_usb_row(&backend, &usb, &target, &file(0), None);
+    assert_eq!(
+        names(&usb_view_rows(&backend, &usb, &target)),
+        file_names(&[3, 1, 2, 0])
+    );
+    let sorted = order_edit_ok(
+        backend.sort_usb_playlist_tracks(SortUsbPlaylistTracksRequest {
+            usb_root: Some(usb.to_string_lossy().to_string()),
+            playlist_id: target.clone(),
+            sort_by: Some("title".to_string()),
+            sort_dir: Some("desc".to_string()),
+        }),
+        "sort",
+    );
+    assert_eq!(sorted.order_edit.edited_playlist_ids, std::slice::from_ref(&target));
+    assert_eq!(
+        names(&usb_view_rows(&backend, &usb, &target)),
+        file_names(&[3, 2, 1, 0])
+    );
+    let moved = move_usb_row(&backend, &usb, &target, &file(1), Some(&file(3)));
+    assert!(moved.order_edit.changed);
+    let expected = file_names(&[1, 3, 2, 0]);
+    assert_eq!(names(&usb_view_rows(&backend, &usb, &target)), expected);
+    let listed = backend
+        .fetch_usb_playlists(FetchUsbPlaylistsRequest {
+            usb_root: Some(usb.to_string_lossy().to_string()),
+        })
+        .data
+        .expect("playlists")
+        .data;
+    assert!(listed.order_edit.active);
+    assert!(
+        listed
+            .items
+            .iter()
+            .any(|p| p.id == target && p.order_edited),
+        "the edited playlist is marked"
+    );
+    assert_eq!(
+        usb_db_files(&usb),
+        dbs_before,
+        "nothing written before Save"
+    );
+
+    wait_for_next_backup_second();
+    order_edit_ok(
+        backend.commit_usb_order_edit(usb_order_edit_request(&usb)),
+        "commit track order",
+    );
+    assert_eq!(names(&usb_view_rows(&backend, &usb, &target)), expected);
+    let (pdb_order, distinct) = pdb_playlist_files(&usb, "Reorder Playlist 0");
+    assert_eq!(pdb_order, expected, "PDB order by entry_index");
+    assert!(distinct);
+    assert_eq!(
+        edb_playlist_files(&usb, "Reorder Playlist 0"),
+        expected,
+        "eDB order by sequenceNo"
+    );
+
+    // Only playlist entry rows changed, in place, and page sequence numbers.
+    let pdb_after = fs::read(&pdb_path).expect("pdb");
+    assert_eq!(
+        pdb_before.len(),
+        pdb_after.len(),
+        "no page added or removed"
+    );
+    let page_size = read_u32_le(&pdb_before, 4).expect("page size") as usize;
+    for (index, (before, after)) in pdb_before
+        .chunks_exact(page_size)
+        .zip(pdb_after.chunks_exact(page_size))
+        .enumerate()
+        .filter(|(_, (before, after))| before != after)
+    {
+        if index == 0 {
+            // The file header: only its sequence number.
+            assert!(
+                before
+                    .iter()
+                    .zip(after)
+                    .enumerate()
+                    .filter(|(_, (a, b))| a != b)
+                    .all(|(o, _)| (0x14..0x18).contains(&o)),
+                "header page changed beyond its sequence"
+            );
+            continue;
+        }
+        let table = read_u32_le(before, 0x08).expect("table type");
+        assert!(
+            table == 7 || table == 8,
+            "page {index} of table {table} changed"
+        );
+        assert!(
+            pdb_page_diff_is_in_place(before, after),
+            "page {index} changed beyond its rows"
+        );
+    }
+    let parsed_before = {
+        let path = root.path().join("before.pdb");
+        fs::write(&path, &pdb_before).expect("write before pdb");
+        parse_pdb(&path).expect("parse before pdb")
+    };
+    let parsed_after = parse_pdb(&pdb_path).expect("parse after pdb");
+    let identities = |parsed: &backend::pdb_reader::ParsedPdb| {
+        let mut rows: Vec<(u32, u32)> = parsed
+            .playlist_entries
+            .iter()
+            .map(|e| (e.playlist_id, e.track_id))
+            .collect();
+        rows.sort_unstable();
+        rows
+    };
+    assert_eq!(
+        identities(&parsed_before),
+        identities(&parsed_after),
+        "same entries"
+    );
+    assert_eq!(
+        format!("{:?}", parsed_before.tracks),
+        format!("{:?}", parsed_after.tracks),
+        "track rows unchanged"
+    );
+
+    // The second save in a row rewrote the first's backup.
+    let after_second = backups();
+    assert_eq!(after_second.len(), after_first.len());
+    assert_eq!(after_second[0].reason.as_deref(), Some("Before order edit"));
+    for timestamp in &export_backups {
+        assert!(
+            after_second.iter().any(|b| &b.timestamp == timestamp),
+            "{timestamp} kept"
+        );
+    }
+
+    // Cancel drops the pending order and writes nothing.
+    let dbs_saved = usb_db_files(&usb);
+    order_edit_ok(
+        backend.begin_usb_order_edit(usb_order_edit_request(&usb)),
+        "begin",
+    );
+    move_usb_row(&backend, &usb, &target, &file(0), Some(&file(1)));
+    order_edit_ok(
+        backend.cancel_usb_order_edit(usb_order_edit_request(&usb)),
+        "cancel",
+    );
+    assert_eq!(names(&usb_view_rows(&backend, &usb, &target)), expected);
+    assert_eq!(usb_db_files(&usb), dbs_saved);
+
+    // A history's order is its play order.
+    order_edit_ok(
+        backend.begin_usb_order_edit(usb_order_edit_request(&usb)),
+        "begin",
+    );
+    let history = backend.move_usb_playlist_track(MoveUsbPlaylistTrackRequest {
+        usb_root: Some(usb.to_string_lossy().to_string()),
+        playlist_id: "usb-h-1".to_string(),
+        move_track_id: "1".to_string(),
+        before_track_id: None,
+    });
+    assert!(!history.ok, "a history id is refused");
+    order_edit_ok(
+        backend.cancel_usb_order_edit(usb_order_edit_request(&usb)),
+        "cancel",
+    );
+
+    // One database at a time, on copies of the stick the app made.
+    for (missing, kept) in [("exportLibrary.db", "PDB"), ("export.pdb", "eDB")] {
+        let copy = root.path().join(format!("usb-without-{missing}"));
+        copy_dir(&usb, &copy);
+        let missing_path = copy
+            .join(USB_VENDOR_ROOT_DIR)
+            .join(USB_VENDOR_DB_DIR)
+            .join(missing);
+        fs::remove_file(&missing_path).expect("remove a database");
+        let (copy_target, _) = usb_playlist_ids(&backend, &copy, "Reorder Playlist 0")
+            .into_iter()
+            .next()
+            .expect("playlist 0 on the copy");
+        order_edit_ok(
+            backend.begin_usb_order_edit(usb_order_edit_request(&copy)),
+            "begin",
+        );
+        move_usb_row(&backend, &copy, &copy_target, &file(1), None);
+        order_edit_ok(
+            backend.commit_usb_order_edit(usb_order_edit_request(&copy)),
+            "commit with one database",
+        );
+        let moved = file_names(&[3, 2, 0, 1]);
+        assert_eq!(names(&usb_view_rows(&backend, &copy, &copy_target)), moved);
+        let held = if kept == "PDB" {
+            pdb_playlist_files(&copy, "Reorder Playlist 0").0
+        } else {
+            edb_playlist_files(&copy, "Reorder Playlist 0")
+        };
+        assert_eq!(held, moved, "the {kept} holds the new order");
+        assert!(!missing_path.exists(), "{missing} not recreated");
+    }
+
+    // Databases that differ: the eDB lacks one of the playlist's tracks.
+    let divergent = root.path().join("usb-divergent");
+    copy_dir(&usb, &divergent);
+    {
+        let conn = open_edb(
+            &divergent
+                .join(USB_VENDOR_ROOT_DIR)
+                .join(USB_VENDOR_DB_DIR)
+                .join("exportLibrary.db"),
+        );
+        let removed = conn
+            .execute(
+                "DELETE FROM playlist_content WHERE rowid IN (
+                    SELECT pc.rowid FROM playlist_content pc
+                    JOIN playlist p ON p.playlist_id = pc.playlist_id
+                    JOIN content c ON c.content_id = pc.content_id
+                    WHERE p.name = 'Reorder Playlist 0' AND c.path LIKE ?1)",
+                [format!("%{}", file(2))],
+            )
+            .expect("remove an eDB entry");
+        assert_eq!(removed, 1);
+    }
+    let (divergent_target, _) = usb_playlist_ids(&backend, &divergent, "Reorder Playlist 0")
+        .into_iter()
+        .next()
+        .expect("playlist 0 on the divergent copy");
+    assert_eq!(
+        names(&usb_view_rows(&backend, &divergent, &divergent_target)),
+        file_names(&[1, 3, 0]),
+        "the view shows the eDB's rows"
+    );
+    order_edit_ok(
+        backend.begin_usb_order_edit(usb_order_edit_request(&divergent)),
+        "begin",
+    );
+    move_usb_row(
+        &backend,
+        &divergent,
+        &divergent_target,
+        &file(0),
+        Some(&file(1)),
+    );
+    order_edit_ok(
+        backend.commit_usb_order_edit(usb_order_edit_request(&divergent)),
+        "commit divergent",
+    );
+    assert_eq!(
+        edb_playlist_files(&divergent, "Reorder Playlist 0"),
+        file_names(&[0, 1, 3])
+    );
+    let (pdb_order, distinct) = pdb_playlist_files(&divergent, "Reorder Playlist 0");
+    assert_eq!(
+        pdb_order,
+        file_names(&[0, 1, 3, 2]),
+        "the PDB entry the eDB lacks keeps its place after the listed ones"
+    );
+    assert!(distinct, "no two PDB entries share an entry_index");
 
     let parity = backend.run_usb_parity_report(RunUsbParityReportRequest {
         usb_root: Some(usb.to_string_lossy().to_string()),

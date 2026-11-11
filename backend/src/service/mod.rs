@@ -28,6 +28,7 @@ pub mod usb_backups;
 pub(crate) mod usb_display_files;
 pub(crate) mod usb_helpers;
 pub(crate) mod usb_identity;
+mod usb_order_edit;
 pub mod usb_staging;
 pub(crate) mod usb_track_facts;
 mod usb_tracklist;
@@ -287,6 +288,10 @@ pub struct BackendService {
     /// each one read-modify-writes the same staged `export.pdb` / eDB.
     /// Shared across `.clone()`s (the Tauri state and the job threads).
     pub(crate) usb_write_lock: Arc<std::sync::Mutex<()>>,
+    /// The USB view's order edit (`usb_order_edit`): the pending order of one
+    /// USB's playlists and tracks, until it's saved or cancelled. Shared
+    /// across `.clone()`s.
+    pub(crate) usb_order_edit: Arc<usb_order_edit::UsbOrderEditSlot>,
     /// Bumped by every `fetch_usb_playlist_tracks` / `fetch_usb_history_tracks`
     /// call, so a page load can tell a newer one started and stop reading
     /// files for a page the frontend will discard.
@@ -315,6 +320,7 @@ impl BackendService {
             parsed_pdb_cache: Arc::new(std::sync::Mutex::new(None)),
             selected_usb_root: Arc::new(std::sync::Mutex::new(None)),
             usb_write_lock: Arc::new(std::sync::Mutex::new(())),
+            usb_order_edit: Arc::new(std::sync::Mutex::new(None)),
             usb_playlist_page_generation: Arc::new(std::sync::atomic::AtomicU64::new(0)),
             usb_history_page_generation: Arc::new(std::sync::atomic::AtomicU64::new(0)),
             data_migration_running: Arc::new(AtomicBool::new(false)),

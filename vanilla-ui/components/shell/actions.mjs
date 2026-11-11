@@ -11,12 +11,28 @@ function resetSortLabel(header) {
 
 export function clearTrackSort(tableSortState, bodyId, grid) {
   delete tableSortState[bodyId];
-  if (!grid) return;
-  grid.querySelectorAll('.sortable[role="columnheader"]').forEach((h) => {
+  if (grid) renderTrackSortHeader(grid, null);
+}
+
+// Shows `sort` ({ key, dir }, or null for none) on the grid's headers: the
+// arrow on the header that owns the key (by its own key or an alternative
+// one, whose label it then shows) and the sort hint.
+export function renderTrackSortHeader(grid, sort) {
+  const headers = grid.querySelectorAll('.sortable[role="columnheader"]');
+  headers.forEach((h) => {
     h.classList.remove("sort-asc", "sort-desc");
     resetSortLabel(h);
   });
-  grid.querySelector(".sort-hint")?.classList.add("hidden");
+  grid.querySelector(".sort-hint")?.classList.toggle("hidden", !sort);
+  if (!sort) return;
+  const owner = [...headers].find((h) => h.dataset.sortKey === sort.key
+    || (h.dataset.sortAlt || "").split(",").includes(sort.key));
+  if (!owner) return;
+  owner.classList.add(sort.dir === "asc" ? "sort-asc" : "sort-desc");
+  if (owner.dataset.sortAlt) {
+    const labelEl = owner.querySelector(".sort-label");
+    if (labelEl && SORT_LABELS[sort.key]) labelEl.textContent = t(SORT_LABELS[sort.key]);
+  }
 }
 
 // The track-list controllers, keyed by the grid's `data-body-id`.
@@ -61,21 +77,7 @@ export function handleSortHeaderClick(ctx, event) {
     clearTrackSort(tableSortState, bodyId, grid);
   } else {
     tableSortState[bodyId] = nextState;
-    grid.querySelectorAll('.sortable[role="columnheader"]').forEach((h) => {
-      h.classList.remove("sort-asc", "sort-desc");
-      resetSortLabel(h);
-    });
-    const ownerTh = allKeys.includes(nextState.key)
-      ? th
-      : grid.querySelector(`[role="columnheader"][data-sort-key="${nextState.key}"]`);
-    if (ownerTh) {
-      ownerTh.classList.add(nextState.dir === "asc" ? "sort-asc" : "sort-desc");
-      if (altKeys) {
-        const labelEl = ownerTh.querySelector(".sort-label");
-        if (labelEl && SORT_LABELS[nextState.key]) labelEl.textContent = t(SORT_LABELS[nextState.key]);
-      }
-    }
-    grid.querySelector(".sort-hint")?.classList.remove("hidden");
+    renderTrackSortHeader(grid, nextState);
   }
 
   // Re-query page 1 with the new sortBy, so the sort spans the whole list.

@@ -9,7 +9,9 @@
 // The USB views answer with what the real backend returned for the demo
 // library exported to a USB (`fixture.usb`); `opts.brokenUsb` swaps in the
 // damaged copy's diagnostics. History sessions, which only a player writes,
-// are made from those USB tracks (`fixture.usbHistory`). Exporting replays
+// are made from those USB tracks (`fixture.usbHistory`). Edit order on the
+// USB Playlists page keeps a pending order that Save order makes the USB's
+// (both answered here, as the backend would). Exporting replays
 // the real export's progress messages as job events; `opts.unexported`
 // playlists show as not exported until then. `opts.tauriRuntime` makes the
 // page pass for the Tauri runtime (as tests/e2e/smoke.spec.mjs does), which
@@ -113,6 +115,44 @@
     ...listTotals(items),
     ...totalTime(items),
   });
+  // Edit order on the USB Playlists page: the pending order, as the backend
+  // holds it (null: no edit), with the backend's texts. Save order makes it the
+  // USB's order.
+  let orderEdit = null;
+  const orderEditState = () => {
+    if (!orderEdit) return { active: false, changed: false, editedPlaylistIds: [], editingText: "" };
+    const editedPlaylistIds = Object.keys(orderEdit.tracks).sort();
+    const n = editedPlaylistIds.length;
+    const count = `${n} playlist${n === 1 ? "" : "s"} changed`;
+    const editingText = orderEdit.playlists
+      ? (n ? `Editing order: playlist order and ${count}` : "Editing order: playlist order changed")
+      : (n ? `Editing order: ${count}` : "Editing order: nothing changed yet");
+    return { active: true, changed: !!orderEdit.playlists || n > 0, editedPlaylistIds, editingText };
+  };
+  const orderEditAnswer = (statusText = "") => ok({ orderEdit: orderEditState(), statusText, warnings: [], warningText: "" });
+  const usbPlaylistItems = () => {
+    const items = usb.playlists.data.items;
+    if (!orderEdit?.playlists) return items;
+    const byId = new Map(items.map((item) => [item.id, item]));
+    return orderEdit.playlists.map((id) => byId.get(id));
+  };
+  const usbPlaylistTrackItems = (id) => {
+    const items = usb.playlistTracks[id].data.items;
+    const ids = orderEdit?.tracks[id];
+    if (!ids) return items;
+    const byId = new Map(items.map((track) => [track.id, track]));
+    return ids.map((trackId) => byId.get(trackId));
+  };
+  const moveBefore = (ids, id, beforeId) => {
+    const rest = ids.filter((item) => item !== id);
+    rest.splice(beforeId == null ? rest.length : rest.indexOf(beforeId), 0, id);
+    return rest;
+  };
+  const setPendingTracks = (id, ids) => {
+    if (ids.join() === usb.playlistTracks[id].data.items.map((t) => t.id).join()) delete orderEdit.tracks[id];
+    else orderEdit.tracks[id] = ids;
+  };
+  const sortKey = (track, by) => (by === "artist" || by === "title" ? String(track[by] || "").toLowerCase() : Number(track[by]) || 0);
   const historySessions = (usbHistory || []).map(({ id, name, createdAt, titles }) => {
     const items = titles.map((title) => usbTracksByTitle.get(title)).filter(Boolean);
     return { id, name, createdAt, items };
@@ -390,9 +430,46 @@
           case "repair_usb_diagnostics":
             return ok({ ...usb.repairPreview.data, ...playlistsState() });
           case "fetch_usb_playlists":
-            return ok({ ...(usb ? usb.playlists.data : { items: [], warnings: [] }), ...playlistsState() });
+            if (!usb) return ok({ items: [], warnings: [], ...playlistsState() });
+            return ok({
+              ...usb.playlists.data,
+              items: usbPlaylistItems().map((item) => ({ ...item, orderEdited: !!orderEdit?.tracks[item.id] })),
+              orderEdit: orderEditState(),
+              orderEditBlockedText: null,
+              ...playlistsState(),
+            });
           case "fetch_usb_playlist_tracks":
-            return usb.playlistTracks[r.id];
+            return ok({ ...usb.playlistTracks[r.id].data, items: usbPlaylistTrackItems(r.id) });
+          case "begin_usb_order_edit":
+            orderEdit = { playlists: null, tracks: {} };
+            return orderEditAnswer("Editing the order: drag playlists and tracks, or sort a playlist by a column. Nothing is written until Save order.");
+          case "move_usb_playlist": {
+            const ids = moveBefore(usbPlaylistItems().map((item) => item.id), r.playlistId, r.beforePlaylistId);
+            orderEdit.playlists = ids.join() === usb.playlists.data.items.map((item) => item.id).join() ? null : ids;
+            return orderEditAnswer();
+          }
+          case "move_usb_playlist_track":
+            setPendingTracks(r.playlistId, moveBefore(usbPlaylistTrackItems(r.playlistId).map((t) => t.id), r.moveTrackId, r.beforeTrackId));
+            return orderEditAnswer();
+          case "sort_usb_playlist_tracks": {
+            const dir = r.sortDir === "desc" ? -1 : 1;
+            const sorted = usbPlaylistTrackItems(r.playlistId).slice().sort((a, b) => {
+              const [x, y] = [sortKey(a, r.sortBy), sortKey(b, r.sortBy)];
+              return (x < y ? -1 : x > y ? 1 : 0) * dir;
+            });
+            setPendingTracks(r.playlistId, sorted.map((t) => t.id));
+            return orderEditAnswer();
+          }
+          case "cancel_usb_order_edit":
+            orderEdit = null;
+            return orderEditAnswer("Order changes discarded");
+          case "commit_usb_order_edit": {
+            await sleep(900);
+            usb.playlists.data.items = usbPlaylistItems();
+            for (const id of Object.keys(orderEdit.tracks)) usb.playlistTracks[id].data.items = usbPlaylistTrackItems(id);
+            orderEdit = null;
+            return orderEditAnswer("Order saved to the USB");
+          }
           case "fetch_usb_histories":
             if (!usb) return ok({ items: [], warnings: [] });
             return ok({
@@ -509,6 +586,9 @@
     };
     addEventListener("mousemove", follow, true);
     addEventListener("pointermove", follow, true);
+    // A drag (reordering rows) sends drag events instead of mouse moves.
+    addEventListener("dragover", follow, true);
+    addEventListener("dragend", () => cursor.classList.remove("down"), true);
     addEventListener("mousedown", () => cursor.classList.add("down"), true);
     addEventListener("mouseup", () => cursor.classList.remove("down"), true);
     // Shows `label` centred at (x, y), or hides it.

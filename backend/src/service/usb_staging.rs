@@ -510,7 +510,7 @@ fn commit_local_to_usb(
     if let Some(parent) = dest.parent() {
         std::fs::create_dir_all(parent)?;
     }
-    let tmp = dest.with_extension(format!("tmp-{}", std::process::id()));
+    let tmp = write_back_temp_path(&dest);
     std::fs::copy(local_path, &tmp)?;
     std::fs::rename(&tmp, &dest)?;
     crate::logging::debug(
@@ -531,6 +531,18 @@ fn commit_local_to_usb(
     let _ = save_state(device_dir, &state);
 
     Ok(())
+}
+
+/// The file a write-back copies to before renaming it over `dest`.
+fn write_back_temp_path(dest: &Path) -> PathBuf {
+    dest.with_extension(format!("tmp-{}", std::process::id()))
+}
+
+/// Where the write-back of `kind` puts its temporary copy on the USB; a test
+/// blocks that path to make the write-back fail.
+#[cfg(test)]
+pub(crate) fn write_back_temp_path_for_test(usb_root: &Path, kind: DbKind) -> PathBuf {
+    write_back_temp_path(&vendor_path(usb_root, kind))
 }
 
 /// External-modification guard: if the USB source has moved since we last

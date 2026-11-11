@@ -279,6 +279,7 @@ fn backup_reason_text(reason: &str) -> String {
         "Before export (mirror)" => tr::backups_reason_export_mirror(),
         "Before export (additive)" => tr::backups_reason_export_additive(),
         "Before playlist reorder" => tr::backups_reason_playlist_reorder(),
+        "Before order edit" => tr::backups_reason_order_edit(),
         "Before playlist removal" => tr::backups_reason_playlist_removal(),
         "Before menu update" => tr::backups_reason_menu_update(),
         "Before background color change" => tr::backups_reason_background_color(),
@@ -424,6 +425,53 @@ impl BackendService {
         playlist_count: Option<usize>,
     ) -> Vec<WarningEntry> {
         self.backup_usb_databases_with_retention_protecting(usb_root, reason, playlist_count, None)
+    }
+
+    /// Like `backup_usb_databases_with_retention`, but when the stick's newest
+    /// backup was taken for the same `reason`, the new backup takes its place
+    /// instead of being added, so repeated saves of one kind (the order edit)
+    /// don't push other backups out of retention. Only the newest backup is
+    /// checked. The old one is removed only once the new one is written.
+    pub(crate) fn backup_usb_databases_replacing_same_reason(
+        &self,
+        usb_root: &Path,
+        reason: &str,
+    ) -> Vec<WarningEntry> {
+        let mut dirs = vec![(usb_backups_dir(usb_root), "usb")];
+        if let Some(cache_dir) = cache_backups_dir(usb_root) {
+            dirs.push((cache_dir, "cache"));
+        }
+        let newest_timestamp = |dirs: &[(PathBuf, &str)]| {
+            entries_by_timestamp(dirs)
+                .into_iter()
+                .next()
+                .map(|entry| (entry.timestamp, entry.reason))
+        };
+        let replaced = newest_timestamp(&dirs)
+            .filter(|(_, newest_reason)| newest_reason.as_deref() == Some(reason))
+            .map(|(timestamp, _)| timestamp);
+        let playlist_count = most_recent_backup_playlist_count(usb_root);
+        let notes =
+            super::usb_vendor_compat::backup_usb_databases(usb_root, reason, playlist_count);
+        if let Some(old) = replaced
+            && newest_timestamp(&dirs).is_some_and(|(new, _)| new != old)
+        {
+            // Taken in the same second, the new backup already overwrote the old one's files.
+            for (_, path) in files_for_timestamp(usb_root, &old) {
+                let _ = std::fs::remove_file(path);
+            }
+            for (dir, _) in &dirs {
+                let _ = std::fs::remove_file(backup_reason_path(dir, &old));
+            }
+        }
+        let retention_count = self
+            .db
+            .connect()
+            .ok()
+            .map(|conn| read_backup_retention_count(&conn))
+            .unwrap_or(DEFAULT_BACKUP_RETENTION_COUNT);
+        reconcile_backups(usb_root, retention_count, None);
+        notes
     }
 
     /// Same as `backup_usb_databases_with_retention`, but `protect_timestamp`

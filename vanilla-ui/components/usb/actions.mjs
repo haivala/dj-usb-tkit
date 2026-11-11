@@ -6,6 +6,10 @@ import { createDialogLifecycle } from "../shared/dialog_lifecycle.mjs";
 import { catchErr } from "../shared/track_actions.mjs";
 import { setActiveListItem } from "../shell/actions.mjs";
 import { STORAGE_KEY_USB_ROOT, STORAGE_KEY_EXPORT_ENGINE_LIBRARY } from "../../settings_keys.mjs";
+import {
+  applyUsbOrderEdit, applyUsbOrderSortClick, dropUsbOrderEdit, forgetUsbOrderSort, isUsbOrderEditing,
+  refuseWhileUsbOrderEditing, renderUsbOrderEditControls, settleUsbOrderEditBeforeLeaving
+} from "./order_edit.mjs";
 
 // Job types that scope a Tauri command to state.usbRoot -- while one of
 // these is running, the currently-selected root must not change underneath
@@ -26,6 +30,7 @@ export function setUsbRootControlsLocked(ctx, locked) {
   el.selectUsbFolderBtn.disabled = !!locked;
   el.selectUsbFolderBtn.title = locked ? t("ui-usb-select-usb-folder-busy-title") : "";
   el.usbRecentList.querySelectorAll("button").forEach((btn) => { btn.disabled = !!locked; });
+  renderUsbOrderEditControls(ctx);
   if (locked) {
     el.exportPlaylistBtn.disabled = true;
   } else {
@@ -312,8 +317,10 @@ export function clearUsbPlaylistsView(ctx) {
   const { state, el } = ctx;
   forgetUsbListRead(ctx, "usb-playlists");
   state.usbPlaylists = [];
+  state.usbOrderEditBlockedText = null;
   el.usbCountsText.textContent = "";
   renderUsbPlaylists(ctx);
+  renderUsbOrderEditControls(ctx);
   ctx.usbPlaylistTracksCtl.clear();
 }
 
@@ -433,7 +440,7 @@ async function promptDriveNameIfUnset(ctx, data) {
 // everything showing the name is refreshed from there.
 export async function renameDrive(ctx) {
   const { state } = ctx;
-  if (isUsbRootChangeBlocked(state)) return;
+  if (isUsbRootChangeBlocked(state) || refuseWhileUsbOrderEditing(ctx)) return;
   const saved = await openDriveNameDialog(ctx, state.usbDeviceName);
   if (!saved) return;
   ctx.emitStatus(saved.statusText);
@@ -509,6 +516,8 @@ export async function validateAndSetUsbRoot(ctx, path) {
 
   const input = String(path || "").trim();
   const previousRoot = state.usbRoot;
+  // Another stick (or none): an order edit on this one is saved, discarded or kept.
+  if (input !== (previousRoot || "") && !(await settleUsbOrderEditBeforeLeaving(ctx))) return false;
   if (input && previousRoot && input !== previousRoot) {
     hideUsbDiagnostics(ctx);
   }
@@ -517,6 +526,8 @@ export async function validateAndSetUsbRoot(ctx, path) {
   // path) and saves it as the folder the app reopens with.
   const data = await command("select_usb", { path: input });
   const { valid, canInitialize } = data;
+  // The same stick, gone: its order edit can't be saved any more.
+  if (!valid) await dropUsbOrderEdit(ctx);
   state.usbRootValid = valid;
   state.usbRoot = input ? data.normalizedRoot || input : null;
   updateUsbRootText(ctx, state.usbRoot, valid);
@@ -554,6 +565,7 @@ export async function validateAndSetUsbRoot(ctx, path) {
 
 export async function removeUsbPlaylist(ctx, playlist) {
   const { state, emitStatus } = ctx;
+  if (refuseWhileUsbOrderEditing(ctx)) return;
   const confirmed = await ctx.openConfirmDialog({
     title: t("ui-usb-playlists-remove-title"),
     message: playlist.removeConfirmText,
@@ -571,22 +583,6 @@ export async function removeUsbPlaylist(ctx, playlist) {
   emitStatus(data.statusText, { warningText: data.warningText });
 }
 
-export async function reorderUsbPlaylists(ctx) {
-  const { state, emitStatus } = ctx;
-  try {
-    const data = await ctx.command("reorder_usb_playlists", {
-      usbRoot: state.usbRoot,
-      orderedPlaylistIds: state.usbPlaylists.map((p) => p.id)
-    });
-    clearUsbDiagnostics(ctx);
-    emitStatus(data.statusText, { warningText: data.warningText });
-  } catch (err) {
-    // The drag already moved the row: read the real order back. A failed read shows on the
-    // progress bar itself; the status line is the save's failure either way.
-    await refreshUsb(ctx).catch((readErr) => console.error("USB playlist re-read failed:", readErr));
-    emitStatus(err?.message || String(err));
-  }
-}
 // USB workflow orchestration.
 
 // Each USB list page: its <ul> (which carries the `data-loaded` mark), its read,
@@ -645,6 +641,9 @@ export function openUsbPlaylistRow(ctx, btn) {
   const { state, el, usbPlaylistTracksCtl, emitStatus } = ctx;
   const playlist = findByScopeId(state.usbPlaylists, btn.dataset.usbPlaylist);
   setActiveListItem(el.usbPlaylists, btn);
+  if (isUsbOrderEditing(state) && String(playlist.id) !== String(usbPlaylistTracksCtl.scopeId)) {
+    forgetUsbOrderSort(ctx);
+  }
   // The controller fetches page 1 (paginated + hydrated server-side),
   // renders it, and sets the "Total time" footer from the response.
   usbPlaylistTracksCtl.load({ scopeId: playlist.id }).catch((err) => {
@@ -706,7 +705,8 @@ async function readUsbPlaylists(ctx, isCurrent) {
   ctx.applyPlaylistsState(data);
 
   el.usbCountsText.textContent = data.summaryText;
-  renderUsbPlaylists(ctx);
+  // Renders the list too.
+  applyUsbOrderEdit(ctx, data.orderEdit, data.orderEditBlockedText);
   keepOpenUsbPlaylist(ctx);
   // The freshly scanned status may flip an open local playlist's reorder lock.
   await ctx.renderCurrentPlaylistTracksFromState();
@@ -768,6 +768,7 @@ export async function runUsbParityReport(ctx) {
 
 export async function previewUsbRepairs(ctx) {
   const { state, emitStatus } = ctx;
+  if (refuseWhileUsbOrderEditing(ctx)) return;
   emitStatus(t("ui-usb-repair-previewing"));
   const data = await ctx.command("repair_usb_diagnostics", {
     usbRoot: state.usbRoot
@@ -778,6 +779,7 @@ export async function previewUsbRepairs(ctx) {
 
 export async function applyUsbRepairs(ctx) {
   const { state, emitStatus } = ctx;
+  if (refuseWhileUsbOrderEditing(ctx)) return;
   emitStatus(t("ui-usb-repair-applying"));
   const selectedFixIds = Array.from(state.selectedRepairFixIds);
   const data = await ctx.command("repair_usb_diagnostics", {
@@ -956,6 +958,7 @@ export async function loadUsbPlayerMenuConfig(ctx) {
 // item stays selected, in whichever list it is now in.
 async function editUsbPlayerMenu(ctx, action, kind, side) {
   const { state, emitStatus } = ctx;
+  if (refuseWhileUsbOrderEditing(ctx)) return;
   const data = await ctx.command("update_usb_player_menu_config", {
     usbRoot: state.usbRoot,
     action,
@@ -1013,6 +1016,7 @@ export async function loadUsbBackgroundColor(ctx) {
 
 export async function setUsbBackgroundColor(ctx, color) {
   const { state, emitStatus } = ctx;
+  if (refuseWhileUsbOrderEditing(ctx)) return;
   const data = await ctx.command("set_usb_background_color", { usbRoot: state.usbRoot, color });
   state.usbBackgroundColor = data;
   if (data.updated) clearUsbDiagnostics(ctx);
@@ -1025,7 +1029,7 @@ export async function setUsbBackgroundColor(ctx, color) {
 // export too).
 export async function exportPlaylistToUsb(ctx, playlistId) {
   const { state } = ctx;
-  if (state.exportStarting || isUsbRootChangeBlocked(state)) return;
+  if (state.exportStarting || isUsbRootChangeBlocked(state) || refuseWhileUsbOrderEditing(ctx)) return;
   state.exportStarting = true;
   ctx.updatePlaylistExportButtons();
   try {
@@ -1098,6 +1102,7 @@ export function renderUsbPlaylists(ctx) {
     btn.dataset.usbPlaylist = playlist.id;
     btn.classList.toggle("active", String(playlist.id) === openId);
     btn.querySelector(".playlist-label").textContent = playlist.name;
+    btn.querySelector(".playlist-order-edited").classList.toggle("hidden", !playlist.orderEdited);
     btn.querySelector(".playlist-remove").dataset.usbRemovePlaylist = playlist.id;
     return li;
   }));
@@ -1145,7 +1150,7 @@ export function renderHistoryList(ctx) {
 // The USB-playlist and USB-history track tables' data layer: paginated +
 // searched + sorted + per-page-hydrated by the backend, rendered via the shared
 // controller. Selection/search/sort/scroll all go through it.
-function createUsbTracksController(ctx, { bodyId, selectionView, fetchCommand, secondaryActionType, actionType, getItems, onScopeChange }) {
+function createUsbTracksController(ctx, { bodyId, selectionView, fetchCommand, secondaryActionType, actionType, getItems, onScopeChange, dragOptions = () => ({}) }) {
   const ctl = createTrackListController({
     bodyId,
     onScopeChange,
@@ -1177,6 +1182,7 @@ function createUsbTracksController(ctx, { bodyId, selectionView, fetchCommand, s
       actionType,
       origin: "usb",
       secondaryActionType,
+      ...dragOptions(),
     }),
     buildRow: ctx.buildTrackTableRow,
     renderEmpty: ctx.renderEmptyTrackTable,
@@ -1190,7 +1196,7 @@ function createUsbTracksController(ctx, { bodyId, selectionView, fetchCommand, s
 }
 
 export function createUsbPlaylistTracksController(ctx) {
-  return createUsbTracksController(ctx, {
+  const ctl = createUsbTracksController(ctx, {
     bodyId: "usbPlaylistTracks",
     selectionView: "usbPlaylist",
     fetchCommand: "fetch_usb_playlist_tracks",
@@ -1198,7 +1204,20 @@ export function createUsbPlaylistTracksController(ctx) {
     secondaryActionType: "play-usb",
     getItems: () => ctx.state.usbPlaylists,
     onScopeChange: () => renderUsbPlaylistHeading(ctx),
+    // The drag handles show only during Edit order, disabled while searching.
+    dragOptions: () => {
+      const editing = isUsbOrderEditing(ctx.state);
+      return {
+        reservesDragColumn: true,
+        enableDragReorder: editing && !ctl.query,
+        dragDisabledTooltip: editing && ctl.query ? t("ui-usb-playlists-drag-search-active") : null,
+      };
+    },
   });
+  // While editing, a column sort is the playlist's new (pending) order.
+  const applyViewSort = ctl.applyHeaderSort;
+  ctl.applyHeaderSort = () => (isUsbOrderEditing(ctx.state) ? applyUsbOrderSortClick(ctx) : applyViewSort());
+  return ctl;
 }
 
 export function createUsbHistoryTracksController(ctx) {
@@ -1215,6 +1234,7 @@ export function createUsbHistoryTracksController(ctx) {
 
 export async function initializeUsb(ctx) {
   const { state, el, emitStatus } = ctx;
+  if (refuseWhileUsbOrderEditing(ctx)) return;
   try {
     const data = await ctx.command("initialize_usb", { usbRoot: state.usbRoot });
     emitStatus(data.statusText);

@@ -69,13 +69,14 @@ export function bindShellEvents(ctx) {
   });
   resizer?.addEventListener("dblclick", () => saveSidebarWidth(SIDEBAR_WIDTH_DEFAULT));
 
-  el.confirmOkBtn.addEventListener("click", () => confirmDialog.close(true));
-  el.confirmCancelBtn.addEventListener("click", () => confirmDialog.close(false));
+  el.confirmOkBtn.addEventListener("click", () => confirmDialog.choose("confirm"));
+  el.confirmAltBtn.addEventListener("click", () => confirmDialog.choose("alt"));
+  el.confirmCancelBtn.addEventListener("click", () => confirmDialog.choose("cancel"));
   document.addEventListener("keydown", (event) => {
     if (!confirmDialog.isOpen()) return;
     if (event.key === "Enter" && document.activeElement === el.confirmOkBtn) {
       event.preventDefault();
-      confirmDialog.close(true);
+      confirmDialog.choose("confirm");
     }
   });
 

@@ -32,20 +32,20 @@ use crate::models::{
     RemoveSourceFolderRequest, RemoveTracksFromPlaylistData, RemoveTracksFromPlaylistRequest,
     RemoveUsbPlaylistData, RemoveUsbPlaylistRequest, RenamePlaylistData, RenamePlaylistRequest,
     ReorderPlaylistTracksData, ReorderPlaylistTracksRequest, ReorderPlaylistsData,
-    ReorderPlaylistsRequest, ReorderUsbPlaylistsData, ReorderUsbPlaylistsRequest,
-    RepairUsbDiagnosticsData, RepairUsbDiagnosticsRequest, ResolvePlaybackSourceData,
-    ResolvePlaybackSourceRequest, ResolveTrackIdentityData, ResolveTrackIdentityRequest,
-    RestoreUsbBackupData, RestoreUsbBackupRequest, RunDataMigrationsData, RunUsbDiagnosticsData,
-    RunUsbDiagnosticsRequest, RunUsbParityReportData, RunUsbParityReportRequest,
-    SaveTrackAnalysisEditsData, SaveTrackAnalysisEditsRequest, SaveTrackMetadataEditsData,
-    SaveTrackMetadataEditsRequest, SaveUsbTrackAnalysisEditsData, SaveUsbTrackAnalysisEditsRequest,
-    SaveUsbTrackMetadataEditsData, SaveUsbTrackMetadataEditsRequest, ScanLibraryData,
-    ScanLibraryRequest, ScanMixxxDbRequest, ScanRekordboxDbRequest, SetAnalysisPausedData,
-    SetExternalLibraryEnabledRequest, SetFrontendSettingData, SetFrontendSettingRequest,
-    SetPlaybackMetronomeRequest, SetSourceFolderEnabledRequest, SetUsbBackgroundColorRequest,
-    SetUsbDeviceNameData, SetUsbDeviceNameRequest, StopPlaybackData, TrackDetail,
-    TracksMetadataSummary, UpdateUsbPlayerMenuConfigData, UpdateUsbPlayerMenuConfigRequest,
-    UsbBackgroundColorData, UsbTrackAnalysisDetail, WithPlaylists,
+    ReorderPlaylistsRequest, RepairUsbDiagnosticsData, RepairUsbDiagnosticsRequest,
+    ResolvePlaybackSourceData, ResolvePlaybackSourceRequest, ResolveTrackIdentityData,
+    ResolveTrackIdentityRequest, RestoreUsbBackupData, RestoreUsbBackupRequest,
+    RunDataMigrationsData, RunUsbDiagnosticsData, RunUsbDiagnosticsRequest, RunUsbParityReportData,
+    RunUsbParityReportRequest, SaveTrackAnalysisEditsData, SaveTrackAnalysisEditsRequest,
+    SaveTrackMetadataEditsData, SaveTrackMetadataEditsRequest, SaveUsbTrackAnalysisEditsData,
+    SaveUsbTrackAnalysisEditsRequest, SaveUsbTrackMetadataEditsData,
+    SaveUsbTrackMetadataEditsRequest, ScanLibraryData, ScanLibraryRequest, ScanMixxxDbRequest,
+    ScanRekordboxDbRequest, SetAnalysisPausedData, SetExternalLibraryEnabledRequest,
+    SetFrontendSettingData, SetFrontendSettingRequest, SetPlaybackMetronomeRequest,
+    SetSourceFolderEnabledRequest, SetUsbBackgroundColorRequest, SetUsbDeviceNameData,
+    SetUsbDeviceNameRequest, StopPlaybackData, TrackDetail, TracksMetadataSummary,
+    UpdateUsbPlayerMenuConfigData, UpdateUsbPlayerMenuConfigRequest, UsbBackgroundColorData,
+    UsbTrackAnalysisDetail, WithPlaylists,
 };
 use crate::player::{PlaybackController, PlaybackTransition};
 use crate::service::BackendService;
@@ -677,27 +677,60 @@ impl BackendCommands {
         )
     }
 
-    pub fn reorder_usb_playlists(
+    pub fn begin_usb_order_edit(
         &self,
-        req: ReorderUsbPlaylistsRequest,
-    ) -> ApiResponse<ReorderUsbPlaylistsData> {
-        wrap_failed(
-            self.service.reorder_usb_playlists(req),
-            tr::usb_playlists_order_failed,
-        )
+        req: crate::models::UsbOrderEditRequest,
+    ) -> ApiResponse<crate::models::UsbOrderEditData> {
+        wrap(self.service.begin_usb_order_edit(req))
     }
 
-    pub fn reorder_usb_playlists_with_progress<F>(
+    pub fn move_usb_playlist(
         &self,
-        req: ReorderUsbPlaylistsRequest,
+        req: crate::models::MoveUsbPlaylistRequest,
+    ) -> ApiResponse<crate::models::UsbOrderEditData> {
+        wrap(self.service.move_usb_playlist(req))
+    }
+
+    pub fn move_usb_playlist_track(
+        &self,
+        req: crate::models::MoveUsbPlaylistTrackRequest,
+    ) -> ApiResponse<crate::models::UsbOrderEditData> {
+        wrap(self.service.move_usb_playlist_track(req))
+    }
+
+    pub fn sort_usb_playlist_tracks(
+        &self,
+        req: crate::models::SortUsbPlaylistTracksRequest,
+    ) -> ApiResponse<crate::models::UsbOrderEditData> {
+        wrap(self.service.sort_usb_playlist_tracks(req))
+    }
+
+    pub fn cancel_usb_order_edit(
+        &self,
+        req: crate::models::UsbOrderEditRequest,
+    ) -> ApiResponse<crate::models::UsbOrderEditData> {
+        wrap(self.service.cancel_usb_order_edit(req))
+    }
+
+    pub fn commit_usb_order_edit(
+        &self,
+        req: crate::models::UsbOrderEditRequest,
+    ) -> ApiResponse<crate::models::UsbOrderEditData> {
+        self.commit_usb_order_edit_with_progress(req, |_, _, _| {})
+    }
+
+    pub fn commit_usb_order_edit_with_progress<F>(
+        &self,
+        req: crate::models::UsbOrderEditRequest,
         on_progress: F,
-    ) -> ApiResponse<ReorderUsbPlaylistsData>
+    ) -> ApiResponse<crate::models::UsbOrderEditData>
     where
         F: FnMut(usize, usize, &str),
     {
-        wrap(
+        wrap_failed(
             self.service
-                .reorder_usb_playlists_with_progress(req, on_progress),
+                .commit_usb_order_edit_with_progress(req, on_progress),
+            tr::usb_order_edit_save_failed,
         )
     }
 

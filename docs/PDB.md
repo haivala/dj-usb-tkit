@@ -830,8 +830,12 @@ parent-scoped order.
 
 ## Playlist Reordering
 
-Outside of export, the `reorder_usb_playlists` command lets the user
-drag-and-drop reorder the USB playlist list in the UI. Unlike the
+Outside of export, the USB Playlists page's Edit order puts the USB
+playlists, and the tracks in each of them, in a new order: the backend holds
+the pending order (`begin_usb_order_edit`, `move_usb_playlist`,
+`move_usb_playlist_track`, `sort_usb_playlist_tracks`) and
+`commit_usb_order_edit` writes it, after one backup, in one pass per
+database, each saved to the USB once. Unlike the
 export-time placement above, every playlist gets its position in the whole
 requested list — it does not scope by parent/folder, matching how
 `fetch_usb_playlists` already sorts and displays the flat playlist list.
@@ -845,6 +849,15 @@ database is reordered there. Because eDB-only playlists hold positions too,
 `t07.sort_order` can have gaps when the list includes them; a list without them
 stays consecutive. `fetch_usb_playlists` sorts PDB rows by `t07.sort_order` and
 eDB-only rows by `sequenceNo` together.
+
+A playlist's track order is its t08 entries' `entry_index`. The commit patches
+those in place (`patch_t08_entry_indices_in_place`), renumbered from the
+playlist's lowest `entry_index`; the entries stay where they are on their pages
+and nothing else on them changes. The eDB gets the same order in
+`playlist_content.sequenceNo`. Tracks are matched across the two by their file
+path, so an entry only one database lists keeps its place after the listed ones.
+A playlist that lists the same track twice in the PDB keeps its PDB order, with
+a warning (the USB diagnostics repair those).
 
 ## Menu Catalog
 

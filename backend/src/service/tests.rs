@@ -2373,7 +2373,12 @@ fn browse_source_files_lists_a_subfolders_tracks_once() {
         (ids, data.total, data.list_track_count)
     };
     assert_eq!(listed(), (vec!["nested".into(), "top".into()], 2, 2));
-    let filtering = || service.get_library_sources().expect("library sources").filtering;
+    let filtering = || {
+        service
+            .get_library_sources()
+            .expect("library sources")
+            .filtering
+    };
     assert!(!filtering());
 
     // Switching the parent off leaves the subfolder as a filter.

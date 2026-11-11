@@ -17,7 +17,7 @@ database health, which is what this project actually implements.
 | License | Open source (AGPL-3.0-or-later) | Closed source, proprietary |
 | Runs fully offline | Yes — local-first, no account or cloud dependency required | Has optional cloud/account-linked features |
 | USB export sync control | Explicit `mirror` or `additive` mode per export (see below) | Playlist re-export behavior is not user-selectable the same way |
-| USB playlist sorting | Drag-and-drop reorder of playlists already on the USB, written back to PDB and eDB in place | Requires the library to be managed and re-exported from Rekordbox |
+| USB playlist sorting | Drag-and-drop or sort playlists already on the USB and the tracks in them, written back to PDB and eDB in place | Requires the library to be managed and re-exported from Rekordbox |
 | USB diagnostics | Dedicated operational + strict-parity reports, read-only | Not exposed as a standalone diagnostic tool |
 | USB repair | Preview-first repair catalog for a defined set of PDB/eDB structural issues, hardware-validated | No equivalent user-facing repair tooling |
 | Pre-export backups | Automatic timestamped PDB/eDB backups before every export and repair write | Not automatic in the same way |
@@ -62,10 +62,13 @@ force a clean resync when that's what's wanted instead.
 
 ## Reordering playlists directly on the USB
 
-The USB Playlists panel supports drag-and-drop reordering of the playlist
-list on an already-exported USB (`reorder_usb_playlists`). This writes the
-same order to `t07.sort_order` in PDB, in place, and to eDB `playlist.sequenceNo`,
-so the new order shows up on CDJs and in Rekordbox itself, not
+The USB Playlists panel's Edit order puts the playlists on an
+already-exported USB, and the tracks in them, in a new order by drag-and-drop
+or a column sort; Save order writes it (`commit_usb_order_edit`). The playlist
+order goes to `t07.sort_order` in PDB, in place, and to eDB
+`playlist.sequenceNo`; the track order to the PDB's t08 `entry_index` and the
+eDB's `playlist_content.sequenceNo`. So the new order shows up on CDJs and in
+Rekordbox itself, not
 just in DJ USB Tkit — and strict-parity ordering checks stay green. See
 "Playlist Reordering" in [`docs/PDB.md`](PDB.md). This works on the USB
 directly; it doesn't require reordering the source playlist locally and

@@ -381,7 +381,28 @@ applies them as they come and never asks for the list again after a change.
   databases and saves both to the USB or neither; answers like
   `get_usb_background_color`. Setting the colour both already hold writes nothing.
 - `remove_usb_playlist`
-- `reorder_usb_playlists`
+- `begin_usb_order_edit` — `{ usbRoot }`, starts Edit order on the USB Playlists page: a
+  pending order of the USB's playlists and of the tracks in them, held by the backend and written
+  only by `commit_usb_order_edit`. Refused (`usb_read_only`) when the USB can't be written, and
+  while another USB write runs. `fetch_usb_playlists` and `fetch_usb_playlist_tracks` show the
+  pending order while the edit is on; `fetch_usb_playlists` answers with `orderEdit` (`active`,
+  `changed`, `editedPlaylistIds`, `editingText`), each playlist's `orderEdited`, and
+  `orderEditBlockedText` (why Edit order can't start, e.g. a read-only USB). Selecting another
+  USB ends the edit.
+- `move_usb_playlist` — `{ usbRoot, playlistId, beforePlaylistId }`, moves a playlist to just
+  before another one (`null`: to the end) in the pending order.
+- `move_usb_playlist_track` — `{ usbRoot, playlistId, moveTrackId, beforeTrackId }`, the same
+  for one track of a playlist. A history list (`usb-h-…`) is refused.
+- `sort_usb_playlist_tracks` — `{ usbRoot, playlistId, sortBy, sortDir }`, makes a column sort
+  the playlist's pending order.
+- `cancel_usb_order_edit` — `{ usbRoot }`, drops the pending order; works when the USB is gone.
+- `commit_usb_order_edit` — `{ usbRoot }`, a USB write job: one backup ("Before order edit",
+  replacing the previous one of the same reason), the new playlist order and track order written
+  to the PDB (t07 sort orders, t08 `entry_index`) and to the eDB (`playlist.sequenceNo`,
+  `playlist_content.sequenceNo`), each saved to the USB once, then one Engine DJ rebuild. A
+  failure keeps the edit on (Save again retries on fresh USB data); a failure after the PDB was
+  saved but before the eDB was says so (`partial`). The move, sort, cancel and begin commands
+  answer `{ orderEdit, statusText, warnings, warningText }`, as this one does.
 - `inspect_usb_track` — `{ source, track, warnings }`; `track` is the whole
   row as a page shows it (library id resolved), with `needsHydration` false.
 - `initialize_usb`
@@ -433,7 +454,7 @@ sort: it is saved as the playlist's track order before the export, as `reorder_p
 - `backupBeforeExport = true` (default) -> copies PDB and eDB to a backups folder next to them with a timestamp before each export; no-op if the files do not yet exist
 - `backupBeforeExport = false` -> skips backup step
 
-Every command that changes the USB's rekordbox data (`export_to_usb`, `reorder_usb_playlists`,
+Every command that changes the USB's rekordbox data (`export_to_usb`, `commit_usb_order_edit`,
 `remove_usb_playlist`, `save_usb_track_analysis_edits`, `save_usb_track_metadata_edits`,
 `restore_usb_backup`, `repair_usb_diagnostics` with `apply`, and the player-menu updates) then
 rebuilds the Engine DJ
@@ -511,7 +532,7 @@ on `job.completed`, the final `message` and, when the job logged warnings, `warn
 their turn come on `job.tracks_waiting` (`waitingTrackIds`, `waitingTooltip`) and leave on the
 track's first progress event, or on `job.tracks_not_waiting` after a cancel.
 
-`fetch_usb_playlists`, `fetch_usb_histories`, `reorder_usb_playlists`,
+`fetch_usb_playlists`, `fetch_usb_histories`, `commit_usb_order_edit`,
 `remove_usb_playlist` and `export_to_usb` return `warningText` beside `statusText`: the
 status line's link to the Event Log ("(2 warnings)", counting the warnings and errors among
 `warnings`), empty when there are none. The UI shows it after the status line; nothing in

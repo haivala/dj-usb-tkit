@@ -76,6 +76,12 @@ export function createInitialState() {
     playlistCreating: null,
     playlistTrackSearch: "",
     usbPlaylists: [],
+    // The backend's `UsbOrderEditState` (Edit order on the USB Playlists page),
+    // why Edit order can't start on this stick (read-only), and the column sort
+    // the pending order last took (see components/usb/order_edit.mjs).
+    usbOrderEdit: { active: false },
+    usbOrderEditBlockedText: null,
+    usbOrderSortChoice: null,
     // Keyed by local playlist id -- { sameNameExistsOnUsb, locksReorder },
     // computed server-side (see backend's PlaylistUsbExportStatus) whenever a
     // command scans the connected USB's playlist names, so the frontend never

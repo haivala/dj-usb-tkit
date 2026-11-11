@@ -291,6 +291,13 @@
         <div class="panel-header">
           <h2 data-text="ui-usb-playlists-title"></h2>
           <span class="muted panel-header-meta" id="usbCountsText"></span>
+          <!-- Edit order: the playlists' and their tracks' order, saved in one write. -->
+          <div class="panel-header-end usb-order-edit hidden" id="usbOrderEditBar">
+            <span class="muted panel-header-meta hidden" id="usbOrderEditText"></span>
+            <button type="button" id="usbEditOrderBtn" data-text="ui-usb-playlists-edit-order"></button>
+            <button type="button" id="usbCancelOrderBtn" class="hidden" data-text="ui-common-cancel"></button>
+            <button type="button" id="usbSaveOrderBtn" class="hidden" data-primary disabled data-text="ui-usb-playlists-save-order"></button>
+          </div>
         </div>
         <div class="split">
           <ul id="usbPlaylists" class="list list-compact left" data-empty-text="No playlists on this USB."></ul>
@@ -317,6 +324,7 @@
               <div class="track-grid" data-track-grid data-body-id="usbPlaylistTracks" role="table" data-text-aria-label="ui-track-table-usb-playlist-tracks-aria-label">
                 <div class="track-grid-head" role="rowgroup">
                   <div class="track-grid-row" role="row">
+                    <div class="track-grid-cell" role="columnheader"></div>
                     <div class="track-grid-cell" role="columnheader"><input type="checkbox" data-select-all="usbPlaylist" data-text-aria-label="ui-track-table-select-all-aria-label" /></div>
                     <div class="track-grid-cell" role="columnheader"></div>
                     <div class="track-grid-cell th-waveform" role="columnheader"><span class="sort-hint hidden" data-text="ui-track-table-sort-hint"></span></div>
@@ -803,6 +811,7 @@
       <p id="confirmMessage" class="muted"></p>
       <div class="row confirm-actions">
         <button id="confirmCancelBtn" data-text="ui-common-cancel"></button>
+        <button id="confirmAltBtn" hidden></button>
         <button id="confirmOkBtn" data-primary></button>
       </div>
     </div>
@@ -1026,7 +1035,7 @@
   <!-- USB panels -->
   <template id="tplMutedListItem"><li class="muted"></li></template>
   <template id="tplUsbPlaylistItem">
-    <li><button><span class="drag-handle" data-usb-drag-handle draggable="true" data-text-tooltip="ui-usb-drag-to-reorder" data-text-aria-label="ui-usb-drag-to-reorder">&#10495;</span><span class="playlist-label"></span><span class="playlist-remove" data-text-tooltip="ui-usb-remove" data-text-aria-label="ui-usb-remove">&times;</span></button></li>
+    <li><button><span class="drag-handle" data-usb-drag-handle draggable="true" data-text-tooltip="ui-usb-drag-to-reorder" data-text-aria-label="ui-usb-drag-to-reorder">&#10495;</span><span class="playlist-label"></span><span class="playlist-order-edited hidden" data-text-tooltip="ui-usb-playlists-order-edited" data-text-aria-label="ui-usb-playlists-order-edited">&#9679;</span><span class="playlist-remove" data-text-tooltip="ui-usb-remove" data-text-aria-label="ui-usb-remove">&times;</span></button></li>
   </template>
   <template id="tplHistoryItem"><li><button><span class="playlist-label"></span><span class="history-date muted"></span></button></li></template>
   <template id="tplUsbAudioFormatChip">

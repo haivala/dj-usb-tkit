@@ -131,17 +131,31 @@ export function syncLibraryOnboardingMode(ctx) {
   );
 }
 
+// The confirm dialog. `open` asks yes/no and resolves a boolean. `openChoice`
+// adds a third button and resolves which of the three was picked: "confirm",
+// "alt" or "cancel" (Escape and a backdrop click are "cancel" in both).
 export function createConfirmDialogController(el) {
-  const dialog = createDialogLifecycle(el.confirmOverlay, { cancelValue: false });
+  const dialog = createDialogLifecycle(el.confirmOverlay, { cancelValue: "cancel" });
+
+  function show({ title, message, confirmLabel, altLabel = null, cancelLabel = null }) {
+    el.confirmTitle.textContent = title || t("ui-common-confirm");
+    el.confirmMessage.textContent = message || "";
+    el.confirmOkBtn.textContent = confirmLabel || t("ui-common-confirm");
+    el.confirmAltBtn.hidden = !altLabel;
+    el.confirmAltBtn.textContent = altLabel || "";
+    el.confirmCancelBtn.textContent = cancelLabel || t("ui-common-cancel");
+    return dialog.open(el.confirmOkBtn);
+  }
 
   return {
     isOpen: dialog.isOpen,
-    close: (result) => dialog.close(!!result),
-    open({ title, message, confirmLabel = t("ui-common-confirm") }) {
-      el.confirmTitle.textContent = title || t("ui-common-confirm");
-      el.confirmMessage.textContent = message || "";
-      el.confirmOkBtn.textContent = confirmLabel;
-      return dialog.open(el.confirmOkBtn);
+    // "confirm", "alt" or "cancel": the button that was clicked.
+    choose: (choice) => dialog.close(choice),
+    async open(options) {
+      return (await show({ ...options, altLabel: null, cancelLabel: null })) === "confirm";
+    },
+    openChoice(options) {
+      return show(options);
     }
   };
 }

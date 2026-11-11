@@ -98,6 +98,21 @@ returned alongside `fetch_usb_playlists`/`run_usb_diagnostics` rather than
 re-derived per UI spot from raw state; the same status also backs the Export
 button's "Append to..." label.
 
+The USB Playlists page shows a playlist on the stick in its own order. Browsing it, a column
+sort only changes the view, and there are no drag handles. **Edit order** (in the page's title
+row) turns on an edit of the whole stick's order: drag the playlists in the list, drag tracks
+inside a playlist (not while searching), or click a column sort to make it that playlist's order.
+The backend holds the pending order and the pages show it; playlists whose track order changed
+get a mark. Nothing is written until **Save order**, which saves it all in one write (see
+`commit_usb_order_edit` in `docs/COMMANDS.md`); **Cancel** drops it. A failed save keeps the edit
+on. Leaving the USB pages or selecting another stick with unsaved changes asks to save, discard
+or stay; a stick that's gone drops the edit. Other USB writes (export, repair, removing a
+playlist, the player menu) wait until the edit ends. The app playlist and the USB playlist share
+the track-row drag code (`components/shared/track_drag_reorder.mjs`), both committing a view sort
+the moment a drag starts.
+
+![Edit order on the USB: a playlist and a track dragged, a BPM sort, then Save order](assets/usb-playlist-order.webp)
+
 Each row of an app playlist has a small icon next to the checkbox: a USB plug for a track on a USB
 stick (`isUsbPath`), a folder for any other. It's red when the track isn't available: a USB track
 whose USB isn't the selected one, or a file that can't be found. The icon, its state and its tooltip

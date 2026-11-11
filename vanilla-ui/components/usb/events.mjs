@@ -1,5 +1,10 @@
 import { catchErr, handleTrackAction, resolveRowActionTrack } from "../shared/track_actions.mjs";
-import { bindListDragReorder, moveArrayItem } from "../shared/list_drag_reorder.mjs";
+import { bindListDragReorder } from "../shared/list_drag_reorder.mjs";
+import { bindTrackDragReorder } from "../shared/track_drag_reorder.mjs";
+import {
+  beginUsbOrderEdit, cancelUsbOrderEdit, commitUsbViewSort, isUsbOrderEditing, isUsbViewSortActive,
+  moveUsbPlaylistInOrder, moveUsbPlaylistTrackInOrder, saveUsbOrderEdit
+} from "./order_edit.mjs";
 import { bindUsbAudioFormatEvents } from "./audio_formats.mjs";
 import { bindTrackSelection } from "../shared/track_selection.mjs";
 import { addSelectionToPlaylists } from "../shared/add_to_playlists.mjs";
@@ -28,7 +33,6 @@ export function bindUsbEvents(ctx) {
     usbPlaylistTracksCtl,
     usbHistoryTracksCtl,
     removeUsbPlaylist,
-    reorderUsbPlaylists,
     stopPlaybackIfActive,
     hydrateUsbTrackMetadata,
     pruneUsbDevice,
@@ -214,14 +218,34 @@ export function bindUsbEvents(ctx) {
     emitStatus(ctx.openUsbPlaylistRow(btn).selectedText);
   });
 
+  // Edit order: the handles show only while editing (CSS on the list's
+  // `is-order-editing`).
+  el.usbEditOrderBtn.addEventListener("click", () => {
+    beginUsbOrderEdit(ctx).catch(catchErr(emitStatus));
+  });
+  el.usbCancelOrderBtn.addEventListener("click", () => {
+    cancelUsbOrderEdit(ctx).catch(catchErr(emitStatus));
+  });
+  el.usbSaveOrderBtn.addEventListener("click", () => {
+    saveUsbOrderEdit(ctx).catch(catchErr(emitStatus));
+  });
+
   bindListDragReorder(el.usbPlaylists, {
     handleSelector: "[data-usb-drag-handle]",
     itemSelector: "li",
-    onMove: (fromIndex, toIndex) => {
-      state.usbPlaylists = moveArrayItem(state.usbPlaylists, fromIndex, toIndex);
-      // It reports its own failure (and re-reads the real order).
-      reorderUsbPlaylists();
-    }
+    // It reports its own failure (and re-reads the real order).
+    onMove: (fromIndex, toIndex) => moveUsbPlaylistInOrder(ctx, fromIndex, toIndex),
+  });
+
+  bindTrackDragReorder(el.usbPlaylistTracks, usbPlaylistTracksCtl, {
+    scrollContainer: el.usbPlaylistTracks.closest(".table-wrap"),
+    canDrag: () => isUsbOrderEditing(state) && !usbPlaylistTracksCtl.query,
+    sortActive: () => isUsbViewSortActive(ctx),
+    commitSort: () => commitUsbViewSort(ctx),
+    onMove: (move) => moveUsbPlaylistTrackInOrder(ctx, move),
+    // Re-read in place: the dropped row stays where the user is.
+    onSettled: () => usbPlaylistTracksCtl.load(),
+    emitStatus,
   });
 
   el.usbPlaylistTracks.addEventListener("click", async (event) => {

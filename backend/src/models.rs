@@ -1794,6 +1794,9 @@ pub struct UsbPlaylist {
     /// How many of `tracks` have no known duration: the "N without length"
     /// count.
     pub duration_unknown_count: usize,
+    /// The pending order edit changed this playlist's track order (the list's mark).
+    #[serde(default)]
+    pub order_edited: bool,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -1854,7 +1857,15 @@ pub struct PlaylistUsbExportStatus {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct FetchUsbPlaylistsData {
+    /// In the pending order while an order edit is on.
     pub items: Vec<UsbPlaylist>,
+    /// The order edit's state for this USB.
+    #[serde(default)]
+    pub order_edit: UsbOrderEditState,
+    /// Edit order's tooltip when the USB can't be written (the button is disabled); `None`
+    /// when it can.
+    #[serde(default)]
+    pub order_edit_blocked_text: Option<String>,
     pub stats: UsbImportStats,
     /// The panel's totals ("3 playlists, 30 tracks"). The track figure is the sum
     /// over `items` (post name-dedupe), not a distinct count, so a track in two
@@ -1900,21 +1911,79 @@ pub struct RemoveUsbPlaylistData {
     pub warning_text: String,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+/// The USB a USB order-edit command works on: `begin_usb_order_edit`,
+/// `commit_usb_order_edit`, `cancel_usb_order_edit`.
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
-pub struct ReorderUsbPlaylistsRequest {
+pub struct UsbOrderEditRequest {
     #[serde(default)]
     pub usb_root: Option<String>,
-    pub ordered_playlist_ids: Vec<String>,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+/// Moves a USB playlist to just before `before_playlist_id` in the pending
+/// playlist order, or to the end when that is `None`.
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
-pub struct ReorderUsbPlaylistsData {
-    pub reordered: usize,
-    /// The status line after the reorder.
+pub struct MoveUsbPlaylistRequest {
+    #[serde(default)]
+    pub usb_root: Option<String>,
+    pub playlist_id: String,
+    #[serde(default)]
+    pub before_playlist_id: Option<String>,
+}
+
+/// Moves one row (`UsbTrack::id`) of a USB playlist to just before
+/// `before_track_id` in its pending order, or to the end when that is `None`.
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct MoveUsbPlaylistTrackRequest {
+    #[serde(default)]
+    pub usb_root: Option<String>,
+    pub playlist_id: String,
+    pub move_track_id: String,
+    #[serde(default)]
+    pub before_track_id: Option<String>,
+}
+
+/// Puts a whole USB playlist's pending order in this column sort (the sort
+/// `fetch_usb_playlist_tracks` uses).
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct SortUsbPlaylistTracksRequest {
+    #[serde(default)]
+    pub usb_root: Option<String>,
+    pub playlist_id: String,
+    #[serde(default)]
+    pub sort_by: Option<String>,
+    #[serde(default)]
+    pub sort_dir: Option<String>,
+}
+
+/// Where the USB view's order edit stands, as the Edit order controls show it.
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct UsbOrderEditState {
+    /// An order edit is on for this USB.
+    pub active: bool,
+    /// The pending order differs from the USB's: Save order has something to write.
+    pub changed: bool,
+    /// The playlists whose track order is edited (`UsbPlaylist::order_edited`).
+    #[serde(default)]
+    pub edited_playlist_ids: Vec<String>,
+    /// "Editing order: 2 playlists changed"; empty while no edit is on.
+    #[serde(default)]
+    pub editing_text: String,
+}
+
+/// The answer of every USB order-edit command.
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct UsbOrderEditData {
+    pub order_edit: UsbOrderEditState,
+    /// The status line after the command; empty for a move or a sort.
     #[serde(default)]
     pub status_text: String,
+    #[serde(default)]
     pub warnings: Vec<WarningEntry>,
     /// The status line's link to the Event Log ("(2 warnings)"), shown after `status_text`;
     /// empty without warnings (`utils::warning_text`).

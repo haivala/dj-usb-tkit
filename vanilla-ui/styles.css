@@ -1205,6 +1205,15 @@ main {
   padding-left: 16px;
 }
 
+/* Actions at the right end of the header line. */
+.panel-header-end {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  align-items: center;
+  margin-left: auto;
+}
+
 /* Summary text on the header line, after the actions. */
 .panel-header-meta {
   font-size: 13px;
@@ -2044,9 +2053,10 @@ td.num, th.num {
   --track-grid-cols: 44px 52px 178px minmax(100px, 1.6fr) minmax(100px, 1.2fr) 64px 78px 58px 8ch 72px minmax(5ch, 14ch);
 }
 
-/* App playlist tracks reserve a leading column for the drag-to-reorder
-   handle, before the selection checkbox. */
-.track-grid[data-body-id="playlistTracksBody"] {
+/* App and USB playlist tracks reserve a leading column for the
+   drag-to-reorder handle, before the selection checkbox. */
+.track-grid[data-body-id="playlistTracksBody"],
+.track-grid[data-body-id="usbPlaylistTracks"] {
   --track-grid-cols: 24px 44px 52px 178px minmax(100px, 1.6fr) minmax(100px, 1.2fr) 64px 78px 58px 8ch 72px minmax(5ch, 14ch);
 }
 
@@ -2665,6 +2675,19 @@ input[type="checkbox"]:disabled {
 .list-compact li button:hover .playlist-remove,
 .list-compact li button:focus-visible .playlist-remove {
   visibility: visible;
+}
+
+/* USB playlists: drag handles only during Edit order, and no removing then. */
+.list:not(.is-order-editing) [data-usb-drag-handle],
+.list.is-order-editing .playlist-remove {
+  display: none;
+}
+
+/* A USB playlist whose track order is edited but not saved yet. */
+.list li button .playlist-order-edited {
+  flex-shrink: 0;
+  font-size: 9px;
+  color: var(--accent);
 }
 
 .list-compact li.dragging button {

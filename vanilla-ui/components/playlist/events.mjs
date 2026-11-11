@@ -4,7 +4,7 @@ import { bindTrackSelection, clearTrackSelection } from "../shared/track_selecti
 import { addSelectionToPlaylists } from "../shared/add_to_playlists.mjs";
 import { editTrackSelection } from "../shared/track_metadata_edits.mjs";
 import { convertTrackSelection } from "../shared/transcodes.mjs";
-import { createDragAutoScroller } from "../../dnd_autoscroll.mjs";
+import { bindTrackDragReorder } from "../shared/track_drag_reorder.mjs";
 import { bindListDragReorder } from "../shared/list_drag_reorder.mjs";
 
 export function bindPlaylistEvents(ctx) {
@@ -207,120 +207,22 @@ export function bindPlaylistEvents(ctx) {
     });
   });
 
-  let dragSourceRow = null;
-  let dragOriginalOrder = null;
-  let dragSortCommit = null; // Promise while a sorted-list drag commits its order, else null
-  const autoScroller = createDragAutoScroller(el.playlistTableWrap);
-
-  el.playlistTracksBody.addEventListener("dragstart", (event) => {
-    const handle = event.target.closest("[data-playlist-track-drag-handle]");
-    const row = handle?.closest(".track-grid-row[data-track-id]");
-    if (!handle || !row) {
-      event.preventDefault();
-      return;
-    }
-    dragSourceRow = row;
-    dragOriginalOrder = Array.from(
-      el.playlistTracksBody.querySelectorAll(".track-grid-row[data-track-id]")
-    ).map((r) => r.dataset.trackId);
-    // WYSIWYG: a column sort on this list is a view-only op until committed. The
-    // instant a drag starts we persist that exact sorted order as the playlist's
-    // real order and drop the sort indicator, so the drop below reorders the list
-    // the user is actually looking at (commitActivePlaylistSort clears the sort
-    // hint synchronously, then awaits the backend sort-commit).
-    const dragPlaylist = getCurrentPlaylist();
-    dragSortCommit = (dragPlaylist && isPlaylistSortActive())
-      ? Promise.resolve(commitActivePlaylistSort(dragPlaylist.id)).catch((err) => {
-          console.error(err);
-          emitStatus(err?.message || String(err));
-        })
-      : null;
-    row.classList.add("dragging");
-    // Only the rows around the viewport are rendered; hold them still while
-    // this row is moved among them (autoscroll only adds rows).
-    playlistTracksCtl.freezeWindow(true);
-    autoScroller.attachWheel();
-    if (event.dataTransfer) {
-      event.dataTransfer.effectAllowed = "move";
-      event.dataTransfer.setData("text/plain", row.dataset.trackId);
-    }
-  });
-
-  el.playlistTracksBody.addEventListener("dragover", (event) => {
-    if (!dragSourceRow) return;
-    event.preventDefault();
-    autoScroller.update(event.clientY);
-    const targetRow = event.target.closest(".track-grid-row[data-track-id]");
-    if (!targetRow || targetRow === dragSourceRow) return;
-    const rect = targetRow.getBoundingClientRect();
-    const before = event.clientY < rect.top + rect.height / 2;
-    if (before) {
-      targetRow.before(dragSourceRow);
-    } else {
-      targetRow.after(dragSourceRow);
-    }
-  });
-
-  el.playlistTracksBody.addEventListener("drop", (event) => {
-    if (dragSourceRow) event.preventDefault();
-  });
-
-  el.playlistTracksBody.addEventListener("dragend", () => {
-    autoScroller.stop();
-    autoScroller.detachWheel();
-    if (!dragSourceRow) return;
-    playlistTracksCtl.freezeWindow(false);
-    dragSourceRow.classList.remove("dragging");
-    const playlist = getCurrentPlaylist();
-    const movedRow = dragSourceRow;
-    const newOrder = Array.from(
-      el.playlistTracksBody.querySelectorAll(".track-grid-row[data-track-id]")
-    ).map((r) => r.dataset.trackId);
-    const originalOrder = dragOriginalOrder;
-    const pendingCommit = dragSortCommit;
-    dragSourceRow = null;
-    dragOriginalOrder = null;
-    dragSortCommit = null;
-    if (!playlist || !originalOrder || newOrder.join("\u0000") === originalOrder.join("\u0000")) {
-      // No positional change. Any active sort was still committed on dragstart;
-      // reconcile the loaded page with the newly persisted order.
-      if (pendingCommit) {
-        pendingCommit.finally(() => refreshCurrentPlaylistTracks().catch((e) => console.error(e)));
-      }
-      return;
-    }
-    // Single-move: the backend repositions this one track relative to its new
-    // neighbour, over the whole playlist -- the DOM only holds loaded rows. When
-    // a sort was active, `pendingCommit` first persists the sorted view as the
-    // playlist order so `beforeTrackId` (a neighbour in that view) lines up.
-    // The next row can be a skeleton (its page not loaded yet): resolve it
-    // through its slot in the list.
-    const nextRow = movedRow.nextElementSibling;
-    const beforeTrackId = nextRow?.classList?.contains("track-grid-row")
-      ? (nextRow.dataset.trackId || playlistTracksCtl.view[Number(nextRow.dataset.trackIndex)]?.id || null)
-      : null;
-    if (nextRow && !beforeTrackId) {
-      emitStatus(t("ui-playlist-track-order-still-loading"));
-      refreshCurrentPlaylistTracks().catch((e) => console.error(e));
-      return;
-    }
-    const moveTrackId = movedRow.dataset.trackId;
-
-    (async () => {
-      try {
-        if (pendingCommit) await pendingCommit; // sorted order must land before the single move
-        // The reorder cleared the playlist's last export.
-        ctx.applyPlaylistsState(await command("reorder_playlist_tracks", {
-          playlistId: playlist.id,
-          moveTrackId,
-          beforeTrackId
-        }));
-      } catch (err) {
-        console.error(err);
-        emitStatus(err?.message || String(err));
-      } finally {
-        refreshCurrentPlaylistTracks().catch((e) => console.error(e));
-      }
-    })();
+  bindTrackDragReorder(el.playlistTracksBody, playlistTracksCtl, {
+    scrollContainer: el.playlistTableWrap,
+    sortActive: () => !!getCurrentPlaylist() && isPlaylistSortActive(),
+    // Clears the sort hint synchronously, then awaits the backend sort-commit.
+    commitSort: () => commitActivePlaylistSort(getCurrentPlaylist().id),
+    onMove: async ({ moveTrackId, beforeTrackId }) => {
+      const playlist = getCurrentPlaylist();
+      if (!playlist) return;
+      // The reorder cleared the playlist's last export.
+      ctx.applyPlaylistsState(await command("reorder_playlist_tracks", {
+        playlistId: playlist.id,
+        moveTrackId,
+        beforeTrackId
+      }));
+    },
+    onSettled: refreshCurrentPlaylistTracks,
+    emitStatus,
   });
 }

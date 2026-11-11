@@ -49,7 +49,7 @@ function installTauriMock(page, mode) {
         ? [{ id: "usb-1", name: "Warmup", source: "mock-tauri", tracks: [{ title: "Track A", artist: "Artist 1", album: "Album X", bpm: 124, key: "8A" }] }]
         : mode === "reorder"
         ? ["Alpha", "Bravo", "Charlie"].map((name, i) => ({
-            id: `usb-pl-${i + 1}`, name, source: "mock-tauri", tracks: [{ title: `Track ${"ABC"[i]}` }]
+            id: `usb-pl-${i + 1}`, name, source: "mock-tauri", tracks: [{ id: `t-${"abc"[i]}`, title: `Track ${"ABC"[i]}` }]
           }))
         : mode === "reorder-scroll"
         ? Array.from({ length: 40 }, (_, i) => ({
@@ -57,7 +57,54 @@ function installTauriMock(page, mode) {
           }))
         : []
     };
-    window.__reorderCalls = [];
+    // Bravo holds three tracks to reorder: B, K, L. By artist they go L, B, K;
+    // by title B, K, L (the order on the stick).
+    if (mode === "reorder") {
+      state.usbPlaylists[1].tracks = [
+        { id: "t-b", title: "Track B Mike", artist: "Artist Lima" },
+        { id: "t-k", title: "Track K Kilo", artist: "Artist Mike" },
+        { id: "t-l", title: "Track L Lima", artist: "Artist Kilo" },
+      ];
+    }
+    // Edit order: the pending order, as the backend holds it (null: no edit).
+    let orderEdit = null;
+    const orderEditState = () => {
+      if (!orderEdit) return { active: false, changed: false, editedPlaylistIds: [], editingText: "" };
+      const editedPlaylistIds = Object.keys(orderEdit.tracks).sort();
+      const listChanged = !!orderEdit.playlists;
+      const changed = listChanged || editedPlaylistIds.length > 0;
+      return {
+        active: true,
+        changed,
+        editedPlaylistIds,
+        editingText: changed
+          ? `Editing order: ${listChanged ? "playlist order" : ""}${listChanged && editedPlaylistIds.length ? " and " : ""}${editedPlaylistIds.length ? `${editedPlaylistIds.length} track order` : ""} changed`
+          : "Editing order: nothing changed yet",
+      };
+    };
+    const pendingPlaylists = () => {
+      const byId = new Map(state.usbPlaylists.map((p) => [String(p.id), p]));
+      const ordered = orderEdit?.playlists ? orderEdit.playlists.map((id) => byId.get(id)) : state.usbPlaylists;
+      return ordered.map((p) => {
+        const trackIds = orderEdit?.tracks[p.id];
+        if (!trackIds) return p;
+        const tracksById = new Map(p.tracks.map((track) => [track.id, track]));
+        return { ...p, tracks: trackIds.map((id) => tracksById.get(id)) };
+      });
+    };
+    const moveBefore = (ids, id, beforeId) => {
+      const rest = ids.filter((item) => item !== id);
+      rest.splice(beforeId == null ? rest.length : rest.indexOf(beforeId), 0, id);
+      return rest;
+    };
+    const sortTracks = (tracks, by, dir) => tracks.slice().sort((a, b) =>
+      String(a[by] || "").localeCompare(String(b[by] || "")) * (dir === "desc" ? -1 : 1));
+    const setTrackOrder = (playlistId, ids) => {
+      const base = state.usbPlaylists.find((p) => p.id === playlistId).tracks.map((track) => track.id);
+      if (ids.join() === base.join()) delete orderEdit.tracks[playlistId];
+      else orderEdit.tracks[playlistId] = ids;
+    };
+    const orderEditAnswer = (data = {}) => backend.ok({ statusText: "", warnings: [], warningText: "", ...data, orderEdit: orderEditState() });
     window.__usbAudioFormatCalls = [];
     let usbAudioFormats = [
       ["flac", "FLAC"], ["alac", "ALAC"], ["aiff", "AIFF"], ["wav", "WAV"], ["mp3", "MP3"], ["aac", "AAC"]
@@ -366,12 +413,15 @@ function installTauriMock(page, mode) {
             ]
           : [];
         return backend.ok({
-          items: state.usbPlaylists.map((p) => ({
+          items: pendingPlaylists().map((p) => ({
             ...p,
             trackCount: p.tracks.length,
+            orderEdited: !!orderEdit?.tracks[p.id],
             selectedText: `USB playlist selected: ${p.name}`,
             removeConfirmText: `mock remove ${p.name}?`
           })),
+          orderEdit: orderEditState(),
+          orderEditBlockedText: null,
           summaryText: `${state.usbPlaylists.length} playlists`,
           statusText: `USB playlists loaded: ${state.usbPlaylists.length}`,
           doneText: "Done",
@@ -387,8 +437,10 @@ function installTauriMock(page, mode) {
         });
       }
       if (command === "fetch_usb_playlist_tracks") {
-        const id = String(payload?.request?.id);
-        const tracks = state.usbPlaylists.find((p) => String(p.id) === id)?.tracks || [];
+        const { id, query, sortBy, sortDir } = payload?.request || {};
+        let tracks = pendingPlaylists().find((p) => String(p.id) === String(id))?.tracks || [];
+        if (query) tracks = tracks.filter((track) => track.title.toLowerCase().includes(query.toLowerCase()));
+        if (sortBy) tracks = sortTracks(tracks, sortBy, sortDir);
         return { ok: true, data: { items: tracks, total: tracks.length, listSummaryText: `${tracks.length} listed` } };
       }
       if (command === "set_usb_audio_formats") {
@@ -398,19 +450,38 @@ function installTauriMock(page, mode) {
         usbAudioFormats = sent.map(({ format, allowed }) => ({ format, allowed, label: labels.get(format) }));
         return { ok: true, data: formatsData() };
       }
-      if (command === "reorder_usb_playlists") {
-        const orderedIds = Array.isArray(payload?.request?.orderedPlaylistIds)
-          ? payload.request.orderedPlaylistIds
-          : [];
-        window.__reorderCalls.push(orderedIds);
-        const byId = new Map(state.usbPlaylists.map((p) => [String(p.id), p]));
-        state.usbPlaylists = orderedIds
-          .map((id) => byId.get(String(id)))
-          .filter((p) => p !== undefined);
-        return backend.ok({
-          reordered: state.usbPlaylists.length,
-          statusText: "Playlist order saved",
-          warnings: [{ level: "error", code: "usb.reorder.pdb-write-back-failed", message: "PDB write-back to USB failed", source: "usb-import" }],
+      if (command === "begin_usb_order_edit") {
+        orderEdit = { playlists: null, tracks: {} };
+        return orderEditAnswer({ statusText: "Editing the order: nothing is written until Save order." });
+      }
+      if (command === "move_usb_playlist") {
+        const { playlistId, beforePlaylistId } = payload.request;
+        const ids = moveBefore(pendingPlaylists().map((p) => p.id), playlistId, beforePlaylistId);
+        orderEdit.playlists = ids.join() === state.usbPlaylists.map((p) => p.id).join() ? null : ids;
+        return orderEditAnswer();
+      }
+      if (command === "move_usb_playlist_track") {
+        const { playlistId, moveTrackId, beforeTrackId } = payload.request;
+        const ids = pendingPlaylists().find((p) => p.id === playlistId).tracks.map((track) => track.id);
+        setTrackOrder(playlistId, moveBefore(ids, moveTrackId, beforeTrackId));
+        return orderEditAnswer();
+      }
+      if (command === "sort_usb_playlist_tracks") {
+        const { playlistId, sortBy, sortDir } = payload.request;
+        const tracks = pendingPlaylists().find((p) => p.id === playlistId).tracks;
+        setTrackOrder(playlistId, sortTracks(tracks, sortBy, sortDir).map((track) => track.id));
+        return orderEditAnswer();
+      }
+      if (command === "cancel_usb_order_edit") {
+        orderEdit = null;
+        return orderEditAnswer({ statusText: "Order changes discarded" });
+      }
+      if (command === "commit_usb_order_edit") {
+        state.usbPlaylists = pendingPlaylists();
+        orderEdit = null;
+        return orderEditAnswer({
+          statusText: "Order saved to the USB",
+          warnings: [{ level: "error", code: "usb.order-edit.engine-failed", message: "Engine DJ library not rebuilt", source: "usb-import" }],
           warningText: "(1 warning)"
         });
       }
@@ -1101,17 +1172,40 @@ async function dragViaHandle(page, fromHandleSelector, toRowSelector, dropNearTo
   await page.mouse.up();
 }
 
-// USB playlist drag-and-drop reorder persists the new order; a drag back onto its own row saves
-// nothing.
+// The `request`s of every `command` sent so far.
+function sentRequests(page, command) {
+  return page.evaluate((command) => window.__calls.filter((c) => c.command === command).map((c) => c.request), command);
+}
+
+// Answers select_usb with another known drive, so the recent list offers a stick switch.
+function offerOtherStick(page) {
+  return page.addInitScript(() => {
+    window.__e2eBackend.override(async (command, request, payload, next) => {
+      if (command !== "select_usb") return undefined;
+      const selected = await next();
+      return { ...selected, data: { ...selected.data, devices: [{ id: "dev-1", rootPath: "/Volumes/OTHER", label: "Other", mounted: true }] } };
+    });
+  });
+}
+
+const usbTrackIds = (page) => page.locator("#usbPlaylistTracks .track-grid-row[data-track-id]")
+  .evaluateAll((rows) => rows.map((row) => row.dataset.trackId));
+const usbTrackHandle = (trackId) => `#usbPlaylistTracks .track-grid-row[data-track-id="${trackId}"] [data-playlist-track-drag-handle]`;
+const usbTrackRow = (trackId) => `#usbPlaylistTracks .track-grid-row[data-track-id="${trackId}"]`;
+
+// Edit order: playlists and tracks are put in a new order (drag or sort) and nothing is sent to
+// be written until Save order; Cancel drops it. Leaving the USB pages or switching sticks with
+// unsaved changes asks to save, discard or stay.
 test("USB playlist reorder", async ({ page }) => {
   await installTauriMock(page, "reorder");
+  await offerOtherStick(page);
   await countPlaylistFetches(page);
   await page.goto("/");
 
   await openUsb(page);
 
-  // Open a diagnostics report first -- a successful reorder must clear it,
-  // since it no longer reflects the (now stale) playlist order it reported on.
+  // Open a diagnostics report first -- a successful save must clear it,
+  // since it no longer reflects the playlist order it reported on.
   const usbHealthCard = page.locator("#usbHealthCard");
   await usbHealthCard.evaluate((node) => { node.open = true; });
   await page.locator("#reDiagnoseBtn").click();
@@ -1120,66 +1214,221 @@ test("USB playlist reorder", async ({ page }) => {
   await page.locator('.nav-item[data-view="usb-playlists"]').click();
 
   const rows = page.locator("#usbPlaylists [data-usb-playlist]");
+  const editBtn = page.locator("#usbEditOrderBtn");
+  const saveBtn = page.locator("#usbSaveOrderBtn");
+  const cancelBtn = page.locator("#usbCancelOrderBtn");
+  const editText = page.locator("#usbOrderEditText");
+  const trackHeader = page.locator('[data-body-id="usbPlaylistTracks"] [role="columnheader"][data-sort-key="artist"]');
+  const dialog = page.locator("#confirmOverlay");
   await expect(rows).toHaveCount(3);
-  await expect(rows.nth(0)).toContainText("Alpha");
-  await expect(rows.nth(1)).toContainText("Bravo");
-  await expect(rows.nth(2)).toContainText("Charlie");
   await expect(rows.nth(0)).toHaveClass(/active/);
   await expect(page.locator("#usbPlaylistTracks .track-grid-row")).toHaveCount(1);
 
-  // Drag "Alpha" (row 0) to below "Charlie" (row 2), moving it to the end.
-  await dragViaHandle(
-    page,
-    '#usbPlaylists li:nth-child(1) [data-usb-drag-handle]',
-    '#usbPlaylists li:nth-child(3)',
-    false
-  );
+  // Browsing: no drag handles, and a sort only changes the view.
+  await expect(page.locator("#usbPlaylists [data-usb-drag-handle]").first()).toBeHidden();
+  await expect(page.locator("#usbPlaylistTracks [data-playlist-track-drag-handle]")).toHaveCount(0);
+  await expect(saveBtn).toBeHidden();
+  await rows.nth(1).click();
+  await expect(page.locator("#usbPlaylistTracks .track-grid-row")).toHaveCount(3);
+  await trackHeader.click();
+  await expect.poll(() => usbTrackIds(page)).toEqual(["t-l", "t-b", "t-k"]);
+  expect(await sentRequests(page, "sort_usb_playlist_tracks")).toHaveLength(0);
+  // Back to the order on the stick.
+  for (let i = 0; i < 4; i += 1) await trackHeader.click();
+  await expect.poll(() => usbTrackIds(page)).toEqual(["t-b", "t-k", "t-l"]);
+  await rows.nth(0).click();
 
-  await expect(page.locator("#statusText")).toContainText("Playlist order saved");
-  // A write that didn't reach the stick isn't shown as a clean save.
-  await expect(page.locator("#statusText .status-warning-link")).toHaveText("(1 warning)");
+  await editBtn.click();
+  await expect(editText).toHaveText("Editing order: nothing changed yet");
+  await expect(saveBtn).toBeDisabled();
+  await expect(cancelBtn).toBeVisible();
+  await expect(page.locator("#usbPlaylists [data-usb-drag-handle]").first()).toBeVisible();
+  await expect(page.locator("#usbPlaylistTracks [data-playlist-track-drag-handle]")).toHaveCount(1);
+
+  // Drag "Alpha" (row 0) to below "Charlie" (row 2), moving it to the end.
+  await dragViaHandle(page, "#usbPlaylists li:nth-child(1) [data-usb-drag-handle]", "#usbPlaylists li:nth-child(3)", false);
   await expect(rows.nth(0)).toContainText("Bravo");
   await expect(rows.nth(1)).toContainText("Charlie");
   await expect(rows.nth(2)).toContainText("Alpha");
-  await expect(page.locator("#diagSections")).toBeEmpty();
-  await expect(page.locator("#diagOverallStatus")).toBeEmpty();
-
-  const reorderCalls = await page.evaluate(() => window.__reorderCalls);
-  expect(reorderCalls.length).toBeGreaterThan(0);
-  const lastCall = reorderCalls[reorderCalls.length - 1];
-  expect(lastCall).toEqual(["usb-pl-2", "usb-pl-3", "usb-pl-1"]);
-
-  // Nothing is read again: the moved playlist stays open.
+  expect(await sentRequests(page, "move_usb_playlist")).toEqual([
+    { usbRoot: "/Volumes/USB-TEST", playlistId: "usb-pl-1", beforePlaylistId: null }
+  ]);
+  await expect(editText).toHaveText("Editing order: playlist order changed");
+  await expect(saveBtn).toBeEnabled();
+  // The moved playlist stays open.
   await expect(rows.nth(2)).toHaveClass(/active/);
   await expect(page.locator("#usbPlaylistHeading .track-list-heading-name")).toHaveText("Alpha");
-  await expect(page.locator("#usbPlaylistTracks .track-grid-row")).toContainText("Track A");
-  expect(await page.evaluate(() => window.__playlistFetches)).toBe(1);
-  expect(await page.evaluate(() => window.__trackFetches)).toBe(1);
 
-  // A click opens the row clicked, in its new place.
+  // A track drag in Bravo: B to the end.
   await rows.nth(0).click();
-  await expect(page.locator("#statusText")).toContainText("USB playlist selected: Bravo");
-  await expect(page.locator("#usbPlaylistHeading .track-list-heading-name")).toHaveText("Bravo");
-  await expect(page.locator("#usbPlaylistTracks .track-grid-row")).toContainText("Track B");
+  await expect.poll(() => usbTrackIds(page)).toEqual(["t-b", "t-k", "t-l"]);
+  await dragViaHandle(page, usbTrackHandle("t-b"), usbTrackRow("t-l"), false);
+  await expect.poll(() => usbTrackIds(page)).toEqual(["t-k", "t-l", "t-b"]);
+  expect(await sentRequests(page, "move_usb_playlist_track")).toEqual([
+    { usbRoot: "/Volumes/USB-TEST", playlistId: "usb-pl-2", moveTrackId: "t-b", beforeTrackId: null }
+  ]);
+  await expect(rows.nth(0).locator(".playlist-order-edited")).toBeVisible();
+  await expect(rows.nth(1).locator(".playlist-order-edited")).toBeHidden();
+  await expect(editText).toHaveText("Editing order: playlist order and 1 track order changed");
 
-  // A drag dropped back within its own row saves nothing.
-  const box = await page.locator('#usbPlaylists li:nth-child(1) [data-usb-drag-handle]').boundingBox();
-  await page.mouse.move(box.x + box.width / 2, box.y + box.height / 2);
-  await page.mouse.down();
-  await page.mouse.move(box.x + box.width / 2, box.y + box.height / 2 + 2, { steps: 3 });
-  await page.mouse.up();
-  await expect(rows.nth(0)).toContainText("Bravo");
-  expect(await page.evaluate(() => window.__reorderCalls.length)).toBe(reorderCalls.length);
+  // A sort click makes the sort the pending order: through the header's cycle (artist up and
+  // down, then title up and down), the pages are fetched in their natural (pending) order.
+  const fetchesBefore = (await sentRequests(page, "fetch_usb_playlist_tracks")).length;
+  for (const [sortBy, sortDir, order] of [
+    ["artist", "asc", ["t-l", "t-b", "t-k"]],
+    ["artist", "desc", ["t-k", "t-b", "t-l"]],
+    ["title", "asc", ["t-b", "t-k", "t-l"]],
+    ["title", "desc", ["t-l", "t-k", "t-b"]],
+  ]) {
+    await trackHeader.click();
+    await expect.poll(() => usbTrackIds(page)).toEqual(order);
+    expect((await sentRequests(page, "sort_usb_playlist_tracks")).at(-1)).toEqual({ usbRoot: "/Volumes/USB-TEST", playlistId: "usb-pl-2", sortBy, sortDir });
+  }
+  await expect(trackHeader).toHaveClass(/sort-desc/);
+  // The cycle's unsorted state keeps the pending order.
+  await trackHeader.click();
+  await expect(trackHeader).not.toHaveClass(/sort-(asc|desc)/);
+  await page.waitForTimeout(100);
+  expect(await usbTrackIds(page)).toEqual(["t-l", "t-k", "t-b"]);
+  expect(await sentRequests(page, "sort_usb_playlist_tracks")).toHaveLength(4);
+  const fetches = (await sentRequests(page, "fetch_usb_playlist_tracks")).slice(fetchesBefore);
+  expect(fetches.length).toBeGreaterThan(0);
+  expect(fetches.every((request) => request.sortBy === null)).toBe(true);
+
+  // A drag after a sort click moves the row without sorting again, and forgets the header choice.
+  await trackHeader.click();
+  await expect.poll(() => usbTrackIds(page)).toEqual(["t-l", "t-b", "t-k"]);
+  await dragViaHandle(page, usbTrackHandle("t-k"), usbTrackRow("t-l"), true);
+  await expect.poll(() => usbTrackIds(page)).toEqual(["t-k", "t-l", "t-b"]);
+  expect(await sentRequests(page, "sort_usb_playlist_tracks")).toHaveLength(5);
+  expect((await sentRequests(page, "move_usb_playlist_track")).at(-1)).toEqual(
+    { usbRoot: "/Volumes/USB-TEST", playlistId: "usb-pl-2", moveTrackId: "t-k", beforeTrackId: "t-l" }
+  );
+  await expect(trackHeader).not.toHaveClass(/sort-(asc|desc)/);
+
+  // Searching: the handles stay, disabled.
+  await page.locator("#usbTrackSearch").fill("Lima");
+  await expect(page.locator("#usbPlaylistTracks .track-grid-row")).toHaveCount(1);
+  const disabledHandle = page.locator("#usbPlaylistTracks .td-drag .drag-handle");
+  await expect(disabledHandle).toHaveClass(/disabled/);
+  await expect(disabledHandle).toHaveAttribute("data-tooltip", "Clear the search to drag tracks");
+  await page.locator("#usbTrackSearch").fill("");
+  await expect(page.locator("#usbPlaylistTracks [data-playlist-track-drag-handle]")).toHaveCount(3);
+
+  // Leaving with unsaved changes: Escape, a backdrop click and Stay keep the edit and the page,
+  // for a view switch and a stick switch alike.
+  const libraryNav = page.locator('.nav-item[data-view="library"]');
+  const recent = page.locator('#usbRecentList button[data-usb-recent-path="/Volumes/OTHER"]');
+  const selectsBefore = (await sentRequests(page, "select_usb")).length;
+  for (const [leave, page_] of [[() => libraryNav.click(), "usb-playlists"], [() => recent.click(), "usb"]]) {
+    if (page_ === "usb") {
+      await page.locator('.nav-item[data-view="usb"]').click();
+      await page.locator("#usbRecentRow").evaluate((row) => row.classList.remove("collapsed"));
+    }
+    for (const dismiss of [
+      () => page.keyboard.press("Escape"),
+      () => dialog.click({ position: { x: 5, y: 5 } }),
+      () => page.locator("#confirmCancelBtn").click(),
+    ]) {
+      await leave();
+      await expect(dialog).toBeVisible();
+      await expect(page.locator("#confirmTitle")).toHaveText("Unsaved order");
+      await expect(page.locator("#confirmOkBtn")).toHaveText("Save order");
+      await expect(page.locator("#confirmAltBtn")).toHaveText("Discard changes");
+      await expect(page.locator("#confirmCancelBtn")).toHaveText("Stay");
+      await dismiss();
+      await expect(dialog).toBeHidden();
+      await expect(page.locator(`#panel-${page_}`)).toHaveClass(/active/);
+    }
+  }
+  expect(await sentRequests(page, "select_usb")).toHaveLength(selectsBefore);
+  expect(await sentRequests(page, "commit_usb_order_edit")).toHaveLength(0);
+  expect(await sentRequests(page, "cancel_usb_order_edit")).toHaveLength(0);
+  await page.locator('.nav-item[data-view="usb-playlists"]').click();
+  await expect(editText).toContainText("changed");
+
+  // Discard: the edit is cancelled, then the view switches.
+  await libraryNav.click();
+  await page.locator("#confirmAltBtn").click();
+  await expect(page.locator("#panel-library")).toHaveClass(/active/);
+  expect(await sentRequests(page, "cancel_usb_order_edit")).toHaveLength(1);
+  expect(await sentRequests(page, "commit_usb_order_edit")).toHaveLength(0);
+  await page.locator('.nav-item[data-view="usb-playlists"]').click();
+  await expect(rows.nth(0)).toContainText("Alpha");
+  await expect(editBtn).toBeVisible();
+  await expect(page.locator("#usbPlaylists [data-usb-drag-handle]").first()).toBeHidden();
+
+  // Save from the dialog: the edit is saved, then the view switches.
+  await editBtn.click();
+  await dragViaHandle(page, "#usbPlaylists li:nth-child(1) [data-usb-drag-handle]", "#usbPlaylists li:nth-child(3)", false);
+  await expect(rows.nth(2)).toContainText("Alpha");
+  await libraryNav.click();
+  await page.locator("#confirmOkBtn").click();
+  await expect(page.locator("#panel-library")).toHaveClass(/active/);
+  expect(await sentRequests(page, "commit_usb_order_edit")).toEqual([{ usbRoot: "/Volumes/USB-TEST" }]);
+  await page.locator('.nav-item[data-view="usb-playlists"]').click();
+  await expect(rows.nth(2)).toContainText("Alpha");
+  await expect(editBtn).toBeVisible();
+
+  // With nothing changed, leaving just ends the edit.
+  await editBtn.click();
+  await libraryNav.click();
+  await expect(page.locator("#panel-library")).toHaveClass(/active/);
+  await expect(dialog).toBeHidden();
+  expect(await sentRequests(page, "cancel_usb_order_edit")).toHaveLength(2);
+  await page.locator('.nav-item[data-view="usb-playlists"]').click();
+
+  // Save order: the status line with its warnings, the stale diagnostics gone.
+  await editBtn.click();
+  await dragViaHandle(page, "#usbPlaylists li:nth-child(3) [data-usb-drag-handle]", "#usbPlaylists li:nth-child(1)", true);
+  await expect(rows.nth(0)).toContainText("Alpha");
+  await saveBtn.click();
+  await expect(page.locator("#statusText")).toContainText("Order saved to the USB");
+  await expect(page.locator("#statusText .status-warning-link")).toHaveText("(1 warning)");
+  await expect(page.locator("#diagSections")).toBeEmpty();
+  await expect(page.locator("#diagOverallStatus")).toBeEmpty();
+  await expect(editBtn).toBeVisible();
+  await expect(rows.nth(0)).toContainText("Alpha");
+
+  // Cancel: the order on the stick comes back.
+  await editBtn.click();
+  await dragViaHandle(page, "#usbPlaylists li:nth-child(1) [data-usb-drag-handle]", "#usbPlaylists li:nth-child(3)", false);
+  await expect(rows.nth(2)).toContainText("Alpha");
+  await cancelBtn.click();
+  await expect(page.locator("#statusText")).toContainText("Order changes discarded");
+  await expect(rows.nth(0)).toContainText("Alpha");
+  await expect(editBtn).toBeVisible();
+  expect(await sentRequests(page, "cancel_usb_order_edit")).toHaveLength(3);
+
+  // A view sort from before the edit becomes the pending order when a drag starts, then the
+  // row moves among what was on screen.
+  await rows.nth(1).click();
+  await expect.poll(() => usbTrackIds(page)).toEqual(["t-b", "t-k", "t-l"]);
+  await trackHeader.click();
+  await expect.poll(() => usbTrackIds(page)).toEqual(["t-l", "t-b", "t-k"]);
+  const sortsBefore = (await sentRequests(page, "sort_usb_playlist_tracks")).length;
+  await editBtn.click();
+  await dragViaHandle(page, usbTrackHandle("t-k"), usbTrackRow("t-l"), true);
+  await expect.poll(() => usbTrackIds(page)).toEqual(["t-k", "t-l", "t-b"]);
+  expect((await sentRequests(page, "sort_usb_playlist_tracks")).slice(sortsBefore)).toEqual([
+    { usbRoot: "/Volumes/USB-TEST", playlistId: "usb-pl-2", sortBy: "artist", sortDir: "asc" }
+  ]);
+  expect((await sentRequests(page, "move_usb_playlist_track")).at(-1)).toEqual(
+    { usbRoot: "/Volumes/USB-TEST", playlistId: "usb-pl-2", moveTrackId: "t-k", beforeTrackId: "t-l" }
+  );
+  await expect(trackHeader).not.toHaveClass(/sort-(asc|desc)/);
+  await cancelBtn.click();
+  await expect.poll(() => usbTrackIds(page)).toEqual(["t-b", "t-k", "t-l"]);
 });
 
-// A failed USB playlist reorder restores the order and keeps the playlist open, and reports the
-// save's failure even when the re-read fails.
+// A failed save re-reads the list, shows the error and keeps the edit on, also when it was the
+// leave dialog's Save (the view stays). The save's failure shows even when the re-read fails.
 test("failed USB playlist reorder", async ({ page }) => {
   await installTauriMock(page, "reorder");
   await page.addInitScript(() => {
     const backend = window.__e2eBackend;
     backend.override(async (command) => {
-      if (command === "reorder_usb_playlists") return backend.fail("Failed to save playlist order: write failed", "IO");
+      if (command === "commit_usb_order_edit") return backend.fail("Failed to save the order: write failed", "IO");
       // `__stickGone`: the read after the failed save fails too.
       if (command === "fetch_usb_playlists" && window.__stickGone) return backend.fail("stick gone", "IO");
     });
@@ -1190,32 +1439,37 @@ test("failed USB playlist reorder", async ({ page }) => {
   await openUsb(page, "usb-playlists");
 
   const rows = page.locator("#usbPlaylists [data-usb-playlist]");
+  const saveBtn = page.locator("#usbSaveOrderBtn");
   await expect(rows.nth(0)).toHaveClass(/active/);
-  await expect(page.locator("#usbPlaylistTracks .track-grid-row")).toHaveCount(1);
-  const dragFirstToLast = () => dragViaHandle(
-    page,
-    '#usbPlaylists li:nth-child(1) [data-usb-drag-handle]',
-    '#usbPlaylists li:nth-child(3)',
-    false
-  );
+  await page.locator("#usbEditOrderBtn").click();
+  await dragViaHandle(page, "#usbPlaylists li:nth-child(1) [data-usb-drag-handle]", "#usbPlaylists li:nth-child(3)", false);
+  await expect(rows.nth(2)).toContainText("Alpha");
+  const fetchesBefore = await page.evaluate(() => window.__playlistFetches);
 
-  await dragFirstToLast();
-  await expect(page.locator("#statusText")).toContainText("Failed to save playlist order: write failed");
-  await expect(rows.nth(0)).toContainText("Alpha");
-  await expect(rows.nth(1)).toContainText("Bravo");
-  await expect(rows.nth(2)).toContainText("Charlie");
-  await expect(rows.nth(0)).toHaveClass(/active/);
+  await saveBtn.click();
+  await expect(page.locator("#statusText")).toContainText("Failed to save the order: write failed");
+  await expect.poll(() => page.evaluate(() => window.__playlistFetches)).toBe(fetchesBefore + 1);
+  // Still editing, the pending order still shown.
+  await expect(saveBtn).toBeEnabled();
+  await expect(page.locator("#usbOrderEditText")).toHaveText("Editing order: playlist order changed");
+  await expect(rows.nth(2)).toContainText("Alpha");
+  await expect(rows.nth(2)).toHaveClass(/active/);
   await expect(page.locator("#usbPlaylistHeading .track-list-heading-name")).toHaveText("Alpha");
-  await expect(page.locator("#usbPlaylistTracks .track-grid-row")).toContainText("Track A");
-  expect(await page.evaluate(() => window.__playlistFetches)).toBe(2);
+
+  // Save from the leave dialog fails: no view switch.
+  await page.locator('.nav-item[data-view="library"]').click();
+  await page.locator("#confirmOkBtn").click();
+  await expect(page.locator("#statusText")).toContainText("Failed to save the order: write failed");
+  await expect(page.locator("#panel-usb-playlists")).toHaveClass(/active/);
+  await expect(saveBtn).toBeEnabled();
 
   // The stick went away: the save's failure, not the read's, and the read's
   // failure on the progress bar.
   await page.evaluate(() => { window.__stickGone = true; });
-  await dragFirstToLast();
+  await saveBtn.click();
   await expect(page.locator("#progressText")).toHaveText("USB load failed");
   await expect(page.locator("#progressFooter")).toHaveClass(/error/);
-  await expect(page.locator("#statusText")).toContainText("Failed to save playlist order: write failed");
+  await expect(page.locator("#statusText")).toContainText("Failed to save the order: write failed");
   // The failure stays until its × closes it.
   await page.locator("#progressDismiss").click();
   await expect(page.locator("#progressFooter")).not.toHaveClass(/active/);
@@ -1238,6 +1492,7 @@ test("USB playlist drag auto-scrolls the list when held near its bottom edge", a
   // meant for the list underneath it.
   await expect(page.locator("#progressFooter")).not.toHaveClass(/active/, { timeout: 3000 });
 
+  await page.locator("#usbEditOrderBtn").click();
   const handle = page.locator('#usbPlaylists li:nth-child(1) [data-usb-drag-handle]');
   const handleBox = await handle.boundingBox();
   const listBox = await list.boundingBox();

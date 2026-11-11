@@ -18,9 +18,8 @@ use crate::models::{
     FetchUsbHistoriesData, FetchUsbHistoriesRequest, FetchUsbPlaylistsData,
     FetchUsbPlaylistsRequest, FetchUsbTracksData, FetchUsbTracksRequest, GetSelectionDurationData,
     InspectUsbTrackData, InspectUsbTrackRequest, RemoveUsbPlaylistData, RemoveUsbPlaylistRequest,
-    ReorderUsbPlaylistsData, ReorderUsbPlaylistsRequest, UsbHistory, UsbHistoryCounts,
-    UsbImportStats, UsbPlaylist, UsbTrack, ValidateUsbRootData, ValidateUsbRootRequest,
-    WarningEntry,
+    UsbHistory, UsbHistoryCounts, UsbImportStats, UsbPlaylist, UsbTrack, ValidateUsbRootData,
+    ValidateUsbRootRequest, WarningEntry,
 };
 use crate::pdb_reader::{
     ParsedPdb, PdbHistoryEntryRow, PdbHistoryPlaylistRow, count_pdb_playlists,
@@ -98,7 +97,7 @@ pub(crate) struct UsbParseCacheKey {
 /// stick on every page / search / sort / scroll.
 #[derive(Debug, Clone)]
 pub(crate) struct CachedUsbPlaylists {
-    items: Vec<UsbPlaylist>,
+    pub(super) items: Vec<UsbPlaylist>,
     stats: UsbImportStats,
     warnings: Vec<WarningEntry>,
 }
@@ -1225,6 +1224,11 @@ impl BackendService {
         req: crate::models::SelectUsbRequest,
     ) -> BackendResult<crate::models::SelectUsbData> {
         let path = req.path.trim();
+        // Another USB's order edit ends here (refused while it's being saved).
+        let new_root = (!path.is_empty())
+            .then(|| resolve_usb_root(Some(path)).ok())
+            .flatten();
+        self.switch_usb_order_edit_root(new_root.as_deref())?;
         let usb = if path.is_empty() {
             self.set_selected_usb_root(None);
             ValidateUsbRootData {
@@ -1453,7 +1457,10 @@ impl BackendService {
     /// The resolved (pre-materialization) playlists for a stick, from cache or
     /// a fresh parse. Used by `fetch_usb_playlist_tracks` to avoid re-parsing
     /// the whole stick per page.
-    fn usb_playlists_resolved(&self, usb_root: &Path) -> BackendResult<Arc<CachedUsbPlaylists>> {
+    pub(super) fn usb_playlists_resolved(
+        &self,
+        usb_root: &Path,
+    ) -> BackendResult<Arc<CachedUsbPlaylists>> {
         let key = self.usb_parse_cache_key(usb_root);
         if let Some(hit) = self.usb_playlists_cache_hit(&key) {
             return Ok(hit);
@@ -1472,17 +1479,30 @@ impl BackendService {
         })
     }
 
-    /// Build the `FetchUsbPlaylistsData` response from a resolved parse.
+    /// Build the `FetchUsbPlaylistsData` response from a resolved parse: in
+    /// the pending order while an order edit is on.
     fn finish_usb_playlists(
         &self,
+        usb_root: &Path,
         resolved: &CachedUsbPlaylists,
     ) -> BackendResult<FetchUsbPlaylistsData> {
         let playlist_count = resolved.items.len();
         let track_total: usize = resolved.items.iter().map(|p| p.track_count).sum();
         let summary_text = tr::usb_playlists_summary(playlist_count, track_total).render();
         let warning_count = logging::count_warnings(&resolved.warnings);
+        let order_edit = self.usb_order_edit_state(usb_root);
+        let mut items: Vec<UsbPlaylist> =
+            resolved.items.iter().map(with_usb_playlist_texts).collect();
+        if let Some(order) = self.pending_usb_playlist_order(usb_root) {
+            super::usb_order_edit::apply_pending_order(&mut items, &order, |p| p.id.clone());
+        }
+        for item in &mut items {
+            item.order_edited = order_edit.edited_playlist_ids.contains(&item.id);
+        }
         Ok(FetchUsbPlaylistsData {
-            items: resolved.items.iter().map(with_usb_playlist_texts).collect(),
+            items,
+            order_edit,
+            order_edit_blocked_text: Self::usb_order_edit_blocked_text(usb_root),
             stats: resolved.stats.clone(),
             status_text: tr::usb_playlists_loaded(playlist_count).render(),
             done_text: tr::usb_playlists_done(&summary_text).render(),
@@ -1516,7 +1536,7 @@ impl BackendService {
 
         let cache_key = self.usb_parse_cache_key(&usb_root);
         if let Some(resolved) = self.usb_playlists_cache_hit(&cache_key) {
-            return self.finish_usb_playlists(&resolved);
+            return self.finish_usb_playlists(&usb_root, &resolved);
         }
 
         let pdb_path = super::usb_staging::stage_pdb(&usb_root)?;
@@ -1698,6 +1718,7 @@ impl BackendService {
                 tracks: playlist_tracks,
                 total_duration_ms,
                 duration_unknown_count,
+                order_edited: false,
             });
         }
         push_usb_stage_timing("resolve playlists", &mut stage_started);
@@ -1781,7 +1802,7 @@ impl BackendService {
         if let Ok(mut guard) = self.usb_playlists_cache.lock() {
             *guard = Some((cache_key, Arc::clone(&resolved)));
         }
-        self.finish_usb_playlists(&resolved)
+        self.finish_usb_playlists(&usb_root, &resolved)
     }
 
     pub fn fetch_usb_histories(
@@ -1789,133 +1810,6 @@ impl BackendService {
         req: FetchUsbHistoriesRequest,
     ) -> BackendResult<FetchUsbHistoriesData> {
         self.fetch_usb_histories_with_progress(req, |_, _, _| {})
-    }
-
-    pub fn reorder_usb_playlists(
-        &self,
-        req: ReorderUsbPlaylistsRequest,
-    ) -> BackendResult<ReorderUsbPlaylistsData> {
-        self.reorder_usb_playlists_with_progress(req, |_, _, _| {})
-    }
-
-    pub fn reorder_usb_playlists_with_progress<F>(
-        &self,
-        req: ReorderUsbPlaylistsRequest,
-        mut on_progress: F,
-    ) -> BackendResult<ReorderUsbPlaylistsData>
-    where
-        F: FnMut(usize, usize, &str),
-    {
-        let mut warnings = Vec::<WarningEntry>::new();
-        on_progress(0, 100, &tr::usb_progress_resolving_usb_root().render());
-        let usb_root = resolve_usb_root(req.usb_root.as_deref())?;
-
-        on_progress(
-            5,
-            100,
-            &tr::usb_progress_backing_up_usb_databases().render(),
-        );
-        warnings.extend(self.backup_usb_databases_with_retention(
-            &usb_root,
-            "Before playlist reorder",
-            None,
-        ));
-
-        on_progress(
-            10,
-            100,
-            &tr::usb_progress_computing_new_playlist_order().render(),
-        );
-        // Every playlist gets its place in the whole list, in both databases, so
-        // a read can sort rows from either database together.
-        let mut pdb_order = HashMap::<u32, u32>::new();
-        let mut edb_order = HashMap::<String, u32>::new();
-        for (position, id) in (0u32..).zip(&req.ordered_playlist_ids) {
-            if let Some(canonical_name) = id.strip_prefix("usb-pl-name-") {
-                edb_order.insert(canonical_name.to_string(), position);
-            } else if let Some(pdb_id) = id
-                .strip_prefix("usb-pl-")
-                .and_then(|pdb_id| pdb_id.parse::<u32>().ok())
-            {
-                pdb_order.insert(pdb_id, position);
-            }
-        }
-        if pdb_order.is_empty() && edb_order.is_empty() {
-            return Err(BackendError::Internal(
-                "reorder_usb_playlists: no playlist ids in orderedPlaylistIds".to_string(),
-            ));
-        }
-
-        on_progress(
-            30,
-            100,
-            &tr::usb_progress_writing_pdb_playlist_order().render(),
-        );
-        let mut patched = 0usize;
-        if !pdb_order.is_empty() {
-            patched =
-                crate::service::repair::restore_pdb_playlist_sort_orders(&usb_root, &pdb_order)?;
-            if let Err(err) = super::usb_staging::write_back_if_changed(
-                &usb_root,
-                super::usb_staging::DbKind::Pdb,
-            ) {
-                warnings.push(logging::log_text(
-                    Level::Error,
-                    "usb-import",
-                    "usb.reorder.pdb-write-back-failed",
-                    &tr::usb_warning_pdb_write_back_failed(err),
-                ));
-            }
-            let parsed = crate::pdb_reader::parse_pdb(&super::usb_staging::stage_pdb(&usb_root)?)?;
-            for leaf in parsed.playlist_tree.iter().filter(|row| !row.row_is_folder) {
-                let Some(position) = pdb_order.get(&leaf.id) else {
-                    continue;
-                };
-                edb_order.insert(canonicalize_playlist_name(&leaf.name), *position);
-                if let Some(folder) = parsed.playlist_tree.iter().find(|p| p.id == leaf.parent_id) {
-                    let display_name = format!("{} / {}", folder.name, leaf.name);
-                    edb_order.insert(canonicalize_playlist_name(&display_name), *position);
-                }
-            }
-        }
-
-        on_progress(
-            70,
-            100,
-            &tr::usb_progress_writing_edb_playlist_order().render(),
-        );
-        let edb_updated =
-            crate::service::repair::write_edb_playlist_order(&usb_root, &edb_order, &mut warnings)?;
-        if patched == 0 && edb_updated == 0 {
-            return Err(BackendError::Internal(
-                "reorder_usb_playlists: orderedPlaylistIds matched no playlist".to_string(),
-            ));
-        }
-        if edb_updated == 0 {
-            logging::debug("usb-import", "reorder: eDB playlist order updated 0 rows");
-        }
-        if let Err(err) =
-            super::usb_staging::write_back_if_changed(&usb_root, super::usb_staging::DbKind::Edb)
-        {
-            warnings.push(logging::log_text(
-                Level::Error,
-                "usb-import",
-                "usb.reorder.edb-write-back-failed",
-                &tr::usb_warning_edb_write_back_failed(err),
-            ));
-        }
-        warnings.extend(self.refresh_engine_library(&usb_root));
-
-        on_progress(100, 100, &tr::usb_progress_playlist_order_saved().render());
-        self.invalidate_usb_parse_cache();
-
-        let warning_count = logging::count_warnings(&warnings);
-        Ok(ReorderUsbPlaylistsData {
-            reordered: patched.max(edb_updated),
-            status_text: tr::usb_playlists_order_saved().render(),
-            warning_text: warning_text(warning_count),
-            warnings,
-        })
     }
 
     pub fn remove_usb_playlist(
@@ -3022,10 +2916,18 @@ impl BackendService {
             .iter()
             .find(|playlist| playlist.id == req.id)
             .ok_or_else(|| BackendError::NotFound(tr::error_usb_playlist_not_found(&req.id)))?;
+        let mut tracks = playlist.tracks.clone();
+        if let Some(order) = self.pending_usb_track_order(&usb_root, &req.id) {
+            super::usb_order_edit::apply_pending_order(
+                &mut tracks,
+                &order,
+                super::usb_order_edit::track_order_key,
+            );
+        }
         let mut data = paginate_usb_tracks(
             "fetch_usb_playlist_tracks",
             &req.id,
-            playlist.tracks.clone(),
+            tracks,
             &req,
             resolved.warnings.clone(),
         )?;
@@ -5275,166 +5177,254 @@ mod tests {
         assert!(matches!(err, crate::error::BackendError::NotFound(_)));
     }
 
-    #[test]
-    fn reorder_usb_playlists_updates_pdb_sort_order() {
-        let (_dir, service) = test_service();
-        let (_usb_dir, usb_root) = test_usb_root();
-        let playlist_a = crate::edb::ExportPlaylistData {
-            id: "pl-a".to_string(),
-            name: "Playlist A".to_string(),
-            tracks: vec![make_export_track("t1", "Song A", "a.mp3")],
-        };
-        let manifest_a = make_export_manifest(
-            "pl-a",
-            "Playlist A",
-            &usb_root,
-            &[("t1", "Song A", "a.mp3")],
-        );
-        crate::service::export_helpers::write_pdb(
-            &usb_root,
-            &playlist_a,
-            &manifest_a,
-            true,
-            None,
-            None,
-        )
-        .expect("write playlist a");
+    // --- USB order edit (`usb_order_edit`) ---
 
-        let playlist_b = crate::edb::ExportPlaylistData {
-            id: "pl-b".to_string(),
-            name: "Playlist B".to_string(),
-            tracks: vec![make_export_track("t2", "Song B", "b.mp3")],
-        };
-        let manifest_b = make_export_manifest(
-            "pl-b",
-            "Playlist B",
-            &usb_root,
-            &[("t2", "Song B", "b.mp3")],
-        );
-        crate::service::export_helpers::write_pdb(
-            &usb_root,
-            &playlist_b,
-            &manifest_b,
-            true,
-            None,
-            None,
-        )
-        .expect("write playlist b");
-
-        let fetched = service
-            .fetch_usb_playlists(crate::models::FetchUsbPlaylistsRequest {
-                usb_root: Some(usb_root.to_string_lossy().to_string()),
-            })
-            .expect("fetch before reorder");
-        let mut ids: Vec<String> = fetched.items.iter().map(|p| p.id.clone()).collect();
-        ids.reverse();
-
-        let result = service
-            .reorder_usb_playlists(crate::models::ReorderUsbPlaylistsRequest {
-                usb_root: Some(usb_root.to_string_lossy().to_string()),
-                ordered_playlist_ids: ids,
-            })
-            .expect("reorder playlists");
-        assert!(result.reordered > 0);
+    fn root_text(usb_root: &Path) -> Option<String> {
+        Some(usb_root.to_string_lossy().to_string())
     }
 
-    #[test]
-    fn reorder_usb_playlists_writes_back_to_usb_when_staging_enabled() {
-        let cache_dir = tempfile::tempdir().expect("cache dir").keep();
-        let _guard = crate::service::usb_staging::set_cache_root_for_test(Some(cache_dir));
-
-        let (_dir, service) = test_service();
-        let (_usb_dir, usb_root) = test_usb_root();
-        let playlist_a = crate::edb::ExportPlaylistData {
-            id: "pl-a".to_string(),
-            name: "Playlist A".to_string(),
-            tracks: vec![make_export_track("t1", "Song A", "a.mp3")],
+    /// A stick with one playlist, "My Playlist", in both databases, holding
+    /// a.mp3, b.mp3 and c.mp3 in that order.
+    fn order_edit_usb() -> (tempfile::TempDir, std::path::PathBuf) {
+        let tracks = [
+            ("t1", "Song A", "a.mp3"),
+            ("t2", "Song B", "b.mp3"),
+            ("t3", "Song C", "c.mp3"),
+        ];
+        let (dir, usb_root) = seeded_playlist_usb_with_tracks(&tracks);
+        let playlist = crate::edb::ExportPlaylistData {
+            id: "pl-1".to_string(),
+            name: "My Playlist".to_string(),
+            tracks: tracks
+                .iter()
+                .map(|(id, title, filename)| make_export_track(id, title, filename))
+                .collect(),
         };
-        let manifest_a = make_export_manifest(
-            "pl-a",
-            "Playlist A",
+        let manifest = make_export_manifest("pl-1", "My Playlist", &usb_root, &tracks);
+        crate::service::export_helpers::write_edb_playlist(&usb_root, &playlist, &manifest, true)
+            .expect("write edb playlist");
+        // That writes the staged copy only (a no-op without staging).
+        crate::service::usb_staging::write_back_if_changed(
             &usb_root,
-            &[("t1", "Song A", "a.mp3")],
-        );
-        crate::service::export_helpers::write_pdb(
-            &usb_root,
-            &playlist_a,
-            &manifest_a,
-            true,
-            None,
-            None,
+            crate::service::usb_staging::DbKind::Edb,
         )
-        .expect("write playlist a");
+        .expect("write the edb back");
+        (dir, usb_root)
+    }
 
-        let playlist_b = crate::edb::ExportPlaylistData {
-            id: "pl-b".to_string(),
-            name: "Playlist B".to_string(),
-            tracks: vec![make_export_track("t2", "Song B", "b.mp3")],
-        };
-        let manifest_b = make_export_manifest(
-            "pl-b",
-            "Playlist B",
-            &usb_root,
-            &[("t2", "Song B", "b.mp3")],
-        );
-        crate::service::export_helpers::write_pdb(
-            &usb_root,
-            &playlist_b,
-            &manifest_b,
-            true,
-            None,
-            None,
+    fn file_name_of(path: &str) -> String {
+        path.replace('\\', "/")
+            .rsplit('/')
+            .next()
+            .unwrap_or_default()
+            .to_string()
+    }
+
+    /// The playlist's files in the order the USB view shows them.
+    fn view_files(
+        service: &crate::service::BackendService,
+        usb_root: &Path,
+        playlist_id: &str,
+    ) -> Vec<(String, String)> {
+        service
+            .fetch_usb_playlist_tracks(crate::models::FetchUsbTracksRequest {
+                usb_root: root_text(usb_root),
+                id: playlist_id.to_string(),
+                ..Default::default()
+            })
+            .expect("fetch tracks")
+            .items
+            .into_iter()
+            .map(|track| (file_name_of(track.identity_path()), track.id))
+            .collect()
+    }
+
+    fn view_names(view: &[(String, String)]) -> Vec<&str> {
+        view.iter().map(|(name, _)| name.as_str()).collect()
+    }
+
+    /// The files of the USB's PDB playlist `name`, by `entry_index`, read from
+    /// the stick's own file.
+    fn usb_pdb_files(usb_root: &Path, name: &str) -> Vec<String> {
+        let parsed = crate::pdb_reader::parse_pdb(
+            &crate::service::usb_vendor_compat::vendor_pdb_path(usb_root),
         )
-        .expect("write playlist b");
-
-        let fetched = service
-            .fetch_usb_playlists(crate::models::FetchUsbPlaylistsRequest {
-                usb_root: Some(usb_root.to_string_lossy().to_string()),
-            })
-            .expect("fetch before reorder");
-        let mut ids: Vec<String> = fetched.items.iter().map(|p| p.id.clone()).collect();
-        ids.reverse();
-        let expected_pdb_id_order: Vec<u32> = ids
-            .iter()
-            .filter_map(|id| {
-                id.strip_prefix("usb-pl-")
-                    .and_then(|s| s.parse::<u32>().ok())
-            })
-            .collect();
-
-        let result = service
-            .reorder_usb_playlists(crate::models::ReorderUsbPlaylistsRequest {
-                usb_root: Some(usb_root.to_string_lossy().to_string()),
-                ordered_playlist_ids: ids,
-            })
-            .expect("reorder playlists");
-        assert!(result.reordered > 0);
-
-        // Bypass staging entirely and read the raw USB-root PDB file --
-        // the file the physical drive actually holds. Before the write-back
-        // fix, the reordered sort order only ever landed in the local
-        // staged cache copy and never reached this path.
-        let raw_pdb_path = crate::service::usb_vendor_compat::vendor_pdb_path(&usb_root);
-        let parsed = crate::pdb_reader::parse_pdb(&raw_pdb_path).expect("parse raw usb pdb");
-        let mut raw_order: Vec<(u32, u32)> = parsed
+        .expect("parse usb pdb");
+        let playlist = parsed
             .playlist_tree
             .iter()
-            .filter(|row| !row.row_is_folder)
-            .map(|row| (row.id, row.sort_order))
+            .find(|row| row.name == name && !row.row_is_folder)
+            .expect("pdb playlist");
+        let mut entries: Vec<_> = parsed
+            .playlist_entries
+            .iter()
+            .filter(|entry| entry.playlist_id == playlist.id)
             .collect();
-        raw_order.sort_by_key(|(_, sort_order)| *sort_order);
-        let raw_id_order: Vec<u32> = raw_order.into_iter().map(|(id, _)| id).collect();
+        entries.sort_by_key(|entry| entry.entry_index);
+        entries
+            .iter()
+            .map(|entry| {
+                let track = parsed
+                    .tracks
+                    .iter()
+                    .find(|track| track.id == entry.track_id)
+                    .expect("pdb track");
+                file_name_of(&track.track_file_path)
+            })
+            .collect()
+    }
+
+    /// The files of the USB's eDB playlist `name`, by `sequenceNo`, read from
+    /// the stick's own file alone.
+    fn usb_edb_files(usb_root: &Path, name: &str) -> Vec<String> {
+        let conn = crate::edb::open_edb(
+            &crate::service::usb_vendor_compat::vendor_edb_path(usb_root),
+            &mut Vec::new(),
+        )
+        .expect("open usb edb");
+        let mut stmt = conn
+            .prepare(
+                "SELECT c.path FROM playlist_content pc
+                 JOIN playlist p ON p.playlist_id = pc.playlist_id
+                 JOIN content c ON c.content_id = pc.content_id
+                 WHERE p.name = ?1 AND p.attribute = 0 ORDER BY pc.sequenceNo",
+            )
+            .expect("prepare");
+        stmt.query_map([name], |row| row.get::<_, String>(0))
+            .expect("query")
+            .map(|path| file_name_of(&path.expect("path")))
+            .collect()
+    }
+
+    fn begin_order_edit(service: &crate::service::BackendService, usb_root: &Path) {
+        service
+            .begin_usb_order_edit(crate::models::UsbOrderEditRequest {
+                usb_root: root_text(usb_root),
+            })
+            .expect("begin order edit");
+    }
+
+    fn commit_order_edit(
+        service: &crate::service::BackendService,
+        usb_root: &Path,
+    ) -> crate::error::BackendResult<crate::models::UsbOrderEditData> {
+        service.commit_usb_order_edit(crate::models::UsbOrderEditRequest {
+            usb_root: root_text(usb_root),
+        })
+    }
+
+    /// Moves the row of `file` to before the row of `before` (the end: `None`).
+    fn move_file(
+        service: &crate::service::BackendService,
+        usb_root: &Path,
+        playlist_id: &str,
+        file: &str,
+        before: Option<&str>,
+    ) -> crate::error::BackendResult<crate::models::UsbOrderEditData> {
+        let view = view_files(service, usb_root, playlist_id);
+        let id_of = |name: &str| {
+            view.iter()
+                .find(|(file, _)| file == name)
+                .map(|(_, id)| id.clone())
+                .expect("row of file")
+        };
+        service.move_usb_playlist_track(crate::models::MoveUsbPlaylistTrackRequest {
+            usb_root: root_text(usb_root),
+            playlist_id: playlist_id.to_string(),
+            move_track_id: id_of(file),
+            before_track_id: before.map(id_of),
+        })
+    }
+
+    fn only_playlist_id(service: &crate::service::BackendService, usb_root: &Path) -> String {
+        service
+            .fetch_usb_playlists(crate::models::FetchUsbPlaylistsRequest {
+                usb_root: root_text(usb_root),
+            })
+            .expect("fetch playlists")
+            .items[0]
+            .id
+            .clone()
+    }
+
+    /// Puts the playlists in `ids`' order with one move each, in an order edit.
+    fn edit_playlist_order(
+        service: &crate::service::BackendService,
+        usb_root: &Path,
+        ids: &[String],
+    ) {
+        begin_order_edit(service, usb_root);
+        for id in ids {
+            service
+                .move_usb_playlist(crate::models::MoveUsbPlaylistRequest {
+                    usb_root: root_text(usb_root),
+                    playlist_id: id.clone(),
+                    before_playlist_id: None,
+                })
+                .expect("move playlist");
+        }
+        commit_order_edit(service, usb_root).expect("commit order edit");
+    }
+
+    /// A staged stick, connected (`validate_usb_root`) as the app connects one.
+    fn connected_order_edit_usb(
+        service: &crate::service::BackendService,
+    ) -> (tempfile::TempDir, std::path::PathBuf, String) {
+        let (dir, usb_root) = order_edit_usb();
+        service
+            .validate_usb_root(crate::models::ValidateUsbRootRequest {
+                path: usb_root.to_string_lossy().to_string(),
+            })
+            .expect("validate usb");
+        let playlist_id = only_playlist_id(service, &usb_root);
+        (dir, usb_root, playlist_id)
+    }
+
+    fn usb_db_bytes(usb_root: &Path) -> (Vec<u8>, Vec<u8>) {
+        (
+            std::fs::read(crate::service::usb_vendor_compat::vendor_pdb_path(usb_root))
+                .expect("usb pdb"),
+            std::fs::read(crate::service::usb_vendor_compat::vendor_edb_path(usb_root))
+                .expect("usb edb"),
+        )
+    }
+
+    #[test]
+    fn usb_order_edit_writes_back_to_usb_when_staging_enabled() {
+        let cache_dir = tempfile::tempdir().expect("cache dir").keep();
+        let _guard = crate::service::usb_staging::set_cache_root_for_test(Some(cache_dir));
+        let (_dir, service) = test_service();
+        let (_usb_dir, usb_root, playlist_id) = connected_order_edit_usb(&service);
+
+        begin_order_edit(&service, &usb_root);
+        move_file(&service, &usb_root, &playlist_id, "c.mp3", Some("a.mp3")).expect("move");
         assert_eq!(
-            raw_id_order, expected_pdb_id_order,
-            "reordered playlist sort order must be written back to the raw USB PDB, not just the staged cache copy"
+            view_names(&view_files(&service, &usb_root, &playlist_id)),
+            ["c.mp3", "a.mp3", "b.mp3"],
+            "the view shows the pending order"
+        );
+        assert_eq!(
+            usb_pdb_files(&usb_root, "My Playlist"),
+            ["a.mp3", "b.mp3", "c.mp3"]
+        );
+        commit_order_edit(&service, &usb_root).expect("commit");
+
+        // Read straight from the stick's files: the staged copies don't count,
+        // and the eDB must hold the order without its write-ahead log.
+        let expected = ["c.mp3", "a.mp3", "b.mp3"];
+        assert_eq!(usb_pdb_files(&usb_root, "My Playlist"), expected);
+        assert_eq!(usb_edb_files(&usb_root, "My Playlist"), expected);
+        assert_eq!(
+            view_names(&view_files(&service, &usb_root, &playlist_id)),
+            expected
         );
     }
 
     #[test]
-    fn reorder_usb_playlists_writes_one_order_to_both_databases() {
+    fn usb_order_edit_writes_one_playlist_order_to_both_databases() {
         let (_dir, service) = test_service();
         let (_usb_dir, usb_root) = test_usb_root();
-        let root = Some(usb_root.to_string_lossy().to_string());
+        let root = root_text(&usb_root);
         let names_in_order = |service: &crate::service::BackendService| {
             service
                 .fetch_usb_playlists(crate::models::FetchUsbPlaylistsRequest {
@@ -5480,12 +5470,8 @@ mod tests {
         assert!(id_of("C").starts_with("usb-pl-name-"));
 
         for order in [["C", "B", "A"], ["B", "C", "A"], ["A", "B", "C"]] {
-            service
-                .reorder_usb_playlists(crate::models::ReorderUsbPlaylistsRequest {
-                    usb_root: root.clone(),
-                    ordered_playlist_ids: order.iter().map(|name| id_of(name)).collect(),
-                })
-                .expect("reorder playlists");
+            let ids: Vec<String> = order.iter().map(|name| id_of(name)).collect();
+            edit_playlist_order(&service, &usb_root, &ids);
 
             let read: Vec<String> = names_in_order(&service)
                 .into_iter()
@@ -5508,10 +5494,10 @@ mod tests {
     }
 
     #[test]
-    fn reorder_usb_playlists_saves_order_with_only_edb_playlists() {
+    fn usb_order_edit_saves_order_with_only_edb_playlists() {
         let (_dir, service) = test_service();
         let (_usb_dir, usb_root) = test_usb_root();
-        let root = Some(usb_root.to_string_lossy().to_string());
+        let root = root_text(&usb_root);
         for (id, name) in [("pl-a", "A"), ("pl-b", "B")] {
             let tracks = [("t1", "Song", "a.mp3")];
             let playlist = crate::edb::ExportPlaylistData {
@@ -5535,29 +5521,276 @@ mod tests {
         };
         let mut ids: Vec<String> = fetch().iter().map(|p| p.id.clone()).collect();
         ids.reverse();
-
-        service
-            .reorder_usb_playlists(crate::models::ReorderUsbPlaylistsRequest {
-                usb_root: root.clone(),
-                ordered_playlist_ids: ids.clone(),
-            })
-            .expect("reorder playlists");
+        edit_playlist_order(&service, &usb_root, &ids);
 
         let read: Vec<String> = fetch().iter().map(|p| p.id.clone()).collect();
         assert_eq!(read, ids);
     }
 
     #[test]
-    fn reorder_usb_playlists_rejects_ids_that_match_no_playlist() {
+    fn usb_order_edit_conflict_in_either_database_stops_the_save_before_writing() {
+        let cache_dir = tempfile::tempdir().expect("cache dir").keep();
+        let _guard = crate::service::usb_staging::set_cache_root_for_test(Some(cache_dir));
+        for changed in [
+            crate::service::usb_vendor_compat::vendor_pdb_path,
+            crate::service::usb_vendor_compat::vendor_edb_path,
+        ] {
+            let (_dir, service) = test_service();
+            let (_usb_dir, usb_root, playlist_id) = connected_order_edit_usb(&service);
+            begin_order_edit(&service, &usb_root);
+            move_file(&service, &usb_root, &playlist_id, "c.mp3", Some("a.mp3")).expect("move");
+
+            // Something else writes the stick after it was staged.
+            let path = changed(&usb_root);
+            let bytes = std::fs::read(&path).expect("usb file");
+            std::thread::sleep(std::time::Duration::from_millis(20));
+            std::fs::write(&path, &bytes).expect("rewrite usb file");
+            let before = usb_db_bytes(&usb_root);
+
+            let err = commit_order_edit(&service, &usb_root).expect_err("conflict");
+            assert!(
+                err.english().contains("changed since it was last read"),
+                "{}",
+                err.english()
+            );
+            assert_eq!(usb_db_bytes(&usb_root), before, "neither database written");
+            let state = service.usb_order_edit_state(&usb_root);
+            assert!(state.active && state.changed, "the pending order stays");
+        }
+    }
+
+    #[test]
+    fn usb_order_edit_failed_write_back_keeps_the_order_for_a_retry() {
+        let cache_dir = tempfile::tempdir().expect("cache dir").keep();
+        let _guard = crate::service::usb_staging::set_cache_root_for_test(Some(cache_dir));
         let (_dir, service) = test_service();
-        let (_usb_dir, usb_root) = test_usb_root();
-        let err = service
-            .reorder_usb_playlists(crate::models::ReorderUsbPlaylistsRequest {
-                usb_root: Some(usb_root.to_string_lossy().to_string()),
-                ordered_playlist_ids: vec!["usb-pl-name-only".to_string()],
+        let (_usb_dir, usb_root, playlist_id) = connected_order_edit_usb(&service);
+        begin_order_edit(&service, &usb_root);
+        move_file(&service, &usb_root, &playlist_id, "a.mp3", None).expect("move");
+
+        // The PDB, written first, can't be written: nothing is.
+        let blocker = crate::service::usb_staging::write_back_temp_path_for_test(
+            &usb_root,
+            crate::service::usb_staging::DbKind::Pdb,
+        );
+        std::fs::create_dir_all(&blocker).expect("block the pdb write-back");
+        let before = usb_db_bytes(&usb_root);
+        commit_order_edit(&service, &usb_root).expect_err("write-back fails");
+        assert_eq!(usb_db_bytes(&usb_root), before);
+        assert!(service.usb_order_edit_state(&usb_root).changed);
+        assert_eq!(
+            view_names(&view_files(&service, &usb_root, &playlist_id)),
+            ["b.mp3", "c.mp3", "a.mp3"],
+            "the view still shows the pending order"
+        );
+
+        std::fs::remove_dir(&blocker).expect("unblock");
+        commit_order_edit(&service, &usb_root).expect("retry");
+        let expected = ["b.mp3", "c.mp3", "a.mp3"];
+        assert_eq!(usb_pdb_files(&usb_root, "My Playlist"), expected);
+        assert_eq!(usb_edb_files(&usb_root, "My Playlist"), expected);
+        assert!(!service.usb_order_edit_state(&usb_root).active);
+    }
+
+    #[test]
+    fn usb_order_edit_partial_save_is_reported_and_cancel_leaves_the_usb_as_is() {
+        let cache_dir = tempfile::tempdir().expect("cache dir").keep();
+        let _guard = crate::service::usb_staging::set_cache_root_for_test(Some(cache_dir));
+        let (_dir, service) = test_service();
+        let (_usb_dir, usb_root, playlist_id) = connected_order_edit_usb(&service);
+        begin_order_edit(&service, &usb_root);
+        move_file(&service, &usb_root, &playlist_id, "a.mp3", None).expect("move");
+
+        // The PDB is written, then the eDB can't be.
+        let blocker = crate::service::usb_staging::write_back_temp_path_for_test(
+            &usb_root,
+            crate::service::usb_staging::DbKind::Edb,
+        );
+        std::fs::create_dir_all(&blocker).expect("block the edb write-back");
+        let err = commit_order_edit(&service, &usb_root).expect_err("partial save");
+        assert!(
+            err.english().contains("saved to the PDB only"),
+            "{}",
+            err.english()
+        );
+        let saved = ["b.mp3", "c.mp3", "a.mp3"];
+        assert_eq!(usb_pdb_files(&usb_root, "My Playlist"), saved);
+        assert_eq!(
+            usb_edb_files(&usb_root, "My Playlist"),
+            ["a.mp3", "b.mp3", "c.mp3"]
+        );
+
+        let cancelled = service
+            .cancel_usb_order_edit(crate::models::UsbOrderEditRequest {
+                usb_root: root_text(&usb_root),
             })
-            .unwrap_err();
-        assert!(matches!(err, crate::error::BackendError::Internal(_)));
+            .expect("cancel");
+        assert!(cancelled.status_text.contains("stays on the USB"));
+        std::fs::remove_dir(&blocker).expect("unblock");
+
+        // The failed save's staged eDB was dropped: a later writer has nothing to write back.
+        assert!(
+            !crate::service::usb_staging::write_back_if_changed(
+                &usb_root,
+                crate::service::usb_staging::DbKind::Edb
+            )
+            .expect("write back")
+        );
+        assert_eq!(usb_pdb_files(&usb_root, "My Playlist"), saved);
+        assert_eq!(
+            usb_edb_files(&usb_root, "My Playlist"),
+            ["a.mp3", "b.mp3", "c.mp3"]
+        );
+    }
+
+    #[test]
+    fn usb_order_edit_failure_after_a_disconnect_drops_the_staged_copies() {
+        let cache_dir = tempfile::tempdir().expect("cache dir").keep();
+        let _guard = crate::service::usb_staging::set_cache_root_for_test(Some(cache_dir));
+        let (_dir, service) = test_service();
+        let (_usb_dir, usb_root, playlist_id) = connected_order_edit_usb(&service);
+        let staged = [
+            crate::service::usb_staging::stage_pdb(&usb_root).expect("staged pdb"),
+            crate::service::usb_staging::stage_edb(&usb_root).expect("staged edb"),
+        ];
+        begin_order_edit(&service, &usb_root);
+        move_file(&service, &usb_root, &playlist_id, "a.mp3", None).expect("move");
+
+        // The stick goes away once the staged copies are patched.
+        let unplug = |_: usize, _: usize, message: &str| {
+            if message == crate::i18n::tr::usb_progress_order_edit_write_back().render() {
+                std::fs::remove_dir_all(&usb_root).expect("unplug");
+                std::fs::write(&usb_root, b"").expect("nothing to write to");
+            }
+        };
+        service
+            .commit_usb_order_edit_with_progress(
+                crate::models::UsbOrderEditRequest {
+                    usb_root: root_text(&usb_root),
+                },
+                unplug,
+            )
+            .expect_err("the stick is gone");
+        for path in &staged {
+            assert!(!path.exists(), "{} dropped", path.display());
+        }
+        service
+            .cancel_usb_order_edit(crate::models::UsbOrderEditRequest {
+                usb_root: root_text(&usb_root),
+            })
+            .expect("cancel");
+        assert!(!service.usb_order_edit_state(&usb_root).active);
+        std::fs::remove_file(&usb_root).expect("tidy up");
+    }
+
+    #[test]
+    fn usb_order_edit_incomplete_edb_checkpoint_stops_the_save() {
+        let cache_dir = tempfile::tempdir().expect("cache dir").keep();
+        let _guard = crate::service::usb_staging::set_cache_root_for_test(Some(cache_dir));
+        let (_dir, service) = test_service();
+        let (_usb_dir, usb_root, playlist_id) = connected_order_edit_usb(&service);
+        begin_order_edit(&service, &usb_root);
+        move_file(&service, &usb_root, &playlist_id, "a.mp3", None).expect("move");
+
+        // A reader holding a snapshot of the staged eDB keeps its log from
+        // being checkpointed.
+        let reader = crate::edb::open_edb_rw(&usb_root).expect("open staged edb");
+        reader
+            .execute_batch("PRAGMA journal_mode=WAL;")
+            .expect("wal");
+        reader
+            .busy_timeout(std::time::Duration::from_millis(50))
+            .expect("timeout");
+        reader.execute_batch("BEGIN").expect("begin");
+        let _: i64 = reader
+            .query_row("SELECT count(*) FROM playlist_content", [], |row| {
+                row.get(0)
+            })
+            .expect("read");
+        let before = usb_db_bytes(&usb_root);
+
+        let err = commit_order_edit(&service, &usb_root).expect_err("checkpoint incomplete");
+        assert!(
+            err.english().contains("couldn't finish writing"),
+            "{}",
+            err.english()
+        );
+        assert_eq!(usb_db_bytes(&usb_root), before, "nothing written back");
+        assert!(service.usb_order_edit_state(&usb_root).changed);
+        drop(reader);
+    }
+
+    #[test]
+    fn usb_order_edit_refuses_changes_while_it_saves() {
+        let (_dir, service) = test_service();
+        let (_usb_dir, usb_root) = order_edit_usb();
+        let (_other_dir, other_root) = test_usb_root();
+        let playlist_id = only_playlist_id(&service, &usb_root);
+        begin_order_edit(&service, &usb_root);
+        move_file(&service, &usb_root, &playlist_id, "a.mp3", None).expect("move");
+
+        let during = service.clone();
+        let root = root_text(&usb_root);
+        let mut checked = false;
+        let check = |_: usize, _: usize, message: &str| {
+            if message != crate::i18n::tr::usb_progress_backing_up_usb_databases().render() {
+                return;
+            }
+            checked = true;
+            let edit = crate::models::UsbOrderEditRequest {
+                usb_root: root.clone(),
+            };
+            assert!(during.begin_usb_order_edit(edit.clone()).is_err());
+            assert!(
+                during
+                    .move_usb_playlist(crate::models::MoveUsbPlaylistRequest {
+                        usb_root: root.clone(),
+                        playlist_id: playlist_id.clone(),
+                        before_playlist_id: None,
+                    })
+                    .is_err()
+            );
+            assert!(
+                during
+                    .sort_usb_playlist_tracks(crate::models::SortUsbPlaylistTracksRequest {
+                        usb_root: root.clone(),
+                        playlist_id: playlist_id.clone(),
+                        sort_by: Some("title".to_string()),
+                        sort_dir: None,
+                    })
+                    .is_err()
+            );
+            assert!(during.cancel_usb_order_edit(edit.clone()).is_err());
+            assert!(during.commit_usb_order_edit(edit).is_err());
+            assert!(
+                during
+                    .select_usb(crate::models::SelectUsbRequest {
+                        path: other_root.to_string_lossy().to_string(),
+                    })
+                    .is_err(),
+                "the selected USB can't change"
+            );
+            assert!(
+                matches!(
+                    during.usb_write_lock.try_lock(),
+                    Err(std::sync::TryLockError::WouldBlock)
+                ),
+                "the save holds the USB write lock"
+            );
+        };
+        service
+            .commit_usb_order_edit_with_progress(
+                crate::models::UsbOrderEditRequest {
+                    usb_root: root_text(&usb_root),
+                },
+                check,
+            )
+            .expect("commit");
+        assert!(checked);
+        assert_eq!(
+            usb_pdb_files(&usb_root, "My Playlist"),
+            ["b.mp3", "c.mp3", "a.mp3"]
+        );
     }
 
     #[test]

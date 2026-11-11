@@ -5,16 +5,17 @@ use std::fs;
 use std::path::Path;
 
 use backend::commands::BackendCommands;
+use backend::error::ErrorCode;
 use backend::models::{
     AddLibrarySelectionToPlaylistRequest, AddSourceFoldersRequest, BrowseSourceFilesRequest,
     CreatePlaylistRequest, DeleteUsbBackupRequest, ExportToUsbRequest, FetchUsbHistoriesRequest,
     FetchUsbPlaylistsRequest, GetPlaylistTracksRequest, GetTrackDetailRequest,
-    InitializeUsbRequest, ListUsbBackupsRequest, PlayResolvedTrackRequest, PruneUsbDeviceRequest,
-    RemoveTracksFromPlaylistRequest, RemoveUsbPlaylistRequest, RenamePlaylistRequest,
-    ReorderPlaylistTracksRequest, ReorderUsbPlaylistsRequest, ResolveTrackIdentityRequest,
+    InitializeUsbRequest, ListUsbBackupsRequest, MoveUsbPlaylistRequest, PlayResolvedTrackRequest,
+    PruneUsbDeviceRequest, RemoveTracksFromPlaylistRequest, RemoveUsbPlaylistRequest,
+    RenamePlaylistRequest, ReorderPlaylistTracksRequest, ResolveTrackIdentityRequest,
     RestoreUsbBackupRequest, RunUsbDiagnosticsRequest, RunUsbParityReportRequest,
     SaveTrackAnalysisEditsRequest, ScanLibraryRequest, ScanRekordboxDbRequest, SelectUsbRequest,
-    SetPlaybackMetronomeRequest, SetUsbDeviceNameRequest, TrackCueInput,
+    SetPlaybackMetronomeRequest, SetUsbDeviceNameRequest, TrackCueInput, UsbOrderEditRequest,
 };
 use backend::service::usb_vendor_compat::DEFAULT_USB_EDB_KEY;
 use tempfile::tempdir;
@@ -813,7 +814,7 @@ fn remove_usb_playlist_with_progress_removes_playlist_from_edb() {
 }
 
 #[test]
-fn reorder_usb_playlists_with_progress_rejects_ids_that_match_no_playlist() {
+fn usb_order_edit_moves_need_an_edit_and_ids_on_the_usb() {
     let root = tempdir().expect("temp root");
     let usb_root = root.path().join("usb");
     fs::create_dir_all(&usb_root).expect("create usb root");
@@ -824,25 +825,43 @@ fn reorder_usb_playlists_with_progress_rejects_ids_that_match_no_playlist() {
         usb_root: usb_root.to_string_lossy().to_string(),
     });
     assert!(init.ok, "initialize usb failed: {init:?}");
+    let usb = Some(usb_root.to_string_lossy().to_string());
+    let move_missing = || {
+        backend.move_usb_playlist(MoveUsbPlaylistRequest {
+            usb_root: usb.clone(),
+            playlist_id: "usb-pl-name-not-on-this-usb".to_string(),
+            before_playlist_id: None,
+        })
+    };
+
+    let refused = move_missing();
+    assert!(!refused.ok, "a move without an order edit is refused");
+    assert!(matches!(
+        refused.error.expect("error").code,
+        ErrorCode::ValidationError
+    ));
+
+    let begun = backend.begin_usb_order_edit(UsbOrderEditRequest {
+        usb_root: usb.clone(),
+    });
+    assert!(begun.ok, "begin failed: {begun:?}");
+    let missing = move_missing();
+    assert!(!missing.ok, "an id that matches no playlist is refused");
+    assert!(matches!(
+        missing.error.expect("error").code,
+        ErrorCode::NotFound
+    ));
 
     let mut progress_events = 0usize;
-    let response = backend.reorder_usb_playlists_with_progress(
-        ReorderUsbPlaylistsRequest {
-            usb_root: Some(usb_root.to_string_lossy().to_string()),
-            ordered_playlist_ids: vec!["usb-pl-name-not-on-this-usb".to_string()],
-        },
-        |_, _, _| {
-            progress_events += 1;
-        },
-    );
-
+    let saved = backend
+        .commit_usb_order_edit_with_progress(UsbOrderEditRequest { usb_root: usb }, |_, _, _| {
+            progress_events += 1
+        });
+    assert!(saved.ok, "saving an unchanged order succeeds: {saved:?}");
     assert!(
-        !response.ok,
-        "ids that match no playlist in either database should fail validation"
+        progress_events > 0,
+        "expected at least one progress callback"
     );
-    let error = response.error.expect("error payload");
-    assert!(error.message.contains("matched no playlist"));
-    let _ = progress_events;
 }
 
 #[test]
