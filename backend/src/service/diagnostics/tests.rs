@@ -2187,7 +2187,7 @@ fn pdb_integrity_reports_rekordbox_bookkeeping_as_pass() {
 #[test]
 fn edb_analysis_refs_pass_when_the_edb_has_no_tracks() {
     let edb_check = |content_rows: Option<usize>| {
-        diagnose_analysis_integrity(None, None, content_rows)
+        diagnose_analysis_integrity(None, Some(None), content_rows)
             .checks
             .into_iter()
             .find(|c| c.label == "eDB analysis refs")

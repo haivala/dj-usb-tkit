@@ -323,6 +323,10 @@ When the USB has only one of the two databases, the fix rebuilds the other:
   that had no PDB is never left with an empty one.
 - Play history is not part of parity and isn't copied: the rebuilt
   database starts with empty history.
+- Diagnostics show the missing database as a warning, not a failure. They
+  skip the checks that compare the two databases or read PDB bytes, and
+  check playlists, analysis references and beat grids from the database
+  the USB has. On a stick without a PDB, that means the eDB.
 
 ### Track field table
 

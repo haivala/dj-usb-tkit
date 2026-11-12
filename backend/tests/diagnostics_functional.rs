@@ -1923,6 +1923,65 @@ fn preview_repair(
     preview.data.expect("preview data").data
 }
 
+/// Diagnostics of a stick with one database: the missing one is a warning
+/// that the repair builds, nothing fails, and the library checks read
+/// whichever database is there.
+fn assert_one_database_diagnostics(backend: &BackendCommands, usb: &Path, file_name: &str) {
+    let diagnostics = backend.run_usb_diagnostics(RunUsbDiagnosticsRequest {
+        usb_root: Some(usb.to_string_lossy().to_string()),
+    });
+    assert!(diagnostics.ok, "diagnostics failed: {diagnostics:?}");
+    let data = diagnostics.data.expect("diagnostics data").data;
+    let checks = data
+        .section_groups
+        .iter()
+        .flat_map(|g| &g.sections)
+        .flat_map(|s| &s.checks)
+        .collect::<Vec<_>>();
+    let failed = checks
+        .iter()
+        .filter(|c| matches!(c.status, backend::models::DiagStatus::Fail))
+        .collect::<Vec<_>>();
+    assert!(failed.is_empty(), "{file_name} missing: {failed:?}");
+    assert!(
+        matches!(data.overall_status, backend::models::DiagStatus::Warn),
+        "{:?}",
+        data.overall_status
+    );
+    // Nothing compares against the database that isn't there.
+    for text in ["path agreement", "No PDB data available"] {
+        assert!(
+            !checks
+                .iter()
+                .any(|c| c.label.contains(text) || c.detail.contains(text)),
+            "{file_name} missing: {checks:?}"
+        );
+    }
+    let missing_line = if file_name == "export.pdb" {
+        "This USB has no database for older players"
+    } else {
+        "This USB has no database for newer players"
+    };
+    assert!(
+        data.overview
+            .iter()
+            .any(|item| item.detail.contains(missing_line)),
+        "{:?}",
+        data.overview
+    );
+    // Both playlists resolve from whichever database is left.
+    let playlists = data
+        .overview
+        .iter()
+        .find(|item| item.title == "Playlists")
+        .expect("playlists row");
+    assert!(
+        matches!(playlists.status, Some(backend::models::DiagStatus::Pass)),
+        "{playlists:?}"
+    );
+    assert_eq!(data.playlist_details.len(), 2, "{:?}", data.playlist_details);
+}
+
 /// Deletes one database from the two-playlist fixture, previews (which must
 /// offer strict parity and write nothing), applies, and checks both
 /// playlists are strict-clean against the rebuilt database.
@@ -1935,6 +1994,8 @@ fn assert_strict_repair_rebuilds_missing(file_name: &str, applied_line: &str) {
     strip_anlz_ppth(&dat);
     let missing = vendor_db_dir(&usb).join(file_name);
     fs::remove_file(&missing).expect("delete database");
+
+    assert_one_database_diagnostics(&backend, &usb, file_name);
 
     let preview = preview_repair(&backend, &usb);
     assert!(

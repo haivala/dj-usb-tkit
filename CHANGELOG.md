@@ -67,7 +67,9 @@
   to the database it has; its histories show from the eDB; removing a playlist also removes the files of the tracks
   only that playlist holds; the export estimate works, and says the missing database is created on export. Export
   first builds the missing database from the other, so the USB ends up with both. The Engine DB export reads the
-  database the USB has, without creating the other. The parity report says which database is missing instead of failing, and Preview Fixes offers the USB's other fixes
+  database the USB has, without creating the other. The parity report says which database is missing instead of failing. Diagnostics show
+  the missing database as a warning and check playlists and analysis from the database the USB has, instead of failing
+  them. Preview Fixes offers the USB's other fixes
   in the same pass as the missing database, so one repair is enough.
 - **Fix:** An edit of a track that is in only one of the USB's two databases saves to that one, and the log says
   Preview Fixes adds it to the other. Before, the edit was refused.

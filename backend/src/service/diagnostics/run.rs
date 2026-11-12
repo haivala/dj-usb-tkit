@@ -76,10 +76,21 @@ impl BackendService {
             100,
             &tr::diagnostics_progress_checking_pdb_integrity().render(),
         );
-        let (pdb_integrity, staged_parse) =
+        let (mut pdb_integrity, staged_parse) =
             diagnose_pdb_integrity(&pdb_path, |path| self.parsed_staged_pdb(path));
         let parsed_pdb: Option<&crate::pdb_reader::ParsedPdb> =
             staged_parse.as_deref().map(|staged| &*staged.parsed);
+        let edb_path = vendor_edb_path(&usb_root);
+        let has_pdb = pdb_path.exists();
+        let has_edb = edb_path.exists();
+        if !has_pdb && has_edb {
+            // Like a missing eDB: players reading the other database still work,
+            // and the repair builds this one from it.
+            for check in &mut pdb_integrity.checks {
+                check.status = DiagStatus::Warn;
+            }
+            pdb_integrity.status = DiagStatus::Warn;
+        }
         note_stage("pdb integrity");
 
         // --- 2. DB Access ---
@@ -88,11 +99,10 @@ impl BackendService {
             100,
             &tr::diagnostics_progress_checking_database_access().render(),
         );
-        let edb_path = vendor_edb_path(&usb_root);
         let mut edb_open_warnings = Vec::<WarningEntry>::new();
         let owned_edb_conn: Option<rusqlite::Connection> = if edb_conn.is_some() {
             None
-        } else if edb_path.exists() {
+        } else if has_edb {
             open_edb_from_usb_root(&usb_root, &mut edb_open_warnings)
         } else {
             None
@@ -109,6 +119,14 @@ impl BackendService {
                     .map(|(name, playlist)| (name.clone(), playlist.tracks.clone()))
                     .collect::<HashMap<_, _>>()
             });
+        // Without a PDB, the library checks below read the eDB's tracks,
+        // playlists and analysis references instead.
+        let edb_catalog = if has_pdb {
+            None
+        } else {
+            conn.and_then(|c| crate::edb::edb_as_parsed_pdb(c).ok())
+        };
+        let catalog = parsed_pdb.or(edb_catalog.as_ref());
 
         // eDB history counts
         {
@@ -236,8 +254,8 @@ impl BackendService {
             .count();
         let edb_only_count = edb_indexed_paths.difference(&pdb_indexed_paths).count();
         let mut contents_integrity = diagnose_contents_integrity_db_only(
-            pdb_indexed_paths.len(),
-            edb_indexed_paths.len(),
+            has_pdb.then_some(pdb_indexed_paths.len()),
+            has_edb.then_some(edb_indexed_paths.len()),
             true_pdb_only_count,
             edb_only_count,
             history_only_count,
@@ -247,7 +265,7 @@ impl BackendService {
         // freezes/comm-errors CDJ hardware while browsing (see `detect_pdb_string_misalignment`
         // for the full MIPS-alignment explanation). `dump_pdb_anomalies`-style checks only look
         // at page/table shape, so this is otherwise invisible on read.
-        {
+        if has_pdb {
             let (artist_layout, misaligned): (Vec<_>, Vec<_>) =
                 crate::service::repair::detect_pdb_string_misalignment(
                     &std::fs::read(&pdb_path).unwrap_or_default(),
@@ -332,7 +350,11 @@ impl BackendService {
                 .map(|n| n.max(0) as usize)
         });
         let mut analysis_integrity =
-            diagnose_analysis_integrity(parsed_pdb, edb_playlist_tracks.as_ref(), edb_content_rows);
+            diagnose_analysis_integrity(
+                has_pdb.then_some(parsed_pdb),
+                has_edb.then_some(edb_playlist_tracks.as_ref()),
+                edb_content_rows,
+            );
         if let Some(parsed) = parsed_pdb {
             // Database-only: the ANLZ beat grids are compared by the repair
             // preview, which scans the analysis files anyway.
@@ -365,6 +387,8 @@ impl BackendService {
                 detail,
             ));
             note_stage("BPM/key check");
+        }
+        if let Some(parsed) = catalog {
             // Database-only, like the BPM check: track rows naming the same
             // bundle. The repair preview also reads each bundle's PPTH.
             let shared = scan_analysis_ownership(&usb_root, parsed, None, false).shared;
@@ -406,7 +430,11 @@ impl BackendService {
             };
             analysis_integrity.checks.push(shared_check);
             note_stage("shared analysis check");
-            let beat_grids = self.outdated_beat_grids(&usb_root, &pdb_path, parsed);
+            let beat_grids = if has_pdb {
+                self.outdated_beat_grids(&usb_root, &pdb_path, parsed)
+            } else {
+                std::sync::Arc::new(detect_outdated_beat_grids(&usb_root, parsed))
+            };
             let (beat_grid_status, beat_grid_detail) =
                 diagnose_beat_grid_format(beat_grids.as_deref());
             note_stage("beat grid check");
@@ -441,8 +469,9 @@ impl BackendService {
         );
         let (playlist_resolution, playlist_details) =
             diagnose_playlist_resolution_with_edb_internal(
-                parsed_pdb,
-                edb_playlist_tracks.as_ref(),
+                catalog,
+                // Without a PDB the playlists come from the eDB: nothing to compare them to.
+                edb_playlist_tracks.as_ref().filter(|_| has_pdb),
                 |done, total, message| {
                     let pct = if total == 0 {
                         98
@@ -489,11 +518,11 @@ impl BackendService {
         let overview = diagnostics_overview(
             &section_groups,
             &OverviewFacts {
-                edb_file_present: edb_path.exists(),
+                edb_file_present: has_edb,
                 pdb_tracks: parsed_pdb.map_or(0, |p| p.tracks.len()),
                 edb_tracks: edb_indexed_paths.len(),
                 pdb_only_tracks: true_pdb_only_count,
-                edb_only_tracks: edb_only_count,
+                edb_only_tracks: if has_pdb { edb_only_count } else { 0 },
                 playlists: playlist_details.len(),
                 playlist_entries: playlist_details.iter().map(|p| p.total_entries).sum(),
                 resolved_playlist_entries: playlist_details

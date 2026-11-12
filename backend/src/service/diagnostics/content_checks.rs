@@ -95,25 +95,47 @@ pub(crate) fn diagnose_contents_integrity(
     }
 }
 
+/// A database the stick doesn't have is `None`: no count for it, and no
+/// agreement check, since there is nothing to compare.
 pub(crate) fn diagnose_contents_integrity_db_only(
-    pdb_indexed_count: usize,
-    edb_indexed_count: usize,
+    pdb_indexed_count: Option<usize>,
+    edb_indexed_count: Option<usize>,
     pdb_only_count: usize,
     edb_only_count: usize,
     history_only_count: usize,
 ) -> DiagSection {
     let mut checks = Vec::new();
 
-    checks.push(DiagCheck::new(
-        tr::diagnostics_check_pdb_paths(),
-        DiagStatus::Pass,
-        tr::diagnostics_check_paths_count(pdb_indexed_count),
-    ));
-    checks.push(DiagCheck::new(
-        tr::diagnostics_check_edb_paths(),
-        DiagStatus::Pass,
-        tr::diagnostics_check_paths_count(edb_indexed_count),
-    ));
+    if let Some(count) = pdb_indexed_count {
+        checks.push(DiagCheck::new(
+            tr::diagnostics_check_pdb_paths(),
+            DiagStatus::Pass,
+            tr::diagnostics_check_paths_count(count),
+        ));
+    }
+    if let Some(count) = edb_indexed_count {
+        checks.push(DiagCheck::new(
+            tr::diagnostics_check_edb_paths(),
+            DiagStatus::Pass,
+            tr::diagnostics_check_paths_count(count),
+        ));
+    }
+    let (Some(pdb_indexed_count), Some(edb_indexed_count)) = (pdb_indexed_count, edb_indexed_count)
+    else {
+        let status =
+            DiagStatus::worst_of(&checks.iter().map(|c| &c.status).collect::<Vec<_>>());
+        return DiagSection {
+            key: "",
+            title: "Contents Integrity".to_string(),
+            status,
+            checks,
+            counts: Some(DiagCountsSummary {
+                contents_count: pdb_indexed_count.unwrap_or(0),
+                indexed_count: edb_indexed_count.unwrap_or(0),
+                mismatch_count: 0,
+            }),
+        };
+    };
 
     let disagreement_status = if pdb_only_count == 0 && edb_only_count == 0 {
         DiagStatus::Pass
@@ -385,14 +407,16 @@ pub(super) fn diagnose_beat_grid_format(
 
 /// `edb_content_rows` is the eDB's `content` row count when it could be read;
 /// with no tracks there are no analysis refs to miss.
+/// The outer `None` of `pdb` / `edb_playlist_tracks` means the stick has no
+/// such database: its check is left out rather than failed.
 pub(crate) fn diagnose_analysis_integrity(
-    parsed: Option<&crate::pdb_reader::ParsedPdb>,
-    edb_playlist_tracks: Option<&HashMap<String, Vec<UsbTrack>>>,
+    pdb: Option<Option<&crate::pdb_reader::ParsedPdb>>,
+    edb_playlist_tracks: Option<Option<&HashMap<String, Vec<UsbTrack>>>>,
     edb_content_rows: Option<usize>,
 ) -> DiagSection {
     let mut checks = Vec::new();
 
-    if let Some(parsed) = parsed {
+    if let Some(Some(parsed)) = pdb {
         let total_tracks = parsed.tracks.len();
         let mut path_refs = HashSet::<String>::new();
         let mut tracks_with_ref = 0usize;
@@ -418,7 +442,7 @@ pub(crate) fn diagnose_analysis_integrity(
                 path_refs.len(),
             ),
         ));
-    } else {
+    } else if pdb.is_some() {
         checks.push(DiagCheck::new(
             tr::diagnostics_check_pdb_analysis(),
             DiagStatus::Fail,
@@ -426,7 +450,7 @@ pub(crate) fn diagnose_analysis_integrity(
         ));
     }
 
-    if let Some(edb_playlist_tracks) = edb_playlist_tracks {
+    if let Some(Some(edb_playlist_tracks)) = edb_playlist_tracks {
         let mut analysis_by_content_id = HashMap::<String, String>::new();
         let mut total_playlist_entries = 0usize;
         for tracks in edb_playlist_tracks.values() {
@@ -470,13 +494,13 @@ pub(crate) fn diagnose_analysis_integrity(
                 total_playlist_entries,
             ),
         ));
-    } else if edb_content_rows == Some(0) {
+    } else if edb_playlist_tracks.is_some() && edb_content_rows == Some(0) {
         checks.push(DiagCheck::new(
             tr::diagnostics_check_edb_analysis(),
             DiagStatus::Pass,
             tr::diagnostics_check_edb_analysis_no_tracks(),
         ));
-    } else {
+    } else if edb_playlist_tracks.is_some() {
         checks.push(DiagCheck::new(
             tr::diagnostics_check_edb_analysis(),
             DiagStatus::Warn,

@@ -388,7 +388,7 @@ diagnostics-area-engine = Denon / Numark players
 diagnostics-preview-fixes-hint = Preview Fixes shows what can be repaired.
 
 # The diagnostics overview's "Older Pioneer players" row.
-diagnostics-overview-pdb-missing = This USB has no player database, so these players won't show any music.
+diagnostics-overview-pdb-missing = This USB has no database for older players, so they may not show this USB's music.
 diagnostics-overview-pdb-unreadable = The player database is missing or can't be read, so these players won't show any music.
 # $playlists, $tracks: what the player database holds.
 diagnostics-overview-pdb-ready = Ready: { $playlists ->
