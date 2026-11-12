@@ -33,7 +33,7 @@ This is the documentation set for DJ USB Tkit.
 
 - `docs/COMMANDS.md`
 - `docs/APP_DATA_MODEL.md`
-- `docs/USB_DATA_FLOW.md` - how reads and writes reach the PDB and eDB through one layer
+- `docs/APP_DATA_FLOW.md` - how reads and writes reach the PDB and eDB through one layer
 - `docs/PDB.md`
 - `docs/eDB.md`
 - `docs/ENGINE_DJ.md` - writing the Engine DJ library (Denon/Numark) from a USB export

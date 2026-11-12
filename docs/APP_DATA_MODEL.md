@@ -2,7 +2,8 @@
 
 This document describes the core entities exchanged between backend commands and UI flows.
 
-For USB database field-level inventories, see `docs/PDB.md` and `docs/eDB.md`.
+For USB database field-level inventories, see `docs/PDB.md` and `docs/eDB.md`. For how these
+entities move between the UI, the backend and the USB's databases, see `docs/APP_DATA_FLOW.md`.
 
 ## Core entities
 
@@ -67,7 +68,10 @@ These entities represent USB-side discovered state:
 
 - connected USB root and identity
 - imported playlist and history metadata
-- USB track metadata (including `formatExt`, derived from the PDB path) and optional preview payload fields
+- USB track metadata (including `formatExt`, derived from the track's USB path) and optional preview payload fields
+
+They are read from whichever of the USB's databases it has, the PDB first and the eDB where
+there is no PDB, through the layer in `docs/APP_DATA_FLOW.md`.
 
 `UsbDevice` state is backed by the local `usb_devices` table, keyed by a
 normalized root path and carrying mount/first-seen/last-seen state. It

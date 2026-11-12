@@ -79,3 +79,12 @@ player, and compare `exportLibrary.db`, `export.pdb` and the track's `.DAT` and
 `.EXT` before and after. If `cueUpdateCount` changes, it can trigger the rewrite.
 If it doesn't, or only on some models, compare the stick's ANLZ cue list with
 the list the last export wrote instead.
+
+## Hardware glance: Engine library from a stick without a PDB
+
+On a stick with only the eDB, the Engine DJ library is written from the eDB,
+and its PDB import counter (`lastRekordBoxLibraryImportReadCounter` /
+`pdbImportKey`) is NULL, since there is no PDB for the player to import. No
+player has read such a library yet. Next time an eDB-only stick is near the
+Mixstream Pro, check that it opens the library without importing anything
+and shows the tracks, playlists and cues.

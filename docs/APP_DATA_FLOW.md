@@ -1,4 +1,4 @@
-# USB Data Flow
+# App Data Flow
 
 How a request from the UI reaches the stick's two databases. Everything that touches the PDB or
 the eDB goes through one layer in `backend/src/service/usb_staging.rs`: it says which databases
@@ -6,7 +6,7 @@ the stick has, and every write goes through one session that saves both database
 
 ## The whole path
 
-![The UI calls the backend service. Readers ask the unification layer which databases the stick has and read parsed staged copies, PDB first with eDB fallback. Writers open a write session that edits the staged copies and commits them to the stick, both or neither, then drops the parse caches. Analysis, audio and artwork files are written straight to the stick.](assets/usb-data-flow.svg)
+![The UI calls the backend service. Readers ask the unification layer which databases the stick has and read parsed staged copies, PDB first with eDB fallback. Writers open a write session that edits the staged copies and commits them to the stick, both or neither, then drops the parse caches. Analysis, audio and artwork files are written straight to the stick.](assets/app-data-flow.svg)
 
 Readers and writers never pick a database file themselves; they ask the layer (blue). Database
 edits happen in the local staged copies and reach the stick only on commit, both databases or
