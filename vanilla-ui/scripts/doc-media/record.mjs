@@ -38,6 +38,8 @@ const VIEWPORT = { width: 1280, height: 837 };
 // side, with no horizontal scrollbar on the table.
 const WIDE_VIEWPORT = { ...VIEWPORT, width: 1500 };
 const ANIM_WIDTH = 960;
+// Margin around a cropped animation, in window pixels.
+const CROP_PAD = 20;
 const EDITOR_TITLE = "Demo Groove";
 // What the source folders look like in the app (long, so the chips truncate).
 const SHOWN_ROOT = "/home/dj/Music/Projects/Chiphead.Music";
@@ -447,14 +449,15 @@ async function capture(page, framesDir, scene, { fullWindow = false } = {}) {
   await page.waitForTimeout(300);
   await cdp.send("Page.stopScreencast");
   boxes.push(await cropBox());
-  const x = Math.min(...boxes.map((b) => b.x));
-  const y = Math.min(...boxes.map((b) => b.y));
-  const crop = {
-    x: Math.floor(x),
-    y: Math.floor(y),
-    w: Math.ceil(Math.max(...boxes.map((b) => b.x + b.width)) - x),
-    h: Math.ceil(Math.max(...boxes.map((b) => b.y + b.height)) - y),
-  };
+  // The editor fills the window edge to edge, so its box has no margin of its
+  // own: pad it (within the window) so the controls don't touch the frame.
+  const pad = fullWindow ? 0 : CROP_PAD;
+  const { width: vw, height: vh } = page.viewportSize();
+  const x = Math.max(0, Math.floor(Math.min(...boxes.map((b) => b.x)) - pad));
+  const y = Math.max(0, Math.floor(Math.min(...boxes.map((b) => b.y)) - pad));
+  const right = Math.min(vw, Math.ceil(Math.max(...boxes.map((b) => b.x + b.width)) + pad));
+  const bottom = Math.min(vh, Math.ceil(Math.max(...boxes.map((b) => b.y + b.height)) + pad));
+  const crop = { x, y, w: right - x, h: bottom - y };
   return { frames, crop };
 }
 

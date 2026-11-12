@@ -39,6 +39,10 @@
 
 ## Unreleased
 
+## 0.6.0
+
+**Severity:** feature
+
 - **New feature:** The track lists' columns can be hidden and put in a new order, from the button at the right end
   of any track list's header. The layout applies to every track list (Library, playlists, USB playlists and history)
   and is kept between runs.
@@ -65,6 +69,8 @@
   saved, and an export that fails is not recorded as done. An export whose eDB can't be written now fails instead of
   saving only the PDB. USB writes run one at a time, and connecting the USB again starts from the databases on the
   USB, not from edits a failed save left behind.
+- **Improvement:** The library's filter mark comes from the backend, which already knows which folders and imported
+  libraries are switched off or missing.
 - **Fix:** Clicking another playlist while typing a new playlist's name saves the new playlist and then opens the
   one you clicked. Before, the new playlist opened instead.
 - **Fix:** A USB with only the PDB or only the eDB works like one with both. Cue, BPM, key and track detail edits save
@@ -77,8 +83,6 @@
   in the same pass as the missing database, so one repair is enough.
 - **Fix:** An edit of a track that is in only one of the USB's two databases saves to that one, and the log says
   Preview Fixes adds it to the other. Before, the edit was refused.
-- **Improvement:** The library's filter mark comes from the backend, which already knows which folders and imported
-  libraries are switched off or missing.
 - **Chore:** The text catalog has one key per English text: a text with the same role on several pages (Remove,
   Drag to reorder, page names, track fields) is one `ui-common-*` key, so a translation translates it once. A test
   fails on a new duplicate unless it's listed with why it stays apart.
