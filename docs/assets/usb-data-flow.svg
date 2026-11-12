@@ -1,0 +1,160 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1160" height="700" viewBox="0 0 1160 700" role="img" aria-label="The UI calls the backend service. Its readers ask the unification layer which databases the stick has and read parsed staged copies, PDB first with eDB fallback. Its writers open a write session that edits the staged copies and commits them to the stick, both or neither, then drops the parse caches. Analysis, audio and artwork files are written straight to the stick.">
+          <style>
+  svg { --bg:#f6f7f9; --fg:#1b2230; --muted:#5d6677; --panel:#ffffff; --line:#c9cfda; --accent:#2d5bc4; --accent-soft:#e8eefb; }
+  @media (prefers-color-scheme: dark) {
+    svg { --bg:#0d1117; --fg:#e3e7ee; --muted:#9aa3b3; --panel:#1a2029; --line:#384252; --accent:#85a8ff; --accent-soft:#1c2740; }
+  }
+  .bg { fill: var(--bg); }
+  .zone { fill: none; stroke: var(--line); stroke-width: 1.2; }
+  .zone-layer { fill: var(--accent-soft); stroke: var(--accent); stroke-width: 1.4; }
+  .box { fill: var(--panel); stroke: var(--line); stroke-width: 1.2; }
+  .box-key { fill: var(--panel); stroke: var(--accent); stroke-width: 1.6; }
+  text { font-family: -apple-system, "Segoe UI", "Noto Sans", Helvetica, Arial, sans-serif; }
+  .t { fill: var(--fg); font-size: 12px; }
+  .t-dim { fill: var(--muted); font-size: 12px; }
+  .t-head { fill: var(--fg); font-size: 13px; font-weight: 600; }
+  .t-code { fill: var(--fg); font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; font-size: 12.5px; font-weight: 600; }
+  .t-zone { fill: var(--muted); font-size: 11px; font-weight: 600; letter-spacing: 0.08em; }
+  .t-zone-layer { fill: var(--accent); font-size: 11px; font-weight: 600; letter-spacing: 0.08em; }
+  .t-arrow { fill: var(--muted); font-size: 11px; }
+  .t-arrow-key { fill: var(--accent); font-size: 11px; font-weight: 500; }
+  .a { fill: none; stroke: var(--muted); stroke-width: 1.4; }
+  .a-key { fill: none; stroke: var(--accent); stroke-width: 1.8; }
+  .a-direct { fill: none; stroke: var(--muted); stroke-width: 1.4; stroke-dasharray: 6 4; }
+  .head { fill: var(--muted); }
+  .head-key { fill: var(--accent); }
+</style>
+<rect class="bg" x="0" y="0" width="1160" height="700"/>
+<defs>
+            <marker id="ah" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M0,0 L10,5 L0,10 z" class="head"/></marker>
+            <marker id="ahk" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M0,0 L10,5 L0,10 z" class="head-key"/></marker>
+          </defs>
+
+          <!-- Column A: app -->
+          <rect class="box" x="40" y="20" width="260" height="50" rx="4"/>
+          <text class="t-head" x="54" y="42">UI (vanilla-ui)</text>
+          <text class="t-dim" x="54" y="60">renders what the backend sends</text>
+          <rect class="box" x="40" y="100" width="260" height="50" rx="4"/>
+          <text class="t-head" x="54" y="122">Tauri commands</text>
+          <text class="t-dim" x="54" y="140">BackendCommands → ApiResponse</text>
+          <line class="a" x1="170" y1="70" x2="170" y2="98" marker-end="url(#ah)"/>
+          <text class="t-arrow" x="180" y="89">invoke</text>
+          <line class="a" x1="170" y1="150" x2="170" y2="178" marker-end="url(#ah)"/>
+          <text class="t-arrow" x="180" y="169">results with derived state</text>
+
+          <rect class="zone" x="20" y="180" width="300" height="500" rx="6"/>
+          <text class="t-zone" x="34" y="199">BACKENDSERVICE</text>
+
+          <rect class="box" x="40" y="210" width="260" height="110" rx="4"/>
+          <text class="t-head" x="54" y="232">Readers</text>
+          <text class="t" x="54" y="252">USB playlists · histories · inspect</text>
+          <text class="t" x="54" y="270">metadata summary · export estimate</text>
+          <text class="t" x="54" y="288">parity report · diagnostics</text>
+          <text class="t" x="54" y="306">repair detection</text>
+
+          <rect class="box" x="40" y="350" width="260" height="130" rx="4"/>
+          <text class="t-head" x="54" y="372">Writers</text>
+          <text class="t" x="54" y="392">cue · BPM · key · metadata saves</text>
+          <text class="t" x="54" y="410">order edit · playlist removal</text>
+          <text class="t" x="54" y="428">export · repair apply</text>
+          <text class="t" x="54" y="446">player menu · background colour</text>
+          <text class="t" x="54" y="464">backup restore · initialize USB</text>
+
+          <rect class="box" x="40" y="510" width="260" height="60" rx="4"/>
+          <text class="t-head" x="54" y="532">Parse caches</text>
+          <text class="t-dim" x="54" y="552">keyed by staged-file signature</text>
+
+          <rect class="box" x="40" y="600" width="260" height="60" rx="4"/>
+          <text class="t-head" x="54" y="622">App DB · analysis cache</text>
+          <text class="t-dim" x="54" y="642">library, playlists, settings, ANLZ</text>
+
+          <!-- caches feed readers -->
+          <polyline class="a" points="40,540 30,540 30,265 38,265" marker-end="url(#ah)"/>
+          <text class="t-arrow" transform="translate(26 402) rotate(-90)" text-anchor="middle">PDB first, eDB fallback</text>
+
+          <!-- Column B: unification layer -->
+          <rect class="box" x="440" y="100" width="280" height="50" rx="4"/>
+          <text class="t-head" x="454" y="122">Backups</text>
+          <text class="t-dim" x="454" y="140">app data, kept per stick</text>
+
+          <rect class="zone-layer" x="420" y="180" width="320" height="500" rx="6"/>
+          <text class="t-zone-layer" x="434" y="199">UNIFICATION LAYER · usb_staging.rs</text>
+          <line class="a" x1="580" y1="180" x2="580" y2="152" marker-end="url(#ah)"/>
+          <text class="t-arrow" x="590" y="171">copies before a write</text>
+
+          <rect class="box-key" x="440" y="210" width="280" height="90" rx="4"/>
+          <text class="t-code" x="454" y="232">UsbDatabases</text>
+          <text class="t" x="454" y="252">Both · PdbOnly · EdbOnly</text>
+          <text class="t" x="454" y="270">pdb() / edb() → staged path</text>
+          <text class="t-dim" x="454" y="288">neither → “no player database”</text>
+
+          <rect class="box-key" x="440" y="310" width="280" height="55" rx="4"/>
+          <text class="t-code" x="454" y="332">locate_track → TrackLocation</text>
+          <text class="t" x="454" y="352">PDB row? · eDB content id?</text>
+
+          <rect class="box-key" x="440" y="380" width="280" height="100" rx="4"/>
+          <text class="t-code" x="454" y="402">UsbWriteSession</text>
+          <text class="t" x="454" y="422">backup on open</text>
+          <text class="t" x="454" y="440">staged PDB bytes + one eDB conn</text>
+          <text class="t" x="454" y="458">commit: both databases or neither</text>
+          <text class="t-dim" x="454" y="474">drop without commit: undo</text>
+
+          <rect class="box" x="440" y="510" width="280" height="60" rx="4"/>
+          <text class="t-head" x="454" y="532">Staged copies</text>
+          <text class="t-dim" x="454" y="552">local disk, one folder per drive</text>
+
+          <rect class="box-key" x="440" y="600" width="280" height="60" rx="4"/>
+          <text class="t-code" x="454" y="622">rebuild_missing_database</text>
+          <text class="t-dim" x="454" y="642">export · Engine export · repair</text>
+
+          <line class="a-key" x1="580" y1="480" x2="580" y2="508" marker-end="url(#ahk)"/>
+          <text class="t-arrow-key" x="590" y="499">edits</text>
+
+          <!-- A ↔ B -->
+          <line class="a" x1="300" y1="250" x2="438" y2="250" marker-end="url(#ah)"/>
+          <text class="t-arrow" x="370" y="243" text-anchor="middle">which databases?</text>
+          <line class="a-key" x1="300" y1="425" x2="438" y2="425" marker-end="url(#ahk)"/>
+          <text class="t-arrow-key" x="370" y="418" text-anchor="middle">open session</text>
+          <polyline class="a-key" points="440,470 312,470 312,525 302,525" marker-end="url(#ahk)"/>
+          <text class="t-arrow-key" x="376" y="464" text-anchor="middle">invalidate</text>
+          <line class="a" x1="440" y1="548" x2="302" y2="548" marker-end="url(#ah)"/>
+          <text class="t-arrow" x="370" y="541" text-anchor="middle">parsed</text>
+
+          <!-- Column C: the stick -->
+          <rect class="zone" x="840" y="180" width="300" height="500" rx="6"/>
+          <text class="t-zone" x="854" y="199">USB STICK</text>
+
+          <rect class="box" x="860" y="210" width="260" height="55" rx="4"/>
+          <text class="t-head" x="874" y="232">PDB · export.pdb</text>
+          <text class="t-dim" x="874" y="252">page-based binary database</text>
+          <rect class="box" x="860" y="280" width="260" height="55" rx="4"/>
+          <text class="t-head" x="874" y="302">eDB · exportLibrary.db</text>
+          <text class="t-dim" x="874" y="322">encrypted SQLite (SQLCipher)</text>
+
+          <rect class="box" x="860" y="390" width="260" height="50" rx="4"/>
+          <text class="t-head" x="874" y="412">USBANLZ/ analysis</text>
+          <text class="t-dim" x="874" y="430">.DAT · .EXT · .2EX</text>
+          <rect class="box" x="860" y="455" width="260" height="50" rx="4"/>
+          <text class="t-head" x="874" y="477">Contents/ · Artwork/</text>
+          <text class="t-dim" x="874" y="495">audio and cover images</text>
+
+          <rect class="box" x="860" y="600" width="260" height="60" rx="4"/>
+          <text class="t-head" x="874" y="622">Engine Library/m.db</text>
+          <text class="t-dim" x="874" y="642">built from the PDB</text>
+          <polyline class="a" points="1120,240 1132,240 1132,630 1122,630" marker-end="url(#ah)"/>
+
+          <!-- stage in: stick → staged copies -->
+          <polyline class="a" points="860,237 785,237 785,540 722,540" marker-end="url(#ah)"/>
+          <line class="a" x1="860" y1="300" x2="785" y2="300"/>
+          <text class="t-arrow" transform="translate(778 470) rotate(-90)" text-anchor="middle">copied in on connect</text>
+
+          <!-- commit out: session → stick -->
+          <polyline class="a-key" points="720,430 815,430 815,252 858,252" marker-end="url(#ahk)"/>
+          <line class="a-key" x1="815" y1="320" x2="858" y2="320" marker-end="url(#ahk)"/>
+          <text class="t-arrow-key" transform="translate(829 375) rotate(-90)" text-anchor="middle">commit</text>
+
+          <!-- files written directly -->
+          <polyline class="a-direct" points="300,372 845,372 845,415 858,415" marker-end="url(#ah)"/>
+          <polyline class="a-direct" points="845,415 845,480 858,480" marker-end="url(#ah)"/>
+          <text class="t-arrow" x="370" y="366" text-anchor="middle">files, direct</text>
+        </svg>
