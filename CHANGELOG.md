@@ -60,7 +60,11 @@
 - **Improvement:** The Engine DJ library is written from the PDB and the eDB together: a track or playlist only
   one of them has is in it too.
 - **Improvement:** Every USB edit, repair and export checks which databases the USB has in the same way, and saves
-  them to the USB together: both or neither.
+  them to the USB together: both or neither. When the second one can't be written, the first is put back, and the
+  edit can be tried again. Export and playlist removal delete files from the USB only after both databases are
+  saved, and an export that fails is not recorded as done. An export whose eDB can't be written now fails instead of
+  saving only the PDB. USB writes run one at a time, and connecting the USB again starts from the databases on the
+  USB, not from edits a failed save left behind.
 - **Fix:** Clicking another playlist while typing a new playlist's name saves the new playlist and then opens the
   one you clicked. Before, the new playlist opened instead.
 - **Fix:** A USB with only the PDB or only the eDB works like one with both. Cue, BPM, key and track detail edits save

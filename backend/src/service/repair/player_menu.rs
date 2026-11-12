@@ -563,6 +563,7 @@ impl BackendService {
         &self,
         req: UpdateUsbPlayerMenuConfigRequest,
     ) -> BackendResult<UpdateUsbPlayerMenuConfigData> {
+        let _usb_write_guard = self.lock_usb_writes();
         let usb_root = resolve_usb_root(req.usb_root.as_deref())?;
         let mut warnings = Vec::<WarningEntry>::new();
         let (before_current, before_available) = load_usb_player_menu_config(&usb_root)?;
@@ -637,6 +638,7 @@ impl BackendService {
         }
 
         let mut session = self.usb_write_session(
+            &_usb_write_guard,
             &usb_root,
             usb_staging::SessionBackup::WithRetention {
                 reason: "Before menu update",
@@ -663,15 +665,7 @@ impl BackendService {
                 ));
                 return Err(err);
             }
-            session.close_edb();
-            if let Err(err) = session.write_back(usb_staging::DbKind::Edb) {
-                warnings.push(logging::log_text(
-                    Level::Error,
-                    "usb-player-menu",
-                    "usb.player-menu.edb-write-back-failed",
-                    &tr::usb_warning_edb_write_back_failed(err),
-                ));
-            }
+            session.close_edb()?;
         } else {
             let rows = t17_rows_for_kinds(&usb_root, &final_kinds)?;
             session.will_write(usb_staging::DbKind::Pdb)?;
@@ -702,25 +696,14 @@ impl BackendService {
                         logging::debug("usb-player-menu", "PDB t17 category snapshot updated");
                     }
                     Ok(false) => {}
-                    Err(e) => {
-                        logging::debug(
-                            "usb-player-menu",
-                            format!("PDB t17 update skipped: {e}", e = e.english()),
-                        );
-                    }
+                    Err(e) => return Err(e),
                 }
             }
-            if let Err(err) = session.write_back(usb_staging::DbKind::Pdb) {
-                warnings.push(logging::log_text(
-                    Level::Error,
-                    "usb-player-menu",
-                    "usb.player-menu.pdb-write-back-failed",
-                    &tr::usb_warning_pdb_write_back_failed(err),
-                ));
-            }
-            warnings.extend(self.refresh_engine_library(&usb_root));
         }
         session.commit()?;
+        if updated {
+            warnings.extend(self.refresh_engine_library(&usb_root));
+        }
 
         Ok(UpdateUsbPlayerMenuConfigData {
             updated,

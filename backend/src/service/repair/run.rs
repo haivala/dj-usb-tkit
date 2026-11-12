@@ -576,7 +576,7 @@ pub(super) fn write_back_both_or_neither(
     pdb: &mut StagedPdb,
 ) -> BackendResult<()> {
     pdb.save()?;
-    usb_staging::write_back_both_or_neither(usb_root, Some(pdb.original.as_deref()))
+    usb_staging::write_back_both_or_neither(usb_root, Some(pdb.original.as_deref()), [true, true])
 }
 
 impl BackendService {
@@ -596,6 +596,7 @@ impl BackendService {
         F: FnMut(usize, usize, &str),
     {
         let start = std::time::Instant::now();
+        let _usb_write_guard = self.lock_usb_writes();
         let usb_root = resolve_usb_root(req.usb_root.as_deref())?;
 
         // Open the eDB and stage the PDB exactly once for this whole repair run,
@@ -1734,8 +1735,21 @@ impl BackendService {
         let outcomes = if req.apply {
             on_progress(70, 100, &tr::repair_progress_apply().render());
             let mut progress = ApplyProgress::new(&mut on_progress, selected_fix_count);
-            self.apply_selected_fixes(
+            progress.report(70, tr::repair_progress_backup());
+            // Every fix writes the staged copies of this one session: one
+            // read-write eDB connection (opened on first use, so SQLCipher key
+            // negotiation happens once), and the in-memory PDB.
+            let session = self.usb_write_session(
+                &_usb_write_guard,
                 &usb_root,
+                usb_staging::SessionBackup::WithRetention {
+                    reason: "Before repair",
+                    playlist_count: None,
+                },
+                &mut warnings,
+            );
+            self.apply_selected_fixes(
+                session,
                 &selected,
                 found,
                 &mut warnings,
@@ -1837,10 +1851,10 @@ impl BackendService {
     }
 
     /// Applies every selected fix, in apply order, to what the detect phase
-    /// found.
+    /// found, in `session`, which it commits.
     fn apply_selected_fixes(
         &self,
-        usb_root: &Path,
+        mut session: usb_staging::UsbWriteSession<'_>,
         selected: &HashSet<String>,
         found: DetectedRepairs,
         warnings: &mut Vec<WarningEntry>,
@@ -1876,19 +1890,8 @@ impl BackendService {
             engine_library_fix_needed,
         } = found;
         let mut outcomes = FixOutcomes::default();
-
-        progress.report(70, tr::repair_progress_backup());
-        // Every fix below writes the staged copies of this one session: one
-        // read-write eDB connection (opened on first use, so SQLCipher key
-        // negotiation happens once), and the in-memory PDB.
-        let mut session = self.usb_write_session(
-            usb_root,
-            usb_staging::SessionBackup::WithRetention {
-                reason: "Before repair",
-                playlist_count: None,
-            },
-            warnings,
-        );
+        let usb_root = session.usb_root().to_path_buf();
+        let usb_root = usb_root.as_path();
 
         progress.report(70, tr::repair_progress_open());
         let mut pdb = match session

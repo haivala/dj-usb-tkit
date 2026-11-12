@@ -1979,7 +1979,12 @@ fn assert_one_database_diagnostics(backend: &BackendCommands, usb: &Path, file_n
         matches!(playlists.status, Some(backend::models::DiagStatus::Pass)),
         "{playlists:?}"
     );
-    assert_eq!(data.playlist_details.len(), 2, "{:?}", data.playlist_details);
+    assert_eq!(
+        data.playlist_details.len(),
+        2,
+        "{:?}",
+        data.playlist_details
+    );
 }
 
 /// Deletes one database from the two-playlist fixture, previews (which must

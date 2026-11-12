@@ -38,7 +38,7 @@ use super::export_helpers::canonicalize_track_path_identity;
 use super::repair::{
     restore_pdb_playlist_sort_orders, write_edb_playlist_order, write_edb_playlist_track_order,
 };
-use super::usb_staging::{self, DbKind, SessionBackup, UsbDatabases};
+use super::usb_staging::{SessionBackup, UsbDatabases, UsbWriteGuard};
 use super::usb_utils::{
     can_write_file_at, canonicalize_playlist_name, has_write_access, resolve_usb_root,
 };
@@ -83,8 +83,6 @@ pub(crate) struct UsbOrderEdit {
     pending: PendingOrder,
     /// A save is running: everything else that touches the edit is refused.
     saving: bool,
-    /// A save wrote one database and then failed to write the other.
-    partially_saved: bool,
 }
 
 pub(crate) type UsbOrderEditSlot = std::sync::Mutex<Option<UsbOrderEdit>>;
@@ -277,61 +275,6 @@ fn ensure_usb_writable(usb_root: &Path) -> BackendResult<()> {
     ))
 }
 
-/// Why a save failed, and whether a database was written before it did.
-struct OrderSaveFailure {
-    error: BackendError,
-    partial: bool,
-}
-
-impl From<BackendError> for OrderSaveFailure {
-    fn from(error: BackendError) -> Self {
-        Self {
-            error,
-            partial: false,
-        }
-    }
-}
-
-impl From<rusqlite::Error> for OrderSaveFailure {
-    fn from(error: rusqlite::Error) -> Self {
-        BackendError::from(error).into()
-    }
-}
-
-impl From<std::io::Error> for OrderSaveFailure {
-    fn from(error: std::io::Error) -> Self {
-        BackendError::from(error).into()
-    }
-}
-
-fn db_label(kind: DbKind) -> &'static str {
-    match kind {
-        DbKind::Pdb => "PDB",
-        DbKind::Edb => "eDB",
-    }
-}
-
-/// Checkpoints the eDB's write-ahead log into its main file: the staging
-/// write-back copies only that file. An incomplete checkpoint fails the save.
-fn checkpoint_edb(conn: &rusqlite::Connection) -> BackendResult<()> {
-    // A reader still on an older snapshot gets this long to finish.
-    conn.busy_timeout(std::time::Duration::from_secs(1))?;
-    let (busy, log_frames, checkpointed) =
-        conn.query_row("PRAGMA wal_checkpoint(TRUNCATE)", [], |row| {
-            Ok((
-                row.get::<_, i64>(0)?,
-                row.get::<_, i64>(1)?,
-                row.get::<_, i64>(2)?,
-            ))
-        })?;
-    if busy != 0 || (log_frames >= 0 && checkpointed != log_frames) {
-        return Err(BackendError::Validation(
-            tr::usb_order_edit_edb_checkpoint_failed(),
-        ));
-    }
-    Ok(())
-}
-
 /// Holds an edit's `saving` mark and clears it however the save ends.
 struct OrderSaveGuard<'a> {
     service: &'a BackendService,
@@ -449,11 +392,8 @@ impl BackendService {
         req: UsbOrderEditRequest,
     ) -> BackendResult<UsbOrderEditData> {
         let usb_root = resolve_usb_root(req.usb_root.as_deref())?;
-        if matches!(
-            self.usb_write_lock.try_lock(),
-            Err(std::sync::TryLockError::WouldBlock)
-        ) {
-            return Err(BackendError::Validation(tr::usb_order_edit_busy()));
+        if self.try_lock_usb_writes().is_none() {
+            return Err(BackendError::Validation(tr::usb_write_busy()));
         }
         ensure_usb_writable(&usb_root)?;
         let mut slot = self.order_edit_slot();
@@ -467,7 +407,6 @@ impl BackendService {
                     usb_root,
                     pending: PendingOrder::default(),
                     saving: false,
-                    partially_saved: false,
                 });
             }
         }
@@ -587,7 +526,7 @@ impl BackendService {
     }
 
     /// Drops the pending order. Never touches the stick, so it works after a
-    /// disconnect too; a save that wrote one database already stays written.
+    /// disconnect too. Failed saves restore the databases before returning.
     pub fn cancel_usb_order_edit(
         &self,
         req: UsbOrderEditRequest,
@@ -595,20 +534,16 @@ impl BackendService {
         // A disconnected stick has no root to resolve: its edit is the one there is.
         let usb_root = resolve_usb_root(req.usb_root.as_deref()).ok();
         let mut slot = self.order_edit_slot();
-        let mut status = tr::usb_order_edit_cancelled();
         if let Some(edit) = slot.as_ref()
             && usb_root.as_ref().is_none_or(|root| *root == edit.usb_root)
         {
             if edit.saving {
                 return Err(BackendError::Validation(tr::usb_order_edit_saving()));
             }
-            if edit.partially_saved {
-                status = tr::usb_order_edit_cancelled_after_partial_save();
-            }
             *slot = None;
         }
         Ok(UsbOrderEditData {
-            status_text: status.render(),
+            status_text: tr::usb_order_edit_cancelled().render(),
             ..UsbOrderEditData::default()
         })
     }
@@ -636,13 +571,9 @@ impl BackendService {
     {
         on_progress(0, 100, &tr::usb_progress_resolving_usb_root().render());
         let usb_root = resolve_usb_root(req.usb_root.as_deref())?;
-        let _usb_write_guard = match self.usb_write_lock.try_lock() {
-            Ok(guard) => guard,
-            Err(std::sync::TryLockError::Poisoned(poisoned)) => poisoned.into_inner(),
-            Err(std::sync::TryLockError::WouldBlock) => {
-                return Err(BackendError::Validation(tr::usb_order_edit_busy()));
-            }
-        };
+        let _usb_write_guard = self
+            .try_lock_usb_writes()
+            .ok_or_else(|| BackendError::Validation(tr::usb_write_busy()))?;
         let pending = {
             let mut slot = self.order_edit_slot();
             let edit = active_edit(&mut slot, &usb_root)?;
@@ -663,21 +594,13 @@ impl BackendService {
         }
 
         let mut warnings = Vec::<WarningEntry>::new();
-        let written =
-            match self.write_usb_order(&usb_root, &pending, &mut warnings, &mut on_progress) {
-                Ok(written) => written,
-                Err(failure) => {
-                    // The write session dropped the staged databases' local
-                    // changes and staged them again from the stick, so no
-                    // later writer reuses them.
-                    if failure.partial
-                        && let Some(edit) = self.order_edit_slot().as_mut()
-                    {
-                        edit.partially_saved = true;
-                    }
-                    return Err(failure.error);
-                }
-            };
+        let written = self.write_usb_order(
+            &_usb_write_guard,
+            &usb_root,
+            &pending,
+            &mut warnings,
+            &mut on_progress,
+        )?;
         if written {
             on_progress(90, 100, &tr::usb_progress_order_edit_engine().render());
             warnings.extend(self.refresh_engine_library(&usb_root));
@@ -702,11 +625,12 @@ impl BackendService {
     /// changed one back. Returns whether a database was written.
     fn write_usb_order<F>(
         &self,
+        usb_write_guard: &UsbWriteGuard<'_>,
         usb_root: &Path,
         pending: &PendingOrder,
         warnings: &mut Vec<WarningEntry>,
         on_progress: &mut F,
-    ) -> Result<bool, OrderSaveFailure>
+    ) -> BackendResult<bool>
     where
         F: FnMut(usize, usize, &str),
     {
@@ -716,6 +640,7 @@ impl BackendService {
             &tr::usb_progress_backing_up_usb_databases().render(),
         );
         let mut session = self.usb_write_session(
+            usb_write_guard,
             usb_root,
             SessionBackup::ReplacingSameReason {
                 reason: BACKUP_REASON,
@@ -830,9 +755,7 @@ impl BackendService {
                 })?;
             }
             tx.commit()?;
-            checkpoint_edb(conn)?;
-            let _ = conn.execute_batch("PRAGMA journal_mode=WAL;");
-            session.close_edb();
+            session.close_edb()?;
             edb_changed = updated > 0;
         }
         if pdb_changed && let Some((path, bytes)) = &pdb {
@@ -849,33 +772,7 @@ impl BackendService {
             verify_saved_order(usb_root, pending, &parse_pdb_bytes(bytes)?)?;
         }
 
-        // Every write-back is checked before any starts, so a stick changed
-        // elsewhere fails the save before it writes anything.
         on_progress(70, 100, &tr::usb_progress_order_edit_write_back().render());
-        let kinds: Vec<DbKind> = [(pdb_changed, DbKind::Pdb), (edb_changed, DbKind::Edb)]
-            .into_iter()
-            .filter_map(|(changed, kind)| changed.then_some(kind))
-            .collect();
-        for kind in &kinds {
-            usb_staging::check_write_back(usb_root, *kind)?;
-        }
-        let mut written: Option<DbKind> = None;
-        for kind in kinds {
-            if let Err(error) = session.write_back(kind) {
-                return Err(match written {
-                    Some(saved) => OrderSaveFailure {
-                        error: BackendError::Validation(tr::usb_order_edit_partial_save(
-                            db_label(saved),
-                            db_label(kind),
-                            &error,
-                        )),
-                        partial: true,
-                    },
-                    None => error.into(),
-                });
-            }
-            written = Some(kind);
-        }
         session.commit()?;
         Ok(pdb_changed || edb_changed)
     }

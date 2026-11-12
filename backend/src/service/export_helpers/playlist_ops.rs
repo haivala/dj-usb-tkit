@@ -17,7 +17,7 @@ use crate::logging::{self, Level};
 use crate::models::WarningEntry;
 use crate::pdb_reader::parse_pdb;
 use crate::service::track_matching::{ContentFingerprint, pdb_track_fingerprint};
-use crate::service::usb_staging::{DbKind, UsbDatabases, UsbDatabasesExt, UsbWriteSession};
+use crate::service::usb_staging::{UsbDatabases, UsbDatabasesExt, UsbWriteSession};
 use crate::service::usb_utils::canonicalize_playlist_name;
 
 fn parse_usb_playlist_numeric_id(raw: Option<&str>) -> Option<u32> {
@@ -578,48 +578,47 @@ pub fn remove_orphaned_dropped_tracks_from_dbs(
     }
 
     // --- eDB: delete content rows for those paths, then orphaned image rows ---
-    if let Some(conn) = session.edb()? {
-        if table_exists(conn, "content") {
-            let to_delete = crate::service::usb_track_facts::read_edb_content_tracks(conn)?
-                .into_iter()
-                .filter(|row| match &row.fingerprint {
-                    Some(fingerprint) => orphan_fingerprints.contains(fingerprint),
-                    None => orphan_path_keys.contains(&canonicalize_track_path_identity(&row.path)),
-                })
-                .filter_map(|row| row.content_id)
-                .collect::<Vec<i64>>();
-            let has_playlist_content = table_exists(conn, "playlist_content");
-            for content_id in &to_delete {
-                // Never delete a content row still linked to any playlist. The
-                // mirror write only unlinks dropped tracks from the target
-                // playlist and never touches others, so this should not fire —
-                // it is a guard against a path-normalisation mismatch with the
-                // PDB-side check above.
-                if has_playlist_content {
-                    let still_linked: Option<i64> = conn
-                        .query_row(
-                            "SELECT 1 FROM playlist_content WHERE content_id = ?1 LIMIT 1",
-                            params![content_id],
-                            |row| row.get(0),
-                        )
-                        .optional()?;
-                    if still_linked.is_some() {
-                        continue;
-                    }
+    if let Some(conn) = session.edb()?
+        && table_exists(conn, "content")
+    {
+        let to_delete = crate::service::usb_track_facts::read_edb_content_tracks(conn)?
+            .into_iter()
+            .filter(|row| match &row.fingerprint {
+                Some(fingerprint) => orphan_fingerprints.contains(fingerprint),
+                None => orphan_path_keys.contains(&canonicalize_track_path_identity(&row.path)),
+            })
+            .filter_map(|row| row.content_id)
+            .collect::<Vec<i64>>();
+        let has_playlist_content = table_exists(conn, "playlist_content");
+        for content_id in &to_delete {
+            // Never delete a content row still linked to any playlist. The
+            // mirror write only unlinks dropped tracks from the target
+            // playlist and never touches others, so this should not fire —
+            // it is a guard against a path-normalisation mismatch with the
+            // PDB-side check above.
+            if has_playlist_content {
+                let still_linked: Option<i64> = conn
+                    .query_row(
+                        "SELECT 1 FROM playlist_content WHERE content_id = ?1 LIMIT 1",
+                        params![content_id],
+                        |row| row.get(0),
+                    )
+                    .optional()?;
+                if still_linked.is_some() {
+                    continue;
                 }
-                result.removed_edb_content += conn.execute(
-                    "DELETE FROM content WHERE content_id = ?1",
-                    params![content_id],
-                )?;
             }
-            if result.removed_edb_content > 0 && table_exists(conn, "image") {
-                let _ = conn.execute(
-                    "DELETE FROM image WHERE image_id NOT IN (SELECT DISTINCT image_id FROM content WHERE image_id IS NOT NULL)",
-                    [],
-                );
-            }
+            result.removed_edb_content += conn.execute(
+                "DELETE FROM content WHERE content_id = ?1",
+                params![content_id],
+            )?;
         }
-        session.write_back(DbKind::Edb)?;
+        if result.removed_edb_content > 0 && table_exists(conn, "image") {
+            let _ = conn.execute(
+                "DELETE FROM image WHERE image_id NOT IN (SELECT DISTINCT image_id FROM content WHERE image_id IS NOT NULL)",
+                [],
+            );
+        }
     }
 
     // --- PDB: tombstone track rows + now-exclusive artwork rows in place ---
@@ -657,7 +656,6 @@ pub fn remove_orphaned_dropped_tracks_from_dbs(
     if result.removed_pdb_tracks > 0 || result.removed_pdb_artwork > 0 {
         rebuild_sentinel_btrees_inplace(&mut pdb_bytes);
         session.write_pdb(&pdb_bytes)?;
-        session.write_back(DbKind::Pdb)?;
     }
 
     if result != MirrorOrphanCleanup::default() {

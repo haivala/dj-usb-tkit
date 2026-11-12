@@ -1,4 +1,4 @@
-<svg xmlns="http://www.w3.org/2000/svg" width="1160" height="700" viewBox="0 0 1160 700" role="img" aria-label="The UI calls the backend service. Its readers ask the unification layer which databases the stick has and read parsed staged copies, PDB first with eDB fallback. Its writers open a write session that edits the staged copies and commits them to the stick, both or neither, then drops the parse caches. Analysis, audio and artwork files are written straight to the stick.">
+<svg xmlns="http://www.w3.org/2000/svg" width="1160" height="700" viewBox="0 0 1160 700" role="img" aria-label="The UI calls the backend service. Its readers ask the unification layer which databases the stick has and read parsed staged copies, PDB first with eDB fallback. Its writers open a write session that edits the staged copies and checkpoints the eDB and commits them to the stick with rollback on failure, then drops the parse caches. Analysis, audio and artwork files are written straight to the stick.">
           <style>
   svg { --bg:#f6f7f9; --fg:#1b2230; --muted:#5d6677; --panel:#ffffff; --line:#c9cfda; --accent:#2d5bc4; --accent-soft:#e8eefb; }
   @media (prefers-color-scheme: dark) {
@@ -96,7 +96,7 @@
           <text class="t-code" x="454" y="402">UsbWriteSession</text>
           <text class="t" x="454" y="422">backup on open</text>
           <text class="t" x="454" y="440">staged PDB bytes + one eDB conn</text>
-          <text class="t" x="454" y="458">commit: both databases or neither</text>
+          <text class="t" x="454" y="458">checkpoint · commit · rollback</text>
           <text class="t-dim" x="454" y="474">drop without commit: undo</text>
 
           <rect class="box" x="440" y="510" width="280" height="60" rx="4"/>

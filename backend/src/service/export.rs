@@ -1122,13 +1122,9 @@ impl BackendService {
         // One export at a time, and none while a USB track save is running:
         // each read-modify-writes the same staged PDB/eDB. Refused rather
         // than queued, so a second click never starts a surprise export later.
-        let _usb_write_guard = match self.usb_write_lock.try_lock() {
-            Ok(guard) => guard,
-            Err(std::sync::TryLockError::Poisoned(poisoned)) => poisoned.into_inner(),
-            Err(std::sync::TryLockError::WouldBlock) => {
-                return Err(BackendError::Validation(tr::export_error_busy()));
-            }
-        };
+        let _usb_write_guard = self
+            .try_lock_usb_writes()
+            .ok_or_else(|| BackendError::Validation(tr::export_error_busy()))?;
 
         let usb_root = resolve_usb_root(req.usb_root.as_deref())?;
         if !usb_root.exists() || !usb_root.is_dir() {
@@ -1594,8 +1590,6 @@ impl BackendService {
             .map(|v| v.eq_ignore_ascii_case("skip"))
             .unwrap_or(false);
 
-        let mut edb_playlist_id: Option<u32> = None;
-        let mut edb_sort_order: Option<u32> = None;
         if export_dry_run {
             logging::debug(
                 "export",
@@ -1675,8 +1669,12 @@ impl BackendService {
                     reason: "Before export (additive)",
                 },
             };
-            let session =
-                write_session.insert(self.usb_write_session(&usb_root, backup, &mut warnings));
+            let session = write_session.insert(self.usb_write_session(
+                &_usb_write_guard,
+                &usb_root,
+                backup,
+                &mut warnings,
+            ));
             // A stick with only one database gets the other first, so the
             // export lands in both.
             if let Some(rebuilt) = super::repair::rebuild_missing_database(session)? {
@@ -1688,6 +1686,7 @@ impl BackendService {
             // Write eDB first (master), then sync PDB to match eDB playlist IDs.
             // The session's one RW connection is reused for the immediate
             // post-write verification read below, instead of reopening.
+            let (edb_playlist_id, edb_sort_order);
             let write_result =
                 write_edb_playlist_in(session, &playlist, &manifest, mirror_playlist_entries);
             match write_result {
@@ -1700,7 +1699,6 @@ impl BackendService {
                 }) => {
                     edb_playlist_id = u32::try_from(playlist_id).ok();
                     edb_sort_order = u32::try_from(sort_order).ok();
-                    session.write_back(usb_staging::DbKind::Edb)?;
                     // Always keep exportExt.pdb byte-stable in normal export.
                     // Strict integrity checks can fail when exportExt header/count
                     // bytes are rewritten from eDB-derived values.
@@ -1720,14 +1718,7 @@ impl BackendService {
                         ),
                     );
                 }
-                Err(err) => {
-                    warnings.push(logging::log_text(
-                        Level::Warn,
-                        "export",
-                        "export.edb-update-skipped",
-                        &tr::export_warning_edb_skipped(err),
-                    ));
-                }
+                Err(err) => return Err(err),
             }
 
             match write_pdb_in(
@@ -1782,12 +1773,13 @@ impl BackendService {
                 .into_iter()
                 .chain(previous_owned.intersection(&referenced).cloned())
                 .collect::<HashSet<_>>();
+            let mut prunable = Vec::new();
             if options.prune_stale {
                 let stale = previous_owned
                     .difference(&current_owned)
                     .cloned()
                     .collect::<Vec<_>>();
-                let prunable =
+                prunable =
                     filter_prunable_stale_paths_for_playlist(&usb_root, &playlist.name, &stale)?;
                 // Before deleting the files, drop the eDB/PDB rows for tracks
                 // that fell out of this playlist and are referenced nowhere
@@ -1796,6 +1788,13 @@ impl BackendService {
                 if let Some(session) = write_session.as_mut() {
                     remove_orphaned_dropped_tracks_from_dbs(session, &prunable)?;
                 }
+            }
+            // Commit both databases before removing files or recording a
+            // successful export. Failed writes leave the old files available.
+            if let Some(session) = write_session.take() {
+                session.commit()?;
+            }
+            if options.prune_stale {
                 let prune_result = prune_stale_export_owned_files(&usb_root, &prunable)?;
                 logging::debug(
                     "export",
@@ -1885,11 +1884,6 @@ impl BackendService {
                     now(),
                 ],
             )?;
-        }
-
-        // A dry run wrote nothing.
-        if let Some(session) = write_session {
-            session.commit()?;
         }
 
         let warning_count = logging::count_warnings(&warnings);
@@ -2977,9 +2971,88 @@ mod tests {
     // --- ensure_local_u32_setting / ensure_track_master_content_id / resolve_manifest_identity ---
 
     #[test]
+    fn failed_export_keeps_databases_and_does_not_record_success() {
+        use crate::service::usb_staging;
+        use rusqlite::params;
+
+        for blocked in [usb_staging::DbKind::Pdb, usb_staging::DbKind::Edb] {
+            let cache = tempdir().unwrap();
+            let _staging = usb_staging::set_cache_root_for_test(Some(cache.path().to_path_buf()));
+            let (_data, service) = test_service();
+            let usb = tempdir().unwrap();
+            crate::service::initialize_usb(usb.path()).unwrap();
+            let source = Path::new(env!("CARGO_MANIFEST_DIR"))
+                .join("tests/fixtures/audio/noart/track_no_art.mp3");
+            let conn = service.db.connect().unwrap();
+            conn.execute(
+                "INSERT INTO tracks (id, title, artist, file_path, format_ext, created_at, updated_at)
+                 VALUES ('failure-track', 'Failure Test', 'Artist', ?1, 'mp3', datetime('now'), datetime('now'))",
+                params![source.to_string_lossy()],
+            ).unwrap();
+            let playlist = service
+                .create_playlist(CreatePlaylistRequest {
+                    name: "Failure Test".into(),
+                })
+                .unwrap();
+            service
+                .add_tracks_to_playlist(crate::models::AddTracksToPlaylistRequest {
+                    playlist_id: playlist.playlist_id.clone(),
+                    track_ids: vec!["failure-track".into()],
+                })
+                .unwrap();
+            let bundle = crate::service::anlz::AnlzBundlePaths {
+                dat_path: _data.path().join("failure.DAT"),
+                ext_path: _data.path().join("failure.EXT"),
+                twoex_path: _data.path().join("failure.2EX"),
+            };
+            crate::service::analysis::write_waveform_bundle_for_audio(&source, &bundle).unwrap();
+            conn.execute("UPDATE tracks SET bpm=128, duration_ms=1000, waveform_peaks_path=?1 WHERE id='failure-track'", params![bundle.dat_path.to_string_lossy()]).unwrap();
+            service.enable_engine_library().unwrap();
+            let pdb = crate::service::usb_vendor_compat::vendor_pdb_path(usb.path());
+            let edb = crate::service::usb_vendor_compat::vendor_edb_path(usb.path());
+            let before = (std::fs::read(&pdb).unwrap(), std::fs::read(&edb).unwrap());
+            let blocker = usb_staging::write_back_temp_path_for_test(usb.path(), blocked);
+            std::fs::create_dir_all(&blocker).unwrap();
+            let request = || ExportToUsbRequest {
+                usb_root: Some(usb.path().to_string_lossy().into_owned()),
+                playlist_id: playlist.playlist_id.clone(),
+                options: None,
+                sort: None,
+            };
+            let error = service
+                .export_to_usb(request())
+                .expect_err("write-back must fail");
+            assert!(matches!(error, BackendError::Io(_)), "{error:?}");
+            assert_eq!(
+                (std::fs::read(&pdb).unwrap(), std::fs::read(&edb).unwrap()),
+                before
+            );
+            let exported: Option<String> = conn
+                .query_row(
+                    "SELECT last_exported_at FROM playlists WHERE id=?1",
+                    params![playlist.playlist_id],
+                    |r| r.get(0),
+                )
+                .unwrap();
+            assert!(exported.is_none());
+            let exports: i64 = conn
+                .query_row("SELECT COUNT(*) FROM usb_device_exports", [], |r| r.get(0))
+                .unwrap();
+            assert_eq!(exports, 0);
+            assert!(!usb.path().join("Engine Library/Database2/m.db").exists());
+            std::fs::remove_dir(blocker).unwrap();
+            service.export_to_usb(request()).expect("retry export");
+            let exports: i64 = conn
+                .query_row("SELECT COUNT(*) FROM usb_device_exports", [], |r| r.get(0))
+                .unwrap();
+            assert_eq!(exports, 1);
+        }
+    }
+
+    #[test]
     fn export_is_refused_while_another_usb_write_runs() {
         let (_dir, service) = test_service();
-        let _running = service.usb_write_lock.lock().unwrap();
+        let _running = service.lock_usb_writes();
 
         let err = service
             .export_to_usb(ExportToUsbRequest {

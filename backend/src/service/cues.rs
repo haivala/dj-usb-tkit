@@ -1220,10 +1220,7 @@ impl BackendService {
         F: FnMut(usize, usize, &str),
     {
         const USB_SAVE_STEPS: usize = 5;
-        let _usb_write_guard = self
-            .usb_write_lock
-            .lock()
-            .unwrap_or_else(std::sync::PoisonError::into_inner);
+        let _usb_write_guard = self.lock_usb_writes();
         on_progress(
             0,
             USB_SAVE_STEPS,
@@ -1274,7 +1271,12 @@ impl BackendService {
         //    in only one of the two is written there, and the gap reported.
         let databases = UsbDatabases::of(&usb_root)?;
         let pdb = read_usb_pdb(&databases)?;
-        let mut session = self.usb_write_session(&usb_root, SessionBackup::None, &mut Vec::new());
+        let mut session = self.usb_write_session(
+            &_usb_write_guard,
+            &usb_root,
+            SessionBackup::None,
+            &mut Vec::new(),
+        );
         if databases.edb().is_some() && session.edb()?.is_none() {
             return Err(BackendError::NotFound(tr::error_usb_edb_unreadable()));
         }

@@ -112,8 +112,6 @@ usb-warning-pdb-not-found-db-fallback = PDB not found under { $root }; using DB 
 usb-warning-edb-unreadable = eDB unreadable: neither plain SQLite nor opened by the USB export key
 # Event Log errors after changing the stick, when the changed database couldn't be copied
 # back to it. $error: the reason, from the OS.
-usb-warning-pdb-write-back-failed = PDB write-back to USB failed: { $error }
-usb-warning-edb-write-back-failed = eDB write-back to USB failed: { $error }
 # The status line when the connected drive's name can't be read. $error: why it failed.
 usb-name-check-failed = Could not check this drive's name: { $error }
 # The Event Log warning when the selected USB's audio formats can't be read. $error: why it failed.
@@ -193,17 +191,16 @@ usb-order-edit-started = Editing the order: drag playlists and tracks, or sort a
 usb-order-edit-saved = Order saved to the USB
 usb-order-edit-unchanged = Order unchanged: nothing to save
 usb-order-edit-cancelled = Order changes discarded
-usb-order-edit-cancelled-after-partial-save = Unsaved order changes discarded. What the failed save already wrote stays on the USB.
 # Why an order edit command was refused.
 usb-order-edit-not-active = Order editing isn't on for this USB
 usb-order-edit-saving = The new order is being saved to the USB; wait for it to finish
-usb-order-edit-busy = Another USB write is running; try again when it's done
+usb-write-busy = Another USB write is running; try again when it's done
 usb-order-edit-read-only = This USB can't be written to, so its order can't be changed
 usb-order-edit-history-refused = A history list's order is the play order; it can't be changed
 # $id: the row that isn't in the playlist.
 usb-order-edit-track-not-found = Track { $id } isn't in this USB playlist
 usb-order-edit-edb-open-failed = The USB's eDB couldn't be opened, so nothing was saved
-usb-order-edit-edb-checkpoint-failed = The eDB couldn't finish writing its changes, so nothing was saved
+usb-edb-checkpoint-failed = The eDB couldn't finish writing its changes, so nothing was saved
 # Saving the order failed. $error: why.
 usb-order-edit-save-failed = Failed to save the order: { $error }
 # The save's check found the PDB and the eDB in a different order after writing; nothing was saved.
@@ -211,7 +208,6 @@ usb-order-edit-save-failed = Failed to save the order: { $error }
 usb-order-edit-verify-failed = The new order came out different in the PDB and the eDB for { $playlists }, so nothing was saved to the USB. Run Preview Fixes in Health & Diagnostics and apply "Upgrade Export Data To Strict Parity", then save the order again.
 # A save wrote one database and then failed on the other. $saved, $failed: "PDB" or "eDB".
 # $error: why.
-usb-order-edit-partial-save = The new order was saved to the { $saved } only: writing the { $failed } failed ({ $error }). Save order again to finish, or Cancel to leave the USB as it is now.
 # Event Log: a playlist whose PDB holds a track twice keeps its PDB order. $playlist: its id.
 usb-order-edit-warning-pdb-duplicates = PDB track order not changed for { $playlist }: the PDB lists a track twice in it (USB diagnostics can repair that)
 
@@ -1639,7 +1635,6 @@ export-error-edb-missing = eDB not found at { $path }
 export-warning-unplayable-format = not exported, players don't play its format: { $path }
 export-warning-source-missing = missing source file: { $path }
 # The playlist was exported to the PDB but not to the eDB. $error: the reason.
-export-warning-edb-skipped = eDB update skipped: { $error }
 # After copying: a file the export wrote is not on the USB. $track: the track's id. $path: the file.
 export-warning-artwork-missing-after = export verification warning: artwork missing for track '{ $track }': { $path }
 export-warning-analysis-missing-after = export verification warning: analysis file missing for track '{ $track }': { $path }

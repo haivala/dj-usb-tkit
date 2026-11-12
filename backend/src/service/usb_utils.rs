@@ -1093,6 +1093,7 @@ pub(crate) fn initialize_usb_for(
     service: Option<&super::BackendService>,
     root: &Path,
 ) -> BackendResult<crate::models::InitializeUsbData> {
+    let write_guard = service.map(super::BackendService::lock_usb_writes);
     if !root.is_dir() {
         return Err(BackendError::Internal(format!(
             "USB root does not exist: {}",
@@ -1125,8 +1126,16 @@ pub(crate) fn initialize_usb_for(
     // in the staged copy, then written back to the USB.
     // Staged afresh, as on connect: a local copy left from an earlier
     // session isn't this stick's database.
+    let mut session = match (service, write_guard.as_ref()) {
+        (Some(service), Some(guard)) => service.usb_write_session(
+            guard,
+            root,
+            super::usb_staging::SessionBackup::None,
+            &mut Vec::new(),
+        ),
+        _ => super::usb_staging::UsbWriteSession::without_service(root),
+    };
     let present = super::usb_staging::UsbDatabases::on_connect(root);
-    let mut session = super::usb_staging::UsbWriteSession::open(service, root);
     let mut created_files = Vec::new();
     for kind in [
         super::usb_staging::DbKind::Pdb,

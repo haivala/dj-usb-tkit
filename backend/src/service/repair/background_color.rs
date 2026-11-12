@@ -151,6 +151,7 @@ impl BackendService {
                 req.color
             )));
         }
+        let _usb_write_guard = self.lock_usb_writes();
         let usb_root = resolve_usb_root(req.usb_root.as_deref())?;
         let mut warnings = Vec::<WarningEntry>::new();
         let mut pdb = StagedPdb::load(&usb_root)?;
@@ -181,6 +182,7 @@ impl BackendService {
         }
 
         let mut session = self.usb_write_session(
+            &_usb_write_guard,
             &usb_root,
             usb_staging::SessionBackup::WithRetention {
                 reason: "Before background color change",

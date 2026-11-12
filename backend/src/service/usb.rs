@@ -767,6 +767,9 @@ impl BackendService {
         &self,
         req: ValidateUsbRootRequest,
     ) -> BackendResult<ValidateUsbRootData> {
+        let _usb_write_guard = self
+            .try_lock_usb_writes()
+            .ok_or_else(|| BackendError::Validation(tr::usb_write_busy()))?;
         let result = self.check_usb_root(req);
         let selected = result
             .as_ref()
@@ -1836,10 +1839,12 @@ impl BackendService {
 
         // Stage 1: Resolve USB root, name candidates (0-10%)
         on_progress(0, 100, &tr::usb_progress_resolving_usb_root().render());
+        let _usb_write_guard = self.lock_usb_writes();
         let usb_root = resolve_usb_root(req.usb_root.as_deref())?;
         push_usb_stage_timing("resolve usb root", &mut stage_started);
 
         let mut session = self.usb_write_session(
+            &_usb_write_guard,
             &usb_root,
             // Removal can change the count, so it's worth a fresh
             // (best-effort) parse rather than carrying the previous
@@ -1877,14 +1882,12 @@ impl BackendService {
         );
         // Without a PDB, the eDB says which tracks only this playlist holds.
         let pdb_result = if session.databases()?.pdb().is_some() {
-            let result = remove_playlist_and_tracks_from_pdb_in(
+            remove_playlist_and_tracks_from_pdb_in(
                 &mut session,
                 req.playlist_id.as_deref(),
                 &name_candidates,
                 &mut warnings,
-            )?;
-            session.write_back(super::usb_staging::DbKind::Pdb)?;
-            result
+            )?
         } else {
             edb_playlist_exclusive_tracks(&mut session, &name_candidates)?
         };
@@ -1903,12 +1906,7 @@ impl BackendService {
             ));
         }
 
-        // Stage 3: Delete exclusive track files (30-65%)
-        on_progress(
-            30,
-            100,
-            &tr::usb_progress_deleting_exclusive_track_files().render(),
-        );
+        // Stage 3: Collect the files to delete after the database commit (30-65%)
         let mut stale_paths = Vec::<String>::new();
         let mut exclusive_track_file_paths = Vec::<String>::new();
 
@@ -1949,6 +1947,28 @@ impl BackendService {
             }
         }
 
+        // Stage 4: Remove from eDB (65-80%)
+        on_progress(65, 100, &tr::usb_progress_cleaning_edb().render());
+        let removed_edb = remove_playlist_from_edb(
+            &mut session,
+            &name_candidates,
+            &exclusive_track_file_paths,
+            &mut warnings,
+        )?;
+        push_usb_stage_timing("remove playlist from eDB", &mut stage_started);
+
+        if removed_edb == 0 && removed_pdb == 0 {
+            return Err(BackendError::NotFound(tr::error_usb_playlist_not_found(
+                &name,
+            )));
+        }
+        session.commit()?;
+
+        on_progress(
+            75,
+            100,
+            &tr::usb_progress_deleting_exclusive_track_files().render(),
+        );
         let mut files_deleted = 0usize;
         if !stale_paths.is_empty() {
             let prune_result = prune_stale_export_owned_files(&usb_root, &stale_paths)?;
@@ -1972,24 +1992,6 @@ impl BackendService {
         }
         push_usb_stage_timing("delete exclusive track files", &mut stage_started);
 
-        // Stage 4: Remove from eDB (65-80%)
-        on_progress(65, 100, &tr::usb_progress_cleaning_edb().render());
-        let removed_edb = remove_playlist_from_edb(
-            &mut session,
-            &name_candidates,
-            &exclusive_track_file_paths,
-            &mut warnings,
-        )?;
-        if let Err(err) = session.write_back(super::usb_staging::DbKind::Edb) {
-            warnings.push(logging::log_text(
-                Level::Error,
-                "usb-import",
-                "usb.remove.edb-write-back-failed",
-                &tr::usb_warning_edb_write_back_failed(err),
-            ));
-        }
-        push_usb_stage_timing("remove playlist from eDB", &mut stage_started);
-
         // Stage 5: Clean up empty directories under Contents/ (80-95%)
         on_progress(
             80,
@@ -2002,12 +2004,6 @@ impl BackendService {
         }
         push_usb_stage_timing("cleanup empty directories", &mut stage_started);
 
-        if removed_edb == 0 && removed_pdb == 0 {
-            return Err(BackendError::NotFound(tr::error_usb_playlist_not_found(
-                &name,
-            )));
-        }
-
         // Stage 6: Finalize (95-100%)
         on_progress(95, 100, &tr::usb_progress_finalizing().render());
         warnings.extend(self.refresh_engine_library(&usb_root));
@@ -2017,7 +2013,6 @@ impl BackendService {
             100,
             &tr::usb_progress_playlist_removal_completed().render(),
         );
-        session.commit()?;
 
         let warning_count = logging::count_warnings(&warnings);
         Ok(RemoveUsbPlaylistData {
@@ -5613,7 +5608,7 @@ mod tests {
     }
 
     #[test]
-    fn usb_order_edit_partial_save_is_reported_and_cancel_leaves_the_usb_as_is() {
+    fn usb_order_edit_failed_edb_write_restores_pdb_and_cancel_leaves_usb_unchanged() {
         let cache_dir = tempfile::tempdir().expect("cache dir").keep();
         let _guard = crate::service::usb_staging::set_cache_root_for_test(Some(cache_dir));
         let (_dir, service) = test_service();
@@ -5621,34 +5616,27 @@ mod tests {
         begin_order_edit(&service, &usb_root);
         move_file(&service, &usb_root, &playlist_id, "a.mp3", None).expect("move");
 
-        // The PDB is written, then the eDB can't be.
+        // A failed second write must restore the first database too.
+        let before = usb_db_bytes(&usb_root);
         let blocker = crate::service::usb_staging::write_back_temp_path_for_test(
             &usb_root,
             crate::service::usb_staging::DbKind::Edb,
         );
         std::fs::create_dir_all(&blocker).expect("block the edb write-back");
-        let err = commit_order_edit(&service, &usb_root).expect_err("partial save");
-        assert!(
-            err.english().contains("saved to the PDB only"),
-            "{}",
-            err.english()
-        );
-        let saved = ["b.mp3", "c.mp3", "a.mp3"];
-        assert_eq!(usb_pdb_files(&usb_root, "My Playlist"), saved);
+        commit_order_edit(&service, &usb_root).expect_err("save fails");
         assert_eq!(
-            usb_edb_files(&usb_root, "My Playlist"),
-            ["a.mp3", "b.mp3", "c.mp3"]
+            usb_db_bytes(&usb_root),
+            before,
+            "both databases rolled back"
         );
-
+        assert!(service.usb_order_edit_state(&usb_root).changed);
         let cancelled = service
             .cancel_usb_order_edit(crate::models::UsbOrderEditRequest {
                 usb_root: root_text(&usb_root),
             })
             .expect("cancel");
-        assert!(cancelled.status_text.contains("stays on the USB"));
+        assert!(!cancelled.status_text.contains("stays on the USB"));
         std::fs::remove_dir(&blocker).expect("unblock");
-
-        // The failed save's staged eDB was dropped: a later writer has nothing to write back.
         assert!(
             !crate::service::usb_staging::write_back_if_changed(
                 &usb_root,
@@ -5656,11 +5644,7 @@ mod tests {
             )
             .expect("write back")
         );
-        assert_eq!(usb_pdb_files(&usb_root, "My Playlist"), saved);
-        assert_eq!(
-            usb_edb_files(&usb_root, "My Playlist"),
-            ["a.mp3", "b.mp3", "c.mp3"]
-        );
+        assert_eq!(usb_db_bytes(&usb_root), before);
     }
 
     #[test]
@@ -5843,10 +5827,7 @@ mod tests {
                 "the selected USB can't change"
             );
             assert!(
-                matches!(
-                    during.usb_write_lock.try_lock(),
-                    Err(std::sync::TryLockError::WouldBlock)
-                ),
+                during.try_lock_usb_writes().is_none(),
                 "the save holds the USB write lock"
             );
         };
@@ -5863,6 +5844,52 @@ mod tests {
             usb_pdb_files(&usb_root, "My Playlist"),
             ["b.mp3", "c.mp3", "a.mp3"]
         );
+    }
+
+    #[test]
+    fn failed_playlist_removal_keeps_both_databases_and_audio_for_retry() {
+        let cache = tempfile::tempdir().unwrap();
+        let _staging =
+            crate::service::usb_staging::set_cache_root_for_test(Some(cache.path().to_path_buf()));
+        let (_dir, service) = test_service();
+        let (_usb, root, _) = connected_order_edit_usb(&service);
+        let parsed = crate::pdb_reader::parse_pdb(
+            &crate::service::usb_vendor_compat::vendor_pdb_path(&root),
+        )
+        .unwrap();
+        let audio: Vec<_> = parsed
+            .tracks
+            .iter()
+            .map(|track| {
+                let path = root.join(track.track_file_path.trim_start_matches('/'));
+                std::fs::create_dir_all(path.parent().unwrap()).unwrap();
+                std::fs::write(&path, b"audio to preserve").unwrap();
+                path
+            })
+            .collect();
+        let before = usb_db_bytes(&root);
+        let blocker = crate::service::usb_staging::write_back_temp_path_for_test(
+            &root,
+            crate::service::usb_staging::DbKind::Edb,
+        );
+        std::fs::create_dir_all(&blocker).unwrap();
+        let request = || crate::models::RemoveUsbPlaylistRequest {
+            usb_root: root_text(&root),
+            playlist_id: None,
+            playlist_name: "My Playlist".into(),
+        };
+        service
+            .remove_usb_playlist(request())
+            .expect_err("second database write fails");
+        assert_eq!(usb_db_bytes(&root), before);
+        for path in &audio {
+            assert_eq!(std::fs::read(path).unwrap(), b"audio to preserve");
+        }
+        std::fs::remove_dir(blocker).unwrap();
+        service
+            .remove_usb_playlist(request())
+            .expect("retry the removal");
+        assert!(audio.iter().all(|path| !path.exists()));
     }
 
     #[test]

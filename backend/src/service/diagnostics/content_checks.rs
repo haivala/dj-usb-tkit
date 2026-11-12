@@ -122,8 +122,7 @@ pub(crate) fn diagnose_contents_integrity_db_only(
     }
     let (Some(pdb_indexed_count), Some(edb_indexed_count)) = (pdb_indexed_count, edb_indexed_count)
     else {
-        let status =
-            DiagStatus::worst_of(&checks.iter().map(|c| &c.status).collect::<Vec<_>>());
+        let status = DiagStatus::worst_of(&checks.iter().map(|c| &c.status).collect::<Vec<_>>());
         return DiagSection {
             key: "",
             title: "Contents Integrity".to_string(),

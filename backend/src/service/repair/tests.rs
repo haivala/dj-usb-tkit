@@ -294,6 +294,54 @@ fn test_usb_root() -> (tempfile::TempDir, std::path::PathBuf) {
 }
 
 #[test]
+fn menu_and_color_failures_leave_both_usb_databases_unchanged() {
+    for menu in [true, false] {
+        let cache = tempdir().unwrap();
+        let _staging = usb_staging::set_cache_root_for_test(Some(cache.path().to_path_buf()));
+        let (_usb, usb_root) = test_usb_root();
+        let data = tempdir().unwrap();
+        let service = BackendService::new(data.path()).unwrap();
+        let pdb = vendor_pdb_path(&usb_root);
+        let edb = super::super::usb_vendor_compat::vendor_edb_path(&usb_root);
+        let before = (std::fs::read(&pdb).unwrap(), std::fs::read(&edb).unwrap());
+        let blocker =
+            usb_staging::write_back_temp_path_for_test(&usb_root, usb_staging::DbKind::Edb);
+        std::fs::create_dir_all(blocker).unwrap();
+        if menu {
+            let before_menu = service
+                .get_usb_player_menu_config(GetUsbPlayerMenuConfigRequest {
+                    usb_root: Some(usb_root.to_string_lossy().into_owned()),
+                })
+                .unwrap();
+            let kind = before_menu
+                .current_items
+                .iter()
+                .find(|item| item.menu_item_id == 17)
+                .unwrap()
+                .kind;
+            service
+                .update_usb_player_menu_config(UpdateUsbPlayerMenuConfigRequest {
+                    usb_root: Some(usb_root.to_string_lossy().into_owned()),
+                    action: UsbPlayerMenuEdit::MoveUp,
+                    kind,
+                })
+                .expect_err("menu save must fail");
+        } else {
+            service
+                .set_usb_background_color(crate::models::SetUsbBackgroundColorRequest {
+                    usb_root: Some(usb_root.to_string_lossy().into_owned()),
+                    color: 5,
+                })
+                .expect_err("color save must fail");
+        }
+        assert_eq!(
+            (std::fs::read(pdb).unwrap(), std::fs::read(edb).unwrap()),
+            before
+        );
+    }
+}
+
+#[test]
 fn background_color_sets_both_databases_on_the_usb() {
     let (_td, usb_root) = test_usb_root();
     let service_data_dir = tempdir().expect("service data dir");

@@ -520,6 +520,7 @@ impl BackendService {
         &self,
         req: RestoreUsbBackupRequest,
     ) -> BackendResult<RestoreUsbBackupData> {
+        let _usb_write_guard = self.lock_usb_writes();
         let usb_root = resolve_usb_root(Some(&req.usb_root))?;
         if files_for_timestamp(&usb_root, &req.timestamp).is_empty() {
             return Err(BackendError::NotFound(tr::backups_error_not_found(
@@ -553,7 +554,12 @@ impl BackendService {
 
         // Each restored file replaces its database's staged copy (staged
         // again from the stick first), and the session writes them back.
-        let mut session = self.usb_write_session(&usb_root, SessionBackup::None, &mut Vec::new());
+        let mut session = self.usb_write_session(
+            &_usb_write_guard,
+            &usb_root,
+            SessionBackup::None,
+            &mut Vec::new(),
+        );
         for (stem, snapshot) in &files {
             if let Some(kind) = database_for_stem(stem) {
                 session.replace_database(kind, snapshot)?;
@@ -1029,6 +1035,46 @@ mod tests {
             })
             .expect("delete");
         assert_eq!(deleted.status_text, "Deleted eDB and PDB backup");
+    }
+
+    #[test]
+    fn failed_backup_restore_leaves_both_databases_unchanged() {
+        let cache = tempdir().unwrap();
+        let _staging =
+            crate::service::usb_staging::set_cache_root_for_test(Some(cache.path().to_path_buf()));
+        let (_dir, service) = test_service();
+        let usb = tempdir().unwrap();
+        let pdb = vendor_pdb_path(usb.path());
+        let edb = vendor_edb_path(usb.path());
+        std::fs::create_dir_all(pdb.parent().unwrap()).unwrap();
+        std::fs::write(&pdb, b"current pdb").unwrap();
+        std::fs::write(&edb, b"current edb").unwrap();
+        let backups = usb_backups_dir(usb.path());
+        touch_backup(
+            &backups,
+            "export",
+            "pdb",
+            "2020-01-01_00-00-00",
+            b"previous pdb",
+        );
+        touch_backup(
+            &backups,
+            "exportLibrary",
+            "db",
+            "2020-01-01_00-00-00",
+            b"previous edb",
+        );
+        let blocker =
+            crate::service::usb_staging::write_back_temp_path_for_test(usb.path(), DbKind::Edb);
+        std::fs::create_dir_all(&blocker).unwrap();
+        service
+            .restore_usb_backup(RestoreUsbBackupRequest {
+                usb_root: usb.path().to_string_lossy().into_owned(),
+                timestamp: "2020-01-01_00-00-00".into(),
+            })
+            .expect_err("failed second write must undo the first");
+        assert_eq!(std::fs::read(pdb).unwrap(), b"current pdb");
+        assert_eq!(std::fs::read(edb).unwrap(), b"current edb");
     }
 
     #[test]

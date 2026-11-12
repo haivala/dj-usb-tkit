@@ -1,21 +1,15 @@
-//! Local HDD staging for the USB-resident `export.pdb` / `exportLibrary.db`
-//! files: read through a local working copy (re-synced only when the USB
-//! source's size/mtime changes), and write back to USB only when the local
-//! copy actually changed, via an atomic (temp-file + rename) commit.
+//! Local staging for the USB's player databases. Readers use the connected
+//! drive's working copies. Writers hold the operation's lock, edit through a
+//! session, and commit only after a complete eDB checkpoint and conflict check.
+//! A failed second write restores the first; this is not crash atomicity.
 //!
-//! This module has no opinion about backups -- callers that want a
-//! pre-write backup must take it themselves, before calling into any write
-//! path here (see `commit_local_to_usb`'s doc comment for why: by the time
-//! a write-back runs, in some call shapes the write has already happened).
-//!
-//! Staging is opt-in per process via [`init_cache_root`]. Until that is
-//! called (CLI dev tools, tests that don't construct a [`super::BackendService`]),
-//! every function here degrades to operating directly on the USB path --
-//! today's behavior, unchanged.
+//! Staging is enabled by the desktop app through [`init_cache_root`]. Without
+//! it (standalone CLI tools and most tests), sessions snapshot and restore the
+//! directly edited files instead. Backups are an optional session setting.
 
 use std::collections::HashMap;
 use std::path::{Path, PathBuf};
-use std::sync::Mutex;
+use std::sync::{Mutex, MutexGuard};
 use std::time::UNIX_EPOCH;
 
 use serde::{Deserialize, Serialize};
@@ -30,6 +24,7 @@ static CACHE_ROOT: Mutex<Option<PathBuf>> = Mutex::new(None);
 /// sidecar update) so concurrent staging/write-back calls -- even across
 /// different USB devices -- can't interleave and corrupt a sidecar file.
 static STATE_LOCK: Mutex<()> = Mutex::new(());
+static STANDALONE_WRITE_LOCK: Mutex<()> = Mutex::new(());
 /// Cache keys (see `cache_key_for_root`) of devices whose local staging copy
 /// has already been verified fresh for the current connect. While a
 /// device's key is present here, `stage_file_with_root` skips its per-call
@@ -336,11 +331,17 @@ fn stage_file_with_root(
     let local_dir = local_vendor_db_dir(&device_dir);
     let local_path = local_dir.join(kind.filename());
 
+    if force_recheck {
+        VERIFIED_THIS_CONNECT
+            .lock()
+            .unwrap()
+            .retain(|key| key != &cache_key);
+    }
     if !force_recheck && local_path.is_file() && is_verified_this_connect(&cache_key) {
         return Ok(local_path);
     }
 
-    if !source.exists() {
+    if optional_stat(source)?.is_none() {
         // Nothing to stage (e.g. fresh USB, PDB not created). Callers
         // already handle "file not present" via their own existence checks.
         // A connect-time call also drops the local copy: one left from an
@@ -365,11 +366,15 @@ fn stage_file_with_root(
 
     let source_stat = stat(source)?;
     let state = load_state(&device_dir);
+    let recorded = state.files.get(kind.state_key());
+    // A reconnect must not reuse edits left by an interrupted session. WAL
+    // bytes also count as dirty, even if the main SQLite file is unchanged.
+    let wal = local_path.with_file_name(format!("{}-wal", kind.filename()));
+    let clean = recorded.is_some_and(|s| stat(&local_path).ok() == Some(s.local))
+        && optional_stat(&wal)?.is_none_or(|s| s.size == 0);
     let reuse = local_path.is_file()
-        && state
-            .files
-            .get(kind.state_key())
-            .is_some_and(|s| s.source == source_stat);
+        && recorded.is_some_and(|s| s.source == source_stat)
+        && (!force_recheck || clean);
 
     if reuse {
         if force_recheck {
@@ -378,6 +383,11 @@ fn stage_file_with_root(
         return Ok(local_path);
     }
 
+    if force_recheck {
+        remove_local_copy(&device_dir, kind, &local_path)?;
+    } else if local_path.is_file() && !clean && recorded.is_some() {
+        return Err(external_change(source));
+    }
     std::fs::copy(source, &local_path)?;
     crate::logging::debug(
         "usb-staging",
@@ -540,24 +550,35 @@ pub(crate) fn write_back_temp_path_for_test(usb_root: &Path, kind: DbKind) -> Pa
 
 /// External-modification guard: if the USB source has moved since we last
 /// synced with it, don't silently clobber whatever changed it.
+fn optional_stat(path: &Path) -> std::io::Result<Option<FileStat>> {
+    match stat(path) {
+        Ok(stat) => Ok(Some(stat)),
+        Err(err) if err.kind() == std::io::ErrorKind::NotFound => Ok(None),
+        Err(err) => Err(err),
+    }
+}
+
+fn external_change(path: &Path) -> BackendError {
+    BackendError::Internal(format!(
+        "USB database changed since it was last read ({}) -- re-open and retry to avoid discarding the external change",
+        path.display()
+    ))
+}
+
 fn ensure_usb_copy_unchanged(device_dir: &Path, kind: DbKind, dest: &Path) -> BackendResult<()> {
-    let state = load_state(device_dir);
-    if let Some(recorded) = state.files.get(kind.state_key())
-        && dest.exists()
-        && let Ok(current) = stat(dest)
-        && current != recorded.source
-    {
-        return Err(BackendError::Internal(format!(
-            "USB database changed since it was last read ({}) -- re-open and retry to avoid discarding the external change",
-            dest.display()
-        )));
+    let expected = load_state(device_dir)
+        .files
+        .get(kind.state_key())
+        .map(|s| s.source);
+    if optional_stat(dest)? != expected {
+        return Err(external_change(dest));
     }
     Ok(())
 }
 
 /// Fails when the USB copy of `kind` changed since it was staged, so a
 /// caller writing back several databases can find out before writing any.
-pub(crate) fn check_write_back(usb_root: &Path, kind: DbKind) -> BackendResult<()> {
+fn check_write_back(usb_root: &Path, kind: DbKind) -> BackendResult<()> {
     let Some(device_dir) = cache_root().map(|root| root.join(resolve_cache_key(usb_root))) else {
         return Ok(());
     };
@@ -615,11 +636,7 @@ pub(crate) fn restage_from_usb(usb_root: &Path, kind: DbKind) -> BackendResult<P
 ///
 /// Backup is the caller's responsibility -- see `commit_local_to_usb`'s doc
 /// comment for why it can't live here.
-pub(crate) fn commit_and_write_back(
-    usb_root: &Path,
-    kind: DbKind,
-    local_bytes: &[u8],
-) -> BackendResult<bool> {
+fn commit_and_write_back(usb_root: &Path, kind: DbKind, local_bytes: &[u8]) -> BackendResult<bool> {
     commit_and_write_back_with_root(cache_root().as_deref(), usb_root, kind, local_bytes)
 }
 
@@ -651,8 +668,13 @@ fn commit_and_write_back_with_root(
 /// path (the connection was opened there in the first place), so this is a
 /// no-op. Backup is the caller's responsibility -- see
 /// `commit_local_to_usb`'s doc comment.
-pub(crate) fn write_back_if_changed(usb_root: &Path, kind: DbKind) -> BackendResult<bool> {
+fn write_changed_database(usb_root: &Path, kind: DbKind) -> BackendResult<bool> {
     write_back_if_changed_with_root(cache_root().as_deref(), usb_root, kind)
+}
+
+#[cfg(test)]
+pub(crate) fn write_back_if_changed(usb_root: &Path, kind: DbKind) -> BackendResult<bool> {
+    write_changed_database(usb_root, kind)
 }
 
 fn write_back_if_changed_with_root(
@@ -971,6 +993,27 @@ impl<'a> EdbRw<'a> {
     }
 }
 
+/// Checkpoints the eDB's write-ahead log into its main file: the staging
+/// write-back copies only that file. An incomplete checkpoint fails the save.
+fn checkpoint_edb(conn: &rusqlite::Connection) -> BackendResult<()> {
+    // A reader still on an older snapshot gets this long to finish.
+    conn.busy_timeout(std::time::Duration::from_secs(1))?;
+    let (busy, log_frames, checkpointed) =
+        conn.query_row("PRAGMA wal_checkpoint(TRUNCATE)", [], |row| {
+            Ok((
+                row.get::<_, i64>(0)?,
+                row.get::<_, i64>(1)?,
+                row.get::<_, i64>(2)?,
+            ))
+        })?;
+    if busy != 0 || (log_frames >= 0 && checkpointed != log_frames) {
+        return Err(BackendError::Validation(
+            crate::i18n::tr::usb_edb_checkpoint_failed(),
+        ));
+    }
+    Ok(())
+}
+
 // ── Write session ────────────────────────────────────────────────────────
 
 /// A backup a write session takes when it opens.
@@ -1002,6 +1045,10 @@ pub enum SessionBackup<'r> {
 /// nothing to the USB.
 pub struct UsbWriteSession<'s> {
     service: Option<&'s super::BackendService>,
+    // Borrowing the operation's guard keeps the entire read/modify/write
+    // sequence locked, including post-commit work done by the caller.
+    _write_guard: Option<&'s UsbWriteGuard<'s>>,
+    _standalone_guard: Option<MutexGuard<'static, ()>>,
     usb_root: PathBuf,
     edb: Option<rusqlite::Connection>,
     /// The databases this session changed (or may have, through its
@@ -1031,15 +1078,45 @@ impl DbKind {
     }
 }
 
+/// Proof that the caller holds the service's USB write lock: only
+/// [`super::BackendService::lock_usb_writes`] and
+/// [`super::BackendService::try_lock_usb_writes`] make one, and a write
+/// session can't be opened without it.
+pub(crate) struct UsbWriteGuard<'a> {
+    _held: MutexGuard<'a, ()>,
+}
+
 impl super::BackendService {
+    /// Takes the USB write lock, waiting for a running write to finish.
+    pub(crate) fn lock_usb_writes(&self) -> UsbWriteGuard<'_> {
+        UsbWriteGuard {
+            _held: self
+                .usb_write_lock
+                .lock()
+                .unwrap_or_else(std::sync::PoisonError::into_inner),
+        }
+    }
+
+    /// Takes the USB write lock, or `None` while another write holds it.
+    pub(crate) fn try_lock_usb_writes(&self) -> Option<UsbWriteGuard<'_>> {
+        match self.usb_write_lock.try_lock() {
+            Ok(guard) => Some(UsbWriteGuard { _held: guard }),
+            Err(std::sync::TryLockError::Poisoned(poisoned)) => Some(UsbWriteGuard {
+                _held: poisoned.into_inner(),
+            }),
+            Err(std::sync::TryLockError::WouldBlock) => None,
+        }
+    }
+
     /// Opens a [`UsbWriteSession`] on `usb_root`, taking `backup` first; the
     /// backup's warnings go to `warnings`.
-    pub(crate) fn usb_write_session(
-        &self,
+    pub(crate) fn usb_write_session<'s>(
+        &'s self,
+        guard: &'s UsbWriteGuard<'s>,
         usb_root: &Path,
         backup: SessionBackup<'_>,
         warnings: &mut Vec<crate::models::WarningEntry>,
-    ) -> UsbWriteSession<'_> {
+    ) -> UsbWriteSession<'s> {
         match backup {
             SessionBackup::None => {}
             SessionBackup::WithRetention {
@@ -1066,21 +1143,30 @@ impl super::BackendService {
                 warnings.extend(self.backup_usb_databases_replacing_same_reason(usb_root, reason));
             }
         }
-        UsbWriteSession::open(Some(self), usb_root)
+        let mut session = UsbWriteSession::open(Some(self), usb_root);
+        session._write_guard = Some(guard);
+        session
     }
 }
 
 impl<'s> UsbWriteSession<'s> {
     /// A session with no service: no backup, and no parse caches to drop.
     pub(crate) fn without_service(usb_root: &Path) -> UsbWriteSession<'static> {
-        UsbWriteSession::open(None, usb_root)
+        let guard = STANDALONE_WRITE_LOCK
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner);
+        let mut session = UsbWriteSession::open(None, usb_root);
+        session._standalone_guard = Some(guard);
+        session
     }
 
     /// A session without a backup; `service` (when given) has its parse
     /// caches dropped on commit.
-    pub(crate) fn open(service: Option<&'s super::BackendService>, usb_root: &Path) -> Self {
+    fn open(service: Option<&'s super::BackendService>, usb_root: &Path) -> Self {
         Self {
             service,
+            _write_guard: None,
+            _standalone_guard: None,
             usb_root: usb_root.to_path_buf(),
             edb: None,
             touched: [false; 2],
@@ -1139,17 +1225,21 @@ impl<'s> UsbWriteSession<'s> {
                 return Ok(None);
             };
             self.touch(DbKind::Edb)?;
-            self.edb = crate::edb::open_edb_rw_at(&path);
+            self.edb = Some(crate::edb::open_edb_rw_at(&path).ok_or_else(|| {
+                BackendError::NotFound(crate::i18n::tr::error_usb_edb_unreadable())
+            })?);
         }
         Ok(self.edb.as_mut())
     }
 
     /// Closes the shared eDB connection, its WAL checkpointed into the file
     /// first: a write-back copies the file, not through SQLite.
-    pub(crate) fn close_edb(&mut self) {
-        if let Some(conn) = self.edb.take() {
-            let _ = conn.execute_batch("PRAGMA wal_checkpoint(TRUNCATE);");
+    pub(crate) fn close_edb(&mut self) -> BackendResult<()> {
+        if let Some(conn) = self.edb.as_ref() {
+            checkpoint_edb(conn)?;
         }
+        self.edb.take();
+        Ok(())
     }
 
     /// The staged PDB's path, for a writer that changes the file itself;
@@ -1191,7 +1281,7 @@ impl<'s> UsbWriteSession<'s> {
         created_date: &str,
     ) -> BackendResult<PathBuf> {
         if kind == DbKind::Edb {
-            self.close_edb();
+            self.close_edb()?;
         }
         let usb_path = vendor_path(&self.usb_root, kind);
         if usb_path.exists() {
@@ -1222,7 +1312,7 @@ impl<'s> UsbWriteSession<'s> {
     /// rebuild leaves nothing to write back.
     pub(crate) fn drop_created_database(&mut self, kind: DbKind) {
         if kind == DbKind::Edb {
-            self.close_edb();
+            self.edb.take();
         }
         if cache_root().is_some() {
             let _ = restage_from_usb(&self.usb_root, kind);
@@ -1261,7 +1351,7 @@ impl<'s> UsbWriteSession<'s> {
     /// holds is staged again first, so the copy lands on it as it is now.
     pub(crate) fn replace_database(&mut self, kind: DbKind, source: &Path) -> BackendResult<()> {
         if kind == DbKind::Edb {
-            self.close_edb();
+            self.close_edb()?;
         }
         if cache_root().is_some() {
             restage_from_usb(&self.usb_root, kind)?;
@@ -1275,29 +1365,24 @@ impl<'s> UsbWriteSession<'s> {
         Ok(())
     }
 
-    /// Writes `kind` back to the USB now, when changed, keeping the session
-    /// open: for a writer whose later steps go on when this one fails. On
-    /// failure the staged copy is staged again from the USB, so the change
-    /// isn't written back later either.
-    pub(crate) fn write_back(&mut self, kind: DbKind) -> BackendResult<bool> {
-        if kind == DbKind::Edb
-            && let Some(conn) = self.edb.as_ref()
-        {
-            let _ = conn.execute_batch("PRAGMA wal_checkpoint(TRUNCATE);");
-        }
-        write_back_if_changed(&self.usb_root, kind).inspect_err(|_| {
-            let _ = restage_from_usb(&self.usb_root, kind);
-        })
-    }
-
     /// Writes each changed database back to the USB, both or neither, and
     /// drops the parse caches.
     pub(crate) fn commit(mut self) -> BackendResult<()> {
-        self.close_edb();
+        // Helpers may have written through a separate connection. Checkpoint
+        // a remaining WAL too. A restored byte snapshot has no WAL to flush.
+        if self.touched[1] && self.edb.is_none() {
+            let path = staged_path(&self.usb_root, DbKind::Edb, false)?;
+            let wal = path.with_file_name("exportLibrary.db-wal");
+            if optional_stat(&wal)?.is_some_and(|s| s.size > 0) {
+                self.edb()?;
+            }
+        }
+        self.close_edb()?;
         let original = self.pdb_original.take();
         let result = write_back_both_or_neither(
             &self.usb_root,
             original.as_ref().map(|original| original.as_deref()),
+            self.touched,
         );
         self.done = true;
         if let Some(service) = self.service {
@@ -1312,7 +1397,9 @@ impl Drop for UsbWriteSession<'_> {
         if self.done {
             return;
         }
-        self.close_edb();
+        // Discarding needs no checkpoint. Close the handle before removing
+        // staging and its journals (also after an incomplete checkpoint).
+        self.edb.take();
         for kind in [DbKind::Pdb, DbKind::Edb] {
             let index = kind_index(kind);
             if !self.touched[index] {
@@ -1346,6 +1433,7 @@ impl Drop for UsbWriteSession<'_> {
 pub(crate) fn write_back_both_or_neither(
     usb_root: &Path,
     pdb_original: Option<Option<&[u8]>>,
+    touched: [bool; 2],
 ) -> BackendResult<()> {
     let restage_both = || {
         let _ = restage_from_usb(usb_root, DbKind::Pdb);
@@ -1353,9 +1441,19 @@ pub(crate) fn write_back_both_or_neither(
     };
     let pdb_written = check_write_back(usb_root, DbKind::Pdb)
         .and_then(|()| check_write_back(usb_root, DbKind::Edb))
-        .and_then(|()| write_back_if_changed(usb_root, DbKind::Pdb))
+        .and_then(|()| {
+            if touched[0] {
+                write_changed_database(usb_root, DbKind::Pdb)
+            } else {
+                Ok(false)
+            }
+        })
         .inspect_err(|_| restage_both())?;
-    if let Err(err) = write_back_if_changed(usb_root, DbKind::Edb) {
+    if let Err(err) = if touched[1] {
+        write_changed_database(usb_root, DbKind::Edb)
+    } else {
+        Ok(false)
+    } {
         let undo = || match pdb_original {
             Some(Some(original)) => {
                 commit_and_write_back(usb_root, DbKind::Pdb, original).map(|_| ())
@@ -1703,5 +1801,243 @@ mod tests {
             b"changed externally",
             "external change must not be silently clobbered"
         );
+    }
+}
+
+// Failure contracts of the shared write session.
+#[cfg(test)]
+mod session_tests {
+    use super::*;
+
+    #[test]
+    fn failed_initialization_removes_the_new_pdb() {
+        let usb = tempfile::tempdir().unwrap();
+        let cache = tempfile::tempdir().unwrap();
+        let _override = set_cache_root_for_test(Some(cache.path().to_path_buf()));
+        let blocker = write_back_temp_path_for_test(usb.path(), DbKind::Edb);
+        std::fs::create_dir_all(&blocker).unwrap();
+        crate::service::initialize_usb(usb.path()).expect_err("the eDB write fails");
+        assert!(!vendor_path(usb.path(), DbKind::Pdb).exists());
+        assert!(!vendor_path(usb.path(), DbKind::Edb).exists());
+        std::fs::remove_dir(blocker).unwrap();
+        crate::service::initialize_usb(usb.path()).expect("retry initialization");
+        assert!(vendor_path(usb.path(), DbKind::Pdb).exists());
+        assert!(vendor_path(usb.path(), DbKind::Edb).exists());
+    }
+
+    #[test]
+    fn session_writes_only_touched_databases() {
+        let usb = tempfile::tempdir().unwrap();
+        let cache = tempfile::tempdir().unwrap();
+        let _override = set_cache_root_for_test(Some(cache.path().to_path_buf()));
+        let pdb = vendor_path(usb.path(), DbKind::Pdb);
+        let edb = vendor_path(usb.path(), DbKind::Edb);
+        std::fs::create_dir_all(pdb.parent().unwrap()).unwrap();
+        std::fs::write(&pdb, b"original pdb").unwrap();
+        std::fs::write(&edb, b"original edb").unwrap();
+        let databases = UsbDatabases::on_connect(usb.path()).unwrap();
+        std::fs::write(databases.edb().unwrap(), b"unrelated dirty staging").unwrap();
+        let mut session = UsbWriteSession::without_service(usb.path());
+        session.write_pdb(b"edited pdb").unwrap();
+        session.commit().unwrap();
+        assert_eq!(std::fs::read(pdb).unwrap(), b"edited pdb");
+        assert_eq!(std::fs::read(edb).unwrap(), b"original edb");
+    }
+
+    #[test]
+    fn reconnect_discards_leftover_wal_even_when_main_file_is_clean() {
+        let usb = tempfile::tempdir().unwrap();
+        let cache = tempfile::tempdir().unwrap();
+        let _override = set_cache_root_for_test(Some(cache.path().to_path_buf()));
+        let edb = vendor_path(usb.path(), DbKind::Edb);
+        std::fs::create_dir_all(edb.parent().unwrap()).unwrap();
+        std::fs::write(&edb, b"original edb").unwrap();
+        let databases = UsbDatabases::on_connect(usb.path()).unwrap();
+        let wal = databases
+            .edb()
+            .unwrap()
+            .with_file_name("exportLibrary.db-wal");
+        std::fs::write(&wal, b"uncommitted frames").unwrap();
+        let reconnected = UsbDatabases::on_connect(usb.path()).unwrap();
+        assert!(!wal.exists());
+        assert_eq!(
+            std::fs::read(reconnected.edb().unwrap()).unwrap(),
+            b"original edb"
+        );
+    }
+
+    #[test]
+    fn externally_created_database_is_not_overwritten() {
+        let usb = tempfile::tempdir().unwrap();
+        let cache = tempfile::tempdir().unwrap();
+        let _override = set_cache_root_for_test(Some(cache.path().to_path_buf()));
+        let mut session = UsbWriteSession::without_service(usb.path());
+        session.write_pdb(b"new pdb").unwrap();
+        let raw = vendor_path(usb.path(), DbKind::Pdb);
+        std::fs::create_dir_all(raw.parent().unwrap()).unwrap();
+        std::fs::write(&raw, b"externally created").unwrap();
+        session
+            .commit()
+            .expect_err("the destination appeared after staging");
+        assert_eq!(std::fs::read(raw).unwrap(), b"externally created");
+    }
+
+    #[test]
+    fn session_commit_and_drop_work_with_and_without_staging() {
+        for staged in [true, false] {
+            let usb = tempfile::tempdir().unwrap();
+            let cache = tempfile::tempdir().unwrap();
+            let _override = set_cache_root_for_test(staged.then(|| cache.path().to_path_buf()));
+            let pdb = vendor_path(usb.path(), DbKind::Pdb);
+            let edb = vendor_path(usb.path(), DbKind::Edb);
+            std::fs::create_dir_all(pdb.parent().unwrap()).unwrap();
+            std::fs::write(&pdb, b"original pdb").unwrap();
+            {
+                let conn = rusqlite::Connection::open(&edb).unwrap();
+                conn.execute_batch(
+                    "CREATE TABLE probe(value INTEGER); INSERT INTO probe VALUES(1);",
+                )
+                .unwrap();
+            }
+            UsbDatabases::on_connect(usb.path()).unwrap();
+            for commit in [false, true] {
+                let mut session = UsbWriteSession::without_service(usb.path());
+                session.write_pdb(b"edited pdb").unwrap();
+                session
+                    .edb()
+                    .unwrap()
+                    .unwrap()
+                    .execute_batch("UPDATE probe SET value=2;")
+                    .unwrap();
+                if staged {
+                    assert_eq!(std::fs::read(&pdb).unwrap(), b"original pdb");
+                    let conn = rusqlite::Connection::open(&edb).unwrap();
+                    assert_eq!(
+                        conn.query_row("SELECT value FROM probe", [], |r| r.get::<_, i64>(0))
+                            .unwrap(),
+                        1
+                    );
+                }
+                if commit {
+                    session.commit().unwrap();
+                } else {
+                    drop(session);
+                }
+                assert_eq!(
+                    std::fs::read(&pdb).unwrap(),
+                    if commit {
+                        b"edited pdb".as_slice()
+                    } else {
+                        b"original pdb".as_slice()
+                    }
+                );
+                let conn = rusqlite::Connection::open(&edb).unwrap();
+                assert_eq!(
+                    conn.query_row("SELECT value FROM probe", [], |r| r.get::<_, i64>(0))
+                        .unwrap(),
+                    if commit { 2 } else { 1 }
+                );
+            }
+        }
+    }
+
+    #[test]
+    fn incomplete_checkpoint_refuses_both_database_writes() {
+        let usb = tempfile::tempdir().unwrap();
+        let cache = tempfile::tempdir().unwrap();
+        let _override = set_cache_root_for_test(Some(cache.path().to_path_buf()));
+        let raw = vendor_path(usb.path(), DbKind::Edb);
+        std::fs::create_dir_all(raw.parent().unwrap()).unwrap();
+        {
+            let conn = rusqlite::Connection::open(&raw).unwrap();
+            conn.execute_batch("CREATE TABLE probe(value INTEGER); INSERT INTO probe VALUES(1);")
+                .unwrap();
+        }
+        let pdb = vendor_path(usb.path(), DbKind::Pdb);
+        std::fs::write(&pdb, b"original pdb").unwrap();
+        UsbDatabases::on_connect(usb.path()).unwrap();
+        let before = std::fs::read(&raw).unwrap();
+        let mut session = UsbWriteSession::without_service(usb.path());
+        session.write_pdb(b"changed pdb").unwrap();
+        let conn = session.edb().unwrap().unwrap();
+        conn.busy_timeout(std::time::Duration::from_millis(10))
+            .unwrap();
+        conn.execute_batch("PRAGMA journal_mode=WAL;").unwrap();
+        let reader = open_edb_rw(usb.path()).unwrap();
+        reader.execute_batch("BEGIN").unwrap();
+        let old: i64 = reader
+            .query_row("SELECT value FROM probe", [], |r| r.get(0))
+            .unwrap();
+        assert_eq!(old, 1);
+        conn.execute_batch("UPDATE probe SET value=2;").unwrap();
+        let (busy, frames, checkpointed): (i64, i64, i64) = conn
+            .query_row("PRAGMA wal_checkpoint(TRUNCATE)", [], |r| {
+                Ok((r.get(0)?, r.get(1)?, r.get(2)?))
+            })
+            .unwrap();
+        assert_ne!(busy, 0);
+        assert!(frames > checkpointed);
+        let err = session
+            .commit()
+            .expect_err("the checkpoint must finish before either write");
+        assert!(err.english().contains("couldn't finish writing"));
+        assert_eq!(std::fs::read(&pdb).unwrap(), b"original pdb");
+        assert_eq!(std::fs::read(&raw).unwrap(), before);
+        let on_usb = rusqlite::Connection::open(&raw).unwrap();
+        let actual: i64 = on_usb
+            .query_row("SELECT value FROM probe", [], |r| r.get(0))
+            .unwrap();
+        assert_eq!(actual, 1, "the acknowledged edit was not copied to USB");
+        drop(reader);
+        let local = open_edb_rw(usb.path()).unwrap();
+        let staged: i64 = local
+            .query_row("SELECT value FROM probe", [], |r| r.get(0))
+            .unwrap();
+        assert_eq!(
+            staged, 1,
+            "failed changes cannot leak into the next session"
+        );
+    }
+
+    #[test]
+    fn reconnect_discards_uncommitted_staged_bytes() {
+        let usb = tempfile::tempdir().unwrap();
+        let cache = tempfile::tempdir().unwrap();
+        let _override = set_cache_root_for_test(Some(cache.path().to_path_buf()));
+        let raw = vendor_path(usb.path(), DbKind::Pdb);
+        std::fs::create_dir_all(raw.parent().unwrap()).unwrap();
+        std::fs::write(&raw, b"original").unwrap();
+        let dbs = UsbDatabases::on_connect(usb.path()).unwrap();
+        std::fs::write(
+            dbs.pdb().unwrap(),
+            b"uncommitted change left by an interrupted process",
+        )
+        .unwrap();
+        let reconnect = UsbDatabases::on_connect(usb.path()).unwrap();
+        assert_eq!(
+            std::fs::read(reconnect.pdb().unwrap()).unwrap(),
+            b"original"
+        );
+        UsbWriteSession::without_service(usb.path())
+            .commit()
+            .unwrap();
+        assert_eq!(std::fs::read(raw).unwrap(), b"original");
+    }
+
+    #[test]
+    fn external_deletion_is_a_write_conflict() {
+        let usb = tempfile::tempdir().unwrap();
+        let cache = tempfile::tempdir().unwrap();
+        let _override = set_cache_root_for_test(Some(cache.path().to_path_buf()));
+        let raw = vendor_path(usb.path(), DbKind::Pdb);
+        std::fs::create_dir_all(raw.parent().unwrap()).unwrap();
+        std::fs::write(&raw, b"original").unwrap();
+        UsbDatabases::on_connect(usb.path()).unwrap();
+        let mut session = UsbWriteSession::without_service(usb.path());
+        session.write_pdb(b"changed").unwrap();
+        std::fs::remove_file(&raw).unwrap();
+        let error = session.commit().expect_err("deletion changed the source");
+        assert!(error.english().contains("changed since it was last read"));
+        assert!(!raw.exists());
     }
 }

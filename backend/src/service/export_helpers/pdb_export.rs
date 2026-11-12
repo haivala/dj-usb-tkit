@@ -480,7 +480,6 @@ pub(super) fn write_pdb_fresh_with_overrides(
     )?;
     if let Some(session) = session {
         session.write_pdb(&build.bytes)?;
-        session.write_back(crate::service::usb_staging::DbKind::Pdb)?;
     }
     Ok(WriteExportPdbResult {
         inserted_tracks: build.inserted_tracks,

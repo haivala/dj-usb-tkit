@@ -286,7 +286,7 @@ pub struct BackendService {
     /// The USB the window has selected: the root `select_usb` last found valid,
     /// or none. The playlists' export status is against it.
     pub(crate) selected_usb_root: Arc<std::sync::Mutex<Option<std::path::PathBuf>>>,
-    /// Serializes cue-editor saves to a USB: they run as background jobs, and
+    /// Serializes all USB database writes and reconnect staging:
     /// each one read-modify-writes the same staged `export.pdb` / eDB.
     /// Shared across `.clone()`s (the Tauri state and the job threads).
     pub(crate) usb_write_lock: Arc<std::sync::Mutex<()>>,

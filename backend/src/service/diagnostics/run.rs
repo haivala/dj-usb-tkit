@@ -349,12 +349,11 @@ impl BackendService {
                 .ok()
                 .map(|n| n.max(0) as usize)
         });
-        let mut analysis_integrity =
-            diagnose_analysis_integrity(
-                has_pdb.then_some(parsed_pdb),
-                has_edb.then_some(edb_playlist_tracks.as_ref()),
-                edb_content_rows,
-            );
+        let mut analysis_integrity = diagnose_analysis_integrity(
+            has_pdb.then_some(parsed_pdb),
+            has_edb.then_some(edb_playlist_tracks.as_ref()),
+            edb_content_rows,
+        );
         if let Some(parsed) = parsed_pdb {
             // Database-only: the ANLZ beat grids are compared by the repair
             // preview, which scans the analysis files anyway.
