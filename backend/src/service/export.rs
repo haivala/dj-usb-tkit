@@ -8,7 +8,7 @@ use rusqlite::{OptionalExtension, params};
 use serde_json::json;
 
 use super::usb::UsbTrackSizes;
-use crate::edb::{open_edb_from_usb_root, open_edb_rw};
+use crate::edb::open_edb_from_usb_root;
 use crate::error::{BackendError, BackendResult};
 use crate::i18n::{Text, tr};
 use crate::logging::{self, Level};
@@ -39,7 +39,7 @@ use super::export_helpers::{
     is_safe_export_owned_path, normalize_owned_export_path, preview_pdb,
     prune_stale_export_owned_files, remove_orphaned_dropped_tracks_from_dbs, stable_u32_hash,
     to_usb_relative_path, usb_relative_path, verify_edb_content, verify_edb_content_with_conn,
-    verify_pdb_content, write_edb_playlist, write_edb_playlist_with_conn, write_pdb,
+    verify_pdb_content, write_edb_playlist_in, write_pdb_in,
 };
 use super::export_log::{append_export_log_record, build_export_log_record};
 use super::usb_staging;
@@ -1047,18 +1047,29 @@ impl BackendService {
         let fits = available_bytes
             .is_none_or(|available| export_space_shortfall(estimate.bytes, available).is_none());
         let (format_notice, format_notice_blocks) = format_notice(&convert, &refused);
+        let mut summary_text = export_space_text(
+            estimate.tracks,
+            list_track_count,
+            estimate.bytes,
+            available_bytes,
+            fits,
+        );
+        // Counted against the database the stick has; the export rebuilds
+        // the other one first.
+        if let Some(missing) = usb_staging::UsbDatabases::present(usb_root)
+            .ok()
+            .flatten()
+            .and_then(|databases| databases.missing())
+        {
+            summary_text.push_str(" · ");
+            summary_text.push_str(&tr::export_space_creates_database(missing.label()).render());
+        }
         Ok(PlaylistExportSpace {
             bytes_to_copy: estimate.bytes,
             tracks_to_copy: estimate.tracks,
             available_bytes,
             fits,
-            summary_text: export_space_text(
-                estimate.tracks,
-                list_track_count,
-                estimate.bytes,
-                available_bytes,
-                fits,
-            ),
+            summary_text,
             format_notice,
             format_notice_blocks,
         })
@@ -1575,6 +1586,9 @@ impl BackendService {
         // see that function's doc comment.
         let mirror_playlist_entries = options.prune_stale;
         validate_export_manifest_before_db_write(&usb_root, &manifest, !export_dry_run)?;
+        // The write to the stick's databases, from the eDB write to the
+        // prune's row removal; dry runs write nothing.
+        let mut write_session: Option<usb_staging::UsbWriteSession<'_>> = None;
         let skip_pdb_write = std::env::var("PDB_WRITE_MODE")
             .ok()
             .map(|v| v.eq_ignore_ascii_case("skip"))
@@ -1587,6 +1601,19 @@ impl BackendService {
                 "export",
                 "dry-run enabled: media/artwork/analysis/database writes skipped",
             );
+            if let Some(missing) = usb_staging::UsbDatabases::present(&usb_root)
+                .ok()
+                .flatten()
+                .and_then(|databases| databases.missing())
+            {
+                logging::debug(
+                    "export",
+                    format!(
+                        "dry-run: the USB has no {}; a real export creates it first",
+                        missing.label()
+                    ),
+                );
+            }
             match preview_pdb(
                 &usb_root,
                 &playlist,
@@ -1636,39 +1663,33 @@ impl BackendService {
                 }
             }
         } else {
-            if options.backup_before_export {
-                // Export can add/replace a playlist, so the count is worth a
-                // fresh (best-effort) parse rather than carrying forward
-                // whatever the last backup recorded.
-                let playlist_count = usb_staging::stage_pdb(&usb_root)
-                    .ok()
-                    .and_then(|p| crate::pdb_reader::count_pdb_playlists(&p));
-                let backup_reason = if options.prune_stale {
-                    "Before export (mirror)"
-                } else {
-                    "Before export (additive)"
-                };
-                warnings.extend(self.backup_usb_databases_with_retention(
-                    &usb_root,
-                    backup_reason,
-                    playlist_count,
-                ));
+            // Export can add/replace a playlist, so the count is worth a
+            // fresh (best-effort) parse rather than carrying forward
+            // whatever the last backup recorded.
+            let backup = match (options.backup_before_export, options.prune_stale) {
+                (false, _) => usb_staging::SessionBackup::None,
+                (true, true) => usb_staging::SessionBackup::CountingPlaylists {
+                    reason: "Before export (mirror)",
+                },
+                (true, false) => usb_staging::SessionBackup::CountingPlaylists {
+                    reason: "Before export (additive)",
+                },
+            };
+            let session =
+                write_session.insert(self.usb_write_session(&usb_root, backup, &mut warnings));
+            // A stick with only one database gets the other first, so the
+            // export lands in both.
+            if let Some(rebuilt) = super::repair::rebuild_missing_database(session)? {
+                logging::debug(
+                    "export",
+                    format!("rebuilt the missing {} before export", rebuilt.label()),
+                );
             }
             // Write eDB first (master), then sync PDB to match eDB playlist IDs.
-            // Open one RW connection here and reuse it for the immediate
+            // The session's one RW connection is reused for the immediate
             // post-write verification read below, instead of reopening.
-            let mut edb_write_conn = open_edb_rw(&usb_root);
-            let write_result = match edb_write_conn.as_mut() {
-                Some(conn) => write_edb_playlist_with_conn(
-                    conn,
-                    &playlist,
-                    &manifest,
-                    mirror_playlist_entries,
-                ),
-                None => {
-                    write_edb_playlist(&usb_root, &playlist, &manifest, mirror_playlist_entries)
-                }
-            };
+            let write_result =
+                write_edb_playlist_in(session, &playlist, &manifest, mirror_playlist_entries);
             match write_result {
                 Ok(WriteExportLibraryDbResult {
                     inserted_content,
@@ -1679,7 +1700,7 @@ impl BackendService {
                 }) => {
                     edb_playlist_id = u32::try_from(playlist_id).ok();
                     edb_sort_order = u32::try_from(sort_order).ok();
-                    usb_staging::write_back_if_changed(&usb_root, usb_staging::DbKind::Edb)?;
+                    session.write_back(usb_staging::DbKind::Edb)?;
                     // Always keep exportExt.pdb byte-stable in normal export.
                     // Strict integrity checks can fail when exportExt header/count
                     // bytes are rewritten from eDB-derived values.
@@ -1688,7 +1709,7 @@ impl BackendService {
                         &playlist,
                         &manifest,
                         true,
-                        edb_write_conn.as_ref(),
+                        session.edb()?.map(|conn| &*conn),
                         false,
                     )?;
                     warnings.extend(verify_warnings);
@@ -1709,8 +1730,8 @@ impl BackendService {
                 }
             }
 
-            match write_pdb(
-                &usb_root,
+            match write_pdb_in(
+                session,
                 &playlist,
                 &manifest,
                 mirror_playlist_entries,
@@ -1772,7 +1793,9 @@ impl BackendService {
                 // that fell out of this playlist and are referenced nowhere
                 // else -- otherwise the rows outlive the files and strict
                 // parity reports them as "missing from USB".
-                remove_orphaned_dropped_tracks_from_dbs(&usb_root, &prunable)?;
+                if let Some(session) = write_session.as_mut() {
+                    remove_orphaned_dropped_tracks_from_dbs(session, &prunable)?;
+                }
                 let prune_result = prune_stale_export_owned_files(&usb_root, &prunable)?;
                 logging::debug(
                     "export",
@@ -1864,7 +1887,10 @@ impl BackendService {
             )?;
         }
 
-        self.invalidate_usb_parse_cache();
+        // A dry run wrote nothing.
+        if let Some(session) = write_session {
+            session.commit()?;
+        }
 
         let warning_count = logging::count_warnings(&warnings);
         let skipped_tracks = skipped_tracks + unplayable_tracks.len();

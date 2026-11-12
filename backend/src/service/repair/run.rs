@@ -502,24 +502,28 @@ pub(super) struct StagedPdb {
     pub(super) bytes: Vec<u8>,
     on_disk: Vec<u8>,
     /// What the USB held when the run started, for undoing a write-back;
-    /// `None` when it had no PDB.
+    /// `None` when it had no PDB. (A write session keeps its own.)
+    #[cfg(test)]
     original: Option<Vec<u8>>,
 }
 
 impl StagedPdb {
     pub(super) fn load(usb_root: &Path) -> BackendResult<Self> {
-        let path = usb_staging::stage_pdb(usb_root)?;
-        let bytes = if path.is_file() {
+        let path = usb_staging::staged_write_path(usb_root, usb_staging::DbKind::Pdb)?;
+        let has_pdb = usb_staging::UsbDatabases::present(usb_root)?
+            .as_ref()
+            .is_some_and(|databases| databases.pdb().is_some());
+        let bytes = if has_pdb {
             std::fs::read(&path)?
         } else {
             Vec::new()
         };
-        let original = crate::service::usb_vendor_compat::vendor_pdb_path(usb_root)
-            .is_file()
-            .then(|| bytes.clone());
+        #[cfg(test)]
+        let original = has_pdb.then(|| bytes.clone());
         Ok(Self {
             path,
             on_disk: bytes.clone(),
+            #[cfg(test)]
             original,
             bytes,
         })
@@ -546,7 +550,7 @@ impl StagedPdb {
         result
     }
 
-    fn save(&mut self) -> BackendResult<()> {
+    pub(super) fn save(&mut self) -> BackendResult<()> {
         if self.bytes != self.on_disk {
             std::fs::write(&self.path, &self.bytes)?;
             self.on_disk.clone_from(&self.bytes);
@@ -564,55 +568,15 @@ impl StagedPdb {
 }
 
 /// Saves both staged databases to the USB, or neither, after putting the
-/// PDB's in-memory bytes into its staged file. Before writing, both
-/// USB copies are checked for outside changes. When the eDB write fails after
-/// the PDB was written, the PDB the USB held before is put back. On failure
-/// the staged copies are staged again from the USB, so they match the drive.
-/// Saves and writes back the PDB of a stick that has no eDB to keep it paired with.
-pub(super) fn write_back_pdb_alone(usb_root: &Path, pdb: &mut StagedPdb) -> BackendResult<()> {
-    pdb.save()?;
-    usb_staging::write_back_if_changed(usb_root, usb_staging::DbKind::Pdb)?;
-    Ok(())
-}
-
+/// PDB's in-memory bytes into its staged file (see
+/// `usb_staging::write_back_both_or_neither`).
+#[cfg(test)]
 pub(super) fn write_back_both_or_neither(
     usb_root: &Path,
     pdb: &mut StagedPdb,
 ) -> BackendResult<()> {
-    let restage_both = || {
-        let _ = usb_staging::restage_from_usb(usb_root, usb_staging::DbKind::Pdb);
-        let _ = usb_staging::restage_from_usb(usb_root, usb_staging::DbKind::Edb);
-    };
-    let pdb_written = pdb
-        .save()
-        .and_then(|()| usb_staging::check_write_back(usb_root, usb_staging::DbKind::Pdb))
-        .and_then(|()| usb_staging::check_write_back(usb_root, usb_staging::DbKind::Edb))
-        .and_then(|()| usb_staging::write_back_if_changed(usb_root, usb_staging::DbKind::Pdb))
-        .inspect_err(|_| restage_both())?;
-    if let Err(err) = usb_staging::write_back_if_changed(usb_root, usb_staging::DbKind::Edb) {
-        let undo = || match &pdb.original {
-            Some(original) => {
-                usb_staging::commit_and_write_back(usb_root, usb_staging::DbKind::Pdb, original)
-                    .map(|_| ())
-            }
-            None => {
-                std::fs::remove_file(crate::service::usb_vendor_compat::vendor_pdb_path(usb_root))
-                    .map_err(Into::into)
-            }
-        };
-        if pdb_written && let Err(undo_err) = undo() {
-            restage_both();
-            return Err(BackendError::Internal(format!(
-                "{err}; putting the previous PDB back also failed ({undo_err}), so the USB has the \
-                 repaired PDB with the previous eDB -- restore the \"Before repair\" backup",
-                err = err.english(),
-                undo_err = undo_err.english()
-            )));
-        }
-        restage_both();
-        return Err(err);
-    }
-    Ok(())
+    pdb.save()?;
+    usb_staging::write_back_both_or_neither(usb_root, Some(pdb.original.as_deref()))
 }
 
 impl BackendService {
@@ -642,7 +606,10 @@ impl BackendService {
         // detectors further down read this same staged copy too.
         let mut edb_open_warnings = Vec::<WarningEntry>::new();
         let edb_conn = open_edb_from_usb_root(&usb_root, &mut edb_open_warnings);
-        let staged_pdb_path = usb_staging::stage_pdb(&usb_root)?;
+        let staged_pdb_path = usb_staging::UsbDatabases::present(&usb_root)?
+            .as_ref()
+            .and_then(|databases| databases.pdb())
+            .map(Path::to_path_buf);
 
         on_progress(5, 100, &tr::repair_progress_baseline().render());
         let diagnostics = self.run_usb_diagnostics_with_progress_impl(
@@ -650,7 +617,7 @@ impl BackendService {
                 usb_root: Some(usb_root.to_string_lossy().to_string()),
             },
             edb_conn.as_ref(),
-            Some(&staged_pdb_path),
+            staged_pdb_path.as_deref(),
             |c, t, m| {
                 let pct = 5 + ((c * 45) / t.max(1)).min(45);
                 on_progress(pct, 100, m);
@@ -663,7 +630,7 @@ impl BackendService {
                 usb_root: Some(usb_root.to_string_lossy().to_string()),
             },
             edb_conn.as_ref(),
-            Some(&staged_pdb_path),
+            staged_pdb_path.as_deref(),
             |c, t, m| {
                 let pct = 55 + ((c * 10) / t.max(1)).min(10);
                 on_progress(pct, 100, m);
@@ -735,10 +702,19 @@ impl BackendService {
 
         // The parse the diagnostics and parity baselines above read
         // (`parsed_staged_pdb`): the staged PDB hasn't changed since.
-        let parsed_pdb = self
-            .parsed_staged_pdb(&staged_pdb_path)
-            .ok()
-            .map(|staged| std::sync::Arc::clone(&staged.parsed));
+        // Without a PDB the detectors read the eDB in the same shape, so a
+        // finding is offered in the same pass as the rebuild that creates
+        // the PDB (the fixes after it work on the rebuilt one).
+        let parsed_pdb = match staged_pdb_path.as_deref() {
+            Some(path) => self
+                .parsed_staged_pdb(path)
+                .ok()
+                .map(|staged| std::sync::Arc::clone(&staged.parsed)),
+            None => edb_conn
+                .as_ref()
+                .and_then(|conn| crate::edb::edb_as_parsed_pdb(conn).ok())
+                .map(std::sync::Arc::new),
+        };
         // This app's export id: the owner of a bundle it shares with another
         // track (`scan_analysis_ownership`).
         let app_master_db_id = self
@@ -910,7 +886,12 @@ impl BackendService {
         let app_beat_grids = outdated_beat_grid_bundles(
             parsed_pdb
                 .as_ref()
-                .map(|parsed| self.outdated_beat_grids(&usb_root, &staged_pdb_path, parsed))
+                .map(|parsed| match staged_pdb_path.as_deref() {
+                    Some(path) => self.outdated_beat_grids(&usb_root, path, parsed),
+                    None => std::sync::Arc::new(
+                        crate::service::diagnostics::detect_outdated_beat_grids(&usb_root, parsed),
+                    ),
+                })
                 .as_deref()
                 .and_then(|found| found.as_deref()),
         );
@@ -1013,7 +994,10 @@ impl BackendService {
         }
         note_stage("seek data check");
         // Every PDB detector below reads the same staged bytes.
-        let staged_pdb_bytes = std::fs::read(&staged_pdb_path).unwrap_or_default();
+        let staged_pdb_bytes = staged_pdb_path
+            .as_deref()
+            .and_then(|path| std::fs::read(path).ok())
+            .unwrap_or_default();
         let pdb_sentinel_u5_pages = detect_pdb_sentinel_u5_on_data_pages(&staged_pdb_bytes);
         let pdb_wrong_flags_pages = detect_pdb_wrong_page_flags(&staged_pdb_bytes);
         let pdb_zero_tranrf_pages = detect_pdb_zero_tranrf_all_tables(&staged_pdb_bytes);
@@ -1511,7 +1495,8 @@ impl BackendService {
             }
         }
 
-        if let Some(parsed) = parsed_pdb.as_ref() {
+        // PDB to eDB by nature: never offered without a PDB.
+        if let Some(parsed) = parsed_pdb.as_ref().filter(|_| staged_pdb_path.is_some()) {
             let (history_rows, history_content_rows) = derive_history_sync_payload(parsed);
             if !history_rows.is_empty()
                 && let Some(conn) = edb_conn.as_ref()
@@ -1769,10 +1754,10 @@ impl BackendService {
         }
 
         if req.apply {
+            // The apply's write session dropped the parse caches, even after
+            // a fix that rewrote only analysis files (no signature the caches
+            // are keyed by changes), so the check below reads afresh.
             outcomes.log(&mut warnings);
-            // A fix that rewrote only analysis files changed no signature the
-            // caches are keyed by, so the check below must not read them.
-            self.invalidate_usb_parse_cache();
         }
 
         let diagnostics_after_apply = if req.apply {
@@ -1893,21 +1878,23 @@ impl BackendService {
         let mut outcomes = FixOutcomes::default();
 
         progress.report(70, tr::repair_progress_backup());
-        warnings.extend(self.backup_usb_databases_with_retention(usb_root, "Before repair", None));
+        // Every fix below writes the staged copies of this one session: one
+        // read-write eDB connection (opened on first use, so SQLCipher key
+        // negotiation happens once), and the in-memory PDB.
+        let mut session = self.usb_write_session(
+            usb_root,
+            usb_staging::SessionBackup::WithRetention {
+                reason: "Before repair",
+                playlist_count: None,
+            },
+            warnings,
+        );
 
-        // Open the eDB read-write once for every fix below instead of
-        // each fix independently re-staging/re-opening it -- SQLCipher
-        // key negotiation is the expensive part. Individual fixes fall
-        // back to opening their own connection if this fails.
         progress.report(70, tr::repair_progress_open());
-        // A missing eDB is created by strict parity; a connection opened now
-        // would be to a stale local copy.
-        let mut fix_edb_conn = if missing_database == Some(usb_staging::DbKind::Edb) {
-            None
-        } else {
-            open_edb_rw(usb_root)
-        };
-        let mut pdb = match StagedPdb::load(usb_root) {
+        let mut pdb = match session
+            .will_write(usb_staging::DbKind::Pdb)
+            .and_then(|()| StagedPdb::load(usb_root))
+        {
             Ok(pdb) => pdb,
             Err(err) => {
                 outcomes.outcomes.push(Outcome::ReadFailed(err.into_arg()));
@@ -1921,7 +1908,7 @@ impl BackendService {
                 self.apply_fix_empty_analysis_files(
                     usb_root,
                     &empty_analysis_paths,
-                    fix_edb_conn.as_mut(),
+                    session.edb_conn(),
                     parsed_pdb.as_deref(),
                     warnings,
                 )
@@ -2047,7 +2034,7 @@ impl BackendService {
                 };
                 progress.start(&tr::repair_fix_strict_parity());
                 match pdb.on_file(|| {
-                    self.apply_strict_parity_upgrade(usb_root, target_names, fix_edb_conn.as_mut())
+                    self.apply_strict_parity_upgrade(usb_root, target_names, &mut session)
                 }) {
                     Ok(result)
                         if result.merged_playlists > 0 || result.rebuilt_database.is_some() =>
@@ -2322,7 +2309,7 @@ impl BackendService {
                     self.apply_fix_relink_moved_audio(
                         usb_root,
                         &moved_audio_relinks,
-                        fix_edb_conn.as_mut(),
+                        session.edb_conn(),
                         warnings,
                     )
                 })
@@ -2340,7 +2327,7 @@ impl BackendService {
                     self.apply_fix_add_unindexed_audio_playlist(
                         usb_root,
                         &unindexed_audio_files,
-                        fix_edb_conn.as_mut(),
+                        session.edb_conn(),
                         warnings,
                     )
                 })
@@ -2391,7 +2378,7 @@ impl BackendService {
                 self.apply_fix_remove_missing_audio_references(
                     usb_root,
                     &missing_audio_paths,
-                    fix_edb_conn.as_mut(),
+                    session.edb_conn(),
                     warnings,
                 )
             }) {
@@ -2428,7 +2415,7 @@ impl BackendService {
                     apply_separate_shared_analysis(
                         usb_root,
                         app_master_db_id,
-                        fix_edb_conn.as_mut(),
+                        session.edb_conn(),
                         warnings,
                     )
                 })
@@ -2458,7 +2445,7 @@ impl BackendService {
                 apply_bpm_key_mismatch_repair(
                     usb_root,
                     app_master_db_id,
-                    fix_edb_conn.as_mut(),
+                    session.edb_conn(),
                     warnings,
                     &mut |done, total| progress.item_done(done, total),
                 )
@@ -2522,11 +2509,8 @@ impl BackendService {
                 outcomes.nothing_to_apply(tr::repair_fix_history_sync());
             } else if let Some(parsed) = parsed_pdb.as_ref() {
                 progress.start(&tr::repair_fix_history_sync());
-                match self.apply_fix_sync_edb_history_from_pdb(
-                    usb_root,
-                    parsed,
-                    fix_edb_conn.as_mut(),
-                ) {
+                match self.apply_fix_sync_edb_history_from_pdb(usb_root, parsed, session.edb_conn())
+                {
                     Ok((history_written, history_content_written)) => {
                         outcomes.applied(
                             tr::repair_fix_history_sync(),
@@ -2545,19 +2529,11 @@ impl BackendService {
             outcomes.not_selected(tr::repair_fix_history_sync());
         }
 
-        // Checkpoint the shared eDB connection's WAL into the main db
-        // file before write-back reads it off disk below -- write-back
-        // copies raw file bytes, not through SQLite, so any change still
-        // sitting in the WAL would otherwise be silently dropped.
-        if let Some(conn) = fix_edb_conn.as_ref() {
-            let _ = conn.execute_batch("PRAGMA wal_checkpoint(TRUNCATE);");
-        }
-        drop(fix_edb_conn);
-
         // All selected fixes above changed only the staged copies (see
-        // usb_staging.rs); save them to the USB here, both or neither.
+        // usb_staging.rs); save them to the USB here, both or neither (the
+        // session checkpoints its eDB connection's WAL first).
         progress.report(95, tr::repair_progress_save());
-        let saved = write_back_both_or_neither(usb_root, &mut pdb);
+        let saved = pdb.save().and_then(|()| session.commit());
         if let Err(err) = &saved {
             outcomes.not_saved(err);
             warnings.push(logging::log_text(

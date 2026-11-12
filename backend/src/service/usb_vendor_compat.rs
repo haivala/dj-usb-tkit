@@ -1,6 +1,7 @@
 use crate::models::WarningEntry;
 use std::path::{Path, PathBuf};
 
+use super::usb_staging::DbKind;
 use serde::{Deserialize, Serialize};
 
 pub const USB_VENDOR_ROOT_DIR: &str = "PIONEER";
@@ -87,12 +88,21 @@ pub(crate) fn backup_usb_databases(
         return notes;
     }
 
+    // Each database the stick has, copied from the USB itself.
+    let databases = super::usb_staging::UsbDatabases::present(usb_root)
+        .ok()
+        .flatten();
     let mut any_copied = false;
-    for (src, stem, ext) in [
-        (vendor_pdb_path(usb_root), "export", "pdb"),
-        (vendor_edb_path(usb_root), "exportLibrary", "db"),
+    for (kind, src, stem, ext) in [
+        (DbKind::Pdb, vendor_pdb_path(usb_root), "export", "pdb"),
+        (
+            DbKind::Edb,
+            vendor_edb_path(usb_root),
+            "exportLibrary",
+            "db",
+        ),
     ] {
-        if !src.is_file() {
+        if !databases.as_ref().is_some_and(|dbs| dbs.has(kind)) {
             continue;
         }
         let dest = backup_dir.join(format!("{stem}_{timestamp}.{ext}"));

@@ -57,7 +57,7 @@ impl BackendService {
         edb_conn: Option<&mut rusqlite::Connection>,
     ) -> BackendResult<(usize, usize)> {
         let (history_rows, history_content_rows) = derive_history_sync_payload(parsed);
-        let Some(mut handle) = EdbConnHandle::acquire(edb_conn, || open_edb_rw(usb_root)) else {
+        let Some(mut handle) = EdbRw::shared_or_open(edb_conn, usb_root) else {
             return Ok((0, 0));
         };
         let conn = handle.conn();

@@ -57,8 +57,18 @@
 - **Improvement:** Ready for translations: BPM values use the language's decimal separator, as the backend's numbers
   already did; cue positions keep a dot in every language. The cue markers' tooltips are whole texts a translation
   can reorder, and the diagnostics overview finds its sections by key instead of by their translated titles.
+- **Improvement:** Every USB edit, repair and export checks which databases the USB has in the same way, and saves
+  them to the USB together: both or neither.
 - **Fix:** Clicking another playlist while typing a new playlist's name saves the new playlist and then opens the
   one you clicked. Before, the new playlist opened instead.
+- **Fix:** A USB with only the PDB or only the eDB works like one with both. Cue, BPM, key and track detail edits save
+  to the database it has; its histories show from the eDB; removing a playlist also removes the files of the tracks
+  only that playlist holds; the export estimate works, and says the missing database is created on export. Export
+  and the Engine DB export first build the missing database from the other, so the USB ends up with both. The
+  parity report says which database is missing instead of failing, and Preview Fixes offers the USB's other fixes
+  in the same pass as the missing database, so one repair is enough.
+- **Fix:** An edit of a track that is in only one of the USB's two databases saves to that one, and the log says
+  Preview Fixes adds it to the other. Before, the edit was refused.
 - **Improvement:** The library's filter mark comes from the backend, which already knows which folders and imported
   libraries are switched off or missing.
 - **Chore:** The text catalog has one key per English text: a text with the same role on several pages (Remove,

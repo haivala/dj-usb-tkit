@@ -225,8 +225,8 @@ pub(super) fn apply_bpm_key_mismatch_repair(
     warnings: &mut Vec<WarningEntry>,
     on_item: &mut impl FnMut(usize, usize),
 ) -> BackendResult<(usize, usize)> {
-    let parsed = parse_pdb(&usb_staging::stage_pdb(usb_root)?)?;
-    let mut handle = EdbConnHandle::acquire(edb_conn, || open_edb_rw(usb_root));
+    let parsed = parse_pdb(&usb_staging::required_pdb(usb_root)?)?;
+    let mut handle = EdbRw::shared_or_open(edb_conn, usb_root);
     let mismatches: Vec<BpmKeyMismatch> = detect_bpm_key_mismatches(
         usb_root,
         &parsed,
@@ -358,7 +358,7 @@ pub(super) fn apply_add_analysis_track_path(
     usb_root: &Path,
     app_master_db_id: Option<u32>,
 ) -> BackendResult<usize> {
-    let parsed = parse_pdb(&usb_staging::stage_pdb(usb_root)?)?;
+    let parsed = parse_pdb(&usb_staging::required_pdb(usb_root)?)?;
     let ownership = scan_analysis_ownership(usb_root, &parsed, app_master_db_id, true);
     for bundle in &ownership.unmarked {
         stamp_bundle_ppth(&bundle.dat, &bundle.track_path)?;
@@ -381,7 +381,7 @@ pub(super) fn apply_separate_shared_analysis(
     edb_conn: Option<&mut rusqlite::Connection>,
     warnings: &mut Vec<WarningEntry>,
 ) -> BackendResult<(usize, usize)> {
-    let pdb_path = usb_staging::stage_pdb(usb_root)?;
+    let pdb_path = usb_staging::required_pdb(usb_root)?;
     let mut bytes = std::fs::read(&pdb_path)?;
     let page_size = pdb_page_size(&bytes)?;
     let parsed = crate::pdb_reader::parse_pdb_bytes(&bytes)?;
@@ -485,7 +485,7 @@ pub(super) fn apply_separate_shared_analysis(
     }
 
     if !moved.is_empty()
-        && let Some(mut handle) = EdbConnHandle::acquire(edb_conn, || open_edb_rw(usb_root))
+        && let Some(mut handle) = EdbRw::shared_or_open(edb_conn, usb_root)
         && table_exists(handle.conn(), "content")
     {
         let new_by_key = moved
@@ -554,7 +554,7 @@ pub(super) fn apply_beat_grid_repair(
     on_item: &mut impl FnMut(usize, usize),
 ) -> BackendResult<usize> {
     let mut fixed = 0usize;
-    let parsed = parse_pdb(&usb_staging::stage_pdb(usb_root)?)?;
+    let parsed = parse_pdb(&usb_staging::required_pdb(usb_root)?)?;
     let targets = outdated_beat_grid_bundles(
         super::super::diagnostics::detect_outdated_beat_grids(usb_root, &parsed).as_deref(),
     );
@@ -734,7 +734,7 @@ pub(super) fn apply_missing_seek_data_repair(
     warnings: &mut Vec<WarningEntry>,
     on_item: &mut impl FnMut(usize, usize),
 ) -> BackendResult<(usize, usize)> {
-    let parsed = parse_pdb(&usb_staging::stage_pdb(usb_root)?)?;
+    let parsed = parse_pdb(&usb_staging::required_pdb(usb_root)?)?;
     let mut fixed = 0usize;
     let mut skipped = 0usize;
     let targets = detect_missing_seek_data(usb_root, &parsed, format);
@@ -817,7 +817,7 @@ impl BackendService {
         let parsed_pdb_ref: Option<&crate::pdb_reader::ParsedPdb> = match parsed_pdb {
             Some(parsed) => Some(parsed),
             None => {
-                owned_parsed_pdb = usb_staging::stage_pdb(usb_root)
+                owned_parsed_pdb = usb_staging::required_pdb(usb_root)
                     .ok()
                     .and_then(|staged_pdb_path| parse_pdb(&staged_pdb_path).ok());
                 owned_parsed_pdb.as_ref()
@@ -850,7 +850,7 @@ impl BackendService {
         }
 
         if let Some(mut handle) =
-            EdbConnHandle::acquire(edb_conn, || open_edb_from_usb_root(usb_root, warnings))
+            EdbRw::shared_or(edb_conn, || open_edb_from_usb_root(usb_root, warnings))
         {
             let conn = handle.conn();
             let mut stmt = conn.prepare(
@@ -1017,7 +1017,7 @@ impl BackendService {
         };
 
         // ── PDB: re-encode each track row with its new path ──────────
-        let pdb_path = usb_staging::stage_pdb(usb_root)?;
+        let pdb_path = usb_staging::required_pdb(usb_root)?;
         let mut bytes = std::fs::read(&pdb_path)?;
         let page_size = pdb_page_size(&bytes)?;
         let parsed = crate::pdb_reader::parse_pdb_bytes(&bytes)?;
@@ -1083,7 +1083,7 @@ impl BackendService {
         }
 
         // ── eDB: same content row, new path ───────────────────────────
-        let Some(mut handle) = EdbConnHandle::acquire(edb_conn, || open_edb_rw(usb_root)) else {
+        let Some(mut handle) = EdbRw::shared_or_open(edb_conn, usb_root) else {
             warnings.push(logging::log_text(
                 Level::Warn,
                 "usb-repair",
@@ -1341,9 +1341,9 @@ impl BackendService {
         // same name is appended to rather than replaced. All or nothing, and
         // only the staged copies: the eDB transaction commits after the
         // staged PDB is written, and the repair run writes both back once.
-        let pdb_path = usb_staging::stage_pdb(usb_root)?;
-        let mut handle = EdbConnHandle::acquire(edb_conn, || open_edb_rw(usb_root));
-        let tx = match handle.as_mut().map(EdbConnHandle::conn) {
+        let pdb_path = usb_staging::required_pdb(usb_root)?;
+        let mut handle = EdbRw::shared_or_open(edb_conn, usb_root);
+        let tx = match handle.as_mut().map(EdbRw::conn) {
             Some(conn) => Some(conn.transaction()?),
             None => {
                 warnings.push(logging::log_text(
@@ -1433,7 +1433,7 @@ impl BackendService {
             .map(|p| audio_path_key(p))
             .collect::<HashSet<_>>();
 
-        if let Some(mut handle) = EdbConnHandle::acquire(edb_conn, || open_edb_rw(usb_root)) {
+        if let Some(mut handle) = EdbRw::shared_or_open(edb_conn, usb_root) {
             let conn = handle.conn();
             let tx = conn.transaction()?;
             if table_exists(&tx, "content") {
@@ -1502,7 +1502,7 @@ impl BackendService {
 
         // Track ids from the PDB as it is now: an earlier fix in this pass
         // (strict parity) may have rewritten it.
-        let missing_track_ids = parse_pdb(&usb_staging::stage_pdb(usb_root)?)?
+        let missing_track_ids = parse_pdb(&usb_staging::required_pdb(usb_root)?)?
             .tracks
             .iter()
             .filter(|t| missing_keys.contains(&audio_path_key(&t.track_file_path)))

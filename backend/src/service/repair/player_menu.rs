@@ -44,7 +44,9 @@ pub(super) struct EdbMenuRow {
 }
 
 pub(super) fn load_edb_menu_rows(usb_root: &std::path::Path) -> BackendResult<Vec<EdbMenuRow>> {
-    let Some(conn) = open_edb_rw(usb_root) else {
+    let Some(conn) = usb_staging::UsbDatabases::present(usb_root)?
+        .and_then(|databases| databases.open_edb_writable())
+    else {
         return Err(crate::error::BackendError::Validation(
             tr::usb_player_menu_error_no_edb(),
         ));
@@ -203,7 +205,8 @@ fn pdb_menu_rows(usb_root: &std::path::Path) -> BackendResult<Vec<MenuRow>> {
 }
 
 fn stick_has_edb(usb_root: &std::path::Path) -> BackendResult<bool> {
-    Ok(usb_staging::stage_edb(usb_root)?.is_file())
+    Ok(usb_staging::UsbDatabases::present(usb_root)?
+        .is_some_and(|databases| databases.edb().is_some()))
 }
 
 /// The menu rows, from the eDB when the stick has one, else from the PDB.
@@ -409,15 +412,10 @@ fn t17_rows_for_kinds(usb_root: &std::path::Path, kinds: &[u32]) -> BackendResul
 /// matching eDB `menuItem` row are left unmirrored (eDB cannot show them);
 /// this is surfaced via a warning so callers can notice.
 pub(super) fn mirror_edb_category_from_pdb_kinds(
-    usb_root: &std::path::Path,
+    conn: &mut rusqlite::Connection,
     pdb_kind_order: &[u32],
 ) -> BackendResult<bool> {
-    let Some(mut conn) = open_edb_rw(usb_root) else {
-        return Err(crate::error::BackendError::Validation(
-            tr::usb_player_menu_error_no_edb(),
-        ));
-    };
-    if !table_exists(&conn, "menuItem") || !table_exists(&conn, "category") {
+    if !table_exists(conn, "menuItem") || !table_exists(conn, "category") {
         return Err(crate::error::BackendError::Validation(
             tr::usb_player_menu_error_tables(),
         ));
@@ -638,51 +636,35 @@ impl BackendService {
             final_kinds.push(*kind);
         }
 
-        warnings.extend(self.backup_usb_databases_with_retention(
+        let mut session = self.usb_write_session(
             &usb_root,
-            "Before menu update",
-            None,
-        ));
+            usb_staging::SessionBackup::WithRetention {
+                reason: "Before menu update",
+                playlist_count: None,
+            },
+            &mut warnings,
+        );
 
         if has_edb {
-            // Snapshot eDB for rollback if the write fails. Staged path: this must
-            // match whatever path `mirror_edb_category_from_pdb_kinds`'s
-            // `open_edb_rw` actually mutates (the local staged copy when staging
-            // is active), or the snapshot/restore would operate on a file the
-            // write never touched.
-            let edb_path = usb_staging::stage_edb(&usb_root)?;
-            let edb_snapshot = if edb_path.is_file() {
-                std::fs::read(&edb_path).ok()
-            } else {
-                None
+            // A failed write leaves the eDB as it was: the session stages it
+            // again from the USB, which never sees this attempt.
+            let written = match session.edb()? {
+                Some(conn) => mirror_edb_category_from_pdb_kinds(conn, &final_kinds),
+                None => Err(crate::error::BackendError::Validation(
+                    tr::usb_player_menu_error_no_edb(),
+                )),
             };
-
-            if let Err(err) = mirror_edb_category_from_pdb_kinds(&usb_root, &final_kinds) {
+            if let Err(err) = written {
                 warnings.push(logging::log_text(
                     Level::Error,
                     "usb-player-menu",
                     "usb.player-menu.edb-write-failed",
                     &tr::usb_player_menu_warning_edb_write_failed(&err),
                 ));
-                if let Some(snapshot) = edb_snapshot.as_ref()
-                    && let Err(restore_err) = std::fs::write(&edb_path, snapshot)
-                {
-                    logging::debug(
-                        "usb-player-menu",
-                        format!(
-                            "eDB snapshot could not be put back ({restore_err}): {}",
-                            edb_path.display()
-                        ),
-                    );
-                }
-                // Deliberately no write_back_if_changed here: the local copy was
-                // just restored to its pre-attempt state, so the real USB drive
-                // must never see this failed attempt.
                 return Err(err);
             }
-            if let Err(err) =
-                usb_staging::write_back_if_changed(&usb_root, usb_staging::DbKind::Edb)
-            {
+            session.close_edb();
+            if let Err(err) = session.write_back(usb_staging::DbKind::Edb) {
                 warnings.push(logging::log_text(
                     Level::Error,
                     "usb-player-menu",
@@ -692,6 +674,7 @@ impl BackendService {
             }
         } else {
             let rows = t17_rows_for_kinds(&usb_root, &final_kinds)?;
+            session.will_write(usb_staging::DbKind::Pdb)?;
             crate::service::export_helpers::patch_pdb_t17_category_snapshot(&usb_root, &rows)?;
         }
 
@@ -707,6 +690,7 @@ impl BackendService {
         let updated = before_all_kinds != after_kinds || databases_differ;
 
         if updated {
+            session.will_write(usb_staging::DbKind::Pdb)?;
             if has_edb {
                 let patched = t17_rows_from_edb(&usb_root, &mut warnings).and_then(|rows| {
                     crate::service::export_helpers::patch_pdb_t17_category_snapshot(
@@ -726,9 +710,7 @@ impl BackendService {
                     }
                 }
             }
-            if let Err(err) =
-                usb_staging::write_back_if_changed(&usb_root, usb_staging::DbKind::Pdb)
-            {
+            if let Err(err) = session.write_back(usb_staging::DbKind::Pdb) {
                 warnings.push(logging::log_text(
                     Level::Error,
                     "usb-player-menu",
@@ -738,6 +720,7 @@ impl BackendService {
             }
             warnings.extend(self.refresh_engine_library(&usb_root));
         }
+        session.commit()?;
 
         Ok(UpdateUsbPlayerMenuConfigData {
             updated,

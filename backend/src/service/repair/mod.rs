@@ -8,7 +8,7 @@ use std::path::Path;
 use rusqlite::params;
 
 use crate::edb::{
-    EdbRead, ExportDbPlaylist, find_key_id_by_name, open_edb_from_usb_root, open_edb_rw, read_edb,
+    EdbRead, ExportDbPlaylist, find_key_id_by_name, open_edb_from_usb_root, read_edb,
 };
 use crate::error::{BackendError, BackendResult};
 use crate::logging::{self, Level};
@@ -46,7 +46,7 @@ use super::track_matching::{
     ContentFingerprint, content_fingerprint_key, matching_file_name, pdb_track_fingerprint,
     same_file_bytes,
 };
-use super::usb_staging;
+use super::usb_staging::{self, EdbRw};
 use super::usb_utils::{
     canonicalize_playlist_name, resolve_usb_root, resolve_usb_side_path, sanitize_warning_path,
     scan_anlz,
@@ -201,35 +201,4 @@ fn strict_repair_force_all_enabled() -> bool {
         .ok()
         .map(|v| v == "1" || v.eq_ignore_ascii_case("true"))
         .unwrap_or(false)
-}
-
-/// Reuses a caller-supplied eDB connection if given, otherwise calls
-/// `open_fallback` to open (and own) one of its own. Centralizes the
-/// "reuse the shared connection, or open a local fallback" pattern that
-/// would otherwise be duplicated across every repair apply-fix helper
-/// below -- each of them previously re-opened the eDB independently even
-/// when a repair run had already opened one, redoing SQLCipher key
-/// negotiation for no reason.
-enum EdbConnHandle<'a> {
-    Shared(&'a mut rusqlite::Connection),
-    Owned(rusqlite::Connection),
-}
-
-impl<'a> EdbConnHandle<'a> {
-    fn acquire(
-        shared: Option<&'a mut rusqlite::Connection>,
-        open_fallback: impl FnOnce() -> Option<rusqlite::Connection>,
-    ) -> Option<Self> {
-        match shared {
-            Some(conn) => Some(Self::Shared(conn)),
-            None => open_fallback().map(Self::Owned),
-        }
-    }
-
-    fn conn(&mut self) -> &mut rusqlite::Connection {
-        match self {
-            Self::Shared(conn) => conn,
-            Self::Owned(conn) => conn,
-        }
-    }
 }

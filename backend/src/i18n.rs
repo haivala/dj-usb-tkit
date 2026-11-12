@@ -341,12 +341,20 @@ fn matching_language<'a>(
         .filter(|code| *code != TEST_LANGUAGE)
         .collect();
     preferred.into_iter().find_map(|locale| {
-        let locale = locale.split(['.', '@']).next().unwrap_or_default().replace('_', "-");
+        let locale = locale
+            .split(['.', '@'])
+            .next()
+            .unwrap_or_default()
+            .replace('_', "-");
         let base = locale.split('-').next().unwrap_or_default();
         available
             .iter()
             .find(|code| code.eq_ignore_ascii_case(&locale))
-            .or_else(|| available.iter().find(|code| code.eq_ignore_ascii_case(base)))
+            .or_else(|| {
+                available
+                    .iter()
+                    .find(|code| code.eq_ignore_ascii_case(base))
+            })
             .copied()
     })
 }
@@ -671,7 +679,10 @@ usb-not-for-ui = Not sent
         // The variable is a different thing: why it failed vs the playlist that wasn't deleted.
         &["backups-delete-failed", "playlist-delete-failed"],
         // A diagnostics check's result vs a sentence in the playlist's heading.
-        &["diagnostics-check-engine-missing", "playlist-export-not-on-usb"],
+        &[
+            "diagnostics-check-engine-missing",
+            "playlist-export-not-on-usb",
+        ],
         // The sidebar's short mark vs a sentence in the playlist's heading.
         &["export-mark-on-usb", "playlist-export-on-usb"],
         // Only variables around a colon: a word order each language picks per message.
@@ -789,10 +800,19 @@ usb-not-for-ui = Not sent
     #[test]
     fn the_first_preferred_language_with_a_catalog_wins() {
         let available = ["en", "fr", "pt-BR", TEST_LANGUAGE];
-        assert_eq!(matching_language(["de-DE", "fr-CA", "en-US"], &available), Some("fr"));
-        assert_eq!(matching_language(["en-GB", "fr-FR"], &available), Some("en"));
+        assert_eq!(
+            matching_language(["de-DE", "fr-CA", "en-US"], &available),
+            Some("fr")
+        );
+        assert_eq!(
+            matching_language(["en-GB", "fr-FR"], &available),
+            Some("en")
+        );
         assert_eq!(matching_language(["pt-BR"], &available), Some("pt-BR"));
-        assert_eq!(matching_language(["pt_br.UTF-8"], &available), Some("pt-BR"));
+        assert_eq!(
+            matching_language(["pt_br.UTF-8"], &available),
+            Some("pt-BR")
+        );
         assert_eq!(matching_language(["fr_FR@euro"], &available), Some("fr"));
         assert_eq!(matching_language(["de-DE", "ja"], &available), None);
         assert_eq!(matching_language([], &available), None);
@@ -800,7 +820,10 @@ usb-not-for-ui = Not sent
 
     #[test]
     fn the_test_language_is_never_the_systems() {
-        assert_eq!(matching_language(["en-XA"], &["en", TEST_LANGUAGE]), Some("en"));
+        assert_eq!(
+            matching_language(["en-XA"], &["en", TEST_LANGUAGE]),
+            Some("en")
+        );
     }
 
     #[test]

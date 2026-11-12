@@ -29,54 +29,33 @@ pub(super) struct StrictParityUpgradeApplyResult {
     pub(super) rebuilt_database: Option<usb_staging::DbKind>,
 }
 
-/// The database to rebuild from the other: the one missing from the USB
-/// while the other is there. `None` when both or neither are.
+/// The database to rebuild from the other: the one the stick lacks while
+/// the other is there. `None` when it has both or neither.
 pub(super) fn missing_database(usb_root: &std::path::Path) -> Option<usb_staging::DbKind> {
-    use crate::service::usb_vendor_compat::{vendor_edb_path, vendor_pdb_path};
-    match (
-        vendor_pdb_path(usb_root).is_file(),
-        vendor_edb_path(usb_root).is_file(),
-    ) {
-        (false, true) => Some(usb_staging::DbKind::Pdb),
-        (true, false) => Some(usb_staging::DbKind::Edb),
-        _ => None,
-    }
+    usb_staging::UsbDatabases::present(usb_root)
+        .ok()
+        .flatten()
+        .and_then(|databases| databases.missing())
 }
 
-/// Stage `kind`, missing from the USB, as `initialize_usb` creates it.
-/// Returns the staged path.
-fn stage_initialized_database(
-    usb_root: &std::path::Path,
-    kind: usb_staging::DbKind,
-) -> BackendResult<std::path::PathBuf> {
-    // A local copy left from an earlier session isn't this USB's database.
-    let path = usb_staging::restage_from_usb(usb_root, kind)?;
-    if let Some(parent) = path.parent() {
-        std::fs::create_dir_all(parent)?;
-    }
-    let created_date = chrono::Local::now().format("%Y-%m-%d").to_string();
-    match kind {
-        usb_staging::DbKind::Pdb => {
-            std::fs::write(
-                &path,
-                crate::service::usb_utils::build_fullshape_pdb_bytes(&created_date),
-            )?;
-        }
-        usb_staging::DbKind::Edb => {
-            crate::service::usb_utils::initialize_fullshape_edb(&path, &created_date)?;
-        }
-    }
-    Ok(path)
-}
-
-/// Remove a database [`stage_initialized_database`] staged, with the
-/// eDB's journal files, so a failed rebuild leaves nothing to write back.
-fn remove_staged_database(path: &std::path::Path) {
-    for suffix in ["", "-wal", "-shm"] {
-        let mut file = path.as_os_str().to_owned();
-        file.push(suffix);
-        let _ = std::fs::remove_file(file);
-    }
+/// Rebuilds the database the stick lacks from the one it has, in `session`:
+/// the strict parity repair's rebuild, the one entry point every flow that
+/// needs both databases takes. `None` when the stick has both (or neither).
+/// The session writes it back on commit.
+pub(crate) fn rebuild_missing_database(
+    session: &mut usb_staging::UsbWriteSession<'_>,
+) -> BackendResult<Option<usb_staging::DbKind>> {
+    let Some(missing) = missing_database(session.usb_root()) else {
+        return Ok(None);
+    };
+    // The merge also writes the database the stick has.
+    session.will_write(match missing {
+        usb_staging::DbKind::Pdb => usb_staging::DbKind::Edb,
+        usb_staging::DbKind::Edb => usb_staging::DbKind::Pdb,
+    })?;
+    let usb_root = session.usb_root().to_path_buf();
+    run_strict_parity_upgrade(&usb_root, None, Some(session), true)
+        .map(|result| result.rebuilt_database)
 }
 
 pub(super) fn edb_track_analysis_key(track: &crate::models::UsbTrack) -> String {
@@ -787,50 +766,58 @@ impl BackendService {
         &self,
         usb_root: &std::path::Path,
         target_playlist_names: Option<&HashSet<String>>,
-        edb_conn: Option<&mut rusqlite::Connection>,
+        session: &mut usb_staging::UsbWriteSession<'_>,
     ) -> BackendResult<StrictParityUpgradeApplyResult> {
-        run_strict_parity_upgrade(usb_root, target_playlist_names, edb_conn, true)
+        run_strict_parity_upgrade(usb_root, target_playlist_names, Some(session), true)
     }
 }
 
-/// The strict parity upgrade, applied (`write`) or as a preview: the same
-/// collect, merge and writers, with the eDB transaction rolled back and the
-/// PDB bytes dropped, so a preview's counts are what an apply writes.
+/// The strict parity upgrade, applied (`write`, in `session`) or as a
+/// preview: the same collect, merge and writers, with the eDB transaction
+/// rolled back and the PDB bytes dropped, so a preview's counts are what an
+/// apply writes.
 ///
 /// All or nothing: the eDB is written in one transaction, the PDB built in
 /// memory, then the staged PDB written and the transaction committed. Any
 /// failure before the commit rolls the eDB back and leaves the staged PDB
 /// as it was; a failed commit puts the staged PDB's old bytes back. The
-/// repair run writes both staged databases back to the USB once at its end.
+/// session writes both staged databases back to the USB once at its end.
 ///
-/// A database missing from the USB (see [`missing_database`]) is staged as
-/// `initialize_usb` creates it and every playlist of the other merged into
-/// it; that is applied only, never previewed. A failed rebuild removes the
-/// staged database again.
+/// A database missing from the USB (see [`missing_database`]) is created in
+/// the session as `initialize_usb` creates it and every playlist of the
+/// other merged into it; that is applied only, never previewed. A failed
+/// rebuild drops the created database again.
 pub(super) fn run_strict_parity_upgrade(
     usb_root: &std::path::Path,
     target_playlist_names: Option<&HashSet<String>>,
-    edb_conn: Option<&mut rusqlite::Connection>,
+    session: Option<&mut usb_staging::UsbWriteSession<'_>>,
     write: bool,
 ) -> BackendResult<StrictParityUpgradeApplyResult> {
     let Some(kind) = missing_database(usb_root) else {
+        let edb_conn = match session {
+            Some(session) => session.edb()?,
+            None => None,
+        };
         return collect_merge_write(usb_root, target_playlist_names, edb_conn, write);
     };
-    if !write {
+    let Some(session) = session.filter(|_| write) else {
         return Err(BackendError::Internal(
             "strict parity upgrade: a missing database is rebuilt only when applied".to_string(),
         ));
-    }
-    let staged = stage_initialized_database(usb_root, kind)?;
-    // A connection opened before the eDB was staged isn't to this one.
-    let edb_conn = edb_conn.filter(|_| kind != usb_staging::DbKind::Edb);
-    match collect_merge_write(usb_root, None, edb_conn, true) {
+    };
+    let created_date = chrono::Local::now().format("%Y-%m-%d").to_string();
+    session.create_database(kind, &created_date)?;
+    let result = match session.edb() {
+        Ok(edb_conn) => collect_merge_write(usb_root, None, edb_conn, true),
+        Err(err) => Err(err),
+    };
+    match result {
         Ok(result) => Ok(StrictParityUpgradeApplyResult {
             rebuilt_database: Some(kind),
             ..result
         }),
         Err(err) => {
-            remove_staged_database(&staged);
+            session.drop_created_database(kind);
             Err(err)
         }
     }
@@ -843,11 +830,11 @@ fn collect_merge_write(
     write: bool,
 ) -> BackendResult<StrictParityUpgradeApplyResult> {
     let mut result = StrictParityUpgradeApplyResult::default();
-    let pdb_path = usb_staging::stage_pdb(usb_root)?;
+    let pdb_path = usb_staging::required_pdb(usb_root)?;
 
     // ── Collect ───────────────────────────────────────────────────────
     let parsed = parse_pdb(&pdb_path)?;
-    let Some(mut handle) = EdbConnHandle::acquire(edb_conn, || open_edb_rw(usb_root)) else {
+    let Some(mut handle) = EdbRw::shared_or_open(edb_conn, usb_root) else {
         return Err(BackendError::Internal(
             "strict parity upgrade: unable to open the eDB".to_string(),
         ));

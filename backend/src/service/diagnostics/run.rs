@@ -2,6 +2,7 @@
 
 use super::*;
 use crate::i18n::tr;
+use crate::service::usb_staging::{DbKind, UsbDatabases, UsbDatabasesExt};
 
 impl BackendService {
     pub fn run_usb_diagnostics(
@@ -60,9 +61,13 @@ impl BackendService {
         );
         note_stage("resolve usb root");
 
+        // A stick without a PDB checks the path it would have.
         let pdb_path = match staged_pdb_path {
             Some(p) => p.to_path_buf(),
-            None => crate::service::usb_staging::stage_pdb(&usb_root)?,
+            None => UsbDatabases::present(&usb_root)?
+                .pdb()
+                .map(std::path::Path::to_path_buf)
+                .unwrap_or_else(|| crate::service::usb_vendor_compat::vendor_pdb_path(&usb_root)),
         };
 
         // --- 1. PDB Integrity ---
@@ -586,10 +591,40 @@ impl BackendService {
         let mut raw_warnings = Vec::<WarningEntry>::new();
         note_stage("resolve usb root");
 
+        // A stick with one database has nothing to compare: it's reported
+        // as missing the other, the finding the strict parity repair fixes.
+        let databases = UsbDatabases::of(&usb_root)?;
+        if let Some(missing) = databases.missing() {
+            let duration_ms = start.elapsed().as_millis() as u64;
+            let label = match missing {
+                DbKind::Pdb => tr::diagnostics_check_pdb_exists(),
+                DbKind::Edb => tr::diagnostics_check_edb(),
+            };
+            let checks = vec![DiagCheck::new(
+                label,
+                DiagStatus::Fail,
+                tr::diagnostics_check_edb_missing(),
+            )];
+            return Ok(RunUsbParityReportData {
+                overall_status: DiagStatus::Fail,
+                overview: missing_database_parity_overview(missing),
+                section_groups: parity_section_groups(&checks),
+                checks,
+                summary_rows: Vec::new(),
+                playlist_details: Vec::new(),
+                warnings: raw_warnings,
+                duration_ms,
+                status_text: crate::i18n::tr::parity_complete(duration_ms).render(),
+                duration_text: crate::i18n::tr::diagnostics_duration(duration_ms).render(),
+                status_label: crate::i18n::tr::parity_status_label(tr::diagnostics_status_fail())
+                    .render(),
+            });
+        }
+
         on_progress(20, 100, &tr::usb_progress_parsing_pdb().render());
         let pdb_path = match staged_pdb_path {
             Some(p) => p.to_path_buf(),
-            None => crate::service::usb_staging::stage_pdb(&usb_root)?,
+            None => databases.require_pdb()?.to_path_buf(),
         };
         let staged = self.parsed_staged_pdb(&pdb_path)?;
         let parsed = &*staged.parsed;

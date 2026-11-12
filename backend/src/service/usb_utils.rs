@@ -355,8 +355,7 @@ pub(crate) fn resolve_usb_root(requested_root: Option<&str>) -> BackendResult<Pa
 /// USB path directly when staging hasn't been initialized (CLI tools,
 /// tests that don't construct a `BackendService`).
 pub(crate) fn parse_staged_pdb(usb_root: &Path) -> BackendResult<crate::pdb_reader::ParsedPdb> {
-    let path = super::usb_staging::stage_pdb(usb_root)?;
-    parse_pdb(&path)
+    parse_pdb(super::usb_staging::UsbDatabases::of(usb_root)?.require_pdb()?)
 }
 
 /// The file a path from the USB's databases names: `/Contents/…` and
@@ -981,10 +980,10 @@ pub(crate) fn load_existing_analysis_paths_by_content_path_with_conn(
 pub(crate) fn load_existing_analysis_paths_by_pdb_track_path(
     usb_root: &Path,
 ) -> HashMap<String, String> {
-    let Ok(pdb_path) = super::usb_staging::stage_pdb(usb_root) else {
+    let Ok(Some(databases)) = super::usb_staging::UsbDatabases::present(usb_root) else {
         return HashMap::new();
     };
-    let Ok(parsed) = parse_pdb(&pdb_path) else {
+    let Some(Ok(parsed)) = databases.pdb().map(parse_pdb) else {
         return HashMap::new();
     };
     let mut out = HashMap::<String, String>::new();
@@ -1085,6 +1084,15 @@ pub(crate) fn repair_utf8_mojibake(value: &str) -> String {
 // ── Initialize empty USB ─────────────────────────────
 
 pub fn initialize_usb(root: &Path) -> BackendResult<crate::models::InitializeUsbData> {
+    initialize_usb_for(None, root)
+}
+
+/// [`initialize_usb`], with `service`'s parse caches dropped once the
+/// databases are written.
+pub(crate) fn initialize_usb_for(
+    service: Option<&super::BackendService>,
+    root: &Path,
+) -> BackendResult<crate::models::InitializeUsbData> {
     if !root.is_dir() {
         return Err(BackendError::Internal(format!(
             "USB root does not exist: {}",
@@ -1112,41 +1120,33 @@ pub fn initialize_usb(root: &Path) -> BackendResult<crate::models::InitializeUsb
         }
     }
 
-    // Create full-shape PDB baseline if missing, through staging like every
-    // other PDB write -- when staging is enabled this commits atomically
-    // (temp file + rename) instead of a plain overwrite.
-    let pdb_file = vendor_pdb_path(root);
-    if !pdb_file.exists() {
-        super::usb_staging::commit_and_write_back(
-            root,
-            super::usb_staging::DbKind::Pdb,
-            &build_fullshape_pdb_bytes(&created_date),
-        )?;
-        created.push(pdb_file.to_string_lossy().to_string());
-    }
-
-    // Create full-shape encrypted eDB when missing, through staging like
-    // every other eDB write: open the connection at the staged (local-cache
-    // or, if staging is disabled, USB) path, then flush it back to USB.
-    let edb_file = vendor_db_dir(root).join("exportLibrary.db");
-    if !edb_file.exists() {
-        let local_edb_path = super::usb_staging::stage_edb(root)?;
-        // The USB copy is confirmed absent, so any local cache file left over
-        // from a prior session (e.g. the user deleted PIONEER/Contents by
-        // hand and reconnected the same-identity drive) is now stale --
-        // `stage_edb` doesn't know that and can hand back that old path.
-        // Discard it before creating fresh schema on top of it, since we
-        // synthesize all content from scratch here regardless.
-        if local_edb_path.exists() {
-            std::fs::remove_file(&local_edb_path)?;
+    // Create each full-shape database the stick lacks (the PDB baseline, the
+    // encrypted eDB), through a write session like every other write: built
+    // in the staged copy, then written back to the USB.
+    // Staged afresh, as on connect: a local copy left from an earlier
+    // session isn't this stick's database.
+    let present = super::usb_staging::UsbDatabases::on_connect(root);
+    let mut session = super::usb_staging::UsbWriteSession::open(service, root);
+    let mut created_files = Vec::new();
+    for kind in [
+        super::usb_staging::DbKind::Pdb,
+        super::usb_staging::DbKind::Edb,
+    ] {
+        if present.as_ref().is_some_and(|dbs| dbs.has(kind)) {
+            continue;
         }
-        if let Some(parent) = local_edb_path.parent() {
-            std::fs::create_dir_all(parent)?;
-        }
-        initialize_fullshape_edb(&local_edb_path, &created_date)?;
-        super::usb_staging::write_back_if_changed(root, super::usb_staging::DbKind::Edb)?;
-        created.push(edb_file.to_string_lossy().to_string());
+        session.create_database(kind, &created_date)?;
+        created_files.push(match kind {
+            super::usb_staging::DbKind::Pdb => vendor_pdb_path(root),
+            super::usb_staging::DbKind::Edb => vendor_db_dir(root).join("exportLibrary.db"),
+        });
     }
+    session.commit()?;
+    created.extend(
+        created_files
+            .iter()
+            .map(|file| file.to_string_lossy().to_string()),
+    );
 
     Ok(crate::models::InitializeUsbData {
         path: root.to_string_lossy().into_owned(),

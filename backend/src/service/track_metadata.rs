@@ -2,13 +2,13 @@
 //! their own, so these changes leave the beat grid, key and cues exactly as
 //! they are (no ANLZ rewrite, no BPM/key marked as user-edited).
 
-use std::path::{Path, PathBuf};
+use std::path::Path;
 
 use rusqlite::{Connection, OptionalExtension, params};
 
 use crate::edb::{
-    complete_partial_date, find_content_id_by_path, find_or_insert_genre, open_edb_rw,
-    resolve_release_date,
+    complete_partial_date, content_column_or_null, find_or_insert_genre, resolve_release_date,
+    table_exists,
 };
 use crate::error::{BackendError, BackendResult};
 use crate::i18n::tr;
@@ -21,11 +21,12 @@ use crate::models::{
 };
 use crate::pdb_reader::pdb_page_size;
 
-use super::anlz::atomic_write_bytes;
 use super::cues::{
-    UsbLocalTrackHint, mark_track_edited_tx, pdb_track_by_media_path, track_not_in_usb_database,
+    UsbLocalTrackHint, mark_track_edited_tx, pdb_track_by_media_path, read_usb_pdb,
+    report_usb_database_gaps, track_not_in_usb_database,
 };
 use super::export_helpers::{PdbLayoutProfile, load_table_columns_tx};
+use super::usb_staging::{SessionBackup, UsbDatabases};
 use super::usb_utils::resolve_usb_root;
 use super::{BackendService, now};
 
@@ -192,18 +193,110 @@ fn rating_byte(rating: Option<i64>) -> u8 {
 }
 
 /// A USB track's genre, star rating and release date as its PDB row has
-/// them, plus every genre name in that PDB.
+/// them, else as its eDB `content` row has them, plus every genre name in
+/// that database.
 pub(super) fn usb_metadata(
     usb_root: &Path,
     media_path: &str,
 ) -> BackendResult<(EditableMetadata, Vec<String>)> {
-    let staged_pdb = super::usb_staging::stage_pdb(usb_root)?;
-    let parsed = crate::pdb_reader::parse_pdb_bytes(&std::fs::read(&staged_pdb)?)?;
-    let row = pdb_track_by_media_path(&parsed, media_path)?;
-    Ok((
-        pdb_row_metadata(&parsed, row),
-        parsed.genres.into_values().collect(),
-    ))
+    let source = UsbMetadataSource::read(usb_root)?;
+    Ok((source.metadata(media_path)?, source.genres()?))
+}
+
+/// What a USB track's genre, rating and release date are read from: the
+/// stick's PDB, else its eDB.
+struct UsbMetadataSource {
+    databases: UsbDatabases,
+    pdb: Option<crate::pdb_reader::ParsedPdb>,
+    edb: Option<Connection>,
+}
+
+impl UsbMetadataSource {
+    fn read(usb_root: &Path) -> BackendResult<Self> {
+        let databases = UsbDatabases::of(usb_root)?;
+        let pdb = read_usb_pdb(&databases)?.map(|(_, parsed)| parsed);
+        let edb = if pdb.is_none() {
+            databases.open_edb(&mut Vec::new())
+        } else {
+            None
+        };
+        Ok(Self {
+            databases,
+            pdb,
+            edb,
+        })
+    }
+
+    fn metadata(&self, media_path: &str) -> BackendResult<EditableMetadata> {
+        if let Some(parsed) = &self.pdb {
+            return Ok(pdb_row_metadata(
+                parsed,
+                pdb_track_by_media_path(parsed, media_path)?,
+            ));
+        }
+        let location = self
+            .databases
+            .locate_track(None, self.edb.as_ref(), media_path)?;
+        match (self.edb.as_ref(), location.edb_content_id) {
+            (Some(conn), Some(content_id)) => edb_content_metadata(conn, content_id),
+            _ => Err(track_not_in_usb_database(media_path)),
+        }
+    }
+
+    fn genres(&self) -> BackendResult<Vec<String>> {
+        if let Some(parsed) = &self.pdb {
+            return Ok(parsed.genres.values().cloned().collect());
+        }
+        match self.edb.as_ref() {
+            Some(conn) if table_exists(conn, "genre") => {
+                let mut stmt = conn.prepare("SELECT name FROM genre WHERE name IS NOT NULL")?;
+                let names = stmt
+                    .query_map([], |row| row.get::<_, String>(0))?
+                    .collect::<Result<Vec<_>, _>>()?;
+                Ok(names)
+            }
+            _ => Ok(Vec::new()),
+        }
+    }
+}
+
+/// An eDB `content` row's genre, rating and release date: the date string,
+/// else just the year, as [`pdb_row_metadata`] reads a PDB row.
+fn edb_content_metadata(conn: &Connection, content_id: i64) -> BackendResult<EditableMetadata> {
+    let genre = if table_exists(conn, "genre") {
+        format!(
+            "(SELECT g.name FROM genre g WHERE g.genre_id = {})",
+            content_column_or_null(conn, "genre_id")
+        )
+    } else {
+        "NULL".to_string()
+    };
+    let sql = format!(
+        "SELECT {genre}, {rating}, {date}, {year} FROM content c WHERE c.content_id = ?1",
+        rating = content_column_or_null(conn, "rating"),
+        date = content_column_or_null(conn, "releaseDate"),
+        year = content_column_or_null(conn, "releaseYear"),
+    );
+    let (genre, rating, date, year) = conn.query_row(&sql, params![content_id], |row| {
+        Ok((
+            row.get::<_, Option<String>>(0)?,
+            row.get::<_, Option<i64>>(1)?,
+            row.get::<_, Option<String>>(2)?,
+            row.get::<_, Option<i64>>(3)?,
+        ))
+    })?;
+    Ok(EditableMetadata {
+        genre: genre
+            .map(|g| g.trim().to_string())
+            .filter(|g| !g.is_empty()),
+        rating: rating_byte(rating),
+        release_date: date
+            .as_deref()
+            .map(str::trim)
+            .filter(|d| !d.is_empty())
+            .map(str::to_string)
+            .or_else(|| year.filter(|y| *y > 0).map(|y| format!("{y:04}"))),
+    })
 }
 
 /// A PDB track row's genre, rating and release date: the date string, else
@@ -341,21 +434,22 @@ fn summarize(metadata: &[EditableMetadata], genre_options: Vec<String>) -> Track
 /// its year) patched in place, or `None` when the rows already have them. A
 /// genre the PDB lacks gets one new genre row, shared by every track.
 struct PdbMetadataPatch {
-    /// The staged PDB and its patched bytes; `None` when nothing changed.
-    write: Option<(PathBuf, Vec<u8>)>,
-    /// Each track's release date after the edit, in `media_paths` order.
-    release_dates: Vec<Option<String>>,
+    /// The patched bytes; `None` when nothing changed.
+    write: Option<Vec<u8>>,
+    /// Each track's release date after the edit, in `rows` order; `None`
+    /// for a track the PDB lacks.
+    release_dates: Vec<Option<Option<String>>>,
 }
 
+/// `bytes`, the staged PDB parsed as `parsed`, with the edit made to each of
+/// `rows` (the edited tracks' rows, `None` where the PDB lacks one).
 fn build_pdb_metadata_patch(
-    usb_root: &Path,
-    media_paths: &[String],
+    mut bytes: Vec<u8>,
+    parsed: &crate::pdb_reader::ParsedPdb,
+    rows: &[Option<&crate::pdb_reader::PdbTrackRow>],
     edits: &MetadataEdits,
 ) -> BackendResult<PdbMetadataPatch> {
-    let staged_pdb = super::usb_staging::stage_pdb(usb_root)?;
-    let mut bytes = std::fs::read(&staged_pdb)?;
     let page_size = pdb_page_size(&bytes)?;
-    let parsed = crate::pdb_reader::parse_pdb_bytes(&bytes)?;
 
     let genre_id = match &edits.genre {
         None => None,
@@ -384,9 +478,12 @@ fn build_pdb_metadata_patch(
     };
 
     let mut mutations = Vec::new();
-    let mut release_dates = Vec::with_capacity(media_paths.len());
-    for media_path in media_paths {
-        let row = pdb_track_by_media_path(&parsed, media_path)?;
+    let mut release_dates = Vec::with_capacity(rows.len());
+    for row in rows {
+        let Some(row) = *row else {
+            release_dates.push(None);
+            continue;
+        };
         let mut data = super::repair::track_row_data_from_reader_row(row);
         let mut changed_fields = Vec::<&'static str>::new();
         if let Some(genre_id) = genre_id
@@ -417,9 +514,9 @@ fn build_pdb_metadata_patch(
                 data.release_date = date.clone();
                 changed_fields.push("release_date");
             }
-            release_dates.push(date);
+            release_dates.push(Some(date));
         } else {
-            release_dates.push(pdb_row_metadata(&parsed, row).release_date);
+            release_dates.push(Some(pdb_row_metadata(parsed, row).release_date));
         }
         if !changed_fields.is_empty() {
             mutations.push(crate::pdb_writer::PdbTrackRowMutation {
@@ -443,7 +540,7 @@ fn build_pdb_metadata_patch(
         page_size,
     )?;
     Ok(PdbMetadataPatch {
-        write: Some((staged_pdb, bytes)),
+        write: Some(bytes),
         release_dates,
     })
 }
@@ -530,24 +627,18 @@ impl BackendService {
         Ok(summarize(&metadata, genre_options(&conn, Vec::new())?))
     }
 
-    /// What USB tracks share, as the USB's PDB has them.
+    /// What USB tracks share, as the USB's PDB has them, else its eDB.
     pub fn get_usb_tracks_metadata_summary(
         &self,
         req: GetUsbTracksMetadataSummaryRequest,
     ) -> BackendResult<TracksMetadataSummary> {
         let usb_root = resolve_usb_root(Some(&req.usb_root))?;
-        let staged_pdb = super::usb_staging::stage_pdb(&usb_root)?;
-        let parsed = crate::pdb_reader::parse_pdb_bytes(&std::fs::read(&staged_pdb)?)?;
+        let source = UsbMetadataSource::read(&usb_root)?;
         let metadata = distinct_trimmed(req.usb_media_paths_raw.iter().map(String::as_str))
             .iter()
-            .map(|path| {
-                Ok(pdb_row_metadata(
-                    &parsed,
-                    pdb_track_by_media_path(&parsed, path)?,
-                ))
-            })
+            .map(|path| source.metadata(path))
             .collect::<BackendResult<Vec<_>>>()?;
-        let usb_genres: Vec<String> = parsed.genres.into_values().collect();
+        let usb_genres = source.genres()?;
         Ok(summarize(
             &metadata,
             genre_options(&*self.db.connect()?, usb_genres)?,
@@ -556,8 +647,9 @@ impl BackendService {
 
     /// Write a genre / rating / release-date edit made from a USB view onto the USB's
     /// PDB and eDB in place, and onto each matched library track. Like the cue
-    /// save, a track missing from either database blocks the save before
-    /// anything is written. Holds `usb_write_lock` for the whole save.
+    /// save, a track in only one of the databases is written there and the
+    /// gap is reported; one in neither blocks the save before anything is
+    /// written. Holds `usb_write_lock` for the whole save.
     pub fn save_usb_track_metadata_edits_with_progress<F>(
         &self,
         req: SaveUsbTrackMetadataEditsRequest,
@@ -601,25 +693,63 @@ impl BackendService {
             req.release_date.as_deref(),
         )?;
 
-        let mut edb_conn = open_edb_rw(&usb_root)
-            .ok_or_else(|| BackendError::NotFound(tr::error_usb_edb_unreadable()))?;
-        let content_ids = tracks
-            .iter()
-            .map(|t| {
-                find_content_id_by_path(&edb_conn, &t.usb_media_path_raw)?
-                    .ok_or_else(|| track_not_in_usb_database(&t.usb_media_path_raw))
-            })
-            .collect::<BackendResult<Vec<_>>>()?;
-        let media_paths: Vec<String> = tracks
-            .iter()
-            .map(|t| t.usb_media_path_raw.clone())
-            .collect();
-        let pdb_patch = build_pdb_metadata_patch(&usb_root, &media_paths, &edits)?;
+        // Each track located in each database the stick has before anything
+        // is written: a track in neither blocks the save; one in only one of
+        // the two is written there, and the gap reported.
+        let databases = UsbDatabases::of(&usb_root)?;
+        let pdb = read_usb_pdb(&databases)?;
+        let mut session = self.usb_write_session(&usb_root, SessionBackup::None, &mut Vec::new());
+        if databases.edb().is_some() && session.edb()?.is_none() {
+            return Err(BackendError::NotFound(tr::error_usb_edb_unreadable()));
+        }
+        let parsed = pdb.as_ref().map(|(_, parsed)| parsed);
+        let mut pdb_rows = Vec::with_capacity(tracks.len());
+        let mut content_ids = Vec::with_capacity(tracks.len());
+        let mut gaps = Vec::with_capacity(tracks.len());
+        for track in &tracks {
+            let location = databases
+                .locate_track(
+                    parsed,
+                    session.edb()?.map(|conn| &*conn),
+                    &track.usb_media_path_raw,
+                )?
+                .require(|| track_not_in_usb_database(&track.usb_media_path_raw))?;
+            pdb_rows.push(location.pdb_row);
+            content_ids.push(location.edb_content_id);
+            gaps.push(location.gaps());
+        }
+        let pdb_patch = match &pdb {
+            Some((bytes, parsed)) => {
+                build_pdb_metadata_patch(bytes.clone(), parsed, &pdb_rows, &edits)?
+            }
+            None => PdbMetadataPatch {
+                write: None,
+                release_dates: vec![None; tracks.len()],
+            },
+        };
+        // A track the PDB lacks: its release date after the edit, from its
+        // eDB row.
+        let mut release_dates = Vec::with_capacity(tracks.len());
+        for ((track, pdb_date), content_id) in
+            tracks.iter().zip(pdb_patch.release_dates).zip(&content_ids)
+        {
+            release_dates.push(match (pdb_date, content_id, session.edb()?) {
+                (Some(date), _, _) => date,
+                (None, Some(content_id), Some(conn)) => {
+                    let existing = edb_content_metadata(conn, *content_id)?.release_date;
+                    match &edits.release_date {
+                        Some(Some(edit)) => Some(usb_release_date(edit, existing.as_deref())),
+                        Some(None) => None,
+                        None => existing,
+                    }
+                }
+                _ => return Err(track_not_in_usb_database(&track.usb_media_path_raw)),
+            });
+        }
 
         on_progress(1, STEPS, &tr::track_detail_progress_writing_pdb().render());
-        if let Some((staged_pdb, bytes)) = pdb_patch.write {
-            atomic_write_bytes(&staged_pdb, &bytes)?;
-            super::usb_staging::write_back_if_changed(&usb_root, super::usb_staging::DbKind::Pdb)?;
+        if let Some(bytes) = pdb_patch.write {
+            session.write_pdb(&bytes)?;
         }
 
         // The library tracks, before the eDB commit, as the cue save does.
@@ -627,7 +757,7 @@ impl BackendService {
         let mut conn = self.db.connect()?;
         let tx = conn.transaction()?;
         let now = now();
-        for (track, release_date) in tracks.iter().zip(pdb_patch.release_dates) {
+        for (track, release_date) in tracks.iter().zip(release_dates) {
             let hint = UsbLocalTrackHint {
                 usb_media_path_raw: &track.usb_media_path_raw,
                 local_track_id: track.local_track_id.as_deref(),
@@ -664,61 +794,67 @@ impl BackendService {
         tx.commit()?;
 
         on_progress(2, STEPS, &tr::track_detail_progress_writing_edb().render());
-        let tx = edb_conn.transaction()?;
-        let content_columns = load_table_columns_tx(&tx, "content")?;
-        let edb_genre_id = match &edits.genre {
-            Some(Some(name)) if content_columns.contains("genre_id") => {
-                find_or_insert_genre(&tx, name)?
-            }
-            _ => None,
-        };
-        for content_id in &content_ids {
-            if edits.genre.is_some() && content_columns.contains("genre_id") {
-                tx.execute(
-                    "UPDATE content SET genre_id = ?1 WHERE content_id = ?2",
-                    params![edb_genre_id, content_id],
-                )?;
-            }
-            if let Some(rating) = edits.rating
-                && content_columns.contains("rating")
-            {
-                tx.execute(
-                    "UPDATE content SET rating = ?1 WHERE content_id = ?2",
-                    params![rating, content_id],
-                )?;
-            }
-            if let Some(edit) = &edits.release_date {
-                let date = match edit {
-                    Some(edit) if content_columns.contains("releaseDate") => {
-                        let existing: Option<String> = tx.query_row(
-                            "SELECT releaseDate FROM content WHERE content_id = ?1",
-                            params![content_id],
-                            |row| row.get(0),
+        let content_ids: Vec<i64> = content_ids.into_iter().flatten().collect();
+        if let Some(edb_conn) = session.edb()?
+            && !content_ids.is_empty()
+        {
+            let tx = edb_conn.transaction()?;
+            let content_columns = load_table_columns_tx(&tx, "content")?;
+            let edb_genre_id = match &edits.genre {
+                Some(Some(name)) if content_columns.contains("genre_id") => {
+                    find_or_insert_genre(&tx, name)?
+                }
+                _ => None,
+            };
+            for content_id in &content_ids {
+                if edits.genre.is_some() && content_columns.contains("genre_id") {
+                    tx.execute(
+                        "UPDATE content SET genre_id = ?1 WHERE content_id = ?2",
+                        params![edb_genre_id, content_id],
+                    )?;
+                }
+                if let Some(rating) = edits.rating
+                    && content_columns.contains("rating")
+                {
+                    tx.execute(
+                        "UPDATE content SET rating = ?1 WHERE content_id = ?2",
+                        params![rating, content_id],
+                    )?;
+                }
+                if let Some(edit) = &edits.release_date {
+                    let date = match edit {
+                        Some(edit) if content_columns.contains("releaseDate") => {
+                            let existing: Option<String> = tx.query_row(
+                                "SELECT releaseDate FROM content WHERE content_id = ?1",
+                                params![content_id],
+                                |row| row.get(0),
+                            )?;
+                            Some(usb_release_date(edit, existing.as_deref()))
+                        }
+                        Some(edit) => Some(edit.clone()),
+                        None => None,
+                    };
+                    if content_columns.contains("releaseYear") {
+                        tx.execute(
+                            "UPDATE content SET releaseYear = ?1 WHERE content_id = ?2",
+                            params![date.as_deref().and_then(year_of).unwrap_or(0), content_id],
                         )?;
-                        Some(usb_release_date(edit, existing.as_deref()))
                     }
-                    Some(edit) => Some(edit.clone()),
-                    None => None,
-                };
-                if content_columns.contains("releaseYear") {
-                    tx.execute(
-                        "UPDATE content SET releaseYear = ?1 WHERE content_id = ?2",
-                        params![date.as_deref().and_then(year_of).unwrap_or(0), content_id],
-                    )?;
-                }
-                if content_columns.contains("releaseDate") {
-                    tx.execute(
-                        "UPDATE content SET releaseDate = ?1 WHERE content_id = ?2",
-                        params![date.unwrap_or_default(), content_id],
-                    )?;
+                    if content_columns.contains("releaseDate") {
+                        tx.execute(
+                            "UPDATE content SET releaseDate = ?1 WHERE content_id = ?2",
+                            params![date.unwrap_or_default(), content_id],
+                        )?;
+                    }
                 }
             }
+            tx.commit()?;
         }
-        tx.commit()?;
-        drop(edb_conn);
-        super::usb_staging::write_back_if_changed(&usb_root, super::usb_staging::DbKind::Edb)?;
+        session.commit()?;
+        for (track, gaps) in tracks.iter().zip(&gaps) {
+            report_usb_database_gaps(&track.usb_media_path_raw, gaps);
+        }
         self.refresh_engine_library(&usb_root);
-        self.invalidate_usb_parse_cache();
 
         on_progress(
             STEPS,

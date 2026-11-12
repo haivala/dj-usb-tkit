@@ -14,13 +14,14 @@ use super::super::usb_vendor_compat::{
 };
 use super::deferred_close::FileCloser;
 use super::{ExportManifest, ExportTrackData};
-use crate::edb::{open_edb_rw, table_exists};
+use crate::edb::table_exists;
 use crate::error::{BackendError, BackendResult};
 use crate::i18n::tr;
 use crate::logging::{self, Level};
 use crate::metadata::{MAX_GRAPHEME_CLUSTER_CHARS, cap_grapheme_clusters, cap_script_diversity};
 use crate::models::WarningEntry;
 use crate::pdb_reader::parse_pdb;
+use crate::service::usb_staging::{UsbDatabases, UsbDatabasesExt};
 
 pub fn sanitize_filename_component(value: &str) -> String {
     let normalized = sanitize_text(value)
@@ -738,7 +739,8 @@ pub fn filter_prunable_stale_paths_for_playlist(
     let mut protected = HashSet::<String>::new();
     let wanted_name = canonicalize_playlist_name(playlist_name);
 
-    if let Some(conn) = open_edb_rw(usb_root)
+    let databases = UsbDatabases::present(usb_root)?;
+    if let Some(conn) = databases.as_ref().and_then(UsbDatabases::open_edb_writable)
         && table_exists(&conn, "playlist")
         && table_exists(&conn, "playlist_content")
         && table_exists(&conn, "content")
@@ -810,9 +812,8 @@ pub fn filter_prunable_stale_paths_for_playlist(
         }
     }
 
-    let pdb_path = super::super::usb_staging::stage_pdb(usb_root)?;
-    if pdb_path.is_file() {
-        let parsed = parse_pdb(&pdb_path)?;
+    if let Some(pdb_path) = databases.pdb() {
+        let parsed = parse_pdb(pdb_path)?;
         let current_playlist_ids = parsed
             .playlist_tree
             .iter()

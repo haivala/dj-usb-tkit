@@ -314,9 +314,16 @@ pub fn open_edb(path: &Path, warnings: &mut Vec<WarningEntry>) -> Option<rusqlit
     conn
 }
 
-fn staged_edb_path(usb_root: &Path) -> Option<std::path::PathBuf> {
-    match crate::service::usb_staging::stage_edb(usb_root) {
-        Ok(path) => Some(path),
+/// A read-only connection to `usb_root`'s staged eDB (see
+/// `usb_staging::UsbDatabases`); `None` without one, or when it can't be
+/// opened (that adds a warning).
+pub fn open_edb_from_usb_root(
+    usb_root: &Path,
+    warnings: &mut Vec<WarningEntry>,
+) -> Option<rusqlite::Connection> {
+    use crate::service::usb_staging::{UsbDatabases, UsbDatabasesExt};
+    let databases = match UsbDatabases::present(usb_root) {
+        Ok(databases) => databases,
         Err(err) => {
             logging::debug(
                 "edb",
@@ -325,25 +332,158 @@ fn staged_edb_path(usb_root: &Path) -> Option<std::path::PathBuf> {
                     err = err.english()
                 ),
             );
-            Some(edb_path_from_usb_root(usb_root))
+            return open_edb(&edb_path_from_usb_root(usb_root), warnings);
         }
-    }
+    };
+    open_edb(databases.edb()?, warnings)
 }
 
-pub fn open_edb_from_usb_root(
-    usb_root: &Path,
-    warnings: &mut Vec<WarningEntry>,
-) -> Option<rusqlite::Connection> {
-    let path = staged_edb_path(usb_root)?;
-    open_edb(&path, warnings)
-}
+pub use crate::service::usb_staging::open_edb_rw;
 
-pub fn open_edb_rw(usb_root: &Path) -> Option<rusqlite::Connection> {
-    let db_path = staged_edb_path(usb_root)?;
-    if !db_path.exists() {
+/// A read-write connection to the eDB at `path`; `None` when it isn't there
+/// or can't be opened.
+pub(crate) fn open_edb_rw_at(path: &Path) -> Option<rusqlite::Connection> {
+    if !path.exists() {
         return None;
     }
-    open_edb_with_flags(&db_path, rusqlite::OpenFlags::SQLITE_OPEN_READ_WRITE)
+    open_edb_with_flags(path, rusqlite::OpenFlags::SQLITE_OPEN_READ_WRITE)
+}
+
+/// The eDB in the parsed PDB's shape, for the readers that work on a parsed
+/// PDB when the stick has only the eDB: one track row per `content` row
+/// (its `content_id` as the track id), the keys and artwork, the playlists
+/// with their entries, and the histories as t11/t12 rows.
+pub(crate) fn edb_as_parsed_pdb(
+    conn: &rusqlite::Connection,
+) -> BackendResult<crate::pdb_reader::ParsedPdb> {
+    use crate::pdb_reader::{
+        ParsedPdb, PdbHistoryEntryRow, PdbHistoryPlaylistRow, PdbPlaylistEntryRow,
+        PdbPlaylistTreeRow, PdbTrackRow,
+    };
+    let id = |value: Option<i64>| value.and_then(|v| u32::try_from(v).ok()).unwrap_or(0);
+    let mut parsed = ParsedPdb::default();
+    if table_exists(conn, "content") {
+        let image_fk = if content_column_or_null(conn, "imageFilePath_id") == "NULL" {
+            content_column_or_null(conn, "image_id")
+        } else {
+            "c.imageFilePath_id".to_string()
+        };
+        let sql = format!(
+            "SELECT c.content_id, c.path, {anlz}, {bpm}, {key}, {mdb}, {len}, {size}, {title}, {image_fk} \
+             FROM content c ORDER BY c.content_id",
+            anlz = content_column_or_null(conn, "analysisDataFilePath"),
+            bpm = content_column_or_null(conn, "bpmx100"),
+            key = content_column_or_null(conn, "key_id"),
+            mdb = content_column_or_null(conn, "masterDbId"),
+            len = content_column_or_null(conn, "length"),
+            size = content_column_or_null(conn, "fileSize"),
+            title = content_column_or_null(conn, "title"),
+        );
+        let mut stmt = conn.prepare(&sql)?;
+        parsed.tracks = stmt
+            .query_map([], |row| {
+                Ok(PdbTrackRow {
+                    id: id(row.get(0)?),
+                    track_file_path: row.get::<_, Option<String>>(1)?.unwrap_or_default(),
+                    anlz_path: row.get::<_, Option<String>>(2)?.unwrap_or_default(),
+                    tempo_x100: id(row.get(3)?),
+                    key_id: id(row.get(4)?),
+                    master_db_id: row
+                        .get::<_, Option<i64>>(5)?
+                        .and_then(|v| u32::try_from(v).ok()),
+                    duration_seconds: row
+                        .get::<_, Option<i64>>(6)?
+                        .and_then(|v| u32::try_from(v).ok()),
+                    file_size_bytes: row
+                        .get::<_, Option<i64>>(7)?
+                        .and_then(|v| u32::try_from(v).ok()),
+                    title: row.get::<_, Option<String>>(8)?.unwrap_or_default(),
+                    artwork_id: id(row.get(9)?),
+                    ..PdbTrackRow::default()
+                })
+            })?
+            .collect::<Result<Vec<_>, _>>()?;
+    }
+    let id_names = |sql: &str| -> BackendResult<HashMap<u32, String>> {
+        let mut stmt = conn.prepare(sql)?;
+        let rows = stmt.query_map([], |row| {
+            Ok((
+                id(row.get(0)?),
+                row.get::<_, Option<String>>(1)?.unwrap_or_default(),
+            ))
+        })?;
+        Ok(rows.collect::<Result<_, _>>()?)
+    };
+    if table_exists(conn, "key") {
+        parsed.keys = id_names("SELECT key_id, name FROM \"key\"")?;
+    }
+    if table_exists(conn, "image") {
+        parsed.artworks = id_names("SELECT image_id, path FROM image")?;
+    }
+    if table_exists(conn, "playlist") {
+        let mut stmt = conn.prepare(
+            "SELECT playlist_id, COALESCE(playlist_id_parent, 0), COALESCE(sequenceNo, 0), \
+             COALESCE(attribute, 0), COALESCE(name, '') FROM playlist",
+        )?;
+        parsed.playlist_tree = stmt
+            .query_map([], |row| {
+                Ok(PdbPlaylistTreeRow {
+                    id: id(row.get(0)?),
+                    parent_id: id(row.get(1)?),
+                    sort_order: id(row.get(2)?),
+                    row_is_folder: row.get::<_, i64>(3)? == 1,
+                    name: row.get(4)?,
+                })
+            })?
+            .collect::<Result<Vec<_>, _>>()?;
+    }
+    if table_exists(conn, "playlist_content") {
+        let mut stmt = conn.prepare(
+            "SELECT playlist_id, content_id, COALESCE(sequenceNo, 0) FROM playlist_content",
+        )?;
+        parsed.playlist_entries = stmt
+            .query_map([], |row| {
+                Ok(PdbPlaylistEntryRow {
+                    playlist_id: id(row.get(0)?),
+                    track_id: id(row.get(1)?),
+                    entry_index: id(row.get(2)?),
+                })
+            })?
+            .collect::<Result<Vec<_>, _>>()?;
+    }
+    if table_exists(conn, "history") {
+        let mut stmt = conn.prepare(
+            "SELECT history_id, COALESCE(name, '') FROM history \
+             ORDER BY COALESCE(sequenceNo, 0), history_id",
+        )?;
+        parsed.history_playlists = stmt
+            .query_map([], |row| {
+                Ok(PdbHistoryPlaylistRow {
+                    id: id(row.get(0)?),
+                    name: row.get(1)?,
+                    source_table: 11,
+                })
+            })?
+            .collect::<Result<Vec<_>, _>>()?;
+    }
+    if table_exists(conn, "history_content") {
+        let mut stmt = conn.prepare(
+            "SELECT history_id, content_id, COALESCE(sequenceNo, 0) FROM history_content",
+        )?;
+        parsed.history_entries = stmt
+            .query_map([], |row| {
+                Ok(PdbHistoryEntryRow {
+                    track_id: row
+                        .get::<_, Option<i64>>(1)?
+                        .and_then(|v| u32::try_from(v).ok()),
+                    playlist_id: id(row.get(0)?),
+                    entry_index: id(row.get(2)?),
+                    source_table: 12,
+                })
+            })?
+            .collect::<Result<Vec<_>, _>>()?;
+    }
+    Ok(parsed)
 }
 
 /// `c.<column>` when the eDB's `content` table has `column`, else `NULL`, so

@@ -1928,6 +1928,11 @@ fn preview_repair(
 /// playlists are strict-clean against the rebuilt database.
 fn assert_strict_repair_rebuilds_missing(file_name: &str, applied_line: &str) {
     let (_root, backend, usb, target, control) = setup_two_playlist_strict_parity_fixture();
+    // A finding besides the missing database: it is offered in the same
+    // pass, whichever database is left to find it in.
+    let track = use_real_usb_bundles(&usb).remove(0);
+    let dat = usb.join(track.anlz_path.trim_start_matches('/'));
+    strip_anlz_ppth(&dat);
     let missing = vendor_db_dir(&usb).join(file_name);
     fs::remove_file(&missing).expect("delete database");
 
@@ -1939,9 +1944,36 @@ fn assert_strict_repair_rebuilds_missing(file_name: &str, applied_line: &str) {
             .any(|fix| fix.id == "upgrade_export_data_to_strict_parity"),
         "strict parity should be offered for the missing {file_name}: {preview:?}"
     );
+    let offered = preview
+        .proposed_fixes
+        .iter()
+        .map(|fix| fix.id.as_str())
+        .collect::<Vec<_>>();
+    assert!(offered.contains(&"add_analysis_track_path"), "{offered:?}");
+    // Nothing that reads or writes only the PDB, or carries the PDB's
+    // history to the eDB, without a PDB.
+    if file_name == "export.pdb" {
+        assert!(
+            !offered
+                .iter()
+                .any(|id| id.starts_with("repair_pdb_") || *id == "sync_edb_history_from_pdb"),
+            "{offered:?}"
+        );
+    }
     assert!(!missing.exists(), "preview must not create {file_name}");
 
-    let data = apply_strict_repair(&backend, &usb);
+    // Everything the preview offers, in one pass.
+    let repair = backend.repair_usb_diagnostics(RepairUsbDiagnosticsRequest {
+        usb_root: Some(usb.to_string_lossy().to_string()),
+        apply: true,
+        selected_fix_ids: preview
+            .proposed_fixes
+            .iter()
+            .map(|fix| fix.id.clone())
+            .collect(),
+    });
+    assert!(repair.ok, "repair failed: {repair:?}");
+    let data = repair.data.expect("repair data").data;
     assert!(data.failed_fixes.is_empty(), "{data:?}");
     assert!(
         data.applied_fixes
@@ -1960,6 +1992,17 @@ fn assert_strict_repair_rebuilds_missing(file_name: &str, applied_line: &str) {
         assert_eq!(detail.pdb_tracks, 1);
         assert_eq!(detail.edb_tracks, 1);
     }
+    assert_eq!(
+        anlz_ppth(&dat).as_deref(),
+        Some(track.track_file_path.as_str())
+    );
+    // One apply pass is enough: nothing is left to fix.
+    let after = preview_repair(&backend, &usb);
+    assert!(
+        after.proposed_fixes.is_empty(),
+        "one pass should leave the {file_name}-less stick clean: {:?}",
+        after.proposed_fixes
+    );
 }
 
 #[test]

@@ -16,7 +16,7 @@
 //! (see `service::anlz`, `service::export`).
 
 use std::collections::{BTreeMap, HashSet};
-use std::path::{Path, PathBuf};
+use std::path::Path;
 
 use base64::Engine as _;
 use rusqlite::{Connection, OptionalExtension, params};
@@ -33,7 +33,7 @@ use crate::models::{
 };
 use crate::pdb_reader::pdb_page_size;
 
-use crate::edb::{find_content_id_by_path, find_key_id_by_name, open_edb_rw};
+use crate::edb::find_key_id_by_name;
 
 use super::anlz::{
     AnlzAnalysisEdits, AnlzCue, apply_analysis_edits_to_anlz, atomic_write_bytes,
@@ -45,6 +45,7 @@ use super::export_helpers::{
 use super::key_notation::{self, KeyNotation, key_display_fields, key_notation_setting};
 use super::track_matching::{content_fingerprint_key, pdb_track_fingerprint};
 use super::transcode_export::transcode_offset_for_usb_file;
+use super::usb_staging::{DbKind, SessionBackup, UsbDatabases};
 use super::usb_utils::{
     pwv5_from_ext_bytes, read_pwv5_from_anlz, resolve_usb_root, resolve_usb_side_path,
     resolve_usb_side_path_text,
@@ -304,28 +305,25 @@ pub(super) fn track_not_in_usb_database(media_path: &str) -> BackendError {
     ))
 }
 
-/// Stage the device `export.pdb` and build its bytes with the t00 tempo and/or
-/// key of the track at `media_path` set to `bpm` / `key` -- the same values the
+/// The staged PDB's bytes (`bytes`, parsed as `parsed`) with the t00 tempo
+/// and/or key of the track `row` set to `bpm` / `key` -- the same values the
 /// USB save writes to the ANLZ beat grid and eDB `content`, so the three never
 /// disagree (older CDJs read the PDB). Tempo uses export's `round(bpm*100)`; a
 /// key the PDB doesn't have yet gets a new t05 row, matched with export's own
-/// rule (`key_names_match`). Returns the staged path + new bytes to write, or
-/// `None` when nothing changes. Nothing is written here, so the caller can
-/// block before touching the device.
+/// rule (`key_names_match`). Returns the new bytes to write, or `None` when
+/// nothing changes. Nothing is written here, so the caller can block before
+/// touching the device.
 fn build_pdb_track_patch(
-    usb_root: &Path,
-    media_path: &str,
+    mut bytes: Vec<u8>,
+    parsed: &crate::pdb_reader::ParsedPdb,
+    row: &crate::pdb_reader::PdbTrackRow,
     bpm: Option<f64>,
     key: Option<&str>,
-) -> BackendResult<Option<(PathBuf, Vec<u8>)>> {
+) -> BackendResult<Option<Vec<u8>>> {
     if bpm.is_none() && key.is_none() {
         return Ok(None);
     }
-    let staged_pdb = super::usb_staging::stage_pdb(usb_root)?;
-    let mut bytes = std::fs::read(&staged_pdb)?;
     let page_size = pdb_page_size(&bytes)?;
-    let parsed = crate::pdb_reader::parse_pdb_bytes(&bytes)?;
-    let row = pdb_track_by_media_path(&parsed, media_path)?;
     let mut data = super::repair::track_row_data_from_reader_row(row);
     let mut changed_fields = Vec::<&'static str>::new();
 
@@ -375,7 +373,32 @@ fn build_pdb_track_patch(
         PdbLayoutProfile::DEFAULT,
         page_size,
     )?;
-    Ok(Some((staged_pdb, bytes)))
+    Ok(Some(bytes))
+}
+
+/// The stick's PDB, read and parsed, when it has one.
+pub(super) fn read_usb_pdb(
+    databases: &UsbDatabases,
+) -> BackendResult<Option<(Vec<u8>, crate::pdb_reader::ParsedPdb)>> {
+    let Some(path) = databases.pdb() else {
+        return Ok(None);
+    };
+    let bytes = std::fs::read(path)?;
+    let parsed = crate::pdb_reader::parse_pdb_bytes(&bytes)?;
+    Ok(Some((bytes, parsed)))
+}
+
+/// Logs that a USB edit of `media_path` went only to the database the track
+/// is in, for each database (`gaps`) the stick has but lacks it in. The
+/// parity report finds the gap, and its repair adds the track.
+pub(super) fn report_usb_database_gaps(media_path: &str, gaps: &[DbKind]) {
+    for gap in gaps {
+        logging::emit_text(
+            logging::Level::Warn,
+            "usb-edit",
+            &tr::usb_warning_track_missing_from_database(media_path.trim(), gap.label()),
+        );
+    }
 }
 
 /// Read/rewrite an ANLZ `.DAT` bundle and its sibling `.EXT` in place with
@@ -1246,19 +1269,34 @@ impl BackendService {
             None => None,
         };
 
-        // 4. Open the device eDB and locate the track *before* writing
-        //    anything, so a missing content row blocks cleanly.
-        let mut edb_conn = open_edb_rw(&usb_root)
-            .ok_or_else(|| BackendError::NotFound(tr::error_usb_edb_unreadable()))?;
-        let content_id = find_content_id_by_path(&edb_conn, &req.usb_media_path_raw)?
-            .ok_or_else(|| track_not_in_usb_database(&req.usb_media_path_raw))?;
+        // 4. Locate the track in each database the stick has *before*
+        //    writing anything, so a track in neither blocks cleanly. A track
+        //    in only one of the two is written there, and the gap reported.
+        let databases = UsbDatabases::of(&usb_root)?;
+        let pdb = read_usb_pdb(&databases)?;
+        let mut session = self.usb_write_session(&usb_root, SessionBackup::None, &mut Vec::new());
+        if databases.edb().is_some() && session.edb()?.is_none() {
+            return Err(BackendError::NotFound(tr::error_usb_edb_unreadable()));
+        }
+        let location = databases
+            .locate_track(
+                pdb.as_ref().map(|(_, parsed)| parsed),
+                session.edb()?.map(|conn| &*conn),
+                &req.usb_media_path_raw,
+            )?
+            .require(|| track_not_in_usb_database(&req.usb_media_path_raw))?;
+        let content_id = location.edb_content_id;
 
         // A BPM edit re-grids the ANLZ and sets eDB `bpmx100`; the PDB tempo
         // (what older CDJs read) must follow or the three disagree until the
-        // next export. Resolve and build the patch before writing anything so
-        // a track missing from the PDB blocks the save cleanly.
-        let pdb_patch =
-            build_pdb_track_patch(&usb_root, &req.usb_media_path_raw, req.bpm, key.as_deref())?;
+        // next export. Build the patch before writing anything.
+        let pdb_patch = match (&pdb, location.pdb_row) {
+            (Some((bytes, parsed)), Some(row)) => {
+                build_pdb_track_patch(bytes.clone(), parsed, row, req.bpm, key.as_deref())?
+            }
+            _ => None,
+        };
+        let gaps = location.gaps();
 
         // The cue list to write onto the device, only when this is a cue edit
         // (an empty list clears). A BPM/key/first-beat-only save leaves the
@@ -1290,9 +1328,8 @@ impl BackendService {
             USB_SAVE_STEPS,
             &tr::track_detail_progress_writing_pdb().render(),
         );
-        if let Some((staged_pdb, bytes)) = pdb_patch {
-            atomic_write_bytes(&staged_pdb, &bytes)?;
-            super::usb_staging::write_back_if_changed(&usb_root, super::usb_staging::DbKind::Pdb)?;
+        if let Some(bytes) = pdb_patch {
+            session.write_pdb(&bytes)?;
         }
 
         on_progress(
@@ -1364,43 +1401,45 @@ impl BackendService {
             USB_SAVE_STEPS,
             &tr::track_detail_progress_writing_edb().render(),
         );
-        let tx = edb_conn.transaction()?;
-        let content_columns = load_table_columns_tx(&tx, "content")?;
-        if let Some(cues) = new_cues.as_deref() {
-            write_edb_cues_for_content(&tx, content_id, cues, &content_columns)?;
-            if !cues.is_empty() && content_columns.contains("cueUpdateCount") {
-                tx.execute(
+        if let Some(content_id) = content_id
+            && let Some(edb_conn) = session.edb()?
+        {
+            let tx = edb_conn.transaction()?;
+            let content_columns = load_table_columns_tx(&tx, "content")?;
+            if let Some(cues) = new_cues.as_deref() {
+                write_edb_cues_for_content(&tx, content_id, cues, &content_columns)?;
+                if !cues.is_empty() && content_columns.contains("cueUpdateCount") {
+                    tx.execute(
                     "UPDATE content SET cueUpdateCount = (COALESCE(CAST(cueUpdateCount AS INTEGER), 0) + 1) WHERE content_id = ?1",
                     params![content_id],
                 )?;
+                }
             }
+            if let Some(bpm) = req.bpm
+                && content_columns.contains("bpmx100")
+            {
+                let bpmx100 = (bpm * 100.0).round() as i64;
+                tx.execute(
+                    "UPDATE content SET bpmx100 = ?1 WHERE content_id = ?2",
+                    params![bpmx100, content_id],
+                )?;
+            }
+            if let Some(key) = key.as_deref()
+                && content_columns.contains("key_id")
+            {
+                let key_id = find_key_id_by_name(&tx, Some(key))?;
+                tx.execute(
+                    "UPDATE content SET key_id = ?1 WHERE content_id = ?2",
+                    params![key_id, content_id],
+                )?;
+            }
+            tx.commit()?;
         }
-        if let Some(bpm) = req.bpm
-            && content_columns.contains("bpmx100")
-        {
-            let bpmx100 = (bpm * 100.0).round() as i64;
-            tx.execute(
-                "UPDATE content SET bpmx100 = ?1 WHERE content_id = ?2",
-                params![bpmx100, content_id],
-            )?;
-        }
-        if let Some(key) = key.as_deref()
-            && content_columns.contains("key_id")
-        {
-            let key_id = find_key_id_by_name(&tx, Some(key))?;
-            tx.execute(
-                "UPDATE content SET key_id = ?1 WHERE content_id = ?2",
-                params![key_id, content_id],
-            )?;
-        }
-        tx.commit()?;
-        drop(edb_conn);
-        super::usb_staging::write_back_if_changed(&usb_root, super::usb_staging::DbKind::Edb)?;
+        session.commit()?;
+        report_usb_database_gaps(&req.usb_media_path_raw, &gaps);
         // Cues and grid live in the ANLZ bundle, so this runs even when the
         // PDB was left alone. The response has no warnings; the log has them.
         self.refresh_engine_library(&usb_root);
-
-        self.invalidate_usb_parse_cache();
 
         on_progress(
             USB_SAVE_STEPS,
@@ -1434,7 +1473,7 @@ impl BackendService {
             key_display,
             key_color,
             anlz_updated: true,
-            edb_updated: true,
+            edb_updated: content_id.is_some(),
             local_updated: local_track_id.is_some(),
             local_track_id,
             track,

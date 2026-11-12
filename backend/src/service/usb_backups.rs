@@ -26,10 +26,9 @@ use crate::models::{
     RestoreUsbBackupData, RestoreUsbBackupRequest, UsbBackupEntry, UsbBackupFile,
 };
 
+use super::usb_staging::{DbKind, SessionBackup};
 use super::usb_utils::resolve_usb_root;
-use super::usb_vendor_compat::{
-    BackupReason, backup_reason_path, vendor_db_dir, vendor_edb_path, vendor_pdb_path,
-};
+use super::usb_vendor_compat::{BackupReason, backup_reason_path, vendor_db_dir};
 use super::{BackendService, DEFAULT_BACKUP_RETENTION_COUNT, SETTING_UI_BACKUP_RETENTION_COUNT};
 
 const STEMS: [(&str, &str); 2] = [("export", "pdb"), ("exportLibrary", "db")];
@@ -399,10 +398,11 @@ fn files_for_timestamp(usb_root: &Path, timestamp: &str) -> Vec<(String, PathBuf
     out
 }
 
-fn live_path_for_stem(usb_root: &Path, stem: &str) -> Option<PathBuf> {
+/// The database a backup file of `stem` holds.
+fn database_for_stem(stem: &str) -> Option<DbKind> {
     match stem {
-        "export" => Some(vendor_pdb_path(usb_root)),
-        "exportLibrary" => Some(vendor_edb_path(usb_root)),
+        "export" => Some(DbKind::Pdb),
+        "exportLibrary" => Some(DbKind::Edb),
         _ => None,
     }
 }
@@ -551,35 +551,15 @@ impl BackendService {
             )));
         }
 
+        // Each restored file replaces its database's staged copy (staged
+        // again from the stick first), and the session writes them back.
+        let mut session = self.usb_write_session(&usb_root, SessionBackup::None, &mut Vec::new());
         for (stem, snapshot) in &files {
-            if let Some(live_path) = live_path_for_stem(&usb_root, stem) {
-                std::fs::copy(snapshot, &live_path)?;
+            if let Some(kind) = database_for_stem(stem) {
+                session.replace_database(kind, snapshot)?;
             }
         }
-
-        // The copy above wrote straight to the live USB path, bypassing
-        // `usb_staging` entirely -- without this, the local HDD staging
-        // cache (and its "verified this connect" fast path, see
-        // `usb_staging::stage_file_with_root`) would keep serving every read
-        // for the rest of the session the pre-restore content. Force a
-        // fresh re-stage per restored file, same as a fresh USB connect does
-        // (`validate_usb_root`).
-        for (stem, _) in &files {
-            let result = match stem.as_str() {
-                "export" => super::usb_staging::stage_pdb_on_connect(&usb_root),
-                "exportLibrary" => super::usb_staging::stage_edb_on_connect(&usb_root),
-                _ => continue,
-            };
-            if let Err(err) = result {
-                crate::logging::debug(
-                    "usb-backups",
-                    format!(
-                        "Failed to re-stage {stem} after restore: {err}",
-                        err = err.english()
-                    ),
-                );
-            }
-        }
+        session.commit()?;
 
         // The response has no warnings; the log has them.
         self.refresh_engine_library(&usb_root);
@@ -631,6 +611,7 @@ impl BackendService {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::service::usb_vendor_compat::{vendor_edb_path, vendor_pdb_path};
     use tempfile::tempdir;
 
     fn test_service() -> (tempfile::TempDir, BackendService) {

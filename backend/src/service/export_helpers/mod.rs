@@ -19,13 +19,15 @@ pub(crate) use field_table::{EdbContentFields, is_placeholder_date, read_edb_con
 pub use pdb_export::*;
 
 // Re-export submodule items at this level for backward compatibility.
+#[cfg(test)]
+use crate::edb::open_edb_rw;
 pub use crate::edb::{
     ExportManifestTrack, ExportPlaylistData, ExportTrackData, content_file_name,
     duration_ms_to_seconds, dynamic_insert, find_content_id_by_path, find_key_id_by_name,
     find_or_insert_album, find_or_insert_artist, find_or_insert_image,
     insert_content_from_template, link_playlist_content, load_table_columns,
     load_table_row_template, map_values_for_insert, next_numeric_id, normalize_export_date,
-    open_edb_rw, populate_content_values_map, preferred_export_playlist_row_id,
+    populate_content_values_map, preferred_export_playlist_row_id,
     replace_export_playlist_row_with_identity, resolve_track_created_date_for_export,
     resolve_track_release_date_for_export, resolve_track_release_year_for_export, table_exists,
     upsert_export_playlist_row,
@@ -58,8 +60,9 @@ pub use pdb_menu::{
     patch_pdb_columns_menu_set_by_kind, patch_pdb_t17_category_snapshot,
 };
 pub use playlist_ops::{
-    MirrorOrphanCleanup, PdbTrackRemoval, remove_orphaned_dropped_tracks_from_dbs,
-    remove_playlist_and_tracks_from_pdb, remove_playlist_from_edb, remove_tracks_from_pdb,
+    MirrorOrphanCleanup, PdbTrackRemoval, edb_playlist_exclusive_tracks,
+    remove_orphaned_dropped_tracks_from_dbs, remove_playlist_and_tracks_from_pdb,
+    remove_playlist_and_tracks_from_pdb_in, remove_playlist_from_edb, remove_tracks_from_pdb,
     verify_edb_content, verify_edb_content_with_conn, verify_pdb_content,
 };
 
@@ -75,6 +78,7 @@ use crate::service::cues::split_cues;
 use crate::utils::{collect_chain as collect_chain_pages, page_offset, table_ptr_fields};
 
 use super::usb_utils::{canonicalize_playlist_name, repair_utf8_mojibake};
+#[cfg(test)]
 use super::usb_vendor_compat::{USB_VENDOR_DB_DIR, USB_VENDOR_ROOT_DIR};
 
 pub(crate) fn canonicalize_track_path_identity(value: &str) -> String {
@@ -180,6 +184,9 @@ pub use super::anlz::WaveformData;
 pub struct PlaylistRemovalPdbResult {
     pub removed_playlist_count: usize,
     pub exclusive_tracks: Vec<ExclusiveTrackInfo>,
+    /// The artwork files only these tracks use (small size; the medium
+    /// variant is derived), as the database stores them.
+    pub exclusive_artwork_paths: Vec<String>,
     pub shared_track_count: usize,
 }
 

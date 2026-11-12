@@ -38,11 +38,10 @@ use super::export_helpers::canonicalize_track_path_identity;
 use super::repair::{
     restore_pdb_playlist_sort_orders, write_edb_playlist_order, write_edb_playlist_track_order,
 };
-use super::usb_staging::{self, DbKind};
+use super::usb_staging::{self, DbKind, SessionBackup, UsbDatabases};
 use super::usb_utils::{
     can_write_file_at, canonicalize_playlist_name, has_write_access, resolve_usb_root,
 };
-use super::usb_vendor_compat::{vendor_edb_path, vendor_pdb_path};
 
 /// The reason recorded on the backup a save takes. A save whose stick's
 /// newest backup has this reason rewrites that one instead of adding one.
@@ -204,7 +203,8 @@ fn verify_saved_order(
     pending: &PendingOrder,
     parsed: &ParsedPdb,
 ) -> BackendResult<()> {
-    let conn = crate::edb::open_edb_rw(usb_root)
+    let conn = UsbDatabases::of(usb_root)?
+        .open_edb_writable()
         .ok_or_else(|| BackendError::Validation(tr::usb_order_edit_edb_open_failed()))?;
     let edb_playlists = crate::edb::read_edb(&conn, usb_root, crate::edb::EdbRead::ALL)
         .map(|library| library.resolved_playlists(usb_root))
@@ -330,24 +330,6 @@ fn checkpoint_edb(conn: &rusqlite::Connection) -> BackendResult<()> {
         ));
     }
     Ok(())
-}
-
-/// After a failed save: drops the staged databases' local changes and stages
-/// them again from the stick, so no later writer reuses them. With the stick
-/// gone, the local copies are only removed.
-fn discard_staged_order_changes(usb_root: &Path) {
-    for kind in [DbKind::Pdb, DbKind::Edb] {
-        if let Err(err) = usb_staging::restage_from_usb(usb_root, kind) {
-            logging::debug(
-                "usb-order-edit",
-                format!(
-                    "Dropping the staged {} after a failed save failed: {}",
-                    db_label(kind),
-                    err.english()
-                ),
-            );
-        }
-    }
 }
 
 /// Holds an edit's `saving` mark and clears it however the save ends.
@@ -685,8 +667,9 @@ impl BackendService {
             match self.write_usb_order(&usb_root, &pending, &mut warnings, &mut on_progress) {
                 Ok(written) => written,
                 Err(failure) => {
-                    discard_staged_order_changes(&usb_root);
-                    self.invalidate_usb_parse_cache();
+                    // The write session dropped the staged databases' local
+                    // changes and staged them again from the stick, so no
+                    // later writer reuses them.
                     if failure.partial
                         && let Some(edit) = self.order_edit_slot().as_mut()
                     {
@@ -699,7 +682,6 @@ impl BackendService {
             on_progress(90, 100, &tr::usb_progress_order_edit_engine().render());
             warnings.extend(self.refresh_engine_library(&usb_root));
         }
-        self.invalidate_usb_parse_cache();
         *self.order_edit_slot() = None;
         on_progress(
             100,
@@ -733,13 +715,18 @@ impl BackendService {
             100,
             &tr::usb_progress_backing_up_usb_databases().render(),
         );
-        warnings.extend(self.backup_usb_databases_replacing_same_reason(usb_root, BACKUP_REASON));
+        let mut session = self.usb_write_session(
+            usb_root,
+            SessionBackup::ReplacingSameReason {
+                reason: BACKUP_REASON,
+            },
+            warnings,
+        );
+        let databases = UsbDatabases::of(usb_root)?;
 
         on_progress(20, 100, &tr::usb_progress_order_edit_pdb().render());
-        // A database missing from the stick is skipped; a local copy left from
-        // an earlier session isn't this stick's.
-        let (mut pdb, parsed) = if vendor_pdb_path(usb_root).is_file() {
-            let path = usb_staging::stage_pdb(usb_root)?;
+        // A database missing from the stick is skipped.
+        let (mut pdb, parsed) = if let Some(path) = session.pdb_path()? {
             let bytes = std::fs::read(&path)?;
             let parsed = parse_pdb_bytes(&bytes)?;
             (Some((path, bytes)), Some(parsed))
@@ -826,8 +813,9 @@ impl BackendService {
         // The eDB, from its own rows, in one transaction.
         on_progress(40, 100, &tr::usb_progress_order_edit_edb().render());
         let mut edb_changed = false;
-        if vendor_edb_path(usb_root).is_file() {
-            let mut conn = crate::edb::open_edb_rw(usb_root)
+        if databases.edb().is_some() {
+            let conn = session
+                .edb()?
                 .ok_or_else(|| BackendError::Validation(tr::usb_order_edit_edb_open_failed()))?;
             let tx = conn.transaction()?;
             let mut updated = write_edb_playlist_order(&tx, &edb_sort)?;
@@ -842,9 +830,9 @@ impl BackendService {
                 })?;
             }
             tx.commit()?;
-            checkpoint_edb(&conn)?;
+            checkpoint_edb(conn)?;
             let _ = conn.execute_batch("PRAGMA journal_mode=WAL;");
-            drop(conn);
+            session.close_edb();
             edb_changed = updated > 0;
         }
         if pdb_changed && let Some((path, bytes)) = &pdb {
@@ -854,7 +842,7 @@ impl BackendService {
         // Nothing reaches the stick unless both databases now hold the same
         // order for what the edit changed.
         if let Some((_, bytes)) = &pdb
-            && vendor_edb_path(usb_root).is_file()
+            && databases.edb().is_some()
             && (pdb_changed || edb_changed)
         {
             on_progress(60, 100, &tr::usb_progress_order_edit_verify().render());
@@ -873,7 +861,7 @@ impl BackendService {
         }
         let mut written: Option<DbKind> = None;
         for kind in kinds {
-            if let Err(error) = usb_staging::write_back_if_changed(usb_root, kind) {
+            if let Err(error) = session.write_back(kind) {
                 return Err(match written {
                     Some(saved) => OrderSaveFailure {
                         error: BackendError::Validation(tr::usb_order_edit_partial_save(
@@ -888,6 +876,7 @@ impl BackendService {
             }
             written = Some(kind);
         }
+        session.commit()?;
         Ok(pdb_changed || edb_changed)
     }
 }

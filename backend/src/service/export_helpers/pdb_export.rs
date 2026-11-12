@@ -2,6 +2,7 @@
 //! byte-level checks that guard them.
 
 use super::*;
+use crate::service::usb_staging::UsbWriteSession;
 
 /// Read PDB t16 row bytes from an existing PDB on disk, in their on-disk
 /// order. Returns `None` when the input bytes are not a valid PDB image or
@@ -201,7 +202,10 @@ pub(super) fn validate_topology_locked_export_bytes(
 /// app's [`crate::pdb_writer::T19_DB_VERSION`] rather than the eDB's
 /// `dbVersion`. `None` when the USB has no readable eDB.
 pub(crate) fn edb_t19_property(usb_root: &Path) -> Option<crate::pdb_writer::T19Property> {
-    let conn = open_edb_rw(usb_root)?;
+    let conn = crate::service::usb_staging::UsbDatabases::present(usb_root)
+        .ok()
+        .flatten()?
+        .open_edb_writable()?;
     t19_property_from_conn(&conn)
 }
 
@@ -240,14 +244,37 @@ pub fn write_pdb(
     edb_playlist_id: Option<u32>,
     edb_sort_order: Option<u32>,
 ) -> BackendResult<WriteExportPdbResult> {
-    write_pdb_fresh_with_overrides(
-        usb_root,
+    let mut session = UsbWriteSession::without_service(usb_root);
+    let result = write_pdb_in(
+        &mut session,
         playlist,
         manifest,
         mirror_playlist_entries,
         edb_playlist_id,
         edb_sort_order,
-        true,
+    )?;
+    session.commit()?;
+    Ok(result)
+}
+
+/// [`write_pdb`] in `session`, written back to the USB at once.
+pub fn write_pdb_in(
+    session: &mut UsbWriteSession<'_>,
+    playlist: &ExportPlaylistData,
+    manifest: &ExportManifest,
+    mirror_playlist_entries: bool,
+    edb_playlist_id: Option<u32>,
+    edb_sort_order: Option<u32>,
+) -> BackendResult<WriteExportPdbResult> {
+    let usb_root = session.usb_root().to_path_buf();
+    write_pdb_fresh_with_overrides(
+        &usb_root,
+        playlist,
+        manifest,
+        mirror_playlist_entries,
+        edb_playlist_id,
+        edb_sort_order,
+        Some(session),
     )
 }
 
@@ -266,7 +293,7 @@ pub fn preview_pdb(
         mirror_playlist_entries,
         edb_playlist_id,
         edb_sort_order,
-        false,
+        None,
     )
 }
 
@@ -422,7 +449,7 @@ pub(super) fn write_pdb_fresh_with_overrides(
     mirror_playlist_entries: bool,
     override_playlist_id: Option<u32>,
     override_sort_order: Option<u32>,
-    commit_write: bool,
+    session: Option<&mut UsbWriteSession<'_>>,
 ) -> BackendResult<WriteExportPdbResult> {
     if std::env::var("PDB_WRITE_MODE")
         .ok()
@@ -451,12 +478,9 @@ pub(super) fn write_pdb_fresh_with_overrides(
         edb_t19_property(usb_root),
         false,
     )?;
-    if commit_write {
-        crate::service::usb_staging::commit_and_write_back(
-            usb_root,
-            crate::service::usb_staging::DbKind::Pdb,
-            &build.bytes,
-        )?;
+    if let Some(session) = session {
+        session.write_pdb(&build.bytes)?;
+        session.write_back(crate::service::usb_staging::DbKind::Pdb)?;
     }
     Ok(WriteExportPdbResult {
         inserted_tracks: build.inserted_tracks,
@@ -515,23 +539,20 @@ pub(crate) fn build_pdb_for_playlists(
         PdbPlaylistTreeRow,
     };
 
-    let pdb_path = crate::service::usb_staging::stage_pdb(usb_root)?;
+    let databases = crate::service::usb_staging::UsbDatabases::present(usb_root)?;
+    let pdb_path = databases.as_ref().and_then(|dbs| dbs.pdb());
     let profile = PdbLayoutProfile::from_env();
 
     // ── Load existing PDB data (for additive mode) ──────────────────────
-    let existing = if pdb_path.is_file() {
-        Some(parse_pdb(&pdb_path)?)
-    } else {
-        None
-    };
+    let existing = pdb_path.map(parse_pdb).transpose()?;
     // A repeated track id takes its last row's flags.
     let existing_header_flags_by_track_id = existing
         .iter()
         .flat_map(|parsed| &parsed.tracks)
         .map(|track| (track.id, track.header_flags))
         .collect::<HashMap<u32, u32>>();
-    let existing_pdb_bytes_before = if pdb_path.is_file() {
-        std::fs::read(&pdb_path).ok()
+    let existing_pdb_bytes_before = if let Some(pdb_path) = pdb_path {
+        std::fs::read(pdb_path).ok()
     } else {
         None
     };
@@ -711,7 +732,7 @@ pub(crate) fn build_pdb_for_playlists(
     let mut edb_identity_by_path =
         HashMap::<String, (Option<u32>, Option<u32>, Option<u32>, Option<u16>)>::new();
     {
-        if let Some(conn) = open_edb_rw(usb_root)
+        if let Some(conn) = databases.as_ref().and_then(|dbs| dbs.open_edb_writable())
             && table_exists(&conn, "content")
         {
             let has_key_table = table_exists(&conn, "key");
@@ -1637,13 +1658,16 @@ pub fn rewrite_pdb_playlist_from_manifest(
     playlist_pdb_id: u32,
     sort_order: u32,
 ) -> BackendResult<WriteExportPdbResult> {
-    write_pdb_fresh_with_overrides(
+    let mut session = UsbWriteSession::without_service(usb_root);
+    let result = write_pdb_fresh_with_overrides(
         usb_root,
         playlist,
         manifest,
         true,
         Some(playlist_pdb_id),
         Some(sort_order),
-        true,
-    )
+        Some(&mut session),
+    )?;
+    session.commit()?;
+    Ok(result)
 }

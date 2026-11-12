@@ -95,7 +95,7 @@ pub(crate) fn forget_cache_key_for_root(usb_root: &Path) {
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub(crate) enum DbKind {
+pub enum DbKind {
     Pdb,
     Edb,
 }
@@ -302,11 +302,11 @@ fn save_state(device_dir: &Path, state: &StagingState) -> std::io::Result<()> {
 /// Takes `cache_root` explicitly (rather than reading the process-global
 /// directly) so tests can exercise the "enabled" path with a private,
 /// per-test root -- never mutating global state, so they're safe to run
-/// concurrently with the rest of the suite. [`stage_pdb`]/[`stage_edb`] are
-/// the thin global-reading wrappers production code actually calls.
+/// concurrently with the rest of the suite. [`UsbDatabases`] is the
+/// global-reading entry point production code actually calls.
 ///
 /// `force_recheck` distinguishes a connect-time call
-/// ([`stage_pdb_on_connect`]/[`stage_edb_on_connect`], `true`) from every
+/// ([`UsbDatabases::on_connect`], `true`) from every
 /// other, passive read/write call site (`false`): only a `true` call is
 /// allowed to *establish* the "verified this connect" fast path
 /// (`VERIFIED_THIS_CONNECT`) on success, and only a `false` call is allowed
@@ -406,6 +406,7 @@ fn stage_file_with_root(
     Ok(local_path)
 }
 
+#[cfg(test)]
 pub(crate) fn stage_pdb(usb_root: &Path) -> BackendResult<PathBuf> {
     stage_file_with_root(
         cache_root().as_deref(),
@@ -416,6 +417,7 @@ pub(crate) fn stage_pdb(usb_root: &Path) -> BackendResult<PathBuf> {
     )
 }
 
+#[cfg(test)]
 pub(crate) fn stage_edb(usb_root: &Path) -> BackendResult<PathBuf> {
     stage_file_with_root(
         cache_root().as_deref(),
@@ -431,22 +433,13 @@ pub(crate) fn stage_edb(usb_root: &Path) -> BackendResult<PathBuf> {
 /// device was already marked verified earlier in the process -- unlike
 /// `stage_pdb`/`stage_edb`, which trust an existing verified mark and skip
 /// the USB `stat()` entirely.
+#[cfg(test)]
 pub(crate) fn stage_pdb_on_connect(usb_root: &Path) -> BackendResult<PathBuf> {
     stage_file_with_root(
         cache_root().as_deref(),
         usb_root,
         &super::usb_vendor_compat::vendor_pdb_path(usb_root),
         DbKind::Pdb,
-        true,
-    )
-}
-
-pub(crate) fn stage_edb_on_connect(usb_root: &Path) -> BackendResult<PathBuf> {
-    stage_file_with_root(
-        cache_root().as_deref(),
-        usb_root,
-        &super::usb_vendor_compat::vendor_edb_path(usb_root),
-        DbKind::Edb,
         true,
     )
 }
@@ -707,6 +700,686 @@ pub(crate) fn commit_and_write_back_for_test(
     local_bytes: &[u8],
 ) -> BackendResult<bool> {
     commit_and_write_back_with_root(cache_root, usb_root, kind, local_bytes)
+}
+
+// ── Which databases a stick has ──────────────────────────────────────────
+
+/// The player databases a stick has, as staged: the PDB, the eDB or both.
+/// Staging decides this once per call from its own per-device copies (which
+/// a connect re-syncs with the USB), so nothing downstream checks files.
+/// Read from whichever is present, PDB first; write to each present one.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum UsbDatabases {
+    Both { pdb: PathBuf, edb: PathBuf },
+    PdbOnly { pdb: PathBuf },
+    EdbOnly { edb: PathBuf },
+}
+
+impl UsbDatabases {
+    fn from_staged(pdb: PathBuf, edb: PathBuf) -> Option<Self> {
+        match (pdb.is_file(), edb.is_file()) {
+            (true, true) => Some(Self::Both { pdb, edb }),
+            (true, false) => Some(Self::PdbOnly { pdb }),
+            (false, true) => Some(Self::EdbOnly { edb }),
+            (false, false) => None,
+        }
+    }
+
+    /// The databases `usb_root` has. Fails when it has neither.
+    pub(crate) fn of(usb_root: &Path) -> BackendResult<Self> {
+        Self::present(usb_root)?
+            .ok_or_else(|| BackendError::NotFound(crate::i18n::tr::usb_error_no_player_database()))
+    }
+
+    /// The databases `usb_root` has, `None` when it has neither (a fresh
+    /// stick, before export or initialize creates them).
+    pub(crate) fn present(usb_root: &Path) -> BackendResult<Option<Self>> {
+        Ok(Self::from_staged(
+            staged_path(usb_root, DbKind::Pdb, false)?,
+            staged_path(usb_root, DbKind::Edb, false)?,
+        ))
+    }
+
+    /// Stages both databases afresh, once per USB connect: a database the
+    /// USB lacks is dropped from staging. Best-effort: a staging hiccup is
+    /// logged, and that database reads as missing.
+    pub(crate) fn on_connect(usb_root: &Path) -> Option<Self> {
+        let stage = |kind: DbKind| {
+            staged_path(usb_root, kind, true)
+                .inspect_err(|err| {
+                    crate::logging::debug(
+                        "usb-import",
+                        format!(
+                            "Failed to stage {} locally: {err}",
+                            kind.label(),
+                            err = err.english()
+                        ),
+                    );
+                })
+                .unwrap_or_default()
+        };
+        let pdb = stage(DbKind::Pdb);
+        let edb = stage(DbKind::Edb);
+        Self::from_staged(pdb, edb)
+    }
+
+    pub(crate) fn pdb(&self) -> Option<&Path> {
+        match self {
+            Self::Both { pdb, .. } | Self::PdbOnly { pdb } => Some(pdb),
+            Self::EdbOnly { .. } => None,
+        }
+    }
+
+    pub(crate) fn edb(&self) -> Option<&Path> {
+        match self {
+            Self::Both { edb, .. } | Self::EdbOnly { edb } => Some(edb),
+            Self::PdbOnly { .. } => None,
+        }
+    }
+
+    /// The staged PDB, for a reader that needs it: an eDB-only stick fails.
+    pub(crate) fn require_pdb(&self) -> BackendResult<&Path> {
+        self.pdb()
+            .ok_or_else(|| BackendError::NotFound(crate::i18n::tr::usb_error_no_pdb()))
+    }
+
+    pub(crate) fn path(&self, kind: DbKind) -> Option<&Path> {
+        match kind {
+            DbKind::Pdb => self.pdb(),
+            DbKind::Edb => self.edb(),
+        }
+    }
+
+    pub(crate) fn has(&self, kind: DbKind) -> bool {
+        self.path(kind).is_some()
+    }
+
+    /// The database the stick lacks while it has the other one.
+    pub(crate) fn missing(&self) -> Option<DbKind> {
+        match self {
+            Self::Both { .. } => None,
+            Self::PdbOnly { .. } => Some(DbKind::Edb),
+            Self::EdbOnly { .. } => Some(DbKind::Pdb),
+        }
+    }
+
+    /// A read-only connection to the staged eDB; `None` without one, or when
+    /// it can't be opened (that adds a warning).
+    pub(crate) fn open_edb(
+        &self,
+        warnings: &mut Vec<crate::models::WarningEntry>,
+    ) -> Option<rusqlite::Connection> {
+        crate::edb::open_edb(self.edb()?, warnings)
+    }
+
+    /// A read-write connection to the staged eDB; `None` without one.
+    pub(crate) fn open_edb_writable(&self) -> Option<rusqlite::Connection> {
+        crate::edb::open_edb_rw_at(self.edb()?)
+    }
+
+    /// Where `media_path`'s track is in each database: its PDB row (from
+    /// `parsed`, the parse of [`Self::pdb`]) and its eDB `content_id` (through
+    /// `edb`, a connection to [`Self::edb`]). The per-database decision of a
+    /// track edit comes from this: see [`TrackLocation::require`].
+    pub(crate) fn locate_track<'p>(
+        &self,
+        parsed: Option<&'p crate::pdb_reader::ParsedPdb>,
+        edb: Option<&rusqlite::Connection>,
+        media_path: &str,
+    ) -> BackendResult<TrackLocation<'p>> {
+        let media_path = media_path.trim();
+        let pdb_row = match parsed.filter(|_| self.pdb().is_some()) {
+            Some(parsed) => parsed
+                .tracks
+                .iter()
+                .find(|t| t.track_file_path == media_path)
+                .or_else(|| {
+                    parsed
+                        .tracks
+                        .iter()
+                        .find(|t| t.track_file_path.eq_ignore_ascii_case(media_path))
+                }),
+            None => None,
+        };
+        let edb_content_id = match edb.filter(|_| self.edb().is_some()) {
+            Some(conn) => crate::edb::find_content_id_by_path(conn, media_path)?,
+            None => None,
+        };
+        Ok(TrackLocation {
+            pdb_row,
+            edb_content_id,
+            pdb_present: self.pdb().is_some(),
+            edb_present: self.edb().is_some(),
+        })
+    }
+}
+
+/// The staged PDB of `usb_root`, for a reader that needs it.
+pub(crate) fn required_pdb(usb_root: &Path) -> BackendResult<PathBuf> {
+    Ok(UsbDatabases::of(usb_root)?.require_pdb()?.to_path_buf())
+}
+
+/// [`UsbDatabases::pdb`] / [`UsbDatabases::edb`] for a stick that may have
+/// neither ([`UsbDatabases::present`]).
+pub trait UsbDatabasesExt {
+    fn pdb(&self) -> Option<&Path>;
+    fn edb(&self) -> Option<&Path>;
+}
+
+impl UsbDatabasesExt for Option<UsbDatabases> {
+    fn pdb(&self) -> Option<&Path> {
+        self.as_ref().and_then(UsbDatabases::pdb)
+    }
+    fn edb(&self) -> Option<&Path> {
+        self.as_ref().and_then(UsbDatabases::edb)
+    }
+}
+
+/// Where a track is in a stick's databases (see [`UsbDatabases::locate_track`]).
+#[derive(Debug, Clone, Copy)]
+pub struct TrackLocation<'p> {
+    pub(crate) pdb_row: Option<&'p crate::pdb_reader::PdbTrackRow>,
+    pub(crate) edb_content_id: Option<i64>,
+    pdb_present: bool,
+    edb_present: bool,
+}
+
+impl TrackLocation<'_> {
+    /// The databases a present database lacks this track in.
+    pub(crate) fn gaps(&self) -> Vec<DbKind> {
+        let mut gaps = Vec::new();
+        if self.pdb_present && self.pdb_row.is_none() {
+            gaps.push(DbKind::Pdb);
+        }
+        if self.edb_present && self.edb_content_id.is_none() {
+            gaps.push(DbKind::Edb);
+        }
+        gaps
+    }
+
+    /// In at least one database. A track in neither is `not_found`.
+    pub(crate) fn require(self, not_found: impl FnOnce() -> BackendError) -> BackendResult<Self> {
+        if self.pdb_row.is_none() && self.edb_content_id.is_none() {
+            return Err(not_found());
+        }
+        Ok(self)
+    }
+}
+
+/// The staged path of `kind` (the USB path when staging is off), present on
+/// the stick or not.
+fn staged_path(usb_root: &Path, kind: DbKind, on_connect: bool) -> BackendResult<PathBuf> {
+    stage_file_with_root(
+        cache_root().as_deref(),
+        usb_root,
+        &vendor_path(usb_root, kind),
+        kind,
+        on_connect,
+    )
+}
+
+/// Where `kind` of `usb_root` is staged, present on the stick or not: for a
+/// writer that may create it (in a write session).
+pub(crate) fn staged_write_path(usb_root: &Path, kind: DbKind) -> BackendResult<PathBuf> {
+    staged_path(usb_root, kind, false)
+}
+
+/// A read-write connection to the staged eDB of `usb_root`; `None` without one.
+pub fn open_edb_rw(usb_root: &Path) -> Option<rusqlite::Connection> {
+    UsbDatabases::present(usb_root)
+        .ok()
+        .flatten()
+        .and_then(|dbs| dbs.open_edb_writable())
+}
+
+/// The caller's shared eDB connection, else one of its own opened through
+/// the layer: what a repair step that can run alone or inside a repair run
+/// writes through.
+pub(crate) enum EdbRw<'a> {
+    Shared(&'a mut rusqlite::Connection),
+    Owned(rusqlite::Connection),
+}
+
+impl<'a> EdbRw<'a> {
+    pub(crate) fn shared_or_open(
+        shared: Option<&'a mut rusqlite::Connection>,
+        usb_root: &Path,
+    ) -> Option<Self> {
+        match shared {
+            Some(conn) => Some(Self::Shared(conn)),
+            None => open_edb_rw(usb_root).map(Self::Owned),
+        }
+    }
+
+    /// Like [`Self::shared_or_open`], opening a connection of its own with
+    /// `open` instead.
+    pub(crate) fn shared_or(
+        shared: Option<&'a mut rusqlite::Connection>,
+        open: impl FnOnce() -> Option<rusqlite::Connection>,
+    ) -> Option<Self> {
+        match shared {
+            Some(conn) => Some(Self::Shared(conn)),
+            None => open().map(Self::Owned),
+        }
+    }
+
+    pub(crate) fn conn(&mut self) -> &mut rusqlite::Connection {
+        match self {
+            Self::Shared(conn) => conn,
+            Self::Owned(conn) => conn,
+        }
+    }
+}
+
+// ── Write session ────────────────────────────────────────────────────────
+
+/// A backup a write session takes when it opens.
+#[derive(Debug, Clone, Copy)]
+pub enum SessionBackup<'r> {
+    None,
+    /// `backup_usb_databases_with_retention`: `reason` and a fresh playlist
+    /// count, when the write can change it.
+    WithRetention {
+        reason: &'r str,
+        playlist_count: Option<usize>,
+    },
+    /// The same, with the playlist count from the staged PDB as it is now.
+    CountingPlaylists {
+        reason: &'r str,
+    },
+    /// Taking the place of a newest backup of the same reason.
+    ReplacingSameReason {
+        reason: &'r str,
+    },
+}
+
+/// One write to a stick's databases. On open it takes the backup asked for;
+/// the writer then changes the staged copies -- the PDB through
+/// [`Self::write_pdb`], the eDB through the one shared connection
+/// [`Self::edb`] -- and [`Self::commit`] writes each changed database back
+/// (both or neither) and drops the parse caches. Dropped without a commit
+/// (an error), it puts the staged copies back as they were and writes
+/// nothing to the USB.
+pub struct UsbWriteSession<'s> {
+    service: Option<&'s super::BackendService>,
+    usb_root: PathBuf,
+    edb: Option<rusqlite::Connection>,
+    /// The databases this session changed (or may have, through its
+    /// connection), PDB then eDB.
+    touched: [bool; 2],
+    /// The staged PDB before this session changed it, `None` when the stick
+    /// had none: for undoing a PDB write-back when the eDB's then fails.
+    pdb_original: Option<Option<Vec<u8>>>,
+    /// Staging off: the USB files as they were, put back on a drop.
+    direct_snapshots: [Option<Option<Vec<u8>>>; 2],
+    done: bool,
+}
+
+fn kind_index(kind: DbKind) -> usize {
+    match kind {
+        DbKind::Pdb => 0,
+        DbKind::Edb => 1,
+    }
+}
+
+impl DbKind {
+    pub(crate) fn label(self) -> &'static str {
+        match self {
+            DbKind::Pdb => "PDB",
+            DbKind::Edb => "eDB",
+        }
+    }
+}
+
+impl super::BackendService {
+    /// Opens a [`UsbWriteSession`] on `usb_root`, taking `backup` first; the
+    /// backup's warnings go to `warnings`.
+    pub(crate) fn usb_write_session(
+        &self,
+        usb_root: &Path,
+        backup: SessionBackup<'_>,
+        warnings: &mut Vec<crate::models::WarningEntry>,
+    ) -> UsbWriteSession<'_> {
+        match backup {
+            SessionBackup::None => {}
+            SessionBackup::WithRetention {
+                reason,
+                playlist_count,
+            } => warnings.extend(self.backup_usb_databases_with_retention(
+                usb_root,
+                reason,
+                playlist_count,
+            )),
+            SessionBackup::CountingPlaylists { reason } => {
+                let playlist_count = UsbDatabases::present(usb_root)
+                    .ok()
+                    .flatten()
+                    .pdb()
+                    .and_then(crate::pdb_reader::count_pdb_playlists);
+                warnings.extend(self.backup_usb_databases_with_retention(
+                    usb_root,
+                    reason,
+                    playlist_count,
+                ));
+            }
+            SessionBackup::ReplacingSameReason { reason } => {
+                warnings.extend(self.backup_usb_databases_replacing_same_reason(usb_root, reason));
+            }
+        }
+        UsbWriteSession::open(Some(self), usb_root)
+    }
+}
+
+impl<'s> UsbWriteSession<'s> {
+    /// A session with no service: no backup, and no parse caches to drop.
+    pub(crate) fn without_service(usb_root: &Path) -> UsbWriteSession<'static> {
+        UsbWriteSession::open(None, usb_root)
+    }
+
+    /// A session without a backup; `service` (when given) has its parse
+    /// caches dropped on commit.
+    pub(crate) fn open(service: Option<&'s super::BackendService>, usb_root: &Path) -> Self {
+        Self {
+            service,
+            usb_root: usb_root.to_path_buf(),
+            edb: None,
+            touched: [false; 2],
+            pdb_original: None,
+            direct_snapshots: [None, None],
+            done: false,
+        }
+    }
+
+    pub(crate) fn usb_root(&self) -> &Path {
+        &self.usb_root
+    }
+
+    /// The databases the stick has now, as this session has staged them.
+    pub(crate) fn databases(&self) -> BackendResult<Option<UsbDatabases>> {
+        UsbDatabases::present(&self.usb_root)
+    }
+
+    /// Marks `kind` as changed by this session, keeping what's needed to
+    /// undo that first.
+    fn touch(&mut self, kind: DbKind) -> BackendResult<()> {
+        let index = kind_index(kind);
+        if self.touched[index] {
+            return Ok(());
+        }
+        let path = staged_path(&self.usb_root, kind, false)?;
+        let current = || -> BackendResult<Option<Vec<u8>>> {
+            Ok(if path.is_file() {
+                Some(std::fs::read(&path)?)
+            } else {
+                None
+            })
+        };
+        if cache_root().is_none() {
+            self.direct_snapshots[index] = Some(current()?);
+        }
+        if kind == DbKind::Pdb {
+            self.pdb_original = Some(if vendor_path(&self.usb_root, kind).is_file() {
+                current()?
+            } else {
+                None
+            });
+        }
+        self.touched[index] = true;
+        Ok(())
+    }
+
+    /// The shared read-write connection to the staged eDB, opened on first
+    /// use; `None` while the stick has no eDB.
+    pub(crate) fn edb(&mut self) -> BackendResult<Option<&mut rusqlite::Connection>> {
+        if self.edb.is_none() {
+            let Some(path) = UsbDatabases::present(&self.usb_root)?
+                .edb()
+                .map(Path::to_path_buf)
+            else {
+                return Ok(None);
+            };
+            self.touch(DbKind::Edb)?;
+            self.edb = crate::edb::open_edb_rw_at(&path);
+        }
+        Ok(self.edb.as_mut())
+    }
+
+    /// Closes the shared eDB connection, its WAL checkpointed into the file
+    /// first: a write-back copies the file, not through SQLite.
+    pub(crate) fn close_edb(&mut self) {
+        if let Some(conn) = self.edb.take() {
+            let _ = conn.execute_batch("PRAGMA wal_checkpoint(TRUNCATE);");
+        }
+    }
+
+    /// The staged PDB's path, for a writer that changes the file itself;
+    /// whatever it writes there is this session's change. `None` while the
+    /// stick has no PDB.
+    pub(crate) fn pdb_path(&mut self) -> BackendResult<Option<PathBuf>> {
+        let Some(path) = UsbDatabases::present(&self.usb_root)?
+            .pdb()
+            .map(Path::to_path_buf)
+        else {
+            return Ok(None);
+        };
+        self.touch(DbKind::Pdb)?;
+        Ok(Some(path))
+    }
+
+    /// Puts `bytes` into the staged PDB, creating it when the stick has none.
+    pub(crate) fn write_pdb(&mut self, bytes: &[u8]) -> BackendResult<()> {
+        self.touch(DbKind::Pdb)?;
+        let path = staged_path(&self.usb_root, DbKind::Pdb, false)?;
+        if let Some(parent) = path.parent() {
+            std::fs::create_dir_all(parent)?;
+        }
+        if cache_root().is_some() {
+            std::fs::write(&path, bytes)?;
+        } else {
+            super::anlz::atomic_write_bytes(&path, bytes)?;
+        }
+        Ok(())
+    }
+
+    /// Creates `kind`, missing from the stick, as `initialize_usb` does:
+    /// `created_date` is the day it was made. A local copy left from an
+    /// earlier session isn't this stick's database, so it goes first.
+    /// Returns the staged path.
+    pub(crate) fn create_database(
+        &mut self,
+        kind: DbKind,
+        created_date: &str,
+    ) -> BackendResult<PathBuf> {
+        if kind == DbKind::Edb {
+            self.close_edb();
+        }
+        let usb_path = vendor_path(&self.usb_root, kind);
+        if usb_path.exists() {
+            return Err(BackendError::Internal(format!(
+                "{} already exists: {}",
+                kind.label(),
+                usb_path.display()
+            )));
+        }
+        let path = restage_from_usb(&self.usb_root, kind)?;
+        self.touch(kind)?;
+        if let Some(parent) = path.parent() {
+            std::fs::create_dir_all(parent)?;
+        }
+        match kind {
+            DbKind::Pdb => {
+                std::fs::write(
+                    &path,
+                    super::usb_utils::build_fullshape_pdb_bytes(created_date),
+                )?;
+            }
+            DbKind::Edb => super::usb_utils::initialize_fullshape_edb(&path, created_date)?,
+        }
+        Ok(path)
+    }
+
+    /// Drops `kind`, which [`Self::create_database`] created, again: a failed
+    /// rebuild leaves nothing to write back.
+    pub(crate) fn drop_created_database(&mut self, kind: DbKind) {
+        if kind == DbKind::Edb {
+            self.close_edb();
+        }
+        if cache_root().is_some() {
+            let _ = restage_from_usb(&self.usb_root, kind);
+        } else {
+            let path = vendor_path(&self.usb_root, kind);
+            for suffix in ["", "-wal", "-shm"] {
+                let mut file = path.as_os_str().to_owned();
+                file.push(suffix);
+                let _ = std::fs::remove_file(file);
+            }
+        }
+    }
+
+    /// Marks `kind` as one this session writes, for a writer that changes
+    /// its staged copy on its own (the repair's in-memory PDB).
+    pub(crate) fn will_write(&mut self, kind: DbKind) -> BackendResult<()> {
+        self.touch(kind)
+    }
+
+    /// [`Self::edb`], with a failure to stage logged and read as no eDB: for
+    /// steps that open a connection of their own without one.
+    pub(crate) fn edb_conn(&mut self) -> Option<&mut rusqlite::Connection> {
+        match self.edb() {
+            Ok(conn) => conn,
+            Err(err) => {
+                crate::logging::debug(
+                    "usb-staging",
+                    format!("could not stage the eDB: {err}", err = err.english()),
+                );
+                None
+            }
+        }
+    }
+
+    /// Replaces `kind` with the file at `source` (a backup): what the stick
+    /// holds is staged again first, so the copy lands on it as it is now.
+    pub(crate) fn replace_database(&mut self, kind: DbKind, source: &Path) -> BackendResult<()> {
+        if kind == DbKind::Edb {
+            self.close_edb();
+        }
+        if cache_root().is_some() {
+            restage_from_usb(&self.usb_root, kind)?;
+        }
+        self.touch(kind)?;
+        let path = staged_path(&self.usb_root, kind, false)?;
+        if let Some(parent) = path.parent() {
+            std::fs::create_dir_all(parent)?;
+        }
+        std::fs::copy(source, &path)?;
+        Ok(())
+    }
+
+    /// Writes `kind` back to the USB now, when changed, keeping the session
+    /// open: for a writer whose later steps go on when this one fails. On
+    /// failure the staged copy is staged again from the USB, so the change
+    /// isn't written back later either.
+    pub(crate) fn write_back(&mut self, kind: DbKind) -> BackendResult<bool> {
+        if kind == DbKind::Edb
+            && let Some(conn) = self.edb.as_ref()
+        {
+            let _ = conn.execute_batch("PRAGMA wal_checkpoint(TRUNCATE);");
+        }
+        write_back_if_changed(&self.usb_root, kind).inspect_err(|_| {
+            let _ = restage_from_usb(&self.usb_root, kind);
+        })
+    }
+
+    /// Writes each changed database back to the USB, both or neither, and
+    /// drops the parse caches.
+    pub(crate) fn commit(mut self) -> BackendResult<()> {
+        self.close_edb();
+        let original = self.pdb_original.take();
+        let result = write_back_both_or_neither(
+            &self.usb_root,
+            original.as_ref().map(|original| original.as_deref()),
+        );
+        self.done = true;
+        if let Some(service) = self.service {
+            service.invalidate_usb_parse_cache();
+        }
+        result
+    }
+}
+
+impl Drop for UsbWriteSession<'_> {
+    fn drop(&mut self) {
+        if self.done {
+            return;
+        }
+        self.close_edb();
+        for kind in [DbKind::Pdb, DbKind::Edb] {
+            let index = kind_index(kind);
+            if !self.touched[index] {
+                continue;
+            }
+            match self.direct_snapshots[index].take() {
+                Some(snapshot) => {
+                    let path = vendor_path(&self.usb_root, kind);
+                    let _ = match snapshot {
+                        Some(bytes) => std::fs::write(&path, bytes),
+                        None => std::fs::remove_file(&path),
+                    };
+                }
+                None => {
+                    let _ = restage_from_usb(&self.usb_root, kind);
+                }
+            }
+        }
+        if let Some(service) = self.service {
+            service.invalidate_usb_parse_cache();
+        }
+    }
+}
+
+/// Writes both staged databases back to the USB, or neither: before writing,
+/// both USB copies are checked for outside changes. When the eDB write fails
+/// after the PDB was written, `pdb_original` (what the USB held; `Some(None)`
+/// when it had no PDB; `None` when unknown, as for a PDB no writer said it
+/// changes) is put back. On failure the staged copies are staged again from
+/// the USB, so they match the drive.
+pub(crate) fn write_back_both_or_neither(
+    usb_root: &Path,
+    pdb_original: Option<Option<&[u8]>>,
+) -> BackendResult<()> {
+    let restage_both = || {
+        let _ = restage_from_usb(usb_root, DbKind::Pdb);
+        let _ = restage_from_usb(usb_root, DbKind::Edb);
+    };
+    let pdb_written = check_write_back(usb_root, DbKind::Pdb)
+        .and_then(|()| check_write_back(usb_root, DbKind::Edb))
+        .and_then(|()| write_back_if_changed(usb_root, DbKind::Pdb))
+        .inspect_err(|_| restage_both())?;
+    if let Err(err) = write_back_if_changed(usb_root, DbKind::Edb) {
+        let undo = || match pdb_original {
+            Some(Some(original)) => {
+                commit_and_write_back(usb_root, DbKind::Pdb, original).map(|_| ())
+            }
+            Some(None) => {
+                std::fs::remove_file(vendor_path(usb_root, DbKind::Pdb)).map_err(Into::into)
+            }
+            None => Err(BackendError::Internal(
+                "the previous PDB wasn't kept".to_string(),
+            )),
+        };
+        if pdb_written && let Err(undo_err) = undo() {
+            restage_both();
+            return Err(BackendError::Internal(format!(
+                "{err}; putting the previous PDB back also failed ({undo_err}), so the USB has the \
+                 new PDB with the previous eDB -- restore the backup taken before this change",
+                err = err.english(),
+                undo_err = undo_err.english()
+            )));
+        }
+        restage_both();
+        return Err(err);
+    }
+    Ok(())
 }
 
 #[cfg(test)]

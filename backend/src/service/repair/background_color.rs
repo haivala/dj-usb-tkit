@@ -5,7 +5,7 @@
 //! only ever sets them together, and export and repair leave both alone
 //! (see `crate::pdb_writer::t19_sync_target`).
 
-use super::run::{StagedPdb, write_back_both_or_neither, write_back_pdb_alone};
+use super::run::StagedPdb;
 use super::*;
 use crate::i18n::{Text, tr};
 use crate::models::{
@@ -103,10 +103,10 @@ fn read_background_colors(usb_root: &Path, pdb: &[u8]) -> UsbBackgroundColorData
     let pdb_color = (!pdb.is_empty())
         .then(|| crate::pdb_writer::t19_background_color(pdb, page_size_of(pdb)))
         .flatten();
-    let has_edb = usb_staging::stage_edb(usb_root).is_ok_and(|path| path.is_file());
-    let edb_color = has_edb
-        .then(|| open_edb_rw(usb_root))
+    let edb_color = usb_staging::UsbDatabases::present(usb_root)
+        .ok()
         .flatten()
+        .and_then(|databases| databases.open_edb_writable())
         .and_then(|conn| edb_background_color(&conn));
     let reason = background_color_refusal(
         pdb_color.is_some() || edb_color.is_some(),
@@ -180,35 +180,34 @@ impl BackendService {
             });
         }
 
-        warnings.extend(self.backup_usb_databases_with_retention(
+        let mut session = self.usb_write_session(
             &usb_root,
-            "Before background color change",
-            None,
-        ));
+            usb_staging::SessionBackup::WithRetention {
+                reason: "Before background color change",
+                playlist_count: None,
+            },
+            &mut warnings,
+        );
 
         // The PDB change stays in memory until the eDB one has succeeded.
         if before.pdb_color.is_some() {
+            session.will_write(usb_staging::DbKind::Pdb)?;
             let page_size = page_size_of(&pdb.bytes);
             pdb.patch(|bytes| {
                 crate::pdb_writer::set_t19_background_color(bytes, page_size, req.color)
             })?;
         }
         if before.edb_color.is_some() {
-            let conn = open_edb_rw(&usb_root)
+            let conn = session
+                .edb()?
                 .ok_or_else(|| BackendError::Validation(tr::usb_background_color_error_no_edb()))?;
             conn.execute(
                 "UPDATE property SET backGroundColorType = ?1",
                 params![req.color],
             )?;
         }
-        match (before.pdb_color, before.edb_color) {
-            (Some(_), Some(_)) => write_back_both_or_neither(&usb_root, &mut pdb)?,
-            (Some(_), None) => write_back_pdb_alone(&usb_root, &mut pdb)?,
-            _ => {
-                usb_staging::write_back_if_changed(&usb_root, usb_staging::DbKind::Edb)?;
-            }
-        }
-        self.invalidate_usb_parse_cache();
+        pdb.save()?;
+        session.commit()?;
         logging::debug(
             "usb-background-color",
             format!(

@@ -224,13 +224,23 @@ pub fn load_pdb_t16_rows_from_bytes(bytes: &[u8]) -> Option<Vec<Vec<u8>>> {
     if rows.is_empty() { None } else { Some(rows) }
 }
 
+/// The staged PDB of `usb_root`, `None` when the stick has none. The patches
+/// below change it in place; the caller's write session writes it back.
+fn staged_pdb(usb_root: &Path) -> BackendResult<Option<std::path::PathBuf>> {
+    Ok(
+        crate::service::usb_staging::UsbDatabases::present(usb_root)?
+            .as_ref()
+            .and_then(|databases| databases.pdb())
+            .map(Path::to_path_buf),
+    )
+}
+
 /// Raw t16 row bytes of the staged PDB of a USB root; empty when there is no
 /// PDB or it isn't page-aligned.
 pub fn load_pdb_t16_raw(usb_root: &Path) -> BackendResult<Vec<Vec<u8>>> {
-    let pdb_path = crate::service::usb_staging::stage_pdb(usb_root)?;
-    if !pdb_path.is_file() {
+    let Some(pdb_path) = staged_pdb(usb_root)? else {
         return Ok(Vec::new());
-    }
+    };
     let bytes = std::fs::read(&pdb_path)?;
     let page_size = 4096usize;
     if bytes.len() < page_size || !bytes.len().is_multiple_of(page_size) {
@@ -288,7 +298,7 @@ pub fn patch_pdb_columns_menu_set_by_kind(
     usb_root: &Path,
     desired: &[(u16, String)],
 ) -> BackendResult<bool> {
-    let pdb_path = crate::service::usb_staging::stage_pdb(usb_root)?;
+    let pdb_path = crate::service::usb_staging::required_pdb(usb_root)?;
     let mut bytes = std::fs::read(&pdb_path)?;
     let page_size = 4096usize;
     if bytes.len() < page_size || bytes.len() % page_size != 0 {
@@ -354,10 +364,9 @@ pub fn patch_pdb_columns_menu_set_by_kind(
 /// marks a changed row absent and appends a new one, so the page holds dead rows
 /// too. Empty when there is no PDB or no t17.
 pub fn load_pdb_t17_live_rows(usb_root: &Path) -> BackendResult<Vec<[u8; 8]>> {
-    let pdb_path = crate::service::usb_staging::stage_pdb(usb_root)?;
-    if !pdb_path.is_file() {
+    let Some(pdb_path) = staged_pdb(usb_root)? else {
         return Ok(Vec::new());
-    }
+    };
     let bytes = std::fs::read(&pdb_path)?;
     let page_size = 4096usize;
     if bytes.len() < page_size || !bytes.len().is_multiple_of(page_size) {
@@ -407,10 +416,9 @@ pub fn patch_pdb_t17_category_snapshot(
     usb_root: &Path,
     encoded_rows: &[[u8; 8]],
 ) -> BackendResult<bool> {
-    let pdb_path = crate::service::usb_staging::stage_pdb(usb_root)?;
-    if !pdb_path.is_file() {
+    let Some(pdb_path) = staged_pdb(usb_root)? else {
         return Ok(false);
-    }
+    };
     let before = std::fs::read(&pdb_path)?;
     let page_size = 4096usize;
     if before.len() < page_size || before.len() % page_size != 0 {

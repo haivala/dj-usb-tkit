@@ -2,30 +2,41 @@
 
 use super::*;
 use crate::i18n::tr;
+use crate::service::usb_staging::{UsbDatabasesExt, UsbWriteSession};
 
+/// Writes `playlist` into the staged eDB of `usb_root` in a write session of
+/// its own, written back to the USB.
 pub fn write_edb_playlist(
     usb_root: &Path,
     playlist: &ExportPlaylistData,
     manifest: &ExportManifest,
     mirror_playlist_entries: bool,
 ) -> BackendResult<WriteExportLibraryDbResult> {
-    let db_path = usb_root
-        .join(USB_VENDOR_ROOT_DIR)
-        .join(USB_VENDOR_DB_DIR)
-        .join("exportLibrary.db");
-    if !db_path.is_file() {
+    let mut session = UsbWriteSession::without_service(usb_root);
+    let result = write_edb_playlist_in(&mut session, playlist, manifest, mirror_playlist_entries)?;
+    session.commit()?;
+    Ok(result)
+}
+
+/// Writes `playlist` into the session's staged eDB.
+pub fn write_edb_playlist_in(
+    session: &mut UsbWriteSession<'_>,
+    playlist: &ExportPlaylistData,
+    manifest: &ExportManifest,
+    mirror_playlist_entries: bool,
+) -> BackendResult<WriteExportLibraryDbResult> {
+    if session.databases()?.edb().is_none() {
         return Err(BackendError::NotFound(tr::export_error_edb_missing(
-            db_path.display(),
+            crate::service::usb_vendor_compat::vendor_edb_path(session.usb_root()).display(),
         )));
     }
-
-    let Some(mut conn) = open_edb_rw(usb_root) else {
+    let Some(conn) = session.edb()? else {
         return Err(BackendError::Internal(
             "unable to open eDB in read-write mode".to_string(),
         ));
     };
 
-    write_edb_playlist_with_conn(&mut conn, playlist, manifest, mirror_playlist_entries)
+    write_edb_playlist_with_conn(conn, playlist, manifest, mirror_playlist_entries)
 }
 
 pub fn write_edb_playlist_with_conn(

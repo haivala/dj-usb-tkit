@@ -10,16 +10,14 @@ use super::{
     ExclusiveTrackInfo, ExportManifest, ExportPlaylistData, PlaylistRemovalPdbResult,
     canonicalize_track_path_identity, normalize_owned_export_path,
 };
-use crate::edb::{
-    edb_path_from_usb_root, open_edb_from_usb_root, open_edb_rw, preferred_export_playlist_row_id,
-    table_exists,
-};
+use crate::edb::{open_edb_from_usb_root, preferred_export_playlist_row_id, table_exists};
 use crate::error::{BackendError, BackendResult};
 use crate::i18n::tr;
 use crate::logging::{self, Level};
 use crate::models::WarningEntry;
 use crate::pdb_reader::parse_pdb;
 use crate::service::track_matching::{ContentFingerprint, pdb_track_fingerprint};
+use crate::service::usb_staging::{DbKind, UsbDatabases, UsbDatabasesExt, UsbWriteSession};
 use crate::service::usb_utils::canonicalize_playlist_name;
 
 fn parse_usb_playlist_numeric_id(raw: Option<&str>) -> Option<u32> {
@@ -45,22 +43,24 @@ fn verify_optional_export_asset_exists(
 }
 
 pub fn remove_playlist_from_edb(
-    usb_root: &Path,
+    session: &mut UsbWriteSession<'_>,
     name_candidates: &[String],
     exclusive_track_paths: &[String],
     warnings: &mut Vec<WarningEntry>,
 ) -> BackendResult<usize> {
-    let Some(mut conn) = open_edb_rw(usb_root) else {
-        // A USB without an eDB has nothing to remove; one that has it but can't be opened is
-        // worth a warning (how the open failed is in the log file).
-        if edb_path_from_usb_root(usb_root).is_file() {
-            warnings.push(logging::log_text(
-                Level::Warn,
-                "usb-import",
-                "usb.remove.edb-open-failed",
-                &tr::usb_playlists_warning_edb_removal_skipped(),
-            ));
-        }
+    // A USB without an eDB has nothing to remove.
+    if session.databases()?.edb().is_none() {
+        return Ok(0);
+    }
+    let Some(conn) = session.edb()? else {
+        // One that has it but can't be opened is worth a warning (how the
+        // open failed is in the log file).
+        warnings.push(logging::log_text(
+            Level::Warn,
+            "usb-import",
+            "usb.remove.edb-open-failed",
+            &tr::usb_playlists_warning_edb_removal_skipped(),
+        ));
         return Ok(0);
     };
     let tx = conn.transaction()?;
@@ -72,25 +72,7 @@ pub fn remove_playlist_from_edb(
         return Ok(0);
     }
 
-    let wanted = name_candidates
-        .iter()
-        .map(|n| canonicalize_playlist_name(n))
-        .collect::<HashSet<_>>();
-    let mut ids = Vec::<i64>::new();
-    {
-        let mut stmt = tx.prepare("SELECT playlist_id, name FROM playlist WHERE attribute = 0")?;
-        let rows = stmt.query_map([], |row| {
-            Ok((row.get::<_, i64>(0)?, row.get::<_, String>(1)?))
-        })?;
-        for row in rows {
-            let Ok((playlist_id, name)) = row else {
-                continue;
-            };
-            if wanted.contains(&canonicalize_playlist_name(&name)) {
-                ids.push(playlist_id);
-            }
-        }
-    }
+    let ids = edb_playlist_ids_named(&tx, name_candidates)?;
     if ids.is_empty() {
         return Ok(0);
     }
@@ -126,8 +108,167 @@ pub fn remove_playlist_from_edb(
     Ok(ids.len())
 }
 
+/// The eDB's playlists (not folders) named one of `name_candidates`.
+fn edb_playlist_ids_named(
+    conn: &rusqlite::Connection,
+    name_candidates: &[String],
+) -> BackendResult<Vec<i64>> {
+    let wanted = name_candidates
+        .iter()
+        .map(|n| canonicalize_playlist_name(n))
+        .collect::<HashSet<_>>();
+    let mut ids = Vec::<i64>::new();
+    let mut stmt = conn.prepare("SELECT playlist_id, name FROM playlist WHERE attribute = 0")?;
+    let rows = stmt.query_map([], |row| {
+        Ok((row.get::<_, i64>(0)?, row.get::<_, String>(1)?))
+    })?;
+    for (playlist_id, name) in rows.flatten() {
+        if wanted.contains(&canonicalize_playlist_name(&name)) {
+            ids.push(playlist_id);
+        }
+    }
+    Ok(ids)
+}
+
+/// The tracks only the named playlist(s) hold, from the eDB's playlist and
+/// history membership: what a stick without a PDB removes with them. Read
+/// before [`remove_playlist_from_edb`] drops the membership. Artwork no
+/// other track uses comes as `exclusive_artwork_paths`; `artwork_id` is 0.
+pub fn edb_playlist_exclusive_tracks(
+    session: &mut UsbWriteSession<'_>,
+    name_candidates: &[String],
+) -> BackendResult<PlaylistRemovalPdbResult> {
+    let mut result = PlaylistRemovalPdbResult {
+        removed_playlist_count: 0,
+        exclusive_tracks: Vec::new(),
+        exclusive_artwork_paths: Vec::new(),
+        shared_track_count: 0,
+    };
+    let Some(conn) = session.edb()? else {
+        return Ok(result);
+    };
+    if !["playlist", "playlist_content", "content"]
+        .iter()
+        .all(|table| table_exists(conn, table))
+    {
+        return Ok(result);
+    }
+    let ids = edb_playlist_ids_named(conn, name_candidates)?
+        .into_iter()
+        .collect::<HashSet<_>>();
+    if ids.is_empty() {
+        return Ok(result);
+    }
+    let mut target = HashSet::<i64>::new();
+    let mut elsewhere = HashSet::<i64>::new();
+    {
+        let mut stmt = conn.prepare("SELECT playlist_id, content_id FROM playlist_content")?;
+        let rows = stmt.query_map([], |row| Ok((row.get::<_, i64>(0)?, row.get::<_, i64>(1)?)))?;
+        for (playlist_id, content_id) in rows.flatten() {
+            if ids.contains(&playlist_id) {
+                target.insert(content_id);
+            } else {
+                elsewhere.insert(content_id);
+            }
+        }
+    }
+    // History tracks stay, like the PDB's.
+    if table_exists(conn, "history_content") {
+        let mut stmt = conn.prepare("SELECT content_id FROM history_content")?;
+        elsewhere.extend(stmt.query_map([], |row| row.get::<_, i64>(0))?.flatten());
+    }
+    let shared = target.intersection(&elsewhere).count();
+    let exclusive = target
+        .difference(&elsewhere)
+        .copied()
+        .collect::<HashSet<_>>();
+    result.shared_track_count = shared;
+
+    let image_fk = if crate::edb::content_column_or_null(conn, "imageFilePath_id") == "NULL" {
+        "image_id"
+    } else {
+        "imageFilePath_id"
+    };
+    let has_images =
+        table_exists(conn, "image") && crate::edb::content_column_or_null(conn, image_fk) != "NULL";
+    let analysis = crate::edb::content_column_or_null(conn, "analysisDataFilePath");
+    let image = if has_images {
+        format!("c.{image_fk}")
+    } else {
+        "NULL".to_string()
+    };
+    let mut kept_images = HashSet::<i64>::new();
+    let mut exclusive_images = HashSet::<i64>::new();
+    {
+        let mut stmt = conn.prepare(&format!(
+            "SELECT c.content_id, c.path, {analysis}, {image} FROM content c"
+        ))?;
+        let rows = stmt.query_map([], |row| {
+            Ok((
+                row.get::<_, i64>(0)?,
+                row.get::<_, Option<String>>(1)?,
+                row.get::<_, Option<String>>(2)?,
+                row.get::<_, Option<i64>>(3)?,
+            ))
+        })?;
+        for (content_id, path, anlz_path, image_id) in rows.flatten() {
+            let image_id = image_id.filter(|id| *id != 0);
+            if !exclusive.contains(&content_id) {
+                kept_images.extend(image_id);
+                continue;
+            }
+            exclusive_images.extend(image_id);
+            result.exclusive_tracks.push(ExclusiveTrackInfo {
+                track_file_path: path.unwrap_or_default(),
+                anlz_path: anlz_path.unwrap_or_default(),
+                artwork_id: 0,
+            });
+        }
+    }
+    if has_images {
+        let mut stmt = conn.prepare("SELECT path FROM image WHERE image_id = ?1")?;
+        let mut exclusive_images = exclusive_images
+            .difference(&kept_images)
+            .copied()
+            .collect::<Vec<_>>();
+        exclusive_images.sort_unstable();
+        for image_id in exclusive_images {
+            if let Some(path) = stmt
+                .query_row(params![image_id], |row| row.get::<_, Option<String>>(0))
+                .optional()?
+                .flatten()
+                .filter(|path| !path.trim().is_empty())
+            {
+                result.exclusive_artwork_paths.push(path);
+            }
+        }
+    }
+    Ok(result)
+}
+
+/// [`remove_playlist_and_tracks_from_pdb_in`] in a write session of its own,
+/// written back to the USB.
 pub fn remove_playlist_and_tracks_from_pdb(
     usb_root: &Path,
+    playlist_id_hint: Option<&str>,
+    name_candidates: &[String],
+    warnings: &mut Vec<WarningEntry>,
+) -> BackendResult<PlaylistRemovalPdbResult> {
+    let mut session = UsbWriteSession::without_service(usb_root);
+    let result = remove_playlist_and_tracks_from_pdb_in(
+        &mut session,
+        playlist_id_hint,
+        name_candidates,
+        warnings,
+    )?;
+    session.commit()?;
+    Ok(result)
+}
+
+/// Removes the playlist from the session's staged PDB, with the tracks no
+/// other playlist or history holds.
+pub fn remove_playlist_and_tracks_from_pdb_in(
+    session: &mut UsbWriteSession<'_>,
     playlist_id_hint: Option<&str>,
     name_candidates: &[String],
     warnings: &mut Vec<WarningEntry>,
@@ -135,10 +276,10 @@ pub fn remove_playlist_and_tracks_from_pdb(
     let empty_result = PlaylistRemovalPdbResult {
         removed_playlist_count: 0,
         exclusive_tracks: Vec::new(),
+        exclusive_artwork_paths: Vec::new(),
         shared_track_count: 0,
     };
-    let pdb_path = crate::service::usb_staging::stage_pdb(usb_root)?;
-    if !pdb_path.is_file() {
+    let Some(pdb_path) = session.databases()?.pdb().map(Path::to_path_buf) else {
         warnings.push(logging::log_text(
             Level::Warn,
             "usb-import",
@@ -146,7 +287,7 @@ pub fn remove_playlist_and_tracks_from_pdb(
             &tr::usb_playlists_warning_pdb_removal_skipped(),
         ));
         return Ok(empty_result);
-    }
+    };
     let parsed = parse_pdb(&pdb_path)?;
 
     let wanted_names = name_candidates
@@ -267,15 +408,13 @@ pub fn remove_playlist_and_tracks_from_pdb(
     // B-tree causes DJ software to reject the database as corrupted.
     rebuild_sentinel_btrees_inplace(&mut pdb_bytes);
 
-    crate::service::usb_staging::commit_and_write_back(
-        usb_root,
-        crate::service::usb_staging::DbKind::Pdb,
-        &pdb_bytes,
-    )?;
+    session.write_pdb(&pdb_bytes)?;
 
     Ok(PlaylistRemovalPdbResult {
         removed_playlist_count: remove_ids.len(),
         exclusive_tracks,
+        // The caller looks the artwork up in the PDB as written.
+        exclusive_artwork_paths: Vec::new(),
         shared_track_count,
     })
 }
@@ -307,10 +446,13 @@ pub fn remove_tracks_from_pdb(
     if track_ids.is_empty() {
         return Ok(result);
     }
-    let pdb_path = crate::service::usb_staging::stage_pdb(usb_root)?;
-    if !pdb_path.is_file() {
+    // The caller's write session writes the staged PDB back.
+    let Some(pdb_path) = UsbDatabases::present(usb_root)?
+        .pdb()
+        .map(Path::to_path_buf)
+    else {
         return Ok(result);
-    }
+    };
     let parsed = parse_pdb(&pdb_path)?;
     let artwork_of = |keep: bool| {
         parsed
@@ -373,9 +515,11 @@ pub struct MirrorOrphanCleanup {
 /// tracks_from_pdb` (`remove_rows_inplace` + `rebuild_sentinel_btrees_inplace`):
 /// row-presence bits are cleared, page layout and table chains are untouched.
 pub fn remove_orphaned_dropped_tracks_from_dbs(
-    usb_root: &Path,
+    session: &mut UsbWriteSession<'_>,
     prunable_media_paths: &[String],
 ) -> BackendResult<MirrorOrphanCleanup> {
+    let usb_root = session.usb_root().to_path_buf();
+    let usb_root = usb_root.as_path();
     let mut result = MirrorOrphanCleanup::default();
 
     let target_keys: HashSet<String> = prunable_media_paths
@@ -388,10 +532,9 @@ pub fn remove_orphaned_dropped_tracks_from_dbs(
         return Ok(result);
     }
 
-    let pdb_path = crate::service::usb_staging::stage_pdb(usb_root)?;
-    if !pdb_path.is_file() {
+    let Some(pdb_path) = session.databases()?.pdb().map(Path::to_path_buf) else {
         return Ok(result);
-    }
+    };
     let parsed = parse_pdb(&pdb_path)?;
 
     // Post-write "still referenced somewhere" guard. After the mirror write the
@@ -435,9 +578,9 @@ pub fn remove_orphaned_dropped_tracks_from_dbs(
     }
 
     // --- eDB: delete content rows for those paths, then orphaned image rows ---
-    if let Some(conn) = open_edb_rw(usb_root) {
-        if table_exists(&conn, "content") {
-            let to_delete = crate::service::usb_track_facts::read_edb_content_tracks(&conn)?
+    if let Some(conn) = session.edb()? {
+        if table_exists(conn, "content") {
+            let to_delete = crate::service::usb_track_facts::read_edb_content_tracks(conn)?
                 .into_iter()
                 .filter(|row| match &row.fingerprint {
                     Some(fingerprint) => orphan_fingerprints.contains(fingerprint),
@@ -445,7 +588,7 @@ pub fn remove_orphaned_dropped_tracks_from_dbs(
                 })
                 .filter_map(|row| row.content_id)
                 .collect::<Vec<i64>>();
-            let has_playlist_content = table_exists(&conn, "playlist_content");
+            let has_playlist_content = table_exists(conn, "playlist_content");
             for content_id in &to_delete {
                 // Never delete a content row still linked to any playlist. The
                 // mirror write only unlinks dropped tracks from the target
@@ -469,18 +612,14 @@ pub fn remove_orphaned_dropped_tracks_from_dbs(
                     params![content_id],
                 )?;
             }
-            if result.removed_edb_content > 0 && table_exists(&conn, "image") {
+            if result.removed_edb_content > 0 && table_exists(conn, "image") {
                 let _ = conn.execute(
                     "DELETE FROM image WHERE image_id NOT IN (SELECT DISTINCT image_id FROM content WHERE image_id IS NOT NULL)",
                     [],
                 );
             }
         }
-        drop(conn);
-        crate::service::usb_staging::write_back_if_changed(
-            usb_root,
-            crate::service::usb_staging::DbKind::Edb,
-        )?;
+        session.write_back(DbKind::Edb)?;
     }
 
     // --- PDB: tombstone track rows + now-exclusive artwork rows in place ---
@@ -517,11 +656,8 @@ pub fn remove_orphaned_dropped_tracks_from_dbs(
     }
     if result.removed_pdb_tracks > 0 || result.removed_pdb_artwork > 0 {
         rebuild_sentinel_btrees_inplace(&mut pdb_bytes);
-        crate::service::usb_staging::commit_and_write_back(
-            usb_root,
-            crate::service::usb_staging::DbKind::Pdb,
-            &pdb_bytes,
-        )?;
+        session.write_pdb(&pdb_bytes)?;
+        session.write_back(DbKind::Pdb)?;
     }
 
     if result != MirrorOrphanCleanup::default() {
@@ -633,7 +769,11 @@ pub fn verify_pdb_content(
     playlist: &ExportPlaylistData,
     manifest: &ExportManifest,
 ) -> BackendResult<()> {
-    let pdb_path = crate::service::usb_staging::stage_pdb(usb_root)?;
+    let Some(pdb_path) = UsbDatabases::of(usb_root)?.pdb().map(Path::to_path_buf) else {
+        return Err(BackendError::Internal(
+            "export verification failed: the USB has no PDB".to_string(),
+        ));
+    };
     let parsed = parse_pdb(&pdb_path)?;
 
     let playlist_ids = parsed

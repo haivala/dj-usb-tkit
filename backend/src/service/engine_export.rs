@@ -190,8 +190,10 @@ pub(crate) fn engine_library_status(usb_root: &Path) -> Option<EngineLibraryStat
     if !m_db.is_file() {
         return None;
     }
-    let pdb_sequence = usb_staging::stage_pdb(usb_root)
+    let pdb_sequence = usb_staging::UsbDatabases::present(usb_root)
         .ok()
+        .flatten()
+        .and_then(|databases| databases.pdb().map(Path::to_path_buf))
         .and_then(|path| std::fs::read(path).ok())
         .and_then(|bytes| pdb_sequence(&bytes));
     Some(EngineLibraryStatus {
@@ -209,8 +211,16 @@ fn pdb_sequence(pdb: &[u8]) -> Option<u32> {
 
 /// Regenerate `Engine Library/Database2/m.db` (and any missing companion
 /// databases) from the USB's rekordbox export.
+///
+/// The library is built from the PDB. A stick with only one database gets
+/// the other first, from the strict parity repair's rebuild.
 pub fn rebuild_engine_library(usb_root: &Path) -> BackendResult<EngineLibrarySummary> {
-    let pdb_path = usb_staging::stage_pdb(usb_root)?;
+    if usb_staging::UsbDatabases::of(usb_root)?.missing().is_some() {
+        let mut session = usb_staging::UsbWriteSession::without_service(usb_root);
+        super::repair::rebuild_missing_database(&mut session)?;
+        session.commit()?;
+    }
+    let pdb_path = usb_staging::required_pdb(usb_root)?;
     let pdb_bytes = std::fs::read(&pdb_path)?;
     let pdb_sequence = pdb_sequence(&pdb_bytes)
         .ok_or_else(|| BackendError::Internal("export.pdb is too short".into()))?;

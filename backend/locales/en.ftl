@@ -94,6 +94,8 @@ usb-error-name-too-long = Drive name must be { $max } characters or fewer
 # $name: the name typed. $other: the drive that has it.
 usb-error-name-taken = Drive name '{ $name }' is already used by another drive ('{ $other }')
 usb-error-read-only-init = The USB is read-only, so it can't be initialized.
+usb-error-no-player-database = This USB has no player database. Export a playlist to it, or prepare it first.
+usb-error-no-pdb = This USB has only the eDB, not the PDB this needs. Preview Fixes can create the PDB from the eDB.
 # $id: the track's id in the USB's databases.
 usb-error-track-not-found = track { $id } not found on the USB
 
@@ -508,6 +510,9 @@ parity-overview-paths = { $count ->
     [one] { $count } track points to a different audio or waveform file depending on the player.
    *[other] { $count } tracks point to a different audio or waveform file depending on the player.
 }
+# The parity report on a USB with only one of the two databases.
+parity-overview-pdb-missing = This USB has an eDB but no PDB, so there's nothing to compare it with.
+parity-overview-edb-missing = This USB has a PDB but no eDB, so there's nothing to compare it with.
 # The rows' text when there's no problem. $count: the playlists.
 parity-overview-playlists-ready = Both databases have the same { $count ->
     [one] { $count } playlist
@@ -1563,6 +1568,8 @@ export-format-refused-kind = { $count ->
    *[other] { $count } { $format } tracks
 } can't go on this USB; export is blocked
 # $size: the free space, such as 27.0 GB.
+# $database: the database the USB lacks, "PDB" or "eDB".
+export-space-creates-database = the USB has no { $database } yet: export creates it
 export-space-free = { $size } free on USB
 # Before the line when the export doesn't fit. $line: the line.
 export-space-does-not-fit = Doesn't fit: { $line }
@@ -2113,7 +2120,9 @@ track-detail-cues-progress-writing-analysis-files = USB: Writing analysis files
 track-detail-cues-progress-updating-library-track = Updating library track
 
 # Saving the cue editor. $path: the track's file on the USB.
-track-detail-cues-error-not-in-usb-database = this track is missing from one of the USB's two databases, so it can't be edited on the USB ({ $path }). Preview Fixes shows what can be repaired.
+track-detail-cues-error-not-in-usb-database = this track isn't in the USB's player database, so it can't be edited on the USB ({ $path }). Preview Fixes shows what can be repaired.
+# $path: the track's file on the USB. $database: "PDB" or "eDB".
+usb-warning-track-missing-from-database = { $path } isn't in the USB's { $database }, so the edit was saved only to the other database. Preview Fixes shows the repair that adds it.
 # $key: the key as typed.
 track-detail-cues-error-unknown-key = unknown key: { $key }
 # $max: the most cue points a track can have (8).

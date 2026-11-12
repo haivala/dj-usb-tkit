@@ -8,10 +8,12 @@ use backend::commands::BackendCommands;
 use backend::models::{
     AddLibrarySelectionToPlaylistRequest, AddSourceFoldersRequest, AddTrackCandidate,
     AddTrackCandidatesToPlaylistRequest, AnalyzeNewTracksRequest, BrowseSourceFilesRequest,
-    CreatePlaylistRequest, ExportToUsbOptions, ExportToUsbRequest, FetchUsbHistoriesRequest,
-    FetchUsbPlaylistsRequest, FetchUsbTracksRequest, GetPlaylistTracksRequest,
-    GetTrackDetailRequest, GetUsbTrackDetailRequest, InitializeUsbRequest,
-    MaterializeSourceTrackRequest, SaveTrackAnalysisEditsRequest, SaveTrackMetadataEditsRequest,
+    CreatePlaylistRequest, DiagStatus, ExportToUsbOptions, ExportToUsbRequest,
+    FetchUsbHistoriesRequest, FetchUsbPlaylistsRequest, FetchUsbTracksRequest,
+    GetPlaylistExportSpaceRequest, GetPlaylistTracksRequest, GetTrackDetailRequest,
+    GetUsbTrackDetailRequest, GetUsbTracksMetadataSummaryRequest, InitializeUsbRequest,
+    InspectUsbTrackRequest, MaterializeSourceTrackRequest, RemoveUsbPlaylistRequest,
+    RunUsbParityReportRequest, SaveTrackAnalysisEditsRequest, SaveTrackMetadataEditsRequest,
     SaveUsbTrackAnalysisEditsRequest, SaveUsbTrackMetadataEditsRequest, ScanLibraryRequest,
     SelectUsbRequest, SetFrontendSettingRequest, SetUsbAudioFormatsRequest, TrackCueInput,
     UsbMetadataEditTrack, UsbTrack,
@@ -2994,9 +2996,10 @@ fn save_usb_track_analysis_edits_blocks_when_usb_not_connected() {
 }
 
 #[test]
-fn usb_save_of_a_track_missing_from_either_database_points_to_the_repair() {
-    // A save would leave the two databases disagreeing, so it is refused,
-    // and the error says where the fix is. Nothing on the stick changes.
+fn usb_save_of_a_track_missing_from_a_database_saves_where_it_is() {
+    // A track in only one of the two databases is saved there; the other
+    // database is left alone for the parity repair. A track in neither is
+    // refused, the error says where the fix is, and nothing changes.
     let root = tempdir().expect("temp root");
     let (backend, _data_dir, usb, _track_id, _playlist_id) = export_one_track_with_cues(
         root.path(),
@@ -3019,7 +3022,7 @@ fn usb_save_of_a_track_missing_from_either_database_points_to_the_repair() {
             .join(USB_VENDOR_DB_DIR)
             .join("exportLibrary.db")
     };
-    let save = || {
+    let save = |position_ms: u32| {
         backend.save_usb_track_analysis_edits(SaveUsbTrackAnalysisEditsRequest {
             usb_root: usb.to_string_lossy().to_string(),
             usb_analysis_path_raw: usb_track.usb_analysis_path_raw.clone().unwrap(),
@@ -3029,7 +3032,7 @@ fn usb_save_of_a_track_missing_from_either_database_points_to_the_repair() {
             duration_ms: usb_track.duration_ms,
             first_beat_ms: None,
             cues: Some(vec![TrackCueInput {
-                position_ms: 1_000,
+                position_ms,
                 color_id: None,
                 name: None,
                 playback_start: false,
@@ -3041,31 +3044,47 @@ fn usb_save_of_a_track_missing_from_either_database_points_to_the_repair() {
             album: None,
         })
     };
-    let assert_points_to_repair = |which: &str| {
-        let ext = only_exported_ext(&usb);
+    let ext = only_exported_ext(&usb);
+    let assert_saved_without = |which: &str, position_ms: u32, missing: &Path, blank: &Path| {
         let ext_before = fs::read(&ext).expect("read ext");
-        let blocked = save();
-        assert!(!blocked.ok, "{which}: save must be blocked");
-        let message = blocked.error.expect("error").message;
-        assert!(
-            message.contains("missing from one of the USB's two databases")
-                && message.contains("Preview Fixes"),
-            "{which}: {message}"
-        );
+        let saved = save(position_ms);
+        assert!(saved.ok, "{which}: save must go through: {:?}", saved.error);
+        assert_ne!(fs::read(&ext).unwrap(), ext_before, "{which}: ANLZ written");
         assert_eq!(
-            fs::read(&ext).unwrap(),
-            ext_before,
-            "{which}: ANLZ untouched"
+            fs::read(missing).unwrap(),
+            fs::read(blank).unwrap(),
+            "{which}: the database without the track is untouched"
         );
     };
 
     let exported_pdb = fs::read(pdb_path(&usb)).expect("read PDB");
     fs::copy(pdb_path(&blank_usb), pdb_path(&usb)).expect("empty the PDB");
-    assert_points_to_repair("not in the PDB");
+    assert_saved_without(
+        "not in the PDB",
+        1_000,
+        &pdb_path(&usb),
+        &pdb_path(&blank_usb),
+    );
 
     fs::write(pdb_path(&usb), &exported_pdb).expect("restore the PDB");
     fs::copy(edb_path(&blank_usb), edb_path(&usb)).expect("empty the eDB");
-    assert_points_to_repair("not in the eDB");
+    assert_saved_without(
+        "not in the eDB",
+        3_000,
+        &edb_path(&usb),
+        &edb_path(&blank_usb),
+    );
+
+    fs::copy(pdb_path(&blank_usb), pdb_path(&usb)).expect("empty the PDB too");
+    let ext_before = fs::read(&ext).expect("read ext");
+    let blocked = save(5_000);
+    assert!(!blocked.ok, "in neither database: save must be blocked");
+    let message = blocked.error.expect("error").message;
+    assert!(
+        message.contains("isn't in the USB's player database") && message.contains("Preview Fixes"),
+        "{message}"
+    );
+    assert_eq!(fs::read(&ext).unwrap(), ext_before, "ANLZ untouched");
 }
 
 #[test]
@@ -3662,5 +3681,339 @@ fn a_playlist_add_logs_its_result_in_the_event_log() {
     assert_eq!(
         ADD_LINES.with(|lines| lines.borrow().clone()),
         vec![("info".to_string(), added.data.status_text.clone())]
+    );
+}
+
+// ── A stick with only the PDB or only the eDB ─────────────────────────────
+// Built through export (both databases), then one database file deleted:
+// what a real one-database stick looks like (it simply lacks the file).
+
+fn edb_path(usb: &Path) -> PathBuf {
+    usb.join(USB_VENDOR_ROOT_DIR)
+        .join(USB_VENDOR_DB_DIR)
+        .join("exportLibrary.db")
+}
+
+#[derive(Clone, Copy, Debug, PartialEq)]
+enum OnlyDb {
+    Pdb,
+    Edb,
+}
+
+impl OnlyDb {
+    fn dropped(self, usb: &Path) -> PathBuf {
+        match self {
+            OnlyDb::Pdb => edb_path(usb),
+            OnlyDb::Edb => pdb_path(usb),
+        }
+    }
+}
+
+/// One exported track on a stick left with only `keep`, re-staged as on
+/// connect. On an eDB-only stick the track also has a history session.
+fn one_database_stick(
+    root: &Path,
+    keep: OnlyDb,
+) -> (BackendCommands, PathBuf, PathBuf, String, String) {
+    let (backend, data_dir, usb, track_id, playlist_id) =
+        export_one_track_with_cues(root, Vec::new());
+    if keep == OnlyDb::Edb {
+        let conn = open_usb_edb(&usb);
+        conn.execute_batch(
+            "INSERT INTO history (history_id, sequenceNo, name, attribute, history_id_parent)
+               VALUES (1, 1, 'HISTORY 001', 0, 0);
+             INSERT INTO history_content (history_id, content_id, sequenceNo)
+               SELECT 1, content_id, 1 FROM content;",
+        )
+        .expect("seed eDB history");
+    }
+    fs::remove_file(keep.dropped(&usb)).expect("delete one database");
+    let selected = backend.select_usb(SelectUsbRequest {
+        path: usb.to_string_lossy().to_string(),
+    });
+    assert!(selected.ok, "select failed: {selected:?}");
+    (backend, data_dir, usb, track_id, playlist_id)
+}
+
+fn assert_one_database_stick_reads_and_edits(keep: OnlyDb) {
+    let root = tempdir().expect("temp root");
+    let (backend, _data_dir, usb, _track_id, playlist_id) = one_database_stick(root.path(), keep);
+    let usb_root = usb.to_string_lossy().to_string();
+
+    // Playlists, histories, inspect.
+    let track = first_usb_playlist_track(&backend, &usb);
+    let histories = backend
+        .fetch_usb_histories(FetchUsbHistoriesRequest {
+            usb_root: Some(usb_root.clone()),
+        })
+        .data
+        .unwrap_or_else(|| panic!("{keep:?}: histories"));
+    if keep == OnlyDb::Edb {
+        assert_eq!(
+            histories
+                .items
+                .iter()
+                .map(|h| (h.name.as_str(), h.track_count))
+                .collect::<Vec<_>>(),
+            [("HISTORY 001", 1)],
+            "eDB histories are listed without a PDB"
+        );
+    }
+    let inspected = backend.inspect_usb_track(InspectUsbTrackRequest {
+        usb_root: Some(usb_root.clone()),
+        track_id: track.id.clone(),
+        file_path: track.usb_media_path.clone(),
+        title: Some(track.title.clone()),
+        artist: Some(track.artist.clone()),
+    });
+    assert!(inspected.ok, "{keep:?}: inspect failed: {inspected:?}");
+
+    // Cue, BPM and key save.
+    let media_raw = track.usb_media_path.clone().expect("media path");
+    let ext = only_exported_ext(&usb);
+    let ext_before = fs::read(&ext).expect("read ext");
+    let saved = backend.save_usb_track_analysis_edits(SaveUsbTrackAnalysisEditsRequest {
+        usb_root: usb_root.clone(),
+        usb_analysis_path_raw: track.usb_analysis_path_raw.clone().unwrap(),
+        usb_media_path_raw: media_raw.clone(),
+        bpm: Some(126.0),
+        key: Some("G#m".to_string()),
+        duration_ms: track.duration_ms,
+        first_beat_ms: None,
+        cues: Some(vec![TrackCueInput {
+            position_ms: 1_500,
+            color_id: None,
+            name: None,
+            playback_start: false,
+            memory: false,
+        }]),
+        local_track_id: track.local_track_id.clone(),
+        title: None,
+        artist: None,
+        album: None,
+    });
+    assert!(saved.ok, "{keep:?}: cue/BPM/key save failed: {saved:?}");
+    assert_ne!(
+        fs::read(&ext).unwrap(),
+        ext_before,
+        "{keep:?}: ANLZ written"
+    );
+    let reread = first_usb_playlist_track(&backend, &usb);
+    assert_eq!(
+        (reread.bpm, reread.key.as_deref()),
+        (Some(126.0), Some("G#m")),
+        "{keep:?}: BPM/key read back from the one database"
+    );
+
+    // Metadata summary and save.
+    let summary = |paths: Vec<String>| {
+        backend
+            .get_usb_tracks_metadata_summary(GetUsbTracksMetadataSummaryRequest {
+                usb_root: usb_root.clone(),
+                usb_media_paths_raw: paths,
+            })
+            .data
+            .unwrap_or_else(|| panic!("{keep:?}: metadata summary"))
+    };
+    assert_eq!(summary(vec![media_raw.clone()]).count, 1);
+    let saved = backend.save_usb_track_metadata_edits_with_progress(
+        SaveUsbTrackMetadataEditsRequest {
+            usb_root: usb_root.clone(),
+            tracks: vec![UsbMetadataEditTrack {
+                usb_media_path_raw: media_raw.clone(),
+                local_track_id: None,
+                title: Some(track.title.clone()),
+                artist: Some(track.artist.clone()),
+                album: track.album.clone(),
+            }],
+            genre: Some("Glitch Polka".to_string()),
+            rating: Some(4),
+            release_date: Some("2016".to_string()),
+        },
+        |_, _, _| {},
+    );
+    assert!(saved.ok, "{keep:?}: metadata save failed: {saved:?}");
+    let after = summary(vec![media_raw.clone()]);
+    assert_eq!(
+        (after.genre.value.as_deref(), after.rating.value),
+        (Some("Glitch Polka"), Some(4)),
+        "{keep:?}: metadata read back"
+    );
+
+    // The export estimate says the missing database comes with the export.
+    let space = backend
+        .get_playlist_export_space(GetPlaylistExportSpaceRequest {
+            playlist_id,
+            usb_root: usb_root.clone(),
+        })
+        .data
+        .unwrap_or_else(|| panic!("{keep:?}: export space"))
+        .export_space
+        .unwrap_or_else(|| panic!("{keep:?}: an estimate without the other database"));
+    assert!(
+        space.summary_text.contains("export creates it"),
+        "{keep:?}: {}",
+        space.summary_text
+    );
+    assert!(
+        !keep.dropped(&usb).exists(),
+        "{keep:?}: nothing created yet"
+    );
+
+    // The parity report names the missing database instead of failing.
+    let parity = backend.run_usb_parity_report(RunUsbParityReportRequest {
+        usb_root: Some(usb_root.clone()),
+    });
+    let parity = parity
+        .data
+        .unwrap_or_else(|| panic!("{keep:?}: parity report failed"));
+    assert!(
+        matches!(parity.overall_status, DiagStatus::Fail)
+            && parity.overview[0]
+                .detail
+                .contains("nothing to compare it with"),
+        "{keep:?}: {:?}",
+        parity.overview
+    );
+}
+
+#[test]
+fn a_pdb_only_stick_reads_and_edits() {
+    assert_one_database_stick_reads_and_edits(OnlyDb::Pdb);
+}
+
+#[test]
+fn an_edb_only_stick_reads_and_edits() {
+    assert_one_database_stick_reads_and_edits(OnlyDb::Edb);
+}
+
+fn assert_export_onto_one_database_stick_writes_both(keep: OnlyDb) {
+    let root = tempdir().expect("temp root");
+    let (backend, _data_dir, usb, _track_id, playlist_id) = one_database_stick(root.path(), keep);
+    let usb_root = usb.to_string_lossy().to_string();
+    let export = backend.export_to_usb(ExportToUsbRequest {
+        usb_root: Some(usb_root.clone()),
+        playlist_id,
+        options: Some(ExportToUsbOptions {
+            include_artwork: false,
+            include_analysis: true,
+            prune_stale: false,
+            ..Default::default()
+        }),
+        sort: None,
+    });
+    assert!(export.ok, "{keep:?}: export failed: {export:?}");
+    assert!(
+        pdb_path(&usb).is_file() && edb_path(&usb).is_file(),
+        "{keep:?}: both databases after the export"
+    );
+    let parity = backend
+        .run_usb_parity_report(RunUsbParityReportRequest {
+            usb_root: Some(usb_root),
+        })
+        .data
+        .unwrap_or_else(|| panic!("{keep:?}: parity report"));
+    for detail in &parity.playlist_details {
+        assert!(
+            matches!(detail.status, DiagStatus::Pass),
+            "{keep:?}: {detail:?}"
+        );
+        assert_eq!((detail.pdb_tracks, detail.edb_tracks), (1, 1), "{keep:?}");
+    }
+    assert!(!parity.playlist_details.is_empty(), "{keep:?}");
+}
+
+#[test]
+fn export_onto_a_pdb_only_stick_writes_both_databases() {
+    assert_export_onto_one_database_stick_writes_both(OnlyDb::Pdb);
+}
+
+#[test]
+fn export_onto_an_edb_only_stick_writes_both_databases() {
+    assert_export_onto_one_database_stick_writes_both(OnlyDb::Edb);
+}
+
+#[test]
+fn engine_db_export_rebuilds_the_missing_database_first() {
+    for keep in [OnlyDb::Pdb, OnlyDb::Edb] {
+        let root = tempdir().expect("temp root");
+        let (_backend, _data_dir, usb, _track_id, _playlist_id) =
+            one_database_stick(root.path(), keep);
+        let summary = backend::service::rebuild_engine_library(&usb)
+            .unwrap_or_else(|err| panic!("{keep:?}: engine export failed: {err:?}"));
+        assert_eq!(summary.tracks, 1, "{keep:?}");
+        assert!(
+            pdb_path(&usb).is_file() && edb_path(&usb).is_file(),
+            "{keep:?}: both databases"
+        );
+    }
+}
+
+#[test]
+fn removing_a_playlist_from_an_edb_only_stick_removes_its_own_tracks() {
+    let root = tempdir().expect("temp root");
+    let (backend, _data_dir, usb, _track_id, _playlist_id) =
+        one_database_stick(root.path(), OnlyDb::Edb);
+    let track = first_usb_playlist_track(&backend, &usb);
+    let audio = usb.join(
+        track
+            .usb_media_path
+            .as_deref()
+            .expect("media path")
+            .trim_start_matches('/'),
+    );
+    let remove = |name: &str| {
+        backend.remove_usb_playlist(RemoveUsbPlaylistRequest {
+            usb_root: Some(usb.to_string_lossy().to_string()),
+            playlist_id: None,
+            playlist_name: name.to_string(),
+        })
+    };
+    let content_rows = || {
+        open_usb_edb(&usb)
+            .query_row("SELECT COUNT(*) FROM content", [], |row| {
+                row.get::<_, i64>(0)
+            })
+            .expect("count content")
+    };
+
+    // The history session holds the track: it stays.
+    let kept = remove("USB Cue Edit");
+    assert!(kept.ok, "removal failed: {kept:?}");
+    assert_eq!(kept.data.expect("data").tracks_kept_shared, 1);
+    assert!(audio.is_file(), "a history track's audio stays");
+    assert_eq!(content_rows(), 1);
+    assert!(!pdb_path(&usb).exists(), "removal creates no PDB");
+
+    // Without the history, it is the playlist's own track: it goes.
+    let root = tempdir().expect("temp root");
+    let (backend, _data_dir, usb, _track_id, _playlist_id) =
+        one_database_stick(root.path(), OnlyDb::Edb);
+    open_usb_edb(&usb)
+        .execute_batch("DELETE FROM history_content; DELETE FROM history;")
+        .expect("drop the history");
+    let ext = only_exported_ext(&usb);
+    let removed = backend.remove_usb_playlist(RemoveUsbPlaylistRequest {
+        usb_root: Some(usb.to_string_lossy().to_string()),
+        playlist_id: None,
+        playlist_name: "USB Cue Edit".to_string(),
+    });
+    assert!(removed.ok, "removal failed: {removed:?}");
+    assert_eq!(removed.data.expect("data").tracks_removed, 1);
+    let audio = usb.join(
+        track
+            .usb_media_path
+            .as_deref()
+            .expect("media path")
+            .trim_start_matches('/'),
+    );
+    assert!(!audio.exists(), "the playlist's own audio is removed");
+    assert!(!ext.exists(), "its analysis is removed");
+    assert_eq!(
+        open_usb_edb(&usb)
+            .query_row("SELECT COUNT(*) FROM content", [], |row| row
+                .get::<_, i64>(0))
+            .expect("count content"),
+        0
     );
 }

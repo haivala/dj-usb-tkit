@@ -74,8 +74,7 @@ pub use engine_export::{EngineLibrarySummary, rebuild_engine_library};
 pub use usb_utils::{detect_external_rekordbox_db, initialize_usb};
 use usb_utils::{
     detect_external_rekordbox_db as detect_external_rekordbox_db_util,
-    initialize_usb as initialize_usb_util, load_waveform_preview_from_analysis_path,
-    read_pwv4_from_anlz,
+    load_waveform_preview_from_analysis_path, read_pwv4_from_anlz,
 };
 
 use chrono::Utc;
@@ -460,9 +459,7 @@ impl BackendService {
     }
 
     pub fn initialize_usb(&self, req: InitializeUsbRequest) -> BackendResult<InitializeUsbData> {
-        let data = initialize_usb_util(Path::new(&req.usb_root))?;
-        self.invalidate_usb_parse_cache();
-        Ok(data)
+        usb_utils::initialize_usb_for(Some(self), Path::new(&req.usb_root))
     }
 }
 

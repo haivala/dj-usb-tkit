@@ -132,6 +132,7 @@ fn match_moved_audio_does_not_relink_across_encodings() {
     assert!(match_moved_audio(&missing, &unindexed).is_empty());
 }
 use crate::edb::ExportDbPlaylist;
+use crate::edb::open_edb_rw;
 use crate::models::{DiagStatus, UsbParityPlaylistDetail};
 use crate::pdb_reader::{
     ParsedPdb, PdbHistoryEntryRow, PdbHistoryPlaylistRow, PdbPlaylistTreeRow, PdbTrackRow,
