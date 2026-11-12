@@ -1,5 +1,6 @@
 //! Write the Engine DJ library for a USB from what is already on it: tracks
-//! and playlists from `export.pdb`, beat grid, cues and waveform from each
+//! and playlists from the PDB and the eDB merged (or the one the stick has),
+//! beat grid, cues and waveform from each
 //! track's ANLZ bundle, artwork from `PIONEER/Artwork`. Rebuilds `m.db`
 //! every time; keeps the player's history (`hm.db`) and the track ids it
 //! refers to. Format layer: [`crate::engine_db`].
@@ -18,13 +19,17 @@ use crate::engine_db::{
 use crate::error::{BackendError, BackendResult};
 use crate::logging::{self, Level};
 use crate::models::{DiagCheck, DiagSection, DiagStatus, TrackCue, WarningEntry};
-use crate::pdb_reader::{ParsedPdb, PdbTrackRow, parse_pdb_bytes};
+use crate::pdb_reader::{
+    ParsedPdb, PdbPlaylistEntryRow, PdbPlaylistTreeRow, PdbTrackRow, parse_pdb_bytes,
+};
 
 use super::anlz::pqtz_beats;
 use super::cues::{DEFAULT_HOTCUE_COLOR_ID, HOTCUE_PALETTE, collapse_anlz_cues};
 use super::key_notation::camelot_position;
 use super::usb_staging;
-use super::usb_utils::{find_anlz_chunk_payload, resolve_usb_side_path};
+use super::usb_utils::{
+    canonicalize_playlist_name, find_anlz_chunk_payload, resolve_usb_side_path,
+};
 use super::{BackendService, SETTING_UI_EXPORT_ENGINE_LIBRARY, now};
 
 /// `AlbumArt` row for tracks without artwork (every track points at a row,
@@ -141,6 +146,11 @@ impl BackendService {
             )
         };
         let sync = match (status.library_counter, status.pdb_sequence) {
+            (None, None) => DiagCheck::new(
+                tr::diagnostics_check_engine_sync(),
+                DiagStatus::Pass,
+                tr::diagnostics_check_engine_sync_no_pdb(),
+            ),
             (Some(library), Some(pdb)) if library == i64::from(pdb) => DiagCheck::new(
                 tr::diagnostics_check_engine_sync(),
                 DiagStatus::Pass,
@@ -176,11 +186,14 @@ pub(crate) struct EngineLibraryStatus {
 }
 
 impl EngineLibraryStatus {
+    /// Written for the PDB the USB has; without a PDB, written without one
+    /// (the player then has no PDB to import).
     pub fn in_sync(&self) -> bool {
-        matches!(
-            (self.library_counter, self.pdb_sequence),
-            (Some(library), Some(pdb)) if library == i64::from(pdb)
-        )
+        match (self.library_counter, self.pdb_sequence) {
+            (Some(library), Some(pdb)) => library == i64::from(pdb),
+            (None, None) => true,
+            _ => false,
+        }
     }
 }
 
@@ -210,21 +223,11 @@ fn pdb_sequence(pdb: &[u8]) -> Option<u32> {
 }
 
 /// Regenerate `Engine Library/Database2/m.db` (and any missing companion
-/// databases) from the USB's rekordbox export.
-///
-/// The library is built from the PDB. A stick with only one database gets
-/// the other first, from the strict parity repair's rebuild.
+/// databases) from the USB's rekordbox export: the PDB and the eDB merged,
+/// or the one the stick has. Creates neither database.
 pub fn rebuild_engine_library(usb_root: &Path) -> BackendResult<EngineLibrarySummary> {
-    if usb_staging::UsbDatabases::of(usb_root)?.missing().is_some() {
-        let mut session = usb_staging::UsbWriteSession::without_service(usb_root);
-        super::repair::rebuild_missing_database(&mut session)?;
-        session.commit()?;
-    }
-    let pdb_path = usb_staging::required_pdb(usb_root)?;
-    let pdb_bytes = std::fs::read(&pdb_path)?;
-    let pdb_sequence = pdb_sequence(&pdb_bytes)
-        .ok_or_else(|| BackendError::Internal("export.pdb is too short".into()))?;
-    let pdb = parse_pdb_bytes(&pdb_bytes)?;
+    let mut warnings = Vec::<WarningEntry>::new();
+    let (pdb, pdb_sequence) = engine_source(usb_root, &mut warnings)?;
 
     let db_dir = engine_db_dir(usb_root);
     let previous = read_previous_library(&db_dir.join("m.db")).unwrap_or_default();
@@ -234,7 +237,6 @@ pub fn rebuild_engine_library(usb_root: &Path) -> BackendResult<EngineLibrarySum
         previous.db_uuid.clone()
     };
 
-    let mut warnings = Vec::<WarningEntry>::new();
     let mut next_id = previous.track_seq + 1;
     let mut art = ArtCollector::new(usb_root);
     let mut engine_ids = HashMap::<u32, i64>::new();
@@ -298,6 +300,209 @@ pub fn rebuild_engine_library(usb_root: &Path) -> BackendResult<EngineLibrarySum
         playlists: library.playlists.len(),
         warnings,
     })
+}
+
+/// What the Engine library is built from: the PDB and the eDB merged (a
+/// track or playlist in both comes from the PDB, see [`merge_edb_into_pdb`]),
+/// or the one the stick has. With a PDB, its header sequence too.
+fn engine_source(
+    usb_root: &Path,
+    warnings: &mut Vec<WarningEntry>,
+) -> BackendResult<(ParsedPdb, Option<u32>)> {
+    let databases = usb_staging::UsbDatabases::of(usb_root)?;
+    let pdb = match databases.pdb() {
+        Some(path) => {
+            let bytes = std::fs::read(path)?;
+            let sequence = pdb_sequence(&bytes)
+                .ok_or_else(|| BackendError::Internal("export.pdb is too short".into()))?;
+            Some((parse_pdb_bytes(&bytes)?, sequence))
+        }
+        None => None,
+    };
+    // An eDB that can't be opened is left out (the open logged why).
+    let edb = databases
+        .open_edb(warnings)
+        .map(|conn| crate::edb::edb_as_parsed_pdb(&conn))
+        .transpose()?;
+    match (pdb, edb) {
+        (Some((pdb, sequence)), Some(edb)) => Ok((merge_edb_into_pdb(pdb, &edb), Some(sequence))),
+        (Some((pdb, sequence)), None) => Ok((pdb, Some(sequence))),
+        (None, Some(edb)) => Ok((edb, None)),
+        (None, None) => Err(BackendError::NotFound(tr::usb_error_no_player_database())),
+    }
+}
+
+/// The match key of a track's file path.
+fn track_path_key(path: &str) -> String {
+    path.trim().trim_start_matches('/').to_lowercase()
+}
+
+/// Ids for names (artists, albums, ...) in one id space: an existing name
+/// keeps its id, a new one gets the next free id.
+struct NameIds<'m> {
+    map: &'m mut HashMap<u32, String>,
+    by_name: HashMap<String, u32>,
+    next: u32,
+}
+
+impl<'m> NameIds<'m> {
+    fn new(map: &'m mut HashMap<u32, String>) -> Self {
+        let by_name = map.iter().map(|(id, name)| (name.clone(), *id)).collect();
+        let next = map.keys().max().copied().unwrap_or(0) + 1;
+        Self { map, by_name, next }
+    }
+
+    /// The id of `name` (0 for none).
+    fn id(&mut self, name: Option<&String>) -> u32 {
+        let Some(name) = name.filter(|name| !name.trim().is_empty()) else {
+            return 0;
+        };
+        if let Some(id) = self.by_name.get(name) {
+            return *id;
+        }
+        let id = self.next;
+        self.next += 1;
+        self.map.insert(id, name.clone());
+        self.by_name.insert(name.clone(), id);
+        id
+    }
+}
+
+/// Each playlist tree row's path of canonical names from the root, folders
+/// marked, so a playlist in both databases is found by where it sits.
+fn playlist_paths(tree: &[PdbPlaylistTreeRow]) -> HashMap<u32, String> {
+    let rows = tree
+        .iter()
+        .map(|row| (row.id, row))
+        .collect::<HashMap<_, _>>();
+    let mut out = HashMap::new();
+    for row in tree {
+        let mut parts = Vec::new();
+        let mut current = Some(row);
+        // Bounded: a parent loop in a broken tree ends the walk.
+        for _ in 0..64 {
+            let Some(at) = current else { break };
+            parts.push(format!(
+                "{}{}",
+                if at.row_is_folder { "+" } else { "-" },
+                canonicalize_playlist_name(&at.name)
+            ));
+            current = (at.parent_id != 0 && at.parent_id != at.id)
+                .then(|| rows.get(&at.parent_id).copied())
+                .flatten();
+        }
+        parts.reverse();
+        out.insert(row.id, parts.join("/"));
+    }
+    out
+}
+
+/// Adds to `merged` (the PDB) what only the eDB has: tracks by file path,
+/// with their names, key and artwork; playlists and folders by their place
+/// in the tree, after the PDB's own at each level; and in a playlist both
+/// have, the eDB's tracks the PDB's list lacks, after its own.
+fn merge_edb_into_pdb(mut merged: ParsedPdb, edb: &ParsedPdb) -> ParsedPdb {
+    let mut by_path = merged
+        .tracks
+        .iter()
+        .map(|t| (track_path_key(&t.track_file_path), t.id))
+        .collect::<HashMap<_, _>>();
+    let mut next_track = merged.tracks.iter().map(|t| t.id).max().unwrap_or(0);
+    let mut track_ids = HashMap::<u32, u32>::new();
+    {
+        let mut artists = NameIds::new(&mut merged.artists);
+        let mut albums = NameIds::new(&mut merged.albums);
+        let mut genres = NameIds::new(&mut merged.genres);
+        let mut labels = NameIds::new(&mut merged.labels);
+        let mut keys = NameIds::new(&mut merged.keys);
+        let mut artworks = NameIds::new(&mut merged.artworks);
+        for row in &edb.tracks {
+            let key = track_path_key(&row.track_file_path);
+            if key.is_empty() {
+                continue;
+            }
+            if let Some(id) = by_path.get(&key) {
+                track_ids.insert(row.id, *id);
+                continue;
+            }
+            next_track += 1;
+            merged.tracks.push(PdbTrackRow {
+                id: next_track,
+                artist_id: artists.id(edb.artists.get(&row.artist_id)),
+                composer_id: artists.id(edb.artists.get(&row.composer_id)),
+                remixer_id: artists.id(edb.artists.get(&row.remixer_id)),
+                album_id: albums.id(edb.albums.get(&row.album_id)),
+                genre_id: genres.id(edb.genres.get(&row.genre_id)),
+                label_id: labels.id(edb.labels.get(&row.label_id)),
+                key_id: keys.id(edb.keys.get(&row.key_id)),
+                artwork_id: artworks.id(edb.artworks.get(&row.artwork_id)),
+                ..row.clone()
+            });
+            by_path.insert(key, next_track);
+            track_ids.insert(row.id, next_track);
+        }
+    }
+
+    let merged_paths = playlist_paths(&merged.playlist_tree)
+        .into_iter()
+        .map(|(id, path)| (path, id))
+        .collect::<HashMap<_, _>>();
+    let edb_paths = playlist_paths(&edb.playlist_tree);
+    let mut next_playlist = merged.playlist_tree.iter().map(|r| r.id).max().unwrap_or(0);
+    let mut playlist_ids = HashMap::<u32, u32>::new();
+    // Parents before children: a shorter path is never deeper.
+    let mut edb_rows = edb.playlist_tree.iter().collect::<Vec<_>>();
+    edb_rows.sort_by_key(|row| {
+        (
+            edb_paths.get(&row.id).map_or(0, |p| p.matches('/').count()),
+            row.sort_order,
+            row.id,
+        )
+    });
+    // After the PDB's own lists at the same level, in the eDB's order.
+    const AFTER_PDB_LISTS: u32 = 1 << 20;
+    for row in edb_rows {
+        if let Some(id) = edb_paths.get(&row.id).and_then(|p| merged_paths.get(p)) {
+            playlist_ids.insert(row.id, *id);
+            continue;
+        }
+        next_playlist += 1;
+        merged.playlist_tree.push(PdbPlaylistTreeRow {
+            id: next_playlist,
+            parent_id: playlist_ids.get(&row.parent_id).copied().unwrap_or(0),
+            sort_order: AFTER_PDB_LISTS.saturating_add(row.sort_order),
+            row_is_folder: row.row_is_folder,
+            name: row.name.clone(),
+        });
+        playlist_ids.insert(row.id, next_playlist);
+    }
+
+    let mut listed = HashMap::<u32, (HashSet<u32>, u32)>::new();
+    for entry in &merged.playlist_entries {
+        let (tracks, last) = listed.entry(entry.playlist_id).or_default();
+        tracks.insert(entry.track_id);
+        *last = (*last).max(entry.entry_index);
+    }
+    let mut edb_entries = edb.playlist_entries.iter().collect::<Vec<_>>();
+    edb_entries.sort_by_key(|e| (e.playlist_id, e.entry_index));
+    for entry in edb_entries {
+        let (Some(playlist_id), Some(track_id)) = (
+            playlist_ids.get(&entry.playlist_id).copied(),
+            track_ids.get(&entry.track_id).copied(),
+        ) else {
+            continue;
+        };
+        let (tracks, last) = listed.entry(playlist_id).or_default();
+        if tracks.insert(track_id) {
+            *last += 1;
+            merged.playlist_entries.push(PdbPlaylistEntryRow {
+                entry_index: *last,
+                track_id,
+                playlist_id,
+            });
+        }
+    }
+    merged
 }
 
 fn engine_track(

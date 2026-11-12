@@ -105,7 +105,7 @@
 
           <rect class="box-key" x="440" y="600" width="280" height="60" rx="4"/>
           <text class="t-code" x="454" y="622">rebuild_missing_database</text>
-          <text class="t-dim" x="454" y="642">export · Engine export · repair</text>
+          <text class="t-dim" x="454" y="642">export · repair</text>
 
           <line class="a-key" x1="580" y1="480" x2="580" y2="508" marker-end="url(#ahk)"/>
           <text class="t-arrow-key" x="590" y="499">edits</text>
@@ -140,8 +140,9 @@
 
           <rect class="box" x="860" y="600" width="260" height="60" rx="4"/>
           <text class="t-head" x="874" y="622">Engine Library/m.db</text>
-          <text class="t-dim" x="874" y="642">built from the PDB</text>
+          <text class="t-dim" x="874" y="642">built from the PDB + eDB, merged</text>
           <polyline class="a" points="1120,240 1132,240 1132,630 1122,630" marker-end="url(#ah)"/>
+          <line class="a" x1="1120" y1="307" x2="1132" y2="307"/>
 
           <!-- stage in: stick → staged copies -->
           <polyline class="a" points="860,237 785,237 785,540 722,540" marker-end="url(#ah)"/>

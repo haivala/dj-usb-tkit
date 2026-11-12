@@ -38,7 +38,8 @@ pub struct EngineLibrary {
     pub db_uuid: String,
     /// `export.pdb` header sequence. The player imports the PDB again when it
     /// differs from `Information.lastRekordBoxLibraryImportReadCounter`.
-    pub pdb_sequence: u32,
+    /// `None` for a USB without a PDB (written as NULL).
+    pub pdb_sequence: Option<u32>,
     pub current_played_indicator: Option<i64>,
     /// Lowest id a new track may get (ids of deleted tracks are never reused).
     pub track_id_floor: i64,
@@ -368,7 +369,7 @@ fn build_m_db(path: &Path, library: &EngineLibrary) -> BackendResult<()> {
         &tx,
         &library.db_uuid,
         library.current_played_indicator,
-        Some(i64::from(library.pdb_sequence)),
+        library.pdb_sequence.map(i64::from),
     )?;
     insert_album_art(&tx, &library.album_art)?;
     insert_tracks(&tx, library)?;
@@ -544,7 +545,7 @@ fn insert_tracks(conn: &Connection, library: &EngineLibrary) -> BackendResult<()
             t.is_analyzed(),
             t.date_added,
             played.played_indicator,
-            i64::from(library.pdb_sequence),
+            library.pdb_sequence.map(i64::from),
             library.db_uuid,
         ])?;
         let (track_data, overview, beat_data) = match (t.sample_rate, t.sample_count) {
@@ -763,7 +764,7 @@ mod tests {
         };
         EngineLibrary {
             db_uuid: "11111111-2222-3333-4444-555555555555".into(),
-            pdb_sequence: 1476,
+            pdb_sequence: Some(1476),
             track_id_floor: 1,
             tracks: vec![
                 track(3, "../Contents/c.mp3"),

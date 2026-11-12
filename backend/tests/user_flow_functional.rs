@@ -3933,20 +3933,79 @@ fn export_onto_an_edb_only_stick_writes_both_databases() {
     assert_export_onto_one_database_stick_writes_both(OnlyDb::Edb);
 }
 
+fn engine_m_db(usb: &Path) -> rusqlite::Connection {
+    rusqlite::Connection::open(usb.join("Engine Library").join("Database2").join("m.db"))
+        .expect("open m.db")
+}
+
 #[test]
-fn engine_db_export_rebuilds_the_missing_database_first() {
+fn engine_db_export_reads_whichever_database_the_stick_has() {
     for keep in [OnlyDb::Pdb, OnlyDb::Edb] {
         let root = tempdir().expect("temp root");
         let (_backend, _data_dir, usb, _track_id, _playlist_id) =
             one_database_stick(root.path(), keep);
         let summary = backend::service::rebuild_engine_library(&usb)
             .unwrap_or_else(|err| panic!("{keep:?}: engine export failed: {err:?}"));
-        assert_eq!(summary.tracks, 1, "{keep:?}");
+        assert_eq!((summary.tracks, summary.playlists), (1, 1), "{keep:?}");
         assert!(
-            pdb_path(&usb).is_file() && edb_path(&usb).is_file(),
-            "{keep:?}: both databases"
+            !keep.dropped(&usb).exists(),
+            "{keep:?}: the missing database is not created"
+        );
+        let counter = engine_m_db(&usb)
+            .query_row(
+                "SELECT lastRekordBoxLibraryImportReadCounter FROM Information",
+                [],
+                |row| row.get::<_, Option<i64>>(0),
+            )
+            .expect("read counter");
+        assert_eq!(
+            counter.is_some(),
+            keep == OnlyDb::Pdb,
+            "{keep:?}: the PDB's sequence only when there is a PDB"
         );
     }
+}
+
+#[test]
+fn engine_db_export_merges_the_pdb_and_the_edb() {
+    let root = tempdir().expect("temp root");
+    let (_backend, _data_dir, usb, _track_id, _playlist_id) =
+        export_one_track_with_cues(root.path(), Vec::new());
+    // A track and a playlist only the eDB has; the track is also added to
+    // the exported playlist, in the eDB only.
+    open_usb_edb(&usb)
+        .execute_batch(
+            "INSERT INTO content (content_id, title, path) VALUES
+               (9001, 'Only In The eDB', '/Contents/Fixture Artist/edb_only.wav');
+             INSERT INTO playlist (playlist_id, sequenceNo, name, attribute, playlist_id_parent)
+               VALUES (9001, 99, 'eDB List', 0, 0);
+             INSERT INTO playlist_content (playlist_id, content_id, sequenceNo)
+               VALUES (9001, 9001, 1);
+             INSERT INTO playlist_content (playlist_id, content_id, sequenceNo)
+               SELECT playlist_id, 9001, 99 FROM playlist WHERE name = 'USB Cue Edit';",
+        )
+        .expect("add eDB-only rows");
+
+    let summary = backend::service::rebuild_engine_library(&usb).expect("engine export");
+    assert_eq!((summary.tracks, summary.playlists), (2, 2));
+    let conn = engine_m_db(&usb);
+    let list_titles = |playlist: &str| {
+        let mut stmt = conn
+            .prepare(
+                "SELECT t.title FROM PlaylistEntity e
+                   JOIN Playlist p ON p.id = e.listId JOIN Track t ON t.id = e.trackId
+                  WHERE p.title = ?1 ORDER BY t.title",
+            )
+            .expect("prepare");
+        stmt.query_map([playlist], |row| row.get::<_, String>(0))
+            .expect("query")
+            .collect::<Result<Vec<_>, _>>()
+            .expect("titles")
+    };
+    assert_eq!(list_titles("eDB List"), ["Only In The eDB"]);
+    let exported = list_titles("USB Cue Edit");
+    assert_eq!(exported.len(), 2, "{exported:?}");
+    assert!(exported.contains(&"Only In The eDB".to_string()));
 }
 
 #[test]

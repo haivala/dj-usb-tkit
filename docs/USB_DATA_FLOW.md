@@ -18,7 +18,10 @@ audio and artwork files are written straight to the stick, outside the session.
 - **Parse caches** (parsed PDB, eDB library, playlists, track sizes) are keyed by the staged
   files' signatures.
 - **`rebuild_missing_database`** is the strict parity repair's rebuild of the database a stick
-  lacks. Export, the Engine DB export and repair call it, inside their write session.
+  lacks. Export and repair call it, inside their write session.
+- **The Engine DJ library** (`m.db`) is built from the PDB and the eDB merged: a track or playlist
+  in both comes from the PDB, and what only one has is added. On a one-database stick it is
+  built from that database alone, and the other is not created.
 
 ## A write session
 
@@ -56,8 +59,7 @@ flowchart LR
 
 Cue, BPM, key and metadata saves take this decision from the layer instead of checking files
 themselves. A database the stick lacks is not a gap: a PDB-only stick writes only the PDB, with
-no warning. Export and the Engine DB export rebuild the missing database first, so the stick ends
-up with both.
+no warning. Export rebuilds the missing database first, so the stick ends up with both.
 
 Presence comes from `UsbDatabases` (`Both`, `PdbOnly`, `EdbOnly`), worked out from the staged
 files on each call rather than cached in a process-wide value. A stick with neither database

@@ -18,9 +18,16 @@ turns the setting on and rebuilds it. A stick's first library therefore comes
 from the player's own (slow) import unless the setting was already on.
 `write_engine_db` does the same rebuild from the command line. Both build it
 from what is already on the stick:
-tracks and playlists from `export.pdb`, and beat grid, cues and waveform from each
-track's ANLZ bundle, plus artwork from `PIONEER/Artwork`. The player then
-uses our grid and skips analysis.
+tracks and playlists from the PDB and the eDB merged, and beat grid, cues and
+waveform from each track's ANLZ bundle, plus artwork from `PIONEER/Artwork`. The
+player then uses our grid and skips analysis.
+
+A track or playlist in both databases comes from the PDB. A track only the eDB
+has (matched by file path) is added with its names, key and artwork; a playlist
+or folder only the eDB has is added after the PDB's own at its level; and a
+playlist in both gets the eDB's tracks its PDB list lacks, after its own. A
+stick with only one database gets its library from that one, and the other
+database is not created.
 
 ```sh
 cargo run -p backend --bin write_engine_db -- /run/media/$USER/USB
@@ -52,6 +59,8 @@ removed first, because SQLite would otherwise replay it onto the new file.
   and `Track.pdbImportKey` hold the `export.pdb` header sequence (u32 LE at
   offset 20). The player imports the PDB again when the sequence on the stick
   differs from the counter. Run `write_engine_db` after every export so they match.
+  On a stick without a PDB both are NULL: there is nothing for the player to
+  import, and the library counts as up to date.
 - **Track ids are never reused.** A trigger aborts inserting an id at or below
   `sqlite_sequence`. A rebuild keeps the previous `m.db`'s `Information.uuid`
   and each track's id (matched by path), and new tracks get ids above the old

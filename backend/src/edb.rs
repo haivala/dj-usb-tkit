@@ -351,7 +351,8 @@ pub(crate) fn open_edb_rw_at(path: &Path) -> Option<rusqlite::Connection> {
 
 /// The eDB in the parsed PDB's shape, for the readers that work on a parsed
 /// PDB when the stick has only the eDB: one track row per `content` row
-/// (its `content_id` as the track id), the keys and artwork, the playlists
+/// (its `content_id` as the track id) with the fields both share, the
+/// names (keys, artists, albums, genres, labels) and artwork, the playlists
 /// with their entries, and the histories as t11/t12 rows.
 pub(crate) fn edb_as_parsed_pdb(
     conn: &rusqlite::Connection,
@@ -368,18 +369,35 @@ pub(crate) fn edb_as_parsed_pdb(
         } else {
             "c.imageFilePath_id".to_string()
         };
+        let col = |name: &str| content_column_or_null(conn, name);
         let sql = format!(
-            "SELECT c.content_id, c.path, {anlz}, {bpm}, {key}, {mdb}, {len}, {size}, {title}, {image_fk} \
+            "SELECT c.content_id, c.path, {}, {}, {}, {}, {}, {}, {}, {image_fk}, \
+             {}, {}, {}, {}, {}, {}, {}, {}, {}, {}, {}, {}, {} \
              FROM content c ORDER BY c.content_id",
-            anlz = content_column_or_null(conn, "analysisDataFilePath"),
-            bpm = content_column_or_null(conn, "bpmx100"),
-            key = content_column_or_null(conn, "key_id"),
-            mdb = content_column_or_null(conn, "masterDbId"),
-            len = content_column_or_null(conn, "length"),
-            size = content_column_or_null(conn, "fileSize"),
-            title = content_column_or_null(conn, "title"),
+            col("analysisDataFilePath"),
+            col("bpmx100"),
+            col("key_id"),
+            col("masterDbId"),
+            col("length"),
+            col("fileSize"),
+            col("title"),
+            col("artist_id_artist"),
+            col("album_id"),
+            col("genre_id"),
+            col("label_id"),
+            col("artist_id_composer"),
+            col("artist_id_remixer"),
+            col("color_id"),
+            col("rating"),
+            col("releaseYear"),
+            col("dateAdded"),
+            col("djComment"),
+            col("bitrate"),
+            col("samplingRate"),
         );
         let mut stmt = conn.prepare(&sql)?;
+        let opt_u32 = |v: Option<i64>| v.and_then(|v| u32::try_from(v).ok());
+        let text = |v: Option<String>| v.filter(|s| !s.trim().is_empty());
         parsed.tracks = stmt
             .query_map([], |row| {
                 Ok(PdbTrackRow {
@@ -388,17 +406,29 @@ pub(crate) fn edb_as_parsed_pdb(
                     anlz_path: row.get::<_, Option<String>>(2)?.unwrap_or_default(),
                     tempo_x100: id(row.get(3)?),
                     key_id: id(row.get(4)?),
-                    master_db_id: row
-                        .get::<_, Option<i64>>(5)?
-                        .and_then(|v| u32::try_from(v).ok()),
-                    duration_seconds: row
-                        .get::<_, Option<i64>>(6)?
-                        .and_then(|v| u32::try_from(v).ok()),
-                    file_size_bytes: row
-                        .get::<_, Option<i64>>(7)?
-                        .and_then(|v| u32::try_from(v).ok()),
+                    master_db_id: opt_u32(row.get(5)?),
+                    duration_seconds: opt_u32(row.get(6)?),
+                    file_size_bytes: opt_u32(row.get(7)?),
                     title: row.get::<_, Option<String>>(8)?.unwrap_or_default(),
                     artwork_id: id(row.get(9)?),
+                    artist_id: id(row.get(10)?),
+                    album_id: id(row.get(11)?),
+                    genre_id: id(row.get(12)?),
+                    label_id: id(row.get(13)?),
+                    composer_id: id(row.get(14)?),
+                    remixer_id: id(row.get(15)?),
+                    color_id: u8::try_from(row.get::<_, Option<i64>>(16)?.unwrap_or(0))
+                        .unwrap_or(0),
+                    rating: u8::try_from(row.get::<_, Option<i64>>(17)?.unwrap_or(0).clamp(0, 5))
+                        .unwrap_or(0),
+                    release_year: row
+                        .get::<_, Option<i64>>(18)?
+                        .and_then(|v| u16::try_from(v).ok())
+                        .filter(|y| *y > 0),
+                    date_added: text(row.get(19)?),
+                    dj_comment: text(row.get(20)?),
+                    bitrate_kbps: opt_u32(row.get(21)?),
+                    sample_rate_hz: opt_u32(row.get(22)?),
                     ..PdbTrackRow::default()
                 })
             })?
@@ -414,8 +444,16 @@ pub(crate) fn edb_as_parsed_pdb(
         })?;
         Ok(rows.collect::<Result<_, _>>()?)
     };
-    if table_exists(conn, "key") {
-        parsed.keys = id_names("SELECT key_id, name FROM \"key\"")?;
+    for (table, map) in [
+        ("key", &mut parsed.keys),
+        ("artist", &mut parsed.artists),
+        ("album", &mut parsed.albums),
+        ("genre", &mut parsed.genres),
+        ("label", &mut parsed.labels),
+    ] {
+        if table_exists(conn, table) {
+            *map = id_names(&format!("SELECT {table}_id, name FROM \"{table}\""))?;
+        }
     }
     if table_exists(conn, "image") {
         parsed.artworks = id_names("SELECT image_id, path FROM image")?;

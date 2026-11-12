@@ -827,6 +827,7 @@ diagnostics-check-engine-upkeep-off = "Write Engine DJ library" is off, so chang
 diagnostics-check-engine-sync = Matches export.pdb
 # $pdb: the PDB's write counter.
 diagnostics-check-engine-sync-ok = Written for export.pdb #{ $pdb }
+diagnostics-check-engine-sync-no-pdb = Written without a PDB: the USB has none for the player to import
 # $library: the counter the library was written for. $pdb: the PDB's. Either can be "?".
 diagnostics-check-engine-sync-behind = Written for export.pdb #{ $library }, the USB has #{ $pdb }. The player may import export.pdb again and analyze the tracks itself. Preview Fixes can rebuild it
 
