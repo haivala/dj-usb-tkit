@@ -268,7 +268,7 @@ usb-background-color-purple = Purple
 # A colour number with no name. $color: the number.
 usb-background-color-numbered = colour { $color }
 # The note when the two databases hold different colours. $pdb, $edb: the colours' names.
-usb-background-color-two-colors = rekordbox set two colours: { $pdb } for older players (PDB), { $edb } for rekordbox and the CDJ-3000 (eDB). Choosing a colour sets both.
+usb-background-color-two-colors = rekordbox set two colours: { $pdb } for older players (PDB), { $edb } for newer players and rekordbox (eDB). Choosing a colour sets both.
 # The note when no colour can be set.
 usb-background-color-no-place = This USB has no place for a background colour.
 usb-background-color-read-only = This USB is read-only, so its background colour can't be changed.

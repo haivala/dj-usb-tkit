@@ -271,7 +271,7 @@ mod text_tests {
         );
         assert_eq!(
             background_color_note(Some(6), Some(0), None),
-            "rekordbox set two colours: Aqua for older players (PDB), Default for rekordbox and the CDJ-3000 (eDB). Choosing a colour sets both."
+            "rekordbox set two colours: Aqua for older players (PDB), Default for newer players and rekordbox (eDB). Choosing a colour sets both."
         );
         assert!(background_color_note(Some(20), Some(0), None).contains("colour 20"));
     }

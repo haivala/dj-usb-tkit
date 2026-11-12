@@ -91,9 +91,9 @@ workaround is deleting the `PIONEER` folder and re-exporting from scratch,
 which loses history and any USB-only playlist state.
 
 `run_usb_parity_report` is the *strict* check in that catalog: it verifies
-that PDB (the binary database older/PDB-primary units rely on) and eDB (the
-newer relational database that newer units also read from) tell an
-identical story, not just that the USB works on the one player you tested.
+that the PDB, which older players read, and the eDB, which newer ones read,
+tell an identical story, not just that the USB works on the one player you
+tested.
 Different CDJ generations and firmware versions lean on PDB and eDB to
 different degrees — a USB can play fine on the unit in front of you while
 still disagreeing between PDB and eDB on playlist membership/order, track

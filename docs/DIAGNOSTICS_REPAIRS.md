@@ -32,9 +32,9 @@ In the app, both live on the USB Browser page: once a USB is selected,
 **Rediagnose USB**, **Parity Report** and **Preview Fixes** sit next to the
 page title, and the report shows under Health & Diagnostics (it scrolls; the
 title row stays). The Parity Report opens with a short explanation of what it
-compares (the legacy PDB and the new eDB) and what a FAIL means. Preview Fixes
-replaces the report with the proposed fixes, each with its own checkbox, and
-**Apply Fixes** runs the checked ones.
+compares (whether older and newer players see the same playlists and tracks)
+and what a FAIL means. Preview Fixes replaces the report with the proposed
+fixes, each with its own checkbox, and **Apply Fixes** runs the checked ones.
 
 Operational diagnostics and strict parity are not the same thing. A USB can be
 usable on hardware while strict parity still reports differences between PDB
@@ -43,9 +43,8 @@ and eDB.
 ## What Strict Parity Means
 
 A USB export is really two separate databases that both have to be trusted:
-`export.pdb` (legacy binary, read as the primary database by older CDJ
-hardware) and `exportLibrary.db`/eDB (encrypted SQLite, read as the primary
-database by the CDJ-3000; desktop DJ software validates both). See
+`export.pdb`, the PDB, for older players, and `exportLibrary.db`, the eDB, for
+newer ones; desktop DJ software validates both. See
 `docs/PDB.md` "How PDB Works" and `docs/eDB.md` "How eDB Works" for why the
 app keeps both instead of one.
 

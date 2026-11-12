@@ -12,9 +12,10 @@ compatibility.
 
 The two files are not interchangeable mirrors:
 
-- Older PDB-first hardware players read PDB as the primary database.
-- Newer eDB-first hardware players read eDB as the primary database and use PDB
-  as a secondary compatibility surface.
+- Hardware players read both databases. Older PDB-first players (such as the
+  CDJ-2000NXS2) use PDB as the primary database; newer eDB-first players (such as
+  the CDJ-3000) use eDB as the primary database and PDB as a secondary
+  compatibility surface.
 - Desktop library software validates PDB structure when loading USB exports.
 
 PDB contains the player-facing track list, playlist tree, playlist membership,

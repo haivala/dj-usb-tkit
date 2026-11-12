@@ -12,6 +12,7 @@ means encrypted DB.
 
 eDB sits beside `export.pdb`, the legacy binary PDB database:
 
+- Hardware players read both databases.
 - CDJ-3000 reads eDB as the primary database.
 - CDJ-2000NXS2 and older players read PDB as the primary database.
 - Desktop DJ software validates the USB as a combined database set.

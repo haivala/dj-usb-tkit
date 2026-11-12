@@ -482,9 +482,8 @@ See `docs/PDB.md` for the t16 row layout and observed kind codes.
 The player's background (menu highlight) colour is stored in both databases,
 and rekordbox lets the two differ:
 
-- PDB: byte 9 of the `t19` (history) rows, read by PDB players such as the
-  CDJ-2000NXS2.
-- eDB: `property.backGroundColorType`, read by rekordbox.
+- PDB: byte 9 of the `t19` (history) rows, read by older players.
+- eDB: `property.backGroundColorType`, read by newer players and rekordbox.
 
 The values follow rekordbox's list: 0 = default, then 1 pink, 2 red, 3 orange,
 4 yellow, 5 green, 6 aqua, 7 blue, 8 purple. `DEVSETTING.DAT` is not involved.
