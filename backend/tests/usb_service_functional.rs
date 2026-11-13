@@ -474,6 +474,7 @@ fn inspect_usb_track_finds_track_by_id_with_no_hints() {
     assert_eq!(data.track.title, title);
     assert_eq!(data.track.artist, artist);
     assert!(data.track.usb_media_path.is_some());
+    assert!(!data.track.needs_hydration);
 }
 
 #[test]

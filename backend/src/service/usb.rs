@@ -4243,51 +4243,6 @@ mod tests {
     }
 
     #[test]
-    fn validate_usb_root_missing_path_is_invalid() {
-        let (_dir, service) = test_service();
-        let missing = std::env::temp_dir().join(format!("does-not-exist-{}", uuid::Uuid::now_v7()));
-        let result = service
-            .validate_usb_root(crate::models::ValidateUsbRootRequest {
-                path: missing.to_string_lossy().to_string(),
-            })
-            .expect("validate");
-        assert!(!result.valid);
-        assert!(
-            result
-                .warnings
-                .iter()
-                .any(|w| w.code == "usb.import.path-not-found")
-        );
-    }
-
-    #[test]
-    fn validate_usb_root_bare_directory_reports_missing_pieces() {
-        let (_dir, service) = test_service();
-        let usb_dir = tempfile::tempdir().expect("usb dir");
-        let result = service
-            .validate_usb_root(crate::models::ValidateUsbRootRequest {
-                path: usb_dir.path().to_string_lossy().to_string(),
-            })
-            .expect("validate");
-        assert!(!result.valid);
-        assert!(!result.has_vendor_root);
-        assert!(!result.has_contents);
-        assert!(!result.has_pdb);
-        assert!(
-            result
-                .warnings
-                .iter()
-                .any(|w| w.code == "usb.import.missing-vendor-root")
-        );
-        assert!(
-            result
-                .warnings
-                .iter()
-                .any(|w| w.code == "usb.import.missing-contents")
-        );
-    }
-
-    #[test]
     fn validate_usb_root_initialized_usb_is_valid_and_registers_device() {
         let (_dir, service) = test_service();
         let (_usb_dir, usb_root) = test_usb_root();
@@ -5996,87 +5951,6 @@ mod tests {
             })
             .unwrap_err();
         assert!(matches!(err, crate::error::BackendError::NotFound(_)));
-    }
-
-    #[test]
-    fn inspect_usb_track_finds_by_id_from_pdb() {
-        let (_dir, service) = test_service();
-        let (_usb_dir, usb_root) = seeded_playlist_usb();
-
-        let fetched = service
-            .fetch_usb_playlists(crate::models::FetchUsbPlaylistsRequest {
-                usb_root: Some(usb_root.to_string_lossy().to_string()),
-            })
-            .expect("fetch playlists");
-        let row = fetched.items[0].tracks[0].clone();
-
-        let inspected = service
-            .inspect_usb_track(crate::models::InspectUsbTrackRequest {
-                usb_root: Some(usb_root.to_string_lossy().to_string()),
-                track_id: row.id.clone(),
-                file_path: None,
-                title: None,
-                artist: None,
-            })
-            .expect("inspect usb track");
-        assert_eq!(inspected.track.title, "Song A");
-        // The whole row: same file as the playlist row, and inspected.
-        assert_eq!(inspected.track.usb_media_path, row.usb_media_path);
-        assert!(!inspected.track.needs_hydration);
-    }
-
-    #[test]
-    fn inspect_usb_track_errors_for_unknown_id() {
-        let (_dir, service) = test_service();
-        let (_usb_dir, usb_root) = seeded_playlist_usb();
-
-        let err = service
-            .inspect_usb_track(crate::models::InspectUsbTrackRequest {
-                usb_root: Some(usb_root.to_string_lossy().to_string()),
-                track_id: "999999".to_string(),
-                file_path: None,
-                title: None,
-                artist: None,
-            })
-            .unwrap_err();
-        assert!(matches!(err, crate::error::BackendError::Validation(_)));
-    }
-
-    #[test]
-    fn inspect_usb_track_rejects_non_numeric_id() {
-        let (_dir, service) = test_service();
-        let (_usb_dir, usb_root) = test_usb_root();
-        let err = service
-            .inspect_usb_track(crate::models::InspectUsbTrackRequest {
-                usb_root: Some(usb_root.to_string_lossy().to_string()),
-                track_id: "not-a-number".to_string(),
-                file_path: None,
-                title: None,
-                artist: None,
-            })
-            .unwrap_err();
-        assert!(matches!(err, crate::error::BackendError::Internal(_)));
-    }
-
-    #[test]
-    fn fetch_usb_histories_returns_empty_when_pdb_missing() {
-        let (_dir, service) = test_service();
-        let usb_dir = tempfile::tempdir().expect("usb dir");
-
-        let result = service
-            .fetch_usb_histories(crate::models::FetchUsbHistoriesRequest {
-                usb_root: Some(usb_dir.path().to_string_lossy().to_string()),
-            })
-            .expect("fetch usb histories");
-
-        assert!(result.items.is_empty());
-        assert_eq!(result.counts.imported_playlists, 0);
-        assert!(
-            result
-                .warnings
-                .iter()
-                .any(|w| w.code == "usb.histories.pdb-not-found")
-        );
     }
 
     #[test]

@@ -39,6 +39,11 @@
 
 ## Unreleased
 
+- **Chore:** The backend tests for playlists, library sources and browsing, rekordbox and Mixxx imports, track
+  identity, playback sources and settings now run through the same commands the app calls, instead of inside the
+  backend. Setup helpers the functional tests had copied file to file are shared, and unit tests that only repeated
+  a functional test are gone.
+
 ## 0.6.0
 
 **Severity:** feature
