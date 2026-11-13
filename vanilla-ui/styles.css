@@ -939,7 +939,10 @@ body.sidebar-resizing {
   width: 100%;
 }
 
-.nav-playlist-add-item {
+.nav-playlist-actions {
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
   margin-top: 4px;
 }
 

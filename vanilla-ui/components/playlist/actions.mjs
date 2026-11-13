@@ -76,12 +76,7 @@ export function promptNewPlaylist(ctx) {
   const wrap = cloneTemplate(document, "tplNavNewPlaylist");
   const input = wrap.querySelector(".nav-new-input");
   const cancel = wrap.querySelector(".nav-new-cancel");
-  const addItem = el.navPlaylistList.querySelector(".nav-playlist-add-item");
-  if (addItem?.nextSibling) {
-    el.navPlaylistList.insertBefore(wrap, addItem.nextSibling);
-  } else {
-    el.navPlaylistList.appendChild(wrap);
-  }
+  el.navPlaylistList.prepend(wrap);
 
   let closed = false;
   const cleanup = () => {

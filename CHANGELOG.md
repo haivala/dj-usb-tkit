@@ -49,6 +49,8 @@
   playlists can go on the USB in the app's order; in additive mode, playlists already on the USB can also take the
   app's track order. Without these, playlists already on the USB keep their place and their order, new playlists go
   on top and new tracks at the end.
+- **Improvement:** Import and New in the sidebar now stay in place above the playlist list instead of scrolling away
+  with it.
 - **Chore:** The backend tests for playlists, library sources and browsing, rekordbox and Mixxx imports, track
   identity, playback sources and settings now run through the same commands the app calls, instead of inside the
   backend. Setup helpers the functional tests had copied file to file are shared, and unit tests that only repeated

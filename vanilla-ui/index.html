@@ -97,20 +97,20 @@
         </button>
         <div class="nav-divider"></div>
         <div class="nav-section-label" data-text="ui-sidebar-playlists"></div>
-        <ul class="nav-playlist-list" id="navPlaylistList">
-          <li class="nav-playlist-add-item">
-            <button class="nav-item nav-add-playlist" id="addPlaylistBtn" data-text-tooltip="ui-sidebar-new-playlist" data-text-aria-label="ui-sidebar-new-playlist">
-              <span class="nav-icon">+</span>
-              <span class="nav-label" data-text="ui-sidebar-add-playlist"></span>
-            </button>
-          </li>
-          <li class="hidden" id="importPlaylistItem">
+        <div class="nav-playlist-actions">
+          <div class="hidden" id="importPlaylistItem">
             <button class="nav-item nav-add-playlist" id="importPlaylistBtn" data-text-tooltip="ui-sidebar-import-playlist-tooltip" data-text-aria-label="ui-sidebar-import-playlist-aria-label">
               <span class="nav-icon">&#8615;</span>
               <span class="nav-label" data-text="ui-common-import"></span>
             </button>
-          </li>
-          <!-- dynamic playlist items inserted here by JS -->
+          </div>
+          <button class="nav-item nav-add-playlist" id="addPlaylistBtn" data-text-tooltip="ui-sidebar-new-playlist" data-text-aria-label="ui-sidebar-new-playlist">
+            <span class="nav-icon">+</span>
+            <span class="nav-label" data-text="ui-sidebar-add-playlist"></span>
+          </button>
+        </div>
+        <ul class="nav-playlist-list" id="navPlaylistList">
+          <!-- dynamic playlist items inserted here by JS; the new-playlist input goes first -->
         </ul>
         <div class="nav-playlist-export hidden" id="exportPlaylistsItem">
           <button class="nav-item nav-add-playlist" data-view="export-playlists" id="exportPlaylistsBtn" data-text-tooltip="ui-sidebar-export-playlists-tooltip">
