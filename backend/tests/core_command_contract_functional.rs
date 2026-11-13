@@ -1,8 +1,10 @@
+mod common;
 mod library_sources;
+
+use common::vendor_db_dir;
 
 use std::collections::{HashMap, HashSet};
 use std::fs;
-use std::path::Path;
 
 use backend::commands::BackendCommands;
 use backend::error::ErrorCode;
@@ -19,10 +21,6 @@ use backend::models::{
 };
 use backend::service::usb_vendor_compat::DEFAULT_USB_EDB_KEY;
 use tempfile::tempdir;
-
-fn vendor_db_dir(root: &Path) -> std::path::PathBuf {
-    root.join("PIONEER").join("rekordbox")
-}
 
 #[test]
 fn browse_source_files_cursor_paginates_stably_and_rejects_query_mismatch_cursor() {

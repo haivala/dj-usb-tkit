@@ -1,4 +1,7 @@
+mod common;
 mod library_sources;
+
+use common::{fixture_audio_path, open_edb, pdb_path, seed_tracks_as_analyzed, vendor_db_dir};
 
 use std::collections::{BTreeSet, HashSet};
 use std::fs;
@@ -11,75 +14,11 @@ use backend::models::{
     ScanLibraryRequest,
 };
 use backend::pdb_reader::parse_pdb;
-use backend::service::usb_vendor_compat::DEFAULT_USB_EDB_KEY;
 use tempfile::tempdir;
-
-const USB_VENDOR_ROOT_DIR: &str = "PIONEER";
-const USB_VENDOR_DB_DIR: &str = "rekordbox";
-
-fn open_edb(path: &Path) -> rusqlite::Connection {
-    let conn = rusqlite::Connection::open(path).expect("open eDB");
-    let has_schema = conn
-        .query_row(
-            "SELECT COUNT(1) FROM sqlite_master WHERE type IN ('table','view')",
-            [],
-            |row| row.get::<_, i64>(0),
-        )
-        .unwrap_or(0);
-    if has_schema == 0 {
-        conn.execute_batch(&format!("PRAGMA key='{DEFAULT_USB_EDB_KEY}';"))
-            .expect("apply SQLCipher key");
-    }
-    conn
-}
-
-fn fixture_audio_path(relative: &str) -> std::path::PathBuf {
-    std::path::PathBuf::from(env!("CARGO_MANIFEST_DIR"))
-        .join("tests")
-        .join("fixtures")
-        .join("audio")
-        .join(relative)
-}
 
 fn copy_audio_fixture(media_dir: &Path, fixture_relative: &str, target_name: &str) {
     let fixture = fixture_audio_path(fixture_relative);
     fs::copy(&fixture, media_dir.join(target_name)).expect("copy audio fixture");
-}
-
-fn seed_test_analysis_bundle(data_dir: &Path, stem: &str) -> std::path::PathBuf {
-    let dir = data_dir.join("analysis").join("waveforms");
-    fs::create_dir_all(&dir).expect("create test analysis dir");
-    let dat = dir.join(format!("{stem}.DAT"));
-    fs::write(&dat, b"test-dat").expect("write test DAT");
-    fs::write(dir.join(format!("{stem}.EXT")), b"test-ext").expect("write test EXT");
-    fs::write(dir.join(format!("{stem}.2EX")), b"test-2ex").expect("write test 2EX");
-    dat
-}
-
-fn seed_tracks_as_analyzed(data_dir: &Path, track_ids: &[String]) {
-    let db_path = data_dir.join("backend.db");
-    let conn = rusqlite::Connection::open(&db_path).expect("open backend db");
-    for (idx, track_id) in track_ids.iter().enumerate() {
-        let bundle = seed_test_analysis_bundle(data_dir, &format!("waveform-{idx}"));
-        conn.execute(
-            "UPDATE tracks
-             SET bpm = 120.0,
-                 tonality = '8A',
-                 duration_ms = 180000,
-                 waveform_peaks_path = ?1
-             WHERE id = ?2",
-            rusqlite::params![bundle.to_string_lossy().to_string(), track_id],
-        )
-        .expect("seed analyzed track fields");
-    }
-}
-
-fn vendor_db_dir(root: &Path) -> std::path::PathBuf {
-    root.join(USB_VENDOR_ROOT_DIR).join(USB_VENDOR_DB_DIR)
-}
-
-fn pdb_path(usb_root: &Path) -> std::path::PathBuf {
-    vendor_db_dir(usb_root).join("export.pdb")
 }
 
 fn edb_path(usb_root: &Path) -> std::path::PathBuf {

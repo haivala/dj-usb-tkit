@@ -6,8 +6,10 @@
 mod common;
 mod library_sources;
 
+use common::{copy_audio_fixture, pdb_path, read_u32_le, seed_tracks_as_analyzed};
+
 use std::fs;
-use std::path::{Path, PathBuf};
+use std::path::Path;
 
 use backend::commands::BackendCommands;
 use backend::error::ErrorCode;
@@ -23,61 +25,6 @@ use backend::models::{
 };
 use backend::pdb_reader::parse_pdb;
 use tempfile::tempdir;
-
-const USB_VENDOR_ROOT_DIR: &str = "PIONEER";
-const USB_VENDOR_DB_DIR: &str = "rekordbox";
-
-fn pdb_path(usb_root: &Path) -> PathBuf {
-    usb_root
-        .join(USB_VENDOR_ROOT_DIR)
-        .join(USB_VENDOR_DB_DIR)
-        .join("export.pdb")
-}
-
-fn fixture_audio_path(relative: &str) -> PathBuf {
-    PathBuf::from(env!("CARGO_MANIFEST_DIR"))
-        .join("tests")
-        .join("fixtures")
-        .join("audio")
-        .join(relative)
-}
-
-fn copy_audio_fixture(media_dir: &Path, fixture_relative: &str, target_name: &str) {
-    common::copy_unique_audio(
-        &fixture_audio_path(fixture_relative),
-        &media_dir.join(target_name),
-    );
-}
-
-fn seed_test_analysis_bundle(data_dir: &Path, stem: &str) -> PathBuf {
-    let dir = data_dir.join("analysis").join("waveforms");
-    fs::create_dir_all(&dir).expect("create test analysis dir");
-    let dat = dir.join(format!("{stem}.DAT"));
-    let ext = dir.join(format!("{stem}.EXT"));
-    let twoex = dir.join(format!("{stem}.2EX"));
-    fs::write(&dat, b"test-dat").expect("write test DAT");
-    fs::write(&ext, b"test-ext").expect("write test EXT");
-    fs::write(&twoex, b"test-2ex").expect("write test 2EX");
-    dat
-}
-
-fn seed_tracks_as_analyzed(data_dir: &Path, track_ids: &[String]) {
-    let db_path = data_dir.join("backend.db");
-    let conn = rusqlite::Connection::open(&db_path).expect("open backend db");
-    for (idx, track_id) in track_ids.iter().enumerate() {
-        let fake_waveform = seed_test_analysis_bundle(data_dir, &format!("test-waveform-{idx}"));
-        conn.execute(
-            "UPDATE tracks
-             SET bpm = 120.0,
-                 tonality = '8A',
-                 duration_ms = 180000,
-                 waveform_peaks_path = ?1
-             WHERE id = ?2",
-            rusqlite::params![fake_waveform.to_string_lossy().to_string(), track_id],
-        )
-        .expect("seed analyzed track fields");
-    }
-}
 
 /// Scans one fixture track into its own source dir, adds it to a fresh
 /// playlist, and exports that playlist to `usb`. Returns the local track id
@@ -1161,14 +1108,6 @@ fn parse_max_last_page(bytes: &[u8], num_tables: usize) -> usize {
         cursor += 16;
     }
     max_page
-}
-
-fn read_u32_le(bytes: &[u8], offset: usize) -> Option<u32> {
-    let a = *bytes.get(offset)?;
-    let b = *bytes.get(offset + 1)?;
-    let c = *bytes.get(offset + 2)?;
-    let d = *bytes.get(offset + 3)?;
-    Some(u32::from_le_bytes([a, b, c, d]))
 }
 
 // --- group edits (the selection bar's Edit) --------------------------------

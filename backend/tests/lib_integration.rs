@@ -2,6 +2,8 @@ use std::collections::{BTreeSet, HashMap};
 mod common;
 mod library_sources;
 
+use common::{seed_test_analysis_bundle, vendor_db_dir};
+
 use std::path::{Path, PathBuf};
 use std::sync::{Arc, Mutex, OnceLock};
 
@@ -37,10 +39,6 @@ use backend::service::{AnalysisEvent, BackendService};
 fn test_env_lock() -> &'static Mutex<()> {
     static LOCK: OnceLock<Mutex<()>> = OnceLock::new();
     LOCK.get_or_init(|| Mutex::new(()))
-}
-
-fn vendor_db_dir(root: &Path) -> PathBuf {
-    root.join(USB_VENDOR_ROOT_DIR).join(USB_VENDOR_DB_DIR)
 }
 
 use backend::service::usb_vendor_compat::DEFAULT_USB_EDB_KEY;
@@ -491,28 +489,6 @@ fn write_test_pulsed_key_aiff(path: &std::path::Path, bpm: f32, duration_ms: u32
     fs::write(path, out).expect("write pulsed aiff");
     // Same parameters, different file: the library keeps one track per file.
     common::copy_unique_audio(path, path);
-}
-
-fn seed_test_analysis_bundle(data_dir: &Path, stem: &str) -> PathBuf {
-    let dir = data_dir.join("analysis").join("waveforms");
-    fs::create_dir_all(&dir).expect("create test analysis dir");
-    let safe_stem = stem
-        .chars()
-        .map(|c| {
-            if c.is_ascii_alphanumeric() || c == '-' || c == '_' {
-                c
-            } else {
-                '_'
-            }
-        })
-        .collect::<String>();
-    let dat = dir.join(format!("{safe_stem}.DAT"));
-    let ext = dir.join(format!("{safe_stem}.EXT"));
-    let twoex = dir.join(format!("{safe_stem}.2EX"));
-    fs::write(&dat, b"test-dat").expect("write test DAT");
-    fs::write(&ext, b"test-ext").expect("write test EXT");
-    fs::write(&twoex, b"test-2ex").expect("write test 2EX");
-    dat
 }
 
 fn seed_track_analysis_fields(data_dir: &Path, track_id: &str) {

@@ -1,7 +1,105 @@
 //! Helpers shared by the functional test crates.
+//!
+//! Each test binary compiles this module separately and uses only part of it.
+#![allow(dead_code)]
 
 use std::fs;
-use std::path::Path;
+use std::path::{Path, PathBuf};
+
+use backend::service::usb_vendor_compat::{
+    DEFAULT_USB_EDB_KEY, USB_VENDOR_DB_DIR, USB_VENDOR_ROOT_DIR,
+};
+
+/// Path of an audio file under `tests/fixtures/audio`.
+pub fn fixture_audio_path(relative: &str) -> PathBuf {
+    PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+        .join("tests")
+        .join("fixtures")
+        .join("audio")
+        .join(relative)
+}
+
+/// Copies an audio fixture into `media_dir` as `target_name`, as a distinct
+/// file (see [`copy_unique_audio`]).
+pub fn copy_audio_fixture(media_dir: &Path, fixture_relative: &str, target_name: &str) {
+    copy_unique_audio(
+        &fixture_audio_path(fixture_relative),
+        &media_dir.join(target_name),
+    );
+}
+
+/// Writes placeholder DAT/EXT/2EX files into the app's analysis cache and
+/// returns the DAT path.
+pub fn seed_test_analysis_bundle(data_dir: &Path, stem: &str) -> PathBuf {
+    let dir = data_dir.join("analysis").join("waveforms");
+    fs::create_dir_all(&dir).expect("create test analysis dir");
+    let safe_stem = stem
+        .chars()
+        .map(|c| {
+            if c.is_ascii_alphanumeric() || c == '-' || c == '_' {
+                c
+            } else {
+                '_'
+            }
+        })
+        .collect::<String>();
+    let dat = dir.join(format!("{safe_stem}.DAT"));
+    fs::write(&dat, b"test-dat").expect("write test DAT");
+    fs::write(dir.join(format!("{safe_stem}.EXT")), b"test-ext").expect("write test EXT");
+    fs::write(dir.join(format!("{safe_stem}.2EX")), b"test-2ex").expect("write test 2EX");
+    dat
+}
+
+/// Marks tracks as analyzed (BPM, key, duration, analysis bundle) so export
+/// takes them without running real analysis.
+pub fn seed_tracks_as_analyzed(data_dir: &Path, track_ids: &[String]) {
+    let conn = rusqlite::Connection::open(data_dir.join("backend.db")).expect("open backend db");
+    for (idx, track_id) in track_ids.iter().enumerate() {
+        let bundle = seed_test_analysis_bundle(data_dir, &format!("test-waveform-{idx}"));
+        conn.execute(
+            "UPDATE tracks
+             SET bpm = 120.0,
+                 tonality = '8A',
+                 duration_ms = 180000,
+                 waveform_peaks_path = ?1
+             WHERE id = ?2",
+            rusqlite::params![bundle.to_string_lossy().to_string(), track_id],
+        )
+        .expect("seed analyzed track fields");
+    }
+}
+
+/// The stick's vendor database folder.
+pub fn vendor_db_dir(usb_root: &Path) -> PathBuf {
+    usb_root.join(USB_VENDOR_ROOT_DIR).join(USB_VENDOR_DB_DIR)
+}
+
+/// The stick's PDB.
+pub fn pdb_path(usb_root: &Path) -> PathBuf {
+    vendor_db_dir(usb_root).join("export.pdb")
+}
+
+/// Opens an eDB, unlocking it with the SQLCipher key when it is encrypted.
+pub fn open_edb(path: &Path) -> rusqlite::Connection {
+    let conn = rusqlite::Connection::open(path).expect("open eDB");
+    let has_schema = conn
+        .query_row(
+            "SELECT COUNT(1) FROM sqlite_master WHERE type IN ('table','view')",
+            [],
+            |row| row.get::<_, i64>(0),
+        )
+        .unwrap_or(0);
+    if has_schema == 0 {
+        conn.execute_batch(&format!("PRAGMA key='{DEFAULT_USB_EDB_KEY}';"))
+            .expect("apply SQLCipher key");
+    }
+    conn
+}
+
+pub fn read_u32_le(bytes: &[u8], offset: usize) -> Option<u32> {
+    let raw = bytes.get(offset..offset + 4)?;
+    Some(u32::from_le_bytes([raw[0], raw[1], raw[2], raw[3]]))
+}
 
 /// Copies an audio fixture to `target`, adding the target's file name as an
 /// extra metadata block so every copy is a different file. The library keeps

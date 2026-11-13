@@ -677,7 +677,8 @@ function scenes(fixture) {
     {
       // docs/PLAYLISTS_PLAYBACK.md: Edit order on the USB Playlists page -- a
       // playlist dragged, a track dragged, a column sort made the order, then
-      // Save order.
+      // Save order. Opens House, Bass and Event 1 in turn, so each
+      // playlist's own tracks show.
       name: "usb-playlist-order",
       caption: "Edit order on the USB: drag playlists and tracks, or sort by a column, then Save order",
       editor: false,
@@ -686,21 +687,28 @@ function scenes(fixture) {
       async run(page, _wf, record) {
         await connectUsbAndPickPlaylist(page, fixture);
         await openNav(page, "usb-playlists");
-        await openUsbListItem(page, { list: "#usbPlaylists", name: "Bass", heading: "#usbPlaylistHeading", body: "#usbPlaylistTracks" });
+        // Start on House, so switching to Bass shows each USB playlist has
+        // its own tracks.
+        await openUsbListItem(page, { list: "#usbPlaylists", name: "House", heading: "#usbPlaylistHeading", body: "#usbPlaylistTracks" });
         await page.mouse.move(900, 300);
         await page.waitForTimeout(300);
         const playlistRow = (name) => page.locator("#usbPlaylists li", { hasText: name });
         const trackRows = page.locator("#usbPlaylistTracks .track-grid-row[data-track-id]");
+        const openPlaylist = async (name) => {
+          await clickOn(page, playlistRow(name).locator("button"), 300);
+          await page.locator("#usbPlaylistHeading .track-list-heading-name", { hasText: name }).waitFor();
+          await trackRows.first().waitFor();
+          await page.waitForTimeout(1200);
+        };
         await record(async () => {
-          await page.waitForTimeout(700);
+          await page.waitForTimeout(1200);
           await clickOn(page, page.locator("#usbEditOrderBtn"), 1200);
           // The last playlist to the top.
           const lastName = (await page.locator("#usbPlaylists li").last().locator(".playlist-label").textContent()).trim();
           await dragRow(page, playlistRow(lastName).locator("[data-usb-drag-handle]"), page.locator("#usbPlaylists li").first(), true);
           await page.waitForTimeout(1200);
           // Bass's last track to the top.
-          await clickOn(page, playlistRow("Bass").locator("button"), 900);
-          await trackRows.first().waitFor();
+          await openPlaylist("Bass");
           await dragRow(page, trackRows.last().locator("[data-playlist-track-drag-handle]"), trackRows.first(), true);
           await page.waitForTimeout(1200);
           // A column sort is the new order too.
@@ -708,6 +716,9 @@ function scenes(fixture) {
           await clickOn(page, page.locator("#usbSaveOrderBtn"), 300);
           await page.locator("#statusText", { hasText: "Order saved to the USB" }).waitFor();
           await waitProgressHidden(page);
+          await page.waitForTimeout(1000);
+          // Another playlist, with tracks of its own.
+          await openPlaylist("Event 1");
           await moveTo(page, 900, 300, 20);
           await page.waitForTimeout(2200);
         }, { fullWindow: true });

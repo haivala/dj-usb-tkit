@@ -1,4 +1,7 @@
+mod common;
 mod library_sources;
+
+use common::{open_edb, pdb_path, read_u32_le, seed_tracks_as_analyzed, vendor_db_dir};
 
 use std::collections::{BTreeMap, BTreeSet};
 use std::fs;
@@ -6,13 +9,8 @@ use std::path::{Path, PathBuf};
 
 use backend::commands::BackendCommands;
 use backend::models::InitializeUsbRequest;
-use backend::service::usb_vendor_compat::DEFAULT_USB_EDB_KEY;
 use backend::shape_compare::compare_usb_shape;
-use rusqlite::Connection;
 use tempfile::tempdir;
-
-const USB_VENDOR_ROOT_DIR: &str = "PIONEER";
-const USB_VENDOR_DB_DIR: &str = "rekordbox";
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 struct PdbTablePointer {
@@ -29,32 +27,8 @@ struct ShapeSnapshot {
     pdb_table_pointers: Vec<PdbTablePointer>,
 }
 
-fn vendor_db_dir(root: &Path) -> PathBuf {
-    root.join(USB_VENDOR_ROOT_DIR).join(USB_VENDOR_DB_DIR)
-}
-
 fn edb_path(root: &Path) -> PathBuf {
     vendor_db_dir(root).join("exportLibrary.db")
-}
-
-fn pdb_path(root: &Path) -> PathBuf {
-    vendor_db_dir(root).join("export.pdb")
-}
-
-fn open_edb(path: &Path) -> Connection {
-    let conn = Connection::open(path).expect("open eDB");
-    let has_schema = conn
-        .query_row(
-            "SELECT COUNT(1) FROM sqlite_master WHERE type IN ('table','view')",
-            [],
-            |row| row.get::<_, i64>(0),
-        )
-        .unwrap_or(0);
-    if has_schema == 0 {
-        conn.execute_batch(&format!("PRAGMA key='{DEFAULT_USB_EDB_KEY}';"))
-            .expect("apply SQLCipher key");
-    }
-    conn
 }
 
 fn load_edb_schema(path: &Path) -> BTreeMap<String, Vec<String>> {
@@ -81,14 +55,6 @@ fn load_edb_schema(path: &Path) -> BTreeMap<String, Vec<String>> {
         schema.insert(table, cols);
     }
     schema
-}
-
-fn read_u32_le(bytes: &[u8], offset: usize) -> Option<u32> {
-    let a = *bytes.get(offset)?;
-    let b = *bytes.get(offset + 1)?;
-    let c = *bytes.get(offset + 2)?;
-    let d = *bytes.get(offset + 3)?;
-    Some(u32::from_le_bytes([a, b, c, d]))
 }
 
 fn load_pdb_table_pointers(path: &Path) -> (u32, u32, Vec<PdbTablePointer>) {
@@ -191,34 +157,6 @@ fn fixture_audio_track() -> PathBuf {
         .join("audio")
         .join("formats")
         .join("track_format_wav.wav")
-}
-
-fn seed_test_analysis_bundle(data_dir: &Path, stem: &str) -> PathBuf {
-    let dir = data_dir.join("analysis").join("waveforms");
-    fs::create_dir_all(&dir).expect("create test analysis dir");
-    let dat = dir.join(format!("{stem}.DAT"));
-    fs::write(&dat, b"test-dat").expect("write test DAT");
-    fs::write(dir.join(format!("{stem}.EXT")), b"test-ext").expect("write test EXT");
-    fs::write(dir.join(format!("{stem}.2EX")), b"test-2ex").expect("write test 2EX");
-    dat
-}
-
-fn seed_tracks_as_analyzed(data_dir: &Path, track_ids: &[String]) {
-    let db_path = data_dir.join("backend.db");
-    let conn = Connection::open(&db_path).expect("open backend db");
-    for (idx, track_id) in track_ids.iter().enumerate() {
-        let bundle = seed_test_analysis_bundle(data_dir, &format!("waveform-{idx}"));
-        conn.execute(
-            "UPDATE tracks
-             SET bpm = 120.0,
-                 tonality = '8A',
-                 duration_ms = 180000,
-                 waveform_peaks_path = ?1
-             WHERE id = ?2",
-            rusqlite::params![bundle.to_string_lossy().to_string(), track_id],
-        )
-        .expect("seed analyzed track fields");
-    }
 }
 
 fn snapshot_usb_shape(root: &Path) -> ShapeSnapshot {

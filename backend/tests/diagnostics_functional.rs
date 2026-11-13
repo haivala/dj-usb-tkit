@@ -2,6 +2,8 @@ mod common;
 mod library_sources;
 mod parity_fixture;
 
+use common::{open_edb, vendor_db_dir};
+
 use std::collections::{HashMap, HashSet};
 use std::fs;
 use std::path::{Path, PathBuf};
@@ -22,7 +24,6 @@ use parity_fixture::{
 use tempfile::{TempDir, tempdir};
 
 const USB_VENDOR_ROOT_DIR: &str = "PIONEER";
-const USB_VENDOR_DB_DIR: &str = "rekordbox";
 const PDB_HEADER_COMPATIBILITY_FIX_ID: &str = "repair_pdb_header_compatibility_field";
 const PDB_DUPLICATE_PLAYLIST_ENTRIES_FIX_ID: &str = "repair_pdb_duplicate_playlist_entries";
 const PDB_SENTINEL_U5_FIX_ID: &str = "repair_pdb_sentinel_u5_on_data_pages";
@@ -45,10 +46,6 @@ fn flat_waveform(len: usize, level: u8) -> backend::service::anlz::WaveformData 
         high_energy_full: band,
         peak_level: 1.0,
     }
-}
-
-fn vendor_db_dir(usb_root: &Path) -> std::path::PathBuf {
-    usb_root.join(USB_VENDOR_ROOT_DIR).join(USB_VENDOR_DB_DIR)
 }
 
 /// Locate the first non-sentinel, non-empty data page of `table_type` in a
@@ -74,37 +71,6 @@ fn find_pdb_data_page(bytes: &[u8], page_size: usize, table_type: u32) -> Option
 
 fn read_pdb_page_size(bytes: &[u8]) -> usize {
     u32::from_le_bytes(bytes[4..8].try_into().unwrap()) as usize
-}
-
-use backend::service::usb_vendor_compat::DEFAULT_USB_EDB_KEY;
-
-/// Open an eDB, trying plain SQLite first, then SQLCipher.
-fn open_edb(path: &Path) -> rusqlite::Connection {
-    let conn = rusqlite::Connection::open(path).expect("open eDB");
-    let has_schema = conn
-        .query_row(
-            "SELECT COUNT(1) FROM sqlite_master WHERE type IN ('table','view')",
-            [],
-            |row| row.get::<_, i64>(0),
-        )
-        .unwrap_or(0);
-    if has_schema == 0 {
-        conn.execute_batch(&format!("PRAGMA key='{DEFAULT_USB_EDB_KEY}';"))
-            .expect("apply SQLCipher key");
-        let unlocked = conn
-            .query_row(
-                "SELECT COUNT(1) FROM sqlite_master WHERE type IN ('table','view')",
-                [],
-                |row| row.get::<_, i64>(0),
-            )
-            .unwrap_or(0);
-        assert!(
-            unlocked > 0,
-            "failed to unlock SQLCipher DB at {}",
-            path.display()
-        );
-    }
-    conn
 }
 
 fn seed_track_artwork_path(data_dir: &Path, track_id: &str, artwork_path: &Path) {

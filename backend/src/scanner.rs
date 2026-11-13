@@ -773,8 +773,8 @@ mod tests {
 
     #[test]
     fn infer_artist_title_dash_separated() {
-        let (artist, title) = infer_artist_title(Path::new("/music/DJ Shadow - Midnight.mp3"));
-        assert_eq!(artist, "DJ Shadow");
+        let (artist, title) = infer_artist_title(Path::new("/music/DJ Lantern - Midnight.mp3"));
+        assert_eq!(artist, "DJ Lantern");
         assert_eq!(title, "Midnight");
     }
 

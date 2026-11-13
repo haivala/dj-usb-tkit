@@ -1,4 +1,7 @@
+mod common;
 mod library_sources;
+
+use common::{pdb_path, read_u32_le};
 
 use std::fs;
 use std::path::Path;
@@ -42,13 +45,6 @@ use tempfile::tempdir;
 
 const USB_VENDOR_ROOT_DIR: &str = "PIONEER";
 const USB_VENDOR_DB_DIR: &str = "rekordbox";
-
-fn pdb_path(usb_root: &Path) -> PathBuf {
-    usb_root
-        .join(USB_VENDOR_ROOT_DIR)
-        .join(USB_VENDOR_DB_DIR)
-        .join("export.pdb")
-}
 
 #[test]
 fn user_like_flow_imports_sources_analyzes_and_adds_from_library_usb_and_history() {
@@ -627,14 +623,6 @@ fn parse_max_last_page(bytes: &[u8], num_tables: usize) -> usize {
         cursor += 16;
     }
     max_page
-}
-
-fn read_u32_le(bytes: &[u8], offset: usize) -> Option<u32> {
-    let a = *bytes.get(offset)?;
-    let b = *bytes.get(offset + 1)?;
-    let c = *bytes.get(offset + 2)?;
-    let d = *bytes.get(offset + 3)?;
-    Some(u32::from_le_bytes([a, b, c, d]))
 }
 
 /// An imported (or user-set) BPM / key survives the track's first analysis --
