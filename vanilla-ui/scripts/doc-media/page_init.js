@@ -167,12 +167,15 @@
     for (const cb of listeners.get(name) || []) cb({ event: name, payload });
   };
   const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
-  // With `opts.audioFormats`, the status the backend gave once that shot's
-  // playlist existed: the one dumped beside the diagnostics predates it.
+  // With `opts.audioFormats` (or `opts.batchExport`), the status the backend
+  // gave once that shot's playlists existed (or changed): the one dumped
+  // beside the diagnostics predates them.
   const exportStatusList = () =>
-    opts.audioFormats
-      ? usb.audioFormats.exportStatus.data.playlistUsbExportStatus
-      : usb?.exportStatus?.data?.playlistUsbExportStatus;
+    opts.batchExport
+      ? usb.batchExport.exportStatus.data.playlistUsbExportStatus
+      : opts.audioFormats
+        ? usb.audioFormats.exportStatus.data.playlistUsbExportStatus
+        : usb?.exportStatus?.data?.playlistUsbExportStatus;
   const exportedNow = new Set();
   // Playlists added to since: their "exported to USB" marks are cleared.
   const changedNow = new Set();
@@ -188,6 +191,12 @@
     if (fresh.length) changedNow.add(playlistId);
     return { playlistId, added: fresh.length, skipped: trackIds.length - fresh.length };
   };
+  // The Export playlists shot: the tracks the backend added to an exported
+  // playlist before reading the page's overview, so the sidebar agrees.
+  if (opts.batchExport) {
+    const { name, titles } = usb.batchExport.change;
+    addToPlaylist(playlists.find((p) => p.name === name).id, byTitles(titles).map((t) => t.id));
+  }
   // Replays the recorded export of playlist `name` as the backend's job
   // events, over about `opts.exportMs`.
   const replayExport = async (playlistId) => {
@@ -380,6 +389,18 @@
               return ok({ exportSpace: { ...space, availableBytes: USB_FREE_BYTES } });
             }
             const items = playlists.find((p) => p.id === r.playlistId)?.tracks || [];
+            return ok({ exportSpace: exportSpace(items) });
+          }
+          case "get_batch_export_overview": {
+            // In the sidebar's (made-up) order, as the backend lists them in its own.
+            const order = playlistRows().map((p) => p.id);
+            const { overview } = usb.batchExport;
+            const rows = [...overview.data.rows].sort((a, b) => order.indexOf(a.playlistId) - order.indexOf(b.playlistId));
+            return { ...overview, data: { ...overview.data, rows } };
+          }
+          case "get_playlists_export_space": {
+            const chosen = playlists.filter((p) => r.playlistIds.includes(p.id));
+            const items = [...new Set(chosen.flatMap((p) => p.tracks))];
             return ok({ exportSpace: exportSpace(items) });
           }
           case "set_usb_audio_formats":

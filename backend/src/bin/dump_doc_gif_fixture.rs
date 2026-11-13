@@ -13,6 +13,8 @@
 //! messages and result, and -- for a copy of the USB at `brokenUsbRoot` with
 //! one audio file renamed, one analysis file emptied and one playlist entry
 //! dropped from the eDB only -- the diagnostics and the repair preview.
+//! With `batchExport` in the spec, also the Export playlists page's overview,
+//! after one exported playlist is changed and an empty one added.
 //!
 //! `DOC_FIXTURE_LANGUAGE` (e.g. `en-XA`, debug builds only) dumps the responses in that
 //! language instead of English, to find response text that isn't from the catalog.
@@ -249,6 +251,10 @@ fn dump_usb(
     let audio_formats = spec
         .get("audioFormats")
         .map(|formats| dump_audio_formats(svc, formats, usb_root, source_dir, &id_of));
+    // Last: it changes an exported playlist, which the dumps above predate.
+    let batch_export = spec
+        .get("batchExport")
+        .map(|batch| dump_batch_export(svc, batch, &exports, usb_root, source_dir, &id_of));
 
     json!({
         "exports": exports,
@@ -262,6 +268,59 @@ fn dump_usb(
         "brokenDiagnostics": broken_diagnostics,
         "repairPreview": repair_preview,
         "audioFormats": audio_formats,
+        "batchExport": batch_export,
+    })
+}
+
+/// The Export playlists page: adds the tracks titled in `spec.change.titles`
+/// to the exported playlist `spec.change.name` (so the stick's copy is out of
+/// date), creates the empty playlist `spec.empty`, then reads the page's
+/// overview for the USB.
+fn dump_batch_export(
+    svc: &BackendService,
+    spec: &Value,
+    exports: &serde_json::Map<String, Value>,
+    usb_root: &str,
+    source_dir: &str,
+    id_of: impl Fn(&str) -> String,
+) -> Value {
+    let change = &spec["change"];
+    let changed_name = change["name"].as_str().expect("change name");
+    let changed_id = exports
+        .get(changed_name)
+        .and_then(|export| export["playlistId"].as_str())
+        .unwrap_or_else(|| fail("batch export", format!("{changed_name:?} wasn't exported")));
+    let track_ids = change["titles"]
+        .as_array()
+        .expect("titles")
+        .iter()
+        .map(|t| id_of(t.as_str().expect("title")))
+        .collect::<Vec<_>>();
+    svc.add_library_selection_to_playlist(request(
+        "add_library_selection_to_playlist",
+        json!({
+            "playlistId": changed_id,
+            "sourceRoots": [source_dir],
+            "trackIds": track_ids
+        }),
+    ))
+    .unwrap_or_else(|e| fail("add_library_selection_to_playlist", e));
+    let empty = svc
+        .create_playlist(request("create_playlist", json!({ "name": spec["empty"] })))
+        .unwrap_or_else(|e| fail("create_playlist", e));
+    let overview = response(
+        "get_batch_export_overview",
+        svc.get_batch_export_overview(request(
+            "get_batch_export_overview",
+            json!({ "usbRoot": usb_root }),
+        )),
+    );
+    // Asked after the change: the earlier dumps still have it up to date.
+    let export_status = response("playlists_state", svc.playlists_state());
+    json!({
+        "emptyPlaylistId": empty.playlist_id,
+        "overview": overview,
+        "exportStatus": export_status,
     })
 }
 

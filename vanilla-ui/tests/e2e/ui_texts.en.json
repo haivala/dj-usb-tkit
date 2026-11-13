@@ -113,6 +113,10 @@
       "one": "Export {count} playlist",
       "other": "Export {count} playlists"
     },
+    "ui-export-playlists-run-usb": {
+      "one": "Export {count} playlist to {name}",
+      "other": "Export {count} playlists to {name}"
+    },
     "ui-export-playlists-select-all": "Select all playlists",
     "ui-export-playlists-select-changed": "New and changed",
     "ui-export-playlists-select-changed-tooltip": "Select only the playlists the USB doesn't have yet or that changed since their last export",

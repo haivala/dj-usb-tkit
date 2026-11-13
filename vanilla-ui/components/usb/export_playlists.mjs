@@ -119,7 +119,9 @@ export function renderExportPlaylistsControls(ctx) {
   el.exportPlaylistsSpace.textContent = space?.summaryText || "";
   el.exportPlaylistsSpace.classList.toggle("is-warning", !!space && !space.fits);
 
-  el.exportPlaylistsRunBtn.textContent = tCount("ui-export-playlists-run", count);
+  el.exportPlaylistsRunBtn.textContent = overview?.usbName
+    ? tCount("ui-export-playlists-run-usb", count, { name: overview.usbName })
+    : tCount("ui-export-playlists-run", count);
   el.exportPlaylistsRunBtn.disabled = count === 0 || !hasUsb(state) || !!state.exportStarting
     || isUsbRootChangeBlocked(state) || (!!space && !space.fits);
 }

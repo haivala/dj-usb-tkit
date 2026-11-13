@@ -42,6 +42,23 @@ Export is intentionally tied to a quick prep loop:
 
 ![Exporting a playlist: progress in the footer, then the export status](assets/export-playlist.webp)
 
+### Exporting several playlists
+
+Export playlists… under the sidebar's playlists (while a USB is connected) opens a page with every
+playlist in the app's order: its tracks, length and size, what exporting it would copy, whether
+the USB already has it (up to date, or changed since), and when and to which USB it was last
+exported. A playlist that can't be exported (no tracks, missing analysis, a format the USB doesn't
+take) is greyed out with the reason. Every other playlist is chosen to start with; "New and
+changed" chooses only the ones the USB lacks or has out of date. The line on top shows what the
+choice copies against the free space, and the chosen playlists export as one job with one backup.
+
+With every playlist chosen, "Use the app's playlist order" puts them on top of the USB's list in
+the app's order. In additive mode, "Use the app's track order" also reorders the tracks of
+playlists already on the USB. Without these, playlists already on the USB keep their place and
+their track order, new playlists go on top and new tracks at the end.
+
+![Export playlists: every playlist, what exporting it would copy, and whether the USB has it](assets/export-playlists.png)
+
 Export is designed for deterministic re-runs. Re-exporting the same playlist should produce predictable results, and optional cleanup can prune stale export-owned files when enabled.
 
 Each export also records local bookkeeping for the selected USB device. The

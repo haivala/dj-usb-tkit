@@ -113,6 +113,10 @@
       "one": "[ÉÉẋþööŕţ {count} þļááýļîîšţ]",
       "other": "[ÉÉẋþööŕţ {count} þļááýļîîšţš]"
     },
+    "ui-export-playlists-run-usb": {
+      "one": "[ÉÉẋþööŕţ {count} þļááýļîîšţ ţöö {name}]",
+      "other": "[ÉÉẋþööŕţ {count} þļááýļîîšţš ţöö {name}]"
+    },
     "ui-export-playlists-select-all": "[Šééļééçţ ááļļ þļááýļîîšţš]",
     "ui-export-playlists-select-changed": "[Ñééŵ ááñð çĥááñĝééð]",
     "ui-export-playlists-select-changed-tooltip": "[Šééļééçţ ööñļý ţĥéé þļááýļîîšţš ţĥéé ÛÛŠƁ ðööééšñ'ţ ĥááṽéé ýééţ ööŕ ţĥááţ çĥááñĝééð šîîñçéé ţĥééîîŕ ļáášţ ééẋþööŕţ]",

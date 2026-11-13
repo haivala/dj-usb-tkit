@@ -1,6 +1,6 @@
 // Records the docs media in docs/assets/ -- the cue-editor, playlist-import,
 // export, selection-toolbar, USB playlist order and track column animations (WebP) and the
-// README / cue-editor / Backups / USB / transcode screenshots -- from the real
+// README / cue-editor / Backups / USB / transcode / Export playlists screenshots -- from the real
 // frontend build.
 //
 //   npm run docs:media           (from vanilla-ui/; needs cargo and ffmpeg)
@@ -164,6 +164,12 @@ const AUDIO_FORMATS = {
   transcode: ["Ice Road", "Snowblind"],
   playlist: "Warmup",
 };
+// The Export playlists shot: after the exports, a track added to House (so
+// the USB's copy is out of date), and Playlist 1 created empty.
+const BATCH_EXPORT = {
+  change: { name: "House", titles: ["Northbound"] },
+  empty: "Playlist 1",
+};
 // USB history sessions (only a player writes these), from the USB's tracks.
 const USB_HISTORY = [
   { id: "hist-2", name: "HISTORY 002", createdAt: "2026-09-26", titles: ["Northbound", "Low Orbit", "Sauna Talk", "Frost Line", "Afterglow", "Driftwood"] },
@@ -224,6 +230,7 @@ function buildFixture(work) {
       untick: AUDIO_FORMATS.untick,
       playlist: { name: AUDIO_FORMATS.playlist, titles: PLAYLISTS.find((p) => p.name === AUDIO_FORMATS.playlist).titles },
     },
+    batchExport: BATCH_EXPORT,
   }));
   run("cargo", [
     "run", "-q", "--release", "-p", "backend", "--features", "dev-tools", "--bin", "dump_doc_gif_fixture",
@@ -240,8 +247,10 @@ function buildFixture(work) {
   const swaps = [
     [brokenUsbRoot, USB_ROOT], [usbRoot, USB_ROOT], [src, SHOWN_ROOT], [transcodeFolder, SHOWN_TRANSCODES],
     ...playlistIds, [fixture.usb.audioFormats.playlistId, warmupId],
+    [fixture.usb.batchExport.emptyPlaylistId, PLAYLISTS.find((p) => p.name === BATCH_EXPORT.empty).id],
   ];
   fixture.usb = presentUsbResponses(fixture.usb, swaps);
+  fixture.usb.batchExport.change = BATCH_EXPORT.change;
   fixture.transcodes = presentUsbResponses(fixture.transcodes, swaps);
   fixture.usbHistory = USB_HISTORY;
   // The page can't read local files: inline artwork, and show made-up paths.
@@ -978,6 +987,23 @@ function shots(fixture) {
           .locator(".format-badge");
         await badge.hover();
         await page.locator(".app-tooltip--visible").waitFor();
+        await page.waitForTimeout(500);
+      },
+    },
+    {
+      // docs/USB_EXPORT.md: the Export playlists page, a row per state (on
+      // the USB and up to date, changed since, not on the USB, no tracks),
+      // with "New and changed" chosen.
+      name: "export-playlists",
+      caption: "Export playlists: every playlist, what exporting it would copy, and whether the USB has it",
+      opts: { audioFormats: true, batchExport: true },
+      viewport: WIDE_VIEWPORT,
+      async run(page) {
+        await page.locator("#exportPlaylistsBtn").click();
+        await page.locator("#exportPlaylistsList .export-playlists-row").first().waitFor();
+        await page.locator("#exportPlaylistsSelectChangedBtn").click();
+        await page.locator("#exportPlaylistsSpace:not(.hidden)").waitFor();
+        await page.mouse.move(WIDE_VIEWPORT.width - 2, WIDE_VIEWPORT.height - 2);
         await page.waitForTimeout(500);
       },
     },

@@ -2288,7 +2288,7 @@ test("export playlists page: a row per playlist, selection, order ticks and one 
   await expect(forceOrder).toBeEnabled();
   await expect(page.locator("#exportPlaylistsForceTrackOrder")).toBeDisabled();
   await expect(page.locator("#exportPlaylistsForceTrackOrderRow")).toHaveAttribute("data-tooltip", "Mirror export always writes the app's track order.");
-  await expect(run).toHaveText("Export 3 playlists");
+  await expect(run).toHaveText("Export 3 playlists to TEST STICK");
   await expect(page.locator("#exportPlaylistsSpace")).toHaveText("3 playlists to copy");
 
   // Not everything chosen: no long-time warning, no forced playlist order.
@@ -2301,7 +2301,7 @@ test("export playlists page: a row per playlist, selection, order ticks and one 
   await expect(forceOrder).toBeDisabled();
   await expect(forceOrder).not.toBeChecked();
   await expect(page.locator("#exportPlaylistsForceOrderHint")).toHaveText("Select all playlists to use it");
-  await expect(run).toHaveText("Export 2 playlists");
+  await expect(run).toHaveText("Export 2 playlists to TEST STICK");
   await expect(page.locator("#exportPlaylistsSpace")).toHaveText("2 playlists to copy");
 
   await page.locator("#exportPlaylistsSelectChangedBtn").click();
@@ -2328,5 +2328,5 @@ test("export playlists page: a row per playlist, selection, order ticks and one 
   });
   // The page reads the stick again and starts over with everything chosen.
   await expect(forceOrder).not.toBeChecked();
-  await expect(run).toHaveText("Export 3 playlists");
+  await expect(run).toHaveText("Export 3 playlists to TEST STICK");
 });

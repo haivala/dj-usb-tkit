@@ -2385,6 +2385,11 @@ ui-export-playlists-run = { $count ->
     [one] Export { $count } playlist
    *[other] Export { $count } playlists
 }
+# The export button with the USB's name. $count: the chosen playlists. $name: the USB's name.
+ui-export-playlists-run-usb = { $count ->
+    [one] Export { $count } playlist to { $name }
+   *[other] Export { $count } playlists to { $name }
+}
 # The status line when the page can't be loaded. $error: why.
 ui-export-playlists-load-failed = Could not load the playlists to export: { $error }
 
