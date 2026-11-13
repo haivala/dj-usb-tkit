@@ -4473,7 +4473,7 @@ fn pdb_writer_keeps_dictionary_rows_that_differ_only_in_case() {
                 row_id: None,
                 playlist_id: None,
                 sort_order: None,
-                move_to_front: false,
+                placement: PlaylistPlacement::AsGiven,
             }],
             None,
             false,

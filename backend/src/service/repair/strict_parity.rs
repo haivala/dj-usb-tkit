@@ -901,6 +901,7 @@ fn collect_merge_write(
             manifest,
             mirror_playlist_entries: true,
             identity: Some((i64::from(mpl.playlist_id), i64::from(mpl.sort_order))),
+            placement: PlaylistPlacement::AsGiven,
         })
         .collect();
     let pdb_writes: Vec<PdbPlaylistWrite<'_>> = merged
@@ -913,7 +914,7 @@ fn collect_merge_write(
             row_id: mpl.pdb_row_id,
             playlist_id: Some(mpl.playlist_id),
             sort_order: Some(mpl.sort_order),
-            move_to_front: false,
+            placement: PlaylistPlacement::AsGiven,
         })
         .collect();
 

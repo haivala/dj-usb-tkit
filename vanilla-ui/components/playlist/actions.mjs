@@ -291,6 +291,10 @@ export function updatePlaylistExportButtons(ctx) {
   el.analyzePlaylistMissingBtn.textContent = current?.analyzeMissingLabel || "";
   el.analyzePlaylistMissingBtn.dataset.tooltip = current?.analyzeMissingTooltip || "";
   el.exportPlaylistBtn.hidden = showAnalyzeMissing;
+
+  // The Export playlists page: offered while a USB is connected.
+  el.exportPlaylistsItem.classList.toggle("hidden", !state.usbRoot || !state.usbRootValid);
+  if (state.activeTab === "export-playlists") ctx.renderExportPlaylistsControls();
 }
 
 export async function createPlaylist(ctx, name) {

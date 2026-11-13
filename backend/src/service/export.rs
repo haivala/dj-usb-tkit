@@ -13,9 +13,10 @@ use crate::error::{BackendError, BackendResult};
 use crate::i18n::{Text, tr};
 use crate::logging::{self, Level};
 use crate::models::{
-    ExportToUsbData, ExportToUsbOptions, ExportToUsbRequest, GetPlaylistExportSpaceData,
-    GetPlaylistExportSpaceRequest, Playlist, PlaylistExportSpace, PlaylistUsbExportStatus,
-    WarningEntry,
+    BatchExportOverviewData, BatchExportRow, BatchExportStatus, ExportPlaylistsToUsbData,
+    ExportPlaylistsToUsbRequest, ExportToUsbData, ExportToUsbOptions, ExportToUsbRequest,
+    GetPlaylistExportSpaceData, GetPlaylistExportSpaceRequest, GetPlaylistsExportSpaceRequest,
+    Playlist, PlaylistExportSpace, PlaylistUsbExportStatus, WarningEntry,
 };
 
 use super::track_matching::{ContentFingerprint, content_fingerprint_key};
@@ -29,9 +30,9 @@ use crate::audio_format::{
 };
 
 use super::export_helpers::{
-    ExportManifest, ExportManifestTrack, ExportPlaylistData, ExportTrackData, FileCloser,
-    WriteExportLibraryDbResult, WriteExportPdbResult, analysis_bundle_claimable,
-    canonicalize_track_path_identity, collect_manifest_owned_paths,
+    EdbPlaylistWrite, ExportManifest, ExportManifestTrack, ExportPlaylistData, ExportTrackData,
+    FileCloser, PdbPlaylistWrite, PlaylistPlacement, WriteExportPdbResult,
+    analysis_bundle_claimable, canonicalize_track_path_identity, collect_manifest_owned_paths,
     collect_manifest_referenced_paths, copy_if_different, copy_wav_normalized_if_needed,
     ensure_analysis_bundle_ppth, export_analysis_bundle_for_track, export_artwork_for_player,
     export_owned_files_setting_key, exported_media_target_path,
@@ -39,7 +40,7 @@ use super::export_helpers::{
     is_safe_export_owned_path, normalize_owned_export_path, preview_pdb,
     prune_stale_export_owned_files, remove_orphaned_dropped_tracks_from_dbs, stable_u32_hash,
     to_usb_relative_path, usb_relative_path, verify_edb_content, verify_edb_content_with_conn,
-    verify_pdb_content, write_edb_playlist_in, write_pdb_in,
+    verify_pdb_content, write_edb_playlists_in, write_pdb_playlists_in,
 };
 use super::export_log::{append_export_log_record, build_export_log_record};
 use super::usb_staging;
@@ -683,6 +684,133 @@ fn format_notice(convert: &[String], refused: &[String]) -> (Option<String>, boo
 /// media and no updated library. Estimate the new bytes up front and refuse
 /// the export when the drive can't hold them plus headroom. Silently skipped
 /// when the mount's free space can't be read.
+/// How an export places its playlists on the stick.
+#[derive(Debug, Clone, Copy)]
+struct ExportLayout {
+    placement: PlaylistPlacement,
+    /// The playlists' entries become the app's tracks in the app's order,
+    /// even in additive mode.
+    force_track_order: bool,
+}
+
+impl ExportLayout {
+    /// One playlist exported from its page: first on the stick.
+    const SINGLE: Self = Self {
+        placement: PlaylistPlacement::MoveToFront,
+        force_track_order: false,
+    };
+}
+
+/// One playlist of an export run, from its load to its record.
+struct PlaylistRun {
+    playlist: ExportPlaylistData,
+    unplayable_tracks: Vec<ExportTrackData>,
+    exported_tracks: usize,
+    skipped_tracks: usize,
+    exported_artworks: usize,
+    exported_analysis_files: usize,
+    manifest_tracks: Vec<ExportManifestTrack>,
+    manifest: ExportManifest,
+    owned_setting_key: String,
+    current_owned: HashSet<String>,
+    prunable: Vec<String>,
+}
+
+impl PlaylistRun {
+    fn new(playlist: ExportPlaylistData, unplayable_tracks: Vec<ExportTrackData>) -> Self {
+        Self {
+            playlist,
+            unplayable_tracks,
+            exported_tracks: 0,
+            skipped_tracks: 0,
+            exported_artworks: 0,
+            exported_analysis_files: 0,
+            manifest_tracks: Vec::new(),
+            manifest: ExportManifest::default(),
+            owned_setting_key: String::new(),
+            current_owned: HashSet::new(),
+            prunable: Vec::new(),
+        }
+    }
+}
+
+/// What one playlist's export did.
+struct ExportedPlaylist {
+    playlist_id: String,
+    playlist_name: String,
+    exported_tracks: usize,
+    skipped_tracks: usize,
+    exported_artworks: usize,
+    exported_analysis_files: usize,
+}
+
+/// An export run's result: its playlists, in the order they were asked for.
+struct ExportRun {
+    playlists: Vec<ExportedPlaylist>,
+    warnings: Vec<WarningEntry>,
+}
+
+/// The USB folder an export writes to, refused when it's missing or read-only.
+fn export_target_usb_root(raw: Option<&str>) -> BackendResult<PathBuf> {
+    let usb_root = resolve_usb_root(raw)?;
+    if !usb_root.exists() || !usb_root.is_dir() {
+        return Err(BackendError::NotFound(tr::export_error_usb_missing(
+            usb_root.display(),
+        )));
+    }
+    if !can_write_file_at(&usb_root) {
+        // The status line's own text says it all.
+        return Err(BackendError::ValidationWithDetails(
+            tr::export_refused_read_only(),
+            json!({
+                "validationType": "usb_read_only",
+                "statusText": tr::export_refused_read_only().render(),
+            }),
+        ));
+    }
+    Ok(usb_root)
+}
+
+fn export_sync_mode_text(options: &ExportToUsbOptions) -> Text {
+    if options.prune_stale {
+        tr::export_sync_mirror()
+    } else {
+        tr::export_sync_additive()
+    }
+}
+
+/// Every track of `playlists` once: the first playlist whole, then each
+/// next one's tracks no playlist before it has. What the space checks count.
+fn merged_export_playlist<'a>(
+    playlists: impl IntoIterator<Item = &'a ExportPlaylistData>,
+) -> ExportPlaylistData {
+    let mut merged: Option<ExportPlaylistData> = None;
+    let mut seen = HashSet::<String>::new();
+    for playlist in playlists {
+        match merged.as_mut() {
+            None => {
+                seen.extend(playlist.tracks.iter().map(|t| t.file_path.clone()));
+                merged = Some(playlist.clone());
+            }
+            Some(merged) => {
+                let new_tracks = playlist
+                    .tracks
+                    .iter()
+                    .filter(|track| !seen.contains(&track.file_path))
+                    .cloned()
+                    .collect::<Vec<_>>();
+                seen.extend(playlist.tracks.iter().map(|t| t.file_path.clone()));
+                merged.tracks.extend(new_tracks);
+            }
+        }
+    }
+    merged.unwrap_or_else(|| ExportPlaylistData {
+        id: String::new(),
+        name: String::new(),
+        tracks: Vec::new(),
+    })
+}
+
 fn ensure_usb_has_space_for_export(
     usb_root: &Path,
     media_root: &Path,
@@ -1003,20 +1131,184 @@ impl BackendService {
     ) -> BackendResult<GetPlaylistExportSpaceData> {
         let usb_root = req.usb_root.trim();
         let export_space = (!usb_root.is_empty())
-            .then(|| self.playlist_export_space(&req.playlist_id, Path::new(usb_root)))
+            .then(|| {
+                self.playlists_export_space(
+                    std::slice::from_ref(&req.playlist_id),
+                    Path::new(usb_root),
+                )
+            })
             .and_then(Result::ok);
         Ok(GetPlaylistExportSpaceData { export_space })
+    }
+
+    /// [`Self::get_playlist_export_space`] for the playlists chosen on the
+    /// Export playlists page, a track in several of them counted once.
+    pub fn get_playlists_export_space(
+        &self,
+        req: GetPlaylistsExportSpaceRequest,
+    ) -> BackendResult<GetPlaylistExportSpaceData> {
+        let usb_root = req.usb_root.trim();
+        let export_space = (!usb_root.is_empty() && !req.playlist_ids.is_empty())
+            .then(|| self.playlists_export_space(&req.playlist_ids, Path::new(usb_root)))
+            .and_then(Result::ok);
+        Ok(GetPlaylistExportSpaceData { export_space })
+    }
+
+    /// The Export playlists page: every playlist in the app's order, with
+    /// whether the stick has it and why it can't be exported, if it can't.
+    pub fn get_batch_export_overview(
+        &self,
+        req: crate::models::GetBatchExportOverviewRequest,
+    ) -> BackendResult<BatchExportOverviewData> {
+        let usb_root = export_target_usb_root(req.usb_root.as_deref())?;
+        let rows = self.batch_export_rows(&usb_root)?;
+        let prune_stale = export_prune_stale_setting(&*self.db.connect()?)?;
+        Ok(BatchExportOverviewData {
+            rows,
+            usb_name: usb_drive_label(&usb_root.to_string_lossy()).unwrap_or_default(),
+            force_track_order_available: !prune_stale,
+            force_track_order_tooltip: if prune_stale {
+                tr::batch_export_force_track_order_mirror_tooltip()
+            } else {
+                tr::batch_export_force_track_order_tooltip()
+            }
+            .render(),
+        })
+    }
+
+    pub(crate) fn batch_export_rows(&self, usb_root: &Path) -> BackendResult<Vec<BatchExportRow>> {
+        let playlists = self.list_playlists()?.items;
+        let usb_playlist_names = self.usb_playlist_names(usb_root);
+        let usb_root_text = usb_root.to_string_lossy().to_string();
+        let formats = super::usb_identity::read_usb_audio_formats(usb_root);
+        // A USB without a PDB yet holds no tracks.
+        let on_usb = self.usb_track_sizes(usb_root).unwrap_or_default();
+        let conn = self.db.connect()?;
+        let mut rows = Vec::with_capacity(playlists.len());
+        for playlist in &playlists {
+            let mut data = self.load_playlist_for_export(&playlist.id)?;
+            let track_count = data.tracks.len();
+            let duration_ms = data
+                .tracks
+                .iter()
+                .filter_map(|t| t.duration_ms)
+                .sum::<u64>();
+            let size_bytes = data
+                .tracks
+                .iter()
+                .filter_map(|t| t.file_size_bytes)
+                .map(|bytes| u64::try_from(bytes).unwrap_or(0))
+                .sum::<u64>();
+            // When, and to which drive: its name then, else its folder's.
+            let last_exported_text = match playlist
+                .last_exported_at
+                .as_deref()
+                .filter(|at| !at.trim().is_empty())
+            {
+                None => tr::batch_export_never(),
+                Some(at) => {
+                    let date = crate::utils::local_date_time(at);
+                    let drive = playlist
+                        .last_exported_usb_name
+                        .clone()
+                        .filter(|name| !name.trim().is_empty())
+                        .or_else(|| {
+                            playlist
+                                .last_exported_usb_root
+                                .as_deref()
+                                .and_then(usb_drive_label)
+                        });
+                    match drive {
+                        Some(drive) => tr::batch_export_last_exported(date, drive),
+                        None => tr::batch_export_last_exported_no_drive(date),
+                    }
+                }
+            }
+            .render();
+            let on_stick =
+                usb_playlist_names.contains(&normalize_playlist_name_for_compare(&playlist.name));
+            let status = if !on_stick {
+                BatchExportStatus::New
+            } else if playlist.last_exported_at.is_some()
+                && playlist.last_exported_usb_root.as_deref() == Some(usb_root_text.as_str())
+            {
+                BatchExportStatus::OnStick
+            } else {
+                BatchExportStatus::OnStickChanged
+            };
+            let status_text = match status {
+                BatchExportStatus::New => tr::batch_export_status_new(),
+                BatchExportStatus::OnStick => tr::batch_export_status_on_stick(),
+                BatchExportStatus::OnStickChanged => tr::batch_export_status_changed(),
+            }
+            .render();
+            let disabled_reason = if data.tracks.is_empty() {
+                Some(tr::batch_export_reason_empty())
+            } else {
+                split_off_unplayable_tracks(&mut data);
+                if data.tracks.is_empty() {
+                    Some(tr::batch_export_reason_none_playable())
+                } else if !super::export_blocking_missing_source_roots(
+                    &conn,
+                    data.tracks.iter().map(|track| track.file_path.as_str()),
+                )?
+                .is_empty()
+                {
+                    Some(tr::batch_export_reason_source_missing())
+                } else if ensure_playlist_tracks_analysis_ready(usb_root, &data).is_err() {
+                    Some(tr::batch_export_reason_not_analyzed())
+                } else if plan_export_files(&conn, &data.tracks, &formats, SourceFacts::Recorded)?
+                    .iter()
+                    .any(|file| matches!(file, ExportFile::Refused(_)))
+                {
+                    Some(tr::batch_export_reason_formats())
+                } else {
+                    None
+                }
+            }
+            .map(|text| text.render());
+            // What exporting it alone would copy: its playable tracks the
+            // stick lacks.
+            let copy = estimate_playlist_copy(usb_root, &data, &on_usb);
+            let copy_text = if copy.tracks == 0 {
+                tr::batch_export_copy_none()
+            } else {
+                tr::batch_export_copy(copy.tracks, byte_size(copy.bytes))
+            }
+            .render();
+            rows.push(BatchExportRow {
+                playlist_id: playlist.id.clone(),
+                name: playlist.name.clone(),
+                track_count,
+                duration_text: if duration_ms > 0 {
+                    crate::utils::duration_text(duration_ms)
+                } else {
+                    String::new()
+                },
+                size_text: byte_size(size_bytes).render(),
+                copy_text,
+                last_exported_text,
+                status,
+                status_text,
+                disabled_reason,
+            });
+        }
+        Ok(rows)
     }
 
     /// The playlist heading's export estimate (see `estimate_playlist_copy`)
     /// against the USB's free space, and its tracks in formats the USB's
     /// USB audio formats don't allow.
-    pub(crate) fn playlist_export_space(
+    pub(crate) fn playlists_export_space(
         &self,
-        playlist_id: &str,
+        playlist_ids: &[String],
         usb_root: &Path,
     ) -> BackendResult<PlaylistExportSpace> {
-        let mut playlist = self.load_playlist_for_export(playlist_id)?;
+        let loaded = playlist_ids
+            .iter()
+            .map(|id| self.load_playlist_for_export(id))
+            .collect::<BackendResult<Vec<_>>>()?;
+        let mut playlist = merged_export_playlist(&loaded);
         let list_track_count = playlist.tracks.len();
         split_off_unplayable_tracks(&mut playlist);
         let plan = plan_export_files(
@@ -1122,26 +1414,10 @@ impl BackendService {
         // One export at a time, and none while a USB track save is running:
         // each read-modify-writes the same staged PDB/eDB. Refused rather
         // than queued, so a second click never starts a surprise export later.
-        let _usb_write_guard = self
+        let usb_write_guard = self
             .try_lock_usb_writes()
             .ok_or_else(|| BackendError::Validation(tr::export_error_busy()))?;
-
-        let usb_root = resolve_usb_root(req.usb_root.as_deref())?;
-        if !usb_root.exists() || !usb_root.is_dir() {
-            return Err(BackendError::NotFound(tr::export_error_usb_missing(
-                usb_root.display(),
-            )));
-        }
-        if !can_write_file_at(&usb_root) {
-            // The status line's own text says it all.
-            return Err(BackendError::ValidationWithDetails(
-                tr::export_refused_read_only(),
-                json!({
-                    "validationType": "usb_read_only",
-                    "statusText": tr::export_refused_read_only().render(),
-                }),
-            ));
-        }
+        let usb_root = export_target_usb_root(req.usb_root.as_deref())?;
         let options = req.options.unwrap_or_default();
         if let Some(sort) = req.sort
             && !self.playlist_sort_locked(&playlist_id, Some(&usb_root), options.prune_stale)?
@@ -1155,6 +1431,151 @@ impl BackendService {
                 before_track_id: None,
             })?;
         }
+        let mut run = self.run_export(
+            &usb_write_guard,
+            &usb_root,
+            &[playlist_id],
+            &options,
+            ExportLayout::SINGLE,
+            &mut on_progress,
+        )?;
+        let exported = run
+            .playlists
+            .pop()
+            .ok_or_else(|| BackendError::Internal("export produced no result".to_string()))?;
+        let warning_count = logging::count_warnings(&run.warnings);
+        let status_text = tr::export_complete(
+            &exported.playlist_name,
+            exported.exported_tracks,
+            exported.skipped_tracks,
+            export_sync_mode_text(&options),
+        )
+        .render();
+        Ok(ExportToUsbData {
+            job_id: String::new(),
+            playlist_id: exported.playlist_id,
+            playlist_name: exported.playlist_name,
+            usb_root: usb_root.to_string_lossy().to_string(),
+            exported_tracks: exported.exported_tracks,
+            skipped_tracks: exported.skipped_tracks,
+            exported_artworks: exported.exported_artworks,
+            exported_analysis_files: exported.exported_analysis_files,
+            status_text,
+            warning_text: warning_text(warning_count),
+            warnings: run.warnings,
+        })
+    }
+
+    /// Exports the chosen playlists as one job: one backup, one write of each
+    /// stick database, one Engine DJ rebuild. The databases change for all of
+    /// them or for none.
+    pub fn export_playlists_to_usb_with_progress<F>(
+        &self,
+        req: ExportPlaylistsToUsbRequest,
+        mut on_progress: F,
+    ) -> BackendResult<ExportPlaylistsToUsbData>
+    where
+        F: FnMut(usize, usize, &str),
+    {
+        let usb_write_guard = self
+            .try_lock_usb_writes()
+            .ok_or_else(|| BackendError::Validation(tr::export_error_busy()))?;
+        let usb_root = export_target_usb_root(req.usb_root.as_deref())?;
+        let options = req.options.unwrap_or_default();
+        let wanted = req
+            .playlist_ids
+            .iter()
+            .map(|id| id.trim())
+            .collect::<HashSet<_>>();
+        let rows = self.batch_export_rows(&usb_root)?;
+        // In the app's order, whatever order they were asked in.
+        let selected = rows
+            .iter()
+            .filter(|row| wanted.contains(row.playlist_id.as_str()))
+            .collect::<Vec<_>>();
+        if selected.is_empty() {
+            return Err(BackendError::Validation(
+                tr::batch_export_error_none_selected(),
+            ));
+        }
+        if let Some(row) = selected.iter().find(|row| row.disabled_reason.is_some()) {
+            return Err(BackendError::Validation(
+                tr::batch_export_error_not_exportable(
+                    &row.name,
+                    row.disabled_reason.clone().unwrap_or_default(),
+                ),
+            ));
+        }
+        if req.force_playlist_order
+            && rows.iter().any(|row| {
+                row.disabled_reason.is_none() && !wanted.contains(row.playlist_id.as_str())
+            })
+        {
+            return Err(BackendError::Validation(
+                tr::batch_export_error_order_needs_all(),
+            ));
+        }
+        // Written last one first: a playlist that goes first goes on top of
+        // the ones written before it, so the first one ends up on top.
+        let ids = selected
+            .iter()
+            .rev()
+            .map(|row| row.playlist_id.clone())
+            .collect::<Vec<_>>();
+        let layout = ExportLayout {
+            placement: if req.force_playlist_order {
+                PlaylistPlacement::MoveToFront
+            } else {
+                PlaylistPlacement::KeepExisting
+            },
+            force_track_order: req.force_track_order,
+        };
+        let run = self.run_export(
+            &usb_write_guard,
+            &usb_root,
+            &ids,
+            &options,
+            layout,
+            &mut on_progress,
+        )?;
+        let exported_tracks = run.playlists.iter().map(|p| p.exported_tracks).sum();
+        let skipped_tracks = run.playlists.iter().map(|p| p.skipped_tracks).sum();
+        let warning_count = logging::count_warnings(&run.warnings);
+        let status_text = tr::batch_export_complete(
+            run.playlists.len(),
+            exported_tracks,
+            skipped_tracks,
+            export_sync_mode_text(&options),
+        )
+        .render();
+        Ok(ExportPlaylistsToUsbData {
+            usb_root: usb_root.to_string_lossy().to_string(),
+            exported_playlists: run.playlists.len(),
+            exported_tracks,
+            skipped_tracks,
+            status_text,
+            warning_text: warning_text(warning_count),
+            warnings: run.warnings,
+        })
+    }
+
+    /// The export of `playlist_ids` to `usb_root`, in that order, under the
+    /// held USB write lock. Every playlist is checked before anything is
+    /// copied; the stick's databases are written once, for all of them.
+    fn run_export<F>(
+        &self,
+        usb_write_guard: &usb_staging::UsbWriteGuard<'_>,
+        usb_root: &Path,
+        playlist_ids: &[String],
+        options: &ExportToUsbOptions,
+        layout: ExportLayout,
+        on_progress: &mut F,
+    ) -> BackendResult<ExportRun>
+    where
+        F: FnMut(usize, usize, &str),
+    {
+        let usb_root = usb_root.to_path_buf();
+        let options = options.clone();
         let export_dry_run = std::env::var("USB_EXPORT_DRY_RUN")
             .ok()
             .map(|v| {
@@ -1162,20 +1583,26 @@ impl BackendService {
                 n == "1" || n == "true" || n == "yes" || n == "on"
             })
             .unwrap_or(false);
-        let mut playlist = self.load_playlist_for_export(&playlist_id)?;
-        if playlist.tracks.is_empty() {
-            return Err(BackendError::Validation(tr::export_error_no_tracks()));
-        }
-        let unplayable_tracks = split_off_unplayable_tracks(&mut playlist);
-        if playlist.tracks.is_empty() {
-            return Err(BackendError::Validation(tr::export_error_none_playable()));
+        let mut runs = Vec::<PlaylistRun>::with_capacity(playlist_ids.len());
+        for playlist_id in playlist_ids {
+            let mut playlist = self.load_playlist_for_export(playlist_id)?;
+            if playlist.tracks.is_empty() {
+                return Err(BackendError::Validation(tr::export_error_no_tracks()));
+            }
+            let unplayable_tracks = split_off_unplayable_tracks(&mut playlist);
+            if playlist.tracks.is_empty() {
+                return Err(BackendError::Validation(tr::export_error_none_playable()));
+            }
+            runs.push(PlaylistRun::new(playlist, unplayable_tracks));
         }
 
         let blocking_missing_roots = {
             let conn = self.db.connect()?;
             super::export_blocking_missing_source_roots(
                 &conn,
-                playlist.tracks.iter().map(|track| track.file_path.as_str()),
+                runs.iter()
+                    .flat_map(|run| run.playlist.tracks.iter())
+                    .map(|track| track.file_path.as_str()),
             )?
         };
         if let Some(missing_root) = blocking_missing_roots.first() {
@@ -1192,32 +1619,49 @@ impl BackendService {
         let media_root = usb_root.join("Contents");
         std::fs::create_dir_all(&media_root)?;
 
-        let total_steps = playlist.tracks.len() + 1;
+        let total_steps = runs
+            .iter()
+            .map(|run| run.playlist.tracks.len())
+            .sum::<usize>()
+            + 1;
         on_progress(0, total_steps, &tr::export_progress_preparing().render());
 
         let mut warnings = Vec::<WarningEntry>::new();
-        for track in &unplayable_tracks {
-            warnings.push(logging::log_text(
-                Level::Warn,
-                "export",
-                "export.unplayable-format",
-                &tr::export_warning_unplayable_format(&track.file_path),
-            ));
+        for run in &runs {
+            for track in &run.unplayable_tracks {
+                warnings.push(logging::log_text(
+                    Level::Warn,
+                    "export",
+                    "export.unplayable-format",
+                    &tr::export_warning_unplayable_format(&track.file_path),
+                ));
+            }
+            ensure_playlist_tracks_analysis_ready(&usb_root, &run.playlist)?;
         }
-        ensure_playlist_tracks_analysis_ready(&usb_root, &playlist)?;
-        let transcode_failures = self.use_transcodes_for_export(
-            &usb_root,
-            &mut playlist,
-            &mut warnings,
-            &mut on_progress,
-        )?;
-        if playlist.tracks.is_empty() {
-            return Err(BackendError::Validation(tr::export_error_none_convertible()));
+        for run in &mut runs {
+            // A track whose transcode couldn't be made is left off, like one
+            // whose file is missing.
+            run.skipped_tracks = self.use_transcodes_for_export(
+                &usb_root,
+                &mut run.playlist,
+                &mut warnings,
+                on_progress,
+            )?;
+            if run.playlist.tracks.is_empty() {
+                return Err(BackendError::Validation(tr::export_error_none_convertible()));
+            }
         }
         if !export_dry_run {
             // A USB without a PDB yet holds no tracks.
             let on_usb = self.usb_track_sizes(&usb_root).unwrap_or_default();
-            ensure_usb_has_space_for_export(&usb_root, &media_root, &playlist, &options, &on_usb)?;
+            let all_tracks = merged_export_playlist(runs.iter().map(|run| &run.playlist));
+            ensure_usb_has_space_for_export(
+                &usb_root,
+                &media_root,
+                &all_tracks,
+                &options,
+                &on_usb,
+            )?;
         }
         let local_conn = self.db.connect()?;
         Self::ensure_track_export_identity_schema(&local_conn)?;
@@ -1254,13 +1698,6 @@ impl BackendService {
             edb_read_conn.as_ref(),
         );
 
-        let mut exported_tracks = 0usize;
-        // A track whose transcode couldn't be made is left off, like one
-        // whose file is missing.
-        let mut skipped_tracks = transcode_failures;
-        let mut exported_artworks = 0usize;
-        let mut exported_analysis_files = 0usize;
-        let mut manifest_tracks = Vec::<ExportManifestTrack>::new();
         // Tracks the on-disk target path each track in *this run* resolves
         // to, so distinct tracks whose (artist, album)-truncated file name
         // collides (e.g. several tracks from the same artist/release, where
@@ -1273,189 +1710,192 @@ impl BackendService {
         let mut claimed_media_targets = HashMap::<PathBuf, Option<ContentFingerprint>>::new();
         // Written files close off-thread; see `deferred_close`.
         let closer = FileCloser::new();
+        let playlist_count = runs.len();
+        let mut done = 0usize;
 
-        for (idx, track) in playlist.tracks.iter().enumerate() {
-            on_progress(
-                idx + 1,
-                total_steps,
-                &tr::export_progress_copying(idx + 1, playlist.tracks.len(), &track.file_name)
-                    .render(),
-            );
-
-            let source = PathBuf::from(&track.file_path);
-            if !source.is_file() {
-                skipped_tracks += 1;
-                warnings.push(logging::log_text(
-                    Level::Warn,
-                    "export",
-                    "export.missing-source-file",
-                    &tr::export_warning_source_missing(source.display()),
-                ));
-                continue;
-            }
-
-            let extension = crate::audio_format::export_extension(&source);
-            let this_fingerprint =
-                content_fingerprint_key(track.file_size_bytes, &track.title, &track.artist);
-            let target = resolve_collision_free_media_target(
-                &mut claimed_media_targets,
-                &usb_tracks.by_path,
-                &media_root,
-                &source,
-                &track.artist,
-                track.album.as_deref(),
-                &track.title,
-                &extension,
-                track
-                    .file_size_bytes
-                    .and_then(|size| u32::try_from(size).ok()),
-                this_fingerprint.clone(),
-            );
-            let computed_target_relative = usb_relative_path(&usb_root, &target);
-            let existing_exported_path = existing_usb_relative_file(&usb_root, &source)
-                .filter(|rel| rel.starts_with("/Contents/"))
-                .or_else(|| {
-                    // The source file itself isn't inside this USB's Contents tree, but
-                    // the same track may already be physically present under a path we
-                    // didn't write. Match on content fingerprint so re-exporting it reuses
-                    // the existing row/media/artwork instead of minting a duplicate. Skip
-                    // this when the candidate is the same path this run would compute
-                    // anyway (e.g. a stable re-export of a track this app itself placed
-                    // there before) — that's not a foreign path, and treating it as one
-                    // would wrongly mark the file as not-owned and make it look stale to
-                    // prune_stale on the next export.
-                    let fingerprint = content_fingerprint_key(
-                        track.file_size_bytes,
-                        &track.title,
-                        &track.artist,
-                    )?;
-                    let candidate = usb_tracks.path_for_fingerprint(&fingerprint)?;
-                    if !same_format_extension(&source.to_string_lossy(), candidate) {
-                        return None;
-                    }
-                    if computed_target_relative
-                        .as_deref()
-                        .map(canonicalize_track_path_identity)
-                        == Some(canonicalize_track_path_identity(candidate))
-                    {
-                        return None;
-                    }
-                    existing_usb_relative_if_present(&usb_root, candidate)
-                });
-            let owns_exported_media = existing_exported_path.is_none();
-            if !export_dry_run && owns_exported_media {
-                if AudioFormat::from_extension(&extension) == Some(AudioFormat::Wav) {
-                    copy_wav_normalized_if_needed(&source, &target, &closer)?;
+        for (run_idx, run) in runs.iter_mut().enumerate() {
+            let mut exported_tracks = 0usize;
+            let mut skipped_tracks = run.skipped_tracks;
+            let mut exported_artworks = 0usize;
+            let mut exported_analysis_files = 0usize;
+            let mut manifest_tracks = Vec::<ExportManifestTrack>::new();
+            for (idx, track) in run.playlist.tracks.iter().enumerate() {
+                done += 1;
+                let copying = tr::export_progress_copying(
+                    idx + 1,
+                    run.playlist.tracks.len(),
+                    &track.file_name,
+                );
+                let message = if playlist_count > 1 {
+                    tr::export_progress_batch_playlist(
+                        copying,
+                        run_idx + 1,
+                        playlist_count,
+                        &run.playlist.name,
+                    )
                 } else {
-                    copy_if_different(&source, &target, &closer)?;
-                }
-            }
-            exported_tracks += 1;
-
-            let exported_path = existing_exported_path.unwrap_or_else(|| {
-                usb_relative_path(&usb_root, &target)
-                    .unwrap_or_else(|| target.to_string_lossy().to_string())
-            });
-            // The USB row this track was exported as before: the one with its
-            // content fingerprint, else the one at its exported path.
-            let existing_identity = this_fingerprint
-                .as_ref()
-                .and_then(|fingerprint| usb_tracks.path_for_fingerprint(fingerprint))
-                .and_then(|path| usb_tracks.identity_at(path))
-                .or_else(|| usb_tracks.identity_at(&exported_path))
-                .cloned();
-            // A masterContentId of this app's that another row carries too is
-            // another track's: this one gets its own, and no artwork from that row.
-            let existing_identity = match existing_identity {
-                Some((Some(mdb), Some(mci), cl, _))
-                    if i64::from(mdb) == app_master_db_id
-                        && usb_tracks.shared_master_content_ids.contains(&mci) =>
-                {
-                    let own = Self::ensure_track_master_content_id(
-                        &local_conn,
-                        &export_identity_key(track),
-                    )?;
-                    Some((Some(mdb), u32::try_from(own).ok(), cl, None))
-                }
-                other => other,
-            };
-            let mut artwork_relative = None;
-            // "This playlist keeps this asset alive on the USB" -- true for a
-            // freshly generated asset AND for one this app placed on a prior
-            // export and is now reusing. For analysis this is kept distinct
-            // from `owns_waveform`, which stays "generated on *this* run"
-            // because it drives app-owned identity assignment in
-            // `resolve_manifest_identity` and must not change here. Without
-            // `retain_*`, a reused asset is absent from `current_owned` and
-            // prune_stale reaps it on the next mirror export even though the
-            // track is still exported.
-            let mut retain_artwork = false;
-            if options.include_artwork {
-                if let Some(existing_artwork) =
-                    existing_usb_relative_if_file(&usb_root, track.artwork_path.as_deref())
-                {
-                    artwork_relative = Some(existing_artwork);
-                    retain_artwork = true;
-                } else if let Some((_, _, _, Some(art_path))) = &existing_identity {
-                    // Fallback: pick up artwork already indexed on the USB PDB for this
-                    // track's row (e.g. a fingerprint-matched track already on this
-                    // USB under a foreign naming scheme) before minting a new asset.
-                    artwork_relative = Some(art_path.clone());
-                    retain_artwork = true;
-                } else if !export_dry_run
-                    && let Some(path) = track.artwork_path.as_deref()
-                    && let Some(asset_path) = export_artwork_for_player(
-                        path,
-                        &usb_root,
-                        &track.id,
-                        &mut warnings,
-                        &closer,
-                    )?
-                {
-                    artwork_relative =
-                        to_usb_relative_path(&usb_root, &asset_path).or(Some(asset_path));
-                    exported_artworks += 1;
-                    retain_artwork = true;
-                }
-            }
-
-            let mut analysis_relative = None;
-            let mut owns_waveform = false;
-            // See `retain_artwork` above: a reused bundle for a still-exported
-            // track must not be pruned even though it wasn't generated now.
-            let mut retain_waveform = false;
-            if options.include_analysis {
-                // Reuse an existing USB-side analysis bundle when the source track
-                // already lives on this stick. Otherwise generate a fresh bundle
-                // from local analysis inputs so waveform/beatgrid fixes apply.
-                // A bundle whose PPTH names another track is that track's
-                // (hash-folder collision): not reused, a fresh one is written.
-                let claimable = |p: &String| {
-                    analysis_bundle_exists(usb_root.as_path(), p)
-                        && resolve_usb_side_path(&usb_root, p)
-                            .is_some_and(|dat| analysis_bundle_claimable(&dat, &exported_path))
+                    copying
                 };
-                if let Some(existing_analysis) =
-                    existing_usb_relative_if_file(&usb_root, track.waveform_peaks_path.as_deref())
-                        .filter(claimable)
-                {
-                    if !export_dry_run {
-                        ensure_analysis_bundle_ppth(
-                            &usb_root,
-                            &existing_analysis,
-                            &exported_path,
-                            track,
-                            &closer,
+                on_progress(done, total_steps, &message.render());
+
+                let source = PathBuf::from(&track.file_path);
+                if !source.is_file() {
+                    skipped_tracks += 1;
+                    warnings.push(logging::log_text(
+                        Level::Warn,
+                        "export",
+                        "export.missing-source-file",
+                        &tr::export_warning_source_missing(source.display()),
+                    ));
+                    continue;
+                }
+
+                let extension = crate::audio_format::export_extension(&source);
+                let this_fingerprint =
+                    content_fingerprint_key(track.file_size_bytes, &track.title, &track.artist);
+                let target = resolve_collision_free_media_target(
+                    &mut claimed_media_targets,
+                    &usb_tracks.by_path,
+                    &media_root,
+                    &source,
+                    &track.artist,
+                    track.album.as_deref(),
+                    &track.title,
+                    &extension,
+                    track
+                        .file_size_bytes
+                        .and_then(|size| u32::try_from(size).ok()),
+                    this_fingerprint.clone(),
+                );
+                let computed_target_relative = usb_relative_path(&usb_root, &target);
+                let existing_exported_path = existing_usb_relative_file(&usb_root, &source)
+                    .filter(|rel| rel.starts_with("/Contents/"))
+                    .or_else(|| {
+                        // The source file itself isn't inside this USB's Contents tree, but
+                        // the same track may already be physically present under a path we
+                        // didn't write. Match on content fingerprint so re-exporting it reuses
+                        // the existing row/media/artwork instead of minting a duplicate. Skip
+                        // this when the candidate is the same path this run would compute
+                        // anyway (e.g. a stable re-export of a track this app itself placed
+                        // there before) — that's not a foreign path, and treating it as one
+                        // would wrongly mark the file as not-owned and make it look stale to
+                        // prune_stale on the next export.
+                        let fingerprint = content_fingerprint_key(
+                            track.file_size_bytes,
+                            &track.title,
+                            &track.artist,
                         )?;
+                        let candidate = usb_tracks.path_for_fingerprint(&fingerprint)?;
+                        if !same_format_extension(&source.to_string_lossy(), candidate) {
+                            return None;
+                        }
+                        if computed_target_relative
+                            .as_deref()
+                            .map(canonicalize_track_path_identity)
+                            == Some(canonicalize_track_path_identity(candidate))
+                        {
+                            return None;
+                        }
+                        existing_usb_relative_if_present(&usb_root, candidate)
+                    });
+                let owns_exported_media = existing_exported_path.is_none();
+                if !export_dry_run && owns_exported_media {
+                    if AudioFormat::from_extension(&extension) == Some(AudioFormat::Wav) {
+                        copy_wav_normalized_if_needed(&source, &target, &closer)?;
+                    } else {
+                        copy_if_different(&source, &target, &closer)?;
                     }
-                    analysis_relative = Some(existing_analysis);
-                    retain_waveform = true;
-                } else {
-                    let exported_key = canonicalize_track_path_identity(&exported_path);
-                    if let Some(existing_analysis) = existing_analysis_by_path
-                        .get(&exported_key)
-                        .cloned()
-                        .filter(claimable)
+                }
+                exported_tracks += 1;
+
+                let exported_path = existing_exported_path.unwrap_or_else(|| {
+                    usb_relative_path(&usb_root, &target)
+                        .unwrap_or_else(|| target.to_string_lossy().to_string())
+                });
+                // The USB row this track was exported as before: the one with its
+                // content fingerprint, else the one at its exported path.
+                let existing_identity = this_fingerprint
+                    .as_ref()
+                    .and_then(|fingerprint| usb_tracks.path_for_fingerprint(fingerprint))
+                    .and_then(|path| usb_tracks.identity_at(path))
+                    .or_else(|| usb_tracks.identity_at(&exported_path))
+                    .cloned();
+                // A masterContentId of this app's that another row carries too is
+                // another track's: this one gets its own, and no artwork from that row.
+                let existing_identity = match existing_identity {
+                    Some((Some(mdb), Some(mci), cl, _))
+                        if i64::from(mdb) == app_master_db_id
+                            && usb_tracks.shared_master_content_ids.contains(&mci) =>
+                    {
+                        let own = Self::ensure_track_master_content_id(
+                            &local_conn,
+                            &export_identity_key(track),
+                        )?;
+                        Some((Some(mdb), u32::try_from(own).ok(), cl, None))
+                    }
+                    other => other,
+                };
+                let mut artwork_relative = None;
+                // "This playlist keeps this asset alive on the USB" -- true for a
+                // freshly generated asset AND for one this app placed on a prior
+                // export and is now reusing. For analysis this is kept distinct
+                // from `owns_waveform`, which stays "generated on *this* run"
+                // because it drives app-owned identity assignment in
+                // `resolve_manifest_identity` and must not change here. Without
+                // `retain_*`, a reused asset is absent from `current_owned` and
+                // prune_stale reaps it on the next mirror export even though the
+                // track is still exported.
+                let mut retain_artwork = false;
+                if options.include_artwork {
+                    if let Some(existing_artwork) =
+                        existing_usb_relative_if_file(&usb_root, track.artwork_path.as_deref())
+                    {
+                        artwork_relative = Some(existing_artwork);
+                        retain_artwork = true;
+                    } else if let Some((_, _, _, Some(art_path))) = &existing_identity {
+                        // Fallback: pick up artwork already indexed on the USB PDB for this
+                        // track's row (e.g. a fingerprint-matched track already on this
+                        // USB under a foreign naming scheme) before minting a new asset.
+                        artwork_relative = Some(art_path.clone());
+                        retain_artwork = true;
+                    } else if !export_dry_run
+                        && let Some(path) = track.artwork_path.as_deref()
+                        && let Some(asset_path) = export_artwork_for_player(
+                            path,
+                            &usb_root,
+                            &track.id,
+                            &mut warnings,
+                            &closer,
+                        )?
+                    {
+                        artwork_relative =
+                            to_usb_relative_path(&usb_root, &asset_path).or(Some(asset_path));
+                        exported_artworks += 1;
+                        retain_artwork = true;
+                    }
+                }
+
+                let mut analysis_relative = None;
+                let mut owns_waveform = false;
+                // See `retain_artwork` above: a reused bundle for a still-exported
+                // track must not be pruned even though it wasn't generated now.
+                let mut retain_waveform = false;
+                if options.include_analysis {
+                    // Reuse an existing USB-side analysis bundle when the source track
+                    // already lives on this stick. Otherwise generate a fresh bundle
+                    // from local analysis inputs so waveform/beatgrid fixes apply.
+                    // A bundle whose PPTH names another track is that track's
+                    // (hash-folder collision): not reused, a fresh one is written.
+                    let claimable = |p: &String| {
+                        analysis_bundle_exists(usb_root.as_path(), p)
+                            && resolve_usb_side_path(&usb_root, p)
+                                .is_some_and(|dat| analysis_bundle_claimable(&dat, &exported_path))
+                    };
+                    if let Some(existing_analysis) = existing_usb_relative_if_file(
+                        &usb_root,
+                        track.waveform_peaks_path.as_deref(),
+                    )
+                    .filter(claimable)
                     {
                         if !export_dry_run {
                             ensure_analysis_bundle_ppth(
@@ -1468,95 +1908,120 @@ impl BackendService {
                         }
                         analysis_relative = Some(existing_analysis);
                         retain_waveform = true;
-                    } else if !export_dry_run
-                        && track.waveform_peaks_path.is_some()
-                        && let Some((relative, files_written)) = export_analysis_bundle_for_track(
-                            track,
-                            &usb_root,
-                            &exported_path,
-                            &mut warnings,
-                            &closer,
-                        )?
-                    {
-                        analysis_relative = Some(relative);
-                        exported_analysis_files += files_written;
-                        owns_waveform = true;
-                        retain_waveform = true;
+                    } else {
+                        let exported_key = canonicalize_track_path_identity(&exported_path);
+                        if let Some(existing_analysis) = existing_analysis_by_path
+                            .get(&exported_key)
+                            .cloned()
+                            .filter(claimable)
+                        {
+                            if !export_dry_run {
+                                ensure_analysis_bundle_ppth(
+                                    &usb_root,
+                                    &existing_analysis,
+                                    &exported_path,
+                                    track,
+                                    &closer,
+                                )?;
+                            }
+                            analysis_relative = Some(existing_analysis);
+                            retain_waveform = true;
+                        } else if !export_dry_run
+                            && track.waveform_peaks_path.is_some()
+                            && let Some((relative, files_written)) =
+                                export_analysis_bundle_for_track(
+                                    track,
+                                    &usb_root,
+                                    &exported_path,
+                                    &mut warnings,
+                                    &closer,
+                                )?
+                        {
+                            analysis_relative = Some(relative);
+                            exported_analysis_files += files_written;
+                            owns_waveform = true;
+                            retain_waveform = true;
+                        }
                     }
                 }
-            }
 
-            // Preserve the track's prior USB identity to keep eDB/PDB track
-            // identity stable across additive exports.
-            let (mdb, mci, cl) = Self::resolve_manifest_identity(
-                &local_conn,
-                &export_identity_key(track),
-                existing_identity.as_ref(),
-                owns_waveform,
-                app_master_db_id,
-                app_content_link_id,
-            )?;
-            manifest_tracks.push(ExportManifestTrack {
-                date_added: None,
-                date_created: None,
-                label: None,
-                remixer: None,
-                composer: None,
-                from_library: true,
-                pdb_track_id: None,
-                edb_content_id: None,
-                id: track.id.clone(),
-                master_db_id: mdb,
-                master_content_id: mci,
-                content_link: cl,
-                position: track.position + 1,
-                track_number: track.track_number,
-                title: track.title.clone(),
-                artist: track.artist.clone(),
-                album: track.album.clone(),
-                bpm: track.bpm,
-                key: track.key.clone(),
-                source_path: source.to_string_lossy().to_string(),
-                exported_path,
-                file_timestamp_at: track.file_timestamp_at,
-                file_size_bytes: track.file_size_bytes,
-                sample_rate_hz: track.sample_rate_hz,
-                bit_depth: track.bit_depth,
-                bitrate_kbps: track.bitrate_kbps,
-                disc_number: track.disc_number,
-                subtitle: track.subtitle.clone(),
-                comment: track.comment.clone(),
-                title_for_search: track.title_for_search.clone(),
-                kuvo_delivery_comment: track.kuvo_delivery_comment.clone(),
-                dj_play_count: track.dj_play_count,
-                rating: track.rating,
-                color_id: track.color_id,
-                artist_id_lyricist: track.artist_id_lyricist,
-                artist_id_original_artist: track.artist_id_original_artist,
-                artist_id_remixer: track.artist_id_remixer,
-                artist_id_composer: track.artist_id_composer,
-                genre_id: track.genre_id,
-                genre: track.genre.clone(),
-                label_id: track.label_id,
-                isrc: track.isrc.clone(),
-                release_year: track.release_year,
-                release_date: track.release_date.clone(),
-                recorded_date: track.recorded_date.clone(),
-                file_type: track.file_type,
-                owns_exported_media,
-                owns_artwork: retain_artwork,
-                owns_waveform: owns_waveform || retain_waveform,
-                artwork_path: artwork_relative,
-                waveform_path: analysis_relative,
-                duration_ms: track.duration_ms,
-                first_beat_ms: track.first_beat_ms,
-                cues: track.cues.clone(),
-            });
+                // Preserve the track's prior USB identity to keep eDB/PDB track
+                // identity stable across additive exports.
+                let (mdb, mci, cl) = Self::resolve_manifest_identity(
+                    &local_conn,
+                    &export_identity_key(track),
+                    existing_identity.as_ref(),
+                    owns_waveform,
+                    app_master_db_id,
+                    app_content_link_id,
+                )?;
+                manifest_tracks.push(ExportManifestTrack {
+                    date_added: None,
+                    date_created: None,
+                    label: None,
+                    remixer: None,
+                    composer: None,
+                    from_library: true,
+                    pdb_track_id: None,
+                    edb_content_id: None,
+                    id: track.id.clone(),
+                    master_db_id: mdb,
+                    master_content_id: mci,
+                    content_link: cl,
+                    position: track.position + 1,
+                    track_number: track.track_number,
+                    title: track.title.clone(),
+                    artist: track.artist.clone(),
+                    album: track.album.clone(),
+                    bpm: track.bpm,
+                    key: track.key.clone(),
+                    source_path: source.to_string_lossy().to_string(),
+                    exported_path,
+                    file_timestamp_at: track.file_timestamp_at,
+                    file_size_bytes: track.file_size_bytes,
+                    sample_rate_hz: track.sample_rate_hz,
+                    bit_depth: track.bit_depth,
+                    bitrate_kbps: track.bitrate_kbps,
+                    disc_number: track.disc_number,
+                    subtitle: track.subtitle.clone(),
+                    comment: track.comment.clone(),
+                    title_for_search: track.title_for_search.clone(),
+                    kuvo_delivery_comment: track.kuvo_delivery_comment.clone(),
+                    dj_play_count: track.dj_play_count,
+                    rating: track.rating,
+                    color_id: track.color_id,
+                    artist_id_lyricist: track.artist_id_lyricist,
+                    artist_id_original_artist: track.artist_id_original_artist,
+                    artist_id_remixer: track.artist_id_remixer,
+                    artist_id_composer: track.artist_id_composer,
+                    genre_id: track.genre_id,
+                    genre: track.genre.clone(),
+                    label_id: track.label_id,
+                    isrc: track.isrc.clone(),
+                    release_year: track.release_year,
+                    release_date: track.release_date.clone(),
+                    recorded_date: track.recorded_date.clone(),
+                    file_type: track.file_type,
+                    owns_exported_media,
+                    owns_artwork: retain_artwork,
+                    owns_waveform: owns_waveform || retain_waveform,
+                    artwork_path: artwork_relative,
+                    waveform_path: analysis_relative,
+                    duration_ms: track.duration_ms,
+                    first_beat_ms: track.first_beat_ms,
+                    cues: track.cues.clone(),
+                });
+            }
+            run.exported_tracks = exported_tracks;
+            run.skipped_tracks = skipped_tracks;
+            run.exported_artworks = exported_artworks;
+            run.exported_analysis_files = exported_analysis_files;
+            run.manifest_tracks = manifest_tracks;
         }
 
         if closer.has_pending() {
             on_progress(
-                playlist.tracks.len(),
+                done,
                 total_steps,
                 &tr::export_progress_waiting_for_writes().render(),
             );
@@ -1567,21 +2032,26 @@ impl BackendService {
             total_steps,
             &tr::export_progress_finalizing_export_metadata().render(),
         );
-        let manifest = ExportManifest {
-            generated_at: now(),
-            playlist_id: playlist.id.clone(),
-            playlist_name: playlist.name.clone(),
-            usb_root: usb_root.to_string_lossy().to_string(),
-            options: options.clone(),
-            exported_tracks,
-            skipped_tracks,
-            warnings: warnings.clone(),
-            tracks: manifest_tracks,
-        };
+        for run in &mut runs {
+            run.manifest = ExportManifest {
+                generated_at: now(),
+                playlist_id: run.playlist.id.clone(),
+                playlist_name: run.playlist.name.clone(),
+                usb_root: usb_root.to_string_lossy().to_string(),
+                options: options.clone(),
+                exported_tracks: run.exported_tracks,
+                skipped_tracks: run.skipped_tracks,
+                warnings: warnings.clone(),
+                tracks: std::mem::take(&mut run.manifest_tracks),
+            };
+        }
         // Same flag `playlist_locks_reorder_on_export` (above) keys off of --
-        // see that function's doc comment.
-        let mirror_playlist_entries = options.prune_stale;
-        validate_export_manifest_before_db_write(&usb_root, &manifest, !export_dry_run)?;
+        // see that function's doc comment. Forcing the app's track order
+        // rewrites the playlists' entries the same way, without the prune.
+        let mirror_playlist_entries = options.prune_stale || layout.force_track_order;
+        for run in &runs {
+            validate_export_manifest_before_db_write(&usb_root, &run.manifest, !export_dry_run)?;
+        }
         // The write to the stick's databases, from the eDB write to the
         // prune's row removal; dry runs write nothing.
         let mut write_session: Option<usb_staging::UsbWriteSession<'_>> = None;
@@ -1608,52 +2078,54 @@ impl BackendService {
                     ),
                 );
             }
-            match preview_pdb(
-                &usb_root,
-                &playlist,
-                &manifest,
-                mirror_playlist_entries,
-                None,
-                None,
-            ) {
-                Ok(WriteExportPdbResult {
-                    inserted_tracks,
-                    inserted_playlists,
-                    topology_issues,
-                    writer_warnings,
-                }) => {
-                    for message in &writer_warnings {
-                        logging::debug("export", message);
-                    }
-                    logging::debug(
-                        "export",
-                        format!(
-                            "PDB preview (tracks: {inserted_tracks}, playlists: {inserted_playlists})"
-                        ),
-                    );
-                    if topology_issues.is_empty() {
-                        logging::debug(
-                            "export",
-                            "PDB preview topology: no critical table-chain delta detected",
-                        );
-                    } else {
+            for run in &runs {
+                match preview_pdb(
+                    &usb_root,
+                    &run.playlist,
+                    &run.manifest,
+                    mirror_playlist_entries,
+                    None,
+                    None,
+                ) {
+                    Ok(WriteExportPdbResult {
+                        inserted_tracks,
+                        inserted_playlists,
+                        topology_issues,
+                        writer_warnings,
+                    }) => {
+                        for message in &writer_warnings {
+                            logging::debug("export", message);
+                        }
                         logging::debug(
                             "export",
                             format!(
-                                "PDB preview topology risk: {}",
-                                counted(topology_issues.len(), "issue", "issues")
+                                "PDB preview (tracks: {inserted_tracks}, playlists: {inserted_playlists})"
                             ),
                         );
-                        for issue in &topology_issues {
-                            logging::debug("export", format!("PDB preview topology: {issue}"));
+                        if topology_issues.is_empty() {
+                            logging::debug(
+                                "export",
+                                "PDB preview topology: no critical table-chain delta detected",
+                            );
+                        } else {
+                            logging::debug(
+                                "export",
+                                format!(
+                                    "PDB preview topology risk: {}",
+                                    counted(topology_issues.len(), "issue", "issues")
+                                ),
+                            );
+                            for issue in &topology_issues {
+                                logging::debug("export", format!("PDB preview topology: {issue}"));
+                            }
                         }
                     }
-                }
-                Err(err) => {
-                    logging::debug(
-                        "export",
-                        format!("PDB preview failed: {err}", err = err.english()),
-                    );
+                    Err(err) => {
+                        logging::debug(
+                            "export",
+                            format!("PDB preview failed: {err}", err = err.english()),
+                        );
+                    }
                 }
             }
         } else {
@@ -1670,7 +2142,7 @@ impl BackendService {
                 },
             };
             let session = write_session.insert(self.usb_write_session(
-                &_usb_write_guard,
+                usb_write_guard,
                 &usb_root,
                 backup,
                 &mut warnings,
@@ -1686,108 +2158,119 @@ impl BackendService {
             // Write eDB first (master), then sync PDB to match eDB playlist IDs.
             // The session's one RW connection is reused for the immediate
             // post-write verification read below, instead of reopening.
-            let (edb_playlist_id, edb_sort_order);
-            let write_result =
-                write_edb_playlist_in(session, &playlist, &manifest, mirror_playlist_entries);
-            match write_result {
-                Ok(WriteExportLibraryDbResult {
-                    inserted_content,
-                    updated_content: _,
-                    linked_playlist_entries,
-                    playlist_id,
-                    sort_order,
-                }) => {
-                    edb_playlist_id = u32::try_from(playlist_id).ok();
-                    edb_sort_order = u32::try_from(sort_order).ok();
-                    // Always keep exportExt.pdb byte-stable in normal export.
-                    // Strict integrity checks can fail when exportExt header/count
-                    // bytes are rewritten from eDB-derived values.
-                    let verify_warnings = self.verify_export_outputs(
-                        &usb_root,
-                        &playlist,
-                        &manifest,
-                        true,
-                        session.edb()?.map(|conn| &*conn),
-                        false,
-                    )?;
-                    warnings.extend(verify_warnings);
-                    logging::debug(
-                        "export",
-                        format!(
-                            "eDB updated (content rows: {inserted_content}, playlist entries: {linked_playlist_entries})"
-                        ),
-                    );
-                }
-                Err(err) => return Err(err),
+            let edb_writes = runs
+                .iter()
+                .map(|run| EdbPlaylistWrite {
+                    playlist: &run.playlist,
+                    manifest: &run.manifest,
+                    mirror_playlist_entries,
+                    identity: None,
+                    placement: layout.placement,
+                })
+                .collect::<Vec<_>>();
+            let edb_results = write_edb_playlists_in(session, &edb_writes)?;
+            for (run, written) in runs.iter().zip(&edb_results) {
+                // Always keep exportExt.pdb byte-stable in normal export.
+                // Strict integrity checks can fail when exportExt header/count
+                // bytes are rewritten from eDB-derived values.
+                let verify_warnings = self.verify_export_outputs(
+                    &usb_root,
+                    &run.playlist,
+                    &run.manifest,
+                    true,
+                    session.edb()?.map(|conn| &*conn),
+                    false,
+                )?;
+                warnings.extend(verify_warnings);
+                logging::debug(
+                    "export",
+                    format!(
+                        "eDB updated (content rows: {}, playlist entries: {})",
+                        written.inserted_content, written.linked_playlist_entries
+                    ),
+                );
             }
 
-            match write_pdb_in(
-                session,
-                &playlist,
-                &manifest,
-                mirror_playlist_entries,
-                edb_playlist_id,
-                edb_sort_order,
-            ) {
-                Ok(WriteExportPdbResult {
-                    inserted_tracks,
-                    inserted_playlists,
-                    topology_issues: _,
-                    writer_warnings,
-                }) => {
-                    let verify_pdb_warnings = self.verify_export_outputs(
-                        &usb_root,
-                        &playlist,
-                        &manifest,
-                        false,
-                        None,
-                        !skip_pdb_write,
-                    )?;
-                    warnings.extend(verify_pdb_warnings);
-                    for message in &writer_warnings {
-                        logging::debug("export", message);
-                    }
-                    logging::debug(
-                        "export",
-                        format!(
-                            "PDB written (tracks: {inserted_tracks}, playlists: {inserted_playlists})"
-                        ),
-                    );
-                }
-                Err(err) => {
-                    return Err(err);
-                }
+            let pdb_writes = runs
+                .iter()
+                .zip(&edb_results)
+                .map(|(run, written)| PdbPlaylistWrite {
+                    playlist: &run.playlist,
+                    manifest: &run.manifest,
+                    mirror_playlist_entries,
+                    row_id: None,
+                    playlist_id: u32::try_from(written.playlist_id).ok(),
+                    sort_order: u32::try_from(written.sort_order).ok(),
+                    placement: layout.placement,
+                })
+                .collect::<Vec<_>>();
+            let WriteExportPdbResult {
+                inserted_tracks,
+                inserted_playlists,
+                topology_issues: _,
+                writer_warnings,
+            } = write_pdb_playlists_in(session, &pdb_writes)?;
+            for run in &runs {
+                let verify_pdb_warnings = self.verify_export_outputs(
+                    &usb_root,
+                    &run.playlist,
+                    &run.manifest,
+                    false,
+                    None,
+                    !skip_pdb_write,
+                )?;
+                warnings.extend(verify_pdb_warnings);
             }
+            for message in &writer_warnings {
+                logging::debug("export", message);
+            }
+            logging::debug(
+                "export",
+                format!("PDB written (tracks: {inserted_tracks}, playlists: {inserted_playlists})"),
+            );
         }
 
         if !export_dry_run {
-            let owned_setting_key = export_owned_files_setting_key(&usb_root, &playlist.id);
-            let previous_owned = self.load_export_owned_files(&owned_setting_key)?;
-            // A file this playlist owned and still points at stays owned even
-            // when this run reused it instead of writing it (a track matched
-            // to its file under another name, e.g. after two same-named
-            // tracks swapped places), so it is never stale while referenced
-            // and is still pruned once the track leaves the playlist.
-            let referenced = collect_manifest_referenced_paths(&usb_root, &manifest);
-            let current_owned = collect_manifest_owned_paths(&usb_root, &manifest)
-                .into_iter()
-                .chain(previous_owned.intersection(&referenced).cloned())
+            // What any playlist of this export still points at is never
+            // stale for another one of them.
+            let referenced_by_export = runs
+                .iter()
+                .flat_map(|run| collect_manifest_referenced_paths(&usb_root, &run.manifest))
                 .collect::<HashSet<_>>();
-            let mut prunable = Vec::new();
-            if options.prune_stale {
-                let stale = previous_owned
-                    .difference(&current_owned)
-                    .cloned()
-                    .collect::<Vec<_>>();
-                prunable =
-                    filter_prunable_stale_paths_for_playlist(&usb_root, &playlist.name, &stale)?;
-                // Before deleting the files, drop the eDB/PDB rows for tracks
-                // that fell out of this playlist and are referenced nowhere
-                // else -- otherwise the rows outlive the files and strict
-                // parity reports them as "missing from USB".
-                if let Some(session) = write_session.as_mut() {
-                    remove_orphaned_dropped_tracks_from_dbs(session, &prunable)?;
+            for run in &mut runs {
+                let owned_setting_key = export_owned_files_setting_key(&usb_root, &run.playlist.id);
+                let previous_owned = self.load_export_owned_files(&owned_setting_key)?;
+                // A file this playlist owned and still points at stays owned even
+                // when this run reused it instead of writing it (a track matched
+                // to its file under another name, e.g. after two same-named
+                // tracks swapped places), so it is never stale while referenced
+                // and is still pruned once the track leaves the playlist.
+                let referenced = collect_manifest_referenced_paths(&usb_root, &run.manifest);
+                let current_owned = collect_manifest_owned_paths(&usb_root, &run.manifest)
+                    .into_iter()
+                    .chain(previous_owned.intersection(&referenced).cloned())
+                    .collect::<HashSet<_>>();
+                if options.prune_stale {
+                    let stale = previous_owned
+                        .difference(&current_owned)
+                        .filter(|path| !referenced_by_export.contains(*path))
+                        .cloned()
+                        .collect::<Vec<_>>();
+                    run.prunable = filter_prunable_stale_paths_for_playlist(
+                        &usb_root,
+                        &run.playlist.name,
+                        &stale,
+                    )?;
+                    // Before deleting the files, drop the eDB/PDB rows for tracks
+                    // that fell out of this playlist and are referenced nowhere
+                    // else -- otherwise the rows outlive the files and strict
+                    // parity reports them as "missing from USB".
+                    if let Some(session) = write_session.as_mut() {
+                        remove_orphaned_dropped_tracks_from_dbs(session, &run.prunable)?;
+                    }
                 }
+                run.owned_setting_key = owned_setting_key;
+                run.current_owned = current_owned;
             }
             // Commit both databases before removing files or recording a
             // successful export. Failed writes leave the old files available.
@@ -1795,19 +2278,23 @@ impl BackendService {
                 session.commit()?;
             }
             if options.prune_stale {
-                let prune_result = prune_stale_export_owned_files(&usb_root, &prunable)?;
-                logging::debug(
-                    "export",
-                    format!(
-                        "prune stale enabled: removed {}, missing {}, skipped {}",
-                        prune_result.removed, prune_result.missing, prune_result.skipped
-                    ),
-                );
+                for run in &runs {
+                    let prune_result = prune_stale_export_owned_files(&usb_root, &run.prunable)?;
+                    logging::debug(
+                        "export",
+                        format!(
+                            "prune stale enabled: removed {}, missing {}, skipped {}",
+                            prune_result.removed, prune_result.missing, prune_result.skipped
+                        ),
+                    );
+                }
                 // Bookend to the pre-DB-write manifest check: prove the prune
-                // didn't delete a file the freshly-exported playlist still
-                // references. Runs before save_export_owned_files so the owned
+                // didn't delete a file the freshly-exported playlists still
+                // reference. Runs before save_export_owned_files so the owned
                 // set isn't advanced on a run that ended up inconsistent.
-                validate_export_manifest_after_prune(&usb_root, &manifest)?;
+                for run in &runs {
+                    validate_export_manifest_after_prune(&usb_root, &run.manifest)?;
+                }
             }
             // After the prune, which can still drop PDB rows.
             if self.engine_library_enabled() {
@@ -1818,7 +2305,6 @@ impl BackendService {
                 );
             }
             warnings.extend(self.refresh_engine_library(&usb_root));
-            self.save_export_owned_files(&owned_setting_key, &current_owned)?;
             {
                 let profile = crate::service::export_helpers::PdbLayoutProfile::from_env();
                 let profile_key = format!("pdb_profile:{}", usb_root.to_string_lossy());
@@ -1827,91 +2313,97 @@ impl BackendService {
                     params![profile_key, profile.as_str(), now()],
                 )?;
             }
-            // The drive's name is kept as it is now: the mount path can later
-            // belong to another stick, so looking the name up by path when
-            // the line is shown could name a drive that never got this export.
-            local_conn.execute(
-                "UPDATE playlists SET last_exported_at = ?1, last_exported_usb_root = ?2, last_exported_track_count = ?3, last_exported_usb_name = ?4 WHERE id = ?5",
-                params![
-                    now(),
-                    usb_root.to_string_lossy().to_string(),
-                    manifest.tracks.len() as i64,
-                    super::usb_drive_name(&local_conn, &usb_root),
-                    playlist.id
-                ],
-            )?;
-            match append_export_log_record(&usb_root, &playlist, &manifest) {
-                // The next connect checks the drive holding this name has
-                // this record, which a copy made before now doesn't.
-                Ok(record) => {
-                    if let Some(name) = super::usb_identity::drive_name(&usb_root) {
-                        usb_utils::record_drive_export(&local_conn, &name, &record.exported_at)?;
-                    }
-                }
-                Err(err) => {
-                    logging::debug(
-                        "export",
-                        format!("USB export log append skipped: {err}", err = err.english()),
-                    );
-                }
+            for run in &runs {
+                self.record_playlist_export(&local_conn, &usb_root, run)?;
             }
-            // Additive, always-queryable counterpart to the on-drive JSON
-            // log above -- that log stays the source of truth for
-            // portability (another machine reading this drive still needs
-            // it); this table is what lets the app answer "what have I
-            // exported to USB devices, and when" without the drive mounted.
-            // mark_mounted=false: an export happening implies the device
-            // was already validated/mounted earlier in the flow, this call
-            // only resolves/bumps the usb_devices row.
-            let usb_device_id =
-                usb_utils::upsert_usb_device(&local_conn, &usb_root, false, &now())?;
-            let export_record = build_export_log_record(&playlist, &manifest);
-            let track_fingerprints_json = serde_json::to_string(&export_record.track_fingerprints)
-                .map_err(|err| {
-                    BackendError::Internal(format!("failed to encode track fingerprints: {err}"))
-                })?;
-            local_conn.execute(
-                "INSERT INTO usb_device_exports (id, usb_device_id, playlist_id, playlist_name, exported_at, track_count, track_fingerprints, created_at)
-                 VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8)",
-                params![
-                    Uuid::now_v7().to_string(),
-                    usb_device_id,
-                    playlist.id,
-                    export_record.playlist_name,
-                    export_record.exported_at,
-                    manifest.tracks.len() as i64,
-                    track_fingerprints_json,
-                    now(),
-                ],
-            )?;
         }
 
-        let warning_count = logging::count_warnings(&warnings);
-        let skipped_tracks = skipped_tracks + unplayable_tracks.len();
-        let status_text = tr::export_complete(
-            &playlist.name,
-            exported_tracks,
-            skipped_tracks,
-            if options.prune_stale {
-                tr::export_sync_mirror()
-            } else {
-                tr::export_sync_additive()
-            },
-        )
-        .render();
-        Ok(ExportToUsbData {
-            job_id: String::new(),
-            playlist_id: playlist.id,
-            playlist_name: playlist.name,
-            usb_root: usb_root.to_string_lossy().to_string(),
-            exported_tracks,
-            skipped_tracks,
-            exported_artworks,
-            exported_analysis_files,
-            status_text,
-            warning_text: warning_text(warning_count),
+        let playlists = runs
+            .into_iter()
+            .rev()
+            .map(|run| ExportedPlaylist {
+                playlist_id: run.playlist.id,
+                playlist_name: run.playlist.name,
+                exported_tracks: run.exported_tracks,
+                skipped_tracks: run.skipped_tracks + run.unplayable_tracks.len(),
+                exported_artworks: run.exported_artworks,
+                exported_analysis_files: run.exported_analysis_files,
+            })
+            .collect();
+        Ok(ExportRun {
+            playlists,
             warnings,
         })
+    }
+
+    /// The app's record of one exported playlist: the files it owns on the
+    /// stick, its "last exported" line, and the export logs.
+    fn record_playlist_export(
+        &self,
+        local_conn: &rusqlite::Connection,
+        usb_root: &Path,
+        run: &PlaylistRun,
+    ) -> BackendResult<()> {
+        let playlist = &run.playlist;
+        let manifest = &run.manifest;
+        self.save_export_owned_files(&run.owned_setting_key, &run.current_owned)?;
+        // The drive's name is kept as it is now: the mount path can later
+        // belong to another stick, so looking the name up by path when
+        // the line is shown could name a drive that never got this export.
+        local_conn.execute(
+            "UPDATE playlists SET last_exported_at = ?1, last_exported_usb_root = ?2, last_exported_track_count = ?3, last_exported_usb_name = ?4 WHERE id = ?5",
+            params![
+                now(),
+                usb_root.to_string_lossy().to_string(),
+                manifest.tracks.len() as i64,
+                super::usb_drive_name(local_conn, usb_root),
+                playlist.id
+            ],
+        )?;
+        match append_export_log_record(usb_root, playlist, manifest) {
+            // The next connect checks the drive holding this name has
+            // this record, which a copy made before now doesn't.
+            Ok(record) => {
+                if let Some(name) = super::usb_identity::drive_name(usb_root) {
+                    usb_utils::record_drive_export(local_conn, &name, &record.exported_at)?;
+                }
+            }
+            Err(err) => {
+                logging::debug(
+                    "export",
+                    format!("USB export log append skipped: {err}", err = err.english()),
+                );
+            }
+        }
+        // Additive, always-queryable counterpart to the on-drive JSON
+        // log above -- that log stays the source of truth for
+        // portability (another machine reading this drive still needs
+        // it); this table is what lets the app answer "what have I
+        // exported to USB devices, and when" without the drive mounted.
+        // mark_mounted=false: an export happening implies the device
+        // was already validated/mounted earlier in the flow, this call
+        // only resolves/bumps the usb_devices row.
+        let usb_device_id = usb_utils::upsert_usb_device(local_conn, usb_root, false, &now())?;
+        let export_record = build_export_log_record(playlist, manifest);
+        let track_fingerprints_json = serde_json::to_string(&export_record.track_fingerprints)
+            .map_err(|err| {
+                BackendError::Internal(format!("failed to encode track fingerprints: {err}"))
+            })?;
+        local_conn.execute(
+            "INSERT INTO usb_device_exports (id, usb_device_id, playlist_id, playlist_name, exported_at, track_count, track_fingerprints, created_at)
+             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8)",
+            params![
+                Uuid::now_v7().to_string(),
+                usb_device_id,
+                playlist.id,
+                export_record.playlist_name,
+                export_record.exported_at,
+                manifest.tracks.len() as i64,
+                track_fingerprints_json,
+                now(),
+            ],
+        )?;
+        Ok(())
     }
 
     fn verify_export_outputs(

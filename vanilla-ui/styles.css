@@ -2975,6 +2975,132 @@ ul[data-loaded]:empty::before {
   min-width: 96px;
 }
 
+/* Export playlists page: one row per playlist, in the track tables' grid
+   (the same row look, header and select-all box), in the app's order. The table fills the page like a playlist's track table, so the
+   Export button sits where a playlist's own does. */
+.export-playlists-grid {
+  /* USB status fits its longest text ("On USB, changed since") and To copy a
+     big playlist's ("3764 tracks · 49.6 GB") without cutting them. */
+  --track-grid-cols: 44px minmax(140px, 1.6fr) 7ch 10ch 9ch minmax(160px, 1fr) minmax(170px, 0.8fr) minmax(220px, 1.6fr);
+}
+
+.export-playlists-body {
+  --track-row-height: 36px;
+}
+
+.export-playlists-row {
+  cursor: pointer;
+}
+
+.export-playlists-row.is-disabled {
+  cursor: default;
+}
+
+.export-playlists-row.is-disabled > .track-grid-cell {
+  opacity: 0.55;
+}
+
+.export-playlists-row > .track-grid-cell {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.export-playlists-name {
+  font-weight: 500;
+}
+
+.export-playlists-num {
+  text-align: right;
+  font-family: 'JetBrains Mono', monospace;
+  font-size: 12px;
+}
+
+/* The headings keep the header's font; only their alignment follows. */
+.track-grid-head .export-playlists-num {
+  font-family: 'Outfit', sans-serif;
+  font-size: 10px;
+}
+
+.track-grid-head .track-grid-cell.export-playlists-num {
+  text-align: right;
+}
+
+.export-playlists-copy,
+.export-playlists-last {
+  color: var(--ink-secondary);
+}
+
+.export-playlists-status {
+  font-size: 12px;
+  color: var(--muted);
+}
+
+.export-playlists-row[data-status="onStick"] .export-playlists-status {
+  color: var(--success);
+}
+
+.export-playlists-row[data-status="onStickChanged"] .export-playlists-status {
+  color: var(--diag-warn);
+}
+
+.export-playlists-row.is-disabled .export-playlists-status {
+  color: var(--danger);
+}
+
+/* "New and changed", as the playlist column's heading: a small outlined
+   accent button, so it reads as one among the header's labels. */
+.track-grid-head .export-playlists-head-btn {
+  height: 22px;
+  padding: 0 10px;
+  font-family: 'Outfit', sans-serif;
+  font-size: 11px;
+  font-weight: 600;
+  border: 1px solid var(--accent);
+  border-radius: 6px;
+  background: transparent;
+  color: var(--accent);
+}
+
+.track-grid-head .export-playlists-head-btn:hover:not(:disabled) {
+  background: var(--accent-glow);
+  color: var(--accent);
+}
+
+.track-grid-head .export-playlists-head-btn:disabled {
+  opacity: 0.5;
+  cursor: default;
+}
+
+.export-playlists-count {
+  margin: 8px 2px 0;
+  font-size: 13px;
+}
+
+/* Under the box, like a playlist's footer line. */
+.export-playlists-options {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  margin: 10px 2px 0;
+  flex-shrink: 0;
+}
+
+.export-playlists-warning {
+  margin: 6px 2px 0;
+  font-size: 13px;
+  color: var(--diag-warn);
+  flex-shrink: 0;
+}
+
+#panel-export-playlists .panel-actions {
+  margin-top: 10px;
+}
+
+.nav-playlist-export {
+  margin-top: 4px;
+}
+
 @media (max-width: 800px) {
   .split { grid-template-columns: 1fr; }
   .player-menu-listbox {
@@ -3237,6 +3363,14 @@ ul[data-loaded]:empty::before {
   border-top: 1px solid var(--line);
   box-shadow: 3px -3px 12px var(--accent-glow);
   padding: 10px 20px 12px;
+  /* Tall enough to cover a page's bottom action button (the export button
+     under a playlist), which is disabled while the job runs anyway. The
+     content is centred in it, with the track a little thicker, so the extra
+     height doesn't show as a gap above the text. */
+  min-height: 72px;
+  display: flex;
+  flex-direction: column;
+  justify-content: center;
   opacity: 0;
   transform: translateY(8px);
   pointer-events: none;
@@ -3368,7 +3502,7 @@ body.sidebar-collapsed .progress-footer {
 }
 
 .progress-track {
-  height: 6px;
+  height: 8px;
   border-radius: 999px;
   overflow: hidden;
   background: var(--bg);

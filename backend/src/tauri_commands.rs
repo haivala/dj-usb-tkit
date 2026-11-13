@@ -1129,6 +1129,30 @@ pub async fn get_playlist_export_space(
 }
 
 #[tauri::command]
+pub async fn get_playlists_export_space(
+    state: State<'_, BackendCommands>,
+    request: crate::models::GetPlaylistsExportSpaceRequest,
+) -> Result<ApiResponse<GetPlaylistExportSpaceData>, String> {
+    let commands = state.inner().clone();
+    Ok(run_blocking_command("get_playlists_export_space", move || {
+        commands.get_playlists_export_space(request)
+    })
+    .await)
+}
+
+#[tauri::command]
+pub async fn get_batch_export_overview(
+    state: State<'_, BackendCommands>,
+    request: crate::models::GetBatchExportOverviewRequest,
+) -> Result<ApiResponse<crate::models::BatchExportOverviewData>, String> {
+    let commands = state.inner().clone();
+    Ok(run_blocking_command("get_batch_export_overview", move || {
+        commands.get_batch_export_overview(request)
+    })
+    .await)
+}
+
+#[tauri::command]
 pub async fn add_track_candidates_to_playlist(
     state: State<'_, BackendCommands>,
     request: AddTrackCandidatesToPlaylistRequest,
@@ -2118,6 +2142,31 @@ pub async fn export_to_usb(
         tr::job_export_to_usb_completed(),
         move |mut progress| {
             commands.export_to_usb_with_progress(request, move |c, t, m| {
+                progress(c, t, m);
+            })
+        },
+    )
+    .await
+}
+
+#[tauri::command]
+pub async fn export_playlists_to_usb(
+    app: AppHandle,
+    state: State<'_, BackendCommands>,
+    request: crate::models::ExportPlaylistsToUsbRequest,
+) -> Result<
+    ApiResponse<crate::models::WithPlaylists<crate::models::ExportPlaylistsToUsbData>>,
+    String,
+> {
+    let commands = state.inner().clone();
+    run_usb_job_with_progress(
+        &app,
+        "export",
+        "export_playlists_to_usb",
+        tr::job_export_playlists_to_usb_started(),
+        tr::job_export_to_usb_completed(),
+        move |mut progress| {
+            commands.export_playlists_to_usb_with_progress(request, move |c, t, m| {
                 progress(c, t, m);
             })
         },

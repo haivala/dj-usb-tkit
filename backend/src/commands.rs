@@ -371,6 +371,20 @@ impl BackendCommands {
         wrap(self.service.get_playlist_export_space(req))
     }
 
+    pub fn get_playlists_export_space(
+        &self,
+        req: crate::models::GetPlaylistsExportSpaceRequest,
+    ) -> ApiResponse<GetPlaylistExportSpaceData> {
+        wrap(self.service.get_playlists_export_space(req))
+    }
+
+    pub fn get_batch_export_overview(
+        &self,
+        req: crate::models::GetBatchExportOverviewRequest,
+    ) -> ApiResponse<crate::models::BatchExportOverviewData> {
+        wrap(self.service.get_batch_export_overview(req))
+    }
+
     pub fn add_track_candidates_to_playlist(
         &self,
         req: AddTrackCandidatesToPlaylistRequest,
@@ -879,6 +893,22 @@ impl BackendCommands {
         F: FnMut(usize, usize, &str),
     {
         wrap(self.with_playlists(self.service.export_to_usb_with_progress(req, on_progress)))
+    }
+
+    pub fn export_playlists_to_usb_with_progress<F>(
+        &self,
+        req: crate::models::ExportPlaylistsToUsbRequest,
+        on_progress: F,
+    ) -> ApiResponse<WithPlaylists<crate::models::ExportPlaylistsToUsbData>>
+    where
+        F: FnMut(usize, usize, &str),
+    {
+        wrap(
+            self.with_playlists(
+                self.service
+                    .export_playlists_to_usb_with_progress(req, on_progress),
+            ),
+        )
     }
 
     pub fn play_resolved_track(

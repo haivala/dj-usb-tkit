@@ -292,4 +292,15 @@ export function bindUsbEvents(ctx) {
     await hydrateUsbTrackMetadata(track);
     handleTrackAction({ action, track, origin: "usb", target, event, state, rowKey, ctx });
   });
+
+  // The Export playlists page.
+  el.exportPlaylistsList.addEventListener("change", (event) => {
+    if (event.target.matches(".export-playlists-check")) ctx.toggleExportPlaylist(event.target);
+  });
+  el.exportPlaylistsList.addEventListener("click", (event) => ctx.clickExportPlaylistRow(event.target));
+  el.exportPlaylistsSelectAll.addEventListener("change", () => ctx.selectExportPlaylists("all"));
+  el.exportPlaylistsSelectChangedBtn.addEventListener("click", () => ctx.selectExportPlaylists("changed"));
+  el.exportPlaylistsRunBtn.addEventListener("click", () => {
+    ctx.runExportPlaylists().catch(catchErr(emitStatus));
+  });
 }

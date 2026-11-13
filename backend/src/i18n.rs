@@ -630,6 +630,12 @@ usb-not-for-ui = Not sent
     /// `ui-common-*` key (docs/TRANSLATING.md), so a translator translates it once. These
     /// share their English but not their role, and may translate differently.
     const SAME_ENGLISH_KEPT_APART: &[&[&str]] = &[
+        // Two values joined with " · ": a hot cue's tooltip, and when and where a playlist
+        // was last exported.
+        &[
+            "batch-export-last-exported",
+            "ui-track-detail-marker-hot-cue-tooltip",
+        ],
         // The sidebar's heading, the Add to… list, the import dialog's group, a diagnostics area.
         &[
             "diagnostics-area-playlists",

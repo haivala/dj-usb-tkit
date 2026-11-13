@@ -647,7 +647,7 @@
     "create_playlist", "rename_playlist", "delete_playlist", "remove_tracks_from_playlist",
     "reorder_playlist_tracks", "add_track_candidates_to_playlist", "add_track_candidates_to_playlists",
     "add_library_selection_to_playlist", "add_library_selection_to_playlists",
-    "import_external_playlists", "export_to_usb", "set_usb_device_name", "select_usb",
+    "import_external_playlists", "export_to_usb", "export_playlists_to_usb", "set_usb_device_name", "select_usb",
     "restore_usb_backup", "set_export_sync_mode",
     "fetch_usb_playlists", "run_usb_diagnostics", "repair_usb_diagnostics"
   ]);

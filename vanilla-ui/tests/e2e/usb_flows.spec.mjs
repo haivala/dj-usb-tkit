@@ -2220,3 +2220,113 @@ test("frontend logging", async ({ page }) => {
   expect(lines).toContainEqual('warn [console] [console.event] count: 42 {"key":"val"}');
   expect(lines.some((line) => line.includes("from the backend"))).toBe(false);
 });
+
+test("export playlists page: a row per playlist, selection, order ticks and one export", async ({ page }) => {
+  await installTauriMock(page, "valid");
+  await page.addInitScript(() => {
+    window.__batchExports = [];
+    const backend = window.__e2eBackend;
+    const row = (playlistId, name, status, statusText, disabledReason = null) =>
+      ({
+        playlistId, name, trackCount: 3, durationText: "12:00", sizeText: "30 MB",
+        copyText: status === "onStick" ? "Nothing new" : "3 tracks · 30 MB",
+        lastExportedText: status === "new" ? "Never" : "2026-11-01 20:00 · TEST STICK",
+        status, statusText, disabledReason
+      });
+    backend.override(async (command, request, payload) => {
+      if (command === "get_batch_export_overview") {
+        return backend.ok({
+          rows: [
+            row("pl-a", "Alpha", "onStick", "On USB, up to date"),
+            row("pl-b", "Bravo", "onStickChanged", "On USB, changed since"),
+            row("pl-c", "Charlie", "new", "Not on USB yet"),
+            row("pl-d", "Delta", "new", "Not on USB yet", "no tracks"),
+          ],
+          usbName: "TEST STICK",
+          forceTrackOrderAvailable: false,
+          forceTrackOrderTooltip: "Mirror export always writes the app's track order.",
+        });
+      }
+      if (command === "get_playlists_export_space") {
+        return backend.ok({ exportSpace: { summaryText: `${payload.request.playlistIds.length} playlists to copy`, fits: true } });
+      }
+      if (command === "export_playlists_to_usb") {
+        window.__batchExports.push(payload.request);
+        return backend.ok({ statusText: "Export complete: 3 playlists", warningText: "", warnings: [] });
+      }
+    });
+  });
+  await page.goto("/");
+  await expect(page.locator("#exportPlaylistsItem")).toBeHidden();
+  await openUsb(page);
+  await expect(page.locator("#exportPlaylistsItem")).toBeVisible();
+  await page.locator("#exportPlaylistsBtn").click();
+
+  await expect(page.locator("#exportPlaylistsTitle")).toHaveText("Export playlists to TEST STICK");
+  const rows = page.locator("#exportPlaylistsList .export-playlists-row");
+  await expect(rows).toHaveCount(4);
+  await expect(rows.locator(".export-playlists-name")).toHaveText(["Alpha", "Bravo", "Charlie", "Delta"]);
+  await expect(rows.first().locator(".export-playlists-last")).toHaveText("2026-11-01 20:00 · TEST STICK");
+  await expect(rows.locator(".export-playlists-status")).toHaveText([
+    "On USB, up to date", "On USB, changed since", "Not on USB yet", "no tracks"
+  ]);
+  await expect(rows.first().locator(".export-playlists-copy")).toHaveText("Nothing new");
+  await expect(rows.first().locator(".export-playlists-length")).toHaveText("12:00");
+  const check = (name) => rows.filter({ hasText: name }).locator(".export-playlists-check");
+  for (const name of ["Alpha", "Bravo", "Charlie"]) await expect(check(name)).toBeChecked();
+  // A playlist that can't be exported can't be chosen.
+  await expect(check("Delta")).toBeDisabled();
+  await expect(check("Delta")).not.toBeChecked();
+
+  const run = page.locator("#exportPlaylistsRunBtn");
+  const forceOrder = page.locator("#exportPlaylistsForceOrder");
+  const warning = page.locator("#exportPlaylistsWarning");
+  const selectAll = page.locator("#exportPlaylistsSelectAll");
+  await expect(selectAll).toBeChecked();
+  await expect(page.locator("#exportPlaylistsCount")).toHaveText("3 of 3 selected");
+  await expect(warning).toBeVisible();
+  await expect(forceOrder).toBeEnabled();
+  await expect(page.locator("#exportPlaylistsForceTrackOrder")).toBeDisabled();
+  await expect(page.locator("#exportPlaylistsForceTrackOrderRow")).toHaveAttribute("data-tooltip", "Mirror export always writes the app's track order.");
+  await expect(run).toHaveText("Export 3 playlists");
+  await expect(page.locator("#exportPlaylistsSpace")).toHaveText("3 playlists to copy");
+
+  // Not everything chosen: no long-time warning, no forced playlist order.
+  await forceOrder.check();
+  // A click on the row ticks and unticks it, like its box.
+  await rows.filter({ hasText: "Bravo" }).locator(".export-playlists-name").click();
+  await expect(check("Bravo")).not.toBeChecked();
+  await expect(selectAll).toHaveJSProperty("indeterminate", true);
+  await expect(warning).toBeHidden();
+  await expect(forceOrder).toBeDisabled();
+  await expect(forceOrder).not.toBeChecked();
+  await expect(page.locator("#exportPlaylistsForceOrderHint")).toHaveText("Select all playlists to use it");
+  await expect(run).toHaveText("Export 2 playlists");
+  await expect(page.locator("#exportPlaylistsSpace")).toHaveText("2 playlists to copy");
+
+  await page.locator("#exportPlaylistsSelectChangedBtn").click();
+  await expect(check("Alpha")).not.toBeChecked();
+  await expect(check("Bravo")).toBeChecked();
+  await expect(check("Charlie")).toBeChecked();
+  // The header box chooses everything, then (clicked again) nothing.
+  await selectAll.click();
+  await expect(selectAll).toBeChecked();
+  await selectAll.click();
+  await expect(selectAll).not.toBeChecked();
+  await expect(run).toBeDisabled();
+
+  await selectAll.click();
+  await forceOrder.check();
+  await run.click();
+  await expect(page.locator("#statusText")).toContainText("Export complete: 3 playlists");
+  const exports = await page.evaluate(() => window.__batchExports);
+  expect(exports).toHaveLength(1);
+  expect(exports[0]).toMatchObject({
+    playlistIds: ["pl-a", "pl-b", "pl-c"],
+    forcePlaylistOrder: true,
+    forceTrackOrder: false,
+  });
+  // The page reads the stick again and starts over with everything chosen.
+  await expect(forceOrder).not.toBeChecked();
+  await expect(run).toHaveText("Export 3 playlists");
+});

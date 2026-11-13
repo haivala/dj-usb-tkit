@@ -7396,3 +7396,430 @@ fn track_added_from_a_usb_row_exports_to_its_own_stick_and_to_another() {
     assert!(!away.ok, "nothing to copy from: {away:?}");
     assert!(files_under(&third.join("Contents")).is_empty());
 }
+
+// --- Export playlists page (batch export) ---
+
+/// The app's playlists for the batch export tests, over three analyzed tracks
+/// ("Batch Artist - One/Two/Three"): `(name, track titles)` each, listed in
+/// the app in this order. Returns the
+/// backend, the playlist ids by name and the track ids by title.
+fn batch_export_setup(
+    root: &Path,
+    usb: &Path,
+    playlists: &[(&str, &[&str])],
+) -> (
+    BackendCommands,
+    std::collections::HashMap<String, String>,
+    std::collections::HashMap<String, String>,
+) {
+    let media = root.join("media");
+    fs::create_dir_all(&media).expect("create media dir");
+    fs::create_dir_all(usb).expect("create usb dir");
+    for title in ["One", "Two", "Three"] {
+        copy_audio_fixture(
+            &media,
+            "formats/track_format_wav.wav",
+            &format!("Batch Artist - {title}.wav"),
+        );
+    }
+    let data_dir = root.join("data");
+    let backend = BackendCommands::new(&data_dir).expect("create backend");
+    let initialized = backend.initialize_usb(InitializeUsbRequest {
+        usb_root: usb.to_string_lossy().to_string(),
+    });
+    assert!(initialized.ok, "initialize usb failed: {initialized:?}");
+    let scan = backend.scan_library(ScanLibraryRequest {
+        source_roots: vec![media.to_string_lossy().to_string()],
+        incremental: true,
+    });
+    assert!(scan.ok, "scan failed: {scan:?}");
+    library_sources::show_only(
+        &backend,
+        vec![media.to_string_lossy().to_string()],
+        false,
+        false,
+    );
+    let track_ids = backend
+        .browse_source_files(BrowseSourceFilesRequest {
+            query: String::new(),
+            limit: 50,
+            ..Default::default()
+        })
+        .data
+        .expect("browse data")
+        .items
+        .into_iter()
+        .map(|track| (track.title, track.id))
+        .collect::<std::collections::HashMap<_, _>>();
+    assert_eq!(track_ids.len(), 3, "every fixture scanned: {track_ids:?}");
+    seed_tracks_as_analyzed(&data_dir, &track_ids.values().cloned().collect::<Vec<_>>());
+    let mut playlist_ids = std::collections::HashMap::new();
+    // The app lists the newest playlist first: made last one first, they're
+    // listed in the order given.
+    for (name, titles) in playlists.iter().rev() {
+        let playlist_id = backend
+            .create_playlist(CreatePlaylistRequest {
+                name: name.to_string(),
+            })
+            .data
+            .expect("playlist data")
+            .data
+            .playlist_id;
+        if !titles.is_empty() {
+            library_sources::show_only(
+                &backend,
+                vec![media.to_string_lossy().to_string()],
+                false,
+                false,
+            );
+            let added =
+                backend.add_library_selection_to_playlist(AddLibrarySelectionToPlaylistRequest {
+                    playlist_id: playlist_id.clone(),
+                    track_ids: titles.iter().map(|t| track_ids[*t].clone()).collect(),
+                    ..Default::default()
+                });
+            assert!(added.ok, "add tracks failed: {added:?}");
+        }
+        playlist_ids.insert(name.to_string(), playlist_id);
+    }
+    (backend, playlist_ids, track_ids)
+}
+
+fn additive_options() -> Option<ExportToUsbOptions> {
+    Some(ExportToUsbOptions {
+        include_artwork: false,
+        prune_stale: false,
+        ..Default::default()
+    })
+}
+
+fn export_one(backend: &BackendCommands, usb: &Path, playlist_id: &str) {
+    let exported = backend.export_to_usb(ExportToUsbRequest {
+        usb_root: Some(usb.to_string_lossy().to_string()),
+        playlist_id: playlist_id.to_string(),
+        options: additive_options(),
+        sort: None,
+    });
+    assert!(exported.ok, "export failed: {exported:?}");
+}
+
+fn export_batch(
+    backend: &BackendCommands,
+    usb: &Path,
+    playlist_ids: Vec<String>,
+    force_playlist_order: bool,
+    force_track_order: bool,
+) -> backend::models::ApiResponse<
+    backend::models::WithPlaylists<backend::models::ExportPlaylistsToUsbData>,
+> {
+    backend.export_playlists_to_usb_with_progress(
+        backend::models::ExportPlaylistsToUsbRequest {
+            usb_root: Some(usb.to_string_lossy().to_string()),
+            playlist_ids,
+            force_playlist_order,
+            force_track_order,
+            options: additive_options(),
+        },
+        |_, _, _| {},
+    )
+}
+
+/// The stick's playlist names in its order, checked to be the same in the PDB and the eDB.
+fn usb_playlist_names_in_order(backend: &BackendCommands, usb: &Path) -> Vec<String> {
+    let parity = backend.run_usb_parity_report(RunUsbParityReportRequest {
+        usb_root: Some(usb.to_string_lossy().to_string()),
+    });
+    assert!(parity.ok, "parity report failed: {parity:?}");
+    for detail in &parity.data.expect("parity data").playlist_details {
+        assert!(
+            detail.sort_order_match,
+            "PDB and eDB order differ for {}: {detail:?}",
+            detail.name
+        );
+    }
+    usb_playlist_ids(backend, usb, "")
+        .into_iter()
+        .map(|(_, name)| name)
+        .collect()
+}
+
+#[test]
+fn batch_export_writes_every_playlist_once_in_the_apps_order_with_one_backup() {
+    let root = tempdir().expect("temp root");
+    let usb = root.path().join("usb");
+    let (backend, ids, _) = batch_export_setup(
+        root.path(),
+        &usb,
+        &[
+            ("Batch A", &["One", "Two"]),
+            ("Batch B", &["Two", "Three"]),
+            ("Batch C", &["Three"]),
+        ],
+    );
+    let exported = export_batch(
+        &backend,
+        &usb,
+        vec![
+            ids["Batch C"].clone(),
+            ids["Batch A"].clone(),
+            ids["Batch B"].clone(),
+        ],
+        true,
+        false,
+    );
+    assert!(exported.ok, "batch export failed: {exported:?}");
+    let data = exported.data.expect("batch data").data;
+    assert_eq!(data.exported_playlists, 3);
+    assert_eq!(data.exported_tracks, 5, "tracks counted per playlist");
+    assert_eq!(
+        usb_playlist_names_in_order(&backend, &usb),
+        ["Batch A", "Batch B", "Batch C"],
+        "the app's order, whatever order they were asked in"
+    );
+    assert_eq!(
+        audio_files_under_contents(&usb).len(),
+        3,
+        "a track in two playlists is copied once"
+    );
+    assert_eq!(edb_playlist_files(&usb, "Batch B").len(), 2);
+    let backups = backend
+        .list_usb_backups(ListUsbBackupsRequest {
+            usb_root: usb.to_string_lossy().to_string(),
+        })
+        .data
+        .expect("backups")
+        .items;
+    assert_eq!(
+        backups.len(),
+        1,
+        "one backup for the whole export: {backups:?}"
+    );
+}
+
+#[test]
+fn batch_export_without_forced_order_keeps_playlists_already_on_the_stick_in_place() {
+    let root = tempdir().expect("temp root");
+    let usb = root.path().join("usb");
+    let (backend, ids, _) = batch_export_setup(
+        root.path(),
+        &usb,
+        &[
+            ("Batch A", &["One"]),
+            ("Batch B", &["Two"]),
+            ("Batch C", &["Three"]),
+            ("Stick Only", &["One"]),
+        ],
+    );
+    // A playlist only the stick has: exported, then deleted in the app.
+    export_one(&backend, &usb, &ids["Stick Only"]);
+    let deleted = backend.delete_playlist(backend::models::DeletePlaylistRequest {
+        playlist_id: ids["Stick Only"].clone(),
+    });
+    assert!(deleted.ok, "delete failed: {deleted:?}");
+    export_one(&backend, &usb, &ids["Batch C"]);
+    assert_eq!(
+        usb_playlist_names_in_order(&backend, &usb),
+        ["Batch C", "Stick Only"]
+    );
+
+    // New ones go on top in the app's order; C stays where it is.
+    let all = vec![
+        ids["Batch A"].clone(),
+        ids["Batch B"].clone(),
+        ids["Batch C"].clone(),
+    ];
+    let exported = export_batch(&backend, &usb, all.clone(), false, false);
+    assert!(exported.ok, "batch export failed: {exported:?}");
+    assert_eq!(
+        usb_playlist_names_in_order(&backend, &usb),
+        ["Batch A", "Batch B", "Batch C", "Stick Only"]
+    );
+    // Moved on the stick, exported again: it keeps the stick's place.
+    export_one(&backend, &usb, &ids["Batch C"]);
+    let exported = export_batch(&backend, &usb, all.clone(), false, false);
+    assert!(exported.ok, "batch export failed: {exported:?}");
+    assert_eq!(
+        usb_playlist_names_in_order(&backend, &usb),
+        ["Batch C", "Batch A", "Batch B", "Stick Only"]
+    );
+
+    // Forced: the app's order on top, the stick's own playlist below.
+    let exported = export_batch(&backend, &usb, all, true, false);
+    assert!(exported.ok, "forced batch export failed: {exported:?}");
+    assert_eq!(
+        usb_playlist_names_in_order(&backend, &usb),
+        ["Batch A", "Batch B", "Batch C", "Stick Only"]
+    );
+}
+
+#[test]
+fn batch_export_refuses_a_forced_playlist_order_without_every_playlist() {
+    let root = tempdir().expect("temp root");
+    let usb = root.path().join("usb");
+    let (backend, ids, _) = batch_export_setup(
+        root.path(),
+        &usb,
+        &[
+            ("Batch A", &["One"]),
+            ("Batch B", &["Two"]),
+            ("Batch Empty", &[]),
+        ],
+    );
+    let refused = export_batch(&backend, &usb, vec![ids["Batch A"].clone()], true, false);
+    assert!(!refused.ok, "a partial selection can't force the order");
+    assert!(
+        !pdb_path_exists_with_playlist(&usb, "Batch A"),
+        "nothing was exported"
+    );
+    // The empty playlist can't be chosen, so A and B are every playlist.
+    let refused = export_batch(
+        &backend,
+        &usb,
+        vec![ids["Batch A"].clone(), ids["Batch Empty"].clone()],
+        false,
+        false,
+    );
+    assert!(!refused.ok, "an empty playlist can't be exported");
+    let exported = export_batch(
+        &backend,
+        &usb,
+        vec![ids["Batch A"].clone(), ids["Batch B"].clone()],
+        true,
+        false,
+    );
+    assert!(exported.ok, "batch export failed: {exported:?}");
+}
+
+fn pdb_path_exists_with_playlist(usb: &Path, name: &str) -> bool {
+    let pdb = usb
+        .join(USB_VENDOR_ROOT_DIR)
+        .join(USB_VENDOR_DB_DIR)
+        .join("export.pdb");
+    parse_pdb(&pdb)
+        .map(|parsed| parsed.playlist_tree.iter().any(|node| node.name == name))
+        .unwrap_or(false)
+}
+
+#[test]
+fn batch_export_forces_the_apps_track_order_onto_a_playlist_already_on_the_stick() {
+    let root = tempdir().expect("temp root");
+    let usb = root.path().join("usb");
+    let (backend, ids, tracks) =
+        batch_export_setup(root.path(), &usb, &[("Batch A", &["One", "Two"])]);
+    export_one(&backend, &usb, &ids["Batch A"]);
+    let reordered = backend.reorder_playlist_tracks(ReorderPlaylistTracksRequest {
+        playlist_id: ids["Batch A"].clone(),
+        ordered_track_ids: vec![tracks["Two"].clone(), tracks["One"].clone()],
+        sort_by: None,
+        sort_dir: None,
+        move_track_id: None,
+        before_track_id: None,
+    });
+    assert!(reordered.ok, "reorder failed: {reordered:?}");
+    let on_stick = edb_playlist_files(&usb, "Batch A");
+    assert_eq!(on_stick.len(), 2);
+
+    // Additive, without the tick: the stick's order stays.
+    let exported = export_batch(&backend, &usb, vec![ids["Batch A"].clone()], false, false);
+    assert!(exported.ok, "batch export failed: {exported:?}");
+    assert_eq!(edb_playlist_files(&usb, "Batch A"), on_stick);
+
+    let exported = export_batch(&backend, &usb, vec![ids["Batch A"].clone()], false, true);
+    assert!(exported.ok, "forced batch export failed: {exported:?}");
+    let reversed = on_stick.iter().rev().cloned().collect::<Vec<_>>();
+    assert_eq!(edb_playlist_files(&usb, "Batch A"), reversed);
+    assert_eq!(pdb_playlist_files(&usb, "Batch A").0, reversed);
+}
+
+#[test]
+fn batch_export_overview_shows_each_playlists_place_and_state_on_the_stick() {
+    use backend::models::BatchExportStatus;
+    let root = tempdir().expect("temp root");
+    let usb = root.path().join("usb");
+    let (backend, ids, tracks) = batch_export_setup(
+        root.path(),
+        &usb,
+        &[
+            ("Batch A", &["One"]),
+            ("Batch B", &["Two"]),
+            ("Batch C", &["Three"]),
+            ("Batch Empty", &[]),
+        ],
+    );
+    export_one(&backend, &usb, &ids["Batch A"]);
+    export_one(&backend, &usb, &ids["Batch B"]);
+    // B changes after its export.
+    library_sources::show_only(
+        &backend,
+        vec![root.path().join("media").to_string_lossy().to_string()],
+        false,
+        false,
+    );
+    let added = backend.add_library_selection_to_playlist(AddLibrarySelectionToPlaylistRequest {
+        playlist_id: ids["Batch B"].clone(),
+        track_ids: vec![tracks["Three"].clone()],
+        ..Default::default()
+    });
+    assert!(added.ok, "add failed: {added:?}");
+
+    let overview =
+        backend.get_batch_export_overview(backend::models::GetBatchExportOverviewRequest {
+            usb_root: Some(usb.to_string_lossy().to_string()),
+        });
+    assert!(overview.ok, "overview failed: {overview:?}");
+    let overview = overview.data.expect("overview data");
+    let rows = overview
+        .rows
+        .iter()
+        .map(|row| (row.name.as_str(), row.status, row.disabled_reason.is_some()))
+        .collect::<Vec<_>>();
+    assert_eq!(
+        rows,
+        [
+            ("Batch A", BatchExportStatus::OnStick, false),
+            ("Batch B", BatchExportStatus::OnStickChanged, false),
+            ("Batch C", BatchExportStatus::New, false),
+            ("Batch Empty", BatchExportStatus::New, true),
+        ]
+    );
+    let usb_label = usb.file_name().unwrap().to_string_lossy().to_string();
+    assert!(
+        overview.rows[0]
+            .last_exported_text
+            .ends_with(&format!(" · {usb_label}")),
+        "names the USB: {}",
+        overview.rows[0].last_exported_text
+    );
+    assert_eq!(overview.rows[2].last_exported_text, "Never");
+    assert!(
+        !overview.force_track_order_available,
+        "mirror, the default, writes the app's order anyway"
+    );
+    let additive = backend.set_export_sync_mode(SetExportSyncModeRequest {
+        prune_stale: false,
+        playlist_id: None,
+        sort: None,
+    });
+    assert!(additive.ok, "set sync mode failed: {additive:?}");
+    let overview = backend
+        .get_batch_export_overview(backend::models::GetBatchExportOverviewRequest {
+            usb_root: Some(usb.to_string_lossy().to_string()),
+        })
+        .data
+        .expect("overview data");
+    assert!(overview.force_track_order_available);
+
+    let space = backend
+        .get_playlists_export_space(backend::models::GetPlaylistsExportSpaceRequest {
+            playlist_ids: vec![ids["Batch B"].clone(), ids["Batch C"].clone()],
+            usb_root: usb.to_string_lossy().to_string(),
+        })
+        .data
+        .expect("space data")
+        .export_space
+        .expect("export space");
+    assert_eq!(
+        space.tracks_to_copy, 1,
+        "Three is in both, counted once; Two is on the stick"
+    );
+}

@@ -1,7 +1,7 @@
 import { createTrackListController } from "../shared/track_list_controller.mjs";
 import { narrowTrackSelectionToLoaded } from "../shared/track_selection.mjs";
 import { cloneTemplate } from "../../ui_utils.mjs";
-import { t } from "../../ui_texts.mjs";
+import { t, tCount } from "../../ui_texts.mjs";
 import { createDialogLifecycle } from "../shared/dialog_lifecycle.mjs";
 import { catchErr } from "../shared/track_actions.mjs";
 import { setActiveListItem } from "../shell/actions.mjs";
@@ -367,6 +367,10 @@ export function usbSelectionChanged(ctx) {
   usbContentChanged(ctx);
   applyPlaylistUsbExportStatus(ctx, []);
   hideUsbDiagnostics(ctx);
+  // The Export playlists page shows the newly selected USB, or nothing.
+  if (ctx.state.activeTab === "export-playlists") {
+    ctx.openExportPlaylistsPage().catch((err) => console.error(err));
+  }
 }
 
 // The folders picked in the system dialog; none when it's cancelled.
@@ -1015,48 +1019,45 @@ export async function setUsbBackgroundColor(ctx, color) {
   emitStatus(data.statusText);
 }
 
-// One export at a time: the button is disabled from the click on, not only
+// One export at a time: the buttons are disabled from the click on, not only
 // once the backend's job.started event arrives (the backend refuses a second
 // export too).
-export async function exportPlaylistToUsb(ctx, playlistId) {
+async function withExportStarting(ctx, run) {
   const { state } = ctx;
   if (state.exportStarting || isUsbRootChangeBlocked(state)) return;
   state.exportStarting = true;
   ctx.updatePlaylistExportButtons();
   try {
-    await runPlaylistExport(ctx, playlistId);
+    await run();
   } finally {
     state.exportStarting = false;
     ctx.updatePlaylistExportButtons();
   }
 }
 
-async function runPlaylistExport(ctx, playlistId) {
-  const { state, el, setProgress, stopProgressHeartbeat, emitStatus } = ctx;
-  const playlist = state.playlists.find((item) => item.id === playlistId);
-  if (!playlist) return;
-  // An active column sort becomes the exported order: the backend saves it
-  // first (unless the export can't change the order on the USB).
-  const sort = state.activeTab === playlistId ? ctx.tableSortState.playlistTracksBody : null;
+// What every export sends from Settings.
+function exportOptions(state) {
+  return {
+    includeArtwork: true,
+    includeAnalysis: true,
+    pruneStale: !!state.exportPruneStale,
+    backupBeforeExport: !!state.exportBackup
+  };
+}
 
-  emitStatus(t("ui-usb-export-running", { name: playlist.name }));
+// Runs an export command (`export_to_usb`, `export_playlists_to_usb`) with the
+// progress footer up. Its response, or null once its failure is shown; a
+// success's status line is shown, its playlists state is the caller's.
+async function runExportCommand(ctx, command, request, runningText) {
+  const { state, el, setProgress, stopProgressHeartbeat, emitStatus } = ctx;
+  emitStatus(runningText);
   el.donateBtn.classList.add("exporting");
   setProgress(true, 8, t("ui-usb-export-starting"));
   ctx.startProgressHeartbeat();
   await ctx.nextPaint();
   let data;
   try {
-    data = await ctx.command("export_to_usb", {
-      usbRoot: state.usbRoot,
-      playlistId: playlist.id,
-      options: {
-        includeArtwork: true,
-        includeAnalysis: true,
-        pruneStale: !!state.exportPruneStale,
-        backupBeforeExport: !!state.exportBackup
-      },
-      sort: sort?.key ? { sortBy: sort.key, sortDir: sort.dir || "asc" } : null
-    });
+    data = await ctx.command(command, request);
   } catch (error) {
     const msg = error.message.trim() || t("ui-usb-export-failed-unknown");
     emitStatus(error.details?.statusText || t("ui-usb-export-failed", { error: msg }));
@@ -1064,7 +1065,7 @@ async function runPlaylistExport(ctx, playlistId) {
     refreshExportStatusInBackground(ctx);
     // Reported: the backend already put the reason in the Event Log, so the
     // caller must not log it again.
-    return;
+    return null;
   } finally {
     if (!state.activeJobId) {
       setProgress(false, 0, t("ui-common-idle"));
@@ -1073,6 +1074,27 @@ async function runPlaylistExport(ctx, playlistId) {
   }
   clearUsbDiagnostics(ctx);
   emitStatus(data.statusText, { warningText: data.warningText });
+  return data;
+}
+
+export async function exportPlaylistToUsb(ctx, playlistId) {
+  await withExportStarting(ctx, () => runPlaylistExport(ctx, playlistId));
+}
+
+async function runPlaylistExport(ctx, playlistId) {
+  const { state } = ctx;
+  const playlist = state.playlists.find((item) => item.id === playlistId);
+  if (!playlist) return;
+  // An active column sort becomes the exported order: the backend saves it
+  // first (unless the export can't change the order on the USB).
+  const sort = state.activeTab === playlistId ? ctx.tableSortState.playlistTracksBody : null;
+  const data = await runExportCommand(ctx, "export_to_usb", {
+    usbRoot: state.usbRoot,
+    playlistId: playlist.id,
+    options: exportOptions(state),
+    sort: sort?.key ? { sortBy: sort.key, sortDir: sort.dir || "asc" } : null
+  }, t("ui-usb-export-running", { name: playlist.name }));
+  if (!data) return;
   // The sort is the playlist's order now (or, locked, stays only a view the
   // export didn't use): the page shows the order it exported.
   if (sort) ctx.clearPlaylistTrackSort();
@@ -1082,6 +1104,26 @@ async function runPlaylistExport(ctx, playlistId) {
   await ctx.switchView(playlistId);
 
   clearUsbPlaylistsView(ctx);
+}
+
+// The Export playlists page's export: the chosen playlists as one job. True
+// once it succeeded.
+export async function exportPlaylistsToUsb(ctx, { playlistIds, forcePlaylistOrder, forceTrackOrder }) {
+  let exported = false;
+  await withExportStarting(ctx, async () => {
+    const data = await runExportCommand(ctx, "export_playlists_to_usb", {
+      usbRoot: ctx.state.usbRoot,
+      playlistIds,
+      forcePlaylistOrder,
+      forceTrackOrder,
+      options: exportOptions(ctx.state)
+    }, tCount("ui-usb-export-playlists-running", playlistIds.length));
+    if (!data) return;
+    ctx.applyPlaylistsState(data);
+    clearUsbPlaylistsView(ctx);
+    exported = true;
+  });
+  return exported;
 }
 
 export function renderUsbPlaylists(ctx) {

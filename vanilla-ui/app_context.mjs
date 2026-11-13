@@ -3,6 +3,7 @@ import * as playback from "./components/playback/actions.mjs";
 import * as playlist from "./components/playlist/actions.mjs";
 import * as usb from "./components/usb/actions.mjs";
 import * as usbAudioFormats from "./components/usb/audio_formats.mjs";
+import * as exportPlaylists from "./components/usb/export_playlists.mjs";
 import * as eventLog from "./components/event-log/actions.mjs";
 import * as backupsUi from "./components/backups/actions.mjs";
 import * as library from "./components/library/actions.mjs";
@@ -31,6 +32,7 @@ function collectElements(document) {
       "usb-playlists": document.getElementById("panel-usb-playlists"),
       "usb-history": document.getElementById("panel-usb-history"),
       "usb-player-menu": document.getElementById("panel-usb-player-menu"),
+      "export-playlists": document.getElementById("panel-export-playlists"),
       "event-log": document.getElementById("panel-event-log"),
       backups: document.getElementById("panel-backups"),
       playlist: document.getElementById("panel-playlist"),
@@ -113,6 +115,8 @@ export function createAppContext(env) {
     initializeUsb pickUsbFolder hydrateUsbTrackMetadata loadUsbDevices
     pruneUsbDevice updateUsbRootText`);
   bindActions(usbAudioFormats, "applyUsbAudioFormats renderUsbAudioFormats");
+  bindActions(exportPlaylists, `openExportPlaylistsPage renderExportPlaylistsControls selectExportPlaylists
+    toggleExportPlaylist clickExportPlaylistRow runExportPlaylists`);
   bindActions(trackTable, "buildTrackTableRow renderEmptyTrackTable finishTrackRows");
   bindActions(trackDetail, "openTrackDetail");
   bindActions(trackColumns, "applyTrackColumns renderTrackColumnsButtons");

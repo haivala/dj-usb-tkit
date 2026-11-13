@@ -995,6 +995,14 @@ pub struct GetPlaylistExportSpaceRequest {
     pub usb_root: String,
 }
 
+/// The playlists chosen on the Export playlists page, against the connected USB.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct GetPlaylistsExportSpaceRequest {
+    pub playlist_ids: Vec<String>,
+    pub usb_root: String,
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct GetPlaylistExportSpaceData {
@@ -2501,6 +2509,94 @@ pub struct ExportToUsbData {
     /// empty without warnings (`utils::warning_text`).
     #[serde(default)]
     pub warning_text: String,
+}
+
+/// Export several playlists to the USB as one job (the Export playlists page).
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ExportPlaylistsToUsbRequest {
+    #[serde(default)]
+    pub usb_root: Option<String>,
+    /// The chosen playlists; exported in the app's order whatever order they come in.
+    pub playlist_ids: Vec<String>,
+    /// The chosen playlists go on top of the stick's list in the app's order. Only with
+    /// every exportable playlist chosen.
+    #[serde(default)]
+    pub force_playlist_order: bool,
+    /// The playlists' entries on the stick become the app's tracks in the app's order,
+    /// even in additive mode.
+    #[serde(default)]
+    pub force_track_order: bool,
+    #[serde(default)]
+    pub options: Option<ExportToUsbOptions>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ExportPlaylistsToUsbData {
+    pub usb_root: String,
+    pub exported_playlists: usize,
+    pub exported_tracks: usize,
+    pub skipped_tracks: usize,
+    /// The status line after the export.
+    pub status_text: String,
+    pub warnings: Vec<WarningEntry>,
+    /// The status line's link to the Event Log; empty without warnings.
+    #[serde(default)]
+    pub warning_text: String,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct GetBatchExportOverviewRequest {
+    #[serde(default)]
+    pub usb_root: Option<String>,
+}
+
+/// Whether the stick already has a playlist (by name), and whether it changed since.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub enum BatchExportStatus {
+    /// Not on the stick.
+    New,
+    /// On the stick, exported there last and unchanged since.
+    OnStick,
+    /// On the stick, but changed since (or last exported elsewhere).
+    OnStickChanged,
+}
+
+/// One playlist of the Export playlists page.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct BatchExportRow {
+    pub playlist_id: String,
+    pub name: String,
+    pub track_count: usize,
+    /// Its tracks' total length ("1:02:03"); empty when none has one.
+    pub duration_text: String,
+    /// Its tracks' audio size.
+    pub size_text: String,
+    /// What exporting it would copy to this USB ("12 tracks · 340 MB", "Nothing new").
+    pub copy_text: String,
+    /// When and to which USB it was last exported ("2026-04-07 13:00 · MY USB"), or "Never".
+    pub last_exported_text: String,
+    pub status: BatchExportStatus,
+    pub status_text: String,
+    /// Why it can't be exported now; `None` when it can.
+    #[serde(default)]
+    pub disabled_reason: Option<String>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct BatchExportOverviewData {
+    pub rows: Vec<BatchExportRow>,
+    /// The USB's name, for the page heading.
+    pub usb_name: String,
+    /// Forcing the track order means something only in additive mode (mirror rewrites it
+    /// anyway).
+    pub force_track_order_available: bool,
+    pub force_track_order_tooltip: String,
 }
 
 // --- USB Diagnostics ---

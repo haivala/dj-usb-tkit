@@ -1364,6 +1364,7 @@ impl BackendService {
                         manifest: &manifest,
                         mirror_playlist_entries: false,
                         identity: None,
+                        placement: PlaylistPlacement::MoveToFront,
                     }],
                 )?;
                 let identity = written.first().map(|w| {
@@ -1386,7 +1387,7 @@ impl BackendService {
                 row_id: None,
                 playlist_id,
                 sort_order,
-                move_to_front: true,
+                placement: PlaylistPlacement::MoveToFront,
             }],
             t19_property,
             false,

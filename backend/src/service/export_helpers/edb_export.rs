@@ -13,18 +13,28 @@ pub fn write_edb_playlist(
     mirror_playlist_entries: bool,
 ) -> BackendResult<WriteExportLibraryDbResult> {
     let mut session = UsbWriteSession::without_service(usb_root);
-    let result = write_edb_playlist_in(&mut session, playlist, manifest, mirror_playlist_entries)?;
+    let mut results = write_edb_playlists_in(
+        &mut session,
+        &[EdbPlaylistWrite {
+            playlist,
+            manifest,
+            mirror_playlist_entries,
+            identity: None,
+            placement: PlaylistPlacement::MoveToFront,
+        }],
+    )?;
     session.commit()?;
-    Ok(result)
+    results
+        .pop()
+        .ok_or_else(|| BackendError::Internal("eDB write produced no result".to_string()))
 }
 
-/// Writes `playlist` into the session's staged eDB.
-pub fn write_edb_playlist_in(
+/// Writes every one of `writes` into the session's staged eDB, in one
+/// transaction and in their order.
+pub fn write_edb_playlists_in(
     session: &mut UsbWriteSession<'_>,
-    playlist: &ExportPlaylistData,
-    manifest: &ExportManifest,
-    mirror_playlist_entries: bool,
-) -> BackendResult<WriteExportLibraryDbResult> {
+    writes: &[EdbPlaylistWrite<'_>],
+) -> BackendResult<Vec<WriteExportLibraryDbResult>> {
     if session.databases()?.edb().is_none() {
         return Err(BackendError::NotFound(tr::export_error_edb_missing(
             crate::service::usb_vendor_compat::vendor_edb_path(session.usb_root()).display(),
@@ -35,33 +45,13 @@ pub fn write_edb_playlist_in(
             "unable to open eDB in read-write mode".to_string(),
         ));
     };
-
-    write_edb_playlist_with_conn(conn, playlist, manifest, mirror_playlist_entries)
-}
-
-pub fn write_edb_playlist_with_conn(
-    conn: &mut rusqlite::Connection,
-    playlist: &ExportPlaylistData,
-    manifest: &ExportManifest,
-    mirror_playlist_entries: bool,
-) -> BackendResult<WriteExportLibraryDbResult> {
     let tx = conn.transaction()?;
-    let mut results = write_edb_playlists_in_tx(
-        &tx,
-        &[EdbPlaylistWrite {
-            playlist,
-            manifest,
-            mirror_playlist_entries,
-            identity: None,
-        }],
-    )?;
+    let results = write_edb_playlists_in_tx(&tx, writes)?;
     tx.commit()?;
     // Keep WAL mode after writes.
     let _ = conn.execute_batch("PRAGMA wal_checkpoint(TRUNCATE);");
     let _ = conn.execute_batch("PRAGMA journal_mode=WAL;");
-    results
-        .pop()
-        .ok_or_else(|| BackendError::Internal("eDB write produced no result".to_string()))
+    Ok(results)
 }
 
 /// One playlist for [`write_edb_playlists_in_tx`].
@@ -75,6 +65,8 @@ pub struct EdbPlaylistWrite<'a> {
     /// the PDB. Without one the row is found by name and moved first, as an
     /// export does.
     pub identity: Option<(i64, i64)>,
+    /// Where a row found by name goes in the playlist list.
+    pub placement: PlaylistPlacement,
 }
 
 /// Write every one of `writes` into the eDB inside `tx`: playlist rows,
@@ -101,6 +93,7 @@ pub fn write_edb_playlists_in_tx(
             manifest,
             mirror_playlist_entries,
             identity,
+            placement,
         } = *write;
         let export_date_added = normalize_export_date(Some(&manifest.generated_at))
             .unwrap_or_else(|| chrono::Utc::now().format("%Y-%m-%d").to_string());
@@ -108,7 +101,7 @@ pub fn write_edb_playlists_in_tx(
             Some((id, sequence_no)) => {
                 replace_export_playlist_row_with_identity(tx, playlist, id, sequence_no)?
             }
-            None => upsert_export_playlist_row(tx, playlist)?,
+            None => upsert_export_playlist_row_placed(tx, playlist, placement)?,
         };
         let sort_order = tx
             .query_row(

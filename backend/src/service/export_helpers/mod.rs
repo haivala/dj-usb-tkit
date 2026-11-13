@@ -22,7 +22,7 @@ pub use pdb_export::*;
 #[cfg(test)]
 use crate::edb::open_edb_rw;
 pub use crate::edb::{
-    ExportManifestTrack, ExportPlaylistData, ExportTrackData, content_file_name,
+    ExportManifestTrack, ExportPlaylistData, ExportTrackData, PlaylistPlacement, content_file_name,
     duration_ms_to_seconds, dynamic_insert, find_content_id_by_path, find_key_id_by_name,
     find_or_insert_album, find_or_insert_artist, find_or_insert_image,
     insert_content_from_template, link_playlist_content, load_table_columns,
@@ -30,7 +30,7 @@ pub use crate::edb::{
     populate_content_values_map, preferred_export_playlist_row_id,
     replace_export_playlist_row_with_identity, resolve_track_created_date_for_export,
     resolve_track_release_date_for_export, resolve_track_release_year_for_export, table_exists,
-    upsert_export_playlist_row,
+    upsert_export_playlist_row, upsert_export_playlist_row_placed,
 };
 pub(crate) use crate::metadata::sanitize_metadata;
 pub use crate::pdb_writer::T08EntryKey;
@@ -112,7 +112,7 @@ fn canonicalize_artwork_path_lookup(value: &str) -> String {
         .to_ascii_lowercase()
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Default)]
 pub struct ExportManifest {
     pub generated_at: String,
     pub playlist_id: String,

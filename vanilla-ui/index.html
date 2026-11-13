@@ -112,6 +112,12 @@
           </li>
           <!-- dynamic playlist items inserted here by JS -->
         </ul>
+        <div class="nav-playlist-export hidden" id="exportPlaylistsItem">
+          <button class="nav-item nav-add-playlist" data-view="export-playlists" id="exportPlaylistsBtn" data-text-tooltip="ui-sidebar-export-playlists-tooltip">
+            <span class="nav-icon">&#8613;</span>
+            <span class="nav-label" data-text="ui-sidebar-export-playlists"></span>
+          </button>
+        </div>
       </nav>
       <div class="nav-sidebar-footer">
         <button class="nav-sidebar-footer-link" id="websiteBtn">
@@ -421,6 +427,51 @@
         <div class="row panel-actions">
           <button id="analyzePlaylistMissingBtn" type="button" disabled data-text="ui-playlist-analyze-missing"></button>
           <button id="exportPlaylistBtn" class="primary-action" disabled data-text="ui-playlist-export"></button>
+        </div>
+      </section>
+
+      <!-- Export playlists: several app playlists to the USB as one export -->
+      <section class="panel" id="panel-export-playlists" role="tabpanel" aria-hidden="true">
+        <div class="panel-header">
+          <h2 id="exportPlaylistsTitle" data-text="ui-export-playlists-title"></h2>
+          <span class="muted panel-header-meta playlist-export-space hidden" id="exportPlaylistsSpace"></span>
+        </div>
+        <p class="muted hidden" id="exportPlaylistsEmpty" data-text="ui-export-playlists-empty"></p>
+        <div class="table-wrap export-playlists-wrap">
+          <div class="track-grid export-playlists-grid" role="table" data-text-aria-label="ui-export-playlists-table-aria-label">
+            <div class="track-grid-head" role="rowgroup">
+              <div class="track-grid-row" role="row">
+                <div class="track-grid-cell td-select" role="columnheader"><input type="checkbox" id="exportPlaylistsSelectAll" data-text-aria-label="ui-export-playlists-select-all" data-text-tooltip="ui-export-playlists-select-all" /></div>
+                <!-- The playlist column's heading is the "New and changed" quick choice, beside the select-all box. -->
+                <div class="track-grid-cell" role="columnheader"><button type="button" class="export-playlists-head-btn" id="exportPlaylistsSelectChangedBtn" data-text="ui-export-playlists-select-changed" data-text-tooltip="ui-export-playlists-select-changed-tooltip"></button></div>
+                <div class="track-grid-cell export-playlists-num" role="columnheader" data-text="ui-export-playlists-col-tracks"></div>
+                <div class="track-grid-cell export-playlists-num" role="columnheader" data-text="ui-track-table-length"></div>
+                <div class="track-grid-cell export-playlists-num" role="columnheader" data-text="ui-export-playlists-col-size"></div>
+                <div class="track-grid-cell" role="columnheader" data-text="ui-export-playlists-col-copy"></div>
+                <div class="track-grid-cell" role="columnheader" data-text="ui-export-playlists-col-status"></div>
+                <div class="track-grid-cell" role="columnheader" data-text="ui-export-playlists-col-last-exported"></div>
+              </div>
+            </div>
+            <div class="track-grid-body export-playlists-body" id="exportPlaylistsList" role="rowgroup"></div>
+          </div>
+        </div>
+        <div class="playlist-footer">
+          <p class="muted export-playlists-count" id="exportPlaylistsCount"></p>
+        </div>
+        <div class="export-playlists-options">
+          <label class="usb-cfg-toggle-row" for="exportPlaylistsForceOrder">
+            <input type="checkbox" id="exportPlaylistsForceOrder" />
+            <span data-text="ui-export-playlists-force-order"></span>
+            <span class="muted usb-cfg-toggle-hint" id="exportPlaylistsForceOrderHint"></span>
+          </label>
+          <label class="usb-cfg-toggle-row" for="exportPlaylistsForceTrackOrder" id="exportPlaylistsForceTrackOrderRow">
+            <input type="checkbox" id="exportPlaylistsForceTrackOrder" />
+            <span data-text="ui-export-playlists-force-track-order"></span>
+          </label>
+        </div>
+        <p class="export-playlists-warning hidden" id="exportPlaylistsWarning" data-text="ui-export-playlists-all-warning"></p>
+        <div class="row panel-actions">
+          <button id="exportPlaylistsRunBtn" class="primary-action" disabled></button>
         </div>
       </section>
 
@@ -1020,6 +1071,18 @@
   <template id="tplMutedListItem"><li class="muted"></li></template>
   <template id="tplUsbPlaylistItem">
     <li><button><span class="drag-handle" data-usb-drag-handle draggable="true" data-text-tooltip="ui-common-drag-to-reorder" data-text-aria-label="ui-common-drag-to-reorder">&#10495;</span><span class="playlist-label"></span><span class="playlist-order-edited hidden" data-text-tooltip="ui-usb-playlists-order-edited" data-text-aria-label="ui-usb-playlists-order-edited">&#9679;</span><span class="playlist-remove" data-text-tooltip="ui-common-remove" data-text-aria-label="ui-common-remove">&times;</span></button></li>
+  </template>
+  <template id="tplExportPlaylistsRow">
+    <div class="track-grid-row export-playlists-row" role="row">
+      <div class="track-grid-cell td-select" role="cell"><input type="checkbox" class="export-playlists-check"></div>
+      <div class="track-grid-cell export-playlists-name" role="cell"></div>
+      <div class="track-grid-cell export-playlists-num export-playlists-tracks" role="cell"></div>
+      <div class="track-grid-cell export-playlists-num export-playlists-length" role="cell"></div>
+      <div class="track-grid-cell export-playlists-num export-playlists-size" role="cell"></div>
+      <div class="track-grid-cell export-playlists-copy" role="cell"></div>
+      <div class="track-grid-cell export-playlists-status" role="cell"></div>
+      <div class="track-grid-cell export-playlists-last" role="cell"></div>
+    </div>
   </template>
   <template id="tplHistoryItem"><li><button><span class="playlist-label"></span><span class="history-date muted"></span></button></li></template>
   <template id="tplUsbAudioFormatChip">

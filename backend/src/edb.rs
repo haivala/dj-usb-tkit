@@ -1111,14 +1111,50 @@ fn sanitized_optional_nonempty_metadata_text(value: Option<&str>) -> Option<Stri
         .filter(|value| !value.is_empty())
 }
 
+/// Where an exported playlist goes in the stick's playlist list.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum PlaylistPlacement {
+    /// First, whether it is new or already on the stick (what an export does).
+    MoveToFront,
+    /// A playlist already on the stick keeps its place; a new one goes first.
+    KeepExisting,
+    /// Left where it is: an existing row keeps its place, a new one goes
+    /// where its given sort order puts it (the repair, which rebuilds rows).
+    AsGiven,
+}
+
+impl PlaylistPlacement {
+    /// Whether the playlist is moved first, given whether it was on the stick.
+    pub fn moves_to_front(self, existed: bool) -> bool {
+        match self {
+            Self::MoveToFront => true,
+            Self::KeepExisting => !existed,
+            Self::AsGiven => false,
+        }
+    }
+}
+
+/// [`upsert_export_playlist_row_placed`], moved first.
 pub fn upsert_export_playlist_row(
     conn: &rusqlite::Connection,
     playlist: &ExportPlaylistData,
 ) -> BackendResult<i64> {
+    upsert_export_playlist_row_placed(conn, playlist, PlaylistPlacement::MoveToFront)
+}
+
+/// The eDB playlist row `playlist` is exported into: the same-named one, or a
+/// new one, placed by `placement`.
+pub fn upsert_export_playlist_row_placed(
+    conn: &rusqlite::Connection,
+    playlist: &ExportPlaylistData,
+    placement: PlaylistPlacement,
+) -> BackendResult<i64> {
     let columns = load_table_columns(conn, "playlist")?;
     let playlist_name = sanitized_metadata_text(&playlist.name);
     if let Some(id) = preferred_export_playlist_row_id(conn, &playlist_name)? {
-        move_export_playlist_row_to_front(conn, id, &columns)?;
+        if placement.moves_to_front(true) {
+            move_export_playlist_row_to_front(conn, id, &columns)?;
+        }
         return Ok(id);
     }
 

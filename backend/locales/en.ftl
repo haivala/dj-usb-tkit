@@ -1320,6 +1320,7 @@ job-remove-usb-playlist-completed = USB: Playlist removal complete
 job-commit-usb-order-edit-started = USB: Saving the new order
 job-commit-usb-order-edit-completed = USB: Order saved
 job-export-to-usb-started = USB: Exporting playlist
+job-export-playlists-to-usb-started = USB: Exporting playlists
 job-export-to-usb-completed = USB: Export complete
 job-run-usb-diagnostics-started = USB: Running diagnostics
 job-run-usb-diagnostics-completed = USB: Diagnostics complete
@@ -1578,6 +1579,46 @@ export-complete = Export complete: { $playlist } - { $count ->
 }, { $skipped } skipped [sync: { $mode }]
 export-sync-mirror = mirror
 export-sync-additive = additive
+# The status line after the Export playlists page's export. $playlists: the playlists
+# exported. $count: their tracks. $skipped: the tracks left out. $mode: export-sync-*.
+batch-export-complete = Export complete: { $playlists ->
+    [one] { $playlists } playlist
+   *[other] { $playlists } playlists
+} - { $count ->
+    [one] { $count } track
+   *[other] { $count } tracks
+}, { $skipped } skipped [sync: { $mode }]
+# Why the Export playlists page's export was refused.
+batch-export-error-none-selected = Choose at least one playlist to export.
+# $playlist: its name. $reason: one of the batch-export-reason-* texts.
+batch-export-error-not-exportable = { $playlist } can't be exported: { $reason }
+batch-export-error-order-needs-all = Keeping the app's playlist order needs every playlist chosen.
+# Why a playlist on the Export playlists page can't be chosen.
+batch-export-reason-empty = no tracks
+batch-export-reason-none-playable = none of its tracks are in a format the players play
+batch-export-reason-source-missing = its music folder isn't connected
+batch-export-reason-not-analyzed = some tracks aren't analyzed yet
+batch-export-reason-formats = some tracks are in formats this USB doesn't allow
+# What exporting a playlist on the Export playlists page would copy. $count: its tracks the
+# USB lacks. $size: their size.
+batch-export-copy = { $count ->
+    [one] { $count } track · { $size }
+   *[other] { $count } tracks · { $size }
+}
+batch-export-copy-none = Nothing new
+# A playlist never exported, in the page's Last exported column.
+batch-export-never = Never
+# When and where a playlist was last exported, in that column. $date: when. $drive: the
+# USB's name.
+batch-export-last-exported = { $date } · { $drive }
+batch-export-last-exported-no-drive = { $date }
+# A playlist's status on the Export playlists page.
+batch-export-status-new = Not on USB yet
+batch-export-status-on-stick = On USB, up to date
+batch-export-status-changed = On USB, changed since
+# The "Use the app's track order" tick's tooltip, in additive and in mirror mode.
+batch-export-force-track-order-tooltip = Playlists already on the USB get the app's tracks in the app's order. Tracks only on the USB leave those playlists; their files stay. Without this, new tracks go at the end and the rest keep their order.
+batch-export-force-track-order-mirror-tooltip = Mirror export always writes the app's track order.
 # Status lines when an export is refused. The ones without an export-error-* key below
 # (no space, the manifest checks) are also the error the Event Log shows.
 # $required, $available: sizes, such as 1.2 GB.
@@ -1609,6 +1650,9 @@ export-progress-writing-engine-dj-library = USB: Writing Engine DJ library
 export-progress-waiting-for-writes = USB: Waiting for files to finish writing
 # $current: tracks done. $total: tracks in all. $file: the track's file name. Here and below.
 export-progress-copying = USB: Copying track { $current }/{ $total }: { $file }
+# export-progress-copying ($step) while several playlists are exported. $index/$count:
+# which playlist. $playlist: its name.
+export-progress-batch-playlist = { $step } (playlist { $index }/{ $count }: { $playlist })
 # Lossless tracks converted for this USB's formats.
 export-progress-converting = USB: Converting track { $current }/{ $total }: { $file }
 
@@ -2311,6 +2355,39 @@ ui-event-log-empty = No events
 # The status line when the log file can't be opened. $error: the error's message.
 ui-event-log-open-file-failed = Could not open the log file: { $error }
 
+## ui-export-playlists
+
+# The Export playlists page: several playlists to the USB as one export.
+ui-export-playlists-title = Export playlists to USB
+# The title with the USB's name. $name: the USB's name.
+ui-export-playlists-title-usb = Export playlists to { $name }
+ui-export-playlists-select-all = Select all playlists
+ui-export-playlists-select-changed = New and changed
+ui-export-playlists-select-changed-tooltip = Select only the playlists the USB doesn't have yet or that changed since their last export
+ui-export-playlists-table-aria-label = Playlists to export
+# The table's column headings.
+ui-export-playlists-col-tracks = Tracks
+ui-export-playlists-col-size = Size
+ui-export-playlists-col-copy = To copy
+ui-export-playlists-col-status = USB status
+ui-export-playlists-col-last-exported = Last exported
+ui-export-playlists-empty = No playlists to export. Connect a USB and make a playlist first.
+# How many are chosen. $count: the chosen playlists. $total: those that can be chosen.
+ui-export-playlists-count = { $count } of { $total } selected
+ui-export-playlists-force-order = Use the app's playlist order
+# Beside the playlist-order tick: why it's off, and what it does.
+ui-export-playlists-force-order-needs-all = Select all playlists to use it
+ui-export-playlists-force-order-hint = The playlists go on top of the USB's list in this order. Without it, playlists already on the USB keep their place and new ones go on top.
+ui-export-playlists-force-track-order = Use the app's track order in playlists already on the USB
+ui-export-playlists-all-warning = Exporting every playlist can take a long time.
+# The export button. $count: the chosen playlists.
+ui-export-playlists-run = { $count ->
+    [one] Export { $count } playlist
+   *[other] Export { $count } playlists
+}
+# The status line when the page can't be loaded. $error: why.
+ui-export-playlists-load-failed = Could not load the playlists to export: { $error }
+
 ## ui-group-edit
 
 ui-group-edit-apply = Apply
@@ -2664,6 +2741,8 @@ ui-sidebar-add-playlist = New
 ui-sidebar-collapse = Collapse sidebar
 ui-sidebar-donate = Donate
 ui-sidebar-donate-tooltip = Please consider donating
+ui-sidebar-export-playlists = Export playlists…
+ui-sidebar-export-playlists-tooltip = Export several playlists to the USB at once
 ui-sidebar-expand = Expand sidebar
 ui-sidebar-history = History
 ui-sidebar-import-playlist-aria-label = Import playlists
@@ -2885,6 +2964,11 @@ ui-usb-diagnostics-running = Running USB diagnostics...
 # The status line while a playlist is exported.
 # $name: the playlist's name.
 ui-usb-export-running = Exporting { $name } to USB...
+# The status line while the Export playlists page exports. $count: the playlists.
+ui-usb-export-playlists-running = { $count ->
+    [one] Exporting { $count } playlist to USB...
+   *[other] Exporting { $count } playlists to USB...
+}
 ui-usb-export-starting = Starting USB export...
 # The status line when an export fails and the backend sent no status line of its own.
 # $error: why it failed, or ui-usb-export-failed-unknown when nothing says.

@@ -451,6 +451,36 @@ pub(super) fn write_pdb_fresh_with_overrides(
     override_sort_order: Option<u32>,
     session: Option<&mut UsbWriteSession<'_>>,
 ) -> BackendResult<WriteExportPdbResult> {
+    write_pdb_playlists(
+        usb_root,
+        &[PdbPlaylistWrite {
+            playlist,
+            manifest,
+            mirror_playlist_entries,
+            row_id: None,
+            playlist_id: override_playlist_id,
+            sort_order: override_sort_order,
+            placement: PlaylistPlacement::MoveToFront,
+        }],
+        session,
+    )
+}
+
+/// Writes every one of `writes` into the session's staged PDB, in their
+/// order, written back to the USB at once.
+pub(crate) fn write_pdb_playlists_in(
+    session: &mut UsbWriteSession<'_>,
+    writes: &[PdbPlaylistWrite<'_>],
+) -> BackendResult<WriteExportPdbResult> {
+    let usb_root = session.usb_root().to_path_buf();
+    write_pdb_playlists(&usb_root, writes, Some(session))
+}
+
+fn write_pdb_playlists(
+    usb_root: &Path,
+    writes: &[PdbPlaylistWrite<'_>],
+    session: Option<&mut UsbWriteSession<'_>>,
+) -> BackendResult<WriteExportPdbResult> {
     if std::env::var("PDB_WRITE_MODE")
         .ok()
         .map(|v| v.eq_ignore_ascii_case("skip"))
@@ -465,15 +495,7 @@ pub(super) fn write_pdb_fresh_with_overrides(
     }
     let build = build_pdb_for_playlists(
         usb_root,
-        &[PdbPlaylistWrite {
-            playlist,
-            manifest,
-            mirror_playlist_entries,
-            row_id: None,
-            playlist_id: override_playlist_id,
-            sort_order: override_sort_order,
-            move_to_front: true,
-        }],
+        writes,
         // The eDB export runs first, so this is the property it just wrote.
         edb_t19_property(usb_root),
         false,
@@ -503,9 +525,9 @@ pub(crate) struct PdbPlaylistWrite<'a> {
     pub playlist_id: Option<u32>,
     /// Sort order for a new playlist row.
     pub sort_order: Option<u32>,
-    /// Show the playlist first, as an export does. The repair keeps every
-    /// playlist's order.
-    pub move_to_front: bool,
+    /// Where the playlist goes in the playlist list: first, as an export
+    /// does by default; the repair keeps every playlist's order.
+    pub placement: PlaylistPlacement,
 }
 
 /// A PDB [`build_pdb_for_playlists`] built in memory, not yet written.
@@ -915,7 +937,7 @@ pub(crate) fn build_pdb_for_playlists(
             row_id,
             playlist_id: override_playlist_id,
             sort_order: override_sort_order,
-            move_to_front,
+            placement,
         } = *write;
         let export_date_added = normalize_export_date(Some(&manifest.generated_at))
             .unwrap_or_else(|| chrono::Utc::now().format("%Y-%m-%d").to_string());
@@ -981,7 +1003,7 @@ pub(crate) fn build_pdb_for_playlists(
             next_sort_order = next_sort_order.max(so + 1);
             id
         };
-        if move_to_front {
+        if placement.moves_to_front(existing_playlist_pdb_id.is_some()) {
             move_playlist_tree_row_to_front(&mut all_playlist_tree, playlist_pdb_id);
         }
         written_playlist_ids.insert(playlist_pdb_id);

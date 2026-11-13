@@ -39,6 +39,14 @@
 
 ## Unreleased
 
+- **New feature:** Export several playlists at once: Export playlists… under the playlists in the sidebar (while a
+  USB is connected) opens a page listing every playlist in the app's order, with its tracks, length and
+  size, what exporting it would copy, when and to which USB it was last exported, and whether the USB already has it or it changed
+  since. All of them are chosen to start with; the page shows what the choice
+  copies against the free space, and the export runs as one job with one backup. With every playlist chosen, the
+  playlists can go on the USB in the app's order; in additive mode, playlists already on the USB can also take the
+  app's track order. Without these, playlists already on the USB keep their place and their order, new playlists go
+  on top and new tracks at the end.
 - **Chore:** The backend tests for playlists, library sources and browsing, rekordbox and Mixxx imports, track
   identity, playback sources and settings now run through the same commands the app calls, instead of inside the
   backend. Setup helpers the functional tests had copied file to file are shared, and unit tests that only repeated
