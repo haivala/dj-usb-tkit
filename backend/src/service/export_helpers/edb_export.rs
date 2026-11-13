@@ -269,15 +269,9 @@ pub fn write_edb_playlists_in_tx(
     let Some(manifest) = writes.first().map(|w| w.manifest) else {
         return Ok(results);
     };
-    // Keep property summary in sync with actual content cardinality.
+    sync_property_content_count(tx)?;
     if table_exists(tx, "property") {
         let property_columns = load_table_columns_tx(tx, "property")?;
-        if property_columns.contains("numberOfContents") {
-            tx.execute(
-                "UPDATE property SET numberOfContents = (SELECT COUNT(1) FROM content)",
-                [],
-            )?;
-        }
         // rekordbox shows the drive under this name. Without a name of
         // this drive's own (none set, or one carried over from another
         // drive) whatever is there stays, e.g. a name set in rekordbox.
@@ -291,6 +285,22 @@ pub fn write_edb_playlists_in_tx(
     }
 
     Ok(results)
+}
+
+/// Sets the `property` row's `numberOfContents` to the eDB's `content` row
+/// count, after any write that adds or removes tracks.
+pub(crate) fn sync_property_content_count(conn: &rusqlite::Connection) -> BackendResult<()> {
+    if table_exists(conn, "property")
+        && load_table_columns(conn, "property")?
+            .iter()
+            .any(|c| c == "numberOfContents")
+    {
+        conn.execute(
+            "UPDATE property SET numberOfContents = (SELECT COUNT(1) FROM content)",
+            [],
+        )?;
+    }
+    Ok(())
 }
 
 pub fn load_table_columns_tx(

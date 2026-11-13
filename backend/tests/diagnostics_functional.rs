@@ -2042,6 +2042,74 @@ fn strict_repair_rebuilds_a_missing_pdb_from_the_edb() {
     assert_strict_repair_rebuilds_missing("export.pdb", "rebuilt the missing PDB from the eDB");
 }
 
+/// A PDB rebuilt from an eDB whose dates are the 1970-01-01 placeholder,
+/// on a stick where one track's audio is gone: the one pass that rebuilds
+/// the PDB and drops the missing track leaves nothing for a second pass.
+/// Both databases get the same date added, the PDB's tt=19 page follows the
+/// track count after the removal, and so does the eDB's `numberOfContents`.
+#[test]
+fn strict_repair_rebuilds_a_missing_pdb_in_one_pass_with_placeholder_dates_and_missing_audio() {
+    let (_root, backend, usb, _target, _control) = setup_two_playlist_strict_parity_fixture();
+    use_real_usb_bundles(&usb);
+    let edb_path = vendor_db_dir(&usb).join("exportLibrary.db");
+    let conn = open_edb(&edb_path);
+    conn.execute("UPDATE content SET dateAdded = '1970-01-01'", [])
+        .expect("write placeholder dates");
+    let gone: String = conn
+        .query_row(
+            "SELECT path FROM content ORDER BY content_id LIMIT 1",
+            [],
+            |row| row.get(0),
+        )
+        .expect("a track path");
+    drop(conn);
+    fs::remove_file(usb.join(gone.trim_start_matches('/'))).expect("delete one track's audio");
+    fs::remove_file(vendor_db_dir(&usb).join("export.pdb")).expect("delete the PDB");
+
+    let preview = preview_repair(&backend, &usb);
+    let repair = backend.repair_usb_diagnostics(RepairUsbDiagnosticsRequest {
+        usb_root: Some(usb.to_string_lossy().to_string()),
+        apply: true,
+        selected_fix_ids: preview
+            .proposed_fixes
+            .iter()
+            .map(|fix| fix.id.clone())
+            .collect(),
+    });
+    assert!(repair.ok, "repair failed: {repair:?}");
+    let data = repair.data.expect("repair data").data;
+    assert!(data.failed_fixes.is_empty(), "{data:?}");
+    assert!(
+        data.applied_fixes
+            .iter()
+            .any(|line| line.contains("rebuilt the missing PDB from the eDB")),
+        "{data:?}"
+    );
+
+    let after = preview_repair(&backend, &usb);
+    assert!(
+        after.proposed_fixes.is_empty(),
+        "one pass should leave nothing to fix: {:?}",
+        after.proposed_fixes
+    );
+
+    let parsed = parse_pdb(&vendor_db_dir(&usb).join("export.pdb")).expect("parse PDB");
+    assert_eq!(parsed.tracks.len(), 1, "the missing track is removed");
+    let conn = open_edb(&edb_path);
+    let (count, number_of_contents, date_added): (i64, i64, String) = conn
+        .query_row(
+            "SELECT (SELECT COUNT(*) FROM content), \
+             (SELECT numberOfContents FROM property), \
+             (SELECT dateAdded FROM content)",
+            [],
+            |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?)),
+        )
+        .expect("eDB counts and date");
+    assert_eq!((count, number_of_contents), (1, 1));
+    assert!(!date_added.starts_with("1970"), "{date_added}");
+    assert_eq!(parsed.tracks[0].date_added.as_deref(), Some(date_added.as_str()));
+}
+
 #[test]
 fn strict_repair_rebuilds_a_missing_edb_from_the_pdb() {
     assert_strict_repair_rebuilds_missing(

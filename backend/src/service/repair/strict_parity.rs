@@ -323,10 +323,12 @@ fn merged_number(edb: Option<i64>, pdb: Option<i64>) -> Option<i64> {
 
 /// One track as the repair hands it to the writers: per field, a non-empty
 /// eDB value wins, else the PDB's. A side without a value never blanks the
-/// other. Nothing is derived, except the creation date of a track whose eDB
-/// row has none (the audio file's date on the USB, else its PDB date
-/// added). A 1970-01-01 placeholder date on either side counts as none
-/// ([`is_placeholder_date`]).
+/// other. Nothing is derived, except two dates: the date added of a track
+/// neither side has one for (today, the date the PDB writer would give a new
+/// row; carried on the track so both writers store the same date in one
+/// pass), and the creation date of a track whose eDB row has none (the audio
+/// file's date on the USB, else its date added). A 1970-01-01 placeholder
+/// date on either side counts as none ([`is_placeholder_date`]).
 pub(super) fn merged_manifest_track(
     usb_root: &std::path::Path,
     edb: Option<&EdbContentFields>,
@@ -352,7 +354,8 @@ pub(super) fn merged_manifest_track(
     let date_added = merged_text(
         e(|r| r.date_added.as_deref()),
         p_text(|t| t.date_added.as_deref()).filter(|d| !is_placeholder_date(d)),
-    );
+    )
+    .or_else(|| Some(chrono::Utc::now().format("%Y-%m-%d").to_string()));
     let date_created = match edb.and_then(|row| row.date_created.clone()) {
         Some(date) => Some(date),
         None => {

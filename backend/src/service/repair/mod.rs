@@ -40,7 +40,8 @@ use super::export_helpers::{
     EdbPlaylistWrite, ExportManifest, ExportManifestTrack, ExportPlaylistData, PdbLayoutProfile,
     PdbPlaylistWrite, PdbTrackRemoval, PdbTrackRowData, PlaylistPlacement, build_pdb_for_playlists,
     encode_album_row, encode_artist_row, load_table_columns, remove_tracks_from_pdb,
-    t19_property_from_conn, table_exists, usb_relative_path, write_edb_playlists_in_tx,
+    sync_property_content_count, t19_property_from_conn, table_exists, usb_relative_path,
+    write_edb_playlists_in_tx,
 };
 use super::track_matching::{
     ContentFingerprint, content_fingerprint_key, matching_file_name, pdb_track_fingerprint,

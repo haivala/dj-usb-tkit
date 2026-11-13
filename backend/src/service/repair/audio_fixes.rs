@@ -1429,6 +1429,7 @@ impl BackendService {
 
         let mut removed_db_content = 0usize;
         let mut removed_db_playlist_links = 0usize;
+        let mut t19_property = None;
         let missing_keys = missing_paths
             .iter()
             .map(|p| audio_path_key(p))
@@ -1489,6 +1490,10 @@ impl BackendService {
                     );
                 }
             }
+            if removed_db_content > 0 {
+                sync_property_content_count(&tx)?;
+            }
+            t19_property = t19_property_from_conn(&tx);
             tx.commit()?;
             let _ = conn.execute_batch("PRAGMA wal_checkpoint(TRUNCATE);");
             let _ = conn.execute_batch("PRAGMA journal_mode=WAL;");
@@ -1515,6 +1520,15 @@ impl BackendService {
                 err = err.english()
             ))
         })?;
+        // Fewer tracks: tt=19 follows the new count in this same pass, as an
+        // export's write does (a no-op on a page rekordbox or a player wrote).
+        if removed_pdb.track_rows > 0 {
+            let pdb_path = usb_staging::required_pdb(usb_root)?;
+            let mut bytes = std::fs::read(&pdb_path)?;
+            if apply_pdb_t19_template_state_repair(&mut bytes, t19_property.as_ref())? {
+                std::fs::write(&pdb_path, &bytes)?;
+            }
+        }
 
         Ok((removed_db_content, removed_db_playlist_links, removed_pdb))
     }

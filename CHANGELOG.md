@@ -51,6 +51,10 @@
   on top and new tracks at the end.
 - **Improvement:** Import and New in the sidebar now stay in place above the playlist list instead of scrolling away
   with it.
+- **Fix:** Rebuilding a missing PDB from the eDB, with the USB's other fixes, now finishes in one repair. A track with
+  no date added gets the same date in both databases instead of only in the PDB, and removing tracks whose audio
+  file is gone also updates the track count older players read from the PDB and the eDB's own track count, so the
+  next scan no longer offers more fixes.
 - **Chore:** The backend tests for playlists, library sources and browsing, rekordbox and Mixxx imports, track
   identity, playback sources and settings now run through the same commands the app calls, instead of inside the
   backend. Setup helpers the functional tests had copied file to file are shared, and unit tests that only repeated
