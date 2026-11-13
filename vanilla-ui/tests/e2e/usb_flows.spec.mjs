@@ -1058,7 +1058,10 @@ test("repair preview", async ({ page }) => {
     node.open = true;
   });
   await page.locator("#reDiagnoseBtn").click();
+  // Collapsed (as on a passing USB): a preview with fixes opens it.
+  await usbHealthCard.evaluate((node) => { node.open = false; });
   await page.locator("#previewRepairsBtn").click();
+  await expect(usbHealthCard).toHaveAttribute("open");
 
   // Plain-language headline and rows first; the fix list is collapsed under
   // Technical details.

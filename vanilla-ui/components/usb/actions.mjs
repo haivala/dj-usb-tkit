@@ -298,6 +298,9 @@ export function renderRepairPreview(ctx, data) {
   showDiagRepairView(ctx);
   el.applyRepairsBtn.disabled = state.selectedRepairFixIds.size === 0;
   if (data.nothingToFix) el.previewRepairsBtn.disabled = true;
+  // A passing USB keeps Health & Diagnostics collapsed; open it when the
+  // preview has fixes to show.
+  else el.usbHealthCard.open = true;
 }
 export function loadUsbRootFromStorage(ctx) {
   const { state, el, localStorage } = ctx;
