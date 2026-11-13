@@ -264,12 +264,23 @@ export async function commitActivePlaylistSort(ctx, playlistId) {
   }));
 }
 
+// While an export or another USB job runs, the progress footer covers the
+// pages' export buttons (disabled then anyway): they're hidden, keeping their
+// space.
+export function setExportButtonsCovered(el, covered) {
+  for (const button of [el.exportPlaylistBtn, el.exportPlaylistsRunBtn]) {
+    button.classList.toggle("is-covered", covered);
+  }
+}
+
 export function updatePlaylistExportButtons(ctx) {
   const { state, el } = ctx;
   const current = getCurrentPlaylist(ctx);
   const status = state.playlistUsbExportStatusById.get(current?.id);
 
-  el.exportPlaylistBtn.disabled = isUsbRootChangeBlocked(state) || !!state.exportStarting;
+  const busy = isUsbRootChangeBlocked(state) || !!state.exportStarting;
+  el.exportPlaylistBtn.disabled = busy;
+  setExportButtonsCovered(el, busy);
   if (status) {
     el.exportPlaylistBtn.textContent = status.exportButtonText;
     el.exportPlaylistBtn.dataset.tooltip = status.exportButtonTitle;

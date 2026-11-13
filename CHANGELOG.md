@@ -39,6 +39,8 @@
 
 ## Unreleased
 
+**Severity:** feature
+
 - **New feature:** Export several playlists at once: Export playlists… under the playlists in the sidebar (while a
   USB is connected) opens a page listing every playlist in the app's order, with its tracks, length and
   size, what exporting it would copy, when and to which USB it was last exported, and whether the USB already has it or it changed

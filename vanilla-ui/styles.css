@@ -1816,6 +1816,13 @@ button.primary-action:hover {
   flex-wrap: wrap;
 }
 
+/* An export button while an export or another USB job runs: the progress
+   footer lies over it. Not drawn, but keeping its space, so the table above
+   stays where it is. */
+.panel-actions .is-covered {
+  visibility: hidden;
+}
+
 .action-buttons {
   display: inline-flex;
   gap: 6px;
@@ -3363,14 +3370,6 @@ ul[data-loaded]:empty::before {
   border-top: 1px solid var(--line);
   box-shadow: 3px -3px 12px var(--accent-glow);
   padding: 10px 20px 12px;
-  /* Tall enough to cover a page's bottom action button (the export button
-     under a playlist), which is disabled while the job runs anyway. The
-     content is centred in it, with the track a little thicker, so the extra
-     height doesn't show as a gap above the text. */
-  min-height: 72px;
-  display: flex;
-  flex-direction: column;
-  justify-content: center;
   opacity: 0;
   transform: translateY(8px);
   pointer-events: none;
@@ -3502,7 +3501,7 @@ body.sidebar-collapsed .progress-footer {
 }
 
 .progress-track {
-  height: 8px;
+  height: 6px;
   border-radius: 999px;
   overflow: hidden;
   background: var(--bg);

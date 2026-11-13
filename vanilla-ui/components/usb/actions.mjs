@@ -5,6 +5,7 @@ import { t, tCount } from "../../ui_texts.mjs";
 import { createDialogLifecycle } from "../shared/dialog_lifecycle.mjs";
 import { catchErr } from "../shared/track_actions.mjs";
 import { setActiveListItem } from "../shell/actions.mjs";
+import { setExportButtonsCovered } from "../playlist/actions.mjs";
 import { STORAGE_KEY_USB_ROOT, STORAGE_KEY_EXPORT_ENGINE_LIBRARY } from "../../settings_keys.mjs";
 import {
   applyUsbOrderEdit, applyUsbOrderSortClick, forgetUsbOrderSort, isUsbOrderEditing,
@@ -33,6 +34,7 @@ export function setUsbRootControlsLocked(ctx, locked) {
   renderUsbOrderEditControls(ctx);
   if (locked) {
     el.exportPlaylistBtn.disabled = true;
+    setExportButtonsCovered(el, true);
   } else {
     // Don't just flip disabled=false here -- the export button's disabled
     // state is normally owned by playlist/usbRootValid logic (see below),
