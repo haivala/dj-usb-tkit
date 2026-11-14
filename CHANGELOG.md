@@ -39,6 +39,8 @@
 
 ## Unreleased
 
+## 0.6.1
+
 **Severity:** feature
 
 - **New feature:** Export several playlists at once: Export playlists… under the playlists in the sidebar (while a
