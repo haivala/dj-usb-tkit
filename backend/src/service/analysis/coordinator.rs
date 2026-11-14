@@ -19,12 +19,10 @@ use uuid::Uuid;
 
 use super::{
     AnalyzeTrackProgress, BpmDetectionParams, LibraryDurationContext, TRACK_ANALYSIS_UPDATE_SQL,
-    analysis_capacity, analysis_debug_workers_enabled,
-    analyze_track_with_usb_fallback_with_updates, build_done_progress_error,
+    analysis_capacity, analyze_track_with_usb_fallback_with_updates, build_done_progress_error,
     build_done_progress_success, build_partial_progress, build_started_progress,
     collect_tracks_for_analysis, elapsed_ms_since, has_memory_headroom_for_engine,
     incomplete_analysis_reason, resolve_analysis_bpm_range, resolve_analysis_engine,
-    resolve_worker_cap_for_engine,
 };
 use crate::error::{BackendError, BackendResult};
 use crate::i18n::{Text, tr};
@@ -413,16 +411,6 @@ impl Coordinator {
             return *budget;
         }
         let budget = analysis_capacity(engine);
-        if analysis_debug_workers_enabled() {
-            let cap = resolve_worker_cap_for_engine(engine);
-            logging::debug(
-                "analysis",
-                format!(
-                    "debug workers budget={budget} memory_cap={:?} env_cap={:?}",
-                    cap.memory_cap, cap.env_cap
-                ),
-            );
-        }
         self.budgets.push((engine, budget));
         budget
     }
@@ -441,6 +429,14 @@ impl Coordinator {
             // Too little memory: wait for a running track to free some. With
             // none running nothing will, so the track fails instead.
             if !has_memory && self.in_flight > 0 {
+                logging::debug(
+                    "analysis",
+                    format!(
+                        "dispatch waiting for memory: engine={engine:?} in_flight={} queued={}",
+                        self.in_flight,
+                        self.queue.len(),
+                    ),
+                );
                 return;
             }
             let Some(item) = self.queue.pop_front() else {
@@ -453,6 +449,15 @@ impl Coordinator {
             );
             if has_memory {
                 self.in_flight += 1;
+                logging::debug(
+                    "analysis",
+                    format!(
+                        "dispatch: track={} engine={engine:?} in_flight={} queued={}",
+                        item.track.id,
+                        self.in_flight,
+                        self.queue.len(),
+                    ),
+                );
                 self.spawn_worker(item);
             } else {
                 self.finish_track(
@@ -518,6 +523,8 @@ impl Coordinator {
     }
 
     fn finish_track(&mut self, item: QueuedTrack, result: BackendResult<LocalAnalysisResult>) {
+        let started = Instant::now();
+        let track_id = item.track.id.clone();
         let QueuedTrack { track, request } = item;
         self.active.remove(&track.id);
         self.completed += 1;
@@ -589,6 +596,14 @@ impl Coordinator {
             );
         }
         request.emit(&self.service.analysis_coordinator, &self.job_id, progress);
+        logging::debug(
+            "analysis",
+            format!(
+                "track={track_id} stage=save and completion notification elapsed_ms={} in_flight={}",
+                started.elapsed().as_millis(),
+                self.in_flight,
+            ),
+        );
     }
 
     /// Clears what hasn't started and resumes, so work asked for after this runs.

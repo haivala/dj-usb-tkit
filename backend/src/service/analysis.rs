@@ -903,10 +903,16 @@ fn analysis_capacity(engine: AnalysisEngine) -> usize {
     let cpu_workers = std::thread::available_parallelism()
         .map(|n| n.get())
         .unwrap_or(1);
-    resolve_analysis_parallelism_budget_with_cap(
-        cpu_workers,
-        resolve_worker_cap_for_engine(engine).combined,
-    )
+    let cap = resolve_worker_cap_for_engine(engine);
+    let budget = resolve_analysis_parallelism_budget_with_cap(cpu_workers, cap.combined);
+    logging::debug(
+        "analysis",
+        format!(
+            "worker budget: engine={engine:?} cpu_workers={cpu_workers} memory_cap={:?} env_cap={:?} budget={budget}",
+            cap.memory_cap, cap.env_cap,
+        ),
+    );
+    budget
 }
 
 fn analysis_worker_cap_from_env() -> Option<usize> {
@@ -1043,6 +1049,7 @@ fn analyze_local_track_with_updates(
         bpm_max,
         engine,
     } = bpm_params;
+    let mut timing = AnalysisStageTimer::new(track_id);
     let path = PathBuf::from(file_path);
     if !path.exists() {
         return Err(BackendError::NotFound(tr::error_audio_file_not_found(
@@ -1053,6 +1060,7 @@ fn analyze_local_track_with_updates(
     // A file with no decodable audio track fails here -- it must not be
     // "analyzed" into a waveform drawn from its raw bytes.
     let (samples, sample_rate) = decode_audio_mono_samples(&path, ANALYSIS_DECODE_MAX_SAMPLES)?;
+    timing.finish_stage("decode");
 
     // Each piece is sent as soon as it is known, in the row's column order:
     // the cover, then the waveform and the length (from the decode), then BPM
@@ -1065,6 +1073,7 @@ fn analyze_local_track_with_updates(
             ..TrackPartialUpdate::default()
         });
     }
+    timing.finish_stage("artwork and notification");
 
     let duration_ms = detect_track_duration_ms(&path)
         .or_else(|| duration_ms_from_decoded(samples.len(), sample_rate));
@@ -1093,8 +1102,10 @@ fn analyze_local_track_with_updates(
             ..TrackPartialUpdate::default()
         });
     }
+    timing.finish_stage("duration, waveform and notifications");
 
     let bpm_key_result = detect_bpm_key(engine, &samples, sample_rate, bpm_min, bpm_max)?;
+    timing.finish_stage("BPM and key");
     // A kept BPM / key wins over the detection, in the DB and in the beat grid
     // written below. `bpm_analyzer` stays unset for a kept BPM so the column
     // keeps saying where it came from.
@@ -1111,6 +1122,7 @@ fn analyze_local_track_with_updates(
         *existing_first_beat_ms,
         *kept_first_beat_ms,
     );
+    timing.finish_stage("first beat");
     let bundle_paths = local_analysis_bundle_paths(waveform_dir, track_id, file_path);
     let waveform_peaks_path =
         if let Some(duration_ms) = duration_ms.filter(|_| !waveform.peaks.is_empty()) {
@@ -1134,6 +1146,7 @@ fn analyze_local_track_with_updates(
             None
         };
     let waveform_preview = waveform_preview_if_persisted(&waveform, &waveform_peaks_path);
+    timing.finish_stage("analysis files and MP3 seek index");
 
     if bpm.is_some() || key.is_some() {
         on_update(TrackPartialUpdate {
@@ -1143,6 +1156,7 @@ fn analyze_local_track_with_updates(
             ..TrackPartialUpdate::default()
         });
     }
+    timing.finish_stage("final notification");
 
     Ok(LocalAnalysisResult {
         bpm,
@@ -1155,6 +1169,34 @@ fn analyze_local_track_with_updates(
         waveform_peaks_path,
         waveform_preview,
     })
+}
+
+/// File-log diagnostics: identify slow stages without logging audio paths or
+/// adding progress events to the UI. Each timestamp starts after log emission.
+struct AnalysisStageTimer<'a> {
+    track_id: &'a str,
+    started: Instant,
+}
+
+impl<'a> AnalysisStageTimer<'a> {
+    fn new(track_id: &'a str) -> Self {
+        Self {
+            track_id,
+            started: Instant::now(),
+        }
+    }
+
+    fn finish_stage(&mut self, stage: &str) {
+        logging::debug(
+            "analysis",
+            format!(
+                "track={} stage={stage} elapsed_ms={}",
+                self.track_id,
+                self.started.elapsed().as_millis()
+            ),
+        );
+        self.started = Instant::now();
+    }
 }
 
 /// The track's first beat after analysis, and whether this analysis placed
