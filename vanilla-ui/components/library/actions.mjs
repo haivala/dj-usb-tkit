@@ -467,14 +467,15 @@ export async function analyzeTrackIds(ctx, trackIds, options = {}) {
     }
   }
   const ids = Array.isArray(trackIds) ? trackIds.filter(Boolean) : [];
-  // With `playlistId` / `scopeToLibraryFilter` the backend picks the tracks that
-  // still need analysis (over the whole playlist / library filter, not just the
+  // With `playlistIds` / `scopeToLibraryFilter` the backend picks the tracks that
+  // still need analysis (over the whole playlists / library filter, not just the
   // page the frontend has loaded), so an empty `ids` list is a valid request.
-  if (!ids.length && !options.playlistId && !options.scopeToLibraryFilter) return;
+  const playlistIds = Array.isArray(options.playlistIds) ? options.playlistIds.filter(Boolean) : [];
+  if (!ids.length && !playlistIds.length && !options.scopeToLibraryFilter) return;
 
   const submitted = await ctx.command("analyze_new_tracks", {
     trackIds: ids,
-    playlistId: options.playlistId || null,
+    playlistIds,
     scopeToLibraryFilter: !!options.scopeToLibraryFilter,
     // Backend parses + validates the range string (service::analysis).
     bpmRange: String(state.analysisBpmRange || ""),

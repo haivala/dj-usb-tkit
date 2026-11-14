@@ -116,7 +116,8 @@ export function createAppContext(env) {
     pruneUsbDevice updateUsbRootText`);
   bindActions(usbAudioFormats, "applyUsbAudioFormats renderUsbAudioFormats");
   bindActions(exportPlaylists, `openExportPlaylistsPage renderExportPlaylistsControls selectExportPlaylists
-    toggleExportPlaylist clickExportPlaylistRow runExportPlaylists`);
+    toggleExportPlaylist clickExportPlaylistRow runExportPlaylists refreshExportPlaylistsPage
+    analyzeExportPlaylistsMissing`);
   bindActions(trackTable, "buildTrackTableRow renderEmptyTrackTable finishTrackRows");
   bindActions(trackDetail, "openTrackDetail");
   bindActions(trackColumns, "applyTrackColumns renderTrackColumnsButtons");

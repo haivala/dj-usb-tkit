@@ -783,7 +783,7 @@ fn playlist_tracks_with_their_analysis_files_gone_need_analysis() {
     let conn = service.db.connect().expect("connect");
     assert_eq!(
         service
-            .collect_playlist_unanalyzed_track_ids(&conn, &playlist.playlist_id, "")
+            .collect_playlists_unanalyzed_track_ids(&conn, &[playlist.playlist_id.as_str()], "")
             .expect("collect"),
         ["gone"]
     );

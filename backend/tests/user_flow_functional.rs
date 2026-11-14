@@ -224,7 +224,7 @@ fn user_like_flow_imports_sources_analyzes_and_adds_from_library_usb_and_history
     // (rather than falling through to a DB-wide auto-select).
     let scoped_analyze = backend
         .analyze_new_tracks(AnalyzeNewTracksRequest {
-            playlist_id: Some(source_playlist_id.clone()),
+            playlist_ids: vec![source_playlist_id.clone()],
             ..Default::default()
         })
         .data

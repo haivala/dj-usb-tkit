@@ -2224,6 +2224,89 @@ test("frontend logging", async ({ page }) => {
   expect(lines.some((line) => line.includes("from the backend"))).toBe(false);
 });
 
+test("export playlists page: Analyze Missing Tracks makes the waiting playlists exportable", async ({ page }) => {
+  await installTauriMock(page, "valid");
+  await page.addInitScript(() => {
+    window.__analyzeRequests = [];
+    const backend = window.__e2eBackend;
+    // The analysis job's events reach the app only through the Tauri runtime.
+    backend.useTauriRuntime();
+    let analyzed = false;
+    const row = (playlistId, name, disabledReason = null) => ({
+      playlistId, name, trackCount: 2, durationText: "8:00", sizeText: "20 MB", copyText: "2 tracks · 20 MB",
+      lastExportedText: "Never", status: "new", statusText: "Not on USB yet", disabledReason, needsAnalysis: !!disabledReason
+    });
+    backend.override(async (command, request, payload) => {
+      if (command === "get_batch_export_overview") {
+        const waiting = analyzed ? null : "some tracks aren't analyzed yet";
+        return backend.ok({
+          rows: [row("pl-a", "Alpha"), row("pl-b", "Bravo"), row("pl-c", "Charlie", waiting)],
+          usbName: "TEST STICK",
+          forceTrackOrderAvailable: false,
+          forceTrackOrderTooltip: "",
+          unanalyzedCount: analyzed ? 0 : 2,
+          analyzeMissingLabel: "Analyze Missing Tracks (2)",
+          analyzeMissingTooltip: "Add the missing analysis",
+        });
+      }
+      if (command === "get_playlists_export_space") {
+        return backend.ok({ exportSpace: { summaryText: `${payload.request.playlistIds.length} playlists to copy`, fits: true } });
+      }
+      if (command === "analyze_new_tracks") {
+        window.__analyzeRequests.push(payload.request);
+        const job = { jobId: "job-analysis", jobType: "analysis", stage: "analyze_new_tracks" };
+        setTimeout(() => {
+          window.__emitJobEvent({ ...job, event: "job.started", message: "Analyzing" });
+          analyzed = true;
+          window.__emitJobEvent({ ...job, event: "job.completed", current: 2, total: 2, percent: 100,
+            message: "Analysis finished: analyzed 2, failed 0" });
+        }, 0);
+        return backend.ok({ jobId: job.jobId, queued: 2, skipped: 0, message: "Analyzing 2 tracks" });
+      }
+    });
+  });
+  await page.goto("/");
+  await openUsb(page);
+  await page.locator("#exportPlaylistsBtn").click();
+
+  const rows = page.locator("#exportPlaylistsList .export-playlists-row");
+  const check = (name) => rows.filter({ hasText: name }).locator(".export-playlists-check");
+  const analyze = page.locator("#exportPlaylistsAnalyzeBtn");
+  await expect(check("Charlie")).toBeEnabled();
+  await expect(rows.filter({ hasText: "Charlie" }).locator(".export-playlists-status")).toHaveText("some tracks aren't analyzed yet");
+  await expect(analyze).toBeVisible();
+  await expect(analyze).toHaveText("Analyze Missing Tracks");
+  // As on the playlist page, it takes the export button's place.
+  await expect(page.locator("#exportPlaylistsRunBtn")).toBeHidden();
+  await check("Charlie").uncheck();
+  await expect(analyze).toBeHidden();
+  await expect(page.locator("#exportPlaylistsRunBtn")).toBeVisible();
+  await check("Alpha").uncheck();
+  await check("Bravo").uncheck();
+  await expect(analyze).toBeHidden();
+  await expect(page.locator("#exportPlaylistsRunBtn")).toBeDisabled();
+  await check("Alpha").check();
+  await check("Charlie").check();
+  await expect(analyze).toBeVisible();
+  await expect(page.locator("#exportPlaylistsRunBtn")).toBeHidden();
+
+  await analyze.click();
+  // The backend picks missing tracks only from the selection.
+  await expect.poll(() => page.evaluate(() => window.__analyzeRequests.length)).toBe(1);
+  const [request] = await page.evaluate(() => window.__analyzeRequests);
+  expect(request).toMatchObject({ trackIds: [], playlistIds: ["pl-a", "pl-c"] });
+
+  // Once the analysis ends, the page reads the stick again: Charlie can be
+  // exported and is chosen, Bravo stays unticked.
+  await expect(check("Charlie")).toBeEnabled();
+  await expect(check("Charlie")).toBeChecked();
+  await expect(check("Alpha")).toBeChecked();
+  await expect(check("Bravo")).not.toBeChecked();
+  await expect(analyze).toBeHidden();
+  await expect(page.locator("#exportPlaylistsRunBtn")).toBeVisible();
+  await expect(page.locator("#exportPlaylistsRunBtn")).toHaveText("Export 2 playlists to TEST STICK");
+});
+
 test("export playlists page: a row per playlist, selection, order ticks and one export", async ({ page }) => {
   await installTauriMock(page, "valid");
   await page.addInitScript(() => {

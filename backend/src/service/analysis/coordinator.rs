@@ -655,19 +655,20 @@ fn select_tracks(
     conn: &Connection,
     request: &AnalyzeNewTracksRequest,
 ) -> BackendResult<Vec<LocalTrackForAnalysis>> {
-    // In auto mode the caller can scope "tracks needing analysis" to one
-    // playlist or to the current library filter instead of the whole DB. We
+    // In auto mode the caller can scope "tracks needing analysis" to some
+    // playlists or to the current library filter instead of the whole DB. We
     // resolve the scoped id list here and feed it through the explicit-id path
     // of `collect_tracks_for_analysis`.
+    let playlist_ids: Vec<&str> = request
+        .playlist_ids
+        .iter()
+        .map(|id| id.trim())
+        .filter(|id| !id.is_empty())
+        .collect();
     let scoped_ids = if !request.track_ids.is_empty() {
         None
-    } else if let Some(playlist_id) = request
-        .playlist_id
-        .as_deref()
-        .map(str::trim)
-        .filter(|id| !id.is_empty())
-    {
-        Some(service.collect_playlist_unanalyzed_track_ids(conn, playlist_id, &request.query)?)
+    } else if !playlist_ids.is_empty() {
+        Some(service.collect_playlists_unanalyzed_track_ids(conn, &playlist_ids, &request.query)?)
     } else if request.scope_to_library_filter {
         Some(service.library_filter_unanalyzed_track_ids(conn, &request.query)?)
     } else {

@@ -1162,8 +1162,16 @@ impl BackendService {
     ) -> BackendResult<BatchExportOverviewData> {
         let usb_root = export_target_usb_root(req.usb_root.as_deref())?;
         let rows = self.batch_export_rows(&usb_root)?;
-        let prune_stale = export_prune_stale_setting(&*self.db.connect()?)?;
+        let conn = self.db.connect()?;
+        let prune_stale = export_prune_stale_setting(&conn)?;
+        let playlist_ids: Vec<&str> = rows.iter().map(|row| row.playlist_id.as_str()).collect();
+        let unanalyzed_count = self
+            .collect_playlists_unanalyzed_track_ids(&conn, &playlist_ids, "")?
+            .len();
         Ok(BatchExportOverviewData {
+            unanalyzed_count,
+            analyze_missing_label: tr::playlist_analyze_missing(unanalyzed_count).render(),
+            analyze_missing_tooltip: tr::batch_export_analyze_missing_tooltip().render(),
             rows,
             usb_name: usb_drive_label(&usb_root.to_string_lossy()).unwrap_or_default(),
             force_track_order_available: !prune_stale,
@@ -1242,6 +1250,7 @@ impl BackendService {
                 BatchExportStatus::OnStickChanged => tr::batch_export_status_changed(),
             }
             .render();
+            let mut needs_analysis = false;
             let disabled_reason = if data.tracks.is_empty() {
                 Some(tr::batch_export_reason_empty())
             } else {
@@ -1256,6 +1265,7 @@ impl BackendService {
                 {
                     Some(tr::batch_export_reason_source_missing())
                 } else if ensure_playlist_tracks_analysis_ready(usb_root, &data).is_err() {
+                    needs_analysis = true;
                     Some(tr::batch_export_reason_not_analyzed())
                 } else if plan_export_files(&conn, &data.tracks, &formats, SourceFacts::Recorded)?
                     .iter()
@@ -1277,6 +1287,7 @@ impl BackendService {
             }
             .render();
             rows.push(BatchExportRow {
+                needs_analysis,
                 playlist_id: playlist.id.clone(),
                 name: playlist.name.clone(),
                 track_count,

@@ -2346,12 +2346,12 @@ pub struct FetchUsbTracksData {
 pub struct AnalyzeNewTracksRequest {
     #[serde(default)]
     pub track_ids: Vec<String>,
-    /// When `track_ids` is empty: restrict auto-selection to the tracks in this
-    /// playlist that still need core analysis (over the whole playlist, not a
-    /// page). Ignored when `track_ids` is non-empty.
+    /// When `track_ids` is empty: restrict auto-selection to the tracks in
+    /// these playlists that still need core analysis (over each whole
+    /// playlist, not a page). Ignored when `track_ids` is non-empty.
     #[serde(default)]
-    pub playlist_id: Option<String>,
-    /// When `track_ids` is empty and `playlist_id` is unset: restrict
+    pub playlist_ids: Vec<String>,
+    /// When `track_ids` and `playlist_ids` are empty: restrict
     /// auto-selection to the library as filtered (its source folders and
     /// libraries, plus `query`) instead of the whole DB.
     #[serde(default)]
@@ -2569,6 +2569,9 @@ pub enum BatchExportStatus {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct BatchExportRow {
+    /// Analysis is the only export blocker; the row can be selected for analysis.
+    #[serde(default)]
+    pub needs_analysis: bool,
     pub playlist_id: String,
     pub name: String,
     pub track_count: usize,
@@ -2597,6 +2600,11 @@ pub struct BatchExportOverviewData {
     /// anyway).
     pub force_track_order_available: bool,
     pub force_track_order_tooltip: String,
+    /// Tracks in any of the playlists that still need analysis (each counted
+    /// once), for the page's Analyze Missing Tracks button; 0 hides it.
+    pub unanalyzed_count: usize,
+    pub analyze_missing_label: String,
+    pub analyze_missing_tooltip: String,
 }
 
 // --- USB Diagnostics ---

@@ -17,7 +17,7 @@ function hasUsb(state) {
 }
 
 function selectableRows(overview) {
-  return (overview?.rows || []).filter((row) => !row.disabledReason);
+  return (overview?.rows || []).filter((row) => !row.disabledReason || row.needsAnalysis);
 }
 
 function allSelected(ctx) {
@@ -45,6 +45,37 @@ export async function openExportPlaylistsPage(ctx) {
   refreshExportPlaylistsSpace(ctx);
 }
 
+// After an analysis: the overview again, keeping the choice and adding the
+// playlists it made exportable.
+export async function refreshExportPlaylistsPage(ctx) {
+  const { state } = ctx;
+  const current = page(ctx);
+  if (!hasUsb(state) || !current.overview) return;
+  const wasSelectable = new Set(selectableRows(current.overview).map((row) => row.playlistId));
+  let overview;
+  try {
+    overview = await ctx.command("get_batch_export_overview", { usbRoot: state.usbRoot });
+  } catch (err) {
+    ctx.emitStatus(t("ui-export-playlists-load-failed", { error: err?.message || String(err) }));
+    return;
+  }
+  current.overview = overview;
+  current.selected = new Set(selectableRows(overview)
+    .map((row) => row.playlistId)
+    .filter((id) => current.selected.has(id) || !wasSelectable.has(id)));
+  renderExportPlaylistsPage(ctx);
+  refreshExportPlaylistsSpace(ctx);
+}
+
+// Analyze Missing Tracks: the backend picks the tracks of the page's
+// selected playlists that still need analysis.
+export async function analyzeExportPlaylistsMissing(ctx) {
+  const { overview, selected } = page(ctx);
+  const playlistIds = (overview?.rows || []).filter((row) => selected.has(row.playlistId)).map((row) => row.playlistId);
+  if (playlistIds.length === 0) return;
+  await ctx.analyzeTrackIds([], { playlistIds });
+}
+
 export function renderExportPlaylistsPage(ctx) {
   const { el, document } = ctx;
   const { overview, selected } = page(ctx);
@@ -58,11 +89,11 @@ export function renderExportPlaylistsPage(ctx) {
     item.dataset.playlistId = row.playlistId;
     item.dataset.status = row.status;
     item.classList.toggle("is-alt", index % 2 === 1);
-    item.classList.toggle("is-disabled", !!row.disabledReason);
+    item.classList.toggle("is-disabled", !!row.disabledReason && !row.needsAnalysis);
     const check = item.querySelector(".export-playlists-check");
     check.value = row.playlistId;
     check.checked = selected.has(row.playlistId);
-    check.disabled = !!row.disabledReason;
+    check.disabled = !!row.disabledReason && !row.needsAnalysis;
     const cells = {
       ".export-playlists-name": row.name,
       ".export-playlists-tracks": String(row.trackCount),
@@ -87,6 +118,11 @@ export function renderExportPlaylistsPage(ctx) {
 export function renderExportPlaylistsControls(ctx) {
   const { el, state } = ctx;
   const { overview, selected, space } = page(ctx);
+  const needsAnalysis = (overview?.rows || []).some((row) => selected.has(row.playlistId) && row.needsAnalysis);
+  el.exportPlaylistsAnalyzeBtn.hidden = !needsAnalysis;
+  el.exportPlaylistsRunBtn.hidden = needsAnalysis;
+  el.exportPlaylistsAnalyzeBtn.textContent = t("ui-playlist-analyze-missing");
+  el.exportPlaylistsAnalyzeBtn.dataset.tooltip = overview?.analyzeMissingTooltip || "";
   const total = selectableRows(overview).length;
   const count = selected.size;
   const everything = allSelected(ctx);

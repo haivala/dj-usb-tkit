@@ -1619,6 +1619,8 @@ batch-export-reason-none-playable = none of its tracks are in a format the playe
 batch-export-reason-source-missing = its music folder isn't connected
 batch-export-reason-not-analyzed = some tracks aren't analyzed yet
 batch-export-reason-formats = some tracks are in formats this USB doesn't allow
+# The Export playlists page's Analyze Missing Tracks tooltip (its label is playlist-analyze-missing).
+batch-export-analyze-missing-tooltip = Add the missing waveform, BPM, key and first beat to the unanalyzed tracks of the selected playlists, so the playlists waiting for analysis can be exported; a BPM or key you edited or imported is kept
 # What exporting a playlist on the Export playlists page would copy. $count: its tracks the
 # USB lacks. $size: their size.
 batch-export-copy = { $count ->
@@ -2029,8 +2031,8 @@ playlist-tracks-removed = Removed { $count ->
    *[other] { $count } tracks
 } from { $name }
 
-# The playlist page's button that analyzes its tracks that still need it, and its tooltip.
-# $count: how many tracks of the playlist need analysis.
+# The playlist page's button that analyzes its tracks that still need it, and its tooltip; the
+# Export playlists page's button too. $count: how many tracks need analysis, each counted once.
 playlist-analyze-missing = Analyze Missing Tracks ({ $count })
 playlist-analyze-missing-tooltip = Add the missing waveform, BPM, key and first beat to this playlist's unanalyzed tracks; a BPM or key you edited or imported is kept
 # The button's tooltip (it's hidden) when no track needs analysis.

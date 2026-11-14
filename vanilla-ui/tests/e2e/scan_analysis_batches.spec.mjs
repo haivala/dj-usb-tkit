@@ -215,7 +215,7 @@ function installScanAnalysisMock(page, opts = {}) {
           let ids = (r.trackIds || []).map(String);
           // Backend-scoped request: the caller sends no ids, the backend picks
           // the tracks that still need core analysis (here: the whole library).
-          if (!ids.length && (r.scopeToLibraryFilter || r.playlistId)) {
+          if (!ids.length && (r.scopeToLibraryFilter || r.playlistIds?.length)) {
             ids = tracks.filter((t) => !isCountable(t)).map((t) => String(t.localTrackId || t.id));
           }
           // The backend parses the `bpmRange` string (service::analysis).

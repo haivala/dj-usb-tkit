@@ -52,14 +52,14 @@ test("playlist analyze-missing skips already-analyzed tracks and targets the res
     const job = { jobId: "job-analysis-mock", jobType: "analysis", stage: "analyze_new_tracks" };
     backend.install((command, request) => {
       if (command !== "analyze_new_tracks") return undefined;
-      // "Analyze Missing" sends no ids + a playlistId; the backend picks the
+      // "Analyze Missing" sends no ids + its playlist's id; the backend picks the
       // playlist's unanalyzed local tracks.
       let ids = (request.trackIds || []).map(String);
-      if (!ids.length && request.playlistId) {
-        ids = backend.store.playlistTracks.get(request.playlistId)
+      if (!ids.length && request.playlistIds?.length) {
+        ids = request.playlistIds.flatMap((id) => backend.store.playlistTracks.get(id))
           .filter((t) => !t.analysisReady).map((t) => String(t.localTrackId || t.id));
       }
-      analyzedRequests.push({ trackIds: ids, playlistId: request.playlistId || null });
+      analyzedRequests.push({ trackIds: ids, playlistIds: request.playlistIds });
       const ours = ids.filter((id) => id === "local-missing-1");
       const total = Math.max(1, ids.length);
       (async () => {
@@ -134,7 +134,7 @@ test("playlist analyze-missing skips already-analyzed tracks and targets the res
   const analyzedRequests = await page.evaluate(() => window.__playlistAnalysisTest.analyzedRequests);
   // The frontend delegates scoping to the backend: it sends the playlist id, not
   // a client-collected id list. The mock resolves it to the unanalyzed track.
-  expect(analyzedRequests.map((item) => item.playlistId)).toEqual(["pl-1"]);
+  expect(analyzedRequests.map((item) => item.playlistIds)).toEqual([["pl-1"]]);
   expect(analyzedRequests.map((item) => item.trackIds)).toEqual([["local-missing-1"]]);
   await expect(page.locator("#statusText")).toContainText("Analysis finished: analyzed 1, failed 0");
   await expect(page.locator('#playlistTracksBody .track-grid-row[data-track-id="local-missing-1"]')).not.toHaveClass(/is-analyzing/);
@@ -211,11 +211,11 @@ test("playlist analyze-missing offers unanalyzed tracks that live on a USB drive
       // "Analyze Missing" sends the playlist id, not an id list; the backend
       // resolves it to that playlist's unanalyzed local tracks.
       let ids = (request.trackIds || []).map(String);
-      if (!ids.length && request.playlistId) {
-        ids = backend.store.playlistTracks.get(request.playlistId)
+      if (!ids.length && request.playlistIds?.length) {
+        ids = request.playlistIds.flatMap((id) => backend.store.playlistTracks.get(id))
           .filter((t) => !t.analysisReady).map((t) => String(t.localTrackId || t.id));
       }
-      analyzedRequests.push({ trackIds: ids, playlistId: request.playlistId || null });
+      analyzedRequests.push({ trackIds: ids, playlistIds: request.playlistIds });
       return backend.ok({ jobId: "job-mock", queued: ids.length, skipped: 0, message: `Analyzing ${ids.length} tracks` });
     }, { tauriRuntime: true });
     window.__playlistAnalysisTest = { analyzedRequests };
@@ -231,7 +231,7 @@ test("playlist analyze-missing offers unanalyzed tracks that live on a USB drive
   await page.locator("#analyzePlaylistMissingBtn").click();
   await page.waitForFunction(() => (window.__playlistAnalysisTest?.analyzedRequests || []).length === 1);
   const analyzedRequests = await page.evaluate(() => window.__playlistAnalysisTest.analyzedRequests);
-  expect(analyzedRequests.map((item) => item.playlistId)).toEqual(["pl-1"]);
+  expect(analyzedRequests.map((item) => item.playlistIds)).toEqual([["pl-1"]]);
   expect(analyzedRequests.map((item) => item.trackIds)).toEqual([["usb-import-1"]]);
 });
 

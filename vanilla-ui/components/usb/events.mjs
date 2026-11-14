@@ -300,6 +300,9 @@ export function bindUsbEvents(ctx) {
   el.exportPlaylistsList.addEventListener("click", (event) => ctx.clickExportPlaylistRow(event.target));
   el.exportPlaylistsSelectAll.addEventListener("change", () => ctx.selectExportPlaylists("all"));
   el.exportPlaylistsSelectChangedBtn.addEventListener("click", () => ctx.selectExportPlaylists("changed"));
+  el.exportPlaylistsAnalyzeBtn.addEventListener("click", () => {
+    ctx.analyzeExportPlaylistsMissing().catch(catchErr(emitStatus));
+  });
   el.exportPlaylistsRunBtn.addEventListener("click", () => {
     ctx.runExportPlaylists().catch(catchErr(emitStatus));
   });

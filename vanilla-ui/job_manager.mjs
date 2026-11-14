@@ -363,6 +363,9 @@ export function handleJobEvent(ctx, payload) {
     }
     if (jobType === "analysis") {
       refreshCurrentPlaylistTracks();
+      if (state.activeTab === "export-playlists") {
+        ctx.refreshExportPlaylistsPage().catch((err) => console.error(err));
+      }
     }
     // A folder may now be fully analyzed.
     refreshLibrarySources();

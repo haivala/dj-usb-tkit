@@ -7823,3 +7823,91 @@ fn batch_export_overview_shows_each_playlists_place_and_state_on_the_stick() {
         "Three is in both, counted once; Two is on the stick"
     );
 }
+
+#[test]
+fn batch_export_overview_offers_analysis_for_the_playlists_waiting_for_it() {
+    let root = tempdir().expect("temp root");
+    let usb = root.path().join("usb");
+    let (backend, ids, tracks) = batch_export_setup(
+        root.path(),
+        &usb,
+        &[
+            ("Batch A", &["One"]),
+            ("Batch B", &["Two"]),
+            ("Batch C", &["One", "Three"]),
+        ],
+    );
+    let conn = rusqlite::Connection::open(root.path().join("data").join("backend.db"))
+        .expect("open backend db");
+    for title in ["One", "Three"] {
+        conn.execute(
+            "UPDATE tracks SET waveform_peaks_path = NULL WHERE id = ?1",
+            [&tracks[title]],
+        )
+        .expect("mark track unanalyzed");
+    }
+    let overview = |backend: &BackendCommands| {
+        backend
+            .get_batch_export_overview(backend::models::GetBatchExportOverviewRequest {
+                usb_root: Some(usb.to_string_lossy().to_string()),
+            })
+            .data
+            .expect("overview data")
+    };
+
+    let before = overview(&backend);
+    assert_eq!(
+        before.unanalyzed_count, 2,
+        "One is in two playlists, counted once"
+    );
+    assert_eq!(before.analyze_missing_label, "Analyze Missing Tracks (2)");
+    assert_eq!(
+        before
+            .rows
+            .iter()
+            .map(|row| row.needs_analysis)
+            .collect::<Vec<_>>(),
+        [true, false, true]
+    );
+    let blocked = before
+        .rows
+        .iter()
+        .map(|row| (row.name.as_str(), row.disabled_reason.is_some()))
+        .collect::<Vec<_>>();
+    assert_eq!(
+        blocked,
+        [("Batch A", true), ("Batch B", false), ("Batch C", true)]
+    );
+
+    let analyzed = backend
+        .analyze_new_tracks(backend::models::AnalyzeNewTracksRequest {
+            playlist_ids: before
+                .rows
+                .iter()
+                .map(|row| row.playlist_id.clone())
+                .collect(),
+            ..Default::default()
+        })
+        .data
+        .expect("analyze data");
+    assert_eq!(
+        analyzed.analyzed, 2,
+        "only the two waiting tracks: {analyzed:?}"
+    );
+
+    let after = overview(&backend);
+    assert_eq!(after.unanalyzed_count, 0);
+    assert!(
+        after.rows.iter().all(|row| row.disabled_reason.is_none()),
+        "every playlist can be exported now: {:?}",
+        after.rows
+    );
+    let exported = export_batch(
+        &backend,
+        &usb,
+        vec![ids["Batch A"].clone(), ids["Batch C"].clone()],
+        false,
+        false,
+    );
+    assert!(exported.ok, "batch export failed: {exported:?}");
+}

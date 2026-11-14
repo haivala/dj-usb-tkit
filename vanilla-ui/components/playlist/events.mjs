@@ -198,10 +198,10 @@ export function bindPlaylistEvents(ctx) {
   el.analyzePlaylistMissingBtn.addEventListener("click", async () => {
     const playlist = getCurrentPlaylist();
     if (!playlist) return;
-    // Backend-owned: `analyze_new_tracks` with a `playlistId` selects the tracks
+    // Backend-owned: `analyze_new_tracks` with `playlistIds` selects the tracks
     // in this playlist that still need analysis, over the whole playlist -- no
     // need to force-load every page here or resolve ids client-side.
-    analyzeTrackIds([], { playlistId: playlist.id }).catch((err) => {
+    analyzeTrackIds([], { playlistIds: [playlist.id] }).catch((err) => {
       console.error(err);
       emitStatus(t("ui-common-analyze-failed", { error: err.message || err }));
     });

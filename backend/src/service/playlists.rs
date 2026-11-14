@@ -567,23 +567,26 @@ impl BackendService {
         Ok(items)
     }
 
-    /// Local track ids in `playlist_id` that still need core analysis, honoring
-    /// the same `query` filter `get_playlist_tracks` applies to its
-    /// `unanalyzed_count`. Playlist position order.
-    pub(crate) fn collect_playlist_unanalyzed_track_ids(
+    /// Local track ids in `playlist_ids` that still need core analysis, each
+    /// once, honoring the same `query` filter `get_playlist_tracks` applies to
+    /// its `unanalyzed_count`. Playlist then position order.
+    pub(crate) fn collect_playlists_unanalyzed_track_ids(
         &self,
         conn: &rusqlite::Connection,
-        playlist_id: &str,
+        playlist_ids: &[&str],
         query: &str,
     ) -> BackendResult<Vec<String>> {
-        let items = self.load_playlist_tracks_ordered(conn, playlist_id)?;
         let query = TrackQuery::new(query);
-        Ok(items
-            .into_iter()
-            .filter(|track| query.matches(track))
-            .filter(|track| !track.analysis_ready)
-            .map(|track| track.id)
-            .collect())
+        let mut seen = std::collections::HashSet::new();
+        let mut ids = Vec::new();
+        for playlist_id in playlist_ids {
+            for track in self.load_playlist_tracks_ordered(conn, playlist_id)? {
+                if query.matches(&track) && !track.analysis_ready && seen.insert(track.id.clone()) {
+                    ids.push(track.id);
+                }
+            }
+        }
+        Ok(ids)
     }
 
     pub fn get_playlist_tracks(

@@ -47,8 +47,10 @@ Export is intentionally tied to a quick prep loop:
 Export playlists… under the sidebar's playlists (while a USB is connected) opens a page with every
 playlist in the app's order: its tracks, length and size, what exporting it would copy, whether
 the USB already has it (up to date, or changed since), and when and to which USB it was last
-exported. A playlist that can't be exported (no tracks, missing analysis, a format the USB doesn't
-take) is greyed out with the reason. Every other playlist is chosen to start with; "New and
+exported. Playlists waiting for analysis can be selected. If any selected playlist needs analysis,
+Analyze Missing Tracks replaces Export and analyzes missing tracks only in the selected playlists.
+Once analysis finishes, the selection is kept and Export returns. Other blocked playlists are
+greyed out with the reason. Every selectable playlist is chosen to start with; "New and
 changed" chooses only the ones the USB lacks or has out of date. The line on top shows what the
 choice copies against the free space, and the chosen playlists export as one job with one backup.
 
