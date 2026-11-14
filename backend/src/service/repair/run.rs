@@ -132,6 +132,7 @@ struct DetectedRepairs {
     pdb_truncated_chains: Vec<TruncatedTableChain>,
     pdb_torn_growth: PdbTornGrowthReport,
     pdb_t19_template_state: bool,
+    pdb_empty_duplicate_playlists: Vec<EmptyDuplicatePlaylist>,
     pdb_misaligned_track_ids: Vec<u32>,
     pdb_misaligned_album_ids: Vec<u32>,
     pdb_misaligned_artist_ids: Vec<u32>,
@@ -1019,6 +1020,10 @@ impl BackendService {
             parsed_pdb.as_ref().map_or(0, |p| p.tracks.len()),
             crate::service::export_helpers::edb_t19_property(&usb_root).as_ref(),
         );
+        let pdb_empty_duplicate_playlists = parsed_pdb
+            .as_ref()
+            .map(|parsed| detect_pdb_empty_duplicate_playlists(parsed))
+            .unwrap_or_default();
         let pdb_misaligned_slots = detect_pdb_string_misalignment(&staged_pdb_bytes);
         let pdb_misaligned_track_ids = misaligned_row_ids(&pdb_misaligned_slots, 0);
         let pdb_misaligned_album_ids = misaligned_row_ids(&pdb_misaligned_slots, 3);
@@ -1163,6 +1168,36 @@ impl BackendService {
                 tr::repair_fix_ec_conflict(),
                 tr::repair_fix_ec_conflict_description(pdb_ec_conflicts.len()),
             ));
+        }
+        if !pdb_empty_duplicate_playlists.is_empty() {
+            detected_issues.push(format!(
+                "{} with the name of a playlist that has tracks",
+                counted(
+                    pdb_empty_duplicate_playlists.len(),
+                    "empty PDB playlist",
+                    "empty PDB playlists"
+                )
+            ));
+            estimated_file_writes += 1;
+            proposed_fixes.push(RepairFixProposal {
+                estimated_deletes: pdb_empty_duplicate_playlists.len(),
+                link: Some("event-log".to_string()),
+                ..fix_proposal(
+                    PDB_EMPTY_DUPLICATE_PLAYLISTS_FIX_ID,
+                    tr::repair_fix_empty_duplicate_playlists(),
+                    tr::repair_fix_empty_duplicate_playlists_description(
+                        pdb_empty_duplicate_playlists.len(),
+                    ),
+                )
+            });
+            for playlist in &pdb_empty_duplicate_playlists {
+                warnings.push(logging::log_text(
+                    Level::Warn,
+                    "usb-diagnostics",
+                    "usb.diagnostics.empty-duplicate-playlist",
+                    &tr::repair_warning_empty_duplicate_playlist(&playlist.name),
+                ));
+            }
         }
         if !pdb_truncated_chains.is_empty() {
             detected_issues.push(format!(
@@ -1717,6 +1752,7 @@ impl BackendService {
             pdb_truncated_chains,
             pdb_torn_growth,
             pdb_t19_template_state,
+            pdb_empty_duplicate_playlists,
             pdb_misaligned_track_ids,
             pdb_misaligned_album_ids,
             pdb_misaligned_artist_ids,
@@ -1874,6 +1910,7 @@ impl BackendService {
             pdb_truncated_chains,
             pdb_torn_growth,
             pdb_t19_template_state,
+            pdb_empty_duplicate_playlists,
             pdb_misaligned_track_ids,
             pdb_misaligned_album_ids,
             pdb_misaligned_artist_ids,
@@ -2018,6 +2055,26 @@ impl BackendService {
                             .to_string(),
                         )
                     })
+            },
+        );
+
+        // Before strict parity, which matches playlists by name: an empty
+        // copy left in place would stand in for the real playlist and the
+        // merge would never settle. The eDB drops the same copy if it has it.
+        outcomes.record_with_progress(
+            progress,
+            tr::repair_fix_empty_duplicate_playlists(),
+            selected.contains(PDB_EMPTY_DUPLICATE_PLAYLISTS_FIX_ID),
+            !pdb_empty_duplicate_playlists.is_empty(),
+            || {
+                let removed =
+                    pdb.patch(|bytes| apply_pdb_empty_duplicate_playlists_repair(bytes))?;
+                if let Some(conn) = session.edb_conn() {
+                    remove_edb_empty_duplicate_playlists(conn, &removed)?;
+                }
+                Ok(Detail::Text(
+                    tr::repair_outcome_detail_empty_duplicate_playlists(removed.len()),
+                ))
             },
         );
 

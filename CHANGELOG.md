@@ -55,6 +55,9 @@
   no date added gets the same date in both databases instead of only in the PDB, and removing tracks whose audio
   file is gone also updates the track count older players read from the PDB and the eDB's own track count, so the
   next scan no longer offers more fixes.
+- **Fix:** A PDB with an empty playlist that has the same name as a playlist with tracks no longer leaves the strict
+  parity repair offering the same fix after every run. Diagnostics warn about the empty copies, and the repair
+  always removes them, from the eDB too where it has them, before it makes the playlists match.
 - **Chore:** The backend tests for playlists, library sources and browsing, rekordbox and Mixxx imports, track
   identity, playback sources and settings now run through the same commands the app calls, instead of inside the
   backend. Setup helpers the functional tests had copied file to file are shared, and unit tests that only repeated

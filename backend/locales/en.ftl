@@ -674,6 +674,13 @@ diagnostics-check-orphaned-entries-detail = { $entries ->
     [one] { $tracks } track ID
    *[other] { $tracks } track IDs
 } not in PDB
+diagnostics-check-empty-duplicate-playlists = Empty duplicate playlists
+# $count: empty PDB playlists named like a playlist with tracks.
+diagnostics-check-empty-duplicate-playlists-detail = { $count ->
+    [0] no empty playlist has the name of a playlist with tracks
+    [one] { $count } empty playlist has the name of a playlist with tracks; Preview Fixes removes it
+   *[other] { $count } empty playlists have the name of a playlist with tracks; Preview Fixes removes them
+}
 diagnostics-check-parse-warnings = Parse warnings
 # $count: the warnings.
 diagnostics-check-parse-warnings-detail = { $count ->
@@ -958,6 +965,7 @@ repair-overview-artist-names = Rewrites artist names that can freeze players or 
 repair-overview-history = Copies the play history so newer players show the same history as older ones.
 repair-overview-strict-parity = Makes every playlist the same on older and newer players.
 repair-overview-duplicate-entries = Removes tracks listed twice in a playlist by mistake.
+repair-overview-empty-duplicate-playlists = Removes empty copies of playlists that have the same name as a playlist with tracks.
 repair-overview-relink = Reconnects tracks to music files that were renamed or moved on the USB.
 repair-overview-unindexed = Puts music files that are in no playlist into a playlist called "Unindexed".
 repair-overview-duplicate-copies = Deletes extra copies of music files that are in no playlist.
@@ -1091,6 +1099,12 @@ repair-fix-duplicate-entries-description = Remove { $count ->
     [one] { $count } stale duplicate playlist_entries row
    *[other] { $count } stale duplicate playlist_entries rows
 } left behind on shared pages from repeated exports of the same playlist over time. This only cleans up duplicate rows already in the PDB — it does not merge playlists between eDB and PDB or otherwise rewrite the export. For that broader repair, use "{ repair-fix-strict-parity }" instead (or in addition).
+repair-fix-empty-duplicate-playlists = Remove Empty Duplicate Playlists
+# $count: the empty playlists.
+repair-fix-empty-duplicate-playlists-description = { $count ->
+    [one] { $count } empty playlist in the PDB has
+   *[other] { $count } empty playlists in the PDB have
+} the name of a playlist with tracks in the same folder. Removes the empty copies from the PDB, and from the eDB where it has them too; the playlists with tracks stay. Always runs before the strict parity upgrade, which matches playlists by name.
 repair-fix-engine = Keep Engine DJ Library Up to Date
 repair-fix-engine-description = This USB has an Engine DJ library (Denon Prime, Numark Mixstream). Turns on "Write Engine DJ library" and rebuilds it now from this USB's rekordbox data; from then on it's rebuilt whenever this app changes a USB. Play history is kept, but changes made on the player itself (cues, loops, playlists created there) are replaced every time.
 
@@ -1188,6 +1202,8 @@ repair-warning-duplicate-audio = duplicate audio file: { $path } (copy of { $ori
 # $old: where the databases point. $new: where the file is now.
 repair-warning-moved-audio = moved audio: { $old } -> { $new }
 repair-warning-missing-audio = missing-audio reference: { $path }
+# $name: the playlist.
+repair-warning-empty-duplicate-playlist = empty duplicate playlist: { $name }
 # $error: the reason, from the OS.
 repair-warning-save-failed = Saving the repaired databases to the USB failed: { $error }
 
@@ -1237,6 +1253,10 @@ repair-outcome-detail-fixed-skipped-failed = fixed { $fixed }, skipped { $skippe
 repair-outcome-detail-duplicate-entries = removed { $count ->
     [one] { $count } duplicate entry
    *[other] { $count } duplicate entries
+}
+repair-outcome-detail-empty-duplicate-playlists = removed { $count ->
+    [one] { $count } empty playlist
+   *[other] { $count } empty playlists
 }
 repair-outcome-detail-relinked = relinked { $count ->
     [one] { $count } track

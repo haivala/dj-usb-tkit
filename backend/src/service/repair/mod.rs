@@ -107,6 +107,7 @@ const PDB_T00_MULTIPAGE_ACTIVE_FIX_ID: &str = "repair_pdb_t00_multipage_active_p
 const PDB_EC_CONFLICT_FIX_ID: &str = "repair_pdb_ec_data_page_conflict";
 const PDB_TORN_GROWTH_PAGES_FIX_ID: &str = "repair_pdb_torn_growth_pages";
 const PDB_TRUNCATED_TABLE_CHAIN_FIX_ID: &str = "repair_pdb_truncated_table_chain";
+const PDB_EMPTY_DUPLICATE_PLAYLISTS_FIX_ID: &str = "remove_pdb_empty_duplicate_playlists";
 const PDB_T19_TEMPLATE_STATE_FIX_ID: &str = "repair_pdb_t19_template_state";
 
 /// Structural-prerequisite fixes the strict-parity upgrade needs to have run
@@ -116,7 +117,9 @@ const PDB_T19_TEMPLATE_STATE_FIX_ID: &str = "repair_pdb_t19_template_state";
 fn fix_always_applied(fix_id: &str) -> bool {
     matches!(
         fix_id,
-        PDB_TRUNCATED_TABLE_CHAIN_FIX_ID | PDB_TORN_GROWTH_PAGES_FIX_ID
+        PDB_TRUNCATED_TABLE_CHAIN_FIX_ID
+            | PDB_TORN_GROWTH_PAGES_FIX_ID
+            | PDB_EMPTY_DUPLICATE_PLAYLISTS_FIX_ID
     )
 }
 
@@ -165,6 +168,7 @@ const REPAIR_FIX_DISPLAY_ORDER: &[&str] = &[
     PDB_TRUNCATED_TABLE_CHAIN_FIX_ID,
     PDB_TORN_GROWTH_PAGES_FIX_ID,
     PDB_T19_TEMPLATE_STATE_FIX_ID,
+    PDB_EMPTY_DUPLICATE_PLAYLISTS_FIX_ID,
     STRICT_PARITY_UPGRADE_FIX_ID,
     PDB_DUPLICATE_PLAYLIST_ENTRIES_FIX_ID,
     PDB_ZERO_TRANRF_FIX_ID,

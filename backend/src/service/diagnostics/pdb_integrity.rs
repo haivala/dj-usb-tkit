@@ -386,6 +386,28 @@ pub(crate) fn diagnose_pdb_integrity(
         tr::diagnostics_check_orphaned_entries_detail(orphaned_entries, orphaned.len()),
     ));
 
+    // Empty copies of a playlist with tracks: the repair removes them before
+    // strict parity, which matches playlists by name.
+    let empty_duplicates = crate::service::repair::detect_pdb_empty_duplicate_playlists(parsed);
+    for playlist in &empty_duplicates {
+        logging::debug(
+            "usb-diagnostics",
+            format!(
+                "empty PDB playlist {} (id {}) has the name of a playlist with tracks",
+                playlist.name, playlist.id
+            ),
+        );
+    }
+    checks.push(DiagCheck::new(
+        tr::diagnostics_check_empty_duplicate_playlists(),
+        if empty_duplicates.is_empty() {
+            DiagStatus::Pass
+        } else {
+            DiagStatus::Warn
+        },
+        tr::diagnostics_check_empty_duplicate_playlists_detail(empty_duplicates.len()),
+    ));
+
     // Parse warnings
     if !parsed.warnings.is_empty() {
         for message in &parsed.warnings {

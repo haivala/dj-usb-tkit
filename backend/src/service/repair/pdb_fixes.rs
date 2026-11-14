@@ -190,6 +190,116 @@ pub(super) fn apply_pdb_duplicate_playlist_entries_repair(
     Ok(crate::pdb_writer::remove_duplicate_playlist_entries_inplace(bytes))
 }
 
+/// A PDB playlist with no tracks whose name another playlist in the same
+/// folder also has, and that other one has tracks: a leftover copy. Parity
+/// matches playlists by name, so the empty copy can stand in for the real
+/// one and the strict parity repair never settles.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(in crate::service) struct EmptyDuplicatePlaylist {
+    pub(in crate::service) id: u32,
+    pub(in crate::service) name: String,
+}
+
+/// Every [`EmptyDuplicatePlaylist`] in `parsed`. When every copy of a name
+/// is empty, none is reported: there is no real one to keep.
+pub(in crate::service) fn detect_pdb_empty_duplicate_playlists(
+    parsed: &crate::pdb_reader::ParsedPdb,
+) -> Vec<EmptyDuplicatePlaylist> {
+    let with_entries = parsed
+        .playlist_entries
+        .iter()
+        .map(|e| e.playlist_id)
+        .collect::<HashSet<_>>();
+    let key = |p: &crate::pdb_reader::PdbPlaylistTreeRow| {
+        (p.parent_id, canonicalize_playlist_name(&p.name))
+    };
+    let filled = parsed
+        .playlist_tree
+        .iter()
+        .filter(|p| !p.row_is_folder && with_entries.contains(&p.id))
+        .map(key)
+        .collect::<HashSet<_>>();
+    let mut found = parsed
+        .playlist_tree
+        .iter()
+        .filter(|p| !p.row_is_folder && !with_entries.contains(&p.id) && filled.contains(&key(p)))
+        .map(|p| EmptyDuplicatePlaylist {
+            id: p.id,
+            name: p.name.clone(),
+        })
+        .collect::<Vec<_>>();
+    found.sort_by_key(|p| p.id);
+    found
+}
+
+/// Remove the [`EmptyDuplicatePlaylist`]s from the PDB, found again on the
+/// current bytes, as removing a playlist does (tombstoned tree rows, sentinel
+/// B-trees rebuilt). Returns what was removed.
+pub(super) fn apply_pdb_empty_duplicate_playlists_repair(
+    bytes: &mut [u8],
+) -> BackendResult<Vec<EmptyDuplicatePlaylist>> {
+    let parsed = crate::pdb_reader::parse_pdb_bytes(bytes)?;
+    let found = detect_pdb_empty_duplicate_playlists(&parsed);
+    if found.is_empty() {
+        return Ok(found);
+    }
+    let ids = found.iter().map(|p| p.id).collect::<HashSet<_>>();
+    crate::pdb_writer::remove_rows_inplace(
+        bytes,
+        7,
+        &ids,
+        crate::pdb_writer::extract_playlist_tree_id,
+    );
+    crate::pdb_writer::rebuild_sentinel_btrees_inplace(bytes);
+    Ok(found)
+}
+
+/// The eDB side of [`apply_pdb_empty_duplicate_playlists_repair`]: the same
+/// playlists, where the eDB has them under the same id and name and they are
+/// empty there too, so both databases drop the copy together. Returns the
+/// rows removed.
+pub(super) fn remove_edb_empty_duplicate_playlists(
+    conn: &rusqlite::Connection,
+    removed: &[EmptyDuplicatePlaylist],
+) -> BackendResult<usize> {
+    use rusqlite::OptionalExtension;
+    if removed.is_empty() || !table_exists(conn, "playlist") {
+        return Ok(0);
+    }
+    let has_content = table_exists(conn, "playlist_content");
+    let mut count = 0;
+    for playlist in removed {
+        let name: Option<String> = conn
+            .query_row(
+                "SELECT name FROM playlist WHERE playlist_id = ?1",
+                params![playlist.id],
+                |row| row.get(0),
+            )
+            .optional()?
+            .flatten();
+        if name.is_none_or(|n| {
+            canonicalize_playlist_name(&n) != canonicalize_playlist_name(&playlist.name)
+        }) {
+            continue;
+        }
+        if has_content {
+            let entries: i64 = conn.query_row(
+                "SELECT COUNT(*) FROM playlist_content WHERE playlist_id = ?1",
+                params![playlist.id],
+                |row| row.get(0),
+            )?;
+            if entries > 0 {
+                continue;
+            }
+        }
+        count += conn.execute(
+            "DELETE FROM playlist WHERE playlist_id = ?1",
+            params![playlist.id],
+        )?;
+    }
+    Ok(count)
+}
+
 pub(super) fn expected_page_flags(table_type: u32) -> u8 {
     // Both 0x24 (sealed) and 0x34 (active) are valid for tt=0/19.
     // This function is kept for backward-compat callers that only need

@@ -2107,7 +2107,105 @@ fn strict_repair_rebuilds_a_missing_pdb_in_one_pass_with_placeholder_dates_and_m
         .expect("eDB counts and date");
     assert_eq!((count, number_of_contents), (1, 1));
     assert!(!date_added.starts_with("1970"), "{date_added}");
-    assert_eq!(parsed.tracks[0].date_added.as_deref(), Some(date_added.as_str()));
+    assert_eq!(
+        parsed.tracks[0].date_added.as_deref(),
+        Some(date_added.as_str())
+    );
+}
+
+/// The PDB holds an empty playlist named like one with tracks, and the eDB
+/// doesn't have it. Parity matches by name and would pick the empty copy,
+/// so strict parity never settled. Diagnostics warn, the repair offers a
+/// fix it always applies before strict parity, and one pass leaves the
+/// stick clean with the real playlist kept.
+#[test]
+fn repair_removes_an_empty_duplicate_pdb_playlist_before_strict_parity() {
+    let (_root, backend, usb, target, control) = setup_two_playlist_strict_parity_fixture();
+    use_real_usb_bundles(&usb);
+    let pdb_path = vendor_db_dir(&usb).join("export.pdb");
+    let edb_path = vendor_db_dir(&usb).join("exportLibrary.db");
+
+    // Empty the control playlist the way the app does: its only track's
+    // audio is gone and the missing-audio fix removes the track.
+    let conn = open_edb(&edb_path);
+    let control_track: String = conn
+        .query_row(
+            "SELECT c.path FROM content c \
+             JOIN playlist_content pc ON pc.content_id = c.content_id \
+             JOIN playlist p ON p.playlist_id = pc.playlist_id WHERE p.name = ?1",
+            [&control],
+            |row| row.get(0),
+        )
+        .expect("control track path");
+    drop(conn);
+    fs::remove_file(usb.join(control_track.trim_start_matches('/'))).expect("delete audio");
+    let removed = backend.repair_usb_diagnostics(RepairUsbDiagnosticsRequest {
+        usb_root: Some(usb.to_string_lossy().to_string()),
+        apply: true,
+        selected_fix_ids: vec!["remove_missing_audio_references".to_string()],
+    });
+    assert!(removed.ok, "missing-audio removal failed: {removed:?}");
+
+    // The empty playlist becomes a PDB-only copy of the target's name
+    // (same canonical name, same byte length).
+    replace_bytes_in_file(&pdb_path, &control, "Repair-Target.");
+    let conn = open_edb(&edb_path);
+    conn.execute("DELETE FROM playlist WHERE name = ?1", [&control])
+        .expect("drop the eDB copy");
+    drop(conn);
+    let parsed = parse_pdb(&pdb_path).expect("parse PDB");
+    assert_eq!(parsed.playlist_tree.len(), 2);
+
+    let diagnostics = backend.run_usb_diagnostics(RunUsbDiagnosticsRequest {
+        usb_root: Some(usb.to_string_lossy().to_string()),
+    });
+    let diagnostics = diagnostics.data.expect("diagnostics data").data;
+    let check = diagnostics
+        .pdb_integrity
+        .checks
+        .iter()
+        .find(|c| c.label == "Empty duplicate playlists")
+        .expect("empty duplicate playlists check");
+    assert!(
+        matches!(check.status, backend::models::DiagStatus::Warn),
+        "{check:?}"
+    );
+
+    let preview = preview_repair(&backend, &usb);
+    let fix = preview
+        .proposed_fixes
+        .iter()
+        .find(|f| f.id == "remove_pdb_empty_duplicate_playlists")
+        .expect("empty duplicate playlist fix offered");
+    assert!(fix.always_applied, "{fix:?}");
+    let repair = backend.repair_usb_diagnostics(RepairUsbDiagnosticsRequest {
+        usb_root: Some(usb.to_string_lossy().to_string()),
+        apply: true,
+        selected_fix_ids: preview
+            .proposed_fixes
+            .iter()
+            .map(|fix| fix.id.clone())
+            .collect(),
+    });
+    assert!(repair.ok, "repair failed: {repair:?}");
+    let data = repair.data.expect("repair data").data;
+    assert!(data.failed_fixes.is_empty(), "{data:?}");
+
+    let after = preview_repair(&backend, &usb);
+    assert!(
+        after.proposed_fixes.is_empty(),
+        "one pass should leave nothing to fix: {:?}",
+        after.proposed_fixes
+    );
+    let parsed = parse_pdb(&pdb_path).expect("parse PDB");
+    assert_eq!(parsed.playlist_tree.len(), 1);
+    assert_eq!(parsed.playlist_tree[0].name, target);
+    assert_eq!(parsed.playlist_entries.len(), 1);
+    let detail = parity_detail_for_playlist(&backend, &usb, &target);
+    assert!(
+        matches!(detail.status, backend::models::DiagStatus::Pass),
+        "{detail:?}"
+    );
 }
 
 #[test]

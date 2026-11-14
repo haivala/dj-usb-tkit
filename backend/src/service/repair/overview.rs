@@ -42,6 +42,10 @@ fn fix_overview_line(fix_id: &str) -> Option<(usize, fn() -> Text)> {
         PDB_DUPLICATE_PLAYLIST_ENTRIES_FIX_ID => {
             (AREA_PLAYLISTS, tr::repair_overview_duplicate_entries)
         }
+        PDB_EMPTY_DUPLICATE_PLAYLISTS_FIX_ID => (
+            AREA_PLAYLISTS,
+            tr::repair_overview_empty_duplicate_playlists,
+        ),
         RELINK_MOVED_AUDIO_FIX_ID => (AREA_MUSIC_FILES, tr::repair_overview_relink),
         UNINDEXED_AUDIO_PLAYLIST_FIX_ID => (AREA_MUSIC_FILES, tr::repair_overview_unindexed),
         DUPLICATE_AUDIO_COPIES_FIX_ID => (AREA_MUSIC_FILES, tr::repair_overview_duplicate_copies),
