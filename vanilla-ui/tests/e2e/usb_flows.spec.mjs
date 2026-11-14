@@ -2224,6 +2224,77 @@ test("frontend logging", async ({ page }) => {
   expect(lines.some((line) => line.includes("from the backend"))).toBe(false);
 });
 
+for (const outcome of ["success", "empty", "failure", "reopened"]) {
+  test(`export playlists page: loading overview (${outcome})`, async ({ page }) => {
+    await installTauriMock(page, "valid");
+    await page.addInitScript(() => {
+      const backend = window.__e2eBackend;
+      window.__overviewRequests = [];
+      backend.override(async (command) => {
+        if (command !== "get_batch_export_overview") return;
+        return new Promise((resolve) => {
+          window.__overviewRequests.push((result) => {
+            if (result === "failure") {
+              resolve(backend.fail("Overview read failed", "IO"));
+              return;
+            }
+            resolve(backend.ok({
+              usbName: result,
+              rows: result === "empty" ? [] : [{
+                playlistId: "pl-loaded", name: result, trackCount: 2,
+                durationText: "8:00", sizeText: "20 MB", copyText: "20 MB",
+                status: "new", statusText: "Not on USB yet", lastExportedText: "Never",
+              }],
+              forceTrackOrderAvailable: true,
+            }));
+          });
+        });
+      });
+    });
+    await page.goto("/");
+    await openUsb(page);
+    await page.locator("#exportPlaylistsBtn").click();
+    const panel = page.locator("#panel-export-playlists");
+    const loading = panel.locator(".track-grid-loading");
+    const rows = panel.locator(".export-playlists-row");
+    await expect(panel).toBeVisible();
+    await expect(loading).toBeVisible();
+    await expect(loading).toHaveText("Loading playlists...");
+    await expect(page.locator("#exportPlaylistsList")).toHaveAttribute("aria-busy", "true");
+    await expect(page.locator("#exportPlaylistsEmpty")).toBeHidden();
+    await expect(rows).toHaveCount(0);
+    for (const id of ["exportPlaylistsRunBtn", "exportPlaylistsSelectAll", "exportPlaylistsSelectChangedBtn",
+      "exportPlaylistsForceOrder", "exportPlaylistsForceTrackOrder"]) {
+      await expect(page.locator(`#${id}`)).toBeDisabled();
+    }
+    await expect.poll(() => page.evaluate(() => window.__overviewRequests.length)).toBe(1);
+    if (outcome === "reopened") {
+      await page.locator('.nav-item[data-view="library"]').click();
+      await page.locator("#exportPlaylistsBtn").click();
+      await expect.poll(() => page.evaluate(() => window.__overviewRequests.length)).toBe(2);
+      await page.evaluate(() => window.__overviewRequests[0]("Old overview"));
+      await expect(loading).toBeVisible();
+      await expect(rows).toHaveCount(0);
+      await page.evaluate(() => window.__overviewRequests[1]("Current overview"));
+    } else {
+      await page.evaluate((result) => window.__overviewRequests[0](result), outcome);
+    }
+    await expect(loading).toBeHidden();
+    await expect(page.locator("#exportPlaylistsList")).not.toHaveAttribute("aria-busy", "true");
+    if (outcome === "failure" || outcome === "empty") {
+      await expect(rows).toHaveCount(0);
+      await expect(page.locator("#exportPlaylistsRunBtn")).toBeDisabled();
+      if (outcome === "empty") await expect(page.locator("#exportPlaylistsEmpty")).toBeVisible();
+      else await expect(page.locator("#exportPlaylistsEmpty")).toBeHidden();
+    } else {
+      await expect(rows).toHaveCount(1);
+      await expect(rows).toContainText(outcome === "reopened" ? "Current overview" : "success");
+      await expect(rows.locator("input")).toBeChecked();
+      await expect(page.locator("#exportPlaylistsRunBtn")).toBeEnabled();
+    }
+  });
+}
+
 test("export playlists page: Analyze Missing Tracks makes the waiting playlists exportable", async ({ page }) => {
   await installTauriMock(page, "valid");
   await page.addInitScript(() => {

@@ -8,7 +8,7 @@ import { cloneTemplate } from "../../ui_utils.mjs";
 import { exportPlaylistsToUsb, isUsbRootChangeBlocked } from "./actions.mjs";
 
 function page(ctx) {
-  ctx.state.exportPlaylistsPage ??= { overview: null, selected: new Set(), spaceSeq: 0, space: null, spaceTimer: null };
+  ctx.state.exportPlaylistsPage ??= { overview: null, selected: new Set(), spaceSeq: 0, space: null, spaceTimer: null, loading: false, loadSeq: 0 };
   return ctx.state.exportPlaylistsPage;
 }
 
@@ -26,45 +26,50 @@ function allSelected(ctx) {
   return rows.length > 0 && rows.every((row) => selected.has(row.playlistId));
 }
 
-// Opened from the sidebar: everything that can be exported is chosen.
+// Open the page before waiting for its overview. Refreshes after analysis keep
+// the selection; a newly opened page starts with every eligible playlist.
 export async function openExportPlaylistsPage(ctx) {
-  const { state } = ctx;
-  const current = page(ctx);
-  current.overview = null;
-  current.selected = new Set();
-  current.space = null;
-  if (hasUsb(state)) {
-    try {
-      current.overview = await ctx.command("get_batch_export_overview", { usbRoot: state.usbRoot });
-    } catch (err) {
-      ctx.emitStatus(t("ui-export-playlists-load-failed", { error: err?.message || String(err) }));
-    }
-    current.selected = new Set(selectableRows(current.overview).map((row) => row.playlistId));
-  }
-  renderExportPlaylistsPage(ctx);
-  refreshExportPlaylistsSpace(ctx);
+  await loadExportPlaylistsPage(ctx, false);
 }
 
-// After an analysis: the overview again, keeping the choice and adding the
-// playlists it made exportable.
 export async function refreshExportPlaylistsPage(ctx) {
+  if (!hasUsb(ctx.state) || !page(ctx).overview) return;
+  await loadExportPlaylistsPage(ctx, true);
+}
+
+async function loadExportPlaylistsPage(ctx, preserveSelection) {
   const { state } = ctx;
   const current = page(ctx);
-  if (!hasUsb(state) || !current.overview) return;
+  const seq = ++current.loadSeq;
+  const usbRoot = state.usbRoot;
   const wasSelectable = new Set(selectableRows(current.overview).map((row) => row.playlistId));
-  let overview;
-  try {
-    overview = await ctx.command("get_batch_export_overview", { usbRoot: state.usbRoot });
-  } catch (err) {
-    ctx.emitStatus(t("ui-export-playlists-load-failed", { error: err?.message || String(err) }));
-    return;
-  }
-  current.overview = overview;
-  current.selected = new Set(selectableRows(overview)
-    .map((row) => row.playlistId)
-    .filter((id) => current.selected.has(id) || !wasSelectable.has(id)));
+  const selected = new Set(current.selected);
+  current.overview = null;
+  current.selected = new Set();
+  current.loading = hasUsb(state);
+  clearTimeout(current.spaceTimer);
+  ++current.spaceSeq;
+  current.space = null;
   renderExportPlaylistsPage(ctx);
-  refreshExportPlaylistsSpace(ctx);
+  if (!current.loading) return;
+
+  const isCurrent = () => seq === current.loadSeq && usbRoot === state.usbRoot && hasUsb(state);
+  try {
+    const overview = await ctx.command("get_batch_export_overview", { usbRoot });
+    if (!isCurrent()) return;
+    current.overview = overview;
+    current.selected = new Set(selectableRows(overview)
+      .map((row) => row.playlistId)
+      .filter((id) => !preserveSelection || selected.has(id) || !wasSelectable.has(id)));
+  } catch (err) {
+    if (isCurrent()) ctx.emitStatus(t("ui-export-playlists-load-failed", { error: err?.message || String(err) }));
+  } finally {
+    if (seq === current.loadSeq) {
+      current.loading = false;
+      renderExportPlaylistsPage(ctx);
+      if (isCurrent()) refreshExportPlaylistsSpace(ctx);
+    }
+  }
 }
 
 // Analyze Missing Tracks: the backend picks the tracks of the page's
@@ -78,12 +83,19 @@ export async function analyzeExportPlaylistsMissing(ctx) {
 
 export function renderExportPlaylistsPage(ctx) {
   const { el, document } = ctx;
-  const { overview, selected } = page(ctx);
+  const { overview, selected, loading } = page(ctx);
   const rows = overview?.rows || [];
   el.exportPlaylistsTitle.textContent = overview?.usbName
     ? t("ui-export-playlists-title-usb", { name: overview.usbName })
     : t("ui-export-playlists-title");
-  el.exportPlaylistsEmpty.classList.toggle("hidden", rows.length > 0);
+  el.exportPlaylistsEmpty.classList.toggle("hidden", loading || !overview || rows.length > 0);
+  if (loading) {
+    el.exportPlaylistsList.dataset.loading = "page";
+    el.exportPlaylistsList.setAttribute("aria-busy", "true");
+  } else {
+    delete el.exportPlaylistsList.dataset.loading;
+    el.exportPlaylistsList.removeAttribute("aria-busy");
+  }
   el.exportPlaylistsList.replaceChildren(...rows.map((row, index) => {
     const item = cloneTemplate(document, "tplExportPlaylistsRow");
     item.dataset.playlistId = row.playlistId;

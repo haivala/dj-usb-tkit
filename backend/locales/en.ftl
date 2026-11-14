@@ -2297,6 +2297,7 @@ ui-common-usb = USB
 ui-common-language = Language
 # Tracks are loading: the startup progress bar and a track table's placeholder.
 ui-common-loading-tracks = Loading tracks...
+ui-common-loading-playlists = Loading playlists...
 ui-common-cancel = Cancel
 # The confirm dialog's title and button when the asker names none.
 ui-common-confirm = Confirm
@@ -2645,7 +2646,6 @@ ui-startup-init-failed = Initialization failed: { $error }
 ui-startup-progress = Initializing...
 ui-startup-progress-done = Initializing done
 ui-startup-progress-failed = Initializing failed
-ui-startup-loading-playlists = Loading playlists...
 
 ## ui-update
 

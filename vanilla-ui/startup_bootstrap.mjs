@@ -205,7 +205,7 @@ export function runDeferredInitialLoad(ctx) {
       failed: t("ui-startup-progress-failed")
     };
     ctx.withProgress(texts, async (progress) => {
-      progress(35, t("ui-startup-loading-playlists"));
+      progress(35, t("ui-common-loading-playlists"));
       await ctx.loadPlaylists();
       progress(70, t("ui-common-loading-tracks"));
       await ctx.resetAndLoadLibraryTracks("");

@@ -49,7 +49,7 @@
   copies against the free space, and the export runs as one job with one backup. With every playlist chosen, the
   playlists can go on the USB in the app's order; in additive mode, playlists already on the USB can also take the
   app's track order. Without these, playlists already on the USB keep their place and their order, new playlists go
-  on top and new tracks at the end.
+  on top and new tracks at the end. The page opens immediately and shows “Loading playlists…” while playlist details are fetched.
 - **Improvement:** Import and New in the sidebar now stay in place above the playlist list instead of scrolling away
   with it.
 - **Fix:** Rebuilding a missing PDB from the eDB, with the USB's other fixes, now finishes in one repair. A track with
