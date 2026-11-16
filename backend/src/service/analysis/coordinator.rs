@@ -375,6 +375,7 @@ impl Coordinator {
             if !self.job_started {
                 self.job_started = true;
                 self.started_at = Instant::now();
+                crate::process_memory::keep_freed_memory();
                 self.emit(&AnalysisEvent::JobStarted {
                     job_id: self.job_id.clone(),
                     total: self.total,
@@ -425,7 +426,12 @@ impl Coordinator {
             if self.in_flight >= self.budget(engine) {
                 return;
             }
-            let has_memory = has_memory_headroom_for_engine(engine);
+            // Memory this process keeps for reuse counts as used: give it
+            // back before deciding there is too little.
+            let has_memory = has_memory_headroom_for_engine(engine) || {
+                crate::process_memory::release_freed_memory();
+                has_memory_headroom_for_engine(engine)
+            };
             // Too little memory: wait for a running track to free some. With
             // none running nothing will, so the track fails instead.
             if !has_memory && self.in_flight > 0 {
@@ -658,6 +664,7 @@ impl Coordinator {
             message: finished_text(analyzed, failed, self.incomplete),
         });
         self.emit(&summary);
+        crate::process_memory::stop_keeping_freed_memory();
     }
 
     fn emit(&self, event: &AnalysisEvent) {

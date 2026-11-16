@@ -61,6 +61,12 @@ alsa-sys = "0.3"
 [target.'cfg(unix)'.dependencies]
 libc = "0.2"
 
+# The allocator on Windows (see src/process_memory.rs). v2: it gives kept
+# memory back on request, which v3 did not when measured.
+[target.'cfg(windows)'.dependencies]
+mimalloc = { version = "0.1", features = ["v2"] }
+libmimalloc-sys = { version = "0.1", features = ["v2", "extended"] }
+
 [build-dependencies]
 fluent-syntax = "0.12"
 

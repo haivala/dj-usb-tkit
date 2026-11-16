@@ -15,6 +15,7 @@ pub mod pdb_page;
 pub mod pdb_reader;
 pub mod pdb_writer;
 pub mod player;
+pub mod process_memory;
 pub mod scanner;
 pub mod service;
 pub mod shape_compare;

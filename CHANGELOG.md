@@ -39,6 +39,10 @@
 
 ## Unreleased
 
+- **Improvement:** Analyzing several tracks at once no longer slows down on Windows, where a batch could take
+  several times longer than the same tracks on Linux, or on Linux computers with many processor cores. The
+  app now keeps the memory analysis frees for the next track while a job runs, and gives it back to the system when the job is done.
+
 ## 0.6.1
 
 **Severity:** feature
