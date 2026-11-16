@@ -657,12 +657,13 @@ test("library row", async ({ page }) => {
       track("autofix", { formatExt: "wav", formatCompat: { severity: "autofix", badge: "WAV", tooltip: "Will be automatically converted to standard PCM on export." } }),
       track("warn", { formatExt: "wav", formatCompat: { severity: "warn", badge: "WAV", tooltip: "44.1 kHz · 16-bit — cannot be safely converted" } }),
       track("ok", { formatExt: "wav", formatCompat: { severity: "ok", badge: "WAV" } }),
+      track("blocked", { formatExt: "opus", formatCompat: { severity: "warn", badge: "OPUS", warning: "Can't be added to playlists.", tooltip: "Can't be added to playlists.", addBlocked: true } }),
     ] });
     backend.install();
   });
   await page.goto("/");
   const row = (id) => page.locator(`#libraryTableBody .track-grid-row[data-track-id="${id}"]`);
-  await expect(page.locator("#libraryTableBody .track-grid-row")).toHaveCount(6);
+  await expect(page.locator("#libraryTableBody .track-grid-row")).toHaveCount(7);
 
   // Source icon: the backend's tooltip; red when the USB isn't there; USB and
   // local look different; none without the backend's field.
@@ -706,6 +707,10 @@ test("library row", async ({ page }) => {
   // Enter, then the input's blur: one playlist.
   expect(await page.evaluate(() => window.__calls.filter((c) => c.command === "create_playlist").length)).toBe(1);
   await expect(add).toHaveAttribute("data-tooltip", "Add to <Mix & Match>");
+  // A track playlists don't take (formatCompat.addBlocked): + stays off, with the reason.
+  const blockedAdd = row("blocked").locator('[data-action="add-library"]');
+  await expect(blockedAdd).toBeDisabled();
+  await expect(blockedAdd).toHaveAttribute("data-tooltip", "Can't be added to playlists.");
 
   // The sidebar shows the name as text, marks it the active playlist, and
   // with no export status, no export mark.

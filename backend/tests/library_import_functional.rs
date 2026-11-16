@@ -1614,6 +1614,63 @@ fn reimporting_a_mixxx_playlist_updates_it_and_refreshes_or_forces_track_data() 
 }
 
 #[test]
+fn a_mixxx_playlist_import_leaves_out_tracks_that_can_never_go_on_a_usb() {
+    // Mixxx plays Opus; players don't and the app can't convert it. The
+    // track comes into the library, the playlist doesn't take it.
+    let mixxx_root = tempdir().expect("mixxx root");
+    let media_root = tempdir().expect("media root");
+    let (_app_dir, data_dir, backend) = app();
+    let paths = media_files(media_root.path(), &["a.mp3", "b.opus"]);
+    let tracks = [
+        plain_track(&paths[0], "Alpha"),
+        plain_track(&paths[1], "Bravo"),
+    ];
+    let fixture: Vec<FixtureTrack<'_>> = tracks
+        .iter()
+        .map(|(path, title)| (path.as_str(), *title, Some(22), 44_100, 0, None, 0))
+        .collect();
+    let mixxx_path = create_mixxx_db_fixture(mixxx_root.path(), &fixture, &[]);
+    add_mixxx_playlists(
+        &mixxx_path,
+        &[(3, "Warmup", 1, MIXXX_PLAYLIST_REGULAR, &[1, 2])],
+        &[],
+    );
+    let path = Some(mixxx_path.to_string_lossy().to_string());
+
+    let imported =
+        import_mixxx(&backend, &path, ExternalPlaylistKind::Playlist, "3", false).expect("import");
+    assert_eq!((imported.added, imported.skipped), (1, 1));
+    assert!(
+        imported
+            .warnings
+            .iter()
+            .any(|w| w.code == "scan.mixxx-db.playlist-tracks-unplayable"),
+        "{:?}",
+        imported.warnings
+    );
+    let db = library_db(&data_dir);
+    let in_playlist: Vec<String> = db
+        .prepare(
+            "SELECT t.title FROM playlist_tracks pt JOIN tracks t ON t.id = pt.track_id
+             WHERE pt.playlist_id = ?1",
+        )
+        .unwrap()
+        .query_map(params![imported.playlist_id], |r| r.get(0))
+        .unwrap()
+        .collect::<Result<_, _>>()
+        .unwrap();
+    assert_eq!(in_playlist, vec!["Alpha".to_string()]);
+    let in_library: i64 = db
+        .query_row(
+            "SELECT COUNT(1) FROM tracks WHERE title = 'Bravo'",
+            [],
+            |r| r.get(0),
+        )
+        .unwrap();
+    assert_eq!(in_library, 1, "the Opus track is still imported");
+}
+
+#[test]
 fn scan_mixxx_db_rejects_non_mixxx_database() {
     let root = tempdir().expect("root");
     let path = root.path().join("other.sqlite");

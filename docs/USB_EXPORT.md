@@ -34,10 +34,11 @@ Library shows them with a "Players don't play this format" warning.
 - An `.ogg` track goes on the USB as a transcode, made by the export when it has none, unless the
   USB takes no format the app converts to (see [TRANSCODES.md](TRANSCODES.md#on-a-usb)).
 - Opus and protected AAC (`.opus`, `.m4p`, and an `.ogg` file holding Opus audio, which a scan
-  records as Opus) can never go on a USB: the app can't convert them. Adding tracks to a playlist
-  leaves them out, and the status line says how many. A playlist import from rekordbox or Mixxx
-  still brings them in.
-- Such a track already in a playlist is left off the USB: each export lists it as skipped, with a
+  records as Opus) can never go on a USB: the app can't convert them. A playlist doesn't take
+  them: the row's "+" is off and says why, adding a selection leaves them out and the status line
+  says how many, and a playlist imported from rekordbox or Mixxx leaves them out with a warning
+  (the tracks still come into the library).
+- Such a track already in a playlist, from before this rule, is left off the USB: each export lists it as skipped, with a
   warning naming the file. A mirror export still prunes; the track, if an older export copied it
   to the stick, drops out of the USB playlist. An export where every track is in such a format is
   refused.

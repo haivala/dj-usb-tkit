@@ -1,5 +1,5 @@
 //! In its own test binary, and so its own process: it reports almost no memory
-//! through the environment, which would fail any analysis running beside it.
+//! through the environment, which would hold back any analysis running beside it.
 
 mod library_sources;
 
@@ -46,7 +46,7 @@ fn write_pulsed_wav(path: &Path, pitch_hz: f32) {
 }
 
 #[test]
-fn a_track_waits_for_memory_while_another_runs_and_fails_when_nothing_is_left_to_free_any() {
+fn a_track_waits_for_memory_while_another_runs_and_starts_when_nothing_is_left_running() {
     // SAFETY: this binary's only test, before any thread starts.
     unsafe {
         std::env::set_var("DJTKIT_ENABLE_ESSENTIA_JS", "0");
@@ -134,12 +134,5 @@ fn a_track_waits_for_memory_while_another_runs_and_fails_when_nothing_is_left_to
     );
     assert!(!ready[0].failed, "{:?}", ready[0].error_message);
     assert_eq!(ready[1].track_id, track_ids[1]);
-    assert!(
-        ready[1]
-            .error_message
-            .as_deref()
-            .is_some_and(|message| message.contains("Not enough available memory")),
-        "{:?}",
-        ready[1].error_message
-    );
+    assert!(!ready[1].failed, "{:?}", ready[1].error_message);
 }

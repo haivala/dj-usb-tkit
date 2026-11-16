@@ -951,9 +951,8 @@ fn analysis_bytes_per_worker(engine: AnalysisEngine) -> u64 {
 /// Whether there's currently enough memory headroom to start one more
 /// analysis job for the given engine. Unlike `resolve_memory_worker_cap`
 /// (which always allows at least one worker so a batch never stalls), this
-/// has no floor -- it's used to gate the single-track analyze path, which has
-/// no worker pool to size and can legitimately be refused outright when
-/// memory is genuinely too tight.
+/// has no floor -- the coordinator uses it to hold the next track back while
+/// others run, and starts it anyway when none do.
 pub(crate) fn has_memory_headroom_for_engine(engine: AnalysisEngine) -> bool {
     match available_system_memory_bytes() {
         Some(available) => {

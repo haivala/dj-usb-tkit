@@ -2240,6 +2240,48 @@ fn a_track_that_can_never_go_on_a_usb_is_not_added_to_a_playlist() {
 }
 
 #[test]
+fn a_rescan_records_an_ogg_holding_opus_as_opus() {
+    // A library scanned before the app told the two apart has the file as
+    // OGG: the next scan corrects it, and playlists stop taking it.
+    let root = tempdir().expect("temp root");
+    let media = root.path().join("media");
+    fs::create_dir_all(&media).expect("create media dir");
+    fs::copy(
+        format_fixture("track_format_ogg_opus.ogg"),
+        media.join("Artist 1 - Opus Inside.ogg"),
+    )
+    .expect("copy opus-in-ogg fixture");
+    let (backend, data_dir, _usb, tracks) = backend_with_scanned_media(root.path());
+    let track_ids: Vec<String> = tracks.into_iter().map(|(id, _)| id).collect();
+    assert_eq!(track_ids.len(), 1);
+    // In the library as a track (not only a browsed file), with the old label.
+    let (_, added) = playlist_with_tracks(&backend, "Before", track_ids.clone());
+    assert_eq!((added.added, added.unplayable), (0, 1));
+    let db = rusqlite::Connection::open(data_dir.join("backend.db")).expect("open db");
+    let format = || -> Option<String> {
+        db.query_row(
+            "SELECT format_ext FROM tracks WHERE id = ?1",
+            [&track_ids[0]],
+            |r| r.get(0),
+        )
+        .expect("track row")
+    };
+    assert_eq!(format().as_deref(), Some("opus"));
+    db.execute(
+        "UPDATE tracks SET format_ext = 'ogg' WHERE id = ?1",
+        [&track_ids[0]],
+    )
+    .expect("put the old label back");
+
+    let scan = backend.scan_library(ScanLibraryRequest {
+        source_roots: vec![media.to_string_lossy().to_string()],
+        incremental: true,
+    });
+    assert!(scan.ok, "rescan failed: {scan:?}");
+    assert_eq!(format().as_deref(), Some("opus"));
+}
+
+#[test]
 fn exports_in_separate_runs_keep_truncated_name_twins_apart() {
     export_truncated_name_twins_in_two_runs(false);
 }

@@ -21,7 +21,7 @@ use super::key_notation::camelot_position;
 use super::{
     BackendService, annotate_imported_playlists, build_track_match_fingerprint,
     external_playlist_key, has_tracks_flagged, no_importable_tracks_error, non_empty_db_value, now,
-    save_imported_playlist,
+    save_imported_playlist, without_tracks_never_on_usb,
 };
 use crate::edb::{load_table_columns, table_exists};
 use crate::error::{BackendError, BackendResult};
@@ -960,6 +960,8 @@ impl BackendService {
             }
         }
 
+        // The tracks stay in the library; the playlist doesn't take them.
+        let (local_ids, never_on_usb) = without_tracks_never_on_usb(&tx, local_ids)?;
         if local_ids.is_empty() {
             // Dropping `tx` rolls back the (partial) track upserts too.
             return Err(no_importable_tracks_error(&name, entry_ids.len()));
@@ -975,6 +977,14 @@ impl BackendService {
                 "scan-mixxx-db",
                 "scan.mixxx-db.playlist-duplicates-skipped",
                 &tr::scan_note_playlist_duplicates(duplicates, &name),
+            ));
+        }
+        if never_on_usb > 0 {
+            warnings.push(logging::log_text(
+                Level::Warn,
+                "scan-mixxx-db",
+                "scan.mixxx-db.playlist-tracks-unplayable",
+                &tr::scan_warning_playlist_tracks_unplayable(never_on_usb, &name),
             ));
         }
         if deleted_in_mixxx > 0 {

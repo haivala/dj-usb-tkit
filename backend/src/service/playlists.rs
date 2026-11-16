@@ -61,6 +61,41 @@ pub(super) fn add_candidate_is_usb_origin(
     !file_path.is_empty() && !usb_root.is_empty() && browse_path_matches_root(file_path, usb_root)
 }
 
+/// Each library track's id, with whether its format can never go on a USB
+/// (`never_goes_on_usb`): a playlist is what goes on one, so it doesn't take
+/// such a track.
+pub(crate) fn tracks_never_on_usb(
+    conn: &rusqlite::Connection,
+) -> BackendResult<std::collections::HashMap<String, bool>> {
+    let mut stmt = conn.prepare("SELECT id, format_ext FROM tracks")?;
+    let rows = stmt.query_map([], |row| {
+        Ok((row.get::<_, String>(0)?, row.get::<_, Option<String>>(1)?))
+    })?;
+    let mut tracks = std::collections::HashMap::new();
+    for row in rows {
+        let (id, format_ext) = row?;
+        tracks.insert(id, format_ext.as_deref().is_some_and(never_goes_on_usb));
+    }
+    Ok(tracks)
+}
+
+/// An imported list's tracks without those a playlist doesn't take
+/// (`tracks_never_on_usb`), and how many those were. They stay in the
+/// library.
+pub(crate) fn without_tracks_never_on_usb(
+    conn: &rusqlite::Connection,
+    track_ids: Vec<String>,
+) -> BackendResult<(Vec<String>, usize)> {
+    let never = tracks_never_on_usb(conn)?;
+    let listed = track_ids.len();
+    let kept: Vec<String> = track_ids
+        .into_iter()
+        .filter(|id| !never.get(id).copied().unwrap_or(false))
+        .collect();
+    let left_out = listed - kept.len();
+    Ok((kept, left_out))
+}
+
 /// Create a local playlist holding `track_ids` in order; returns its id.
 pub(crate) fn insert_local_playlist(
     conn: &rusqlite::Connection,
@@ -726,17 +761,7 @@ impl BackendService {
 
         // Pre-load existing track IDs to avoid N+1 queries, each with
         // whether its format can never go on a USB.
-        let mut existing_tracks = std::collections::HashMap::new();
-        {
-            let mut stmt = tx.prepare("SELECT id, format_ext FROM tracks")?;
-            let rows = stmt.query_map([], |row| {
-                Ok((row.get::<_, String>(0)?, row.get::<_, Option<String>>(1)?))
-            })?;
-            for row in rows {
-                let (id, format_ext) = row?;
-                existing_tracks.insert(id, format_ext.as_deref().is_some_and(never_goes_on_usb));
-            }
-        }
+        let existing_tracks = tracks_never_on_usb(&tx)?;
 
         // A track already in the playlist isn't added again.
         let mut playlist_track_ids = std::collections::HashSet::new();

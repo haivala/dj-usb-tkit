@@ -179,6 +179,7 @@ export function createTrackRow(ctx, track, options) {
       ? t("ui-track-row-remove-from-tooltip", { playlist: playlistName })
       : t("ui-common-remove-from-playlist");
   } else {
+    markAddBlocked(primary, track);
     setAddButtonState(primary, state.playlists?.find((p) => p.id === state.currentPlaylistId));
   }
   primary.textContent = options.actionLabel;
@@ -205,12 +206,26 @@ const SKELETON_SHIMMER_MS = 1600;
 // A row's "+": enabled, and saying where it adds, only with an active
 // `playlist` (as the header shows it). Also redrawn on rows already shown
 // when the active playlist or the playlist list changes
-// (`updateAddToPlaylistButtons`).
+// (`updateAddToPlaylistButtons`). Off for good on a track playlists don't
+// take, with the backend's reason (`markAddBlocked`).
 export function setAddButtonState(button, playlist) {
+  const blocked = button.dataset.addBlocked;
+  if (blocked !== undefined) {
+    button.disabled = true;
+    button.dataset.tooltip = blocked;
+    return;
+  }
   button.disabled = !playlist;
   button.dataset.tooltip = playlist
     ? t("ui-track-row-add-to-tooltip", { playlist: playlist.name })
     : t("ui-track-row-add-no-playlist-tooltip");
+}
+
+// Backend-owned `formatCompat.addBlocked`: the track's format can never go
+// on a USB, so its "+" stays off and shows the format warning.
+function markAddBlocked(button, track) {
+  const compat = track?.formatCompat;
+  if (compat?.addBlocked) button.dataset.addBlocked = compat.warning ?? "";
 }
 
 export function buildTrackTableRow(ctx, track, options) {

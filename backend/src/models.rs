@@ -423,6 +423,10 @@ pub struct FormatCompat {
     /// known, then the warning.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub tooltip: Option<String>,
+    /// The track can't be added to a playlist, as its format can never go on
+    /// a USB: the row's "+" is off, with the warning as its tooltip.
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub add_blocked: bool,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]

@@ -19,6 +19,7 @@ use std::path::Path;
 
 use crate::audio_format::{
     AudioFormat, UsbAudioFormat, UsbAudioFormatOfExtension, is_alac_file, is_player_extension,
+    never_goes_on_usb,
 };
 use crate::i18n::{Num, tr};
 use crate::models::{FormatCompat, FormatCompatSeverity};
@@ -40,6 +41,17 @@ impl FormatCompat {
             severity: FormatCompatSeverity::Warn,
             warning: Some(message.to_string()),
             ..Self::default()
+        }
+    }
+
+    /// A format that can never go on a USB (`never_goes_on_usb`): playlists
+    /// don't take the track.
+    fn never_on_usb() -> Self {
+        Self {
+            add_blocked: true,
+            ..Self::warn(
+                "Players don't play this format and the app can't convert it. Can't be added to playlists.",
+            )
         }
     }
 
@@ -177,7 +189,11 @@ fn usb_format_compat_verdict(
     formats: &UsbAudioFormats,
 ) -> FormatCompat {
     let Some(ext) = format_ext.filter(|ext| is_player_extension(ext)) else {
-        return FormatCompat::warn("Unlisted format");
+        return if format_ext.is_some_and(never_goes_on_usb) {
+            FormatCompat::never_on_usb()
+        } else {
+            FormatCompat::warn("Unlisted format")
+        };
     };
     let format = match UsbAudioFormat::of_extension(ext) {
         UsbAudioFormatOfExtension::Known(format) => format,
@@ -270,9 +286,7 @@ fn format_verdict(
             _ => FormatCompat::ok(),
         },
         // Export leaves these off the USB (`split_off_unplayable_tracks`).
-        AudioFormat::M4p | AudioFormat::Opus => FormatCompat::warn(
-            "Players don't play this format and the app can't convert it. Can't be added to playlists.",
-        ),
+        AudioFormat::M4p | AudioFormat::Opus => FormatCompat::never_on_usb(),
         AudioFormat::Ogg => FormatCompat::warn(
             "Players don't play this format. Export converts it to a format the USB allows.",
         ),

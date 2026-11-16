@@ -1977,6 +1977,11 @@ scan-warning-playlist-tracks-deleted = { $count ->
     [one] { $count } track
    *[other] { $count } tracks
 } in "{ $playlist }" no longer in the { $library } library
+# $count: the list's tracks left out of the playlist, as their format can never go on a USB.
+scan-warning-playlist-tracks-unplayable = { $count ->
+    [one] { $count } track
+   *[other] { $count } tracks
+} in "{ $playlist }" left out: players don't play the format and the app can't convert it (Opus, protected AAC)
 
 ## playlist
 
