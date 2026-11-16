@@ -16,6 +16,17 @@ The standard release flow is:
 
 The `Release` workflow publishes GitHub Releases from existing `v*` tags.
 
+Relevant pushes to `main` also run the platform builds to populate caches in
+the default branch's scope. These runs do not upload bundle artifacts or
+publish releases. GitHub lets tag builds restore default-branch caches, but
+not caches from earlier tags. The first `main` build starts cold; later tag
+builds can reuse it when their toolchain and cache keys match. Tag builds
+only restore caches and never save them: a cache saved from a tag would be
+usable by that tag alone and would take room from the `main` caches in the
+repository's cache quota. A tag pushed together with its commit restores the
+cache of the previous `main` build, because the two runs start at the same
+time.
+
 To publish from CI:
 
 ```bash

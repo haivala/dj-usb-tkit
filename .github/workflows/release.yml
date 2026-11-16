@@ -2,6 +2,19 @@ name: Release
 
 on:
   push:
+    # Tag caches cannot be restored by later tags. Build on the default
+    # branch too, so release jobs have a shared cache they can restore.
+    branches:
+      - main
+    paths:
+      - "Cargo.toml"
+      - "Cargo.lock"
+      - "backend/**"
+      - "desktop/**"
+      - "vanilla-ui/**"
+      - "scripts/**"
+      - ".cargo/**"
+      - ".github/workflows/release.yml"
     tags:
       - "v*"
   workflow_dispatch:
@@ -47,6 +60,12 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
+
+          # Populate default-branch caches without publishing a release.
+          if [[ "$GITHUB_EVENT_NAME" == "push" && "$GITHUB_REF" == "refs/heads/main" ]]; then
+            echo "checkout_ref=$GITHUB_SHA" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
 
           tag_input="${{ inputs.tag || '' }}"
           if [[ -n "$tag_input" ]]; then
@@ -124,9 +143,14 @@ jobs:
           rustup toolchain install stable --profile minimal
           rustup default stable
 
+      # Tag builds only restore: a cache saved from a tag can be restored by
+      # that tag alone, and would take room from the default-branch caches in
+      # the repository's cache quota.
       - name: Cache Rust build artifacts
         if: runner.os != 'Linux'
         uses: Swatinem/rust-cache@v2
+        with:
+          save-if: ${{ github.ref_type != 'tag' }}
 
       - name: Configure Windows OpenSSL build
         if: runner.os == 'Windows'
@@ -173,9 +197,10 @@ jobs:
             Add-Content -Path $env:GITHUB_PATH -Value $nasmDir.FullName
           }
 
-      - name: Cache Linux Docker-build Rust/npm artifacts
+      - name: Restore Linux Docker-build Rust/npm artifacts
+        id: linux_cache
         if: runner.os == 'Linux'
-        uses: actions/cache@v4
+        uses: actions/cache/restore@v4
         with:
           path: |
             target
@@ -215,7 +240,7 @@ jobs:
           build-args: |
             APT_REFRESH=${{ env.APT_REFRESH }}
           cache-from: type=gha
-          cache-to: type=gha,mode=max
+          cache-to: ${{ github.ref_type != 'tag' && 'type=gha,mode=max' || '' }}
 
       - name: Build Linux release bundles
         if: runner.os == 'Linux'
@@ -267,6 +292,7 @@ jobs:
           Write-Host "OK: no libcrypto/libssl DLL dependency." -ForegroundColor Green
 
       - name: Upload bundle artifacts
+        if: needs.prepare.outputs.tag != ''
         uses: actions/upload-artifact@v4
         with:
           name: djtkit-${{ matrix.artifact_suffix }}
@@ -281,8 +307,26 @@ jobs:
             target/release/bundle/**/*.app.tar.gz
             target/release/bundle/**/*.sig
 
+      # Saved after the upload so the finished bundles can be left out of it.
+      - name: Drop bundles from the cached target directory
+        if: runner.os == 'Linux' && github.ref_type != 'tag' && steps.linux_cache.outputs.cache-hit != 'true'
+        shell: bash
+        run: rm -rf target/release/bundle
+
+      - name: Save Linux Docker-build Rust/npm artifacts
+        if: runner.os == 'Linux' && github.ref_type != 'tag' && steps.linux_cache.outputs.cache-hit != 'true'
+        uses: actions/cache/save@v4
+        with:
+          path: |
+            target
+            .docker-cache/cargo-registry
+            .docker-cache/cargo-git
+            .docker-cache/npm
+          key: ${{ steps.linux_cache.outputs.cache-primary-key }}
+
   publish:
     name: Publish GitHub Release
+    if: needs.prepare.outputs.tag != ''
     needs:
       - prepare
       - build
