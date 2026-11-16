@@ -4,16 +4,18 @@ on:
   push:
     # Tag caches cannot be restored by later tags. Build on the default
     # branch too, so release jobs have a shared cache they can restore.
+    # Only for changes to what the caches hold (dependencies, the build
+    # image, build settings), not for every code push. A version bump
+    # changes Cargo.lock, so each release gets one such build before its tag.
     branches:
       - main
     paths:
-      - "Cargo.toml"
       - "Cargo.lock"
-      - "backend/**"
-      - "desktop/**"
-      - "vanilla-ui/**"
-      - "scripts/**"
+      - "**/Cargo.toml"
+      - "vanilla-ui/package-lock.json"
+      - "desktop/package-lock.json"
       - ".cargo/**"
+      - "scripts/Dockerfile.linux-build"
       - ".github/workflows/release.yml"
     tags:
       - "v*"

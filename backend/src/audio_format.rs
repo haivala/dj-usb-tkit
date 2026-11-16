@@ -197,12 +197,28 @@ impl UsbAudioFormat {
 /// Whether an MP4 container (`.m4a`) holds ALAC rather than AAC. Probes the
 /// file's header; an unreadable file counts as AAC.
 pub fn is_alac_file(path: &Path) -> bool {
-    use symphonia::core::codecs::CODEC_TYPE_ALAC;
+    file_holds_codec(path, "m4a", symphonia::core::codecs::CODEC_TYPE_ALAC)
+}
+
+/// Whether an Ogg container (`.ogg`) holds Opus audio, which the app can't
+/// decode, rather than Vorbis. Probes the file's header; an unreadable file
+/// counts as not Opus.
+pub fn is_opus_in_ogg(path: &Path) -> bool {
+    file_holds_codec(path, "ogg", symphonia::core::codecs::CODEC_TYPE_OPUS)
+}
+
+/// Whether the container at `path`, probed as an `extension` file, has a
+/// track in `codec`. False when the file can't be read.
+fn file_holds_codec(
+    path: &Path,
+    extension: &str,
+    codec: symphonia::core::codecs::CodecType,
+) -> bool {
     let Ok(media) = crate::symphonia_decoder::open_media_source(path) else {
         return false;
     };
     let mut hint = symphonia::core::probe::Hint::new();
-    hint.with_extension("m4a");
+    hint.with_extension(extension);
     symphonia::default::get_probe()
         .format(
             &hint,
@@ -215,8 +231,28 @@ pub fn is_alac_file(path: &Path) -> bool {
                 .format
                 .tracks()
                 .iter()
-                .any(|track| track.codec_params.codec == CODEC_TYPE_ALAC)
+                .any(|track| track.codec_params.codec == codec)
         })
+}
+
+/// The format the scan records for a file: its extension, except an `.ogg`
+/// holding Opus audio, which is recorded as `opus`. Players play neither,
+/// but the app converts Vorbis and can't decode Opus.
+pub fn recorded_format_ext(path: &Path) -> Option<String> {
+    let ext = format_ext_of(path)?;
+    if AudioFormat::from_extension(&ext) == Some(AudioFormat::Ogg) && is_opus_in_ogg(path) {
+        return Some(AudioFormat::Opus.canonical_extension().to_string());
+    }
+    Some(ext)
+}
+
+/// Whether a track with this recorded format can never go on a USB: players
+/// don't play it and the app can't convert it.
+pub fn never_goes_on_usb(format_ext: &str) -> bool {
+    matches!(
+        AudioFormat::from_extension(format_ext),
+        Some(AudioFormat::Opus | AudioFormat::M4p)
+    )
 }
 
 /// [`AudioFormat::rekordbox_file_type`] for a stored extension; 0 when unknown.
@@ -324,6 +360,32 @@ pub fn format_ext_of(path: &Path) -> Option<String> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn an_ogg_holding_opus_is_recorded_as_opus() {
+        let fixture = |name: &str| {
+            Path::new(env!("CARGO_MANIFEST_DIR"))
+                .join("tests/fixtures/audio/formats")
+                .join(name)
+        };
+        let vorbis = fixture("track_format_ogg.ogg");
+        let opus = fixture("track_format_ogg_opus.ogg");
+        assert!(!is_opus_in_ogg(&vorbis));
+        assert!(is_opus_in_ogg(&opus));
+        assert_eq!(recorded_format_ext(&vorbis).as_deref(), Some("ogg"));
+        assert_eq!(recorded_format_ext(&opus).as_deref(), Some("opus"));
+        // Not there to probe: by its extension.
+        assert_eq!(
+            recorded_format_ext(Path::new("/nowhere/a.OGG")).as_deref(),
+            Some("ogg")
+        );
+
+        assert!(never_goes_on_usb("opus"));
+        assert!(never_goes_on_usb("M4P"));
+        for ext in ["ogg", "mp3", "flac", "m4a", "wav", "xyz"] {
+            assert!(!never_goes_on_usb(ext), "{ext}");
+        }
+    }
 
     #[test]
     fn format_ext_from_path_lowercases_and_handles_missing() {

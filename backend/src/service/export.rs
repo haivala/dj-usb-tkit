@@ -21,7 +21,7 @@ use crate::models::{
 
 use super::track_matching::{ContentFingerprint, content_fingerprint_key};
 use super::transcode_export::{
-    ExportFile, SourceFacts, estimated_transcode_bytes, plan_export_files,
+    ExportFile, SourceFacts, estimated_transcode_bytes, goes_as_transcode_only, plan_export_files,
     prepare_transcode_bundle, use_transcode,
 };
 use super::usb_track_facts::{UsbTrackFact, UsbTrackFacts, UsbTrackIdentity};
@@ -525,14 +525,23 @@ fn track_on_usb(
     })
 }
 
-/// Takes the tracks players don't play (`.ogg`, `.opus`, `.m4p`) out of
-/// `playlist` and returns them: export leaves them off the USB rather than
-/// put a track in the databases that won't play. Unlike a missing source file
-/// this skip is deliberate, so it doesn't hold back a mirror export's prune.
-fn split_off_unplayable_tracks(playlist: &mut ExportPlaylistData) -> Vec<ExportTrackData> {
-    let (playable, unplayable) = std::mem::take(&mut playlist.tracks)
-        .into_iter()
-        .partition(|track| is_player_extension(&export_extension(Path::new(&track.file_path))));
+/// Takes the tracks players don't play (`.opus`, `.m4p`, and `.ogg` when the
+/// USB takes no format the app converts to) out of `playlist` and returns
+/// them: export leaves them off the USB rather than put a track in the
+/// databases that won't play. Unlike a missing source file this skip is
+/// deliberate, so it doesn't hold back a mirror export's prune.
+fn split_off_unplayable_tracks(
+    playlist: &mut ExportPlaylistData,
+    formats: &super::usb_identity::UsbAudioFormats,
+) -> Vec<ExportTrackData> {
+    let (playable, unplayable) =
+        std::mem::take(&mut playlist.tracks)
+            .into_iter()
+            .partition(|track| {
+                let path = Path::new(&track.file_path);
+                is_player_extension(&export_extension(path))
+                    || goes_as_transcode_only(path, formats)
+            });
     playlist.tracks = playable;
     unplayable
 }
@@ -1254,7 +1263,7 @@ impl BackendService {
             let disabled_reason = if data.tracks.is_empty() {
                 Some(tr::batch_export_reason_empty())
             } else {
-                split_off_unplayable_tracks(&mut data);
+                split_off_unplayable_tracks(&mut data, &formats);
                 if data.tracks.is_empty() {
                     Some(tr::batch_export_reason_none_playable())
                 } else if !super::export_blocking_missing_source_roots(
@@ -1321,13 +1330,10 @@ impl BackendService {
             .collect::<BackendResult<Vec<_>>>()?;
         let mut playlist = merged_export_playlist(&loaded);
         let list_track_count = playlist.tracks.len();
-        split_off_unplayable_tracks(&mut playlist);
-        let plan = plan_export_files(
-            &*self.db.connect()?,
-            &playlist.tracks,
-            &super::usb_identity::read_usb_audio_formats(usb_root),
-            SourceFacts::Recorded,
-        )?;
+        let conn = self.db.connect()?;
+        let formats = super::usb_identity::read_usb_audio_formats(usb_root);
+        split_off_unplayable_tracks(&mut playlist, &formats);
+        let plan = plan_export_files(&conn, &playlist.tracks, &formats, SourceFacts::Recorded)?;
         // Sized as the files export will copy: a transcode by its own size,
         // one still to make by an estimate.
         let mut convert = Vec::new();
@@ -1595,12 +1601,13 @@ impl BackendService {
             })
             .unwrap_or(false);
         let mut runs = Vec::<PlaylistRun>::with_capacity(playlist_ids.len());
+        let formats = super::usb_identity::read_usb_audio_formats(&usb_root);
         for playlist_id in playlist_ids {
             let mut playlist = self.load_playlist_for_export(playlist_id)?;
             if playlist.tracks.is_empty() {
                 return Err(BackendError::Validation(tr::export_error_no_tracks()));
             }
-            let unplayable_tracks = split_off_unplayable_tracks(&mut playlist);
+            let unplayable_tracks = split_off_unplayable_tracks(&mut playlist, &formats);
             if playlist.tracks.is_empty() {
                 return Err(BackendError::Validation(tr::export_error_none_playable()));
             }
@@ -1652,12 +1659,14 @@ impl BackendService {
         for run in &mut runs {
             // A track whose transcode couldn't be made is left off, like one
             // whose file is missing.
-            run.skipped_tracks = self.use_transcodes_for_export(
+            let (skipped, unplayable) = self.use_transcodes_for_export(
                 &usb_root,
                 &mut run.playlist,
                 &mut warnings,
                 on_progress,
             )?;
+            run.skipped_tracks = skipped;
+            run.unplayable_tracks.extend(unplayable);
             if run.playlist.tracks.is_empty() {
                 return Err(BackendError::Validation(tr::export_error_none_convertible()));
             }
@@ -2493,15 +2502,17 @@ impl BackendService {
     /// is written, when a track can't go on the stick in any ticked format;
     /// makes the transcodes that are missing or out of date; then points each
     /// track that goes as a transcode at it and at its analysis bundle. A
-    /// track whose transcode fails is taken out with a warning; returns how
-    /// many.
+    /// track whose transcode fails is taken out with a warning. Returns how
+    /// many were, and apart from those the tracks players don't play anyway
+    /// (an OGG that can't be converted): leaving those off is no failure, so
+    /// they don't hold back a mirror export's prune.
     fn use_transcodes_for_export<F>(
         &self,
         usb_root: &Path,
         playlist: &mut ExportPlaylistData,
         warnings: &mut Vec<WarningEntry>,
         on_progress: &mut F,
-    ) -> BackendResult<usize>
+    ) -> BackendResult<(usize, Vec<ExportTrackData>)>
     where
         F: FnMut(usize, usize, &str),
     {
@@ -2555,6 +2566,7 @@ impl BackendService {
         let data_dir = self.db.data_dir();
         let mut kept = Vec::with_capacity(playlist.tracks.len());
         let mut dropped = 0usize;
+        let mut unplayable = Vec::new();
         for (mut track, file) in std::mem::take(&mut playlist.tracks).into_iter().zip(plan) {
             match file {
                 ExportFile::Source => kept.push(track),
@@ -2588,12 +2600,16 @@ impl BackendService {
                         "export.transcode-failed",
                         &failed,
                     ));
-                    dropped += 1;
+                    if goes_as_transcode_only(Path::new(&track.file_path), &formats) {
+                        unplayable.push(track);
+                    } else {
+                        dropped += 1;
+                    }
                 }
             }
         }
         playlist.tracks = kept;
-        Ok(dropped)
+        Ok((dropped, unplayable))
     }
 
     /// The playlist's tracks in position order, every format included; export
@@ -3152,7 +3168,7 @@ mod tests {
         assert_eq!(details["validationType"], "usb_audio_format_refused");
         assert_eq!(
             details["statusText"],
-            "Export blocked: 2 tracks in a format this USB's formats don't allow, and only lossless files can be converted. See Event Log for details."
+            "Export blocked: 2 tracks in a format this USB's formats don't allow, and only lossless and OGG files can be converted. See Event Log for details."
         );
     }
 

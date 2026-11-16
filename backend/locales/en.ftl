@@ -1428,14 +1428,14 @@ transcode-export-exported = { $format } transcode · { $size }, exported to this
 # $format: what it's converted to. $source: transcode-export-source.
 transcode-export-convert = Converted to { $format } on export — { $source }
 # $file: the track's own file, as the FMT column describes it. $format: its format's name.
-transcode-export-refused = { $file } — { $format } can't go on this USB: only lossless files can be converted
+transcode-export-refused = { $file } — { $format } can't go on this USB: only lossless and OGG files can be converted
 
 transcode-error-folder-in-source = the transcode folder can't be inside a source folder: the scan would list the transcodes as tracks
 
 # Event Log notes per track. $file: the source file's name.
 transcode-skipped-not-found = { $file }: file not found
 transcode-skipped-already-format = { $file }: already this format
-transcode-skipped-not-lossless = { $file }: not a lossless file
+transcode-skipped-not-lossless = { $file }: not a lossless or OGG file
 transcode-skipped-up-to-date = { $file }: already has an up-to-date transcode
 # $reason: why the encoder failed (from the encoder, not translated).
 transcode-failed = { $file }: { $reason }
@@ -1649,7 +1649,7 @@ export-refused-no-space = Export blocked: not enough free space on the USB drive
 export-refused-formats = Export blocked: { $count ->
     [one] { $count } track
    *[other] { $count } tracks
-} in a format this USB's formats don't allow, and only lossless files can be converted. See Event Log for details.
+} in a format this USB's formats don't allow, and only lossless and OGG files can be converted. See Event Log for details.
 # $missing: the tracks without analysis files. $total: the playlist's tracks.
 export-refused-analysis-files = Export blocked: the analysis files of { $missing } of { $total ->
     [one] { $total } track
@@ -1689,7 +1689,7 @@ export-error-none-convertible = none of the playlist's tracks could be converted
 export-error-formats = Export blocked: { $count ->
     [one] { $count } track
    *[other] { $count } tracks
-} in a format this USB's formats don't allow, and only lossless files can be converted: { $tracks }
+} in a format this USB's formats don't allow, and only lossless and OGG files can be converted: { $tracks }
 # $missing: tracks without analysis. $total: the playlist's tracks.
 export-error-not-analyzed = Export blocked: { $missing }/{ $total } playlist tracks are missing required analysis (waveform, bpm, duration, DAT/EXT files); run analysis first
 # $folder: the missing source folder.
@@ -2023,6 +2023,15 @@ playlist-tracks-added = Added { $count ->
     [one] { $count } track
    *[other] { $count } tracks
 } (skipped { $skipped }) to { $name }
+# The same line when some of the tracks were left out: they are in a format that can never go on a USB.
+# $unplayable: the tracks left out.
+playlist-tracks-added-unplayable = Added { $count ->
+    [one] { $count } track
+   *[other] { $count } tracks
+} (skipped { $skipped }) to { $name }. Not added: { $unplayable ->
+    [one] { $unplayable } track
+   *[other] { $unplayable } tracks
+} in a format players don't play and the app can't convert (Opus, protected AAC)
 
 # The status line after removing tracks from a playlist.
 # $count: the tracks removed. $name: the playlist's name.
@@ -2310,7 +2319,7 @@ ui-common-save = Save
 ui-convert-folder-hint = Saved in { $folder } (change it in Settings).
 ui-convert-apply = Convert
 ui-convert-format = Format
-ui-convert-intro = Makes another file of each selected lossless track, for players that can't read FLAC or ALAC. It is still the same track: no new library row, and cues and edits stay on the track.
+ui-convert-intro = Makes another file of each selected lossless or OGG track, for players that can't read FLAC, ALAC or OGG. It is still the same track: no new library row, and cues and edits stay on the track.
 ui-convert-remove = Remove transcodes
 ui-convert-remove-tooltip = Delete the selected tracks' transcode files
 ui-convert-title = Convert tracks
@@ -2547,7 +2556,7 @@ ui-playlist-delete-playlist = Delete playlist
 ui-playlist-export = Export to USB
 ui-playlist-export-space-tooltip = The size to copy includes the tracks' analysis files and artwork, so it can be larger than the audio size in the title
 ui-playlist-export-status = Not exported yet.
-ui-playlist-format-warning-tooltip = Follows the USB's Audio formats (USB view). Only lossless tracks can be converted
+ui-playlist-format-warning-tooltip = Follows the USB's Audio formats (USB view). Only lossless and OGG tracks can be converted
 ui-playlist-name-placeholder = Playlist name...
 ui-playlist-rename-aria-label = Rename playlist
 ui-playlist-rename-tooltip = Rename playlist (or double-click the name)
@@ -2684,7 +2693,7 @@ ui-selection-bar-select-all-progress-failed = Selecting all matching tracks fail
 ui-selection-bar-enumerating = Enumerating tracks...
 ui-selection-bar-clear-selection = Clear selection
 ui-selection-bar-convert = Convert…
-ui-selection-bar-convert-tooltip = Make AIFF, WAV or MP3 files of the selected lossless tracks for players that can't read FLAC or ALAC, or remove them
+ui-selection-bar-convert-tooltip = Make AIFF, WAV or MP3 files of the selected lossless and OGG tracks for players that can't read FLAC, ALAC or OGG, or remove them
 ui-selection-bar-count-none = 0 selected
 ui-selection-bar-edit-details = Edit details…
 ui-selection-bar-edit-short = Edit…

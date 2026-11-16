@@ -16,9 +16,12 @@ The standard release flow is:
 
 The `Release` workflow publishes GitHub Releases from existing `v*` tags.
 
-Relevant pushes to `main` also run the platform builds to populate caches in
-the default branch's scope. These runs do not upload bundle artifacts or
-publish releases. GitHub lets tag builds restore default-branch caches, but
+Pushes to `main` that change what the caches hold (`Cargo.lock`, a
+`Cargo.toml`, a `package-lock.json`, `.cargo/`, the Linux build image or the
+workflow itself) also run the platform builds to populate caches in the
+default branch's scope. Ordinary code pushes do not. A version bump changes
+`Cargo.lock`, so it triggers one such build: let it finish before pushing the
+tag. These runs do not upload bundle artifacts or publish releases. GitHub lets tag builds restore default-branch caches, but
 not caches from earlier tags. The first `main` build starts cold; later tag
 builds can reuse it when their toolchain and cache keys match. Tag builds
 only restore caches and never save them: a cache saved from a tag would be

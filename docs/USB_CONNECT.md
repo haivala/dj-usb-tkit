@@ -111,7 +111,7 @@ stick goes into next; they change from gig to gig, so the app doesn't guess.
 - **Stored on the USB** (in `.dj-usb-tkit/drive.json`, next to the drive's name), so the setting
   goes with the stick to another computer. On a read-only USB the row can't be changed.
 - **What it does:** export puts each track on the USB as its own file or one of its transcodes,
-  the first in a ticked format, and converts lossless tracks that have neither
+  the first in a ticked format, and converts lossless and OGG tracks that have neither
   ([TRANSCODES.md](TRANSCODES.md#on-a-usb)). The USB's playlist and history tracks in an
   unticked format get a warning in the FMT column ("FLAC is not allowed on this USB"), and an
   app playlist's title row says what the export will convert or refuse (see above). ALAC and AAC

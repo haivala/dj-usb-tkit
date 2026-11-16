@@ -271,8 +271,8 @@ pub struct TranscodeTracksData {
     #[serde(default)]
     pub job_id: String,
     pub transcoded: usize,
-    /// Tracks that need no transcode in this format (not lossless, already
-    /// this format, already up to date, file missing).
+    /// Tracks that need no transcode in this format (not lossless or OGG,
+    /// already this format, already up to date, file missing).
     pub skipped: usize,
     pub failed: usize,
     pub cancelled: bool,
@@ -1095,6 +1095,9 @@ pub struct AddTracksToPlaylistData {
     pub playlist_id: String,
     pub added: usize,
     pub skipped: usize,
+    /// Tracks left out because their format can never go on a USB.
+    #[serde(default)]
+    pub unplayable: usize,
     /// "Added 2 tracks (skipped 0) to Warmup".
     #[serde(default)]
     pub status_text: String,

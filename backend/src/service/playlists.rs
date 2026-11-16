@@ -1,6 +1,7 @@
 //! Local playlists and imported-playlist bookkeeping.
 
 use super::*;
+use crate::audio_format::never_goes_on_usb;
 use crate::i18n::{Text, tr};
 use std::collections::{HashMap, HashSet};
 
@@ -342,9 +343,20 @@ fn tracks_added_status(
     playlist_id: &str,
     added: usize,
     skipped: usize,
+    unplayable: usize,
 ) -> BackendResult<String> {
     let name = playlist_name(conn, playlist_id)?;
-    Ok(tr::playlist_tracks_added(added, skipped, name).render())
+    Ok(tracks_added_text(added, skipped, unplayable, name).render())
+}
+
+/// The status line of an add to the playlist(s) `names`: `unplayable` of
+/// the tracks were left out (`never_goes_on_usb`).
+fn tracks_added_text(added: usize, skipped: usize, unplayable: usize, names: String) -> Text {
+    if unplayable == 0 {
+        tr::playlist_tracks_added(added, skipped, names)
+    } else {
+        tr::playlist_tracks_added_unplayable(added, skipped, names, unplayable)
+    }
 }
 
 /// An add's result in the Event Log (`playlist_add.result`): the status line
@@ -354,13 +366,14 @@ fn log_playlist_add(
     playlist_ids: &[String],
     added: usize,
     skipped: usize,
+    unplayable: usize,
     counts: String,
 ) -> BackendResult<Text> {
     let names = playlist_ids
         .iter()
         .map(|id| playlist_name(conn, id))
         .collect::<BackendResult<Vec<_>>>()?;
-    let text = tr::playlist_tracks_added(added, skipped, names.join(", "));
+    let text = tracks_added_text(added, skipped, unplayable, names.join(", "));
     logging::log_text(Level::Info, "playlist-add", "playlist_add.result", &text);
     logging::debug("playlist-add", counts);
     Ok(text)
@@ -708,15 +721,20 @@ impl BackendService {
 
         let mut added = 0usize;
         let mut skipped = 0usize;
+        let mut unplayable = 0usize;
         let now = now();
 
-        // Pre-load existing track IDs to avoid N+1 queries
-        let mut existing_track_ids = std::collections::HashSet::new();
+        // Pre-load existing track IDs to avoid N+1 queries, each with
+        // whether its format can never go on a USB.
+        let mut existing_tracks = std::collections::HashMap::new();
         {
-            let mut stmt = tx.prepare("SELECT id FROM tracks")?;
-            let rows = stmt.query_map([], |row| row.get::<_, String>(0))?;
+            let mut stmt = tx.prepare("SELECT id, format_ext FROM tracks")?;
+            let rows = stmt.query_map([], |row| {
+                Ok((row.get::<_, String>(0)?, row.get::<_, Option<String>>(1)?))
+            })?;
             for row in rows {
-                existing_track_ids.insert(row?);
+                let (id, format_ext) = row?;
+                existing_tracks.insert(id, format_ext.as_deref().is_some_and(never_goes_on_usb));
             }
         }
 
@@ -732,8 +750,14 @@ impl BackendService {
         }
 
         for track_id in &req.track_ids {
-            if !existing_track_ids.contains(track_id.as_str()) {
+            let Some(&never_on_usb) = existing_tracks.get(track_id.as_str()) else {
                 return Err(BackendError::NotFound(tr::error_track_not_found(track_id)));
+            };
+            // A playlist is what goes on a USB: a track that never can
+            // stays out of it.
+            if never_on_usb {
+                unplayable += 1;
+                continue;
             }
 
             if playlist_track_ids.contains(track_id.as_str()) {
@@ -766,13 +790,14 @@ impl BackendService {
             params![now, req.playlist_id],
         )?;
 
-        let status_text = tracks_added_status(&tx, &req.playlist_id, added, skipped)?;
+        let status_text = tracks_added_status(&tx, &req.playlist_id, added, skipped, unplayable)?;
         tx.commit()?;
 
         Ok(AddTracksToPlaylistData {
             playlist_id: req.playlist_id,
             added,
             skipped,
+            unplayable,
             status_text,
         })
     }
@@ -832,10 +857,11 @@ impl BackendService {
 
         if track_ids.is_empty() {
             return Ok(AddTracksToPlaylistData {
-                status_text: tracks_added_status(&conn, &req.playlist_id, 0, 0)?,
+                status_text: tracks_added_status(&conn, &req.playlist_id, 0, 0, 0)?,
                 playlist_id: req.playlist_id,
                 added: 0,
                 skipped: 0,
+                unplayable: 0,
             });
         }
         drop(conn);
@@ -849,9 +875,10 @@ impl BackendService {
             std::slice::from_ref(&added.playlist_id),
             added.added,
             added.skipped,
+            added.unplayable,
             format!(
-                "added={} | skipped={} | allMatching={}",
-                added.added, added.skipped, req.all_matching
+                "added={} | skipped={} | unplayable={} | allMatching={}",
+                added.added, added.skipped, added.unplayable, req.all_matching
             ),
         )?;
         Ok(added)
@@ -951,9 +978,10 @@ impl BackendService {
             std::slice::from_ref(&added.playlist_id),
             added.added,
             added.skipped,
+            added.unplayable,
             format!(
-                "requested={requested} | resolved={resolved} | added={} | skipped={}",
-                added.added, added.skipped
+                "requested={requested} | resolved={resolved} | added={} | skipped={} | unplayable={}",
+                added.added, added.skipped, added.unplayable
             ),
         )?;
 
@@ -1020,6 +1048,7 @@ impl BackendService {
                     playlist_id: playlist_id.clone(),
                     added: 0,
                     skipped: 0,
+                    unplayable: 0,
                     status_text: String::new(),
                 }
             } else {
@@ -1035,13 +1064,17 @@ impl BackendService {
             let conn = self.db.connect()?;
             let added: usize = items.iter().map(|item| item.added).sum();
             let skipped: usize = items.iter().map(|item| item.skipped).sum();
+            // The same tracks went to every playlist, so each left out the
+            // same ones.
+            let unplayable = items.first().map_or(0, |item| item.unplayable);
             log_playlist_add(
                 &conn,
                 playlist_ids,
                 added,
                 skipped,
+                unplayable,
                 format!(
-                    "requested={requested} | resolved={} | added={added} | skipped={skipped}",
+                    "requested={requested} | resolved={} | added={added} | skipped={skipped} | unplayable={unplayable}",
                     track_ids.len()
                 ),
             )?

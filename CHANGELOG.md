@@ -39,6 +39,14 @@
 
 ## Unreleased
 
+- **New feature:** OGG Vorbis tracks can go on a USB. Players don't play OGG, so export converts an OGG track the
+  way it converts lossless tracks, to the USB's first ticked audio format the app makes (AIFF, WAV or MP3), with
+  the track's cues, beat grid and BPM. Convert… makes the same files ahead of time. An OGG track is still left
+  off a USB whose audio formats include none of the three, with a warning.
+- **Improvement:** Tracks that can never go on a USB (Opus and protected AAC, which players don't play and the app
+  can't convert) are no longer added to playlists: the status line says how many were left out. An `.ogg` file
+  holding Opus audio is recognised as Opus when the library is scanned.
+
 ## 0.6.2
 
 - **Improvement:** Analyzing several tracks at once no longer slows down on Windows, where a batch could take

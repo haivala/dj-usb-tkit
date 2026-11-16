@@ -19,7 +19,9 @@ use std::path::{Path, PathBuf};
 use rusqlite::{OptionalExtension, params, params_from_iter};
 
 use crate::audio_encode::TranscodeFormat;
-use crate::audio_format::{UsbAudioFormat, format_ext_from_path, track_rekordbox_file_type};
+use crate::audio_format::{
+    AudioFormat, UsbAudioFormat, format_ext_from_path, track_rekordbox_file_type,
+};
 use crate::edb::ExportTrackData;
 use crate::error::BackendResult;
 use crate::i18n::tr;
@@ -100,6 +102,23 @@ fn transcode_format_of(format: UsbAudioFormat) -> Option<TranscodeFormat> {
     TranscodeFormat::ALL
         .into_iter()
         .find(|&candidate| usb_audio_format_of(candidate) == format)
+}
+
+/// The first of the USB's ticked formats the app can convert to.
+fn first_convertible_format(formats: &UsbAudioFormats) -> Option<TranscodeFormat> {
+    formats
+        .entries()
+        .iter()
+        .filter(|(_, allowed)| *allowed)
+        .find_map(|&(format, _)| transcode_format_of(format))
+}
+
+/// Whether `path` is a file players don't play that export still puts on a
+/// USB with `formats`, as a transcode: an OGG, when the app converts to one
+/// of the ticked formats.
+pub(crate) fn goes_as_transcode_only(path: &Path, formats: &UsbAudioFormats) -> bool {
+    AudioFormat::of_path(path) == Some(AudioFormat::Ogg)
+        && first_convertible_format(formats).is_some()
 }
 
 fn is_lossless(format: UsbAudioFormat) -> bool {
@@ -245,11 +264,7 @@ fn choose_export_file(
     up_to_date: &[TranscodeFile],
     formats: &UsbAudioFormats,
 ) -> ExportFile {
-    // Not a USB audio formats format: export's own "players don't play it"
-    // rule deals with it.
-    let Some(own) = library_usb_audio_format(&track.file_path, track.bit_depth) else {
-        return ExportFile::Source;
-    };
+    let own = library_usb_audio_format(&track.file_path, track.bit_depth);
     let ticked = || {
         formats
             .entries()
@@ -258,7 +273,7 @@ fn choose_export_file(
             .map(|&(format, _)| format)
     };
     for format in ticked() {
-        if format == own {
+        if Some(format) == own {
             return ExportFile::Source;
         }
         if let Some(file) = up_to_date
@@ -268,12 +283,20 @@ fn choose_export_file(
             return ExportFile::Transcode(file.clone());
         }
     }
+    // Not a USB audio formats format: an OGG gets a transcode made, anything
+    // else is left to export's own "players don't play it" rule.
+    let Some(own) = own else {
+        return match first_convertible_format(formats) {
+            Some(format) if goes_as_transcode_only(Path::new(&track.file_path), formats) => {
+                ExportFile::Make(format)
+            }
+            _ => ExportFile::Source,
+        };
+    };
     if !is_lossless(own) {
         return ExportFile::Refused(own);
     }
-    ticked()
-        .find_map(transcode_format_of)
-        .map_or(ExportFile::Refused(own), ExportFile::Make)
+    first_convertible_format(formats).map_or(ExportFile::Refused(own), ExportFile::Make)
 }
 
 /// What the FMT column shows for `file`; `None` for the track's own file.
@@ -615,7 +638,8 @@ mod tests {
         assert_eq!(got[2], ExportFile::Make(TranscodeFormat::Aiff));
         assert_eq!(got[3], ExportFile::Refused(UsbAudioFormat::Aac));
         assert_eq!(got[4], ExportFile::Source);
-        assert_eq!(got[5], ExportFile::Source);
+        // Players don't play OGG: it gets a transcode made as well.
+        assert_eq!(got[5], ExportFile::Make(TranscodeFormat::Aiff));
 
         // A ticked own format before the transcode's: the track's own file.
         let flac_first = formats(&[
@@ -652,6 +676,29 @@ mod tests {
         assert_eq!(
             plan(&fx, &tracks[1..2], &only_alac)[0],
             ExportFile::Refused(UsbAudioFormat::Flac)
+        );
+    }
+
+    #[test]
+    fn an_ogg_goes_as_its_transcode_or_gets_one_made() {
+        let fx = fixture(&[("ogg", "mp3", 100)]);
+        let tracks = [
+            track("ogg", "/m/x.ogg", None),
+            track("bare", "/m/y.ogg", None),
+        ];
+        let got = plan(&fx, &tracks, &UsbAudioFormats::default());
+        let ExportFile::Transcode(file) = &got[0] else {
+            panic!("{:?}", got[0]);
+        };
+        assert_eq!(file.file_path, fx.paths["ogg"]);
+        assert_eq!(got[1], ExportFile::Make(TranscodeFormat::Aiff));
+        assert_eq!(
+            plan(&fx, &tracks[..1], &no(&["mp3"]))[0],
+            ExportFile::Make(TranscodeFormat::Aiff)
+        );
+        assert_eq!(
+            plan(&fx, &tracks[1..], &no(&["aiff", "wav", "mp3"]))[0],
+            ExportFile::Source
         );
     }
 
@@ -745,8 +792,8 @@ mod tests {
             Some((
                 "refused".to_string(),
                 "AAC".to_string(),
-                "M4A · 48 kHz · 256 kbps — AAC can't go on this USB: only lossless files can be \
-                 converted"
+                "M4A · 48 kHz · 256 kbps — AAC can't go on this USB: only lossless and OGG files can \
+                 be converted"
                     .to_string()
             ))
         );

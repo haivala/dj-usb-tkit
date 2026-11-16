@@ -18,6 +18,7 @@ use walkdir::WalkDir;
 
 use crate::audio_format::{
     AudioFormat, format_ext_of, is_apple_double, is_format_folder_name, is_library_extension,
+    recorded_format_ext,
 };
 use crate::error::{BackendError, BackendResult};
 use crate::wav_format::{WavFormatIssue, detect_wav_format_issue};
@@ -286,7 +287,7 @@ pub fn scan_audio_file(path: &Path) -> BackendResult<ScannedTrack> {
         file_size_bytes: i64::try_from(metadata.len()).ok(),
         file_modified_at: file_time_secs(metadata.modified()),
         file_created_at: file_time_secs(metadata.created()),
-        format_ext: format_ext_of(path),
+        format_ext: recorded_format_ext(path),
         sample_rate_hz,
         bit_depth,
         bitrate_kbps,

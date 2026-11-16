@@ -52,7 +52,7 @@
     "ui-convert-apply": "Convert",
     "ui-convert-folder-hint": "Saved in {folder} (change it in Settings).",
     "ui-convert-format": "Format",
-    "ui-convert-intro": "Makes another file of each selected lossless track, for players that can't read FLAC or ALAC. It is still the same track: no new library row, and cues and edits stay on the track.",
+    "ui-convert-intro": "Makes another file of each selected lossless or OGG track, for players that can't read FLAC, ALAC or OGG. It is still the same track: no new library row, and cues and edits stay on the track.",
     "ui-convert-remove": "Remove transcodes",
     "ui-convert-remove-tooltip": "Delete the selected tracks' transcode files",
     "ui-convert-title": "Convert tracks",
@@ -230,7 +230,7 @@
     "ui-playlist-export-failed-unknown": "unknown error",
     "ui-playlist-export-space-tooltip": "The size to copy includes the tracks' analysis files and artwork, so it can be larger than the audio size in the title",
     "ui-playlist-export-status": "Not exported yet.",
-    "ui-playlist-format-warning-tooltip": "Follows the USB's Audio formats (USB view). Only lossless tracks can be converted",
+    "ui-playlist-format-warning-tooltip": "Follows the USB's Audio formats (USB view). Only lossless and OGG tracks can be converted",
     "ui-playlist-import-column-aria-label": "{library} lists",
     "ui-playlist-import-force": "Force update track data",
     "ui-playlist-import-force-from": "Force update track data from {library}",
@@ -284,7 +284,7 @@
     "ui-selection-bar-add-tooltip": "Add the selected tracks to {playlist}",
     "ui-selection-bar-clear-selection": "Clear selection",
     "ui-selection-bar-convert": "Convert…",
-    "ui-selection-bar-convert-tooltip": "Make AIFF, WAV or MP3 files of the selected lossless tracks for players that can't read FLAC or ALAC, or remove them",
+    "ui-selection-bar-convert-tooltip": "Make AIFF, WAV or MP3 files of the selected lossless and OGG tracks for players that can't read FLAC, ALAC or OGG, or remove them",
     "ui-selection-bar-count": {
       "one": "{count} selected",
       "other": "{count} selected"

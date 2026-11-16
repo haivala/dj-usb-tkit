@@ -811,6 +811,25 @@ mod tests {
         }
     }
 
+    #[test]
+    fn an_ogg_vorbis_source_converts_to_every_format() {
+        let dir = tempfile::tempdir().expect("tempdir");
+        let src = fixture("track_format_ogg.ogg");
+        for format in TranscodeFormat::ALL {
+            let dst = dir.path().join(format!("ogg.{}", format.extension()));
+            let out = transcode_file(&src, &dst, format, &TranscodeTags::default(), &no_cancel())
+                .expect("transcode");
+            assert_eq!((out.channels, out.sample_rate), (1, 44_100), "{format:?}");
+            assert!(
+                out.duration_ms.abs_diff(2000) < 50,
+                "{format:?}: {} ms",
+                out.duration_ms
+            );
+            let (samples, _, _, _) = decode_all(&dst);
+            assert!(samples.iter().any(|&s| s != 0), "{format:?}: silent");
+        }
+    }
+
     /// Deterministic noise bursts: unlike a tone, they correlate at exactly
     /// one lag.
     fn write_noise_wav(path: &Path, seconds: u32) {

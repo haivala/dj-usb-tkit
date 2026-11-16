@@ -170,6 +170,7 @@ impl Service {
             playlist_id: added.playlist_id,
             added: added.added,
             skipped: added.skipped,
+            unplayable: 0,
             status_text: added.status_text,
         })
     }
