@@ -107,6 +107,29 @@ player, and compare `exportLibrary.db`, `export.pdb` and the track's `.DAT` and
 If it doesn't, or only on some models, compare the stick's ANLZ cue list with
 the list the last export wrote instead.
 
+## Possibility: rekordbox or Mixxx as the master for track data
+
+First ask users whether they want this. Today forced overwrites exist only in
+the playlist import ("Force update track data"); the ↻ library import never
+replaces cues, BPM or key on a track that already has them, and nothing in the
+UI shows which tracks came from rekordbox or Mixxx, although every track
+carries `rekordboxDbSource` / `mixxxDbSource`.
+
+Idea: a "Track data source" setting in the Analysis section of the settings
+drawer: This app (default, today's behaviour), rekordbox or Mixxx.
+
+- With an external master, every import (↻ and playlist import) replaces BPM,
+  key, beat grid and cues of the tracks from that library; the force checkbox
+  is hidden since it's implied.
+- Those tracks open the cue editor read-only, with a note to edit them there
+  and press ↻. Viewing and playing from cues still works. This also tells the
+  user which tracks the master owns.
+- Analysis leaves their BPM, key and grid alone.
+- Folder-only tracks stay editable; a track in both libraries follows the
+  chosen one.
+- Switching the setting changes no data, only the next ↻ does. ↻ stays manual,
+  no re-read at startup.
+
 ## Hardware glance: Engine library from a stick without a PDB
 
 On a stick with only the eDB, the Engine DJ library is written from the eDB,
