@@ -5,7 +5,7 @@
 # edit this file, not the PKGBUILD there.
 #
 # Repackages the release .deb. The binary links these libraries directly
-# (readelf NEEDED); glibc and libgcc are in base.
+# (readelf NEEDED), listed in full as namcap asks, glibc and libgcc included.
 
 pkgname=dj-usb-tkit-bin
 _appname=dj-usb-tkit
@@ -21,8 +21,10 @@ depends=(
   'dbus'
   'gdk-pixbuf2'
   'glib2'
+  'glibc'
   'gtk3'
   'hicolor-icon-theme'
+  'libgcc'
   'libsoup3'
   'webkit2gtk-4.1'
 )
