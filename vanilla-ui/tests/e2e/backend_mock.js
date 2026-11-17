@@ -377,7 +377,7 @@
     // `FetchUsbHistoriesData` (fetch_usb_histories).
     usbHistories(overrides = {}) {
       const { counts, ...rest } = overrides;
-      const items = (overrides.items || []).map((item) => ({ canExportTracklist: !!item.tracks?.length, ...item }));
+      const items = (overrides.items || []).map((item) => ({ canExportTracklist: !!item.tracks?.length, headingText: item.name, ...item }));
       return {
         items: [],
         summaryText: "mock histories summary",

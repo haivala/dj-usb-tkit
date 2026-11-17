@@ -2082,6 +2082,17 @@ pub struct UsbHistory {
     pub total_duration_ms: u64,
     /// See `UsbPlaylist::duration_unknown_count`.
     pub duration_unknown_count: usize,
+    /// The database the tracks come from: "PDB" or "eDB" (see
+    /// `UsbPlaylist::source`).
+    #[serde(default)]
+    pub source: String,
+    /// Both databases have the session (the heading says "Both DBs").
+    #[serde(skip)]
+    pub in_both: bool,
+    /// The track list's heading: the name with the database that has the
+    /// session, e.g. "HISTORY 007 (Both DBs)".
+    #[serde(default)]
+    pub heading_text: String,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]

@@ -54,7 +54,7 @@ The baseline eDB schema contains these table families:
 | --- | --- | --- |
 | content and metadata dictionaries | `content`, `artist`, `album`, `key`, `genre`, `label`, `color`, `image` | track metadata and id-to-name/path resolution |
 | playlist and membership | `playlist`, `playlist_content` | playlist tree rows and ordered membership |
-| history and membership | `history`, `history_content` | imported and repaired history sessions |
+| history and membership | `history`, `history_content` | history sessions; who writes them depends on `dbVersion` (see below) |
 | cue and hot-cue banks | `cue`, `hotCueBankList`, `hotCueBankList_cue` | `cue` is populated on export from the app's `track_cues` (see below); `hotCueBankList*` remain baseline-only |
 | navigation/config | `property`, `menuItem`, `category`, `sort` | device/db metadata, browse catalog, visible category state, sort state |
 | user tags and recommendations | `myTag`, `myTag_content`, `recommendedLike` | user/My Tag tree, tag-to-track links, recommendation rows |
@@ -155,7 +155,29 @@ History rows live in `history` and `history_content`:
 | `history` | history playlist identity, order, name, attribute, and parent id |
 | `history_content` | ordered track membership for history sessions |
 
-Import and repair can synchronize history from PDB-derived history payloads.
+How and when players write history to each database isn't fully known. Every
+stick seen with history has it in the PDB's `t11/t12` (`docs/PDB.md`); whether a
+player also writes these tables seems to depend on the eDB's
+`property.dbVersion`. What the sticks seen show:
+
+- `dbVersion` 1000: a CDJ-3000 left them alone. A session it recorded after an
+  app export is only in the PDB; the eDB's sessions there are older copies of
+  the PDB's.
+- `dbVersion` 10000: on the one stick seen with history, both databases held
+  the same sessions under the same ids. Its `history_content` names tracks by
+  their PDB id, which on that stick is not always the eDB's `content_id` for the
+  same file, so some entries name a missing or different `content` row.
+
+The app copies the PDB's sessions here with the optional
+`sync_edb_history_from_pdb` repair (`derive_history_sync_payload` in
+`backend/src/service/repair/history.rs`). It keeps the PDB session's id as
+`history_id`, sets `sequenceNo`, `attribute` and `history_id_parent` to 0, and
+writes each entry's PDB track id as `content_id` without mapping it to the eDB's
+own id. That is harmless when the two databases number tracks the same way (an
+app export) and wrong where they differ.
+
+Because of both, USB History prefers the PDB's copy of a session
+(`docs/USB_IMPORT.md`).
 
 ## Dictionary and Artwork Rows
 

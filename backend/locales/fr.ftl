@@ -145,6 +145,8 @@ usb-history-summary = { $sessions ->
 }
 
 usb-history-loaded = Historiques USB chargés : { $sessions }
+usb-history-heading = { $name } ({ $databases })
+usb-history-source-both = Les deux bases
 usb-history-warning-pdb-not-found = PDB introuvable sous { $root } ; l'importation de l'historique nécessite la PDB
 
 ## usb-player-menu

@@ -37,40 +37,32 @@ pub(crate) fn lookup_playlist_tracks<'a>(
         })
 }
 
-pub(crate) fn merge_playlist_tracks(
+/// A USB playlist's tracks, from one database: the eDB's list when it has
+/// any, else the PDB's. Returns the list with its source ("eDB", "PDB" or
+/// "none"). A repeated record ID keeps its first entry.
+pub(crate) fn pick_playlist_tracks(
     pdb_tracks: &[UsbTrack],
-    export_tracks: &[UsbTrack],
+    edb_tracks: &[UsbTrack],
 ) -> (Vec<UsbTrack>, &'static str) {
-    if !export_tracks.is_empty() {
-        let mut out = Vec::<UsbTrack>::new();
-        let mut seen = HashSet::<String>::new();
-        for track in export_tracks {
-            if track_merge_key(track).is_none_or(|key| seen.insert(key)) {
-                out.push(track.clone());
-            }
-        }
-        return (out, "eDB");
-    }
-
-    if pdb_tracks.is_empty() {
+    let (tracks, source) = if !edb_tracks.is_empty() {
+        (edb_tracks, "eDB")
+    } else if !pdb_tracks.is_empty() {
+        (pdb_tracks, "PDB")
+    } else {
         return (Vec::new(), "none");
-    }
-
-    let mut out = Vec::<UsbTrack>::new();
+    };
     let mut seen = HashSet::<String>::new();
-    for set in [pdb_tracks, export_tracks] {
-        for track in set {
-            if track_merge_key(track).is_none_or(|key| seen.insert(key)) {
-                out.push(track.clone());
-            }
-        }
-    }
-    (out, "pdb")
+    let picked = tracks
+        .iter()
+        .filter(|track| track_merge_key(track).is_none_or(|key| seen.insert(key)))
+        .cloned()
+        .collect();
+    (picked, source)
 }
 
 pub(crate) fn playlist_source_rank(source: &str) -> usize {
     match source {
-        "pdb" => 3,
+        "PDB" => 3,
         "eDB" => 2,
         _ => 1,
     }
@@ -279,31 +271,31 @@ mod tests {
 
     #[test]
     fn source_rank_ordering() {
-        assert_eq!(playlist_source_rank("pdb"), 3);
+        assert_eq!(playlist_source_rank("PDB"), 3);
         assert_eq!(playlist_source_rank("eDB"), 2);
         assert_eq!(playlist_source_rank("other"), 1);
         assert_eq!(playlist_source_rank(""), 1);
     }
 
-    // --- merge_playlist_tracks ---
+    // --- pick_playlist_tracks ---
 
     #[test]
-    fn merge_prefers_export_over_pdb() {
+    fn pick_prefers_export_over_pdb() {
         let pdb = vec![make_track("1", "A", "X", "/a.mp3")];
         let export = vec![make_track("1", "A Better", "X", "/a.mp3")];
 
-        let (merged, source) = merge_playlist_tracks(&pdb, &export);
+        let (merged, source) = pick_playlist_tracks(&pdb, &export);
         assert_eq!(source, "eDB");
         assert_eq!(merged.len(), 1);
         assert_eq!(merged[0].title, "A Better");
     }
 
     #[test]
-    fn merge_export_source_does_not_append_same_name_pdb_tracks() {
+    fn pick_export_source_does_not_append_same_name_pdb_tracks() {
         let pdb = vec![make_track("1", "Old USB Track", "X", "/old.mp3")];
         let export = vec![make_track("2", "New Export Track", "Y", "/new.mp3")];
 
-        let (merged, source) = merge_playlist_tracks(&pdb, &export);
+        let (merged, source) = pick_playlist_tracks(&pdb, &export);
         assert_eq!(source, "eDB");
         assert_eq!(merged.len(), 1);
         assert_eq!(merged[0].title, "New Export Track");
@@ -311,38 +303,38 @@ mod tests {
     }
 
     #[test]
-    fn merge_export_source_returns_only_export_set() {
+    fn pick_export_source_returns_only_export_set() {
         let pdb = vec![
             make_track("1", "Track A", "X", "/a.mp3"),
             make_track("2", "Track B", "Y", "/b.mp3"),
         ];
         let export = vec![make_track("1", "Track A Export", "X", "/a.mp3")];
 
-        let (merged, source) = merge_playlist_tracks(&pdb, &export);
+        let (merged, source) = pick_playlist_tracks(&pdb, &export);
         assert_eq!(source, "eDB");
         assert_eq!(merged.len(), 1);
         assert_eq!(merged[0].title, "Track A Export");
     }
 
     #[test]
-    fn merge_deduplicates_same_path_when_ids_differ() {
+    fn pick_deduplicates_same_path_when_ids_differ() {
         let pdb = vec![make_track("1001", "Track A", "X", "/a.mp3")];
         let export = vec![make_track("2002", "Track A Export", "X", "/a.mp3")];
 
-        let (merged, source) = merge_playlist_tracks(&pdb, &export);
+        let (merged, source) = pick_playlist_tracks(&pdb, &export);
         assert_eq!(source, "eDB");
         assert_eq!(merged.len(), 1);
         assert_eq!(merged[0].id, "2002");
     }
 
     #[test]
-    fn merge_keeps_distinct_tracks_whose_paths_differ_only_by_punctuation() {
+    fn pick_keeps_distinct_tracks_whose_paths_differ_only_by_punctuation() {
         let export = vec![
             make_track("1", "Live Vol. 1", "X", "/Contents/X/Live - Vol. 1.mp3"),
             make_track("2", "Live Vol-1", "X", "/Contents/X/Live - Vol-1.mp3"),
         ];
 
-        let (merged, _) = merge_playlist_tracks(&[], &export);
+        let (merged, _) = pick_playlist_tracks(&[], &export);
         assert_eq!(
             merged.iter().map(|t| t.id.as_str()).collect::<Vec<_>>(),
             ["1", "2"]
@@ -350,28 +342,28 @@ mod tests {
     }
 
     #[test]
-    fn merge_collapses_repeated_record_id() {
+    fn pick_collapses_repeated_record_id() {
         let export = vec![
             make_track("1", "Track A", "X", "/a.mp3"),
             make_track("1", "Track A", "X", "/a.mp3"),
         ];
 
-        let (merged, _) = merge_playlist_tracks(&[], &export);
+        let (merged, _) = pick_playlist_tracks(&[], &export);
         assert_eq!(merged.len(), 1);
     }
 
     #[test]
-    fn merge_pdb_only() {
+    fn pick_pdb_only() {
         let pdb = vec![make_track("1", "Track A", "X", "/a.mp3")];
         let export: Vec<UsbTrack> = vec![];
 
-        let (merged, source) = merge_playlist_tracks(&pdb, &export);
-        assert_eq!(source, "pdb");
+        let (merged, source) = pick_playlist_tracks(&pdb, &export);
+        assert_eq!(source, "PDB");
         assert_eq!(merged.len(), 1);
     }
 
     #[test]
-    fn merge_without_path_preserves_distinct_record_ids_and_unknown_entries() {
+    fn pick_without_path_preserves_distinct_record_ids_and_unknown_entries() {
         let pdb = vec![
             make_track("1", "Song", "Artist", ""),
             make_track("2", "Song", "Artist", ""),
@@ -380,8 +372,8 @@ mod tests {
             make_track("1", "Song", "Artist", ""),
         ];
 
-        let (merged, source) = merge_playlist_tracks(&pdb, &[]);
-        assert_eq!(source, "pdb");
+        let (merged, source) = pick_playlist_tracks(&pdb, &[]);
+        assert_eq!(source, "PDB");
         assert_eq!(merged.len(), 4);
         assert_eq!(
             merged.iter().map(|t| t.id.as_str()).collect::<Vec<_>>(),
@@ -390,8 +382,8 @@ mod tests {
     }
 
     #[test]
-    fn merge_all_empty() {
-        let (merged, source) = merge_playlist_tracks(&[], &[]);
+    fn pick_all_empty() {
+        let (merged, source) = pick_playlist_tracks(&[], &[]);
         assert_eq!(source, "none");
         assert!(merged.is_empty());
     }
@@ -401,8 +393,8 @@ mod tests {
     #[test]
     fn dedupe_keeps_higher_track_count() {
         let items = vec![
-            make_playlist("My Set", "pdb", 5),
-            make_playlist("My Set", "pdb", 10),
+            make_playlist("My Set", "PDB", 5),
+            make_playlist("My Set", "PDB", 10),
         ];
         let (deduped, collapsed) = dedupe_usb_playlists_by_name(items);
         assert_eq!(deduped.len(), 1);
@@ -414,19 +406,19 @@ mod tests {
     fn dedupe_keeps_higher_rank_on_same_count() {
         let items = vec![
             make_playlist("My Set", "none", 5),
-            make_playlist("My Set", "pdb", 5),
+            make_playlist("My Set", "PDB", 5),
         ];
         let (deduped, collapsed) = dedupe_usb_playlists_by_name(items);
         assert_eq!(deduped.len(), 1);
         assert_eq!(collapsed, 1);
-        assert_eq!(deduped[0].source, "pdb");
+        assert_eq!(deduped[0].source, "PDB");
     }
 
     #[test]
     fn dedupe_different_names_kept() {
         let items = vec![
-            make_playlist("Set A", "pdb", 5),
-            make_playlist("Set B", "pdb", 3),
+            make_playlist("Set A", "PDB", 5),
+            make_playlist("Set B", "PDB", 3),
         ];
         let (deduped, collapsed) = dedupe_usb_playlists_by_name(items);
         assert_eq!(deduped.len(), 2);

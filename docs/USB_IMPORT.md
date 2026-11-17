@@ -39,7 +39,7 @@ Known DB data surfaces used by import:
   - artwork and dictionary ID references used by track rows
   - history-family tables (`t11/t12`, `t17/t18`, and `t19`)
 
-Track metadata resolution for imported playlist entries is multi-source. The importer attempts to resolve each referenced track ID through PDB row data, then eDB content data, then optional rekordbox DB fallback, and skips unresolvable orphan entries instead of failing the whole playlist import.
+Track metadata resolution for imported playlist entries is multi-source. The importer attempts to resolve each referenced track ID through PDB row data, then eDB content data, then optional rekordbox DB fallback, and skips unresolvable orphan entries instead of failing the whole playlist import. History entries are different: each is looked up only in the database its session came from (see below).
 
 ### Adding a USB track to an app playlist
 
@@ -101,12 +101,33 @@ Parser hardening includes compatibility behavior observed in real exports:
 
 These rules are important for robust import on mixed-vendor or older USB content where strict naive parsing would drop rows.
 
-History source selection is explicit. Import keeps the two history-table
-families separate and selects one family for a read: `t11/t12` is used
-whenever either table is populated, otherwise import uses `t17/t18`. This
-avoids mixing incompatible history-table families and prevents seeded
+History source selection is explicit. Inside the PDB, import keeps the two
+history-table families separate and selects one family for a read: `t11/t12`
+is used whenever either table is populated, otherwise import uses `t17/t18`.
+This avoids mixing incompatible history-table families and prevents seeded
 `t17/t18` template rows from surfacing as real user history on initialized or
-freshly exported drives.
+freshly exported drives. Only sessions named `HISTORY NNN` are listed.
+
+USB History then lists the sessions of both databases, matched by session id
+(the PDB row id and the eDB `history_id`, which are the same for one session):
+`resolve_history_sessions` and `merge_history_sessions` in
+`backend/src/service/usb.rs`. Each session's tracks come from one database,
+looked up in that database's own tracks, because the two can number a track
+differently:
+
+- the PDB's copy when it has tracks: every stick seen with history has it in
+  the PDB, and the eDB's copy can name PDB track ids (`docs/eDB.md`);
+- otherwise the eDB's copy, when it has tracks: a session only the eDB still
+  has, for example after the PDB was rebuilt from the eDB;
+- otherwise whichever database has the session, with no tracks.
+
+The heading above a session's track list says where the session is:
+"HISTORY 007 (Both DBs)" when both databases have it, else the one database that
+has it, for example "HISTORY 007 (eDB)". How and when players write history to
+each database isn't known, so this is shown for history only. The session's
+`source` field still names the database its tracks were taken from. A track that isn't in its session's
+database is listed as "Unknown Track #N", never filled in from the other
+database.
 
 USB History lists sessions newest first. The backend reverses them after filling in their dates,
 because carrying a date forward needs them oldest first.

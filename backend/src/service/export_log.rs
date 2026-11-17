@@ -646,6 +646,9 @@ mod tests {
             ],
             total_duration_ms: 0,
             duration_unknown_count: 0,
+            source: "PDB".to_string(),
+            in_both: false,
+            heading_text: String::new(),
         }];
         let log = UsbExportLog {
             schema_version: 1,

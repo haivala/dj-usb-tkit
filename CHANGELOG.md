@@ -49,8 +49,13 @@
 - **Improvement:** Protected AAC tracks (`.m4p`), which players don't play and the app can't convert, are no
   longer added to playlists. The row's "+" is off and says why, adding a selection leaves them out and says how
   many, and a playlist imported from rekordbox or Mixxx leaves them out with a warning.
+- **Improvement:** The heading above a USB history session's track list names the database that has the
+  session, or says Both DBs, for example "HISTORY 007 (Both DBs)".
 - **Fix:** Analysis no longer fails every track still waiting with "Not enough available memory" when the last
   running track ends while memory is short. The next track starts anyway.
+- **Fix:** USB history lists the sessions from both the PDB and the eDB. A session recorded only in the eDB was
+  missing while the USB had a PDB. A session in both shows the PDB's tracks, or the eDB's when the PDB's copy is
+  empty, and each session's tracks are looked up in the database the session came from.
 
 ## 0.6.2
 

@@ -357,10 +357,7 @@ pub(crate) fn open_edb_rw_at(path: &Path) -> Option<rusqlite::Connection> {
 pub(crate) fn edb_as_parsed_pdb(
     conn: &rusqlite::Connection,
 ) -> BackendResult<crate::pdb_reader::ParsedPdb> {
-    use crate::pdb_reader::{
-        ParsedPdb, PdbHistoryEntryRow, PdbHistoryPlaylistRow, PdbPlaylistEntryRow,
-        PdbPlaylistTreeRow, PdbTrackRow,
-    };
+    use crate::pdb_reader::{ParsedPdb, PdbPlaylistEntryRow, PdbPlaylistTreeRow, PdbTrackRow};
     let id = |value: Option<i64>| value.and_then(|v| u32::try_from(v).ok()).unwrap_or(0);
     let mut parsed = ParsedPdb::default();
     if table_exists(conn, "content") {
@@ -489,12 +486,28 @@ pub(crate) fn edb_as_parsed_pdb(
             })?
             .collect::<Result<Vec<_>, _>>()?;
     }
+    (parsed.history_playlists, parsed.history_entries) = read_edb_history(conn)?;
+    Ok(parsed)
+}
+
+/// The eDB's `history` / `history_content` rows in the PDB's history shape
+/// (t11/t12). Entry track IDs are eDB `content_id`s.
+pub(crate) fn read_edb_history(
+    conn: &rusqlite::Connection,
+) -> BackendResult<(
+    Vec<crate::pdb_reader::PdbHistoryPlaylistRow>,
+    Vec<crate::pdb_reader::PdbHistoryEntryRow>,
+)> {
+    use crate::pdb_reader::{PdbHistoryEntryRow, PdbHistoryPlaylistRow};
+    let id = |value: Option<i64>| value.and_then(|v| u32::try_from(v).ok()).unwrap_or(0);
+    let mut playlists = Vec::new();
+    let mut entries = Vec::new();
     if table_exists(conn, "history") {
         let mut stmt = conn.prepare(
             "SELECT history_id, COALESCE(name, '') FROM history \
              ORDER BY COALESCE(sequenceNo, 0), history_id",
         )?;
-        parsed.history_playlists = stmt
+        playlists = stmt
             .query_map([], |row| {
                 Ok(PdbHistoryPlaylistRow {
                     id: id(row.get(0)?),
@@ -508,7 +521,7 @@ pub(crate) fn edb_as_parsed_pdb(
         let mut stmt = conn.prepare(
             "SELECT history_id, content_id, COALESCE(sequenceNo, 0) FROM history_content",
         )?;
-        parsed.history_entries = stmt
+        entries = stmt
             .query_map([], |row| {
                 Ok(PdbHistoryEntryRow {
                     track_id: row
@@ -521,7 +534,7 @@ pub(crate) fn edb_as_parsed_pdb(
             })?
             .collect::<Result<Vec<_>, _>>()?;
     }
-    Ok(parsed)
+    Ok((playlists, entries))
 }
 
 /// `c.<column>` when the eDB's `content` table has `column`, else `NULL`, so

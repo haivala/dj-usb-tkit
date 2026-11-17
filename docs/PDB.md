@@ -234,8 +234,8 @@ Known table families used by this repository:
 | `t08` | playlist_entries | playlist membership and order |
 | `t09` | unlisted/other | not named in the Deep Symmetry table list; left empty by the current writer |
 | `t10` | unlisted/other | not named in the Deep Symmetry table list; left empty by the current writer |
-| `t11` | history_playlists_alt | not named in the Deep Symmetry table list; left empty by the current writer; import uses this history family when populated |
-| `t12` | history_entries_alt | not named in the Deep Symmetry table list; left empty by the current writer; import uses this history family when populated |
+| `t11` | history_playlists_alt | not named in the Deep Symmetry table list; where players record play history sessions (`HISTORY NNN`); left empty by the current writer; import uses this history family when populated |
+| `t12` | history_entries_alt | not named in the Deep Symmetry table list; the tracks of the `t11` sessions, in play order; left empty by the current writer; import uses this history family when populated |
 | `t13` | artwork | artwork path dictionary rows |
 | `t14` | unlisted/other | not named in the Deep Symmetry table list; left empty by the current writer |
 | `t15` | unlisted/other | not named in the Deep Symmetry table list; left empty by the current writer |
@@ -255,6 +255,18 @@ export. The reader can parse `t11` and `t12` as an alternate runtime
 history-family surface. Runtime history import keeps `t11/t12` separate from
 `t17/t18` and uses `t11/t12` whenever either table is populated; otherwise it
 uses `t17/t18`.
+
+Every stick seen with play history has it here. How and when players write
+history to each database isn't fully known; whether they also write the eDB's
+`history` / `history_content` seems to depend on the eDB's database version
+(`property.dbVersion`, see `docs/eDB.md`). On a `dbVersion` 1000 stick a CDJ-3000,
+which reads the eDB first, still wrote its sessions to `t11/t12` only: after an
+app export, a new `HISTORY NNN` session appeared in `t11/t12` while the eDB file
+was unchanged since the export. Sessions are numbered in order on the stick (`HISTORY 001`,
+`HISTORY 002`, …), and the number is the row id. Whether a number is ever
+reused after a session is removed has not been checked; a stick whose first
+session is not `HISTORY 001` has been seen, with no trace of the earlier
+sessions in either database or in the app's backups.
 
 ### t17/t18 blank template rows on fresh/never-played exports
 

@@ -149,6 +149,7 @@ usb-playlists-selected = USB playlist selected: { $name } ({ $count ->
 # $name: the playlist's name.
 usb-playlists-remove-confirm = Remove USB playlist "{ $name }" from the stick?
 
+
 # Event Log notes while reading or removing the stick's playlists.
 # $count: how many playlists. $names: their names, comma-separated.
 usb-playlists-warning-empty-source = { $count ->
@@ -226,6 +227,11 @@ usb-history-summary = { $sessions ->
 # The status line after reading the stick's history; a warning count may follow.
 # $sessions: how many sessions were read.
 usb-history-loaded = USB histories loaded: { $sessions }
+# Heading above a USB history session's track list. $name: the session's name.
+# $databases: the database that has the session, "PDB" or "eDB", or usb-history-source-both.
+usb-history-heading = { $name } ({ $databases })
+# The $databases above for a session that's in both the PDB and the eDB.
+usb-history-source-both = Both DBs
 # Event Log warning when the stick has no PDB. $root: the USB's folder.
 usb-history-warning-pdb-not-found = PDB not found under { $root }; history import requires PDB
 

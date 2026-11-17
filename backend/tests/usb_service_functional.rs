@@ -983,6 +983,98 @@ fn fetch_usb_histories_reads_injected_pdb_history_rows_and_materializes_tracks()
     );
 }
 
+#[test]
+fn fetch_usb_histories_lists_sessions_from_both_databases() {
+    let root = tempdir().expect("temp root");
+    let media_a = root.path().join("media-a");
+    let media_b = root.path().join("media-b");
+    let usb = root.path().join("usb");
+    fs::create_dir_all(&usb).expect("create usb dir");
+    let data_dir = root.path().join("data");
+    let backend = BackendCommands::new(&data_dir).expect("create backend");
+    let initialized = backend.initialize_usb(InitializeUsbRequest {
+        usb_root: usb.to_string_lossy().to_string(),
+    });
+    assert!(initialized.ok, "initialize usb failed: {initialized:?}");
+    scan_and_export_single_track(
+        &backend,
+        &data_dir,
+        &media_a,
+        &usb,
+        "formats/track_format_flac.flac",
+        "History Artist - History Track A.flac",
+        "History Source Playlist A",
+    );
+    scan_and_export_single_track(
+        &backend,
+        &data_dir,
+        &media_b,
+        &usb,
+        "noart/track_no_art.mp3",
+        "History Artist - History Track B.mp3",
+        "History Source Playlist B",
+    );
+
+    // Session 1 in both databases, session 2 only in the eDB, each naming a
+    // track by its own database's ID.
+    let parsed = parse_pdb(&pdb_path(&usb)).expect("parse exported pdb");
+    let track_a = parsed
+        .tracks
+        .iter()
+        .find(|t| t.track_file_path.contains("Track A"))
+        .expect("track A in PDB")
+        .id;
+    append_history_to_pdb(&pdb_path(&usb), 1, &[track_a]);
+    let edb = common::open_edb(&common::vendor_db_dir(&usb).join("exportLibrary.db"));
+    let content_id = |name: &str| -> i64 {
+        edb.query_row(
+            "SELECT content_id FROM content WHERE path LIKE ?1",
+            [format!("%{name}%")],
+            |row| row.get(0),
+        )
+        .expect("track in eDB")
+    };
+    let (edb_track_a, edb_track_b) = (content_id("Track A"), content_id("Track B"));
+    edb.execute_batch(&format!(
+        "INSERT INTO history (history_id, sequenceNo, name, attribute, history_id_parent) \
+         VALUES (1, 0, 'HISTORY 1', 0, 0), (2, 0, 'HISTORY 002', 0, 0); \
+         INSERT INTO history_content (history_id, content_id, sequenceNo) \
+         VALUES (1, {edb_track_a}, 1), (2, {edb_track_b}, 1);"
+    ))
+    .expect("add eDB history");
+    drop(edb);
+
+    let data = backend
+        .fetch_usb_histories(FetchUsbHistoriesRequest {
+            usb_root: Some(usb.to_string_lossy().to_string()),
+        })
+        .data
+        .expect("history data");
+    let listed = data
+        .items
+        .iter()
+        .map(|h| {
+            let titles = h.tracks.iter().map(|t| t.title.clone()).collect::<Vec<_>>();
+            (h.id.as_str(), h.heading_text.as_str(), titles)
+        })
+        .collect::<Vec<_>>();
+    assert_eq!(
+        listed,
+        [
+            (
+                "usb-h-2",
+                "HISTORY 002 (eDB)",
+                vec!["Fixture No Art".to_string()]
+            ),
+            (
+                "usb-h-1",
+                "HISTORY 1 (Both DBs)",
+                vec!["History Track A".to_string()]
+            ),
+        ]
+    );
+}
+
 fn append_history_to_pdb(pdb_path: &Path, history_id: u32, track_ids: &[u32]) {
     let mut bytes = fs::read(pdb_path).expect("read PDB");
     let len_page = read_u32_le(&bytes, 4).expect("len_page") as usize;

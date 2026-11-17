@@ -651,6 +651,12 @@ usb-not-for-ui = Not sent
             "ui-usb-edb",
         ],
         &["backups-files-pdb", "diagnostics-section-pdb", "ui-usb-pdb"],
+        // A value with its note in parentheses: a USB history session's name with its
+        // database, and a repair outcome with its notes.
+        &[
+            "repair-outcome-detail-unindexed-notes",
+            "usb-history-heading",
+        ],
         // A diagnostics group, where playback came from, the sidebar's page.
         &[
             "diagnostics-group-library",

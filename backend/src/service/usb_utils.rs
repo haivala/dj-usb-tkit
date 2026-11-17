@@ -1027,13 +1027,6 @@ pub(crate) fn collect_contents_files(usb_root: &Path) -> Vec<String> {
     out
 }
 
-pub(crate) fn parse_history_numeric_id(id: &str) -> u32 {
-    id.rsplit('-')
-        .next()
-        .and_then(|s| s.parse::<u32>().ok())
-        .unwrap_or(u32::MAX)
-}
-
 pub(crate) fn canonicalize_playlist_name(value: &str) -> String {
     value
         .chars()

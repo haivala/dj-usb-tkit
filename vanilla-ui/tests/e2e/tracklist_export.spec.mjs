@@ -31,8 +31,8 @@ function installTauriMock(page) {
         case "fetch_usb_histories":
           return backend.ok({
             items: [
-              { id: "hist-1", name: "HISTORY 001", createdAt: "2026-08-01", tracks: historyTracks },
-              { id: "hist-0", name: "HISTORY 000", createdAt: null, tracks: historyTracks.slice(0, 1) }
+              { id: "hist-1", name: "HISTORY 001", headingText: "HISTORY 001 (PDB)", createdAt: "2026-08-01", tracks: historyTracks },
+              { id: "hist-0", name: "HISTORY 000", headingText: "HISTORY 000 (eDB)", createdAt: null, tracks: historyTracks.slice(0, 1) }
             ],
             counts: { importedPlaylists: 2, importedTracks: 5 },
             summaryText: "2 sessions, 5 tracks",
@@ -72,7 +72,7 @@ test("Export Tracklist dialog's start-track select is populated from the selecte
   // Same layout as USB Playlists: totals on the header line, the open
   // session's name + track count above its table.
   await expect(page.locator(".panel-header #historyCountsText")).toHaveText("2 sessions, 5 tracks");
-  await expect(page.locator("#historyHeading .track-list-heading-name")).toHaveText("HISTORY 001");
+  await expect(page.locator("#historyHeading .track-list-heading-name")).toHaveText("HISTORY 001 (PDB)");
   await expect(page.locator("#historyHeading .track-list-heading-count")).toHaveText("4 tracks");
   // Opening the first session by itself doesn't replace the read's status.
   await expect(page.locator("#statusText")).toContainText("USB histories loaded: 2");
@@ -166,7 +166,7 @@ test("Export Tracklist saves the session from the chosen start track, and report
 
   // Another row exports its own session.
   await page.locator("#historyList li").nth(1).locator("button").click();
-  await expect(page.locator("#historyHeading .track-list-heading-name")).toHaveText("HISTORY 000");
+  await expect(page.locator("#historyHeading .track-list-heading-name")).toHaveText("HISTORY 000 (eDB)");
   await page.locator("#exportHistoryTracklistBtn").click();
   await page.locator("#tracklistExportOkBtn").click();
   await expect.poll(() => page.evaluate(() => window.__tracklistBuilds.at(-1)?.id)).toBe("hist-0");
@@ -180,7 +180,7 @@ test("a session the backend says can't export disables Export Tracklist, and a l
     backend.override(async (command, request, payload, next) => {
       if (command === "fetch_usb_histories") {
         return backend.ok({
-          items: [{ id: "hist-1", name, createdAt: "2026-08-01", canExportTracklist: false, tracks: [] }],
+          items: [{ id: "hist-1", name, headingText: name, createdAt: "2026-08-01", canExportTracklist: false, tracks: [] }],
           counts: { importedPlaylists: 1, importedTracks: 0 },
           warnings: []
         });

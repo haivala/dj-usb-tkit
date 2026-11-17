@@ -2,7 +2,7 @@
 
 use crate::i18n::tr;
 use crate::utils::{counted, track_list_summary, warning_text};
-use std::collections::{HashMap, HashSet};
+use std::collections::{BTreeMap, BTreeSet, HashMap, HashSet};
 use std::path::Path;
 use std::sync::Arc;
 
@@ -12,7 +12,7 @@ use uuid::Uuid;
 
 use super::diagnostics::{OutdatedBeatGrid, detect_outdated_beat_grids};
 use super::usb_staging::{UsbDatabases, UsbDatabasesExt};
-use crate::edb::{open_edb_from_usb_root, table_exists};
+use crate::edb::open_edb_from_usb_root;
 use crate::error::{BackendError, BackendResult};
 use crate::logging::{self, Level};
 use crate::models::{
@@ -22,7 +22,7 @@ use crate::models::{
     UsbHistory, UsbHistoryCounts, UsbImportStats, UsbPlaylist, UsbTrack, ValidateUsbRootData,
     ValidateUsbRootRequest, WarningEntry,
 };
-use crate::pdb_reader::{ParsedPdb, PdbHistoryEntryRow, PdbHistoryPlaylistRow};
+use crate::pdb_reader::{ParsedPdb, PdbHistoryEntryRow, PdbHistoryPlaylistRow, PdbHistoryRow};
 
 use super::analysis::normalize_text;
 use super::export_helpers::{
@@ -38,14 +38,14 @@ use super::usb_display_files::{
 use super::usb_helpers::{
     PlaylistCandidate, decode_history_playlist_id, decode_history_track_id,
     dedupe_usb_playlists_by_name, history_entry_sort_key, is_named_history_playlist,
-    lookup_playlist_tracks, merge_playlist_tracks, normalize_packed_id,
-    parse_history_name_numeric_id, parse_history_slot_id, sanitize_history_name, sanitize_text,
+    lookup_playlist_tracks, normalize_packed_id, parse_history_name_numeric_id,
+    parse_history_slot_id, pick_playlist_tracks, sanitize_history_name, sanitize_text,
 };
 use super::usb_identity::UsbAudioFormats;
 use super::usb_utils::{
     self, artwork_path_to_data_url, canonicalize_or_self, canonicalize_playlist_name,
     has_write_access, load_waveform_preview_from_analysis_path, normalize_usb_root_path,
-    parse_history_numeric_id, resolve_usb_root, resolve_usb_side_path_lexical_text,
+    resolve_usb_root, resolve_usb_side_path_lexical_text,
 };
 use super::usb_vendor_compat::{USB_CONTENTS_DIR, USB_VENDOR_ROOT_DIR};
 use super::{
@@ -322,6 +322,149 @@ fn filter_named_history_playlists(
         .collect()
 }
 
+/// One database's history session with its tracks resolved.
+#[derive(Debug, Clone)]
+struct HistorySession {
+    name: String,
+    /// The "NNN" of "HISTORY NNN".
+    name_number: Option<u32>,
+    tracks: Vec<UsbTrack>,
+}
+
+/// One database's named history sessions by session number (the row ID:
+/// rekordbox and the app's eDB history sync give a session the same one in
+/// both databases), each entry's track looked up in `track_by_id`, that same
+/// database's tracks.
+fn resolve_history_sessions(
+    playlists: &[PdbHistoryPlaylistRow],
+    entries: &[PdbHistoryEntryRow],
+    track_by_id: &HashMap<u32, UsbTrack>,
+) -> BTreeMap<u32, HistorySession> {
+    let playlists = filter_named_history_playlists(playlists.to_vec());
+    let known_history_ids = playlists
+        .iter()
+        .map(|row| normalize_packed_id(row.id))
+        .collect::<HashSet<_>>();
+    let mut entries_by_history = entries.iter().fold(
+        HashMap::<u32, Vec<&PdbHistoryEntryRow>>::new(),
+        |mut acc, e| {
+            let decoded =
+                decode_history_playlist_id(e.playlist_id, e.entry_index, &known_history_ids)
+                    .unwrap_or_else(|| normalize_packed_id(e.playlist_id));
+            acc.entry(decoded).or_default().push(e);
+            acc
+        },
+    );
+    playlists
+        .iter()
+        .map(|row| {
+            let row_id = normalize_packed_id(row.id);
+            let mut entries = entries_by_history.remove(&row_id).unwrap_or_default();
+            entries.sort_by_key(|e| history_entry_sort_key(e.entry_index));
+            let tracks = entries
+                .iter()
+                .filter_map(|e| {
+                    e.track_id
+                        .or_else(|| decode_history_track_id(e.playlist_id, e.entry_index))
+                })
+                .map(|track_id| {
+                    track_by_id
+                        .get(&track_id)
+                        .cloned()
+                        .unwrap_or_else(|| unknown_history_track(track_id))
+                })
+                .collect::<Vec<_>>();
+            // Never empty: only "HISTORY ..." sessions get here.
+            let name = sanitize_history_name(&row.name);
+            let name_number = parse_history_name_numeric_id(&name);
+            (
+                row_id,
+                HistorySession {
+                    name,
+                    name_number,
+                    tracks,
+                },
+            )
+        })
+        .collect()
+}
+
+/// Both databases' sessions as one list, matched by session number, each
+/// with whether both databases have it and the database its tracks come
+/// from: the PDB's when it has tracks,
+/// else the eDB's when that has any, else whichever has the session.
+fn merge_history_sessions(
+    mut pdb: BTreeMap<u32, HistorySession>,
+    mut edb: BTreeMap<u32, HistorySession>,
+) -> BTreeMap<u32, (HistorySession, &'static str, bool)> {
+    let numbers = pdb
+        .keys()
+        .chain(edb.keys())
+        .copied()
+        .collect::<BTreeSet<_>>();
+    numbers
+        .into_iter()
+        .filter_map(|number| {
+            let picked = match (pdb.remove(&number), edb.remove(&number)) {
+                (Some(p), Some(e)) if p.tracks.is_empty() && !e.tracks.is_empty() => {
+                    (e, "eDB", true)
+                }
+                (Some(p), e) => (p, "PDB", e.is_some()),
+                (None, Some(e)) => (e, "eDB", false),
+                (None, None) => return None,
+            };
+            Some((number, picked))
+        })
+        .collect()
+}
+
+/// The PDB's history dates (t19 rows) by session number.
+fn history_dates_by_number(rows: &[PdbHistoryRow]) -> HashMap<u32, String> {
+    rows.iter().fold(HashMap::new(), |mut acc, row| {
+        let date = row
+            .date
+            .as_deref()
+            .map(sanitize_text)
+            .filter(|v| !v.is_empty());
+        let num = row.num.as_deref().and_then(parse_history_slot_id);
+        if let (Some(num), Some(date)) = (num, date) {
+            acc.entry(num).or_insert(date);
+        }
+        acc
+    })
+}
+
+/// A history entry whose track isn't in its database.
+fn unknown_history_track(track_id: u32) -> UsbTrack {
+    UsbTrack {
+        id: track_id.to_string(),
+        local_track_id: None,
+        title: format!("Unknown Track #{track_id}"),
+        artist: "Unknown Artist".to_string(),
+        album: None,
+        year: None,
+        genre: None,
+        track_number: None,
+        bpm: None,
+        key: None,
+        key_display: None,
+        key_color: None,
+        file_path: String::new(),
+        format_ext: None,
+        needs_hydration: false,
+        format_compat: crate::models::FormatCompat::default(),
+        usb_media_path: None,
+        artwork_path: None,
+        artwork_data_url: None,
+        waveform_peaks_path: None,
+        usb_analysis_path: None,
+        usb_analysis_path_raw: None,
+        waveform_preview: None,
+        duration_ms: None,
+        file_size_bytes: None,
+    }
+}
+
 fn normalize_date_created(value: &str) -> Option<NaiveDate> {
     let trimmed = value.trim();
     if trimmed.is_empty() {
@@ -331,11 +474,15 @@ fn normalize_date_created(value: &str) -> Option<NaiveDate> {
     NaiveDate::parse_from_str(&ten, "%Y-%m-%d").ok()
 }
 
+/// Dates the undated sessions from their tracks' added dates, carried
+/// forward in session order. A session's track IDs are looked up in its own
+/// database's dates (`pdb_dates` or `edb_dates`, by `source`).
 fn apply_history_dates_from_track_date_created(
     histories: &mut [UsbHistory],
-    date_created_by_track_id: &HashMap<u32, String>,
+    pdb_dates: &HashMap<u32, String>,
+    edb_dates: &HashMap<u32, String>,
 ) {
-    if histories.is_empty() || date_created_by_track_id.is_empty() {
+    if histories.is_empty() || (pdb_dates.is_empty() && edb_dates.is_empty()) {
         return;
     }
 
@@ -350,6 +497,11 @@ fn apply_history_dates_from_track_date_created(
             continue;
         }
 
+        let date_created_by_track_id = if history.source == "eDB" {
+            edb_dates
+        } else {
+            pdb_dates
+        };
         let own_latest = history
             .tracks
             .iter()
@@ -561,6 +713,16 @@ fn with_usb_history_texts(data: &FetchUsbHistoriesData) -> FetchUsbHistoriesData
             .render();
     data.status_text = tr::usb_history_loaded(data.items.len()).render();
     data.warning_text = warning_text(data.warning_count);
+    for history in &mut data.items {
+        // Which database has the session: how and when players write history
+        // to each one isn't known.
+        let databases = if history.in_both {
+            tr::usb_history_source_both().render()
+        } else {
+            history.source.clone()
+        };
+        history.heading_text = tr::usb_history_heading(&history.name, databases).render();
+    }
     data
 }
 
@@ -1687,7 +1849,7 @@ impl BackendService {
             )
             .cloned()
             .unwrap_or_default();
-            let (playlist_tracks, source) = merge_playlist_tracks(&pdb_tracks, &export_tracks);
+            let (playlist_tracks, source) = pick_playlist_tracks(&pdb_tracks, &export_tracks);
             for t in &playlist_tracks {
                 if let Ok(id) = t.id.parse::<u32>() {
                     referenced_track_ids.insert(id);
@@ -1762,7 +1924,7 @@ impl BackendService {
         );
 
         if !source_counts.is_empty() {
-            let pdb_count = source_counts.get("pdb").copied().unwrap_or(0);
+            let pdb_count = source_counts.get("PDB").copied().unwrap_or(0);
             let edb_count = source_counts.get("eDB").copied().unwrap_or(0);
             if edb_count > 0 {
                 logging::debug(
@@ -2047,21 +2209,23 @@ impl BackendService {
             return Ok(with_usb_history_texts(&hit));
         }
 
-        // Without a PDB, the eDB's `history` / `history_content` rows, read
-        // into the PDB's history shape so one path lists them.
         let databases = UsbDatabases::present(&usb_root)?;
         let staged = databases
             .pdb()
             .map(|pdb_path| self.parsed_staged_pdb(pdb_path))
             .transpose()?;
-        let edb_histories = match (&staged, &databases) {
-            (None, Some(databases)) => databases
-                .open_edb(&mut Vec::new())
-                .map(|conn| crate::edb::edb_as_parsed_pdb(&conn))
-                .transpose()?,
-            _ => None,
-        };
-        if staged.is_none() && edb_histories.is_none() {
+        let pdb: Option<&ParsedPdb> = staged.as_deref().map(|staged| &*staged.parsed);
+        push_usb_stage_timing("parse PDB", &mut stage_started);
+        on_progress(
+            30,
+            100,
+            &tr::usb_progress_reading_supplemental_databases().render(),
+        );
+        let mut warnings = Vec::<WarningEntry>::new();
+        // One eDB connection for every read below: each open re-runs
+        // SQLCipher key negotiation, which can dominate on a large eDB.
+        let edb_conn = open_edb_from_usb_root(&usb_root, &mut warnings);
+        if pdb.is_none() && edb_conn.is_none() {
             logging::debug(
                 "usb-import",
                 format!("USB root in use: {}", usb_root.display()),
@@ -2091,39 +2255,17 @@ impl BackendService {
                 warnings,
             }));
         }
-
-        let parsed: &ParsedPdb = match (&staged, &edb_histories) {
-            (Some(staged), _) => &staged.parsed,
-            (None, Some(edb_histories)) => edb_histories,
-            (None, None) => unreachable!("returned above"),
-        };
-        push_usb_stage_timing("parse PDB", &mut stage_started);
-        on_progress(
-            30,
-            100,
-            &tr::usb_progress_reading_supplemental_databases().render(),
-        );
-        let mut supplemental_warnings = Vec::<WarningEntry>::new();
-        // Open the eDB once and reuse it for every read below -- opening it
-        // per-call was redundantly re-running SQLCipher key negotiation up
-        // to 4x in this one stage (see try_read_track_index_from_edb_with_conn's
-        // doc comment), which could dominate wall time on a large eDB even
-        // on fast media and misdiagnose as "slow media suspected".
-        let supplemental_edb_conn = open_edb_from_usb_root(&usb_root, &mut supplemental_warnings);
-        let supplemental_edb = supplemental_edb_conn
+        let edb = edb_conn
             .as_ref()
-            .and_then(|conn| self.staged_edb(&usb_root, Some(conn), &mut supplemental_warnings));
-        let supplemental_track_by_id = supplemental_edb
+            .and_then(|conn| self.staged_edb(&usb_root, Some(conn), &mut warnings));
+        let edb_track_by_id = edb
             .as_deref()
             .map(|library| library.resolved_tracks(&usb_root))
             .unwrap_or_default();
-        let mut date_created_by_track_id = build_history_track_date_index(&parsed.tracks);
-        if date_created_by_track_id.is_empty() {
-            date_created_by_track_id = supplemental_edb
-                .as_deref()
-                .map(|library| library.date_created.clone())
-                .unwrap_or_default();
-        }
+        let (edb_history_playlists, edb_history_entries) = match edb_conn.as_ref() {
+            Some(conn) => crate::edb::read_edb_history(conn)?,
+            None => (Vec::new(), Vec::new()),
+        };
         let export_log = match export_log::load_export_log(&usb_root) {
             Ok(log) => log,
             Err(err) => {
@@ -2134,59 +2276,16 @@ impl BackendService {
                 None
             }
         };
-        let (edb_history_rows, edb_history_content_rows) =
-            if let Some(conn) = supplemental_edb_conn.as_ref() {
-                let history_rows = if table_exists(conn, "history") {
-                    conn.query_row(
-                        "SELECT COUNT(*) FROM history",
-                        [],
-                        |row: &rusqlite::Row<'_>| row.get::<_, i64>(0),
-                    )
-                    .ok()
-                    .unwrap_or(0)
-                    .max(0) as usize
-                } else {
-                    0
-                };
-                let history_content_rows = if table_exists(conn, "history_content") {
-                    conn.query_row(
-                        "SELECT COUNT(*) FROM history_content",
-                        [],
-                        |row: &rusqlite::Row<'_>| row.get::<_, i64>(0),
-                    )
-                    .ok()
-                    .unwrap_or(0)
-                    .max(0) as usize
-                } else {
-                    0
-                };
-                (history_rows, history_content_rows)
-            } else {
-                (0, 0)
-            };
         push_usb_stage_timing_with_threshold(
             "read supplemental databases",
             &mut stage_started,
-            slow_stage_threshold_ms(supplemental_track_by_id.len()),
-        );
-        let history_date_by_num = parsed.history_rows.iter().fold(
-            std::collections::HashMap::<u32, String>::new(),
-            |mut acc, row| {
-                let date = row
-                    .date
-                    .as_deref()
-                    .map(sanitize_text)
-                    .filter(|v| !v.is_empty());
-                let num = row.num.as_deref().and_then(parse_history_slot_id);
-                if let (Some(num), Some(date)) = (num, date) {
-                    acc.entry(num).or_insert(date);
-                }
-                acc
-            },
+            slow_stage_threshold_ms(edb_track_by_id.len()),
         );
 
         on_progress(50, 100, &tr::usb_progress_building_track_index().render());
-        let track_by_id = build_usb_track_index(parsed, &usb_root);
+        let pdb_track_by_id = pdb
+            .map(|parsed| build_usb_track_index(parsed, &usb_root))
+            .unwrap_or_default();
         push_usb_stage_timing("build track index", &mut stage_started);
 
         on_progress(
@@ -2194,109 +2293,63 @@ impl BackendService {
             100,
             &tr::usb_progress_resolving_history_entries().render(),
         );
-        let (history_playlists, selected_history_entries) =
-            select_history_rows(&parsed.history_playlists, &parsed.history_entries);
-        let history_playlists = filter_named_history_playlists(history_playlists);
-
-        let known_history_ids = history_playlists
-            .iter()
-            .map(|row| normalize_packed_id(row.id))
-            .collect::<HashSet<_>>();
-
-        let mut entries_by_history = selected_history_entries.iter().fold(
-            std::collections::HashMap::<u32, Vec<_>>::new(),
-            |mut acc, e| {
-                let decoded =
-                    decode_history_playlist_id(e.playlist_id, e.entry_index, &known_history_ids)
-                        .unwrap_or_else(|| normalize_packed_id(e.playlist_id));
-                acc.entry(decoded).or_default().push(e);
-                acc
-            },
+        // Each database's sessions resolve against that database's own
+        // tracks: the two can number the same track differently.
+        let (pdb_history_playlists, pdb_history_entries) = pdb
+            .map(|parsed| select_history_rows(&parsed.history_playlists, &parsed.history_entries))
+            .unwrap_or_default();
+        let pdb_sessions = resolve_history_sessions(
+            &pdb_history_playlists,
+            &pdb_history_entries,
+            &pdb_track_by_id,
         );
-
-        let mut items = history_playlists
-            .iter()
-            .map(|row| {
-                let logical_playlist_id = normalize_packed_id(row.id);
-                let mut entries = entries_by_history
-                    .remove(&logical_playlist_id)
-                    .unwrap_or_default();
-                entries.sort_by_key(|e| history_entry_sort_key(e.entry_index));
-                let tracks = entries
-                    .iter()
-                    .filter_map(|e| {
-                        e.track_id
-                            .or_else(|| decode_history_track_id(e.playlist_id, e.entry_index))
-                    })
-                    .map(|track_id| {
-                        track_by_id
-                            .get(&track_id)
-                            .cloned()
-                            .or_else(|| supplemental_track_by_id.get(&track_id).cloned())
-                            .unwrap_or_else(|| {
-                                supplemental_track_by_id.get(&track_id).cloned().unwrap_or(
-                                    UsbTrack {
-                                        id: track_id.to_string(),
-                                        local_track_id: None,
-                                        title: format!("Unknown Track #{track_id}"),
-                                        artist: "Unknown Artist".to_string(),
-                                        album: None,
-                                        year: None,
-                                        genre: None,
-                                        track_number: None,
-                                        bpm: None,
-                                        key: None,
-                                        key_display: None,
-                                        key_color: None,
-                                        file_path: String::new(),
-                                        format_ext: None,
-                                        needs_hydration: false,
-                                        format_compat: crate::models::FormatCompat::default(),
-                                        usb_media_path: None,
-                                        artwork_path: None,
-                                        artwork_data_url: None,
-                                        waveform_peaks_path: None,
-                                        usb_analysis_path: None,
-                                        usb_analysis_path_raw: None,
-                                        waveform_preview: None,
-                                        duration_ms: None,
-                                        file_size_bytes: None,
-                                    },
-                                )
-                            })
-                    })
-                    .collect::<Vec<_>>();
-
-                let cleaned_name = sanitize_history_name(&row.name);
+        let edb_sessions = resolve_history_sessions(
+            &edb_history_playlists,
+            &edb_history_entries,
+            &edb_track_by_id,
+        );
+        let history_date_by_num = pdb
+            .map(|parsed| history_dates_by_number(&parsed.history_rows))
+            .unwrap_or_default();
+        let mut items = merge_history_sessions(pdb_sessions, edb_sessions)
+            .into_iter()
+            .map(|(number, (session, source, in_both))| {
                 let created_at = history_date_by_num
-                    .get(&logical_playlist_id)
-                    .cloned()
+                    .get(&number)
                     .or_else(|| {
-                        parse_history_name_numeric_id(&cleaned_name)
-                            .and_then(|n| history_date_by_num.get(&n).cloned())
-                    });
-                let (total_duration_ms, duration_unknown_count) = duration_totals(&tracks);
+                        session
+                            .name_number
+                            .and_then(|n| history_date_by_num.get(&n))
+                    })
+                    .cloned();
+                let (total_duration_ms, duration_unknown_count) = duration_totals(&session.tracks);
                 UsbHistory {
-                    id: format!("usb-h-{}", logical_playlist_id),
-                    name: if cleaned_name.is_empty() {
-                        format!("History {logical_playlist_id}")
-                    } else {
-                        cleaned_name
-                    },
+                    id: format!("usb-h-{number}"),
+                    name: session.name,
                     created_at,
-                    can_export_tracklist: !tracks.is_empty(),
-                    track_count: tracks.len(),
-                    tracks,
+                    can_export_tracklist: !session.tracks.is_empty(),
+                    track_count: session.tracks.len(),
+                    tracks: session.tracks,
                     total_duration_ms,
                     duration_unknown_count,
+                    source: source.to_string(),
+                    in_both,
+                    // Built when answering: see `with_usb_history_texts`.
+                    heading_text: String::new(),
                 }
             })
             .collect::<Vec<_>>();
         push_usb_stage_timing("resolve history entries", &mut stage_started);
 
-        items.sort_by_key(|h| parse_history_numeric_id(&h.id));
         export_log::apply_history_dates_from_export_log(&mut items, export_log.as_ref());
-        apply_history_dates_from_track_date_created(&mut items, &date_created_by_track_id);
+        let pdb_dates = pdb
+            .map(|parsed| build_history_track_date_index(&parsed.tracks))
+            .unwrap_or_default();
+        let edb_dates = edb
+            .as_deref()
+            .map(|library| library.date_created.clone())
+            .unwrap_or_default();
+        apply_history_dates_from_track_date_created(&mut items, &pdb_dates, &edb_dates);
         // Newest first. Only now: the date carry-forward above needs ascending order.
         items.reverse();
 
@@ -2305,72 +2358,69 @@ impl BackendService {
             100,
             &tr::usb_progress_finalizing_history_import().render(),
         );
-        for message in &parsed.warnings {
-            logging::debug("usb-import", message);
+        if let Some(parsed) = pdb {
+            for message in &parsed.warnings {
+                logging::debug("usb-import", message);
+            }
         }
-        let mut warnings = Vec::<WarningEntry>::new();
         logging::debug(
             "usb-import",
             format!(
-                "history import: selected populated history table family from t11/t12 vs t17/t18: playlists={}, entries={}",
-                history_playlists.len(),
-                selected_history_entries.len()
+                "history import: {} sessions from PDB ({} entries), {} from eDB ({} entries)",
+                items.iter().filter(|h| h.source == "PDB").count(),
+                pdb_history_entries.len(),
+                items.iter().filter(|h| h.source == "eDB").count(),
+                edb_history_entries.len(),
             ),
         );
         logging::debug(
             "usb-import",
             format!("USB root in use: {}", usb_root.display()),
         );
-        warnings.extend(supplemental_warnings);
         // Per-track materialization is deferred to `fetch_usb_history_tracks`
         // (viewed page) and the add-to-playlist path -- see the note in
         // `fetch_usb_playlists_with_progress`.
 
+        let pdb_rows = |source_table: u32| {
+            pdb.map(|parsed| {
+                parsed
+                    .history_playlists
+                    .iter()
+                    .filter(|row| row.source_table == source_table)
+                    .count()
+            })
+            .unwrap_or(0)
+        };
+        let pdb_entries = |source_table: u32| {
+            pdb.map(|parsed| {
+                parsed
+                    .history_entries
+                    .iter()
+                    .filter(|row| row.source_table == source_table)
+                    .count()
+            })
+            .unwrap_or(0)
+        };
         let imported_tracks: usize = items.iter().map(|history| history.tracks.len()).sum();
-        let data = FetchUsbHistoriesData {
-            items,
+        let data = Arc::new(FetchUsbHistoriesData {
             counts: UsbHistoryCounts {
-                imported_playlists: history_playlists.len(),
+                imported_playlists: items.len(),
                 imported_tracks,
-                pdb_t11_playlists: parsed
-                    .history_playlists
-                    .iter()
-                    .filter(|row| row.source_table == 11)
-                    .count(),
-                pdb_t12_entries: parsed
-                    .history_entries
-                    .iter()
-                    .filter(|row| row.source_table == 12)
-                    .count(),
-                pdb_t17_playlists: parsed
-                    .history_playlists
-                    .iter()
-                    .filter(|row| row.source_table == 17)
-                    .count(),
-                pdb_t18_entries: parsed
-                    .history_entries
-                    .iter()
-                    .filter(|row| row.source_table == 18)
-                    .count(),
-                edb_history_rows,
-                edb_history_content_rows,
+                pdb_t11_playlists: pdb_rows(11),
+                pdb_t12_entries: pdb_entries(12),
+                pdb_t17_playlists: pdb_rows(17),
+                pdb_t18_entries: pdb_entries(18),
+                edb_history_rows: edb_history_playlists.len(),
+                edb_history_content_rows: edb_history_entries.len(),
             },
+            items,
             // Built when answering: see `with_usb_history_texts`.
             summary_text: String::new(),
             status_text: String::new(),
             warning_count: logging::count_warnings(&warnings),
             warning_text: String::new(),
             warnings,
-        };
-        let mut data = data;
-        if staged.is_none() {
-            // The rows came from the eDB: the PDB has none.
-            data.counts.pdb_t11_playlists = 0;
-            data.counts.pdb_t12_entries = 0;
-            data.counts.pdb_t17_playlists = 0;
-            data.counts.pdb_t18_entries = 0;
-        }
-        let data = Arc::new(data);
+        });
         if let Ok(mut guard) = self.usb_histories_cache.lock() {
             *guard = Some((cache_key, Arc::clone(&data)));
         }
@@ -3281,8 +3331,9 @@ mod tests {
         SLOW_USB_STAGE_MS, UsbDisplaySource, apply_history_dates_from_track_date_created,
         build_history_track_date_index, build_track_match_fingerprint, build_usb_track_index,
         cleanup_empty_dirs_recursive, filter_named_history_playlists, hydrate_usb_page,
-        hydrate_usb_track_in_place, normalize_date_created, now, paginate_usb_tracks,
-        push_usb_stage_timing_with_threshold, select_history_rows, slow_stage_threshold_ms,
+        hydrate_usb_track_in_place, merge_history_sessions, normalize_date_created, now,
+        paginate_usb_tracks, push_usb_stage_timing_with_threshold, resolve_history_sessions,
+        select_history_rows, slow_stage_threshold_ms,
     };
     use crate::models::{UsbHistory, UsbTrack};
     use crate::pdb_reader::{PdbHistoryEntryRow, PdbHistoryPlaylistRow, PdbTrackRow};
@@ -3527,6 +3578,9 @@ mod tests {
                 ],
                 total_duration_ms: 0,
                 duration_unknown_count: 0,
+                source: "PDB".to_string(),
+                in_both: false,
+                heading_text: String::new(),
             },
             UsbHistory {
                 id: "usb-h-2".to_string(),
@@ -3537,6 +3591,9 @@ mod tests {
                 tracks: vec![make_track("30", "/USB/Contents/A/3.mp3")],
                 total_duration_ms: 0,
                 duration_unknown_count: 0,
+                source: "PDB".to_string(),
+                in_both: false,
+                heading_text: String::new(),
             },
             UsbHistory {
                 id: "usb-h-3".to_string(),
@@ -3547,6 +3604,9 @@ mod tests {
                 tracks: vec![make_track("40", "/USB/Contents/A/4.mp3")],
                 total_duration_ms: 0,
                 duration_unknown_count: 0,
+                source: "PDB".to_string(),
+                in_both: false,
+                heading_text: String::new(),
             },
         ];
         let date_created_by_track_id = HashMap::from([
@@ -3556,7 +3616,11 @@ mod tests {
             (40u32, "2024-10-20".to_string()),
         ]);
 
-        apply_history_dates_from_track_date_created(&mut histories, &date_created_by_track_id);
+        apply_history_dates_from_track_date_created(
+            &mut histories,
+            &date_created_by_track_id,
+            &HashMap::new(),
+        );
 
         assert_eq!(histories[0].created_at.as_deref(), Some("2024-10-15"));
         assert_eq!(histories[1].created_at.as_deref(), Some("2024-10-15"));
@@ -3574,10 +3638,17 @@ mod tests {
             tracks: vec![make_track("10", "/USB/Contents/A/1.mp3")],
             total_duration_ms: 0,
             duration_unknown_count: 0,
+            source: "PDB".to_string(),
+            in_both: false,
+            heading_text: String::new(),
         }];
         let date_created_by_track_id = HashMap::from([(10u32, "2024-10-15".to_string())]);
 
-        apply_history_dates_from_track_date_created(&mut histories, &date_created_by_track_id);
+        apply_history_dates_from_track_date_created(
+            &mut histories,
+            &date_created_by_track_id,
+            &HashMap::new(),
+        );
 
         assert_eq!(histories[0].created_at.as_deref(), Some("2026-04-03"));
     }
@@ -3594,6 +3665,9 @@ mod tests {
                 tracks: vec![make_track("10", "/USB/Contents/A/1.mp3")],
                 total_duration_ms: 0,
                 duration_unknown_count: 0,
+                source: "PDB".to_string(),
+                in_both: false,
+                heading_text: String::new(),
             },
             UsbHistory {
                 id: "usb-h-2".to_string(),
@@ -3604,11 +3678,18 @@ mod tests {
                 tracks: vec![make_track("20", "/USB/Contents/A/2.mp3")],
                 total_duration_ms: 0,
                 duration_unknown_count: 0,
+                source: "PDB".to_string(),
+                in_both: false,
+                heading_text: String::new(),
             },
         ];
         let date_created_by_track_id = HashMap::from([(20u32, "2024-10-15".to_string())]);
 
-        apply_history_dates_from_track_date_created(&mut histories, &date_created_by_track_id);
+        apply_history_dates_from_track_date_created(
+            &mut histories,
+            &date_created_by_track_id,
+            &HashMap::new(),
+        );
 
         assert_eq!(histories[0].created_at.as_deref(), Some("2026-04-03"));
         assert_eq!(histories[1].created_at.as_deref(), Some("2026-04-03"));
@@ -3659,6 +3740,108 @@ mod tests {
         assert!(history_playlists.iter().all(|row| row.source_table == 11));
         assert_eq!(history_entries.len(), 2);
         assert!(history_entries.iter().all(|row| row.source_table == 12));
+    }
+
+    fn history_rows(
+        sessions: &[(u32, &str, &[u32])],
+    ) -> (Vec<PdbHistoryPlaylistRow>, Vec<PdbHistoryEntryRow>) {
+        let playlists = sessions
+            .iter()
+            .map(|(id, name, _)| PdbHistoryPlaylistRow {
+                id: *id,
+                name: name.to_string(),
+                source_table: 11,
+            })
+            .collect();
+        let entries = sessions
+            .iter()
+            .flat_map(|(id, _, tracks)| {
+                tracks
+                    .iter()
+                    .enumerate()
+                    .map(|(index, track_id)| PdbHistoryEntryRow {
+                        track_id: Some(*track_id),
+                        playlist_id: *id,
+                        entry_index: index as u32 + 1,
+                        source_table: 12,
+                    })
+            })
+            .collect();
+        (playlists, entries)
+    }
+
+    fn track_index(ids: &[(u32, &str)]) -> HashMap<u32, UsbTrack> {
+        ids.iter()
+            .map(|(id, path)| (*id, make_track(&id.to_string(), path)))
+            .collect()
+    }
+
+    #[test]
+    fn history_sessions_merge_both_databases_by_number() {
+        // PDB has 1 and 2; the eDB has 2 and 3.
+        let (pdb_playlists, pdb_entries) =
+            history_rows(&[(1, "HISTORY 001", &[10]), (2, "HISTORY 002", &[20, 21])]);
+        let (edb_playlists, edb_entries) =
+            history_rows(&[(2, "HISTORY 002", &[500]), (3, "HISTORY 003", &[501])]);
+        let pdb_tracks = track_index(&[(10, "/p/10.mp3"), (20, "/p/20.mp3"), (21, "/p/21.mp3")]);
+        // eDB 500 is the PDB's 20 under the eDB's own ID; 20 means another
+        // track there.
+        let edb_tracks = track_index(&[
+            (20, "/e/other.mp3"),
+            (500, "/e/500.mp3"),
+            (501, "/e/501.mp3"),
+        ]);
+
+        let merged = merge_history_sessions(
+            resolve_history_sessions(&pdb_playlists, &pdb_entries, &pdb_tracks),
+            resolve_history_sessions(&edb_playlists, &edb_entries, &edb_tracks),
+        );
+
+        let summary = merged
+            .iter()
+            .map(|(number, (session, source, in_both))| {
+                let paths = session
+                    .tracks
+                    .iter()
+                    .map(|t| t.file_path.as_str())
+                    .collect::<Vec<_>>();
+                (*number, *source, *in_both, paths)
+            })
+            .collect::<Vec<_>>();
+        assert_eq!(
+            summary,
+            [
+                (1, "PDB", false, vec!["/p/10.mp3"]),
+                (2, "PDB", true, vec!["/p/20.mp3", "/p/21.mp3"]),
+                (3, "eDB", false, vec!["/e/501.mp3"]),
+            ]
+        );
+    }
+
+    #[test]
+    fn history_session_empty_in_pdb_takes_the_edb_tracks() {
+        let (pdb_playlists, pdb_entries) = history_rows(&[(5, "HISTORY 005", &[])]);
+        let (edb_playlists, edb_entries) = history_rows(&[(5, "HISTORY 005", &[7, 8])]);
+        let edb_tracks = track_index(&[(7, "/e/7.mp3")]);
+
+        let merged = merge_history_sessions(
+            resolve_history_sessions(&pdb_playlists, &pdb_entries, &HashMap::new()),
+            resolve_history_sessions(&edb_playlists, &edb_entries, &edb_tracks),
+        );
+
+        let (session, source, in_both) = &merged[&5];
+        assert_eq!(*source, "eDB");
+        assert!(*in_both);
+        // A track missing from its own database is unknown, never borrowed
+        // from the other one.
+        assert_eq!(
+            session
+                .tracks
+                .iter()
+                .map(|t| t.title.as_str())
+                .collect::<Vec<_>>(),
+            ["T", "Unknown Track #8"]
+        );
     }
 
     #[test]

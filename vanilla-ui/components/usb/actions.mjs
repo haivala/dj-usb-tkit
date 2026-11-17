@@ -1148,12 +1148,13 @@ export function renderUsbPlaylists(ctx) {
 }
 
 // Name, track count and size of the list shown in a USB track table, above
-// it. `item` is the open playlist/history (null hides the heading). The count
-// and size come with the first page (`listSummaryText`, stored on the item).
-function renderTrackListHeading(heading, item) {
+// it. `item` is the open playlist/history (null hides the heading), `name`
+// the heading's text. The count and size come with the first page
+// (`listSummaryText`, stored on the item).
+function renderTrackListHeading(heading, item, name) {
   heading.classList.toggle("hidden", !item);
   if (!item) return;
-  heading.querySelector(".track-list-heading-name").textContent = item.name;
+  heading.querySelector(".track-list-heading-name").textContent = name;
   heading.querySelector(".track-list-heading-count").textContent = item.listSummaryText || "";
 }
 
@@ -1163,12 +1164,12 @@ function findByScopeId(items, scopeId) {
 
 export function renderUsbPlaylistHeading(ctx) {
   const playlist = findByScopeId(ctx.state.usbPlaylists, ctx.usbPlaylistTracksCtl.scopeId);
-  renderTrackListHeading(ctx.el.usbPlaylistHeading, playlist);
+  renderTrackListHeading(ctx.el.usbPlaylistHeading, playlist, playlist?.name);
 }
 
 export function renderHistoryHeading(ctx) {
   const history = findByScopeId(ctx.state.histories, ctx.usbHistoryTracksCtl.scopeId);
-  renderTrackListHeading(ctx.el.historyHeading, history);
+  renderTrackListHeading(ctx.el.historyHeading, history, history?.headingText);
   ctx.el.exportHistoryTracklistBtn.disabled = !history?.canExportTracklist;
 }
 
