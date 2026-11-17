@@ -9,7 +9,7 @@
 // This module only renders the `state.updateCheck` verdict:
 //   { updateAvailable, severity: "none"|"normal"|"feature"|"critical",
 //     currentVersion, latestVersion, releaseUrl,
-//     installKind: "appimage"|"deb"|"rpm"|"nsis"|"msi"|"dmg"|"unknown",
+//     installKind: "appimage"|"deb"|"rpm"|"nsis"|"msi"|"dmg"|"pacman"|"unknown",
 //     downloadUrl: string|null, canSelfUpdate,
 //     action: "install"|"download"|"none", checkFailed }
 // `action` (the one way to update this install) is decided by the backend;

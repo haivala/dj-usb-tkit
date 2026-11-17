@@ -45,6 +45,13 @@ chmod +x DJ_USB_Tkit_*_amd64.AppImage
 ./DJ_USB_Tkit_*_amd64.AppImage
 ```
 
+On Arch Linux, install [`dj-usb-tkit-bin`](https://aur.archlinux.org/packages/dj-usb-tkit-bin)
+from the AUR with your AUR helper, and update it the same way:
+
+```bash
+yay -S dj-usb-tkit-bin
+```
+
 If rekordbox runs under Wine, use this Linux build, not the Windows one: the
 Windows build's interface (WebView2) stays blank under Wine. The Linux build
 finds rekordbox's library in `$WINEPREFIX`, `~/.wine`, or a Bottles bottle.

@@ -41,6 +41,8 @@
 
 - **New feature:** The app is available in French. Pick Français in Settings → Language or in Quick Start; a
   computer set to French opens the app in French until another language is picked.
+- **New feature:** Arch Linux users can install the app from the AUR as `dj-usb-tkit-bin`. When a newer
+  version is out, the app says so and points to the package manager instead of offering a download.
 - **New feature:** OGG Vorbis and Opus tracks can go on a USB. Players don't play either, so export converts them
   the way it converts lossless tracks, to the USB's first ticked audio format the app makes (AIFF, WAV or MP3),
   with the track's cues, beat grid and BPM. Convert… makes the same files ahead of time. Opus tracks also play,

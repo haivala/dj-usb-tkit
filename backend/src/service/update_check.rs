@@ -65,6 +65,10 @@ pub enum InstallKind {
     /// (the updater would run the NSIS installer next to the MSI install).
     Msi,
     Dmg,
+    /// Installed by pacman (the AUR package, which repackages the deb). Arch
+    /// users update through pacman / their AUR helper, so the app offers
+    /// neither the in-app updater nor a download.
+    Pacman,
     /// A dev build (`cargo run`) or a bundle type we don't know.
     Unknown,
 }
@@ -85,9 +89,30 @@ impl InstallKind {
             Self::Rpm => Some(".rpm"),
             Self::Nsis | Self::Msi => Some("-setup.exe"),
             Self::Dmg => Some(".dmg"),
-            Self::Unknown => None,
+            Self::Pacman | Self::Unknown => None,
         }
     }
+}
+
+/// Where pacman keeps one folder per installed package (`<name>-<ver>-<rel>`),
+/// each with a `files` list.
+pub const PACMAN_LOCAL_DB: &str = "/var/lib/pacman/local";
+
+/// Whether a package in pacman's local database owns `exe`. Only this app's
+/// packages (`dj-usb-tkit`, `dj-usb-tkit-bin`, ...) are looked at; their
+/// `files` list holds paths without the leading `/`.
+pub fn pacman_owns(local_db: &std::path::Path, exe: &std::path::Path) -> bool {
+    let Some(exe) = exe.to_str().and_then(|p| p.strip_prefix('/')) else {
+        return false;
+    };
+    let Ok(entries) = std::fs::read_dir(local_db) else {
+        return false;
+    };
+    entries.flatten().any(|entry| {
+        entry.file_name().to_string_lossy().starts_with("dj-usb-tkit")
+            && std::fs::read_to_string(entry.path().join("files"))
+                .is_ok_and(|files| files.lines().any(|line| line == exe))
+    })
 }
 
 /// The one thing the update UI offers for an available update.
@@ -169,7 +194,9 @@ impl UpdateInfo {
     /// Fills `status_text` and `banner_text` from the verdict.
     fn with_texts(mut self) -> Self {
         let version = &self.latest_version;
-        self.status_text = if self.update_available {
+        self.status_text = if self.update_available && self.install_kind == InstallKind::Pacman {
+            tr::update_available_package_manager(version)
+        } else if self.update_available {
             tr::update_available(version)
         } else if self.check_failed {
             tr::update_check_failed()
@@ -572,6 +599,7 @@ mod tests {
         assert_eq!(action(InstallKind::Deb), UpdateAction::Download);
         assert_eq!(action(InstallKind::Rpm), UpdateAction::Download);
         assert_eq!(action(InstallKind::Msi), UpdateAction::Download);
+        assert_eq!(action(InstallKind::Pacman), UpdateAction::None);
         assert_eq!(action(InstallKind::Unknown), UpdateAction::None);
         assert_eq!(
             evaluate("0.3.2", InstallKind::AppImage, &releases).action,
@@ -591,6 +619,45 @@ mod tests {
             UpdateInfo::none("0.3.0", InstallKind::AppImage).status_text,
             "Up to date."
         );
+    }
+
+    #[test]
+    fn pacman_installs_are_told_to_update_through_the_package_manager() {
+        let releases = [with_assets(rel("v0.3.2", None), ALL_ASSETS)];
+        let info = evaluate("0.3.0", InstallKind::Pacman, &releases);
+        assert!(info.update_available);
+        assert!(!info.can_self_update);
+        assert_eq!(info.download_url, None);
+        assert_eq!(
+            info.status_text,
+            "Version 0.3.2 is available. Update it with your package manager."
+        );
+    }
+
+    #[test]
+    fn pacman_owns_only_files_listed_by_this_apps_package() {
+        let db = tempfile::tempdir().unwrap();
+        let add = |dir: &str, files: &str| {
+            let path = db.path().join(dir);
+            std::fs::create_dir(&path).unwrap();
+            std::fs::write(path.join("files"), files).unwrap();
+        };
+        add(
+            "dj-usb-tkit-bin-0.6.2-1",
+            "%FILES%\nusr/\nusr/bin/\nusr/bin/dj_usb_tkit_desktop\n",
+        );
+        add("other-app-1.0-1", "%FILES%\nusr/bin/other_app\n");
+
+        let owns = |exe: &str| pacman_owns(db.path(), std::path::Path::new(exe));
+        assert!(owns("/usr/bin/dj_usb_tkit_desktop"));
+        assert!(!owns("/home/user/Apps/dj_usb_tkit_desktop"));
+        // Another package's files don't count.
+        assert!(!owns("/usr/bin/other_app"));
+        // No pacman database at all (not Arch).
+        assert!(!pacman_owns(
+            &db.path().join("missing"),
+            std::path::Path::new("/usr/bin/dj_usb_tkit_desktop")
+        ));
     }
 
     #[test]

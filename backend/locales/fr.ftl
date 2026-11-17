@@ -1359,6 +1359,7 @@ format-size-gb = { NUMBER($size) } Go
 ## update
 
 update-available = La version { $version } est disponible.
+update-available-package-manager = La version { $version } est disponible. Mettez-la à jour avec votre gestionnaire de paquets.
 update-check-failed = Impossible de rechercher des mises à jour.
 update-up-to-date = À jour.
 update-banner-critical = Mise à jour critique disponible : { $version }

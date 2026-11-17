@@ -1774,6 +1774,8 @@ format-size-gb = { NUMBER($size) } GB
 
 # The settings update line. $version: the newest release's version.
 update-available = Version { $version } is available.
+# The same line for an install managed by a Linux package manager (the AUR package).
+update-available-package-manager = Version { $version } is available. Update it with your package manager.
 update-check-failed = Couldn't check for updates.
 update-up-to-date = Up to date.
 # The banner for a release that fixes something important, or brings notable features.

@@ -2567,6 +2567,18 @@ fn current_install_kind() -> crate::service::update_check::InstallKind {
     if cfg!(debug_assertions) {
         return InstallKind::Unknown;
     }
+    // The AUR package repackages the deb, so its binary says Deb; pacman's
+    // own database is what tells the two apart.
+    if cfg!(target_os = "linux")
+        && std::env::current_exe().is_ok_and(|exe| {
+            crate::service::update_check::pacman_owns(
+                std::path::Path::new(crate::service::update_check::PACMAN_LOCAL_DB),
+                &exe,
+            )
+        })
+    {
+        return InstallKind::Pacman;
+    }
     match bundle_type() {
         Some(BundleType::AppImage) => InstallKind::AppImage,
         Some(BundleType::Deb) => InstallKind::Deb,

@@ -13,3 +13,4 @@ desktop/src-tauri/gen/schemas/windows-schema.json
 .docker-cache/
 .tmp-diag-data/
 .cargo/
+packaging/aur/dj-usb-tkit-bin/

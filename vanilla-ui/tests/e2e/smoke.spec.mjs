@@ -419,6 +419,20 @@ test("update check", async ({ page }) => {
       .toBe(debUrl);
   }
 
+  // A pacman (AUR) install: the backend's package-manager line, no download
+  // link and no in-app install.
+  await showUpdate(page, updateCheck("feature", {
+    installKind: "pacman",
+    statusText: "Version 0.3.0 is available. Update it with your package manager.",
+  }));
+  {
+    await expect(page.locator("#updateBanner")).toBeVisible();
+    await expect(page.locator("#updateBannerActions .update-download-link")).toBeHidden();
+    await expect(page.locator("#updateBannerActions .update-install-btn")).toBeHidden();
+    await expect(page.locator("#settingsUpdateStatus"))
+      .toHaveText("Version 0.3.0 is available. Update it with your package manager.");
+  }
+
   // Update & restart: the update runs as a job on the footer progress bar.
   await showUpdate(page, selfUpdatable("critical"));
   {
