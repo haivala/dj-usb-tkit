@@ -35,3 +35,25 @@ opt-level = 3
 [profile.dev]
 debug = "line-tables-only"
 split-debuginfo = "unpacked"
+
+# Playback decodes inside the audio callback (rodio pulls samples from cpal's
+# thread), so the decode path gets a speed build in dev too, leaving more
+# headroom before an underrun. The app's own crates stay at debug settings.
+[profile.dev.package.symphonia-core]
+opt-level = 3
+[profile.dev.package.symphonia-bundle-flac]
+opt-level = 3
+[profile.dev.package.symphonia-bundle-mp3]
+opt-level = 3
+[profile.dev.package.symphonia-codec-aac]
+opt-level = 3
+[profile.dev.package.symphonia-codec-alac]
+opt-level = 3
+[profile.dev.package.symphonia-codec-pcm]
+opt-level = 3
+[profile.dev.package.symphonia-codec-vorbis]
+opt-level = 3
+[profile.dev.package.opusic-sys]
+opt-level = 3
+[profile.dev.package.rodio]
+opt-level = 3
