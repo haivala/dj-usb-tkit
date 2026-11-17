@@ -107,28 +107,35 @@ player, and compare `exportLibrary.db`, `export.pdb` and the track's `.DAT` and
 If it doesn't, or only on some models, compare the stick's ANLZ cue list with
 the list the last export wrote instead.
 
-## Possibility: rekordbox or Mixxx as the master for track data
+## Possibility: ask on import when rekordbox or Mixxx data differs
 
-First ask users whether they want this. Today forced overwrites exist only in
-the playlist import ("Force update track data"); the ↻ library import never
-replaces cues, BPM or key on a track that already has them, and nothing in the
-UI shows which tracks came from rekordbox or Mixxx, although every track
-carries `rekordboxDbSource` / `mixxxDbSource`.
+Today the ↻ library import silently
+keeps the library's cues, BPM, key and grid when a track already has them, so
+the user never learns that rekordbox or Mixxx has different values. Only the
+playlist import can replace them, through its "Force update track data"
+checkbox, and that replaces everything for every track in the playlist.
 
-Idea: a "Track data source" setting in the Analysis section of the settings
-drawer: This app (default, today's behaviour), rekordbox or Mixxx.
+Imports match tracks by file path, so this also covers a folder track whose
+cues were made in this app, and a track in both libraries: a forced import
+from one library already overwrites what came from the other, in both
+directions. Cues record no origin (`track_cues` has no source column), so the
+app can't tell its own cues from imported ones.
 
-- With an external master, every import (↻ and playlist import) replaces BPM,
-  key, beat grid and cues of the tracks from that library; the force checkbox
-  is hidden since it's implied.
-- Those tracks open the cue editor read-only, with a note to edit them there
-  and press ↻. Viewing and playing from cues still works. This also tells the
-  user which tracks the master owns.
-- Analysis leaves their BPM, key and grid alone.
-- Folder-only tracks stay editable; a track in both libraries follows the
-  chosen one.
-- Switching the setting changes no data, only the next ↻ does. ↻ stays manual,
-  no re-read at startup.
+Idea: no setting, ask at import time instead.
+
+- The import first works out, in the backend, which tracks have different
+  cues, BPM, key or grid in the external library than in the local one, and
+  imports everything else as today. No differences, no question.
+- With differences, one dialog: "rekordbox has different cues, BPM or key for
+  N tracks: Keep library's / Use rekordbox's", with the tracks listed. The UI
+  only shows the backend's list and counts.
+- The same dialog for ↻ and the playlist import; the force checkbox goes away.
+- Two steps (find the differences, then apply) instead of one write, like the
+  repair preview and apply.
+- Someone who uses rekordbox or Mixxx as their master clicks "Use …" on each
+  import that finds differences. A "don't ask again" option only if users ask
+  for it.
+- ↻ stays manual, no re-read at startup.
 
 ## Hardware glance: Engine library from a stick without a PDB
 
