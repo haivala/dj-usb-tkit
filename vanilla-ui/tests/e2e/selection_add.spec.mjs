@@ -77,7 +77,7 @@ function installSelectionMock(page, mockOpts = {}) {
         Object.assign(tracks.find((t) => t.id === trackIds[0]), converted);
         return backend.ok({
           jobId: "j1", transcoded: 1, skipped: trackIds.length - 1, failed: 0, cancelled: false,
-          messages: trackIds.slice(1).map(() => "two.mp3: not a lossless or OGG file"),
+          messages: trackIds.slice(1).map(() => "two.mp3: not a lossless, OGG or Opus file"),
           tracks: [converted],
           summary: `Converting done: 1 track converted, ${trackIds.length - 1} skipped`,
         });

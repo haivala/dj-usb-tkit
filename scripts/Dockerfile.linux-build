@@ -18,7 +18,7 @@ ARG APT_REFRESH=unset
 RUN echo "apt refresh: $APT_REFRESH" \
     && apt-get update && apt-get upgrade -y \
     && apt-get install -y --no-install-recommends \
-      build-essential git curl ca-certificates pkg-config \
+      build-essential cmake git curl ca-certificates pkg-config \
       libssl-dev libasound2-dev libgtk-3-dev libwebkit2gtk-4.1-dev \
       libayatana-appindicator3-dev librsvg2-dev \
       patchelf file xz-utils xdg-utils rpm zsync desktop-file-utils appstream \

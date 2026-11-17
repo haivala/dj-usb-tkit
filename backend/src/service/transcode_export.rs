@@ -114,10 +114,10 @@ fn first_convertible_format(formats: &UsbAudioFormats) -> Option<TranscodeFormat
 }
 
 /// Whether `path` is a file players don't play that export still puts on a
-/// USB with `formats`, as a transcode: an OGG, when the app converts to one
-/// of the ticked formats.
+/// USB with `formats`, as a transcode: an OGG or Opus file, when the app
+/// converts to one of the ticked formats.
 pub(crate) fn goes_as_transcode_only(path: &Path, formats: &UsbAudioFormats) -> bool {
-    AudioFormat::of_path(path) == Some(AudioFormat::Ogg)
+    AudioFormat::of_path(path).is_some_and(AudioFormat::goes_as_transcode_only)
         && first_convertible_format(formats).is_some()
 }
 
@@ -283,7 +283,7 @@ fn choose_export_file(
             return ExportFile::Transcode(file.clone());
         }
     }
-    // Not a USB audio formats format: an OGG gets a transcode made, anything
+    // Not a USB audio formats format: an OGG or Opus gets a transcode made, anything
     // else is left to export's own "players don't play it" rule.
     let Some(own) = own else {
         return match first_convertible_format(formats) {
@@ -792,7 +792,7 @@ mod tests {
             Some((
                 "refused".to_string(),
                 "AAC".to_string(),
-                "M4A · 48 kHz · 256 kbps — AAC can't go on this USB: only lossless and OGG files can \
+                "M4A · 48 kHz · 256 kbps — AAC can't go on this USB: only lossless, OGG and Opus files can \
                  be converted"
                     .to_string()
             ))

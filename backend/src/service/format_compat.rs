@@ -286,8 +286,8 @@ fn format_verdict(
             _ => FormatCompat::ok(),
         },
         // Export leaves these off the USB (`split_off_unplayable_tracks`).
-        AudioFormat::M4p | AudioFormat::Opus => FormatCompat::never_on_usb(),
-        AudioFormat::Ogg => FormatCompat::warn(
+        AudioFormat::M4p => FormatCompat::never_on_usb(),
+        AudioFormat::Ogg | AudioFormat::Opus => FormatCompat::warn(
             "Players don't play this format. Export converts it to a format the USB allows.",
         ),
         AudioFormat::Alac => FormatCompat::warn("Unlisted format"),

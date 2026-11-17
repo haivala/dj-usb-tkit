@@ -54,6 +54,15 @@ if (-not $installed) {
     Write-Host "  Done." -ForegroundColor Green
 }
 
+# CMake builds the bundled Opus decoder (libopus).
+Reload-Path
+if (-not (Get-Command cmake -ErrorAction SilentlyContinue)) {
+    Write-Host "  Installing CMake..."
+    winget install --id Kitware.CMake --exact --silent --accept-package-agreements --accept-source-agreements | Out-Null
+    $cmakeBin = "${env:ProgramFiles}\CMake\bin"
+    if (Test-Path $cmakeBin) { $env:Path = "$cmakeBin;$env:Path" }
+}
+
 # ─── 2. Rust ────────────────────────────────────────────────────────────────
 Write-Host "`n[2/6] Checking Rust..." -ForegroundColor Yellow
 $cargoPath = "$env:USERPROFILE\.cargo\bin"

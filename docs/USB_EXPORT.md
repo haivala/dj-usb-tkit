@@ -31,11 +31,11 @@ See [ENGINE_DJ.md](ENGINE_DJ.md).
 Tracks in a format the players don't play (`.ogg`, `.opus`, `.m4p`) stay in the library, and the
 Library shows them with a "Players don't play this format" warning.
 
-- An `.ogg` track goes on the USB as a transcode, made by the export when it has none, unless the
-  USB takes no format the app converts to (see [TRANSCODES.md](TRANSCODES.md#on-a-usb)).
-- Opus and protected AAC (`.opus`, `.m4p`, and an `.ogg` file holding Opus audio, which a scan
-  records as Opus) can never go on a USB: the app can't convert them. A playlist doesn't take
-  them: the row's "+" is off and says why, adding a selection leaves them out and the status line
+- An `.ogg` or `.opus` track (an `.ogg` file holding Opus audio is shown as Opus) goes on the USB
+  as a transcode, made by the export when it has none, unless the USB takes no format the app
+  converts to (see [TRANSCODES.md](TRANSCODES.md#on-a-usb)).
+- Protected AAC (`.m4p`) can never go on a USB: the app can't convert it. A playlist doesn't take
+  it: the row's "+" is off and says why, adding a selection leaves them out and the status line
   says how many, and a playlist imported from rekordbox or Mixxx leaves them out with a warning
   (the tracks still come into the library).
 - Such a track already in a playlist, from before this rule, is left off the USB: each export lists it as skipped, with a

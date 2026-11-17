@@ -101,9 +101,9 @@ Release pipeline behavior (`scripts/release.sh`):
 - builds desktop bundles from `desktop/src-tauri/`
 - uses `scripts/tauri.release.conf.json` for release configuration
 
-macOS note: `scripts/macos-build-setup.sh` installs all prerequisites (Xcode Command Line Tools, Rust, Node.js) and builds the app. Safe to re-run.
+macOS note: `scripts/macos-build-setup.sh` installs all prerequisites (Xcode Command Line Tools, CMake, Rust, Node.js) and builds the app. Safe to re-run.
 
-Windows note: `scripts/windows-build-setup.ps1` installs all prerequisites (Visual Studio Build Tools, Rust, Node.js portable, OpenSSL, WebView2 runtime) and builds the app. Safe to re-run. Must be run from PowerShell as Administrator.
+Windows note: `scripts/windows-build-setup.ps1` installs all prerequisites (Visual Studio Build Tools, CMake, Rust, Node.js portable, OpenSSL, WebView2 runtime) and builds the app. Safe to re-run. Must be run from PowerShell as Administrator.
 
 Linux note: AppImage builds require `linuxdeploy` available on `PATH`.
 

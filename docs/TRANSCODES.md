@@ -28,17 +28,19 @@ by it:
 - Of the track's own file and its up-to-date transcodes, the one in the first ticked format goes
   on the USB. With FLAC and MP3 both ticked and MP3 first, a track with an MP3 transcode goes as
   the MP3; one without goes as its FLAC.
-- None in a ticked format: a lossless or OGG track gets a transcode made by the export, in the
+- None in a ticked format: a lossless, OGG or Opus track gets a transcode made by the export, in the
   first ticked format the app makes (AIFF, WAV or MP3). The progress bar shows "Converting" first. The
   new transcode stays in the library like one made with Convert…, so the next export reuses it.
   An out-of-date transcode is made again the same way.
 - An MP3 or AAC track in a format the USB doesn't allow can't be converted (export only converts
-  from lossless and OGG). The export is refused before anything is written, and the message names the
+  from lossless, OGG and Opus). The export is refused before anything is written, and the message names the
   tracks.
-- An OGG track never goes as its own file, as players don't play OGG. With no ticked format the
-  app makes, an OGG track without a transcode in a ticked format is left off the USB with a
-  warning (see [USB_EXPORT.md](USB_EXPORT.md)). So is an OGG the app can't convert, such as an
-  `.ogg` file holding Opus audio: the warning says why, and a mirror export still prunes.
+- An OGG or Opus track never goes as its own file, as players don't play either. With no ticked
+  format the app makes, such a track without a transcode in a ticked format is left off the USB
+  with a warning (see [USB_EXPORT.md](USB_EXPORT.md)); a mirror export still prunes.
+- Opus always decodes at 48 kHz, so its transcodes are 48 kHz. The decoder drops the stream's
+  pre-skip (the encoder's warm-up samples) and applies its output gain, so the transcode starts
+  at the track's first sample and the cues and beat grid line up. Mono and stereo Opus only.
 - A file already on the USB is never removed by the export (only a mirror export prunes, as
   rekordbox's does). A track exported as its FLAC before and as its MP3 now is on the USB both
   ways: two USB tracks, each with its own masterContentId, both in the playlist.

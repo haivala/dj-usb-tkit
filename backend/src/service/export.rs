@@ -525,7 +525,7 @@ fn track_on_usb(
     })
 }
 
-/// Takes the tracks players don't play (`.opus`, `.m4p`, and `.ogg` when the
+/// Takes the tracks players don't play (`.m4p`, and `.ogg`/`.opus` when the
 /// USB takes no format the app converts to) out of `playlist` and returns
 /// them: export leaves them off the USB rather than put a track in the
 /// databases that won't play. Unlike a missing source file this skip is
@@ -3168,7 +3168,7 @@ mod tests {
         assert_eq!(details["validationType"], "usb_audio_format_refused");
         assert_eq!(
             details["statusText"],
-            "Export blocked: 2 tracks in a format this USB's formats don't allow, and only lossless and OGG files can be converted. See Event Log for details."
+            "Export blocked: 2 tracks in a format this USB's formats don't allow, and only lossless, OGG and Opus files can be converted. See Event Log for details."
         );
     }
 

@@ -657,7 +657,7 @@ test("library row", async ({ page }) => {
       track("autofix", { formatExt: "wav", formatCompat: { severity: "autofix", badge: "WAV", tooltip: "Will be automatically converted to standard PCM on export." } }),
       track("warn", { formatExt: "wav", formatCompat: { severity: "warn", badge: "WAV", tooltip: "44.1 kHz · 16-bit — cannot be safely converted" } }),
       track("ok", { formatExt: "wav", formatCompat: { severity: "ok", badge: "WAV" } }),
-      track("blocked", { formatExt: "opus", formatCompat: { severity: "warn", badge: "OPUS", warning: "Can't be added to playlists.", tooltip: "Can't be added to playlists.", addBlocked: true } }),
+      track("blocked", { formatExt: "m4p", formatCompat: { severity: "warn", badge: "M4P", warning: "Can't be added to playlists.", tooltip: "Can't be added to playlists.", addBlocked: true } }),
     ] });
     backend.install();
   });

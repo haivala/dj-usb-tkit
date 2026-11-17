@@ -23,7 +23,9 @@ use std::time::Duration;
 use rodio::Source;
 use rodio::source::SeekError as RodioSeekError;
 use symphonia::core::audio::{AudioBufferRef, SampleBuffer, SignalSpec};
-use symphonia::core::codecs::{CODEC_TYPE_NULL, Decoder as CodecDecoder, DecoderOptions};
+use symphonia::core::codecs::{
+    CODEC_TYPE_NULL, CodecRegistry, Decoder as CodecDecoder, DecoderOptions,
+};
 use symphonia::core::errors::Error as SymphoniaError;
 use symphonia::core::formats::{FormatOptions, FormatReader, SeekMode, SeekTo, SeekedTo};
 use symphonia::core::io::{MediaSource, MediaSourceStream};
@@ -225,6 +227,18 @@ impl Seek for AiffSsndOffsetSource {
     }
 }
 
+/// The codecs every symphonia decoder in the backend is made from: symphonia's own, plus
+/// the libopus-backed Opus decoder (`opus_decoder`), which symphonia 0.5 lacks.
+pub(crate) fn codecs() -> &'static CodecRegistry {
+    static CODECS: std::sync::OnceLock<CodecRegistry> = std::sync::OnceLock::new();
+    CODECS.get_or_init(|| {
+        let mut registry = CodecRegistry::new();
+        symphonia::default::register_enabled_codecs(&mut registry);
+        registry.register_all::<crate::opus_decoder::OpusDecoder>();
+        registry
+    })
+}
+
 #[derive(Debug)]
 pub struct DecoderError(pub String);
 
@@ -249,6 +263,8 @@ pub struct SeekableSymphoniaSource {
     total_duration: Option<Time>,
     buffer: SampleBuffer<i16>,
     spec: SignalSpec,
+    /// Added to every seek target (`opus_decoder::seek_offset_frames`).
+    seek_offset: Time,
 }
 
 impl SeekableSymphoniaSource {
@@ -278,9 +294,15 @@ impl SeekableSymphoniaSource {
             .ok_or_else(|| DecoderError("no track with a supported codec".to_string()))?
             .clone();
 
-        let mut decoder = symphonia::default::get_codecs()
+        let mut decoder = codecs()
             .make(&track.codec_params, &DecoderOptions::default())
             .map_err(to_decoder_error)?;
+        let seek_offset = track
+            .codec_params
+            .time_base
+            .map_or(Time::default(), |base| {
+                base.calc_time(crate::opus_decoder::seek_offset_frames(&track.codec_params))
+            });
         let total_duration = track
             .codec_params
             .time_base
@@ -326,6 +348,7 @@ impl SeekableSymphoniaSource {
             total_duration,
             buffer,
             spec,
+            seek_offset,
         })
     }
 
@@ -417,7 +440,7 @@ impl Source for SeekableSymphoniaSource {
             let time = self.total_duration.expect("checked by seek_beyond_end");
             skip_back_a_tiny_bit(time)
         } else {
-            pos.as_secs_f64().into()
+            (pos.as_secs_f64() + self.seek_offset.seconds as f64 + self.seek_offset.frac).into()
         };
 
         let to_skip = self.current_frame_offset % self.channels().max(1) as usize;

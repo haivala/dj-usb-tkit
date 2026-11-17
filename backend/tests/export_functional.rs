@@ -2089,21 +2089,35 @@ fn usb_has_file_with_extension(usb: &Path, extension: &str) -> bool {
 
 #[test]
 fn export_to_usb_puts_an_ogg_on_the_usb_as_a_transcode() {
-    // Players don't play OGG, so the export converts it: the USB gets the
-    // transcode (AIFF, the first format the app makes) and never the OGG.
+    export_puts_the_file_on_the_usb_as_a_transcode("track_format_ogg.ogg", "Artist 1 - Vorbis.ogg");
+}
+
+#[test]
+fn export_to_usb_puts_an_opus_on_the_usb_as_a_transcode() {
+    export_puts_the_file_on_the_usb_as_a_transcode(
+        "track_format_ogg_opus.ogg",
+        "Artist 1 - Opus.opus",
+    );
+    // Opus audio in an `.ogg` file goes the same way.
+    export_puts_the_file_on_the_usb_as_a_transcode(
+        "track_format_ogg_opus.ogg",
+        "Artist 1 - Opus Inside.ogg",
+    );
+}
+
+/// Players don't play OGG or Opus, so the export converts the file `fixture`,
+/// copied in as `name`: the USB gets the transcode (AIFF, the first format the
+/// app makes) and never the source file.
+fn export_puts_the_file_on_the_usb_as_a_transcode(fixture: &str, name: &str) {
     let root = tempdir().expect("temp root");
     let media = root.path().join("media");
     fs::create_dir_all(&media).expect("create media dir");
-    fs::copy(
-        format_fixture("track_format_ogg.ogg"),
-        media.join("Artist 1 - Vorbis.ogg"),
-    )
-    .expect("copy ogg fixture");
+    fs::copy(format_fixture(fixture), media.join(name)).expect("copy fixture");
     let (backend, data_dir, usb, tracks) = backend_with_scanned_media(root.path());
     let track_ids: Vec<String> = tracks.into_iter().map(|(id, _)| id).collect();
     assert_eq!(track_ids.len(), 1);
 
-    let (playlist_id, added) = playlist_with_tracks(&backend, "Vorbis", track_ids.clone());
+    let (playlist_id, added) = playlist_with_tracks(&backend, "Converted", track_ids.clone());
     assert_eq!((added.added, added.unplayable), (1, 0));
     seed_tracks_as_analyzed(&data_dir, &track_ids);
     let exported = backend.export_to_usb(ExportToUsbRequest {
@@ -2122,13 +2136,15 @@ fn export_to_usb_puts_an_ogg_on_the_usb_as_a_transcode() {
     assert_eq!(data.data.exported_tracks, 1);
     assert_eq!(data.data.skipped_tracks, 0, "{:?}", data.data.warnings);
 
-    let paths = usb_playlist_track_paths(&usb, "Vorbis");
+    let paths = usb_playlist_track_paths(&usb, "Converted");
     assert_eq!(paths.len(), 1, "{paths:?}");
     assert!(paths[0].ends_with(".aiff"), "{paths:?}");
-    assert!(
-        !usb_has_file_with_extension(&usb, "ogg"),
-        "the OGG must not be copied to the USB"
-    );
+    for ext in ["ogg", "opus"] {
+        assert!(
+            !usb_has_file_with_extension(&usb, ext),
+            "the {ext} source must not be copied to the USB"
+        );
+    }
 }
 
 #[test]
@@ -2182,8 +2198,9 @@ fn export_to_usb_reports_a_missing_ogg_as_a_missing_file() {
 
 #[test]
 fn a_track_that_can_never_go_on_a_usb_is_not_added_to_a_playlist() {
-    // Opus (also inside an `.ogg`) and protected AAC: players don't play
-    // them and the app can't convert them, so a playlist doesn't take them.
+    // Protected AAC: players don't play it and the app can't convert it, so
+    // a playlist doesn't take it. Opus (also inside an `.ogg`) and OGG Vorbis
+    // are converted on export, so a playlist takes them.
     let root = tempdir().expect("temp root");
     let media = root.path().join("media");
     fs::create_dir_all(&media).expect("create media dir");
@@ -2208,11 +2225,11 @@ fn a_track_that_can_never_go_on_a_usb_is_not_added_to_a_playlist() {
         "Mixed",
         tracks.iter().map(|(id, _)| id.clone()).collect(),
     );
-    assert_eq!((added.added, added.skipped, added.unplayable), (2, 0, 3));
+    assert_eq!((added.added, added.skipped, added.unplayable), (4, 0, 1));
     assert_eq!(
         added.status_text,
-        "Added 2 tracks (skipped 0) to Mixed. Not added: 3 tracks in a format players don't \
-         play and the app can't convert (Opus, protected AAC)"
+        "Added 4 tracks (skipped 0) to Mixed. Not added: 1 track in protected AAC, which \
+         players don't play and the app can't convert"
     );
 
     let mut in_playlist: Vec<String> = backend
@@ -2235,14 +2252,19 @@ fn a_track_that_can_never_go_on_a_usb_is_not_added_to_a_playlist() {
     in_playlist.sort();
     assert_eq!(
         in_playlist,
-        vec!["Artist 1 - Plays.mp3", "Artist 5 - Vorbis.ogg"]
+        vec![
+            "Artist 1 - Plays.mp3",
+            "Artist 2 - Opus.opus",
+            "Artist 4 - Opus Inside.ogg",
+            "Artist 5 - Vorbis.ogg",
+        ]
     );
 }
 
 #[test]
 fn a_rescan_records_an_ogg_holding_opus_as_opus() {
     // A library scanned before the app told the two apart has the file as
-    // OGG: the next scan corrects it, and playlists stop taking it.
+    // OGG: the next scan corrects it.
     let root = tempdir().expect("temp root");
     let media = root.path().join("media");
     fs::create_dir_all(&media).expect("create media dir");
@@ -2256,7 +2278,7 @@ fn a_rescan_records_an_ogg_holding_opus_as_opus() {
     assert_eq!(track_ids.len(), 1);
     // In the library as a track (not only a browsed file), with the old label.
     let (_, added) = playlist_with_tracks(&backend, "Before", track_ids.clone());
-    assert_eq!((added.added, added.unplayable), (0, 1));
+    assert_eq!((added.added, added.unplayable), (1, 0));
     let db = rusqlite::Connection::open(data_dir.join("backend.db")).expect("open db");
     let format = || -> Option<String> {
         db.query_row(

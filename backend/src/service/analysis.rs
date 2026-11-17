@@ -1660,7 +1660,7 @@ fn decode_audio_mono_samples_symphonia(
     let mut format = probed.format;
     let track = first_audio_track(format.tracks()).ok_or_else(|| "no audio track".to_string())?;
     let track_id = track.id;
-    let mut decoder = symphonia::default::get_codecs()
+    let mut decoder = crate::symphonia_decoder::codecs()
         .make(&track.codec_params, &DecoderOptions::default())
         .map_err(|err| err.to_string())?;
 

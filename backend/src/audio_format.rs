@@ -106,6 +106,12 @@ impl AudioFormat {
             Self::Ogg | Self::Opus => 0,
         }
     }
+
+    /// Whether players don't play this format but the app converts it, so it
+    /// only ever goes on a USB as a transcode: OGG (Vorbis) and Opus.
+    pub fn goes_as_transcode_only(self) -> bool {
+        matches!(self, Self::Ogg | Self::Opus)
+    }
 }
 
 /// A format the user ticks per USB stick (USB audio formats): which files export
@@ -200,9 +206,8 @@ pub fn is_alac_file(path: &Path) -> bool {
     file_holds_codec(path, "m4a", symphonia::core::codecs::CODEC_TYPE_ALAC)
 }
 
-/// Whether an Ogg container (`.ogg`) holds Opus audio, which the app can't
-/// decode, rather than Vorbis. Probes the file's header; an unreadable file
-/// counts as not Opus.
+/// Whether an Ogg container (`.ogg`) holds Opus audio rather than Vorbis.
+/// Probes the file's header; an unreadable file counts as not Opus.
 pub fn is_opus_in_ogg(path: &Path) -> bool {
     file_holds_codec(path, "ogg", symphonia::core::codecs::CODEC_TYPE_OPUS)
 }
@@ -236,8 +241,8 @@ fn file_holds_codec(
 }
 
 /// The format the scan records for a file: its extension, except an `.ogg`
-/// holding Opus audio, which is recorded as `opus`. Players play neither,
-/// but the app converts Vorbis and can't decode Opus.
+/// holding Opus audio, which is recorded as `opus`, so the library shows
+/// the codec the file really holds.
 pub fn recorded_format_ext(path: &Path) -> Option<String> {
     let ext = format_ext_of(path)?;
     if AudioFormat::from_extension(&ext) == Some(AudioFormat::Ogg) && is_opus_in_ogg(path) {
@@ -251,7 +256,7 @@ pub fn recorded_format_ext(path: &Path) -> Option<String> {
 pub fn never_goes_on_usb(format_ext: &str) -> bool {
     matches!(
         AudioFormat::from_extension(format_ext),
-        Some(AudioFormat::Opus | AudioFormat::M4p)
+        Some(AudioFormat::M4p)
     )
 }
 
@@ -380,9 +385,8 @@ mod tests {
             Some("ogg")
         );
 
-        assert!(never_goes_on_usb("opus"));
         assert!(never_goes_on_usb("M4P"));
-        for ext in ["ogg", "mp3", "flac", "m4a", "wav", "xyz"] {
+        for ext in ["ogg", "opus", "mp3", "flac", "m4a", "wav", "xyz"] {
             assert!(!never_goes_on_usb(ext), "{ext}");
         }
     }

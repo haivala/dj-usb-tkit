@@ -150,6 +150,7 @@ Copyright (c) DJ USB Tkit contributors. Project code is licensed under `AGPL-3.0
 - [Rust](https://rustup.rs/) (stable)
 - [Node.js](https://nodejs.org/) 24 LTS (24.15 or newer) or 26 (required for frontend build/tests; the optional Essentia engine uses whichever `node` is installed)
 - System libraries for Tauri v2 (see below)
+- [CMake](https://cmake.org/) (builds the bundled Opus decoder)
 - Tauri CLI v2 for release bundles:
 
 ```
@@ -163,19 +164,19 @@ Ensure `~/.cargo/bin` is available in `PATH`.
 **Arch Linux:**
 
 ```
-sudo pacman -S --needed webkit2gtk-4.1 gtk3 libappindicator-gtk3 librsvg base-devel openssl pkg-config
+sudo pacman -S --needed webkit2gtk-4.1 gtk3 libappindicator-gtk3 librsvg base-devel openssl pkg-config cmake
 ```
 
 **Ubuntu / Debian:**
 
 ```
-sudo apt install libwebkit2gtk-4.1-dev libgtk-3-dev libappindicator3-dev librsvg2-dev build-essential libssl-dev pkg-config
+sudo apt install libwebkit2gtk-4.1-dev libgtk-3-dev libappindicator3-dev librsvg2-dev build-essential libssl-dev pkg-config cmake
 ```
 
 **Fedora:**
 
 ```
-sudo dnf install webkit2gtk4.1-devel gtk3-devel libappindicator-gtk3-devel librsvg2-devel gcc gcc-c++ openssl-devel pkg-config
+sudo dnf install webkit2gtk4.1-devel gtk3-devel libappindicator-gtk3-devel librsvg2-devel gcc gcc-c++ openssl-devel pkg-config cmake
 ```
 
 For other distros see the [Tauri prerequisites docs](https://v2.tauri.app/start/prerequisites/#linux).

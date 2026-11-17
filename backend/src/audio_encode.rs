@@ -223,7 +223,7 @@ impl PcmSource {
             .find(|track| track.codec_params.codec != CODEC_TYPE_NULL)
             .ok_or_else(|| failed("no audio track"))?;
         let track_id = track.id;
-        let decoder = symphonia::default::get_codecs()
+        let decoder = crate::symphonia_decoder::codecs()
             .make(&track.codec_params, &DecoderOptions::default())
             .map_err(failed)?;
         let bits_per_sample = track
@@ -808,6 +808,26 @@ mod tests {
                     "{name} → {format:?}: samples differ"
                 );
             }
+        }
+    }
+
+    #[test]
+    fn an_ogg_opus_source_converts_to_every_format() {
+        let dir = tempfile::tempdir().expect("tempdir");
+        let src = fixture("track_format_ogg_opus.ogg");
+        for format in TranscodeFormat::ALL {
+            let dst = dir.path().join(format!("opus.{}", format.extension()));
+            let out = transcode_file(&src, &dst, format, &TranscodeTags::default(), &no_cancel())
+                .expect("transcode");
+            // Opus always decodes at 48 kHz.
+            assert_eq!((out.channels, out.sample_rate), (1, 48_000), "{format:?}");
+            assert!(
+                out.duration_ms.abs_diff(1000) < 50,
+                "{format:?}: {} ms",
+                out.duration_ms
+            );
+            let (samples, _, _, _) = decode_all(&dst);
+            assert!(samples.iter().any(|&s| s != 0), "{format:?}: silent");
         }
     }
 

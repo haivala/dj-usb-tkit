@@ -39,14 +39,14 @@
 
 ## Unreleased
 
-- **New feature:** OGG Vorbis tracks can go on a USB. Players don't play OGG, so export converts an OGG track the
-  way it converts lossless tracks, to the USB's first ticked audio format the app makes (AIFF, WAV or MP3), with
-  the track's cues, beat grid and BPM. Convert… makes the same files ahead of time. An OGG track is still left
-  off a USB whose audio formats include none of the three, with a warning.
-- **Improvement:** Tracks that can never go on a USB (Opus and protected AAC, which players don't play and the app
-  can't convert) are no longer added to playlists. The row's "+" is off and says why, adding a selection leaves
-  them out and says how many, and a playlist imported from rekordbox or Mixxx leaves them out with a warning. An
-  `.ogg` file holding Opus audio is recognised as Opus when the library is scanned.
+- **New feature:** OGG Vorbis and Opus tracks can go on a USB. Players don't play either, so export converts them
+  the way it converts lossless tracks, to the USB's first ticked audio format the app makes (AIFF, WAV or MP3),
+  with the track's cues, beat grid and BPM. Convert… makes the same files ahead of time. Opus tracks also play,
+  show waveforms and can be analyzed in the app. An `.ogg` file holding Opus audio is shown as Opus. These tracks
+  are still left off a USB whose audio formats include none of the three, with a warning.
+- **Improvement:** Protected AAC tracks (`.m4p`), which players don't play and the app can't convert, are no
+  longer added to playlists. The row's "+" is off and says why, adding a selection leaves them out and says how
+  many, and a playlist imported from rekordbox or Mixxx leaves them out with a warning.
 - **Fix:** Analysis no longer fails every track still waiting with "Not enough available memory" when the last
   running track ends while memory is short. The next track starts anyway.
 

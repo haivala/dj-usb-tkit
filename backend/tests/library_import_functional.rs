@@ -1615,12 +1615,12 @@ fn reimporting_a_mixxx_playlist_updates_it_and_refreshes_or_forces_track_data() 
 
 #[test]
 fn a_mixxx_playlist_import_leaves_out_tracks_that_can_never_go_on_a_usb() {
-    // Mixxx plays Opus; players don't and the app can't convert it. The
-    // track comes into the library, the playlist doesn't take it.
+    // Mixxx plays protected AAC; players don't and the app can't convert it.
+    // The track comes into the library, the playlist doesn't take it.
     let mixxx_root = tempdir().expect("mixxx root");
     let media_root = tempdir().expect("media root");
     let (_app_dir, data_dir, backend) = app();
-    let paths = media_files(media_root.path(), &["a.mp3", "b.opus"]);
+    let paths = media_files(media_root.path(), &["a.mp3", "b.m4p"]);
     let tracks = [
         plain_track(&paths[0], "Alpha"),
         plain_track(&paths[1], "Bravo"),
@@ -1667,7 +1667,7 @@ fn a_mixxx_playlist_import_leaves_out_tracks_that_can_never_go_on_a_usb() {
             |r| r.get(0),
         )
         .unwrap();
-    assert_eq!(in_library, 1, "the Opus track is still imported");
+    assert_eq!(in_library, 1, "the protected AAC track is still imported");
 }
 
 #[test]

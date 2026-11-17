@@ -27,6 +27,17 @@ else
     echo "  Done."
 fi
 
+# CMake builds the bundled Opus decoder (libopus); the Command Line Tools don't include it.
+if ! command -v cmake &>/dev/null; then
+    if command -v brew &>/dev/null; then
+        echo "  Installing CMake via Homebrew..."
+        brew install cmake
+    else
+        echo "  CMake is required: install it from https://cmake.org/download/ or with Homebrew, then re-run."
+        exit 1
+    fi
+fi
+
 # ─── 2. Rust ────────────────────────────────────────────────────────────────
 echo ""
 echo "[2/4] Checking Rust..."

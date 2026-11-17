@@ -139,16 +139,11 @@ pub(crate) fn file_facts(path: &Path) -> (Option<i64>, Option<i64>) {
     }
 }
 
-/// Whether `path` holds audio a transcode can be made from: lossless, or OGG Vorbis.
+/// Whether `path` holds audio a transcode can be made from: lossless, OGG or Opus.
 fn is_transcode_source(path: &Path) -> bool {
     match AudioFormat::of_path(path) {
-        Some(
-            AudioFormat::Flac
-            | AudioFormat::Wav
-            | AudioFormat::Aiff
-            | AudioFormat::Alac
-            | AudioFormat::Ogg,
-        ) => true,
+        Some(format) if format.goes_as_transcode_only() => true,
+        Some(AudioFormat::Flac | AudioFormat::Wav | AudioFormat::Aiff | AudioFormat::Alac) => true,
         // `.m4a` holds AAC or ALAC; only the codec tells.
         Some(AudioFormat::M4a) => crate::audio_format::is_alac_file(path),
         _ => false,
@@ -1182,7 +1177,7 @@ mod tests {
         assert!(
             data.messages
                 .iter()
-                .any(|m| m.starts_with("b.mp3: not a lossless or OGG file"))
+                .any(|m| m.starts_with("b.mp3: not a lossless, OGG or Opus file"))
         );
         assert!(s.out.join("c.wav").is_file());
     }
