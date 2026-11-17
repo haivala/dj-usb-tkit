@@ -421,3 +421,66 @@ jobs:
               --notes-file "$notes_file" \
               "${release_flags[@]}"
           fi
+
+  # Updates the AUR package dj-usb-tkit-bin to the release's .deb. Stable,
+  # public releases only: a draft's assets can't be downloaded, and a
+  # prerelease must not reach Arch users. Needs the AUR_SSH_PRIVATE_KEY secret
+  # (the private key registered on the AUR account); skipped without it.
+  aur:
+    name: Update AUR package
+    if: >-
+      needs.prepare.outputs.tag != '' &&
+      needs.prepare.outputs.prerelease != 'true' &&
+      needs.prepare.outputs.draft != 'true'
+    needs:
+      - prepare
+      - publish
+    runs-on: ubuntu-24.04
+    container: archlinux:base-devel
+    steps:
+      - name: Install tools
+        run: pacman -Syu --noconfirm --needed git openssh
+
+      - name: Check out release tag
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ needs.prepare.outputs.checkout_ref }}
+
+      - name: Build and push the AUR package
+        shell: bash
+        env:
+          TAG: ${{ needs.prepare.outputs.tag }}
+          AUR_SSH_PRIVATE_KEY: ${{ secrets.AUR_SSH_PRIVATE_KEY }}
+        run: |
+          set -euo pipefail
+          if [[ -z "$AUR_SSH_PRIVATE_KEY" ]]; then
+            echo "AUR_SSH_PRIVATE_KEY is not set; skipping the AUR update."
+            exit 0
+          fi
+
+          # makepkg refuses to run as root.
+          useradd -m builder
+          chown -R builder: "$GITHUB_WORKSPACE"
+
+          ssh_dir=/home/builder/.ssh
+          install -d -m 700 -o builder -g builder "$ssh_dir"
+          printf '%s\n' "$AUR_SSH_PRIVATE_KEY" > "$ssh_dir/aur"
+          # The AUR's published ed25519 host key, pinned instead of trusting
+          # whatever answers on first connect.
+          echo 'aur.archlinux.org ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIEuBKrPzbawxA/k2g6NcyV5jmqwJ2s+zpgZGZ7tpLIcN' > "$ssh_dir/known_hosts"
+          cat > "$ssh_dir/config" <<'EOF'
+          Host aur.archlinux.org
+            User aur
+            IdentityFile ~/.ssh/aur
+            IdentitiesOnly yes
+            StrictHostKeyChecking yes
+          EOF
+          chown builder: "$ssh_dir"/*
+          chmod 600 "$ssh_dir"/*
+
+          sudo -u builder -H \
+            GIT_AUTHOR_NAME="${GITHUB_ACTOR}" \
+            GIT_AUTHOR_EMAIL="${GITHUB_ACTOR}@users.noreply.github.com" \
+            GIT_COMMITTER_NAME="${GITHUB_ACTOR}" \
+            GIT_COMMITTER_EMAIL="${GITHUB_ACTOR}@users.noreply.github.com" \
+            ./scripts/aur-release.sh "$TAG" --push

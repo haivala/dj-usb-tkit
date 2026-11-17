@@ -564,7 +564,7 @@ test("changing the language reloads the window in it, and a refused change keeps
   const select = page.locator("#languageSelect");
   await expect(select).toHaveValue("en");
   // Each language named in itself, as get_ui_texts lists them.
-  await expect(select.locator("option")).toHaveText(["English", /^\[.+\]$/]);
+  await expect(select.locator("option")).toHaveText(["English", "Français", /^\[.+\]$/]);
 
   // Refused while a job runs: the page stays, in English.
   await page.evaluate(() => window.sessionStorage.setItem("e2eJobRunning", "1"));
@@ -611,7 +611,7 @@ test("Quick Start on a first run offers the language, and hides it with only one
   await expect(page.locator("#helpOverlay")).toBeVisible();
   const select = page.locator("#helpLanguageSelect");
   await expect(select).toHaveValue("en");
-  await expect(select.locator("option")).toHaveText(["English", /^\[.+\]$/]);
+  await expect(select.locator("option")).toHaveText(["English", "Français", /^\[.+\]$/]);
 
   await select.selectOption("en-XA");
   await expect(page.locator("html")).toHaveAttribute("lang", "en-XA");

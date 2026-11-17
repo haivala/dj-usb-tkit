@@ -39,6 +39,10 @@
 
 ## Unreleased
 
+## 0.6.3
+
+**Severity:** feature
+
 - **New feature:** The app is available in French. Pick Français in Settings → Language or in Quick Start; a
   computer set to French opens the app in French until another language is picked.
 - **New feature:** Arch Linux users can install the app from the AUR as `dj-usb-tkit-bin`. When a newer

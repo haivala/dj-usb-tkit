@@ -4,10 +4,12 @@
 #   scripts/aur-release.sh v0.6.2            # render PKGBUILD + .SRCINFO, test-build
 #   scripts/aur-release.sh v0.6.2 --install  # ...and install the built package
 #   PKGREL=2 scripts/aur-release.sh v0.6.2   # packaging-only fix for the same version
+#   scripts/aur-release.sh v0.6.2 --push     # ...and commit + push to the AUR (CI)
 #
 # The AUR repository is cloned into packaging/aur/dj-usb-tkit-bin/ (ignored by
-# git here). The script stages PKGBUILD and .SRCINFO there but never commits or
-# pushes; it prints the commands for that at the end.
+# git here). Without --push the script stages PKGBUILD and .SRCINFO there and
+# prints the commit/push commands; the release workflow's `aur` job runs it
+# with --push.
 set -euo pipefail
 
 PKGNAME=dj-usb-tkit-bin
@@ -20,10 +22,16 @@ aur_dir="$root/packaging/aur/$PKGNAME"
 
 tag="${1:-}"
 install=0
-[[ "${2:-}" == "--install" ]] && install=1
+push=0
+case "${2:-}" in
+  --install) install=1 ;;
+  --push) push=1 ;;
+  "") ;;
+  *) echo "unknown option: $2" >&2; exit 1 ;;
+esac
 
 if [[ ! "$tag" =~ ^v[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
-  echo "usage: $0 vX.Y.Z [--install]  (stable release tags only, no -rc)" >&2
+  echo "usage: $0 vX.Y.Z [--install|--push]  (stable release tags only, no -rc)" >&2
   exit 1
 fi
 version="${tag#v}"
@@ -56,7 +64,9 @@ build="$work/build"
 mkdir "$build"
 cp "$aur_dir/PKGBUILD" "$build/"
 cp "$work/app.deb" "$build/dj-usb-tkit-${version}.deb"
-(cd "$build" && makepkg -f --noconfirm)
+# --nodeps: repackaging the .deb needs none of the runtime dependencies (the CI
+# container has none of them); `pacman -U` below still installs them.
+(cd "$build" && makepkg -f --nodeps --noconfirm)
 pkgfile="$(find "$build" -maxdepth 1 -name "${PKGNAME}-${version}-${pkgrel}-*.pkg.tar.*" | head -n1)"
 echo "Built $(basename "$pkgfile")"
 
@@ -72,6 +82,18 @@ fi
 
 git -C "$aur_dir" add PKGBUILD .SRCINFO
 git -C "$aur_dir" status --short
+
+if (( push )); then
+  if git -C "$aur_dir" diff --cached --quiet; then
+    echo "The AUR already has $version-$pkgrel; nothing to push."
+    exit 0
+  fi
+  git -C "$aur_dir" commit -m "Update to $version-$pkgrel"
+  git -C "$aur_dir" push origin HEAD:master
+  echo "Pushed $PKGNAME $version-$pkgrel to the AUR."
+  exit 0
+fi
+
 cat <<EOF
 
 Staged in $aur_dir. To publish:
