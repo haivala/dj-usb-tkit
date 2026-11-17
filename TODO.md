@@ -69,7 +69,7 @@ Open points:
 - Track IDs differ between the two databases on rekordbox-made sticks, so a
   session copied to the other database must map its tracks by file path. The
   current sync writes PDB track IDs into `history_content.content_id`
-  unmapped, which names missing or wrong tracks there (USB_PROBLEM).
+  unmapped, which names missing or wrong tracks there.
 - An entry whose track isn't in the other database at all: leave it out of
   the copy, skip the whole session, or add the track to that database?
 - Writing sessions to the PDB means appending to `t11/t12`, which the app has
