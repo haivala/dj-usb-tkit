@@ -54,6 +54,33 @@ track only in eDB history and in no playlist could lose its audio, analysis
 and artwork files. "Remove Missing Audio References" already counts both
 histories.
 
+## Possibility: history repair merges both databases' sessions into both
+
+First ask users whether they want this. USB History already lists the sessions
+of both databases, matched by `history_id` (`merge_history_sessions` in
+`backend/src/service/usb.rs`). The optional `sync_edb_history_from_pdb` repair
+(`backend/src/service/repair/history.rs`) still only overwrites the eDB's
+history with the PDB's, dropping sessions only the eDB has. The idea: merge
+both databases' sessions the same way USB History does and write the result
+to both, still as an optional fix.
+
+Open points:
+
+- Track IDs differ between the two databases on rekordbox-made sticks, so a
+  session copied to the other database must map its tracks by file path. The
+  current sync writes PDB track IDs into `history_content.content_id`
+  unmapped, which names missing or wrong tracks there (USB_PROBLEM).
+- An entry whose track isn't in the other database at all: leave it out of
+  the copy, skip the whole session, or add the track to that database?
+- Writing sessions to the PDB means appending to `t11/t12`, which the app has
+  never done. A CDJ-3000 appends one `t11` page (one 16-byte row: id + name)
+  and one `t12` page (12-byte rows: track id, session id, entry index) per
+  session, flags `0x24`, `u5=1`, `num_rl=nrs-1`. `append_rows_to_chain_in_place`
+  fills free space on existing pages first, so it would need a new-page-only
+  mode to match. Needs a hardware check (NXS2 + rekordbox) before release.
+- How and when players write history to each database isn't known (see
+  `docs/eDB.md`), which the item above would help settle.
+
 ## Possibility: copy cues added on a CDJ back to the library
 
 Cues added on a CDJ don't reach a library track that already has cues:
