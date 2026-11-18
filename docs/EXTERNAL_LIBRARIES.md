@@ -133,7 +133,7 @@ the checklist's order; one that fails doesn't stop the rest, and the status
 line names it. When they are done, the first imported playlist opens. A track
 listed twice in a list is added to its playlist once.
 
-![Import under New, ticking two rekordbox playlists and all Mixxx crates, and the first imported playlist opening](assets/import-playlist.webp)
+![Import under New, ticking two rekordbox playlists and all Mixxx crates, taking rekordbox's track data for the tracks that differ, and the first imported playlist opening](assets/import-playlist.webp)
 
 An imported playlist's header says where it came from, e.g. `Friday Set (5 tracks, Total time: 14:05) · Imported from
 rekordbox`.
