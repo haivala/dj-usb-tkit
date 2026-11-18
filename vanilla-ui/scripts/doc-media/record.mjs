@@ -605,11 +605,18 @@ function scenes(fixture) {
     {
       // docs/EXTERNAL_LIBRARIES.md: Import under New, tick two rekordbox
       // playlists in the grouped list and every Mixxx crate with its group's
-      // box, and the first opens as a new playlist.
+      // box; rekordbox's differing track data is taken, and the first opens
+      // as a new playlist.
       name: "import-playlist",
-      caption: "Importing two rekordbox playlists and all Mixxx crates: the first opens as a new playlist",
+      caption: "Importing two rekordbox playlists and all Mixxx crates, taking rekordbox's track data",
       editor: false,
       opts: {
+        importConflicts: {
+          rekordbox: [
+            { title: "Low Orbit", differs: "cues, BPM" },
+            { title: "Pier Lights", differs: "beat grid" },
+          ],
+        },
         externalLibraries: {
           rekordbox: [
             { id: "3924571", name: "Friday Set", kind: "playlist", titles: ["Low Orbit", "Sauna Talk", "Pier Lights", "White Nights", "Afterglow"] },
@@ -643,6 +650,10 @@ function scenes(fixture) {
           await page.waitForTimeout(500);
           await clickOn(page, page.locator("#playlistImportOkBtn"), 300);
           await page.locator("#playlistTracksBody .track-grid-row").first().waitFor();
+          // The tracks rekordbox has other values for: take rekordbox's.
+          await page.locator("#importConflictOverlay").waitFor();
+          await page.waitForTimeout(2000);
+          await clickOn(page, page.locator("#importConflictUseBtn"), 300);
           await moveTo(page, 820, 520, 20);
           await page.waitForTimeout(2200);
         }, { fullWindow: true });

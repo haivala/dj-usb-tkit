@@ -105,6 +105,32 @@
     playlists.push({ id, name: item.name, tracks: items, imported: true });
     return { playlistId: id, name: item.name, added: items.length, indexed: 0, notFound: [], warnings: [] };
   };
+  // The backend's question after an import, for each imported-from library
+  // named in `opts.importConflicts` ({ library: [{ title, differs }] }): its
+  // tracks whose cues, BPM, key or grid differ from the library's.
+  const LIBRARY_LABELS = { rekordbox: "rekordbox", mixxx: "Mixxx" };
+  const LIBRARY_PATHS = {
+    rekordbox: "C:/Users/dj/AppData/Roaming/Pioneer/rekordbox/master.db",
+    mixxx: "/home/dj/.mixxx/mixxxdb.sqlite",
+  };
+  const importConflicts = (libraries) => Object.entries(opts.importConflicts || {})
+    .filter(([library]) => libraries.has(library))
+    .map(([library, differing]) => {
+      const label = LIBRARY_LABELS[library];
+      const rows = differing.map(({ title, differs }) => {
+        const track = tracks.find((t) => t.title === title);
+        return { trackId: track.id, nameText: `${track.artist} – ${track.title}`, differsText: differs };
+      });
+      return {
+        library,
+        path: LIBRARY_PATHS[library],
+        trackIds: rows.map((row) => row.trackId),
+        titleText: `Different track data in ${label}`,
+        messageText: `${label} has different cues, BPM, key or beat grid for ${rows.length} tracks than your library.`,
+        useLabel: `Use ${label}'s`,
+        rows,
+      };
+    });
   // USB track rows by title, from every exported playlist.
   const usbTracksByTitle = new Map(
     Object.values(usb?.playlistTracks || {}).flatMap((resp) => resp.data.items.map((t) => [t.title, t]))
@@ -310,11 +336,11 @@
             return ok({ ran: [], retryLater: [] });
           case "detect_external_rekordbox_db":
             return ok(external?.rekordbox
-              ? { found: true, path: "C:/Users/dj/AppData/Roaming/Pioneer/rekordbox/master.db", imported: true }
+              ? { found: true, path: LIBRARY_PATHS.rekordbox, imported: true }
               : { found: false, path: null, imported: false });
           case "detect_external_mixxx_db":
             return ok(external?.mixxx
-              ? { found: true, path: "/home/dj/.mixxx/mixxxdb.sqlite", imported: true }
+              ? { found: true, path: LIBRARY_PATHS.mixxx, imported: true }
               : { found: false, path: null, imported: false });
           case "list_rekordbox_playlists":
             return listExternal("rekordbox");
@@ -329,7 +355,15 @@
               failed: 0,
               added: results.reduce((n, { playlist }) => n + playlist.added, 0),
               skipped: 0,
+              conflicts: importConflicts(new Set(r.items.map((item) => item.library))),
             }));
+          }
+          case "apply_external_track_data": {
+            const n = r.trackIds.length;
+            return ok({
+              updated: n,
+              statusText: `Took the cues, BPM, key and beat grid of ${n} tracks from ${LIBRARY_LABELS[r.library]}`,
+            });
           }
           case "list_playlists":
             return ok(playlistsState());
