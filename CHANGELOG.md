@@ -45,6 +45,7 @@
   source folder.
 - **Fix:** Analyze Library also analyzes rekordbox tracks that are missing a waveform, BPM or length. The BPM,
   key and beat grid that came from rekordbox are kept.
+- **Improvement:** Track analysis is faster, most of all for MP3s. The results are the same as before.
 
 ## 0.6.4
 

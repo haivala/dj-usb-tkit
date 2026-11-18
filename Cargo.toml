@@ -31,6 +31,32 @@ opt-level = 3
 opt-level = 3
 [profile.release.package.symphonia-codec-alac]
 opt-level = 3
+# Analysis decodes every track it reads (rodio first, symphonia as the
+# fallback), and the waveform and BPM refinement run in the backend crate
+# itself, over every sample of the track: all of them get the speed build too.
+# Rust has no fast-math, so the analysis results don't change with it.
+[profile.release.package.backend]
+opt-level = 3
+[profile.release.package.rodio]
+opt-level = 3
+[profile.release.package.symphonia-core]
+opt-level = 3
+[profile.release.package.symphonia-bundle-mp3]
+opt-level = 3
+[profile.release.package.symphonia-codec-aac]
+opt-level = 3
+[profile.release.package.symphonia-codec-pcm]
+opt-level = 3
+[profile.release.package.symphonia-codec-vorbis]
+opt-level = 3
+[profile.release.package.symphonia-format-isomp4]
+opt-level = 3
+[profile.release.package.symphonia-format-ogg]
+opt-level = 3
+[profile.release.package.symphonia-format-riff]
+opt-level = 3
+[profile.release.package.opusic-sys]
+opt-level = 3
 
 [profile.dev]
 debug = "line-tables-only"
