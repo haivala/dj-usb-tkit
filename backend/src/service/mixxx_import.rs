@@ -20,6 +20,7 @@ use super::import_conflicts::{
     differing_fields, import_conflicts, load_local_track_data, track_file_paths,
 };
 use super::key_notation::camelot_position;
+use super::library::ImportedFileCopies;
 use super::{
     BackendService, annotate_imported_playlists, build_track_match_fingerprint,
     external_playlist_key, has_tracks_flagged, no_importable_tracks_error, non_empty_db_value, now,
@@ -591,6 +592,8 @@ struct MixxxTrackImporter<'a> {
     conflicts: Vec<ConflictedTrack>,
     unsupported: usize,
     warnings: Vec<WarningEntry>,
+    /// Byte-identical copies of a file, handled like the folder scan does.
+    copies: ImportedFileCopies,
 }
 
 impl<'a> MixxxTrackImporter<'a> {
@@ -621,6 +624,7 @@ impl<'a> MixxxTrackImporter<'a> {
             conflicts: Vec::new(),
             unsupported: 0,
             warnings: Vec::new(),
+            copies: ImportedFileCopies::new("scan-mixxx-db", "mixxx_db_source"),
         })
     }
 
@@ -648,6 +652,15 @@ impl<'a> MixxxTrackImporter<'a> {
             Some(t.album.as_str()).filter(|s| !s.is_empty()),
         );
         let existing_id = self.existing.get(&t.file_path).cloned();
+        match existing_id {
+            Some(_) => self.copies.met(&t.file_path),
+            // A copy of a library track's file: that track stands in for it.
+            None => {
+                if let Some(kept_id) = self.copies.kept_track_for(tx, &t.file_path)? {
+                    return Ok(Some(kept_id));
+                }
+            }
+        }
         let track_id = existing_id
             .clone()
             .unwrap_or_else(|| Uuid::now_v7().to_string());
@@ -772,6 +785,7 @@ impl<'a> MixxxTrackImporter<'a> {
                 ],
             )?;
             self.existing.insert(t.file_path.clone(), track_id.clone());
+            self.copies.added(&t.file_path);
             self.indexed += 1;
         }
 
@@ -886,6 +900,7 @@ impl<'a> MixxxTrackImporter<'a> {
                 format!("cover files copied: {}", self.artwork_ok),
             );
         }
+        self.warnings.append(&mut self.copies.warnings);
         std::mem::take(&mut self.warnings)
     }
 }
@@ -909,6 +924,7 @@ impl BackendService {
         for t in &tracks {
             importer.upsert(&tx, t)?;
         }
+        let merged = importer.copies.merge(&tx, &self.db.data_dir())?;
         tx.commit()?;
 
         let warnings = importer.finish_warnings();
@@ -925,8 +941,9 @@ impl BackendService {
             job_id: Uuid::now_v7().to_string(),
             indexed: importer.indexed,
             updated: importer.updated,
-            // Imports never remove tracks (see `MixxxTrackImporter::upsert`).
-            removed: 0,
+            // A missing file's track is never removed (see `MixxxTrackImporter::upsert`);
+            // only tracks merged into an identical copy's track are.
+            removed: merged.len(),
             conflicts: import_conflicts(
                 ExternalLibrary::Mixxx,
                 req.path.as_deref(),
@@ -995,6 +1012,16 @@ impl BackendService {
                 local_ids.push(track_id);
             }
         }
+
+        // A track merged into an identical copy's is placed as that track,
+        // and a track the playlist names twice that way is placed once.
+        let merged = importer.copies.merge(&tx, &self.db.data_dir())?;
+        let mut placed = HashSet::new();
+        let local_ids: Vec<String> = local_ids
+            .into_iter()
+            .map(|id| merged.get(&id).cloned().unwrap_or(id))
+            .filter(|id| placed.insert(id.clone()))
+            .collect();
 
         // The tracks stay in the library; the playlist doesn't take them.
         let (local_ids, never_on_usb) = without_tracks_never_on_usb(&tx, local_ids)?;
@@ -1066,6 +1093,7 @@ impl BackendService {
                 updated += 1;
             }
         }
+        importer.copies.merge(&tx, &self.db.data_dir())?;
         tx.commit()?;
         Ok(ApplyExternalTrackDataData {
             updated,
@@ -1408,7 +1436,7 @@ mod tests {
             .map(|n| media_root.path().join(n))
             .collect();
         for p in &paths {
-            std::fs::write(p, b"audio").expect("write media");
+            std::fs::write(p, format!("audio {}", p.display())).expect("write media");
         }
         let track = |path: &Path, title| (path.to_str().unwrap().to_string(), title);
         let tracks = [

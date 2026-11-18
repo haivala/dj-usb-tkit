@@ -92,6 +92,12 @@ Some tracks are skipped, with the reason in the Event Log:
 - the file isn't one the library takes, such as a video or a tracker module
   (`.it`, `.xm`, …), the same rule the folder scan uses
 - the track was deleted in rekordbox / Mixxx
+- the file is a byte-identical copy of a file already in the library (the
+  same file in two folders), as with the folder scan: the library keeps one
+  track, which a playlist import places instead, and the Event Log names the
+  extra copy to delete. Copies the library already holds as separate tracks
+  are merged into the one with cues, then the one in more playlists, then
+  the oldest
 
 ### Source chips
 
@@ -152,7 +158,7 @@ cues from the app's values.
 ### When both libraries have the same file
 
 Tracks are matched by file path, so a file in both libraries is one track in
-the app:
+the app (and so is an identical copy at another path, see above):
 
 - it carries both source flags and shows when either chip is on
 - title, artist and album: whichever import ran last

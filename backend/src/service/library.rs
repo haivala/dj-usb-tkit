@@ -23,60 +23,106 @@ pub(super) fn stored_file_path(path: &str) -> &Path {
     Path::new(path.trim())
 }
 
-fn duplicate_file_warning(duplicate_path: &str, kept_path: &str) -> WarningEntry {
+/// "Same file in two places": `duplicate` is a byte-identical copy of the
+/// library's `kept`. `source` is the log source (the scan or an import).
+pub(super) fn duplicate_file_warning(
+    source: &str,
+    duplicate_path: &str,
+    kept_path: &str,
+) -> WarningEntry {
     logging::log_text(
         Level::Warn,
-        "library-scan",
+        source,
         "scan.duplicate-file",
         &tr::library_warning_duplicate_file(duplicate_path, kept_path),
     )
 }
 
-/// Scanned files already in the library, by size: the candidates a newly
-/// found file is compared against. Sizes come from the scan, not the DB.
-fn library_paths_by_size(
-    scanned: &[ScannedTrack],
-    existing: &ExistingTracksByPath,
-) -> HashMap<i64, Vec<String>> {
-    let mut by_size = HashMap::<i64, Vec<String>>::new();
-    for item in scanned {
-        if let Some(size) = item.file_size_bytes.filter(|&size| size > 0)
-            && existing.contains_key(&item.path)
-        {
-            by_size.entry(size).or_default().push(item.path.clone());
+/// The library's files by size: the candidates a newly found file is compared
+/// against for a byte-identical copy, and the groups
+/// [`merge_identical_library_tracks`] looks through.
+#[derive(Default)]
+pub(super) struct LibraryFilesBySize(HashMap<i64, Vec<String>>);
+
+impl LibraryFilesBySize {
+    /// Scanned files already in the library, with the scan's sizes.
+    fn from_scan(scanned: &[ScannedTrack], existing: &ExistingTracksByPath) -> Self {
+        let mut files = Self::default();
+        for item in scanned {
+            if existing.contains_key(&item.path) {
+                files.add(&item.path, item.file_size_bytes);
+            }
+        }
+        files
+    }
+
+    /// Every library track's file, for an import: the stored size, else the
+    /// file's own (imported tracks often have none stored). Files that are
+    /// gone are left out.
+    pub(super) fn from_tracks(conn: &rusqlite::Connection) -> BackendResult<Self> {
+        let mut stmt = conn.prepare("SELECT file_path, file_size_bytes FROM tracks")?;
+        let rows = stmt
+            .query_map([], |row| {
+                Ok((row.get::<_, String>(0)?, row.get::<_, Option<i64>>(1)?))
+            })?
+            .collect::<Result<Vec<_>, _>>()?;
+        let mut files = Self::default();
+        for (path, size) in rows {
+            let size = size.filter(|&size| size > 0).or_else(|| file_size(&path));
+            files.add(&path, size);
+        }
+        Ok(files)
+    }
+
+    /// The library file `path` (of `size` bytes) is a byte-identical copy of.
+    pub(super) fn identical_to(&self, path: &str, size: Option<i64>) -> Option<String> {
+        self.0
+            .get(&size?)?
+            .iter()
+            .find(|other| {
+                other.as_str() != path
+                    && track_matching::same_file_bytes(Path::new(path), Path::new(other.as_str()))
+            })
+            .cloned()
+    }
+
+    pub(super) fn add(&mut self, path: &str, size: Option<i64>) {
+        if let Some(size) = size.filter(|&size| size > 0) {
+            self.0.entry(size).or_default().push(path.to_string());
         }
     }
-    by_size
+
+    fn remove(&mut self, path: &str) {
+        for paths in self.0.values_mut() {
+            paths.retain(|other| other != path);
+        }
+    }
 }
 
-/// The library file `item` is a byte-identical copy of, if any.
-fn identical_library_file(
-    paths_by_size: &HashMap<i64, Vec<String>>,
-    item: &ScannedTrack,
-) -> Option<String> {
-    let candidates = paths_by_size.get(&item.file_size_bytes?)?;
-    candidates
-        .iter()
-        .find(|path| {
-            **path != item.path
-                && track_matching::same_file_bytes(Path::new(&item.path), Path::new(path.as_str()))
-        })
-        .cloned()
+/// A file's size on disk, `None` when it can't be read.
+pub(super) fn file_size(path: &str) -> Option<i64> {
+    std::fs::metadata(path)
+        .ok()
+        .and_then(|meta| i64::try_from(meta.len()).ok())
 }
 
-struct MergedDuplicateTrack {
-    id: String,
-    file_path: String,
-    waveform_peaks_path: Option<String>,
+/// A library track folded into a byte-identical copy's track.
+pub(super) struct MergedDuplicateTrack {
+    pub id: String,
+    pub file_path: String,
+    pub waveform_peaks_path: Option<String>,
+    pub kept_id: String,
+    pub kept_path: String,
 }
 
-/// Folds library tracks whose files (same-size groups of `paths_by_size`)
-/// are byte-identical into one track. The kept track is the one with cues,
-/// then the one in more playlists, then the oldest. Returns the removed
-/// tracks; the scan then meets their files as new copies and warns.
-fn merge_identical_library_tracks(
+/// Folds library tracks whose files (same-size groups of `files`) are
+/// byte-identical into one track. The kept track is the one with cues, then
+/// the one in more playlists, then the oldest. With `only`, just the groups
+/// holding one of those files (an import's). Returns the removed tracks.
+pub(super) fn merge_identical_library_tracks(
     tx: &rusqlite::Transaction<'_>,
-    paths_by_size: &HashMap<i64, Vec<String>>,
+    files: &LibraryFilesBySize,
+    only: Option<&HashSet<String>>,
 ) -> BackendResult<Vec<MergedDuplicateTrack>> {
     struct Row {
         id: String,
@@ -94,7 +140,10 @@ fn merge_identical_library_tracks(
     )?;
 
     let mut merged = Vec::new();
-    for paths in paths_by_size.values().filter(|paths| paths.len() > 1) {
+    let groups = files.0.values().filter(|paths| {
+        paths.len() > 1 && only.is_none_or(|only| paths.iter().any(|path| only.contains(path)))
+    });
+    for paths in groups {
         let mut group = Vec::<Row>::new();
         for path in paths {
             let row = stmt
@@ -131,12 +180,174 @@ fn merge_identical_library_tracks(
                     id: copy.id,
                     file_path: copy.path,
                     waveform_peaks_path: copy.waveform_peaks_path,
+                    kept_id: kept.id.clone(),
+                    kept_path: kept.path.clone(),
                 });
             }
             group = rest;
         }
     }
     Ok(merged)
+}
+
+/// A rekordbox / Mixxx import's handling of byte-identical copies, like the
+/// folder scan's: a new file identical to a library track's isn't added (the
+/// kept track stands in for it), and copies the library already holds as
+/// separate tracks are merged ([`Self::merge`]).
+pub(super) struct ImportedFileCopies {
+    /// Log source of the warnings.
+    source: &'static str,
+    /// Which library's flag (`rekordbox_db_source` / `mixxx_db_source`) the
+    /// kept track gets.
+    source_flag_column: &'static str,
+    /// Built on the first new file.
+    files: Option<LibraryFilesBySize>,
+    /// Every file this import met, new or already in the library.
+    imported: HashSet<String>,
+    pub warnings: Vec<WarningEntry>,
+}
+
+impl ImportedFileCopies {
+    pub fn new(source: &'static str, source_flag_column: &'static str) -> Self {
+        debug_assert!(matches!(
+            source_flag_column,
+            "rekordbox_db_source" | "mixxx_db_source"
+        ));
+        Self {
+            source,
+            source_flag_column,
+            files: None,
+            imported: HashSet::new(),
+            warnings: Vec::new(),
+        }
+    }
+
+    /// A file already in the library that the import updated.
+    pub fn met(&mut self, path: &str) {
+        self.imported.insert(path.to_string());
+    }
+
+    /// For a file new to the library: the library track whose file it is a
+    /// byte-identical copy of, which then stands in for it (flagged as from
+    /// this library), with the warning logged. `None`: add it as a track,
+    /// then call [`Self::added`].
+    pub fn kept_track_for(
+        &mut self,
+        tx: &rusqlite::Connection,
+        path: &str,
+    ) -> BackendResult<Option<String>> {
+        if self.files.is_none() {
+            self.files = Some(LibraryFilesBySize::from_tracks(tx)?);
+        }
+        let files = self.files.as_ref().expect("just built");
+        let Some(kept_path) = files.identical_to(path, file_size(path)) else {
+            return Ok(None);
+        };
+        let Some(kept_id) = tx
+            .query_row(
+                "SELECT id FROM tracks WHERE file_path = ?1",
+                params![kept_path],
+                |row| row.get::<_, String>(0),
+            )
+            .optional()?
+        else {
+            return Ok(None);
+        };
+        tx.execute(
+            &format!(
+                "UPDATE tracks SET {} = 1 WHERE id = ?1",
+                self.source_flag_column
+            ),
+            params![kept_id],
+        )?;
+        self.warnings
+            .push(duplicate_file_warning(self.source, path, &kept_path));
+        self.imported.insert(kept_path);
+        Ok(Some(kept_id))
+    }
+
+    /// A new file added as its own track.
+    pub fn added(&mut self, path: &str) {
+        self.imported.insert(path.to_string());
+        if let Some(files) = &mut self.files {
+            files.add(path, file_size(path));
+        }
+    }
+
+    /// Merge the library tracks whose files are byte-identical copies of a
+    /// file this import met, as the folder scan does, logging each extra copy.
+    /// Returns the merged tracks' ids mapped to the kept tracks'.
+    pub fn merge(
+        &mut self,
+        tx: &rusqlite::Transaction<'_>,
+        data_dir: &Path,
+    ) -> BackendResult<HashMap<String, String>> {
+        if self.imported.is_empty() {
+            return Ok(HashMap::new());
+        }
+        let files = LibraryFilesBySize::from_tracks(tx)?;
+        let merged = merge_identical_library_tracks(tx, &files, Some(&self.imported))?;
+        let mut kept_ids = HashMap::new();
+        let mut removed = Vec::new();
+        for duplicate in merged {
+            self.warnings.push(duplicate_file_warning(
+                self.source,
+                &duplicate.file_path,
+                &duplicate.kept_path,
+            ));
+            kept_ids.insert(duplicate.id.clone(), duplicate.kept_id);
+            removed.push((duplicate.id, duplicate.waveform_peaks_path));
+        }
+        forget_removed_tracks(tx, data_dir, &removed)?;
+        Ok(kept_ids)
+    }
+}
+
+/// Clean up after tracks deleted from the library (`(id, waveform_peaks_path)`
+/// of each): their local ANLZ cache unless a remaining track shares the bundle
+/// (the cache name hashes the lower-cased source path, so case-variant paths
+/// map to one bundle), their cover copies, and their transcodes.
+pub(super) fn forget_removed_tracks(
+    tx: &rusqlite::Transaction<'_>,
+    data_dir: &Path,
+    removed: &[(String, Option<String>)],
+) -> BackendResult<()> {
+    if removed.is_empty() {
+        return Ok(());
+    }
+    let analysis_dir = data_dir.join("analysis");
+    let waveform_dir = analysis_dir.join("waveforms");
+    for dat in removed.iter().filter_map(|(_, waveform)| {
+        waveform
+            .as_deref()
+            .and_then(|p| local_cache_bundle_dat(&waveform_dir, Path::new(p.trim())))
+    }) {
+        let still_referenced: bool = tx.query_row(
+            "SELECT EXISTS(SELECT 1 FROM tracks WHERE waveform_peaks_path = ?1)",
+            params![dat.to_string_lossy()],
+            |row| row.get(0),
+        )?;
+        if !still_referenced {
+            remove_bundle_files(&dat);
+        }
+    }
+    // A cover copy is `<id>.<ext>`: the scan writes .jpg, an import keeps the
+    // image's own extension.
+    let ids: HashSet<&str> = removed.iter().map(|(id, _)| id.as_str()).collect();
+    if let Ok(entries) = std::fs::read_dir(analysis_dir.join("artwork")) {
+        for entry in entries.flatten() {
+            let path = entry.path();
+            if path
+                .file_stem()
+                .and_then(|stem| stem.to_str())
+                .is_some_and(|stem| ids.contains(stem))
+            {
+                let _ = std::fs::remove_file(path);
+            }
+        }
+    }
+    super::transcode::sweep_orphan_transcodes(tx)?;
+    Ok(())
 }
 
 /// Moves `from_id`'s playlist entries and USB links to `into_id`, then
@@ -297,19 +508,13 @@ impl BackendService {
 
         let mut indexed = 0usize;
         let mut updated = 0usize;
-        let mut paths_by_size = library_paths_by_size(&scanned, &existing_tracks);
+        let mut library_files = LibraryFilesBySize::from_scan(&scanned, &existing_tracks);
         // Identical files the library already holds as separate tracks (added
-        // before the scan skipped copies) are folded into one.
-        let merged_duplicates = merge_identical_library_tracks(&tx, &paths_by_size)?;
+        // before the scan skipped copies) are folded into one; the scan then
+        // meets their files as new copies and warns.
+        let merged_duplicates = merge_identical_library_tracks(&tx, &library_files, None)?;
         for duplicate in &merged_duplicates {
-            if let Some(paths) = scanned
-                .iter()
-                .find(|item| item.path == duplicate.file_path)
-                .and_then(|item| item.file_size_bytes)
-                .and_then(|size| paths_by_size.get_mut(&size))
-            {
-                paths.retain(|path| *path != duplicate.file_path);
-            }
+            library_files.remove(&duplicate.file_path);
             existing_tracks.remove(&duplicate.file_path);
         }
 
@@ -318,16 +523,12 @@ impl BackendService {
 
             match existing {
                 None => {
-                    if let Some(kept) = identical_library_file(&paths_by_size, item) {
-                        warnings.push(duplicate_file_warning(&item.path, &kept));
+                    if let Some(kept) = library_files.identical_to(&item.path, item.file_size_bytes)
+                    {
+                        warnings.push(duplicate_file_warning("library-scan", &item.path, &kept));
                         continue;
                     }
-                    if let Some(size) = item.file_size_bytes {
-                        paths_by_size
-                            .entry(size)
-                            .or_default()
-                            .push(item.path.clone());
-                    }
+                    library_files.add(&item.path, item.file_size_bytes);
                     let id = Uuid::now_v7().to_string();
                     let fingerprint = build_track_match_fingerprint(
                         &item.title,
@@ -498,11 +699,8 @@ impl BackendService {
         }
 
         let scanned_paths = unique_paths(&scanned);
-        let mut removed = 0usize;
-        let mut orphaned_cache_bundles = Vec::<PathBuf>::new();
-        let analysis_dir = self.db.data_dir().join("analysis");
-        let waveform_dir = analysis_dir.join("waveforms");
-        let artwork_dir = analysis_dir.join("artwork");
+        let mut removed_tracks = Vec::<(String, Option<String>)>::new();
+        let waveform_dir = self.db.data_dir().join("analysis").join("waveforms");
         for root in &existing_roots {
             let escaped_root = root
                 .replace('\\', "\\\\")
@@ -525,45 +723,17 @@ impl BackendService {
                 let (id, path, waveform_peaks_path) = row?;
                 if !scanned_paths.contains(path.as_str()) {
                     tx.execute("DELETE FROM tracks WHERE id = ?1", params![id])?;
-                    if let Some(dat) = waveform_peaks_path
-                        .as_deref()
-                        .and_then(|p| local_cache_bundle_dat(&waveform_dir, Path::new(p.trim())))
-                    {
-                        orphaned_cache_bundles.push(dat);
-                    }
-                    let _ = std::fs::remove_file(artwork_dir.join(format!("{id}.jpg")));
-                    removed += 1;
+                    removed_tracks.push((id, waveform_peaks_path));
                 }
             }
         }
-
-        for duplicate in merged_duplicates {
-            if let Some(dat) = duplicate
-                .waveform_peaks_path
-                .as_deref()
-                .and_then(|p| local_cache_bundle_dat(&waveform_dir, Path::new(p.trim())))
-            {
-                orphaned_cache_bundles.push(dat);
-            }
-            let _ = std::fs::remove_file(artwork_dir.join(format!("{}.jpg", duplicate.id)));
-            removed += 1;
-        }
-
-        // Clean up the removed tracks' local ANLZ cache, unless a remaining
-        // track shares the bundle (the cache name hashes the lower-cased
-        // source path, so case-variant paths map to one bundle).
-        for dat in &orphaned_cache_bundles {
-            let still_referenced: bool = tx.query_row(
-                "SELECT EXISTS(SELECT 1 FROM tracks WHERE waveform_peaks_path = ?1)",
-                params![dat.to_string_lossy()],
-                |row| row.get(0),
-            )?;
-            if !still_referenced {
-                remove_bundle_files(dat);
-            }
-        }
-        // The removed and merged tracks' transcodes go with them.
-        super::transcode::sweep_orphan_transcodes(&tx)?;
+        removed_tracks.extend(
+            merged_duplicates
+                .into_iter()
+                .map(|duplicate| (duplicate.id, duplicate.waveform_peaks_path)),
+        );
+        let removed = removed_tracks.len();
+        forget_removed_tracks(&tx, &self.db.data_dir(), &removed_tracks)?;
 
         // Detect stale local ANLZ cache (missing PWV6 in .2EX) and mark for
         // re-analysis. Only the app's own cache is checked: a bundle on a USB

@@ -14,6 +14,7 @@ use backend::models::{
     ImportExternalPlaylistRequest, ImportExternalPlaylistsData, ImportExternalPlaylistsItem,
     ImportExternalPlaylistsRequest, ImportedPlaylistRef, ListExternalPlaylistsRequest,
     SaveTrackAnalysisEditsRequest, ScanMixxxDbRequest, ScanRekordboxDbRequest, TrackCueInput,
+    WarningEntry,
 };
 use backend::service::anlz::{WaveformData, build_anlz_dat_file, build_anlz_ext_file};
 use backend::service::cues::DEFAULT_HOTCUE_COLOR_ID;
@@ -42,7 +43,8 @@ fn media_files(dir: &Path, names: &[&str]) -> Vec<PathBuf> {
         .iter()
         .map(|name| {
             let path = dir.join(name);
-            fs::write(&path, b"audio").expect("write media");
+            // Each file its own bytes: identical files are one track.
+            fs::write(&path, format!("audio {name}")).expect("write media");
             path
         })
         .collect()
@@ -1090,7 +1092,7 @@ fn scan_mixxx_db_imports_tracks_cues_and_cover_and_keeps_local_cues() {
     let missing_path = media_root.path().join("missing.mp3");
     let module_path = media_root.path().join("tune.it");
     for p in [&new_path, &existing_path, &deleted_path, &module_path] {
-        fs::write(p, b"audio").expect("write media");
+        fs::write(p, format!("audio {}", p.display())).expect("write media");
     }
     fs::write(media_root.path().join("cover.jpg"), b"jpg").expect("write cover");
 
@@ -1653,6 +1655,153 @@ fn reimporting_a_mixxx_playlist_updates_it_refreshes_mixxx_values_and_asks_about
         )
         .expect("alpha cue");
     assert_eq!(alpha_cue, 3_000);
+}
+
+fn duplicate_warnings(warnings: &[WarningEntry]) -> Vec<&str> {
+    warnings
+        .iter()
+        .filter(|w| w.code == "scan.duplicate-file")
+        .map(|w| w.message.as_str())
+        .collect()
+}
+
+fn track_count(data_dir: &Path) -> i64 {
+    library_db(data_dir)
+        .query_row("SELECT COUNT(*) FROM tracks", [], |r| r.get(0))
+        .unwrap()
+}
+
+#[test]
+fn a_mixxx_import_keeps_one_track_for_identical_copies_of_a_file() {
+    let mixxx_root = tempdir().expect("mixxx root");
+    let media_root = tempdir().expect("media root");
+    let (_app_dir, data_dir, backend) = app();
+    let original = media_root.path().join("set/a.mp3");
+    let copy = media_root.path().join("House/set/a.mp3");
+    // Same size as the copies, different bytes: its own track.
+    let lookalike = media_root.path().join("b.mp3");
+    for (path, bytes) in [
+        (&original, "audio one"),
+        (&copy, "audio one"),
+        (&lookalike, "audio two"),
+    ] {
+        fs::create_dir_all(path.parent().unwrap()).unwrap();
+        fs::write(path, bytes).unwrap();
+    }
+    let paths = [&original, &copy, &lookalike].map(|p| p.to_str().unwrap().to_string());
+    let fixture: Vec<FixtureTrack<'_>> = [("Alpha", 0), ("Alpha copy", 1), ("Bravo", 2)]
+        .iter()
+        .map(|(title, i)| (paths[*i].as_str(), *title, None, 44_100, 0, None, 0))
+        .collect();
+    let mixxx_path = create_mixxx_db_fixture(mixxx_root.path(), &fixture, &[]);
+    add_mixxx_playlists(
+        &mixxx_path,
+        &[(3, "Warmup", 1, MIXXX_PLAYLIST_REGULAR, &[1, 2, 3])],
+        &[],
+    );
+    let path = Some(mixxx_path.to_string_lossy().to_string());
+
+    // The copy isn't added: the playlist holds the kept track once, and the
+    // Event Log names the extra copy.
+    let imported =
+        import_mixxx(&backend, &path, ExternalPlaylistKind::Playlist, "3").expect("import");
+    assert_eq!(track_count(&data_dir), 2);
+    assert_eq!(
+        playlist_titles(&data_dir, &imported.playlist_id),
+        vec!["Alpha", "Bravo"]
+    );
+    let warnings = duplicate_warnings(&imported.warnings);
+    assert_eq!(warnings.len(), 1, "{warnings:?}");
+    assert!(warnings[0].contains(&paths[1]) && warnings[0].contains(&paths[0]));
+
+    // A library that already holds the copy as its own track (an import from
+    // before), with cues on it: the next import merges the two into the one
+    // with cues, which takes the other's playlist place.
+    let db = library_db(&data_dir);
+    db.execute_batch(&format!(
+        "INSERT INTO tracks (id, title, artist, file_path, created_at, updated_at, mixxx_db_source)
+           VALUES ('old-copy', 'Alpha copy', 'Artist', '{}', 'x', 'x', 1);
+         INSERT INTO track_cues (id, track_id, position_ms, sort_order, created_at, updated_at)
+           VALUES ('cue', 'old-copy', 1000, 0, 'x', 'x');",
+        paths[1]
+    ))
+    .unwrap();
+    let alpha_id = track_id_by_title(&data_dir, "Alpha");
+    let scanned = backend
+        .scan_mixxx_db(ScanMixxxDbRequest { path: path.clone() })
+        .data
+        .expect("scan");
+    assert_eq!(scanned.removed, 1);
+    assert_eq!(duplicate_warnings(&scanned.warnings).len(), 1);
+    assert_eq!(track_count(&data_dir), 2);
+    let gone: i64 = db
+        .query_row(
+            "SELECT COUNT(*) FROM tracks WHERE id = ?1",
+            [&alpha_id],
+            |r| r.get(0),
+        )
+        .unwrap();
+    assert_eq!(gone, 0, "the copy without cues is merged away");
+    assert_eq!(
+        playlist_titles(&data_dir, &imported.playlist_id),
+        vec!["Alpha copy", "Bravo"]
+    );
+}
+
+#[test]
+fn a_rekordbox_import_uses_the_library_track_for_a_copy_of_its_file() {
+    let mixxx_root = tempdir().expect("mixxx root");
+    let media_root = tempdir().expect("media root");
+    let (_app_dir, data_dir, backend) = app();
+    let library = RekordboxLibrary::new();
+    // A copy of rekordbox's Alpha (a.mp3), already in the library from Mixxx.
+    let copy = media_root.path().join("alpha.mp3");
+    fs::write(&copy, "audio a.mp3").unwrap();
+    let copy_path = copy.to_str().unwrap().to_string();
+    let mixxx_path = create_mixxx_db_fixture(
+        mixxx_root.path(),
+        &[(
+            copy_path.as_str(),
+            "Alpha from Mixxx",
+            None,
+            44_100,
+            0,
+            None,
+            0,
+        )],
+        &[],
+    );
+    backend
+        .scan_mixxx_db(ScanMixxxDbRequest {
+            path: Some(mixxx_path.to_string_lossy().to_string()),
+        })
+        .data
+        .expect("mixxx import");
+
+    let imported = import_rekordbox(
+        &backend,
+        &library.path(),
+        ExternalPlaylistKind::Playlist,
+        "11",
+    )
+    .expect("import");
+    // Alpha is the Mixxx track, now from rekordbox too; rekordbox's own path
+    // never became a track.
+    let titles = playlist_titles(&data_dir, &imported.playlist_id);
+    assert!(
+        titles.iter().any(|title| title == "Alpha from Mixxx"),
+        "{titles:?}"
+    );
+    assert!(!titles.iter().any(|title| title == "Alpha"), "{titles:?}");
+    let flags: (bool, bool) = library_db(&data_dir)
+        .query_row(
+            "SELECT mixxx_db_source, rekordbox_db_source FROM tracks WHERE file_path = ?1",
+            [&copy_path],
+            |r| Ok((r.get(0)?, r.get(1)?)),
+        )
+        .unwrap();
+    assert_eq!(flags, (true, true));
+    assert_eq!(duplicate_warnings(&imported.warnings).len(), 1);
 }
 
 #[test]

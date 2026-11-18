@@ -18,6 +18,7 @@ use super::import_conflicts::{
     differing_fields, import_conflicts, load_local_track_data, track_file_paths,
 };
 
+use super::library::ImportedFileCopies;
 use super::usb_utils::external_rekordbox_db_candidates;
 use super::usb_vendor_compat::DEFAULT_MASTER_DB_KEY;
 use super::wine_paths::{translate_wine_path, wine_prefix_of};
@@ -535,6 +536,8 @@ struct RekordboxTrackImporter<'a> {
     /// Tracks whose own values differ from rekordbox's and were kept.
     conflicts: Vec<ConflictedTrack>,
     warnings: Vec<WarningEntry>,
+    /// Byte-identical copies of a file, handled like the folder scan does.
+    copies: ImportedFileCopies,
 }
 
 impl<'a> RekordboxTrackImporter<'a> {
@@ -581,6 +584,7 @@ impl<'a> RekordboxTrackImporter<'a> {
             cue_tracks: 0,
             conflicts: Vec::new(),
             warnings: Vec::new(),
+            copies: ImportedFileCopies::new("scan-rekordbox-db", "rekordbox_db_source"),
         })
     }
 
@@ -611,6 +615,15 @@ impl<'a> RekordboxTrackImporter<'a> {
         // Resolve (or generate) the track ID before any file writes
         let existing_id = self.existing.get(&t.file_path).cloned();
         let file_path = t.file_path.to_string_lossy();
+        match existing_id {
+            Some(_) => self.copies.met(&file_path),
+            // A copy of a library track's file: that track stands in for it.
+            None => {
+                if let Some(kept_id) = self.copies.kept_track_for(tx, &file_path)? {
+                    return Ok(Some(kept_id));
+                }
+            }
+        }
         let format_ext = crate::audio_format::format_ext_of(&t.file_path);
         let track_id = existing_id
             .clone()
@@ -742,6 +755,7 @@ impl<'a> RekordboxTrackImporter<'a> {
                 ],
             )?;
             self.existing.insert(t.file_path.clone(), track_id.clone());
+            self.copies.added(&file_path);
             self.indexed += 1;
         }
         match cue_action(&local, &external, self.force, differing) {
@@ -907,6 +921,7 @@ impl<'a> RekordboxTrackImporter<'a> {
                 self.artwork_null
             ),
         );
+        self.warnings.append(&mut self.copies.warnings);
         std::mem::take(&mut self.warnings)
     }
 }
@@ -923,6 +938,7 @@ impl BackendService {
         for t in &tracks {
             importer.upsert(&tx, t)?;
         }
+        let merged = importer.copies.merge(&tx, &self.db.data_dir())?;
         tx.commit()?;
 
         let warnings = importer.finish_warnings();
@@ -939,8 +955,9 @@ impl BackendService {
             job_id: Uuid::now_v7().to_string(),
             indexed: importer.indexed,
             updated: importer.updated,
-            // Imports never remove tracks (see `RekordboxTrackImporter::upsert`).
-            removed: 0,
+            // A missing file's track is never removed (see `RekordboxTrackImporter::upsert`);
+            // only tracks merged into an identical copy's track are.
+            removed: merged.len(),
             conflicts: import_conflicts(
                 ExternalLibrary::Rekordbox,
                 req.path.as_deref(),
@@ -1006,6 +1023,16 @@ impl BackendService {
                 local_ids.push(track_id);
             }
         }
+
+        // A track merged into an identical copy's is placed as that track,
+        // and a track the playlist names twice that way is placed once.
+        let merged = importer.copies.merge(&tx, &self.db.data_dir())?;
+        let mut placed = HashSet::new();
+        let local_ids: Vec<String> = local_ids
+            .into_iter()
+            .map(|id| merged.get(&id).cloned().unwrap_or(id))
+            .filter(|id| placed.insert(id.clone()))
+            .collect();
 
         // The tracks stay in the library; the playlist doesn't take them.
         let (local_ids, never_on_usb) = without_tracks_never_on_usb(&tx, local_ids)?;
@@ -1078,6 +1105,7 @@ impl BackendService {
                 updated += 1;
             }
         }
+        importer.copies.merge(&tx, &self.db.data_dir())?;
         tx.commit()?;
         Ok(ApplyExternalTrackDataData {
             updated,
