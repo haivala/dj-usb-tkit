@@ -478,6 +478,8 @@ impl BackendService {
         let mut scanned = scan_audio_files(&existing_roots)?;
         // Sorted so the copy kept of two identical new files is always the same one.
         scanned.sort_by(|a, b| a.path.cmp(&b.path));
+        // A folder nested in another source folder is walked under both.
+        scanned.dedup_by(|a, b| a.path == b.path);
         let now = now();
         let mut conn = self.db.connect()?;
         let tx = conn.transaction()?;

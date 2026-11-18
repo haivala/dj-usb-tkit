@@ -1514,7 +1514,7 @@ fn browse_source_files_lists_a_subfolders_tracks_once() {
     let conn = service.db.connect().expect("connect");
     for (id, folder) in [("top", &parent_str), ("nested", &child_str)] {
         let path = format!("{folder}/{id}.mp3");
-        std::fs::write(&path, b"data").expect("write track");
+        std::fs::write(&path, id).expect("write track");
         insert_full_track(&conn, id, id, "Artist", &path, None, None, false);
     }
     drop(conn);

@@ -41,6 +41,8 @@
 
 - **Improvement:** Importing from rekordbox or Mixxx now asks when tracks differ. Cues, BPM, key or beat grid that you edited, analyzed or brought in from elsewhere are kept, and a dialog lists the tracks whose values differ in the library, with the choice to keep yours or take the library's. Values that came from the same library before follow changes made there without asking, cues included. This replaces the playlist import's "Force update track data" option.
 - **Improvement:** Importing from rekordbox or Mixxx treats identical copies of a file in different folders like the folder scan does: the library keeps one track, the Event Log names the extra copy, and copies imported earlier as separate tracks are merged.
+- **Fix:** Indexing no longer fails with a database error when one source folder is inside another and the
+  inner folder's tracks are not in the library yet.
 
 ## 0.6.3
 

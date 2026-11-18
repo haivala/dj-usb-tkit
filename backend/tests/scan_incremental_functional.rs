@@ -196,6 +196,32 @@ fn scan_missing_source_root_reports_not_found_without_pruning_tracks() {
 }
 
 #[test]
+fn scan_of_a_folder_nested_in_another_source_folder_indexes_its_files_once() {
+    let root = tempdir().expect("temp root");
+    let media = root.path().join("media");
+    let nested = media.join("Sub");
+    fs::create_dir_all(&nested).expect("create media dirs");
+    fs::write(media.join("Artist - A.mp3"), b"audio-a").expect("write track a");
+    fs::write(nested.join("Artist - B.mp3"), b"audio-b").expect("write track b");
+
+    let backend = BackendCommands::new(root.path().join("data")).expect("create backend");
+    let added = backend.add_source_folders(AddSourceFoldersRequest {
+        paths: vec![
+            nested.to_string_lossy().to_string(),
+            media.to_string_lossy().to_string(),
+        ],
+    });
+    assert!(added.ok, "adding nested source folders failed: {added:?}");
+    let scan = added
+        .data
+        .expect("add source folders")
+        .scan
+        .expect("the added folders' scan");
+    assert_eq!(scan.indexed, 2);
+    assert!(scan.warnings.is_empty(), "{:?}", scan.warnings);
+}
+
+#[test]
 fn relocate_source_root_rewrites_paths_and_preserves_playlist_membership() {
     let root = tempdir().expect("temp root");
     let media = root.path().join("media");
