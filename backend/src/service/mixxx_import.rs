@@ -20,7 +20,7 @@ use super::import_conflicts::{
     differing_fields, import_conflicts, load_local_track_data, track_file_paths,
 };
 use super::key_notation::camelot_position;
-use super::library::ImportedFileCopies;
+use super::library::{ImportedFileCopies, file_size, import_status_with_copies};
 use super::{
     BackendService, annotate_imported_playlists, build_track_match_fingerprint,
     external_playlist_key, has_tracks_flagged, no_importable_tracks_error, non_empty_db_value, now,
@@ -732,6 +732,7 @@ impl<'a> MixxxTrackImporter<'a> {
                     artwork_path = COALESCE(?8, artwork_path),
                     format_ext = COALESCE(format_ext, ?9),
                     match_fingerprint = ?10,
+                    file_size_bytes = COALESCE(file_size_bytes, ?16),
                     mixxx_db_source = 1,
                     updated_at = ?11
                    WHERE id = ?12"#,
@@ -751,6 +752,7 @@ impl<'a> MixxxTrackImporter<'a> {
                     self.force,
                     t.genre,
                     first_beat_ms,
+                    file_size(&t.file_path),
                 ],
             )?;
             self.updated += 1;
@@ -761,11 +763,11 @@ impl<'a> MixxxTrackImporter<'a> {
                     duration_ms, sample_rate_hz, artwork_path, match_fingerprint,
                     mixxx_db_source, created_at, updated_at,
                     bpm_analyzer, tonality_source, genre,
-                    first_beat_ms, first_beat_ms_source
+                    first_beat_ms, first_beat_ms_source, file_size_bytes
                    ) VALUES (?1,?2,?3,?4,?5,?6,?7,?8,?9,?10,?11,?12,1,?13,?13,
                      CASE WHEN ?5 IS NOT NULL THEN 'mixxx' END,
                      CASE WHEN ?6 IS NOT NULL THEN 'mixxx' END, ?14,
-                     ?15, CASE WHEN ?15 IS NOT NULL THEN 'mixxx' END)"#,
+                     ?15, CASE WHEN ?15 IS NOT NULL THEN 'mixxx' END, ?16)"#,
                 params![
                     track_id,
                     t.title,
@@ -782,6 +784,7 @@ impl<'a> MixxxTrackImporter<'a> {
                     self.now,
                     t.genre,
                     t.first_beat_ms,
+                    file_size(&t.file_path),
                 ],
             )?;
             self.existing.insert(t.file_path.clone(), track_id.clone());
@@ -928,15 +931,17 @@ impl BackendService {
         tx.commit()?;
 
         let warnings = importer.finish_warnings();
-        let status_text = match importer.not_found.len() {
-            0 => crate::i18n::tr::library_import_done_mixxx(importer.indexed, importer.updated),
-            count => crate::i18n::tr::library_import_done_mixxx_not_found(
-                importer.indexed,
-                importer.updated,
-                count,
-            ),
-        }
-        .render();
+        let status_text = import_status_with_copies(
+            match importer.not_found.len() {
+                0 => tr::library_import_done_mixxx(importer.indexed, importer.updated),
+                count => tr::library_import_done_mixxx_not_found(
+                    importer.indexed,
+                    importer.updated,
+                    count,
+                ),
+            },
+            importer.copies.found,
+        );
         Ok(ScanLibraryData {
             job_id: Uuid::now_v7().to_string(),
             indexed: importer.indexed,

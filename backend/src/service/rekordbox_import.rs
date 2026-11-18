@@ -18,7 +18,7 @@ use super::import_conflicts::{
     differing_fields, import_conflicts, load_local_track_data, track_file_paths,
 };
 
-use super::library::ImportedFileCopies;
+use super::library::{ImportedFileCopies, file_size, import_status_with_copies};
 use super::usb_utils::external_rekordbox_db_candidates;
 use super::usb_vendor_compat::DEFAULT_MASTER_DB_KEY;
 use super::wine_paths::{translate_wine_path, wine_prefix_of};
@@ -702,6 +702,7 @@ impl<'a> RekordboxTrackImporter<'a> {
                     artwork_path = COALESCE(?8, artwork_path),
                     format_ext = COALESCE(format_ext, ?12),
                     match_fingerprint = ?9,
+                    file_size_bytes = COALESCE(file_size_bytes, ?16),
                     rekordbox_db_source = 1,
                     updated_at = ?10
                    WHERE id = ?11"#,
@@ -720,7 +721,8 @@ impl<'a> RekordboxTrackImporter<'a> {
                     format_ext,
                     self.force,
                     t.genre,
-                    first_beat_ms
+                    first_beat_ms,
+                    file_size(&file_path),
                 ],
             )?;
             self.updated += 1;
@@ -731,11 +733,11 @@ impl<'a> RekordboxTrackImporter<'a> {
                     duration_ms, waveform_peaks_path, artwork_path, match_fingerprint,
                     rekordbox_db_source, created_at, updated_at,
                     bpm_analyzer, tonality_source, genre,
-                    first_beat_ms, first_beat_ms_source
+                    first_beat_ms, first_beat_ms_source, file_size_bytes
                    ) VALUES (?1,?2,?3,?4,?5,?6,?7,?8,?9,?10,?11,?12,1,?13,?13,
                      CASE WHEN ?5 IS NOT NULL THEN 'rekordbox' END,
                      CASE WHEN ?6 IS NOT NULL THEN 'rekordbox' END, ?14,
-                     ?15, CASE WHEN ?15 IS NOT NULL THEN 'rekordbox' END)"#,
+                     ?15, CASE WHEN ?15 IS NOT NULL THEN 'rekordbox' END, ?16)"#,
                 params![
                     track_id,
                     t.title,
@@ -751,7 +753,8 @@ impl<'a> RekordboxTrackImporter<'a> {
                     fingerprint,
                     self.now,
                     t.genre,
-                    first_beat_ms
+                    first_beat_ms,
+                    file_size(&file_path),
                 ],
             )?;
             self.existing.insert(t.file_path.clone(), track_id.clone());
@@ -942,15 +945,17 @@ impl BackendService {
         tx.commit()?;
 
         let warnings = importer.finish_warnings();
-        let status_text = match importer.not_found.len() {
-            0 => crate::i18n::tr::library_import_done_rekordbox(importer.indexed, importer.updated),
-            count => crate::i18n::tr::library_import_done_rekordbox_not_found(
-                importer.indexed,
-                importer.updated,
-                count,
-            ),
-        }
-        .render();
+        let status_text = import_status_with_copies(
+            match importer.not_found.len() {
+                0 => tr::library_import_done_rekordbox(importer.indexed, importer.updated),
+                count => tr::library_import_done_rekordbox_not_found(
+                    importer.indexed,
+                    importer.updated,
+                    count,
+                ),
+            },
+            importer.copies.found,
+        );
         Ok(ScanLibraryData {
             job_id: Uuid::now_v7().to_string(),
             indexed: importer.indexed,

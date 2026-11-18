@@ -4,7 +4,7 @@ use crate::utils::track_list_summary;
 use std::collections::{HashMap, HashSet};
 
 use super::*;
-use crate::i18n::tr;
+use crate::i18n::{Text, tr};
 use crate::scanner::{ListedAudioFile, ScannedTrack};
 
 pub(super) fn browse_path_key(path: &str) -> String {
@@ -205,6 +205,8 @@ pub(super) struct ImportedFileCopies {
     /// Every file this import met, new or already in the library.
     imported: HashSet<String>,
     pub warnings: Vec<WarningEntry>,
+    /// Extra copies found: new files not added plus tracks merged.
+    pub found: usize,
 }
 
 impl ImportedFileCopies {
@@ -219,6 +221,7 @@ impl ImportedFileCopies {
             files: None,
             imported: HashSet::new(),
             warnings: Vec::new(),
+            found: 0,
         }
     }
 
@@ -262,6 +265,7 @@ impl ImportedFileCopies {
         )?;
         self.warnings
             .push(duplicate_file_warning(self.source, path, &kept_path));
+        self.found += 1;
         self.imported.insert(kept_path);
         Ok(Some(kept_id))
     }
@@ -295,11 +299,25 @@ impl ImportedFileCopies {
                 &duplicate.file_path,
                 &duplicate.kept_path,
             ));
+            self.found += 1;
             kept_ids.insert(duplicate.id.clone(), duplicate.kept_id);
             removed.push((duplicate.id, duplicate.waveform_peaks_path));
         }
         forget_removed_tracks(tx, data_dir, &removed)?;
         Ok(kept_ids)
+    }
+}
+
+/// An import's status line, with the extra copies it found when there were
+/// any (the Event Log names each).
+pub(super) fn import_status_with_copies(status: Text, copies: usize) -> String {
+    match copies {
+        0 => status.render(),
+        count => format!(
+            "{} | {}",
+            status.render(),
+            tr::library_import_duplicate_files(count).render()
+        ),
     }
 }
 

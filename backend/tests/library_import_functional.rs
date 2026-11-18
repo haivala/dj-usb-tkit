@@ -1710,6 +1710,15 @@ fn a_mixxx_import_keeps_one_track_for_identical_copies_of_a_file() {
         playlist_titles(&data_dir, &imported.playlist_id),
         vec!["Alpha", "Bravo"]
     );
+    // Imported tracks store their file's size, as scanned ones do.
+    let sizes: Vec<Option<i64>> = library_db(&data_dir)
+        .prepare("SELECT file_size_bytes FROM tracks ORDER BY title")
+        .unwrap()
+        .query_map([], |r| r.get(0))
+        .unwrap()
+        .collect::<Result<_, _>>()
+        .unwrap();
+    assert_eq!(sizes, vec![Some(9), Some(9)]);
     let warnings = duplicate_warnings(&imported.warnings);
     assert_eq!(warnings.len(), 1, "{warnings:?}");
     assert!(warnings[0].contains(&paths[1]) && warnings[0].contains(&paths[0]));
@@ -1733,6 +1742,13 @@ fn a_mixxx_import_keeps_one_track_for_identical_copies_of_a_file() {
         .expect("scan");
     assert_eq!(scanned.removed, 1);
     assert_eq!(duplicate_warnings(&scanned.warnings).len(), 1);
+    assert!(
+        scanned
+            .status_text
+            .ends_with("| 1 duplicate file (see event log)"),
+        "{}",
+        scanned.status_text
+    );
     assert_eq!(track_count(&data_dir), 2);
     let gone: i64 = db
         .query_row(

@@ -1436,6 +1436,11 @@ library-import-done-mixxx-not-found = Importation de la bibliothèque Mixxx term
    *[other] { $count } fichiers introuvables
 } (voir le journal des événements)
 
+library-import-duplicate-files = { $count ->
+    [one] { $count } fichier en double
+   *[other] { $count } fichiers en double
+} (voir le journal des événements)
+
 library-error-no-source-folder = Ajoutez un dossier source avant l'analyse
 library-error-no-source-enabled = Activez au moins un dossier source avant l'analyse
 library-error-source-file-missing = le fichier source n'existe pas : { $path }

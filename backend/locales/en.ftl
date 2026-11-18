@@ -1897,6 +1897,13 @@ library-import-done-mixxx-not-found = Mixxx library import done: { $new } new, {
    *[other] { $count } files
 } not found (see event log)
 
+# Added to an import's status line when some of its files are byte-identical copies of
+# library files: kept as one track, the Event Log names each. $count: the copies.
+library-import-duplicate-files = { $count ->
+    [one] { $count } duplicate file
+   *[other] { $count } duplicate files
+} (see event log)
+
 # Scanning and importing refused.
 library-error-no-source-folder = Add a source folder before scanning
 library-error-no-source-enabled = Switch on at least one source folder before scanning
