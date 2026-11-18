@@ -43,6 +43,11 @@
 - **Improvement:** Importing from rekordbox or Mixxx treats identical copies of a file in different folders like the folder scan does: the library keeps one track, the Event Log names the extra copy, and copies imported earlier as separate tracks are merged.
 - **Fix:** Indexing no longer fails with a database error when one source folder is inside another and the
   inner folder's tracks are not in the library yet.
+- **Fix:** Analysis no longer runs the computer out of memory on a long batch. The memory analysis keeps for
+  reuse is now reused from track to track instead of growing with every track analyzed, and fewer tracks are
+  analyzed at once on a computer with many CPU cores.
+- **Fix:** Essentia analysis keeps its workers running for the whole job instead of restarting all of them
+  over and over, and stops them when the job ends.
 
 ## 0.6.3
 

@@ -6,7 +6,7 @@ use std::fs::File;
 use std::io::{BufRead, BufReader, Write};
 use std::path::{Path, PathBuf};
 use std::process::{Child, ChildStdin, ChildStdout, Command, Stdio};
-use std::sync::{Condvar, Mutex, OnceLock};
+use std::sync::{Mutex, OnceLock, PoisonError};
 use std::time::Instant;
 
 use image::imageops::FilterType;
@@ -55,14 +55,20 @@ const ANALYSIS_MEMORY_HEADROOM_BYTES: u64 = 1024 * 1024 * 1024; // 1 GiB
 // Extra margin on top of the flat headroom, since per-worker budgets below are estimates.
 const ANALYSIS_MEMORY_USABLE_FRACTION: f64 = 0.75;
 // stratum-dsp's internal working set (STFT spectrogram, onset/tempogram/chroma
-// buffers) dwarfs the ~96MB decode buffer. Measured empirically: ~1.15GB/worker
-// peak RSS under realistic concurrent load (N threads x ~4min tracks), rounded
-// up with margin. A worker parked on an unusually long single track (near the
-// ANALYSIS_DECODE_MAX_SAMPLES cap) can still peak closer to ~2.7GB; accepted
-// residual risk for libraries dominated by very long recorded sets/mixes.
-const ANALYSIS_MEMORY_PER_WORKER_STRATUM_BYTES: u64 = 1536 * 1024 * 1024;
-// Stratum budget plus a Node.js/WASM child process per worker.
-const ANALYSIS_MEMORY_PER_WORKER_ESSENTIA_BYTES: u64 = 400 * 1024 * 1024;
+// buffers) dwarfs the ~96MB decode buffer. Each worker thread keeps the freed
+// memory of its allocator arena for the whole job (see process_memory.rs), so
+// what counts is its high point, not its average. Measured on a release build
+// over a 2,400-track library batch with 14 workers: ~2.4GB/worker once every
+// worker had met its larger tracks, flat from there. Fewer workers than CPU
+// threads cost no throughput there: analysis was disk/memory-bound. A worker parked
+// on an unusually long single track (near the ANALYSIS_DECODE_MAX_SAMPLES cap)
+// can still peak closer to ~2.7GB; accepted residual risk for libraries
+// dominated by very long recorded sets/mixes.
+const ANALYSIS_MEMORY_PER_WORKER_STRATUM_BYTES: u64 = 2560 * 1024 * 1024;
+// Decode and waveform in this process (stratum-dsp doesn't run), plus a
+// Node.js/WASM child process per worker. Measured on a release build with 12
+// workers: ~0.2GB/worker in this process and up to ~0.8GB per Node worker.
+const ANALYSIS_MEMORY_PER_WORKER_ESSENTIA_BYTES: u64 = 1280 * 1024 * 1024;
 const ANLZ_DETAIL_BINS_PER_SECOND: f64 = 150.0;
 const LIBRARY_ARTWORK_SIZE_PX: u32 = 80;
 const DEFAULT_ANALYSIS_BPM_MIN: u32 = 70;
@@ -354,7 +360,6 @@ fn essentia_result_has_detected_values(result: &EssentiaResult) -> bool {
 struct EssentiaWorkerConfig {
     node_bin: PathBuf,
     runner_path: PathBuf,
-    pool_size: usize,
 }
 
 /// AppImage's `AppRun` prepends the mounted AppDir's own `usr/lib` to
@@ -446,15 +451,19 @@ impl Drop for EssentiaNodeWorker {
 
 #[derive(Default)]
 struct EssentiaWorkerPoolState {
+    /// What the idle workers were started with.
     config: Option<EssentiaWorkerConfig>,
-    workers: Vec<Option<EssentiaNodeWorker>>,
-    available: Vec<usize>,
+    idle: Vec<EssentiaNodeWorker>,
 }
 
+/// Node workers kept running between tracks, so each track doesn't pay for
+/// starting Node and loading the WASM module. The pool has no size of its
+/// own: a request takes an idle worker or starts one, so it holds as many as
+/// were ever busy at once, which the analysis coordinator's worker budget
+/// bounds.
 #[derive(Default)]
 struct EssentiaWorkerPool {
     state: Mutex<EssentiaWorkerPoolState>,
-    ready: Condvar,
 }
 
 impl EssentiaWorkerPool {
@@ -463,90 +472,47 @@ impl EssentiaWorkerPool {
         config: &EssentiaWorkerConfig,
         args: &serde_json::Value,
     ) -> BackendResult<Vec<u8>> {
-        let (idx, mut worker) = self.acquire(config)?;
-        let result = worker.request(args);
-        let replacement = match result {
-            Ok(_) => Some(worker),
-            Err(_) => EssentiaNodeWorker::spawn(config).ok(),
+        let mut worker = match self.take_idle(config) {
+            Some(worker) => worker,
+            None => EssentiaNodeWorker::spawn(config)?,
         };
-        self.release(idx, replacement, config);
+        let result = worker.request(args);
+        // A worker that failed a request is dropped, which kills it.
+        if result.is_ok() {
+            self.put_idle(worker, config);
+        }
         result
     }
 
-    fn acquire(&self, config: &EssentiaWorkerConfig) -> BackendResult<(usize, EssentiaNodeWorker)> {
-        let mut state = self.state.lock().map_err(|_| {
-            BackendError::Internal("analysis worker pool mutex poisoned".to_string())
-        })?;
-        self.ensure_config_locked(&mut state, config)?;
-
-        loop {
-            if let Some(idx) = state.available.pop()
-                && let Some(worker) = state.workers.get_mut(idx).and_then(Option::take)
-            {
-                return Ok((idx, worker));
-            }
-            state = self.ready.wait(state).map_err(|_| {
-                BackendError::Internal("analysis worker pool condvar poisoned".to_string())
-            })?;
-            self.ensure_config_locked(&mut state, config)?;
+    /// An idle worker started with `config`. Workers started with anything
+    /// else (Essentia was reinstalled or moved) are dropped.
+    fn take_idle(&self, config: &EssentiaWorkerConfig) -> Option<EssentiaNodeWorker> {
+        let mut state = self.state.lock().unwrap_or_else(PoisonError::into_inner);
+        if state.config.as_ref() != Some(config) {
+            state.idle.clear();
+            state.config = Some(config.clone());
         }
+        state.idle.pop()
     }
 
-    fn release(
-        &self,
-        idx: usize,
-        worker: Option<EssentiaNodeWorker>,
-        config: &EssentiaWorkerConfig,
-    ) {
-        if let Ok(mut state) = self.state.lock()
-            && state.config.as_ref() == Some(config)
-        {
-            if idx >= state.workers.len() {
-                state.workers.resize_with(idx + 1, || None);
-            }
-            state.workers[idx] = worker;
-            if state.workers[idx].is_some() {
-                state.available.push(idx);
-                self.ready.notify_one();
-            } else {
-                state.config = None;
-                state.available.clear();
-                state.workers.clear();
-                self.ready.notify_all();
-            }
+    fn put_idle(&self, worker: EssentiaNodeWorker, config: &EssentiaWorkerConfig) {
+        let mut state = self.state.lock().unwrap_or_else(PoisonError::into_inner);
+        if state.config.as_ref() == Some(config) {
+            state.idle.push(worker);
         }
     }
 
     fn reset(&self) {
-        if let Ok(mut state) = self.state.lock() {
-            state.config = None;
-            state.available.clear();
-            state.workers.clear();
-            self.ready.notify_all();
-        }
+        let mut state = self.state.lock().unwrap_or_else(PoisonError::into_inner);
+        state.config = None;
+        state.idle.clear();
     }
+}
 
-    fn ensure_config_locked(
-        &self,
-        state: &mut EssentiaWorkerPoolState,
-        config: &EssentiaWorkerConfig,
-    ) -> BackendResult<()> {
-        if state.config.as_ref() == Some(config) && state.available.len() == state.workers.len() {
-            return Ok(());
-        }
-        if state.config.as_ref() == Some(config) {
-            return Ok(());
-        }
-
-        state.available.clear();
-        state.workers.clear();
-        state.config = Some(config.clone());
-        for idx in 0..config.pool_size {
-            state.workers.push(Some(EssentiaNodeWorker::spawn(config)?));
-            state.available.push(idx);
-        }
-        Ok(())
-    }
+/// Stops the idle Node workers: called when an analysis job ends, so their
+/// memory isn't held while nothing is analyzed.
+pub(super) fn stop_essentia_workers() {
+    essentia_worker_pool().reset();
 }
 
 fn essentia_worker_pool() -> &'static EssentiaWorkerPool {
@@ -905,13 +871,14 @@ fn analysis_capacity(engine: AnalysisEngine) -> usize {
         .unwrap_or(1);
     let cap = resolve_worker_cap_for_engine(engine);
     let budget = resolve_analysis_parallelism_budget_with_cap(cpu_workers, cap.combined);
-    logging::debug(
-        "analysis",
-        format!(
-            "worker budget: engine={engine:?} cpu_workers={cpu_workers} memory_cap={:?} env_cap={:?} budget={budget}",
-            cap.memory_cap, cap.env_cap,
-        ),
+    let line = format!(
+        "worker budget: engine={engine:?} cpu_workers={cpu_workers} memory_cap={:?} env_cap={:?} budget={budget}",
+        cap.memory_cap, cap.env_cap,
     );
+    if analysis_debug_workers_enabled() {
+        eprintln!("{line}");
+    }
+    logging::debug("analysis", line);
     budget
 }
 
@@ -1000,10 +967,7 @@ fn analysis_debug_workers_enabled() -> bool {
 }
 
 /// The memory/env worker caps for a given engine, broken down for debug
-/// logging as well as combined. The single implementation here is shared by
-/// both worker-pool call sites (batch analysis and the essentia pool) so a
-/// copy-paste bug in "pick budget -> combine caps" can't silently diverge
-/// between them.
+/// logging as well as combined.
 struct WorkerCapBreakdown {
     memory_cap: Option<usize>,
     env_cap: Option<usize>,
@@ -1479,32 +1443,9 @@ fn resolve_essentia_worker_config() -> BackendResult<EssentiaWorkerConfig> {
         return Err(BackendError::Internal(format!("{message} | {details}")));
     }
 
-    let cpu_workers = std::thread::available_parallelism()
-        .map(|n| n.get())
-        .unwrap_or(1);
-    // This pool is a lazily-initialized global shared across batch and
-    // single-track paths, so it always uses the (heavier) essentia budget
-    // regardless of which engine the current request selected.
-    let cap = resolve_worker_cap_for_engine(AnalysisEngine::Essentia);
-    let pool_size = resolve_analysis_parallelism_budget_with_cap(cpu_workers, cap.combined);
-    if analysis_debug_workers_enabled() {
-        let line = format!(
-            "debug workers(essentia) cpu_workers={} memory_cap={} env_cap={} pool_size={}",
-            cpu_workers,
-            cap.memory_cap
-                .map(|v| v.to_string())
-                .unwrap_or_else(|| "unavailable".to_string()),
-            cap.env_cap
-                .map(|v| v.to_string())
-                .unwrap_or_else(|| "none".to_string()),
-            pool_size
-        );
-        crate::logging::debug("analysis", line);
-    }
     Ok(EssentiaWorkerConfig {
         node_bin,
         runner_path,
-        pool_size,
     })
 }
 
@@ -2524,8 +2465,8 @@ mod tests {
         unsafe { std::env::set_var("DJTKIT_ANALYSIS_AVAILABLE_MEMORY_BYTES", "4294967296") };
         let cap = resolve_worker_cap_for_engine(AnalysisEngine::Stratum);
         unsafe { std::env::remove_var("DJTKIT_ANALYSIS_AVAILABLE_MEMORY_BYTES") };
-        // 4 GiB available, 1.5 GiB/worker budget: after 1 GiB headroom = 3
-        // GiB; * 0.75 = 2.25 GiB; / 1.5GiB = 1.
+        // 4 GiB available, 2.5 GiB/worker budget: after 1 GiB headroom = 3
+        // GiB; * 0.75 = 2.25 GiB; / 2.5 GiB = 0, floored to 1.
         assert_eq!(cap.memory_cap, Some(1));
         assert_eq!(cap.env_cap, None);
         assert_eq!(cap.combined, Some(1));
@@ -2539,8 +2480,8 @@ mod tests {
         let stratum_cap = resolve_worker_cap_for_engine(AnalysisEngine::Stratum);
         let essentia_cap = resolve_worker_cap_for_engine(AnalysisEngine::Essentia);
         unsafe { std::env::remove_var("DJTKIT_ANALYSIS_AVAILABLE_MEMORY_BYTES") };
-        // Same available memory, different per-worker budgets (1.5 GiB vs
-        // 400MiB) must produce different caps -- proves the right per-engine
+        // Same available memory, different per-worker budgets (2.5 GiB vs
+        // 1.25 GiB) must produce different caps -- proves the right per-engine
         // constant is actually selected, not just that some cap exists.
         assert_ne!(stratum_cap.memory_cap, essentia_cap.memory_cap);
         assert!(essentia_cap.memory_cap.unwrap() > stratum_cap.memory_cap.unwrap());
@@ -2550,7 +2491,7 @@ mod tests {
     fn has_memory_headroom_for_engine_false_when_below_budget() {
         let _guard = env_var_lock().lock().unwrap();
         // 1 GiB available: entirely consumed by the flat headroom alone, so
-        // there's zero usable budget left for even one stratum worker (1.5
+        // there's zero usable budget left for even one stratum worker (2.5
         // GiB/worker) -- this must refuse, not silently proceed.
         unsafe { std::env::set_var("DJTKIT_ANALYSIS_AVAILABLE_MEMORY_BYTES", "1073741824") };
         let allowed = has_memory_headroom_for_engine(AnalysisEngine::Stratum);
@@ -2593,7 +2534,7 @@ mod tests {
         // Plenty of RAM, so the memory cap should never bind here -- this
         // isolates the headroom-reservation behavior on its own. Mirrors
         // `analysis_capacity`: resolve the engine cap, reserve ~2 cores.
-        unsafe { std::env::set_var("DJTKIT_ANALYSIS_AVAILABLE_MEMORY_BYTES", "68719476736") };
+        unsafe { std::env::set_var("DJTKIT_ANALYSIS_AVAILABLE_MEMORY_BYTES", "137438953472") };
         let cap = resolve_worker_cap_for_engine(AnalysisEngine::Stratum);
         unsafe { std::env::remove_var("DJTKIT_ANALYSIS_AVAILABLE_MEMORY_BYTES") };
         let cpu_workers = 24;

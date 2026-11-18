@@ -179,6 +179,107 @@ struct QueuedTrack {
     request: Arc<RequestContext>,
 }
 
+/// A track for a worker, with the job's progress when it was started.
+struct WorkerTask {
+    item: QueuedTrack,
+    current: usize,
+    total: usize,
+}
+
+/// What every worker of a job shares.
+struct WorkerContext {
+    tx: mpsc::Sender<Message>,
+    handle: Arc<AnalysisCoordinatorHandle>,
+    job_id: String,
+    waveform_dir: PathBuf,
+    artwork_dir: PathBuf,
+}
+
+/// Worker threads taking tracks from one channel. Dropping the pool closes
+/// the channel, and each thread ends once it has finished its track.
+struct WorkerPool {
+    send: mpsc::Sender<WorkerTask>,
+    receive: Arc<Mutex<mpsc::Receiver<WorkerTask>>>,
+    threads: usize,
+}
+
+impl WorkerPool {
+    fn new() -> Self {
+        let (send, receive) = mpsc::channel();
+        Self {
+            send,
+            receive: Arc::new(Mutex::new(receive)),
+            threads: 0,
+        }
+    }
+
+    fn spawn(&mut self, context: WorkerContext) {
+        let receive = Arc::clone(&self.receive);
+        self.threads += 1;
+        std::thread::spawn(move || {
+            loop {
+                // The lock is held only while waiting for the next track.
+                let task = receive
+                    .lock()
+                    .unwrap_or_else(PoisonError::into_inner)
+                    .recv();
+                let Ok(task) = task else {
+                    return;
+                };
+                run_worker_task(&context, task);
+            }
+        });
+    }
+}
+
+fn run_worker_task(context: &WorkerContext, task: WorkerTask) {
+    let WorkerTask {
+        item,
+        current,
+        total,
+    } = task;
+    let result = panic::catch_unwind(AssertUnwindSafe(|| {
+        #[cfg(test)]
+        assert!(
+            !item.track.title.contains("worker panics"),
+            "a worker panicked"
+        );
+        analyze_track_with_usb_fallback_with_updates(
+            &item.track,
+            &context.waveform_dir,
+            &context.artwork_dir,
+            BpmDetectionParams {
+                bpm_min: item.request.bpm_min,
+                bpm_max: item.request.bpm_max,
+                engine: item.request.engine,
+            },
+            |update| {
+                // Straight to the user: only the result goes through the
+                // coordinator, and it is sent after these.
+                item.request.emit(
+                    &context.handle,
+                    &context.job_id,
+                    build_partial_progress(
+                        current,
+                        total,
+                        item.track.id.clone(),
+                        item.track.title.clone(),
+                        item.track.file_path.clone(),
+                        update,
+                    ),
+                );
+            },
+        )
+    }))
+    .unwrap_or_else(|payload| {
+        Err(BackendError::Internal(format!(
+            "analysis worker panicked: {}",
+            panic_text(payload.as_ref())
+        )))
+    });
+    let _ = context.tx.send(Message::WorkerDone { item, result });
+}
+
 struct Coordinator {
     service: BackendService,
     /// Its own, outside the pool: analysis never waits on the rest of the app,
@@ -197,6 +298,12 @@ struct Coordinator {
     /// Read once per engine: memory the running workers hold would otherwise
     /// count against it and wrongly shrink it.
     budgets: Vec<(AnalysisEngine, usize)>,
+    /// The job's worker threads. They live as long as the job, so each keeps
+    /// reusing the memory its own allocator arena holds on to (see
+    /// `process_memory`). A thread per track would mostly start before the
+    /// last one's arena was free and get a new arena, each holding a track's
+    /// worth of memory until the job ends.
+    workers: WorkerPool,
     paused: bool,
     total: usize,
     completed: usize,
@@ -233,6 +340,7 @@ impl Coordinator {
             active: HashSet::new(),
             in_flight: 0,
             budgets: Vec::new(),
+            workers: WorkerPool::new(),
             paused: false,
             total: 0,
             completed: 0,
@@ -423,7 +531,8 @@ impl Coordinator {
             let Some(engine) = self.queue.front().map(|item| item.request.engine) else {
                 return;
             };
-            if self.in_flight >= self.budget(engine) {
+            let budget = self.budget(engine);
+            if self.in_flight >= budget {
                 return;
             }
             // Memory this process keeps for reuse counts as used: give it
@@ -464,58 +573,26 @@ impl Coordinator {
                     self.queue.len(),
                 ),
             );
-            self.spawn_worker(item);
+            self.start_on_worker(item, budget);
         }
     }
 
-    fn spawn_worker(&self, item: QueuedTrack) {
-        let tx = self.tx.clone();
-        let handle = self.service.analysis_coordinator.clone();
-        let job_id = self.job_id.clone();
-        let (current, total) = (self.completed, self.total);
-        let waveform_dir = self.waveform_dir.clone();
-        let artwork_dir = self.artwork_dir.clone();
-        std::thread::spawn(move || {
-            let result = panic::catch_unwind(AssertUnwindSafe(|| {
-                #[cfg(test)]
-                assert!(
-                    !item.track.title.contains("worker panics"),
-                    "a worker panicked"
-                );
-                analyze_track_with_usb_fallback_with_updates(
-                    &item.track,
-                    &waveform_dir,
-                    &artwork_dir,
-                    BpmDetectionParams {
-                        bpm_min: item.request.bpm_min,
-                        bpm_max: item.request.bpm_max,
-                        engine: item.request.engine,
-                    },
-                    |update| {
-                        // Straight to the user: only the result goes through
-                        // the coordinator, and it is sent after these.
-                        item.request.emit(
-                            &handle,
-                            &job_id,
-                            build_partial_progress(
-                                current,
-                                total,
-                                item.track.id.clone(),
-                                item.track.title.clone(),
-                                item.track.file_path.clone(),
-                                update,
-                            ),
-                        );
-                    },
-                )
-            }))
-            .unwrap_or_else(|payload| {
-                Err(BackendError::Internal(format!(
-                    "analysis worker panicked: {}",
-                    panic_text(payload.as_ref())
-                )))
+    /// Hands `item` to a worker thread, starting threads up to `budget`.
+    fn start_on_worker(&mut self, item: QueuedTrack, budget: usize) {
+        while self.workers.threads < budget {
+            self.workers.spawn(WorkerContext {
+                tx: self.tx.clone(),
+                handle: self.service.analysis_coordinator.clone(),
+                job_id: self.job_id.clone(),
+                waveform_dir: self.waveform_dir.clone(),
+                artwork_dir: self.artwork_dir.clone(),
             });
-            let _ = tx.send(Message::WorkerDone { item, result });
+        }
+        // The workers only stop when the pool is dropped with the coordinator.
+        let _ = self.workers.send.send(WorkerTask {
+            item,
+            current: self.completed,
+            total: self.total,
         });
     }
 
@@ -655,6 +732,7 @@ impl Coordinator {
             message: finished_text(analyzed, failed, self.incomplete),
         });
         self.emit(&summary);
+        super::stop_essentia_workers();
         crate::process_memory::stop_keeping_freed_memory();
     }
 
