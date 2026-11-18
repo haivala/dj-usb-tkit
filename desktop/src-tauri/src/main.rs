@@ -916,6 +916,7 @@ fn main() {
             backend::tauri_commands::list_mixxx_playlists,
             backend::tauri_commands::list_rekordbox_playlists,
             backend::tauri_commands::import_external_playlists,
+            backend::tauri_commands::apply_external_track_data,
             backend::tauri_commands::browse_source_files,
             backend::tauri_commands::get_library_sources,
             backend::tauri_commands::add_source_folders,

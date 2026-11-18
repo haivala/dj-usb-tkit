@@ -39,6 +39,8 @@
 
 ## Unreleased
 
+- **Improvement:** Importing from rekordbox or Mixxx now asks when tracks differ. Cues, BPM, key or beat grid that you edited, analyzed or brought in from elsewhere are kept, and a dialog lists the tracks whose values differ in the library, with the choice to keep yours or take the library's. Values that came from the same library before follow changes made there without asking, cues included. This replaces the playlist import's "Force update track data" option.
+
 ## 0.6.3
 
 **Severity:** feature

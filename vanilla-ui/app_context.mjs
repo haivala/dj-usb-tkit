@@ -99,7 +99,7 @@ export function createAppContext(env) {
     relocateSourceRoot renderSourceChips applyLibraryDurationSummary renderLibraryRows
     scheduleLibrarySearch resetAndLoadLibraryTracks
     reloadTrackListsForKeyNotation analyzeLibrary reanalyzeTracks
-    scanRekordboxDb scanMixxxDb analyzeTrackIds analyzeSingleTrack setTrackAnalyzingState setTracksWaitingState
+    scanRekordboxDb scanMixxxDb resolveImportConflicts analyzeTrackIds analyzeSingleTrack setTrackAnalyzingState setTracksWaitingState
     showTrackRow`);
   bindActions(usb, `setUsbRootControlsLocked applyPlaylistUsbExportStatus showDiagReportView
     clearUsbDiagnostics hideUsbDiagnostics loadUsbRootFromStorage usbContentChanged
@@ -126,6 +126,7 @@ export function createAppContext(env) {
   ctx.openConfirmDialog = (opts) => ctx.confirmDialog.open(opts);
   ctx.tracklistExportDialog = uiCtrl.createTracklistExportDialogController(ctx.el);
   ctx.playlistImportDialog = uiCtrl.createPlaylistImportDialogController(ctx.el, ctx.document);
+  ctx.importConflictDialog = uiCtrl.createImportConflictDialogController(ctx.el, ctx.document);
   ctx.groupEditDialog = createGroupEditDialogController(ctx.el, ctx.document);
   ctx.addToDialog = createAddToDialogController(ctx.el, ctx.document);
   ctx.convertDialog = createConvertDialogController(ctx.el, ctx.document);

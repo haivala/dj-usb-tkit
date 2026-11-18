@@ -453,6 +453,32 @@ async function importExternalLibrary(ctx, { command, path, startingText, failedT
 
   // The files it couldn't find are in the Event Log already: the backend logged them.
   emitStatus(result.statusText);
+  await resolveImportConflicts(ctx, result.conflicts ? [result.conflicts] : []);
+}
+
+// After a rekordbox / Mixxx import: for each library whose tracks differ in
+// values the import kept, ask whether to take the library's instead (the
+// backend's question and list), and do so on "Use …".
+export async function resolveImportConflicts(ctx, conflictsList) {
+  let applied = false;
+  for (const conflicts of conflictsList || []) {
+    if (!conflicts?.trackIds?.length) continue;
+    if (!(await ctx.importConflictDialog.open(conflicts))) continue;
+    try {
+      const data = await ctx.command("apply_external_track_data", {
+        library: conflicts.library,
+        path: conflicts.path || undefined,
+        trackIds: conflicts.trackIds
+      });
+      applied = true;
+      ctx.emitStatus(data.statusText);
+    } catch (err) {
+      ctx.emitStatus(err?.message || String(err));
+    }
+  }
+  if (!applied) return;
+  await resetAndLoadLibraryTracks(ctx, ctx.state.libraryQuery || "");
+  await ctx.refreshCurrentPlaylistTracks();
 }
 
 // Adds to the backend's analysis job and returns at once: the job's events

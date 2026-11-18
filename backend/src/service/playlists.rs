@@ -1,5 +1,6 @@
 //! Local playlists and imported-playlist bookkeeping.
 
+use super::import_conflicts::merge_import_conflicts;
 use super::*;
 use crate::audio_format::never_goes_on_usb;
 use crate::i18n::{Text, tr};
@@ -273,6 +274,7 @@ impl BackendService {
         };
         let mut failed_names = Vec::new();
         let mut first_error = None;
+        let mut conflicts = Vec::new();
         for item in req.items {
             let name = item.name.clone();
             let library = item.library;
@@ -281,7 +283,8 @@ impl BackendService {
                 ExternalLibrary::Mixxx => self.import_mixxx_playlist(item.request),
             };
             out.results.push(match result {
-                Ok(playlist) => {
+                Ok(mut playlist) => {
+                    conflicts.extend(playlist.conflicts.take());
                     out.imported += 1;
                     out.added += playlist.added;
                     out.skipped += playlist.skipped;
@@ -314,6 +317,7 @@ impl BackendService {
                 }
             });
         }
+        out.conflicts = merge_import_conflicts(conflicts);
         out.status_text = match first_error {
             // Nothing imported: the first failure is the status line.
             Some(error) if out.imported == 0 => match single_library {

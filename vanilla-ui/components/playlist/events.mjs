@@ -101,6 +101,8 @@ export function bindPlaylistEvents(ctx) {
   el.playlistImportCancelBtn.addEventListener("click", () => {
     playlistImportDialog?.close(false);
   });
+  el.importConflictUseBtn.addEventListener("click", () => ctx.importConflictDialog.close(true));
+  el.importConflictKeepBtn.addEventListener("click", () => ctx.importConflictDialog.close(false));
 
   let playlistSearchTimer = null;
   el.playlistSearchInput.addEventListener("input", () => {

@@ -96,7 +96,7 @@ pub fn import_anlz_cues_for_track(
     for cue in &mut cues {
         cue.position_ms = cue.position_ms.saturating_sub(shift);
     }
-    insert_track_cues(tx, track_id, &cues)?;
+    insert_track_cues(tx, track_id, &cues, "usb")?;
 
     // Seed the beat-grid anchor when the local row doesn't have one.
     let local_first_beat: Option<i64> = tx
@@ -129,13 +129,20 @@ pub fn track_has_cues(conn: &Connection, track_id: &str) -> BackendResult<bool> 
     Ok(existing > 0)
 }
 
-/// Append `cues` to the track's `track_cues` rows, `sort_order` = list order.
+/// Append `cues` to the track's `track_cues` rows, `sort_order` = list order,
+/// and record where the track's cues came from (`tracks.cue_source`:
+/// `'rekordbox'`, `'mixxx'`, `'usb'`; the cue editor writes `'user'`).
 pub fn insert_track_cues(
     conn: &Connection,
     track_id: &str,
     cues: &[TrackCue],
+    source: &str,
 ) -> BackendResult<()> {
     let now = now();
+    conn.execute(
+        "UPDATE tracks SET cue_source = ?1 WHERE id = ?2",
+        params![source, track_id],
+    )?;
     for (index, cue) in cues.iter().enumerate() {
         conn.execute(
             "INSERT INTO track_cues
@@ -856,6 +863,12 @@ fn apply_local_analysis_edits_tx(
     if let Some(cues) = cues {
         tx.execute(
             "DELETE FROM track_cues WHERE track_id = ?1",
+            params![track_id],
+        )?;
+        // Even an emptied list is the user's choice: an import asks before
+        // filling it again.
+        tx.execute(
+            "UPDATE tracks SET cue_source = 'user' WHERE id = ?1",
             params![track_id],
         )?;
         for (index, cue) in cues.iter().enumerate() {
@@ -1665,6 +1678,7 @@ mod tests {
               bpm_analyzer TEXT,
               tonality TEXT,
               tonality_source TEXT,
+              cue_source TEXT,
               updated_at TEXT
             );
             CREATE TABLE track_cues (
@@ -2359,6 +2373,15 @@ mod tests {
             )
             .unwrap();
         assert_eq!(key, ("F#m".to_string(), "user".to_string()));
+
+        let cue_source: String = conn
+            .query_row(
+                "SELECT cue_source FROM tracks WHERE id = 'track-1'",
+                [],
+                |row| row.get(0),
+            )
+            .unwrap();
+        assert_eq!(cue_source, "user", "an import asks before replacing edited cues");
 
         let cues = load_track_cues(&conn, "track-1").expect("cues");
         assert_eq!(

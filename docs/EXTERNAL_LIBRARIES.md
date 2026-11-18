@@ -46,20 +46,23 @@ them with the app's own detection. A BPM you set yourself in the cue editor
 behaves the same way. The BPM tooltip shows where the value came from
 ("From Mixxx", "From rekordbox", "Manually set").
 
-Running an import again updates the tracks already imported. Your own changes
-win:
+Running an import again updates the tracks already imported:
 
-- BPM and key are taken from rekordbox / Mixxx when the track has none, or
-  when its value still came from that library, so a tempo you corrected
-  there comes across. A value you edited in the app, or that the app's
-  analysis replaced (Reanalyze), is kept.
+- Cues, BPM, key and beat grid are taken from rekordbox / Mixxx when the track
+  has none, or when its value still came from that library, so a tempo or a
+  cue you changed there comes across.
+- A value from anywhere else (edited in the app, the app's analysis, the other
+  library, a USB stick) is kept when it differs from the library's. After the
+  import a dialog lists those tracks and what differs on each ("cues, BPM"),
+  with **Keep library's** or **Use rekordbox's / Mixxx's**. Keeping asks again
+  on the next import. A grid whose first beat sits a whole number of beats
+  away counts as the same grid.
 - Length is only filled in when the track has none.
 - Title, artist and album follow the library; genre does too when the library
   has one for the track.
-- Cues are only added to a track that has no cues in the app.
 
-The playlist import can override this per playlist (see **Force update**
-below).
+The playlist import works the same way, with one dialog per library after all
+the ticked lists are imported.
 
 The app's cue list is up to 8 cue points plus one playback-start cue, and
 cue points take pads A–H in position order. So an imported hot cue can land on
@@ -78,8 +81,8 @@ rekordbox cues are imported like this:
   already has a memory point there
 
 Tracks imported before memory cues were supported had them turned into cue
-points or left out. Importing again with "force update track data from
-rekordbox" brings them back as memory cues.
+points or left out. Importing again and choosing **Use rekordbox's** brings
+them back as memory cues.
 
 Some tracks are skipped, with the reason in the Event Log:
 
@@ -141,12 +144,10 @@ for example `5 tracks · updates "Friday Set"`.
 Changes you made to that playlist in the app are replaced. A playlist you
 delete is created again on the next import.
 
-**Force update track data from rekordbox / Mixxx** (a checkbox, off by
-default) makes the ticked playlists' tracks take BPM, key and cues from their
-library even where you edited them or reanalyzed them in the app. Cues are only
-replaced when the library has cues for the track. The analysis files on the
-USB follow on the next export, which rebuilds each track's beat grid and cues
-from the app's values.
+Taking the library's values (**Use rekordbox's / Mixxx's** after an import)
+only replaces cues when the library has cues for the track. The analysis files
+on the USB follow on the next export, which rebuilds each track's beat grid and
+cues from the app's values.
 
 ### When both libraries have the same file
 
@@ -155,10 +156,11 @@ the app:
 
 - it carries both source flags and shows when either chip is on
 - title, artist and album: whichever import ran last
-- BPM, key, length: the first value found is kept
+- BPM, key, grid and cues: the first import fills them in; the other library's
+  import asks when its values differ
+- length: the first value found is kept
 - waveform: rekordbox's analysis file
 - cover image: whichever import copied one last
-- hot cues: from whichever import finds the track without cues first
 
 ## Deep technical details
 
@@ -190,6 +192,11 @@ See `backend/src/service/wine_paths.rs`.
   `scan_mixxx_db`, `list_mixxx_playlists`, `import_mixxx_playlist`
 - `backend/src/service/playlists.rs`: `import_external_playlists`, the
   command the playlist import dialog calls, running the two above per list
+- `backend/src/service/import_conflicts.rs`: which values differ in a way the
+  user decides (`differing_fields`), what happens to a track's cues
+  (`cue_action`), the dialog's question (`ImportConflicts`), and
+  `apply_external_track_data`, the dialog's "Use …", which imports the listed
+  tracks again with `force` set
 
 Each module has one per-track importer (`RekordboxTrackImporter`,
 `MixxxTrackImporter`) that the whole-library import and the playlist import
@@ -207,7 +214,10 @@ ids overlap). The list commands return the matching local playlist as
 came from. An import that fills in a track's BPM, key or first beat sets
 `bpm_analyzer` / `tonality_source` / `first_beat_ms_source` to `rekordbox` or
 `mixxx` (a cue-editor edit sets `user`), only over a value that is missing or
-came from the same library, unless forced. `analysis::kept_analysis_values` keeps a value with one of those
+came from the same library, unless forced. `tracks.cue_source` does the same
+for the cue list (`rekordbox`, `mixxx`, `usb` for cues read from a stick,
+`user`); `NULL` is a track whose cues predate it, and an import that finds them
+equal to the library's records that library as their source. `analysis::kept_analysis_values` keeps a value with one of those
 sources when the track has no waveform yet (its first analysis); a track that
 already has one is reanalyzed and gets the detected values. Each library's
 chip switch is stored by the backend (`set_external_library_enabled`, read

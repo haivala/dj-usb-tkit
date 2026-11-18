@@ -423,8 +423,7 @@ export async function importExternalPlaylist(ctx) {
             name: item.name,
             path: item.path,
             kind: item.kind,
-            id: item.id,
-            force: item.force === true
+            id: item.id
           }))
         });
         for (const [index, outcome] of (data.results || []).entries()) {
@@ -452,6 +451,7 @@ export async function importExternalPlaylist(ctx) {
   // The files it couldn't find and the lists that failed are in the Event Log
   // already: the backend logged them.
   emitStatus(data.statusText);
+  await ctx.resolveImportConflicts(data.conflicts);
 }
 
 export async function deletePlaylist(ctx, playlistId) {

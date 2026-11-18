@@ -1483,10 +1483,10 @@ scan-note-hot-cues-imported = hot cues importés pour { $count ->
     [one] { $count } morceau
    *[other] { $count } morceaux
 }
-scan-note-cues-kept-local = cues existants conservés pour { $count ->
+scan-note-cues-kept-local = valeurs de la bibliothèque conservées pour { $count ->
     [one] { $count } morceau
    *[other] { $count } morceaux
-} ; leurs cues { $library } n'ont pas été importés
+} dont les cues, le BPM, la tonalité ou la grille de temps diffèrent dans { $library }
 scan-note-unsupported-skipped = { $count ->
     [one] { $count } morceau ignoré
    *[other] { $count } morceaux ignorés
@@ -1982,16 +1982,32 @@ ui-playlist-add-none-resolved = Aucun identifiant de morceau importé trouvé à
 ui-playlist-add-select-first = Sélectionnez au moins un morceau à ajouter
 ui-playlist-empty-heading = Parcourez la Bibliothèque ou la clé USB pour ajouter des morceaux
 
+## import-conflicts
+
+import-conflicts-title = Données de morceaux différentes dans { $library }
+import-conflicts-message = { $library } a des cues, un BPM, une tonalité ou une grille de temps différents pour { $count ->
+    [one] { $count } morceau
+   *[other] { $count } morceaux
+} par rapport à votre bibliothèque.
+import-conflicts-use = Utiliser { $library }
+import-conflicts-field-cues = cues
+import-conflicts-field-bpm = BPM
+import-conflicts-field-key = tonalité
+import-conflicts-field-grid = grille de temps
+import-conflicts-applied = Cues, BPM, tonalité et grille de temps de { $count ->
+    [one] { $count } morceau
+   *[other] { $count } morceaux
+} repris de { $library }
+ui-import-conflicts-keep = Garder la bibliothèque
+ui-import-conflicts-list-aria-label = Morceaux différents
+
 ## ui-playlist-import
 
-ui-playlist-import-force = Forcer la mise à jour des données des morceaux
-ui-playlist-import-force-note = Remplace le BPM, la tonalité et les cues des morceaux des playlists, y compris vos propres modifications.
 ui-playlist-import-intro = Chacune est importée comme nouvelle playlist. Les morceaux qui ne sont pas encore dans la bibliothèque sont importés avec elle.
 ui-playlist-import-ok-count = { $count ->
     [one] Importer { $count }
    *[other] Importer { $count }
 }
-ui-playlist-import-force-from = Forcer la mise à jour des données des morceaux depuis { $library }
 ui-playlist-import-column-aria-label = Listes { $library }
 ui-playlist-import-title = Importer des playlists
 ui-playlist-import-group-playlists = Playlists

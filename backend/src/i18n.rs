@@ -673,8 +673,13 @@ usb-not-for-ui = Not sent
         ],
         // A diagnostics section vs a Settings section.
         &["diagnostics-section-analysis", "ui-settings-analysis"],
-        // A narrow column header (may be abbreviated, like "Fmt") vs a field's label.
-        &["ui-track-detail-bpm", "ui-track-table-bpm"],
+        // A narrow column header (may be abbreviated, like "Fmt") vs a field's label vs a
+        // field named in an import's list of what differs (lower-case in the others).
+        &[
+            "import-conflicts-field-bpm",
+            "ui-track-detail-bpm",
+            "ui-track-table-bpm",
+        ],
         &["ui-track-detail-key", "ui-track-table-key"],
         &["ui-common-genre", "ui-track-table-genre"],
         // A status word vs a button.

@@ -9,11 +9,11 @@ use std::path::{Path, PathBuf};
 
 use backend::commands::BackendCommands;
 use backend::models::{
-    BrowseSourceFilesRequest, ExternalLibrary, ExternalPlaylistKind, GetTrackDetailRequest,
-    ImportExternalPlaylistData, ImportExternalPlaylistRequest, ImportExternalPlaylistsData,
-    ImportExternalPlaylistsItem, ImportExternalPlaylistsRequest, ImportedPlaylistRef,
-    ListExternalPlaylistsRequest, SaveTrackAnalysisEditsRequest, ScanMixxxDbRequest,
-    ScanRekordboxDbRequest, TrackCueInput,
+    ApplyExternalTrackDataRequest, BrowseSourceFilesRequest, ExternalLibrary, ExternalPlaylistKind,
+    GetTrackDetailRequest, ImportConflicts, ImportExternalPlaylistData,
+    ImportExternalPlaylistRequest, ImportExternalPlaylistsData, ImportExternalPlaylistsItem,
+    ImportExternalPlaylistsRequest, ImportedPlaylistRef, ListExternalPlaylistsRequest,
+    SaveTrackAnalysisEditsRequest, ScanMixxxDbRequest, ScanRekordboxDbRequest, TrackCueInput,
 };
 use backend::service::anlz::{WaveformData, build_anlz_dat_file, build_anlz_ext_file};
 use backend::service::cues::DEFAULT_HOTCUE_COLOR_ID;
@@ -62,7 +62,6 @@ fn import_item(
     path: &Option<String>,
     kind: ExternalPlaylistKind,
     id: &str,
-    force: bool,
 ) -> ImportExternalPlaylistsItem {
     ImportExternalPlaylistsItem {
         library,
@@ -71,7 +70,6 @@ fn import_item(
             path: path.clone(),
             kind,
             id: id.to_string(),
-            force,
         },
     }
 }
@@ -83,15 +81,30 @@ fn import_one(
     path: &Option<String>,
     kind: ExternalPlaylistKind,
     id: &str,
-    force: bool,
 ) -> Result<ImportExternalPlaylistData, String> {
-    let mut data = import_lists(backend, vec![import_item(library, path, kind, id, force)]);
+    let mut data = import_lists(backend, vec![import_item(library, path, kind, id)]);
     let outcome = data.results.remove(0);
     match (outcome.playlist, outcome.error) {
-        (Some(playlist), _) => Ok(playlist),
+        (Some(mut playlist), _) => {
+            // One list from one library: at most one question.
+            playlist.conflicts = data.conflicts.pop();
+            Ok(playlist)
+        }
         (None, Some(error)) => Err(error),
         (None, None) => panic!("import outcome has neither a playlist nor an error"),
     }
+}
+
+/// The conflict dialog's "Use …": take the library's values for every track
+/// the import asked about.
+fn use_library_values(backend: &BackendCommands, conflicts: &ImportConflicts) -> usize {
+    let response = backend.apply_external_track_data(ApplyExternalTrackDataRequest {
+        library: conflicts.library,
+        path: conflicts.path.clone(),
+        track_ids: conflicts.track_ids.clone(),
+    });
+    assert!(response.ok, "apply external track data: {response:?}");
+    response.data.expect("apply data").updated
 }
 
 fn playlist_titles(data_dir: &Path, playlist_id: &str) -> Vec<String> {
@@ -279,9 +292,8 @@ fn import_rekordbox(
     path: &Option<String>,
     kind: ExternalPlaylistKind,
     id: &str,
-    force: bool,
 ) -> Result<ImportExternalPlaylistData, String> {
-    import_one(backend, ExternalLibrary::Rekordbox, path, kind, id, force)
+    import_one(backend, ExternalLibrary::Rekordbox, path, kind, id)
 }
 
 #[test]
@@ -313,7 +325,7 @@ fn list_and_import_rekordbox_playlists_and_history() {
         ]
     );
 
-    let imported = import_rekordbox(&backend, &path, ExternalPlaylistKind::Playlist, "11", false)
+    let imported = import_rekordbox(&backend, &path, ExternalPlaylistKind::Playlist, "11")
         .expect("import playlist");
     assert_eq!(imported.name, "Friday");
     assert_eq!(imported.added, 3);
@@ -371,7 +383,7 @@ fn list_and_import_rekordbox_playlists_and_history() {
         ]
     );
 
-    let history = import_rekordbox(&backend, &path, ExternalPlaylistKind::History, "h2", false)
+    let history = import_rekordbox(&backend, &path, ExternalPlaylistKind::History, "h2")
         .expect("import history");
     assert_eq!(history.indexed, 0, "tracks reused from the first import");
     assert_eq!(
@@ -380,8 +392,7 @@ fn list_and_import_rekordbox_playlists_and_history() {
     );
 
     // Nothing importable: an error, and no empty playlist left behind.
-    let err =
-        import_rekordbox(&backend, &path, ExternalPlaylistKind::Playlist, "15", false).unwrap_err();
+    let err = import_rekordbox(&backend, &path, ExternalPlaylistKind::Playlist, "15").unwrap_err();
     assert!(err.contains("the only track in"), "{err}");
     assert_eq!(playlist_count(&data_dir), 2);
 
@@ -392,7 +403,7 @@ fn list_and_import_rekordbox_playlists_and_history() {
         (ExternalPlaylistKind::Crate, "11"),
     ] {
         assert!(
-            import_rekordbox(&backend, &path, kind, id, false).is_err(),
+            import_rekordbox(&backend, &path, kind, id).is_err(),
             "{kind:?} {id} should not import"
         );
     }
@@ -432,7 +443,6 @@ fn import_keeps_every_rekordbox_memory_cue() {
         &library.path(),
         ExternalPlaylistKind::Playlist,
         "11",
-        false,
     )
     .expect("import playlist");
     assert!(
@@ -475,14 +485,12 @@ fn import_keeps_every_rekordbox_memory_cue() {
 }
 
 #[test]
-fn reimporting_a_rekordbox_playlist_updates_it_and_force_takes_rekordbox_values() {
+fn reimporting_a_rekordbox_playlist_asks_before_taking_rekordbox_values() {
     let (_app_dir, data_dir, backend) = app();
     let library = RekordboxLibrary::new();
     let path = library.path();
-    let import = |force| {
-        import_rekordbox(&backend, &path, ExternalPlaylistKind::Playlist, "11", force)
-            .expect("import")
-    };
+    let import =
+        || import_rekordbox(&backend, &path, ExternalPlaylistKind::Playlist, "11").expect("import");
     let charlie = || -> (f64, Option<String>, Vec<i64>) {
         let db = library_db(&data_dir);
         let (bpm, source) = db
@@ -505,27 +513,45 @@ fn reimporting_a_rekordbox_playlist_updates_it_and_force_takes_rekordbox_values(
         (bpm, source, cues)
     };
 
-    let first = import(false);
+    let first = import();
+    assert!(
+        first.conflicts.is_none(),
+        "a first import has nothing to ask"
+    );
     assert_eq!(
         first_local_playlist_imported_from(&backend).as_deref(),
         Some("rekordbox")
     );
+    // Unedited, a re-import asks nothing.
+    assert!(import().conflicts.is_none());
     library_db(&data_dir)
         .execute_batch(
-            "UPDATE tracks SET bpm = 99.0, bpm_analyzer = 'user' WHERE title = 'Charlie';
+            "UPDATE tracks SET bpm = 99.0, bpm_analyzer = 'user', cue_source = 'user'
+               WHERE title = 'Charlie';
              DELETE FROM track_cues;
              INSERT INTO track_cues (id, track_id, position_ms, sort_order, created_at, updated_at)
                SELECT 'local', id, 7777, 0, 'x', 'x' FROM tracks WHERE title = 'Charlie';",
         )
         .expect("local edits");
 
-    let again = import(false);
-    assert!(again.updated_existing);
-    assert_eq!(again.playlist_id, first.playlist_id);
-    assert_eq!(charlie(), (99.0, Some("user".to_string()), vec![7777]));
+    // The edits differ from rekordbox's: kept, and asked about (every time).
+    for _ in 0..2 {
+        let again = import();
+        assert!(again.updated_existing);
+        assert_eq!(again.playlist_id, first.playlist_id);
+        assert_eq!(charlie(), (99.0, Some("user".to_string()), vec![7777]));
+        let conflicts = again.conflicts.expect("asks about Charlie");
+        assert_eq!(conflicts.library, ExternalLibrary::Rekordbox);
+        assert_eq!(
+            conflicts.track_ids,
+            vec![track_id_by_title(&data_dir, "Charlie")]
+        );
+        assert_eq!(conflicts.rows[0].differs_text, "cues, BPM");
+    }
 
-    let forced = import(true);
-    assert_eq!(forced.playlist_id, first.playlist_id);
+    let conflicts = import().conflicts.expect("asks again");
+    assert_eq!(use_library_values(&backend, &conflicts), 1);
+    assert!(import().conflicts.is_none(), "nothing differs any more");
     assert_eq!(
         charlie(),
         (
@@ -542,10 +568,8 @@ fn rekordbox_import_takes_first_beat_from_rekordbox_beat_grid() {
     let library = RekordboxLibrary::new();
     library.add_charlie_analysis();
     let path = library.path();
-    let import = |force| {
-        import_rekordbox(&backend, &path, ExternalPlaylistKind::Playlist, "11", force)
-            .expect("import")
-    };
+    let import =
+        || import_rekordbox(&backend, &path, ExternalPlaylistKind::Playlist, "11").expect("import");
     let charlie = || -> (Option<i64>, Option<String>) {
         library_db(&data_dir)
             .query_row(
@@ -556,7 +580,7 @@ fn rekordbox_import_takes_first_beat_from_rekordbox_beat_grid() {
             .expect("charlie")
     };
 
-    import(false);
+    import();
     assert_eq!(charlie(), (Some(437), Some("rekordbox".to_string())));
     let detail = backend
         .get_track_detail(GetTrackDetailRequest {
@@ -573,10 +597,10 @@ fn rekordbox_import_takes_first_beat_from_rekordbox_beat_grid() {
             [],
         )
         .unwrap();
-    import(false);
+    let conflicts = import().conflicts.expect("asks about the moved grid");
     assert_eq!(charlie(), (Some(900), Some("user".to_string())));
-    // ...and a forced one takes rekordbox's again.
-    import(true);
+    // ...and taking rekordbox's values brings its grid back.
+    use_library_values(&backend, &conflicts);
     assert_eq!(charlie(), (Some(437), Some("rekordbox".to_string())));
 }
 
@@ -590,7 +614,6 @@ fn saving_edits_never_writes_into_rekordbox_anlz_files() {
         &library.path(),
         ExternalPlaylistKind::Playlist,
         "11",
-        false,
     )
     .expect("import");
 
@@ -624,7 +647,6 @@ fn import_external_playlists_totals_imports_and_keeps_going_after_a_failure() {
             &path,
             ExternalPlaylistKind::Playlist,
             id,
-            false,
         )
     };
 
@@ -1052,9 +1074,8 @@ fn import_mixxx(
     path: &Option<String>,
     kind: ExternalPlaylistKind,
     id: &str,
-    force: bool,
 ) -> Result<ImportExternalPlaylistData, String> {
-    import_one(backend, ExternalLibrary::Mixxx, path, kind, id, force)
+    import_one(backend, ExternalLibrary::Mixxx, path, kind, id)
 }
 
 #[test]
@@ -1420,7 +1441,7 @@ fn list_and_import_mixxx_playlists_crates_and_set_logs() {
         ]
     );
 
-    let imported = import_mixxx(&backend, &path, ExternalPlaylistKind::Playlist, "3", false)
+    let imported = import_mixxx(&backend, &path, ExternalPlaylistKind::Playlist, "3")
         .expect("import playlist");
     assert_eq!(imported.name, "Warmup");
     assert_eq!(imported.added, 3);
@@ -1473,8 +1494,8 @@ fn list_and_import_mixxx_playlists_crates_and_set_logs() {
     drop(db);
 
     // Re-importing reuses the library rows; a crate imports artist/title order.
-    let crate_import = import_mixxx(&backend, &path, ExternalPlaylistKind::Crate, "1", false)
-        .expect("import crate");
+    let crate_import =
+        import_mixxx(&backend, &path, ExternalPlaylistKind::Crate, "1").expect("import crate");
     assert_eq!(crate_import.indexed, 0);
     assert_eq!(
         playlist_titles(&data_dir, &crate_import.playlist_id),
@@ -1482,17 +1503,16 @@ fn list_and_import_mixxx_playlists_crates_and_set_logs() {
     );
 
     // Only a missing file: an error, and no empty playlist left behind.
-    let err = import_mixxx(&backend, &path, ExternalPlaylistKind::Crate, "2", false).unwrap_err();
+    let err = import_mixxx(&backend, &path, ExternalPlaylistKind::Crate, "2").unwrap_err();
     assert!(err.contains("the only track in"), "{err}");
     assert_eq!(playlist_count(&data_dir), 2);
 
-    let err =
-        import_mixxx(&backend, &path, ExternalPlaylistKind::Playlist, "42", false).unwrap_err();
+    let err = import_mixxx(&backend, &path, ExternalPlaylistKind::Playlist, "42").unwrap_err();
     assert!(err.contains("not found"), "{err}");
 }
 
 #[test]
-fn reimporting_a_mixxx_playlist_updates_it_and_refreshes_or_forces_track_data() {
+fn reimporting_a_mixxx_playlist_updates_it_refreshes_mixxx_values_and_asks_about_edits() {
     let mixxx_root = tempdir().expect("mixxx root");
     let media_root = tempdir().expect("media root");
     let (_app_dir, data_dir, backend) = app();
@@ -1513,7 +1533,7 @@ fn reimporting_a_mixxx_playlist_updates_it_and_refreshes_or_forces_track_data() 
         &[(3, "Warmup crate", &[2])],
     );
     let path = Some(mixxx_path.to_string_lossy().to_string());
-    let import = |kind, force| import_mixxx(&backend, &path, kind, "3", force).expect("import");
+    let import = |kind| import_mixxx(&backend, &path, kind, "3").expect("import");
     let track = |title: &str| -> (f64, Option<String>, i64) {
         library_db(&data_dir)
             .query_row(
@@ -1526,7 +1546,7 @@ fn reimporting_a_mixxx_playlist_updates_it_and_refreshes_or_forces_track_data() 
             .expect("track row")
     };
 
-    let first = import(ExternalPlaylistKind::Playlist, false);
+    let first = import(ExternalPlaylistKind::Playlist);
     assert!(!first.updated_existing);
     assert_eq!(
         first_local_playlist_imported_from(&backend).as_deref(),
@@ -1579,9 +1599,9 @@ fn reimporting_a_mixxx_playlist_updates_it_and_refreshes_or_forces_track_data() 
         )
         .expect("mixxx edits");
 
-    // Plain re-import: the same playlist, its name kept, the new order;
-    // Mixxx-owned values refresh, the user's edits stay.
-    let again = import(ExternalPlaylistKind::Playlist, false);
+    // Re-import: the same playlist, its name kept, the new order; Mixxx-owned
+    // values refresh, the user's edits stay and are asked about.
+    let again = import(ExternalPlaylistKind::Playlist);
     assert!(again.updated_existing);
     assert_eq!(again.playlist_id, first.playlist_id);
     assert_eq!(again.name, "My Warmup");
@@ -1591,15 +1611,20 @@ fn reimporting_a_mixxx_playlist_updates_it_and_refreshes_or_forces_track_data() 
     );
     assert_eq!(track("Alpha"), (130.0, Some("user".to_string()), 1));
     assert_eq!(track("Bravo"), (128.0, Some("mixxx".to_string()), 1));
+    let conflicts = again.conflicts.expect("asks about Alpha");
+    assert_eq!(conflicts.library, ExternalLibrary::Mixxx);
+    assert_eq!(
+        conflicts.track_ids,
+        vec![track_id_by_title(&data_dir, "Alpha")]
+    );
 
     // The crate with the same id becomes its own playlist.
-    let crate_import = import(ExternalPlaylistKind::Crate, false);
+    let crate_import = import(ExternalPlaylistKind::Crate);
     assert!(!crate_import.updated_existing);
     assert_ne!(crate_import.playlist_id, first.playlist_id);
 
-    // Forced: Mixxx wins, BPM and cues included.
-    let forced = import(ExternalPlaylistKind::Playlist, true);
-    assert!(forced.updated_existing);
+    // "Use Mixxx's": Mixxx wins, BPM and cues included.
+    assert_eq!(use_library_values(&backend, &conflicts), 1);
     assert_eq!(track("Alpha"), (126.0, Some("mixxx".to_string()), 1));
     let alpha_cue: i64 = library_db(&data_dir)
         .query_row(
@@ -1611,6 +1636,23 @@ fn reimporting_a_mixxx_playlist_updates_it_and_refreshes_or_forces_track_data() 
         .expect("alpha cue");
     assert_eq!(alpha_cue, 1_000, "Mixxx's cue replaced the local one");
     assert_eq!(playlist_count(&data_dir), 2);
+
+    // Cues that came from Mixxx follow a change made there, without asking.
+    Connection::open(&mixxx_path)
+        .expect("open mixxx fixture")
+        .execute("UPDATE cues SET position = 264600 WHERE track_id = 1", [])
+        .expect("move Alpha's cue in Mixxx");
+    let refreshed = import(ExternalPlaylistKind::Playlist);
+    assert!(refreshed.conflicts.is_none(), "{:?}", refreshed.conflicts);
+    let alpha_cue: i64 = library_db(&data_dir)
+        .query_row(
+            "SELECT c.position_ms FROM track_cues c JOIN tracks t ON t.id = c.track_id
+             WHERE t.title = 'Alpha'",
+            [],
+            |r| r.get(0),
+        )
+        .expect("alpha cue");
+    assert_eq!(alpha_cue, 3_000);
 }
 
 #[test]
@@ -1638,7 +1680,7 @@ fn a_mixxx_playlist_import_leaves_out_tracks_that_can_never_go_on_a_usb() {
     let path = Some(mixxx_path.to_string_lossy().to_string());
 
     let imported =
-        import_mixxx(&backend, &path, ExternalPlaylistKind::Playlist, "3", false).expect("import");
+        import_mixxx(&backend, &path, ExternalPlaylistKind::Playlist, "3").expect("import");
     assert_eq!((imported.added, imported.skipped), (1, 1));
     assert!(
         imported

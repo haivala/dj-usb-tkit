@@ -12,8 +12,10 @@ use rusqlite::{Connection, OpenFlags, params};
 use uuid::Uuid;
 
 use super::anlz::read_first_beat_from_anlz;
-use super::cues::{
-    DEFAULT_HOTCUE_COLOR_ID, MAX_HOT_CUES, insert_track_cues, is_valid_color_id, track_has_cues,
+use super::cues::{DEFAULT_HOTCUE_COLOR_ID, MAX_HOT_CUES, insert_track_cues, is_valid_color_id};
+use super::import_conflicts::{
+    ConflictedTrack, CueAction, DifferingFields, ExternalTrackData, LocalTrackData, cue_action,
+    differing_fields, import_conflicts, load_local_track_data, track_file_paths,
 };
 
 use super::usb_utils::external_rekordbox_db_candidates;
@@ -30,6 +32,7 @@ use crate::error::{BackendError, BackendResult};
 use crate::i18n::{Text, tr};
 use crate::logging::{self, Level};
 use crate::models::{
+    ApplyExternalTrackDataData, ApplyExternalTrackDataRequest, ExternalLibrary,
     ExternalPlaylistKind, ExternalPlaylistSummary, ImportExternalPlaylistData,
     ImportExternalPlaylistRequest, ListExternalPlaylistsData, ListExternalPlaylistsRequest,
     ScanLibraryData, ScanRekordboxDbRequest, TrackCue, WarningEntry,
@@ -508,8 +511,8 @@ fn load_rb_cues(conn: &Connection, content_id: &str) -> BackendResult<Vec<RbCue>
 /// both treat a track identically.
 struct RekordboxTrackImporter<'a> {
     master: &'a Connection,
-    /// Take BPM, key and cues from rekordbox even over the app's own values
-    /// (the playlist import's "force update").
+    /// Take cues, BPM, key and grid from rekordbox even over the track's own
+    /// values (the user chose rekordbox's in the conflict dialog).
     force: bool,
     has_cue_table: bool,
     master_path: PathBuf,
@@ -529,7 +532,8 @@ struct RekordboxTrackImporter<'a> {
     sample_anlz: Option<String>,
     sample_img: Option<String>,
     cue_tracks: usize,
-    cue_tracks_kept_local: usize,
+    /// Tracks whose own values differ from rekordbox's and were kept.
+    conflicts: Vec<ConflictedTrack>,
     warnings: Vec<WarningEntry>,
 }
 
@@ -575,7 +579,7 @@ impl<'a> RekordboxTrackImporter<'a> {
             sample_anlz: None,
             sample_img: None,
             cue_tracks: 0,
-            cue_tracks_kept_local: 0,
+            conflicts: Vec::new(),
             warnings: Vec::new(),
         })
     }
@@ -622,11 +626,42 @@ impl<'a> RekordboxTrackImporter<'a> {
         let waveform_path = anlz_abs.as_deref().and_then(Path::to_str);
         let artwork_path = self.copy_artwork(t, &track_id);
         let album = Some(&t.album).filter(|a| !a.is_empty());
+        let cues = self.load_cues(t)?;
+        let external = ExternalTrackData {
+            bpm: t.bpm,
+            key: t.tonality.as_deref(),
+            first_beat_ms,
+            cues: &cues,
+        };
+
+        let local = match existing_id {
+            Some(_) => load_local_track_data(tx, &track_id)?,
+            None => LocalTrackData::default(),
+        };
+        let differing = if self.force {
+            DifferingFields::default()
+        } else {
+            differing_fields(&local, &external, REKORDBOX_LIBRARY)
+        };
+        if differing.any() {
+            self.conflicts.push(ConflictedTrack {
+                track_id: track_id.clone(),
+                title: t.title.clone(),
+                artist: t.artist.clone(),
+                fields: differing,
+            });
+        }
+        // A value that conflicts is left out, so the track keeps its own.
+        let bpm = t.bpm.filter(|_| !differing.bpm);
+        let tonality = t.tonality.as_deref().filter(|_| !differing.key);
+        let first_beat_ms = first_beat_ms.filter(|_| !differing.grid);
 
         if existing_id.is_some() {
             tx.execute(
                 // A BPM / key this import fills in is marked as rekordbox's,
                 // so the first analysis keeps it (see `kept_analysis_values`).
+                // A value that differs from the track's own is left out above
+                // (the user is asked), unless forced.
                 // SET expressions see the row's old values.
                 r#"UPDATE tracks SET
                     title = ?1, artist = ?2, album = ?3,
@@ -661,8 +696,8 @@ impl<'a> RekordboxTrackImporter<'a> {
                     t.title,
                     t.artist,
                     album,
-                    t.bpm,
-                    t.tonality,
+                    bpm,
+                    tonality,
                     t.duration_ms,
                     waveform_path,
                     artwork_path,
@@ -709,32 +744,35 @@ impl<'a> RekordboxTrackImporter<'a> {
             self.existing.insert(t.file_path.clone(), track_id.clone());
             self.indexed += 1;
         }
-        self.import_cues(tx, t, &track_id)?;
+        match cue_action(&local, &external, self.force, differing) {
+            CueAction::Keep => {}
+            CueAction::AdoptSource => {
+                tx.execute(
+                    "UPDATE tracks SET cue_source = ?1 WHERE id = ?2",
+                    params![REKORDBOX_LIBRARY, track_id],
+                )?;
+            }
+            CueAction::Write => {
+                tx.execute(
+                    "DELETE FROM track_cues WHERE track_id = ?1",
+                    params![track_id],
+                )?;
+                insert_track_cues(tx, &track_id, &cues, REKORDBOX_LIBRARY)?;
+                self.cue_tracks += 1;
+            }
+        }
         Ok(Some(track_id))
     }
 
-    /// Cues from `djmdCue`: only onto a track without local cues (local edits
-    /// win).
-    fn import_cues(&mut self, tx: &Connection, t: &RbTrack, track_id: &str) -> BackendResult<()> {
+    /// The track's cues in `djmdCue`.
+    fn load_cues(&self, t: &RbTrack) -> BackendResult<Vec<TrackCue>> {
         if !self.has_cue_table || t.content_id.is_empty() {
-            return Ok(());
+            return Ok(Vec::new());
         }
-        let cues = rekordbox_cues_to_track_cues(&load_rb_cues(self.master, &t.content_id)?);
-        if cues.is_empty() {
-            return Ok(());
-        }
-        if self.force {
-            tx.execute(
-                "DELETE FROM track_cues WHERE track_id = ?1",
-                params![track_id],
-            )?;
-        } else if track_has_cues(tx, track_id)? {
-            self.cue_tracks_kept_local += 1;
-            return Ok(());
-        }
-        insert_track_cues(tx, track_id, &cues)?;
-        self.cue_tracks += 1;
-        Ok(())
+        Ok(rekordbox_cues_to_track_cues(&load_rb_cues(
+            self.master,
+            &t.content_id,
+        )?))
     }
 
     /// Waveform: store the original ANLZ path in place - no copy, no conversion.
@@ -827,11 +865,11 @@ impl<'a> RekordboxTrackImporter<'a> {
                 tr::scan_note_cues_imported(self.cue_tracks),
             );
         }
-        if self.cue_tracks_kept_local > 0 {
+        if !self.conflicts.is_empty() {
             note(
                 Level::Info,
                 "scan.rekordbox-db.cues-kept-local",
-                tr::scan_note_cues_kept_local(self.cue_tracks_kept_local, "rekordbox"),
+                tr::scan_note_cues_kept_local(self.conflicts.len(), "rekordbox"),
             );
         }
         if self.unsupported > 0 {
@@ -903,6 +941,11 @@ impl BackendService {
             updated: importer.updated,
             // Imports never remove tracks (see `RekordboxTrackImporter::upsert`).
             removed: 0,
+            conflicts: import_conflicts(
+                ExternalLibrary::Rekordbox,
+                req.path.as_deref(),
+                &importer.conflicts,
+            ),
             not_found: importer.not_found,
             warnings,
             status_text,
@@ -945,7 +988,6 @@ impl BackendService {
         let tx = db_conn.transaction()?;
         let mut importer =
             RekordboxTrackImporter::new(&conn, master_path, &tx, &self.db.data_dir())?;
-        importer.force = req.force;
 
         let mut local_ids: Vec<String> = Vec::new();
         let mut seen: HashSet<&str> = HashSet::new();
@@ -1007,8 +1049,39 @@ impl BackendService {
             added: local_ids.len(),
             skipped: entry_ids.len() - local_ids.len(),
             indexed: importer.indexed,
+            conflicts: import_conflicts(
+                ExternalLibrary::Rekordbox,
+                req.path.as_deref(),
+                &importer.conflicts,
+            ),
             not_found: importer.not_found,
             warnings,
+        })
+    }
+
+    /// The conflict dialog's "Use rekordbox's": import these library tracks
+    /// again from rekordbox, taking its cues, BPM, key and grid over their own.
+    pub(crate) fn apply_rekordbox_track_data(
+        &self,
+        req: &ApplyExternalTrackDataRequest,
+    ) -> BackendResult<ApplyExternalTrackDataData> {
+        let (master_path, conn) = open_rekordbox_db(req.path.as_deref())?;
+        let mut db_conn = self.db.connect()?;
+        let tx = db_conn.transaction()?;
+        let wanted = track_file_paths(&tx, &req.track_ids)?;
+        let mut importer =
+            RekordboxTrackImporter::new(&conn, master_path, &tx, &self.db.data_dir())?;
+        importer.force = true;
+        let mut updated = 0;
+        for t in load_rekordbox_db_tracks(&conn, &importer.master_path)? {
+            if wanted.contains(&t.file_path) && importer.upsert(&tx, &t)?.is_some() {
+                updated += 1;
+            }
+        }
+        tx.commit()?;
+        Ok(ApplyExternalTrackDataData {
+            updated,
+            status_text: tr::import_conflicts_applied(updated, "rekordbox").render(),
         })
     }
 }

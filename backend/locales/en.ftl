@@ -1956,10 +1956,10 @@ scan-note-hot-cues-imported = hot cues imported for { $count ->
     [one] { $count } track
    *[other] { $count } tracks
 }
-scan-note-cues-kept-local = existing cues kept for { $count ->
+scan-note-cues-kept-local = library values kept for { $count ->
     [one] { $count } track
    *[other] { $count } tracks
-}; their { $library } cues were not imported
+} whose cues, BPM, key or beat grid differ in { $library }
 scan-note-unsupported-skipped = { $count ->
     [one] { $count } track
    *[other] { $count } tracks
@@ -2607,18 +2607,41 @@ ui-playlist-add-select-first = Select at least one track to add
 # An empty playlist: its heading and the buttons that lead to tracks to add.
 ui-playlist-empty-heading = Browse Library or USB to add tracks
 
+## import-conflicts
+
+# After a rekordbox / Mixxx import: tracks whose values differ from the
+# library's were kept as they are, and the user picks a side. $library:
+# rekordbox or Mixxx.
+import-conflicts-title = Different track data in { $library }
+# $library: rekordbox or Mixxx. $count: tracks that differ.
+import-conflicts-message = { $library } has different cues, BPM, key or beat grid for { $count ->
+    [one] { $count } track
+   *[other] { $count } tracks
+} than your library.
+# The button that replaces the tracks' values. $library: rekordbox or Mixxx.
+import-conflicts-use = Use { $library }'s
+# What differs, listed after each track's name.
+import-conflicts-field-cues = cues
+import-conflicts-field-bpm = BPM
+import-conflicts-field-key = key
+import-conflicts-field-grid = beat grid
+# The status line after "Use …". $count: tracks replaced. $library: rekordbox or Mixxx.
+import-conflicts-applied = Took the cues, BPM, key and beat grid of { $count ->
+    [one] { $count } track
+   *[other] { $count } tracks
+} from { $library }
+# The button that keeps the library's values.
+ui-import-conflicts-keep = Keep library's
+ui-import-conflicts-list-aria-label = Tracks that differ
+
 ## ui-playlist-import
 
-ui-playlist-import-force = Force update track data
-ui-playlist-import-force-note = Replaces the BPM, key and cues of the playlists' tracks, including your own edits.
 ui-playlist-import-intro = Each is imported as a new playlist. Tracks not yet in the library are imported with it.
 # The import button with more than one list ticked. $count: how many.
 ui-playlist-import-ok-count = { $count ->
     [one] Import { $count }
    *[other] Import { $count }
 }
-# The force option when every ticked list comes from one library. $library: rekordbox or Mixxx.
-ui-playlist-import-force-from = Force update track data from { $library }
 # A library's list of playlists. $library: rekordbox or Mixxx.
 ui-playlist-import-column-aria-label = { $library } lists
 ui-playlist-import-title = Import Playlists

@@ -9,7 +9,8 @@ use crate::models::{
     AddSourceFoldersData, AddSourceFoldersRequest, AddTrackCandidatesToPlaylistData,
     AddTrackCandidatesToPlaylistRequest, AddTrackCandidatesToPlaylistsRequest,
     AddTracksToPlaylistData, AddTracksToPlaylistsData, AnalyzeNewTracksData,
-    AnalyzeNewTracksRequest, ApiResponse, BrowseSourceFilesData, BrowseSourceFilesRequest,
+    AnalyzeNewTracksRequest, ApiResponse, ApplyExternalTrackDataData,
+    ApplyExternalTrackDataRequest, BrowseSourceFilesData, BrowseSourceFilesRequest,
     BuildUsbHistoryTracklistData, BuildUsbHistoryTracklistRequest, CreatePlaylistData,
     CreatePlaylistRequest, DeletePlaylistData, DeletePlaylistRequest, DeleteUsbBackupData,
     DeleteUsbBackupRequest, DetectExternalMixxxDbData, DetectExternalRekordboxDbData,
@@ -139,6 +140,13 @@ impl BackendCommands {
             self.with_playlists(self.service.import_external_playlists(req)),
             tr::playlist_import_many_failed,
         )
+    }
+
+    pub fn apply_external_track_data(
+        &self,
+        req: ApplyExternalTrackDataRequest,
+    ) -> ApiResponse<ApplyExternalTrackDataData> {
+        wrap(self.service.apply_external_track_data(req))
     }
 
     pub fn browse_source_files(

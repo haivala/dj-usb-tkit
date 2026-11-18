@@ -169,9 +169,34 @@ function installSourceChipAnalysisMock(page) {
           data: { found: true, path: "/home/dj/.mixxx/mixxxdb.sqlite", imported: !!window.__mixxxImported }
         };
       }
+      // The backend's question after an import whose tracks differ from the library's.
+      const conflictsFrom = (library, path) => {
+        const label = library === "mixxx" ? "Mixxx" : "rekordbox";
+        return {
+          library, path, trackIds: [`${library}-t1`, `${library}-t2`],
+          titleText: `Different track data in ${label}`,
+          messageText: `${label} has different cues, BPM, key or beat grid for 2 tracks than your library.`,
+          useLabel: `Use ${label}'s`,
+          rows: [
+            { trackId: `${library}-t1`, nameText: "Artist A – Track A", differsText: "cues, BPM" },
+            { trackId: `${library}-t2`, nameText: "Track B", differsText: "key" }
+          ]
+        };
+      };
+      if (command === "apply_external_track_data") {
+        window.__applied = [...(window.__applied || []), payload.request];
+        const label = payload.request.library === "mixxx" ? "Mixxx" : "rekordbox";
+        return backend.ok({
+          updated: payload.request.trackIds.length,
+          statusText: `Took the cues, BPM, key and beat grid of ${payload.request.trackIds.length} tracks from ${label}`
+        });
+      }
       if (command === "scan_rekordbox_db") {
         if (window.__failRekordboxScan) return backend.fail("db locked");
-        return backend.ok({ indexed: 3, updated: 1, warnings: [], statusText: "Desktop library import done: 3 new, 1 updated" });
+        return backend.ok({
+          indexed: 3, updated: 1, warnings: [], statusText: "Desktop library import done: 3 new, 1 updated",
+          ...(window.__rekordboxConflicts ? { conflicts: conflictsFrom("rekordbox", "/music/master.db") } : {})
+        });
       }
       if (command === "scan_mixxx_db") {
         window.__mixxxImported = true;
@@ -227,8 +252,12 @@ function installSourceChipAnalysisMock(page) {
             playlist: { playlistId, name: playlistId, added: 2, skipped: 0, indexed: 2, warnings: [] }
           };
         });
+        // Several lists: both libraries' tracks differ.
+        const conflicts = results.length > 1
+          ? [conflictsFrom("rekordbox", "/music/master.db"), conflictsFrom("mixxx", "/home/dj/.mixxx/mixxxdb.sqlite")]
+          : [];
         return backend.ok({
-          results, imported: results.length, failed: 0, added: 2 * results.length, skipped: 0,
+          results, imported: results.length, failed: 0, added: 2 * results.length, skipped: 0, conflicts,
           statusText: results.length === 1
             ? `Imported playlist ${results[0].playlist.name}: 2 tracks`
             : `Imported ${results.length} of ${results.length} playlists: ${2 * results.length} tracks`
@@ -311,6 +340,34 @@ test("source chips and playlist import", async ({ page }) => {
     const rekordboxImport = page.locator('#libraryChipsContainer .source-chip-import[data-import-library="rekordbox"]');
     await rekordboxImport.click();
     await expect(page.locator("#statusText")).toContainText("Desktop library import done: 3 new, 1 updated");
+    const conflictOverlay = page.locator("#importConflictOverlay");
+    await expect(conflictOverlay).toBeHidden();
+
+    // Tracks whose values differ: the backend's question and list. Keep (the
+    // focused default) leaves them; Use takes rekordbox's.
+    await page.evaluate(() => { window.__rekordboxConflicts = true; });
+    await rekordboxImport.click();
+    await expect(conflictOverlay).toBeVisible();
+    await expect(page.locator("#importConflictTitle")).toHaveText("Different track data in rekordbox");
+    await expect(page.locator("#importConflictMessage")).toContainText("for 2 tracks");
+    await expect(page.locator("#importConflictList .add-to-name")).toHaveText(["Artist A – Track A", "Track B"]);
+    await expect(page.locator("#importConflictList .add-to-note")).toHaveText(["cues, BPM", "key"]);
+    await expect(page.locator("#importConflictUseBtn")).toHaveText("Use rekordbox's");
+    await expect(page.locator("#importConflictKeepBtn")).toHaveText("Keep library's");
+    await expect(page.locator("#importConflictKeepBtn")).toBeFocused();
+    await page.locator("#importConflictKeepBtn").click();
+    await expect(conflictOverlay).toBeHidden();
+    expect(await page.evaluate(() => window.__applied || null)).toBeNull();
+    await expect(page.locator("#statusText")).toContainText("Desktop library import done: 3 new, 1 updated");
+
+    await rekordboxImport.click();
+    await page.locator("#importConflictUseBtn").click();
+    await expect(conflictOverlay).toBeHidden();
+    await expect.poll(async () => page.evaluate(() => window.__applied)).toEqual([
+      { library: "rekordbox", path: "/music/master.db", trackIds: ["rekordbox-t1", "rekordbox-t2"] }
+    ]);
+    await expect(page.locator("#statusText")).toContainText("Took the cues, BPM, key and beat grid of 2 tracks from rekordbox");
+    await page.evaluate(() => { window.__rekordboxConflicts = false; window.__applied = null; });
     await page.evaluate(() => { window.__failRekordboxScan = true; });
     await rekordboxImport.click();
     await expect(page.locator("#statusText")).toContainText("Desktop library import failed:");
@@ -328,7 +385,6 @@ test("source chips and playlist import", async ({ page }) => {
     const list = page.locator("#playlistImportList");
     const row = (name) => list.locator("li", { hasText: name });
     const okBtn = page.locator("#playlistImportOkBtn");
-    const forceLabel = page.locator("#playlistImportForceLabel");
     await expect(overlay).toBeVisible();
     // A column per library, its lists grouped by kind.
     await expect(list.locator(".playlist-import-column-title")).toHaveText(["rekordbox", "Mixxx"]);
@@ -340,16 +396,11 @@ test("source chips and playlist import", async ({ page }) => {
     await expect(row("Test playlist").locator(".add-to-note")).toHaveText('3 tracks · updates "My Test playlist"');
     // Nothing ticked: nothing to import.
     await expect(okBtn).toBeDisabled();
-    await expect(forceLabel).toHaveText("Force update track data");
-    await expect(page.locator("#playlistImportForce")).not.toBeChecked();
-    // The force option names the library when every ticked list comes from one.
     await row("Peak").locator("input").check();
     await expect(okBtn).toBeEnabled();
     await expect(okBtn).toHaveText("Import");
-    await expect(forceLabel).toHaveText("Force update track data from Mixxx");
     await row("Winter Party").locator("input").check();
     await expect(okBtn).toHaveText("Import 2");
-    await expect(forceLabel).toHaveText("Force update track data");
     // A group heading's box ticks the whole group, shows when some of it is
     // ticked, and unticks it again.
     const groupBox = (label, group) =>
@@ -391,28 +442,41 @@ test("source chips and playlist import", async ({ page }) => {
     await okBtn.click();
     await expect(overlay).toBeHidden();
     await expect.poll(async () => page.evaluate(() => window.__playlistImports)).toEqual([
-      { library: "mixxx", name: "2026-09-30", path: "/home/dj/.mixxx/mixxxdb.sqlite", kind: "history", id: "3", force: false }
+      { library: "mixxx", name: "2026-09-30", path: "/home/dj/.mixxx/mixxxdb.sqlite", kind: "history", id: "3" }
     ]);
+    // Nothing differs: no question.
+    await expect(page.locator("#importConflictOverlay")).toBeHidden();
     await expect(page.locator('.nav-playlist-item[data-playlist-id="pl-mixxx"]')).toHaveClass(/active/);
     await expect(page.locator("#playlistPanelTitle")).toHaveText(/ · Imported from Mixxx$/);
     await expect(page.locator('.source-chip-toggle[data-mixxx-db="true"]')).toBeChecked();
 
-    // Several lists from both libraries: each imported in list order, with
-    // force for all; the first opens, and both libraries' chips turn on.
+    // Several lists from both libraries: each imported in list order; the
+    // first opens, and both libraries' chips turn on.
     await importBtn.click();
-    await expect(page.locator("#playlistImportForce")).not.toBeChecked();
     await row("Peak").locator("input").check();
     await row("Winter Party").locator("input").check();
-    await page.locator("#playlistImportForce").check();
     await okBtn.click();
     await expect.poll(async () => page.evaluate(() => window.__playlistImports.slice(1))).toEqual([
-      { library: "rekordbox", name: "Winter Party", path: "/music/master.db", kind: "playlist", id: "1234567890", force: true },
-      { library: "mixxx", name: "Peak", path: "/home/dj/.mixxx/mixxxdb.sqlite", kind: "crate", id: "7", force: true }
+      { library: "rekordbox", name: "Winter Party", path: "/music/master.db", kind: "playlist", id: "1234567890" },
+      { library: "mixxx", name: "Peak", path: "/home/dj/.mixxx/mixxxdb.sqlite", kind: "crate", id: "7" }
     ]);
     await expect(page.locator('.nav-playlist-item[data-playlist-id="pl-rekordbox"]')).toHaveClass(/active/);
     await expect(page.locator('.source-chip-toggle[data-rekordbox-db="true"]')).toBeChecked();
     await expect(page.locator('.source-chip-toggle[data-mixxx-db="true"]')).toBeChecked();
     await expect(page.locator("#statusText")).toContainText("Imported 2 of 2 playlists: 4 tracks");
+    // Both libraries' tracks differ: one question each, in turn. rekordbox's
+    // values are taken; Escape keeps the library's against Mixxx's.
+    const conflictTitle = page.locator("#importConflictTitle");
+    await expect(conflictTitle).toHaveText("Different track data in rekordbox");
+    await page.locator("#importConflictUseBtn").click();
+    await expect(conflictTitle).toHaveText("Different track data in Mixxx");
+    await expect(page.locator("#importConflictUseBtn")).toHaveText("Use Mixxx's");
+    await page.keyboard.press("Escape");
+    await expect(page.locator("#importConflictOverlay")).toBeHidden();
+    await expect.poll(async () => page.evaluate(() => window.__applied)).toEqual([
+      { library: "rekordbox", path: "/music/master.db", trackIds: ["rekordbox-t1", "rekordbox-t2"] }
+    ]);
+    await expect(page.locator("#statusText")).toContainText("from rekordbox");
 
     // Nothing imported: the backend's status line says why, and the open
     // playlist stays.

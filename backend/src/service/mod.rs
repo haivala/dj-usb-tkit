@@ -16,6 +16,7 @@ mod export;
 pub mod export_helpers;
 mod export_log;
 pub(crate) mod format_compat;
+mod import_conflicts;
 pub(crate) mod key_notation;
 mod migrations;
 mod mixxx_import;

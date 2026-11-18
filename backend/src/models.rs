@@ -487,6 +487,10 @@ pub struct ScanLibraryData {
     /// indexed, for a library import what it brought in.
     #[serde(default)]
     pub status_text: String,
+    /// A library import's tracks whose values differ from the library's (kept
+    /// as they were): the question for the user.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub conflicts: Option<ImportConflicts>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -3321,10 +3325,6 @@ pub struct ImportExternalPlaylistRequest {
     pub path: Option<String>,
     pub kind: ExternalPlaylistKind,
     pub id: String,
-    /// Replace the tracks' BPM, key and cues with the library's, even where
-    /// they were edited or reanalyzed in the app.
-    #[serde(default)]
-    pub force: bool,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -3346,6 +3346,10 @@ pub struct ImportExternalPlaylistData {
     #[serde(default, skip_serializing)]
     pub not_found: Vec<String>,
     pub warnings: Vec<WarningEntry>,
+    /// Tracks whose values differ from the library's. Not sent: the
+    /// several-list import merges them into its own `conflicts`.
+    #[serde(default, skip_serializing)]
+    pub conflicts: Option<ImportConflicts>,
 }
 
 /// One list picked in the playlist import dialog: which library it is from,
@@ -3390,6 +3394,57 @@ pub struct ImportExternalPlaylistsData {
     pub skipped: usize,
     /// The status line: the imported lists, or (none imported) why the first
     /// one failed.
+    pub status_text: String,
+    /// One question per library whose tracks differ (see [`ImportConflicts`]).
+    #[serde(default)]
+    pub conflicts: Vec<ImportConflicts>,
+}
+
+/// After a rekordbox / Mixxx import: the tracks whose cues, BPM, key or beat
+/// grid differ from the library's in values the import may not replace on its
+/// own (edited in the app, analyzed, or from elsewhere). The import kept them;
+/// the dialog asks whether to take the library's (`apply_external_track_data`).
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ImportConflicts {
+    pub library: ExternalLibrary,
+    /// The library database the import read, for the apply call.
+    #[serde(default)]
+    pub path: Option<String>,
+    pub track_ids: Vec<String>,
+    pub title_text: String,
+    pub message_text: String,
+    /// The button that takes the library's values.
+    pub use_label: String,
+    pub rows: Vec<ImportConflictRow>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ImportConflictRow {
+    pub track_id: String,
+    /// "Artist – Title".
+    pub name_text: String,
+    /// What differs: "cues, BPM".
+    pub differs_text: String,
+}
+
+/// Take the library's cues, BPM, key and beat grid for these library tracks,
+/// replacing their own.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ApplyExternalTrackDataRequest {
+    pub library: ExternalLibrary,
+    #[serde(default)]
+    pub path: Option<String>,
+    pub track_ids: Vec<String>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ApplyExternalTrackDataData {
+    /// Tracks whose values were replaced.
+    pub updated: usize,
     pub status_text: String,
 }
 

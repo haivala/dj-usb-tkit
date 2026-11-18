@@ -19,7 +19,8 @@ use crate::models::{
     AddSourceFoldersData, AddSourceFoldersRequest, AddTrackCandidatesToPlaylistData,
     AddTrackCandidatesToPlaylistRequest, AddTrackCandidatesToPlaylistsRequest,
     AddTracksToPlaylistData, AddTracksToPlaylistsData, AnalysisSubmittedData,
-    AnalyzeNewTracksRequest, ApiResponse, BrowseSourceFilesData, BrowseSourceFilesRequest,
+    AnalyzeNewTracksRequest, ApiResponse, ApplyExternalTrackDataData,
+    ApplyExternalTrackDataRequest, BrowseSourceFilesData, BrowseSourceFilesRequest,
     BuildUsbHistoryTracklistData, BuildUsbHistoryTracklistRequest, CreatePlaylistData,
     CreatePlaylistRequest, DeletePlaylistData, DeletePlaylistRequest, DeleteUsbBackupData,
     DeleteUsbBackupRequest, DetectExternalMixxxDbData, DetectExternalRekordboxDbData,
@@ -2295,6 +2296,18 @@ pub async fn import_external_playlists(
                 )
             }),
     )
+}
+
+#[tauri::command]
+pub async fn apply_external_track_data(
+    state: State<'_, BackendCommands>,
+    request: ApplyExternalTrackDataRequest,
+) -> Result<ApiResponse<ApplyExternalTrackDataData>, String> {
+    let commands = state.inner().clone();
+    Ok(run_blocking_command("apply_external_track_data", move || {
+        commands.apply_external_track_data(request)
+    })
+    .await)
 }
 
 #[tauri::command]

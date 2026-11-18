@@ -274,6 +274,7 @@ impl Db {
         ensure_tracks_column(&conn, "genre_source", "TEXT")?;
         ensure_tracks_column(&conn, "release_date_source", "TEXT")?;
         ensure_tracks_column(&conn, "file_created_at", "INTEGER")?;
+        ensure_tracks_column(&conn, "cue_source", "TEXT")?;
         ensure_playlists_column(&conn, "last_exported_at", "TEXT")?;
         ensure_playlists_column(&conn, "last_exported_usb_root", "TEXT")?;
         ensure_playlists_column(&conn, "last_exported_track_count", "INTEGER")?;
@@ -329,6 +330,7 @@ const ALLOWED_TRACK_COLUMNS: &[&str] = &[
     "genre_source",
     "release_date_source",
     "file_created_at",
+    "cue_source",
 ];
 const ALLOWED_PLAYLIST_COLUMNS: &[&str] = &[
     "last_exported_at",

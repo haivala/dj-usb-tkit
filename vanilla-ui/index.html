@@ -913,15 +913,24 @@
       <div class="tracklist-export-body">
         <p class="muted" data-text="ui-playlist-import-intro"></p>
         <div class="playlist-import-columns" id="playlistImportList"><!-- tplPlaylistImportColumn per library --></div>
-        <label class="usb-cfg-toggle-row" for="playlistImportForce">
-          <input type="checkbox" id="playlistImportForce" />
-          <span id="playlistImportForceLabel" data-text="ui-playlist-import-force"></span>
-          <span class="muted usb-cfg-toggle-hint" data-text="ui-playlist-import-force-note"></span>
-        </label>
       </div>
       <div class="row confirm-actions">
         <button id="playlistImportCancelBtn" data-text="ui-common-cancel"></button>
         <button id="playlistImportOkBtn" data-primary disabled data-text="ui-common-import"></button>
+      </div>
+    </div>
+  </div>
+
+  <!-- After a rekordbox / Mixxx import: the tracks whose cues, BPM, key or grid differ from the
+       library's (kept as they were), and whether to take the library's instead. -->
+  <div class="confirm-overlay" id="importConflictOverlay" hidden>
+    <div class="confirm-dialog import-conflict-dialog" role="dialog" aria-modal="true" aria-labelledby="importConflictTitle">
+      <h3 id="importConflictTitle"></h3>
+      <p class="muted" id="importConflictMessage"></p>
+      <ul class="add-to-list" id="importConflictList" data-text-aria-label="ui-import-conflicts-list-aria-label"><!-- tplImportConflictRow per track --></ul>
+      <div class="row confirm-actions">
+        <button id="importConflictKeepBtn" data-text="ui-import-conflicts-keep"></button>
+        <button id="importConflictUseBtn"></button>
       </div>
     </div>
   </div>
@@ -1051,6 +1060,9 @@
   </template>
   <template id="tplPlaylistImportColumn">
     <section class="playlist-import-column"><h4 class="playlist-import-column-title"></h4><ul class="add-to-list"></ul></section>
+  </template>
+  <template id="tplImportConflictRow">
+    <li><div class="add-to-item import-conflict-item"><span class="add-to-name"></span><span class="muted add-to-note"></span></div></li>
   </template>
   <template id="tplAddToItem">
     <li><label class="add-to-item"><input type="checkbox" /><span class="add-to-name"></span><span class="muted add-to-note"></span></label></li>

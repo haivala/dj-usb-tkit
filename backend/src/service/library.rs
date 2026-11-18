@@ -241,6 +241,7 @@ impl BackendService {
                 not_found,
                 warnings,
                 status_text: self.folders_indexed_status(0)?,
+                conflicts: None,
             });
         }
 
@@ -604,6 +605,7 @@ impl BackendService {
             not_found,
             warnings,
             status_text: self.folders_indexed_status(indexed)?,
+            conflicts: None,
         })
     }
 

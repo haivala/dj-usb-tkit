@@ -4738,6 +4738,17 @@ td button[data-action]:disabled,
   max-height: min(65vh, 560px);
 }
 
+/* After an import: the tracks whose values differ from the library's (a plain list). */
+.import-conflict-dialog {
+  width: min(520px, 100%);
+}
+
+.import-conflict-item,
+.import-conflict-item:hover {
+  cursor: default;
+  background: none;
+}
+
 /* A heading row between groups of a checklist (Import Playlists). */
 .add-to-list > li.check-list-group {
   padding: 6px 12px 4px;

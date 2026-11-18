@@ -14,8 +14,10 @@ use std::path::{Path, PathBuf};
 use rusqlite::{Connection, OpenFlags, OptionalExtension, params};
 use uuid::Uuid;
 
-use super::cues::{
-    KEY_OPTIONS, MAX_HOT_CUES, insert_track_cues, nearest_palette_color_id, track_has_cues,
+use super::cues::{KEY_OPTIONS, MAX_HOT_CUES, insert_track_cues, nearest_palette_color_id};
+use super::import_conflicts::{
+    ConflictedTrack, CueAction, DifferingFields, ExternalTrackData, LocalTrackData, cue_action,
+    differing_fields, import_conflicts, load_local_track_data, track_file_paths,
 };
 use super::key_notation::camelot_position;
 use super::{
@@ -28,9 +30,10 @@ use crate::error::{BackendError, BackendResult};
 use crate::i18n::{Text, tr};
 use crate::logging::{self, Level};
 use crate::models::{
-    DetectExternalMixxxDbData, ExternalPlaylistKind, ExternalPlaylistSummary,
-    ImportExternalPlaylistData, ImportExternalPlaylistRequest, ListExternalPlaylistsData,
-    ListExternalPlaylistsRequest, ScanLibraryData, ScanMixxxDbRequest, TrackCue, WarningEntry,
+    ApplyExternalTrackDataData, ApplyExternalTrackDataRequest, DetectExternalMixxxDbData,
+    ExternalLibrary, ExternalPlaylistKind, ExternalPlaylistSummary, ImportExternalPlaylistData,
+    ImportExternalPlaylistRequest, ListExternalPlaylistsData, ListExternalPlaylistsRequest,
+    ScanLibraryData, ScanMixxxDbRequest, TrackCue, WarningEntry,
 };
 use crate::scanner::is_library_audio_file;
 
@@ -571,8 +574,8 @@ fn load_mixxx_playlist_entries(
 /// and the single-playlist import so both treat a track identically.
 struct MixxxTrackImporter<'a> {
     mixxx: &'a Connection,
-    /// Take BPM, key and cues from Mixxx even over the app's own values
-    /// (the playlist import's "force update").
+    /// Take cues, BPM, key and grid from Mixxx even over the track's own
+    /// values (the user chose Mixxx's in the conflict dialog).
     force: bool,
     has_cues_table: bool,
     existing: HashMap<String, String>,
@@ -584,7 +587,8 @@ struct MixxxTrackImporter<'a> {
     artwork_ok: usize,
     artwork_miss: usize,
     cue_tracks: usize,
-    cue_tracks_kept_local: usize,
+    /// Tracks whose own values differ from Mixxx's and were kept.
+    conflicts: Vec<ConflictedTrack>,
     unsupported: usize,
     warnings: Vec<WarningEntry>,
 }
@@ -614,7 +618,7 @@ impl<'a> MixxxTrackImporter<'a> {
             artwork_ok: 0,
             artwork_miss: 0,
             cue_tracks: 0,
-            cue_tracks_kept_local: 0,
+            conflicts: Vec::new(),
             unsupported: 0,
             warnings: Vec::new(),
         })
@@ -650,13 +654,42 @@ impl<'a> MixxxTrackImporter<'a> {
         let artwork_path = self.copy_cover(t, &track_id);
         let album = Some(&t.album).filter(|a| !a.is_empty());
         let format_ext = crate::audio_format::format_ext_from_path(&t.file_path);
+        let cues = self.load_cues(t)?;
+        let external = ExternalTrackData {
+            bpm: t.bpm,
+            key: t.key.as_deref(),
+            first_beat_ms: t.first_beat_ms.map(i64::from),
+            cues: &cues,
+        };
+
+        let local = match existing_id {
+            Some(_) => load_local_track_data(tx, &track_id)?,
+            None => LocalTrackData::default(),
+        };
+        let differing = if self.force {
+            DifferingFields::default()
+        } else {
+            differing_fields(&local, &external, MIXXX_LIBRARY)
+        };
+        if differing.any() {
+            self.conflicts.push(ConflictedTrack {
+                track_id: track_id.clone(),
+                title: t.title.clone(),
+                artist: t.artist.clone(),
+                fields: differing,
+            });
+        }
+        // A value that conflicts is left out, so the track keeps its own.
+        let bpm = t.bpm.filter(|_| !differing.bpm);
+        let key = t.key.as_deref().filter(|_| !differing.key);
+        let first_beat_ms = t.first_beat_ms.filter(|_| !differing.grid);
 
         if existing_id.is_some() {
             tx.execute(
                 // Mixxx's BPM / key / first beat replace the track's when it has
                 // none, when they still came from Mixxx (so a tempo corrected in
-                // Mixxx comes across), or when forced -- never a value the user
-                // edited or the app's analysis set otherwise. A value taken is
+                // Mixxx comes across), or when forced. A value that differs from
+                // the track's own is left out above (the user is asked). A value taken is
                 // marked as Mixxx's, so the first analysis keeps it (see
                 // `kept_analysis_values`).
                 // SET expressions see the row's old values.
@@ -693,8 +726,8 @@ impl<'a> MixxxTrackImporter<'a> {
                     t.title,
                     t.artist,
                     album,
-                    t.bpm,
-                    t.key,
+                    bpm,
+                    key,
                     t.duration_ms,
                     t.sample_rate,
                     artwork_path,
@@ -704,7 +737,7 @@ impl<'a> MixxxTrackImporter<'a> {
                     track_id,
                     self.force,
                     t.genre,
-                    t.first_beat_ms,
+                    first_beat_ms,
                 ],
             )?;
             self.updated += 1;
@@ -742,7 +775,23 @@ impl<'a> MixxxTrackImporter<'a> {
             self.indexed += 1;
         }
 
-        self.import_cues(tx, t, &track_id)?;
+        match cue_action(&local, &external, self.force, differing) {
+            CueAction::Keep => {}
+            CueAction::AdoptSource => {
+                tx.execute(
+                    "UPDATE tracks SET cue_source = ?1 WHERE id = ?2",
+                    params![MIXXX_LIBRARY, track_id],
+                )?;
+            }
+            CueAction::Write => {
+                tx.execute(
+                    "DELETE FROM track_cues WHERE track_id = ?1",
+                    params![track_id],
+                )?;
+                insert_track_cues(tx, &track_id, &cues, MIXXX_LIBRARY)?;
+                self.cue_tracks += 1;
+            }
+        }
         Ok(Some(track_id))
     }
 
@@ -778,32 +827,15 @@ impl<'a> MixxxTrackImporter<'a> {
         }
     }
 
-    /// Hot cues: only onto a track without local cues (local edits win).
-    fn import_cues(
-        &mut self,
-        tx: &Connection,
-        t: &MixxxTrack,
-        track_id: &str,
-    ) -> BackendResult<()> {
+    /// The track's hot cues in Mixxx (positions need its sample rate).
+    fn load_cues(&self, t: &MixxxTrack) -> BackendResult<Vec<TrackCue>> {
         let Some(sample_rate) = t.sample_rate.filter(|_| self.has_cues_table) else {
-            return Ok(());
+            return Ok(Vec::new());
         };
-        let cues = mixxx_cues_to_track_cues(&load_mixxx_cues(self.mixxx, t.mixxx_id)?, sample_rate);
-        if cues.is_empty() {
-            return Ok(());
-        }
-        if self.force {
-            tx.execute(
-                "DELETE FROM track_cues WHERE track_id = ?1",
-                params![track_id],
-            )?;
-        } else if track_has_cues(tx, track_id)? {
-            self.cue_tracks_kept_local += 1;
-            return Ok(());
-        }
-        insert_track_cues(tx, track_id, &cues)?;
-        self.cue_tracks += 1;
-        Ok(())
+        Ok(mixxx_cues_to_track_cues(
+            &load_mixxx_cues(self.mixxx, t.mixxx_id)?,
+            sample_rate,
+        ))
     }
 
     /// The summary log entries, appended after the per-track warnings.
@@ -834,11 +866,11 @@ impl<'a> MixxxTrackImporter<'a> {
                 tr::scan_note_hot_cues_imported(self.cue_tracks),
             );
         }
-        if self.cue_tracks_kept_local > 0 {
+        if !self.conflicts.is_empty() {
             note(
                 Level::Info,
                 "scan.mixxx-db.cues-kept-local",
-                tr::scan_note_cues_kept_local(self.cue_tracks_kept_local, "Mixxx"),
+                tr::scan_note_cues_kept_local(self.conflicts.len(), "Mixxx"),
             );
         }
         if self.artwork_miss > 0 {
@@ -895,6 +927,11 @@ impl BackendService {
             updated: importer.updated,
             // Imports never remove tracks (see `MixxxTrackImporter::upsert`).
             removed: 0,
+            conflicts: import_conflicts(
+                ExternalLibrary::Mixxx,
+                req.path.as_deref(),
+                &importer.conflicts,
+            ),
             not_found: importer.not_found,
             warnings,
             status_text,
@@ -939,7 +976,6 @@ impl BackendService {
         let mut db_conn = self.db.connect()?;
         let tx = db_conn.transaction()?;
         let mut importer = MixxxTrackImporter::new(&mixxx, &tx, &self.db.data_dir())?;
-        importer.force = req.force;
 
         let mut local_ids: Vec<String> = Vec::new();
         let mut seen_mixxx: HashSet<i64> = HashSet::new();
@@ -1002,8 +1038,38 @@ impl BackendService {
             added: local_ids.len(),
             skipped: entry_ids.len() - local_ids.len(),
             indexed: importer.indexed,
+            conflicts: import_conflicts(
+                ExternalLibrary::Mixxx,
+                req.path.as_deref(),
+                &importer.conflicts,
+            ),
             not_found: importer.not_found,
             warnings,
+        })
+    }
+
+    /// The conflict dialog's "Use Mixxx's": import these library tracks again
+    /// from Mixxx, taking its cues, BPM, key and grid over their own.
+    pub(crate) fn apply_mixxx_track_data(
+        &self,
+        req: &ApplyExternalTrackDataRequest,
+    ) -> BackendResult<ApplyExternalTrackDataData> {
+        let mixxx = open_mixxx_db(req.path.as_deref())?;
+        let mut db_conn = self.db.connect()?;
+        let tx = db_conn.transaction()?;
+        let wanted = track_file_paths(&tx, &req.track_ids)?;
+        let mut importer = MixxxTrackImporter::new(&mixxx, &tx, &self.db.data_dir())?;
+        importer.force = true;
+        let mut updated = 0;
+        for t in load_mixxx_tracks(&mixxx)? {
+            if wanted.contains(Path::new(&t.file_path)) && importer.upsert(&tx, &t)?.is_some() {
+                updated += 1;
+            }
+        }
+        tx.commit()?;
+        Ok(ApplyExternalTrackDataData {
+            updated,
+            status_text: tr::import_conflicts_applied(updated, "Mixxx").render(),
         })
     }
 }

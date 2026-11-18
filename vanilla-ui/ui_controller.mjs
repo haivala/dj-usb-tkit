@@ -163,8 +163,30 @@ export function createConfirmDialogController(el) {
 
 // The Import Playlists dialog: every importable list, a column per library
 // grouped by kind, to tick any number of; each group's heading ticks the whole
-// group. Resolves with the ticked items in list order (each with `force`), or
-// null on cancel.
+// group. Resolves with the ticked items in list order, or null on cancel.
+// After a rekordbox / Mixxx import: the backend's question about the tracks
+// whose values differ from the library's. Resolves true for "Use …", false
+// for Keep (also Escape and the backdrop).
+export function createImportConflictDialogController(el, document) {
+  const dialog = createDialogLifecycle(el.importConflictOverlay, { cancelValue: false });
+  return {
+    isOpen: dialog.isOpen,
+    close: (useLibrary) => dialog.close(!!useLibrary),
+    open(conflicts) {
+      el.importConflictTitle.textContent = conflicts.titleText || "";
+      el.importConflictMessage.textContent = conflicts.messageText || "";
+      el.importConflictUseBtn.textContent = conflicts.useLabel || "";
+      el.importConflictList.replaceChildren(...(conflicts.rows || []).map((row) => {
+        const item = cloneTemplate(document, "tplImportConflictRow");
+        item.querySelector(".add-to-name").textContent = row.nameText;
+        item.querySelector(".add-to-note").textContent = row.differsText;
+        return item;
+      }));
+      return dialog.open(el.importConflictKeepBtn);
+    }
+  };
+}
+
 export function createPlaylistImportDialogController(el, document) {
   const dialog = createDialogLifecycle(el.playlistImportOverlay);
   let items = [];
@@ -232,10 +254,6 @@ export function createPlaylistImportDialogController(el, document) {
     el.playlistImportOkBtn.textContent = chosen.length > 1
       ? tCount("ui-playlist-import-ok-count", chosen.length)
       : t("ui-common-import");
-    const sources = new Set(chosen.map((item) => item.sourceLabel));
-    el.playlistImportForceLabel.textContent = sources.size === 1
-      ? t("ui-playlist-import-force-from", { library: [...sources][0] })
-      : t("ui-playlist-import-force");
   }
 
   return {
@@ -250,13 +268,11 @@ export function createPlaylistImportDialogController(el, document) {
     isOpen: dialog.isOpen,
     close(confirmed) {
       if (!dialog.isOpen()) return;
-      const force = !!el.playlistImportForce.checked;
-      const chosen = confirmed ? checkedItems().map((item) => ({ ...item, force })) : [];
+      const chosen = confirmed ? checkedItems() : [];
       dialog.close(chosen.length ? chosen : null);
     },
     open({ columns = [] } = {}) {
       dialog.close();
-      el.playlistImportForce.checked = false;
       populate(columns);
       return dialog.open(el.playlistImportList.querySelector("input"));
     }
