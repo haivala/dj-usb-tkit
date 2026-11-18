@@ -423,8 +423,12 @@ impl BackendService {
         if source_roots.is_empty() {
             // The library's switched-on folders; a missing one is reported in
             // `not_found` below.
+            // With only an imported library switched on there's no folder to
+            // check: the scan is a no-op and the analysis that follows takes
+            // the library's tracks.
             let sources = LibrarySources::load(&*self.db.connect()?)?;
-            if sources.roots.is_empty() {
+            let library_on = sources.rekordbox_db || sources.mixxx_db;
+            if sources.roots.is_empty() && !library_on {
                 return Err(BackendError::Validation(
                     tr::library_error_no_source_folder(),
                 ));
@@ -435,7 +439,7 @@ impl BackendService {
                 .filter(|root| sources.is_enabled(root))
                 .cloned()
                 .collect();
-            if source_roots.is_empty() {
+            if source_roots.is_empty() && !library_on {
                 return Err(BackendError::Validation(
                     tr::library_error_no_source_enabled(),
                 ));

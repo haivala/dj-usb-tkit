@@ -593,18 +593,15 @@ impl BackendService {
         conn: &rusqlite::Connection,
         query: &str,
     ) -> BackendResult<Vec<String>> {
-        let rekordbox_db_shown = LibrarySources::load(conn)?.rekordbox_db;
         let visible = self.compute_visible_library_tracks(conn, query)?;
         Ok(visible
             .iter()
-            // A track whose analysis data comes from an attached master.db
-            // doesn't need local analysis. Nor does a file the scan couldn't
-            // index (a browse-only row, `id == file_path`): there's no track
-            // to analyze.
+            // Any track missing core analysis gets it, an imported library's
+            // too (what it brought along is kept). Not a file the scan
+            // couldn't index (a browse-only row, `id == file_path`): there's
+            // no track to analyze.
             .filter(|track| {
-                !(rekordbox_db_shown && track.rekordbox_db_source)
-                    && !track_has_core_analysis_for_source_status(track)
-                    && track.id != track.file_path
+                !track_has_core_analysis_for_source_status(track) && track.id != track.file_path
             })
             .map(|track| track.id.clone())
             .collect())

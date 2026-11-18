@@ -107,7 +107,10 @@ drive selection from being rendered against a newer selected drive.
 
 - `scan_library` — `{ sourceRoots?, incremental }` → `{ indexed, updated,
   removed, warnings, statusText }`; `statusText` is the status line
-  after adding folders (the folder count and the tracks indexed).
+  after adding folders (the folder count and the tracks indexed). Without
+  `sourceRoots` and with no folder switched on, it is a validation error
+  unless an imported library is switched on; then it scans nothing and
+  succeeds, so Analyze Library goes on to the library's tracks.
 - `scan_rekordbox_db`
 - `scan_mixxx_db`
 - `browse_source_files` — lists the library as its sources are set (below);
@@ -115,8 +118,11 @@ drive selection from being rendered against a newer selected drive.
   their waveforms (`waveformPreview`, or `waveformColorData` for rekordbox
   tracks), read for that page only, as a USB page's are.
 - `get_library_sources` → `{ folders, rekordboxDbEnabled, mixxxDbEnabled,
-  everConfigured, filterStatusText, filtering }`, each folder `{ path, enabled,
-  missing, fullyAnalyzed }`. `filterStatusText` is the status line after a switch
+  rekordboxDbFullyAnalyzed, mixxxDbFullyAnalyzed, everConfigured,
+  filterStatusText, filtering }`, each folder `{ path, enabled, missing,
+  fullyAnalyzed }`. `fullyAnalyzed` (and the libraries' `…FullyAnalyzed`) is
+  on when the source has tracks and every one has its waveform, BPM and
+  length; its chip shows green. `filterStatusText` is the status line after a switch
   ("Source filters: 2/3 enabled"); `filtering` is on while some source's tracks
   are hidden (a folder off or missing, an imported library off), which the
   library's filter mark shows.

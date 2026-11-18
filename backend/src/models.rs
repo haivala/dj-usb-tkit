@@ -687,6 +687,10 @@ pub struct LibrarySourcesData {
     pub folders: Vec<SourceFolder>,
     pub rekordbox_db_enabled: bool,
     pub mixxx_db_enabled: bool,
+    /// Every track imported from the library has its core analysis (its
+    /// chip shows green, as a fully analyzed folder's does).
+    pub rekordbox_db_fully_analyzed: bool,
+    pub mixxx_db_fully_analyzed: bool,
     /// A source has been set up at some point (a folder added or a library
     /// imported), even if none is left: the library then shows its table
     /// instead of the "add a folder" onboarding.

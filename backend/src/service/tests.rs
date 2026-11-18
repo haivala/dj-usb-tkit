@@ -1030,3 +1030,43 @@ fn track_rows_carry_the_bpm_source_and_unknown_title_texts() {
         ("Unknown Title", "Unknown Artist")
     );
 }
+
+#[test]
+fn library_analysis_picks_imported_library_tracks_missing_core_analysis() {
+    let (_dir, service) = test_service();
+    let conn = service.db.connect().expect("connect");
+    insert_track(
+        &conn,
+        "rb-missing",
+        "/music/rb/missing.mp3",
+        "fp-a",
+        Some(200_000),
+        None,
+    );
+    insert_track(
+        &conn,
+        "rb-done",
+        "/music/rb/done.mp3",
+        "fp-b",
+        Some(200_000),
+        None,
+    );
+    conn.execute("UPDATE tracks SET rekordbox_db_source = 1", [])
+        .expect("flag rekordbox tracks");
+    conn.execute(
+        "UPDATE tracks SET bpm = 124.0, waveform_peaks_path = '/data/done.dat' WHERE id = 'rb-done'",
+        [],
+    )
+    .expect("analyze one");
+    LibrarySources {
+        rekordbox_db: true,
+        ..LibrarySources::default()
+    }
+    .save(&conn)
+    .expect("switch rekordbox on");
+
+    let ids = service
+        .library_filter_unanalyzed_track_ids(&conn, "")
+        .expect("unanalyzed ids");
+    assert_eq!(ids, ["rb-missing"]);
+}

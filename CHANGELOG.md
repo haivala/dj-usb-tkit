@@ -39,6 +39,13 @@
 
 ## Unreleased
 
+- **Fix:** The rekordbox and Mixxx chips turn green once every track imported from them is analyzed, as
+  folder chips do.
+- **Fix:** Analyze Library works with only rekordbox or Mixxx switched on, instead of asking to switch on a
+  source folder.
+- **Fix:** Analyze Library also analyzes rekordbox tracks that are missing a waveform, BPM or length. The BPM,
+  key and beat grid that came from rekordbox are kept.
+
 ## 0.6.4
 
 **Severity:** critical — see item(s) marked **(CRITICAL)** below.

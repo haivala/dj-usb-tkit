@@ -477,6 +477,17 @@ fn scan_library_reports_validation_for_empty_roots_and_tolerates_missing_root() 
         scan_switched_on(),
         "Switch on at least one source folder before scanning"
     );
+    // Only an imported library switched on: nothing to scan, not an error,
+    // so Analyze Library goes on to analyze the library's tracks.
+    for (rekordbox, mixxx) in [(true, false), (false, true)] {
+        library_sources::show_only(&backend, Vec::new(), rekordbox, mixxx);
+        let scan = backend.scan_library(ScanLibraryRequest {
+            source_roots: Vec::new(),
+            incremental: true,
+        });
+        assert!(scan.ok, "library-only scan should not fail: {scan:?}");
+        assert_eq!(scan.data.expect("library-only scan data").indexed, 0);
+    }
 
     let missing_root = root.path().join("does-not-exist");
     let missing = backend.scan_library(ScanLibraryRequest {

@@ -90,7 +90,7 @@ function installSourceChipAnalysisMock(page) {
     // as the real backend does.
     const folder = (path) => ({ path, label: path, parent: null, enabled: true, missing: false, fullyAnalyzed: true });
     window.__sources = {
-      folders: [folder("/music")], rekordboxDbEnabled: false, mixxxDbEnabled: false, everConfigured: true, analyzeButtonLabel: "Analyze Library", analyzeScanningStatus: "Scanning library files...", trackNotInLibraryStatus: "Track is not in the local library yet. Run Analyze Library first."
+      folders: [folder("/music")], rekordboxDbEnabled: false, mixxxDbEnabled: false, rekordboxDbFullyAnalyzed: true, mixxxDbFullyAnalyzed: false, everConfigured: true, analyzeButtonLabel: "Analyze Library", analyzeScanningStatus: "Scanning library files...", trackNotInLibraryStatus: "Track is not in the local library yet. Run Analyze Library first."
     };
     window.__libraryToggles = [];
     window.__folderToggles = [];
@@ -284,7 +284,7 @@ test("source chips and playlist import", async ({ page }) => {
   await page.goto("/");
   // Source chips show analyzed green on startup and adding a source indexes it.
   {
-    await expect(page.locator(".source-chip.source-chip-analyzed")).toHaveCount(1);
+    await expect(page.locator("#sourceChipsContainer .source-chip.source-chip-analyzed")).toHaveCount(1);
     await page.locator("#addSourceBtn").click();
     // Adding a folder indexes it in the same command (metadata only, no
     // analysis), so its tracks are playable right away without a manual
@@ -293,7 +293,7 @@ test("source chips and playlist import", async ({ page }) => {
     await expect.poll(async () => page.evaluate(() => window.__addPayloads)).toEqual([{ paths: ["/music2"] }]);
     await expect(page.locator("#statusText")).toContainText("indexed 1 track");
     expect(await page.evaluate(() => window.__scanCalls)).toBe(0);
-    await expect(page.locator(".source-chip.source-chip-analyzed")).toHaveCount(2);
+    await expect(page.locator("#sourceChipsContainer .source-chip.source-chip-analyzed")).toHaveCount(2);
 
     // The library chips sit in their own "Libraries" row, not among the folders.
     await expect(page.locator("#libraryChipsRow")).toBeVisible();
@@ -306,6 +306,8 @@ test("source chips and playlist import", async ({ page }) => {
     await expect(rekordboxDbToggle).toBeVisible();
     await expect(rekordboxDbToggle).toHaveAttribute("aria-label", "Toggle rekordbox library");
     await expect(rekordboxDbToggle).toBeEnabled();
+    // Library chips go green from the backend's analyzed flag, as folder chips do.
+    await expect(page.locator("#libraryChipsContainer .source-chip")).toHaveClass([/source-chip-analyzed/, /^(?!.*source-chip-analyzed)/]);
     const browseCalls = await page.evaluate(() => window.__browseCalls);
     await rekordboxDbToggle.check();
     await expect(rekordboxDbToggle).toBeChecked();

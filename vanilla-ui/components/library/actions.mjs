@@ -167,17 +167,20 @@ function renderLibraryChips(ctx) {
     {
       path: state.externalRekordboxDbPath, imported: state.rekordboxDbImported,
       enabled: state.librarySources.rekordboxDbEnabled,
+      fullyAnalyzed: state.librarySources.rekordboxDbFullyAnalyzed,
       template: "tplSourceChipRekordboxDb", notImportedTooltip: t("ui-library-chip-not-imported-rekordbox-tooltip")
     },
     {
       path: state.externalMixxxDbPath, imported: state.mixxxDbImported,
       enabled: state.librarySources.mixxxDbEnabled,
+      fullyAnalyzed: state.librarySources.mixxxDbFullyAnalyzed,
       template: "tplSourceChipMixxxDb", notImportedTooltip: t("ui-library-chip-not-imported-mixxx-tooltip")
     }
   ].filter((library) => library.path);
   el.libraryChipsContainer.replaceChildren();
   for (const library of libraries) {
     const chip = cloneTemplate(document, library.template);
+    chip.classList.toggle("source-chip-analyzed", !!library.imported && !!library.fullyAnalyzed);
     const toggle = chip.querySelector(".source-chip-toggle");
     toggle.disabled = !library.imported;
     toggle.checked = !!library.imported && !!library.enabled;

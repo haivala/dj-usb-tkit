@@ -37,7 +37,8 @@ turns the chip on:
 Mixxx stores its waveforms in its own format, so Mixxx tracks need the app's
 analysis before export, like any folder track. Only the first beat of a Mixxx
 beat grid is used; the app's grid is built from it and the BPM. rekordbox tracks
-point at rekordbox's analysis files instead.
+point at rekordbox's analysis files instead; one that rekordbox never analyzed
+(no waveform, BPM or length) gets the app's analysis like any other track.
 
 The first analysis of an imported track keeps the imported BPM and key, so a
 tempo or key the DJ corrected in rekordbox or Mixxx isn't lost, and writes
@@ -106,6 +107,12 @@ library's tracks and never re-imports (the ↻ does that). It can only be
 turned on once the library has been imported, which the backend reports with
 the library's detection (`imported`). The two chips are independent. A track
 that is in both libraries shows when either chip is on.
+
+A library's chip turns green, as a folder's does, once every track imported
+from it has its waveform, BPM and length (`rekordboxDbFullyAnalyzed` /
+`mixxxDbFullyAnalyzed` from `get_library_sources`). **Analyze Library** works
+with only a library switched on and no folder: it analyzes that library's
+tracks that are missing any of those, keeping what the library brought along.
 
 ### Importing a playlist
 

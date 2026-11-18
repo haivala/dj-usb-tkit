@@ -248,17 +248,23 @@ impl BackendService {
         let folders: Vec<SourceFolder> = folders;
         // The imported libraries whose chip can be switched: still found, and
         // imported. Each is (switchable, switched on).
+        let rekordbox_switchable = detect_external_rekordbox_db_util().found
+            && has_tracks_flagged(conn, "rekordbox_db_source")?;
+        let mixxx_switchable = super::mixxx_import::detect_external_mixxx_db().found
+            && has_tracks_flagged(conn, "mixxx_db_source")?;
+        // A library chip's analyzed status, like a folder's: every track it
+        // imported has its core analysis, switched on or not.
+        let library_fully_analyzed = |libraries: ExternalLibraries| -> BackendResult<bool> {
+            let tracks = self.compute_all_library_tracks(conn, &[], libraries)?;
+            Ok(!tracks.is_empty() && tracks.iter().all(track_has_core_analysis_for_source_status))
+        };
+        let rekordbox_db_fully_analyzed = rekordbox_switchable
+            && library_fully_analyzed(ExternalLibraries::from_flags(true, false))?;
+        let mixxx_db_fully_analyzed =
+            mixxx_switchable && library_fully_analyzed(ExternalLibraries::from_flags(false, true))?;
         let libraries = [
-            (
-                detect_external_rekordbox_db_util().found
-                    && has_tracks_flagged(conn, "rekordbox_db_source")?,
-                sources.rekordbox_db,
-            ),
-            (
-                super::mixxx_import::detect_external_mixxx_db().found
-                    && has_tracks_flagged(conn, "mixxx_db_source")?,
-                sources.mixxx_db,
-            ),
+            (rekordbox_switchable, sources.rekordbox_db),
+            (mixxx_switchable, sources.mixxx_db),
         ];
         let libraries = libraries.iter().filter(|(switchable, _)| *switchable);
         let enabled = folders
@@ -282,6 +288,8 @@ impl BackendService {
             filtering: enabled < total,
             rekordbox_db_enabled: sources.rekordbox_db,
             mixxx_db_enabled: sources.mixxx_db,
+            rekordbox_db_fully_analyzed,
+            mixxx_db_fully_analyzed,
             ever_configured: sources.ever_configured(),
         })
     }
