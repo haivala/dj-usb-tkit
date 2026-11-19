@@ -36,12 +36,13 @@
   const defaultColumns = trackColumns.data.layout;
   let columnLayout = defaultColumns;
   // The backend's library sources: the folders (some switched off, some
-  // inside another) and, when shown, an imported Mixxx library switched on
-  // in the Libraries row.
+  // inside another). An imported library shows in the Libraries row switched
+  // off: switched on but not fully analyzed, the footer would count its
+  // tracks without length.
   const librarySources = {
     folders: sourceFolders.map((folder) => ({ ...folder, missing: false, fullyAnalyzed: true })),
     rekordboxDbEnabled: false,
-    mixxxDbEnabled: !!opts.externalLibraries?.mixxx,
+    mixxxDbEnabled: false,
     everConfigured: true,
     analyzeButtonLabel: sourceFolders.length > 1 ? "Analyze Libraries" : "Analyze Library",
     analyzeScanningStatus: "Scanning library files...",
@@ -49,7 +50,7 @@
   };
   const shownRoots = sourceFolders.filter((folder) => folder.enabled).map((folder) => folder.path);
   ls.setItem("djusbtkit.helpSeen", "1");
-  ls.setItem("djusbtkit.theme", "dark");
+  ls.setItem("djusbtkit.theme", opts.theme || "dark");
   ls.setItem("djusbtkit.accentHue", "270");
   ls.setItem("djusbtkit.cueStartOnFirstBeat", "0");
   ls.setItem("djusbtkit.cueQuantize", "1");

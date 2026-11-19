@@ -5,7 +5,10 @@ Local-first DJ library manager — scan, analyze and export playlists to USB for
 Prebuilt installers for macOS, Windows, and Linux are on the [Releases](https://github.com/haivala/dj-usb-tkit/releases) page.
 
 <p align="center">
-  <img src="docs/assets/DJ-USB-Tkit.png" alt="DJ USB Tkit screenshot" width="800" />
+  <picture>
+    <source media="(prefers-color-scheme: light)" srcset="docs/assets/DJ-USB-Tkit-light.png" />
+    <img src="docs/assets/DJ-USB-Tkit.png" alt="DJ USB Tkit screenshot" width="800" />
+  </picture>
 </p>
 
 ## Installing a Prebuilt Release

@@ -132,7 +132,8 @@ message-routing contracts.
 
 The animations (WebP) and screenshots in `docs/assets/` (used by `docs/CUE_EDITOR.md` and
 the top-level README) are recorded from the real frontend build: the three
-`cue-editor-*.webp`, `DJ-USB-Tkit.png` and `cue-editor.png`. Re-record them
+`cue-editor-*.webp`, `DJ-USB-Tkit.png` (and its light-theme twin
+`DJ-USB-Tkit-light.png`) and `cue-editor.png`. Re-record them
 after a UI change:
 
 ```bash

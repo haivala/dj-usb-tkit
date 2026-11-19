@@ -301,7 +301,7 @@ function buildFixture(work) {
 // `sourcesOpen: false` closes the Sources accordion, as a click on its header
 // does, so the GIFs show more of the Library.
 async function openApp(browser, fixture, opts, { sourcesOpen = true, viewport = VIEWPORT } = {}) {
-  const ctx = await browser.newContext({ viewport, deviceScaleFactor: 1, colorScheme: "dark" });
+  const ctx = await browser.newContext({ viewport, deviceScaleFactor: 1, colorScheme: opts?.theme || "dark" });
   await ctx.addInitScript({
     content: `window.__DOC_GIF_FIXTURE__=${JSON.stringify(fixture)};window.__DOC_GIF_OPTS__=${JSON.stringify(opts)};`,
   });
@@ -472,7 +472,14 @@ async function capture(page, framesDir, scene, { fullWindow = false } = {}) {
 
 // Renders a footer `width` pixels wide in the app's font and dark colours:
 // the caption on the left, the app name on the right.
-async function renderFooter(browser, caption, width, out) {
+// The footer's colours per theme: the app's --bg, --line, --muted and --ink.
+const FOOTER_COLORS = {
+  dark: { bg: "#0c0a12", line: "#2a2538", caption: "#9b93ad", name: "#e4dff0" },
+  light: { bg: "#f0edf5", line: "#d8d2e4", caption: "#5c5470", name: "#1a1528" },
+};
+
+async function renderFooter(browser, caption, width, out, theme = "dark") {
+  const c = FOOTER_COLORS[theme];
   const page = await browser.newPage({ viewport: { width, height: FOOTER_HEIGHT }, deviceScaleFactor: 1 });
   // Same origin as the fonts, which would otherwise be blocked as cross-origin.
   await page.goto(`${BASE_URL}styles.css`);
@@ -481,9 +488,9 @@ async function renderFooter(browser, caption, width, out) {
     @font-face { font-family: Outfit; src: url(${BASE_URL}assets/fonts/google/Outfit-500.ttf); font-weight: 500; }
     html, body { margin: 0; }
     footer { box-sizing: border-box; display: flex; align-items: center; gap: 16px; height: ${FOOTER_HEIGHT}px;
-      padding: 0 10px; background: #0c0a12; border-top: 1px solid #2a2538; font: 400 12px/1 Outfit, sans-serif; }
-    .caption { flex: 1; min-width: 0; color: #9b93ad; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
-    .app-name { color: #e4dff0; font-weight: 500; white-space: nowrap; }
+      padding: 0 10px; background: ${c.bg}; border-top: 1px solid ${c.line}; font: 400 12px/1 Outfit, sans-serif; }
+    .caption { flex: 1; min-width: 0; color: ${c.caption}; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+    .app-name { color: ${c.name}; font-weight: 500; white-space: nowrap; }
   </style><footer><span class="caption"></span><span class="app-name">DJ USB Tkit</span></footer>`);
   await page.locator(".caption").evaluate((el, text) => { el.textContent = text; }, caption);
   await page.evaluate(() => document.fonts.ready);
@@ -871,22 +878,25 @@ function shots(fixture) {
   const firstBeat = fixture.detail.firstBeatMs ?? 0;
   const onBeat = (n) => Math.round(firstBeat + n * (60000 / bpm));
 
-  return [
-    {
-      // README hero: the Library with a USB connected, a playlist active, the
-      // source folders grouped under the folder they lie in (one switched on
-      // as the filter), an imported Mixxx library, and more tracks than fit
-      // (so it scrolls). One
-      // row hovered, so its play button shows on the cover art.
-      name: "DJ-USB-Tkit",
-      caption: "The Library, with a USB connected and a playlist active",
-      opts: { externalLibraries: { mixxx: [] } },
-      async run(page) {
-        const row = page.locator("#libraryTableBody .track-grid-row").nth(1);
-        await row.locator(".track-grid-cell", { hasText: "Low Orbit" }).hover();
-        await page.waitForTimeout(400);
-      },
+  // README hero: the Library with a USB connected, a playlist active, the
+  // source folders grouped under the folder they lie in (one switched on as
+  // the filter), an imported Mixxx library, and more tracks than fit (so it
+  // scrolls). One row hovered, so its play button shows on the cover art.
+  // Shot in both themes; the README picks the one matching the reader's.
+  const hero = (name, theme) => ({
+    name,
+    caption: "The Library, with a USB connected and a playlist active",
+    opts: { externalLibraries: { mixxx: [] }, theme },
+    async run(page) {
+      const row = page.locator("#libraryTableBody .track-grid-row").nth(1);
+      await row.locator(".track-grid-cell", { hasText: "Low Orbit" }).hover();
+      await page.waitForTimeout(400);
     },
+  });
+
+  return [
+    hero("DJ-USB-Tkit", "dark"),
+    hero("DJ-USB-Tkit-light", "light"),
     {
       // docs/USB_BACKUPS.md: the Backups panel, opened from the USB page.
       name: "backup-view",
@@ -1101,7 +1111,7 @@ try {
     await page.screenshot({ path: raw });
     await ctx.close();
     const out = join(outDir, `${shot.name}.png`);
-    const footer = await renderFooter(browser, shot.caption, viewport.width, join(work, `footer-${shot.name}.png`));
+    const footer = await renderFooter(browser, shot.caption, viewport.width, join(work, `footer-${shot.name}.png`), shot.opts?.theme);
     addFooter(raw, footer, out);
     console.log(`wrote ${relative(repoDir, out)}`);
   }
