@@ -62,212 +62,67 @@ For a prefix somewhere else, start the app with `WINEPREFIX=/path/to/prefix`
 (see [docs/EXTERNAL_LIBRARIES.md](docs/EXTERNAL_LIBRARIES.md)).
 
 If the window stays blank or black, or the app closes right after it opens,
-start it with the GPU renderer turned off:
-
-```bash
-WEBKIT_DISABLE_DMABUF_RENDERER=1 ./DJ_USB_Tkit_*_amd64.AppImage
-```
-
-The app then draws on the CPU, which uses more CPU during long exports and
+start it with `WEBKIT_DISABLE_DMABUF_RENDERER=1` in front of the command. The
+app then draws on the CPU, which uses more CPU during long exports and
 analysis runs.
 
-## Current Capabilities
+## Features
 
-- Library scanning, playlist management, and native local playback.
-- Import tracks and playlists from a rekordbox or Mixxx library on the same
-  computer, including their hot cues (see
-  [docs/EXTERNAL_LIBRARIES.md](docs/EXTERNAL_LIBRARIES.md)).
-- USB import/export with `mirror` and `additive` playlist sync modes.
-- Transcodes for players that can't read FLAC or ALAC: convert lossless
-  tracks to MP3 320, AIFF or WAV, kept as extra files of the same track (cues,
-  edits and playlists stay on one track). Each USB has its own Audio formats,
-  and export puts every track on it in the first allowed format, converting it
-  when needed (see [docs/TRANSCODES.md](docs/TRANSCODES.md)).
-- An Engine DJ library on the USB for Denon and Numark players, kept in step
-  with every change to the stick, so they get the app's beat grids and
-  waveforms without analyzing every track again. Off by default: turn on
-  Settings → Export → "Write Engine DJ library" (see
-  [`docs/ENGINE_DJ.md`](docs/ENGINE_DJ.md)).
-- Local BPM, key, waveform, and artwork analysis for missing track metadata.
-- A cue editor for setting a track's hot cues, memory cues, beat grid, key,
-  genre, star rating, and where the CDJ starts playback, from the library or straight on a connected USB (see
-  [Cue Editor](#cue-editor) below).
-- USB diagnostics, strict parity reporting, and preview-first repair actions.
-- Repair tools can help recover some broken USB database states; backups are
-  created before repair writes, but recovery is not guaranteed.
-- A USB that has only one of its two player databases (the PDB or the eDB)
-  gets the missing one rebuilt from the other by the repair.
-- USB initialization for drives that are writable but missing the expected
-  export database structure.
-- USB drives can be given a persistent name, so the same physical drive keeps
-  its identity across replugs, ports, and computers. What selecting a USB does,
-  and what changes while one is connected, is in
-  [docs/USB_CONNECT.md](docs/USB_CONNECT.md).
-- A dedicated Backups panel to list, restore, and delete USB database
-  snapshots, with configurable retention.
-- Automated backend and frontend coverage for core workflows, export behavior,
-  diagnostics, and UI interactions.
-
-## Cue Editor
-
-Open it with the magnifier button next to an analyzed track's waveform, in the
-library, an app playlist, a USB playlist, or USB history. It shows the track's
-full-detail colour waveform with the beat grid over it.
+- **Library**: scan your music folders, build playlists, and play tracks in
+  the app.
+- **Analysis**: BPM, key, waveforms and artwork for tracks that lack them
+  (see [docs/LIBRARY_ANALYSIS.md](docs/LIBRARY_ANALYSIS.md)).
+- **Cue editor**: hot cues, memory cues, beat grid, key, genre, rating and
+  where the CDJ starts playback, from the library or straight on a connected
+  USB, with a metronome to check the grid by ear (see
+  [docs/CUE_EDITOR.md](docs/CUE_EDITOR.md)).
+- **rekordbox and Mixxx import**: tracks, playlists and hot cues from a library
+  on the same computer (see [docs/EXTERNAL_LIBRARIES.md](docs/EXTERNAL_LIBRARIES.md)).
+- **USB export and import** for Pioneer CDJ/XDJ and rekordbox, in `mirror` or
+  `additive` sync mode. Each USB keeps its name across replugs and computers
+  (see [docs/USB_EXPORT.md](docs/USB_EXPORT.md) and
+  [docs/USB_CONNECT.md](docs/USB_CONNECT.md)).
+- **Transcodes**: FLAC, ALAC, WAV, AIFF, OGG and Opus tracks converted to MP3
+  320, AIFF or WAV for players that can't read them, kept on the same track
+  with its cues and playlists (see [docs/TRANSCODES.md](docs/TRANSCODES.md)).
+- **Engine DJ** library on the USB for Denon and Numark players, so they get
+  the app's beat grids and waveforms (see [docs/ENGINE_DJ.md](docs/ENGINE_DJ.md)).
+- **Diagnostics and repair** for broken USB databases, with a preview before
+  anything is written (see [docs/DIAGNOSTICS_REPAIRS.md](docs/DIAGNOSTICS_REPAIRS.md)).
+- **Backups** of the USB databases before every write, which you can restore
+  from the Backups panel (see [docs/USB_BACKUPS.md](docs/USB_BACKUPS.md)).
 
 <p align="center">
   <img src="docs/assets/cue-editor-drag-cues.webp" alt="Dragging cue points in the cue editor" width="800" />
 </p>
 
-- **Hot cues**: up to 8, lettered A–H by position, each with a name and
-  colour. Add them by double-clicking the waveform, with "+ Hot cue" or with C
-  while playing; drag markers to move them. Quantize (Q) snaps cues to the
-  beat, and Shift places one freely.
-- **Beat grid**: fix the BPM (type it, nudge it by 0.01, or ×2 / ÷2 for a half
-  or double tempo analysis), move the first beat, and set the key.
-- **Playback start**: choose whether the CDJ loads the track on the first cue
-  or on the first beat, as a memory cue with no hot-cue pad.
-- **Listening**: play and pause in the editor, with a metronome that clicks on
-  the grid so you can hear whether it lines up, and a Mix slider to balance
-  the clicks against the music.
-- **Editing**: undo/redo, keyboard shortcuts, and zoom, pan and a whole-track
-  overview strip.
+Everything runs locally: no cloud service is needed for any of it. The full
+documentation starts at [docs/README.md](docs/README.md), and
+[docs/COMPARISON.md](docs/COMPARISON.md) covers how the app differs from
+rekordbox.
 
-Each hot cue is exported as both a memory point and a hot-cue pad. **Memory
-cues** (memory points without a pad, any number, with name and colour, as
-rekordbox makes them) are shown as ▼ flags, edited in one compact slot, added
-with M, and kept through import, editing and export. Saving from
-a USB row writes the change straight onto the USB (no re-export needed) and
-into the local library. Full details, shortcuts and the storage format are in
-[`docs/CUE_EDITOR.md`](docs/CUE_EDITOR.md).
+> **Warning:** This software writes to DJ USB drives and library databases. Use it at your own risk: the author and maintainers are not responsible for broken USB exports, corrupted databases, data loss, or other damage to your USB drive. Always keep your own backups. The app's repair tools have recovered broken USB databases in real use, but recovery is not guaranteed. This software is provided without warranty; see [LICENSE](LICENSE).
 
-## Design Goals
+## Building from Source
 
-- Local-first desktop workflows — no cloud dependency for indexing, playlists, USB import/export, diagnostics/repairs, or playback.
-- Fast prep flow: index library quickly, build playlists, analyze only missing tracks for the target playlist, then export.
-- Strict parity reporting is kept separate from operational passability, so users can distinguish "works" vs "fully parity-clean" outcomes.
-- Pluggable analysis engine: `stratum` (default) and optional `essentia`.
-
-Detailed behavior and requirements are documented under `docs/`, starting with [`docs/README.md`](docs/README.md); command reference details are in [`docs/COMMANDS.md`](docs/COMMANDS.md). See [`docs/COMPARISON.md`](docs/COMPARISON.md) for how this differs from rekordbox.
-
-> **Warning:** This software writes to DJ USB drives and library databases. Use it at your own risk: the author and maintainers are not responsible for broken USB exports, corrupted databases, data loss, or other damage to your USB drive. Always keep your own backups.
->
-> The app creates timestamped backups of the existing PDB/eDB database files before every export, playlist reorder/removal, repair, or menu-config write. The newest backup always stays on the USB drive in `PIONEER/rekordbox/backups/`; older ones are moved to a local cache to avoid filling up the drive. Backups can be browsed, restored, or deleted from the **Backups** panel (the **Backups** button on the USB page). The repair tools have also recovered broken USB database states in real use, but recovery is not guaranteed. This software is provided without warranty; see [LICENSE](LICENSE).
-
-Copyright (c) DJ USB Tkit contributors. Project code is licensed under `AGPL-3.0-or-later` (full text in [LICENSE](LICENSE)); contributions are accepted under the same terms (inbound = outbound). See `CONTRIBUTING.md`. A redistribution-focused dependency/license audit is tracked in [`docs/THIRD_PARTY_LICENSES.md`](docs/THIRD_PARTY_LICENSES.md).
-
-## Prerequisites
-
-- [Rust](https://rustup.rs/) (stable)
-- [Node.js](https://nodejs.org/) 24 LTS (24.15 or newer) or 26 (required for frontend build/tests; the optional Essentia engine uses whichever `node` is installed)
-- System libraries for Tauri v2 (see below)
-- [CMake](https://cmake.org/) (builds the bundled Opus decoder)
-- Tauri CLI v2 for release bundles:
-
-```
-cargo install tauri-cli --version '^2'
-```
-
-Ensure `~/.cargo/bin` is available in `PATH`.
-
-### System Libraries
-
-**Arch Linux:**
-
-```
-sudo pacman -S --needed webkit2gtk-4.1 gtk3 libappindicator-gtk3 librsvg base-devel openssl pkg-config cmake
-```
-
-**Ubuntu / Debian:**
-
-```
-sudo apt install libwebkit2gtk-4.1-dev libgtk-3-dev libappindicator3-dev librsvg2-dev build-essential libssl-dev pkg-config cmake
-```
-
-**Fedora:**
-
-```
-sudo dnf install webkit2gtk4.1-devel gtk3-devel libappindicator-gtk3-devel librsvg2-devel gcc gcc-c++ openssl-devel pkg-config cmake
-```
-
-For other distros see the [Tauri prerequisites docs](https://v2.tauri.app/start/prerequisites/#linux).
-
-## Build & Run
+You need Rust (stable), Node.js 24 LTS or 26, CMake, and Tauri's system
+libraries. With those installed:
 
 ```
 cd desktop/src-tauri
-cargo build
 cargo run
 ```
 
-`cargo run` does not require Tauri CLI. Tauri CLI is required for release bundle builds (`tauri build`).
+Per-distro package lists, release bundles for macOS, Windows and Linux, and
+the release workflow are in
+[docs/RELEASE_BUILD_INSTALL.md](docs/RELEASE_BUILD_INSTALL.md).
 
-## Release Bundles
+## License
 
-Published builds are available on the [Releases](https://github.com/haivala/dj-usb-tkit/releases) page. To build your own:
-
-### macOS
-
-Install prerequisites and build with:
-
-```bash
-chmod +x scripts/macos-build-setup.sh
-./scripts/macos-build-setup.sh
-```
-
-### Windows
-
-Open PowerShell as Administrator and run:
-
-```powershell
-powershell -ExecutionPolicy Bypass -File scripts\windows-build-setup.ps1
-```
-
-### Linux
-
-Build installers/packages with:
-
-```bash
-./scripts/release.sh
-```
-
-The script stages a clean frontend bundle into `vanilla-ui/dist` (excluding development folders such as `node_modules`) before packaging.
-On Linux, the default bundles are `deb,rpm,appimage`. AppImage packaging requires a working `linuxdeploy` binary on `PATH`.
-When AppImage is included, the script also sets `NO_STRIP=1` by default to avoid linuxdeploy strip failures on RELR-enabled system libraries (common on Arch and newer distros). Set `LINUXDEPLOY_NO_STRIP=0` to disable.
-Release builds do not bundle Essentia assets or a Node runtime.
-The app works without Node when using prebuilt binaries and the default `stratum` analysis engine.
-Node is only needed when building from source (frontend/tooling) or when enabling the optional Essentia analysis engine.
-Essentia can be downloaded in-app from **Settings** when the user enables the Essentia engine.
-
-Linux packaging notes:
-
-- The AppImage bundles most GUI/runtime dependencies needed by the Tauri/WebKit stack (for example `webkit2gtk`, `gtk-3`, `libsoup`, `javascriptcoregtk`, `glib`, `gio`, `pango`, and `cairo`).
-- Core system libraries remain host-provided, following normal AppImage practice. This includes libraries such as `libc`, `libm`, `libpthread`, `libstdc++`, `libX11`, and `libasound`.
-- Published release builds are made in an Ubuntu 22.04 container (`scripts/linux-release-docker.sh`), so they need glibc 2.35 or newer. `./scripts/release.sh` builds against your own system's glibc, so its AppImage only runs on systems at least as new as yours. Use `scripts/linux-release-docker.sh` for a portable build.
-- The AppImage, deb, and rpm include AppStream metadata (`usr/share/metainfo/art.chiph.djusbtkit.metainfo.xml`) for software centers and AppImage managers.
-- The Tauri UI does not require Node at runtime.
-
-Examples:
-
-```bash
-./scripts/release.sh
-BUNDLES=deb,rpm ./scripts/release.sh
-```
-
-Artifacts are written under:
-
-```bash
-target/release/bundle
-```
-
-For release build workflow and publication checks, see `docs/RELEASE_BUILD_INSTALL.md`.
-
-## Project Structure
-
-```
-backend/       – Rust library: data model, SQLite storage, commands
-desktop/       – Tauri host app
-vanilla-ui/    – Frontend (vanilla HTML/JS/CSS)
-```
+Copyright (c) DJ USB Tkit contributors. Licensed under `AGPL-3.0-or-later`
+(full text in [LICENSE](LICENSE)); contributions are accepted under the same
+terms. See [CONTRIBUTING.md](CONTRIBUTING.md). Dependency licenses are listed in
+[docs/THIRD_PARTY_LICENSES.md](docs/THIRD_PARTY_LICENSES.md).
 
 ## Donate
 

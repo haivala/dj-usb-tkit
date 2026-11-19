@@ -1,5 +1,99 @@
 # Release + Build/Install
 
+## Building from source
+
+### Prerequisites
+
+- [Rust](https://rustup.rs/) (stable)
+- [Node.js](https://nodejs.org/) 24 LTS (24.15 or newer) or 26 (required for frontend build/tests; the optional Essentia engine uses whichever `node` is installed)
+- System libraries for Tauri v2 (see below)
+- [CMake](https://cmake.org/) (builds the bundled Opus decoder)
+- Tauri CLI v2 for release bundles:
+
+```
+cargo install tauri-cli --version '^2'
+```
+
+Ensure `~/.cargo/bin` is available in `PATH`.
+
+### System libraries
+
+**Arch Linux:**
+
+```
+sudo pacman -S --needed webkit2gtk-4.1 gtk3 libappindicator-gtk3 librsvg base-devel openssl pkg-config cmake
+```
+
+**Ubuntu / Debian:**
+
+```
+sudo apt install libwebkit2gtk-4.1-dev libgtk-3-dev libappindicator3-dev librsvg2-dev build-essential libssl-dev pkg-config cmake
+```
+
+**Fedora:**
+
+```
+sudo dnf install webkit2gtk4.1-devel gtk3-devel libappindicator-gtk3-devel librsvg2-devel gcc gcc-c++ openssl-devel pkg-config cmake
+```
+
+For other distros see the [Tauri prerequisites docs](https://v2.tauri.app/start/prerequisites/#linux).
+
+### Build & run
+
+```
+cd desktop/src-tauri
+cargo build
+cargo run
+```
+
+`cargo run` does not require Tauri CLI. Tauri CLI is required for release bundle builds (`tauri build`).
+
+### Release bundles
+
+Published builds are available on the [Releases](https://github.com/haivala/dj-usb-tkit/releases) page. To build your own:
+
+**macOS:** install prerequisites and build with:
+
+```bash
+chmod +x scripts/macos-build-setup.sh
+./scripts/macos-build-setup.sh
+```
+
+**Windows:** open PowerShell as Administrator and run:
+
+```powershell
+powershell -ExecutionPolicy Bypass -File scripts\windows-build-setup.ps1
+```
+
+**Linux:** build installers/packages with:
+
+```bash
+./scripts/release.sh
+BUNDLES=deb,rpm ./scripts/release.sh
+```
+
+Artifacts are written under `target/release/bundle`.
+
+The script stages a clean frontend bundle into `vanilla-ui/dist` (excluding development folders such as `node_modules`) before packaging.
+On Linux, the default bundles are `deb,rpm,appimage`. AppImage packaging requires a working `linuxdeploy` binary on `PATH`.
+When AppImage is included, the script also sets `NO_STRIP=1` by default to avoid linuxdeploy strip failures on RELR-enabled system libraries (common on Arch and newer distros). Set `LINUXDEPLOY_NO_STRIP=0` to disable.
+Release builds do not bundle Essentia assets or a Node runtime: the app works without Node with the default `stratum` analysis engine, and Essentia can be downloaded in-app from **Settings** when the user enables it.
+
+Linux packaging notes:
+
+- The AppImage bundles most GUI/runtime dependencies needed by the Tauri/WebKit stack (for example `webkit2gtk`, `gtk-3`, `libsoup`, `javascriptcoregtk`, `glib`, `gio`, `pango`, and `cairo`).
+- Core system libraries remain host-provided, following normal AppImage practice. This includes libraries such as `libc`, `libm`, `libpthread`, `libstdc++`, `libX11`, and `libasound`.
+- Published release builds are made in an Ubuntu 22.04 container (`scripts/linux-release-docker.sh`), so they need glibc 2.35 or newer. `./scripts/release.sh` builds against your own system's glibc, so its AppImage only runs on systems at least as new as yours. Use `scripts/linux-release-docker.sh` for a portable build.
+- The AppImage, deb, and rpm include AppStream metadata (`usr/share/metainfo/art.chiph.djusbtkit.metainfo.xml`) for software centers and AppImage managers.
+
+### Project structure
+
+```
+backend/       – Rust library: data model, SQLite storage, commands
+desktop/       – Tauri host app
+vanilla-ui/    – Frontend (vanilla HTML/JS/CSS)
+```
+
 ## How it works
 
 Development and release packaging run locally from this repository. Backend and frontend tests are part of the standard release flow, and desktop bundles are produced by the release script.
