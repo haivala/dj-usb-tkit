@@ -109,7 +109,10 @@ pub fn pacman_owns(local_db: &std::path::Path, exe: &std::path::Path) -> bool {
         return false;
     };
     entries.flatten().any(|entry| {
-        entry.file_name().to_string_lossy().starts_with("dj-usb-tkit")
+        entry
+            .file_name()
+            .to_string_lossy()
+            .starts_with("dj-usb-tkit")
             && std::fs::read_to_string(entry.path().join("files"))
                 .is_ok_and(|files| files.lines().any(|line| line == exe))
     })

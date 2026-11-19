@@ -41,6 +41,9 @@
 
 - **Fix:** The rekordbox and Mixxx chips turn green once every track imported from them is analyzed, as
   folder chips do.
+- **Fix:** A source folder added through a symlink, inside a source folder added by another path, no longer
+  lists its tracks twice. It takes the outer folder's path, and libraries that already have the doubled tracks
+  are merged back to one track per file, keeping the analyzed one.
 - **Fix:** Analyze Library works with only rekordbox or Mixxx switched on, instead of asking to switch on a
   source folder.
 - **Fix:** Analyze Library also analyzes rekordbox tracks that are missing a waveform, BPM or length. The BPM,

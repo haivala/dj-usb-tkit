@@ -29,6 +29,101 @@ fn resolved_source_root(root: &str) -> String {
         .unwrap_or_else(|_| root.trim().to_string())
 }
 
+/// The spelling `roots[index]` takes when it lies inside another root (or is
+/// the same folder as an earlier one) reached through a different path, a
+/// symlink: that root's spelling plus the path inside it. With `Data` linking
+/// to `/mnt/raid`, a source `/mnt/raid/music/a` next to a source
+/// `/home/me/Data/music` is `/home/me/Data/music/a`. `None` when it already
+/// has its spelling (or lies inside no other root).
+fn respelled_source_root(index: usize, roots: &[String]) -> Option<String> {
+    let root = &roots[index];
+    let resolved = resolved_source_root(root);
+    roots
+        .iter()
+        .enumerate()
+        .filter_map(|(other, container)| {
+            let resolved_container = resolved_source_root(container);
+            let relative = relative_path_under_source_root(&resolved, &resolved_container)?;
+            // Two roots naming one folder: the first one keeps its spelling.
+            let same_folder = relative.is_empty();
+            (other != index && (!same_folder || other < index)).then_some((
+                container,
+                resolved_container.len(),
+                relative,
+            ))
+        })
+        .max_by_key(|(_, depth, _)| *depth)
+        .map(|(container, _, relative)| {
+            relocated_source_path(Path::new(container), &relative)
+                .to_string_lossy()
+                .to_string()
+        })
+        .filter(|respelled| respelled != root)
+}
+
+/// Moves the tracks under `old_root` to the same files spelled under
+/// `new_root` (one folder reached two ways). A file the library holds under
+/// both spellings keeps one track: the analyzed one, else the one already
+/// under `new_root`. Returns the dropped tracks as `(id, waveform_peaks_path)`
+/// for `forget_removed_tracks`.
+fn respell_source_tracks(
+    tx: &rusqlite::Transaction<'_>,
+    old_root: &str,
+    new_root: &str,
+) -> BackendResult<Vec<(String, Option<String>)>> {
+    type Row = (String, Option<String>, Option<f64>, Option<i64>);
+    let analyzed = |(_, waveform, bpm, duration): &Row| {
+        has_core_analysis_fields(
+            waveform.as_deref(),
+            *bpm,
+            duration.and_then(|ms| u64::try_from(ms).ok()),
+        )
+    };
+    let tracks = tx
+        .prepare("SELECT id, waveform_peaks_path, bpm, duration_ms, file_path FROM tracks")?
+        .query_map([], |row| {
+            Ok((
+                (row.get(0)?, row.get(1)?, row.get(2)?, row.get(3)?),
+                row.get::<_, String>(4)?,
+            ))
+        })?
+        .collect::<Result<Vec<(Row, String)>, _>>()?;
+    let timestamp = now();
+    let mut removed = Vec::new();
+    for (track, file_path) in tracks {
+        let Some(relative) = relative_path_under_source_root(&file_path, old_root) else {
+            continue;
+        };
+        let new_path = relocated_source_path(Path::new(new_root), &relative)
+            .to_string_lossy()
+            .to_string();
+        if new_path == file_path {
+            continue;
+        }
+        let twin = tx
+            .query_row(
+                "SELECT id, waveform_peaks_path, bpm, duration_ms FROM tracks WHERE file_path = ?1",
+                params![&new_path],
+                |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?, row.get(3)?)),
+            )
+            .optional()?;
+        if let Some(twin) = twin {
+            if !analyzed(&track) || analyzed(&twin) {
+                merge_track_into(tx, &track.0, &twin.0)?;
+                removed.push((track.0, track.1));
+                continue;
+            }
+            merge_track_into(tx, &twin.0, &track.0)?;
+            removed.push((twin.0, twin.1));
+        }
+        tx.execute(
+            "UPDATE tracks SET file_path = ?1, updated_at = ?2 WHERE id = ?3",
+            params![&new_path, &timestamp, &track.0],
+        )?;
+    }
+    Ok(removed)
+}
+
 /// For each of `roots`, the index of the nearest other root it lies inside
 /// (resolved through symlinks), if any. Two roots naming the same folder
 /// don't nest: the first one keeps it, the later one is inside it.
@@ -204,7 +299,41 @@ impl BackendService {
             sources.mixxx_db &= !mixxx_gone;
             sources.save(&conn)?;
         }
+        // Folders added through a symlink before roots were respelled.
+        self.respell_source_roots(&mut sources)?;
         self.library_sources_data(&conn, &sources)
+    }
+
+    /// Gives every source folder that lies inside another one through a
+    /// different path (a symlink) that folder's spelling, and its tracks
+    /// with it, so one file never has two tracks. Saves `sources` when
+    /// anything changed.
+    fn respell_source_roots(&self, sources: &mut LibrarySources) -> BackendResult<()> {
+        let respell = |roots: &[String]| {
+            (0..roots.len()).find_map(|index| Some((index, respelled_source_root(index, roots)?)))
+        };
+        if respell(&sources.roots).is_none() {
+            return Ok(());
+        }
+        let mut conn = self.db.connect()?;
+        let tx = conn.transaction()?;
+        let mut removed = Vec::new();
+        while let Some((index, respelled)) = respell(&sources.roots) {
+            let old_root = sources.roots[index].clone();
+            removed.extend(respell_source_tracks(&tx, &old_root, &respelled)?);
+            let enabled = sources.is_enabled(&old_root);
+            if sources.roots.contains(&respelled) {
+                sources.roots.remove(index);
+            } else {
+                sources.roots[index] = respelled.clone();
+                sources.enabled.entry(respelled).or_insert(enabled);
+            }
+        }
+        sources.save(&tx)?;
+        forget_removed_tracks(&tx, &self.db.data_dir(), &removed)?;
+        tx.commit()?;
+        self.forget_source_folder_listings();
+        Ok(())
     }
 
     /// The source chips' view of `sources`. Each folder's analyzed status is
@@ -312,13 +441,22 @@ impl BackendService {
     ) -> BackendResult<AddSourceFoldersData> {
         let conn = self.db.connect()?;
         let mut sources = LibrarySources::load(&conn)?;
-        let mut added = Vec::new();
+        let before = sources.roots.clone();
         for path in sanitize_source_roots(req.paths) {
             if !sources.roots.contains(&path) {
-                sources.roots.push(path.clone());
-                added.push(path);
+                sources.roots.push(path);
             }
         }
+        // A folder reached through a symlink takes the spelling of the source
+        // folder it's in (one already there, the same folder again, adds
+        // nothing), and one holding existing folders gives them its spelling.
+        self.respell_source_roots(&mut sources)?;
+        let added: Vec<String> = sources
+            .roots
+            .iter()
+            .filter(|root| !before.contains(root))
+            .cloned()
+            .collect();
         if !added.is_empty() {
             sources.ever_configured = true;
             sources.save(&conn)?;

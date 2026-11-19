@@ -2381,7 +2381,10 @@ mod tests {
                 |row| row.get(0),
             )
             .unwrap();
-        assert_eq!(cue_source, "user", "an import asks before replacing edited cues");
+        assert_eq!(
+            cue_source, "user",
+            "an import asks before replacing edited cues"
+        );
 
         let cues = load_track_cues(&conn, "track-1").expect("cues");
         assert_eq!(

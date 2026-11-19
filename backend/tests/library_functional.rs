@@ -1589,11 +1589,155 @@ fn get_library_sources_nests_subfolders_under_their_parent() {
         [
             (other.clone(), other.clone(), None),
             (music.clone(), music.clone(), None),
-            (linked_b.clone(), "b/".to_string(), Some(music.clone())),
+            // Respelled inside `music`, so its files have one path.
+            (format!("{music}/b"), "b/".to_string(), Some(music.clone())),
             (a.clone(), "a/".to_string(), Some(music.clone())),
             (deep.clone(), "deep/".to_string(), Some(a.clone())),
         ]
     );
+}
+
+/// `base/link` names `base/real`: `(base, link/music, real/music/sub)`, the
+/// subfolder holding `alpha.wav`.
+fn symlinked_music_folder() -> (tempfile::TempDir, String, String) {
+    let base = tempfile::tempdir().expect("base");
+    let base_str = base.path().to_string_lossy().to_string();
+    let real_sub = format!("{base_str}/real/music/sub");
+    std::fs::create_dir_all(&real_sub).expect("folders");
+    copy_audio_fixture(
+        Path::new(&real_sub),
+        "formats/track_format_wav.wav",
+        "alpha.wav",
+    );
+    std::os::unix::fs::symlink(format!("{base_str}/real"), format!("{base_str}/link"))
+        .expect("symlink");
+    (base, format!("{base_str}/link/music"), real_sub)
+}
+
+fn track_paths(service: &Service) -> Vec<(String, String)> {
+    let conn = service.db.connect().expect("connect");
+    let mut stmt = conn
+        .prepare("SELECT id, file_path FROM tracks ORDER BY file_path")
+        .expect("prepare");
+    stmt.query_map([], |row| Ok((row.get(0)?, row.get(1)?)))
+        .expect("query")
+        .collect::<Result<_, _>>()
+        .expect("rows")
+}
+
+#[test]
+fn add_source_folders_gives_a_folder_reached_through_a_symlink_its_parents_spelling() {
+    let (_dir, service) = test_service();
+    let (_base, linked_music, real_sub) = symlinked_music_folder();
+    let add = |path: &str| {
+        service
+            .add_source_folders(AddSourceFoldersRequest {
+                paths: vec![path.to_string()],
+            })
+            .expect("add source folder")
+    };
+    add(&linked_music);
+    let linked_sub = format!("{linked_music}/sub");
+    let added = add(&real_sub);
+    assert_eq!(added.added, [linked_sub.as_str()]);
+    let folders: Vec<&str> = added
+        .sources
+        .folders
+        .iter()
+        .map(|f| f.path.as_str())
+        .collect();
+    assert_eq!(folders, [linked_music.as_str(), linked_sub.as_str()]);
+    // One track for the one file, under the one spelling.
+    let paths: Vec<String> = track_paths(&service)
+        .into_iter()
+        .map(|(_, path)| path)
+        .collect();
+    assert_eq!(paths, [format!("{linked_sub}/alpha.wav")]);
+    // The same folder again, either way, adds nothing.
+    assert!(add(&real_sub).added.is_empty());
+    assert!(add(&linked_sub).added.is_empty());
+}
+
+#[test]
+fn get_library_sources_folds_a_folder_added_through_a_symlink_into_its_parent() {
+    let (_dir, service) = test_service();
+    let (_base, linked_music, real_sub) = symlinked_music_folder();
+    let linked_sub = format!("{linked_music}/sub");
+    std::fs::write(format!("{real_sub}/bravo.wav"), b"b").expect("bravo");
+    // As stored before roots were respelled: the subfolder by its real
+    // path (switched off), each file in it twice under the two spellings.
+    let conn = service.db.connect().expect("connect");
+    for (key, value) in [
+        (
+            "ui_source_roots_v1",
+            serde_json::json!([linked_music, real_sub]).to_string(),
+        ),
+        (
+            "ui_source_root_enabled_v1",
+            serde_json::json!({ real_sub.as_str(): false }).to_string(),
+        ),
+    ] {
+        conn.execute(
+            "INSERT INTO app_settings (key, value, updated_at) VALUES (?1, ?2, '')",
+            params![key, value],
+        )
+        .expect("seed sources");
+    }
+    for (id, path) in [
+        ("linked-alpha", format!("{linked_sub}/alpha.wav")),
+        ("real-alpha", format!("{real_sub}/alpha.wav")),
+        ("real-bravo", format!("{real_sub}/bravo.wav")),
+    ] {
+        insert_full_track(&conn, id, id, "Artist", &path, Some(200_000), None, false);
+    }
+    // The real-path copy was analyzed; the playlist holds the other.
+    conn.execute(
+        "UPDATE tracks SET bpm = 120.0, waveform_peaks_path = '/data/w.dat' WHERE id = 'real-alpha'",
+        [],
+    )
+    .expect("analyze");
+    drop(conn);
+    let playlist = service
+        .create_playlist(CreatePlaylistRequest {
+            name: "PL".to_string(),
+        })
+        .expect("create playlist");
+    service
+        .add_tracks_to_playlist(AddTracksToPlaylistRequest {
+            playlist_id: playlist.playlist_id.clone(),
+            track_ids: vec!["linked-alpha".to_string()],
+        })
+        .expect("add to playlist");
+
+    let folders: Vec<(String, bool)> = service
+        .get_library_sources()
+        .expect("sources")
+        .folders
+        .into_iter()
+        .map(|f| (f.path, f.enabled))
+        .collect();
+    assert_eq!(
+        folders,
+        [(linked_music.clone(), true), (linked_sub.clone(), false)]
+    );
+    assert_eq!(
+        track_paths(&service),
+        [
+            ("real-alpha".to_string(), format!("{linked_sub}/alpha.wav")),
+            ("real-bravo".to_string(), format!("{linked_sub}/bravo.wav")),
+        ]
+    );
+    let in_playlist: Vec<String> = service
+        .get_playlist_tracks(GetPlaylistTracksRequest {
+            playlist_id: playlist.playlist_id,
+            ..Default::default()
+        })
+        .expect("playlist tracks")
+        .items
+        .into_iter()
+        .map(|track| track.id)
+        .collect();
+    assert_eq!(in_playlist, ["real-alpha"]);
 }
 
 #[test]

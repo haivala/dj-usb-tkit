@@ -4119,7 +4119,7 @@ td button[data-action]:disabled,
   top: 0;
   right: 0;
   bottom: 0;
-  width: 380px;
+  width: 440px;
   max-width: 100%;
   z-index: 51;
   background: var(--card);
