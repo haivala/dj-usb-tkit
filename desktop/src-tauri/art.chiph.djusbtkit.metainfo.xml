@@ -11,14 +11,17 @@
     <p>
       DJ USB T[ool]Kit: Local-first DJ library manager — scan, analyze and
       export playlists to USB for Pioneer CDJ/XDJ, rekordbox and Engine DJ players (Denon, Numark),
-      and repair broken USB drives.
+      converting FLAC, ALAC, OGG and Opus for players that can't read them, and repair broken USB drives.
     </p>
     <ul>
       <li>Library scanning, playlist management, and local playback</li>
       <li>USB import and export with mirror and additive playlist sync</li>
       <li>Local BPM, key, waveform, and artwork analysis</li>
-      <li>A cue editor for hot cues, beat grid, key, and playback start</li>
-      <li>USB diagnostics and repair tools, with backups made before repair writes</li>
+      <li>A cue editor for hot cues, memory cues, beat grid, key, and playback start</li>
+      <li>Import of tracks, playlists and hot cues from rekordbox and Mixxx</li>
+      <li>Transcodes to MP3 320, AIFF or WAV, kept on the same track with its cues and playlists</li>
+      <li>An Engine DJ library on the USB for Denon and Numark players</li>
+      <li>USB diagnostics and repair tools, with backups made before every USB write</li>
     </ul>
   </description>
 

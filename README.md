@@ -1,6 +1,6 @@
 # DJ USB Tkit
 
-Local-first DJ library manager — scan, analyze and export playlists to USB for Pioneer CDJ/XDJ, rekordbox and Engine DJ players (Denon, Numark), converting FLAC to MP3, AIFF or WAV for players that can't read it, and repair broken USB drives. Built with Rust + Tauri.
+Local-first DJ library manager — scan, analyze and export playlists to USB for Pioneer CDJ/XDJ, rekordbox and Engine DJ players (Denon, Numark), converting FLAC, ALAC, OGG and Opus to MP3, AIFF or WAV for players that can't read them, and repair broken USB drives. Built with Rust + Tauri.
 
 Prebuilt installers for macOS, Windows, and Linux are on the [Releases](https://github.com/haivala/dj-usb-tkit/releases) page.
 

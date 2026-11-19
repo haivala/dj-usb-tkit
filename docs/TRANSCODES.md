@@ -1,6 +1,6 @@
 # Transcodes
 
-Older CDJs can't play FLAC or ALAC. **Convert…** in the selection bar (Library
+Older CDJs can't play FLAC or ALAC, and no player plays OGG or Opus. **Convert…** in the selection bar (Library
 and app playlists) makes another file of each selected track in AIFF, WAV or
 MP3 320 kbps.
 
@@ -75,9 +75,9 @@ size.
 
 The app decides, so selecting a mixed set is fine:
 
-- Only lossless files and OGG Vorbis are converted: FLAC, ALAC (`.m4a` files
-  holding ALAC, not AAC), WAV, AIFF and OGG. Players can't play OGG, so its
-  transcode is how an OGG track gets on a USB.
+- Only lossless files, OGG Vorbis and Opus are converted: FLAC, ALAC (`.m4a`
+  files holding ALAC, not AAC), WAV, AIFF, OGG and Opus. Players can't play OGG
+  or Opus, so a transcode is how such a track gets on a USB.
 - A file already in the chosen format is skipped (a WAV is not converted to
   WAV).
 - A track that already has an up-to-date transcode in that format is skipped.

@@ -37,7 +37,8 @@ openly, and adds tooling Rekordbox doesn't expose to users at all.
 ## Cross-platform, including Linux
 
 Rekordbox has no official Linux release; DJ USB Tkit builds and runs on
-Linux (Arch, Ubuntu/Debian, Fedora — see the main [README](../README.md)),
+Linux (Arch, Ubuntu/Debian, Fedora — see
+[RELEASE_BUILD_INSTALL.md](RELEASE_BUILD_INSTALL.md)),
 in addition to Windows and macOS.
 
 ## Open source
