@@ -1017,17 +1017,11 @@ pub(super) fn apply_pdb_track_string_alignment_repair(
     if mutations.is_empty() {
         return Ok(0);
     }
-    let before = bytes.to_vec();
     let patched = crate::pdb_writer::mutate_tracks_in_place(
         bytes,
         &mutations,
         PdbLayoutProfile::DEFAULT,
         page_size,
-    )?;
-    crate::pdb_reader::check_written_page_conventions(
-        &before,
-        bytes,
-        "Track string alignment repair",
     )?;
     Ok(patched)
 }
@@ -1158,11 +1152,9 @@ pub(super) fn reencode_pdb_dictionary_rows(
     if rows.is_empty() {
         return Ok(0);
     }
-    let before = bytes.to_vec();
     let patched = crate::pdb_writer::realign_dictionary_rows_in_place(
         bytes, table_type, id_offset, &rows, page_size,
     )?;
-    crate::pdb_reader::check_written_page_conventions(&before, bytes, &format!("{label} repair"))?;
     Ok(patched)
 }
 
@@ -1289,21 +1281,13 @@ pub(in crate::service) fn detect_pdb_inconsistent_page_footers(
         return Vec::new();
     }
     let mut out = Vec::new();
-    for i in 1..bytes.len() / page_size {
-        let page = &bytes[i * page_size..(i + 1) * page_size];
-        if read_u32_le_at(page, 4).unwrap_or(0) == 0 || page[0x1b] & 0x40 != 0 {
-            continue; // blank page or sentinel/index page
-        }
-        let table_type = read_u32_le_at(page, 8).unwrap_or(9999);
-        let Some((slots, _)) = pdb_page::read_slot_counts(page) else {
+    for mismatch in crate::pdb_reader::validate_pdb_page_conventions(bytes) {
+        let i = mismatch.page_index as usize;
+        let Some(page) = bytes.get(i * page_size..(i + 1) * page_size) else {
             continue;
         };
-        if slots == 0
-            || !pdb_page::footer_clear_of_heap(page, slots)
-            || pdb_page::transaction_consistent(page, slots)
-        {
-            continue;
-        }
+        let table_type = mismatch.table_type;
+        let slots = usize::from(mismatch.trc);
         let groups: Vec<_> = pdb_page::footer_groups(page_size, slots).collect();
         let rowpf: Vec<u16> = groups.iter().map(|g| g.rowpf(page) & g.mask()).collect();
         let tranrf: Vec<u16> = groups.iter().map(|g| g.tranrf(page) & g.mask()).collect();

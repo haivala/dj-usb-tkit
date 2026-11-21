@@ -74,6 +74,8 @@ mod pdb_fixes;
 mod player_menu;
 mod run;
 mod strict_parity;
+mod write_gate;
+pub use write_gate::{pdb_shape_problems, pdb_write_problems};
 #[cfg(test)]
 mod tests;
 

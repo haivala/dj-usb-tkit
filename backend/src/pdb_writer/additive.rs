@@ -2714,12 +2714,6 @@ pub(crate) fn try_write_pdb_additive_in_place(
     // more, without requiring a manual repair action.
     remove_duplicate_playlist_entries_inplace(&mut bytes);
 
-    crate::pdb_reader::check_written_page_conventions(
-        existing_bytes,
-        &bytes,
-        "PDB additive write",
-    )?;
-
     // Do NOT pad to next_unused here. The blank ec pages come naturally from
     // the resize done in append_rows_to_chain_in_place when overflow is placed
     // at max(physical_end, next_unused) — pages between physical_end and the

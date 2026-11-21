@@ -128,6 +128,11 @@ path = "src/bin/compare_pdb.rs"
 required-features = ["dev-tools"]
 
 [[bin]]
+name = "check_pdb_shape"
+path = "src/bin/check_pdb_shape.rs"
+required-features = ["dev-tools"]
+
+[[bin]]
 name = "dump_pdb_anomalies"
 path = "src/bin/dump_pdb_anomalies.rs"
 required-features = ["dev-tools"]

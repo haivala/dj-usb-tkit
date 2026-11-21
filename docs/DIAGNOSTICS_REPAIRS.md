@@ -344,6 +344,39 @@ the second and its collection date to the first (see `docs/PDB.md`). Genre, labe
 that differ only in case or punctuation aren't noted: the writers match
 dictionary names that way, so they keep each side's spelling.
 
+## Write gate
+
+Every PDB write, whatever made it (fresh export, export onto a stick, mirror
+export, repair, track or cue edit, playlist change, player menu), goes
+through a `UsbWriteSession`, and its commit checks the staged PDB before
+anything reaches the USB (`pdb_write_problems` in
+`backend/src/service/repair/write_gate.rs`). The commit fails, and the USB
+keeps both databases as they were, when the new PDB has a problem the old
+one didn't:
+
+- a page whose footer breaks the transaction rule (`docs/PDB.md`, "Page
+  Footer Conventions");
+- a damaged page header: flags other than `0x24`/`0x34`, or a live-row count
+  that isn't the page's `rowpf` bits;
+- a footer that runs into the page's rows;
+- a track or album string where the players can't read it;
+- a table chain that doesn't link from its first page to its last, ends past
+  the file, or whose next free page isn't what its last page points at, or
+  is another table's data; half-written growth pages;
+- a header seq not above every page's seq;
+- an index page that doesn't point at its table's pages;
+- two live track or playlist rows with one id, or a playlist entry, folder or
+  dictionary reference that names no row.
+
+These are the shapes the repair detectors find, so report, repair and gate
+share one detector each. A problem the stick already had doesn't stop a
+write; the repairs handle those. Every PDB rekordbox wrote without crashing
+passes the same checks with nothing to report
+(`cargo run --features dev-tools --bin check_pdb_shape -- <export.pdb>`).
+`backend/tests/write_paths_functional.rs` runs every write command on an
+app-made stick and on one with rekordbox's page shapes and checks the PDB
+after each.
+
 ## Implementation Anchors
 
 | Area | File |
@@ -385,6 +418,9 @@ Relevant test areas:
 
 - `backend/tests/diagnostics_functional.rs`
 - `backend/tests/export_shape_parity_functional.rs`
+- `backend/tests/write_paths_functional.rs`: every USB write command, run on an
+  app-made and a rekordbox-shaped stick, leaves a PDB the write gate finds
+  nothing in
 - `backend/src/service/diagnostics/tests.rs` unit tests
 - `backend/src/service/repair/tests.rs` unit tests
 - `backend/src/edb.rs` unit tests

@@ -463,17 +463,11 @@ pub(super) fn apply_separate_shared_analysis(
     }
 
     if !mutations.is_empty() {
-        let before = bytes.clone();
         crate::pdb_writer::mutate_tracks_in_place(
             &mut bytes,
             &mutations,
             PdbLayoutProfile::DEFAULT,
             page_size,
-        )?;
-        crate::pdb_reader::check_written_page_conventions(
-            &before,
-            &bytes,
-            "separating shared analysis",
         )?;
         std::fs::write(&pdb_path, &bytes)?;
     }
@@ -1036,14 +1030,12 @@ impl BackendService {
                 bundles.push((row.anlz_path.clone(), rel));
             }
         }
-        let before = bytes.clone();
         let relinked = crate::pdb_writer::mutate_tracks_in_place(
             &mut bytes,
             &mutations,
             PdbLayoutProfile::DEFAULT,
             page_size,
         )?;
-        crate::pdb_reader::check_written_page_conventions(&before, &bytes, "Relink")?;
         std::fs::write(&pdb_path, &bytes)?;
 
         // ── ANLZ: the bundle names the file it belongs to ─────────────

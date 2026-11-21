@@ -72,6 +72,7 @@ use track_matching::{
 
 // Re-export functions used by commands.rs via crate::service::*
 pub use engine_export::{EngineLibrarySummary, rebuild_engine_library};
+pub use repair::{pdb_shape_problems, pdb_write_problems};
 pub use usb_utils::{detect_external_rekordbox_db, initialize_usb};
 use usb_utils::{
     detect_external_rekordbox_db as detect_external_rekordbox_db_util,

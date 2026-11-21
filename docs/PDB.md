@@ -64,10 +64,10 @@ Known PDB rules:
   history. Normal export preserves them and ORs in only newly appended row bits.
 - Do not normalize existing `tranrf` to equal `rowpf`; that shape is unsafe on
   older PDB-first hardware players.
-- Every page a write changes or adds must follow the transaction rule (see
-  "Page Footer Conventions"), or the write is refused
-  (`check_written_page_conventions`). A page the write leaves alone never
-  blocks it; the footer repair handles those.
+- No write may leave a PDB with a problem rekordbox or the players can't
+  read that it didn't have before: every write passes `pdb_write_problems`
+  when its session commits, or nothing reaches the USB (see
+  `docs/DIAGNOSTICS_REPAIRS.md`, "Write gate").
 - `tt=8` playlist-entry rows are identified by `(playlist_id, track_id)`.
   `entry_index` is a mutable position, never part of identity: a track whose
   order within an already-exported playlist changes is patched in place

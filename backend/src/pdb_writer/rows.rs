@@ -241,12 +241,10 @@ pub(crate) fn rewrite_variable_page_rows_in_place(
     page[0x1e..0x20].copy_from_slice(&(used_s as u16).to_le_bytes());
     let free_s = page_size.saturating_sub(HEAP_START + used_s + footer_size);
     page[0x1c..0x1e].copy_from_slice(&(free_s as u16).to_le_bytes());
-    let num_rl = if row_offsets.is_empty() {
-        0u16
-    } else {
-        (row_offsets.len() - 1) as u16
-    };
-    page[0x22..0x24].copy_from_slice(&num_rl.to_le_bytes());
+    // Every slot's tranrf bit is set below, so the transaction rule gives
+    // `(trc, 0)`: the shape t06/t07/t16/t17/t18 keep. Callers writing a
+    // `u5 = 1` table restamp it (`apply_page_footer_convention`).
+    page[0x22..0x24].copy_from_slice(&0u16.to_le_bytes());
 
     if page_size > HEAP_START {
         page[HEAP_START..].fill(0u8);

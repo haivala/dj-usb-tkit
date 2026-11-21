@@ -202,6 +202,7 @@ pub fn count_pdb_playlists(path: &Path) -> Option<usize> {
 /// A data page whose `(u5, num_rl)` breaks the transaction rule.
 #[derive(Debug, Clone)]
 pub struct PdbPageConventionMismatch {
+    /// The page's position in the file.
     pub page_index: u32,
     pub table_type: u32,
     /// Row slots on the page.
@@ -232,7 +233,8 @@ impl std::fmt::Display for PdbPageConventionMismatch {
 /// count of its `tranrf` bits and the lowest of them, or rekordbox's
 /// placeholder pair (see `docs/PDB.md`, "Page Footer Conventions"). Every
 /// page rekordbox writes follows it, and rekordbox 6 crashes on a page that
-/// doesn't, so the writers refuse to leave one behind.
+/// doesn't: the footer repair fixes these pages, and no write may add one
+/// (`pdb_write_problems`).
 ///
 /// Index pages (`pf=0x64`), empty slots and pages whose footer would run
 /// into the row heap (the footer repairs leave those alone) are skipped.
@@ -248,7 +250,7 @@ pub fn validate_pdb_page_conventions(bytes: &[u8]) -> Vec<PdbPageConventionMisma
     if bytes.len() < len_page {
         return mismatches;
     }
-    for page in bytes.chunks_exact(len_page).skip(1) {
+    for (index, page) in bytes.chunks_exact(len_page).enumerate().skip(1) {
         let stored_idx = read_u32_le_at(page, 0x04).unwrap_or(0);
         if stored_idx == 0 || read_u8_at(page, 0x1b).unwrap_or(0) == 0x64 {
             continue;
@@ -268,7 +270,7 @@ pub fn validate_pdb_page_conventions(bytes: &[u8]) -> Vec<PdbPageConventionMisma
             .unwrap_or((pdb_page::PLACEHOLDER_FIELD, pdb_page::PLACEHOLDER_FIELD));
         let (observed_u5, observed_num_rl) = pdb_page::read_transaction_header(page);
         mismatches.push(PdbPageConventionMismatch {
-            page_index: stored_idx,
+            page_index: index as u32,
             table_type: read_u32_le_at(page, 0x08).unwrap_or(0),
             trc: slots as u16,
             observed_u5,
@@ -278,46 +280,6 @@ pub fn validate_pdb_page_conventions(bytes: &[u8]) -> Vec<PdbPageConventionMisma
         });
     }
     mismatches
-}
-
-/// Fails when a write left a page breaking the transaction rule
-/// ([`validate_pdb_page_conventions`]) that it changed or added: `before` is
-/// the PDB as it was, `after` as written. A page the write didn't touch is
-/// left to the footer repair, never a reason to refuse the write. `what`
-/// names the write in the error.
-pub fn check_written_page_conventions(
-    before: &[u8],
-    after: &[u8],
-    what: &str,
-) -> BackendResult<()> {
-    let Some(len_page) = crate::utils::read_u32_le_at(after, 4)
-        .map(|v| v as usize)
-        .filter(|&v| v > 0)
-    else {
-        return Ok(());
-    };
-    fn page_at(bytes: &[u8], index: usize, len_page: usize) -> Option<&[u8]> {
-        bytes.get(index * len_page..(index + 1) * len_page)
-    }
-    let written: Vec<_> = validate_pdb_page_conventions(after)
-        .into_iter()
-        .filter(|m| {
-            let index = m.page_index as usize;
-            page_at(before, index, len_page) != page_at(after, index, len_page)
-        })
-        .collect();
-    if written.is_empty() {
-        return Ok(());
-    }
-    let detail = written
-        .iter()
-        .take(8)
-        .map(|m| m.to_string())
-        .collect::<Vec<_>>()
-        .join(" | ");
-    Err(BackendError::Internal(format!(
-        "{what} blocked: page-header convention mismatches ({detail})"
-    )))
 }
 
 /// The page size from a PDB file header.

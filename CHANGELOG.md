@@ -60,13 +60,21 @@
   PDB's track numbers, which rekordbox assigns separately, so history could name the wrong tracks.
 - **Fix:** ISRC codes rekordbox wrote to the PDB are read correctly, so a repair no longer rewrites those tracks.
 - **Fix:** Exports and repairs no longer refuse to write to a USB that rekordbox has just exported to. They
-  checked rekordbox's pages for the app's own page shape; they now check only the pages they write.
+  checked rekordbox's pages for the app's own page shape; they now refuse only problems the write itself adds.
+- **Fix:** A Player Menu change leaves the PDB's menu pages in the shape rekordbox writes. Before, their page
+  bookkeeping was one rekordbox 6 can crash on.
 - **Fix:** A playlist rekordbox numbers differently in the PDB and the eDB no longer fails parity. Parity compares
   the order the players show the playlists in, not the numbers, so Preview Fixes no longer offers a repair that
   changes nothing after every rekordbox export.
 - **Fix:** Tracks rekordbox exported no longer show up as differing in their date added, so Preview Fixes no
   longer offers to rewrite them. rekordbox keeps two dates in the PDB, the day a track joined its collection and
   the day it was added to the USB; a repair now compares and writes each the way rekordbox does.
+- **Improvement:** Every change the app writes to a USB (exports, repairs, track and cue edits, playlist order and
+  removal, the Player Menu) is checked before it reaches the stick. If the new PDB would have anything rekordbox
+  or the players can't read that it didn't have before, nothing is written, the USB keeps both databases as they
+  were, and the Event Log names the problem.
+- **Chore:** Tests run every kind of USB write, one after another, on a USB the app made and on one shaped the way
+  rekordbox leaves it, and check that the PDB stays readable after each.
 - **Improvement:** Track analysis is faster, most of all for MP3s. The results are the same as before.
 
 ## 0.6.4

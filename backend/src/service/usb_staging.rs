@@ -1059,6 +1059,9 @@ pub struct UsbWriteSession<'s> {
     pdb_original: Option<Option<Vec<u8>>>,
     /// Staging off: the USB files as they were, put back on a drop.
     direct_snapshots: [Option<Option<Vec<u8>>>; 2],
+    /// The PDB is a backup put back as it was, not something a writer made:
+    /// the shape check doesn't apply.
+    pdb_restored: bool,
     done: bool,
 }
 
@@ -1172,6 +1175,7 @@ impl<'s> UsbWriteSession<'s> {
             touched: [false; 2],
             pdb_original: None,
             direct_snapshots: [None, None],
+            pdb_restored: false,
             done: false,
         }
     }
@@ -1362,7 +1366,43 @@ impl<'s> UsbWriteSession<'s> {
             std::fs::create_dir_all(parent)?;
         }
         std::fs::copy(source, &path)?;
+        if kind == DbKind::Pdb {
+            self.pdb_restored = true;
+        }
         Ok(())
+    }
+
+    /// Fails when this session's PDB has something rekordbox or the players
+    /// can't read that the PDB before it didn't (`pdb_write_problems`). The
+    /// caller then drops the session, which writes nothing to the USB.
+    fn refuse_unreadable_pdb(&self) -> BackendResult<()> {
+        let path = staged_path(&self.usb_root, DbKind::Pdb, false)?;
+        if !path.is_file() {
+            return Ok(());
+        }
+        let after = std::fs::read(&path)?;
+        let before = self
+            .pdb_original
+            .as_ref()
+            .and_then(|bytes| bytes.as_deref());
+        let problems = super::pdb_write_problems(before, &after);
+        if problems.is_empty() {
+            return Ok(());
+        }
+        for problem in &problems {
+            crate::logging::emit(crate::logging::Level::Warn, "usb-staging", problem);
+        }
+        Err(BackendError::Internal(format!(
+            "nothing was written to the USB: the new PDB has {} problem(s) rekordbox or the \
+             players can't read, a bug in this app ({})",
+            problems.len(),
+            problems
+                .iter()
+                .take(3)
+                .cloned()
+                .collect::<Vec<_>>()
+                .join("; ")
+        )))
     }
 
     /// Writes each changed database back to the USB, both or neither, and
@@ -1378,6 +1418,12 @@ impl<'s> UsbWriteSession<'s> {
             }
         }
         self.close_edb()?;
+        if self.touched[0] && !self.pdb_restored {
+            // A USB changed from outside is a conflict, whatever the PDB holds.
+            check_write_back(&self.usb_root, DbKind::Pdb)?;
+            check_write_back(&self.usb_root, DbKind::Edb)?;
+            self.refuse_unreadable_pdb()?;
+        }
         let original = self.pdb_original.take();
         let result = write_back_both_or_neither(
             &self.usb_root,
