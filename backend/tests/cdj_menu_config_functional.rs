@@ -2,8 +2,8 @@ use std::fs;
 
 use backend::commands::BackendCommands;
 use backend::models::{
-    GetUsbPlayerMenuConfigRequest, InitializeUsbRequest, UpdateUsbPlayerMenuConfigData,
-    UpdateUsbPlayerMenuConfigRequest, UsbPlayerMenuEdit,
+    GetUsbPlayerMenuConfigRequest, InitializeUsbRequest, RepairUsbDiagnosticsRequest,
+    UpdateUsbPlayerMenuConfigData, UpdateUsbPlayerMenuConfigRequest, UsbPlayerMenuEdit,
 };
 use backend::service::export_helpers::{
     encode_pdb_t16_row, load_pdb_t16_decoded, load_pdb_t16_raw, load_pdb_t17_live_rows,
@@ -426,6 +426,111 @@ fn a_menu_edit_keeps_each_t17_rows_byte_and_place() {
         date_added(&after),
         "DATE ADDED's row isn't written"
     );
+}
+
+/// `(u5, num_rl)` of each live t16/t17 data page, by page.
+fn menu_page_transactions(pdb: &[u8]) -> Vec<(usize, u16, u16, u16)> {
+    let page_size = u32::from_le_bytes(pdb[4..8].try_into().unwrap()) as usize;
+    pdb.chunks_exact(page_size)
+        .enumerate()
+        .skip(1)
+        .filter(|(_, page)| {
+            let table = u32::from_le_bytes(page[8..12].try_into().unwrap());
+            u32::from_le_bytes(page[4..8].try_into().unwrap()) != 0
+                && matches!(table, 16 | 17)
+                && page[0x1b] != 0x64
+                && u16::from_le_bytes([page[0x1e], page[0x1f]]) != 0
+        })
+        .map(|(index, page)| {
+            let slots = u32::from_le_bytes(page[0x18..0x1c].try_into().unwrap()) & 0x1fff;
+            (
+                index,
+                slots as u16,
+                u16::from_le_bytes([page[0x20], page[0x21]]),
+                u16::from_le_bytes([page[0x22], page[0x23]]),
+            )
+        })
+        .collect()
+}
+
+/// Earlier versions' menu edits left the rewritten menu pages with every row
+/// in the last transaction but `num_rl` at the last slot instead of the
+/// first. Diagnostics find it and one repair gives the pages back the shape a
+/// fresh USB has, the menu unchanged.
+#[test]
+fn repair_fixes_the_menu_pages_earlier_versions_wrote() {
+    let usb_dir = tempdir().expect("usb tempdir");
+    let usb_root = usb_dir.path().to_path_buf();
+    let data_dir = tempdir().expect("data tempdir");
+    let backend = BackendCommands::new(data_dir.path()).expect("create backend");
+    initialized_usb(&backend, &usb_root);
+    let edit = edit_menu(&backend, &usb_root, UsbPlayerMenuEdit::Remove, 139);
+    assert!(edit.data.expect("edit").updated);
+    let menu = menu_kinds(&get_menu(&backend, &usb_root).current_items);
+
+    let pdb_path = usb_root.join("PIONEER/rekordbox/export.pdb");
+    let mut pdb = fs::read(&pdb_path).expect("read PDB");
+    let pages = menu_page_transactions(&pdb);
+    assert!(
+        pages
+            .iter()
+            .all(|&(_, slots, u5, num_rl)| (u5, num_rl) == (slots, 0)),
+        "a menu edit writes the fresh shape: {pages:?}"
+    );
+    let page_size = u32::from_le_bytes(pdb[4..8].try_into().unwrap()) as usize;
+    for &(index, slots, _, _) in &pages {
+        let at = index * page_size + 0x22;
+        pdb[at..at + 2].copy_from_slice(&(slots - 1).to_le_bytes());
+    }
+    fs::write(&pdb_path, &pdb).expect("write the earlier shape");
+    assert!(!backend::service::pdb_shape_problems(&pdb).is_empty());
+
+    let repair = |apply: bool, selected_fix_ids: Vec<String>| {
+        backend
+            .repair_usb_diagnostics(RepairUsbDiagnosticsRequest {
+                usb_root: Some(usb_root.to_string_lossy().into_owned()),
+                apply,
+                selected_fix_ids,
+            })
+            .data
+            .expect("repair")
+            .data
+    };
+    let fixes: Vec<String> = repair(false, Vec::new())
+        .proposed_fixes
+        .into_iter()
+        .map(|fix| fix.id)
+        .collect();
+    assert!(
+        fixes
+            .iter()
+            .any(|id| id == "repair_pdb_page_footer_transaction"),
+        "{fixes:?}"
+    );
+    let applied = repair(true, fixes);
+    assert!(
+        applied.failed_fixes.is_empty(),
+        "{:?}",
+        applied.failed_fixes
+    );
+
+    let pdb = fs::read(&pdb_path).expect("read PDB");
+    assert_eq!(
+        menu_page_transactions(&pdb),
+        pages,
+        "the fresh shape is back"
+    );
+    assert_eq!(
+        backend::service::pdb_shape_problems(&pdb),
+        Vec::<String>::new()
+    );
+    assert_eq!(menu_kinds(&get_menu(&backend, &usb_root).current_items), menu);
+    let left: Vec<String> = repair(false, Vec::new())
+        .proposed_fixes
+        .into_iter()
+        .map(|fix| fix.id)
+        .collect();
+    assert!(left.is_empty(), "one repair is enough: {left:?}");
 }
 
 #[test]

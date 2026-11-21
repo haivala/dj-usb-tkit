@@ -62,7 +62,7 @@
 - **Fix:** Exports and repairs no longer refuse to write to a USB that rekordbox has just exported to. They
   checked rekordbox's pages for the app's own page shape; they now refuse only problems the write itself adds.
 - **Fix:** A Player Menu change leaves the PDB's menu pages in the shape rekordbox writes. Before, their page
-  bookkeeping was one rekordbox 6 can crash on.
+  bookkeeping was one rekordbox 6 can crash on. Repair puts right the menu pages earlier versions left that way.
 - **Fix:** A playlist rekordbox numbers differently in the PDB and the eDB no longer fails parity. Parity compares
   the order the players show the playlists in, not the numbers, so Preview Fixes no longer offers a repair that
   changes nothing after every rekordbox export.
