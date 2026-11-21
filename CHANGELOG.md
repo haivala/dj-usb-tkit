@@ -39,6 +39,8 @@
 
 ## Unreleased
 
+**Severity:** critical — see item(s) marked **(CRITICAL)** below.
+
 - **Fix:** The rekordbox and Mixxx chips turn green once every track imported from them is analyzed, as
   folder chips do.
 - **Fix:** A source folder added through a symlink, inside a source folder added by another path, no longer
@@ -48,7 +50,7 @@
   source folder.
 - **Fix:** Analyze Library also analyzes rekordbox tracks that are missing a waveform, BPM or length. The BPM,
   key and beat grid that came from rekordbox are kept.
-- **Fix:** Repairing a USB that rekordbox exported to no longer rewrites rekordbox's own page bookkeeping in
+- **Fix (CRITICAL):** Repairing a USB that rekordbox exported to no longer rewrites rekordbox's own page bookkeeping in
   the PDB. On such a USB, rekordbox 6 crashed on its next export or lost its playlists.
 - **Fix:** Repair puts right USBs an earlier repair left that way, and pages rekordbox left half-written when it
   crashed during an export.
@@ -59,9 +61,9 @@
 - **Fix:** Syncing the eDB's play history from the PDB points each entry at the eDB's own track. It used the
   PDB's track numbers, which rekordbox assigns separately, so history could name the wrong tracks.
 - **Fix:** ISRC codes rekordbox wrote to the PDB are read correctly, so a repair no longer rewrites those tracks.
-- **Fix:** Exports and repairs no longer refuse to write to a USB that rekordbox has just exported to. They
+- **Fix (CRITICAL):** Exports and repairs no longer refuse to write to a USB that rekordbox has just exported to. They
   checked rekordbox's pages for the app's own page shape; they now refuse only problems the write itself adds.
-- **Fix:** A Player Menu change leaves the PDB's menu pages in the shape rekordbox writes. Before, their page
+- **Fix (CRITICAL):** A Player Menu change leaves the PDB's menu pages in the shape rekordbox writes. Before, their page
   bookkeeping was one rekordbox 6 can crash on. Repair puts right the menu pages earlier versions left that way.
 - **Fix:** A playlist rekordbox numbers differently in the PDB and the eDB no longer fails parity. Parity compares
   the order the players show the playlists in, not the numbers, so Preview Fixes no longer offers a repair that
