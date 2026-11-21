@@ -577,9 +577,11 @@ pub fn update_existing_content_row(
         "artist_id_lyricist",
         int(track.artist_id_lyricist.map(i64::from)),
     );
+    // A 0 id means none: rekordbox keeps such a reference NULL.
+    let nonzero_id = crate::edb::nonzero_id;
     want(
         "artist_id_originalArtist",
-        int(track.artist_id_original_artist.map(i64::from)),
+        int(nonzero_id(track.artist_id_original_artist)),
     );
     let named_artist = |name: Option<&str>| -> BackendResult<Option<i64>> {
         match name.map(str::trim).filter(|v| !v.is_empty()) {
@@ -589,11 +591,11 @@ pub fn update_existing_content_row(
     };
     want(
         "artist_id_remixer",
-        int(named_artist(track.remixer.as_deref())?.or(track.artist_id_remixer.map(i64::from))),
+        int(named_artist(track.remixer.as_deref())?.or(nonzero_id(track.artist_id_remixer))),
     );
     want(
         "artist_id_composer",
-        int(named_artist(track.composer.as_deref())?.or(track.artist_id_composer.map(i64::from))),
+        int(named_artist(track.composer.as_deref())?.or(nonzero_id(track.artist_id_composer))),
     );
     // By name, as the PDB row is: the library's `genre_id` is never set, so
     // writing it would clear the genre the PDB keeps.
@@ -608,7 +610,7 @@ pub fn update_existing_content_row(
         "label_id",
         match track.label.as_deref().filter(|v| !v.trim().is_empty()) {
             Some(label) => int(crate::edb::find_or_insert_label(tx, label)?),
-            None => int(track.label_id.map(i64::from)),
+            None => int(nonzero_id(track.label_id)),
         },
     );
     if from_library {
@@ -623,7 +625,8 @@ pub fn update_existing_content_row(
             })),
         );
         want("isHotCueAutoLoadOn", Some(Value::Integer(1)));
-        want("isKuvoDeliverStatusOn", Some(Value::Integer(1)));
+        // Always 0, though rekordbox writes 1: the app never publishes to KUVO.
+        want("isKuvoDeliverStatusOn", Some(Value::Integer(0)));
         want("hasModified", Some(Value::Integer(0)));
     }
     // The album is only filled in: a row's own album stays.

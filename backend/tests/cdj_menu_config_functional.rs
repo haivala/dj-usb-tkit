@@ -524,7 +524,10 @@ fn repair_fixes_the_menu_pages_earlier_versions_wrote() {
         backend::service::pdb_shape_problems(&pdb),
         Vec::<String>::new()
     );
-    assert_eq!(menu_kinds(&get_menu(&backend, &usb_root).current_items), menu);
+    assert_eq!(
+        menu_kinds(&get_menu(&backend, &usb_root).current_items),
+        menu
+    );
     let left: Vec<String> = repair(false, Vec::new())
         .proposed_fixes
         .into_iter()

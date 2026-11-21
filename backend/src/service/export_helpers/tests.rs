@@ -257,6 +257,12 @@ fn insert_content_from_template_matches_rb6_null_empty_conventions() {
     let mut track = mapping_test_track();
     track.title_for_search = None;
     track.release_date = None;
+    // A 0 id from the library means none, as no id does.
+    track.artist_id_lyricist = None;
+    track.artist_id_original_artist = Some(0);
+    track.artist_id_remixer = None;
+    track.artist_id_composer = Some(0);
+    track.label_id = Some(0);
 
     let content_id =
         insert_content_from_template(&conn, &track, Some("2024-07-09")).expect("insert content");
@@ -264,26 +270,81 @@ fn insert_content_from_template_matches_rb6_null_empty_conventions() {
 
     let row = conn
         .query_row(
-            "SELECT titleForSearch, releaseDate FROM content WHERE content_id = 1",
+            "SELECT titleForSearch, releaseDate, artist_id_lyricist, artist_id_originalArtist,
+                    artist_id_remixer, artist_id_composer, label_id
+             FROM content WHERE content_id = 1",
             [],
             |r| {
                 Ok((
                     r.get::<_, Option<String>>(0)?,
                     r.get::<_, Option<String>>(1)?,
+                    [
+                        r.get::<_, Option<i64>>(2)?,
+                        r.get::<_, Option<i64>>(3)?,
+                        r.get::<_, Option<i64>>(4)?,
+                        r.get::<_, Option<i64>>(5)?,
+                        r.get::<_, Option<i64>>(6)?,
+                    ],
                 ))
             },
         )
         .expect("load content row");
 
-    assert_eq!(
-        row.0.as_deref(),
-        Some(""),
-        "titleForSearch should be empty string when missing"
-    );
+    // rekordbox 6.8.6 (USB_CUE_RB) and 7 both leave these NULL.
+    assert_eq!(row.0, None, "titleForSearch is NULL when missing");
     assert_eq!(
         row.1.as_deref(),
         Some("2024-05-01"),
         "releaseDate should fall back to the file timestamp when release_date is missing"
+    );
+    assert_eq!(
+        row.2,
+        [Some(0), None, None, None, None],
+        "a missing reference is NULL, except the lyricist rekordbox writes as 0"
+    );
+}
+
+#[test]
+fn new_artist_and_album_rows_leave_search_name_and_image_null_like_rekordbox() {
+    let conn = rusqlite::Connection::open_in_memory().expect("open memory db");
+    conn.execute_batch(
+        r#"
+            CREATE TABLE artist(artist_id integer primary key, name varchar, nameForSearch varchar);
+            CREATE TABLE album(album_id integer primary key, name varchar, artist_id integer,
+                image_id integer, isComplation integer, nameForSearch varchar);
+            -- Template rows with values a new row must not inherit.
+            INSERT INTO artist VALUES (1, 'Old Artist', 'old artist');
+            INSERT INTO album VALUES (1, 'Old Album', 1, 7, 1, 'old album');
+        "#,
+    )
+    .expect("create schema");
+
+    let album_id = crate::edb::find_or_insert_album(&conn, Some("New Album"), Some("New Artist"))
+        .expect("insert album")
+        .expect("album id");
+
+    let album = conn
+        .query_row(
+            "SELECT al.artist_id, al.image_id, al.isComplation, al.nameForSearch,
+                    ar.name, ar.nameForSearch
+             FROM album al JOIN artist ar ON ar.artist_id = al.artist_id
+             WHERE al.album_id = ?1",
+            [album_id],
+            |r| {
+                Ok((
+                    r.get::<_, Option<i64>>(1)?,
+                    r.get::<_, Option<i64>>(2)?,
+                    r.get::<_, Option<String>>(3)?,
+                    r.get::<_, String>(4)?,
+                    r.get::<_, Option<String>>(5)?,
+                ))
+            },
+        )
+        .expect("load album row");
+    assert_eq!(
+        album,
+        (None, Some(0), None, "New Artist".to_string(), None),
+        "image_id and both nameForSearch are NULL, isComplation 0"
     );
 }
 

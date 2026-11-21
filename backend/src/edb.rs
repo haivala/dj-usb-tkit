@@ -1337,6 +1337,11 @@ pub fn insert_content_from_template(
     Ok(next_id)
 }
 
+/// A reference id the track really has: 0 means none, as in the PDB.
+pub(crate) fn nonzero_id(id: Option<u32>) -> Option<i64> {
+    id.filter(|&id| id != 0).map(i64::from)
+}
+
 pub fn populate_content_values_map(
     conn: &rusqlite::Connection,
     values: &mut HashMap<String, Value>,
@@ -1476,10 +1481,13 @@ pub fn populate_content_values_map(
         );
     }
     if values.contains_key("titleForSearch") {
+        // rekordbox (6.8.6 and 7) leaves it NULL when there is none.
         let title_for_search =
-            sanitized_optional_nonempty_metadata_text(track.title_for_search.as_deref())
-                .unwrap_or_default();
-        values.insert("titleForSearch".to_string(), Value::Text(title_for_search));
+            sanitized_optional_nonempty_metadata_text(track.title_for_search.as_deref());
+        values.insert(
+            "titleForSearch".to_string(),
+            title_for_search.map(Value::Text).unwrap_or(Value::Null),
+        );
     }
     if values.contains_key("isrc") {
         values.insert(
@@ -1546,10 +1554,13 @@ pub fn populate_content_values_map(
             Value::Integer(i64::from(track.artist_id_lyricist.unwrap_or(0))),
         );
     }
+    // rekordbox leaves a reference the track doesn't have NULL, never 0; only
+    // `artist_id_lyricist` is 0 (above).
+    let id_or_null = |id: Option<i64>| id.map(Value::Integer).unwrap_or(Value::Null);
     if values.contains_key("artist_id_originalArtist") {
         values.insert(
             "artist_id_originalArtist".to_string(),
-            Value::Integer(i64::from(track.artist_id_original_artist.unwrap_or(0))),
+            id_or_null(nonzero_id(track.artist_id_original_artist)),
         );
     }
     let named_artist = |name: Option<&str>| -> BackendResult<Option<i64>> {
@@ -1559,16 +1570,12 @@ pub fn populate_content_values_map(
         }
     };
     if values.contains_key("artist_id_remixer") {
-        let id = named_artist(track.remixer.as_deref())?
-            .or(track.artist_id_remixer.map(i64::from))
-            .unwrap_or(0);
-        values.insert("artist_id_remixer".to_string(), Value::Integer(id));
+        let id = named_artist(track.remixer.as_deref())?.or(nonzero_id(track.artist_id_remixer));
+        values.insert("artist_id_remixer".to_string(), id_or_null(id));
     }
     if values.contains_key("artist_id_composer") {
-        let id = named_artist(track.composer.as_deref())?
-            .or(track.artist_id_composer.map(i64::from))
-            .unwrap_or(0);
-        values.insert("artist_id_composer".to_string(), Value::Integer(id));
+        let id = named_artist(track.composer.as_deref())?.or(nonzero_id(track.artist_id_composer));
+        values.insert("artist_id_composer".to_string(), id_or_null(id));
     }
     if values.contains_key("genre_id") {
         let resolved_genre_id = if let Some(ref genre_name) = track.genre {
@@ -1586,9 +1593,8 @@ pub fn populate_content_values_map(
             Some(label) => find_or_insert_label(conn, label)?,
             None => None,
         }
-        .or(track.label_id.map(i64::from))
-        .unwrap_or(0);
-        values.insert("label_id".to_string(), Value::Integer(id));
+        .or(nonzero_id(track.label_id));
+        values.insert("label_id".to_string(), id_or_null(id));
     }
     if values.contains_key("analysedBits") {
         values.insert(
@@ -1894,8 +1900,9 @@ pub fn find_or_insert_artist(
             if values.contains_key("name") {
                 values.insert("name".to_string(), Value::Text(artist_name.to_string()));
             }
+            // rekordbox leaves it NULL; the template row's value is not ours.
             if values.contains_key("nameForSearch") {
-                values.insert("nameForSearch".to_string(), Value::Text(String::new()));
+                values.insert("nameForSearch".to_string(), Value::Null);
             }
             dynamic_insert(conn, "artist", &columns, &values)?;
         }
@@ -1971,11 +1978,12 @@ pub fn find_or_insert_album(
             if values.contains_key("isComplation") {
                 values.insert("isComplation".to_string(), Value::Integer(0));
             }
+            // rekordbox leaves both NULL; the template row's values are not ours.
             if values.contains_key("nameForSearch") {
-                values.insert("nameForSearch".to_string(), Value::Text(String::new()));
+                values.insert("nameForSearch".to_string(), Value::Null);
             }
             if values.contains_key("image_id") {
-                values.insert("image_id".to_string(), Value::Integer(0));
+                values.insert("image_id".to_string(), Value::Null);
             }
             dynamic_insert(conn, "album", &columns, &values)?;
         }

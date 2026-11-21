@@ -61,6 +61,11 @@
 - **Fix:** Syncing the eDB's play history from the PDB points each entry at the eDB's own track. It used the
   PDB's track numbers, which rekordbox assigns separately, so history could name the wrong tracks.
 - **Fix:** ISRC codes rekordbox wrote to the PDB are read correctly, so a repair no longer rewrites those tracks.
+- **Fix:** Artists, albums and tracks the export adds to the eDB leave empty fields blank, as rekordbox does,
+  instead of filling them with 0 or an empty text: an album's artwork and search name, an artist's search name,
+  and a track's search title, original artist, remixer, composer and label. Rows earlier versions wrote stay as
+  they are.
+- **Fix:** Re-exporting a track that is already on the USB no longer turns on its KUVO delivery flag in the eDB.
 - **Fix (CRITICAL):** Exports and repairs no longer refuse to write to a USB that rekordbox has just exported to. They
   checked rekordbox's pages for the app's own page shape; they now refuse only problems the write itself adds.
 - **Fix (CRITICAL):** A Player Menu change leaves the PDB's menu pages in the shape rekordbox writes. Before, their page
