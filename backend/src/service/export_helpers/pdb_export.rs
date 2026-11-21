@@ -572,6 +572,23 @@ pub(crate) fn build_pdb_for_playlists(
         .flat_map(|parsed| &parsed.tracks)
         .map(|track| (track.id, track.header_flags))
         .collect::<HashMap<u32, u32>>();
+    // rekordbox keeps two dates on a track row: the day the track joined its
+    // collection (slot 10, the eDB's dateCreated) and the day it reached the
+    // USB (slot 15, the eDB's dateAdded). The app writes the USB date to
+    // both. A row whose two dates differ shows the stick is in rekordbox's
+    // shape; otherwise a new row follows the app's.
+    let pdb_keeps_collection_dates =
+        existing
+            .iter()
+            .flat_map(|parsed| &parsed.tracks)
+            .any(|track| match (&track.date_added, &track.analyze_date) {
+                (Some(collection), Some(usb)) => {
+                    collection != usb
+                        && !is_placeholder_date(collection)
+                        && !is_placeholder_date(usb)
+                }
+                _ => false,
+            });
     let existing_pdb_bytes_before = if let Some(pdb_path) = pdb_path {
         std::fs::read(pdb_path).ok()
     } else {
@@ -1516,10 +1533,10 @@ pub(crate) fn build_pdb_for_playlists(
                         .map(|ms| duration_ms_to_seconds(ms) as u32),
                     file_type: track.file_type.and_then(|v| u16::try_from(v).ok()),
                     isrc: track.isrc.clone(),
-                    // rekordbox's convention for a new row: slot 10 holds the
-                    // eDB's dateCreated, slot 15 its dateAdded. A library
-                    // track shows the date it was added to the USB in both.
-                    date_added: (!track.from_library)
+                    // A track carried over from the USB onto a stick in
+                    // rekordbox's shape gets its collection date in slot 10;
+                    // otherwise both slots hold the date it reached the USB.
+                    date_added: (!track.from_library && pdb_keeps_collection_dates)
                         .then(|| normalize_export_date(track.date_created.as_deref()))
                         .flatten()
                         .or_else(|| date_added.clone())

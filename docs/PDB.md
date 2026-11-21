@@ -64,8 +64,10 @@ Known PDB rules:
   history. Normal export preserves them and ORs in only newly appended row bits.
 - Do not normalize existing `tranrf` to equal `rowpf`; that shape is unsafe on
   older PDB-first hardware players.
-- `tt=8` playlist-entry pages are strictly validated as
-  `u5=1, num_rl=trc-1`.
+- Every page a write changes or adds must follow the transaction rule (see
+  "Page Footer Conventions"), or the write is refused
+  (`check_written_page_conventions`). A page the write leaves alone never
+  blocks it; the footer repair handles those.
 - `tt=8` playlist-entry rows are identified by `(playlist_id, track_id)`.
   `entry_index` is a mutable position, never part of identity: a track whose
   order within an already-exported playlist changes is patched in place
@@ -775,8 +777,9 @@ slots:
 | `20` | media path |
 
 App exports write the day a track was added to the USB to both `10` and `15`.
-A track a repair adds to the PDB from the eDB follows rekordbox: `dateCreated`
-in `10`, `dateAdded` in `15`. A repair that changes a row's USB date writes it
+A track a repair adds to the PDB from the eDB follows the stick: on a PDB in
+rekordbox's shape (a row whose two dates differ) it gets `dateCreated` in
+`10` and `dateAdded` in `15`; otherwise `dateAdded` in both. A repair that changes a row's USB date writes it
 to `15`, and to `10` too only when the row holds one date in both (the app's
 shape). Parity takes the eDB's `dateAdded` as matching when either slot holds
 it.

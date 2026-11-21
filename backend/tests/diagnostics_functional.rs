@@ -2404,6 +2404,87 @@ fn strict_parity_reads_rekordbox_track_dates() {
     assert_one_repair_pass_clears_parity(&backend, &usb);
 }
 
+/// Gives the eDB a second track the PDB doesn't have: the playlist's audio
+/// file copied to a new path under `Contents/`, with a copy of its content
+/// row (new id, that path, no analysis file, the given dates) appended to
+/// `playlist_name`. Returns the new path.
+fn add_edb_only_track(
+    usb: &Path,
+    playlist_name: &str,
+    date_created: &str,
+    date_added: &str,
+) -> String {
+    let conn = open_edb(&vendor_db_dir(usb).join("exportLibrary.db"));
+    let (content_id, path): (i64, String) = conn
+        .query_row(
+            "SELECT c.content_id, c.path FROM content c JOIN playlist_content pc \
+             USING(content_id) JOIN playlist p USING(playlist_id) WHERE p.name = ?1",
+            [playlist_name],
+            |row| Ok((row.get(0)?, row.get(1)?)),
+        )
+        .expect("playlist track");
+    let source = usb.join(path.trim_start_matches('/'));
+    let extension = source.extension().and_then(|e| e.to_str()).unwrap_or("mp3");
+    let new_path = format!("/Contents/Second Artist/Second Copy.{extension}");
+    let target = usb.join(new_path.trim_start_matches('/'));
+    fs::create_dir_all(target.parent().expect("parent")).expect("create dir");
+    fs::copy(&source, &target).expect("copy audio");
+    let new_id = content_id + 100;
+    conn.execute_batch(&format!(
+        "CREATE TEMP TABLE copy AS SELECT * FROM content WHERE content_id = {content_id};
+         UPDATE copy SET content_id = {new_id}, path = '{new_path}',
+             fileName = 'Second Copy.{extension}', title = 'Second Copy',
+             analysisDataFilePath = NULL,
+             dateCreated = '{date_created}', dateAdded = '{date_added}';
+         INSERT INTO content SELECT * FROM copy;
+         CREATE TEMP TABLE link AS SELECT * FROM playlist_content WHERE content_id = {content_id};
+         UPDATE link SET content_id = {new_id}, sequenceNo = sequenceNo + 1;
+         INSERT INTO playlist_content SELECT * FROM link;"
+    ))
+    .expect("add eDB-only track");
+    new_path
+}
+
+/// `(slot 10, slot 15)` dates of the PDB track row at `path`.
+fn pdb_track_dates(pdb_path: &Path, path: &str) -> (Option<String>, Option<String>) {
+    let parsed = parse_pdb(pdb_path).expect("parse pdb");
+    assert_eq!(parsed.tracks.len(), 2, "a new row, not the old one moved");
+    let track = parsed
+        .tracks
+        .iter()
+        .find(|t| t.track_file_path == path)
+        .expect("track row added to the PDB");
+    (track.date_added.clone(), track.analyze_date.clone())
+}
+
+#[test]
+fn strict_repair_dates_a_new_pdb_row_like_the_rows_on_the_stick() {
+    let dates = |collection: &str, usb: &str| (Some(collection.to_string()), Some(usb.to_string()));
+    // A stick the app wrote: one date, the day the track reached the USB,
+    // in both slots.
+    let (_root, backend, usb, playlist_name) = setup_clean_strict_parity_fixture();
+    let pdb_path = vendor_db_dir(&usb).join("export.pdb");
+    let path = add_edb_only_track(&usb, &playlist_name, "2019-05-06", "2021-02-03");
+    let data = apply_strict_repair(&backend, &usb);
+    assert!(data.failed_fixes.is_empty(), "{:#?}", data.failed_fixes);
+    assert_eq!(
+        pdb_track_dates(&pdb_path, &path),
+        dates("2021-02-03", "2021-02-03")
+    );
+
+    // A stick in rekordbox's shape: the collection date in slot 10.
+    let (_root, backend, usb, playlist_name) = setup_clean_strict_parity_fixture();
+    let pdb_path = vendor_db_dir(&usb).join("export.pdb");
+    give_pdb_track_rekordbox_dates(&pdb_path, "2018-01-02");
+    let path = add_edb_only_track(&usb, &playlist_name, "2019-05-06", "2021-02-03");
+    let data = apply_strict_repair(&backend, &usb);
+    assert!(data.failed_fixes.is_empty(), "{:#?}", data.failed_fixes);
+    assert_eq!(
+        pdb_track_dates(&pdb_path, &path),
+        dates("2019-05-06", "2021-02-03")
+    );
+}
+
 #[test]
 fn strict_repair_failure_leaves_both_databases_as_they_were() {
     let (_root, backend, usb, playlist_name) = setup_clean_strict_parity_fixture();
