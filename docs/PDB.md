@@ -574,8 +574,45 @@ the same `tt=19` page.
 
 `trc` means the total row-slot count on the page.
 
-The current writer uses these `(u5, num_rl)` values for freshly written active
-data pages:
+### The transaction rule
+
+`tranrf` marks the row slots the page's last write touched, deleted rows
+included. On every data page rekordbox writes, in every table, the header's
+`u5` is the number of `tranrf` bits and `num_rl` the lowest slot among them,
+or both hold the placeholder `0x1FFF`. Examples from rekordbox pages:
+
+| Page | `tranrf` slots | `(u5, num_rl)` |
+| --- | --- | --- |
+| playlist tree, 7 slots, slots 3–6 rewritten | 3, 4, 5, 6 | `(4, 3)` |
+| playlist tree, deletes on slots 0, 3, 5 and 21 | 0, 3, 5, 21 | `(4, 0)` |
+| playlist entries, one row added | 3 | `(1, 3)` |
+| tracks | — | `(0x1FFF, 0x1FFF)` |
+
+rekordbox 6 crashes on its next export, or loses its playlists, when a page
+breaks this rule. Older app versions broke it on rekordbox's pages by forcing
+a table's fresh-write shape (below) onto them without touching `tranrf`, by
+filling empty `tranrf` groups from `rowpf`, or by adding moved rows to
+`tranrf` alone. The repair `repair_pdb_page_footer_transaction` sets
+`(u5, num_rl)` from the page's own `tranrf` again; every writer keeps the rule
+(`pdb_page::write_transaction`):
+
+* an in-place append makes the appended rows the page's transaction (on a
+  `u5 = 1` table only the last appended row, as rekordbox does);
+* tombstoning a row keeps the page's `tranrf` and header fields;
+* a page that already follows the rule is never rewritten, whatever its shape.
+
+A crashed rekordbox write can also leave a page with flags `0x10` and a
+live-row count that doesn't match `rowpf` (once 2040 on a 9-slot page), and
+2-byte NUL runs every 36 bytes from the page end through the row heap, where
+it wrote each footer group's `tranrf` position. Valid data-page flags are
+`0x24` and `0x34`, on any table. `repair_pdb_damaged_page_headers` restores
+the flags and the live count from `rowpf`; `merge_damaged_track_rows` merges a
+track row whose strings the NUL runs hit into its intact twin.
+
+### Fresh-write shapes
+
+The fresh writer uses these `(u5, num_rl)` values, each with the matching
+`tranrf` (every slot for `(trc, 0)`, the last slot for `(1, trc - 1)`):
 
 | Table | Convention |
 | --- | --- |
@@ -583,11 +620,13 @@ data pages:
 | `t06`, `t07`, `t16`, `t17`, `t18` | `(trc, 0)` |
 | `t19` | `(2, max(trc - 2, 0))` |
 
-Sentinel pages usually override these conventions and use `u5=8191` and
-`num_rl=8191`. Observed `tt=0` sentinels can carry other transaction state,
-including `u5=1, num_rl=0`.
+These are our shapes, not rekordbox's: rekordbox's pages carry whatever
+transaction last touched them, and their flags can be `0x34` on any table.
 
-Sealed overflow pages use `(1, trc - 1)`.
+Sentinel pages usually use `u5=8191` and `num_rl=8191`. Observed `tt=0`
+sentinels can carry other transaction state, including `u5=1, num_rl=0`.
+
+### Row-slot count
 
 The row-slot count used for row traversal is read from the packed 3-byte
 field at `0x18..0x1b` (`packed_page_row_slot_count` in `utils.rs`, the
@@ -605,11 +644,10 @@ fallback. Call sites that switched from the old heuristic to this decode:
 `pdb_writer`'s `page_has_transaction_tombstones`, `read_page_footer_state`,
 `parse_t08_entries_from_page`, and `parse_page_row_slots`; `pdb_reader.rs`'s
 `parse_page_rows` (the row parser behind the main public `parse_pdb_bytes`
-entry point); and `repair/pdb_fixes.rs`'s `detect_pdb_zero_tranrf_pages_for_tables`,
-where the old heuristic could silently skip inspecting a large playlist
-page's true last footer group (257 rows is the smallest case that both wraps
-and crosses a 16-row group boundary), letting real transaction-footer
-corruption there go undetected by "repair USB." The `dump_*` developer
+entry point); and the repair's footer checks, where the old heuristic could
+silently skip a large playlist page's true last footer group (257 rows is the
+smallest case that both wraps and crosses a 16-row group boundary). The
+`dump_*` developer
 diagnostic binaries in `src/bin/` carry the same fix for consistency, though
 they aren't part of the shipped app.
 
@@ -621,7 +659,9 @@ other than the (now-fixed) byte wrap: `pdb_writer`'s
 through `pdb_page::scan_footer_tolerant`.
 
 The writer cannot rely on the parser's tolerance. It must emit page footer
-values accepted by players.
+values accepted by players. In-place passes leave alone a page whose footer
+for its slot count would reach into the row heap (`pdb_page::footer_clear_of_heap`),
+and never write a live-row count above the slot count.
 
 Because `nrs` (offset `0x18`) is a single byte, no page may hold more than 255
 rows. The writer enforces this as a hard cap (`MAX_ROWS_PER_PAGE` in
@@ -725,14 +765,21 @@ slots:
 | `3` | structural default |
 | `6` | publish track info flag (`ON` when enabled) |
 | `7` | autoload hot cues flag — written `ON` for every exported track, so hot cues written to the ANLZ/eDB auto-load on the player. Cue *data* itself lives in the ANLZ bundle + eDB `cue` table, not the PDB. |
-| `10` | date added |
+| `10` | date added: the date the players show and sort by. rekordbox writes the eDB's `dateCreated` here (the day the track joined its collection) |
 | `11` | release date |
 | `14` | analysis path |
-| `15` | date-added value used by current layout |
+| `15` | rekordbox writes the eDB's `dateAdded` here (the day the track was added to the USB) |
 | `16` | DJ comment |
 | `17` | title |
 | `19` | file name |
 | `20` | media path |
+
+App exports write the day a track was added to the USB to both `10` and `15`.
+A track a repair adds to the PDB from the eDB follows rekordbox: `dateCreated`
+in `10`, `dateAdded` in `15`. A repair that changes a row's USB date writes it
+to `15`, and to `10` too only when the row holds one date in both (the app's
+shape). Parity takes the eDB's `dateAdded` as matching when either slot holds
+it.
 
 Unmapped string slots are kept structurally present. They are not removed or
 collapsed.

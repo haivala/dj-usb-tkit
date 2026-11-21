@@ -2,9 +2,11 @@
 ///
 /// Usage:
 ///   cargo run --manifest-path backend/Cargo.toml --bin run_usb_repair -- \
-///       <usb_root> [data_dir] [apply|preview]
+///       <usb_root> [data_dir] [apply|preview] [--skip=<fix_id>,<fix_id>...]
 ///
 /// Default mode is "preview" (dry-run). Pass "apply" to actually write changes.
+/// `--skip` leaves those fixes unchecked, as a user unticking them in the
+/// repair dialog would.
 use std::env;
 use std::path::PathBuf;
 
@@ -18,9 +20,14 @@ fn main() {
         std::process::exit(2);
     }
     let usb_root = args[1].clone();
+    let skip: Vec<String> = args
+        .iter()
+        .filter_map(|s| s.strip_prefix("--skip="))
+        .flat_map(|ids| ids.split(',').map(str::to_string))
+        .collect();
     let data_dir = args
         .get(2)
-        .filter(|s| !matches!(s.as_str(), "apply" | "preview"))
+        .filter(|s| !matches!(s.as_str(), "apply" | "preview") && !s.starts_with("--skip="))
         .map(PathBuf::from)
         .unwrap_or_else(|| PathBuf::from(".tmp-diag-data"));
     let mode = args
@@ -73,7 +80,7 @@ fn main() {
                 d.data
                     .proposed_fixes
                     .into_iter()
-                    .filter(|f| f.supported)
+                    .filter(|f| f.supported && !skip.contains(&f.id))
                     .map(|f| f.id)
                     .collect::<Vec<_>>()
             })

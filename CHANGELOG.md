@@ -48,6 +48,25 @@
   source folder.
 - **Fix:** Analyze Library also analyzes rekordbox tracks that are missing a waveform, BPM or length. The BPM,
   key and beat grid that came from rekordbox are kept.
+- **Fix:** Repairing a USB that rekordbox exported to no longer rewrites rekordbox's own page bookkeeping in
+  the PDB. On such a USB, rekordbox 6 crashed on its next export or lost its playlists.
+- **Fix:** Repair puts right USBs an earlier repair left that way, and pages rekordbox left half-written when it
+  crashed during an export.
+- **Fix:** Exports that add to a USB rekordbox wrote keep the PDB's pages the way rekordbox expects them.
+- **Fix:** A track whose file name a crashed rekordbox write damaged, next to an intact track for the same file,
+  is merged into that track in both databases, keeping its playlists and play history. It used to show as
+  missing audio that couldn't be removed while it was in a play history.
+- **Fix:** Syncing the eDB's play history from the PDB points each entry at the eDB's own track. It used the
+  PDB's track numbers, which rekordbox assigns separately, so history could name the wrong tracks.
+- **Fix:** ISRC codes rekordbox wrote to the PDB are read correctly, so a repair no longer rewrites those tracks.
+- **Fix:** Exports and repairs no longer refuse to write to a USB that rekordbox has just exported to. They
+  checked rekordbox's pages for the app's own page shape; they now check only the pages they write.
+- **Fix:** A playlist rekordbox numbers differently in the PDB and the eDB no longer fails parity. Parity compares
+  the order the players show the playlists in, not the numbers, so Preview Fixes no longer offers a repair that
+  changes nothing after every rekordbox export.
+- **Fix:** Tracks rekordbox exported no longer show up as differing in their date added, so Preview Fixes no
+  longer offers to rewrite them. rekordbox keeps two dates in the PDB, the day a track joined its collection and
+  the day it was added to the USB; a repair now compares and writes each the way rekordbox does.
 - **Improvement:** Track analysis is faster, most of all for MP3s. The results are the same as before.
 
 ## 0.6.4

@@ -245,7 +245,12 @@ pub struct PdbTrackRowData {
     pub duration_seconds: Option<u32>,
     pub file_type: Option<u16>,
     pub isrc: Option<String>,
+    /// String slot 10, the date the player shows as "date added". rekordbox
+    /// writes the eDB's `dateCreated` here.
     pub date_added: Option<String>,
+    /// String slot 15. rekordbox writes the eDB's `dateAdded` here. `None`
+    /// writes `date_added`.
+    pub analyze_date: Option<String>,
     pub release_date: Option<String>,
     pub dj_comment: Option<String>,
     pub file_name: Option<String>,

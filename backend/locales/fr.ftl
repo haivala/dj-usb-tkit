@@ -385,7 +385,7 @@ parity-issue-dictionary = problèmes de dict. { $count }
 parity-issue-artwork = pochettes différentes { $count }
 parity-issue-rating-colour = note/couleur différente { $count }
 parity-issue-field-notes = notes de champs { $count }
-parity-issue-id-mismatch = id différent
+parity-issue-in-one-database = dans une seule base
 parity-issue-sort-mismatch = tri différent
 parity-issue-order-mismatch = ordre différent
 
@@ -420,48 +420,22 @@ diagnostics-check-pdb-header-value = valeur { $value } aux octets 0x10..0x14
 diagnostics-check-pdb-header-unknown = valeur { $value } aux octets 0x10..0x14 ; une valeur compatible connue était attendue
 diagnostics-check-pdb-page-headers = En-têtes de pages PDB
 diagnostics-check-pdb-page-headers-valid = u5, page_flags et tranrf sont valides sur toutes les pages de données
-diagnostics-check-pdb-page-headers-bookkeeping = valides ; suivi des transactions de rekordbox : { $parts }
-diagnostics-check-pdb-page-headers-sentinel-u5 = { $count ->
+diagnostics-check-pdb-page-headers-damaged = { $count ->
     [one] { $count } page
    *[other] { $count } pages
-} avec la sentinelle u5=0x1FFF
-diagnostics-check-pdb-page-headers-page-flags = { $count ->
+} avec des page_flags invalides ou un nombre de lignes actives erroné
+diagnostics-check-pdb-page-headers-footer = { $count ->
     [one] { $count } page
    *[other] { $count } pages
-} avec des page_flags non standard
-diagnostics-check-pdb-page-headers-tranrf = { $count ->
-    [one] { $count } page de données
-   *[other] { $count } pages de données
-} avec tranrf=0 sur le dernier groupe de lignes
+} dont u5/num_rl ne correspondent pas à tranrf
 diagnostics-check-pdb-structure = Intégrité structurelle de la PDB
 diagnostics-check-pdb-structure-ok = b-tree sentinelle, formes des pages, ID de lignes et pointeurs d'écriture OK
 diagnostics-check-pdb-structure-ok-bookkeeping = b-tree sentinelle, formes des pages, ID de lignes et pointeurs d'écriture OK ; suivi des transactions de rekordbox : { $parts }
 diagnostics-check-pdb-structure-fails = { $parts } — lancez repair_usb_diagnostics pour corriger
-diagnostics-check-pdb-structure-warns = { $parts } — toléré par les lecteurs ; réparation disponible
 diagnostics-check-pdb-structure-stale-btree = { $count ->
     [one] { $count } sentinelle
    *[other] { $count } sentinelles
 } b-tree obsolète
-diagnostics-check-pdb-structure-playlist-tree-shape = { $count ->
-    [one] { $count } page playlist_tree
-   *[other] { $count } pages playlist_tree
-} de forme non standard
-diagnostics-check-pdb-structure-tombstoned = { $count ->
-    [one] { $count } ligne supprimée
-   *[other] { $count } lignes supprimées
-} avec un id non nul
-diagnostics-check-pdb-structure-track-page-shape = { $count ->
-    [one] { $count } page de morceaux
-   *[other] { $count } pages de morceaux
-} de forme non standard
-diagnostics-check-pdb-structure-track-page-active = { $count ->
-    [one] { $count } page de morceaux
-   *[other] { $count } pages de morceaux
-} ACTV dans une chaîne de plusieurs pages
-diagnostics-check-pdb-structure-history-shape = { $count ->
-    [one] { $count } page d'historique
-   *[other] { $count } pages d'historique
-} de forme incorrecte
 diagnostics-check-pdb-structure-ec-conflict = { $count ->
     [one] { $count } table
    *[other] { $count } tables
@@ -750,6 +724,9 @@ repair-overview-artist-names = Réécrit les noms d'artistes qui peuvent figer l
 repair-overview-history = Copie l'historique de lecture pour que les nouveaux lecteurs affichent le même historique que les anciens.
 repair-overview-strict-parity = Rend chaque playlist identique sur les anciens et les nouveaux lecteurs.
 repair-overview-duplicate-entries = Retire les morceaux listés deux fois par erreur dans une playlist.
+repair-overview-footer-transaction = Corrige les données de playlists et de morceaux modifiées par une ancienne version de cette application, qui font planter rekordbox ou lui font perdre ses playlists lors de l'export suivant.
+repair-overview-page-headers = Répare les pages que rekordbox a laissées à moitié écrites en plantant pendant un export.
+repair-overview-damaged-tracks = Répare les morceaux dont rekordbox a endommagé le nom de fichier en plantant, en gardant leurs playlists et leur historique.
 repair-overview-empty-duplicate-playlists = Supprime les copies vides de playlists qui portent le même nom qu'une playlist avec des morceaux.
 repair-overview-relink = Reconnecte les morceaux aux fichiers audio renommés ou déplacés sur la clé USB.
 repair-overview-unindexed = Place les fichiers audio qui ne sont dans aucune playlist dans une playlist nommée « Unindexed ».
@@ -790,11 +767,6 @@ repair-fix-mp3-seek = Ajouter les données de recherche MP3 manquantes
 repair-fix-mp3-seek-description = Lit chaque MP3 de la clé USB et écrit l'index de recherche que rekordbox écrit pour lui (PVBR dans le .DAT), octet pour octet comme rekordbox. Les beatgrids, les cues et les formes d'onde sont conservés. Les fichiers dont l'index ne peut pas être reproduit exactement sont ignorés et nommés dans le Journal des événements.
 repair-fix-flac-seek = Ajouter les données de recherche FLAC manquantes
 repair-fix-flac-seek-description = Lit chaque FLAC de la clé USB et écrit un index de recherche (PVB2 dans le .EXT). Pour les morceaux longs, environ 98 % de ses entrées correspondent à celles de rekordbox ; les autres sont décalées d'une trame. Les beatgrids, les cues et les formes d'onde sont conservés. Les fichiers qui ne se lisent pas proprement sont ignorés et nommés dans le Journal des événements.
-repair-fix-history-shape = Réparer la forme du pied de page des pages Historique/Colonnes de la PDB
-repair-fix-history-shape-description = Corrige les champs de pied de page u5/num_rl sur { $count ->
-    [one] { $count } page de données tt=16/17/18
-   *[other] { $count } pages de données tt=16/17/18
-} en passant de la forme incorrecte (1, nrs-1) à la convention correcte (nrs, 0).
 repair-fix-ec-conflict = Réparer le conflit de pointeur d'écriture de table
 repair-fix-ec-conflict-description = Tables dont le pointeur empty_candidate vise une page déjà utilisée comme données par une autre table : { $count }. Le logiciel DJ vérifie cet invariant et signale « base de données corrompue » quand il trouve un conflit. La réparation réaffecte chaque empty_candidate en conflit à une page libre au-delà du fichier physique et met à jour next_unused_page dans l'en-tête.
 repair-fix-truncated = Réparer la chaîne de table tronquée
@@ -904,14 +876,22 @@ repair-meta-always-applied = toujours appliqué
 repair-meta-always-applied-tooltip = Toujours appliqué — nécessaire pour que les autres réparations se terminent sans risque
 
 
-repair-fix-zero-tranrf = Réparer les pages de données avec tranrf à zéro
-repair-fix-page-flags = Réparer les indicateurs des pages de données PDB
-repair-fix-sentinel-u5 = Réparer les pages de données PDB avec la sentinelle u5
-repair-fix-track-shape = Réparer la forme du pied de page des pages de morceaux PDB
-repair-fix-t00-multipage = Réparer l'indicateur de page de morceaux (chaîne de plusieurs pages)
-repair-fix-tombstoned = Réparer les ID des lignes supprimées
 repair-fix-stale-btree = Réparer l'index B-tree sentinelle obsolète
-repair-fix-playlist-tree-shape = Réparer la forme du pied de page des pages playlist_tree PDB
+repair-fix-footer-transaction = Réparer les pieds de page de la PDB
+repair-fix-footer-transaction-description = Réécrit les champs de pied de page u5/num_rl sur { $count ->
+    [one] { $count } page de données PDB
+   *[other] { $count } pages de données PDB
+} à partir des bits tranrf de la page, la forme qu'écrit rekordbox. D'anciennes versions de cette application les modifiaient, ce qui fait planter rekordbox 6 ou lui fait perdre ses playlists lors de l'export suivant.
+repair-fix-page-headers = Réparer les en-têtes de pages PDB endommagés
+repair-fix-page-headers-description = Rétablit les indicateurs de page et le nombre de lignes actives sur { $count ->
+    [one] { $count } page de données PDB
+   *[other] { $count } pages de données PDB
+} à partir du pied de page des lignes. rekordbox laisse des pages ainsi lorsqu'il plante au milieu d'un export.
+repair-fix-damaged-tracks = Fusionner les lignes de morceaux endommagées
+repair-fix-damaged-tracks-description = { $count ->
+    [one] { $count } ligne de morceau
+   *[other] { $count } lignes de morceaux
+} dont le nom de fichier a été écrasé par un plantage de rekordbox, à côté d'une ligne intacte pour le même fichier audio. Déplace leurs entrées de playlists et d'historique vers la ligne intacte et supprime la ligne endommagée, dans les deux bases.
 
 repair-progress-baseline = USB : diagnostics de référence
 repair-progress-parity = USB : préparation des indications de parité
@@ -936,6 +916,7 @@ repair-warning-seek-data-unfixable-replace = les données de recherche { $format
 repair-warning-seek-data-unfixable-report = les données de recherche { $format } ne peuvent pas être ajoutées ({ $reason } ; merci de signaler ce fichier (les détails du format, pas l'audio) pour que ses données de recherche puissent être prises en charge) : { $path }
 repair-warning-missing-audio-scan-skipped = recherche d'audio manquant ignorée : le dossier Contents est absent ou vide (copie des bases seules)
 repair-warning-history-audio-missing = fichier audio d'un morceau de l'historique manquant : { $path }
+repair-warning-damaged-track = ligne de morceau endommagée par un plantage de rekordbox, sans copie intacte vers laquelle la fusionner : { $path }
 repair-warning-duplicate-audio = fichier audio en double : { $path } (copie de { $original })
 repair-warning-moved-audio = audio déplacé : { $old } -> { $new }
 repair-warning-missing-audio = référence audio manquante : { $path }

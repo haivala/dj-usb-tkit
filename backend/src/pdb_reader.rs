@@ -34,7 +34,13 @@ pub struct PdbTrackRow {
     pub duration_seconds: Option<u32>,
     pub file_type: Option<u16>,
     pub isrc: Option<String>,
+    /// String slot 10. rekordbox writes the eDB's `dateCreated` here (the
+    /// date the track joined its collection); the app writes the date the
+    /// track was added to the USB.
     pub date_added: Option<String>,
+    /// String slot 15. rekordbox writes the eDB's `dateAdded` here (the date
+    /// the track was added to the USB).
+    pub analyze_date: Option<String>,
     pub release_date: Option<String>,
     pub dj_comment: Option<String>,
     pub file_name: Option<String>,
@@ -193,12 +199,12 @@ pub fn count_pdb_playlists(path: &Path) -> Option<usize> {
     })
 }
 
-/// Mismatch between an observed page's `(u5, num_rl)` and the per-table
-/// convention player firmware expects.
+/// A data page whose `(u5, num_rl)` breaks the transaction rule.
 #[derive(Debug, Clone)]
 pub struct PdbPageConventionMismatch {
     pub page_index: u32,
     pub table_type: u32,
+    /// Row slots on the page.
     pub trc: u16,
     pub observed_u5: u16,
     pub observed_num_rl: u16,
@@ -222,29 +228,17 @@ impl std::fmt::Display for PdbPageConventionMismatch {
     }
 }
 
-/// Walk every data page in a PDB byte buffer and flag any pages whose
-/// `(u5, num_rl, seq)` footer fields exhibit one of the failure modes
-/// observed in the comm-error class of bugs.
+/// Every data page whose `(u5, num_rl)` breaks the transaction rule: the
+/// count of its `tranrf` bits and the lowest of them, or rekordbox's
+/// placeholder pair (see `docs/PDB.md`, "Page Footer Conventions"). Every
+/// page rekordbox writes follows it, and rekordbox 6 crashes on a page that
+/// doesn't, so the writers refuse to leave one behind.
 ///
-/// The validator only enforces the parts of the per-table convention
-/// that reference exports also obey, so it can be run against both reference
-/// samples and our own writer's output:
-///
-/// - `seq=1` on every data page across the whole file. Reference exports
-///   carry a varying transaction-commit counter on data pages; player
-///   firmware appears to validate that they are not all collapsed.
-/// - `tt=8` (playlist_entries) pages where `u5 != 1` or `num_rl != trc - 1`.
-///   This is the most strictly consistent table in observed reference output and
-///   was the one whose mismatch (`u5=trc`) most clearly differentiated the
-///   broken export from the working backup. Other `(1, trc-1)` tables are NOT
-///   enforced strictly: real rekordbox `tt=0` transaction/tombstone pages carry
-///   a smaller `num_rl`.
-/// - `num_rl > trc` on any data page (impossible row index).
-///
-/// Sentinel/index pages (`pf=0x64`) and zeroed slots are skipped, as are
-/// tables 16/17/18 (preserved verbatim from the pre-export PDB).
+/// Index pages (`pf=0x64`), empty slots and pages whose footer would run
+/// into the row heap (the footer repairs leave those alone) are skipped.
 pub fn validate_pdb_page_conventions(bytes: &[u8]) -> Vec<PdbPageConventionMismatch> {
-    use crate::utils::{read_u8_at, read_u16_le_at, read_u32_le_at};
+    use crate::pdb_page;
+    use crate::utils::{read_u8_at, read_u32_le_at};
 
     let mut mismatches = Vec::new();
     let len_page = match read_u32_le_at(bytes, 4) {
@@ -254,81 +248,76 @@ pub fn validate_pdb_page_conventions(bytes: &[u8]) -> Vec<PdbPageConventionMisma
     if bytes.len() < len_page {
         return mismatches;
     }
-    let total_pages = bytes.len() / len_page;
-
-    for page_idx in 1..total_pages {
-        let off = page_idx * len_page;
-        if off + 0x28 > bytes.len() {
-            break;
-        }
-        let page = &bytes[off..off + len_page];
-
+    for page in bytes.chunks_exact(len_page).skip(1) {
         let stored_idx = read_u32_le_at(page, 0x04).unwrap_or(0);
-        if stored_idx == 0 {
+        if stored_idx == 0 || read_u8_at(page, 0x1b).unwrap_or(0) == 0x64 {
             continue;
         }
-
-        let pf = read_u8_at(page, 0x1b).unwrap_or(0);
-        if pf == 0x64 {
+        let Some((slots, _)) = pdb_page::read_slot_counts(page) else {
             continue;
-        }
-
-        let table_type = read_u32_le_at(page, 0x08).unwrap_or(0);
-        if matches!(table_type, 16..=18) {
-            continue;
-        }
-
-        let nrs = read_u8_at(page, 0x18).unwrap_or(0);
-        let observed_u5 = read_u16_le_at(page, 0x20).unwrap_or(0);
-        let observed_num_rl = read_u16_le_at(page, 0x22).unwrap_or(0);
-
-        if observed_num_rl == 8191 || observed_u5 == 8191 {
-            continue;
-        }
-
-        let trc: u16 = if nrs == 0 {
-            continue;
-        } else if observed_num_rl >= nrs as u16 {
-            observed_num_rl.saturating_add(1)
-        } else {
-            nrs as u16
         };
-
-        // Only `tt=8` (playlist_entries) is enforced strictly. Real rekordbox
-        // exports do NOT keep `num_rl == trc-1` on `tt=0` transaction/tombstone
-        // pages (`flags=0x34` pages mid-chain carry a smaller `num_rl` — the
-        // active-row or last-committed-slot index), so the tracks/dictionary/
-        // artwork family is left to the generic `num_rl > trc` bound below.
-        if table_type == 8 {
-            let exp_u5 = 1u16;
-            let exp_num_rl = trc.saturating_sub(1);
-            if observed_u5 != exp_u5 || observed_num_rl != exp_num_rl {
-                mismatches.push(PdbPageConventionMismatch {
-                    page_index: stored_idx,
-                    table_type,
-                    trc,
-                    observed_u5,
-                    observed_num_rl,
-                    expected_u5: exp_u5,
-                    expected_num_rl: exp_num_rl,
-                });
-                continue;
-            }
+        if slots == 0
+            || !pdb_page::footer_clear_of_heap(page, slots)
+            || pdb_page::transaction_consistent(page, slots)
+        {
+            continue;
         }
-        if trc > 0 && observed_num_rl >= trc {
-            mismatches.push(PdbPageConventionMismatch {
-                page_index: stored_idx,
-                table_type,
-                trc,
-                observed_u5,
-                observed_num_rl,
-                expected_u5: observed_u5,
-                expected_num_rl: trc.saturating_sub(1),
-            });
-        }
+        let groups: Vec<_> = pdb_page::footer_groups(page.len(), slots).collect();
+        let tranrf: Vec<u16> = groups.iter().map(|g| g.tranrf(page)).collect();
+        let (expected_u5, expected_num_rl) = pdb_page::transaction_fields(&groups, &tranrf)
+            .unwrap_or((pdb_page::PLACEHOLDER_FIELD, pdb_page::PLACEHOLDER_FIELD));
+        let (observed_u5, observed_num_rl) = pdb_page::read_transaction_header(page);
+        mismatches.push(PdbPageConventionMismatch {
+            page_index: stored_idx,
+            table_type: read_u32_le_at(page, 0x08).unwrap_or(0),
+            trc: slots as u16,
+            observed_u5,
+            observed_num_rl,
+            expected_u5,
+            expected_num_rl,
+        });
     }
-
     mismatches
+}
+
+/// Fails when a write left a page breaking the transaction rule
+/// ([`validate_pdb_page_conventions`]) that it changed or added: `before` is
+/// the PDB as it was, `after` as written. A page the write didn't touch is
+/// left to the footer repair, never a reason to refuse the write. `what`
+/// names the write in the error.
+pub fn check_written_page_conventions(
+    before: &[u8],
+    after: &[u8],
+    what: &str,
+) -> BackendResult<()> {
+    let Some(len_page) = crate::utils::read_u32_le_at(after, 4)
+        .map(|v| v as usize)
+        .filter(|&v| v > 0)
+    else {
+        return Ok(());
+    };
+    fn page_at(bytes: &[u8], index: usize, len_page: usize) -> Option<&[u8]> {
+        bytes.get(index * len_page..(index + 1) * len_page)
+    }
+    let written: Vec<_> = validate_pdb_page_conventions(after)
+        .into_iter()
+        .filter(|m| {
+            let index = m.page_index as usize;
+            page_at(before, index, len_page) != page_at(after, index, len_page)
+        })
+        .collect();
+    if written.is_empty() {
+        return Ok(());
+    }
+    let detail = written
+        .iter()
+        .take(8)
+        .map(|m| m.to_string())
+        .collect::<Vec<_>>()
+        .join(" | ");
+    Err(BackendError::Internal(format!(
+        "{what} blocked: page-header convention mismatches ({detail})"
+    )))
 }
 
 /// The page size from a PDB file header.
@@ -676,6 +665,12 @@ fn parse_track_row(row: &[u8]) -> Option<PdbTrackRow> {
         .unwrap_or_default();
     let isrc = decode_track_string_slot(row, &offsets, 0).filter(|value| !value.is_empty());
     let date_added = decode_track_string_slot(row, &offsets, 10).filter(|value| !value.is_empty());
+    let analyze_date = offsets
+        .get(15)
+        .copied()
+        .filter(|&offset| offset != 0)
+        .and_then(|offset| get_string_from_pdb(row, offset as usize))
+        .filter(|value| !value.is_empty());
     let release_date =
         decode_track_string_slot(row, &offsets, 11).filter(|value| !value.is_empty());
     let dj_comment = decode_track_string_slot(row, &offsets, 16).filter(|value| !value.is_empty());
@@ -712,6 +707,7 @@ fn parse_track_row(row: &[u8]) -> Option<PdbTrackRow> {
         file_type,
         isrc,
         date_added,
+        analyze_date,
         release_date,
         dj_comment,
         file_name,
@@ -978,9 +974,18 @@ fn decode_track_string_slot(row: &[u8], offsets: &[u16], index: usize) -> Option
 
 fn decode_isrc_slot(row: &[u8], offset: usize) -> Option<String> {
     let first = *row.get(offset)? as usize;
-    // ISRC is always ASCII. Reference exports and the writer use short-ASCII:
-    // header = len*2+3 (always odd).
-    // Even first byte (e.g. 0x90 empty-envelope from old buggy encoder) → treat as absent.
+    // ISRC is always ASCII. The writer uses short-ASCII: header = len*2+3
+    // (always odd). rekordbox writes a long-string envelope instead:
+    // `0x90, len_lo, len_hi, 0x00, 0x03, ascii..., 0x00` (the old app
+    // encoder wrote the same envelope with no characters for an absent ISRC).
+    if first == 0x90 {
+        let total = u16::from_le_bytes([*row.get(offset + 1)?, *row.get(offset + 2)?]) as usize;
+        let payload = row.get(offset + 4..offset.checked_add(total)?)?;
+        let text = payload.strip_prefix(&[0x03])?;
+        let text = text.split(|&b| b == 0).next().unwrap_or_default();
+        let s = String::from_utf8_lossy(text).trim().to_string();
+        return if s.is_empty() { None } else { Some(s) };
+    }
     if first.is_multiple_of(2) {
         return None;
     }
@@ -1651,6 +1656,21 @@ mod tests {
     }
 
     #[test]
+    fn decode_isrc_slot_reads_rekordbox_long_envelope() {
+        // rekordbox: 0x90 envelope, 0x03 marker, ASCII, NUL terminator.
+        let mut row = vec![0u8; 180];
+        let offset = 136usize;
+        let mut raw = vec![0x90u8, 0x12, 0x00, 0x00, 0x03];
+        raw.extend_from_slice(b"XXA021900001");
+        raw.push(0x00);
+        row[offset..offset + raw.len()].copy_from_slice(&raw);
+        assert_eq!(
+            decode_isrc_slot(&row, offset).as_deref(),
+            Some("XXA021900001")
+        );
+    }
+
+    #[test]
     fn decode_isrc_slot_handles_standard_short_ascii_encoding() {
         // Fixed encoder and reference exports write: [(len*2+3), ascii_chars...]
         let mut row = vec![0u8; 180];
@@ -1805,6 +1825,7 @@ mod tests {
                 file_type: Some(1),
                 isrc: Some("ZZXXX2100001".to_string()),
                 date_added: Some("2025-08-28".to_string()),
+                analyze_date: None,
                 release_date: Some("2021-01-01".to_string()),
                 dj_comment: Some("Visit https://example.com".to_string()),
                 file_name: Some("Demo Artist - DEMO001 - Sample - 01 Sample Track.mp3".to_string()),
@@ -1884,6 +1905,7 @@ mod tests {
                 file_type: Some(1),
                 isrc: None,
                 date_added: None,
+                analyze_date: None,
                 release_date: None,
                 dj_comment: None,
                 file_name: Some("default.mp3".to_string()),

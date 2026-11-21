@@ -26,12 +26,8 @@ use tempfile::{TempDir, tempdir};
 const USB_VENDOR_ROOT_DIR: &str = "PIONEER";
 const PDB_HEADER_COMPATIBILITY_FIX_ID: &str = "repair_pdb_header_compatibility_field";
 const PDB_DUPLICATE_PLAYLIST_ENTRIES_FIX_ID: &str = "repair_pdb_duplicate_playlist_entries";
-const PDB_SENTINEL_U5_FIX_ID: &str = "repair_pdb_sentinel_u5_on_data_pages";
-const PDB_WRONG_PAGE_FLAGS_FIX_ID: &str = "repair_pdb_wrong_page_flags";
-const PDB_ZERO_TRANRF_FIX_ID: &str = "repair_pdb_zero_tranrf_on_track_pages";
-const PDB_WRONG_TRACK_U5_FIX_ID: &str = "repair_pdb_wrong_track_u5_num_rl";
-const PDB_WRONG_HISTORY_SHAPE_FIX_ID: &str = "repair_pdb_wrong_history_page_shape";
-const PDB_WRONG_PLAYLIST_TREE_SHAPE_FIX_ID: &str = "repair_pdb_wrong_playlist_tree_shape";
+const PDB_DAMAGED_PAGE_HEADERS_FIX_ID: &str = "repair_pdb_damaged_page_headers";
+const PDB_INCONSISTENT_FOOTERS_FIX_ID: &str = "repair_pdb_page_footer_transaction";
 /// A flat waveform with the same level on every band.
 fn flat_waveform(len: usize, level: u8) -> backend::service::anlz::WaveformData {
     let band = vec![level.min(127); len];
@@ -710,7 +706,7 @@ fn assert_same_parity_detail(actual: &UsbParityPlaylistDetail, expected: &UsbPar
         actual.dictionary_id_issue_tracks, expected.dictionary_id_issue_tracks,
         "dictionary id mismatch\nactual: {actual:?}\nexpected: {expected:?}"
     );
-    assert_eq!(actual.playlist_id_match, expected.playlist_id_match);
+    assert_eq!(actual.playlist_in_both, expected.playlist_in_both);
     assert_eq!(actual.sort_order_match, expected.sort_order_match);
     assert_eq!(actual.parent_match, expected.parent_match);
     assert_eq!(actual.pdb_playlist_id, expected.pdb_playlist_id);
@@ -955,7 +951,7 @@ fn clean_export_fixture_reaches_full_strict_parity_pass() {
         .find(|d| d.name == playlist_name)
         .expect("playlist detail");
     assert!(
-        playlist.playlist_id_match,
+        playlist.playlist_in_both,
         "playlist ids should match: {playlist:?}"
     );
     assert!(
@@ -1270,11 +1266,11 @@ fn rekordbox_pdb_header_compatibility_value_4_never_warns_and_rides_along_with_a
     assert_eq!(read_pdb_header_compatibility_value(&pdb_path), 4);
 
     // A repair for something else normalizes the value too.
-    break_history_page_shape(&pdb_path);
+    break_page_footer(&pdb_path);
     let repair = backend.repair_usb_diagnostics(RepairUsbDiagnosticsRequest {
         usb_root: Some(usb.to_string_lossy().to_string()),
         apply: true,
-        selected_fix_ids: vec![PDB_WRONG_HISTORY_SHAPE_FIX_ID.to_string()],
+        selected_fix_ids: vec![PDB_INCONSISTENT_FOOTERS_FIX_ID.to_string()],
     });
     assert!(repair.ok, "repair apply failed: {repair:?}");
     assert_eq!(read_pdb_header_compatibility_value(&pdb_path), 5);
@@ -1363,7 +1359,7 @@ fn strict_repair_preview_and_apply_repopulate_edb_for_exported_playlist_gap_case
     assert_eq!(after_playlist.only_in_pdb, 0);
     assert_eq!(after_playlist.only_in_edb, 0);
     assert!(!after_playlist.order_mismatch);
-    assert!(after_playlist.playlist_id_match);
+    assert!(after_playlist.playlist_in_both);
     assert!(after_playlist.sort_order_match);
 }
 
@@ -1763,7 +1759,7 @@ fn strict_repair_pdb_primary_repopulates_thin_edb_and_restores_strict_parity() {
     assert_eq!(parity_after.edb_tracks, 1);
     assert_eq!(parity_after.only_in_pdb, 0);
     assert_eq!(parity_after.only_in_edb, 0);
-    assert!(parity_after.playlist_id_match);
+    assert!(parity_after.playlist_in_both);
     assert!(parity_after.sort_order_match);
     assert_eq!(parity_after.pdb_missing_core_metadata, 0);
     assert_eq!(parity_after.edb_missing_core_metadata, 0);
@@ -2343,6 +2339,71 @@ fn strict_repair_carries_pdb_only_fields_into_a_new_edb_row() {
     assert_one_repair_pass_clears_parity(&backend, &usb);
 }
 
+/// Rewrites the track row's string slot 10 (the PDB's date added) to `date`,
+/// leaving slot 15: the shape rekordbox writes, with the collection date in
+/// slot 10 and the date the track joined the USB in slot 15.
+fn give_pdb_track_rekordbox_dates(pdb_path: &Path, date: &str) {
+    let before = parse_pdb(pdb_path).expect("parse pdb").tracks[0].clone();
+    let usb_date = before.date_added.clone().expect("export date");
+    assert_eq!(before.analyze_date.as_deref(), Some(usb_date.as_str()));
+    assert_eq!(usb_date.len(), date.len());
+    let original = fs::read(pdb_path).expect("read pdb");
+    let hits: Vec<usize> = original
+        .windows(usb_date.len())
+        .enumerate()
+        .filter(|(_, w)| *w == usb_date.as_bytes())
+        .map(|(i, _)| i)
+        .collect();
+    for at in hits {
+        let mut bytes = original.clone();
+        bytes[at..at + date.len()].copy_from_slice(date.as_bytes());
+        fs::write(pdb_path, &bytes).expect("write pdb");
+        let track = parse_pdb(pdb_path).expect("parse pdb").tracks[0].clone();
+        if track.date_added.as_deref() == Some(date)
+            && track.analyze_date.as_deref() == Some(usb_date.as_str())
+        {
+            return;
+        }
+    }
+    panic!("no slot 10 date found");
+}
+
+#[test]
+fn strict_parity_reads_rekordbox_track_dates() {
+    let (_root, backend, usb, playlist_name) = setup_clean_strict_parity_fixture();
+    let vendor_db = vendor_db_dir(&usb).join("exportLibrary.db");
+    let pdb_path = vendor_db_dir(&usb).join("export.pdb");
+    give_pdb_track_rekordbox_dates(&pdb_path, "2019-05-06");
+    let usb_date = parse_pdb(&pdb_path).expect("parse pdb").tracks[0]
+        .analyze_date
+        .clone()
+        .expect("slot 15 date");
+    let conn = open_edb(&vendor_db);
+    conn.execute(
+        "UPDATE content SET dateCreated = '2019-05-06', dateAdded = ?1",
+        [&usb_date],
+    )
+    .expect("seed eDB dates");
+    drop(conn);
+
+    // The eDB's dateAdded is the PDB's slot 15: nothing differs.
+    let failing = failing_parity_checks(&backend, &usb);
+    assert!(failing.is_empty(), "{failing:#?}");
+
+    // A new USB date reaches slot 15 only; slot 10 keeps rekordbox's date.
+    let conn = open_edb(&vendor_db);
+    conn.execute("UPDATE content SET dateAdded = '2021-02-03'", [])
+        .expect("seed new date");
+    drop(conn);
+    drop_edb_membership(&usb, &playlist_name);
+    let data = apply_strict_repair(&backend, &usb);
+    assert!(data.failed_fixes.is_empty(), "{:#?}", data.failed_fixes);
+    let track = parse_pdb(&pdb_path).expect("parse pdb").tracks[0].clone();
+    assert_eq!(track.date_added.as_deref(), Some("2019-05-06"));
+    assert_eq!(track.analyze_date.as_deref(), Some("2021-02-03"));
+    assert_one_repair_pass_clears_parity(&backend, &usb);
+}
+
 #[test]
 fn strict_repair_failure_leaves_both_databases_as_they_were() {
     let (_root, backend, usb, playlist_name) = setup_clean_strict_parity_fixture();
@@ -2525,6 +2586,13 @@ fn strict_repair_preserves_existing_pdb_playlist_ids_for_matched_playlists() {
     )
     .expect("update playlist id for b");
     drop(conn);
+    // rekordbox numbers each database's playlists separately: different ids
+    // alone pass parity.
+    let failing = failing_parity_checks(&backend, &usb);
+    assert!(failing.is_empty(), "{failing:#?}");
+    // A repair that runs for another reason writes the PDB's ids to the eDB.
+    drop_edb_membership(&usb, &playlist_a);
+    drop_edb_membership(&usb, &playlist_b);
 
     let repair = backend.repair_usb_diagnostics(backend::models::RepairUsbDiagnosticsRequest {
         usb_root: Some(usb.to_string_lossy().to_string()),
@@ -4298,22 +4366,6 @@ fn apply_fix_and_assert_applied(backend: &BackendCommands, usb: &Path, fix_id: &
 }
 
 #[test]
-fn repair_pdb_sentinel_u5_detects_and_fixes_via_orchestrator() {
-    let (_root, backend, usb, _playlist_name) = setup_clean_strict_parity_fixture();
-    let pdb_path = vendor_db_dir(&usb).join("export.pdb");
-    read_write_pdb(&pdb_path, |bytes, page_size| {
-        let page = find_pdb_data_page(bytes, page_size, 0).expect("tt=0 data page");
-        let off = page * page_size;
-        bytes[off + 0x20..off + 0x22].copy_from_slice(&0x1FFFu16.to_le_bytes());
-        bytes[off + 0x22..off + 0x24].copy_from_slice(&0x1FFFu16.to_le_bytes());
-    });
-
-    assert_fix_proposed(&backend, &usb, PDB_SENTINEL_U5_FIX_ID);
-    apply_fix_and_assert_applied(&backend, &usb, PDB_SENTINEL_U5_FIX_ID);
-    assert_no_pdb_structural_repairs(&backend, &usb);
-}
-
-#[test]
 fn repair_pdb_duplicate_playlist_entries_detects_and_fixes_via_orchestrator() {
     let (_root, backend, usb, _playlist_name) = setup_clean_strict_parity_fixture();
     let pdb_path = vendor_db_dir(&usb).join("export.pdb");
@@ -4368,26 +4420,21 @@ fn repair_pdb_duplicate_playlist_entries_detects_and_fixes_via_orchestrator() {
 }
 
 #[test]
-fn repair_pdb_wrong_page_flags_detects_and_fixes_via_orchestrator() {
+fn repair_pdb_damaged_page_headers_detects_and_fixes_via_orchestrator() {
     let (_root, backend, usb, _playlist_name) = setup_clean_strict_parity_fixture();
     let pdb_path = vendor_db_dir(&usb).join("export.pdb");
     read_write_pdb(&pdb_path, |bytes, page_size| {
         let page = find_pdb_data_page(bytes, page_size, 0).expect("tt=0 data page");
-        bytes[page * page_size + 0x1b] = 0x11; // neither 0x24 nor 0x34
+        bytes[page * page_size + 0x1b] = 0x10; // what a crashed rekordbox write leaves
     });
 
-    assert_fix_proposed(&backend, &usb, PDB_WRONG_PAGE_FLAGS_FIX_ID);
-    apply_fix_and_assert_applied(&backend, &usb, PDB_WRONG_PAGE_FLAGS_FIX_ID);
-    // Not `assert_no_pdb_structural_repairs`: the correction target for tt=0
-    // is 0x34 (active), which legitimately differs from this fixture's
-    // originally-exported sealed (0x24) page and exposes an unrelated,
-    // genuinely separate stale-sentinel-B-tree condition. Only assert the
-    // fix under test actually resolved.
-    assert_fix_not_proposed(&backend, &usb, PDB_WRONG_PAGE_FLAGS_FIX_ID);
+    assert_fix_proposed(&backend, &usb, PDB_DAMAGED_PAGE_HEADERS_FIX_ID);
+    apply_fix_and_assert_applied(&backend, &usb, PDB_DAMAGED_PAGE_HEADERS_FIX_ID);
+    assert_no_pdb_structural_repairs(&backend, &usb);
 }
 
 #[test]
-fn repair_pdb_zero_tranrf_detects_and_fixes_via_orchestrator() {
+fn repair_pdb_page_footer_without_transaction_bits_via_orchestrator() {
     let (_root, backend, usb, _playlist_name) = setup_clean_strict_parity_fixture();
     let pdb_path = vendor_db_dir(&usb).join("export.pdb");
     read_write_pdb(&pdb_path, |bytes, page_size| {
@@ -4403,71 +4450,35 @@ fn repair_pdb_zero_tranrf_detects_and_fixes_via_orchestrator() {
         bytes[tranrf_off..tranrf_off + 2].copy_from_slice(&0u16.to_le_bytes());
     });
 
-    assert_fix_proposed(&backend, &usb, PDB_ZERO_TRANRF_FIX_ID);
-    apply_fix_and_assert_applied(&backend, &usb, PDB_ZERO_TRANRF_FIX_ID);
+    assert_fix_proposed(&backend, &usb, PDB_INCONSISTENT_FOOTERS_FIX_ID);
+    apply_fix_and_assert_applied(&backend, &usb, PDB_INCONSISTENT_FOOTERS_FIX_ID);
     assert_no_pdb_structural_repairs(&backend, &usb);
 }
 
 #[test]
-fn repair_pdb_wrong_history_page_shape_detects_and_fixes_via_orchestrator() {
+fn repair_pdb_page_footer_with_wrong_fields_via_orchestrator() {
     let (_root, backend, usb, _playlist_name) = setup_clean_strict_parity_fixture();
-    break_history_page_shape(&vendor_db_dir(&usb).join("export.pdb"));
+    break_page_footer(&vendor_db_dir(&usb).join("export.pdb"));
 
-    assert_fix_proposed(&backend, &usb, PDB_WRONG_HISTORY_SHAPE_FIX_ID);
-    apply_fix_and_assert_applied(&backend, &usb, PDB_WRONG_HISTORY_SHAPE_FIX_ID);
+    assert_fix_proposed(&backend, &usb, PDB_INCONSISTENT_FOOTERS_FIX_ID);
+    apply_fix_and_assert_applied(&backend, &usb, PDB_INCONSISTENT_FOOTERS_FIX_ID);
     assert_no_pdb_structural_repairs(&backend, &usb);
 }
 
-#[test]
-fn repair_pdb_wrong_track_u5_detects_and_fixes_via_orchestrator() {
-    let (_root, backend, usb, _playlist_name) = setup_clean_strict_parity_fixture();
-    let pdb_path = vendor_db_dir(&usb).join("export.pdb");
-    read_write_pdb(&pdb_path, |bytes, page_size| {
-        let page = find_pdb_data_page(bytes, page_size, 0).expect("tt=0 data page");
-        let off = page * page_size;
-        bytes[off + 0x1b] = 0x34; // active
-        bytes[off + 0x20..off + 0x22].copy_from_slice(&99u16.to_le_bytes());
-        bytes[off + 0x22..off + 0x24].copy_from_slice(&99u16.to_le_bytes());
-    });
-
-    assert_fix_proposed(&backend, &usb, PDB_WRONG_TRACK_U5_FIX_ID);
-    apply_fix_and_assert_applied(&backend, &usb, PDB_WRONG_TRACK_U5_FIX_ID);
-    // Same rationale as the wrong_page_flags test above: forcing this page
-    // active (0x34) exposes an unrelated stale-sentinel-B-tree condition.
-    assert_fix_not_proposed(&backend, &usb, PDB_WRONG_TRACK_U5_FIX_ID);
-}
-
-#[test]
-fn repair_pdb_wrong_playlist_tree_shape_detects_and_fixes_via_orchestrator() {
-    let (_root, backend, usb, _playlist_name) = setup_clean_strict_parity_fixture();
-    let pdb_path = vendor_db_dir(&usb).join("export.pdb");
-    read_write_pdb(&pdb_path, |bytes, page_size| {
+/// Give the playlist_tree page `(u5, num_rl)` that don't match its tranrf.
+fn break_page_footer(pdb_path: &Path) {
+    read_write_pdb(pdb_path, |bytes, page_size| {
         let page = find_pdb_data_page(bytes, page_size, 7).expect("tt=7 data page");
         let off = page * page_size;
-        bytes[off + 0x22..off + 0x24].copy_from_slice(&5u16.to_le_bytes()); // num_rl != 0
-    });
-
-    assert_fix_proposed(&backend, &usb, PDB_WRONG_PLAYLIST_TREE_SHAPE_FIX_ID);
-    apply_fix_and_assert_applied(&backend, &usb, PDB_WRONG_PLAYLIST_TREE_SHAPE_FIX_ID);
-    assert_no_pdb_structural_repairs(&backend, &usb);
-}
-
-fn break_history_page_shape(pdb_path: &Path) {
-    read_write_pdb(pdb_path, |bytes, page_size| {
-        let page = find_pdb_data_page(bytes, page_size, 17).expect("tt=17 data page");
-        let off = page * page_size;
-        let nrs = bytes[off + 0x18];
-        assert!(nrs > 1, "need nrs > 1 to construct the old-bug pattern");
-        bytes[off + 0x20..off + 0x22].copy_from_slice(&1u16.to_le_bytes());
-        bytes[off + 0x22..off + 0x24].copy_from_slice(&(nrs as u16 - 1).to_le_bytes());
+        bytes[off + 0x22..off + 0x24].copy_from_slice(&5u16.to_le_bytes());
     });
 }
 
 #[test]
 fn repair_pdb_fix_not_in_selected_ids_is_skipped_not_applied() {
     let (_root, backend, usb, _playlist_name) = setup_clean_strict_parity_fixture();
-    break_history_page_shape(&vendor_db_dir(&usb).join("export.pdb"));
-    assert_fix_proposed(&backend, &usb, PDB_WRONG_HISTORY_SHAPE_FIX_ID);
+    break_page_footer(&vendor_db_dir(&usb).join("export.pdb"));
+    assert_fix_proposed(&backend, &usb, PDB_INCONSISTENT_FOOTERS_FIX_ID);
 
     let repair = backend.repair_usb_diagnostics(RepairUsbDiagnosticsRequest {
         usb_root: Some(usb.to_string_lossy().to_string()),
@@ -4477,9 +4488,10 @@ fn repair_pdb_fix_not_in_selected_ids_is_skipped_not_applied() {
     assert!(repair.ok, "repair apply failed: {repair:?}");
     let data = repair.data.expect("repair data");
     assert!(
-        data.data.skipped_fixes.iter().any(|m| {
-            m.contains("Repair PDB History/Columns Page Footer Shape") && m.contains("not selected")
-        }),
+        data.data
+            .skipped_fixes
+            .iter()
+            .any(|m| m.contains("Repair PDB Page Footers") && m.contains("not selected")),
         "expected the unselected fix to be reported as skipped: {:#?}",
         data.data.skipped_fixes
     );
@@ -4488,90 +4500,13 @@ fn repair_pdb_fix_not_in_selected_ids_is_skipped_not_applied() {
             .data
             .applied_fixes
             .iter()
-            .any(|m| m.contains("History/Columns")),
+            .any(|m| m.contains("Page Footers")),
         "unselected fix must not have been applied: {:#?}",
         data.data.applied_fixes
     );
 
     // The corruption must still be present since the fix wasn't applied.
-    assert_fix_proposed(&backend, &usb, PDB_WRONG_HISTORY_SHAPE_FIX_ID);
-}
-
-/// rekordbox's own transaction bookkeeping (here: a non-default page_flags
-/// byte, as real rekordbox exports carry) never warns or shows up as an
-/// issue, but every repair that runs still normalizes it.
-#[test]
-fn rekordbox_bookkeeping_never_warns_and_rides_along_with_any_repair() {
-    let (_root, backend, usb, _playlist_name) = setup_clean_strict_parity_fixture();
-    let pdb_path = vendor_db_dir(&usb).join("export.pdb");
-    read_write_pdb(&pdb_path, |bytes, page_size| {
-        let page = find_pdb_data_page(bytes, page_size, 0).expect("tt=0 data page");
-        bytes[page * page_size + 0x1b] = 0x11;
-    });
-
-    let diagnostics = backend.run_usb_diagnostics(RunUsbDiagnosticsRequest {
-        usb_root: Some(usb.to_string_lossy().to_string()),
-    });
-    assert!(diagnostics.ok, "diagnostics failed: {diagnostics:?}");
-    let page_headers = diagnostics
-        .data
-        .expect("diagnostics data")
-        .data
-        .pdb_integrity
-        .checks
-        .into_iter()
-        .find(|c| c.label == "PDB page headers")
-        .expect("PDB page headers check");
-    assert!(
-        matches!(page_headers.status, DiagStatus::Pass),
-        "rekordbox bookkeeping must not warn: {page_headers:?}"
-    );
-
-    let preview = backend.repair_usb_diagnostics(RepairUsbDiagnosticsRequest {
-        usb_root: Some(usb.to_string_lossy().to_string()),
-        apply: false,
-        selected_fix_ids: vec![],
-    });
-    assert!(preview.ok, "repair preview failed: {preview:?}");
-    let preview = preview.data.expect("preview data");
-    let fix = preview
-        .data
-        .proposed_fixes
-        .iter()
-        .find(|f| f.id == PDB_WRONG_PAGE_FLAGS_FIX_ID)
-        .expect("bookkeeping fix still proposed");
-    assert!(
-        fix.bookkeeping,
-        "page_flags fix must be flagged bookkeeping"
-    );
-    assert!(
-        !preview
-            .data
-            .detected_issues
-            .iter()
-            .any(|i| i.contains("page_flags")),
-        "bookkeeping must not count as an issue: {:#?}",
-        preview.data.detected_issues
-    );
-
-    // A repair for something else normalizes the bookkeeping too.
-    break_history_page_shape(&pdb_path);
-    let repair = backend.repair_usb_diagnostics(RepairUsbDiagnosticsRequest {
-        usb_root: Some(usb.to_string_lossy().to_string()),
-        apply: true,
-        selected_fix_ids: vec![PDB_WRONG_HISTORY_SHAPE_FIX_ID.to_string()],
-    });
-    assert!(repair.ok, "repair apply failed: {repair:?}");
-    let data = repair.data.expect("repair data");
-    assert!(
-        data.data
-            .applied_fixes
-            .iter()
-            .any(|m| m.contains("Repair PDB Data Page Flags")),
-        "bookkeeping must ride along with the selected repair: {:#?}",
-        data.data.applied_fixes
-    );
-    assert_fix_not_proposed(&backend, &usb, PDB_WRONG_PAGE_FLAGS_FIX_ID);
+    assert_fix_proposed(&backend, &usb, PDB_INCONSISTENT_FOOTERS_FIX_ID);
 }
 
 // ── fix_empty_analysis_files ──────────────────────────────────────────────
@@ -6399,9 +6334,9 @@ fn repair_apply_reports_failure_when_pdb_is_read_only() {
     let pdb_path = vendor_db_dir(&usb).join("export.pdb");
     read_write_pdb(&pdb_path, |bytes, page_size| {
         let page = find_pdb_data_page(bytes, page_size, 0).expect("tt=0 data page");
-        bytes[page * page_size + 0x1b] = 0x11; // invalid flags
+        bytes[page * page_size + 0x1b] = 0x10; // invalid flags
     });
-    assert_fix_proposed(&backend, &usb, PDB_WRONG_PAGE_FLAGS_FIX_ID);
+    assert_fix_proposed(&backend, &usb, PDB_DAMAGED_PAGE_HEADERS_FIX_ID);
 
     let mut perms = fs::metadata(&pdb_path).expect("pdb metadata").permissions();
     perms.set_readonly(true);
@@ -6410,7 +6345,7 @@ fn repair_apply_reports_failure_when_pdb_is_read_only() {
     let repair = backend.repair_usb_diagnostics(RepairUsbDiagnosticsRequest {
         usb_root: Some(usb.to_string_lossy().to_string()),
         apply: true,
-        selected_fix_ids: vec![PDB_WRONG_PAGE_FLAGS_FIX_ID.to_string()],
+        selected_fix_ids: vec![PDB_DAMAGED_PAGE_HEADERS_FIX_ID.to_string()],
     });
 
     // Restore write permission before any assertion can early-return, so the
@@ -6429,7 +6364,7 @@ fn repair_apply_reports_failure_when_pdb_is_read_only() {
         data.data
             .failed_fixes
             .iter()
-            .any(|m| m.contains("Repair PDB Data Page Flags")),
+            .any(|m| m.contains("Repair Damaged PDB Page Headers")),
         "expected the write failure to be reported in failed_fixes: {:#?}",
         data.data.failed_fixes
     );

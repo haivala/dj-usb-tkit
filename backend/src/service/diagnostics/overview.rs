@@ -453,7 +453,7 @@ pub(super) fn parity_overview(
 
     let playlist_problems = [
         problem(
-            totals.playlist_id_mismatches,
+            totals.playlists_not_in_both,
             tr::parity_overview_playlist_ids,
         ),
         problem(totals.total_only_in_pdb, tr::parity_overview_only_in_pdb),
@@ -567,8 +567,11 @@ pub(super) fn parity_issue_labels(d: &UsbParityPlaylistDetail) -> Vec<String> {
         (d.field_note_tracks, tr::parity_issue_field_notes),
     ];
     let flags: [(bool, fn() -> Text); 3] = [
-        (!d.playlist_id_match, tr::parity_issue_id_mismatch),
-        (!d.sort_order_match, tr::parity_issue_sort_mismatch),
+        (!d.playlist_in_both, tr::parity_issue_in_one_database),
+        (
+            d.playlist_in_both && !d.sort_order_match,
+            tr::parity_issue_sort_mismatch,
+        ),
         (d.order_mismatch, tr::parity_issue_order_mismatch),
     ];
     // Badge order: membership, then the playlist-wide flags, then the rest.

@@ -95,6 +95,7 @@ fn main() {
             file_type: t.file_type,
             isrc: t.isrc.clone(),
             date_added: t.date_added.clone(),
+            analyze_date: t.analyze_date.clone(),
             release_date: t.release_date.clone(),
             dj_comment: t.dj_comment.clone(),
             file_name: t.file_name.clone(),

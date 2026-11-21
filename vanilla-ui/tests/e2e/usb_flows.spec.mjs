@@ -249,7 +249,7 @@ function installTauriMock(page, mode) {
               artworkMismatchTracks: 1,
               pathMismatchTracks: 1,
               dictionaryIdIssueTracks: 1,
-              playlistIdMatch: true,
+              playlistInBoth: true,
               sortOrderMatch: true,
               sampleOnlyInPdb: [],
               sampleOnlyInEdb: [],

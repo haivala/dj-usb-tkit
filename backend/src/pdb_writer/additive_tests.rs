@@ -155,8 +155,9 @@ fn append_rows_to_chain_in_place_no_growth_when_capacity_available() {
     let u5_before = u16::from_le_bytes(bytes[last_off + 0x20..last_off + 0x22].try_into().unwrap());
 
     // Manually set existing footer masks to simulate a page that had
-    // prior transaction state. Reused-page append must preserve it and
-    // OR in only the appended row bit.
+    // prior transaction state. The append is the page's new transaction:
+    // rowpf gains the appended row, tranrf holds only that row, and
+    // (u5, num_rl) follow tranrf (docs/PDB.md "Page Footer Conventions").
     let rowpf_off = last_off + PAGE_SIZE - 4;
     let tranrf_off = last_off + PAGE_SIZE - 2;
     bytes[rowpf_off..rowpf_off + 2].copy_from_slice(&0x0003u16.to_le_bytes());
@@ -194,9 +195,13 @@ fn append_rows_to_chain_in_place_no_growth_when_capacity_available() {
     );
     assert_eq!(
         u16::from_le_bytes(bytes[tranrf_off..tranrf_off + 2].try_into().unwrap()),
-        0x0006,
-        "tranrf should preserve existing bits and add only the appended row"
+        0x0004,
+        "tranrf should hold only the appended row"
     );
+    assert!(crate::pdb_page::transaction_consistent(
+        &bytes[last_off..last_off + PAGE_SIZE],
+        3
+    ));
     assert_eq!(
         u16::from_le_bytes(bytes[last_off + 0x20..last_off + 0x22].try_into().unwrap()),
         u5_before,
@@ -787,6 +792,7 @@ fn append_tracks_round_trips_through_parser() {
         file_type: Some(1),
         isrc: None,
         date_added: Some("2026-04-30".into()),
+        analyze_date: None,
         release_date: None,
         dj_comment: None,
         file_name: None,
@@ -902,6 +908,7 @@ fn additive_diff_patches_existing_track_scalars_in_place() {
         file_type: Some(1),
         isrc: None,
         date_added: Some("2026-04-30".into()),
+        analyze_date: None,
         release_date: None,
         dj_comment: None,
         file_name: None,
@@ -1046,8 +1053,13 @@ fn append_playlist_tree_preserves_transaction_tombstone_page() {
     );
     assert_eq!(
         u16::from_le_bytes(bytes[tranrf_off..tranrf_off + 2].try_into().unwrap()),
-        0x0003
+        0x0002,
+        "the append replaces the delete as the page's last transaction"
     );
+    assert!(crate::pdb_page::transaction_consistent(
+        &bytes[old_last_off..old_last_off + PAGE_SIZE],
+        2
+    ));
     let used_s = u16::from_le_bytes(
         bytes[old_last_off + 0x1e..old_last_off + 0x20]
             .try_into()
@@ -1113,6 +1125,7 @@ fn build_seed_pdb_data() -> PdbData {
         file_type: None,
         isrc: None,
         date_added: None,
+        analyze_date: None,
         release_date: None,
         dj_comment: None,
         file_name: None,
@@ -1201,6 +1214,7 @@ fn additive_diff_rejects_removed_track() {
         file_type: None,
         isrc: None,
         date_added: None,
+        analyze_date: None,
         release_date: None,
         dj_comment: None,
         file_name: None,
@@ -1437,7 +1451,7 @@ fn mutate_tracks_in_place_zeroes_id_on_relocated_slot() {
     // + a freshly appended replacement row. The vacated slot must have
     // its id field zeroed — otherwise it's a live duplicate of the
     // relocated row's id, which is exactly what
-    // `detect_pdb_tombstoned_playlist_tree_ids` flags as PDB corruption.
+    // `detect_pdb_tombstoned_playlist_tree_ids` checks for.
     let seed = build_seed_pdb_data();
     let mut bytes = write_pdb(&seed).expect("write seed");
 
@@ -1800,6 +1814,7 @@ fn same_size_track_row_patch_sanitizes_metadata_strings() {
         file_type: Some(1),
         isrc: None,
         date_added: Some("2026-06-17".into()),
+        analyze_date: None,
         release_date: None,
         dj_comment: Some("Comment".into()),
         file_name: Some("track.mp3".into()),
@@ -1869,6 +1884,7 @@ fn apply_additive_diff_grows_file_minimally() {
         file_type: Some(1),
         isrc: None,
         date_added: Some("2026-04-30".into()),
+        analyze_date: None,
         release_date: None,
         dj_comment: None,
         file_name: None,
@@ -2021,6 +2037,7 @@ fn additive_diff_accepts_empty_existing_pdb_for_first_export() {
         file_type: None,
         isrc: None,
         date_added: None,
+        analyze_date: None,
         release_date: None,
         dj_comment: None,
         file_name: Some("first.flac".into()),
@@ -2075,6 +2092,7 @@ fn mirror_removal_leaves_tt8_pages_with_single_bit_tranrf() {
         file_type: None,
         isrc: None,
         date_added: None,
+        analyze_date: None,
         release_date: None,
         dj_comment: None,
         file_name: Some(format!("t{id:03}.flac")),
@@ -2210,6 +2228,7 @@ fn additive_first_export_large_library_synthesizes_single_t19_row() {
             file_type: None,
             isrc: None,
             date_added: None,
+            analyze_date: None,
             release_date: None,
             dj_comment: None,
             file_name: Some(format!("track{id}.flac")),
@@ -2277,6 +2296,7 @@ fn additive_first_export_preserves_template_menu_pages() {
         file_type: None,
         isrc: None,
         date_added: None,
+        analyze_date: None,
         release_date: None,
         dj_comment: None,
         file_name: Some("first.flac".into()),
@@ -2385,6 +2405,7 @@ fn additive_first_export_keeps_t07_on_initial_tail_candidate() {
             file_type: None,
             isrc: None,
             date_added: None,
+            analyze_date: None,
             release_date: None,
             dj_comment: Some("first export growth row ".repeat(30)),
             file_name: Some(format!("first-export-growth-{id}.flac")),
@@ -2468,6 +2489,7 @@ fn reposition_test_track(id: u32) -> crate::service::export_helpers::PdbTrackRow
         file_type: None,
         isrc: None,
         date_added: None,
+        analyze_date: None,
         release_date: None,
         dj_comment: None,
         file_name: Some(format!("reposition-track-{id}.flac")),
@@ -2824,6 +2846,7 @@ fn t19_test_track(id: u32) -> crate::service::export_helpers::PdbTrackRowData {
         file_type: None,
         isrc: None,
         date_added: None,
+        analyze_date: None,
         release_date: None,
         dj_comment: None,
         file_name: Some(format!("t{id:03}.flac")),

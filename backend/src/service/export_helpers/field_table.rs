@@ -161,6 +161,7 @@ fn pdb_track_row_fields_are_classified(row: &PdbTrackRowData) {
         file_type: _,
         isrc: _,
         date_added: _,
+        analyze_date: _,
         release_date: _,
         dj_comment: _,
         file_name: _,
@@ -449,15 +450,20 @@ pub(crate) fn note_field_differences(
             "releaseDate",
             text_differs(edb.release_date.as_deref(), pdb.release_date.as_deref()),
         ),
-        (
-            "dateAdded",
-            text_differs(
-                edb.date_added.as_deref(),
-                pdb.date_added
-                    .as_deref()
-                    .filter(|d| !is_placeholder_date(d)),
-            ),
-        ),
+        // rekordbox writes the eDB's dateAdded to the PDB's slot 15 (and its
+        // dateCreated to slot 10); the app writes it to both.
+        ("dateAdded", {
+            let slot_10 = pdb
+                .date_added
+                .as_deref()
+                .filter(|d| !is_placeholder_date(d));
+            let slot_15 = pdb
+                .analyze_date
+                .as_deref()
+                .filter(|d| !is_placeholder_date(d));
+            text_differs(edb.date_added.as_deref(), slot_10)
+                && text_differs(edb.date_added.as_deref(), slot_15)
+        }),
         (
             "bitrate",
             num_differs(edb.bitrate, pdb.bitrate_kbps.map(i64::from)),
@@ -511,6 +517,14 @@ mod tests {
             note_field_differences(&edb, &pdb, &parsed),
             vec!["genre", "dateAdded"]
         );
+        // rekordbox's own row: dateCreated in slot 10, dateAdded in slot 15.
+        let rekordbox_row = crate::pdb_reader::PdbTrackRow {
+            date_added: Some("2020-09-01".to_string()),
+            analyze_date: Some("2020-09-18".to_string()),
+            ..pdb.clone()
+        };
+        edb.genre = Some("drum & Bass".to_string());
+        assert!(note_field_differences(&edb, &rekordbox_row, &parsed).is_empty());
     }
 
     #[test]

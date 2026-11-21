@@ -55,7 +55,7 @@ fn inplace_data_pages(bytes: &[u8], len_page: usize, table_type: u32) -> Vec<Inp
             continue;
         };
         let payload_end = HEAP_START + used_size as usize;
-        if payload_end > len_page {
+        if payload_end > len_page || !pdb_page::footer_clear_of_heap(page, num_row_offsets) {
             continue;
         }
         out.push(InplaceDataPage {
@@ -157,6 +157,77 @@ pub(crate) fn remove_rows_inplace(
         );
     }
     removed
+}
+
+/// Move the live playlist (tt=8) and history (tt=12, tt=18) entries of the
+/// tracks in `twins` (track id → id of the track taking its place) onto the
+/// twin, in place. A playlist entry whose playlist already holds the twin is
+/// removed instead (tombstoned as in [`remove_rows_inplace`]); history
+/// entries are always kept. Returns `(repointed, removed)`.
+pub(crate) fn merge_track_entries_inplace(
+    bytes: &mut [u8],
+    twins: &std::collections::HashMap<u32, u32>,
+) -> (usize, usize) {
+    if twins.is_empty() {
+        return (0, 0);
+    }
+    let Some(len_page) = inplace_page_size(bytes) else {
+        return (0, 0);
+    };
+    // (table, offset of the track id in the row, offset of the playlist id).
+    const ENTRY_TABLES: [(u32, usize, usize); 3] = [(8, 4, 8), (12, 0, 4), (18, 0, 4)];
+    let row_u32 = |page: &[u8], row: usize, at: usize| read_u32_le_at(page, row + at).unwrap_or(0);
+
+    let mut repointed = 0usize;
+    let mut removed = 0usize;
+    for (table_type, track_at, playlist_at) in ENTRY_TABLES {
+        // (playlist, track) pairs already present, so a moved playlist entry
+        // never duplicates one (history may list a track more than once).
+        let mut present = std::collections::HashSet::<(u32, u32)>::new();
+        let pages = inplace_data_pages(bytes, len_page, table_type);
+        if table_type == 8 {
+            for data_page in &pages {
+                let page = &bytes[data_page.start..data_page.start + len_page];
+                for slot in pdb_page::footer_slots(page, data_page.num_row_offsets) {
+                    let row = HEAP_START + slot.heap_off;
+                    if slot.present && row + 12 <= data_page.payload_end {
+                        present.insert((
+                            row_u32(page, row, playlist_at),
+                            row_u32(page, row, track_at),
+                        ));
+                    }
+                }
+            }
+        }
+        for data_page in &pages {
+            let page = &mut bytes[data_page.start..data_page.start + len_page];
+            let mut doomed = Vec::new();
+            let slots: Vec<_> = pdb_page::footer_slots(page, data_page.num_row_offsets).collect();
+            for slot in slots {
+                let row = HEAP_START + slot.heap_off;
+                if !slot.present || row + 12 > data_page.payload_end {
+                    continue;
+                }
+                let Some(&twin) = twins.get(&row_u32(page, row, track_at)) else {
+                    continue;
+                };
+                if table_type == 8 && !present.insert((row_u32(page, row, playlist_at), twin)) {
+                    doomed.push(slot);
+                    continue;
+                }
+                page[row + track_at..row + track_at + 4].copy_from_slice(&twin.to_le_bytes());
+                repointed += 1;
+            }
+            removed += doomed.len();
+            tombstone_slots(
+                page,
+                data_page,
+                &doomed,
+                table_uses_tombstone_footer_convention(table_type),
+            );
+        }
+    }
+    (repointed, removed)
 }
 
 /// Location of one active `tt=8` (playlist_entries) row.
@@ -336,67 +407,22 @@ pub(crate) fn patch_t08_entry_indices_in_place(
     patched
 }
 
-/// Normalise tt=8 (playlist_entry) page footer fields to `(u5=1, num_rl=trc-1)`.
-///
-/// Exports produced by other software occasionally carry interior pages whose
-/// `num_rl` does not follow the `trc-1` convention required by strict player
-/// validation. This pass corrects those pages before the post-write convention
-/// check so the writer's output is always conformant.
+/// Give tt=8 (playlist_entry) pages whose footer doesn't follow the
+/// transaction rule the `(u5=1, num_rl=trc-1)` shape, with `tranrf` on the
+/// last slot to match (docs/PDB.md "Page Footer Conventions"). Pages that
+/// already follow the rule, rekordbox's included, are left alone.
 pub(crate) fn fix_tt8_num_rl_conventions_inplace(bytes: &mut [u8]) {
-    let len_page = match read_u32_le_at(bytes, 4) {
-        Some(v) if v > 0 => v as usize,
-        _ => return,
-    };
-    if bytes.len() < len_page {
+    let Some(len_page) = inplace_page_size(bytes) else {
         return;
-    }
-    let total_pages = bytes.len() / len_page;
-    for page_idx in 1..total_pages {
-        let off = page_idx * len_page;
-        if off + 0x28 > bytes.len() {
-            break;
-        }
-        let table_type = match read_u32_le_at(&bytes[off..], 0x08) {
-            Some(t) => t,
-            None => continue,
-        };
-        if table_type != 8 {
+    };
+    for data_page in inplace_data_pages(bytes, len_page, 8) {
+        let page = &mut bytes[data_page.start..data_page.start + len_page];
+        let slots = data_page.num_row_offsets;
+        if !pdb_page::footer_fits(len_page, slots) || pdb_page::transaction_consistent(page, slots)
+        {
             continue;
         }
-        let pf = match read_u8_at(&bytes[off..], 0x1b) {
-            Some(v) => v,
-            None => continue,
-        };
-        if pf == 0x64 {
-            continue;
-        }
-        let nrs = match read_u8_at(&bytes[off..], 0x18) {
-            Some(v) if v > 0 => v,
-            _ => continue,
-        };
-        let observed_num_rl = match read_u16_le_at(&bytes[off..], 0x22) {
-            Some(v) => v,
-            None => continue,
-        };
-        if observed_num_rl == 8191 {
-            continue;
-        }
-        let trc: u16 = if observed_num_rl >= nrs as u16 {
-            observed_num_rl.saturating_add(1)
-        } else {
-            nrs as u16
-        };
-        let exp_num_rl = trc.saturating_sub(1);
-        let exp_u5: u16 = 1;
-        let observed_u5 = read_u16_le_at(&bytes[off..], 0x20).unwrap_or(0);
-        if observed_u5 != exp_u5 {
-            bytes[off + 0x20] = exp_u5 as u8;
-            bytes[off + 0x21] = (exp_u5 >> 8) as u8;
-        }
-        if observed_num_rl != exp_num_rl {
-            bytes[off + 0x22] = exp_num_rl as u8;
-            bytes[off + 0x23] = (exp_num_rl >> 8) as u8;
-        }
+        pdb_page::write_transaction(page, slots, &[slots - 1]);
     }
 }
 
@@ -473,9 +499,11 @@ pub(crate) fn rebuild_sentinel_btrees_for_tables(bytes: &mut [u8], tables: &[u32
         }
         active.sort_unstable();
 
-        let ne = active.len().min(0x1FFF) as u16;
-        if ne == 0 {
+        if active.is_empty() {
             continue; // nothing to write — leave sentinel as-is
+        }
+        if !write_sentinel_btree(bytes, sent_off, page_size, &active) {
+            continue;
         }
 
         // Update sentinel seq to current max data-page seq + 1.
@@ -499,23 +527,6 @@ pub(crate) fn rebuild_sentinel_btrees_for_tables(bytes: &mut [u8], tables: &[u32
             .unwrap_or(1);
         let sentinel_seq = max_seq.saturating_add(1);
         bytes[sent_off + 0x10..sent_off + 0x14].copy_from_slice(&sentinel_seq.to_le_bytes());
-
-        let fill_end = sent_off + page_size.saturating_sub(SENTINEL_TAIL_ZERO_BYTES);
-        let mut cursor = sent_off + 0x3c;
-        for &pi in &active {
-            if cursor + 4 > fill_end {
-                break;
-            }
-            bytes[cursor..cursor + 4].copy_from_slice(&(pi * 8).to_le_bytes());
-            cursor += 4;
-        }
-        while cursor + 4 <= fill_end {
-            bytes[cursor..cursor + 4].copy_from_slice(&SENTINEL_EMPTY_ENTRY.to_le_bytes());
-            cursor += 4;
-        }
-        bytes[sent_off + 0x38..sent_off + 0x3a].copy_from_slice(&ne.to_le_bytes());
-        bytes[sent_off + 0x3a..sent_off + 0x3c].copy_from_slice(&0x1fffu16.to_le_bytes());
-        bytes[sent_off + 0x26..sent_off + 0x28].copy_from_slice(&ne.to_le_bytes());
     }
 }
 
@@ -546,4 +557,53 @@ pub(crate) fn extract_playlist_entry_track_id(row: &[u8]) -> Option<u32> {
 /// Extract artwork row ID (at offset 0x00 LE).
 pub(crate) fn extract_artwork_id(row: &[u8]) -> Option<u32> {
     extract_u32_at(row, 0)
+}
+
+/// Point the sentinel page at `sent_off` at the `active` data pages (sorted
+/// page indexes): entries `page * 8`, the rest empty. A B-tree that already
+/// indexes exactly these pages stays as it is: rekordbox keeps its own entry
+/// order and free slots, and rewriting them changes a valid page for nothing.
+/// Returns whether anything was written.
+pub(crate) fn write_sentinel_btree(
+    bytes: &mut [u8],
+    sent_off: usize,
+    page_size: usize,
+    active: &[u32],
+) -> bool {
+    let Some(fill_end) = page_size
+        .checked_sub(SENTINEL_TAIL_ZERO_BYTES)
+        .map(|end| sent_off + end)
+        .filter(|&end| end <= bytes.len() && end >= sent_off + 0x3c)
+    else {
+        return false;
+    };
+    let mut indexed: Vec<u32> = bytes[sent_off + 0x3c..fill_end]
+        .as_chunks::<4>()
+        .0
+        .iter()
+        .map(|&entry| u32::from_le_bytes(entry))
+        .filter(|&entry| entry != SENTINEL_EMPTY_ENTRY)
+        .map(|entry| entry / 8)
+        .collect();
+    indexed.sort_unstable();
+    if indexed == active {
+        return false;
+    }
+    let mut cursor = sent_off + 0x3c;
+    for &page_idx in active {
+        if cursor + 4 > fill_end {
+            break;
+        }
+        bytes[cursor..cursor + 4].copy_from_slice(&(page_idx * 8).to_le_bytes());
+        cursor += 4;
+    }
+    while cursor + 4 <= fill_end {
+        bytes[cursor..cursor + 4].copy_from_slice(&SENTINEL_EMPTY_ENTRY.to_le_bytes());
+        cursor += 4;
+    }
+    let ne = active.len().min(0x1FFF) as u16;
+    bytes[sent_off + 0x38..sent_off + 0x3a].copy_from_slice(&ne.to_le_bytes());
+    bytes[sent_off + 0x3a..sent_off + 0x3c].copy_from_slice(&0x1fffu16.to_le_bytes());
+    bytes[sent_off + 0x26..sent_off + 0x28].copy_from_slice(&ne.to_le_bytes());
+    true
 }

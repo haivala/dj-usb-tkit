@@ -232,7 +232,13 @@ pub fn encode_track_row_with_profile(
     slot_bytes[10] = encode_pdb_string(track.date_added.as_deref().unwrap_or(""));
     slot_bytes[11] = encode_pdb_string(track.release_date.as_deref().unwrap_or(""));
     slot_bytes[14] = encode_pdb_string(&track.anlz_path);
-    slot_bytes[15] = encode_pdb_string(track.date_added.as_deref().unwrap_or(""));
+    slot_bytes[15] = encode_pdb_string(
+        track
+            .analyze_date
+            .as_deref()
+            .or(track.date_added.as_deref())
+            .unwrap_or(""),
+    );
     slot_bytes[16] = encode_pdb_string(&sanitize_metadata(
         track.dj_comment.as_deref().unwrap_or(""),
     ));
@@ -448,6 +454,7 @@ mod tests {
             file_type: None,
             isrc: None,
             date_added: None,
+            analyze_date: None,
             release_date: release_date.map(str::to_owned),
             dj_comment: None,
             file_name: None,

@@ -19,7 +19,7 @@ pub(super) struct ParityTotals {
     pub(super) total_dictionary_id_issues: usize,
     /// Playlist tracks counted once each, however many playlists hold them.
     pub(super) rating_colour_mismatches: usize,
-    pub(super) playlist_id_mismatches: usize,
+    pub(super) playlists_not_in_both: usize,
 }
 
 impl ParityTotals {
@@ -51,7 +51,7 @@ impl ParityTotals {
             .iter()
             .map(|d| d.rating_colour_mismatch_tracks)
             .sum();
-        let playlist_id_mismatches = details.iter().filter(|d| !d.playlist_id_match).count();
+        let playlists_not_in_both = details.iter().filter(|d| !d.playlist_in_both).count();
         Self {
             fail_playlists,
             total_only_in_pdb,
@@ -66,7 +66,7 @@ impl ParityTotals {
             total_path_mismatches,
             total_dictionary_id_issues,
             rating_colour_mismatches,
-            playlist_id_mismatches,
+            playlists_not_in_both,
         }
     }
 }
@@ -315,8 +315,50 @@ pub(crate) fn build_usb_parity_comparison(
         all_keys.insert(key.clone());
     }
 
+    // Where each playlist both databases have sits in the player's list: its
+    // position among those playlists in its folder (the PDB's parent), by
+    // each database's own sort value. rekordbox numbers playlists and sort
+    // values separately per database, so only the order has to agree.
+    let parent_by_key: HashMap<String, u32> = leaves
+        .iter()
+        .map(|leaf| (canonicalize_playlist_name(&leaf.name), leaf.parent_id))
+        .collect();
+    let shown_position = |sort_of: &dyn Fn(&str) -> Option<(u32, u32)>| {
+        let mut by_folder = HashMap::<u32, Vec<(u32, u32, &str)>>::new();
+        for key in &all_keys {
+            if !(pdb_info_by_playlist.contains_key(key) && edb_info_by_playlist.contains_key(key)) {
+                continue;
+            }
+            if let Some((sort, id)) = sort_of(key) {
+                let parent = parent_by_key.get(key).copied().unwrap_or(0);
+                by_folder
+                    .entry(parent)
+                    .or_default()
+                    .push((sort, id, key.as_str()));
+            }
+        }
+        let mut position = HashMap::<String, usize>::new();
+        for rows in by_folder.values_mut() {
+            rows.sort();
+            for (at, (_, _, key)) in rows.iter().enumerate() {
+                position.insert((*key).to_string(), at);
+            }
+        }
+        position
+    };
+    let pdb_position = shown_position(&|key| {
+        pdb_info_by_playlist
+            .get(key)
+            .map(|info| (info.sort_order, info.playlist_id))
+    });
+    let edb_position = shown_position(&|key| {
+        edb_info_by_playlist
+            .get(key)
+            .and_then(|info| Some((info.sort_order?, info.playlist_id.unwrap_or(0))))
+    });
+
     let mut details = Vec::<UsbParityPlaylistDetail>::new();
-    for key in all_keys {
+    for key in all_keys.iter().cloned() {
         let pdb_name = leaves
             .iter()
             .find(|n| canonicalize_playlist_name(&n.name) == key)
@@ -818,18 +860,11 @@ pub(crate) fn build_usb_parity_comparison(
             .as_ref()
             .map(|info| info.duplicate_entries)
             .unwrap_or(0);
-        let playlist_id_match = match (pdb_info.as_ref(), edb_info.as_ref()) {
-            (Some(pdb), Some(edb)) => edb
-                .playlist_id
-                .map(|playlist_id| playlist_id == pdb.playlist_id)
-                .unwrap_or(false),
-            _ => false,
-        };
-        let sort_order_match = match (pdb_info.as_ref(), edb_info.as_ref()) {
-            (Some(pdb), Some(edb)) => edb
-                .sort_order
-                .map(|sort_order| sort_order == pdb.sort_order)
-                .unwrap_or(false),
+        // Both databases have the playlist. Its id may differ: rekordbox
+        // numbers each database's playlists separately.
+        let playlist_in_both = pdb_info.is_some() && edb_info.is_some();
+        let sort_order_match = match (pdb_position.get(&key), edb_position.get(&key)) {
+            (Some(pdb), Some(edb)) => pdb == edb,
             _ => false,
         };
 
@@ -839,7 +874,6 @@ pub(crate) fn build_usb_parity_comparison(
             && pdb_duplicate_entries == 0
             && path_mismatch_tracks == 0
             && dictionary_id_issue_tracks == 0
-            && playlist_id_match
             && sort_order_match;
 
         let status = if !structural_pass {
@@ -871,7 +905,7 @@ pub(crate) fn build_usb_parity_comparison(
             field_note_tracks,
             path_mismatch_tracks,
             dictionary_id_issue_tracks,
-            playlist_id_match,
+            playlist_in_both,
             sort_order_match,
             sample_only_in_pdb,
             sample_only_in_edb,
@@ -941,7 +975,7 @@ pub(crate) fn build_usb_parity_comparison(
         total_dictionary_id_issues,
         // The report counts these by track (`rating_colour`) instead.
         rating_colour_mismatches: _,
-        playlist_id_mismatches,
+        playlists_not_in_both,
     } = ParityTotals::from_details(&details);
 
     let warn_playlists = details
@@ -969,7 +1003,7 @@ pub(crate) fn build_usb_parity_comparison(
         tr::diagnostics_check_parity_overall_detail(
             details.len(),
             fail_playlists,
-            playlist_id_mismatches,
+            playlists_not_in_both,
         ),
     ));
     checks.push(DiagCheck::new(
@@ -1107,8 +1141,8 @@ pub(crate) fn build_usb_parity_comparison(
     let pass_or = |ok: bool, bad: DiagStatus| if ok { DiagStatus::Pass } else { bad };
     checks.push(DiagCheck::new(
         tr::diagnostics_check_parity_identity(),
-        pass_or(playlist_id_mismatches == 0, DiagStatus::Fail),
-        tr::diagnostics_check_parity_identity_detail(playlist_id_mismatches),
+        pass_or(playlists_not_in_both == 0, DiagStatus::Fail),
+        tr::diagnostics_check_parity_identity_detail(playlists_not_in_both),
     ));
     checks.push(DiagCheck::new(
         tr::diagnostics_check_parity_membership(),

@@ -77,7 +77,7 @@ fn fix_outcomes_event_log_names_a_fix_without_its_file_format_detail() {
     use crate::i18n::tr;
 
     let mut outcomes = FixOutcomes::default();
-    outcomes.record(tr::repair_fix_page_flags(), true, true, || {
+    outcomes.record(tr::repair_fix_page_headers(), true, true, || {
         Ok(Detail::File("patched 3 pages".to_string()))
     });
     outcomes.record(tr::repair_fix_relink(), true, true, || {
@@ -90,14 +90,14 @@ fn fix_outcomes_event_log_names_a_fix_without_its_file_format_detail() {
     assert_eq!(
         shown,
         vec![
-            "repair applied: Repair PDB Data Page Flags",
+            "repair applied: Repair Damaged PDB Page Headers",
             "repair applied: Relink Moved Audio Files: relinked 1 track"
         ]
     );
     // The response keeps the detail.
     assert_eq!(
         outcomes.lines(OutcomeKind::Applied)[0],
-        "Repair PDB Data Page Flags: patched 3 pages"
+        "Repair Damaged PDB Page Headers: patched 3 pages"
     );
 }
 
@@ -152,7 +152,7 @@ fn make_strict_repair_detail(name: &str) -> UsbParityPlaylistDetail {
         order_mismatch: false,
         path_mismatch_tracks: 0,
         dictionary_id_issue_tracks: 0,
-        playlist_id_match: true,
+        playlist_in_both: true,
         sort_order_match: true,
         parent_match: Some(true),
         pdb_playlist_id: Some(1),
@@ -280,9 +280,14 @@ fn derive_history_sync_payload_uses_named_histories_and_valid_entries() {
         ..ParsedPdb::default()
     };
 
-    let (history_rows, history_content_rows) = derive_history_sync_payload(&parsed);
+    // The eDB numbers its content rows on its own: PDB track 101 is eDB
+    // content 7, and a track with no eDB row stays in the PDB's history only.
+    let content_ids = HashMap::from([(101, 7)]);
+    let (history_rows, history_content_rows) = derive_history_sync_payload(&parsed, &content_ids);
     assert_eq!(history_rows, vec![(10, 0, "HISTORY 001".to_string(), 0, 0)]);
-    assert_eq!(history_content_rows, vec![(10, 101, 1)]);
+    assert_eq!(history_content_rows, vec![(10, 7, 1)]);
+    let (_, unmatched) = derive_history_sync_payload(&parsed, &HashMap::new());
+    assert!(unmatched.is_empty());
 }
 
 fn test_usb_root() -> (tempfile::TempDir, std::path::PathBuf) {
@@ -872,47 +877,6 @@ fn write_pdb_pages_as_usb_root(pages: Vec<Vec<u8>>) -> (tempfile::TempDir, std::
 }
 
 #[test]
-fn sentinel_u5_repair_detects_and_fixes_sentinel_footer() {
-    let mut p1 = data_page(1, 7); // tt=7 (playlist_tree): correct is (nrs, 0)
-    set_nrs(&mut p1, 3);
-    set_u5_num_rl(&mut p1, 0x1FFF, 0x1FFF);
-    let (_td, usb_root) = write_pdb_pages_as_usb_root(vec![header_page(), p1]);
-    let pdb_path = vendor_pdb_path(&usb_root);
-
-    let pages = detect_pdb_sentinel_u5_on_data_pages(&read_pdb_file(&pdb_path));
-    assert_eq!(pages.len(), 1, "expected one sentinel-u5 page detected");
-    assert_eq!(pages[0].page_index, 1);
-
-    // No-op on empty input.
-    assert_eq!(
-        patch_pdb_file(&usb_root, |bytes| apply_pdb_sentinel_u5_repair(bytes, &[])).unwrap(),
-        0
-    );
-
-    let patched = patch_pdb_file(&usb_root, |bytes| {
-        apply_pdb_sentinel_u5_repair(bytes, &pages)
-    })
-    .unwrap();
-    assert_eq!(patched, 1);
-
-    let bytes = std::fs::read(&pdb_path).unwrap();
-    let off = TEST_PAGE_SIZE;
-    assert_eq!(
-        u16::from_le_bytes(bytes[off + 0x20..off + 0x22].try_into().unwrap()),
-        3
-    );
-    assert_eq!(
-        u16::from_le_bytes(bytes[off + 0x22..off + 0x24].try_into().unwrap()),
-        0
-    );
-
-    assert!(
-        detect_pdb_sentinel_u5_on_data_pages(&read_pdb_file(&pdb_path)).is_empty(),
-        "repair should be idempotent"
-    );
-}
-
-#[test]
 fn duplicate_playlist_entries_repair_removes_stale_rows_and_is_idempotent() {
     use crate::pdb_writer::writer_tests::build_tt8_test_page;
 
@@ -947,182 +911,132 @@ fn duplicate_playlist_entries_repair_is_noop_on_clean_pdb() {
     assert_eq!(removed, 0);
 }
 
+/// A one-group tt=7 page with `slots` row slots and the given footer bits.
+fn playlist_tree_page(slots: u8, u5: u16, num_rl: u16, rowpf: u16, tranrf: u16) -> Vec<u8> {
+    let mut p = data_page(1, 7);
+    set_flags(&mut p, 0x34);
+    set_nrs(&mut p, slots);
+    set_u5_num_rl(&mut p, u5, num_rl);
+    let end = TEST_PAGE_SIZE;
+    p[end - 4..end - 2].copy_from_slice(&rowpf.to_le_bytes());
+    p[end - 2..end].copy_from_slice(&tranrf.to_le_bytes());
+    p
+}
+
+fn page_u5_num_rl_tranrf(bytes: &[u8]) -> (u16, u16, u16) {
+    let off = TEST_PAGE_SIZE;
+    let end = off + TEST_PAGE_SIZE;
+    (
+        u16::from_le_bytes(bytes[off + 0x20..off + 0x22].try_into().unwrap()),
+        u16::from_le_bytes(bytes[off + 0x22..off + 0x24].try_into().unwrap()),
+        u16::from_le_bytes(bytes[end - 2..end].try_into().unwrap()),
+    )
+}
+
+/// Detects the page, applies the fix and returns the page's
+/// `(u5, num_rl, tranrf)` afterwards.
+fn fix_playlist_tree_page(page: Vec<u8>) -> (u16, u16, u16) {
+    let (_td, usb_root) = write_pdb_pages_as_usb_root(vec![header_page(), page]);
+    let pdb_path = vendor_pdb_path(&usb_root);
+    let pages = detect_pdb_inconsistent_page_footers(&read_pdb_file(&pdb_path));
+    assert_eq!(pages.len(), 1);
+    let patched = patch_pdb_file(&usb_root, |bytes| {
+        apply_pdb_inconsistent_page_footer_repair(bytes, &pages)
+    })
+    .unwrap();
+    assert_eq!(patched, 1);
+    let bytes = std::fs::read(&pdb_path).unwrap();
+    assert!(detect_pdb_inconsistent_page_footers(&bytes).is_empty());
+    page_u5_num_rl_tranrf(&bytes)
+}
+
+fn playlist_tree_page_flagged(page: Vec<u8>) -> bool {
+    let (_td, usb_root) = write_pdb_pages_as_usb_root(vec![header_page(), page]);
+    !detect_pdb_inconsistent_page_footers(&read_pdb_file(&vendor_pdb_path(&usb_root))).is_empty()
+}
+
 #[test]
-fn wrong_page_flags_repair_detects_and_fixes_invalid_flags() {
-    let mut p1 = data_page(1, 7); // tt=7: only 0x24 is valid
-    set_flags(&mut p1, 0x99);
+fn damaged_page_header_repair_restores_flags_and_live_count() {
+    // What a crashed rekordbox write leaves: flags 0x10 and a live-row count
+    // that isn't the number of rowpf bits (3 live of 4 slots, header says 0).
+    let mut p1 = playlist_tree_page(4, 1, 3, 0b1011, 0b1000);
+    set_flags(&mut p1, 0x10);
     let (_td, usb_root) = write_pdb_pages_as_usb_root(vec![header_page(), p1]);
     let pdb_path = vendor_pdb_path(&usb_root);
 
-    let pages = detect_pdb_wrong_page_flags(&read_pdb_file(&pdb_path));
+    let pages = detect_pdb_damaged_page_headers(&read_pdb_file(&pdb_path));
     assert_eq!(pages.len(), 1);
-    assert_eq!(pages[0].page_index, 1);
-    assert_eq!(pages[0].correct_flags, 0x24);
-
+    assert_eq!(pages[0].flags, Some(0x24));
+    assert_eq!(pages[0].slot_counts, Some((4, 3)));
     assert_eq!(
-        patch_pdb_file(&usb_root, |bytes| apply_pdb_wrong_page_flags_repair(
+        patch_pdb_file(&usb_root, |bytes| apply_pdb_damaged_page_header_repair(
             bytes,
             &[]
         ))
         .unwrap(),
         0
     );
-
     let patched = patch_pdb_file(&usb_root, |bytes| {
-        apply_pdb_wrong_page_flags_repair(bytes, &pages)
+        apply_pdb_damaged_page_header_repair(bytes, &pages)
     })
     .unwrap();
     assert_eq!(patched, 1);
 
     let bytes = std::fs::read(&pdb_path).unwrap();
-    assert_eq!(bytes[TEST_PAGE_SIZE + 0x1b], 0x24);
-    assert!(detect_pdb_wrong_page_flags(&read_pdb_file(&pdb_path)).is_empty());
+    let page = &bytes[TEST_PAGE_SIZE..2 * TEST_PAGE_SIZE];
+    assert_eq!(page[0x1b], 0x24);
+    assert_eq!(crate::pdb_page::read_slot_counts(page), Some((4, 3)));
+    assert!(detect_pdb_damaged_page_headers(&bytes).is_empty());
 }
 
 #[test]
-fn wrong_page_flags_repair_allows_active_flag_on_track_table() {
-    // tt=0 (tracks) accepts both 0x24 and 0x34; only a value outside that
-    // set should be flagged, and the correction target is 0x34 (active).
-    let mut p1 = data_page(1, 0);
-    set_flags(&mut p1, 0x11);
-    let (_td, usb_root) = write_pdb_pages_as_usb_root(vec![header_page(), p1]);
-    let pdb_path = vendor_pdb_path(&usb_root);
-
-    let pages = detect_pdb_wrong_page_flags(&read_pdb_file(&pdb_path));
-    assert_eq!(pages.len(), 1);
-    assert_eq!(pages[0].correct_flags, 0x34);
+fn damaged_page_headers_accept_active_flags_on_every_table() {
+    // rekordbox writes 0x34 on any table, not only tracks and history.
+    for table_type in [0u32, 2, 7, 8, 13] {
+        let mut p1 = playlist_tree_page(4, 1, 3, 0b1111, 0b1000);
+        p1[8..12].copy_from_slice(&table_type.to_le_bytes());
+        p1[0x19] = 0x80; // live-row count 4 in bits 13-23
+        let (_td, usb_root) = write_pdb_pages_as_usb_root(vec![header_page(), p1]);
+        assert!(
+            detect_pdb_damaged_page_headers(&read_pdb_file(&vendor_pdb_path(&usb_root))).is_empty(),
+            "table {table_type}"
+        );
+    }
 }
 
 #[test]
-fn zero_tranrf_repair_detects_and_fixes_missing_transaction_flags() {
-    // tt=0, u5=2 (non-dict shape): tranrf must mirror rowpf in every group.
-    let mut p1 = data_page(1, 0);
-    set_nrs(&mut p1, 1);
-    set_u5_num_rl(&mut p1, 2, 0);
-    // Single footer group at the tail of the page: [row-offset(u16)] [rowpf(u16)] [tranrf(u16)]
-    // laid out backwards from the end: cursor -= 4 (rowpf|tranrf), then -= glen*2 (offsets).
-    let rowpf_off = TEST_PAGE_SIZE - 4;
-    let tranrf_off = TEST_PAGE_SIZE - 2;
-    p1[rowpf_off..rowpf_off + 2].copy_from_slice(&1u16.to_le_bytes()); // rowpf != 0
-    p1[tranrf_off..tranrf_off + 2].copy_from_slice(&0u16.to_le_bytes()); // tranrf == 0 (bug)
-    let (_td, usb_root) = write_pdb_pages_as_usb_root(vec![header_page(), p1]);
-    let pdb_path = vendor_pdb_path(&usb_root);
-
-    let pages = detect_pdb_zero_tranrf_all_tables(&read_pdb_file(&pdb_path));
-    assert_eq!(pages.len(), 1, "expected one zero-tranrf page detected");
-    assert_eq!(pages[0].page_index, 1);
-
-    assert_eq!(
-        patch_pdb_file(&usb_root, |bytes| apply_pdb_zero_tranrf_repair(bytes, &[])).unwrap(),
-        0
+fn footer_transaction_reads_the_slot_count_past_255() {
+    // tt=8, 257 slots: the count wraps a u8 (257 & 0xFF = 1) and spans 17
+    // footer groups. (1, 256) with tranrf on slot 256 follows the rule; the
+    // same fields with no tranrf bit do not, and the fix marks slot 256.
+    let page = |tranrf: u16| {
+        let mut p1 = data_page(1, 8);
+        p1[0x18] = 1; // packed slot count low byte: 257 & 0xFF
+        p1[0x19] = 1; // packed slot count mid byte: (257 >> 8) & 0xFF
+        set_u5_num_rl(&mut p1, 1, 256);
+        let last_group_rowpf_off = TEST_PAGE_SIZE - 16 * 36 - 4;
+        p1[last_group_rowpf_off..last_group_rowpf_off + 2].copy_from_slice(&1u16.to_le_bytes());
+        p1[last_group_rowpf_off + 2..last_group_rowpf_off + 4]
+            .copy_from_slice(&tranrf.to_le_bytes());
+        p1
+    };
+    let (_td, usb_root) = write_pdb_pages_as_usb_root(vec![header_page(), page(1)]);
+    assert!(
+        detect_pdb_inconsistent_page_footers(&read_pdb_file(&vendor_pdb_path(&usb_root)))
+            .is_empty()
     );
 
-    let patched = patch_pdb_file(&usb_root, |bytes| {
-        apply_pdb_zero_tranrf_repair(bytes, &pages)
+    let (_td, usb_root) = write_pdb_pages_as_usb_root(vec![header_page(), page(0)]);
+    let pdb_path = vendor_pdb_path(&usb_root);
+    let pages = detect_pdb_inconsistent_page_footers(&read_pdb_file(&pdb_path));
+    assert_eq!(pages.len(), 1, "the 257th slot's group must be read");
+    assert_eq!((pages[0].u5, pages[0].num_rl), (1, 256));
+    patch_pdb_file(&usb_root, |bytes| {
+        apply_pdb_inconsistent_page_footer_repair(bytes, &pages)
     })
     .unwrap();
-    assert_eq!(patched, 1);
-
-    let bytes = std::fs::read(&pdb_path).unwrap();
-    let off = TEST_PAGE_SIZE + tranrf_off;
-    assert_eq!(
-        u16::from_le_bytes(bytes[off..off + 2].try_into().unwrap()),
-        1,
-        "tranrf should now mirror rowpf"
-    );
-    assert!(detect_pdb_zero_tranrf_all_tables(&read_pdb_file(&pdb_path)).is_empty());
+    assert!(detect_pdb_inconsistent_page_footers(&read_pdb_file(&pdb_path)).is_empty());
 }
-
-#[test]
-fn zero_tranrf_repair_detects_corruption_on_a_wrapped_257_row_page() {
-    // tt=8 (playlist_entries), u5=1: only the last footer group carries
-    // tranrf. 257 rows is the smallest row count that both wraps `nrs`
-    // (257 & 0xFF = 1) and crosses a 16-row group boundary (257 rows =
-    // 17 groups), which used to make `nrs.max(num_rl)` undercount the
-    // group total by one and silently skip inspecting the true last
-    // group entirely -- see docs/PDB.md "Page Footer Conventions".
-    let mut p1 = data_page(1, 8);
-    p1[0x18] = 1; // packed row count low byte: 257 & 0xFF
-    p1[0x19] = 1; // packed row count mid byte: (257 >> 8) & 0xFF
-    p1[0x1a] = 0;
-    set_u5_num_rl(&mut p1, 1, 256); // (u5, num_rl) = (1, trc-1) for trc=257
-
-    // Footer groups are written backward from the page end. 16 full
-    // groups (rows 0..255) each consume 4 (rowpf|tranrf) + 16*2 (offsets)
-    // = 36 bytes; the 17th group (row 256 only) starts right after them.
-    let last_group_rowpf_off = TEST_PAGE_SIZE - 16 * 36 - 4;
-    let last_group_tranrf_off = last_group_rowpf_off + 2;
-    p1[last_group_rowpf_off..last_group_rowpf_off + 2].copy_from_slice(&1u16.to_le_bytes()); // rowpf != 0
-    // tranrf left at 0 (page starts zero-filled) -- the corrupt shape.
-
-    let (_td, usb_root) = write_pdb_pages_as_usb_root(vec![header_page(), p1]);
-    let pdb_path = vendor_pdb_path(&usb_root);
-
-    let pages = detect_pdb_zero_tranrf_all_tables(&read_pdb_file(&pdb_path));
-    assert_eq!(
-        pages.len(),
-        1,
-        "the 257th row's group must be inspected and flagged, not skipped"
-    );
-    assert_eq!(pages[0].page_index, 1);
-
-    let patched = patch_pdb_file(&usb_root, |bytes| {
-        apply_pdb_zero_tranrf_repair(bytes, &pages)
-    })
-    .unwrap();
-    assert_eq!(patched, 1);
-
-    let bytes = std::fs::read(&pdb_path).unwrap();
-    let off = TEST_PAGE_SIZE + last_group_tranrf_off;
-    assert_eq!(
-        u16::from_le_bytes(bytes[off..off + 2].try_into().unwrap()),
-        1,
-        "tranrf should now mirror rowpf"
-    );
-    assert!(detect_pdb_zero_tranrf_all_tables(&read_pdb_file(&pdb_path)).is_empty());
-}
-
-#[test]
-fn wrong_history_page_shape_repair_detects_and_fixes_old_bug_pattern() {
-    // tt=17 (columns/history-family): correct convention is (nrs, 0); the
-    // old-bug pattern (u5=1, num_rl=nrs-1) must be flagged and corrected.
-    let mut p1 = data_page(1, 17);
-    set_nrs(&mut p1, 4);
-    set_u5_num_rl(&mut p1, 1, 3); // nrs-1 == 3
-    let (_td, usb_root) = write_pdb_pages_as_usb_root(vec![header_page(), p1]);
-    let pdb_path = vendor_pdb_path(&usb_root);
-
-    let pages = detect_pdb_wrong_history_page_shape(&read_pdb_file(&pdb_path));
-    assert_eq!(pages.len(), 1);
-    assert_eq!(pages[0].nrs, 4);
-
-    assert_eq!(
-        patch_pdb_file(
-            &usb_root,
-            |bytes| apply_pdb_wrong_history_page_shape_repair(bytes, &[])
-        )
-        .unwrap(),
-        0
-    );
-    let patched = patch_pdb_file(&usb_root, |bytes| {
-        apply_pdb_wrong_history_page_shape_repair(bytes, &pages)
-    })
-    .unwrap();
-    assert_eq!(patched, 1);
-
-    let bytes = std::fs::read(&pdb_path).unwrap();
-    let off = TEST_PAGE_SIZE;
-    assert_eq!(
-        u16::from_le_bytes(bytes[off + 0x20..off + 0x22].try_into().unwrap()),
-        4
-    );
-    assert_eq!(
-        u16::from_le_bytes(bytes[off + 0x22..off + 0x24].try_into().unwrap()),
-        0
-    );
-    assert!(detect_pdb_wrong_history_page_shape(&read_pdb_file(&pdb_path)).is_empty());
-}
-
 /// Build a small realistic PDB (via the real writer) with one track and one album, both
 /// carrying non-ASCII names, so their string slots are UTF-16 encoded.
 fn build_seed_pdb_bytes_for_alignment_test() -> Vec<u8> {
@@ -1172,6 +1086,7 @@ fn build_seed_pdb_bytes_for_alignment_test() -> Vec<u8> {
         file_type: None,
         isrc: None,
         date_added: None,
+        analyze_date: None,
         release_date: None,
         dj_comment: None,
         file_name: None,
@@ -1586,196 +1501,77 @@ fn album_string_alignment_repair_fixes_row_orphaned_from_live_t03_chain() {
 }
 
 #[test]
-fn wrong_track_u5_repair_detects_and_fixes_active_page_footer() {
-    // tt=0, flags=0x34 (active): only (u5=2, num_rl=0) or (u5=1, num_rl=nrs-1)
-    // are valid; anything else must be flagged and normalised to the
-    // writer's own current convention, (u5=1, num_rl=nrs-1) -- not the
-    // older (2, 0) shape, which the detector still tolerates as valid on
-    // pages that already have it but is no longer the repair's target.
-    let mut p1 = data_page(1, 0);
-    set_flags(&mut p1, 0x34);
-    set_nrs(&mut p1, 5);
-    set_u5_num_rl(&mut p1, 99, 99);
-    let (_td, usb_root) = write_pdb_pages_as_usb_root(vec![header_page(), p1]);
-    let pdb_path = vendor_pdb_path(&usb_root);
-
-    let pages = detect_pdb_wrong_track_u5(&read_pdb_file(&pdb_path));
-    assert_eq!(pages.len(), 1);
-    assert_eq!(pages[0].page_index, 1);
-
-    assert_eq!(
-        patch_pdb_file(&usb_root, |bytes| apply_pdb_wrong_track_u5_repair(
-            bytes,
-            &[]
-        ))
-        .unwrap(),
-        0
-    );
-    let patched = patch_pdb_file(&usb_root, |bytes| {
-        apply_pdb_wrong_track_u5_repair(bytes, &pages)
-    })
-    .unwrap();
-    assert_eq!(patched, 1);
-
-    let bytes = std::fs::read(&pdb_path).unwrap();
-    let off = TEST_PAGE_SIZE;
-    assert_eq!(
-        u16::from_le_bytes(bytes[off + 0x20..off + 0x22].try_into().unwrap()),
-        1
-    );
-    assert_eq!(
-        u16::from_le_bytes(bytes[off + 0x22..off + 0x24].try_into().unwrap()),
-        4
-    );
-    assert!(detect_pdb_wrong_track_u5(&read_pdb_file(&pdb_path)).is_empty());
+fn footer_transaction_accepts_rekordbox_transaction_footer() {
+    // rekordbox: 7 slots, 2 live, last transaction touched slots 3-6.
+    assert!(!playlist_tree_page_flagged(playlist_tree_page(
+        7, 4, 3, 0b011_0000, 0b111_1000
+    )));
+    // rekordbox: transaction bits on deleted slots {0, 3, 5}.
+    assert!(!playlist_tree_page_flagged(playlist_tree_page(
+        16, 3, 0, 0xfff0, 0b10_1001
+    )));
 }
 
 #[test]
-fn t00_multipage_active_repair_flags_only_predecessor_pages() {
-    // Two chained tt=0 pages, both ACTV (0x34). Page 1 -> Page 2 makes
-    // page 1 a predecessor (must become SEAL); page 2 is the terminal
-    // active page (next_page not in the data-page set) and stays ACTV.
-    let mut p1 = data_page(1, 0);
-    set_flags(&mut p1, 0x34);
-    set_nrs(&mut p1, 4);
-    set_next_page(&mut p1, 2);
-    let mut p2 = data_page(2, 0);
-    set_flags(&mut p2, 0x34);
-    set_nrs(&mut p2, 4);
-    set_next_page(&mut p2, 0); // terminal: doesn't point at another data page
-    let (_td, usb_root) = write_pdb_pages_as_usb_root(vec![header_page(), p1, p2]);
-    let pdb_path = vendor_pdb_path(&usb_root);
-
-    let pages = detect_pdb_t00_multipage_active_pages(&read_pdb_file(&pdb_path));
-    assert_eq!(
-        pages.len(),
-        1,
-        "only the predecessor page should be flagged"
-    );
-    assert_eq!(pages[0].page_index, 1);
-
-    assert_eq!(
-        patch_pdb_file(&usb_root, |bytes| apply_pdb_t00_multipage_active_repair(
-            bytes,
-            &[]
-        ))
-        .unwrap(),
-        0
-    );
-    let patched = patch_pdb_file(&usb_root, |bytes| {
-        apply_pdb_t00_multipage_active_repair(bytes, &pages)
-    })
-    .unwrap();
-    assert_eq!(patched, 1);
-
-    let bytes = std::fs::read(&pdb_path).unwrap();
-    let off = TEST_PAGE_SIZE; // page 1
-    assert_eq!(bytes[off + 0x1b], 0x24, "predecessor page must become SEAL");
-    assert_eq!(
-        u16::from_le_bytes(bytes[off + 0x20..off + 0x22].try_into().unwrap()),
-        1
-    );
-    assert_eq!(
-        u16::from_le_bytes(bytes[off + 0x22..off + 0x24].try_into().unwrap()),
-        3
-    );
-    // Terminal page 2 must be left untouched.
-    let off2 = TEST_PAGE_SIZE * 2;
-    assert_eq!(bytes[off2 + 0x1b], 0x34);
-    assert!(detect_pdb_t00_multipage_active_pages(&read_pdb_file(&pdb_path)).is_empty());
+fn footer_transaction_accepts_fresh_page() {
+    // Our fresh page: (trc, 0), every slot live and in the transaction.
+    assert!(!playlist_tree_page_flagged(playlist_tree_page(
+        6, 6, 0, 0b11_1111, 0b11_1111
+    )));
 }
 
 #[test]
-fn wrong_playlist_tree_shape_repair_detects_and_fixes_footer() {
-    // tt=7 (playlist_tree): correct convention is (nrs, 0).
-    let mut p1 = data_page(1, 7);
-    set_nrs(&mut p1, 6);
-    set_u5_num_rl(&mut p1, 1, 1); // wrong: neither num_rl==0 nor u5==nrs
-    let (_td, usb_root) = write_pdb_pages_as_usb_root(vec![header_page(), p1]);
-    let pdb_path = vendor_pdb_path(&usb_root);
-
-    let pages = detect_pdb_wrong_playlist_tree_shape(&read_pdb_file(&pdb_path));
-    assert_eq!(pages.len(), 1);
-    assert_eq!(pages[0].nrs, 6);
-
+fn footer_transaction_fixes_forced_trc_footer_from_tranrf() {
+    // Old repair forced (trc, 0) onto a rekordbox page with deleted rows.
     assert_eq!(
-        patch_pdb_file(&usb_root, |bytes| {
-            apply_pdb_wrong_playlist_tree_shape_repair(bytes, &[])
-        })
-        .unwrap(),
-        0
+        fix_playlist_tree_page(playlist_tree_page(7, 7, 0, 0b011_0000, 0b111_1000)),
+        (4, 3, 0b111_1000)
     );
-    let patched = patch_pdb_file(&usb_root, |bytes| {
-        apply_pdb_wrong_playlist_tree_shape_repair(bytes, &pages)
-    })
-    .unwrap();
-    assert_eq!(patched, 1);
-
-    let bytes = std::fs::read(&pdb_path).unwrap();
-    let off = TEST_PAGE_SIZE;
-    assert_eq!(
-        u16::from_le_bytes(bytes[off + 0x20..off + 0x22].try_into().unwrap()),
-        6
-    );
-    assert_eq!(
-        u16::from_le_bytes(bytes[off + 0x22..off + 0x24].try_into().unwrap()),
-        0
-    );
-    assert!(detect_pdb_wrong_playlist_tree_shape(&read_pdb_file(&pdb_path)).is_empty());
 }
 
 #[test]
-fn tombstoned_playlist_tree_id_repair_zeroes_duplicate_dead_id() {
-    // tt=7 (playlist_tree), id field at row byte 12 (TOMBSTONE_ID_TABLES).
-    // Two row slots: row0 (active, id=42) and row1 (tombstoned, id=42 —
-    // a stale duplicate left behind by an earlier repair).
-    let mut p1 = data_page(1, 7);
-    p1[0x18] = 2; // packed row count low byte: num_row_offsets = 2
-    // rowpf group header at the tail: cursor -= 4 for (rowpf, tranrf).
-    let rowpf_off = TEST_PAGE_SIZE - 4;
-    // bit0 (row index 0, first row) = active; bit1 (row index 1, last row) = tombstoned.
-    p1[rowpf_off..rowpf_off + 2].copy_from_slice(&0b01u16.to_le_bytes());
-    // Row-offset table (2 entries, u16 each), stored in reversed row order:
-    // position0 -> LAST row (index1), position1 -> FIRST row (index0).
-    let offsets_off = rowpf_off - 4;
-    p1[offsets_off..offsets_off + 2].copy_from_slice(&0x20u16.to_le_bytes()); // row1 heap offset
-    p1[offsets_off + 2..offsets_off + 4].copy_from_slice(&0x00u16.to_le_bytes()); // row0 heap offset
-    // Row bytes on the heap (heap_start = 0x28): id field at row_byte_off + 12.
-    let heap_start = 0x28usize;
-    p1[heap_start + 12..heap_start + 16].copy_from_slice(&42u32.to_le_bytes()); // row0 id (active)
-    p1[heap_start + 0x20 + 12..heap_start + 0x20 + 16].copy_from_slice(&42u32.to_le_bytes()); // row1 id (tombstoned dup)
-    let (_td, usb_root) = write_pdb_pages_as_usb_root(vec![header_page(), p1]);
+fn footer_transaction_drops_tranrf_copied_from_rowpf() {
+    // Old repair: (trc, 0) plus the zero-tranrf fill, which copied rowpf into
+    // the groups whose tranrf was 0. Group 0 keeps rekordbox's {0, 3, 5};
+    // group 1's copy goes, giving back rekordbox's (3, 0). A row deleted
+    // after the fill (slot 16) leaves the copy a superset of rowpf.
+    let mut page = playlist_tree_page(20, 20, 0, 0xfff0, 0b10_1001);
+    let g1 = TEST_PAGE_SIZE - 36;
+    page[g1 - 4..g1 - 2].copy_from_slice(&0b1110u16.to_le_bytes());
+    page[g1 - 2..g1].copy_from_slice(&0b1111u16.to_le_bytes());
+    let (_td, usb_root) = write_pdb_pages_as_usb_root(vec![header_page(), page]);
     let pdb_path = vendor_pdb_path(&usb_root);
-
-    let items = detect_pdb_tombstoned_playlist_tree_ids(&read_pdb_file(&pdb_path));
+    let pages = detect_pdb_inconsistent_page_footers(&read_pdb_file(&pdb_path));
+    patch_pdb_file(&usb_root, |bytes| {
+        apply_pdb_inconsistent_page_footer_repair(bytes, &pages)
+    })
+    .unwrap();
+    let bytes = std::fs::read(&pdb_path).unwrap();
+    assert_eq!(page_u5_num_rl_tranrf(&bytes), (3, 0, 0b10_1001));
+    let g1_abs = TEST_PAGE_SIZE + g1;
     assert_eq!(
-        items.len(),
-        1,
-        "expected the duplicate tombstoned id to be flagged"
+        u16::from_le_bytes(bytes[g1_abs - 2..g1_abs].try_into().unwrap()),
+        0
     );
-    assert_eq!(items[0].page_index, 1);
-    assert_eq!(items[0].id_field_offset, heap_start + 0x20 + 12);
+    assert!(detect_pdb_inconsistent_page_footers(&bytes).is_empty());
+}
 
+#[test]
+fn footer_transaction_fixes_old_writer_footer_without_tranrf() {
+    // The original broken export: (1, 1), no tranrf at all. Every slot
+    // becomes the transaction, the fresh-page shape.
     assert_eq!(
-        patch_pdb_file(&usb_root, |bytes| {
-            apply_pdb_tombstoned_playlist_tree_id_repair(bytes, &[])
-        })
+        fix_playlist_tree_page(playlist_tree_page(6, 1, 1, 0b11_1111, 0)),
+        (6, 0, 0b11_1111)
+    );
+    assert_eq!(
+        patch_pdb_file(
+            &write_pdb_pages_as_usb_root(vec![header_page(), data_page(1, 7)]).1,
+            |bytes| apply_pdb_inconsistent_page_footer_repair(bytes, &[])
+        )
         .unwrap(),
         0
     );
-    let patched = patch_pdb_file(&usb_root, |bytes| {
-        apply_pdb_tombstoned_playlist_tree_id_repair(bytes, &items)
-    })
-    .unwrap();
-    assert_eq!(patched, 1);
-
-    let bytes = std::fs::read(&pdb_path).unwrap();
-    let id_off = TEST_PAGE_SIZE + heap_start + 0x20 + 12;
-    assert_eq!(
-        u32::from_le_bytes(bytes[id_off..id_off + 4].try_into().unwrap()),
-        0
-    );
-    assert!(detect_pdb_tombstoned_playlist_tree_ids(&read_pdb_file(&pdb_path)).is_empty());
 }
 
 #[test]
@@ -2082,6 +1878,11 @@ fn apply_fix_sync_edb_history_from_pdb_overwrites_stale_edb_rows() {
     // and one invalid entry (track_id=0, must be dropped) — mirrors
     // derive_history_sync_payload's own filtering rules.
     let parsed = ParsedPdb {
+        tracks: vec![crate::pdb_reader::PdbTrackRow {
+            id: 101,
+            track_file_path: "/Contents/Artist/Track.mp3".to_string(),
+            ..Default::default()
+        }],
         history_playlists: vec![PdbHistoryPlaylistRow {
             id: 10,
             name: "HISTORY 001".to_string(),
@@ -2113,7 +1914,8 @@ fn apply_fix_sync_edb_history_from_pdb_overwrites_stale_edb_rows() {
              CREATE TABLE IF NOT EXISTS history_content(history_id integer, content_id integer, sequenceNo integer); \
              DELETE FROM history; DELETE FROM history_content; \
              INSERT INTO history(history_id, sequenceNo, name, attribute, history_id_parent) VALUES (999, 5, 'Stale', 0, 0); \
-             INSERT INTO history_content(history_id, content_id, sequenceNo) VALUES (999, 555, 1), (999, 556, 2);",
+             INSERT INTO history_content(history_id, content_id, sequenceNo) VALUES (999, 555, 1), (999, 556, 2); \
+             INSERT INTO content(content_id, path) VALUES (7, '/Contents/Artist/Track.mp3');",
         )
         .expect("seed stale history rows");
         tx.commit().expect("commit seed");
@@ -2144,7 +1946,10 @@ fn apply_fix_sync_edb_history_from_pdb_overwrites_stale_edb_rows() {
         )
         .expect("history_content row");
     assert_eq!(content_hid, 10);
-    assert_eq!(content_id, 101);
+    assert_eq!(
+        content_id, 7,
+        "the eDB row holds the eDB's id for the track"
+    );
 }
 
 #[test]
@@ -2190,6 +1995,7 @@ fn apply_fix_empty_analysis_files_bakes_real_pdb_tempo_not_120_default() {
             file_type: None,
             isrc: None,
             date_added: None,
+            analyze_date: None,
             release_date: None,
             dj_comment: None,
             file_name: None,
@@ -2264,6 +2070,7 @@ fn apply_fix_empty_analysis_files_keeps_folders_with_the_same_letters_apart() {
             file_type: None,
             isrc: None,
             date_added: None,
+            analyze_date: None,
             release_date: None,
             dj_comment: None,
             file_name: None,
@@ -2356,6 +2163,7 @@ fn apply_fix_empty_analysis_files_fails_when_source_audio_cannot_be_decoded() {
             file_type: None,
             isrc: None,
             date_added: None,
+            analyze_date: None,
             release_date: None,
             dj_comment: None,
             file_name: None,
@@ -2449,6 +2257,7 @@ fn history_test_track(id: u32, path: &str) -> PdbTrackRow {
         file_type: None,
         isrc: None,
         date_added: None,
+        analyze_date: None,
         release_date: None,
         dj_comment: None,
         file_name: None,
@@ -2518,7 +2327,7 @@ fn repair_overview_groups_fixes_by_area_and_flags_what_it_cant_fix() {
     let fixes = [
         proposal(PDB_TRUNCATED_TABLE_CHAIN_FIX_ID, true),
         proposal(PDB_TORN_GROWTH_PAGES_FIX_ID, true),
-        proposal(PDB_WRONG_PAGE_FLAGS_FIX_ID, true),
+        proposal(PDB_STALE_SENTINEL_BTREE_FIX_ID, true),
         proposal(BPM_KEY_MISMATCH_FIX_ID, true),
         proposal(ENGINE_LIBRARY_FIX_ID, true),
     ];
@@ -2595,4 +2404,50 @@ fn repair_rows_are_ready_to_show() {
     assert!(!rows[3].selectable);
     assert_eq!(rows[3].meta_text, "✗ preview-only · safe");
     assert_eq!(rows[3].link.as_deref(), Some("event-log"));
+}
+
+#[test]
+fn damaged_track_rows_pair_only_with_one_intact_twin() {
+    let track = |id: u32, path: &str, size: u32| crate::pdb_reader::PdbTrackRow {
+        id,
+        track_file_path: path.to_string(),
+        title: "Some Title".to_string(),
+        file_size_bytes: Some(size),
+        duration_seconds: Some(300),
+        ..Default::default()
+    };
+    let parsed = ParsedPdb {
+        tracks: vec![
+            // NUL runs in the path; one intact row for the same file.
+            track(1, "/Contents/Artist A/Song\0\0ne.mp3", 1000),
+            track(2, "/Contents/Artist A/Song One.mp3", 1000),
+            // Damaged, but two intact rows fit: no merge.
+            track(3, "/Contents/Artist B/Tw\0\0.mp3", 2000),
+            track(4, "/Contents/Artist B/Two.mp3", 2000),
+            track(5, "/Contents/Artist B/Two-1.mp3", 2000),
+            // A plain missing file without damage is not this fix's business.
+            track(6, "/Contents/Artist C/Gone.mp3", 1000),
+        ],
+        ..ParsedPdb::default()
+    };
+    let missing_keys: HashSet<String> = [
+        "/Contents/Artist A/Song\0\0ne.mp3",
+        "/Contents/Artist B/Tw\0\0.mp3",
+        "/Contents/Artist C/Gone.mp3",
+    ]
+    .iter()
+    .map(|p| audio_path_key(p))
+    .collect();
+
+    let found = detect_nul_damaged_tracks(&parsed, None, &missing_keys);
+    assert_eq!(found.pdb_twins, HashMap::from([(1, 2)]));
+    assert!(found.edb_twins.is_empty());
+    assert_eq!(
+        found.merged_paths,
+        vec!["/Contents/Artist A/Song\0\0ne.mp3".to_string()]
+    );
+    assert_eq!(
+        found.without_twin,
+        vec!["/Contents/Artist B/Tw\0\0.mp3".to_string()]
+    );
 }

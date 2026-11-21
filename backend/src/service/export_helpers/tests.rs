@@ -2292,22 +2292,15 @@ fn remove_playlist_cleans_exclusive_tracks_preserves_shared() {
         "t1 should remain"
     );
 
-    // Regression: deleting a playlist tombstones its t07 row, but t07 is
-    // a `(trc, 0)` footer-convention table (docs/PDB.md "Page Footer
-    // Conventions"), not a `(1, trc - 1)` tombstone-convention table like
-    // t00/t08/t13. `remove_rows_inplace` used to apply the `(1, last
-    // removed slot)` shape unconditionally to every table, which flipped
-    // playlist_tree pages (still holding the surviving "Playlist A" row)
-    // into the shape `detect_pdb_wrong_playlist_tree_shape` (and the "PDB
-    // structural integrity: playlist_tree page(s) wrong shape"
-    // diagnostic) flags as broken.
-    let wrong_shape_pages = crate::service::repair::detect_pdb_wrong_playlist_tree_shape(
+    // Deleting a playlist tombstones rows on several tables; every page
+    // it touches must keep its footer transaction consistent (docs/PDB.md
+    // "Page Footer Conventions"), or rekordbox crashes on its next export.
+    let inconsistent = crate::service::repair::detect_pdb_inconsistent_page_footers(
         &crate::service::repair::read_pdb_file(&pdb_path),
     );
     assert!(
-        wrong_shape_pages.is_empty(),
-        "deleting a playlist must not leave playlist_tree pages in the wrong \
-         (u5, num_rl) footer shape: {wrong_shape_pages:?}"
+        inconsistent.is_empty(),
+        "deleting a playlist must leave every page footer consistent: {inconsistent:?}"
     );
 
     assert!(
@@ -2500,6 +2493,7 @@ fn remove_playlist_and_tracks_from_pdb_keeps_history_referenced_tracks() {
         file_type: None,
         isrc: None,
         date_added: None,
+        analyze_date: None,
         release_date: None,
         dj_comment: None,
         file_name: Some("track.mp3".to_string()),
@@ -4423,6 +4417,7 @@ fn pdb_writer_keeps_dictionary_rows_that_differ_only_in_case() {
         file_type: None,
         isrc: None,
         date_added: None,
+        analyze_date: None,
         release_date: None,
         dj_comment: None,
         file_name: Some("song.mp3".into()),

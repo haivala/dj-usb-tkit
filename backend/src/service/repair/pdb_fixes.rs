@@ -95,89 +95,6 @@ pub(in crate::service) fn apply_pdb_t19_template_state_repair(
     Ok(true)
 }
 
-/// A data page whose `u5` field at offset 0x20 carries the sentinel value
-/// 0x1FFF.  This makes player firmware treat the page as an empty fence
-/// page and report the database as corrupted.
-#[derive(Debug, Clone)]
-pub(in crate::service) struct SentinelU5Page {
-    pub(super) page_index: usize,
-    current_num_rl: u16,
-    correct_u5: u16,
-    correct_num_rl: u16,
-}
-
-pub(in crate::service) fn detect_pdb_sentinel_u5_on_data_pages(
-    bytes: &[u8],
-) -> Vec<SentinelU5Page> {
-    use crate::pdb_writer::data_page_footer_fields;
-    use crate::utils::{read_u8_at, read_u16_le_at, read_u32_le_at};
-    let Some(page_size) = read_u32_le_at(bytes, 4).map(|v| v as usize) else {
-        return Vec::new();
-    };
-    if page_size == 0 || bytes.len() < page_size * 2 {
-        return Vec::new();
-    }
-    let total = bytes.len() / page_size;
-    let mut out = Vec::new();
-    for i in 1..total {
-        let off = i * page_size;
-        let Some(idx) = read_u32_le_at(bytes, off + 4) else {
-            continue;
-        };
-        if idx == 0 {
-            continue; // blank/zeroed page
-        }
-        let Some(used_s) = read_u16_le_at(bytes, off + 0x1e) else {
-            continue;
-        };
-        if used_s == 0 {
-            continue; // sentinel/fence page — u5=8191 is expected here
-        }
-        let Some(u5) = read_u16_le_at(bytes, off + 0x20) else {
-            continue;
-        };
-        if u5 != 0x1FFF {
-            continue;
-        }
-        let table_type = read_u32_le_at(bytes, off + 8).unwrap_or(9999);
-        let nrs = read_u8_at(bytes, off + 24).unwrap_or(0);
-        let current_num_rl = read_u16_le_at(bytes, off + 0x22).unwrap_or(0);
-        let (correct_u5, correct_num_rl) = data_page_footer_fields(table_type, nrs as u16);
-        out.push(SentinelU5Page {
-            page_index: i,
-            current_num_rl,
-            correct_u5,
-            correct_num_rl,
-        });
-    }
-    out
-}
-
-pub(super) fn apply_pdb_sentinel_u5_repair(
-    bytes: &mut [u8],
-    pages: &[SentinelU5Page],
-) -> BackendResult<usize> {
-    if pages.is_empty() {
-        return Ok(0);
-    }
-    let page_size = pdb_page_size(bytes)?;
-    let mut patched = 0usize;
-    for page in pages {
-        let off = page.page_index * page_size;
-        if off + 0x24 > bytes.len() {
-            continue;
-        }
-        bytes[off + 0x20..off + 0x22].copy_from_slice(&page.correct_u5.to_le_bytes());
-        // Only patch num_rl if it also carries the sentinel value; leave a
-        // correct existing num_rl alone.
-        if page.current_num_rl == 0x1FFF {
-            bytes[off + 0x22..off + 0x24].copy_from_slice(&page.correct_num_rl.to_le_bytes());
-        }
-        patched += 1;
-    }
-    Ok(patched)
-}
-
 /// Standalone counterpart to the duplicate-entry sweep bundled into
 /// `apply_strict_parity_upgrade` (see its "Phase 3b"). Safe to run on its
 /// own: `remove_duplicate_playlist_entries_inplace` is a pure function over
@@ -300,250 +217,87 @@ pub(super) fn remove_edb_empty_duplicate_playlists(
     Ok(count)
 }
 
-pub(super) fn expected_page_flags(table_type: u32) -> u8 {
-    // Both 0x24 (sealed) and 0x34 (active) are valid for tt=0/19.
-    // This function is kept for backward-compat callers that only need
-    // the "default/active" value; detection logic uses is_valid_page_flags.
-    if matches!(table_type, 0 | 19) {
-        0x34
-    } else {
-        0x24
-    }
-}
-
-pub(super) fn is_valid_page_flags(table_type: u32, flags: u8) -> bool {
-    match table_type {
-        0 | 7 | 19 => flags == 0x24 || flags == 0x34, // sealed or active both valid
-        _ => flags == 0x24,
-    }
-}
-
+/// A data page header rekordbox left damaged when it crashed mid-write: page
+/// flags other than 0x24/0x34 (it leaves 0x10), or a live-row count that
+/// isn't the number of `rowpf` bits (seen: 0 on a page with live rows, and
+/// 2040, a negative count wrapped to 11 bits). On every page rekordbox
+/// writes, flags are 0x24 or 0x34 and the count matches `rowpf`.
 #[derive(Debug, Clone)]
-pub(in crate::service) struct WrongFlagsPage {
+pub(in crate::service) struct DamagedPageHeader {
     pub(in crate::service) page_index: usize,
-    pub(in crate::service) correct_flags: u8,
+    /// Flags to write, when the current ones are invalid.
+    pub(in crate::service) flags: Option<u8>,
+    /// `(num_row_offsets, live rows)` to write, when the count is wrong.
+    pub(in crate::service) slot_counts: Option<(usize, usize)>,
 }
 
-pub(in crate::service) fn detect_pdb_wrong_page_flags(bytes: &[u8]) -> Vec<WrongFlagsPage> {
-    use crate::utils::{read_u8_at, read_u16_le_at, read_u32_le_at};
+pub(in crate::service) fn detect_pdb_damaged_page_headers(bytes: &[u8]) -> Vec<DamagedPageHeader> {
+    use crate::utils::{read_u16_le_at, read_u32_le_at};
     let Some(page_size) = read_u32_le_at(bytes, 4).map(|v| v as usize) else {
         return Vec::new();
     };
     if page_size == 0 || bytes.len() < page_size * 2 {
         return Vec::new();
     }
-    let total = bytes.len() / page_size;
     let mut out = Vec::new();
-    for i in 1..total {
-        let off = i * page_size;
-        let Some(idx) = read_u32_le_at(bytes, off + 4) else {
-            continue;
-        };
-        if idx == 0 {
-            continue;
+    for i in 1..bytes.len() / page_size {
+        let page = &bytes[i * page_size..(i + 1) * page_size];
+        if read_u32_le_at(page, 4).unwrap_or(0) == 0 || page[0x1b] & 0x40 != 0 {
+            continue; // blank page or sentinel/index page
         }
-        let used_s = read_u16_le_at(bytes, off + 0x1e).unwrap_or(0);
-        if used_s == 0 {
-            continue; // sentinel/fence page — skip
+        if read_u16_le_at(page, 0x1e).unwrap_or(0) == 0 {
+            continue; // never-written page
         }
-        let table_type = read_u32_le_at(bytes, off + 8).unwrap_or(9999);
-        let flags = read_u8_at(bytes, off + 0x1b).unwrap_or(0);
-        if !is_valid_page_flags(table_type, flags) {
-            out.push(WrongFlagsPage {
+        let flags = (!is_valid_page_flags(page[0x1b])).then_some(0x24);
+        let slot_counts = pdb_page::read_slot_counts(page)
+            .filter(|&(slots, _)| pdb_page::footer_clear_of_heap(page, slots))
+            .and_then(|(slots, live)| {
+                let actual = pdb_page::footer_slots(page, slots)
+                    .filter(|slot| slot.present)
+                    .count();
+                (actual != live).then_some((slots, actual))
+            });
+        if flags.is_some() || slot_counts.is_some() {
+            out.push(DamagedPageHeader {
                 page_index: i,
-                correct_flags: expected_page_flags(table_type),
+                flags,
+                slot_counts,
             });
         }
     }
     out
 }
 
-pub(super) fn apply_pdb_wrong_page_flags_repair(
+pub(super) fn apply_pdb_damaged_page_header_repair(
     bytes: &mut [u8],
-    pages: &[WrongFlagsPage],
+    pages: &[DamagedPageHeader],
 ) -> BackendResult<usize> {
     if pages.is_empty() {
         return Ok(0);
     }
     let page_size = pdb_page_size(bytes)?;
     let mut patched = 0usize;
-    for page in pages {
-        let off = page.page_index * page_size + 0x1b;
-        if off >= bytes.len() {
+    for p in pages {
+        let off = p.page_index * page_size;
+        let Some(page) = bytes.get_mut(off..off + page_size) else {
             continue;
+        };
+        if let Some(flags) = p.flags {
+            page[0x1b] = flags;
         }
-        bytes[off] = page.correct_flags;
+        if let Some((slots, live)) = p.slot_counts {
+            pdb_page::write_slot_counts(page, slots, live);
+        }
         patched += 1;
     }
     Ok(patched)
 }
 
-/// A data page whose footer has tranrf=0 despite having active rows (rowpf≠0).
-/// Some DJ software versions reject databases where tranrf is zero on a page
-/// that contains live rows.  Fix: set tranrf = rowpf so all active rows are
-/// considered part of the last transaction.
-#[derive(Debug, Clone)]
-pub(in crate::service) struct ZeroTranrfPage {
-    pub(in crate::service) page_index: usize,
-    pub(in crate::service) u5: u16,
-    pub(in crate::service) num_rl: usize,
-    /// rowpf value for each group (to copy into tranrf for groups that need fixing)
-    pub(in crate::service) rowpf_groups: Vec<u16>,
-    /// existing tranrf value for each group (0x0000 in groups that need fixing)
-    pub(in crate::service) tranrf_groups: Vec<u16>,
-    /// byte offset within the page of each group's 4-byte header
-    pub(in crate::service) footer_group_offsets: Vec<usize>,
-}
-
-/// A tt=16/17/18 data page whose u5/num_rl footer fields carry the old wrong
-/// `(1, nrs-1)` pattern instead of the correct `(nrs, 0)` convention.  DJ software
-/// and player firmware may reject or misparse these pages.
-#[derive(Debug, Clone)]
-pub(in crate::service) struct WrongShapeHistoryPage {
-    pub(in crate::service) page_index: usize,
-    #[allow(dead_code)]
-    pub(in crate::service) table_type: u32,
-    pub(in crate::service) nrs: u16,
-}
-
-/// Detect tt=16/17/18 data pages carrying the wrong `(1, nrs-1)` footer shape.
-/// The correct convention for these tables is `(nrs, 0)`.
-pub(in crate::service) fn detect_pdb_wrong_history_page_shape(
-    bytes: &[u8],
-) -> Vec<WrongShapeHistoryPage> {
-    use crate::utils::{read_u8_at, read_u16_le_at, read_u32_le_at};
-    let Some(page_size) = read_u32_le_at(bytes, 4).map(|v| v as usize) else {
-        return Vec::new();
-    };
-    if page_size == 0 || bytes.len() < page_size * 2 {
-        return Vec::new();
-    }
-    let total = bytes.len() / page_size;
-    let mut out = Vec::new();
-    for i in 1..total {
-        let off = i * page_size;
-        let Some(idx) = read_u32_le_at(bytes, off + 4) else {
-            continue;
-        };
-        if idx == 0 {
-            continue;
-        }
-        let used_s = read_u16_le_at(bytes, off + 0x1e).unwrap_or(0);
-        if used_s == 0 {
-            continue;
-        }
-        let table_type = read_u32_le_at(bytes, off + 8).unwrap_or(9999);
-        if !matches!(table_type, 16..=18) {
-            continue;
-        }
-        let nrs = read_u8_at(bytes, off + 0x18).unwrap_or(0) as u16;
-        if nrs == 0 {
-            continue;
-        }
-        let u5 = read_u16_le_at(bytes, off + 0x20).unwrap_or(0);
-        let num_rl = read_u16_le_at(bytes, off + 0x22).unwrap_or(0);
-        // Flag the old-bug pattern: u5=1 and num_rl=nrs-1. When nrs=1 this
-        // pattern is bit-identical to the correct (u5=nrs, num_rl=0) shape —
-        // a single-row page can never be distinguished as wrong, so skip it
-        // rather than flag a false positive that no repair can actually fix.
-        if nrs > 1 && u5 == 1 && num_rl == nrs.saturating_sub(1) {
-            out.push(WrongShapeHistoryPage {
-                page_index: i,
-                table_type,
-                nrs,
-            });
-        }
-    }
-    out
-}
-
-pub(super) fn apply_pdb_wrong_history_page_shape_repair(
-    bytes: &mut [u8],
-    pages: &[WrongShapeHistoryPage],
-) -> BackendResult<usize> {
-    set_nrs_footer_shape(bytes, pages.iter().map(|p| (p.page_index, p.nrs)))
-}
-
-/// Sets each `(page_index, nrs)` page's footer to `u5 = nrs, num_rl = 0`,
-/// the shape the history, columns and playlist-tree tables use.
-fn set_nrs_footer_shape(
-    bytes: &mut [u8],
-    pages: impl ExactSizeIterator<Item = (usize, u16)>,
-) -> BackendResult<usize> {
-    if pages.len() == 0 {
-        return Ok(0);
-    }
-    let page_size = pdb_page_size(bytes)?;
-    let mut patched = 0usize;
-    for (page_index, nrs) in pages {
-        let off = page_index * page_size;
-        if off + 0x24 > bytes.len() {
-            continue;
-        }
-        bytes[off + 0x20..off + 0x22].copy_from_slice(&nrs.to_le_bytes());
-        bytes[off + 0x22..off + 0x24].copy_from_slice(&0u16.to_le_bytes());
-        patched += 1;
-    }
-    Ok(patched)
-}
-
-/// A tt=0 track data page whose u5/num_rl footer fields are inconsistent with its flags.
-/// Valid combinations:
-///   - flags=0x34 (active page): `(u5=2, num_rl=0)`
-///   - flags=0x24 (sealed page): `(u5=1, num_rl=nrs-1)` OR `(u5=2, num_rl=0)` (player compat)
-///
-/// Only active (0x34) pages with wrong footer are flagged — they affect player loading.
-#[derive(Debug, Clone)]
-pub(in crate::service) struct WrongTrackU5Page {
-    pub(in crate::service) page_index: usize,
-}
-
-pub(in crate::service) fn detect_pdb_wrong_track_u5(bytes: &[u8]) -> Vec<WrongTrackU5Page> {
-    use crate::utils::{read_u8_at, read_u16_le_at, read_u32_le_at};
-    let Some(page_size) = read_u32_le_at(bytes, 4).map(|v| v as usize) else {
-        return Vec::new();
-    };
-    if page_size == 0 || bytes.len() < page_size * 2 {
-        return Vec::new();
-    }
-    let total = bytes.len() / page_size;
-    let mut out = Vec::new();
-    for i in 1..total {
-        let off = i * page_size;
-        let Some(idx) = read_u32_le_at(bytes, off + 4) else {
-            continue;
-        };
-        if idx == 0 {
-            continue;
-        }
-        let table_type = read_u32_le_at(bytes, off + 8).unwrap_or(9999);
-        if table_type != 0 {
-            continue;
-        }
-        let nrs = read_u8_at(bytes, off + 0x18).unwrap_or(0) as u16;
-        if nrs == 0 {
-            continue;
-        }
-        let u5 = read_u16_le_at(bytes, off + 0x20).unwrap_or(0);
-        if u5 == 0x1FFF {
-            continue; // sentinel — handled by separate repair
-        }
-        let flags = read_u8_at(bytes, off + 0x1b).unwrap_or(0);
-        if flags == 0x64 {
-            continue; // sentinel page
-        }
-        let num_rl = read_u16_le_at(bytes, off + 0x22).unwrap_or(0);
-        // Active (0x34) pages: accept both (u5=1, num_rl=nrs-1) (current writer)
-        // and (u5=2, num_rl=0) (old writer / early reference export observation). Flag anything else.
-        if flags == 0x34 {
-            let is_new_format = u5 == 1 && num_rl == nrs.saturating_sub(1);
-            let is_old_format = u5 == 2 && num_rl == 0;
-            if !is_new_format && !is_old_format {
-                out.push(WrongTrackU5Page { page_index: i });
-            }
-        }
-    }
-    out
+/// rekordbox writes both 0x24 (sealed) and 0x34 (active) on data pages of
+/// every table. Anything else (rekordbox leaves 0x10 when it crashes
+/// mid-write) is damage.
+fn is_valid_page_flags(flags: u8) -> bool {
+    flags == 0x24 || flags == 0x34
 }
 
 /// A track/album/artist row whose long-form (UTF-16 `0x90` or long ASCII `0x40`) string slot
@@ -712,104 +466,6 @@ pub(in crate::service) fn detect_pdb_string_misalignment(
         }
     }
     out
-}
-
-/// A tt=0 (tracks) data page with flags=0x34 (ACTV) in a table that has more
-/// than one data page. Reference exports confirm: single-page tt=0 chains use
-/// ACTV (0x34); multi-page chains must use ALL SEAL (0x24). DJ software rejects
-/// a multi-page chain that contains any ACTV page.
-#[derive(Debug, Clone)]
-pub(in crate::service) struct T00MultipageActivePage {
-    pub(in crate::service) page_index: usize,
-    pub(in crate::service) nrs: u8,
-}
-
-/// Detect ACTV (0x34) tt=0 pages that must be SEAL (0x24) in a multi-page chain.
-/// The last (active write) page in the chain legitimately stays ACTV; only
-/// predecessor pages that are still marked ACTV are flagged.
-pub(in crate::service) fn detect_pdb_t00_multipage_active_pages(
-    bytes: &[u8],
-) -> Vec<T00MultipageActivePage> {
-    use crate::utils::{read_u8_at, read_u16_le_at, read_u32_le_at};
-    let Some(page_size) = read_u32_le_at(bytes, 4).map(|v| v as usize) else {
-        return Vec::new();
-    };
-    if page_size == 0 || bytes.len() < page_size * 2 {
-        return Vec::new();
-    }
-    let total = bytes.len() / page_size;
-
-    // Collect all non-sentinel, non-empty tt=0 data pages: (page_index, flags, nrs, next_page).
-    let mut t00_pages: Vec<(usize, u8, u8, u32)> = Vec::new();
-    for i in 1..total {
-        let off = i * page_size;
-        let Some(idx) = read_u32_le_at(bytes, off + 4) else {
-            continue;
-        };
-        if idx == 0 {
-            continue;
-        }
-        let tt = read_u32_le_at(bytes, off + 8).unwrap_or(9999);
-        if tt != 0 {
-            continue;
-        }
-        let flags = read_u8_at(bytes, off + 0x1b).unwrap_or(0);
-        if flags == 0x64 {
-            continue; // sentinel page
-        }
-        let used_s = read_u16_le_at(bytes, off + 0x1e).unwrap_or(0);
-        if used_s == 0 {
-            continue;
-        }
-        let nrs = read_u8_at(bytes, off + 0x18).unwrap_or(0);
-        let next_page = read_u32_le_at(bytes, off + 0x0c).unwrap_or(0);
-        t00_pages.push((i, flags, nrs, next_page));
-    }
-
-    // Only flag when there are multiple data pages (multi-page chain rule).
-    if t00_pages.len() <= 1 {
-        return Vec::new();
-    }
-
-    // The last data page has next_page pointing outside the set of tt=0 data
-    // pages (back to the sentinel or zero). Only predecessor pages must be SEAL.
-    let data_page_indices: std::collections::HashSet<usize> =
-        t00_pages.iter().map(|(i, _, _, _)| *i).collect();
-
-    t00_pages
-        .into_iter()
-        .filter(|&(_page_index, flags, _, next_page)| {
-            // Only flag ACTV pages whose next_page leads to another data page —
-            // i.e. they are predecessors, not the terminal active page.
-            flags == 0x34 && data_page_indices.contains(&(next_page as usize))
-        })
-        .map(|(page_index, _, nrs, _)| T00MultipageActivePage { page_index, nrs })
-        .collect()
-}
-
-pub(super) fn apply_pdb_t00_multipage_active_repair(
-    bytes: &mut [u8],
-    pages: &[T00MultipageActivePage],
-) -> BackendResult<usize> {
-    if pages.is_empty() {
-        return Ok(0);
-    }
-    let page_size = pdb_page_size(bytes)?;
-    let mut patched = 0usize;
-    for page in pages {
-        let off = page.page_index * page_size;
-        if off + 0x24 > bytes.len() {
-            continue;
-        }
-        // Flags: 0x34 → 0x24 (sealed convention for multi-page tt=0 chain)
-        bytes[off + 0x1b] = 0x24;
-        // Footer shape: sealed pages use (u5=1, num_rl=nrs-1) like dict tables.
-        let nrs = page.nrs as u16;
-        bytes[off + 0x20..off + 0x22].copy_from_slice(&1u16.to_le_bytes());
-        bytes[off + 0x22..off + 0x24].copy_from_slice(&nrs.saturating_sub(1).to_le_bytes());
-        patched += 1;
-    }
-    Ok(patched)
 }
 
 /// A table whose `empty_candidate` pointer targets a physical page that is
@@ -1319,6 +975,7 @@ pub(crate) fn track_row_data_from_reader_row(
         file_type: row.file_type,
         isrc: row.isrc.clone(),
         date_added: row.date_added.clone(),
+        analyze_date: row.analyze_date.clone(),
         release_date: row.release_date.clone(),
         dj_comment: row.dj_comment.clone(),
         file_name: row.file_name.clone(),
@@ -1360,24 +1017,18 @@ pub(super) fn apply_pdb_track_string_alignment_repair(
     if mutations.is_empty() {
         return Ok(0);
     }
+    let before = bytes.to_vec();
     let patched = crate::pdb_writer::mutate_tracks_in_place(
         bytes,
         &mutations,
         PdbLayoutProfile::DEFAULT,
         page_size,
     )?;
-    let mismatches = crate::pdb_reader::validate_pdb_page_conventions(bytes);
-    if !mismatches.is_empty() {
-        let detail = mismatches
-            .iter()
-            .take(8)
-            .map(|m| m.to_string())
-            .collect::<Vec<_>>()
-            .join(" | ");
-        return Err(BackendError::Internal(format!(
-            "Track string alignment repair blocked: page-header convention mismatches ({detail})"
-        )));
-    }
+    crate::pdb_reader::check_written_page_conventions(
+        &before,
+        bytes,
+        "Track string alignment repair",
+    )?;
     Ok(patched)
 }
 
@@ -1507,68 +1158,19 @@ pub(super) fn reencode_pdb_dictionary_rows(
     if rows.is_empty() {
         return Ok(0);
     }
+    let before = bytes.to_vec();
     let patched = crate::pdb_writer::realign_dictionary_rows_in_place(
         bytes, table_type, id_offset, &rows, page_size,
     )?;
-    let mismatches = crate::pdb_reader::validate_pdb_page_conventions(bytes);
-    if !mismatches.is_empty() {
-        let detail = mismatches
-            .iter()
-            .take(8)
-            .map(|m| m.to_string())
-            .collect::<Vec<_>>()
-            .join(" | ");
-        return Err(BackendError::Internal(format!(
-            "{label} repair blocked: page-header convention mismatches ({detail})"
-        )));
-    }
+    crate::pdb_reader::check_written_page_conventions(&before, bytes, &format!("{label} repair"))?;
     Ok(patched)
-}
-
-/// Normalizes flagged pages to the current writer's own convention
-/// (`data_page_footer_fields(0, trc)`, i.e. `(1, nrs-1)`), not the older
-/// `(2, 0)` shape `detect_pdb_wrong_track_u5` still tolerates as valid on
-/// pages that already have it.
-pub(super) fn apply_pdb_wrong_track_u5_repair(
-    bytes: &mut [u8],
-    pages: &[WrongTrackU5Page],
-) -> BackendResult<usize> {
-    if pages.is_empty() {
-        return Ok(0);
-    }
-    let page_size = pdb_page_size(bytes)?;
-    let mut patched = 0usize;
-    for page in pages {
-        let off = page.page_index * page_size;
-        if off + 0x24 > bytes.len() {
-            continue;
-        }
-        let trc =
-            crate::utils::packed_page_row_slot_count(&bytes[off..off + page_size]).unwrap_or(0);
-        let (u5, num_rl) = crate::pdb_writer::data_page_footer_fields(0, trc as u16);
-        bytes[off + 0x20..off + 0x22].copy_from_slice(&u5.to_le_bytes());
-        bytes[off + 0x22..off + 0x24].copy_from_slice(&num_rl.to_le_bytes());
-        patched += 1;
-    }
-    Ok(patched)
-}
-
-/// A tombstoned row whose id field is non-zero.  When a repair re-writes a row
-/// into a new slot it may leave the old (tombstoned) slot with its original id
-/// intact.  DJ software validates row ids across all slots including tombstoned
-/// ones and rejects the PDB if duplicates are found.
-/// Fix: zero out the id field in each affected tombstoned slot.
-#[derive(Debug, Clone)]
-pub(in crate::service) struct TombstonedRowId {
-    pub(in crate::service) page_index: usize,
-    /// byte offset within the page of the 4-byte id field in the tombstoned row
-    pub(in crate::service) id_field_offset: usize,
 }
 
 // (table_type, id_field_offset_in_row) pairs for tables where the DJ software
 // validates uniqueness including tombstoned slots.
 // tt=0 (tracks): id at row byte 72
 // tt=7 (playlist_tree): id at row byte 12
+#[cfg(test)]
 pub(super) const TOMBSTONE_ID_TABLES: &[(u32, usize)] = &[(0, 72), (7, 12)];
 
 /// Detect tombstoned rows in tt=0 (tracks) and tt=7 (playlist_tree) whose id
@@ -1577,10 +1179,14 @@ pub(super) const TOMBSTONE_ID_TABLES: &[(u32, usize)] = &[(0, 72), (7, 12)];
 ///
 /// Non-zero IDs in tombstones that have no corresponding active row are normal
 /// deletions (the DJ software leaves IDs in place when deleting rows) and are
-/// not flagged.
+/// not flagged. rekordbox leaves such duplicates after every edit (it writes
+/// the new row and tombstones the old one), so this is no finding: it is a
+/// test-only check that our own writer zeroes the ids of the rows it moves.
+/// Returns `(table_type, id, page_index)` per duplicate.
+#[cfg(test)]
 pub(in crate::service) fn detect_pdb_tombstoned_playlist_tree_ids(
     bytes: &[u8],
-) -> Vec<TombstonedRowId> {
+) -> Vec<(u32, u32, usize)> {
     use crate::utils::{read_u16_le_at, read_u32_le_at};
     let Some(page_size) = read_u32_le_at(bytes, 4).map(|v| v as usize) else {
         return Vec::new();
@@ -1595,7 +1201,7 @@ pub(in crate::service) fn detect_pdb_tombstoned_playlist_tree_ids(
     // candidates: tombstoned rows with non-zero IDs that might be duplicates.
     let mut active_ids: std::collections::HashMap<u32, std::collections::HashSet<u32>> =
         std::collections::HashMap::new();
-    let mut candidates: Vec<(u32, u32, TombstonedRowId)> = Vec::new(); // (tt, id, row)
+    let mut candidates: Vec<(u32, u32, usize)> = Vec::new(); // (tt, id, page)
 
     for i in 1..total {
         let off = i * page_size;
@@ -1635,14 +1241,7 @@ pub(in crate::service) fn detect_pdb_tombstoned_playlist_tree_ids(
             if is_active {
                 active_ids.entry(tt).or_default().insert(id);
             } else {
-                candidates.push((
-                    tt,
-                    id,
-                    TombstonedRowId {
-                        page_index: i,
-                        id_field_offset: id_byte_off - off,
-                    },
-                ));
+                candidates.push((tt, id, i));
             }
         }
     }
@@ -1656,75 +1255,130 @@ pub(in crate::service) fn detect_pdb_tombstoned_playlist_tree_ids(
                 .map(|set| set.contains(id))
                 .unwrap_or(false)
         })
-        .map(|(_, _, row)| row)
         .collect()
 }
 
-/// A tt=7 (playlist_tree) data page with wrong (u5, num_rl) footer shape.
-/// The correct convention is (nrs, 0). The original broken export wrote num_rl=1
-/// (and u5=1) and the additive exporter silently preserved old_num_rl, leaving
-/// num_rl ≠ 0 — which DJ software detects as corrupted.
+/// A data page whose `(u5, num_rl)` header fields don't match its own
+/// `tranrf` bits (docs/PDB.md "Page Footer Conventions").
+///
+/// Every page rekordbox writes has `u5` = the number of `tranrf` bits and
+/// `num_rl` = the lowest one (or both at the `0x1FFF` placeholder), and our
+/// writer's pages follow the same rule. Older app versions broke it on
+/// rekordbox's pages: forcing `(trc, 0)` or `(1, nrs-1)` without touching
+/// `tranrf`, filling empty `tranrf` groups from `rowpf`, or adding moved rows
+/// to `tranrf` alone. rekordbox 6 then crashes on its next export or loses
+/// its playlists. The fix rewrites `(u5, num_rl)` from the page's `tranrf`.
 #[derive(Debug, Clone)]
-pub(in crate::service) struct WrongPlaylistTreeShapePage {
+pub(in crate::service) struct InconsistentFooterPage {
     pub(in crate::service) page_index: usize,
-    pub(in crate::service) nrs: u8,
+    /// The `(u5, num_rl)` the page should carry.
+    pub(in crate::service) u5: u16,
+    pub(in crate::service) num_rl: u16,
+    /// `tranrf` per footer group after the fix, with the word's page offset.
+    pub(in crate::service) tranrf_groups: Vec<(usize, u16)>,
 }
 
-pub(in crate::service) fn detect_pdb_wrong_playlist_tree_shape(
+pub(in crate::service) fn detect_pdb_inconsistent_page_footers(
     bytes: &[u8],
-) -> Vec<WrongPlaylistTreeShapePage> {
-    use crate::utils::{read_u8_at, read_u16_le_at, read_u32_le_at};
+) -> Vec<InconsistentFooterPage> {
+    use crate::utils::read_u32_le_at;
     let Some(page_size) = read_u32_le_at(bytes, 4).map(|v| v as usize) else {
         return Vec::new();
     };
     if page_size == 0 || bytes.len() < page_size * 2 {
         return Vec::new();
     }
-    let total = bytes.len() / page_size;
     let mut out = Vec::new();
-    for i in 1..total {
-        let off = i * page_size;
-        let Some(idx) = read_u32_le_at(bytes, off + 4) else {
+    for i in 1..bytes.len() / page_size {
+        let page = &bytes[i * page_size..(i + 1) * page_size];
+        if read_u32_le_at(page, 4).unwrap_or(0) == 0 || page[0x1b] & 0x40 != 0 {
+            continue; // blank page or sentinel/index page
+        }
+        let table_type = read_u32_le_at(page, 8).unwrap_or(9999);
+        let Some((slots, _)) = pdb_page::read_slot_counts(page) else {
             continue;
         };
-        if idx == 0 {
+        if slots == 0
+            || !pdb_page::footer_clear_of_heap(page, slots)
+            || pdb_page::transaction_consistent(page, slots)
+        {
             continue;
         }
-        let tt = read_u32_le_at(bytes, off + 8).unwrap_or(9999);
-        if tt != 7 {
+        let groups: Vec<_> = pdb_page::footer_groups(page_size, slots).collect();
+        let rowpf: Vec<u16> = groups.iter().map(|g| g.rowpf(page) & g.mask()).collect();
+        let tranrf: Vec<u16> = groups.iter().map(|g| g.tranrf(page) & g.mask()).collect();
+        // The old zero-tranrf normalization filled every group whose
+        // `tranrf` was 0 with its `rowpf`; deleting rows later only clears
+        // `rowpf` bits, so such a group still has `rowpf` inside `tranrf`.
+        // On a page that is inconsistent anyway, drop those copies again
+        // when other groups still carry rekordbox's own bits, so the page
+        // gets its original transaction back.
+        let original: Vec<u16> = tranrf
+            .iter()
+            .zip(&rowpf)
+            .map(|(&t, &r)| if r != 0 && r & t == r { 0 } else { t })
+            .collect();
+        let target = if original.iter().any(|&t| t != 0) {
+            original
+        } else if tranrf.iter().any(|&t| t != 0) {
+            tranrf
+        } else {
+            // No bits at all: the table's fresh-page shape.
+            let (u5, num_rl) = crate::pdb_writer::data_page_footer_fields(table_type, slots as u16);
+            let marked: Vec<usize> = if u5 == 1 {
+                vec![num_rl as usize]
+            } else {
+                (0..slots).collect()
+            };
+            groups
+                .iter()
+                .map(|g| {
+                    marked
+                        .iter()
+                        .filter(|&&slot| g.contains_slot(slot))
+                        .fold(0u16, |bits, &slot| bits | 1 << (slot - g.first_slot))
+                })
+                .collect()
+        };
+        let Some((u5, num_rl)) = pdb_page::transaction_fields(&groups, &target) else {
             continue;
-        }
-        let flags = read_u8_at(bytes, off + 0x1b).unwrap_or(0);
-        if flags == 0x64 {
-            continue; // sentinel page, skip
-        }
-        let nrs = read_u8_at(bytes, off + 0x18).unwrap_or(0);
-        if nrs == 0 {
-            continue;
-        }
-        let u5 = read_u16_le_at(bytes, off + 0x20).unwrap_or(0);
-        if u5 == 0x1FFF {
-            continue; // sentinel value — handled separately
-        }
-        let num_rl = read_u16_le_at(bytes, off + 0x22).unwrap_or(0);
-        // Convention: (nrs, 0). Flag if num_rl ≠ 0 OR u5 ≠ nrs.
-        if num_rl != 0 || u5 != nrs as u16 {
-            out.push(WrongPlaylistTreeShapePage { page_index: i, nrs });
-        }
+        };
+        out.push(InconsistentFooterPage {
+            page_index: i,
+            u5,
+            num_rl,
+            tranrf_groups: groups
+                .iter()
+                .zip(target)
+                .map(|(g, t)| (g.tranrf_off(), t))
+                .collect(),
+        });
     }
     out
 }
 
-pub(super) fn apply_pdb_wrong_playlist_tree_shape_repair(
+pub(super) fn apply_pdb_inconsistent_page_footer_repair(
     bytes: &mut [u8],
-    pages: &[WrongPlaylistTreeShapePage],
+    pages: &[InconsistentFooterPage],
 ) -> BackendResult<usize> {
-    set_nrs_footer_shape(
-        bytes,
-        pages.iter().map(|p| (p.page_index, u16::from(p.nrs))),
-    )
+    if pages.is_empty() {
+        return Ok(0);
+    }
+    let page_size = pdb_page_size(bytes)?;
+    let mut patched = 0usize;
+    for p in pages {
+        let off = p.page_index * page_size;
+        let Some(page) = bytes.get_mut(off..off + page_size) else {
+            continue;
+        };
+        pdb_page::write_transaction_header(page, p.u5, p.num_rl);
+        for &(tranrf_off, bits) in &p.tranrf_groups {
+            page[tranrf_off..tranrf_off + 2].copy_from_slice(&bits.to_le_bytes());
+        }
+        patched += 1;
+    }
+    Ok(patched)
 }
-
 /// A sentinel (index) page whose B-tree entry area is stale — it has num_entries > 0
 /// with entries that no longer match the actual data page layout after additive exports
 /// grew the table beyond what the original export recorded.
@@ -1816,20 +1470,25 @@ pub(in crate::service) fn detect_pdb_stale_sentinel_btree(bytes: &[u8]) -> Vec<S
         // Only sentinel (0x64) targets or wrong-table targets are invalid.
         // ne count is not required to equal the active (0x34) page count; reference
         // exports often have ne that differs from the live 0x34 page count.
+        // rekordbox keeps free slots (0x1FFF_FFF8) between its entries and
+        // a free-list head at 0x3a, so the `ne` entries are not always the
+        // first `ne` slots: check every used slot of the entry area, and
+        // that there are `ne` of them.
+        let entry_area = off + 0x3c..off + page_size - 20;
+        let mut used_entries = 0usize;
         let mut entries_valid = true;
-        for slot in 0..ne as usize {
-            let entry_off = off + 0x3c + slot * 4;
+        for entry_off in entry_area.step_by(4) {
             let Some(entry) = read_u32_le_at(bytes, entry_off) else {
                 entries_valid = false;
                 break;
             };
             if entry == 0x1fff_fff8 {
-                entries_valid = false;
-                break;
+                continue;
             }
+            used_entries += 1;
             let page_idx = (entry / 8) as usize;
             let page_off = page_idx * page_size;
-            if page_off + page_size > bytes.len() {
+            if page_idx == 0 || page_off + page_size > bytes.len() {
                 entries_valid = false;
                 break;
             }
@@ -1839,6 +1498,9 @@ pub(in crate::service) fn detect_pdb_stale_sentinel_btree(bytes: &[u8]) -> Vec<S
                 entries_valid = false;
                 break;
             }
+        }
+        if used_entries != ne as usize {
+            entries_valid = false;
         }
 
         // u7 orphaned: write-pointer non-zero but no entries.
@@ -1924,154 +1586,6 @@ pub(super) fn apply_pdb_stale_sentinel_btree_repair(
         // u7 (write-pointer) = n
         bytes[off + 0x26..off + 0x28].copy_from_slice(&ne.to_le_bytes());
         patched += 1;
-    }
-    Ok(patched)
-}
-
-pub(super) fn apply_pdb_tombstoned_playlist_tree_id_repair(
-    bytes: &mut [u8],
-    items: &[TombstonedRowId],
-) -> BackendResult<usize> {
-    if items.is_empty() {
-        return Ok(0);
-    }
-    let page_size = pdb_page_size(bytes)?;
-    let mut patched = 0usize;
-    for item in items {
-        let abs = item.page_index * page_size + item.id_field_offset;
-        if abs + 4 > bytes.len() {
-            continue;
-        }
-        bytes[abs..abs + 4].copy_from_slice(&0u32.to_le_bytes());
-        patched += 1;
-    }
-    Ok(patched)
-}
-
-/// Detect zero-tranrf on all non-empty data pages (any table type).
-pub(in crate::service) fn detect_pdb_zero_tranrf_all_tables(bytes: &[u8]) -> Vec<ZeroTranrfPage> {
-    detect_pdb_zero_tranrf_pages_for_tables(bytes, Some(&[]))
-}
-
-// table_filter: None = only tt=0; Some(&[]) = all tables; Some(list) = specific tables
-pub(super) fn detect_pdb_zero_tranrf_pages_for_tables(
-    bytes: &[u8],
-    table_filter: Option<&[u32]>,
-) -> Vec<ZeroTranrfPage> {
-    use crate::utils::{read_u16_le_at, read_u32_le_at};
-    let Some(page_size) = read_u32_le_at(bytes, 4).map(|v| v as usize) else {
-        return Vec::new();
-    };
-    if page_size == 0 || bytes.len() < page_size * 2 {
-        return Vec::new();
-    }
-    let total = bytes.len() / page_size;
-    let mut out = Vec::new();
-
-    for i in 1..total {
-        let off = i * page_size;
-        let Some(idx) = read_u32_le_at(bytes, off + 4) else {
-            continue;
-        };
-        if idx == 0 {
-            continue;
-        }
-        let tt = read_u32_le_at(bytes, off + 8).unwrap_or(9999);
-        let pass = match table_filter {
-            None => tt == 0,   // track pages only
-            Some(&[]) => true, // all tables
-            Some(list) => list.contains(&tt),
-        };
-        if !pass {
-            continue;
-        }
-        let used_s = read_u16_le_at(bytes, off + 0x1e).unwrap_or(0);
-        if used_s == 0 {
-            continue;
-        }
-        let u5 = read_u16_le_at(bytes, off + 0x20).unwrap_or(0);
-        let num_rl = read_u16_le_at(bytes, off + 0x22).unwrap_or(0) as usize;
-        let page = &bytes[off..off + page_size];
-        let row_slots = crate::utils::packed_page_row_slot_count(page).unwrap_or(0);
-        if row_slots == 0 || !pdb_page::footer_fits(page_size, row_slots) {
-            continue;
-        }
-
-        let groups: Vec<_> = pdb_page::footer_groups(page_size, row_slots).collect();
-        let rowpf_groups: Vec<u16> = groups.iter().map(|group| group.rowpf(page)).collect();
-        let tranrf_groups: Vec<u16> = groups.iter().map(|group| group.tranrf(page)).collect();
-        let footer_group_offsets: Vec<usize> = groups.iter().map(|group| group.rowpf_off).collect();
-
-        // For u5=1 tables (dict tables, playlist entries) only the last group carries
-        // tranrf; all preceding groups are correctly zero per the documented formula.
-        // For other tables (u5=trc, u5=2) tranrf must mirror rowpf in every group.
-        let needs_fix = if u5 == 1 {
-            let last_group = num_rl / 16;
-            last_group < groups.len()
-                && rowpf_groups[last_group] != 0
-                && tranrf_groups[last_group] == 0
-        } else {
-            rowpf_groups
-                .iter()
-                .zip(tranrf_groups.iter())
-                .any(|(&rf, &tf)| rf != 0 && tf == 0)
-        };
-
-        if needs_fix {
-            out.push(ZeroTranrfPage {
-                page_index: i,
-                u5,
-                num_rl,
-                rowpf_groups,
-                tranrf_groups,
-                footer_group_offsets,
-            });
-        }
-    }
-    out
-}
-
-pub(super) fn apply_pdb_zero_tranrf_repair(
-    bytes: &mut [u8],
-    pages: &[ZeroTranrfPage],
-) -> BackendResult<usize> {
-    if pages.is_empty() {
-        return Ok(0);
-    }
-    let page_size = pdb_page_size(bytes)?;
-    let mut patched = 0usize;
-    for page in pages {
-        let page_base = page.page_index * page_size;
-        let mut fixed_any = false;
-        for (group_idx, ((&rowpf, &existing_tranrf), &footer_off)) in page
-            .rowpf_groups
-            .iter()
-            .zip(page.tranrf_groups.iter())
-            .zip(page.footer_group_offsets.iter())
-            .enumerate()
-        {
-            if rowpf == 0 || existing_tranrf != 0 {
-                continue;
-            }
-            let tranrf_val: u16 = if page.u5 == 1 {
-                // u5=1: only the last group gets 1<<(num_rl%16); non-last groups are correct at 0.
-                if group_idx != page.num_rl / 16 {
-                    continue;
-                }
-                1u16 << (page.num_rl % 16)
-            } else {
-                rowpf
-            };
-            let tranrf_off = page_base + footer_off + 2;
-            if tranrf_off + 2 > bytes.len() {
-                continue;
-            }
-            bytes[tranrf_off..tranrf_off + 2].copy_from_slice(&tranrf_val.to_le_bytes());
-            fixed_any = true;
-        }
-        if fixed_any {
-            patched += 1;
-        }
     }
     Ok(patched)
 }

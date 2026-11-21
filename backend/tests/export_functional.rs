@@ -1393,19 +1393,27 @@ fn export_to_usb_preserves_t07_playlist_tree_tombstone_page() {
         "original tombstoned t07 row must remain inactive"
     );
     assert_ne!(
-        tranrf_after & 0x0001,
-        0,
-        "original tombstoned t07 transaction bit must remain set"
-    );
-    assert_ne!(
         rowpf_after & !0x0001,
         0,
         "second export should append at least one active t07 row to the tombstone page"
     );
+    // The append is the page's last transaction: tranrf holds exactly the
+    // appended rows and (u5, num_rl) follow it (docs/PDB.md "Page Footer
+    // Conventions"); a stale tranrf crashes rekordbox's next export.
     assert_eq!(
-        tranrf_after & rowpf_after,
-        rowpf_after,
-        "new active t07 rows should also be marked in tranrf"
+        tranrf_after, rowpf_after,
+        "tranrf must hold exactly the appended t07 rows"
+    );
+    assert_eq!(
+        (
+            read_u16_le(&after_second, t07_last_off + 0x20).unwrap(),
+            read_u16_le(&after_second, t07_last_off + 0x22).unwrap()
+        ),
+        (
+            tranrf_after.count_ones() as u16,
+            tranrf_after.trailing_zeros() as u16
+        ),
+        "(u5, num_rl) must follow tranrf"
     );
 
     let parsed = parse_pdb(&pdb_path).expect("parse PDB after tombstone append");

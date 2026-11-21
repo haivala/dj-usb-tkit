@@ -123,8 +123,6 @@ fn append_rows_to_existing_page_preserving_footer_state(
     let Some(mut footer) = read_page_footer_state(&page_snapshot, page_size) else {
         return Ok(0);
     };
-    let old_u5 = read_u16_le_at(&page_snapshot, 0x20).unwrap_or(0);
-    let old_num_rl = read_u16_le_at(&page_snapshot, 0x22).unwrap_or(0);
     let mut used_s = read_u16_le_at(&page_snapshot, 0x1e).unwrap_or(0) as usize;
     let mut new_used_s = used_s;
     let mut absorbed = 0usize;
@@ -156,12 +154,14 @@ fn append_rows_to_existing_page_preserving_footer_state(
             "additive append: page {page_idx} for table {table_type} disappeared"
         ))
     })?;
+    let mut appended = Vec::with_capacity(absorbed);
     for row in rows.iter().take(absorbed) {
         let start = align4(used_s);
         if start > used_s {
             page[HEAP_START + used_s..HEAP_START + start].fill(0);
         }
         let slot = footer.offsets.len();
+        appended.push(slot);
         let mut row_bytes = row.clone();
         apply_page_local_index_shift(table_type, &mut row_bytes, slot);
         let end = start + row_bytes.len();
@@ -180,7 +180,6 @@ fn append_rows_to_existing_page_preserving_footer_state(
         }
         let bit_mask = 1u16 << bit;
         footer.rowpf_by_group[group] |= bit_mask;
-        footer.tranrf_by_group[group] |= bit_mask;
         used_s = aligned_end;
     }
 
@@ -190,31 +189,6 @@ fn append_rows_to_existing_page_preserving_footer_state(
         .sum();
     pdb_page::write_slot_counts(page, row_count, active_count);
     page[0x1e..0x20].copy_from_slice(&(used_s as u16).to_le_bytes());
-
-    let (u5, num_rl) = if table_type == 7 {
-        // tt=7 (playlist_tree) convention: (nrs, 0). Use row_count (total slots including
-        // tombstoned) as u5, always 0 for num_rl. Never preserve old_num_rl — the original
-        // broken export wrote num_rl=1 and preserving it causes DJ software to reject.
-        (row_count as u16, 0u16)
-    } else {
-        // Existing data pages carry transaction history in u5/num_rl/tranrf.
-        // Preserve u5 unless the page is being populated from an empty state,
-        // and avoid rewriting sentinel-style num_rl values observed on working
-        // hardware-tested exports. For normal u5=1 pages, num_rl still tracks
-        // the final row slot required by strict table validators such as tt=8.
-        let (fresh_u5, fresh_num_rl) = data_page_footer_fields(table_type, row_count as u16);
-        let u5 = if old_u5 == 0 { fresh_u5 } else { old_u5 };
-        let num_rl = if old_num_rl == 0x1FFF {
-            old_num_rl
-        } else if u5 == 1 {
-            row_count.saturating_sub(1) as u16
-        } else {
-            fresh_num_rl
-        };
-        (u5, num_rl)
-    };
-    page[0x20..0x22].copy_from_slice(&u5.to_le_bytes());
-    page[0x22..0x24].copy_from_slice(&num_rl.to_le_bytes());
 
     // Keep existing page_flags. Pages must not be resealed or normalized
     // during additive export.
@@ -227,8 +201,6 @@ fn append_rows_to_existing_page_preserving_footer_state(
     let free_s = page_size.saturating_sub(HEAP_START + used_s + footer_size);
     page[0x1c..0x1e].copy_from_slice(&(free_s as u16).to_le_bytes());
 
-    // Existing tranrf groups are validated transaction history on player hardware
-    // family players. Preserve them and OR in only the appended row bits.
     let offsets: Vec<u16> = footer.offsets.iter().map(|&offset| offset as u16).collect();
     pdb_page::write_footer(page, &offsets, |group| {
         (
@@ -236,6 +208,17 @@ fn append_rows_to_existing_page_preserving_footer_state(
             footer.tranrf_by_group[group.index],
         )
     });
+    // The appended rows are the page's last transaction, as when rekordbox
+    // adds rows; the previous write's bits go. `(trc, 0)` tables mark every
+    // appended slot, the others only the last one, each table's own
+    // convention (`data_page_footer_fields`, docs/PDB.md "Page Footer
+    // Conventions").
+    let transaction = if data_page_footer_fields(table_type, row_count as u16).0 == 1 {
+        &appended[appended.len() - 1..]
+    } else {
+        &appended[..]
+    };
+    pdb_page::write_transaction(page, row_count, transaction);
 
     Ok(absorbed)
 }
@@ -646,37 +629,7 @@ pub(crate) fn append_rows_to_chain_in_place(
                 data_pages.push(j as u32);
             }
             data_pages.sort_unstable();
-            if let Some(page_size_u) = page_size.checked_sub(SENTINEL_TAIL_ZERO_BYTES) {
-                let fill_end = sent_off + page_size_u;
-                let mut cursor = sent_off + 0x3c;
-                for &page_idx in &data_pages {
-                    if cursor + 4 > fill_end {
-                        break;
-                    }
-                    let ev = page_idx * 8;
-                    if let Some(sl) = bytes.get_mut(cursor..cursor + 4) {
-                        sl.copy_from_slice(&ev.to_le_bytes());
-                    }
-                    cursor += 4;
-                }
-                // Clear remaining slots
-                while cursor + 4 <= fill_end {
-                    if let Some(sl) = bytes.get_mut(cursor..cursor + 4) {
-                        sl.copy_from_slice(&SENTINEL_EMPTY_ENTRY.to_le_bytes());
-                    }
-                    cursor += 4;
-                }
-            }
-            let ne = (data_pages.len().min(0x1FFF)) as u16;
-            if let Some(sl) = bytes.get_mut(sent_off + 0x38..sent_off + 0x3a) {
-                sl.copy_from_slice(&ne.to_le_bytes());
-            }
-            if let Some(sl) = bytes.get_mut(sent_off + 0x3a..sent_off + 0x3c) {
-                sl.copy_from_slice(&0x1fffu16.to_le_bytes());
-            }
-            if let Some(sl) = bytes.get_mut(sent_off + 0x26..sent_off + 0x28) {
-                sl.copy_from_slice(&ne.to_le_bytes());
-            }
+            write_sentinel_btree(bytes, sent_off, page_size, &data_pages);
         }
     }
 
@@ -952,6 +905,15 @@ pub(crate) fn compute_additive_diff(
                 != new_row.date_added.as_deref().unwrap_or("")
             {
                 changed_fields.push("date_added");
+            }
+            if existing.analyze_date.as_deref().unwrap_or("")
+                != new_row
+                    .analyze_date
+                    .as_deref()
+                    .or(new_row.date_added.as_deref())
+                    .unwrap_or("")
+            {
+                changed_fields.push("analyze_date");
             }
             if existing.release_date.as_deref().unwrap_or("")
                 != new_row.release_date.as_deref().unwrap_or("")
@@ -1955,13 +1917,14 @@ fn rebuild_track_row_preserving(
         mutation.changed_fields.iter().copied().collect();
     // String slots the writer owns, by the field that fills them (see
     // `encode_track_row_with_profile`).
-    const OWNED_SLOTS: [(&str, usize); 10] = [
+    const OWNED_SLOTS: [(&str, usize); 11] = [
         ("isrc", 0),
         ("publish_track_info_on", 6),
         ("autoload_hotcues_on", 7),
         ("date_added", 10),
         ("release_date", 11),
         ("anlz_path", 14),
+        ("analyze_date", 15),
         ("dj_comment", 16),
         ("title", 17),
         ("file_name", 19),
@@ -2086,6 +2049,18 @@ pub(super) fn build_same_size_track_row_patch(
     ) && patch_changed_string_slot(
         &mut patched,
         &fields,
+        "analyze_date",
+        15,
+        encode_pdb_string(
+            desired
+                .analyze_date
+                .as_deref()
+                .or(desired.date_added.as_deref())
+                .unwrap_or(""),
+        ),
+    ) && patch_changed_string_slot(
+        &mut patched,
+        &fields,
         "dj_comment",
         16,
         encode_pdb_string(&sanitize_metadata(
@@ -2126,7 +2101,7 @@ pub(super) fn build_same_size_track_row_patch(
     }
 }
 
-/// Tombstone a row's slot within its page (clear it from `rowpf`, mark it in `tranrf`, decrement
+/// Tombstone a row's slot within its page (clear it from `rowpf`, decrement
 /// the page's active-row count) and zero its id field so the vacated slot isn't left as a live
 /// duplicate of whatever row replaces it elsewhere in the chain.
 ///
@@ -2145,27 +2120,23 @@ fn mark_row_slot_inactive(
         ))
     })?;
     let rowpf_off = off + slot.bits_off;
-    let tranrf_off = rowpf_off + 2;
     let rowpf = read_u16_le_at(bytes, rowpf_off).ok_or_else(|| {
         BackendError::Internal("PDB additive track mutation blocked: rowpf missing".into())
-    })?;
-    let tranrf = read_u16_le_at(bytes, tranrf_off).ok_or_else(|| {
-        BackendError::Internal("PDB additive track mutation blocked: tranrf missing".into())
     })?;
     if rowpf & slot.bit_mask == 0 {
         return Ok(());
     }
     let new_rowpf = rowpf & !slot.bit_mask;
     bytes[rowpf_off..rowpf_off + 2].copy_from_slice(&new_rowpf.to_le_bytes());
-    let new_tranrf = tranrf | slot.bit_mask;
-    bytes[tranrf_off..tranrf_off + 2].copy_from_slice(&new_tranrf.to_le_bytes());
+    // `tranrf` and `(u5, num_rl)` stay as they are: they describe the page's
+    // last transaction and must keep matching each other (docs/PDB.md "Page
+    // Footer Conventions"); adding the vacated slot to `tranrf` alone broke
+    // that on rekordbox's pages.
 
     // Zero the id field in the row we're vacating. The replacement row carries the same id to a
     // new slot elsewhere in the chain, so leaving the old id in place here would make this
-    // tombstoned slot a live duplicate of the new row's id — exactly what
-    // `detect_pdb_tombstoned_playlist_tree_ids`/the "Repair Tombstoned Row
-    // IDs" fix in service::repair exists to clean up after the fact. Zero it
-    // at the source instead of relying on that separate repair pass.
+    // tombstoned slot a live duplicate of the new row's id (the export
+    // tests check this with `detect_pdb_tombstoned_playlist_tree_ids`).
     let row_abs = off + HEAP_START + slot.start;
     if let Some(id_off) = row_abs.checked_add(id_field_offset)
         && id_off + 4 <= bytes.len()
@@ -2173,7 +2144,7 @@ fn mark_row_slot_inactive(
         bytes[id_off..id_off + 4].copy_from_slice(&0u32.to_le_bytes());
     }
 
-    let page = &mut bytes[off..];
+    let page = &mut bytes[off..off + page_size];
     if let Some((num_row_offsets, num_rows)) = pdb_page::read_slot_counts(page) {
         pdb_page::write_slot_counts(page, num_row_offsets, num_rows.saturating_sub(1));
     }
@@ -2743,18 +2714,11 @@ pub(crate) fn try_write_pdb_additive_in_place(
     // more, without requiring a manual repair action.
     remove_duplicate_playlist_entries_inplace(&mut bytes);
 
-    let mismatches = crate::pdb_reader::validate_pdb_page_conventions(&bytes);
-    if !mismatches.is_empty() {
-        let detail = mismatches
-            .iter()
-            .take(8)
-            .map(|m| m.to_string())
-            .collect::<Vec<_>>()
-            .join(" | ");
-        return Err(BackendError::Internal(format!(
-            "PDB additive write blocked: page-header convention mismatches ({detail})"
-        )));
-    }
+    crate::pdb_reader::check_written_page_conventions(
+        existing_bytes,
+        &bytes,
+        "PDB additive write",
+    )?;
 
     // Do NOT pad to next_unused here. The blank ec pages come naturally from
     // the resize done in append_rows_to_chain_in_place when overflow is placed

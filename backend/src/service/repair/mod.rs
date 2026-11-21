@@ -67,6 +67,7 @@ use super::diagnostics::{
 
 mod audio_fixes;
 mod background_color;
+mod damaged_tracks;
 mod history;
 mod overview;
 mod pdb_fixes;
@@ -77,6 +78,7 @@ mod strict_parity;
 mod tests;
 
 use audio_fixes::*;
+use damaged_tracks::*;
 use history::*;
 use overview::*;
 pub(crate) use pdb_fixes::*;
@@ -95,20 +97,15 @@ const PDB_DUPLICATE_PLAYLIST_ENTRIES_FIX_ID: &str = "repair_pdb_duplicate_playli
 const SYNC_EDB_HISTORY_FROM_PDB_FIX_ID: &str = "sync_edb_history_from_pdb";
 const PDB_HEADER_COMPATIBILITY_FIX_ID: &str = "repair_pdb_header_compatibility_field";
 const PDB_HEADER_COMPATIBILITY_FALLBACK_VALUE: u32 = 5;
-const PDB_SENTINEL_U5_FIX_ID: &str = "repair_pdb_sentinel_u5_on_data_pages";
-const PDB_WRONG_PAGE_FLAGS_FIX_ID: &str = "repair_pdb_wrong_page_flags";
-const PDB_ZERO_TRANRF_FIX_ID: &str = "repair_pdb_zero_tranrf_on_track_pages";
-const PDB_WRONG_TRACK_U5_FIX_ID: &str = "repair_pdb_wrong_track_u5_num_rl";
-const PDB_WRONG_HISTORY_SHAPE_FIX_ID: &str = "repair_pdb_wrong_history_page_shape";
+const PDB_DAMAGED_PAGE_HEADERS_FIX_ID: &str = "repair_pdb_damaged_page_headers";
 const PDB_STALE_SENTINEL_BTREE_FIX_ID: &str = "repair_pdb_stale_sentinel_btree";
-const PDB_WRONG_PLAYLIST_TREE_SHAPE_FIX_ID: &str = "repair_pdb_wrong_playlist_tree_shape";
-const PDB_TOMBSTONED_PLAYLIST_TREE_ID_FIX_ID: &str = "repair_pdb_tombstoned_playlist_tree_ids";
-const PDB_T00_MULTIPAGE_ACTIVE_FIX_ID: &str = "repair_pdb_t00_multipage_active_pages";
+const PDB_INCONSISTENT_FOOTERS_FIX_ID: &str = "repair_pdb_page_footer_transaction";
 const PDB_EC_CONFLICT_FIX_ID: &str = "repair_pdb_ec_data_page_conflict";
 const PDB_TORN_GROWTH_PAGES_FIX_ID: &str = "repair_pdb_torn_growth_pages";
 const PDB_TRUNCATED_TABLE_CHAIN_FIX_ID: &str = "repair_pdb_truncated_table_chain";
 const PDB_EMPTY_DUPLICATE_PLAYLISTS_FIX_ID: &str = "remove_pdb_empty_duplicate_playlists";
 const PDB_T19_TEMPLATE_STATE_FIX_ID: &str = "repair_pdb_t19_template_state";
+const DAMAGED_TRACK_ROWS_FIX_ID: &str = "merge_damaged_track_rows";
 
 /// Structural-prerequisite fixes the strict-parity upgrade needs to have run
 /// first -- surfaced to the editor as `RepairFixProposal.always_applied` so it
@@ -119,26 +116,19 @@ fn fix_always_applied(fix_id: &str) -> bool {
         fix_id,
         PDB_TRUNCATED_TABLE_CHAIN_FIX_ID
             | PDB_TORN_GROWTH_PAGES_FIX_ID
+            | PDB_DAMAGED_PAGE_HEADERS_FIX_ID
+            | DAMAGED_TRACK_ROWS_FIX_ID
             | PDB_EMPTY_DUPLICATE_PLAYLISTS_FIX_ID
     )
 }
 
-/// Page shapes real rekordbox exports carry as transaction bookkeeping and
-/// that players and rekordbox read fine, so they are never reported as
-/// issues. Our writer never produces them, so their fixes still normalize
-/// them whenever a repair runs. Surfaced as `RepairFixProposal.bookkeeping`.
+/// Page state real rekordbox exports carry and that players and rekordbox
+/// read fine, so it is never reported as an issue; the fix normalizes it
+/// whenever a repair runs. Surfaced as `RepairFixProposal.bookkeeping`.
+/// rekordbox's own page footers and flags are not on this list: rewriting
+/// them made rekordbox 6 crash (docs/PDB.md "Page Footer Conventions").
 fn fix_is_bookkeeping(fix_id: &str) -> bool {
-    matches!(
-        fix_id,
-        PDB_ZERO_TRANRF_FIX_ID
-            | PDB_WRONG_PAGE_FLAGS_FIX_ID
-            | PDB_SENTINEL_U5_FIX_ID
-            | PDB_WRONG_TRACK_U5_FIX_ID
-            | PDB_T00_MULTIPAGE_ACTIVE_FIX_ID
-            | PDB_TOMBSTONED_PLAYLIST_TREE_ID_FIX_ID
-            | PDB_WRONG_PLAYLIST_TREE_SHAPE_FIX_ID
-            | PDB_STALE_SENTINEL_BTREE_FIX_ID
-    )
+    matches!(fix_id, PDB_STALE_SENTINEL_BTREE_FIX_ID)
 }
 const PDB_TRACK_STRING_ALIGNMENT_FIX_ID: &str = "repair_pdb_track_string_alignment";
 const RELINK_MOVED_AUDIO_FIX_ID: &str = "relink_moved_audio";
@@ -167,18 +157,13 @@ const REPAIR_FIX_DISPLAY_ORDER: &[&str] = &[
     EMPTY_ANALYSIS_FILES_FIX_ID,
     PDB_TRUNCATED_TABLE_CHAIN_FIX_ID,
     PDB_TORN_GROWTH_PAGES_FIX_ID,
+    PDB_DAMAGED_PAGE_HEADERS_FIX_ID,
+    DAMAGED_TRACK_ROWS_FIX_ID,
     PDB_T19_TEMPLATE_STATE_FIX_ID,
     PDB_EMPTY_DUPLICATE_PLAYLISTS_FIX_ID,
     STRICT_PARITY_UPGRADE_FIX_ID,
     PDB_DUPLICATE_PLAYLIST_ENTRIES_FIX_ID,
-    PDB_ZERO_TRANRF_FIX_ID,
-    PDB_WRONG_PAGE_FLAGS_FIX_ID,
-    PDB_SENTINEL_U5_FIX_ID,
-    PDB_WRONG_HISTORY_SHAPE_FIX_ID,
-    PDB_WRONG_TRACK_U5_FIX_ID,
-    PDB_T00_MULTIPAGE_ACTIVE_FIX_ID,
-    PDB_TOMBSTONED_PLAYLIST_TREE_ID_FIX_ID,
-    PDB_WRONG_PLAYLIST_TREE_SHAPE_FIX_ID,
+    PDB_INCONSISTENT_FOOTERS_FIX_ID,
     PDB_STALE_SENTINEL_BTREE_FIX_ID,
     PDB_EC_CONFLICT_FIX_ID,
     PDB_TRACK_STRING_ALIGNMENT_FIX_ID,

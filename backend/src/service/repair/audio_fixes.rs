@@ -463,24 +463,18 @@ pub(super) fn apply_separate_shared_analysis(
     }
 
     if !mutations.is_empty() {
+        let before = bytes.clone();
         crate::pdb_writer::mutate_tracks_in_place(
             &mut bytes,
             &mutations,
             PdbLayoutProfile::DEFAULT,
             page_size,
         )?;
-        let mismatches = crate::pdb_reader::validate_pdb_page_conventions(&bytes);
-        if !mismatches.is_empty() {
-            let detail = mismatches
-                .iter()
-                .take(8)
-                .map(|m| m.to_string())
-                .collect::<Vec<_>>()
-                .join(" | ");
-            return Err(BackendError::Internal(format!(
-                "separating shared analysis blocked: page-header convention mismatches ({detail})"
-            )));
-        }
+        crate::pdb_reader::check_written_page_conventions(
+            &before,
+            &bytes,
+            "separating shared analysis",
+        )?;
         std::fs::write(&pdb_path, &bytes)?;
     }
 
@@ -1042,24 +1036,14 @@ impl BackendService {
                 bundles.push((row.anlz_path.clone(), rel));
             }
         }
+        let before = bytes.clone();
         let relinked = crate::pdb_writer::mutate_tracks_in_place(
             &mut bytes,
             &mutations,
             PdbLayoutProfile::DEFAULT,
             page_size,
         )?;
-        let mismatches = crate::pdb_reader::validate_pdb_page_conventions(&bytes);
-        if !mismatches.is_empty() {
-            let detail = mismatches
-                .iter()
-                .take(8)
-                .map(|m| m.to_string())
-                .collect::<Vec<_>>()
-                .join(" | ");
-            return Err(BackendError::Internal(format!(
-                "Relink blocked: page-header convention mismatches ({detail})"
-            )));
-        }
+        crate::pdb_reader::check_written_page_conventions(&before, &bytes, "Relink")?;
         std::fs::write(&pdb_path, &bytes)?;
 
         // ── ANLZ: the bundle names the file it belongs to ─────────────

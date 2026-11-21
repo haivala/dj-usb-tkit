@@ -47,6 +47,9 @@ pub fn read_slot_counts(page: &[u8]) -> Option<(usize, usize)> {
 /// Write the packed `(num_row_offsets, num_rows)` header field at `0x18..0x1b`.
 /// Values are masked to their 13/11-bit widths.
 pub fn write_slot_counts(page: &mut [u8], num_row_offsets: usize, num_rows: usize) {
+    // More live rows than slots is what a crashed rekordbox write leaves
+    // (live count 2040 on a 9-slot page); never write it.
+    let num_rows = num_rows.min(num_row_offsets);
     let packed = (num_row_offsets as u32 & 0x1fff) | ((num_rows as u32 & 0x7ff) << 13);
     page[0x18] = (packed & 0xff) as u8;
     page[0x19] = ((packed >> 8) & 0xff) as u8;
@@ -65,6 +68,15 @@ pub fn footer_size(slot_count: usize) -> usize {
 /// Whether the whole footer for `slot_count` slots fits in a `page_len` page.
 pub fn footer_fits(page_len: usize, slot_count: usize) -> bool {
     footer_size(slot_count) <= page_len
+}
+
+/// Whether the footer for `slot_count` slots sits clear of the page's row
+/// heap (`HEAP_START` plus the header's used size). A page where it doesn't
+/// has a slot count the rows can't back, and writing that footer would
+/// overwrite rows, so the in-place passes leave such a page alone.
+pub fn footer_clear_of_heap(page: &[u8], slot_count: usize) -> bool {
+    let heap_end = HEAP_START + read_u16_le_at(page, 0x1e).unwrap_or(0) as usize;
+    heap_end + footer_size(slot_count) <= page.len()
 }
 
 /// One footer group's position within its page. Offsets are relative to the
@@ -216,6 +228,83 @@ pub fn write_single_slot_tranrf(page: &mut [u8], slot_count: usize, slot: usize)
             0
         };
         group.set_tranrf(page, tranrf);
+    }
+}
+
+// ---------------------------------------------------------------------------
+// Transaction fields
+// ---------------------------------------------------------------------------
+//
+// `tranrf` marks the row slots the page's last write touched, deleted rows
+// included. Every data page rekordbox writes, in every table, has
+// `u5` = the number of those slots and `num_rl` = the lowest one, or the
+// placeholder pair `(0x1FFF, 0x1FFF)`. rekordbox 6 crashes or loses its
+// playlists on a page where they don't match. See docs/PDB.md "Page Footer
+// Conventions".
+
+/// The `u5`/`num_rl` placeholder pair rekordbox leaves on some data pages.
+pub const PLACEHOLDER_FIELD: u16 = 0x1FFF;
+
+/// `(u5, num_rl)` the transaction rule gives for per-group `tranrf` words
+/// (one per group of `groups`), or `None` when no bit is set.
+pub fn transaction_fields(groups: &[FooterGroup], tranrf: &[u16]) -> Option<(u16, u16)> {
+    let mut count = 0u32;
+    let mut lowest = None;
+    for (group, &bits) in groups.iter().zip(tranrf) {
+        let bits = bits & group.mask();
+        if bits != 0 && lowest.is_none() {
+            lowest = Some(group.first_slot + bits.trailing_zeros() as usize);
+        }
+        count += bits.count_ones();
+    }
+    lowest.map(|slot| (count as u16, slot as u16))
+}
+
+/// The page's `(u5, num_rl)` header fields.
+pub fn read_transaction_header(page: &[u8]) -> (u16, u16) {
+    (
+        read_u16_le_at(page, 0x20).unwrap_or(0),
+        read_u16_le_at(page, 0x22).unwrap_or(0),
+    )
+}
+
+/// Write `(u5, num_rl)` to the page header.
+pub fn write_transaction_header(page: &mut [u8], u5: u16, num_rl: u16) {
+    write_u16_le_at(page, 0x20, u5);
+    write_u16_le_at(page, 0x22, num_rl);
+}
+
+/// Whether a data page with `slot_count` row slots follows the transaction
+/// rule. A page with no slots has nothing to describe.
+pub fn transaction_consistent(page: &[u8], slot_count: usize) -> bool {
+    if slot_count == 0 {
+        return true;
+    }
+    let header = read_transaction_header(page);
+    if header == (PLACEHOLDER_FIELD, PLACEHOLDER_FIELD) {
+        return true;
+    }
+    let groups: Vec<_> = footer_groups(page.len(), slot_count).collect();
+    let tranrf: Vec<u16> = groups.iter().map(|g| g.tranrf(page)).collect();
+    transaction_fields(&groups, &tranrf) == Some(header)
+}
+
+/// Mark exactly `slots` as the page's last transaction: `tranrf` holds those
+/// slots and nothing else, and `(u5, num_rl)` follow from it. `slots` must
+/// not be empty and must be below `slot_count`.
+pub fn write_transaction(page: &mut [u8], slot_count: usize, slots: &[usize]) {
+    let groups: Vec<_> = footer_groups(page.len(), slot_count).collect();
+    let mut tranrf = vec![0u16; groups.len()];
+    for &slot in slots {
+        if let Some(group) = groups.iter().find(|g| g.contains_slot(slot)) {
+            tranrf[group.index] |= 1 << (slot - group.first_slot);
+        }
+    }
+    for (group, &bits) in groups.iter().zip(&tranrf) {
+        group.set_tranrf(page, bits);
+    }
+    if let Some((u5, num_rl)) = transaction_fields(&groups, &tranrf) {
+        write_transaction_header(page, u5, num_rl);
     }
 }
 
@@ -389,5 +478,42 @@ mod tests {
         let groups: Vec<_> = footer_groups(4096, 20).collect();
         assert_eq!(groups[0].tranrf(&page), 0);
         assert_eq!(groups[1].tranrf(&page), 1 << 3);
+    }
+
+    #[test]
+    fn transaction_rule_counts_tranrf_bits_and_takes_the_lowest() {
+        // rekordbox: slots 3-6 of 7 in the last transaction.
+        let mut page = vec![0u8; 4096];
+        write_footer(&mut page, &[0; 7], |_| (0b011_0000, 0b111_1000));
+        write_transaction_header(&mut page, 4, 3);
+        assert!(transaction_consistent(&page, 7));
+        // The old repair's forced (trc, 0) on the same page.
+        write_transaction_header(&mut page, 7, 0);
+        assert!(!transaction_consistent(&page, 7));
+        // The placeholder pair is valid whatever tranrf holds.
+        write_transaction_header(&mut page, PLACEHOLDER_FIELD, PLACEHOLDER_FIELD);
+        assert!(transaction_consistent(&page, 7));
+    }
+
+    #[test]
+    fn write_transaction_spans_groups() {
+        let mut page = vec![0u8; 4096];
+        write_footer(&mut page, &[0; 20], |group| (group.mask(), group.mask()));
+        write_transaction(&mut page, 20, &[17, 19]);
+        let groups: Vec<_> = footer_groups(4096, 20).collect();
+        assert_eq!(groups[0].tranrf(&page), 0);
+        assert_eq!(groups[1].tranrf(&page), 0b1010);
+        assert_eq!(read_transaction_header(&page), (2, 17));
+        assert!(transaction_consistent(&page, 20));
+    }
+
+    #[test]
+    fn footer_clear_of_heap_needs_room_after_the_rows() {
+        // Rows filling all but 36 bytes leave room for 16 slots' footer
+        // (36 bytes), not 17 (42 bytes).
+        let mut page = vec![0u8; 4096];
+        page[0x1e..0x20].copy_from_slice(&(4096 - HEAP_START as u16 - 36).to_le_bytes());
+        assert!(footer_clear_of_heap(&page, 16));
+        assert!(!footer_clear_of_heap(&page, 17));
     }
 }

@@ -698,6 +698,7 @@ pub(crate) fn build_pdb_for_playlists(
                 file_type: track.file_type,
                 isrc: track.isrc.clone(),
                 date_added: track.date_added.clone(),
+                analyze_date: track.analyze_date.clone(),
                 release_date: track.release_date.clone(),
                 dj_comment: track.dj_comment.clone(),
                 file_name: track.file_name.clone(),
@@ -1255,7 +1256,32 @@ pub(crate) fn build_pdb_for_playlists(
                         existing_track.dj_comment = Some(comment);
                     }
                     if let Some(ref date) = date_added {
-                        existing_track.date_added = Some(date.clone());
+                        if track.from_library {
+                            existing_track.date_added = Some(date.clone());
+                            existing_track.analyze_date = Some(date.clone());
+                        } else {
+                            // A track carried over from the USB. rekordbox writes the
+                            // USB date to slot 15 and the collection date to slot
+                            // 10, the app the USB date to both: a row already
+                            // holding the date in either slot keeps both, and
+                            // slot 10 follows only on a row in the app's shape.
+                            let holds = |d: &Option<String>| d.as_deref() == Some(date.as_str());
+                            if !holds(&existing_track.date_added)
+                                && !holds(&existing_track.analyze_date)
+                            {
+                                let app_shape = existing_track.analyze_date.is_none()
+                                    || existing_track.analyze_date == existing_track.date_added;
+                                if app_shape
+                                    || existing_track
+                                        .date_added
+                                        .as_deref()
+                                        .is_none_or(is_placeholder_date)
+                                {
+                                    existing_track.date_added = Some(date.clone());
+                                }
+                                existing_track.analyze_date = Some(date.clone());
+                            }
+                        }
                     }
                     if let Some(name) = named(&track.label) {
                         let key = canonicalize_playlist_name(&name);
@@ -1490,7 +1516,15 @@ pub(crate) fn build_pdb_for_playlists(
                         .map(|ms| duration_ms_to_seconds(ms) as u32),
                     file_type: track.file_type.and_then(|v| u16::try_from(v).ok()),
                     isrc: track.isrc.clone(),
-                    date_added: date_added
+                    // rekordbox's convention for a new row: slot 10 holds the
+                    // eDB's dateCreated, slot 15 its dateAdded. A library
+                    // track shows the date it was added to the USB in both.
+                    date_added: (!track.from_library)
+                        .then(|| normalize_export_date(track.date_created.as_deref()))
+                        .flatten()
+                        .or_else(|| date_added.clone())
+                        .or_else(|| Some(export_date_added.clone())),
+                    analyze_date: date_added
                         .clone()
                         .or_else(|| Some(export_date_added.clone())),
                     release_date: release_date.clone(),

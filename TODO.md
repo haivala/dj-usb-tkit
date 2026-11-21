@@ -1,5 +1,53 @@
 # TODO
 
+## 1.0.0: remove repairs for damage only old app versions wrote
+
+Keep these until 1.0.0, then remove them (detector, repair, catalog entry in
+`docs/DIAGNOSTICS_REPAIRS.md`, and their tests). The damage they fix came from
+this app's own earlier writers. Sticks from those versions keep it, because
+the additive export appends and patches instead of rewriting.
+
+- rekordbox bookkeeping fixes (`bookkeeping: true`): stale sentinel B-tree,
+  header field values 1/4. Keep a test-only check that the writer never
+  produces these shapes.
+- `repair_pdb_ec_data_page_conflict`
+- the tt=8 duplicate playlist-entry sweep (standalone repair and strict
+  parity's duplicate-entry phase)
+- `repair_pdb_artist_name_layout`, `repair_pdb_track_string_alignment`,
+  `repair_pdb_album_string_alignment`
+- `repair_pdb_t19_template_state` (export still rewrites an app-written `t19`)
+- ANLZ: `fix_beat_grid_header`, `add_missing_mp3_seek_data`,
+  `add_analysis_track_path`, `separate_shared_analysis`
+
+Keep beyond 1.0.0, since other writers or interrupted writes cause these too:
+torn growth pages, truncated table chain, unknown header compatibility values,
+empty duplicate playlists, strict parity, the audio fixes, history sync, the
+Engine DJ library, page footer transaction (a crashed rekordbox write breaks it
+too), damaged page headers and the damaged track row merge.
+
+## rekordbox crash damage: what repair still can't do
+
+A crashed rekordbox write can leave NUL runs in a track row's strings. Repair
+merges such a row into an intact twin for the same file. A damaged row with no
+twin (or more than one candidate) only gets a warning in the Event Log and
+stays "missing audio": its real path is lost. If such rows turn up in play
+history on real USBs, look at rebuilding the row from the eDB's intact row for
+the same track (same file size, duration and rekordbox master ids).
+
+The same crash can hit the playlist tree: a half-written new row in a deleted
+slot, live with the id of another live playlist, and NUL runs in a playlist
+name. Strict parity then refuses to write (the playlist row "changed"), so the
+PDB stays as it is. A fix would drop the half-written row (the eDB has no
+playlist for it) and restore the damaged name from the eDB's playlist with the
+same id.
+
+## Diagnostics: characters the CDJ can't show
+
+Titles and paths with characters older players can't display (CJK, for
+instance) play fine but show as blanks or boxes. A diagnostics warning naming
+those tracks would explain it; no repair, the user decides about their own
+tags. Low priority.
+
 ## Monitor: track rows outside the media library
 
 The library database can collect track rows that no longer belong to the

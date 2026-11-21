@@ -114,64 +114,56 @@ pub(crate) fn diagnose_pdb_integrity(
     }
 
     {
-        // All three are rekordbox transaction bookkeeping: real rekordbox
-        // exports carry them and play fine, so they never warn. Repair USB
-        // still normalizes them whenever it runs (see
-        // `repair::fix_is_bookkeeping`); our own writer never produces them.
-        let bad_u5 = crate::service::repair::detect_pdb_sentinel_u5_on_data_pages(&bytes);
-        let bad_flags = crate::service::repair::detect_pdb_wrong_page_flags(&bytes);
-        let bad_tranrf = crate::service::repair::detect_pdb_zero_tranrf_all_tables(&bytes);
+        // rekordbox's own page state (flags 0x24/0x34, footers that follow
+        // the transaction rule, the 0x1FFF placeholder) is valid and never
+        // reported. These two are damage: from old app repairs, or from a
+        // rekordbox write that crashed halfway.
+        let damaged = crate::service::repair::detect_pdb_damaged_page_headers(&bytes);
+        let inconsistent = crate::service::repair::detect_pdb_inconsistent_page_footers(&bytes);
         let mut parts: Vec<Text> = Vec::new();
-        if !bad_u5.is_empty() {
-            parts.push(tr::diagnostics_check_pdb_page_headers_sentinel_u5(
-                bad_u5.len(),
+        if !damaged.is_empty() {
+            parts.push(tr::diagnostics_check_pdb_page_headers_damaged(
+                damaged.len(),
             ));
         }
-        if !bad_flags.is_empty() {
-            parts.push(tr::diagnostics_check_pdb_page_headers_page_flags(
-                bad_flags.len(),
+        if !inconsistent.is_empty() {
+            parts.push(tr::diagnostics_check_pdb_page_headers_footer(
+                inconsistent.len(),
             ));
         }
-        if !bad_tranrf.is_empty() {
-            parts.push(tr::diagnostics_check_pdb_page_headers_tranrf(
-                bad_tranrf.len(),
-            ));
-        }
-        let detail = if parts.is_empty() {
-            tr::diagnostics_check_pdb_page_headers_valid()
+        let (status, detail) = if parts.is_empty() {
+            (
+                DiagStatus::Pass,
+                tr::diagnostics_check_pdb_page_headers_valid(),
+            )
         } else {
             logging::debug(
                 "usb-diagnostics",
                 format!(
-                    "rekordbox transaction bookkeeping on PDB data pages: {}; normalized whenever a repair runs.",
+                    "damaged PDB page headers: {}; run repair_pdb_damaged_page_headers / repair_pdb_page_footer_transaction to fix.",
                     join_english(&parts)
                 ),
             );
-            tr::diagnostics_check_pdb_page_headers_bookkeeping(join_rendered(&parts, "; "))
+            (
+                DiagStatus::Fail,
+                tr::diagnostics_check_pdb_structure_fails(join_rendered(&parts, "; ")),
+            )
         };
         checks.push(DiagCheck::new(
             tr::diagnostics_check_pdb_page_headers(),
-            DiagStatus::Pass,
+            status,
             detail,
         ));
     }
 
     {
         let stale_btree = crate::service::repair::detect_pdb_stale_sentinel_btree(&bytes);
-        let wrong_pl_tree = crate::service::repair::detect_pdb_wrong_playlist_tree_shape(&bytes);
-        let tombstoned = crate::service::repair::detect_pdb_tombstoned_playlist_tree_ids(&bytes);
-        let wrong_track_u5 = crate::service::repair::detect_pdb_wrong_track_u5(&bytes);
-        let wrong_history = crate::service::repair::detect_pdb_wrong_history_page_shape(&bytes);
-        let t00_multipage_active =
-            crate::service::repair::detect_pdb_t00_multipage_active_pages(&bytes);
         let ec_conflicts = crate::service::repair::detect_pdb_ec_data_page_conflicts(&bytes);
         let truncated_chains = crate::service::repair::detect_pdb_truncated_table_chains(&bytes);
         let torn_growth = crate::service::repair::detect_pdb_torn_growth_pages(&bytes);
 
         // Hard failures: conditions that cause player or DJ software rejection.
         let mut fail_parts: Vec<Text> = Vec::new();
-        // Soft warnings: player-tolerant shapes rekordbox itself never writes.
-        let mut warn_parts: Vec<Text> = Vec::new();
         // rekordbox transaction bookkeeping: real rekordbox exports carry these
         // and play fine, so they never warn (see the page-headers check above).
         let mut bookkeeping_parts: Vec<Text> = Vec::new();
@@ -179,26 +171,6 @@ pub(crate) fn diagnose_pdb_integrity(
         if !stale_btree.is_empty() {
             bookkeeping_parts.push(tr::diagnostics_check_pdb_structure_stale_btree(
                 stale_btree.len(),
-            ));
-        }
-        if !wrong_pl_tree.is_empty() {
-            bookkeeping_parts.push(tr::diagnostics_check_pdb_structure_playlist_tree_shape(
-                wrong_pl_tree.len(),
-            ));
-        }
-        if !tombstoned.is_empty() {
-            bookkeeping_parts.push(tr::diagnostics_check_pdb_structure_tombstoned(
-                tombstoned.len(),
-            ));
-        }
-        if !wrong_track_u5.is_empty() {
-            bookkeeping_parts.push(tr::diagnostics_check_pdb_structure_track_page_shape(
-                wrong_track_u5.len(),
-            ));
-        }
-        if !t00_multipage_active.is_empty() {
-            bookkeeping_parts.push(tr::diagnostics_check_pdb_structure_track_page_active(
-                t00_multipage_active.len(),
             ));
         }
         if !bookkeeping_parts.is_empty() {
@@ -209,18 +181,6 @@ pub(crate) fn diagnose_pdb_integrity(
                     join_english(&bookkeeping_parts)
                 ),
             );
-        }
-        if !wrong_history.is_empty() {
-            logging::debug(
-                "usb-diagnostics",
-                format!(
-                    "{} with wrong u5/num_rl shape; run repair_pdb_wrong_history_page_shape to fix.",
-                    counted(wrong_history.len(), "history page", "history pages")
-                ),
-            );
-            warn_parts.push(tr::diagnostics_check_pdb_structure_history_shape(
-                wrong_history.len(),
-            ));
         }
         if !ec_conflicts.is_empty() {
             logging::debug(
@@ -276,14 +236,12 @@ pub(crate) fn diagnose_pdb_integrity(
                 tr::diagnostics_check_pdb_structure_torn_tail()
             });
         }
-        let integrity_status = if !fail_parts.is_empty() {
-            DiagStatus::Fail
-        } else if !warn_parts.is_empty() {
-            DiagStatus::Warn
-        } else {
+        let integrity_status = if fail_parts.is_empty() {
             DiagStatus::Pass
+        } else {
+            DiagStatus::Fail
         };
-        let detail = if fail_parts.is_empty() && warn_parts.is_empty() {
+        let detail = if fail_parts.is_empty() {
             if bookkeeping_parts.is_empty() {
                 tr::diagnostics_check_pdb_structure_ok().render()
             } else {
@@ -294,20 +252,7 @@ pub(crate) fn diagnose_pdb_integrity(
                 .render()
             }
         } else {
-            let mut segments = Vec::new();
-            if !fail_parts.is_empty() {
-                segments.push(tr::diagnostics_check_pdb_structure_fails(join_rendered(
-                    &fail_parts,
-                    "; ",
-                )));
-            }
-            if !warn_parts.is_empty() {
-                segments.push(tr::diagnostics_check_pdb_structure_warns(join_rendered(
-                    &warn_parts,
-                    "; ",
-                )));
-            }
-            join_rendered(&segments, " | ")
+            tr::diagnostics_check_pdb_structure_fails(join_rendered(&fail_parts, "; ")).render()
         };
         checks.push(DiagCheck::new(
             tr::diagnostics_check_pdb_structure(),

@@ -160,6 +160,7 @@ fn test_track_page_uses_0x34_flags() {
         file_type: None,
         isrc: None,
         date_added: None,
+        analyze_date: None,
         release_date: None,
         dj_comment: None,
         file_name: None,
@@ -203,6 +204,7 @@ fn minimal_track_row(title: &str, file_name: &str, file_path: &str) -> PdbTrackR
         file_type: None,
         isrc: None,
         date_added: None,
+        analyze_date: None,
         release_date: None,
         dj_comment: None,
         file_name: Some(file_name.into()),
@@ -383,6 +385,7 @@ fn test_string_encoding_non_ascii_roundtrip() {
         bit_depth: None,
         isrc: None,
         date_added: None,
+        analyze_date: None,
         release_date: None,
         dj_comment: None,
         publish_track_info_on: None,
@@ -587,6 +590,7 @@ fn pdb_page_conventions_synthetic_fixture() {
         file_type: None,
         isrc: None,
         date_added: None,
+        analyze_date: None,
         release_date: None,
         dj_comment: None,
         file_name: None,
@@ -744,6 +748,7 @@ fn test_growth_does_not_shift_legacy_history_block() {
             file_type: None,
             isrc: None,
             date_added: None,
+            analyze_date: None,
             release_date: None,
             dj_comment: None,
             file_name: None,
@@ -1202,6 +1207,7 @@ fn test_pdb_with_tracks_round_trip() {
         bit_depth: Some(16),
         isrc: None,
         date_added: Some("2024-01-15".into()),
+        analyze_date: None,
         release_date: None,
         dj_comment: None,
         publish_track_info_on: None,
@@ -1260,6 +1266,7 @@ fn test_fresh_write_multipage_tt0_all_pages_sealed() {
             file_type: None,
             isrc: None,
             date_added: None,
+            analyze_date: None,
             release_date: None,
             dj_comment: None,
             file_name: None,
@@ -1355,4 +1362,65 @@ fn test_history_runtime_footer_only_last_row_active_beyond_one_group() {
         group1_tranrf, 0b1100,
         "tranrf should carry the final row plus the one before it"
     );
+}
+
+// ── Damaged-row merge ───────────────────────────────────────────────
+
+#[test]
+fn merge_track_entries_moves_entries_to_the_twin_and_keeps_history() {
+    let mut data = PdbData::empty();
+    data.colors = standard_colors();
+    data.columns_raw_rows = standard_columns_raw();
+    // Track 5 is damaged, track 9 its twin. Playlist 1 holds both, so the
+    // damaged entry goes; playlist 2 holds only the damaged row, which moves.
+    data.playlist_entries = vec![
+        PdbPlaylistEntryRow {
+            entry_index: 1,
+            track_id: 5,
+            playlist_id: 1,
+        },
+        PdbPlaylistEntryRow {
+            entry_index: 2,
+            track_id: 9,
+            playlist_id: 1,
+        },
+        PdbPlaylistEntryRow {
+            entry_index: 1,
+            track_id: 5,
+            playlist_id: 2,
+        },
+    ];
+    // History keeps every play, the twin's own included.
+    data.history_playlists = vec![PdbDictRow {
+        id: 3,
+        name: "HISTORY 001".into(),
+    }];
+    data.history_entries = vec![
+        PdbHistoryEntryRow {
+            track_id: 5,
+            playlist_id: 3,
+            entry_index: 1,
+        },
+        PdbHistoryEntryRow {
+            track_id: 9,
+            playlist_id: 3,
+            entry_index: 2,
+        },
+    ];
+    let mut bytes = write_pdb(&data).expect("write pdb");
+
+    let (repointed, removed) =
+        merge_track_entries_inplace(&mut bytes, &std::collections::HashMap::from([(5, 9)]));
+    assert_eq!((repointed, removed), (2, 1));
+
+    let parsed = crate::pdb_reader::parse_pdb_bytes(&bytes).expect("parse");
+    let mut entries: Vec<_> = parsed
+        .playlist_entries
+        .iter()
+        .map(|e| (e.playlist_id, e.track_id))
+        .collect();
+    entries.sort_unstable();
+    assert_eq!(entries, vec![(1, 9), (2, 9)]);
+    let history: Vec<_> = parsed.history_entries.iter().map(|e| e.track_id).collect();
+    assert_eq!(history, vec![Some(9), Some(9)]);
 }

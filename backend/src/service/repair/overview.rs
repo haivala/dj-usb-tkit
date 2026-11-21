@@ -29,9 +29,7 @@ fn fix_overview_line(fix_id: &str) -> Option<(usize, fn() -> Text)> {
             (AREA_OLDER_PLAYERS, tr::repair_overview_interrupted_export)
         }
         PDB_T19_TEMPLATE_STATE_FIX_ID => (AREA_OLDER_PLAYERS, tr::repair_overview_track_count),
-        PDB_WRONG_HISTORY_SHAPE_FIX_ID | PDB_EC_CONFLICT_FIX_ID => {
-            (AREA_OLDER_PLAYERS, tr::repair_overview_rekordbox_corrupted)
-        }
+        PDB_EC_CONFLICT_FIX_ID => (AREA_OLDER_PLAYERS, tr::repair_overview_rekordbox_corrupted),
         PDB_HEADER_COMPATIBILITY_FIX_ID => (AREA_OLDER_PLAYERS, tr::repair_overview_header),
         PDB_TRACK_STRING_ALIGNMENT_FIX_ID | PDB_ALBUM_STRING_ALIGNMENT_FIX_ID => {
             (AREA_OLDER_PLAYERS, tr::repair_overview_string_alignment)
@@ -42,6 +40,9 @@ fn fix_overview_line(fix_id: &str) -> Option<(usize, fn() -> Text)> {
         PDB_DUPLICATE_PLAYLIST_ENTRIES_FIX_ID => {
             (AREA_PLAYLISTS, tr::repair_overview_duplicate_entries)
         }
+        PDB_INCONSISTENT_FOOTERS_FIX_ID => (AREA_PLAYLISTS, tr::repair_overview_footer_transaction),
+        PDB_DAMAGED_PAGE_HEADERS_FIX_ID => (AREA_PLAYLISTS, tr::repair_overview_page_headers),
+        DAMAGED_TRACK_ROWS_FIX_ID => (AREA_PLAYLISTS, tr::repair_overview_damaged_tracks),
         PDB_EMPTY_DUPLICATE_PLAYLISTS_FIX_ID => (
             AREA_PLAYLISTS,
             tr::repair_overview_empty_duplicate_playlists,

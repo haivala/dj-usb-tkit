@@ -81,7 +81,7 @@ pub(crate) fn playlist_requires_strict_upgrade(detail: &UsbParityPlaylistDetail)
         || detail.rating_colour_mismatch_tracks > 0
         // Notes don't fail parity, but the merge is what makes them agree.
         || detail.field_note_tracks > 0
-        || !detail.playlist_id_match
+        || !detail.playlist_in_both
         || !detail.sort_order_match
 }
 
@@ -351,9 +351,13 @@ pub(super) fn merged_manifest_track(
         p_text(|t| Some(t.track_file_path.as_str())),
     )
     .unwrap_or_default();
+    // The PDB's slot 15 holds rekordbox's dateAdded; the app writes the same
+    // date to slot 10 too, which is all an older row may have.
     let date_added = merged_text(
         e(|r| r.date_added.as_deref()),
-        p_text(|t| t.date_added.as_deref()).filter(|d| !is_placeholder_date(d)),
+        p_text(|t| t.analyze_date.as_deref())
+            .filter(|d| !is_placeholder_date(d))
+            .or_else(|| p_text(|t| t.date_added.as_deref()).filter(|d| !is_placeholder_date(d))),
     )
     .or_else(|| Some(chrono::Utc::now().format("%Y-%m-%d").to_string()));
     let date_created = match edb.and_then(|row| row.date_created.clone()) {

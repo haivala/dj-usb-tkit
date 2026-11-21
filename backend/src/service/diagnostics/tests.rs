@@ -307,7 +307,7 @@ fn parity_detail() -> UsbParityPlaylistDetail {
         order_mismatch: false,
         path_mismatch_tracks: 0,
         dictionary_id_issue_tracks: 0,
-        playlist_id_match: true,
+        playlist_in_both: true,
         sort_order_match: true,
         parent_match: None,
         pdb_playlist_id: None,
@@ -455,11 +455,11 @@ fn parity_issue_labels_membership_badge_needs_tracks_on_the_other_side() {
     let mut wholly_missing = parity_detail();
     wholly_missing.only_in_pdb = 50;
     wholly_missing.edb_tracks = 0;
-    wholly_missing.playlist_id_match = false;
+    wholly_missing.playlist_in_both = false;
     wholly_missing.sort_order_match = false;
     assert_eq!(
         parity_issue_labels(&wholly_missing),
-        vec!["id mismatch", "sort mismatch"]
+        vec!["in one database only"]
     );
 }
 
@@ -469,7 +469,7 @@ fn parity_issue_labels_lists_structural_and_count_issues() {
     d.pdb_tracks = 10;
     d.edb_tracks = 8;
     d.only_in_pdb = 2;
-    d.playlist_id_match = false;
+    d.playlist_in_both = false;
     d.sort_order_match = false;
     d.pdb_missing_core_metadata = 1;
     d.dictionary_id_issue_tracks = 2;
@@ -477,8 +477,7 @@ fn parity_issue_labels_lists_structural_and_count_issues() {
         parity_issue_labels(&d),
         vec![
             "+PDB 2",
-            "id mismatch",
-            "sort mismatch",
+            "in one database only",
             "PDB gaps 1",
             "dict issues 2"
         ]
@@ -653,6 +652,7 @@ fn make_pdb_track(id: u32, title: &str, artist_id: u32, file_path: &str) -> PdbT
         file_type: None,
         isrc: None,
         date_added: None,
+        analyze_date: None,
         release_date: None,
         dj_comment: None,
         file_name: None,
@@ -1362,6 +1362,78 @@ fn parity_report_fails_when_playlist_sort_order_differs() {
     assert!(ordering.detail.contains("playlist-sort-order mismatches=2"));
 }
 
+/// A PDB with playlists "First", "Second", "Third" (ids 10, 20, 30, sort
+/// 0, 1, 2), one track each.
+fn three_playlist_parsed() -> ParsedPdb {
+    let mut parsed = ParsedPdb::default();
+    parsed.artists.insert(1, "Artist".to_string());
+    for (i, name) in ["First", "Second", "Third"].iter().enumerate() {
+        let n = u32::try_from(i).expect("index");
+        let path = format!("/Contents/Artist/{name}.mp3");
+        parsed.playlist_tree.push(PdbPlaylistTreeRow {
+            id: 10 * (n + 1),
+            parent_id: 0,
+            sort_order: n,
+            row_is_folder: false,
+            name: (*name).to_string(),
+        });
+        parsed.tracks.push(make_pdb_track(n + 1, name, 1, &path));
+        parsed.playlist_entries.push(PdbPlaylistEntryRow {
+            entry_index: 0,
+            track_id: n + 1,
+            playlist_id: 10 * (n + 1),
+        });
+    }
+    parsed
+}
+
+/// The eDB side of [`three_playlist_parsed`], with each playlist's
+/// `(playlist_id, sequenceNo)`.
+fn three_playlist_edb(ids_and_sort: [(i64, i64); 3]) -> HashMap<String, ExportDbPlaylist> {
+    ["First", "Second", "Third"]
+        .iter()
+        .zip(ids_and_sort)
+        .enumerate()
+        .map(|(i, (name, (playlist_id, sort_order)))| {
+            let path = format!("/Contents/Artist/{name}.mp3");
+            (
+                (*name).to_string(),
+                ExportDbPlaylist {
+                    playlist_id,
+                    sort_order,
+                    tracks: vec![make_usb_track(&(i + 1).to_string(), name, "Artist", &path)],
+                },
+            )
+        })
+        .collect()
+}
+
+#[test]
+fn parity_compares_the_playlist_order_the_player_shows_not_ids() {
+    let parsed = three_playlist_parsed();
+    let compare = |edb: HashMap<String, ExportDbPlaylist>| {
+        build_usb_parity_comparison(
+            &parsed,
+            &edb,
+            &RatingColourParity::default(),
+            &FieldNoteParity::default(),
+            None,
+        )
+    };
+    // rekordbox numbers each database separately: other ids and sort
+    // values, same order.
+    let (_, _, details, _) = compare(three_playlist_edb([(32, 5), (7, 6), (9, 9)]));
+    assert!(
+        details
+            .iter()
+            .all(|d| d.playlist_in_both && d.sort_order_match),
+        "{details:#?}"
+    );
+    // "First" first in the PDB but last in the eDB: every playlist moves.
+    let (_, _, details, _) = compare(three_playlist_edb([(32, 3), (7, 1), (9, 2)]));
+    assert!(details.iter().all(|d| !d.sort_order_match), "{details:#?}");
+}
+
 #[test]
 fn parity_playlist_details_follow_playlist_sort_order_not_name() {
     let mut parsed = ParsedPdb::default();
@@ -1645,9 +1717,9 @@ fn parity_report_warns_when_edb_source_metadata_is_incomplete() {
         .find(|c| c.label == "eDB source completeness")
         .expect("eDB source completeness check");
     assert!(matches!(edb_source.status, DiagStatus::Warn));
-    assert!(matches!(overall, DiagStatus::Fail));
+    assert!(matches!(overall, DiagStatus::Warn));
     assert_eq!(playlist.edb_missing_core_metadata, 1);
-    assert!(matches!(playlist.status, DiagStatus::Fail));
+    assert!(matches!(playlist.status, DiagStatus::Warn));
 }
 
 #[test]
@@ -2131,34 +2203,39 @@ fn analysis_ownership_finds_unmarked_and_foreign_single_bundles() {
     assert_eq!(found.non_owner_track_ids(), HashSet::from([3]));
 }
 
-/// rekordbox transaction bookkeeping (here: ACTV track pages inside a
-/// multi-page chain and a playlist_tree footer shape the writer doesn't use)
-/// passes, with the counts named in the detail.
+/// rekordbox's own page shapes pass: ACTV (0x34) pages inside a multi-page
+/// chain and footers that follow the transaction rule, whatever the table.
 #[test]
-fn pdb_integrity_reports_rekordbox_bookkeeping_as_pass() {
+fn pdb_integrity_passes_rekordbox_page_shapes() {
     use crate::models::DiagStatus;
 
     const PAGE: usize = 4096;
-    let data_page = |index: u32, table_type: u32, flags: u8, nrs: u8, next: u32| {
-        let mut p = vec![0u8; PAGE];
-        p[4..8].copy_from_slice(&index.to_le_bytes());
-        p[8..12].copy_from_slice(&table_type.to_le_bytes());
-        p[0x0c..0x10].copy_from_slice(&next.to_le_bytes());
-        p[0x18] = nrs;
-        p[0x1b] = flags;
-        p[0x1e..0x20].copy_from_slice(&1u16.to_le_bytes());
-        p
-    };
+    // `slots` row slots, `rowpf` live, `tranrf` the last transaction;
+    // (u5, num_rl) = (tranrf bits, lowest tranrf slot).
+    let data_page =
+        |index: u32, table_type: u32, flags: u8, slots: u8, rowpf: u16, tranrf: u16, next: u32| {
+            let mut p = vec![0u8; PAGE];
+            p[4..8].copy_from_slice(&index.to_le_bytes());
+            p[8..12].copy_from_slice(&table_type.to_le_bytes());
+            p[0x0c..0x10].copy_from_slice(&next.to_le_bytes());
+            let packed = u32::from(slots) | (rowpf.count_ones() << 13);
+            p[0x18..0x1b].copy_from_slice(&packed.to_le_bytes()[..3]);
+            p[0x1b] = flags;
+            p[0x1e..0x20].copy_from_slice(&1u16.to_le_bytes());
+            p[0x20..0x22].copy_from_slice(&(tranrf.count_ones() as u16).to_le_bytes());
+            p[0x22..0x24].copy_from_slice(&(tranrf.trailing_zeros() as u16).to_le_bytes());
+            p[PAGE - 4..PAGE - 2].copy_from_slice(&rowpf.to_le_bytes());
+            p[PAGE - 2..PAGE].copy_from_slice(&tranrf.to_le_bytes());
+            p
+        };
     let mut header = vec![0u8; PAGE];
     header[4..8].copy_from_slice(&(PAGE as u32).to_le_bytes());
-    let mut playlist_tree = data_page(3, 7, 0x24, 6, 0);
-    playlist_tree[0x20..0x22].copy_from_slice(&1u16.to_le_bytes());
-    playlist_tree[0x22..0x24].copy_from_slice(&1u16.to_le_bytes());
     let pages = [
         header,
-        data_page(1, 0, 0x34, 4, 2),
-        data_page(2, 0, 0x34, 4, 0),
-        playlist_tree,
+        data_page(1, 0, 0x34, 4, 0b1111, 0b1000, 2),
+        data_page(2, 0, 0x34, 4, 0b1111, 0b1000, 0),
+        // Slots 3-5 of 6 in the last transaction, one row deleted.
+        data_page(3, 7, 0x34, 6, 0b11_0111, 0b11_1000, 0),
     ];
 
     let td = tempfile::tempdir().expect("tempdir");
@@ -2168,20 +2245,17 @@ fn pdb_integrity_reports_rekordbox_bookkeeping_as_pass() {
     let (section, _) = super::pdb_integrity::diagnose_pdb_integrity(&pdb_path, |path| {
         crate::service::usb::StagedPdbParse::read(path).map(std::sync::Arc::new)
     });
-    let check = section
-        .checks
-        .iter()
-        .find(|c| c.label == "PDB structural integrity")
-        .unwrap_or_else(|| panic!("structural integrity check: {:#?}", section.checks));
-    assert!(
-        matches!(check.status, DiagStatus::Pass),
-        "rekordbox bookkeeping must not warn: {check:?}"
-    );
-    assert!(
-        check.detail.contains("ACTV in multi-page chain") && check.detail.contains("playlist_tree"),
-        "detail should name the bookkeeping: {}",
-        check.detail
-    );
+    for label in ["PDB structural integrity", "PDB page headers"] {
+        let check = section
+            .checks
+            .iter()
+            .find(|c| c.label == label)
+            .unwrap_or_else(|| panic!("{label} check: {:#?}", section.checks));
+        assert!(
+            matches!(check.status, DiagStatus::Pass),
+            "rekordbox page shapes must pass: {check:?}"
+        );
+    }
 }
 
 #[test]

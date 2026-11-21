@@ -2022,6 +2022,7 @@ mod diag_tests {
             file_type: None,
             isrc: None,
             date_added: None,
+            analyze_date: None,
             release_date: None,
             dj_comment: None,
             file_name: None,

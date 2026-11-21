@@ -127,7 +127,8 @@ struct DetectedRepairs {
     app_master_db_id: Option<u32>,
     app_beat_grids: Vec<std::path::PathBuf>,
     missing_seek_data: Vec<(SeekFormat, Vec<MissingSeekData>)>,
-    pdb_wrong_history_shape_pages: Vec<WrongShapeHistoryPage>,
+    pdb_damaged_headers: Vec<DamagedPageHeader>,
+    pdb_inconsistent_footers: Vec<InconsistentFooterPage>,
     pdb_ec_conflicts: Vec<EcDataPageConflict>,
     pdb_truncated_chains: Vec<TruncatedTableChain>,
     pdb_torn_growth: PdbTornGrowthReport,
@@ -141,6 +142,7 @@ struct DetectedRepairs {
     unindexed_audio_files: Vec<String>,
     duplicate_audio_copies: Vec<DuplicateAudioCopy>,
     moved_audio_relinks: Vec<MovedAudioRelink>,
+    damaged_tracks: NulDamagedTracks,
     sync_edb_history_supported: bool,
     sync_edb_history_needed: bool,
     strict_upgrade_targets: HashSet<String>,
@@ -657,6 +659,7 @@ impl BackendService {
         let mut unindexed_audio_files = Vec::<String>::new();
         let mut duplicate_audio_copies = Vec::<DuplicateAudioCopy>::new();
         let mut moved_audio_relinks = Vec::<MovedAudioRelink>::new();
+        let mut damaged_tracks = NulDamagedTracks::default();
         let mut sync_edb_history_supported = false;
         let mut sync_edb_history_needed = false;
 
@@ -1000,18 +1003,9 @@ impl BackendService {
             .as_deref()
             .and_then(|path| std::fs::read(path).ok())
             .unwrap_or_default();
-        let pdb_sentinel_u5_pages = detect_pdb_sentinel_u5_on_data_pages(&staged_pdb_bytes);
-        let pdb_wrong_flags_pages = detect_pdb_wrong_page_flags(&staged_pdb_bytes);
-        let pdb_zero_tranrf_pages = detect_pdb_zero_tranrf_all_tables(&staged_pdb_bytes);
-        let pdb_wrong_history_shape_pages = detect_pdb_wrong_history_page_shape(&staged_pdb_bytes);
-        let pdb_tombstoned_playlist_ids =
-            detect_pdb_tombstoned_playlist_tree_ids(&staged_pdb_bytes);
-        let pdb_wrong_track_u5_pages = detect_pdb_wrong_track_u5(&staged_pdb_bytes);
-        let pdb_t00_multipage_active_pages =
-            detect_pdb_t00_multipage_active_pages(&staged_pdb_bytes);
+        let pdb_damaged_headers = detect_pdb_damaged_page_headers(&staged_pdb_bytes);
         let pdb_stale_sentinel_btree_pages = detect_pdb_stale_sentinel_btree(&staged_pdb_bytes);
-        let pdb_wrong_playlist_tree_shape_pages =
-            detect_pdb_wrong_playlist_tree_shape(&staged_pdb_bytes);
+        let pdb_inconsistent_footers = detect_pdb_inconsistent_page_footers(&staged_pdb_bytes);
         let pdb_ec_conflicts = detect_pdb_ec_data_page_conflicts(&staged_pdb_bytes);
         let pdb_truncated_chains = detect_pdb_truncated_table_chains(&staged_pdb_bytes);
         let pdb_torn_growth = detect_pdb_torn_growth_pages(&staged_pdb_bytes);
@@ -1032,100 +1026,6 @@ impl BackendService {
         // rekordbox transaction bookkeeping (see `fix_is_bookkeeping`): no
         // detected issue and no write of its own -- it rides along with the
         // PDB write of whatever repair runs.
-        if !pdb_zero_tranrf_pages.is_empty() {
-            proposed_fixes.push(fix_proposal(
-                PDB_ZERO_TRANRF_FIX_ID,
-                tr::repair_fix_zero_tranrf(),
-                format!(
-                    "Set tranrf = rowpf on {} where tranrf is zero but active rows exist.",
-                    counted(pdb_zero_tranrf_pages.len(), "data page", "data pages")
-                ),
-            ));
-        }
-        if !pdb_wrong_flags_pages.is_empty() {
-            proposed_fixes.push(fix_proposal(
-                PDB_WRONG_PAGE_FLAGS_FIX_ID,
-                tr::repair_fix_page_flags(),
-                format!(
-                    "Patch page_flags byte (0x1b) on {} to the per-table value \
-                     (tracks/history=0x34, all others=0x24).",
-                    counted(pdb_wrong_flags_pages.len(), "data page", "data pages")
-                ),
-            ));
-        }
-        if !pdb_sentinel_u5_pages.is_empty() {
-            proposed_fixes.push(fix_proposal(
-                PDB_SENTINEL_U5_FIX_ID,
-                tr::repair_fix_sentinel_u5(),
-                format!(
-                    "Patch u5/num_rl header fields on {} from sentinel 0x1FFF to the \
-                     per-table value.",
-                    counted(pdb_sentinel_u5_pages.len(), "data page", "data pages")
-                ),
-            ));
-        }
-        if !pdb_wrong_history_shape_pages.is_empty() {
-            detected_issues.push(format!(
-                "{} with wrong u5/num_rl shape (may be rejected as corrupted)",
-                counted(
-                    pdb_wrong_history_shape_pages.len(),
-                    "PDB history/columns page",
-                    "PDB history/columns pages"
-                )
-            ));
-            estimated_file_writes += 1;
-            proposed_fixes.push(fix_proposal(
-                PDB_WRONG_HISTORY_SHAPE_FIX_ID,
-                tr::repair_fix_history_shape(),
-                tr::repair_fix_history_shape_description(pdb_wrong_history_shape_pages.len()),
-            ));
-        }
-        if !pdb_wrong_track_u5_pages.is_empty() {
-            proposed_fixes.push(fix_proposal(
-                PDB_WRONG_TRACK_U5_FIX_ID,
-                tr::repair_fix_track_shape(),
-                format!(
-                    "Normalise u5/num_rl footer fields on {} to (1, nrs-1), \
-                     the format written by the current writer. (2, 0) is left untouched on pages \
-                     that already have it.",
-                    counted(
-                        pdb_wrong_track_u5_pages.len(),
-                        "tt=0 track page",
-                        "tt=0 track pages"
-                    )
-                ),
-            ));
-        }
-        if !pdb_t00_multipage_active_pages.is_empty() {
-            proposed_fixes.push(fix_proposal(
-                PDB_T00_MULTIPAGE_ACTIVE_FIX_ID,
-                tr::repair_fix_t00_multipage(),
-                format!(
-                    "Set flags=0x24 (SEAL) and u5/num_rl=(1, nrs-1) on {} \
-                     marked ACTV (0x34) in a multi-page chain, the shape the writer produces.",
-                    counted(
-                        pdb_t00_multipage_active_pages.len(),
-                        "tt=0 track page",
-                        "tt=0 track pages"
-                    )
-                ),
-            ));
-        }
-        if !pdb_tombstoned_playlist_ids.is_empty() {
-            proposed_fixes.push(fix_proposal(
-                PDB_TOMBSTONED_PLAYLIST_TREE_ID_FIX_ID,
-                tr::repair_fix_tombstoned(),
-                format!(
-                    "Zero out the id field in {} (tracks + playlist_tree) whose \
-                     id is also used by an active row.",
-                    counted(
-                        pdb_tombstoned_playlist_ids.len(),
-                        "tombstoned slot",
-                        "tombstoned slots"
-                    )
-                ),
-            ));
-        }
         if !pdb_stale_sentinel_btree_pages.is_empty() {
             proposed_fixes.push(fix_proposal(
                 PDB_STALE_SENTINEL_BTREE_FIX_ID,
@@ -1141,19 +1041,34 @@ impl BackendService {
                 ),
             ));
         }
-        if !pdb_wrong_playlist_tree_shape_pages.is_empty() {
+        if !pdb_inconsistent_footers.is_empty() {
+            detected_issues.push(format!(
+                "{} whose u5/num_rl don't match their tranrf (rekordbox 6 crashes \
+                 or loses its playlists on the next export)",
+                counted(
+                    pdb_inconsistent_footers.len(),
+                    "PDB data page",
+                    "PDB data pages"
+                )
+            ));
+            estimated_file_writes += 1;
             proposed_fixes.push(fix_proposal(
-                PDB_WRONG_PLAYLIST_TREE_SHAPE_FIX_ID,
-                tr::repair_fix_playlist_tree_shape(),
-                format!(
-                    "Set u5=nrs and num_rl=0 on {}, the shape \
-                     the writer produces for this table.",
-                    counted(
-                        pdb_wrong_playlist_tree_shape_pages.len(),
-                        "tt=7 (playlist_tree) data page",
-                        "tt=7 (playlist_tree) data pages"
-                    )
-                ),
+                PDB_INCONSISTENT_FOOTERS_FIX_ID,
+                tr::repair_fix_footer_transaction(),
+                tr::repair_fix_footer_transaction_description(pdb_inconsistent_footers.len()),
+            ));
+        }
+        if !pdb_damaged_headers.is_empty() {
+            detected_issues.push(format!(
+                "{} with invalid page flags or a live-row count that doesn't match the \
+                 row footer (left by a crashed rekordbox write)",
+                counted(pdb_damaged_headers.len(), "PDB data page", "PDB data pages")
+            ));
+            estimated_file_writes += 1;
+            proposed_fixes.push(fix_proposal(
+                PDB_DAMAGED_PAGE_HEADERS_FIX_ID,
+                tr::repair_fix_page_headers(),
+                tr::repair_fix_page_headers_description(pdb_damaged_headers.len()),
             ));
         }
         if !pdb_ec_conflicts.is_empty() {
@@ -1334,7 +1249,40 @@ impl BackendService {
                     });
                 }
             } else {
-                let missing_keys = presence.missing_keys();
+                let mut missing_keys = presence.missing_keys();
+                // Rows a crashed rekordbox write damaged, next to an intact
+                // twin, are merged into the twin: none of the missing-audio
+                // fixes below sees them.
+                damaged_tracks =
+                    detect_nul_damaged_tracks(parsed, edb_conn.as_ref(), &missing_keys);
+                let merged_keys = damaged_tracks
+                    .merged_paths
+                    .iter()
+                    .map(|p| audio_path_key(p))
+                    .collect::<HashSet<_>>();
+                missing_keys.retain(|key| !merged_keys.contains(key));
+                if !damaged_tracks.is_empty() {
+                    detected_issues.push(format!(
+                        "{} damaged by a crashed rekordbox write, next to an intact twin",
+                        counted(damaged_tracks.len(), "track row", "track rows")
+                    ));
+                    proposed_fixes.push(RepairFixProposal {
+                        estimated_deletes: damaged_tracks.len(),
+                        ..fix_proposal(
+                            DAMAGED_TRACK_ROWS_FIX_ID,
+                            tr::repair_fix_damaged_tracks(),
+                            tr::repair_fix_damaged_tracks_description(damaged_tracks.len()),
+                        )
+                    });
+                }
+                for path in &damaged_tracks.without_twin {
+                    warnings.push(logging::log_text(
+                        Level::Warn,
+                        "usb-diagnostics",
+                        "usb.diagnostics.damaged-track",
+                        &tr::repair_warning_damaged_track(path.replace('\0', "\u{fffd}")),
+                    ));
+                }
                 let missing_audio_track_ids = parsed
                     .tracks
                     .iter()
@@ -1342,6 +1290,7 @@ impl BackendService {
                     .map(|t| t.id)
                     .collect::<HashSet<u32>>();
                 missing_audio_paths = presence.missing.clone();
+                missing_audio_paths.retain(|p| !merged_keys.contains(&audio_path_key(p)));
                 unindexed_audio_files = presence.unindexed.clone();
 
                 // A copy of an indexed file sitting next to it is not a new
@@ -1532,48 +1481,62 @@ impl BackendService {
         }
 
         // PDB to eDB by nature: never offered without a PDB.
-        if let Some(parsed) = parsed_pdb.as_ref().filter(|_| staged_pdb_path.is_some()) {
-            let (history_rows, history_content_rows) = derive_history_sync_payload(parsed);
-            if !history_rows.is_empty()
-                && let Some(conn) = edb_conn.as_ref()
-                && table_exists(conn, "history")
-                && table_exists(conn, "history_content")
+        if let Some(parsed) = parsed_pdb.as_ref().filter(|_| staged_pdb_path.is_some())
+            && let Some(conn) = edb_conn.as_ref()
+            && table_exists(conn, "history")
+            && table_exists(conn, "history_content")
+            && let content_ids = edb_content_ids_by_pdb_track(parsed, conn)
+            && let (history_rows, history_content_rows) =
+                derive_history_sync_payload(parsed, &content_ids)
+            && !history_rows.is_empty()
+        {
+            let current_history = read_sorted_rows(
+                conn,
+                "SELECT history_id, name FROM history ORDER BY history_id, name",
+                |row| Ok((row.get::<_, i64>(0)?, row.get::<_, Option<String>>(1)?)),
+            );
+            let current_history_content = read_sorted_rows(
+                conn,
+                "SELECT history_id, content_id, sequenceNo FROM history_content \
+                     ORDER BY history_id, sequenceNo, content_id",
+                |row| {
+                    Ok((
+                        row.get::<_, i64>(0)?,
+                        row.get::<_, i64>(1)?,
+                        row.get::<_, i64>(2)?,
+                    ))
+                },
+            );
+            let current_history_count = current_history.len();
+            let current_history_content_count = current_history_content.len();
+            let mut target_history: Vec<_> = history_rows
+                .iter()
+                .map(|(id, _, name, _, _)| (*id, Some(name.clone())))
+                .collect();
+            target_history.sort();
+            let mut target_history_content = history_content_rows.clone();
+            target_history_content
+                .sort_by_key(|&(history_id, content_id, seq)| (history_id, seq, content_id));
+            let target_history_count = history_rows.len();
+            let target_history_content_count = history_content_rows.len();
+            if current_history != target_history
+                || current_history_content != target_history_content
             {
-                let current_history_count = conn
-                    .query_row("SELECT COUNT(*) FROM history", [], |row| {
-                        row.get::<_, i64>(0)
-                    })
-                    .ok()
-                    .unwrap_or(0)
-                    .max(0) as usize;
-                let current_history_content_count = conn
-                    .query_row("SELECT COUNT(*) FROM history_content", [], |row| {
-                        row.get::<_, i64>(0)
-                    })
-                    .ok()
-                    .unwrap_or(0)
-                    .max(0) as usize;
-                let target_history_count = history_rows.len();
-                let target_history_content_count = history_content_rows.len();
-                if current_history_count != target_history_count
-                    || current_history_content_count != target_history_content_count
-                {
-                    sync_edb_history_needed = true;
-                    sync_edb_history_supported = true;
-                    detected_issues.push(format!(
+                sync_edb_history_needed = true;
+                sync_edb_history_supported = true;
+                detected_issues.push(format!(
                                 "eDB history differs from PDB-derived payload (history {current_history_count}->{target_history_count}, history_content {current_history_content_count}->{target_history_content_count})"
                             ));
-                    proposed_fixes.push(RepairFixProposal {
-                        destructive: current_history_count > 0 || current_history_content_count > 0,
-                        estimated_writes: target_history_count + target_history_content_count,
-                        estimated_deletes: current_history_count + current_history_content_count,
-                        ..fix_proposal(
-                            SYNC_EDB_HISTORY_FROM_PDB_FIX_ID,
-                            tr::repair_fix_history_sync(),
-                            tr::repair_fix_history_sync_description(),
-                        )
-                    });
-                }
+                proposed_fixes.push(RepairFixProposal {
+                    destructive: current_history_count > 0 || current_history_content_count > 0,
+                    estimated_writes: target_history_count + target_history_content_count,
+                    estimated_deletes: current_history_count + current_history_content_count,
+                    ..fix_proposal(
+                        SYNC_EDB_HISTORY_FROM_PDB_FIX_ID,
+                        tr::repair_fix_history_sync(),
+                        tr::repair_fix_history_sync_description(),
+                    )
+                });
             }
         }
 
@@ -1747,7 +1710,8 @@ impl BackendService {
             app_master_db_id,
             app_beat_grids,
             missing_seek_data,
-            pdb_wrong_history_shape_pages,
+            pdb_damaged_headers,
+            pdb_inconsistent_footers,
             pdb_ec_conflicts,
             pdb_truncated_chains,
             pdb_torn_growth,
@@ -1761,6 +1725,7 @@ impl BackendService {
             unindexed_audio_files,
             duplicate_audio_copies,
             moved_audio_relinks,
+            damaged_tracks,
             sync_edb_history_supported,
             sync_edb_history_needed,
             strict_upgrade_targets,
@@ -1905,7 +1870,8 @@ impl BackendService {
             app_master_db_id,
             app_beat_grids,
             missing_seek_data,
-            pdb_wrong_history_shape_pages,
+            pdb_damaged_headers,
+            pdb_inconsistent_footers,
             pdb_ec_conflicts,
             pdb_truncated_chains,
             pdb_torn_growth,
@@ -1919,6 +1885,7 @@ impl BackendService {
             unindexed_audio_files,
             duplicate_audio_copies,
             moved_audio_relinks,
+            damaged_tracks,
             sync_edb_history_supported,
             sync_edb_history_needed,
             strict_upgrade_targets,
@@ -2033,6 +2000,51 @@ impl BackendService {
             },
         );
 
+        // Before strict parity too: the additive writer and the parser read
+        // the live-row count, and a page rekordbox left half-written must be
+        // whole before anything appends to it. Grows nothing, so the
+        // torn-growth boundary above stays valid.
+        outcomes.record_with_progress(
+            progress,
+            tr::repair_fix_page_headers(),
+            selected.contains(PDB_DAMAGED_PAGE_HEADERS_FIX_ID),
+            !pdb_damaged_headers.is_empty(),
+            || {
+                pdb.patch(|bytes| apply_pdb_damaged_page_header_repair(bytes, &pdb_damaged_headers))
+                    .map(|n| Detail::File(format!("patched {}", counted(n, "page", "pages"))))
+            },
+        );
+
+        // Before strict parity: a damaged row's entries must sit on its twin
+        // before parity compares the two databases' playlists.
+        outcomes.record_with_progress(
+            progress,
+            tr::repair_fix_damaged_tracks(),
+            selected.contains(DAMAGED_TRACK_ROWS_FIX_ID),
+            !damaged_tracks.is_empty(),
+            || {
+                pdb.on_file(|| {
+                    self.apply_fix_merge_nul_damaged_tracks(
+                        usb_root,
+                        &damaged_tracks,
+                        session.edb_conn(),
+                    )
+                })
+                .map(|m| {
+                    Detail::File(format!(
+                        "eDB: moved {} entries, dropped {} duplicate, deleted {} rows; \
+                         PDB: moved {} entries, dropped {} duplicate, deleted {} rows",
+                        m.edb_moved,
+                        m.edb_dropped,
+                        m.edb_deleted,
+                        m.pdb_moved,
+                        m.pdb_dropped,
+                        m.pdb_deleted
+                    ))
+                })
+            },
+        );
+
         // Before strict parity, so its additive write already finds t19
         // counting the tracks and leaves it alone (parity's own additive
         // writes keep it in sync if they add tracks). Grows nothing, so the torn-growth
@@ -2128,25 +2140,14 @@ impl BackendService {
             outcomes.not_selected(tr::repair_fix_duplicate_entries());
         }
 
-        // rekordbox bookkeeping runs with every apply, so it always follows
-        // the fixes above that rewrite the PDB (strict parity appends rows
-        // and pages). Detect it again on the current bytes instead of
-        // patching the preview's page snapshot.
-        let pdb_zero_tranrf_pages = detect_pdb_zero_tranrf_all_tables(&pdb.bytes);
-        let pdb_wrong_flags_pages = detect_pdb_wrong_page_flags(&pdb.bytes);
-        let pdb_sentinel_u5_pages = detect_pdb_sentinel_u5_on_data_pages(&pdb.bytes);
-        let pdb_wrong_track_u5_pages = detect_pdb_wrong_track_u5(&pdb.bytes);
-        let pdb_t00_multipage_active_pages = detect_pdb_t00_multipage_active_pages(&pdb.bytes);
-        let pdb_tombstoned_playlist_ids = detect_pdb_tombstoned_playlist_tree_ids(&pdb.bytes);
-        let pdb_wrong_playlist_tree_shape_pages = detect_pdb_wrong_playlist_tree_shape(&pdb.bytes);
         // The page and row targets the preview found are stale once the
         // fixes above wrote the PDB (strict parity, the audio fixes); find
         // them again on the current bytes. A target the writers already fixed
         // is then simply gone.
-        let pdb_wrong_history_shape_pages = if pdb_wrong_history_shape_pages.is_empty() {
-            pdb_wrong_history_shape_pages
+        let pdb_inconsistent_footers = if pdb_inconsistent_footers.is_empty() {
+            pdb_inconsistent_footers
         } else {
-            detect_pdb_wrong_history_page_shape(&pdb.bytes)
+            detect_pdb_inconsistent_page_footers(&pdb.bytes)
         };
         let pdb_ec_conflicts = if pdb_ec_conflicts.is_empty() {
             pdb_ec_conflicts
@@ -2164,110 +2165,22 @@ impl BackendService {
         let pdb_misaligned_track_ids = misaligned_row_ids(&pdb_misaligned_slots, 0);
         let pdb_misaligned_album_ids = misaligned_row_ids(&pdb_misaligned_slots, 3);
         let pdb_misaligned_artist_ids = misaligned_row_ids(&pdb_misaligned_slots, 2);
+        // After every other PDB write, so it sees the pages as they end up.
         outcomes.record_with_progress(
             progress,
-            tr::repair_fix_zero_tranrf(),
-            selected.contains(PDB_ZERO_TRANRF_FIX_ID),
-            !pdb_zero_tranrf_pages.is_empty(),
-            || {
-                pdb.patch(|bytes| apply_pdb_zero_tranrf_repair(bytes, &pdb_zero_tranrf_pages))
-                    .map(|n| Detail::File(format!("patched {}", counted(n, "page", "pages"))))
-            },
-        );
-
-        outcomes.record_with_progress(
-            progress,
-            tr::repair_fix_page_flags(),
-            selected.contains(PDB_WRONG_PAGE_FLAGS_FIX_ID),
-            !pdb_wrong_flags_pages.is_empty(),
-            || {
-                pdb.patch(|bytes| apply_pdb_wrong_page_flags_repair(bytes, &pdb_wrong_flags_pages))
-                    .map(|n| Detail::File(format!("patched {}", counted(n, "page", "pages"))))
-            },
-        );
-
-        outcomes.record_with_progress(
-            progress,
-            tr::repair_fix_sentinel_u5(),
-            selected.contains(PDB_SENTINEL_U5_FIX_ID),
-            !pdb_sentinel_u5_pages.is_empty(),
-            || {
-                pdb.patch(|bytes| apply_pdb_sentinel_u5_repair(bytes, &pdb_sentinel_u5_pages))
-                    .map(|n| Detail::File(format!("patched {}", counted(n, "page", "pages"))))
-            },
-        );
-
-        outcomes.record_with_progress(
-            progress,
-            tr::repair_fix_history_shape(),
-            selected.contains(PDB_WRONG_HISTORY_SHAPE_FIX_ID),
-            !pdb_wrong_history_shape_pages.is_empty(),
+            tr::repair_fix_footer_transaction(),
+            selected.contains(PDB_INCONSISTENT_FOOTERS_FIX_ID),
+            !pdb_inconsistent_footers.is_empty(),
             || {
                 pdb.patch(|bytes| {
-                    apply_pdb_wrong_history_page_shape_repair(bytes, &pdb_wrong_history_shape_pages)
+                    apply_pdb_inconsistent_page_footer_repair(bytes, &pdb_inconsistent_footers)
                 })
                 .map(|n| Detail::File(format!("patched {}", counted(n, "page", "pages"))))
             },
         );
 
-        outcomes.record_with_progress(
-            progress,
-            tr::repair_fix_track_shape(),
-            selected.contains(PDB_WRONG_TRACK_U5_FIX_ID),
-            !pdb_wrong_track_u5_pages.is_empty(),
-            || {
-                pdb.patch(|bytes| apply_pdb_wrong_track_u5_repair(bytes, &pdb_wrong_track_u5_pages))
-                    .map(|n| Detail::File(format!("patched {}", counted(n, "page", "pages"))))
-            },
-        );
-
-        outcomes.record_with_progress(
-            progress,
-            tr::repair_fix_t00_multipage(),
-            selected.contains(PDB_T00_MULTIPAGE_ACTIVE_FIX_ID),
-            !pdb_t00_multipage_active_pages.is_empty(),
-            || {
-                pdb.patch(|bytes| {
-                    apply_pdb_t00_multipage_active_repair(bytes, &pdb_t00_multipage_active_pages)
-                })
-                .map(|n| Detail::File(format!("patched {}", counted(n, "page", "pages"))))
-            },
-        );
-
-        outcomes.record_with_progress(
-            progress,
-            tr::repair_fix_tombstoned(),
-            selected.contains(PDB_TOMBSTONED_PLAYLIST_TREE_ID_FIX_ID),
-            !pdb_tombstoned_playlist_ids.is_empty(),
-            || {
-                pdb.patch(|bytes| {
-                    apply_pdb_tombstoned_playlist_tree_id_repair(
-                        bytes,
-                        &pdb_tombstoned_playlist_ids,
-                    )
-                })
-                .map(|n| Detail::File(format!("zeroed id in {}", counted(n, "slot", "slots"))))
-            },
-        );
-
-        outcomes.record_with_progress(
-            progress,
-            tr::repair_fix_playlist_tree_shape(),
-            selected.contains(PDB_WRONG_PLAYLIST_TREE_SHAPE_FIX_ID),
-            !pdb_wrong_playlist_tree_shape_pages.is_empty(),
-            || {
-                pdb.patch(|bytes| {
-                    apply_pdb_wrong_playlist_tree_shape_repair(
-                        bytes,
-                        &pdb_wrong_playlist_tree_shape_pages,
-                    )
-                })
-                .map(|n| Detail::File(format!("patched {}", counted(n, "page", "pages"))))
-            },
-        );
-
-        // After the page fixes above: resealing a track page can leave its
-        // sentinel's B-tree stale.
+        // After the page fixes above, which can change which pages count as
+        // active for the sentinel's B-tree.
         let pdb_stale_sentinel_btree_pages = detect_pdb_stale_sentinel_btree(&pdb.bytes);
         outcomes.record_with_progress(
             progress,
@@ -2567,10 +2480,18 @@ impl BackendService {
         if selected.contains(SYNC_EDB_HISTORY_FROM_PDB_FIX_ID) {
             if !sync_edb_history_supported || !sync_edb_history_needed {
                 outcomes.nothing_to_apply(tr::repair_fix_history_sync());
-            } else if let Some(parsed) = parsed_pdb.as_ref() {
+            } else if let Some(parsed) = usb_staging::required_pdb(usb_root)
+                .ok()
+                .and_then(|pdb| parse_pdb(&pdb).ok())
+            {
+                // The PDB as it is now: earlier fixes in this pass may have
+                // merged or removed tracks.
                 progress.start(&tr::repair_fix_history_sync());
-                match self.apply_fix_sync_edb_history_from_pdb(usb_root, parsed, session.edb_conn())
-                {
+                match self.apply_fix_sync_edb_history_from_pdb(
+                    usb_root,
+                    &parsed,
+                    session.edb_conn(),
+                ) {
                     Ok((history_written, history_content_written)) => {
                         outcomes.applied(
                             tr::repair_fix_history_sync(),
@@ -2661,4 +2582,15 @@ mod repair_meta_text_tests {
             "✓ supported · safe · 1 write"
         );
     }
+}
+
+/// Every row a query returns, in its order; empty when the query fails.
+fn read_sorted_rows<T>(
+    conn: &rusqlite::Connection,
+    sql: &str,
+    map: impl FnMut(&rusqlite::Row<'_>) -> rusqlite::Result<T>,
+) -> Vec<T> {
+    conn.prepare(sql)
+        .and_then(|mut stmt| stmt.query_map([], map)?.collect())
+        .unwrap_or_default()
 }

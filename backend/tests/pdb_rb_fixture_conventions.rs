@@ -1,7 +1,7 @@
-//! Env-gated golden-fixture test: verifies our documented per-table
-//! `(u5, num_rl)` convention table (see `docs/PDB.md` and
-//! `pdb_writer::data_page_footer_fields`) matches a real
-//! reference-exported PDB.
+//! Env-gated golden-fixture test: verifies every page of a real
+//! reference-exported PDB follows the documented transaction rule (see
+//! `docs/PDB.md`, "Page Footer Conventions") and that its data-page seqs
+//! vary.
 //!
 //! Set `REFERENCE_FIXTURE_PDB=<path>` to run; otherwise the test silently
 //! returns. This mirrors the pattern for large reference export fixtures:

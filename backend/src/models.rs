@@ -2900,8 +2900,12 @@ pub struct UsbParityPlaylistDetail {
     pub path_mismatch_tracks: usize,
     #[serde(default)]
     pub dictionary_id_issue_tracks: usize,
+    /// Both databases have the playlist (matched by name). Its id may
+    /// differ: rekordbox numbers each database's playlists separately.
     #[serde(default)]
-    pub playlist_id_match: bool,
+    pub playlist_in_both: bool,
+    /// The playlist sits in the same place in both databases' playlist list
+    /// (its position among the playlists both have, in its folder).
     #[serde(default)]
     pub sort_order_match: bool,
     #[serde(default)]

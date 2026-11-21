@@ -92,9 +92,9 @@ run an explicit ANLZ scan when looking for empty or malformed analysis bundles.
 
 | Area | What it checks |
 | --- | --- |
-| Playlist identity | matching playlist ids across PDB and eDB |
+| Playlist identity | every playlist is in both PDB and eDB, matched by name. The ids may differ: rekordbox numbers each database's playlists separately, so a playlist its sync recreates gets a reused id in the PDB and a new one in the eDB |
 | Playlist membership | tracks only in PDB, tracks only in eDB, and duplicate PDB entries |
-| Playlist order | common entries appear in the same order within a playlist, and playlist sibling order (PDB `t07.sort_order`) matches eDB `playlist.sequenceNo`; both dimensions are reported together as "Playlist ordering parity" |
+| Playlist order | common entries appear in the same order within a playlist, and each playlist sits in the same place in both databases' playlist list: its position among the playlists both have in its folder, by PDB `t07.sort_order` and eDB `playlist.sequenceNo` (the values themselves may differ, as rekordbox writes them); both dimensions are reported together as "Playlist ordering parity" |
 | Track metadata | title, artist, album, key, track number, BPM, duration |
 | Paths | media path and analysis path parity |
 | Artwork | artwork presence on both sides |
@@ -130,13 +130,19 @@ When `apply=true`:
   `repair_pdb_torn_growth_pages` because its dirty-tail truncation boundary is
   computed once, up front, and would otherwise go stale and cut off
   tracks/playlists that strict parity had just written;
-- `repair_pdb_t19_template_state` runs right after those two and before strict
+- `repair_pdb_damaged_page_headers` and then `merge_damaged_track_rows` run
+  next, also before strict parity: the writers and the parser read the live-row
+  count, and a damaged row's entries must sit on its twin before parity compares
+  the two databases' playlists;
+- `repair_pdb_t19_template_state` runs right after those and before strict
   parity upgrade, so strict parity's additive write finds `t19` already counting
   the tracks and leaves it alone; all other structural PDB page repairs run *after* strict
-  parity upgrade;
-- the desktop UI's repair preview locks these two fixes' checkboxes checked
-  whenever they're proposed — they cannot be deselected while leaving strict
-  parity selected, since there is no safe outcome from skipping either one;
+  parity upgrade, and `repair_pdb_page_footer_transaction` is detected again on
+  the PDB strict parity left;
+- the desktop UI's repair preview locks the checkboxes of these fixes that run
+  before strict parity (`always_applied`; `repair_pdb_t19_template_state` is not
+  locked) whenever they're proposed — they cannot be deselected while leaving
+  strict parity selected, since there is no safe outcome from skipping one;
 - rekordbox bookkeeping fixes (see below) are added to every apply, whatever
   `selectedFixIds` holds;
 - report commands still remain read-only.
@@ -161,15 +167,10 @@ The current code can propose these repair IDs:
 | `repair_pdb_track_string_alignment` / `repair_pdb_album_string_alignment` | `t00` track or `t03` album rows with a long-form string slot (UTF-16 `0x90` or long ASCII `0x40`) that isn't 4-byte aligned: MIPS CDJs freeze or give communication errors while browsing, or (misaligned long ASCII comments) as soon as the track list opens. Shown as the "Track/album string alignment" check under Contents integrity | Re-encodes each row with the same content through the current, aligned encoder and relocates it. One pass leaves nothing flagged. Misaligned artist names go through `repair_pdb_artist_name_layout`. Nothing else rewrites these rows: until the fix is applied, diagnostics keeps the check (and the "Older Pioneer players" line) at FAIL |
 | `repair_pdb_artist_name_layout` | `t02` artist rows whose name isn't where rekordbox puts it: a short ASCII name not at offset 10 (written by app versions before 0.4.1, which put every name at 12), or a UTF-16 name not 4-byte aligned. Shown as the "Artist name layout" check under Contents integrity. CDJs read the ASCII rows fine, but an Engine DJ player's own import of `export.pdb` shows those tracks without an artist | Re-encodes each row with the same id and name (ASCII at 10, UTF-16 at 12) and relocates it within `t02`. One pass leaves nothing flagged |
 | `repair_pdb_header_compatibility_field` | PDB header bytes `0x10..0x14` | Writes only that 4-byte field to the built-in compatibility value `5`. A value rekordbox writes (`1`, `4`) is bookkeeping: no warning, and it is set to `5` only when another repair runs. Any other value warns and is a fix of its own. A local backup snapshot's value is never used |
-| `repair_pdb_sentinel_u5_on_data_pages` | data pages whose `u5` is sentinel `0x1FFF` | Rewrites `u5` and, only when needed, `num_rl` to the per-table data-page convention |
-| `repair_pdb_wrong_page_flags` | data pages with invalid `page_flags` | Patches byte `0x1b` to the accepted value for that table family |
-| `repair_pdb_zero_tranrf_on_track_pages` | row-footer groups with active rows and zero `tranrf` | Patches only zero `tranrf` groups; it does not normalize non-zero transaction masks |
-| `repair_pdb_wrong_track_u5_num_rl` | invalid active `t00` track-page footer shape | Patches the affected track page footer fields |
-| `repair_pdb_wrong_history_page_shape` | `t16`, `t17`, or `t18` pages with `(1, nrs-1)` shape and `nrs > 1` | Changes those pages to `(nrs, 0)`; single-entry pages (`nrs == 1`, where `(1, nrs-1)` and `(nrs, 0)` coincide) are already valid and are not flagged |
+| `repair_pdb_page_footer_transaction` | data pages whose `u5`/`num_rl` don't follow their own `tranrf` (docs/PDB.md, "The transaction rule"): rekordbox 6 crashes or loses its playlists on its next export. Older app versions left these on rekordbox's pages. Shown as a FAIL "PDB page headers" check | Sets `(u5, num_rl)` from the page's `tranrf`. A group whose `tranrf` an old repair filled from `rowpf` gets its copy dropped first when other groups still hold rekordbox's own bits; a page with no `tranrf` bit at all gets the table's fresh-write shape. A page that follows the rule is never touched. Re-detected after strict parity |
+| `repair_pdb_damaged_page_headers` | data pages a crashed rekordbox write left with flags other than `0x24`/`0x34` (`0x10`) or a live-row count that doesn't match `rowpf`. Shown as a FAIL "PDB page headers" check | Sets flags `0x24` and the live-row count to the number of `rowpf` bits. Runs before strict parity |
+| `merge_damaged_track_rows` | a track row whose path or title holds NUL runs from a crashed rekordbox write and whose file is missing, next to exactly one intact row for the same audio: same file size and duration (and, in the eDB, the same rekordbox `masterDbId`/`masterContentId`) with its file present. Each database is matched on its own | Moves the damaged row's playlist and history entries to the twin (a playlist entry is dropped where the playlist already holds the twin; history is never dropped), then deletes the row, in both databases. Merged rows are left out of the missing-audio fixes. A damaged row without exactly one twin stays missing audio and gets a `usb.diagnostics.damaged-track` warning. Runs before strict parity |
 | `repair_pdb_stale_sentinel_btree` | sentinel pages with stale B-tree entries | Resets the sentinel B-tree index area to the empty state |
-| `repair_pdb_wrong_playlist_tree_shape` | `t07` playlist-tree pages with wrong footer shape | Sets `u5=nrs` and `num_rl=0` |
-| `repair_pdb_tombstoned_playlist_tree_ids` | tombstoned `t00` or `t07` slots duplicating active ids | Zeros only the id field in affected tombstoned slots |
-| `repair_pdb_t00_multipage_active_pages` | predecessor `t00` pages marked active in a multi-page chain | Sets those pages to sealed flag `0x24` and `(1, nrs-1)` |
 | `repair_pdb_ec_data_page_conflict` | table `empty_candidate` pointer aliasing another table's data page | Assigns each conflicting table a new empty candidate beyond the current file tail and updates `next_unused_page` |
 | `repair_pdb_torn_growth_pages` | torn additive-growth write left by an interrupted export (e.g. USB disconnected mid-write) | Zeroes `empty_candidate` page(s) that hold garbage instead of a blank reusable page, truncates any never-populated file tail beyond `next_unused_page`, and recomputes `seqdb` |
 | `repair_pdb_t19_template_state` | the PDB has tracks but its `t19` page does not match them and the eDB's `property` row: still the empty-device template (one sealed row, flags `0x24`, `u5=1`, `rowpf=0x0001`; older players show 0 tracks), or a ring whose newest row id is not the track count (an older build always wrote ids `0..1`; older players show 1 track and can hang on a communication error) or whose version or name is not the eDB's (a ring keeps its own date and colour). Shown as a WARN "PDB history page" check in the PDB section (the players show a wrong track count but still work), and in the overview as older players showing 0 or 1 tracks | Rewrites the page as the ring rekordbox keeps for the PDB's track count and the eDB's `property` row (`docs/PDB.md`, "`tt=19` activation") and marks it active (flags `0x34`, `u5=2`). Also points the `t19` sentinel's B-tree at that page, as an export does; touches no other page. A page a player has added rows to is left alone, as is a `t19` with more than one data page (rekordbox's, after a rename). Re-checked at apply time, so a second run is a no-op |
@@ -178,37 +179,29 @@ The current code can propose these repair IDs:
 | `add_unindexed_audio_playlist` | audio files under `Contents/` not indexed by PDB/eDB (e.g. databases restored from an older backup), matched by exact path like the parity report's indexed-file presence check | Additive export of a USB-only playlist `Unindexed`: tags read from each file, BPM/first beat/cues from the file's canonical ANLZ bundle (bundle reused, not rewritten). A file without a bundle is analysed and gets one, as with `fix_empty_analysis_files`; only a file that can't be analysed is added without. Nothing is copied or deleted |
 | `remove_duplicate_audio_copies` | an unindexed audio file under `Contents/` that is a byte-for-byte copy of an indexed file in the same folder (e.g. `Track.mp3` next to the exported `Track-1.mp3`) | Deletes the copy after comparing it with the original again; the indexed track and its playlists, cues and analysis are untouched. These files are taken out of `add_unindexed_audio_playlist`, so the same track is not added twice. Marked destructive |
 | `remove_missing_audio_references` | PDB track rows or eDB `content` rows whose audio file is missing from the USB, by the parity report's presence scan | Removes the eDB `content` rows and their `playlist_content` links, and the PDB playlist entries, track rows and now-unused artwork rows. Paired references are relinked instead; tracks in a history playlist are never removed (see below) |
-| `sync_edb_history_from_pdb` | eDB history counts differ from PDB-derived history payload | Replaces eDB `history` and `history_content` rows from current PDB history data |
+| `sync_edb_history_from_pdb` | eDB history rows differ from the PDB-derived history payload | Replaces eDB `history` and `history_content` rows from the PDB's history as the earlier fixes left it. PDB track ids become eDB `content_id`s by audio path, since rekordbox numbers the two databases on its own; an entry whose track has no eDB row stays in the PDB only |
 | `keep_engine_library_up_to_date` | the USB has an Engine DJ library and "Write Engine DJ library" is off, or the library is behind `export.pdb` | Turns the setting on and rebuilds `m.db` from the PDB, after every other fix and the write-back. Play history (`hm.db`) is kept; changes made on the player in `m.db` (cues, loops, playlists) are replaced. Marked destructive for that reason. Not in the default set when no `selectedFixIds` are given (see `docs/ENGINE_DJ.md`) |
 
 ### rekordbox bookkeeping
 
-Real rekordbox exports carry transaction bookkeeping in the PDB: sentinel
-`u5`, `tranrf=0` on a last-row group, non-default `page_flags`, `t00`/`t07`
-footer shapes the writer doesn't use, `ACTV` track pages inside a multi-page
-chain, stale sentinel B-trees, and tombstoned rows that keep the id of an
-active row. They appear and disappear with each rekordbox export, players and
-rekordbox read them fine, and this app's exporter works on top of them
-unrepaired. These fixes carry `bookkeeping: true`:
+Some PDB state real rekordbox exports carry is bookkeeping: players and
+rekordbox read it fine and this app's exporter works on top of it. These fixes
+carry `bookkeeping: true`:
 
-- `repair_pdb_sentinel_u5_on_data_pages`
-- `repair_pdb_wrong_page_flags`
-- `repair_pdb_zero_tranrf_on_track_pages`
-- `repair_pdb_wrong_track_u5_num_rl`
-- `repair_pdb_t00_multipage_active_pages`
-- `repair_pdb_tombstoned_playlist_tree_ids`
-- `repair_pdb_wrong_playlist_tree_shape`
 - `repair_pdb_stale_sentinel_btree`
 - `repair_pdb_header_compatibility_field`, only when the value is `1` or `4`
 
-Diagnostics report them as Pass ("PDB page headers", "PDB structural
-integrity") with the counts in the detail, and they are not detected issues.
-The repair still proposes them, so tests can assert that the writer never
-produces these shapes, but the editor neither lists nor counts them, and every
-apply runs them alongside whatever else is applied. Since they always follow
-fixes that rewrite the PDB (strict parity appends rows and pages), the apply
-detects them again on the PDB as those fixes left it, not from the preview;
-the stale-B-tree check runs last, after the page fixes that can expose it.
+Diagnostics report them as Pass, and they are not detected issues. The repair
+still proposes them, so tests can assert that the writer never produces these
+shapes, but the editor neither lists nor counts them, and every apply runs them
+alongside whatever else is applied, detected again on the PDB as the other
+fixes left it.
+
+rekordbox's own page footers and flags are not bookkeeping to normalize: a
+rekordbox page carries whatever transaction last touched it, `0x34` flags occur
+on any table, and tombstoned rows keep their ids. The app leaves all of that as
+it is. Rewriting it to the writer's fresh-write shapes, as older versions did,
+made rekordbox 6 crash on its next export (docs/PDB.md, "The transaction rule").
 
 ## Unsupported and Manual Cases
 
@@ -345,7 +338,9 @@ label. They never fail parity, but Preview Fixes offers the strict parity
 repair for a playlist that has them: its merge fills a value one side lacks
 and makes both carry the eDB's otherwise. A 1970-01-01 date added or created
 is the placeholder an older strict parity repair wrote and counts as no date,
-so the other side's real date replaces it. Genre, label and artist names
+so the other side's real date replaces it. The eDB's date added matches when
+either of the PDB track row's two date slots holds it: rekordbox writes it to
+the second and its collection date to the first (see `docs/PDB.md`). Genre, label and artist names
 that differ only in case or punctuation aren't noted: the writers match
 dictionary names that way, so they keep each side's spelling.
 
