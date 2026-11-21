@@ -290,7 +290,7 @@ fn insert_content_from_template_matches_rb6_null_empty_conventions() {
         )
         .expect("load content row");
 
-    // rekordbox 6.8.6 (USB_CUE_RB) and 7 both leave these NULL.
+    // rekordbox 6 and 7 both leave these NULL.
     assert_eq!(row.0, None, "titleForSearch is NULL when missing");
     assert_eq!(
         row.1.as_deref(),

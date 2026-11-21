@@ -3235,7 +3235,7 @@ mod tests {
 
     #[test]
     fn resolve_collision_free_media_target_disambiguates_same_artist_long_prefix_group() {
-        // Reproduces the USB_DISCONNECTS defect: 7 tracks from the same
+        // Reproduces a real-stick defect: 7 tracks from the same
         // artist share a long common "Artist - Album - " prefix that, once
         // truncated to CONTENT_FILENAME_MAX_LEN (48), all collapse to the
         // identical on-disk filename. Each must resolve to a distinct path.

@@ -2467,7 +2467,7 @@ mod tests {
 
     #[test]
     fn dat_pqtz_header_matches_rekordbox_layout() {
-        // From a rekordbox export (USB_CUE_RB, "Bash Plate"): 649 beats.
+        // From a rekordbox export of a track with 649 beats.
         let rekordbox = "000000000008000000000289";
         let dat = build_anlz_dat_file(
             &WaveformData::from_peaks(vec![128; 100]),

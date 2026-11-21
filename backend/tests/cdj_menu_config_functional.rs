@@ -663,63 +663,6 @@ fn background_color_writes_to_the_database_that_exists() {
     }
 }
 
-/// Real rekordbox edits, in the git-ignored `USB_MENU_TEST`: this checks nothing
-/// where that folder isn't.
-#[test]
-fn rekordbox_edited_menus_read_without_a_false_warning_and_keep_their_rows() {
-    const CODE: &str = "usb.player-menu.databases-differ";
-    let fixtures = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../USB_MENU_TEST");
-    let Ok(entries) = fs::read_dir(&fixtures) else {
-        return;
-    };
-    for entry in entries.flatten() {
-        let found = [
-            entry.path().join("PIONEER/rekordbox"),
-            entry.path().join("rekordbox"),
-        ]
-        .into_iter()
-        .find(|dir| dir.join("export.pdb").is_file());
-        let Some(source) = found else { continue };
-        let name = entry.file_name();
-
-        let usb_dir = tempdir().expect("usb tempdir");
-        let usb_root = usb_dir.path().to_path_buf();
-        let target = usb_root.join("PIONEER/rekordbox");
-        fs::create_dir_all(&target).expect("create dirs");
-        for file in ["export.pdb", "exportLibrary.db"] {
-            fs::copy(source.join(file), target.join(file)).expect("copy database");
-        }
-        let data_dir = tempdir().expect("data tempdir");
-        let backend = BackendCommands::new(data_dir.path()).expect("create backend");
-
-        let menu = get_menu(&backend, &usb_root);
-        assert!(!menu.warnings.iter().any(|w| w.code == CODE), "{name:?}");
-        assert!(
-            menu.current_items.iter().any(|item| item.kind == 140),
-            "{name:?}"
-        );
-        let before = load_pdb_t17_live_rows(&usb_root).expect("t17");
-        assert_eq!(before.len(), 22, "{name:?}");
-
-        let first = menu.current_items[0].kind;
-        let edit = edit_menu(&backend, &usb_root, UsbPlayerMenuEdit::MoveDown, first)
-            .data
-            .expect("edit");
-        assert!(edit.updated, "{name:?}");
-        let after = load_pdb_t17_live_rows(&usb_root).expect("t17");
-        assert_eq!(after.len(), before.len(), "{name:?}");
-        for (old, new) in before.iter().zip(&after) {
-            assert_eq!(
-                old[..5],
-                new[..5],
-                "{name:?}: rows keep their place and bytes"
-            );
-        }
-        let again = get_menu(&backend, &usb_root);
-        assert!(!again.warnings.iter().any(|w| w.code == CODE), "{name:?}");
-    }
-}
-
 #[test]
 fn save_idempotent_when_already_in_sync() {
     // Re-saving the current kind set must leave PDB bytes unchanged and report
