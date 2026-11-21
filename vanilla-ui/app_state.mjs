@@ -149,6 +149,7 @@ export function createInitialState() {
     analysisWaitingTooltip: "",
     deletingPlaylistId: null,
     selectedRepairFixIds: new Set(),
+    repairFixNames: new Map(),
     startupPhase: true
   };
   Object.defineProperty(state, "selectedTrackIds", {

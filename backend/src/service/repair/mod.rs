@@ -14,7 +14,7 @@ use crate::error::{BackendError, BackendResult};
 use crate::logging::{self, Level};
 use crate::models::{
     DiagOverviewItem, DiagStatus, GetUsbPlayerMenuConfigData, GetUsbPlayerMenuConfigRequest,
-    RepairFixProposal, RepairRow, RepairUnsupportedItem, RepairUsbDiagnosticsData,
+    RepairFixProposal, RepairNameInput, RepairRow, RepairUnsupportedItem, RepairUsbDiagnosticsData,
     RepairUsbDiagnosticsRequest, RunUsbDiagnosticsRequest, RunUsbParityReportRequest,
     UpdateUsbPlayerMenuConfigData, UpdateUsbPlayerMenuConfigRequest, UsbParityPlaylistDetail,
     UsbPlayerMenuEdit, UsbPlayerMenuItem, WarningEntry,
@@ -137,8 +137,6 @@ const RELINK_MOVED_AUDIO_FIX_ID: &str = "relink_moved_audio";
 const UNINDEXED_AUDIO_PLAYLIST_FIX_ID: &str = "add_unindexed_audio_playlist";
 const DUPLICATE_AUDIO_COPIES_FIX_ID: &str = "remove_duplicate_audio_copies";
 const ENGINE_LIBRARY_FIX_ID: &str = "keep_engine_library_up_to_date";
-/// USB playlist the unindexed-audio fix collects its files into.
-const UNINDEXED_AUDIO_PLAYLIST_NAME: &str = "Unindexed";
 const PDB_ALBUM_STRING_ALIGNMENT_FIX_ID: &str = "repair_pdb_album_string_alignment";
 const PDB_ARTIST_NAME_LAYOUT_FIX_ID: &str = "repair_pdb_artist_name_layout";
 

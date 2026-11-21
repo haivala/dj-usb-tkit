@@ -4855,6 +4855,7 @@ fn export_writes_engine_library_and_keeps_history_on_re_export() {
 
     let preview = backend
         .repair_usb_diagnostics(RepairUsbDiagnosticsRequest {
+            fix_names: Default::default(),
             usb_root: usb_root.clone(),
             apply: false,
             selected_fix_ids: Vec::new(),
@@ -4872,6 +4873,7 @@ fn export_writes_engine_library_and_keeps_history_on_re_export() {
 
     let applied = backend
         .repair_usb_diagnostics(RepairUsbDiagnosticsRequest {
+            fix_names: Default::default(),
             usb_root: usb_root.clone(),
             apply: true,
             selected_fix_ids: vec!["keep_engine_library_up_to_date".to_string()],

@@ -82,6 +82,7 @@ pub(super) fn repair_rows(
             locked_tooltip: (fix.supported && fix.always_applied)
                 .then(|| tr::repair_meta_always_applied_tooltip().render()),
             link: fix.link.clone(),
+            name_input: fix.name_input.clone(),
         });
     let unsupported_rows = unsupported.iter().map(|item| RepairRow {
         id: format!("unsupported:{}", item.issue),
@@ -93,6 +94,7 @@ pub(super) fn repair_rows(
         locked: false,
         locked_tooltip: None,
         link: item.link.clone(),
+        name_input: None,
     });
     fix_rows.chain(unsupported_rows).collect()
 }
@@ -115,11 +117,33 @@ fn fix_proposal(
         always_applied: false,
         bookkeeping: false,
         link: None,
+        name_input: None,
     }
+}
+
+/// The unindexed-audio fix's playlist name when the user leaves it as is.
+pub(super) fn unindexed_playlist_default_name() -> String {
+    tr::repair_fix_unindexed_default_name().render()
+}
+
+/// The playlist the unindexed-audio fix fills: the name typed into its row,
+/// cleaned like any other metadata, or the default when blank.
+pub(super) fn unindexed_playlist_name(typed: Option<&String>) -> String {
+    typed
+        .map(|name| {
+            crate::metadata::sanitize_metadata(name.trim())
+                .trim()
+                .to_string()
+        })
+        .filter(|name| !name.is_empty())
+        .unwrap_or_else(unindexed_playlist_default_name)
 }
 
 /// What the detect phase found, handed to the apply phase.
 struct DetectedRepairs {
+    /// The playlist the unindexed-audio fix fills: the name typed into its
+    /// row, else the default.
+    unindexed_playlist: String,
     empty_analysis_paths: Vec<std::path::PathBuf>,
     parsed_pdb: Option<std::sync::Arc<ParsedPdb>>,
     bpm_key_mismatches: Vec<BpmKeyMismatch>,
@@ -1419,13 +1443,14 @@ impl BackendService {
             proposed_fixes.push(RepairFixProposal {
                 estimated_writes: 2,
                 link: Some("event-log".to_string()),
+                name_input: Some(RepairNameInput {
+                    label: tr::repair_fix_unindexed_name_label().render(),
+                    value: unindexed_playlist_default_name(),
+                }),
                 ..fix_proposal(
                     UNINDEXED_AUDIO_PLAYLIST_FIX_ID,
                     tr::repair_fix_unindexed(),
-                    tr::repair_fix_unindexed_description(
-                        unindexed_audio_files.len(),
-                        UNINDEXED_AUDIO_PLAYLIST_NAME,
-                    ),
+                    tr::repair_fix_unindexed_description(unindexed_audio_files.len()),
                 )
             });
             for path in &unindexed_audio_files {
@@ -1703,6 +1728,9 @@ impl BackendService {
             .count();
 
         let found = DetectedRepairs {
+            unindexed_playlist: unindexed_playlist_name(
+                req.fix_names.get(UNINDEXED_AUDIO_PLAYLIST_FIX_ID),
+            ),
             empty_analysis_paths,
             parsed_pdb,
             bpm_key_mismatches,
@@ -1863,6 +1891,7 @@ impl BackendService {
         progress: &mut ApplyProgress<'_>,
     ) -> FixOutcomes {
         let DetectedRepairs {
+            unindexed_playlist,
             empty_analysis_paths,
             parsed_pdb,
             bpm_key_mismatches,
@@ -2299,6 +2328,7 @@ impl BackendService {
                 pdb.on_file(|| {
                     self.apply_fix_add_unindexed_audio_playlist(
                         usb_root,
+                        &unindexed_playlist,
                         &unindexed_audio_files,
                         session.edb_conn(),
                         warnings,
@@ -2308,7 +2338,7 @@ impl BackendService {
                     Detail::composed(|r| {
                         let detail = r(&tr::repair_outcome_detail_unindexed(
                             added,
-                            UNINDEXED_AUDIO_PLAYLIST_NAME,
+                            unindexed_playlist.as_str(),
                         ));
                         let mut notes = Vec::new();
                         if analysed > 0 {

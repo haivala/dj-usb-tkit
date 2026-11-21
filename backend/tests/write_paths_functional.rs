@@ -379,6 +379,7 @@ fn run_every_write(rekordbox_shaped: bool) {
 /// Applies every fix the repair offers, except keeping the Engine library.
 fn apply_every_fix(stick: &Stick) {
     let request = |apply, selected_fix_ids| RepairUsbDiagnosticsRequest {
+        fix_names: Default::default(),
         usb_root: stick.root(),
         apply,
         selected_fix_ids,

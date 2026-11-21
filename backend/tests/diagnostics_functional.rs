@@ -106,6 +106,7 @@ fn create_previous_pdb_snapshot_with_header(
 
 fn assert_no_pdb_structural_repairs(backend: &BackendCommands, usb: &Path) {
     let preview = backend.repair_usb_diagnostics(RepairUsbDiagnosticsRequest {
+        fix_names: Default::default(),
         usb_root: Some(usb.to_string_lossy().to_string()),
         apply: false,
         selected_fix_ids: vec![],
@@ -460,6 +461,7 @@ fn repair_usb_diagnostics_with_progress_missing_root_returns_api_error() {
     let mut progress_calls = 0usize;
     let response = backend.repair_usb_diagnostics_with_progress(
         RepairUsbDiagnosticsRequest {
+            fix_names: Default::default(),
             usb_root: Some(missing_usb.to_string_lossy().to_string()),
             apply: false,
             selected_fix_ids: Vec::new(),
@@ -1099,6 +1101,7 @@ fn diagnostics_and_repair_pdb_header_compatibility_without_previous_snapshot() {
     );
 
     let preview = backend.repair_usb_diagnostics(RepairUsbDiagnosticsRequest {
+        fix_names: Default::default(),
         usb_root: Some(usb.to_string_lossy().to_string()),
         apply: false,
         selected_fix_ids: Vec::new(),
@@ -1124,6 +1127,7 @@ fn diagnostics_and_repair_pdb_header_compatibility_without_previous_snapshot() {
     );
 
     let repair = backend.repair_usb_diagnostics(RepairUsbDiagnosticsRequest {
+        fix_names: Default::default(),
         usb_root: Some(usb.to_string_lossy().to_string()),
         apply: true,
         selected_fix_ids: vec![PDB_HEADER_COMPATIBILITY_FIX_ID.to_string()],
@@ -1194,6 +1198,7 @@ fn diagnostics_and_repair_pdb_header_compatibility_ignores_backup_snapshot_drift
     );
 
     let preview = backend.repair_usb_diagnostics(RepairUsbDiagnosticsRequest {
+        fix_names: Default::default(),
         usb_root: Some(usb.to_string_lossy().to_string()),
         apply: false,
         selected_fix_ids: Vec::new(),
@@ -1238,6 +1243,7 @@ fn rekordbox_pdb_header_compatibility_value_4_never_warns_and_rides_along_with_a
     );
 
     let preview = backend.repair_usb_diagnostics(RepairUsbDiagnosticsRequest {
+        fix_names: Default::default(),
         usb_root: Some(usb.to_string_lossy().to_string()),
         apply: false,
         selected_fix_ids: Vec::new(),
@@ -1268,6 +1274,7 @@ fn rekordbox_pdb_header_compatibility_value_4_never_warns_and_rides_along_with_a
     // A repair for something else normalizes the value too.
     break_page_footer(&pdb_path);
     let repair = backend.repair_usb_diagnostics(RepairUsbDiagnosticsRequest {
+        fix_names: Default::default(),
         usb_root: Some(usb.to_string_lossy().to_string()),
         apply: true,
         selected_fix_ids: vec![PDB_INCONSISTENT_FOOTERS_FIX_ID.to_string()],
@@ -1323,6 +1330,7 @@ fn strict_repair_preview_and_apply_repopulate_edb_for_exported_playlist_gap_case
     assert_eq!(before_playlist.only_in_pdb, 1);
 
     let repair = backend.repair_usb_diagnostics(backend::models::RepairUsbDiagnosticsRequest {
+        fix_names: Default::default(),
         usb_root: Some(usb.to_string_lossy().to_string()),
         apply: true,
         selected_fix_ids: vec!["upgrade_export_data_to_strict_parity".to_string()],
@@ -1403,6 +1411,7 @@ fn strict_repair_replaces_placeholder_edb_dates_with_the_pdb_date() {
     assert_eq!(field_notes(), 1, "the placeholder date should be noted");
 
     let preview = backend.repair_usb_diagnostics(backend::models::RepairUsbDiagnosticsRequest {
+        fix_names: Default::default(),
         usb_root: usb_root.clone(),
         apply: false,
         selected_fix_ids: Vec::new(),
@@ -1418,6 +1427,7 @@ fn strict_repair_replaces_placeholder_edb_dates_with_the_pdb_date() {
     );
 
     let repair = backend.repair_usb_diagnostics(backend::models::RepairUsbDiagnosticsRequest {
+        fix_names: Default::default(),
         usb_root: usb_root.clone(),
         apply: true,
         selected_fix_ids: vec!["upgrade_export_data_to_strict_parity".to_string()],
@@ -1447,6 +1457,7 @@ fn strict_repair_leaves_unrelated_playlists_unchanged() {
 
     let initial_repair =
         backend.repair_usb_diagnostics(backend::models::RepairUsbDiagnosticsRequest {
+            fix_names: Default::default(),
             usb_root: Some(usb.to_string_lossy().to_string()),
             apply: true,
             selected_fix_ids: vec!["upgrade_export_data_to_strict_parity".to_string()],
@@ -1491,6 +1502,7 @@ fn strict_repair_leaves_unrelated_playlists_unchanged() {
     drop(conn);
 
     let repair = backend.repair_usb_diagnostics(backend::models::RepairUsbDiagnosticsRequest {
+        fix_names: Default::default(),
         usb_root: Some(usb.to_string_lossy().to_string()),
         apply: true,
         selected_fix_ids: vec!["upgrade_export_data_to_strict_parity".to_string()],
@@ -1569,6 +1581,7 @@ fn strict_repair_syncs_all_edb_sort_orders_to_pdb() {
     drop(conn);
 
     let repair = backend.repair_usb_diagnostics(backend::models::RepairUsbDiagnosticsRequest {
+        fix_names: Default::default(),
         usb_root: Some(usb.to_string_lossy().to_string()),
         apply: true,
         selected_fix_ids: vec!["upgrade_export_data_to_strict_parity".to_string()],
@@ -1625,6 +1638,7 @@ fn strict_repair_is_idempotent_after_successful_upgrade() {
 
     let first_repair =
         backend.repair_usb_diagnostics(backend::models::RepairUsbDiagnosticsRequest {
+            fix_names: Default::default(),
             usb_root: Some(usb.to_string_lossy().to_string()),
             apply: true,
             selected_fix_ids: vec!["upgrade_export_data_to_strict_parity".to_string()],
@@ -1642,6 +1656,7 @@ fn strict_repair_is_idempotent_after_successful_upgrade() {
 
     let second_repair =
         backend.repair_usb_diagnostics(backend::models::RepairUsbDiagnosticsRequest {
+            fix_names: Default::default(),
             usb_root: Some(usb.to_string_lossy().to_string()),
             apply: true,
             selected_fix_ids: vec!["upgrade_export_data_to_strict_parity".to_string()],
@@ -1731,6 +1746,7 @@ fn strict_repair_pdb_primary_repopulates_thin_edb_and_restores_strict_parity() {
     );
 
     let repair = backend.repair_usb_diagnostics(backend::models::RepairUsbDiagnosticsRequest {
+        fix_names: Default::default(),
         usb_root: Some(usb.to_string_lossy().to_string()),
         apply: true,
         selected_fix_ids: vec!["upgrade_export_data_to_strict_parity".to_string()],
@@ -1799,6 +1815,7 @@ fn strict_repair_carries_the_edb_rating_and_colour_into_the_pdb() {
     assert_eq!(pdb_rating_colour(), (0, 0));
 
     let repair = backend.repair_usb_diagnostics(backend::models::RepairUsbDiagnosticsRequest {
+        fix_names: Default::default(),
         usb_root: Some(usb.to_string_lossy().to_string()),
         apply: true,
         selected_fix_ids: vec!["upgrade_export_data_to_strict_parity".to_string()],
@@ -1877,6 +1894,7 @@ fn preview_repair(
     usb: &Path,
 ) -> backend::models::RepairUsbDiagnosticsData {
     let preview = backend.repair_usb_diagnostics(RepairUsbDiagnosticsRequest {
+        fix_names: Default::default(),
         usb_root: Some(usb.to_string_lossy().to_string()),
         apply: false,
         selected_fix_ids: vec![],
@@ -1992,6 +2010,7 @@ fn assert_strict_repair_rebuilds_missing(file_name: &str, applied_line: &str) {
 
     // Everything the preview offers, in one pass.
     let repair = backend.repair_usb_diagnostics(RepairUsbDiagnosticsRequest {
+        fix_names: Default::default(),
         usb_root: Some(usb.to_string_lossy().to_string()),
         apply: true,
         selected_fix_ids: preview
@@ -2064,6 +2083,7 @@ fn strict_repair_rebuilds_a_missing_pdb_in_one_pass_with_placeholder_dates_and_m
 
     let preview = preview_repair(&backend, &usb);
     let repair = backend.repair_usb_diagnostics(RepairUsbDiagnosticsRequest {
+        fix_names: Default::default(),
         usb_root: Some(usb.to_string_lossy().to_string()),
         apply: true,
         selected_fix_ids: preview
@@ -2136,6 +2156,7 @@ fn repair_removes_an_empty_duplicate_pdb_playlist_before_strict_parity() {
     drop(conn);
     fs::remove_file(usb.join(control_track.trim_start_matches('/'))).expect("delete audio");
     let removed = backend.repair_usb_diagnostics(RepairUsbDiagnosticsRequest {
+        fix_names: Default::default(),
         usb_root: Some(usb.to_string_lossy().to_string()),
         apply: true,
         selected_fix_ids: vec!["remove_missing_audio_references".to_string()],
@@ -2175,6 +2196,7 @@ fn repair_removes_an_empty_duplicate_pdb_playlist_before_strict_parity() {
         .expect("empty duplicate playlist fix offered");
     assert!(fix.always_applied, "{fix:?}");
     let repair = backend.repair_usb_diagnostics(RepairUsbDiagnosticsRequest {
+        fix_names: Default::default(),
         usb_root: Some(usb.to_string_lossy().to_string()),
         apply: true,
         selected_fix_ids: preview
@@ -2234,6 +2256,7 @@ fn apply_strict_repair(
     usb: &Path,
 ) -> backend::models::RepairUsbDiagnosticsData {
     let repair = backend.repair_usb_diagnostics(RepairUsbDiagnosticsRequest {
+        fix_names: Default::default(),
         usb_root: Some(usb.to_string_lossy().to_string()),
         apply: true,
         selected_fix_ids: vec!["upgrade_export_data_to_strict_parity".to_string()],
@@ -2553,6 +2576,7 @@ fn strict_repair_avoids_playlist_id_collisions_with_existing_pdb_folders() {
     drop(conn);
 
     let repair = backend.repair_usb_diagnostics(backend::models::RepairUsbDiagnosticsRequest {
+        fix_names: Default::default(),
         usb_root: Some(usb.to_string_lossy().to_string()),
         apply: true,
         selected_fix_ids: vec!["upgrade_export_data_to_strict_parity".to_string()],
@@ -2676,6 +2700,7 @@ fn strict_repair_preserves_existing_pdb_playlist_ids_for_matched_playlists() {
     drop_edb_membership(&usb, &playlist_b);
 
     let repair = backend.repair_usb_diagnostics(backend::models::RepairUsbDiagnosticsRequest {
+        fix_names: Default::default(),
         usb_root: Some(usb.to_string_lossy().to_string()),
         apply: true,
         selected_fix_ids: vec!["upgrade_export_data_to_strict_parity".to_string()],
@@ -2837,6 +2862,7 @@ fn strict_repair_chooses_richer_side_when_membership_matches_but_metadata_differ
 
     let repair_pdb =
         backend_pdb.repair_usb_diagnostics(backend::models::RepairUsbDiagnosticsRequest {
+            fix_names: Default::default(),
             usb_root: Some(usb_pdb.to_string_lossy().to_string()),
             apply: true,
             selected_fix_ids: vec!["upgrade_export_data_to_strict_parity".to_string()],
@@ -2877,6 +2903,7 @@ fn strict_repair_chooses_richer_side_when_membership_matches_but_metadata_differ
 
     let repair_edb =
         backend_edb.repair_usb_diagnostics(backend::models::RepairUsbDiagnosticsRequest {
+            fix_names: Default::default(),
             usb_root: Some(usb_edb.to_string_lossy().to_string()),
             apply: true,
             selected_fix_ids: vec!["upgrade_export_data_to_strict_parity".to_string()],
@@ -2933,6 +2960,7 @@ fn strict_repair_copies_exact_source_artwork_paths_where_one_side_lacks_artwork(
 
     let repair_pdb =
         backend_pdb.repair_usb_diagnostics(backend::models::RepairUsbDiagnosticsRequest {
+            fix_names: Default::default(),
             usb_root: Some(usb_pdb.to_string_lossy().to_string()),
             apply: true,
             selected_fix_ids: vec!["upgrade_export_data_to_strict_parity".to_string()],
@@ -2980,6 +3008,7 @@ fn strict_repair_copies_exact_source_artwork_paths_where_one_side_lacks_artwork(
     thin_first_pdb_track_row_fields(&pdb_path, true, true);
     let repair_edb =
         backend_edb.repair_usb_diagnostics(backend::models::RepairUsbDiagnosticsRequest {
+            fix_names: Default::default(),
             usb_root: Some(usb_edb.to_string_lossy().to_string()),
             apply: true,
             selected_fix_ids: vec!["upgrade_export_data_to_strict_parity".to_string()],
@@ -3003,6 +3032,7 @@ fn strict_repair_copies_exact_source_artwork_paths_where_one_side_lacks_artwork(
     clear_first_pdb_track_artwork(&pdb_path);
     let repair_edb =
         backend_edb.repair_usb_diagnostics(backend::models::RepairUsbDiagnosticsRequest {
+            fix_names: Default::default(),
             usb_root: Some(usb_edb.to_string_lossy().to_string()),
             apply: true,
             selected_fix_ids: vec!["upgrade_export_data_to_strict_parity".to_string()],
@@ -3078,6 +3108,7 @@ fn strict_repair_restores_path_only_pdb_mismatch_from_edb() {
     );
 
     let repair = backend.repair_usb_diagnostics(backend::models::RepairUsbDiagnosticsRequest {
+        fix_names: Default::default(),
         usb_root: Some(usb.to_string_lossy().to_string()),
         apply: true,
         selected_fix_ids: vec!["upgrade_export_data_to_strict_parity".to_string()],
@@ -3139,6 +3170,7 @@ fn strict_repair_retains_small_and_medium_artwork_variants_together() {
     drop(conn);
 
     let repair = backend.repair_usb_diagnostics(backend::models::RepairUsbDiagnosticsRequest {
+        fix_names: Default::default(),
         usb_root: Some(usb.to_string_lossy().to_string()),
         apply: true,
         selected_fix_ids: vec!["upgrade_export_data_to_strict_parity".to_string()],
@@ -3185,6 +3217,7 @@ fn strict_repair_restores_unresolved_pdb_dictionary_ids_from_edb() {
     );
 
     let repair = backend.repair_usb_diagnostics(backend::models::RepairUsbDiagnosticsRequest {
+        fix_names: Default::default(),
         usb_root: Some(usb.to_string_lossy().to_string()),
         apply: true,
         selected_fix_ids: vec!["upgrade_export_data_to_strict_parity".to_string()],
@@ -3219,6 +3252,7 @@ fn strict_repair_preserves_sharp_keys_from_edb() {
     thin_first_pdb_track_row_fields(&pdb_path, true, false);
 
     let repair = backend.repair_usb_diagnostics(backend::models::RepairUsbDiagnosticsRequest {
+        fix_names: Default::default(),
         usb_root: Some(usb.to_string_lossy().to_string()),
         apply: true,
         selected_fix_ids: vec!["upgrade_export_data_to_strict_parity".to_string()],
@@ -3262,6 +3296,7 @@ fn strict_repair_source_selection_matrix_uses_supported_deltas() {
     thin_first_pdb_track_row_fields(&pdb_path, true, true);
     let repair_edb =
         backend_edb.repair_usb_diagnostics(backend::models::RepairUsbDiagnosticsRequest {
+            fix_names: Default::default(),
             usb_root: Some(usb_edb.to_string_lossy().to_string()),
             apply: true,
             selected_fix_ids: vec!["upgrade_export_data_to_strict_parity".to_string()],
@@ -3318,6 +3353,7 @@ fn strict_repair_source_selection_matrix_uses_supported_deltas() {
     drop(conn);
     let repair_pdb =
         backend_pdb.repair_usb_diagnostics(backend::models::RepairUsbDiagnosticsRequest {
+            fix_names: Default::default(),
             usb_root: Some(usb_pdb.to_string_lossy().to_string()),
             apply: true,
             selected_fix_ids: vec!["upgrade_export_data_to_strict_parity".to_string()],
@@ -3382,6 +3418,7 @@ fn strict_repair_source_selection_matrix_uses_supported_deltas() {
     );
     let repair_none =
         backend_none.repair_usb_diagnostics(backend::models::RepairUsbDiagnosticsRequest {
+            fix_names: Default::default(),
             usb_root: Some(usb_none.to_string_lossy().to_string()),
             apply: true,
             selected_fix_ids: vec!["upgrade_export_data_to_strict_parity".to_string()],
@@ -4398,6 +4435,7 @@ fn read_write_pdb(pdb_path: &Path, mutate: impl FnOnce(&mut Vec<u8>, usize)) {
 
 fn assert_fix_proposed(backend: &BackendCommands, usb: &Path, fix_id: &str) {
     let preview = backend.repair_usb_diagnostics(RepairUsbDiagnosticsRequest {
+        fix_names: Default::default(),
         usb_root: Some(usb.to_string_lossy().to_string()),
         apply: false,
         selected_fix_ids: vec![],
@@ -4413,6 +4451,7 @@ fn assert_fix_proposed(backend: &BackendCommands, usb: &Path, fix_id: &str) {
 
 fn assert_fix_not_proposed(backend: &BackendCommands, usb: &Path, fix_id: &str) {
     let preview = backend.repair_usb_diagnostics(RepairUsbDiagnosticsRequest {
+        fix_names: Default::default(),
         usb_root: Some(usb.to_string_lossy().to_string()),
         apply: false,
         selected_fix_ids: vec![],
@@ -4428,6 +4467,7 @@ fn assert_fix_not_proposed(backend: &BackendCommands, usb: &Path, fix_id: &str) 
 
 fn apply_fix_and_assert_applied(backend: &BackendCommands, usb: &Path, fix_id: &str) {
     let repair = backend.repair_usb_diagnostics(RepairUsbDiagnosticsRequest {
+        fix_names: Default::default(),
         usb_root: Some(usb.to_string_lossy().to_string()),
         apply: true,
         selected_fix_ids: vec![fix_id.to_string()],
@@ -4562,6 +4602,7 @@ fn repair_pdb_fix_not_in_selected_ids_is_skipped_not_applied() {
     assert_fix_proposed(&backend, &usb, PDB_INCONSISTENT_FOOTERS_FIX_ID);
 
     let repair = backend.repair_usb_diagnostics(RepairUsbDiagnosticsRequest {
+        fix_names: Default::default(),
         usb_root: Some(usb.to_string_lossy().to_string()),
         apply: true,
         selected_fix_ids: vec!["upgrade_export_data_to_strict_parity".to_string()],
@@ -4621,6 +4662,7 @@ fn repair_fix_empty_analysis_files_regenerates_from_source_audio() {
     assert_fix_proposed(&backend, &usb, "fix_empty_analysis_files");
 
     let repair = backend.repair_usb_diagnostics(RepairUsbDiagnosticsRequest {
+        fix_names: Default::default(),
         usb_root: Some(usb.to_string_lossy().to_string()),
         apply: true,
         selected_fix_ids: vec!["fix_empty_analysis_files".to_string()],
@@ -4666,6 +4708,7 @@ fn repair_fix_empty_analysis_files_skips_unmapped_stray_bundle() {
     fs::write(stray_dir.join("ANLZ0000.2EX"), []).expect("write empty stray 2EX");
 
     let repair = backend.repair_usb_diagnostics(RepairUsbDiagnosticsRequest {
+        fix_names: Default::default(),
         usb_root: Some(usb.to_string_lossy().to_string()),
         apply: true,
         selected_fix_ids: vec!["fix_empty_analysis_files".to_string()],
@@ -4779,6 +4822,7 @@ fn repair_fix_bpm_key_mismatch_aligns_anlz_and_edb_to_pdb_in_one_pass() {
 
     assert_fix_proposed(&backend, &usb, "fix_bpm_key_mismatch");
     let repair = backend.repair_usb_diagnostics(RepairUsbDiagnosticsRequest {
+        fix_names: Default::default(),
         usb_root: Some(usb.to_string_lossy().to_string()),
         apply: true,
         selected_fix_ids: vec!["fix_bpm_key_mismatch".to_string()],
@@ -4853,6 +4897,7 @@ fn repair_fix_beat_grid_rewrites_pre_0_3_7_grids_once() {
 
     assert_fix_proposed(&backend, &usb, "fix_beat_grid_header");
     let repair = backend.repair_usb_diagnostics(RepairUsbDiagnosticsRequest {
+        fix_names: Default::default(),
         usb_root: Some(usb.to_string_lossy().to_string()),
         apply: true,
         selected_fix_ids: vec!["fix_beat_grid_header".to_string()],
@@ -4958,6 +5003,7 @@ fn diagnostics_flag_outdated_beat_grids_only_on_tracks_last_exported_by_older_ve
     // Once fixed, the old export record alone isn't enough to flag it, and
     // the repair's own check after it already reads the rewritten grid.
     let repair = backend.repair_usb_diagnostics(RepairUsbDiagnosticsRequest {
+        fix_names: Default::default(),
         usb_root: Some(usb.to_string_lossy().to_string()),
         apply: true,
         selected_fix_ids: vec!["fix_beat_grid_header".to_string()],
@@ -5018,6 +5064,7 @@ fn repair_add_missing_mp3_seek_data_fills_an_empty_pvbr_once() {
     let mut progress = Vec::new();
     let repair = backend.repair_usb_diagnostics_with_progress(
         RepairUsbDiagnosticsRequest {
+            fix_names: Default::default(),
             usb_root: Some(usb.to_string_lossy().to_string()),
             apply: true,
             selected_fix_ids: vec!["add_missing_mp3_seek_data".to_string()],
@@ -5114,6 +5161,7 @@ fn repair_remove_missing_audio_references_deletes_dangling_track_refs() {
     fs::remove_file(missing_file).expect("delete one referenced audio file");
 
     let preview = backend.repair_usb_diagnostics(RepairUsbDiagnosticsRequest {
+        fix_names: Default::default(),
         usb_root: Some(usb.to_string_lossy().to_string()),
         apply: false,
         selected_fix_ids: vec![],
@@ -5141,6 +5189,7 @@ fn repair_remove_missing_audio_references_deletes_dangling_track_refs() {
     );
 
     let repair = backend.repair_usb_diagnostics(RepairUsbDiagnosticsRequest {
+        fix_names: Default::default(),
         usb_root: Some(usb.to_string_lossy().to_string()),
         apply: true,
         selected_fix_ids: vec!["remove_missing_audio_references".to_string()],
@@ -5210,6 +5259,7 @@ fn repair_relinks_a_renamed_audio_file_instead_of_removing_it() {
 
     let preview = backend
         .repair_usb_diagnostics(RepairUsbDiagnosticsRequest {
+            fix_names: Default::default(),
             usb_root: Some(usb.to_string_lossy().to_string()),
             apply: false,
             selected_fix_ids: vec![],
@@ -5236,6 +5286,7 @@ fn repair_relinks_a_renamed_audio_file_instead_of_removing_it() {
 
     // Default selection: every supported fix.
     let repair = backend.repair_usb_diagnostics(RepairUsbDiagnosticsRequest {
+        fix_names: Default::default(),
         usb_root: Some(usb.to_string_lossy().to_string()),
         apply: true,
         selected_fix_ids: vec![],
@@ -5292,6 +5343,7 @@ fn repair_relinks_a_renamed_audio_file_instead_of_removing_it() {
     assert!(failing.is_empty(), "{failing:#?}");
     let after = backend
         .repair_usb_diagnostics(RepairUsbDiagnosticsRequest {
+            fix_names: Default::default(),
             usb_root: Some(usb.to_string_lossy().to_string()),
             apply: false,
             selected_fix_ids: vec![],
@@ -5330,6 +5382,7 @@ fn repair_removes_missing_and_adds_unrelated_unindexed_audio_in_one_pass() {
     );
 
     let repair = backend.repair_usb_diagnostics(RepairUsbDiagnosticsRequest {
+        fix_names: Default::default(),
         usb_root: Some(usb.to_string_lossy().to_string()),
         apply: true,
         selected_fix_ids: vec![],
@@ -5372,6 +5425,7 @@ fn repair_removes_missing_and_adds_unrelated_unindexed_audio_in_one_pass() {
 
     let after = backend
         .repair_usb_diagnostics(RepairUsbDiagnosticsRequest {
+            fix_names: Default::default(),
             usb_root: Some(usb.to_string_lossy().to_string()),
             apply: false,
             selected_fix_ids: vec![],
@@ -5408,6 +5462,7 @@ fn indexed_audio_presence_status(backend: &BackendCommands, usb: &Path) -> DiagS
 fn proposed_fix_ids(backend: &BackendCommands, usb: &Path) -> Vec<String> {
     backend
         .repair_usb_diagnostics(RepairUsbDiagnosticsRequest {
+            fix_names: Default::default(),
             usb_root: Some(usb.to_string_lossy().to_string()),
             apply: false,
             selected_fix_ids: vec![],
@@ -5445,6 +5500,7 @@ fn repair_deletes_unindexed_copy_of_an_indexed_audio_file() {
     ));
     let preview = backend
         .repair_usb_diagnostics(RepairUsbDiagnosticsRequest {
+            fix_names: Default::default(),
             usb_root: Some(usb.to_string_lossy().to_string()),
             apply: false,
             selected_fix_ids: vec![],
@@ -5471,6 +5527,7 @@ fn repair_deletes_unindexed_copy_of_an_indexed_audio_file() {
     );
 
     let repair = backend.repair_usb_diagnostics(RepairUsbDiagnosticsRequest {
+        fix_names: Default::default(),
         usb_root: Some(usb.to_string_lossy().to_string()),
         apply: true,
         selected_fix_ids: vec![],
@@ -5582,6 +5639,7 @@ fn failing_parity_checks(backend: &BackendCommands, usb: &Path) -> Vec<String> {
 /// afterwards: what the report flags, one repair pass resolves.
 fn assert_one_repair_pass_clears_parity(backend: &BackendCommands, usb: &Path) {
     let repair = backend.repair_usb_diagnostics(RepairUsbDiagnosticsRequest {
+        fix_names: Default::default(),
         usb_root: Some(usb.to_string_lossy().to_string()),
         apply: true,
         selected_fix_ids: vec![],
@@ -5699,6 +5757,7 @@ fn repair_keeps_tracks_in_edb_history_when_their_file_is_missing() {
 
     let preview = backend
         .repair_usb_diagnostics(RepairUsbDiagnosticsRequest {
+            fix_names: Default::default(),
             usb_root: Some(usb.to_string_lossy().to_string()),
             apply: false,
             selected_fix_ids: vec![],
@@ -6081,6 +6140,7 @@ fn repair_lists_mp3_whose_seek_data_cant_be_built_instead_of_proposing_it() {
 
     let preview = backend
         .repair_usb_diagnostics(RepairUsbDiagnosticsRequest {
+            fix_names: Default::default(),
             usb_root: Some(usb.to_string_lossy().to_string()),
             apply: false,
             selected_fix_ids: vec![],
@@ -6117,6 +6177,7 @@ fn repair_lists_mp3_whose_seek_data_cant_be_built_instead_of_proposing_it() {
     // still validates the selected fix and reports this damaged file safely.
     let applied = backend
         .repair_usb_diagnostics(RepairUsbDiagnosticsRequest {
+            fix_names: Default::default(),
             usb_root: Some(usb.to_string_lossy().to_string()),
             apply: true,
             selected_fix_ids: vec!["add_missing_mp3_seek_data".to_string()],
@@ -6157,6 +6218,7 @@ fn repair_detects_unindexed_audio_under_contents() {
     );
 
     let preview = backend.repair_usb_diagnostics(RepairUsbDiagnosticsRequest {
+        fix_names: Default::default(),
         usb_root: Some(usb.to_string_lossy().to_string()),
         apply: false,
         selected_fix_ids: vec![],
@@ -6180,12 +6242,21 @@ fn repair_detects_unindexed_audio_under_contents() {
                 && f.description.contains(
                     "in no playlist (e.g. after restoring the databases from a backup): 1.",
                 )
-                && f.description.contains("\"Unindexed\"")
                 && f.link.as_deref() == Some("event-log")
         }),
         "expected the unindexed-audio playlist fix: {:#?}",
         data.data.proposed_fixes
     );
+    // The row asks for the playlist's name, starting from "Unindexed".
+    let row = data
+        .data
+        .rows
+        .iter()
+        .find(|row| row.id == "add_unindexed_audio_playlist")
+        .expect("unindexed-audio row");
+    let input = row.name_input.as_ref().expect("name input");
+    assert_eq!(input.label, "Playlist name");
+    assert_eq!(input.value, "Unindexed");
 }
 
 #[test]
@@ -6204,6 +6275,7 @@ fn repair_adds_unindexed_audio_to_usb_playlist_in_one_pass() {
     );
 
     let repair = backend.repair_usb_diagnostics(RepairUsbDiagnosticsRequest {
+        fix_names: Default::default(),
         usb_root: Some(usb.to_string_lossy().to_string()),
         apply: true,
         selected_fix_ids: vec!["add_unindexed_audio_playlist".to_string()],
@@ -6246,7 +6318,24 @@ fn repair_adds_unindexed_audio_to_usb_playlist_in_one_pass() {
         edb_paths,
         vec!["/Contents/Stray Artist/Stray Album/99 Unindexed Stray.mp3".to_string()]
     );
+    // rekordbox never leaves `dateCreated` empty: the track gets the day it
+    // joined the USB, the date the PDB's date-added slot holds too.
+    let (date_created, date_added): (Option<String>, Option<String>) = conn
+        .query_row(
+            "SELECT dateCreated, dateAdded FROM content WHERE path LIKE '%/99 Unindexed Stray.mp3'",
+            [],
+            |r| Ok((r.get(0)?, r.get(1)?)),
+        )
+        .expect("content row");
+    assert!(date_created.is_some(), "dateCreated left NULL");
+    assert_eq!(date_created, date_added);
     let parsed = parse_pdb(&vendor_db_dir(&usb).join("export.pdb")).expect("parse pdb");
+    let pdb_date = parsed
+        .tracks
+        .iter()
+        .find(|t| t.track_file_path.ends_with("/99 Unindexed Stray.mp3"))
+        .and_then(|t| t.date_added.clone());
+    assert_eq!(pdb_date, date_created, "both databases hold the same day");
     let names: Vec<&str> = parsed
         .playlist_tree
         .iter()
@@ -6283,6 +6372,7 @@ fn repair_adds_unindexed_audio_to_usb_playlist_in_one_pass() {
     // One pass is enough: a fresh preview no longer sees unindexed audio.
     let after = backend
         .repair_usb_diagnostics(RepairUsbDiagnosticsRequest {
+            fix_names: Default::default(),
             usb_root: Some(usb.to_string_lossy().to_string()),
             apply: false,
             selected_fix_ids: vec![],
@@ -6298,6 +6388,63 @@ fn repair_adds_unindexed_audio_to_usb_playlist_in_one_pass() {
         "unindexed audio still reported: {:#?}",
         after.data.detected_issues
     );
+}
+
+#[test]
+fn repair_adds_unindexed_audio_to_the_playlist_name_typed_for_it() {
+    let (_root, backend, usb, _playlist_name) = setup_clean_strict_parity_fixture();
+    let stray_dir = usb.join("Contents/Stray Artist/Stray Album");
+    fs::create_dir_all(&stray_dir).expect("create stray contents dir");
+    copy_audio_fixture(
+        &stray_dir,
+        "noart/track_no_art.mp3",
+        "99 Unindexed Stray.mp3",
+    );
+
+    let repair = backend.repair_usb_diagnostics(RepairUsbDiagnosticsRequest {
+        fix_names: [(
+            "add_unindexed_audio_playlist".to_string(),
+            "  Found On Stick  ".to_string(),
+        )]
+        .into(),
+        usb_root: Some(usb.to_string_lossy().to_string()),
+        apply: true,
+        selected_fix_ids: vec!["add_unindexed_audio_playlist".to_string()],
+    });
+    assert!(repair.ok, "repair failed: {repair:?}");
+    let data = repair.data.expect("repair data");
+    assert!(
+        data.data
+            .applied_fixes
+            .iter()
+            .any(|m| m.contains("added 1 track") && m.contains("\"Found On Stick\"")),
+        "applied {:#?} failed {:#?}",
+        data.data.applied_fixes,
+        data.data.failed_fixes
+    );
+
+    let conn = open_edb(&vendor_db_dir(&usb).join("exportLibrary.db"));
+    let edb_count: i64 = conn
+        .query_row(
+            "SELECT count(*) FROM playlist p
+             JOIN playlist_content pc ON pc.playlist_id = p.playlist_id
+             WHERE p.name = 'Found On Stick'",
+            [],
+            |r| r.get(0),
+        )
+        .expect("count");
+    assert_eq!(edb_count, 1);
+    let parsed = parse_pdb(&vendor_db_dir(&usb).join("export.pdb")).expect("parse pdb");
+    let names: Vec<&str> = parsed
+        .playlist_tree
+        .iter()
+        .map(|p| p.name.as_str())
+        .collect();
+    assert!(
+        names.contains(&"Found On Stick"),
+        "PDB playlists: {names:?}"
+    );
+    assert!(!names.contains(&"Unindexed"), "PDB playlists: {names:?}");
 }
 
 #[test]
@@ -6330,6 +6477,7 @@ fn repair_unindexed_audio_playlist_reuses_the_files_analysis_bundle() {
     let pdb_path = vendor_db_dir(&usb).join("export.pdb");
 
     let repair = backend.repair_usb_diagnostics(RepairUsbDiagnosticsRequest {
+        fix_names: Default::default(),
         usb_root: Some(usb.to_string_lossy().to_string()),
         apply: true,
         selected_fix_ids: vec!["add_unindexed_audio_playlist".to_string()],
@@ -6364,6 +6512,7 @@ fn repair_reports_missing_audio_scan_skipped_when_contents_absent() {
     fs::remove_dir_all(usb.join("Contents")).expect("remove Contents directory");
 
     let preview = backend.repair_usb_diagnostics(RepairUsbDiagnosticsRequest {
+        fix_names: Default::default(),
         usb_root: Some(usb.to_string_lossy().to_string()),
         apply: false,
         selected_fix_ids: vec![],
@@ -6390,6 +6539,7 @@ fn repair_reports_parity_preview_unavailable_when_edb_unreadable() {
     fs::write(&edb_path, b"not a sqlite database").expect("corrupt eDB");
 
     let preview = backend.repair_usb_diagnostics(RepairUsbDiagnosticsRequest {
+        fix_names: Default::default(),
         usb_root: Some(usb.to_string_lossy().to_string()),
         apply: false,
         selected_fix_ids: vec![],
@@ -6424,6 +6574,7 @@ fn repair_apply_reports_failure_when_pdb_is_read_only() {
     fs::set_permissions(&pdb_path, perms).expect("make pdb read-only");
 
     let repair = backend.repair_usb_diagnostics(RepairUsbDiagnosticsRequest {
+        fix_names: Default::default(),
         usb_root: Some(usb.to_string_lossy().to_string()),
         apply: true,
         selected_fix_ids: vec![PDB_DAMAGED_PAGE_HEADERS_FIX_ID.to_string()],
@@ -6481,6 +6632,7 @@ fn strict_repair_picks_up_pdb_only_playlist_with_no_edb_counterpart() {
     }
 
     let repair = backend.repair_usb_diagnostics(RepairUsbDiagnosticsRequest {
+        fix_names: Default::default(),
         usb_root: Some(usb.to_string_lossy().to_string()),
         apply: true,
         selected_fix_ids: vec!["upgrade_export_data_to_strict_parity".to_string()],
@@ -6531,6 +6683,7 @@ fn strict_repair_skips_orphaned_playlist_tree_entry_without_erroring() {
     });
 
     let repair = backend.repair_usb_diagnostics(RepairUsbDiagnosticsRequest {
+        fix_names: Default::default(),
         usb_root: Some(usb.to_string_lossy().to_string()),
         apply: true,
         selected_fix_ids: vec!["upgrade_export_data_to_strict_parity".to_string()],
@@ -6583,6 +6736,7 @@ fn strict_repair_reports_failure_when_pdb_rewrite_cannot_be_written() {
     fs::set_permissions(&pdb_path, perms).expect("make pdb read-only");
 
     let repair = backend.repair_usb_diagnostics(RepairUsbDiagnosticsRequest {
+        fix_names: Default::default(),
         usb_root: Some(usb.to_string_lossy().to_string()),
         apply: true,
         selected_fix_ids: vec!["upgrade_export_data_to_strict_parity".to_string()],

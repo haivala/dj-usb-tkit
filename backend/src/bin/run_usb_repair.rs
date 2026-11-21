@@ -59,6 +59,7 @@ fn main() {
     // "select all, hit apply" rather than the narrower empty-list shortcut.
     let selected_fix_ids = if apply {
         let preview = backend.repair_usb_diagnostics(RepairUsbDiagnosticsRequest {
+            fix_names: Default::default(),
             usb_root: Some(usb_root.clone()),
             apply: false,
             selected_fix_ids: vec![],
@@ -91,6 +92,7 @@ fn main() {
 
     let resp = backend.repair_usb_diagnostics_with_progress(
         RepairUsbDiagnosticsRequest {
+            fix_names: Default::default(),
             usb_root: Some(usb_root.clone()),
             apply,
             selected_fix_ids,

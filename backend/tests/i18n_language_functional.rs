@@ -352,6 +352,7 @@ fn diagnostics_report_follows_the_language() {
     std::fs::create_dir_all(&contents).expect("create Contents");
     std::fs::write(contents.join("stray.mp3"), [0u8; 64]).expect("write stray file");
     let repair = backend.repair_usb_diagnostics(RepairUsbDiagnosticsRequest {
+        fix_names: Default::default(),
         usb_root: Some(usb.to_string_lossy().to_string()),
         apply: false,
         selected_fix_ids: Vec::new(),

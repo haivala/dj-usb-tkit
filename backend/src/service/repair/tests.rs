@@ -566,6 +566,7 @@ fn repair_apply_batches_local_writes_and_flushes_pdb_to_usb_once() {
     let result = service
         .repair_usb_diagnostics_with_progress(
             RepairUsbDiagnosticsRequest {
+                fix_names: Default::default(),
                 usb_root: Some(usb_root.to_string_lossy().to_string()),
                 apply: true,
                 selected_fix_ids: vec![PDB_HEADER_COMPATIBILITY_FIX_ID.to_string()],
@@ -2301,6 +2302,7 @@ fn proposal(id: &str, supported: bool) -> RepairFixProposal {
         always_applied: fix_always_applied(id),
         bookkeeping: fix_is_bookkeeping(id),
         link: None,
+        name_input: None,
     }
 }
 
@@ -2450,4 +2452,15 @@ fn damaged_track_rows_pair_only_with_one_intact_twin() {
         found.without_twin,
         vec!["/Contents/Artist B/Tw\0\0.mp3".to_string()]
     );
+}
+
+#[test]
+fn unindexed_playlist_name_is_the_typed_name_or_the_default() {
+    let name =
+        |typed: Option<&str>| run::unindexed_playlist_name(typed.map(str::to_string).as_ref());
+    assert_eq!(name(None), "Unindexed");
+    assert_eq!(name(Some("")), "Unindexed");
+    assert_eq!(name(Some("   ")), "Unindexed");
+    assert_eq!(name(Some("\0")), "Unindexed");
+    assert_eq!(name(Some("  My Strays ")), "My Strays");
 }

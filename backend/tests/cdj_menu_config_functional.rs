@@ -488,6 +488,7 @@ fn repair_fixes_the_menu_pages_earlier_versions_wrote() {
     let repair = |apply: bool, selected_fix_ids: Vec<String>| {
         backend
             .repair_usb_diagnostics(RepairUsbDiagnosticsRequest {
+                fix_names: Default::default(),
                 usb_root: Some(usb_root.to_string_lossy().into_owned()),
                 apply,
                 selected_fix_ids,

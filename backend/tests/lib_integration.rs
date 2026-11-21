@@ -4615,6 +4615,7 @@ fn repair_usb_diagnostics_preview_lists_missing_audio_references_fix() {
     let _seed = seed_usb_missing_audio_fixture(&backend, &usb);
 
     let preview_response = backend.repair_usb_diagnostics(RepairUsbDiagnosticsRequest {
+        fix_names: Default::default(),
         usb_root: Some(usb.to_string_lossy().to_string()),
         apply: false,
         selected_fix_ids: Vec::new(),
@@ -4661,6 +4662,7 @@ fn repair_usb_diagnostics_preview_lists_unindexed_audio_paths_in_warnings() {
     let unindexed_path = seed_usb_unindexed_audio_fixture(&backend, &usb);
 
     let preview_response = backend.repair_usb_diagnostics(RepairUsbDiagnosticsRequest {
+        fix_names: Default::default(),
         usb_root: Some(usb.to_string_lossy().to_string()),
         apply: false,
         selected_fix_ids: Vec::new(),
@@ -4980,6 +4982,7 @@ fn repair_usb_diagnostics_strict_upgrade_rewrites_pdb_from_edb() {
     drop(conn);
 
     let preview_response = backend.repair_usb_diagnostics(RepairUsbDiagnosticsRequest {
+        fix_names: Default::default(),
         usb_root: Some(usb.to_string_lossy().to_string()),
         apply: false,
         selected_fix_ids: Vec::new(),
@@ -5001,6 +5004,7 @@ fn repair_usb_diagnostics_strict_upgrade_rewrites_pdb_from_edb() {
     );
 
     let applied_response = backend.repair_usb_diagnostics(RepairUsbDiagnosticsRequest {
+        fix_names: Default::default(),
         usb_root: Some(usb.to_string_lossy().to_string()),
         apply: true,
         selected_fix_ids: vec!["upgrade_export_data_to_strict_parity".to_string()],
@@ -5156,6 +5160,7 @@ fn repair_usb_diagnostics_strict_upgrade_is_not_proposed_when_neither_side_is_ri
     drop(conn);
 
     let preview_response = backend.repair_usb_diagnostics(RepairUsbDiagnosticsRequest {
+        fix_names: Default::default(),
         usb_root: Some(usb.to_string_lossy().to_string()),
         apply: false,
         selected_fix_ids: Vec::new(),
@@ -5189,6 +5194,7 @@ fn repair_usb_diagnostics_apply_removes_missing_audio_references_from_db_and_pdb
     let (missing_path, missing_track_id) = seed_usb_missing_audio_fixture(&backend, &usb);
 
     let applied_response = backend.repair_usb_diagnostics(RepairUsbDiagnosticsRequest {
+        fix_names: Default::default(),
         usb_root: Some(usb.to_string_lossy().to_string()),
         apply: true,
         selected_fix_ids: vec!["remove_missing_audio_references".to_string()],

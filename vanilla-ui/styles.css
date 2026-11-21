@@ -4080,6 +4080,19 @@ td button[data-action]:disabled,
   margin-left: 0;
 }
 
+.diag-repair-fix-name {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin: 2px 0;
+  color: var(--ink-secondary);
+}
+
+.diag-repair-fix-name-input {
+  flex: 0 1 260px;
+  min-width: 0;
+}
+
 .diag-repair-fix-meta {
   font-family: 'JetBrains Mono', monospace;
   font-size: 0.85em;

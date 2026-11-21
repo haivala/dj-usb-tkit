@@ -950,7 +950,7 @@ repair-overview-page-headers = Repairs pages rekordbox left half-written when it
 repair-overview-damaged-tracks = Repairs tracks whose file name rekordbox damaged when it crashed, keeping their playlists and play history.
 repair-overview-empty-duplicate-playlists = Removes empty copies of playlists that have the same name as a playlist with tracks.
 repair-overview-relink = Reconnects tracks to music files that were renamed or moved on the USB.
-repair-overview-unindexed = Puts music files that are in no playlist into a playlist called "Unindexed".
+repair-overview-unindexed = Puts music files that are in no playlist into a playlist you name.
 repair-overview-duplicate-copies = Deletes extra copies of music files that are in no playlist.
 repair-overview-missing-audio = Removes tracks whose music file is no longer on the USB. Play history keeps them.
 repair-overview-empty-analysis = Rebuilds missing waveforms and beat grids.
@@ -1033,8 +1033,12 @@ repair-fix-duplicate-copies = Remove Duplicate Audio Copies
 # $count: the copies.
 repair-fix-duplicate-copies-description = Audio files on the USB in no playlist, each a byte-for-byte copy of a track in the same folder: { $count }. Deletes each copy; the original track keeps its playlists, cues and analysis. See Event Log for the file list.
 repair-fix-unindexed = Add Unindexed Audio to a Playlist
-# $count: the files. $playlist: the playlist's name on the USB (Unindexed; not translated, it's what the USB stores).
-repair-fix-unindexed-description = Audio files on the USB in no playlist (e.g. after restoring the databases from a backup): { $count }. Adds each to a USB playlist "{ $playlist }", reusing its analysis files; nothing is copied or deleted. See Event Log for the file list.
+# $count: the files.
+repair-fix-unindexed-description = Audio files on the USB in no playlist (e.g. after restoring the databases from a backup): { $count }. Adds each to the USB playlist named below, reusing its analysis files; nothing is copied or deleted. See Event Log for the file list.
+# Label of the text field under the fix.
+repair-fix-unindexed-name-label = Playlist name
+# The field's starting value: the playlist's name on the USB. Re-running the fix with the same name adds to that playlist.
+repair-fix-unindexed-default-name = Unindexed
 repair-fix-relink = Relink Moved Audio Files
 # $count: the tracks.
 repair-fix-relink-description = Tracks pointing to a missing file while the same track is on the USB under another name or folder: { $count }. Points each to the file found; it keeps its playlists, cues and analysis. See Event Log for the list.

@@ -3126,6 +3126,10 @@ pub struct RepairUsbDiagnosticsRequest {
     pub apply: bool,
     #[serde(default)]
     pub selected_fix_ids: Vec<String>,
+    /// A name typed into a row's `name_input`, by fix id. A fix whose name
+    /// is missing or blank uses the row's default.
+    #[serde(default)]
+    pub fix_names: std::collections::HashMap<String, String>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -3161,6 +3165,9 @@ pub struct RepairFixProposal {
     /// `"event-log"` when the Event Log already lists the affected items.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub link: Option<String>,
+    /// Shown under the row as a text field; see `RepairRow::name_input`.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub name_input: Option<RepairNameInput>,
 }
 
 /// One row of the repair preview's fix list, ready to show: a fix that can be
@@ -3186,6 +3193,18 @@ pub struct RepairRow {
     /// `"event-log"` when the Event Log already lists the affected items.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub link: Option<String>,
+    /// A name the fix asks for (e.g. the playlist it creates). Apply sends
+    /// what was typed back in `RepairUsbDiagnosticsRequest::fix_names`.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub name_input: Option<RepairNameInput>,
+}
+
+/// A text field under a repair row, filled with the fix's default name.
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+pub struct RepairNameInput {
+    pub label: String,
+    pub value: String,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]

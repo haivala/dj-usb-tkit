@@ -66,6 +66,10 @@
   and a track's search title, original artist, remixer, composer and label. Rows earlier versions wrote stay as
   they are.
 - **Fix:** Re-exporting a track that is already on the USB no longer turns on its KUVO delivery flag in the eDB.
+- **Improvement:** The repair that adds music files in no playlist asks for the playlist's name instead of always
+  using "Unindexed". It starts as "Unindexed", so leaving it adds to that playlist as before.
+- **Fix:** Tracks that repair adds get the day they were added as their date in the eDB, as in the PDB. rekordbox
+  never leaves that date empty; the repair did.
 - **Fix (CRITICAL):** Exports and repairs no longer refuse to write to a USB that rekordbox has just exported to. They
   checked rekordbox's pages for the app's own page shape; they now refuse only problems the write itself adds.
 - **Fix (CRITICAL):** A Player Menu change leaves the PDB's menu pages in the shape rekordbox writes. Before, their page

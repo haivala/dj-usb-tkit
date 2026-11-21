@@ -630,6 +630,12 @@ usb-not-for-ui = Not sent
     /// `ui-common-*` key (docs/TRANSLATING.md), so a translator translates it once. These
     /// share their English but not their role, and may translate differently.
     const SAME_ENGLISH_KEPT_APART: &[&[&str]] = &[
+        // The sidebar's new-playlist placeholder ("Playlist name..."), and the label of the
+        // name field under the repair that adds unindexed audio to a playlist.
+        &[
+            "repair-fix-unindexed-name-label",
+            "ui-playlist-name-placeholder",
+        ],
         // Two values joined with " · ": a hot cue's tooltip, and when and where a playlist
         // was last exported.
         &[

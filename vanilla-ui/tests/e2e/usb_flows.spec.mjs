@@ -265,6 +265,7 @@ function installTauriMock(page, mode) {
       }
       if (command === "repair_usb_diagnostics") {
         if (payload?.request?.apply) {
+          window.__repairApplyRequest = payload.request;
           return backend.ok({
             appliedFixes: payload.request.selectedFixIds || [],
             failedFixes: [],
@@ -316,6 +317,16 @@ function installTauriMock(page, mode) {
               selectable: true,
               checked: true,
               locked: false
+            },
+            {
+              id: "add_unindexed_audio_playlist",
+              title: "Add Unindexed Audio to a Playlist",
+              description: "Adds each to the USB playlist named below.",
+              metaText: "✓ supported · safe",
+              selectable: true,
+              checked: true,
+              locked: false,
+              nameInput: { label: "Playlist name", value: "Unindexed" }
             },
             {
               id: "keep_engine_library_up_to_date",
@@ -1106,6 +1117,15 @@ test("repair preview", async ({ page }) => {
   await expect(malformedItem.locator(".diag-log-link")).toBeVisible();
   await expect(page.locator("#diagRepairFixes li", { hasText: "Repair PDB History/Columns Page Footer Shape" }).locator(".diag-log-link")).toHaveCount(0);
 
+  // A fix that asks for a name shows a field with the backend's label and
+  // default; the others have none. What's typed goes back with Apply.
+  const unindexedFix = page.locator("#diagRepairFixes li", { hasText: "Add Unindexed Audio to a Playlist" });
+  await expect(unindexedFix.locator(".diag-repair-fix-name-label")).toHaveText("Playlist name");
+  const playlistName = unindexedFix.locator(".diag-repair-fix-name-input");
+  await expect(playlistName).toHaveValue("Unindexed");
+  await expect(page.locator("#diagRepairFixes li", { hasText: "Repair Truncated Table Chain" }).locator(".diag-repair-fix-name")).toBeHidden();
+  await playlistName.fill("Found On Stick");
+
   await expect(page.locator("#exportEngineLibraryCheckbox")).not.toBeChecked();
   const engineFix = page.locator("#diagRepairFixes li", { hasText: "Keep Engine DJ Library Up to Date" });
   await expect(engineFix.locator(".diag-repair-fix-check")).toBeChecked();
@@ -1116,6 +1136,9 @@ test("repair preview", async ({ page }) => {
   await page.locator("#applyRepairsBtn").click();
   await expect(page.locator("#exportEngineLibraryCheckbox")).toBeChecked();
   expect(await page.evaluate(() => window.__playlistFetches)).toBe(1);
+  expect(await page.evaluate(() => window.__repairApplyRequest.fixNames)).toEqual({
+    add_unindexed_audio_playlist: "Found On Stick"
+  });
 
   // The repair cleared the list, so opening the page reads it again.
   await page.locator('.nav-item[data-view="usb-playlists"]').click();

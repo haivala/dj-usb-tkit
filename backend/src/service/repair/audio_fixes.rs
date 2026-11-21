@@ -1127,17 +1127,23 @@ impl BackendService {
     /// USB-only playlist: tags are read from the files, BPM/first beat/cues
     /// from each file's canonical ANLZ bundle (generated from the audio when
     /// there is none), and the eDB + PDB writers append the tracks to
-    /// `UNINDEXED_AUDIO_PLAYLIST_NAME`. Returns (tracks added, bundles
+    /// `playlist_name`. Returns (tracks added, bundles
     /// generated, tracks left without an analysis bundle).
     pub(super) fn apply_fix_add_unindexed_audio_playlist(
         &self,
         usb_root: &std::path::Path,
+        playlist_name: &str,
         files: &[String],
         edb_conn: Option<&mut rusqlite::Connection>,
         warnings: &mut Vec<WarningEntry>,
     ) -> BackendResult<(usize, usize, usize)> {
         let local_conn = self.db.connect()?;
         Self::ensure_track_export_identity_schema(&local_conn)?;
+        // The day the files join the USB's collection: the PDB writes it to
+        // its date-added slot from `generated_at`, and the eDB's
+        // `dateCreated` (which rekordbox never leaves empty) gets the same.
+        let generated_at = crate::service::now();
+        let date_created = crate::edb::normalize_export_date(Some(&generated_at));
         let app_master_db_id = Self::ensure_local_u32_setting(
             &local_conn,
             SETTING_EXPORT_MASTER_DB_ID,
@@ -1229,7 +1235,7 @@ impl BackendService {
             let file_timestamp_at = scanned.file_timestamp();
             manifest_tracks.push(ExportManifestTrack {
                 date_added: None,
-                date_created: None,
+                date_created: date_created.clone(),
                 label: None,
                 remixer: None,
                 composer: None,
@@ -1292,11 +1298,11 @@ impl BackendService {
 
         let playlist = ExportPlaylistData {
             id: "usb-unindexed-audio".to_string(),
-            name: UNINDEXED_AUDIO_PLAYLIST_NAME.to_string(),
+            name: playlist_name.to_string(),
             tracks: Vec::new(),
         };
         let manifest = ExportManifest {
-            generated_at: crate::service::now(),
+            generated_at,
             playlist_id: playlist.id.clone(),
             playlist_name: playlist.name.clone(),
             usb_root: usb_root.to_string_lossy().to_string(),

@@ -268,6 +268,9 @@ export function renderRepairPreview(ctx, data) {
   el.diagRepairTechnical.classList.toggle("hidden", data.rows.length === 0);
 
   state.selectedRepairFixIds = new Set(data.rows.filter((row) => row.checked).map((row) => row.id));
+  // Names typed into rows that ask for one (e.g. the playlist a fix fills),
+  // by fix id; Apply sends them back.
+  state.repairFixNames = new Map();
   el.diagRepairFixes.replaceChildren();
   for (const row of data.rows) {
     const li = cloneTemplate(document, "tplRepairFix");
@@ -291,6 +294,15 @@ export function renderRepairPreview(ctx, data) {
     const desc = li.querySelector(".diag-repair-fix-desc");
     desc.textContent = row.description;
     appendEventLogLink(ctx, desc, row.link);
+    if (row.nameInput) {
+      const field = li.querySelector(".diag-repair-fix-name");
+      field.classList.remove("hidden");
+      field.querySelector(".diag-repair-fix-name-label").textContent = row.nameInput.label;
+      const input = field.querySelector(".diag-repair-fix-name-input");
+      input.value = row.nameInput.value;
+      state.repairFixNames.set(row.id, input.value);
+      input.addEventListener("input", () => state.repairFixNames.set(row.id, input.value));
+    }
     li.querySelector(".diag-repair-fix-meta").textContent = row.metaText;
     el.diagRepairFixes.appendChild(li);
   }
@@ -784,10 +796,12 @@ export async function applyUsbRepairs(ctx) {
   const { state, emitStatus } = ctx;
   emitStatus(t("ui-usb-repair-applying"));
   const selectedFixIds = Array.from(state.selectedRepairFixIds);
+  const fixNames = Object.fromEntries(state.repairFixNames ?? []);
   const data = await ctx.command("repair_usb_diagnostics", {
     usbRoot: state.usbRoot,
     apply: true,
-    selectedFixIds
+    selectedFixIds,
+    fixNames
   });
   if (data.usbContentChanged) usbContentChanged(ctx);
   // The Engine library fix turns the setting on backend-side.

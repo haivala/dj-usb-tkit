@@ -75,6 +75,7 @@ fn main() {
 
     let repair_response = backend.repair_usb_diagnostics_with_progress(
         RepairUsbDiagnosticsRequest {
+            fix_names: Default::default(),
             usb_root: Some(usb_root.clone()),
             apply,
             selected_fix_ids: vec![], // empty = run all supported fixes
