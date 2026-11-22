@@ -40,6 +40,7 @@
 ## Unreleased
 
 - **Fix:** A playlist changed while it was being exported is no longer marked as exported when the export finishes, so it shows as changed and the next export brings the change to the USB.
+- **Fix:** Playlists the export adds to the eDB leave their artwork blank, as rekordbox does, instead of setting it to 0.
 - **Improvement:** The export's progress bar shows how fast music files are being copied to the USB, next to the track count.
 - **Chore:** Removed backend and UI code the app no longer called, including the playback-source command left over from when the UI started playback itself. A test now fails when the desktop app registers a command the UI never calls, or when the UI calls one that isn't registered.
 

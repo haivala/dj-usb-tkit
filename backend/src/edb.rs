@@ -1187,8 +1187,9 @@ pub fn upsert_export_playlist_row_placed(
             if values.contains_key("sequenceNo") {
                 values.insert("sequenceNo".to_string(), Value::Integer(0));
             }
+            // rekordbox leaves a playlist's image NULL; the template's isn't ours.
             if values.contains_key("image_id") {
-                values.insert("image_id".to_string(), Value::Integer(0));
+                values.insert("image_id".to_string(), Value::Null);
             }
             dynamic_insert(conn, "playlist", &columns, &values)?;
         }
@@ -1276,8 +1277,9 @@ pub fn replace_export_playlist_row_with_identity(
             if values.contains_key("sequenceNo") {
                 values.insert("sequenceNo".to_string(), Value::Integer(sequence_no));
             }
+            // rekordbox leaves a playlist's image NULL; the template's isn't ours.
             if values.contains_key("image_id") {
-                values.insert("image_id".to_string(), Value::Integer(0));
+                values.insert("image_id".to_string(), Value::Null);
             }
             dynamic_insert(conn, "playlist", &columns, &values)?;
         }
@@ -2522,6 +2524,46 @@ mod tests {
             )
             .expect("load playlist name");
         assert_eq!(name, "BadName");
+    }
+
+    #[test]
+    fn new_export_playlist_row_leaves_image_null_like_rekordbox() {
+        let temp = tempdir().expect("tempdir");
+        let db_path = export_db_path(temp.path());
+        let conn = rusqlite::Connection::open(&db_path).expect("create sqlite db");
+        conn.execute_batch(
+            r#"
+            CREATE TABLE playlist(playlist_id integer primary key, sequenceNo integer,
+                name varchar, image_id integer, attribute integer, playlist_id_parent integer);
+            CREATE TABLE playlist_content (playlist_id INTEGER, content_id INTEGER, sequenceNo INTEGER);
+            -- A template row with an image a new playlist must not inherit.
+            INSERT INTO playlist VALUES (1, 0, 'Old', 7, 0, 0);
+            "#,
+        )
+        .expect("seed playlists");
+
+        let playlist = ExportPlaylistData {
+            id: "pl-new".to_string(),
+            name: "New".to_string(),
+            tracks: Vec::new(),
+        };
+        let playlist_id = upsert_export_playlist_row(&conn, &playlist).expect("upsert playlist");
+
+        let row = conn
+            .query_row(
+                "SELECT image_id, attribute, playlist_id_parent FROM playlist WHERE playlist_id = ?1",
+                [playlist_id],
+                |row| {
+                    Ok((
+                        row.get::<_, Option<i64>>(0)?,
+                        row.get::<_, Option<i64>>(1)?,
+                        row.get::<_, Option<i64>>(2)?,
+                    ))
+                },
+            )
+            .expect("load playlist row");
+        // rekordbox 6 and 7: image NULL, attribute and parent 0.
+        assert_eq!(row, (None, Some(0), Some(0)));
     }
 
     #[test]
