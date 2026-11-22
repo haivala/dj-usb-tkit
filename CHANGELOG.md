@@ -39,6 +39,8 @@
 
 ## Unreleased
 
+## 0.6.5
+
 **Severity:** critical — see item(s) marked **(CRITICAL)** below.
 
 - **Improvement:** Every change the app writes to a USB (exports, repairs, track and cue edits, playlist order and
