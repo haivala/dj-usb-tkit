@@ -39,6 +39,7 @@
 
 ## Unreleased
 
+- **Fix:** A playlist changed while it was being exported is no longer marked as exported when the export finishes, so it shows as changed and the next export brings the change to the USB.
 - **Improvement:** The export's progress bar shows how fast music files are being copied to the USB, next to the track count.
 
 ## 0.6.5

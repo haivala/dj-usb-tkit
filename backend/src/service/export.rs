@@ -713,6 +713,10 @@ impl ExportLayout {
 /// One playlist of an export run, from its load to its record.
 struct PlaylistRun {
     playlist: ExportPlaylistData,
+    /// The playlist's `updated_at` before its tracks were read: an edit
+    /// during the export changes it, and then the playlist isn't marked
+    /// exported.
+    updated_at: Option<String>,
     unplayable_tracks: Vec<ExportTrackData>,
     exported_tracks: usize,
     skipped_tracks: usize,
@@ -726,9 +730,14 @@ struct PlaylistRun {
 }
 
 impl PlaylistRun {
-    fn new(playlist: ExportPlaylistData, unplayable_tracks: Vec<ExportTrackData>) -> Self {
+    fn new(
+        playlist: ExportPlaylistData,
+        updated_at: Option<String>,
+        unplayable_tracks: Vec<ExportTrackData>,
+    ) -> Self {
         Self {
             playlist,
+            updated_at,
             unplayable_tracks,
             exported_tracks: 0,
             skipped_tracks: 0,
@@ -1603,6 +1612,17 @@ impl BackendService {
         let mut runs = Vec::<PlaylistRun>::with_capacity(playlist_ids.len());
         let formats = super::usb_identity::read_usb_audio_formats(&usb_root);
         for playlist_id in playlist_ids {
+            // Read before the tracks, so an edit in between counts as one.
+            let updated_at = self
+                .db
+                .connect()?
+                .query_row(
+                    "SELECT updated_at FROM playlists WHERE id = ?1",
+                    params![playlist_id],
+                    |row| row.get::<_, Option<String>>(0),
+                )
+                .optional()?
+                .flatten();
             let mut playlist = self.load_playlist_for_export(playlist_id)?;
             if playlist.tracks.is_empty() {
                 return Err(BackendError::Validation(tr::export_error_no_tracks()));
@@ -1611,7 +1631,7 @@ impl BackendService {
             if playlist.tracks.is_empty() {
                 return Err(BackendError::Validation(tr::export_error_none_playable()));
             }
-            runs.push(PlaylistRun::new(playlist, unplayable_tracks));
+            runs.push(PlaylistRun::new(playlist, updated_at, unplayable_tracks));
         }
 
         let blocking_missing_roots = {
@@ -2385,14 +2405,17 @@ impl BackendService {
         // The drive's name is kept as it is now: the mount path can later
         // belong to another stick, so looking the name up by path when
         // the line is shown could name a drive that never got this export.
+        // A playlist edited since the export read it keeps the cleared mark:
+        // the stick doesn't have that edit.
         local_conn.execute(
-            "UPDATE playlists SET last_exported_at = ?1, last_exported_usb_root = ?2, last_exported_track_count = ?3, last_exported_usb_name = ?4 WHERE id = ?5",
+            "UPDATE playlists SET last_exported_at = ?1, last_exported_usb_root = ?2, last_exported_track_count = ?3, last_exported_usb_name = ?4 WHERE id = ?5 AND updated_at IS ?6",
             params![
                 now(),
                 usb_root.to_string_lossy().to_string(),
                 manifest.tracks.len() as i64,
                 super::usb_drive_name(local_conn, usb_root),
-                playlist.id
+                playlist.id,
+                run.updated_at
             ],
         )?;
         match append_export_log_record(usb_root, playlist, manifest) {

@@ -8033,6 +8033,68 @@ fn batch_export_forces_the_apps_track_order_onto_a_playlist_already_on_the_stick
 }
 
 #[test]
+fn playlist_edited_during_its_export_is_not_marked_exported() {
+    use backend::models::BatchExportStatus;
+    let root = tempdir().expect("temp root");
+    let usb = root.path().join("usb");
+    let (backend, ids, tracks) =
+        batch_export_setup(root.path(), &usb, &[("Batch A", &["One"]), ("Batch B", &["Two"])]);
+    library_sources::show_only(
+        &backend,
+        vec![root.path().join("media").to_string_lossy().to_string()],
+        false,
+        false,
+    );
+
+    // "Two" is added to A while A's export is copying its tracks.
+    let mut added = None;
+    let exported = backend.export_to_usb_with_progress(
+        ExportToUsbRequest {
+            usb_root: Some(usb.to_string_lossy().to_string()),
+            playlist_id: ids["Batch A"].clone(),
+            options: additive_options(),
+            sort: None,
+        },
+        |_, _, message| {
+            if added.is_none() && message.starts_with("USB: Copying") {
+                added = Some(backend.add_library_selection_to_playlist(
+                    AddLibrarySelectionToPlaylistRequest {
+                        playlist_id: ids["Batch A"].clone(),
+                        track_ids: vec![tracks["Two"].clone()],
+                        ..Default::default()
+                    },
+                ));
+            }
+        },
+    );
+    assert!(exported.ok, "export failed: {exported:?}");
+    let added = added.expect("the export copied a track");
+    assert!(added.ok, "add failed: {added:?}");
+
+    let overview =
+        backend.get_batch_export_overview(backend::models::GetBatchExportOverviewRequest {
+            usb_root: Some(usb.to_string_lossy().to_string()),
+        });
+    assert!(overview.ok, "overview failed: {overview:?}");
+    let rows = overview.data.expect("overview data").rows;
+    assert_eq!(rows[0].name, "Batch A");
+    assert_ne!(
+        rows[0].status,
+        BatchExportStatus::OnStick,
+        "the stick lacks the track added during the export"
+    );
+
+    // Exporting it again with nothing changing marks it.
+    export_one(&backend, &usb, &ids["Batch A"]);
+    let overview =
+        backend.get_batch_export_overview(backend::models::GetBatchExportOverviewRequest {
+            usb_root: Some(usb.to_string_lossy().to_string()),
+        });
+    let rows = overview.data.expect("overview data").rows;
+    assert_eq!(rows[0].status, BatchExportStatus::OnStick);
+}
+
+#[test]
 fn batch_export_overview_shows_each_playlists_place_and_state_on_the_stick() {
     use backend::models::BatchExportStatus;
     let root = tempdir().expect("temp root");
