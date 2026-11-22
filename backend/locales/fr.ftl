@@ -696,7 +696,7 @@ diagnostics-progress-checking-playlist-resolution = USB : vérification de la r
 diagnostics-progress-checking-audio-files = USB : vérification de la présence des fichiers audio indexés
 diagnostics-progress-comparing-playlist-sources = USB : comparaison des sources des playlists
 diagnostics-progress-finalizing-parity-report = USB : finalisation du rapport de parité
-diagnostics-progress-resolving-playlist = Résolution de la playlist { $current }/{ $total } : { $playlist }
+diagnostics-progress-resolving-playlist = Résolution de la playlist { $playlist }
 
 diagnostics-warning-missing-audio = fichier audio indexé absent de la clé USB : { $path }
 diagnostics-warning-unindexed-audio = fichier audio non indexé : { $path }
@@ -895,21 +895,26 @@ repair-fix-damaged-tracks-description = { $count ->
    *[other] { $count } lignes de morceaux
 } dont le nom de fichier a été écrasé par un plantage de rekordbox, à côté d'une ligne intacte pour le même fichier audio. Déplace leurs entrées de playlists et d'historique vers la ligne intacte et supprime la ligne endommagée, dans les deux bases.
 
+progress-detail-count = { $done }/{ $total }
+progress-detail-count-speed = { $done }/{ $total } · { $speed } Mo/s
+progress-detail-count-playlist = { $done }/{ $total } · playlist { $index }/{ $count }
+progress-detail-bytes = { $done }/{ $total } Mo
+progress-detail-bytes-speed = { $done }/{ $total } Mo · { $speed } Mo/s
+
 repair-progress-baseline = USB : diagnostics de référence
 repair-progress-parity = USB : préparation des indications de parité
 repair-progress-collect = USB : recherche des réparations possibles
 repair-progress-apply = USB : application des corrections choisies
 repair-progress-backup = USB : sauvegarde des bases de données avant réparation
+repair-progress-backup-file = USB : sauvegarde des bases de données avant réparation — { $file }
 repair-progress-open = USB : ouverture des bases de données à réparer
 repair-progress-save = USB : enregistrement des bases de données réparées
 repair-progress-rerun = USB : nouveaux diagnostics après réparation
 repair-progress-applied = USB : réparation appliquée
 repair-progress-preview-ready = USB : aperçu de la réparation prêt
 repair-progress-applying = USB : application de { $fix }
-repair-progress-applying-items = USB : application de { $fix } ({ $done }/{ $total })
 repair-progress-finished = USB : { $fix } terminé
-repair-progress-applying-file = USB : application de { $fix } { $done }/{ $total } — { $file }
-repair-progress-applying-file-speed = USB : application de { $fix } { $done }/{ $total }, { $speed } Mo/s — { $file }
+repair-progress-applying-file = USB : application de { $fix } — { $file }
 
 repair-warning-bpm-key-mismatch = Écart de BPM/tonalité : { $path } ({ $values })
 repair-warning-shared-analysis = fichier d'analyse partagé : { $path } utilisé par { $tracks } ; gardé par { $owner }
@@ -1062,7 +1067,7 @@ job-scan-mixxx-db-progress = Lecture de la base de données de la bibliothèque 
 job-scan-mixxx-db-completed = Importation de la bibliothèque Mixxx terminée
 job-scan-mixxx-db-completed-counts = Importation de la bibliothèque Mixxx terminée : { $indexed } indexé(s), { $updated } mis à jour
 job-transcode-tracks-started = Conversion des morceaux sélectionnés
-job-transcode-tracks-progress = Conversion { $current }/{ $total } : { $file }
+job-transcode-tracks-progress = Conversion de { $file }
 job-transcode-tracks-completed = Conversion terminée : { $converted } converti(s), { $skipped } ignoré(s), { $failed } en échec
 job-transcode-tracks-cancelled = Conversion annulée : { $converted } converti(s)
 job-install-update-started = Recherche de mise à jour...
@@ -1078,7 +1083,6 @@ migration-fingerprints = Calcul des empreintes des morceaux
 migration-merge-usb-tracks = Fusion des morceaux USB en double
 migration-beat-grids = Mise à niveau des beatgrids en cache
 migration-mp3-seek = Ajout des données de recherche MP3
-migration-progress = { $migration } : { $current }/{ $total }
 
 migration-warning-failed = Échec de { $migration } ({ $error }) ; nouvelle tentative au prochain lancement
 migration-warning-startup-failed = Échec des mises à niveau de données au démarrage ({ $error }) ; nouvelle tentative au prochain lancement
@@ -1139,7 +1143,7 @@ analysis-submitted-some-already = { $count ->
 analysis-submitted-none = Aucun morceau n'a besoin d'analyse
 analysis-waiting-tooltip = En attente de son tour d'analyse
 analysis-started = Analyse des morceaux sélectionnés
-analysis-progress = Analyse { $current }/{ $total } : { $file }
+analysis-progress = Analyse de { $file }
 analysis-job-track-failed = Échec de l'analyse du morceau : { $track } - { $error }
 analysis-job-track-failed-unknown = erreur d'analyse inconnue
 analysis-finished = Analyse terminée : { $analyzed } analysé(s), { $failed } en échec
@@ -1277,9 +1281,9 @@ export-progress-preparing = USB : préparation de l'export
 export-progress-finalizing-export-metadata = USB : finalisation des métadonnées d'export
 export-progress-writing-engine-dj-library = USB : écriture de la bibliothèque Engine DJ
 export-progress-waiting-for-writes = USB : attente de la fin de l'écriture des fichiers
-export-progress-copying = USB : copie du morceau { $current }/{ $total } : { $file }
-export-progress-batch-playlist = { $step } (playlist { $index }/{ $count } : { $playlist })
-export-progress-converting = USB : conversion du morceau { $current }/{ $total } : { $file }
+export-progress-copying = USB : copie de { $file }
+export-progress-batch-playlist = { $step } pour { $playlist }
+export-progress-converting = USB : conversion de { $file }
 
 export-error-busy = Un autre export ou une autre modification de la clé USB est encore en cours. Exportez à nouveau une fois terminé.
 export-error-usb-missing = La racine USB n'existe pas : { $path }
@@ -1887,7 +1891,7 @@ ui-job-cancel-analysis = Annuler l'analyse
 ui-job-cancel-transcode-aria-label = Annuler la conversion
 ui-job-cancel-transcode-title = Annuler la conversion (les fichiers terminés sont conservés)
 ui-job-working = En cours...
-ui-job-paused = (en pause)
+ui-job-paused = en pause
 ui-job-done = Terminé
 ui-job-failed = Échec
 ui-job-resume-analysis = Reprendre l'analyse

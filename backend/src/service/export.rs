@@ -1741,22 +1741,23 @@ impl BackendService {
             let mut manifest_tracks = Vec::<ExportManifestTrack>::new();
             for (idx, track) in run.playlist.tracks.iter().enumerate() {
                 done += 1;
-                let copying = tr::export_progress_copying(
-                    idx + 1,
-                    run.playlist.tracks.len(),
-                    &track.file_name,
-                );
+                let copying = tr::export_progress_copying(&track.file_name);
+                let (current, tracks) = (idx + 1, run.playlist.tracks.len());
                 let message = if playlist_count > 1 {
-                    tr::export_progress_batch_playlist(
-                        copying,
-                        run_idx + 1,
-                        playlist_count,
-                        &run.playlist.name,
+                    crate::progress::with_detail(
+                        tr::export_progress_batch_playlist(copying, &run.playlist.name).render(),
+                        tr::progress_detail_count_playlist(
+                            current,
+                            tracks,
+                            run_idx + 1,
+                            playlist_count,
+                        )
+                        .render(),
                     )
                 } else {
-                    copying
+                    crate::progress::count(copying.render(), current, tracks)
                 };
-                on_progress(done, total_steps, &message.render());
+                on_progress(done, total_steps, &message);
 
                 let source = PathBuf::from(&track.file_path);
                 if !source.is_file() {
@@ -2553,7 +2554,11 @@ impl BackendService {
                 on_progress(
                     done,
                     total,
-                    &tr::export_progress_converting(done, total, name).render(),
+                    &crate::progress::count(
+                        tr::export_progress_converting(name).render(),
+                        done,
+                        total,
+                    ),
                 );
             })?
         };

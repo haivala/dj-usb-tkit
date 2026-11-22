@@ -185,7 +185,10 @@ fn dump_usb(
                     },
                 }),
             ),
-            |current, total, message| progress.push(json!([current, total, message])),
+            |current, total, text| {
+                let (message, detail) = backend::progress::split(text);
+                progress.push(json!([current, total, message, detail]));
+            },
         );
         exports.insert(
             name.to_string(),

@@ -1976,7 +1976,10 @@ fn playlist_resolution_emits_stage_and_per_playlist_progress_messages() {
 
     assert_eq!(progress.len(), 1);
     assert!(progress[0].contains("1/1"));
-    assert!(progress[0].contains("Resolving playlist 1/1: Progress"));
+    assert!(progress[0].ends_with(&crate::progress::with_detail(
+        "Resolving playlist Progress",
+        "1/1"
+    )));
 }
 
 // ── Identity-key normalization tests ─────────────────────────────

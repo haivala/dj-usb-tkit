@@ -634,7 +634,11 @@ where
         on_playlist_progress(
             done,
             total,
-            &tr::diagnostics_progress_resolving_playlist(done, total, display_name).render(),
+            &crate::progress::count(
+                tr::diagnostics_progress_resolving_playlist(display_name).render(),
+                done,
+                total,
+            ),
         );
         let mut unique_track_ids = HashSet::<u32>::new();
         let mut pdb_ids = HashSet::<String>::new();

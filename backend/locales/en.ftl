@@ -906,8 +906,8 @@ diagnostics-progress-checking-playlist-resolution = USB: Checking playlist resol
 diagnostics-progress-checking-audio-files = USB: Checking indexed audio file presence
 diagnostics-progress-comparing-playlist-sources = USB: Comparing playlist sources
 diagnostics-progress-finalizing-parity-report = USB: Finalizing parity report
-# $current: playlists done. $total: playlists in all. $playlist: its name.
-diagnostics-progress-resolving-playlist = Resolving playlist { $current }/{ $total }: { $playlist }
+# $playlist: its name.
+diagnostics-progress-resolving-playlist = Resolving playlist { $playlist }
 
 # Event Log warnings from diagnostics and the parity report. $path: a file on the stick.
 diagnostics-warning-missing-audio = indexed audio file missing from USB: { $path }
@@ -1156,12 +1156,25 @@ repair-fix-damaged-tracks-description = { $count ->
    *[other] { $count } track rows
 } whose file name a crashed rekordbox write overwrote, next to an intact row for the same music file. Moves their playlist and history entries to the intact row and removes the damaged one, in both databases.
 
+# The progress bar's detail, next to the elapsed time: counts, sizes and read speed of the step
+# its message names. $done, $total: items done and in all.
+progress-detail-count = { $done }/{ $total }
+# $speed: megabytes per second, e.g. "0.12" or "2.6".
+progress-detail-count-speed = { $done }/{ $total } · { $speed } MB/s
+# $index, $count: which playlist of several being exported.
+progress-detail-count-playlist = { $done }/{ $total } · playlist { $index }/{ $count }
+# $done, $total: megabytes copied and the file's size, e.g. "1.2" and "1.9".
+progress-detail-bytes = { $done }/{ $total } MB
+progress-detail-bytes-speed = { $done }/{ $total } MB · { $speed } MB/s
+
 # The progress bar while repairing.
 repair-progress-baseline = USB: Running diagnostics baseline
 repair-progress-parity = USB: Building parity guidance
 repair-progress-collect = USB: Collecting repair opportunities
 repair-progress-apply = USB: Applying selected fixes
 repair-progress-backup = USB: Backing up databases before repair
+# $file: the database file being copied.
+repair-progress-backup-file = USB: Backing up databases before repair — { $file }
 repair-progress-open = USB: Opening repair databases
 repair-progress-save = USB: Saving repaired databases
 repair-progress-rerun = USB: Re-running diagnostics after repair
@@ -1169,13 +1182,9 @@ repair-progress-applied = USB: Repair apply complete
 repair-progress-preview-ready = USB: Repair preview ready
 # $fix: the fix's title (repair-fix-…), here and below.
 repair-progress-applying = USB: Applying { $fix }
-# $done, $total: the fix's items (files, tracks) done and in all.
-repair-progress-applying-items = USB: Applying { $fix } ({ $done }/{ $total })
 repair-progress-finished = USB: Finished { $fix }
-# The fix reading each music file in full ($done, $total: files; $file: its name; $speed:
-# megabytes per second, e.g. "0.12").
-repair-progress-applying-file = USB: Applying { $fix } { $done }/{ $total } — { $file }
-repair-progress-applying-file-speed = USB: Applying { $fix } { $done }/{ $total }, { $speed } MB/s — { $file }
+# The fix reading a music file in full. $file: its name.
+repair-progress-applying-file = USB: Applying { $fix } — { $file }
 
 # Event Log warnings from the repair preview, the details its rows link to. $path: a file on
 # the stick, here and below.
@@ -1362,8 +1371,8 @@ job-scan-mixxx-db-completed = Mixxx library import completed
 # $indexed, $updated: track counts.
 job-scan-mixxx-db-completed-counts = Mixxx library import completed: indexed { $indexed }, updated { $updated }
 job-transcode-tracks-started = Converting selected tracks
-# Convert…, one per finished track. $current: tracks done. $total: tracks in all. $file: the file's name.
-job-transcode-tracks-progress = Converting { $current }/{ $total }: { $file }
+# Convert…, one per finished track. $file: the file's name.
+job-transcode-tracks-progress = Converting { $file }
 # $converted, $skipped, $failed: track counts.
 job-transcode-tracks-completed = Converting finished: { $converted } converted, { $skipped } skipped, { $failed } failed
 # $converted: tracks converted before the cancel.
@@ -1384,8 +1393,6 @@ migration-fingerprints = Filling track fingerprints
 migration-merge-usb-tracks = Merging duplicate USB tracks
 migration-beat-grids = Upgrading cached beat grids
 migration-mp3-seek = Adding MP3 seek data
-# The progress bar during an upgrade. $migration: one of the names above. $current, $total: items done and in all.
-migration-progress = { $migration }: { $current }/{ $total }
 
 # Event Log warnings when a data upgrade fails. $migration: the upgrade (migration-*). $error: the reason.
 migration-warning-failed = { $migration } failed ({ $error }); it runs again next launch
@@ -1468,8 +1475,8 @@ analysis-submitted-none = No tracks need analysis
 analysis-waiting-tooltip = Waiting for its turn to be analyzed
 # The progress bar.
 analysis-started = Analyzing selected tracks
-# $current: tracks done. $total: tracks in all. $file: the file's name.
-analysis-progress = Analyzing { $current }/{ $total }: { $file }
+# $file: the file's name.
+analysis-progress = Analyzing { $file }
 # The Event Log entry when a track's analysis fails. $track: the track's title and id
 # ("Title (id)"), or its id. $error: why.
 analysis-job-track-failed = Track analysis failed: { $track } - { $error }
@@ -1667,13 +1674,12 @@ export-progress-preparing = USB: Preparing export
 export-progress-finalizing-export-metadata = USB: Finalizing export metadata
 export-progress-writing-engine-dj-library = USB: Writing Engine DJ library
 export-progress-waiting-for-writes = USB: Waiting for files to finish writing
-# $current: tracks done. $total: tracks in all. $file: the track's file name. Here and below.
-export-progress-copying = USB: Copying track { $current }/{ $total }: { $file }
-# export-progress-copying ($step) while several playlists are exported. $index/$count:
-# which playlist. $playlist: its name.
-export-progress-batch-playlist = { $step } (playlist { $index }/{ $count }: { $playlist })
+# $file: the track's file name. Here and below.
+export-progress-copying = USB: Copying { $file }
+# export-progress-copying ($step) while several playlists are exported. $playlist: its name.
+export-progress-batch-playlist = { $step } for { $playlist }
 # Lossless tracks converted for this USB's formats.
-export-progress-converting = USB: Converting track { $current }/{ $total }: { $file }
+export-progress-converting = USB: Converting { $file }
 
 # Why an export was refused: the error the Event Log shows (the status line has its own text above).
 export-error-busy = Another export or change to the USB is still running. Export again once it has finished.
@@ -2497,7 +2503,7 @@ ui-job-cancel-transcode-title = Cancel converting (finished files are kept)
 # The progress bar's text while a job runs with no step of its own.
 ui-job-working = Working...
 # After the elapsed time while analysis is paused.
-ui-job-paused = (paused)
+ui-job-paused = paused
 # A backend job's progress bar when it finished or failed without a message.
 ui-job-done = Done
 ui-job-failed = Failed

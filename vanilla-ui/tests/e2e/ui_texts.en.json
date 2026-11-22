@@ -168,7 +168,7 @@
     "ui-job-done": "Done",
     "ui-job-failed": "Failed",
     "ui-job-pause-analysis": "Pause analysis",
-    "ui-job-paused": "(paused)",
+    "ui-job-paused": "paused",
     "ui-job-progress": "Progress",
     "ui-job-progress-aria-label": "Operation progress",
     "ui-job-resume-analysis": "Resume analysis",

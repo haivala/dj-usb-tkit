@@ -221,7 +221,11 @@ impl<'a> ApplyProgress<'a> {
         (self.emit)(
             percent,
             100,
-            &tr::repair_progress_applying_items(&self.title, completed, total).render(),
+            &crate::progress::count(
+                tr::repair_progress_applying(&self.title).render(),
+                completed,
+                total,
+            ),
         );
     }
 
@@ -232,22 +236,16 @@ impl<'a> ApplyProgress<'a> {
         }
         let done = done.min(total);
         let percent = self.start + (self.end - self.start) * done / total;
-        let current = (done + 1).min(total);
-        let message = match mb_per_s {
-            Some(speed) => tr::repair_progress_applying_file_speed(
-                &self.title,
-                current,
+        (self.emit)(
+            percent,
+            100,
+            &crate::progress::count_speed(
+                tr::repair_progress_applying_file(&self.title, file).render(),
+                (done + 1).min(total),
                 total,
-                file,
-                if speed < 1.0 {
-                    format!("{speed:.2}")
-                } else {
-                    format!("{speed:.1}")
-                },
+                mb_per_s,
             ),
-            None => tr::repair_progress_applying_file(&self.title, current, total, file),
-        };
-        (self.emit)(percent, 100, &message.render());
+        );
     }
 
     fn finish(&mut self) {
@@ -261,6 +259,20 @@ impl<'a> ApplyProgress<'a> {
     /// A step outside the per-fix window (before the first fix, after the last).
     fn report(&mut self, percent: usize, label: Text) {
         (self.emit)(percent, 100, &label.render());
+    }
+
+    /// The backup's copy of one database file, before the first fix.
+    fn backup_copy(&mut self, copy: &crate::service::usb_vendor_compat::BackupCopy) {
+        (self.emit)(
+            70,
+            100,
+            &crate::progress::bytes_speed(
+                tr::repair_progress_backup_file(copy.file).render(),
+                copy.done_bytes,
+                copy.total_bytes,
+                copy.mb_per_s,
+            ),
+        );
     }
 }
 
@@ -294,7 +306,10 @@ mod progress_tests {
         assert_eq!(events[4].0, 79);
         assert_eq!(
             events[5],
-            (81, "USB: Applying Fix Beat Grid (1/2)".to_string())
+            (
+                81,
+                crate::progress::with_detail("USB: Applying Fix Beat Grid", "1/2")
+            )
         );
         assert_eq!(events[6].0, 84);
         assert_eq!(events[7].0, 84);
@@ -1779,7 +1794,7 @@ impl BackendService {
             // Every fix writes the staged copies of this one session: one
             // read-write eDB connection (opened on first use, so SQLCipher key
             // negotiation happens once), and the in-memory PDB.
-            let session = self.usb_write_session(
+            let session = self.usb_write_session_reporting(
                 &_usb_write_guard,
                 &usb_root,
                 usb_staging::SessionBackup::WithRetention {
@@ -1787,6 +1802,7 @@ impl BackendService {
                     playlist_count: None,
                 },
                 &mut warnings,
+                &mut |copy| progress.backup_copy(&copy),
             );
             self.apply_selected_fixes(
                 session,

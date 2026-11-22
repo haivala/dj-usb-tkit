@@ -28,7 +28,7 @@ use crate::models::{
 
 use super::usb_staging::{DbKind, SessionBackup};
 use super::usb_utils::resolve_usb_root;
-use super::usb_vendor_compat::{BackupReason, backup_reason_path, vendor_db_dir};
+use super::usb_vendor_compat::{BackupCopy, BackupReason, backup_reason_path, vendor_db_dir};
 use super::{BackendService, DEFAULT_BACKUP_RETENTION_COUNT, SETTING_UI_BACKUP_RETENTION_COUNT};
 
 const STEMS: [(&str, &str); 2] = [("export", "pdb"), ("exportLibrary", "db")];
@@ -423,8 +423,15 @@ impl BackendService {
         usb_root: &Path,
         reason: &str,
         playlist_count: Option<usize>,
+        on_copy: &mut dyn FnMut(BackupCopy),
     ) -> Vec<WarningEntry> {
-        self.backup_usb_databases_with_retention_protecting(usb_root, reason, playlist_count, None)
+        self.backup_usb_databases_with_retention_protecting(
+            usb_root,
+            reason,
+            playlist_count,
+            None,
+            on_copy,
+        )
     }
 
     /// Like `backup_usb_databases_with_retention`, but when the stick's newest
@@ -436,6 +443,7 @@ impl BackendService {
         &self,
         usb_root: &Path,
         reason: &str,
+        on_copy: &mut dyn FnMut(BackupCopy),
     ) -> Vec<WarningEntry> {
         let mut dirs = vec![(usb_backups_dir(usb_root), "usb")];
         if let Some(cache_dir) = cache_backups_dir(usb_root) {
@@ -451,8 +459,12 @@ impl BackendService {
             .filter(|(_, newest_reason)| newest_reason.as_deref() == Some(reason))
             .map(|(timestamp, _)| timestamp);
         let playlist_count = most_recent_backup_playlist_count(usb_root);
-        let notes =
-            super::usb_vendor_compat::backup_usb_databases(usb_root, reason, playlist_count);
+        let notes = super::usb_vendor_compat::backup_usb_databases(
+            usb_root,
+            reason,
+            playlist_count,
+            on_copy,
+        );
         if let Some(old) = replaced
             && newest_timestamp(&dirs).is_some_and(|(new, _)| new != old)
         {
@@ -485,10 +497,15 @@ impl BackendService {
         reason: &str,
         playlist_count: Option<usize>,
         protect_timestamp: Option<&str>,
+        on_copy: &mut dyn FnMut(BackupCopy),
     ) -> Vec<WarningEntry> {
         let playlist_count = playlist_count.or_else(|| most_recent_backup_playlist_count(usb_root));
-        let notes =
-            super::usb_vendor_compat::backup_usb_databases(usb_root, reason, playlist_count);
+        let notes = super::usb_vendor_compat::backup_usb_databases(
+            usb_root,
+            reason,
+            playlist_count,
+            on_copy,
+        );
         let retention_count = self
             .db
             .connect()
@@ -537,6 +554,7 @@ impl BackendService {
             "Before restore",
             None,
             Some(&req.timestamp),
+            &mut |_| {},
         );
 
         // Re-resolve the restore target's file locations *after* the
@@ -957,7 +975,12 @@ mod tests {
             Some(4),
         );
 
-        service.backup_usb_databases_with_retention(usb_root, "Before playlist reorder", None);
+        service.backup_usb_databases_with_retention(
+            usb_root,
+            "Before playlist reorder",
+            None,
+            &mut |_| {},
+        );
 
         let result = service
             .list_usb_backups(ListUsbBackupsRequest {

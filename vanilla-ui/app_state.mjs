@@ -149,6 +149,9 @@ export function createInitialState() {
     analysisWaitingTooltip: "",
     deletingPlaylistId: null,
     selectedRepairFixIds: new Set(),
+    // Whether Preview Fixes is offered: a report is shown and the last
+    // preview didn't find nothing to fix.
+    repairPreviewOffered: false,
     repairFixNames: new Map(),
     startupPhase: true
   };

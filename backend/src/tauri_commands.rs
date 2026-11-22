@@ -176,6 +176,7 @@ fn emit_job_event<R: tauri::Runtime>(
     percent: usize,
     message: impl Into<String>,
 ) {
+    let (message, detail) = crate::progress::split_owned(message.into());
     let payload = JobEventPayload {
         event: event_name.to_string(),
         job_id: identity.job_id.to_string(),
@@ -184,7 +185,8 @@ fn emit_job_event<R: tauri::Runtime>(
         current,
         total,
         percent: percent.min(100),
-        message: message.into(),
+        message,
+        detail,
         track_id: None,
         track_title: None,
         file_path: None,
@@ -2050,8 +2052,11 @@ pub async fn transcode_tracks(
                 progress.current,
                 total,
                 progress.current * 100 / total,
-                tr::job_transcode_tracks_progress(progress.current, progress.total, file_name)
-                    .render(),
+                crate::progress::count(
+                    tr::job_transcode_tracks_progress(file_name).render(),
+                    progress.current,
+                    progress.total,
+                ),
             );
         })
     })

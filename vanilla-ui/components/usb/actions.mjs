@@ -26,8 +26,21 @@ export function isUsbRootChangeBlocked(state) {
   return false;
 }
 
+// The Health & Diagnostics buttons each start a job on the stick, so they're
+// off while a USB job runs (a repair, an export, a read) as well as when
+// their own report says there's nothing to do.
+export function updateUsbHealthButtons(ctx) {
+  const { state, el } = ctx;
+  const busy = isUsbRootChangeBlocked(state);
+  el.reDiagnoseBtn.disabled = busy;
+  el.runUsbParityBtn.disabled = busy;
+  el.previewRepairsBtn.disabled = busy || !state.repairPreviewOffered;
+  el.applyRepairsBtn.disabled = busy || state.selectedRepairFixIds.size === 0;
+}
+
 export function setUsbRootControlsLocked(ctx, locked) {
   const { el } = ctx;
+  updateUsbHealthButtons(ctx);
   el.selectUsbFolderBtn.disabled = !!locked;
   el.selectUsbFolderBtn.title = locked ? t("ui-usb-select-usb-folder-busy-title") : "";
   el.usbRecentList.querySelectorAll("button").forEach((btn) => { btn.disabled = !!locked; });
@@ -109,10 +122,11 @@ function fillDiagRow(tr, status, values) {
 }
 
 export function renderDiagnosticsReport(ctx, data) {
-  const { el, document } = ctx;
+  const { state, el, document } = ctx;
   el.usbDiagnosticsCard.classList.remove("hidden");
   showDiagReportView(ctx);
-  el.previewRepairsBtn.disabled = false;
+  state.repairPreviewOffered = true;
+  updateUsbHealthButtons(ctx);
   ctx.updateUsbHealthDot(data.overallStatus, data.healthText);
 
   el.usbHealthCard.classList.remove("is-loading");
@@ -169,10 +183,11 @@ function renderReportBody(ctx, data) {
 }
 
 export function renderParityReport(ctx, data) {
-  const { el, document } = ctx;
+  const { state, el, document } = ctx;
   el.usbDiagnosticsCard.classList.remove("hidden");
   showDiagReportView(ctx);
-  el.previewRepairsBtn.disabled = false;
+  state.repairPreviewOffered = true;
+  updateUsbHealthButtons(ctx);
   // Its own badge next to the health one: the health badge keeps matching
   // the USB health dot.
   el.diagParityStatus.textContent = data.statusLabel;
@@ -221,7 +236,7 @@ function showDiagRepairView(ctx) {
 // edit, export, backup restore, ...) but the same drive is still selected --
 // the stale report should disappear, not the whole panel.
 function resetDiagnosticsContent(ctx) {
-  const { el } = ctx;
+  const { state, el } = ctx;
   ctx.updateUsbHealthDot(null);
   el.diagSections.replaceChildren();
   el.diagOverallStatus.textContent = "";
@@ -232,8 +247,9 @@ function resetDiagnosticsContent(ctx) {
   el.diagRepairSummary.className = "diag-repair-summary";
   el.diagRepairOverview.replaceChildren();
   el.diagRepairFixes.replaceChildren();
-  el.previewRepairsBtn.disabled = true;
-  el.applyRepairsBtn.disabled = true;
+  state.repairPreviewOffered = false;
+  state.selectedRepairFixIds = new Set();
+  updateUsbHealthButtons(ctx);
   showDiagReportView(ctx);
 }
 
@@ -285,7 +301,7 @@ export function renderRepairPreview(ctx, data) {
       checkbox.addEventListener("change", () => {
         if (checkbox.checked) state.selectedRepairFixIds.add(row.id);
         else state.selectedRepairFixIds.delete(row.id);
-        el.applyRepairsBtn.disabled = state.selectedRepairFixIds.size === 0;
+        updateUsbHealthButtons(ctx);
       });
     } else {
       checkbox.remove();
@@ -308,11 +324,11 @@ export function renderRepairPreview(ctx, data) {
   }
 
   showDiagRepairView(ctx);
-  el.applyRepairsBtn.disabled = state.selectedRepairFixIds.size === 0;
-  if (data.nothingToFix) el.previewRepairsBtn.disabled = true;
+  if (data.nothingToFix) state.repairPreviewOffered = false;
+  updateUsbHealthButtons(ctx);
   // A passing USB keeps Health & Diagnostics collapsed; open it when the
   // preview has fixes to show.
-  else el.usbHealthCard.open = true;
+  if (!data.nothingToFix) el.usbHealthCard.open = true;
 }
 export function loadUsbRootFromStorage(ctx) {
   const { state, el, localStorage } = ctx;

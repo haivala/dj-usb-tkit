@@ -1677,7 +1677,8 @@ async function connectUsb(page) {
   await expect(page.locator("#diagOverallStatus")).toHaveText("WARN");
 }
 
-// A running USB job locks the USB selection and export until it ends; other jobs don't.
+// A running USB job locks the USB selection, export and the Health & Diagnostics buttons
+// until it ends; other jobs don't.
 test("USB job locks", async ({ page }) => {
   await installTauriMock(page, "valid");
   await listenForBackendEvents(page);
@@ -1709,8 +1710,14 @@ test("USB job locks", async ({ page }) => {
     ([jobType, event]) => window.__emitJobEvent({ jobId: `job-${jobType}`, jobType, stage: "test", event, percent: 0, message: "USB: working" }),
     [jobType, event]
   );
+  // Each Health & Diagnostics button starts a job on the stick.
+  const health = ["#reDiagnoseBtn", "#runUsbParityBtn", "#previewRepairsBtn", "#applyRepairsBtn"]
+    .map((selector) => page.locator(selector));
+  const healthEnabled = () => Promise.all(health.map((button) => button.isEnabled()));
   await expect(recent).toBeEnabled();
   await expect(exportBtn).toBeEnabled();
+  await expect(page.locator("#reDiagnoseBtn")).toBeEnabled();
+  const idleHealth = await healthEnabled();
 
   for (const [jobType, endEvent] of [
     ["usb_read", "job.completed"],
@@ -1723,6 +1730,7 @@ test("USB job locks", async ({ page }) => {
     await expect(select).toHaveAttribute("title", /wait/i);
     await expect(recent).toBeDisabled();
     await expect(exportBtn).toBeDisabled();
+    for (const button of health) await expect(button).toBeDisabled();
 
     // A click already on its way when the job starts changes nothing either.
     const before = await counts();
@@ -1742,6 +1750,8 @@ test("USB job locks", async ({ page }) => {
     await expect(select).toBeEnabled();
     await expect(recent).toBeEnabled();
     await expect(exportBtn).toBeEnabled();
+    // Back to what their own reports say.
+    await expect.poll(healthEnabled).toEqual(idleHealth);
   }
 
   await emit("analysis", "job.started");
@@ -1749,22 +1759,31 @@ test("USB job locks", async ({ page }) => {
   await expect(select).toBeEnabled();
   await expect(exportBtn).toBeEnabled();
 
-  // The footer follows the running job only, its percent kept within 0–100;
-  // a failed job's reason is on the status line (the backend logs it itself).
-  const job = (jobId, event, percent, message) => page.evaluate(
+  // The footer follows the running job only, its percent kept within 0–100,
+  // with the job's detail (counts, speed) next to the elapsed time and its
+  // message on the right; a failed job's reason is on the status line (the
+  // backend logs it itself).
+  const job = (jobId, event, percent, message, detail) => page.evaluate(
     (e) => window.__emitJobEvent(e),
-    { jobId, jobType: "export", stage: "copy", event, percent, message }
+    { jobId, jobType: "export", stage: "copy", event, percent, message, ...(detail ? { detail } : {}) }
   );
   const fill = page.locator("#progressFill");
   await emit("analysis", "job.completed");
   await job("export-9", "job.started", 5, "Copying files");
   await expect(fill).toHaveAttribute("style", /width: 5%/);
-  await job("other-job", "job.progress", 80, "Wrong job");
+  const detail = page.locator("#progressDetail");
+  await job("export-9", "job.progress", 40, "USB: Copying Track One.mp3", "3/40 · 2.6 MB/s");
+  await expect(page.locator("#progressText")).toHaveText("USB: Copying Track One.mp3");
+  await expect(detail).toHaveText("3/40 · 2.6 MB/s");
+  await expect(detail).toBeVisible();
+  await job("other-job", "job.progress", 80, "Wrong job", "9/9");
   await page.waitForTimeout(100);
-  await expect(fill).toHaveAttribute("style", /width: 5%/);
+  await expect(fill).toHaveAttribute("style", /width: 40%/);
   await expect(page.locator("#progressText")).not.toContainText("Wrong job");
+  await expect(detail).toHaveText("3/40 · 2.6 MB/s");
   await job("export-9", "job.progress", 150, "Copying files");
   await expect(fill).toHaveAttribute("style", /width: 100%/);
+  await expect(detail).toBeHidden();
   await job("export-9", "job.failed", 100, "Export failed: disk gone");
   await expect(page.locator("#statusText")).toContainText("Export failed: disk gone");
   await page.locator("#eventLogBtn").click();

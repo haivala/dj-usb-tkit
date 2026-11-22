@@ -49,9 +49,11 @@
   using "Unindexed". It starts as "Unindexed", so leaving it adds to that playlist as before.
 - **Improvement:** Track analysis is faster, most of all for MP3s. The results are the same as before.
 - **Improvement:** Preview Fixes no longer reads every MP3 and FLAC that lacks seek data, which took minutes on a
-  USB stick. It offers the fix from the analysis files alone, and the fix reads each music file once, showing the
-  file being read, how many are left and the read speed. A file the fix had to skip is listed as unsupported in
-  later previews instead of being offered again.
+  USB stick. It offers the fix from the analysis files alone, and the fix reads each music file once. A file the
+  fix had to skip is listed as unsupported in later previews instead of being offered again.
+- **Improvement:** The progress bar shows counts, sizes and read speed next to the elapsed time, and the step and
+  the file it's working on at the right. Adding seek data and backing up the databases before a repair now show
+  how far along they are, so a slow USB stick no longer looks stuck.
 - **Fix (CRITICAL):** Repairing a USB that rekordbox exported to no longer rewrites rekordbox's own page bookkeeping in
   the PDB. On such a USB, rekordbox 6 crashed on its next export or lost its playlists.
 - **Fix (CRITICAL):** Exports and repairs no longer refuse to write to a USB that rekordbox has just exported to. They

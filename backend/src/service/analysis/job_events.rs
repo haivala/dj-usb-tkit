@@ -12,6 +12,7 @@ const JOB_TYPE: &str = "analysis";
 const STAGE: &str = "analyze_new_tracks";
 
 fn job_payload(event: &str, job_id: &str, percent: usize, message: String) -> JobEventPayload {
+    let (message, detail) = crate::progress::split_owned(message);
     JobEventPayload {
         event: event.to_string(),
         job_id: job_id.to_string(),
@@ -21,6 +22,7 @@ fn job_payload(event: &str, job_id: &str, percent: usize, message: String) -> Jo
         total: 1,
         percent,
         message,
+        detail,
         track_id: None,
         track_title: None,
         file_path: None,
@@ -90,8 +92,11 @@ fn track_payload(job_id: &str, progress: &AnalyzeTrackProgress) -> JobEventPaylo
             "job.progress",
             job_id,
             (progress.current * 100 / total).min(100),
-            crate::i18n::tr::analysis_progress(progress.current, progress.total, file_name)
-                .render(),
+            crate::progress::count(
+                crate::i18n::tr::analysis_progress(file_name).render(),
+                progress.current,
+                progress.total,
+            ),
         )
     }
 }
@@ -222,7 +227,8 @@ mod tests {
         assert_eq!(track["trackId"], "t1");
         assert_eq!(track["trackReady"], true);
         assert_eq!(track["percent"], 25);
-        assert_eq!(track["message"], "Analyzing 1/4: Song.mp3");
+        assert_eq!(track["message"], "Analyzing Song.mp3");
+        assert_eq!(track["detail"], "1/4");
         assert_ui_reads(&["job.progress", "payload.trackId", "payload.trackReady"]);
     }
 

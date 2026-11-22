@@ -66,10 +66,21 @@ pub(crate) fn backup_reason_path(backup_dir: &Path, timestamp: &str) -> PathBuf 
 
 /// Copies the USB's databases into its backups folder. Each copy and failure
 /// is logged (Event Log and file) and returned for the command's warnings.
+/// A database file being copied into a backup, as `backup_usb_databases`
+/// reports it: a slow USB stick can take minutes on one.
+pub(crate) struct BackupCopy<'a> {
+    /// The database's file name.
+    pub file: &'a str,
+    pub done_bytes: u64,
+    pub total_bytes: u64,
+    pub mb_per_s: Option<f64>,
+}
+
 pub(crate) fn backup_usb_databases(
     usb_root: &Path,
     reason: &str,
     playlist_count: Option<usize>,
+    on_copy: &mut dyn FnMut(BackupCopy),
 ) -> Vec<WarningEntry> {
     use crate::i18n::tr;
     use crate::logging::{self, Level};
@@ -106,7 +117,15 @@ pub(crate) fn backup_usb_databases(
             continue;
         }
         let dest = backup_dir.join(format!("{stem}_{timestamp}.{ext}"));
-        match std::fs::copy(&src, &dest) {
+        let file = format!("{stem}.{ext}");
+        match copy_reporting(&src, &dest, &mut |done_bytes, total_bytes, mb_per_s| {
+            on_copy(BackupCopy {
+                file: &file,
+                done_bytes,
+                total_bytes,
+                mb_per_s,
+            })
+        }) {
             Ok(_) => {
                 any_copied = true;
                 notes.push(logging::log_text(
@@ -139,6 +158,39 @@ pub(crate) fn backup_usb_databases(
     notes
 }
 
+/// `std::fs::copy` in 1 MiB chunks, reporting (bytes copied, file size, MB/s
+/// once measured) at the start, about twice a second and at the end.
+fn copy_reporting(
+    src: &Path,
+    dest: &Path,
+    on_progress: &mut dyn FnMut(u64, u64, Option<f64>),
+) -> std::io::Result<u64> {
+    use std::io::{Read as _, Write as _};
+    let mut input = std::fs::File::open(src)?;
+    let total = input.metadata().map(|m| m.len()).unwrap_or(0);
+    let mut output = std::fs::File::create(dest)?;
+    let mut meter = crate::progress::SpeedMeter::new();
+    let mut buffer = vec![0u8; 1 << 20];
+    let mut done = 0u64;
+    on_progress(0, total, None);
+    loop {
+        let read = match input.read(&mut buffer) {
+            Ok(0) => break,
+            Ok(read) => read,
+            Err(err) if err.kind() == std::io::ErrorKind::Interrupted => continue,
+            Err(err) => return Err(err),
+        };
+        output.write_all(&buffer[..read])?;
+        done += read as u64;
+        if meter.bytes(read as u64) {
+            on_progress(done, total.max(done), meter.mb_per_s());
+        }
+    }
+    output.flush()?;
+    on_progress(done, total.max(done), meter.mb_per_s());
+    Ok(done)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -152,7 +204,7 @@ mod tests {
         std::fs::write(vendor_pdb_path(usb_root), b"pdb").unwrap();
         std::fs::write(vendor_edb_path(usb_root), b"edb").unwrap();
 
-        backup_usb_databases(usb_root, "Before export", Some(7));
+        backup_usb_databases(usb_root, "Before export", Some(7), &mut |_| {});
 
         let backup_dir = vendor_db_dir(usb_root).join("backups");
         let sidecars: Vec<_> = std::fs::read_dir(&backup_dir)
@@ -179,7 +231,7 @@ mod tests {
         std::fs::create_dir_all(vendor_db_dir(usb_root)).unwrap();
         std::fs::write(vendor_pdb_path(usb_root), b"pdb").unwrap();
 
-        backup_usb_databases(usb_root, "Before playlist reorder", None);
+        backup_usb_databases(usb_root, "Before playlist reorder", None, &mut |_| {});
 
         let backup_dir = vendor_db_dir(usb_root).join("backups");
         let sidecar = std::fs::read_dir(&backup_dir)
@@ -204,7 +256,7 @@ mod tests {
         let usb = tempdir().unwrap();
         let usb_root = usb.path();
         // No live PDB/eDB present -- nothing to back up, so no sidecar either.
-        backup_usb_databases(usb_root, "Before export", Some(3));
+        backup_usb_databases(usb_root, "Before export", Some(3), &mut |_| {});
 
         let backup_dir = vendor_db_dir(usb_root).join("backups");
         let sidecar_count = std::fs::read_dir(&backup_dir)

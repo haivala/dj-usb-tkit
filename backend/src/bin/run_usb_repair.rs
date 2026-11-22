@@ -97,7 +97,11 @@ fn main() {
             apply,
             selected_fix_ids,
         },
-        |cur, tot, msg| eprintln!("  [{cur}/{tot}] {msg}"),
+        |cur, tot, text| {
+            let (msg, detail) = backend::progress::split(text);
+            let detail = detail.map(|d| format!(" ({d})")).unwrap_or_default();
+            eprintln!("  [{cur}/{tot}] {msg}{detail}");
+        },
     );
 
     if !resp.ok {

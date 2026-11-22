@@ -3417,8 +3417,17 @@ body.sidebar-collapsed .progress-footer {
   text-align: right;
 }
 
-.progress-meta #progressTime {
+.progress-meta #progressTime,
+.progress-meta #progressDetail {
   flex-shrink: 0;
+}
+
+.progress-meta #progressDetail:empty {
+  display: none;
+}
+
+.progress-meta #progressDetail::before {
+  content: "· ";
 }
 
 .progress-dismiss {

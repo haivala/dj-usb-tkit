@@ -316,7 +316,7 @@ async function startMockExport(page) {
     message: "USB: Exporting playlist"
   }));
   await expect(page.locator("#progressText")).toHaveText("USB: Exporting playlist");
-  await expect(page.locator("#progressTime")).toHaveText(/^\(\d+s\)$/);
+  await expect(page.locator("#progressTime")).toHaveText(/^\d+s$/);
 }
 
 function finishMockExport(page) {
@@ -353,7 +353,7 @@ test("analysis during an export", async ({ page }) => {
     await expect(page.locator("#statusText")).toContainText("analyzed 1, failed 0");
     await expect(page.locator("#progressFooter")).toHaveClass(/active/);
     await expect(page.locator("#progressText")).toHaveText("USB: Exporting playlist");
-    await expect(page.locator("#progressTime")).toHaveText(/^\(\d+s\)$/);
+    await expect(page.locator("#progressTime")).toHaveText(/^\d+s$/);
     await expect(page.locator("#progressPauseBtn")).toBeHidden();
     await expect(page.locator("#selectUsbFolderBtn")).toBeDisabled();
 
@@ -372,7 +372,7 @@ test("analysis during an export", async ({ page }) => {
 
     await finishMockExport(page);
     await expect(page.locator("#progressText")).toHaveText("Analyzing selected tracks");
-    await expect(page.locator("#progressTime")).toHaveText(/^\(\d+s\)$/);
+    await expect(page.locator("#progressTime")).toHaveText(/^\d+s$/);
     await expect(page.locator("#progressPauseBtn")).toBeVisible();
 
     await page.evaluate(() => window.__releaseBeforeBpmKey());
@@ -690,7 +690,7 @@ test("pause button stops picking up new tracks and resume continues the batch", 
   // A track already in flight when pause was clicked is allowed to finish
   // (same as the backend's own worker loop), so wait out more than one full
   // track (4 pieces x 60ms) before establishing the "paused" baseline count.
-  // "(paused)" isn't a usable settle signal here: it can briefly show in the
+  // "paused" isn't a usable settle signal here: it can briefly show in the
   // gap between one track's ready event and the next track's first piece.
   await page.waitForTimeout(400);
   const pausedCount = await page.locator("#libraryTableBody .bpm-pill").count();
@@ -700,12 +700,12 @@ test("pause button stops picking up new tracks and resume continues the batch", 
   await page.waitForTimeout(400);
   await expect(page.locator("#libraryTableBody .bpm-pill")).toHaveCount(pausedCount);
   // Only once the batch has genuinely stopped (no track still in flight)
-  // does the elapsed timer freeze on "(paused)".
-  await expect(page.locator("#progressTime")).toHaveText("(paused)");
+  // does the elapsed timer freeze on "paused".
+  await expect(page.locator("#progressTime")).toHaveText("paused");
 
   await page.locator("#progressPauseBtn").click();
   await expect.poll(async () => page.evaluate(() => window.__scanTestStats?.analysisPaused)).toBe(false);
-  await expect(page.locator("#progressTime")).not.toHaveText("(paused)");
+  await expect(page.locator("#progressTime")).not.toHaveText("paused");
 
   await expect(page.locator("#libraryTableBody .bpm-pill")).toHaveCount(5);
   await expect(page.locator("#statusText")).toContainText("analyzed 5, failed 0");
@@ -772,11 +772,11 @@ test("pause and the elapsed timer", async ({ page }) => {
 
     // The in-flight track hasn't reported ready yet, so the batch hasn't
     // really stopped -- the timer must still be ticking, not frozen.
-    await expect(page.locator("#progressTime")).not.toHaveText("(paused)");
+    await expect(page.locator("#progressTime")).not.toHaveText("paused");
 
     // Once that track finishes (its bpm/key piece lands), nothing else starts
     // because we're paused, so now it has genuinely stopped.
-    await expect(page.locator("#progressTime")).toHaveText("(paused)");
+    await expect(page.locator("#progressTime")).toHaveText("paused");
     const settledCount = await page.locator("#libraryTableBody .bpm-pill").count();
     expect(settledCount).toBeLessThan(3);
 
@@ -794,7 +794,7 @@ test("pause and the elapsed timer", async ({ page }) => {
     // Click pause the moment track 1 is ready. By then the mock (like a real
     // backend worker) is already past its pause check and working on track 2,
     // but track 2's first piece hasn't been reported yet -- so with no rows
-    // analyzing, the UI freezes on "(paused)" right away.
+    // analyzing, the UI freezes on "paused" right away.
     await page.waitForFunction(() => {
       if ((window.__scanTestStats?.pieceEventsByPiece?.bpm_key || 0) < 1) return false;
       document.getElementById("progressPauseBtn").click();
@@ -804,10 +804,10 @@ test("pause and the elapsed timer", async ({ page }) => {
     // Track 2's first piece shows it was in flight after all, so the timer
     // must go back to counting instead of staying frozen.
     await page.waitForFunction(() => (window.__scanTestStats?.pieceEventsByPiece?.artwork || 0) >= 2);
-    await expect(page.locator("#progressTime")).not.toHaveText("(paused)");
+    await expect(page.locator("#progressTime")).not.toHaveText("paused");
 
     // Once track 2 finishes, nothing else starts, so it's genuinely stopped.
-    await expect(page.locator("#progressTime")).toHaveText("(paused)");
+    await expect(page.locator("#progressTime")).toHaveText("paused");
     await expect(page.locator("#libraryTableBody .bpm-pill")).toHaveCount(2);
     await page.waitForTimeout(400);
     await expect(page.locator("#libraryTableBody .bpm-pill")).toHaveCount(2);

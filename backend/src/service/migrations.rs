@@ -175,7 +175,7 @@ fn run_registry(
             on_progress(
                 current,
                 total,
-                &tr::migration_progress((migration.label)(), current, total).render(),
+                &crate::progress::count((migration.label)().render(), current, total),
             );
         };
         match (migration.run)(svc, &mut progress) {
@@ -440,8 +440,16 @@ mod tests {
         assert_eq!(
             messages,
             [
-                (1, 2, "Upgrading cached beat grids: 1/2".to_string()),
-                (2, 2, "Upgrading cached beat grids: 2/2".to_string())
+                (
+                    1,
+                    2,
+                    crate::progress::with_detail("Upgrading cached beat grids", "1/2")
+                ),
+                (
+                    2,
+                    2,
+                    crate::progress::with_detail("Upgrading cached beat grids", "2/2")
+                )
             ]
         );
         assert_eq!(

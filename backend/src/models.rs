@@ -52,7 +52,12 @@ pub struct JobEventPayload {
     pub current: usize,
     pub total: usize,
     pub percent: usize,
+    /// The step and what it's working on: the progress bar's right side.
     pub message: String,
+    /// Counts, sizes, read speed (`crate::progress`): shown next to the
+    /// elapsed time.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub detail: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub track_id: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]

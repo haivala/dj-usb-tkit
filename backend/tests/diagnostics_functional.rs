@@ -5076,15 +5076,34 @@ fn repair_add_missing_mp3_seek_data_fills_an_empty_pvbr_once() {
     assert!(progress.contains(&(70, "USB: Applying Add Missing MP3 Seek Data".to_string())));
     assert!(progress.contains(&(
         94,
-        "USB: Applying Add Missing MP3 Seek Data (1/1)".to_string()
+        backend::progress::with_detail("USB: Applying Add Missing MP3 Seek Data", "1/1")
     )));
-    // The apply reads the audio: the progress names the file being read.
+    // The apply reads the audio: the progress names the file being read,
+    // with the count in its detail.
     let file_name = track_path.rsplit('/').next().expect("file name");
     assert!(
         progress.contains(&(
             70,
-            format!("USB: Applying Add Missing MP3 Seek Data 1/1 — {file_name}")
+            backend::progress::with_detail(
+                format!("USB: Applying Add Missing MP3 Seek Data — {file_name}"),
+                "1/1"
+            )
         )),
+        "{progress:#?}"
+    );
+    // So does the backup's copy of each database.
+    assert!(
+        progress.iter().any(|(percent, text)| *percent == 70
+            && backend::progress::split(text)
+                == (
+                    "USB: Backing up databases before repair — export.pdb",
+                    Some(
+                        text.rsplit(backend::progress::DETAIL_SEPARATOR)
+                            .next()
+                            .unwrap()
+                    )
+                )
+            && text.ends_with(" MB")),
         "{progress:#?}"
     );
     let data = repair.data.expect("repair data");

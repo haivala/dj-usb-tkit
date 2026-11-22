@@ -1120,6 +1120,19 @@ impl super::BackendService {
         backup: SessionBackup<'_>,
         warnings: &mut Vec<crate::models::WarningEntry>,
     ) -> UsbWriteSession<'s> {
+        self.usb_write_session_reporting(guard, usb_root, backup, warnings, &mut |_| {})
+    }
+
+    /// [`Self::usb_write_session`], reporting each database file the backup
+    /// copies (`on_copy`): on a slow stick the copy can take minutes.
+    pub(crate) fn usb_write_session_reporting<'s>(
+        &'s self,
+        guard: &'s UsbWriteGuard<'s>,
+        usb_root: &Path,
+        backup: SessionBackup<'_>,
+        warnings: &mut Vec<crate::models::WarningEntry>,
+        on_copy: &mut dyn FnMut(super::usb_vendor_compat::BackupCopy),
+    ) -> UsbWriteSession<'s> {
         match backup {
             SessionBackup::None => {}
             SessionBackup::WithRetention {
@@ -1129,6 +1142,7 @@ impl super::BackendService {
                 usb_root,
                 reason,
                 playlist_count,
+                on_copy,
             )),
             SessionBackup::CountingPlaylists { reason } => {
                 let playlist_count = UsbDatabases::present(usb_root)
@@ -1140,10 +1154,13 @@ impl super::BackendService {
                     usb_root,
                     reason,
                     playlist_count,
+                    on_copy,
                 ));
             }
             SessionBackup::ReplacingSameReason { reason } => {
-                warnings.extend(self.backup_usb_databases_replacing_same_reason(usb_root, reason));
+                warnings.extend(
+                    self.backup_usb_databases_replacing_same_reason(usb_root, reason, on_copy),
+                );
             }
         }
         let mut session = UsbWriteSession::open(Some(self), usb_root);

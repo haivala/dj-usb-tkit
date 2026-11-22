@@ -80,8 +80,10 @@ fn main() {
             apply,
             selected_fix_ids: vec![], // empty = run all supported fixes
         },
-        |current, total, message| {
-            println!("repair.progress={current}/{total}|{message}");
+        |current, total, text| {
+            let (message, detail) = backend::progress::split(text);
+            let detail = detail.map(|d| format!(" ({d})")).unwrap_or_default();
+            println!("repair.progress={current}/{total}|{message}{detail}");
         },
     );
     if !repair_response.ok {

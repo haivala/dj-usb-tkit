@@ -230,15 +230,15 @@
     const name = playlists.find((p) => p.id === playlistId)?.name;
     const run = usb.exports[name];
     const job = { jobId: "job-doc-export", jobType: "export", stage: "export_to_usb" };
-    const emit = (event, current, total, message) => emitEvent("job:event", {
+    const emit = (event, current, total, message, detail) => emitEvent("job:event", {
       event, ...job, current, total, percent: Math.min(100, Math.floor((current * 100) / Math.max(1, total))),
-      message, timestamp: new Date().toISOString(),
+      message, ...(detail ? { detail } : {}), timestamp: new Date().toISOString(),
     });
     emit("job.started", 0, 1, "USB: Exporting playlist");
     const stepMs = (opts.exportMs || 3000) / Math.max(1, run.progress.length);
-    for (const [current, total, message] of run.progress) {
+    for (const [current, total, message, detail] of run.progress) {
       await sleep(stepMs);
-      emit("job.progress", current, Math.max(1, total), message || "USB: Exporting playlist");
+      emit("job.progress", current, Math.max(1, total), message || "USB: Exporting playlist", detail);
     }
     exportedNow.add(playlistId);
     emit("job.completed", 1, 1, "USB: Export complete");

@@ -696,54 +696,6 @@ pub(super) enum SeekApplyEvent<'a> {
     },
 }
 
-/// Read speed over half-second windows, and when a new file's name is worth
-/// showing: at most every 100 ms, so fast media doesn't flood the UI.
-struct ReadMeter {
-    window_started: std::time::Instant,
-    window_bytes: usize,
-    mb_per_s: Option<f64>,
-    last_shown: Option<std::time::Instant>,
-}
-
-impl ReadMeter {
-    const WINDOW: std::time::Duration = std::time::Duration::from_millis(500);
-    const MIN_INTERVAL: std::time::Duration = std::time::Duration::from_millis(100);
-
-    fn new() -> Self {
-        Self {
-            window_started: std::time::Instant::now(),
-            window_bytes: 0,
-            mb_per_s: None,
-            last_shown: None,
-        }
-    }
-
-    /// Whether to show the file just started.
-    fn file_started(&mut self) -> bool {
-        let show = self
-            .last_shown
-            .is_none_or(|at| at.elapsed() >= Self::MIN_INTERVAL);
-        if show {
-            self.last_shown = Some(std::time::Instant::now());
-        }
-        show
-    }
-
-    /// Whether a new speed was measured (and is worth showing).
-    fn read(&mut self, bytes: usize) -> bool {
-        self.window_bytes += bytes;
-        let elapsed = self.window_started.elapsed();
-        if elapsed < Self::WINDOW {
-            return false;
-        }
-        self.mb_per_s = Some(self.window_bytes as f64 / elapsed.as_secs_f64() / 1_000_000.0);
-        self.window_started = std::time::Instant::now();
-        self.window_bytes = 0;
-        self.last_shown = Some(self.window_started);
-        true
-    }
-}
-
 /// Write the missing seek indexes of one format found by
 /// [`detect_missing_seek_data`], re-detected so bundles regenerated earlier in
 /// the same pass are covered. A file that doesn't parse cleanly is skipped and
@@ -763,7 +715,7 @@ pub(super) fn apply_missing_seek_data_repair(
     let mut skipped = 0usize;
     let targets = detect_missing_seek_data(usb_root, &parsed, format);
     let total = targets.len();
-    let mut meter = ReadMeter::new();
+    let mut meter = crate::progress::SpeedMeter::new();
     for (done, target) in targets.into_iter().enumerate() {
         let file = target
             .track_path
@@ -774,21 +726,21 @@ pub(super) fn apply_missing_seek_data_repair(
         let index = match skips.get(&target.audio_path) {
             Some(skip) => Err(skip),
             None => {
-                if meter.file_started() {
+                if meter.item_started() {
                     on_event(SeekApplyEvent::Reading {
                         done,
                         total,
                         file,
-                        mb_per_s: meter.mb_per_s,
+                        mb_per_s: meter.mb_per_s(),
                     });
                 }
                 let index = seek_index_for_audio_reporting(&target.audio_path, &mut |bytes| {
-                    if meter.read(bytes) {
+                    if meter.bytes(bytes as u64) {
                         on_event(SeekApplyEvent::Reading {
                             done,
                             total,
                             file,
-                            mb_per_s: meter.mb_per_s,
+                            mb_per_s: meter.mb_per_s(),
                         });
                     }
                 });

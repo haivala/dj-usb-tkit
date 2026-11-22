@@ -3,6 +3,8 @@
 import { USB_ROOT_LOCKING_JOB_TYPES, isUsbRootChangeBlocked } from "./components/usb/actions.mjs";
 import { t } from "./ui_texts.mjs";
 
+// `opts.detail`: the job's counts, sizes and speed, shown next to the elapsed
+// time; the text (the step and the file it's on) sits on the right.
 export function setProgress(ctx, active, percent = 0, text = "", opts = {}) {
   const { state, el } = ctx;
   el.progressFooter.classList.toggle("active", active);
@@ -18,6 +20,7 @@ export function setProgress(ctx, active, percent = 0, text = "", opts = {}) {
   // The elapsed time lives in its own span, so per-track text updates never
   // blank it between heartbeat ticks.
   el.progressText.textContent = state.progressBaseText;
+  el.progressDetail.textContent = opts.detail || "";
 }
 
 function elapsedSecs(state) {
@@ -28,7 +31,7 @@ function renderProgressTime(ctx) {
   const { state, el } = ctx;
   if (state.progressPausedAtMs) el.progressTime.textContent = t("ui-job-paused");
   else if (!state.progressHeartbeatTimer) el.progressTime.textContent = "";
-  else el.progressTime.textContent = `(${elapsedSecs(state)}s)`;
+  else el.progressTime.textContent = `${elapsedSecs(state)}s`;
 }
 
 export function dismissProgress(ctx) {
@@ -223,6 +226,7 @@ export function handleJobEvent(ctx, payload) {
   const jobType = String(payload.jobType || "job");
   const stage = String(payload.stage || "");
   const message = String(payload.message || "");
+  const detail = String(payload.detail || "");
   const percent = Number(payload.percent ?? 0);
   const statusText = formatJobStatusText(jobType, stage, message);
   const status = statusText ? { text: statusText } : null;
@@ -283,7 +287,7 @@ export function handleJobEvent(ctx, payload) {
   }
 
   if (eventName === "job.started" && jobId) {
-    state.runningJobs.set(jobId, { jobType, startedAtMs: Date.now(), percent, message });
+    state.runningJobs.set(jobId, { jobType, startedAtMs: Date.now(), percent, message, detail });
     if (USB_ROOT_LOCKING_JOB_TYPES.has(jobType)) {
       setUsbRootControlsLocked(true);
     }
@@ -334,9 +338,10 @@ export function handleJobEvent(ctx, payload) {
     if (job) {
       job.percent = percent;
       job.message = message;
+      job.detail = detail;
     }
     if (ownsProgressBar) {
-      setProgress(ctx, true, percent, message || t("ui-job-working"));
+      setProgress(ctx, true, percent, message || t("ui-job-working"), { detail });
     }
     if (status) {
       emitMessage({
@@ -398,7 +403,7 @@ function showJobOnProgressBar(ctx, jobId) {
   const job = state.runningJobs.get(jobId);
   state.activeJobId = jobId;
   state.activeJobType = job.jobType;
-  setProgress(ctx, true, job.percent, job.message || t("ui-job-working"));
+  setProgress(ctx, true, job.percent, job.message || t("ui-job-working"), { detail: job.detail });
   stopProgressHeartbeat(ctx);
   startProgressHeartbeat(ctx);
   state.progressStartedAtMs = job.startedAtMs;
