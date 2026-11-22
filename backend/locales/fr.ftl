@@ -898,6 +898,7 @@ repair-fix-damaged-tracks-description = { $count ->
 progress-detail-count = { $done }/{ $total }
 progress-detail-count-speed = { $done }/{ $total } · { $speed } Mo/s
 progress-detail-count-playlist = { $done }/{ $total } · playlist { $index }/{ $count }
+progress-detail-count-playlist-speed = { $done }/{ $total } · playlist { $index }/{ $count } · { $speed } Mo/s
 progress-detail-bytes = { $done }/{ $total } Mo
 progress-detail-bytes-speed = { $done }/{ $total } Mo · { $speed } Mo/s
 

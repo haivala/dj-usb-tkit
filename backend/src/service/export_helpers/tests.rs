@@ -1863,7 +1863,7 @@ fn copy_if_different_copies_new_file() {
     let dst = dir.path().join("sub/target.bin");
     fs::write(&src, b"hello").unwrap();
 
-    copy_if_different(&src, &dst, &FileCloser::new()).unwrap();
+    copy_if_different(&src, &dst, &FileCloser::new(), &mut |_| {}).unwrap();
     assert_eq!(fs::read(&dst).unwrap(), b"hello");
 }
 
@@ -1875,7 +1875,7 @@ fn copy_if_different_skips_same_size() {
     fs::write(&src, b"hello").unwrap();
     fs::write(&dst, b"world").unwrap(); // same size, different content
 
-    copy_if_different(&src, &dst, &FileCloser::new()).unwrap();
+    copy_if_different(&src, &dst, &FileCloser::new(), &mut |_| {}).unwrap();
     // Same size → skips copy, so dst still has "world"
     assert_eq!(fs::read(&dst).unwrap(), b"world");
 }
@@ -1888,7 +1888,7 @@ fn copy_if_different_copies_different_size() {
     fs::write(&src, b"hello world").unwrap();
     fs::write(&dst, b"hi").unwrap();
 
-    copy_if_different(&src, &dst, &FileCloser::new()).unwrap();
+    copy_if_different(&src, &dst, &FileCloser::new(), &mut |_| {}).unwrap();
     assert_eq!(fs::read(&dst).unwrap(), b"hello world");
 }
 
@@ -1898,7 +1898,7 @@ fn copy_if_different_missing_source_errors() {
     let src = dir.path().join("nonexistent.bin");
     let dst = dir.path().join("target.bin");
 
-    let result = copy_if_different(&src, &dst, &FileCloser::new());
+    let result = copy_if_different(&src, &dst, &FileCloser::new(), &mut |_| {});
     assert!(result.is_err());
 }
 
@@ -1943,7 +1943,7 @@ fn copy_wav_normalized_if_needed_rewrites_extensible_pcm() {
     fs::write(&src, wav_with_extensible_fmt(1, &data)).unwrap();
     let dst = dir.path().join("sub/target.wav");
 
-    copy_wav_normalized_if_needed(&src, &dst, &FileCloser::new()).unwrap();
+    copy_wav_normalized_if_needed(&src, &dst, &FileCloser::new(), &mut |_| {}).unwrap();
 
     let out = fs::read(&dst).unwrap();
     let format_tag = u16::from_le_bytes(out[20..22].try_into().unwrap());
@@ -1961,11 +1961,11 @@ fn copy_wav_normalized_if_needed_skips_rewrite_when_target_up_to_date() {
     fs::write(&src, wav_with_extensible_fmt(1, &[0u8; 20])).unwrap();
     let dst = dir.path().join("target.wav");
 
-    copy_wav_normalized_if_needed(&src, &dst, &FileCloser::new()).unwrap();
+    copy_wav_normalized_if_needed(&src, &dst, &FileCloser::new(), &mut |_| {}).unwrap();
     let first_write = fs::metadata(&dst).unwrap().modified().unwrap();
 
     std::thread::sleep(std::time::Duration::from_millis(10));
-    copy_wav_normalized_if_needed(&src, &dst, &FileCloser::new()).unwrap();
+    copy_wav_normalized_if_needed(&src, &dst, &FileCloser::new(), &mut |_| {}).unwrap();
     let second_write = fs::metadata(&dst).unwrap().modified().unwrap();
 
     assert_eq!(
@@ -2001,7 +2001,7 @@ fn copy_wav_normalized_if_needed_falls_back_for_non_extensible_wav() {
     fs::write(&src, &plain).unwrap();
     let dst = dir.path().join("target.wav");
 
-    copy_wav_normalized_if_needed(&src, &dst, &FileCloser::new()).unwrap();
+    copy_wav_normalized_if_needed(&src, &dst, &FileCloser::new(), &mut |_| {}).unwrap();
     assert_eq!(
         fs::read(&dst).unwrap(),
         plain,
@@ -2017,7 +2017,7 @@ fn copy_wav_normalized_if_needed_falls_back_for_extensible_other_subformat() {
     fs::write(&src, &source_bytes).unwrap();
     let dst = dir.path().join("target.wav");
 
-    copy_wav_normalized_if_needed(&src, &dst, &FileCloser::new()).unwrap();
+    copy_wav_normalized_if_needed(&src, &dst, &FileCloser::new(), &mut |_| {}).unwrap();
     assert_eq!(
         fs::read(&dst).unwrap(),
         source_bytes,

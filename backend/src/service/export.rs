@@ -1732,6 +1732,8 @@ impl BackendService {
         let closer = FileCloser::new();
         let playlist_count = runs.len();
         let mut done = 0usize;
+        // Audio copied to the stick, across every playlist of the run.
+        let mut copy_speed = crate::progress::SpeedMeter::new();
 
         for (run_idx, run) in runs.iter_mut().enumerate() {
             let mut exported_tracks = 0usize;
@@ -1743,21 +1745,28 @@ impl BackendService {
                 done += 1;
                 let copying = tr::export_progress_copying(&track.file_name);
                 let (current, tracks) = (idx + 1, run.playlist.tracks.len());
-                let message = if playlist_count > 1 {
-                    crate::progress::with_detail(
-                        tr::export_progress_batch_playlist(copying, &run.playlist.name).render(),
-                        tr::progress_detail_count_playlist(
+                let message = |mb_per_s: Option<f64>| {
+                    if playlist_count > 1 {
+                        crate::progress::count_playlist_speed(
+                            tr::export_progress_batch_playlist(
+                                copying.clone(),
+                                &run.playlist.name,
+                            )
+                            .render(),
+                            (current, tracks),
+                            (run_idx + 1, playlist_count),
+                            mb_per_s,
+                        )
+                    } else {
+                        crate::progress::count_speed(
+                            copying.render(),
                             current,
                             tracks,
-                            run_idx + 1,
-                            playlist_count,
+                            mb_per_s,
                         )
-                        .render(),
-                    )
-                } else {
-                    crate::progress::count(copying.render(), current, tracks)
+                    }
                 };
-                on_progress(done, total_steps, &message);
+                on_progress(done, total_steps, &message(copy_speed.mb_per_s()));
 
                 let source = PathBuf::from(&track.file_path);
                 if !source.is_file() {
@@ -1821,10 +1830,15 @@ impl BackendService {
                     });
                 let owns_exported_media = existing_exported_path.is_none();
                 if !export_dry_run && owns_exported_media {
+                    let mut on_bytes = |bytes| {
+                        if copy_speed.bytes(bytes) {
+                            on_progress(done, total_steps, &message(copy_speed.mb_per_s()));
+                        }
+                    };
                     if AudioFormat::from_extension(&extension) == Some(AudioFormat::Wav) {
-                        copy_wav_normalized_if_needed(&source, &target, &closer)?;
+                        copy_wav_normalized_if_needed(&source, &target, &closer, &mut on_bytes)?;
                     } else {
-                        copy_if_different(&source, &target, &closer)?;
+                        copy_if_different(&source, &target, &closer, &mut on_bytes)?;
                     }
                 }
                 exported_tracks += 1;

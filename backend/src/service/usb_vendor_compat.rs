@@ -165,28 +165,18 @@ fn copy_reporting(
     dest: &Path,
     on_progress: &mut dyn FnMut(u64, u64, Option<f64>),
 ) -> std::io::Result<u64> {
-    use std::io::{Read as _, Write as _};
     let mut input = std::fs::File::open(src)?;
     let total = input.metadata().map(|m| m.len()).unwrap_or(0);
     let mut output = std::fs::File::create(dest)?;
     let mut meter = crate::progress::SpeedMeter::new();
-    let mut buffer = vec![0u8; 1 << 20];
     let mut done = 0u64;
     on_progress(0, total, None);
-    loop {
-        let read = match input.read(&mut buffer) {
-            Ok(0) => break,
-            Ok(read) => read,
-            Err(err) if err.kind() == std::io::ErrorKind::Interrupted => continue,
-            Err(err) => return Err(err),
-        };
-        output.write_all(&buffer[..read])?;
-        done += read as u64;
-        if meter.bytes(read as u64) {
+    crate::progress::copy_counting(&mut input, &mut output, &mut |bytes| {
+        done += bytes;
+        if meter.bytes(bytes) {
             on_progress(done, total.max(done), meter.mb_per_s());
         }
-    }
-    output.flush()?;
+    })?;
     on_progress(done, total.max(done), meter.mb_per_s());
     Ok(done)
 }

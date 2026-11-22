@@ -53,6 +53,23 @@ pub fn count_speed(
     with_detail(message, detail.render())
 }
 
+/// `3/40 · playlist 2/5 · 2.6 MB/s`: [`count_speed`] for one playlist of
+/// several being exported.
+pub fn count_playlist_speed(
+    message: impl AsRef<str>,
+    (done, total): (usize, usize),
+    (index, count): (usize, usize),
+    mb_per_s: Option<f64>,
+) -> String {
+    let detail = match mb_per_s {
+        Some(speed) => {
+            tr::progress_detail_count_playlist_speed(done, total, index, count, speed_text(speed))
+        }
+        None => tr::progress_detail_count_playlist(done, total, index, count),
+    };
+    with_detail(message, detail.render())
+}
+
 /// `1.2/1.9 MB · 0.4 MB/s`: bytes copied of a file's size, with the speed
 /// once measured.
 pub fn bytes_speed(
@@ -67,6 +84,30 @@ pub fn bytes_speed(
         None => tr::progress_detail_bytes(mb(done), mb(total)),
     };
     with_detail(message, detail.render())
+}
+
+/// Copies `input` to `output` in 1 MiB chunks, passing each chunk's size to
+/// `on_bytes` (for a [`SpeedMeter`]); the bytes copied in all.
+pub fn copy_counting(
+    input: &mut impl std::io::Read,
+    output: &mut impl std::io::Write,
+    on_bytes: &mut dyn FnMut(u64),
+) -> std::io::Result<u64> {
+    let mut buffer = vec![0u8; 1 << 20];
+    let mut done = 0u64;
+    loop {
+        let read = match input.read(&mut buffer) {
+            Ok(0) => break,
+            Ok(read) => read,
+            Err(err) if err.kind() == std::io::ErrorKind::Interrupted => continue,
+            Err(err) => return Err(err),
+        };
+        output.write_all(&buffer[..read])?;
+        done += read as u64;
+        on_bytes(read as u64);
+    }
+    output.flush()?;
+    Ok(done)
 }
 
 /// Two decimals below 1 MB/s, so a slow stick doesn't read as 0.0.

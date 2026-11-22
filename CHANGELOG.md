@@ -39,62 +39,35 @@
 
 ## Unreleased
 
+- **Improvement:** The export's progress bar shows how fast music files are being copied to the USB, next to the track count.
+
 ## 0.6.5
 
 **Severity:** critical — see item(s) marked **(CRITICAL)** below.
 
-- **Improvement:** Every change the app writes to a USB (exports, repairs, track and cue edits, playlist order and
-  removal, the Player Menu) is checked before it reaches the stick. If the new PDB would have anything rekordbox
-  or the players can't read that it didn't have before, nothing is written, the USB keeps both databases as they
-  were, and the Event Log names the problem.
-- **Improvement:** The repair that adds music files in no playlist asks for the playlist's name instead of always
-  using "Unindexed". It starts as "Unindexed", so leaving it adds to that playlist as before.
+- **Improvement:** Every change the app writes to a USB (exports, repairs, track and cue edits, playlist order and removal, the Player Menu) is checked before it reaches the stick. If the new PDB would have anything rekordbox or the players can't read that it didn't have before, nothing is written, the USB keeps both databases as they were, and the Event Log names the problem.
+- **Improvement:** The repair that adds music files in no playlist asks for the playlist's name instead of always using "Unindexed". It starts as "Unindexed", so leaving it adds to that playlist as before.
 - **Improvement:** Track analysis is faster, most of all for MP3s. The results are the same as before.
-- **Improvement:** Preview Fixes no longer reads every MP3 and FLAC that lacks seek data, which took minutes on a
-  USB stick. It offers the fix from the analysis files alone, and the fix reads each music file once. A file the
-  fix had to skip is listed as unsupported in later previews instead of being offered again.
-- **Improvement:** The progress bar shows counts, sizes and read speed next to the elapsed time, and the step and
-  the file it's working on at the right. Adding seek data and backing up the databases before a repair now show
-  how far along they are, so a slow USB stick no longer looks stuck.
-- **Fix (CRITICAL):** Repairing a USB that rekordbox exported to no longer rewrites rekordbox's own page bookkeeping in
-  the PDB. On such a USB, rekordbox 6 crashed on its next export or lost its playlists.
-- **Fix (CRITICAL):** Exports and repairs no longer refuse to write to a USB that rekordbox has just exported to. They
-  checked rekordbox's pages for the app's own page shape; they now refuse only problems the write itself adds.
-- **Fix (CRITICAL):** A Player Menu change leaves the PDB's menu pages in the shape rekordbox writes. Before, their page
-  bookkeeping was one rekordbox 6 can crash on. Repair puts right the menu pages earlier versions left that way.
-- **Fix:** Repair puts right USBs an earlier repair left that way, and pages rekordbox left half-written when it
-  crashed during an export.
+- **Improvement:** Preview Fixes no longer reads every MP3 and FLAC that lacks seek data, which took minutes on a USB stick. It offers the fix from the analysis files alone, and the fix reads each music file once. A file the fix had to skip is listed as unsupported in later previews instead of being offered again.
+- **Improvement:** The progress bar shows counts, sizes and read speed next to the elapsed time, and the step and the file it's working on at the right. Adding seek data and backing up the databases before a repair now show how far along they are, so a slow USB stick no longer looks stuck.
+- **Fix (CRITICAL):** Repairing a USB that rekordbox exported to no longer rewrites rekordbox's own page bookkeeping in the PDB. On such a USB, rekordbox 6 crashed on its next export or lost its playlists.
+- **Fix (CRITICAL):** Exports and repairs no longer refuse to write to a USB that rekordbox has just exported to. They checked rekordbox's pages for the app's own page shape; they now refuse only problems the write itself adds.
+- **Fix (CRITICAL):** A Player Menu change leaves the PDB's menu pages in the shape rekordbox writes. Before, their page bookkeeping was one rekordbox 6 can crash on. Repair puts right the menu pages earlier versions left that way.
+- **Fix:** Repair puts right USBs an earlier repair left that way, and pages rekordbox left half-written when it crashed during an export.
 - **Fix:** Exports that add to a USB rekordbox wrote keep the PDB's pages the way rekordbox expects them.
-- **Fix:** A track whose file name a crashed rekordbox write damaged, next to an intact track for the same file,
-  is merged into that track in both databases, keeping its playlists and play history. It used to show as
-  missing audio that couldn't be removed while it was in a play history.
-- **Fix:** Syncing the eDB's play history from the PDB points each entry at the eDB's own track. It used the
-  PDB's track numbers, which rekordbox assigns separately, so history could name the wrong tracks.
+- **Fix:** A track whose file name a crashed rekordbox write damaged, next to an intact track for the same file, is merged into that track in both databases, keeping its playlists and play history. It used to show as missing audio that couldn't be removed while it was in a play history.
+- **Fix:** Syncing the eDB's play history from the PDB points each entry at the eDB's own track. It used the PDB's track numbers, which rekordbox assigns separately, so history could name the wrong tracks.
 - **Fix:** ISRC codes rekordbox wrote to the PDB are read correctly, so a repair no longer rewrites those tracks.
-- **Fix:** A playlist rekordbox numbers differently in the PDB and the eDB no longer fails parity. Parity compares
-  the order the players show the playlists in, not the numbers, so Preview Fixes no longer offers a repair that
-  changes nothing after every rekordbox export.
-- **Fix:** Tracks rekordbox exported no longer show up as differing in their date added, so Preview Fixes no
-  longer offers to rewrite them. rekordbox keeps two dates in the PDB, the day a track joined its collection and
-  the day it was added to the USB; a repair now compares and writes each the way rekordbox does.
-- **Fix:** Artists, albums and tracks the export adds to the eDB leave empty fields blank, as rekordbox does,
-  instead of filling them with 0 or an empty text: an album's artwork and search name, an artist's search name,
-  and a track's search title, original artist, remixer, composer and label. Rows earlier versions wrote stay as
-  they are.
+- **Fix:** A playlist rekordbox numbers differently in the PDB and the eDB no longer fails parity. Parity compares the order the players show the playlists in, not the numbers, so Preview Fixes no longer offers a repair that changes nothing after every rekordbox export.
+- **Fix:** Tracks rekordbox exported no longer show up as differing in their date added, so Preview Fixes no longer offers to rewrite them. rekordbox keeps two dates in the PDB, the day a track joined its collection and the day it was added to the USB; a repair now compares and writes each the way rekordbox does.
+- **Fix:** Artists, albums and tracks the export adds to the eDB leave empty fields blank, as rekordbox does, instead of filling them with 0 or an empty text: an album's artwork and search name, an artist's search name, and a track's search title, original artist, remixer, composer and label. Rows earlier versions wrote stay as they are.
 - **Fix:** Re-exporting a track that is already on the USB no longer turns on its KUVO delivery flag in the eDB.
-- **Fix:** Tracks that repair adds get the day they were added as their date in the eDB, as in the PDB. rekordbox
-  never leaves that date empty; the repair did.
-- **Fix:** The rekordbox and Mixxx chips turn green once every track imported from them is analyzed, as
-  folder chips do.
-- **Fix:** A source folder added through a symlink, inside a source folder added by another path, no longer
-  lists its tracks twice. It takes the outer folder's path, and libraries that already have the doubled tracks
-  are merged back to one track per file, keeping the analyzed one.
-- **Fix:** Analyze Library works with only rekordbox or Mixxx switched on, instead of asking to switch on a
-  source folder.
-- **Fix:** Analyze Library also analyzes rekordbox tracks that are missing a waveform, BPM or length. The BPM,
-  key and beat grid that came from rekordbox are kept.
-- **Chore:** Tests run every kind of USB write, one after another, on a USB the app made and on one shaped the way
-  rekordbox leaves it, and check that the PDB stays readable after each.
+- **Fix:** Tracks that repair adds get the day they were added as their date in the eDB, as in the PDB. rekordbox never leaves that date empty; the repair did.
+- **Fix:** The rekordbox and Mixxx chips turn green once every track imported from them is analyzed, as folder chips do.
+- **Fix:** A source folder added through a symlink, inside a source folder added by another path, no longer lists its tracks twice. It takes the outer folder's path, and libraries that already have the doubled tracks are merged back to one track per file, keeping the analyzed one.
+- **Fix:** Analyze Library works with only rekordbox or Mixxx switched on, instead of asking to switch on a source folder.
+- **Fix:** Analyze Library also analyzes rekordbox tracks that are missing a waveform, BPM or length. The BPM, key and beat grid that came from rekordbox are kept.
+- **Chore:** Tests run every kind of USB write, one after another, on a USB the app made and on one shaped the way rekordbox leaves it, and check that the PDB stays readable after each.
 
 ## 0.6.4
 
@@ -102,1506 +75,572 @@
 
 - **Improvement:** Importing from rekordbox or Mixxx now asks when tracks differ. Cues, BPM, key or beat grid that you edited, analyzed or brought in from elsewhere are kept, and a dialog lists the tracks whose values differ in the library, with the choice to keep yours or take the library's. Values that came from the same library before follow changes made there without asking, cues included. This replaces the playlist import's "Force update track data" option.
 - **Improvement:** Importing from rekordbox or Mixxx treats identical copies of a file in different folders like the folder scan does: the library keeps one track, the Event Log names the extra copy, and copies imported earlier as separate tracks are merged.
-- **Fix:** Indexing no longer fails with a database error when one source folder is inside another and the
-  inner folder's tracks are not in the library yet.
-- **Fix (CRITICAL):** Analysis no longer runs the computer out of memory on a long batch. The memory analysis keeps for
-  reuse is now reused from track to track instead of growing with every track analyzed, and fewer tracks are
-  analyzed at once on a computer with many CPU cores.
-- **Fix:** Essentia analysis keeps its workers running for the whole job instead of restarting all of them
-  over and over, and stops them when the job ends.
+- **Fix:** Indexing no longer fails with a database error when one source folder is inside another and the inner folder's tracks are not in the library yet.
+- **Fix (CRITICAL):** Analysis no longer runs the computer out of memory on a long batch. The memory analysis keeps for reuse is now reused from track to track instead of growing with every track analyzed, and fewer tracks are analyzed at once on a computer with many CPU cores.
+- **Fix:** Essentia analysis keeps its workers running for the whole job instead of restarting all of them over and over, and stops them when the job ends.
 
 ## 0.6.3
 
 **Severity:** feature
 
-- **New feature:** The app is available in French. Pick Français in Settings → Language or in Quick Start; a
-  computer set to French opens the app in French until another language is picked.
-- **New feature:** Arch Linux users can install the app from the AUR as `dj-usb-tkit-bin`. When a newer
-  version is out, the app says so and points to the package manager instead of offering a download.
-- **New feature:** OGG Vorbis and Opus tracks can go on a USB. Players don't play either, so export converts them
-  the way it converts lossless tracks, to the USB's first ticked audio format the app makes (AIFF, WAV or MP3),
-  with the track's cues, beat grid and BPM. Convert… makes the same files ahead of time. Opus tracks also play,
-  show waveforms and can be analyzed in the app. An `.ogg` file holding Opus audio is shown as Opus. These tracks
-  are still left off a USB whose audio formats include none of the three, with a warning.
-- **Improvement:** Protected AAC tracks (`.m4p`), which players don't play and the app can't convert, are no
-  longer added to playlists. The row's "+" is off and says why, adding a selection leaves them out and says how
-  many, and a playlist imported from rekordbox or Mixxx leaves them out with a warning.
-- **Improvement:** The heading above a USB history session's track list names the database that has the
-  session, or says Both DBs, for example "HISTORY 007 (Both DBs)".
-- **Fix:** Analysis no longer fails every track still waiting with "Not enough available memory" when the last
-  running track ends while memory is short. The next track starts anyway.
-- **Fix:** USB history lists the sessions from both the PDB and the eDB. A session recorded only in the eDB was
-  missing while the USB had a PDB. A session in both shows the PDB's tracks, or the eDB's when the PDB's copy is
-  empty, and each session's tracks are looked up in the database the session came from.
+- **New feature:** The app is available in French. Pick Français in Settings → Language or in Quick Start; a computer set to French opens the app in French until another language is picked.
+- **New feature:** Arch Linux users can install the app from the AUR as `dj-usb-tkit-bin`. When a newer version is out, the app says so and points to the package manager instead of offering a download.
+- **New feature:** OGG Vorbis and Opus tracks can go on a USB. Players don't play either, so export converts them the way it converts lossless tracks, to the USB's first ticked audio format the app makes (AIFF, WAV or MP3), with the track's cues, beat grid and BPM. Convert… makes the same files ahead of time. Opus tracks also play, show waveforms and can be analyzed in the app. An `.ogg` file holding Opus audio is shown as Opus. These tracks are still left off a USB whose audio formats include none of the three, with a warning.
+- **Improvement:** Protected AAC tracks (`.m4p`), which players don't play and the app can't convert, are no longer added to playlists. The row's "+" is off and says why, adding a selection leaves them out and says how many, and a playlist imported from rekordbox or Mixxx leaves them out with a warning.
+- **Improvement:** The heading above a USB history session's track list names the database that has the session, or says Both DBs, for example "HISTORY 007 (Both DBs)".
+- **Fix:** Analysis no longer fails every track still waiting with "Not enough available memory" when the last running track ends while memory is short. The next track starts anyway.
+- **Fix:** USB history lists the sessions from both the PDB and the eDB. A session recorded only in the eDB was missing while the USB had a PDB. A session in both shows the PDB's tracks, or the eDB's when the PDB's copy is empty, and each session's tracks are looked up in the database the session came from.
 
 ## 0.6.2
 
-- **Improvement:** Analyzing several tracks at once no longer slows down on Windows, where a batch could take
-  several times longer than the same tracks on Linux, or on Linux computers with many processor cores. The
-  app now keeps the memory analysis frees for the next track while a job runs, and gives it back to the system when the job is done.
+- **Improvement:** Analyzing several tracks at once no longer slows down on Windows, where a batch could take several times longer than the same tracks on Linux, or on Linux computers with many processor cores. The app now keeps the memory analysis frees for the next track while a job runs, and gives it back to the system when the job is done.
 
 ## 0.6.1
 
 **Severity:** feature
 
-- **New feature:** Export several playlists at once: Export playlists… under the playlists in the sidebar (while a
-  USB is connected) opens a page listing every playlist in the app's order, with its tracks, length and
-  size, what exporting it would copy, when and to which USB it was last exported, and whether the USB already has it or it changed
-  since. When a selected playlist needs analysis, Analyze Missing Tracks replaces Export and analyzes only the
-  selected playlists. Playlists waiting for analysis can be selected; every selectable playlist is chosen to start with; the page shows what the choice
-  copies against the free space, and the export runs as one job with one backup. With every playlist chosen, the
-  playlists can go on the USB in the app's order; in additive mode, playlists already on the USB can also take the
-  app's track order. Without these, playlists already on the USB keep their place and their order, new playlists go
-  on top and new tracks at the end. The page opens immediately and shows “Loading playlists…” while playlist details are fetched.
-- **Improvement:** Import and New in the sidebar now stay in place above the playlist list instead of scrolling away
-  with it.
-- **Fix:** Rebuilding a missing PDB from the eDB, with the USB's other fixes, now finishes in one repair. A track with
-  no date added gets the same date in both databases instead of only in the PDB, and removing tracks whose audio
-  file is gone also updates the track count older players read from the PDB and the eDB's own track count, so the
-  next scan no longer offers more fixes.
-- **Fix:** A PDB with an empty playlist that has the same name as a playlist with tracks no longer leaves the strict
-  parity repair offering the same fix after every run. Diagnostics warn about the empty copies, and the repair
-  always removes them, from the eDB too where it has them, before it makes the playlists match.
-- **Chore:** The backend tests for playlists, library sources and browsing, rekordbox and Mixxx imports, track
-  identity, playback sources and settings now run through the same commands the app calls, instead of inside the
-  backend. Setup helpers the functional tests had copied file to file are shared, and unit tests that only repeated
-  a functional test are gone.
+- **New feature:** Export several playlists at once: Export playlists… under the playlists in the sidebar (while a USB is connected) opens a page listing every playlist in the app's order, with its tracks, length and size, what exporting it would copy, when and to which USB it was last exported, and whether the USB already has it or it changed since. When a selected playlist needs analysis, Analyze Missing Tracks replaces Export and analyzes only the selected playlists. Playlists waiting for analysis can be selected; every selectable playlist is chosen to start with; the page shows what the choice copies against the free space, and the export runs as one job with one backup. With every playlist chosen, the playlists can go on the USB in the app's order; in additive mode, playlists already on the USB can also take the app's track order. Without these, playlists already on the USB keep their place and their order, new playlists go on top and new tracks at the end. The page opens immediately and shows “Loading playlists…” while playlist details are fetched.
+- **Improvement:** Import and New in the sidebar now stay in place above the playlist list instead of scrolling away with it.
+- **Fix:** Rebuilding a missing PDB from the eDB, with the USB's other fixes, now finishes in one repair. A track with no date added gets the same date in both databases instead of only in the PDB, and removing tracks whose audio file is gone also updates the track count older players read from the PDB and the eDB's own track count, so the next scan no longer offers more fixes.
+- **Fix:** A PDB with an empty playlist that has the same name as a playlist with tracks no longer leaves the strict parity repair offering the same fix after every run. Diagnostics warn about the empty copies, and the repair always removes them, from the eDB too where it has them, before it makes the playlists match.
+- **Chore:** The backend tests for playlists, library sources and browsing, rekordbox and Mixxx imports, track identity, playback sources and settings now run through the same commands the app calls, instead of inside the backend. Setup helpers the functional tests had copied file to file are shared, and unit tests that only repeated a functional test are gone.
 
 ## 0.6.0
 
 **Severity:** feature
 
-- **New feature:** The track lists' columns can be hidden and put in a new order, from the button at the right end
-  of any track list's header. The layout applies to every track list (Library, playlists, USB playlists and history)
-  and is kept between runs.
-- **New feature:** A Genre column for the track lists, sortable like the others. It is hidden until you tick it in
-  the column editor.
-- **New feature:** USB playlists and the tracks in them can be put in a new order (Edit order → drag or sort → Save
-  order), saved straight to the USB.
-- **New feature:** In the Import Playlists dialog, each group heading (Playlists, Crates, History) has a box that
-  ticks or unticks every list in that group, for rekordbox and Mixxx alike.
-- **New feature:** Until you pick a language, the app starts in your computer's language when it has it, and in
-  English otherwise.
-- **Improvement:** Quick Start, which opens on the first run, has the same language choice as Settings, so the
-  language can be picked before anything else. Both show only when the app has more than one language.
-- **Improvement:** The cue editor shows cue positions to the millisecond (`1:23.456`), the precision they are saved
-  with.
-- **Improvement:** Ready for translations: BPM values use the language's decimal separator, as the backend's numbers
-  already did; cue positions keep a dot in every language. The cue markers' tooltips are whole texts a translation
-  can reorder, and the diagnostics overview finds its sections by key instead of by their translated titles.
-- **Improvement:** The Engine DJ library is written from the PDB and the eDB together: a track or playlist only
-  one of them has is in it too.
-- **Improvement:** Every USB edit, repair and export checks which databases the USB has in the same way, and saves
-  them to the USB together: both or neither. When the second one can't be written, the first is put back, and the
-  edit can be tried again. Export and playlist removal delete files from the USB only after both databases are
-  saved, and an export that fails is not recorded as done. An export whose eDB can't be written now fails instead of
-  saving only the PDB. USB writes run one at a time, and connecting the USB again starts from the databases on the
-  USB, not from edits a failed save left behind.
-- **Improvement:** The library's filter mark comes from the backend, which already knows which folders and imported
-  libraries are switched off or missing.
-- **Fix:** Clicking another playlist while typing a new playlist's name saves the new playlist and then opens the
-  one you clicked. Before, the new playlist opened instead.
-- **Fix:** A USB with only the PDB or only the eDB works like one with both. Cue, BPM, key and track detail edits save
-  to the database it has; its histories show from the eDB; removing a playlist also removes the files of the tracks
-  only that playlist holds; the export estimate works, and says the missing database is created on export. Export
-  first builds the missing database from the other, so the USB ends up with both. The Engine DB export reads the
-  database the USB has, without creating the other. The parity report says which database is missing instead of failing. Diagnostics show
-  the missing database as a warning and check playlists and analysis from the database the USB has, instead of failing
-  them. Preview Fixes offers the USB's other fixes
-  in the same pass as the missing database, so one repair is enough.
-- **Fix:** An edit of a track that is in only one of the USB's two databases saves to that one, and the log says
-  Preview Fixes adds it to the other. Before, the edit was refused.
-- **Chore:** The text catalog has one key per English text: a text with the same role on several pages (Remove,
-  Drag to reorder, page names, track fields) is one `ui-common-*` key, so a translation translates it once. A test
-  fails on a new duplicate unless it's listed with why it stays apart.
-- **Chore:** The four longest end-to-end tests get three times the default time: with every spec running in parallel
-  they ran past it, though no step hung.
-- **Chore:** The UI's end-to-end tests share one mock backend that answers like the real one, and tests that use the
-  same setup run as one test. Unit tests whose checks the end-to-end tests now make are removed, and so is UI code
-  that only those unit tests reached. The end-to-end coverage report counts every page load of a test, and an
-  end-to-end run stops when the built UI is older than its sources or is the coverage build.
+- **New feature:** The track lists' columns can be hidden and put in a new order, from the button at the right end of any track list's header. The layout applies to every track list (Library, playlists, USB playlists and history) and is kept between runs.
+- **New feature:** A Genre column for the track lists, sortable like the others. It is hidden until you tick it in the column editor.
+- **New feature:** USB playlists and the tracks in them can be put in a new order (Edit order → drag or sort → Save order), saved straight to the USB.
+- **New feature:** In the Import Playlists dialog, each group heading (Playlists, Crates, History) has a box that ticks or unticks every list in that group, for rekordbox and Mixxx alike.
+- **New feature:** Until you pick a language, the app starts in your computer's language when it has it, and in English otherwise.
+- **Improvement:** Quick Start, which opens on the first run, has the same language choice as Settings, so the language can be picked before anything else. Both show only when the app has more than one language.
+- **Improvement:** The cue editor shows cue positions to the millisecond (`1:23.456`), the precision they are saved with.
+- **Improvement:** Ready for translations: BPM values use the language's decimal separator, as the backend's numbers already did; cue positions keep a dot in every language. The cue markers' tooltips are whole texts a translation can reorder, and the diagnostics overview finds its sections by key instead of by their translated titles.
+- **Improvement:** The Engine DJ library is written from the PDB and the eDB together: a track or playlist only one of them has is in it too.
+- **Improvement:** Every USB edit, repair and export checks which databases the USB has in the same way, and saves them to the USB together: both or neither. When the second one can't be written, the first is put back, and the edit can be tried again. Export and playlist removal delete files from the USB only after both databases are saved, and an export that fails is not recorded as done. An export whose eDB can't be written now fails instead of saving only the PDB. USB writes run one at a time, and connecting the USB again starts from the databases on the USB, not from edits a failed save left behind.
+- **Improvement:** The library's filter mark comes from the backend, which already knows which folders and imported libraries are switched off or missing.
+- **Fix:** Clicking another playlist while typing a new playlist's name saves the new playlist and then opens the one you clicked. Before, the new playlist opened instead.
+- **Fix:** A USB with only the PDB or only the eDB works like one with both. Cue, BPM, key and track detail edits save to the database it has; its histories show from the eDB; removing a playlist also removes the files of the tracks only that playlist holds; the export estimate works, and says the missing database is created on export. Export first builds the missing database from the other, so the USB ends up with both. The Engine DB export reads the database the USB has, without creating the other. The parity report says which database is missing instead of failing. Diagnostics show the missing database as a warning and check playlists and analysis from the database the USB has, instead of failing them. Preview Fixes offers the USB's other fixes in the same pass as the missing database, so one repair is enough.
+- **Fix:** An edit of a track that is in only one of the USB's two databases saves to that one, and the log says Preview Fixes adds it to the other. Before, the edit was refused.
+- **Chore:** The text catalog has one key per English text: a text with the same role on several pages (Remove, Drag to reorder, page names, track fields) is one `ui-common-*` key, so a translation translates it once. A test fails on a new duplicate unless it's listed with why it stays apart.
+- **Chore:** The four longest end-to-end tests get three times the default time: with every spec running in parallel they ran past it, though no step hung.
+- **Chore:** The UI's end-to-end tests share one mock backend that answers like the real one, and tests that use the same setup run as one test. Unit tests whose checks the end-to-end tests now make are removed, and so is UI code that only those unit tests reached. The end-to-end coverage report counts every page load of a test, and an end-to-end run stops when the built UI is older than its sources or is the coverage build.
 
 ## 0.5.7
 
 **Severity:** critical — see item(s) marked **(CRITICAL)** below.
 
-- **Fix (CRITICAL):** The strict parity repair no longer replaces a track's real date added in the PDB with
-  1970-01-01. The repair in versions before 0.4.10 wrote that date into the eDB for tracks it had no date for, and
-  later repairs copied it into the PDB. It now counts as no date, so the repair puts the PDB's real date into the
-  eDB, and an export fills it in as it does an empty date.
-- **Fix:** Preview Fixes offers the strict parity repair for playlists whose only parity findings are notes (other
-  track fields that differ between the PDB and the eDB), so one repair leaves no notes. A genre, label or artist
-  name that differs only in upper and lower case is no longer noted, since the PDB and the eDB keep one entry
-  per name either way.
-- **Fix:** Warnings that pass on a reason, such as a failed save to the USB, a failed repair step or a failed
-  track analysis, no longer show "validation error:" in front of it, and show the reason in the app's language.
-  The log file keeps it in English.
-- **Improvement:** The Event Log entry for a failed action, such as renaming a playlist, saving cues or restoring a
-  backup, now says what failed, as the status line does, instead of only the reason.
-- **Improvement:** After a playlist change, such as a rename, an add or an export, the sidebar's "On this USB" marks
-  update together with the change instead of a moment after it.
-- **Improvement:** Exporting a playlist with a column sort active saves the sort as its order and exports in one
-  step. If that fails, the status line says once that the export failed, and the sort stays on screen.
-- **Improvement:** Selecting a USB shows its audio formats, its name and the sidebar's "On this USB" marks
-  together with the selection, instead of one after another.
-- **Improvement:** Selecting a USB reads its PDB and its eDB once. Before, the selection, the diagnostics that
-  follow and the USB Playlists page each read them again.
-- **Improvement:** Opening the eDB is quicker after its first open. Selecting a USB, its diagnostics, history,
-  export and repairs each opened it again, and every open worked out its key anew.
+- **Fix (CRITICAL):** The strict parity repair no longer replaces a track's real date added in the PDB with 1970-01-01. The repair in versions before 0.4.10 wrote that date into the eDB for tracks it had no date for, and later repairs copied it into the PDB. It now counts as no date, so the repair puts the PDB's real date into the eDB, and an export fills it in as it does an empty date.
+- **Fix:** Preview Fixes offers the strict parity repair for playlists whose only parity findings are notes (other track fields that differ between the PDB and the eDB), so one repair leaves no notes. A genre, label or artist name that differs only in upper and lower case is no longer noted, since the PDB and the eDB keep one entry per name either way.
+- **Fix:** Warnings that pass on a reason, such as a failed save to the USB, a failed repair step or a failed track analysis, no longer show "validation error:" in front of it, and show the reason in the app's language. The log file keeps it in English.
+- **Improvement:** The Event Log entry for a failed action, such as renaming a playlist, saving cues or restoring a backup, now says what failed, as the status line does, instead of only the reason.
+- **Improvement:** After a playlist change, such as a rename, an add or an export, the sidebar's "On this USB" marks update together with the change instead of a moment after it.
+- **Improvement:** Exporting a playlist with a column sort active saves the sort as its order and exports in one step. If that fails, the status line says once that the export failed, and the sort stays on screen.
+- **Improvement:** Selecting a USB shows its audio formats, its name and the sidebar's "On this USB" marks together with the selection, instead of one after another.
+- **Improvement:** Selecting a USB reads its PDB and its eDB once. Before, the selection, the diagnostics that follow and the USB Playlists page each read them again.
+- **Improvement:** Opening the eDB is quicker after its first open. Selecting a USB, its diagnostics, history, export and repairs each opened it again, and every open worked out its key anew.
 - **Improvement:** Exporting a playlist and repairs that rewrite the PDB read the existing PDB faster.
 - **Improvement:** Opening a USB track's details reads its analysis file once instead of twice.
-- **Improvement:** On a large USB, the USB Playlists and History pages, the parity check and a USB track's details
-  open much faster. They no longer look up every track's files on the stick to work out their paths.
-- **Improvement:** The diagnostics' Beat grid format check runs once per USB until something on it changes, so
-  selecting the USB again doesn't read its analysis files again. It reads only the beat grid of the tracks the
-  export log names, in folder order.
-- **Improvement:** USB repair offers Fix Beat Grid for exactly the tracks the diagnostics' Beat grid format line
-  flags. Before, the two looked for outdated beat grids each in their own way.
-- **Improvement:** Checking a USB for repairs reads only the parts of the analysis files its BPM, beat grid and
-  seek data checks need, not their waveforms.
+- **Improvement:** On a large USB, the USB Playlists and History pages, the parity check and a USB track's details open much faster. They no longer look up every track's files on the stick to work out their paths.
+- **Improvement:** The diagnostics' Beat grid format check runs once per USB until something on it changes, so selecting the USB again doesn't read its analysis files again. It reads only the beat grid of the tracks the export log names, in folder order.
+- **Improvement:** USB repair offers Fix Beat Grid for exactly the tracks the diagnostics' Beat grid format line flags. Before, the two looked for outdated beat grids each in their own way.
+- **Improvement:** Checking a USB for repairs reads only the parts of the analysis files its BPM, beat grid and seek data checks need, not their waveforms.
 - **Chore:** The log file times each diagnostics and repair check on its own.
-- **Improvement:** Adding a source folder saves and indexes it in one step. If the indexing fails, the folder
-  stays added, the status line says the indexing failed, and the next scan indexes it.
-- **Improvement:** Relocating a missing source folder also indexes the new folder, so files only it has join
-  the library without a separate scan.
-- **Improvement:** Restoring or deleting a backup and forgetting a recent USB update their list from the
-  action's own answer instead of reading it again.
-- **Improvement:** The Event Log entry for each list a playlist import couldn't bring in names its library, the list
-  and the reason in one line. An add logs only its result; the "Adding N tracks" entry before it is gone.
-- **Improvement:** Changing the export sync mode saves an open playlist's column sort, the mode and the playlists'
-  reorder locks in one step. If the mode can't be saved, the choice in Settings goes back to the mode in use.
-- **Improvement:** The sidebar's "On this USB" marks come from one place for every action. Before, reading the USB
-  Playlists page, running diagnostics and repairing worked them out on their own, and a repair whose follow-up
-  check failed cleared them.
-- **Chore:** The app window can no longer widen the set of folders it may load files from. The backend lets in
-  the library's source folders and the selected USB itself.
+- **Improvement:** Adding a source folder saves and indexes it in one step. If the indexing fails, the folder stays added, the status line says the indexing failed, and the next scan indexes it.
+- **Improvement:** Relocating a missing source folder also indexes the new folder, so files only it has join the library without a separate scan.
+- **Improvement:** Restoring or deleting a backup and forgetting a recent USB update their list from the action's own answer instead of reading it again.
+- **Improvement:** The Event Log entry for each list a playlist import couldn't bring in names its library, the list and the reason in one line. An add logs only its result; the "Adding N tracks" entry before it is gone.
+- **Improvement:** Changing the export sync mode saves an open playlist's column sort, the mode and the playlists' reorder locks in one step. If the mode can't be saved, the choice in Settings goes back to the mode in use.
+- **Improvement:** The sidebar's "On this USB" marks come from one place for every action. Before, reading the USB Playlists page, running diagnostics and repairing worked them out on their own, and a repair whose follow-up check failed cleared them.
+- **Chore:** The app window can no longer widen the set of folders it may load files from. The backend lets in the library's source folders and the selected USB itself.
 
 ## 0.5.6
 
-- **New feature:** Settings has a Language choice. English is the only language so far. Changing it reloads the
-  window in the new language, and isn't possible while a job such as an export or analysis runs.
-- **Fix:** The Player Menu editor now always lists DATE ADDED last, where the players show it. Before, items added
-  to the menu were listed below it.
-- **Fix:** A USB mounted read-only is now shown as read-only, and changing its USB audio formats or background
-  colour, or initializing it, is refused with "read-only" instead of failing with a filesystem error. On Windows,
-  a folder's read-only attribute no longer makes a USB that can be written look read-only, which hid Initialize
-  and refused USB audio format changes.
-- **Fix:** Each warning now shows once in the Event Log and the session log file. Before, most showed twice:
-  once as it happened and again when its command finished.
-- **Fix:** After an export with warnings, the "(N warnings)" link to the Event Log now comes at the end of the
-  status line. Before, it sat in the middle and the sync mode after it was part of the link.
-- **Fix:** When saving a USB playlist order fails and reading the playlists back fails too, the status line now
-  shows why the save failed. Before, it showed the read's error as the reason the order wasn't saved.
-- **Improvement:** The Event Log and the "(N warnings)" counts show only what you can act on. Developer detail,
-  such as stage timings, database internals and the app's startup steps, now goes only to the session log file,
-  where it's marked [debug]; every other line there was also shown in the Event Log.
-- **Improvement:** A playlist's "Last exported" line shows the date as 2026-04-07 13:00, like the Backups page,
-  instead of in the computer's regional format. The not-enough-space message on export gives sizes in KB, MB and
-  GB like the rest of the app.
-- **Chore:** The backend now decides the sidebar's export mark and its meaning, "On this USB" or "Exported to
-  USB", instead of the UI.
+- **New feature:** Settings has a Language choice. English is the only language so far. Changing it reloads the window in the new language, and isn't possible while a job such as an export or analysis runs.
+- **Fix:** The Player Menu editor now always lists DATE ADDED last, where the players show it. Before, items added to the menu were listed below it.
+- **Fix:** A USB mounted read-only is now shown as read-only, and changing its USB audio formats or background colour, or initializing it, is refused with "read-only" instead of failing with a filesystem error. On Windows, a folder's read-only attribute no longer makes a USB that can be written look read-only, which hid Initialize and refused USB audio format changes.
+- **Fix:** Each warning now shows once in the Event Log and the session log file. Before, most showed twice: once as it happened and again when its command finished.
+- **Fix:** After an export with warnings, the "(N warnings)" link to the Event Log now comes at the end of the status line. Before, it sat in the middle and the sync mode after it was part of the link.
+- **Fix:** When saving a USB playlist order fails and reading the playlists back fails too, the status line now shows why the save failed. Before, it showed the read's error as the reason the order wasn't saved.
+- **Improvement:** The Event Log and the "(N warnings)" counts show only what you can act on. Developer detail, such as stage timings, database internals and the app's startup steps, now goes only to the session log file, where it's marked [debug]; every other line there was also shown in the Event Log.
+- **Improvement:** A playlist's "Last exported" line shows the date as 2026-04-07 13:00, like the Backups page, instead of in the computer's regional format. The not-enough-space message on export gives sizes in KB, MB and GB like the rest of the app.
+- **Chore:** The backend now decides the sidebar's export mark and its meaning, "On this USB" or "Exported to USB", instead of the UI.
 
 ## 0.5.5
 
 **Severity:** feature
 
-- **New feature:** A new analysis coordinator runs all analysis as one job. You can ask for more at any time:
-  it joins the job's queue and runs in turn, with one progress bar, one pause and cancel, and one final message.
-  A track already in the job is skipped, and its own Analyze button is disabled while it waits or is analyzed,
-  in playlists too. Reanalyze on a waiting track replaces its kept values. Cancel clears what's waiting, and
-  anything you ask for after it still runs.
-- **Fix:** Analysis no longer ties up the app's database connections, so many requests at once can't freeze
-  the app for 30 seconds. A track waits for memory while others run, instead of failing.
-- **Fix:** Reordering USB playlists now saves the order in both databases for every playlist, by name.
-  Before, a playlist only in the eDB kept its old place, and always listed after the others. A failed reorder
-  keeps its error in the status line instead of replacing it with "USB playlists loaded", and one that can't
-  write to the stick shows its warnings instead of a plain "Playlist order saved".
-- **Fix:** Removing a USB playlist no longer blanks the open playlist's track count while its table reloads,
-  and its warnings now reach the Event Log that the status line links to.
-- **Fix:** Selecting the same USB again now clears its playlists and history, so a stick back from a player
-  doesn't keep showing the old lists. Exporting a playlist to USB now clears the old USB Playlists totals along
-  with the list.
+- **New feature:** A new analysis coordinator runs all analysis as one job. You can ask for more at any time: it joins the job's queue and runs in turn, with one progress bar, one pause and cancel, and one final message. A track already in the job is skipped, and its own Analyze button is disabled while it waits or is analyzed, in playlists too. Reanalyze on a waiting track replaces its kept values. Cancel clears what's waiting, and anything you ask for after it still runs.
+- **Fix:** Analysis no longer ties up the app's database connections, so many requests at once can't freeze the app for 30 seconds. A track waits for memory while others run, instead of failing.
+- **Fix:** Reordering USB playlists now saves the order in both databases for every playlist, by name. Before, a playlist only in the eDB kept its old place, and always listed after the others. A failed reorder keeps its error in the status line instead of replacing it with "USB playlists loaded", and one that can't write to the stick shows its warnings instead of a plain "Playlist order saved".
+- **Fix:** Removing a USB playlist no longer blanks the open playlist's track count while its table reloads, and its warnings now reach the Event Log that the status line links to.
+- **Fix:** Selecting the same USB again now clears its playlists and history, so a stick back from a player doesn't keep showing the old lists. Exporting a playlist to USB now clears the old USB Playlists totals along with the list.
 - **Fix:** Export to USB no longer refuses with "Playlist must contain tracks" while a search has no matches.
-- **Fix:** Exporting to a USB mounted read-only is now refused straight away with "USB is read-only", instead
-  of failing with a filesystem error. On Windows, a folder's read-only attribute no longer refuses a USB that
-  can be written.
-- **Fix:** An empty playlist no longer shows its old "Last exported" line, which could happen after removing
-  the source folder its tracks were in.
-- **Fix:** A Player Menu change now keeps rekordbox's row data in the PDB, instead of overwriting part of it,
-  and the editor no longer offers items that aren't browse categories, such as COMMENTS and CUE.
-- **Fix:** Player Menu items that can't be removed now look muted in the list, so you can see which they are
-  without selecting them. They can still be selected and moved.
+- **Fix:** Exporting to a USB mounted read-only is now refused straight away with "USB is read-only", instead of failing with a filesystem error. On Windows, a folder's read-only attribute no longer refuses a USB that can be written.
+- **Fix:** An empty playlist no longer shows its old "Last exported" line, which could happen after removing the source folder its tracks were in.
+- **Fix:** A Player Menu change now keeps rekordbox's row data in the PDB, instead of overwriting part of it, and the editor no longer offers items that aren't browse categories, such as COMMENTS and CUE.
+- **Fix:** Player Menu items that can't be removed now look muted in the list, so you can see which they are without selecting them. They can still be selected and moved.
 - **Fix:** A failed background colour read now says so, and a read-only USB says why its colour can't change.
-- **Fix:** Restoring a USB backup no longer loses the "on this USB" marks and the playlist reorder lock
-  until the next diagnostics run. The same goes for a repair whose follow-up diagnostics fail.
-- **Fix:** Diagnostics no longer warn "PDB header compatibility: value 4" on USBs exported with
-  rekordbox, which writes that value itself. The next repair you run on the USB sets it to 5.
+- **Fix:** Restoring a USB backup no longer loses the "on this USB" marks and the playlist reorder lock until the next diagnostics run. The same goes for a repair whose follow-up diagnostics fail.
+- **Fix:** Diagnostics no longer warn "PDB header compatibility: value 4" on USBs exported with rekordbox, which writes that value itself. The next repair you run on the USB sets it to 5.
 - **Fix:** The USB pages' hidden menu items can no longer be reached with the keyboard when no USB is selected.
-- **Improvement:** The Scan Library button is now Analyze Library, which is what it does: it checks your
-  folders for changes, then analyzes what needs it. Its scan warnings and missing folders go to the Event Log,
-  and the status line no longer shows the scan's track and album counts.
-- **Improvement:** USB Playlists and USB History load when you open the page, and only once until the
-  USB changes. If a read fails, it tries again the next time you open the page. The Import Playlists
-  and Import History buttons are gone. They open their first item when you open the page with nothing open,
-  and coming back to a page keeps what was open.
-- **Improvement:** Reordering USB playlists no longer re-reads the list, and the open playlist stays
-  open. Removing a USB playlist keeps the open one too, unless that's the one you removed.
-- **Improvement:** On USB History, Export Tracklist moved under the open session's tracks, where an app
-  playlist has Export to USB, and rows show the session's date on a smaller muted line under its name.
-- **Improvement:** The USB list responses no longer carry every track, and Export Tracklist is built in
-  the backend. The saved file doesn't change.
-- **Improvement:** The Player Menu editor no longer tags items as being in only one database, and its PDB fix is
-  gone with its banner, buttons and diagnostics warning: it was for a one-time error the app no longer makes.
-  DATE ADDED always stays in the player menu, and differing menus in the databases are logged.
+- **Improvement:** The Scan Library button is now Analyze Library, which is what it does: it checks your folders for changes, then analyzes what needs it. Its scan warnings and missing folders go to the Event Log, and the status line no longer shows the scan's track and album counts.
+- **Improvement:** USB Playlists and USB History load when you open the page, and only once until the USB changes. If a read fails, it tries again the next time you open the page. The Import Playlists and Import History buttons are gone. They open their first item when you open the page with nothing open, and coming back to a page keeps what was open.
+- **Improvement:** Reordering USB playlists no longer re-reads the list, and the open playlist stays open. Removing a USB playlist keeps the open one too, unless that's the one you removed.
+- **Improvement:** On USB History, Export Tracklist moved under the open session's tracks, where an app playlist has Export to USB, and rows show the session's date on a smaller muted line under its name.
+- **Improvement:** The USB list responses no longer carry every track, and Export Tracklist is built in the backend. The saved file doesn't change.
+- **Improvement:** The Player Menu editor no longer tags items as being in only one database, and its PDB fix is gone with its banner, buttons and diagnostics warning: it was for a one-time error the app no longer makes. DATE ADDED always stays in the player menu, and differing menus in the databases are logged.
 - **Improvement:** The Player Menu editor and background colour work on a USB with only one of its databases.
-- **Improvement:** A blocked export's status line no longer says "Export failed: export blocked: …". When
-  it's blocked by free space, formats or an internal check, it says so once, and a format block counts the
-  tracks and leaves their names to the Event Log. A read-only USB is now checked when you export, instead of
-  when you selected it.
-- **Improvement:** Selecting a USB no longer reads its databases an extra time for the export button, and a USB
-  with no PDB no longer gets a "Missing PDB" warning.
-- **Improvement:** Saving a drive's name without changing it now says "Drive name unchanged." in the status
-  line.
-- **Improvement:** The list totals, track-list headings, export estimate, Backups page text, USB
-  status lines, USB selection, diagnostics, player menu and background colour text now come from the backend.
-- **Chore:** The backend now sends USB History newest first, instead of the UI reversing the list, and USB
-  History keeps one record of the open session, instead of three.
-- **Chore:** Removed USB checks and messages that could never run, and the export button's text from the
-  frontend.
-- **Chore:** Moved the USB selection lock, stored USB, player menu, background colour, backup delete and
-  tracklist dialog tests from unit tests to e2e tests.
-- **Chore:** The docs describe the USB lists loading when a page opens, Export Tracklist's new place and
-  backend build, and reorders writing both databases. The USB Playlists and USB History screenshots show the
-  new layout. Those and the transcode screenshot show the side menu open, the USB ones are wider so their track
-  lists have no horizontal scrollbar, and the transcode screenshot's export button names the USB. The Library,
-  Settings and Player Menu screenshots and the import and selection animations show the Analyze button and the
-  muted menu items.
+- **Improvement:** A blocked export's status line no longer says "Export failed: export blocked: …". When it's blocked by free space, formats or an internal check, it says so once, and a format block counts the tracks and leaves their names to the Event Log. A read-only USB is now checked when you export, instead of when you selected it.
+- **Improvement:** Selecting a USB no longer reads its databases an extra time for the export button, and a USB with no PDB no longer gets a "Missing PDB" warning.
+- **Improvement:** Saving a drive's name without changing it now says "Drive name unchanged." in the status line.
+- **Improvement:** The list totals, track-list headings, export estimate, Backups page text, USB status lines, USB selection, diagnostics, player menu and background colour text now come from the backend.
+- **Chore:** The backend now sends USB History newest first, instead of the UI reversing the list, and USB History keeps one record of the open session, instead of three.
+- **Chore:** Removed USB checks and messages that could never run, and the export button's text from the frontend.
+- **Chore:** Moved the USB selection lock, stored USB, player menu, background colour, backup delete and tracklist dialog tests from unit tests to e2e tests.
+- **Chore:** The docs describe the USB lists loading when a page opens, Export Tracklist's new place and backend build, and reorders writing both databases. The USB Playlists and USB History screenshots show the new layout. Those and the transcode screenshot show the side menu open, the USB ones are wider so their track lists have no horizontal scrollbar, and the transcode screenshot's export button names the USB. The Library, Settings and Player Menu screenshots and the import and selection animations show the Analyze button and the muted menu items.
 
 ## 0.5.4
 
-- **New feature:** App playlist rows show a small icon next to the checkbox: a USB plug for a track
-  on a USB stick, a folder for a local one. It's red when that USB isn't the selected one, or when
-  the file can't be found. The tooltip shows the file's path.
-- **Fix:** On Windows, analyzing tracks could freeze the window ("Not Responding") for many
-  seconds at a time, even with low CPU use. The app's event log was written from the window's own
-  thread, opening and closing the log file for every analysis log line, and many library and
-  playlist commands (including the folder scan run when analysis finishes) also ran there. The log
-  is now written by a background thread, and those commands run off the window thread.
-- **Fix:** Adding a USB playlist track that isn't in the local library to an app playlist lost its
-  cover, year, genre and length, so it also showed as needing analysis with its cue editor disabled.
-  They now come along from the USB. To fix a track added earlier, add it from the USB again.
-- **Fix:** Re-exporting a playlist now writes the same update counters and analysis flags to
-  the eDB as rekordbox does. Before, the counters grew on every export and some tracks got
-  a larger jump depending on their position in the playlist. Players aren't affected.
-- **Improvement:** The Linux AppImage bundles the current WebKitGTK from Ubuntu 22.04's updates on
-  every release, with its security fixes. Before, the build could reuse an older cached copy.
-- **Improvement:** In the cue editor, the greyed-out part of the waveform before where the CDJ
-  starts playback is now drawn by the waveform itself instead of a GPU filter laid over it. It looks
-  the same, and the GPU has less work to do on every playback frame.
-- **Improvement:** While the cue editor is open, the Help, Settings and Event Log buttons in the
-  top bar look disabled. They already did nothing until the editor closed.
-- **Improvement:** Closing a confirmation, playlist import, tracklist export, bulk Edit, Add to,
-  Convert or drive-name dialog restores focus to the previously focused control when it is
-  still present.
-- **Chore:** Those seven dialogs share their open/close, cancellation and event-listener cleanup
-  code. About 1.3 KB less JavaScript in the app. Existing unit and browser tests now also check
-  repeated dismissal, reopening and focus restoration.
-- **Chore:** The UI code no longer checks whether its own page elements exist before using them;
-  every one is always there. The unit tests that relied on those checks now run on the real
-  page.
-- **Chore:** The USB page's code reads the backend's answers as the backend sends them, instead
-  of re-checking every field's type and filling in defaults the backend never leaves out.
-- **Chore:** The browser tests share one stubbed backend, which fills every answer out to the
-  backend's full shape, instead of each test file keeping its own copy. The unit tests that fed
-  the USB page made-up backend answers are gone; the browser tests now cover what they checked.
-- **Chore:** The UI code no longer carries checks that only a test could fail: whether its own
-  functions, the browser's features (canvas, `ResizeObserver`, `requestAnimationFrame`,
-  `CSS.escape`, `localStorage`) or a well-formed drive-name answer are there. Artwork paths go
-  straight through Tauri's asset protocol, without the fallbacks only the tests used. The unit
-  tests supply what Node and jsdom lack instead. About 1 KB less JavaScript in the app.
+- **New feature:** App playlist rows show a small icon next to the checkbox: a USB plug for a track on a USB stick, a folder for a local one. It's red when that USB isn't the selected one, or when the file can't be found. The tooltip shows the file's path.
+- **Fix:** On Windows, analyzing tracks could freeze the window ("Not Responding") for many seconds at a time, even with low CPU use. The app's event log was written from the window's own thread, opening and closing the log file for every analysis log line, and many library and playlist commands (including the folder scan run when analysis finishes) also ran there. The log is now written by a background thread, and those commands run off the window thread.
+- **Fix:** Adding a USB playlist track that isn't in the local library to an app playlist lost its cover, year, genre and length, so it also showed as needing analysis with its cue editor disabled. They now come along from the USB. To fix a track added earlier, add it from the USB again.
+- **Fix:** Re-exporting a playlist now writes the same update counters and analysis flags to the eDB as rekordbox does. Before, the counters grew on every export and some tracks got a larger jump depending on their position in the playlist. Players aren't affected.
+- **Improvement:** The Linux AppImage bundles the current WebKitGTK from Ubuntu 22.04's updates on every release, with its security fixes. Before, the build could reuse an older cached copy.
+- **Improvement:** In the cue editor, the greyed-out part of the waveform before where the CDJ starts playback is now drawn by the waveform itself instead of a GPU filter laid over it. It looks the same, and the GPU has less work to do on every playback frame.
+- **Improvement:** While the cue editor is open, the Help, Settings and Event Log buttons in the top bar look disabled. They already did nothing until the editor closed.
+- **Improvement:** Closing a confirmation, playlist import, tracklist export, bulk Edit, Add to, Convert or drive-name dialog restores focus to the previously focused control when it is still present.
+- **Chore:** Those seven dialogs share their open/close, cancellation and event-listener cleanup code. About 1.3 KB less JavaScript in the app. Existing unit and browser tests now also check repeated dismissal, reopening and focus restoration.
+- **Chore:** The UI code no longer checks whether its own page elements exist before using them; every one is always there. The unit tests that relied on those checks now run on the real page.
+- **Chore:** The USB page's code reads the backend's answers as the backend sends them, instead of re-checking every field's type and filling in defaults the backend never leaves out.
+- **Chore:** The browser tests share one stubbed backend, which fills every answer out to the backend's full shape, instead of each test file keeping its own copy. The unit tests that fed the USB page made-up backend answers are gone; the browser tests now cover what they checked.
+- **Chore:** The UI code no longer carries checks that only a test could fail: whether its own functions, the browser's features (canvas, `ResizeObserver`, `requestAnimationFrame`, `CSS.escape`, `localStorage`) or a well-formed drive-name answer are there. Artwork paths go straight through Tauri's asset protocol, without the fallbacks only the tests used. The unit tests supply what Node and jsdom lack instead. About 1 KB less JavaScript in the app.
 
 ## 0.5.3
 
 **Severity:** feature
 
-- **New feature:** Convert… in the Library and playlist selection bars makes an AIFF, WAV or
-  MP3 320 kbps file of the selected lossless tracks, for players that can't read FLAC or ALAC. It
-  is not a new track: the FMT column shows it under the track's own format, and cues, edits and
-  playlists stay on the one track. Files go to a folder set in Settings → Transcodes, outside the
-  source folders.
-- **New feature:** Audio formats in the USB view: tick the audio formats export puts on a USB,
-  and drag them into your order of preference. Set them for the players at the next gig; the
-  setting is stored on the USB. Export puts each track on the USB as the first file in a ticked
-  format: the track's own file or one of its transcodes. A lossless track with neither gets its
-  transcode made during the export; an MP3 or AAC track in a format the USB doesn't allow can't
-  be converted, so the export is refused and names it. A track already on the USB in a format
-  since unticked stays there, in the playlist too: its transcode is added next to it as a USB
-  track of its own. Cues and the beat grid move with an MP3's later start, and cues edited on
-  such a USB track come back to the library track in step. The USB's playlist and history tracks
-  in an unticked format get a warning in the FMT column. In an app playlist, the FMT column shows
-  the format each track goes on the selected USB in, with its own file as the source in the
-  tooltip, and the title row says how many tracks the export will convert or refuse.
-- **Fix:** ALAC tracks (`.m4a`) are exported with the ALAC file type in the PDB and the eDB, as
-  rekordbox writes them, instead of the one for AAC. Exporting again corrects tracks already on a
-  USB.
-- **Fix:** On older macOS versions (Safari before 16.2), the cue editor no longer has a
-  see-through background that shows the page under it. The few colours that used a newer CSS
-  feature get a plain theme colour there instead.
-- **Fix:** A track row's **+** no longer says "Create and activate a playlist first" while a
-  playlist is active. Rows shown before the playlists had loaded, or before the active playlist
-  was renamed, kept that tooltip; it now says "Add to …" with the active playlist's name, as the
-  header does.
-- **Improvement:** Saving cue, beat grid, key or track detail edits on a USB track that one of
-  the USB's two databases doesn't list is still refused, since it would leave them disagreeing,
-  but the message now says so in plain words and points to Preview Fixes, which repairs it.
-- **Improvement:** USB tracks the rekordbox eDB lists carry the file size it records, so finding
-  their library track no longer reads each file's size from the stick.
-- **Improvement:** Export, mirror export cleanup, repair and USB edits work out a USB track's
-  file size, title and artist match key in one place, so they always agree on which tracks are
-  the same.
-- **Chore:** The docs' screenshots and animations are recorded again: the selection bar's
-  Convert…, the Transcodes folder in Settings and the USB's Audio formats row show, and
-  `docs/TRANSCODES.md` has a screenshot of an app playlist for a USB that takes only MP3 and AAC.
+- **New feature:** Convert… in the Library and playlist selection bars makes an AIFF, WAV or MP3 320 kbps file of the selected lossless tracks, for players that can't read FLAC or ALAC. It is not a new track: the FMT column shows it under the track's own format, and cues, edits and playlists stay on the one track. Files go to a folder set in Settings → Transcodes, outside the source folders.
+- **New feature:** Audio formats in the USB view: tick the audio formats export puts on a USB, and drag them into your order of preference. Set them for the players at the next gig; the setting is stored on the USB. Export puts each track on the USB as the first file in a ticked format: the track's own file or one of its transcodes. A lossless track with neither gets its transcode made during the export; an MP3 or AAC track in a format the USB doesn't allow can't be converted, so the export is refused and names it. A track already on the USB in a format since unticked stays there, in the playlist too: its transcode is added next to it as a USB track of its own. Cues and the beat grid move with an MP3's later start, and cues edited on such a USB track come back to the library track in step. The USB's playlist and history tracks in an unticked format get a warning in the FMT column. In an app playlist, the FMT column shows the format each track goes on the selected USB in, with its own file as the source in the tooltip, and the title row says how many tracks the export will convert or refuse.
+- **Fix:** ALAC tracks (`.m4a`) are exported with the ALAC file type in the PDB and the eDB, as rekordbox writes them, instead of the one for AAC. Exporting again corrects tracks already on a USB.
+- **Fix:** On older macOS versions (Safari before 16.2), the cue editor no longer has a see-through background that shows the page under it. The few colours that used a newer CSS feature get a plain theme colour there instead.
+- **Fix:** A track row's **+** no longer says "Create and activate a playlist first" while a playlist is active. Rows shown before the playlists had loaded, or before the active playlist was renamed, kept that tooltip; it now says "Add to …" with the active playlist's name, as the header does.
+- **Improvement:** Saving cue, beat grid, key or track detail edits on a USB track that one of the USB's two databases doesn't list is still refused, since it would leave them disagreeing, but the message now says so in plain words and points to Preview Fixes, which repairs it.
+- **Improvement:** USB tracks the rekordbox eDB lists carry the file size it records, so finding their library track no longer reads each file's size from the stick.
+- **Improvement:** Export, mirror export cleanup, repair and USB edits work out a USB track's file size, title and artist match key in one place, so they always agree on which tracks are the same.
+- **Chore:** The docs' screenshots and animations are recorded again: the selection bar's Convert…, the Transcodes folder in Settings and the USB's Audio formats row show, and `docs/TRANSCODES.md` has a screenshot of an app playlist for a USB that takes only MP3 and AAC.
 
 ## 0.5.2
 
 **Severity:** critical — see item(s) marked **(CRITICAL)** below.
 
-- **New feature:** A USB that has only one of its two databases, the PDB or the eDB, can be
-  repaired: "Upgrade Export Data To Strict Parity" creates the missing one as Initialize USB does
-  and writes every playlist of the other into it. Play history isn't copied. The diagnostics
-  overview points to Preview Fixes for a missing database instead of saying an export creates
-  one.
-- **Fix:** USB diagnostics no longer report an exported `.ogg`, `.opus` or `.m4p` track as missing
-  its audio file, which offered to remove the track from its playlists although the file was on the
-  USB. The macOS `._` files that sit next to each audio file on a stick written from a Mac are no
-  longer counted as unindexed audio, which offered to add them to the databases as tracks.
-- **Fix (CRITICAL):** Exporting a track whose file name, cut to the USB's 48-character limit,
-  matches a track already on the USB (in either database) from another playlist or an earlier
-  export no longer copies its audio over that track's file; both playlists played the newer track.
-  The new one gets a `-1` name, as rekordbox does. A track exported before and edited since still keeps its own file.
-- **Fix:** A track that is on the USB only in the rekordbox eDB, not the PDB, now counts as on the
-  USB when exporting: exporting it again reuses its file instead of copying it a second time,
-  and the playlist's export estimate and free-space check don't count it as still to copy.
-- **Fix:** A library scan no longer fails when an audio file is moved or deleted while the scan
-  runs; that file is left out and the rest is scanned.
-- **Improvement:** Export leaves `.ogg`, `.opus` and `.m4p` tracks off the USB, since no player
-  plays them. They stay in the library and its playlists; the export counts them as skipped and
-  names each one in the Event Log, and the Library's format warning says they aren't exported. A
-  mirror export of a playlist with such tracks still syncs the rest.
-- **Chore:** The essentia analysis engine's node, runner and module paths are handed to the analysis
-  process directly instead of being written into the app's environment while it runs, which could
-  crash the app in rare cases. A repair whose database write fails and whose staged database then
-  can't be put back now says so in the Event Log instead of failing silently.
-- **Chore:** The docs animations are animated WebP instead of GIF: under half the size (3.2 MB to
-  1.4 MB) and without the GIF colour banding. The repair preview screenshot's caption no longer
-  lists three problems next to a banner that counts four.
+- **New feature:** A USB that has only one of its two databases, the PDB or the eDB, can be repaired: "Upgrade Export Data To Strict Parity" creates the missing one as Initialize USB does and writes every playlist of the other into it. Play history isn't copied. The diagnostics overview points to Preview Fixes for a missing database instead of saying an export creates one.
+- **Fix:** USB diagnostics no longer report an exported `.ogg`, `.opus` or `.m4p` track as missing its audio file, which offered to remove the track from its playlists although the file was on the USB. The macOS `._` files that sit next to each audio file on a stick written from a Mac are no longer counted as unindexed audio, which offered to add them to the databases as tracks.
+- **Fix (CRITICAL):** Exporting a track whose file name, cut to the USB's 48-character limit, matches a track already on the USB (in either database) from another playlist or an earlier export no longer copies its audio over that track's file; both playlists played the newer track. The new one gets a `-1` name, as rekordbox does. A track exported before and edited since still keeps its own file.
+- **Fix:** A track that is on the USB only in the rekordbox eDB, not the PDB, now counts as on the USB when exporting: exporting it again reuses its file instead of copying it a second time, and the playlist's export estimate and free-space check don't count it as still to copy.
+- **Fix:** A library scan no longer fails when an audio file is moved or deleted while the scan runs; that file is left out and the rest is scanned.
+- **Improvement:** Export leaves `.ogg`, `.opus` and `.m4p` tracks off the USB, since no player plays them. They stay in the library and its playlists; the export counts them as skipped and names each one in the Event Log, and the Library's format warning says they aren't exported. A mirror export of a playlist with such tracks still syncs the rest.
+- **Chore:** The essentia analysis engine's node, runner and module paths are handed to the analysis process directly instead of being written into the app's environment while it runs, which could crash the app in rare cases. A repair whose database write fails and whose staged database then can't be put back now says so in the Event Log instead of failing silently.
+- **Chore:** The docs animations are animated WebP instead of GIF: under half the size (3.2 MB to 1.4 MB) and without the GIF colour banding. The repair preview screenshot's caption no longer lists three problems next to a banner that counts four.
 
 ## 0.5.1
 
 **Severity:** critical — see item(s) marked **(CRITICAL)** below.
 
-- **Fix (CRITICAL):** An export in the default "Mirror playlist (exact match)" mode could delete
-  the audio files of tracks still in the playlist and then report "the stale-file prune removed a
-  file the exported playlist still references". It happened when two tracks with the same artist,
-  album and title swapped places in the playlist: each was matched to the other's file name on the
-  USB. A file the exported playlist points to is no longer removed; it is removed once its track
-  leaves the playlist.
+- **Fix (CRITICAL):** An export in the default "Mirror playlist (exact match)" mode could delete the audio files of tracks still in the playlist and then report "the stale-file prune removed a file the exported playlist still references". It happened when two tracks with the same artist, album and title swapped places in the playlist: each was matched to the other's file name on the USB. A file the exported playlist points to is no longer removed; it is removed once its track leaves the playlist.
 
 ## 0.5.0
 
 **Severity:** feature
 
-- **New feature:** The Player Menu editor sets the USB's background colour, the players' menu
-  highlight colour. One selector writes it to both databases; when rekordbox left them with
-  different colours, the editor names both. Export and repair no longer change a colour set in
-  rekordbox for the PDB alone.
-- **New feature:** A source folder inside another source folder, also through a symlink, is shown
-  grouped under that folder's chip, labelled with its path inside it.
-- **Improvement:** A USB the app initializes starts with a purple background colour on every
-  player, instead of the default.
-- **Improvement:** The Player Menu editor's Add, Remove, Up and Down are applied by the backend to
-  the menu on the USB, instead of the app sending a whole new menu built from what it last loaded.
-  An edit that changes nothing, such as Up on the top item, no longer makes a USB backup.
-- **Improvement:** Counts in status messages, the Event Log, USB diagnostics and repair
-  descriptions read naturally: "1 track", "3 tracks" instead of "track(s)", and no more "1 tracks".
-- **Improvement:** The counts in status messages (warnings, skipped and unresolved tracks, the
-  totals of a multi-playlist import) come from the backend; importing several rekordbox or Mixxx
-  lists is one backend call that keeps going past a failed list.
-- **Fix:** A playlist track whose analysis files were deleted (for example with the analysis
-  cache) blocked the export while the playlist showed no tracks to analyze. It now counts as
-  unanalyzed, and Analyze Missing Tracks writes its files again, keeping an edited or imported
-  BPM, key and first beat.
-- **Fix:** Scan Library decides whether to analyze from the same tracks the analysis picks. Before,
-  it could skip analysis that imported library tracks needed, or start one that found nothing to do
-  for tracks rekordbox had already analyzed.
-- **Fix:** With a source folder and a folder inside it both switched on, the library listed the
-  inner folder's tracks twice, inflating the track count, size and total time.
+- **New feature:** The Player Menu editor sets the USB's background colour, the players' menu highlight colour. One selector writes it to both databases; when rekordbox left them with different colours, the editor names both. Export and repair no longer change a colour set in rekordbox for the PDB alone.
+- **New feature:** A source folder inside another source folder, also through a symlink, is shown grouped under that folder's chip, labelled with its path inside it.
+- **Improvement:** A USB the app initializes starts with a purple background colour on every player, instead of the default.
+- **Improvement:** The Player Menu editor's Add, Remove, Up and Down are applied by the backend to the menu on the USB, instead of the app sending a whole new menu built from what it last loaded. An edit that changes nothing, such as Up on the top item, no longer makes a USB backup.
+- **Improvement:** Counts in status messages, the Event Log, USB diagnostics and repair descriptions read naturally: "1 track", "3 tracks" instead of "track(s)", and no more "1 tracks".
+- **Improvement:** The counts in status messages (warnings, skipped and unresolved tracks, the totals of a multi-playlist import) come from the backend; importing several rekordbox or Mixxx lists is one backend call that keeps going past a failed list.
+- **Fix:** A playlist track whose analysis files were deleted (for example with the analysis cache) blocked the export while the playlist showed no tracks to analyze. It now counts as unanalyzed, and Analyze Missing Tracks writes its files again, keeping an edited or imported BPM, key and first beat.
+- **Fix:** Scan Library decides whether to analyze from the same tracks the analysis picks. Before, it could skip analysis that imported library tracks needed, or start one that found nothing to do for tracks rekordbox had already analyzed.
+- **Fix:** With a source folder and a folder inside it both switched on, the library listed the inner folder's tracks twice, inflating the track count, size and total time.
 
 ## 0.4.11
 
 **Severity:** feature
 
-- **New feature:** The selection bar shows the total time of the selected tracks next to their
-  count, with a "+" when some of them have no length yet.
-- **Fix:** A playlist's "Last exported … to ‹drive›" line now goes away as soon as the playlist
-  changes. Before, it stayed after reordering the playlist's tracks, and adding tracks or renaming
-  the playlist left the drive's name in it.
-- **Improvement:** The library's source folders and their on/off switches, and the rekordbox and
-  Mixxx chips' switches, are now kept by the backend. The library list, Select all, the selection's
-  time, adding to a playlist and analysis all read the same switches, and a library whose database
-  is gone is switched off for good.
-- **Fix:** The cue editor's waveform no longer shimmers while it scrolls during playback: the bars
-  slide along instead of changing height from frame to frame.
-- **Fix:** In the cue editor, Play after the track has played to its end starts it from the
-  beginning. Before, it started again just before the end and stopped almost at once.
-- **Improvement:** After analysis, a cue editor save or a track details edit, the backend sends the
-  track's whole updated row, and every list showing that track (the library, app playlists, USB
-  playlists and history) shows it as sent. The same goes for a USB row filled in when you click it,
-  and for a file that playing or adding to a playlist puts into the library. A reanalysis that fails now brings back the track's
-  BPM and key in the row instead of leaving them blank.
-- **Improvement:** The library's waveforms arrive with their rows, a page at a time as you scroll,
-  instead of being filled in after the list is drawn.
-- **Improvement:** While a track is analyzed, its waveform and length show as soon as the file is
-  decoded, before its BPM and key are detected.
-- **Improvement:** Zoomed out, the cue editor's bar lines no longer cover the waveform: they thin
-  to every 2nd, 4th… bar and draw narrower, and the Beat grid slider's thicker lines show once
-  there is room for them. On a tall window the editor sits a little above the middle instead of at
-  the top.
-- **Improvement:** When the selection bar needs more room, the search field beside it narrows to
-  make space before the bar moves onto a line of its own.
+- **New feature:** The selection bar shows the total time of the selected tracks next to their count, with a "+" when some of them have no length yet.
+- **Fix:** A playlist's "Last exported … to ‹drive›" line now goes away as soon as the playlist changes. Before, it stayed after reordering the playlist's tracks, and adding tracks or renaming the playlist left the drive's name in it.
+- **Improvement:** The library's source folders and their on/off switches, and the rekordbox and Mixxx chips' switches, are now kept by the backend. The library list, Select all, the selection's time, adding to a playlist and analysis all read the same switches, and a library whose database is gone is switched off for good.
+- **Fix:** The cue editor's waveform no longer shimmers while it scrolls during playback: the bars slide along instead of changing height from frame to frame.
+- **Fix:** In the cue editor, Play after the track has played to its end starts it from the beginning. Before, it started again just before the end and stopped almost at once.
+- **Improvement:** After analysis, a cue editor save or a track details edit, the backend sends the track's whole updated row, and every list showing that track (the library, app playlists, USB playlists and history) shows it as sent. The same goes for a USB row filled in when you click it, and for a file that playing or adding to a playlist puts into the library. A reanalysis that fails now brings back the track's BPM and key in the row instead of leaving them blank.
+- **Improvement:** The library's waveforms arrive with their rows, a page at a time as you scroll, instead of being filled in after the list is drawn.
+- **Improvement:** While a track is analyzed, its waveform and length show as soon as the file is decoded, before its BPM and key are detected.
+- **Improvement:** Zoomed out, the cue editor's bar lines no longer cover the waveform: they thin to every 2nd, 4th… bar and draw narrower, and the Beat grid slider's thicker lines show once there is room for them. On a tall window the editor sits a little above the middle instead of at the top.
+- **Improvement:** When the selection bar needs more room, the search field beside it narrows to make space before the bar moves onto a line of its own.
 
 ## 0.4.10
 
 **Severity:** feature
 
-- **Fix:** When Repair can't save the repaired databases to the USB, it now saves neither: if the PDB
-  was already written, the previous PDB is put back. The fixes are then reported as failed instead
-  of applied. Before, the USB could be left with a repaired PDB next to the old eDB (or the other
-  way round), and the repair still reported its fixes as applied.
-- **New feature:** Import Playlists from rekordbox or Mixxx is a checklist: tick any number of
-  playlists, crates and history sessions, from both libraries at once, and import them in one go.
-  The first one opens when they are done.
-- **Improvement:** The cue editor's waveform works like rekordbox's: while a track is loaded
-  (playing or paused), the playhead stays in the middle and the waveform scrolls under it, blank
-  past the track's start and end. Dragging the waveform scrubs it under the playhead, zooming keeps
-  the playhead centred, and clicking the overview moves playback there. With nothing loaded, the
-  waveform still drags to pan.
-- **Improvement:** The cue editor leaves room above the waveform for the cue marker flags, so they
-  no longer disappear into loud parts of the waveform.
-- **Improvement:** Adding a hot cue on a memory cue turns that memory cue into the hot cue (a hot
-  cue is a memory point too), keeping its name and colour, instead of refusing with "A memory cue
-  is already there."
-- **Chore:** Repair reads the staged PDB once and runs its page fixes in memory, writing the PDB
-  only when a fix that works on the file needs it and once at the end, instead of reading and
-  writing the whole file for every fix.
-- **Chore:** Removed backend code nothing in the app used (a Tauri command the UI never called,
-  an unused PDB check and wrappers only tests called), and merged duplicated helpers: PDB string
-  encoding, PDB page-size reads, PDB page footer repairs, atomic file writes, file moves, ANLZ
-  `.EXT` chunk reads, PDB `columns` reads and page cursor decoding. Exports and repairs produce the
-  same bytes as before. The backend code is now `cargo fmt` clean.
+- **Fix:** When Repair can't save the repaired databases to the USB, it now saves neither: if the PDB was already written, the previous PDB is put back. The fixes are then reported as failed instead of applied. Before, the USB could be left with a repaired PDB next to the old eDB (or the other way round), and the repair still reported its fixes as applied.
+- **New feature:** Import Playlists from rekordbox or Mixxx is a checklist: tick any number of playlists, crates and history sessions, from both libraries at once, and import them in one go. The first one opens when they are done.
+- **Improvement:** The cue editor's waveform works like rekordbox's: while a track is loaded (playing or paused), the playhead stays in the middle and the waveform scrolls under it, blank past the track's start and end. Dragging the waveform scrubs it under the playhead, zooming keeps the playhead centred, and clicking the overview moves playback there. With nothing loaded, the waveform still drags to pan.
+- **Improvement:** The cue editor leaves room above the waveform for the cue marker flags, so they no longer disappear into loud parts of the waveform.
+- **Improvement:** Adding a hot cue on a memory cue turns that memory cue into the hot cue (a hot cue is a memory point too), keeping its name and colour, instead of refusing with "A memory cue is already there."
+- **Chore:** Repair reads the staged PDB once and runs its page fixes in memory, writing the PDB only when a fix that works on the file needs it and once at the end, instead of reading and writing the whole file for every fix.
+- **Chore:** Removed backend code nothing in the app used (a Tauri command the UI never called, an unused PDB check and wrappers only tests called), and merged duplicated helpers: PDB string encoding, PDB page-size reads, PDB page footer repairs, atomic file writes, file moves, ANLZ `.EXT` chunk reads, PDB `columns` reads and page cursor decoding. Exports and repairs produce the same bytes as before. The backend code is now `cargo fmt` clean.
 
 ## 0.4.9
 
 **Severity:** critical — see item(s) marked **(CRITICAL)** below.
 
-- **Fix (CRITICAL):** The "Upgrade Export Data To Strict Parity" repair could leave a large USB that
-  neither the players nor rekordbox would load. It rewrote both databases once per playlist, replaced
-  every track's eDB values with a thin copy (clearing comments, ISRCs, dates added, cues and labels),
-  and wrote the USB many times in one run. It now reads both databases completely, merges them
-  (a value on either side is kept), and writes each database once through the export's own writers,
-  changing only what differs (a track's artwork in the PDB stays when it has some). If it fails,
-  neither database is changed. Preview Fixes shows how many rows it will add and change.
-- **Fix:** Re-exporting a playlist no longer rewrites eDB values that haven't changed, and no longer
-  clears values the library doesn't have (an ISRC, release year or key rekordbox wrote stays). The
-  export date only fills in a missing date added.
-- **Fix:** Export and repairs no longer move a track to another artist, album, genre, key or label
-  entry that differs only in case or punctuation (for example "Drum & Bass" to "drum & Bass"), and
-  no longer trim spaces from titles and comments. Which entry was picked could change from one run to
-  the next.
-- **Fix:** A PDB track row that has to grow (a longer title or path) keeps its composer, label,
-  remixer and the other values the app doesn't change. Export now also writes composer, label and
-  remixer into the PDB.
-- **Fix:** Adding unindexed audio files to a playlist during a repair writes the USB once, at the
-  end of the repair, together with the other fixes; fixes that run after strict parity act on what it
-  wrote.
-- **Fix:** Exporting to (or repairing) a USB that was renamed in rekordbox after it had filled its
-  player history page no longer rewrites the page rekordbox had retired. That left two history pages
-  that both looked current to the players.
-- **Fix:** A drive name with non-ASCII characters (ä, ö, é, …) is written into the player history
-  page the way rekordbox writes it, aligned where older CDJs expect it. Every named drive's history
-  rows now also have rekordbox's length.
-- **Fix:** A newly initialized USB carries the day it was initialized in the PDB as well as the eDB,
-  like a USB rekordbox initializes. Before, the PDB got a fixed date.
-- **Fix:** The player history page in the PDB again carries the app's own version string. Since
-  0.4.8 it copied the eDB's, which on libraries rekordbox upgraded is a value the app had never
-  written. The page also keeps the date it already has instead of taking the eDB's, as rekordbox
-  does.
-- **Fix:** Health & Diagnostics on a large USB no longer sits on "Checking analysis references" for
-  a long time. The shared analysis file check looked up every track's analysis folder on the drive,
-  although it only compares the paths stored in the databases.
-- **Improvement:** The parity report notes other track fields that differ between the databases
-  (comment, ISRC, genre, label, dates, audio format details) without failing the check.
-- **Improvement:** Track and album text an older version stored where older CDJs can't read it is no
-  longer rewritten behind your back on every write to the USB. Health & Diagnostics shows it as failing,
-  and Preview Fixes repairs it when you choose to.
+- **Fix (CRITICAL):** The "Upgrade Export Data To Strict Parity" repair could leave a large USB that neither the players nor rekordbox would load. It rewrote both databases once per playlist, replaced every track's eDB values with a thin copy (clearing comments, ISRCs, dates added, cues and labels), and wrote the USB many times in one run. It now reads both databases completely, merges them (a value on either side is kept), and writes each database once through the export's own writers, changing only what differs (a track's artwork in the PDB stays when it has some). If it fails, neither database is changed. Preview Fixes shows how many rows it will add and change.
+- **Fix:** Re-exporting a playlist no longer rewrites eDB values that haven't changed, and no longer clears values the library doesn't have (an ISRC, release year or key rekordbox wrote stays). The export date only fills in a missing date added.
+- **Fix:** Export and repairs no longer move a track to another artist, album, genre, key or label entry that differs only in case or punctuation (for example "Drum & Bass" to "drum & Bass"), and no longer trim spaces from titles and comments. Which entry was picked could change from one run to the next.
+- **Fix:** A PDB track row that has to grow (a longer title or path) keeps its composer, label, remixer and the other values the app doesn't change. Export now also writes composer, label and remixer into the PDB.
+- **Fix:** Adding unindexed audio files to a playlist during a repair writes the USB once, at the end of the repair, together with the other fixes; fixes that run after strict parity act on what it wrote.
+- **Fix:** Exporting to (or repairing) a USB that was renamed in rekordbox after it had filled its player history page no longer rewrites the page rekordbox had retired. That left two history pages that both looked current to the players.
+- **Fix:** A drive name with non-ASCII characters (ä, ö, é, …) is written into the player history page the way rekordbox writes it, aligned where older CDJs expect it. Every named drive's history rows now also have rekordbox's length.
+- **Fix:** A newly initialized USB carries the day it was initialized in the PDB as well as the eDB, like a USB rekordbox initializes. Before, the PDB got a fixed date.
+- **Fix:** The player history page in the PDB again carries the app's own version string. Since 0.4.8 it copied the eDB's, which on libraries rekordbox upgraded is a value the app had never written. The page also keeps the date it already has instead of taking the eDB's, as rekordbox does.
+- **Fix:** Health & Diagnostics on a large USB no longer sits on "Checking analysis references" for a long time. The shared analysis file check looked up every track's analysis folder on the drive, although it only compares the paths stored in the databases.
+- **Improvement:** The parity report notes other track fields that differ between the databases (comment, ISRC, genre, label, dates, audio format details) without failing the check.
+- **Improvement:** Track and album text an older version stored where older CDJs can't read it is no longer rewritten behind your back on every write to the USB. Health & Diagnostics shows it as failing, and Preview Fixes repairs it when you choose to.
 
 ## 0.4.8
 
 **Severity:** critical — see item(s) marked **(CRITICAL)** below.
 
-- **Improvement:** rekordbox now shows a USB under the drive name given in the app. Each export
-  writes the name into the eDB.
-- **Fix (CRITICAL):** Older players could show 0 tracks on a USB the app had initialized, even after
-  playlists were exported to it, and after the first fix for that, only 1 track and sometimes hang with a
-  communication error. Exports now keep the PDB's history page counting the USB's tracks and matching the
-  eDB's device details (name, creation date, background color) the way rekordbox does, and Repair fixes
-  USBs that are already affected.
-- **Fix (CRITICAL):** Older CDJs (CDJ-2000nexus, CDJ-2000NXS2) could give a communication error as soon as the
-  track list opened when a track had a comment or title longer than 126 characters. Exports now place
-  such text where the players can read it, and any write to an affected USB (an export, a repair, a cue
-  or metadata edit) fixes the tracks already on it.
-- **Fix:** USB playlists could leave out a track whose file name differed from another track's
-  only by punctuation (`Vol. 1.mp3` and `Vol-1.mp3`).
-- **Fix:** A playlist's heading could count tracks already on the USB as still to copy, even right
-  after exporting the playlist. This happened to tracks whose shortened file names collide with another
-  track's.
-- **Fix:** Re-exporting a playlist could give two tracks whose file names differ only by punctuation
-  the same track identity and artwork on the USB. The next export of such a playlist gives each track
-  its own again.
-- **Fix:** An export could be refused for lack of free space on the USB when some of its tracks were
-  already on it under a shortened file name.
-- **Fix:** repair now recognises a wider form of interrupted-export corruption. A
-  drive whose PDB tracks table claimed a last page past the end of the file *and*
-  had an unfilled blank page linked onto the end of the chain would report every
-  playlist as un-repairable ("PDB additive track mutation blocked: t00 chain
-  invalid") and could not be fixed. The truncated-table-chain repair now walks
-  the chain to the last page that actually holds data, skipping the trailing
-  blank page, so these drives repair cleanly in one pass.
+- **Improvement:** rekordbox now shows a USB under the drive name given in the app. Each export writes the name into the eDB.
+- **Fix (CRITICAL):** Older players could show 0 tracks on a USB the app had initialized, even after playlists were exported to it, and after the first fix for that, only 1 track and sometimes hang with a communication error. Exports now keep the PDB's history page counting the USB's tracks and matching the eDB's device details (name, creation date, background color) the way rekordbox does, and Repair fixes USBs that are already affected.
+- **Fix (CRITICAL):** Older CDJs (CDJ-2000nexus, CDJ-2000NXS2) could give a communication error as soon as the track list opened when a track had a comment or title longer than 126 characters. Exports now place such text where the players can read it, and any write to an affected USB (an export, a repair, a cue or metadata edit) fixes the tracks already on it.
+- **Fix:** USB playlists could leave out a track whose file name differed from another track's only by punctuation (`Vol. 1.mp3` and `Vol-1.mp3`).
+- **Fix:** A playlist's heading could count tracks already on the USB as still to copy, even right after exporting the playlist. This happened to tracks whose shortened file names collide with another track's.
+- **Fix:** Re-exporting a playlist could give two tracks whose file names differ only by punctuation the same track identity and artwork on the USB. The next export of such a playlist gives each track its own again.
+- **Fix:** An export could be refused for lack of free space on the USB when some of its tracks were already on it under a shortened file name.
+- **Fix:** repair now recognises a wider form of interrupted-export corruption. A drive whose PDB tracks table claimed a last page past the end of the file *and* had an unfilled blank page linked onto the end of the chain would report every playlist as un-repairable ("PDB additive track mutation blocked: t00 chain invalid") and could not be fixed. The truncated-table-chain repair now walks the chain to the last page that actually holds data, skipping the trailing blank page, so these drives repair cleanly in one pass.
 
 ## 0.4.7
 
-- **Fix:** A playlist's "Last exported … to" line could name the wrong drive when another stick
-  had since been mounted at the same place, for example a new stick with the same volume label as
-  an old one. The line now keeps the name the drive had at the export. Exports made before this
-  version show the drive's mount path instead.
-- **Fix:** Opening a playlist right after an empty one kept showing the "add tracks" screen until
-  its tracks had loaded, and a search with no matches showed it too. A playlist with tracks now
-  shows "Loading tracks…" while they load, and a search with no matches shows an empty table.
-- **Improvement:** A playlist's tracks no longer wait for the "tracks to copy" line. With a USB
-  connected, the list shows right away and the line fills in a moment later.
-- **Improvement:** Select all, scrolling and searching the library are much faster, most of all
-  with a large library and only some source folders enabled. They no longer go through every
-  file in the source folders, or re-read copies of library files, each time. The folders are read
-  again when the app window comes back into focus or the library is scanned, so files added from
-  outside the app still show up.
+- **Fix:** A playlist's "Last exported … to" line could name the wrong drive when another stick had since been mounted at the same place, for example a new stick with the same volume label as an old one. The line now keeps the name the drive had at the export. Exports made before this version show the drive's mount path instead.
+- **Fix:** Opening a playlist right after an empty one kept showing the "add tracks" screen until its tracks had loaded, and a search with no matches showed it too. A playlist with tracks now shows "Loading tracks…" while they load, and a search with no matches shows an empty table.
+- **Improvement:** A playlist's tracks no longer wait for the "tracks to copy" line. With a USB connected, the list shows right away and the line fills in a moment later.
+- **Improvement:** Select all, scrolling and searching the library are much faster, most of all with a large library and only some source folders enabled. They no longer go through every file in the source folders, or re-read copies of library files, each time. The folders are read again when the app window comes back into focus or the library is scanned, so files added from outside the app still show up.
 
 ## 0.4.6
 
 **Severity:** critical — see item(s) marked **(CRITICAL)** below.
 
-- **Fix (CRITICAL):** With a USB connected, opening a playlist (also at startup and when
-  selecting the USB) read the size of every track's file from your music disk to work out the
-  "tracks to copy" line, waking a sleeping hard drive and repeating the work as the list scrolled.
-  The line now uses the sizes the library recorded when the files were scanned and no longer
-  touches your music files.
-- **Fix:** When no USB is connected, the "Last exported to …" line under a playlist could show the
-  wrong drive name, for example for a drive that was named on another computer. It now shows the
-  name the drive had the last time it was connected.
-- **Fix:** Clicking Export twice, or quickly on another playlist, could start a second export to
-  the same USB while the first was still running. Export is now disabled from the click until the
-  export has finished, and a second export is refused.
-- **Fix:** Analyzing tracks during an export took over the export's progress bar. Once the
-  analysis finished, the bar lost its elapsed time, the USB controls unlocked while the export was
-  still writing, and the app could start installing an update mid-export. The progress bar now
-  stays with the job that started first, and jobs started after it show their progress in the
-  status line. When the first job ends, the bar moves to the next job still running. An analysis
-  keeps its pause and cancel buttons even while an export has the bar, and pausing it doesn't stop
-  the export's elapsed time.
-- **Improvement:** The progress bar's elapsed time now sits next to the "Progress" heading instead
-  of after the status text.
-- **Chore:** New docs page on connecting a USB: how to select one, what selecting it does
-  (naming, spotting copies, the local working copy of its databases, diagnostics), what changes
-  in the app while it's connected, and why to select it again after using the stick in a player
-  or rekordbox.
+- **Fix (CRITICAL):** With a USB connected, opening a playlist (also at startup and when selecting the USB) read the size of every track's file from your music disk to work out the "tracks to copy" line, waking a sleeping hard drive and repeating the work as the list scrolled. The line now uses the sizes the library recorded when the files were scanned and no longer touches your music files.
+- **Fix:** When no USB is connected, the "Last exported to …" line under a playlist could show the wrong drive name, for example for a drive that was named on another computer. It now shows the name the drive had the last time it was connected.
+- **Fix:** Clicking Export twice, or quickly on another playlist, could start a second export to the same USB while the first was still running. Export is now disabled from the click until the export has finished, and a second export is refused.
+- **Fix:** Analyzing tracks during an export took over the export's progress bar. Once the analysis finished, the bar lost its elapsed time, the USB controls unlocked while the export was still writing, and the app could start installing an update mid-export. The progress bar now stays with the job that started first, and jobs started after it show their progress in the status line. When the first job ends, the bar moves to the next job still running. An analysis keeps its pause and cancel buttons even while an export has the bar, and pausing it doesn't stop the export's elapsed time.
+- **Improvement:** The progress bar's elapsed time now sits next to the "Progress" heading instead of after the status text.
+- **Chore:** New docs page on connecting a USB: how to select one, what selecting it does (naming, spotting copies, the local working copy of its databases, diagnostics), what changes in the app while it's connected, and why to select it again after using the stick in a player or rekordbox.
 
 ## 0.4.5
 
 **Severity:** feature
 
-- **New feature:** Playlist, Media Library, USB playlist and USB history headings show the total
-  size of the list's audio files next to its track count, so you can see before exporting whether
-  a playlist fits on the USB. Both numbers cover the whole list, even while a search is narrowing
-  it.
-- **New feature:** With a USB connected, the playlist title row shows how many tracks and how much
-  data an export would still copy and how much space is free on the USB, and warns when it won't
-  fit. Tracks
-  already on the USB aren't counted, and working this out doesn't read the USB, so it stays quick
-  on slow sticks.
-- **New feature:** Click the drive name in the header to rename the connected USB. Its backups and
-  local cache move to the new name. A drive left unnamed shows as "Unnamed" and can be named the
-  same way.
-- **Fix:** A USB with the same volume label as one you already named is asked for its own name,
-  instead of quietly taking the other drive's name and sharing its backups. Names that differ only
-  in case or punctuation count as the same name. A copy of a named drive or folder is asked for its
-  own name too, once it's a different size from the original or the original has had an export
-  the copy doesn't have. Until it's named, it keeps its own cache and its backups stay on the USB.
-- **Fix:** A failed export or other background job adds one entry to the Event Log instead of
-  repeating the same error up to four times.
-- **Improvement:** The cue editor opens over the page and sidebar instead of opening as a window
-  on top, and the track you edited stays marked in the list after closing.
-- **Improvement:** With a USB connected, the checkmark next to a playlist in the sidebar and the
-  export line under the playlist's title show whether that playlist is on this USB. With no USB
-  connected they still show whether the playlist was ever exported.
-- **Improvement:** Writing the Engine DJ library at the end of an export is much faster: the
-  database is built on the computer and copied to the USB in one go. The export progress shows
-  this as its own step.
-- **Improvement:** After the last track is copied, the export progress says when it is waiting for
-  the copied files to finish writing to the USB, instead of looking stuck on that track.
-- **Chore:** Updated dependencies (`tauri`, `reqwest`, `serde`, `chrono`, `uuid`, `@tauri-apps/api`,
-  `@tauri-apps/cli`, `@playwright/test`, `jsdom`).
-- **Chore:** Building the app needs Node.js 24.15 or newer, or Node.js 26. The macOS and Windows
-  build setup scripts install Node.js 24.22.1.
+- **New feature:** Playlist, Media Library, USB playlist and USB history headings show the total size of the list's audio files next to its track count, so you can see before exporting whether a playlist fits on the USB. Both numbers cover the whole list, even while a search is narrowing it.
+- **New feature:** With a USB connected, the playlist title row shows how many tracks and how much data an export would still copy and how much space is free on the USB, and warns when it won't fit. Tracks already on the USB aren't counted, and working this out doesn't read the USB, so it stays quick on slow sticks.
+- **New feature:** Click the drive name in the header to rename the connected USB. Its backups and local cache move to the new name. A drive left unnamed shows as "Unnamed" and can be named the same way.
+- **Fix:** A USB with the same volume label as one you already named is asked for its own name, instead of quietly taking the other drive's name and sharing its backups. Names that differ only in case or punctuation count as the same name. A copy of a named drive or folder is asked for its own name too, once it's a different size from the original or the original has had an export the copy doesn't have. Until it's named, it keeps its own cache and its backups stay on the USB.
+- **Fix:** A failed export or other background job adds one entry to the Event Log instead of repeating the same error up to four times.
+- **Improvement:** The cue editor opens over the page and sidebar instead of opening as a window on top, and the track you edited stays marked in the list after closing.
+- **Improvement:** With a USB connected, the checkmark next to a playlist in the sidebar and the export line under the playlist's title show whether that playlist is on this USB. With no USB connected they still show whether the playlist was ever exported.
+- **Improvement:** Writing the Engine DJ library at the end of an export is much faster: the database is built on the computer and copied to the USB in one go. The export progress shows this as its own step.
+- **Improvement:** After the last track is copied, the export progress says when it is waiting for the copied files to finish writing to the USB, instead of looking stuck on that track.
+- **Chore:** Updated dependencies (`tauri`, `reqwest`, `serde`, `chrono`, `uuid`, `@tauri-apps/api`, `@tauri-apps/cli`, `@playwright/test`, `jsdom`).
+- **Chore:** Building the app needs Node.js 24.15 or newer, or Node.js 26. The macOS and Windows build setup scripts install Node.js 24.22.1.
 
 ## 0.4.4
 
 **Severity:** critical — see item(s) marked **(CRITICAL)** below.
 
-- **Fix (CRITICAL):** Removing a source folder that sits inside another source folder no longer
-  removes its tracks, with their cues and analysis, from the library. Removing a parent folder
-  likewise keeps the tracks of a subfolder that is still a source folder.
-- **Improvement:** Scan Library and Analyze Missing Tracks analyze every track that needs it in
-  one run. They no longer stop after 3000 tracks with an "Auto analysis limit reached" notice,
-  which could also appear wrongly when a file in a source folder couldn't be added to the
-  library, for example one still being downloaded.
-- **Improvement:** Exporting to a USB stick on Linux is much faster. The desktop mounts FAT
-  sticks so that every written file pauses briefly when it's closed; the export now lets those
-  pauses overlap instead of waiting on each one in turn.
-- **Improvement:** The Linux AppImage no longer turns off WebKit's GPU renderer at startup. If the
-  window stays blank or black, the README shows how to start it the old way.
-- **Fix:** On Linux with an NVIDIA graphics card, the `.deb` and `.rpm` installs no longer close
-  right after opening under Wayland or show a black window under X11.
-- **Fix:** The same audio file in two folders no longer becomes two tracks in the library. Scan
-  Library keeps one track and warns in the event log which file is the extra copy, on every scan
-  until it's deleted. Copies already in the library are merged on the next scan, keeping the
-  track's cues and playlists, so a playlist holding both copies exports again instead of being
-  blocked.
-- **Fix:** Warnings from Scan Library itself now appear in the event log and in the warning count
-  shown when the scan finishes.
-- **Fix:** Playing a track in the Media Library always plays its own file. It no longer tries a
-  copy on an old exported USB stick that has the same title and artist.
-- **Fix:** On Linux the app shows up as "DJ USB Tkit" instead of "DJ_USB_Tkit" in application
-  menus and launchers.
-- **Improvement:** On Linux the app has a fuller description in application menus, launchers
-  and software centers, including how the name is said: DJ USB T[ool]Kit.
+- **Fix (CRITICAL):** Removing a source folder that sits inside another source folder no longer removes its tracks, with their cues and analysis, from the library. Removing a parent folder likewise keeps the tracks of a subfolder that is still a source folder.
+- **Improvement:** Scan Library and Analyze Missing Tracks analyze every track that needs it in one run. They no longer stop after 3000 tracks with an "Auto analysis limit reached" notice, which could also appear wrongly when a file in a source folder couldn't be added to the library, for example one still being downloaded.
+- **Improvement:** Exporting to a USB stick on Linux is much faster. The desktop mounts FAT sticks so that every written file pauses briefly when it's closed; the export now lets those pauses overlap instead of waiting on each one in turn.
+- **Improvement:** The Linux AppImage no longer turns off WebKit's GPU renderer at startup. If the window stays blank or black, the README shows how to start it the old way.
+- **Fix:** On Linux with an NVIDIA graphics card, the `.deb` and `.rpm` installs no longer close right after opening under Wayland or show a black window under X11.
+- **Fix:** The same audio file in two folders no longer becomes two tracks in the library. Scan Library keeps one track and warns in the event log which file is the extra copy, on every scan until it's deleted. Copies already in the library are merged on the next scan, keeping the track's cues and playlists, so a playlist holding both copies exports again instead of being blocked.
+- **Fix:** Warnings from Scan Library itself now appear in the event log and in the warning count shown when the scan finishes.
+- **Fix:** Playing a track in the Media Library always plays its own file. It no longer tries a copy on an old exported USB stick that has the same title and artist.
+- **Fix:** On Linux the app shows up as "DJ USB Tkit" instead of "DJ_USB_Tkit" in application menus and launchers.
+- **Improvement:** On Linux the app has a fuller description in application menus, launchers and software centers, including how the name is said: DJ USB T[ool]Kit.
 
 ## 0.4.3
 
 **Severity:** feature
 
-- **New feature:** The Event Log writes everything it records to a log file that covers the
-  whole session, and an "Open log file" button opens it. The list in the window keeps only the
-  newest entries; the file keeps everything since the app was started.
-- **New feature:** When an analysis run finishes, the Event Log records how many tracks it
-  covered and how long it took.
-- **New feature:** The cue editor has a folder button that opens the track's folder in the
-  file manager with the file selected, for library and USB tracks alike.
-- **New feature:** The cue editor edits a track's release date, next to the genre: a full date,
-  or just the year or year and month. The field shows the date export writes to the PDB and the
-  eDB, which CDJs that read only the eDB use, so a date that export fills in from the file is
-  visible and can be corrected. Opened from a USB row, the edit is written to the PDB and the
-  eDB on the stick as well as the library. A date set here, and its year, stay when the library
-  is rescanned.
-- **New feature:** Every track list (Media Library, app playlists, USB playlists and USB
-  history) has row checkboxes, a select-all box and a selection bar beside the search, each
-  taking half the row. The bar is always there, so the table no longer jumps when a selection
-  starts; until then it shows a hint of what it does, then the count and its actions. On a
-  narrow window the actions switch to short labels. The Library reanalyzes the selection, and an
-  app playlist removes it from the playlist or reanalyzes it. The Library, USB playlists and
-  history add it to the active playlist with "+ Add to" and the playlist's name. Add to…, in all
-  four lists, opens a list of playlists to add the selection to several at once, shows which
-  already hold all or part of it, and creates a new playlist on the spot.
-- **New feature:** The selection bar's Edit… sets the genre, release date and star rating of every
-  selected track in one go, in all four track lists. It shows each field's shared value or
-  "Mixed", and writes only the fields you change; an emptied field is cleared. Edits from USB
-  playlists and history are written to the PDB and the eDB on the stick as well as the library.
-- **New feature:** Track lists have a sortable Year column next to Album. The columns now run
-  Track, Album, Year, BPM, Key, Length and format, so the mixing columns sit closer to the
-  track name and the file format comes last.
-- **Fix:** The progress bar's elapsed time no longer disappears while analysis shows the track
-  being worked on. A long track name is shortened instead of pushing the time out of view.
-- **Fix:** Analysis no longer fills the Event Log with "no state change" warnings for tracks
-  that weren't on screen or whose BPM and key didn't change.
-- **Fix:** Exported tracks always carry a release year that matches their release date. A track
-  tagged with a full release date but no year gets the year from that date. A track tagged only
-  with a year or year and month no longer gets a release date from a different year.
-- **Fix:** Date tags written day first, such as "18.2.2009", now give the track its release
-  year and are exported as proper dates. Slash dates such as "05/06/2009", which can be read
-  either day first or month first, give only the year. MP3, AIFF and WAV files whose date is
-  stored in a custom "DATE" or "YEAR" field, as some tag editors write it, are read too. Scan the
-  libraries to update tracks that are already in the library.
-- **Improvement:** The Library's Scan button always scans and fills in missing analysis; it no
-  longer turns into "Analyze Selected" while tracks are selected. The selection bar's Reanalyze
-  gives every selected track a fresh analysis, replacing imported or edited BPM, key and first
-  beat even on a track that was never analyzed (cues are kept).
-- **Improvement:** Track search also matches the genre and the release year, and each word can
-  match a different field, so "techno 2009" finds techno tracks from 2009.
-- **Improvement:** When a track has no release date tag, export uses the earlier of the file's
-  created and modified dates instead of always the modified date. That date is usually closer to
-  the release, for example for files unzipped from a purchased album or edited in a tag editor
-  later. Rescan the library to pick up created dates for tracks that were already in it.
-- **Chore:** The backend tests go through the same commands the app uses: the library is read
-  and added to playlists the way the library view does it, USB rows are added the way their
-  "+" does, and the duplicate-USB-track cleanup runs at startup as it does for users. Seven
-  commands the app never called are removed, along with an option to add a track to a playlist
-  it's already in that the app never used.
+- **New feature:** The Event Log writes everything it records to a log file that covers the whole session, and an "Open log file" button opens it. The list in the window keeps only the newest entries; the file keeps everything since the app was started.
+- **New feature:** When an analysis run finishes, the Event Log records how many tracks it covered and how long it took.
+- **New feature:** The cue editor has a folder button that opens the track's folder in the file manager with the file selected, for library and USB tracks alike.
+- **New feature:** The cue editor edits a track's release date, next to the genre: a full date, or just the year or year and month. The field shows the date export writes to the PDB and the eDB, which CDJs that read only the eDB use, so a date that export fills in from the file is visible and can be corrected. Opened from a USB row, the edit is written to the PDB and the eDB on the stick as well as the library. A date set here, and its year, stay when the library is rescanned.
+- **New feature:** Every track list (Media Library, app playlists, USB playlists and USB history) has row checkboxes, a select-all box and a selection bar beside the search, each taking half the row. The bar is always there, so the table no longer jumps when a selection starts; until then it shows a hint of what it does, then the count and its actions. On a narrow window the actions switch to short labels. The Library reanalyzes the selection, and an app playlist removes it from the playlist or reanalyzes it. The Library, USB playlists and history add it to the active playlist with "+ Add to" and the playlist's name. Add to…, in all four lists, opens a list of playlists to add the selection to several at once, shows which already hold all or part of it, and creates a new playlist on the spot.
+- **New feature:** The selection bar's Edit… sets the genre, release date and star rating of every selected track in one go, in all four track lists. It shows each field's shared value or "Mixed", and writes only the fields you change; an emptied field is cleared. Edits from USB playlists and history are written to the PDB and the eDB on the stick as well as the library.
+- **New feature:** Track lists have a sortable Year column next to Album. The columns now run Track, Album, Year, BPM, Key, Length and format, so the mixing columns sit closer to the track name and the file format comes last.
+- **Fix:** The progress bar's elapsed time no longer disappears while analysis shows the track being worked on. A long track name is shortened instead of pushing the time out of view.
+- **Fix:** Analysis no longer fills the Event Log with "no state change" warnings for tracks that weren't on screen or whose BPM and key didn't change.
+- **Fix:** Exported tracks always carry a release year that matches their release date. A track tagged with a full release date but no year gets the year from that date. A track tagged only with a year or year and month no longer gets a release date from a different year.
+- **Fix:** Date tags written day first, such as "18.2.2009", now give the track its release year and are exported as proper dates. Slash dates such as "05/06/2009", which can be read either day first or month first, give only the year. MP3, AIFF and WAV files whose date is stored in a custom "DATE" or "YEAR" field, as some tag editors write it, are read too. Scan the libraries to update tracks that are already in the library.
+- **Improvement:** The Library's Scan button always scans and fills in missing analysis; it no longer turns into "Analyze Selected" while tracks are selected. The selection bar's Reanalyze gives every selected track a fresh analysis, replacing imported or edited BPM, key and first beat even on a track that was never analyzed (cues are kept).
+- **Improvement:** Track search also matches the genre and the release year, and each word can match a different field, so "techno 2009" finds techno tracks from 2009.
+- **Improvement:** When a track has no release date tag, export uses the earlier of the file's created and modified dates instead of always the modified date. That date is usually closer to the release, for example for files unzipped from a purchased album or edited in a tag editor later. Rescan the library to pick up created dates for tracks that were already in it.
+- **Chore:** The backend tests go through the same commands the app uses: the library is read and added to playlists the way the library view does it, USB rows are added the way their "+" does, and the duplicate-USB-track cleanup runs at startup as it does for users. Seven commands the app never called are removed, along with an option to add a track to a playlist it's already in that the app never used.
 - **Chore:** Updated dependencies (`combine`, `defmt`).
 
 ## 0.4.2
 
 **Severity:** feature
 
-- **New feature:** USB repair gives tracks that share an analysis file their own ("Give Tracks
-  Their Own Analysis Files"), named the way rekordbox names them when two tracks land in the same
-  analysis folder, and adds the track path to analysis files that lack it ("Add Track Path to
-  Analysis Files"). Diagnostics warn about shared analysis files.
-- **New feature:** USB repair can delete audio files that are in no playlist and are
-  byte-for-byte copies of a track in the same folder (for example `Track.mp3` next to the
-  exported `Track-1.mp3`). They are no longer offered for the "Unindexed" playlist, where the
-  same track would show up twice.
-- **New feature:** Sidebar playlists can be put in any order by dragging the handle that shows
-  when hovering a playlist. New playlists appear at the top. The order is the app's own and
-  doesn't change the playlist order on the USB.
-- **New feature:** The sidebar can be made wider or narrower by dragging its right edge. The
-  width is remembered, and double-clicking the edge resets it.
-- **New feature:** The cue editor edits a track's genre and star rating. The genre field
-  suggests the genres the library (and the USB, for a USB track) already has. Opened from a USB
-  row, the edit is written to the PDB and the eDB on the stick as well as the library. A genre
-  set here stays when the library is rescanned or re-imported from rekordbox or Mixxx. Saving
-  only a genre or rating change leaves the beat grid, key and cues as they are.
-- **Fix:** When USB repair upgrades playlists to strict parity and the same pass also tidies a
-  PDB playlist page that the upgrade adds a playlist to, the page is now tidied as the upgrade
-  left it. Before, that page could need a second repair run.
-- **Fix:** Track matching keeps different file formats separate when linking USB tracks to the
-  Library, reusing existing USB media, resolving playback, or relinking moved audio. Duplicate
-  audio checks compare files in bounded memory. Automatic Library links require matching file
-  sizes; missing recorded sizes are read from file metadata when possible. USB playlists keep
-  separate entries when the file path is missing and only editable metadata matches. Playback and
-  moved-audio repair use the same filename matching rule.
-- **Fix:** USB repair now decides which audio files are indexed, missing or unindexed exactly
-  as the parity report does, so every file the report lists gets a repair. Before, a file whose
-  name differed from an indexed one only by a `-1`/`-2` suffix got no repair, and a file the
-  report found by ignoring letter case could still be reported missing by the repair.
-- **Fix:** "Remove Missing Audio References" also removes the track's PDB row and eDB rows
-  that are in no playlist, so the parity report is clean afterwards instead of still listing
-  the missing files. Tracks in a history playlist are never removed; the repair preview lists
-  them instead.
-- **Fix:** A playlist whose only difference between the two databases is a track's rating,
-  colour or artwork now gets "Upgrade Export Data To Strict Parity". Before, the parity report
-  warned about it but the repair offered nothing.
-- **Fix:** "Add Unindexed Audio to a Playlist" analyses a file that has no analysis files on
-  the USB, so the added track has its waveform and the parity report doesn't flag its
-  metadata as incomplete.
-- **Fix:** Export no longer overwrites another track's analysis file when two tracks' paths land
-  in the same analysis folder. The second track gets the next file in that folder, named with its
-  track path, as rekordbox does. Before, both tracks used one file, so a player could show one
-  track's waveform and beat grid for the other.
-- **Fix:** "Fix BPM/Key Mismatch" is no longer offered after every repair on a USB where two
-  tracks share an analysis file. Each pass rebuilt the shared beat grid for one track, which made
-  it wrong for the other.
-- **Fix:** An MP3 or FLAC whose seek data can't be built, such as a file with a damaged region,
-  is listed in the repair preview as something to replace instead of being offered on every
-  repair.
-- **Fix:** Analysis files the USB repair creates for MP3 and FLAC tracks get the seek data
-  rekordbox writes, so the seek-data repair isn't offered for them afterwards.
-- **Fix:** A thin bar no longer flickers at the bottom of the window while nothing is
-  running. The hidden progress bar was still animating and sometimes showed through on Linux.
-- **Fix:** The BPM/key analysis runtime's paths (node, runner script, installed modules) are
-  passed to the analysis process unchanged instead of through text, so they also work from a
-  folder whose name isn't valid UTF-8. A rekordbox library's ANLZ beat grid is read from its
-  path directly, and more export and repair helpers take `Path` instead of text.
-- **Fix:** The "empty analysis files" repair matches each empty file to its track by the
-  file's full path. Before, it compared only the letters and digits of the path, so two
-  analysis folders whose names differ only in where the `/` falls could be mixed up, and the
-  other track's analysis would be rebuilt instead. The repair also gets the empty files
-  straight from the USB scan instead of reading them back out of the scan's warning text,
-  so a file whose name has a control character in it is repaired too.
-- **Fix:** Double-clicking a sidebar playlist to rename it no longer closes the name field right
-  away. Hovering a playlist also shows a pencil button that starts a rename.
-- **Fix:** Diagnostics of a freshly initialized USB with no tracks no longer warn that analysis
-  references are missing for newer players.
-- **Fix:** Resizing the window while the cue editor is open now redraws its waveform and beat
-  grid. Before, the waveform could go blank and the beat grid lines stayed where they were.
-- **Fix:** Re-exporting a track that is already on the USB no longer clears its genre in the
-  eDB. The PDB kept the genre, so the two databases disagreed.
-- **Improvement:** Diagnostics no longer warn about the transaction bookkeeping rekordbox
-  itself leaves in the PDB (sentinel u5, tranrf=0, page flags and footer shapes, active
-  track pages in a multi-page chain, stale sentinel B-trees, tombstoned rows with an id), so a
-  USB exported only by rekordbox shows green. Repair no longer lists these as fixes; it still
-  tidies them up whenever it runs.
-- **Improvement:** The Event Log opens from a button in the header instead of from Settings,
-  and the button shows how many errors were logged since the log was last opened. When a
-  diagnostics, parity or repair-preview item points to details in the log, the button gets a
-  dot until the log is opened.
-- **Improvement:** Repair-preview items whose details are listed in the Event Log (audio files
-  in no playlist, moved audio files, malformed analysis entries) link to it, like the
-  diagnostics checks already did.
-- **Improvement:** Preview Fixes opens with a plain-language summary like the diagnostics
-  report: a headline saying how many problems Apply Fixes repairs, one row per area it changes
-  (older and newer Pioneer players, playlists, music files, waveforms and beat grids,
-  Denon / Numark players), and a row for problems it can't fix. The detailed list of fixes is
-  under a collapsed "Technical details".
-- **Improvement:** Apply Fixes shows the running repair and divides its progress range among the
-  available selected fixes. BPM/key, beat-grid and seek-data repairs also show completed tracks or
-  files within their range. The apply pass skips rebuilding MP3 and FLAC seek indexes while
-  planning; the selected seek-data fix still checks each audio file when it runs.
-- **Improvement:** The Backups panel opens from a Backups button on the USB page instead of
-  from Settings.
+- **New feature:** USB repair gives tracks that share an analysis file their own ("Give Tracks Their Own Analysis Files"), named the way rekordbox names them when two tracks land in the same analysis folder, and adds the track path to analysis files that lack it ("Add Track Path to Analysis Files"). Diagnostics warn about shared analysis files.
+- **New feature:** USB repair can delete audio files that are in no playlist and are byte-for-byte copies of a track in the same folder (for example `Track.mp3` next to the exported `Track-1.mp3`). They are no longer offered for the "Unindexed" playlist, where the same track would show up twice.
+- **New feature:** Sidebar playlists can be put in any order by dragging the handle that shows when hovering a playlist. New playlists appear at the top. The order is the app's own and doesn't change the playlist order on the USB.
+- **New feature:** The sidebar can be made wider or narrower by dragging its right edge. The width is remembered, and double-clicking the edge resets it.
+- **New feature:** The cue editor edits a track's genre and star rating. The genre field suggests the genres the library (and the USB, for a USB track) already has. Opened from a USB row, the edit is written to the PDB and the eDB on the stick as well as the library. A genre set here stays when the library is rescanned or re-imported from rekordbox or Mixxx. Saving only a genre or rating change leaves the beat grid, key and cues as they are.
+- **Fix:** When USB repair upgrades playlists to strict parity and the same pass also tidies a PDB playlist page that the upgrade adds a playlist to, the page is now tidied as the upgrade left it. Before, that page could need a second repair run.
+- **Fix:** Track matching keeps different file formats separate when linking USB tracks to the Library, reusing existing USB media, resolving playback, or relinking moved audio. Duplicate audio checks compare files in bounded memory. Automatic Library links require matching file sizes; missing recorded sizes are read from file metadata when possible. USB playlists keep separate entries when the file path is missing and only editable metadata matches. Playback and moved-audio repair use the same filename matching rule.
+- **Fix:** USB repair now decides which audio files are indexed, missing or unindexed exactly as the parity report does, so every file the report lists gets a repair. Before, a file whose name differed from an indexed one only by a `-1`/`-2` suffix got no repair, and a file the report found by ignoring letter case could still be reported missing by the repair.
+- **Fix:** "Remove Missing Audio References" also removes the track's PDB row and eDB rows that are in no playlist, so the parity report is clean afterwards instead of still listing the missing files. Tracks in a history playlist are never removed; the repair preview lists them instead.
+- **Fix:** A playlist whose only difference between the two databases is a track's rating, colour or artwork now gets "Upgrade Export Data To Strict Parity". Before, the parity report warned about it but the repair offered nothing.
+- **Fix:** "Add Unindexed Audio to a Playlist" analyses a file that has no analysis files on the USB, so the added track has its waveform and the parity report doesn't flag its metadata as incomplete.
+- **Fix:** Export no longer overwrites another track's analysis file when two tracks' paths land in the same analysis folder. The second track gets the next file in that folder, named with its track path, as rekordbox does. Before, both tracks used one file, so a player could show one track's waveform and beat grid for the other.
+- **Fix:** "Fix BPM/Key Mismatch" is no longer offered after every repair on a USB where two tracks share an analysis file. Each pass rebuilt the shared beat grid for one track, which made it wrong for the other.
+- **Fix:** An MP3 or FLAC whose seek data can't be built, such as a file with a damaged region, is listed in the repair preview as something to replace instead of being offered on every repair.
+- **Fix:** Analysis files the USB repair creates for MP3 and FLAC tracks get the seek data rekordbox writes, so the seek-data repair isn't offered for them afterwards.
+- **Fix:** A thin bar no longer flickers at the bottom of the window while nothing is running. The hidden progress bar was still animating and sometimes showed through on Linux.
+- **Fix:** The BPM/key analysis runtime's paths (node, runner script, installed modules) are passed to the analysis process unchanged instead of through text, so they also work from a folder whose name isn't valid UTF-8. A rekordbox library's ANLZ beat grid is read from its path directly, and more export and repair helpers take `Path` instead of text.
+- **Fix:** The "empty analysis files" repair matches each empty file to its track by the file's full path. Before, it compared only the letters and digits of the path, so two analysis folders whose names differ only in where the `/` falls could be mixed up, and the other track's analysis would be rebuilt instead. The repair also gets the empty files straight from the USB scan instead of reading them back out of the scan's warning text, so a file whose name has a control character in it is repaired too.
+- **Fix:** Double-clicking a sidebar playlist to rename it no longer closes the name field right away. Hovering a playlist also shows a pencil button that starts a rename.
+- **Fix:** Diagnostics of a freshly initialized USB with no tracks no longer warn that analysis references are missing for newer players.
+- **Fix:** Resizing the window while the cue editor is open now redraws its waveform and beat grid. Before, the waveform could go blank and the beat grid lines stayed where they were.
+- **Fix:** Re-exporting a track that is already on the USB no longer clears its genre in the eDB. The PDB kept the genre, so the two databases disagreed.
+- **Improvement:** Diagnostics no longer warn about the transaction bookkeeping rekordbox itself leaves in the PDB (sentinel u5, tranrf=0, page flags and footer shapes, active track pages in a multi-page chain, stale sentinel B-trees, tombstoned rows with an id), so a USB exported only by rekordbox shows green. Repair no longer lists these as fixes; it still tidies them up whenever it runs.
+- **Improvement:** The Event Log opens from a button in the header instead of from Settings, and the button shows how many errors were logged since the log was last opened. When a diagnostics, parity or repair-preview item points to details in the log, the button gets a dot until the log is opened.
+- **Improvement:** Repair-preview items whose details are listed in the Event Log (audio files in no playlist, moved audio files, malformed analysis entries) link to it, like the diagnostics checks already did.
+- **Improvement:** Preview Fixes opens with a plain-language summary like the diagnostics report: a headline saying how many problems Apply Fixes repairs, one row per area it changes (older and newer Pioneer players, playlists, music files, waveforms and beat grids, Denon / Numark players), and a row for problems it can't fix. The detailed list of fixes is under a collapsed "Technical details".
+- **Improvement:** Apply Fixes shows the running repair and divides its progress range among the available selected fixes. BPM/key, beat-grid and seek-data repairs also show completed tracks or files within their range. The apply pass skips rebuilding MP3 and FLAC seek indexes while planning; the selected seek-data fix still checks each audio file when it runs.
+- **Improvement:** The Backups panel opens from a Backups button on the USB page instead of from Settings.
 - **Improvement:** The sidebar is more compact, so more playlists fit before it scrolls.
-- **Improvement:** Library, playlist and USB track lists search and sort by the same rules, and a
-  committed playlist sort saves exactly the order the list showed. USB list search now also
-  matches text that spans title, artist and album (for example "title artist"), as the Library
-  search already did.
-- **Improvement:** Track lists keep a steady scrollbar sized for the whole list instead of one
-  that jumps each time more tracks load. Dragging it anywhere loads that part of the list
-  directly, with placeholder rows until it arrives, and long lists stay fast because only the
-  rows on screen are drawn. Loading tracks no longer freezes the window, and Library pages load
-  faster because unchanged audio files aren't read again.
-- **Improvement:** Audio format support follows what Pioneer players read. `.wave` files are
-  picked up by the library scan and exported as `.wav`, with a format notice that says so. USB
-  diagnostics and repair count unindexed `.mp4` files and no longer count `.ogg` files, and USB
-  tracks in a format players don't read show the unlisted-format warning.
-- **Chore:** The PDB page footer (row offsets and row presence bits) is now read and
-  written by one shared module (`pdb_page`) instead of separate copies across the writer,
-  reader, repairs and dump tools. Exports and repairs produce the same bytes as before.
-- **Chore:** The PDB writer is split into files by job (data model, whole-file writer,
-  in-place repairs, additive writer, shared row helpers) instead of one large file.
-- **Chore:** USB repairs are split into files by area (PDB page fixes, audio fixes, player
-  menu, history sync, strict parity, the repair run itself), and the repair run's detect and
-  apply phases are separate functions. Repairs offer and apply the same fixes as before.
-- **Chore:** USB diagnostics are split into files by area (PDB integrity, content and
-  analysis checks, parity comparison, overview layout, path helpers) instead of one large file.
-- **Chore:** The backend service's core file is split into files by area (track library,
-  playback, playlists, source roots, settings) instead of one large file.
+- **Improvement:** Library, playlist and USB track lists search and sort by the same rules, and a committed playlist sort saves exactly the order the list showed. USB list search now also matches text that spans title, artist and album (for example "title artist"), as the Library search already did.
+- **Improvement:** Track lists keep a steady scrollbar sized for the whole list instead of one that jumps each time more tracks load. Dragging it anywhere loads that part of the list directly, with placeholder rows until it arrives, and long lists stay fast because only the rows on screen are drawn. Loading tracks no longer freezes the window, and Library pages load faster because unchanged audio files aren't read again.
+- **Improvement:** Audio format support follows what Pioneer players read. `.wave` files are picked up by the library scan and exported as `.wav`, with a format notice that says so. USB diagnostics and repair count unindexed `.mp4` files and no longer count `.ogg` files, and USB tracks in a format players don't read show the unlisted-format warning.
+- **Chore:** The PDB page footer (row offsets and row presence bits) is now read and written by one shared module (`pdb_page`) instead of separate copies across the writer, reader, repairs and dump tools. Exports and repairs produce the same bytes as before.
+- **Chore:** The PDB writer is split into files by job (data model, whole-file writer, in-place repairs, additive writer, shared row helpers) instead of one large file.
+- **Chore:** USB repairs are split into files by area (PDB page fixes, audio fixes, player menu, history sync, strict parity, the repair run itself), and the repair run's detect and apply phases are separate functions. Repairs offer and apply the same fixes as before.
+- **Chore:** USB diagnostics are split into files by area (PDB integrity, content and analysis checks, parity comparison, overview layout, path helpers) instead of one large file.
+- **Chore:** The backend service's core file is split into files by area (track library, playback, playlists, source roots, settings) instead of one large file.
 - **Chore:** The export helpers' eDB writers and PDB writers each have their own file.
-- **Chore:** How a track was matched (`matchedBy`, `resolvedBy`) and where it plays from
-  (`source`) are enums in the backend instead of free text. The app sends the same values
-  as before. The audio player keeps the loaded track's path as a `Path`, and every USB
-  repair's id is a named constant.
-- **Chore:** The library database stores a track file's modified time as a number instead of
-  text. The first start after updating converts it once; the library, cues, playlists and
-  USB links stay as they are.
+- **Chore:** How a track was matched (`matchedBy`, `resolvedBy`) and where it plays from (`source`) are enums in the backend instead of free text. The app sends the same values as before. The audio player keeps the loaded track's path as a `Path`, and every USB repair's id is a named constant.
+- **Chore:** The library database stores a track file's modified time as a number instead of text. The first start after updating converts it once; the library, cues, playlists and USB links stay as they are.
 
 ## 0.4.1
 
-- **Fix:** Denon Prime and Numark Mixstream players that import the PDB
-  themselves showed many tracks without an artist. The export now writes artist names the
-  way rekordbox does. USB diagnostics flag USBs exported with earlier versions, and
-  Preview Fixes offers "Repair Artist Name Layout" to fix them in one pass.
-- **Fix:** The Engine DJ library gave files whose names mix many writing systems a
-  shortened file name (e.g. ending in `.3` instead of `.mp3`). It now uses the real file name.
-- **Chore:** `docs/ENGINE_DJ.md` lists how the library differs from the player's own
-  import and what the player changes when a track is played.
+- **Fix:** Denon Prime and Numark Mixstream players that import the PDB themselves showed many tracks without an artist. The export now writes artist names the way rekordbox does. USB diagnostics flag USBs exported with earlier versions, and Preview Fixes offers "Repair Artist Name Layout" to fix them in one pass.
+- **Fix:** The Engine DJ library gave files whose names mix many writing systems a shortened file name (e.g. ending in `.3` instead of `.mp3`). It now uses the real file name.
+- **Chore:** `docs/ENGINE_DJ.md` lists how the library differs from the player's own import and what the player changes when a track is played.
 
 ## 0.4.0
 
 **Severity:** feature
 
-- **New feature:** Write the Engine DJ library for Denon Prime and Numark Mixstream players
-  from a USB's rekordbox export (`write_engine_db <usb root>`). Players then use our beat
-  grid, overview waveform, hot cues (with colours), main cue, key and artwork instead of
-  importing the rekordbox data and analyzing every track again. Play history on the stick is
-  kept across re-runs; changes made on the player itself are replaced. See
-  `docs/ENGINE_DJ.md`.
-- **New feature:** Settings → Export → "Write Engine DJ library" (off by default) keeps the
-  Engine DJ library up to date whenever the app changes a USB: export, playlist reorder or
-  removal, cue edits, backup restore, repairs.
-- **New feature:** USB diagnostics check the Engine DJ library. They warn when a USB
-  has an Engine library that the app isn't keeping up to date, or that is behind
-  the PDB, and Preview Fixes offers "Keep Engine DJ Library Up to Date" to turn the
-  setting on and rebuild it. A USB without one gets a note to turn the setting on before
-  using it in an Engine player.
-- **Fix:** Exporting to a USB that rekordbox had exported to no longer resets the star
-  rating and colour of rekordbox's tracks. Newer Pioneer players lost them on every track
-  the app exported again; older players could lose them on all tracks whenever an export
-  rewrote the whole database.
-- **Improvement:** USB Health & Diagnostics opens with a plain-language summary: one line
-  each for older Pioneer players, newer Pioneer players, playlists, waveforms & beat grids,
-  and Denon / Numark players, saying what a problem means and pointing to Preview Fixes. The
-  detailed checks moved under a collapsed **Technical details**, regrouped into Databases
-  (PDB, eDB, Engine DJ side by side), Library (playlists, analysis) and Low-level boxes.
-  The per-playlist resolution table, which repeated the summary, is gone.
-- **Improvement:** The Parity Report gets the same treatment: three plain-language lines
-  (playlists, track details, music files) saying whether older and newer Pioneer players see
-  the same thing, with the checks and the per-playlist comparison under a collapsed
-  **Technical details**. The parity summary table, which repeated the checks, is gone. Its
-  result shows as its own "Parity" badge next to the health badge instead of replacing it,
-  so the badge and the USB health dot no longer disagree.
-- **Improvement:** The Parity Report no longer warns about tracks that have a composer,
-  lyricist, original artist, remixer or label set ("Reference-documented field coverage").
-  Players don't need those fields. It now compares each track's star rating and colour
-  between the two databases instead: a mismatch shows as a warning on **Track details** and
-  on the result, and **Upgrade Export Data To Strict Parity** copies the newer players'
-  rating and colour to older players.
-- **Improvement:** MP3 seek data (analysis, and the **Add Missing MP3 Seek Data** repair)
-  now also covers files with APE or Lyrics3 tags, CBR files whose first frame was wiped to
-  zeros, and CBR files with a cut-off last frame, matching what rekordbox writes for them.
-  A file with a large zeroed-out stretch of audio is logged as "audio corrupted", with a
-  hint to replace it, instead of asking for a report.
-- **Improvement:** Every collapsible heading shows the pointer cursor and no longer selects
-  text when clicked.
-- **Improvement:** Clicking the cue editor's waveform moves the playhead there instead of
-  starting playback. If the track was playing it plays on from the new spot; otherwise it
-  stays paused there and Play starts from it. Drag the playhead to hear the track follow the
-  pointer; it goes quiet while the pointer rests. On release the track goes back to how it
-  was: still playing, or paused at the drop point.
+- **New feature:** Write the Engine DJ library for Denon Prime and Numark Mixstream players from a USB's rekordbox export (`write_engine_db <usb root>`). Players then use our beat grid, overview waveform, hot cues (with colours), main cue, key and artwork instead of importing the rekordbox data and analyzing every track again. Play history on the stick is kept across re-runs; changes made on the player itself are replaced. See `docs/ENGINE_DJ.md`.
+- **New feature:** Settings → Export → "Write Engine DJ library" (off by default) keeps the Engine DJ library up to date whenever the app changes a USB: export, playlist reorder or removal, cue edits, backup restore, repairs.
+- **New feature:** USB diagnostics check the Engine DJ library. They warn when a USB has an Engine library that the app isn't keeping up to date, or that is behind the PDB, and Preview Fixes offers "Keep Engine DJ Library Up to Date" to turn the setting on and rebuild it. A USB without one gets a note to turn the setting on before using it in an Engine player.
+- **Fix:** Exporting to a USB that rekordbox had exported to no longer resets the star rating and colour of rekordbox's tracks. Newer Pioneer players lost them on every track the app exported again; older players could lose them on all tracks whenever an export rewrote the whole database.
+- **Improvement:** USB Health & Diagnostics opens with a plain-language summary: one line each for older Pioneer players, newer Pioneer players, playlists, waveforms & beat grids, and Denon / Numark players, saying what a problem means and pointing to Preview Fixes. The detailed checks moved under a collapsed **Technical details**, regrouped into Databases (PDB, eDB, Engine DJ side by side), Library (playlists, analysis) and Low-level boxes. The per-playlist resolution table, which repeated the summary, is gone.
+- **Improvement:** The Parity Report gets the same treatment: three plain-language lines (playlists, track details, music files) saying whether older and newer Pioneer players see the same thing, with the checks and the per-playlist comparison under a collapsed **Technical details**. The parity summary table, which repeated the checks, is gone. Its result shows as its own "Parity" badge next to the health badge instead of replacing it, so the badge and the USB health dot no longer disagree.
+- **Improvement:** The Parity Report no longer warns about tracks that have a composer, lyricist, original artist, remixer or label set ("Reference-documented field coverage"). Players don't need those fields. It now compares each track's star rating and colour between the two databases instead: a mismatch shows as a warning on **Track details** and on the result, and **Upgrade Export Data To Strict Parity** copies the newer players' rating and colour to older players.
+- **Improvement:** MP3 seek data (analysis, and the **Add Missing MP3 Seek Data** repair) now also covers files with APE or Lyrics3 tags, CBR files whose first frame was wiped to zeros, and CBR files with a cut-off last frame, matching what rekordbox writes for them. A file with a large zeroed-out stretch of audio is logged as "audio corrupted", with a hint to replace it, instead of asking for a report.
+- **Improvement:** Every collapsible heading shows the pointer cursor and no longer selects text when clicked.
+- **Improvement:** Clicking the cue editor's waveform moves the playhead there instead of starting playback. If the track was playing it plays on from the new spot; otherwise it stays paused there and Play starts from it. Drag the playhead to hear the track follow the pointer; it goes quiet while the pointer rests. On release the track goes back to how it was: still playing, or paused at the drop point.
 
 ## 0.3.7
 
 **Severity:** critical — see item(s) marked **(CRITICAL)** below.
 
-- **Fix (CRITICAL):** Beat grids from earlier versions were refused by newer players such
-  as the XDJ-AZ ("please analyse this track in rekordbox", no Beat Sync). On the first
-  launch after updating, the app rewrites the beat grids in its own analysis cache in the
-  0.3.7 format, with progress shown in the footer. It happens once; analysis and
-  cue-editor saves wait until it's done. Re-export your playlists, or run USB repair →
-  **Fix Beat Grid**, to fix the ones already on a USB.
-- **New feature:** Memory cues in the cue editor. They show as ▼ flags on the waveform
-  (grey, or in their colour) and are edited in one slot in the Cues header: ‹ › steps through
-  them like a CDJ's CUE/LOOP CALL, with play, colour, name and delete; + or M adds one at the
-  playhead. Any number per track, without using up the 8 pads. The first memory cue also adds
-  the ▶ playback-start marker on the first beat, which then stays as long as the track has any
-  cue. The grey shading before playback start now ends on the earliest memory cue, where the
-  CDJ loads the track.
-- **New feature:** **Cues follow grid** in the cue editor (next to Q, off by default).
-  When it's on, changing the BPM or the first beat moves every cue so it stays on its beat,
-  which fixes a grid under cues placed with Quantize. Off, cues keep their place in the
-  audio, as in rekordbox.
-- **New feature:** USB diagnostics have a **Beat grid format** line that flags tracks whose
-  beat grid is in the outdated format the XDJ-AZ refuses Beat Sync on, and points to **Fix
-  Beat Grid** or a re-export. Only tracks this app exported can have it; the stick's export log, which
-  now records the app version, says which ones to check, so the check reads only those
-  tracks' analysis files, and only their first 4 KB.
-- **Fix:** Memory cues are kept. rekordbox memory cues — on a USB prepared by rekordbox, or
-  imported from rekordbox's library — were turned into hot cues on the next save or import,
-  and any past the eighth were dropped. They are now their own kind: any number, with their
-  name and colour, kept through import, saving and export as memory points without a pad.
-  Tracks imported from rekordbox earlier get theirs back when imported again with "force
-  update track data from rekordbox".
-- **Fix:** Saving a BPM, key or first-beat edit from a USB playlist no longer rewrites the
-  track's cues on the stick. Before, it turned rekordbox memory cues into hot cues and
-  dropped any past the eighth, even though no cue was edited.
-- **Fix:** Analysed MP3s now get the seek index (`PVBR`) rekordbox writes: the sample total,
-  and for VBR files the byte offsets, byte for byte as rekordbox writes them for the files
-  checked. MP3s analysed earlier get it once on the first launch, with the cached beat grids;
-  a track whose file can't be found then is marked for analysis instead. Files whose index
-  can't be reproduced exactly keep the empty one and are named in the Event Log, so they can
-  be reported.
-- **Fix:** Relocating a moved media folder to a path that differs only in letter case (e.g.
-  `~/music/Sets` → `~/Music/Sets`) was refused with "newRoot must be different from
-  oldRoot", and the folder's chip then disappeared from the sources. On Linux those are
-  different folders, so the relocation now goes through and the chip shows the new path.
-- **Improvement:** The USB repair **Add Missing Seek Data** is now two fixes, **Add Missing
-  MP3 Seek Data** (exactly what rekordbox writes) and **Add Missing FLAC Seek Data** (about
-  98% of entries match rekordbox's on long tracks), so either can be applied alone.
-- **Chore:** One-time data upgrades now go through a single registry
-  (`backend/src/service/migrations.rs`, see `docs/APP_DATA_MODEL.md` "Data migrations"),
-  recorded in a `data_migrations` table. The three existing startup backfills moved into it
-  and no longer run on every launch.
-- **Chore:** USB repair now writes the outcome of every fix (applied, skipped or failed)
-  to the Event Log, so a log shared for a bug report shows what the repair did. "Not
-  selected" is listed only for fixes that had something to do.
+- **Fix (CRITICAL):** Beat grids from earlier versions were refused by newer players such as the XDJ-AZ ("please analyse this track in rekordbox", no Beat Sync). On the first launch after updating, the app rewrites the beat grids in its own analysis cache in the 0.3.7 format, with progress shown in the footer. It happens once; analysis and cue-editor saves wait until it's done. Re-export your playlists, or run USB repair → **Fix Beat Grid**, to fix the ones already on a USB.
+- **New feature:** Memory cues in the cue editor. They show as ▼ flags on the waveform (grey, or in their colour) and are edited in one slot in the Cues header: ‹ › steps through them like a CDJ's CUE/LOOP CALL, with play, colour, name and delete; + or M adds one at the playhead. Any number per track, without using up the 8 pads. The first memory cue also adds the ▶ playback-start marker on the first beat, which then stays as long as the track has any cue. The grey shading before playback start now ends on the earliest memory cue, where the CDJ loads the track.
+- **New feature:** **Cues follow grid** in the cue editor (next to Q, off by default). When it's on, changing the BPM or the first beat moves every cue so it stays on its beat, which fixes a grid under cues placed with Quantize. Off, cues keep their place in the audio, as in rekordbox.
+- **New feature:** USB diagnostics have a **Beat grid format** line that flags tracks whose beat grid is in the outdated format the XDJ-AZ refuses Beat Sync on, and points to **Fix Beat Grid** or a re-export. Only tracks this app exported can have it; the stick's export log, which now records the app version, says which ones to check, so the check reads only those tracks' analysis files, and only their first 4 KB.
+- **Fix:** Memory cues are kept. rekordbox memory cues — on a USB prepared by rekordbox, or imported from rekordbox's library — were turned into hot cues on the next save or import, and any past the eighth were dropped. They are now their own kind: any number, with their name and colour, kept through import, saving and export as memory points without a pad. Tracks imported from rekordbox earlier get theirs back when imported again with "force update track data from rekordbox".
+- **Fix:** Saving a BPM, key or first-beat edit from a USB playlist no longer rewrites the track's cues on the stick. Before, it turned rekordbox memory cues into hot cues and dropped any past the eighth, even though no cue was edited.
+- **Fix:** Analysed MP3s now get the seek index (`PVBR`) rekordbox writes: the sample total, and for VBR files the byte offsets, byte for byte as rekordbox writes them for the files checked. MP3s analysed earlier get it once on the first launch, with the cached beat grids; a track whose file can't be found then is marked for analysis instead. Files whose index can't be reproduced exactly keep the empty one and are named in the Event Log, so they can be reported.
+- **Fix:** Relocating a moved media folder to a path that differs only in letter case (e.g. `~/music/Sets` → `~/Music/Sets`) was refused with "newRoot must be different from oldRoot", and the folder's chip then disappeared from the sources. On Linux those are different folders, so the relocation now goes through and the chip shows the new path.
+- **Improvement:** The USB repair **Add Missing Seek Data** is now two fixes, **Add Missing MP3 Seek Data** (exactly what rekordbox writes) and **Add Missing FLAC Seek Data** (about 98% of entries match rekordbox's on long tracks), so either can be applied alone.
+- **Chore:** One-time data upgrades now go through a single registry (`backend/src/service/migrations.rs`, see `docs/APP_DATA_MODEL.md` "Data migrations"), recorded in a `data_migrations` table. The three existing startup backfills moved into it and no longer run on every launch.
+- **Chore:** USB repair now writes the outcome of every fix (applied, skipped or failed) to the Event Log, so a log shared for a bug report shows what the repair did. "Not selected" is listed only for fixes that had something to do.
 
 ## 0.3.7-rc.3
 
 Release candidate for testing Beat Sync on the XDJ-AZ. Use this one, not rc2.
 
-- **Fix:** The app's extended beat grid (`PQT2` in the `.EXT` analysis file) now matches
-  rekordbox's exactly: it carries the checksum of the beat grid and each beat's time to the
-  microsecond. Before, the checksum was 0, which is the likely reason the XDJ-AZ treated
-  app-analysed tracks as not analysed by rekordbox and refused Beat Sync. Beat times are
-  now floored to the millisecond as rekordbox does (≤ 1 ms difference).
-- **Changed:** The USB repair from rc2 is now **Fix Beat Grid**. It rewrites both the
-  `.DAT` and `.EXT` beat grids of older app bundles on the stick; re-exporting does the same.
+- **Fix:** The app's extended beat grid (`PQT2` in the `.EXT` analysis file) now matches rekordbox's exactly: it carries the checksum of the beat grid and each beat's time to the microsecond. Before, the checksum was 0, which is the likely reason the XDJ-AZ treated app-analysed tracks as not analysed by rekordbox and refused Beat Sync. Beat times are now floored to the millisecond as rekordbox does (≤ 1 ms difference).
+- **Changed:** The USB repair from rc2 is now **Fix Beat Grid**. It rewrites both the `.DAT` and `.EXT` beat grids of older app bundles on the stick; re-exporting does the same.
 
 ## 0.3.7-rc.2
 
 Release candidate for testing the beat grid on the XDJ-AZ.
 
-- **Fix:** The app wrote one fixed value in the beat-grid header of its `.DAT` analysis
-  files two bytes off from where rekordbox writes it. Older players ignore it; the XDJ-AZ
-  is suspected to reject the beat grid because of it ("please analyse this track in
-  rekordbox"). New analysis and every export now write rekordbox's layout, and the new USB
-  repair **Fix Beat Grid Header** fixes the files already on a stick without re-exporting.
+- **Fix:** The app wrote one fixed value in the beat-grid header of its `.DAT` analysis files two bytes off from where rekordbox writes it. Older players ignore it; the XDJ-AZ is suspected to reject the beat grid because of it ("please analyse this track in rekordbox"). New analysis and every export now write rekordbox's layout, and the new USB repair **Fix Beat Grid Header** fixes the files already on a stick without re-exporting.
 
 ## 0.3.7-rc.1
 
 Release candidate for testing seek data on the XDJ-AZ.
 
-- **Fix:** New USB repair **Add Missing Seek Data**. App-analysed MP3s got an empty seek
-  index (`PVBR`), which the XDJ-AZ answers with "please analyse this track in rekordbox";
-  FLACs got none (`PVB2`). The repair reads each MP3 and FLAC on the stick and writes the
-  seek index rekordbox writes for it. Beat grids, cues and waveforms are kept, and
-  rekordbox's own bundles are never touched. Files it can't index exactly are skipped and
-  named in the Event Log. Analysis itself is unchanged, so re-exporting a track brings
-  back the empty seek data: run the repair again after an export.
-- **Chore:** Release candidates. A `v0.3.7-rc.1`-style tag is published as a GitHub
-  prerelease, so stable installs are never offered it, by the update check or by the
-  in-app updater. A release-candidate install is offered its final release (0.3.7)
-  once that is out.
-- **Chore:** The docs screenshots and GIFs no longer show the app version, in
-  their footer or in the Settings drawer, so they only need re-recording after
-  a UI change. All of them were re-recorded once to drop it.
+- **Fix:** New USB repair **Add Missing Seek Data**. App-analysed MP3s got an empty seek index (`PVBR`), which the XDJ-AZ answers with "please analyse this track in rekordbox"; FLACs got none (`PVB2`). The repair reads each MP3 and FLAC on the stick and writes the seek index rekordbox writes for it. Beat grids, cues and waveforms are kept, and rekordbox's own bundles are never touched. Files it can't index exactly are skipped and named in the Event Log. Analysis itself is unchanged, so re-exporting a track brings back the empty seek data: run the repair again after an export.
+- **Chore:** Release candidates. A `v0.3.7-rc.1`-style tag is published as a GitHub prerelease, so stable installs are never offered it, by the update check or by the in-app updater. A release-candidate install is offered its final release (0.3.7) once that is out.
+- **Chore:** The docs screenshots and GIFs no longer show the app version, in their footer or in the Settings drawer, so they only need re-recording after a UI change. All of them were re-recorded once to drop it.
 
 ## 0.3.6
 
 **Severity:** critical — see item(s) marked **(CRITICAL)** below.
 
-- **Fix (CRITICAL):** Tracks imported from a rekordbox library now keep rekordbox's beat
-  grid on the USB. Export was writing rekordbox's `.EXT` analysis file in place
-  of the `.DAT`, so players such as the XDJ-AZ found no beat grid, disabled
-  sync and asked for the track to be analysed in rekordbox. The `.DAT` now
-  arrives intact, including rekordbox's MP3 seek index (`PVBR`). A beat grid
-  that hasn't been edited here is exported exactly as rekordbox made it, so
-  variable-tempo grids are no longer flattened to one tempo. rekordbox bundles
-  without a `.2EX` file (older analyses) no longer block the export.
-  ([#6](https://github.com/haivala/dj-usb-tkit/issues/6))
-- **Fix:** Saving cue or first-beat edits on a track imported from rekordbox no
-  longer rewrites the analysis files inside the rekordbox library. The edits
-  are kept in this app's library and written onto the USB at export.
+- **Fix (CRITICAL):** Tracks imported from a rekordbox library now keep rekordbox's beat grid on the USB. Export was writing rekordbox's `.EXT` analysis file in place of the `.DAT`, so players such as the XDJ-AZ found no beat grid, disabled sync and asked for the track to be analysed in rekordbox. The `.DAT` now arrives intact, including rekordbox's MP3 seek index (`PVBR`). A beat grid that hasn't been edited here is exported exactly as rekordbox made it, so variable-tempo grids are no longer flattened to one tempo. rekordbox bundles without a `.2EX` file (older analyses) no longer block the export. ([#6](https://github.com/haivala/dj-usb-tkit/issues/6))
+- **Fix:** Saving cue or first-beat edits on a track imported from rekordbox no longer rewrites the analysis files inside the rekordbox library. The edits are kept in this app's library and written onto the USB at export.
 
 ## 0.3.5
 
-- **New feature:** on Linux, a rekordbox library running under Wine is
-  found and can be imported. The app looks in `$WINEPREFIX`, `~/.wine`, and
-  Bottles bottles, and maps rekordbox's `C:` / `Z:` track paths to where the
-  files are on Linux. The Windows build doesn't work under Wine, so use the
-  Linux build for this.
-- **Fix:** AIFF files with padding before the audio can be analyzed and
-  played. They used to fail with "No support for AIFF block-aligned data".
-- **Fix:** a track row now pulses as analyzing for the whole time the
-  track is being analyzed. Before, it only lit up sometimes or a moment
-  at the very end, so during a large analysis some rows never showed it.
-- **Fix:** the cue editor button is disabled for a track that has no
-  waveform, even if it has a BPM and key. Its tooltip says to analyze the
-  track first.
-- **Fix:** in the light theme, the track list's keys are readable. Their
-  text was a pale colour meant for the dark theme.
-- **Fix:** the beat grid in the cue editor looks even. Lines used to be
-  drawn between screen pixels, so some looked thicker or fainter than
-  others and their spacing seemed to wobble.
-- **Fix:** where a list's two scrollbars meet, the corner is dark now
-  instead of a white square.
-- **Improvement:** reanalyzing a track clears its BPM and key as soon as
-  its analysis starts, so you can see the fresh values come in. A first
-  analysis still keeps a BPM or key you edited or imported in view.
-- **Improvement:** the cue editor's BPM, key, first beat and playback-start
-  controls fit on two compact rows (BPM and key, then first beat and where
-  playback starts), leaving more room for the waveform. The BPM and first
-  beat boxes have up/down arrows that match the light or dark theme, and
-  the BPM box shows two decimals (119.00), as in the track list.
-- **Improvement:** the cue editor's header shows the track's cover art, its
-  title, and the artist and album below it, like the track's row in the list.
-- **Improvement:** the button next to a track's waveform that opens the cue
-  editor shows a cue marker instead of a magnifying glass.
-- **Improvement:** the track list's format and BPM values are plain text,
-  not boxes. When you hover a row, the values with more details get a dotted
-  underline, and the pointer turns into a question mark over them. A format
-  that needs attention keeps its coloured box, which in the dark theme is
-  now a soft tint instead of a bright fill, and no longer wraps onto two
-  lines.
-- **Improvement:** the track list's sort arrows sit right after each
-  column's name, so they no longer look like they belong to the next column.
-  The column the list is sorted by is shown in the accent colour.
-- **Improvement:** on the empty library screen, the rekordbox import button
-  says "rekordbox library", like the "Mixxx library" one next to it, instead
-  of "RB master.db".
-- **Chore:** the rekordbox library's "master DB" names in the code, docs,
-  database and settings are now "rekordbox DB", matching the Mixxx ones. The
-  environment override is `DJUSBTKIT_REKORDBOX_DB_PATH`; the old
-  `DJUSBTKIT_MASTER_DB_PATH` still works. Existing libraries and the
-  rekordbox chip's on/off state carry over on the first start.
-- **Chore:** backend helpers that read files on this machine (artwork,
-  waveforms, ANLZ, USB setup, source folders) take `Path` instead of text,
-  and a USB database path resolved against the stick is a `PathBuf`.
-  `CONTRIBUTING.md` explains where paths stay text: the API, the database,
-  and rekordbox's own `/Contents/…` and `/PIONEER/…` paths.
-- **Chore:** the docs show more of the app for 0.3.4: USB Playlists and History,
-  the Player Menu editor, Health & Diagnostics, the repair preview, Settings,
-  and a playlist export. Their USB views come from the demo library really
-  exported to a USB, and every screenshot and GIF has a caption and the app
-  version below it.
+- **New feature:** on Linux, a rekordbox library running under Wine is found and can be imported. The app looks in `$WINEPREFIX`, `~/.wine`, and Bottles bottles, and maps rekordbox's `C:` / `Z:` track paths to where the files are on Linux. The Windows build doesn't work under Wine, so use the Linux build for this.
+- **Fix:** AIFF files with padding before the audio can be analyzed and played. They used to fail with "No support for AIFF block-aligned data".
+- **Fix:** a track row now pulses as analyzing for the whole time the track is being analyzed. Before, it only lit up sometimes or a moment at the very end, so during a large analysis some rows never showed it.
+- **Fix:** the cue editor button is disabled for a track that has no waveform, even if it has a BPM and key. Its tooltip says to analyze the track first.
+- **Fix:** in the light theme, the track list's keys are readable. Their text was a pale colour meant for the dark theme.
+- **Fix:** the beat grid in the cue editor looks even. Lines used to be drawn between screen pixels, so some looked thicker or fainter than others and their spacing seemed to wobble.
+- **Fix:** where a list's two scrollbars meet, the corner is dark now instead of a white square.
+- **Improvement:** reanalyzing a track clears its BPM and key as soon as its analysis starts, so you can see the fresh values come in. A first analysis still keeps a BPM or key you edited or imported in view.
+- **Improvement:** the cue editor's BPM, key, first beat and playback-start controls fit on two compact rows (BPM and key, then first beat and where playback starts), leaving more room for the waveform. The BPM and first beat boxes have up/down arrows that match the light or dark theme, and the BPM box shows two decimals (119.00), as in the track list.
+- **Improvement:** the cue editor's header shows the track's cover art, its title, and the artist and album below it, like the track's row in the list.
+- **Improvement:** the button next to a track's waveform that opens the cue editor shows a cue marker instead of a magnifying glass.
+- **Improvement:** the track list's format and BPM values are plain text, not boxes. When you hover a row, the values with more details get a dotted underline, and the pointer turns into a question mark over them. A format that needs attention keeps its coloured box, which in the dark theme is now a soft tint instead of a bright fill, and no longer wraps onto two lines.
+- **Improvement:** the track list's sort arrows sit right after each column's name, so they no longer look like they belong to the next column. The column the list is sorted by is shown in the accent colour.
+- **Improvement:** on the empty library screen, the rekordbox import button says "rekordbox library", like the "Mixxx library" one next to it, instead of "RB master.db".
+- **Chore:** the rekordbox library's "master DB" names in the code, docs, database and settings are now "rekordbox DB", matching the Mixxx ones. The environment override is `DJUSBTKIT_REKORDBOX_DB_PATH`; the old `DJUSBTKIT_MASTER_DB_PATH` still works. Existing libraries and the rekordbox chip's on/off state carry over on the first start.
+- **Chore:** backend helpers that read files on this machine (artwork, waveforms, ANLZ, USB setup, source folders) take `Path` instead of text, and a USB database path resolved against the stick is a `PathBuf`. `CONTRIBUTING.md` explains where paths stay text: the API, the database, and rekordbox's own `/Contents/…` and `/PIONEER/…` paths.
+- **Chore:** the docs show more of the app for 0.3.4: USB Playlists and History, the Player Menu editor, Health & Diagnostics, the repair preview, Settings, and a playlist export. Their USB views come from the demo library really exported to a USB, and every screenshot and GIF has a caption and the app version below it.
 
 ## 0.3.4
 
 **Severity:** feature
 
-- **Improvement:** switching USB playlists now stops loading the previous
-  one, so quick changes don't pile up.
-- **Improvement:** USB playlists open much faster on Windows, where Windows
-  Defender scans every file read from the stick. Tracks you also have in
-  your library show their waveform and cover art from the library, and
-  everything read from a stick is kept on the computer, so each file is
-  read from the stick only once, even across restarts.
-- **Improvement:** the Event Log shows how long each USB playlist or
-  history page took to load, and how many of its files came from the
-  library, the local copy or the stick.
-- **Improvement:** the USB Playlists and USB History lists are more
-  compact, and the playlist list shows only names. The open playlist's or
-  session's name and track count are shown above its tracks, and the
-  remove button appears on the row under the mouse.
-- **Improvement:** a track's play button now sits on its cover art and
-  shows when you hover the row, which leaves more room for the other
-  columns in every track list.
-- **Improvement:** checkboxes follow the app's light and dark theme instead
-  of showing the system's white boxes. A checked source folder or library
-  shows a green check, and a missing folder a red one.
-- **Improvement:** track lists show a "Loading tracks…" spinner while a
-  page is loading. When you switch to another playlist, the previous
-  playlist's tracks are no longer shown while the new one loads.
-- **Improvement:** when an update is waiting, it's the first thing in
-  Settings, with one action: "Update & restart" for AppImage, Windows and
-  macOS installs, or a download for deb/rpm. The download also appears if
-  an in-app update fails.
-- **Improvement:** a dot on the Settings button shows when an update is
-  available, so routine updates are noticed without opening Settings.
-- **Improvement:** the app checks for updates again every 6 hours, and
-  a button next to the version in Settings checks right away. A check
-  that can't reach GitHub now says so instead of looking up to date.
-- **Improvement:** the Mixxx import takes each track's first beat from its
-  Mixxx beat grid, so the app's beat grid lines up with the one in Mixxx,
-  including a grid you adjusted there. A first beat you moved in the cue
-  editor is kept unless you force the import.
-- **Improvement:** analysis finds BPMs that fall between whole and half
-  values, such as 174.79, instead of rounding them to the nearest half BPM,
-  so the beat grid no longer drifts through the track. Tracks whose tempo is
-  a whole or half BPM keep that value. A BPM that is off by 3:2 or 4:3, such
-  as 83 for a 125 track or 116 for a 174 track, is corrected when the real
-  tempo clearly fits the track better, and a tempo that clearly fits is
-  found even when the first estimate is several BPM off. The beat grid's
-  first beat is placed on an actual beat of the track; before, it was often
-  around a tenth of a second off. The BPM's tooltip says "stratum-v2" for
-  tracks analyzed this way, so tracks still carrying an older analysis can
-  be told apart.
+- **Improvement:** switching USB playlists now stops loading the previous one, so quick changes don't pile up.
+- **Improvement:** USB playlists open much faster on Windows, where Windows Defender scans every file read from the stick. Tracks you also have in your library show their waveform and cover art from the library, and everything read from a stick is kept on the computer, so each file is read from the stick only once, even across restarts.
+- **Improvement:** the Event Log shows how long each USB playlist or history page took to load, and how many of its files came from the library, the local copy or the stick.
+- **Improvement:** the USB Playlists and USB History lists are more compact, and the playlist list shows only names. The open playlist's or session's name and track count are shown above its tracks, and the remove button appears on the row under the mouse.
+- **Improvement:** a track's play button now sits on its cover art and shows when you hover the row, which leaves more room for the other columns in every track list.
+- **Improvement:** checkboxes follow the app's light and dark theme instead of showing the system's white boxes. A checked source folder or library shows a green check, and a missing folder a red one.
+- **Improvement:** track lists show a "Loading tracks…" spinner while a page is loading. When you switch to another playlist, the previous playlist's tracks are no longer shown while the new one loads.
+- **Improvement:** when an update is waiting, it's the first thing in Settings, with one action: "Update & restart" for AppImage, Windows and macOS installs, or a download for deb/rpm. The download also appears if an in-app update fails.
+- **Improvement:** a dot on the Settings button shows when an update is available, so routine updates are noticed without opening Settings.
+- **Improvement:** the app checks for updates again every 6 hours, and a button next to the version in Settings checks right away. A check that can't reach GitHub now says so instead of looking up to date.
+- **Improvement:** the Mixxx import takes each track's first beat from its Mixxx beat grid, so the app's beat grid lines up with the one in Mixxx, including a grid you adjusted there. A first beat you moved in the cue editor is kept unless you force the import.
+- **Improvement:** analysis finds BPMs that fall between whole and half values, such as 174.79, instead of rounding them to the nearest half BPM, so the beat grid no longer drifts through the track. Tracks whose tempo is a whole or half BPM keep that value. A BPM that is off by 3:2 or 4:3, such as 83 for a 125 track or 116 for a 174 track, is corrected when the real tempo clearly fits the track better, and a tempo that clearly fits is found even when the first estimate is several BPM off. The beat grid's first beat is placed on an actual beat of the track; before, it was often around a tenth of a second off. The BPM's tooltip says "stratum-v2" for tracks analyzed this way, so tracks still carrying an older analysis can be told apart.
 
 ## 0.3.3
 
-- **Fix:** selecting a USB playlist while the previous one was still
-  loading could fail with "an internal database error occurred". This
-  showed up mostly on Windows, on the second playlist selected.
-- **Fix:** an export or scan started while an in-app update was downloading
-  could be cut short by the restart. The update now waits for it to finish
-  before installing.
-- **Fix:** after a failed in-app update the update banner stayed hidden;
-  it now comes back so the update can be retried.
-- **Fix:** the "Update & restart" button no longer appears for a release
-  that can't be installed in-app; it offers the download link instead.
-- **Improvement:** browsing a USB no longer writes to the app's library
-  database. A USB track is added to it only when you add the track to a
-  playlist.
-- **Improvement:** when a database error occurs, the Event Log now shows
-  the actual error, not just "an internal database error occurred".
-- **Improvement:** an empty app playlist no longer says "Not exported
-  yet." It now has buttons to the Media Library and to the USB view, or
-  to the USB's playlists once a USB is selected.
-- **Improvement:** empty-state buttons now sit side by side in one row,
-  including the Library's "Add Folder" / "RB master.db" / "Mixxx library".
-- **Improvement:** "Rediagnose USB" and "Parity Report" now open Health &
-  Diagnostics when they finish, whatever the result. The automatic check
-  when you select a USB still opens it only when something isn't a pass.
-- **Improvement:** the diagnostics result (PASS / WARN / FAIL and how long
-  it took) now shows in the Health & Diagnostics heading, so it's visible
-  with the section closed.
+- **Fix:** selecting a USB playlist while the previous one was still loading could fail with "an internal database error occurred". This showed up mostly on Windows, on the second playlist selected.
+- **Fix:** an export or scan started while an in-app update was downloading could be cut short by the restart. The update now waits for it to finish before installing.
+- **Fix:** after a failed in-app update the update banner stayed hidden; it now comes back so the update can be retried.
+- **Fix:** the "Update & restart" button no longer appears for a release that can't be installed in-app; it offers the download link instead.
+- **Improvement:** browsing a USB no longer writes to the app's library database. A USB track is added to it only when you add the track to a playlist.
+- **Improvement:** when a database error occurs, the Event Log now shows the actual error, not just "an internal database error occurred".
+- **Improvement:** an empty app playlist no longer says "Not exported yet." It now has buttons to the Media Library and to the USB view, or to the USB's playlists once a USB is selected.
+- **Improvement:** empty-state buttons now sit side by side in one row, including the Library's "Add Folder" / "RB master.db" / "Mixxx library".
+- **Improvement:** "Rediagnose USB" and "Parity Report" now open Health & Diagnostics when they finish, whatever the result. The automatic check when you select a USB still opens it only when something isn't a pass.
+- **Improvement:** the diagnostics result (PASS / WARN / FAIL and how long it took) now shows in the Health & Diagnostics heading, so it's visible with the section closed.
 
 ## 0.3.2
 
 **Severity:** feature
 
-- **New feature:** the update notice can now install the update for you.
-  AppImage, Windows and macOS installs get an "Update & restart" button.
-  It downloads the new version, checks its signature, installs it and
-  restarts the app, with progress in the bottom bar. It waits until a
-  running export or scan is done. This works from the next release on;
-  this one still has to be installed by hand.
-- **Improvement:** the update notice links straight to the right download
-  for how you installed the app (.AppImage, .deb, .rpm, .dmg or Windows
-  setup), not just the release page. deb and rpm installs keep updating
-  through your package manager, so they get the link only.
-- **Improvement:** Windows now ships only the setup .exe. The MSI installer
-  is no longer built: it needed admin rights to install and update. If you
-  installed the MSI, uninstall it and install the setup .exe; the update
-  notice links to it.
+- **New feature:** the update notice can now install the update for you. AppImage, Windows and macOS installs get an "Update & restart" button. It downloads the new version, checks its signature, installs it and restarts the app, with progress in the bottom bar. It waits until a running export or scan is done. This works from the next release on; this one still has to be installed by hand.
+- **Improvement:** the update notice links straight to the right download for how you installed the app (.AppImage, .deb, .rpm, .dmg or Windows setup), not just the release page. deb and rpm installs keep updating through your package manager, so they get the link only.
+- **Improvement:** Windows now ships only the setup .exe. The MSI installer is no longer built: it needed admin rights to install and update. If you installed the MSI, uninstall it and install the setup .exe; the update notice links to it.
 
 ## 0.3.1
 
-- **Fix:** the parity report's "Indexed audio file presence" check now
-  lists each indexed audio file missing from the USB in the Event Log, not
-  just how many there are. Unindexed files were already listed. When
-  anything is missing or unindexed, the check gets a "→ event log" button
-  that opens the list.
-- **Fix:** pausing analysis right between two tracks no longer leaves the
-  timer stuck on "(paused)" while the next track, already started, is still
-  being analyzed. The timer keeps counting until that track finishes, then
-  shows "(paused)".
-- **Fix:** tracks imported from rekordbox now show their beat grid in the
-  cue editor. The import takes the first beat from rekordbox's own beat
-  grid; before, these tracks had no grid, because they aren't analyzed in
-  the app. Already imported tracks get it the next time you import them
-  (↻). A grid you moved in the cue editor is kept, unless you force a
-  re-import.
-- **Fix:** exporting a track whose file name mixes several writing systems
-  (e.g. Braille, Yi and Georgian characters) no longer loses the file's
-  extension on the USB. The limit on writing systems per name also removed
-  the extension's letters (".mp3" became ".3"), so the CDJ couldn't play
-  the track. Export such tracks again from the original files to fix them
-  on the USB. Found with track 6 of 00000ooooo's album "–5"
-  (https://00000ooooo.bandcamp.com/album/--5).
-- **Chore:** made the pause/resume analysis test reliable when the full
-  test suite runs in parallel.
+- **Fix:** the parity report's "Indexed audio file presence" check now lists each indexed audio file missing from the USB in the Event Log, not just how many there are. Unindexed files were already listed. When anything is missing or unindexed, the check gets a "→ event log" button that opens the list.
+- **Fix:** pausing analysis right between two tracks no longer leaves the timer stuck on "(paused)" while the next track, already started, is still being analyzed. The timer keeps counting until that track finishes, then shows "(paused)".
+- **Fix:** tracks imported from rekordbox now show their beat grid in the cue editor. The import takes the first beat from rekordbox's own beat grid; before, these tracks had no grid, because they aren't analyzed in the app. Already imported tracks get it the next time you import them (↻). A grid you moved in the cue editor is kept, unless you force a re-import.
+- **Fix:** exporting a track whose file name mixes several writing systems (e.g. Braille, Yi and Georgian characters) no longer loses the file's extension on the USB. The limit on writing systems per name also removed the extension's letters (".mp3" became ".3"), so the CDJ couldn't play the track. Export such tracks again from the original files to fix them on the USB. Found with track 6 of 00000ooooo's album "–5" (https://00000ooooo.bandcamp.com/album/--5).
+- **Chore:** made the pause/resume analysis test reliable when the full test suite runs in parallel.
 
 ## 0.3.0
 
 **Severity:** feature
 
-- **New feature:** import a Mixxx library. When the app finds Mixxx's
-  library (`mixxxdb.sqlite`), a "Mixxx" chip with an import button (↻)
-  appears in the Media Library's new "Libraries" row. Importing brings in each track's title,
-  artist, album, genre, BPM, key, length and cover image file, plus its hot cues
-  (position, colour and label) and main cue as the playback-start cue.
-  Cues are only added to tracks that don't already have cues in the app.
-  Mixxx waveforms and beat grids aren't imported, so imported tracks are
-  analyzed like any other track; that analysis keeps the imported BPM and
-  key, and "Reanalyze" replaces them with the app's own detection. Importing
-  again updates a BPM or key that still came from Mixxx. Files the library doesn't take (tracker
-  modules, videos) are skipped. The chip turns Mixxx tracks on and off in
-  the library view, separately from the rekordbox library.
-- **New feature:** the rekordbox import imports rekordbox cues, hot cues first. Hot
-  cues (pads A–H, with name and colour) become cue points; a memory cue
-  before the first hot cue becomes the playback-start cue; other memory cues
-  fill the cue points still free. A track with only memory cues (set up for
-  older players) gets its first memory cue as the playback start and the
-  next 8 as cue points. Cues are only added to tracks that don't already
-  have cues in the app.
-- **New feature:** import a playlist from rekordbox or Mixxx. The sidebar's
-  Playlists section gets an "Import" button when either library is found.
-  It lists the playlists and history sessions that have tracks (plus Mixxx
-  crates; rekordbox playlists inside folders show as "Folder / Name"). The
-  one you pick becomes a new playlist in the same order (Mixxx crates by
-  artist and title). Its tracks are imported into the library the same way
-  as with the library chips' import, including hot cues. A track
-  listed twice is added once. If none of its tracks are found on this
-  computer, nothing is created and the status line says so. Smart playlists
-  aren't listed, because rekordbox doesn't store their tracks. Importing the
-  same list again updates the playlist it made the first time (tracks and
-  order, the name you gave it kept) instead of creating a copy. "Force update
-  track data" replaces the tracks' BPM, key and cues with the library's,
-  including your own edits.
-- **New feature:** the USB repair can add audio files that are on the USB but
-  in no playlist (for example after restoring the USB's databases from an
-  older backup) to a USB playlist called "Unindexed". The files' existing
-  analysis is reused, and nothing is copied or deleted. This replaces the old
-  "Manual Re-import Unindexed Audio" advice. When a track's file was renamed
-  or moved on the USB, the repair now points the track at the file it finds
-  instead, so it stays in its playlists. Removing references to missing files
-  no longer waits for a manual re-import first.
-- **Fix:** video files (`.mp4` files with a video track) are no longer
-  imported into the library; audio-only `.mp4` (AAC) files still are, and
-  videos already in the library drop out on the next scan. Analysis now
-  reads the audio track of an `.mp4` that also contains video, instead of
-  failing on the video track.
-- **Fix:** a file whose audio can't be decoded now counts as failed (with
-  the reason in the Event Log). Before, it was counted as analyzed, with a
-  meaningless waveform drawn from the file's raw bytes and no BPM, key or
-  length. A track that decodes but ends up without a BPM or length is now
-  reported as "incomplete" in the status line instead of "analyzed". The USB
-  repair for empty analysis files likewise reports such a track as failed
-  and leaves its file as it was, instead of writing a raw-bytes waveform.
+- **New feature:** import a Mixxx library. When the app finds Mixxx's library (`mixxxdb.sqlite`), a "Mixxx" chip with an import button (↻) appears in the Media Library's new "Libraries" row. Importing brings in each track's title, artist, album, genre, BPM, key, length and cover image file, plus its hot cues (position, colour and label) and main cue as the playback-start cue. Cues are only added to tracks that don't already have cues in the app. Mixxx waveforms and beat grids aren't imported, so imported tracks are analyzed like any other track; that analysis keeps the imported BPM and key, and "Reanalyze" replaces them with the app's own detection. Importing again updates a BPM or key that still came from Mixxx. Files the library doesn't take (tracker modules, videos) are skipped. The chip turns Mixxx tracks on and off in the library view, separately from the rekordbox library.
+- **New feature:** the rekordbox import imports rekordbox cues, hot cues first. Hot cues (pads A–H, with name and colour) become cue points; a memory cue before the first hot cue becomes the playback-start cue; other memory cues fill the cue points still free. A track with only memory cues (set up for older players) gets its first memory cue as the playback start and the next 8 as cue points. Cues are only added to tracks that don't already have cues in the app.
+- **New feature:** import a playlist from rekordbox or Mixxx. The sidebar's Playlists section gets an "Import" button when either library is found. It lists the playlists and history sessions that have tracks (plus Mixxx crates; rekordbox playlists inside folders show as "Folder / Name"). The one you pick becomes a new playlist in the same order (Mixxx crates by artist and title). Its tracks are imported into the library the same way as with the library chips' import, including hot cues. A track listed twice is added once. If none of its tracks are found on this computer, nothing is created and the status line says so. Smart playlists aren't listed, because rekordbox doesn't store their tracks. Importing the same list again updates the playlist it made the first time (tracks and order, the name you gave it kept) instead of creating a copy. "Force update track data" replaces the tracks' BPM, key and cues with the library's, including your own edits.
+- **New feature:** the USB repair can add audio files that are on the USB but in no playlist (for example after restoring the USB's databases from an older backup) to a USB playlist called "Unindexed". The files' existing analysis is reused, and nothing is copied or deleted. This replaces the old "Manual Re-import Unindexed Audio" advice. When a track's file was renamed or moved on the USB, the repair now points the track at the file it finds instead, so it stays in its playlists. Removing references to missing files no longer waits for a manual re-import first.
+- **Fix:** video files (`.mp4` files with a video track) are no longer imported into the library; audio-only `.mp4` (AAC) files still are, and videos already in the library drop out on the next scan. Analysis now reads the audio track of an `.mp4` that also contains video, instead of failing on the video track.
+- **Fix:** a file whose audio can't be decoded now counts as failed (with the reason in the Event Log). Before, it was counted as analyzed, with a meaningless waveform drawn from the file's raw bytes and no BPM, key or length. A track that decodes but ends up without a BPM or length is now reported as "incomplete" in the status line instead of "analyzed". The USB repair for empty analysis files likewise reports such a track as failed and leaves its file as it was, instead of writing a raw-bytes waveform.
 - **Fix:** analysis files no longer contain made-up data:
-  - A track with no known BPM gets no beat grid instead of a 120 BPM one,
-    and moving its first beat no longer rebuilds the grid at 120 BPM.
-  - No phrase map is written. Every track with a BPM got the same Intro /
-    Verse / Chorus / Outro split into equal quarters, which players showed
-    as if it were real phrase analysis. Phrase data rekordbox wrote is still
-    kept.
-  - A track whose length is unknown gets no waveform, instead of a waveform
-    and beat grid sized for a 3-minute length. The USB repairs for empty
-    analysis files and for beat-grid tempo take the length from the audio
-    file when the USB database has none, and otherwise report the track
-    instead of guessing.
-- **Fix:** starting a new job (creating a playlist, importing from the USB,
-  exporting, …) right after another one finished no longer makes its
-  progress bar disappear partway through. Before, the previous job's
-  "hide the bar" delay still fired and blanked the new job's progress.
-- **Fix:** clicking × on the new-playlist name field reliably cancels it,
-  instead of sometimes creating the playlist anyway.
-- **Fix:** the rekordbox import no longer deletes a track from the app when its file
-  isn't found, for example because its drive is unplugged. Deleting it also
-  removed it from every playlist and lost its cues and edits. The track is
-  now kept and listed in the Event Log as not found.
-- **Improvement:** analysis finds half BPMs (such as 87.5) and corrects
-  estimates up to 2 BPM off, instead of always rounding to a whole BPM. Half
-  values matter most for slow tracks whose double is the real tempo (87.5 →
-  175). Each nearby whole and half BPM is checked against the whole track;
-  when none clearly fits, the BPM is rounded as before. On a sample of 218
-  library tracks this matched the reference BPM for 197 instead of 139.
-  Track lists show every BPM with two decimals ("128.00", "87.50") and
-  right-align BPM and length so they line up; the format column is
-  left-aligned.
-- **Improvement:** the analyze buttons' tooltips say what each one changes.
-  "Analyze" and "Analyze Missing Tracks" only add the missing waveform, BPM,
-  key and first beat, keeping a BPM or key you edited or imported.
-  "Reanalyze" resets all of them to a fresh analysis, replacing imported or
-  edited values (cues are kept). "Analyze Selected" does the first for
-  unanalyzed tracks and the second for analyzed ones.
+  - A track with no known BPM gets no beat grid instead of a 120 BPM one, and moving its first beat no longer rebuilds the grid at 120 BPM.
+  - No phrase map is written. Every track with a BPM got the same Intro / Verse / Chorus / Outro split into equal quarters, which players showed as if it were real phrase analysis. Phrase data rekordbox wrote is still kept.
+  - A track whose length is unknown gets no waveform, instead of a waveform and beat grid sized for a 3-minute length. The USB repairs for empty analysis files and for beat-grid tempo take the length from the audio file when the USB database has none, and otherwise report the track instead of guessing.
+- **Fix:** starting a new job (creating a playlist, importing from the USB, exporting, …) right after another one finished no longer makes its progress bar disappear partway through. Before, the previous job's "hide the bar" delay still fired and blanked the new job's progress.
+- **Fix:** clicking × on the new-playlist name field reliably cancels it, instead of sometimes creating the playlist anyway.
+- **Fix:** the rekordbox import no longer deletes a track from the app when its file isn't found, for example because its drive is unplugged. Deleting it also removed it from every playlist and lost its cues and edits. The track is now kept and listed in the Event Log as not found.
+- **Improvement:** analysis finds half BPMs (such as 87.5) and corrects estimates up to 2 BPM off, instead of always rounding to a whole BPM. Half values matter most for slow tracks whose double is the real tempo (87.5 → 175). Each nearby whole and half BPM is checked against the whole track; when none clearly fits, the BPM is rounded as before. On a sample of 218 library tracks this matched the reference BPM for 197 instead of 139. Track lists show every BPM with two decimals ("128.00", "87.50") and right-align BPM and length so they line up; the format column is left-aligned.
+- **Improvement:** the analyze buttons' tooltips say what each one changes. "Analyze" and "Analyze Missing Tracks" only add the missing waveform, BPM, key and first beat, keeping a BPM or key you edited or imported. "Reanalyze" resets all of them to a fresh analysis, replacing imported or edited values (cues are kept). "Analyze Selected" does the first for unanalyzed tracks and the second for analyzed ones.
 - **Improvement:** the rekordbox import:
-  - keeps an imported BPM or key when the app analyzes the track for the
-    first time; "Reanalyze" still replaces it with the app's own detection.
-    Importing again updates a BPM or key that still came from rekordbox, so
-    a tempo corrected there comes across; one you edited or reanalyzed in
-    the app is kept. A track rekordbox never analyzed now has an unknown BPM
-    instead of 0.
+  - keeps an imported BPM or key when the app analyzes the track for the first time; "Reanalyze" still replaces it with the app's own detection. Importing again updates a BPM or key that still came from rekordbox, so a tempo corrected there comes across; one you edited or reanalyzed in the app is kept. A track rekordbox never analyzed now has an unknown BPM instead of 0.
   - brings in each track's genre.
-  - skips files the library doesn't take (such as videos), like the folder
-    scan does.
-- **Improvement:** page layouts. All page titles share one size and style,
-  and each page's buttons sit next to its title, so they stay visible:
-  - Media Library: "+ Add Folder" and "Scan Libraries" stay visible when the
-    Sources section collapses. The rekordbox chip moves out of the folder
-    chips into its own "Libraries" row, where its ↻ button replaces "Import
-    RB"; its checkbox stays disabled until the library has been imported.
-  - USB Browser: "Rediagnose USB", "Parity Report" and "Preview Fixes" moved
-    from inside Health & Diagnostics up next to the title and show once a
-    USB is selected; the title and buttons stay in place while the
-    diagnostics report scrolls. USB Playlists and USB History do the same
-    with their buttons.
-  - Playlist page: the export status and total time share one row under the
-    table, and the title shows only the track count.
-  - Backups: "Refresh" sits next to the title, and each backup fits on one
-    line.
-- **Improvement:** USBs are shown by their name instead of their folder or
-  mount path, which is still shown on hover: the selected USB on the USB
-  Browser page, and "Export to USB: …" and "Last exported … to …" on a
-  playlist's page.
-- **Improvement:** the Parity Report explains what it checks: that the USB's
-  legacy (PDB) and new (eDB) databases hold the same playlists, tracks, order
-  and metadata, and that a FAIL means players may show different playlists
-  depending on which database they read.
-- **Improvement:** the cue editor opens on the first 60 bars at the track's
-  BPM instead of the first 2 minutes, so beat lines are spaced the same on
-  every track whatever its tempo. Beat lines too close together to read are
-  left out until you zoom in, and bar lines thin out the same way when
-  zoomed far out. The "Beat grid" slider now sets how thick the lines are as
-  well as how strongly they show.
+  - skips files the library doesn't take (such as videos), like the folder scan does.
+- **Improvement:** page layouts. All page titles share one size and style, and each page's buttons sit next to its title, so they stay visible:
+  - Media Library: "+ Add Folder" and "Scan Libraries" stay visible when the Sources section collapses. The rekordbox chip moves out of the folder chips into its own "Libraries" row, where its ↻ button replaces "Import RB"; its checkbox stays disabled until the library has been imported.
+  - USB Browser: "Rediagnose USB", "Parity Report" and "Preview Fixes" moved from inside Health & Diagnostics up next to the title and show once a USB is selected; the title and buttons stay in place while the diagnostics report scrolls. USB Playlists and USB History do the same with their buttons.
+  - Playlist page: the export status and total time share one row under the table, and the title shows only the track count.
+  - Backups: "Refresh" sits next to the title, and each backup fits on one line.
+- **Improvement:** USBs are shown by their name instead of their folder or mount path, which is still shown on hover: the selected USB on the USB Browser page, and "Export to USB: …" and "Last exported … to …" on a playlist's page.
+- **Improvement:** the Parity Report explains what it checks: that the USB's legacy (PDB) and new (eDB) databases hold the same playlists, tracks, order and metadata, and that a FAIL means players may show different playlists depending on which database they read.
+- **Improvement:** the cue editor opens on the first 60 bars at the track's BPM instead of the first 2 minutes, so beat lines are spaced the same on every track whatever its tempo. Beat lines too close together to read are left out until you zoom in, and bar lines thin out the same way when zoomed far out. The "Beat grid" slider now sets how thick the lines are as well as how strongly they show.
 - **Improvement:** less waiting and overhead:
-  - "Import Playlists" on the USB view no longer pauses between steps just
-    to show progress messages.
-  - Saving cue edits to a USB that another USB job is using continues the
-    moment that job finishes, instead of checking for it every 200 ms.
-  - During analysis and other long jobs, the UI no longer logs a line for
-    every job event (each one also became an Event Log entry and a write to
-    the log file), and an open Event Log adds new entries in place instead
-    of redrawing up to 1,000 rows for each one.
-  - Refreshing the library folders' "fully analyzed" (green) status, which
-    happens after every analysis batch and job, uses its own backend command
-    instead of a full library browse (including sorting every track).
-- **Chore:** new `docs/EXTERNAL_LIBRARIES.md` on importing tracks and
-  playlists from rekordbox and Mixxx; the command and data-model docs list
-  the new commands, source flags and the frontend settings allowlist.
+  - "Import Playlists" on the USB view no longer pauses between steps just to show progress messages.
+  - Saving cue edits to a USB that another USB job is using continues the moment that job finishes, instead of checking for it every 200 ms.
+  - During analysis and other long jobs, the UI no longer logs a line for every job event (each one also became an Event Log entry and a write to the log file), and an open Event Log adds new entries in place instead of redrawing up to 1,000 rows for each one.
+  - Refreshing the library folders' "fully analyzed" (green) status, which happens after every analysis batch and job, uses its own backend command instead of a full library browse (including sorting every track).
+- **Chore:** new `docs/EXTERNAL_LIBRARIES.md` on importing tracks and playlists from rekordbox and Mixxx; the command and data-model docs list the new commands, source flags and the frontend settings allowlist.
 - **Chore:** a smaller, simpler frontend:
-  - The UI code shares one app context instead of passing dependencies
-    around by hand, and DOM references are collected from `index.html`
-    automatically instead of a hand-kept list.
-  - All HTML lives as templates in `index.html` rather than being built in
-    JavaScript (`main.js` went from about 1,800 lines to 34), and the
-    production bundle is minified (447 KB → 211 KB).
-  - The UI no longer re-checks and re-coerces the track, USB playlist and
-    player-menu data the backend already sends fully typed.
-  - One status-message function instead of two names for it, the
-    playback-button helpers loaded as a normal module instead of a global
-    script, and unused app state removed.
-  - 20 frontend unit tests that only repeated what the end-to-end tests
-    already check through the real UI were retired.
+  - The UI code shares one app context instead of passing dependencies around by hand, and DOM references are collected from `index.html` automatically instead of a hand-kept list.
+  - All HTML lives as templates in `index.html` rather than being built in JavaScript (`main.js` went from about 1,800 lines to 34), and the production bundle is minified (447 KB → 211 KB).
+  - The UI no longer re-checks and re-coerces the track, USB playlist and player-menu data the backend already sends fully typed.
+  - One status-message function instead of two names for it, the playback-button helpers loaded as a normal module instead of a global script, and unused app state removed.
+  - 20 frontend unit tests that only repeated what the end-to-end tests already check through the real UI were retired.
 
 ## 0.2.9
 
-- **Fix:** the app version (and the "Update available" link) now shows in the
-  Settings header next to the close button. Before, it sat at the bottom of
-  the settings list and was hidden below the fold on shorter windows.
-- **Improvement:** the cue editor always shows all eight hot cue slots (A–H)
-  in a grid of up to four columns, with the unused slots dimmed. The window no
-  longer changes height as cues are added or removed, and each cue has its
-  own outlined box so it's easier to tell apart. The playback-start cue now
-  sits next to the "Cues" heading, marked with the same ▶ flag it has on the
-  waveform.
-- **Fix:** the cue letters on the cue editor's waveform are no longer
-  italic.
+- **Fix:** the app version (and the "Update available" link) now shows in the Settings header next to the close button. Before, it sat at the bottom of the settings list and was hidden below the fold on shorter windows.
+- **Improvement:** the cue editor always shows all eight hot cue slots (A–H) in a grid of up to four columns, with the unused slots dimmed. The window no longer changes height as cues are added or removed, and each cue has its own outlined box so it's easier to tell apart. The playback-start cue now sits next to the "Cues" heading, marked with the same ▶ flag it has on the waveform.
+- **Fix:** the cue letters on the cue editor's waveform are no longer italic.
 
 ## 0.2.8
 
 **Severity:** feature
 
-- **New feature:** a "Key notation" setting (Settings → Classic `Am` /
-  Camelot `8A`). It changes how keys are shown in the app: the track lists,
-  USB playlists and history, and the cue editor's key picker. It's display
-  only: the library and every USB export keep the classic key name, which all
-  CDJ/XDJ models read. Newer players have their own Key display setting to
-  show Camelot on the deck.
-- **Improvement:** sorting by the Key column now follows the Camelot wheel
-  (1A, 1B, 2A … 12B) in both notations, instead of sorting key names
-  alphabetically.
-- **Fix:** saving the cue editor to a USB no longer freezes the window while
-  the stick is written. The progress bar shows each write (analysis files,
-  PDB, library, eDB). If an export or another USB job
-  is running, the save waits for it to finish instead of writing at the same
-  time, and back-to-back saves never overwrite each other's changes.
-- **Fix:** opening the cue editor on a track that's already playing no longer
-  shows it as stopped. The editor picks up the running playback: the playhead
-  and Play/Pause show where it is, and "+ Cue" lands there. Closing the editor
-  leaves the track playing. If a different track is playing when the editor
-  opens, it stops, so Play and "+ Cue" always apply to the track being edited.
-- **Fix:** the highlight on the selected cue in the cue editor's list no
-  longer gets cut off at the edges.
-- **Chore:** the README and cue-editor screenshots are now generated like the
-  cue-editor GIFs, from a made-up demo library. One command
-  (`npm run docs:media --prefix vanilla-ui`) regenerates all of them;
-  `docs:gifs` is gone.
+- **New feature:** a "Key notation" setting (Settings → Classic `Am` / Camelot `8A`). It changes how keys are shown in the app: the track lists, USB playlists and history, and the cue editor's key picker. It's display only: the library and every USB export keep the classic key name, which all CDJ/XDJ models read. Newer players have their own Key display setting to show Camelot on the deck.
+- **Improvement:** sorting by the Key column now follows the Camelot wheel (1A, 1B, 2A … 12B) in both notations, instead of sorting key names alphabetically.
+- **Fix:** saving the cue editor to a USB no longer freezes the window while the stick is written. The progress bar shows each write (analysis files, PDB, library, eDB). If an export or another USB job is running, the save waits for it to finish instead of writing at the same time, and back-to-back saves never overwrite each other's changes.
+- **Fix:** opening the cue editor on a track that's already playing no longer shows it as stopped. The editor picks up the running playback: the playhead and Play/Pause show where it is, and "+ Cue" lands there. Closing the editor leaves the track playing. If a different track is playing when the editor opens, it stops, so Play and "+ Cue" always apply to the track being edited.
+- **Fix:** the highlight on the selected cue in the cue editor's list no longer gets cut off at the edges.
+- **Chore:** the README and cue-editor screenshots are now generated like the cue-editor GIFs, from a made-up demo library. One command (`npm run docs:media --prefix vanilla-ui`) regenerates all of them; `docs:gifs` is gone.
 
 ## 0.2.7
 
 **Severity:** critical — see item(s) marked **(CRITICAL)** below.
 
-- **Fix (CRITICAL):** saving BPM or key in the cue editor from a USB row now
-  writes them to the PDB too. Before, only the beat grid and
-  the eDB changed, so the databases on the stick disagreed and
-  CDJs that read the PDB kept showing the old BPM and key. Update before
-  editing more tracks on a USB, then run the repair below on sticks you've
-  already edited.
-- **New feature:** a "BPM/key consistency" check and a "Fix BPM/Key Mismatch"
-  repair (`fix_bpm_key_mismatch`). The automatic USB diagnosis compares BPM
-  and key between the PDB and eDB (databases only). The
-  repair also compares each ANLZ beat grid, then rebuilds the grid and sets
-  the eDB BPM and key from the PDB in one pass. Waveforms, cues and the
-  first beat are kept.
-- **Fix:** after saving in the cue editor, every view shows the new BPM and
-  key without a reload: the open app playlist's row, every loaded USB
-  playlist and history row of the same file, and the library track a USB
-  save also updated (even when the USB row didn't know which library track it
-  was).
-- **Fix:** a library scan now finds the app's ANLZ cache files for real. The
-  check that sends outdated caches (no 3-band `PWV6` waveform) back for
-  reanalysis never ran, and removing a track from the library left its cache
-  files on disk. Both now use the track's stored bundle path, and neither ever
-  touches bundles on a USB stick.
+- **Fix (CRITICAL):** saving BPM or key in the cue editor from a USB row now writes them to the PDB too. Before, only the beat grid and the eDB changed, so the databases on the stick disagreed and CDJs that read the PDB kept showing the old BPM and key. Update before editing more tracks on a USB, then run the repair below on sticks you've already edited.
+- **New feature:** a "BPM/key consistency" check and a "Fix BPM/Key Mismatch" repair (`fix_bpm_key_mismatch`). The automatic USB diagnosis compares BPM and key between the PDB and eDB (databases only). The repair also compares each ANLZ beat grid, then rebuilds the grid and sets the eDB BPM and key from the PDB in one pass. Waveforms, cues and the first beat are kept.
+- **Fix:** after saving in the cue editor, every view shows the new BPM and key without a reload: the open app playlist's row, every loaded USB playlist and history row of the same file, and the library track a USB save also updated (even when the USB row didn't know which library track it was).
+- **Fix:** a library scan now finds the app's ANLZ cache files for real. The check that sends outdated caches (no 3-band `PWV6` waveform) back for reanalysis never ran, and removing a track from the library left its cache files on disk. Both now use the track's stored bundle path, and neither ever touches bundles on a USB stick.
 
 ## 0.2.6
 
-- **Fix:** the Linux AppImage runs on Ubuntu 22.04, Linux Mint 21, and other
-  distros with glibc 2.35. Release builds now use an Ubuntu 22.04 base instead
-  of Debian 12, which raised the minimum to glibc 2.36.
-- **Improvement:** the AppImage, deb, and rpm include AppStream metadata, so
-  software centers and AppImage managers (Gear Lever, AppImageLauncher) show a
-  description and screenshot. The app is also listed under Audio/Video instead
-  of having no desktop category.
+- **Fix:** the Linux AppImage runs on Ubuntu 22.04, Linux Mint 21, and other distros with glibc 2.35. Release builds now use an Ubuntu 22.04 base instead of Debian 12, which raised the minimum to glibc 2.36.
+- **Improvement:** the AppImage, deb, and rpm include AppStream metadata, so software centers and AppImage managers (Gear Lever, AppImageLauncher) show a description and screenshot. The app is also listed under Audio/Video instead of having no desktop category.
 
 ## 0.2.5
 
@@ -1609,919 +648,286 @@ Release candidate for testing seek data on the XDJ-AZ.
 
 Walkthrough with screenshots: [release write-up on chiph.art](https://chiph.art/en/project/2026/dj-usb-tool-kit-0-2-5?utm_source=djtkit&utm_medium=changelog&utm_campaign=release).
 
-- **New feature:** a "New features available" update banner. A release whose
-  notes carry `**Severity:** feature` now gets the prominent in-app banner
-  (in the accent colour, dismissible per version like the critical one)
-  instead of only the quiet note in Settings. `check_for_update` reports it
-  as `severity: "feature"`; a critical release still takes precedence.
-- **New feature:** a Mix slider next to the cue editor's metronome balances
-  the music against the clicks. In the middle both play at full level; slide
-  left to fade the clicks, right to fade the music so the clicks cut through a
-  loud track. Applies while playing and is remembered. It shows only while the
-  metronome is on.
-- **Fix:** tooltips wrap between words instead of splitting a word mid-way
-  (e.g. "bea / t"); long unbroken text such as file paths still wraps.
-- **Improvement:** the cue editor's key list comes from the backend
-  (`keyOptions` on `get_track_detail` / `get_usb_track_detail`), so the picker
-  always offers exactly the keys a save accepts.
-- **Improvement:** the backend alone checks cue lists: the cue editor no
-  longer re-checks the cues it loads or saves. Hot cues read without a colour
-  get the default colour from the backend, as a save would store them.
-- **Chore:** removed the stale hardware-check TODO on the hot-cue colour
-  palette (verified on a CDJ).
+- **New feature:** a "New features available" update banner. A release whose notes carry `**Severity:** feature` now gets the prominent in-app banner (in the accent colour, dismissible per version like the critical one) instead of only the quiet note in Settings. `check_for_update` reports it as `severity: "feature"`; a critical release still takes precedence.
+- **New feature:** a Mix slider next to the cue editor's metronome balances the music against the clicks. In the middle both play at full level; slide left to fade the clicks, right to fade the music so the clicks cut through a loud track. Applies while playing and is remembered. It shows only while the metronome is on.
+- **Fix:** tooltips wrap between words instead of splitting a word mid-way (e.g. "bea / t"); long unbroken text such as file paths still wraps.
+- **Improvement:** the cue editor's key list comes from the backend (`keyOptions` on `get_track_detail` / `get_usb_track_detail`), so the picker always offers exactly the keys a save accepts.
+- **Improvement:** the backend alone checks cue lists: the cue editor no longer re-checks the cues it loads or saves. Hot cues read without a colour get the default colour from the backend, as a save would store them.
+- **Chore:** removed the stale hardware-check TODO on the hot-cue colour palette (verified on a CDJ).
 
 ## 0.2.4
 
-- **New feature:** cue points can be dragged along the waveform in the cue
-  editor to reposition them (see Quantize below for snapping). A plain click
-  on a marker still plays from that cue.
-- **New feature:** play/pause button in the cue editor. Pause holds the track
-  at its position in the audio engine (new `pause_playback_native` /
-  `resume_playback_native` commands, `paused` on playback status and events);
-  "+ Cue" while paused lands on the paused spot.
-- **New feature:** "Playback starts at [First cue | First beat]" choice in the
-  cue editor. First beat gives the track a memory-only playback-start cue (no
-  hot-cue pad) at the first beat, listed first and marked apart from the cue
-  points, so the CDJ loads there instead of on the first cue. It can be
-  dragged but never past a hot cue, and follows the first beat until moved;
-  once moved, the choice reads "Start marker". The choice is remembered and
-  applied when a track gets its first cue (default: First cue); with no cues
-  it is disabled and a note says the CDJ starts at the first audio.
-  Stored as `track_cues.is_playback_start` / `playbackStart` on cues.
-- **Improvement:** the cue editor greys out the waveform before where the CDJ
-  will start playback (the playback-start cue, else the first cue point),
-  updating live while cues are dragged.
-- **New feature:** "Beat grid" brightness slider in the cue editor sets how
-  strongly the beat grid shows over the waveform (remembered). The grid also
-  extends into a thin strip above and below the waveform, so beats stay
-  readable where the waveform is loud.
-- **Improvement:** bar starts in the cue editor's beat grid stay visible
-  whatever the "Beat grid" slider says; the slider mostly sets the ordinary
-  beats.
-- **New feature:** bar numbers under the cue editor's waveform, every bar when
-  zoomed in and every 2nd/4th/… bar when zoomed out so they never crowd.
-- **New feature:** whole-track overview strip under the cue editor's waveform,
-  with the visible part boxed and the cues marked; click or drag it to move
-  the view.
-- **Improvement:** the cue editor's usage hints fold into a "?" tooltip once
-  the track has a cue.
-- **New feature:** Quantize ("Q") in the cue editor, on by default and
-  remembered: double-clicked, "+ Cue" and dragged cues snap to the nearest
-  beat; hold Shift to place one freely (with Q off, Shift snaps instead).
-- **New feature:** cue editor keyboard shortcuts: Space play/pause, C add a
-  cue at the playhead, 1–8 jump to cue A–H, ←/→ move the selected cue one beat
-  (Shift: 10 ms). The selected cue (last added, clicked, dragged or jumped to)
-  is outlined on the waveform and tinted in the list. Keys typed into a cue
-  name or other field stay there.
-- **New feature:** Undo/Redo in the cue editor (buttons, Ctrl+Z,
-  Ctrl+Shift+Z / Ctrl+Y) for BPM, key, first beat and cue edits; a typed name
-  or one drag is one step.
-- **New feature:** ÷2 and ×2 BPM buttons in the cue editor, for a half- or
-  double-tempo analysis.
-- **New feature:** metronome toggle in the cue editor: clicks on the beat grid
-  while playing (accented on each bar start), to hear whether the grid lines up.
-  The native playback engine mixes the clicks into the track's own samples
-  (new `set_playback_metronome` command), so they sit exactly on the heard beat,
-  follow seeks and grid edits live, and need no webview audio (WebKitGTK
-  without GStreamer's `autoaudiosink` has none). Off each time the editor opens
-  and when it closes.
-- **Chore:** new `docs/CUE_EDITOR.md` covering the cue editor (beat grid,
-  cues, Quantize, playback start, keyboard shortcuts, metronome, undo, saving);
-  `docs/COMMANDS.md`, `docs/APP_DATA_MODEL.md` and `docs/USB_EXPORT.md` now
-  document the playback-start cue, `set_playback_metronome` and pause/resume.
-- **Chore:** the "Analyze Missing" e2e test no longer flakes under parallel
-  load: its mock analysis now waits for the test instead of a 200 ms timer the
-  test's check could miss.
-- **Improvement:** the cue editor's visible-time readout ("0:56–1:04") sits
-  centred under the waveform, with the track's total time at the right end,
-  and without the "“Fit” shows all" hint.
-- **Improvement:** clicking outside the cue editor or pressing Escape no
-  longer closes it (discarding the edits) while there are unsaved changes; the
-  Save button pulses instead. With nothing changed, both still close it.
-- **Fix:** dragging in the cue editor (panning the waveform, moving a cue
-  marker, the overview strip) no longer selects text on the page when the
-  pointer passes over it.
-- **Fix:** a long folder path in a confirm dialog (e.g. "Remove Source
-  Folder") wraps instead of running past the dialog's edge.
+- **New feature:** cue points can be dragged along the waveform in the cue editor to reposition them (see Quantize below for snapping). A plain click on a marker still plays from that cue.
+- **New feature:** play/pause button in the cue editor. Pause holds the track at its position in the audio engine (new `pause_playback_native` / `resume_playback_native` commands, `paused` on playback status and events); "+ Cue" while paused lands on the paused spot.
+- **New feature:** "Playback starts at [First cue | First beat]" choice in the cue editor. First beat gives the track a memory-only playback-start cue (no hot-cue pad) at the first beat, listed first and marked apart from the cue points, so the CDJ loads there instead of on the first cue. It can be dragged but never past a hot cue, and follows the first beat until moved; once moved, the choice reads "Start marker". The choice is remembered and applied when a track gets its first cue (default: First cue); with no cues it is disabled and a note says the CDJ starts at the first audio. Stored as `track_cues.is_playback_start` / `playbackStart` on cues.
+- **Improvement:** the cue editor greys out the waveform before where the CDJ will start playback (the playback-start cue, else the first cue point), updating live while cues are dragged.
+- **New feature:** "Beat grid" brightness slider in the cue editor sets how strongly the beat grid shows over the waveform (remembered). The grid also extends into a thin strip above and below the waveform, so beats stay readable where the waveform is loud.
+- **Improvement:** bar starts in the cue editor's beat grid stay visible whatever the "Beat grid" slider says; the slider mostly sets the ordinary beats.
+- **New feature:** bar numbers under the cue editor's waveform, every bar when zoomed in and every 2nd/4th/… bar when zoomed out so they never crowd.
+- **New feature:** whole-track overview strip under the cue editor's waveform, with the visible part boxed and the cues marked; click or drag it to move the view.
+- **Improvement:** the cue editor's usage hints fold into a "?" tooltip once the track has a cue.
+- **New feature:** Quantize ("Q") in the cue editor, on by default and remembered: double-clicked, "+ Cue" and dragged cues snap to the nearest beat; hold Shift to place one freely (with Q off, Shift snaps instead).
+- **New feature:** cue editor keyboard shortcuts: Space play/pause, C add a cue at the playhead, 1–8 jump to cue A–H, ←/→ move the selected cue one beat (Shift: 10 ms). The selected cue (last added, clicked, dragged or jumped to) is outlined on the waveform and tinted in the list. Keys typed into a cue name or other field stay there.
+- **New feature:** Undo/Redo in the cue editor (buttons, Ctrl+Z, Ctrl+Shift+Z / Ctrl+Y) for BPM, key, first beat and cue edits; a typed name or one drag is one step.
+- **New feature:** ÷2 and ×2 BPM buttons in the cue editor, for a half- or double-tempo analysis.
+- **New feature:** metronome toggle in the cue editor: clicks on the beat grid while playing (accented on each bar start), to hear whether the grid lines up. The native playback engine mixes the clicks into the track's own samples (new `set_playback_metronome` command), so they sit exactly on the heard beat, follow seeks and grid edits live, and need no webview audio (WebKitGTK without GStreamer's `autoaudiosink` has none). Off each time the editor opens and when it closes.
+- **Chore:** new `docs/CUE_EDITOR.md` covering the cue editor (beat grid, cues, Quantize, playback start, keyboard shortcuts, metronome, undo, saving); `docs/COMMANDS.md`, `docs/APP_DATA_MODEL.md` and `docs/USB_EXPORT.md` now document the playback-start cue, `set_playback_metronome` and pause/resume.
+- **Chore:** the "Analyze Missing" e2e test no longer flakes under parallel load: its mock analysis now waits for the test instead of a 200 ms timer the test's check could miss.
+- **Improvement:** the cue editor's visible-time readout ("0:56–1:04") sits centred under the waveform, with the track's total time at the right end, and without the "“Fit” shows all" hint.
+- **Improvement:** clicking outside the cue editor or pressing Escape no longer closes it (discarding the edits) while there are unsaved changes; the Save button pulses instead. With nothing changed, both still close it.
+- **Fix:** dragging in the cue editor (panning the waveform, moving a cue marker, the overview strip) no longer selects text on the page when the pointer passes over it.
+- **Fix:** a long folder path in a confirm dialog (e.g. "Remove Source Folder") wraps instead of running past the dialog's edge.
 
 ## 0.2.3
 
-- **Fix:** the repair/diagnostics scan for corrupted transaction footers
-  (`detect_pdb_zero_tranrf_pages_for_tables`) could silently skip inspecting
-  a page's true last row-footer group when that page had more than 255 rows
-  and crossed a 16-row group boundary right at the wrap point (257 rows is
-  the smallest case) — the same row-count decoding bug fixed for playlist
-  duplication in 0.2.2, but here it let real footer corruption on very large
-  playlists go undetected by "repair USB" instead of causing corruption
-  directly. Uses the same packed page-header decode as that fix.
-- **Chore:** hardened the main PDB reader's row-count decoding
-  (`parse_page_rows`, used by every read of a USB's library/playlist data)
-  to use the packed page-header field directly instead of relying on a
-  heuristic fallback scan to recover from the wrap — no known live bug here
-  (the fallback already self-corrected in every case tried), but it removes
-  the last place still depending on that fragile heuristic. Applied the same
-  fix to the internal `dump_*` developer diagnostic tools for consistency.
-- **Fix:** the "Repair PDB Track Page Footer Shape" repair normalized a
-  track page's footer fields to `(u5=2, num_rl=0)` — an older, undocumented
-  shape — instead of `(u5=1, num_rl=nrs-1)`, the convention the writer
-  itself actually produces and validates on every export. Both were accepted
-  as valid by the detector, so this only mattered on the rare page that
-  needed repairing at all, and only when this fix was applied without also
-  running "Upgrade Export Data To Strict Parity"; it now targets the
-  writer's own convention directly so it can't drift from it again.
+- **Fix:** the repair/diagnostics scan for corrupted transaction footers (`detect_pdb_zero_tranrf_pages_for_tables`) could silently skip inspecting a page's true last row-footer group when that page had more than 255 rows and crossed a 16-row group boundary right at the wrap point (257 rows is the smallest case) — the same row-count decoding bug fixed for playlist duplication in 0.2.2, but here it let real footer corruption on very large playlists go undetected by "repair USB" instead of causing corruption directly. Uses the same packed page-header decode as that fix.
+- **Chore:** hardened the main PDB reader's row-count decoding (`parse_page_rows`, used by every read of a USB's library/playlist data) to use the packed page-header field directly instead of relying on a heuristic fallback scan to recover from the wrap — no known live bug here (the fallback already self-corrected in every case tried), but it removes the last place still depending on that fragile heuristic. Applied the same fix to the internal `dump_*` developer diagnostic tools for consistency.
+- **Fix:** the "Repair PDB Track Page Footer Shape" repair normalized a track page's footer fields to `(u5=2, num_rl=0)` — an older, undocumented shape — instead of `(u5=1, num_rl=nrs-1)`, the convention the writer itself actually produces and validates on every export. Both were accepted as valid by the detector, so this only mattered on the rare page that needed repairing at all, and only when this fix was applied without also running "Upgrade Export Data To Strict Parity"; it now targets the writer's own convention directly so it can't drift from it again.
 
 ## 0.2.2
 
 **Severity:** critical — see item marked **(CRITICAL)** below.
 
-- **Fix (CRITICAL):** additively patching an existing PDB whose `t08`
-  playlist_entries page holds more than 255 rows (byte capacity allows well
-  over 255 since rows are only 12 bytes, and a page can combine entries from
-  multiple playlists) could silently drop the page's last row from the
-  writer's view of "entries that already exist," causing that entry to be
-  duplicated when playlist changes were written back to the USB. Row-slot
-  counts are now decoded from the full packed page-header field instead of a
-  single byte that wrapped past 255.
+- **Fix (CRITICAL):** additively patching an existing PDB whose `t08` playlist_entries page holds more than 255 rows (byte capacity allows well over 255 since rows are only 12 bytes, and a page can combine entries from multiple playlists) could silently drop the page's last row from the writer's view of "entries that already exist," causing that entry to be duplicated when playlist changes were written back to the USB. Row-slot counts are now decoded from the full packed page-header field instead of a single byte that wrapped past 255.
 - **Chore:** update deps
 
 ## 0.2.1
 
-- **New feature:** BPM and musical key are now editable from the same
-  per-track cues/beat-grid modal. Editing BPM regenerates the beat grid;
-  edits made from a USB track update the on-device library immediately, not
-  just on the next export.
-- **Fix:** on Windows, analyzing tracks with the essentia engine no longer
-  flashes a console window for each spawned `node` process.
-- **Improvement:** the cues/beat-grid modal is larger (scales with the window
-  instead of capping out) and its heading now reads "Album · Artist – Title"
-  instead of repeating "Cues & beat grid".
+- **New feature:** BPM and musical key are now editable from the same per-track cues/beat-grid modal. Editing BPM regenerates the beat grid; edits made from a USB track update the on-device library immediately, not just on the next export.
+- **Fix:** on Windows, analyzing tracks with the essentia engine no longer flashes a console window for each spawned `node` process.
+- **Improvement:** the cues/beat-grid modal is larger (scales with the window instead of capping out) and its heading now reads "Album · Artist – Title" instead of repeating "Cues & beat grid".
 
 ## 0.2.0
 
-- **New feature:** cue points and the beat-grid first beat are now editable. A
-  per-track modal (opened from the magnifier button next to a track's waveform)
-  shows the full-detail colour waveform with a beat-grid overlay and
-  **scroll-to-zoom / drag-to-pan** (opens zoomed to the first ~2 minutes, with a
-  readout above the waveform naming the visible window vs the track length — e.g.
-  "0:00–2:00 of 5:34" — so the zoomed-in start is unmistakable; "Fit" shows the
-  whole track); click the waveform to play from a point (the view
-  follows the playhead), **double-click to add a cue there** (or play and hit
-  "+ Cue" to drop one at the playhead; up to 8, each auto-named "Cue 1", "Cue
-  2", … with a distinct default colour and both editable), and every cue row
-  and waveform marker has its own play-from-here control. The first beat can
-  be nudged by the beat. Each cue is exported as both a
-  memory cue and a hot-cue pad (A–H, colour), baked into the local analysis
-  files and the USB Rekordbox database (`PCOB`/`PCPT` + `PCO2`/`PCP2` ANLZ
-  chunks and the eDB `cue` table), and preserved when a stick is re-imported.
-- **New feature:** the cue / beat-grid editor now opens on **every** playlist-view
-  track row — Library, app playlists, USB playlists, and USB history — not just
-  Library. Editing a Library or app-playlist row writes the local master (and
-  resets the affected playlists' export markers so a re-export refreshes the
-  stick). Editing a USB row writes that stick's ANLZ + Rekordbox database **in
-  place** (a CDJ sees the change with no re-export) *and* writes the same edit
-  into the local master, so the two never diverge; that path requires the USB to
-  be connected and blocks with a clear message otherwise. The local analysis
-  stays the single source of truth — export just reconciles each stick to it.
-  (The USB lists show the cue-editor button but no per-track "Analyze" button —
-  that only ever acts on a local library copy.)
-- **Fix:** a track re-analyzed to a corrected BPM could still export with its
-  old beat grid (e.g. a hardcoded 120 BPM default) when the on-USB bundle
-  already existed and had no cues/first-beat edit to trigger a rebuild — CDJ
-  hardware reads that beat grid for its live tempo display, not the library
-  BPM field. Export now re-derives the beat grid from the analyzed BPM alone,
-  and `fix_empty_analysis_files` no longer defaults to 120 BPM when
-  regenerating a bundle. Re-exporting an affected playlist fixes it.
-- **Improvement:** importing a USB is much faster, especially from a stick that
-  lives on a spinning HDD. The import no longer walks every track of every
-  playlist to create local library rows and read each track's on-USB analysis
-  bundle from disk (a "finalize playlist import" stage that could take minutes
-  on slow media). That per-track work now happens only for the tracks actually
-  on screen when a playlist is opened, and the cue points / beat grid are pulled
-  in when a track is added to a local playlist — where they are first needed for
-  export. Adding a USB track to a local playlist and re-exporting it are
-  unchanged.
-- **Improvement:** opening a USB playlist and scrolling, searching, or sorting
-  it no longer re-parses the whole stick's PDB / eDB on
-  every request — the parsed result is cached in memory and reused until the
-  stick's databases change (or the app writes to them).
-- **Improvement:** local track analysis (BPM/key/beat-grid) is now several times
-  faster. The release build was compiling the audio-analysis engine and its FFT
-  backend size-first (`opt-level = "z"`); they now build speed-first while the
-  rest of the binary stays size-optimized.
-- **Improvement:** a USB export is now blocked when *any* track in the playlist
-  lives under a missing source folder, not just one on the currently loaded
-  page — the check moved into the backend export gate, which sees the whole
-  playlist.
-- **Improvement:** on export, the on-USB analysis bundle is now reconciled to the
-  local master unconditionally on both the retain and fresh paths, instead of via
-  a per-path "has edits" heuristic — no behaviour change on any currently
-  reachable input, but a future change to the export analysis gate can no longer
-  silently reintroduce a stale-cue path.
-- **Chore:** documented the new `track_cues` table, the four cue/beat-grid
-  commands (`get_track_detail`, `save_track_analysis_edits`,
-  `get_usb_track_detail`, `save_usb_track_analysis_edits`), and the cue/beat-grid
-  export & import paths across the `docs/` set.
-- **Chore:** expanded Rust backend test coverage for cue persistence, playback
-  command error paths, command wrapper contracts, and `master.db` scanning,
-  raising backend line coverage from 89.54% to 90.23%.
-- **Chore:** the export button label ("Append to … on USB" vs "Export to USB")
-  and the missing-source-folder export block are computed in the backend; the
-  frontend renders them instead of re-deriving the append rule or parsing the
-  USB path itself.
-- **Chore:** relicense project code and package metadata from MIT to
-  `AGPL-3.0-or-later` for the 0.2.0 release line.
+- **New feature:** cue points and the beat-grid first beat are now editable. A per-track modal (opened from the magnifier button next to a track's waveform) shows the full-detail colour waveform with a beat-grid overlay and **scroll-to-zoom / drag-to-pan** (opens zoomed to the first ~2 minutes, with a readout above the waveform naming the visible window vs the track length — e.g. "0:00–2:00 of 5:34" — so the zoomed-in start is unmistakable; "Fit" shows the whole track); click the waveform to play from a point (the view follows the playhead), **double-click to add a cue there** (or play and hit "+ Cue" to drop one at the playhead; up to 8, each auto-named "Cue 1", "Cue 2", … with a distinct default colour and both editable), and every cue row and waveform marker has its own play-from-here control. The first beat can be nudged by the beat. Each cue is exported as both a memory cue and a hot-cue pad (A–H, colour), baked into the local analysis files and the USB Rekordbox database (`PCOB`/`PCPT` + `PCO2`/`PCP2` ANLZ chunks and the eDB `cue` table), and preserved when a stick is re-imported.
+- **New feature:** the cue / beat-grid editor now opens on **every** playlist-view track row — Library, app playlists, USB playlists, and USB history — not just Library. Editing a Library or app-playlist row writes the local master (and resets the affected playlists' export markers so a re-export refreshes the stick). Editing a USB row writes that stick's ANLZ + Rekordbox database **in place** (a CDJ sees the change with no re-export) *and* writes the same edit into the local master, so the two never diverge; that path requires the USB to be connected and blocks with a clear message otherwise. The local analysis stays the single source of truth — export just reconciles each stick to it. (The USB lists show the cue-editor button but no per-track "Analyze" button — that only ever acts on a local library copy.)
+- **Fix:** a track re-analyzed to a corrected BPM could still export with its old beat grid (e.g. a hardcoded 120 BPM default) when the on-USB bundle already existed and had no cues/first-beat edit to trigger a rebuild — CDJ hardware reads that beat grid for its live tempo display, not the library BPM field. Export now re-derives the beat grid from the analyzed BPM alone, and `fix_empty_analysis_files` no longer defaults to 120 BPM when regenerating a bundle. Re-exporting an affected playlist fixes it.
+- **Improvement:** importing a USB is much faster, especially from a stick that lives on a spinning HDD. The import no longer walks every track of every playlist to create local library rows and read each track's on-USB analysis bundle from disk (a "finalize playlist import" stage that could take minutes on slow media). That per-track work now happens only for the tracks actually on screen when a playlist is opened, and the cue points / beat grid are pulled in when a track is added to a local playlist — where they are first needed for export. Adding a USB track to a local playlist and re-exporting it are unchanged.
+- **Improvement:** opening a USB playlist and scrolling, searching, or sorting it no longer re-parses the whole stick's PDB / eDB on every request — the parsed result is cached in memory and reused until the stick's databases change (or the app writes to them).
+- **Improvement:** local track analysis (BPM/key/beat-grid) is now several times faster. The release build was compiling the audio-analysis engine and its FFT backend size-first (`opt-level = "z"`); they now build speed-first while the rest of the binary stays size-optimized.
+- **Improvement:** a USB export is now blocked when *any* track in the playlist lives under a missing source folder, not just one on the currently loaded page — the check moved into the backend export gate, which sees the whole playlist.
+- **Improvement:** on export, the on-USB analysis bundle is now reconciled to the local master unconditionally on both the retain and fresh paths, instead of via a per-path "has edits" heuristic — no behaviour change on any currently reachable input, but a future change to the export analysis gate can no longer silently reintroduce a stale-cue path.
+- **Chore:** documented the new `track_cues` table, the four cue/beat-grid commands (`get_track_detail`, `save_track_analysis_edits`, `get_usb_track_detail`, `save_usb_track_analysis_edits`), and the cue/beat-grid export & import paths across the `docs/` set.
+- **Chore:** expanded Rust backend test coverage for cue persistence, playback command error paths, command wrapper contracts, and `master.db` scanning, raising backend line coverage from 89.54% to 90.23%.
+- **Chore:** the export button label ("Append to … on USB" vs "Export to USB") and the missing-source-folder export block are computed in the backend; the frontend renders them instead of re-deriving the append rule or parsing the USB path itself.
+- **Chore:** relicense project code and package metadata from MIT to `AGPL-3.0-or-later` for the 0.2.0 release line.
 
 ## 0.1.36
 
-- **Fix:** dragging a playlist track while a column sort is active now saves that
-  sorted order the moment the drag starts (the sort arrow clears), so the track
-  lands exactly where you drop it instead of the list jumping to an unrelated
-  order.
-- **Fix:** the playlist panel header shows the whole playlist's track count, not
-  just the number of rows loaded into the current page.
-- **Fix:** an MP3 whose reported average bitrate exceeds 320 kbps is no longer
-  flagged as unsupported — a CBR MPEG Layer III stream can't exceed its tier's
-  ceiling, so a higher average just means VBR, which CDJs play fine.
-- **Fix:** a blocked USB export again shows the specific "N/M tracks need
-  analysis" (or missing-source-folder) reason instead of a generic failure line.
-- **Chore:** large sweep moving derived UI state out of the JS frontend into the
-  Rust backend, so each fact is computed once (with unit tests) and the frontend
-  just renders it — CDJ format-compatibility badges, Event Log warning severity,
-  the in-app update check (no longer an HTTP call from the webview), the export
-  reorder-lock, USB-row hydration state, the entire USB diagnostics / parity /
-  repair report, player-menu `removable` flags, BPM-range parsing, history-session
-  dates, and job-status text. Also removed `mock_api_client.mjs`, a ~1100-line
-  browser/dev re-implementation of the backend. No user-visible behavior change.
+- **Fix:** dragging a playlist track while a column sort is active now saves that sorted order the moment the drag starts (the sort arrow clears), so the track lands exactly where you drop it instead of the list jumping to an unrelated order.
+- **Fix:** the playlist panel header shows the whole playlist's track count, not just the number of rows loaded into the current page.
+- **Fix:** an MP3 whose reported average bitrate exceeds 320 kbps is no longer flagged as unsupported — a CBR MPEG Layer III stream can't exceed its tier's ceiling, so a higher average just means VBR, which CDJs play fine.
+- **Fix:** a blocked USB export again shows the specific "N/M tracks need analysis" (or missing-source-folder) reason instead of a generic failure line.
+- **Chore:** large sweep moving derived UI state out of the JS frontend into the Rust backend, so each fact is computed once (with unit tests) and the frontend just renders it — CDJ format-compatibility badges, Event Log warning severity, the in-app update check (no longer an HTTP call from the webview), the export reorder-lock, USB-row hydration state, the entire USB diagnostics / parity / repair report, player-menu `removable` flags, BPM-range parsing, history-session dates, and job-status text. Also removed `mock_api_client.mjs`, a ~1100-line browser/dev re-implementation of the backend. No user-visible behavior change.
 
 ## 0.1.35
 
-- **Fix:** the shimmer on the progress-footer bar now sweeps the full width of the
-  track instead of being confined to the filled portion, so it no longer stalls
-  after a short travel and restarts while a job is still near 0%.
-- **Fix:** "Analyze Missing Tracks" in a playlist and the post-scan library
-  analysis now select the tracks that need analysis entirely on the backend,
-  scoped to that playlist or to the current library filter, so a large paginated
-  list no longer analyzes only its first page — and the "N tracks / M albums"
-  figures in the scan status line are computed over the whole scanned library
-  rather than the page just loaded.
-- **Fix:** the backend's auto-selection of "tracks needing analysis" now uses the
-  same core-fields definition (waveform + positive BPM + positive duration) as
-  the row badges, the playlist "Analyze Missing" count and the source-folder
-  "analyzed" indicator, so the count shown and the set actually analyzed always
-  match; rows a failed run left with BPM 0 or no waveform are picked up again.
-- **Fix:** "Add selected" / "Select all matching" in the library now enumerate
-  and add tracks on the backend, so a selection spanning pages that have since
-  scrolled out of view is no longer lost.
-- **Improvement:** which library or USB row shows as "playing" is now decided
-  purely from the backend-resolved track id (carried on playback events and on
-  USB playlist/history rows), removing the client-side path/metadata scan that
-  ran for every row on every table render.
-- **Improvement:** the USB panel's "N playlists, M tracks" total and the USB
-  history session/track counts are read straight from the backend response with
-  no client-side fallback tally.
+- **Fix:** the shimmer on the progress-footer bar now sweeps the full width of the track instead of being confined to the filled portion, so it no longer stalls after a short travel and restarts while a job is still near 0%.
+- **Fix:** "Analyze Missing Tracks" in a playlist and the post-scan library analysis now select the tracks that need analysis entirely on the backend, scoped to that playlist or to the current library filter, so a large paginated list no longer analyzes only its first page — and the "N tracks / M albums" figures in the scan status line are computed over the whole scanned library rather than the page just loaded.
+- **Fix:** the backend's auto-selection of "tracks needing analysis" now uses the same core-fields definition (waveform + positive BPM + positive duration) as the row badges, the playlist "Analyze Missing" count and the source-folder "analyzed" indicator, so the count shown and the set actually analyzed always match; rows a failed run left with BPM 0 or no waveform are picked up again.
+- **Fix:** "Add selected" / "Select all matching" in the library now enumerate and add tracks on the backend, so a selection spanning pages that have since scrolled out of view is no longer lost.
+- **Improvement:** which library or USB row shows as "playing" is now decided purely from the backend-resolved track id (carried on playback events and on USB playlist/history rows), removing the client-side path/metadata scan that ran for every row on every table render.
+- **Improvement:** the USB panel's "N playlists, M tracks" total and the USB history session/track counts are read straight from the backend response with no client-side fallback tally.
 
 ## 0.1.34
 
-- **Fix:** playing a track from a USB playlist now plays the library copy whenever
-  the library actually has the file on disk, instead of sometimes falling through
-  to the USB copy and reporting a misleading "library unavailable". Playback
-  resolution now skips library rows whose file has moved or been deleted and heals
-  onto a live copy of the same track.
-- **Improvement:** the playback status line now states only where a track is
-  playing from — `Library` or `USB` with no "(matched)" /  "(library unavailable)" qualifier. 
-  When playback does fall back from the library copy to a USB copy, the reason is recorded 
-  in the Event Log.
-- **Fix:** the playlist panel again offers "Analyze Missing Tracks" for every track missing
-  waveform/BPM/duration, including tracks imported into the library from a
-  USB drive — previously the button was hidden for those and the export failed later at the
-  backend analysis gate instead.
-- **Fix:** every track in an opened playlist is now correctly flagged as coming from the
-  external master database (or not) — a mismatched column list in the playlist-tracks query
-  made them all look non-rekordbox-db.
-- **Fix:** opening an app playlist that has tracks right after viewing an empty one now paints
-  its waveforms — the empty playlist's "no tracks" state hides the track table, and the
-  waveform canvases were being measured (and locked to 1×1) while still hidden, then never
-  repainted once the table was shown.
-- **Improvement:** export now runs a free-space preflight before copying any media — it
-  estimates the new bytes the copy will write (skipping tracks already on the drive) and
-  refuses the export up front when the USB can't hold them plus headroom, instead of filling
-  the drive mid-copy and leaving orphaned partial files with no updated database.
-- **Improvement:** mirror-mode export re-runs the manifest invariant check after the stale-file
-  prune, so if the prune ever deleted a file the freshly-exported playlist still references the
-  export fails loudly (pointing at the pre-export backup) instead of reporting success with a
-  hole in the drive.
-- **Improvement:** all four track-list views — library, app playlist, USB playlist, USB
-  history — now share one backend-driven fetch/paginate/search/sort/scroll data layer. Each
-  renders one already-hydrated page at a time (waveform/BPM/key/artwork) and scroll-loads the
-  rest; search and column sort re-query the backend (`browse_source_files`,
-  `fetch_usb_playlist_tracks` / `fetch_usb_history_tracks`) so they span the whole list, not
-  just the rows scrolled into view. The `state.filteredTracks` client-search overlay, the
-  client-side `sortTracks` / `filterTracksByQuery` / `applySortToTracks` helpers, and every
-  view's bespoke pagination/scroll bookkeeping are gone. For the app playlist a column sort
-  stays a reversible view op until committed on navigate-away/export (`reorder_playlist_tracks`
-  gained a `sortBy` mode), and drag-reorder became a single-move (`moveTrackId` /
-  `beforeTrackId`) so it works without loading every row.
-- **Improvement:** more per-track derived state is now computed once by the backend and
-  rendered as-is, so the UI can no longer disagree with the pre-export gate or with itself:
-  whether a track still needs analysis (`analysisReady`, a single rule shared with the export
-  gate, on every row and analysis progress event), the format badge (`formatExt` guaranteed on
-  the wire for every track-returning command, USB tracks included, with a file-path-extension
-  fallback for legacy / master.db / USB-merge rows), the playback status source label ("Library
-  (matched)", "USB", … — resolved at play time, reused verbatim for later events, cleared on
-  stop), and every track-list "Total time" footer (whole-list backend total, correct while a
-  search filter is active).
-- **Chore:** track-list frontend cleanup enabled by the two changes above — one shared
-  "Total time" helper instead of three near-identical copies, one
-  `resolveRowActionTrack(view, el)` for row-action resolution across all four views
-  (position-first, identity fallback) replacing the library-vs-USB `data-id` / `data-index`
-  split, and the dead snake_case / seconds-vs-milliseconds track-field coalescing branches
-  removed now that the response contract is camelCase with a single `durationMs`.
+- **Fix:** playing a track from a USB playlist now plays the library copy whenever the library actually has the file on disk, instead of sometimes falling through to the USB copy and reporting a misleading "library unavailable". Playback resolution now skips library rows whose file has moved or been deleted and heals onto a live copy of the same track.
+- **Improvement:** the playback status line now states only where a track is playing from — `Library` or `USB` with no "(matched)" /  "(library unavailable)" qualifier. When playback does fall back from the library copy to a USB copy, the reason is recorded in the Event Log.
+- **Fix:** the playlist panel again offers "Analyze Missing Tracks" for every track missing waveform/BPM/duration, including tracks imported into the library from a USB drive — previously the button was hidden for those and the export failed later at the backend analysis gate instead.
+- **Fix:** every track in an opened playlist is now correctly flagged as coming from the external master database (or not) — a mismatched column list in the playlist-tracks query made them all look non-rekordbox-db.
+- **Fix:** opening an app playlist that has tracks right after viewing an empty one now paints its waveforms — the empty playlist's "no tracks" state hides the track table, and the waveform canvases were being measured (and locked to 1×1) while still hidden, then never repainted once the table was shown.
+- **Improvement:** export now runs a free-space preflight before copying any media — it estimates the new bytes the copy will write (skipping tracks already on the drive) and refuses the export up front when the USB can't hold them plus headroom, instead of filling the drive mid-copy and leaving orphaned partial files with no updated database.
+- **Improvement:** mirror-mode export re-runs the manifest invariant check after the stale-file prune, so if the prune ever deleted a file the freshly-exported playlist still references the export fails loudly (pointing at the pre-export backup) instead of reporting success with a hole in the drive.
+- **Improvement:** all four track-list views — library, app playlist, USB playlist, USB history — now share one backend-driven fetch/paginate/search/sort/scroll data layer. Each renders one already-hydrated page at a time (waveform/BPM/key/artwork) and scroll-loads the rest; search and column sort re-query the backend (`browse_source_files`, `fetch_usb_playlist_tracks` / `fetch_usb_history_tracks`) so they span the whole list, not just the rows scrolled into view. The `state.filteredTracks` client-search overlay, the client-side `sortTracks` / `filterTracksByQuery` / `applySortToTracks` helpers, and every view's bespoke pagination/scroll bookkeeping are gone. For the app playlist a column sort stays a reversible view op until committed on navigate-away/export (`reorder_playlist_tracks` gained a `sortBy` mode), and drag-reorder became a single-move (`moveTrackId` / `beforeTrackId`) so it works without loading every row.
+- **Improvement:** more per-track derived state is now computed once by the backend and rendered as-is, so the UI can no longer disagree with the pre-export gate or with itself: whether a track still needs analysis (`analysisReady`, a single rule shared with the export gate, on every row and analysis progress event), the format badge (`formatExt` guaranteed on the wire for every track-returning command, USB tracks included, with a file-path-extension fallback for legacy / master.db / USB-merge rows), the playback status source label ("Library (matched)", "USB", … — resolved at play time, reused verbatim for later events, cleared on stop), and every track-list "Total time" footer (whole-list backend total, correct while a search filter is active).
+- **Chore:** track-list frontend cleanup enabled by the two changes above — one shared "Total time" helper instead of three near-identical copies, one `resolveRowActionTrack(view, el)` for row-action resolution across all four views (position-first, identity fallback) replacing the library-vs-USB `data-id` / `data-index` split, and the dead snake_case / seconds-vs-milliseconds track-field coalescing branches removed now that the response contract is camelCase with a single `durationMs`.
 
 ## 0.1.33
 
-- **Improvement:** switching the export sync mode now updates the track-reorder lock on the
-  open playlist immediately instead of waiting for the next USB scan — mirror mode unlocks
-  drag/column-sort right away, and switching back to additive re-locks a playlist that
-  already exists on the USB (committing any active column sort first).
-- **Fix:** when switching to additive mode with an unsaved track sort, the app now tries to
-  save that sort before locking the playlist and says so in the status line if the save
-  fails (previously it silently claimed the order was kept).
-- **Fix:** a USB playlist nested inside a folder now matches a local playlist of the same
-  name consistently — the USB playlists view and USB diagnostics previously disagreed on
-  whether additive export would lock its track order.
-- **Chore:** functional-test coverage for the mirror-mode purge fix — a dropped track with
-  device play history keeps its full on-drive shape (PDB `anlz_path`/`artwork_id`, analysis +
-  artwork files, eDB `analysisDataFilePath`/`image_id` and `image` row) while a plainly-removed
-  track is fully torn down including its now-exclusive artwork and orphaned image rows; and a
-  track dropped from one playlist but still in another keeps its eDB `content` and PDB track
-  rows, not just its file.
-- **Improvement:** export now runs a pre-database-write manifest invariant check, blocking unsafe
-  or duplicate media targets and refusing mirror-mode pruning when source files were skipped, so a
-  missing local source cannot silently turn into an empty or partial destructive sync.
-- **Chore:** refreshed `Cargo.lock` to latest semver-compatible dependency versions and bumped
-  `base64` to 0.23.
+- **Improvement:** switching the export sync mode now updates the track-reorder lock on the open playlist immediately instead of waiting for the next USB scan — mirror mode unlocks drag/column-sort right away, and switching back to additive re-locks a playlist that already exists on the USB (committing any active column sort first).
+- **Fix:** when switching to additive mode with an unsaved track sort, the app now tries to save that sort before locking the playlist and says so in the status line if the save fails (previously it silently claimed the order was kept).
+- **Fix:** a USB playlist nested inside a folder now matches a local playlist of the same name consistently — the USB playlists view and USB diagnostics previously disagreed on whether additive export would lock its track order.
+- **Chore:** functional-test coverage for the mirror-mode purge fix — a dropped track with device play history keeps its full on-drive shape (PDB `anlz_path`/`artwork_id`, analysis + artwork files, eDB `analysisDataFilePath`/`image_id` and `image` row) while a plainly-removed track is fully torn down including its now-exclusive artwork and orphaned image rows; and a track dropped from one playlist but still in another keeps its eDB `content` and PDB track rows, not just its file.
+- **Improvement:** export now runs a pre-database-write manifest invariant check, blocking unsafe or duplicate media targets and refusing mirror-mode pruning when source files were skipped, so a missing local source cannot silently turn into an empty or partial destructive sync.
+- **Chore:** refreshed `Cargo.lock` to latest semver-compatible dependency versions and bumped `base64` to 0.23.
 
 ## 0.1.32
 
 **Severity:** critical — see item(s) marked **(CRITICAL)** below.
 
-- **New feature:** the on-drive USB export log now records which sync mode produced each export
-  (additive or mirror) and the tracks in their actual playlist order, instead of only an
-  alphabetically-sorted list with no mode information. Older log entries are read as before with
-  the mode shown as unknown.
-- **Fix:** a mirror-mode re-export deleted the waveform/beatgrid and cover-art files of
-  every track that was already on the USB from a previous export, because a reused analysis or
-  artwork asset was not recognised as still owned by the exported playlist and the stale-file
-  prune reaped it. Re-importing the drive then showed no waveforms or artwork for those tracks.
-  Reused assets for tracks still in the playlist are now kept.
-- **Fix:** a mirror-mode export that dropped tracks from a playlist deleted their audio files but
-  left the matching eDB `content` and PDB track rows behind, so the strict parity report flagged
-  them as "indexed audio file(s) missing from USB". Mirror export now also removes those rows
-  (and any now-unused artwork rows) when the dropped track is in no other USB playlist and has no
-  device play history — tracks that are still referenced elsewhere are left untouched.
-- **Fix (CRITICAL):** exporting a playlist of more than about 95 tracks to a freshly initialized USB
-  always failed outright with "t19 runtime synthesis: N rows do not fit on page". The exporter
-  fabricated one placeholder history row per track with no cap, which could never fit on a single
-  page past that size. There is no real play history to represent on a never-played device, so it
-  now always ends up with a single placeholder row regardless of library size and matching what a 
-  genuine rekordbox-initialized USB already ships with, by leaving that row untouched when it's already
-  present instead of needlessly rewriting it on every first export.
-- **Fix (CRITICAL):** exporting a single playlist with more than 255 tracks could crash rekordbox
-  desktop outright with no error dialog. Rows were packed onto a page purely by remaining byte
-  space, with no limit on row count — for playlist entries specifically (a small, fixed-size row),
-  a large enough playlist could pack far more than 255 rows onto one page, silently wrapping the
-  page's row-count byte field. Every page is now capped at 255 rows regardless of remaining space,
-  which the format requires but this exporter didn't previously enforce.
-- **Fix (CRITICAL):** a mirror-mode export that removed playlist entries left the rewritten
-  `playlist_entries` pages with every footer group's transaction bitmask set to "all rows",
-  instead of the single-bit convention the from-scratch writer, reference rekordbox exports, and
-  player firmware use — the same footer-shape class of bug as the `tt=19` fix above, which made
-  drives unreadable on a CDJ-2000NXS2. All page rewrites that change a row count now stamp the
-  footer convention through one shared, single source of truth, closing off this whole class of
-  bug rather than fixing it one table at a time.
+- **New feature:** the on-drive USB export log now records which sync mode produced each export (additive or mirror) and the tracks in their actual playlist order, instead of only an alphabetically-sorted list with no mode information. Older log entries are read as before with the mode shown as unknown.
+- **Fix:** a mirror-mode re-export deleted the waveform/beatgrid and cover-art files of every track that was already on the USB from a previous export, because a reused analysis or artwork asset was not recognised as still owned by the exported playlist and the stale-file prune reaped it. Re-importing the drive then showed no waveforms or artwork for those tracks. Reused assets for tracks still in the playlist are now kept.
+- **Fix:** a mirror-mode export that dropped tracks from a playlist deleted their audio files but left the matching eDB `content` and PDB track rows behind, so the strict parity report flagged them as "indexed audio file(s) missing from USB". Mirror export now also removes those rows (and any now-unused artwork rows) when the dropped track is in no other USB playlist and has no device play history — tracks that are still referenced elsewhere are left untouched.
+- **Fix (CRITICAL):** exporting a playlist of more than about 95 tracks to a freshly initialized USB always failed outright with "t19 runtime synthesis: N rows do not fit on page". The exporter fabricated one placeholder history row per track with no cap, which could never fit on a single page past that size. There is no real play history to represent on a never-played device, so it now always ends up with a single placeholder row regardless of library size and matching what a genuine rekordbox-initialized USB already ships with, by leaving that row untouched when it's already present instead of needlessly rewriting it on every first export.
+- **Fix (CRITICAL):** exporting a single playlist with more than 255 tracks could crash rekordbox desktop outright with no error dialog. Rows were packed onto a page purely by remaining byte space, with no limit on row count — for playlist entries specifically (a small, fixed-size row), a large enough playlist could pack far more than 255 rows onto one page, silently wrapping the page's row-count byte field. Every page is now capped at 255 rows regardless of remaining space, which the format requires but this exporter didn't previously enforce.
+- **Fix (CRITICAL):** a mirror-mode export that removed playlist entries left the rewritten `playlist_entries` pages with every footer group's transaction bitmask set to "all rows", instead of the single-bit convention the from-scratch writer, reference rekordbox exports, and player firmware use — the same footer-shape class of bug as the `tt=19` fix above, which made drives unreadable on a CDJ-2000NXS2. All page rewrites that change a row count now stamp the footer convention through one shared, single source of truth, closing off this whole class of bug rather than fixing it one table at a time.
 
 ## 0.1.31
 
 **Severity:** critical — see item(s) marked **(CRITICAL)** below.
 
-- **Fix (CRITICAL):** exporting more than 16 tracks to a USB could produce a PDB that rekordbox
-  desktop rejected as corrupted and that caused a CDJ-2000NXS2 to mount and silently eject the drive
-  in a loop. The per-track runtime table's footer incorrectly marked every row as simultaneously
-  "active" instead of only the most recent one, once the table grew past a single 16-row footer
-  group.
-- **Fix:** tracks whose CDJ-truncated filename collided with another track's (e.g. several tracks
-  by the same artist sharing a long title prefix) silently overwrote each other on export, losing
-  tracks from the exported playlist without any warning. Colliding filenames now get a numbered
-  suffix, matching rekordbox's own naming convention.
-- **Fix:** re-exporting a track that already had a PDB row (e.g. after re-encoding the source file)
-  kept its old file size, sample rate, bitrate, file type, release year/date, and ISRC instead of
-  refreshing them.
-- **Chore:** updated dependencies (`chacha20`, `combine`, `libredox`, `uuid`), applied `rustfmt`,
-  and fixed clippy/build warnings in the helper binaries.
+- **Fix (CRITICAL):** exporting more than 16 tracks to a USB could produce a PDB that rekordbox desktop rejected as corrupted and that caused a CDJ-2000NXS2 to mount and silently eject the drive in a loop. The per-track runtime table's footer incorrectly marked every row as simultaneously "active" instead of only the most recent one, once the table grew past a single 16-row footer group.
+- **Fix:** tracks whose CDJ-truncated filename collided with another track's (e.g. several tracks by the same artist sharing a long title prefix) silently overwrote each other on export, losing tracks from the exported playlist without any warning. Colliding filenames now get a numbered suffix, matching rekordbox's own naming convention.
+- **Fix:** re-exporting a track that already had a PDB row (e.g. after re-encoding the source file) kept its old file size, sample rate, bitrate, file type, release year/date, and ISRC instead of refreshing them.
+- **Chore:** updated dependencies (`chacha20`, `combine`, `libredox`, `uuid`), applied `rustfmt`, and fixed clippy/build warnings in the helper binaries.
 
 ## 0.1.30
 
-- **Fix (CRITICAL):** additive export could be blocked with "PDB additive write blocked: page-header
-  convention mismatches" after tombstoning a duplicate or removed `playlist_entries` row that wasn't
-  the last row slot on its page — the tombstone footer's `num_rl` field was set to the tombstoned
-  row's own slot index instead of the page's fixed last slot, which strict player validation rejects
+- **Fix (CRITICAL):** additive export could be blocked with "PDB additive write blocked: page-header convention mismatches" after tombstoning a duplicate or removed `playlist_entries` row that wasn't the last row slot on its page — the tombstone footer's `num_rl` field was set to the tombstoned row's own slot index instead of the page's fixed last slot, which strict player validation rejects
 
 ## 0.1.29
 
 **Severity:** critical — see item(s) marked **(CRITICAL)** below.
 
-- **Fix (CRITICAL):** re-initializing a USB after manually deleting its `PIONEER`/`Contents` folders
-  always failed with "an internal database error occurred", with no workaround — a stale local
-  staging-cache copy of the eDB left over from before the deletion is now discarded before
-  rebuilding it, instead of colliding with its already-existing schema
-- **New feature:** add a standalone "Remove Duplicate PDB Playlist Entries" repair fix that cleans
-  up stale duplicate `playlist_entries` rows (the same defect fixed by 0.1.27's export-time sweep)
-  without requiring the much more invasive "Upgrade Export Data To Strict Parity" fix, which also
-  merges playlists between eDB/PDB and rewrites both databases. Previously the only ways to clean
-  up leftover duplicate PDB rows were to accept that full merge or re-export the affected playlist
-- **Improvement:** show the sync mode (mirror/additive) in the Backups panel's "Before export" entries,
-  so a pre-export snapshot's listed reason records which export mode produced it
-- **Chore:** extend the additive-growth/mirror/reorder/history-guard workflow integration test with a
-  check that an additive re-export right after a local reorder leaves entry order and count
-  untouched (order sync is mirror-only), and remove a now-redundant reorder/duplicate-entries
-  regression test whose remove+re-add workaround predated the `reorder_playlist_tracks` command and
-  whose scenario the workflow test now covers more realistically (dedicated reorder command, against
-  a multi-page PDB, through an actual mirror export)
+- **Fix (CRITICAL):** re-initializing a USB after manually deleting its `PIONEER`/`Contents` folders always failed with "an internal database error occurred", with no workaround — a stale local staging-cache copy of the eDB left over from before the deletion is now discarded before rebuilding it, instead of colliding with its already-existing schema
+- **New feature:** add a standalone "Remove Duplicate PDB Playlist Entries" repair fix that cleans up stale duplicate `playlist_entries` rows (the same defect fixed by 0.1.27's export-time sweep) without requiring the much more invasive "Upgrade Export Data To Strict Parity" fix, which also merges playlists between eDB/PDB and rewrites both databases. Previously the only ways to clean up leftover duplicate PDB rows were to accept that full merge or re-export the affected playlist
+- **Improvement:** show the sync mode (mirror/additive) in the Backups panel's "Before export" entries, so a pre-export snapshot's listed reason records which export mode produced it
+- **Chore:** extend the additive-growth/mirror/reorder/history-guard workflow integration test with a check that an additive re-export right after a local reorder leaves entry order and count untouched (order sync is mirror-only), and remove a now-redundant reorder/duplicate-entries regression test whose remove+re-add workaround predated the `reorder_playlist_tracks` command and whose scenario the workflow test now covers more realistically (dedicated reorder command, against a multi-page PDB, through an actual mirror export)
 
 ## 0.1.28
 
 **Severity:** critical — see item(s) marked **(CRITICAL)** below.
 
-- **Fix:** initializing a fresh USB now writes its baseline PDB/eDB through
-  the same local-HDD staging path as every other database write, instead of writing directly to the
-  USB — restoring atomic (temp-file + rename) commits and local caching for a drive's very first
-  database write
+- **Fix:** initializing a fresh USB now writes its baseline PDB/eDB through the same local-HDD staging path as every other database write, instead of writing directly to the USB — restoring atomic (temp-file + rename) commits and local caching for a drive's very first database write
 - **Chore:** update deps
-- **Fix (CRITICAL):** mirror-mode USB export could delete the exported file for a track that had
-  been played on the device, if that track was removed from its only local playlist — pruning now
-  protects any track with device play history, matching the existing protection when removing a
-  whole playlist from the USB
-- **Chore:** add an integration test covering additive export while the exported database is
-  growing across multiple pages, followed by a local track reorder and removal (including a track
-  with device play history), then a mirror-mode re-export — verifying PDB/eDB entry order parity,
-  the `run_usb_parity_report` result, pruning of the removed track's exported file, that a
-  played-and-removed track's file survives pruning, and idempotency of a repeated mirror export
+- **Fix (CRITICAL):** mirror-mode USB export could delete the exported file for a track that had been played on the device, if that track was removed from its only local playlist — pruning now protects any track with device play history, matching the existing protection when removing a whole playlist from the USB
+- **Chore:** add an integration test covering additive export while the exported database is growing across multiple pages, followed by a local track reorder and removal (including a track with device play history), then a mirror-mode re-export — verifying PDB/eDB entry order parity, the `run_usb_parity_report` result, pruning of the removed track's exported file, that a played-and-removed track's file survives pruning, and idempotency of a repeated mirror export
 
 ## 0.1.27
 
 **Severity:** critical — see item(s) marked **(CRITICAL)** below.
 
-- **Fix (CRITICAL):** a playlist that had been exported to the same USB many times over its history could
-  accumulate duplicate rows in the exported database — one real-world drive had a single track
-  duplicated 7 times — eventually corrupting the export enough that the drive failed to load on
-  a CDJ at all (no menu, not even a specific-track error). This happened because the writer
-  identified a playlist entry by its track *and* its position together, so a track whose position
-  changed between exports was treated as one entry being removed and a different one being added,
-  instead of the same entry moving — and if that removal ever lagged behind the addition across a
-  playlist's export history, the stale copy was never cleaned up. Track positions are now updated
-  in place, and every export also sweeps for and removes any duplicate entries already left behind
-  on a drive from before this fix.
+- **Fix (CRITICAL):** a playlist that had been exported to the same USB many times over its history could accumulate duplicate rows in the exported database — one real-world drive had a single track duplicated 7 times — eventually corrupting the export enough that the drive failed to load on a CDJ at all (no menu, not even a specific-track error). This happened because the writer identified a playlist entry by its track *and* its position together, so a track whose position changed between exports was treated as one entry being removed and a different one being added, instead of the same entry moving — and if that removal ever lagged behind the addition across a playlist's export history, the stale copy was never cleaned up. Track positions are now updated in place, and every export also sweeps for and removes any duplicate entries already left behind on a drive from before this fix.
 
 ## 0.1.26
 
-- **New feature:** sorting an app playlist by a column now sets its real (and thus exported)
-  track order, not just how it looks while browsing. Sorting stays a free, reversible view action
-  while you're viewing the playlist (search included — searching a sorted playlist never affects
-  what gets saved), and only gets written to the playlist's real order — the same way dragging a
-  track already does — when you navigate away from it or export it. Exporting is blocked with a
-  status message if that save fails, so a stale order never gets exported silently. A playlist you
-  never sorted yourself never inherits another playlist's pending sort, since the shared playlist
-  view commits (or discards) whatever sort was active the moment you leave.
-- **Fix:** a source folder that was removed from the media library and then re-added showed its
-  tracks again, but they couldn't be played — every attempt failed with "track not found in
-  Library or selected USB" — until you separately clicked "Scan Library". Adding a folder now
-  indexes it immediately, so its tracks are usable right away.
-- **Fix:** starting playback of a track from a USB drive occasionally failed with "playback
-  worker timed out ... while starting playback", sometimes several times in a row, even though
-  the track then started playing normally moments later. The backend's single playback worker
-  thread opened/decoded the target file inline and gave itself a fixed 5-second budget to do so
-  — fine for local disk, but an occasional false failure on USB media whose first ("cold") read
-  can legitimately take a bit longer. That slow, one-off open also blocked the same worker
-  thread from handling Stop/Status or a newer Play in the meantime, so skipping tracks while one
-  was still loading could pile up several of these false timeouts back to back. Opening a file
-  now happens on its own thread instead of blocking the worker, so Stop/Status/a newer Play stay
-  responsive regardless, a newer Play immediately supersedes a still-loading older one instead of
-  queuing behind it, and Play itself is no longer bound by a tight fixed timeout that was racing
-  legitimately slow (but not stuck) disk reads.
+- **New feature:** sorting an app playlist by a column now sets its real (and thus exported) track order, not just how it looks while browsing. Sorting stays a free, reversible view action while you're viewing the playlist (search included — searching a sorted playlist never affects what gets saved), and only gets written to the playlist's real order — the same way dragging a track already does — when you navigate away from it or export it. Exporting is blocked with a status message if that save fails, so a stale order never gets exported silently. A playlist you never sorted yourself never inherits another playlist's pending sort, since the shared playlist view commits (or discards) whatever sort was active the moment you leave.
+- **Fix:** a source folder that was removed from the media library and then re-added showed its tracks again, but they couldn't be played — every attempt failed with "track not found in Library or selected USB" — until you separately clicked "Scan Library". Adding a folder now indexes it immediately, so its tracks are usable right away.
+- **Fix:** starting playback of a track from a USB drive occasionally failed with "playback worker timed out ... while starting playback", sometimes several times in a row, even though the track then started playing normally moments later. The backend's single playback worker thread opened/decoded the target file inline and gave itself a fixed 5-second budget to do so — fine for local disk, but an occasional false failure on USB media whose first ("cold") read can legitimately take a bit longer. That slow, one-off open also blocked the same worker thread from handling Stop/Status or a newer Play in the meantime, so skipping tracks while one was still loading could pile up several of these false timeouts back to back. Opening a file now happens on its own thread instead of blocking the worker, so Stop/Status/a newer Play stay responsive regardless, a newer Play immediately supersedes a still-loading older one instead of queuing behind it, and Play itself is no longer bound by a tight fixed timeout that was racing legitimately slow (but not stuck) disk reads.
 
 ## 0.1.25
 
 **Severity:** critical — see item(s) marked **(CRITICAL)** below.
 
-- **New feature:** in the Media Library view, selecting one or more tracks now turns the "Scan
-  Library" button into "Analyze Selected" — clicking it re-analyzes (BPM/key/waveform) just the
-  selected tracks instead of rescanning and analyzing the whole library.
-- **Fix (CRITICAL):** in the Library and Playlist track lists, sorting by a column (e.g. Title,
-  Artist) could cause Play, click-to-seek, and Remove to act on the wrong track — the row you
-  clicked and the track actually played or deleted could differ once the list was sorted. Track
-  actions now always resolve by the track's id instead of its row position.
-- **Improvement:** the Playlist track list now shows the same "sorted by" header hint as the
-  Library/USB/History track lists when a column sort is active, and dragging a track to a new
-  position now works even while sorted — the drag clears the sort so your manual order sticks
-  instead of being immediately re-sorted away.
-- **Fix:** column-header sorting in a local playlist's track list is now disabled — with the same
-  tooltip already shown on the disabled drag handle — when additive export would leave the USB's
-  existing copy of that playlist's order untouched, matching the existing drag-reorder guard.
+- **New feature:** in the Media Library view, selecting one or more tracks now turns the "Scan Library" button into "Analyze Selected" — clicking it re-analyzes (BPM/key/waveform) just the selected tracks instead of rescanning and analyzing the whole library.
+- **Fix (CRITICAL):** in the Library and Playlist track lists, sorting by a column (e.g. Title, Artist) could cause Play, click-to-seek, and Remove to act on the wrong track — the row you clicked and the track actually played or deleted could differ once the list was sorted. Track actions now always resolve by the track's id instead of its row position.
+- **Improvement:** the Playlist track list now shows the same "sorted by" header hint as the Library/USB/History track lists when a column sort is active, and dragging a track to a new position now works even while sorted — the drag clears the sort so your manual order sticks instead of being immediately re-sorted away.
+- **Fix:** column-header sorting in a local playlist's track list is now disabled — with the same tooltip already shown on the disabled drag handle — when additive export would leave the USB's existing copy of that playlist's order untouched, matching the existing drag-reorder guard.
 
 ## 0.1.24
 
 **Severity:** critical — see item(s) marked **(CRITICAL)** below.
 
-- **Fix (CRITICAL):** adding tracks to a playlist from the media library (via a selection) failed
-  every time with a "duplicate field trackId" backend error, a regression from the 0.1.23 fix
-  below: the add-to-playlist payload sent both `id` and `trackId`, which the backend treats as
-  two names for the same field. Only `trackId` is sent now.
+- **Fix (CRITICAL):** adding tracks to a playlist from the media library (via a selection) failed every time with a "duplicate field trackId" backend error, a regression from the 0.1.23 fix below: the add-to-playlist payload sent both `id` and `trackId`, which the backend treats as two names for the same field. Only `trackId` is sent now.
 
 ## 0.1.23
 
 **Severity:** critical — see item(s) marked **(CRITICAL)** below.
 
-- **Fix (CRITICAL):** adding tracks to a playlist from the media library crashed with an
-  "invalid type" backend error for any track that hadn't been BPM-analyzed yet. The
-  add-to-playlist request now sends a payload built explicitly for the backend command instead
-  of forwarding the UI's display-normalized track object, so UI-only state (like an empty BPM
-  placeholder) can no longer break the request.
-- **Fix (CRITICAL):** the library's "select all" checkbox only selected tracks already loaded
-  into the UI, silently skipping matches beyond the first page on any library or search with
-  more results than a single page. It now loads the full matching set from the backend before
-  selecting.
+- **Fix (CRITICAL):** adding tracks to a playlist from the media library crashed with an "invalid type" backend error for any track that hadn't been BPM-analyzed yet. The add-to-playlist request now sends a payload built explicitly for the backend command instead of forwarding the UI's display-normalized track object, so UI-only state (like an empty BPM placeholder) can no longer break the request.
+- **Fix (CRITICAL):** the library's "select all" checkbox only selected tracks already loaded into the UI, silently skipping matches beyond the first page on any library or search with more results than a single page. It now loads the full matching set from the backend before selecting.
 
 ## 0.1.22
 
-- **New feature:** tracks inside an app playlist can now be reordered by dragging them, backed by
-  a new `reorder_playlist_tracks` backend command that persists the custom order to the
-  `playlist_tracks.position` column. Dragging is disabled while a column sort or search filter is
-  active, since the rendered row order wouldn't match the playlist's real track order in that case.
-  It's also disabled (with a tooltip naming the matching USB playlist) when a same-named playlist
-  already exists on the connected USB and additive (non-mirror) export is enabled, since that
-  export mode never rewrites the order of tracks already on the device — reordering there wouldn't
-  be reflected on next export. Newly added tracks are unaffected and still export in the chosen
-  order. That same "does exporting this playlist right now append to (rather than reorder) an
-  existing same-named USB playlist" check — also used for the Export button's "Append to..."
-  label — is computed once, server-side (`PlaylistUsbExportStatus` in the backend export
-  service) and returned alongside `fetch_usb_playlists`/`run_usb_diagnostics`, rather than each
-  UI spot re-deriving it from raw USB-scan/export-setting state.
-- **Fix:** drag-and-drop reordering (both the new playlist-track reordering above and the existing
-  USB playlist sidebar reordering) now auto-scrolls the list when the drag is held near its top or
-  bottom edge, or via the mouse wheel. Previously a drag couldn't reach items outside the visible
-  area of a long list.
-- **Improvement:** playback start is now backend-owned through `play_resolved_track`: the
-  frontend sends one request, while the backend resolves local-vs-USB source paths, validates
-  selected-USB fallback paths, retries recoverable native playback startup errors, and returns
-  the source label used by the UI. This removes the old client-side resolve/play/retry/fallback
-  orchestration without changing playback behavior.
-- **Chore:** split the browser/dev mock backend out of `api_client.mjs` into
-  `mock_api_client.mjs`, lazy-loading it only outside Tauri. `api_client.mjs` is now just the
-  Tauri/mock selector and command helper, and the playback unit tests now cover the frontend
-  command boundary while the migrated retry/source-label policy is tested in Rust. Track identity
-  recovery for analysis/playlist actions also moved behind backend `resolve_track_identity`
-  instead of sequencing materialize/fallback commands in the frontend.
-- **Improvement:** playlist add, post-analysis hydration, and post-repair diagnostics now do
-  more orchestration in the backend. The frontend sends row candidates through
-  `add_track_candidates_to_playlist`, consumes hydrated `analyze_new_tracks.items` instead of
-  making a second fetch, and renders diagnostics returned by `repair_usb_diagnostics` after
-  apply instead of re-running diagnostics client-side.
-- **Improvement:** playlist "Total time" is now computed once server-side from the full
-  track list, matching how the media library and USB playlist/history views already
-  report their totals, instead of being summed client-side from whatever tracks happen
-  to be loaded.
-- **Chore:** removed frontend unit tests that duplicated existing e2e coverage, and
-  extended a few e2e specs to cover what they checked.
+- **New feature:** tracks inside an app playlist can now be reordered by dragging them, backed by a new `reorder_playlist_tracks` backend command that persists the custom order to the `playlist_tracks.position` column. Dragging is disabled while a column sort or search filter is active, since the rendered row order wouldn't match the playlist's real track order in that case. It's also disabled (with a tooltip naming the matching USB playlist) when a same-named playlist already exists on the connected USB and additive (non-mirror) export is enabled, since that export mode never rewrites the order of tracks already on the device — reordering there wouldn't be reflected on next export. Newly added tracks are unaffected and still export in the chosen order. That same "does exporting this playlist right now append to (rather than reorder) an existing same-named USB playlist" check — also used for the Export button's "Append to..." label — is computed once, server-side (`PlaylistUsbExportStatus` in the backend export service) and returned alongside `fetch_usb_playlists`/`run_usb_diagnostics`, rather than each UI spot re-deriving it from raw USB-scan/export-setting state.
+- **Fix:** drag-and-drop reordering (both the new playlist-track reordering above and the existing USB playlist sidebar reordering) now auto-scrolls the list when the drag is held near its top or bottom edge, or via the mouse wheel. Previously a drag couldn't reach items outside the visible area of a long list.
+- **Improvement:** playback start is now backend-owned through `play_resolved_track`: the frontend sends one request, while the backend resolves local-vs-USB source paths, validates selected-USB fallback paths, retries recoverable native playback startup errors, and returns the source label used by the UI. This removes the old client-side resolve/play/retry/fallback orchestration without changing playback behavior.
+- **Chore:** split the browser/dev mock backend out of `api_client.mjs` into `mock_api_client.mjs`, lazy-loading it only outside Tauri. `api_client.mjs` is now just the Tauri/mock selector and command helper, and the playback unit tests now cover the frontend command boundary while the migrated retry/source-label policy is tested in Rust. Track identity recovery for analysis/playlist actions also moved behind backend `resolve_track_identity` instead of sequencing materialize/fallback commands in the frontend.
+- **Improvement:** playlist add, post-analysis hydration, and post-repair diagnostics now do more orchestration in the backend. The frontend sends row candidates through `add_track_candidates_to_playlist`, consumes hydrated `analyze_new_tracks.items` instead of making a second fetch, and renders diagnostics returned by `repair_usb_diagnostics` after apply instead of re-running diagnostics client-side.
+- **Improvement:** playlist "Total time" is now computed once server-side from the full track list, matching how the media library and USB playlist/history views already report their totals, instead of being summed client-side from whatever tracks happen to be loaded.
+- **Chore:** removed frontend unit tests that duplicated existing e2e coverage, and extended a few e2e specs to cover what they checked.
 
 ## 0.1.21
 
-- **Fix:** searching the media library could make an unrelated, already fully-analyzed source
-  folder's chip lose its green "analyzed" state — and multiple folders could be affected at
-  once — because the analyzed/total counts behind that indicator were computed from the
-  search-filtered track list instead of each folder's full contents. A search matching zero
-  tracks in a folder collapsed its count to 0, which read as "not analyzed." The chip's status
-  is now computed from each folder's full contents regardless of the current search query.
-- **Fix:** selecting a very large USB playlist or history session (rekordbox caps a playlist at
-  9999 tracks) could freeze the UI entirely, including making the window unresponsive just from
-  moving the mouse over the track table — rendering thousands of rows, waveforms, and cover
-  images at once is expensive regardless of how fast the underlying data fetch is. USB playlist
-  and history track tables now render and hydrate a page at a time for selections over ~300
-  tracks, loading more as the user scrolls; typical playlists (~80 tracks) render exactly as
-  before. Because hydration was initially only wired up for the selection and scroll render
-  paths, searching or sorting a paginated selection could still leave newly-visible tracks
-  (brought into view by the filter or the new sort order) without their bpm/key/waveform/cover
-  art — every render path (selection, search, sort, scroll) now hydrates whatever it just
-  displayed.
-- **Fix:** "Total time" summaries — in the media library and for USB playlist/history
-  selections — were computed client-side by summing whatever tracks happened to be loaded, so
-  they showed the wrong (too-low) total on app restart, after a search/filter change until every
-  matching track had paged back in, and immediately after selecting a large paginated USB
-  playlist/history before hydration caught up. The backend now computes the true total for the
-  current filter/selection and sends it with the listing or selection response; the library
-  additionally receives a live-updated total per track during an analysis batch. The frontend
-  just displays the numbers it's given instead of recomputing them from partial data.
-- **Improvement:** batched USB track metadata hydration (used when selecting/paginating a
-  playlist) was slow for large selections for two independent reasons, both now fixed: resolving
-  a track id scanned the entire parsed PDB per requested id — an O(items × library size) scan
-  regardless of how the requests were batched, now resolved via a prebuilt lookup instead — and
-  every response eagerly read and base64-encoded each track's cover art, pure overhead since the
-  UI already falls back to loading cover art directly from the USB drive (the same way it already
-  does for tracks resolved via the export database), which inflated response sizes enough to
-  block the UI while parsing a single large batch.
-- **Improvement:** USB repair and export now open the export library database (eDB) once per
-  run and reuse that connection for every read/write step, instead of reopening it for each
-  fix or verification pass. A full repair with several fixes selected previously reopened the
-  eDB 5+ times (re-running SQLCipher key negotiation each time); it now opens it once. A repair
-  run also used to parse the USB's PDB three separate times (once for the diagnostics baseline,
-  once for the parity report, once more for the fix-detection pass), even though none of those
-  three steps writes to it; it's now parsed once and reused across all three.
-- **Chore:** ran `cargo fmt` across the backend crate to clear accumulated formatting drift
-  (no `rustfmt.toml`/CI fmt check previously enforced consistency). No behavior change.
-- **Improvement:** export no longer re-scans the full in-progress track list to look up each
-  track's row while building a playlist — for large libraries with many playlists, this scan
-  scaled with total unique tracks times total playlist entries. Track rows are now found via an
-  id lookup instead. USB diagnostics also no longer clones every playlist's track data (including
-  waveform previews and artwork) just to reshape it for internal checks; that data is moved
-  instead since nothing else needed the original copy.
-- **Fix:** analyzing a large playlist no longer freezes the UI. Every analysis progress event was
-  triggering a full library re-scan, chip-panel DOM rebuild, and duration resum on the JS main
-  thread; on a big batch this ran hundreds to thousands of times instead of once. These now only
-  run once, when the whole batch actually finishes, instead of being throttled with a timer.
-- **Fix:** rows in the library and playlist tables could shift/misalign for two separate reasons
-  during analysis, both now fixed: the pulsing border on an in-progress analyzing row changed that
-  row's height, shifting every row below it and making the list look jumpy; and a row with a
-  loaded cover image rendered a few pixels taller than one still showing the placeholder square,
-  misaligning row borders as covers loaded in. The border no longer affects row height, and the
-  cover image is now sized identically to its placeholder.
-- **Chore:** removed dead code with no production callers: the unused analysis-row-patch queue
-  (`createAnalysisPatchQueue` and its wiring in `main.js`, a `requestAnimationFrame`-coalesced
-  batching layer that was fully wired up but never actually invoked) and
-  `refreshLoadedLibraryTracksFromBackend`, an unused helper. No behavior change.
-- **Chore:** trimmed the frontend unit test suite (70 files/10,848 lines down to 57/9,437), removing
-  tests that only duplicated existing Playwright e2e coverage or asserted nothing about real app
-  code. A handful of files had real, unique coverage that mocked away the DOM/event-wiring behavior
-  they were nominally testing; that coverage was ported into new or extended e2e tests (row-click
-  hydration patch/fallback, the master.db chip's scan-free filtering, event-log source-dropdown
-  dedup, and analyze error-path status messages) before the originals were deleted. No behavior
-  change.
+- **Fix:** searching the media library could make an unrelated, already fully-analyzed source folder's chip lose its green "analyzed" state — and multiple folders could be affected at once — because the analyzed/total counts behind that indicator were computed from the search-filtered track list instead of each folder's full contents. A search matching zero tracks in a folder collapsed its count to 0, which read as "not analyzed." The chip's status is now computed from each folder's full contents regardless of the current search query.
+- **Fix:** selecting a very large USB playlist or history session (rekordbox caps a playlist at 9999 tracks) could freeze the UI entirely, including making the window unresponsive just from moving the mouse over the track table — rendering thousands of rows, waveforms, and cover images at once is expensive regardless of how fast the underlying data fetch is. USB playlist and history track tables now render and hydrate a page at a time for selections over ~300 tracks, loading more as the user scrolls; typical playlists (~80 tracks) render exactly as before. Because hydration was initially only wired up for the selection and scroll render paths, searching or sorting a paginated selection could still leave newly-visible tracks (brought into view by the filter or the new sort order) without their bpm/key/waveform/cover art — every render path (selection, search, sort, scroll) now hydrates whatever it just displayed.
+- **Fix:** "Total time" summaries — in the media library and for USB playlist/history selections — were computed client-side by summing whatever tracks happened to be loaded, so they showed the wrong (too-low) total on app restart, after a search/filter change until every matching track had paged back in, and immediately after selecting a large paginated USB playlist/history before hydration caught up. The backend now computes the true total for the current filter/selection and sends it with the listing or selection response; the library additionally receives a live-updated total per track during an analysis batch. The frontend just displays the numbers it's given instead of recomputing them from partial data.
+- **Improvement:** batched USB track metadata hydration (used when selecting/paginating a playlist) was slow for large selections for two independent reasons, both now fixed: resolving a track id scanned the entire parsed PDB per requested id — an O(items × library size) scan regardless of how the requests were batched, now resolved via a prebuilt lookup instead — and every response eagerly read and base64-encoded each track's cover art, pure overhead since the UI already falls back to loading cover art directly from the USB drive (the same way it already does for tracks resolved via the export database), which inflated response sizes enough to block the UI while parsing a single large batch.
+- **Improvement:** USB repair and export now open the export library database (eDB) once per run and reuse that connection for every read/write step, instead of reopening it for each fix or verification pass. A full repair with several fixes selected previously reopened the eDB 5+ times (re-running SQLCipher key negotiation each time); it now opens it once. A repair run also used to parse the USB's PDB three separate times (once for the diagnostics baseline, once for the parity report, once more for the fix-detection pass), even though none of those three steps writes to it; it's now parsed once and reused across all three.
+- **Chore:** ran `cargo fmt` across the backend crate to clear accumulated formatting drift (no `rustfmt.toml`/CI fmt check previously enforced consistency). No behavior change.
+- **Improvement:** export no longer re-scans the full in-progress track list to look up each track's row while building a playlist — for large libraries with many playlists, this scan scaled with total unique tracks times total playlist entries. Track rows are now found via an id lookup instead. USB diagnostics also no longer clones every playlist's track data (including waveform previews and artwork) just to reshape it for internal checks; that data is moved instead since nothing else needed the original copy.
+- **Fix:** analyzing a large playlist no longer freezes the UI. Every analysis progress event was triggering a full library re-scan, chip-panel DOM rebuild, and duration resum on the JS main thread; on a big batch this ran hundreds to thousands of times instead of once. These now only run once, when the whole batch actually finishes, instead of being throttled with a timer.
+- **Fix:** rows in the library and playlist tables could shift/misalign for two separate reasons during analysis, both now fixed: the pulsing border on an in-progress analyzing row changed that row's height, shifting every row below it and making the list look jumpy; and a row with a loaded cover image rendered a few pixels taller than one still showing the placeholder square, misaligning row borders as covers loaded in. The border no longer affects row height, and the cover image is now sized identically to its placeholder.
+- **Chore:** removed dead code with no production callers: the unused analysis-row-patch queue (`createAnalysisPatchQueue` and its wiring in `main.js`, a `requestAnimationFrame`-coalesced batching layer that was fully wired up but never actually invoked) and `refreshLoadedLibraryTracksFromBackend`, an unused helper. No behavior change.
+- **Chore:** trimmed the frontend unit test suite (70 files/10,848 lines down to 57/9,437), removing tests that only duplicated existing Playwright e2e coverage or asserted nothing about real app code. A handful of files had real, unique coverage that mocked away the DOM/event-wiring behavior they were nominally testing; that coverage was ported into new or extended e2e tests (row-click hydration patch/fallback, the master.db chip's scan-free filtering, event-log source-dropdown dedup, and analyze error-path status messages) before the originals were deleted. No behavior change.
 
 ## 0.1.20
 
 **Severity:** critical — see item(s) marked **(CRITICAL)** below.
 
-- **Fix (CRITICAL):** 0.1.19's libcrypto fix didn't actually fix it — the Windows build still
-  linked against a DLL import stub (the specific DLL name it needed just moved from
-  libcrypto-3-x64.dll to libcrypto-4-x64.dll), so installs still failed to launch. OpenSSL is now
-  compiled from source and linked in as a genuine static library on Windows, with no
-  libcrypto/libssl DLL involved at any point — the release build now also fails outright if the
-  resulting exe ends up depending on one, so this can't silently ship broken again.
+- **Fix (CRITICAL):** 0.1.19's libcrypto fix didn't actually fix it — the Windows build still linked against a DLL import stub (the specific DLL name it needed just moved from libcrypto-3-x64.dll to libcrypto-4-x64.dll), so installs still failed to launch. OpenSSL is now compiled from source and linked in as a genuine static library on Windows, with no libcrypto/libssl DLL involved at any point — the release build now also fails outright if the resulting exe ends up depending on one, so this can't silently ship broken again.
 
 ## 0.1.19
 
 **Severity:** critical — see item(s) marked **(CRITICAL)** below.
 
-- **Fix (CRITICAL):** the Windows build was linking against OpenSSL's DLL-import
-  stubs instead of its true static libraries, so every Windows install of
-  0.1.18 failed to launch with "libcrypto-4-x64.dll was not found" (an earlier
-  packaging change had also silently required libcrypto-3-x64.dll, which the
-  installer never shipped either). The app now links OpenSSL fully statically
-  on Windows, with no libcrypto/libssl DLL dependency at all.
+- **Fix (CRITICAL):** the Windows build was linking against OpenSSL's DLL-import stubs instead of its true static libraries, so every Windows install of 0.1.18 failed to launch with "libcrypto-4-x64.dll was not found" (an earlier packaging change had also silently required libcrypto-3-x64.dll, which the installer never shipped either). The app now links OpenSSL fully statically on Windows, with no libcrypto/libssl DLL dependency at all.
 
 ## 0.1.18
 
 **Severity:** critical — see item(s) marked **(CRITICAL)** below.
 
-- **New feature:** the Backups list now shows why each backup was taken (e.g. "Before export",
-  "Before playlist reorder", "Before repair", "Before restore") instead of no context at all.
-  Backups made before this change show "—" since the reason wasn't recorded yet.
-- **Improvement:** the Backups panel now states once, under the heading, that every backup
-  includes both the PDB and eDB, instead of repeating "eDB and PDB" on every row.
-- **Improvement:** the USB export log (used to backfill playlist export history dates) now lives
-  at `.dj-usb-tkit/dj_usb_tkit_export_log.v1.json` on the drive instead of inside rekordbox's own
-  `PIONEER/rekordbox/` folder. Existing logs at the old location are picked up and moved forward
-  automatically the next time they're read.
-- **Fix (CRITICAL):** restoring a USB DB backup had no visible effect — playlists (and anything else
-  read from the drive) kept showing pre-restore data no matter how many times they were reloaded.
-  The restore wrote the backup straight to the USB file but never refreshed the local staging cache
-  most reads are actually served from, so every read kept trusting the stale cached copy. Restoring
-  now forces that cache to refresh, the same way a fresh USB connect does.
-- **Fix (CRITICAL):** restoring a backup that wasn't the most recent one could fail outright with an
-  I/O error, because taking the required pre-restore safety backup could itself relocate the very
-  snapshot being restored from out from under the restore.
-- **Improvement:** loaded playlists, histories, and player-menu editor state now clear from the UI
-  after a backup restore or an applied repair fix, since either can change what's on the drive —
-  matching how the diagnostics report already gets cleared on any DB-changing action.
-- **New feature:** the Backups list now shows how many playlists were on the drive at backup time.
-  Export and playlist removal (the only actions that can change that count) get a fresh count;
-  every other backup reason carries the count forward from the previous backup instead of
-  re-parsing the PDB for no reason. Backups made before this change show no count.
+- **New feature:** the Backups list now shows why each backup was taken (e.g. "Before export", "Before playlist reorder", "Before repair", "Before restore") instead of no context at all. Backups made before this change show "—" since the reason wasn't recorded yet.
+- **Improvement:** the Backups panel now states once, under the heading, that every backup includes both the PDB and eDB, instead of repeating "eDB and PDB" on every row.
+- **Improvement:** the USB export log (used to backfill playlist export history dates) now lives at `.dj-usb-tkit/dj_usb_tkit_export_log.v1.json` on the drive instead of inside rekordbox's own `PIONEER/rekordbox/` folder. Existing logs at the old location are picked up and moved forward automatically the next time they're read.
+- **Fix (CRITICAL):** restoring a USB DB backup had no visible effect — playlists (and anything else read from the drive) kept showing pre-restore data no matter how many times they were reloaded. The restore wrote the backup straight to the USB file but never refreshed the local staging cache most reads are actually served from, so every read kept trusting the stale cached copy. Restoring now forces that cache to refresh, the same way a fresh USB connect does.
+- **Fix (CRITICAL):** restoring a backup that wasn't the most recent one could fail outright with an I/O error, because taking the required pre-restore safety backup could itself relocate the very snapshot being restored from out from under the restore.
+- **Improvement:** loaded playlists, histories, and player-menu editor state now clear from the UI after a backup restore or an applied repair fix, since either can change what's on the drive — matching how the diagnostics report already gets cleared on any DB-changing action.
+- **New feature:** the Backups list now shows how many playlists were on the drive at backup time. Export and playlist removal (the only actions that can change that count) get a fresh count; every other backup reason carries the count forward from the previous backup instead of re-parsing the PDB for no reason. Backups made before this change show no count.
 - **Chore:** update deps
 
 ## 0.1.17
 
-- **Fix:** the on-screen USB diagnostics report was left showing stale pass/warn/fail results
-  after restoring a DB backup, removing/reordering a USB playlist, syncing or editing the player
-  menu, or exporting a playlist — none of these re-ran diagnostics, so the report kept describing
-  a PDB/eDB state that no longer existed. Backup restore additionally *hid* the whole diagnostics
-  panel outright rather than just clearing its content. All of these now clear the report (health
-  dot back to "unknown", no stale rows) instead of leaving it stale or hiding the panel; the user
-  can re-run diagnostics to get a fresh report for the current state.
-- **Fix:** additive USB export could create a duplicate track — a second PDB row, a second
-  copy of the audio file, and a second playlist entry — when re-exporting a track that was
-  already physically present on the USB under a path this app hadn't itself written (e.g.
-  copied there originally by rekordbox, or by an earlier export run using a different
-  file-naming scheme). The "is this track already on the USB" check only recognized a match
-  when the freshly computed destination path exactly matched an existing PDB row's path;
-  anything already on the stick under a different layout was invisible to it, so the
-  additive-export resolver minted a brand-new track id, copied the audio again, and appended
-  a duplicate playlist entry instead of reusing the existing one. Additive export now also
-  matches against a content fingerprint (file size plus normalized title and artist) built
-  from the USB's existing PDB, and reuses the matched row's identity, media, artwork, and
-  analysis bundle instead of duplicating them. This does not retroactively clean up
-  duplicates a USB already accumulated before this fix — only diagnostics/repair tooling can
-  do that — it only stops additive export from creating new ones going forward.
-- **Fix:** the album string-alignment repair (`repair_pdb_album_string_alignment`) could silently
-  fail to fix rows that USB diagnostics flagged, when the affected album's original data page had
-  since been orphaned from the live PDB table chain (e.g. a track exported by an older,
-  pre-alignment-fix build was played on a CDJ — recording it into a PDB history playlist — and its
-  regular playlist was later removed). The repair only walked the live chain, while detection scans
-  every page in the file, so it could report success without touching the flagged row and USB
-  diagnostics would keep reporting the same misaligned album row after every repair attempt. The
-  repair now scans the same page range diagnostics does.
-- **Fix:** running USB diagnostics, the parity report, or repair diagnostics could hang or take much
-  longer than necessary on slow/misbehaving USB media. Each of these independently re-opened the
-  encrypted eDB — and, in the repair flow, re-staged the PDB —
-  once per internal read instead of once per run, so every extra read paid its own USB stat/copy and
-  SQLCipher key-negotiation cost. Diagnostics, the parity report, and repair now each open the eDB
-  and stage the PDB exactly once and reuse that connection/path for every read in the same run.
-- **Improvement:** the local HDD staging cache for the PDB/eDB (introduced in 0.1.16) checked
-  whether its copy was still fresh against the USB device on every single read/write throughout a
-  connected session — playlist fetch, track inspect, diagnostics, export, every repair step — each
-  paying its own USB stat cost even when nothing had changed since the last check (plus, separately,
-  a small drive-name-marker read on the device to identify which cache belonged to it). That
-  freshness check now happens once, when the USB is connected (`validate_usb_root`), and every read
-  for the rest of that session trusts the already-verified local copy and its already-resolved
-  device identity instead of touching the device again. Re-validating the same drive (re-picking it,
-  or reconnecting after it was modified elsewhere) still forces a fresh check; naming or renaming a
-  drive still takes effect immediately for every read that follows. Also fixed two remaining spots
-  that read the PDB straight off the USB device instead of through the staging cache at all
-  (`inspect_usb_track`'s single-track path, and the analysis-path lookup export runs before writing)
-  — both now go through the same staged copy as everything else.
+- **Fix:** the on-screen USB diagnostics report was left showing stale pass/warn/fail results after restoring a DB backup, removing/reordering a USB playlist, syncing or editing the player menu, or exporting a playlist — none of these re-ran diagnostics, so the report kept describing a PDB/eDB state that no longer existed. Backup restore additionally *hid* the whole diagnostics panel outright rather than just clearing its content. All of these now clear the report (health dot back to "unknown", no stale rows) instead of leaving it stale or hiding the panel; the user can re-run diagnostics to get a fresh report for the current state.
+- **Fix:** additive USB export could create a duplicate track — a second PDB row, a second copy of the audio file, and a second playlist entry — when re-exporting a track that was already physically present on the USB under a path this app hadn't itself written (e.g. copied there originally by rekordbox, or by an earlier export run using a different file-naming scheme). The "is this track already on the USB" check only recognized a match when the freshly computed destination path exactly matched an existing PDB row's path; anything already on the stick under a different layout was invisible to it, so the additive-export resolver minted a brand-new track id, copied the audio again, and appended a duplicate playlist entry instead of reusing the existing one. Additive export now also matches against a content fingerprint (file size plus normalized title and artist) built from the USB's existing PDB, and reuses the matched row's identity, media, artwork, and analysis bundle instead of duplicating them. This does not retroactively clean up duplicates a USB already accumulated before this fix — only diagnostics/repair tooling can do that — it only stops additive export from creating new ones going forward.
+- **Fix:** the album string-alignment repair (`repair_pdb_album_string_alignment`) could silently fail to fix rows that USB diagnostics flagged, when the affected album's original data page had since been orphaned from the live PDB table chain (e.g. a track exported by an older, pre-alignment-fix build was played on a CDJ — recording it into a PDB history playlist — and its regular playlist was later removed). The repair only walked the live chain, while detection scans every page in the file, so it could report success without touching the flagged row and USB diagnostics would keep reporting the same misaligned album row after every repair attempt. The repair now scans the same page range diagnostics does.
+- **Fix:** running USB diagnostics, the parity report, or repair diagnostics could hang or take much longer than necessary on slow/misbehaving USB media. Each of these independently re-opened the encrypted eDB — and, in the repair flow, re-staged the PDB — once per internal read instead of once per run, so every extra read paid its own USB stat/copy and SQLCipher key-negotiation cost. Diagnostics, the parity report, and repair now each open the eDB and stage the PDB exactly once and reuse that connection/path for every read in the same run.
+- **Improvement:** the local HDD staging cache for the PDB/eDB (introduced in 0.1.16) checked whether its copy was still fresh against the USB device on every single read/write throughout a connected session — playlist fetch, track inspect, diagnostics, export, every repair step — each paying its own USB stat cost even when nothing had changed since the last check (plus, separately, a small drive-name-marker read on the device to identify which cache belonged to it). That freshness check now happens once, when the USB is connected (`validate_usb_root`), and every read for the rest of that session trusts the already-verified local copy and its already-resolved device identity instead of touching the device again. Re-validating the same drive (re-picking it, or reconnecting after it was modified elsewhere) still forces a fresh check; naming or renaming a drive still takes effect immediately for every read that follows. Also fixed two remaining spots that read the PDB straight off the USB device instead of through the staging cache at all (`inspect_usb_track`'s single-track path, and the analysis-path lookup export runs before writing) — both now go through the same staged copy as everything else.
 
 ## 0.1.16
 
-- **New feature:** the top status line now shows the active playlist and the connected USB drive's
-  name stacked together, each with a status dot (accent-colored when a playlist is active; health-
-  colored — pass/warn/fail — for the USB drive, from the last diagnostics run). Both are always
-  visible, showing "No active playlist" / "Not connected" as placeholders rather than disappearing
-  when there's nothing to show.
-- **New feature:** USB DB backups (PDB/eDB snapshots, taken before every
-  export/reorder/remove-playlist/repair/menu-config change) now have a dedicated **Backups** panel
-  (Settings → Open Backups) to list, restore, and delete snapshots. Since the PDB and eDB are
-  always backed up together as a pair, each backup event is listed as a single "eDB and PDB" entry
-  rather than two separate rows, and restoring or deleting one acts on both files at once. The
-  newest backup per file always stays on the USB stick, so it travels with the drive to any
-  computer; older backups are moved to the local HDD staging cache instead of accumulating forever
-  on the (often space-constrained) USB drive. How many backups to keep in total is configurable in
-  Settings (default 10) instead of growing unbounded.
-- **New feature:** USB drives can now be given a name (prompted once, the first time a valid,
-  unnamed drive is connected). The name is stored both in a small marker file on the drive itself
-  and locally, so the same physical drive keeps its identity across replugs, different USB ports,
-  and even different computers — something the previous mount-path-based identity couldn't do.
-  Naming also fixes a pre-existing bug where the local HDD staging cache could pick a new,
-  unrelated folder for the same drive after a replug (its cache key was derived from the OS-assigned
-  mount path, which isn't guaranteed to stay the same). If the selected folder is on an actual
-  removable USB device, the drive's own filesystem volume label is read (via `GetVolumeInformationW`
-  on Windows, DiskArbitration on macOS, `/dev/disk/by-label` on Linux) and pre-filled into the
-  naming prompt as a suggestion — the user can still edit or replace it before saving.
-- **Chore:** removed the dead `patch_pdb_columns_menu_order_by_kind` / `patch_pdb_columns_playlist_first`
-  helpers from `pdb_menu.rs`. They had no callers and bypassed the staging cache, unlike the rest of
-  the PDB write path.
-- **Improvement:** the USB-resident PDB and eDB are now staged to a
-  local HDD working copy the first time each is read, instead of being re-read from the USB
-  mount on every call. The local copy is reused until the USB file's size/mtime changes, so
-  browsing playlists, exporting, running diagnostics, and USB repair all hit local disk instead
-  of the (slower, more failure-prone) USB mount after the first touch. Writes go to the local
-  copy first and are only committed back to the USB drive — atomically, via a temp-file rename —
-  if the local copy actually changed; an unchanged write no longer touches the drive at all. USB
-  repair batches every fix selected in one apply request against the local copy and flushes to
-  the drive once at the end, instead of once per fix. This only applies to the desktop app, which
-  is the only context that enables staging (see `usb_staging::init_cache_root`); CLI dev tools
-  and the test suite keep reading/writing the USB path directly, unchanged.
-- **Improvement:** the Event Log now shows where the local USB staging cache lives (once per
-  device, the first time it's created) plus each time a file is staged locally or written back to
-  the USB drive, so the working folder is easy to find if you want to inspect it directly.
-- **Improvement:** selecting a USB playlist or history session now hydrates all of its
-  tracks' waveform/BPM/key/artwork metadata through a handful of batched backend calls
-  instead of one call per track. Each `inspect_usb_track` call used to re-parse the PDB
-  and re-open/re-key the SQLCipher eDB connection from scratch, so large playlists opened
-  dozens of fresh database connections in a row; the new `inspect_usb_tracks` batch command
-  parses the PDB and opens the eDB once per chunk of tracks. Hydration still stops issuing
-  further chunks and patching rows the moment the user selects a different playlist/history,
-  so switching away mid-load no longer wastes backend work on a stale selection.
+- **New feature:** the top status line now shows the active playlist and the connected USB drive's name stacked together, each with a status dot (accent-colored when a playlist is active; health- colored — pass/warn/fail — for the USB drive, from the last diagnostics run). Both are always visible, showing "No active playlist" / "Not connected" as placeholders rather than disappearing when there's nothing to show.
+- **New feature:** USB DB backups (PDB/eDB snapshots, taken before every export/reorder/remove-playlist/repair/menu-config change) now have a dedicated **Backups** panel (Settings → Open Backups) to list, restore, and delete snapshots. Since the PDB and eDB are always backed up together as a pair, each backup event is listed as a single "eDB and PDB" entry rather than two separate rows, and restoring or deleting one acts on both files at once. The newest backup per file always stays on the USB stick, so it travels with the drive to any computer; older backups are moved to the local HDD staging cache instead of accumulating forever on the (often space-constrained) USB drive. How many backups to keep in total is configurable in Settings (default 10) instead of growing unbounded.
+- **New feature:** USB drives can now be given a name (prompted once, the first time a valid, unnamed drive is connected). The name is stored both in a small marker file on the drive itself and locally, so the same physical drive keeps its identity across replugs, different USB ports, and even different computers — something the previous mount-path-based identity couldn't do. Naming also fixes a pre-existing bug where the local HDD staging cache could pick a new, unrelated folder for the same drive after a replug (its cache key was derived from the OS-assigned mount path, which isn't guaranteed to stay the same). If the selected folder is on an actual removable USB device, the drive's own filesystem volume label is read (via `GetVolumeInformationW` on Windows, DiskArbitration on macOS, `/dev/disk/by-label` on Linux) and pre-filled into the naming prompt as a suggestion — the user can still edit or replace it before saving.
+- **Chore:** removed the dead `patch_pdb_columns_menu_order_by_kind` / `patch_pdb_columns_playlist_first` helpers from `pdb_menu.rs`. They had no callers and bypassed the staging cache, unlike the rest of the PDB write path.
+- **Improvement:** the USB-resident PDB and eDB are now staged to a local HDD working copy the first time each is read, instead of being re-read from the USB mount on every call. The local copy is reused until the USB file's size/mtime changes, so browsing playlists, exporting, running diagnostics, and USB repair all hit local disk instead of the (slower, more failure-prone) USB mount after the first touch. Writes go to the local copy first and are only committed back to the USB drive — atomically, via a temp-file rename — if the local copy actually changed; an unchanged write no longer touches the drive at all. USB repair batches every fix selected in one apply request against the local copy and flushes to the drive once at the end, instead of once per fix. This only applies to the desktop app, which is the only context that enables staging (see `usb_staging::init_cache_root`); CLI dev tools and the test suite keep reading/writing the USB path directly, unchanged.
+- **Improvement:** the Event Log now shows where the local USB staging cache lives (once per device, the first time it's created) plus each time a file is staged locally or written back to the USB drive, so the working folder is easy to find if you want to inspect it directly.
+- **Improvement:** selecting a USB playlist or history session now hydrates all of its tracks' waveform/BPM/key/artwork metadata through a handful of batched backend calls instead of one call per track. Each `inspect_usb_track` call used to re-parse the PDB and re-open/re-key the SQLCipher eDB connection from scratch, so large playlists opened dozens of fresh database connections in a row; the new `inspect_usb_tracks` batch command parses the PDB and opens the eDB once per chunk of tracks. Hydration still stops issuing further chunks and patching rows the moment the user selects a different playlist/history, so switching away mid-load no longer wastes backend work on a stale selection.
 - **Chore:** update deps
 
 ## 0.1.15
 
 **Severity:** critical — see item(s) marked **(CRITICAL)** below.
 
-- **Fix (CRITICAL):** stop the torn-growth-pages repair (added in 0.1.13) from silently
-  dropping tracks/playlists that a strict-parity upgrade had just written in the same repair
-  run. That repair truncates the PDB back to a "never-populated file tail" boundary computed
-  once, up front, before any other repair writes; strict parity's additive writer legitimately
-  grows the file past that boundary while merging playlists and tracks, so running the
-  truncation afterward (the previous apply order) cut off everything strict parity had just
-  added. Torn-growth-pages now runs before strict parity, alongside the truncated-table-chain
-  repair, so its truncation boundary is always computed and applied before anything grows the
-  file.
-- **Improvement:** the USB Diagnostics repair preview now lists proposed fixes in the order
-  they're actually applied — the truncated-table-chain and torn-growth-pages structural
-  prerequisites first, then the strict-parity upgrade, then the remaining structural repairs —
-  instead of strict parity always being pinned to the top of the list regardless of apply
-  order.
-- **Improvement:** the truncated-table-chain and torn-growth-pages fix checkboxes in the repair
-  preview are now locked checked and cannot be deselected while they're proposed, since leaving
-  either unchecked while strict parity runs has no safe outcome.
-- **Chore:** cache Rust build artifacts (`Swatinem/rust-cache` for macOS/Windows, a host-mounted
-  Cargo registry/git cache for the Docker-based Linux build) and the Linux build image's Docker
-  layers (`docker/build-push-action` with the GitHub Actions cache backend) in the release
-  workflow, so `cargo build --release` and the Linux toolchain image don't rebuild from scratch
-  on every tagged release.
+- **Fix (CRITICAL):** stop the torn-growth-pages repair (added in 0.1.13) from silently dropping tracks/playlists that a strict-parity upgrade had just written in the same repair run. That repair truncates the PDB back to a "never-populated file tail" boundary computed once, up front, before any other repair writes; strict parity's additive writer legitimately grows the file past that boundary while merging playlists and tracks, so running the truncation afterward (the previous apply order) cut off everything strict parity had just added. Torn-growth-pages now runs before strict parity, alongside the truncated-table-chain repair, so its truncation boundary is always computed and applied before anything grows the file.
+- **Improvement:** the USB Diagnostics repair preview now lists proposed fixes in the order they're actually applied — the truncated-table-chain and torn-growth-pages structural prerequisites first, then the strict-parity upgrade, then the remaining structural repairs — instead of strict parity always being pinned to the top of the list regardless of apply order.
+- **Improvement:** the truncated-table-chain and torn-growth-pages fix checkboxes in the repair preview are now locked checked and cannot be deselected while they're proposed, since leaving either unchecked while strict parity runs has no safe outcome.
+- **Chore:** cache Rust build artifacts (`Swatinem/rust-cache` for macOS/Windows, a host-mounted Cargo registry/git cache for the Docker-based Linux build) and the Linux build image's Docker layers (`docker/build-push-action` with the GitHub Actions cache backend) in the release workflow, so `cargo build --release` and the Linux toolchain image don't rebuild from scratch on every tagged release.
 
 ## 0.1.14
 
 **Severity:** critical — see item(s) marked **(CRITICAL)** below.
 
-- **New feature:** detect and repair a PDB table whose declared last page is beyond the
-  physical end of the file — a more severe variant of the interrupted-export ("USB
-  disconnected mid-write") signature, where the table pointer's `last_page`/`empty_candidate`
-  were advanced to claim new pages that never actually got flushed to disk. Unlike
-  `empty_candidate` (which healthy exports routinely set beyond the current file length as
-  reserved growth headroom), a table's `last_page` must always physically exist; when it
-  doesn't, every additive track append needed by strict parity hard-fails, and USB Diagnostics
-  previously only reported this indirectly as missing playlists and generic strict-parity
-  failures. Repair points the table's `last`/`empty_candidate` fields back at the real last
-  written page — no page content changes — and runs before the strict-parity upgrade fix,
-  since strict parity's additive writes depend on the chain already being walkable.
-- **Fix:** stop the strict-parity upgrade's playlist write from failing with `UNIQUE
-  constraint failed: playlist.playlist_id` when a target playlist id happened to already be
-  occupied by a folder row in eDB. `replace_export_playlist_row_with_identity`'s collision
-  check and its reassignment update were both scoped to `attribute = 0` (playlist rows), but
-  the `playlist_id` UNIQUE constraint applies to the whole `playlist` table regardless of
-  `attribute` — folders share the same id space. This let a same-id folder go undetected (and
-  even when detected, left unmoved), aborting the entire strict-parity upgrade on the first
-  playlist that needed a fresh PDB-side id landing on an already-occupied eDB folder id.
-- **Chore:** `run_usb_diagnostics` dev CLI (`backend/src/bin/run_usb_diagnostics.rs`) now
-  prints each diagnostics section's individual status/checks, not just the overall status and
-  flattened warning log — needed to tell which section was failing when the overall status and
-  warning log alone didn't make it obvious.
-- **Fix (CRITICAL):** stop the Windows build from failing to start with a missing
-  `libcrypto-3-x64.dll`, and from failing to build at all on CI. SQLCipher (used to decrypt
-  the eDB) was built with `rusqlite`'s `bundled-sqlcipher` feature, which links
-  against a dynamically-found system OpenSSL instead of bundling one — on Windows this meant
-  the installed app needed `libcrypto-3-x64.dll` present alongside it, which the installer
-  never shipped. Statically linking against a vendored, from-source OpenSSL build
-  (`bundled-sqlcipher-vendored-openssl`) fixed that but broke Windows CI itself, since building
-  OpenSSL from source shells out to Perl's `Configure` script, which failed on the Windows
-  runner (`Locale::Maketext::Simple` missing from Git Bash's bundled Perl). Settled on
-  `OPENSSL_NO_VENDOR=1` pointing at the full slproweb Win64 OpenSSL package's static libraries
-  instead — same static-linked, no-DLL-at-runtime result, without compiling OpenSSL at all.
-  Also switched the Tauri CLI (`cargo install tauri-cli`, which hit the same
-  `openssl-sys`/Perl problem building itself) to npm's `@tauri-apps/cli`, which ships prebuilt
-  native binaries per platform.
+- **New feature:** detect and repair a PDB table whose declared last page is beyond the physical end of the file — a more severe variant of the interrupted-export ("USB disconnected mid-write") signature, where the table pointer's `last_page`/`empty_candidate` were advanced to claim new pages that never actually got flushed to disk. Unlike `empty_candidate` (which healthy exports routinely set beyond the current file length as reserved growth headroom), a table's `last_page` must always physically exist; when it doesn't, every additive track append needed by strict parity hard-fails, and USB Diagnostics previously only reported this indirectly as missing playlists and generic strict-parity failures. Repair points the table's `last`/`empty_candidate` fields back at the real last written page — no page content changes — and runs before the strict-parity upgrade fix, since strict parity's additive writes depend on the chain already being walkable.
+- **Fix:** stop the strict-parity upgrade's playlist write from failing with `UNIQUE constraint failed: playlist.playlist_id` when a target playlist id happened to already be occupied by a folder row in eDB. `replace_export_playlist_row_with_identity`'s collision check and its reassignment update were both scoped to `attribute = 0` (playlist rows), but the `playlist_id` UNIQUE constraint applies to the whole `playlist` table regardless of `attribute` — folders share the same id space. This let a same-id folder go undetected (and even when detected, left unmoved), aborting the entire strict-parity upgrade on the first playlist that needed a fresh PDB-side id landing on an already-occupied eDB folder id.
+- **Chore:** `run_usb_diagnostics` dev CLI (`backend/src/bin/run_usb_diagnostics.rs`) now prints each diagnostics section's individual status/checks, not just the overall status and flattened warning log — needed to tell which section was failing when the overall status and warning log alone didn't make it obvious.
+- **Fix (CRITICAL):** stop the Windows build from failing to start with a missing `libcrypto-3-x64.dll`, and from failing to build at all on CI. SQLCipher (used to decrypt the eDB) was built with `rusqlite`'s `bundled-sqlcipher` feature, which links against a dynamically-found system OpenSSL instead of bundling one — on Windows this meant the installed app needed `libcrypto-3-x64.dll` present alongside it, which the installer never shipped. Statically linking against a vendored, from-source OpenSSL build (`bundled-sqlcipher-vendored-openssl`) fixed that but broke Windows CI itself, since building OpenSSL from source shells out to Perl's `Configure` script, which failed on the Windows runner (`Locale::Maketext::Simple` missing from Git Bash's bundled Perl). Settled on `OPENSSL_NO_VENDOR=1` pointing at the full slproweb Win64 OpenSSL package's static libraries instead — same static-linked, no-DLL-at-runtime result, without compiling OpenSSL at all. Also switched the Tauri CLI (`cargo install tauri-cli`, which hit the same `openssl-sys`/Perl problem building itself) to npm's `@tauri-apps/cli`, which ships prebuilt native binaries per platform.
 - **Chore:** update deps
 
 ## 0.1.13
 
-- **New feature:** detect and repair a PDB left mid-write by an interrupted export (e.g. the
-  USB was disconnected while rekordbox was growing the database). One or more tables'
-  `empty_candidate` page — the pre-reserved slot for the next batch of rows — was left holding
-  leftover disk content instead of the blank page the writer requires before reusing it, so the
-  database never self-healed on a later export and could be rejected as corrupted. USB
-  Diagnostics now flags this distinctly (rather than as generic PDB corruption), and Repair
-  zeroes the affected page(s), truncates any never-populated file tail left past the header's
-  allocation boundary, and recomputes the transaction sequence counter — without touching any
-  table's page chain or transaction history.
+- **New feature:** detect and repair a PDB left mid-write by an interrupted export (e.g. the USB was disconnected while rekordbox was growing the database). One or more tables' `empty_candidate` page — the pre-reserved slot for the next batch of rows — was left holding leftover disk content instead of the blank page the writer requires before reusing it, so the database never self-healed on a later export and could be rejected as corrupted. USB Diagnostics now flags this distinctly (rather than as generic PDB corruption), and Repair zeroes the affected page(s), truncates any never-populated file tail left past the header's allocation boundary, and recomputes the transaction sequence counter — without touching any table's page chain or transaction history.
 
 ## 0.1.12
 
-- **New feature:** detect and repair track/album rows with a misaligned UTF-16 string slot —
-  MIPS-based CDJ hardware requires 4-byte aligned reads for the UTF-16 string header, and a
-  misaligned slot freezes/comm-errors the player while browsing. USB Diagnostics' Contents
-  Integrity section now flags any track title/filename/etc. or album name slot that isn't
-  4-byte aligned, and Repair can re-encode and relocate the affected rows in place.
+- **New feature:** detect and repair track/album rows with a misaligned UTF-16 string slot — MIPS-based CDJ hardware requires 4-byte aligned reads for the UTF-16 string header, and a misaligned slot freezes/comm-errors the player while browsing. USB Diagnostics' Contents Integrity section now flags any track title/filename/etc. or album name slot that isn't 4-byte aligned, and Repair can re-encode and relocate the affected rows in place.
 - **Chore:** Up the coverage on multiple files
 
 ## 0.1.11
 
 **Severity:** critical — see item(s) marked **(CRITICAL)** below.
 
-- **Fix:** restore waveform color refresh on USB/history track rows after
-  analysis completes. `patchUsbTrackRow` and `patchHistoryTrackRow` were
-  missing `setWaveformColorData` from the deps passed to the shared row-patch
-  helper (the library and playlist row-patch call sites had it, these two
-  didn't), so a freshly-analyzed track's waveform kept its stale color on
-  those two views until the row was fully re-rendered some other way.
+- **Fix:** restore waveform color refresh on USB/history track rows after analysis completes. `patchUsbTrackRow` and `patchHistoryTrackRow` were missing `setWaveformColorData` from the deps passed to the shared row-patch helper (the library and playlist row-patch call sites had it, these two didn't), so a freshly-analyzed track's waveform kept its stale color on those two views until the row was fully re-rendered some other way.
 - **Chore:** de-duplicate frontend JS boilerplate in `vanilla-ui`
 - **Chore:** trim unit tests that duplicated existing e2e coverage in `vanilla-ui`, consolidate a shared test DOM fixture, add an opt-in e2e coverage report (`npm run test:e2e:coverage`)
 - **Fix:** determine track USB-origin authoritatively on the backend (`Track.isUsbPath`, matched against the full `usb_devices` registry) instead of a frontend heuristic that only checked whichever USB root happened to be selected in the current session
@@ -2539,355 +945,95 @@ Walkthrough with screenshots: [release write-up on chiph.art](https://chiph.art/
 
 **Severity:** critical — see item(s) marked **(CRITICAL)** below.
 
-- **Fix (CRITICAL):** stop USB-vs-local playback and materialization from
-  silently diverging. Browsing a USB playlist/history that contained a song
-  the user already had locally always created a second, disconnected
-  `tracks` row instead of recognizing the existing one — which could let
-  `resolve_playback_source` return the USB-mounted copy instead of the local
-  disk copy (unnecessary USB read wear, and playback breaking entirely once
-  the drive is unmounted), and could silently overwrite a correct local
-  `waveform_peaks_path` with a USB-sourced one. Fixed by matching incoming
-  USB tracks against existing local tracks by fingerprint (title/artist/album)
-  plus a duration + exact file-size confidence gate before ever creating a
-  placeholder row, by excluding any known USB-device root from playback
-  resolution, and by giving every playback origin (library, playlist, USB,
-  history) a `track_id` fast path so an already-saved playlist entry
-  referencing a stale USB placeholder self-heals the next time it's played,
-  with no migration required. A one-time startup pass also merges USB
-  placeholder rows left behind by the old behavior back into their genuine
-  local counterpart.
-- **New feature:** add a `usb_devices` registry (recent USB roots with mount
-  state, replacing the old localStorage-based recent-roots list) and a
-  `usb_device_exports` table recording export history per device, queryable
-  even when that exact drive isn't currently mounted.
-- **Fix:** prevent switching the selected USB drive while a USB-scoped job
-  (parity report, diagnostics, repair, playlist read/write, or export) is
-  still running, so a slow response for the old drive can no longer land
-  after the UI has already moved on to a different one and get rendered as
-  if it belonged to the new drive.
-- **Fix:** clear a playlist's "exported to USB" checkmark immediately when
-  tracks are added to it after export, not just when tracks are removed.
-  The backend already nulled the playlist's export-status fields on every
-  add, but the frontend only refreshed the track list afterward and never
-  updated its cached copy of that status, so the checkmark kept showing
-  "exported" until an unrelated action happened to refetch the playlist
-  list.
-- **Fix:** stop the "Repair PDB Header Compatibility Field" diagnostic from
-  perpetually re-flagging itself. It compared the PDB file header's
-  compatibility byte against the most recent local backup snapshot and
-  proposed patching toward that snapshot's value on any difference — but the
-  writer always emits `5` on a fresh export while applying the repair patches
-  to whatever the snapshot held (often `1`), so every export/repair cycle
-  flipped the value and re-triggered the opposite-direction "fix" against the
-  next snapshot, never converging. Both `1` and `5` are confirmed accepted by
-  every tested validator, so a differing backup snapshot is no longer treated
-  as an issue; only a genuinely unrecognized value is repaired now.
-- **New feature:** add an "Export Tracklist" button to the USB History panel.
-  Exports the selected history session's tracks as a plain `.txt` file
-  (`Artist - Title` per line), with a choice of which track the list starts
-  from and an option to include estimated cumulative times before or after
-  each track. Times are always an estimate — summed from track length in
-  play order starting from the chosen track — since CDJs never record a
-  per-track playback timestamp in the USB, and often not even a reliable
-  session date; this app estimates the latter from track metadata when the
-  USB doesn't provide one directly.
+- **Fix (CRITICAL):** stop USB-vs-local playback and materialization from silently diverging. Browsing a USB playlist/history that contained a song the user already had locally always created a second, disconnected `tracks` row instead of recognizing the existing one — which could let `resolve_playback_source` return the USB-mounted copy instead of the local disk copy (unnecessary USB read wear, and playback breaking entirely once the drive is unmounted), and could silently overwrite a correct local `waveform_peaks_path` with a USB-sourced one. Fixed by matching incoming USB tracks against existing local tracks by fingerprint (title/artist/album) plus a duration + exact file-size confidence gate before ever creating a placeholder row, by excluding any known USB-device root from playback resolution, and by giving every playback origin (library, playlist, USB, history) a `track_id` fast path so an already-saved playlist entry referencing a stale USB placeholder self-heals the next time it's played, with no migration required. A one-time startup pass also merges USB placeholder rows left behind by the old behavior back into their genuine local counterpart.
+- **New feature:** add a `usb_devices` registry (recent USB roots with mount state, replacing the old localStorage-based recent-roots list) and a `usb_device_exports` table recording export history per device, queryable even when that exact drive isn't currently mounted.
+- **Fix:** prevent switching the selected USB drive while a USB-scoped job (parity report, diagnostics, repair, playlist read/write, or export) is still running, so a slow response for the old drive can no longer land after the UI has already moved on to a different one and get rendered as if it belonged to the new drive.
+- **Fix:** clear a playlist's "exported to USB" checkmark immediately when tracks are added to it after export, not just when tracks are removed. The backend already nulled the playlist's export-status fields on every add, but the frontend only refreshed the track list afterward and never updated its cached copy of that status, so the checkmark kept showing "exported" until an unrelated action happened to refetch the playlist list.
+- **Fix:** stop the "Repair PDB Header Compatibility Field" diagnostic from perpetually re-flagging itself. It compared the PDB file header's compatibility byte against the most recent local backup snapshot and proposed patching toward that snapshot's value on any difference — but the writer always emits `5` on a fresh export while applying the repair patches to whatever the snapshot held (often `1`), so every export/repair cycle flipped the value and re-triggered the opposite-direction "fix" against the next snapshot, never converging. Both `1` and `5` are confirmed accepted by every tested validator, so a differing backup snapshot is no longer treated as an issue; only a genuinely unrecognized value is repaired now.
+- **New feature:** add an "Export Tracklist" button to the USB History panel. Exports the selected history session's tracks as a plain `.txt` file (`Artist - Title` per line), with a choice of which track the list starts from and an option to include estimated cumulative times before or after each track. Times are always an estimate — summed from track length in play order starting from the chosen track — since CDJs never record a per-track playback timestamp in the USB, and often not even a reliable session date; this app estimates the latter from track metadata when the USB doesn't provide one directly.
 - **Chore:** cargo fmt,clippy,update
 
 ## 0.1.9
 
 **Severity:** critical
 
-- Fix history import and diagnostics treating rekordbox's own blank
-  template history-menu rows as real history. Every fresh or never-played
-  rekordbox export ships a fixed block of empty, unnamed history-playlist
-  placeholder rows; a fallback path added while hardening history import
-  against hardware-recorded history started surfacing these as a batch of
-  phantom "History N" playlists with fabricated track entries, and
-  diagnostics reported misleading history counts for drives that had never
-  actually recorded any DJ history. Only rekordbox-recorded sessions (named
-  `HISTORY NNN`) are now surfaced as history.
-- Remove frontend heuristic local-file matching from USB/imported track
-  playback. Playback now substitutes an HDD/library file only when backend
-  `resolve_playback_source` returns a verified match; if no verified HDD match
-  exists, playback can still use the selected USB source path.
-- Add test coverage for the USB repair engine (`service::repair`), raising its
-  line coverage from ~63% to ~85%. Most of the gap was in the individual PDB
-  byte-level repair functions (wrong page flags, sentinel u5, zero tranrf,
-  wrong track/history/playlist-tree footer shape, stale sentinel B-tree,
-  tombstoned row ids, EC data-page conflicts) and in the repair orchestrator's
-  per-fix proposal/apply/skip wiring, none of which were previously exercised
-  because no existing test constructed the specific corrupted-page byte
-  patterns each one detects. No behavior change — tests only.
-- Unify all backend logging into the Event Log. Previously there were four
-  disconnected paths: per-command warning lists classified after the fact by
-  four independently-hand-rolled guessers (two of which, in the diagnostics
-  and repair modules, disagreed with each other on identical conditions — the
-  same corruption could show up as `warn` from one command and `error` from
-  another); a separate live-event path used by only two files; a handful of
-  `eprintln!`-only messages that never reached the UI at all (notably
-  `scan_rekordbox_db`'s ANLZ/artwork-miss diagnostics); and command failures,
-  which never reached the Event Log at all. Every message now states its own
-  level/code at the point it's created and is emitted through one function
-  that both returns it in the command's response and pushes it live — so a
-  failed command, a repair finding, or an import warning all land in the
-  Event Log the same way, immediately. `error.rs` also gained a distinct
-  `DbError` code (previously folded into the generic `InternalError`).
-- Fix USB status/hint text rendering `[object Object]` and the "Auto analysis
-  limit reached" notice silently disappearing after the Event Log unification
-  above changed several commands' `warnings` field from plain strings to
-  structured entries (`{level, code, message, source}`). `validate_usb_root`,
-  `analyze_new_tracks`, and `scan_rekordbox_db` warning consumers in the frontend
-  now read the `message` field instead of stringifying or re-joining the
-  whole entry.
+- Fix history import and diagnostics treating rekordbox's own blank template history-menu rows as real history. Every fresh or never-played rekordbox export ships a fixed block of empty, unnamed history-playlist placeholder rows; a fallback path added while hardening history import against hardware-recorded history started surfacing these as a batch of phantom "History N" playlists with fabricated track entries, and diagnostics reported misleading history counts for drives that had never actually recorded any DJ history. Only rekordbox-recorded sessions (named `HISTORY NNN`) are now surfaced as history.
+- Remove frontend heuristic local-file matching from USB/imported track playback. Playback now substitutes an HDD/library file only when backend `resolve_playback_source` returns a verified match; if no verified HDD match exists, playback can still use the selected USB source path.
+- Add test coverage for the USB repair engine (`service::repair`), raising its line coverage from ~63% to ~85%. Most of the gap was in the individual PDB byte-level repair functions (wrong page flags, sentinel u5, zero tranrf, wrong track/history/playlist-tree footer shape, stale sentinel B-tree, tombstoned row ids, EC data-page conflicts) and in the repair orchestrator's per-fix proposal/apply/skip wiring, none of which were previously exercised because no existing test constructed the specific corrupted-page byte patterns each one detects. No behavior change — tests only.
+- Unify all backend logging into the Event Log. Previously there were four disconnected paths: per-command warning lists classified after the fact by four independently-hand-rolled guessers (two of which, in the diagnostics and repair modules, disagreed with each other on identical conditions — the same corruption could show up as `warn` from one command and `error` from another); a separate live-event path used by only two files; a handful of `eprintln!`-only messages that never reached the UI at all (notably `scan_rekordbox_db`'s ANLZ/artwork-miss diagnostics); and command failures, which never reached the Event Log at all. Every message now states its own level/code at the point it's created and is emitted through one function that both returns it in the command's response and pushes it live — so a failed command, a repair finding, or an import warning all land in the Event Log the same way, immediately. `error.rs` also gained a distinct `DbError` code (previously folded into the generic `InternalError`).
+- Fix USB status/hint text rendering `[object Object]` and the "Auto analysis limit reached" notice silently disappearing after the Event Log unification above changed several commands' `warnings` field from plain strings to structured entries (`{level, code, message, source}`). `validate_usb_root`, `analyze_new_tracks`, and `scan_rekordbox_db` warning consumers in the frontend now read the `message` field instead of stringifying or re-joining the whole entry.
 
 ## 0.1.8
 
-- Fix the play/pause transport button needing multiple clicks — sometimes to
-  stop a playing track, sometimes to switch to a different track, sometimes
-  silently doing nothing at all. Root cause was a single non-keyed "is a
-  request in flight" latch: while one play/stop request was still resolving,
-  the next click for a _different_ track was silently dropped instead of
-  either queuing or superseding it. Play/stop now use a generation counter and
-  a synchronous pending-intent so a new click always immediately reflects the
-  user's latest intent, and a small backend-call queue guarantees whichever
-  click was truly last is the one that wins. Also fixed: a global "click away
-  from the playing row stops playback" listener that fired _before_ the
-  clicked button's own play/stop logic on every track switch, effectively
-  turning every switch into two competing backend commands instead of one; a
-  dead-code fast path meant every single play — even a track already known
-  locally — paid for an unnecessary database round-trip; and a stale
-  "still playing" snapshot from a backend status-poll thread could arrive
-  after an explicit stop and silently revive the "playing" state.
-- Remove the backend's 250ms playback-status poll thread entirely. It existed
-  to detect a track finishing on its own and to push waveform progress
-  updates, but pushed events over the same channel as direct play/stop
-  replies with no ordering guarantee between the two — the source of the
-  stale-snapshot bug above. Natural end-of-track detection now happens inside
-  the same serialized thread that already handles explicit play/stop
-  commands (via a conditional receive timeout), so it can't race them by
-  construction; the frontend now computes the waveform playhead position
-  itself from a wall-clock timer instead of depending on a stream of pushed
-  progress ticks.
-- Fix seeking/scrubbing to a point in a track being slow — sometimes slow
-  enough to hit a 5-second internal timeout and fail outright — because the
-  backend's fallback seek implementation decoded and discarded every sample
-  from the start of the track up to the target position rather than actually
-  seeking. Playback now decodes and seeks through a small custom audio source
-  built directly on the same `symphonia` decoding library already bundled for
-  format support, replacing reliance on the `rodio` crate's own decoder (whose
-  seek implementation couldn't report a stream length to the FLAC/MP3 seek
-  logic, silently forcing the slow fallback for compressed formats). Seeking
-  to any point in an MP3, FLAC, WAV, AAC/M4A, MP4, or Opus/OGG file is now
-  effectively instant regardless of file length or seek position. `rodio` is
-  still used for actual audio output (device I/O, buffering, mixing) — only
-  its decoding path was replaced.
-- Fix playback errors/warnings (e.g. a failed play or an unsupported file)
-  only ever flashing briefly in the status bar with no way to review them
-  afterward. Any status update tagged as a warning or error now also persists
-  to the Event Log, the same as backend-reported issues already did.
-- Replace native browser `title=""` tooltips throughout the app with a custom
-  tooltip that appears in ~150ms instead of the browser's native ~1s hover
-  delay. This was most noticeable on the source-folder chips: the full path
-  was already exposed on hover (visually truncated with an ellipsis), but the
-  slow native delay made it read as "the feature is missing." Format badges
-  in the library table now also show sample-rate/bit-depth (or bitrate)
-  detail on hover for every track, not just ones with a compatibility warning.
-- Remove the `analyze_track_piece` backend command. It was a per-piece
-  (duration/artwork/waveform/bpm-key) analysis endpoint left over from an
-  older frontend dispatch loop; that loop was already deleted in favor of the
-  single `analyze_new_tracks` batch call, leaving `analyze_track_piece`
-  unreachable from the app. Also reorder per-track analysis progress
-  (duration/artwork/waveform/bpm-key) to artwork, then waveform, then
-  duration, then bpm/key, matching the track row's left-to-right column
-  order; audio is still decoded only once per track.
-- Fix single-track analyze (clicking "Analyze"/"Reanalyze" on one track row)
-  having no memory check at all — unlike a multi-track batch, it has no
-  worker pool to size against available RAM, so clicking through many track
-  rows in a row could pile up concurrent analysis jobs with no memory
-  awareness and crash the app. It now checks for available memory headroom
-  before starting and fails that track with a clear message instead of
-  proceeding when memory is too tight.
+- Fix the play/pause transport button needing multiple clicks — sometimes to stop a playing track, sometimes to switch to a different track, sometimes silently doing nothing at all. Root cause was a single non-keyed "is a request in flight" latch: while one play/stop request was still resolving, the next click for a _different_ track was silently dropped instead of either queuing or superseding it. Play/stop now use a generation counter and a synchronous pending-intent so a new click always immediately reflects the user's latest intent, and a small backend-call queue guarantees whichever click was truly last is the one that wins. Also fixed: a global "click away from the playing row stops playback" listener that fired _before_ the clicked button's own play/stop logic on every track switch, effectively turning every switch into two competing backend commands instead of one; a dead-code fast path meant every single play — even a track already known locally — paid for an unnecessary database round-trip; and a stale "still playing" snapshot from a backend status-poll thread could arrive after an explicit stop and silently revive the "playing" state.
+- Remove the backend's 250ms playback-status poll thread entirely. It existed to detect a track finishing on its own and to push waveform progress updates, but pushed events over the same channel as direct play/stop replies with no ordering guarantee between the two — the source of the stale-snapshot bug above. Natural end-of-track detection now happens inside the same serialized thread that already handles explicit play/stop commands (via a conditional receive timeout), so it can't race them by construction; the frontend now computes the waveform playhead position itself from a wall-clock timer instead of depending on a stream of pushed progress ticks.
+- Fix seeking/scrubbing to a point in a track being slow — sometimes slow enough to hit a 5-second internal timeout and fail outright — because the backend's fallback seek implementation decoded and discarded every sample from the start of the track up to the target position rather than actually seeking. Playback now decodes and seeks through a small custom audio source built directly on the same `symphonia` decoding library already bundled for format support, replacing reliance on the `rodio` crate's own decoder (whose seek implementation couldn't report a stream length to the FLAC/MP3 seek logic, silently forcing the slow fallback for compressed formats). Seeking to any point in an MP3, FLAC, WAV, AAC/M4A, MP4, or Opus/OGG file is now effectively instant regardless of file length or seek position. `rodio` is still used for actual audio output (device I/O, buffering, mixing) — only its decoding path was replaced.
+- Fix playback errors/warnings (e.g. a failed play or an unsupported file) only ever flashing briefly in the status bar with no way to review them afterward. Any status update tagged as a warning or error now also persists to the Event Log, the same as backend-reported issues already did.
+- Replace native browser `title=""` tooltips throughout the app with a custom tooltip that appears in ~150ms instead of the browser's native ~1s hover delay. This was most noticeable on the source-folder chips: the full path was already exposed on hover (visually truncated with an ellipsis), but the slow native delay made it read as "the feature is missing." Format badges in the library table now also show sample-rate/bit-depth (or bitrate) detail on hover for every track, not just ones with a compatibility warning.
+- Remove the `analyze_track_piece` backend command. It was a per-piece (duration/artwork/waveform/bpm-key) analysis endpoint left over from an older frontend dispatch loop; that loop was already deleted in favor of the single `analyze_new_tracks` batch call, leaving `analyze_track_piece` unreachable from the app. Also reorder per-track analysis progress (duration/artwork/waveform/bpm-key) to artwork, then waveform, then duration, then bpm/key, matching the track row's left-to-right column order; audio is still decoded only once per track.
+- Fix single-track analyze (clicking "Analyze"/"Reanalyze" on one track row) having no memory check at all — unlike a multi-track batch, it has no worker pool to size against available RAM, so clicking through many track rows in a row could pile up concurrent analysis jobs with no memory awareness and crash the app. It now checks for available memory headroom before starting and fails that track with a clear message instead of proceeding when memory is too tight.
 
 ## 0.1.7
 
 **Severity:** critical
 
-- Fix the memory-aware analysis worker cap (0.1.5/0.1.6) not applying to the
-  most common analysis trigger. Clicking "Scan Library" ran its automatic
-  post-scan analysis through a second, separate concurrency mechanism — a
-  frontend-driven per-track dispatch loop sized only by CPU core count, with
-  no awareness of available memory or `DJTKIT_ANALYSIS_MAX_WORKERS` — so the
-  memory cap never actually applied to it. All analysis (Scan Library,
-  Analyze Missing Tracks, manual reanalyze) now goes through the single
-  memory/CPU/env-capped backend pipeline; the separate uncapped mechanism has
-  been removed entirely, along with the now-unused `get_system_parallelism`
-  command and the `benchmark_analyze_tracks` dev tool.
-- Fix a custom BPM search range (set in Settings) being silently ignored by
-  any analysis that went through the batch backend path — it always used the
-  default 70-180 range regardless of the configured setting. Now that all
-  analysis is consolidated onto this path, this applied everywhere; the
-  batch command now honors the configured range.
-- Fix the batch analysis worker pool using every available CPU core on
-  high-core-count machines, starving the OS/UI thread and making the app
-  unresponsive during a scan. The worker pool now reserves ~2 cores for the
-  OS/UI, matching the budget the opt-in `essentia` engine's pool already
-  used — a regression from consolidating all analysis onto the single capped
-  pipeline above, which used a cap that bounded worker count by memory and
-  CPU count but never reserved this headroom.
-- Fix the library view (including scrolling) becoming unresponsive during a
-  large batch analysis, independent of CPU/worker count — even a single
-  worker triggered it. Live analysis progress was rebuilding the entire
-  source-folder chip row from scratch and rescanning the whole visible track
-  list on every single track completion; for a batch of hundreds of tracks
-  this pinned the JS main thread almost continuously. Source chips now only
-  refresh at natural batch checkpoints (they don't need to reflect
-  per-track state, only whether a folder is fully analyzed), and the running
-  duration total is updated with a fixed-cost increment per track instead of
-  a full rescan.
-- Fix batch analysis holding a single database write transaction open for
-  the entire batch, committing only once at the very end. SQLite allows only
-  one write transaction at a time even in WAL mode, so any other write
-  attempted while a batch was running (such as saving a settings change)
-  would wait up to 5 seconds and then fail, surfacing as "database is
-  locked" (shown generically as "an internal database error" in the Event
-  Log), and could make the whole app feel stuck until the batch finished.
-  The batch now commits after every individual track instead of only at the
-  end — any commit interval tied to a track _count_, even a small one, can
-  still hold the lock for an unbounded amount of wall-clock time if
-  individual tracks are slow to analyze, so track count isn't a reliable
-  basis for the interval; only "after every track" is actually independent
-  of hardware, worker count, and per-track duration.
-- Add Pause/Resume and Cancel controls to the analysis progress bar. Pausing
-  lets any tracks currently being analyzed finish, but holds off starting new
-  ones until resumed; cancelling does the same but permanently, ending the
-  batch early with a status noting how many tracks were analyzed before it
-  stopped. The progress bar's elapsed-time counter keeps ticking for
-  whichever track(s) were already in flight when Pause was pressed, and only
-  switches to "paused" once they actually finish and nothing new has
-  started; resuming picks the counter back up from where it left off
-  (excluding the paused duration) instead of restarting it.
+- Fix the memory-aware analysis worker cap (0.1.5/0.1.6) not applying to the most common analysis trigger. Clicking "Scan Library" ran its automatic post-scan analysis through a second, separate concurrency mechanism — a frontend-driven per-track dispatch loop sized only by CPU core count, with no awareness of available memory or `DJTKIT_ANALYSIS_MAX_WORKERS` — so the memory cap never actually applied to it. All analysis (Scan Library, Analyze Missing Tracks, manual reanalyze) now goes through the single memory/CPU/env-capped backend pipeline; the separate uncapped mechanism has been removed entirely, along with the now-unused `get_system_parallelism` command and the `benchmark_analyze_tracks` dev tool.
+- Fix a custom BPM search range (set in Settings) being silently ignored by any analysis that went through the batch backend path — it always used the default 70-180 range regardless of the configured setting. Now that all analysis is consolidated onto this path, this applied everywhere; the batch command now honors the configured range.
+- Fix the batch analysis worker pool using every available CPU core on high-core-count machines, starving the OS/UI thread and making the app unresponsive during a scan. The worker pool now reserves ~2 cores for the OS/UI, matching the budget the opt-in `essentia` engine's pool already used — a regression from consolidating all analysis onto the single capped pipeline above, which used a cap that bounded worker count by memory and CPU count but never reserved this headroom.
+- Fix the library view (including scrolling) becoming unresponsive during a large batch analysis, independent of CPU/worker count — even a single worker triggered it. Live analysis progress was rebuilding the entire source-folder chip row from scratch and rescanning the whole visible track list on every single track completion; for a batch of hundreds of tracks this pinned the JS main thread almost continuously. Source chips now only refresh at natural batch checkpoints (they don't need to reflect per-track state, only whether a folder is fully analyzed), and the running duration total is updated with a fixed-cost increment per track instead of a full rescan.
+- Fix batch analysis holding a single database write transaction open for the entire batch, committing only once at the very end. SQLite allows only one write transaction at a time even in WAL mode, so any other write attempted while a batch was running (such as saving a settings change) would wait up to 5 seconds and then fail, surfacing as "database is locked" (shown generically as "an internal database error" in the Event Log), and could make the whole app feel stuck until the batch finished. The batch now commits after every individual track instead of only at the end — any commit interval tied to a track _count_, even a small one, can still hold the lock for an unbounded amount of wall-clock time if individual tracks are slow to analyze, so track count isn't a reliable basis for the interval; only "after every track" is actually independent of hardware, worker count, and per-track duration.
+- Add Pause/Resume and Cancel controls to the analysis progress bar. Pausing lets any tracks currently being analyzed finish, but holds off starting new ones until resumed; cancelling does the same but permanently, ending the batch early with a status noting how many tracks were analyzed before it stopped. The progress bar's elapsed-time counter keeps ticking for whichever track(s) were already in flight when Pause was pressed, and only switches to "paused" once they actually finish and nothing new has started; resuming picks the counter back up from where it left off (excluding the paused duration) instead of restarting it.
 
 ## 0.1.6
 
 **Severity:** critical
 
-- Fix analysis still crashing/hanging on lower-RAM, high-core-count machines
-  after 0.1.5's memory-aware worker cap. That fix's per-worker memory budget
-  for the `stratum` engine was based on a fixed decode-buffer estimate and
-  didn't account for `stratum-dsp`'s own internal analysis buffers; measured
-  under realistic concurrent load, actual usage was several times higher, so
-  the cap rarely bound tighter than CPU count on affected machines. The
-  budget is now based on real measurement and worker count is capped
-  accordingly, while high-RAM machines see no change in behavior.
-- Fix the opt-in `essentia` engine failing to start from the AppImage build
-  with an `OPENSSL_3.x not found` error. The AppImage's own bundled
-  `libcrypto.so.3` (needed by our Rust dependencies) was shadowing the
-  system's newer OpenSSL via `LD_LIBRARY_PATH` when we shelled out to the
-  system's Node runtime, which is linked against the newer version. The
-  AppImage's own library path is no longer passed through to spawned Node
-  processes.
-- Fix `DJTKIT_ANALYSIS_DEBUG_WORKERS=1` diagnostic output only reaching the
-  in-app Event Log; it now also prints to the terminal.
-- Fix source folder chips not turning green after analysis finishes on
-  large libraries — they only updated when toggling a folder's filter
-  checkbox, and could stay stale on app start. Folder analysis status is
-  now refreshed from the backend on startup and whenever an analysis job
-  completes.
-- When a status message reports warnings or errors (USB scans/exports,
-  library scans/analysis), that part of the status line is now a link
-  that jumps straight to the Event Log instead of being inert text.
-- Fix the "Get Node.js" link in the Essentia setup panel not going
-  anywhere — it pointed at a placeholder `#` href instead of the
-  download page.
+- Fix analysis still crashing/hanging on lower-RAM, high-core-count machines after 0.1.5's memory-aware worker cap. That fix's per-worker memory budget for the `stratum` engine was based on a fixed decode-buffer estimate and didn't account for `stratum-dsp`'s own internal analysis buffers; measured under realistic concurrent load, actual usage was several times higher, so the cap rarely bound tighter than CPU count on affected machines. The budget is now based on real measurement and worker count is capped accordingly, while high-RAM machines see no change in behavior.
+- Fix the opt-in `essentia` engine failing to start from the AppImage build with an `OPENSSL_3.x not found` error. The AppImage's own bundled `libcrypto.so.3` (needed by our Rust dependencies) was shadowing the system's newer OpenSSL via `LD_LIBRARY_PATH` when we shelled out to the system's Node runtime, which is linked against the newer version. The AppImage's own library path is no longer passed through to spawned Node processes.
+- Fix `DJTKIT_ANALYSIS_DEBUG_WORKERS=1` diagnostic output only reaching the in-app Event Log; it now also prints to the terminal.
+- Fix source folder chips not turning green after analysis finishes on large libraries — they only updated when toggling a folder's filter checkbox, and could stay stale on app start. Folder analysis status is now refreshed from the backend on startup and whenever an analysis job completes.
+- When a status message reports warnings or errors (USB scans/exports, library scans/analysis), that part of the status line is now a link that jumps straight to the Event Log instead of being inert text.
+- Fix the "Get Node.js" link in the Essentia setup panel not going anywhere — it pointed at a placeholder `#` href instead of the download page.
 
 ## 0.1.5
 
 **Severity:** critical
 
-- Fix analysis crashing on lower-RAM, high-core-count machines (reported on
-  a 12-thread/16GB AppImage install). The analysis worker pool
-  previously sized itself from CPU core count alone; it now also caps
-  worker count based on available system memory, using a conservative
-  per-worker budget (higher for the opt-in `essentia` engine, which runs an
-  extra Node.js/WASM process per worker) so a busy or memory-constrained
-  host no longer overcommits RAM during batch analysis.
-- Add drag-and-drop reordering for USB playlists. Grab the handle on a
-  playlist row in the USB Playlists panel to reorder it; the new order is
-  written back to the USB's PDB and eDB, so it's reflected on CDJs and in
-  rekordbox, not just in the app.
-- Remove a dead `master.db` autodetection candidate path under
-  `~/.local/share/Pioneer/rekordbox/master.db`. rekordbox has no official
-  Linux install, so this path could never match a real installation.
+- Fix analysis crashing on lower-RAM, high-core-count machines (reported on a 12-thread/16GB AppImage install). The analysis worker pool previously sized itself from CPU core count alone; it now also caps worker count based on available system memory, using a conservative per-worker budget (higher for the opt-in `essentia` engine, which runs an extra Node.js/WASM process per worker) so a busy or memory-constrained host no longer overcommits RAM during batch analysis.
+- Add drag-and-drop reordering for USB playlists. Grab the handle on a playlist row in the USB Playlists panel to reorder it; the new order is written back to the USB's PDB and eDB, so it's reflected on CDJs and in rekordbox, not just in the app.
+- Remove a dead `master.db` autodetection candidate path under `~/.local/share/Pioneer/rekordbox/master.db`. rekordbox has no official Linux install, so this path could never match a real installation.
 
 ## 0.1.4
 
-- Missing library source folders are now surfaced as recoverable UI state
-  instead of being treated as deleted media during scan. Missing source chips
-  render as warning chips, scan pruning ignores missing roots, and affected
-  exports are blocked until the source is relocated or explicitly removed.
-- Add source-root relocation for moved music folders. Relocation rewrites
-  indexed track paths to the new folder while preserving track IDs and local
-  playlist membership.
-- Fix "Duplicate PDB entries" diagnostics failures that the offered strict
-  parity repair could not actually resolve. Some playlists on
-  long-lived, heavily-edited USBs had accumulated stale duplicate copies of
-  a track's playlist membership in the device-side database; running the
-  repair reported success without removing them. The repair now finds and
-  removes the stale duplicates so affected playlists pass diagnostics.
-- Fix strict parity reporting for playlist sort-order drift. eDB playlist
-  sequence numbers that no longer match the device-facing PDB playlist order
-  are now reported as ordering parity failures and routed through strict
-  repair, which syncs eDB order back from PDB.
-- Clicking a track row in a USB playlist or history list to load its
-  waveform/BPM/key no longer rebuilds and repaints the entire visible track
-  list — only the clicked row updates now, matching how the library view
-  already behaves.
+- Missing library source folders are now surfaced as recoverable UI state instead of being treated as deleted media during scan. Missing source chips render as warning chips, scan pruning ignores missing roots, and affected exports are blocked until the source is relocated or explicitly removed.
+- Add source-root relocation for moved music folders. Relocation rewrites indexed track paths to the new folder while preserving track IDs and local playlist membership.
+- Fix "Duplicate PDB entries" diagnostics failures that the offered strict parity repair could not actually resolve. Some playlists on long-lived, heavily-edited USBs had accumulated stale duplicate copies of a track's playlist membership in the device-side database; running the repair reported success without removing them. The repair now finds and removes the stale duplicates so affected playlists pass diagnostics.
+- Fix strict parity reporting for playlist sort-order drift. eDB playlist sequence numbers that no longer match the device-facing PDB playlist order are now reported as ordering parity failures and routed through strict repair, which syncs eDB order back from PDB.
+- Clicking a track row in a USB playlist or history list to load its waveform/BPM/key no longer rebuilds and repaints the entire visible track list — only the clicked row updates now, matching how the library view already behaves.
 
 ## 0.1.3
 
-- Fix USB export becoming permanently blocked with a "PDB export blocked"
-  error once a USB's playlist list had grown large enough to need extra
-  internal storage space for a new playlist — affected any USB that had
-  accumulated enough playlists over time, making it impossible to export any
-  further new playlist to it.
-- Fix USB diagnostics permanently reporting one unfixable "history page
-  shape" issue on USBs with a single-entry history-menu page; repair now
-  correctly recognizes it as already valid.
-- Internal: clean up clippy lint warnings and apply `cargo fmt` across the
-  backend and desktop crates (no functional changes).
-- Detect WAV files using the `WAVE_FORMAT_EXTENSIBLE` header, which some
-  Pioneer CDJs reject even when the underlying audio is otherwise within
-  spec. Flagged during library scan with a format-badge tooltip; when the
-  extensible header wraps plain PCM/IEEE-float data, export automatically
-  rewrites it to a standard header (lossless, no re-encoding) so the file
-  plays on CDJ hardware.
+- Fix USB export becoming permanently blocked with a "PDB export blocked" error once a USB's playlist list had grown large enough to need extra internal storage space for a new playlist — affected any USB that had accumulated enough playlists over time, making it impossible to export any further new playlist to it.
+- Fix USB diagnostics permanently reporting one unfixable "history page shape" issue on USBs with a single-entry history-menu page; repair now correctly recognizes it as already valid.
+- Internal: clean up clippy lint warnings and apply `cargo fmt` across the backend and desktop crates (no functional changes).
+- Detect WAV files using the `WAVE_FORMAT_EXTENSIBLE` header, which some Pioneer CDJs reject even when the underlying audio is otherwise within spec. Flagged during library scan with a format-badge tooltip; when the extensible header wraps plain PCM/IEEE-float data, export automatically rewrites it to a standard header (lossless, no re-encoding) so the file plays on CDJ hardware.
 
 ## 0.1.2
 
-- Fix CDJ hardware hangs on pathological Unicode metadata (long
-  combining-mark "zalgo" stacks and names mixing many unrelated Unicode
-  scripts) in exported titles, artist, and album names, and in on-disk
-  export file/folder names. Thanks to 00000ooooo's album "–5"
-  (https://00000ooooo.bandcamp.com/album/--5) for the real-world torture
-  test.
+- Fix CDJ hardware hangs on pathological Unicode metadata (long combining-mark "zalgo" stacks and names mixing many unrelated Unicode scripts) in exported titles, artist, and album names, and in on-disk export file/folder names. Thanks to 00000ooooo's album "–5" (https://00000ooooo.bandcamp.com/album/--5) for the real-world torture test.
 - Fix a MIPS unaligned-read hardware freeze for non-ASCII album names.
 
-Note: while testing against that album, rekordbox threw an
-"unexpected error" and broke playlists on export of the same USB.
+Note: while testing against that album, rekordbox threw an "unexpected error" and broke playlists on export of the same USB.
 
 ## 0.1.1
 
-- Fix macOS master.db detection for current rekordbox installs, which store
-  the database directly under `~/Library/Pioneer/rekordbox/master.db` rather
-  than under `Application Support`.
+- Fix macOS master.db detection for current rekordbox installs, which store the database directly under `~/Library/Pioneer/rekordbox/master.db` rather than under `Application Support`.
 
 ## 0.1.0
 
 - Initial public release.
-- Local-first library scanning, playlist management, native playback, and
-  frontend source-folder workflows.
+- Local-first library scanning, playlist management, native playback, and frontend source-folder workflows.
 - USB import/export with mirror and additive playlist sync modes.
-- USB diagnostics, strict parity reporting, preview-first repair actions, and
-  timestamped database backups before write operations.
+- USB diagnostics, strict parity reporting, preview-first repair actions, and timestamped database backups before write operations.
 - Local BPM, key, waveform, and artwork analysis for export preparation.
 - Release packaging workflow for Tauri desktop builds.

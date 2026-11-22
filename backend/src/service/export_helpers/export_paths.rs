@@ -171,7 +171,15 @@ fn limit_contents_file_name_plain(file_name: &str, max_len: usize) -> String {
     }
 }
 
-pub fn copy_if_different(source: &Path, target: &Path, closer: &FileCloser) -> BackendResult<()> {
+/// Copies `source` to `target` unless a file of the same size is already
+/// there, passing each copied chunk's size to `on_bytes` (the export's copy
+/// speed).
+pub fn copy_if_different(
+    source: &Path,
+    target: &Path,
+    closer: &FileCloser,
+    on_bytes: &mut dyn FnMut(u64),
+) -> BackendResult<()> {
     if let Some(parent) = target.parent() {
         std::fs::create_dir_all(parent)?;
     }
@@ -183,7 +191,7 @@ pub fn copy_if_different(source: &Path, target: &Path, closer: &FileCloser) -> B
     if should_copy {
         let mut src = std::fs::File::open(source)?;
         let mut dst = std::fs::File::create(target)?;
-        std::io::copy(&mut src, &mut dst)?;
+        crate::progress::copy_counting(&mut src, &mut dst, on_bytes)?;
         closer.close(dst);
     }
     Ok(())
@@ -196,19 +204,21 @@ pub fn copy_if_different(source: &Path, target: &Path, closer: &FileCloser) -> B
 /// never re-encoded. Falls back to a plain `copy_if_different` for anything
 /// that isn't a safely-convertible extensible WAV (unreadable header, or an
 /// extensible subformat other than PCM/float, which stays a hard warning).
+/// `on_bytes` as in `copy_if_different`.
 pub fn copy_wav_normalized_if_needed(
     source: &Path,
     target: &Path,
     closer: &FileCloser,
+    on_bytes: &mut dyn FnMut(u64),
 ) -> BackendResult<()> {
     let info = match crate::wav_format::parse_wav_fmt(source)? {
         Some(info) => info,
-        None => return copy_if_different(source, target, closer),
+        None => return copy_if_different(source, target, closer, on_bytes),
     };
     if !crate::wav_format::classify(&info)
         .is_some_and(crate::wav_format::WavFormatIssue::is_export_autofixable)
     {
-        return copy_if_different(source, target, closer);
+        return copy_if_different(source, target, closer, on_bytes);
     }
 
     if let Some(parent) = target.parent() {
@@ -230,6 +240,7 @@ pub fn copy_wav_normalized_if_needed(
         closer.close(crate::wav_format::rewrite_extensible_to_pcm(
             source, target,
         )?);
+        on_bytes(expected_len);
     }
     Ok(())
 }

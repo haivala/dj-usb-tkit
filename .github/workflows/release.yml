@@ -209,7 +209,7 @@ jobs:
             .docker-cache/cargo-registry
             .docker-cache/cargo-git
             .docker-cache/npm
-          key: linux-docker-build-${{ hashFiles('Cargo.lock', 'vanilla-ui/package-lock.json', 'desktop/package-lock.json') }}
+          key: linux-docker-build-${{ hashFiles('rust-toolchain.toml', 'Cargo.toml', 'Cargo.lock', 'vanilla-ui/package-lock.json', 'desktop/package-lock.json') }}
           restore-keys: |
             linux-docker-build-
 

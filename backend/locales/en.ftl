@@ -1163,6 +1163,7 @@ progress-detail-count = { $done }/{ $total }
 progress-detail-count-speed = { $done }/{ $total } · { $speed } MB/s
 # $index, $count: which playlist of several being exported.
 progress-detail-count-playlist = { $done }/{ $total } · playlist { $index }/{ $count }
+progress-detail-count-playlist-speed = { $done }/{ $total } · playlist { $index }/{ $count } · { $speed } MB/s
 # $done, $total: megabytes copied and the file's size, e.g. "1.2" and "1.9".
 progress-detail-bytes = { $done }/{ $total } MB
 progress-detail-bytes-speed = { $done }/{ $total } MB · { $speed } MB/s
