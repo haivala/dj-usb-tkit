@@ -5061,6 +5061,7 @@ fn repair_add_missing_mp3_seek_data_fills_an_empty_pvbr_once() {
     assert_fix_proposed(&backend, &usb, "add_missing_mp3_seek_data");
     // The stick has no FLAC, so the FLAC fix has nothing to offer.
     assert_fix_not_proposed(&backend, &usb, "add_missing_flac_seek_data");
+
     let mut progress = Vec::new();
     let repair = backend.repair_usb_diagnostics_with_progress(
         RepairUsbDiagnosticsRequest {
@@ -5077,6 +5078,15 @@ fn repair_add_missing_mp3_seek_data_fills_an_empty_pvbr_once() {
         94,
         "USB: Applying Add Missing MP3 Seek Data (1/1)".to_string()
     )));
+    // The apply reads the audio: the progress names the file being read.
+    let file_name = track_path.rsplit('/').next().expect("file name");
+    assert!(
+        progress.contains(&(
+            70,
+            format!("USB: Applying Add Missing MP3 Seek Data 1/1 — {file_name}")
+        )),
+        "{progress:#?}"
+    );
     let data = repair.data.expect("repair data");
     assert!(
         data.data
@@ -6127,32 +6137,72 @@ fn export_never_overwrites_another_tracks_analysis_file() {
 }
 
 #[test]
-fn repair_lists_mp3_whose_seek_data_cant_be_built_instead_of_proposing_it() {
+fn repair_lists_mp3_whose_seek_data_cant_be_built_once_the_apply_skipped_it() {
     let (_root, backend, usb, _playlist) = setup_clean_strict_parity_fixture();
     use_real_usb_bundles(&usb);
     // A large zero-filled region in the middle of the audio: the seek index
-    // can't be built, so the fix would skip the file on every pass.
+    // can't be built, so the fix skips the file.
     let audio = find_contents_audio_file(&usb);
     let bytes = fs::read(&audio).expect("read audio");
     let middle = bytes.len() / 2;
     let corrupted = [&bytes[..middle], &vec![0u8; 128 * 1024], &bytes[middle..]].concat();
     fs::write(&audio, corrupted).expect("corrupt audio");
+    let request = |apply: bool| RepairUsbDiagnosticsRequest {
+        fix_names: Default::default(),
+        usb_root: Some(usb.to_string_lossy().to_string()),
+        apply,
+        selected_fix_ids: if apply {
+            vec!["add_missing_mp3_seek_data".to_string()]
+        } else {
+            vec![]
+        },
+    };
+    let seek_fix_proposed = |data: &backend::models::RepairUsbDiagnosticsData| {
+        data.proposed_fixes
+            .iter()
+            .any(|f| f.id == "add_missing_mp3_seek_data")
+    };
 
+    // The preview reads no audio: every bundle without seek data is offered.
     let preview = backend
-        .repair_usb_diagnostics(RepairUsbDiagnosticsRequest {
-            fix_names: Default::default(),
-            usb_root: Some(usb.to_string_lossy().to_string()),
-            apply: false,
-            selected_fix_ids: vec![],
-        })
+        .repair_usb_diagnostics(request(false))
         .data
         .expect("preview data");
     assert!(
-        !preview
+        seek_fix_proposed(&preview.data),
+        "{:#?}",
+        preview.data.proposed_fixes
+    );
+
+    // The apply's full read finds the damage and skips the file.
+    let applied = backend
+        .repair_usb_diagnostics(request(true))
+        .data
+        .expect("apply data");
+    assert!(
+        applied
             .data
-            .proposed_fixes
+            .applied_fixes
             .iter()
-            .any(|f| f.id == "add_missing_mp3_seek_data"),
+            .any(|fix| fix == "Add Missing MP3 Seek Data: fixed 0, skipped 1"),
+        "{:#?}",
+        applied.data.applied_fixes
+    );
+    assert!(
+        applied
+            .data
+            .warnings
+            .iter()
+            .any(|warning| warning.code == "usb.repair.seek-data.skipped")
+    );
+
+    // Remembered: the next preview lists it instead of offering the fix again.
+    let preview = backend
+        .repair_usb_diagnostics(request(false))
+        .data
+        .expect("preview data");
+    assert!(
+        !seek_fix_proposed(&preview.data),
         "{:#?}",
         preview.data.proposed_fixes
     );
@@ -6173,30 +6223,16 @@ fn repair_lists_mp3_whose_seek_data_cant_be_built_instead_of_proposing_it() {
         "the Event Log names the file and why"
     );
 
-    // An explicit apply does not repeat preview's expensive audio scan, but
-    // still validates the selected fix and reports this damaged file safely.
-    let applied = backend
-        .repair_usb_diagnostics(RepairUsbDiagnosticsRequest {
-            fix_names: Default::default(),
-            usb_root: Some(usb.to_string_lossy().to_string()),
-            apply: true,
-            selected_fix_ids: vec!["add_missing_mp3_seek_data".to_string()],
-        })
+    // A replaced file is tried again.
+    fs::write(&audio, &bytes).expect("restore audio");
+    let preview = backend
+        .repair_usb_diagnostics(request(false))
         .data
-        .expect("apply data");
+        .expect("preview data");
     assert!(
-        applied
-            .data
-            .applied_fixes
-            .iter()
-            .any(|fix| fix == "Add Missing MP3 Seek Data: fixed 0, skipped 1")
-    );
-    assert!(
-        applied
-            .data
-            .warnings
-            .iter()
-            .any(|warning| warning.code == "usb.repair.seek-data.skipped")
+        seek_fix_proposed(&preview.data),
+        "{:#?}",
+        preview.data.proposed_fixes
     );
 }
 

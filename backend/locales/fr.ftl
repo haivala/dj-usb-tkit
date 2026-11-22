@@ -908,12 +908,13 @@ repair-progress-preview-ready = USB : aperçu de la réparation prêt
 repair-progress-applying = USB : application de { $fix }
 repair-progress-applying-items = USB : application de { $fix } ({ $done }/{ $total })
 repair-progress-finished = USB : { $fix } terminé
+repair-progress-applying-file = USB : application de { $fix } { $done }/{ $total } — { $file }
+repair-progress-applying-file-speed = USB : application de { $fix } { $done }/{ $total }, { $speed } Mo/s — { $file }
 
 repair-warning-bpm-key-mismatch = Écart de BPM/tonalité : { $path } ({ $values })
 repair-warning-shared-analysis = fichier d'analyse partagé : { $path } utilisé par { $tracks } ; gardé par { $owner }
 repair-warning-shared-analysis-no-owner = fichier d'analyse partagé : { $path } utilisé par { $tracks } ; gardé par aucun morceau (chacun reçoit le sien)
 repair-warning-analysis-without-track-path = fichier d'analyse sans chemin de morceau : { $path } ({ $track })
-repair-warning-seek-data-unfixable = les données de recherche { $format } ne peuvent pas être ajoutées ({ $reason }) : { $path }
 repair-warning-seek-data-unfixable-replace = les données de recherche { $format } ne peuvent pas être ajoutées ({ $reason } ; remplacez-le par une copie intacte) : { $path }
 repair-warning-seek-data-unfixable-report = les données de recherche { $format } ne peuvent pas être ajoutées ({ $reason } ; merci de signaler ce fichier (les détails du format, pas l'audio) pour que ses données de recherche puissent être prises en charge) : { $path }
 repair-warning-missing-audio-scan-skipped = recherche d'audio manquant ignorée : le dossier Contents est absent ou vide (copie des bases seules)

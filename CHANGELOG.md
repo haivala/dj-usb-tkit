@@ -41,17 +41,23 @@
 
 **Severity:** critical — see item(s) marked **(CRITICAL)** below.
 
-- **Fix:** The rekordbox and Mixxx chips turn green once every track imported from them is analyzed, as
-  folder chips do.
-- **Fix:** A source folder added through a symlink, inside a source folder added by another path, no longer
-  lists its tracks twice. It takes the outer folder's path, and libraries that already have the doubled tracks
-  are merged back to one track per file, keeping the analyzed one.
-- **Fix:** Analyze Library works with only rekordbox or Mixxx switched on, instead of asking to switch on a
-  source folder.
-- **Fix:** Analyze Library also analyzes rekordbox tracks that are missing a waveform, BPM or length. The BPM,
-  key and beat grid that came from rekordbox are kept.
+- **Improvement:** Every change the app writes to a USB (exports, repairs, track and cue edits, playlist order and
+  removal, the Player Menu) is checked before it reaches the stick. If the new PDB would have anything rekordbox
+  or the players can't read that it didn't have before, nothing is written, the USB keeps both databases as they
+  were, and the Event Log names the problem.
+- **Improvement:** The repair that adds music files in no playlist asks for the playlist's name instead of always
+  using "Unindexed". It starts as "Unindexed", so leaving it adds to that playlist as before.
+- **Improvement:** Track analysis is faster, most of all for MP3s. The results are the same as before.
+- **Improvement:** Preview Fixes no longer reads every MP3 and FLAC that lacks seek data, which took minutes on a
+  USB stick. It offers the fix from the analysis files alone, and the fix reads each music file once, showing the
+  file being read, how many are left and the read speed. A file the fix had to skip is listed as unsupported in
+  later previews instead of being offered again.
 - **Fix (CRITICAL):** Repairing a USB that rekordbox exported to no longer rewrites rekordbox's own page bookkeeping in
   the PDB. On such a USB, rekordbox 6 crashed on its next export or lost its playlists.
+- **Fix (CRITICAL):** Exports and repairs no longer refuse to write to a USB that rekordbox has just exported to. They
+  checked rekordbox's pages for the app's own page shape; they now refuse only problems the write itself adds.
+- **Fix (CRITICAL):** A Player Menu change leaves the PDB's menu pages in the shape rekordbox writes. Before, their page
+  bookkeeping was one rekordbox 6 can crash on. Repair puts right the menu pages earlier versions left that way.
 - **Fix:** Repair puts right USBs an earlier repair left that way, and pages rekordbox left half-written when it
   crashed during an export.
 - **Fix:** Exports that add to a USB rekordbox wrote keep the PDB's pages the way rekordbox expects them.
@@ -61,32 +67,30 @@
 - **Fix:** Syncing the eDB's play history from the PDB points each entry at the eDB's own track. It used the
   PDB's track numbers, which rekordbox assigns separately, so history could name the wrong tracks.
 - **Fix:** ISRC codes rekordbox wrote to the PDB are read correctly, so a repair no longer rewrites those tracks.
-- **Fix:** Artists, albums and tracks the export adds to the eDB leave empty fields blank, as rekordbox does,
-  instead of filling them with 0 or an empty text: an album's artwork and search name, an artist's search name,
-  and a track's search title, original artist, remixer, composer and label. Rows earlier versions wrote stay as
-  they are.
-- **Fix:** Re-exporting a track that is already on the USB no longer turns on its KUVO delivery flag in the eDB.
-- **Improvement:** The repair that adds music files in no playlist asks for the playlist's name instead of always
-  using "Unindexed". It starts as "Unindexed", so leaving it adds to that playlist as before.
-- **Fix:** Tracks that repair adds get the day they were added as their date in the eDB, as in the PDB. rekordbox
-  never leaves that date empty; the repair did.
-- **Fix (CRITICAL):** Exports and repairs no longer refuse to write to a USB that rekordbox has just exported to. They
-  checked rekordbox's pages for the app's own page shape; they now refuse only problems the write itself adds.
-- **Fix (CRITICAL):** A Player Menu change leaves the PDB's menu pages in the shape rekordbox writes. Before, their page
-  bookkeeping was one rekordbox 6 can crash on. Repair puts right the menu pages earlier versions left that way.
 - **Fix:** A playlist rekordbox numbers differently in the PDB and the eDB no longer fails parity. Parity compares
   the order the players show the playlists in, not the numbers, so Preview Fixes no longer offers a repair that
   changes nothing after every rekordbox export.
 - **Fix:** Tracks rekordbox exported no longer show up as differing in their date added, so Preview Fixes no
   longer offers to rewrite them. rekordbox keeps two dates in the PDB, the day a track joined its collection and
   the day it was added to the USB; a repair now compares and writes each the way rekordbox does.
-- **Improvement:** Every change the app writes to a USB (exports, repairs, track and cue edits, playlist order and
-  removal, the Player Menu) is checked before it reaches the stick. If the new PDB would have anything rekordbox
-  or the players can't read that it didn't have before, nothing is written, the USB keeps both databases as they
-  were, and the Event Log names the problem.
+- **Fix:** Artists, albums and tracks the export adds to the eDB leave empty fields blank, as rekordbox does,
+  instead of filling them with 0 or an empty text: an album's artwork and search name, an artist's search name,
+  and a track's search title, original artist, remixer, composer and label. Rows earlier versions wrote stay as
+  they are.
+- **Fix:** Re-exporting a track that is already on the USB no longer turns on its KUVO delivery flag in the eDB.
+- **Fix:** Tracks that repair adds get the day they were added as their date in the eDB, as in the PDB. rekordbox
+  never leaves that date empty; the repair did.
+- **Fix:** The rekordbox and Mixxx chips turn green once every track imported from them is analyzed, as
+  folder chips do.
+- **Fix:** A source folder added through a symlink, inside a source folder added by another path, no longer
+  lists its tracks twice. It takes the outer folder's path, and libraries that already have the doubled tracks
+  are merged back to one track per file, keeping the analyzed one.
+- **Fix:** Analyze Library works with only rekordbox or Mixxx switched on, instead of asking to switch on a
+  source folder.
+- **Fix:** Analyze Library also analyzes rekordbox tracks that are missing a waveform, BPM or length. The BPM,
+  key and beat grid that came from rekordbox are kept.
 - **Chore:** Tests run every kind of USB write, one after another, on a USB the app made and on one shaped the way
   rekordbox leaves it, and check that the PDB stays readable after each.
-- **Improvement:** Track analysis is faster, most of all for MP3s. The results are the same as before.
 
 ## 0.6.4
 

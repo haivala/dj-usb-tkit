@@ -1172,6 +1172,10 @@ repair-progress-applying = USB: Applying { $fix }
 # $done, $total: the fix's items (files, tracks) done and in all.
 repair-progress-applying-items = USB: Applying { $fix } ({ $done }/{ $total })
 repair-progress-finished = USB: Finished { $fix }
+# The fix reading each music file in full ($done, $total: files; $file: its name; $speed:
+# megabytes per second, e.g. "0.12").
+repair-progress-applying-file = USB: Applying { $fix } { $done }/{ $total } — { $file }
+repair-progress-applying-file-speed = USB: Applying { $fix } { $done }/{ $total }, { $speed } MB/s — { $file }
 
 # Event Log warnings from the repair preview, the details its rows link to. $path: a file on
 # the stick, here and below.
@@ -1184,7 +1188,6 @@ repair-warning-shared-analysis-no-owner = shared analysis file: { $path } used b
 # $track: the track file the analysis file belongs to.
 repair-warning-analysis-without-track-path = analysis file without track path: { $path } ({ $track })
 # $format: MP3 or FLAC. $reason: what in the audio file stops it (technical, not translated).
-repair-warning-seek-data-unfixable = { $format } seek data can't be added ({ $reason }): { $path }
 repair-warning-seek-data-unfixable-replace = { $format } seek data can't be added ({ $reason }; replace it with an intact copy): { $path }
 repair-warning-seek-data-unfixable-report = { $format } seek data can't be added ({ $reason }; please report this file (format details, not the audio) so its seek data can be supported): { $path }
 repair-warning-missing-audio-scan-skipped = missing-audio scan skipped: Contents directory is absent or empty (DB-only snapshot)

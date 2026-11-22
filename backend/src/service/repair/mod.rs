@@ -32,7 +32,7 @@ use super::anlz::{
     read_first_beat_from_anlz, upgrade_bundle_beat_grid, with_seek_index,
     write_generated_anlz_bundle,
 };
-use super::anlz_seek::{SeekIndexSkip, seek_index_for_audio};
+use super::anlz_seek::{SeekIndexSkip, seek_index_for_audio, seek_index_for_audio_reporting};
 use super::cues::collapse_anlz_cues;
 use super::export::APP_CONTENT_LINK_ID;
 use super::export_helpers::pdb_encoding::ARTIST_SHORT_ASCII_NAME_OFFSET;
@@ -47,6 +47,7 @@ use super::track_matching::{
     ContentFingerprint, content_fingerprint_key, matching_file_name, pdb_track_fingerprint,
     same_file_bytes,
 };
+use super::usb_display_files::SeekSkipMemory;
 use super::usb_staging::{self, EdbRw};
 use super::usb_utils::{
     canonicalize_playlist_name, resolve_usb_root, resolve_usb_side_path, sanitize_warning_path,

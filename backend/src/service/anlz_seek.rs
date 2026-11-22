@@ -57,6 +57,35 @@ pub(super) enum SeekIndexSkip {
 }
 
 impl SeekIndexSkip {
+    const ALL: [Self; 17] = [
+        Self::Unreadable,
+        Self::BadId3v2,
+        Self::NoAudioFrames,
+        Self::UnsupportedMpegVersion,
+        Self::LostSync,
+        Self::TruncatedFrame,
+        Self::MixedSampleRate,
+        Self::ApeOrLyrics3Tag,
+        Self::VbriHeader,
+        Self::UnknownEncoder,
+        Self::XingCountMismatch,
+        Self::NotFlac,
+        Self::BadStreamInfo,
+        Self::UnknownTotalSamples,
+        Self::FlacFrameSequence,
+        Self::TooLarge,
+        Self::CorruptedAudio,
+    ];
+
+    /// A stable name to store the reason by (`SeekSkipMemory`).
+    pub(super) fn code(self) -> String {
+        format!("{self:?}")
+    }
+
+    pub(super) fn from_code(code: &str) -> Option<Self> {
+        Self::ALL.into_iter().find(|skip| skip.code() == code)
+    }
+
     pub(super) fn describe(self) -> &'static str {
         match self {
             Self::Unreadable => "audio file could not be read",
@@ -89,7 +118,17 @@ impl SeekIndexSkip {
 /// The seek index for an MP3 or FLAC; `Ok(None)` for any other format,
 /// which keeps the empty `PVBR` and gets no `PVB2`.
 pub(super) fn seek_index_for_audio(path: &Path) -> Result<Option<SeekIndex>, SeekIndexSkip> {
-    let read = || std::fs::read(path).map_err(|_| SeekIndexSkip::Unreadable);
+    seek_index_for_audio_reporting(path, &mut |_| {})
+}
+
+/// [`seek_index_for_audio`], calling `on_read` with the byte count of each
+/// chunk read from the file: a slow USB stick can take minutes on one file,
+/// and the repair preview shows the read speed meanwhile.
+pub(super) fn seek_index_for_audio_reporting(
+    path: &Path,
+    on_read: &mut dyn FnMut(usize),
+) -> Result<Option<SeekIndex>, SeekIndexSkip> {
+    let mut read = || read_reporting(path, on_read).map_err(|_| SeekIndexSkip::Unreadable);
     match AudioFormat::of_path(path) {
         Some(AudioFormat::Mp3) => {
             parse_mp3_pvbr(&read()?).map(|payload| Some(SeekIndex::Pvbr(payload)))
@@ -98,6 +137,32 @@ pub(super) fn seek_index_for_audio(path: &Path) -> Result<Option<SeekIndex>, See
             parse_flac_pvb2(&read()?).map(|chunk| Some(SeekIndex::Pvb2(chunk)))
         }
         _ => Ok(None),
+    }
+}
+
+/// `std::fs::read`, in 1 MiB chunks reported to `on_read`.
+fn read_reporting(path: &Path, on_read: &mut dyn FnMut(usize)) -> std::io::Result<Vec<u8>> {
+    use std::io::Read as _;
+    const CHUNK: usize = 1 << 20;
+    let mut file = std::fs::File::open(path)?;
+    let size = file.metadata().map(|m| m.len() as usize).unwrap_or(0);
+    // Room for the final zero-length read's chunk too.
+    let mut bytes = Vec::with_capacity(size + CHUNK);
+    loop {
+        let start = bytes.len();
+        bytes.resize(start + CHUNK, 0);
+        match file.read(&mut bytes[start..]) {
+            Ok(0) => {
+                bytes.truncate(start);
+                return Ok(bytes);
+            }
+            Ok(n) => {
+                bytes.truncate(start + n);
+                on_read(n);
+            }
+            Err(err) if err.kind() == std::io::ErrorKind::Interrupted => bytes.truncate(start),
+            Err(err) => return Err(err),
+        }
     }
 }
 

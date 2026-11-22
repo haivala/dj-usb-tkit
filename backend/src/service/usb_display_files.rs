@@ -12,6 +12,9 @@
 //!    app data dir), keyed by device, the file's path on the stick and its
 //!    size + mtime -- a `stat` doesn't trigger a scan, opening the file does;
 //! 3. the stick itself, storing the result in that cache.
+//!
+//! The same cache file remembers which audio files the seek data repair had
+//! to skip (`SeekSkipMemory`).
 
 use std::collections::HashMap;
 use std::path::{Path, PathBuf};
@@ -21,6 +24,7 @@ use rusqlite::{Connection, OptionalExtension, params};
 use crate::logging;
 use crate::models::UsbTrack;
 
+use super::anlz_seek::SeekIndexSkip;
 use super::browse_path_matches_root;
 use super::usb_identity::{UsbAudioFormats, read_usb_audio_formats};
 use super::usb_utils::{
@@ -253,6 +257,12 @@ fn open_cache(path: &Path) -> rusqlite::Result<Connection> {
           data BLOB,
           PRIMARY KEY (device_key, kind, usb_path)
         );
+        CREATE TABLE IF NOT EXISTS seek_data_skips (
+          usb_path TEXT NOT NULL,
+          sig TEXT NOT NULL,
+          reason TEXT NOT NULL,
+          PRIMARY KEY (usb_path, sig)
+        );
         "#,
     )?;
     Ok(conn)
@@ -289,6 +299,69 @@ fn store_read(
         params![cache.device_key, kind.as_str(), usb_path, sig, data],
     )?;
     Ok(())
+}
+
+/// Audio files the seek data repair had to skip (`SeekIndexSkip`), kept in
+/// the same cache file. The repair preview reads no audio, so without this a
+/// file skipped once would be offered again on every preview. Keyed by the
+/// path on the stick and the file's size + mtime: a replaced file is tried
+/// again. Without a usable cache file nothing is remembered.
+pub(crate) struct SeekSkipMemory {
+    conn: Option<Connection>,
+    usb_root: PathBuf,
+}
+
+impl SeekSkipMemory {
+    pub(crate) fn open(data_dir: &Path, usb_root: &Path) -> Self {
+        let conn = open_cache(&data_dir.join(CACHE_FILE_NAME))
+            .map_err(|err| {
+                logging::debug(
+                    "usb-repair",
+                    format!("USB read cache unavailable, seek data skips not remembered: {err}"),
+                );
+            })
+            .ok();
+        Self {
+            conn,
+            usb_root: usb_root.to_path_buf(),
+        }
+    }
+
+    /// Why the repair skipped `audio`, if it did and the file hasn't changed.
+    pub(super) fn get(&self, audio: &Path) -> Option<SeekIndexSkip> {
+        let conn = self.conn.as_ref()?;
+        let sig = file_signature(audio)?;
+        conn.query_row(
+            "SELECT reason FROM seek_data_skips WHERE usb_path = ?1 AND sig = ?2",
+            params![self.stick_path(audio), sig],
+            |row| row.get::<_, String>(0),
+        )
+        .optional()
+        .ok()
+        .flatten()
+        .and_then(|code| SeekIndexSkip::from_code(&code))
+    }
+
+    pub(super) fn remember(&self, audio: &Path, skip: SeekIndexSkip) {
+        let (Some(conn), Some(sig)) = (self.conn.as_ref(), file_signature(audio)) else {
+            return;
+        };
+        let usb_path = self.stick_path(audio);
+        if let Err(err) = conn.execute(
+            "INSERT OR REPLACE INTO seek_data_skips (usb_path, sig, reason) VALUES (?1, ?2, ?3)",
+            params![usb_path, sig, skip.code()],
+        ) {
+            logging::debug(
+                "usb-repair",
+                format!("Couldn't remember the seek data skip of {usb_path}: {err}"),
+            );
+        }
+    }
+
+    fn stick_path(&self, path: &Path) -> String {
+        let relative = path.strip_prefix(&self.usb_root).unwrap_or(path);
+        relative.to_string_lossy().replace('\\', "/")
+    }
 }
 
 fn file_signature(path: &Path) -> Option<String> {

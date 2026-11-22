@@ -225,6 +225,31 @@ impl<'a> ApplyProgress<'a> {
         );
     }
 
+    /// An item whose file is being read: its name and the read speed.
+    fn item_reading(&mut self, done: usize, total: usize, file: &str, mb_per_s: Option<f64>) {
+        if total == 0 {
+            return;
+        }
+        let done = done.min(total);
+        let percent = self.start + (self.end - self.start) * done / total;
+        let current = (done + 1).min(total);
+        let message = match mb_per_s {
+            Some(speed) => tr::repair_progress_applying_file_speed(
+                &self.title,
+                current,
+                total,
+                file,
+                if speed < 1.0 {
+                    format!("{speed:.2}")
+                } else {
+                    format!("{speed:.1}")
+                },
+            ),
+            None => tr::repair_progress_applying_file(&self.title, current, total, file),
+        };
+        (self.emit)(percent, 100, &message.render());
+    }
+
     fn finish(&mut self) {
         (self.emit)(
             self.end,
@@ -939,6 +964,11 @@ impl BackendService {
                 )
             });
         }
+        // Only the analysis files are read here: the fix is offered for every
+        // bundle without seek data, and the audio is parsed once, by the
+        // apply. A file the apply had to skip is remembered (`SeekSkipMemory`)
+        // and listed as unsupported instead of offered again.
+        let seek_skips = SeekSkipMemory::open(&self.db.data_dir(), &usb_root);
         let missing_seek_data: Vec<(SeekFormat, Vec<MissingSeekData>)> =
             [SeekFormat::Mp3, SeekFormat::Flac]
                 .into_iter()
@@ -947,18 +977,8 @@ impl BackendService {
                         .as_ref()
                         .map(|parsed| detect_missing_seek_data(&usb_root, parsed, format))
                         .unwrap_or_default();
-                    // Preview checks whether each seek index can be built so it
-                    // only offers fixable files. An explicit apply selection
-                    // checks the audio again in apply_missing_seek_data_repair;
-                    // parsing every MP3/FLAC here first can take minutes on a
-                    // USB stick and doubles the reads for the selected fix.
-                    // Keep the old all-fixes API behavior when no IDs were
-                    // selected, since it derives the selection from proposals.
-                    let (fixable, unfixable) = if req.apply && !req.selected_fix_ids.is_empty() {
-                        (missing, Vec::new())
-                    } else {
-                        partition_fixable_seek_data(missing)
-                    };
+                    let (fixable, unfixable) =
+                        partition_remembered_seek_skips(missing, &seek_skips);
                     if !unfixable.is_empty() {
                         unsupported_items.push(RepairUnsupportedItem {
                             issue: tr::repair_unsupported_seek_data(unfixable.len(), format.name())
@@ -966,22 +986,13 @@ impl BackendService {
                             reason: tr::repair_unsupported_seek_data_reason().render(),
                             link: Some("event-log".to_string()),
                         });
-                        for (target, (reason, advice)) in &unfixable {
-                            let (name, path) = (format.name(), &target.track_path);
-                            let line = match advice {
-                                SeekSkipAdvice::Nothing => {
-                                    tr::repair_warning_seek_data_unfixable(name, reason, path)
-                                }
-                                SeekSkipAdvice::Replace => {
-                                    tr::repair_warning_seek_data_unfixable_replace(
-                                        name, reason, path,
-                                    )
-                                }
-                                SeekSkipAdvice::Report => {
-                                    tr::repair_warning_seek_data_unfixable_report(
-                                        name, reason, path,
-                                    )
-                                }
+                        for (target, skip) in &unfixable {
+                            let (name, reason, path) =
+                                (format.name(), skip.describe(), &target.track_path);
+                            let line = if skip.asks_for_report() {
+                                tr::repair_warning_seek_data_unfixable_report(name, reason, path)
+                            } else {
+                                tr::repair_warning_seek_data_unfixable_replace(name, reason, path)
                             };
                             warnings.push(logging::log_text(
                                 Level::Warn,
@@ -2483,6 +2494,7 @@ impl BackendService {
             progress.finish();
         }
 
+        let seek_skips = SeekSkipMemory::open(&self.db.data_dir(), usb_root);
         for (format, missing) in &missing_seek_data {
             let selected_format = selected.contains(format.fix_id());
             let found = !missing.is_empty();
@@ -2494,8 +2506,19 @@ impl BackendService {
                     apply_missing_seek_data_repair(
                         usb_root,
                         *format,
+                        &seek_skips,
                         warnings,
-                        &mut |done, total| progress.item_done(done, total),
+                        &mut |event| match event {
+                            SeekApplyEvent::Reading {
+                                done,
+                                total,
+                                file,
+                                mb_per_s,
+                            } => progress.item_reading(done, total, file, mb_per_s),
+                            SeekApplyEvent::ItemDone { done, total } => {
+                                progress.item_done(done, total)
+                            }
+                        },
                     )
                 })
                 .map(|(fixed, skipped)| {

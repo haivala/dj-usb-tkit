@@ -661,88 +661,164 @@ pub(super) fn detect_missing_seek_data(
     out
 }
 
-/// What a skipped seek-data line suggests doing about the file.
-#[derive(Debug, Clone, Copy, PartialEq)]
-pub(super) enum SeekSkipAdvice {
-    Nothing,
-    /// Damaged audio: the user's to replace.
-    Replace,
-    /// A layout not supported yet: worth reporting.
-    Report,
-}
-
-impl SeekSkipAdvice {
-    fn of(skip: SeekIndexSkip) -> Self {
-        if skip.asks_for_report() {
-            Self::Report
-        } else {
-            Self::Replace
-        }
-    }
-}
-
-/// Why a file gets no seek data: its technical reason (English) and the advice.
-pub(super) type SeekSkip = (&'static str, SeekSkipAdvice);
-
-/// Split [`detect_missing_seek_data`]'s targets into the ones the fix can
-/// write an index for and the ones it would skip, each with the skip reason
-/// and advice the apply step logs. Builds the index the apply step builds, so
-/// a file the fix always skips is never proposed as fixable.
-pub(super) fn partition_fixable_seek_data(
+/// Split [`detect_missing_seek_data`]'s targets into the ones the fix is
+/// offered for and the ones an earlier apply had to skip (unchanged since),
+/// with the reason it logged. Reads no audio: the apply parses it.
+pub(super) fn partition_remembered_seek_skips(
     targets: Vec<MissingSeekData>,
-) -> (Vec<MissingSeekData>, Vec<(MissingSeekData, SeekSkip)>) {
+    skips: &SeekSkipMemory,
+) -> (Vec<MissingSeekData>, Vec<(MissingSeekData, SeekIndexSkip)>) {
     let mut fixable = Vec::new();
     let mut unfixable = Vec::new();
     for target in targets {
-        let skip = match seek_index_for_audio(&target.audio_path) {
-            Ok(Some(index)) => std::fs::read(&target.bundle_path)
-                .ok()
-                .and_then(|bytes| with_seek_index(&bytes, &index))
-                .is_none()
-                .then_some(("analysis file could not be parsed", SeekSkipAdvice::Report)),
-            Ok(None) => Some(("not an MP3 or FLAC", SeekSkipAdvice::Nothing)),
-            Err(skip) => Some((skip.describe(), SeekSkipAdvice::of(skip))),
-        };
-        match skip {
-            None => fixable.push(target),
+        match skips.get(&target.audio_path) {
             Some(skip) => unfixable.push((target, skip)),
+            None => fixable.push(target),
         }
     }
     (fixable, unfixable)
+}
+
+/// What [`apply_missing_seek_data_repair`] reports while it works.
+pub(super) enum SeekApplyEvent<'a> {
+    /// Reading the audio of item `done + 1`: its file name and, once
+    /// measured, the read speed in MB/s. A slow USB stick can take minutes on
+    /// one file, so this is repeated while it reads.
+    Reading {
+        done: usize,
+        total: usize,
+        file: &'a str,
+        mb_per_s: Option<f64>,
+    },
+    ItemDone {
+        done: usize,
+        total: usize,
+    },
+}
+
+/// Read speed over half-second windows, and when a new file's name is worth
+/// showing: at most every 100 ms, so fast media doesn't flood the UI.
+struct ReadMeter {
+    window_started: std::time::Instant,
+    window_bytes: usize,
+    mb_per_s: Option<f64>,
+    last_shown: Option<std::time::Instant>,
+}
+
+impl ReadMeter {
+    const WINDOW: std::time::Duration = std::time::Duration::from_millis(500);
+    const MIN_INTERVAL: std::time::Duration = std::time::Duration::from_millis(100);
+
+    fn new() -> Self {
+        Self {
+            window_started: std::time::Instant::now(),
+            window_bytes: 0,
+            mb_per_s: None,
+            last_shown: None,
+        }
+    }
+
+    /// Whether to show the file just started.
+    fn file_started(&mut self) -> bool {
+        let show = self
+            .last_shown
+            .is_none_or(|at| at.elapsed() >= Self::MIN_INTERVAL);
+        if show {
+            self.last_shown = Some(std::time::Instant::now());
+        }
+        show
+    }
+
+    /// Whether a new speed was measured (and is worth showing).
+    fn read(&mut self, bytes: usize) -> bool {
+        self.window_bytes += bytes;
+        let elapsed = self.window_started.elapsed();
+        if elapsed < Self::WINDOW {
+            return false;
+        }
+        self.mb_per_s = Some(self.window_bytes as f64 / elapsed.as_secs_f64() / 1_000_000.0);
+        self.window_started = std::time::Instant::now();
+        self.window_bytes = 0;
+        self.last_shown = Some(self.window_started);
+        true
+    }
 }
 
 /// Write the missing seek indexes of one format found by
 /// [`detect_missing_seek_data`], re-detected so bundles regenerated earlier in
 /// the same pass are covered. A file that doesn't parse cleanly is skipped and
 /// named in the Event Log with its reason, so it can be reported; nothing is
-/// ever approximated. Returns (bundles written, tracks skipped).
+/// ever approximated. A skipped file is remembered in `skips`, so the next
+/// preview lists it instead of offering the fix again, and isn't re-read
+/// while unchanged. Returns (bundles written, tracks skipped).
 pub(super) fn apply_missing_seek_data_repair(
     usb_root: &Path,
     format: SeekFormat,
+    skips: &SeekSkipMemory,
     warnings: &mut Vec<WarningEntry>,
-    on_item: &mut impl FnMut(usize, usize),
+    on_event: &mut impl FnMut(SeekApplyEvent),
 ) -> BackendResult<(usize, usize)> {
     let parsed = parse_pdb(&usb_staging::required_pdb(usb_root)?)?;
     let mut fixed = 0usize;
     let mut skipped = 0usize;
     let targets = detect_missing_seek_data(usb_root, &parsed, format);
     let total = targets.len();
-    for (item_index, target) in targets.into_iter().enumerate() {
-        let (reason, report) = match seek_index_for_audio(&target.audio_path) {
+    let mut meter = ReadMeter::new();
+    for (done, target) in targets.into_iter().enumerate() {
+        let file = target
+            .track_path
+            .rsplit(['/', '\\'])
+            .next()
+            .unwrap_or(&target.track_path);
+        // A file skipped before, unchanged since: not read again.
+        let index = match skips.get(&target.audio_path) {
+            Some(skip) => Err(skip),
+            None => {
+                if meter.file_started() {
+                    on_event(SeekApplyEvent::Reading {
+                        done,
+                        total,
+                        file,
+                        mb_per_s: meter.mb_per_s,
+                    });
+                }
+                let index = seek_index_for_audio_reporting(&target.audio_path, &mut |bytes| {
+                    if meter.read(bytes) {
+                        on_event(SeekApplyEvent::Reading {
+                            done,
+                            total,
+                            file,
+                            mb_per_s: meter.mb_per_s,
+                        });
+                    }
+                });
+                if let Err(skip) = index {
+                    skips.remember(&target.audio_path, skip);
+                }
+                index
+            }
+        };
+        let (reason, report) = match index {
             Ok(Some(index)) => {
                 let bytes = std::fs::read(&target.bundle_path)?;
                 match with_seek_index(&bytes, &index) {
                     Some(patched) => {
                         atomic_write_bytes(&target.bundle_path, &patched)?;
                         fixed += 1;
-                        on_item(item_index + 1, total);
+                        on_event(SeekApplyEvent::ItemDone {
+                            done: done + 1,
+                            total,
+                        });
                         continue;
                     }
                     None => ("analysis file could not be parsed", true),
                 }
             }
             Ok(None) => {
-                on_item(item_index + 1, total);
+                on_event(SeekApplyEvent::ItemDone {
+                    done: done + 1,
+                    total,
+                });
                 continue;
             }
             Err(skip) => (skip.describe(), skip.asks_for_report()),
@@ -759,7 +835,10 @@ pub(super) fn apply_missing_seek_data_repair(
             "usb.repair.seek-data.skipped",
             &line,
         ));
-        on_item(item_index + 1, total);
+        on_event(SeekApplyEvent::ItemDone {
+            done: done + 1,
+            total,
+        });
     }
     Ok((fixed, skipped))
 }
