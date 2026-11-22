@@ -1,0 +1,8 @@
+# CI builds with exactly this Rust (rustup reads this file; a system cargo
+# without rustup ignores it). A new rustc makes every cached build artifact
+# unusable, so a floating "stable" turned some releases into full rebuilds.
+# Bump the version on purpose, on a default-branch push, so the caches
+# refill before the next tag.
+[toolchain]
+channel = "1.100.0"
+profile = "minimal"

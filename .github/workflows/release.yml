@@ -142,8 +142,8 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          rustup toolchain install stable --profile minimal
-          rustup default stable
+          # Installs the version pinned in rust-toolchain.toml.
+          rustup toolchain install
 
       # Tag builds only restore: a cache saved from a tag can be restored by
       # that tag alone, and would take room from the default-branch caches in

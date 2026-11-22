@@ -10,7 +10,10 @@ license = "AGPL-3.0-or-later"
 [profile.release]
 opt-level = "z"
 lto = "thin"
-codegen-units = 1
+# The default 16 units let the app's own crates compile on all cores; they
+# rebuild on every release (the version bump), and at 1 unit they ran on one
+# core. Thin LTO still optimizes across the units.
+codegen-units = 16
 strip = true
 panic = "abort"
 
