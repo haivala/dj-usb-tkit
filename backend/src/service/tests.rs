@@ -1070,3 +1070,306 @@ fn library_analysis_picks_imported_library_tracks_missing_core_analysis() {
         .expect("unanalyzed ids");
     assert_eq!(ids, ["rb-missing"]);
 }
+
+#[test]
+fn resolve_playback_source_fast_path_by_track_id() {
+    let (_dir, service) = test_service();
+    let conn = service.db.connect().expect("connect");
+    insert_full_track(
+        &conn,
+        "t1",
+        "Song",
+        "Artist",
+        "/music/a.mp3",
+        None,
+        None,
+        false,
+    );
+    drop(conn);
+
+    let result = service
+        .resolve_playback_source(ResolvePlaybackSourceRequest {
+            title: String::new(),
+            artist: String::new(),
+            album: None,
+            bpm: None,
+            file_path: None,
+            file_size_bytes: None,
+            track_id: Some("t1".to_string()),
+        })
+        .expect("resolve playback source");
+    assert_eq!(result.matched_by, crate::models::TrackMatch::SelfId);
+    assert_eq!(result.resolved_path.as_deref(), Some("/music/a.mp3"));
+    assert_eq!(result.track_id.as_deref(), Some("t1"));
+}
+
+#[test]
+fn resolve_playback_source_falls_back_to_fingerprint_hash_match() {
+    let (_dir, service) = test_service();
+    let conn = service.db.connect().expect("connect");
+    insert_full_track(
+        &conn,
+        "t1",
+        "Song",
+        "Artist",
+        "/music/a.mp3",
+        None,
+        None,
+        false,
+    );
+    drop(conn);
+
+    let result = service
+        .resolve_playback_source(ResolvePlaybackSourceRequest {
+            title: "Song".to_string(),
+            artist: "Artist".to_string(),
+            album: None,
+            bpm: None,
+            file_path: None,
+            file_size_bytes: None,
+            track_id: None,
+        })
+        .expect("resolve playback source");
+    assert_eq!(result.matched_by, crate::models::TrackMatch::Hash);
+    assert_eq!(result.track_id.as_deref(), Some("t1"));
+}
+
+#[test]
+fn resolve_playback_source_fast_path_skips_row_whose_file_is_missing() {
+    let (dir, service) = test_service();
+    let live_path = dir.path().join("live.mp3");
+    std::fs::write(&live_path, b"x").expect("write live file");
+    let live_path = live_path.to_string_lossy().to_string();
+
+    let conn = service.db.connect().expect("connect");
+    insert_full_track(
+        &conn,
+        "stale",
+        "Song",
+        "Artist",
+        "/music/gone.mp3",
+        None,
+        None,
+        false,
+    );
+    insert_full_track(
+        &conn, "live", "Song", "Artist", &live_path, None, None, false,
+    );
+    drop(conn);
+
+    let result = service
+        .resolve_playback_source(ResolvePlaybackSourceRequest {
+            title: "Song".to_string(),
+            artist: "Artist".to_string(),
+            album: None,
+            bpm: None,
+            file_path: None,
+            file_size_bytes: None,
+            track_id: Some("stale".to_string()),
+        })
+        .expect("resolve playback source");
+    assert_eq!(result.resolved_path.as_deref(), Some(live_path.as_str()));
+    assert_eq!(result.track_id.as_deref(), Some("live"));
+}
+
+#[test]
+fn resolve_playback_source_best_candidate_prefers_file_on_disk() {
+    let (dir, service) = test_service();
+    let live_path = dir.path().join("live.mp3");
+    std::fs::write(&live_path, b"x").expect("write live file");
+    let live_path = live_path.to_string_lossy().to_string();
+
+    let conn = service.db.connect().expect("connect");
+    insert_full_track(
+        &conn,
+        "stale",
+        "Song",
+        "Artist",
+        "/music/gone.mp3",
+        None,
+        None,
+        false,
+    );
+    insert_full_track(
+        &conn, "live", "Song", "Artist", &live_path, None, None, false,
+    );
+    drop(conn);
+
+    let result = service
+        .resolve_playback_source(ResolvePlaybackSourceRequest {
+            title: "Song".to_string(),
+            artist: "Artist".to_string(),
+            album: None,
+            bpm: None,
+            file_path: None,
+            file_size_bytes: None,
+            track_id: None,
+        })
+        .expect("resolve playback source");
+    assert_eq!(result.resolved_path.as_deref(), Some(live_path.as_str()));
+    assert_eq!(result.track_id.as_deref(), Some("live"));
+}
+
+#[test]
+fn resolve_playback_source_plays_own_local_file_over_stale_export_row() {
+    // A library file not indexed yet (e.g. its row was removed) must play
+    // itself, not an old export row that shares its title and artist.
+    let (dir, service) = test_service();
+    let own = dir.path().join("Song.mp3");
+    std::fs::write(&own, b"x").expect("write own file");
+    let own = own.to_string_lossy().to_string();
+    let conn = service.db.connect().expect("connect");
+    insert_full_track(
+        &conn,
+        "stale-export",
+        "Song",
+        "Artist",
+        "/gone/USB_OLD/Contents/Artist/Song.mp3",
+        None,
+        None,
+        false,
+    );
+    drop(conn);
+
+    let result = service
+        .resolve_playback_source(song_request(Some(&own)))
+        .expect("resolve playback source");
+    assert_eq!(result.matched_by, crate::models::TrackMatch::OwnFile);
+    assert_eq!(result.resolved_path.as_deref(), Some(own.as_str()));
+    assert_eq!(result.track_id, None);
+
+    let conn = service.db.connect().expect("connect");
+    insert_full_track(&conn, "own", "Song", "Artist", &own, None, None, false);
+    drop(conn);
+    let result = service
+        .resolve_playback_source(song_request(Some(&own)))
+        .expect("resolve playback source");
+    assert_eq!(result.matched_by, crate::models::TrackMatch::SelfId);
+    assert_eq!(result.track_id.as_deref(), Some("own"));
+}
+
+#[test]
+fn resolve_playback_source_falls_back_to_missing_file_row_when_nothing_on_disk() {
+    // The USB fallback in play_resolved_track relies on still getting a
+    // library path here even when its file is gone -- don't regress that.
+    let (_dir, service) = test_service();
+    let conn = service.db.connect().expect("connect");
+    insert_full_track(
+        &conn,
+        "stale",
+        "Song",
+        "Artist",
+        "/music/gone.mp3",
+        None,
+        None,
+        false,
+    );
+    drop(conn);
+
+    let result = service
+        .resolve_playback_source(ResolvePlaybackSourceRequest {
+            title: "Song".to_string(),
+            artist: "Artist".to_string(),
+            album: None,
+            bpm: None,
+            file_path: None,
+            file_size_bytes: None,
+            track_id: None,
+        })
+        .expect("resolve playback source");
+    assert_eq!(result.matched_by, crate::models::TrackMatch::Hash);
+    assert_eq!(result.resolved_path.as_deref(), Some("/music/gone.mp3"));
+}
+
+#[test]
+fn resolve_playback_source_keeps_missing_self_row_as_last_resort() {
+    let (_dir, service) = test_service();
+    let conn = service.db.connect().expect("connect");
+    insert_full_track(
+        &conn,
+        "stale",
+        "Song",
+        "Artist",
+        "/music/gone.mp3",
+        None,
+        None,
+        false,
+    );
+    drop(conn);
+
+    // Metadata that matches nothing by fingerprint or title, so the search
+    // passes come up empty and the missing-file self row is all we have.
+    let result = service
+        .resolve_playback_source(ResolvePlaybackSourceRequest {
+            title: "Totally Different".to_string(),
+            artist: "Nobody".to_string(),
+            album: None,
+            bpm: None,
+            file_path: None,
+            file_size_bytes: None,
+            track_id: Some("stale".to_string()),
+        })
+        .expect("resolve playback source");
+    assert_eq!(result.matched_by, crate::models::TrackMatch::SelfId);
+    assert_eq!(result.resolved_path.as_deref(), Some("/music/gone.mp3"));
+}
+
+#[test]
+fn resolve_playback_source_returns_none_for_blank_title_or_artist() {
+    let (_dir, service) = test_service();
+    let result = service
+        .resolve_playback_source(ResolvePlaybackSourceRequest {
+            title: "   ".to_string(),
+            artist: "Artist".to_string(),
+            album: None,
+            bpm: None,
+            file_path: None,
+            file_size_bytes: None,
+            track_id: None,
+        })
+        .expect("resolve playback source");
+    assert_eq!(result.matched_by, crate::models::TrackMatch::NoMatch);
+    assert!(result.resolved_path.is_none());
+}
+
+#[test]
+fn resolve_playback_source_prefers_local_track_by_fingerprint() {
+    let root = tempfile::tempdir().expect("temp root");
+    let media = root.path().join("media");
+    std::fs::create_dir_all(&media).expect("create media dir");
+    let local_track_path = media.join("Artist One - Track One.mp3");
+    std::fs::write(&local_track_path, b"mock-audio").expect("write local track");
+
+    let data_dir = root.path().join("data");
+    let service = BackendService::new(&data_dir).expect("create backend");
+
+    service
+        .scan_library(ScanLibraryRequest {
+            source_roots: vec![media.to_string_lossy().to_string()],
+            incremental: true,
+        })
+        .expect("scan");
+
+    let data = service
+        .resolve_playback_source(ResolvePlaybackSourceRequest {
+            title: "Track One".to_string(),
+            artist: "Artist One".to_string(),
+            album: None,
+            bpm: None,
+            file_path: Some("/some/usb/path/Track One.mp3".to_string()),
+            file_size_bytes: None,
+            track_id: None,
+        })
+        .expect("resolve playback source");
+    assert!(
+        data.matched_by == crate::models::TrackMatch::Hash
+            || data.matched_by == crate::models::TrackMatch::Metadata,
+        "unexpected resolver mode: {}",
+        data.matched_by
+    );
+    assert_eq!(
+        data.resolved_path.as_deref(),
+        Some(local_track_path.to_string_lossy().as_ref())
+    );
+    assert!(data.track_id.is_some());
+}

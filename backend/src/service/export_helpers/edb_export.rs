@@ -4,31 +4,6 @@ use super::*;
 use crate::i18n::tr;
 use crate::service::usb_staging::{UsbDatabasesExt, UsbWriteSession};
 
-/// Writes `playlist` into the staged eDB of `usb_root` in a write session of
-/// its own, written back to the USB.
-pub fn write_edb_playlist(
-    usb_root: &Path,
-    playlist: &ExportPlaylistData,
-    manifest: &ExportManifest,
-    mirror_playlist_entries: bool,
-) -> BackendResult<WriteExportLibraryDbResult> {
-    let mut session = UsbWriteSession::without_service(usb_root);
-    let mut results = write_edb_playlists_in(
-        &mut session,
-        &[EdbPlaylistWrite {
-            playlist,
-            manifest,
-            mirror_playlist_entries,
-            identity: None,
-            placement: PlaylistPlacement::MoveToFront,
-        }],
-    )?;
-    session.commit()?;
-    results
-        .pop()
-        .ok_or_else(|| BackendError::Internal("eDB write produced no result".to_string()))
-}
-
 /// Writes every one of `writes` into the session's staged eDB, in one
 /// transaction and in their order.
 pub fn write_edb_playlists_in(

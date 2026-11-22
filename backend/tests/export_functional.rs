@@ -8037,8 +8037,11 @@ fn playlist_edited_during_its_export_is_not_marked_exported() {
     use backend::models::BatchExportStatus;
     let root = tempdir().expect("temp root");
     let usb = root.path().join("usb");
-    let (backend, ids, tracks) =
-        batch_export_setup(root.path(), &usb, &[("Batch A", &["One"]), ("Batch B", &["Two"])]);
+    let (backend, ids, tracks) = batch_export_setup(
+        root.path(),
+        &usb,
+        &[("Batch A", &["One"]), ("Batch B", &["Two"])],
+    );
     library_sources::show_only(
         &backend,
         vec![root.path().join("media").to_string_lossy().to_string()],

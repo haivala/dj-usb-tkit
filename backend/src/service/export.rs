@@ -1768,22 +1768,14 @@ impl BackendService {
                 let message = |mb_per_s: Option<f64>| {
                     if playlist_count > 1 {
                         crate::progress::count_playlist_speed(
-                            tr::export_progress_batch_playlist(
-                                copying.clone(),
-                                &run.playlist.name,
-                            )
-                            .render(),
+                            tr::export_progress_batch_playlist(copying.clone(), &run.playlist.name)
+                                .render(),
                             (current, tracks),
                             (run_idx + 1, playlist_count),
                             mb_per_s,
                         )
                     } else {
-                        crate::progress::count_speed(
-                            copying.render(),
-                            current,
-                            tracks,
-                            mb_per_s,
-                        )
+                        crate::progress::count_speed(copying.render(), current, tracks, mb_per_s)
                     }
                 };
                 on_progress(done, total_steps, &message(copy_speed.mb_per_s()));

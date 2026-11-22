@@ -34,19 +34,18 @@ use crate::models::{
     RemoveUsbPlaylistData, RemoveUsbPlaylistRequest, RenamePlaylistData, RenamePlaylistRequest,
     ReorderPlaylistTracksData, ReorderPlaylistTracksRequest, ReorderPlaylistsData,
     ReorderPlaylistsRequest, RepairUsbDiagnosticsData, RepairUsbDiagnosticsRequest,
-    ResolvePlaybackSourceData, ResolvePlaybackSourceRequest, ResolveTrackIdentityData,
-    ResolveTrackIdentityRequest, RestoreUsbBackupData, RestoreUsbBackupRequest,
-    RunDataMigrationsData, RunUsbDiagnosticsData, RunUsbDiagnosticsRequest, RunUsbParityReportData,
-    RunUsbParityReportRequest, SaveTrackAnalysisEditsData, SaveTrackAnalysisEditsRequest,
-    SaveTrackMetadataEditsData, SaveTrackMetadataEditsRequest, SaveUsbTrackAnalysisEditsData,
-    SaveUsbTrackAnalysisEditsRequest, SaveUsbTrackMetadataEditsData,
-    SaveUsbTrackMetadataEditsRequest, ScanLibraryData, ScanLibraryRequest, ScanMixxxDbRequest,
-    ScanRekordboxDbRequest, SetAnalysisPausedData, SetExternalLibraryEnabledRequest,
-    SetFrontendSettingData, SetFrontendSettingRequest, SetPlaybackMetronomeRequest,
-    SetSourceFolderEnabledRequest, SetUsbBackgroundColorRequest, SetUsbDeviceNameData,
-    SetUsbDeviceNameRequest, StopPlaybackData, TrackDetail, TracksMetadataSummary,
-    UpdateUsbPlayerMenuConfigData, UpdateUsbPlayerMenuConfigRequest, UsbBackgroundColorData,
-    UsbTrackAnalysisDetail, WithPlaylists,
+    ResolveTrackIdentityData, ResolveTrackIdentityRequest, RestoreUsbBackupData,
+    RestoreUsbBackupRequest, RunDataMigrationsData, RunUsbDiagnosticsData,
+    RunUsbDiagnosticsRequest, RunUsbParityReportData, RunUsbParityReportRequest,
+    SaveTrackAnalysisEditsData, SaveTrackAnalysisEditsRequest, SaveTrackMetadataEditsData,
+    SaveTrackMetadataEditsRequest, SaveUsbTrackAnalysisEditsData, SaveUsbTrackAnalysisEditsRequest,
+    SaveUsbTrackMetadataEditsData, SaveUsbTrackMetadataEditsRequest, ScanLibraryData,
+    ScanLibraryRequest, ScanMixxxDbRequest, ScanRekordboxDbRequest, SetAnalysisPausedData,
+    SetExternalLibraryEnabledRequest, SetFrontendSettingData, SetFrontendSettingRequest,
+    SetPlaybackMetronomeRequest, SetSourceFolderEnabledRequest, SetUsbBackgroundColorRequest,
+    SetUsbDeviceNameData, SetUsbDeviceNameRequest, StopPlaybackData, TrackDetail,
+    TracksMetadataSummary, UpdateUsbPlayerMenuConfigData, UpdateUsbPlayerMenuConfigRequest,
+    UsbBackgroundColorData, UsbTrackAnalysisDetail, WithPlaylists,
 };
 use crate::player::{PlaybackController, PlaybackTransition};
 use crate::service::BackendService;
@@ -313,13 +312,6 @@ impl BackendCommands {
             self.service
                 .relocate_source_root_with_progress(req, on_indexing),
         )
-    }
-
-    pub fn resolve_playback_source(
-        &self,
-        req: ResolvePlaybackSourceRequest,
-    ) -> ApiResponse<ResolvePlaybackSourceData> {
-        wrap(self.service.resolve_playback_source(req))
     }
 
     pub fn create_playlist(

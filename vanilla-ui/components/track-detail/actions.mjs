@@ -1061,10 +1061,6 @@ export function createTrackDetailController(el, prefs = {}) {
       api.setView(anchor - Math.max(0, Math.min(1, ratio)) * newSpan, newSpan);
     },
 
-    panByMs(deltaMs) {
-      api.setView(working.view.startMs + deltaMs, viewSpanMs());
-    },
-
     fitView() {
       api.setView(0, working.durationMs || DEFAULT_SPAN_MS);
     },

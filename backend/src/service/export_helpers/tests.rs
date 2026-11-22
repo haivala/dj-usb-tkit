@@ -2,6 +2,7 @@ use super::super::usb_vendor_compat::USB_ANALYSIS_DIR;
 use super::*;
 use crate::models::RunUsbParityReportRequest;
 use crate::service::BackendService;
+use crate::service::usb_staging::UsbWriteSession;
 use std::fs;
 use std::path::PathBuf;
 use tempfile::tempdir;
@@ -3568,10 +3569,33 @@ fn write_edb_playlist_updates_alias_matched_content_path_in_place() {
         tracks: vec![track],
     };
 
-    write_edb_playlist(usb_root, &playlist, &manifest, true)
-        .expect("write initial eDB content path");
+    let mut session = UsbWriteSession::without_service(usb_root);
+    write_edb_playlists_in(
+        &mut session,
+        &[EdbPlaylistWrite {
+            playlist: &playlist,
+            manifest: &manifest,
+            mirror_playlist_entries: true,
+            identity: None,
+            placement: PlaylistPlacement::MoveToFront,
+        }],
+    )
+    .expect("write initial eDB content path");
+    session.commit().expect("write initial eDB content path");
     manifest.tracks[0].exported_path = corrected_path.to_string();
-    write_edb_playlist(usb_root, &playlist, &manifest, true).expect("rewrite eDB content path");
+    let mut session = UsbWriteSession::without_service(usb_root);
+    write_edb_playlists_in(
+        &mut session,
+        &[EdbPlaylistWrite {
+            playlist: &playlist,
+            manifest: &manifest,
+            mirror_playlist_entries: true,
+            identity: None,
+            placement: PlaylistPlacement::MoveToFront,
+        }],
+    )
+    .expect("rewrite eDB content path");
+    session.commit().expect("rewrite eDB content path");
 
     let conn = open_edb_rw(usb_root).expect("open eDB");
     let paths = {
@@ -3619,17 +3643,53 @@ fn write_edb_playlist_sets_device_name_from_drive_name() {
 
     // No drive name: a name set elsewhere (e.g. in rekordbox) stays.
     set_device_name("Named Elsewhere");
-    write_edb_playlist(usb_root, &playlist, &manifest, true).expect("export");
+    let mut session = UsbWriteSession::without_service(usb_root);
+    write_edb_playlists_in(
+        &mut session,
+        &[EdbPlaylistWrite {
+            playlist: &playlist,
+            manifest: &manifest,
+            mirror_playlist_entries: true,
+            identity: None,
+            placement: PlaylistPlacement::MoveToFront,
+        }],
+    )
+    .expect("export");
+    session.commit().expect("export");
     assert_eq!(device_name(), "Named Elsewhere");
 
     crate::service::usb_identity::write_drive_name(usb_root, "Test Stick").unwrap();
-    write_edb_playlist(usb_root, &playlist, &manifest, true).expect("export");
+    let mut session = UsbWriteSession::without_service(usb_root);
+    write_edb_playlists_in(
+        &mut session,
+        &[EdbPlaylistWrite {
+            playlist: &playlist,
+            manifest: &manifest,
+            mirror_playlist_entries: true,
+            identity: None,
+            placement: PlaylistPlacement::MoveToFront,
+        }],
+    )
+    .expect("export");
+    session.commit().expect("export");
     assert_eq!(device_name(), "Test Stick");
 
     // A name carried over from another drive is not this drive's.
     set_device_name("Named Elsewhere");
     crate::service::usb_identity::set_name_conflict(usb_root, true);
-    write_edb_playlist(usb_root, &playlist, &manifest, true).expect("export");
+    let mut session = UsbWriteSession::without_service(usb_root);
+    write_edb_playlists_in(
+        &mut session,
+        &[EdbPlaylistWrite {
+            playlist: &playlist,
+            manifest: &manifest,
+            mirror_playlist_entries: true,
+            identity: None,
+            placement: PlaylistPlacement::MoveToFront,
+        }],
+    )
+    .expect("export");
+    session.commit().expect("export");
     assert_eq!(device_name(), "Named Elsewhere");
 }
 
@@ -3674,7 +3734,19 @@ fn write_edb_playlist_matches_rekordbox_reexport_bookkeeping() {
                 _ => {}
             }
         }
-        write_edb_playlist(usb_root, &playlist, &manifest, true).expect("export");
+        let mut session = UsbWriteSession::without_service(usb_root);
+        write_edb_playlists_in(
+            &mut session,
+            &[EdbPlaylistWrite {
+                playlist: &playlist,
+                manifest: &manifest,
+                mirror_playlist_entries: true,
+                identity: None,
+                placement: PlaylistPlacement::MoveToFront,
+            }],
+        )
+        .expect("export");
+        session.commit().expect("export");
     };
     let row = |title: &str| -> Row {
         let conn = open_edb_rw(usb_root).expect("open eDB");

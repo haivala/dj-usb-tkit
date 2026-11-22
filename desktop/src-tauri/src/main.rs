@@ -933,7 +933,6 @@ fn main() {
             backend::tauri_commands::get_usb_tracks_metadata_summary,
             backend::tauri_commands::save_usb_track_metadata_edits,
             backend::tauri_commands::relocate_source_root,
-            backend::tauri_commands::resolve_playback_source,
             backend::tauri_commands::create_playlist,
             backend::tauri_commands::rename_playlist,
             backend::tauri_commands::reorder_playlists,

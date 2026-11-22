@@ -187,3 +187,36 @@ fn with_id3v23_priv_frame(bytes: &[u8], data: &[u8]) -> Vec<u8> {
     out.extend_from_slice(&bytes[10..]);
     out
 }
+
+/// The UI's JS files, relative to `vanilla-ui/`, sorted.
+pub fn ui_files(ui_dir: &Path) -> Vec<PathBuf> {
+    const SKIP: &[&str] = &[
+        "node_modules",
+        "dist",
+        "tests",
+        "scripts",
+        "test-results",
+        "assets",
+        "playwright.config.mjs",
+    ];
+    let mut files = Vec::new();
+    let mut dirs = vec![ui_dir.to_path_buf()];
+    while let Some(dir) = dirs.pop() {
+        for entry in std::fs::read_dir(&dir).expect("read vanilla-ui") {
+            let path = entry.expect("dir entry").path();
+            let name = path
+                .file_name()
+                .and_then(|n| n.to_str())
+                .unwrap_or_default();
+            if path.is_dir() {
+                if !SKIP.contains(&name) && !name.starts_with('.') {
+                    dirs.push(path);
+                }
+            } else if (name.ends_with(".mjs") || name.ends_with(".js")) && !SKIP.contains(&name) {
+                files.push(path.strip_prefix(ui_dir).expect("inside").to_path_buf());
+            }
+        }
+    }
+    files.sort();
+    files
+}

@@ -558,7 +558,6 @@
           return ok(path ? backend.selectUsb({ normalizedRoot: path }) : backend.selectUsb({ valid: false, normalizedRoot: null }));
         }
         case "run_usb_diagnostics": return ok(backend.usbDiagnostics());
-        case "resolve_playback_source": return ok({ resolvedPath: null, matchedBy: "none", trackId: null });
         case "play_resolved_track": return ok({ playing: true, paused: false, positionMs: 0, durationMs: 0 });
         case "stop_playback_native":
         case "get_playback_status_native":

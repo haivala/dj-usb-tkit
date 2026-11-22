@@ -1645,11 +1645,12 @@ mod diag_tests {
     use crate::pdb_reader::{ParsedPdb, PdbPlaylistEntryRow, PdbPlaylistTreeRow, PdbTrackRow};
     use crate::service::diagnostics::{diagnose_contents_integrity, diagnose_playlist_resolution};
     use crate::service::export_helpers::{
-        CONTENT_FILENAME_MAX_LEN, ExportManifest, ExportManifestTrack, ExportPlaylistData,
-        exported_media_target_path, write_edb_playlist,
+        CONTENT_FILENAME_MAX_LEN, EdbPlaylistWrite, ExportManifest, ExportManifestTrack,
+        ExportPlaylistData, PlaylistPlacement, exported_media_target_path, write_edb_playlists_in,
     };
     use crate::service::now;
     use crate::service::usb_helpers::{parse_history_name_numeric_id, parse_history_slot_id};
+    use crate::service::usb_staging::UsbWriteSession;
     use rusqlite::params;
     use std::path::{Path, PathBuf};
     use std::sync::{Mutex, OnceLock};
@@ -2735,8 +2736,19 @@ mod diag_tests {
             }],
         };
 
-        let result = write_edb_playlist(&tmp, &playlist, &manifest, true);
-        assert!(result.is_ok(), "db write failed: {result:?}");
+        let mut session = UsbWriteSession::without_service(&tmp);
+        write_edb_playlists_in(
+            &mut session,
+            &[EdbPlaylistWrite {
+                playlist: &playlist,
+                manifest: &manifest,
+                mirror_playlist_entries: true,
+                identity: None,
+                placement: PlaylistPlacement::MoveToFront,
+            }],
+        )
+        .expect("db write failed");
+        session.commit().expect("db write failed");
 
         let conn = rusqlite::Connection::open(&db_path).unwrap();
         let row = conn
@@ -2899,8 +2911,19 @@ mod diag_tests {
             }],
         };
 
-        let result = write_edb_playlist(&tmp, &playlist, &manifest, true);
-        assert!(result.is_ok(), "db write failed: {result:?}");
+        let mut session = UsbWriteSession::without_service(&tmp);
+        write_edb_playlists_in(
+            &mut session,
+            &[EdbPlaylistWrite {
+                playlist: &playlist,
+                manifest: &manifest,
+                mirror_playlist_entries: true,
+                identity: None,
+                placement: PlaylistPlacement::MoveToFront,
+            }],
+        )
+        .expect("db write failed");
+        session.commit().expect("db write failed");
 
         let conn = rusqlite::Connection::open(&db_path).unwrap();
         let stored = conn

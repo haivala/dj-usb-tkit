@@ -21,9 +21,9 @@ use backend::models::{
     ExportToUsbRequest, FetchUsbHistoriesRequest, FetchUsbPlaylistsRequest, FetchUsbTracksRequest,
     GetPlaylistTracksRequest, GetTrackDetailRequest, InitializeUsbRequest,
     RemoveSourceFolderRequest, RemoveTracksFromPlaylistRequest, RemoveUsbPlaylistRequest,
-    RepairUsbDiagnosticsRequest, ResolvePlaybackSourceRequest, RunUsbDiagnosticsRequest,
-    RunUsbParityReportRequest, ScanLibraryRequest, SetFrontendSettingRequest,
-    SetTrackColumnsRequest, SetUsbDeviceNameRequest, TrackColumnLayout, WarningEntry,
+    RepairUsbDiagnosticsRequest, RunUsbDiagnosticsRequest, RunUsbParityReportRequest,
+    ScanLibraryRequest, SetFrontendSettingRequest, SetTrackColumnsRequest, SetUsbDeviceNameRequest,
+    TrackColumnLayout, WarningEntry,
 };
 use backend::pdb_reader::parse_pdb;
 use backend::service::anlz::canonical_analysis_bundle_paths;
@@ -2214,47 +2214,6 @@ fn export_to_usb_additive_does_not_overwrite_existing_cover_art_by_playlist_posi
         old_hash_after, old_hash_before,
         "existing exported cover art must not be overwritten by new tracks at the same playlist positions"
     );
-}
-
-#[test]
-fn resolve_playback_source_prefers_local_track_by_fingerprint() {
-    let root = tempdir().expect("temp root");
-    let media = root.path().join("media");
-    fs::create_dir_all(&media).expect("create media dir");
-    let local_track_path = media.join("Artist One - Track One.mp3");
-    fs::write(&local_track_path, b"mock-audio").expect("write local track");
-
-    let data_dir = root.path().join("data");
-    let backend = BackendCommands::new(&data_dir).expect("create backend");
-
-    let scan = backend.scan_library(ScanLibraryRequest {
-        source_roots: vec![media.to_string_lossy().to_string()],
-        incremental: true,
-    });
-    assert!(scan.ok, "scan failed: {scan:?}");
-
-    let resolved = backend.resolve_playback_source(ResolvePlaybackSourceRequest {
-        title: "Track One".to_string(),
-        artist: "Artist One".to_string(),
-        album: None,
-        bpm: None,
-        file_path: Some("/some/usb/path/Track One.mp3".to_string()),
-        file_size_bytes: None,
-        track_id: None,
-    });
-    assert!(resolved.ok, "resolve failed: {resolved:?}");
-    let data = resolved.data.expect("resolve data");
-    assert!(
-        data.matched_by == backend::models::TrackMatch::Hash
-            || data.matched_by == backend::models::TrackMatch::Metadata,
-        "unexpected resolver mode: {}",
-        data.matched_by
-    );
-    assert_eq!(
-        data.resolved_path.as_deref(),
-        Some(local_track_path.to_string_lossy().as_ref())
-    );
-    assert!(data.track_id.is_some());
 }
 
 #[test]

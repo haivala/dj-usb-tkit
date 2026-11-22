@@ -183,8 +183,8 @@ test("removing and re-adding a source folder", async ({ page }) => {
 
     // The re-indexed tracks must carry real, freshly-assigned ids from
     // the indexing -- not the raw file path (the pre-fix placeholder id) and
-    // not the old, now-deleted row's id -- so playback/resolve_playback_source
-    // can find them by id immediately.
+    // not the old, now-deleted row's id -- so playback can find them
+    // by id immediately.
     const restoredRow = page.locator("#libraryTableBody .track-grid-row", { hasText: "A One" });
     await expect(restoredRow).toHaveAttribute("data-track-id", "a-1-rescanned");
   }

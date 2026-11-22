@@ -3325,6 +3325,10 @@ fn resolve_usb_track_from_sources(
 
 #[cfg(test)]
 mod tests {
+    use crate::service::export_helpers::{
+        EdbPlaylistWrite, PlaylistPlacement, write_edb_playlists_in,
+    };
+    use crate::service::usb_staging::UsbWriteSession;
     use std::path::Path;
 
     use super::{
@@ -5356,8 +5360,19 @@ mod tests {
                 .collect(),
         };
         let manifest = make_export_manifest("pl-1", "My Playlist", &usb_root, &tracks);
-        crate::service::export_helpers::write_edb_playlist(&usb_root, &playlist, &manifest, true)
-            .expect("write edb playlist");
+        let mut session = UsbWriteSession::without_service(&usb_root);
+        write_edb_playlists_in(
+            &mut session,
+            &[EdbPlaylistWrite {
+                playlist: &playlist,
+                manifest: &manifest,
+                mirror_playlist_entries: true,
+                identity: None,
+                placement: PlaylistPlacement::MoveToFront,
+            }],
+        )
+        .expect("write edb playlist");
+        session.commit().expect("write edb playlist");
         // That writes the staged copy only (a no-op without staging).
         crate::service::usb_staging::write_back_if_changed(
             &usb_root,
@@ -5608,10 +5623,19 @@ mod tests {
                 )
                 .expect("write pdb playlist");
             }
-            crate::service::export_helpers::write_edb_playlist(
-                &usb_root, &playlist, &manifest, true,
+            let mut session = UsbWriteSession::without_service(&usb_root);
+            write_edb_playlists_in(
+                &mut session,
+                &[EdbPlaylistWrite {
+                    playlist: &playlist,
+                    manifest: &manifest,
+                    mirror_playlist_entries: true,
+                    identity: None,
+                    placement: PlaylistPlacement::MoveToFront,
+                }],
             )
             .expect("write edb playlist");
+            session.commit().expect("write edb playlist");
         }
 
         let items = names_in_order(&service);
@@ -5661,10 +5685,19 @@ mod tests {
                 tracks: vec![make_export_track("t1", "Song", "a.mp3")],
             };
             let manifest = make_export_manifest(id, name, &usb_root, &tracks);
-            crate::service::export_helpers::write_edb_playlist(
-                &usb_root, &playlist, &manifest, true,
+            let mut session = UsbWriteSession::without_service(&usb_root);
+            write_edb_playlists_in(
+                &mut session,
+                &[EdbPlaylistWrite {
+                    playlist: &playlist,
+                    manifest: &manifest,
+                    mirror_playlist_entries: true,
+                    identity: None,
+                    placement: PlaylistPlacement::MoveToFront,
+                }],
             )
             .expect("write edb playlist");
+            session.commit().expect("write edb playlist");
         }
         let fetch = || {
             service
@@ -6072,8 +6105,19 @@ mod tests {
                 .collect(),
         };
         let manifest = make_export_manifest("pl-1", "My Playlist", &usb_root, &tracks);
-        crate::service::export_helpers::write_edb_playlist(&usb_root, &playlist, &manifest, true)
-            .expect("seed edb playlist");
+        let mut session = UsbWriteSession::without_service(&usb_root);
+        write_edb_playlists_in(
+            &mut session,
+            &[EdbPlaylistWrite {
+                playlist: &playlist,
+                manifest: &manifest,
+                mirror_playlist_entries: true,
+                identity: None,
+                placement: PlaylistPlacement::MoveToFront,
+            }],
+        )
+        .expect("seed edb playlist");
+        session.commit().expect("seed edb playlist");
 
         // Enable staging now: remove_usb_playlist will operate on a local
         // HDD cache copy of the eDB, not the USB-mounted file directly.
