@@ -11,6 +11,7 @@ use crate::logging;
 use crate::logging::Level;
 use crate::models::WarningEntry;
 use crate::pdb_reader::parse_pdb;
+use crate::service::anlz_read::anlz_file_walks_cleanly;
 use std::collections::HashMap;
 use std::path::{Path, PathBuf};
 use walkdir::WalkDir;
@@ -218,30 +219,34 @@ pub(crate) fn sanitize_warning_path(path: &Path) -> String {
         .collect::<String>()
 }
 
-/// Whether the `.DAT` + `.EXT` pair of an analysis bundle exists. `anlz_path`
-/// may name any member of the bundle: a rekordbox import stores the `.EXT`.
-/// The `.2EX` is optional, since rekordbox's own bundles from older analyses
-/// have none, and exporting the pair is still what rekordbox would put on a stick.
-pub(crate) fn analysis_bundle_exists(usb_root: &Path, anlz_path: &str) -> bool {
-    let Some(path) = resolve_usb_side_path(usb_root, anlz_path) else {
-        return false;
-    };
-    path.with_extension("DAT").is_file() && path.with_extension("EXT").is_file()
+/// Whether the `.DAT` + `.EXT` pair of an analysis bundle is there and
+/// undamaged: both walk to their end ([`anlz_file_walks_cleanly`]). The
+/// `.2EX` is optional, since rekordbox's own bundles from older analyses have
+/// none, and exporting the pair is still what rekordbox would put on a stick.
+fn bundle_pair_usable(bundle: &Path) -> bool {
+    anlz_file_walks_cleanly(&bundle.with_extension("DAT"))
+        && anlz_file_walks_cleanly(&bundle.with_extension("EXT"))
 }
 
-/// Whether a library track's analysis bundle is gone from the local disk: an
-/// absolute `anlz_path` whose `.DAT` or `.EXT` is missing (see
-/// [`analysis_bundle_exists`]). A USB-side path (`/PIONEER/...`,
-/// `/Contents/...`) only resolves against a stick, so it is not checked here;
-/// the export gate checks it against the target.
-pub(crate) fn local_analysis_bundle_missing(anlz_path: &str) -> bool {
+/// [`bundle_pair_usable`] for a waveform path resolved against `usb_root`.
+/// `anlz_path` may name any member of the bundle: a rekordbox import stores
+/// the `.EXT`.
+pub(crate) fn analysis_bundle_usable(usb_root: &Path, anlz_path: &str) -> bool {
+    resolve_usb_side_path(usb_root, anlz_path).is_some_and(|path| bundle_pair_usable(&path))
+}
+
+/// Whether a library track's analysis bundle is gone from the local disk or
+/// damaged: an absolute `anlz_path` whose `.DAT` or `.EXT` is missing or
+/// doesn't walk to its end ([`bundle_pair_usable`]). Either way the track
+/// needs analysis again, which writes a new bundle. A USB-side path
+/// (`/PIONEER/...`, `/Contents/...`) only resolves against a stick, so it is
+/// not checked here; the export gate checks it against the target.
+pub(crate) fn local_analysis_bundle_unusable(anlz_path: &str) -> bool {
     let normalized = anlz_path.trim().replace('\\', "/");
     let usb_side = normalized.starts_with(USB_VENDOR_ROOT_PREFIX)
         || normalized.starts_with(&format!("/{USB_CONTENTS_DIR}/"));
     let path = Path::new(&normalized);
-    !usb_side
-        && path.is_absolute()
-        && !(path.with_extension("DAT").is_file() && path.with_extension("EXT").is_file())
+    !usb_side && path.is_absolute() && !bundle_pair_usable(path)
 }
 
 pub(crate) fn load_existing_analysis_paths_by_content_path(
@@ -426,8 +431,9 @@ mod tests {
             .join("ABCDEF01");
         std::fs::create_dir_all(&rb).unwrap();
         std::fs::create_dir_all(&anlz_dir).unwrap();
-        std::fs::write(anlz_dir.join("ANLZ0000.DAT"), b"dat").unwrap();
-        std::fs::write(anlz_dir.join("ANLZ0000.EXT"), b"ext").unwrap();
+        let empty = crate::service::anlz_read::empty_anlz_file();
+        std::fs::write(anlz_dir.join("ANLZ0000.DAT"), &empty).unwrap();
+        std::fs::write(anlz_dir.join("ANLZ0000.EXT"), &empty).unwrap();
         std::fs::write(anlz_dir.join("ANLZ0000.2EX"), b"2ex").unwrap();
 
         let db_path = rb.join("exportLibrary.db");
@@ -461,7 +467,7 @@ mod tests {
             .cloned()
             .expect("analysis path should be mapped");
         assert!(
-            analysis_bundle_exists(&tmp, &anlz),
+            analysis_bundle_usable(&tmp, &anlz),
             "bundle should be detected"
         );
 

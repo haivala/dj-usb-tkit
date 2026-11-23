@@ -2,6 +2,7 @@
 //! the track tables draw, from the library's or the stick's files.
 
 use crate::service::WAVEFORM_PREVIEW_BINS;
+use std::ops::Range;
 use std::path::{Path, PathBuf};
 
 pub(crate) fn load_waveform_preview_from_analysis_path(path: &Path) -> Option<Vec<u8>> {
@@ -52,7 +53,7 @@ pub(crate) fn waveform_preview_candidates(path: &Path) -> Vec<PathBuf> {
 /// Extract the raw PWV4 payload from a desktop library ANLZ `.EXT` file (no conversion).
 /// Returns the 1200 × 6 byte payload, or None if the file/chunk is absent.
 pub(crate) fn read_pwv4_from_anlz(dat_path: &Path) -> Option<Vec<u8>> {
-    read_ext_chunk(dat_path, "PWV4")
+    read_ext_chunk(dat_path, b"PWV4")
 }
 
 /// Extract the raw PWV5 colour-detail waveform payload from a desktop library
@@ -60,12 +61,12 @@ pub(crate) fn read_pwv4_from_anlz(dat_path: &Path) -> Option<Vec<u8>> {
 /// `R(3) | G(3) | B(3) | Height(5) | _(2)`. Entry count is duration-derived
 /// (`ceil(duration_s * 150) + 4`), so this can be tens of thousands of entries.
 pub(crate) fn read_pwv5_from_anlz(dat_path: &Path) -> Option<Vec<u8>> {
-    read_ext_chunk(dat_path, "PWV5").filter(|p| p.len() >= 4)
+    read_ext_chunk(dat_path, b"PWV5").filter(|p| p.len() >= 4)
 }
 
 /// The raw `tag` chunk payload from the `.EXT` sibling of `dat_path` (or
 /// `dat_path` itself when it already is the `.EXT`).
-fn read_ext_chunk(dat_path: &Path, tag: &str) -> Option<Vec<u8>> {
+fn read_ext_chunk(dat_path: &Path, tag: &[u8; 4]) -> Option<Vec<u8>> {
     let ext_path = if dat_path
         .extension()
         .and_then(|e| e.to_str())
@@ -75,36 +76,26 @@ fn read_ext_chunk(dat_path: &Path, tag: &str) -> Option<Vec<u8>> {
     } else {
         dat_path.with_extension("EXT")
     };
-    ext_chunk_from_bytes(&std::fs::read(&ext_path).ok()?, tag)
-}
-
-/// The raw `tag` chunk payload from an ANLZ file's bytes.
-fn ext_chunk_from_bytes(bytes: &[u8], tag: &str) -> Option<Vec<u8>> {
-    let container = find_anlz_chunk_payload(bytes, "PMAI").unwrap_or(bytes);
-    find_anlz_chunk_payload(container, tag).map(<[u8]>::to_vec)
+    anlz_chunk_payload(&std::fs::read(&ext_path).ok()?, tag).map(<[u8]>::to_vec)
 }
 
 /// [`read_pwv5_from_anlz`] from `.EXT` bytes already read.
 pub(crate) fn pwv5_from_ext_bytes(bytes: &[u8]) -> Option<Vec<u8>> {
-    ext_chunk_from_bytes(bytes, "PWV5").filter(|p| p.len() >= 4)
+    anlz_chunk_payload(bytes, b"PWV5")
+        .filter(|p| p.len() >= 4)
+        .map(<[u8]>::to_vec)
 }
 
 pub(crate) fn extract_waveform_preview_from_anlz_bytes(
     bytes: &[u8],
     bins: usize,
 ) -> Option<Vec<u8>> {
-    if bytes.len() < 16 {
-        return None;
-    }
-
-    let container = find_anlz_chunk_payload(bytes, "PMAI").unwrap_or(bytes);
     // Prefer single-byte-per-level formats (PWV3, PWAV, PWV2) because
     // downsample_waveform_payload extracts amplitude via `b & 0x1F` per byte.
     // Multi-byte formats (PWV5=2B, PWV4=6B per level) need dedicated decoders
     // and would produce garbage with byte-level extraction.
-    let preferred_tags = ["PWV3", "PWAV", "PWV2"];
-    for tag in preferred_tags {
-        if let Some(payload) = find_anlz_chunk_payload(container, tag) {
+    for tag in [b"PWV3", b"PWAV", b"PWV2"] {
+        if let Some(payload) = anlz_chunk_payload(bytes, tag) {
             let peaks = downsample_waveform_payload(payload, bins.max(1));
             if !peaks.is_empty() {
                 return Some(peaks);
@@ -114,52 +105,169 @@ pub(crate) fn extract_waveform_preview_from_anlz_bytes(
     None
 }
 
-pub(crate) fn find_anlz_chunk_payload<'a>(bytes: &'a [u8], wanted_tag: &str) -> Option<&'a [u8]> {
-    let mut offset = 0usize;
-    while offset + 12 <= bytes.len() {
-        let tag_bytes = &bytes[offset..offset + 4];
-        let tag_ok = tag_bytes
-            .iter()
-            .all(|b| b.is_ascii_uppercase() || b.is_ascii_digit());
-        if !tag_ok {
-            offset += 1;
-            continue;
-        }
+/// An ANLZ chunk's tag, header length and total length from its 12-byte
+/// header, when they hold together: a header at least those 12 bytes and a
+/// chunk at least its header. Whether the chunk fits in the file is the
+/// caller's check.
+pub(crate) fn chunk_header(head: &[u8]) -> Option<([u8; 4], usize, usize)> {
+    let tag: [u8; 4] = head.get(0..4)?.try_into().ok()?;
+    let header_len = u32::from_be_bytes(head.get(4..8)?.try_into().ok()?) as usize;
+    let total_len = u32::from_be_bytes(head.get(8..12)?.try_into().ok()?) as usize;
+    (header_len >= 12 && total_len >= header_len).then_some((tag, header_len, total_len))
+}
 
-        let Ok(tag) = std::str::from_utf8(tag_bytes) else {
-            offset += 1;
-            continue;
-        };
+/// One chunk of walked ANLZ bytes: its tag, its whole span, and its payload
+/// (the bytes after its header), as ranges into those bytes.
+pub(crate) struct AnlzChunk {
+    pub(crate) tag: [u8; 4],
+    pub(crate) range: Range<usize>,
+    pub(crate) body: Range<usize>,
+}
 
-        let header_len = u32::from_be_bytes([
-            bytes[offset + 4],
-            bytes[offset + 5],
-            bytes[offset + 6],
-            bytes[offset + 7],
-        ]) as usize;
-        let total_len = u32::from_be_bytes([
-            bytes[offset + 8],
-            bytes[offset + 9],
-            bytes[offset + 10],
-            bytes[offset + 11],
-        ]) as usize;
+/// The chunks of ANLZ bytes in file order ([`anlz_chunks`], [`chunk_entries`]).
+///
+/// The walk stops at the first chunk whose header doesn't hold together or
+/// that runs past the end. Every reader treats what comes after as
+/// unreadable, so a damaged file reads the same everywhere: the chunks before
+/// the damage, and nothing after it. A file whose walk doesn't reach its end
+/// is damaged, and its track needs analysis again
+/// ([`anlz_file_walks_cleanly`]).
+pub(crate) struct AnlzChunks<'a> {
+    data: &'a [u8],
+    pos: usize,
+    stopped: bool,
+}
 
-        if header_len < 12 || total_len < header_len || offset + total_len > bytes.len() {
-            offset += 1;
-            continue;
-        }
-
-        if tag == wanted_tag {
-            let start = offset + header_len;
-            let end = offset + total_len;
-            if start < end {
-                return Some(&bytes[start..end]);
-            }
-        }
-
-        offset += total_len;
+impl AnlzChunks<'_> {
+    /// Where the walk stopped: the end of the last chunk it read.
+    pub(crate) fn end(&self) -> usize {
+        self.pos
     }
-    None
+
+    /// Whether the walk got to the end of the bytes. Meaningful once the
+    /// iterator is exhausted.
+    pub(crate) fn complete(&self) -> bool {
+        self.pos == self.data.len()
+    }
+}
+
+impl Iterator for AnlzChunks<'_> {
+    type Item = AnlzChunk;
+
+    fn next(&mut self) -> Option<AnlzChunk> {
+        if self.stopped || self.pos == self.data.len() {
+            return None;
+        }
+        let pos = self.pos;
+        let header = self
+            .data
+            .get(pos..pos + 12)
+            .and_then(chunk_header)
+            .filter(|&(_, _, total_len)| total_len <= self.data.len() - pos);
+        let Some((tag, header_len, total_len)) = header else {
+            self.stopped = true;
+            return None;
+        };
+        self.pos = pos + total_len;
+        Some(AnlzChunk {
+            tag,
+            range: pos..pos + total_len,
+            body: pos + header_len..pos + total_len,
+        })
+    }
+}
+
+/// The chunks of an ANLZ file's bytes, after its 28-byte `PMAI` header. Bytes
+/// that aren't an ANLZ file have none and never walk to the end.
+pub(crate) fn anlz_chunks(file: &[u8]) -> AnlzChunks<'_> {
+    let is_anlz = file.len() >= 28 && file.starts_with(b"PMAI");
+    AnlzChunks {
+        data: file,
+        pos: if is_anlz { 28 } else { 0 },
+        stopped: !is_anlz,
+    }
+}
+
+/// The entries inside a chunk's payload (the `PCPT`/`PCP2` cues of a
+/// `PCOB`/`PCO2`), which are laid out like chunks.
+pub(crate) fn chunk_entries(body: &[u8]) -> AnlzChunks<'_> {
+    AnlzChunks {
+        data: body,
+        pos: 0,
+        stopped: false,
+    }
+}
+
+/// The payload of the first `tag` chunk that has one, in an ANLZ file's bytes.
+pub(crate) fn anlz_chunk_payload<'a>(file: &'a [u8], tag: &[u8; 4]) -> Option<&'a [u8]> {
+    anlz_chunks(file)
+        .find(|chunk| &chunk.tag == tag && !chunk.body.is_empty())
+        .map(|chunk| &file[chunk.body])
+}
+
+/// Walks the chunk headers of the ANLZ file at `path`, reading through a
+/// `buffer_size` buffer and skipping each chunk `keep` turns down by its
+/// length. Returns the file's 28-byte header followed by the kept chunks, and
+/// whether the walk reached the end of the file (`false` for a file that
+/// isn't ANLZ). `None` when the file can't be read.
+pub(crate) fn stream_anlz_chunks(
+    path: &Path,
+    keep: impl Fn(&[u8; 4]) -> bool,
+    buffer_size: usize,
+) -> Option<(Vec<u8>, bool)> {
+    use std::io::Read;
+    let file = std::fs::File::open(path).ok()?;
+    let len = file.metadata().ok()?.len();
+    let mut file = std::io::BufReader::with_capacity(buffer_size, file);
+    let mut out = vec![0u8; 28];
+    file.read_exact(&mut out).ok()?;
+    if !out.starts_with(b"PMAI") {
+        return Some((out, false));
+    }
+    let mut pos = 28u64;
+    while pos < len {
+        let mut head = [0u8; 12];
+        if len - pos < 12 || file.read_exact(&mut head).is_err() {
+            return Some((out, false));
+        }
+        let Some((tag, _, total_len)) = chunk_header(&head) else {
+            return Some((out, false));
+        };
+        let total_len = total_len as u64;
+        if total_len > len - pos {
+            return Some((out, false));
+        }
+        let rest = total_len - 12;
+        if keep(&tag) {
+            let mut body = vec![0u8; usize::try_from(rest).ok()?];
+            if file.read_exact(&mut body).is_err() {
+                return Some((out, false));
+            }
+            out.extend_from_slice(&head);
+            out.extend_from_slice(&body);
+        } else if file.seek_relative(i64::try_from(rest).ok()?).is_err() {
+            return Some((out, false));
+        }
+        pos += total_len;
+    }
+    Some((out, true))
+}
+
+/// An ANLZ file with no chunks: its 28-byte header, the file length in bytes
+/// 8..12. It walks cleanly, for tests that need a bundle but not its content.
+#[cfg(test)]
+pub(crate) fn empty_anlz_file() -> Vec<u8> {
+    let mut file = b"PMAI".to_vec();
+    file.extend_from_slice(&28u32.to_be_bytes());
+    file.extend_from_slice(&28u32.to_be_bytes());
+    file.resize(28, 0);
+    file
+}
+
+/// Whether the ANLZ file at `path` is there and walks to its end. Reads only
+/// the chunk headers, so it is cheap enough to run per listed track.
+pub(crate) fn anlz_file_walks_cleanly(path: &Path) -> bool {
+    stream_anlz_chunks(path, |_| false, 64).is_some_and(|(_, clean)| clean)
 }
 
 pub(crate) fn downsample_waveform_payload(payload: &[u8], bins: usize) -> Vec<u8> {

@@ -12,6 +12,7 @@ use uuid::Uuid;
 
 use crate::error::BackendResult;
 
+use super::anlz_read::{anlz_chunks, chunk_entries, stream_anlz_chunks};
 use super::anlz_seek::{PVBR_PAYLOAD_LEN, SeekIndex, SeekIndexSkip, seek_index_for_audio};
 use super::usb::vendor_compat::{USB_ANALYSIS_DIR, USB_VENDOR_ROOT_DIR};
 
@@ -742,34 +743,14 @@ pub fn ensure_ppth_chunk(data: &[u8], track_path: &str) -> Vec<u8> {
     out.extend_from_slice(&data[..28]);
     out.extend_from_slice(&ppth_chunk);
 
-    let mut pos = 28usize;
-    while pos < data.len() {
-        if pos + 12 > data.len() {
-            out.extend_from_slice(&data[pos..]);
-            break;
+    let mut chunks = anlz_chunks(data);
+    for chunk in chunks.by_ref() {
+        if &chunk.tag != b"PPTH" {
+            out.extend_from_slice(&data[chunk.range]);
         }
-        let Some(header_len) = read_u32_be_at(data, pos + 4).map(|v| v as usize) else {
-            out.extend_from_slice(&data[pos..]);
-            break;
-        };
-        let Some(total_len) = read_u32_be_at(data, pos + 8).map(|v| v as usize) else {
-            out.extend_from_slice(&data[pos..]);
-            break;
-        };
-        if header_len < 12
-            || total_len < header_len
-            || total_len == 0
-            || pos + total_len > data.len()
-        {
-            out.extend_from_slice(&data[pos..]);
-            break;
-        }
-
-        if data.get(pos..pos + 4) != Some(b"PPTH") {
-            out.extend_from_slice(&data[pos..pos + total_len]);
-        }
-        pos += total_len;
     }
+    // A damaged tail is kept as it is.
+    out.extend_from_slice(&data[chunks.end()..]);
 
     let file_len = out.len() as u32;
     out[8..12].copy_from_slice(&file_len.to_be_bytes());
@@ -832,31 +813,11 @@ pub fn apply_analysis_edits_to_anlz(data: &[u8], edits: &AnlzAnalysisEdits<'_>) 
     let mut out = Vec::with_capacity(data.len());
     out.extend_from_slice(&data[..28]);
 
-    let mut pos = 28usize;
-    while pos < data.len() {
-        if pos + 12 > data.len() {
-            out.extend_from_slice(&data[pos..]);
-            break;
-        }
-        let Some(header_len) = read_u32_be_at(data, pos + 4).map(|v| v as usize) else {
-            out.extend_from_slice(&data[pos..]);
-            break;
-        };
-        let Some(total_len) = read_u32_be_at(data, pos + 8).map(|v| v as usize) else {
-            out.extend_from_slice(&data[pos..]);
-            break;
-        };
-        if header_len < 12
-            || total_len < header_len
-            || total_len == 0
-            || pos + total_len > data.len()
-        {
-            out.extend_from_slice(&data[pos..]);
-            break;
-        }
-
-        let fourcc = &data[pos..pos + 4];
-        let original = &data[pos..pos + total_len];
+    let mut chunks = anlz_chunks(data);
+    for chunk in chunks.by_ref() {
+        let pos = chunk.range.start;
+        let fourcc = &chunk.tag;
+        let original = &data[chunk.range];
         let mut replacement: Option<Vec<u8>> = None;
 
         if let (Some(first_beat_ms), Some(duration_ms)) = (rebuilt_first_beat, beatgrid_duration_ms)
@@ -895,8 +856,9 @@ pub fn apply_analysis_edits_to_anlz(data: &[u8], edits: &AnlzAnalysisEdits<'_>) 
             Some(chunk) => out.extend_from_slice(&chunk),
             None => out.extend_from_slice(original),
         }
-        pos += total_len;
     }
+    // A damaged tail is kept as it is.
+    out.extend_from_slice(&data[chunks.end()..]);
 
     let file_len = out.len() as u32;
     out[8..12].copy_from_slice(&file_len.to_be_bytes());
@@ -905,39 +867,21 @@ pub fn apply_analysis_edits_to_anlz(data: &[u8], edits: &AnlzAnalysisEdits<'_>) 
 
 /// The track path in an ANLZ file's `PPTH` chunk, if it has one.
 pub(crate) fn ppth_path_from_anlz(data: &[u8]) -> Option<String> {
-    if data.len() < 28 || data.get(0..4) != Some(b"PMAI") {
+    let chunk = anlz_chunks(data).find(|chunk| &chunk.tag == b"PPTH")?;
+    let payload = &data[chunk.body];
+    if !payload.len().is_multiple_of(2) {
         return None;
     }
-    let mut pos = 28usize;
-    while pos + 12 <= data.len() {
-        let header_len = read_u32_be_at(data, pos + 4)? as usize;
-        let total_len = read_u32_be_at(data, pos + 8)? as usize;
-        if header_len < 12
-            || total_len < header_len
-            || total_len == 0
-            || pos + total_len > data.len()
-        {
-            return None;
-        }
-        if data.get(pos..pos + 4) == Some(b"PPTH") {
-            let payload = data.get(pos + header_len..pos + total_len)?;
-            if payload.len() % 2 != 0 {
-                return None;
-            }
-            let mut units = payload
-                .as_chunks::<2>()
-                .0
-                .iter()
-                .map(|chunk| u16::from_be_bytes(*chunk))
-                .collect::<Vec<_>>();
-            if units.last() == Some(&0) {
-                units.pop();
-            }
-            return String::from_utf16(&units).ok();
-        }
-        pos += total_len;
+    let mut units = payload
+        .as_chunks::<2>()
+        .0
+        .iter()
+        .map(|chunk| u16::from_be_bytes(*chunk))
+        .collect::<Vec<_>>();
+    if units.last() == Some(&0) {
+        units.pop();
     }
-    None
+    String::from_utf16(&units).ok()
 }
 
 // ===========================================================================
@@ -1037,21 +981,12 @@ fn try_fill_mp3_pvbr(dat_path: &Path, audio_path: &Path) -> BackendResult<PvbrFi
 /// Every chunk of a `PMAI` file as (fourcc, byte range). `None` unless the
 /// whole file walks cleanly, so a patch never lands in a damaged file.
 fn anlz_chunk_ranges(data: &[u8]) -> Option<Vec<([u8; 4], std::ops::Range<usize>)>> {
-    if data.len() < 28 || data.get(0..4) != Some(b"PMAI") {
-        return None;
-    }
-    let mut chunks = Vec::new();
-    let mut pos = 28usize;
-    while pos < data.len() {
-        let header_len = read_u32_be_at(data, pos + 4)? as usize;
-        let total_len = read_u32_be_at(data, pos + 8)? as usize;
-        if header_len < 12 || total_len < header_len || pos + total_len > data.len() {
-            return None;
-        }
-        chunks.push((data[pos..pos + 4].try_into().ok()?, pos..pos + total_len));
-        pos += total_len;
-    }
-    Some(chunks)
+    let mut chunks = anlz_chunks(data);
+    let ranges = chunks
+        .by_ref()
+        .map(|chunk| (chunk.tag, chunk.range))
+        .collect();
+    chunks.complete().then_some(ranges)
 }
 
 /// The total sample count in a `.DAT`'s `PVBR`; `None` without a
@@ -1124,26 +1059,15 @@ const PQTZ_UNKNOWN2: u32 = 0x0008_0000;
 const PQTZ_HEADER_MISPLACED: [u8; 8] = [0, 0, 0, 0x08, 0, 0, 0, 0];
 
 /// Whether a `.DAT`'s `PQTZ` header has the pre-0.3.7 misplaced layout.
-/// Works on the start of the file too: `PQTZ` follows `PPTH` and `PVBR`,
-/// about 2 KB in.
+/// Works on [`read_anlz_chunks`]'s result too, which keeps `PQTZ` whole.
 pub(crate) fn has_misplaced_pqtz_header(dat: &[u8]) -> bool {
-    if dat.get(0..4) != Some(b"PMAI") {
-        return false;
-    }
-    let mut pos = 28usize;
-    while let (Some(header_len), Some(total_len)) =
-        (read_u32_be_at(dat, pos + 4), read_u32_be_at(dat, pos + 8))
-    {
-        if header_len < 12 || total_len < header_len {
-            return false;
-        }
-        if &dat[pos..pos + 4] == b"PQTZ" {
-            return header_len == 24
-                && dat.get(pos + 12..pos + 20) == Some(&PQTZ_HEADER_MISPLACED[..]);
-        }
-        pos += total_len as usize;
-    }
-    false
+    anlz_chunks(dat)
+        .find(|chunk| &chunk.tag == b"PQTZ")
+        .is_some_and(|chunk| {
+            chunk.body.start - chunk.range.start == 24
+                && dat.get(chunk.range.start + 12..chunk.range.start + 20)
+                    == Some(&PQTZ_HEADER_MISPLACED[..])
+        })
 }
 
 /// The ANLZ file at `path` with only the `tags` chunks kept: its 28-byte
@@ -1155,7 +1079,6 @@ pub(crate) fn has_misplaced_pqtz_header(dat: &[u8]) -> bool {
 /// so a whole-file walk ([`anlz_chunk_ranges`]) still fails and a first-match
 /// walk still finds what comes before. `None` when the file can't be read.
 pub(crate) fn read_anlz_chunks(path: &Path, tags: &[[u8; 4]]) -> Option<Vec<u8>> {
-    use std::io::Read;
     const BROKEN_TAIL: [u8; 4] = [0; 4];
     // Reads go through one buffer this size, and skips stay inside it: the
     // header and the chunks before the waveforms (where the beat grid is)
@@ -1163,41 +1086,9 @@ pub(crate) fn read_anlz_chunks(path: &Path, tags: &[[u8; 4]]) -> Option<Vec<u8>>
     // the drive and cost more than reading the whole file.
     const READ_SIZE: usize = 64 * 1024;
 
-    let file = std::fs::File::open(path).ok()?;
-    let len = file.metadata().ok()?.len();
-    let mut file = std::io::BufReader::with_capacity(READ_SIZE, file);
-    let mut out = vec![0u8; 28];
-    file.read_exact(&mut out).ok()?;
-    if out.get(0..4) != Some(b"PMAI") {
-        return Some(out);
-    }
-    let mut pos = 28u64;
-    while pos < len {
-        let mut head = [0u8; 12];
-        if len - pos < 12 || file.read_exact(&mut head).is_err() {
-            out.extend_from_slice(&BROKEN_TAIL);
-            break;
-        }
-        let header_len = u64::from(u32::from_be_bytes([head[4], head[5], head[6], head[7]]));
-        let total_len = u64::from(u32::from_be_bytes([head[8], head[9], head[10], head[11]]));
-        if header_len < 12 || total_len < header_len || pos + total_len > len {
-            out.extend_from_slice(&BROKEN_TAIL);
-            break;
-        }
-        let rest = total_len - 12;
-        if tags.iter().any(|tag| head[..4] == tag[..]) {
-            let mut body = vec![0u8; usize::try_from(rest).ok()?];
-            if file.read_exact(&mut body).is_err() {
-                out.extend_from_slice(&BROKEN_TAIL);
-                break;
-            }
-            out.extend_from_slice(&head);
-            out.extend_from_slice(&body);
-        } else if file.seek_relative(i64::try_from(rest).ok()?).is_err() {
-            out.extend_from_slice(&BROKEN_TAIL);
-            break;
-        }
-        pos += total_len;
+    let (mut out, clean) = stream_anlz_chunks(path, |tag| tags.contains(tag), READ_SIZE)?;
+    if !clean && out.starts_with(b"PMAI") {
+        out.extend_from_slice(&BROKEN_TAIL);
     }
     Some(out)
 }
@@ -1510,50 +1401,25 @@ fn build_pcp2_entry(cue: &AnlzCue) -> Vec<u8> {
 /// `PCOB`/`PCPT` (position + hot slot only) for older bundles that lack `PCO2`.
 /// Used on USB re-import so cues the app itself exported survive round-trips.
 pub fn read_cues_from_anlz(data: &[u8]) -> Vec<AnlzCue> {
-    if data.len() < 28 || data.get(0..4) != Some(b"PMAI") {
-        return Vec::new();
-    }
-
     let mut from_pco2: Vec<AnlzCue> = Vec::new();
     let mut from_pcob: Vec<AnlzCue> = Vec::new();
 
-    let mut pos = 28usize;
-    while pos + 12 <= data.len() {
-        let fourcc = &data[pos..pos + 4];
-        let Some(header_len) = read_u32_be_at(data, pos + 4).map(|v| v as usize) else {
-            break;
-        };
-        let Some(total_len) = read_u32_be_at(data, pos + 8).map(|v| v as usize) else {
-            break;
-        };
-        if header_len < 12 || total_len < header_len || pos + total_len > data.len() {
-            break;
-        }
-
-        if fourcc == b"PCO2" || fourcc == b"PCOB" {
-            let body = &data[pos + header_len..pos + total_len];
-            let mut sub = 0usize;
-            while sub + 12 <= body.len() {
-                let sub_fourcc = &body[sub..sub + 4];
-                let sub_hlen = read_u32_be_at(body, sub + 4).unwrap_or(0) as usize;
-                let sub_tlen = read_u32_be_at(body, sub + 8).unwrap_or(0) as usize;
-                if sub_hlen < 12 || sub_tlen < sub_hlen || sub + sub_tlen > body.len() {
-                    break;
-                }
-                let entry = &body[sub..sub + sub_tlen];
-                if sub_fourcc == b"PCP2" {
-                    if let Some(cue) = parse_pcp2_entry(entry) {
+    for chunk in anlz_chunks(data) {
+        if &chunk.tag == b"PCO2" || &chunk.tag == b"PCOB" {
+            let body = &data[chunk.body];
+            for entry in chunk_entries(body) {
+                let bytes = &body[entry.range];
+                if &entry.tag == b"PCP2" {
+                    if let Some(cue) = parse_pcp2_entry(bytes) {
                         from_pco2.push(cue);
                     }
-                } else if sub_fourcc == b"PCPT"
-                    && let Some(cue) = parse_pcpt_entry(entry)
+                } else if &entry.tag == b"PCPT"
+                    && let Some(cue) = parse_pcpt_entry(bytes)
                 {
                     from_pcob.push(cue);
                 }
-                sub += sub_tlen;
             }
         }
-        pos += total_len;
     }
 
     if !from_pco2.is_empty() {
@@ -1566,31 +1432,20 @@ pub fn read_cues_from_anlz(data: &[u8]) -> Vec<AnlzCue> {
 /// Read the beat-grid anchor (time of the first beat, ms) from an ANLZ file's
 /// `PQTZ` (or `PQT2`) chunk. Used on USB re-import to seed `tracks.first_beat_ms`.
 pub fn read_first_beat_from_anlz(data: &[u8]) -> Option<u32> {
-    if data.len() < 28 || data.get(0..4) != Some(b"PMAI") {
-        return None;
-    }
-    let mut pos = 28usize;
-    while pos + 12 <= data.len() {
-        let fourcc = &data[pos..pos + 4];
-        let header_len = read_u32_be_at(data, pos + 4)? as usize;
-        let total_len = read_u32_be_at(data, pos + 8)? as usize;
-        if header_len < 12 || total_len < header_len || pos + total_len > data.len() {
-            break;
-        }
-        if fourcc == b"PQTZ" {
+    for chunk in anlz_chunks(data) {
+        if &chunk.tag == b"PQTZ" {
             // payload: 8-byte beat entries (beat_num u16, tempo u16, time u32)
-            let body = &data[pos + header_len..pos + total_len];
+            let body = &data[chunk.body.clone()];
             if body.len() >= 8 {
                 return read_u32_be_at(body, 4);
             }
         }
-        if fourcc == b"PQT2" {
+        if &chunk.tag == b"PQT2" {
             // header carries first_time_ms at chunk-relative offset 28.
-            if let Some(t) = read_u32_be_at(data, pos + 28) {
+            if let Some(t) = read_u32_be_at(data, chunk.range.start + 28) {
                 return Some(t);
             }
         }
-        pos += total_len;
     }
     None
 }
@@ -1601,32 +1456,22 @@ pub fn read_first_beat_from_anlz(data: &[u8]) -> Option<u32> {
 /// left behind by an earlier degenerate analysis or repair pass — see
 /// `docs/DIAGNOSTICS_REPAIRS.md`).
 pub fn read_beatgrid_tempo_from_anlz(data: &[u8]) -> Option<u16> {
-    if data.len() < 28 || data.get(0..4) != Some(b"PMAI") {
-        return None;
-    }
-    let mut pos = 28usize;
-    while pos + 12 <= data.len() {
-        let fourcc = &data[pos..pos + 4];
-        let header_len = read_u32_be_at(data, pos + 4)? as usize;
-        let total_len = read_u32_be_at(data, pos + 8)? as usize;
-        if header_len < 12 || total_len < header_len || pos + total_len > data.len() {
-            break;
-        }
-        if fourcc == b"PQTZ" {
+    for chunk in anlz_chunks(data) {
+        if &chunk.tag == b"PQTZ" {
             // payload: 8-byte beat entries (beat_num u16, tempo u16, time u32)
-            let body = &data[pos + header_len..pos + total_len];
+            let body = &data[chunk.body.clone()];
             if body.len() >= 4 {
                 return Some(u16::from_be_bytes([body[2], body[3]]));
             }
         }
-        if fourcc == b"PQT2" {
+        if &chunk.tag == b"PQT2" {
             // header content: first_beat_num(u16) tempo(u16) first_time_ms(u32) ...
             // at content offset 12..14/14..16 (chunk-relative offset 26..28).
-            if header_len >= 28 {
+            if chunk.body.start - chunk.range.start >= 28 {
+                let pos = chunk.range.start;
                 return Some(u16::from_be_bytes([data[pos + 26], data[pos + 27]]));
             }
         }
-        pos += total_len;
     }
     None
 }
@@ -2492,6 +2337,99 @@ mod tests {
             build_anlz_dat_file(&waveform, "", Some(bpm), 200_000, Some(first_beat_ms), &[]),
             build_anlz_ext_file(&waveform, "", Some(bpm), 200_000, Some(first_beat_ms), &[]),
         )
+    }
+
+    /// An `.EXT` whose first `PCO2` claims to run past the end of the file,
+    /// and where that chunk starts.
+    fn ext_damaged_at_pco2() -> (Vec<u8>, Vec<u8>, usize) {
+        let (_, ext) = bundle_at(120.0, 437);
+        let at = anlz_chunks(&ext)
+            .find(|chunk| &chunk.tag == b"PCO2")
+            .expect("PCO2")
+            .range
+            .start;
+        let mut damaged = ext.clone();
+        damaged[at + 8..at + 12].copy_from_slice(&u32::MAX.to_be_bytes());
+        (ext, damaged, at)
+    }
+
+    #[test]
+    fn every_reader_stops_at_a_damaged_chunk() {
+        use crate::service::anlz_read::{
+            anlz_chunk_payload, extract_waveform_preview_from_anlz_bytes,
+        };
+        let (ext, damaged, at) = ext_damaged_at_pco2();
+        assert!(anlz_chunk_payload(&ext, b"PWV5").is_some());
+
+        // Chunks before the damage read; nothing after it does, not even a
+        // chunk whose header is intact.
+        assert!(anlz_chunk_payload(&damaged, b"PWV3").is_some());
+        assert!(extract_waveform_preview_from_anlz_bytes(&damaged, 50).is_some());
+        assert_eq!(anlz_chunk_payload(&damaged, b"PWV5"), None);
+        assert_eq!(anlz_chunk_payload(&damaged, b"PWV4"), None);
+        let mut chunks = anlz_chunks(&damaged);
+        assert!(chunks.by_ref().all(|chunk| chunk.range.end <= at));
+        assert_eq!(chunks.end(), at);
+        assert!(!chunks.complete());
+        assert_eq!(anlz_chunk_ranges(&damaged), None);
+        assert_eq!(has_pvb2_chunk(&damaged), None);
+
+        // A rewrite keeps the damaged tail as it is.
+        let renamed = ensure_ppth_chunk(&damaged, "/Contents/a.mp3");
+        assert!(renamed.ends_with(&damaged[at..]));
+        assert_eq!(
+            ppth_path_from_anlz(&renamed).as_deref(),
+            Some("/Contents/a.mp3")
+        );
+        assert_eq!(u32_at(&renamed, 8) as usize, renamed.len());
+    }
+
+    #[test]
+    fn readers_ignore_the_file_length_in_the_header() {
+        use crate::service::anlz_read::anlz_chunk_payload;
+        let (dat, ext) = bundle_at(120.0, 437);
+        for (file, tag) in [(&dat, b"PQTZ"), (&ext, b"PWV5")] {
+            let mut wrong = file.clone();
+            wrong[8..12].copy_from_slice(&1u32.to_be_bytes());
+            assert_eq!(
+                anlz_chunk_payload(&wrong, tag),
+                anlz_chunk_payload(file, tag)
+            );
+            assert!(anlz_chunk_ranges(&wrong).is_some());
+        }
+    }
+
+    #[test]
+    fn a_file_walks_cleanly_only_when_its_chunks_end_at_its_end() {
+        use crate::service::anlz_read::anlz_file_walks_cleanly;
+        let (dat, ext) = bundle_at(120.0, 437);
+        let (_, damaged, _) = ext_damaged_at_pco2();
+        let mut trailing = ext.clone();
+        trailing.extend_from_slice(&[1, 2, 3]);
+        let mut header_only = dat[..28].to_vec();
+        header_only[8..12].copy_from_slice(&28u32.to_be_bytes());
+        let dir = tempfile::tempdir().unwrap();
+        let file = |name: &str, bytes: &[u8]| {
+            let path = dir.path().join(name);
+            std::fs::write(&path, bytes).unwrap();
+            path
+        };
+        for (name, bytes, clean) in [
+            ("dat.DAT", dat.as_slice(), true),
+            ("ext.EXT", ext.as_slice(), true),
+            ("header.DAT", header_only.as_slice(), true),
+            ("damaged.EXT", damaged.as_slice(), false),
+            ("truncated.EXT", &ext[..ext.len() - 3], false),
+            ("trailing.EXT", trailing.as_slice(), false),
+            (
+                "audio.DAT",
+                b"ID3 not an analysis file at all".as_slice(),
+                false,
+            ),
+        ] {
+            assert_eq!(anlz_file_walks_cleanly(&file(name, bytes)), clean, "{name}");
+        }
+        assert!(!anlz_file_walks_cleanly(&dir.path().join("gone.DAT")));
     }
 
     fn u32_at(data: &[u8], at: usize) -> u32 {

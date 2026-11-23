@@ -28,8 +28,18 @@ pub fn copy_audio_fixture(media_dir: &Path, fixture_relative: &str, target_name:
     );
 }
 
-/// Writes placeholder DAT/EXT/2EX files into the app's analysis cache and
-/// returns the DAT path.
+/// An ANLZ file with no chunks: its 28-byte header, the file length in bytes
+/// 8..12. The app accepts it as an undamaged analysis file.
+pub fn empty_anlz_file() -> Vec<u8> {
+    let mut file = b"PMAI".to_vec();
+    file.extend_from_slice(&28u32.to_be_bytes());
+    file.extend_from_slice(&28u32.to_be_bytes());
+    file.resize(28, 0);
+    file
+}
+
+/// Writes placeholder (chunkless) DAT/EXT/2EX files into the app's analysis
+/// cache and returns the DAT path.
 pub fn seed_test_analysis_bundle(data_dir: &Path, stem: &str) -> PathBuf {
     let dir = data_dir.join("analysis").join("waveforms");
     fs::create_dir_all(&dir).expect("create test analysis dir");
@@ -44,9 +54,10 @@ pub fn seed_test_analysis_bundle(data_dir: &Path, stem: &str) -> PathBuf {
         })
         .collect::<String>();
     let dat = dir.join(format!("{safe_stem}.DAT"));
-    fs::write(&dat, b"test-dat").expect("write test DAT");
-    fs::write(dir.join(format!("{safe_stem}.EXT")), b"test-ext").expect("write test EXT");
-    fs::write(dir.join(format!("{safe_stem}.2EX")), b"test-2ex").expect("write test 2EX");
+    for ext in ["DAT", "EXT", "2EX"] {
+        fs::write(dir.join(format!("{safe_stem}.{ext}")), empty_anlz_file())
+            .expect("write test analysis file");
+    }
     dat
 }
 

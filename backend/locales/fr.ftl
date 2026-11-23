@@ -1309,7 +1309,7 @@ export-refused-formats = Export bloqué : { $count ->
 export-refused-analysis-files = Export bloqué : les fichiers d'analyse de { $missing } sur { $total ->
     [one] { $total } morceau
    *[other] { $total } morceaux
-} sont manquants. Sélectionnez-les et utilisez « Réanalyser ».
+} sont manquants ou endommagés. Sélectionnez-les et utilisez « Réanalyser ».
 export-refused-not-analyzed = Export bloqué : { $missing } sur { $total ->
     [one] { $total } morceau
    *[other] { $total } morceaux

@@ -3328,9 +3328,9 @@ fn export_to_usb_reuses_existing_usb_assets_for_usb_origin_tracks() {
     let cover_fixture = cover_fixture_path();
     fs::copy(&cover_fixture, &usb_art_small).expect("seed small artwork");
     fs::copy(&cover_fixture, &usb_art_medium).expect("seed medium artwork");
-    fs::write(&usb_anlz_dat, b"dat").expect("seed DAT");
-    fs::write(&usb_anlz_ext, b"ext").expect("seed EXT");
-    fs::write(&usb_anlz_2ex, b"2ex").expect("seed 2EX");
+    for path in [&usb_anlz_dat, &usb_anlz_ext, &usb_anlz_2ex] {
+        fs::write(path, common::empty_anlz_file()).expect("seed analysis file");
+    }
 
     let materialized = backend.materialize_source_track(MaterializeSourceTrackRequest {
         file_path: usb_track_path.to_string_lossy().to_string(),

@@ -725,18 +725,28 @@ fn add_tracks_to_playlist_rejects_unknown_track() {
 }
 
 #[test]
-fn playlist_tracks_with_their_analysis_files_gone_need_analysis() {
+fn playlist_tracks_with_their_analysis_files_gone_or_damaged_need_analysis() {
     let (_dir, service) = test_service();
     let anlz = tempfile::tempdir().expect("anlz dir");
+    let empty_anlz = crate::service::anlz_read::empty_anlz_file();
     let present = anlz.path().join("ANLZ0000.DAT");
     for ext in ["DAT", "EXT"] {
-        std::fs::write(present.with_extension(ext), b"x").expect("bundle");
+        std::fs::write(present.with_extension(ext), &empty_anlz).expect("bundle");
     }
     let gone = anlz.path().join("ANLZ0001.DAT");
+    // A chunk header cut off at the end of the `.EXT`.
+    let damaged = anlz.path().join("ANLZ0002.DAT");
+    std::fs::write(&damaged, &empty_anlz).expect("dat");
+    std::fs::write(
+        damaged.with_extension("EXT"),
+        [empty_anlz.as_slice(), b"PWV3\0\0"].concat(),
+    )
+    .expect("ext");
     let conn = service.db.connect().expect("connect");
     for (id, waveform) in [
         ("present", present.to_string_lossy().to_string()),
         ("gone", gone.to_string_lossy().to_string()),
+        ("damaged", damaged.to_string_lossy().to_string()),
         // Only a stick resolves this; the export gate checks it there.
         (
             "usb-side",
@@ -759,7 +769,12 @@ fn playlist_tracks_with_their_analysis_files_gone_need_analysis() {
     service
         .add_tracks_to_playlist(AddTracksToPlaylistRequest {
             playlist_id: playlist.playlist_id.clone(),
-            track_ids: vec!["present".into(), "gone".into(), "usb-side".into()],
+            track_ids: vec![
+                "present".into(),
+                "gone".into(),
+                "damaged".into(),
+                "usb-side".into(),
+            ],
         })
         .expect("add tracks");
 
@@ -769,7 +784,7 @@ fn playlist_tracks_with_their_analysis_files_gone_need_analysis() {
             ..Default::default()
         })
         .expect("get playlist tracks");
-    assert_eq!(tracks.unanalyzed_count, 1);
+    assert_eq!(tracks.unanalyzed_count, 2);
     let ready: Vec<_> = tracks
         .items
         .iter()
@@ -777,15 +792,20 @@ fn playlist_tracks_with_their_analysis_files_gone_need_analysis() {
         .collect();
     assert_eq!(
         ready,
-        [("present", true), ("gone", false), ("usb-side", true)]
+        [
+            ("present", true),
+            ("gone", false),
+            ("damaged", false),
+            ("usb-side", true)
+        ]
     );
-    // "Analyze Missing Tracks" picks the same track.
+    // "Analyze Missing Tracks" picks the same tracks.
     let conn = service.db.connect().expect("connect");
     assert_eq!(
         service
             .collect_playlists_unanalyzed_track_ids(&conn, &[playlist.playlist_id.as_str()], "")
             .expect("collect"),
-        ["gone"]
+        ["gone", "damaged"]
     );
 }
 

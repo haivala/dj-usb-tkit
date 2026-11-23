@@ -42,7 +42,7 @@ use crate::models::{
 };
 use crate::service::usb::root::{can_write_file_at, resolve_usb_root, resolve_usb_side_path};
 use crate::service::usb::stick_files::{
-    analysis_bundle_exists, load_existing_analysis_paths_by_content_path,
+    analysis_bundle_usable, load_existing_analysis_paths_by_content_path,
     load_existing_analysis_paths_by_content_path_with_conn,
     load_existing_analysis_paths_by_pdb_track_path,
 };
@@ -904,7 +904,7 @@ fn has_analysis_bundle(usb_root: &Path, track: &ExportTrackData) -> bool {
     track
         .waveform_peaks_path
         .as_deref()
-        .map(|path| analysis_bundle_exists(usb_root, path))
+        .map(|path| analysis_bundle_usable(usb_root, path))
         .unwrap_or(false)
 }
 
@@ -1933,7 +1933,7 @@ impl BackendService {
                     // A bundle whose PPTH names another track is that track's
                     // (hash-folder collision): not reused, a fresh one is written.
                     let claimable = |p: &String| {
-                        analysis_bundle_exists(usb_root.as_path(), p)
+                        analysis_bundle_usable(usb_root.as_path(), p)
                             && resolve_usb_side_path(&usb_root, p)
                                 .is_some_and(|dat| analysis_bundle_claimable(&dat, &exported_path))
                     };
@@ -3017,9 +3017,10 @@ mod tests {
         let dat = dir.join(format!("{stem}.DAT"));
         let ext = dir.join(format!("{stem}.EXT"));
         let twoex = dir.join(format!("{stem}.2EX"));
-        std::fs::write(&dat, b"bad-dat").expect("write DAT");
-        std::fs::write(&ext, b"bad-ext").expect("write EXT");
-        std::fs::write(&twoex, b"bad-2ex").expect("write 2EX");
+        let empty = crate::service::anlz_read::empty_anlz_file();
+        std::fs::write(&dat, &empty).expect("write DAT");
+        std::fs::write(&ext, &empty).expect("write EXT");
+        std::fs::write(&twoex, &empty).expect("write 2EX");
         dat.to_string_lossy().to_string()
     }
 
@@ -3048,15 +3049,22 @@ mod tests {
     }
 
     #[test]
-    fn required_analysis_requires_existing_anlz_bundle_but_not_valid_content() {
+    fn required_analysis_requires_an_undamaged_anlz_bundle_but_not_its_content() {
         let dir = tempdir().expect("tempdir");
         let mut track = make_track();
-        track.waveform_peaks_path = Some(write_test_analysis_bundle(dir.path(), "invalid"));
+        track.waveform_peaks_path = Some(write_test_analysis_bundle(dir.path(), "empty"));
 
         assert!(
             has_required_analysis(dir.path(), &track),
-            "export readiness should require files, not validate ANLZ quality"
+            "export readiness should require undamaged files, not judge their content"
         );
+
+        let mut damaged = make_track();
+        let damaged_path = write_test_analysis_bundle(dir.path(), "damaged");
+        std::fs::write(Path::new(&damaged_path).with_extension("EXT"), b"bad-ext")
+            .expect("write EXT");
+        damaged.waveform_peaks_path = Some(damaged_path);
+        assert!(!has_required_analysis(dir.path(), &damaged));
 
         let mut missing_bundle = make_track();
         missing_bundle.waveform_peaks_path =
@@ -3068,8 +3076,9 @@ mod tests {
     fn required_analysis_accepts_rekordbox_bundle_without_2ex() {
         // rekordbox imports store the `.EXT`; older rekordbox analyses have no `.2EX`.
         let dir = tempdir().expect("tempdir");
-        std::fs::write(dir.path().join("ANLZ0000.DAT"), b"dat").expect("write DAT");
-        std::fs::write(dir.path().join("ANLZ0000.EXT"), b"ext").expect("write EXT");
+        let empty = crate::service::anlz_read::empty_anlz_file();
+        std::fs::write(dir.path().join("ANLZ0000.DAT"), &empty).expect("write DAT");
+        std::fs::write(dir.path().join("ANLZ0000.EXT"), &empty).expect("write EXT");
         let mut track = make_track();
         track.waveform_peaks_path = Some(
             dir.path()
@@ -3145,7 +3154,7 @@ mod tests {
                 assert_eq!(details["totalTrackCount"], 1);
                 assert_eq!(
                     details["statusText"],
-                    "Export blocked: the analysis files of 1 of 1 track are missing. Select them and use Reanalyze."
+                    "Export blocked: the analysis files of 1 of 1 track are missing or damaged. Select them and use Reanalyze."
                 );
             }
             other => panic!("unexpected error variant: {other:?}"),

@@ -603,7 +603,7 @@ impl BackendService {
         let mut items = rows.collect::<Result<Vec<_>, _>>()?;
         apply_frontend_track_fields(conn, &mut items)?;
         // The export gate also needs the analysis files, so a playlist track
-        // whose files are gone needs analysis even with its fields set:
+        // whose files are gone or damaged needs analysis even with its fields set:
         // "Analyze Missing Tracks" then rewrites them instead of the export
         // failing with nothing to click.
         for track in &mut items {
@@ -611,7 +611,7 @@ impl BackendService {
                 && track
                     .waveform_peaks_path
                     .as_deref()
-                    .is_some_and(crate::service::usb::stick_files::local_analysis_bundle_missing)
+                    .is_some_and(crate::service::usb::stick_files::local_analysis_bundle_unusable)
             {
                 track.analysis_ready = false;
             }

@@ -13,21 +13,11 @@ use tempfile::{TempDir, tempdir};
 
 use crate::{common, library_sources};
 
-fn seed_test_analysis_bundle(data_dir: &Path, stem: &str) -> PathBuf {
-    let dir = data_dir.join("analysis").join("waveforms");
-    fs::create_dir_all(&dir).expect("create test analysis dir");
-    let dat = dir.join(format!("{stem}.DAT"));
-    fs::write(&dat, b"test-dat").expect("write test DAT");
-    fs::write(dir.join(format!("{stem}.EXT")), b"test-ext").expect("write test EXT");
-    fs::write(dir.join(format!("{stem}.2EX")), b"test-2ex").expect("write test 2EX");
-    dat
-}
-
 pub fn seed_tracks_as_analyzed(data_dir: &Path, track_ids: &[String]) {
     let db_path = data_dir.join("backend.db");
     let conn = rusqlite::Connection::open(&db_path).expect("open backend db");
     for (idx, track_id) in track_ids.iter().enumerate() {
-        let bundle = seed_test_analysis_bundle(data_dir, &format!("waveform-{idx}"));
+        let bundle = common::seed_test_analysis_bundle(data_dir, &format!("waveform-{idx}"));
         conn.execute(
             "UPDATE tracks
              SET bpm = 120.0,

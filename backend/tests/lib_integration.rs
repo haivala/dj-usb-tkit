@@ -6608,13 +6608,14 @@ fn export_to_usb_fingerprint_fallback_reuses_foreign_scheme_track_instead_of_dup
         .id;
 
     // Analysis is required for export regardless of include_analysis, so seed a
-    // minimal (dummy-content) DAT/EXT/2EX bundle and point the local track at it.
+    // minimal (chunkless) DAT/EXT/2EX bundle and point the local track at it.
     let local_analysis_dir = root.path().join("local-analysis");
     fs::create_dir_all(&local_analysis_dir).expect("create local analysis dir");
     let waveform_dat = local_analysis_dir.join("ANLZ0000.DAT");
-    fs::write(&waveform_dat, b"dat").expect("write DAT");
-    fs::write(local_analysis_dir.join("ANLZ0000.EXT"), b"ext").expect("write EXT");
-    fs::write(local_analysis_dir.join("ANLZ0000.2EX"), b"2ex").expect("write 2EX");
+    for ext in ["DAT", "EXT", "2EX"] {
+        fs::write(waveform_dat.with_extension(ext), common::empty_anlz_file())
+            .expect("write analysis file");
+    }
 
     let conn = rusqlite::Connection::open(data_dir.join("backend.db")).expect("open backend db");
     conn.execute(

@@ -725,10 +725,11 @@ pub(crate) fn kept_analysis_values(
 const ANALYSIS_TRACK_COLS: &str = "id, title, file_path, bpm, bpm_analyzer, tonality, tonality_source, waveform_peaks_path, first_beat_ms, first_beat_ms_source";
 
 fn row_to_track_for_analysis(row: &rusqlite::Row<'_>) -> rusqlite::Result<LocalTrackForAnalysis> {
-    // A waveform whose files are gone counts as none: analyzing that track
+    // A waveform whose files are gone or damaged counts as none: analyzing that track
     // restores them, a first analysis that keeps edited and imported values.
     let has_waveform = row.get::<_, Option<String>>(7)?.is_some_and(|p| {
-        !p.trim().is_empty() && !crate::service::usb::stick_files::local_analysis_bundle_missing(&p)
+        !p.trim().is_empty()
+            && !crate::service::usb::stick_files::local_analysis_bundle_unusable(&p)
     });
     let existing_first_beat_ms = row
         .get::<_, Option<i64>>(8)?
@@ -2150,7 +2151,11 @@ mod tests {
         let anlz = tempdir().expect("anlz dir");
         for name in ["ANLZ0000", "ANLZ0001"] {
             for ext in ["DAT", "EXT"] {
-                std::fs::write(anlz.path().join(format!("{name}.{ext}")), b"x").expect("bundle");
+                std::fs::write(
+                    anlz.path().join(format!("{name}.{ext}")),
+                    crate::service::anlz_read::empty_anlz_file(),
+                )
+                .expect("bundle");
             }
         }
         let a = anlz.path().display();

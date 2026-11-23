@@ -1722,7 +1722,7 @@ export-refused-formats = Export blocked: { $count ->
 export-refused-analysis-files = Export blocked: the analysis files of { $missing } of { $total ->
     [one] { $total } track
    *[other] { $total } tracks
-} are missing. Select them and use Reanalyze.
+} are missing or damaged. Select them and use Reanalyze.
 # $missing: the tracks not analyzed. $total: the playlist's tracks.
 export-refused-not-analyzed = Export blocked: { $missing } of { $total ->
     [one] { $total } track

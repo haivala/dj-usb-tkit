@@ -22,7 +22,7 @@ use crate::models::{DiagCheck, DiagSection, DiagStatus, TrackCue, WarningEntry};
 use crate::pdb_reader::{
     ParsedPdb, PdbPlaylistEntryRow, PdbPlaylistTreeRow, PdbTrackRow, parse_pdb_bytes,
 };
-use crate::service::anlz_read::find_anlz_chunk_payload;
+use crate::service::anlz_read::anlz_chunk_payload;
 use crate::service::usb::root::resolve_usb_side_path;
 use crate::service::usb::text::canonicalize_playlist_name;
 use rusqlite::{OptionalExtension, params};
@@ -683,11 +683,7 @@ fn engine_grid(beats: &[(u16, u16, u32)], rate: f64, sample_count: i64) -> Vec<G
 /// The `.EXT`'s `PWV4` colour preview (1200 entries; bytes 3/4/5 are the
 /// low/mid/high bands, 0-127) as Engine's 1024-entry 0-255 overview.
 fn overview_from_ext(ext: &[u8]) -> Option<Vec<[u8; 3]>> {
-    if ext.get(0..4) != Some(b"PMAI") {
-        return None;
-    }
-    let container = find_anlz_chunk_payload(ext, "PMAI").unwrap_or(ext);
-    let payload = find_anlz_chunk_payload(container, "PWV4")?;
+    let payload = anlz_chunk_payload(ext, b"PWV4")?;
     let (entries, _) = payload.as_chunks::<6>();
     if entries.len() < OVERVIEW_ENTRIES / 4 {
         return None;
