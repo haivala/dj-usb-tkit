@@ -41,7 +41,7 @@ fn main() {
 
     for slot in pdb_page::row_slots(page) {
         let (start, end) = (slot.start, slot.end);
-        let row = &page[pdb_page::HEAP_START + start..pdb_page::HEAP_START + end];
+        let row = &page[slot.range()];
         let len = row.len();
         let id = read_u32_le(row, 12).unwrap_or(0);
         let so = read_u32_le(row, 8).unwrap_or(0);

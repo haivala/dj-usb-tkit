@@ -420,6 +420,13 @@ pub struct RowSlot {
     pub footer: FooterSlot,
 }
 
+impl RowSlot {
+    /// The row's bytes as a range of its page.
+    pub fn range(&self) -> std::ops::Range<usize> {
+        HEAP_START + self.start..HEAP_START + self.end
+    }
+}
+
 /// The row slots of a page (its whole length): as many as the header's
 /// `num_row_offsets` ([`read_slot_counts`]), each running from its heap
 /// offset to the next slot's, the last to the end of the used heap. A slot
@@ -461,7 +468,7 @@ pub fn present_rows(page: &[u8]) -> Vec<Vec<u8>> {
     row_slots(page)
         .into_iter()
         .filter(|slot| slot.present)
-        .map(|slot| page[HEAP_START + slot.start..HEAP_START + slot.end].to_vec())
+        .map(|slot| page[slot.range()].to_vec())
         .collect()
 }
 

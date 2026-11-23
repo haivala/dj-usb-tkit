@@ -43,35 +43,6 @@ fn test_env_lock() -> &'static Mutex<()> {
 
 use backend::service::usb::vendor_compat::DEFAULT_USB_EDB_KEY;
 
-/// Open an eDB, trying plain SQLite first, then SQLCipher.
-fn open_export_db(path: &Path) -> rusqlite::Connection {
-    let conn = rusqlite::Connection::open(path).expect("open eDB");
-    let has_schema = conn
-        .query_row(
-            "SELECT COUNT(1) FROM sqlite_master WHERE type IN ('table','view')",
-            [],
-            |row| row.get::<_, i64>(0),
-        )
-        .unwrap_or(0);
-    if has_schema == 0 {
-        conn.execute_batch(&format!("PRAGMA key='{DEFAULT_USB_EDB_KEY}';"))
-            .expect("apply SQLCipher key");
-        let unlocked = conn
-            .query_row(
-                "SELECT COUNT(1) FROM sqlite_master WHERE type IN ('table','view')",
-                [],
-                |row| row.get::<_, i64>(0),
-            )
-            .unwrap_or(0);
-        assert!(
-            unlocked > 0,
-            "failed to unlock SQLCipher DB at {}",
-            path.display()
-        );
-    }
-    conn
-}
-
 /// Materialization of local rows / `track_usb_links` / `local_track_id` moved
 /// off the USB import and onto the paginated page fetch. Tests that used to
 /// read materialized state straight off `fetch_usb_playlists` now walk every
@@ -254,7 +225,7 @@ fn seed_usb_missing_audio_fixture(backend: &BackendCommands, usb_root: &Path) ->
         .expect("seed PDB with missing track");
 
     let db_path = vendor_db_dir(usb_root).join("exportLibrary.db");
-    let conn = open_export_db(&db_path);
+    let conn = common::open_edb(&db_path);
     conn.execute(
         "INSERT INTO playlist (playlist_id, name, attribute, sequenceNo) VALUES (?1, ?2, 0, 1)",
         rusqlite::params![77i64, playlist_name],
@@ -504,16 +475,6 @@ fn seed_track_analysis_fields(data_dir: &Path, track_id: &str) {
         rusqlite::params![track_id, waveform_path.to_string_lossy().to_string()],
     )
     .expect("seed track analysis fields");
-}
-
-fn seed_track_artwork_path(data_dir: &Path, track_id: &str, artwork_path: &Path) {
-    let db_path = data_dir.join("backend.db");
-    let conn = rusqlite::Connection::open(db_path).expect("open backend db");
-    conn.execute(
-        "UPDATE tracks SET artwork_path = ?1 WHERE id = ?2",
-        [artwork_path.to_string_lossy().as_ref(), track_id],
-    )
-    .expect("seed track artwork path");
 }
 
 fn write_solid_cover_jpeg(path: &Path, rgb: [u8; 3]) {
@@ -1176,7 +1137,7 @@ fn export_to_usb_copies_anlz_bundle_for_fixture_mp3() {
     assert!(twoex >= 1, "expected at least one copied ANLZ0000.2EX");
 
     let db_path = vendor_db_dir(&usb).join("exportLibrary.db");
-    let conn = open_export_db(&db_path);
+    let conn = common::open_edb(&db_path);
     let (content_path, analysis_path): (String, String) = conn
         .query_row(
             "SELECT path, analysisDataFilePath FROM content WHERE analysisDataFilePath IS NOT NULL LIMIT 1",
@@ -1247,7 +1208,7 @@ fn export_to_usb_prunes_stale_owned_assets_when_enabled() {
         .expect("track id");
 
     seed_track_analysis_fields(&data_dir, &track_id);
-    seed_track_artwork_path(&data_dir, &track_id, &media.join("cover.jpg"));
+    common::seed_track_artwork_path(&data_dir, &track_id, &media.join("cover.jpg"));
 
     let created = backend.create_playlist(CreatePlaylistRequest {
         name: "Prune Test".to_string(),
@@ -1586,7 +1547,7 @@ fn export_to_usb_mirror_prune_keeps_shared_artwork_referenced_by_other_playlists
     for id in [&shared_id, &only_a_id, &only_b_id] {
         seed_track_analysis_fields(&data_dir, id);
     }
-    seed_track_artwork_path(&data_dir, &shared_id, &shared_cover);
+    common::seed_track_artwork_path(&data_dir, &shared_id, &shared_cover);
 
     let created_a = backend.create_playlist(CreatePlaylistRequest {
         name: "Mirror Art A".to_string(),
@@ -1640,7 +1601,7 @@ fn export_to_usb_mirror_prune_keeps_shared_artwork_referenced_by_other_playlists
     }
 
     let export_db = vendor_db_dir(&usb).join("exportLibrary.db");
-    let conn = open_export_db(&export_db);
+    let conn = common::open_edb(&export_db);
     let shared_image_path: String = conn
         .query_row(
             r#"
@@ -1809,7 +1770,7 @@ fn export_to_usb_mirror_prune_keeps_shared_analysis_referenced_by_other_playlist
     }
 
     let export_db = vendor_db_dir(&usb).join("exportLibrary.db");
-    let conn = open_export_db(&export_db);
+    let conn = common::open_edb(&export_db);
     let shared_anlz_path: String = conn
         .query_row(
             "SELECT analysisDataFilePath FROM content WHERE title = 'Shared Track' LIMIT 1",
@@ -1946,7 +1907,7 @@ fn export_to_usb_preserves_existing_export_db_metadata_when_local_track_is_thin(
     );
 
     let export_db = vendor_db_dir(&usb).join("exportLibrary.db");
-    let conn = open_export_db(&export_db);
+    let conn = common::open_edb(&export_db);
     conn.execute(
         "INSERT OR REPLACE INTO artist (artist_id, name) VALUES (7, 'Existing Artist')",
         [],
@@ -1993,7 +1954,7 @@ fn export_to_usb_preserves_existing_export_db_metadata_when_local_track_is_thin(
     });
     assert!(exported.ok, "export failed: {exported:?}");
 
-    let conn = open_export_db(&export_db);
+    let conn = common::open_edb(&export_db);
     let row = conn
         .query_row(
             r#"
@@ -2120,10 +2081,10 @@ fn export_to_usb_additive_does_not_overwrite_existing_cover_art_by_playlist_posi
         seed_track_analysis_fields(&data_dir, id);
     }
     for id in &old_ids {
-        seed_track_artwork_path(&data_dir, id, &old_cover);
+        common::seed_track_artwork_path(&data_dir, id, &old_cover);
     }
     for id in &new_ids {
-        seed_track_artwork_path(&data_dir, id, &new_cover);
+        common::seed_track_artwork_path(&data_dir, id, &new_cover);
     }
 
     let created = backend.create_playlist(CreatePlaylistRequest {
@@ -2159,7 +2120,7 @@ fn export_to_usb_additive_does_not_overwrite_existing_cover_art_by_playlist_posi
     assert!(export_old.ok, "initial export failed: {export_old:?}");
 
     let export_db = vendor_db_dir(&usb).join("exportLibrary.db");
-    let conn = open_export_db(&export_db);
+    let conn = common::open_edb(&export_db);
     let old_image_path: String = conn
         .query_row(
             r#"
@@ -4193,7 +4154,7 @@ fn adding_usb_track_clears_stale_local_key_when_usb_key_is_missing() {
     write_pdb(&usb, &playlist, &manifest, false, None, None).expect("write export pdb");
 
     let export_db = vendor_db_dir(&usb).join("exportLibrary.db");
-    let conn = open_export_db(&export_db);
+    let conn = common::open_edb(&export_db);
     conn.execute(
         r#"INSERT OR REPLACE INTO playlist (playlist_id, name, attribute, sequenceNo) VALUES (1, 'USB Key Clear', 0, 1)"#,
         [],
@@ -4399,7 +4360,7 @@ fn fetch_usb_histories_opens_edb_exactly_once_not_once_per_read() {
     write_pdb(&usb, &playlist, &manifest, false, None, None).expect("write export pdb");
 
     let export_db = vendor_db_dir(&usb).join("exportLibrary.db");
-    let conn = open_export_db(&export_db);
+    let conn = common::open_edb(&export_db);
     conn.execute(
         r#"INSERT OR REPLACE INTO playlist (playlist_id, name, attribute, sequenceNo) VALUES (1, 'EDB Reuse', 0, 1)"#,
         [],
@@ -4887,7 +4848,7 @@ fn repair_usb_diagnostics_strict_upgrade_rewrites_pdb_from_edb() {
 
     write_pdb(&usb, &playlist, &manifest, true, None, None).expect("write pdb");
     let vendor_db = vendor_db_dir(&usb).join("exportLibrary.db");
-    let conn = open_export_db(&vendor_db);
+    let conn = common::open_edb(&vendor_db);
     conn.execute(
         "INSERT INTO playlist (playlist_id, name, attribute, sequenceNo) VALUES (100, 'Testi', 0, 100)",
         [],
@@ -5100,7 +5061,7 @@ fn repair_usb_diagnostics_strict_upgrade_is_not_proposed_when_neither_side_is_ri
     write_pdb(&usb, &playlist, &manifest, true, None, None).expect("write thin pdb");
 
     let vendor_db = vendor_db_dir(&usb).join("exportLibrary.db");
-    let conn = open_export_db(&vendor_db);
+    let conn = common::open_edb(&vendor_db);
     conn.execute(
         "INSERT INTO playlist (playlist_id, name, attribute, sequenceNo) VALUES (1, 'Thin Repair', 0, 1)",
         [],
@@ -5164,7 +5125,7 @@ fn repair_usb_diagnostics_apply_removes_missing_audio_references_from_db_and_pdb
     );
 
     let db_path = vendor_db_dir(&usb).join("exportLibrary.db");
-    let conn = open_export_db(&db_path);
+    let conn = common::open_edb(&db_path);
     let remaining_content: i64 = conn
         .query_row(
             "SELECT COUNT(1) FROM content WHERE path = ?1",
@@ -5248,7 +5209,7 @@ fn remove_usb_playlist_deletes_playlist_from_edb() {
         ),
     );
 
-    let conn = open_export_db(&db_path);
+    let conn = common::open_edb(&db_path);
     let count: i64 = conn
         .query_row(
             "SELECT COUNT(1) FROM playlist WHERE name = 'My Playlist'",
@@ -5376,8 +5337,8 @@ fn export_to_usb_test_matches_expected_usb_content_rows_for_exported_tracks() {
         test_db.display()
     );
 
-    let expected_conn = open_export_db(&expected_db);
-    let test_conn = open_export_db(&test_db);
+    let expected_conn = common::open_edb(&expected_db);
+    let test_conn = common::open_edb(&test_db);
 
     let load_columns = |conn: &rusqlite::Connection| -> BTreeSet<String> {
         let mut out = BTreeSet::<String>::new();
@@ -5651,8 +5612,8 @@ fn export_to_usb_produces_identical_content_and_pdb_rows_across_two_runs() {
     }
 
     // ── eDB content row comparison ──────────────────────────────────
-    let conn_a = open_export_db(&vendor_db_dir(&usb_a).join("exportLibrary.db"));
-    let conn_b = open_export_db(&vendor_db_dir(&usb_b).join("exportLibrary.db"));
+    let conn_a = common::open_edb(&vendor_db_dir(&usb_a).join("exportLibrary.db"));
+    let conn_b = common::open_edb(&vendor_db_dir(&usb_b).join("exportLibrary.db"));
 
     let load_columns = |conn: &rusqlite::Connection| -> BTreeSet<String> {
         let mut out = BTreeSet::<String>::new();

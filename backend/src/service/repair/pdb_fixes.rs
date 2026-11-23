@@ -166,12 +166,7 @@ pub(super) fn apply_pdb_empty_duplicate_playlists_repair(
         return Ok(found);
     }
     let ids = found.iter().map(|p| p.id).collect::<HashSet<_>>();
-    crate::pdb_writer::remove_rows_inplace(
-        bytes,
-        7,
-        &ids,
-        crate::pdb_writer::extract_playlist_tree_id,
-    );
+    crate::pdb_writer::remove_rows_inplace(bytes, 7, &ids, crate::pdb_row::playlist_tree_id);
     crate::pdb_writer::rebuild_sentinel_btrees_inplace(bytes);
     Ok(found)
 }
@@ -323,7 +318,7 @@ pub(in crate::service) fn detect_pdb_string_misalignment(
             if !slot.present {
                 continue;
             }
-            let row = &page[pdb_page::HEAP_START + slot.start..pdb_page::HEAP_START + slot.end];
+            let row = &page[slot.range()];
             let row_len = row.len();
             match table_type {
                 0 => {
@@ -1003,7 +998,7 @@ pub(super) fn reencode_pdb_dictionary_rows(
             if !slot.present {
                 continue;
             }
-            let row = &page[pdb_page::HEAP_START + slot.start..pdb_page::HEAP_START + slot.end];
+            let row = &page[slot.range()];
             let Some(id) = read_u32_le_at(row, id_offset) else {
                 continue;
             };
@@ -1064,7 +1059,7 @@ pub(in crate::service) fn detect_pdb_tombstoned_playlist_tree_ids(
 
         for slot in pdb_page::row_slots(page) {
             let is_active = slot.present;
-            let row = &page[pdb_page::HEAP_START + slot.start..pdb_page::HEAP_START + slot.end];
+            let row = &page[slot.range()];
             let id = read_u32_le_at(row, id_field_offset).unwrap_or(0);
             if id == 0 {
                 continue;

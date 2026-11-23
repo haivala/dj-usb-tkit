@@ -3,8 +3,7 @@
 
 use super::root::can_write_file_at;
 use super::vendor_compat::{
-    DEFAULT_USB_EDB_KEY, USB_CONTENTS_DIR, USB_VENDOR_DB_DIR, USB_VENDOR_ROOT_DIR, vendor_db_dir,
-    vendor_pdb_path,
+    DEFAULT_USB_EDB_KEY, USB_CONTENTS_DIR, vendor_db_dir, vendor_edb_path, vendor_pdb_path,
 };
 use crate::error::{BackendError, BackendResult};
 use crate::i18n::tr;
@@ -32,10 +31,7 @@ pub(crate) fn initialize_usb_for(
         return Err(BackendError::Validation(tr::usb_error_read_only_init()));
     }
 
-    let dirs_to_create = [
-        root.join(USB_VENDOR_ROOT_DIR).join(USB_VENDOR_DB_DIR),
-        root.join(USB_CONTENTS_DIR),
-    ];
+    let dirs_to_create = [vendor_db_dir(root), root.join(USB_CONTENTS_DIR)];
 
     // The day the USB is initialized: the eDB's `property.createdDate` and
     // the t19 template row carry it, as on a USB rekordbox initializes.
@@ -75,9 +71,7 @@ pub(crate) fn initialize_usb_for(
         session.create_database(kind, &created_date)?;
         created_files.push(match kind {
             crate::service::usb::staging::DbKind::Pdb => vendor_pdb_path(root),
-            crate::service::usb::staging::DbKind::Edb => {
-                vendor_db_dir(root).join("exportLibrary.db")
-            }
+            crate::service::usb::staging::DbKind::Edb => vendor_edb_path(root),
         });
     }
     session.commit()?;

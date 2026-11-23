@@ -349,10 +349,7 @@ pub fn remove_playlist_and_tracks_from_pdb_in(
     let shared_track_count = shared_track_ids.len();
 
     // --- In-place deletion: mark rows as not-in-use, preserving page layout ---
-    use crate::pdb_writer::{
-        extract_artwork_id, extract_playlist_entry_playlist_id, extract_playlist_tree_id,
-        extract_track_id, rebuild_sentinel_btrees_inplace, remove_rows_inplace,
-    };
+    use crate::pdb_writer::{rebuild_sentinel_btrees_inplace, remove_rows_inplace};
 
     let mut pdb_bytes = std::fs::read(&pdb_path)?;
 
@@ -378,18 +375,28 @@ pub fn remove_playlist_and_tracks_from_pdb_in(
     };
 
     // Mark playlist tree rows as deleted (table type 7)
-    remove_rows_inplace(&mut pdb_bytes, 7, &remove_ids, extract_playlist_tree_id);
+    remove_rows_inplace(
+        &mut pdb_bytes,
+        7,
+        &remove_ids,
+        crate::pdb_row::playlist_tree_id,
+    );
 
     // Mark playlist entries as deleted (table type 8)
     remove_rows_inplace(
         &mut pdb_bytes,
         8,
         &remove_ids,
-        extract_playlist_entry_playlist_id,
+        crate::pdb_row::playlist_entry_playlist_id,
     );
 
     // Mark exclusive tracks as deleted (table type 0)
-    remove_rows_inplace(&mut pdb_bytes, 0, &exclusive_track_ids, extract_track_id);
+    remove_rows_inplace(
+        &mut pdb_bytes,
+        0,
+        &exclusive_track_ids,
+        crate::pdb_row::track_id,
+    );
 
     // Mark exclusive artwork as deleted (table type 13)
     if !exclusive_artwork_ids.is_empty() {
@@ -397,7 +404,7 @@ pub fn remove_playlist_and_tracks_from_pdb_in(
             &mut pdb_bytes,
             13,
             &exclusive_artwork_ids,
-            extract_artwork_id,
+            crate::pdb_row::artwork_id,
         );
     }
 
@@ -435,10 +442,7 @@ pub fn remove_tracks_from_pdb(
     usb_root: &Path,
     track_ids: &HashSet<u32>,
 ) -> BackendResult<PdbTrackRemoval> {
-    use crate::pdb_writer::{
-        extract_artwork_id, extract_playlist_entry_track_id, extract_track_id,
-        rebuild_sentinel_btrees_inplace, remove_rows_inplace,
-    };
+    use crate::pdb_writer::{rebuild_sentinel_btrees_inplace, remove_rows_inplace};
 
     let mut result = PdbTrackRemoval::default();
     if track_ids.is_empty() {
@@ -470,15 +474,15 @@ pub fn remove_tracks_from_pdb(
         &mut pdb_bytes,
         8,
         track_ids,
-        extract_playlist_entry_track_id,
+        crate::pdb_row::playlist_entry_track_id,
     );
-    result.track_rows = remove_rows_inplace(&mut pdb_bytes, 0, track_ids, extract_track_id);
+    result.track_rows = remove_rows_inplace(&mut pdb_bytes, 0, track_ids, crate::pdb_row::track_id);
     if !exclusive_artwork_ids.is_empty() {
         result.artwork_rows = remove_rows_inplace(
             &mut pdb_bytes,
             13,
             &exclusive_artwork_ids,
-            extract_artwork_id,
+            crate::pdb_row::artwork_id,
         );
     }
     if result == PdbTrackRemoval::default() {
@@ -620,9 +624,7 @@ pub fn remove_orphaned_dropped_tracks_from_dbs(
     }
 
     // --- PDB: tombstone track rows + now-exclusive artwork rows in place ---
-    use crate::pdb_writer::{
-        extract_artwork_id, extract_track_id, rebuild_sentinel_btrees_inplace, remove_rows_inplace,
-    };
+    use crate::pdb_writer::{rebuild_sentinel_btrees_inplace, remove_rows_inplace};
 
     let exclusive_artwork_ids: HashSet<u32> = {
         let removed: HashSet<u32> = parsed
@@ -641,14 +643,18 @@ pub fn remove_orphaned_dropped_tracks_from_dbs(
     };
 
     let mut pdb_bytes = std::fs::read(&pdb_path)?;
-    result.removed_pdb_tracks =
-        remove_rows_inplace(&mut pdb_bytes, 0, &orphan_track_ids, extract_track_id);
+    result.removed_pdb_tracks = remove_rows_inplace(
+        &mut pdb_bytes,
+        0,
+        &orphan_track_ids,
+        crate::pdb_row::track_id,
+    );
     if !exclusive_artwork_ids.is_empty() {
         result.removed_pdb_artwork = remove_rows_inplace(
             &mut pdb_bytes,
             13,
             &exclusive_artwork_ids,
-            extract_artwork_id,
+            crate::pdb_row::artwork_id,
         );
     }
     if result.removed_pdb_tracks > 0 || result.removed_pdb_artwork > 0 {

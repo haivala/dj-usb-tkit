@@ -78,12 +78,8 @@ pub struct PdbPlaylistTreeRow {
     pub name: String,
 }
 
-#[derive(Clone, Debug)]
-pub struct PdbPlaylistEntryRow {
-    pub entry_index: u32,
-    pub track_id: u32,
-    pub playlist_id: u32,
-}
+/// The writer writes the playlist entries it reads.
+pub use crate::pdb_reader::PdbPlaylistEntryRow;
 
 #[derive(Clone, Debug)]
 pub struct PdbHistoryEntryRow {

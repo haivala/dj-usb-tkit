@@ -7,7 +7,6 @@
 //! it (standalone CLI tools and most tests), sessions snapshot and restore the
 //! directly edited files instead. Backups are an optional session setting.
 
-use super::vendor_compat::{USB_VENDOR_DB_DIR, USB_VENDOR_ROOT_DIR};
 use crate::error::{BackendError, BackendResult};
 use crate::service::normalize_source_root_for_matching;
 use serde::{Deserialize, Serialize};
@@ -95,8 +94,8 @@ pub enum DbKind {
 impl DbKind {
     fn filename(self) -> &'static str {
         match self {
-            DbKind::Pdb => "export.pdb",
-            DbKind::Edb => "exportLibrary.db",
+            DbKind::Pdb => crate::service::usb::vendor_compat::PDB_FILE_NAME,
+            DbKind::Edb => crate::service::usb::vendor_compat::EDB_FILE_NAME,
         }
     }
 
@@ -218,8 +217,10 @@ fn device_dir_for(cache_root: Option<&Path>, usb_root: &Path) -> Option<PathBuf>
     cache_root.map(|root| root.join(cache_key_for_root(usb_root)))
 }
 
+/// The vendor database folder of the local copy in `device_dir`, laid out
+/// as on the stick.
 fn local_vendor_db_dir(device_dir: &Path) -> PathBuf {
-    device_dir.join(USB_VENDOR_ROOT_DIR).join(USB_VENDOR_DB_DIR)
+    crate::service::usb::vendor_compat::vendor_db_dir(device_dir)
 }
 
 /// The HDD-cache-side `backups/` dir for `usb_root`'s device (mirrors the
@@ -1548,7 +1549,7 @@ mod tests {
     use tempfile::tempdir;
 
     fn usb_root_with_edb(dir: &Path, bytes: &[u8]) -> PathBuf {
-        let db_dir = dir.join(USB_VENDOR_ROOT_DIR).join(USB_VENDOR_DB_DIR);
+        let db_dir = crate::service::usb::vendor_compat::vendor_db_dir(dir);
         std::fs::create_dir_all(&db_dir).unwrap();
         std::fs::write(db_dir.join("exportLibrary.db"), bytes).unwrap();
         dir.to_path_buf()
@@ -1820,7 +1821,7 @@ mod tests {
             b"modified locally"
         );
         // No leftover temp file beside the final destination.
-        let db_dir = usb_root.join(USB_VENDOR_ROOT_DIR).join(USB_VENDOR_DB_DIR);
+        let db_dir = crate::service::usb::vendor_compat::vendor_db_dir(&usb_root);
         let leftover_tmp = std::fs::read_dir(&db_dir)
             .unwrap()
             .filter_map(|e| e.ok())

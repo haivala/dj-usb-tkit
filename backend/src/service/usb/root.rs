@@ -2,8 +2,8 @@
 //! the stick's databases store against it, and whether it can be written.
 
 use super::vendor_compat::{
-    USB_CONTENTS_DIR, USB_ROOT_ENV_KEY, USB_VENDOR_DB_DIR, USB_VENDOR_DB_DIR_LOWER,
-    USB_VENDOR_ROOT_DIR, USB_VENDOR_ROOT_DIR_LOWER, USB_VENDOR_ROOT_PREFIX,
+    USB_CONTENTS_DIR, USB_ROOT_ENV_KEY, USB_VENDOR_DB_DIR_LOWER, USB_VENDOR_ROOT_DIR,
+    USB_VENDOR_ROOT_DIR_LOWER, USB_VENDOR_ROOT_PREFIX,
 };
 use crate::error::{BackendError, BackendResult};
 use crate::i18n::tr;
@@ -206,7 +206,7 @@ pub(crate) fn resolve_usb_side_path_lexical_text(usb_root: &Path, raw: &str) -> 
 /// media would cost too much. A command that writes checks with
 /// `can_write_file_at` instead, right before it writes.
 pub(crate) fn has_write_access(root: &Path) -> bool {
-    let probe_dir = root.join(USB_VENDOR_ROOT_DIR).join(USB_VENDOR_DB_DIR);
+    let probe_dir = crate::service::usb::vendor_compat::vendor_db_dir(root);
     let target = if probe_dir.is_dir() {
         probe_dir
     } else {
@@ -283,7 +283,7 @@ pub(super) mod tests {
             root
         );
         assert_eq!(
-            normalize_usb_root_path(root.join(USB_VENDOR_ROOT_DIR).join(USB_VENDOR_DB_DIR)),
+            normalize_usb_root_path(crate::service::usb::vendor_compat::vendor_db_dir(&root)),
             root
         );
     }
@@ -317,7 +317,7 @@ pub(super) mod tests {
     #[test]
     fn resolve_usb_side_path_allows_valid_vendor_relative() {
         let tmp = std::env::temp_dir().join(format!("__test_usb_resolve_{}__", Uuid::now_v7()));
-        let vendor_root = tmp.join(USB_VENDOR_ROOT_DIR).join(USB_VENDOR_DB_DIR);
+        let vendor_root = crate::service::usb::vendor_compat::vendor_db_dir(&tmp);
         std::fs::create_dir_all(&vendor_root).unwrap();
         std::fs::write(vendor_root.join("test.db"), b"data").unwrap();
 

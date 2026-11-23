@@ -1,7 +1,7 @@
 mod common;
 mod library_sources;
 
-use common::{open_edb, pdb_path, read_u32_le, seed_tracks_as_analyzed, vendor_db_dir};
+use common::{open_edb, pdb_path, read_u32_le, seed_tracks_as_analyzed};
 
 use std::collections::{BTreeMap, BTreeSet};
 use std::fs;
@@ -25,10 +25,6 @@ struct ShapeSnapshot {
     pdb_len_page: u32,
     pdb_num_tables: u32,
     pdb_table_pointers: Vec<PdbTablePointer>,
-}
-
-fn edb_path(root: &Path) -> PathBuf {
-    vendor_db_dir(root).join("exportLibrary.db")
 }
 
 fn load_edb_schema(path: &Path) -> BTreeMap<String, Vec<String>> {
@@ -75,12 +71,6 @@ fn load_pdb_table_pointers(path: &Path) -> (u32, u32, Vec<PdbTablePointer>) {
         cursor += 16;
     }
     (len_page, num_tables, pointers)
-}
-
-fn read_u16_le(bytes: &[u8], offset: usize) -> Option<u16> {
-    let a = *bytes.get(offset)?;
-    let b = *bytes.get(offset + 1)?;
-    Some(u16::from_le_bytes([a, b]))
 }
 
 fn mutate_first_sentinel_marker(pdb_file: &Path) -> bool {
@@ -135,7 +125,7 @@ fn count_pdb_table_rows(pdb_bytes: &[u8], target_table_type: u32) -> usize {
         if page_flags == 0x64 {
             continue;
         }
-        let used_size = read_u16_le(pdb_bytes, page_off + 0x1e).unwrap_or(0) as usize;
+        let used_size = common::read_u16_le(pdb_bytes, page_off + 0x1e).unwrap_or(0) as usize;
         if used_size == 0 {
             continue;
         }
@@ -160,7 +150,7 @@ fn fixture_audio_track() -> PathBuf {
 }
 
 fn snapshot_usb_shape(root: &Path) -> ShapeSnapshot {
-    let edb_schema = load_edb_schema(&edb_path(root));
+    let edb_schema = load_edb_schema(&common::edb_path(root));
     let (pdb_len_page, pdb_num_tables, pdb_table_pointers) =
         load_pdb_table_pointers(&pdb_path(root));
     ShapeSnapshot {
@@ -292,7 +282,7 @@ fn strict_shape_compare_detects_match_and_mismatch_on_generated_usb_roots() {
     );
 
     // Force structural mismatch on actual eDB.
-    let conn = open_edb(&edb_path(&actual_root));
+    let conn = open_edb(&common::edb_path(&actual_root));
     conn.execute_batch("CREATE TABLE __shape_mismatch_probe(id INTEGER);")
         .expect("create probe table");
 

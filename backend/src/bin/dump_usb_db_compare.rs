@@ -1,14 +1,10 @@
 use std::collections::{BTreeMap, BTreeSet, HashMap};
 use std::env;
-use std::path::{Path, PathBuf};
+use std::path::PathBuf;
 
 use backend::pdb_reader::{parse_pdb, parse_pdb_track_debug_rows};
 use rusqlite::{Connection, types::ValueRef};
 use serde::Serialize;
-
-const DEFAULT_USB_EXPORT_KEY: &str =
-    "r8gddnr4k847830ar6cqzbkk0el6qytmb3trbbx805jm74vez64i5o8fnrqryqls";
-const DEFAULT_MASTER_KEY: &str = "402fd_d44f42a8_eb0f6d4db0e6b";
 
 #[derive(Debug, Serialize)]
 struct DumpOutput {
@@ -75,7 +71,7 @@ fn main() {
     }
 
     let mut warnings = Vec::<String>::new();
-    let conn = match open_export_db(&export_db, &mut warnings) {
+    let conn = match backend::edb::open_rekordbox_db_for_tools(&export_db) {
         Ok(conn) => conn,
         Err(err) => {
             eprintln!("error: failed to open {}: {err}", export_db.display());
@@ -119,42 +115,6 @@ fn main() {
         "{}",
         serde_json::to_string_pretty(&output).expect("serialize dump output")
     );
-}
-
-fn open_export_db(path: &Path, warnings: &mut Vec<String>) -> Result<Connection, String> {
-    let conn = Connection::open(path).map_err(|e| e.to_string())?;
-    let has_schema = conn
-        .query_row(
-            "SELECT COUNT(1) FROM sqlite_master WHERE type IN ('table','view')",
-            [],
-            |r| r.get::<_, i64>(0),
-        )
-        .unwrap_or(0);
-    if has_schema > 0 {
-        warnings.push("eDB opened without SQLCipher key".to_string());
-        return Ok(conn);
-    }
-
-    let keys = [DEFAULT_USB_EXPORT_KEY, DEFAULT_MASTER_KEY];
-    for key in keys {
-        let conn = Connection::open(path).map_err(|e| e.to_string())?;
-        if conn.execute_batch(&format!("PRAGMA key='{key}';")).is_err() {
-            continue;
-        }
-        let unlocked = conn
-            .query_row(
-                "SELECT COUNT(1) FROM sqlite_master WHERE type IN ('table','view')",
-                [],
-                |r| r.get::<_, i64>(0),
-            )
-            .unwrap_or(0);
-        if unlocked > 0 {
-            warnings.push("eDB opened with SQLCipher key".to_string());
-            return Ok(conn);
-        }
-    }
-
-    Err("not readable as plain sqlite or with known SQLCipher keys".to_string())
 }
 
 fn dump_sqlite_tables(conn: &Connection) -> Vec<DumpTable> {

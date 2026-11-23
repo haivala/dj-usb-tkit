@@ -7,6 +7,7 @@
 //! - .EXT: PPTH + PWV3(detail) + PCOB(hot) + PCOB(mem) + PCO2(hot) + PCO2(mem) + PWV5(color detail) + PWV4(color preview 1200)
 //! - .2EX: PPTH + PWV7(3-band detail) + PWV6(3-band preview 1200) + PWVC
 
+pub use super::anlz_read::anlz_chunk_payload;
 use std::path::{Path, PathBuf};
 use uuid::Uuid;
 
@@ -2193,23 +2194,6 @@ mod tests {
         );
     }
 
-    fn find_chunk_payload<'a>(data: &'a [u8], wanted: &str) -> Option<&'a [u8]> {
-        let mut pos = 28;
-        while pos + 12 <= data.len() {
-            let tag = &data[pos..pos + 4];
-            let header_len = read_u32_be(data, pos + 4) as usize;
-            let total_len = read_u32_be(data, pos + 8) as usize;
-            if tag == wanted.as_bytes() {
-                return Some(&data[pos + header_len..pos + total_len]);
-            }
-            if total_len == 0 {
-                break;
-            }
-            pos += total_len;
-        }
-        None
-    }
-
     // --- Transcode bundle ---
 
     #[test]
@@ -2310,7 +2294,7 @@ mod tests {
             None,
             &[],
         );
-        let pqtz = find_chunk_payload(&dat, "PQTZ").expect("PQTZ chunk");
+        let pqtz = anlz_chunk_payload(&dat, b"PQTZ").expect("PQTZ chunk");
         assert_eq!(pqtz.len(), 61 * 8, "120 BPM × 30s = 61 beats × 8 bytes");
     }
 
@@ -2486,7 +2470,7 @@ mod tests {
         assert_eq!(pqt2_checksum_ok(&dat, &ext), Some(true));
 
         // The body is each beat's microseconds; PQTZ holds the floored ms.
-        let body = find_chunk_payload(&ext, "PQT2").unwrap();
+        let body = anlz_chunk_payload(&ext, b"PQT2").unwrap();
         let interval_us = 60_000_000.0 / 131.82;
         for (i, (&(_, _, ms), us)) in beats.iter().zip(body.as_chunks::<2>().0).enumerate() {
             let exact = 295_000 + (i as f64 * interval_us).round() as u64;
@@ -2624,7 +2608,7 @@ mod tests {
             Some(0),
             &[],
         );
-        let pqtz = find_chunk_payload(&dat, "PQTZ").expect("PQTZ chunk");
+        let pqtz = anlz_chunk_payload(&dat, b"PQTZ").expect("PQTZ chunk");
         assert_eq!(pqtz.len(), 21 * 8);
 
         let beat_num = u16::from_be_bytes([pqtz[0], pqtz[1]]);
@@ -2653,7 +2637,7 @@ mod tests {
             None,
             &[],
         );
-        let pwav = find_chunk_payload(&dat, "PWAV").expect("PWAV");
+        let pwav = anlz_chunk_payload(&dat, b"PWAV").expect("PWAV");
         assert_eq!(pwav.len(), 400);
         for &b in pwav {
             let height = b & 0x1F;
@@ -2673,7 +2657,7 @@ mod tests {
             None,
             &[],
         );
-        let pwv2 = find_chunk_payload(&dat, "PWV2").expect("PWV2");
+        let pwv2 = anlz_chunk_payload(&dat, b"PWV2").expect("PWV2");
         assert_eq!(pwv2.len(), 100);
         for &b in pwv2 {
             let height = b & 0x0F;
@@ -2758,7 +2742,7 @@ mod tests {
             None,
             &[],
         );
-        let pwv3 = find_chunk_payload(&ext, "PWV3").expect("PWV3");
+        let pwv3 = anlz_chunk_payload(&ext, b"PWV3").expect("PWV3");
         let mut saw_non7 = false;
         for &b in pwv3 {
             let whiteness = (b >> 5) & 0x07;
@@ -2783,7 +2767,7 @@ mod tests {
             None,
             &[],
         );
-        let pwv3 = find_chunk_payload(&ext, "PWV3").expect("PWV3");
+        let pwv3 = anlz_chunk_payload(&ext, b"PWV3").expect("PWV3");
         assert_eq!(
             pwv3.len(),
             4504,
@@ -2801,8 +2785,8 @@ mod tests {
             None,
             &[],
         );
-        let pwv3 = find_chunk_payload(&ext, "PWV3").expect("PWV3");
-        let pwv5 = find_chunk_payload(&ext, "PWV5").expect("PWV5");
+        let pwv3 = anlz_chunk_payload(&ext, b"PWV3").expect("PWV3");
+        let pwv5 = anlz_chunk_payload(&ext, b"PWV5").expect("PWV5");
         assert_eq!(pwv5.len(), pwv3.len() * 2, "PWV5 = 2 bytes per PWV3 entry");
     }
 
@@ -2816,7 +2800,7 @@ mod tests {
             None,
             &[],
         );
-        let pwv4 = find_chunk_payload(&ext, "PWV4").expect("PWV4");
+        let pwv4 = anlz_chunk_payload(&ext, b"PWV4").expect("PWV4");
         assert_eq!(pwv4.len(), 7200, "1200 × 6 bytes");
     }
 
@@ -2835,7 +2819,7 @@ mod tests {
             peak_level: 1.0,
         };
         let ext = build_anlz_ext_file(&waveform, "", None, 30_000, None, &[]);
-        let pwv4 = find_chunk_payload(&ext, "PWV4").expect("PWV4");
+        let pwv4 = anlz_chunk_payload(&ext, b"PWV4").expect("PWV4");
         assert_eq!(pwv4.len(), 7200, "1200 × 6 bytes");
 
         // Check all entries stay in the expected NXS2-style lane ranges.
@@ -2887,14 +2871,14 @@ mod tests {
     #[test]
     fn twoex_pwv7_is_3_bytes_per_entry() {
         let twoex = build_anlz_2ex_file(&WaveformData::from_peaks(vec![128; 100]), "", 30_000);
-        let pwv7 = find_chunk_payload(&twoex, "PWV7").expect("PWV7");
+        let pwv7 = anlz_chunk_payload(&twoex, b"PWV7").expect("PWV7");
         assert_eq!(pwv7.len(), 4504 * 3);
     }
 
     #[test]
     fn twoex_pwv6_has_1200_entries() {
         let twoex = build_anlz_2ex_file(&WaveformData::from_peaks(vec![128; 100]), "", 30_000);
-        let pwv6 = find_chunk_payload(&twoex, "PWV6").expect("PWV6");
+        let pwv6 = anlz_chunk_payload(&twoex, b"PWV6").expect("PWV6");
         assert_eq!(pwv6.len(), 1200 * 3, "1200 × 3 bytes");
     }
 
@@ -2913,7 +2897,7 @@ mod tests {
             peak_level: 1.0,
         };
         let twoex = build_anlz_2ex_file(&waveform, "", 10_000);
-        let pwv7 = find_chunk_payload(&twoex, "PWV7").expect("PWV7");
+        let pwv7 = anlz_chunk_payload(&twoex, b"PWV7").expect("PWV7");
         for chunk in pwv7.chunks(3) {
             let (mid, high, low) = (chunk[0], chunk[1], chunk[2]);
             assert!(low >= mid, "bass input: low ({low}) should >= mid ({mid})");
@@ -3051,7 +3035,7 @@ mod tests {
             None,
             &[],
         );
-        let ppth = find_chunk_payload(&dat, "PPTH").expect("PPTH chunk");
+        let ppth = anlz_chunk_payload(&dat, b"PPTH").expect("PPTH chunk");
         let u16s: Vec<u16> = ppth
             .chunks(2)
             .map(|c| u16::from_be_bytes([c[0], c[1]]))
@@ -3144,14 +3128,14 @@ mod tests {
         assert_eq!(patched.len(), dat.len());
         assert_eq!(pvbr_total_samples(&patched), Some(11_520));
         assert_eq!(
-            find_chunk_payload(&patched, "PVBR").unwrap(),
+            anlz_chunk_payload(&patched, b"PVBR").unwrap(),
             payload.as_slice()
         );
         assert_eq!(collect_chunk_tags(&patched), collect_chunk_tags(&dat));
-        for tag in ["PQTZ", "PWAV", "PWV2"] {
+        for tag in [b"PQTZ", b"PWAV", b"PWV2"] {
             assert_eq!(
-                find_chunk_payload(&patched, tag),
-                find_chunk_payload(&dat, tag)
+                anlz_chunk_payload(&patched, tag),
+                anlz_chunk_payload(&dat, tag)
             );
         }
     }
@@ -3181,7 +3165,7 @@ mod tests {
 
         let twice = with_seek_index(&once, &SeekIndex::Pvb2(chunk(5))).unwrap();
         assert_eq!(collect_chunk_tags(&twice), tags);
-        assert_eq!(find_chunk_payload(&twice, "PVB2").unwrap().len(), 5 * 20);
+        assert_eq!(anlz_chunk_payload(&twice, b"PVB2").unwrap().len(), 5 * 20);
         assert_eq!(&twice[28..ext.len()], &ext[28..]);
     }
 
@@ -3402,17 +3386,18 @@ mod tests {
 
         // Chunk order and every non-cue / non-beatgrid chunk are unchanged.
         assert_eq!(collect_chunk_tags(&edited), before_tags);
-        for tag in ["PPTH", "PWV3", "PWV5", "PWV4"] {
+        for tag in [b"PPTH", b"PWV3", b"PWV5", b"PWV4"] {
             assert_eq!(
-                find_chunk_payload(&plain, tag),
-                find_chunk_payload(&edited, tag),
-                "{tag} must be byte-identical"
+                anlz_chunk_payload(&plain, tag),
+                anlz_chunk_payload(&edited, tag),
+                "{} must be byte-identical",
+                String::from_utf8_lossy(tag)
             );
         }
         // PQT2 beat times moved.
         assert_ne!(
-            find_chunk_payload(&plain, "PQT2"),
-            find_chunk_payload(&edited, "PQT2"),
+            anlz_chunk_payload(&plain, b"PQT2"),
+            anlz_chunk_payload(&edited, b"PQT2"),
         );
         // Cues now decode back out.
         assert_eq!(read_cues_from_anlz(&edited).len(), 4);
@@ -3427,12 +3412,12 @@ mod tests {
         let ext = build_anlz_ext_file(&waveform, "/Contents/x.mp3", None, 120_000, None, &[]);
         verify_anlz_structure(&dat, "no-bpm DAT");
         verify_anlz_structure(&ext, "no-bpm EXT");
-        assert!(find_chunk_payload(&dat, "PQTZ").is_none());
-        assert!(find_chunk_payload(&ext, "PQT2").is_none());
+        assert!(anlz_chunk_payload(&dat, b"PQTZ").is_none());
+        assert!(anlz_chunk_payload(&ext, b"PQT2").is_none());
         assert_eq!(read_beatgrid_tempo_from_anlz(&dat), None);
         // The waveforms are still there.
-        assert!(find_chunk_payload(&dat, "PWAV").is_some());
-        assert!(find_chunk_payload(&ext, "PWV5").is_some());
+        assert!(anlz_chunk_payload(&dat, b"PWAV").is_some());
+        assert!(anlz_chunk_payload(&ext, b"PWV5").is_some());
     }
 
     #[test]
@@ -3455,8 +3440,8 @@ mod tests {
             },
         );
         assert_eq!(
-            find_chunk_payload(&plain, "PQT2"),
-            find_chunk_payload(&edited, "PQT2"),
+            anlz_chunk_payload(&plain, b"PQT2"),
+            anlz_chunk_payload(&edited, b"PQT2"),
             "no known tempo: the grid must not be rebuilt"
         );
         assert_eq!(read_beatgrid_tempo_from_anlz(&edited), Some(12_800));
@@ -3484,8 +3469,8 @@ mod tests {
             },
         );
         assert_eq!(
-            find_chunk_payload(&plain, "PQT2"),
-            find_chunk_payload(&edited, "PQT2"),
+            anlz_chunk_payload(&plain, b"PQT2"),
+            anlz_chunk_payload(&edited, b"PQT2"),
             "no known length: the grid must not be rebuilt"
         );
         assert_eq!(read_cues_from_anlz(&edited).len(), 4);
@@ -3523,11 +3508,12 @@ mod tests {
         // The anchor already embedded in the bundle (0ms) is preserved,
         // wrapped to the new tempo's beat interval -- not discarded.
         assert_eq!(read_first_beat_from_anlz(&edited), Some(0));
-        for tag in ["PPTH", "PWV3", "PWV5", "PWV4"] {
+        for tag in [b"PPTH", b"PWV3", b"PWV5", b"PWV4"] {
             assert_eq!(
-                find_chunk_payload(&plain, tag),
-                find_chunk_payload(&edited, tag),
-                "{tag} must be byte-identical"
+                anlz_chunk_payload(&plain, tag),
+                anlz_chunk_payload(&edited, tag),
+                "{} must be byte-identical",
+                String::from_utf8_lossy(tag)
             );
         }
         verify_anlz_structure(&edited, "bpm-only edited EXT");

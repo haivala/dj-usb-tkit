@@ -182,7 +182,7 @@ impl BackendService {
                     .playlist_entries
                     .iter()
                     .fold(HashMap::<u32, Vec<_>>::new(), |mut acc, e| {
-                        acc.entry(e.playlist_id).or_default().push(e.clone());
+                        acc.entry(e.playlist_id).or_default().push(*e);
                         acc
                     });
 

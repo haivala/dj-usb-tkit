@@ -49,7 +49,7 @@ fn main() {
     );
 
     for s in pdb_page::row_slots(page) {
-        let row = &page[pdb_page::HEAP_START + s.start..pdb_page::HEAP_START + s.end];
+        let row = &page[s.range()];
         let track_id = read_u32_le(row, 72).unwrap_or(0);
         let rowpf = s.footer.group.rowpf(page);
         let tranrf = s.footer.group.tranrf(page);

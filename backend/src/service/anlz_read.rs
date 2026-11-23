@@ -199,7 +199,7 @@ pub(crate) fn chunk_entries(body: &[u8]) -> AnlzChunks<'_> {
 }
 
 /// The payload of the first `tag` chunk that has one, in an ANLZ file's bytes.
-pub(crate) fn anlz_chunk_payload<'a>(file: &'a [u8], tag: &[u8; 4]) -> Option<&'a [u8]> {
+pub fn anlz_chunk_payload<'a>(file: &'a [u8], tag: &[u8; 4]) -> Option<&'a [u8]> {
     anlz_chunks(file)
         .find(|chunk| &chunk.tag == tag && !chunk.body.is_empty())
         .map(|chunk| &file[chunk.body])

@@ -9,14 +9,8 @@ use super::*;
 #[test]
 fn row_slots_handle_more_than_255_rows_on_a_page() {
     let row_count = 260usize;
-    let rows: Vec<[u8; 12]> = (0..row_count as u32)
-        .map(|idx| {
-            encode_t08_row(T08EntryKey {
-                entry_index: idx + 1,
-                track_id: idx + 1,
-                playlist_id: 1,
-            })
-        })
+    let rows: Vec<Vec<u8>> = (0..row_count as u32)
+        .map(|idx| encode_playlist_entry_row(idx + 1, idx + 1, 1))
         .collect();
     let row_refs: Vec<&[u8]> = rows.iter().map(|r| r.as_slice()).collect();
     let page = build_data_page(8, page_flags_for_table(8), 1, &row_refs, false);
@@ -400,14 +394,7 @@ fn append_rows_to_chain_in_place_never_exceeds_255_rows_per_page() {
     let mut bytes = bytes;
 
     let new_rows: Vec<Vec<u8>> = (1u32..=600)
-        .map(|i| {
-            encode_t08_row(T08EntryKey {
-                entry_index: i,
-                track_id: i,
-                playlist_id: 1,
-            })
-            .to_vec()
-        })
+        .map(|i| encode_playlist_entry_row(i, i, 1))
         .collect();
     append_rows_to_chain_in_place(&mut bytes, 8, &new_rows, PAGE_SIZE)
         .expect("append 600 playlist entries");
@@ -2124,10 +2111,10 @@ fn mirror_removal_leaves_tt8_pages_with_single_bit_tranrf() {
             playlist_id: 1,
         });
     }
-    let all_desired: Vec<T08EntryKey> = full
+    let all_desired: Vec<PdbPlaylistEntryRow> = full
         .playlist_entries
         .iter()
-        .map(|e| T08EntryKey {
+        .map(|e| PdbPlaylistEntryRow {
             entry_index: e.entry_index,
             track_id: e.track_id,
             playlist_id: e.playlist_id,
@@ -2142,10 +2129,10 @@ fn mirror_removal_leaves_tt8_pages_with_single_bit_tranrf() {
     // entries. The other 12 become `removed_t08_entries`.
     let mut pruned = full.clone();
     pruned.playlist_entries.retain(|e| e.entry_index <= 8);
-    let pruned_desired: Vec<T08EntryKey> = pruned
+    let pruned_desired: Vec<PdbPlaylistEntryRow> = pruned
         .playlist_entries
         .iter()
-        .map(|e| T08EntryKey {
+        .map(|e| PdbPlaylistEntryRow {
             entry_index: e.entry_index,
             track_id: e.track_id,
             playlist_id: e.playlist_id,
@@ -2319,7 +2306,7 @@ fn additive_first_export_preserves_template_menu_pages() {
         playlist_id: 1,
     });
 
-    let desired = vec![T08EntryKey {
+    let desired = vec![PdbPlaylistEntryRow {
         entry_index: 1,
         track_id: 1,
         playlist_id: 1,
@@ -2428,7 +2415,7 @@ fn additive_first_export_keeps_t07_on_initial_tail_candidate() {
     let desired = next
         .playlist_entries
         .iter()
-        .map(|entry| T08EntryKey {
+        .map(|entry| PdbPlaylistEntryRow {
             entry_index: entry.entry_index,
             track_id: entry.track_id,
             playlist_id: entry.playlist_id,
@@ -2533,7 +2520,7 @@ fn additive_diff_reposition_does_not_duplicate_or_reappend() {
     let first_desired = first
         .playlist_entries
         .iter()
-        .map(|e| T08EntryKey {
+        .map(|e| PdbPlaylistEntryRow {
             entry_index: e.entry_index,
             track_id: e.track_id,
             playlist_id: e.playlist_id,
@@ -2567,7 +2554,7 @@ fn additive_diff_reposition_does_not_duplicate_or_reappend() {
     let reordered_desired = reordered
         .playlist_entries
         .iter()
-        .map(|e| T08EntryKey {
+        .map(|e| PdbPlaylistEntryRow {
             entry_index: e.entry_index,
             track_id: e.track_id,
             playlist_id: e.playlist_id,
@@ -2642,7 +2629,7 @@ fn additive_diff_repeated_reposition_never_accumulates_duplicates() {
         let desired = data
             .playlist_entries
             .iter()
-            .map(|e| T08EntryKey {
+            .map(|e| PdbPlaylistEntryRow {
                 entry_index: e.entry_index,
                 track_id: e.track_id,
                 playlist_id: e.playlist_id,

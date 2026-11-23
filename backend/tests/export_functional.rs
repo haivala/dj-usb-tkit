@@ -88,26 +88,6 @@ fn cover_fixture_path() -> std::path::PathBuf {
         .join("cover.jpg")
 }
 
-fn seed_track_artwork_path(data_dir: &Path, track_id: &str, artwork_path: &Path) {
-    let db_path = data_dir.join("backend.db");
-    let conn = rusqlite::Connection::open(&db_path).expect("open backend db");
-    conn.execute(
-        "UPDATE tracks SET artwork_path = ?1 WHERE id = ?2",
-        rusqlite::params![artwork_path.to_string_lossy().as_ref(), track_id],
-    )
-    .expect("seed track artwork path");
-}
-
-fn read_u16_le(bytes: &[u8], offset: usize) -> Option<u16> {
-    let a = *bytes.get(offset)?;
-    let b = *bytes.get(offset + 1)?;
-    Some(u16::from_le_bytes([a, b]))
-}
-
-fn write_u16_le(bytes: &mut [u8], offset: usize, value: u16) {
-    bytes[offset..offset + 2].copy_from_slice(&value.to_le_bytes());
-}
-
 fn pdb_table_ptr(bytes: &[u8], table_type: u32) -> Option<(u32, u32, u32)> {
     let table_count = read_u32_le(bytes, 0x08)? as usize;
     for idx in 0..table_count {
@@ -1354,8 +1334,8 @@ fn export_to_usb_preserves_t07_playlist_tree_tombstone_page() {
     let t07_last_off = t07_last_before as usize * page_size;
     let t07_next_before =
         read_u32_le(&before_second, t07_last_off + 0x0c).expect("t07 next before");
-    let used_before =
-        read_u16_le(&before_second, t07_last_off + 0x1e).expect("t07 used_s before") as usize;
+    let used_before = common::read_u16_le(&before_second, t07_last_off + 0x1e)
+        .expect("t07 used_s before") as usize;
     assert!(used_before > 0, "first export should create a t07 row");
     let tombstone_payload_before =
         before_second[t07_last_off + 40..t07_last_off + 40 + used_before].to_vec();
@@ -1363,7 +1343,7 @@ fn export_to_usb_preserves_t07_playlist_tree_tombstone_page() {
     let rowpf_off = t07_last_off + page_size - 4;
     let tranrf_off = t07_last_off + page_size - 2;
     assert_ne!(
-        read_u16_le(&before_second, rowpf_off).unwrap() & 0x0001,
+        common::read_u16_le(&before_second, rowpf_off).unwrap() & 0x0001,
         0,
         "seed playlist row should be active before tombstone mutation"
     );
@@ -1373,8 +1353,8 @@ fn export_to_usb_preserves_t07_playlist_tree_tombstone_page() {
     before_second[t07_last_off + 0x18] = 1;
     before_second[t07_last_off + 0x19] = 0;
     before_second[t07_last_off + 0x1a] = 0;
-    write_u16_le(&mut before_second, rowpf_off, 0x0000);
-    write_u16_le(&mut before_second, tranrf_off, 0x0001);
+    common::write_u16_le(&mut before_second, rowpf_off, 0x0000);
+    common::write_u16_le(&mut before_second, tranrf_off, 0x0001);
     fs::write(&pdb_path, &before_second).expect("write mutated tombstone PDB");
 
     let created_second = backend.create_playlist(CreatePlaylistRequest {
@@ -1429,8 +1409,8 @@ fn export_to_usb_preserves_t07_playlist_tree_tombstone_page() {
         "inactive t07 row payload must be preserved byte-for-byte"
     );
 
-    let rowpf_after = read_u16_le(&after_second, rowpf_off).expect("rowpf after");
-    let tranrf_after = read_u16_le(&after_second, tranrf_off).expect("tranrf after");
+    let rowpf_after = common::read_u16_le(&after_second, rowpf_off).expect("rowpf after");
+    let tranrf_after = common::read_u16_le(&after_second, tranrf_off).expect("tranrf after");
     assert_eq!(
         rowpf_after & 0x0001,
         0,
@@ -1450,8 +1430,8 @@ fn export_to_usb_preserves_t07_playlist_tree_tombstone_page() {
     );
     assert_eq!(
         (
-            read_u16_le(&after_second, t07_last_off + 0x20).unwrap(),
-            read_u16_le(&after_second, t07_last_off + 0x22).unwrap()
+            common::read_u16_le(&after_second, t07_last_off + 0x20).unwrap(),
+            common::read_u16_le(&after_second, t07_last_off + 0x22).unwrap()
         ),
         (
             tranrf_after.count_ones() as u16,
@@ -1670,7 +1650,7 @@ fn export_edb_and_pdb_artwork_paths_both_resolve_when_artwork_enabled() {
         cover_path.display()
     );
     for track_id in &track_ids {
-        seed_track_artwork_path(&data_dir, track_id, &cover_path);
+        common::seed_track_artwork_path(&data_dir, track_id, &cover_path);
     }
 
     let created = backend.create_playlist(CreatePlaylistRequest {
@@ -3046,7 +3026,7 @@ fn export_to_usb_option_matrix_controls_artwork_analysis_and_prune_behavior() {
         .expect("scanned track");
 
     seed_tracks_as_analyzed(&data_dir, std::slice::from_ref(&track.id));
-    seed_track_artwork_path(&data_dir, &track.id, &cover_path);
+    common::seed_track_artwork_path(&data_dir, &track.id, &cover_path);
 
     let created = backend.create_playlist(CreatePlaylistRequest {
         name: "Option Matrix".to_string(),
@@ -3234,7 +3214,7 @@ fn export_to_usb_reexport_is_idempotent_for_media_and_assets() {
         .expect("scanned track");
 
     seed_tracks_as_analyzed(&data_dir, std::slice::from_ref(&track.id));
-    seed_track_artwork_path(&data_dir, &track.id, &cover_path);
+    common::seed_track_artwork_path(&data_dir, &track.id, &cover_path);
 
     let created = backend.create_playlist(CreatePlaylistRequest {
         name: "Idempotency".to_string(),
@@ -6185,7 +6165,7 @@ fn export_to_usb_additive_growth_then_mirror_after_reorder_and_removal_keeps_dbs
         .find(|t| t.track_file_path == played_removed_path)
         .expect("played track present in pdb before mirror export")
         .id;
-    append_history_to_pdb(&pdb_path, 1, &[played_pdb_track_id]);
+    common::append_history_to_pdb(&pdb_path, 1, &[played_pdb_track_id]);
 
     let contents_count_before_mirror = WalkDir::new(usb.join("Contents"))
         .into_iter()
@@ -6520,7 +6500,7 @@ fn export_mirror_reexport_keeps_reused_analysis_and_artwork_files() {
     seed_tracks_as_analyzed(&data_dir, &track_ids);
     let cover = cover_fixture_path();
     for id in &track_ids {
-        seed_track_artwork_path(&data_dir, id, &cover);
+        common::seed_track_artwork_path(&data_dir, id, &cover);
     }
 
     let created = backend.create_playlist(CreatePlaylistRequest {
@@ -6706,7 +6686,7 @@ fn export_mirror_prune_keeps_history_protected_track_full_shape() {
     seed_tracks_as_analyzed(&data_dir, &all_ids);
     let cover = cover_fixture_path();
     for id in &all_ids {
-        seed_track_artwork_path(&data_dir, id, &cover);
+        common::seed_track_artwork_path(&data_dir, id, &cover);
     }
 
     let created = backend.create_playlist(CreatePlaylistRequest {
@@ -6834,7 +6814,7 @@ fn export_mirror_prune_keeps_history_protected_track_full_shape() {
 
     // Inject a device play-history entry for Beta, then drop Beta (history-
     // protected) and Gamma (plain removal) from the playlist. Alpha stays.
-    append_history_to_pdb(&pdb_path, 1, &[history_shape.pdb_id]);
+    common::append_history_to_pdb(&pdb_path, 1, &[history_shape.pdb_id]);
 
     let removed = backend.remove_tracks_from_playlist(RemoveTracksFromPlaylistRequest {
         playlist_id: playlist_id.clone(),
@@ -7220,129 +7200,6 @@ fn export_mirror_prune_keeps_dropped_track_rows_when_shared_by_another_playlist(
     );
 }
 
-/// Appends synthetic PDB history-playlist (t11) and history-entry (t12) pages
-/// directly onto a real exported PDB, since there is no in-app command to
-/// create device play history -- it only ever originates from actual CDJ
-/// hardware play. Ported from usb_service_functional.rs (each `tests/*.rs`
-/// file compiles as its own binary, so helpers aren't shared).
-fn append_history_to_pdb(pdb_path: &Path, history_id: u32, track_ids: &[u32]) {
-    let mut bytes = fs::read(pdb_path).expect("read PDB");
-    let len_page = read_u32_le(&bytes, 4).expect("len_page") as usize;
-    let num_tables = read_u32_le(&bytes, 8).expect("num_tables") as usize;
-    let max_page = parse_max_last_page(&bytes, num_tables) as u32;
-
-    let history_playlist_page = max_page + 1;
-    let history_entries_page = max_page + 2;
-
-    let playlist_row = build_history_playlist_row(history_id, "HISTORY 1");
-    let entry_rows = track_ids
-        .iter()
-        .enumerate()
-        .map(|(idx, track_id)| build_history_entry_row(*track_id, history_id, (idx + 1) as u32))
-        .collect::<Vec<_>>();
-
-    let playlist_page = build_pdb_page(
-        11,
-        history_playlist_page,
-        history_playlist_page,
-        &[playlist_row],
-        len_page,
-    );
-    let entries_page = build_pdb_page(
-        12,
-        history_entries_page,
-        history_entries_page,
-        &entry_rows,
-        len_page,
-    );
-
-    bytes.extend_from_slice(&playlist_page);
-    bytes.extend_from_slice(&entries_page);
-
-    let p1 = 28 + num_tables * 16;
-    let p2 = p1 + 16;
-    bytes[p1..p1 + 4].copy_from_slice(&11u32.to_le_bytes());
-    bytes[p1 + 8..p1 + 12].copy_from_slice(&history_playlist_page.to_le_bytes());
-    bytes[p1 + 12..p1 + 16].copy_from_slice(&history_playlist_page.to_le_bytes());
-
-    bytes[p2..p2 + 4].copy_from_slice(&12u32.to_le_bytes());
-    bytes[p2 + 8..p2 + 12].copy_from_slice(&history_entries_page.to_le_bytes());
-    bytes[p2 + 12..p2 + 16].copy_from_slice(&history_entries_page.to_le_bytes());
-
-    bytes[8..12].copy_from_slice(&((num_tables as u32) + 2).to_le_bytes());
-    fs::write(pdb_path, bytes).expect("write PDB with history tables");
-}
-
-fn build_history_playlist_row(id: u32, name: &str) -> Vec<u8> {
-    let mut row = Vec::<u8>::new();
-    row.extend_from_slice(&id.to_le_bytes());
-    row.extend_from_slice(&common::short_ascii_pdb_string(name));
-    row
-}
-
-fn build_history_entry_row(track_id: u32, playlist_id: u32, entry_index: u32) -> Vec<u8> {
-    let mut row = vec![0u8; 12];
-    row[0..4].copy_from_slice(&track_id.to_le_bytes());
-    row[4..8].copy_from_slice(&playlist_id.to_le_bytes());
-    row[8..12].copy_from_slice(&entry_index.to_le_bytes());
-    row
-}
-
-fn build_pdb_page(
-    table_type: u32,
-    page_index: u32,
-    seq: u32,
-    rows: &[Vec<u8>],
-    len_page: usize,
-) -> Vec<u8> {
-    let mut page = vec![0u8; len_page];
-    page[4..8].copy_from_slice(&page_index.to_le_bytes());
-    page[8..12].copy_from_slice(&table_type.to_le_bytes());
-    page[12..16].copy_from_slice(&0u32.to_le_bytes());
-    page[16..20].copy_from_slice(&seq.to_le_bytes());
-
-    let mut payload_offset = 0usize;
-    let mut row_offsets = Vec::<u16>::new();
-    for row in rows {
-        row_offsets.push(payload_offset as u16);
-        let start = 40 + payload_offset;
-        let end = start + row.len();
-        page[start..end].copy_from_slice(row);
-        payload_offset += row.len();
-    }
-
-    page[24] = (rows.len() % 256) as u8;
-    page[30..32].copy_from_slice(&(payload_offset as u16).to_le_bytes());
-    page[34..36].copy_from_slice(&((rows.len().saturating_sub(1)) as u16).to_le_bytes());
-
-    let mut cursor = len_page;
-    for group_start in (0..rows.len()).step_by(16) {
-        cursor -= 4;
-        let group_len = (rows.len() - group_start).min(16);
-        let bits = ((1u32 << group_len) - 1) as u16;
-        page[cursor..cursor + 2].copy_from_slice(&bits.to_le_bytes());
-        for j in 0..group_len {
-            cursor -= 2;
-            page[cursor..cursor + 2].copy_from_slice(&row_offsets[group_start + j].to_le_bytes());
-        }
-    }
-
-    page
-}
-
-fn parse_max_last_page(bytes: &[u8], num_tables: usize) -> usize {
-    let mut cursor = 28usize;
-    let mut max_page = 0usize;
-    for _ in 0..num_tables {
-        let Some(last_page) = read_u32_le(bytes, cursor + 12) else {
-            break;
-        };
-        max_page = max_page.max(last_page as usize);
-        cursor += 16;
-    }
-    max_page
-}
-
 #[test]
 fn mirror_reexport_after_swapping_colliding_tracks_keeps_their_files() {
     let root = tempdir().expect("temp root");
@@ -7604,7 +7461,7 @@ fn track_added_from_a_usb_row_exports_to_its_own_stick_and_to_another() {
         .collect();
     let data_first = first.data_dir().to_path_buf();
     seed_tracks_as_analyzed(&data_first, &track_ids);
-    seed_track_artwork_path(&data_first, &track_ids[0], &cover_fixture_path());
+    common::seed_track_artwork_path(&data_first, &track_ids[0], &cover_fixture_path());
     rusqlite::Connection::open(data_first.join("backend.db"))
         .expect("open db")
         .execute(

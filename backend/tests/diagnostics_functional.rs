@@ -17,9 +17,10 @@ use backend::models::{
     UsbParityPlaylistDetail,
 };
 use backend::pdb_reader::parse_pdb;
+use common::fixture_audio_path;
 use parity_fixture::{
-    copy_audio_fixture, fixture_audio_path, seed_tracks_as_analyzed,
-    setup_clean_strict_parity_fixture, setup_clean_strict_parity_fixture_with_local_key,
+    copy_audio_fixture, seed_tracks_as_analyzed, setup_clean_strict_parity_fixture,
+    setup_clean_strict_parity_fixture_with_local_key,
 };
 use tempfile::{TempDir, tempdir};
 
@@ -67,16 +68,6 @@ fn find_pdb_data_page(bytes: &[u8], page_size: usize, table_type: u32) -> Option
 
 fn read_pdb_page_size(bytes: &[u8]) -> usize {
     u32::from_le_bytes(bytes[4..8].try_into().unwrap()) as usize
-}
-
-fn seed_track_artwork_path(data_dir: &Path, track_id: &str, artwork_path: &Path) {
-    let db_path = data_dir.join("backend.db");
-    let conn = rusqlite::Connection::open(&db_path).expect("open backend db");
-    conn.execute(
-        "UPDATE tracks SET artwork_path = ?1 WHERE id = ?2",
-        rusqlite::params![artwork_path.to_string_lossy().as_ref(), track_id],
-    )
-    .expect("seed track artwork path");
 }
 
 fn read_pdb_header_compatibility_value(pdb_path: &Path) -> u32 {
@@ -413,7 +404,7 @@ fn setup_clean_strict_parity_fixture_with_artwork() -> (TempDir, BackendCommands
         "expected fixture cover at {}",
         cover_path.display()
     );
-    seed_track_artwork_path(&data_dir, &track_ids[0], &cover_path);
+    common::seed_track_artwork_path(&data_dir, &track_ids[0], &cover_path);
 
     let playlist_name = "Clean Parity Artwork".to_string();
     let created = backend.create_playlist(CreatePlaylistRequest {

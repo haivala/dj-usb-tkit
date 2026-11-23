@@ -4,10 +4,6 @@ use std::path::{Path, PathBuf};
 
 use rusqlite::{Connection, OptionalExtension, types::Value};
 
-const DEFAULT_USB_EXPORT_KEY: &str =
-    "r8gddnr4k847830ar6cqzbkk0el6qytmb3trbbx805jm74vez64i5o8fnrqryqls";
-const DEFAULT_MASTER_KEY: &str = "402fd_d44f42a8_eb0f6d4db0e6b";
-
 fn main() {
     let args = env::args().collect::<Vec<_>>();
     if args.len() != 3 {
@@ -20,7 +16,7 @@ fn main() {
     let expected_db = db_path_from_usb_root(Path::new(&args[1]));
     let actual_db = db_path_from_usb_root(Path::new(&args[2]));
 
-    let expected = match open_export_db(&expected_db) {
+    let expected = match backend::edb::open_rekordbox_db_for_tools(&expected_db) {
         Ok(c) => c,
         Err(err) => {
             eprintln!(
@@ -30,7 +26,7 @@ fn main() {
             std::process::exit(1);
         }
     };
-    let actual = match open_export_db(&actual_db) {
+    let actual = match backend::edb::open_rekordbox_db_for_tools(&actual_db) {
         Ok(c) => c,
         Err(err) => {
             eprintln!("failed to open actual db {}: {err}", actual_db.display());
@@ -72,47 +68,6 @@ fn db_path_from_usb_root(root: &Path) -> PathBuf {
     let vendor_root = ["PIO", "NEER"].join("");
     let db_dir = ["reko", "rdbox"].join("");
     root.join(vendor_root).join(db_dir).join("exportLibrary.db")
-}
-
-fn open_export_db(path: &Path) -> Result<Connection, String> {
-    let open = || Connection::open(path).map_err(|e| e.to_string());
-    let has_schema = |conn: &Connection| {
-        conn.query_row(
-            "SELECT COUNT(1) FROM sqlite_master WHERE type IN ('table','view')",
-            [],
-            |r| r.get::<_, i64>(0),
-        )
-        .ok()
-        .unwrap_or(0)
-            > 0
-    };
-
-    let plain = open()?;
-    if has_schema(&plain) {
-        return Ok(plain);
-    }
-
-    let mut keys = vec![
-        DEFAULT_USB_EXPORT_KEY.to_string(),
-        DEFAULT_MASTER_KEY.to_string(),
-    ];
-    if let Ok(extra) = env::var("USB_DB_KEY") {
-        let t = extra.trim();
-        if !t.is_empty() && !keys.iter().any(|k| k == t) {
-            keys.insert(0, t.to_string());
-        }
-    }
-
-    for key in keys {
-        let conn = open()?;
-        if conn.execute_batch(&format!("PRAGMA key='{key}';")).is_err() {
-            continue;
-        }
-        if has_schema(&conn) {
-            return Ok(conn);
-        }
-    }
-    Err("not readable as plain sqlite or with known SQLCipher keys".to_string())
 }
 
 fn list_tables(conn: &Connection) -> Vec<String> {

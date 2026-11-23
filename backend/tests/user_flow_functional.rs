@@ -1,7 +1,7 @@
 mod common;
 mod library_sources;
 
-use common::{pdb_path, read_u32_le};
+use common::pdb_path;
 
 use std::fs;
 use std::path::Path;
@@ -42,9 +42,6 @@ fn find_files_named(dir: &Path, name: &str, out: &mut Vec<PathBuf>) {
     }
 }
 use tempfile::tempdir;
-
-const USB_VENDOR_ROOT_DIR: &str = "PIONEER";
-const USB_VENDOR_DB_DIR: &str = "rekordbox";
 
 #[test]
 fn user_like_flow_imports_sources_analyzes_and_adds_from_library_usb_and_history() {
@@ -254,7 +251,7 @@ fn user_like_flow_imports_sources_analyzes_and_adds_from_library_usb_and_history
         .map(|t| t.id)
         .collect::<Vec<_>>();
     assert_eq!(history_track_ids.len(), 2, "need two exported track ids");
-    append_history_to_pdb(&pdb_path(&usb), 1, &history_track_ids);
+    common::append_history_to_pdb(&pdb_path(&usb), 1, &history_track_ids);
 
     let usb_playlists = backend.fetch_usb_playlists(FetchUsbPlaylistsRequest {
         usb_root: Some(usb.to_string_lossy().to_string()),
@@ -495,124 +492,6 @@ fn user_like_flow_imports_sources_analyzes_and_adds_from_library_usb_and_history
             track
         );
     }
-}
-
-fn append_history_to_pdb(pdb_path: &Path, history_id: u32, track_ids: &[u32]) {
-    let mut bytes = fs::read(pdb_path).expect("read PDB");
-    let len_page = read_u32_le(&bytes, 4).expect("len_page") as usize;
-    let num_tables = read_u32_le(&bytes, 8).expect("num_tables") as usize;
-    let max_page = parse_max_last_page(&bytes, num_tables) as u32;
-
-    let history_playlist_page = max_page + 1;
-    let history_entries_page = max_page + 2;
-
-    let playlist_row = build_history_playlist_row(history_id, "HISTORY 1");
-    let entry_rows = track_ids
-        .iter()
-        .enumerate()
-        .map(|(idx, track_id)| build_history_entry_row(*track_id, history_id, (idx + 1) as u32))
-        .collect::<Vec<_>>();
-
-    let playlist_page = build_pdb_page(
-        11,
-        history_playlist_page,
-        history_playlist_page,
-        &[playlist_row],
-        len_page,
-    );
-    let entries_page = build_pdb_page(
-        12,
-        history_entries_page,
-        history_entries_page,
-        &entry_rows,
-        len_page,
-    );
-
-    bytes.extend_from_slice(&playlist_page);
-    bytes.extend_from_slice(&entries_page);
-
-    let p1 = 28 + num_tables * 16;
-    let p2 = p1 + 16;
-    bytes[p1..p1 + 4].copy_from_slice(&11u32.to_le_bytes());
-    bytes[p1 + 8..p1 + 12].copy_from_slice(&history_playlist_page.to_le_bytes());
-    bytes[p1 + 12..p1 + 16].copy_from_slice(&history_playlist_page.to_le_bytes());
-
-    bytes[p2..p2 + 4].copy_from_slice(&12u32.to_le_bytes());
-    bytes[p2 + 8..p2 + 12].copy_from_slice(&history_entries_page.to_le_bytes());
-    bytes[p2 + 12..p2 + 16].copy_from_slice(&history_entries_page.to_le_bytes());
-
-    bytes[8..12].copy_from_slice(&((num_tables as u32) + 2).to_le_bytes());
-    fs::write(pdb_path, bytes).expect("write PDB with history tables");
-}
-
-fn build_history_playlist_row(id: u32, name: &str) -> Vec<u8> {
-    let mut row = Vec::<u8>::new();
-    row.extend_from_slice(&id.to_le_bytes());
-    row.extend_from_slice(&common::short_ascii_pdb_string(name));
-    row
-}
-
-fn build_history_entry_row(track_id: u32, playlist_id: u32, entry_index: u32) -> Vec<u8> {
-    let mut row = vec![0u8; 12];
-    row[0..4].copy_from_slice(&track_id.to_le_bytes());
-    row[4..8].copy_from_slice(&playlist_id.to_le_bytes());
-    row[8..12].copy_from_slice(&entry_index.to_le_bytes());
-    row
-}
-
-fn build_pdb_page(
-    table_type: u32,
-    page_index: u32,
-    seq: u32,
-    rows: &[Vec<u8>],
-    len_page: usize,
-) -> Vec<u8> {
-    let mut page = vec![0u8; len_page];
-    page[4..8].copy_from_slice(&page_index.to_le_bytes());
-    page[8..12].copy_from_slice(&table_type.to_le_bytes());
-    page[12..16].copy_from_slice(&0u32.to_le_bytes());
-    page[16..20].copy_from_slice(&seq.to_le_bytes());
-
-    let mut payload_offset = 0usize;
-    let mut row_offsets = Vec::<u16>::new();
-    for row in rows {
-        row_offsets.push(payload_offset as u16);
-        let start = 40 + payload_offset;
-        let end = start + row.len();
-        page[start..end].copy_from_slice(row);
-        payload_offset += row.len();
-    }
-
-    page[24] = (rows.len() % 256) as u8;
-    page[30..32].copy_from_slice(&(payload_offset as u16).to_le_bytes());
-    page[34..36].copy_from_slice(&((rows.len().saturating_sub(1)) as u16).to_le_bytes());
-
-    let mut cursor = len_page;
-    for group_start in (0..rows.len()).step_by(16) {
-        cursor -= 4;
-        let group_len = (rows.len() - group_start).min(16);
-        let bits = ((1u32 << group_len) - 1) as u16;
-        page[cursor..cursor + 2].copy_from_slice(&bits.to_le_bytes());
-        for j in 0..group_len {
-            cursor -= 2;
-            page[cursor..cursor + 2].copy_from_slice(&row_offsets[group_start + j].to_le_bytes());
-        }
-    }
-
-    page
-}
-
-fn parse_max_last_page(bytes: &[u8], num_tables: usize) -> usize {
-    let mut cursor = 28usize;
-    let mut max_page = 0usize;
-    for _ in 0..num_tables {
-        let Some(last_page) = read_u32_le(bytes, cursor + 12) else {
-            break;
-        };
-        max_page = max_page.max(last_page as usize);
-        cursor += 16;
-    }
-    max_page
 }
 
 /// An imported (or user-set) BPM / key survives the track's first analysis --
@@ -2995,11 +2874,6 @@ fn usb_save_of_a_track_missing_from_a_database_saves_where_it_is() {
     backend.initialize_usb(InitializeUsbRequest {
         usb_root: blank_usb.to_string_lossy().to_string(),
     });
-    let edb_path = |root: &Path| {
-        root.join(USB_VENDOR_ROOT_DIR)
-            .join(USB_VENDOR_DB_DIR)
-            .join("exportLibrary.db")
-    };
     let save = |position_ms: u32| {
         backend.save_usb_track_analysis_edits(SaveUsbTrackAnalysisEditsRequest {
             usb_root: usb.to_string_lossy().to_string(),
@@ -3045,12 +2919,12 @@ fn usb_save_of_a_track_missing_from_a_database_saves_where_it_is() {
     );
 
     fs::write(pdb_path(&usb), &exported_pdb).expect("restore the PDB");
-    fs::copy(edb_path(&blank_usb), edb_path(&usb)).expect("empty the eDB");
+    fs::copy(common::edb_path(&blank_usb), common::edb_path(&usb)).expect("empty the eDB");
     assert_saved_without(
         "not in the eDB",
         3_000,
-        &edb_path(&usb),
-        &edb_path(&blank_usb),
+        &common::edb_path(&usb),
+        &common::edb_path(&blank_usb),
     );
 
     fs::copy(pdb_path(&blank_usb), pdb_path(&usb)).expect("empty the PDB too");
@@ -3666,12 +3540,6 @@ fn a_playlist_add_logs_its_result_in_the_event_log() {
 // Built through export (both databases), then one database file deleted:
 // what a real one-database stick looks like (it simply lacks the file).
 
-fn edb_path(usb: &Path) -> PathBuf {
-    usb.join(USB_VENDOR_ROOT_DIR)
-        .join(USB_VENDOR_DB_DIR)
-        .join("exportLibrary.db")
-}
-
 #[derive(Clone, Copy, Debug, PartialEq)]
 enum OnlyDb {
     Pdb,
@@ -3681,7 +3549,7 @@ enum OnlyDb {
 impl OnlyDb {
     fn dropped(self, usb: &Path) -> PathBuf {
         match self {
-            OnlyDb::Pdb => edb_path(usb),
+            OnlyDb::Pdb => common::edb_path(usb),
             OnlyDb::Edb => pdb_path(usb),
         }
     }
@@ -3882,7 +3750,7 @@ fn assert_export_onto_one_database_stick_writes_both(keep: OnlyDb) {
     });
     assert!(export.ok, "{keep:?}: export failed: {export:?}");
     assert!(
-        pdb_path(&usb).is_file() && edb_path(&usb).is_file(),
+        pdb_path(&usb).is_file() && common::edb_path(&usb).is_file(),
         "{keep:?}: both databases after the export"
     );
     let parity = backend

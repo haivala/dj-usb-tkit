@@ -670,14 +670,14 @@ pub(crate) struct PdbAdditiveDiff {
     pub new_playlist_tree: Vec<(u32, u32, u32, bool, String)>,
     /// Desired final t08 entries; passed through to the existing in-place
     /// patch helpers, which figure out what to add and where.
-    pub desired_t08_entries: Vec<T08EntryKey>,
+    pub desired_t08_entries: Vec<PdbPlaylistEntryRow>,
     /// t08 entries whose `(playlist_id, track_id)` identity is no longer
     /// desired at all — to be removed in-place. Does NOT include entries
     /// that are still desired but at a different `entry_index`; those are
     /// `repositioned_t08_entries` instead, so a position change is never a
     /// remove+add pair. Non-empty when mirror-mode export shrinks an
     /// existing playlist, or an additive export drops a track from it.
-    pub removed_t08_entries: Vec<T08EntryKey>,
+    pub removed_t08_entries: Vec<PdbPlaylistEntryRow>,
     /// Existing `(playlist_id, track_id)` entries whose desired
     /// `entry_index` differs from what's currently on disk — patched in
     /// place via `patch_t08_entry_indices_in_place` rather than deleted and
@@ -757,7 +757,7 @@ impl std::fmt::Display for NonAdditiveReason {
 pub(crate) fn compute_additive_diff(
     existing_bytes: &[u8],
     new_data: &PdbData,
-    desired_t08_entries: Vec<T08EntryKey>,
+    desired_t08_entries: Vec<PdbPlaylistEntryRow>,
 ) -> Result<PdbAdditiveDiff, NonAdditiveReason> {
     let parsed = crate::pdb_reader::parse_pdb_bytes(existing_bytes)
         .map_err(|e| NonAdditiveReason::Unparseable(e.english()))?;
@@ -1091,39 +1091,40 @@ pub(crate) fn compute_additive_diff(
     // playlist it has entries for (an export passes one playlist, the
     // strict parity repair all it merges). An existing entry is matched against it by
     // `(playlist_id, track_id)` identity only -- `entry_index` is a
-    // position, not part of identity (see `T08EntryKey`'s doc comment and
+    // position, not part of identity (see `PdbPlaylistEntryRow`'s doc comment and
     // `patch_t08_entry_indices_in_place`). This keeps a track whose order
     // changed from ever being computed as a remove+add pair: it is either
     // unchanged, or its position is patched in place, never both removed
     // and re-added.
-    let (removed_t08_entries, repositioned_t08_entries): (Vec<T08EntryKey>, Vec<(u32, u32, u32)>) =
-        if !desired_t08_entries.is_empty() {
-            let target_playlist_ids: std::collections::HashSet<u32> =
-                desired_t08_entries.iter().map(|k| k.playlist_id).collect();
-            let desired_by_identity: std::collections::HashMap<(u32, u32), u32> =
-                desired_t08_entries
-                    .iter()
-                    .map(|k| ((k.playlist_id, k.track_id), k.entry_index))
-                    .collect();
-            let existing_t08 = collect_t08_entry_keys(existing_bytes, 4096);
-            let mut removed = Vec::new();
-            let mut repositioned = Vec::new();
-            for k in existing_t08 {
-                if !target_playlist_ids.contains(&k.playlist_id) {
-                    continue;
-                }
-                match desired_by_identity.get(&(k.playlist_id, k.track_id)) {
-                    None => removed.push(k),
-                    Some(&new_entry_index) if new_entry_index != k.entry_index => {
-                        repositioned.push((k.playlist_id, k.track_id, new_entry_index));
-                    }
-                    _ => {}
-                }
+    let (removed_t08_entries, repositioned_t08_entries): (
+        Vec<PdbPlaylistEntryRow>,
+        Vec<(u32, u32, u32)>,
+    ) = if !desired_t08_entries.is_empty() {
+        let target_playlist_ids: std::collections::HashSet<u32> =
+            desired_t08_entries.iter().map(|k| k.playlist_id).collect();
+        let desired_by_identity: std::collections::HashMap<(u32, u32), u32> = desired_t08_entries
+            .iter()
+            .map(|k| ((k.playlist_id, k.track_id), k.entry_index))
+            .collect();
+        let existing_t08 = collect_t08_entry_keys(existing_bytes, 4096);
+        let mut removed = Vec::new();
+        let mut repositioned = Vec::new();
+        for k in existing_t08 {
+            if !target_playlist_ids.contains(&k.playlist_id) {
+                continue;
             }
-            (removed, repositioned)
-        } else {
-            (Vec::new(), Vec::new())
-        };
+            match desired_by_identity.get(&(k.playlist_id, k.track_id)) {
+                None => removed.push(k),
+                Some(&new_entry_index) if new_entry_index != k.entry_index => {
+                    repositioned.push((k.playlist_id, k.track_id, new_entry_index));
+                }
+                _ => {}
+            }
+        }
+        (removed, repositioned)
+    } else {
+        (Vec::new(), Vec::new())
+    };
 
     Ok(PdbAdditiveDiff {
         new_tracks,
@@ -1155,12 +1156,13 @@ pub(crate) fn compute_additive_diff(
 pub(crate) fn remove_t08_entries_in_place(
     bytes: &mut [u8],
     page_size: usize,
-    victims: &[T08EntryKey],
+    victims: &[PdbPlaylistEntryRow],
 ) -> BackendResult<()> {
     if victims.is_empty() {
         return Ok(());
     }
-    let victim_set: std::collections::HashSet<T08EntryKey> = victims.iter().copied().collect();
+    let victim_set: std::collections::HashSet<PdbPlaylistEntryRow> =
+        victims.iter().copied().collect();
 
     let (_ec, first, last) = table_ptr_fields(bytes, 8).ok_or_else(|| {
         BackendError::Internal("remove_t08_entries: table 8 pointer missing".into())
@@ -1183,15 +1185,7 @@ pub(crate) fn remove_t08_entries_in_place(
         let kept: Vec<Vec<u8>> = present
             .iter()
             .filter(|row| {
-                if row.len() < 12 {
-                    return true;
-                }
-                let k = T08EntryKey {
-                    entry_index: u32::from_le_bytes([row[0], row[1], row[2], row[3]]),
-                    track_id: u32::from_le_bytes([row[4], row[5], row[6], row[7]]),
-                    playlist_id: u32::from_le_bytes([row[8], row[9], row[10], row[11]]),
-                };
-                !victim_set.contains(&k)
+                pdb_row::playlist_entry(row).is_none_or(|entry| !victim_set.contains(&entry))
             })
             .cloned()
             .collect();
@@ -1666,17 +1660,16 @@ fn t19_live_rows(bytes: &[u8], page_size: usize) -> Option<Vec<T19LiveRow>> {
     if nrs == 0 || !pdb_page::footer_fits(page_size, nrs) {
         return None;
     }
-    let used = read_u16_le_at(page, 0x1e)? as usize;
-    pdb_page::footer_slots(page, nrs)
+    pdb_page::row_slots(page)
+        .into_iter()
         .map(|slot| {
-            // The id (bytes 4..8) and the color (byte 9) lie in the used heap.
-            if slot.heap_off + 10 > used {
-                return None;
-            }
+            // The id (bytes 4..8) and the color (byte 9) lie in the row.
+            let row = &page[slot.range()];
+            (row.len() >= 10).then_some(())?;
             Some(T19LiveRow {
-                at: off + HEAP_START + slot.heap_off,
+                at: off + slot.range().start,
                 present: slot.present,
-                id: read_u32_le_at(page, HEAP_START + slot.heap_off + 4)?,
+                id: read_u32_le_at(row, 4)?,
             })
         })
         .collect()
@@ -2555,7 +2548,7 @@ pub(crate) fn apply_additive_diff(
                 .into_iter()
                 .map(|k| (k.playlist_id, k.track_id))
                 .collect();
-        let added_keys: Vec<T08EntryKey> = diff
+        let added_keys: Vec<PdbPlaylistEntryRow> = diff
             .desired_t08_entries
             .iter()
             .copied()
@@ -2564,7 +2557,13 @@ pub(crate) fn apply_additive_diff(
         if !added_keys.is_empty() {
             let added_rows: Vec<Vec<u8>> = added_keys
                 .iter()
-                .map(|k| encode_t08_row(*k).to_vec())
+                .map(|k| {
+                    crate::service::export_helpers::encode_playlist_entry_row(
+                        k.entry_index,
+                        k.track_id,
+                        k.playlist_id,
+                    )
+                })
                 .collect();
             let _ = append_rows_to_chain_in_place(&mut out, 8, &added_rows, page_size)?;
         }
@@ -2596,7 +2595,7 @@ pub(crate) fn apply_additive_diff(
 pub(crate) fn try_write_pdb_additive_in_place(
     existing_bytes: &[u8],
     new_data: &PdbData,
-    desired_t08_entries: Vec<T08EntryKey>,
+    desired_t08_entries: Vec<PdbPlaylistEntryRow>,
     page_size: usize,
 ) -> BackendResult<Option<(Vec<u8>, AdditiveWriteSummary)>> {
     let diff = match compute_additive_diff(existing_bytes, new_data, desired_t08_entries) {

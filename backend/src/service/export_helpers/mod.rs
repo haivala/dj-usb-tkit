@@ -33,7 +33,6 @@ pub use crate::edb::{
     upsert_export_playlist_row, upsert_export_playlist_row_placed,
 };
 pub(crate) use crate::metadata::sanitize_metadata;
-pub use crate::pdb_writer::T08EntryKey;
 #[cfg(test)]
 pub use export_paths::canonical_artwork_target_path;
 pub use export_paths::{

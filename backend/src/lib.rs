@@ -27,6 +27,8 @@ pub mod shape_compare;
 mod symphonia_decoder;
 pub mod utils;
 pub mod wav_format;
+#[cfg(feature = "dev-tools")]
+pub mod waveform_tools;
 
 #[cfg(feature = "tauri")]
 pub mod tauri_commands;

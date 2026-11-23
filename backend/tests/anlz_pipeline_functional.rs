@@ -112,23 +112,6 @@ fn chunk_tags(data: &[u8]) -> Vec<String> {
     walk_chunks(data).into_iter().map(|(t, _, _)| t).collect()
 }
 
-fn find_chunk_payload<'a>(data: &'a [u8], wanted: &str) -> Option<&'a [u8]> {
-    let mut pos = 28;
-    while pos + 12 <= data.len() {
-        let tag = &data[pos..pos + 4];
-        let header_len = read_u32_be(data, pos + 4) as usize;
-        let total_len = read_u32_be(data, pos + 8) as usize;
-        if tag == wanted.as_bytes() {
-            return Some(&data[pos + header_len..pos + total_len]);
-        }
-        if total_len == 0 {
-            break;
-        }
-        pos += total_len;
-    }
-    None
-}
-
 fn verify_pmai_header(data: &[u8], label: &str) {
     assert!(data.len() >= 28, "{label}: too short");
     assert_eq!(&data[0..4], b"PMAI", "{label}: missing PMAI magic");
@@ -218,7 +201,7 @@ fn anlz_pipeline_with_generated_kick_pattern() {
     );
 
     // PPTH: verify UTF-16BE path
-    let ppth = find_chunk_payload(&dat, "PPTH").expect("PPTH in DAT");
+    let ppth = backend::service::anlz::anlz_chunk_payload(&dat, b"PPTH").expect("PPTH in DAT");
     let u16s: Vec<u16> = ppth
         .chunks(2)
         .map(|c| u16::from_be_bytes([c[0], c[1]]))
@@ -227,7 +210,7 @@ fn anlz_pipeline_with_generated_kick_pattern() {
     assert_eq!(decoded, TRACK_PATH);
 
     // PQTZ: 120 BPM × 30s = 61 beats, 8 bytes each
-    let pqtz = find_chunk_payload(&dat, "PQTZ").expect("PQTZ in DAT");
+    let pqtz = backend::service::anlz::anlz_chunk_payload(&dat, b"PQTZ").expect("PQTZ in DAT");
     assert_eq!(pqtz.len(), 61 * 8, "PQTZ should have 61 beat entries");
     // First beat: beat_number=1, tempo=12000. Absolute first-beat phase is waveform-derived.
     assert_eq!(u16::from_be_bytes([pqtz[0], pqtz[1]]), 1);
@@ -245,7 +228,7 @@ fn anlz_pipeline_with_generated_kick_pattern() {
     );
 
     // PWAV: 400 entries
-    let pwav = find_chunk_payload(&dat, "PWAV").expect("PWAV in DAT");
+    let pwav = backend::service::anlz::anlz_chunk_payload(&dat, b"PWAV").expect("PWAV in DAT");
     assert_eq!(pwav.len(), 400);
     // Should have non-zero entries (kick drum produces amplitude)
     assert!(
@@ -254,7 +237,7 @@ fn anlz_pipeline_with_generated_kick_pattern() {
     );
 
     // PWV2: 100 entries
-    let pwv2 = find_chunk_payload(&dat, "PWV2").expect("PWV2 in DAT");
+    let pwv2 = backend::service::anlz::anlz_chunk_payload(&dat, b"PWV2").expect("PWV2 in DAT");
     assert_eq!(pwv2.len(), 100);
 
     // === Validate .EXT ===
@@ -269,11 +252,11 @@ fn anlz_pipeline_with_generated_kick_pattern() {
     );
 
     // PWV3: detail count uses ceil(duration × 150) + 4 entries
-    let pwv3 = find_chunk_payload(&ext, "PWV3").expect("PWV3 in EXT");
+    let pwv3 = backend::service::anlz::anlz_chunk_payload(&ext, b"PWV3").expect("PWV3 in EXT");
     assert_eq!(pwv3.len(), 4504, "PWV3 entry count = ceil(30s × 150) + 4");
 
     // PWV4: 1200 entries × 6 bytes = 7200
-    let pwv4 = find_chunk_payload(&ext, "PWV4").expect("PWV4 in EXT");
+    let pwv4 = backend::service::anlz::anlz_chunk_payload(&ext, b"PWV4").expect("PWV4 in EXT");
     assert_eq!(pwv4.len(), 7200, "PWV4 = 1200 × 6 bytes");
     // Validate PWV4 frequency energy encoding (not RGB)
     let mut pwv4_low_dominant = 0u32;
@@ -302,7 +285,7 @@ fn anlz_pipeline_with_generated_kick_pattern() {
     }
 
     // PWV5: same entry count as PWV3, 2 bytes each
-    let pwv5 = find_chunk_payload(&ext, "PWV5").expect("PWV5 in EXT");
+    let pwv5 = backend::service::anlz::anlz_chunk_payload(&ext, b"PWV5").expect("PWV5 in EXT");
     assert_eq!(pwv5.len(), pwv3.len() * 2, "PWV5 entry count matches PWV3");
 
     // PWV5 encoding: check RGB bits make sense
@@ -324,7 +307,7 @@ fn anlz_pipeline_with_generated_kick_pattern() {
     );
 
     // PWV7: detail count matches PWV3
-    let pwv7 = find_chunk_payload(&twoex, "PWV7").expect("PWV7 in 2EX");
+    let pwv7 = backend::service::anlz::anlz_chunk_payload(&twoex, b"PWV7").expect("PWV7 in 2EX");
     assert_eq!(pwv7.len(), 4504 * 3, "PWV7 = 4504 × 3 bytes");
 
     // PWV7: entries are encoded as [low, mid, high], so bass-heavy input

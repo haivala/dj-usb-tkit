@@ -35,20 +35,7 @@ pub fn seed_tracks_as_analyzed(data_dir: &Path, track_ids: &[String]) {
     }
 }
 
-pub fn fixture_audio_path(relative: &str) -> PathBuf {
-    PathBuf::from(env!("CARGO_MANIFEST_DIR"))
-        .join("tests")
-        .join("fixtures")
-        .join("audio")
-        .join(relative)
-}
-
-pub fn copy_audio_fixture(media_dir: &Path, fixture_relative: &str, target_name: &str) {
-    common::copy_unique_audio(
-        &fixture_audio_path(fixture_relative),
-        &media_dir.join(target_name),
-    );
-}
+pub use common::copy_audio_fixture;
 
 pub fn setup_clean_strict_parity_fixture_with_local_key(
     local_key: Option<&str>,

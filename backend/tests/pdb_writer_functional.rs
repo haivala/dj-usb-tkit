@@ -1,7 +1,7 @@
 mod common;
 mod library_sources;
 
-use common::{fixture_audio_path, open_edb, pdb_path, seed_tracks_as_analyzed, vendor_db_dir};
+use common::{open_edb, pdb_path, seed_tracks_as_analyzed};
 
 use std::collections::{BTreeSet, HashSet};
 use std::fs;
@@ -15,15 +15,6 @@ use backend::models::{
 };
 use backend::pdb_reader::parse_pdb;
 use tempfile::tempdir;
-
-fn copy_audio_fixture(media_dir: &Path, fixture_relative: &str, target_name: &str) {
-    let fixture = fixture_audio_path(fixture_relative);
-    fs::copy(&fixture, media_dir.join(target_name)).expect("copy audio fixture");
-}
-
-fn edb_path(usb_root: &Path) -> std::path::PathBuf {
-    vendor_db_dir(usb_root).join("exportLibrary.db")
-}
 
 /// Validate PDB header invariants:
 /// - 20 tables, 4096-byte pages
@@ -73,7 +64,7 @@ fn validate_pdb_edb_parity(usb_root: &Path, expected_playlists: usize, expected_
     );
 
     // eDB parity
-    let conn = open_edb(&edb_path(usb_root));
+    let conn = open_edb(&common::edb_path(usb_root));
     let edb_playlist_count: i64 = conn
         .query_row(
             "SELECT COUNT(1) FROM playlist WHERE attribute = 0",
@@ -120,10 +111,10 @@ fn setup_multi_track_fixture() -> (
     fs::create_dir_all(&media).expect("create media dir");
     fs::create_dir_all(&usb).expect("create usb dir");
 
-    copy_audio_fixture(&media, "embedded/track_embedded.mp3", "01 Track A.mp3");
-    copy_audio_fixture(&media, "folder/track_folder.jpg.mp3", "02 Track B.mp3");
-    copy_audio_fixture(&media, "noart/track_no_art.mp3", "03 Track C.mp3");
-    copy_audio_fixture(
+    common::copy_audio_fixture(&media, "embedded/track_embedded.mp3", "01 Track A.mp3");
+    common::copy_audio_fixture(&media, "folder/track_folder.jpg.mp3", "02 Track B.mp3");
+    common::copy_audio_fixture(&media, "noart/track_no_art.mp3", "03 Track C.mp3");
+    common::copy_audio_fixture(
         &media,
         "parent/child/track_parent_folder.jpg.mp3",
         "04 Track D.mp3",

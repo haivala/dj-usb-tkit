@@ -4,11 +4,6 @@ use std::fs;
 use std::path::{Path, PathBuf};
 
 use image::{Rgb, RgbImage};
-use rusqlite::{Connection, types::ValueRef};
-
-const DEFAULT_USB_EXPORT_KEY: &str =
-    "r8gddnr4k847830ar6cqzbkk0el6qytmb3trbbx805jm74vez64i5o8fnrqryqls";
-const DEFAULT_MASTER_KEY: &str = "402fd_d44f42a8_eb0f6d4db0e6b";
 
 // 3-way waveform colors
 const COLOR_LOW: Rgb<u8> = Rgb([40, 100, 220]);
@@ -29,6 +24,10 @@ const WAVEFORM_HEIGHT: u32 = 120;
 const LANE_HEIGHT: u32 = 48;
 const SEPARATOR_HEIGHT: u32 = 4;
 const LANE_GAP: u32 = 2;
+
+use backend::waveform_tools::{
+    find_chunk_payload, load_path_to_anlz_map, resolve_ext, slugify, split_six, split_three,
+};
 
 fn main() {
     let args = env::args().collect::<Vec<_>>();
@@ -380,7 +379,7 @@ fn load_pwv7_waveforms(usb_root: &Path) -> BTreeMap<String, Pwv7Waveform> {
         let Ok(bytes) = fs::read(&twoex) else {
             continue;
         };
-        let Some(payload) = find_chunk_payload_vec(&bytes, b"PWV7") else {
+        let Some(payload) = find_chunk_payload(&bytes, b"PWV7").map(<[u8]>::to_vec) else {
             continue;
         };
         if payload.len() < 3 {
@@ -412,13 +411,14 @@ fn load_pwv4_waveforms(usb_root: &Path) -> BTreeMap<String, [Vec<u8>; 6]> {
         let Ok(bytes) = fs::read(&ext_path) else {
             continue;
         };
-        let Some(payload) = find_chunk_payload_vec(&bytes, b"PWV4") else {
+        let Some(payload) = find_chunk_payload(&bytes, b"PWV4").map(<[u8]>::to_vec) else {
             continue;
         };
         if payload.len() < 6 {
             continue;
         }
-        let lanes = split_six(&payload);
+        let (b0, b1, b2, b3, b4, b5) = split_six(&payload);
+        let lanes = [b0, b1, b2, b3, b4, b5];
         if !lanes[0].is_empty() {
             result.insert(path_key.clone(), lanes);
         }
@@ -429,139 +429,3 @@ fn load_pwv4_waveforms(usb_root: &Path) -> BTreeMap<String, [Vec<u8>; 6]> {
 // ---------------------------------------------------------------------------
 // eDB + ANLZ helpers
 // ---------------------------------------------------------------------------
-
-fn load_path_to_anlz_map(usb_root: &Path) -> Result<BTreeMap<String, String>, String> {
-    let db = usb_root
-        .join("PIONEER")
-        .join("rekordbox")
-        .join("exportLibrary.db");
-    let conn = open_with_known_keys(&db)?;
-    let mut stmt = conn
-        .prepare("SELECT path, analysisDataFilePath FROM content WHERE path IS NOT NULL AND TRIM(path) != ''")
-        .map_err(|e| format!("prepare: {e}"))?;
-    let mut rows = stmt.query([]).map_err(|e| format!("query: {e}"))?;
-    let mut out = BTreeMap::new();
-    while let Ok(Some(row)) = rows.next() {
-        let path = render_value_ref(row.get_ref(0).map_err(|e| e.to_string())?);
-        let anlz = render_value_ref(row.get_ref(1).map_err(|e| e.to_string())?);
-        if path.is_empty() || anlz.is_empty() {
-            continue;
-        }
-        out.insert(path.to_ascii_lowercase(), anlz);
-    }
-    Ok(out)
-}
-
-fn open_with_known_keys(path: &Path) -> Result<Connection, String> {
-    let open_plain = || Connection::open(path).map_err(|e| e.to_string());
-    let has_schema = |conn: &Connection| {
-        conn.query_row(
-            "SELECT COUNT(1) FROM sqlite_master WHERE type IN ('table','view')",
-            [],
-            |r| r.get::<_, i64>(0),
-        )
-        .ok()
-        .unwrap_or(0)
-            > 0
-    };
-    let plain = open_plain()?;
-    if has_schema(&plain) {
-        return Ok(plain);
-    }
-    for key in [DEFAULT_MASTER_KEY, DEFAULT_USB_EXPORT_KEY] {
-        let conn = open_plain()?;
-        if conn.execute_batch(&format!("PRAGMA key='{key}';")).is_err() {
-            continue;
-        }
-        if has_schema(&conn) {
-            return Ok(conn);
-        }
-    }
-    Err(format!("cannot open database {}", path.display()))
-}
-
-fn render_value_ref(v: ValueRef<'_>) -> String {
-    match v {
-        ValueRef::Null => String::new(),
-        ValueRef::Integer(x) => x.to_string(),
-        ValueRef::Real(x) => x.to_string(),
-        ValueRef::Text(x) => String::from_utf8_lossy(x).to_string(),
-        ValueRef::Blob(x) => format!("<blob:{}>", x.len()),
-    }
-}
-
-fn resolve_ext(usb_root: &Path, analysis_path: &str, ext: &str) -> PathBuf {
-    let rel = analysis_path.trim_start_matches('/').replace('\\', "/");
-    let base = usb_root.join(rel);
-    base.with_extension(ext)
-}
-
-fn find_chunk_payload_vec(bytes: &[u8], tag: &[u8; 4]) -> Option<Vec<u8>> {
-    let mut offset = 0usize;
-    while offset + 12 <= bytes.len() {
-        let t = &bytes[offset..offset + 4];
-        let header_len = u32::from_be_bytes([
-            bytes[offset + 4],
-            bytes[offset + 5],
-            bytes[offset + 6],
-            bytes[offset + 7],
-        ]) as usize;
-        let total_len = u32::from_be_bytes([
-            bytes[offset + 8],
-            bytes[offset + 9],
-            bytes[offset + 10],
-            bytes[offset + 11],
-        ]) as usize;
-        if total_len < header_len || total_len < 12 || offset + total_len > bytes.len() {
-            offset += 1;
-            continue;
-        }
-        if t == tag {
-            return bytes
-                .get(offset + header_len..offset + total_len)
-                .map(|s| s.to_vec());
-        }
-        offset += 1;
-    }
-    None
-}
-
-fn split_three(values: &[u8]) -> (Vec<u8>, Vec<u8>, Vec<u8>) {
-    let mut a = Vec::new();
-    let mut b = Vec::new();
-    let mut c = Vec::new();
-    for chunk in values.chunks(3) {
-        if chunk.len() == 3 {
-            a.push(chunk[0]);
-            b.push(chunk[1]);
-            c.push(chunk[2]);
-        }
-    }
-    (a, b, c)
-}
-
-fn split_six(values: &[u8]) -> [Vec<u8>; 6] {
-    let mut lanes: [Vec<u8>; 6] = Default::default();
-    for chunk in values.chunks(6) {
-        if chunk.len() == 6 {
-            for (i, &v) in chunk.iter().enumerate() {
-                lanes[i].push(v);
-            }
-        }
-    }
-    lanes
-}
-
-fn slugify(path: &str) -> String {
-    path.chars()
-        .map(|c| {
-            if c.is_ascii_alphanumeric() {
-                c.to_ascii_lowercase()
-            } else {
-                '_'
-            }
-        })
-        .collect::<String>()
-        .trim_matches('_')
-        .to_string()
-}

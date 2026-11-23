@@ -28,12 +28,17 @@ pub const DEFAULT_MASTER_DB_KEY: &str =
 pub const DEFAULT_USB_EDB_KEY: &str =
     "r8gddnr4k847830ar6cqzbkk0el6qytmb3trbbx805jm74vez64i5o8fnrqryqls";
 
+/// The PDB's file name in the vendor database folder.
+pub(crate) const PDB_FILE_NAME: &str = "export.pdb";
+/// The eDB's file name in the vendor database folder.
+pub(crate) const EDB_FILE_NAME: &str = "exportLibrary.db";
+
 pub(crate) fn vendor_db_dir(usb_root: &Path) -> PathBuf {
     usb_root.join(USB_VENDOR_ROOT_DIR).join(USB_VENDOR_DB_DIR)
 }
 
 pub(crate) fn vendor_pdb_path(usb_root: &Path) -> PathBuf {
-    vendor_db_dir(usb_root).join("export.pdb")
+    vendor_db_dir(usb_root).join(PDB_FILE_NAME)
 }
 
 pub(crate) fn desktop_master_db_rel_path() -> PathBuf {
@@ -43,7 +48,7 @@ pub(crate) fn desktop_master_db_rel_path() -> PathBuf {
 }
 
 pub(crate) fn vendor_edb_path(usb_root: &Path) -> PathBuf {
-    vendor_db_dir(usb_root).join("exportLibrary.db")
+    vendor_db_dir(usb_root).join(EDB_FILE_NAME)
 }
 
 /// Sidecar recording why a backup was taken (e.g. "Before export"), written

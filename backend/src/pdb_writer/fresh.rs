@@ -32,10 +32,14 @@ fn encode_color_row(row: &PdbColorRow) -> Vec<u8> {
 }
 
 fn encode_history_entry_row(row: &PdbHistoryEntryRow) -> Vec<u8> {
-    let mut out = vec![0u8; 12];
-    out[0..4].copy_from_slice(&row.track_id.to_le_bytes());
-    out[4..8].copy_from_slice(&row.playlist_id.to_le_bytes());
-    out[8..12].copy_from_slice(&row.entry_index.to_le_bytes());
+    let mut out = vec![0u8; pdb_row::ENTRY_ROW_LEN];
+    for (at, value) in [
+        (pdb_row::HISTORY_ENTRY_TRACK_AT, row.track_id),
+        (pdb_row::HISTORY_ENTRY_PLAYLIST_AT, row.playlist_id),
+        (pdb_row::HISTORY_ENTRY_INDEX_AT, row.entry_index),
+    ] {
+        out[at..at + 4].copy_from_slice(&value.to_le_bytes());
+    }
     out
 }
 

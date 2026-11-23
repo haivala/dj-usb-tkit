@@ -1,6 +1,6 @@
 //! Page/row primitives shared by the in-place paths: rewriting a
-//! variable-row page, track-row string slot patches and t08
-//! playlist-entry key parsing.
+//! variable-row page, track-row string slot patches and reading a PDB's
+//! playlist entries.
 
 use super::*;
 
@@ -35,66 +35,23 @@ pub(crate) fn patch_track_row_slot_bytes_if_len_matches(
     dst.copy_from_slice(desired);
     true
 }
-#[derive(Clone, Copy, Debug, Eq, PartialEq, Hash)]
-pub struct T08EntryKey {
-    pub entry_index: u32,
-    pub track_id: u32,
-    pub playlist_id: u32,
-}
-
-#[derive(Clone, Debug)]
-struct T08EntryLoc {
-    key: T08EntryKey,
-    // Retained for callers that may need the physical location/raw bytes of
-    // a t08 entry in the future; only `key` is read by current call sites.
-    #[allow(dead_code)]
-    page_index: u32,
-    #[allow(dead_code)]
-    raw: [u8; 12],
-}
-
-pub(crate) fn encode_t08_row(key: T08EntryKey) -> [u8; 12] {
-    let mut out = [0u8; 12];
-    out[0..4].copy_from_slice(&key.entry_index.to_le_bytes());
-    out[4..8].copy_from_slice(&key.track_id.to_le_bytes());
-    out[8..12].copy_from_slice(&key.playlist_id.to_le_bytes());
-    out
-}
-
-fn parse_t08_entries_from_page(page: &[u8], page_index: u32) -> Vec<T08EntryLoc> {
+/// The live playlist entries on `page`.
+fn parse_t08_entries_from_page(page: &[u8]) -> Vec<PdbPlaylistEntryRow> {
     if !pdb_page::is_data_page(page) {
         return Vec::new();
     }
     pdb_page::present_rows(page)
-        .into_iter()
-        .filter_map(|row| {
-            let raw: [u8; 12] = row.get(..12)?.try_into().ok()?;
-            Some(T08EntryLoc {
-                key: T08EntryKey {
-                    entry_index: read_u32_le_at(&raw, 0)?,
-                    track_id: read_u32_le_at(&raw, 4)?,
-                    playlist_id: read_u32_le_at(&raw, 8)?,
-                },
-                page_index,
-                raw,
-            })
-        })
+        .iter()
+        .filter_map(|row| pdb_row::playlist_entry(row))
         .collect()
 }
 
-pub(crate) fn collect_t08_entry_keys(bytes: &[u8], page_size: usize) -> Vec<T08EntryKey> {
+pub(crate) fn collect_t08_entry_keys(bytes: &[u8], page_size: usize) -> Vec<PdbPlaylistEntryRow> {
     let Some((_ec, first, last)) = table_ptr_fields(bytes, 8) else {
         return Vec::new();
     };
     let chain = collect_chain_pages(bytes, page_size, first, last).unwrap_or_default();
-    parse_t08_entries_with_locs(bytes, &chain, page_size)
-        .into_iter()
-        .map(|e| e.key)
-        .collect()
-}
-
-fn parse_t08_entries_with_locs(bytes: &[u8], chain: &[u32], page_size: usize) -> Vec<T08EntryLoc> {
-    let mut out = Vec::<T08EntryLoc>::new();
+    let mut out = Vec::new();
     for &page_idx in chain.iter().skip(1) {
         let Some(off) = page_offset(page_idx, page_size) else {
             continue;
@@ -102,7 +59,7 @@ fn parse_t08_entries_with_locs(bytes: &[u8], chain: &[u32], page_size: usize) ->
         let Some(page) = bytes.get(off..off + page_size) else {
             continue;
         };
-        out.extend(parse_t08_entries_from_page(page, page_idx));
+        out.extend(parse_t08_entries_from_page(page));
     }
     out
 }

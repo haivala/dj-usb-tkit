@@ -1665,11 +1665,11 @@ pub(crate) fn build_pdb_for_playlists(
                     .into(),
             ));
         }
-        let desired_t08: Vec<T08EntryKey> = pdb_data
+        let desired_t08: Vec<PdbPlaylistEntryRow> = pdb_data
             .playlist_entries
             .iter()
             .filter(|e| written_playlist_ids.contains(&e.playlist_id))
-            .map(|e| T08EntryKey {
+            .map(|e| PdbPlaylistEntryRow {
                 entry_index: e.entry_index,
                 track_id: e.track_id,
                 playlist_id: e.playlist_id,

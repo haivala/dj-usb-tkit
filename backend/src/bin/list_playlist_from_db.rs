@@ -5,10 +5,6 @@ use backend::commands::BackendCommands;
 use backend::pdb_reader::parse_pdb;
 use rusqlite::{Connection, types::ValueRef};
 
-const DEFAULT_USB_EXPORT_KEY: &str =
-    "r8gddnr4k847830ar6cqzbkk0el6qytmb3trbbx805jm74vez64i5o8fnrqryqls";
-const DEFAULT_MASTER_KEY: &str = "402fd_d44f42a8_eb0f6d4db0e6b";
-
 fn fail(message: impl AsRef<str>) -> ! {
     eprintln!("error: {}", message.as_ref());
     std::process::exit(1);
@@ -49,48 +45,6 @@ fn resolve_edb_path(input: &Path) -> PathBuf {
         .join("PIONEER")
         .join("rekordbox")
         .join("exportLibrary.db")
-}
-
-fn open_edb_with_known_keys(path: &Path) -> Result<Connection, String> {
-    let open_plain = || Connection::open(path).map_err(|e| e.to_string());
-    let has_schema = |conn: &Connection| {
-        conn.query_row(
-            "SELECT COUNT(1) FROM sqlite_master WHERE type IN ('table','view')",
-            [],
-            |r| r.get::<_, i64>(0),
-        )
-        .ok()
-        .unwrap_or(0)
-            > 0
-    };
-
-    let plain = open_plain()?;
-    if has_schema(&plain) {
-        return Ok(plain);
-    }
-
-    let mut keys = vec![
-        DEFAULT_MASTER_KEY.to_string(),
-        DEFAULT_USB_EXPORT_KEY.to_string(),
-    ];
-    if let Ok(extra) = env::var("USB_DB_KEY") {
-        let trimmed = extra.trim();
-        if !trimmed.is_empty() && !keys.iter().any(|k| k == trimmed) {
-            keys.insert(0, trimmed.to_string());
-        }
-    }
-
-    for key in keys {
-        let conn = open_plain()?;
-        if conn.execute_batch(&format!("PRAGMA key='{key}';")).is_err() {
-            continue;
-        }
-        if has_schema(&conn) {
-            return Ok(conn);
-        }
-    }
-
-    Err("not readable as plain sqlite or with known keys".to_string())
 }
 
 fn table_columns(conn: &Connection, table: &str) -> Vec<String> {
@@ -142,7 +96,7 @@ fn list_edb_playlists(input: &Path) {
     if !edb_path.is_file() {
         fail(format!("eDB not found: {}", edb_path.display()));
     }
-    let conn = open_edb_with_known_keys(&edb_path)
+    let conn = backend::edb::open_rekordbox_db_for_tools(&edb_path)
         .unwrap_or_else(|err| fail(format!("open eDB failed: {err}")));
 
     let cols = table_columns(&conn, "playlist");

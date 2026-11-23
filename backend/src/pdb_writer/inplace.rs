@@ -15,15 +15,14 @@ fn table_uses_tombstone_footer_convention(table_type: u32) -> bool {
 }
 
 /// A data page that the in-place row passes below may edit: of the wanted
-/// table, not an index page, with at least one row slot and a payload that
-/// ends inside the page.
+/// table, not an index page, with at least one row slot, a heap that ends
+/// inside the page and a footer clear of it. Its rows are
+/// [`pdb_page::row_slots`], as every reader sees them.
 struct InplaceDataPage {
     idx: usize,
     start: usize,
     num_row_offsets: usize,
     num_rows: usize,
-    /// End of the row payload, relative to the page start.
-    payload_end: usize,
 }
 
 /// Page size of a PDB the in-place passes can work on: the header's page
@@ -48,8 +47,9 @@ fn inplace_data_pages(bytes: &[u8], len_page: usize, table_type: u32) -> Vec<Inp
         let Some(used_size) = read_u16_le_at(page, 0x1e) else {
             continue;
         };
-        let payload_end = HEAP_START + used_size as usize;
-        if payload_end > len_page || !pdb_page::footer_clear_of_heap(page, num_row_offsets) {
+        if HEAP_START + used_size as usize > len_page
+            || !pdb_page::footer_clear_of_heap(page, num_row_offsets)
+        {
             continue;
         }
         let idx = idx as usize;
@@ -58,7 +58,6 @@ fn inplace_data_pages(bytes: &[u8], len_page: usize, table_type: u32) -> Vec<Inp
             start: idx * len_page,
             num_row_offsets,
             num_rows,
-            payload_end,
         });
     }
     out
@@ -134,14 +133,14 @@ pub(crate) fn remove_rows_inplace(
     let mut removed = 0usize;
     for data_page in inplace_data_pages(bytes, len_page, table_type) {
         let page = &mut bytes[data_page.start..data_page.start + len_page];
-        let doomed: Vec<_> = pdb_page::footer_slots(page, data_page.num_row_offsets)
+        let doomed: Vec<_> = pdb_page::row_slots(page)
+            .into_iter()
             .filter(|slot| {
-                let row_start = HEAP_START + slot.heap_off;
                 slot.present
-                    && row_start < data_page.payload_end
-                    && extract_row_id(&page[row_start..data_page.payload_end])
+                    && extract_row_id(&page[slot.range()])
                         .is_some_and(|id| ids_to_remove.contains(&id))
             })
+            .map(|slot| slot.footer)
             .collect();
         removed += doomed.len();
         tombstone_slots(
@@ -179,31 +178,25 @@ pub(crate) fn playlist_tree_slots(bytes: &[u8]) -> Vec<PlaylistTreeSlot> {
     let mut out = Vec::new();
     for data_page in inplace_data_pages(bytes, len_page, 7) {
         let page = &bytes[data_page.start..data_page.start + len_page];
-        for slot in pdb_page::footer_slots(page, data_page.num_row_offsets) {
-            let row_start = HEAP_START + slot.heap_off;
-            let Some(row) = page.get(row_start..data_page.payload_end) else {
+        for slot in pdb_page::row_slots(page) {
+            let row = &page[slot.range()];
+            let Some(fields) = pdb_row::playlist_tree_fields(row) else {
                 continue;
             };
-            let (Some(parent_id), Some(sort_order), Some(id), Some(folder)) = (
-                read_u32_le_at(row, 0),
-                read_u32_le_at(row, 8),
-                read_u32_le_at(row, 12),
-                read_u32_le_at(row, 16),
-            ) else {
+            let Some((name, _)) = pdb_row::raw_pdb_string(row, pdb_row::PLAYLIST_TREE_NAME_AT)
+            else {
                 continue;
             };
-            let Some((name, _)) = crate::pdb_row::raw_pdb_string(row, 20) else {
-                continue;
-            };
+            let footer = slot.footer;
             out.push(PlaylistTreeSlot {
                 page: data_page.idx,
-                slot: slot.index,
+                slot: footer.index,
                 live: slot.present,
-                in_last_write: slot.group.tranrf(page) & slot.bit != 0,
-                id,
-                parent_id,
-                sort_order,
-                is_folder: folder == 1,
+                in_last_write: footer.group.tranrf(page) & footer.bit != 0,
+                id: fields.id,
+                parent_id: fields.parent_id,
+                sort_order: fields.sort_order,
+                is_folder: fields.is_folder,
                 name,
             });
         }
@@ -223,8 +216,10 @@ pub(crate) fn remove_playlist_tree_slots_inplace(
     let mut removed = 0;
     for data_page in inplace_data_pages(bytes, len_page, 7) {
         let page = &mut bytes[data_page.start..data_page.start + len_page];
-        let doomed: Vec<_> = pdb_page::footer_slots(page, data_page.num_row_offsets)
-            .filter(|s| s.present && slots.contains(&(data_page.idx, s.index)))
+        let doomed: Vec<_> = pdb_page::row_slots(page)
+            .into_iter()
+            .filter(|s| s.present && slots.contains(&(data_page.idx, s.footer.index)))
+            .map(|s| s.footer)
             .collect();
         removed += doomed.len();
         tombstone_slots(page, &data_page, &doomed, false);
@@ -249,22 +244,22 @@ pub(crate) fn rename_playlist_tree_slot_inplace(
             continue;
         }
         let page = &mut bytes[data_page.start..data_page.start + len_page];
-        let Some(slot) =
-            pdb_page::footer_slots(page, data_page.num_row_offsets).find(|s| s.index == slot_idx)
+        let Some(slot) = pdb_page::row_slots(page)
+            .into_iter()
+            .find(|s| s.footer.index == slot_idx)
         else {
             return false;
         };
-        let name_start = HEAP_START + slot.heap_off + 20;
-        let Some(old_len) = page
-            .get(HEAP_START + slot.heap_off..data_page.payload_end)
-            .and_then(|row| crate::pdb_row::raw_pdb_string(row, 20))
-            .map(|(_, len)| len)
+        let row = slot.range();
+        let Some((_, old_len)) =
+            pdb_row::raw_pdb_string(&page[row.clone()], pdb_row::PLAYLIST_TREE_NAME_AT)
         else {
             return false;
         };
-        if old_len != encoded.len() || name_start + old_len > data_page.payload_end {
+        if old_len != encoded.len() {
             return false;
         }
+        let name_start = row.start + pdb_row::PLAYLIST_TREE_NAME_AT;
         page[name_start..name_start + old_len].copy_from_slice(&encoded);
         return true;
     }
@@ -287,7 +282,31 @@ pub(crate) fn merge_track_entries_inplace(
         return (0, 0);
     };
     // (table, offset of the track id in the row, offset of the playlist id).
-    const ENTRY_TABLES: [(u32, usize, usize); 3] = [(8, 4, 8), (12, 0, 4), (18, 0, 4)];
+    const ENTRY_TABLES: [(u32, usize, usize); 3] = [
+        (
+            8,
+            pdb_row::PLAYLIST_ENTRY_TRACK_AT,
+            pdb_row::PLAYLIST_ENTRY_PLAYLIST_AT,
+        ),
+        (
+            12,
+            pdb_row::HISTORY_ENTRY_TRACK_AT,
+            pdb_row::HISTORY_ENTRY_PLAYLIST_AT,
+        ),
+        (
+            18,
+            pdb_row::HISTORY_ENTRY_TRACK_AT,
+            pdb_row::HISTORY_ENTRY_PLAYLIST_AT,
+        ),
+    ];
+    // The live entry rows on `page`, as their ranges.
+    let entry_rows = |page: &[u8]| -> Vec<(pdb_page::FooterSlot, std::ops::Range<usize>)> {
+        pdb_page::row_slots(page)
+            .into_iter()
+            .filter(|slot| slot.present && slot.end - slot.start >= pdb_row::ENTRY_ROW_LEN)
+            .map(|slot| (slot.footer, slot.range()))
+            .collect()
+    };
     let row_u32 = |page: &[u8], row: usize, at: usize| read_u32_le_at(page, row + at).unwrap_or(0);
 
     let mut repointed = 0usize;
@@ -300,26 +319,19 @@ pub(crate) fn merge_track_entries_inplace(
         if table_type == 8 {
             for data_page in &pages {
                 let page = &bytes[data_page.start..data_page.start + len_page];
-                for slot in pdb_page::footer_slots(page, data_page.num_row_offsets) {
-                    let row = HEAP_START + slot.heap_off;
-                    if slot.present && row + 12 <= data_page.payload_end {
-                        present.insert((
-                            row_u32(page, row, playlist_at),
-                            row_u32(page, row, track_at),
-                        ));
-                    }
+                for (_, row) in entry_rows(page) {
+                    present.insert((
+                        row_u32(page, row.start, playlist_at),
+                        row_u32(page, row.start, track_at),
+                    ));
                 }
             }
         }
         for data_page in &pages {
             let page = &mut bytes[data_page.start..data_page.start + len_page];
             let mut doomed = Vec::new();
-            let slots: Vec<_> = pdb_page::footer_slots(page, data_page.num_row_offsets).collect();
-            for slot in slots {
-                let row = HEAP_START + slot.heap_off;
-                if !slot.present || row + 12 > data_page.payload_end {
-                    continue;
-                }
+            for (slot, row) in entry_rows(page) {
+                let row = row.start;
                 let Some(&twin) = twins.get(&row_u32(page, row, track_at)) else {
                     continue;
                 };
@@ -378,26 +390,20 @@ pub(crate) fn remove_duplicate_playlist_entries_inplace(bytes: &mut [u8]) -> usi
         std::collections::HashMap::new();
     for data_page in &data_pages {
         let page = &bytes[data_page.start..data_page.start + len_page];
-        for slot in pdb_page::footer_slots(page, data_page.num_row_offsets) {
-            let row_start = HEAP_START + slot.heap_off;
-            if !slot.present || row_start >= data_page.payload_end {
+        for slot in pdb_page::row_slots(page) {
+            if !slot.present {
                 continue;
             }
-            let row_data = &page[row_start..data_page.payload_end];
-            let (Some(entry_index), Some(track_id), Some(playlist_id)) = (
-                extract_u32_at(row_data, 0x00),
-                extract_playlist_entry_track_id(row_data),
-                extract_playlist_entry_playlist_id(row_data),
-            ) else {
+            let Some(entry) = pdb_row::playlist_entry(&page[slot.range()]) else {
                 continue;
             };
             locations
-                .entry((playlist_id, track_id))
+                .entry((entry.playlist_id, entry.track_id))
                 .or_default()
                 .push(PlaylistEntryLocation {
                     page_idx: data_page.idx,
-                    slot: slot.index,
-                    entry_index,
+                    slot: slot.footer.index,
+                    entry_index: entry.entry_index,
                 });
         }
     }
@@ -429,8 +435,10 @@ pub(crate) fn remove_duplicate_playlist_entries_inplace(bytes: &mut [u8]) -> usi
     let mut removed = 0usize;
     for data_page in &data_pages {
         let page = &mut bytes[data_page.start..data_page.start + len_page];
-        let doomed: Vec<_> = pdb_page::footer_slots(page, data_page.num_row_offsets)
-            .filter(|slot| slot.present && to_remove.contains(&(data_page.idx, slot.index)))
+        let doomed: Vec<_> = pdb_page::row_slots(page)
+            .into_iter()
+            .filter(|slot| slot.present && to_remove.contains(&(data_page.idx, slot.footer.index)))
+            .map(|slot| slot.footer)
             .collect();
         removed += doomed.len();
         tombstone_slots(page, data_page, &doomed, true);
@@ -443,7 +451,7 @@ pub(crate) fn remove_duplicate_playlist_entries_inplace(bytes: &mut [u8]) -> usi
 ///
 /// `patches` is `(playlist_id, track_id, new_entry_index)`. An existing row
 /// is matched by `(playlist_id, track_id)` only — `entry_index` is treated
-/// as a mutable position, never part of identity (see `T08EntryKey`'s doc
+/// as a mutable position, never part of identity (see `PdbPlaylistEntryRow`'s doc
 /// comment). This is what makes a track's position change in an already-
 /// exported playlist a true in-place update instead of a remove+add pair:
 /// there is no delete/add pair here for a partial failure (e.g. an
@@ -472,27 +480,27 @@ pub(crate) fn patch_t08_entry_indices_in_place(
 
     for data_page in inplace_data_pages(bytes, page_size, 8) {
         let page = &mut bytes[data_page.start..data_page.start + page_size];
-        let row_starts: Vec<usize> = pdb_page::footer_slots(page, data_page.num_row_offsets)
+        let entries: Vec<_> = pdb_page::row_slots(page)
+            .into_iter()
             .filter(|slot| slot.present)
-            .map(|slot| HEAP_START + slot.heap_off)
-            .filter(|&row_start| row_start + 12 <= data_page.payload_end)
+            .filter_map(|slot| {
+                Some((
+                    slot.range().start,
+                    pdb_row::playlist_entry(&page[slot.range()])?,
+                ))
+            })
             .collect();
-        for row_start in row_starts {
-            let row_data = &page[row_start..row_start + 12];
-            let (Some(track_id), Some(playlist_id)) = (
-                extract_playlist_entry_track_id(row_data),
-                extract_playlist_entry_playlist_id(row_data),
-            ) else {
+        for (row_start, entry) in entries {
+            let Some(&new_entry_index) =
+                desired_by_identity.get(&(entry.playlist_id, entry.track_id))
+            else {
                 continue;
             };
-            let Some(&new_entry_index) = desired_by_identity.get(&(playlist_id, track_id)) else {
-                continue;
-            };
-            let current_entry_index = extract_u32_at(row_data, 0x00).unwrap_or(0);
-            if current_entry_index == new_entry_index {
+            if entry.entry_index == new_entry_index {
                 continue;
             }
-            page[row_start..row_start + 4].copy_from_slice(&new_entry_index.to_le_bytes());
+            let at = row_start + pdb_row::PLAYLIST_ENTRY_INDEX_AT;
+            page[at..at + 4].copy_from_slice(&new_entry_index.to_le_bytes());
             touched_pages.insert(data_page.idx);
             patched += 1;
         }
@@ -584,35 +592,6 @@ pub(crate) fn rebuild_sentinel_btrees_for_tables(bytes: &mut [u8], tables: &[u32
         let sentinel_seq = max_seq.saturating_add(1);
         bytes[sent_off + 0x10..sent_off + 0x14].copy_from_slice(&sentinel_seq.to_le_bytes());
     }
-}
-
-fn extract_u32_at(row: &[u8], offset: usize) -> Option<u32> {
-    read_u32_le_at(row, offset)
-}
-
-/// Extract track ID from a raw track row (at offset 0x48 LE).
-pub(crate) fn extract_track_id(row: &[u8]) -> Option<u32> {
-    extract_u32_at(row, 0x48)
-}
-
-/// Extract playlist tree row ID (at offset 0x0c LE).
-pub(crate) fn extract_playlist_tree_id(row: &[u8]) -> Option<u32> {
-    extract_u32_at(row, 0x0c)
-}
-
-/// Extract playlist entry's playlist_id (at offset 0x08 LE).
-pub(crate) fn extract_playlist_entry_playlist_id(row: &[u8]) -> Option<u32> {
-    extract_u32_at(row, 0x08)
-}
-
-/// Extract playlist entry's track_id (at offset 0x04 LE).
-pub(crate) fn extract_playlist_entry_track_id(row: &[u8]) -> Option<u32> {
-    extract_u32_at(row, 0x04)
-}
-
-/// Extract artwork row ID (at offset 0x00 LE).
-pub(crate) fn extract_artwork_id(row: &[u8]) -> Option<u32> {
-    extract_u32_at(row, 0)
 }
 
 /// Point the sentinel page at `sent_off` at the `active` data pages (sorted

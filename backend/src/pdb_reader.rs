@@ -79,7 +79,10 @@ pub struct PdbPlaylistTreeRow {
     pub name: String,
 }
 
-#[derive(Debug, Clone)]
+/// A playlist entry row (t08). A track's place in a playlist is
+/// `(playlist_id, track_id)`; `entry_index` is its position, which an export
+/// may change in place.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub struct PdbPlaylistEntryRow {
     pub entry_index: u32,
     pub track_id: u32,
@@ -188,10 +191,7 @@ pub fn pdb_file_at(input: &Path) -> PathBuf {
     if input.is_file() {
         return input.to_path_buf();
     }
-    input
-        .join(crate::service::usb::vendor_compat::USB_VENDOR_ROOT_DIR)
-        .join(crate::service::usb::vendor_compat::USB_VENDOR_DB_DIR)
-        .join("export.pdb")
+    crate::service::usb::vendor_compat::vendor_pdb_path(input)
 }
 
 pub fn parse_pdb(path: &Path) -> BackendResult<ParsedPdb> {
@@ -359,7 +359,7 @@ fn dispatch_row(row: Vec<u8>, page_info: PageInfo, out: &mut ParsedPdb) {
             }
         }
         TableType::PlaylistEntries => {
-            if let Some(v) = parse_playlist_entry_row(&row) {
+            if let Some(v) = crate::pdb_row::playlist_entry(&row) {
                 out.playlist_entries.push(v);
             }
         }
@@ -664,20 +664,13 @@ fn parse_artwork_row(row: &[u8]) -> Option<(u32, String)> {
 }
 
 fn parse_playlist_tree_row(row: &[u8]) -> Option<PdbPlaylistTreeRow> {
+    let fields = crate::pdb_row::playlist_tree_fields(row)?;
     Some(PdbPlaylistTreeRow {
-        parent_id: read_u32_le(row, 0)?,
-        sort_order: read_u32_le(row, 8)?,
-        id: read_u32_le(row, 12)?,
-        row_is_folder: read_u32_le(row, 16)? == 1,
-        name: get_string_from_pdb(row, 20).unwrap_or_default(),
-    })
-}
-
-fn parse_playlist_entry_row(row: &[u8]) -> Option<PdbPlaylistEntryRow> {
-    Some(PdbPlaylistEntryRow {
-        entry_index: read_u32_le(row, 0)?,
-        track_id: read_u32_le(row, 4)?,
-        playlist_id: read_u32_le(row, 8)?,
+        parent_id: fields.parent_id,
+        sort_order: fields.sort_order,
+        id: fields.id,
+        row_is_folder: fields.is_folder,
+        name: get_string_from_pdb(row, crate::pdb_row::PLAYLIST_TREE_NAME_AT).unwrap_or_default(),
     })
 }
 
@@ -690,11 +683,14 @@ fn parse_history_playlist_row(row: &[u8], source_table: u32) -> Option<PdbHistor
 }
 
 fn parse_history_entry_row(row: &[u8], source_table: u32) -> Option<PdbHistoryEntryRow> {
-    if row.len() >= 12 {
+    use crate::pdb_row::{
+        ENTRY_ROW_LEN, HISTORY_ENTRY_INDEX_AT, HISTORY_ENTRY_PLAYLIST_AT, HISTORY_ENTRY_TRACK_AT,
+    };
+    if row.len() >= ENTRY_ROW_LEN {
         return Some(PdbHistoryEntryRow {
-            track_id: read_u32_le(row, 0),
-            playlist_id: read_u32_le(row, 4)?,
-            entry_index: read_u32_le(row, 8)?,
+            track_id: read_u32_le(row, HISTORY_ENTRY_TRACK_AT),
+            playlist_id: read_u32_le(row, HISTORY_ENTRY_PLAYLIST_AT)?,
+            entry_index: read_u32_le(row, HISTORY_ENTRY_INDEX_AT)?,
             source_table,
         });
     }

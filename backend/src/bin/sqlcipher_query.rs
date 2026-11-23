@@ -1,11 +1,7 @@
 use std::env;
 use std::path::PathBuf;
 
-use rusqlite::{Connection, types::ValueRef};
-
-const DEFAULT_USB_EXPORT_KEY: &str =
-    "r8gddnr4k847830ar6cqzbkk0el6qytmb3trbbx805jm74vez64i5o8fnrqryqls";
-const DEFAULT_MASTER_KEY: &str = "402fd_d44f42a8_eb0f6d4db0e6b";
+use rusqlite::types::ValueRef;
 
 fn main() {
     let args = env::args().collect::<Vec<_>>();
@@ -16,7 +12,7 @@ fn main() {
     let db_path = PathBuf::from(&args[1]);
     let sql = args[2..].join(" ");
 
-    let conn = match open_with_known_keys(&db_path) {
+    let conn = match backend::edb::open_rekordbox_db_for_tools(&db_path) {
         Ok(c) => c,
         Err(err) => {
             eprintln!("failed to open {}: {err}", db_path.display());
@@ -62,46 +58,4 @@ fn main() {
         }
         println!("{}", out.join("|"));
     }
-}
-
-fn open_with_known_keys(path: &PathBuf) -> Result<Connection, String> {
-    let open_plain = || Connection::open(path).map_err(|e| e.to_string());
-    let has_schema = |conn: &Connection| {
-        conn.query_row(
-            "SELECT COUNT(1) FROM sqlite_master WHERE type IN ('table','view')",
-            [],
-            |r| r.get::<_, i64>(0),
-        )
-        .ok()
-        .unwrap_or(0)
-            > 0
-    };
-
-    let plain = open_plain()?;
-    if has_schema(&plain) {
-        return Ok(plain);
-    }
-
-    let mut keys = vec![
-        DEFAULT_MASTER_KEY.to_string(),
-        DEFAULT_USB_EXPORT_KEY.to_string(),
-    ];
-    if let Ok(extra) = env::var("USB_DB_KEY") {
-        let trimmed = extra.trim();
-        if !trimmed.is_empty() && !keys.iter().any(|k| k == trimmed) {
-            keys.insert(0, trimmed.to_string());
-        }
-    }
-
-    for key in keys {
-        let conn = open_plain()?;
-        if conn.execute_batch(&format!("PRAGMA key='{key}';")).is_err() {
-            continue;
-        }
-        if has_schema(&conn) {
-            return Ok(conn);
-        }
-    }
-
-    Err("not readable as plain sqlite or with known keys".to_string())
 }

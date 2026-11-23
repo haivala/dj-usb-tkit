@@ -6,9 +6,7 @@ use crate::logging::{self, Level};
 use crate::metadata::sanitize_metadata;
 use crate::models::{UsbTrack, WarningEntry};
 use crate::service::usb::root::resolve_usb_side_path_lexical_text;
-use crate::service::usb::vendor_compat::{
-    DEFAULT_USB_EDB_KEY, USB_VENDOR_DB_DIR, USB_VENDOR_ROOT_DIR,
-};
+use crate::service::usb::vendor_compat::DEFAULT_USB_EDB_KEY;
 use crate::utils::counted;
 use chrono::TimeZone;
 use rusqlite::{OptionalExtension, params, types::Value};
@@ -169,10 +167,7 @@ pub struct ExportDbPlaylist {
 // -----------------------------------------------------------------------------
 
 pub fn edb_path_from_usb_root(usb_root: &Path) -> std::path::PathBuf {
-    usb_root
-        .join(USB_VENDOR_ROOT_DIR)
-        .join(USB_VENDOR_DB_DIR)
-        .join("exportLibrary.db")
+    crate::service::usb::vendor_compat::vendor_edb_path(usb_root)
 }
 
 /// Whether `conn` sees a schema: at least one table or view of its own. A
@@ -310,6 +305,39 @@ pub fn open_edb(path: &Path, warnings: &mut Vec<WarningEntry>) -> Option<rusqlit
         ));
     }
     conn
+}
+
+/// A dev tool's read-only connection to any rekordbox database at `path`:
+/// an eDB as [`open_edb`] unlocks it, else a rekordbox `master.db` with its
+/// key, else with the key in the `USB_DB_KEY` environment variable.
+pub fn open_rekordbox_db_for_tools(path: &Path) -> Result<rusqlite::Connection, String> {
+    let flags = rusqlite::OpenFlags::SQLITE_OPEN_READ_ONLY;
+    if !path.is_file() {
+        return Err(format!("{} is not a file", path.display()));
+    }
+    if let Some(conn) = open_edb_with_flags(path, flags) {
+        return Ok(conn);
+    }
+    let extra = std::env::var("USB_DB_KEY").ok();
+    let keys = [
+        Some(crate::service::usb::vendor_compat::DEFAULT_MASTER_DB_KEY),
+        extra
+            .as_deref()
+            .map(str::trim)
+            .filter(|key| !key.is_empty()),
+    ];
+    for key in keys.into_iter().flatten() {
+        let Ok(conn) = rusqlite::Connection::open_with_flags(path, flags) else {
+            continue;
+        };
+        if conn.execute_batch(&format!("PRAGMA key='{key}';")).is_ok() && has_schema(&conn) {
+            return Ok(conn);
+        }
+    }
+    Err(format!(
+        "{} doesn't open with any known key",
+        path.display()
+    ))
 }
 
 /// A read-only connection to `usb_root`'s staged eDB (see

@@ -65,22 +65,36 @@ pub fn encode_playlist_tree_row(
     row_is_folder: bool,
     name: &str,
 ) -> Vec<u8> {
-    let offset = 20usize;
+    use crate::pdb_row::{
+        PLAYLIST_TREE_FOLDER_AT, PLAYLIST_TREE_ID_AT, PLAYLIST_TREE_NAME_AT,
+        PLAYLIST_TREE_PARENT_AT, PLAYLIST_TREE_SORT_AT,
+    };
     let name_bytes = encode_pdb_string(&sanitize_metadata(name));
-    let mut row = vec![0u8; offset + name_bytes.len()];
-    row[0..4].copy_from_slice(&parent_id.to_le_bytes());
-    row[8..12].copy_from_slice(&sort_order.to_le_bytes());
-    row[12..16].copy_from_slice(&id.to_le_bytes());
-    row[16..20].copy_from_slice(&(if row_is_folder { 1u32 } else { 0u32 }).to_le_bytes());
-    row[offset..offset + name_bytes.len()].copy_from_slice(&name_bytes);
+    let mut row = vec![0u8; PLAYLIST_TREE_NAME_AT + name_bytes.len()];
+    for (at, value) in [
+        (PLAYLIST_TREE_PARENT_AT, parent_id),
+        (PLAYLIST_TREE_SORT_AT, sort_order),
+        (PLAYLIST_TREE_ID_AT, id),
+        (PLAYLIST_TREE_FOLDER_AT, u32::from(row_is_folder)),
+    ] {
+        row[at..at + 4].copy_from_slice(&value.to_le_bytes());
+    }
+    row[PLAYLIST_TREE_NAME_AT..].copy_from_slice(&name_bytes);
     row
 }
 
 pub fn encode_playlist_entry_row(entry_index: u32, track_id: u32, playlist_id: u32) -> Vec<u8> {
-    let mut row = vec![0u8; 12];
-    row[0..4].copy_from_slice(&entry_index.to_le_bytes());
-    row[4..8].copy_from_slice(&track_id.to_le_bytes());
-    row[8..12].copy_from_slice(&playlist_id.to_le_bytes());
+    use crate::pdb_row::{
+        ENTRY_ROW_LEN, PLAYLIST_ENTRY_INDEX_AT, PLAYLIST_ENTRY_PLAYLIST_AT, PLAYLIST_ENTRY_TRACK_AT,
+    };
+    let mut row = vec![0u8; ENTRY_ROW_LEN];
+    for (at, value) in [
+        (PLAYLIST_ENTRY_INDEX_AT, entry_index),
+        (PLAYLIST_ENTRY_TRACK_AT, track_id),
+        (PLAYLIST_ENTRY_PLAYLIST_AT, playlist_id),
+    ] {
+        row[at..at + 4].copy_from_slice(&value.to_le_bytes());
+    }
     row
 }
 

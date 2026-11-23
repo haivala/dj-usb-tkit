@@ -1,16 +1,25 @@
-//! PDB row layouts: where a row's strings sit, and the DeviceSQL strings
-//! themselves.
+//! PDB row layouts: where a row's ids and strings sit, and the DeviceSQL
+//! strings themselves.
 //!
-//! The reader, the writers, the detectors and their repairs all find a row's
-//! strings through this, so they agree on where each one is and how long it
+//! The reader, the writers, the detectors and their repairs all read a row's
+//! fields through this, so they agree on where each one is and how long it
 //! is. The encoders that build rows live in
 //! `service::export_helpers::pdb_encoding`.
 
-use crate::utils::{read_u8_at, read_u16_le_at, write_u16_le_at};
+use crate::pdb_reader::PdbPlaylistEntryRow;
+use crate::utils::{read_u8_at, read_u16_le_at, read_u32_le_at, write_u16_le_at};
 
 // ---------------------------------------------------------------------------
 // Track rows (t00)
 // ---------------------------------------------------------------------------
+
+/// Row offset of a track row's id.
+pub const TRACK_ID_AT: usize = 72;
+
+/// A track row's id.
+pub fn track_id(row: &[u8]) -> Option<u32> {
+    read_u32_le_at(row, TRACK_ID_AT)
+}
 
 /// String slots in a track row.
 pub const TRACK_STRING_SLOTS: usize = 21;
@@ -168,6 +177,83 @@ pub fn raw_pdb_string(row: &[u8], offset: usize) -> Option<(String, usize)> {
         text.iter().map(|&b| b as char).collect::<String>()
     };
     Some((value, len))
+}
+
+// ---------------------------------------------------------------------------
+// Artwork rows (t13)
+// ---------------------------------------------------------------------------
+
+/// An artwork row's id (its first field).
+pub fn artwork_id(row: &[u8]) -> Option<u32> {
+    read_u32_le_at(row, 0)
+}
+
+// ---------------------------------------------------------------------------
+// Playlist tree rows (t07)
+// ---------------------------------------------------------------------------
+
+/// Row offsets of a playlist-tree row's fields.
+pub const PLAYLIST_TREE_PARENT_AT: usize = 0;
+pub const PLAYLIST_TREE_SORT_AT: usize = 8;
+pub const PLAYLIST_TREE_ID_AT: usize = 12;
+pub const PLAYLIST_TREE_FOLDER_AT: usize = 16;
+pub const PLAYLIST_TREE_NAME_AT: usize = 20;
+
+/// A playlist-tree row's fixed fields.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct PlaylistTreeFields {
+    pub parent_id: u32,
+    pub sort_order: u32,
+    pub id: u32,
+    pub is_folder: bool,
+}
+
+pub fn playlist_tree_fields(row: &[u8]) -> Option<PlaylistTreeFields> {
+    Some(PlaylistTreeFields {
+        parent_id: read_u32_le_at(row, PLAYLIST_TREE_PARENT_AT)?,
+        sort_order: read_u32_le_at(row, PLAYLIST_TREE_SORT_AT)?,
+        id: read_u32_le_at(row, PLAYLIST_TREE_ID_AT)?,
+        is_folder: read_u32_le_at(row, PLAYLIST_TREE_FOLDER_AT)? == 1,
+    })
+}
+
+/// A playlist-tree row's id.
+pub fn playlist_tree_id(row: &[u8]) -> Option<u32> {
+    read_u32_le_at(row, PLAYLIST_TREE_ID_AT)
+}
+
+// ---------------------------------------------------------------------------
+// Playlist entries (t08) and history entries (t12, t18)
+// ---------------------------------------------------------------------------
+
+/// Bytes in a playlist or history entry row.
+pub const ENTRY_ROW_LEN: usize = 12;
+/// Row offsets of a playlist entry's fields.
+pub const PLAYLIST_ENTRY_INDEX_AT: usize = 0;
+pub const PLAYLIST_ENTRY_TRACK_AT: usize = 4;
+pub const PLAYLIST_ENTRY_PLAYLIST_AT: usize = 8;
+/// Row offsets of a history entry's fields: the track comes first.
+pub const HISTORY_ENTRY_TRACK_AT: usize = 0;
+pub const HISTORY_ENTRY_PLAYLIST_AT: usize = 4;
+pub const HISTORY_ENTRY_INDEX_AT: usize = 8;
+
+/// A playlist entry row.
+pub fn playlist_entry(row: &[u8]) -> Option<PdbPlaylistEntryRow> {
+    Some(PdbPlaylistEntryRow {
+        entry_index: read_u32_le_at(row, PLAYLIST_ENTRY_INDEX_AT)?,
+        track_id: read_u32_le_at(row, PLAYLIST_ENTRY_TRACK_AT)?,
+        playlist_id: read_u32_le_at(row, PLAYLIST_ENTRY_PLAYLIST_AT)?,
+    })
+}
+
+/// A playlist entry row's track id.
+pub fn playlist_entry_track_id(row: &[u8]) -> Option<u32> {
+    read_u32_le_at(row, PLAYLIST_ENTRY_TRACK_AT)
+}
+
+/// A playlist entry row's playlist id.
+pub fn playlist_entry_playlist_id(row: &[u8]) -> Option<u32> {
+    read_u32_le_at(row, PLAYLIST_ENTRY_PLAYLIST_AT)
 }
 
 #[cfg(test)]

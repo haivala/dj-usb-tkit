@@ -50,7 +50,7 @@ pub(crate) use additive::*;
 pub use fresh::*;
 pub(crate) use inplace::*;
 pub use model::*;
-pub use rows::*;
+pub(crate) use rows::*;
 
 // ── Constants ────────────────────────────────────────────────────────────────
 

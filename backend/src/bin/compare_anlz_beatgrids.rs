@@ -20,11 +20,6 @@ use std::fs;
 use std::path::{Path, PathBuf};
 
 use backend::service::anlz::{read_beatgrid_tempo_from_anlz, read_first_beat_from_anlz};
-use rusqlite::{Connection, types::ValueRef};
-
-const DEFAULT_USB_EXPORT_KEY: &str =
-    "r8gddnr4k847830ar6cqzbkk0el6qytmb3trbbx805jm74vez64i5o8fnrqryqls";
-const DEFAULT_MASTER_KEY: &str = "402fd_d44f42a8_eb0f6d4db0e6b";
 
 const WORST_N: usize = 15;
 
@@ -76,6 +71,8 @@ enum Classification {
     Unchanged,
     Missing,
 }
+
+use backend::waveform_tools::{render_value_ref, resolve_ext};
 
 fn main() {
     let args: Vec<String> = env::args().collect();
@@ -483,7 +480,7 @@ fn load_track_map(usb_root: &Path) -> Result<BTreeMap<i64, TrackInfo>, String> {
         .join("PIONEER")
         .join("rekordbox")
         .join("exportLibrary.db");
-    let conn = open_with_known_keys(&db)?;
+    let conn = backend::edb::open_rekordbox_db_for_tools(&db)?;
     let mut stmt = conn
         .prepare(
             "SELECT path, analysisDataFilePath, fileSize FROM content \
@@ -505,48 +502,4 @@ fn load_track_map(usb_root: &Path) -> Result<BTreeMap<i64, TrackInfo>, String> {
         });
     }
     Ok(out)
-}
-
-fn open_with_known_keys(path: &Path) -> Result<Connection, String> {
-    let open_plain = || Connection::open(path).map_err(|e| e.to_string());
-    let has_schema = |conn: &Connection| {
-        conn.query_row(
-            "SELECT COUNT(1) FROM sqlite_master WHERE type IN ('table','view')",
-            [],
-            |r| r.get::<_, i64>(0),
-        )
-        .ok()
-        .unwrap_or(0)
-            > 0
-    };
-    let plain = open_plain()?;
-    if has_schema(&plain) {
-        return Ok(plain);
-    }
-    for key in [DEFAULT_MASTER_KEY, DEFAULT_USB_EXPORT_KEY] {
-        let conn = open_plain()?;
-        if conn.execute_batch(&format!("PRAGMA key='{key}';")).is_err() {
-            continue;
-        }
-        if has_schema(&conn) {
-            return Ok(conn);
-        }
-    }
-    Err(format!("cannot open database {}", path.display()))
-}
-
-fn render_value_ref(v: ValueRef<'_>) -> String {
-    match v {
-        ValueRef::Null => String::new(),
-        ValueRef::Integer(x) => x.to_string(),
-        ValueRef::Real(x) => x.to_string(),
-        ValueRef::Text(x) => String::from_utf8_lossy(x).to_string(),
-        ValueRef::Blob(x) => format!("<blob:{}>", x.len()),
-    }
-}
-
-fn resolve_ext(usb_root: &Path, analysis_path: &str, ext: &str) -> PathBuf {
-    let rel = analysis_path.trim_start_matches('/').replace('\\', "/");
-    let base = usb_root.join(rel);
-    base.with_extension(ext)
 }

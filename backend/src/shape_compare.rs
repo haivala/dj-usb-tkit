@@ -1,10 +1,10 @@
 use std::collections::{BTreeMap, BTreeSet};
-use std::path::{Path, PathBuf};
+use std::path::Path;
 
 use serde::Serialize;
 
 use crate::edb::open_edb;
-use crate::service::usb::vendor_compat::{USB_VENDOR_DB_DIR, USB_VENDOR_ROOT_DIR};
+use crate::service::usb::vendor_compat::{vendor_edb_path, vendor_pdb_path};
 use crate::utils::{read_u16_le_at as read_u16_le, read_u32_le_at as read_u32_le};
 
 #[derive(Debug, Clone, Serialize, PartialEq, Eq)]
@@ -70,18 +70,6 @@ pub struct ShapeDiff {
     pub missing_edb_tables: Vec<String>,
     pub extra_edb_tables: Vec<String>,
     pub edb_schema_table_diffs: Vec<EdbSchemaTableDiff>,
-}
-
-fn vendor_db_dir(root: &Path) -> PathBuf {
-    root.join(USB_VENDOR_ROOT_DIR).join(USB_VENDOR_DB_DIR)
-}
-
-fn edb_path(root: &Path) -> PathBuf {
-    vendor_db_dir(root).join("exportLibrary.db")
-}
-
-fn pdb_path(root: &Path) -> PathBuf {
-    vendor_db_dir(root).join("export.pdb")
 }
 
 fn load_edb_schema(path: &Path) -> BTreeMap<String, Vec<String>> {
@@ -181,10 +169,10 @@ fn load_pdb_table_shapes(path: &Path) -> Vec<PdbTableShape> {
 }
 
 fn snapshot_usb_shape(root: &Path) -> ShapeSnapshot {
-    let edb_schema = load_edb_schema(&edb_path(root));
+    let edb_schema = load_edb_schema(&vendor_edb_path(root));
     let (pdb_len_page, pdb_num_tables, pdb_table_pointers) =
-        load_pdb_table_pointers(&pdb_path(root));
-    let pdb_table_shapes = load_pdb_table_shapes(&pdb_path(root));
+        load_pdb_table_pointers(&vendor_pdb_path(root));
+    let pdb_table_shapes = load_pdb_table_shapes(&vendor_pdb_path(root));
     ShapeSnapshot {
         edb_schema,
         pdb_len_page,
