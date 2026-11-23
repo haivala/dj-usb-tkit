@@ -778,7 +778,8 @@ impl BackendService {
                 };
                 if let Ok(bytes) = std::fs::read(dat.with_extension("2EX"))
                     && bytes.starts_with(b"PMAI")
-                    && !bytes.windows(4).any(|w| w == b"PWV6")
+                    && !crate::service::anlz_read::anlz_chunks(&bytes)
+                        .any(|chunk| &chunk.tag == b"PWV6")
                 {
                     tx.execute(
                         "UPDATE tracks SET waveform_peaks_path = NULL WHERE id = ?1",

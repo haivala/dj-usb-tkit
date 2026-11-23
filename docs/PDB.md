@@ -787,6 +787,13 @@ String encoding used by the writer:
 - non-ASCII strings use marker `0x90` plus UTF-16LE payload;
 - path strings (slot 20) do **not** include a trailing NUL — `total_len` encodes exact char count.
 
+Every module finds a row's strings and reads them through `pdb_row`: the track
+string offsets, the artist and album name offsets, the string lengths and the
+decoder. Rows other writers made use the same kinds: players write `t11`
+history session names (`HISTORY 001`) as short ASCII. Any other kind byte is
+read as no string; on the sticks checked one appears only in rows a crashed
+rekordbox write damaged.
+
 Before metadata strings are encoded, export strips embedded NUL bytes, caps
 any grapheme cluster (base character plus combining marks) to 8 codepoints,
 caps the number of distinct Unicode scripts a single string may mix to 3, and

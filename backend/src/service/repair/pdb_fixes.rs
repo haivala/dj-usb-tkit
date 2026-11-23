@@ -301,32 +301,6 @@ pub(in crate::service) struct MisalignedStringSlot {
     pub(in crate::service) slot_label: &'static str,
 }
 
-/// Mirrors `pdb_reader::track_string_slot_label` (private to that module — duplicated here as a
-/// small const lookup rather than widening its visibility just for a label string).
-pub(super) const TRACK_STRING_SLOT_LABELS: [&str; 21] = [
-    "isrc",
-    "lyricist",
-    "unknown_string_2",
-    "unknown_string_3",
-    "unknown_string_4",
-    "message",
-    "publish_track_info",
-    "autoload_hotcues",
-    "unknown_string_5",
-    "unknown_string_6",
-    "date_added",
-    "release_date",
-    "mix_name",
-    "unknown_string_7",
-    "analysis_path_start",
-    "analysis_path_end",
-    "comment",
-    "title_start",
-    "title_end",
-    "filename",
-    "track_file_path",
-];
-
 /// Detect rows whose UTF-16 string slot isn't 4-byte aligned. MIPS-based player hardware
 /// requires 4-byte aligned reads for the UTF-16 header (`0x90 [len:u16] 0x00`); a misaligned slot
 /// freezes/comm-errors CDJ hardware while browsing. Any exporter that doesn't guarantee this
@@ -339,7 +313,7 @@ pub(super) const TRACK_STRING_SLOT_LABELS: [&str; 21] = [
 pub(in crate::service) fn detect_pdb_string_misalignment(
     bytes: &[u8],
 ) -> Vec<MisalignedStringSlot> {
-    use crate::utils::{read_u8_at, read_u16_le_at, read_u32_le_at};
+    use crate::utils::{read_u16_le_at, read_u32_le_at};
     let mut out = Vec::new();
     for (_, page) in pdb_page::data_pages(bytes) {
         let Some(table_type @ (0 | 2 | 3)) = pdb_page::table_type(page) else {
@@ -359,20 +333,12 @@ pub(in crate::service) fn detect_pdb_string_misalignment(
                     let Some(id) = read_u32_le_at(row, 72) else {
                         continue;
                     };
-                    for (index, label) in TRACK_STRING_SLOT_LABELS.iter().enumerate() {
-                        let Some(slot_offset) =
-                            read_u16_le_at(row, 94 + 2 * index).map(|v| v as usize)
-                        else {
-                            continue;
-                        };
-                        if matches!(row.get(slot_offset), Some(0x40 | 0x90)) && slot_offset % 4 != 0
-                        {
-                            out.push(MisalignedStringSlot {
-                                table_type,
-                                id,
-                                slot_label: label,
-                            });
-                        }
+                    for slot in pdb_row::misaligned_track_string_slots(row) {
+                        out.push(MisalignedStringSlot {
+                            table_type,
+                            id,
+                            slot_label: pdb_row::TRACK_STRING_SLOT_LABELS[slot],
+                        });
                     }
                 }
                 3 => {
@@ -382,10 +348,7 @@ pub(in crate::service) fn detect_pdb_string_misalignment(
                     let Some(id) = read_u32_le_at(row, 12) else {
                         continue;
                     };
-                    let name_offset = read_u8_at(row, 21).unwrap_or(22) as usize;
-                    if matches!(row.get(name_offset), Some(0x40 | 0x90))
-                        && !name_offset.is_multiple_of(4)
-                    {
+                    if pdb_row::long_string_misaligned(row, pdb_row::album_name_offset(row)) {
                         out.push(MisalignedStringSlot {
                             table_type,
                             id,
@@ -400,21 +363,16 @@ pub(in crate::service) fn detect_pdb_string_misalignment(
                     let Some(id) = read_u32_le_at(row, 4) else {
                         continue;
                     };
-                    let typ = read_u16_le_at(row, 0).unwrap_or(0);
-                    let Some(name_offset) = (if typ == 100 {
-                        read_u16_le_at(row, 10).map(|v| v as usize)
-                    } else {
-                        read_u8_at(row, 9).map(|v| v as usize)
-                    }) else {
+                    let Some(name_offset) = pdb_row::artist_name_offset(row) else {
                         continue;
                     };
-                    if matches!(row.get(name_offset), Some(0x40 | 0x90)) && name_offset % 4 != 0 {
+                    if pdb_row::long_string_misaligned(row, name_offset) {
                         out.push(MisalignedStringSlot {
                             table_type,
                             id,
                             slot_label: "name",
                         });
-                    } else if typ == 0x60
+                    } else if read_u16_le_at(row, 0) == Some(0x60)
                         && row.get(name_offset).is_some_and(|b| b & 1 == 1)
                         && name_offset != ARTIST_SHORT_ASCII_NAME_OFFSET
                     {
@@ -974,13 +932,13 @@ pub(super) fn apply_pdb_album_string_alignment_repair(
 
 /// Album row `id` re-encoded by the current writer, artist and name unchanged.
 fn reencode_album_row(row: &[u8], id: u32) -> Option<Vec<u8>> {
-    use crate::utils::{read_u8_at, read_u32_le_at};
+    use crate::utils::read_u32_le_at;
     if row.len() < 16 {
         return None;
     }
     let artist_id = read_u32_le_at(row, 8)?;
-    let name_offset = read_u8_at(row, 21).unwrap_or(22) as usize;
-    let name = crate::pdb_reader::get_string_from_pdb(row, name_offset).unwrap_or_default();
+    let name =
+        pdb_row::get_string_from_pdb(row, pdb_row::album_name_offset(row)).unwrap_or_default();
     Some(encode_album_row(id, &name, artist_id))
 }
 
@@ -995,16 +953,10 @@ pub(super) fn apply_pdb_artist_name_layout_repair(
 
 /// Artist row `id` re-encoded by the current writer, name unchanged.
 fn reencode_artist_row(row: &[u8], id: u32) -> Option<Vec<u8>> {
-    use crate::utils::{read_u8_at, read_u16_le_at};
     if row.len() < 10 {
         return None;
     }
-    let name_offset = if read_u16_le_at(row, 0)? == 0x64 {
-        read_u16_le_at(row, 10)? as usize
-    } else {
-        read_u8_at(row, 9)? as usize
-    };
-    let name = crate::pdb_reader::get_string_from_pdb(row, name_offset)?;
+    let name = pdb_row::get_string_from_pdb(row, pdb_row::artist_name_offset(row)?)?;
     Some(encode_artist_row(id, &name))
 }
 

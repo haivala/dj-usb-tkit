@@ -192,7 +192,7 @@ pub(crate) fn playlist_tree_slots(bytes: &[u8]) -> Vec<PlaylistTreeSlot> {
             ) else {
                 continue;
             };
-            let Some((name, _)) = crate::pdb_reader::raw_pdb_string(row, 20) else {
+            let Some((name, _)) = crate::pdb_row::raw_pdb_string(row, 20) else {
                 continue;
             };
             out.push(PlaylistTreeSlot {
@@ -257,7 +257,7 @@ pub(crate) fn rename_playlist_tree_slot_inplace(
         let name_start = HEAP_START + slot.heap_off + 20;
         let Some(old_len) = page
             .get(HEAP_START + slot.heap_off..data_page.payload_end)
-            .and_then(|row| crate::pdb_reader::raw_pdb_string(row, 20))
+            .and_then(|row| crate::pdb_row::raw_pdb_string(row, 20))
             .map(|(_, len)| len)
         else {
             return false;

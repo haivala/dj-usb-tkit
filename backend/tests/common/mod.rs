@@ -38,6 +38,18 @@ pub fn empty_anlz_file() -> Vec<u8> {
     file
 }
 
+/// `value` as a short ASCII PDB string (kind `len * 2 + 3`), as players
+/// write their history session names (`HISTORY 001`).
+pub fn short_ascii_pdb_string(value: &str) -> Vec<u8> {
+    assert!(
+        value.is_ascii() && value.len() <= 126,
+        "not a short ASCII string"
+    );
+    let mut out = vec![(value.len() * 2 + 3) as u8];
+    out.extend_from_slice(value.as_bytes());
+    out
+}
+
 /// Writes placeholder (chunkless) DAT/EXT/2EX files into the app's analysis
 /// cache and returns the DAT path.
 pub fn seed_test_analysis_bundle(data_dir: &Path, stem: &str) -> PathBuf {

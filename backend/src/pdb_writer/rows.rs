@@ -9,14 +9,14 @@ pub(crate) fn patch_track_row_slot_bytes_if_len_matches(
     slot_index: usize,
     desired: &[u8],
 ) -> bool {
-    if slot_index >= 21 || row.len() < 136 {
+    if row.len() < 136 {
         return false;
     }
-    let Some(slot_start) = read_u16_le_at(row, 94 + slot_index * 2).map(|v| v as usize) else {
+    let Some(slot_start) = pdb_row::track_string_offset(row, slot_index) else {
         return false;
     };
-    let slot_end = if slot_index + 1 < 21 {
-        let Some(next) = read_u16_le_at(row, 94 + (slot_index + 1) * 2).map(|v| v as usize) else {
+    let slot_end = if slot_index + 1 < pdb_row::TRACK_STRING_SLOTS {
+        let Some(next) = pdb_row::track_string_offset(row, slot_index + 1) else {
             return false;
         };
         next

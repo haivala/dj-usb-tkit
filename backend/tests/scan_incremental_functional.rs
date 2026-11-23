@@ -346,7 +346,17 @@ fn waveform_path(data_dir: &std::path::Path, file_name: &str) -> Option<String> 
     .expect("query waveform path")
 }
 
-fn write_bundle(dat: &std::path::Path, twoex: &[u8]) {
+/// Writes a bundle whose `.2EX` holds `chunks` (tag, payload), in order.
+fn write_bundle(dat: &std::path::Path, chunks: &[(&[u8; 4], &[u8])]) {
+    let mut twoex = common::empty_anlz_file();
+    for (tag, payload) in chunks {
+        twoex.extend_from_slice(*tag);
+        twoex.extend_from_slice(&12u32.to_be_bytes());
+        twoex.extend_from_slice(&(12 + payload.len() as u32).to_be_bytes());
+        twoex.extend_from_slice(payload);
+    }
+    let len = twoex.len() as u32;
+    twoex[8..12].copy_from_slice(&len.to_be_bytes());
     fs::create_dir_all(dat.parent().unwrap()).expect("create bundle dir");
     fs::write(dat, common::empty_anlz_file()).expect("write DAT");
     fs::write(dat.with_extension("EXT"), common::empty_anlz_file()).expect("write EXT");
@@ -382,9 +392,11 @@ fn scan_clears_stale_local_anlz_cache_but_never_usb_bundles() {
     let usb = root
         .path()
         .join("usb/PIONEER/USBANLZ/P001/0000ABCD/ANLZ0000.DAT");
-    write_bundle(&stale, b"PMAI-PPTH-PWV7");
-    write_bundle(&fresh, b"PMAI-PPTH-PWV7-PWV6");
-    write_bundle(&usb, b"PMAI-PPTH-PWV7");
+    // The stale one's `PWV7` happens to hold the bytes "PWV6": only a chunk
+    // counts.
+    write_bundle(&stale, &[(b"PPTH", b""), (b"PWV7", b"..PWV6..")]);
+    write_bundle(&fresh, &[(b"PPTH", b""), (b"PWV7", b""), (b"PWV6", b"")]);
+    write_bundle(&usb, &[(b"PPTH", b""), (b"PWV7", b"")]);
     set_waveform_path(&data_dir, "Stale.mp3", &stale);
     set_waveform_path(&data_dir, "Fresh.mp3", &fresh);
     set_waveform_path(&data_dir, "Usb.mp3", &usb);
@@ -425,8 +437,8 @@ fn scan_removing_a_track_deletes_its_hashed_cache_bundle_unless_shared() {
     let cache = data_dir.join("analysis").join("waveforms");
     let own = cache.join("11111111.DAT");
     let shared = cache.join("22222222.DAT");
-    write_bundle(&own, b"PMAI-PWV6");
-    write_bundle(&shared, b"PMAI-PWV6");
+    write_bundle(&own, &[(b"PWV6", b"")]);
+    write_bundle(&shared, &[(b"PWV6", b"")]);
     set_waveform_path(&data_dir, "Gone.mp3", &own);
     set_waveform_path(&data_dir, "GoneShared.mp3", &shared);
     set_waveform_path(&data_dir, "Kept.mp3", &shared);

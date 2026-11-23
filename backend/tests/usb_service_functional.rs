@@ -1126,7 +1126,7 @@ fn append_history_to_pdb(pdb_path: &Path, history_id: u32, track_ids: &[u32]) {
 fn build_history_playlist_row(id: u32, name: &str) -> Vec<u8> {
     let mut row = Vec::<u8>::new();
     row.extend_from_slice(&id.to_le_bytes());
-    row.extend_from_slice(&encode_pdb_ascii_string(name));
+    row.extend_from_slice(&common::short_ascii_pdb_string(name));
     row
 }
 
@@ -1136,16 +1136,6 @@ fn build_history_entry_row(track_id: u32, playlist_id: u32, entry_index: u32) ->
     row[4..8].copy_from_slice(&playlist_id.to_le_bytes());
     row[8..12].copy_from_slice(&entry_index.to_le_bytes());
     row
-}
-
-fn encode_pdb_ascii_string(value: &str) -> Vec<u8> {
-    let bytes = value.as_bytes();
-    let mut out = Vec::<u8>::with_capacity(4 + bytes.len());
-    out.push(0u8);
-    out.extend_from_slice(&(4u16 + bytes.len() as u16).to_le_bytes());
-    out.push(0u8);
-    out.extend_from_slice(bytes);
-    out
 }
 
 fn build_pdb_page(

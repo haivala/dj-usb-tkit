@@ -1308,7 +1308,7 @@ impl T19Property {
             kind if kind & 1 == 1 => Some(usize::from(kind >> 1)),
             _ => read_u16_le_at(row, at + 1).map(usize::from),
         };
-        let created_date = crate::pdb_reader::get_string_from_pdb(row, T19_DATE_OFFSET)?;
+        let created_date = pdb_row::get_string_from_pdb(row, T19_DATE_OFFSET)?;
         // The two bytes after the date are the row offsets of the version
         // and name strings (see `t19_slot_row`).
         let offsets = T19_DATE_OFFSET + string_len(T19_DATE_OFFSET)?;
@@ -1318,11 +1318,11 @@ impl T19Property {
         if version_at != offsets + 2 || (name_at != version_end && name_at != align4(version_end)) {
             return None;
         }
-        let db_version = crate::pdb_reader::get_string_from_pdb(row, version_at)?;
+        let db_version = pdb_row::get_string_from_pdb(row, version_at)?;
         // `get_string_from_pdb` has no value for the empty string (`03`).
         let device_name = match *row.get(name_at)? {
             0x03 => String::new(),
-            _ => crate::pdb_reader::get_string_from_pdb(row, name_at)?,
+            _ => pdb_row::get_string_from_pdb(row, name_at)?,
         };
         Some(Self {
             created_date,
@@ -1766,25 +1766,6 @@ fn patch_changed_string_slot(
     patch_track_row_slot_bytes_if_len_matches(row, slot_index, &desired)
 }
 
-/// True if any of the row's 21 string slots is long-form (UTF-16 `0x90` or long ASCII `0x40`
-/// marker, both with a 4-byte header) but starts at a row-relative offset that isn't 4-byte
-/// aligned. MIPS-based player hardware requires 4-byte
-/// aligned reads for that header; a misaligned slot froze/comm-errored CDJ hardware while
-/// browsing (see `encode_track_row_with_profile`'s alignment padding, added to fix this at
-/// write time). A same-size in-place patch never touches the offset table, so it can't fix an
-/// already-misaligned slot — it would silently leave the row broken.
-pub(super) fn track_row_has_misaligned_utf16_slot(row: &[u8]) -> bool {
-    for index in 0..21usize {
-        let Some(offset) = read_u16_le_at(row, 94 + 2 * index).map(|v| v as usize) else {
-            continue;
-        };
-        if matches!(row.get(offset), Some(0x40 | 0x90)) && offset % 4 != 0 {
-            return true;
-        }
-    }
-    false
-}
-
 /// Patch the fixed-width fields of a t00 row that `fields` names with
 /// `desired`'s values, leaving every other byte as it is.
 fn patch_changed_track_scalars(
@@ -1865,19 +1846,6 @@ fn patch_changed_track_scalars(
     }
 }
 
-/// Total bytes of the PDB string starting at `at` in `row`: short strings
-/// carry it in their kind byte, long ones (`0x40` ASCII, `0x90` UTF-16) in the
-/// u16 after it.
-fn track_row_string_len(row: &[u8], at: usize) -> Option<usize> {
-    let kind = *row.get(at)?;
-    let len = if kind & 1 == 1 {
-        usize::from(kind >> 1)
-    } else {
-        usize::from(read_u16_le_at(row, at + 1)?)
-    };
-    (len > 0 && at + len <= row.len()).then_some(len)
-}
-
 /// A changed t00 row that no longer fits its slot, rebuilt from the row it
 /// replaces: the fixed-width fields and string slots the change doesn't
 /// touch keep their bytes (composer, label, original artist, the strings
@@ -1910,8 +1878,8 @@ fn rebuild_track_row_preserving(
         ("file_path", 20),
     ];
     let slot_bytes = |source: &[u8], slot: usize| -> Option<Vec<u8>> {
-        let at = usize::from(read_u16_le_at(source, 94 + 2 * slot)?);
-        let len = track_row_string_len(source, at)?;
+        let at = pdb_row::track_string_offset(source, slot)?;
+        let len = pdb_row::pdb_string_len(source, at)?;
         source.get(at..at + len).map(<[u8]>::to_vec)
     };
     let mut slots = Vec::with_capacity(21);
@@ -1947,7 +1915,7 @@ fn rebuild_track_row_preserving(
                 mutation.row.id
             ))
         })?;
-        out[94 + 2 * index..96 + 2 * index].copy_from_slice(&offset.to_le_bytes());
+        pdb_row::set_track_string_offset(&mut out, index, offset);
         out.extend_from_slice(bytes);
     }
     Ok(out)
@@ -1965,7 +1933,7 @@ pub(super) fn build_same_size_track_row_patch(
         )));
     }
 
-    if track_row_has_misaligned_utf16_slot(row) {
+    if pdb_row::misaligned_track_string_slots(row).next().is_some() {
         // Force the caller down the relocate path (full re-encode + tombstone + append) instead
         // of patching content back into the same misaligned slot bounds.
         return Ok(None);
@@ -2058,9 +2026,7 @@ pub(super) fn build_same_size_track_row_patch(
         let raw = encode_pdb_string(&sanitize_metadata(
             desired.file_name.as_deref().unwrap_or(&desired.file_path),
         ));
-        let slot19_start = read_u16_le_at(&patched, 94 + 19 * 2)
-            .map(|v| v as usize)
-            .unwrap_or(0);
+        let slot19_start = pdb_row::track_string_offset(&patched, 19).unwrap_or(0);
         let pad = (4 - (slot19_start + raw.len()) % 4) % 4;
         let mut padded = raw;
         padded.resize(padded.len() + pad, 0u8);

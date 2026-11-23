@@ -318,7 +318,7 @@ pub fn encode_track_row_with_profile(
     row[92..94].copy_from_slice(&pre_92_93);
 
     for (index, offset) in offsets.iter().enumerate() {
-        row[94 + 2 * index..94 + 2 * index + 2].copy_from_slice(&offset.to_le_bytes());
+        crate::pdb_row::set_track_string_offset(&mut row, index, *offset);
     }
     Ok(row)
 }

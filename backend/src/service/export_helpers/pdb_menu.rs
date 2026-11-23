@@ -116,49 +116,11 @@ fn row_id_u16(row: &[u8]) -> Option<u16> {
     read_u16_le_at(row, 0)
 }
 
-/// Decode a PDB string at `offset` in `row`. Returns the decoded String.
-/// Handles the three PDB string variants:
-/// - 0x90: long UTF-16LE with 2-byte total length + pad
-/// - 0x40: long ASCII with 2-byte total length + pad
-/// - odd marker (len*2+3): short ASCII
-///
-/// If the decoded string is wrapped in `\u{fffa}...\u{fffb}` mojibake markers
-/// (used for localizable menu labels), those markers are stripped.
+/// The PDB string at `offset` in `row` ([`crate::pdb_row::raw_pdb_string`])
+/// without the `U+FFFA`/`U+FFFB` markers that wrap localizable menu labels,
+/// and without NULs at either end.
 fn decode_pdb_row_string(row: &[u8], offset: usize) -> Option<String> {
-    let marker = *row.get(offset)?;
-    let raw = match marker {
-        0x90 | 0x40 => {
-            let total = read_u16_le_at(row, offset + 1)? as usize;
-            if total < 4 {
-                return None;
-            }
-            let body_start = offset + 4;
-            let body_end = offset + total;
-            let body = row.get(body_start..body_end)?;
-            if marker == 0x90 {
-                if body.len() % 2 != 0 {
-                    return None;
-                }
-                let code_units = body
-                    .as_chunks::<2>()
-                    .0
-                    .iter()
-                    .map(|c| u16::from_le_bytes(*c))
-                    .collect::<Vec<_>>();
-                String::from_utf16(&code_units).ok()?
-            } else {
-                let end = body.iter().position(|b| *b == 0).unwrap_or(body.len());
-                String::from_utf8(body[..end].to_vec()).ok()?
-            }
-        }
-        m if m >= 3 && m % 2 == 1 => {
-            let len = (m as usize - 3) / 2;
-            let body_start = offset + 1;
-            let body = row.get(body_start..body_start + len)?;
-            String::from_utf8(body.to_vec()).ok()?
-        }
-        _ => return None,
-    };
+    let (raw, _) = crate::pdb_row::raw_pdb_string(row, offset)?;
     Some(
         raw.trim_matches(|c: char| c == '\u{fffa}' || c == '\u{fffb}' || c == '\u{0000}')
             .to_string(),
@@ -482,15 +444,8 @@ mod tests {
     }
 
     #[test]
-    fn decode_pdb_row_string_rejects_odd_length_utf16_body() {
-        // total=7 -> body length 3 (odd) for the 0x90 marker.
-        let row = vec![0x90, 7, 0, 0, 0, 0, 0];
-        assert_eq!(decode_pdb_row_string(&row, 0), None);
-    }
-
-    #[test]
-    fn decode_pdb_row_string_decodes_ascii_marker_with_nul_terminator() {
-        let body = b"HELLO\0PAD";
+    fn decode_pdb_row_string_decodes_ascii_marker_with_nul_padding() {
+        let body = b"HELLO\0\0\0";
         let total = 4 + body.len();
         let mut row = vec![0x40];
         row.extend_from_slice(&(total as u16).to_le_bytes());

@@ -480,7 +480,7 @@ fn parse_track_row(row: &[u8]) -> Option<PdbTrackRow> {
     let duration_seconds = read_u16_le(row, 84).map(|v| v as u32).filter(|v| *v > 0);
     let file_type = read_u16_le(row, 90).filter(|v| *v > 0);
 
-    let offsets = parse_track_string_offsets(row);
+    let offsets = track_string_offsets(row);
 
     let title = decode_range_string_slot(row, &offsets, 17, 18);
     let anlz_path = decode_range_string_slot(row, &offsets, 14, 15);
@@ -547,7 +547,7 @@ fn parse_track_row(row: &[u8]) -> Option<PdbTrackRow> {
 
 fn parse_track_debug_row(row: &[u8]) -> Option<PdbTrackDebugRow> {
     let id = read_u32_le(row, 72)?;
-    let offsets = parse_track_string_offsets(row);
+    let offsets = track_string_offsets(row);
 
     let mut fixed_fields = HashMap::<String, String>::new();
     insert_u32_field(&mut fixed_fields, "header_flags_u32", read_u32_le(row, 0));
@@ -599,7 +599,7 @@ fn parse_track_debug_row(row: &[u8]) -> Option<PdbTrackDebugRow> {
         .enumerate()
         .map(|(index, offset)| PdbTrackStringSlot {
             index,
-            label: track_string_slot_label(index),
+            label: TRACK_STRING_SLOT_LABELS[index],
             offset: *offset,
             raw_hex: raw_track_string_slot_hex(row, &offsets, index),
             decoded_value: decode_track_string_slot(row, &offsets, index),
@@ -628,26 +628,14 @@ fn parse_genre_row(row: &[u8]) -> Option<(u32, String)> {
 }
 
 fn parse_artist_row(row: &[u8]) -> Option<(u32, String)> {
-    let typ = read_u16_le(row, 0)?;
     let id = read_u32_le(row, 4)?;
-    let on = read_u8(row, 9)? as usize;
-    let ofs = if typ == 100 {
-        read_u16_le(row, 10)? as usize
-    } else {
-        on
-    };
-    let name = get_string_from_pdb(row, ofs).unwrap_or_default();
+    let name = get_string_from_pdb(row, artist_name_offset(row)?).unwrap_or_default();
     Some((id, name))
 }
 
 fn parse_album_row(row: &[u8]) -> Option<(u32, String)> {
     let id = read_u32_le(row, 12)?;
-    // ofs_name_near (byte 21) is self-describing: the writer pads non-ASCII
-    // (UTF-16) names to a 4-byte-aligned offset (24) instead of the ASCII
-    // default (22) to avoid a MIPS unaligned-read freeze, so this must be
-    // read from the row rather than assumed fixed. See `encode_album_row`.
-    let name_offset = read_u8(row, 21).unwrap_or(22) as usize;
-    let name = get_string_from_pdb(row, name_offset).unwrap_or_default();
+    let name = get_string_from_pdb(row, album_name_offset(row)).unwrap_or_default();
     Some((id, name))
 }
 
@@ -710,54 +698,6 @@ fn parse_history_row(row: &[u8]) -> Option<PdbHistoryRow> {
     let date = get_string_range(row, 10, 20).map(|v| v.trim_end_matches('\0').to_string());
     let num = get_string_range(row, 32, 36).map(|v| v.trim_end_matches('\0').to_string());
     Some(PdbHistoryRow { date, num })
-}
-
-pub(crate) fn get_string_from_pdb(row: &[u8], offset: usize) -> Option<String> {
-    raw_pdb_string(row, offset).map(|(value, _)| value.trim_end_matches('\0').to_string())
-}
-
-/// The DeviceSQL string at `offset` with every NUL kept (a crashed rekordbox
-/// write can leave NULs at its end too), and its encoded length in bytes.
-pub(crate) fn raw_pdb_string(row: &[u8], offset: usize) -> Option<(String, usize)> {
-    let n = read_u8(row, offset)? as usize;
-    if n % 2 == 1 {
-        let r = (n - 1) / 2;
-        let (start, end) = (offset + 1, offset + r);
-        if start >= end || end > row.len() {
-            return None;
-        }
-        return Some((String::from_utf8_lossy(&row[start..end]).into_owned(), r));
-    }
-
-    let code = read_u8(row, offset)?;
-    let enc = if (code & 0b0100_0000) != 0 {
-        "ascii"
-    } else if (code & 0b0010_0000) != 0 {
-        "utf8"
-    } else if (code & 0b1001_0000) == 0b1001_0000 {
-        "utf16le"
-    } else {
-        "ascii"
-    };
-
-    let len = read_u16_le(row, offset + 1)? as usize;
-    let end = offset + len;
-    if offset + 4 > row.len() || end > row.len() || end < offset + 4 {
-        return None;
-    }
-    let data = &row[offset + 4..end];
-    let value = match enc {
-        "utf16le" => {
-            let mut buf = Vec::with_capacity(data.len() / 2);
-            for chunk in data.as_chunks::<2>().0 {
-                buf.push(u16::from_le_bytes(*chunk));
-            }
-            String::from_utf16_lossy(&buf)
-        }
-        "utf8" => String::from_utf8_lossy(data).into_owned(),
-        _ => data.iter().map(|b| *b as char).collect::<String>(),
-    };
-    Some((value, len))
 }
 
 // Decode a range string slot (title=17, anlz_path=14).
@@ -847,39 +787,12 @@ fn raw_track_string_slot_hex(row: &[u8], offsets: &[u16], index: usize) -> Strin
                 return String::new();
             };
             let offset = offset as usize;
-            let len = raw_pdb_string_len(row, offset).unwrap_or(0);
+            let len = pdb_string_len(row, offset).unwrap_or(0);
             if len == 0 {
                 return String::new();
             }
             hex_slice(row, offset, offset.saturating_add(len))
         }
-    }
-}
-
-fn track_string_slot_label(index: usize) -> &'static str {
-    match index {
-        0 => "isrc",
-        1 => "lyricist",
-        2 => "unknown_string_2",
-        3 => "unknown_string_3",
-        4 => "unknown_string_4",
-        5 => "message",
-        6 => "publish_track_info",
-        7 => "autoload_hotcues",
-        8 => "unknown_string_5",
-        9 => "unknown_string_6",
-        10 => "date_added",
-        11 => "release_date",
-        12 => "mix_name",
-        13 => "unknown_string_7",
-        14 => "analysis_path_start",
-        15 => "analysis_path_end",
-        16 => "comment",
-        17 => "title_start",
-        18 => "title_end",
-        19 => "filename",
-        20 => "track_file_path",
-        _ => "unknown",
     }
 }
 
@@ -905,15 +818,6 @@ fn hex_slice(row: &[u8], start: usize, end: usize) -> String {
         .collect::<String>()
 }
 
-fn raw_pdb_string_len(row: &[u8], offset: usize) -> Option<usize> {
-    let n = read_u8(row, offset)? as usize;
-    if n % 2 == 1 {
-        let r = (n - 1) / 2;
-        return Some(r.saturating_add(1));
-    }
-    read_u16_le(row, offset + 1).map(|len| len as usize)
-}
-
 fn get_string_range(row: &[u8], start: usize, end: usize) -> Option<String> {
     if start >= end || end > row.len() {
         return None;
@@ -926,14 +830,10 @@ fn get_string_range(row: &[u8], start: usize, end: usize) -> Option<String> {
     )
 }
 
-fn parse_track_string_offsets(row: &[u8]) -> [u16; 21] {
-    let mut offsets = [0u16; 21];
-    for (i, slot) in offsets.iter_mut().enumerate() {
-        *slot = read_u16_le(row, 94 + 2 * i).unwrap_or(0);
-    }
-    offsets
-}
-
+use crate::pdb_row::{
+    TRACK_STRING_SLOT_LABELS, album_name_offset, artist_name_offset, get_string_from_pdb,
+    pdb_string_len, track_string_offsets,
+};
 use crate::utils::{
     read_u8_at as read_u8, read_u16_le_at as read_u16_le, read_u32_le_at as read_u32_le,
 };
@@ -1767,9 +1667,10 @@ mod tests {
         assert_eq!(track.string_slots[12].decoded_value, None);
         assert_eq!(track.string_slots[13].label, "unknown_string_7");
         assert_eq!(track.string_slots[13].decoded_value, None);
-        assert_eq!(track.string_slots[1].raw_hex, "0305");
-        assert_eq!(track.string_slots[5].raw_hex, "0303");
-        assert_eq!(track.string_slots[12].raw_hex, "0303");
+        // An empty string is its kind byte alone.
+        assert_eq!(track.string_slots[1].raw_hex, "03");
+        assert_eq!(track.string_slots[5].raw_hex, "03");
+        assert_eq!(track.string_slots[12].raw_hex, "03");
         assert_eq!(
             track
                 .fixed_fields

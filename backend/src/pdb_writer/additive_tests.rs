@@ -1583,7 +1583,7 @@ fn corrupt_track_row_title_alignment(row: &[u8]) -> Vec<u8> {
 }
 
 #[test]
-fn track_row_has_misaligned_utf16_slot_detects_bad_offset() {
+fn misaligned_track_string_slots_finds_a_bad_offset() {
     let mut seed = build_seed_pdb_data();
     seed.tracks[0].title = "Café Track".into();
     let bytes = write_pdb(&seed).expect("write seed");
@@ -1591,13 +1591,13 @@ fn track_row_has_misaligned_utf16_slot_detects_bad_offset() {
         track_row_loc_by_id(&bytes, 1).expect("track row loc");
     let row = &bytes[row_abs..row_abs + row_len];
     assert!(
-        !track_row_has_misaligned_utf16_slot(row),
+        !has_misaligned_slot(row),
         "current writer must produce an aligned row"
     );
 
     let corrupted = corrupt_track_row_title_alignment(row);
     assert!(
-        track_row_has_misaligned_utf16_slot(&corrupted),
+        has_misaligned_slot(&corrupted),
         "corrupted row must be detected as misaligned"
     );
 }
@@ -1633,9 +1633,7 @@ fn mutate_tracks_in_place_fixes_preexisting_misaligned_title_slot() {
     let (_pi, corrupted_row_abs, corrupted_row_len, _slot2) =
         track_row_loc_by_id(&bytes, 1).expect("corrupted track row loc");
     assert!(
-        track_row_has_misaligned_utf16_slot(
-            &bytes[corrupted_row_abs..corrupted_row_abs + corrupted_row_len]
-        ),
+        has_misaligned_slot(&bytes[corrupted_row_abs..corrupted_row_abs + corrupted_row_len]),
         "test setup must actually produce a misaligned row"
     );
 
@@ -1656,7 +1654,7 @@ fn mutate_tracks_in_place_fixes_preexisting_misaligned_title_slot() {
         track_row_loc_by_id(&bytes, 1).expect("fixed track row loc");
     let fixed_row = &bytes[fixed_row_abs..fixed_row_abs + fixed_row_len];
     assert!(
-        !track_row_has_misaligned_utf16_slot(fixed_row),
+        !has_misaligned_slot(fixed_row),
         "row must be relocated and re-encoded with a correctly aligned slot"
     );
 
@@ -3562,4 +3560,10 @@ fn fresh_writer_keeps_real_t19_history_rows() {
         let at = off + HEAP_START + i * 40;
         assert_eq!(&bytes[at..at + 40], row.as_slice());
     }
+}
+
+fn has_misaligned_slot(row: &[u8]) -> bool {
+    crate::pdb_row::misaligned_track_string_slots(row)
+        .next()
+        .is_some()
 }

@@ -23,6 +23,7 @@ use std::path::Path;
 
 use crate::error::{BackendError, BackendResult};
 use crate::pdb_page::{self, HEAP_START, footer_size};
+use crate::pdb_row;
 use crate::service::export_helpers::pdb_encoding::apply_page_local_index_shift;
 use crate::service::export_helpers::{
     PdbLayoutProfile, PdbTrackRowData, encode_album_row, encode_artist_row, encode_artwork_row,

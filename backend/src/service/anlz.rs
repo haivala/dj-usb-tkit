@@ -1440,14 +1440,21 @@ pub fn read_first_beat_from_anlz(data: &[u8]) -> Option<u32> {
                 return read_u32_be_at(body, 4);
             }
         }
-        if &chunk.tag == b"PQT2" {
-            // header carries first_time_ms at chunk-relative offset 28.
-            if let Some(t) = read_u32_be_at(data, chunk.range.start + 28) {
-                return Some(t);
-            }
+        if &chunk.tag == b"PQT2"
+            && let Some(header) = pqt2_header(data, &chunk)
+        {
+            return read_u32_be_at(header, 28);
         }
     }
     None
+}
+
+/// A `PQT2` chunk's header (from its tag), when it is long enough to hold
+/// `first_beat_num`(u16) `tempo`(u16) `first_time_ms`(u32) at chunk offsets
+/// 24..32. Shorter, and those fields would be read from the chunk's payload.
+fn pqt2_header<'a>(data: &'a [u8], chunk: &super::anlz_read::AnlzChunk) -> Option<&'a [u8]> {
+    let header = &data[chunk.range.start..chunk.body.start];
+    (header.len() >= 32).then_some(header)
 }
 
 /// Read the beat-grid tempo (BPM × 100) actually baked into an ANLZ `PQTZ`
@@ -1464,13 +1471,10 @@ pub fn read_beatgrid_tempo_from_anlz(data: &[u8]) -> Option<u16> {
                 return Some(u16::from_be_bytes([body[2], body[3]]));
             }
         }
-        if &chunk.tag == b"PQT2" {
-            // header content: first_beat_num(u16) tempo(u16) first_time_ms(u32) ...
-            // at content offset 12..14/14..16 (chunk-relative offset 26..28).
-            if chunk.body.start - chunk.range.start >= 28 {
-                let pos = chunk.range.start;
-                return Some(u16::from_be_bytes([data[pos + 26], data[pos + 27]]));
-            }
+        if &chunk.tag == b"PQT2"
+            && let Some(header) = pqt2_header(data, &chunk)
+        {
+            return Some(u16::from_be_bytes([header[26], header[27]]));
         }
     }
     None
@@ -2351,6 +2355,25 @@ mod tests {
         let mut damaged = ext.clone();
         damaged[at + 8..at + 12].copy_from_slice(&u32::MAX.to_be_bytes());
         (ext, damaged, at)
+    }
+
+    #[test]
+    fn a_short_pqt2_header_has_no_first_beat_or_tempo() {
+        let file = |header: &[u8]| {
+            let mut file = crate::service::anlz_read::empty_anlz_file();
+            append_anlz_chunk(&mut file, b"PQT2", header, &[0xAA; 16]);
+            file
+        };
+        // First beat 2 at 120.00 BPM, 1234 ms, at chunk offsets 24..32.
+        let mut header = vec![0u8; 44];
+        header[12..20].copy_from_slice(&[0, 2, 0x2E, 0xE0, 0, 0, 0x04, 0xD2]);
+        let full = file(&header);
+        assert_eq!(read_first_beat_from_anlz(&full), Some(1234));
+        assert_eq!(read_beatgrid_tempo_from_anlz(&full), Some(12_000));
+        // Cut off before the first beat's time: it isn't read from the payload.
+        let short = file(&header[..14]);
+        assert_eq!(read_first_beat_from_anlz(&short), None);
+        assert_eq!(read_beatgrid_tempo_from_anlz(&short), None);
     }
 
     #[test]

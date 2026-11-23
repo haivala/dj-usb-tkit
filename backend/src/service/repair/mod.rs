@@ -51,6 +51,7 @@ use crate::models::{
 };
 use crate::pdb_page;
 use crate::pdb_reader::{ParsedPdb, parse_pdb, pdb_page_size};
+use crate::pdb_row;
 use crate::scanner::scan_audio_file;
 use crate::service::usb::root::{resolve_usb_root, resolve_usb_side_path};
 use crate::service::usb::stick_files::{sanitize_warning_path, scan_anlz};
