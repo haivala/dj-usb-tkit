@@ -106,6 +106,14 @@ Open points:
   mode to match. Needs a hardware check (NXS2 + rekordbox) before release.
 - How and when players write history to each database isn't known (see
   `docs/eDB.md`), which the item above would help settle.
+- The PDB reader and writer still have separate history entry row types
+  (`PdbHistoryEntryRow` in `backend/src/pdb_reader.rs` and in
+  `backend/src/pdb_writer/model.rs`). The reader's also reads the 8-byte
+  `t17/t18` seed rows, so its track id is optional and it keeps which table
+  the row came from. The writer's describes only the 12-byte `t12` rows it
+  writes, always with a track id. Merge them once the writer appends
+  sessions, deciding what it writes for a row without a track id; the
+  playlist tree and entry rows are already one type.
 
 ## Possibility: copy cues added on a CDJ back to the library
 
