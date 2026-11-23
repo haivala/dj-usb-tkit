@@ -6,10 +6,9 @@
 //! one track's waveform and beat grid for another. The diagnostics, the BPM
 //! check, the repairs and export all decide ownership here.
 
+use super::*;
 use std::collections::BTreeMap;
 use std::path::{Path, PathBuf};
-
-use super::*;
 
 /// The `PPTH` track path of one ANLZ file. Only the start of the file is
 /// read; `PPTH` is the first chunk.
@@ -102,9 +101,9 @@ pub(crate) fn scan_analysis_ownership(
     // filesystem lookup per track, which on a cold, large stick is what the
     // whole diagnosis waits on.
     let resolve = if read_ppth {
-        crate::service::usb::utils::resolve_usb_side_path
+        crate::service::usb::root::resolve_usb_side_path
     } else {
-        crate::service::usb::utils::resolve_usb_side_path_lexical
+        crate::service::usb::root::resolve_usb_side_path_lexical
     };
     let mut by_bundle = BTreeMap::<String, (PathBuf, Vec<&crate::pdb_reader::PdbTrackRow>)>::new();
     for track in &parsed.tracks {

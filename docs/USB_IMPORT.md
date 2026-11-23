@@ -75,7 +75,7 @@ a fixed candidate list in order and returning the first path that exists:
 There is no Linux candidate: rekordbox has no official Linux install, so no
 real install path exists to check there.
 
-See `external_rekordbox_db_candidates` in `backend/src/service/usb/utils.rs`.
+See `external_rekordbox_db_candidates` in `backend/src/service/rekordbox_import.rs`.
 
 The import service deliberately favors responsiveness over eager payload loading. `fetch_usb_playlists` and `fetch_usb_histories` resolve the playlist/history **list** and its counts, not per-track payloads. Expensive per-track hydration (waveform preview bytes, artwork data URLs) is deferred and paid one page at a time.
 

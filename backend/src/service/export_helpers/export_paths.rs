@@ -1,13 +1,6 @@
 //! File path utilities: sanitization, artwork/analysis export, pruning, manifest paths.
 
-use crate::utils::counted;
-use std::collections::{HashMap, HashSet};
-use std::io::{Cursor, Write};
-use std::path::{Path, PathBuf};
-
 use super::super::SETTING_EXPORT_OWNED_FILES_PREFIX;
-use super::super::usb::helpers::sanitize_text;
-use super::super::usb::utils::{canonicalize_playlist_name, resolve_usb_side_path};
 use super::super::usb::vendor_compat::{
     USB_ANALYSIS_PREFIX, USB_ARTWORK_DIR, USB_ARTWORK_PREFIX, USB_CONTENTS_PREFIX,
     USB_VENDOR_ROOT_DIR,
@@ -21,7 +14,13 @@ use crate::logging::{self, Level};
 use crate::metadata::{MAX_GRAPHEME_CLUSTER_CHARS, cap_grapheme_clusters, cap_script_diversity};
 use crate::models::WarningEntry;
 use crate::pdb_reader::parse_pdb;
+use crate::service::usb::root::resolve_usb_side_path;
 use crate::service::usb::staging::{UsbDatabases, UsbDatabasesExt};
+use crate::service::usb::text::{canonicalize_playlist_name, sanitize_text};
+use crate::utils::counted;
+use std::collections::{HashMap, HashSet};
+use std::io::{Cursor, Write};
+use std::path::{Path, PathBuf};
 
 pub fn sanitize_filename_component(value: &str) -> String {
     let normalized = sanitize_text(value)

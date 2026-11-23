@@ -268,7 +268,7 @@ pub(super) fn frontend_ui_setting_keys() -> &'static [&'static str] {
 /// The user's configured local library folders (`LibrarySources`). An
 /// explicit "this is my library folder" assertion from the user outranks
 /// stale USB-device history for that same path (see
-/// `usb::utils::all_usb_device_root_paths`).
+/// `crate::service::usb::identity::all_usb_device_root_paths`).
 pub(crate) fn configured_source_roots(conn: &rusqlite::Connection) -> BackendResult<Vec<String>> {
     Ok(LibrarySources::load(conn)?.roots)
 }
@@ -297,7 +297,7 @@ pub(crate) fn export_prune_stale_setting(conn: &rusqlite::Connection) -> Backend
 /// not the passage of time or a prune action.
 pub(crate) fn untainted_usb_root_paths(conn: &rusqlite::Connection) -> BackendResult<Vec<String>> {
     let source_roots = configured_source_roots(conn)?;
-    let all_roots = usb::utils::all_usb_device_root_paths(conn)?;
+    let all_roots = crate::service::usb::identity::all_usb_device_root_paths(conn)?;
     Ok(all_roots
         .into_iter()
         .filter(|root| {

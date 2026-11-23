@@ -1,11 +1,5 @@
 //! Playlist and track removal from eDB and PDB, content verification.
 
-use crate::utils::counted;
-use std::collections::{HashMap, HashSet};
-use std::path::Path;
-
-use rusqlite::{OptionalExtension, params};
-
 use super::{
     ExclusiveTrackInfo, ExportManifest, ExportPlaylistData, PlaylistRemovalPdbResult,
     canonicalize_track_path_identity, normalize_owned_export_path,
@@ -18,7 +12,11 @@ use crate::models::WarningEntry;
 use crate::pdb_reader::parse_pdb;
 use crate::service::track_matching::{ContentFingerprint, pdb_track_fingerprint};
 use crate::service::usb::staging::{UsbDatabases, UsbDatabasesExt, UsbWriteSession};
-use crate::service::usb::utils::canonicalize_playlist_name;
+use crate::service::usb::text::canonicalize_playlist_name;
+use crate::utils::counted;
+use rusqlite::{OptionalExtension, params};
+use std::collections::{HashMap, HashSet};
+use std::path::Path;
 
 fn parse_usb_playlist_numeric_id(raw: Option<&str>) -> Option<u32> {
     let id_part = raw?.trim().strip_prefix("usb-pl-")?;

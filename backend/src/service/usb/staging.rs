@@ -7,17 +7,14 @@
 //! it (standalone CLI tools and most tests), sessions snapshot and restore the
 //! directly edited files instead. Backups are an optional session setting.
 
+use super::vendor_compat::{USB_VENDOR_DB_DIR, USB_VENDOR_ROOT_DIR};
+use crate::error::{BackendError, BackendResult};
+use crate::service::normalize_source_root_for_matching;
+use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use std::path::{Path, PathBuf};
 use std::sync::{Mutex, MutexGuard};
 use std::time::UNIX_EPOCH;
-
-use serde::{Deserialize, Serialize};
-
-use crate::error::{BackendError, BackendResult};
-
-use super::vendor_compat::{USB_VENDOR_DB_DIR, USB_VENDOR_ROOT_DIR};
-use crate::service::normalize_source_root_for_matching;
 
 static CACHE_ROOT: Mutex<Option<PathBuf>> = Mutex::new(None);
 /// Guards the read-modify-write critical sections below (stat, copy/write,
@@ -1321,11 +1318,11 @@ impl<'s> UsbWriteSession<'s> {
             DbKind::Pdb => {
                 std::fs::write(
                     &path,
-                    crate::service::usb::utils::build_fullshape_pdb_bytes(created_date),
+                    crate::service::usb::initialize::build_fullshape_pdb_bytes(created_date),
                 )?;
             }
             DbKind::Edb => {
-                crate::service::usb::utils::initialize_fullshape_edb(&path, created_date)?
+                crate::service::usb::initialize::initialize_fullshape_edb(&path, created_date)?
             }
         }
         Ok(path)

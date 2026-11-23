@@ -16,18 +16,15 @@
 //! The same file carries the stick's USB audio formats ([`UsbAudioFormats`]): which
 //! audio formats export puts on it, so they travel with the stick too.
 
-use std::path::{Path, PathBuf};
-use std::sync::Mutex;
-
-use rusqlite::{OptionalExtension, params};
-use serde::{Deserialize, Serialize};
-
+use super::root::resolve_usb_root;
 use crate::audio_format::UsbAudioFormat;
 use crate::error::{BackendError, BackendResult};
 use crate::i18n::{Text, tr};
 use crate::service::{BackendService, now};
-
-use super::utils::{self, resolve_usb_root};
+use rusqlite::{OptionalExtension, params};
+use serde::{Deserialize, Serialize};
+use std::path::{Path, PathBuf};
+use std::sync::Mutex;
 
 const MARKER_DIR: &str = ".dj-usb-tkit";
 const MARKER_FILE: &str = "drive.json";
@@ -223,7 +220,7 @@ pub(crate) fn validate_name(name: &str) -> Result<String, Text> {
 
 /// Write `name` to the marker file at `root`, creating the marker directory
 /// if needed. Caller is responsible for uniqueness checks against other
-/// known drives (see `usb::utils::find_registered_drive`).
+/// known drives (see `find_registered_drive`).
 pub(crate) fn write_drive_name(root: &Path, name: &str) -> std::io::Result<()> {
     let validated =
         validate_name(name).map_err(|text| std::io::Error::other(text.render_english()))?;
@@ -529,7 +526,7 @@ impl BackendService {
         )?;
         // A removed drive's name is free again.
         if let Some(label) = label.filter(|label| !label.trim().is_empty()) {
-            utils::forget_drive_name(&conn, label.trim())?;
+            forget_drive_name(&conn, label.trim())?;
         }
         drop(conn);
         Ok(crate::models::PruneUsbDeviceData {
@@ -598,7 +595,7 @@ impl BackendService {
     ) -> BackendResult<Option<String>> {
         let marker = crate::service::usb::identity::read_drive_name(usb_root);
         let registered = match &marker {
-            Some(name) => utils::find_registered_drive(conn, name)?,
+            Some(name) => find_registered_drive(conn, name)?,
             None => None,
         };
         let total_bytes = fs4::total_space(usb_root).ok();
@@ -622,13 +619,13 @@ impl BackendService {
         }
         if let Some(name) = &marker {
             let now_ts = now();
-            utils::register_drive_name(conn, name, &now_ts)?;
+            register_drive_name(conn, name, &now_ts)?;
             if let Some(total_bytes) = total_bytes {
-                utils::fill_registered_drive_size(conn, name, total_bytes)?;
+                fill_registered_drive_size(conn, name, total_bytes)?;
             }
             // The path's label follows the drive last seen there, also one
             // named elsewhere (another computer, or a hand-edited marker).
-            utils::set_device_label(conn, usb_root, name, &now_ts)?;
+            set_device_label(conn, usb_root, name, &now_ts)?;
         }
         Ok(None)
     }
@@ -664,7 +661,7 @@ impl BackendService {
         let keeps_own_name = current.is_some() && renaming_away.is_none();
         if !keeps_own_name
             && !claims_name
-            && let Some(taken) = utils::find_registered_drive(&conn, &name)?
+            && let Some(taken) = find_registered_drive(&conn, &name)?
         {
             return Err(BackendError::Validation(tr::usb_error_name_taken(
                 &name,
@@ -689,7 +686,7 @@ impl BackendService {
         crate::service::usb::staging::forget_cache_key_for_root(&usb_root);
         let now_ts = now();
         if let Some(old_name) = renaming_away {
-            utils::forget_drive_name(&conn, old_name)?;
+            forget_drive_name(&conn, old_name)?;
             // Earlier exports to this drive name it as it is now called. By
             // its old name, not its mount path: another stick may have used
             // the same path, and names are unique to one drive.
@@ -698,17 +695,17 @@ impl BackendService {
                 params![name, old_name],
             )?;
         }
-        utils::register_drive_name(&conn, &name, &now_ts)?;
+        register_drive_name(&conn, &name, &now_ts)?;
         if !keeps_own_name {
             // This drive is now the one the name is checked against.
-            utils::set_registered_drive(
+            set_registered_drive(
                 &conn,
                 &name,
                 crate::service::export_log::latest_export_log_record_at(&usb_root).as_deref(),
                 fs4::total_space(&usb_root).ok(),
             )?;
         }
-        utils::set_device_label(&conn, &usb_root, &name, &now_ts)?;
+        set_device_label(&conn, &usb_root, &name, &now_ts)?;
         self.invalidate_usb_parse_cache();
 
         Ok(crate::models::SetUsbDeviceNameData {
@@ -722,6 +719,209 @@ impl BackendService {
             updated,
         })
     }
+}
+
+/// Upsert a `usb_devices` row for `root`, keyed on its normalized path.
+/// Any touch clears `deleted_at` (seeing a device again un-prunes it).
+/// `mark_mounted=true` additionally makes this the ONLY mounted device --
+/// every other row is unmounted in the same call (`validate_usb_root`'s
+/// success path is the sole caller that passes `true`). `mark_mounted=false`
+/// only bumps `last_seen_at`, leaving mounted state untouched everywhere
+/// else (the USB browse/materialize and export paths must not imply "just
+/// mounted" or silently unmount whatever the user actually has selected).
+pub(crate) fn upsert_usb_device(
+    conn: &rusqlite::Connection,
+    root: &Path,
+    mark_mounted: bool,
+    now_ts: &str,
+) -> BackendResult<String> {
+    let root_path = root.to_string_lossy().to_string();
+    let root_path_key = crate::service::normalize_source_root_for_matching(&root_path);
+
+    let existing_id: Option<String> = conn
+        .query_row(
+            "SELECT id FROM usb_devices WHERE root_path_key = ?1",
+            rusqlite::params![root_path_key],
+            |row| row.get(0),
+        )
+        .optional()?;
+
+    let id = if let Some(id) = existing_id {
+        conn.execute(
+            "UPDATE usb_devices SET root_path = ?1, last_seen_at = ?2, updated_at = ?2, deleted_at = NULL WHERE id = ?3",
+            rusqlite::params![root_path, now_ts, id],
+        )?;
+        id
+    } else {
+        let id = uuid::Uuid::now_v7().to_string();
+        conn.execute(
+            "INSERT INTO usb_devices (id, root_path, root_path_key, label, mounted, first_seen_at, last_seen_at, deleted_at, created_at, updated_at)
+             VALUES (?1, ?2, ?3, NULL, 0, ?4, ?4, NULL, ?4, ?4)",
+            rusqlite::params![id, root_path, root_path_key, now_ts],
+        )?;
+        id
+    };
+
+    if mark_mounted {
+        conn.execute(
+            "UPDATE usb_devices SET mounted = 0, updated_at = ?1 WHERE mounted != 0 AND id != ?2",
+            rusqlite::params![now_ts, id],
+        )?;
+        conn.execute(
+            "UPDATE usb_devices SET mounted = 1, updated_at = ?1 WHERE id = ?2",
+            rusqlite::params![now_ts, id],
+        )?;
+    }
+
+    Ok(id)
+}
+
+/// A `usb_drive_names` row: the name in use, plus what tells the drive that
+/// holds it apart from a copy (see `BackendService::check_drive_identity`).
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(crate) struct RegisteredDrive {
+    pub name: String,
+    /// `exportedAt` of the last export this computer logged on the drive.
+    pub last_export_at: Option<String>,
+    /// The drive's (or, for a folder, its disk's) size.
+    pub total_bytes: Option<u64>,
+}
+
+/// The registered drive whose name shares `name`'s slug, if any. Names double
+/// as cache/backup-archive keys (`usb::identity::slug`), so "My USB" and
+/// "my-usb" are the same name here.
+pub(crate) fn find_registered_drive(
+    conn: &rusqlite::Connection,
+    name: &str,
+) -> BackendResult<Option<RegisteredDrive>> {
+    let row = conn
+        .query_row(
+            "SELECT name, last_export_at, total_bytes FROM usb_drive_names WHERE slug = ?1",
+            rusqlite::params![crate::service::usb::identity::slug(name)],
+            |row| {
+                Ok(RegisteredDrive {
+                    name: row.get(0)?,
+                    last_export_at: row.get(1)?,
+                    total_bytes: row.get::<_, Option<i64>>(2)?.map(|n| n.max(0) as u64),
+                })
+            },
+        )
+        .optional()?;
+    Ok(row)
+}
+
+/// Record `name` as in use by a drive (see `db::create_usb_drive_names`),
+/// keeping what is already known about the drive holding it.
+pub(crate) fn register_drive_name(
+    conn: &rusqlite::Connection,
+    name: &str,
+    now_ts: &str,
+) -> BackendResult<()> {
+    conn.execute(
+        "INSERT INTO usb_drive_names (slug, name, last_seen_at) VALUES (?1, ?2, ?3)
+         ON CONFLICT(slug) DO UPDATE SET name = excluded.name, last_seen_at = excluded.last_seen_at",
+        rusqlite::params![crate::service::usb::identity::slug(name), name, now_ts],
+    )?;
+    Ok(())
+}
+
+/// Make the drive at hand the one holding `name`: from now on it's the
+/// drive whose last export and size the name is checked against.
+pub(crate) fn set_registered_drive(
+    conn: &rusqlite::Connection,
+    name: &str,
+    last_export_at: Option<&str>,
+    total_bytes: Option<u64>,
+) -> BackendResult<()> {
+    conn.execute(
+        "UPDATE usb_drive_names SET last_export_at = ?1, total_bytes = ?2 WHERE slug = ?3",
+        rusqlite::params![
+            last_export_at,
+            total_bytes.map(|n| n as i64),
+            crate::service::usb::identity::slug(name)
+        ],
+    )?;
+    Ok(())
+}
+
+/// Remember the size of the drive holding `name`, if it isn't known yet.
+pub(crate) fn fill_registered_drive_size(
+    conn: &rusqlite::Connection,
+    name: &str,
+    total_bytes: u64,
+) -> BackendResult<()> {
+    conn.execute(
+        "UPDATE usb_drive_names SET total_bytes = ?1 WHERE slug = ?2 AND total_bytes IS NULL",
+        rusqlite::params![
+            total_bytes as i64,
+            crate::service::usb::identity::slug(name)
+        ],
+    )?;
+    Ok(())
+}
+
+/// Remember the export just logged on the drive holding `name`.
+pub(crate) fn record_drive_export(
+    conn: &rusqlite::Connection,
+    name: &str,
+    exported_at: &str,
+) -> BackendResult<()> {
+    conn.execute(
+        "UPDATE usb_drive_names SET last_export_at = ?1 WHERE slug = ?2",
+        rusqlite::params![exported_at, crate::service::usb::identity::slug(name)],
+    )?;
+    Ok(())
+}
+
+/// Free `name` for another drive to take (renamed away, or the drive was
+/// removed from the known list).
+pub(crate) fn forget_drive_name(conn: &rusqlite::Connection, name: &str) -> BackendResult<()> {
+    conn.execute(
+        "DELETE FROM usb_drive_names WHERE slug = ?1",
+        rusqlite::params![crate::service::usb::identity::slug(name)],
+    )?;
+    Ok(())
+}
+
+/// Persist `label` onto the `usb_devices` row for `root`, upserting a row
+/// first if none exists yet (e.g. naming a drive before it's ever been
+/// through `validate_usb_root`). The on-drive marker file
+/// (`usb::identity::write_drive_name`) is the source of truth; this is the
+/// name shown for the path while the drive isn't plugged in, kept in sync by
+/// the caller.
+pub(crate) fn set_device_label(
+    conn: &rusqlite::Connection,
+    root: &Path,
+    label: &str,
+    now_ts: &str,
+) -> BackendResult<()> {
+    upsert_usb_device(conn, root, false, now_ts)?;
+    let root_path_key = crate::service::normalize_source_root_for_matching(&root.to_string_lossy());
+    conn.execute(
+        "UPDATE usb_devices SET label = ?1, updated_at = ?2 WHERE root_path_key = ?3 AND label IS NOT ?1",
+        rusqlite::params![label, now_ts, root_path_key],
+    )?;
+    Ok(())
+}
+
+/// All known device root paths (display form), ANY mount state, ANY age,
+/// INCLUDING soft-deleted devices. Used only for the "is this path
+/// untrustworthy as durable local storage" check (materialize matching,
+/// `resolve_playback_source` exclusion) -- a path that was ever on removable
+/// media stays untrustworthy even after the user prunes it from their UI
+/// list, since pruning doesn't change the underlying filesystem fact.
+///
+/// Note the asymmetry with `list_usb_devices` (UI-facing, filters
+/// `WHERE deleted_at IS NULL`) on purpose -- those two read paths have
+/// different correctness requirements and must not share a single query.
+pub(crate) fn all_usb_device_root_paths(conn: &rusqlite::Connection) -> BackendResult<Vec<String>> {
+    let mut stmt = conn.prepare("SELECT root_path FROM usb_devices")?;
+    let rows = stmt.query_map([], |row| row.get::<_, String>(0))?;
+    let mut paths = Vec::new();
+    for row in rows {
+        paths.push(row?);
+    }
+    Ok(paths)
 }
 
 #[cfg(test)]
@@ -927,5 +1127,136 @@ mod tests {
         assert_eq!(linux_unescape_udev_label("CLUB\\x20STICK"), "CLUB STICK");
         assert_eq!(linux_unescape_udev_label("PLAIN"), "PLAIN");
         assert_eq!(linux_unescape_udev_label("trailing\\x2"), "trailing\\x2");
+    }
+
+    fn test_db() -> (tempfile::TempDir, crate::db::Db) {
+        let dir = tempdir().expect("tempdir");
+        let db = crate::db::Db::new(dir.path()).expect("db init");
+        (dir, db)
+    }
+
+    #[test]
+    fn upsert_usb_device_inserts_then_updates_last_seen_without_duplicating() {
+        let (_dir, db) = test_db();
+        let conn = db.connect().expect("connect");
+        let id1 = upsert_usb_device(&conn, Path::new("/mnt/usb1"), false, "2026-01-01T00:00:00Z")
+            .expect("first upsert");
+        let id2 = upsert_usb_device(&conn, Path::new("/mnt/usb1"), false, "2026-01-02T00:00:00Z")
+            .expect("second upsert");
+        assert_eq!(id1, id2, "same root should resolve to the same device row");
+
+        let count: i64 = conn
+            .query_row("SELECT COUNT(1) FROM usb_devices", [], |row| row.get(0))
+            .expect("count devices");
+        assert_eq!(count, 1);
+
+        let last_seen: String = conn
+            .query_row(
+                "SELECT last_seen_at FROM usb_devices WHERE id = ?1",
+                params![id1],
+                |row| row.get(0),
+            )
+            .expect("last_seen_at");
+        assert_eq!(last_seen, "2026-01-02T00:00:00Z");
+    }
+
+    #[test]
+    fn upsert_usb_device_mark_mounted_unmounts_every_other_device() {
+        let (_dir, db) = test_db();
+        let conn = db.connect().expect("connect");
+        let id_a = upsert_usb_device(&conn, Path::new("/mnt/usbA"), true, "2026-01-01T00:00:00Z")
+            .expect("mount A");
+        let mounted_a: i64 = conn
+            .query_row(
+                "SELECT mounted FROM usb_devices WHERE id = ?1",
+                params![id_a],
+                |row| row.get(0),
+            )
+            .expect("mounted A");
+        assert_eq!(mounted_a, 1);
+
+        let id_b = upsert_usb_device(&conn, Path::new("/mnt/usbB"), true, "2026-01-01T00:01:00Z")
+            .expect("mount B");
+        let mounted_a_after: i64 = conn
+            .query_row(
+                "SELECT mounted FROM usb_devices WHERE id = ?1",
+                params![id_a],
+                |row| row.get(0),
+            )
+            .expect("mounted A after");
+        let mounted_b: i64 = conn
+            .query_row(
+                "SELECT mounted FROM usb_devices WHERE id = ?1",
+                params![id_b],
+                |row| row.get(0),
+            )
+            .expect("mounted B");
+        assert_eq!(
+            mounted_a_after, 0,
+            "A should be unmounted once B is mounted"
+        );
+        assert_eq!(mounted_b, 1);
+    }
+
+    #[test]
+    fn upsert_usb_device_without_mark_mounted_never_changes_mount_state() {
+        let (_dir, db) = test_db();
+        let conn = db.connect().expect("connect");
+        let id_a = upsert_usb_device(&conn, Path::new("/mnt/usbA"), true, "2026-01-01T00:00:00Z")
+            .expect("mount A");
+        upsert_usb_device(&conn, Path::new("/mnt/usbB"), false, "2026-01-01T00:01:00Z")
+            .expect("touch B without mounting");
+        let mounted_a: i64 = conn
+            .query_row(
+                "SELECT mounted FROM usb_devices WHERE id = ?1",
+                params![id_a],
+                |row| row.get(0),
+            )
+            .expect("mounted A");
+        assert_eq!(
+            mounted_a, 1,
+            "browsing another root must not unmount the currently mounted device"
+        );
+    }
+
+    #[test]
+    fn upsert_usb_device_clears_deleted_at_on_any_touch() {
+        let (_dir, db) = test_db();
+        let conn = db.connect().expect("connect");
+        let id = upsert_usb_device(&conn, Path::new("/mnt/usb1"), false, "2026-01-01T00:00:00Z")
+            .expect("first upsert");
+        conn.execute(
+            "UPDATE usb_devices SET deleted_at = ?1 WHERE id = ?2",
+            params!["2026-01-02T00:00:00Z", id],
+        )
+        .expect("soft delete");
+        upsert_usb_device(&conn, Path::new("/mnt/usb1"), false, "2026-01-03T00:00:00Z")
+            .expect("re-touch");
+        let deleted_at: Option<String> = conn
+            .query_row(
+                "SELECT deleted_at FROM usb_devices WHERE id = ?1",
+                params![id],
+                |row| row.get(0),
+            )
+            .expect("deleted_at");
+        assert_eq!(
+            deleted_at, None,
+            "re-picking the same root should un-prune it"
+        );
+    }
+
+    #[test]
+    fn all_usb_device_root_paths_includes_soft_deleted_devices() {
+        let (_dir, db) = test_db();
+        let conn = db.connect().expect("connect");
+        let id = upsert_usb_device(&conn, Path::new("/mnt/usb1"), false, "2026-01-01T00:00:00Z")
+            .expect("upsert");
+        conn.execute(
+            "UPDATE usb_devices SET deleted_at = ?1 WHERE id = ?2",
+            params!["2026-01-02T00:00:00Z", id],
+        )
+        .expect("soft delete");
+        let paths = all_usb_device_root_paths(&conn).expect("root paths");
+        assert!(paths.iter().any(|p| p == "/mnt/usb1"));
     }
 }

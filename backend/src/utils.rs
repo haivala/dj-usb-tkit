@@ -1,7 +1,7 @@
 //! Shared binary/PDB byte-level helpers.
 //!
 //! These were previously duplicated across diagnostics, pdb_patch, export_helpers,
-//! usb::utils, and several dev binaries. Canonical implementations live here.
+//! usb::initialize, and several dev binaries. Canonical implementations live here.
 
 use std::collections::HashSet;
 

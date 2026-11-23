@@ -15,26 +15,6 @@
 //! grid, and export/import plumb the same data onto the USB Rekordbox database
 //! (see `service::anlz`, `service::export`).
 
-use std::collections::{BTreeMap, HashSet};
-use std::path::Path;
-
-use base64::Engine as _;
-use rusqlite::{Connection, OptionalExtension, params};
-use uuid::Uuid;
-
-use crate::error::{BackendError, BackendResult};
-use crate::i18n::tr;
-use crate::logging;
-use crate::models::{
-    GetTrackDetailRequest, GetUsbTrackDetailRequest, KeyOption, KeyOptionGroup,
-    ResolvePlaybackSourceRequest, SaveTrackAnalysisEditsData, SaveTrackAnalysisEditsRequest,
-    SaveUsbTrackAnalysisEditsData, SaveUsbTrackAnalysisEditsRequest, TrackCue, TrackCueInput,
-    TrackDetail, UsbTrackAnalysisDetail,
-};
-use crate::pdb_reader::pdb_page_size;
-
-use crate::edb::find_key_id_by_name;
-
 use super::anlz::{
     AnlzAnalysisEdits, AnlzCue, apply_analysis_edits_to_anlz, atomic_write_bytes,
     read_cues_from_anlz, read_first_beat_from_anlz,
@@ -46,14 +26,30 @@ use super::key_notation::{self, KeyNotation, key_display_fields, key_notation_se
 use super::track_matching::{content_fingerprint_key, pdb_track_fingerprint};
 use super::transcode_export::transcode_offset_for_usb_file;
 use super::usb::staging::{DbKind, SessionBackup, UsbDatabases};
-use super::usb::utils::{
-    pwv5_from_ext_bytes, read_pwv5_from_anlz, resolve_usb_root, resolve_usb_side_path,
-    resolve_usb_side_path_text,
-};
 use super::{
     BackendService, TRACK_COLS, apply_frontend_track_fields, local_cache_bundle_dat, now,
     row_to_track,
 };
+use crate::edb::find_key_id_by_name;
+use crate::error::{BackendError, BackendResult};
+use crate::i18n::tr;
+use crate::logging;
+use crate::models::{
+    GetTrackDetailRequest, GetUsbTrackDetailRequest, KeyOption, KeyOptionGroup,
+    ResolvePlaybackSourceRequest, SaveTrackAnalysisEditsData, SaveTrackAnalysisEditsRequest,
+    SaveUsbTrackAnalysisEditsData, SaveUsbTrackAnalysisEditsRequest, TrackCue, TrackCueInput,
+    TrackDetail, UsbTrackAnalysisDetail,
+};
+use crate::pdb_reader::pdb_page_size;
+use crate::service::anlz_read::{pwv5_from_ext_bytes, read_pwv5_from_anlz};
+use crate::service::usb::root::{
+    resolve_usb_root, resolve_usb_side_path, resolve_usb_side_path_text,
+};
+use base64::Engine as _;
+use rusqlite::{Connection, OptionalExtension, params};
+use std::collections::{BTreeMap, HashSet};
+use std::path::Path;
+use uuid::Uuid;
 
 /// Highest number of hot cues a track can carry (one per CDJ hot-cue pad A–H).
 pub const MAX_HOT_CUES: u8 = 8;
@@ -246,7 +242,7 @@ fn local_track_id_by_usb_fingerprint(
     usb_root: &Path,
     req: &UsbLocalTrackHint<'_>,
 ) -> Option<String> {
-    let parsed = super::usb::utils::parse_staged_pdb(usb_root).ok()?;
+    let parsed = crate::service::usb::cache::parse_staged_pdb(usb_root).ok()?;
     let row = pdb_track_by_media_path(&parsed, req.usb_media_path_raw).ok()?;
     let fingerprint = pdb_track_fingerprint(&parsed, row)?;
     let size = row.file_size_bytes.map(i64::from);

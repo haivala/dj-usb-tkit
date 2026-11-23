@@ -1,9 +1,7 @@
 //! USB History's Export Tracklist: the start-track labels and the text file.
 //! Both read the history from the existing cache, so neither touches the stick.
 
-use std::path::Path;
-
-use super::utils::resolve_usb_root;
+use super::root::resolve_usb_root;
 use crate::error::{BackendError, BackendResult};
 use crate::i18n::tr;
 use crate::models::{
@@ -12,6 +10,7 @@ use crate::models::{
     UsbHistory, UsbTrack,
 };
 use crate::service::BackendService;
+use std::path::Path;
 
 const START_TRACK_LABEL_MAX_CHARS: usize = 64;
 

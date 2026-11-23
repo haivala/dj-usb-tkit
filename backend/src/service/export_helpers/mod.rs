@@ -66,20 +66,18 @@ pub use playlist_ops::{
     verify_edb_content, verify_edb_content_with_conn, verify_pdb_content,
 };
 
-use std::collections::{HashMap, HashSet};
-use std::path::Path;
-
-use rusqlite::{OptionalExtension, params};
-
 use crate::error::{BackendError, BackendResult};
 use crate::models::{ExportToUsbOptions, TrackCue, WarningEntry};
 use crate::pdb_reader::parse_pdb;
 use crate::service::cues::split_cues;
 use crate::utils::{collect_chain as collect_chain_pages, page_offset, table_ptr_fields};
+use rusqlite::{OptionalExtension, params};
+use std::collections::{HashMap, HashSet};
+use std::path::Path;
 
-use super::usb::utils::{canonicalize_playlist_name, repair_utf8_mojibake};
 #[cfg(test)]
 use super::usb::vendor_compat::{USB_VENDOR_DB_DIR, USB_VENDOR_ROOT_DIR};
+use crate::service::usb::text::{canonicalize_playlist_name, repair_utf8_mojibake};
 
 pub(crate) fn canonicalize_track_path_identity(value: &str) -> String {
     let normalized = repair_utf8_mojibake(value.trim()).replace('\\', "/");

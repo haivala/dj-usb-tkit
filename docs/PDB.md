@@ -292,7 +292,7 @@ part of rekordbox's own export template and are present even when `t11`/`t12`
 most common case of a freshly exported or never-played drive. Any reader that
 surfaces history rows as user-facing history (import, diagnostics, or repair
 payload derivation) must filter on the `"HISTORY "` name prefix first. This
-is the same rule applied by `is_named_history_playlist` (`usb/helpers.rs`)
+is the same rule applied by `is_named_history_playlist` (`usb/history.rs`)
 and `derive_history_sync_payload` (`repair/history.rs`).
 
 ## Page Header

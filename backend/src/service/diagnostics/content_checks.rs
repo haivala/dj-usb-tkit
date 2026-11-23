@@ -263,7 +263,7 @@ pub(crate) fn detect_bpm_key_mismatches(
         let edb_row = edb_by_path.get(&track.track_file_path);
 
         let dat = (scan_anlz && pdb_tempo_x100 > 0 && !shared_bundle_tracks.contains(&track.id))
-            .then(|| crate::service::usb::utils::resolve_usb_side_path(usb_root, &track.anlz_path))
+            .then(|| crate::service::usb::root::resolve_usb_side_path(usb_root, &track.anlz_path))
             .flatten();
         let anlz_tempos_x100 = dat.as_ref().map_or([None, None], |dat| {
             // Only the beat-grid chunks: an `.EXT` is mostly waveforms.
@@ -356,7 +356,7 @@ pub(crate) fn detect_outdated_beat_grids(
             })
         })
         .filter_map(|track| {
-            crate::service::usb::utils::resolve_usb_side_path_lexical(usb_root, &track.anlz_path)
+            crate::service::usb::root::resolve_usb_side_path_lexical(usb_root, &track.anlz_path)
                 .map(|dat| OutdatedBeatGrid {
                     track_path: track.track_file_path.clone(),
                     dat,

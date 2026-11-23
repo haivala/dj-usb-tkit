@@ -7,6 +7,8 @@
 //! `format_compat::compute_usb_format_compat`), and export picks each track's
 //! file by it (see `transcode_export`).
 
+use super::identity::{UsbAudioFormats, read_usb_audio_formats, write_usb_audio_formats};
+use super::root::{can_write_file_at, has_write_access, resolve_usb_root};
 use crate::audio_format::{
     UsbAudioFormat, UsbAudioFormatOfExtension, format_ext_from_path, m4a_is_alac_by_bit_depth,
 };
@@ -16,9 +18,6 @@ use crate::models::{
     GetUsbAudioFormatsRequest, SetUsbAudioFormatsRequest, UsbAudioFormatSetting,
     UsbAudioFormatsData,
 };
-
-use super::identity::{UsbAudioFormats, read_usb_audio_formats, write_usb_audio_formats};
-use super::utils::{can_write_file_at, has_write_access, resolve_usb_root};
 use crate::service::BackendService;
 
 fn formats_data(formats: &UsbAudioFormats, writable: bool) -> UsbAudioFormatsData {

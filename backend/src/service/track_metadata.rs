@@ -2,10 +2,13 @@
 //! their own, so these changes leave the beat grid, key and cues exactly as
 //! they are (no ANLZ rewrite, no BPM/key marked as user-edited).
 
-use std::path::Path;
-
-use rusqlite::{Connection, OptionalExtension, params};
-
+use super::cues::{
+    UsbLocalTrackHint, mark_track_edited_tx, pdb_track_by_media_path, read_usb_pdb,
+    report_usb_database_gaps, track_not_in_usb_database,
+};
+use super::export_helpers::{PdbLayoutProfile, load_table_columns_tx};
+use super::usb::staging::{SessionBackup, UsbDatabases};
+use super::{BackendService, now};
 use crate::edb::{
     complete_partial_date, content_column_or_null, find_or_insert_genre, resolve_release_date,
     table_exists,
@@ -20,15 +23,9 @@ use crate::models::{
     UsbMetadataEditResult, UsbMetadataEditTrack,
 };
 use crate::pdb_reader::pdb_page_size;
-
-use super::cues::{
-    UsbLocalTrackHint, mark_track_edited_tx, pdb_track_by_media_path, read_usb_pdb,
-    report_usb_database_gaps, track_not_in_usb_database,
-};
-use super::export_helpers::{PdbLayoutProfile, load_table_columns_tx};
-use super::usb::staging::{SessionBackup, UsbDatabases};
-use super::usb::utils::resolve_usb_root;
-use super::{BackendService, now};
+use crate::service::usb::root::resolve_usb_root;
+use rusqlite::{Connection, OptionalExtension, params};
+use std::path::Path;
 
 /// Highest star rating (the PDB row byte and the eDB column are 0–5).
 const MAX_RATING: u8 = 5;

@@ -1,22 +1,20 @@
 //! Export database (eDB/SQLite) helpers and CRUD operations.
 
-use crate::utils::counted;
-use std::collections::HashMap;
-use std::path::Path;
-
-use chrono::TimeZone;
-use rusqlite::{OptionalExtension, params, types::Value};
-use serde::Serialize;
-
 use crate::error::{BackendError, BackendResult};
 use crate::i18n::tr;
 use crate::logging::{self, Level};
 use crate::metadata::sanitize_metadata;
 use crate::models::{UsbTrack, WarningEntry};
-use crate::service::usb::utils::resolve_usb_side_path_lexical_text;
+use crate::service::usb::root::resolve_usb_side_path_lexical_text;
 use crate::service::usb::vendor_compat::{
     DEFAULT_USB_EDB_KEY, USB_VENDOR_DB_DIR, USB_VENDOR_ROOT_DIR,
 };
+use crate::utils::counted;
+use chrono::TimeZone;
+use rusqlite::{OptionalExtension, params, types::Value};
+use serde::Serialize;
+use std::collections::HashMap;
+use std::path::Path;
 
 // -----------------------------------------------------------------------------
 // eDB data contracts
@@ -2103,8 +2101,11 @@ mod tests {
         EdbRead, ExportPlaylistData, open_edb, open_edb_from_usb_root, open_edb_rw, read_edb,
         replace_export_playlist_row_with_identity, upsert_export_playlist_row,
     };
-    use crate::service::usb::vendor_compat::{USB_VENDOR_DB_DIR, USB_VENDOR_ROOT_DIR};
+    use crate::service::usb::vendor_compat::{
+        USB_CONTENTS_DIR, USB_VENDOR_DB_DIR, USB_VENDOR_ROOT_DIR,
+    };
     use tempfile::tempdir;
+    use uuid::Uuid;
 
     fn export_db_path(root: &std::path::Path) -> std::path::PathBuf {
         let dir = root.join(USB_VENDOR_ROOT_DIR).join(USB_VENDOR_DB_DIR);
@@ -2162,7 +2163,7 @@ mod tests {
     fn encrypted_edb_opens_with_its_derived_key_read_only_and_read_write() {
         let temp = tempdir().expect("tempdir");
         let db_path = export_db_path(temp.path());
-        crate::service::usb::utils::initialize_fullshape_edb(&db_path, "2026-01-01")
+        crate::service::usb::initialize::initialize_fullshape_edb(&db_path, "2026-01-01")
             .expect("create eDB");
         let salt = super::edb_salt(&db_path).expect("an encrypted eDB has a salt");
 
@@ -2724,5 +2725,200 @@ mod tests {
 
         let dates = &all.date_created;
         assert_eq!(dates.get(&42).map(String::as_str), Some("2024-02-10"));
+    }
+
+    #[test]
+    fn try_read_playlists_from_edb_merges_duplicate_same_name_playlists() {
+        let tmp = tempdir().unwrap();
+        let vendor_db = tmp.path().join(USB_VENDOR_ROOT_DIR).join(USB_VENDOR_DB_DIR);
+        std::fs::create_dir_all(&vendor_db).unwrap();
+
+        let db_path = vendor_db.join("exportLibrary.db");
+        let conn = rusqlite::Connection::open(&db_path).unwrap();
+        conn.execute_batch(
+            r#"
+            CREATE TABLE artist (artist_id INTEGER PRIMARY KEY, name TEXT);
+            CREATE TABLE album (album_id INTEGER PRIMARY KEY, artist_id INTEGER, name TEXT);
+            CREATE TABLE "key" (key_id INTEGER PRIMARY KEY, scaleName TEXT, seq INTEGER, name TEXT);
+            CREATE TABLE image (image_id INTEGER PRIMARY KEY, path TEXT);
+            CREATE TABLE playlist (playlist_id INTEGER PRIMARY KEY, name TEXT, attribute INTEGER, sequenceNo INTEGER);
+            CREATE TABLE content (
+              content_id INTEGER PRIMARY KEY,
+              title TEXT,
+              artist_id_artist INTEGER,
+              album_id INTEGER,
+              key_id INTEGER,
+              image_id INTEGER,
+              path TEXT,
+              analysisDataFilePath TEXT,
+              bpmx100 INTEGER,
+              length INTEGER
+            );
+            CREATE TABLE playlist_content (playlist_id INTEGER, content_id INTEGER, sequenceNo INTEGER);
+            INSERT INTO artist (artist_id, name) VALUES (1, 'Artist');
+            INSERT INTO playlist (playlist_id, name, attribute, sequenceNo) VALUES
+              (1, 'Testi', 0, 1),
+              (2, 'Testi', 0, 2);
+            INSERT INTO content (content_id, title, artist_id_artist, path, bpmx100, length) VALUES
+              (11, 'Old A', 1, '/Contents/A.mp3', 12000, 180),
+              (12, 'Old B', 1, '/Contents/B.mp3', 12100, 181),
+              (13, 'New C', 1, '/Contents/C.mp3', 12200, 182);
+            INSERT INTO playlist_content (playlist_id, content_id, sequenceNo) VALUES
+              (1, 11, 1),
+              (1, 12, 2),
+              (2, 13, 1);
+            "#,
+        )
+        .unwrap();
+        drop(conn);
+
+        std::fs::create_dir_all(tmp.path().join("Contents")).unwrap();
+        std::fs::write(tmp.path().join("Contents/A.mp3"), b"a").unwrap();
+        std::fs::write(tmp.path().join("Contents/B.mp3"), b"b").unwrap();
+        std::fs::write(tmp.path().join("Contents/C.mp3"), b"c").unwrap();
+
+        let mut warnings = Vec::new();
+        let conn = crate::edb::open_edb_from_usb_root(tmp.path(), &mut warnings).unwrap();
+        let playlists = crate::edb::read_edb(
+            &conn,
+            tmp.path(),
+            crate::edb::EdbRead {
+                playlists: true,
+                resolve_paths: true,
+                ..crate::edb::EdbRead::default()
+            },
+        )
+        .unwrap()
+        .playlists;
+        let testi = playlists.get("Testi").expect("merged playlist");
+        assert_eq!(
+            testi.playlist_id, 1,
+            "same-name merge should keep the earliest playlist id"
+        );
+        assert_eq!(
+            testi.sort_order, 1,
+            "same-name merge should keep the earliest playlist sort order"
+        );
+        assert_eq!(
+            testi.tracks.len(),
+            3,
+            "same-name export DB playlists should merge"
+        );
+    }
+
+    #[test]
+    fn usb_tracks_from_edb_defer_artwork_data_url_to_lazy_load() {
+        let tmp = std::env::temp_dir().join(format!("__test_usb_artwork_db_{}__", Uuid::now_v7()));
+        let rb = tmp.join(USB_VENDOR_ROOT_DIR).join(USB_VENDOR_DB_DIR);
+        std::fs::create_dir_all(&rb).unwrap();
+
+        // Create a fake artwork file on the USB
+        let artwork_dir = tmp.join(USB_CONTENTS_DIR).join("artwork");
+        std::fs::create_dir_all(&artwork_dir).unwrap();
+        let artwork_file = artwork_dir.join("cover.jpg");
+        std::fs::write(
+            &artwork_file,
+            [0xFF, 0xD8, 0xFF, 0xE0, 0x00, 0x02, 0x00, 0x00, 0xFF, 0xD9],
+        )
+        .unwrap();
+
+        // Create an eDB with proper schema (JOINed tables)
+        let db_path = rb.join("exportLibrary.db");
+        let conn = rusqlite::Connection::open(&db_path).unwrap();
+        conn.execute_batch(
+            r#"
+            CREATE TABLE playlist (
+              playlist_id INTEGER PRIMARY KEY,
+              name TEXT,
+              attribute INTEGER,
+              sequenceNo INTEGER
+            );
+            CREATE TABLE artist (
+              artist_id INTEGER PRIMARY KEY,
+              name TEXT
+            );
+            CREATE TABLE album (
+              album_id INTEGER PRIMARY KEY,
+              name TEXT
+            );
+            CREATE TABLE "key" (
+              key_id INTEGER PRIMARY KEY,
+              name TEXT
+            );
+            CREATE TABLE image (
+              image_id INTEGER PRIMARY KEY,
+              path TEXT
+            );
+            CREATE TABLE content (
+              content_id INTEGER PRIMARY KEY,
+              title TEXT,
+              artist_id_artist INTEGER,
+              album_id INTEGER,
+              key_id INTEGER,
+              image_id INTEGER,
+              path TEXT,
+              analysisDataFilePath TEXT,
+              bpmx100 INTEGER
+            );
+            CREATE TABLE playlist_content (
+              playlist_id INTEGER,
+              content_id INTEGER,
+              sequenceNo INTEGER
+            );
+            INSERT INTO artist (artist_id, name) VALUES (1, 'Test Artist');
+            INSERT INTO image (image_id, path) VALUES (1, '/Contents/artwork/cover.jpg');
+            INSERT INTO playlist (playlist_id, name, attribute, sequenceNo) VALUES (1, 'ArtTest', 0, 1);
+            INSERT INTO content (content_id, title, artist_id_artist, image_id, path, bpmx100)
+              VALUES (1, 'Track With Art', 1, 1, '/Contents/track.mp3', 12800);
+            INSERT INTO playlist_content (playlist_id, content_id, sequenceNo) VALUES (1, 1, 1);
+            "#,
+        )
+        .unwrap();
+        drop(conn);
+
+        // Use the function that reads tracks from export DB
+        let mut warnings = Vec::new();
+        let playlists = crate::edb::open_edb_from_usb_root(&tmp, &mut warnings)
+            .and_then(|conn| {
+                crate::edb::read_edb(
+                    &conn,
+                    &tmp,
+                    crate::edb::EdbRead {
+                        playlists: true,
+                        resolve_paths: true,
+                        ..crate::edb::EdbRead::default()
+                    },
+                )
+            })
+            .map(|library| library.playlists)
+            .filter(|playlists| !playlists.is_empty());
+        assert!(
+            playlists.is_some(),
+            "should read playlists from export db, warnings: {warnings:?}"
+        );
+        let playlists = playlists.unwrap();
+
+        let track = playlists
+            .values()
+            .flat_map(|playlist| playlist.tracks.iter())
+            .find(|t| t.title == "Track With Art");
+        assert!(track.is_some(), "should find the test track");
+        let track = track.unwrap();
+
+        assert!(
+            track.artwork_path.is_some(),
+            "USB track artwork_path should be populated when artwork exists"
+        );
+        let artwork_path = track.artwork_path.as_ref().unwrap();
+        assert!(
+            artwork_path.ends_with("/Contents/artwork/cover.jpg"),
+            "artwork_path should resolve to USB artwork location: {artwork_path}"
+        );
+        assert!(
+            track.artwork_data_url.is_none(),
+            "USB import should defer artwork_data_url loading until inspect/hydration"
+        );
+
+        std::fs::remove_dir_all(&tmp).ok();
     }
 }

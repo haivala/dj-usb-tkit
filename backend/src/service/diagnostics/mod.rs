@@ -1,8 +1,9 @@
 //! USB diagnostics and parity report. `run` holds the entry points; the other
 //! submodules hold the checks and the display layout they feed.
 
-use std::collections::{HashMap, HashSet};
-
+use super::BackendService;
+use super::export_helpers::{load_table_columns, table_exists};
+use super::usb::vendor_compat::vendor_edb_path;
 use crate::edb::{ExportDbPlaylist, open_edb_from_usb_root};
 use crate::error::{BackendError, BackendResult};
 use crate::logging::{self, Level};
@@ -12,18 +13,15 @@ use crate::models::{
     RunUsbDiagnosticsData, RunUsbDiagnosticsRequest, RunUsbParityReportData,
     RunUsbParityReportRequest, UsbParityPlaylistDetail, UsbTrack, WarningEntry,
 };
+use crate::service::usb::history::is_named_history_playlist;
+use crate::service::usb::root::resolve_usb_root;
+use crate::service::usb::stick_files::collect_contents_files;
+use crate::service::usb::text::{canonicalize_playlist_name, repair_utf8_mojibake};
 use crate::utils::{
     collect_chain_lenient as collect_chain, counted, page_offset, read_u8_at, read_u16_le_at,
     read_u32_le_at, table_ptr_fields,
 };
-
-use super::BackendService;
-use super::export_helpers::{load_table_columns, table_exists};
-use super::usb::helpers::is_named_history_playlist;
-use super::usb::utils::{
-    canonicalize_playlist_name, collect_contents_files, repair_utf8_mojibake, resolve_usb_root,
-};
-use super::usb::vendor_compat::vendor_edb_path;
+use std::collections::{HashMap, HashSet};
 
 mod analysis_ownership;
 mod audio_presence;

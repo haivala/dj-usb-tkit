@@ -7,10 +7,9 @@
 //! it is mapped or listed as not synced, and a test fails on any eDB
 //! template `content` column in neither list below.
 
-use std::collections::{HashMap, HashSet};
-
 use super::{ExportManifestTrack, PdbTrackRowData, load_table_columns, table_exists};
 use crate::error::BackendResult;
+use std::collections::{HashMap, HashSet};
 
 /// eDB `content` columns the writers sync from the manifest.
 #[cfg_attr(not(test), allow(dead_code))]
@@ -531,7 +530,7 @@ mod tests {
     fn every_edb_template_content_column_is_mapped_or_listed_as_not_synced() {
         let dir = tempfile::tempdir().expect("tempdir");
         let conn = rusqlite::Connection::open(dir.path().join("t.db")).expect("open");
-        conn.execute_batch(crate::service::usb::utils::EDB_SCHEMA)
+        conn.execute_batch(crate::service::usb::initialize::EDB_SCHEMA)
             .expect("template schema");
         let columns = load_table_columns(&conn, "content").expect("columns");
         let synced: HashSet<&str> = EDB_CONTENT_SYNCED_COLUMNS.iter().copied().collect();

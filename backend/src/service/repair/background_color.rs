@@ -110,7 +110,7 @@ fn read_background_colors(usb_root: &Path, pdb: &[u8]) -> UsbBackgroundColorData
         .and_then(|conn| edb_background_color(&conn));
     let reason = background_color_refusal(
         pdb_color.is_some() || edb_color.is_some(),
-        crate::service::usb::utils::has_write_access(usb_root),
+        crate::service::usb::root::has_write_access(usb_root),
     );
     UsbBackgroundColorData {
         chips: background_color_chips(pdb_color, edb_color),
@@ -167,7 +167,7 @@ impl BackendService {
         }
         // The read above only looks; this one writes, so a read-only mount is
         // caught here instead of failing halfway through with its own error.
-        if !crate::service::usb::utils::can_write_file_at(&usb_root) {
+        if !crate::service::usb::root::can_write_file_at(&usb_root) {
             return Err(BackendError::Validation(
                 tr::usb_background_color_read_only(),
             ));

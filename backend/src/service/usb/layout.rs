@@ -10,9 +10,8 @@
 //! On Linux everything comes from files any user can read (`/proc/mounts`,
 //! udev's database, sysfs); elsewhere only the filesystem type is known.
 
-use std::path::Path;
-
 use crate::i18n::{Text, tr};
+use std::path::Path;
 
 /// Filesystem size below this share of its partition counts as not filling it.
 /// A FAT filesystem as made by `mkfs.fat` or `diskutil` fills its partition to
@@ -111,11 +110,10 @@ pub(crate) fn read_drive_layout(usb_root: &Path) -> Option<DriveLayout> {
 
 #[cfg(target_os = "linux")]
 mod platform {
-    use std::collections::HashMap;
-    use std::path::Path;
-
     use super::{DriveLayout, PartitionTable, classify_fs};
     use crate::service::usb::identity::{linux_device_is_usb, linux_mount_for_path};
+    use std::collections::HashMap;
+    use std::path::Path;
 
     /// sysfs counts block device sizes in 512-byte sectors, whatever the
     /// device's own sector size.
@@ -215,7 +213,7 @@ mod platform {
     /// `ID_FS_SIZE`. It leaves out the FAT's own tables, a small share.
     #[allow(clippy::unnecessary_cast)]
     fn statvfs_total(path: &Path) -> Option<u64> {
-        let stats = crate::service::usb::utils::statvfs(path)?;
+        let stats = crate::service::usb::root::statvfs(path)?;
         Some(stats.f_blocks as u64 * stats.f_frsize as u64)
     }
 }
@@ -224,9 +222,8 @@ mod platform {
 /// removable disk, not its partition table or partitions.
 #[cfg(not(target_os = "linux"))]
 mod platform {
-    use std::path::Path;
-
     use super::{DriveLayout, classify_fs};
+    use std::path::Path;
 
     pub(super) fn read_drive_layout(usb_root: &Path) -> Option<DriveLayout> {
         let canon = std::fs::canonicalize(usb_root).ok();

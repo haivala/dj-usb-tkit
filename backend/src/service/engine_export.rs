@@ -5,32 +5,29 @@
 //! every time; keeps the player's history (`hm.db`) and the track ids it
 //! refers to. Format layer: [`crate::engine_db`].
 
-use crate::i18n::tr;
-use std::collections::{HashMap, HashSet};
-use std::path::Path;
-
-use rusqlite::{OptionalExtension, params};
-
+use super::anlz::pqtz_beats;
+use super::cues::{DEFAULT_HOTCUE_COLOR_ID, HOTCUE_PALETTE, collapse_anlz_cues};
+use super::key_notation::camelot_position;
+use super::usb::staging;
+use super::{BackendService, SETTING_UI_EXPORT_ENGINE_LIBRARY, now};
 use crate::engine_db::{
     EngineAlbumArt, EngineCue, EngineLibrary, EnginePlaylist, EngineTrack, GridMarker,
     HOT_CUE_SLOTS, OVERVIEW_ENTRIES, engine_db_dir, engine_key_from_camelot, ensure_aux_dbs,
     read_pdb_import_counter, read_previous_library, write_engine_m_db,
 };
 use crate::error::{BackendError, BackendResult};
+use crate::i18n::tr;
 use crate::logging::{self, Level};
 use crate::models::{DiagCheck, DiagSection, DiagStatus, TrackCue, WarningEntry};
 use crate::pdb_reader::{
     ParsedPdb, PdbPlaylistEntryRow, PdbPlaylistTreeRow, PdbTrackRow, parse_pdb_bytes,
 };
-
-use super::anlz::pqtz_beats;
-use super::cues::{DEFAULT_HOTCUE_COLOR_ID, HOTCUE_PALETTE, collapse_anlz_cues};
-use super::key_notation::camelot_position;
-use super::usb::staging;
-use super::usb::utils::{
-    canonicalize_playlist_name, find_anlz_chunk_payload, resolve_usb_side_path,
-};
-use super::{BackendService, SETTING_UI_EXPORT_ENGINE_LIBRARY, now};
+use crate::service::anlz_read::find_anlz_chunk_payload;
+use crate::service::usb::root::resolve_usb_side_path;
+use crate::service::usb::text::canonicalize_playlist_name;
+use rusqlite::{OptionalExtension, params};
+use std::collections::{HashMap, HashSet};
+use std::path::Path;
 
 /// `AlbumArt` row for tracks without artwork (every track points at a row,
 /// as on a device-written library).

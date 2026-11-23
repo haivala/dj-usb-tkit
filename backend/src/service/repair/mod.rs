@@ -2,28 +2,6 @@
 //! user selects. `run` drives one repair pass; the other submodules hold the
 //! detectors and apply functions it calls.
 
-use std::collections::{HashMap, HashSet};
-use std::path::Path;
-
-use rusqlite::params;
-
-use crate::edb::{
-    EdbRead, ExportDbPlaylist, find_key_id_by_name, open_edb_from_usb_root, read_edb,
-};
-use crate::error::{BackendError, BackendResult};
-use crate::logging::{self, Level};
-use crate::models::{
-    DiagOverviewItem, DiagStatus, GetUsbPlayerMenuConfigData, GetUsbPlayerMenuConfigRequest,
-    RepairFixProposal, RepairNameInput, RepairRow, RepairUnsupportedItem, RepairUsbDiagnosticsData,
-    RepairUsbDiagnosticsRequest, RunUsbDiagnosticsRequest, RunUsbParityReportRequest,
-    UpdateUsbPlayerMenuConfigData, UpdateUsbPlayerMenuConfigRequest, UsbParityPlaylistDetail,
-    UsbPlayerMenuEdit, UsbPlayerMenuItem, WarningEntry,
-};
-use crate::pdb_page;
-use crate::pdb_reader::{ParsedPdb, parse_pdb, pdb_page_size};
-
-use super::BackendService;
-use super::SETTING_EXPORT_MASTER_DB_ID;
 use super::analysis::{build_waveform_preview_from_audio, detect_track_duration_ms};
 use super::anlz::{
     AnlzAnalysisEdits, AnlzBundlePaths, GridUpgrade, WaveformData, analysis_bundle_paths_for_track,
@@ -34,6 +12,12 @@ use super::anlz::{
 };
 use super::anlz_seek::{SeekIndexSkip, seek_index_for_audio, seek_index_for_audio_reporting};
 use super::cues::collapse_anlz_cues;
+use super::diagnostics::{
+    AnalysisOwnership, BpmKeyMismatch, audio_path_key, build_meta_key, collect_edb_audio_paths,
+    detect_bpm_key_mismatches, normalize_analysis_path_for_identity,
+    normalize_pdb_path_for_edb_lookup, scan_analysis_ownership, scan_audio_presence,
+    track_identity_key,
+};
 use super::export::APP_CONTENT_LINK_ID;
 use super::export_helpers::pdb_encoding::ARTIST_SHORT_ASCII_NAME_OFFSET;
 use super::export_helpers::{
@@ -49,22 +33,32 @@ use super::track_matching::{
 };
 use super::usb::display_files::SeekSkipMemory;
 use super::usb::staging::{self, EdbRw};
-use super::usb::utils::{
-    canonicalize_playlist_name, resolve_usb_root, resolve_usb_side_path, sanitize_warning_path,
-    scan_anlz,
-};
 #[cfg(test)]
 use super::usb::vendor_compat::vendor_pdb_path;
+use super::{BackendService, SETTING_EXPORT_MASTER_DB_ID};
 use crate::audio_format::same_format_extension;
-use crate::scanner::scan_audio_file;
-use crate::utils::counted;
-
-use super::diagnostics::{
-    AnalysisOwnership, BpmKeyMismatch, audio_path_key, build_meta_key, collect_edb_audio_paths,
-    detect_bpm_key_mismatches, normalize_analysis_path_for_identity,
-    normalize_pdb_path_for_edb_lookup, scan_analysis_ownership, scan_audio_presence,
-    track_identity_key,
+use crate::edb::{
+    EdbRead, ExportDbPlaylist, find_key_id_by_name, open_edb_from_usb_root, read_edb,
 };
+use crate::error::{BackendError, BackendResult};
+use crate::logging::{self, Level};
+use crate::models::{
+    DiagOverviewItem, DiagStatus, GetUsbPlayerMenuConfigData, GetUsbPlayerMenuConfigRequest,
+    RepairFixProposal, RepairNameInput, RepairRow, RepairUnsupportedItem, RepairUsbDiagnosticsData,
+    RepairUsbDiagnosticsRequest, RunUsbDiagnosticsRequest, RunUsbParityReportRequest,
+    UpdateUsbPlayerMenuConfigData, UpdateUsbPlayerMenuConfigRequest, UsbParityPlaylistDetail,
+    UsbPlayerMenuEdit, UsbPlayerMenuItem, WarningEntry,
+};
+use crate::pdb_page;
+use crate::pdb_reader::{ParsedPdb, parse_pdb, pdb_page_size};
+use crate::scanner::scan_audio_file;
+use crate::service::usb::root::{resolve_usb_root, resolve_usb_side_path};
+use crate::service::usb::stick_files::{sanitize_warning_path, scan_anlz};
+use crate::service::usb::text::canonicalize_playlist_name;
+use crate::utils::counted;
+use rusqlite::params;
+use std::collections::{HashMap, HashSet};
+use std::path::Path;
 
 mod audio_fixes;
 mod background_color;

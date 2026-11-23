@@ -5,6 +5,7 @@
 pub(crate) mod analysis;
 pub use analysis::{AnalysisEvent, AnalysisJobSummary, AnalysisObserver, analysis_event_payload};
 pub mod anlz;
+pub(crate) mod anlz_read;
 mod anlz_seek;
 pub(crate) mod bpm_key;
 #[cfg(test)]
@@ -60,24 +61,12 @@ use track_matching::{
 };
 
 // Re-export functions used by commands.rs via crate::service::*
+use anlz_read::{load_waveform_preview_from_analysis_path, read_pwv4_from_anlz};
 pub use engine_export::{EngineLibrarySummary, rebuild_engine_library};
+pub use rekordbox_import::detect_external_rekordbox_db;
+use rekordbox_import::detect_external_rekordbox_db as detect_external_rekordbox_db_util;
 pub use repair::{pdb_shape_problems, pdb_write_problems};
-pub use usb::utils::{detect_external_rekordbox_db, initialize_usb};
-use usb::utils::{
-    detect_external_rekordbox_db as detect_external_rekordbox_db_util,
-    load_waveform_preview_from_analysis_path, read_pwv4_from_anlz,
-};
-
-use chrono::Utc;
-use rusqlite::{OptionalExtension, params, params_from_iter};
-use serde::{Deserialize, Serialize};
-use std::hash::{Hash, Hasher};
-use std::path::{Path, PathBuf};
-use std::sync::Arc;
-use std::sync::atomic::AtomicBool;
-use uuid::Uuid;
-
-use base64::Engine;
+pub use usb::initialize::initialize_usb;
 
 use crate::db::Db;
 use crate::error::{BackendError, BackendResult};
@@ -111,6 +100,15 @@ use crate::models::{
 use crate::player::PlaybackController;
 use crate::scanner::{ScanCache, scan_audio_files, unique_paths};
 use crate::wav_format::WavFormatIssue;
+use base64::Engine;
+use chrono::Utc;
+use rusqlite::{OptionalExtension, params, params_from_iter};
+use serde::{Deserialize, Serialize};
+use std::hash::{Hash, Hasher};
+use std::path::{Path, PathBuf};
+use std::sync::Arc;
+use std::sync::atomic::AtomicBool;
+use uuid::Uuid;
 
 const TRACK_QUERY_LIMIT_MAX: usize = 5000;
 const SETTING_EXPORT_OWNED_FILES_PREFIX: &str = "export_owned_files_v1";
@@ -416,7 +414,12 @@ impl BackendService {
         }
 
         for root in roots {
-            usb::utils::upsert_usb_device(&conn, Path::new(&root), false, &now_ts)?;
+            crate::service::usb::identity::upsert_usb_device(
+                &conn,
+                Path::new(&root),
+                false,
+                &now_ts,
+            )?;
         }
 
         Ok(())
@@ -450,7 +453,7 @@ impl BackendService {
     }
 
     pub fn initialize_usb(&self, req: InitializeUsbRequest) -> BackendResult<InitializeUsbData> {
-        usb::utils::initialize_usb_for(Some(self), Path::new(&req.usb_root))
+        crate::service::usb::initialize::initialize_usb_for(Some(self), Path::new(&req.usb_root))
     }
 }
 

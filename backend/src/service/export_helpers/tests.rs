@@ -1,11 +1,12 @@
-use super::super::usb::vendor_compat::USB_ANALYSIS_DIR;
 use super::*;
 use crate::models::RunUsbParityReportRequest;
-use crate::service::BackendService;
 use crate::service::usb::staging::UsbWriteSession;
+use crate::service::usb::vendor_compat::USB_ANALYSIS_DIR;
+use crate::service::{BackendService, now};
 use std::fs;
 use std::path::PathBuf;
 use tempfile::tempdir;
+use uuid::Uuid;
 
 fn mapping_test_track() -> ExportManifestTrack {
     ExportManifestTrack {
@@ -2032,7 +2033,7 @@ fn remove_playlist_and_tracks_from_pdb_allows_removing_last_playlist() {
     let usb_root = dir.path();
     std::fs::create_dir_all(usb_root.join(USB_VENDOR_ROOT_DIR).join(USB_VENDOR_DB_DIR)).unwrap();
 
-    crate::service::usb::utils::initialize_usb(usb_root).expect("initialize usb skeleton");
+    crate::service::usb::initialize::initialize_usb(usb_root).expect("initialize usb skeleton");
 
     let playlist = ExportPlaylistData {
         id: "pl-last".to_string(),
@@ -2225,7 +2226,7 @@ fn remove_playlist_cleans_exclusive_tracks_preserves_shared() {
     )
     .unwrap();
 
-    crate::service::usb::utils::initialize_usb(usb_root).expect("initialize usb skeleton");
+    crate::service::usb::initialize::initialize_usb(usb_root).expect("initialize usb skeleton");
 
     // Export playlist A with tracks t1, t2
     let playlist_a = ExportPlaylistData {
@@ -2387,7 +2388,7 @@ fn remove_playlist_fully_shared_preserves_all_tracks() {
     let usb_root = dir.path();
     std::fs::create_dir_all(usb_root.join(USB_VENDOR_ROOT_DIR).join(USB_VENDOR_DB_DIR)).unwrap();
 
-    crate::service::usb::utils::initialize_usb(usb_root).expect("initialize usb skeleton");
+    crate::service::usb::initialize::initialize_usb(usb_root).expect("initialize usb skeleton");
 
     // Export playlist A with tracks t1, t2
     let playlist_a = ExportPlaylistData {
@@ -2460,7 +2461,7 @@ fn remove_playlist_preserves_pdb_page_count_with_many_entries() {
     let usb_root = dir.path();
     std::fs::create_dir_all(usb_root.join(USB_VENDOR_ROOT_DIR).join(USB_VENDOR_DB_DIR)).unwrap();
 
-    crate::service::usb::utils::initialize_usb(usb_root).expect("initialize usb skeleton");
+    crate::service::usb::initialize::initialize_usb(usb_root).expect("initialize usb skeleton");
 
     // 20 tracks → 20 playlist entries per playlist → enough to stress
     let tracks_a: Vec<ExportTrackData> = (0..20)
@@ -2635,7 +2636,7 @@ fn initialize_usb_seeds_baseline_history_shape_pages() {
     let usb_root = dir.path();
     std::fs::create_dir_all(usb_root.join(USB_VENDOR_ROOT_DIR).join(USB_VENDOR_DB_DIR)).unwrap();
 
-    crate::service::usb::utils::initialize_usb(usb_root).expect("initialize usb skeleton");
+    crate::service::usb::initialize::initialize_usb(usb_root).expect("initialize usb skeleton");
 
     let pdb_path = usb_root
         .join(USB_VENDOR_ROOT_DIR)
@@ -2694,7 +2695,7 @@ fn t19_template_state_repair_activates_page_once() {
     let dir = tempdir().unwrap();
     let usb_root = dir.path();
     std::fs::create_dir_all(usb_root.join(USB_VENDOR_ROOT_DIR).join(USB_VENDOR_DB_DIR)).unwrap();
-    crate::service::usb::utils::initialize_usb(usb_root).expect("initialize usb skeleton");
+    crate::service::usb::initialize::initialize_usb(usb_root).expect("initialize usb skeleton");
     let pdb_path = usb_root
         .join(USB_VENDOR_ROOT_DIR)
         .join(USB_VENDOR_DB_DIR)
@@ -2784,7 +2785,7 @@ fn export_preserves_t17_t18_seed_shape_and_allows_t19_runtime_rows() {
     let dir = tempdir().unwrap();
     let usb_root = dir.path();
     std::fs::create_dir_all(usb_root.join(USB_VENDOR_ROOT_DIR).join(USB_VENDOR_DB_DIR)).unwrap();
-    crate::service::usb::utils::initialize_usb(usb_root).expect("initialize usb skeleton");
+    crate::service::usb::initialize::initialize_usb(usb_root).expect("initialize usb skeleton");
     let pdb_path = usb_root
         .join(USB_VENDOR_ROOT_DIR)
         .join(USB_VENDOR_DB_DIR)
@@ -2925,7 +2926,7 @@ fn topology_guard_tolerates_pure_tail_append_on_unwritten_table() {
     let dir = tempdir().unwrap();
     let usb_root = dir.path();
     std::fs::create_dir_all(usb_root.join(USB_VENDOR_ROOT_DIR).join(USB_VENDOR_DB_DIR)).unwrap();
-    crate::service::usb::utils::initialize_usb(usb_root).expect("initialize usb skeleton");
+    crate::service::usb::initialize::initialize_usb(usb_root).expect("initialize usb skeleton");
     let pdb_path = usb_root
         .join(USB_VENDOR_ROOT_DIR)
         .join(USB_VENDOR_DB_DIR)
@@ -2953,7 +2954,7 @@ fn topology_guard_rejects_relocated_page_on_unwritten_table() {
     let dir = tempdir().unwrap();
     let usb_root = dir.path();
     std::fs::create_dir_all(usb_root.join(USB_VENDOR_ROOT_DIR).join(USB_VENDOR_DB_DIR)).unwrap();
-    crate::service::usb::utils::initialize_usb(usb_root).expect("initialize usb skeleton");
+    crate::service::usb::initialize::initialize_usb(usb_root).expect("initialize usb skeleton");
     let pdb_path = usb_root
         .join(USB_VENDOR_ROOT_DIR)
         .join(USB_VENDOR_DB_DIR)
@@ -2985,7 +2986,7 @@ fn rewrite_pdb_playlist_rebuilds_resolvable_dictionary_rows_on_initialized_usb()
     let usb_root = dir.path();
     std::fs::create_dir_all(usb_root.join(USB_VENDOR_ROOT_DIR).join(USB_VENDOR_DB_DIR)).unwrap();
 
-    crate::service::usb::utils::initialize_usb(usb_root).expect("initialize usb skeleton");
+    crate::service::usb::initialize::initialize_usb(usb_root).expect("initialize usb skeleton");
 
     let playlist = ExportPlaylistData {
         id: "pl-dict".to_string(),
@@ -3140,7 +3141,7 @@ fn write_pdb_fresh_backfills_dictionary_ids_from_edb_when_manifest_is_thin() {
     let dir = tempdir().unwrap();
     let usb_root = dir.path();
     std::fs::create_dir_all(usb_root.join(USB_VENDOR_ROOT_DIR).join(USB_VENDOR_DB_DIR)).unwrap();
-    crate::service::usb::utils::initialize_usb(usb_root).expect("initialize usb skeleton");
+    crate::service::usb::initialize::initialize_usb(usb_root).expect("initialize usb skeleton");
 
     let conn = open_edb_rw(usb_root).expect("open eDB");
     let mut seed_track = mapping_test_track();
@@ -3236,7 +3237,7 @@ fn write_pdb_updates_alias_matched_track_to_manifest_filename_exactly() {
     let dir = tempdir().unwrap();
     let usb_root = dir.path();
     std::fs::create_dir_all(usb_root.join(USB_VENDOR_ROOT_DIR).join(USB_VENDOR_DB_DIR)).unwrap();
-    crate::service::usb::utils::initialize_usb(usb_root).expect("initialize usb skeleton");
+    crate::service::usb::initialize::initialize_usb(usb_root).expect("initialize usb skeleton");
 
     let playlist = ExportPlaylistData {
         id: "pl-alias-path".to_string(),
@@ -3333,7 +3334,7 @@ fn write_pdb_reuses_existing_row_when_a_different_manifest_track_id_targets_the_
     let dir = tempdir().unwrap();
     let usb_root = dir.path();
     std::fs::create_dir_all(usb_root.join(USB_VENDOR_ROOT_DIR).join(USB_VENDOR_DB_DIR)).unwrap();
-    crate::service::usb::utils::initialize_usb(usb_root).expect("initialize usb skeleton");
+    crate::service::usb::initialize::initialize_usb(usb_root).expect("initialize usb skeleton");
 
     let playlist = ExportPlaylistData {
         id: "pl-fingerprint-fallback".to_string(),
@@ -3419,7 +3420,7 @@ fn write_pdb_writes_rating_and_colour_and_keeps_them_when_the_library_has_none()
     let dir = tempdir().unwrap();
     let usb_root = dir.path();
     std::fs::create_dir_all(usb_root.join(USB_VENDOR_ROOT_DIR).join(USB_VENDOR_DB_DIR)).unwrap();
-    crate::service::usb::utils::initialize_usb(usb_root).expect("initialize usb skeleton");
+    crate::service::usb::initialize::initialize_usb(usb_root).expect("initialize usb skeleton");
     let pdb_path = usb_root
         .join(USB_VENDOR_ROOT_DIR)
         .join(USB_VENDOR_DB_DIR)
@@ -3534,7 +3535,7 @@ fn write_edb_playlist_updates_alias_matched_content_path_in_place() {
     let dir = tempdir().unwrap();
     let usb_root = dir.path();
     std::fs::create_dir_all(usb_root.join(USB_VENDOR_ROOT_DIR).join(USB_VENDOR_DB_DIR)).unwrap();
-    crate::service::usb::utils::initialize_usb(usb_root).expect("initialize usb skeleton");
+    crate::service::usb::initialize::initialize_usb(usb_root).expect("initialize usb skeleton");
 
     let playlist = ExportPlaylistData {
         id: "pl-alias-edb".to_string(),
@@ -3621,7 +3622,7 @@ fn write_edb_playlist_sets_device_name_from_drive_name() {
     let dir = tempdir().unwrap();
     let usb_root = dir.path();
     std::fs::create_dir_all(usb_root.join(USB_VENDOR_ROOT_DIR).join(USB_VENDOR_DB_DIR)).unwrap();
-    crate::service::usb::utils::initialize_usb(usb_root).expect("initialize usb skeleton");
+    crate::service::usb::initialize::initialize_usb(usb_root).expect("initialize usb skeleton");
     let playlist = ExportPlaylistData {
         id: "pl-name".to_string(),
         name: "Name".to_string(),
@@ -3704,7 +3705,7 @@ fn write_edb_playlist_matches_rekordbox_reexport_bookkeeping() {
     let dir = tempdir().unwrap();
     let usb_root = dir.path();
     std::fs::create_dir_all(usb_root.join(USB_VENDOR_ROOT_DIR).join(USB_VENDOR_DB_DIR)).unwrap();
-    crate::service::usb::utils::initialize_usb(usb_root).expect("initialize usb skeleton");
+    crate::service::usb::initialize::initialize_usb(usb_root).expect("initialize usb skeleton");
 
     let cues = |count: u32| -> Vec<TrackCue> {
         (0..count)
@@ -3809,7 +3810,7 @@ fn strict_parity_report_has_no_dictionary_id_issues_for_thin_manifest_fallback()
     let dir = tempdir().unwrap();
     let usb_root = dir.path();
     std::fs::create_dir_all(usb_root.join(USB_VENDOR_ROOT_DIR).join(USB_VENDOR_DB_DIR)).unwrap();
-    crate::service::usb::utils::initialize_usb(usb_root).expect("initialize usb skeleton");
+    crate::service::usb::initialize::initialize_usb(usb_root).expect("initialize usb skeleton");
 
     let mut conn = open_edb_rw(usb_root).expect("open eDB");
 
@@ -3892,7 +3893,7 @@ fn strict_parity_report_has_no_dictionary_id_issues_when_edb_is_thin_but_manifes
     let dir = tempdir().unwrap();
     let usb_root = dir.path();
     std::fs::create_dir_all(usb_root.join(USB_VENDOR_ROOT_DIR).join(USB_VENDOR_DB_DIR)).unwrap();
-    crate::service::usb::utils::initialize_usb(usb_root).expect("initialize usb skeleton");
+    crate::service::usb::initialize::initialize_usb(usb_root).expect("initialize usb skeleton");
 
     let mut conn = open_edb_rw(usb_root).expect("open eDB");
 
@@ -4006,7 +4007,7 @@ fn strict_parity_additive_write_keeps_dictionary_ids_resolved_with_thin_manifest
     let dir = tempdir().unwrap();
     let usb_root = dir.path();
     std::fs::create_dir_all(usb_root.join(USB_VENDOR_ROOT_DIR).join(USB_VENDOR_DB_DIR)).unwrap();
-    crate::service::usb::utils::initialize_usb(usb_root).expect("initialize usb skeleton");
+    crate::service::usb::initialize::initialize_usb(usb_root).expect("initialize usb skeleton");
 
     let mut conn = open_edb_rw(usb_root).expect("open eDB");
 
@@ -4123,7 +4124,7 @@ fn rewrite_pdb_playlist_keeps_f_sharp_and_f_minor_as_distinct_keys() {
     let usb_root = dir.path();
     std::fs::create_dir_all(usb_root.join(USB_VENDOR_ROOT_DIR).join(USB_VENDOR_DB_DIR))
         .expect("create pdb dir");
-    crate::service::usb::utils::initialize_usb(usb_root).expect("initialize usb skeleton");
+    crate::service::usb::initialize::initialize_usb(usb_root).expect("initialize usb skeleton");
 
     let playlist = ExportPlaylistData {
         id: "pl-keys".to_string(),
@@ -4450,7 +4451,7 @@ fn write_pdb_refreshes_file_size_sample_rate_bitrate_on_reexport_of_existing_tra
     // field list even though duration/title/anlz_path were.
     let dir = tempdir().unwrap();
     let usb_root = dir.path();
-    crate::service::usb::utils::initialize_usb(usb_root).expect("initialize usb skeleton");
+    crate::service::usb::initialize::initialize_usb(usb_root).expect("initialize usb skeleton");
 
     let playlist = ExportPlaylistData {
         id: "pl-refresh".to_string(),
@@ -4500,7 +4501,7 @@ fn pdb_writer_keeps_dictionary_rows_that_differ_only_in_case() {
     // every time (no pick between colliding rows), and stays byte-identical.
     let dir = tempdir().unwrap();
     let usb_root = dir.path();
-    crate::service::usb::utils::initialize_usb(usb_root).expect("initialize usb skeleton");
+    crate::service::usb::initialize::initialize_usb(usb_root).expect("initialize usb skeleton");
     let pdb_path = usb_root
         .join(USB_VENDOR_ROOT_DIR)
         .join(USB_VENDOR_DB_DIR)
@@ -5161,7 +5162,7 @@ fn export_writes_edb_property_into_t19() {
     let dir = tempdir().unwrap();
     let usb_root = dir.path();
     std::fs::create_dir_all(usb_root.join(USB_VENDOR_ROOT_DIR).join(USB_VENDOR_DB_DIR)).unwrap();
-    crate::service::usb::utils::initialize_usb(usb_root).expect("initialize usb skeleton");
+    crate::service::usb::initialize::initialize_usb(usb_root).expect("initialize usb skeleton");
     {
         let conn = open_edb_rw(usb_root).expect("open eDB");
         conn.execute(
@@ -5191,4 +5192,368 @@ fn export_writes_edb_property_into_t19() {
     assert_eq!(bytes[row1 + 9], crate::pdb_writer::INIT_BACKGROUND_COLOR);
     assert_eq!(&bytes[row1 + 12..row1 + 23], b"\x172026-10-22");
     assert_eq!(&bytes[row1 + 30..row1 + 41], b"\x17Test Stick");
+}
+
+#[test]
+fn write_edb_sets_per_track_key_and_analysis_fields() {
+    let tmp = std::env::temp_dir().join(format!("__test_edb_fields_{}__", Uuid::now_v7()));
+    std::fs::create_dir_all(tmp.join(USB_VENDOR_ROOT_DIR).join(USB_VENDOR_DB_DIR)).unwrap();
+    let db_path = tmp
+        .join(USB_VENDOR_ROOT_DIR)
+        .join(USB_VENDOR_DB_DIR)
+        .join("exportLibrary.db");
+    let template_anlz = format!(
+        "/{}/{}/P000/TEMPLATE/ANLZ0000.DAT",
+        USB_VENDOR_ROOT_DIR, USB_ANALYSIS_DIR
+    );
+    let conn = rusqlite::Connection::open(&db_path).unwrap();
+    conn.execute_batch(
+        &format!(
+            r#"
+        CREATE TABLE playlist (
+          playlist_id INTEGER PRIMARY KEY,
+          name TEXT,
+          attribute INTEGER,
+          sequenceNo INTEGER
+        );
+        CREATE TABLE content (
+          content_id INTEGER PRIMARY KEY,
+          title TEXT,
+          path TEXT,
+          analysisDataFilePath TEXT,
+          bpmx100 INTEGER,
+          key_id INTEGER,
+          image_id INTEGER
+        );
+        CREATE TABLE playlist_content (
+          playlist_id INTEGER,
+          content_id INTEGER,
+          sequenceNo INTEGER
+        );
+        CREATE TABLE "key" (
+          key_id INTEGER PRIMARY KEY,
+          name TEXT
+        );
+        INSERT INTO "key" (key_id, name) VALUES (1, '8A'), (2, '9A');
+        INSERT INTO playlist (playlist_id, name, attribute, sequenceNo) VALUES (1, 'Template', 0, 1);
+        INSERT INTO content (content_id, title, path, analysisDataFilePath, bpmx100, key_id, image_id)
+          VALUES (1, 'Template', '/Contents/TEMPLATE.mp3', '{template_anlz}', 12800, 2, 99);
+        INSERT INTO playlist_content (playlist_id, content_id, sequenceNo) VALUES (1, 1, 1);
+        "#,
+        ),
+    )
+    .unwrap();
+    drop(conn);
+
+    let playlist = ExportPlaylistData {
+        id: "local-test".to_string(),
+        name: "Field Test".to_string(),
+        tracks: Vec::new(),
+    };
+    let manifest = ExportManifest {
+        generated_at: now(),
+        playlist_id: "local-test".to_string(),
+        playlist_name: "Field Test".to_string(),
+        usb_root: tmp.to_string_lossy().to_string(),
+        options: ExportToUsbOptions {
+            include_artwork: false,
+            include_analysis: false,
+            prune_stale: false,
+            ..Default::default()
+        },
+        exported_tracks: 1,
+        skipped_tracks: 0,
+        warnings: Vec::new(),
+        tracks: vec![ExportManifestTrack {
+            date_added: None,
+            date_created: None,
+            label: None,
+            remixer: None,
+            composer: None,
+            from_library: true,
+            pdb_track_id: None,
+            edb_content_id: None,
+            first_beat_ms: None,
+            cues: Vec::new(),
+            id: "track-1".to_string(),
+            master_db_id: None,
+            master_content_id: None,
+            content_link: None,
+            position: 1,
+            track_number: Some(1),
+            title: "Alpha".to_string(),
+            artist: "Artist".to_string(),
+            album: None,
+            bpm: Some(123.45),
+            key: Some("8A".to_string()),
+            source_path: "/tmp/source.mp3".to_string(),
+            exported_path: "/Contents/Artist/UnknownAlbum/source.mp3".to_string(),
+            file_timestamp_at: None,
+            file_size_bytes: None,
+            sample_rate_hz: None,
+            bit_depth: None,
+            bitrate_kbps: None,
+            disc_number: None,
+            subtitle: None,
+            comment: None,
+            title_for_search: None,
+            kuvo_delivery_comment: None,
+            dj_play_count: None,
+            rating: None,
+            color_id: None,
+            artist_id_lyricist: None,
+            artist_id_original_artist: None,
+            artist_id_remixer: None,
+            artist_id_composer: None,
+            genre_id: None,
+            genre: None,
+            label_id: None,
+            isrc: None,
+            release_year: None,
+            release_date: None,
+            recorded_date: None,
+            file_type: None,
+            owns_exported_media: true,
+            owns_artwork: true,
+            owns_waveform: true,
+            artwork_path: None,
+            waveform_path: None,
+            duration_ms: None,
+        }],
+    };
+
+    let mut session = UsbWriteSession::without_service(&tmp);
+    write_edb_playlists_in(
+        &mut session,
+        &[EdbPlaylistWrite {
+            playlist: &playlist,
+            manifest: &manifest,
+            mirror_playlist_entries: true,
+            identity: None,
+            placement: PlaylistPlacement::MoveToFront,
+        }],
+    )
+    .expect("db write failed");
+    session.commit().expect("db write failed");
+
+    let conn = rusqlite::Connection::open(&db_path).unwrap();
+    let row = conn
+        .query_row(
+            r#"
+            SELECT analysisDataFilePath, key_id, bpmx100, image_id
+            FROM content
+            WHERE path = ?1
+            LIMIT 1
+            "#,
+            params!["/Contents/Artist/UnknownAlbum/source.mp3"],
+            |r| {
+                Ok((
+                    r.get::<_, Option<String>>(0)?,
+                    r.get::<_, Option<i64>>(1)?,
+                    r.get::<_, Option<i64>>(2)?,
+                    r.get::<_, Option<i64>>(3)?,
+                ))
+            },
+        )
+        .unwrap();
+    assert!(
+        row.0.is_none(),
+        "analysisDataFilePath should be NULL when waveform is not exported"
+    );
+    assert_eq!(row.1, Some(1), "key_id should map from key name");
+    assert_eq!(row.2, Some(12345), "bpmx100 should map from BPM");
+    assert!(
+        row.3.is_none(),
+        "image_id should be NULL when artwork is not exported"
+    );
+
+    std::fs::remove_dir_all(&tmp).ok();
+}
+
+#[test]
+fn write_edb_updates_existing_content_analysis_path() {
+    let tmp = std::env::temp_dir().join(format!("__test_edb_update_existing_{}__", Uuid::now_v7()));
+    std::fs::create_dir_all(tmp.join(USB_VENDOR_ROOT_DIR).join(USB_VENDOR_DB_DIR)).unwrap();
+    let db_path = tmp
+        .join(USB_VENDOR_ROOT_DIR)
+        .join(USB_VENDOR_DB_DIR)
+        .join("exportLibrary.db");
+    let old_anlz = format!(
+        "/{}/{}/P000/OLD/ANLZ0000.DAT",
+        USB_VENDOR_ROOT_DIR, USB_ANALYSIS_DIR
+    );
+    let new_anlz = format!(
+        "/{}/{}/P111/NEW/ANLZ0000.DAT",
+        USB_VENDOR_ROOT_DIR, USB_ANALYSIS_DIR
+    );
+    let conn = rusqlite::Connection::open(&db_path).unwrap();
+    conn.execute_batch(
+        &format!(
+            r#"
+        CREATE TABLE playlist (
+          playlist_id INTEGER PRIMARY KEY,
+          name TEXT,
+          attribute INTEGER,
+          sequenceNo INTEGER
+        );
+        CREATE TABLE content (
+          content_id INTEGER PRIMARY KEY,
+          title TEXT,
+          path TEXT,
+          analysisDataFilePath TEXT
+        );
+        CREATE TABLE playlist_content (
+          playlist_id INTEGER,
+          content_id INTEGER,
+          sequenceNo INTEGER
+        );
+        INSERT INTO playlist (playlist_id, name, attribute, sequenceNo) VALUES (1, 'Template', 0, 1);
+        INSERT INTO content (content_id, title, path, analysisDataFilePath)
+          VALUES (10, 'Old', '/Contents/Artist One/Album One/Artist One - Album One - 03 Track One.mp3', '{old_anlz}');
+        INSERT INTO playlist_content (playlist_id, content_id, sequenceNo) VALUES (1, 10, 1);
+        "#,
+        ),
+    )
+    .unwrap();
+    drop(conn);
+
+    let playlist = ExportPlaylistData {
+        id: "local-test".to_string(),
+        name: "Field Test".to_string(),
+        tracks: Vec::new(),
+    };
+    let manifest = ExportManifest {
+        generated_at: now(),
+        playlist_id: "local-test".to_string(),
+        playlist_name: "Field Test".to_string(),
+        usb_root: tmp.to_string_lossy().to_string(),
+        options: ExportToUsbOptions {
+            include_artwork: false,
+            include_analysis: true,
+            prune_stale: false,
+            ..Default::default()
+        },
+        exported_tracks: 1,
+        skipped_tracks: 0,
+        warnings: Vec::new(),
+        tracks: vec![ExportManifestTrack {
+            date_added: None,
+            date_created: None,
+            label: None,
+            remixer: None,
+            composer: None,
+            from_library: true,
+            pdb_track_id: None,
+            edb_content_id: None,
+            first_beat_ms: None,
+            cues: Vec::new(),
+            id: "track-1".to_string(),
+            master_db_id: None,
+            master_content_id: None,
+            content_link: None,
+            position: 1,
+            track_number: Some(3),
+            title: "Track One".to_string(),
+            artist: "Artist One".to_string(),
+            album: Some("Album One".to_string()),
+            bpm: None,
+            key: None,
+            source_path: "/tmp/source.mp3".to_string(),
+            exported_path:
+                "/Contents/Artist One/Album One/Artist One - Album One - 03 Track One.mp3"
+                    .to_string(),
+            file_timestamp_at: None,
+            file_size_bytes: None,
+            sample_rate_hz: None,
+            bit_depth: None,
+            bitrate_kbps: None,
+            disc_number: None,
+            subtitle: None,
+            comment: None,
+            title_for_search: None,
+            kuvo_delivery_comment: None,
+            dj_play_count: None,
+            rating: None,
+            color_id: None,
+            artist_id_lyricist: None,
+            artist_id_original_artist: None,
+            artist_id_remixer: None,
+            artist_id_composer: None,
+            genre_id: None,
+            genre: None,
+            label_id: None,
+            isrc: None,
+            release_year: None,
+            release_date: None,
+            recorded_date: None,
+            file_type: None,
+            owns_exported_media: true,
+            owns_artwork: true,
+            owns_waveform: true,
+            artwork_path: None,
+            waveform_path: Some(new_anlz.clone()),
+            duration_ms: None,
+        }],
+    };
+
+    let mut session = UsbWriteSession::without_service(&tmp);
+    write_edb_playlists_in(
+        &mut session,
+        &[EdbPlaylistWrite {
+            playlist: &playlist,
+            manifest: &manifest,
+            mirror_playlist_entries: true,
+            identity: None,
+            placement: PlaylistPlacement::MoveToFront,
+        }],
+    )
+    .expect("db write failed");
+    session.commit().expect("db write failed");
+
+    let conn = rusqlite::Connection::open(&db_path).unwrap();
+    let stored = conn
+        .query_row(
+            "SELECT analysisDataFilePath FROM content WHERE content_id = 10",
+            [],
+            |row| row.get::<_, Option<String>>(0),
+        )
+        .unwrap();
+    assert_eq!(
+        stored.as_deref(),
+        Some(new_anlz.as_str()),
+        "existing content row should get refreshed analysisDataFilePath"
+    );
+
+    std::fs::remove_dir_all(&tmp).ok();
+}
+
+#[test]
+fn content_name_limits_match_vendor_style_caps() {
+    let artist =
+        "Very Long Artist Name That Should Definitely Be Trimmed For USB Export Compatibility";
+    let album = "An Even Longer Album Name That Exceeds Typical External library Content Folder Constraints";
+    let file_name = "Very Long Track Name That Should Also Be Trimmed To Device Safe Limits.mp3";
+    let source = PathBuf::from(format!("/tmp/{file_name}"));
+    let target = exported_media_target_path(
+        Path::new("/tmp/usb/Contents"),
+        &source,
+        artist,
+        Some(album),
+        "Title",
+        "mp3",
+    );
+    let rel = target
+        .strip_prefix("/tmp/usb/Contents")
+        .expect("strip prefix");
+    let parts = rel
+        .components()
+        .map(|c| c.as_os_str().to_string_lossy().to_string())
+        .collect::<Vec<_>>();
+    assert_eq!(parts.len(), 3, "expected artist/album/file under Contents");
+    assert!(
+        parts
+            .iter()
+            .all(|p| p.chars().count() <= CONTENT_FILENAME_MAX_LEN),
+        "all path components should respect 48-char limit: {parts:?}"
+    );
 }

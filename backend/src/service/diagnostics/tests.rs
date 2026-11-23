@@ -1,6 +1,3 @@
-use std::collections::{HashMap, HashSet};
-use std::fs;
-
 use super::{
     DISPLAY_ANALYSIS, DISPLAY_EDB, DISPLAY_ENGINE, DISPLAY_LAYOUT, DISPLAY_LOW_LEVEL, DISPLAY_PDB,
     DISPLAY_PLAYLISTS, ExportDbPlaylist, FieldNoteParity, OverviewFacts, ParityTotals,
@@ -13,6 +10,9 @@ use super::{
     regroup_sections, track_identity_key,
 };
 use crate::models::UsbParityPlaylistDetail;
+use crate::service::diagnostics::diagnose_playlist_resolution;
+use std::collections::{HashMap, HashSet};
+use std::fs;
 
 /// A check with an English `label`, keyed like the real one when a layout lists
 /// it (so it's placed and found as the real one is), unkeyed (a playlist's row)
@@ -2280,4 +2280,217 @@ fn edb_analysis_refs_pass_when_the_edb_has_no_tracks() {
             crate::models::DiagStatus::Warn
         ));
     }
+}
+
+#[test]
+fn diag_status_worst_of_all_pass() {
+    let result = DiagStatus::worst_of(&[&DiagStatus::Pass, &DiagStatus::Pass]);
+    assert!(matches!(result, DiagStatus::Pass));
+}
+
+#[test]
+fn diag_status_worst_of_includes_warn() {
+    let result = DiagStatus::worst_of(&[&DiagStatus::Pass, &DiagStatus::Warn]);
+    assert!(matches!(result, DiagStatus::Warn));
+}
+
+#[test]
+fn diag_status_worst_of_includes_fail() {
+    let result = DiagStatus::worst_of(&[&DiagStatus::Pass, &DiagStatus::Warn, &DiagStatus::Fail]);
+    assert!(matches!(result, DiagStatus::Fail));
+}
+
+#[test]
+fn contents_integrity_exact_match() {
+    let section = diagnose_contents_integrity(100, 100);
+    assert!(matches!(section.status, DiagStatus::Pass));
+    assert_eq!(section.checks.len(), 3);
+    let counts = section.counts.expect("contents counts");
+    assert_eq!(counts.contents_count, 100);
+    assert_eq!(counts.indexed_count, 100);
+    assert_eq!(counts.mismatch_count, 0);
+}
+
+#[test]
+fn contents_integrity_small_mismatch_warns() {
+    let section = diagnose_contents_integrity(103, 100);
+    assert!(matches!(section.status, DiagStatus::Warn));
+    let counts = section.counts.expect("contents counts");
+    assert_eq!(counts.contents_count, 103);
+    assert_eq!(counts.indexed_count, 100);
+    assert_eq!(counts.mismatch_count, 3);
+}
+
+#[test]
+fn contents_integrity_large_unindexed_audio_mismatch_warns() {
+    let section = diagnose_contents_integrity(110, 100);
+    assert!(matches!(section.status, DiagStatus::Warn));
+    let counts = section.counts.expect("contents counts");
+    assert_eq!(counts.contents_count, 110);
+    assert_eq!(counts.indexed_count, 100);
+    assert_eq!(counts.mismatch_count, 10);
+}
+
+#[test]
+fn contents_integrity_missing_files_fails() {
+    let section = diagnose_contents_integrity(90, 100);
+    assert!(matches!(section.status, DiagStatus::Fail));
+    let counts = section.counts.expect("contents counts");
+    assert_eq!(counts.contents_count, 90);
+    assert_eq!(counts.indexed_count, 100);
+    assert_eq!(counts.mismatch_count, -10);
+}
+
+fn make_track(id: u32) -> PdbTrackRow {
+    PdbTrackRow {
+        header_flags: 0,
+        content_link: None,
+        sample_rate_hz: None,
+        file_size_bytes: None,
+        master_content_id: None,
+        master_db_id: None,
+        id,
+        artist_id: 0,
+        album_id: 0,
+        artwork_id: 0,
+        key_id: 0,
+        genre_id: 0,
+        composer_id: 0,
+        label_id: 0,
+        remixer_id: 0,
+        color_id: 0,
+        rating: 0,
+        bitrate_kbps: None,
+        track_number: id,
+        tempo_x100: 12800,
+        release_year: None,
+        bit_depth: None,
+        duration_seconds: None,
+        file_type: None,
+        isrc: None,
+        date_added: None,
+        analyze_date: None,
+        release_date: None,
+        dj_comment: None,
+        file_name: None,
+        publish_track_info: None,
+        autoload_hotcues: None,
+        title: format!("Track {id}"),
+        anlz_path: String::new(),
+        track_file_path: String::new(),
+    }
+}
+
+fn make_entry(playlist_id: u32, track_id: u32) -> PdbPlaylistEntryRow {
+    PdbPlaylistEntryRow {
+        entry_index: 0,
+        track_id,
+        playlist_id,
+    }
+}
+
+fn make_tree_leaf(id: u32, name: &str) -> PdbPlaylistTreeRow {
+    PdbPlaylistTreeRow {
+        id,
+        parent_id: 0,
+        sort_order: id,
+        row_is_folder: false,
+        name: name.to_string(),
+    }
+}
+
+#[test]
+fn playlist_resolution_all_resolved() {
+    let parsed = ParsedPdb {
+        tracks: vec![make_track(1), make_track(2), make_track(3)],
+        playlist_tree: vec![make_tree_leaf(10, "MyPlaylist")],
+        playlist_entries: vec![make_entry(10, 1), make_entry(10, 2), make_entry(10, 3)],
+        ..Default::default()
+    };
+
+    let (section, details) = diagnose_playlist_resolution(Some(&parsed));
+    assert!(matches!(section.status, DiagStatus::Pass));
+    assert_eq!(details.len(), 1);
+    assert_eq!(details[0].resolved_entries, 3);
+    assert_eq!(details[0].total_entries, 3);
+    assert!((details[0].resolution_rate - 1.0).abs() < 0.001);
+}
+
+#[test]
+fn playlist_resolution_partial_warns() {
+    // 10 entries, only 2 track IDs exist (1, 2), rest are orphaned (3..10)
+    let parsed = ParsedPdb {
+        tracks: vec![make_track(1), make_track(2)],
+        playlist_tree: vec![make_tree_leaf(10, "Partial")],
+        playlist_entries: (1..=10).map(|i| make_entry(10, i)).collect(),
+        ..Default::default()
+    };
+
+    let (section, details) = diagnose_playlist_resolution(Some(&parsed));
+    // 2/10 = 20% < 80% threshold → FAIL
+    assert!(matches!(section.status, DiagStatus::Fail));
+    assert_eq!(details[0].resolved_entries, 2);
+    assert_eq!(details[0].total_entries, 10);
+}
+
+#[test]
+fn playlist_resolution_borderline_warn() {
+    // 9 tracks, 10 entries → 90% resolution → WARN (not PASS, < 100%)
+    let parsed = ParsedPdb {
+        tracks: (1..=9).map(make_track).collect(),
+        playlist_tree: vec![make_tree_leaf(10, "Almost")],
+        playlist_entries: (1..=10).map(|i| make_entry(10, i)).collect(),
+        ..Default::default()
+    };
+
+    let (section, details) = diagnose_playlist_resolution(Some(&parsed));
+    assert!(matches!(section.status, DiagStatus::Warn));
+    assert_eq!(details[0].resolved_entries, 9);
+}
+
+#[test]
+fn playlist_resolution_empty_playlist_passes() {
+    // No entries for playlist 10
+    let parsed = ParsedPdb {
+        tracks: vec![make_track(1)],
+        playlist_tree: vec![make_tree_leaf(10, "Empty")],
+        ..Default::default()
+    };
+
+    let (section, details) = diagnose_playlist_resolution(Some(&parsed));
+    assert!(matches!(section.status, DiagStatus::Pass));
+    assert_eq!(details[0].total_entries, 0);
+    assert_eq!(details[0].resolved_entries, 0);
+    assert!((details[0].resolution_rate - 1.0).abs() < 0.001);
+}
+
+#[test]
+fn playlist_resolution_no_pdb_fails() {
+    let (section, details) = diagnose_playlist_resolution(None);
+    assert!(matches!(section.status, DiagStatus::Fail));
+    assert!(details.is_empty());
+}
+
+#[test]
+fn playlist_resolution_multiple_playlists() {
+    let parsed = ParsedPdb {
+        tracks: vec![make_track(1), make_track(2), make_track(3)],
+        playlist_tree: vec![make_tree_leaf(10, "Full"), make_tree_leaf(20, "Half")],
+        playlist_entries: vec![
+            make_entry(10, 1),
+            make_entry(10, 2),
+            make_entry(20, 3),
+            make_entry(20, 999), // orphaned
+        ],
+        ..Default::default()
+    };
+
+    let (section, details) = diagnose_playlist_resolution(Some(&parsed));
+    assert_eq!(details.len(), 2);
+    // "Full" is 100% → PASS
+    assert!(matches!(details[0].status, DiagStatus::Pass));
+    // "Half" is 50% → FAIL (< 80%)
+    assert!(matches!(details[1].status, DiagStatus::Fail));
+    // Overall should be FAIL
+    assert!(matches!(section.status, DiagStatus::Fail));
 }

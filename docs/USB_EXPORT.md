@@ -136,7 +136,7 @@ local copy and the operation can be retried.
 
 Implementation: `backend/src/service/usb/staging.rs` (staging/write-back core),
 `backend/src/edb.rs` (`open_edb_from_usb_root`/`open_edb_rw` route eDB access through it
-transparently), `backend/src/service/usb/utils.rs` (`parse_staged_pdb` wraps `pdb_reader::parse_pdb`
+transparently), `backend/src/service/usb/cache.rs` (`parse_staged_pdb` wraps `pdb_reader::parse_pdb`
 for PDB reads).
 
 ## USB drive naming

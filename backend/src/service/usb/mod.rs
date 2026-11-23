@@ -6,30 +6,30 @@ pub(crate) mod audio_formats;
 pub mod backups;
 pub(crate) mod cache;
 pub(crate) mod display_files;
-pub(crate) mod helpers;
-mod history;
+pub(crate) mod history;
 pub(super) mod history_tracklist;
 pub(crate) mod identity;
+pub(crate) mod initialize;
 pub(crate) mod layout;
 pub(super) mod order_edit;
 mod playlists;
+pub(crate) mod root;
 pub mod staging;
+pub(crate) mod stick_files;
+pub(crate) mod text;
 pub(crate) mod track_facts;
 mod tracks;
-pub(crate) mod utils;
 pub mod vendor_compat;
 
-use crate::i18n::tr;
-
-use self::staging::{UsbDatabases, UsbDatabasesExt};
-use crate::error::{BackendError, BackendResult};
-use crate::logging::{self, Level};
-use crate::models::{ValidateUsbRootData, ValidateUsbRootRequest, WarningEntry};
-
-use self::utils::{
+use self::root::{
     canonicalize_or_self, has_write_access, normalize_usb_root_path, resolve_usb_root,
 };
+use self::staging::{UsbDatabases, UsbDatabasesExt};
 use self::vendor_compat::{USB_CONTENTS_DIR, USB_VENDOR_ROOT_DIR};
+use crate::error::{BackendError, BackendResult};
+use crate::i18n::tr;
+use crate::logging::{self, Level};
+use crate::models::{ValidateUsbRootData, ValidateUsbRootRequest, WarningEntry};
 use crate::service::{BackendService, now};
 
 const SLOW_USB_STAGE_MS: u128 = 8_000;
@@ -208,7 +208,7 @@ impl BackendService {
 
         let normalized = normalize_usb_root_path(canonicalize_or_self(candidate));
         let mount_conn = self.db.connect()?;
-        utils::upsert_usb_device(&mount_conn, &normalized, true, &now())?;
+        crate::service::usb::identity::upsert_usb_device(&mount_conn, &normalized, true, &now())?;
         // Before staging below: a drive carrying another drive's name must
         // not stage into that drive's cache.
         self.check_drive_identity(&mount_conn, &normalized)?;

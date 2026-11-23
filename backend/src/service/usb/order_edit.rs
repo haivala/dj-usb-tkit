@@ -16,12 +16,9 @@
 //! [`apply_pending_order`], the same function that orders the view, so what
 //! the view shows is what gets written.
 
-use std::collections::{HashMap, HashSet};
-use std::path::{Path, PathBuf};
-use std::sync::{MutexGuard, PoisonError};
-
-use serde_json::json;
-
+use super::root::{can_write_file_at, has_write_access, resolve_usb_root};
+use super::staging::{SessionBackup, UsbDatabases, UsbWriteGuard};
+use super::text::canonicalize_playlist_name;
 use crate::error::{BackendError, BackendResult};
 use crate::i18n::tr;
 use crate::logging::{self, Level};
@@ -30,12 +27,6 @@ use crate::models::{
     UsbOrderEditData, UsbOrderEditRequest, UsbOrderEditState, UsbPlaylist, UsbTrack, WarningEntry,
 };
 use crate::pdb_reader::{ParsedPdb, PdbPlaylistEntryRow, parse_pdb_bytes, pdb_page_size};
-use crate::utils::warning_text;
-
-use super::staging::{SessionBackup, UsbDatabases, UsbWriteGuard};
-use super::utils::{
-    can_write_file_at, canonicalize_playlist_name, has_write_access, resolve_usb_root,
-};
 use crate::service::BackendService;
 use crate::service::diagnostics::{
     FieldNoteParity, RatingColourParity, build_usb_parity_comparison,
@@ -44,6 +35,11 @@ use crate::service::export_helpers::canonicalize_track_path_identity;
 use crate::service::repair::{
     restore_pdb_playlist_sort_orders, write_edb_playlist_order, write_edb_playlist_track_order,
 };
+use crate::utils::warning_text;
+use serde_json::json;
+use std::collections::{HashMap, HashSet};
+use std::path::{Path, PathBuf};
+use std::sync::{MutexGuard, PoisonError};
 
 /// The reason recorded on the backup a save takes. A save whose stick's
 /// newest backup has this reason rewrites that one instead of adding one.

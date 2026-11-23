@@ -4,12 +4,11 @@
 //! identical bytes establish an identical file. Database record identity and
 //! playback's best-effort ranking remain with their respective callers.
 
+use crate::audio_format::same_format_extension;
+use crate::service::usb::text::canonicalize_playlist_name;
 use std::hash::{Hash, Hasher};
 use std::io::{BufReader, Read};
 use std::path::Path;
-
-use super::usb::utils::canonicalize_playlist_name;
-use crate::audio_format::same_format_extension;
 
 /// (file size, normalized title, normalized artist). This is a candidate
 /// lookup key, not proof that two files contain the same recording.

@@ -1,34 +1,5 @@
 //! Export to USB implementation.
 
-use crate::utils::{byte_size, byte_size_precise, counted, warning_text};
-use std::collections::{HashMap, HashSet};
-use std::path::{Path, PathBuf};
-
-use rusqlite::{OptionalExtension, params};
-use serde_json::json;
-
-use super::usb::cache::UsbTrackSizes;
-use crate::edb::open_edb_from_usb_root;
-use crate::error::{BackendError, BackendResult};
-use crate::i18n::{Text, tr};
-use crate::logging::{self, Level};
-use crate::models::{
-    BatchExportOverviewData, BatchExportRow, BatchExportStatus, ExportPlaylistsToUsbData,
-    ExportPlaylistsToUsbRequest, ExportToUsbData, ExportToUsbOptions, ExportToUsbRequest,
-    GetPlaylistExportSpaceData, GetPlaylistExportSpaceRequest, GetPlaylistsExportSpaceRequest,
-    Playlist, PlaylistExportSpace, PlaylistUsbExportStatus, WarningEntry,
-};
-
-use super::track_matching::{ContentFingerprint, content_fingerprint_key};
-use super::transcode_export::{
-    ExportFile, SourceFacts, estimated_transcode_bytes, goes_as_transcode_only, plan_export_files,
-    prepare_transcode_bundle, use_transcode,
-};
-use super::usb::track_facts::{UsbTrackFact, UsbTrackFacts, UsbTrackIdentity};
-use crate::audio_format::{
-    AudioFormat, export_extension, is_player_extension, same_format_extension,
-};
-
 use super::export_helpers::{
     EdbPlaylistWrite, ExportManifest, ExportManifestTrack, ExportPlaylistData, ExportTrackData,
     FileCloser, PdbPlaylistWrite, PlaylistPlacement, WriteExportPdbResult,
@@ -43,17 +14,43 @@ use super::export_helpers::{
     verify_pdb_content, write_edb_playlists_in, write_pdb_playlists_in,
 };
 use super::export_log::{append_export_log_record, build_export_log_record};
-use super::usb::staging;
-use super::usb::utils::{
-    self, analysis_bundle_exists, can_write_file_at, load_existing_analysis_paths_by_content_path,
-    load_existing_analysis_paths_by_content_path_with_conn,
-    load_existing_analysis_paths_by_pdb_track_path, resolve_usb_root, resolve_usb_side_path,
+use super::track_matching::{ContentFingerprint, content_fingerprint_key};
+use super::transcode_export::{
+    ExportFile, SourceFacts, estimated_transcode_bytes, goes_as_transcode_only, plan_export_files,
+    prepare_transcode_bundle, use_transcode,
 };
+use super::usb::cache::UsbTrackSizes;
+use super::usb::staging;
+use super::usb::track_facts::{UsbTrackFact, UsbTrackFacts, UsbTrackIdentity};
 use super::usb::vendor_compat::{USB_ANALYSIS_PREFIX, USB_ARTWORK_PREFIX, USB_CONTENTS_PREFIX};
 use super::{
     BackendService, SETTING_EXPORT_MASTER_DB_ID, export_prune_stale_setting,
     has_core_analysis_fields, now,
 };
+use crate::audio_format::{
+    AudioFormat, export_extension, is_player_extension, same_format_extension,
+};
+use crate::edb::open_edb_from_usb_root;
+use crate::error::{BackendError, BackendResult};
+use crate::i18n::{Text, tr};
+use crate::logging::{self, Level};
+use crate::models::{
+    BatchExportOverviewData, BatchExportRow, BatchExportStatus, ExportPlaylistsToUsbData,
+    ExportPlaylistsToUsbRequest, ExportToUsbData, ExportToUsbOptions, ExportToUsbRequest,
+    GetPlaylistExportSpaceData, GetPlaylistExportSpaceRequest, GetPlaylistsExportSpaceRequest,
+    Playlist, PlaylistExportSpace, PlaylistUsbExportStatus, WarningEntry,
+};
+use crate::service::usb::root::{can_write_file_at, resolve_usb_root, resolve_usb_side_path};
+use crate::service::usb::stick_files::{
+    analysis_bundle_exists, load_existing_analysis_paths_by_content_path,
+    load_existing_analysis_paths_by_content_path_with_conn,
+    load_existing_analysis_paths_by_pdb_track_path,
+};
+use crate::utils::{byte_size, byte_size_precise, counted, warning_text};
+use rusqlite::{OptionalExtension, params};
+use serde_json::json;
+use std::collections::{HashMap, HashSet};
+use std::path::{Path, PathBuf};
 use uuid::Uuid;
 
 fn existing_usb_relative_if_file(usb_root: &Path, path: Option<&str>) -> Option<String> {
@@ -959,7 +956,7 @@ fn ensure_playlist_tracks_analysis_ready(
 
 /// Same normalization the frontend used to do client-side (trim + lowercase)
 /// before this comparison moved to the backend -- kept distinct from
-/// `usb::utils::canonicalize_playlist_name` (alnum-only, used for matching a
+/// `crate::service::usb::text::canonicalize_playlist_name` (alnum-only, used for matching a
 /// local playlist to its possibly-mangled eDB row), since that's a stricter
 /// match than "is this the playlist a user would call the same name".
 /// contentLink low 16 bits encode a format/version identifier that the DJ software
@@ -1734,7 +1731,9 @@ impl BackendService {
         // itself already inside this USB's Contents tree, but the same content
         // already is -- under a path this app didn't write.
         let usb_tracks = UsbTrackFacts::read(
-            utils::parse_staged_pdb(&usb_root).ok().as_ref(),
+            crate::service::usb::cache::parse_staged_pdb(&usb_root)
+                .ok()
+                .as_ref(),
             edb_read_conn.as_ref(),
         );
 
@@ -2415,7 +2414,11 @@ impl BackendService {
             // this record, which a copy made before now doesn't.
             Ok(record) => {
                 if let Some(name) = super::usb::identity::drive_name(usb_root) {
-                    utils::record_drive_export(local_conn, &name, &record.exported_at)?;
+                    crate::service::usb::identity::record_drive_export(
+                        local_conn,
+                        &name,
+                        &record.exported_at,
+                    )?;
                 }
             }
             Err(err) => {
@@ -2433,7 +2436,8 @@ impl BackendService {
         // mark_mounted=false: an export happening implies the device
         // was already validated/mounted earlier in the flow, this call
         // only resolves/bumps the usb_devices row.
-        let usb_device_id = utils::upsert_usb_device(local_conn, usb_root, false, &now())?;
+        let usb_device_id =
+            crate::service::usb::identity::upsert_usb_device(local_conn, usb_root, false, &now())?;
         let export_record = build_export_log_record(playlist, manifest);
         let track_fingerprints_json = serde_json::to_string(&export_record.track_fingerprints)
             .map_err(|err| {
@@ -2939,12 +2943,11 @@ impl BackendService {
 
 #[cfg(test)]
 mod tests {
-    use super::format_notice;
     use super::{
         BackendService, ContentFingerprint, UsbTrackSizes, compute_playlist_usb_export_status,
         content_fingerprint_key, ensure_playlist_tracks_analysis_ready, estimate_export_new_bytes,
         estimate_playlist_copy, existing_usb_relative_if_file, existing_usb_relative_if_present,
-        export_space_shortfall, has_required_analysis, has_required_analysis_fields,
+        export_space_shortfall, format_notice, has_required_analysis, has_required_analysis_fields,
         insufficient_space_error, normalize_playlist_name_for_compare,
         playlist_locks_reorder_on_export, refused_formats_error,
         resolve_collision_free_media_target, usb_drive_label,

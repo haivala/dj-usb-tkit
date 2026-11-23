@@ -1,35 +1,5 @@
 //! Track analysis: BPM detection, key detection, waveform generation, cover art.
 
-use crate::i18n::{Text, tr};
-use std::collections::HashSet;
-use std::fs::File;
-use std::io::{BufRead, BufReader, Write};
-use std::path::{Path, PathBuf};
-use std::process::{Child, ChildStdin, ChildStdout, Command, Stdio};
-use std::sync::{Mutex, OnceLock, PoisonError};
-use std::time::Instant;
-
-use image::imageops::FilterType;
-use lofty::file::TaggedFileExt;
-use lofty::picture::PictureType;
-use lofty::probe::read_from_path;
-use rodio::Decoder;
-use rodio::Source;
-use rusqlite::params;
-use symphonia::core::audio::SampleBuffer;
-use symphonia::core::codecs::{CODEC_TYPE_NULL, DecoderOptions};
-use symphonia::core::errors::Error as SymphoniaError;
-use symphonia::core::formats::FormatOptions;
-use symphonia::core::formats::Track as SymphoniaTrack;
-use symphonia::core::io::MediaSourceStream;
-use symphonia::core::meta::MetadataOptions;
-use symphonia::core::probe::Hint;
-use uuid::Uuid;
-
-use crate::error::{BackendError, BackendResult};
-use crate::logging::{self, Level};
-use crate::models::WarningEntry;
-
 use super::anlz::{
     AnlzBundlePaths, WaveformData, atomic_write_bytes, fill_mp3_pvbr,
     write_generated_anlz_bundle_with_first_beat,
@@ -42,6 +12,31 @@ use super::{
     BackendService, LibrarySources, SETTING_UI_ANALYSIS_ENGINE, WAVEFORM_PREVIEW_BINS,
     has_core_analysis_fields, track_has_core_analysis_for_source_status,
 };
+use crate::error::{BackendError, BackendResult};
+use crate::i18n::{Text, tr};
+use crate::logging::{self, Level};
+use crate::models::WarningEntry;
+use image::imageops::FilterType;
+use lofty::file::TaggedFileExt;
+use lofty::picture::PictureType;
+use lofty::probe::read_from_path;
+use rodio::{Decoder, Source};
+use rusqlite::params;
+use std::collections::HashSet;
+use std::fs::File;
+use std::io::{BufRead, BufReader, Write};
+use std::path::{Path, PathBuf};
+use std::process::{Child, ChildStdin, ChildStdout, Command, Stdio};
+use std::sync::{Mutex, OnceLock, PoisonError};
+use std::time::Instant;
+use symphonia::core::audio::SampleBuffer;
+use symphonia::core::codecs::{CODEC_TYPE_NULL, DecoderOptions};
+use symphonia::core::errors::Error as SymphoniaError;
+use symphonia::core::formats::{FormatOptions, Track as SymphoniaTrack};
+use symphonia::core::io::MediaSourceStream;
+use symphonia::core::meta::MetadataOptions;
+use symphonia::core::probe::Hint;
+use uuid::Uuid;
 
 mod coordinator;
 mod job_events;
@@ -733,7 +728,7 @@ fn row_to_track_for_analysis(row: &rusqlite::Row<'_>) -> rusqlite::Result<LocalT
     // A waveform whose files are gone counts as none: analyzing that track
     // restores them, a first analysis that keeps edited and imported values.
     let has_waveform = row.get::<_, Option<String>>(7)?.is_some_and(|p| {
-        !p.trim().is_empty() && !super::usb::utils::local_analysis_bundle_missing(&p)
+        !p.trim().is_empty() && !crate::service::usb::stick_files::local_analysis_bundle_missing(&p)
     });
     let existing_first_beat_ms = row
         .get::<_, Option<i64>>(8)?

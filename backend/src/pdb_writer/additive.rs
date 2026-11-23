@@ -1626,7 +1626,7 @@ pub(crate) fn sync_t19_ring_page(
     // would need a page allocated, which this in-place `&mut [u8]` writer
     // cannot do. Not reachable in production: the `initialize_usb` template
     // always pre-seeds one tt=19 data page (`seed_rb_initialized_history_shape`
-    // in usb/utils.rs). Tests must mirror that pre-seeded page.
+    // in usb/initialize.rs). Tests must mirror that pre-seeded page.
     let page_idx = t19_only_data_page(bytes, page_size).ok_or_else(|| {
         BackendError::Internal("t19 sync: table 19 has no single data page".into())
     })?;

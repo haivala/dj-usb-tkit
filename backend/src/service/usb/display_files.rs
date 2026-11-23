@@ -16,22 +16,19 @@
 //! The same cache file remembers which audio files the seek data repair had
 //! to skip (`SeekSkipMemory`).
 
-use std::collections::HashMap;
-use std::path::{Path, PathBuf};
-
-use rusqlite::{Connection, OptionalExtension, params};
-
+use super::identity::{UsbAudioFormats, read_usb_audio_formats};
 use crate::error::BackendResult;
 use crate::logging;
 use crate::models::UsbTrack;
-
-use super::identity::{UsbAudioFormats, read_usb_audio_formats};
-use super::utils;
-use super::utils::{
-    artwork_path_to_data_url, load_waveform_preview_from_analysis_path, waveform_preview_candidates,
+use crate::service::anlz_read::{
+    load_waveform_preview_from_analysis_path, waveform_preview_candidates,
 };
 use crate::service::anlz_seek::SeekIndexSkip;
 use crate::service::{BackendService, browse_path_matches_root};
+use base64::{Engine as _, engine::general_purpose::STANDARD as BASE64_STANDARD};
+use rusqlite::{Connection, OptionalExtension, params};
+use std::collections::HashMap;
+use std::path::{Path, PathBuf};
 
 const CACHE_FILE_NAME: &str = "usb_read_cache.sqlite";
 
@@ -413,7 +410,7 @@ impl BackendService {
                 crate::service::normalize_source_root_for_matching(&usb_root.to_string_lossy())
             ),
         };
-        let mut usb_roots = utils::all_usb_device_root_paths(conn)?;
+        let mut usb_roots = crate::service::usb::identity::all_usb_device_root_paths(conn)?;
         usb_roots.push(usb_root.to_string_lossy().into_owned());
 
         let mut library = HashMap::new();
@@ -445,6 +442,26 @@ impl BackendService {
             library,
         ))
     }
+}
+
+pub(crate) fn artwork_path_to_data_url(path: &Path) -> Option<String> {
+    let ext = path
+        .extension()
+        .and_then(|e| e.to_str())
+        .map(|s| s.to_ascii_lowercase())?;
+    let mime = match ext.as_str() {
+        "jpg" | "jpeg" => "image/jpeg",
+        "png" => "image/png",
+        "gif" => "image/gif",
+        "webp" => "image/webp",
+        _ => return None,
+    };
+    let bytes = std::fs::read(path).ok()?;
+    if bytes.is_empty() {
+        return None;
+    }
+    let encoded = BASE64_STANDARD.encode(bytes);
+    Some(format!("data:{mime};base64,{encoded}"))
 }
 
 #[cfg(test)]
@@ -542,5 +559,65 @@ mod tests {
             kept.artwork_path.as_deref(),
             Some("/home/me/.local/share/app/artwork/a.jpg")
         );
+    }
+
+    #[test]
+    fn artwork_path_to_data_url_encodes_jpeg() {
+        let tmp = std::env::temp_dir().join("__test_artwork__.jpg");
+        // Minimal JPEG: FFD8 header + FFD9 trailer
+        std::fs::write(
+            &tmp,
+            [0xFF, 0xD8, 0xFF, 0xE0, 0x00, 0x02, 0x00, 0x00, 0xFF, 0xD9],
+        )
+        .unwrap();
+        let result = artwork_path_to_data_url(&tmp);
+        assert!(result.is_some(), "should produce data URL for .jpg file");
+        let url = result.unwrap();
+        assert!(
+            url.starts_with("data:image/jpeg;base64,"),
+            "should have jpeg mime: {url}"
+        );
+        assert!(url.len() > 30, "should contain base64 data");
+        std::fs::remove_file(&tmp).ok();
+    }
+
+    #[test]
+    fn artwork_path_to_data_url_encodes_png() {
+        let tmp = std::env::temp_dir().join("__test_artwork_png__.png");
+        // Minimal PNG-like bytes (just needs non-empty content + .png extension)
+        std::fs::write(&tmp, b"\x89PNG\r\n\x1a\n fake png data").unwrap();
+        let result = artwork_path_to_data_url(&tmp);
+        assert!(result.is_some(), "should produce data URL for .png file");
+        let url = result.unwrap();
+        assert!(
+            url.starts_with("data:image/png;base64,"),
+            "should have png mime: {url}"
+        );
+        std::fs::remove_file(&tmp).ok();
+    }
+
+    #[test]
+    fn artwork_path_to_data_url_returns_none_for_unsupported_extension() {
+        let tmp = std::env::temp_dir().join("__test_artwork_txt__.txt");
+        std::fs::write(&tmp, b"not an image").unwrap();
+        let result = artwork_path_to_data_url(&tmp);
+        assert!(result.is_none(), "should return None for .txt file");
+        std::fs::remove_file(&tmp).ok();
+    }
+
+    #[test]
+    fn artwork_path_to_data_url_returns_none_for_empty_file() {
+        let tmp = std::env::temp_dir().join("__test_artwork_empty__.jpg");
+        std::fs::write(&tmp, b"").unwrap();
+        let result = artwork_path_to_data_url(&tmp);
+        assert!(result.is_none(), "should return None for empty file");
+        std::fs::remove_file(&tmp).ok();
+    }
+
+    #[test]
+    fn artwork_path_to_data_url_returns_none_for_missing_file() {
+        let result =
+            artwork_path_to_data_url(Path::new("/tmp/__nonexistent_artwork_test_file__.jpg"));
+        assert!(result.is_none(), "should return None for missing file");
     }
 }

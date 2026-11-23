@@ -32,10 +32,9 @@
 //! removed, or, when it is in a play history (never removed), keeps its
 //! strings with the NULs dropped.
 
+use super::*;
 use std::collections::{BTreeMap, HashMap, HashSet};
 use std::path::Path;
-
-use super::*;
 
 /// The strings a rebuild repairs: the PDB row's field (as
 /// `PdbTrackRowMutation::changed_fields` names it) and the eDB `content`
@@ -503,7 +502,7 @@ pub(super) fn detect_track_rebuilds(
     if !pdb_rows.iter().any(RowFacts::is_damaged) && !edb_rows.iter().any(RowFacts::is_damaged) {
         return TrackRebuilds::default();
     }
-    let contents = crate::service::usb::utils::collect_contents_files(usb_root);
+    let contents = crate::service::usb::stick_files::collect_contents_files(usb_root);
     let pdb_backups = {
         let ids: Vec<u32> = pdb_rows
             .iter()

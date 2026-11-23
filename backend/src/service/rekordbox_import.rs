@@ -5,21 +5,13 @@
 //! waveforms. A playlist or history session imports as a new local playlist,
 //! importing its tracks the same way.
 
-use std::collections::{HashMap, HashSet};
-use std::path::{Path, PathBuf};
-
-use rusqlite::{Connection, OpenFlags, params};
-use uuid::Uuid;
-
 use super::anlz::read_first_beat_from_anlz;
 use super::cues::{DEFAULT_HOTCUE_COLOR_ID, MAX_HOT_CUES, insert_track_cues, is_valid_color_id};
 use super::import_conflicts::{
     ConflictedTrack, CueAction, DifferingFields, ExternalTrackData, LocalTrackData, cue_action,
     differing_fields, import_conflicts, load_local_track_data, track_file_paths,
 };
-
 use super::library::{ImportedFileCopies, file_size, import_status_with_copies};
-use super::usb::utils::external_rekordbox_db_candidates;
 use super::usb::vendor_compat::DEFAULT_MASTER_DB_KEY;
 use super::wine_paths::{translate_wine_path, wine_prefix_of};
 use super::{
@@ -39,6 +31,13 @@ use crate::models::{
     ScanLibraryData, ScanRekordboxDbRequest, TrackCue, WarningEntry,
 };
 use crate::scanner::is_library_audio_file;
+use crate::service::usb::vendor_compat::{
+    LEGACY_REKORDBOX_DB_ENV_KEY, REKORDBOX_DB_ENV_KEY, desktop_master_db_rel_path,
+};
+use rusqlite::{Connection, OpenFlags, params};
+use std::collections::{HashMap, HashSet};
+use std::path::{Path, PathBuf};
+use uuid::Uuid;
 
 // `djmdPlaylist.Attribute` / `djmdHistory.Attribute`: a list of tracks (as
 // opposed to a folder, 1, or a smart playlist, 4, whose tracks rekordbox
@@ -1128,9 +1127,82 @@ fn read_rekordbox_first_beat(path: &Path) -> Option<u32> {
         .find_map(|p| read_first_beat_from_anlz(&std::fs::read(p).ok()?))
 }
 
+pub fn detect_external_rekordbox_db() -> crate::models::DetectExternalRekordboxDbData {
+    let candidates = external_rekordbox_db_candidates();
+
+    for candidate in &candidates {
+        if candidate.is_file() {
+            return crate::models::DetectExternalRekordboxDbData {
+                found: true,
+                path: Some(candidate.to_string_lossy().to_string()),
+                imported: false,
+            };
+        }
+    }
+
+    crate::models::DetectExternalRekordboxDbData {
+        found: false,
+        path: None,
+        imported: false,
+    }
+}
+
+pub(crate) fn external_rekordbox_db_candidates() -> Vec<PathBuf> {
+    let mut candidates = Vec::new();
+
+    // Check env var overrides first
+    for key in [REKORDBOX_DB_ENV_KEY, LEGACY_REKORDBOX_DB_ENV_KEY] {
+        if let Ok(env_path) = std::env::var(key) {
+            let trimmed = env_path.trim();
+            if !trimmed.is_empty() {
+                candidates.push(PathBuf::from(trimmed));
+            }
+        }
+    }
+
+    // HOME-based paths (macOS)
+    if let Ok(home) = std::env::var("HOME") {
+        let home = PathBuf::from(home);
+        // macOS: desktop library uses "Pioneer DJ" (with space) as the application directory
+        candidates.push(
+            home.join("Library/Application Support")
+                .join("Pioneer DJ/rekordbox/master.db"),
+        );
+        // macOS fallback: older installs may use "Pioneer"
+        candidates.push(
+            home.join("Library/Application Support")
+                .join(desktop_master_db_rel_path()),
+        );
+        // macOS: current rekordbox installs store the db directly under Library,
+        // without "Application Support"
+        candidates.push(home.join("Library").join(desktop_master_db_rel_path()));
+    }
+
+    // Windows APPDATA
+    if let Ok(appdata) = std::env::var("APPDATA") {
+        candidates.push(PathBuf::from(appdata).join(desktop_master_db_rel_path()));
+    }
+
+    // Windows USERPROFILE fallback
+    if let Ok(userprofile) = std::env::var("USERPROFILE") {
+        candidates.push(
+            PathBuf::from(userprofile)
+                .join("AppData/Roaming")
+                .join(desktop_master_db_rel_path()),
+        );
+    }
+
+    // rekordbox installed under Wine
+    #[cfg(target_os = "linux")]
+    candidates.extend(crate::service::wine_paths::wine_rekordbox_db_candidates());
+
+    candidates
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+    use std::sync::{Mutex, OnceLock};
 
     fn rb_cue(kind: i64, in_msec: i64) -> RbCue {
         RbCue {
@@ -1269,5 +1341,89 @@ mod tests {
             summary(&rekordbox_cues_to_track_cues(&cues)),
             vec![(10_000, 'H'), (20_000, 'M')]
         );
+    }
+
+    fn env_var_lock() -> &'static Mutex<()> {
+        static LOCK: OnceLock<Mutex<()>> = OnceLock::new();
+        LOCK.get_or_init(|| Mutex::new(()))
+    }
+
+    #[test]
+    fn detect_external_rekordbox_db_env_override_nonexistent() {
+        let _guard = env_var_lock().lock().expect("env var lock");
+        // Point to a path that doesn't exist — should return found: false
+        unsafe {
+            std::env::set_var(
+                "DJUSBTKIT_REKORDBOX_DB_PATH",
+                "/tmp/__nonexistent_external_rekordbox_db_test__",
+            )
+        };
+        let result = detect_external_rekordbox_db();
+        unsafe { std::env::remove_var("DJUSBTKIT_REKORDBOX_DB_PATH") };
+        assert!(!result.found);
+        assert!(result.path.is_none());
+    }
+
+    #[test]
+    fn detect_external_rekordbox_db_env_override_existing_file() {
+        let _guard = env_var_lock().lock().expect("env var lock");
+        let tmp = std::env::temp_dir().join("__test_external_master.db");
+        std::fs::write(&tmp, b"fake").unwrap();
+        unsafe { std::env::set_var("DJUSBTKIT_REKORDBOX_DB_PATH", tmp.to_str().unwrap()) };
+        let result = detect_external_rekordbox_db();
+        unsafe { std::env::remove_var("DJUSBTKIT_REKORDBOX_DB_PATH") };
+        std::fs::remove_file(&tmp).ok();
+        assert!(result.found);
+        assert_eq!(result.path.unwrap(), tmp.to_string_lossy().to_string());
+    }
+
+    #[test]
+    fn external_rekordbox_db_candidates_includes_env_override() {
+        let _guard = env_var_lock().lock().expect("env var lock");
+        unsafe { std::env::set_var("DJUSBTKIT_REKORDBOX_DB_PATH", "/custom/path/master.db") };
+        let candidates = external_rekordbox_db_candidates();
+        unsafe { std::env::remove_var("DJUSBTKIT_REKORDBOX_DB_PATH") };
+        assert!(
+            candidates
+                .iter()
+                .any(|p| p.to_str() == Some("/custom/path/master.db"))
+        );
+    }
+
+    #[cfg(target_os = "linux")]
+    #[test]
+    fn external_rekordbox_db_candidates_includes_wineprefix() {
+        let _guard = env_var_lock().lock().expect("env var lock");
+        let prefix = tempfile::tempdir().expect("prefix");
+        std::fs::create_dir_all(prefix.path().join("drive_c/users/dj")).expect("user dir");
+        unsafe { std::env::set_var("WINEPREFIX", prefix.path()) };
+        let candidates = external_rekordbox_db_candidates();
+        unsafe { std::env::remove_var("WINEPREFIX") };
+        let expected = prefix
+            .path()
+            .join("drive_c/users/dj/AppData/Roaming/Pioneer/rekordbox/master.db");
+        assert!(candidates.contains(&expected), "{candidates:?}");
+    }
+
+    #[test]
+    fn external_rekordbox_db_candidates_honours_legacy_env_override() {
+        let _guard = env_var_lock().lock().expect("env var lock");
+        unsafe { std::env::set_var("DJUSBTKIT_MASTER_DB_PATH", "/legacy/path/master.db") };
+        let candidates = external_rekordbox_db_candidates();
+        unsafe { std::env::remove_var("DJUSBTKIT_MASTER_DB_PATH") };
+        assert!(
+            candidates
+                .iter()
+                .any(|p| p.to_str() == Some("/legacy/path/master.db"))
+        );
+    }
+
+    #[test]
+    fn external_rekordbox_db_candidates_includes_macos_library_pioneer_path() {
+        let _guard = env_var_lock().lock().expect("env var lock");
+        let home = std::env::var("HOME").expect("HOME must be set for this test");
+        let candidates = external_rekordbox_db_candidates();
+        let expected = PathBuf::from(home).join("Library/Pioneer/rekordbox/master.db");
+        assert!(candidates.contains(&expected));
     }
 }

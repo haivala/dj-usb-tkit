@@ -13,25 +13,21 @@
 //!
 //! Also backs the "Backups" UI panel: list / restore / delete.
 
-use crate::models::WarningEntry;
-use std::collections::BTreeMap;
-use std::path::{Path, PathBuf};
-
-use rusqlite::{OptionalExtension, params};
-
+use super::root::resolve_usb_root;
+use super::staging::{DbKind, SessionBackup};
+use super::vendor_compat::{BackupCopy, BackupReason, backup_reason_path, vendor_db_dir};
 use crate::error::{BackendError, BackendResult};
 use crate::i18n::tr;
 use crate::models::{
     DeleteUsbBackupData, DeleteUsbBackupRequest, ListUsbBackupsData, ListUsbBackupsRequest,
-    RestoreUsbBackupData, RestoreUsbBackupRequest, UsbBackupEntry, UsbBackupFile,
+    RestoreUsbBackupData, RestoreUsbBackupRequest, UsbBackupEntry, UsbBackupFile, WarningEntry,
 };
-
-use super::staging::{DbKind, SessionBackup};
-use super::utils::resolve_usb_root;
-use super::vendor_compat::{BackupCopy, BackupReason, backup_reason_path, vendor_db_dir};
 use crate::service::{
     BackendService, DEFAULT_BACKUP_RETENTION_COUNT, SETTING_UI_BACKUP_RETENTION_COUNT,
 };
+use rusqlite::{OptionalExtension, params};
+use std::collections::BTreeMap;
+use std::path::{Path, PathBuf};
 
 const STEMS: [(&str, &str); 2] = [("export", "pdb"), ("exportLibrary", "db")];
 
