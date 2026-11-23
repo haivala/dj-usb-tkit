@@ -7,6 +7,29 @@
 
 import { t, tCount } from "../../ui_texts.mjs";
 import { createDialogLifecycle } from "./dialog_lifecycle.mjs";
+import { cloneTemplate } from "../../ui_utils.mjs";
+
+// The 1-5 star rating the cue editor and the selection bar's Edit share:
+// `mountRatingStars` fills an empty radiogroup with the stars,
+// `renderRatingStars` lights the stars up to `rating` (0 = none) and
+// `toggledRating` is the rating a star click sets -- the current rating's own
+// star clears it.
+export function mountRatingStars(container) {
+  container.replaceChildren(...cloneTemplate(container.ownerDocument, "tplRatingStars").children);
+}
+
+export function renderRatingStars(container, rating) {
+  for (const star of container.querySelectorAll("[data-rating]")) {
+    const n = Number(star.dataset.rating);
+    star.classList.toggle("is-on", n <= rating);
+    star.setAttribute("aria-checked", String(n === rating));
+  }
+}
+
+export function toggledRating(current, clicked) {
+  const n = Math.max(0, Math.min(5, Math.round(Number(clicked) || 0)));
+  return n === current ? 0 : n;
+}
 
 // The shape of a release date the editors send: YYYY, YYYY-MM or YYYY-MM-DD
 // (month and day may have one digit). The backend checks it is a real date
@@ -83,13 +106,8 @@ export function createGroupEditDialogController(el, document) {
   let touched = new Set();
   let rating = 0;
 
-  function renderRating() {
-    for (const star of el.groupEditRating.querySelectorAll("[data-rating]")) {
-      const n = Number(star.dataset.rating);
-      star.classList.toggle("is-on", n <= rating);
-      star.setAttribute("aria-checked", String(n === rating));
-    }
-  }
+  mountRatingStars(el.groupEditRating);
+  const renderRating = () => renderRatingStars(el.groupEditRating, rating);
 
   function apply() {
     const edits = {};
@@ -115,8 +133,7 @@ export function createGroupEditDialogController(el, document) {
   el.groupEditRating.addEventListener("click", (event) => {
     const star = event.target.closest("[data-rating]");
     if (!star) return;
-    const n = Number(star.dataset.rating);
-    rating = n === rating ? 0 : n;
+    rating = toggledRating(rating, star.dataset.rating);
     touched.add("rating");
     el.groupEditRatingMixed.hidden = true;
     renderRating();

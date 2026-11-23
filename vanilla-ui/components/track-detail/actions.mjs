@@ -14,7 +14,14 @@
 // the toggle is then disabled and shown checked, purely informational.
 
 import { drawDetailWaveform, base64ToBytes, computeWaveNorm } from "./waveform_detail.mjs";
-import { RELEASE_DATE_PATTERN, saveLibraryMetadataEdits, saveUsbMetadataEdits } from "../shared/track_metadata_edits.mjs";
+import {
+  RELEASE_DATE_PATTERN,
+  mountRatingStars,
+  renderRatingStars,
+  saveLibraryMetadataEdits,
+  saveUsbMetadataEdits,
+  toggledRating,
+} from "../shared/track_metadata_edits.mjs";
 import { cloneTemplate } from "../../ui_utils.mjs";
 import { coverElement, markLastEditedRow } from "../../track_table.mjs";
 import { coverUrl, attachCoverFallbackHandlers } from "../library/actions.mjs";
@@ -128,6 +135,7 @@ export function createTrackDetailController(el, prefs = {}) {
     // opened from (null when not known)
     onClosed = () => {},
   } = prefs;
+  if (el.trackDetailRating) mountRatingStars(el.trackDetailRating);
   let resolveFn = null;
   let open = false;
   // The list row the editor was opened from (see `onClosed`).
@@ -998,11 +1006,7 @@ export function createTrackDetailController(el, prefs = {}) {
   }
 
   function renderRating() {
-    for (const star of el.trackDetailRating.querySelectorAll("[data-rating]") || []) {
-      const on = Number(star.dataset.rating) <= working.rating;
-      star.classList.toggle("is-on", on);
-      star.setAttribute("aria-checked", String(Number(star.dataset.rating) === working.rating));
-    }
+    if (el.trackDetailRating) renderRatingStars(el.trackDetailRating, working.rating);
   }
 
   function render() {
@@ -1179,9 +1183,8 @@ export function createTrackDetailController(el, prefs = {}) {
 
     /// Set the star rating; the current rating's own star clears it.
     setRating(stars) {
-      const n = Math.max(0, Math.min(5, Math.round(Number(stars) || 0)));
       mutate(null, () => {
-        working.rating = n === working.rating ? 0 : n;
+        working.rating = toggledRating(working.rating, stars);
       });
       render();
     },

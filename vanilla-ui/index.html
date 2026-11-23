@@ -527,7 +527,7 @@
           </div>
           <!-- Right of the title; under it on a narrow window. -->
           <div class="track-detail-meta">
-            <div class="track-detail-rating" id="trackDetailRating" role="radiogroup" data-text-aria-label="ui-common-rating" data-text-tooltip="ui-rating-tooltip"><button type="button" role="radio" aria-checked="false" data-rating="1" data-text-aria-label="ui-rating-1-star-aria-label">&#9733;</button><button type="button" role="radio" aria-checked="false" data-rating="2" data-text-aria-label="ui-rating-2-stars-aria-label">&#9733;</button><button type="button" role="radio" aria-checked="false" data-rating="3" data-text-aria-label="ui-rating-3-stars-aria-label">&#9733;</button><button type="button" role="radio" aria-checked="false" data-rating="4" data-text-aria-label="ui-rating-4-stars-aria-label">&#9733;</button><button type="button" role="radio" aria-checked="false" data-rating="5" data-text-aria-label="ui-rating-5-stars-aria-label">&#9733;</button></div>
+            <div class="track-detail-rating" id="trackDetailRating" role="radiogroup" data-text-aria-label="ui-common-rating" data-text-tooltip="ui-rating-tooltip"></div>
             <input type="text" id="trackDetailGenre" class="track-detail-genre" list="trackDetailGenreOptions" maxlength="64" autocomplete="off" spellcheck="false" data-text-placeholder="ui-common-genre" data-text-aria-label="ui-common-genre" data-text-tooltip="ui-track-detail-genre-tooltip" />
             <datalist id="trackDetailGenreOptions"><!-- from the track detail's genreOptions --></datalist>
             <input type="text" id="trackDetailReleaseDate" class="track-detail-release-date" maxlength="10" autocomplete="off" spellcheck="false" data-text-placeholder="ui-common-release-date" data-text-aria-label="ui-common-release-date" data-text-tooltip="ui-track-detail-release-date-tooltip" />
@@ -821,7 +821,7 @@
         <input type="text" id="groupEditReleaseDate" maxlength="10" autocomplete="off" spellcheck="false" data-text-tooltip="ui-group-edit-release-date-tooltip" />
         <span data-text="ui-common-rating"></span>
         <div class="group-edit-rating-row">
-          <div class="track-detail-rating" id="groupEditRating" role="radiogroup" data-text-aria-label="ui-common-rating" data-text-tooltip="ui-rating-tooltip"><button type="button" role="radio" aria-checked="false" data-rating="1" data-text-aria-label="ui-rating-1-star-aria-label">&#9733;</button><button type="button" role="radio" aria-checked="false" data-rating="2" data-text-aria-label="ui-rating-2-stars-aria-label">&#9733;</button><button type="button" role="radio" aria-checked="false" data-rating="3" data-text-aria-label="ui-rating-3-stars-aria-label">&#9733;</button><button type="button" role="radio" aria-checked="false" data-rating="4" data-text-aria-label="ui-rating-4-stars-aria-label">&#9733;</button><button type="button" role="radio" aria-checked="false" data-rating="5" data-text-aria-label="ui-rating-5-stars-aria-label">&#9733;</button></div>
+          <div class="track-detail-rating" id="groupEditRating" role="radiogroup" data-text-aria-label="ui-common-rating" data-text-tooltip="ui-rating-tooltip"></div>
           <span class="muted" id="groupEditRatingMixed" hidden data-text="ui-group-edit-mixed"></span>
         </div>
       </div>
@@ -1034,6 +1034,8 @@
   <template id="tplCoverImg"><img class="cover-thumb" data-text-alt="ui-cover-img-alt" loading="lazy" /></template>
   <template id="tplCoverPlaceholder"><div class="cover-thumb" aria-hidden="true"></div></template>
   <template id="tplWaveformCanvas"><canvas class="waveform-canvas-el" aria-hidden="true"></canvas></template>
+  <!-- The 1-5 star rating of the cue editor and the selection bar's Edit -->
+  <template id="tplRatingStars"><div><button type="button" role="radio" aria-checked="false" data-rating="1" data-text-aria-label="ui-rating-1-star-aria-label">&#9733;</button><button type="button" role="radio" aria-checked="false" data-rating="2" data-text-aria-label="ui-rating-2-stars-aria-label">&#9733;</button><button type="button" role="radio" aria-checked="false" data-rating="3" data-text-aria-label="ui-rating-3-stars-aria-label">&#9733;</button><button type="button" role="radio" aria-checked="false" data-rating="4" data-text-aria-label="ui-rating-4-stars-aria-label">&#9733;</button><button type="button" role="radio" aria-checked="false" data-rating="5" data-text-aria-label="ui-rating-5-stars-aria-label">&#9733;</button></div></template>
   <template id="tplBpmPill"><span class="bpm-pill"></span></template>
   <template id="tplKeyPill"><span class="key-pill"></span></template>
   <template id="tplIconPlay"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M8 6v12l10-6z"></path></svg></template>
