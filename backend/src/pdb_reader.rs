@@ -1,5 +1,5 @@
 use std::collections::HashMap;
-use std::path::Path;
+use std::path::{Path, PathBuf};
 
 use crate::error::{BackendError, BackendResult};
 
@@ -180,6 +180,18 @@ pub struct PdbDiagnostics {
     pub pages_with_num_rl_8191: usize,
     pub nrs_wrapping_pages: usize,
     pub page_type_counts: HashMap<u32, usize>,
+}
+
+/// The PDB a dev tool was pointed at: `input` itself when it is a file, else
+/// the PDB of the stick whose root `input` is.
+pub fn pdb_file_at(input: &Path) -> PathBuf {
+    if input.is_file() {
+        return input.to_path_buf();
+    }
+    input
+        .join(crate::service::usb::vendor_compat::USB_VENDOR_ROOT_DIR)
+        .join(crate::service::usb::vendor_compat::USB_VENDOR_DB_DIR)
+        .join("export.pdb")
 }
 
 pub fn parse_pdb(path: &Path) -> BackendResult<ParsedPdb> {

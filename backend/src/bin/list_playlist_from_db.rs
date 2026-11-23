@@ -51,18 +51,6 @@ fn resolve_edb_path(input: &Path) -> PathBuf {
         .join("exportLibrary.db")
 }
 
-fn resolve_pdb_path(input: &Path) -> PathBuf {
-    if input
-        .file_name()
-        .and_then(|v| v.to_str())
-        .map(|v| v.eq_ignore_ascii_case("export.pdb"))
-        .unwrap_or(false)
-    {
-        return input.to_path_buf();
-    }
-    input.join("PIONEER").join("rekordbox").join("export.pdb")
-}
-
 fn open_edb_with_known_keys(path: &Path) -> Result<Connection, String> {
     let open_plain = || Connection::open(path).map_err(|e| e.to_string());
     let has_schema = |conn: &Connection| {
@@ -229,7 +217,7 @@ fn list_edb_playlists(input: &Path) {
 }
 
 fn list_pdb_playlists(input: &Path) {
-    let pdb_path = resolve_pdb_path(input);
+    let pdb_path = backend::pdb_reader::pdb_file_at(input);
     if !pdb_path.is_file() {
         fail(format!("PDB not found: {}", pdb_path.display()));
     }

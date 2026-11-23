@@ -844,6 +844,50 @@ fn playlist_of_fixture_wavs(
     (backend, playlist_id)
 }
 
+/// The `.2EX` is optional (no bundle without one has been seen): the export
+/// copies the `.DAT`/`.EXT` pair and its checks accept the bundle.
+#[test]
+fn export_copies_a_bundle_without_2ex() {
+    let root = tempdir().expect("temp root");
+    let media = root.path().join("media");
+    let usb = root.path().join("usb");
+    fs::create_dir_all(&media).expect("create media dir");
+    fs::create_dir_all(&usb).expect("create usb dir");
+    let (backend, playlist_id) =
+        playlist_of_fixture_wavs(root.path(), &media, &usb, &["Pair Artist - Pair Only.wav"]);
+    let cache = root.path().join("data/analysis/waveforms");
+    for entry in fs::read_dir(&cache).expect("read analysis cache") {
+        let path = entry.expect("cache entry").path();
+        if path.extension().is_some_and(|ext| ext == "2EX") {
+            fs::remove_file(path).expect("remove .2EX");
+        }
+    }
+
+    let exported = backend.export_to_usb(ExportToUsbRequest {
+        usb_root: Some(usb.to_string_lossy().to_string()),
+        playlist_id,
+        options: None,
+        sort: None,
+    });
+    assert!(exported.ok, "export failed: {exported:?}");
+
+    let bundle_files = WalkDir::new(usb.join("PIONEER/USBANLZ"))
+        .into_iter()
+        .filter_map(Result::ok)
+        .filter(|entry| entry.file_type().is_file())
+        .filter_map(|entry| {
+            entry
+                .path()
+                .extension()
+                .map(|ext| ext.to_string_lossy().to_string())
+        })
+        .collect::<std::collections::BTreeSet<_>>();
+    assert_eq!(
+        bundle_files,
+        ["DAT", "EXT"].map(String::from).into_iter().collect()
+    );
+}
+
 #[test]
 fn playlist_export_space_finds_tracks_exported_under_a_suffixed_name() {
     let root = tempdir().expect("temp root");

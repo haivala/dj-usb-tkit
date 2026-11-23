@@ -117,12 +117,12 @@ fn mark_playlist_tree_row_inactive_for_test(bytes: &mut [u8], id: u32) {
     let (page_idx, _row_abs, _row_len, slot) =
         playlist_tree_row_loc_by_id(bytes, id).expect("t07 row loc");
     let off = page_offset(page_idx, PAGE_SIZE).expect("page off");
-    let rowpf_off = off + slot.bits_off;
-    let tranrf_off = rowpf_off + 2;
+    let rowpf_off = off + slot.footer.group.rowpf_off;
+    let tranrf_off = off + slot.footer.group.tranrf_off();
     let rowpf = read_u16_le_at(bytes, rowpf_off).expect("rowpf");
     let tranrf = read_u16_le_at(bytes, tranrf_off).expect("tranrf");
-    bytes[rowpf_off..rowpf_off + 2].copy_from_slice(&(rowpf & !slot.bit_mask).to_le_bytes());
-    bytes[tranrf_off..tranrf_off + 2].copy_from_slice(&(tranrf | slot.bit_mask).to_le_bytes());
+    bytes[rowpf_off..rowpf_off + 2].copy_from_slice(&(rowpf & !slot.footer.bit).to_le_bytes());
+    bytes[tranrf_off..tranrf_off + 2].copy_from_slice(&(tranrf | slot.footer.bit).to_le_bytes());
 
     let packed = u32::from(bytes[off + 0x18])
         | (u32::from(bytes[off + 0x19]) << 8)
@@ -1475,9 +1475,9 @@ fn mutate_tracks_in_place_zeroes_id_on_relocated_slot() {
     assert_eq!(patched, 1);
 
     let off = page_offset(orig_page_idx, PAGE_SIZE).expect("orig page offset");
-    let rowpf = read_u16_le_at(&bytes, off + orig_slot.bits_off).expect("rowpf");
+    let rowpf = read_u16_le_at(&bytes, off + orig_slot.footer.group.rowpf_off).expect("rowpf");
     assert_eq!(
-        rowpf & orig_slot.bit_mask,
+        rowpf & orig_slot.footer.bit,
         0,
         "original track slot must be tombstoned (relocated, not patched in place)"
     );

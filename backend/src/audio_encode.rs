@@ -566,8 +566,9 @@ impl Mp3Writer {
             Some(left) => left,
             None => self
                 .buf
-                .first_chunk::<4>()
-                .and_then(|header| mpeg1_layer3_frame_len(*header))
+                .get(..4)
+                .and_then(|header| crate::mp3_frame::parse_mpeg1_layer3_frame(header, 0))
+                .map(|frame| frame.length)
                 .ok_or_else(|| failed("LAME's output doesn't start with an MP3 frame"))?,
         };
         let skip = left.min(self.buf.len());
@@ -623,31 +624,6 @@ impl Mp3Writer {
             offset_ms: f64::from(offset_samples) * 1000.0 / f64::from(self.out_rate),
         })
     }
-}
-
-/// The byte length of an MPEG-1 Layer III frame from its 4-byte header
-/// (`144 * bitrate / sample rate`, plus the padding byte). `None` for
-/// anything else; LAME only writes MPEG-1 here (see `mp3_output_rate`).
-fn mpeg1_layer3_frame_len(header: [u8; 4]) -> Option<usize> {
-    const KBPS: [u32; 15] = [
-        0, 32, 40, 48, 56, 64, 80, 96, 112, 128, 160, 192, 224, 256, 320,
-    ];
-    // Sync, MPEG-1 (11), Layer III (01).
-    if header[0] != 0xFF || header[1] & 0xFE != 0xFA {
-        return None;
-    }
-    let kbps = *KBPS.get(usize::from(header[2] >> 4))?;
-    let rate = match (header[2] >> 2) & 0b11 {
-        0 => 44_100,
-        1 => 48_000,
-        2 => 32_000,
-        _ => return None,
-    };
-    if kbps == 0 {
-        return None;
-    }
-    let padding = u32::from((header[2] >> 1) & 1);
-    usize::try_from(144_000 * kbps / rate + padding).ok()
 }
 
 /// The encoder delay (in samples) from a LAME Info/Xing frame: 12 bits, 21
@@ -728,17 +704,6 @@ mod tests {
             extended_80(48_000),
             [0x40, 0x0E, 0xBB, 0x80, 0, 0, 0, 0, 0, 0]
         );
-    }
-
-    #[test]
-    fn mpeg1_layer3_frame_len_follows_the_header() {
-        // 320 kbit/s, 44.1 kHz, no padding / padding; 48 kHz.
-        assert_eq!(mpeg1_layer3_frame_len([0xFF, 0xFB, 0xE0, 0x44]), Some(1044));
-        assert_eq!(mpeg1_layer3_frame_len([0xFF, 0xFB, 0xE2, 0x44]), Some(1045));
-        assert_eq!(mpeg1_layer3_frame_len([0xFF, 0xFB, 0xE4, 0x44]), Some(960));
-        // MPEG-2, or no sync.
-        assert_eq!(mpeg1_layer3_frame_len([0xFF, 0xF3, 0xE0, 0x44]), None);
-        assert_eq!(mpeg1_layer3_frame_len([0x00, 0xFB, 0xE0, 0x44]), None);
     }
 
     #[test]

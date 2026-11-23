@@ -1,6 +1,5 @@
 use std::collections::{BTreeMap, BTreeSet, HashSet};
 use std::env;
-use std::path::PathBuf;
 
 use backend::utils::{collect_chain, read_u32_le_at as read_u32_le};
 use serde::Serialize;
@@ -89,14 +88,6 @@ fn starts_with_chain(new_chain: &[u32], old_chain: &[u32]) -> bool {
     old_chain.iter().zip(new_chain.iter()).all(|(a, b)| a == b)
 }
 
-fn parse_pdb_arg(input: &str) -> PathBuf {
-    let as_path = PathBuf::from(input);
-    if as_path.is_file() {
-        return as_path;
-    }
-    as_path.join("PIONEER").join("rekordbox").join("export.pdb")
-}
-
 fn main() {
     let args = env::args().collect::<Vec<_>>();
     if args.len() != 3 {
@@ -106,8 +97,8 @@ fn main() {
         std::process::exit(2);
     }
 
-    let old_path = parse_pdb_arg(&args[1]);
-    let new_path = parse_pdb_arg(&args[2]);
+    let old_path = backend::pdb_reader::pdb_file_at(std::path::Path::new(&args[1]));
+    let new_path = backend::pdb_reader::pdb_file_at(std::path::Path::new(&args[2]));
     let old_bytes = match std::fs::read(&old_path) {
         Ok(v) => v,
         Err(err) => {

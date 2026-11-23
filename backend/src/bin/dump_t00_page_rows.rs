@@ -1,54 +1,9 @@
 use std::env;
-use std::path::PathBuf;
 
 use backend::pdb_page;
 use backend::utils::{read_u16_le_at as read_u16_le, read_u32_le_at as read_u32_le};
 
 const PAGE_SIZE: usize = 4096;
-
-#[derive(Clone, Copy, Debug)]
-struct Slot {
-    footer: pdb_page::FooterSlot,
-    start: usize,
-    end: usize,
-}
-
-fn parse_slots(page: &[u8]) -> Vec<Slot> {
-    if page.len() < PAGE_SIZE {
-        return Vec::new();
-    }
-    let used_s = read_u16_le(page, 30).unwrap_or(0) as usize;
-    if used_s == 0 {
-        return Vec::new();
-    }
-    let payload_len = used_s.min(PAGE_SIZE.saturating_sub(pdb_page::HEAP_START));
-    let n_header = pdb_page::read_slot_counts(page).map_or(0, |(slots, _)| slots);
-    let footer: Vec<_> = pdb_page::footer_slots(&page[..PAGE_SIZE], n_header).collect();
-
-    let mut out = Vec::<Slot>::new();
-    for (i, slot) in footer.iter().enumerate() {
-        let start = slot.heap_off;
-        let end = footer.get(i + 1).map_or(payload_len, |next| next.heap_off);
-        if end <= start || end > payload_len {
-            continue;
-        }
-        out.push(Slot {
-            footer: *slot,
-            start,
-            end,
-        });
-    }
-    out
-}
-
-fn parse_pdb_arg(arg: &str) -> PathBuf {
-    let p = PathBuf::from(arg);
-    if p.is_file() {
-        p
-    } else {
-        p.join("PIONEER").join("rekordbox").join("export.pdb")
-    }
-}
 
 fn main() {
     let args = env::args().collect::<Vec<_>>();
@@ -56,7 +11,7 @@ fn main() {
         eprintln!("usage: cargo run --bin dump_t00_page_rows -- <pdb_or_usb_root> <page_idx>");
         std::process::exit(2);
     }
-    let pdb = parse_pdb_arg(&args[1]);
+    let pdb = backend::pdb_reader::pdb_file_at(std::path::Path::new(&args[1]));
     let page_idx: usize = match args[2].parse() {
         Ok(v) => v,
         Err(_) => {
@@ -93,10 +48,8 @@ fn main() {
         read_u16_le(page, PAGE_SIZE - 2).unwrap_or(0)
     );
 
-    let payload_end = 40usize.saturating_add(used_s as usize).min(PAGE_SIZE);
-    let payload = &page[40..payload_end];
-    for s in parse_slots(page) {
-        let row = &payload[s.start..s.end];
+    for s in pdb_page::row_slots(page) {
+        let row = &page[pdb_page::HEAP_START + s.start..pdb_page::HEAP_START + s.end];
         let track_id = read_u32_le(row, 72).unwrap_or(0);
         let rowpf = s.footer.group.rowpf(page);
         let tranrf = s.footer.group.tranrf(page);

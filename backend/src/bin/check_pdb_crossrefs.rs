@@ -7,7 +7,7 @@
 ///
 /// Reports orphaned references that would be detected as database corruption.
 use std::env;
-use std::path::{Path, PathBuf};
+use std::path::Path;
 
 use backend::pdb_reader::parse_pdb;
 
@@ -18,7 +18,7 @@ fn main() {
         std::process::exit(2);
     }
     let input = Path::new(&args[1]);
-    let pdb_path = resolve_pdb(input);
+    let pdb_path = backend::pdb_reader::pdb_file_at(input);
 
     let parsed = match parse_pdb(&pdb_path) {
         Ok(p) => p,
@@ -154,16 +154,4 @@ fn main() {
         println!("result: FAIL — {errors} cross-reference issue(s) found");
         std::process::exit(1);
     }
-}
-
-fn resolve_pdb(input: &Path) -> PathBuf {
-    if input
-        .file_name()
-        .and_then(|n| n.to_str())
-        .map(|n| n.eq_ignore_ascii_case("export.pdb"))
-        .unwrap_or(false)
-    {
-        return input.to_path_buf();
-    }
-    input.join("PIONEER").join("rekordbox").join("export.pdb")
 }

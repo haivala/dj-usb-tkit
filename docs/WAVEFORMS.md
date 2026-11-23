@@ -11,7 +11,7 @@ The app stores a small waveform preview for UI use, but player ANLZ files need h
 - UI preview payloads are downsampled to `WAVEFORM_PREVIEW_BINS` (`2400`) before being returned to the frontend.
 - Local ANLZ cache generation uses detail-resolution waveform data: `max(2400, ceil(duration_seconds * 150) + 4)`.
 - USB export does not generate ANLZ; it copies previously generated `DAT/EXT/2EX` bundles.
-- Normal USB export requires waveform path, BPM, duration, and existing `DAT` + `EXT` files before media copy starts. A `2EX` is copied when present; rekordbox bundles from older analyses have none.
+- Normal USB export requires waveform path, BPM, duration, and existing `DAT` + `EXT` files before media copy starts. A `2EX` is copied when present; it is optional, though every bundle seen so far has one.
 - ANLZ detail chunk entry counts are `ceil(duration_seconds * 150) + 4`, with a minimum of `400`.
 - Preview chunks stay fixed-size:
   - `PWAV` = 400 entries in `.DAT`

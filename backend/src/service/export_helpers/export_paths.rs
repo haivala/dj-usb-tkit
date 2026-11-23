@@ -464,7 +464,7 @@ pub fn ensure_analysis_bundle_ppth(
         let out = apply_analysis_edits_to_anlz(&ensure_ppth_chunk(&bytes, track_path), &edits);
         write_bytes_if_different(path, &out, closer)?;
     }
-    // rekordbox's own bundles from older analyses have no `.2EX`.
+    // The `.2EX` is optional (see `bundle_usable`).
     if twoex_path.is_file() {
         let bytes = std::fs::read(&twoex_path)?;
         let with_ppth = ensure_ppth_chunk(&bytes, track_path);
@@ -480,7 +480,7 @@ pub fn ensure_analysis_bundle_ppth(
 /// cache stores the `.DAT`, a rekordbox import stores the `.EXT` (for its
 /// colour waveform). The `.DAT` is always resolved from it, so rekordbox's
 /// beat grid (`PQTZ`) and seek index (`PVBR`) reach the stick. A missing
-/// `.2EX` is skipped: rekordbox's own bundles from older analyses have none.
+/// `.2EX` is skipped (the `.2EX` is optional, see `bundle_usable`).
 pub fn export_analysis_bundle_for_track(
     track: &ExportTrackData,
     usb_root: &Path,

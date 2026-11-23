@@ -374,26 +374,18 @@ fn run_manifest_invariant_check(
                 "analysis",
                 &track.id,
                 USB_ANALYSIS_PREFIX,
-                require_files && track.owns_waveform,
+                false,
                 &mut issues,
             );
             if require_files
                 && track.owns_waveform
                 && let Some(analysis_path) = analysis_path
+                && !analysis_bundle_usable(usb_root, &analysis_path)
             {
-                for variant in
-                    crate::service::export_helpers::analysis_bundle_path_variants(&analysis_path)
-                {
-                    let missing = resolve_usb_side_path(usb_root, &variant)
-                        .map(|abs| !abs.is_file())
-                        .unwrap_or(true);
-                    if missing {
-                        issues.record(format!(
-                            "analysis bundle file for track '{}' is missing: {variant}",
-                            track.id
-                        ));
-                    }
-                }
+                issues.record(format!(
+                    "analysis bundle for track '{}' is missing or damaged: {analysis_path}",
+                    track.id
+                ));
             }
         }
     }
@@ -2498,7 +2490,7 @@ impl BackendService {
             if let Some(anlz) = track.waveform_path.as_deref() {
                 let anlz_abs =
                     resolve_usb_side_path(usb_root, anlz).unwrap_or_else(|| PathBuf::from(anlz));
-                if !anlz_abs.is_file() {
+                if !analysis_bundle_usable(usb_root, anlz) {
                     warnings.push(logging::log_text(
                         Level::Warn,
                         "export",
@@ -3085,7 +3077,7 @@ mod tests {
 
     #[test]
     fn required_analysis_accepts_rekordbox_bundle_without_2ex() {
-        // rekordbox imports store the `.EXT`; older rekordbox analyses have no `.2EX`.
+        // rekordbox imports store the `.EXT`; the `.2EX` is optional (see `bundle_usable`).
         let dir = tempdir().expect("tempdir");
         let empty = crate::service::anlz_read::empty_anlz_file();
         std::fs::write(dir.path().join("ANLZ0000.DAT"), &empty).expect("write DAT");
@@ -3975,7 +3967,7 @@ mod tests {
                 usb_dir
                     .path()
                     .join(format!("PIONEER/USBANLZ/P001/00000001/ANLZ0000.{ext}")),
-                b"anlz",
+                crate::service::anlz_read::empty_anlz_file(),
             )
             .expect("write analysis");
         }

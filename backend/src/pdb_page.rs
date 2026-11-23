@@ -416,10 +416,8 @@ pub struct RowSlot {
     pub end: usize,
     /// Whether the slot's `rowpf` bit is set (the row is live).
     pub present: bool,
-    /// Page offset of the slot's group's `rowpf` word.
-    pub bits_off: usize,
-    /// The slot's bit within that word.
-    pub bit_mask: u16,
+    /// The slot's footer entry: its number, group and bit.
+    pub footer: FooterSlot,
 }
 
 /// The row slots of a page (its whole length): as many as the header's
@@ -451,8 +449,7 @@ pub fn row_slots(page: &[u8]) -> Vec<RowSlot> {
                 start,
                 end,
                 present: slot.present,
-                bits_off: slot.group.rowpf_off,
-                bit_mask: slot.bit,
+                footer: *slot,
             })
         })
         .collect()

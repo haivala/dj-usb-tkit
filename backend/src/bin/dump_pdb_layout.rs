@@ -1,7 +1,7 @@
 use std::collections::BTreeMap;
 use std::env;
 use std::fs;
-use std::path::{Path, PathBuf};
+use std::path::Path;
 
 use backend::utils::{
     read_u8_at as read_u8, read_u16_le_at as read_u16_le, read_u32_le_at as read_u32_le,
@@ -25,7 +25,7 @@ fn main() {
     }
 
     let input = Path::new(&args[1]);
-    let pdb_path = resolve_pdb_path(input);
+    let pdb_path = backend::pdb_reader::pdb_file_at(input);
     let bytes = match fs::read(&pdb_path) {
         Ok(v) => v,
         Err(err) => {
@@ -168,18 +168,6 @@ fn main() {
             num_rl
         );
     }
-}
-
-fn resolve_pdb_path(input: &Path) -> PathBuf {
-    if input
-        .file_name()
-        .and_then(|name| name.to_str())
-        .map(|name| name.eq_ignore_ascii_case("export.pdb"))
-        .unwrap_or(false)
-    {
-        return input.to_path_buf();
-    }
-    input.join("PIONEER").join("rekordbox").join("export.pdb")
 }
 
 fn table_type_name(raw: u32) -> &'static str {

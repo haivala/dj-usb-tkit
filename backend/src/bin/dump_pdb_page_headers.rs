@@ -12,7 +12,7 @@
 ///   diff <(./dump_pdb_page_headers A.pdb) <(./dump_pdb_page_headers B.pdb)
 use std::env;
 use std::fs;
-use std::path::{Path, PathBuf};
+use std::path::Path;
 
 use backend::pdb_page;
 use backend::utils::{read_u8_at as ru8, read_u16_le_at as ru16, read_u32_le_at as ru32};
@@ -47,7 +47,7 @@ fn main() {
         std::process::exit(2);
     }
     let input = Path::new(&args[1]);
-    let pdb_path = resolve_pdb(input);
+    let pdb_path = backend::pdb_reader::pdb_file_at(input);
     let bytes = match fs::read(&pdb_path) {
         Ok(v) => v,
         Err(e) => {
@@ -209,16 +209,4 @@ fn main() {
             );
         }
     }
-}
-
-fn resolve_pdb(input: &Path) -> PathBuf {
-    if input
-        .file_name()
-        .and_then(|n| n.to_str())
-        .map(|n| n.eq_ignore_ascii_case("export.pdb"))
-        .unwrap_or(false)
-    {
-        return input.to_path_buf();
-    }
-    input.join("PIONEER").join("rekordbox").join("export.pdb")
 }

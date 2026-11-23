@@ -451,8 +451,8 @@ pub(crate) fn prepare_transcode_bundle(
                 transcode_bytes.as_deref()?,
                 transcode.shift_ms(),
             ),
-            // The track's `.2EX` is optional (rekordbox imports may lack
-            // one); it holds only waveforms, so the transcode's own does.
+            // The track's `.2EX` is optional (see `bundle_usable`); it
+            // holds only waveforms, so the transcode's own does.
             Err(_) if ext == "2EX" => transcode_bytes,
             Err(_) => None,
         };

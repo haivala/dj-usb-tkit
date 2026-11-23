@@ -2064,14 +2064,14 @@ fn mark_row_slot_inactive(
             "PDB additive track mutation blocked: page {page_idx} out of bounds"
         ))
     })?;
-    let rowpf_off = off + slot.bits_off;
+    let rowpf_off = off + slot.footer.group.rowpf_off;
     let rowpf = read_u16_le_at(bytes, rowpf_off).ok_or_else(|| {
         BackendError::Internal("PDB additive track mutation blocked: rowpf missing".into())
     })?;
-    if rowpf & slot.bit_mask == 0 {
+    if rowpf & slot.footer.bit == 0 {
         return Ok(());
     }
-    let new_rowpf = rowpf & !slot.bit_mask;
+    let new_rowpf = rowpf & !slot.footer.bit;
     bytes[rowpf_off..rowpf_off + 2].copy_from_slice(&new_rowpf.to_le_bytes());
     // `tranrf` and `(u5, num_rl)` stay as they are: they describe the page's
     // last transaction and must keep matching each other (docs/PDB.md "Page

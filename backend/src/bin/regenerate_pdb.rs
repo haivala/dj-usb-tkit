@@ -10,7 +10,7 @@
 /// WARNING: rebuilding a PDB from scratch relocates table chains. This breaks
 /// player hardware compatibility. Only use for DJ software diagnostic testing.
 use std::env;
-use std::path::{Path, PathBuf};
+use std::path::Path;
 
 use backend::pdb_reader::parse_pdb;
 use backend::pdb_writer::{
@@ -28,7 +28,7 @@ fn main() {
     let source = Path::new(&args[1]);
     let dest = Path::new(&args[2]);
 
-    let src_pdb = resolve_pdb(source);
+    let src_pdb = backend::pdb_reader::pdb_file_at(source);
     let parsed = match parse_pdb(&src_pdb) {
         Ok(p) => p,
         Err(e) => {
@@ -247,16 +247,4 @@ fn main() {
         bytes.len() / 4096,
         dest.display()
     );
-}
-
-fn resolve_pdb(input: &Path) -> PathBuf {
-    if input
-        .file_name()
-        .and_then(|n| n.to_str())
-        .map(|n| n.eq_ignore_ascii_case("export.pdb"))
-        .unwrap_or(false)
-    {
-        return input.to_path_buf();
-    }
-    input.join("PIONEER").join("rekordbox").join("export.pdb")
 }

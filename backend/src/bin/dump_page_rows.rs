@@ -1,68 +1,5 @@
-use std::path::PathBuf;
-
-use backend::pdb_page::{self, FooterSlot};
 use backend::utils::{read_u16_le_at as read_u16_le, read_u32_le_at as read_u32_le};
-
-/// Every footer slot of the page, or none when the footer doesn't fit.
-fn page_footer_slots(page: &[u8], used_s: usize) -> Vec<FooterSlot> {
-    let n_header = pdb_page::read_slot_counts(page).map_or(0, |(slots, _)| slots);
-    if used_s == 0 || page.len() < 64 || !pdb_page::footer_fits(page.len(), n_header) {
-        return Vec::new();
-    }
-    pdb_page::footer_slots(page, n_header).collect()
-}
-
-fn parse_pdb_string(row: &[u8], offset: usize) -> String {
-    let Some(&n0) = row.get(offset) else {
-        return String::new();
-    };
-    let n = n0 as usize;
-    if n % 2 == 1 {
-        let r = (n - 1) / 2;
-        let end = (offset + r).min(row.len());
-        let start = (offset + 1).min(end);
-        return String::from_utf8_lossy(&row[start..end])
-            .trim_end_matches('\0')
-            .to_string();
-    }
-
-    let Some(len) = read_u16_le(row, offset + 1).map(|v| v as usize) else {
-        return String::new();
-    };
-    let end = offset.saturating_add(len);
-    if offset + 4 > row.len() || end > row.len() || end < offset + 4 {
-        return String::new();
-    }
-    let data = &row[offset + 4..end];
-
-    let code = n0;
-    let b5 = (code & 0b0001_0000) != 0;
-    let b8 = (code & 0b1000_0000) != 0;
-    if b5 && b8 {
-        let mut u16s = Vec::with_capacity(data.len() / 2);
-        for c in data.as_chunks::<2>().0 {
-            u16s.push(u16::from_le_bytes([c[0], c[1]]));
-        }
-        String::from_utf16_lossy(&u16s)
-            .trim_end_matches('\0')
-            .to_string()
-    } else {
-        // ascii and utf8 flag bits both decode the same way here.
-        String::from_utf8_lossy(data)
-            .trim_end_matches('\0')
-            .to_string()
-    }
-}
-
-fn read_pdb_bytes(path: &str) -> Result<Vec<u8>, String> {
-    let p = PathBuf::from(path);
-    let file = if p.is_dir() {
-        p.join("PIONEER").join("rekordbox").join("export.pdb")
-    } else {
-        p
-    };
-    std::fs::read(&file).map_err(|e| format!("failed to read {}: {e}", file.display()))
-}
+use backend::{pdb_page, pdb_row};
 
 fn main() {
     let args = std::env::args().skip(1).collect::<Vec<_>>();
@@ -72,10 +9,11 @@ fn main() {
     }
     let path = &args[0];
     let page_idx: usize = args[1].parse().unwrap_or(0);
-    let pdb = match read_pdb_bytes(path) {
+    let pdb_path = backend::pdb_reader::pdb_file_at(std::path::Path::new(path));
+    let pdb = match std::fs::read(&pdb_path) {
         Ok(v) => v,
         Err(e) => {
-            eprintln!("{e}");
+            eprintln!("failed to read {}: {e}", pdb_path.display());
             std::process::exit(1);
         }
     };
@@ -101,31 +39,16 @@ fn main() {
         page_idx, tt, next, seq, nrs, u3, u5, num_rl, rowpf0, tranrf0
     );
 
-    let used_s = read_u16_le(page, 30).unwrap_or(0) as usize;
-    let payload_len = used_s.min(ps - pdb_page::HEAP_START);
-    let payload = &page[pdb_page::HEAP_START..pdb_page::HEAP_START + payload_len];
-    let slots = page_footer_slots(page, used_s);
-    for (i, s) in slots.iter().enumerate() {
-        let start = s.heap_off.min(payload_len);
-        let end = slots
-            .get(i + 1)
-            .map_or(payload_len, |next| next.heap_off.min(payload_len));
-        let len = end.saturating_sub(start);
-        let (id, so, pid, folder, name) = if start < end {
-            let row = &payload[start..end];
-            let id = read_u32_le(row, 12).unwrap_or(0);
-            let so = read_u32_le(row, 8).unwrap_or(0);
-            let pid = read_u32_le(row, 0).unwrap_or(0);
-            let folder = read_u32_le(row, 16).unwrap_or(0);
-            let name = if row.len() >= 21 {
-                parse_pdb_string(row, 20)
-            } else {
-                String::new()
-            };
-            (id, so, pid, folder, name)
-        } else {
-            (0, 0, 0, 0, String::new())
-        };
+    for slot in pdb_page::row_slots(page) {
+        let (start, end) = (slot.start, slot.end);
+        let row = &page[pdb_page::HEAP_START + start..pdb_page::HEAP_START + end];
+        let len = row.len();
+        let id = read_u32_le(row, 12).unwrap_or(0);
+        let so = read_u32_le(row, 8).unwrap_or(0);
+        let pid = read_u32_le(row, 0).unwrap_or(0);
+        let folder = read_u32_le(row, 16).unwrap_or(0);
+        let name = pdb_row::get_string_from_pdb(row, 20).unwrap_or_default();
+        let s = slot.footer;
         let rowpf = s.group.rowpf(page);
         let tranrf = s.group.tranrf(page);
         println!(

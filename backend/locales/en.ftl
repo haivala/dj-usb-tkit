@@ -1770,7 +1770,7 @@ export-warning-source-missing = missing source file: { $path }
 # The playlist was exported to the PDB but not to the eDB. $error: the reason.
 # After copying: a file the export wrote is not on the USB. $track: the track's id. $path: the file.
 export-warning-artwork-missing-after = export verification warning: artwork missing for track '{ $track }': { $path }
-export-warning-analysis-missing-after = export verification warning: analysis file missing for track '{ $track }': { $path }
+export-warning-analysis-missing-after = export verification warning: analysis bundle missing or damaged for track '{ $track }': { $path }
 # A converted copy is exported without analysis. $path: the source track's file.
 export-warning-transcode-no-analysis = no analysis for the transcode of { $path }
 # A track left out because converting it failed. $path: its file. $reason: why, from the converter.

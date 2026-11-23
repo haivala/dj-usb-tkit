@@ -221,10 +221,10 @@ pub(crate) fn sanitize_warning_path(path: &Path) -> String {
 
 /// Whether an analysis bundle is there and undamaged: its `.DAT` and `.EXT`
 /// walk to their end ([`anlz_file_walks_cleanly`]), and so does its `.2EX`
-/// when it has one. The `.2EX` is optional, since rekordbox's own bundles
-/// from older analyses have none, and exporting the pair is still what
-/// rekordbox would put on a stick; but export copies one that is there, so a
-/// damaged one makes the bundle unusable too.
+/// when it has one. The `.2EX` is optional: the `.DAT`/`.EXT` pair is the
+/// part every player reads, though every bundle seen so far, rekordbox's and
+/// the app's, has a `.2EX`. Export copies one that is there, so a damaged one
+/// makes the bundle unusable too.
 fn bundle_usable(bundle: &Path) -> bool {
     let twoex = bundle.with_extension("2EX");
     anlz_file_walks_cleanly(&bundle.with_extension("DAT"))

@@ -12,6 +12,7 @@ pub mod logging;
 pub mod metadata;
 pub mod metronome;
 pub mod models;
+mod mp3_frame;
 mod opus_decoder;
 pub mod pdb_page;
 pub mod pdb_reader;

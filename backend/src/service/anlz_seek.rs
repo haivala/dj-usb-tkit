@@ -8,6 +8,7 @@
 use std::path::Path;
 
 use crate::audio_format::AudioFormat;
+use crate::mp3_frame::{Mp3Frame, parse_mpeg1_layer3_frame};
 
 const PVBR_ENTRIES: usize = 400;
 pub(super) const PVBR_PAYLOAD_LEN: usize = PVBR_ENTRIES * 4 + 4;
@@ -164,15 +165,6 @@ fn read_reporting(path: &Path, on_read: &mut dyn FnMut(usize)) -> std::io::Resul
             Err(err) => return Err(err),
         }
     }
-}
-
-#[derive(Clone, Copy, Debug)]
-struct Mp3Frame {
-    offset: usize,
-    length: usize,
-    padding: usize,
-    bitrate_kbps: u16,
-    sample_rate: u32,
 }
 
 fn parse_mp3_pvbr(bytes: &[u8]) -> Result<Vec<u8>, SeekIndexSkip> {
@@ -366,34 +358,6 @@ fn is_other_mpeg_frame(bytes: &[u8], offset: usize) -> bool {
     bytes
         .get(offset..offset + 2)
         .is_some_and(|sync| sync[0] == 0xff && sync[1] & 0xe0 == 0xe0)
-}
-
-fn parse_mpeg1_layer3_frame(bytes: &[u8], offset: usize) -> Option<Mp3Frame> {
-    let header = u32::from_be_bytes(bytes.get(offset..offset + 4)?.try_into().ok()?);
-    if header & 0xffe0_0000 != 0xffe0_0000
-        || (header >> 19) & 0x3 != 0x3
-        || (header >> 17) & 0x3 != 0x1
-    {
-        return None;
-    }
-    const BITRATES: [u16; 16] = [
-        0, 32, 40, 48, 56, 64, 80, 96, 112, 128, 160, 192, 224, 256, 320, 0,
-    ];
-    const SAMPLE_RATES: [u32; 4] = [44_100, 48_000, 32_000, 0];
-    let bitrate_kbps = BITRATES[((header >> 12) & 0xf) as usize];
-    let sample_rate = SAMPLE_RATES[((header >> 10) & 0x3) as usize];
-    if bitrate_kbps == 0 || sample_rate == 0 {
-        return None;
-    }
-    let padding = ((header >> 9) & 1) as usize;
-    let length = 144_000 * usize::from(bitrate_kbps) / sample_rate as usize + padding;
-    Some(Mp3Frame {
-        offset,
-        length,
-        padding,
-        bitrate_kbps,
-        sample_rate,
-    })
 }
 
 #[derive(Clone, Copy, Debug)]
