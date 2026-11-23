@@ -13,7 +13,8 @@ do not write to the USB.
 
 The report opens with one plain-language line per player family and area. The
 individual checks sit under a collapsed **Technical details**, grouped into
-Databases (PDB, eDB and Engine DJ side by side), Library and Low-level:
+Drive (only for a USB device), Databases (PDB, eDB and Engine DJ side by
+side), Library and Low-level:
 
 ![Health & Diagnostics: a summary per player, and the checks under Technical details](assets/usb-diagnostics-details.png)
 
@@ -75,6 +76,7 @@ merging and rewriting both databases to match — see "Repair Flow" below.
 
 | Area | What it checks |
 | --- | --- |
+| USB drive | Only when the selected folder is exactly the mount point of a USB device; a folder used as a USB, or a folder on a stick, gets no check. Warns when the drive differs from [USB_PREPARE.md](USB_PREPARE.md)'s layout: a filesystem other than FAT32, a partition table other than MBR (or none), the USB not being the drive's first partition or the drive having more than one, and a filesystem under 90% of its partition. Linux reads `/proc/mounts`, udev's database and sysfs, all without root; Windows and macOS check only the filesystem type. The Event Log names each difference. No repair: Preview Fixes lists it as unsupported |
 | PDB integrity | `export.pdb` exists, parses, has expected header/page state, and has parseable playlists/history |
 | eDB access | encrypted DB can be opened, required tables can be read, and history counts can be inspected |
 | Contents integrity | PDB and eDB indexed media-path sets agree at DB level, matched by the same path key as the parity report's raw audio coverage |
@@ -209,6 +211,7 @@ Some findings intentionally do not have automatic repairs:
 
 | Finding | Behavior |
 | --- | --- |
+| USB drive partitioned or formatted unlike [USB_PREPARE.md](USB_PREPARE.md) | reported as unsupported; the app doesn't format drives. Back up the stick, reformat it as that page describes and copy everything back |
 | malformed entries under `PIONEER/USBANLZ` | reported as unsupported; inspect event-log warnings and re-export affected tracks |
 | parity preview unavailable | repair preview continues, but strict parity upgrade is not proposed, unless exactly one database is missing (see "Missing database") |
 | both the PDB and the eDB missing | nothing to rebuild from; strict parity upgrade is not proposed. Initialize the USB and export again |

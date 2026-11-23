@@ -39,6 +39,7 @@
 
 ## Unreleased
 
+- **New feature:** Diagnostics warns when a USB stick isn't partitioned and formatted the way players expect (one MBR partition with FAT32), naming what differs and how to reformat it. A stick like that can work with little music on it and later make a player ask to format it. Windows and macOS check the filesystem only.
 - **Improvement:** The export's progress bar shows how fast music files are being copied to the USB, next to the track count.
 - **Fix:** A playlist changed while it was being exported is no longer marked as exported when the export finishes, so it shows as changed and the next export brings the change to the USB.
 - **Fix:** Playlists the export adds to the eDB leave their artwork blank, as rekordbox does, instead of setting it to 0.

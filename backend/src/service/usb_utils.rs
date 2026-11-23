@@ -476,18 +476,22 @@ fn folder_looks_writable(_path: &Path, _metadata: &std::fs::Metadata) -> bool {
 
 #[cfg(unix)]
 fn mount_is_read_only(path: &Path) -> bool {
+    statvfs(path).is_some_and(|stats| stats.f_flag & libc::ST_RDONLY != 0)
+}
+
+/// `statvfs` for `path`: the filesystem's flags and size, answered without
+/// touching the drive.
+#[cfg(unix)]
+pub(crate) fn statvfs(path: &Path) -> Option<libc::statvfs> {
     use std::os::unix::ffi::OsStrExt;
-    let Ok(c_path) = std::ffi::CString::new(path.as_os_str().as_bytes()) else {
-        return false;
-    };
+    let c_path = std::ffi::CString::new(path.as_os_str().as_bytes()).ok()?;
     let mut stats = std::mem::MaybeUninit::<libc::statvfs>::uninit();
     // SAFETY: `c_path` is NUL-terminated and outlives the call, and `stats`
     // is only read after `statvfs` reports it filled in.
     if unsafe { libc::statvfs(c_path.as_ptr(), stats.as_mut_ptr()) } != 0 {
-        return false;
+        return None;
     }
-    let stats = unsafe { stats.assume_init() };
-    stats.f_flag & libc::ST_RDONLY != 0
+    Some(unsafe { stats.assume_init() })
 }
 
 /// Whether a file can really be written at `root`. Unlike `has_write_access`

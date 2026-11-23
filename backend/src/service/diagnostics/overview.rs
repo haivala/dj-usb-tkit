@@ -3,12 +3,13 @@
 use super::*;
 use crate::i18n::{Text, tr};
 
-pub(super) const DISPLAY_PDB: usize = 0;
-pub(super) const DISPLAY_EDB: usize = 1;
-pub(super) const DISPLAY_ENGINE: usize = 2;
-pub(super) const DISPLAY_PLAYLISTS: usize = 3;
-pub(super) const DISPLAY_ANALYSIS: usize = 4;
-pub(super) const DISPLAY_LOW_LEVEL: usize = 5;
+pub(super) const DISPLAY_DRIVE: usize = 0;
+pub(super) const DISPLAY_PDB: usize = 1;
+pub(super) const DISPLAY_EDB: usize = 2;
+pub(super) const DISPLAY_ENGINE: usize = 3;
+pub(super) const DISPLAY_PLAYLISTS: usize = 4;
+pub(super) const DISPLAY_ANALYSIS: usize = 5;
+pub(super) const DISPLAY_LOW_LEVEL: usize = 6;
 
 /// One section of the diagnostics report as the user sees it.
 pub(super) struct DisplaySection {
@@ -22,9 +23,15 @@ pub(super) struct DisplaySection {
 
 /// Display sections of the diagnostics report, in render order. Checks are
 /// computed per diagnose stage (PDB, eDB, contents, ...) and regrouped here by
-/// what they tell the user: the databases on the USB first, then playlists and
-/// analysis, raw format counters last. `DISPLAY_*` index into it.
-pub(super) const DISPLAY_LAYOUT: [DisplaySection; 7] = [
+/// what they tell the user: the drive itself first, then the databases on the
+/// USB, then playlists and analysis, raw format counters last. `DISPLAY_*`
+/// index into it.
+pub(super) const DISPLAY_LAYOUT: [DisplaySection; 8] = [
+    DisplaySection {
+        group: tr::diagnostics_group_drive,
+        title: tr::diagnostics_section_drive_format,
+        labels: &[tr::diagnostics_check_drive_layout],
+    },
     DisplaySection {
         group: tr::diagnostics_group_databases,
         title: tr::diagnostics_section_pdb,
@@ -208,6 +215,20 @@ pub(super) fn diagnostics_overview(
     };
     let with_hint = |problems: Vec<Text>| with_preview_fixes_hint(&problems);
     let mut items = Vec::new();
+
+    // Only for a USB device, and first: a drive players can't read hides the rest.
+    if let Some(drive) = section(DISPLAY_DRIVE) {
+        let detail = if is_pass(&drive.status) {
+            tr::diagnostics_overview_drive_ready()
+        } else {
+            tr::diagnostics_overview_drive_layout()
+        };
+        items.push(item(
+            tr::diagnostics_area_drive(),
+            Some(drive.status.clone()),
+            detail.render(),
+        ));
+    }
 
     // Older Pioneer players read export.pdb.
     let pdb = section(DISPLAY_PDB);

@@ -769,6 +769,20 @@ impl BackendService {
             });
         }
 
+        // The app doesn't format drives: the diagnostics' layout check, listed
+        // as something to do by hand. Its problems are in the Event Log.
+        let drive_layout_differs = crate::service::usb_layout::read_drive_layout(&usb_root)
+            .is_some_and(|layout| !crate::service::usb_layout::layout_problems(&layout).is_empty());
+        if drive_layout_differs {
+            detected_issues
+                .push("USB drive layout differs from one MBR partition with FAT32".into());
+            unsupported_items.push(RepairUnsupportedItem {
+                issue: tr::repair_unsupported_drive_layout().render(),
+                reason: tr::diagnostics_check_drive_layout_reformat().render(),
+                link: Some("event-log".to_string()),
+            });
+        }
+
         // The parse the diagnostics and parity baselines above read
         // (`parsed_staged_pdb`): the staged PDB hasn't changed since.
         // Without a PDB the detectors read the eDB in the same shape, so a

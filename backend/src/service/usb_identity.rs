@@ -344,38 +344,57 @@ fn linux_unescape_mount_field(raw: &str) -> String {
         .replace("\\012", "\n")
 }
 
-/// Finds the mount source (e.g. `/dev/sdb1`) covering `path`, by picking the
-/// `/proc/mounts` entry whose mount point is the longest matching prefix of
-/// `path` -- the same "most specific mount wins" rule `df`/`lsblk` use.
+/// A `/proc/mounts` entry: what is mounted where, as which filesystem.
 #[cfg(target_os = "linux")]
-fn linux_mount_source_for_path(path: &Path) -> Option<PathBuf> {
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(crate) struct LinuxMount {
+    /// The mount source, e.g. `/dev/sdb1`.
+    pub(crate) source: PathBuf,
+    pub(crate) mount_point: PathBuf,
+    /// The filesystem type as the kernel names it (`vfat`, `exfat`, `fuseblk`, ...).
+    pub(crate) fs_type: String,
+}
+
+/// The `/proc/mounts` entry covering `path`: the one whose mount point is the
+/// longest matching prefix of `path`, the same "most specific mount wins" rule
+/// `df`/`lsblk` use.
+#[cfg(target_os = "linux")]
+pub(crate) fn linux_mount_for_path(path: &Path) -> Option<LinuxMount> {
     let content = std::fs::read_to_string("/proc/mounts").ok()?;
-    linux_mount_source_from_mounts_content(&content, path)
+    linux_mount_from_mounts_content(&content, path)
 }
 
 #[cfg(target_os = "linux")]
-fn linux_mount_source_from_mounts_content(content: &str, path: &Path) -> Option<PathBuf> {
-    let mut best: Option<(PathBuf, PathBuf)> = None;
+fn linux_mount_source_for_path(path: &Path) -> Option<PathBuf> {
+    linux_mount_for_path(path).map(|mount| mount.source)
+}
+
+#[cfg(target_os = "linux")]
+fn linux_mount_from_mounts_content(content: &str, path: &Path) -> Option<LinuxMount> {
+    let mut best: Option<LinuxMount> = None;
     for line in content.lines() {
         let mut fields = line.split_whitespace();
-        let (Some(fs_spec), Some(fs_file)) = (fields.next(), fields.next()) else {
+        let (Some(fs_spec), Some(fs_file), Some(fs_vfstype)) =
+            (fields.next(), fields.next(), fields.next())
+        else {
             continue;
         };
         let mount_point = PathBuf::from(linux_unescape_mount_field(fs_file));
         if !path.starts_with(&mount_point) {
             continue;
         }
-        let is_longer = best
-            .as_ref()
-            .is_none_or(|(mp, _)| mount_point.as_os_str().len() > mp.as_os_str().len());
+        let is_longer = best.as_ref().is_none_or(|current| {
+            mount_point.as_os_str().len() > current.mount_point.as_os_str().len()
+        });
         if is_longer {
-            best = Some((
+            best = Some(LinuxMount {
+                source: PathBuf::from(linux_unescape_mount_field(fs_spec)),
                 mount_point,
-                PathBuf::from(linux_unescape_mount_field(fs_spec)),
-            ));
+                fs_type: fs_vfstype.to_string(),
+            });
         }
     }
-    best.map(|(_, dev)| dev)
+    best
 }
 
 /// Whether `device` is backed by USB (has a `usb-*` entry under
@@ -384,7 +403,7 @@ fn linux_mount_source_from_mounts_content(content: &str, path: &Path) -> Option<
 /// directly since enabling sysinfo's `disk` feature would pull in
 /// Windows/macOS-only dependencies this codebase has no other use for.
 #[cfg(target_os = "linux")]
-fn linux_device_is_usb(device: &Path) -> bool {
+pub(crate) fn linux_device_is_usb(device: &Path) -> bool {
     let Ok(device_canon) = device.canonicalize() else {
         return false;
     };
@@ -610,34 +629,38 @@ mod tests {
 
     #[cfg(target_os = "linux")]
     #[test]
-    fn linux_mount_source_from_mounts_content_picks_longest_matching_mount_point() {
+    fn linux_mount_from_mounts_content_picks_longest_matching_mount_point() {
         let mounts = "/dev/sda1 / ext4 rw 0 0\n\
              /dev/sdb1 /media/user/CLUBSTICK vfat rw 0 0\n\
              tmpfs /tmp tmpfs rw 0 0\n";
         let path = std::path::Path::new("/media/user/CLUBSTICK/PIONEER/rekordbox");
         assert_eq!(
-            linux_mount_source_from_mounts_content(mounts, path),
-            Some(std::path::PathBuf::from("/dev/sdb1"))
+            linux_mount_from_mounts_content(mounts, path),
+            Some(LinuxMount {
+                source: PathBuf::from("/dev/sdb1"),
+                mount_point: PathBuf::from("/media/user/CLUBSTICK"),
+                fs_type: "vfat".to_string(),
+            })
         );
     }
 
     #[cfg(target_os = "linux")]
     #[test]
-    fn linux_mount_source_from_mounts_content_unescapes_octal_sequences() {
+    fn linux_mount_from_mounts_content_unescapes_octal_sequences() {
         let mounts = "/dev/sdb1 /media/user/My\\040Stick vfat rw 0 0\n";
         let path = std::path::Path::new("/media/user/My Stick/PIONEER");
         assert_eq!(
-            linux_mount_source_from_mounts_content(mounts, path),
-            Some(std::path::PathBuf::from("/dev/sdb1"))
+            linux_mount_from_mounts_content(mounts, path).map(|m| m.source),
+            Some(PathBuf::from("/dev/sdb1"))
         );
     }
 
     #[cfg(target_os = "linux")]
     #[test]
-    fn linux_mount_source_from_mounts_content_returns_none_when_no_mount_covers_path() {
+    fn linux_mount_from_mounts_content_returns_none_when_no_mount_covers_path() {
         let mounts = "/dev/sda1 /home ext4 rw 0 0\n";
         let path = std::path::Path::new("/media/user/CLUBSTICK");
-        assert_eq!(linux_mount_source_from_mounts_content(mounts, path), None);
+        assert_eq!(linux_mount_from_mounts_content(mounts, path), None);
     }
 
     #[cfg(target_os = "linux")]

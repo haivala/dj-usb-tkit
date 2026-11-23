@@ -371,12 +371,14 @@ diagnostics-group-databases = Databases
 diagnostics-group-library = Library
 diagnostics-group-low-level = Low-level
 diagnostics-group-comparison = Comparison
+diagnostics-group-drive = Drive
 diagnostics-section-pdb = PDB
 diagnostics-section-edb = eDB
 diagnostics-section-engine = Engine DJ
 diagnostics-section-analysis = Analysis
 diagnostics-section-player-counters = Player counters
 diagnostics-section-page-format = Page format
+diagnostics-section-drive-format = Partitions & filesystem
 
 # The overview rows' titles, above the diagnostics, parity and repair reports: what a DJ cares about.
 diagnostics-area-older-players = Older Pioneer players
@@ -386,6 +388,7 @@ diagnostics-area-track-details = Track details
 diagnostics-area-music-files = Music files
 diagnostics-area-analysis = Waveforms & beat grids
 diagnostics-area-engine = Denon / Numark players
+diagnostics-area-drive = USB drive
 # After an overview row's problems, when a repair can fix them.
 diagnostics-preview-fixes-hint = Preview Fixes shows what can be repaired.
 
@@ -445,6 +448,9 @@ diagnostics-overview-engine-not-set-up = Not set up. Only needed for Denon Prime
 diagnostics-overview-engine-updates-off = Updates are turned off, so changes made in this app don't reach these players.
 diagnostics-overview-engine-out-of-date = Out of date, so the player will analyze every track again.
 diagnostics-overview-engine-ready = Ready.
+# The diagnostics overview's "USB drive" row, shown when the USB is a mounted USB device.
+diagnostics-overview-drive-ready = Partitioned and formatted the way players expect.
+diagnostics-overview-drive-layout = Partitioned or formatted in a way not every player reads. If a player asks to format this USB or doesn't show it, reformat it as "Partitions & filesystem" below describes.
 
 # The parity report's overview rows: one sentence per problem kind.
 # $count: the playlists whose ids differ.
@@ -813,6 +819,26 @@ diagnostics-check-engine-sync-ok = Written for export.pdb #{ $pdb }
 diagnostics-check-engine-sync-no-pdb = Written without a PDB: the USB has none for the player to import
 # $library: the counter the library was written for. $pdb: the PDB's. Either can be "?".
 diagnostics-check-engine-sync-behind = Written for export.pdb #{ $library }, the USB has #{ $pdb }. The player may import export.pdb again and analyze the tracks itself. Preview Fixes can rebuild it
+# The USB drive's partition layout and filesystem, compared with one MBR partition with FAT32.
+diagnostics-check-drive-layout = Partition layout
+diagnostics-check-drive-layout-ok = One MBR partition with FAT32, as players expect
+# After the problems below: what to do about them.
+diagnostics-check-drive-layout-reformat = To be sure every player reads it, back up the USB, reformat it with one MBR partition and FAT32 ("Preparing a USB Drive" in the app's documentation has the steps), and copy everything back.
+# $version: FAT16 or FAT12.
+diagnostics-drive-older-fat = The filesystem is { $version }, not FAT32.
+diagnostics-drive-exfat = The filesystem is exFAT, which only newer players read.
+# $name: the filesystem's name as the computer reports it, such as ntfs or apfs.
+diagnostics-drive-other-fs = The filesystem is { $name }, which most players can't read.
+diagnostics-drive-gpt = The partition table is GPT, which not every player reads.
+diagnostics-drive-no-table = The drive has no partition table: the filesystem fills the whole drive.
+# $name: the partition table's type as the computer reports it.
+diagnostics-drive-other-table = The partition table is { $name }, not MBR.
+# $number: which partition of the drive this USB is.
+diagnostics-drive-not-first = This is partition { $number } of the drive; players only look at the first one.
+# $count: the drive's partitions, always more than one.
+diagnostics-drive-more-partitions = The drive has { $count } partitions; players only look at the first one.
+# $filesystem, $partition: sizes, such as 7.5 GB.
+diagnostics-drive-fs-smaller = The filesystem is { $filesystem } in a { $partition } partition.
 
 # The parity report's checks.
 diagnostics-check-parity-overall = Overall player parity status
@@ -1096,6 +1122,8 @@ repair-unsupported-malformed-analysis = { $count ->
    *[other] { $count } malformed USBANLZ entries
 }
 repair-unsupported-malformed-analysis-reason = These indicate USB analysis directory corruption or stray files. Inspect Event Log entries tagged 'analysis entry malformed' and re-export affected tracks (or rebuild USB analysis data).
+# The USB drive's partitions or filesystem differ from one MBR partition with FAT32; its reason is diagnostics-check-drive-layout-reformat.
+repair-unsupported-drive-layout = The USB drive is partitioned or formatted in a way not every player reads
 # $count: the tracks. $format: MP3 or FLAC.
 repair-unsupported-seek-data = { $count } { $format } { $count ->
     [one] track

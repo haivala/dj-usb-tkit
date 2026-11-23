@@ -163,27 +163,3 @@ and its PDB import counter (`lastRekordBoxLibraryImportReadCounter` /
 player has read such a library yet. Next time an eDB-only stick is near the
 Mixstream Pro, check that it opens the library without importing anything
 and shows the tracks, playlists and cues.
-
-## Diagnostics: warn about a USB layout players may not read
-
-A FAT32 stick that worked with less data made a CDJ ask to format it once more
-was put on it. Reformatting it with the `docs/USB_PREPARE.md` commands and
-copying the same data back fixed it, so the stick itself was fine and the old
-partition layout or filesystem was the problem. When a USB is selected, warn
-when its layout differs from `docs/USB_PREPARE.md` and point there.
-
-Check only when the selected path is exactly a mount point of a USB/removable
-device (`linux_mount_source_for_path` + `linux_device_is_usb`, `sysinfo`
-`is_removable()` elsewhere). A folder used as a USB, or a subfolder on a stick,
-gets no check and no warning.
-
-Linux without root (`/dev/sdX` needs root or the `disk` group):
-- filesystem type from `/proc/mounts` (`vfat`, `exfat`, `ntfs`, ...);
-- MBR vs GPT and FAT32 vs FAT16 from udev's `/run/udev/data/b<major>:<minor>`
-  (`ID_PART_TABLE_TYPE`, `ID_FS_VERSION`);
-- first/only partition, or an EFI partition in front, from `/sys/class/block/`;
-- filesystem size (`statvfs`) against the partition size in sysfs.
-
-The FAT dirty bit needs a raw read; leave it out. macOS: `diskutil info -plist`
-gives scheme and filesystem without root. Windows: start with the filesystem
-type from `sysinfo`.

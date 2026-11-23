@@ -29,6 +29,7 @@ pub mod usb_backups;
 pub(crate) mod usb_display_files;
 pub(crate) mod usb_helpers;
 pub(crate) mod usb_identity;
+pub(crate) mod usb_layout;
 mod usb_order_edit;
 pub mod usb_staging;
 pub(crate) mod usb_track_facts;

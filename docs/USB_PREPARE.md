@@ -15,6 +15,9 @@ backups in `PIONEER/rekordbox/backups/` and the app's drive name marker.
 | Filesystem | FAT32 | Every Pioneer/AlphaTheta and Denon/Engine DJ player reads it |
 | Volume label | Up to 11 characters, uppercase letters, digits, `_` | FAT label limits; the app suggests the label as the drive name |
 
+Diagnostics warns when a selected stick differs from this layout (see "USB drive" in
+[DIAGNOSTICS_REPAIRS.md](DIAGNOSTICS_REPAIRS.md)).
+
 exFAT is supported only by newer players. Check the player's manual before choosing it over
 FAT32. FAT32's 4 GB per-file limit does not matter for audio files.
 

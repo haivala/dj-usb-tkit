@@ -483,7 +483,11 @@ impl BackendService {
         note_stage("playlist resolution");
 
         let engine_library_section = self.engine_library_section(&usb_root);
+        let drive_section = drive_layout_section(&usb_root, &mut raw_warnings);
         let overall_status = DiagStatus::worst_of(&[
+            drive_section
+                .as_ref()
+                .map_or(&DiagStatus::Pass, |section| &section.status),
             &pdb_integrity.status,
             &edb_access.status,
             &contents_integrity.status,
@@ -504,13 +508,15 @@ impl BackendService {
         let cdj_counter_section = cdj_counter_snapshot
             .as_ref()
             .map(player_counter_snapshot_section);
-        let mut display_sources = vec![
+        let mut display_sources: Vec<_> =
+            drive_section.iter().map(|s| (s, DISPLAY_DRIVE)).collect();
+        display_sources.extend([
             (&pdb_integrity, DISPLAY_PDB),
             (&playlist_resolution, DISPLAY_PLAYLISTS),
             (&analysis_integrity, DISPLAY_ANALYSIS),
             (&edb_access, DISPLAY_EDB),
             (&contents_integrity, DISPLAY_EDB),
-        ];
+        ]);
         display_sources.extend(engine_library_section.iter().map(|s| (s, DISPLAY_ENGINE)));
         display_sources.extend(cdj_counter_section.iter().map(|s| (s, DISPLAY_LOW_LEVEL)));
         let section_groups = regroup_sections(&DISPLAY_LAYOUT, &display_sources);

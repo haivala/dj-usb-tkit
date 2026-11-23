@@ -251,12 +251,14 @@ diagnostics-group-databases = Bases de données
 diagnostics-group-library = Bibliothèque
 diagnostics-group-low-level = Bas niveau
 diagnostics-group-comparison = Comparaison
+diagnostics-group-drive = Support
 diagnostics-section-pdb = PDB
 diagnostics-section-edb = eDB
 diagnostics-section-engine = Engine DJ
 diagnostics-section-analysis = Analyse
 diagnostics-section-player-counters = Compteurs du lecteur
 diagnostics-section-page-format = Format des pages
+diagnostics-section-drive-format = Partitions et système de fichiers
 
 diagnostics-area-older-players = Anciens lecteurs Pioneer
 diagnostics-area-newer-players = Nouveaux lecteurs Pioneer
@@ -265,6 +267,7 @@ diagnostics-area-track-details = Détails des morceaux
 diagnostics-area-music-files = Fichiers audio
 diagnostics-area-analysis = Formes d'onde et beatgrids
 diagnostics-area-engine = Lecteurs Denon / Numark
+diagnostics-area-drive = Clé USB
 diagnostics-preview-fixes-hint = « Aperçu des corrections » montre ce qui peut être réparé.
 
 diagnostics-overview-pdb-missing = Cette clé USB n'a pas de base de données pour les anciens lecteurs, ils risquent donc de ne pas afficher sa musique.
@@ -313,6 +316,8 @@ diagnostics-overview-engine-not-set-up = Non configurée. Nécessaire uniquement
 diagnostics-overview-engine-updates-off = Les mises à jour sont désactivées, les modifications faites dans l'application n'atteignent donc pas ces lecteurs.
 diagnostics-overview-engine-out-of-date = Obsolète, le lecteur va donc analyser à nouveau chaque morceau.
 diagnostics-overview-engine-ready = Prête.
+diagnostics-overview-drive-ready = Partitionnée et formatée comme les lecteurs l'attendent.
+diagnostics-overview-drive-layout = Partitionnée ou formatée d'une façon que tous les lecteurs ne lisent pas. Si un lecteur propose de formater cette clé USB ou ne l'affiche pas, reformatez-la comme l'indique « Partitions et système de fichiers » ci-dessous.
 
 parity-overview-playlist-ids = { $count ->
     [one] { $count } playlist ne concorde pas entre les deux bases de données.
@@ -621,6 +626,18 @@ diagnostics-check-engine-sync = Correspond à export.pdb
 diagnostics-check-engine-sync-ok = Écrite pour export.pdb n° { $pdb }
 diagnostics-check-engine-sync-no-pdb = Écrite sans PDB : la clé USB n'en a pas à importer pour le lecteur
 diagnostics-check-engine-sync-behind = Écrite pour export.pdb n° { $library }, la clé USB a le n° { $pdb }. Le lecteur peut importer à nouveau export.pdb et analyser lui-même les morceaux. « Aperçu des corrections » peut la reconstruire
+diagnostics-check-drive-layout = Partitionnement
+diagnostics-check-drive-layout-ok = Une partition MBR en FAT32, comme les lecteurs l'attendent
+diagnostics-check-drive-layout-reformat = Pour que tous les lecteurs la lisent, sauvegardez la clé USB, reformatez-la avec une seule partition MBR en FAT32 (« Preparing a USB Drive » dans la documentation de l'application donne les étapes), puis recopiez tout dessus.
+diagnostics-drive-older-fat = Le système de fichiers est { $version }, pas FAT32.
+diagnostics-drive-exfat = Le système de fichiers est exFAT, que seuls les lecteurs récents lisent.
+diagnostics-drive-other-fs = Le système de fichiers est { $name }, que la plupart des lecteurs ne savent pas lire.
+diagnostics-drive-gpt = La table de partitions est GPT, que tous les lecteurs ne lisent pas.
+diagnostics-drive-no-table = La clé n'a pas de table de partitions : le système de fichiers occupe toute la clé.
+diagnostics-drive-other-table = La table de partitions est { $name }, pas MBR.
+diagnostics-drive-not-first = C'est la partition { $number } de la clé ; les lecteurs ne regardent que la première.
+diagnostics-drive-more-partitions = La clé a { $count } partitions ; les lecteurs ne regardent que la première.
+diagnostics-drive-fs-smaller = Le système de fichiers fait { $filesystem } dans une partition de { $partition }.
 
 diagnostics-check-parity-overall = État global de parité des lecteurs
 diagnostics-check-parity-overall-detail = playlists vérifiées : { $playlists }, playlists en échec : { $failing }, id de playlists différents : { $ids }
@@ -846,6 +863,7 @@ repair-unsupported-malformed-analysis = { $count ->
    *[other] { $count } entrées USBANLZ mal formées
 }
 repair-unsupported-malformed-analysis-reason = Elles indiquent une corruption du dossier d'analyse de la clé USB ou des fichiers égarés. Examinez les entrées du Journal des événements marquées « entrée d'analyse mal formée » et réexportez les morceaux concernés (ou reconstruisez les données d'analyse de la clé USB).
+repair-unsupported-drive-layout = La clé USB est partitionnée ou formatée d'une façon que tous les lecteurs ne lisent pas
 repair-unsupported-seek-data = { $count ->
     [one] { $count } morceau { $format }
    *[other] { $count } morceaux { $format }
