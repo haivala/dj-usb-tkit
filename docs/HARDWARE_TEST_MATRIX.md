@@ -77,7 +77,7 @@ release (0.1.0) and has stayed working through every version since.
 | CDJ-2000 | `player-menu-edit` | untested | 0.5.5 | | Added in 0.5.5. |
 | CDJ-2000NXS | everything tested | pass | 0.5.5 | 2026-11-06 | All scenarios run on 0.2.0 (2026-09-11); `player-menu-edit` on 0.5.5; cue-editor scenarios re-run on 0.2.4; `cue-points-and-edited-beatgrid` re-run on 0.3.7 with memory cues. `strict-parity-repair` was `fail` at 0.4.8; fixed in 0.4.9. |
 | CDJ-2000NXS2 | everything tested | pass | 0.5.5 | 2026-11-06 | All scenarios run on 0.2.0 (2026-09-11); `player-menu-edit` on 0.5.5; cue-editor scenarios re-run on 0.2.4; `cue-points-and-edited-beatgrid` re-run on 0.3.7 with memory cues. `more-than-16-tracks-fresh-usb-init` was `fail` at <=0.1.30; fixed in 0.1.31. `strict-parity-repair` was `fail` at 0.4.8; fixed in 0.4.9. |
-| CDJ-2000NXS2 | `track-details-and-date-added` | warn | 0.6.4 | 2026-11-21 | The player shows neither, on the app's USB or on one from rekordbox 6.8.6: a limit of the player, not of the export. |
+| CDJ-2000NXS2 | `track-details-and-date-added` | pass | 0.6.4 | 2026-11-21 | Track details are right. DATE ADDED lists no dates, on the app's USB or on one from rekordbox 6.8.6: a limit of the player, not of the export. |
 | XDJ-1000MK2 | everything tested | pass | 0.2.6 | 2026-09-29 | First validation on this device (fw 1.44). |
 | XDJ-1000MK2 | `player-menu-edit` | untested | 0.5.5 | | Added in 0.5.5. |
 | XDJ-AZ | `normal-export` | pass | 0.3.7-rc.3 | 2026-10-09 | First validation on this device (fw 1.30). |
@@ -159,7 +159,7 @@ tested` row.
 | CDJ-2000NXS | 1.44 | 0.4.9 | `strict-parity-repair` | pass | 2026-10-30 | maintainer | Same run as the CDJ-2000NXS2 row above. |
 | CDJ-2000NXS2 | 1.82 | 0.5.5 | `player-menu-edit` | pass | 2026-11-06 | maintainer | First hardware validation of the Player Menu editor. The edited menu and the background colour show on the player, on a USB with both databases and on one without an eDB. DATE ADDED always shows, as the last item, which the app's editor didn't match until the fix after 0.5.5. |
 | CDJ-2000NXS | 1.44 | 0.5.5 | `player-menu-edit` | pass | 2026-11-06 | maintainer | Same run as the CDJ-2000NXS2 row above. |
-| CDJ-2000NXS2 | 1.82 | 0.6.4 | `track-details-and-date-added` | warn | 2026-11-21 | maintainer | First run. On the app's USB the track details show no album (a track with a genre shows the genre on that line) and DATE ADDED lists no dates; the same with the eDB removed. A 2-track USB exported by rekordbox 6.8.6 behaves the same on this player: its album and its date added don't show either. So nothing to fix in the export; recorded so it isn't chased again. |
+| CDJ-2000NXS2 | 1.82 | 0.6.4 | `track-details-and-date-added` | pass | 2026-11-21 | maintainer | First run. The track details show artist, time, BPM, genre (with the genre icon) and comment; this player has no album line there. DATE ADDED lists no dates on the app's USB, the same with the eDB removed. A 2-track USB exported by rekordbox 6.8.6 behaves the same on this player: its date added doesn't show either. The app's USB matches rekordbox's on this player. |
 
 ## Known Issues
 
@@ -356,7 +356,7 @@ the repaired database files are written.
 | `playback-start-position` | Set "Playback starts at" in the cue editor, export, USB insert, database mount, track load, check the load position |
 | `engine-library` | Export with "Write Engine DJ library" on, USB insert on an Engine DJ player, library loads without importing again, track load without analysing again, app beat grid shown, hot cues trigger, play history kept after the library is rebuilt |
 | `player-menu-edit` | Add, remove and reorder Player Menu items in the app, USB insert, database mount, the player's browse menu shows the edited items in the app's order, set the background colour in the app, the player shows that colour; once on a USB with both databases and once without an eDB |
-| `track-details-and-date-added` | USB insert, database mount, track load, the track details show the album, DATE ADDED lists the dates tracks were added and each date lists its tracks; compared with a USB exported by rekordbox |
+| `track-details-and-date-added` | USB insert, database mount, track load, the track details show the genre with the genre icon, DATE ADDED lists the dates tracks were added and each date lists its tracks; compared with a USB exported by rekordbox |
 | `engine-pdb-import-artists` | Export with "Write Engine DJ library" off (no `Engine Library` folder), USB insert on an Engine DJ player, player imports `export.pdb`, browse tracks, artist shown on every track that has one |
 
 ## Recording Warn Or Fail Results
