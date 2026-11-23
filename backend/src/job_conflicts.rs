@@ -56,8 +56,7 @@ pub enum ActionGroup {
     Export,
     /// Every other change to the USB, and the checks of it (diagnostics, parity, repair).
     Usb,
-    /// Naming the USB: it moves the drive's backups and cache, so it also waits for an
-    /// open order edit.
+    /// Naming the USB: it moves the drive's backups and cache.
     UsbName,
     /// Changing what the library holds: source folders, rekordbox / Mixxx imports.
     Library,
@@ -95,9 +94,10 @@ pub fn blocked_by(blocker: Blocker) -> &'static [ActionGroup] {
         Blocker::Job(JobType::Analysis) => &[Essentia, App],
         Blocker::Job(JobType::Migration) => &[Analyze, TrackEdit, App],
         Blocker::Job(JobType::Update) => &ActionGroup::ALL,
-        // The page can't be left while it's open, so naming the drive from the header is
-        // all it has to hold off.
-        Blocker::UsbOrderEdit => &[UsbName],
+        // The page can't be left while it's open, so what it holds off is what can be
+        // reached from there: naming the drive from the header, and the update banner's
+        // install (its restart would lose the pending order).
+        Blocker::UsbOrderEdit => &[UsbName, App],
     }
 }
 
@@ -332,12 +332,13 @@ mod tests {
     }
 
     #[test]
-    fn an_open_order_edit_blocks_only_naming_the_usb() {
+    fn an_open_order_edit_blocks_naming_the_usb_and_installing_an_update() {
         let edit = [Blocker::UsbOrderEdit];
         assert_eq!(
             refusal("set_usb_device_name", edit),
             Some(tr::job_blocks_usb_order_edit().render())
         );
+        assert!(refusal("install_update", edit).is_some());
         // Its own steps, and the USB track edits on its page, go on.
         assert_eq!(refusal("move_usb_playlist", edit), None);
         assert_eq!(refusal("commit_usb_order_edit", edit), None);
@@ -367,7 +368,6 @@ mod tests {
                 "{job_type:?}"
             );
         }
-        assert_eq!(refusal("set_language", [Blocker::UsbOrderEdit]), None);
     }
 
     #[test]

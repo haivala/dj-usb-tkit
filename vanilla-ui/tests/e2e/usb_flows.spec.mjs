@@ -1762,7 +1762,7 @@ test("a running job blocks its action groups", async ({ page }) => {
   await expect(page.locator("#analyzeLibraryBtn")).toBeEnabled();
   await expect(page.locator("#usbNameBadge")).not.toHaveAttribute("data-blocked-reason");
 
-  // An open order edit blocks only naming the drive.
+  // An open order edit blocks naming the drive (and installing an update), not the rest.
   const editReason = "Save or cancel the order edit first.";
   await blocked({ "usb-name": editReason });
   await expect(page.locator("#usbNameBadge")).toHaveAttribute("data-blocked-reason", editReason);

@@ -132,11 +132,12 @@ still be on), it asks `get_blocked_actions` → `{ blockedActions }` for the cur
 | `analysis` job | | | | | | | | | ✗ | ✗ |
 | `migration` job | | | | | | | ✗ | ✗ | | ✗ |
 | `update` job | ✗ | ✗ | ✗ | ✗ | ✗ | ✗ | ✗ | ✗ | ✗ | ✗ |
-| open order edit | | | | ✗ | | | | | | |
+| open order edit | | | | ✗ | | | | | | ✗ |
 
 An analysis runs alongside an export, and app playlists can be edited during one (the
 playlist then shows as changed). The order edit's page can't be left while it's open, so
-it only has to hold off naming the drive from the header. A USB read only blocks switching to another USB: the
+it only holds off what can be reached from there: naming the drive from the header, and
+the update banner's install, whose restart would lose the pending order. A USB read only blocks switching to another USB: the
 stick's databases are read from their staged copies. A USB track edit saved while the
 `usb` group is blocked waits for it instead of failing, so an open editor's changes
 aren't lost.
