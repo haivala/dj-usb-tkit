@@ -167,6 +167,9 @@ struct DetectedRepairs {
     duplicate_audio_copies: Vec<DuplicateAudioCopy>,
     moved_audio_relinks: Vec<MovedAudioRelink>,
     damaged_tracks: NulDamagedTracks,
+    track_rebuilds: TrackRebuilds,
+    playlist_name_sources: PlaylistNameSources,
+    playlist_tree_repairs: PlaylistTreeRepairs,
     sync_edb_history_supported: bool,
     sync_edb_history_needed: bool,
     strict_upgrade_targets: HashSet<String>,
@@ -724,6 +727,7 @@ impl BackendService {
         let mut duplicate_audio_copies = Vec::<DuplicateAudioCopy>::new();
         let mut moved_audio_relinks = Vec::<MovedAudioRelink>::new();
         let mut damaged_tracks = NulDamagedTracks::default();
+        let mut track_rebuilds = TrackRebuilds::default();
         let mut sync_edb_history_supported = false;
         let mut sync_edb_history_needed = false;
 
@@ -1078,9 +1082,27 @@ impl BackendService {
             parsed_pdb.as_ref().map_or(0, |p| p.tracks.len()),
             crate::service::export_helpers::edb_t19_property(&usb_root).as_ref(),
         );
+        let playlist_name_sources = PlaylistNameSources::read(
+            &usb_root,
+            edb_conn.as_ref(),
+            self.playlist_names_exported_to(&usb_root),
+        );
+        let playlist_tree_repairs =
+            detect_damaged_playlist_tree(&staged_pdb_bytes, &playlist_name_sources);
+        // On the tree as the playlist repair leaves it, which runs first: a
+        // repaired name can make an empty playlist a duplicate.
         let pdb_empty_duplicate_playlists = parsed_pdb
             .as_ref()
-            .map(|parsed| detect_pdb_empty_duplicate_playlists(parsed))
+            .map(|parsed| {
+                if playlist_tree_repairs.is_empty() {
+                    detect_pdb_empty_duplicate_playlists(parsed)
+                } else {
+                    empty_duplicate_playlists_in(
+                        &repaired_playlist_tree(&staged_pdb_bytes, &playlist_tree_repairs),
+                        &parsed.playlist_entries,
+                    )
+                }
+            })
             .unwrap_or_default();
         let pdb_misaligned_slots = detect_pdb_string_misalignment(&staged_pdb_bytes);
         let pdb_misaligned_track_ids = misaligned_row_ids(&pdb_misaligned_slots, 0);
@@ -1146,6 +1168,46 @@ impl BackendService {
                 PDB_EC_CONFLICT_FIX_ID,
                 tr::repair_fix_ec_conflict(),
                 tr::repair_fix_ec_conflict_description(pdb_ec_conflicts.len()),
+            ));
+        }
+        if !playlist_tree_repairs.is_empty() {
+            detected_issues.push(format!(
+                "{} damaged by a crashed rekordbox write",
+                counted(playlist_tree_repairs.len(), "playlist row", "playlist rows")
+            ));
+            estimated_file_writes += 1;
+            proposed_fixes.push(RepairFixProposal {
+                estimated_deletes: playlist_tree_repairs.half_written.len(),
+                link: Some("event-log".to_string()),
+                ..fix_proposal(
+                    DAMAGED_PLAYLISTS_FIX_ID,
+                    tr::repair_fix_damaged_playlists(),
+                    tr::repair_fix_damaged_playlists_description(playlist_tree_repairs.len()),
+                )
+            });
+            for (_, _, name) in &playlist_tree_repairs.half_written {
+                warnings.push(logging::log_text(
+                    Level::Warn,
+                    "usb-diagnostics",
+                    "usb.diagnostics.half-written-playlist",
+                    &tr::repair_warning_half_written_playlist(name),
+                ));
+            }
+            for rename in playlist_tree_repairs.renames.iter().filter(|r| !r.restored) {
+                warnings.push(logging::log_text(
+                    Level::Warn,
+                    "usb-diagnostics",
+                    "usb.diagnostics.damaged-playlist-name",
+                    &tr::repair_warning_damaged_playlist_name(&rename.new),
+                ));
+            }
+        }
+        for (id, names) in &playlist_tree_repairs.undecided {
+            warnings.push(logging::log_text(
+                Level::Warn,
+                "usb-diagnostics",
+                "usb.diagnostics.playlist-id-shared",
+                &tr::repair_warning_playlist_id_shared(*id, names.join(", ")),
             ));
         }
         if !pdb_empty_duplicate_playlists.is_empty() {
@@ -1319,10 +1381,27 @@ impl BackendService {
                 // fixes below sees them.
                 damaged_tracks =
                     detect_nul_damaged_tracks(parsed, edb_conn.as_ref(), &missing_keys);
+                // Damaged rows without a twin that the stick still identifies
+                // are rebuilt instead: they aren't missing audio either.
+                track_rebuilds = detect_track_rebuilds(
+                    &usb_root,
+                    parsed,
+                    edb_conn.as_ref(),
+                    &damaged_tracks,
+                    &missing_keys,
+                );
+                let rebuilt_keys = track_rebuilds
+                    .old_paths()
+                    .map(audio_path_key)
+                    .collect::<HashSet<_>>();
+                damaged_tracks
+                    .without_twin
+                    .retain(|p| !rebuilt_keys.contains(&audio_path_key(p)));
                 let merged_keys = damaged_tracks
                     .merged_paths
                     .iter()
                     .map(|p| audio_path_key(p))
+                    .chain(rebuilt_keys)
                     .collect::<HashSet<_>>();
                 missing_keys.retain(|key| !merged_keys.contains(key));
                 if !damaged_tracks.is_empty() {
@@ -1338,6 +1417,39 @@ impl BackendService {
                             tr::repair_fix_damaged_tracks_description(damaged_tracks.len()),
                         )
                     });
+                }
+                if !track_rebuilds.is_empty() {
+                    detected_issues.push(format!(
+                        "{} damaged by a crashed rekordbox write, with no intact twin",
+                        counted(track_rebuilds.len(), "track row", "track rows")
+                    ));
+                    proposed_fixes.push(RepairFixProposal {
+                        estimated_deletes: track_rebuilds.removed(),
+                        link: Some("event-log".to_string()),
+                        ..fix_proposal(
+                            REBUILD_DAMAGED_TRACK_ROWS_FIX_ID,
+                            tr::repair_fix_rebuild_damaged_tracks(),
+                            tr::repair_fix_rebuild_damaged_tracks_description(track_rebuilds.len()),
+                        )
+                    });
+                    for path in track_rebuilds.removed_paths() {
+                        warnings.push(logging::log_text(
+                            Level::Warn,
+                            "usb-diagnostics",
+                            "usb.diagnostics.damaged-track-removed",
+                            &tr::repair_warning_damaged_track_removed(
+                                path.replace('\0', "\u{fffd}"),
+                            ),
+                        ));
+                    }
+                    for path in &track_rebuilds.kept_for_history {
+                        warnings.push(logging::log_text(
+                            Level::Warn,
+                            "usb-diagnostics",
+                            "usb.diagnostics.damaged-track-kept",
+                            &tr::repair_warning_damaged_track_kept(path.replace('\0', "\u{fffd}")),
+                        ));
+                    }
                 }
                 for path in &damaged_tracks.without_twin {
                     warnings.push(logging::log_text(
@@ -1356,6 +1468,9 @@ impl BackendService {
                 missing_audio_paths = presence.missing.clone();
                 missing_audio_paths.retain(|p| !merged_keys.contains(&audio_path_key(p)));
                 unindexed_audio_files = presence.unindexed.clone();
+                // The files rebuilt rows name again.
+                let claimed = track_rebuilds.claimed_paths();
+                unindexed_audio_files.retain(|p| !claimed.contains(&audio_path_key(p)));
 
                 // A copy of an indexed file sitting next to it is not a new
                 // track: offer to delete it rather than add the same track to
@@ -1748,13 +1863,14 @@ impl BackendService {
         } else {
             req.selected_fix_ids.iter().cloned().collect()
         };
-        // Bookkeeping is never offered for selection; it rides along with
-        // every repair that runs.
+        // Bookkeeping is never offered for selection, and the damage repairs
+        // aren't optional (`fix_always_applied`): both ride along with every
+        // repair that runs, whatever was selected.
         if req.apply {
             selected.extend(
                 proposed_fixes
                     .iter()
-                    .filter(|f| f.bookkeeping)
+                    .filter(|f| f.bookkeeping || (f.supported && f.always_applied))
                     .map(|f| f.id.clone()),
             );
         }
@@ -1794,6 +1910,9 @@ impl BackendService {
             duplicate_audio_copies,
             moved_audio_relinks,
             damaged_tracks,
+            track_rebuilds,
+            playlist_name_sources,
+            playlist_tree_repairs,
             sync_edb_history_supported,
             sync_edb_history_needed,
             strict_upgrade_targets,
@@ -1956,6 +2075,9 @@ impl BackendService {
             duplicate_audio_copies,
             moved_audio_relinks,
             damaged_tracks,
+            track_rebuilds,
+            playlist_name_sources,
+            playlist_tree_repairs,
             sync_edb_history_supported,
             sync_edb_history_needed,
             strict_upgrade_targets,
@@ -1978,44 +2100,6 @@ impl BackendService {
                 return outcomes;
             }
         };
-
-        if selected.contains(EMPTY_ANALYSIS_FILES_FIX_ID) {
-            progress.start(&tr::repair_fix_empty_analysis());
-            match pdb.on_file(|| {
-                self.apply_fix_empty_analysis_files(
-                    usb_root,
-                    &empty_analysis_paths,
-                    session.edb_conn(),
-                    parsed_pdb.as_deref(),
-                    warnings,
-                )
-            }) {
-                Ok((fixed, skipped, failed, write_count)) => {
-                    *estimated_file_writes = (*estimated_file_writes).max(write_count);
-                    if failed > 0 {
-                        outcomes.push(
-                            tr::repair_fix_empty_analysis(),
-                            FixResult::PartlyFailed(Detail::Text(
-                                tr::repair_outcome_detail_fixed_skipped_failed(
-                                    fixed, skipped, failed,
-                                ),
-                            )),
-                        );
-                    } else if fixed > 0 {
-                        outcomes.applied(
-                            tr::repair_fix_empty_analysis(),
-                            Detail::Text(tr::repair_outcome_detail_fixed_skipped(fixed, skipped)),
-                        );
-                    } else {
-                        outcomes.nothing_to_apply(tr::repair_fix_empty_analysis());
-                    }
-                }
-                Err(err) => outcomes.failed(tr::repair_fix_empty_analysis(), &err),
-            }
-            progress.finish();
-        } else if !empty_analysis_paths.is_empty() {
-            outcomes.not_selected(tr::repair_fix_empty_analysis());
-        }
 
         // Unlike the other structural repairs (which are safe to run after
         // strict parity, since write_pdb's own additive writes establish
@@ -2046,9 +2130,9 @@ impl BackendService {
         // (`append_rows_to_chain_in_place`); if this repair ran afterward
         // using the now-stale boundary, it would truncate the file back down
         // and silently drop everything strict parity had just written.
-        // Neither `fix_empty_analysis_files` nor the truncated-table-chain
-        // repair above grow the PDB file, so running this immediately after
-        // them (and still before strict parity) keeps the boundary accurate.
+        // The truncated-table-chain repair above doesn't grow the PDB file,
+        // so running this immediately after it (and before anything that
+        // appends rows) keeps the boundary accurate.
         outcomes.record_with_progress(
             progress,
             tr::repair_fix_torn_growth(),
@@ -2115,6 +2199,143 @@ impl BackendService {
             },
         );
 
+        // After the merge, which takes the rows that have a twin; before
+        // strict parity, which then compares, and for a missing database
+        // copies, the rebuilt rows. Appends relocated rows, so after the
+        // torn-growth truncation.
+        outcomes.record_with_progress(
+            progress,
+            tr::repair_fix_rebuild_damaged_tracks(),
+            selected.contains(REBUILD_DAMAGED_TRACK_ROWS_FIX_ID),
+            !track_rebuilds.is_empty(),
+            || {
+                let mut edb_rows = 0;
+                let mut edb_removed = 0;
+                if !track_rebuilds.edb.is_empty() || !track_rebuilds.edb_removed.is_empty() {
+                    let Some(mut handle) = EdbRw::shared_or_open(session.edb_conn(), usb_root)
+                    else {
+                        return Err(BackendError::Internal(
+                            "the eDB could not be opened".to_string(),
+                        ));
+                    };
+                    let tx = handle.conn().transaction()?;
+                    edb_rows = apply_edb_track_rebuilds(&tx, &track_rebuilds.edb)?;
+                    edb_removed = apply_edb_track_removals(&tx, &track_rebuilds.edb_removed)?;
+                    tx.commit()?;
+                }
+                let pdb_rows = if track_rebuilds.pdb.is_empty() {
+                    0
+                } else {
+                    pdb.patch(|bytes| apply_pdb_track_rebuilds(bytes, &track_rebuilds.pdb))?
+                };
+                let pdb_removed = if track_rebuilds.pdb_removed.is_empty() {
+                    0
+                } else {
+                    let ids: HashSet<u32> =
+                        track_rebuilds.pdb_removed.iter().map(|r| r.id).collect();
+                    pdb.on_file(|| {
+                        let removal = remove_tracks_from_pdb(usb_root, &ids)?;
+                        // Fewer tracks: tt=19 follows the new count, as the
+                        // merge's removal does.
+                        let pdb_path = usb_staging::required_pdb(usb_root)?;
+                        let mut bytes = std::fs::read(&pdb_path)?;
+                        let t19 = crate::service::export_helpers::edb_t19_property(usb_root);
+                        if apply_pdb_t19_template_state_repair(&mut bytes, t19.as_ref())? {
+                            std::fs::write(&pdb_path, &bytes)?;
+                        }
+                        Ok(removal.track_rows)
+                    })?
+                };
+                Ok(Detail::File(format!(
+                    "PDB: rebuilt {}, removed {}; eDB: rebuilt {}, removed {}",
+                    counted(pdb_rows, "track row", "track rows"),
+                    counted(pdb_removed, "track row", "track rows"),
+                    counted(edb_rows, "track row", "track rows"),
+                    counted(edb_removed, "track row", "track rows")
+                )))
+            },
+        );
+
+        // Before strict parity, which refuses to write while a playlist row
+        // changed under it, and before the empty duplicates, which compare
+        // names. Detected again on the PDB the fixes above left.
+        outcomes.record_with_progress(
+            progress,
+            tr::repair_fix_damaged_playlists(),
+            selected.contains(DAMAGED_PLAYLISTS_FIX_ID),
+            !playlist_tree_repairs.is_empty(),
+            || {
+                let rows = pdb.patch(|bytes| {
+                    let repairs = detect_damaged_playlist_tree(bytes, &playlist_name_sources);
+                    apply_damaged_playlist_tree(bytes, &repairs)
+                })?;
+                Ok(Detail::File(format!(
+                    "PDB: repaired {}",
+                    counted(rows, "playlist row", "playlist rows")
+                )))
+            },
+        );
+
+        // Before strict parity, which matches playlists by name: an empty
+        // copy left in place would stand in for the real playlist and the
+        // merge would never settle. The eDB drops the same copy if it has it.
+        outcomes.record_with_progress(
+            progress,
+            tr::repair_fix_empty_duplicate_playlists(),
+            selected.contains(PDB_EMPTY_DUPLICATE_PLAYLISTS_FIX_ID),
+            !pdb_empty_duplicate_playlists.is_empty(),
+            || {
+                let removed =
+                    pdb.patch(|bytes| apply_pdb_empty_duplicate_playlists_repair(bytes))?;
+                if let Some(conn) = session.edb_conn() {
+                    remove_edb_empty_duplicate_playlists(conn, &removed)?;
+                }
+                Ok(Detail::Text(
+                    tr::repair_outcome_detail_empty_duplicate_playlists(removed.len()),
+                ))
+            },
+        );
+
+        // Every fix above is a damage repair (`fix_always_applied`); every
+        // one from here on is optional.
+        if selected.contains(EMPTY_ANALYSIS_FILES_FIX_ID) {
+            progress.start(&tr::repair_fix_empty_analysis());
+            match pdb.on_file(|| {
+                self.apply_fix_empty_analysis_files(
+                    usb_root,
+                    &empty_analysis_paths,
+                    session.edb_conn(),
+                    parsed_pdb.as_deref(),
+                    warnings,
+                )
+            }) {
+                Ok((fixed, skipped, failed, write_count)) => {
+                    *estimated_file_writes = (*estimated_file_writes).max(write_count);
+                    if failed > 0 {
+                        outcomes.push(
+                            tr::repair_fix_empty_analysis(),
+                            FixResult::PartlyFailed(Detail::Text(
+                                tr::repair_outcome_detail_fixed_skipped_failed(
+                                    fixed, skipped, failed,
+                                ),
+                            )),
+                        );
+                    } else if fixed > 0 {
+                        outcomes.applied(
+                            tr::repair_fix_empty_analysis(),
+                            Detail::Text(tr::repair_outcome_detail_fixed_skipped(fixed, skipped)),
+                        );
+                    } else {
+                        outcomes.nothing_to_apply(tr::repair_fix_empty_analysis());
+                    }
+                }
+                Err(err) => outcomes.failed(tr::repair_fix_empty_analysis(), &err),
+            }
+            progress.finish();
+        } else if !empty_analysis_paths.is_empty() {
+            outcomes.not_selected(tr::repair_fix_empty_analysis());
+        }
+
         // Before strict parity, so its additive write already finds t19
         // counting the tracks and leaves it alone (parity's own additive
         // writes keep it in sync if they add tracks). Grows nothing, so the torn-growth
@@ -2137,26 +2358,6 @@ impl BackendService {
                             .to_string(),
                         )
                     })
-            },
-        );
-
-        // Before strict parity, which matches playlists by name: an empty
-        // copy left in place would stand in for the real playlist and the
-        // merge would never settle. The eDB drops the same copy if it has it.
-        outcomes.record_with_progress(
-            progress,
-            tr::repair_fix_empty_duplicate_playlists(),
-            selected.contains(PDB_EMPTY_DUPLICATE_PLAYLISTS_FIX_ID),
-            !pdb_empty_duplicate_playlists.is_empty(),
-            || {
-                let removed =
-                    pdb.patch(|bytes| apply_pdb_empty_duplicate_playlists_repair(bytes))?;
-                if let Some(conn) = session.edb_conn() {
-                    remove_edb_empty_duplicate_playlists(conn, &removed)?;
-                }
-                Ok(Detail::Text(
-                    tr::repair_outcome_detail_empty_duplicate_playlists(removed.len()),
-                ))
             },
         );
 

@@ -126,25 +126,36 @@ When `apply=true`:
 - selected fixes are applied if `selectedFixIds` is non-empty;
 - if `selectedFixIds` is empty, all supported non-optional fixes are selected;
 - `sync_edb_history_from_pdb` and `keep_engine_library_up_to_date` are optional and are not selected by default;
-- `repair_pdb_truncated_table_chain` and `repair_pdb_torn_growth_pages` both run
-  *before* strict parity upgrade — `repair_pdb_truncated_table_chain` because
-  additive track appends hard-fail while a table's chain is unreachable, and
-  `repair_pdb_torn_growth_pages` because its dirty-tail truncation boundary is
-  computed once, up front, and would otherwise go stale and cut off
-  tracks/playlists that strict parity had just written;
-- `repair_pdb_damaged_page_headers` and then `merge_damaged_track_rows` run
-  next, also before strict parity: the writers and the parser read the live-row
-  count, and a damaged row's entries must sit on its twin before parity compares
-  the two databases' playlists;
-- `repair_pdb_t19_template_state` runs right after those and before strict
-  parity upgrade, so strict parity's additive write finds `t19` already counting
-  the tracks and leaves it alone; all other structural PDB page repairs run *after* strict
+- the damage repairs are not optional: `repair_pdb_truncated_table_chain`,
+  `repair_pdb_torn_growth_pages`, `repair_pdb_damaged_page_headers`,
+  `merge_damaged_track_rows`, `rebuild_damaged_track_rows`,
+  `repair_damaged_playlist_rows` and
+  `remove_pdb_empty_duplicate_playlists` are added to every apply whatever
+  `selectedFixIds` holds, the desktop UI locks their checkboxes
+  (`always_applied`), and they run first, in that order, before any optional fix:
+  - `repair_pdb_truncated_table_chain` because additive track appends hard-fail
+    while a table's chain is unreachable;
+  - `repair_pdb_torn_growth_pages` before anything grows the file, because its
+    dirty-tail truncation boundary is computed once, up front, and would
+    otherwise cut off rows written after it;
+  - `repair_pdb_damaged_page_headers` because the writers and the parser read
+    the live-row count;
+  - `merge_damaged_track_rows` and `rebuild_damaged_track_rows` so that every
+    later fix, strict parity included, works on repaired track rows: a damaged
+    row's entries sit on its twin, and a missing database is rebuilt from
+    repaired rows, never damaged ones;
+  - `repair_damaged_playlist_rows` because strict parity refuses to write
+    while a playlist row changed under it, and the empty-duplicate check
+    compares the repaired names (it is detected on the tree as this fix
+    leaves it);
+  - `remove_pdb_empty_duplicate_playlists` because strict parity matches
+    playlists by name;
+- the optional fixes follow: `fix_empty_analysis_files`, then
+  `repair_pdb_t19_template_state` (before strict parity upgrade, so its additive
+  write finds `t19` already counting the tracks and leaves it alone), then strict
+  parity upgrade; all other structural PDB page repairs run *after* strict
   parity upgrade, and `repair_pdb_page_footer_transaction` is detected again on
   the PDB strict parity left;
-- the desktop UI's repair preview locks the checkboxes of these fixes that run
-  before strict parity (`always_applied`; `repair_pdb_t19_template_state` is not
-  locked) whenever they're proposed — they cannot be deselected while leaving
-  strict parity selected, since there is no safe outcome from skipping one;
 - rekordbox bookkeeping fixes (see below) are added to every apply, whatever
   `selectedFixIds` holds;
 - report commands still remain read-only.
@@ -171,7 +182,9 @@ The current code can propose these repair IDs:
 | `repair_pdb_header_compatibility_field` | PDB header bytes `0x10..0x14` | Writes only that 4-byte field to the built-in compatibility value `5`. A value rekordbox writes (`1`, `4`) is bookkeeping: no warning, and it is set to `5` only when another repair runs. Any other value warns and is a fix of its own. A local backup snapshot's value is never used |
 | `repair_pdb_page_footer_transaction` | data pages whose `u5`/`num_rl` don't follow their own `tranrf` (docs/PDB.md, "The transaction rule"): rekordbox 6 crashes or loses its playlists on its next export. Older app versions left these on rekordbox's pages. Shown as a FAIL "PDB page headers" check | Sets `(u5, num_rl)` from the page's `tranrf`. A group whose `tranrf` an old repair filled from `rowpf` gets its copy dropped first when other groups still hold rekordbox's own bits; a page with no `tranrf` bit at all gets the table's fresh-write shape. A page that follows the rule is never touched. Re-detected after strict parity |
 | `repair_pdb_damaged_page_headers` | data pages a crashed rekordbox write left with flags other than `0x24`/`0x34` (`0x10`) or a live-row count that doesn't match `rowpf`. Shown as a FAIL "PDB page headers" check | Sets flags `0x24` and the live-row count to the number of `rowpf` bits. Runs before strict parity |
-| `merge_damaged_track_rows` | a track row whose path or title holds NUL runs from a crashed rekordbox write and whose file is missing, next to exactly one intact row for the same audio: same file size and duration (and, in the eDB, the same rekordbox `masterDbId`/`masterContentId`) with its file present. Each database is matched on its own | Moves the damaged row's playlist and history entries to the twin (a playlist entry is dropped where the playlist already holds the twin; history is never dropped), then deletes the row, in both databases. Merged rows are left out of the missing-audio fixes. A damaged row without exactly one twin stays missing audio and gets a `usb.diagnostics.damaged-track` warning. Runs before strict parity |
+| `merge_damaged_track_rows` | a track row whose path or title holds NUL runs from a crashed rekordbox write and whose file is missing, next to exactly one intact row for the same audio: same file size and duration (and, in the eDB, the same rekordbox `masterDbId`/`masterContentId`), with its file present and its path fitting the damaged one (each NUL run stands for up to as many characters). Each database is matched on its own | The row in a play history stays (a CDJ may have played rekordbox's newer copy); when both or neither are, the earlier row (lower id) stays, since it was written before the crash and the newer one is rekordbox's copy. The other row's playlist and history entries move to it (a playlist entry is dropped where the playlist already holds it; history is never dropped), then the other row is deleted, in both databases. When the damaged row is the one that stays, `rebuild_damaged_track_rows` gives it its twin's path and undamaged strings. Merged rows are left out of the missing-audio fixes. A damaged row without exactly one twin goes to `rebuild_damaged_track_rows`. Not optional; runs before strict parity |
+| `rebuild_damaged_track_rows` | a track row with NUL runs from a crashed rekordbox write (or an emptied path) and no twin for `merge_damaged_track_rows`, in either database on its own: (a) its path is damaged and the stick still identifies its file, or (b) its path is intact and the file is there but another string is damaged | (a) Finds the file from: the stick's files no intact row of that database points at, with the row's file size, whose path fits the damaged one (each NUL run stands for up to as many characters; a path without its extension was cut short); the `PPTH` of the bundle an undamaged analysis path names; the newest backup PDB's row with the same id (PDB rows); the other database's one intact row with the same size and duration. A source only counts when it names such a file; the row is rebuilt when the sources together name exactly one file and no other damaged row names it. Works without an eDB. (b) and (a) then rewrite every damaged string: path and file name from the file, others from the other database's row for the same file where that string is undamaged, else the title from the file's tags (or name) and the analysis path from the bundle whose `PPTH` names the file, the rest emptied. Ids, numbers, playlist and history entries stay. A row no source repairs is still damage rekordbox breaks on, so it doesn't stay whatever is selected: with its path intact (its file missing) its other strings are repaired the same way, the rest emptied; with its path lost (NUL runs or emptied) it is removed from that database with its playlist entries (`usb.diagnostics.damaged-track-removed`), or, when it is in a play history, kept with the NULs dropped from every string (`usb.diagnostics.damaged-track-kept`). After this fix no crash-damaged track row is left, so strict parity never rewrites one. Not optional; runs before strict parity |
+| `repair_damaged_playlist_rows` | playlist-tree (t07) rows a crashed rekordbox write damaged, in the PDB: (a) two live rows with the same id where only one was touched by the page's last write (`tranrf`), and, when there is an eDB, it has a playlist whose name the other row's name fits; (b) live names with NUL runs | Playlists are matched by name only, as everywhere between the PDB and the eDB, which number their playlists on their own. (a) Removes the half-written row (the one in the last write); the earlier row stays. The two shared one list of entries, so strict parity adds the half-written playlist back from the eDB when the eDB has it; without an eDB it is lost, and the Event Log says so. (b) Gives the name back from the first source with exactly one name that fits (each NUL run stands for up to as many characters, the rest in full): the eDB's playlists, the backup PDBs' (newest first), the tree's deleted rows, the app's playlists last exported to this USB. When more than one fits, names other playlists already have don't count, and rows are resolved in passes; a row all of whose fitting names are taken is a copy and gets the first of them, so `remove_pdb_empty_duplicate_playlists` (detected on the repaired tree) removes it when it is empty. With no fitting name, drops the NULs and says so in the Event Log. Renames in place when the name encodes to the same length, else writes a new row with the same id, parent and sort order. Live rows sharing an id that this can't decide (the last write touched both or neither, or no eDB playlist fits) get a `usb.diagnostics.playlist-id-shared` warning and are left alone. Not optional; runs before strict parity |
 | `repair_pdb_stale_sentinel_btree` | sentinel pages with stale B-tree entries | Resets the sentinel B-tree index area to the empty state |
 | `repair_pdb_ec_data_page_conflict` | table `empty_candidate` pointer aliasing another table's data page | Assigns each conflicting table a new empty candidate beyond the current file tail and updates `next_unused_page` |
 | `repair_pdb_torn_growth_pages` | torn additive-growth write left by an interrupted export (e.g. USB disconnected mid-write) | Zeroes `empty_candidate` page(s) that hold garbage instead of a blank reusable page, truncates any never-populated file tail beyond `next_unused_page`, and recomputes `seqdb` |

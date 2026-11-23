@@ -23,23 +23,8 @@ Keep beyond 1.0.0, since other writers or interrupted writes cause these too:
 torn growth pages, truncated table chain, unknown header compatibility values,
 empty duplicate playlists, strict parity, the audio fixes, history sync, the
 Engine DJ library, page footer transaction (a crashed rekordbox write breaks it
-too), damaged page headers and the damaged track row merge.
-
-## rekordbox crash damage: what repair still can't do
-
-A crashed rekordbox write can leave NUL runs in a track row's strings. Repair
-merges such a row into an intact twin for the same file. A damaged row with no
-twin (or more than one candidate) only gets a warning in the Event Log and
-stays "missing audio": its real path is lost. If such rows turn up in play
-history on real USBs, look at rebuilding the row from the eDB's intact row for
-the same track (same file size, duration and rekordbox master ids).
-
-The same crash can hit the playlist tree: a half-written new row in a deleted
-slot, live with the id of another live playlist, and NUL runs in a playlist
-name. Strict parity then refuses to write (the playlist row "changed"), so the
-PDB stays as it is. A fix would drop the half-written row (the eDB has no
-playlist for it) and restore the damaged name from the eDB's playlist with the
-same id.
+too), damaged page headers, the damaged track row merge and rebuild, and the
+damaged playlist repair.
 
 ## Diagnostics: characters the CDJ can't show
 

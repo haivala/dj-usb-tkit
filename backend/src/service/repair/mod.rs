@@ -68,11 +68,13 @@ use super::diagnostics::{
 
 mod audio_fixes;
 mod background_color;
+mod damaged_playlists;
 mod damaged_tracks;
 mod history;
 mod overview;
 mod pdb_fixes;
 mod player_menu;
+mod rebuild_tracks;
 mod run;
 mod strict_parity;
 mod write_gate;
@@ -81,10 +83,12 @@ pub use write_gate::{pdb_shape_problems, pdb_write_problems};
 mod tests;
 
 use audio_fixes::*;
+use damaged_playlists::*;
 use damaged_tracks::*;
 use history::*;
 use overview::*;
 pub(crate) use pdb_fixes::*;
+use rebuild_tracks::*;
 pub(crate) use strict_parity::*;
 
 const EMPTY_ANALYSIS_FILES_FIX_ID: &str = "fix_empty_analysis_files";
@@ -109,11 +113,15 @@ const PDB_TRUNCATED_TABLE_CHAIN_FIX_ID: &str = "repair_pdb_truncated_table_chain
 const PDB_EMPTY_DUPLICATE_PLAYLISTS_FIX_ID: &str = "remove_pdb_empty_duplicate_playlists";
 const PDB_T19_TEMPLATE_STATE_FIX_ID: &str = "repair_pdb_t19_template_state";
 const DAMAGED_TRACK_ROWS_FIX_ID: &str = "merge_damaged_track_rows";
+const REBUILD_DAMAGED_TRACK_ROWS_FIX_ID: &str = "rebuild_damaged_track_rows";
+const DAMAGED_PLAYLISTS_FIX_ID: &str = "repair_damaged_playlist_rows";
 
-/// Structural-prerequisite fixes the strict-parity upgrade needs to have run
-/// first -- surfaced to the editor as `RepairFixProposal.always_applied` so it
-/// can lock their checkbox. Kept in lockstep with `REPAIR_FIX_DISPLAY_ORDER`
-/// and the apply block.
+/// Fixes for damage a USB can't be used with: broken page structure and rows
+/// a crashed rekordbox write left behind. Not optional: every apply runs
+/// them, before any optional fix, whatever was selected, and the editor
+/// locks their checkbox (`RepairFixProposal.always_applied`). Strict parity,
+/// including rebuilding a missing database, then works on repaired rows.
+/// Kept in lockstep with `REPAIR_FIX_DISPLAY_ORDER` and the apply block.
 fn fix_always_applied(fix_id: &str) -> bool {
     matches!(
         fix_id,
@@ -121,6 +129,8 @@ fn fix_always_applied(fix_id: &str) -> bool {
             | PDB_TORN_GROWTH_PAGES_FIX_ID
             | PDB_DAMAGED_PAGE_HEADERS_FIX_ID
             | DAMAGED_TRACK_ROWS_FIX_ID
+            | REBUILD_DAMAGED_TRACK_ROWS_FIX_ID
+            | DAMAGED_PLAYLISTS_FIX_ID
             | PDB_EMPTY_DUPLICATE_PLAYLISTS_FIX_ID
     )
 }
@@ -141,27 +151,23 @@ const ENGINE_LIBRARY_FIX_ID: &str = "keep_engine_library_up_to_date";
 const PDB_ALBUM_STRING_ALIGNMENT_FIX_ID: &str = "repair_pdb_album_string_alignment";
 const PDB_ARTIST_NAME_LAYOUT_FIX_ID: &str = "repair_pdb_artist_name_layout";
 
-/// The order proposed fixes are shown in (and, for the first four entries,
-/// the order they're actually applied in — see the apply block below). Must
-/// be kept in sync with that block by hand: truncated-table-chain and
-/// torn-growth-pages are structural prerequisites that always run before
-/// strict parity, so they must also always be displayed first.
-///
-/// If a future fix is likewise a structural prerequisite for strict parity
-/// (must physically run before it, not just "happens to run early"), three
-/// places need updating together: its position in the apply block below, its
-/// position in this array, and `fix_always_applied` above — which sets
-/// `RepairFixProposal.always_applied` so the editor locks that fix's checkbox
-/// checked (a user can't deselect a prerequisite while leaving strict parity
-/// selected).
+/// The order proposed fixes are shown and applied in (see the apply block in
+/// `run.rs`, kept in sync by hand). The `fix_always_applied` fixes come
+/// first, in the order they must run: the page structure before anything
+/// reads rows (torn growth before anything grows the file, since its
+/// truncation boundary was worked out on the file as it was), then damaged
+/// track rows, damaged playlist rows, then empty duplicate playlists. Every optional
+/// fix comes after them.
 const REPAIR_FIX_DISPLAY_ORDER: &[&str] = &[
-    EMPTY_ANALYSIS_FILES_FIX_ID,
     PDB_TRUNCATED_TABLE_CHAIN_FIX_ID,
     PDB_TORN_GROWTH_PAGES_FIX_ID,
     PDB_DAMAGED_PAGE_HEADERS_FIX_ID,
     DAMAGED_TRACK_ROWS_FIX_ID,
-    PDB_T19_TEMPLATE_STATE_FIX_ID,
+    REBUILD_DAMAGED_TRACK_ROWS_FIX_ID,
+    DAMAGED_PLAYLISTS_FIX_ID,
     PDB_EMPTY_DUPLICATE_PLAYLISTS_FIX_ID,
+    EMPTY_ANALYSIS_FILES_FIX_ID,
+    PDB_T19_TEMPLATE_STATE_FIX_ID,
     STRICT_PARITY_UPGRADE_FIX_ID,
     PDB_DUPLICATE_PLAYLIST_ENTRIES_FIX_ID,
     PDB_INCONSISTENT_FOOTERS_FIX_ID,

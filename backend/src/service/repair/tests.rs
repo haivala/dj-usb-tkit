@@ -2409,7 +2409,7 @@ fn repair_rows_are_ready_to_show() {
 }
 
 #[test]
-fn damaged_track_rows_pair_only_with_one_intact_twin() {
+fn damaged_track_rows_pair_only_with_one_intact_twin_and_keep_the_played_or_earlier_row() {
     let track = |id: u32, path: &str, size: u32| crate::pdb_reader::PdbTrackRow {
         id,
         track_file_path: path.to_string(),
@@ -2420,37 +2420,64 @@ fn damaged_track_rows_pair_only_with_one_intact_twin() {
     };
     let parsed = ParsedPdb {
         tracks: vec![
-            // NUL runs in the path; one intact row for the same file.
+            // NUL runs in the path; one intact row for the same file. The
+            // damaged row is the earlier one, so it stays.
             track(1, "/Contents/Artist A/Song\0\0ne.mp3", 1000),
             track(2, "/Contents/Artist A/Song One.mp3", 1000),
             // Damaged, but two intact rows fit: no merge.
             track(3, "/Contents/Artist B/Tw\0\0.mp3", 2000),
             track(4, "/Contents/Artist B/Two.mp3", 2000),
-            track(5, "/Contents/Artist B/Two-1.mp3", 2000),
+            track(5, "/Contents/Artist B/Twa.mp3", 2000),
             // A plain missing file without damage is not this fix's business.
             track(6, "/Contents/Artist C/Gone.mp3", 1000),
+            // The intact row is the earlier one: the damaged one goes.
+            track(7, "/Contents/Artist D/Four.mp3", 3000),
+            track(8, "/Contents/Artist D/F\0\0r.mp3", 3000),
+            // Same size and duration, but the name doesn't fit: no twin.
+            track(9, "/Contents/Artist E/Fiv\0\0mp3", 4000),
+            track(10, "/Contents/Artist E/Other.mp3", 4000),
+            // The newer row is in a play history: it stays, though the
+            // damaged one is earlier.
+            track(11, "/Contents/Artist F/S\0\0.mp3", 5000),
+            track(12, "/Contents/Artist F/Six.mp3", 5000),
         ],
+        history_entries: vec![crate::pdb_reader::PdbHistoryEntryRow {
+            track_id: Some(12),
+            playlist_id: 1,
+            entry_index: 1,
+            source_table: 12,
+        }],
         ..ParsedPdb::default()
     };
     let missing_keys: HashSet<String> = [
         "/Contents/Artist A/Song\0\0ne.mp3",
         "/Contents/Artist B/Tw\0\0.mp3",
         "/Contents/Artist C/Gone.mp3",
+        "/Contents/Artist D/F\0\0r.mp3",
+        "/Contents/Artist E/Fiv\0\0mp3",
+        "/Contents/Artist F/S\0\0.mp3",
     ]
     .iter()
     .map(|p| audio_path_key(p))
     .collect();
 
     let found = detect_nul_damaged_tracks(&parsed, None, &missing_keys);
-    assert_eq!(found.pdb_twins, HashMap::from([(1, 2)]));
+    assert_eq!(found.pdb_twins, HashMap::from([(2, 1), (8, 7), (11, 12)]));
     assert!(found.edb_twins.is_empty());
     assert_eq!(
         found.merged_paths,
-        vec!["/Contents/Artist A/Song\0\0ne.mp3".to_string()]
+        vec![
+            "/Contents/Artist A/Song\0\0ne.mp3".to_string(),
+            "/Contents/Artist D/F\0\0r.mp3".to_string(),
+            "/Contents/Artist F/S\0\0.mp3".to_string(),
+        ]
     );
     assert_eq!(
         found.without_twin,
-        vec!["/Contents/Artist B/Tw\0\0.mp3".to_string()]
+        vec![
+            "/Contents/Artist B/Tw\0\0.mp3".to_string(),
+            "/Contents/Artist E/Fiv\0\0mp3".to_string(),
+        ]
     );
 }
 

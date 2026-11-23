@@ -849,10 +849,20 @@ fn parse_history_row(row: &[u8]) -> Option<PdbHistoryRow> {
 }
 
 pub(crate) fn get_string_from_pdb(row: &[u8], offset: usize) -> Option<String> {
+    raw_pdb_string(row, offset).map(|(value, _)| value.trim_end_matches('\0').to_string())
+}
+
+/// The DeviceSQL string at `offset` with every NUL kept (a crashed rekordbox
+/// write can leave NULs at its end too), and its encoded length in bytes.
+pub(crate) fn raw_pdb_string(row: &[u8], offset: usize) -> Option<(String, usize)> {
     let n = read_u8(row, offset)? as usize;
     if n % 2 == 1 {
         let r = (n - 1) / 2;
-        return get_string_range(row, offset + 1, offset + r);
+        let (start, end) = (offset + 1, offset + r);
+        if start >= end || end > row.len() {
+            return None;
+        }
+        return Some((String::from_utf8_lossy(&row[start..end]).into_owned(), r));
     }
 
     let code = read_u8(row, offset)?;
@@ -872,26 +882,18 @@ pub(crate) fn get_string_from_pdb(row: &[u8], offset: usize) -> Option<String> {
         return None;
     }
     let data = &row[offset + 4..end];
-    Some(match enc {
+    let value = match enc {
         "utf16le" => {
             let mut buf = Vec::with_capacity(data.len() / 2);
             for chunk in data.as_chunks::<2>().0 {
                 buf.push(u16::from_le_bytes(*chunk));
             }
             String::from_utf16_lossy(&buf)
-                .trim_end_matches('\0')
-                .to_string()
         }
-        "utf8" => String::from_utf8_lossy(data)
-            .trim_end_matches('\0')
-            .to_string(),
-        _ => data
-            .iter()
-            .map(|b| *b as char)
-            .collect::<String>()
-            .trim_end_matches('\0')
-            .to_string(),
-    })
+        "utf8" => String::from_utf8_lossy(data).into_owned(),
+        _ => data.iter().map(|b| *b as char).collect::<String>(),
+    };
+    Some((value, len))
 }
 
 // Decode a range string slot (title=17, anlz_path=14).

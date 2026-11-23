@@ -61,6 +61,17 @@ fn list_stem_files(dir: &Path, stem: &str, ext: &str) -> Vec<PathBuf> {
     files
 }
 
+/// The PDB backups of `usb_root`, on the stick and in the cache, newest first.
+pub(crate) fn backup_pdb_files(usb_root: &Path) -> Vec<PathBuf> {
+    let mut files = list_stem_files(&usb_backups_dir(usb_root), "export", "pdb");
+    if let Some(dir) = cache_backups_dir(usb_root) {
+        files.extend(list_stem_files(&dir, "export", "pdb"));
+    }
+    // Same fixed-width timestamped names in both folders.
+    files.sort_by(|a, b| b.file_name().cmp(&a.file_name()));
+    files
+}
+
 /// Timestamps with a `{timestamp}.reason.json` sidecar present in `dir`.
 fn list_reason_timestamps(dir: &Path) -> Vec<String> {
     std::fs::read_dir(dir)

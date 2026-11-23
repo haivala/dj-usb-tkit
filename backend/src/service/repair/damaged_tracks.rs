@@ -4,20 +4,29 @@
 //! through a page's row heap. A track row hit this way has a path that names
 //! no file. When rekordbox had already given the same audio a second, intact
 //! row (it does when it doesn't recognise a row another collection owns), the
-//! damaged row is a broken copy of that twin: its playlist and history
-//! entries move to the twin and the row goes. The number fields survive the
-//! overwrite and the strings don't (characters can also be missing and paths
-//! cut short), so the twin is found by file size and duration, plus the
-//! rekordbox master ids in the eDB, and only when exactly one row fits.
+//! two rows are one track: one row goes, its playlist and history entries move
+//! to the other. The number fields survive the overwrite and the strings
+//! don't (characters can also be missing and paths cut short), so the twin is
+//! found by file size and duration, plus the rekordbox master ids in the eDB,
+//! and its file name must fit what's left of the damaged path; only when
+//! exactly one row fits.
+//!
+//! The row in a play history stays: a CDJ may have played rekordbox's newer
+//! copy, and history keeps naming the row it was written for. When both or
+//! neither are, the earlier row (lower id) stays: it was written while
+//! everything worked, the newer one is rekordbox's mistake. The other row's
+//! playlist and history entries move to the one that stays, so no history is
+//! lost. A damaged row that stays gets its text back from its twin
+//! (`rebuild_damaged_track_rows`).
 
 use super::*;
 
-/// Damaged track rows, and the intact twin each one merges into.
+/// Damaged track rows paired with an intact twin, and which of each pair stays.
 #[derive(Debug, Default, Clone)]
 pub(super) struct NulDamagedTracks {
-    /// Damaged PDB track id → id of its intact twin.
+    /// PDB track id of the row that goes → id of the row that stays.
     pub(super) pdb_twins: HashMap<u32, u32>,
-    /// Damaged eDB content_id → content_id of its intact twin.
+    /// eDB content_id of the row that goes → content_id of the row that stays.
     pub(super) edb_twins: HashMap<i64, i64>,
     /// Paths of the merged rows, which the missing-audio fixes leave alone.
     pub(super) merged_paths: Vec<String>,
@@ -37,11 +46,6 @@ impl NulDamagedTracks {
     }
 }
 
-/// A NUL inside the string, not just padding at its end.
-fn has_nul_run(value: &str) -> bool {
-    value.trim_end_matches('\0').contains('\0')
-}
-
 /// One track row, from either database, as the twin match sees it.
 struct TrackFacts<Id> {
     id: Id,
@@ -54,25 +58,48 @@ struct TrackFacts<Id> {
 }
 
 /// Damaged rows whose file is missing, each paired with the one intact row
-/// whose file exists and whose key matches. Returns the pairs and the
-/// damaged rows without exactly one twin.
-fn pair_twins<Id: Copy + Eq + std::hash::Hash>(
-    rows: &[TrackFacts<Id>],
-) -> (HashMap<Id, Id>, Vec<&TrackFacts<Id>>) {
+/// whose file exists, whose key matches and whose path fits the damaged one.
+/// Returns the pairs as row that goes → row that stays (see the module docs;
+/// `in_history` are the ids in a play history), and the damaged rows without
+/// exactly one twin.
+fn pair_twins<'a, Id: Copy + Ord + std::hash::Hash>(
+    rows: &'a [TrackFacts<Id>],
+    in_history: &HashSet<Id>,
+) -> (HashMap<Id, Id>, Vec<&'a TrackFacts<Id>>) {
     let mut twins = HashMap::new();
     let mut without_twin = Vec::new();
     for row in rows.iter().filter(|r| r.damaged && r.missing) {
-        let mut candidates = rows
-            .iter()
-            .filter(|t| !t.damaged && !t.missing && t.key.is_some() && t.key == row.key);
+        let mut candidates = rows.iter().filter(|t| {
+            !t.damaged
+                && !t.missing
+                && t.key.is_some()
+                && t.key == row.key
+                && damaged_path_fits(&row.path, &t.path)
+        });
         match (candidates.next(), candidates.next()) {
             (Some(twin), None) => {
-                twins.insert(row.id, twin.id);
+                let (damaged_in, twin_in) =
+                    (in_history.contains(&row.id), in_history.contains(&twin.id));
+                let keep_damaged = if damaged_in != twin_in {
+                    damaged_in
+                } else {
+                    row.id < twin.id
+                };
+                if keep_damaged {
+                    twins.insert(twin.id, row.id);
+                } else {
+                    twins.insert(row.id, twin.id);
+                }
             }
             _ => without_twin.push(row),
         }
     }
     (twins, without_twin)
+}
+
+/// Whether `id` is in a pair, as the row that goes or the one that stays.
+pub(super) fn is_paired<Id: Eq + std::hash::Hash>(twins: &HashMap<Id, Id>, id: &Id) -> bool {
+    twins.contains_key(id) || twins.values().any(|kept| kept == id)
 }
 
 /// Finds the damaged rows in the PDB (`parsed`) and the eDB. `missing_keys`
@@ -100,11 +127,16 @@ pub(super) fn detect_nul_damaged_tracks(
                 .map(|(size, duration)| (u64::from(size), u64::from(duration), 0, 0)),
         })
         .collect();
-    let (pdb_twins, pdb_without) = pair_twins(&pdb_rows);
+    let pdb_history: HashSet<u32> = parsed
+        .history_entries
+        .iter()
+        .filter_map(|e| e.track_id)
+        .collect();
+    let (pdb_twins, pdb_without) = pair_twins(&pdb_rows, &pdb_history);
     found.merged_paths.extend(
         pdb_rows
             .iter()
-            .filter(|r| pdb_twins.contains_key(&r.id))
+            .filter(|r| r.damaged && is_paired(&pdb_twins, &r.id))
             .map(|r| r.path.clone()),
     );
     found
@@ -149,11 +181,21 @@ pub(super) fn detect_nul_damaged_tracks(
             Some(rows.flatten().collect())
         })
         .unwrap_or_default();
-    let (edb_twins, edb_without) = pair_twins(&edb_rows);
+    let edb_history: HashSet<i64> = edb
+        .filter(|conn| table_exists(conn, "history_content"))
+        .and_then(|conn| {
+            let mut stmt = conn
+                .prepare("SELECT DISTINCT content_id FROM history_content")
+                .ok()?;
+            let ids = stmt.query_map([], |row| row.get::<_, i64>(0)).ok()?;
+            Some(ids.flatten().collect())
+        })
+        .unwrap_or_default();
+    let (edb_twins, edb_without) = pair_twins(&edb_rows, &edb_history);
     found.merged_paths.extend(
         edb_rows
             .iter()
-            .filter(|r| edb_twins.contains_key(&r.id))
+            .filter(|r| r.damaged && is_paired(&edb_twins, &r.id))
             .map(|r| r.path.clone()),
     );
     found
@@ -176,8 +218,8 @@ pub(super) fn detect_nul_damaged_tracks(
     found
 }
 
-/// Rows the merge changed: per database, the entries moved to a twin, the
-/// duplicate playlist entries dropped and the damaged rows deleted.
+/// Rows the merge changed: per database, the entries moved to the row that
+/// stays, the duplicate playlist entries dropped and the rows deleted.
 #[derive(Debug, Default, Clone, Copy, PartialEq, Eq)]
 pub(super) struct TwinMerge {
     pub(super) edb_moved: usize,
@@ -189,10 +231,10 @@ pub(super) struct TwinMerge {
 }
 
 impl BackendService {
-    /// Merges every damaged row of `found` into its twin, in both
-    /// databases: playlist and history entries move to the twin (a playlist
-    /// entry is dropped where the playlist already holds the twin; history
-    /// is never dropped), then the damaged row is deleted.
+    /// Merges every pair of `found`, in both databases: the playlist and
+    /// history entries of the row that goes move to the row that stays (a
+    /// playlist entry is dropped where the playlist already holds that row;
+    /// history is never dropped), then the row that goes is deleted.
     pub(super) fn apply_fix_merge_nul_damaged_tracks(
         &self,
         usb_root: &Path,
@@ -211,28 +253,26 @@ impl BackendService {
             let tx = conn.transaction()?;
             let has_playlists = table_exists(&tx, "playlist_content");
             let has_history = table_exists(&tx, "history_content");
-            for (&damaged, &twin) in &found.edb_twins {
+            for (&gone, &kept) in &found.edb_twins {
                 if has_playlists {
                     merge.edb_dropped += tx.execute(
                         "DELETE FROM playlist_content WHERE content_id = ?1 AND playlist_id IN \
                          (SELECT playlist_id FROM playlist_content WHERE content_id = ?2)",
-                        params![damaged, twin],
+                        params![gone, kept],
                     )?;
                     merge.edb_moved += tx.execute(
                         "UPDATE playlist_content SET content_id = ?2 WHERE content_id = ?1",
-                        params![damaged, twin],
+                        params![gone, kept],
                     )?;
                 }
                 if has_history {
                     merge.edb_moved += tx.execute(
                         "UPDATE history_content SET content_id = ?2 WHERE content_id = ?1",
-                        params![damaged, twin],
+                        params![gone, kept],
                     )?;
                 }
-                merge.edb_deleted += tx.execute(
-                    "DELETE FROM content WHERE content_id = ?1",
-                    params![damaged],
-                )?;
+                merge.edb_deleted +=
+                    tx.execute("DELETE FROM content WHERE content_id = ?1", params![gone])?;
             }
             if merge.edb_deleted > 0 {
                 sync_property_content_count(&tx)?;
@@ -247,8 +287,8 @@ impl BackendService {
             (merge.pdb_moved, merge.pdb_dropped) =
                 crate::pdb_writer::merge_track_entries_inplace(&mut bytes, &found.pdb_twins);
             std::fs::write(&pdb_path, &bytes)?;
-            let damaged: HashSet<u32> = found.pdb_twins.keys().copied().collect();
-            let removal = remove_tracks_from_pdb(usb_root, &damaged)?;
+            let gone: HashSet<u32> = found.pdb_twins.keys().copied().collect();
+            let removal = remove_tracks_from_pdb(usb_root, &gone)?;
             merge.pdb_dropped += removal.playlist_entries;
             merge.pdb_deleted = removal.track_rows;
             // Fewer tracks: tt=19 follows the new count, as an export's

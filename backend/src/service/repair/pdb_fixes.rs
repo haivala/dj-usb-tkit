@@ -122,22 +122,27 @@ pub(in crate::service) struct EmptyDuplicatePlaylist {
 pub(in crate::service) fn detect_pdb_empty_duplicate_playlists(
     parsed: &crate::pdb_reader::ParsedPdb,
 ) -> Vec<EmptyDuplicatePlaylist> {
-    let with_entries = parsed
-        .playlist_entries
+    empty_duplicate_playlists_in(&parsed.playlist_tree, &parsed.playlist_entries)
+}
+
+/// [`detect_pdb_empty_duplicate_playlists`] on a playlist tree and its entries.
+pub(in crate::service) fn empty_duplicate_playlists_in(
+    tree: &[crate::pdb_reader::PdbPlaylistTreeRow],
+    entries: &[crate::pdb_reader::PdbPlaylistEntryRow],
+) -> Vec<EmptyDuplicatePlaylist> {
+    let with_entries = entries
         .iter()
         .map(|e| e.playlist_id)
         .collect::<HashSet<_>>();
     let key = |p: &crate::pdb_reader::PdbPlaylistTreeRow| {
         (p.parent_id, canonicalize_playlist_name(&p.name))
     };
-    let filled = parsed
-        .playlist_tree
+    let filled = tree
         .iter()
         .filter(|p| !p.row_is_folder && with_entries.contains(&p.id))
         .map(key)
         .collect::<HashSet<_>>();
-    let mut found = parsed
-        .playlist_tree
+    let mut found = tree
         .iter()
         .filter(|p| !p.row_is_folder && !with_entries.contains(&p.id) && filled.contains(&key(p)))
         .map(|p| EmptyDuplicatePlaylist {

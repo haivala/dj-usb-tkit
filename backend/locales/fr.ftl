@@ -743,7 +743,8 @@ repair-overview-strict-parity = Rend chaque playlist identique sur les anciens e
 repair-overview-duplicate-entries = Retire les morceaux listés deux fois par erreur dans une playlist.
 repair-overview-footer-transaction = Corrige les données de playlists et de morceaux modifiées par une ancienne version de cette application, qui font planter rekordbox ou lui font perdre ses playlists lors de l'export suivant.
 repair-overview-page-headers = Répare les pages que rekordbox a laissées à moitié écrites en plantant pendant un export.
-repair-overview-damaged-tracks = Répare les morceaux dont rekordbox a endommagé le nom de fichier en plantant, en gardant leurs playlists et leur historique.
+repair-overview-damaged-tracks = Répare les morceaux dont rekordbox a endommagé le nom de fichier ou le titre en plantant, en gardant leurs playlists et leur historique.
+repair-overview-damaged-playlists = Répare les playlists que rekordbox a endommagées en plantant : rend les noms endommagés et supprime une playlist à moitié écrite qui a pris la place d'une autre.
 repair-overview-empty-duplicate-playlists = Supprime les copies vides de playlists qui portent le même nom qu'une playlist avec des morceaux.
 repair-overview-relink = Reconnecte les morceaux aux fichiers audio renommés ou déplacés sur la clé USB.
 repair-overview-unindexed = Place les fichiers audio qui ne sont dans aucune playlist dans une playlist que vous nommez.
@@ -911,7 +912,17 @@ repair-fix-damaged-tracks = Fusionner les lignes de morceaux endommagées
 repair-fix-damaged-tracks-description = { $count ->
     [one] { $count } ligne de morceau
    *[other] { $count } lignes de morceaux
-} dont le nom de fichier a été écrasé par un plantage de rekordbox, à côté d'une ligne intacte pour le même fichier audio. Déplace leurs entrées de playlists et d'historique vers la ligne intacte et supprime la ligne endommagée, dans les deux bases.
+} dont le nom de fichier a été écrasé par un plantage de rekordbox, à côté d'une ligne intacte pour le même fichier audio. Garde la ligne présente dans un historique, sinon la plus ancienne, y déplace les entrées de playlists et d'historique de l'autre ligne et supprime l'autre ligne, dans les deux bases.
+repair-fix-rebuild-damaged-tracks = Reconstruire les lignes de morceaux endommagées
+repair-fix-rebuild-damaged-tracks-description = { $count ->
+    [one] { $count } ligne de morceau
+   *[other] { $count } lignes de morceaux
+} dont le nom de fichier, le titre ou un autre texte a été écrasé par un plantage de rekordbox, sans ligne intacte pour le même fichier audio. Rend à chacune son texte à partir du fichier audio de la clé USB auquel elle correspond encore, par sa taille et les caractères restés intacts, en gardant ses entrées de playlists et d'historique. Une ligne dont le fichier audio est introuvable est supprimée ou, si elle figure dans un historique, gardée sans les caractères endommagés.
+repair-fix-damaged-playlists = Réparer les playlists endommagées
+repair-fix-damaged-playlists-description = { $count ->
+    [one] { $count } ligne de playlist endommagée
+   *[other] { $count } lignes de playlists endommagées
+} par un plantage de rekordbox. Rend les noms endommagés à partir de l'eDB, d'une sauvegarde ou des anciennes copies que rekordbox a laissées dans le PDB, et supprime une playlist à moitié écrite qui a pris l'identifiant d'une autre ; la réparation la rajoute depuis l'eDB quand l'eDB l'a.
 
 progress-detail-count = { $done }/{ $total }
 progress-detail-count-speed = { $done }/{ $total } · { $speed } Mo/s
@@ -944,6 +955,8 @@ repair-warning-seek-data-unfixable-report = les données de recherche { $format 
 repair-warning-missing-audio-scan-skipped = recherche d'audio manquant ignorée : le dossier Contents est absent ou vide (copie des bases seules)
 repair-warning-history-audio-missing = fichier audio d'un morceau de l'historique manquant : { $path }
 repair-warning-damaged-track = ligne de morceau endommagée par un plantage de rekordbox, sans copie intacte vers laquelle la fusionner : { $path }
+repair-warning-damaged-track-removed = ligne de morceau endommagée par un plantage de rekordbox, fichier audio introuvable, supprimée : { $path }
+repair-warning-damaged-track-kept = ligne de morceau endommagée par un plantage de rekordbox, fichier audio introuvable, gardée pour son historique sans les caractères endommagés : { $path }
 repair-warning-duplicate-audio = fichier audio en double : { $path } (copie de { $original })
 repair-warning-moved-audio = audio déplacé : { $old } -> { $new }
 repair-warning-missing-audio = référence audio manquante : { $path }

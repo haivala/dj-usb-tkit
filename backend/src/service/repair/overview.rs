@@ -42,7 +42,10 @@ fn fix_overview_line(fix_id: &str) -> Option<(usize, fn() -> Text)> {
         }
         PDB_INCONSISTENT_FOOTERS_FIX_ID => (AREA_PLAYLISTS, tr::repair_overview_footer_transaction),
         PDB_DAMAGED_PAGE_HEADERS_FIX_ID => (AREA_PLAYLISTS, tr::repair_overview_page_headers),
-        DAMAGED_TRACK_ROWS_FIX_ID => (AREA_PLAYLISTS, tr::repair_overview_damaged_tracks),
+        DAMAGED_TRACK_ROWS_FIX_ID | REBUILD_DAMAGED_TRACK_ROWS_FIX_ID => {
+            (AREA_PLAYLISTS, tr::repair_overview_damaged_tracks)
+        }
+        DAMAGED_PLAYLISTS_FIX_ID => (AREA_PLAYLISTS, tr::repair_overview_damaged_playlists),
         PDB_EMPTY_DUPLICATE_PLAYLISTS_FIX_ID => (
             AREA_PLAYLISTS,
             tr::repair_overview_empty_duplicate_playlists,

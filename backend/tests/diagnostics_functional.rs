@@ -482,21 +482,21 @@ fn repair_usb_diagnostics_with_progress_missing_root_returns_api_error() {
 
 fn setup_two_playlist_strict_parity_fixture() -> (TempDir, BackendCommands, PathBuf, String, String)
 {
+    setup_two_playlist_fixture(["noart/track_no_art.mp3", "noart/track_no_art.mp3"])
+}
+
+/// Two tracks, from the audio fixtures `audio`, each exported in a playlist of
+/// its own: "Repair Target" holds the first, "Repair Control" the second.
+fn setup_two_playlist_fixture(
+    audio: [&str; 2],
+) -> (TempDir, BackendCommands, PathBuf, String, String) {
     let root = tempdir().expect("temp root");
     let media = root.path().join("media");
     let usb = root.path().join("usb");
     fs::create_dir_all(&media).expect("create media dir");
     fs::create_dir_all(&usb).expect("create usb dir");
-    copy_audio_fixture(
-        &media,
-        "noart/track_no_art.mp3",
-        "01 Fixture Artist - Repair A.mp3",
-    );
-    copy_audio_fixture(
-        &media,
-        "noart/track_no_art.mp3",
-        "02 Fixture Artist - Repair B.mp3",
-    );
+    copy_audio_fixture(&media, audio[0], "01 Fixture Artist - Repair A.mp3");
+    copy_audio_fixture(&media, audio[1], "02 Fixture Artist - Repair B.mp3");
 
     let data_dir = root.path().join("data");
     let backend = BackendCommands::new(&data_dir).expect("create backend");
@@ -6815,4 +6815,642 @@ fn strict_repair_reports_failure_when_pdb_rewrite_cannot_be_written() {
         "expected the PDB write failure to be reported: {:#?}",
         data.data.failed_fixes
     );
+}
+
+/// Overwrites two bytes of `text`, starting at byte `at`, with NULs in the
+/// USB's PDB, as a crashed rekordbox write does. `text` occurs once there.
+fn nul_damage_pdb_text(usb: &Path, text: &str, at: usize) {
+    let path = vendor_db_dir(usb).join("export.pdb");
+    let mut bytes = fs::read(&path).expect("read PDB");
+    let hits: Vec<usize> = bytes
+        .windows(text.len())
+        .enumerate()
+        .filter(|(_, window)| *window == text.as_bytes())
+        .map(|(i, _)| i)
+        .collect();
+    assert_eq!(hits.len(), 1, "{text:?} in the PDB: {hits:?}");
+    bytes[hits[0] + at] = 0;
+    bytes[hits[0] + at + 1] = 0;
+    fs::write(&path, bytes).expect("write PDB");
+}
+
+/// The text with two characters from `at` replaced by NULs.
+fn nul_damaged(text: &str, at: usize) -> String {
+    let mut chars: Vec<char> = text.chars().collect();
+    chars[at] = '\0';
+    chars[at + 1] = '\0';
+    chars.into_iter().collect()
+}
+
+/// The first fixture track's PDB row: its id, path and title.
+fn repair_target_pdb_track(usb: &Path) -> (u32, String, String) {
+    let parsed = parse_pdb(&vendor_db_dir(usb).join("export.pdb")).expect("parse PDB");
+    let track = parsed
+        .tracks
+        .iter()
+        .find(|t| t.track_file_path.ends_with("Repair A.mp3") || t.track_file_path.contains('\0'))
+        .expect("Repair A in the PDB");
+    (track.id, track.track_file_path.clone(), track.title.clone())
+}
+
+fn assert_no_damage_left(backend: &BackendCommands, usb: &Path) {
+    let preview = preview_repair(backend, usb);
+    let ids: Vec<&str> = preview
+        .proposed_fixes
+        .iter()
+        .map(|f| f.id.as_str())
+        .collect();
+    for id in [
+        "merge_damaged_track_rows",
+        "rebuild_damaged_track_rows",
+        "remove_missing_audio_references",
+        "add_unindexed_audio_playlist",
+        "relink_moved_audio",
+    ] {
+        assert!(!ids.contains(&id), "{id} still proposed: {ids:?}");
+    }
+    assert!(
+        !preview
+            .warnings
+            .iter()
+            .any(|w| w.code == "usb.diagnostics.damaged-track"),
+        "{:?}",
+        preview.warnings
+    );
+}
+
+#[test]
+fn damaged_track_rows_without_a_twin_are_rebuilt_even_when_not_selected() {
+    let (_root, backend, usb, _, _) =
+        setup_two_playlist_fixture(["embedded/track_embedded.mp3", "folder/track_folder.jpg.mp3"]);
+    let (id, path, title) = repair_target_pdb_track(&usb);
+    assert!(!title.is_empty());
+    // The PDB row's path and title, and the eDB row's path, as a crashed
+    // rekordbox write leaves them. The eDB's title stays intact.
+    nul_damage_pdb_text(&usb, &path, 2);
+    nul_damage_pdb_text(&usb, &title, 1);
+    let edb = open_edb(&vendor_db_dir(&usb).join("exportLibrary.db"));
+    let changed = edb
+        .execute(
+            "UPDATE content SET path = ?1 WHERE path = ?2",
+            rusqlite::params![nul_damaged(&path, 12), path],
+        )
+        .expect("damage the eDB path");
+    assert_eq!(changed, 1);
+    drop(edb);
+
+    let preview = preview_repair(&backend, &usb);
+    let rebuild = preview
+        .proposed_fixes
+        .iter()
+        .find(|f| f.id == "rebuild_damaged_track_rows")
+        .unwrap_or_else(|| panic!("no rebuild proposed: {:?}", preview.proposed_fixes));
+    assert!(rebuild.always_applied);
+
+    // An apply that selects none of the damage repairs still runs them.
+    let applied = backend.repair_usb_diagnostics(RepairUsbDiagnosticsRequest {
+        fix_names: Default::default(),
+        usb_root: Some(usb.to_string_lossy().to_string()),
+        apply: true,
+        selected_fix_ids: vec!["fix_bpm_key_mismatch".to_string()],
+    });
+    let applied = applied.data.expect("apply").data;
+    assert!(
+        applied.failed_fixes.is_empty(),
+        "{:?}",
+        applied.failed_fixes
+    );
+    assert!(
+        applied
+            .applied_fixes
+            .iter()
+            .any(|f| f.contains("Rebuild Damaged Track Rows")),
+        "{:?}",
+        applied.applied_fixes
+    );
+
+    let (rebuilt_id, rebuilt_path, rebuilt_title) = repair_target_pdb_track(&usb);
+    assert_eq!(rebuilt_id, id);
+    assert_eq!(rebuilt_path, path);
+    assert_eq!(rebuilt_title, title, "the title comes back from the eDB");
+    let edb = open_edb(&vendor_db_dir(&usb).join("exportLibrary.db"));
+    let edb_paths: i64 = edb
+        .query_row(
+            "SELECT COUNT(*) FROM content WHERE path = ?1",
+            [&path],
+            |row| row.get(0),
+        )
+        .expect("eDB paths");
+    assert_eq!(edb_paths, 1, "the eDB row names the file again");
+    drop(edb);
+    let parsed = parse_pdb(&vendor_db_dir(&usb).join("export.pdb")).expect("parse PDB");
+    assert!(
+        parsed.playlist_entries.iter().any(|e| e.track_id == id),
+        "the rebuilt row keeps its playlist entry"
+    );
+    assert_no_damage_left(&backend, &usb);
+}
+
+#[test]
+fn damaged_track_rows_are_rebuilt_on_a_usb_without_an_edb() {
+    let (_root, backend, usb, _, _) =
+        setup_two_playlist_fixture(["embedded/track_embedded.mp3", "folder/track_folder.jpg.mp3"]);
+    let (id, path, title) = repair_target_pdb_track(&usb);
+    nul_damage_pdb_text(&usb, &path, 2);
+    nul_damage_pdb_text(&usb, &title, 1);
+    fs::remove_file(vendor_db_dir(&usb).join("exportLibrary.db")).expect("remove the eDB");
+
+    let applied = backend.repair_usb_diagnostics(RepairUsbDiagnosticsRequest {
+        fix_names: Default::default(),
+        usb_root: Some(usb.to_string_lossy().to_string()),
+        apply: true,
+        selected_fix_ids: Vec::new(),
+    });
+    let applied = applied.data.expect("apply").data;
+    assert!(
+        applied.failed_fixes.is_empty(),
+        "{:?}",
+        applied.failed_fixes
+    );
+
+    let (rebuilt_id, rebuilt_path, rebuilt_title) = repair_target_pdb_track(&usb);
+    assert_eq!(rebuilt_id, id);
+    assert_eq!(rebuilt_path, path);
+    assert!(
+        !rebuilt_title.is_empty() && !rebuilt_title.contains('\0'),
+        "{rebuilt_title:?}"
+    );
+    // The eDB the repair builds from the PDB has the rebuilt row, not the damaged one.
+    let edb = open_edb(&vendor_db_dir(&usb).join("exportLibrary.db"));
+    let damaged: i64 = edb
+        .query_row(
+            "SELECT COUNT(*) FROM content WHERE instr(path, char(0)) > 0 OR instr(title, char(0)) > 0",
+            [],
+            |row| row.get(0),
+        )
+        .expect("eDB damage");
+    assert_eq!(damaged, 0);
+    let rebuilt: i64 = edb
+        .query_row(
+            "SELECT COUNT(*) FROM content WHERE path = ?1",
+            [&path],
+            |row| row.get(0),
+        )
+        .expect("eDB paths");
+    assert_eq!(rebuilt, 1);
+    drop(edb);
+    assert_no_damage_left(&backend, &usb);
+}
+
+/// Gives the first fixture track a second, newer eDB row, as rekordbox does,
+/// moves its playlist entries there and damages the earlier row's path.
+/// Returns the path and the (earlier, newer) content ids.
+fn add_newer_edb_twin_and_damage_the_earlier(usb: &Path) -> (String, i64, i64) {
+    let (_, path, _) = repair_target_pdb_track(usb);
+    let edb = open_edb(&vendor_db_dir(usb).join("exportLibrary.db"));
+    let earlier: i64 = edb
+        .query_row(
+            "SELECT content_id FROM content WHERE path = ?1",
+            [&path],
+            |row| row.get(0),
+        )
+        .expect("earlier row");
+    edb.execute_batch(&format!(
+        "CREATE TEMP TABLE twin AS SELECT * FROM content WHERE content_id = {earlier};
+         UPDATE twin SET content_id = (SELECT MAX(content_id) + 1 FROM content);
+         INSERT INTO content SELECT * FROM twin;"
+    ))
+    .expect("add the newer twin");
+    let newer: i64 = edb
+        .query_row("SELECT MAX(content_id) FROM content", [], |row| row.get(0))
+        .expect("newer row");
+    let moved = edb
+        .execute(
+            "UPDATE playlist_content SET content_id = ?1 WHERE content_id = ?2",
+            [newer, earlier],
+        )
+        .expect("move the entry");
+    assert!(moved > 0);
+    edb.execute(
+        "UPDATE content SET path = ?1 WHERE content_id = ?2",
+        rusqlite::params![nul_damaged(&path, 12), earlier],
+    )
+    .expect("damage the earlier row");
+    (path, earlier, newer)
+}
+
+/// Applies the default repair and returns the eDB rows left of `ids` and how
+/// many playlist entries each holds.
+fn apply_and_read_twins(
+    backend: &BackendCommands,
+    usb: &Path,
+    ids: [i64; 2],
+) -> Vec<(i64, String, i64)> {
+    let applied = backend.repair_usb_diagnostics(RepairUsbDiagnosticsRequest {
+        fix_names: Default::default(),
+        usb_root: Some(usb.to_string_lossy().to_string()),
+        apply: true,
+        selected_fix_ids: vec!["fix_bpm_key_mismatch".to_string()],
+    });
+    let applied = applied.data.expect("apply").data;
+    assert!(
+        applied.failed_fixes.is_empty(),
+        "{:?}",
+        applied.failed_fixes
+    );
+    let edb = open_edb(&vendor_db_dir(usb).join("exportLibrary.db"));
+    edb.prepare(
+        "SELECT content_id, path, \
+             (SELECT COUNT(*) FROM playlist_content p WHERE p.content_id = c.content_id) \
+             FROM content c WHERE content_id IN (?1, ?2)",
+    )
+    .expect("prepare")
+    .query_map(ids, |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?)))
+    .expect("query")
+    .flatten()
+    .collect()
+}
+
+#[test]
+fn a_damaged_earlier_row_stays_and_its_newer_twin_goes() {
+    let (_root, backend, usb, _, _) =
+        setup_two_playlist_fixture(["embedded/track_embedded.mp3", "folder/track_folder.jpg.mp3"]);
+    let (path, earlier, newer) = add_newer_edb_twin_and_damage_the_earlier(&usb);
+    let rows = apply_and_read_twins(&backend, &usb, [earlier, newer]);
+    assert_eq!(rows.len(), 1, "{rows:?}");
+    let (id, kept_path, entries) = &rows[0];
+    assert_eq!(
+        (*id, kept_path.as_str()),
+        (earlier, path.as_str()),
+        "the earlier row stays, repaired"
+    );
+    assert!(*entries > 0, "the entries move back to the earlier row");
+    assert_no_damage_left(&backend, &usb);
+}
+
+#[test]
+fn a_newer_twin_a_cdj_played_stays() {
+    let (_root, backend, usb, _, _) =
+        setup_two_playlist_fixture(["embedded/track_embedded.mp3", "folder/track_folder.jpg.mp3"]);
+    let (path, earlier, newer) = add_newer_edb_twin_and_damage_the_earlier(&usb);
+    let edb = open_edb(&vendor_db_dir(&usb).join("exportLibrary.db"));
+    edb.execute_batch(&format!(
+        "CREATE TABLE IF NOT EXISTS history_content(history_id integer, content_id integer, sequenceNo integer);
+         INSERT INTO history_content(history_id, content_id, sequenceNo) VALUES (1, {newer}, 1);"
+    ))
+    .expect("play the newer row");
+    drop(edb);
+    let rows = apply_and_read_twins(&backend, &usb, [earlier, newer]);
+    assert_eq!(rows.len(), 1, "{rows:?}");
+    let (id, kept_path, entries) = &rows[0];
+    assert_eq!(
+        (*id, kept_path.as_str()),
+        (newer, path.as_str()),
+        "the played row stays"
+    );
+    assert!(*entries > 0);
+    let edb = open_edb(&vendor_db_dir(&usb).join("exportLibrary.db"));
+    let history: i64 = edb
+        .query_row(
+            "SELECT COUNT(*) FROM history_content WHERE content_id = ?1",
+            [newer],
+            |row| row.get(0),
+        )
+        .expect("history");
+    assert_eq!(history, 1, "history still names the played row");
+}
+
+/// A live playlist-tree (t07) row slot: where its row starts and where its
+/// footer bits sit, as byte offsets into the PDB.
+struct TreeSlot {
+    page_start: usize,
+    slot: usize,
+    row_start: usize,
+    tranrf_off: usize,
+    bit: u16,
+}
+
+fn live_tree_slots(bytes: &[u8]) -> Vec<TreeSlot> {
+    let read_u16 = |at: usize| u16::from_le_bytes([bytes[at], bytes[at + 1]]);
+    let read_u32 = |at: usize| u32::from_le_bytes(bytes[at..at + 4].try_into().unwrap());
+    let len_page = read_u32(4) as usize;
+    let mut out = Vec::new();
+    for page in 1..bytes.len() / len_page {
+        let start = page * len_page;
+        if read_u32(start + 8) != 7 || bytes[start + 0x1b] & 0x40 != 0 {
+            continue;
+        }
+        let slots = (read_u32(start + 0x18) & 0x1fff) as usize;
+        for slot in 0..slots {
+            let (group, j) = (slot / 16, slot % 16);
+            let base = start + len_page - group * 0x24;
+            let bit = 1u16 << j;
+            if read_u16(base - 4) & bit == 0 {
+                continue;
+            }
+            out.push(TreeSlot {
+                page_start: start,
+                slot,
+                row_start: start + 40 + read_u16(base - 6 - 2 * j) as usize,
+                tranrf_off: base - 2,
+                bit,
+            });
+        }
+    }
+    out
+}
+
+/// The live playlist rows of the PDB as `(id, name)`, NULs kept, sorted.
+fn live_playlist_rows(usb: &Path) -> Vec<(u32, String)> {
+    let bytes = fs::read(vendor_db_dir(usb).join("export.pdb")).expect("read PDB");
+    let mut rows: Vec<(u32, String)> = live_tree_slots(&bytes)
+        .iter()
+        .map(|s| {
+            let id = u32::from_le_bytes(
+                bytes[s.row_start + 12..s.row_start + 16]
+                    .try_into()
+                    .unwrap(),
+            );
+            let kind = bytes[s.row_start + 20] as usize;
+            assert_eq!(kind % 2, 1, "short ASCII names in the fixture");
+            let len = (kind >> 1) - 1;
+            let name = &bytes[s.row_start + 21..s.row_start + 21 + len];
+            (id, name.iter().map(|&b| b as char).collect())
+        })
+        .collect();
+    rows.sort();
+    rows
+}
+
+/// What a crashed rekordbox write leaves when it was adding a playlist: the
+/// row of `half_written` carries the id of `real`, and the page's last write
+/// touched only that row. Returns `real`'s id.
+fn half_write_playlist_row(usb: &Path, half_written: &str, real: &str) -> u32 {
+    let rows = live_playlist_rows(usb);
+    let id_of = |name: &str| rows.iter().find(|(_, n)| n == name).expect(name).0;
+    let real_id = id_of(real);
+    let half_id = id_of(half_written);
+    let path = vendor_db_dir(usb).join("export.pdb");
+    let mut bytes = fs::read(&path).expect("read PDB");
+    let slots = live_tree_slots(&bytes);
+    let slot = slots
+        .iter()
+        .find(|s| {
+            u32::from_le_bytes(
+                bytes[s.row_start + 12..s.row_start + 16]
+                    .try_into()
+                    .unwrap(),
+            ) == half_id
+        })
+        .expect("half-written row");
+    bytes[slot.row_start + 12..slot.row_start + 16].copy_from_slice(&real_id.to_le_bytes());
+    for other in slots.iter().filter(|s| s.page_start == slot.page_start) {
+        bytes[other.tranrf_off..other.tranrf_off + 2].copy_from_slice(&0u16.to_le_bytes());
+    }
+    bytes[slot.tranrf_off..slot.tranrf_off + 2].copy_from_slice(&slot.bit.to_le_bytes());
+    let header = slot.page_start + 0x20;
+    bytes[header..header + 2].copy_from_slice(&1u16.to_le_bytes());
+    bytes[header + 2..header + 4].copy_from_slice(&(slot.slot as u16).to_le_bytes());
+    fs::write(&path, bytes).expect("write PDB");
+    real_id
+}
+
+fn assert_no_playlist_damage_left(backend: &BackendCommands, usb: &Path) {
+    let next = preview_repair(backend, usb);
+    for id in [
+        "repair_damaged_playlist_rows",
+        "remove_pdb_empty_duplicate_playlists",
+        "upgrade_export_data_to_strict_parity",
+    ] {
+        assert!(
+            !next.proposed_fixes.iter().any(|f| f.id == id),
+            "{id} still proposed: {:?}",
+            next.proposed_fixes
+        );
+    }
+}
+
+/// Deletes every backup PDB under `dir`, on the stick and in the app's cache.
+fn remove_backup_pdbs(dir: &Path) {
+    for entry in fs::read_dir(dir).expect("read dir").flatten() {
+        let path = entry.path();
+        let name = entry.file_name().to_string_lossy().to_string();
+        if path.is_dir() {
+            remove_backup_pdbs(&path);
+        } else if name.starts_with("export_") && name.ends_with(".pdb") {
+            fs::remove_file(&path).expect("remove backup");
+        }
+    }
+}
+
+fn apply_default_repair(backend: &BackendCommands, usb: &Path) {
+    let applied = backend.repair_usb_diagnostics(RepairUsbDiagnosticsRequest {
+        fix_names: Default::default(),
+        usb_root: Some(usb.to_string_lossy().to_string()),
+        apply: true,
+        selected_fix_ids: Vec::new(),
+    });
+    let applied = applied.data.expect("apply").data;
+    assert!(
+        applied.failed_fixes.is_empty(),
+        "{:?}",
+        applied.failed_fixes
+    );
+}
+
+#[test]
+fn a_half_written_playlist_goes_and_damaged_names_come_back() {
+    let (_root, backend, usb, _, _) = setup_two_playlist_strict_parity_fixture();
+    let target_id = half_write_playlist_row(&usb, "Repair Control", "Repair Target");
+    nul_damage_pdb_text(&usb, "Repair Target", 3);
+
+    let preview = preview_repair(&backend, &usb);
+    let fix = preview
+        .proposed_fixes
+        .iter()
+        .find(|f| f.id == "repair_damaged_playlist_rows")
+        .unwrap_or_else(|| panic!("no playlist repair: {:?}", preview.proposed_fixes));
+    assert!(fix.always_applied);
+    assert!(
+        preview
+            .warnings
+            .iter()
+            .any(|w| w.code == "usb.diagnostics.half-written-playlist"),
+        "{:?}",
+        preview.warnings
+    );
+
+    apply_default_repair(&backend, &usb);
+
+    let rows = live_playlist_rows(&usb);
+    let names: Vec<&str> = rows.iter().map(|(_, n)| n.as_str()).collect();
+    assert_eq!(names.len(), 2, "{rows:?}");
+    assert!(
+        names.contains(&"Repair Target"),
+        "the name comes back from the eDB: {rows:?}"
+    );
+    assert!(
+        names.contains(&"Repair Control"),
+        "strict parity adds it back from the eDB: {rows:?}"
+    );
+    assert_eq!(
+        rows.iter().filter(|(id, _)| *id == target_id).count(),
+        1,
+        "one row per id: {rows:?}"
+    );
+    assert_no_playlist_damage_left(&backend, &usb);
+}
+
+#[test]
+fn a_half_written_playlist_goes_on_a_usb_without_an_edb() {
+    let (root, backend, usb, _, _) = setup_two_playlist_strict_parity_fixture();
+    let target_id = half_write_playlist_row(&usb, "Repair Control", "Repair Target");
+    nul_damage_pdb_text(&usb, "Repair Target", 3);
+    fs::remove_file(vendor_db_dir(&usb).join("exportLibrary.db")).expect("remove the eDB");
+    // No backup either: the name can only come from the app's library.
+    remove_backup_pdbs(root.path());
+
+    apply_default_repair(&backend, &usb);
+
+    let rows = live_playlist_rows(&usb);
+    assert_eq!(
+        rows,
+        vec![(target_id, "Repair Target".to_string())],
+        "the half-written row goes; the name comes back from the library"
+    );
+    let edb = open_edb(&vendor_db_dir(&usb).join("exportLibrary.db"));
+    let damaged: i64 = edb
+        .query_row(
+            "SELECT COUNT(*) FROM playlist WHERE instr(name, char(0)) > 0",
+            [],
+            |row| row.get(0),
+        )
+        .expect("eDB names");
+    assert_eq!(damaged, 0, "the rebuilt eDB has the repaired name");
+    drop(edb);
+    assert_no_playlist_damage_left(&backend, &usb);
+}
+
+#[test]
+fn playlists_sharing_an_id_without_a_half_written_one_are_left_alone() {
+    let (_root, backend, usb, _, _) = setup_two_playlist_strict_parity_fixture();
+    half_write_playlist_row(&usb, "Repair Control", "Repair Target");
+    // Both rows in the last write: nothing tells which one is real.
+    let path = vendor_db_dir(&usb).join("export.pdb");
+    let mut bytes = fs::read(&path).expect("read PDB");
+    for slot in live_tree_slots(&bytes) {
+        let at = slot.tranrf_off;
+        let bits = u16::from_le_bytes([bytes[at], bytes[at + 1]]) | slot.bit;
+        bytes[at..at + 2].copy_from_slice(&bits.to_le_bytes());
+    }
+    fs::write(&path, bytes).expect("write PDB");
+
+    let preview = preview_repair(&backend, &usb);
+    assert!(
+        !preview
+            .proposed_fixes
+            .iter()
+            .any(|f| f.id == "repair_damaged_playlist_rows"),
+        "{:?}",
+        preview.proposed_fixes
+    );
+    assert!(
+        preview
+            .warnings
+            .iter()
+            .any(|w| w.code == "usb.diagnostics.playlist-id-shared"),
+        "{:?}",
+        preview.warnings
+    );
+}
+
+#[test]
+fn a_half_written_playlist_goes_when_the_edb_numbers_playlists_differently() {
+    let (_root, backend, usb, _, _) = setup_two_playlist_strict_parity_fixture();
+    // rekordbox numbers the eDB's playlists on its own.
+    let edb = open_edb(&vendor_db_dir(&usb).join("exportLibrary.db"));
+    edb.execute_batch(
+        "UPDATE playlist SET playlist_id = playlist_id + 100;
+         UPDATE playlist_content SET playlist_id = playlist_id + 100;",
+    )
+    .expect("renumber the eDB playlists");
+    drop(edb);
+    half_write_playlist_row(&usb, "Repair Control", "Repair Target");
+
+    let preview = preview_repair(&backend, &usb);
+    assert!(
+        preview
+            .warnings
+            .iter()
+            .any(|w| w.code == "usb.diagnostics.half-written-playlist"),
+        "{:?}",
+        preview.warnings
+    );
+    apply_default_repair(&backend, &usb);
+
+    let names: Vec<String> = live_playlist_rows(&usb)
+        .into_iter()
+        .map(|(_, n)| n)
+        .collect();
+    assert_eq!(names.len(), 2, "{names:?}");
+    assert!(names.contains(&"Repair Target".to_string()), "{names:?}");
+    assert!(names.contains(&"Repair Control".to_string()), "{names:?}");
+    assert_no_playlist_damage_left(&backend, &usb);
+}
+
+#[test]
+fn a_damaged_track_row_whose_file_is_gone_is_removed_even_when_missing_audio_is_not_selected() {
+    let (_root, backend, usb, _, _) =
+        setup_two_playlist_fixture(["embedded/track_embedded.mp3", "folder/track_folder.jpg.mp3"]);
+    let (id, path, _) = repair_target_pdb_track(&usb);
+    fs::remove_file(usb.join(path.trim_start_matches('/'))).expect("remove the music file");
+    nul_damage_pdb_text(&usb, &path, 2);
+
+    let preview = preview_repair(&backend, &usb);
+    let rebuild = preview
+        .proposed_fixes
+        .iter()
+        .find(|f| f.id == "rebuild_damaged_track_rows")
+        .unwrap_or_else(|| panic!("no rebuild proposed: {:?}", preview.proposed_fixes));
+    assert!(rebuild.always_applied);
+    assert_eq!(rebuild.estimated_deletes, 1);
+    assert!(
+        preview
+            .warnings
+            .iter()
+            .any(|w| w.code == "usb.diagnostics.damaged-track-removed"),
+        "{:?}",
+        preview.warnings
+    );
+
+    let applied = backend.repair_usb_diagnostics(RepairUsbDiagnosticsRequest {
+        fix_names: Default::default(),
+        usb_root: Some(usb.to_string_lossy().to_string()),
+        apply: true,
+        selected_fix_ids: vec!["fix_bpm_key_mismatch".to_string()],
+    });
+    let applied = applied.data.expect("apply").data;
+    assert!(
+        applied.failed_fixes.is_empty(),
+        "{:?}",
+        applied.failed_fixes
+    );
+
+    let parsed = parse_pdb(&vendor_db_dir(&usb).join("export.pdb")).expect("parse PDB");
+    assert!(
+        !parsed.tracks.iter().any(|t| t.id == id),
+        "the damaged row is gone"
+    );
+    assert!(
+        !parsed
+            .tracks
+            .iter()
+            .any(|t| t.track_file_path.contains('\0')),
+        "no NUL left in the PDB"
+    );
+    let next = preview_repair(&backend, &usb);
+    let ids: Vec<&str> = next.proposed_fixes.iter().map(|f| f.id.as_str()).collect();
+    for fix in ["rebuild_damaged_track_rows", "merge_damaged_track_rows"] {
+        assert!(!ids.contains(&fix), "{fix} still proposed: {ids:?}");
+    }
 }

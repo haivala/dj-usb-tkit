@@ -973,7 +973,8 @@ repair-overview-strict-parity = Makes every playlist the same on older and newer
 repair-overview-duplicate-entries = Removes tracks listed twice in a playlist by mistake.
 repair-overview-footer-transaction = Fixes playlist and track data an older version of this app changed, which makes rekordbox crash or lose its playlists on its next export.
 repair-overview-page-headers = Repairs pages rekordbox left half-written when it crashed during an export.
-repair-overview-damaged-tracks = Repairs tracks whose file name rekordbox damaged when it crashed, keeping their playlists and play history.
+repair-overview-damaged-tracks = Repairs tracks whose file name or title rekordbox damaged when it crashed, keeping their playlists and play history.
+repair-overview-damaged-playlists = Repairs playlists rekordbox damaged when it crashed: gives damaged names back and removes a half-written playlist that took another playlist's place.
 repair-overview-empty-duplicate-playlists = Removes empty copies of playlists that have the same name as a playlist with tracks.
 repair-overview-relink = Reconnects tracks to music files that were renamed or moved on the USB.
 repair-overview-unindexed = Puts music files that are in no playlist into a playlist you name.
@@ -1182,7 +1183,19 @@ repair-fix-damaged-tracks = Merge Damaged Track Rows
 repair-fix-damaged-tracks-description = { $count ->
     [one] { $count } track row
    *[other] { $count } track rows
-} whose file name a crashed rekordbox write overwrote, next to an intact row for the same music file. Moves their playlist and history entries to the intact row and removes the damaged one, in both databases.
+} whose file name a crashed rekordbox write overwrote, next to an intact row for the same music file. Keeps the row in a play history, else the earlier one, moves the other row's playlist and history entries to it and removes the other row, in both databases.
+repair-fix-rebuild-damaged-tracks = Rebuild Damaged Track Rows
+# $count: the track rows.
+repair-fix-rebuild-damaged-tracks-description = { $count ->
+    [one] { $count } track row
+   *[other] { $count } track rows
+} whose file name, title or other text a crashed rekordbox write overwrote, with no intact row for the same music file. Gives each its text back from the music file on the USB it still matches, by size and the characters that survived, keeping its playlist and history entries. A row whose music file can't be found is removed, or, when it is in a play history, kept with the damaged characters dropped.
+repair-fix-damaged-playlists = Repair Damaged Playlists
+# $count: the playlist rows.
+repair-fix-damaged-playlists-description = { $count ->
+    [one] { $count } playlist row
+   *[other] { $count } playlist rows
+} a crashed rekordbox write damaged. Gives damaged names back from the eDB, a backup or the old copies rekordbox left in the PDB, and removes a half-written playlist that took the id of another playlist; repair adds it back from the eDB when the eDB has it.
 
 # The progress bar's detail, next to the elapsed time: counts, sizes and read speed of the step
 # its message names. $done, $total: items done and in all.
@@ -1232,6 +1245,10 @@ repair-warning-missing-audio-scan-skipped = missing-audio scan skipped: Contents
 repair-warning-history-audio-missing = history track's audio file missing: { $path }
 # $path: the damaged path, as the databases hold it.
 repair-warning-damaged-track = track row damaged by a crashed rekordbox write, with no intact copy to merge into: { $path }
+# $path: the damaged path, as the databases hold it.
+repair-warning-damaged-track-removed = track row damaged by a crashed rekordbox write, its music file not found, removed: { $path }
+# $path: the damaged path, as the databases hold it.
+repair-warning-damaged-track-kept = track row damaged by a crashed rekordbox write, its music file not found, kept for its play history with the damaged characters dropped: { $path }
 # $original: the indexed file it copies.
 repair-warning-duplicate-audio = duplicate audio file: { $path } (copy of { $original })
 # $old: where the databases point. $new: where the file is now.
@@ -1239,6 +1256,12 @@ repair-warning-moved-audio = moved audio: { $old } -> { $new }
 repair-warning-missing-audio = missing-audio reference: { $path }
 # $name: the playlist.
 repair-warning-empty-duplicate-playlist = empty duplicate playlist: { $name }
+# $name: the playlist.
+repair-warning-half-written-playlist = playlist half-written by a crashed rekordbox write, with the id of another playlist, removed: { $name }
+# $name: the name the playlist gets.
+repair-warning-damaged-playlist-name = playlist name damaged by a crashed rekordbox write, with no source to restore it from, renamed: { $name }
+# $id: the playlist id. $names: the playlists that share it.
+repair-warning-playlist-id-shared = playlists sharing id { $id } after a crashed rekordbox write, with no way to tell which one is real: { $names }
 # $error: the reason, from the OS.
 repair-warning-save-failed = Saving the repaired databases to the USB failed: { $error }
 

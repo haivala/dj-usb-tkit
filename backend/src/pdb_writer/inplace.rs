@@ -159,6 +159,123 @@ pub(crate) fn remove_rows_inplace(
     removed
 }
 
+/// One playlist-tree (t07) row as it sits on its page.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(crate) struct PlaylistTreeSlot {
+    pub(crate) page: usize,
+    pub(crate) slot: usize,
+    /// Whether the row is live (its `rowpf` bit is set).
+    pub(crate) live: bool,
+    /// Whether the page's last write touched the row (its `tranrf` bit).
+    pub(crate) in_last_write: bool,
+    pub(crate) id: u32,
+    pub(crate) parent_id: u32,
+    pub(crate) sort_order: u32,
+    pub(crate) is_folder: bool,
+    /// The name with every NUL kept.
+    pub(crate) name: String,
+}
+
+/// Every playlist-tree row slot whose row can be read, live or deleted.
+pub(crate) fn playlist_tree_slots(bytes: &[u8]) -> Vec<PlaylistTreeSlot> {
+    let Some(len_page) = inplace_page_size(bytes) else {
+        return Vec::new();
+    };
+    let mut out = Vec::new();
+    for data_page in inplace_data_pages(bytes, len_page, 7) {
+        let page = &bytes[data_page.start..data_page.start + len_page];
+        for slot in pdb_page::footer_slots(page, data_page.num_row_offsets) {
+            let row_start = HEAP_START + slot.heap_off;
+            let Some(row) = page.get(row_start..data_page.payload_end) else {
+                continue;
+            };
+            let (Some(parent_id), Some(sort_order), Some(id), Some(folder)) = (
+                read_u32_le_at(row, 0),
+                read_u32_le_at(row, 8),
+                read_u32_le_at(row, 12),
+                read_u32_le_at(row, 16),
+            ) else {
+                continue;
+            };
+            let Some((name, _)) = crate::pdb_reader::raw_pdb_string(row, 20) else {
+                continue;
+            };
+            out.push(PlaylistTreeSlot {
+                page: data_page.idx,
+                slot: slot.index,
+                live: slot.present,
+                in_last_write: slot.group.tranrf(page) & slot.bit != 0,
+                id,
+                parent_id,
+                sort_order,
+                is_folder: folder == 1,
+                name,
+            });
+        }
+    }
+    out
+}
+
+/// Tombstone the live playlist-tree rows at `slots` (`(page, slot)`), as
+/// [`remove_rows_inplace`] does by id. Returns the rows removed.
+pub(crate) fn remove_playlist_tree_slots_inplace(
+    bytes: &mut [u8],
+    slots: &[(usize, usize)],
+) -> usize {
+    let Some(len_page) = inplace_page_size(bytes) else {
+        return 0;
+    };
+    let mut removed = 0;
+    for data_page in inplace_data_pages(bytes, len_page, 7) {
+        let page = &mut bytes[data_page.start..data_page.start + len_page];
+        let doomed: Vec<_> = pdb_page::footer_slots(page, data_page.num_row_offsets)
+            .filter(|s| s.present && slots.contains(&(data_page.idx, s.index)))
+            .collect();
+        removed += doomed.len();
+        tombstone_slots(page, &data_page, &doomed, false);
+    }
+    removed
+}
+
+/// Overwrite the name of the playlist-tree row at `(page, slot)` with
+/// `name`, when its encoding is as long as the old one's. Returns whether it
+/// was written.
+pub(crate) fn rename_playlist_tree_slot_inplace(
+    bytes: &mut [u8],
+    (page_idx, slot_idx): (usize, usize),
+    name: &str,
+) -> bool {
+    let Some(len_page) = inplace_page_size(bytes) else {
+        return false;
+    };
+    let encoded = crate::service::export_helpers::encode_pdb_string(name);
+    for data_page in inplace_data_pages(bytes, len_page, 7) {
+        if data_page.idx != page_idx {
+            continue;
+        }
+        let page = &mut bytes[data_page.start..data_page.start + len_page];
+        let Some(slot) =
+            pdb_page::footer_slots(page, data_page.num_row_offsets).find(|s| s.index == slot_idx)
+        else {
+            return false;
+        };
+        let name_start = HEAP_START + slot.heap_off + 20;
+        let Some(old_len) = page
+            .get(HEAP_START + slot.heap_off..data_page.payload_end)
+            .and_then(|row| crate::pdb_reader::raw_pdb_string(row, 20))
+            .map(|(_, len)| len)
+        else {
+            return false;
+        };
+        if old_len != encoded.len() || name_start + old_len > data_page.payload_end {
+            return false;
+        }
+        page[name_start..name_start + old_len].copy_from_slice(&encoded);
+        return true;
+    }
+    false
+}
+
 /// Move the live playlist (tt=8) and history (tt=12, tt=18) entries of the
 /// tracks in `twins` (track id → id of the track taking its place) onto the
 /// twin, in place. A playlist entry whose playlist already holds the twin is
