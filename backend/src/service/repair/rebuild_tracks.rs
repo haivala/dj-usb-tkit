@@ -410,7 +410,7 @@ fn other_db_twin<'a, Id, Other>(
 /// The undamaged path the newest backup PDB has for each of `ids`.
 fn backup_paths(usb_root: &Path, ids: &[u32]) -> HashMap<u32, String> {
     let mut found = HashMap::new();
-    for backup in crate::service::usb_backups::backup_pdb_files(usb_root) {
+    for backup in crate::service::usb::backups::backup_pdb_files(usb_root) {
         if found.len() == ids.len() {
             break;
         }
@@ -503,7 +503,7 @@ pub(super) fn detect_track_rebuilds(
     if !pdb_rows.iter().any(RowFacts::is_damaged) && !edb_rows.iter().any(RowFacts::is_damaged) {
         return TrackRebuilds::default();
     }
-    let contents = crate::service::usb_utils::collect_contents_files(usb_root);
+    let contents = crate::service::usb::utils::collect_contents_files(usb_root);
     let pdb_backups = {
         let ids: Vec<u32> = pdb_rows
             .iter()

@@ -7,8 +7,10 @@
 
 use std::collections::{HashMap, HashSet};
 
-use super::export_helpers::canonicalize_track_path_identity;
-use super::track_matching::{ContentFingerprint, content_fingerprint_key, pdb_track_fingerprint};
+use crate::service::export_helpers::canonicalize_track_path_identity;
+use crate::service::track_matching::{
+    ContentFingerprint, content_fingerprint_key, pdb_track_fingerprint,
+};
 
 /// (master_db_id, master_content_id, content_link, artwork_path) for a USB track.
 pub(crate) type UsbTrackIdentity = (Option<u32>, Option<u32>, Option<u32>, Option<String>);

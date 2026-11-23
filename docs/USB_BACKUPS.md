@@ -15,7 +15,7 @@ one logical snapshot covering both files.
 
 Only the newest snapshot per file stays in `PIONEER/rekordbox/backups/` on the USB drive itself —
 that single restore point travels with the physical drive to any computer. Older snapshots are
-moved to the local HDD staging cache (`usb_staging::backups_dir_for`, under the same
+moved to the local HDD staging cache (`usb::staging::backups_dir_for`, under the same
 per-device cache directory, see [USB_EXPORT.md](USB_EXPORT.md), "Local HDD staging") instead of
 accumulating forever on the (often space-constrained) USB stick. This archiving requires a named drive: an unnamed drive has no
 stable cache directory yet, so everything is left on the USB until it's named. Total snapshots
@@ -31,6 +31,6 @@ snapshot being restored from), then copies the snapshot's files over the live PD
 
 ![The Backups panel listing snapshots on the USB and on this computer](assets/backup-view.png)
 
-Implementation: `backend/src/service/usb_backups.rs` (list/restore/delete + retention/archival
-policy), `backend/src/service/usb_vendor_compat.rs` (`backup_usb_databases`, the raw timestamped
+Implementation: `backend/src/service/usb/backups.rs` (list/restore/delete + retention/archival
+policy), `backend/src/service/usb/vendor_compat.rs` (`backup_usb_databases`, the raw timestamped
 copy every mutating operation calls through `backup_usb_databases_with_retention`).

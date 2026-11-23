@@ -2,7 +2,7 @@
 
 use super::*;
 use crate::i18n::tr;
-use crate::service::usb_staging::{UsbDatabasesExt, UsbWriteSession};
+use crate::service::usb::staging::{UsbDatabasesExt, UsbWriteSession};
 
 /// Writes every one of `writes` into the session's staged eDB, in one
 /// transaction and in their order.
@@ -12,7 +12,7 @@ pub fn write_edb_playlists_in(
 ) -> BackendResult<Vec<WriteExportLibraryDbResult>> {
     if session.databases()?.edb().is_none() {
         return Err(BackendError::NotFound(tr::export_error_edb_missing(
-            crate::service::usb_vendor_compat::vendor_edb_path(session.usb_root()).display(),
+            crate::service::usb::vendor_compat::vendor_edb_path(session.usb_root()).display(),
         )));
     }
     let Some(conn) = session.edb()? else {
@@ -252,8 +252,8 @@ pub fn write_edb_playlists_in_tx(
         // drive) whatever is there stays, e.g. a name set in rekordbox.
         let usb_root = Path::new(&manifest.usb_root);
         if property_columns.contains("deviceName")
-            && !crate::service::usb_identity::has_name_conflict(usb_root)
-            && let Some(name) = crate::service::usb_identity::read_drive_name(usb_root)
+            && !crate::service::usb::identity::has_name_conflict(usb_root)
+            && let Some(name) = crate::service::usb::identity::read_drive_name(usb_root)
         {
             tx.execute("UPDATE property SET deviceName = ?1", params![name])?;
         }

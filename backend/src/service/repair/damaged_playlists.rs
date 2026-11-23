@@ -110,7 +110,7 @@ impl PlaylistNameSources {
     }
 
     fn with_backups(mut self, usb_root: &Path) -> Self {
-        self.backups = crate::service::usb_backups::backup_pdb_files(usb_root)
+        self.backups = crate::service::usb::backups::backup_pdb_files(usb_root)
             .iter()
             .filter_map(|path| std::fs::read(path).ok())
             .map(|bytes| {

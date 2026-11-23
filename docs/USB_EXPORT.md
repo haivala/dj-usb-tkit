@@ -114,7 +114,7 @@ never collide; that fallback is also why backup archiving ([USB_BACKUPS.md](USB_
 require a named drive.
 
 This is the desktop app's behavior specifically — it's the only context that enables staging, at
-startup, right after the backend is constructed (`usb_staging::init_cache_root` in
+startup, right after the backend is constructed (`usb::staging::init_cache_root` in
 `desktop/src-tauri/src/main.rs`). CLI dev tools (`backend/src/bin/*.rs`) and the automated test
 suite never enable it, so they keep reading/writing the given path directly, matching behavior
 from before staging existed.
@@ -134,9 +134,9 @@ to commit — e.g. Rekordbox itself wrote to the drive in between — the write-
 an error instead of silently overwriting that external change; re-opening the USB re-syncs the
 local copy and the operation can be retried.
 
-Implementation: `backend/src/service/usb_staging.rs` (staging/write-back core),
+Implementation: `backend/src/service/usb/staging.rs` (staging/write-back core),
 `backend/src/edb.rs` (`open_edb_from_usb_root`/`open_edb_rw` route eDB access through it
-transparently), `backend/src/service/usb_utils.rs` (`parse_staged_pdb` wraps `pdb_reader::parse_pdb`
+transparently), `backend/src/service/usb/utils.rs` (`parse_staged_pdb` wraps `pdb_reader::parse_pdb`
 for PDB reads).
 
 ## USB drive naming
@@ -184,7 +184,7 @@ the drive holding that name:
   from other computers only add records, so they never trip this; an unreadable log is ignored.
 
 A drive that fails either check counts as unnamed for the rest of the session
-(`usb_identity::drive_name`): it stages into its own cache, its backups stay on the USB, and it
+(`usb::identity::drive_name`): it stages into its own cache, its backups stay on the USB, and it
 isn't labelled with the other drive's name. The naming prompt says which name it carries, and the
 OS label isn't suggested when it is that name. Giving it a new name makes it a drive of its own.
 Giving it the carried name again makes it the drive that name is checked against (for a drive
@@ -200,7 +200,7 @@ device has a `usb-*` entry under `/dev/disk/by-id/`). The user can still edit or
 suggestion before saving; an arbitrary local directory that isn't backed by a removable device
 gets no suggestion.
 
-Implementation: `backend/src/service/usb_identity.rs`, `check_drive_identity` and
+Implementation: `backend/src/service/usb/identity.rs`, `check_drive_identity` and
 `set_usb_device_name` in `backend/src/service/usb.rs`.
 
 ## Deep technical details
@@ -282,7 +282,7 @@ must always match the real file on disk.
 A stick can list a track in the PDB only, in the eDB only (for example a stick
 whose PDB was lost or never written), or in both. Every check of what is
 already on the USB reads both databases through one helper, `UsbTrackFacts`
-(`backend/src/service/usb_track_facts.rs`): the PDB's track rows first, then the
+(`backend/src/service/usb/track_facts.rs`): the PDB's track rows first, then the
 eDB's `content` rows, which add the tracks the PDB doesn't list and fill in a
 file size or content fingerprint a PDB row lacks. The content fingerprint is
 the recorded file size plus the normalized title and artist

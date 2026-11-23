@@ -1,10 +1,10 @@
-//! The USB drive's partition layout and filesystem (`usb_layout`) as a report
+//! The USB drive's partition layout and filesystem (`usb::layout`) as a report
 //! section. Only a warning: the app doesn't format drives, so it names the
 //! difference and how to reformat.
 
 use super::*;
 use crate::i18n::{Text, tr};
-use crate::service::usb_layout::{layout_problems, read_drive_layout};
+use crate::service::usb::layout::{layout_problems, read_drive_layout};
 
 /// `None` when `usb_root` isn't the mount point of a USB device: a folder
 /// used as a USB has no drive layout of its own to check.

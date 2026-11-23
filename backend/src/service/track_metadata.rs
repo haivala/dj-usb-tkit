@@ -26,8 +26,8 @@ use super::cues::{
     report_usb_database_gaps, track_not_in_usb_database,
 };
 use super::export_helpers::{PdbLayoutProfile, load_table_columns_tx};
-use super::usb_staging::{SessionBackup, UsbDatabases};
-use super::usb_utils::resolve_usb_root;
+use super::usb::staging::{SessionBackup, UsbDatabases};
+use super::usb::utils::resolve_usb_root;
 use super::{BackendService, now};
 
 /// Highest star rating (the PDB row byte and the eDB column are 0–5).

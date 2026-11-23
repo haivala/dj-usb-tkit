@@ -416,7 +416,7 @@ export async function detectExternalMixxxDb(ctx) {
 
 // Prompts for (and saves) a name for `state.usbRoot` if it doesn't have one
 // yet. A name is this app's only notion of stable drive identity (see
-// `usb_identity` on the backend) -- it's what lets backups and local
+// `usb::identity` on the backend) -- it's what lets backups and local
 // staging caching correctly recognize "this is the same drive" again after
 // a replug or a different computer, where the OS-assigned mount path can't.
 // Best-effort: any failure to even check/show the prompt just lets the user

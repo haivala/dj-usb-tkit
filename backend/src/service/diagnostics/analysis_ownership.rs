@@ -102,9 +102,9 @@ pub(crate) fn scan_analysis_ownership(
     // filesystem lookup per track, which on a cold, large stick is what the
     // whole diagnosis waits on.
     let resolve = if read_ppth {
-        crate::service::usb_utils::resolve_usb_side_path
+        crate::service::usb::utils::resolve_usb_side_path
     } else {
-        crate::service::usb_utils::resolve_usb_side_path_lexical
+        crate::service::usb::utils::resolve_usb_side_path_lexical
     };
     let mut by_bundle = BTreeMap::<String, (PathBuf, Vec<&crate::pdb_reader::PdbTrackRow>)>::new();
     for track in &parsed.tracks {

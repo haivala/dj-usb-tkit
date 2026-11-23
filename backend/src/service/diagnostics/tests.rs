@@ -2246,7 +2246,7 @@ fn pdb_integrity_passes_rekordbox_page_shapes() {
     fs::write(&pdb_path, pages.concat()).expect("write test pdb");
 
     let (section, _) = super::pdb_integrity::diagnose_pdb_integrity(&pdb_path, |path| {
-        crate::service::usb::StagedPdbParse::read(path).map(std::sync::Arc::new)
+        crate::service::usb::cache::StagedPdbParse::read(path).map(std::sync::Arc::new)
     });
     for label in ["PDB structural integrity", "PDB page headers"] {
         let check = section

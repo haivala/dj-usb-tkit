@@ -32,15 +32,17 @@ use crate::models::{
 use crate::pdb_reader::{ParsedPdb, PdbPlaylistEntryRow, parse_pdb_bytes, pdb_page_size};
 use crate::utils::warning_text;
 
-use super::BackendService;
-use super::diagnostics::{FieldNoteParity, RatingColourParity, build_usb_parity_comparison};
-use super::export_helpers::canonicalize_track_path_identity;
-use super::repair::{
-    restore_pdb_playlist_sort_orders, write_edb_playlist_order, write_edb_playlist_track_order,
-};
-use super::usb_staging::{SessionBackup, UsbDatabases, UsbWriteGuard};
-use super::usb_utils::{
+use super::staging::{SessionBackup, UsbDatabases, UsbWriteGuard};
+use super::utils::{
     can_write_file_at, canonicalize_playlist_name, has_write_access, resolve_usb_root,
+};
+use crate::service::BackendService;
+use crate::service::diagnostics::{
+    FieldNoteParity, RatingColourParity, build_usb_parity_comparison,
+};
+use crate::service::export_helpers::canonicalize_track_path_identity;
+use crate::service::repair::{
+    restore_pdb_playlist_sort_orders, write_edb_playlist_order, write_edb_playlist_track_order,
 };
 
 /// The reason recorded on the backup a save takes. A save whose stick's
@@ -523,7 +525,8 @@ impl BackendService {
                     .unwrap_or_default(),
                 track_order_key,
             );
-            super::TrackSort::new(req.sort_by.as_deref(), req.sort_dir.as_deref()).apply(&mut rows);
+            crate::service::TrackSort::new(req.sort_by.as_deref(), req.sort_dir.as_deref())
+                .apply(&mut rows);
             let keys = rows.iter().map(track_order_key).collect();
             pending.set_tracks(&playlist.id, keys, &base);
             Ok(())

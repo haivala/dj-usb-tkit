@@ -38,7 +38,7 @@ pub enum JobType {
 }
 
 /// What can block actions: a running job, or the USB Playlists page's order edit while
-/// it's open (`usb_order_edit`), which holds a pending order for the selected USB.
+/// it's open (`usb::order_edit`), which holds a pending order for the selected USB.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum Blocker {
     Job(JobType),

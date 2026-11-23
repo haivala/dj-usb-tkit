@@ -15,13 +15,13 @@ use crate::models::WarningEntry;
 use crate::pdb_page;
 use crate::pdb_reader::parse_pdb;
 
-use super::WAVEFORM_PREVIEW_BINS;
-use super::usb_vendor_compat::{
+use super::vendor_compat::{
     DEFAULT_USB_EDB_KEY, LEGACY_REKORDBOX_DB_ENV_KEY, REKORDBOX_DB_ENV_KEY, USB_ANALYSIS_DIR,
     USB_CONTENTS_DIR, USB_ROOT_ENV_KEY, USB_VENDOR_DB_DIR, USB_VENDOR_DB_DIR_LOWER,
     USB_VENDOR_ROOT_DIR, USB_VENDOR_ROOT_DIR_LOWER, USB_VENDOR_ROOT_PREFIX,
     desktop_master_db_rel_path, vendor_db_dir, vendor_pdb_path,
 };
+use crate::service::WAVEFORM_PREVIEW_BINS;
 
 pub(crate) fn artwork_path_to_data_url(path: &Path) -> Option<String> {
     let ext = path
@@ -105,7 +105,7 @@ pub(crate) fn upsert_usb_device(
     now_ts: &str,
 ) -> BackendResult<String> {
     let root_path = root.to_string_lossy().to_string();
-    let root_path_key = super::normalize_source_root_for_matching(&root_path);
+    let root_path_key = crate::service::normalize_source_root_for_matching(&root_path);
 
     let existing_id: Option<String> = conn
         .query_row(
@@ -157,7 +157,7 @@ pub(crate) struct RegisteredDrive {
 }
 
 /// The registered drive whose name shares `name`'s slug, if any. Names double
-/// as cache/backup-archive keys (`usb_identity::slug`), so "My USB" and
+/// as cache/backup-archive keys (`usb::identity::slug`), so "My USB" and
 /// "my-usb" are the same name here.
 pub(crate) fn find_registered_drive(
     conn: &rusqlite::Connection,
@@ -166,7 +166,7 @@ pub(crate) fn find_registered_drive(
     let row = conn
         .query_row(
             "SELECT name, last_export_at, total_bytes FROM usb_drive_names WHERE slug = ?1",
-            rusqlite::params![super::usb_identity::slug(name)],
+            rusqlite::params![crate::service::usb::identity::slug(name)],
             |row| {
                 Ok(RegisteredDrive {
                     name: row.get(0)?,
@@ -189,7 +189,7 @@ pub(crate) fn register_drive_name(
     conn.execute(
         "INSERT INTO usb_drive_names (slug, name, last_seen_at) VALUES (?1, ?2, ?3)
          ON CONFLICT(slug) DO UPDATE SET name = excluded.name, last_seen_at = excluded.last_seen_at",
-        rusqlite::params![super::usb_identity::slug(name), name, now_ts],
+        rusqlite::params![crate::service::usb::identity::slug(name), name, now_ts],
     )?;
     Ok(())
 }
@@ -207,7 +207,7 @@ pub(crate) fn set_registered_drive(
         rusqlite::params![
             last_export_at,
             total_bytes.map(|n| n as i64),
-            super::usb_identity::slug(name)
+            crate::service::usb::identity::slug(name)
         ],
     )?;
     Ok(())
@@ -221,7 +221,10 @@ pub(crate) fn fill_registered_drive_size(
 ) -> BackendResult<()> {
     conn.execute(
         "UPDATE usb_drive_names SET total_bytes = ?1 WHERE slug = ?2 AND total_bytes IS NULL",
-        rusqlite::params![total_bytes as i64, super::usb_identity::slug(name)],
+        rusqlite::params![
+            total_bytes as i64,
+            crate::service::usb::identity::slug(name)
+        ],
     )?;
     Ok(())
 }
@@ -234,7 +237,7 @@ pub(crate) fn record_drive_export(
 ) -> BackendResult<()> {
     conn.execute(
         "UPDATE usb_drive_names SET last_export_at = ?1 WHERE slug = ?2",
-        rusqlite::params![exported_at, super::usb_identity::slug(name)],
+        rusqlite::params![exported_at, crate::service::usb::identity::slug(name)],
     )?;
     Ok(())
 }
@@ -244,7 +247,7 @@ pub(crate) fn record_drive_export(
 pub(crate) fn forget_drive_name(conn: &rusqlite::Connection, name: &str) -> BackendResult<()> {
     conn.execute(
         "DELETE FROM usb_drive_names WHERE slug = ?1",
-        rusqlite::params![super::usb_identity::slug(name)],
+        rusqlite::params![crate::service::usb::identity::slug(name)],
     )?;
     Ok(())
 }
@@ -252,7 +255,7 @@ pub(crate) fn forget_drive_name(conn: &rusqlite::Connection, name: &str) -> Back
 /// Persist `label` onto the `usb_devices` row for `root`, upserting a row
 /// first if none exists yet (e.g. naming a drive before it's ever been
 /// through `validate_usb_root`). The on-drive marker file
-/// (`usb_identity::write_drive_name`) is the source of truth; this is the
+/// (`usb::identity::write_drive_name`) is the source of truth; this is the
 /// name shown for the path while the drive isn't plugged in, kept in sync by
 /// the caller.
 pub(crate) fn set_device_label(
@@ -262,7 +265,7 @@ pub(crate) fn set_device_label(
     now_ts: &str,
 ) -> BackendResult<()> {
     upsert_usb_device(conn, root, false, now_ts)?;
-    let root_path_key = super::normalize_source_root_for_matching(&root.to_string_lossy());
+    let root_path_key = crate::service::normalize_source_root_for_matching(&root.to_string_lossy());
     conn.execute(
         "UPDATE usb_devices SET label = ?1, updated_at = ?2 WHERE root_path_key = ?3 AND label IS NOT ?1",
         rusqlite::params![label, now_ts, root_path_key],
@@ -355,7 +358,7 @@ pub(crate) fn resolve_usb_root(requested_root: Option<&str>) -> BackendResult<Pa
 /// USB path directly when staging hasn't been initialized (CLI tools,
 /// tests that don't construct a `BackendService`).
 pub(crate) fn parse_staged_pdb(usb_root: &Path) -> BackendResult<crate::pdb_reader::ParsedPdb> {
-    parse_pdb(super::usb_staging::UsbDatabases::of(usb_root)?.require_pdb()?)
+    parse_pdb(crate::service::usb::staging::UsbDatabases::of(usb_root)?.require_pdb()?)
 }
 
 /// The file a path from the USB's databases names: `/Contents/…` and
@@ -974,7 +977,7 @@ pub(crate) fn load_existing_analysis_paths_by_content_path_with_conn(
             continue;
         }
         out.insert(
-            super::export_helpers::canonicalize_track_path_identity(p),
+            crate::service::export_helpers::canonicalize_track_path_identity(p),
             a.to_string(),
         );
     }
@@ -984,7 +987,7 @@ pub(crate) fn load_existing_analysis_paths_by_content_path_with_conn(
 pub(crate) fn load_existing_analysis_paths_by_pdb_track_path(
     usb_root: &Path,
 ) -> HashMap<String, String> {
-    let Ok(Some(databases)) = super::usb_staging::UsbDatabases::present(usb_root) else {
+    let Ok(Some(databases)) = crate::service::usb::staging::UsbDatabases::present(usb_root) else {
         return HashMap::new();
     };
     let Some(Ok(parsed)) = databases.pdb().map(parse_pdb) else {
@@ -998,7 +1001,7 @@ pub(crate) fn load_existing_analysis_paths_by_pdb_track_path(
             continue;
         }
         out.insert(
-            super::export_helpers::canonicalize_track_path_identity(path),
+            crate::service::export_helpers::canonicalize_track_path_identity(path),
             anlz.to_string(),
         );
     }
@@ -1087,10 +1090,10 @@ pub fn initialize_usb(root: &Path) -> BackendResult<crate::models::InitializeUsb
 /// [`initialize_usb`], with `service`'s parse caches dropped once the
 /// databases are written.
 pub(crate) fn initialize_usb_for(
-    service: Option<&super::BackendService>,
+    service: Option<&crate::service::BackendService>,
     root: &Path,
 ) -> BackendResult<crate::models::InitializeUsbData> {
-    let write_guard = service.map(super::BackendService::lock_usb_writes);
+    let write_guard = service.map(crate::service::BackendService::lock_usb_writes);
     if !root.is_dir() {
         return Err(BackendError::Internal(format!(
             "USB root does not exist: {}",
@@ -1127,24 +1130,26 @@ pub(crate) fn initialize_usb_for(
         (Some(service), Some(guard)) => service.usb_write_session(
             guard,
             root,
-            super::usb_staging::SessionBackup::None,
+            crate::service::usb::staging::SessionBackup::None,
             &mut Vec::new(),
         ),
-        _ => super::usb_staging::UsbWriteSession::without_service(root),
+        _ => crate::service::usb::staging::UsbWriteSession::without_service(root),
     };
-    let present = super::usb_staging::UsbDatabases::on_connect(root);
+    let present = crate::service::usb::staging::UsbDatabases::on_connect(root);
     let mut created_files = Vec::new();
     for kind in [
-        super::usb_staging::DbKind::Pdb,
-        super::usb_staging::DbKind::Edb,
+        crate::service::usb::staging::DbKind::Pdb,
+        crate::service::usb::staging::DbKind::Edb,
     ] {
         if present.as_ref().is_some_and(|dbs| dbs.has(kind)) {
             continue;
         }
         session.create_database(kind, &created_date)?;
         created_files.push(match kind {
-            super::usb_staging::DbKind::Pdb => vendor_pdb_path(root),
-            super::usb_staging::DbKind::Edb => vendor_db_dir(root).join("exportLibrary.db"),
+            crate::service::usb::staging::DbKind::Pdb => vendor_pdb_path(root),
+            crate::service::usb::staging::DbKind::Edb => {
+                vendor_db_dir(root).join("exportLibrary.db")
+            }
         });
     }
     session.commit()?;
@@ -1637,7 +1642,7 @@ pub(crate) fn external_rekordbox_db_candidates() -> Vec<PathBuf> {
 
     // rekordbox installed under Wine
     #[cfg(target_os = "linux")]
-    candidates.extend(super::wine_paths::wine_rekordbox_db_candidates());
+    candidates.extend(crate::service::wine_paths::wine_rekordbox_db_candidates());
 
     candidates
 }
@@ -1653,8 +1658,8 @@ mod diag_tests {
         ExportPlaylistData, PlaylistPlacement, exported_media_target_path, write_edb_playlists_in,
     };
     use crate::service::now;
-    use crate::service::usb_helpers::{parse_history_name_numeric_id, parse_history_slot_id};
-    use crate::service::usb_staging::UsbWriteSession;
+    use crate::service::usb::helpers::{parse_history_name_numeric_id, parse_history_slot_id};
+    use crate::service::usb::staging::UsbWriteSession;
     use rusqlite::params;
     use std::path::{Path, PathBuf};
     use std::sync::{Mutex, OnceLock};
@@ -2372,7 +2377,7 @@ mod diag_tests {
     fn initialize_usb_writes_pdb_and_edb_through_staging_when_enabled() {
         let usb = tempfile::tempdir().expect("usb tempdir");
         let cache_dir = tempfile::tempdir().expect("cache dir").keep();
-        let _guard = crate::service::usb_staging::set_cache_root_for_test(Some(cache_dir));
+        let _guard = crate::service::usb::staging::set_cache_root_for_test(Some(cache_dir));
 
         let result = initialize_usb(usb.path()).unwrap();
         assert!(!result.created_dirs.is_empty());
@@ -2398,9 +2403,9 @@ mod diag_tests {
         // Both files must actually have gone through the local cache, not
         // just been written straight to the USB.
         let staged_pdb =
-            crate::service::usb_staging::stage_pdb(usb.path()).expect("stage pdb after init");
+            crate::service::usb::staging::stage_pdb(usb.path()).expect("stage pdb after init");
         let staged_edb =
-            crate::service::usb_staging::stage_edb(usb.path()).expect("stage edb after init");
+            crate::service::usb::staging::stage_edb(usb.path()).expect("stage edb after init");
         assert_ne!(
             staged_pdb, pdb_usb_path,
             "PDB should be staged to a local cache path"
@@ -2423,7 +2428,7 @@ mod diag_tests {
         let mtime_before = std::fs::metadata(&staged_edb).unwrap().modified().unwrap();
         std::thread::sleep(std::time::Duration::from_millis(20));
         let staged_edb_again =
-            crate::service::usb_staging::stage_edb(usb.path()).expect("stage edb again");
+            crate::service::usb::staging::stage_edb(usb.path()).expect("stage edb again");
         let mtime_after = std::fs::metadata(&staged_edb_again)
             .unwrap()
             .modified()
@@ -2438,7 +2443,7 @@ mod diag_tests {
     fn initialize_usb_recovers_when_usb_wiped_but_local_cache_is_stale() {
         let usb = tempfile::tempdir().expect("usb tempdir");
         let cache_dir = tempfile::tempdir().expect("cache dir").keep();
-        let _guard = crate::service::usb_staging::set_cache_root_for_test(Some(cache_dir));
+        let _guard = crate::service::usb::staging::set_cache_root_for_test(Some(cache_dir));
 
         // First init: populates both the USB and the local cache with a
         // full PDB/eDB.
@@ -3422,7 +3427,7 @@ mod diag_tests {
 
     #[test]
     fn anlz_dat_file_roundtrip_extracts_correct_preview() {
-        use super::super::anlz::{WaveformData, build_anlz_dat_file};
+        use crate::service::anlz::{WaveformData, build_anlz_dat_file};
 
         let peaks: Vec<u8> = (0..100).map(|i| (i * 100 / 99).min(100) as u8).collect();
         let dat_bytes = build_anlz_dat_file(

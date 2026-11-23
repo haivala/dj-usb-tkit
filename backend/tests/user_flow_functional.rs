@@ -26,7 +26,7 @@ use backend::service::anlz::{
     AnlzAnalysisEdits, AnlzCue, apply_analysis_edits_to_anlz, read_beatgrid_tempo_from_anlz,
     read_cues_from_anlz, read_first_beat_from_anlz,
 };
-use backend::service::usb_vendor_compat::DEFAULT_USB_EDB_KEY;
+use backend::service::usb::vendor_compat::DEFAULT_USB_EDB_KEY;
 
 fn find_files_named(dir: &Path, name: &str, out: &mut Vec<PathBuf>) {
     let Ok(entries) = fs::read_dir(dir) else {

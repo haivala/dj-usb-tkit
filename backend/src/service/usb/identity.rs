@@ -19,11 +19,15 @@
 use std::path::{Path, PathBuf};
 use std::sync::Mutex;
 
+use rusqlite::{OptionalExtension, params};
 use serde::{Deserialize, Serialize};
 
 use crate::audio_format::UsbAudioFormat;
 use crate::error::{BackendError, BackendResult};
 use crate::i18n::{Text, tr};
+use crate::service::{BackendService, now};
+
+use super::utils::{self, resolve_usb_root};
 
 const MARKER_DIR: &str = ".dj-usb-tkit";
 const MARKER_FILE: &str = "drive.json";
@@ -166,7 +170,7 @@ fn marker_path(root: &Path) -> PathBuf {
 static NAME_CONFLICTS: Mutex<Vec<String>> = Mutex::new(Vec::new());
 
 fn root_key(root: &Path) -> String {
-    super::normalize_source_root_for_matching(&root.to_string_lossy())
+    crate::service::normalize_source_root_for_matching(&root.to_string_lossy())
 }
 
 pub(crate) fn set_name_conflict(root: &Path, conflicted: bool) {
@@ -219,7 +223,7 @@ pub(crate) fn validate_name(name: &str) -> Result<String, Text> {
 
 /// Write `name` to the marker file at `root`, creating the marker directory
 /// if needed. Caller is responsible for uniqueness checks against other
-/// known drives (see `usb_utils::find_registered_drive`).
+/// known drives (see `usb::utils::find_registered_drive`).
 pub(crate) fn write_drive_name(root: &Path, name: &str) -> std::io::Result<()> {
     let validated =
         validate_name(name).map_err(|text| std::io::Error::other(text.render_english()))?;
@@ -464,6 +468,260 @@ fn linux_unescape_udev_label(raw: &str) -> String {
         }
     }
     String::from_utf8_lossy(&out).into_owned()
+}
+
+/// The registered `usb_devices` id for the stick mounted at `usb_root`.
+pub(super) fn usb_device_id_for_root(
+    conn: &rusqlite::Connection,
+    usb_root: &Path,
+) -> BackendResult<Option<String>> {
+    let root_key = crate::service::normalize_source_root_for_matching(&usb_root.to_string_lossy());
+    Ok(conn
+        .query_row(
+            "SELECT id FROM usb_devices WHERE root_path_key = ?1",
+            params![root_key],
+            |row| row.get(0),
+        )
+        .optional()?)
+}
+
+impl BackendService {
+    pub fn list_usb_devices(&self) -> BackendResult<crate::models::ListUsbDevicesData> {
+        let conn = self.db.connect()?;
+        let mut stmt = conn.prepare(
+            "SELECT id, root_path, label, mounted, first_seen_at, last_seen_at
+             FROM usb_devices
+             WHERE deleted_at IS NULL
+             ORDER BY last_seen_at DESC",
+        )?;
+        let items = stmt
+            .query_map([], |row| {
+                Ok(crate::models::UsbDeviceSummary {
+                    id: row.get(0)?,
+                    root_path: row.get(1)?,
+                    label: row.get(2)?,
+                    mounted: row.get::<_, i64>(3)? != 0,
+                    first_seen_at: row.get(4)?,
+                    last_seen_at: row.get(5)?,
+                })
+            })?
+            .collect::<Result<Vec<_>, _>>()?;
+        Ok(crate::models::ListUsbDevicesData { items })
+    }
+
+    pub fn prune_usb_device(
+        &self,
+        req: crate::models::PruneUsbDeviceRequest,
+    ) -> BackendResult<crate::models::PruneUsbDeviceData> {
+        let conn = self.db.connect()?;
+        let now_ts = now();
+        let label: Option<String> = conn
+            .query_row(
+                "SELECT label FROM usb_devices WHERE id = ?1 AND deleted_at IS NULL",
+                params![req.id],
+                |row| row.get::<_, Option<String>>(0),
+            )
+            .optional()?
+            .flatten();
+        let changed = conn.execute(
+            "UPDATE usb_devices SET deleted_at = ?1, updated_at = ?1 WHERE id = ?2 AND deleted_at IS NULL",
+            params![now_ts, req.id],
+        )?;
+        // A removed drive's name is free again.
+        if let Some(label) = label.filter(|label| !label.trim().is_empty()) {
+            utils::forget_drive_name(&conn, label.trim())?;
+        }
+        drop(conn);
+        Ok(crate::models::PruneUsbDeviceData {
+            pruned: changed > 0,
+            devices: self.list_usb_devices()?.items,
+        })
+    }
+
+    /// Reads the user-assigned name for `req.usb_root` from the on-drive
+    /// marker (survives a different computer). A drive without one is
+    /// unnamed, even when `usb_devices` has a name cached for its mount path:
+    /// drives with the same volume label mount at the same path, so that
+    /// name may belong to a different drive. A drive whose marker names
+    /// another drive is unnamed too (`check_drive_identity`). See
+    /// `usb::identity` for why a name, not a hardware serial, is this app's
+    /// notion of drive identity.
+    pub fn get_usb_device_name(
+        &self,
+        req: crate::models::GetUsbDeviceNameRequest,
+    ) -> BackendResult<crate::models::GetUsbDeviceNameData> {
+        let usb_root = resolve_usb_root(Some(&req.usb_root))?;
+        let conn = self.db.connect()?;
+        let name_taken_by = self.check_drive_identity(&conn, &usb_root)?;
+        if name_taken_by.is_none()
+            && let Some(name) = crate::service::usb::identity::read_drive_name(&usb_root)
+        {
+            return Ok(crate::models::GetUsbDeviceNameData {
+                name: Some(name),
+                suggested_name: None,
+                name_taken_by: None,
+            });
+        }
+
+        // The OS label is often the other drive's name: suggesting it would
+        // have the two share it again.
+        let suggested_name = crate::service::usb::identity::suggest_drive_name(&usb_root)
+            .map(|suggested| suggested.trim().to_string())
+            .filter(|suggested| {
+                name_taken_by.as_deref().is_none_or(|taken| {
+                    crate::service::usb::identity::slug(taken)
+                        != crate::service::usb::identity::slug(suggested)
+                })
+            });
+        Ok(crate::models::GetUsbDeviceNameData {
+            name: None,
+            suggested_name,
+            name_taken_by,
+        })
+    }
+
+    /// Decides whether the drive at `usb_root` is the drive its name marker
+    /// names, or a different one carrying that name: a copy of the drive
+    /// (stick or folder), or a drive that took its name through an old bug.
+    /// It's a different drive when the drive this computer knows by that
+    /// name had a different size, or got an export (logged on it, see
+    /// `export_log`) that this drive's export log doesn't have. A different
+    /// drive counts as unnamed (`usb::identity::drive_name`) so it gets its
+    /// own cache and backups; returns the name it carries.
+    ///
+    /// Otherwise registers the name, so drives named on another computer
+    /// count as taken here too, and labels the mount path with it.
+    pub(crate) fn check_drive_identity(
+        &self,
+        conn: &rusqlite::Connection,
+        usb_root: &Path,
+    ) -> BackendResult<Option<String>> {
+        let marker = crate::service::usb::identity::read_drive_name(usb_root);
+        let registered = match &marker {
+            Some(name) => utils::find_registered_drive(conn, name)?,
+            None => None,
+        };
+        let total_bytes = fs4::total_space(usb_root).ok();
+        let conflict = registered.as_ref().is_some_and(|drive| {
+            let size_differs =
+                matches!((drive.total_bytes, total_bytes), (Some(known), Some(now)) if known != now);
+            // An unreadable log proves nothing either way.
+            let export_missing = drive.last_export_at.as_deref().is_some_and(|exported_at| {
+                crate::service::export_log::has_export_log_record(usb_root, exported_at) == Some(false)
+            });
+            size_differs || export_missing
+        });
+
+        if crate::service::usb::identity::has_name_conflict(usb_root) != conflict {
+            crate::service::usb::identity::set_name_conflict(usb_root, conflict);
+            crate::service::usb::staging::forget_cache_key_for_root(usb_root);
+            self.invalidate_usb_parse_cache();
+        }
+        if conflict {
+            return Ok(registered.map(|drive| drive.name));
+        }
+        if let Some(name) = &marker {
+            let now_ts = now();
+            utils::register_drive_name(conn, name, &now_ts)?;
+            if let Some(total_bytes) = total_bytes {
+                utils::fill_registered_drive_size(conn, name, total_bytes)?;
+            }
+            // The path's label follows the drive last seen there, also one
+            // named elsewhere (another computer, or a hand-edited marker).
+            utils::set_device_label(conn, usb_root, name, &now_ts)?;
+        }
+        Ok(None)
+    }
+
+    /// Assigns `req.name` to `req.usb_root`, rejecting names already taken by
+    /// a different drive (names double as cache/backup-archive keys). Also
+    /// renames: the drive's cache dir moves to the new name and its old name
+    /// is freed. A drive carrying another drive's name may take that name
+    /// back (it is that drive after all), which makes it the drive the name
+    /// is checked against. Writes the on-drive marker (source of truth), the
+    /// local `usb_devices.label` cache and the `usb_drive_names` registry.
+    pub fn set_usb_device_name(
+        &self,
+        req: crate::models::SetUsbDeviceNameRequest,
+    ) -> BackendResult<crate::models::SetUsbDeviceNameData> {
+        let usb_root = resolve_usb_root(Some(&req.usb_root))?;
+        let name = crate::service::usb::identity::validate_name(&req.name)
+            .map_err(BackendError::Validation)?;
+        let same_name = |other: &str| {
+            crate::service::usb::identity::slug(other) == crate::service::usb::identity::slug(&name)
+        };
+        let marker = crate::service::usb::identity::read_drive_name(&usb_root);
+        let conflicted = crate::service::usb::identity::has_name_conflict(&usb_root);
+        // A carried name isn't this drive's: renaming away from it must not
+        // take the other drive's cache or free its name.
+        let current = marker.as_deref().filter(|_| !conflicted);
+        let updated = current != Some(name.as_str());
+        let renaming_away = current.filter(|current| !same_name(current));
+        let claims_name = conflicted && marker.as_deref().is_some_and(same_name);
+
+        let conn = self.db.connect()?;
+        // Keeping its own name (or changing only its case) is not a collision.
+        let keeps_own_name = current.is_some() && renaming_away.is_none();
+        if !keeps_own_name
+            && !claims_name
+            && let Some(taken) = utils::find_registered_drive(&conn, &name)?
+        {
+            return Err(BackendError::Validation(tr::usb_error_name_taken(
+                &name,
+                &taken.name,
+            )));
+        }
+
+        if let Some(old_name) = renaming_away {
+            crate::service::usb::staging::rename_cache_dir(old_name, &name).map_err(|e| {
+                BackendError::Internal(format!("failed to move the drive's cache: {e}"))
+            })?;
+        }
+        if let Err(e) = crate::service::usb::identity::write_drive_name(&usb_root, &name) {
+            if let Some(old_name) = renaming_away {
+                let _ = crate::service::usb::staging::rename_cache_dir(&name, old_name);
+            }
+            return Err(BackendError::Internal(format!(
+                "failed to write drive name marker: {e}"
+            )));
+        }
+        crate::service::usb::identity::set_name_conflict(&usb_root, false);
+        crate::service::usb::staging::forget_cache_key_for_root(&usb_root);
+        let now_ts = now();
+        if let Some(old_name) = renaming_away {
+            utils::forget_drive_name(&conn, old_name)?;
+            // Earlier exports to this drive name it as it is now called. By
+            // its old name, not its mount path: another stick may have used
+            // the same path, and names are unique to one drive.
+            conn.execute(
+                "UPDATE playlists SET last_exported_usb_name = ?1 WHERE last_exported_usb_name = ?2",
+                params![name, old_name],
+            )?;
+        }
+        utils::register_drive_name(&conn, &name, &now_ts)?;
+        if !keeps_own_name {
+            // This drive is now the one the name is checked against.
+            utils::set_registered_drive(
+                &conn,
+                &name,
+                crate::service::export_log::latest_export_log_record_at(&usb_root).as_deref(),
+                fs4::total_space(&usb_root).ok(),
+            )?;
+        }
+        utils::set_device_label(&conn, &usb_root, &name, &now_ts)?;
+        self.invalidate_usb_parse_cache();
+
+        Ok(crate::models::SetUsbDeviceNameData {
+            status_text: if updated {
+                tr::usb_drive_renamed(&name)
+            } else {
+                tr::usb_drive_name_unchanged()
+            }
+            .render(),
+            name,
+            updated,
+        })
+    }
 }
 
 #[cfg(test)]

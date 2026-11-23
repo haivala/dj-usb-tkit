@@ -19,11 +19,11 @@ use crate::utils::{
 
 use super::BackendService;
 use super::export_helpers::{load_table_columns, table_exists};
-use super::usb_helpers::is_named_history_playlist;
-use super::usb_utils::{
+use super::usb::helpers::is_named_history_playlist;
+use super::usb::utils::{
     canonicalize_playlist_name, collect_contents_files, repair_utf8_mojibake, resolve_usb_root,
 };
-use super::usb_vendor_compat::vendor_edb_path;
+use super::usb::vendor_compat::vendor_edb_path;
 
 mod analysis_ownership;
 mod audio_presence;

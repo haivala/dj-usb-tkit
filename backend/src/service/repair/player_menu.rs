@@ -44,7 +44,7 @@ pub(super) struct EdbMenuRow {
 }
 
 pub(super) fn load_edb_menu_rows(usb_root: &std::path::Path) -> BackendResult<Vec<EdbMenuRow>> {
-    let Some(conn) = usb_staging::UsbDatabases::present(usb_root)?
+    let Some(conn) = staging::UsbDatabases::present(usb_root)?
         .and_then(|databases| databases.open_edb_writable())
     else {
         return Err(crate::error::BackendError::Validation(
@@ -205,8 +205,10 @@ fn pdb_menu_rows(usb_root: &std::path::Path) -> BackendResult<Vec<MenuRow>> {
 }
 
 fn stick_has_edb(usb_root: &std::path::Path) -> BackendResult<bool> {
-    Ok(usb_staging::UsbDatabases::present(usb_root)?
-        .is_some_and(|databases| databases.edb().is_some()))
+    Ok(
+        staging::UsbDatabases::present(usb_root)?
+            .is_some_and(|databases| databases.edb().is_some()),
+    )
 }
 
 /// The menu rows, from the eDB when the stick has one, else from the PDB.
@@ -640,7 +642,7 @@ impl BackendService {
         let mut session = self.usb_write_session(
             &_usb_write_guard,
             &usb_root,
-            usb_staging::SessionBackup::WithRetention {
+            staging::SessionBackup::WithRetention {
                 reason: "Before menu update",
                 playlist_count: None,
             },
@@ -668,7 +670,7 @@ impl BackendService {
             session.close_edb()?;
         } else {
             let rows = t17_rows_for_kinds(&usb_root, &final_kinds)?;
-            session.will_write(usb_staging::DbKind::Pdb)?;
+            session.will_write(staging::DbKind::Pdb)?;
             crate::service::export_helpers::patch_pdb_t17_category_snapshot(&usb_root, &rows)?;
         }
 
@@ -684,7 +686,7 @@ impl BackendService {
         let updated = before_all_kinds != after_kinds || databases_differ;
 
         if updated {
-            session.will_write(usb_staging::DbKind::Pdb)?;
+            session.will_write(staging::DbKind::Pdb)?;
             if has_edb {
                 let patched = t17_rows_from_edb(&usb_root, &mut warnings).and_then(|rows| {
                     crate::service::export_helpers::patch_pdb_t17_category_snapshot(

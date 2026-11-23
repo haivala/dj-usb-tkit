@@ -228,7 +228,7 @@ pub fn load_pdb_t16_rows_from_bytes(bytes: &[u8]) -> Option<Vec<Vec<u8>>> {
 /// below change it in place; the caller's write session writes it back.
 fn staged_pdb(usb_root: &Path) -> BackendResult<Option<std::path::PathBuf>> {
     Ok(
-        crate::service::usb_staging::UsbDatabases::present(usb_root)?
+        crate::service::usb::staging::UsbDatabases::present(usb_root)?
             .as_ref()
             .and_then(|databases| databases.pdb())
             .map(Path::to_path_buf),
@@ -298,7 +298,7 @@ pub fn patch_pdb_columns_menu_set_by_kind(
     usb_root: &Path,
     desired: &[(u16, String)],
 ) -> BackendResult<bool> {
-    let pdb_path = crate::service::usb_staging::required_pdb(usb_root)?;
+    let pdb_path = crate::service::usb::staging::required_pdb(usb_root)?;
     let mut bytes = std::fs::read(&pdb_path)?;
     let page_size = 4096usize;
     if bytes.len() < page_size || bytes.len() % page_size != 0 {
@@ -456,7 +456,7 @@ pub fn patch_pdb_t17_category_snapshot(
 
 #[cfg(test)]
 mod tests {
-    use super::super::super::usb_vendor_compat::{USB_VENDOR_DB_DIR, USB_VENDOR_ROOT_DIR};
+    use super::super::super::usb::vendor_compat::{USB_VENDOR_DB_DIR, USB_VENDOR_ROOT_DIR};
     use super::*;
 
     fn test_usb_root() -> (tempfile::TempDir, std::path::PathBuf) {

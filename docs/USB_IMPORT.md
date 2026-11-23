@@ -75,7 +75,7 @@ a fixed candidate list in order and returning the first path that exists:
 There is no Linux candidate: rekordbox has no official Linux install, so no
 real install path exists to check there.
 
-See `external_rekordbox_db_candidates` in `backend/src/service/usb_utils.rs`.
+See `external_rekordbox_db_candidates` in `backend/src/service/usb/utils.rs`.
 
 The import service deliberately favors responsiveness over eager payload loading. `fetch_usb_playlists` and `fetch_usb_histories` resolve the playlist/history **list** and its counts, not per-track payloads. Expensive per-track hydration (waveform preview bytes, artwork data URLs) is deferred and paid one page at a time.
 
@@ -147,7 +147,7 @@ PDB `t19` rows can carry a date per history session when the CDJ wrote one,
 but when that's absent the app estimates it from the session's own tracks'
 `date_added` metadata instead (`apply_history_dates_from_track_date_created`
 in `backend/src/service/usb.rs`). The backend builds this export from the
-cached `UsbHistory` data (`backend/src/service/usb_tracklist.rs`); it does not
+cached `UsbHistory` data (`backend/src/service/usb/history_tracklist.rs`); it does not
 read PDB/eDB again and is unrelated to the USB export/write pipeline.
 
 Corruption tolerance is intentional: unreadable optional analysis artifacts should produce warnings rather than aborting whole playlist/history imports. The command returns partial-but-usable data whenever safe to do so.

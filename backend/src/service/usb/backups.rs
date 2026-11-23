@@ -1,13 +1,13 @@
 //! Split storage + retention for USB DB backup snapshots created by
-//! `usb_vendor_compat::backup_usb_databases`: the single newest snapshot per
+//! `usb::vendor_compat::backup_usb_databases`: the single newest snapshot per
 //! file always stays on the USB (so at least one restore point travels with
 //! the physical drive to any computer), while older snapshots are archived
-//! off to the HDD-side staging cache (`usb_staging::backups_dir_for`) so
+//! off to the HDD-side staging cache (`usb::staging::backups_dir_for`) so
 //! they stop consuming space on the USB stick. A user-configurable
 //! retention count (`SETTING_UI_BACKUP_RETENTION_COUNT`) then caps the
 //! combined USB+cache count, pruning the oldest cache-side snapshots first.
 //!
-//! Archiving to the cache requires a named drive (`usb_identity`) -- an
+//! Archiving to the cache requires a named drive (`usb::identity`) -- an
 //! unnamed drive has no stable cache directory to archive into, so
 //! reconciliation just leaves everything on the USB in that case.
 //!
@@ -26,10 +26,12 @@ use crate::models::{
     RestoreUsbBackupData, RestoreUsbBackupRequest, UsbBackupEntry, UsbBackupFile,
 };
 
-use super::usb_staging::{DbKind, SessionBackup};
-use super::usb_utils::resolve_usb_root;
-use super::usb_vendor_compat::{BackupCopy, BackupReason, backup_reason_path, vendor_db_dir};
-use super::{BackendService, DEFAULT_BACKUP_RETENTION_COUNT, SETTING_UI_BACKUP_RETENTION_COUNT};
+use super::staging::{DbKind, SessionBackup};
+use super::utils::resolve_usb_root;
+use super::vendor_compat::{BackupCopy, BackupReason, backup_reason_path, vendor_db_dir};
+use crate::service::{
+    BackendService, DEFAULT_BACKUP_RETENTION_COUNT, SETTING_UI_BACKUP_RETENTION_COUNT,
+};
 
 const STEMS: [(&str, &str); 2] = [("export", "pdb"), ("exportLibrary", "db")];
 
@@ -38,7 +40,7 @@ fn usb_backups_dir(usb_root: &Path) -> PathBuf {
 }
 
 fn cache_backups_dir(usb_root: &Path) -> Option<PathBuf> {
-    super::usb_staging::backups_dir_for(usb_root)
+    crate::service::usb::staging::backups_dir_for(usb_root)
 }
 
 /// Snapshot filenames are `{stem}_{timestamp}.{ext}` with a fixed-width
@@ -131,7 +133,7 @@ fn most_recent_backup_playlist_count(usb_root: &Path) -> Option<usize> {
 
 /// Best-effort rename, falling back to copy + remove when the source and
 /// destination are on different filesystems (USB -> internal HDD).
-pub(super) fn move_file(src: &Path, dest: &Path) -> std::io::Result<()> {
+pub(in crate::service) fn move_file(src: &Path, dest: &Path) -> std::io::Result<()> {
     if let Some(parent) = dest.parent() {
         std::fs::create_dir_all(parent)?;
     }
@@ -261,7 +263,7 @@ fn read_backup_retention_count(conn: &rusqlite::Connection) -> u32 {
 }
 
 /// PDB and eDB are always backed up together under one shared timestamp (see
-/// `usb_vendor_compat::backup_usb_databases`), so entries are grouped by
+/// `usb::vendor_compat::backup_usb_databases`), so entries are grouped by
 /// timestamp into a single bundle covering both files rather than one row
 /// per stem. `reconcile_backups` prunes/archives each stem independently,
 /// but since both stems are created (and thus retained/archived) on the same
@@ -420,10 +422,10 @@ fn database_for_stem(stem: &str) -> Option<DbKind> {
 
 impl BackendService {
     /// Takes a fresh timestamped backup of `usb_root`'s live DB files (same
-    /// raw copy `usb_vendor_compat::backup_usb_databases` always did), then
+    /// raw copy `usb::vendor_compat::backup_usb_databases` always did), then
     /// reconciles storage per this module's split/retention policy. This is
     /// the function every mutating USB command should call instead of
-    /// `usb_vendor_compat::backup_usb_databases` directly.
+    /// `usb::vendor_compat::backup_usb_databases` directly.
     /// `playlist_count`: `Some(n)` when the caller has already computed a
     /// fresh count (its own operation could change how many playlists exist
     /// on the drive); `None` when the caller's operation can't change that
@@ -470,7 +472,7 @@ impl BackendService {
             .filter(|(_, newest_reason)| newest_reason.as_deref() == Some(reason))
             .map(|(timestamp, _)| timestamp);
         let playlist_count = most_recent_backup_playlist_count(usb_root);
-        let notes = super::usb_vendor_compat::backup_usb_databases(
+        let notes = crate::service::usb::vendor_compat::backup_usb_databases(
             usb_root,
             reason,
             playlist_count,
@@ -511,7 +513,7 @@ impl BackendService {
         on_copy: &mut dyn FnMut(BackupCopy),
     ) -> Vec<WarningEntry> {
         let playlist_count = playlist_count.or_else(|| most_recent_backup_playlist_count(usb_root));
-        let notes = super::usb_vendor_compat::backup_usb_databases(
+        let notes = crate::service::usb::vendor_compat::backup_usb_databases(
             usb_root,
             reason,
             playlist_count,
@@ -646,7 +648,7 @@ impl BackendService {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::service::usb_vendor_compat::{vendor_edb_path, vendor_pdb_path};
+    use crate::service::usb::vendor_compat::{vendor_edb_path, vendor_pdb_path};
     use tempfile::tempdir;
 
     fn test_service() -> (tempfile::TempDir, BackendService) {
@@ -675,7 +677,7 @@ mod tests {
     }
 
     fn name_drive(usb_root: &Path, name: &str) {
-        crate::service::usb_identity::write_drive_name(usb_root, name).unwrap();
+        crate::service::usb::identity::write_drive_name(usb_root, name).unwrap();
     }
 
     #[test]
@@ -685,7 +687,7 @@ mod tests {
         let usb_root = usb.path();
         name_drive(usb_root, "Club Stick");
         let _guard =
-            crate::service::usb_staging::set_cache_root_for_test(Some(cache.path().to_path_buf()));
+            crate::service::usb::staging::set_cache_root_for_test(Some(cache.path().to_path_buf()));
 
         let backups_dir = usb_backups_dir(usb_root);
         touch_backup(
@@ -727,7 +729,7 @@ mod tests {
         let cache = tempdir().unwrap();
         let usb_root = usb.path();
         let _guard =
-            crate::service::usb_staging::set_cache_root_for_test(Some(cache.path().to_path_buf()));
+            crate::service::usb::staging::set_cache_root_for_test(Some(cache.path().to_path_buf()));
 
         let backups_dir = usb_backups_dir(usb_root);
         touch_backup(
@@ -762,7 +764,7 @@ mod tests {
         let usb_root = usb.path();
         name_drive(usb_root, "Club Stick");
         let _guard =
-            crate::service::usb_staging::set_cache_root_for_test(Some(cache.path().to_path_buf()));
+            crate::service::usb::staging::set_cache_root_for_test(Some(cache.path().to_path_buf()));
 
         let backups_dir = usb_backups_dir(usb_root);
         for i in 1..=5 {
@@ -803,7 +805,7 @@ mod tests {
         let usb_root = usb.path();
         name_drive(usb_root, "Club Stick");
         let _guard =
-            crate::service::usb_staging::set_cache_root_for_test(Some(cache.path().to_path_buf()));
+            crate::service::usb::staging::set_cache_root_for_test(Some(cache.path().to_path_buf()));
 
         touch_backup(
             &usb_backups_dir(usb_root),
@@ -955,7 +957,7 @@ mod tests {
         let usb_root = usb.path();
         name_drive(usb_root, "Playlist Count Test");
         let _guard =
-            crate::service::usb_staging::set_cache_root_for_test(Some(cache.path().to_path_buf()));
+            crate::service::usb::staging::set_cache_root_for_test(Some(cache.path().to_path_buf()));
 
         let cache_dir = cache_backups_dir(usb_root).expect("cache dir for named drive");
         touch_reason(
@@ -1075,7 +1077,7 @@ mod tests {
     fn failed_backup_restore_leaves_both_databases_unchanged() {
         let cache = tempdir().unwrap();
         let _staging =
-            crate::service::usb_staging::set_cache_root_for_test(Some(cache.path().to_path_buf()));
+            crate::service::usb::staging::set_cache_root_for_test(Some(cache.path().to_path_buf()));
         let (_dir, service) = test_service();
         let usb = tempdir().unwrap();
         let pdb = vendor_pdb_path(usb.path());
@@ -1099,7 +1101,7 @@ mod tests {
             b"previous edb",
         );
         let blocker =
-            crate::service::usb_staging::write_back_temp_path_for_test(usb.path(), DbKind::Edb);
+            crate::service::usb::staging::write_back_temp_path_for_test(usb.path(), DbKind::Edb);
         std::fs::create_dir_all(&blocker).unwrap();
         service
             .restore_usb_backup(RestoreUsbBackupRequest {
@@ -1179,7 +1181,7 @@ mod tests {
         let usb_root = usb.path();
         name_drive(usb_root, "Restore Stage Test");
         let _guard =
-            crate::service::usb_staging::set_cache_root_for_test(Some(cache.path().to_path_buf()));
+            crate::service::usb::staging::set_cache_root_for_test(Some(cache.path().to_path_buf()));
 
         let live_pdb = vendor_pdb_path(usb_root);
         std::fs::create_dir_all(live_pdb.parent().unwrap()).unwrap();
@@ -1188,7 +1190,7 @@ mod tests {
         // Simulate a normal connect: stages the pre-restore content locally
         // and marks the drive verified, exactly like `validate_usb_root`
         // does for a real session.
-        crate::service::usb_staging::stage_pdb_on_connect(usb_root).expect("stage on connect");
+        crate::service::usb::staging::stage_pdb_on_connect(usb_root).expect("stage on connect");
 
         let backups_dir = usb_backups_dir(usb_root);
         touch_backup(
@@ -1210,7 +1212,7 @@ mod tests {
         // A passive read (what `fetch_usb_playlists` actually calls) must
         // see the restored content, not whatever was staged before restore.
         let staged_path =
-            crate::service::usb_staging::stage_pdb(usb_root).expect("stage after restore");
+            crate::service::usb::staging::stage_pdb(usb_root).expect("stage after restore");
         assert_eq!(
             std::fs::read(&staged_path).unwrap(),
             b"restored-content",
@@ -1226,7 +1228,7 @@ mod tests {
         let usb_root = usb.path();
         name_drive(usb_root, "Restore Status Test");
         let _guard =
-            crate::service::usb_staging::set_cache_root_for_test(Some(cache.path().to_path_buf()));
+            crate::service::usb::staging::set_cache_root_for_test(Some(cache.path().to_path_buf()));
         let live_pdb = vendor_pdb_path(usb_root);
         std::fs::create_dir_all(live_pdb.parent().unwrap()).unwrap();
         std::fs::write(&live_pdb, b"live").unwrap();
@@ -1268,7 +1270,7 @@ mod tests {
         let usb_root = usb.path();
         name_drive(usb_root, "Club Stick");
         let _guard =
-            crate::service::usb_staging::set_cache_root_for_test(Some(cache.path().to_path_buf()));
+            crate::service::usb::staging::set_cache_root_for_test(Some(cache.path().to_path_buf()));
 
         service
             .set_frontend_setting(crate::models::SetFrontendSettingRequest {
@@ -1392,7 +1394,7 @@ mod tests {
         let usb_root = usb.path();
         name_drive(usb_root, "Club Stick");
         let _guard =
-            crate::service::usb_staging::set_cache_root_for_test(Some(cache.path().to_path_buf()));
+            crate::service::usb::staging::set_cache_root_for_test(Some(cache.path().to_path_buf()));
 
         let backups_dir = usb_backups_dir(usb_root);
         touch_backup(&backups_dir, "export", "pdb", "2020-01-01_00-00-00", b"old");
@@ -1435,7 +1437,7 @@ mod tests {
         let usb_root = usb.path();
         name_drive(usb_root, "Club Stick");
         let _guard =
-            crate::service::usb_staging::set_cache_root_for_test(Some(cache.path().to_path_buf()));
+            crate::service::usb::staging::set_cache_root_for_test(Some(cache.path().to_path_buf()));
 
         let backups_dir = usb_backups_dir(usb_root);
         for i in 1..=3 {

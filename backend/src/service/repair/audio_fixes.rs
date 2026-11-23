@@ -225,7 +225,7 @@ pub(super) fn apply_bpm_key_mismatch_repair(
     warnings: &mut Vec<WarningEntry>,
     on_item: &mut impl FnMut(usize, usize),
 ) -> BackendResult<(usize, usize)> {
-    let parsed = parse_pdb(&usb_staging::required_pdb(usb_root)?)?;
+    let parsed = parse_pdb(&staging::required_pdb(usb_root)?)?;
     let mut handle = EdbRw::shared_or_open(edb_conn, usb_root);
     let mismatches: Vec<BpmKeyMismatch> = detect_bpm_key_mismatches(
         usb_root,
@@ -358,7 +358,7 @@ pub(super) fn apply_add_analysis_track_path(
     usb_root: &Path,
     app_master_db_id: Option<u32>,
 ) -> BackendResult<usize> {
-    let parsed = parse_pdb(&usb_staging::required_pdb(usb_root)?)?;
+    let parsed = parse_pdb(&staging::required_pdb(usb_root)?)?;
     let ownership = scan_analysis_ownership(usb_root, &parsed, app_master_db_id, true);
     for bundle in &ownership.unmarked {
         stamp_bundle_ppth(&bundle.dat, &bundle.track_path)?;
@@ -381,7 +381,7 @@ pub(super) fn apply_separate_shared_analysis(
     edb_conn: Option<&mut rusqlite::Connection>,
     warnings: &mut Vec<WarningEntry>,
 ) -> BackendResult<(usize, usize)> {
-    let pdb_path = usb_staging::required_pdb(usb_root)?;
+    let pdb_path = staging::required_pdb(usb_root)?;
     let mut bytes = std::fs::read(&pdb_path)?;
     let page_size = pdb_page_size(&bytes)?;
     let parsed = crate::pdb_reader::parse_pdb_bytes(&bytes)?;
@@ -542,7 +542,7 @@ pub(super) fn apply_beat_grid_repair(
     on_item: &mut impl FnMut(usize, usize),
 ) -> BackendResult<usize> {
     let mut fixed = 0usize;
-    let parsed = parse_pdb(&usb_staging::required_pdb(usb_root)?)?;
+    let parsed = parse_pdb(&staging::required_pdb(usb_root)?)?;
     let targets = outdated_beat_grid_bundles(
         super::super::diagnostics::detect_outdated_beat_grids(usb_root, &parsed).as_deref(),
     );
@@ -710,7 +710,7 @@ pub(super) fn apply_missing_seek_data_repair(
     warnings: &mut Vec<WarningEntry>,
     on_event: &mut impl FnMut(SeekApplyEvent),
 ) -> BackendResult<(usize, usize)> {
-    let parsed = parse_pdb(&usb_staging::required_pdb(usb_root)?)?;
+    let parsed = parse_pdb(&staging::required_pdb(usb_root)?)?;
     let mut fixed = 0usize;
     let mut skipped = 0usize;
     let targets = detect_missing_seek_data(usb_root, &parsed, format);
@@ -836,7 +836,7 @@ impl BackendService {
         let parsed_pdb_ref: Option<&crate::pdb_reader::ParsedPdb> = match parsed_pdb {
             Some(parsed) => Some(parsed),
             None => {
-                owned_parsed_pdb = usb_staging::required_pdb(usb_root)
+                owned_parsed_pdb = staging::required_pdb(usb_root)
                     .ok()
                     .and_then(|staged_pdb_path| parse_pdb(&staged_pdb_path).ok());
                 owned_parsed_pdb.as_ref()
@@ -1036,7 +1036,7 @@ impl BackendService {
         };
 
         // ── PDB: re-encode each track row with its new path ──────────
-        let pdb_path = usb_staging::required_pdb(usb_root)?;
+        let pdb_path = staging::required_pdb(usb_root)?;
         let mut bytes = std::fs::read(&pdb_path)?;
         let page_size = pdb_page_size(&bytes)?;
         let parsed = crate::pdb_reader::parse_pdb_bytes(&bytes)?;
@@ -1354,7 +1354,7 @@ impl BackendService {
         // same name is appended to rather than replaced. All or nothing, and
         // only the staged copies: the eDB transaction commits after the
         // staged PDB is written, and the repair run writes both back once.
-        let pdb_path = usb_staging::required_pdb(usb_root)?;
+        let pdb_path = staging::required_pdb(usb_root)?;
         let mut handle = EdbRw::shared_or_open(edb_conn, usb_root);
         let tx = match handle.as_mut().map(EdbRw::conn) {
             Some(conn) => Some(conn.transaction()?),
@@ -1521,7 +1521,7 @@ impl BackendService {
 
         // Track ids from the PDB as it is now: an earlier fix in this pass
         // (strict parity) may have rewritten it.
-        let missing_track_ids = parse_pdb(&usb_staging::required_pdb(usb_root)?)?
+        let missing_track_ids = parse_pdb(&staging::required_pdb(usb_root)?)?
             .tracks
             .iter()
             .filter(|t| missing_keys.contains(&audio_path_key(&t.track_file_path)))
@@ -1536,7 +1536,7 @@ impl BackendService {
         // Fewer tracks: tt=19 follows the new count in this same pass, as an
         // export's write does (a no-op on a page rekordbox or a player wrote).
         if removed_pdb.track_rows > 0 {
-            let pdb_path = usb_staging::required_pdb(usb_root)?;
+            let pdb_path = staging::required_pdb(usb_root)?;
             let mut bytes = std::fs::read(&pdb_path)?;
             if apply_pdb_t19_template_state_repair(&mut bytes, t19_property.as_ref())? {
                 std::fs::write(&pdb_path, &bytes)?;

@@ -1,7 +1,7 @@
 # App Data Flow
 
 How a request from the UI reaches the stick's two databases. Everything that touches the PDB or
-the eDB goes through one layer in `backend/src/service/usb_staging.rs`: it says which databases
+the eDB goes through one layer in `backend/src/service/usb/staging.rs`: it says which databases
 the stick has, and every write goes through one locked session with a single commit and rollback.
 
 ## The whole path
@@ -84,7 +84,7 @@ can handle an empty stick.
 
 | File | What |
 | --- | --- |
-| `backend/src/service/usb_staging.rs` | `UsbDatabases`, `TrackLocation`, `UsbWriteSession`, staging |
+| `backend/src/service/usb/staging.rs` | `UsbDatabases`, `TrackLocation`, `UsbWriteSession`, staging |
 | `backend/src/service/repair/strict_parity.rs` | `rebuild_missing_database` and the shared strict-parity rebuild |
 | `backend/src/edb.rs` | eDB reads; `edb_as_parsed_pdb` for PDB-less repair detection and histories |
 | `backend/src/service/usb.rs` | connect, browse, histories, playlist removal, parse caches |

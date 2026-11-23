@@ -19,7 +19,7 @@ use backend::models::{
     SaveTrackAnalysisEditsRequest, ScanLibraryRequest, ScanRekordboxDbRequest, SelectUsbRequest,
     SetPlaybackMetronomeRequest, SetUsbDeviceNameRequest, TrackCueInput, UsbOrderEditRequest,
 };
-use backend::service::usb_vendor_compat::DEFAULT_USB_EDB_KEY;
+use backend::service::usb::vendor_compat::DEFAULT_USB_EDB_KEY;
 use tempfile::tempdir;
 
 #[test]

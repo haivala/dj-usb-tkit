@@ -1,7 +1,7 @@
 use crate::models::WarningEntry;
 use std::path::{Path, PathBuf};
 
-use super::usb_staging::DbKind;
+use super::staging::DbKind;
 use serde::{Deserialize, Serialize};
 
 pub const USB_VENDOR_ROOT_DIR: &str = "PIONEER";
@@ -48,13 +48,13 @@ pub(crate) fn vendor_edb_path(usb_root: &Path) -> PathBuf {
 
 /// Sidecar recording why a backup was taken (e.g. "Before export"), written
 /// alongside the PDB/eDB snapshots under the same timestamp. Same
-/// one-field-struct shape as `usb_identity::DriveMarker`, for consistency
+/// one-field-struct shape as `usb::identity::DriveMarker`, for consistency
 /// with the app's other on-disk JSON metadata.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub(crate) struct BackupReason {
     pub reason: String,
     /// Playlist count on the drive at backup time, or `None` for backups
-    /// predating this field. See `usb_backups::backup_usb_databases_with_retention`
+    /// predating this field. See `usb::backups::backup_usb_databases_with_retention`
     /// for how this is resolved (fresh parse vs. carried forward).
     #[serde(default)]
     pub playlist_count: Option<usize>,
@@ -100,7 +100,7 @@ pub(crate) fn backup_usb_databases(
     }
 
     // Each database the stick has, copied from the USB itself.
-    let databases = super::usb_staging::UsbDatabases::present(usb_root)
+    let databases = crate::service::usb::staging::UsbDatabases::present(usb_root)
         .ok()
         .flatten();
     let mut any_copied = false;

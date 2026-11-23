@@ -115,7 +115,7 @@ mod platform {
     use std::path::Path;
 
     use super::{DriveLayout, PartitionTable, classify_fs};
-    use crate::service::usb_identity::{linux_device_is_usb, linux_mount_for_path};
+    use crate::service::usb::identity::{linux_device_is_usb, linux_mount_for_path};
 
     /// sysfs counts block device sizes in 512-byte sectors, whatever the
     /// device's own sector size.
@@ -215,7 +215,7 @@ mod platform {
     /// `ID_FS_SIZE`. It leaves out the FAT's own tables, a small share.
     #[allow(clippy::unnecessary_cast)]
     fn statvfs_total(path: &Path) -> Option<u64> {
-        let stats = crate::service::usb_utils::statvfs(path)?;
+        let stats = crate::service::usb::utils::statvfs(path)?;
         Some(stats.f_blocks as u64 * stats.f_frsize as u64)
     }
 }

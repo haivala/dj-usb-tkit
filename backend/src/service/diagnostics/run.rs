@@ -2,7 +2,7 @@
 
 use super::*;
 use crate::i18n::tr;
-use crate::service::usb_staging::{DbKind, UsbDatabases, UsbDatabasesExt};
+use crate::service::usb::staging::{DbKind, UsbDatabases, UsbDatabasesExt};
 
 impl BackendService {
     pub fn run_usb_diagnostics(
@@ -67,7 +67,7 @@ impl BackendService {
             None => UsbDatabases::present(&usb_root)?
                 .pdb()
                 .map(std::path::Path::to_path_buf)
-                .unwrap_or_else(|| crate::service::usb_vendor_compat::vendor_pdb_path(&usb_root)),
+                .unwrap_or_else(|| crate::service::usb::vendor_compat::vendor_pdb_path(&usb_root)),
         };
 
         // --- 1. PDB Integrity ---

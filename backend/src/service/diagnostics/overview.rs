@@ -535,11 +535,11 @@ pub(super) fn parity_overview(
 /// The parity overview of a stick that lacks `missing`: the one problem, and
 /// the hint that Preview Fixes repairs it.
 pub(super) fn missing_database_parity_overview(
-    missing: crate::service::usb_staging::DbKind,
+    missing: crate::service::usb::staging::DbKind,
 ) -> Vec<DiagOverviewItem> {
     let problem = match missing {
-        crate::service::usb_staging::DbKind::Pdb => tr::parity_overview_pdb_missing(),
-        crate::service::usb_staging::DbKind::Edb => tr::parity_overview_edb_missing(),
+        crate::service::usb::staging::DbKind::Pdb => tr::parity_overview_pdb_missing(),
+        crate::service::usb::staging::DbKind::Edb => tr::parity_overview_edb_missing(),
     };
     vec![DiagOverviewItem {
         title: tr::diagnostics_area_playlists().render(),

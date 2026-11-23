@@ -17,8 +17,8 @@ use crate::logging::{self, Level};
 use crate::models::WarningEntry;
 use crate::pdb_reader::parse_pdb;
 use crate::service::track_matching::{ContentFingerprint, pdb_track_fingerprint};
-use crate::service::usb_staging::{UsbDatabases, UsbDatabasesExt, UsbWriteSession};
-use crate::service::usb_utils::canonicalize_playlist_name;
+use crate::service::usb::staging::{UsbDatabases, UsbDatabasesExt, UsbWriteSession};
+use crate::service::usb::utils::canonicalize_playlist_name;
 
 fn parse_usb_playlist_numeric_id(raw: Option<&str>) -> Option<u32> {
     let id_part = raw?.trim().strip_prefix("usb-pl-")?;
@@ -581,7 +581,7 @@ pub fn remove_orphaned_dropped_tracks_from_dbs(
     if let Some(conn) = session.edb()?
         && table_exists(conn, "content")
     {
-        let to_delete = crate::service::usb_track_facts::read_edb_content_tracks(conn)?
+        let to_delete = crate::service::usb::track_facts::read_edb_content_tracks(conn)?
             .into_iter()
             .filter(|row| match &row.fingerprint {
                 Some(fingerprint) => orphan_fingerprints.contains(fingerprint),

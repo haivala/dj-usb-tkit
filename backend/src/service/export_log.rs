@@ -9,9 +9,9 @@ use crate::models::{UsbHistory, UsbTrack};
 use super::anlz::atomic_write_bytes;
 use super::diagnostics::track_identity_key;
 use super::export_helpers::{ExportManifest, ExportPlaylistData};
-use super::usb_backups::move_file;
-use super::usb_identity::app_marker_dir;
-use super::usb_vendor_compat::vendor_db_dir;
+use super::usb::backups::move_file;
+use super::usb::identity::app_marker_dir;
+use super::usb::vendor_compat::vendor_db_dir;
 
 const EXPORT_LOG_FILE_NAME: &str = "dj_usb_tkit_export_log.v1.json";
 const EXPORT_LOG_SCHEMA_VERSION: u32 = 1;

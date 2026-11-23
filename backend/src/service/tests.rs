@@ -390,7 +390,7 @@ fn find_confident_fingerprint_match_skips_candidates_under_a_known_usb_root() {
 fn untainted_usb_root_paths_excludes_configured_source_roots() {
     let (_dir, db) = test_db();
     let conn = db.connect().expect("connect");
-    usb_utils::upsert_usb_device(&conn, Path::new("/mnt/data"), false, &now())
+    usb::utils::upsert_usb_device(&conn, Path::new("/mnt/data"), false, &now())
         .expect("seed usb device");
     conn.execute(
         "INSERT INTO app_settings (key, value, updated_at) VALUES (?1, ?2, datetime('now'))",

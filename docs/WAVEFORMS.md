@@ -105,7 +105,7 @@ read the stale beat-grid tempo for its live/master display — a normal
 re-export now corrects it.
 
 The track-detail modal renders the **PWV5 colour-detail** waveform from the
-`.EXT`, read raw by `read_pwv5_from_anlz` (`usb_utils.rs`), **base64-encoded**
+`.EXT`, read raw by `read_pwv5_from_anlz` (`usb/utils.rs`), **base64-encoded**
 onto `get_track_detail`'s `detailWaveform` (the raw payload is tens of KB — a
 JSON number array would be ~3× that on the wire). The modal decodes it and
 renders only the visible `[startMs, endMs]` slice, so **scroll-to-zoom /

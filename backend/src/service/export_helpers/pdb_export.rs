@@ -2,7 +2,7 @@
 //! byte-level checks that guard them.
 
 use super::*;
-use crate::service::usb_staging::UsbWriteSession;
+use crate::service::usb::staging::UsbWriteSession;
 
 /// Read PDB t16 row bytes from an existing PDB on disk, in their on-disk
 /// order. Returns `None` when the input bytes are not a valid PDB image or
@@ -202,7 +202,7 @@ pub(super) fn validate_topology_locked_export_bytes(
 /// app's [`crate::pdb_writer::T19_DB_VERSION`] rather than the eDB's
 /// `dbVersion`. `None` when the USB has no readable eDB.
 pub(crate) fn edb_t19_property(usb_root: &Path) -> Option<crate::pdb_writer::T19Property> {
-    let conn = crate::service::usb_staging::UsbDatabases::present(usb_root)
+    let conn = crate::service::usb::staging::UsbDatabases::present(usb_root)
         .ok()
         .flatten()?
         .open_edb_writable()?;
@@ -560,7 +560,7 @@ pub(crate) fn build_pdb_for_playlists(
         PdbPlaylistTreeRow,
     };
 
-    let databases = crate::service::usb_staging::UsbDatabases::present(usb_root)?;
+    let databases = crate::service::usb::staging::UsbDatabases::present(usb_root)?;
     let pdb_path = databases.as_ref().and_then(|dbs| dbs.pdb());
     let profile = PdbLayoutProfile::from_env();
 

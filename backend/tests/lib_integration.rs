@@ -31,7 +31,7 @@ use backend::service::export_helpers::{
     ExportManifest, ExportManifestTrack, ExportPlaylistData, analysis_bundle_path_variants,
     exported_media_target_path, write_pdb,
 };
-use backend::service::usb_vendor_compat::{
+use backend::service::usb::vendor_compat::{
     USB_ANALYSIS_DIR, USB_ARTWORK_DIR, USB_VENDOR_DB_DIR, USB_VENDOR_ROOT_DIR,
 };
 use backend::service::{AnalysisEvent, BackendService};
@@ -41,7 +41,7 @@ fn test_env_lock() -> &'static Mutex<()> {
     LOCK.get_or_init(|| Mutex::new(()))
 }
 
-use backend::service::usb_vendor_compat::DEFAULT_USB_EDB_KEY;
+use backend::service::usb::vendor_compat::DEFAULT_USB_EDB_KEY;
 
 /// Open an eDB, trying plain SQLite first, then SQLCipher.
 fn open_export_db(path: &Path) -> rusqlite::Connection {

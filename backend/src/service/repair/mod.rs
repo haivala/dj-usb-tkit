@@ -47,14 +47,14 @@ use super::track_matching::{
     ContentFingerprint, content_fingerprint_key, matching_file_name, pdb_track_fingerprint,
     same_file_bytes,
 };
-use super::usb_display_files::SeekSkipMemory;
-use super::usb_staging::{self, EdbRw};
-use super::usb_utils::{
+use super::usb::display_files::SeekSkipMemory;
+use super::usb::staging::{self, EdbRw};
+use super::usb::utils::{
     canonicalize_playlist_name, resolve_usb_root, resolve_usb_side_path, sanitize_warning_path,
     scan_anlz,
 };
 #[cfg(test)]
-use super::usb_vendor_compat::vendor_pdb_path;
+use super::usb::vendor_compat::vendor_pdb_path;
 use crate::audio_format::same_format_extension;
 use crate::scanner::scan_audio_file;
 use crate::utils::counted;

@@ -23,7 +23,7 @@ use crate::audio_format::{
 };
 use crate::i18n::{Num, tr};
 use crate::models::{FormatCompat, FormatCompatSeverity};
-use crate::service::usb_identity::UsbAudioFormats;
+use crate::service::usb::identity::UsbAudioFormats;
 use crate::wav_format::WavFormatIssue;
 
 const RATES_WAV: [u32; 3] = [44_100, 48_000, 96_000];

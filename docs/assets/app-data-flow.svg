@@ -78,7 +78,7 @@
           <text class="t-dim" x="454" y="140">app data, kept per stick</text>
 
           <rect class="zone-layer" x="420" y="180" width="320" height="500" rx="6"/>
-          <text class="t-zone-layer" x="434" y="199">UNIFICATION LAYER · usb_staging.rs</text>
+          <text class="t-zone-layer" x="434" y="199">UNIFICATION LAYER · usb/staging.rs</text>
           <line class="a" x1="580" y1="180" x2="580" y2="152" marker-end="url(#ah)"/>
           <text class="t-arrow" x="590" y="171">copies before a write</text>
 

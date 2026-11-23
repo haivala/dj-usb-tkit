@@ -19,8 +19,8 @@ use super::import_conflicts::{
 };
 
 use super::library::{ImportedFileCopies, file_size, import_status_with_copies};
-use super::usb_utils::external_rekordbox_db_candidates;
-use super::usb_vendor_compat::DEFAULT_MASTER_DB_KEY;
+use super::usb::utils::external_rekordbox_db_candidates;
+use super::usb::vendor_compat::DEFAULT_MASTER_DB_KEY;
 use super::wine_paths::{translate_wine_path, wine_prefix_of};
 use super::{
     BackendService, annotate_imported_playlists, build_track_match_fingerprint,

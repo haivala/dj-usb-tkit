@@ -733,7 +733,7 @@ fn row_to_track_for_analysis(row: &rusqlite::Row<'_>) -> rusqlite::Result<LocalT
     // A waveform whose files are gone counts as none: analyzing that track
     // restores them, a first analysis that keeps edited and imported values.
     let has_waveform = row.get::<_, Option<String>>(7)?.is_some_and(|p| {
-        !p.trim().is_empty() && !super::usb_utils::local_analysis_bundle_missing(&p)
+        !p.trim().is_empty() && !super::usb::utils::local_analysis_bundle_missing(&p)
     });
     let existing_first_beat_ms = row
         .get::<_, Option<i64>>(8)?

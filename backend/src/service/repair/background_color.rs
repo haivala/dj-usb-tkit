@@ -103,14 +103,14 @@ fn read_background_colors(usb_root: &Path, pdb: &[u8]) -> UsbBackgroundColorData
     let pdb_color = (!pdb.is_empty())
         .then(|| crate::pdb_writer::t19_background_color(pdb, page_size_of(pdb)))
         .flatten();
-    let edb_color = usb_staging::UsbDatabases::present(usb_root)
+    let edb_color = staging::UsbDatabases::present(usb_root)
         .ok()
         .flatten()
         .and_then(|databases| databases.open_edb_writable())
         .and_then(|conn| edb_background_color(&conn));
     let reason = background_color_refusal(
         pdb_color.is_some() || edb_color.is_some(),
-        crate::service::usb_utils::has_write_access(usb_root),
+        crate::service::usb::utils::has_write_access(usb_root),
     );
     UsbBackgroundColorData {
         chips: background_color_chips(pdb_color, edb_color),
@@ -167,7 +167,7 @@ impl BackendService {
         }
         // The read above only looks; this one writes, so a read-only mount is
         // caught here instead of failing halfway through with its own error.
-        if !crate::service::usb_utils::can_write_file_at(&usb_root) {
+        if !crate::service::usb::utils::can_write_file_at(&usb_root) {
             return Err(BackendError::Validation(
                 tr::usb_background_color_read_only(),
             ));
@@ -184,7 +184,7 @@ impl BackendService {
         let mut session = self.usb_write_session(
             &_usb_write_guard,
             &usb_root,
-            usb_staging::SessionBackup::WithRetention {
+            staging::SessionBackup::WithRetention {
                 reason: "Before background color change",
                 playlist_count: None,
             },
@@ -193,7 +193,7 @@ impl BackendService {
 
         // The PDB change stays in memory until the eDB one has succeeded.
         if before.pdb_color.is_some() {
-            session.will_write(usb_staging::DbKind::Pdb)?;
+            session.will_write(staging::DbKind::Pdb)?;
             let page_size = page_size_of(&pdb.bytes);
             pdb.patch(|bytes| {
                 crate::pdb_writer::set_t19_background_color(bytes, page_size, req.color)

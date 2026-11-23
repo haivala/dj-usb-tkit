@@ -4,7 +4,7 @@ use std::collections::{HashMap, HashSet};
 
 use crate::models::{UsbPlaylist, UsbTrack};
 
-use super::usb_utils::canonicalize_playlist_name;
+use super::utils::canonicalize_playlist_name;
 
 #[derive(Debug, Clone)]
 pub(crate) struct PlaylistCandidate {

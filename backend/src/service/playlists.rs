@@ -611,7 +611,7 @@ impl BackendService {
                 && track
                     .waveform_peaks_path
                     .as_deref()
-                    .is_some_and(super::usb_utils::local_analysis_bundle_missing)
+                    .is_some_and(super::usb::utils::local_analysis_bundle_missing)
             {
                 track.analysis_ready = false;
             }

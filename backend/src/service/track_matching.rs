@@ -8,7 +8,7 @@ use std::hash::{Hash, Hasher};
 use std::io::{BufReader, Read};
 use std::path::Path;
 
-use super::usb_utils::canonicalize_playlist_name;
+use super::usb::utils::canonicalize_playlist_name;
 use crate::audio_format::same_format_extension;
 
 /// (file size, normalized title, normalized artist). This is a candidate

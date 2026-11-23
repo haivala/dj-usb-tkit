@@ -18,7 +18,7 @@ use backend::models::{
 };
 use backend::service::anlz::{WaveformData, build_anlz_dat_file, build_anlz_ext_file};
 use backend::service::cues::DEFAULT_HOTCUE_COLOR_ID;
-use backend::service::usb_vendor_compat::DEFAULT_MASTER_DB_KEY;
+use backend::service::usb::vendor_compat::DEFAULT_MASTER_DB_KEY;
 use rusqlite::{Connection, params};
 use tempfile::{TempDir, tempdir};
 

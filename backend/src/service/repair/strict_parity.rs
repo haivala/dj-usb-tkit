@@ -26,13 +26,13 @@ pub(super) struct StrictParityUpgradeApplyResult {
     pub(super) pdb_tracks_changed: usize,
     pub(super) pdb_playlists_inserted: usize,
     /// The database the collect phase created because the USB lacked it.
-    pub(super) rebuilt_database: Option<usb_staging::DbKind>,
+    pub(super) rebuilt_database: Option<staging::DbKind>,
 }
 
 /// The database to rebuild from the other: the one the stick lacks while
 /// the other is there. `None` when it has both or neither.
-pub(super) fn missing_database(usb_root: &std::path::Path) -> Option<usb_staging::DbKind> {
-    usb_staging::UsbDatabases::present(usb_root)
+pub(super) fn missing_database(usb_root: &std::path::Path) -> Option<staging::DbKind> {
+    staging::UsbDatabases::present(usb_root)
         .ok()
         .flatten()
         .and_then(|databases| databases.missing())
@@ -43,15 +43,15 @@ pub(super) fn missing_database(usb_root: &std::path::Path) -> Option<usb_staging
 /// needs both databases takes. `None` when the stick has both (or neither).
 /// The session writes it back on commit.
 pub(crate) fn rebuild_missing_database(
-    session: &mut usb_staging::UsbWriteSession<'_>,
-) -> BackendResult<Option<usb_staging::DbKind>> {
+    session: &mut staging::UsbWriteSession<'_>,
+) -> BackendResult<Option<staging::DbKind>> {
     let Some(missing) = missing_database(session.usb_root()) else {
         return Ok(None);
     };
     // The merge also writes the database the stick has.
     session.will_write(match missing {
-        usb_staging::DbKind::Pdb => usb_staging::DbKind::Edb,
-        usb_staging::DbKind::Edb => usb_staging::DbKind::Pdb,
+        staging::DbKind::Pdb => staging::DbKind::Edb,
+        staging::DbKind::Edb => staging::DbKind::Pdb,
     })?;
     let usb_root = session.usb_root().to_path_buf();
     run_strict_parity_upgrade(&usb_root, None, Some(session), true)
@@ -300,8 +300,8 @@ pub(super) fn strict_parity_summary(result: &StrictParityUpgradeApplyResult) -> 
         result.duplicate_entries_removed,
     );
     match result.rebuilt_database {
-        Some(usb_staging::DbKind::Pdb) => tr::repair_strict_parity_rebuilt_pdb(summary),
-        Some(usb_staging::DbKind::Edb) => tr::repair_strict_parity_rebuilt_edb(summary),
+        Some(staging::DbKind::Pdb) => tr::repair_strict_parity_rebuilt_pdb(summary),
+        Some(staging::DbKind::Edb) => tr::repair_strict_parity_rebuilt_edb(summary),
         None => summary,
     }
 }
@@ -773,7 +773,7 @@ impl BackendService {
         &self,
         usb_root: &std::path::Path,
         target_playlist_names: Option<&HashSet<String>>,
-        session: &mut usb_staging::UsbWriteSession<'_>,
+        session: &mut staging::UsbWriteSession<'_>,
     ) -> BackendResult<StrictParityUpgradeApplyResult> {
         run_strict_parity_upgrade(usb_root, target_playlist_names, Some(session), true)
     }
@@ -797,7 +797,7 @@ impl BackendService {
 pub(super) fn run_strict_parity_upgrade(
     usb_root: &std::path::Path,
     target_playlist_names: Option<&HashSet<String>>,
-    session: Option<&mut usb_staging::UsbWriteSession<'_>>,
+    session: Option<&mut staging::UsbWriteSession<'_>>,
     write: bool,
 ) -> BackendResult<StrictParityUpgradeApplyResult> {
     let Some(kind) = missing_database(usb_root) else {
@@ -837,7 +837,7 @@ fn collect_merge_write(
     write: bool,
 ) -> BackendResult<StrictParityUpgradeApplyResult> {
     let mut result = StrictParityUpgradeApplyResult::default();
-    let pdb_path = usb_staging::required_pdb(usb_root)?;
+    let pdb_path = staging::required_pdb(usb_root)?;
 
     // ── Collect ───────────────────────────────────────────────────────
     let parsed = parse_pdb(&pdb_path)?;

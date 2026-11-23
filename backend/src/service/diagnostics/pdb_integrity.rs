@@ -8,10 +8,10 @@ pub(crate) fn diagnose_pdb_integrity(
     pdb_path: &std::path::Path,
     parse: impl FnOnce(
         &std::path::Path,
-    ) -> BackendResult<std::sync::Arc<crate::service::usb::StagedPdbParse>>,
+    ) -> BackendResult<std::sync::Arc<crate::service::usb::cache::StagedPdbParse>>,
 ) -> (
     DiagSection,
-    Option<std::sync::Arc<crate::service::usb::StagedPdbParse>>,
+    Option<std::sync::Arc<crate::service::usb::cache::StagedPdbParse>>,
 ) {
     let mut checks = Vec::new();
 

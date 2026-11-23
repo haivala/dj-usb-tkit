@@ -23,7 +23,7 @@ use backend::models::{
     GetTrackDetailRequest, GetTracksByIdsRequest,
 };
 use backend::service::BackendService;
-use backend::service::usb_vendor_compat::DEFAULT_USB_EDB_KEY;
+use backend::service::usb::vendor_compat::DEFAULT_USB_EDB_KEY;
 use serde::Serialize;
 use serde::de::DeserializeOwned;
 use serde_json::{Value, json};

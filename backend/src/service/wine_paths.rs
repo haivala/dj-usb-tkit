@@ -5,7 +5,7 @@
 use std::path::{Path, PathBuf};
 
 use super::looks_like_windows_absolute_path;
-use super::usb_vendor_compat::desktop_master_db_rel_path;
+use super::usb::vendor_compat::desktop_master_db_rel_path;
 
 /// The Wine prefix `path` lives in: its nearest ancestor holding
 /// `dosdevices/`, where Wine keeps one symlink per drive letter.

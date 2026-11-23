@@ -3,8 +3,7 @@
 
 use std::path::Path;
 
-use super::BackendService;
-use super::usb_utils::resolve_usb_root;
+use super::utils::resolve_usb_root;
 use crate::error::{BackendError, BackendResult};
 use crate::i18n::tr;
 use crate::models::{
@@ -12,6 +11,7 @@ use crate::models::{
     GetUsbHistoryTracklistOptionsData, GetUsbHistoryTracklistOptionsRequest, TracklistTimeMode,
     UsbHistory, UsbTrack,
 };
+use crate::service::BackendService;
 
 const START_TRACK_LABEL_MAX_CHARS: usize = 64;
 

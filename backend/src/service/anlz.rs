@@ -13,7 +13,7 @@ use uuid::Uuid;
 use crate::error::BackendResult;
 
 use super::anlz_seek::{PVBR_PAYLOAD_LEN, SeekIndex, SeekIndexSkip, seek_index_for_audio};
-use super::usb_vendor_compat::{USB_ANALYSIS_DIR, USB_VENDOR_ROOT_DIR};
+use super::usb::vendor_compat::{USB_ANALYSIS_DIR, USB_VENDOR_ROOT_DIR};
 
 /// Waveform data with both amplitude peaks (0-100) and frequency bands (0-5) per bin.
 ///

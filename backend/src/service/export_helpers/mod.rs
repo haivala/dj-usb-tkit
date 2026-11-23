@@ -77,9 +77,9 @@ use crate::pdb_reader::parse_pdb;
 use crate::service::cues::split_cues;
 use crate::utils::{collect_chain as collect_chain_pages, page_offset, table_ptr_fields};
 
-use super::usb_utils::{canonicalize_playlist_name, repair_utf8_mojibake};
+use super::usb::utils::{canonicalize_playlist_name, repair_utf8_mojibake};
 #[cfg(test)]
-use super::usb_vendor_compat::{USB_VENDOR_DB_DIR, USB_VENDOR_ROOT_DIR};
+use super::usb::vendor_compat::{USB_VENDOR_DB_DIR, USB_VENDOR_ROOT_DIR};
 
 pub(crate) fn canonicalize_track_path_identity(value: &str) -> String {
     let normalized = repair_utf8_mojibake(value.trim()).replace('\\', "/");

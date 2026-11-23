@@ -4,7 +4,7 @@ use std::path::{Path, PathBuf};
 use serde::Serialize;
 
 use crate::edb::open_edb;
-use crate::service::usb_vendor_compat::{USB_VENDOR_DB_DIR, USB_VENDOR_ROOT_DIR};
+use crate::service::usb::vendor_compat::{USB_VENDOR_DB_DIR, USB_VENDOR_ROOT_DIR};
 use crate::utils::{read_u16_le_at as read_u16_le, read_u32_le_at as read_u32_le};
 
 #[derive(Debug, Clone, Serialize, PartialEq, Eq)]

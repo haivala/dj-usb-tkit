@@ -1,6 +1,6 @@
 //! USB audio formats: per USB stick, which audio formats export puts on it, in
 //! the user's order of preference. Stored in the stick's
-//! `drive.json` (see `usb_identity::UsbAudioFormats`), so the setting travels
+//! `drive.json` (see `usb::identity::UsbAudioFormats`), so the setting travels
 //! with the stick.
 //!
 //! USB rows in an unticked format get a warning (see
@@ -17,9 +17,9 @@ use crate::models::{
     UsbAudioFormatsData,
 };
 
-use super::BackendService;
-use super::usb_identity::{UsbAudioFormats, read_usb_audio_formats, write_usb_audio_formats};
-use super::usb_utils::{can_write_file_at, has_write_access, resolve_usb_root};
+use super::identity::{UsbAudioFormats, read_usb_audio_formats, write_usb_audio_formats};
+use super::utils::{can_write_file_at, has_write_access, resolve_usb_root};
+use crate::service::BackendService;
 
 fn formats_data(formats: &UsbAudioFormats, writable: bool) -> UsbAudioFormatsData {
     let ticked = formats

@@ -45,8 +45,8 @@ use super::export_helpers::{
 use super::key_notation::{self, KeyNotation, key_display_fields, key_notation_setting};
 use super::track_matching::{content_fingerprint_key, pdb_track_fingerprint};
 use super::transcode_export::transcode_offset_for_usb_file;
-use super::usb_staging::{DbKind, SessionBackup, UsbDatabases};
-use super::usb_utils::{
+use super::usb::staging::{DbKind, SessionBackup, UsbDatabases};
+use super::usb::utils::{
     pwv5_from_ext_bytes, read_pwv5_from_anlz, resolve_usb_root, resolve_usb_side_path,
     resolve_usb_side_path_text,
 };
@@ -246,7 +246,7 @@ fn local_track_id_by_usb_fingerprint(
     usb_root: &Path,
     req: &UsbLocalTrackHint<'_>,
 ) -> Option<String> {
-    let parsed = super::usb_utils::parse_staged_pdb(usb_root).ok()?;
+    let parsed = super::usb::utils::parse_staged_pdb(usb_root).ok()?;
     let row = pdb_track_by_media_path(&parsed, req.usb_media_path_raw).ok()?;
     let fingerprint = pdb_track_fingerprint(&parsed, row)?;
     let size = row.file_size_bytes.map(i64::from);

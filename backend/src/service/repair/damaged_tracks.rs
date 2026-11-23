@@ -282,7 +282,7 @@ impl BackendService {
         }
 
         if !found.pdb_twins.is_empty() {
-            let pdb_path = usb_staging::required_pdb(usb_root)?;
+            let pdb_path = staging::required_pdb(usb_root)?;
             let mut bytes = std::fs::read(&pdb_path)?;
             (merge.pdb_moved, merge.pdb_dropped) =
                 crate::pdb_writer::merge_track_entries_inplace(&mut bytes, &found.pdb_twins);

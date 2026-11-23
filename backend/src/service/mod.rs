@@ -23,19 +23,7 @@ mod mixxx_import;
 mod rekordbox_import;
 mod repair;
 pub mod update_check;
-mod usb;
-pub(crate) mod usb_audio_formats;
-pub mod usb_backups;
-pub(crate) mod usb_display_files;
-pub(crate) mod usb_helpers;
-pub(crate) mod usb_identity;
-pub(crate) mod usb_layout;
-mod usb_order_edit;
-pub mod usb_staging;
-pub(crate) mod usb_track_facts;
-mod usb_tracklist;
-pub(crate) mod usb_utils;
-pub mod usb_vendor_compat;
+pub mod usb;
 mod wine_paths;
 
 mod library;
@@ -74,8 +62,8 @@ use track_matching::{
 // Re-export functions used by commands.rs via crate::service::*
 pub use engine_export::{EngineLibrarySummary, rebuild_engine_library};
 pub use repair::{pdb_shape_problems, pdb_write_problems};
-pub use usb_utils::{detect_external_rekordbox_db, initialize_usb};
-use usb_utils::{
+pub use usb::utils::{detect_external_rekordbox_db, initialize_usb};
+use usb::utils::{
     detect_external_rekordbox_db as detect_external_rekordbox_db_util,
     load_waveform_preview_from_analysis_path, read_pwv4_from_anlz,
 };
@@ -230,10 +218,10 @@ impl ExternalLibraries {
 /// in, else the name cached for it in `usb_devices`. None for a drive whose
 /// marker names another drive -- the cached name may well be that drive's.
 pub(crate) fn usb_drive_name(conn: &rusqlite::Connection, usb_root: &Path) -> Option<String> {
-    if usb_identity::has_name_conflict(usb_root) {
+    if usb::identity::has_name_conflict(usb_root) {
         return None;
     }
-    if let Some(name) = usb_identity::read_drive_name(usb_root) {
+    if let Some(name) = usb::identity::read_drive_name(usb_root) {
         return Some(name);
     }
     conn.query_row(
@@ -272,20 +260,20 @@ pub struct BackendService {
     /// keyed by the staged PDB + eDB signatures. Lets the paginated
     /// `fetch_usb_playlist_tracks` / `fetch_usb_history_tracks` skip a full
     /// re-parse on every page. Shared across `.clone()`s of the service.
-    pub(crate) usb_playlists_cache: Arc<usb::UsbPlaylistsCache>,
-    pub(crate) usb_histories_cache: Arc<usb::UsbHistoriesCache>,
+    pub(crate) usb_playlists_cache: Arc<usb::cache::UsbPlaylistsCache>,
+    pub(crate) usb_histories_cache: Arc<usb::cache::UsbHistoriesCache>,
     /// The staged PDB's track files and sizes, for the playlist heading's
     /// export estimate. Shared across `.clone()`s of the service.
-    pub(crate) usb_track_sizes_cache: Arc<usb::UsbTrackSizesCache>,
+    pub(crate) usb_track_sizes_cache: Arc<usb::cache::UsbTrackSizesCache>,
     /// The last stick's outdated beat grids (`outdated_beat_grids`), shared
     /// like the caches above.
-    pub(crate) beat_grid_cache: Arc<usb::BeatGridCache>,
+    pub(crate) beat_grid_cache: Arc<usb::cache::BeatGridCache>,
     /// The last staged eDB's tracks and playlists (`staged_edb`), shared like
     /// `parsed_pdb_cache`.
-    pub(crate) edb_library_cache: Arc<usb::EdbLibraryCache>,
+    pub(crate) edb_library_cache: Arc<usb::cache::EdbLibraryCache>,
     /// The last staged PDB's parse (`parsed_staged_pdb`), shared by the commands that read
     /// it, so selecting a USB, its diagnostics and its playlists parse it once.
-    pub(crate) parsed_pdb_cache: Arc<usb::ParsedPdbCache>,
+    pub(crate) parsed_pdb_cache: Arc<usb::cache::ParsedPdbCache>,
     /// The USB the window has selected: the root `select_usb` last found valid,
     /// or none. The playlists' export status is against it.
     pub(crate) selected_usb_root: Arc<std::sync::Mutex<Option<std::path::PathBuf>>>,
@@ -293,10 +281,10 @@ pub struct BackendService {
     /// each one read-modify-writes the same staged `export.pdb` / eDB.
     /// Shared across `.clone()`s (the Tauri state and the job threads).
     pub(crate) usb_write_lock: Arc<std::sync::Mutex<()>>,
-    /// The USB view's order edit (`usb_order_edit`): the pending order of one
+    /// The USB view's order edit (`usb::order_edit`): the pending order of one
     /// USB's playlists and tracks, until it's saved or cancelled. Shared
     /// across `.clone()`s.
-    pub(crate) usb_order_edit: Arc<usb_order_edit::UsbOrderEditSlot>,
+    pub(crate) usb_order_edit: Arc<usb::order_edit::UsbOrderEditSlot>,
     /// Bumped by every `fetch_usb_playlist_tracks` / `fetch_usb_history_tracks`
     /// call, so a page load can tell a newer one started and stop reading
     /// files for a page the frontend will discard.
@@ -331,7 +319,7 @@ impl BackendService {
             data_migration_running: Arc::new(AtomicBool::new(false)),
             library_scan_cache: Arc::new(ScanCache::default()),
         };
-        // Deliberately NOT called here (see `usb_staging::init_cache_root`'s
+        // Deliberately NOT called here (see `usb::staging::init_cache_root`'s
         // doc comment): `BackendService::new`/`BackendCommands::new` are the
         // same constructor `cargo test --lib`'s unit tests, `backend/tests/*`
         // integration tests, AND the real desktop app all call, and `CACHE_ROOT`
@@ -342,7 +330,7 @@ impl BackendService {
         // silently enabled (and racing across concurrently-constructed
         // instances) in `backend/tests/*.rs`. Only the real desktop app,
         // which is the sole context where exactly one `BackendService`
-        // lives for the whole process, calls `usb_staging::init_cache_root`
+        // lives for the whole process, calls `usb::staging::init_cache_root`
         // -- from `desktop/src-tauri/src/main.rs`, right after constructing
         // its one `BackendCommands`.
         svc.reset_mounted_usb_devices()?;
@@ -428,7 +416,7 @@ impl BackendService {
         }
 
         for root in roots {
-            usb_utils::upsert_usb_device(&conn, Path::new(&root), false, &now_ts)?;
+            usb::utils::upsert_usb_device(&conn, Path::new(&root), false, &now_ts)?;
         }
 
         Ok(())
@@ -462,7 +450,7 @@ impl BackendService {
     }
 
     pub fn initialize_usb(&self, req: InitializeUsbRequest) -> BackendResult<InitializeUsbData> {
-        usb_utils::initialize_usb_for(Some(self), Path::new(&req.usb_root))
+        usb::utils::initialize_usb_for(Some(self), Path::new(&req.usb_root))
     }
 }
 

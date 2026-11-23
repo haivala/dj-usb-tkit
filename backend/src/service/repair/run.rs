@@ -173,7 +173,7 @@ struct DetectedRepairs {
     sync_edb_history_supported: bool,
     sync_edb_history_needed: bool,
     strict_upgrade_targets: HashSet<String>,
-    missing_database: Option<usb_staging::DbKind>,
+    missing_database: Option<staging::DbKind>,
     pdb_duplicate_entry_count: usize,
     engine_library_fix_needed: bool,
 }
@@ -265,7 +265,7 @@ impl<'a> ApplyProgress<'a> {
     }
 
     /// The backup's copy of one database file, before the first fix.
-    fn backup_copy(&mut self, copy: &crate::service::usb_vendor_compat::BackupCopy) {
+    fn backup_copy(&mut self, copy: &crate::service::usb::vendor_compat::BackupCopy) {
         (self.emit)(
             70,
             100,
@@ -579,8 +579,8 @@ pub(super) struct StagedPdb {
 
 impl StagedPdb {
     pub(super) fn load(usb_root: &Path) -> BackendResult<Self> {
-        let path = usb_staging::staged_write_path(usb_root, usb_staging::DbKind::Pdb)?;
-        let has_pdb = usb_staging::UsbDatabases::present(usb_root)?
+        let path = staging::staged_write_path(usb_root, staging::DbKind::Pdb)?;
+        let has_pdb = staging::UsbDatabases::present(usb_root)?
             .as_ref()
             .is_some_and(|databases| databases.pdb().is_some());
         let bytes = if has_pdb {
@@ -639,14 +639,14 @@ impl StagedPdb {
 
 /// Saves both staged databases to the USB, or neither, after putting the
 /// PDB's in-memory bytes into its staged file (see
-/// `usb_staging::write_back_both_or_neither`).
+/// `usb::staging::write_back_both_or_neither`).
 #[cfg(test)]
 pub(super) fn write_back_both_or_neither(
     usb_root: &Path,
     pdb: &mut StagedPdb,
 ) -> BackendResult<()> {
     pdb.save()?;
-    usb_staging::write_back_both_or_neither(usb_root, Some(pdb.original.as_deref()), [true, true])
+    staging::write_back_both_or_neither(usb_root, Some(pdb.original.as_deref()), [true, true])
 }
 
 impl BackendService {
@@ -677,7 +677,7 @@ impl BackendService {
         // detectors further down read this same staged copy too.
         let mut edb_open_warnings = Vec::<WarningEntry>::new();
         let edb_conn = open_edb_from_usb_root(&usb_root, &mut edb_open_warnings);
-        let staged_pdb_path = usb_staging::UsbDatabases::present(&usb_root)?
+        let staged_pdb_path = staging::UsbDatabases::present(&usb_root)?
             .as_ref()
             .and_then(|databases| databases.pdb())
             .map(Path::to_path_buf);
@@ -775,8 +775,10 @@ impl BackendService {
 
         // The app doesn't format drives: the diagnostics' layout check, listed
         // as something to do by hand. Its problems are in the Event Log.
-        let drive_layout_differs = crate::service::usb_layout::read_drive_layout(&usb_root)
-            .is_some_and(|layout| !crate::service::usb_layout::layout_problems(&layout).is_empty());
+        let drive_layout_differs = crate::service::usb::layout::read_drive_layout(&usb_root)
+            .is_some_and(|layout| {
+                !crate::service::usb::layout::layout_problems(&layout).is_empty()
+            });
         if drive_layout_differs {
             detected_issues
                 .push("USB drive layout differs from one MBR partition with FAT32".into());
@@ -1804,12 +1806,8 @@ impl BackendService {
         }
         if let Some(kind) = missing_database {
             let (issue, description) = match kind {
-                usb_staging::DbKind::Pdb => {
-                    ("PDB missing", tr::repair_fix_strict_parity_pdb_missing())
-                }
-                usb_staging::DbKind::Edb => {
-                    ("eDB missing", tr::repair_fix_strict_parity_edb_missing())
-                }
+                staging::DbKind::Pdb => ("PDB missing", tr::repair_fix_strict_parity_pdb_missing()),
+                staging::DbKind::Edb => ("eDB missing", tr::repair_fix_strict_parity_edb_missing()),
             };
             detected_issues.push(issue.to_string());
             proposed_fixes.push(fix_proposal(
@@ -1930,7 +1928,7 @@ impl BackendService {
             let session = self.usb_write_session_reporting(
                 &_usb_write_guard,
                 &usb_root,
-                usb_staging::SessionBackup::WithRetention {
+                staging::SessionBackup::WithRetention {
                     reason: "Before repair",
                     playlist_count: None,
                 },
@@ -2043,7 +2041,7 @@ impl BackendService {
     /// found, in `session`, which it commits.
     fn apply_selected_fixes(
         &self,
-        mut session: usb_staging::UsbWriteSession<'_>,
+        mut session: staging::UsbWriteSession<'_>,
         selected: &HashSet<String>,
         found: DetectedRepairs,
         warnings: &mut Vec<WarningEntry>,
@@ -2091,7 +2089,7 @@ impl BackendService {
 
         progress.report(70, tr::repair_progress_open());
         let mut pdb = match session
-            .will_write(usb_staging::DbKind::Pdb)
+            .will_write(staging::DbKind::Pdb)
             .and_then(|()| StagedPdb::load(usb_root))
         {
             Ok(pdb) => pdb,
@@ -2237,7 +2235,7 @@ impl BackendService {
                         let removal = remove_tracks_from_pdb(usb_root, &ids)?;
                         // Fewer tracks: tt=19 follows the new count, as the
                         // merge's removal does.
-                        let pdb_path = usb_staging::required_pdb(usb_root)?;
+                        let pdb_path = staging::required_pdb(usb_root)?;
                         let mut bytes = std::fs::read(&pdb_path)?;
                         let t19 = crate::service::export_helpers::edb_t19_property(usb_root);
                         if apply_pdb_t19_template_state_repair(&mut bytes, t19.as_ref())? {
@@ -2764,7 +2762,7 @@ impl BackendService {
         if selected.contains(SYNC_EDB_HISTORY_FROM_PDB_FIX_ID) {
             if !sync_edb_history_supported || !sync_edb_history_needed {
                 outcomes.nothing_to_apply(tr::repair_fix_history_sync());
-            } else if let Some(parsed) = usb_staging::required_pdb(usb_root)
+            } else if let Some(parsed) = staging::required_pdb(usb_root)
                 .ok()
                 .and_then(|pdb| parse_pdb(&pdb).ok())
             {
@@ -2795,7 +2793,7 @@ impl BackendService {
         }
 
         // All selected fixes above changed only the staged copies (see
-        // usb_staging.rs); save them to the USB here, both or neither (the
+        // usb/staging.rs); save them to the USB here, both or neither (the
         // session checkpoints its eDB connection's WAL first).
         progress.report(95, tr::repair_progress_save());
         let saved = pdb.save().and_then(|()| session.commit());

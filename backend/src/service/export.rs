@@ -7,7 +7,7 @@ use std::path::{Path, PathBuf};
 use rusqlite::{OptionalExtension, params};
 use serde_json::json;
 
-use super::usb::UsbTrackSizes;
+use super::usb::cache::UsbTrackSizes;
 use crate::edb::open_edb_from_usb_root;
 use crate::error::{BackendError, BackendResult};
 use crate::i18n::{Text, tr};
@@ -24,7 +24,7 @@ use super::transcode_export::{
     ExportFile, SourceFacts, estimated_transcode_bytes, goes_as_transcode_only, plan_export_files,
     prepare_transcode_bundle, use_transcode,
 };
-use super::usb_track_facts::{UsbTrackFact, UsbTrackFacts, UsbTrackIdentity};
+use super::usb::track_facts::{UsbTrackFact, UsbTrackFacts, UsbTrackIdentity};
 use crate::audio_format::{
     AudioFormat, export_extension, is_player_extension, same_format_extension,
 };
@@ -43,13 +43,13 @@ use super::export_helpers::{
     verify_pdb_content, write_edb_playlists_in, write_pdb_playlists_in,
 };
 use super::export_log::{append_export_log_record, build_export_log_record};
-use super::usb_staging;
-use super::usb_utils::{
+use super::usb::staging;
+use super::usb::utils::{
     self, analysis_bundle_exists, can_write_file_at, load_existing_analysis_paths_by_content_path,
     load_existing_analysis_paths_by_content_path_with_conn,
     load_existing_analysis_paths_by_pdb_track_path, resolve_usb_root, resolve_usb_side_path,
 };
-use super::usb_vendor_compat::{USB_ANALYSIS_PREFIX, USB_ARTWORK_PREFIX, USB_CONTENTS_PREFIX};
+use super::usb::vendor_compat::{USB_ANALYSIS_PREFIX, USB_ARTWORK_PREFIX, USB_CONTENTS_PREFIX};
 use super::{
     BackendService, SETTING_EXPORT_MASTER_DB_ID, export_prune_stale_setting,
     has_core_analysis_fields, now,
@@ -532,7 +532,7 @@ fn track_on_usb(
 /// deliberate, so it doesn't hold back a mirror export's prune.
 fn split_off_unplayable_tracks(
     playlist: &mut ExportPlaylistData,
-    formats: &super::usb_identity::UsbAudioFormats,
+    formats: &super::usb::identity::UsbAudioFormats,
 ) -> Vec<ExportTrackData> {
     let (playable, unplayable) =
         std::mem::take(&mut playlist.tracks)
@@ -959,7 +959,7 @@ fn ensure_playlist_tracks_analysis_ready(
 
 /// Same normalization the frontend used to do client-side (trim + lowercase)
 /// before this comparison moved to the backend -- kept distinct from
-/// `usb_utils::canonicalize_playlist_name` (alnum-only, used for matching a
+/// `usb::utils::canonicalize_playlist_name` (alnum-only, used for matching a
 /// local playlist to its possibly-mangled eDB row), since that's a stricter
 /// match than "is this the playlist a user would call the same name".
 /// contentLink low 16 bits encode a format/version identifier that the DJ software
@@ -1042,7 +1042,7 @@ pub(crate) fn usb_root_last_segment(usb_root: &str) -> Option<String> {
 /// marker the app writes when a drive is named), else the root's trailing
 /// directory name.
 pub(crate) fn usb_drive_label(usb_root: &str) -> Option<String> {
-    super::usb_identity::drive_name(std::path::Path::new(usb_root.trim()))
+    super::usb::identity::drive_name(std::path::Path::new(usb_root.trim()))
         .or_else(|| usb_root_last_segment(usb_root))
 }
 
@@ -1206,7 +1206,7 @@ impl BackendService {
         let playlists = self.list_playlists()?.items;
         let usb_playlist_names = self.usb_playlist_names(usb_root);
         let usb_root_text = usb_root.to_string_lossy().to_string();
-        let formats = super::usb_identity::read_usb_audio_formats(usb_root);
+        let formats = super::usb::identity::read_usb_audio_formats(usb_root);
         // A USB without a PDB yet holds no tracks.
         let on_usb = self.usb_track_sizes(usb_root).unwrap_or_default();
         let conn = self.db.connect()?;
@@ -1340,7 +1340,7 @@ impl BackendService {
         let mut playlist = merged_export_playlist(&loaded);
         let list_track_count = playlist.tracks.len();
         let conn = self.db.connect()?;
-        let formats = super::usb_identity::read_usb_audio_formats(usb_root);
+        let formats = super::usb::identity::read_usb_audio_formats(usb_root);
         split_off_unplayable_tracks(&mut playlist, &formats);
         let plan = plan_export_files(&conn, &playlist.tracks, &formats, SourceFacts::Recorded)?;
         // Sized as the files export will copy: a transcode by its own size,
@@ -1374,7 +1374,7 @@ impl BackendService {
         );
         // Counted against the database the stick has; the export rebuilds
         // the other one first.
-        if let Some(missing) = usb_staging::UsbDatabases::present(usb_root)
+        if let Some(missing) = staging::UsbDatabases::present(usb_root)
             .ok()
             .flatten()
             .and_then(|databases| databases.missing())
@@ -1590,7 +1590,7 @@ impl BackendService {
     /// copied; the stick's databases are written once, for all of them.
     fn run_export<F>(
         &self,
-        usb_write_guard: &usb_staging::UsbWriteGuard<'_>,
+        usb_write_guard: &staging::UsbWriteGuard<'_>,
         usb_root: &Path,
         playlist_ids: &[String],
         options: &ExportToUsbOptions,
@@ -1610,7 +1610,7 @@ impl BackendService {
             })
             .unwrap_or(false);
         let mut runs = Vec::<PlaylistRun>::with_capacity(playlist_ids.len());
-        let formats = super::usb_identity::read_usb_audio_formats(&usb_root);
+        let formats = super::usb::identity::read_usb_audio_formats(&usb_root);
         for playlist_id in playlist_ids {
             // Read before the tracks, so an edit in between counts as one.
             let updated_at = self
@@ -1734,7 +1734,7 @@ impl BackendService {
         // itself already inside this USB's Contents tree, but the same content
         // already is -- under a path this app didn't write.
         let usb_tracks = UsbTrackFacts::read(
-            usb_utils::parse_staged_pdb(&usb_root).ok().as_ref(),
+            utils::parse_staged_pdb(&usb_root).ok().as_ref(),
             edb_read_conn.as_ref(),
         );
 
@@ -2101,7 +2101,7 @@ impl BackendService {
         }
         // The write to the stick's databases, from the eDB write to the
         // prune's row removal; dry runs write nothing.
-        let mut write_session: Option<usb_staging::UsbWriteSession<'_>> = None;
+        let mut write_session: Option<staging::UsbWriteSession<'_>> = None;
         let skip_pdb_write = std::env::var("PDB_WRITE_MODE")
             .ok()
             .map(|v| v.eq_ignore_ascii_case("skip"))
@@ -2112,7 +2112,7 @@ impl BackendService {
                 "export",
                 "dry-run enabled: media/artwork/analysis/database writes skipped",
             );
-            if let Some(missing) = usb_staging::UsbDatabases::present(&usb_root)
+            if let Some(missing) = staging::UsbDatabases::present(&usb_root)
                 .ok()
                 .flatten()
                 .and_then(|databases| databases.missing())
@@ -2180,11 +2180,11 @@ impl BackendService {
             // fresh (best-effort) parse rather than carrying forward
             // whatever the last backup recorded.
             let backup = match (options.backup_before_export, options.prune_stale) {
-                (false, _) => usb_staging::SessionBackup::None,
-                (true, true) => usb_staging::SessionBackup::CountingPlaylists {
+                (false, _) => staging::SessionBackup::None,
+                (true, true) => staging::SessionBackup::CountingPlaylists {
                     reason: "Before export (mirror)",
                 },
-                (true, false) => usb_staging::SessionBackup::CountingPlaylists {
+                (true, false) => staging::SessionBackup::CountingPlaylists {
                     reason: "Before export (additive)",
                 },
             };
@@ -2414,8 +2414,8 @@ impl BackendService {
             // The next connect checks the drive holding this name has
             // this record, which a copy made before now doesn't.
             Ok(record) => {
-                if let Some(name) = super::usb_identity::drive_name(usb_root) {
-                    usb_utils::record_drive_export(local_conn, &name, &record.exported_at)?;
+                if let Some(name) = super::usb::identity::drive_name(usb_root) {
+                    utils::record_drive_export(local_conn, &name, &record.exported_at)?;
                 }
             }
             Err(err) => {
@@ -2433,7 +2433,7 @@ impl BackendService {
         // mark_mounted=false: an export happening implies the device
         // was already validated/mounted earlier in the flow, this call
         // only resolves/bumps the usb_devices row.
-        let usb_device_id = usb_utils::upsert_usb_device(local_conn, usb_root, false, &now())?;
+        let usb_device_id = utils::upsert_usb_device(local_conn, usb_root, false, &now())?;
         let export_record = build_export_log_record(playlist, manifest);
         let track_fingerprints_json = serde_json::to_string(&export_record.track_fingerprints)
             .map_err(|err| {
@@ -2546,7 +2546,7 @@ impl BackendService {
     where
         F: crate::progress::ProgressFn,
     {
-        let formats = super::usb_identity::read_usb_audio_formats(usb_root);
+        let formats = super::usb::identity::read_usb_audio_formats(usb_root);
         let plan = |tracks: &[ExportTrackData]| {
             plan_export_files(&*self.db.connect()?, tracks, &formats, SourceFacts::OnDisk)
         };
@@ -2958,7 +2958,7 @@ mod tests {
         ExportManifest, ExportManifestTrack, ExportPlaylistData, ExportTrackData,
         exported_media_target_path,
     };
-    use crate::service::usb::usb_track_size_key;
+    use crate::service::usb::cache::usb_track_size_key;
     use std::collections::HashMap;
     use std::path::{Path, PathBuf};
     use tempfile::tempdir;
@@ -3525,12 +3525,12 @@ mod tests {
 
     #[test]
     fn failed_export_keeps_databases_and_does_not_record_success() {
-        use crate::service::usb_staging;
+        use crate::service::usb::staging;
         use rusqlite::params;
 
-        for blocked in [usb_staging::DbKind::Pdb, usb_staging::DbKind::Edb] {
+        for blocked in [staging::DbKind::Pdb, staging::DbKind::Edb] {
             let cache = tempdir().unwrap();
-            let _staging = usb_staging::set_cache_root_for_test(Some(cache.path().to_path_buf()));
+            let _staging = staging::set_cache_root_for_test(Some(cache.path().to_path_buf()));
             let (_data, service) = test_service();
             let usb = tempdir().unwrap();
             crate::service::initialize_usb(usb.path()).unwrap();
@@ -3561,10 +3561,10 @@ mod tests {
             crate::service::analysis::write_waveform_bundle_for_audio(&source, &bundle).unwrap();
             conn.execute("UPDATE tracks SET bpm=128, duration_ms=1000, waveform_peaks_path=?1 WHERE id='failure-track'", params![bundle.dat_path.to_string_lossy()]).unwrap();
             service.enable_engine_library().unwrap();
-            let pdb = crate::service::usb_vendor_compat::vendor_pdb_path(usb.path());
-            let edb = crate::service::usb_vendor_compat::vendor_edb_path(usb.path());
+            let pdb = crate::service::usb::vendor_compat::vendor_pdb_path(usb.path());
+            let edb = crate::service::usb::vendor_compat::vendor_edb_path(usb.path());
             let before = (std::fs::read(&pdb).unwrap(), std::fs::read(&edb).unwrap());
-            let blocker = usb_staging::write_back_temp_path_for_test(usb.path(), blocked);
+            let blocker = staging::write_back_temp_path_for_test(usb.path(), blocked);
             std::fs::create_dir_all(&blocker).unwrap();
             let request = || ExportToUsbRequest {
                 usb_root: Some(usb.path().to_string_lossy().into_owned()),
@@ -4688,7 +4688,7 @@ mod tests {
     #[test]
     fn export_button_names_a_named_drive_and_falls_back_to_its_folder() {
         let named = tempfile::tempdir().expect("named drive");
-        crate::service::usb_identity::write_drive_name(named.path(), "CLUB_STICK")
+        crate::service::usb::identity::write_drive_name(named.path(), "CLUB_STICK")
             .expect("name drive");
         let root = named.path().to_string_lossy().to_string();
         assert_eq!(usb_drive_label(&root).as_deref(), Some("CLUB_STICK"));

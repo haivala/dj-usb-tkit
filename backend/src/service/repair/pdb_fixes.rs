@@ -1592,7 +1592,7 @@ pub(crate) fn patch_pdb_file<T>(
     usb_root: &Path,
     fix: impl FnOnce(&mut Vec<u8>) -> BackendResult<T>,
 ) -> BackendResult<T> {
-    let path = usb_staging::required_pdb(usb_root)?;
+    let path = staging::required_pdb(usb_root)?;
     let mut bytes = std::fs::read(&path)?;
     let result = fix(&mut bytes)?;
     std::fs::write(&path, &bytes)?;

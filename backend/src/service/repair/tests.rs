@@ -302,15 +302,14 @@ fn test_usb_root() -> (tempfile::TempDir, std::path::PathBuf) {
 fn menu_and_color_failures_leave_both_usb_databases_unchanged() {
     for menu in [true, false] {
         let cache = tempdir().unwrap();
-        let _staging = usb_staging::set_cache_root_for_test(Some(cache.path().to_path_buf()));
+        let _staging = staging::set_cache_root_for_test(Some(cache.path().to_path_buf()));
         let (_usb, usb_root) = test_usb_root();
         let data = tempdir().unwrap();
         let service = BackendService::new(data.path()).unwrap();
         let pdb = vendor_pdb_path(&usb_root);
-        let edb = super::super::usb_vendor_compat::vendor_edb_path(&usb_root);
+        let edb = super::super::usb::vendor_compat::vendor_edb_path(&usb_root);
         let before = (std::fs::read(&pdb).unwrap(), std::fs::read(&edb).unwrap());
-        let blocker =
-            usb_staging::write_back_temp_path_for_test(&usb_root, usb_staging::DbKind::Edb);
+        let blocker = staging::write_back_temp_path_for_test(&usb_root, staging::DbKind::Edb);
         std::fs::create_dir_all(blocker).unwrap();
         if menu {
             let before_menu = service
@@ -384,7 +383,7 @@ fn background_color_sets_both_databases_on_the_usb() {
     let pdb = std::fs::read(vendor_pdb_path(&usb_root)).expect("read pdb");
     assert_eq!(crate::pdb_writer::t19_background_color(&pdb, 4096), Some(5));
     let conn = crate::edb::open_edb(
-        &super::super::usb_vendor_compat::vendor_edb_path(&usb_root),
+        &super::super::usb::vendor_compat::vendor_edb_path(&usb_root),
         &mut Vec::new(),
     )
     .expect("open eDB");
@@ -545,7 +544,7 @@ fn player_menu_edits_apply_to_the_current_order() {
 #[test]
 fn repair_apply_batches_local_writes_and_flushes_pdb_to_usb_once() {
     let cache_dir = tempdir().expect("cache dir").keep();
-    let _guard = usb_staging::set_cache_root_for_test(Some(cache_dir));
+    let _guard = staging::set_cache_root_for_test(Some(cache_dir));
 
     let (_td, usb_root) = test_usb_root();
     let service_data_dir = tempdir().expect("service data dir");
@@ -630,7 +629,7 @@ fn a_page_fix_that_fails_halfway_leaves_the_staged_pdb_unchanged() {
 /// compatibility field, as a repair run would before write-back.
 fn staged_repair_with_changed_pdb(usb_root: &Path) -> super::run::StagedPdb {
     let mut pdb = super::run::StagedPdb::load(usb_root).expect("load staged pdb");
-    usb_staging::stage_edb(usb_root).expect("stage edb");
+    staging::stage_edb(usb_root).expect("stage edb");
     pdb.patch(|bytes| {
         bytes[0x10..0x14].copy_from_slice(&99u32.to_le_bytes());
         Ok(())
@@ -652,14 +651,16 @@ fn append_byte(path: &Path) {
 #[test]
 fn repair_write_back_writes_neither_database_when_the_usb_changed_since_staging() {
     let cache_dir = tempdir().expect("cache dir").keep();
-    let _guard = usb_staging::set_cache_root_for_test(Some(cache_dir));
+    let _guard = staging::set_cache_root_for_test(Some(cache_dir));
     let (_td, usb_root) = test_usb_root();
     let raw_pdb_path = vendor_pdb_path(&usb_root);
     let raw_pdb_before = std::fs::read(&raw_pdb_path).unwrap();
     let mut pdb = staged_repair_with_changed_pdb(&usb_root);
 
     // Something else writes the USB's eDB after it was staged.
-    append_byte(&super::super::usb_vendor_compat::vendor_edb_path(&usb_root));
+    append_byte(&super::super::usb::vendor_compat::vendor_edb_path(
+        &usb_root,
+    ));
 
     let err = super::run::write_back_both_or_neither(&usb_root, &mut pdb)
         .expect_err("write-back must refuse an outside change");
@@ -669,7 +670,7 @@ fn repair_write_back_writes_neither_database_when_the_usb_changed_since_staging(
     );
     assert_eq!(std::fs::read(&raw_pdb_path).unwrap(), raw_pdb_before);
     assert_eq!(
-        std::fs::read(usb_staging::stage_pdb(&usb_root).unwrap()).unwrap(),
+        std::fs::read(staging::stage_pdb(&usb_root).unwrap()).unwrap(),
         raw_pdb_before,
         "the staged PDB is staged again from the USB"
     );
@@ -678,14 +679,14 @@ fn repair_write_back_writes_neither_database_when_the_usb_changed_since_staging(
 #[test]
 fn repair_write_back_puts_the_previous_pdb_back_when_the_edb_write_fails() {
     let cache_dir = tempdir().expect("cache dir").keep();
-    let _guard = usb_staging::set_cache_root_for_test(Some(cache_dir));
+    let _guard = staging::set_cache_root_for_test(Some(cache_dir));
     let (_td, usb_root) = test_usb_root();
     let raw_pdb_path = vendor_pdb_path(&usb_root);
-    let raw_edb_path = super::super::usb_vendor_compat::vendor_edb_path(&usb_root);
+    let raw_edb_path = super::super::usb::vendor_compat::vendor_edb_path(&usb_root);
     let raw_pdb_before = std::fs::read(&raw_pdb_path).unwrap();
     let raw_edb_before = std::fs::read(&raw_edb_path).unwrap();
     let mut pdb = staged_repair_with_changed_pdb(&usb_root);
-    append_byte(&usb_staging::stage_edb(&usb_root).unwrap());
+    append_byte(&staging::stage_edb(&usb_root).unwrap());
 
     // The eDB's write-back copies through this temp path; a directory
     // there makes that copy fail after the PDB was written.
@@ -701,7 +702,7 @@ fn repair_write_back_puts_the_previous_pdb_back_when_the_edb_write_fails() {
     );
     assert_eq!(std::fs::read(&raw_edb_path).unwrap(), raw_edb_before);
     assert_eq!(
-        std::fs::read(usb_staging::stage_edb(&usb_root).unwrap()).unwrap(),
+        std::fs::read(staging::stage_edb(&usb_root).unwrap()).unwrap(),
         raw_edb_before,
         "the staged eDB is staged again from the USB"
     );
@@ -710,14 +711,14 @@ fn repair_write_back_puts_the_previous_pdb_back_when_the_edb_write_fails() {
 #[test]
 fn repair_write_back_removes_a_rebuilt_pdb_when_the_edb_write_fails() {
     let cache_dir = tempdir().expect("cache dir").keep();
-    let _guard = usb_staging::set_cache_root_for_test(Some(cache_dir));
+    let _guard = staging::set_cache_root_for_test(Some(cache_dir));
     let (_td, usb_root) = test_usb_root();
     let raw_pdb_path = vendor_pdb_path(&usb_root);
-    let raw_edb_path = super::super::usb_vendor_compat::vendor_edb_path(&usb_root);
+    let raw_edb_path = super::super::usb::vendor_compat::vendor_edb_path(&usb_root);
     let rebuilt = std::fs::read(&raw_pdb_path).unwrap();
     std::fs::remove_file(&raw_pdb_path).unwrap();
     let mut pdb = super::run::StagedPdb::load(&usb_root).expect("load staged pdb");
-    append_byte(&usb_staging::stage_edb(&usb_root).unwrap());
+    append_byte(&staging::stage_edb(&usb_root).unwrap());
     pdb.patch(|bytes| {
         bytes.clone_from(&rebuilt);
         Ok(())
@@ -738,7 +739,7 @@ fn repair_write_back_removes_a_rebuilt_pdb_when_the_edb_write_fails() {
 #[test]
 fn apply_fix_sync_edb_history_from_pdb_flushes_to_usb_when_staging_enabled() {
     let cache_dir = tempdir().expect("cache dir").keep();
-    let _guard = usb_staging::set_cache_root_for_test(Some(cache_dir));
+    let _guard = staging::set_cache_root_for_test(Some(cache_dir));
 
     let (_td, usb_root) = test_usb_root();
     let service_data_dir = tempdir().expect("service data dir");
@@ -774,7 +775,7 @@ fn apply_fix_sync_edb_history_from_pdb_flushes_to_usb_when_staging_enabled() {
     // `crate::edb::open_edb` (which tries the known keys) is used
     // instead of a plain `rusqlite::Connection::open` -- applied
     // directly to the raw path to bypass staging entirely.
-    let raw_edb_path = super::super::usb_vendor_compat::vendor_edb_path(&usb_root);
+    let raw_edb_path = super::super::usb::vendor_compat::vendor_edb_path(&usb_root);
     {
         let mut open_warnings = Vec::new();
         let conn =
@@ -792,8 +793,7 @@ fn apply_fix_sync_edb_history_from_pdb_flushes_to_usb_when_staging_enabled() {
         );
     }
 
-    let committed =
-        usb_staging::write_back_if_changed(&usb_root, usb_staging::DbKind::Edb).unwrap();
+    let committed = staging::write_back_if_changed(&usb_root, staging::DbKind::Edb).unwrap();
     assert!(committed, "expected the eDB write-back to actually commit");
 
     let mut open_warnings = Vec::new();

@@ -534,7 +534,7 @@ fn rebuilt_tracks_sql(table_sql: &str) -> Option<String> {
     ))
 }
 
-/// The drive-name registry (`usb_identity`): one row per name in use, keyed
+/// The drive-name registry (`usb::identity`): one row per name in use, keyed
 /// by its slug since that is the drive's cache/backup key. Unlike
 /// `usb_devices.label` it isn't tied to a mount path, so two drives that the
 /// OS mounts at the same path still can't end up with the same name. Seeded
@@ -577,7 +577,7 @@ fn create_usb_drive_names(conn: &Connection) -> BackendResult<()> {
             let name = label.trim();
             tx.execute(
                 "INSERT OR REPLACE INTO usb_drive_names (slug, name, last_seen_at) VALUES (?1, ?2, ?3)",
-                rusqlite::params![crate::service::usb_identity::slug(name), name, last_seen_at],
+                rusqlite::params![crate::service::usb::identity::slug(name), name, last_seen_at],
             )?;
         }
         true
@@ -598,7 +598,7 @@ fn create_usb_drive_names(conn: &Connection) -> BackendResult<()> {
         let mut latest = std::collections::HashMap::new();
         for (label, exported_at) in exports {
             latest.insert(
-                crate::service::usb_identity::slug(label.trim()),
+                crate::service::usb::identity::slug(label.trim()),
                 exported_at,
             );
         }

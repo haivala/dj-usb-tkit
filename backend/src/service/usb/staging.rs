@@ -16,8 +16,8 @@ use serde::{Deserialize, Serialize};
 
 use crate::error::{BackendError, BackendResult};
 
-use super::normalize_source_root_for_matching;
-use super::usb_vendor_compat::{USB_VENDOR_DB_DIR, USB_VENDOR_ROOT_DIR};
+use super::vendor_compat::{USB_VENDOR_DB_DIR, USB_VENDOR_ROOT_DIR};
+use crate::service::normalize_source_root_for_matching;
 
 static CACHE_ROOT: Mutex<Option<PathBuf>> = Mutex::new(None);
 /// Guards the read-modify-write critical sections below (stat, copy/write,
@@ -180,8 +180,8 @@ fn cache_root() -> Option<PathBuf> {
 /// or a test's arbitrary temp dir) fall back to the old mount-path hash,
 /// prefixed so the two key spaces can never collide.
 fn cache_key_for_root(usb_root: &Path) -> String {
-    if let Some(name) = super::usb_identity::drive_name(usb_root) {
-        return super::usb_identity::slug(&name);
+    if let Some(name) = crate::service::usb::identity::drive_name(usb_root) {
+        return crate::service::usb::identity::slug(&name);
     }
 
     use std::hash::{Hash, Hasher};
@@ -208,8 +208,8 @@ fn rename_cache_dir_with_root(
     let Some(cache_root) = cache_root else {
         return Ok(());
     };
-    let old_dir = cache_root.join(super::usb_identity::slug(old_name));
-    let new_dir = cache_root.join(super::usb_identity::slug(new_name));
+    let old_dir = cache_root.join(crate::service::usb::identity::slug(old_name));
+    let new_dir = cache_root.join(crate::service::usb::identity::slug(new_name));
     if old_dir == new_dir || !old_dir.is_dir() || new_dir.exists() {
         return Ok(());
     }
@@ -237,7 +237,7 @@ pub(crate) fn backups_dir_for(usb_root: &Path) -> Option<PathBuf> {
     // cache key is the unstable mount-path hash (see `cache_key_for_root`),
     // so archiving into it now would just orphan the archive once the drive
     // is later named and its cache key changes.
-    super::usb_identity::drive_name(usb_root)?;
+    crate::service::usb::identity::drive_name(usb_root)?;
     device_dir_for(cache_root().as_deref(), usb_root)
         .map(|device_dir| local_vendor_db_dir(&device_dir).join("backups"))
 }
@@ -421,7 +421,7 @@ pub(crate) fn stage_pdb(usb_root: &Path) -> BackendResult<PathBuf> {
     stage_file_with_root(
         cache_root().as_deref(),
         usb_root,
-        &super::usb_vendor_compat::vendor_pdb_path(usb_root),
+        &crate::service::usb::vendor_compat::vendor_pdb_path(usb_root),
         DbKind::Pdb,
         false,
     )
@@ -432,7 +432,7 @@ pub(crate) fn stage_edb(usb_root: &Path) -> BackendResult<PathBuf> {
     stage_file_with_root(
         cache_root().as_deref(),
         usb_root,
-        &super::usb_vendor_compat::vendor_edb_path(usb_root),
+        &crate::service::usb::vendor_compat::vendor_edb_path(usb_root),
         DbKind::Edb,
         false,
     )
@@ -448,7 +448,7 @@ pub(crate) fn stage_pdb_on_connect(usb_root: &Path) -> BackendResult<PathBuf> {
     stage_file_with_root(
         cache_root().as_deref(),
         usb_root,
-        &super::usb_vendor_compat::vendor_pdb_path(usb_root),
+        &crate::service::usb::vendor_compat::vendor_pdb_path(usb_root),
         DbKind::Pdb,
         true,
     )
@@ -462,7 +462,7 @@ pub(crate) fn stage_edb_with_root(
     stage_file_with_root(
         cache_root,
         usb_root,
-        &super::usb_vendor_compat::vendor_edb_path(usb_root),
+        &crate::service::usb::vendor_compat::vendor_edb_path(usb_root),
         DbKind::Edb,
         false,
     )
@@ -476,7 +476,7 @@ pub(crate) fn stage_edb_on_connect_with_root(
     stage_file_with_root(
         cache_root,
         usb_root,
-        &super::usb_vendor_compat::vendor_edb_path(usb_root),
+        &crate::service::usb::vendor_compat::vendor_edb_path(usb_root),
         DbKind::Edb,
         true,
     )
@@ -484,8 +484,8 @@ pub(crate) fn stage_edb_on_connect_with_root(
 
 fn vendor_path(usb_root: &Path, kind: DbKind) -> PathBuf {
     match kind {
-        DbKind::Pdb => super::usb_vendor_compat::vendor_pdb_path(usb_root),
-        DbKind::Edb => super::usb_vendor_compat::vendor_edb_path(usb_root),
+        DbKind::Pdb => crate::service::usb::vendor_compat::vendor_pdb_path(usb_root),
+        DbKind::Edb => crate::service::usb::vendor_compat::vendor_edb_path(usb_root),
     }
 }
 
@@ -1044,7 +1044,7 @@ pub enum SessionBackup<'r> {
 /// (an error), it puts the staged copies back as they were and writes
 /// nothing to the USB.
 pub struct UsbWriteSession<'s> {
-    service: Option<&'s super::BackendService>,
+    service: Option<&'s crate::service::BackendService>,
     // Borrowing the operation's guard keeps the entire read/modify/write
     // sequence locked, including post-commit work done by the caller.
     _write_guard: Option<&'s UsbWriteGuard<'s>>,
@@ -1089,7 +1089,7 @@ pub(crate) struct UsbWriteGuard<'a> {
     _held: MutexGuard<'a, ()>,
 }
 
-impl super::BackendService {
+impl crate::service::BackendService {
     /// Takes the USB write lock, waiting for a running write to finish.
     pub(crate) fn lock_usb_writes(&self) -> UsbWriteGuard<'_> {
         UsbWriteGuard {
@@ -1131,7 +1131,7 @@ impl super::BackendService {
         usb_root: &Path,
         backup: SessionBackup<'_>,
         warnings: &mut Vec<crate::models::WarningEntry>,
-        on_copy: &mut dyn FnMut(super::usb_vendor_compat::BackupCopy),
+        on_copy: &mut dyn FnMut(crate::service::usb::vendor_compat::BackupCopy),
     ) -> UsbWriteSession<'s> {
         match backup {
             SessionBackup::None => {}
@@ -1182,7 +1182,7 @@ impl<'s> UsbWriteSession<'s> {
 
     /// A session without a backup; `service` (when given) has its parse
     /// caches dropped on commit.
-    fn open(service: Option<&'s super::BackendService>, usb_root: &Path) -> Self {
+    fn open(service: Option<&'s crate::service::BackendService>, usb_root: &Path) -> Self {
         Self {
             service,
             _write_guard: None,
@@ -1287,7 +1287,7 @@ impl<'s> UsbWriteSession<'s> {
         if cache_root().is_some() {
             std::fs::write(&path, bytes)?;
         } else {
-            super::anlz::atomic_write_bytes(&path, bytes)?;
+            crate::service::anlz::atomic_write_bytes(&path, bytes)?;
         }
         Ok(())
     }
@@ -1321,10 +1321,12 @@ impl<'s> UsbWriteSession<'s> {
             DbKind::Pdb => {
                 std::fs::write(
                     &path,
-                    super::usb_utils::build_fullshape_pdb_bytes(created_date),
+                    crate::service::usb::utils::build_fullshape_pdb_bytes(created_date),
                 )?;
             }
-            DbKind::Edb => super::usb_utils::initialize_fullshape_edb(&path, created_date)?,
+            DbKind::Edb => {
+                crate::service::usb::utils::initialize_fullshape_edb(&path, created_date)?
+            }
         }
         Ok(path)
     }
@@ -1402,7 +1404,7 @@ impl<'s> UsbWriteSession<'s> {
             .pdb_original
             .as_ref()
             .and_then(|bytes| bytes.as_deref());
-        let problems = super::pdb_write_problems(before, &after);
+        let problems = crate::service::pdb_write_problems(before, &after);
         if problems.is_empty() {
             return Ok(());
         }
@@ -1558,7 +1560,7 @@ mod tests {
     #[test]
     fn cache_key_for_root_uses_drive_name_when_named() {
         let usb = tempdir().unwrap();
-        crate::service::usb_identity::write_drive_name(usb.path(), "Club Stick").unwrap();
+        crate::service::usb::identity::write_drive_name(usb.path(), "Club Stick").unwrap();
         assert_eq!(cache_key_for_root(usb.path()), "club-stick");
     }
 
@@ -1576,8 +1578,8 @@ mod tests {
         // fallback which is keyed on that very path.
         let usb_a = tempdir().unwrap();
         let usb_b = tempdir().unwrap();
-        crate::service::usb_identity::write_drive_name(usb_a.path(), "Club Stick").unwrap();
-        crate::service::usb_identity::write_drive_name(usb_b.path(), "Club Stick").unwrap();
+        crate::service::usb::identity::write_drive_name(usb_a.path(), "Club Stick").unwrap();
+        crate::service::usb::identity::write_drive_name(usb_b.path(), "Club Stick").unwrap();
         assert_eq!(
             cache_key_for_root(usb_a.path()),
             cache_key_for_root(usb_b.path())
@@ -1615,7 +1617,7 @@ mod tests {
         // Naming the drive without invalidating the resolver's cache must
         // still serve the stale (pre-name) key -- this is what makes the
         // resolver actually skip the marker-file read on repeat calls.
-        crate::service::usb_identity::write_drive_name(&usb_root, "Club Stick").unwrap();
+        crate::service::usb::identity::write_drive_name(&usb_root, "Club Stick").unwrap();
         let key2 = resolve_cache_key(&usb_root);
         assert_eq!(
             key1, key2,
@@ -1653,7 +1655,7 @@ mod tests {
         let staged = stage_edb_with_root(None, &usb_root).unwrap();
         assert_eq!(
             staged,
-            super::super::usb_vendor_compat::vendor_edb_path(&usb_root)
+            crate::service::usb::vendor_compat::vendor_edb_path(&usb_root)
         );
     }
 
@@ -1666,7 +1668,7 @@ mod tests {
         let staged1 = stage_edb_with_root(Some(cache.path()), &usb_root).unwrap();
         assert_ne!(
             staged1,
-            super::super::usb_vendor_compat::vendor_edb_path(&usb_root)
+            crate::service::usb::vendor_compat::vendor_edb_path(&usb_root)
         );
         assert_eq!(std::fs::read(&staged1).unwrap(), b"hello");
 
@@ -1692,7 +1694,7 @@ mod tests {
 
         std::thread::sleep(std::time::Duration::from_millis(20));
         std::fs::write(
-            super::super::usb_vendor_compat::vendor_edb_path(&usb_root),
+            crate::service::usb::vendor_compat::vendor_edb_path(&usb_root),
             b"hello world, now longer",
         )
         .unwrap();
@@ -1714,7 +1716,7 @@ mod tests {
 
         std::thread::sleep(std::time::Duration::from_millis(20));
         std::fs::write(
-            super::super::usb_vendor_compat::vendor_edb_path(&usb_root),
+            crate::service::usb::vendor_compat::vendor_edb_path(&usb_root),
             b"changed after connect",
         )
         .unwrap();
@@ -1741,7 +1743,7 @@ mod tests {
 
         std::thread::sleep(std::time::Duration::from_millis(20));
         std::fs::write(
-            super::super::usb_vendor_compat::vendor_edb_path(&usb_root),
+            crate::service::usb::vendor_compat::vendor_edb_path(&usb_root),
             b"changed externally, reconnected",
         )
         .unwrap();
@@ -1764,7 +1766,10 @@ mod tests {
         let usb_root = usb_root_with_edb(usb.path(), b"hello");
         let staged = stage_edb_on_connect_with_root(Some(cache.path()), &usb_root).unwrap();
         std::fs::write(staged.with_extension("db-wal"), b"wal").unwrap();
-        std::fs::remove_file(super::super::usb_vendor_compat::vendor_edb_path(&usb_root)).unwrap();
+        std::fs::remove_file(crate::service::usb::vendor_compat::vendor_edb_path(
+            &usb_root,
+        ))
+        .unwrap();
 
         // A passive call keeps it: it may be a copy this session hasn't
         // written back yet.
@@ -1790,7 +1795,10 @@ mod tests {
             write_back_if_changed_for_test(Some(cache.path()), &usb_root, DbKind::Edb).unwrap();
         assert!(!committed);
         assert_eq!(
-            std::fs::read(super::super::usb_vendor_compat::vendor_edb_path(&usb_root)).unwrap(),
+            std::fs::read(crate::service::usb::vendor_compat::vendor_edb_path(
+                &usb_root
+            ))
+            .unwrap(),
             b"hello"
         );
     }
@@ -1808,7 +1816,10 @@ mod tests {
         assert!(committed);
 
         assert_eq!(
-            std::fs::read(super::super::usb_vendor_compat::vendor_edb_path(&usb_root)).unwrap(),
+            std::fs::read(crate::service::usb::vendor_compat::vendor_edb_path(
+                &usb_root
+            ))
+            .unwrap(),
             b"modified locally"
         );
         // No leftover temp file beside the final destination.
@@ -1831,7 +1842,10 @@ mod tests {
             commit_and_write_back_for_test(None, &usb_root, DbKind::Edb, b"new content").unwrap();
         assert!(committed);
         assert_eq!(
-            std::fs::read(super::super::usb_vendor_compat::vendor_edb_path(&usb_root)).unwrap(),
+            std::fs::read(crate::service::usb::vendor_compat::vendor_edb_path(
+                &usb_root
+            ))
+            .unwrap(),
             b"new content",
             "with staging disabled, commit_and_write_back must still write straight to the USB path"
         );
@@ -1848,7 +1862,7 @@ mod tests {
         // drive) after we staged our local copy.
         std::thread::sleep(std::time::Duration::from_millis(20));
         std::fs::write(
-            super::super::usb_vendor_compat::vendor_edb_path(&usb_root),
+            crate::service::usb::vendor_compat::vendor_edb_path(&usb_root),
             b"changed externally",
         )
         .unwrap();
@@ -1860,7 +1874,10 @@ mod tests {
             write_back_if_changed_for_test(Some(cache.path()), &usb_root, DbKind::Edb).unwrap_err();
         assert!(matches!(err, BackendError::Internal(_)));
         assert_eq!(
-            std::fs::read(super::super::usb_vendor_compat::vendor_edb_path(&usb_root)).unwrap(),
+            std::fs::read(crate::service::usb::vendor_compat::vendor_edb_path(
+                &usb_root
+            ))
+            .unwrap(),
             b"changed externally",
             "external change must not be silently clobbered"
         );

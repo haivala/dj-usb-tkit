@@ -26,8 +26,8 @@ use crate::pdb_reader::{
 use super::anlz::pqtz_beats;
 use super::cues::{DEFAULT_HOTCUE_COLOR_ID, HOTCUE_PALETTE, collapse_anlz_cues};
 use super::key_notation::camelot_position;
-use super::usb_staging;
-use super::usb_utils::{
+use super::usb::staging;
+use super::usb::utils::{
     canonicalize_playlist_name, find_anlz_chunk_payload, resolve_usb_side_path,
 };
 use super::{BackendService, SETTING_UI_EXPORT_ENGINE_LIBRARY, now};
@@ -203,7 +203,7 @@ pub(crate) fn engine_library_status(usb_root: &Path) -> Option<EngineLibraryStat
     if !m_db.is_file() {
         return None;
     }
-    let pdb_sequence = usb_staging::UsbDatabases::present(usb_root)
+    let pdb_sequence = staging::UsbDatabases::present(usb_root)
         .ok()
         .flatten()
         .and_then(|databases| databases.pdb().map(Path::to_path_buf))
@@ -309,7 +309,7 @@ fn engine_source(
     usb_root: &Path,
     warnings: &mut Vec<WarningEntry>,
 ) -> BackendResult<(ParsedPdb, Option<u32>)> {
-    let databases = usb_staging::UsbDatabases::of(usb_root)?;
+    let databases = staging::UsbDatabases::of(usb_root)?;
     let pdb = match databases.pdb() {
         Some(path) => {
             let bytes = std::fs::read(path)?;

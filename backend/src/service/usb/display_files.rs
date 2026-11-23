@@ -21,15 +21,17 @@ use std::path::{Path, PathBuf};
 
 use rusqlite::{Connection, OptionalExtension, params};
 
+use crate::error::BackendResult;
 use crate::logging;
 use crate::models::UsbTrack;
 
-use super::anlz_seek::SeekIndexSkip;
-use super::browse_path_matches_root;
-use super::usb_identity::{UsbAudioFormats, read_usb_audio_formats};
-use super::usb_utils::{
+use super::identity::{UsbAudioFormats, read_usb_audio_formats};
+use super::utils;
+use super::utils::{
     artwork_path_to_data_url, load_waveform_preview_from_analysis_path, waveform_preview_candidates,
 };
+use crate::service::anlz_seek::SeekIndexSkip;
+use crate::service::{BackendService, browse_path_matches_root};
 
 const CACHE_FILE_NAME: &str = "usb_read_cache.sqlite";
 
@@ -328,7 +330,7 @@ impl SeekSkipMemory {
     }
 
     /// Why the repair skipped `audio`, if it did and the file hasn't changed.
-    pub(super) fn get(&self, audio: &Path) -> Option<SeekIndexSkip> {
+    pub(in crate::service) fn get(&self, audio: &Path) -> Option<SeekIndexSkip> {
         let conn = self.conn.as_ref()?;
         let sig = file_signature(audio)?;
         conn.query_row(
@@ -342,7 +344,7 @@ impl SeekSkipMemory {
         .and_then(|code| SeekIndexSkip::from_code(&code))
     }
 
-    pub(super) fn remember(&self, audio: &Path, skip: SeekIndexSkip) {
+    pub(in crate::service) fn remember(&self, audio: &Path, skip: SeekIndexSkip) {
         let (Some(conn), Some(sig)) = (self.conn.as_ref(), file_signature(audio)) else {
             return;
         };
@@ -392,6 +394,57 @@ fn waveform_signature(path: &Path) -> Option<String> {
         })
         .collect();
     (!parts.is_empty()).then(|| parts.join("|"))
+}
+
+impl BackendService {
+    /// Where `page`'s display files are read from: the matched local tracks'
+    /// own files, else the local cache of this stick's reads, else the stick.
+    pub(super) fn build_usb_display_source(
+        &self,
+        conn: &rusqlite::Connection,
+        usb_root: &Path,
+        usb_device_id: Option<String>,
+        page: &[UsbTrack],
+    ) -> BackendResult<UsbDisplaySource> {
+        let device_key = match usb_device_id {
+            Some(id) => id,
+            None => format!(
+                "root:{}",
+                crate::service::normalize_source_root_for_matching(&usb_root.to_string_lossy())
+            ),
+        };
+        let mut usb_roots = utils::all_usb_device_root_paths(conn)?;
+        usb_roots.push(usb_root.to_string_lossy().into_owned());
+
+        let mut library = HashMap::new();
+        let mut stmt = conn
+            .prepare_cached("SELECT waveform_peaks_path, artwork_path FROM tracks WHERE id = ?1")?;
+        for id in page
+            .iter()
+            .filter_map(|track| track.local_track_id.as_deref())
+        {
+            if library.contains_key(id) {
+                continue;
+            }
+            let files = stmt
+                .query_row(params![id], |row| {
+                    Ok(LibraryDisplayFiles {
+                        waveform_path: row.get(0)?,
+                        artwork_path: row.get(1)?,
+                    })
+                })
+                .optional()?;
+            if let Some(files) = files {
+                library.insert(id.to_string(), library_files_off_usb(files, &usb_roots));
+            }
+        }
+        Ok(UsbDisplaySource::new(
+            &self.db.data_dir(),
+            usb_root,
+            device_key,
+            library,
+        ))
+    }
 }
 
 #[cfg(test)]

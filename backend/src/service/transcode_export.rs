@@ -1,5 +1,5 @@
 //! Which file of a track goes onto a USB: the track's own, or one of its
-//! transcodes, by the stick's USB audio formats (see `usb_identity::UsbAudioFormats`).
+//! transcodes, by the stick's USB audio formats (see `usb::identity::UsbAudioFormats`).
 //!
 //! The stick's order of preference picks among the files the track has in a
 //! ticked format: its own file and its up-to-date transcodes. When none is
@@ -33,8 +33,8 @@ use super::transcode::{
     file_facts, size_text, transcode_bundle_dir, transcode_export_bundle,
     transcode_waveform_bundle, write_transcode_waveform_bundle,
 };
-use super::usb_audio_formats::library_usb_audio_format;
-use super::usb_identity::UsbAudioFormats;
+use super::usb::audio_formats::library_usb_audio_format;
+use super::usb::identity::UsbAudioFormats;
 
 /// A recorded transcode of a track.
 #[derive(Debug, Clone, PartialEq)]
@@ -361,7 +361,7 @@ pub(crate) fn fill_track_export_files(
             ..Default::default()
         })
         .collect();
-    let formats = super::usb_identity::read_usb_audio_formats(usb_root);
+    let formats = super::usb::identity::read_usb_audio_formats(usb_root);
     let plan = plan_export_files(conn, &export_tracks, &formats, SourceFacts::Recorded)?;
     for (track, file) in tracks.iter_mut().zip(plan) {
         if let ExportFile::Transcode(file) = &file {
