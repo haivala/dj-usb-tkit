@@ -35,14 +35,8 @@ fn inplace_page_size(bytes: &[u8]) -> Option<usize> {
 
 fn inplace_data_pages(bytes: &[u8], len_page: usize, table_type: u32) -> Vec<InplaceDataPage> {
     let mut out = Vec::new();
-    for idx in 1..bytes.len() / len_page {
-        let start = idx * len_page;
-        let page = &bytes[start..start + len_page];
-        if read_u32_le_at(page, 0x08) != Some(table_type) {
-            continue;
-        }
-        // Skip index/sentinel pages (bit 6 set in page_flags)
-        if page[0x1b] & 0x40 != 0 {
+    for (idx, page) in pdb_page::data_pages(bytes) {
+        if pdb_page::table_type(page) != Some(table_type) {
             continue;
         }
         let Some((num_row_offsets, num_rows)) = pdb_page::read_slot_counts(page) else {
@@ -58,9 +52,10 @@ fn inplace_data_pages(bytes: &[u8], len_page: usize, table_type: u32) -> Vec<Inp
         if payload_end > len_page || !pdb_page::footer_clear_of_heap(page, num_row_offsets) {
             continue;
         }
+        let idx = idx as usize;
         out.push(InplaceDataPage {
             idx,
-            start,
+            start: idx * len_page,
             num_row_offsets,
             num_rows,
             payload_end,
@@ -556,66 +551,17 @@ pub(crate) fn rebuild_sentinel_btrees_inplace(bytes: &mut [u8]) {
 /// [`rebuild_sentinel_btrees_inplace`] for only the listed tables, which
 /// must use 0x34 for active pages (tt=0, tt=19).
 pub(crate) fn rebuild_sentinel_btrees_for_tables(bytes: &mut [u8], tables: &[u32]) {
-    let Some(page_size) = read_u32_le_at(bytes, 4).map(|v| v as usize) else {
+    let Some(page_size) = pdb_page::file_page_size(bytes) else {
         return;
     };
-    if page_size == 0 || bytes.len() < page_size * 2 {
-        return;
-    }
-    let total = bytes.len() / page_size;
+    let sentinels: Vec<(u32, u32)> = pdb_page::index_pages(bytes)
+        .filter_map(|(index, page)| Some((index, pdb_page::table_type(page)?)))
+        .filter(|(_, tt)| tables.contains(tt))
+        .collect();
 
-    for sent_idx in 1..total {
-        let sent_off = sent_idx * page_size;
-        if sent_off + page_size > bytes.len() {
-            break;
-        }
-        // Must be a sentinel (0x64)
-        if bytes.get(sent_off + 0x1b).copied() != Some(0x64) {
-            continue;
-        }
-        let tt = bytes
-            .get(sent_off + 8..sent_off + 12)
-            .and_then(|b| b.try_into().ok())
-            .map(u32::from_le_bytes)
-            .unwrap_or(9999);
-        if !tables.contains(&tt) {
-            continue;
-        }
-
-        // Collect all data pages for this table with flags=0x34
-        let mut active: Vec<u32> = Vec::new();
-        for pi in 1..total {
-            if pi == sent_idx {
-                continue;
-            }
-            let po = pi * page_size;
-            if po + page_size > bytes.len() {
-                break;
-            }
-            let ptt = bytes
-                .get(po + 8..po + 12)
-                .and_then(|b| b.try_into().ok())
-                .map(u32::from_le_bytes)
-                .unwrap_or(9999);
-            if ptt != tt {
-                continue;
-            }
-            let pf = bytes.get(po + 0x1b).copied().unwrap_or(0);
-            if pf != 0x34 {
-                continue; // 0x64 sentinel, 0x24 sealed, or unknown
-            }
-            let used = bytes
-                .get(po + 0x1e..po + 0x20)
-                .and_then(|b| b.try_into().ok())
-                .map(|b: [u8; 2]| u16::from_le_bytes(b))
-                .unwrap_or(0);
-            if used == 0 {
-                continue; // blank page
-            }
-            active.push(pi as u32);
-        }
-        active.sort_unstable();
-
+    for (sent_idx, tt) in sentinels {
+        let sent_off = sent_idx as usize * page_size;
+        let active = pdb_page::active_data_pages(bytes, tt);
         if active.is_empty() {
             continue; // nothing to write — leave sentinel as-is
         }
@@ -628,18 +574,11 @@ pub(crate) fn rebuild_sentinel_btrees_for_tables(bytes: &mut [u8], tables: &[u32
         // (e.g. tt=0 seq=31, tt=19 seq=15 vs seq=1 on un-updated sentinels).
         // A sentinel with seq=1 while data pages have higher seqs indicates the
         // B-tree was never refreshed, which detected as corruption.
-        let max_seq = (1..total)
-            .filter(|&j| j != sent_idx)
-            .filter_map(|j| {
-                let o = j * page_size;
-                bytes.get(o..o + page_size).and_then(|p| {
-                    if p[0x1b] != 0x64 && u32::from_le_bytes(p[4..8].try_into().ok()?) != 0 {
-                        Some(u32::from_le_bytes(p[0x10..0x14].try_into().ok()?))
-                    } else {
-                        None
-                    }
-                })
+        let max_seq = pdb_page::pages(bytes)
+            .filter(|(_, page)| {
+                !pdb_page::is_index_page(page) && read_u32_le_at(page, 4).unwrap_or(0) != 0
             })
+            .filter_map(|(_, page)| read_u32_le_at(page, 0x10))
             .max()
             .unwrap_or(1);
         let sentinel_seq = max_seq.saturating_add(1);
@@ -687,14 +626,10 @@ pub(crate) fn write_sentinel_btree(
     page_size: usize,
     active: &[u32],
 ) -> bool {
-    let Some(fill_end) = page_size
-        .checked_sub(SENTINEL_TAIL_ZERO_BYTES)
-        .map(|end| sent_off + end)
-        .filter(|&end| end <= bytes.len() && end >= sent_off + 0x3c)
-    else {
+    let Some(entries) = sentinel_entry_area(bytes, sent_off, page_size) else {
         return false;
     };
-    let mut indexed: Vec<u32> = bytes[sent_off + 0x3c..fill_end]
+    let mut indexed: Vec<u32> = bytes[entries]
         .as_chunks::<4>()
         .0
         .iter()
@@ -703,10 +638,37 @@ pub(crate) fn write_sentinel_btree(
         .map(|entry| entry / 8)
         .collect();
     indexed.sort_unstable();
-    if indexed == active {
+    indexed != active && fill_sentinel_btree(bytes, sent_off, page_size, active)
+}
+
+/// The byte range of the sentinel page at `sent_off` that holds its B-tree
+/// entries, when the page is in `bytes`.
+fn sentinel_entry_area(
+    bytes: &[u8],
+    sent_off: usize,
+    page_size: usize,
+) -> Option<std::ops::Range<usize>> {
+    page_size
+        .checked_sub(SENTINEL_TAIL_ZERO_BYTES)
+        .map(|end| sent_off + end)
+        .filter(|&end| end <= bytes.len() && end >= sent_off + 0x3c)
+        .map(|end| sent_off + 0x3c..end)
+}
+
+/// [`write_sentinel_btree`] whatever the B-tree holds now, so `ne`, the
+/// free-list head and `u7` are rewritten too. The stale-B-tree repair uses
+/// this: the entries may be right while those fields aren't.
+pub(crate) fn fill_sentinel_btree(
+    bytes: &mut [u8],
+    sent_off: usize,
+    page_size: usize,
+    active: &[u32],
+) -> bool {
+    let Some(entries) = sentinel_entry_area(bytes, sent_off, page_size) else {
         return false;
-    }
-    let mut cursor = sent_off + 0x3c;
+    };
+    let fill_end = entries.end;
+    let mut cursor = entries.start;
     for &page_idx in active {
         if cursor + 4 > fill_end {
             break;

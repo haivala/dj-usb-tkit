@@ -4,7 +4,7 @@ use std::collections::{HashMap, HashSet};
 use std::path::Path;
 
 use crate::error::{BackendError, BackendResult};
-use crate::pdb_writer::{parse_page_row_slots, rewrite_variable_page_rows_in_place};
+use crate::pdb_writer::rewrite_variable_page_rows_in_place;
 use crate::utils::{
     collect_chain as collect_chain_pages, page_offset, read_u16_le_at, table_ptr_fields,
 };
@@ -46,7 +46,7 @@ fn load_live_table_rows(
             continue;
         };
         let mut page_rows = Vec::<Vec<u8>>::new();
-        for slot in parse_page_row_slots(page, page_size) {
+        for slot in crate::pdb_page::row_slots(page) {
             if !slot.present || slot.end > payload_len || slot.start >= slot.end {
                 continue;
             }

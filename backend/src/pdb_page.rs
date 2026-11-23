@@ -1,5 +1,5 @@
-//! PDB data-page row-slot header fields and the backward-growing row index
-//! footer.
+//! PDB pages: which pages hold rows, the rows on them, the row-slot header
+//! fields and the backward-growing row index footer.
 //!
 //! Footer layout, per group of up to 16 row slots, group 0 ending at the very
 //! last byte of the page:
@@ -18,7 +18,7 @@
 //! *which* bits to set (per-table conventions, tombstoning) live in
 //! `pdb_writer` and `service::repair`.
 
-use crate::utils::{read_u16_le_at, write_u16_le_at};
+use crate::utils::{read_u16_le_at, read_u32_le_at, write_u16_le_at};
 
 /// Start of the row heap: 32-byte common header + 8-byte data-page header.
 pub const HEAP_START: usize = 0x28;
@@ -34,6 +34,8 @@ const GROUP_BYTES: usize = 4 + GROUP_SLOTS * 2;
 /// `(num_row_offsets, num_rows)` from the packed 24-bit header field at
 /// `0x18..0x1b` (bits 0-12 and 13-23). `num_row_offsets` is the page's row
 /// slot count including tombstoned slots; `num_rows` counts live rows only.
+/// Read as one field, not as the single byte at `0x18` (`nrs`), which wraps
+/// past 255 slots: 12-byte `t08` rows put well over 255 on a 4096-byte page.
 pub fn read_slot_counts(page: &[u8]) -> Option<(usize, usize)> {
     let packed = u32::from(*page.get(0x18)?)
         | (u32::from(*page.get(0x19)?) << 8)
@@ -309,115 +311,161 @@ pub fn write_transaction(page: &mut [u8], slot_count: usize, slots: &[usize]) {
 }
 
 // ---------------------------------------------------------------------------
-// Tolerant footer scan
+// Pages
+// ---------------------------------------------------------------------------
+//
+// Which pages hold rows is decided here and nowhere else, so the reader, the
+// writers, the detectors and their repairs all look at the same pages.
+
+/// The page flag bit that marks an index page. Data pages have it clear
+/// (`0x24`/`0x34` on every page rekordbox writes, `0x10` on one it crashed
+/// writing); index pages have it set (`0x64`).
+pub const INDEX_PAGE_FLAG: u8 = 0x40;
+/// The page flags of a table's active data pages: the ones its index page's
+/// B-tree lists. Sealed pages (`0x24`) are reached through `next_page`.
+pub const ACTIVE_PAGE_FLAGS: u8 = 0x34;
+
+/// The page size in a PDB file's header, when it isn't 0 and the file holds
+/// the header page and at least one more.
+pub fn file_page_size(bytes: &[u8]) -> Option<usize> {
+    let size = usize::try_from(read_u32_le_at(bytes, 4)?).ok()?;
+    (size > 0 && bytes.len() >= size.checked_mul(2)?).then_some(size)
+}
+
+/// A page's table type.
+pub fn table_type(page: &[u8]) -> Option<u32> {
+    read_u32_le_at(page, 8)
+}
+
+/// A page's flags byte.
+pub fn page_flags(page: &[u8]) -> u8 {
+    page.get(0x1b).copied().unwrap_or(0)
+}
+
+/// Whether a page was ever written: a blank page has page index 0.
+fn written(page: &[u8]) -> bool {
+    read_u32_le_at(page, 4).is_some_and(|index| index != 0)
+}
+
+/// Whether a page is a written index page ([`INDEX_PAGE_FLAG`] set).
+pub fn is_index_page(page: &[u8]) -> bool {
+    written(page) && page_flags(page) & INDEX_PAGE_FLAG != 0
+}
+
+/// Whether a page holds rows: written, not an index page, and with a row
+/// heap (a used size above 0). Every pass that reads rows or decides which
+/// pages a table owns goes by this.
+pub fn is_data_page(page: &[u8]) -> bool {
+    written(page)
+        && page_flags(page) & INDEX_PAGE_FLAG == 0
+        && read_u16_le_at(page, 0x1e).is_some_and(|used| used > 0)
+}
+
+/// Every page of a PDB file after its header page, with its page number.
+/// None when the header's page size doesn't fit the file
+/// ([`file_page_size`]).
+pub fn pages(bytes: &[u8]) -> impl Iterator<Item = (u32, &[u8])> {
+    file_page_size(bytes).into_iter().flat_map(move |size| {
+        bytes
+            .chunks_exact(size)
+            .enumerate()
+            .skip(1)
+            .map(|(index, page)| (index as u32, page))
+    })
+}
+
+/// Whether the page at `index` carries that index in its header. Every page
+/// written to a PDB does; a page that names another position is torn or
+/// garbage, not a page of the file at this one.
+fn self_indexed(index: u32, page: &[u8]) -> bool {
+    read_u32_le_at(page, 4) == Some(index)
+}
+
+/// The pages of [`pages`] that hold rows ([`is_data_page`]) and carry their
+/// own position as their page index.
+pub fn data_pages(bytes: &[u8]) -> impl Iterator<Item = (u32, &[u8])> {
+    pages(bytes).filter(|&(index, page)| self_indexed(index, page) && is_data_page(page))
+}
+
+/// The pages of [`pages`] that are index pages ([`is_index_page`]) and carry
+/// their own position as their page index.
+pub fn index_pages(bytes: &[u8]) -> impl Iterator<Item = (u32, &[u8])> {
+    pages(bytes).filter(|&(index, page)| self_indexed(index, page) && is_index_page(page))
+}
+
+/// The active data pages of table `table_type` ([`ACTIVE_PAGE_FLAGS`]), in
+/// page order: what its index page's B-tree lists.
+pub fn active_data_pages(bytes: &[u8], table_type: u32) -> Vec<u32> {
+    data_pages(bytes)
+        .filter(|(_, page)| {
+            self::table_type(page) == Some(table_type) && page_flags(page) == ACTIVE_PAGE_FLAGS
+        })
+        .map(|(index, _)| index)
+        .collect()
+}
+
+// ---------------------------------------------------------------------------
+// Rows
 // ---------------------------------------------------------------------------
 
-/// Row-slot offsets and per-group `rowpf` words, as read by
-/// [`scan_footer_tolerant`].
-#[derive(Debug, Default)]
-pub struct ScannedFooter {
-    pub offsets: Vec<usize>,
-    pub rowpf: Vec<u16>,
+/// One row slot of a page, as [`row_slots`] reads it. `start..end` is the
+/// row's span in the heap, relative to [`HEAP_START`].
+#[derive(Debug, Clone, Copy)]
+pub struct RowSlot {
+    pub start: usize,
+    pub end: usize,
+    /// Whether the slot's `rowpf` bit is set (the row is live).
+    pub present: bool,
+    /// Page offset of the slot's group's `rowpf` word.
+    pub bits_off: usize,
+    /// The slot's bit within that word.
+    pub bit_mask: u16,
 }
 
-impl ScannedFooter {
-    pub fn is_present(&self, slot: usize) -> bool {
-        self.rowpf
-            .get(slot / GROUP_SLOTS)
-            .is_some_and(|bits| (bits >> (slot % GROUP_SLOTS)) & 1 == 1)
-    }
-
-    /// `(start, end)` of `slot`'s row within the payload: up to the next
-    /// slot's offset, or `payload_len` for the last slot. Not clamped.
-    pub fn row_bounds(&self, slot: usize, payload_len: usize) -> (usize, usize) {
-        let start = self.offsets[slot];
-        let end = self.offsets.get(slot + 1).copied().unwrap_or(payload_len);
-        (start, end)
-    }
-}
-
-/// Read the footer of a page whose payload ends at `payload_end` (absolute
-/// within the page) for parsing an arbitrary, possibly foreign-written page.
+/// The row slots of a page (its whole length): as many as the header's
+/// `num_row_offsets` ([`read_slot_counts`]), each running from its heap
+/// offset to the next slot's, the last to the end of the used heap. A slot
+/// whose span is empty or runs past the used heap is left out.
 ///
-/// Phase 1 trusts the header's packed slot count, reading as far as the page
-/// allows. Phase 2: when the index space between `payload_end` and the page
-/// end has room for up to 512 more slots than the header claims (one `nrs`
-/// wrap), the scan continues with strict validation — footer bytes must not
-/// overlap the payload, offsets must be within the payload and
-/// non-decreasing — and stops at the first slot that fails.
-pub fn scan_footer_tolerant(page: &[u8], len_page: usize, payload_end: usize) -> ScannedFooter {
-    let payload_len = payload_end.saturating_sub(HEAP_START);
-    let n_header = crate::utils::packed_page_row_slot_count(page).unwrap_or(0);
-    let index_space = len_page.saturating_sub(payload_end);
-    let full_groups = index_space / GROUP_BYTES;
-    let leftover = index_space % GROUP_BYTES;
-    let partial_rows = if leftover >= 6 { (leftover - 4) / 2 } else { 0 };
-    let n_max = full_groups * GROUP_SLOTS + partial_rows;
-
-    let mut out = ScannedFooter::default();
-    if n_header == 0 && n_max == 0 {
-        return out;
+/// Every reader and writer reads rows through this, so a damaged page reads
+/// the same everywhere: nothing past the header's slot count and nothing
+/// past the heap, however the footer space around it looks.
+pub fn row_slots(page: &[u8]) -> Vec<RowSlot> {
+    if page.len() < 64 {
+        return Vec::new();
     }
-
-    let mut m = len_page;
-    // Phase 1: trust the page header count.
-    for i in 0..n_header {
-        if i % GROUP_SLOTS == 0 {
-            if m < 4 {
-                break;
-            }
-            m -= 4;
-            let Some(bits) = read_u16_le_at(page, m) else {
-                break;
-            };
-            out.rowpf.push(bits);
-        }
-        if m < 2 {
-            break;
-        }
-        m -= 2;
-        let Some(off) = read_u16_le_at(page, m) else {
-            break;
-        };
-        out.offsets.push(off as usize);
+    let used = read_u16_le_at(page, 0x1e).unwrap_or(0) as usize;
+    let heap_len = used.min(page.len() - HEAP_START);
+    if heap_len == 0 {
+        return Vec::new();
     }
+    let slot_count = read_slot_counts(page).map_or(0, |(slots, _)| slots);
+    let footer: Vec<FooterSlot> = footer_slots(page, slot_count).collect();
+    footer
+        .iter()
+        .enumerate()
+        .filter_map(|(i, slot)| {
+            let start = slot.heap_off;
+            let end = footer.get(i + 1).map_or(heap_len, |next| next.heap_off);
+            (start < end && end <= heap_len).then_some(RowSlot {
+                start,
+                end,
+                present: slot.present,
+                bits_off: slot.group.rowpf_off,
+                bit_mask: slot.bit,
+            })
+        })
+        .collect()
+}
 
-    // Phase 2: extend past a header count that looks wrapped.
-    let gap = n_max.saturating_sub(n_header);
-    if gap > 0 && gap <= 512 && out.offsets.len() == n_header {
-        let mut prev_off = out.offsets.last().copied();
-        for i in n_header..n_max {
-            if i % GROUP_SLOTS == 0 {
-                if m < 4 || m.saturating_sub(4) < payload_end {
-                    break;
-                }
-                m -= 4;
-                let Some(bits) = read_u16_le_at(page, m) else {
-                    break;
-                };
-                out.rowpf.push(bits);
-            }
-            if m < 2 || m.saturating_sub(2) < payload_end {
-                break;
-            }
-            m -= 2;
-            let Some(off) = read_u16_le_at(page, m) else {
-                break;
-            };
-            let off = off as usize;
-            if off > payload_len {
-                break;
-            }
-            if let Some(prev) = prev_off
-                && off < prev
-            {
-                break;
-            }
-            prev_off = Some(off);
-            out.offsets.push(off);
-        }
-    }
-    out
+/// The live rows of a page ([`row_slots`] with their `rowpf` bit set), in
+/// slot order.
+pub fn present_rows(page: &[u8]) -> Vec<Vec<u8>> {
+    row_slots(page)
+        .into_iter()
+        .filter(|slot| slot.present)
+        .map(|slot| page[HEAP_START + slot.start..HEAP_START + slot.end].to_vec())
+        .collect()
 }
 
 #[cfg(test)]

@@ -30,8 +30,8 @@ use crate::service::export_helpers::{
     encode_track_row_with_profile, sanitize_metadata,
 };
 use crate::utils::{
-    collect_chain as collect_chain_pages, packed_page_row_slot_count, page_offset, read_u8_at,
-    read_u16_le_at, read_u32_le_at, set_table_ptr_fields, table_ptr_fields, write_u32_le_at,
+    collect_chain as collect_chain_pages, page_offset, read_u16_le_at, read_u32_le_at,
+    set_table_ptr_fields, table_ptr_fields, write_u32_le_at,
 };
 
 mod additive;

@@ -34,7 +34,7 @@ pub(super) fn page_has_transaction_tombstones(page: &[u8], page_size: usize) -> 
     if used_s == 0 {
         return false;
     }
-    let row_slots = packed_page_row_slot_count(page).unwrap_or(0);
+    let row_slots = pdb_page::read_slot_counts(page).map_or(0, |(slots, _)| slots);
     pdb_page::footer_groups(page_size, row_slots)
         .any(|group| group.tranrf(page) & !group.rowpf(page) & group.mask() != 0)
 }
@@ -53,7 +53,7 @@ pub(super) fn read_page_footer_state(page: &[u8], page_size: usize) -> Option<Pa
     if used_s == 0 {
         return None;
     }
-    let row_slots = packed_page_row_slot_count(page).unwrap_or(0);
+    let row_slots = pdb_page::read_slot_counts(page).map_or(0, |(slots, _)| slots);
     if row_slots == 0 || !pdb_page::footer_fits(page_size, row_slots) {
         return None;
     }
@@ -603,32 +603,11 @@ pub(crate) fn append_rows_to_chain_in_place(
     // different table), so scanning by tt gives the definitive set of live pages.
     {
         if let Some(sent_off) = page_offset(first, page_size) {
-            let total_phys = bytes.len() / page_size;
-            let sentinel_tt = read_u32_le_at(bytes, sent_off + 8).unwrap_or(9999);
             // B-tree contains ONLY active (flags=0x34) pages. Settled/sealed pages
             // (0x24) are navigated via next_page chain pointers. Reference format:
             // one B-tree entry per table, pointing to the current write head.
-            let mut data_pages: Vec<u32> = Vec::new();
-            for j in 1..total_phys {
-                if j * page_size == sent_off {
-                    continue;
-                } // skip sentinel itself
-                let poff = j * page_size;
-                let page_tt = read_u32_le_at(bytes, poff + 8).unwrap_or(9999);
-                if page_tt != sentinel_tt {
-                    continue;
-                }
-                let page_flags = read_u8_at(bytes, poff + 0x1b).unwrap_or(0);
-                if page_flags != PAGE_FLAGS_DATA_TRACK {
-                    continue;
-                } // only active pages
-                let used_s = read_u16_le_at(bytes, poff + 0x1e).unwrap_or(0);
-                if used_s == 0 {
-                    continue;
-                } // skip empty pages
-                data_pages.push(j as u32);
-            }
-            data_pages.sort_unstable();
+            let sentinel_tt = read_u32_le_at(bytes, sent_off + 8).unwrap_or(9999);
+            let data_pages = pdb_page::active_data_pages(bytes, sentinel_tt);
             write_sentinel_btree(bytes, sent_off, page_size, &data_pages);
         }
     }
@@ -1200,7 +1179,7 @@ pub(crate) fn remove_t08_entries_in_place(
             Some(s) => s.to_vec(),
             None => continue,
         };
-        let present = read_present_page_rows(&page_view, page_size);
+        let present = pdb_page::present_rows(&page_view);
         let kept: Vec<Vec<u8>> = present
             .iter()
             .filter(|row| {
@@ -1250,7 +1229,7 @@ pub(crate) fn remove_t08_entries_in_place(
         .find(|&&page_idx| {
             page_offset(page_idx, page_size)
                 .and_then(|off| bytes.get(off..off + page_size))
-                .map(|p| !read_present_page_rows(p, page_size).is_empty())
+                .map(|p| !pdb_page::present_rows(p).is_empty())
                 .unwrap_or(false)
         })
         .copied()
@@ -2110,7 +2089,7 @@ pub(super) fn build_same_size_track_row_patch(
 fn mark_row_slot_inactive(
     bytes: &mut [u8],
     page_idx: u32,
-    slot: PageRowSlot,
+    slot: pdb_page::RowSlot,
     id_field_offset: usize,
     page_size: usize,
 ) -> BackendResult<()> {
@@ -2194,7 +2173,7 @@ pub(crate) fn patch_playlist_tree_sort_orders_in_place(
             continue;
         }
         let payload_len = used_s.min(page_size.saturating_sub(HEAP_START));
-        let slots = parse_page_row_slots(page, page_size);
+        let slots = pdb_page::row_slots(page);
         for slot in slots {
             if !slot.present || slot.end > payload_len || slot.start >= slot.end {
                 continue;
@@ -2289,7 +2268,7 @@ pub(crate) fn mutate_tracks_in_place(
             continue;
         }
         let payload_len = used_s.min(page_size.saturating_sub(40));
-        let slots = parse_page_row_slots(page, page_size);
+        let slots = pdb_page::row_slots(page);
         for slot in slots {
             if !slot.present || slot.end > payload_len || slot.start >= slot.end {
                 continue;
@@ -2419,28 +2398,17 @@ pub(crate) fn realign_dictionary_rows_in_place(
     let mut patched_ids = std::collections::HashSet::<u32>::new();
     let mut patched_pages = std::collections::HashSet::<u32>::new();
     let mut replacement_rows = Vec::<Vec<u8>>::new();
-    let total_pages = (bytes.len() / page_size) as u32;
-    for page_idx in 1..total_pages {
+    let table_pages: Vec<u32> = pdb_page::data_pages(bytes)
+        .filter(|(_, page)| pdb_page::table_type(page) == Some(table_type))
+        .map(|(index, _)| index)
+        .collect();
+    for page_idx in table_pages {
         let Some(off) = page_offset(page_idx, page_size) else {
             continue;
         };
-        let Some(page) = bytes.get(off..off + page_size) else {
-            continue;
-        };
-        if read_u32_le_at(page, 4).unwrap_or(0) == 0 {
-            continue;
-        }
-        if read_u32_le_at(page, 8) != Some(table_type) {
-            continue;
-        }
-        let used_s = read_u16_le_at(page, 30).unwrap_or(0) as usize;
-        if used_s == 0 {
-            continue;
-        }
-        let payload_len = used_s.min(page_size.saturating_sub(HEAP_START));
-        let slots = parse_page_row_slots(page, page_size);
+        let slots = pdb_page::row_slots(&bytes[off..off + page_size]);
         for slot in slots {
-            if !slot.present || slot.end > payload_len || slot.start >= slot.end {
+            if !slot.present {
                 continue;
             }
             let row_abs = off + HEAP_START + slot.start;

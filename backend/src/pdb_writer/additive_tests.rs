@@ -7,7 +7,7 @@ use super::*;
 // authored by real rekordbox for a large playlist can legitimately have
 // more, and this tool must still read it correctly when patching it.
 #[test]
-fn parse_page_row_slots_handles_more_than_255_rows_on_a_page() {
+fn row_slots_handle_more_than_255_rows_on_a_page() {
     let row_count = 260usize;
     let rows: Vec<[u8; 12]> = (0..row_count as u32)
         .map(|idx| {
@@ -21,7 +21,7 @@ fn parse_page_row_slots_handles_more_than_255_rows_on_a_page() {
     let row_refs: Vec<&[u8]> = rows.iter().map(|r| r.as_slice()).collect();
     let page = build_data_page(8, page_flags_for_table(8), 1, &row_refs, false);
 
-    let slots = parse_page_row_slots(&page, PAGE_SIZE);
+    let slots = pdb_page::row_slots(&page);
 
     assert_eq!(
         slots.len(),
@@ -47,7 +47,7 @@ fn encode_artist_row(id: u32, name: &str) -> Vec<u8> {
     // Match the writer's near-variant artist encoding closely enough
     // for footer-capacity bookkeeping. The exact byte layout doesn't
     // matter for the topology tests; we only need consistent lengths
-    // and that read_present_page_rows can locate the rows again.
+    // and that present_rows can locate the rows again.
     let mut out = Vec::<u8>::new();
     out.extend_from_slice(&0x0060u16.to_le_bytes()); // subtype
     out.push(0x03); // index_shift
@@ -75,10 +75,7 @@ fn indexed_table_row_shift_by_id(
         let used_s = read_u16_le_at(page, 0x1e)? as usize;
         let payload_len = used_s.min(PAGE_SIZE.saturating_sub(HEAP_START));
         let payload = page.get(HEAP_START..HEAP_START + payload_len)?;
-        for (row_idx, slot) in parse_page_row_slots(page, PAGE_SIZE)
-            .into_iter()
-            .enumerate()
-        {
+        for (row_idx, slot) in pdb_page::row_slots(page).into_iter().enumerate() {
             if !slot.present || slot.end > payload.len() || slot.start >= slot.end {
                 continue;
             }
@@ -91,7 +88,10 @@ fn indexed_table_row_shift_by_id(
     None
 }
 
-fn playlist_tree_row_loc_by_id(bytes: &[u8], id: u32) -> Option<(u32, usize, usize, PageRowSlot)> {
+fn playlist_tree_row_loc_by_id(
+    bytes: &[u8],
+    id: u32,
+) -> Option<(u32, usize, usize, pdb_page::RowSlot)> {
     let (_ec, first, last) = table_ptr_fields(bytes, 7)?;
     let chain = collect_chain_pages(bytes, PAGE_SIZE, first, last)?;
     for page_idx in chain.into_iter().skip(1) {
@@ -99,7 +99,7 @@ fn playlist_tree_row_loc_by_id(bytes: &[u8], id: u32) -> Option<(u32, usize, usi
         let page = bytes.get(off..off + PAGE_SIZE)?;
         let used_s = read_u16_le_at(page, 0x1e)? as usize;
         let payload_len = used_s.min(PAGE_SIZE.saturating_sub(HEAP_START));
-        for slot in parse_page_row_slots(page, PAGE_SIZE) {
+        for slot in pdb_page::row_slots(page) {
             if slot.end > payload_len || slot.start >= slot.end {
                 continue;
             }
@@ -1421,7 +1421,7 @@ fn mutate_tracks_in_place_keeps_header_seqdb_non_decreasing() {
     );
 }
 
-fn track_row_loc_by_id(bytes: &[u8], id: u32) -> Option<(u32, usize, usize, PageRowSlot)> {
+fn track_row_loc_by_id(bytes: &[u8], id: u32) -> Option<(u32, usize, usize, pdb_page::RowSlot)> {
     let (_ec, first, last) = table_ptr_fields(bytes, 0)?;
     let chain = collect_chain_pages(bytes, PAGE_SIZE, first, last)?;
     for page_idx in chain.into_iter().skip(1) {
@@ -1429,7 +1429,7 @@ fn track_row_loc_by_id(bytes: &[u8], id: u32) -> Option<(u32, usize, usize, Page
         let page = bytes.get(off..off + PAGE_SIZE)?;
         let used_s = read_u16_le_at(page, 0x1e)? as usize;
         let payload_len = used_s.min(PAGE_SIZE.saturating_sub(HEAP_START));
-        for slot in parse_page_row_slots(page, PAGE_SIZE) {
+        for slot in pdb_page::row_slots(page) {
             if slot.end > payload_len || slot.start >= slot.end {
                 continue;
             }
@@ -1619,7 +1619,7 @@ fn mutate_tracks_in_place_fixes_preexisting_misaligned_title_slot() {
         track_row_loc_by_id(&bytes, 1).expect("track row loc");
     let off = page_offset(page_idx, PAGE_SIZE).expect("page offset");
     let page = bytes[off..off + PAGE_SIZE].to_vec();
-    let mut page_rows = read_present_page_rows(&page, PAGE_SIZE);
+    let mut page_rows = pdb_page::present_rows(&page);
     for candidate in page_rows.iter_mut() {
         if read_u32_le_at(candidate, 72) == Some(1) {
             *candidate = corrupt_track_row_title_alignment(candidate);
@@ -1702,7 +1702,7 @@ fn realign_dictionary_rows_in_place_fixes_misaligned_album_name() {
     let page_idx = chain[1];
     let off = page_offset(page_idx, PAGE_SIZE).expect("page offset");
     let page = bytes[off..off + PAGE_SIZE].to_vec();
-    let mut page_rows = read_present_page_rows(&page, PAGE_SIZE);
+    let mut page_rows = pdb_page::present_rows(&page);
     for candidate in page_rows.iter_mut() {
         if read_u32_le_at(candidate, 12) == Some(1) {
             *candidate = corrupt_album_row_name_alignment(candidate);
@@ -1722,7 +1722,7 @@ fn realign_dictionary_rows_in_place_fixes_misaligned_album_name() {
             let page = bytes.get(off..off + PAGE_SIZE).expect("page bytes");
             let used_s = read_u16_le_at(page, 30).unwrap_or(0) as usize;
             let payload_len = used_s.min(PAGE_SIZE.saturating_sub(HEAP_START));
-            for slot in parse_page_row_slots(page, PAGE_SIZE) {
+            for slot in pdb_page::row_slots(page) {
                 if !slot.present || slot.end > payload_len || slot.start >= slot.end {
                     continue;
                 }

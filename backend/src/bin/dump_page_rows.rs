@@ -1,13 +1,11 @@
 use std::path::PathBuf;
 
 use backend::pdb_page::{self, FooterSlot};
-use backend::utils::{
-    packed_page_row_slot_count, read_u16_le_at as read_u16_le, read_u32_le_at as read_u32_le,
-};
+use backend::utils::{read_u16_le_at as read_u16_le, read_u32_le_at as read_u32_le};
 
 /// Every footer slot of the page, or none when the footer doesn't fit.
 fn page_footer_slots(page: &[u8], used_s: usize) -> Vec<FooterSlot> {
-    let n_header = packed_page_row_slot_count(page).unwrap_or(0);
+    let n_header = pdb_page::read_slot_counts(page).map_or(0, |(slots, _)| slots);
     if used_s == 0 || page.len() < 64 || !pdb_page::footer_fits(page.len(), n_header) {
         return Vec::new();
     }

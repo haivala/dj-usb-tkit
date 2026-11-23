@@ -986,7 +986,7 @@ fn damaged_page_header_repair_restores_flags_and_live_count() {
     let bytes = std::fs::read(&pdb_path).unwrap();
     let page = &bytes[TEST_PAGE_SIZE..2 * TEST_PAGE_SIZE];
     assert_eq!(page[0x1b], 0x24);
-    assert_eq!(crate::pdb_page::read_slot_counts(page), Some((4, 3)));
+    assert_eq!(pdb_page::read_slot_counts(page), Some((4, 3)));
     assert!(detect_pdb_damaged_page_headers(&bytes).is_empty());
 }
 
@@ -1105,7 +1105,7 @@ fn build_seed_pdb_bytes_for_alignment_test() -> Vec<u8> {
 /// insert one byte before the UTF-16 string content and bump the recorded offset, breaking
 /// 4-byte alignment without changing the decoded content.
 fn corrupt_alignment_in_place(bytes: &mut [u8]) {
-    use crate::pdb_writer::{read_present_page_rows, rewrite_variable_page_rows_in_place};
+    use crate::pdb_writer::rewrite_variable_page_rows_in_place;
     use crate::utils::{
         collect_chain, page_offset, read_u16_le_at, read_u32_le_at, table_ptr_fields,
     };
@@ -1125,7 +1125,7 @@ fn corrupt_alignment_in_place(bytes: &mut [u8]) {
                 continue;
             }
             let page = page_view.to_vec();
-            let mut rows = read_present_page_rows(&page, PAGE_SIZE);
+            let mut rows = pdb_page::present_rows(&page);
             let mut any_changed = false;
             for row in rows.iter_mut() {
                 if read_u32_le_at(row, id_offset) != Some(1) {
@@ -1248,7 +1248,7 @@ fn repair_usb_diagnostics_proposes_and_applies_string_alignment_fixes() {
 /// Replace track 1's comment (string slot 16) with `comment` stored as long ASCII (`0x40`) at a
 /// misaligned row offset, as older builds wrote it, shifting the later slot offsets.
 fn store_long_ascii_comment_in_place(bytes: &mut [u8], comment: &str) {
-    use crate::pdb_writer::{read_present_page_rows, rewrite_variable_page_rows_in_place};
+    use crate::pdb_writer::rewrite_variable_page_rows_in_place;
     use crate::utils::{
         collect_chain, page_offset, read_u16_le_at, read_u32_le_at, table_ptr_fields,
     };
@@ -1257,7 +1257,7 @@ fn store_long_ascii_comment_in_place(bytes: &mut [u8], comment: &str) {
     let chain = collect_chain(bytes, PAGE_SIZE, first, last).expect("t00 chain");
     for page_idx in chain.into_iter().skip(1) {
         let off = page_offset(page_idx, PAGE_SIZE).expect("page offset");
-        let mut rows = read_present_page_rows(&bytes[off..off + PAGE_SIZE], PAGE_SIZE);
+        let mut rows = pdb_page::present_rows(&bytes[off..off + PAGE_SIZE]);
         let Some(row) = rows
             .iter_mut()
             .find(|row| read_u32_le_at(row, 72) == Some(1))
@@ -1385,7 +1385,7 @@ fn diagnostics_fail_misaligned_long_ascii_until_the_user_repairs() {
 /// flag such rows and the repair moves the name to 10 without changing it.
 #[test]
 fn artist_name_layout_repair_moves_ascii_name_to_rekordbox_offset() {
-    use crate::pdb_writer::{read_present_page_rows, rewrite_variable_page_rows_in_place};
+    use crate::pdb_writer::rewrite_variable_page_rows_in_place;
     use crate::utils::{collect_chain, read_u32_le_at, table_ptr_fields};
     const PAGE_SIZE: usize = 4096;
     let mut bytes = build_seed_pdb_bytes_for_alignment_test();
@@ -1400,7 +1400,7 @@ fn artist_name_layout_repair_moves_ascii_name_to_rekordbox_offset() {
     for page_idx in chain.into_iter().skip(1) {
         let off = page_idx as usize * PAGE_SIZE;
         let page = bytes[off..off + PAGE_SIZE].to_vec();
-        let mut rows = read_present_page_rows(&page, PAGE_SIZE);
+        let mut rows = pdb_page::present_rows(&page);
         let mut changed = false;
         for row in rows.iter_mut() {
             if read_u32_le_at(row, 4) == Some(1) {

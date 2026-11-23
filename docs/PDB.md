@@ -325,6 +325,14 @@ Page flags used by the writer:
 | `0x24` | normal/sealed data page |
 | `0x34` | active transaction-class data page |
 
+Bit `0x40` tells the two kinds apart: set on index pages, clear on data pages
+(including the `0x10` a crashed rekordbox write leaves). A data page is a page
+whose `page_index` is its own position in the file, with bit `0x40` clear and
+a `used_size` above 0. `pdb_page::data_pages` is the only place that decides
+this: the reader, the writers, the diagnostics and the repairs all read rows
+and page ownership from the same pages. A page that names another position
+(a torn or garbage page) is not a page of the file at that position.
+
 Current writer behavior:
 
 - `tt=0` and `tt=19` use `0x34` for active baseline data pages.
@@ -631,37 +639,21 @@ sentinels can carry other transaction state, including `u5=1, num_rl=0`.
 ### Row-slot count
 
 The row-slot count used for row traversal is read from the packed 3-byte
-field at `0x18..0x1b` (`packed_page_row_slot_count` in `utils.rs`, the
-canonical decode every module below imports rather than reimplementing), not
-from `nrs` (the single byte at `0x18`) combined with `num_rl` (`0x22`).
-Reading `nrs` alone wraps past 255 rows — a real risk for `t08`
-playlist_entries specifically, since its 12-byte rows mean byte capacity
-alone lets a single 4096-byte page hold well over 255 of them (see the
-`MAX_ROWS_PER_PAGE` paragraph below). Earlier parser versions worked around
-the wrap with a heuristic (`num_rl==8191` meant "page does not track
-`num_rl`, trust `nrs`"; otherwise `max(nrs, num_rl)`), which could still
-misread by up to a few rows depending on table convention. Decoding the
-packed field directly is correct up to 8191 rows/page and needs no such
-fallback. Call sites that switched from the old heuristic to this decode:
-`pdb_writer`'s `page_has_transaction_tombstones`, `read_page_footer_state`,
-`parse_t08_entries_from_page`, and `parse_page_row_slots`; `pdb_reader.rs`'s
-`parse_page_rows` (the row parser behind the main public `parse_pdb_bytes`
-entry point); and the repair's footer checks, where the old heuristic could
-silently skip a large playlist page's true last footer group (257 rows is the
-smallest case that both wraps and crosses a 16-row group boundary). The
-`dump_*` developer
-diagnostic binaries in `src/bin/` carry the same fix for consistency, though
-they aren't part of the shipped app.
+field at `0x18..0x1b` (`pdb_page::read_slot_counts`), not from `nrs` (the
+single byte at `0x18`) combined with `num_rl` (`0x22`). Reading `nrs` alone
+wraps past 255 rows — a real risk for `t08` playlist_entries specifically,
+since its 12-byte rows mean byte capacity alone lets a single 4096-byte page
+hold well over 255 of them (see the `MAX_ROWS_PER_PAGE` paragraph below).
+Decoding the packed field directly is correct up to 8191 rows/page and needs
+no fallback.
 
-Two of the fixed sites keep a defensive Phase 2 scan that extends past the
-header-reported count when the page's footer index space can hold more rows
-than the header claims, in case the header count is ever wrong for a reason
-other than the (now-fixed) byte wrap: `pdb_writer`'s
-`parse_t08_entries_from_page` and `pdb_reader.rs`'s `parse_page_rows`, both
-through `pdb_page::scan_footer_tolerant`.
+Every module reads a page's rows through `pdb_page::row_slots`: exactly the
+header's slot count, each row from its heap offset to the next slot's, the
+last to the end of the used heap, and nothing that runs past the heap. No
+reader looks past the header's count for more rows, so a damaged page reads
+the same in the parser, the writers and the repairs.
 
-The writer cannot rely on the parser's tolerance. It must emit page footer
-values accepted by players. In-place passes leave alone a page whose footer
+The writer must emit page footer values accepted by players. In-place passes leave alone a page whose footer
 for its slot count would reach into the row heap (`pdb_page::footer_clear_of_heap`),
 and never write a live-row count above the slot count.
 

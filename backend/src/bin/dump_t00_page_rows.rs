@@ -2,9 +2,7 @@ use std::env;
 use std::path::PathBuf;
 
 use backend::pdb_page;
-use backend::utils::{
-    packed_page_row_slot_count, read_u16_le_at as read_u16_le, read_u32_le_at as read_u32_le,
-};
+use backend::utils::{read_u16_le_at as read_u16_le, read_u32_le_at as read_u32_le};
 
 const PAGE_SIZE: usize = 4096;
 
@@ -24,7 +22,7 @@ fn parse_slots(page: &[u8]) -> Vec<Slot> {
         return Vec::new();
     }
     let payload_len = used_s.min(PAGE_SIZE.saturating_sub(pdb_page::HEAP_START));
-    let n_header = packed_page_row_slot_count(page).unwrap_or(0);
+    let n_header = pdb_page::read_slot_counts(page).map_or(0, |(slots, _)| slots);
     let footer: Vec<_> = pdb_page::footer_slots(&page[..PAGE_SIZE], n_header).collect();
 
     let mut out = Vec::<Slot>::new();

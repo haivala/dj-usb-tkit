@@ -237,23 +237,9 @@ pub(in crate::service) struct DamagedPageHeader {
 }
 
 pub(in crate::service) fn detect_pdb_damaged_page_headers(bytes: &[u8]) -> Vec<DamagedPageHeader> {
-    use crate::utils::{read_u16_le_at, read_u32_le_at};
-    let Some(page_size) = read_u32_le_at(bytes, 4).map(|v| v as usize) else {
-        return Vec::new();
-    };
-    if page_size == 0 || bytes.len() < page_size * 2 {
-        return Vec::new();
-    }
     let mut out = Vec::new();
-    for i in 1..bytes.len() / page_size {
-        let page = &bytes[i * page_size..(i + 1) * page_size];
-        if read_u32_le_at(page, 4).unwrap_or(0) == 0 || page[0x1b] & 0x40 != 0 {
-            continue; // blank page or sentinel/index page
-        }
-        if read_u16_le_at(page, 0x1e).unwrap_or(0) == 0 {
-            continue; // never-written page
-        }
-        let flags = (!is_valid_page_flags(page[0x1b])).then_some(0x24);
+    for (index, page) in pdb_page::data_pages(bytes) {
+        let flags = (!is_valid_page_flags(pdb_page::page_flags(page))).then_some(0x24);
         let slot_counts = pdb_page::read_slot_counts(page)
             .filter(|&(slots, _)| pdb_page::footer_clear_of_heap(page, slots))
             .and_then(|(slots, live)| {
@@ -264,7 +250,7 @@ pub(in crate::service) fn detect_pdb_damaged_page_headers(bytes: &[u8]) -> Vec<D
             });
         if flags.is_some() || slot_counts.is_some() {
             out.push(DamagedPageHeader {
-                page_index: i,
+                page_index: index as usize,
                 flags,
                 slot_counts,
             });
@@ -353,45 +339,18 @@ pub(super) const TRACK_STRING_SLOT_LABELS: [&str; 21] = [
 pub(in crate::service) fn detect_pdb_string_misalignment(
     bytes: &[u8],
 ) -> Vec<MisalignedStringSlot> {
-    use crate::pdb_writer::parse_page_row_slots;
     use crate::utils::{read_u8_at, read_u16_le_at, read_u32_le_at};
-    let Some(page_size) = read_u32_le_at(bytes, 4).map(|v| v as usize) else {
-        return Vec::new();
-    };
-    if page_size == 0 || bytes.len() < page_size * 2 {
-        return Vec::new();
-    }
-    let total = bytes.len() / page_size;
     let mut out = Vec::new();
-    for i in 1..total {
-        let off = i * page_size;
-        let Some(idx) = read_u32_le_at(bytes, off + 4) else {
+    for (_, page) in pdb_page::data_pages(bytes) {
+        let Some(table_type @ (0 | 2 | 3)) = pdb_page::table_type(page) else {
             continue;
         };
-        if idx == 0 {
-            continue;
-        }
-        let table_type = read_u32_le_at(bytes, off + 8).unwrap_or(9999);
-        if !matches!(table_type, 0 | 2 | 3) {
-            continue;
-        }
-        let used_s = read_u16_le_at(bytes, off + 30).unwrap_or(0) as usize;
-        if used_s == 0 {
-            continue;
-        }
-        let Some(page) = bytes.get(off..off + page_size) else {
-            continue;
-        };
-        let payload_len = used_s.min(page_size.saturating_sub(40));
-        for slot in parse_page_row_slots(page, page_size) {
-            if !slot.present || slot.end > payload_len || slot.start >= slot.end {
+        for slot in pdb_page::row_slots(page) {
+            if !slot.present {
                 continue;
             }
-            let row_abs = off + 40 + slot.start;
-            let row_len = slot.end - slot.start;
-            let Some(row) = bytes.get(row_abs..row_abs + row_len) else {
-                continue;
-            };
+            let row = &page[pdb_page::HEAP_START + slot.start..pdb_page::HEAP_START + slot.end];
+            let row_len = row.len();
             match table_type {
                 0 => {
                     if row_len < 136 {
@@ -494,35 +453,16 @@ pub(in crate::service) struct EcDataPageConflict {
 pub(in crate::service) fn detect_pdb_ec_data_page_conflicts(
     bytes: &[u8],
 ) -> Vec<EcDataPageConflict> {
-    use crate::utils::{read_u8_at, read_u16_le_at, read_u32_le_at};
-    let Some(page_size) = read_u32_le_at(bytes, 4).map(|v| v as usize) else {
-        return Vec::new();
-    };
-    if page_size == 0 || bytes.len() < page_size * 2 {
+    use crate::utils::read_u32_le_at;
+    if pdb_page::file_page_size(bytes).is_none() {
         return Vec::new();
     }
-    let total_pages = bytes.len() / page_size;
     let num_tables = read_u32_le_at(bytes, 8).unwrap_or(0) as usize;
 
-    // Build: page_index → table_type for all non-sentinel, non-empty data pages.
-    let mut data_page_owner: std::collections::HashMap<u32, u32> = std::collections::HashMap::new();
-    for p in 1..total_pages {
-        let off = p * page_size;
-        let stored_idx = read_u32_le_at(bytes, off + 4).unwrap_or(0);
-        if stored_idx == 0 {
-            continue;
-        }
-        let pf = read_u8_at(bytes, off + 0x1b).unwrap_or(0);
-        if pf == 0x64 {
-            continue; // sentinel page
-        }
-        let tt = read_u32_le_at(bytes, off + 8).unwrap_or(0);
-        let used_s = read_u16_le_at(bytes, off + 0x1e).unwrap_or(0);
-        if used_s == 0 {
-            continue;
-        }
-        data_page_owner.insert(stored_idx, tt);
-    }
+    // Which table owns each data page.
+    let data_page_owner: std::collections::HashMap<u32, u32> = pdb_page::data_pages(bytes)
+        .map(|(index, page)| (index, pdb_page::table_type(page).unwrap_or(0)))
+        .collect();
 
     let mut conflicts = Vec::new();
     for i in 0..num_tables {
@@ -827,37 +767,20 @@ impl PdbTornGrowthReport {
 /// Only pages outside every table's live-data set are ever proposed here;
 /// this never touches a page that is part of a real chain.
 pub(in crate::service) fn detect_pdb_torn_growth_pages(bytes: &[u8]) -> PdbTornGrowthReport {
-    use crate::utils::{page_offset, read_u8_at, read_u16_le_at, read_u32_le_at};
-    let Some(page_size) = read_u32_le_at(bytes, 4).map(|v| v as usize) else {
+    use crate::utils::{page_offset, read_u32_le_at};
+    let Some(page_size) = pdb_page::file_page_size(bytes) else {
         return PdbTornGrowthReport::default();
     };
-    if page_size == 0 || bytes.len() < page_size * 2 {
-        return PdbTornGrowthReport::default();
-    }
     let total_pages = (bytes.len() / page_size) as u32;
     let num_tables = read_u32_le_at(bytes, 8).unwrap_or(0) as usize;
     let next_unused = read_u32_le_at(bytes, 0x0c).unwrap_or(total_pages);
 
     // Same page-ownership scan detect_pdb_ec_data_page_conflicts uses: a page
-    // is "live" only if it is a non-sentinel, non-empty data page actually
-    // claimed by some table. Anything else is fair game to be a torn blank.
-    let mut live_data_pages: std::collections::HashSet<u32> = std::collections::HashSet::new();
-    for p in 1..total_pages as usize {
-        let off = p * page_size;
-        let stored_idx = read_u32_le_at(bytes, off + 4).unwrap_or(0);
-        if stored_idx == 0 {
-            continue;
-        }
-        let pf = read_u8_at(bytes, off + 0x1b).unwrap_or(0);
-        if pf == 0x64 {
-            continue; // sentinel page
-        }
-        let used_s = read_u16_le_at(bytes, off + 0x1e).unwrap_or(0);
-        if used_s == 0 {
-            continue;
-        }
-        live_data_pages.insert(stored_idx);
-    }
+    // is "live" only if it is a data page. Anything else is fair game to be a
+    // torn blank.
+    let live_data_pages: std::collections::HashSet<u32> = pdb_page::data_pages(bytes)
+        .map(|(index, _)| index)
+        .collect();
 
     let mut garbage_ec_pages = Vec::new();
     for i in 0..num_tables {
@@ -1096,7 +1019,7 @@ pub(super) fn reencode_pdb_dictionary_rows(
     label: &str,
     encode: impl Fn(&[u8], u32) -> Option<Vec<u8>>,
 ) -> BackendResult<usize> {
-    use crate::utils::{page_offset, read_u32_le_at};
+    use crate::utils::read_u32_le_at;
     if ids.is_empty() {
         return Ok(0);
     }
@@ -1114,35 +1037,21 @@ pub(super) fn reencode_pdb_dictionary_rows(
         ))
     })?;
 
-    // Scan every physical page stamped with this table type, not just pages reachable by walking
+    // Scan every data page stamped with this table type, not just pages reachable by walking
     // the first/last chain pointers -- matching `detect_pdb_string_misalignment`'s scope exactly.
     // `ids` came from that same raw scan, so a chain-only walk here could silently fail to find
     // (and thus never fix) a row `ids` named: e.g. a stale row left present on a page that an
     // earlier rewrite orphaned from the live chain without touching its content.
     let mut rows: Vec<(u32, Vec<u8>)> = Vec::new();
-    let total_pages = bytes.len() / page_size;
-    for page_idx in 1..total_pages as u32 {
-        let Some(off) = page_offset(page_idx, page_size) else {
-            continue;
-        };
-        let Some(page) = bytes.get(off..off + page_size) else {
-            continue;
-        };
-        if read_u32_le_at(page, 4).unwrap_or(0) == 0 {
+    for (_, page) in pdb_page::data_pages(bytes) {
+        if pdb_page::table_type(page) != Some(table_type) {
             continue;
         }
-        if read_u32_le_at(page, 8) != Some(table_type) {
-            continue;
-        }
-        for slot in crate::pdb_writer::parse_page_row_slots(page, page_size) {
-            if !slot.present || slot.start >= slot.end {
+        for slot in pdb_page::row_slots(page) {
+            if !slot.present {
                 continue;
             }
-            let row_abs = off + 40 + slot.start;
-            let row_len = slot.end - slot.start;
-            let Some(row) = bytes.get(row_abs..row_abs + row_len) else {
-                continue;
-            };
+            let row = &page[pdb_page::HEAP_START + slot.start..pdb_page::HEAP_START + slot.end];
             let Some(id) = read_u32_le_at(row, id_offset) else {
                 continue;
             };
@@ -1184,14 +1093,7 @@ pub(super) const TOMBSTONE_ID_TABLES: &[(u32, usize)] = &[(0, 72), (7, 12)];
 pub(in crate::service) fn detect_pdb_tombstoned_playlist_tree_ids(
     bytes: &[u8],
 ) -> Vec<(u32, u32, usize)> {
-    use crate::utils::{read_u16_le_at, read_u32_le_at};
-    let Some(page_size) = read_u32_le_at(bytes, 4).map(|v| v as usize) else {
-        return Vec::new();
-    };
-    if page_size == 0 || bytes.len() < page_size * 2 {
-        return Vec::new();
-    }
-    let total = bytes.len() / page_size;
+    use crate::utils::read_u32_le_at;
 
     // Collect active IDs and tombstone candidates in one pass.
     // active_ids: table_type → set of IDs present in live rows.
@@ -1200,38 +1102,18 @@ pub(in crate::service) fn detect_pdb_tombstoned_playlist_tree_ids(
         std::collections::HashMap::new();
     let mut candidates: Vec<(u32, u32, usize)> = Vec::new(); // (tt, id, page)
 
-    for i in 1..total {
-        let off = i * page_size;
-        let Some(idx) = read_u32_le_at(bytes, off + 4) else {
-            continue;
-        };
-        if idx == 0 {
-            continue;
-        }
-        let used_s = read_u16_le_at(bytes, off + 0x1e).unwrap_or(0);
-        if used_s == 0 {
-            continue;
-        }
-        let tt = read_u32_le_at(bytes, off + 8).unwrap_or(9999);
+    for (index, page) in pdb_page::data_pages(bytes) {
+        let i = index as usize;
+        let tt = pdb_page::table_type(page).unwrap_or(9999);
         let id_field_offset = match TOMBSTONE_ID_TABLES.iter().find(|(t, _)| *t == tt) {
             Some((_, ofs)) => *ofs,
             None => continue,
         };
 
-        let page = &bytes[off..off + page_size];
-        let num_row_offsets = crate::utils::packed_page_row_slot_count(page).unwrap_or(0);
-        if num_row_offsets == 0 || !pdb_page::footer_fits(page_size, num_row_offsets) {
-            continue;
-        }
-
-        for slot in pdb_page::footer_slots(page, num_row_offsets) {
+        for slot in pdb_page::row_slots(page) {
             let is_active = slot.present;
-            let row_byte_off = off + pdb_page::HEAP_START + slot.heap_off;
-            let id_byte_off = row_byte_off + id_field_offset;
-            if id_byte_off + 4 > bytes.len() {
-                continue;
-            }
-            let id = read_u32_le_at(bytes, id_byte_off).unwrap_or(0);
+            let row = &page[pdb_page::HEAP_START + slot.start..pdb_page::HEAP_START + slot.end];
+            let id = read_u32_le_at(row, id_field_offset).unwrap_or(0);
             if id == 0 {
                 continue;
             }
@@ -1393,60 +1275,30 @@ pub(in crate::service) struct StaleSentinelBtree {
 /// is NOT flagged. This means a freshly DJ-software-authored PDB with correct B-tree
 /// entries passes without error.
 pub(in crate::service) fn detect_pdb_stale_sentinel_btree(bytes: &[u8]) -> Vec<StaleSentinelBtree> {
-    use crate::utils::{read_u8_at, read_u16_le_at, read_u32_le_at};
+    use crate::utils::{read_u16_le_at, read_u32_le_at};
     use std::collections::HashMap;
-    let Some(page_size) = read_u32_le_at(bytes, 4).map(|v| v as usize) else {
+    let Some(page_size) = pdb_page::file_page_size(bytes) else {
         return Vec::new();
     };
-    if page_size == 0 || bytes.len() < page_size * 2 {
-        return Vec::new();
-    }
-    let total = bytes.len() / page_size;
 
-    // Count data pages per table type: total and active (0x34 only).
-    // B-tree entries must match active pages only; sealed (0x24) pages are
-    // navigated via next_page chain and are not indexed in the B-tree.
-    let mut data_pages_per_tt: HashMap<u32, usize> = HashMap::new();
+    // Active (0x34) data pages per table type: the B-tree indexes only
+    // these ([`pdb_page::active_data_pages`]); sealed (0x24) pages are
+    // navigated via the next_page chain.
     let mut active_pages_per_tt: HashMap<u32, usize> = HashMap::new();
-    for i in 1..total {
-        let off = i * page_size;
-        let Some(idx) = read_u32_le_at(bytes, off + 4) else {
-            continue;
-        };
-        if idx == 0 {
-            continue;
-        }
-        let flags = read_u8_at(bytes, off + 0x1b).unwrap_or(0);
-        if flags == 0x64 {
-            continue;
-        } // sentinel — skip
-        let used_s = read_u16_le_at(bytes, off + 0x1e).unwrap_or(0);
-        if used_s == 0 {
-            continue;
-        } // empty page — skip
-        let tt = read_u32_le_at(bytes, off + 8).unwrap_or(9999);
-        *data_pages_per_tt.entry(tt).or_insert(0) += 1;
-        if flags == 0x34 {
+    for (_, page) in pdb_page::data_pages(bytes) {
+        if pdb_page::page_flags(page) == pdb_page::ACTIVE_PAGE_FLAGS {
+            let tt = pdb_page::table_type(page).unwrap_or(9999);
             *active_pages_per_tt.entry(tt).or_insert(0) += 1;
         }
     }
 
     let mut out = Vec::new();
-    for i in 1..total {
+    for (index, page) in pdb_page::index_pages(bytes) {
+        let i = index as usize;
         let off = i * page_size;
-        let Some(idx) = read_u32_le_at(bytes, off + 4) else {
-            continue;
-        };
-        if idx == 0 {
-            continue;
-        }
-        let flags = read_u8_at(bytes, off + 0x1b).unwrap_or(0);
-        if flags != 0x64 {
-            continue;
-        } // only sentinel/index pages
-        let ne = read_u16_le_at(bytes, off + 0x38).unwrap_or(0);
-        let u7 = read_u16_le_at(bytes, off + 0x26).unwrap_or(0);
-        let tt = read_u32_le_at(bytes, off + 8).unwrap_or(9999);
+        let ne = read_u16_le_at(page, 0x38).unwrap_or(0);
+        let u7 = read_u16_le_at(page, 0x26).unwrap_or(0);
+        let tt = pdb_page::table_type(page).unwrap_or(9999);
         let active = *active_pages_per_tt.get(&tt).unwrap_or(&0);
         // Quick-exit: clean sentinel — no active pages and no orphaned pointer.
         if ne == 0 && u7 == 0 && active == 0 {
@@ -1477,13 +1329,13 @@ pub(in crate::service) fn detect_pdb_stale_sentinel_btree(bytes: &[u8]) -> Vec<S
             used_entries += 1;
             let page_idx = (entry / 8) as usize;
             let page_off = page_idx * page_size;
-            if page_idx == 0 || page_off + page_size > bytes.len() {
-                entries_valid = false;
-                break;
-            }
-            let page_tt = read_u32_le_at(bytes, page_off + 8).unwrap_or(9999);
-            let page_flags = read_u8_at(bytes, page_off + 0x1b).unwrap_or(0);
-            if page_tt != tt || page_flags == 0x64 {
+            let target = bytes.get(page_off..page_off + page_size);
+            if page_idx == 0
+                || !target.is_some_and(|target| {
+                    pdb_page::table_type(target) == Some(tt)
+                        && pdb_page::page_flags(target) & pdb_page::INDEX_PAGE_FLAG == 0
+                })
+            {
                 entries_valid = false;
                 break;
             }
@@ -1508,73 +1360,26 @@ pub(super) fn apply_pdb_stale_sentinel_btree_repair(
     bytes: &mut [u8],
     pages: &[StaleSentinelBtree],
 ) -> BackendResult<usize> {
-    use crate::utils::{read_u8_at, read_u16_le_at, read_u32_le_at};
     if pages.is_empty() {
         return Ok(0);
     }
     let page_size = pdb_page_size(bytes)?;
-    const SENTINEL_EMPTY_ENTRY: u32 = 0x1fff_fff8;
-    const SENTINEL_TAIL_ZERO_BYTES: usize = 20;
-    let total_physical = bytes.len() / page_size;
     let mut patched = 0usize;
     for page in pages {
         let off = page.page_index * page_size;
-        if off + page_size > bytes.len() {
+        // The table's active pages, found by scanning the whole file:
+        // next_page chain pointers are unreliable, since old pages may point
+        // at pages since reused by another table.
+        let Some(tt) = bytes
+            .get(off..off + page_size)
+            .and_then(pdb_page::table_type)
+        else {
             continue;
+        };
+        let active = pdb_page::active_data_pages(bytes, tt);
+        if crate::pdb_writer::fill_sentinel_btree(bytes, off, page_size, &active) {
+            patched += 1;
         }
-        // Collect all active data pages for this table by scanning the whole file.
-        // Following next_page chain pointers is unreliable — old pages may have
-        // stale pointers to pages that have been repurposed for a different table.
-        // Scanning by tt gives the definitive set of live pages.
-        let tt = read_u32_le_at(bytes, off + 8).unwrap_or(9999);
-        let mut data_pages: Vec<u32> = Vec::new();
-        for j in 1..total_physical {
-            if j == page.page_index {
-                continue;
-            }
-            let poff = j * page_size;
-            let page_tt = read_u32_le_at(bytes, poff + 8).unwrap_or(9999);
-            if page_tt != tt {
-                continue;
-            }
-            let page_flags = read_u8_at(bytes, poff + 0x1b).unwrap_or(0);
-            // B-tree entries must point to active (0x34) pages only.
-            // Sealed (0x24) pages are navigated via next_page chain, not indexed.
-            if page_flags != 0x34 {
-                continue;
-            }
-            let used_s = read_u16_le_at(bytes, poff + 0x1e).unwrap_or(0);
-            if used_s == 0 {
-                continue;
-            } // skip empty pages
-            data_pages.push(j as u32);
-        }
-        data_pages.sort_unstable();
-        let n = data_pages.len();
-        let fill_end = off + page_size.saturating_sub(SENTINEL_TAIL_ZERO_BYTES);
-        // Write correct entries, then fill remaining slots with SENTINEL_EMPTY_ENTRY.
-        let mut cursor = off + 0x3c;
-        for (i, &page_idx) in data_pages.iter().enumerate() {
-            if cursor + 4 > fill_end {
-                break;
-            }
-            let entry_val = page_idx * 8;
-            bytes[cursor..cursor + 4].copy_from_slice(&entry_val.to_le_bytes());
-            cursor += 4;
-            let _ = i;
-        }
-        while cursor + 4 <= fill_end {
-            bytes[cursor..cursor + 4].copy_from_slice(&SENTINEL_EMPTY_ENTRY.to_le_bytes());
-            cursor += 4;
-        }
-        let ne = n.min(0x1FFF) as u16;
-        // num_entries = number of data pages
-        bytes[off + 0x38..off + 0x3a].copy_from_slice(&ne.to_le_bytes());
-        // first_empty = 0x1FFF (no free slots)
-        bytes[off + 0x3a..off + 0x3c].copy_from_slice(&0x1fffu16.to_le_bytes());
-        // u7 (write-pointer) = n
-        bytes[off + 0x26..off + 0x28].copy_from_slice(&ne.to_le_bytes());
-        patched += 1;
     }
     Ok(patched)
 }

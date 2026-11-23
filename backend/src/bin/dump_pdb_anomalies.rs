@@ -17,9 +17,7 @@ use std::fs;
 use std::path::{Path, PathBuf};
 
 use backend::pdb_page;
-use backend::utils::{
-    packed_page_row_slot_count, read_u8_at as ru8, read_u16_le_at as ru16, read_u32_le_at as ru32,
-};
+use backend::utils::{read_u8_at as ru8, read_u16_le_at as ru16, read_u32_le_at as ru32};
 
 fn main() {
     let args: Vec<_> = env::args().collect();
@@ -407,7 +405,7 @@ fn main() {
         let tt = ru32(&bytes, off + 8).unwrap_or(0);
         let nrs = ru8(&bytes, off + 0x18).unwrap_or(0) as usize;
         let page = &bytes[off..off + page_size];
-        let row_slots = packed_page_row_slot_count(page).unwrap_or(0);
+        let row_slots = pdb_page::read_slot_counts(page).map_or(0, |(slots, _)| slots);
         if row_slots == 0 {
             continue;
         }

@@ -4,8 +4,7 @@ use std::fs;
 use std::path::{Path, PathBuf};
 
 use backend::utils::{
-    packed_page_row_slot_count, read_u8_at as read_u8, read_u16_le_at as read_u16_le,
-    read_u32_le_at as read_u32_le,
+    read_u8_at as read_u8, read_u16_le_at as read_u16_le, read_u32_le_at as read_u32_le,
 };
 
 #[derive(Debug, Default)]
@@ -207,5 +206,5 @@ fn table_type_name(raw: u32) -> &'static str {
 }
 
 fn parse_row_count(page: &[u8]) -> Option<usize> {
-    packed_page_row_slot_count(page)
+    backend::pdb_page::read_slot_counts(page).map(|(slots, _)| slots)
 }

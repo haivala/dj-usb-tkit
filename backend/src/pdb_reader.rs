@@ -171,7 +171,6 @@ pub(crate) struct PageInfo {
     page_index: u32,
     table_type: TableType,
     nrs: u8,
-    used_s: u16,
     num_rl: u16,
 }
 
@@ -236,25 +235,14 @@ impl std::fmt::Display for PdbPageConventionMismatch {
 /// doesn't: the footer repair fixes these pages, and no write may add one
 /// (`pdb_write_problems`).
 ///
-/// Index pages (`pf=0x64`), empty slots and pages whose footer would run
-/// into the row heap (the footer repairs leave those alone) are skipped.
+/// Only data pages ([`pdb_page::is_data_page`]) are checked, and of those
+/// not the ones whose footer would run into the row heap (the footer repairs
+/// leave those alone).
 pub fn validate_pdb_page_conventions(bytes: &[u8]) -> Vec<PdbPageConventionMismatch> {
     use crate::pdb_page;
-    use crate::utils::{read_u8_at, read_u32_le_at};
 
     let mut mismatches = Vec::new();
-    let len_page = match read_u32_le_at(bytes, 4) {
-        Some(v) if v > 0 => v as usize,
-        _ => return mismatches,
-    };
-    if bytes.len() < len_page {
-        return mismatches;
-    }
-    for (index, page) in bytes.chunks_exact(len_page).enumerate().skip(1) {
-        let stored_idx = read_u32_le_at(page, 0x04).unwrap_or(0);
-        if stored_idx == 0 || read_u8_at(page, 0x1b).unwrap_or(0) == 0x64 {
-            continue;
-        }
+    for (index, page) in pdb_page::data_pages(bytes) {
         let Some((slots, _)) = pdb_page::read_slot_counts(page) else {
             continue;
         };
@@ -270,8 +258,8 @@ pub fn validate_pdb_page_conventions(bytes: &[u8]) -> Vec<PdbPageConventionMisma
             .unwrap_or((pdb_page::PLACEHOLDER_FIELD, pdb_page::PLACEHOLDER_FIELD));
         let (observed_u5, observed_num_rl) = pdb_page::read_transaction_header(page);
         mismatches.push(PdbPageConventionMismatch {
-            page_index: index as u32,
-            table_type: read_u32_le_at(page, 0x08).unwrap_or(0),
+            page_index: index,
+            table_type: pdb_page::table_type(page).unwrap_or(0),
             trc: slots as u16,
             observed_u5,
             observed_num_rl,
@@ -289,39 +277,14 @@ pub fn pdb_page_size(bytes: &[u8]) -> BackendResult<usize> {
         .ok_or_else(|| BackendError::Internal("PDB too small to read page size".into()))
 }
 
-/// Collect the `seq` (offset `0x10`) value from every non-sentinel,
-/// non-zeroed data page. Used by tests to assert that an export's
-/// transaction-commit counter actually varies across pages — player firmware
-/// appears to reject PDBs whose data pages are all collapsed to `seq=1`.
+/// The `seq` (offset `0x10`) of every data page. Used by tests to assert
+/// that an export's transaction-commit counter actually varies across pages
+/// — player firmware appears to reject PDBs whose data pages are all
+/// collapsed to `seq=1`.
 pub fn collect_pdb_data_page_seqs(bytes: &[u8]) -> Vec<u32> {
-    use crate::utils::{read_u8_at, read_u32_le_at};
-
-    let mut out = Vec::new();
-    let len_page = match read_u32_le_at(bytes, 4) {
-        Some(v) if v > 0 => v as usize,
-        _ => return out,
-    };
-    if bytes.len() < len_page {
-        return out;
-    }
-    let total_pages = bytes.len() / len_page;
-    for page_idx in 1..total_pages {
-        let off = page_idx * len_page;
-        if off + 0x28 > bytes.len() {
-            break;
-        }
-        let page = &bytes[off..off + len_page];
-        let stored_idx = read_u32_le_at(page, 0x04).unwrap_or(0);
-        if stored_idx == 0 {
-            continue;
-        }
-        let pf = read_u8_at(page, 0x1b).unwrap_or(0);
-        if pf == 0x64 {
-            continue;
-        }
-        out.push(read_u32_le_at(page, 0x10).unwrap_or(0));
-    }
-    out
+    crate::pdb_page::data_pages(bytes)
+        .map(|(_, page)| read_u32_le(page, 0x10).unwrap_or(0))
+        .collect()
 }
 
 pub fn parse_pdb_track_debug_rows(path: &Path) -> BackendResult<Vec<PdbTrackDebugRow>> {
@@ -331,8 +294,8 @@ pub fn parse_pdb_track_debug_rows(path: &Path) -> BackendResult<Vec<PdbTrackDebu
 
 pub fn parse_pdb_with_diagnostics(path: &Path) -> BackendResult<(ParsedPdb, PdbDiagnostics)> {
     let bytes = std::fs::read(path)?;
-    let len_page = parse_len_page(&bytes)?;
-    let (out, diag) = parse_pdb_bytes_internal(&bytes, len_page, true);
+    check_len_page(&bytes)?;
+    let (out, diag) = parse_pdb_bytes_internal(&bytes, true);
     Ok((out, diag))
 }
 
@@ -419,103 +382,60 @@ fn dispatch_row(row: Vec<u8>, page_info: PageInfo, out: &mut ParsedPdb) {
 }
 
 fn parse_pdb_track_debug_rows_bytes(bytes: &[u8]) -> BackendResult<Vec<PdbTrackDebugRow>> {
-    let len_page = parse_len_page(bytes)?;
-
-    let max_page = parse_max_physical_page(bytes, len_page);
-    let mut warnings = Vec::<String>::new();
-    let mut out = Vec::<PdbTrackDebugRow>::new();
-
-    for page_idx in 1..=max_page {
-        let start = page_idx * len_page;
-        let end = start + len_page;
-        if end > bytes.len() {
-            break;
-        }
-        let page = &bytes[start..end];
-        let Some(page_info) = parse_page_info(page) else {
-            continue;
-        };
-        if page_info.table_type != TableType::Tracks {
-            continue;
-        }
-        for row in parse_page_rows(page, len_page, page_info, &mut warnings) {
-            if let Some(track) = parse_track_debug_row(&row) {
-                out.push(track);
-            }
-        }
-    }
-
-    Ok(out)
+    check_len_page(bytes)?;
+    Ok(crate::pdb_page::data_pages(bytes)
+        .filter(|(_, page)| crate::pdb_page::table_type(page) == Some(0))
+        .flat_map(|(_, page)| crate::pdb_page::present_rows(page))
+        .filter_map(|row| parse_track_debug_row(&row))
+        .collect())
 }
 
 pub fn parse_pdb_bytes(bytes: &[u8]) -> BackendResult<ParsedPdb> {
-    let len_page = parse_len_page(bytes)?;
-    let (out, _) = parse_pdb_bytes_internal(bytes, len_page, false);
+    check_len_page(bytes)?;
+    let (out, _) = parse_pdb_bytes_internal(bytes, false);
     Ok(out)
 }
 
-fn parse_len_page(bytes: &[u8]) -> BackendResult<usize> {
-    let len_page = read_u32_le(bytes, 4)
-        .ok_or_else(|| BackendError::Internal("invalid PDB header: missing len_page".to_string()))?
-        as usize;
+/// Fails unless the header has a page size; the pages themselves are read by
+/// [`crate::pdb_page::pages`], which leaves out what doesn't fit it.
+fn check_len_page(bytes: &[u8]) -> BackendResult<()> {
+    let len_page = read_u32_le(bytes, 4).ok_or_else(|| {
+        BackendError::Internal("invalid PDB header: missing len_page".to_string())
+    })?;
     if len_page == 0 {
         return Err(BackendError::Internal(
             "invalid PDB header: len_page is zero".to_string(),
         ));
     }
-    Ok(len_page)
+    Ok(())
 }
 
 fn parse_pdb_bytes_internal(
     bytes: &[u8],
-    len_page: usize,
     collect_diagnostics: bool,
 ) -> (ParsedPdb, PdbDiagnostics) {
-    let max_page = parse_max_physical_page(bytes, len_page);
-    if max_page == 0 {
-        return (ParsedPdb::default(), PdbDiagnostics::default());
-    }
-
     let mut out = ParsedPdb::default();
     let mut diag = PdbDiagnostics::default();
 
-    for page_idx in 1..=max_page {
-        let start = page_idx * len_page;
-        let end = start + len_page;
-        if end > bytes.len() {
-            out.warnings.push(format!(
-                "PDB page {} out of file bounds (len_page={}, file_size={})",
-                page_idx,
-                len_page,
-                bytes.len()
-            ));
-            break;
-        }
-
-        let page = &bytes[start..end];
-        let page_info = match parse_page_info(page) {
-            Some(v) => v,
-            None => {
-                out.warnings
-                    .push(format!("PDB page {} has invalid page header", page_idx));
-                continue;
-            }
-        };
-
-        if collect_diagnostics {
+    if collect_diagnostics {
+        for (_, page) in crate::pdb_page::pages(bytes) {
             diag.total_pages += 1;
             let raw_type = read_u32_le(page, 8).unwrap_or(9999);
             *diag.page_type_counts.entry(raw_type).or_insert(0) += 1;
-            if page_info.num_rl == 8191 {
+            if parse_page_info(page).is_some_and(|info| info.num_rl == 8191) {
                 diag.pages_with_num_rl_8191 += 1;
             }
         }
+    }
 
-        let rows = parse_page_rows(page, len_page, page_info, &mut out.warnings);
+    for (_, page) in crate::pdb_page::data_pages(bytes) {
+        let Some(page_info) = parse_page_info(page) else {
+            continue;
+        };
+        let rows = crate::pdb_page::present_rows(page);
         if collect_diagnostics && rows.len() > page_info.nrs as usize {
             diag.nrs_wrapping_pages += 1;
         }
-
         for row in rows {
             dispatch_row(row, page_info, &mut out);
         }
@@ -524,69 +444,13 @@ fn parse_pdb_bytes_internal(
     (out, diag)
 }
 
-fn parse_max_physical_page(bytes: &[u8], len_page: usize) -> usize {
-    if len_page == 0 || bytes.len() < len_page * 2 {
-        return 0;
-    }
-    (bytes.len() / len_page).saturating_sub(1)
-}
-
 fn parse_page_info(page: &[u8]) -> Option<PageInfo> {
     Some(PageInfo {
         page_index: read_u32_le(page, 4)?,
         table_type: TableType::from_u32(read_u32_le(page, 8)?),
         nrs: read_u8(page, 24)?,
-        used_s: read_u16_le(page, 30)?,
         num_rl: read_u16_le(page, 34)?,
     })
-}
-
-fn parse_page_rows(
-    page: &[u8],
-    len_page: usize,
-    page_info: PageInfo,
-    warnings: &mut Vec<String>,
-) -> Vec<Vec<u8>> {
-    if page_info.page_index == 0 {
-        return Vec::new();
-    }
-
-    if page_info.used_s == 0 {
-        return Vec::new();
-    }
-
-    let payload_start = 40usize;
-    let payload_end = payload_start.saturating_add(page_info.used_s as usize);
-    if payload_end > page.len() || payload_start >= payload_end {
-        warnings.push(format!(
-            "page {} invalid payload bounds: {}..{}",
-            page_info.page_index, payload_start, payload_end
-        ));
-        return Vec::new();
-    }
-    let payload = &page[payload_start..payload_end];
-
-    // The row-slot count is the packed 3-byte field at `0x18..0x1b`, not the
-    // single wrapping `nrs` byte at `0x18` combined with `num_rl` (`0x22`) —
-    // see `packed_page_row_slot_count`. The tolerant scan's phase 2 stays as a
-    // defensive fallback (in case the header count is ever wrong for some
-    // other reason), but no longer needs to correct for `nrs` wrapping.
-    let footer = crate::pdb_page::scan_footer_tolerant(page, len_page, payload_end);
-
-    let mut rows = Vec::new();
-    for i in 0..footer.offsets.len() {
-        if !footer.is_present(i) {
-            continue;
-        }
-        let (start, raw_end) = footer.row_bounds(i, payload.len());
-        let clamped_start = start.min(payload.len());
-        let clamped_end = raw_end.min(payload.len());
-        if clamped_start >= clamped_end {
-            continue;
-        }
-        rows.push(payload[clamped_start..clamped_end].to_vec());
-    }
-    rows
 }
 
 fn parse_track_row(row: &[u8]) -> Option<PdbTrackRow> {
@@ -1097,6 +961,15 @@ mod tests {
     ///   [end of page - index] backward-growing row index:
     ///     For each group of 16 rows: 2-byte presence bits + 2 padding + 16×2-byte offsets
     ///     (read from end of page backward)
+    /// A page's rows as `parse_pdb_bytes` reads them.
+    fn page_rows(page: &[u8]) -> Vec<Vec<u8>> {
+        if crate::pdb_page::is_data_page(page) {
+            crate::pdb_page::present_rows(page)
+        } else {
+            Vec::new()
+        }
+    }
+
     fn build_page(len_page: usize, table_type: u32, rows: &[&[u8]]) -> Vec<u8> {
         let mut page = vec![0u8; len_page];
         let n = rows.len();
@@ -1146,26 +1019,21 @@ mod tests {
     }
 
     #[test]
-    fn parse_page_rows_single_row() {
+    fn page_rows_single_row() {
         let row_data = b"hello world!";
         let page = build_page(4096, 0, &[row_data]);
-        let info = parse_page_info(&page).unwrap();
-        let mut warnings = Vec::new();
-        let rows = parse_page_rows(&page, 4096, info, &mut warnings);
+        let rows = page_rows(&page);
         assert_eq!(rows.len(), 1);
         assert_eq!(&rows[0], row_data);
-        assert!(warnings.is_empty());
     }
 
     #[test]
-    fn parse_page_rows_multiple_rows() {
+    fn page_rows_multiple_rows() {
         let r1 = b"AAAA";
         let r2 = b"BBBBBB";
         let r3 = b"CC";
         let page = build_page(4096, 8, &[r1, r2, r3]);
-        let info = parse_page_info(&page).unwrap();
-        let mut warnings = Vec::new();
-        let rows = parse_page_rows(&page, 4096, info, &mut warnings);
+        let rows = page_rows(&page);
         assert_eq!(rows.len(), 3);
         assert_eq!(&rows[0], b"AAAA");
         assert_eq!(&rows[1], b"BBBBBB");
@@ -1173,7 +1041,7 @@ mod tests {
     }
 
     #[test]
-    fn parse_page_rows_handles_more_than_255_rows_on_a_page() {
+    fn page_rows_handles_more_than_255_rows_on_a_page() {
         // t08 playlist_entries rows are 12 bytes, so byte capacity alone lets
         // a single 4096-byte page hold well over 255 of them. `nrs` (the
         // single byte at 0x18) wraps at 256; the packed 3-byte field must be
@@ -1189,23 +1057,19 @@ mod tests {
             .collect();
         let row_refs: Vec<&[u8]> = rows_data.iter().map(|r| r.as_slice()).collect();
         let page = build_page(4096, 8, &row_refs);
-        let info = parse_page_info(&page).unwrap();
-        let mut warnings = Vec::new();
-        let rows = parse_page_rows(&page, 4096, info, &mut warnings);
+        let rows = page_rows(&page);
         assert_eq!(rows.len(), row_count);
     }
 
     #[test]
-    fn parse_page_rows_empty_page() {
+    fn page_rows_empty_page() {
         let page = build_page(4096, 0, &[]);
-        let info = parse_page_info(&page).unwrap();
-        let mut warnings = Vec::new();
-        let rows = parse_page_rows(&page, 4096, info, &mut warnings);
+        let rows = page_rows(&page);
         assert!(rows.is_empty());
     }
 
     #[test]
-    fn parse_page_rows_skips_deleted_rows() {
+    fn page_rows_skips_deleted_rows() {
         // Build a page with 3 rows but mark the middle one as not present
         let r1 = b"AAAA";
         let r2 = b"BBBB";
@@ -1217,16 +1081,14 @@ mod tests {
         bits &= !(1 << 1); // clear bit 1
         page[bits_offset..bits_offset + 2].copy_from_slice(&bits.to_le_bytes());
 
-        let info = parse_page_info(&page).unwrap();
-        let mut warnings = Vec::new();
-        let rows = parse_page_rows(&page, 4096, info, &mut warnings);
+        let rows = page_rows(&page);
         assert_eq!(rows.len(), 2);
         assert_eq!(&rows[0], b"AAAA");
         assert_eq!(&rows[1], b"CCCC");
     }
 
     #[test]
-    fn parse_page_rows_nrs_wrapping_recovers_all_entries() {
+    fn page_rows_nrs_wrapping_recovers_all_entries() {
         // Simulate a page with 284 12-byte playlist entries.
         // nrs = 284 % 256 = 28, which would cause the old parser to read only 28 rows.
         let entry = [0u8; 12];
@@ -1236,9 +1098,7 @@ mod tests {
         // Verify nrs wrapped
         assert_eq!(page[24], 28); // 284 % 256
 
-        let info = parse_page_info(&page).unwrap();
-        let mut warnings = Vec::new();
-        let rows = parse_page_rows(&page, 4096, info, &mut warnings);
+        let rows = page_rows(&page);
 
         // Must recover all 284 rows, not just 28
         assert_eq!(
@@ -1249,7 +1109,7 @@ mod tests {
     }
 
     #[test]
-    fn parse_page_rows_nrs_wrapping_preserves_row_content() {
+    fn page_rows_nrs_wrapping_preserves_row_content() {
         // 260 rows where each row contains its index as a u32
         let mut row_data: Vec<Vec<u8>> = Vec::new();
         for i in 0..260u32 {
@@ -1262,9 +1122,7 @@ mod tests {
 
         assert_eq!(page[24], 4); // 260 % 256
 
-        let info = parse_page_info(&page).unwrap();
-        let mut warnings = Vec::new();
-        let rows = parse_page_rows(&page, 4096, info, &mut warnings);
+        let rows = page_rows(&page);
         assert_eq!(rows.len(), 260);
 
         // Verify content integrity for every row
@@ -1275,15 +1133,13 @@ mod tests {
     }
 
     #[test]
-    fn parse_page_rows_small_page_no_false_extension() {
+    fn page_rows_small_page_no_false_extension() {
         // A page with 1 large row (like a track) must not falsely extend into
         // the unused zero-filled index space.
         let big_row = vec![0xABu8; 460];
         let page = build_page(4096, 0, &[big_row.as_slice()]);
 
-        let info = parse_page_info(&page).unwrap();
-        let mut warnings = Vec::new();
-        let rows = parse_page_rows(&page, 4096, info, &mut warnings);
+        let rows = page_rows(&page);
 
         assert_eq!(
             rows.len(),
@@ -1295,7 +1151,7 @@ mod tests {
     }
 
     #[test]
-    fn parse_page_rows_16_rows_exactly_one_group() {
+    fn page_rows_16_rows_exactly_one_group() {
         // Exactly 16 rows = 1 full presence group, no wrapping
         let row_data: Vec<Vec<u8>> = (0..16u32)
             .map(|i| {
@@ -1307,14 +1163,12 @@ mod tests {
         let row_refs: Vec<&[u8]> = row_data.iter().map(|r| r.as_slice()).collect();
         let page = build_page(4096, 8, &row_refs);
 
-        let info = parse_page_info(&page).unwrap();
-        let mut warnings = Vec::new();
-        let rows = parse_page_rows(&page, 4096, info, &mut warnings);
+        let rows = page_rows(&page);
         assert_eq!(rows.len(), 16);
     }
 
     #[test]
-    fn parse_page_rows_17_rows_spans_two_groups() {
+    fn page_rows_17_rows_spans_two_groups() {
         // 17 rows = 2 presence groups
         let row_data: Vec<Vec<u8>> = (0..17u32)
             .map(|i| {
@@ -1326,9 +1180,7 @@ mod tests {
         let row_refs: Vec<&[u8]> = row_data.iter().map(|r| r.as_slice()).collect();
         let page = build_page(4096, 8, &row_refs);
 
-        let info = parse_page_info(&page).unwrap();
-        let mut warnings = Vec::new();
-        let rows = parse_page_rows(&page, 4096, info, &mut warnings);
+        let rows = page_rows(&page);
         assert_eq!(rows.len(), 17);
 
         // Verify last row content
@@ -1337,20 +1189,18 @@ mod tests {
     }
 
     #[test]
-    fn parse_page_rows_page_index_zero_returns_empty() {
+    fn page_rows_page_index_zero_returns_empty() {
         let row_data = b"data";
         let mut page = build_page(4096, 0, &[row_data]);
         // Set page_index to 0
         page[4..8].copy_from_slice(&0u32.to_le_bytes());
 
-        let info = parse_page_info(&page).unwrap();
-        let mut warnings = Vec::new();
-        let rows = parse_page_rows(&page, 4096, info, &mut warnings);
+        let rows = page_rows(&page);
         assert!(rows.is_empty());
     }
 
     #[test]
-    fn parse_page_rows_num_rl_8191_uses_nrs() {
+    fn page_rows_num_rl_8191_uses_nrs() {
         // num_rl=8191 (0x1FFF) is a sentinel meaning "num_rl not tracked",
         // so the parser should fall back to nrs and still parse rows.
         let row_data = b"data";
@@ -1360,10 +1210,28 @@ mod tests {
 
         let info = parse_page_info(&page).unwrap();
         assert_eq!(info.num_rl, 8191);
-        let mut warnings = Vec::new();
-        let rows = parse_page_rows(&page, 4096, info, &mut warnings);
+        let rows = page_rows(&page);
         assert_eq!(rows.len(), 1);
         assert_eq!(&rows[0], b"data");
+    }
+
+    #[test]
+    fn page_rows_stop_at_the_header_slot_count() {
+        // A header that counts fewer slots than the footer holds: the rows
+        // past its count aren't read, here or by the writers and repairs.
+        let rows: Vec<&[u8]> = vec![b"AAAA", b"BBBB", b"CCCC"];
+        let mut page = build_page(4096, 0, &rows);
+        crate::pdb_page::write_slot_counts(&mut page, 2, 2);
+        // The last counted slot runs to the end of the used heap.
+        assert_eq!(page_rows(&page), [b"AAAA".to_vec(), b"BBBBCCCC".to_vec()]);
+        assert_eq!(crate::pdb_page::row_slots(&page).len(), 2);
+    }
+
+    #[test]
+    fn index_pages_have_no_rows() {
+        let mut page = build_page(4096, 0, &[b"data"]);
+        page[0x1b] = 0x64;
+        assert!(page_rows(&page).is_empty());
     }
 
     // ── PDB round-trip tests ──────────────────────────────
@@ -1406,8 +1274,11 @@ mod tests {
         }
 
         let mut file = header;
-        for (_, page) in table_pages {
-            file.extend_from_slice(page);
+        for (position, (_, page)) in (1u32..).zip(table_pages) {
+            // Every written page carries its own position as its index.
+            let mut page = page.clone();
+            page[4..8].copy_from_slice(&position.to_le_bytes());
+            file.extend_from_slice(&page);
         }
         file
     }

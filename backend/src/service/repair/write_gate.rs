@@ -41,7 +41,7 @@ pub fn pdb_shape_problems(bytes: &[u8]) -> Vec<String> {
     for page in detect_pdb_damaged_page_headers(bytes) {
         problems.push(found("damaged page header", &page));
     }
-    for page in footers_into_rows(bytes, page_size) {
+    for page in footers_into_rows(bytes) {
         problems.push(found("page footer runs into the rows", &page));
     }
     for slot in detect_pdb_string_misalignment(bytes) {
@@ -120,20 +120,13 @@ fn broken_table_pointers(bytes: &[u8], page_size: usize) -> Vec<String> {
 
 /// Data pages whose footer, for the slot count in their header, overlaps
 /// the row heap: the footer and the rows overwrite each other.
-fn footers_into_rows(bytes: &[u8], page_size: usize) -> Vec<usize> {
-    use crate::utils::{read_u16_le_at, read_u32_le_at};
-    (1..bytes.len() / page_size)
-        .filter(|&i| {
-            let page = &bytes[i * page_size..(i + 1) * page_size];
-            if read_u32_le_at(page, 4).unwrap_or(0) == 0 || page[0x1b] & 0x40 != 0 {
-                return false; // blank page or index page
-            }
-            if read_u16_le_at(page, 0x1e).unwrap_or(0) == 0 {
-                return false; // never-written page
-            }
+fn footers_into_rows(bytes: &[u8]) -> Vec<u32> {
+    pdb_page::data_pages(bytes)
+        .filter(|(_, page)| {
             pdb_page::read_slot_counts(page)
                 .is_some_and(|(slots, _)| !pdb_page::footer_clear_of_heap(page, slots))
         })
+        .map(|(index, _)| index)
         .collect()
 }
 
