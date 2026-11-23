@@ -8,7 +8,7 @@ import { test, expect } from "./coverage-fixture.mjs";
 // backend/src/service/analysis.rs (analyze_local_track_with_updates,
 // build_partial_progress, build_done_progress_success),
 // backend/src/service/analysis/coordinator.rs and
-// backend/src/tauri_commands.rs (emit_analysis_event).
+// backend/src/tauri_commands/analysis.rs (emit_analysis_event).
 // These mocks simulate that same event sequence so the frontend's real
 // job_manager.mjs handleJobEvent()/applyRealtimeAnalyzedTrackUpdate() codepath
 // is exercised exactly as it is in production.

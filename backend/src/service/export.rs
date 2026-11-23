@@ -3066,6 +3066,17 @@ mod tests {
         damaged.waveform_peaks_path = Some(damaged_path);
         assert!(!has_required_analysis(dir.path(), &damaged));
 
+        // Export copies a `.2EX` that is there, so it must be undamaged too.
+        let mut damaged_2ex = make_track();
+        let damaged_2ex_path = write_test_analysis_bundle(dir.path(), "damaged-2ex");
+        std::fs::write(
+            Path::new(&damaged_2ex_path).with_extension("2EX"),
+            b"bad-2ex",
+        )
+        .expect("write 2EX");
+        damaged_2ex.waveform_peaks_path = Some(damaged_2ex_path);
+        assert!(!has_required_analysis(dir.path(), &damaged_2ex));
+
         let mut missing_bundle = make_track();
         missing_bundle.waveform_peaks_path =
             Some(dir.path().join("missing.DAT").to_string_lossy().to_string());

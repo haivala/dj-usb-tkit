@@ -49,7 +49,7 @@ fn main() {
 
 ## Backend Tauri Commands
 
-Commands currently exposed in `backend/src/tauri_commands.rs`:
+Commands currently exposed in `backend/src/tauri_commands/` (one module per area, shared job plumbing in `jobs.rs`):
 
 - Library:
   - `scan_library`

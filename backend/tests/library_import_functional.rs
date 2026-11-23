@@ -2,6 +2,7 @@
 //! `mixxxdb.sqlite`) through the commands the import dialogs call: library
 //! scans, playlist listing, and playlist / history / crate imports.
 
+mod common;
 mod library_sources;
 
 use std::fs;
@@ -805,7 +806,7 @@ fn scan_rekordbox_db_imports_updates_keeps_missing_and_reports_resource_warnings
     let image_path = share_dir.join("PIONEER/Artwork/a/COVER.JPG");
     fs::create_dir_all(anlz_path.parent().unwrap()).expect("create anlz dir");
     fs::create_dir_all(image_path.parent().unwrap()).expect("create image dir");
-    fs::write(&anlz_path, b"anlz").expect("write anlz");
+    fs::write(&anlz_path, common::empty_anlz_file()).expect("write anlz");
     fs::write(&image_path, b"jpg").expect("write artwork");
 
     let removed_path = media_root.path().join("removed.mp3");

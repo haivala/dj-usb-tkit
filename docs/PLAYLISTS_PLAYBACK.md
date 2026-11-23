@@ -159,8 +159,8 @@ The engine can also mix metronome clicks on a beat grid into the playing track (
 Implementation anchors:
 
 - playlist command façade: `backend/src/commands.rs`
-- playback Tauri handlers: `backend/src/tauri_commands.rs`
-- playback event emission: `backend/src/tauri_commands.rs`
+- playback Tauri handlers: `backend/src/tauri_commands/playback.rs`
+- playback event emission: `backend/src/tauri_commands/playback.rs`
 - invoke registration: `desktop/src-tauri/src/main.rs`
 
 ## Verification links

@@ -312,7 +312,7 @@ The main technical stages are:
 4. Write playlist/track metadata into PDB and eDB.
 5. Emit progress and warnings through the job event model.
 
-If playlist tracks are missing required analysis, export is blocked and UI instructs the user to run "Analyze Missing Tracks" for that playlist before retrying export. That button counts the same tracks the gate blocks, including analyzed tracks whose local analysis files are gone or damaged (`local_analysis_bundle_unusable`; damaged means a file whose chunks do not walk to its end). A USB-side bundle path can only be checked against the target stick; when only such files are missing or damaged, the message says to Reanalyze those tracks.
+If playlist tracks are missing required analysis, export is blocked and UI instructs the user to run "Analyze Missing Tracks" for that playlist before retrying export. That button counts the same tracks the gate blocks, including analyzed tracks whose local analysis files are gone or damaged (`local_analysis_bundle_unusable`; damaged means a `DAT`, `EXT` or, when there is one, `2EX` whose chunks do not walk to its end). A USB-side bundle path can only be checked against the target stick; when only such files are missing or damaged, the message says to Reanalyze those tracks.
 
 Analysis bundle handling is copy-only during export. Export requires the track to already have a `DAT` + `EXT` bundle (plus `2EX` when one exists; rekordbox bundles from older analyses have none) and copies/reuses it even if the bundle is older or low-detail. Export does not decode source audio or regenerate ANLZ files; missing bundle files block export before media copy starts. See `docs/WAVEFORMS.md`. The exception is a track that goes on the USB as a transcode (the USB audio formats, see `docs/TRANSCODES.md`): its bundle is the track's own with the transcode's waveforms and its beat grid moved by the transcode's start offset, and export draws the transcode's waveforms when they aren't there yet. The analysis check before export looks at the track's own bundle.
 
@@ -541,7 +541,7 @@ When the USB has only one of the two databases, the strict parity repair creates
 Implementation anchors:
 
 - export command façade: `backend/src/commands.rs`
-- Tauri export handler: `backend/src/tauri_commands.rs`
+- Tauri export handler: `backend/src/tauri_commands/export.rs`
 - desktop invoke wiring: `desktop/src-tauri/src/main.rs`
 
 ## Verification links

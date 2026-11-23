@@ -140,7 +140,7 @@ while the NSIS setup installs per-user.
 ### In-app updater
 
 AppImage, NSIS and macOS installs update themselves from the banner's
-"Update & restart" button (`install_update` in `backend/src/tauri_commands.rs`,
+"Update & restart" button (`install_update` in `backend/src/tauri_commands/updates.rs`,
 `tauri-plugin-updater`). deb/rpm installs belong to the package manager and only
 get a direct download link to their asset.
 

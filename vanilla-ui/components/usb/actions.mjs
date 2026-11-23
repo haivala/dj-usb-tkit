@@ -20,7 +20,7 @@ export function updateUsbHealthButtons(ctx) {
 }
 
 // Index the backend's per-playlist `playlistUsbExportStatus` (see
-// PlaylistUsbExportStatus in backend/src/models.rs) by playlist id, for O(1)
+// PlaylistUsbExportStatus in backend/src/models/usb.rs) by playlist id, for O(1)
 // lookup while rendering. The backend computes same-name-on-USB and
 // export-mode-locks-reorder itself; the frontend only looks the answer up.
 export function playlistUsbExportStatusById(statusList) {

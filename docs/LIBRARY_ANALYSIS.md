@@ -217,7 +217,7 @@ Operational commands for controlling a running batch:
 Implementation anchors:
 
 - command façade: `backend/src/commands.rs`
-- Tauri bridge: `backend/src/tauri_commands.rs`
+- Tauri bridge: `backend/src/tauri_commands/analysis.rs`
 - analysis progress type: `backend/src/service/analysis.rs:153`
 - analysis command entry: `backend/src/service/analysis.rs:490`
 - batched analysis path: `backend/src/service/analysis.rs:497`

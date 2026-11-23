@@ -219,25 +219,28 @@ pub(crate) fn sanitize_warning_path(path: &Path) -> String {
         .collect::<String>()
 }
 
-/// Whether the `.DAT` + `.EXT` pair of an analysis bundle is there and
-/// undamaged: both walk to their end ([`anlz_file_walks_cleanly`]). The
-/// `.2EX` is optional, since rekordbox's own bundles from older analyses have
-/// none, and exporting the pair is still what rekordbox would put on a stick.
-fn bundle_pair_usable(bundle: &Path) -> bool {
+/// Whether an analysis bundle is there and undamaged: its `.DAT` and `.EXT`
+/// walk to their end ([`anlz_file_walks_cleanly`]), and so does its `.2EX`
+/// when it has one. The `.2EX` is optional, since rekordbox's own bundles
+/// from older analyses have none, and exporting the pair is still what
+/// rekordbox would put on a stick; but export copies one that is there, so a
+/// damaged one makes the bundle unusable too.
+fn bundle_usable(bundle: &Path) -> bool {
+    let twoex = bundle.with_extension("2EX");
     anlz_file_walks_cleanly(&bundle.with_extension("DAT"))
         && anlz_file_walks_cleanly(&bundle.with_extension("EXT"))
+        && (!twoex.exists() || anlz_file_walks_cleanly(&twoex))
 }
 
-/// [`bundle_pair_usable`] for a waveform path resolved against `usb_root`.
+/// [`bundle_usable`] for a waveform path resolved against `usb_root`.
 /// `anlz_path` may name any member of the bundle: a rekordbox import stores
 /// the `.EXT`.
 pub(crate) fn analysis_bundle_usable(usb_root: &Path, anlz_path: &str) -> bool {
-    resolve_usb_side_path(usb_root, anlz_path).is_some_and(|path| bundle_pair_usable(&path))
+    resolve_usb_side_path(usb_root, anlz_path).is_some_and(|path| bundle_usable(&path))
 }
 
 /// Whether a library track's analysis bundle is gone from the local disk or
-/// damaged: an absolute `anlz_path` whose `.DAT` or `.EXT` is missing or
-/// doesn't walk to its end ([`bundle_pair_usable`]). Either way the track
+/// damaged: an absolute `anlz_path` whose bundle isn't [`bundle_usable`]. Either way the track
 /// needs analysis again, which writes a new bundle. A USB-side path
 /// (`/PIONEER/...`, `/Contents/...`) only resolves against a stick, so it is
 /// not checked here; the export gate checks it against the target.
@@ -246,7 +249,7 @@ pub(crate) fn local_analysis_bundle_unusable(anlz_path: &str) -> bool {
     let usb_side = normalized.starts_with(USB_VENDOR_ROOT_PREFIX)
         || normalized.starts_with(&format!("/{USB_CONTENTS_DIR}/"));
     let path = Path::new(&normalized);
-    !usb_side && path.is_absolute() && !bundle_pair_usable(path)
+    !usb_side && path.is_absolute() && !bundle_usable(path)
 }
 
 pub(crate) fn load_existing_analysis_paths_by_content_path(
@@ -434,7 +437,7 @@ mod tests {
         let empty = crate::service::anlz_read::empty_anlz_file();
         std::fs::write(anlz_dir.join("ANLZ0000.DAT"), &empty).unwrap();
         std::fs::write(anlz_dir.join("ANLZ0000.EXT"), &empty).unwrap();
-        std::fs::write(anlz_dir.join("ANLZ0000.2EX"), b"2ex").unwrap();
+        std::fs::write(anlz_dir.join("ANLZ0000.2EX"), &empty).unwrap();
 
         let db_path = rb.join("exportLibrary.db");
         let anlz_path = format!(

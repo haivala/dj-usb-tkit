@@ -1,3 +1,4 @@
+mod common;
 mod library_sources;
 
 use std::fs;
@@ -347,8 +348,8 @@ fn waveform_path(data_dir: &std::path::Path, file_name: &str) -> Option<String> 
 
 fn write_bundle(dat: &std::path::Path, twoex: &[u8]) {
     fs::create_dir_all(dat.parent().unwrap()).expect("create bundle dir");
-    fs::write(dat, b"PMAI-dat").expect("write DAT");
-    fs::write(dat.with_extension("EXT"), b"PMAI-ext").expect("write EXT");
+    fs::write(dat, common::empty_anlz_file()).expect("write DAT");
+    fs::write(dat.with_extension("EXT"), common::empty_anlz_file()).expect("write EXT");
     fs::write(dat.with_extension("2EX"), twoex).expect("write 2EX");
 }
 

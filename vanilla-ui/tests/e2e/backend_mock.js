@@ -1,6 +1,6 @@
 // The one stubbed backend every e2e page starts with (installed by
 // coverage-fixture.mjs before the spec's own init scripts). Answers are shaped
-// like the backend's structs (backend/src/models.rs): the frontend reads them
+// like the backend's structs (backend/src/models/): the frontend reads them
 // without re-checking their shape.
 //
 // A spec seeds the library and playlists (`seed`) and installs its own

@@ -9,7 +9,7 @@ import { t, tCount } from "../../ui_texts.mjs";
 const PLAYLIST_LOAD_LIMIT_DEFAULT = 150;
 
 // Builds the wire payload for add_track_candidates_to_playlist from a UI track object,
-// keeping only the fields AddTrackCandidate (backend/src/models.rs) declares so UI-display
+// keeping only the fields AddTrackCandidate (backend/src/models/playlists.rs) declares so UI-display
 // state/sentinels (e.g. bpm: "" for "not analyzed yet") never reach the backend's strict types.
 export function toAddTrackCandidatePayload(track) {
   // > 0, not just isFinite: an empty-string/undefined "not analyzed yet" sentinel coerces to 0
