@@ -3761,11 +3761,6 @@ fn repeated_same_playlist_export_keeps_pdb_and_db_membership_stable() {
         usb_root: usb.to_string_lossy().to_string(),
     });
     assert!(initialized.ok, "initialize usb failed: {initialized:?}");
-    seed_edb_for_export(
-        &usb.join(USB_VENDOR_ROOT_DIR)
-            .join(USB_VENDOR_DB_DIR)
-            .join("exportLibrary.db"),
-    );
 
     let scan = backend.scan_library(ScanLibraryRequest {
         source_roots: vec![media.to_string_lossy().to_string()],
@@ -3937,11 +3932,6 @@ fn export_sync_mode_additive_preserves_existing_playlist_entries() {
         usb_root: usb.to_string_lossy().to_string(),
     });
     assert!(initialized.ok, "initialize usb failed: {initialized:?}");
-    seed_edb_for_export(
-        &usb.join(USB_VENDOR_ROOT_DIR)
-            .join(USB_VENDOR_DB_DIR)
-            .join("exportLibrary.db"),
-    );
 
     let scan = backend.scan_library(ScanLibraryRequest {
         source_roots: vec![media.to_string_lossy().to_string()],
@@ -4107,11 +4097,6 @@ fn export_sync_mode_mirror_new_playlist_does_not_prune_existing_playlists() {
         usb_root: usb.to_string_lossy().to_string(),
     });
     assert!(initialized.ok, "initialize usb failed: {initialized:?}");
-    seed_edb_for_export(
-        &usb.join(USB_VENDOR_ROOT_DIR)
-            .join(USB_VENDOR_DB_DIR)
-            .join("exportLibrary.db"),
-    );
 
     let scan = backend.scan_library(ScanLibraryRequest {
         source_roots: vec![media.to_string_lossy().to_string()],
@@ -4252,11 +4237,6 @@ fn fetch_usb_playlists_reports_reorder_lock_only_for_additive_same_name_collisio
         usb_root: usb.to_string_lossy().to_string(),
     });
     assert!(initialized.ok, "initialize usb failed: {initialized:?}");
-    seed_edb_for_export(
-        &usb.join(USB_VENDOR_ROOT_DIR)
-            .join(USB_VENDOR_DB_DIR)
-            .join("exportLibrary.db"),
-    );
 
     let scan = backend.scan_library(ScanLibraryRequest {
         source_roots: vec![media.to_string_lossy().to_string()],
@@ -4492,11 +4472,6 @@ fn export_saves_the_sort_it_is_given_unless_the_order_is_locked_on_the_usb() {
         usb_root: usb.to_string_lossy().to_string(),
     });
     assert!(initialized.ok, "initialize usb failed: {initialized:?}");
-    seed_edb_for_export(
-        &usb.join(USB_VENDOR_ROOT_DIR)
-            .join(USB_VENDOR_DB_DIR)
-            .join("exportLibrary.db"),
-    );
     let scan = backend.scan_library(ScanLibraryRequest {
         source_roots: vec![media.to_string_lossy().to_string()],
         incremental: true,
@@ -4674,55 +4649,6 @@ fn usb_playlist_track_paths(usb_root: &Path, playlist_name: &str) -> Vec<String>
     out.sort();
     out.dedup();
     out
-}
-
-fn seed_edb_for_export(db_path: &std::path::Path) {
-    std::fs::remove_file(db_path).ok();
-    let artwork_path = format!("/{USB_VENDOR_ROOT_DIR}/{USB_ARTWORK_DIR}/template.jpg");
-    let conn = open_edb(db_path);
-    conn.execute_batch(
-        &format!(
-            r#"
-        CREATE TABLE IF NOT EXISTS playlist (
-          playlist_id INTEGER PRIMARY KEY,
-          name TEXT,
-          attribute INTEGER,
-          sequenceNo INTEGER
-        );
-        CREATE TABLE IF NOT EXISTS content (
-          content_id INTEGER PRIMARY KEY,
-          title TEXT,
-          path TEXT,
-          analysisDataFilePath TEXT,
-          bpmx100 INTEGER,
-          key_id INTEGER,
-          image_id INTEGER
-        );
-        CREATE TABLE IF NOT EXISTS image (
-          image_id INTEGER PRIMARY KEY,
-          path TEXT
-        );
-        CREATE TABLE IF NOT EXISTS "key" (
-          key_id INTEGER PRIMARY KEY,
-          name TEXT
-        );
-        CREATE TABLE IF NOT EXISTS playlist_content (
-          playlist_id INTEGER,
-          content_id INTEGER,
-          sequenceNo INTEGER
-        );
-        INSERT OR IGNORE INTO playlist (playlist_id, name, attribute, sequenceNo)
-          VALUES (1, 'Template Playlist', 0, 1);
-        INSERT OR IGNORE INTO content (content_id, title, path, analysisDataFilePath, bpmx100, key_id, image_id)
-          VALUES (1, 'Template Content', '/Contents/template.mp3', NULL, 0, NULL, NULL);
-        INSERT OR IGNORE INTO image (image_id, path)
-          VALUES (1, '{artwork_path}');
-        INSERT OR IGNORE INTO "key" (key_id, name)
-          VALUES (1, '8A');
-        "#,
-        ),
-    )
-    .expect("seed export db");
 }
 
 #[test]
