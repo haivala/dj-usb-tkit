@@ -572,7 +572,7 @@ impl BackendService {
         mut on_progress: F,
     ) -> BackendResult<UsbOrderEditData>
     where
-        F: FnMut(usize, usize, &str),
+        F: crate::progress::ProgressFn,
     {
         on_progress(0, 100, &tr::usb_progress_resolving_usb_root().render());
         let usb_root = resolve_usb_root(req.usb_root.as_deref())?;
@@ -637,7 +637,7 @@ impl BackendService {
         on_progress: &mut F,
     ) -> BackendResult<bool>
     where
-        F: FnMut(usize, usize, &str),
+        F: crate::progress::ProgressFn,
     {
         on_progress(
             5,

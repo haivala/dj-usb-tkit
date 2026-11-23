@@ -1688,7 +1688,7 @@ impl BackendService {
         mut on_progress: F,
     ) -> BackendResult<FetchUsbPlaylistsData>
     where
-        F: FnMut(usize, usize, &str),
+        F: crate::progress::ProgressFn,
     {
         let mut warnings = Vec::<WarningEntry>::new();
         let mut stage_started = std::time::Instant::now();
@@ -1988,7 +1988,7 @@ impl BackendService {
         mut on_progress: F,
     ) -> BackendResult<RemoveUsbPlaylistData>
     where
-        F: FnMut(usize, usize, &str),
+        F: crate::progress::ProgressFn,
     {
         let mut warnings = Vec::<WarningEntry>::new();
         let mut stage_started = std::time::Instant::now();
@@ -2196,7 +2196,7 @@ impl BackendService {
         mut on_progress: F,
     ) -> BackendResult<FetchUsbHistoriesData>
     where
-        F: FnMut(usize, usize, &str),
+        F: crate::progress::ProgressFn,
     {
         let mut stage_started = std::time::Instant::now();
         on_progress(2, 100, &tr::usb_progress_resolving_root().render());

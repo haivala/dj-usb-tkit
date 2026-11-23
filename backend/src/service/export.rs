@@ -1429,7 +1429,7 @@ impl BackendService {
         mut on_progress: F,
     ) -> BackendResult<ExportToUsbData>
     where
-        F: FnMut(usize, usize, &str),
+        F: crate::progress::ProgressFn,
     {
         let playlist_id = req.playlist_id.trim().to_string();
         if playlist_id.is_empty() {
@@ -1501,7 +1501,7 @@ impl BackendService {
         mut on_progress: F,
     ) -> BackendResult<ExportPlaylistsToUsbData>
     where
-        F: FnMut(usize, usize, &str),
+        F: crate::progress::ProgressFn,
     {
         let usb_write_guard = self
             .try_lock_usb_writes()
@@ -1598,7 +1598,7 @@ impl BackendService {
         on_progress: &mut F,
     ) -> BackendResult<ExportRun>
     where
-        F: FnMut(usize, usize, &str),
+        F: crate::progress::ProgressFn,
     {
         let usb_root = usb_root.to_path_buf();
         let options = options.clone();
@@ -2544,7 +2544,7 @@ impl BackendService {
         on_progress: &mut F,
     ) -> BackendResult<(usize, Vec<ExportTrackData>)>
     where
-        F: FnMut(usize, usize, &str),
+        F: crate::progress::ProgressFn,
     {
         let formats = super::usb_identity::read_usb_audio_formats(usb_root);
         let plan = |tracks: &[ExportTrackData]| {

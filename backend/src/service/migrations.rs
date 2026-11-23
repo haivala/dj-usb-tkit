@@ -22,8 +22,6 @@ use crate::models::RunDataMigrationsData;
 use super::BackendService;
 use super::anlz::{GridUpgrade, PvbrFill, fill_mp3_pvbr, upgrade_bundle_beat_grid};
 
-pub(crate) type Progress<'a> = &'a mut dyn FnMut(usize, usize, &str);
-
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(crate) enum Phase {
     /// Run synchronously at the end of `BackendService::new`.
@@ -45,7 +43,7 @@ pub(crate) struct Migration {
     pub phase: Phase,
     /// Progress-bar text.
     pub label: fn() -> Text,
-    pub run: fn(&BackendService, Progress<'_>) -> BackendResult<Outcome>,
+    pub run: fn(&BackendService, &mut dyn crate::progress::ProgressFn) -> BackendResult<Outcome>,
 }
 
 pub(crate) const MIGRATIONS: &[Migration] = &[
@@ -101,7 +99,7 @@ impl BackendService {
     /// [`BackendService::ensure_no_data_migration`]).
     pub fn run_data_migrations<F>(&self, mut on_progress: F) -> BackendResult<RunDataMigrationsData>
     where
-        F: FnMut(usize, usize, &str),
+        F: crate::progress::ProgressFn,
     {
         run_registry(self, MIGRATIONS, Phase::Background, &mut on_progress)
     }
@@ -159,7 +157,7 @@ fn run_registry(
     svc: &BackendService,
     registry: &[Migration],
     phase: Phase,
-    on_progress: Progress<'_>,
+    on_progress: &mut dyn crate::progress::ProgressFn,
 ) -> BackendResult<RunDataMigrationsData> {
     let pending = pending(svc, registry, phase)?;
     let mut summary = RunDataMigrationsData::default();
@@ -224,7 +222,7 @@ fn run_registry(
 /// bundles live elsewhere.
 fn upgrade_cached_beat_grids(
     svc: &BackendService,
-    progress: Progress<'_>,
+    progress: &mut dyn crate::progress::ProgressFn,
 ) -> BackendResult<Outcome> {
     let dir = svc.db.data_dir().join("analysis").join("waveforms");
     let Ok(entries) = std::fs::read_dir(&dir) else {
@@ -293,7 +291,7 @@ fn upgrade_cached_beat_grids(
 /// included, once the file is back.
 fn fill_cached_mp3_seek_indexes(
     svc: &BackendService,
-    progress: Progress<'_>,
+    progress: &mut dyn crate::progress::ProgressFn,
 ) -> BackendResult<Outcome> {
     let waveform_dir = svc.db.data_dir().join("analysis").join("waveforms");
     let conn = svc.db.connect()?;

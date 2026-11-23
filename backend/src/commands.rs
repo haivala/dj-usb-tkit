@@ -256,7 +256,7 @@ impl BackendCommands {
         on_progress: F,
     ) -> ApiResponse<SaveUsbTrackMetadataEditsData>
     where
-        F: FnMut(usize, usize, &str),
+        F: crate::progress::ProgressFn,
     {
         wrap_failed(
             self.service
@@ -288,7 +288,7 @@ impl BackendCommands {
         on_progress: F,
     ) -> ApiResponse<SaveUsbTrackAnalysisEditsData>
     where
-        F: FnMut(usize, usize, &str),
+        F: crate::progress::ProgressFn,
     {
         wrap(
             self.service
@@ -587,7 +587,7 @@ impl BackendCommands {
         on_progress: F,
     ) -> ApiResponse<RunDataMigrationsData>
     where
-        F: FnMut(usize, usize, &str),
+        F: crate::progress::ProgressFn,
     {
         wrap_failed(
             self.service.run_data_migrations(on_progress),
@@ -608,7 +608,7 @@ impl BackendCommands {
         on_progress: F,
     ) -> ApiResponse<WithPlaylists<FetchUsbPlaylistsData>>
     where
-        F: FnMut(usize, usize, &str),
+        F: crate::progress::ProgressFn,
     {
         wrap(
             self.with_playlists(
@@ -631,7 +631,7 @@ impl BackendCommands {
         on_progress: F,
     ) -> ApiResponse<FetchUsbHistoriesData>
     where
-        F: FnMut(usize, usize, &str),
+        F: crate::progress::ProgressFn,
     {
         wrap(
             self.service
@@ -686,7 +686,7 @@ impl BackendCommands {
         on_progress: F,
     ) -> ApiResponse<RemoveUsbPlaylistData>
     where
-        F: FnMut(usize, usize, &str),
+        F: crate::progress::ProgressFn,
     {
         wrap(
             self.service
@@ -742,7 +742,7 @@ impl BackendCommands {
         on_progress: F,
     ) -> ApiResponse<crate::models::UsbOrderEditData>
     where
-        F: FnMut(usize, usize, &str),
+        F: crate::progress::ProgressFn,
     {
         wrap_failed(
             self.service
@@ -885,7 +885,7 @@ impl BackendCommands {
         on_progress: F,
     ) -> ApiResponse<WithPlaylists<ExportToUsbData>>
     where
-        F: FnMut(usize, usize, &str),
+        F: crate::progress::ProgressFn,
     {
         wrap(self.with_playlists(self.service.export_to_usb_with_progress(req, on_progress)))
     }
@@ -896,7 +896,7 @@ impl BackendCommands {
         on_progress: F,
     ) -> ApiResponse<WithPlaylists<crate::models::ExportPlaylistsToUsbData>>
     where
-        F: FnMut(usize, usize, &str),
+        F: crate::progress::ProgressFn,
     {
         wrap(
             self.with_playlists(
@@ -949,7 +949,7 @@ impl BackendCommands {
         on_progress: F,
     ) -> ApiResponse<WithPlaylists<RunUsbDiagnosticsData>>
     where
-        F: FnMut(usize, usize, &str),
+        F: crate::progress::ProgressFn,
     {
         wrap(
             self.with_playlists(
@@ -972,7 +972,7 @@ impl BackendCommands {
         on_progress: F,
     ) -> ApiResponse<RunUsbParityReportData>
     where
-        F: FnMut(usize, usize, &str),
+        F: crate::progress::ProgressFn,
     {
         wrap(
             self.service
@@ -993,7 +993,7 @@ impl BackendCommands {
         on_progress: F,
     ) -> ApiResponse<WithPlaylists<RepairUsbDiagnosticsData>>
     where
-        F: FnMut(usize, usize, &str),
+        F: crate::progress::ProgressFn,
     {
         wrap(
             self.with_playlists(

@@ -431,7 +431,7 @@ impl BackendService {
     pub(crate) fn make_transcodes_for_export(
         &self,
         wanted: &[(String, TranscodeFormat)],
-        mut on_progress: impl FnMut(usize, usize, &str),
+        mut on_progress: impl crate::progress::ProgressFn,
     ) -> BackendResult<Vec<(String, String)>> {
         let conn = self.db.connect()?;
         let ids: Vec<String> = wanted.iter().map(|(id, _)| id.clone()).collect();

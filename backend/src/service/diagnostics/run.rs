@@ -18,7 +18,7 @@ impl BackendService {
         on_progress: F,
     ) -> BackendResult<RunUsbDiagnosticsData>
     where
-        F: FnMut(usize, usize, &str),
+        F: crate::progress::ProgressFn,
     {
         self.run_usb_diagnostics_with_progress_impl(req, None, None, on_progress)
     }
@@ -39,7 +39,7 @@ impl BackendService {
         mut on_progress: F,
     ) -> BackendResult<RunUsbDiagnosticsData>
     where
-        F: FnMut(usize, usize, &str),
+        F: crate::progress::ProgressFn,
     {
         const SLOW_USB_STAGE_MS: u128 = 3_000;
         let start = std::time::Instant::now();
@@ -585,7 +585,7 @@ impl BackendService {
         on_progress: F,
     ) -> BackendResult<RunUsbParityReportData>
     where
-        F: FnMut(usize, usize, &str),
+        F: crate::progress::ProgressFn,
     {
         self.run_usb_parity_report_with_progress_impl(req, None, None, on_progress)
     }
@@ -603,7 +603,7 @@ impl BackendService {
         mut on_progress: F,
     ) -> BackendResult<RunUsbParityReportData>
     where
-        F: FnMut(usize, usize, &str),
+        F: crate::progress::ProgressFn,
     {
         const SLOW_USB_STAGE_MS: u128 = 3_000;
         let start = std::time::Instant::now();

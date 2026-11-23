@@ -404,7 +404,7 @@ async fn run_usb_job_with_progress<T, F>(
 ) -> Result<ApiResponse<T>, String>
 where
     T: Serialize + Send + 'static,
-    F: FnOnce(Box<dyn FnMut(usize, usize, &str) + Send>) -> ApiResponse<T> + Send + 'static,
+    F: FnOnce(Box<dyn crate::progress::ProgressFn + Send>) -> ApiResponse<T> + Send + 'static,
 {
     let job_id = Uuid::now_v7().to_string();
     let identity = JobIdentity {

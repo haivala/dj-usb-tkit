@@ -181,7 +181,7 @@ struct DetectedRepairs {
 /// Progress through the selected repair fixes. Each fix owns a segment of the
 /// apply phase; multi-file fixes can report completed items within theirs.
 struct ApplyProgress<'a> {
-    emit: &'a mut dyn FnMut(usize, usize, &str),
+    emit: &'a mut dyn crate::progress::ProgressFn,
     total_fixes: usize,
     started_fixes: usize,
     start: usize,
@@ -190,7 +190,7 @@ struct ApplyProgress<'a> {
 }
 
 impl<'a> ApplyProgress<'a> {
-    fn new(emit: &'a mut dyn FnMut(usize, usize, &str), total_fixes: usize) -> Self {
+    fn new(emit: &'a mut dyn crate::progress::ProgressFn, total_fixes: usize) -> Self {
         Self {
             emit,
             total_fixes: total_fixes.max(1),
@@ -663,7 +663,7 @@ impl BackendService {
         mut on_progress: F,
     ) -> BackendResult<RepairUsbDiagnosticsData>
     where
-        F: FnMut(usize, usize, &str),
+        F: crate::progress::ProgressFn,
     {
         let start = std::time::Instant::now();
         let _usb_write_guard = self.lock_usb_writes();

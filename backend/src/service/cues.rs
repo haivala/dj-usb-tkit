@@ -1230,7 +1230,7 @@ impl BackendService {
         mut on_progress: F,
     ) -> BackendResult<SaveUsbTrackAnalysisEditsData>
     where
-        F: FnMut(usize, usize, &str),
+        F: crate::progress::ProgressFn,
     {
         const USB_SAVE_STEPS: usize = 5;
         let _usb_write_guard = self.lock_usb_writes();

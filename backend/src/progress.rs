@@ -4,11 +4,18 @@
 //! file or playlist being worked on, which changes length every moment) and
 //! its detail next to the elapsed time on the left: counts, sizes, read
 //! speed. The detail rides in the same string as the message, after
-//! [`DETAIL_SEPARATOR`], so the `FnMut(usize, usize, &str)` progress callbacks
-//! all through the backend carry it unchanged; the job event emitters split
-//! it into the payload's own `detail` field ([`split`]).
+//! [`DETAIL_SEPARATOR`], so the [`ProgressFn`] callbacks all through the
+//! backend carry it unchanged; the job event emitters split it into the
+//! payload's own `detail` field ([`split`]).
 
 use crate::i18n::tr;
+
+/// A job's progress callback: `(current, total, text)`, where `text` is a
+/// message with an optional detail ([`with_detail`]). Every closure with that
+/// signature is one; `dyn ProgressFn` is the type-erased form.
+pub trait ProgressFn: FnMut(usize, usize, &str) {}
+
+impl<F: FnMut(usize, usize, &str) + ?Sized> ProgressFn for F {}
 
 /// ASCII unit separator: never part of a rendered text.
 pub const DETAIL_SEPARATOR: char = '\u{1f}';

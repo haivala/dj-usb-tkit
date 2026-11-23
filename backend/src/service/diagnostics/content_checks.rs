@@ -538,7 +538,7 @@ pub(crate) fn diagnose_playlist_resolution_with_edb_internal<F>(
     mut on_playlist_progress: F,
 ) -> (DiagSection, Vec<PlaylistDiagEntry>)
 where
-    F: FnMut(usize, usize, &str),
+    F: crate::progress::ProgressFn,
 {
     let mut checks = Vec::new();
     let mut playlist_details = Vec::new();
