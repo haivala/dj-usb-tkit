@@ -532,6 +532,7 @@ export async function registerBackendJobEvents(ctx) {
   if (typeof unlistenJobsBlocked === "function") {
     state.unlistenJobsBlocked = unlistenJobsBlocked;
   }
+  await ctx.loadBlockedActions();
 
   const unlistenPlayback = await listen("playback:event", (event) => {
     handlePlaybackEvent(ctx, event?.payload);

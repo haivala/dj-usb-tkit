@@ -78,7 +78,7 @@ export function createAppContext(env) {
   bindActions(backupsUi, "renderBackups restoreUsbBackup deleteUsbBackup");
   bindActions(jobMgr, `setProgress dismissProgress startProgressHeartbeat stopProgressHeartbeat
     withProgress handleJobEvent toggleAnalysisPause cancelAnalysis cancelTranscode scheduleProgressIdle`);
-  bindActions(actionBlocks, "initActionBlocks applyBlockedActions actionBlockedReason whenActionUnblocked");
+  bindActions(actionBlocks, "initActionBlocks applyBlockedActions loadBlockedActions actionBlockedReason whenActionUnblocked");
   bindActions(uiCtrl, `updateModeText updateActivePlaylistIndicators updateAddToPlaylistButtons
     updateUsbNameBadge updateSelectionCount updateUsbSubNavDisabledState updateUsbEmptyState
     updateAnalyzeLibraryButtonLabel closeSettingsDrawer updateUsbHealthDot

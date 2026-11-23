@@ -546,6 +546,7 @@
         case "get_library_sources": return ok(backend.librarySources());
         case "set_frontend_setting": return ok({ saved: true });
         case "list_usb_devices": return ok({ items: [] });
+        case "get_blocked_actions": return ok({ blockedActions: {} });
         case "fetch_usb_playlists": return ok(backend.usbPlaylists());
         case "fetch_usb_histories": return ok(backend.usbHistories());
         case "fetch_usb_playlist_tracks":

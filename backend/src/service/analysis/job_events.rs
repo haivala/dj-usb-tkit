@@ -6,9 +6,10 @@ use chrono::Utc;
 
 use super::AnalyzeTrackProgress;
 use super::coordinator::AnalysisEvent;
+use crate::job_conflicts::JobType;
 use crate::models::JobEventPayload;
 
-const JOB_TYPE: &str = "analysis";
+const JOB_TYPE: JobType = JobType::Analysis;
 const STAGE: &str = "analyze_new_tracks";
 
 fn job_payload(event: &str, job_id: &str, percent: usize, message: String) -> JobEventPayload {
@@ -16,7 +17,7 @@ fn job_payload(event: &str, job_id: &str, percent: usize, message: String) -> Jo
     JobEventPayload {
         event: event.to_string(),
         job_id: job_id.to_string(),
-        job_type: JOB_TYPE.to_string(),
+        job_type: JOB_TYPE,
         stage: STAGE.to_string(),
         current: 0,
         total: 1,

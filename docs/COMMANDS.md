@@ -97,20 +97,25 @@ in place of the row whose id was the path.
 ### What a running job blocks
 
 One table decides what can't start while a job runs (`backend/src/job_conflicts.rs`).
-Every command is in one action group, or in none when no job ever blocks it (reads, app
-playlists, settings, playback, cancels); a test fails for a registered command that isn't
-listed. The desktop app's invoke handler refuses a blocked command before it runs, with
-the reason as its error. Whenever a job starts or ends, the backend sends `jobs:blocked`
-with `blockedActions`, the blocked groups and the reason for each (`{ "usb": "Wait for
-the export to finish." }`); the frontend (`vanilla-ui/action_blocks.mjs`) marks every
+What blocks is a running job, by its `JobType` (`jobType` in its events), or the USB
+Playlists page's order edit while it's open. Every command is in one action group, or in
+none when nothing ever blocks it (reads, app playlists, settings, playback, cancels); a
+test fails for a registered command that isn't listed. The desktop app's invoke handler
+refuses a blocked command before it runs, with the reason as its error. Whenever a job
+starts or ends, or the order edit opens or closes, the backend sends `jobs:blocked` with
+`blockedActions`, the blocked groups and the reason for each (`{ "usb": "Wait for the
+export to finish." }`); the frontend (`vanilla-ui/action_blocks.mjs`) marks every
 control with `data-action-group` in a blocked group `aria-disabled`, shows the reason as
-its tooltip and on the status line when clicked, and stops its clicks and keys.
+its tooltip and on the status line when clicked, and stops its clicks and keys. Once the
+window listens to `jobs:blocked` (also after a reload, when a job or the order edit may
+still be on), it asks `get_blocked_actions` → `{ blockedActions }` for the current map.
 
 | Group | Commands |
 |---|---|
 | `switch-usb` | `select_usb`, `prune_usb_device`, `pick_usb_folder` |
 | `export` | `export_to_usb`, `export_playlists_to_usb` |
-| `usb` | every other USB write (name, audio formats, backups, Player Menu, background colour, USB playlist removal and order, USB track edits, initialize) and the USB checks (diagnostics, parity, repair) |
+| `usb` | every other USB write (audio formats, backups, Player Menu, background colour, USB playlist removal and order, USB track edits, initialize) and the USB checks (diagnostics, parity, repair) |
+| `usb-name` | `set_usb_device_name` (it moves the drive's backups and cache) |
 | `library` | source folders (add, remove, switch, relocate), rekordbox / Mixxx imports and their track data |
 | `convert` | `transcode_tracks`, `remove_track_transcodes`, the transcode folder |
 | `analyze` | `analyze_new_tracks`, `scan_library` (Analyze Library scans first) |
@@ -118,18 +123,20 @@ its tooltip and on the status line when clicked, and stops its clicks and keys.
 | `essentia` | `download_essentia`, `remove_essentia` |
 | `app` | `set_language`, `install_update` (both restart the window) |
 
-| Running job ↓ blocks → | switch-usb | export | usb | library | convert | analyze | track-edit | essentia | app |
-|---|---|---|---|---|---|---|---|---|---|
-| `export`, `usb_write` | ✗ | ✗ | ✗ | ✗ | ✗ | | | | ✗ |
-| `diagnostics` | ✗ | ✗ | ✗ | | | | | | ✗ |
-| `usb_read` | ✗ | | | | | | | | ✗ |
-| `scan`, `transcode` | | ✗ | | ✗ | ✗ | | | | ✗ |
-| `analysis` | | | | | | | | ✗ | ✗ |
-| `migration` | | | | | | ✗ | ✗ | | ✗ |
-| `update` | ✗ | ✗ | ✗ | ✗ | ✗ | ✗ | ✗ | ✗ | ✗ |
+| Blocker ↓ blocks → | switch-usb | export | usb | usb-name | library | convert | analyze | track-edit | essentia | app |
+|---|---|---|---|---|---|---|---|---|---|---|
+| `export`, `usb_write` job | ✗ | ✗ | ✗ | ✗ | ✗ | ✗ | | | | ✗ |
+| `diagnostics` job | ✗ | ✗ | ✗ | ✗ | | | | | | ✗ |
+| `usb_read` job | ✗ | | | | | | | | | ✗ |
+| `scan`, `transcode` job | | ✗ | | | ✗ | ✗ | | | | ✗ |
+| `analysis` job | | | | | | | | | ✗ | ✗ |
+| `migration` job | | | | | | | ✗ | ✗ | | ✗ |
+| `update` job | ✗ | ✗ | ✗ | ✗ | ✗ | ✗ | ✗ | ✗ | ✗ | ✗ |
+| open order edit | | | | ✗ | | | | | | |
 
 An analysis runs alongside an export, and app playlists can be edited during one (the
-playlist then shows as changed). A USB read only blocks switching to another USB: the
+playlist then shows as changed). The order edit's page can't be left while it's open, so
+it only has to hold off naming the drive from the header. A USB read only blocks switching to another USB: the
 stick's databases are read from their staged copies. A USB track edit saved while the
 `usb` group is blocked waits for it instead of failing, so an open editor's changes
 aren't lost.

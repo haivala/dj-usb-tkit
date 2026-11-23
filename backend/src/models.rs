@@ -47,7 +47,7 @@ impl<T: Serialize> ApiResponse<T> {
 pub struct JobEventPayload {
     pub event: String,
     pub job_id: String,
-    pub job_type: String,
+    pub job_type: crate::job_conflicts::JobType,
     pub stage: String,
     pub current: usize,
     pub total: usize,
@@ -1411,6 +1411,14 @@ pub struct ReorderPlaylistTracksRequest {
 pub struct ReorderPlaylistTracksData {
     pub playlist_id: String,
     pub reordered: usize,
+}
+
+/// What's blocked now (`job_conflicts::blocked_actions`): the groups, each with its
+/// reason. `get_blocked_actions` answers with it; `jobs:blocked` sends the same map.
+#[derive(Debug, Clone, PartialEq, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct GetBlockedActionsData {
+    pub blocked_actions: std::collections::BTreeMap<crate::job_conflicts::ActionGroup, String>,
 }
 
 /// `get_ui_texts`: every `ui-` text of the catalog, in the current language, for the text

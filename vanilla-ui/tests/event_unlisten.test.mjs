@@ -20,6 +20,7 @@ test("registerBackendJobEvents unregisters old listeners and stores new ones", a
   const ctx = {
     state,
     isTauriRuntime: () => true,
+    loadBlockedActions: async () => {},
     getTauriEventListen: async () => async (eventName, handler) => {
       assert.equal(typeof handler, "function");
       if (eventName === "job:event") return () => { newJobUnlistenCalls += 1; };

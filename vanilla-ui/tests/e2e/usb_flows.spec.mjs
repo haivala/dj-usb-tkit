@@ -1680,6 +1680,28 @@ async function connectUsb(page) {
 // What a running job blocks comes from the backend (`jobs:blocked`, the table in
 // job_conflicts.rs): every control of a blocked group is off, says why, and ignores clicks,
 // until the groups are free again. Controls keep their own enabled state meanwhile.
+// A reload of the window (a language change) while an order edit is open: the backend
+// still has it, so naming the drive is off from the start, without a `jobs:blocked`.
+test("a reloaded window asks what's blocked", async ({ page }) => {
+  await installTauriMock(page, "valid");
+  await listenForBackendEvents(page);
+  await page.addInitScript(() => {
+    window.__e2eBackend.override(async (command) => {
+      if (command === "get_blocked_actions") {
+        return { ok: true, data: { blockedActions: { "usb-name": "Save or cancel the order edit first." } } };
+      }
+    });
+  });
+  await page.goto("/");
+  await connectUsb(page);
+  await page.locator('.nav-item[data-view="usb"]').click();
+
+  const badge = page.locator("#usbNameBadge");
+  await expect(badge).toHaveAttribute("data-blocked-reason", "Save or cancel the order edit first.");
+  await page.evaluate(() => window.__emitBlockedActions({}));
+  await expect(badge).not.toHaveAttribute("data-blocked-reason");
+});
+
 test("a running job blocks its action groups", async ({ page }) => {
   await installTauriMock(page, "valid");
   await listenForBackendEvents(page);
@@ -1736,8 +1758,16 @@ test("a running job blocks its action groups", async ({ page }) => {
   }
   expect(await counts()).toEqual(before);
 
-  // Only the groups the backend names: the analysis buttons stay on.
+  // Only the groups the backend names: the analysis buttons and naming the drive stay on.
   await expect(page.locator("#analyzeLibraryBtn")).toBeEnabled();
+  await expect(page.locator("#usbNameBadge")).not.toHaveAttribute("data-blocked-reason");
+
+  // An open order edit blocks only naming the drive.
+  const editReason = "Save or cancel the order edit first.";
+  await blocked({ "usb-name": editReason });
+  await expect(page.locator("#usbNameBadge")).toHaveAttribute("data-blocked-reason", editReason);
+  await expect(page.locator("#usbNameBadge")).toHaveAttribute("aria-disabled", "true");
+  await expect(exportBtn).toBeEnabled();
 
   await blocked({});
   await expect(select).toBeEnabled();

@@ -1368,7 +1368,8 @@ repair-outcome-detail-engine = setting on, rebuilt ({ $tracks ->
 
 # When a job fails without a message.
 job-failed-unknown = Operation failed
-# Why a button is off while a job runs (the tooltip of every control the job blocks), by job.
+# Why a button is off while a job runs (the tooltip of every control the job blocks), by job,
+# and while the USB Playlists page's order edit is open.
 job-blocks-export = Wait for the export to finish.
 job-blocks-usb-write = Wait for the change to the USB to finish.
 job-blocks-usb-read = Wait for the USB to finish loading.
@@ -1378,7 +1379,7 @@ job-blocks-transcode = Wait for the conversion to finish, or cancel it.
 job-blocks-analysis = Wait for the analysis to finish, or cancel it.
 job-blocks-migration = Wait for the data upgrade to finish.
 job-blocks-update = The update is being installed.
-job-blocks-other = Wait for the running job to finish.
+job-blocks-usb-order-edit = Save or cancel the order edit first.
 job-save-usb-track-metadata-edits-started = USB: Saving track details
 job-save-usb-track-metadata-edits-completed = USB: Track details saved
 job-save-usb-track-analysis-edits-started = USB: Saving cue edits
@@ -1852,10 +1853,6 @@ settings-language-unknown = Unknown language: { $language }
 settings-warning-language-unavailable = The saved language { $language } isn't available; using English
 # This catalog's language, named in itself ("English", "Deutsch"): the settings' language list shows it.
 settings-language-name = English
-# The error when the language is changed while a job (USB, analysis, a library scan or import) runs: the
-# change reloads the window, which would lose the job's progress bar, pause and cancel. Shown after
-# settings-language-failed's "Could not change the language: ".
-settings-language-job-running = a job is running. Try again when it has finished.
 # The status line when saving the language failed. $error: why.
 settings-language-failed = Could not change the language: { $error }
 # The native folder dialog's title, from the transcode folder's Change.
@@ -3149,7 +3146,6 @@ ui-usb-playlists-compared = Playlists compared
 # The USB playlists page's order edit: its buttons, the tooltips and the leave dialog.
 ui-usb-playlists-edit-order = Edit order
 ui-usb-playlists-edit-order-tooltip = Change the order of the playlists and of the tracks in them; nothing is written until Save order
-ui-usb-playlists-order-edit-blocks-jobs = Save or cancel the order edit first
 ui-usb-playlists-save-order = Save order
 ui-usb-playlists-order-edited = Track order changed
 ui-usb-playlists-drag-search-active = Clear the search to drag tracks

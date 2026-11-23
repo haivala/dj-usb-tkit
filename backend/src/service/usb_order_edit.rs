@@ -330,6 +330,11 @@ impl BackendService {
             .unwrap_or_default()
     }
 
+    /// Whether an order edit is open (for the selected USB: selecting another drops it).
+    pub fn usb_order_edit_open(&self) -> bool {
+        self.order_edit_slot().is_some()
+    }
+
     /// Edit order's tooltip while the USB can't be written; `None` when it can.
     pub(crate) fn usb_order_edit_blocked_text(usb_root: &Path) -> Option<String> {
         (!has_write_access(usb_root)).then(|| tr::usb_order_edit_read_only().render())

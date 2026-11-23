@@ -8,7 +8,7 @@ import { setActiveListItem } from "../shell/actions.mjs";
 import { STORAGE_KEY_USB_ROOT, STORAGE_KEY_EXPORT_ENGINE_LIBRARY } from "../../settings_keys.mjs";
 import {
   applyUsbOrderEdit, applyUsbOrderSortClick, forgetUsbOrderSort, isUsbOrderEditing,
-  refuseWhileUsbOrderEditing, renderUsbOrderEditControls
+  renderUsbOrderEditControls
 } from "./order_edit.mjs";
 
 // Preview Fixes and Apply Fixes are off when their report says there's
@@ -440,7 +440,6 @@ async function promptDriveNameIfUnset(ctx, data) {
 // everything showing the name is refreshed from there.
 export async function renameDrive(ctx) {
   const { state } = ctx;
-  if (refuseWhileUsbOrderEditing(ctx)) return;
   const saved = await openDriveNameDialog(ctx, state.usbDeviceName);
   if (!saved) return;
   ctx.emitStatus(saved.statusText);

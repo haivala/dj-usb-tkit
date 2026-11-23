@@ -485,23 +485,18 @@ impl BackendCommands {
         wrap(self.service.set_track_columns(req))
     }
 
-    /// Changes the language, refused while `job_running`: the change reloads the window,
-    /// which loses a running job's progress bar, pause and cancel (no command reconnects to
-    /// one). The desktop app passes whether its job registry is empty, and holds the registry
-    /// meanwhile so no job starts mid-change.
+    /// Changes the language. The desktop app refuses it while a job runs
+    /// (`job_conflicts`): the change reloads the window.
     pub fn set_language(
         &self,
         req: crate::models::SetLanguageRequest,
-        job_running: bool,
     ) -> ApiResponse<crate::models::SetLanguageData> {
-        let result = if job_running {
-            Err(crate::error::BackendError::Validation(
-                tr::settings_language_job_running(),
-            ))
-        } else {
-            self.service.set_language(req)
-        };
-        wrap_failed(result, tr::settings_language_failed)
+        wrap_failed(self.service.set_language(req), tr::settings_language_failed)
+    }
+
+    /// Whether the USB Playlists page's order edit is open: it blocks naming the USB.
+    pub fn usb_order_edit_open(&self) -> bool {
+        self.service.usb_order_edit_open()
     }
 
     /// See `BackendService::apply_saved_language`: the desktop app calls it once at startup.

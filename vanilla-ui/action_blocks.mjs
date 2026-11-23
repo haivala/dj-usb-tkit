@@ -7,6 +7,9 @@
 // one) and keys stopped, with the reason in the status line. A control's own `disabled`
 // (nothing selected, nothing to do) stays its own.
 //
+// A reload of the window starts with nothing blocked, though a job or the USB order edit
+// may still be on: `loadBlockedActions` asks once the window listens to `jobs:blocked`.
+//
 // Code that acts without a click (switching to a plugged-in USB, a save waiting for a USB
 // job) asks `actionBlockedReason` / `whenActionUnblocked`.
 
@@ -56,6 +59,7 @@ export function initActionBlocks(ctx) {
 // `jobs:blocked`: the groups the running jobs block now, `{ group: reason }`.
 export function applyBlockedActions(ctx, blockedActions) {
   const { state, document } = ctx;
+  state.blockedActionsSeq += 1;
   state.blockedActions = blockedActions || {};
   syncTree(state, document.body);
   for (const [group, waiters] of state.actionBlockWaiters) {
@@ -63,6 +67,19 @@ export function applyBlockedActions(ctx, blockedActions) {
     state.actionBlockWaiters.delete(group);
     waiters.forEach((resolve) => resolve());
   }
+}
+
+// What's blocked now, from the backend. An event that came while it was asked is newer.
+export async function loadBlockedActions(ctx) {
+  const seq = ctx.state.blockedActionsSeq;
+  let data;
+  try {
+    data = await ctx.command("get_blocked_actions");
+  } catch (err) {
+    ctx.warn("Failed to load the blocked actions:", err);
+    return;
+  }
+  if (ctx.state.blockedActionsSeq === seq) applyBlockedActions(ctx, data?.blockedActions);
 }
 
 // Why `group` is blocked now, or null.

@@ -52,12 +52,9 @@ fn save_language(
     backend: &BackendCommands,
     language: &str,
 ) -> backend::models::ApiResponse<backend::models::SetLanguageData> {
-    backend.set_language(
-        SetLanguageRequest {
-            language: language.to_string(),
-        },
-        false,
-    )
+    backend.set_language(SetLanguageRequest {
+        language: language.to_string(),
+    })
 }
 
 /// Every line logged in this test binary, as (Event Log text, log file text). The sink is
@@ -515,29 +512,6 @@ fn numbers_take_the_language_decimal_separator_and_english_logs_keep_the_point()
     // Whole numbers have no separator and no grouping.
     let shown = backend::utils::track_list_summary(1234, 0);
     assert!(shown.contains("1234"), "{shown}");
-}
-
-#[test]
-fn the_language_doesnt_change_while_a_job_runs() {
-    let _test = LanguageTest::start();
-    let root = tempdir().expect("temp root");
-    let backend = BackendCommands::new(root.path().join("data")).expect("create backend");
-    let language = |value: &str| SetLanguageRequest {
-        language: value.to_string(),
-    };
-
-    let refused = backend.set_language(language(TEST_LANGUAGE), true);
-    assert!(!refused.ok, "{refused:?}");
-    let error = refused.error.expect("error");
-    assert_eq!(
-        error.message,
-        "Could not change the language: a job is running. Try again when it has finished."
-    );
-    assert_eq!(i18n::current_language(), ENGLISH);
-
-    let saved = backend.set_language(language(TEST_LANGUAGE), false);
-    assert!(saved.ok, "{saved:?}");
-    assert_eq!(i18n::current_language(), TEST_LANGUAGE);
 }
 
 #[test]

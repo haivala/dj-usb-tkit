@@ -14,6 +14,7 @@ use uuid::Uuid;
 use crate::commands::BackendCommands;
 use crate::error::{ErrorCode, ErrorPayload};
 use crate::i18n::{Text, tr};
+use crate::job_conflicts::{ActionGroup, Blocker, JobType, blocked_actions, refusal};
 use crate::models::{
     AddLibrarySelectionToPlaylistRequest, AddLibrarySelectionToPlaylistsRequest,
     AddSourceFoldersData, AddSourceFoldersRequest, AddTrackCandidatesToPlaylistData,
@@ -69,25 +70,73 @@ const ESSENTIA_DOWNLOAD_EVENT: &str = "essentia_download_progress";
 /// job emits `job.started` before doing any work, so a job started meanwhile
 /// blocks there until the app has restarted instead of being cut short. What
 /// the running jobs block comes from `job_conflicts`.
-static RUNNING_JOBS: Mutex<BTreeMap<String, String>> = Mutex::new(BTreeMap::new());
+static RUNNING_JOBS: Mutex<BTreeMap<String, JobType>> = Mutex::new(BTreeMap::new());
 
 /// The event that carries the blocked action groups (`job_conflicts::blocked_actions`)
-/// whenever a job starts or ends.
+/// whenever a blocker comes or goes: a job starts or ends, the USB order edit opens or
+/// closes.
 const JOBS_BLOCKED_EVENT: &str = "jobs:blocked";
 
-fn running_jobs() -> MutexGuard<'static, BTreeMap<String, String>> {
+fn running_jobs() -> MutexGuard<'static, BTreeMap<String, JobType>> {
     RUNNING_JOBS.lock().unwrap_or_else(PoisonError::into_inner)
 }
 
-/// The refusal of a command the running jobs block (`job_conflicts`), for the desktop
-/// app's invoke handler to answer with before the command runs.
-pub fn refuse_blocked_command(command: &str) -> Option<ApiResponse<()>> {
-    let jobs = running_jobs();
-    let reason = crate::job_conflicts::refusal(command, jobs.values().map(String::as_str))?;
+/// Whether the USB Playlists page's order edit is open. Asked before `RUNNING_JOBS` is
+/// locked, never while it's held.
+fn usb_order_edit_open<R: tauri::Runtime, M: Manager<R>>(manager: &M) -> bool {
+    manager
+        .try_state::<BackendCommands>()
+        .is_some_and(|commands| commands.usb_order_edit_open())
+}
+
+/// What blocks actions now: the running jobs, and the order edit when it's open.
+fn blockers(
+    jobs: &BTreeMap<String, JobType>,
+    usb_order_edit_open: bool,
+) -> impl Iterator<Item = Blocker> + '_ {
+    jobs.values()
+        .map(|job_type| Blocker::Job(*job_type))
+        .chain(usb_order_edit_open.then_some(Blocker::UsbOrderEdit))
+}
+
+fn send_blocked_actions<R: tauri::Runtime>(
+    app: &AppHandle<R>,
+    blocked: BTreeMap<ActionGroup, String>,
+) {
+    let _ = app.emit(
+        JOBS_BLOCKED_EVENT,
+        serde_json::json!({ "blockedActions": blocked }),
+    );
+}
+
+/// Sends what's blocked now, after the order edit opened or closed outside a job.
+fn emit_blocked_actions<R: tauri::Runtime>(app: &AppHandle<R>) {
+    let edit_open = usb_order_edit_open(app);
+    let blocked = blocked_actions(blockers(&running_jobs(), edit_open));
+    send_blocked_actions(app, blocked);
+}
+
+/// The refusal of `command` while these blockers are on (`job_conflicts`), or `None`.
+fn blocked_refusal<T: Serialize>(
+    command: &str,
+    jobs: &BTreeMap<String, JobType>,
+    usb_order_edit_open: bool,
+) -> Option<ApiResponse<T>> {
+    let reason = refusal(command, blockers(jobs, usb_order_edit_open))?;
     Some(ApiResponse::failure(ErrorPayload::new(
         ErrorCode::ValidationError,
         reason,
     )))
+}
+
+/// The refusal of a command that something running blocks, for the desktop app's invoke
+/// handler to answer with before the command runs.
+pub fn refuse_blocked_command<R: tauri::Runtime, M: Manager<R>>(
+    manager: &M,
+    command: &str,
+) -> Option<ApiResponse<()>> {
+    let edit_open = usb_order_edit_open(manager);
+    blocked_refusal(command, &running_jobs(), edit_open)
 }
 
 /// Cancellation flag for in-progress Essentia download. Managed Tauri state.
@@ -179,7 +228,7 @@ where
 #[derive(Clone, Copy)]
 struct JobIdentity<'a> {
     job_id: &'a str,
-    job_type: &'a str,
+    job_type: JobType,
     stage: &'a str,
 }
 
@@ -196,7 +245,7 @@ fn emit_job_event<R: tauri::Runtime>(
     let payload = JobEventPayload {
         event: event_name.to_string(),
         job_id: identity.job_id.to_string(),
-        job_type: identity.job_type.to_string(),
+        job_type: identity.job_type,
         stage: identity.stage.to_string(),
         current,
         total,
@@ -238,26 +287,19 @@ fn emit_job_payload<R: tauri::Runtime>(
     event_name: &str,
     payload: JobEventPayload,
 ) {
-    let blocked = match event_name {
-        "job.started" | "job.completed" | "job.failed" => {
+    if matches!(event_name, "job.started" | "job.completed" | "job.failed") {
+        let edit_open = usb_order_edit_open(app);
+        let blocked = {
             let mut jobs = running_jobs();
             if event_name == "job.started" {
-                jobs.insert(payload.job_id.clone(), payload.job_type.clone());
+                jobs.insert(payload.job_id.clone(), payload.job_type);
             } else {
                 jobs.remove(&payload.job_id);
             }
-            Some(crate::job_conflicts::blocked_actions(
-                jobs.values().map(String::as_str),
-            ))
-        }
-        _ => None,
-    };
-    // Before the job's own event, so its controls are off by the time it shows.
-    if let Some(blocked) = blocked {
-        let _ = app.emit(
-            JOBS_BLOCKED_EVENT,
-            serde_json::json!({ "blockedActions": blocked }),
-        );
+            blocked_actions(blockers(&jobs, edit_open))
+        };
+        // Before the job's own event, so its controls are off by the time it shows.
+        send_blocked_actions(app, blocked);
     }
     let direct_event_name = event_name.replace('.', ":");
     let _ = app.emit(&direct_event_name, payload.clone());
@@ -286,7 +328,7 @@ fn emit_job_failed<R: tauri::Runtime>(
 
 async fn run_usb_job<T, F>(
     app: &AppHandle,
-    job_type: &str,
+    job_type: JobType,
     stage: &str,
     started_message: Text,
     completed_message: Text,
@@ -354,7 +396,7 @@ where
 
 async fn run_usb_job_with_progress<T, F>(
     app: &AppHandle,
-    job_type: &str,
+    job_type: JobType,
     stage: &str,
     started_message: Text,
     completed_message: Text,
@@ -383,7 +425,7 @@ where
 
     let app_for_task = app.clone();
     let job_id_for_task = job_id.clone();
-    let job_type_for_task = job_type.to_string();
+
     let stage_for_task = stage.to_string();
     let response = match tauri::async_runtime::spawn_blocking(move || {
         let progress = Box::new(move |current: usize, total: usize, message: &str| {
@@ -391,7 +433,7 @@ where
             let percent = ((current * 100) / denom).min(100);
             let identity = JobIdentity {
                 job_id: &job_id_for_task,
-                job_type: &job_type_for_task,
+                job_type,
                 stage: &stage_for_task,
             };
             // Every job:event carries a non-empty message so the frontend never
@@ -580,7 +622,7 @@ pub async fn scan_library(
     let job_id = Uuid::now_v7().to_string();
     let identity = JobIdentity {
         job_id: &job_id,
-        job_type: "scan",
+        job_type: JobType::Scan,
         stage: "scan_library",
     };
     emit_job_event(
@@ -640,7 +682,7 @@ pub async fn scan_rekordbox_db(
     let job_id = Uuid::now_v7().to_string();
     let identity = JobIdentity {
         job_id: &job_id,
-        job_type: "scan",
+        job_type: JobType::Scan,
         stage: "scan_rekordbox_db",
     };
     emit_job_event(
@@ -702,7 +744,7 @@ pub async fn scan_mixxx_db(
     let job_id = Uuid::now_v7().to_string();
     let identity = JobIdentity {
         job_id: &job_id,
-        job_type: "scan",
+        job_type: JobType::Scan,
         stage: "scan_mixxx_db",
     };
     emit_job_event(
@@ -797,7 +839,7 @@ impl SourceFolderScanJob {
     fn identity(&self) -> JobIdentity<'_> {
         JobIdentity {
             job_id: &self.job_id,
-            job_type: "scan",
+            job_type: JobType::Scan,
             stage: "scan_library",
         }
     }
@@ -999,7 +1041,7 @@ pub async fn save_usb_track_metadata_edits(
     let commands = state.inner().clone();
     run_usb_job_with_progress(
         &app,
-        "usb_write",
+        JobType::UsbWrite,
         "save_usb_track_metadata_edits",
         tr::job_save_usb_track_metadata_edits_started(),
         tr::job_save_usb_track_metadata_edits_completed(),
@@ -1036,7 +1078,7 @@ pub async fn save_usb_track_analysis_edits(
     let commands = state.inner().clone();
     run_usb_job_with_progress(
         &app,
-        "usb_write",
+        JobType::UsbWrite,
         "save_usb_track_analysis_edits",
         tr::job_save_usb_track_analysis_edits_started(),
         tr::job_save_usb_track_analysis_edits_completed(),
@@ -1289,6 +1331,17 @@ pub async fn reorder_playlist_tracks(
     .await)
 }
 
+/// What's blocked now, once the window has started listening to `jobs:blocked`: a job
+/// or an order edit can outlive a reload of the window. Sync: two in-memory reads.
+#[tauri::command]
+pub fn get_blocked_actions(
+    state: State<'_, BackendCommands>,
+) -> ApiResponse<crate::models::GetBlockedActionsData> {
+    let edit_open = state.usb_order_edit_open();
+    let blocked_actions = blocked_actions(blockers(&running_jobs(), edit_open));
+    ApiResponse::success(crate::models::GetBlockedActionsData { blocked_actions })
+}
+
 /// The UI's texts, once at startup, before anything renders. Sync: it reads the parsed
 /// catalog, no I/O.
 #[tauri::command]
@@ -1339,14 +1392,19 @@ pub fn set_track_columns(
 }
 
 /// Sync, so the job registry can be held until the language is saved: no job starts during
-/// the change.
+/// the change (it reloads the window, which would lose a running job's progress bar, pause
+/// and cancel). A job that started after the invoke handler's check is caught here.
 #[tauri::command]
 pub fn set_language(
     state: State<'_, BackendCommands>,
     request: crate::models::SetLanguageRequest,
 ) -> ApiResponse<crate::models::SetLanguageData> {
+    let edit_open = state.usb_order_edit_open();
     let jobs = running_jobs();
-    state.set_language(request, !jobs.is_empty())
+    if let Some(refused) = blocked_refusal("set_language", &jobs, edit_open) {
+        return refused;
+    }
+    state.set_language(request)
 }
 
 #[tauri::command]
@@ -1358,7 +1416,7 @@ pub async fn select_usb(
     let commands = state.inner().clone();
     let response = run_usb_job(
         &app,
-        "usb_read",
+        JobType::UsbRead,
         "select_usb",
         tr::job_validate_usb_root_started(),
         tr::job_validate_usb_root_completed(),
@@ -1527,7 +1585,7 @@ pub async fn run_data_migrations(
     }
     run_usb_job_with_progress(
         &app,
-        "migration",
+        JobType::Migration,
         "migrate",
         tr::job_migrate_started(),
         tr::job_migrate_completed(),
@@ -1547,7 +1605,7 @@ pub async fn fetch_usb_playlists(
     let commands = state.inner().clone();
     run_usb_job_with_progress(
         &app,
-        "usb_read",
+        JobType::UsbRead,
         "fetch_usb_playlists",
         tr::job_fetch_usb_playlists_started(),
         tr::job_fetch_usb_playlists_completed(),
@@ -1569,7 +1627,7 @@ pub async fn fetch_usb_histories(
     let commands = state.inner().clone();
     run_usb_job_with_progress(
         &app,
-        "usb_read",
+        JobType::UsbRead,
         "fetch_usb_histories",
         tr::job_fetch_usb_histories_started(),
         tr::job_fetch_usb_histories_completed(),
@@ -1591,7 +1649,7 @@ pub async fn get_usb_player_menu_config(
     let commands = state.inner().clone();
     run_usb_job(
         &app,
-        "usb_read",
+        JobType::UsbRead,
         "get_usb_player_menu_config",
         tr::job_get_usb_player_menu_config_started(),
         tr::job_get_usb_player_menu_config_completed(),
@@ -1610,7 +1668,7 @@ pub async fn update_usb_player_menu_config(
     let commands = state.inner().clone();
     run_usb_job(
         &app,
-        "usb_write",
+        JobType::UsbWrite,
         "update_usb_player_menu_config",
         tr::job_update_usb_player_menu_config_started(),
         tr::job_update_usb_player_menu_config_completed(),
@@ -1629,7 +1687,7 @@ pub async fn get_usb_background_color(
     let commands = state.inner().clone();
     run_usb_job(
         &app,
-        "usb_read",
+        JobType::UsbRead,
         "get_usb_background_color",
         tr::job_get_usb_background_color_started(),
         tr::job_get_usb_background_color_completed(),
@@ -1648,7 +1706,7 @@ pub async fn set_usb_background_color(
     let commands = state.inner().clone();
     run_usb_job(
         &app,
-        "usb_write",
+        JobType::UsbWrite,
         "set_usb_background_color",
         tr::job_set_usb_background_color_started(),
         tr::job_set_usb_background_color_completed(),
@@ -1667,7 +1725,7 @@ pub async fn remove_usb_playlist(
     let commands = state.inner().clone();
     run_usb_job_with_progress(
         &app,
-        "usb_write",
+        JobType::UsbWrite,
         "remove_usb_playlist",
         tr::job_remove_usb_playlist_started(),
         tr::job_remove_usb_playlist_completed(),
@@ -1682,14 +1740,17 @@ pub async fn remove_usb_playlist(
 
 #[tauri::command]
 pub async fn begin_usb_order_edit(
+    app: AppHandle,
     state: State<'_, BackendCommands>,
     request: crate::models::UsbOrderEditRequest,
 ) -> Result<ApiResponse<crate::models::UsbOrderEditData>, String> {
     let commands = state.inner().clone();
-    Ok(run_blocking_command("begin_usb_order_edit", move || {
+    let response = run_blocking_command("begin_usb_order_edit", move || {
         commands.begin_usb_order_edit(request)
     })
-    .await)
+    .await;
+    emit_blocked_actions(&app);
+    Ok(response)
 }
 
 #[tauri::command]
@@ -1730,14 +1791,17 @@ pub async fn sort_usb_playlist_tracks(
 
 #[tauri::command]
 pub async fn cancel_usb_order_edit(
+    app: AppHandle,
     state: State<'_, BackendCommands>,
     request: crate::models::UsbOrderEditRequest,
 ) -> Result<ApiResponse<crate::models::UsbOrderEditData>, String> {
     let commands = state.inner().clone();
-    Ok(run_blocking_command("cancel_usb_order_edit", move || {
+    let response = run_blocking_command("cancel_usb_order_edit", move || {
         commands.cancel_usb_order_edit(request)
     })
-    .await)
+    .await;
+    emit_blocked_actions(&app);
+    Ok(response)
 }
 
 #[tauri::command]
@@ -1749,7 +1813,7 @@ pub async fn commit_usb_order_edit(
     let commands = state.inner().clone();
     run_usb_job_with_progress(
         &app,
-        "usb_write",
+        JobType::UsbWrite,
         "commit_usb_order_edit",
         tr::job_commit_usb_order_edit_started(),
         tr::job_commit_usb_order_edit_completed(),
@@ -2034,7 +2098,7 @@ pub async fn transcode_tracks(
     let job_id = Uuid::now_v7().to_string();
     let identity = JobIdentity {
         job_id: &job_id,
-        job_type: "transcode",
+        job_type: JobType::Transcode,
         stage: "transcode_tracks",
     };
     emit_job_event(
@@ -2053,7 +2117,7 @@ pub async fn transcode_tracks(
         commands.transcode_tracks_with_progress(request, |progress| {
             let identity = JobIdentity {
                 job_id: &job_id_for_task,
-                job_type: "transcode",
+                job_type: JobType::Transcode,
                 stage: "transcode_tracks",
             };
             let file_name = std::path::Path::new(&progress.file_path)
@@ -2158,7 +2222,7 @@ pub async fn export_to_usb(
     let commands = state.inner().clone();
     run_usb_job_with_progress(
         &app,
-        "export",
+        JobType::Export,
         "export_to_usb",
         tr::job_export_to_usb_started(),
         tr::job_export_to_usb_completed(),
@@ -2183,7 +2247,7 @@ pub async fn export_playlists_to_usb(
     let commands = state.inner().clone();
     run_usb_job_with_progress(
         &app,
-        "export",
+        JobType::Export,
         "export_playlists_to_usb",
         tr::job_export_playlists_to_usb_started(),
         tr::job_export_to_usb_completed(),
@@ -2205,7 +2269,7 @@ pub async fn run_usb_diagnostics(
     let commands = state.inner().clone();
     run_usb_job_with_progress(
         &app,
-        "diagnostics",
+        JobType::Diagnostics,
         "run_usb_diagnostics",
         tr::job_run_usb_diagnostics_started(),
         tr::job_run_usb_diagnostics_completed(),
@@ -2227,7 +2291,7 @@ pub async fn run_usb_parity_report(
     let commands = state.inner().clone();
     run_usb_job_with_progress(
         &app,
-        "diagnostics",
+        JobType::Diagnostics,
         "run_usb_parity_report",
         tr::job_run_usb_parity_report_started(),
         tr::job_run_usb_parity_report_completed(),
@@ -2249,7 +2313,7 @@ pub async fn repair_usb_diagnostics(
     let commands = state.inner().clone();
     run_usb_job_with_progress(
         &app,
-        "diagnostics",
+        JobType::Diagnostics,
         "repair_usb_diagnostics",
         tr::job_repair_usb_diagnostics_started(),
         tr::job_repair_usb_diagnostics_completed(),
@@ -2351,7 +2415,7 @@ pub async fn initialize_usb(
     let commands = state.inner().clone();
     run_usb_job(
         &app,
-        "usb_write",
+        JobType::UsbWrite,
         "initialize_usb",
         tr::job_initialize_usb_started(),
         tr::job_initialize_usb_completed(),
@@ -2685,7 +2749,7 @@ pub async fn install_update(app: AppHandle) -> ApiResponse<()> {
     let job_id = format!("job-update-{}", Uuid::now_v7());
     let identity = JobIdentity {
         job_id: &job_id,
-        job_type: "update",
+        job_type: JobType::Update,
         stage: "install_update",
     };
     emit_job_event(
@@ -2791,7 +2855,7 @@ pub async fn install_update(app: AppHandle) -> ApiResponse<()> {
 }
 
 /// `RUNNING_JOBS`, locked, once no job but `own_job_id` is running.
-fn lock_jobs_when_idle(own_job_id: &str) -> Option<MutexGuard<'static, BTreeMap<String, String>>> {
+fn lock_jobs_when_idle(own_job_id: &str) -> Option<MutexGuard<'static, BTreeMap<String, JobType>>> {
     let jobs = running_jobs();
     jobs.keys().all(|id| id == own_job_id).then_some(jobs)
 }

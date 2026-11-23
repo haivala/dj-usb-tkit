@@ -14,16 +14,6 @@ export function isUsbOrderEditing(state) {
   return !!state.usbOrderEdit?.active;
 }
 
-// The edit lives on the USB Playlists page, which can't be left with it on.
-// What can still be reached from there and writes the USB (renaming the drive
-// from the header) waits for it to end: true, with the reason on the status
-// line, when it must not start.
-export function refuseWhileUsbOrderEditing(ctx) {
-  if (!isUsbOrderEditing(ctx.state)) return false;
-  ctx.emitStatus(t("ui-usb-playlists-order-edit-blocks-jobs"));
-  return true;
-}
-
 // Stores the backend's edit state (and, from a list read, why Edit order can't
 // start) and re-renders what shows it.
 export function applyUsbOrderEdit(ctx, orderEdit, blockedText) {

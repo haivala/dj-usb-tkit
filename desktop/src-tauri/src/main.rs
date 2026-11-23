@@ -955,6 +955,7 @@ fn main() {
             backend::tauri_commands::remove_tracks_from_playlist,
             backend::tauri_commands::reorder_playlist_tracks,
             backend::tauri_commands::get_ui_texts,
+            backend::tauri_commands::get_blocked_actions,
             backend::tauri_commands::get_frontend_settings,
             backend::tauri_commands::set_frontend_setting,
             backend::tauri_commands::get_track_columns,
@@ -1029,7 +1030,10 @@ fn main() {
         ];
             move |invoke: tauri::ipc::Invoke<tauri::Wry>| {
                 if let Some(refusal) =
-                    backend::tauri_commands::refuse_blocked_command(invoke.message.command())
+                    backend::tauri_commands::refuse_blocked_command(
+                        invoke.message.webview_ref(),
+                        invoke.message.command(),
+                    )
                 {
                     invoke.resolver.resolve(refusal);
                     return true;

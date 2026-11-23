@@ -54,6 +54,8 @@ export function createInitialState() {
     // What the running jobs block, `{ group: reason }` (action_blocks.mjs), and
     // the resolvers waiting for a group to be unblocked.
     blockedActions: {},
+    // Bumped by every `jobs:blocked`, so `loadBlockedActions` can tell its answer is older.
+    blockedActionsSeq: 0,
     actionBlockWaiters: new Map(),
     // The loaded library page(s); owned by the library TrackListController
     // (main.js) via getItems/setItems, but read directly by playback
