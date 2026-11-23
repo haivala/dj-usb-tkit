@@ -26,13 +26,6 @@ Engine DJ library, page footer transaction (a crashed rekordbox write breaks it
 too), damaged page headers, the damaged track row merge and rebuild, and the
 damaged playlist repair.
 
-## Diagnostics: characters the CDJ can't show
-
-Titles and paths with characters older players can't display (CJK, for
-instance) play fine but show as blanks or boxes. A diagnostics warning naming
-those tracks would explain it; no repair, the user decides about their own
-tags. Low priority.
-
 ## Monitor: track rows outside the media library
 
 The library database can collect track rows that no longer belong to the
