@@ -39,6 +39,8 @@
 
 ## Unreleased
 
+- **Improvement:** While a job runs, every button that would get in its way is off, and hovering it says which job to wait for; the app refuses those actions itself too. Before, some buttons were off, some ignored the click and some failed with an error. An export now also holds off source-folder changes, rekordbox and Mixxx imports and converting; renaming the USB and changing its audio formats, backups, Player Menu or background colour wait for a running USB job; and the analysis engine can no longer be removed during an analysis.
+
 ## 0.6.6
 
 **Severity:** feature

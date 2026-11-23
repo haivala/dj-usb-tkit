@@ -497,9 +497,10 @@ export function handlePlaybackEvent(ctx, payload) {
 
 export async function unregisterBackendJobEvents(ctx) {
   const { state } = ctx;
-  const unlistenFns = [state.unlistenJobEvent, state.unlistenPlaybackEvent, state.unlistenBackendLogEvent]
-    .filter((fn) => typeof fn === "function");
+  const unlistenFns = [state.unlistenJobEvent, state.unlistenJobsBlocked, state.unlistenPlaybackEvent,
+    state.unlistenBackendLogEvent].filter((fn) => typeof fn === "function");
   state.unlistenJobEvent = null;
+  state.unlistenJobsBlocked = null;
   state.unlistenPlaybackEvent = null;
   state.unlistenBackendLogEvent = null;
   for (const fn of unlistenFns) {
@@ -523,6 +524,13 @@ export async function registerBackendJobEvents(ctx) {
   });
   if (typeof unlisten === "function") {
     state.unlistenJobEvent = unlisten;
+  }
+
+  const unlistenJobsBlocked = await listen("jobs:blocked", (event) => {
+    ctx.applyBlockedActions(event?.payload?.blockedActions);
+  });
+  if (typeof unlistenJobsBlocked === "function") {
+    state.unlistenJobsBlocked = unlistenJobsBlocked;
   }
 
   const unlistenPlayback = await listen("playback:event", (event) => {

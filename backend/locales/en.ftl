@@ -1368,6 +1368,17 @@ repair-outcome-detail-engine = setting on, rebuilt ({ $tracks ->
 
 # When a job fails without a message.
 job-failed-unknown = Operation failed
+# Why a button is off while a job runs (the tooltip of every control the job blocks), by job.
+job-blocks-export = Wait for the export to finish.
+job-blocks-usb-write = Wait for the change to the USB to finish.
+job-blocks-usb-read = Wait for the USB to finish loading.
+job-blocks-diagnostics = Wait for the USB check or repair to finish.
+job-blocks-scan = Wait for the folder scan to finish.
+job-blocks-transcode = Wait for the conversion to finish, or cancel it.
+job-blocks-analysis = Wait for the analysis to finish, or cancel it.
+job-blocks-migration = Wait for the data upgrade to finish.
+job-blocks-update = The update is being installed.
+job-blocks-other = Wait for the running job to finish.
 job-save-usb-track-metadata-edits-started = USB: Saving track details
 job-save-usb-track-metadata-edits-completed = USB: Track details saved
 job-save-usb-track-analysis-edits-started = USB: Saving cue edits
@@ -2752,8 +2763,6 @@ ui-startup-progress-failed = Initializing failed
 
 # The settings update line after the in-app install failed. $version: the version it tried.
 ui-update-install-failed = Couldn't install version { $version }.
-# The status line when an update is started during another job.
-ui-update-busy = Finish the running job before updating.
 
 ## ui-rating
 
@@ -3108,10 +3117,6 @@ ui-usb-forget-path-aria-label = Forget { $path }
 ui-usb-parity-running = Running USB parity report...
 ui-usb-repair-applying = Applying supported USB repair fixes...
 ui-usb-repair-previewing = Previewing USB repair fixes...
-# The Select USB Folder button's title while a USB operation runs.
-ui-usb-select-usb-folder-busy-title = Please wait for the current USB operation to finish
-# The status line when another USB is picked while a USB operation runs.
-ui-usb-switch-busy = Please wait for the current USB operation to finish before switching drives
 
 ## ui-usb-history
 
@@ -3144,7 +3149,6 @@ ui-usb-playlists-compared = Playlists compared
 # The USB playlists page's order edit: its buttons, the tooltips and the leave dialog.
 ui-usb-playlists-edit-order = Edit order
 ui-usb-playlists-edit-order-tooltip = Change the order of the playlists and of the tracks in them; nothing is written until Save order
-ui-usb-playlists-edit-order-busy = Wait for the running USB job to finish
 ui-usb-playlists-order-edit-blocks-jobs = Save or cancel the order edit first
 ui-usb-playlists-save-order = Save order
 ui-usb-playlists-order-edited = Track order changed

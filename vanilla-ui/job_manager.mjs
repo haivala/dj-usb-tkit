@@ -1,6 +1,5 @@
 // Job progress bar management: set/dismiss/heartbeat/withProgress.
 
-import { USB_ROOT_LOCKING_JOB_TYPES, isUsbRootChangeBlocked } from "./components/usb/actions.mjs";
 import { t } from "./ui_texts.mjs";
 
 // `opts.detail`: the job's counts, sizes and speed, shown next to the elapsed
@@ -216,7 +215,6 @@ export function handleJobEvent(ctx, payload) {
     applyLibraryDurationSummary,
     setTrackAnalyzingState,
     setTracksWaitingState,
-    setUsbRootControlsLocked,
     refreshCurrentPlaylistTracks,
   } = ctx;
   if (!payload || typeof payload !== "object") return;
@@ -288,9 +286,6 @@ export function handleJobEvent(ctx, payload) {
 
   if (eventName === "job.started" && jobId) {
     state.runningJobs.set(jobId, { jobType, startedAtMs: Date.now(), percent, message, detail });
-    if (USB_ROOT_LOCKING_JOB_TYPES.has(jobType)) {
-      setUsbRootControlsLocked(true);
-    }
     if (jobType === "analysis") {
       setAnalysisControlsVisible(state, el, true);
     }
@@ -415,13 +410,8 @@ function showJobOnProgressBar(ctx, jobId) {
 }
 
 function finishJob(ctx, jobId, jobType, ownsProgressBar, idleDelayMs) {
-  const { state, el, setUsbRootControlsLocked } = ctx;
+  const { state, el } = ctx;
   if (jobId) state.runningJobs.delete(jobId);
-  if (USB_ROOT_LOCKING_JOB_TYPES.has(jobType) && !isUsbRootChangeBlocked(state)) {
-    setUsbRootControlsLocked(false);
-    const waiters = state.usbJobIdleWaiters.splice(0);
-    waiters.forEach((resolve) => resolve());
-  }
   if (jobType === "analysis") {
     setAnalysisControlsVisible(state, el, false);
   }
@@ -437,12 +427,4 @@ function finishJob(ctx, jobId, jobType, ownsProgressBar, idleDelayMs) {
   } else {
     scheduleProgressIdle(ctx, idleDelayMs);
   }
-}
-
-// Resolves once no USB job holds the drive: at once when none is running,
-// otherwise when the running one completes or fails.
-export function waitForUsbJobIdle(ctx) {
-  const { state } = ctx;
-  if (!isUsbRootChangeBlocked(state)) return Promise.resolve();
-  return new Promise((resolve) => state.usbJobIdleWaiters.push(resolve)).then(() => waitForUsbJobIdle(ctx));
 }

@@ -5,7 +5,7 @@
 // be exported (`get_batch_export_overview`); the page keeps only the selection.
 import { t, tCount } from "../../ui_texts.mjs";
 import { cloneTemplate } from "../../ui_utils.mjs";
-import { exportPlaylistsToUsb, isUsbRootChangeBlocked } from "./actions.mjs";
+import { exportPlaylistsToUsb } from "./actions.mjs";
 
 function page(ctx) {
   ctx.state.exportPlaylistsPage ??= { overview: null, selected: new Set(), spaceSeq: 0, space: null, spaceTimer: null, loading: false, loadSeq: 0 };
@@ -170,8 +170,7 @@ export function renderExportPlaylistsControls(ctx) {
   el.exportPlaylistsRunBtn.textContent = overview?.usbName
     ? tCount("ui-export-playlists-run-usb", count, { name: overview.usbName })
     : tCount("ui-export-playlists-run", count);
-  el.exportPlaylistsRunBtn.disabled = count === 0 || !hasUsb(state) || !!state.exportStarting
-    || isUsbRootChangeBlocked(state) || (!!space && !space.fits);
+  el.exportPlaylistsRunBtn.disabled = count === 0 || !hasUsb(state) || (!!space && !space.fits);
 }
 
 // The size line for the chosen playlists, asked for once the choice settles;

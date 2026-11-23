@@ -506,7 +506,6 @@
     "ui-tracklist-export-placement-before": "[Ɓééƒööŕéé ţŕááçķ (0:00 ÅÅŕţîîšţ - Ţîîţļéé)]",
     "ui-tracklist-export-start-from": "[Šţááŕţ ƒŕööɱ ţŕááçķ]",
     "ui-tracklist-export-title": "[ÉÉẋþööŕţ Ţŕááçķļîîšţ]",
-    "ui-update-busy": "[Ƒîîñîîšĥ ţĥéé ŕûûññîîñĝ ĵööƀ ƀééƒööŕéé ûûþðááţîîñĝ.]",
     "ui-update-install-failed": "[Çööûûļðñ'ţ îîñšţááļļ ṽééŕšîîööñ {version}.]",
     "ui-usb-apply-repairs": "[ÅÅþþļý Ƒîîẋééš]",
     "ui-usb-audio-formats": "[ÅÅûûðîîöö ƒööŕɱááţš]",
@@ -560,7 +559,6 @@
     "ui-usb-playlists-compared": "[Þļááýļîîšţš çööɱþááŕééð]",
     "ui-usb-playlists-drag-search-active": "[Çļééááŕ ţĥéé šééááŕçĥ ţöö ðŕááĝ ţŕááçķš]",
     "ui-usb-playlists-edit-order": "[ÉÉðîîţ ööŕðééŕ]",
-    "ui-usb-playlists-edit-order-busy": "[Ŵááîîţ ƒööŕ ţĥéé ŕûûññîîñĝ ÛÛŠƁ ĵööƀ ţöö ƒîîñîîšĥ]",
     "ui-usb-playlists-edit-order-tooltip": "[Çĥááñĝéé ţĥéé ööŕðééŕ ööƒ ţĥéé þļááýļîîšţš ááñð ööƒ ţĥéé ţŕááçķš îîñ ţĥééɱ; ñööţĥîîñĝ îîš ŵŕîîţţééñ ûûñţîîļ Šááṽéé ööŕðééŕ]",
     "ui-usb-playlists-leave-discard": "[Ðîîšçááŕð çĥááñĝééš]",
     "ui-usb-playlists-leave-message": "[Ţĥéé ñééŵ ööŕðééŕ ööƒ ţĥîîš ÛÛŠƁ'š þļááýļîîšţš îîšñ'ţ šááṽééð ýééţ.]",
@@ -583,9 +581,7 @@
     "ui-usb-repair-technical-details": "[Ţééçĥñîîçááļ ðééţááîîļš]",
     "ui-usb-root-path": "[Ñöö ÛÛŠƁ šééļééçţééð]",
     "ui-usb-select-usb-folder": "[Šééļééçţ ÛÛŠƁ Ƒööļðééŕ]",
-    "ui-usb-select-usb-folder-busy-title": "[Þļééáášéé ŵááîîţ ƒööŕ ţĥéé çûûŕŕééñţ ÛÛŠƁ ööþééŕááţîîööñ ţöö ƒîîñîîšĥ]",
     "ui-usb-status": "[Šţááţûûš]",
-    "ui-usb-switch-busy": "[Þļééáášéé ŵááîîţ ƒööŕ ţĥéé çûûŕŕééñţ ÛÛŠƁ ööþééŕááţîîööñ ţöö ƒîîñîîšĥ ƀééƒööŕéé šŵîîţçĥîîñĝ ðŕîîṽééš]",
     "ui-usb-title": "[ÛÛŠƁ Ɓŕööŵšééŕ]"
   },
   "languages": [

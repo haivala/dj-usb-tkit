@@ -3,7 +3,6 @@ import { narrowTrackSelectionToLoaded } from "../shared/track_selection.mjs";
 import { applyPlaylistReorderLockToGrid } from "../shared/export_reorder_lock.mjs";
 import { moveArrayItem } from "../shared/list_drag_reorder.mjs";
 import { clearTrackSort, renderEmptyState } from "../shell/actions.mjs";
-import { isUsbRootChangeBlocked } from "../usb/actions.mjs";
 import { cssEscape, cloneTemplate } from "../../ui_utils.mjs";
 import { t, tCount } from "../../ui_texts.mjs";
 
@@ -259,23 +258,11 @@ export async function commitActivePlaylistSort(ctx, playlistId) {
   }));
 }
 
-// While an export or another USB job runs, the progress footer covers the
-// pages' export buttons (disabled then anyway): they're hidden, keeping their
-// space.
-export function setExportButtonsCovered(el, covered) {
-  for (const button of [el.exportPlaylistBtn, el.exportPlaylistsRunBtn]) {
-    button.classList.toggle("is-covered", covered);
-  }
-}
-
 export function updatePlaylistExportButtons(ctx) {
   const { state, el } = ctx;
   const current = getCurrentPlaylist(ctx);
   const status = state.playlistUsbExportStatusById.get(current?.id);
 
-  const busy = isUsbRootChangeBlocked(state) || !!state.exportStarting;
-  el.exportPlaylistBtn.disabled = busy;
-  setExportButtonsCovered(el, busy);
   if (status) {
     el.exportPlaylistBtn.textContent = status.exportButtonText;
     el.exportPlaylistBtn.dataset.tooltip = status.exportButtonTitle;

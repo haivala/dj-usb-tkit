@@ -717,6 +717,8 @@ test("playlist export", async ({ page }) => {
   // 30 s default (each step just runs slower; none hangs). Three times the time.
   test.slow();
   await installReorderTauriMock(page, { usbSameNamePlaylistName: "Reorder Playlist" });
+  // The backend's events reach the page (`jobs:blocked` during an export).
+  await page.addInitScript(() => window.__e2eBackend.useTauriRuntime());
   await page.goto("/");
   {
     await page.evaluate(() => {
@@ -745,21 +747,31 @@ test("playlist export", async ({ page }) => {
     await connectUsbAndFetchPlaylists(page);
     await page.locator("#navPlaylistList .nav-playlist-item").first().click();
     await expect(page.locator("#playlistTracksBody .track-grid-row")).toHaveCount(3);
-    // Hold export_to_usb open until the test releases it, counting the calls.
-    await page.evaluate(() => {
+    // Hold export_to_usb open until the test releases it, counting the calls. As the
+    // backend, the running export blocks exporting (`jobs:blocked`) and a second
+    // export is refused.
+    const reason = "Wait for the export to finish.";
+    await page.evaluate((reason) => {
       window.__exportCalls = 0;
+      let running = false;
       const backend = window.__e2eBackend;
       backend.override(async (command, request, payload, next) => {
         if (command !== "export_to_usb") return next();
+        if (running) return { ok: false, error: { code: "VALIDATION_ERROR", message: reason } };
+        running = true;
         window.__exportCalls += 1;
+        window.__emitBlockedActions({ export: reason });
         await new Promise((resolve) => { window.__finishExport = resolve; });
+        running = false;
+        window.__emitBlockedActions({});
         return { ok: false, error: { code: "INTERNAL", message: "stopped by test" } };
       });
-    });
+    }, reason);
 
     const exportBtn = page.locator("#exportPlaylistBtn");
     await exportBtn.dblclick();
     await expect(exportBtn).toBeDisabled();
+    await expect(exportBtn).toHaveAttribute("data-blocked-reason", reason);
     expect(await page.evaluate(() => window.__exportCalls)).toBe(1);
 
     await page.evaluate(() => window.__finishExport());

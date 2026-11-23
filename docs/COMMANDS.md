@@ -94,12 +94,45 @@ or adding it gives it a library row, `resolve_track_identity` and each add
 resolution carry that row as `track` (only then), and `showTrackRow` shows it
 in place of the row whose id was the path.
 
-USB-scoped jobs lock the selected USB root in the frontend until the matching
-`job.completed` or `job.failed` event arrives. Locking job types are
-`usb_read`, `usb_write`, `diagnostics`, and `export`; this covers playlist and
-history reads, player-menu reads/writes, initialization, export, parity,
-diagnostics, and repair. The lock prevents a late response from an earlier
-drive selection from being rendered against a newer selected drive.
+### What a running job blocks
+
+One table decides what can't start while a job runs (`backend/src/job_conflicts.rs`).
+Every command is in one action group, or in none when no job ever blocks it (reads, app
+playlists, settings, playback, cancels); a test fails for a registered command that isn't
+listed. The desktop app's invoke handler refuses a blocked command before it runs, with
+the reason as its error. Whenever a job starts or ends, the backend sends `jobs:blocked`
+with `blockedActions`, the blocked groups and the reason for each (`{ "usb": "Wait for
+the export to finish." }`); the frontend (`vanilla-ui/action_blocks.mjs`) marks every
+control with `data-action-group` in a blocked group `aria-disabled`, shows the reason as
+its tooltip and on the status line when clicked, and stops its clicks and keys.
+
+| Group | Commands |
+|---|---|
+| `switch-usb` | `select_usb`, `prune_usb_device`, `pick_usb_folder` |
+| `export` | `export_to_usb`, `export_playlists_to_usb` |
+| `usb` | every other USB write (name, audio formats, backups, Player Menu, background colour, USB playlist removal and order, USB track edits, initialize) and the USB checks (diagnostics, parity, repair) |
+| `library` | source folders (add, remove, switch, relocate), rekordbox / Mixxx imports and their track data |
+| `convert` | `transcode_tracks`, `remove_track_transcodes`, the transcode folder |
+| `analyze` | `analyze_new_tracks`, `scan_library` (Analyze Library scans first) |
+| `track-edit` | `save_track_analysis_edits`, `save_track_metadata_edits` |
+| `essentia` | `download_essentia`, `remove_essentia` |
+| `app` | `set_language`, `install_update` (both restart the window) |
+
+| Running job ↓ blocks → | switch-usb | export | usb | library | convert | analyze | track-edit | essentia | app |
+|---|---|---|---|---|---|---|---|---|---|
+| `export`, `usb_write` | ✗ | ✗ | ✗ | ✗ | ✗ | | | | ✗ |
+| `diagnostics` | ✗ | ✗ | ✗ | | | | | | ✗ |
+| `usb_read` | ✗ | | | | | | | | ✗ |
+| `scan`, `transcode` | | ✗ | | ✗ | ✗ | | | | ✗ |
+| `analysis` | | | | | | | | ✗ | ✗ |
+| `migration` | | | | | | ✗ | ✗ | | ✗ |
+| `update` | ✗ | ✗ | ✗ | ✗ | ✗ | ✗ | ✗ | ✗ | ✗ |
+
+An analysis runs alongside an export, and app playlists can be edited during one (the
+playlist then shows as changed). A USB read only blocks switching to another USB: the
+stick's databases are read from their staged copies. A USB track edit saved while the
+`usb` group is blocked waits for it instead of failing, so an open editor's changes
+aren't lost.
 
 ## Command groups
 

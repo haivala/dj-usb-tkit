@@ -90,3 +90,19 @@ fn registered_tauri_commands_match_the_ui_calls() {
          generate_handler! (register the command or fix the name):\n{unregistered:#?}"
     );
 }
+
+/// Every registered command is classified in `job_conflicts::command_block`: either a running
+/// job can block it (its action group) or none ever does. A new command must be added there,
+/// so the UI and the invoke handler know what blocks it.
+#[test]
+fn every_registered_command_says_what_blocks_it() {
+    let unclassified: Vec<_> = registered_commands()
+        .into_iter()
+        .filter(|name| backend::job_conflicts::command_block(name).is_none())
+        .collect();
+    assert!(
+        unclassified.is_empty(),
+        "Commands missing from job_conflicts::command_block (add each to its action group, \
+         or to the commands no job blocks):\n{unclassified:#?}"
+    );
+}

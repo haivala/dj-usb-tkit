@@ -1789,6 +1789,13 @@ button[disabled] {
   pointer-events: none;
 }
 
+/* A control a running job blocks (action_blocks.mjs): looks disabled, but
+   keeps its pointer events so hovering it shows why. */
+[data-blocked-reason] {
+  opacity: 0.4;
+  cursor: not-allowed;
+}
+
 /* destructive buttons */
 button[data-destructive] {
   color: var(--ink-secondary);
@@ -1819,10 +1826,10 @@ button.primary-action:hover {
   flex-wrap: wrap;
 }
 
-/* An export button while an export or another USB job runs: the progress
-   footer lies over it. Not drawn, but keeping its space, so the table above
-   stays where it is. */
-.panel-actions .is-covered {
+/* An export button while a running job blocks exporting: the progress footer
+   lies over it. Not drawn, but keeping its space, so the table above stays
+   where it is. */
+.panel-actions [data-action-group="export"][data-blocked-reason] {
   visibility: hidden;
 }
 

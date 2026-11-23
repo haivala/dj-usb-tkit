@@ -463,20 +463,20 @@ test("update check", async ({ page }) => {
     await expect(page.locator("#settingsUpdateActions .update-download-link")).not.toHaveClass(/hidden/);
   }
 
-  // Update & restart waits for a running job instead of cutting it short.
+  // Update & restart is off while a job runs, instead of cutting it short.
   await showUpdate(page, selfUpdatable("feature"));
   {
-    await expect(page.locator("#updateBannerActions .update-install-btn")).toBeVisible();
+    const install = page.locator("#updateBannerActions .update-install-btn");
+    await expect(install).toBeVisible();
 
-    await page.evaluate(() => window.__emitJobEvent({
-      event: "job.started", jobId: "job-export-1", jobType: "export", stage: "export_to_usb",
-      current: 0, total: 1, percent: 0, message: "Exporting..."
-    }));
-    await expect(page.locator("#progressText")).toContainText("Exporting...");
-
-    await page.locator("#updateBannerActions .update-install-btn").click();
-    await expect(page.locator("#statusText")).toContainText("Finish the running job before updating.");
+    await page.evaluate(() => window.__emitBlockedActions({ app: "Wait for the export to finish." }));
+    await expect(install).toBeDisabled();
+    // Clicked anyway (not actionable to Playwright): it says why and installs nothing.
+    await install.click({ force: true });
+    await expect(page.locator("#statusText")).toContainText("Wait for the export to finish.");
     expect(await page.evaluate(() => window.__calls.some((c) => c.command === "install_update"))).toBe(false);
+    await page.evaluate(() => window.__emitBlockedActions({}));
+    await expect(install).toBeEnabled();
   }
 
   // The settings update line offers one action; its button re-checks on demand.

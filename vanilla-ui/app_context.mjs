@@ -11,6 +11,7 @@ import * as settings from "./components/settings/actions.mjs";
 import * as shell from "./components/shell/actions.mjs";
 import * as trackDetail from "./components/track-detail/actions.mjs";
 import * as jobMgr from "./job_manager.mjs";
+import * as actionBlocks from "./action_blocks.mjs";
 import * as bootstrap from "./startup_bootstrap.mjs";
 import * as uiCtrl from "./ui_controller.mjs";
 import * as messages from "./message_bus.mjs";
@@ -76,7 +77,8 @@ export function createAppContext(env) {
     setupRuntimeErrorLogging logToFile`);
   bindActions(backupsUi, "renderBackups restoreUsbBackup deleteUsbBackup");
   bindActions(jobMgr, `setProgress dismissProgress startProgressHeartbeat stopProgressHeartbeat
-    withProgress handleJobEvent toggleAnalysisPause cancelAnalysis cancelTranscode scheduleProgressIdle waitForUsbJobIdle`);
+    withProgress handleJobEvent toggleAnalysisPause cancelAnalysis cancelTranscode scheduleProgressIdle`);
+  bindActions(actionBlocks, "initActionBlocks applyBlockedActions actionBlockedReason whenActionUnblocked");
   bindActions(uiCtrl, `updateModeText updateActivePlaylistIndicators updateAddToPlaylistButtons
     updateUsbNameBadge updateSelectionCount updateUsbSubNavDisabledState updateUsbEmptyState
     updateAnalyzeLibraryButtonLabel closeSettingsDrawer updateUsbHealthDot
@@ -101,7 +103,7 @@ export function createAppContext(env) {
     reloadTrackListsForKeyNotation analyzeLibrary reanalyzeTracks
     scanRekordboxDb scanMixxxDb resolveImportConflicts analyzeTrackIds analyzeSingleTrack setTrackAnalyzingState setTracksWaitingState
     showTrackRow`);
-  bindActions(usb, `setUsbRootControlsLocked applyPlaylistUsbExportStatus showDiagReportView
+  bindActions(usb, `applyPlaylistUsbExportStatus showDiagReportView
     clearUsbDiagnostics hideUsbDiagnostics loadUsbRootFromStorage usbContentChanged
     pickSourceFolders detectExternalRekordboxDb detectExternalMixxxDb
     validateAndSetUsbRoot renameDrive

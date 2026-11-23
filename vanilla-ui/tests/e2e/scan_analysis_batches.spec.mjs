@@ -355,11 +355,9 @@ test("analysis during an export", async ({ page }) => {
     await expect(page.locator("#progressText")).toHaveText("USB: Exporting playlist");
     await expect(page.locator("#progressTime")).toHaveText(/^\d+s$/);
     await expect(page.locator("#progressPauseBtn")).toBeHidden();
-    await expect(page.locator("#selectUsbFolderBtn")).toBeDisabled();
 
     await finishMockExport(page);
     await expect(page.locator("#progressFooter")).not.toHaveClass(/active/);
-    await expect(page.locator("#selectUsbFolderBtn")).toBeEnabled();
   }
 
   await page.reload();

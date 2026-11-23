@@ -1,7 +1,7 @@
 import { t } from "../../ui_texts.mjs";
 import { clearTrackSort, renderTrackSortHeader } from "../shell/actions.mjs";
 import { moveArrayItem } from "../shared/list_drag_reorder.mjs";
-import { clearUsbDiagnostics, isUsbRootChangeBlocked, refreshUsb, renderUsbPlaylists } from "./actions.mjs";
+import { clearUsbDiagnostics, refreshUsb, renderUsbPlaylists } from "./actions.mjs";
 
 // Edit order: the USB playlists' order and the order of the tracks in them,
 // edited as one pending change the backend holds (`begin_usb_order_edit` …
@@ -43,18 +43,16 @@ export function applyUsbOrderEdit(ctx, orderEdit, blockedText) {
 export function renderUsbOrderEditControls(ctx) {
   const { state, el } = ctx;
   const editing = isUsbOrderEditing(state);
-  const busy = isUsbRootChangeBlocked(state);
   el.usbOrderEditBar.classList.toggle("hidden", !state.usbRootValid && !editing);
   el.usbOrderEditText.textContent = editing ? state.usbOrderEdit.editingText || "" : "";
   el.usbOrderEditText.classList.toggle("hidden", !editing);
   el.usbEditOrderBtn.classList.toggle("hidden", editing);
   el.usbCancelOrderBtn.classList.toggle("hidden", !editing);
   el.usbSaveOrderBtn.classList.toggle("hidden", !editing);
-  const blocked = state.usbOrderEditBlockedText || (busy ? t("ui-usb-playlists-edit-order-busy") : null);
+  const blocked = state.usbOrderEditBlockedText;
   el.usbEditOrderBtn.disabled = !!blocked;
   el.usbEditOrderBtn.dataset.tooltip = blocked || t("ui-usb-playlists-edit-order-tooltip");
-  el.usbSaveOrderBtn.disabled = busy || !state.usbOrderEdit?.changed;
-  el.usbCancelOrderBtn.disabled = busy;
+  el.usbSaveOrderBtn.disabled = !state.usbOrderEdit?.changed;
   el.usbPlaylists.classList.toggle("is-order-editing", editing);
   // No column changes while editing (track_columns.mjs).
   ctx.renderTrackColumnsButtons();

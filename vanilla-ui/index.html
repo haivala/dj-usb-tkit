@@ -48,7 +48,7 @@
           <span class="header-stat-label" data-text="ui-header-playlist-badge"></span>
           <span class="header-stat-value" id="badgeLabel" data-text="ui-header-badge-none"></span>
         </div>
-        <div class="usb-name-badge" id="usbNameBadge" role="button" tabindex="-1" aria-disabled="true">
+        <div data-action-group="usb" class="usb-name-badge" id="usbNameBadge" role="button" tabindex="-1" aria-disabled="true">
           <span class="usb-health-dot" id="usbHeaderHealthDot" data-text-tooltip="ui-usb-health-unknown" data-text-aria-label="ui-usb-health-unknown"></span>
           <span class="header-stat-label" data-text="ui-common-usb"></span>
           <span class="header-stat-value" id="usbNameBadgeLabel" data-text="ui-header-usb-name-badge-not-connected"></span>
@@ -65,7 +65,7 @@
   <div class="update-banner hidden" id="updateBanner" role="alert">
     <span id="updateBannerText"><span class="update-banner-message"></span> — <a href="#" class="update-banner-link" data-text="ui-header-update-banner-view-release"></a></span>
     <span class="update-actions" id="updateBannerActions">
-      <button class="update-install-btn hidden" type="button" data-text="ui-common-update-restart"></button>
+      <button class="update-install-btn hidden" type="button" data-action-group="app" data-text="ui-common-update-restart"></button>
       <a href="#" class="update-download-link hidden" data-text="ui-common-update-download"></a>
     </span>
     <button class="update-banner-dismiss" id="updateBannerDismissBtn" data-text-aria-label="ui-common-dismiss">&times;</button>
@@ -99,7 +99,7 @@
         <div class="nav-section-label" data-text="ui-sidebar-playlists"></div>
         <div class="nav-playlist-actions">
           <div class="hidden" id="importPlaylistItem">
-            <button class="nav-item nav-add-playlist" id="importPlaylistBtn" data-text-tooltip="ui-sidebar-import-playlist-tooltip" data-text-aria-label="ui-sidebar-import-playlist-aria-label">
+            <button data-action-group="library" class="nav-item nav-add-playlist" id="importPlaylistBtn" data-text-tooltip="ui-sidebar-import-playlist-tooltip" data-text-aria-label="ui-sidebar-import-playlist-aria-label">
               <span class="nav-icon">&#8615;</span>
               <span class="nav-label" data-text="ui-common-import"></span>
             </button>
@@ -139,8 +139,8 @@
           <div class="panel-header">
             <h2 data-text="ui-common-media-library"></h2>
             <div class="panel-header-actions">
-              <button id="addSourceBtn" data-text="ui-library-add-source"></button>
-              <button id="analyzeLibraryBtn" data-primary data-text="ui-library-analyze-library"></button>
+              <button data-action-group="library" id="addSourceBtn" data-text="ui-library-add-source"></button>
+              <button data-action-group="analyze" id="analyzeLibraryBtn" data-primary data-text="ui-library-analyze-library"></button>
             </div>
             <span class="muted panel-header-meta" id="libraryCountsText"></span>
           </div>
@@ -177,8 +177,8 @@
               <span class="selection-hint" data-text="ui-selection-bar-hint-library"></span>
               <button type="button" data-selection-action="add" data-primary disabled hidden>+ <span class="selection-label-long" data-text="ui-selection-bar-add-to-target"></span> <span class="selection-target"></span></button>
               <button type="button" data-selection-action="add-to" disabled data-text-tooltip="ui-selection-bar-add-to-tooltip" data-text="ui-selection-bar-add-to"></button>
-              <button type="button" data-selection-action="reanalyze" disabled data-text-tooltip="ui-selection-bar-reanalyze-tooltip" data-text="ui-common-reanalyze"></button>
-              <button type="button" data-selection-action="convert" disabled data-text-tooltip="ui-selection-bar-convert-tooltip" data-text="ui-selection-bar-convert"></button>
+              <button data-action-group="analyze" type="button" data-selection-action="reanalyze" disabled data-text-tooltip="ui-selection-bar-reanalyze-tooltip" data-text="ui-common-reanalyze"></button>
+              <button data-action-group="convert" type="button" data-selection-action="convert" disabled data-text-tooltip="ui-selection-bar-convert-tooltip" data-text="ui-selection-bar-convert"></button>
               <button type="button" data-selection-action="edit" disabled data-text-tooltip="ui-selection-bar-edit-tooltip"><span class="selection-label-long" data-text="ui-selection-bar-edit-details"></span><span class="selection-label-short" data-text="ui-selection-bar-edit-short"></span></button>
               <button type="button" class="selection-clear" data-selection-action="clear" disabled data-text-aria-label="ui-selection-bar-clear-selection" data-text-tooltip="ui-selection-bar-clear-selection">&times;</button>
             </div>
@@ -199,15 +199,15 @@
           <div class="panel-header">
             <h2 data-text="ui-usb-title"></h2>
             <div class="panel-header-actions">
-              <button id="selectUsbFolderBtn" data-primary data-text="ui-usb-select-usb-folder"></button>
+              <button data-action-group="switch-usb" id="selectUsbFolderBtn" data-primary data-text="ui-usb-select-usb-folder"></button>
               <span class="usb-path-badge" id="usbRootPathText" data-text="ui-usb-root-path"></span>
               <span class="usb-health-dot" id="usbHealthDot" data-text-tooltip="ui-usb-health-unknown" data-text-aria-label="ui-usb-health-unknown"></span>
             </div>
             <div class="panel-header-actions hidden" id="usbDiagToolbar">
-              <button id="reDiagnoseBtn" data-text="ui-usb-re-diagnose"></button>
-              <button id="runUsbParityBtn" data-text-tooltip="ui-usb-parity-report-tooltip" data-text="ui-usb-parity-report"></button>
+              <button data-action-group="usb" id="reDiagnoseBtn" data-text="ui-usb-re-diagnose"></button>
+              <button data-action-group="usb" id="runUsbParityBtn" data-text-tooltip="ui-usb-parity-report-tooltip" data-text="ui-usb-parity-report"></button>
               <span class="usb-cfg-toolbar-sep"></span>
-              <button id="previewRepairsBtn" data-text="ui-usb-preview-repairs"></button>
+              <button data-action-group="usb" id="previewRepairsBtn" data-text="ui-usb-preview-repairs"></button>
               <span class="usb-cfg-toolbar-sep"></span>
               <button id="usbBackupsBtn" data-text-tooltip="ui-usb-backups-tooltip" data-text="ui-common-backups"></button>
             </div>
@@ -224,7 +224,7 @@
           </div>
           <div class="usb-cfg-init-row hidden" id="usbInitRow">
             <span class="muted" id="usbInitHint" data-text="ui-usb-init-hint"></span>
-            <button id="initializeUsbBtn" data-text="ui-usb-initialize-usb"></button>
+            <button data-action-group="usb" id="initializeUsbBtn" data-text="ui-usb-initialize-usb"></button>
           </div>
         </div>
 
@@ -267,7 +267,7 @@
                   </details>
                   <div class="diag-repair-actions">
                     <button id="diagBackToReportBtn" data-text="ui-usb-diag-back-to-report"></button>
-                    <button id="applyRepairsBtn" disabled data-primary data-text="ui-usb-apply-repairs"></button>
+                    <button data-action-group="usb" id="applyRepairsBtn" disabled data-primary data-text="ui-usb-apply-repairs"></button>
                   </div>
                 </div>
               </div>
@@ -285,9 +285,9 @@
           <!-- Edit order: the playlists' and their tracks' order, saved in one write. -->
           <div class="panel-header-end usb-order-edit hidden" id="usbOrderEditBar">
             <span class="muted panel-header-meta hidden" id="usbOrderEditText"></span>
-            <button type="button" id="usbEditOrderBtn" data-text="ui-usb-playlists-edit-order"></button>
+            <button data-action-group="usb" type="button" id="usbEditOrderBtn" data-text="ui-usb-playlists-edit-order"></button>
             <button type="button" id="usbCancelOrderBtn" class="hidden" data-text="ui-common-cancel"></button>
-            <button type="button" id="usbSaveOrderBtn" class="hidden" data-primary disabled data-text="ui-usb-playlists-save-order"></button>
+            <button data-action-group="usb" type="button" id="usbSaveOrderBtn" class="hidden" data-primary disabled data-text="ui-usb-playlists-save-order"></button>
           </div>
         </div>
         <div class="split">
@@ -381,10 +381,10 @@
             <p class="muted player-menu-label" data-text="ui-usb-player-menu-current"></p>
             <div id="usbPlayerMenuCurrent" class="player-menu-listbox" role="listbox" data-text-aria-label="ui-usb-player-menu-current-aria-label"></div>
             <div class="row player-menu-actions">
-              <button id="usbPlayerMenuAddBtn" data-text="ui-usb-player-menu-add"></button>
-              <button id="usbPlayerMenuRemoveBtn" data-text="ui-usb-player-menu-remove"></button>
-              <button id="usbPlayerMenuUpBtn" data-text="ui-usb-player-menu-up"></button>
-              <button id="usbPlayerMenuDownBtn" data-text="ui-usb-player-menu-down"></button>
+              <button data-action-group="usb" id="usbPlayerMenuAddBtn" data-text="ui-usb-player-menu-add"></button>
+              <button data-action-group="usb" id="usbPlayerMenuRemoveBtn" data-text="ui-usb-player-menu-remove"></button>
+              <button data-action-group="usb" id="usbPlayerMenuUpBtn" data-text="ui-usb-player-menu-up"></button>
+              <button data-action-group="usb" id="usbPlayerMenuDownBtn" data-text="ui-usb-player-menu-down"></button>
             </div>
           </div>
         </div>
@@ -407,8 +407,8 @@
             <span class="selection-hint" data-text="ui-selection-bar-hint-playlist"></span>
             <button type="button" data-selection-action="add-to" disabled data-text-tooltip="ui-selection-bar-add-to-tooltip" data-text="ui-selection-bar-add-to"></button>
             <button type="button" data-selection-action="remove" disabled data-text-tooltip="ui-selection-bar-remove-tooltip"><span class="selection-label-long" data-text="ui-common-remove-from-playlist"></span><span class="selection-label-short" data-text="ui-common-remove"></span></button>
-            <button type="button" data-selection-action="reanalyze" disabled data-text-tooltip="ui-selection-bar-reanalyze-tooltip" data-text="ui-common-reanalyze"></button>
-            <button type="button" data-selection-action="convert" disabled data-text-tooltip="ui-selection-bar-convert-tooltip" data-text="ui-selection-bar-convert"></button>
+            <button data-action-group="analyze" type="button" data-selection-action="reanalyze" disabled data-text-tooltip="ui-selection-bar-reanalyze-tooltip" data-text="ui-common-reanalyze"></button>
+            <button data-action-group="convert" type="button" data-selection-action="convert" disabled data-text-tooltip="ui-selection-bar-convert-tooltip" data-text="ui-selection-bar-convert"></button>
             <button type="button" data-selection-action="edit" disabled data-text-tooltip="ui-selection-bar-edit-tooltip"><span class="selection-label-long" data-text="ui-selection-bar-edit-details"></span><span class="selection-label-short" data-text="ui-selection-bar-edit-short"></span></button>
             <button type="button" class="selection-clear" data-selection-action="clear" disabled data-text-aria-label="ui-selection-bar-clear-selection" data-text-tooltip="ui-selection-bar-clear-selection">&times;</button>
           </div>
@@ -425,8 +425,8 @@
           <p class="muted track-total-time" id="playlistTotalDuration" data-text="ui-track-table-total-time"></p>
         </div>
         <div class="row panel-actions">
-          <button id="analyzePlaylistMissingBtn" type="button" disabled data-text="ui-playlist-analyze-missing"></button>
-          <button id="exportPlaylistBtn" class="primary-action" disabled data-text="ui-playlist-export"></button>
+          <button data-action-group="analyze" id="analyzePlaylistMissingBtn" type="button" disabled data-text="ui-playlist-analyze-missing"></button>
+          <button id="exportPlaylistBtn" class="primary-action" data-action-group="export" data-text="ui-playlist-export"></button>
         </div>
       </section>
 
@@ -472,8 +472,8 @@
         </div>
         <p class="export-playlists-warning hidden" id="exportPlaylistsWarning" data-text="ui-export-playlists-all-warning"></p>
         <div class="row panel-actions">
-          <button id="exportPlaylistsAnalyzeBtn" type="button" hidden></button>
-          <button id="exportPlaylistsRunBtn" class="primary-action" disabled></button>
+          <button data-action-group="analyze" id="exportPlaylistsAnalyzeBtn" type="button" hidden></button>
+          <button id="exportPlaylistsRunBtn" class="primary-action" data-action-group="export" disabled></button>
         </div>
       </section>
 
@@ -631,7 +631,7 @@
             <button type="button" id="trackDetailRedo" data-text-tooltip="ui-track-detail-redo-tooltip" disabled data-text="ui-track-detail-redo"></button>
           </div>
           <button id="trackDetailCancelBtn" data-text="ui-common-cancel"></button>
-          <button id="trackDetailSaveBtn" data-primary data-text="ui-common-save"></button>
+          <button data-action-group="track-edit" id="trackDetailSaveBtn" data-primary data-text="ui-common-save"></button>
         </div>
       </div>
       <div class="track-detail-color-popover" id="trackDetailColorPopover" hidden></div>
@@ -656,7 +656,7 @@
         <span class="settings-update-status" id="settingsUpdateStatus"></span>
         <a href="#" class="update-note-link hidden" id="settingsUpdateReleaseLink" data-text="ui-settings-update-release-link"></a>
         <span class="update-actions" id="settingsUpdateActions">
-          <button class="update-install-btn hidden" type="button" data-text="ui-common-update-restart"></button>
+          <button class="update-install-btn hidden" type="button" data-action-group="app" data-text="ui-common-update-restart"></button>
           <a href="#" class="update-download-link hidden" data-text="ui-common-update-download"></a>
         </span>
       </div>
@@ -683,7 +683,7 @@
         </label>
         <label class="usb-cfg-toggle-row" id="settingsLanguageRow" for="languageSelect">
           <span data-text="ui-common-language"></span>
-          <select id="languageSelect"></select>
+          <select id="languageSelect" data-action-group="app"></select>
         </label>
       </div>
       <div class="settings-section">
@@ -713,9 +713,9 @@
         <div id="essentiaInstallRow" class="essentia-install-row hidden">
           <span id="essentiaNodeStatus"></span>
           <div class="essentia-install-actions">
-            <button id="essentiaDownloadBtn" class="essentia-btn" data-text="ui-settings-essentia-download"></button>
+            <button data-action-group="essentia" id="essentiaDownloadBtn" class="essentia-btn" data-text="ui-settings-essentia-download"></button>
             <button id="essentiaCancelBtn" class="essentia-btn hidden" data-text="ui-common-cancel"></button>
-            <button id="essentiaRemoveBtn" class="essentia-btn hidden" data-text="ui-common-remove"></button>
+            <button data-action-group="essentia" id="essentiaRemoveBtn" class="essentia-btn hidden" data-text="ui-common-remove"></button>
           </div>
         </div>
       </div>
@@ -745,8 +745,8 @@
         <div class="settings-folder-path" id="transcodeFolderText"></div>
         <div class="settings-folder-actions">
           <span class="muted" id="transcodeFolderDefaultTag" hidden data-text="ui-settings-transcode-folder-default-tag"></span>
-          <button type="button" class="settings-small-btn" id="transcodeFolderResetBtn" hidden data-text="ui-settings-transcode-folder-reset"></button>
-          <button type="button" class="settings-small-btn" id="transcodeFolderChangeBtn" data-text="ui-settings-transcode-folder-change"></button>
+          <button data-action-group="convert" type="button" class="settings-small-btn" id="transcodeFolderResetBtn" hidden data-text="ui-settings-transcode-folder-reset"></button>
+          <button data-action-group="convert" type="button" class="settings-small-btn" id="transcodeFolderChangeBtn" data-text="ui-settings-transcode-folder-change"></button>
         </div>
         <span class="muted settings-hint" data-text="ui-settings-transcode-folder-hint"></span>
       </div>
@@ -792,7 +792,7 @@
       <p class="muted" id="driveNameError" hidden></p>
       <div class="row confirm-actions">
         <button id="driveNameSkipBtn"><span data-drive-name-mode="name conflict" data-text="ui-drive-name-skip"></span><span data-drive-name-mode="rename" hidden data-text="ui-common-cancel"></span></button>
-        <button id="driveNameOkBtn" data-primary data-text="ui-common-save"></button>
+        <button data-action-group="usb" id="driveNameOkBtn" data-primary data-text="ui-common-save"></button>
       </div>
     </div>
   </div>
@@ -828,7 +828,7 @@
       <p class="muted group-edit-hint" data-text="ui-group-edit-intro"></p>
       <div class="row confirm-actions">
         <button type="button" id="groupEditCancelBtn" data-text="ui-common-cancel"></button>
-        <button type="button" id="groupEditApplyBtn" data-primary data-text="ui-group-edit-apply"></button>
+        <button data-action-group="track-edit" type="button" id="groupEditApplyBtn" data-primary data-text="ui-group-edit-apply"></button>
       </div>
     </div>
   </div>
@@ -873,9 +873,9 @@
       </fieldset>
       <p class="muted convert-folder-hint" id="convertFolderHint"></p>
       <div class="row confirm-actions">
-        <button type="button" id="convertRemoveBtn" class="convert-remove-btn" data-text-tooltip="ui-convert-remove-tooltip" data-text="ui-convert-remove"></button>
+        <button data-action-group="convert" type="button" id="convertRemoveBtn" class="convert-remove-btn" data-text-tooltip="ui-convert-remove-tooltip" data-text="ui-convert-remove"></button>
         <button type="button" id="convertCancelBtn" data-text="ui-common-cancel"></button>
-        <button type="button" id="convertApplyBtn" data-primary data-text="ui-convert-apply"></button>
+        <button data-action-group="convert" type="button" id="convertApplyBtn" data-primary data-text="ui-convert-apply"></button>
       </div>
     </div>
   </div>
@@ -917,7 +917,7 @@
       </div>
       <div class="row confirm-actions">
         <button id="playlistImportCancelBtn" data-text="ui-common-cancel"></button>
-        <button id="playlistImportOkBtn" data-primary disabled data-text="ui-common-import"></button>
+        <button data-action-group="library" id="playlistImportOkBtn" data-primary disabled data-text="ui-common-import"></button>
       </div>
     </div>
   </div>
@@ -931,7 +931,7 @@
       <ul class="add-to-list" id="importConflictList" data-text-aria-label="ui-import-conflicts-list-aria-label"><!-- tplImportConflictRow per track --></ul>
       <div class="row confirm-actions">
         <button id="importConflictKeepBtn" data-text="ui-import-conflicts-keep"></button>
-        <button id="importConflictUseBtn"></button>
+        <button data-action-group="library" id="importConflictUseBtn"></button>
       </div>
     </div>
   </div>
@@ -999,7 +999,7 @@
       <div role="cell" class="track-grid-cell td-key"></div>
       <div role="cell" class="track-grid-cell td-length"></div>
       <div role="cell" class="track-grid-cell td-format"><span class="format-badge"></span></div>
-      <div role="cell" class="track-grid-cell td-action"><div class="action-buttons"><button class="track-add-btn"></button><button data-action="analyze-track"></button></div></div>
+      <div role="cell" class="track-grid-cell td-action"><div class="action-buttons"><button class="track-add-btn"></button><button data-action-group="analyze" data-action="analyze-track"></button></div></div>
     </div>
   </template>
   <!-- Convert… dialog: one format choice -->
@@ -1044,14 +1044,14 @@
   <template id="tplUiTextsFailed"><p class="ui-texts-failed"></p></template>
   <template id="tplStatusWarningLink"><span class="status-warning"> | <a href="#" class="status-warning-link"></a></span></template>
   <template id="tplSourceChipRekordboxDb">
-    <span class="source-chip source-chip-library"><input class="source-chip-toggle" type="checkbox" data-rekordbox-db="true" data-text-aria-label="ui-library-toggle-rekordbox-library-aria-label" /><span class="source-chip-path">rekordbox</span><button class="source-chip-import" type="button" data-import-library="rekordbox" data-text-tooltip="ui-library-import-from-rekordbox" data-text-aria-label="ui-library-import-from-rekordbox">&#8635;</button></span>
+    <span data-action-group="library" class="source-chip source-chip-library"><input class="source-chip-toggle" type="checkbox" data-rekordbox-db="true" data-text-aria-label="ui-library-toggle-rekordbox-library-aria-label" /><span class="source-chip-path">rekordbox</span><button class="source-chip-import" type="button" data-import-library="rekordbox" data-text-tooltip="ui-library-import-from-rekordbox" data-text-aria-label="ui-library-import-from-rekordbox">&#8635;</button></span>
   </template>
   <template id="tplSelectOptgroup"><optgroup></optgroup></template>
   <template id="tplSourceChipMixxxDb">
-    <span class="source-chip source-chip-library"><input class="source-chip-toggle" type="checkbox" data-mixxx-db="true" data-text-aria-label="ui-library-toggle-mixxx-library-aria-label" /><span class="source-chip-path">Mixxx</span><button class="source-chip-import" type="button" data-import-library="mixxx" data-text-tooltip="ui-library-import-from-mixxx" data-text-aria-label="ui-library-import-from-mixxx">&#8635;</button></span>
+    <span data-action-group="library" class="source-chip source-chip-library"><input class="source-chip-toggle" type="checkbox" data-mixxx-db="true" data-text-aria-label="ui-library-toggle-mixxx-library-aria-label" /><span class="source-chip-path">Mixxx</span><button class="source-chip-import" type="button" data-import-library="mixxx" data-text-tooltip="ui-library-import-from-mixxx" data-text-aria-label="ui-library-import-from-mixxx">&#8635;</button></span>
   </template>
   <template id="tplSourceChip">
-    <span class="source-chip"><input class="source-chip-toggle" type="checkbox" data-text-aria-label="ui-library-filter-source-aria-label" /><span class="source-chip-path"></span><button class="source-chip-remove" data-text-aria-label="ui-common-remove">&times;</button></span>
+    <span data-action-group="library" class="source-chip"><input class="source-chip-toggle" type="checkbox" data-text-aria-label="ui-library-filter-source-aria-label" /><span class="source-chip-path"></span><button class="source-chip-remove" data-text-aria-label="ui-common-remove">&times;</button></span>
   </template>
   <template id="tplSourceChipGroup">
     <div class="source-chip-group"><div class="source-chip-children"></div></div>
@@ -1101,10 +1101,10 @@
   </template>
   <template id="tplHistoryItem"><li><button><span class="playlist-label"></span><span class="history-date muted"></span></button></li></template>
   <template id="tplUsbAudioFormatChip">
-    <span class="usb-cfg-recent-item usb-cfg-audio-format-chip"><span class="drag-handle" data-usb-audio-format-drag-handle draggable="true" data-text-tooltip="ui-usb-drag-to-set-tooltip" data-text-aria-label="ui-common-drag-to-reorder">&#10495;</span><label class="usb-cfg-audio-format-label"><input type="checkbox" class="usb-cfg-audio-format-check"><span class="usb-cfg-audio-format-name"></span></label></span>
+    <span data-action-group="usb" class="usb-cfg-recent-item usb-cfg-audio-format-chip"><span class="drag-handle" data-usb-audio-format-drag-handle draggable="true" data-text-tooltip="ui-usb-drag-to-set-tooltip" data-text-aria-label="ui-common-drag-to-reorder">&#10495;</span><label class="usb-cfg-audio-format-label"><input type="checkbox" class="usb-cfg-audio-format-check"><span class="usb-cfg-audio-format-name"></span></label></span>
   </template>
   <template id="tplUsbRecentItem">
-    <span class="usb-cfg-recent-item"><button type="button" class="usb-cfg-recent-btn" style="direction: rtl; text-align: left;"></button><button type="button" class="usb-cfg-recent-prune-btn" data-text-tooltip="ui-usb-forget-tooltip">×</button></span>
+    <span class="usb-cfg-recent-item"><button data-action-group="switch-usb" type="button" class="usb-cfg-recent-btn" style="direction: rtl; text-align: left;"></button><button data-action-group="switch-usb" type="button" class="usb-cfg-recent-prune-btn" data-text-tooltip="ui-usb-forget-tooltip">×</button></span>
   </template>
   <template id="tplDiagOverviewItem">
     <div class="diag-overview-item"><span class="diag-indicator"></span><div><div class="diag-overview-title"></div><div class="diag-overview-detail"></div></div></div>
@@ -1135,7 +1135,7 @@
     <li><input type="checkbox" class="diag-repair-fix-check" /><div class="diag-repair-fix-content"><div class="diag-repair-fix-title"><strong></strong></div><span class="diag-repair-fix-desc"></span><label class="diag-repair-fix-name hidden"><span class="diag-repair-fix-name-label"></span><input type="text" class="diag-repair-fix-name-input" maxlength="255" autocomplete="off" spellcheck="false" /></label><span class="diag-repair-fix-meta"></span></div></li>
   </template>
   <template id="tplBackgroundColorChip">
-    <button type="button" class="bg-color-chip" role="radio"><span class="bg-color-chip-dot" aria-hidden="true"></span><span class="bg-color-chip-label"></span></button>
+    <button data-action-group="usb" type="button" class="bg-color-chip" role="radio"><span class="bg-color-chip-dot" aria-hidden="true"></span><span class="bg-color-chip-label"></span></button>
   </template>
   <template id="tplPlayerMenuItem">
     <button type="button" class="player-menu-item" role="option"><span class="player-menu-item-label"></span></button>
@@ -1154,8 +1154,8 @@
       <div class="event-log-source"></div>
       <div class="event-log-message"></div>
       <div class="backups-row-actions">
-        <button type="button" class="backups-restore-btn" data-text="ui-backups-restore"></button>
-        <button type="button" class="backups-delete-btn" data-text="ui-common-delete"></button>
+        <button data-action-group="usb" type="button" class="backups-restore-btn" data-text="ui-backups-restore"></button>
+        <button data-action-group="usb" type="button" class="backups-delete-btn" data-text="ui-common-delete"></button>
       </div>
     </div>
   </template>
@@ -1196,7 +1196,7 @@
       </div>
       <label class="usb-cfg-toggle-row help-language-row" id="helpLanguageRow" for="helpLanguageSelect">
         <span data-text="ui-common-language"></span>
-        <select id="helpLanguageSelect"></select>
+        <select id="helpLanguageSelect" data-action-group="app"></select>
       </label>
       <ol class="help-steps">
         <li><strong data-text="ui-help-step-folders"></strong> <span data-text="ui-help-step-folders-text"></span></li>

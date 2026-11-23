@@ -1677,9 +1677,10 @@ async function connectUsb(page) {
   await expect(page.locator("#diagOverallStatus")).toHaveText("WARN");
 }
 
-// A running USB job locks the USB selection, export and the Health & Diagnostics buttons
-// until it ends; other jobs don't.
-test("USB job locks", async ({ page }) => {
+// What a running job blocks comes from the backend (`jobs:blocked`, the table in
+// job_conflicts.rs): every control of a blocked group is off, says why, and ignores clicks,
+// until the groups are free again. Controls keep their own enabled state meanwhile.
+test("a running job blocks its action groups", async ({ page }) => {
   await installTauriMock(page, "valid");
   await listenForBackendEvents(page);
   await page.addInitScript(() => {
@@ -1706,10 +1707,7 @@ test("USB job locks", async ({ page }) => {
   const recent = page.locator('#usbRecentList button[data-usb-recent-path="/Volumes/OTHER"]');
   const exportBtn = page.locator("#exportPlaylistBtn");
   const counts = () => page.evaluate(() => ({ picks: window.__picks, validates: window.__validates }));
-  const emit = (jobType, event) => page.evaluate(
-    ([jobType, event]) => window.__emitJobEvent({ jobId: `job-${jobType}`, jobType, stage: "test", event, percent: 0, message: "USB: working" }),
-    [jobType, event]
-  );
+  const blocked = (blockedActions) => page.evaluate((b) => window.__emitBlockedActions(b), blockedActions);
   // Each Health & Diagnostics button starts a job on the stick.
   const health = ["#reDiagnoseBtn", "#runUsbParityBtn", "#previewRepairsBtn", "#applyRepairsBtn"]
     .map((selector) => page.locator(selector));
@@ -1719,45 +1717,42 @@ test("USB job locks", async ({ page }) => {
   await expect(page.locator("#reDiagnoseBtn")).toBeEnabled();
   const idleHealth = await healthEnabled();
 
-  for (const [jobType, endEvent] of [
-    ["usb_read", "job.completed"],
-    ["usb_write", "job.failed"],
-    ["diagnostics", "job.completed"],
-    ["export", "job.completed"]
-  ]) {
-    await emit(jobType, "job.started");
-    await expect(select).toBeDisabled();
-    await expect(select).toHaveAttribute("title", /wait/i);
-    await expect(recent).toBeDisabled();
-    await expect(exportBtn).toBeDisabled();
-    for (const button of health) await expect(button).toBeDisabled();
+  const reason = "Wait for the export to finish.";
+  await blocked({ "switch-usb": reason, export: reason, usb: reason });
+  await expect(select).toBeDisabled();
+  await expect(select).toHaveAttribute("data-blocked-reason", reason);
+  await expect(recent).toBeDisabled();
+  await expect(exportBtn).toBeDisabled();
+  for (const button of health) await expect(button).toBeDisabled();
 
-    // A click already on its way when the job starts changes nothing either.
-    const before = await counts();
-    for (const selector of ["#selectUsbFolderBtn", '#usbRecentList button[data-usb-recent-path="/Volumes/OTHER"]']) {
-      await page.evaluate((selector) => {
-        document.querySelector("#statusText").textContent = "";
-        const button = document.querySelector(selector);
-        button.disabled = false;
-        button.click();
-      }, selector);
-      await expect(page.locator("#statusText")).toContainText(/wait/i);
-    }
-    expect(await counts()).toEqual(before);
-    await page.evaluate(() => { document.querySelector("#selectUsbFolderBtn").disabled = true; });
-
-    await emit(jobType, endEvent);
-    await expect(select).toBeEnabled();
-    await expect(recent).toBeEnabled();
-    await expect(exportBtn).toBeEnabled();
-    // Back to what their own reports say.
-    await expect.poll(healthEnabled).toEqual(idleHealth);
+  // A click changes nothing and says why.
+  const before = await counts();
+  for (const selector of ["#selectUsbFolderBtn", '#usbRecentList button[data-usb-recent-path="/Volumes/OTHER"]']) {
+    await page.evaluate((selector) => {
+      document.querySelector("#statusText").textContent = "";
+      document.querySelector(selector).click();
+    }, selector);
+    await expect(page.locator("#statusText")).toContainText(reason);
   }
+  expect(await counts()).toEqual(before);
 
-  await emit("analysis", "job.started");
-  await page.waitForTimeout(100);
+  // Only the groups the backend names: the analysis buttons stay on.
+  await expect(page.locator("#analyzeLibraryBtn")).toBeEnabled();
+
+  await blocked({});
   await expect(select).toBeEnabled();
+  await expect(select).not.toHaveAttribute("data-blocked-reason");
+  await expect(recent).toBeEnabled();
   await expect(exportBtn).toBeEnabled();
+  // Back to what their own reports say.
+  await expect.poll(healthEnabled).toEqual(idleHealth);
+});
+
+test("a job's footer", async ({ page }) => {
+  await installTauriMock(page, "valid");
+  await listenForBackendEvents(page);
+  await page.goto("/");
+  await connectUsb(page);
 
   // The footer follows the running job only, its percent kept within 0–100,
   // with the job's detail (counts, speed) next to the elapsed time and its
@@ -1768,7 +1763,6 @@ test("USB job locks", async ({ page }) => {
     { jobId, jobType: "export", stage: "copy", event, percent, message, ...(detail ? { detail } : {}) }
   );
   const fill = page.locator("#progressFill");
-  await emit("analysis", "job.completed");
   await job("export-9", "job.started", 5, "Copying files");
   await expect(fill).toHaveAttribute("style", /width: 5%/);
   const detail = page.locator("#progressDetail");

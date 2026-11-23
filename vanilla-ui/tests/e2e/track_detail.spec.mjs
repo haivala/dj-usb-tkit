@@ -2220,14 +2220,20 @@ test("USB save as a job", async ({ page }) => {
   await page.locator("#trackDetailAddCue").click();
   // An export starts while the editor is open.
   const exportJob = { jobId: "export-1", jobType: "export", stage: "export_to_usb" };
-  await page.evaluate((job) => window.__emitJobEvent({ ...job, event: "job.started", percent: 0, message: "USB: Exporting playlist" }), exportJob);
+  await page.evaluate((job) => {
+    window.__emitJobEvent({ ...job, event: "job.started", percent: 0, message: "USB: Exporting playlist" });
+    window.__emitBlockedActions({ usb: "Wait for the export to finish." });
+  }, exportJob);
   await page.locator("#trackDetailSaveBtn").click();
   await expect(page.locator("#statusText")).toContainText("Waiting for the running USB job");
   const saveCalls = () => page.evaluate(() => window.__calls.filter((c) => c.command === "save_usb_track_analysis_edits").length);
   expect(await saveCalls()).toBe(0);
 
   // Once the export finishes, the edits are saved -- nothing was dropped.
-  await page.evaluate((job) => window.__emitJobEvent({ ...job, event: "job.completed", percent: 100, message: "USB: Export complete" }), exportJob);
+  await page.evaluate((job) => {
+    window.__emitBlockedActions({});
+    window.__emitJobEvent({ ...job, event: "job.completed", percent: 100, message: "USB: Export complete" });
+  }, exportJob);
   await expect.poll(saveCalls).toBe(1);
   await page.evaluate(() => window.__releaseUsbSave());
   await expect(page.locator("#statusText")).toContainText("to USB");

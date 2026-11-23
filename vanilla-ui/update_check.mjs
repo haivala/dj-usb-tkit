@@ -188,16 +188,6 @@ export function dismissUpdateBanner(ctx) {
 export async function installUpdate(ctx) {
   const { state, el } = ctx;
   if (state.updateInstalling) return;
-  // A restart in the middle of an export or scan would cut it short.
-  if (state.activeJobId) {
-    ctx.emitMessage({
-      level: "warn",
-      source: "update",
-      code: "update.busy",
-      status: { text: t("ui-update-busy") }
-    });
-    return;
-  }
 
   state.updateInstalling = true;
   el.updateBanner.classList.add("hidden");

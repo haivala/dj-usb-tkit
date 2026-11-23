@@ -506,7 +506,6 @@
     "ui-tracklist-export-placement-before": "Before track (0:00 Artist - Title)",
     "ui-tracklist-export-start-from": "Start from track",
     "ui-tracklist-export-title": "Export Tracklist",
-    "ui-update-busy": "Finish the running job before updating.",
     "ui-update-install-failed": "Couldn't install version {version}.",
     "ui-usb-apply-repairs": "Apply Fixes",
     "ui-usb-audio-formats": "Audio formats",
@@ -560,7 +559,6 @@
     "ui-usb-playlists-compared": "Playlists compared",
     "ui-usb-playlists-drag-search-active": "Clear the search to drag tracks",
     "ui-usb-playlists-edit-order": "Edit order",
-    "ui-usb-playlists-edit-order-busy": "Wait for the running USB job to finish",
     "ui-usb-playlists-edit-order-tooltip": "Change the order of the playlists and of the tracks in them; nothing is written until Save order",
     "ui-usb-playlists-leave-discard": "Discard changes",
     "ui-usb-playlists-leave-message": "The new order of this USB's playlists isn't saved yet.",
@@ -583,9 +581,7 @@
     "ui-usb-repair-technical-details": "Technical details",
     "ui-usb-root-path": "No USB selected",
     "ui-usb-select-usb-folder": "Select USB Folder",
-    "ui-usb-select-usb-folder-busy-title": "Please wait for the current USB operation to finish",
     "ui-usb-status": "Status",
-    "ui-usb-switch-busy": "Please wait for the current USB operation to finish before switching drives",
     "ui-usb-title": "USB Browser"
   },
   "languages": [

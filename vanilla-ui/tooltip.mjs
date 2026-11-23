@@ -2,8 +2,10 @@ const SHOW_DELAY_MS = 150;
 const VIEWPORT_MARGIN = 8;
 const GAP = 6;
 
+// A control a running job blocks shows why (`data-blocked-reason`, action_blocks.mjs)
+// in place of its own tooltip.
 function closestTooltipTarget(node) {
-  return typeof node?.closest === "function" ? node.closest("[data-tooltip]") : null;
+  return typeof node?.closest === "function" ? node.closest("[data-blocked-reason], [data-tooltip]") : null;
 }
 
 export function initTooltips({ document, window }) {
@@ -41,7 +43,7 @@ export function initTooltips({ document, window }) {
   }
 
   function showTooltip(target) {
-    const text = target.dataset?.tooltip;
+    const text = target.dataset?.blockedReason || target.dataset?.tooltip;
     // A target re-rendered away during the show delay has an all-zero rect,
     // which would pin the tooltip to the viewport's top-left corner.
     if (!text || !target.isConnected) return;

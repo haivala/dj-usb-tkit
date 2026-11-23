@@ -25,6 +25,7 @@ test("registerBackendJobEvents unregisters old listeners and stores new ones", a
       if (eventName === "job:event") return () => { newJobUnlistenCalls += 1; };
       if (eventName === "playback:event") return () => { newPlaybackUnlistenCalls += 1; };
       if (eventName === "backend:log") return () => {};
+      if (eventName === "jobs:blocked") return () => {};
       throw new Error(`unexpected event ${eventName}`);
     },
     handleJobEvent: () => {},

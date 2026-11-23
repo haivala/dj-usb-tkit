@@ -34,6 +34,8 @@
   };
   window.__emit = emit;
   window.__emitJobEvent = (payload) => emit("job:event", payload);
+  // What the running jobs block, as the backend's `jobs:blocked` (`{ group: reason }`).
+  window.__emitBlockedActions = (blockedActions) => emit("jobs:blocked", { blockedActions });
   // What the backend's `logging::log` sends for each warning it makes.
   window.__emitBackendLog = (payload) => emit("backend:log", payload);
   window.__hasJobListener = () => (listeners.get("job:event") || []).length > 0;

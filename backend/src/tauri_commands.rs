@@ -1,6 +1,6 @@
 #![cfg(feature = "tauri")]
 
-use std::collections::BTreeSet;
+use std::collections::BTreeMap;
 use std::panic::{self, AssertUnwindSafe};
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex, MutexGuard, PoisonError};
@@ -63,15 +63,31 @@ const JOB_EVENT_CHANNEL: &str = "job:event";
 const PLAYBACK_EVENT_CHANNEL: &str = "playback:event";
 const ESSENTIA_DOWNLOAD_EVENT: &str = "essentia_download_progress";
 
-/// Ids of jobs that have emitted `job.started` but not yet `job.completed` /
-/// `job.failed`, kept up to date by `emit_job_payload`. `install_update` waits
-/// for it to empty and holds it while installing: every job emits
-/// `job.started` before doing any work, so a job started meanwhile blocks
-/// there until the app has restarted instead of being cut short.
-static RUNNING_JOBS: Mutex<BTreeSet<String>> = Mutex::new(BTreeSet::new());
+/// Jobs that have emitted `job.started` but not yet `job.completed` /
+/// `job.failed` (id -> job type), kept up to date by `emit_job_payload`.
+/// `install_update` waits for it to empty and holds it while installing: every
+/// job emits `job.started` before doing any work, so a job started meanwhile
+/// blocks there until the app has restarted instead of being cut short. What
+/// the running jobs block comes from `job_conflicts`.
+static RUNNING_JOBS: Mutex<BTreeMap<String, String>> = Mutex::new(BTreeMap::new());
 
-fn running_jobs() -> MutexGuard<'static, BTreeSet<String>> {
+/// The event that carries the blocked action groups (`job_conflicts::blocked_actions`)
+/// whenever a job starts or ends.
+const JOBS_BLOCKED_EVENT: &str = "jobs:blocked";
+
+fn running_jobs() -> MutexGuard<'static, BTreeMap<String, String>> {
     RUNNING_JOBS.lock().unwrap_or_else(PoisonError::into_inner)
+}
+
+/// The refusal of a command the running jobs block (`job_conflicts`), for the desktop
+/// app's invoke handler to answer with before the command runs.
+pub fn refuse_blocked_command(command: &str) -> Option<ApiResponse<()>> {
+    let jobs = running_jobs();
+    let reason = crate::job_conflicts::refusal(command, jobs.values().map(String::as_str))?;
+    Some(ApiResponse::failure(ErrorPayload::new(
+        ErrorCode::ValidationError,
+        reason,
+    )))
 }
 
 /// Cancellation flag for in-progress Essentia download. Managed Tauri state.
@@ -222,14 +238,26 @@ fn emit_job_payload<R: tauri::Runtime>(
     event_name: &str,
     payload: JobEventPayload,
 ) {
-    match event_name {
-        "job.started" => {
-            running_jobs().insert(payload.job_id.clone());
+    let blocked = match event_name {
+        "job.started" | "job.completed" | "job.failed" => {
+            let mut jobs = running_jobs();
+            if event_name == "job.started" {
+                jobs.insert(payload.job_id.clone(), payload.job_type.clone());
+            } else {
+                jobs.remove(&payload.job_id);
+            }
+            Some(crate::job_conflicts::blocked_actions(
+                jobs.values().map(String::as_str),
+            ))
         }
-        "job.completed" | "job.failed" => {
-            running_jobs().remove(&payload.job_id);
-        }
-        _ => {}
+        _ => None,
+    };
+    // Before the job's own event, so its controls are off by the time it shows.
+    if let Some(blocked) = blocked {
+        let _ = app.emit(
+            JOBS_BLOCKED_EVENT,
+            serde_json::json!({ "blockedActions": blocked }),
+        );
     }
     let direct_event_name = event_name.replace('.', ":");
     let _ = app.emit(&direct_event_name, payload.clone());
@@ -2323,7 +2351,7 @@ pub async fn initialize_usb(
     let commands = state.inner().clone();
     run_usb_job(
         &app,
-        "usb_read",
+        "usb_write",
         "initialize_usb",
         tr::job_initialize_usb_started(),
         tr::job_initialize_usb_completed(),
@@ -2763,7 +2791,7 @@ pub async fn install_update(app: AppHandle) -> ApiResponse<()> {
 }
 
 /// `RUNNING_JOBS`, locked, once no job but `own_job_id` is running.
-fn lock_jobs_when_idle(own_job_id: &str) -> Option<MutexGuard<'static, BTreeSet<String>>> {
+fn lock_jobs_when_idle(own_job_id: &str) -> Option<MutexGuard<'static, BTreeMap<String, String>>> {
     let jobs = running_jobs();
-    jobs.iter().all(|id| id == own_job_id).then_some(jobs)
+    jobs.keys().all(|id| id == own_job_id).then_some(jobs)
 }

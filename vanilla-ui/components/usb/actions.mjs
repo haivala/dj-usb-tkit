@@ -5,55 +5,18 @@ import { t, tCount } from "../../ui_texts.mjs";
 import { createDialogLifecycle } from "../shared/dialog_lifecycle.mjs";
 import { catchErr } from "../shared/track_actions.mjs";
 import { setActiveListItem } from "../shell/actions.mjs";
-import { setExportButtonsCovered } from "../playlist/actions.mjs";
 import { STORAGE_KEY_USB_ROOT, STORAGE_KEY_EXPORT_ENGINE_LIBRARY } from "../../settings_keys.mjs";
 import {
   applyUsbOrderEdit, applyUsbOrderSortClick, forgetUsbOrderSort, isUsbOrderEditing,
   refuseWhileUsbOrderEditing, renderUsbOrderEditControls
 } from "./order_edit.mjs";
 
-// Job types that scope a Tauri command to state.usbRoot -- while one of
-// these is running, the currently-selected root must not change underneath
-// it, or an in-flight response (e.g. a parity report) can land after the
-// user has already switched to a different drive and get rendered as if it
-// belonged to the new one.
-export const USB_ROOT_LOCKING_JOB_TYPES = new Set(["usb_read", "usb_write", "diagnostics", "export"]);
-
-export function isUsbRootChangeBlocked(state) {
-  for (const job of state.runningJobs.values()) {
-    if (USB_ROOT_LOCKING_JOB_TYPES.has(job.jobType)) return true;
-  }
-  return false;
-}
-
-// The Health & Diagnostics buttons each start a job on the stick, so they're
-// off while a USB job runs (a repair, an export, a read) as well as when
-// their own report says there's nothing to do.
+// Preview Fixes and Apply Fixes are off when their report says there's
+// nothing to do. (A running job blocks them through their action group.)
 export function updateUsbHealthButtons(ctx) {
   const { state, el } = ctx;
-  const busy = isUsbRootChangeBlocked(state);
-  el.reDiagnoseBtn.disabled = busy;
-  el.runUsbParityBtn.disabled = busy;
-  el.previewRepairsBtn.disabled = busy || !state.repairPreviewOffered;
-  el.applyRepairsBtn.disabled = busy || state.selectedRepairFixIds.size === 0;
-}
-
-export function setUsbRootControlsLocked(ctx, locked) {
-  const { el } = ctx;
-  updateUsbHealthButtons(ctx);
-  el.selectUsbFolderBtn.disabled = !!locked;
-  el.selectUsbFolderBtn.title = locked ? t("ui-usb-select-usb-folder-busy-title") : "";
-  el.usbRecentList.querySelectorAll("button").forEach((btn) => { btn.disabled = !!locked; });
-  renderUsbOrderEditControls(ctx);
-  if (locked) {
-    el.exportPlaylistBtn.disabled = true;
-    setExportButtonsCovered(el, true);
-  } else {
-    // Don't just flip disabled=false here -- the export button's disabled
-    // state is normally owned by playlist/usbRootValid logic (see below),
-    // so hand back to that recompute instead of overriding it.
-    ctx.updatePlaylistExportButtons();
-  }
+  el.previewRepairsBtn.disabled = !state.repairPreviewOffered;
+  el.applyRepairsBtn.disabled = state.selectedRepairFixIds.size === 0;
 }
 
 // Index the backend's per-playlist `playlistUsbExportStatus` (see
@@ -477,7 +440,7 @@ async function promptDriveNameIfUnset(ctx, data) {
 // everything showing the name is refreshed from there.
 export async function renameDrive(ctx) {
   const { state } = ctx;
-  if (isUsbRootChangeBlocked(state) || refuseWhileUsbOrderEditing(ctx)) return;
+  if (refuseWhileUsbOrderEditing(ctx)) return;
   const saved = await openDriveNameDialog(ctx, state.usbDeviceName);
   if (!saved) return;
   ctx.emitStatus(saved.statusText);
@@ -546,8 +509,9 @@ async function openDriveNameDialog(ctx, initial) {
 export async function validateAndSetUsbRoot(ctx, path) {
   const { state, el, command, emitStatus } = ctx;
 
-  if (isUsbRootChangeBlocked(state)) {
-    emitStatus(t("ui-usb-switch-busy"));
+  const blocked = ctx.actionBlockedReason("switch-usb");
+  if (blocked) {
+    emitStatus(blocked);
     return false;
   }
 
@@ -1054,22 +1018,6 @@ export async function setUsbBackgroundColor(ctx, color) {
   emitStatus(data.statusText);
 }
 
-// One export at a time: the buttons are disabled from the click on, not only
-// once the backend's job.started event arrives (the backend refuses a second
-// export too).
-async function withExportStarting(ctx, run) {
-  const { state } = ctx;
-  if (state.exportStarting || isUsbRootChangeBlocked(state)) return;
-  state.exportStarting = true;
-  ctx.updatePlaylistExportButtons();
-  try {
-    await run();
-  } finally {
-    state.exportStarting = false;
-    ctx.updatePlaylistExportButtons();
-  }
-}
-
 // What every export sends from Settings.
 function exportOptions(state) {
   return {
@@ -1113,10 +1061,6 @@ async function runExportCommand(ctx, command, request, runningText) {
 }
 
 export async function exportPlaylistToUsb(ctx, playlistId) {
-  await withExportStarting(ctx, () => runPlaylistExport(ctx, playlistId));
-}
-
-async function runPlaylistExport(ctx, playlistId) {
   const { state } = ctx;
   const playlist = state.playlists.find((item) => item.id === playlistId);
   if (!playlist) return;
@@ -1144,21 +1088,17 @@ async function runPlaylistExport(ctx, playlistId) {
 // The Export playlists page's export: the chosen playlists as one job. True
 // once it succeeded.
 export async function exportPlaylistsToUsb(ctx, { playlistIds, forcePlaylistOrder, forceTrackOrder }) {
-  let exported = false;
-  await withExportStarting(ctx, async () => {
-    const data = await runExportCommand(ctx, "export_playlists_to_usb", {
-      usbRoot: ctx.state.usbRoot,
-      playlistIds,
-      forcePlaylistOrder,
-      forceTrackOrder,
-      options: exportOptions(ctx.state)
-    }, tCount("ui-usb-export-playlists-running", playlistIds.length));
-    if (!data) return;
-    ctx.applyPlaylistsState(data);
-    clearUsbPlaylistsView(ctx);
-    exported = true;
-  });
-  return exported;
+  const data = await runExportCommand(ctx, "export_playlists_to_usb", {
+    usbRoot: ctx.state.usbRoot,
+    playlistIds,
+    forcePlaylistOrder,
+    forceTrackOrder,
+    options: exportOptions(ctx.state)
+  }, tCount("ui-usb-export-playlists-running", playlistIds.length));
+  if (!data) return false;
+  ctx.applyPlaylistsState(data);
+  clearUsbPlaylistsView(ctx);
+  return true;
 }
 
 export function renderUsbPlaylists(ctx) {
@@ -1315,10 +1255,6 @@ export async function initializeUsb(ctx) {
 }
 
 export async function pickUsbFolder(ctx) {
-  if (isUsbRootChangeBlocked(ctx.state)) {
-    ctx.emitStatus(t("ui-usb-switch-busy"));
-    return null;
-  }
   const selected = await ctx.invoke("pick_usb_folder");
   if (!selected) return null;
   await validateAndSetUsbRoot(ctx, String(selected));
@@ -1387,7 +1323,6 @@ export function renderUsbRecentRoots(ctx) {
   const devices = state.usbDevices;
   el.usbRecentRow.classList.toggle("hidden", !devices.length);
   if (!devices.length) return;
-  const locked = isUsbRootChangeBlocked(state);
   devices.forEach((device) => {
     const path = device.rootPath;
     const row = cloneTemplate(document, "tplUsbRecentItem");
@@ -1395,12 +1330,10 @@ export function renderUsbRecentRoots(ctx) {
     btn.dataset.usbRecentPath = path;
     btn.dataset.tooltip = path;
     btn.textContent = path;
-    btn.disabled = locked;
 
     const pruneBtn = row.querySelector(".usb-cfg-recent-prune-btn");
     pruneBtn.dataset.usbPruneDeviceId = device.id;
     pruneBtn.setAttribute("aria-label", t("ui-usb-forget-path-aria-label", { path }));
-    pruneBtn.disabled = locked;
     el.usbRecentList.appendChild(row);
   });
 }

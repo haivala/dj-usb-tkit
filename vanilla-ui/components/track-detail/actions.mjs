@@ -14,7 +14,6 @@
 // the toggle is then disabled and shown checked, purely informational.
 
 import { drawDetailWaveform, base64ToBytes, computeWaveNorm } from "./waveform_detail.mjs";
-import { isUsbRootChangeBlocked } from "../usb/actions.mjs";
 import { RELEASE_DATE_PATTERN, saveLibraryMetadataEdits, saveUsbMetadataEdits } from "../shared/track_metadata_edits.mjs";
 import { cloneTemplate } from "../../ui_utils.mjs";
 import { coverElement, markLastEditedRow } from "../../track_table.mjs";
@@ -1768,11 +1767,11 @@ async function openUsbTrackDetail(ctx, track, { rowKey = null } = {}) {
   });
   if (!payload) return;
 
-  // Another USB job (an export, diagnostics, another save) writes the same
-  // databases on the stick: wait for it instead of dropping the edits.
-  if (isUsbRootChangeBlocked(state)) {
+  // A running job blocks USB changes (an export, diagnostics, another save):
+  // wait for it instead of dropping the edits.
+  if (ctx.actionBlockedReason("usb")) {
     emitStatus(t("ui-track-detail-waiting-for-usb-job"));
-    await ctx.waitForUsbJobIdle();
+    await ctx.whenActionUnblocked("usb");
   }
 
   // A genre / rating / release-date-only edit leaves the analysis files, BPM and key alone.

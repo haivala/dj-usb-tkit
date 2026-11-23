@@ -22,8 +22,6 @@ export function createInitialState() {
     usbNameTakenBy: null,
     // select_usb's audio formats for the connected USB (USB audio formats), or null.
     usbAudioFormats: null,
-    // An export was clicked and hasn't finished (see exportPlaylistToUsb).
-    exportStarting: false,
     exportPruneStale: true,
     exportBackup: true,
     // Rebuild the Engine DJ library whenever the app changes a USB. Off until
@@ -53,8 +51,10 @@ export function createInitialState() {
     updateInstallFailed: false,
     // Pending progress-footer hide (job_manager.mjs scheduleProgressIdle).
     progressIdleTimer: null,
-    // Resolvers waiting for the running USB job to end (waitForUsbJobIdle).
-    usbJobIdleWaiters: [],
+    // What the running jobs block, `{ group: reason }` (action_blocks.mjs), and
+    // the resolvers waiting for a group to be unblocked.
+    blockedActions: {},
+    actionBlockWaiters: new Map(),
     // The loaded library page(s); owned by the library TrackListController
     // (main.js) via getItems/setItems, but read directly by playback
     // resolution, analysis patching, and selection.
@@ -118,6 +118,7 @@ export function createInitialState() {
     runningJobs: new Map(),
     analysisPaused: false,
     unlistenJobEvent: null,
+    unlistenJobsBlocked: null,
     unlistenPlaybackEvent: null,
     unlistenBackendLogEvent: null,
     activeWaveform: null,

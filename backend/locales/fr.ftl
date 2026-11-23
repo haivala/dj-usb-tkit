@@ -1047,6 +1047,16 @@ repair-outcome-detail-engine = réglage activé, reconstruite ({ $tracks ->
 ## job
 
 job-failed-unknown = Échec de l'opération
+job-blocks-export = Attendez la fin de l'export.
+job-blocks-usb-write = Attendez la fin de la modification de la clé USB.
+job-blocks-usb-read = Attendez la fin du chargement de la clé USB.
+job-blocks-diagnostics = Attendez la fin de la vérification ou de la réparation de la clé USB.
+job-blocks-scan = Attendez la fin de la recherche de fichiers dans les dossiers.
+job-blocks-transcode = Attendez la fin de la conversion, ou annulez-la.
+job-blocks-analysis = Attendez la fin de l'analyse, ou annulez-la.
+job-blocks-migration = Attendez la fin de la mise à niveau des données.
+job-blocks-update = La mise à jour est en cours d'installation.
+job-blocks-other = Attendez la fin de la tâche en cours.
 job-save-usb-track-metadata-edits-started = USB : enregistrement des détails des morceaux
 job-save-usb-track-metadata-edits-completed = USB : détails des morceaux enregistrés
 job-save-usb-track-analysis-edits-started = USB : enregistrement des modifications de cues
@@ -2074,7 +2084,6 @@ ui-startup-progress-failed = Échec de l'initialisation
 ## ui-update
 
 ui-update-install-failed = Impossible d'installer la version { $version }.
-ui-update-busy = Terminez la tâche en cours avant de mettre à jour.
 
 ## ui-rating
 
@@ -2381,8 +2390,6 @@ ui-usb-forget-path-aria-label = Oublier { $path }
 ui-usb-parity-running = Rapport de parité USB en cours...
 ui-usb-repair-applying = Application des corrections USB prises en charge...
 ui-usb-repair-previewing = Aperçu des corrections USB...
-ui-usb-select-usb-folder-busy-title = Veuillez attendre la fin de l'opération USB en cours
-ui-usb-switch-busy = Veuillez attendre la fin de l'opération USB en cours avant de changer de clé
 
 ## ui-usb-history
 
@@ -2412,7 +2419,6 @@ ui-usb-player-menu-up = Monter
 ui-usb-playlists-compared = Playlists comparées
 ui-usb-playlists-edit-order = Modifier l'ordre
 ui-usb-playlists-edit-order-tooltip = Changer l'ordre des playlists et des morceaux qu'elles contiennent ; rien n'est écrit avant « Enregistrer l'ordre »
-ui-usb-playlists-edit-order-busy = Attendez la fin de la tâche USB en cours
 ui-usb-playlists-order-edit-blocks-jobs = Enregistrez ou annulez d'abord la modification de l'ordre
 ui-usb-playlists-save-order = Enregistrer l'ordre
 ui-usb-playlists-order-edited = Ordre des morceaux modifié

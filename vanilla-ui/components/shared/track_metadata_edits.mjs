@@ -7,7 +7,6 @@
 
 import { t, tCount } from "../../ui_texts.mjs";
 import { createDialogLifecycle } from "./dialog_lifecycle.mjs";
-import { isUsbRootChangeBlocked } from "../usb/actions.mjs";
 
 // The shape of a release date the editors send: YYYY, YYYY-MM or YYYY-MM-DD
 // (month and day may have one digit). The backend checks it is a real date
@@ -35,11 +34,11 @@ export async function saveLibraryMetadataEdits(ctx, trackIds, edits) {
 }
 
 export async function saveUsbMetadataEdits(ctx, rows, edits) {
-  // Another USB job (an export, diagnostics, another save) writes the same
-  // databases on the stick: wait for it instead of dropping the edits.
-  if (isUsbRootChangeBlocked(ctx.state)) {
+  // A running job blocks USB changes (an export, diagnostics, another save):
+  // wait for it instead of dropping the edits.
+  if (ctx.actionBlockedReason("usb")) {
     ctx.emitStatus(t("ui-group-edit-waiting-for-usb-job"));
-    await ctx.waitForUsbJobIdle();
+    await ctx.whenActionUnblocked("usb");
   }
   const saved = await ctx.command("save_usb_track_metadata_edits", {
     usbRoot: ctx.state.usbRoot,

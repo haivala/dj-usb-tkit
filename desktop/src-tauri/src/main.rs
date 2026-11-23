@@ -909,7 +909,10 @@ fn main() {
 
             Ok(())
         })
-        .invoke_handler(tauri::generate_handler![
+        // A command a running job blocks (`backend::job_conflicts`) is refused here, before
+        // it runs, with the reason the UI shows on its disabled controls.
+        .invoke_handler({
+            let commands: fn(tauri::ipc::Invoke<tauri::Wry>) -> bool = tauri::generate_handler![
             backend::tauri_commands::scan_library,
             backend::tauri_commands::scan_rekordbox_db,
             backend::tauri_commands::scan_mixxx_db,
@@ -1023,7 +1026,17 @@ fn main() {
             save_text_file,
             show_window,
             set_theme_background
-        ])
+        ];
+            move |invoke: tauri::ipc::Invoke<tauri::Wry>| {
+                if let Some(refusal) =
+                    backend::tauri_commands::refuse_blocked_command(invoke.message.command())
+                {
+                    invoke.resolver.resolve(refusal);
+                    return true;
+                }
+                commands(invoke)
+            }
+        })
         .run(tauri::generate_context!())
         .expect("failed to run tauri application");
 }
