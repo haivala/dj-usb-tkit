@@ -156,7 +156,7 @@ fn edb_playlist_names(id: &str, parsed: Option<&ParsedPdb>) -> Vec<String> {
     let Some(leaf) = parsed
         .playlist_tree
         .iter()
-        .find(|row| row.id == pdb_id && !row.row_is_folder)
+        .find(|row| row.id == pdb_id && !row.is_folder)
     else {
         return Vec::new();
     };

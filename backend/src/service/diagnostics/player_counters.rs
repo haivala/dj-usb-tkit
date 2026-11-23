@@ -57,7 +57,7 @@ pub(super) fn compute_player_counter_snapshot(
     let playlist_count_candidate = parsed
         .playlist_tree
         .iter()
-        .filter(|row| !row.row_is_folder)
+        .filter(|row| !row.is_folder)
         .count();
 
     let t11 = table_signal(&bytes, page_size, 11)?;

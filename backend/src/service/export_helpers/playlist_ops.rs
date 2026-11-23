@@ -296,7 +296,7 @@ pub fn remove_playlist_and_tracks_from_pdb_in(
     let remove_ids = parsed
         .playlist_tree
         .iter()
-        .filter(|row| !row.row_is_folder)
+        .filter(|row| !row.is_folder)
         .filter(|row| {
             hinted_id.is_some_and(|id| id == row.id)
                 || wanted_names.contains(&canonicalize_playlist_name(&row.name))
@@ -781,7 +781,7 @@ pub fn verify_pdb_content(
     let playlist_ids = parsed
         .playlist_tree
         .iter()
-        .filter(|node| !node.row_is_folder && node.name == playlist.name)
+        .filter(|node| !node.is_folder && node.name == playlist.name)
         .map(|node| node.id)
         .collect::<Vec<_>>();
     if playlist_ids.is_empty() {

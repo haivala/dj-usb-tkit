@@ -200,14 +200,14 @@ fn strict_repair_playlist_names_follow_pdb_order_with_edb_only_tail() {
         id: 10,
         parent_id: 0,
         sort_order: 1,
-        row_is_folder: false,
+        is_folder: false,
         name: "Zeta".to_string(),
     });
     parsed.playlist_tree.push(PdbPlaylistTreeRow {
         id: 20,
         parent_id: 0,
         sort_order: 2,
-        row_is_folder: false,
+        is_folder: false,
         name: "Alpha".to_string(),
     });
 

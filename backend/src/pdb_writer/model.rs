@@ -69,14 +69,8 @@ pub struct PdbArtworkRow {
     pub path: String,
 }
 
-#[derive(Clone, Debug)]
-pub struct PdbPlaylistTreeRow {
-    pub id: u32,
-    pub parent_id: u32,
-    pub sort_order: u32,
-    pub is_folder: bool,
-    pub name: String,
-}
+/// The writer writes the playlist tree rows it reads.
+pub use crate::pdb_reader::PdbPlaylistTreeRow;
 
 /// The writer writes the playlist entries it reads.
 pub use crate::pdb_reader::PdbPlaylistEntryRow;

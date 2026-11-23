@@ -2084,7 +2084,7 @@ fn usb_pdb_files(usb_root: &Path, name: &str) -> Vec<String> {
     let playlist = parsed
         .playlist_tree
         .iter()
-        .find(|row| row.name == name && !row.row_is_folder)
+        .find(|row| row.name == name && !row.is_folder)
         .expect("pdb playlist");
     let mut entries: Vec<_> = parsed
         .playlist_entries

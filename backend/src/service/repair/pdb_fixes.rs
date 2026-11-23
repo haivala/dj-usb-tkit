@@ -139,12 +139,12 @@ pub(in crate::service) fn empty_duplicate_playlists_in(
     };
     let filled = tree
         .iter()
-        .filter(|p| !p.row_is_folder && with_entries.contains(&p.id))
+        .filter(|p| !p.is_folder && with_entries.contains(&p.id))
         .map(key)
         .collect::<HashSet<_>>();
     let mut found = tree
         .iter()
-        .filter(|p| !p.row_is_folder && !with_entries.contains(&p.id) && filled.contains(&key(p)))
+        .filter(|p| !p.is_folder && !with_entries.contains(&p.id) && filled.contains(&key(p)))
         .map(|p| EmptyDuplicatePlaylist {
             id: p.id,
             name: p.name.clone(),

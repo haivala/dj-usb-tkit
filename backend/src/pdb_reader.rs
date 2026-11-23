@@ -75,7 +75,7 @@ pub struct PdbPlaylistTreeRow {
     pub id: u32,
     pub parent_id: u32,
     pub sort_order: u32,
-    pub row_is_folder: bool,
+    pub is_folder: bool,
     pub name: String,
 }
 
@@ -202,12 +202,9 @@ pub fn parse_pdb(path: &Path) -> BackendResult<ParsedPdb> {
 /// Playlist count from the PDB alone (excludes folder nodes), best-effort --
 /// `None` on any read/parse failure, never a hard error.
 pub fn count_pdb_playlists(path: &Path) -> Option<usize> {
-    parse_pdb(path).ok().map(|p| {
-        p.playlist_tree
-            .iter()
-            .filter(|row| !row.row_is_folder)
-            .count()
-    })
+    parse_pdb(path)
+        .ok()
+        .map(|p| p.playlist_tree.iter().filter(|row| !row.is_folder).count())
 }
 
 /// A data page whose `(u5, num_rl)` breaks the transaction rule.
@@ -669,7 +666,7 @@ fn parse_playlist_tree_row(row: &[u8]) -> Option<PdbPlaylistTreeRow> {
         parent_id: fields.parent_id,
         sort_order: fields.sort_order,
         id: fields.id,
-        row_is_folder: fields.is_folder,
+        is_folder: fields.is_folder,
         name: get_string_from_pdb(row, crate::pdb_row::PLAYLIST_TREE_NAME_AT).unwrap_or_default(),
     })
 }
@@ -1257,7 +1254,7 @@ mod tests {
         assert_eq!(row.id, 42);
         assert_eq!(row.parent_id, 0);
         assert_eq!(row.sort_order, 5);
-        assert!(!row.row_is_folder);
+        assert!(!row.is_folder);
         assert_eq!(row.name, "My Playlist");
     }
 
@@ -1275,7 +1272,7 @@ mod tests {
         assert_eq!(row.id, 10);
         assert_eq!(row.parent_id, 1);
         assert_eq!(row.sort_order, 3);
-        assert!(row.row_is_folder);
+        assert!(row.is_folder);
         assert_eq!(row.name, "DJ Sets");
     }
 
@@ -1796,7 +1793,7 @@ mod tests {
         assert_eq!(parsed.playlist_tree.len(), 1);
         assert_eq!(parsed.playlist_tree[0].id, 10);
         assert_eq!(parsed.playlist_tree[0].name, "My Set");
-        assert!(!parsed.playlist_tree[0].row_is_folder);
+        assert!(!parsed.playlist_tree[0].is_folder);
 
         // Verify playlist entries
         assert_eq!(parsed.playlist_entries.len(), 2);

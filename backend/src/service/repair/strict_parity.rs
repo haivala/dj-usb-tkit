@@ -128,7 +128,7 @@ pub(super) fn strict_repair_ordered_playlist_names(
     let mut pdb_leaves = parsed
         .playlist_tree
         .iter()
-        .filter(|row| !row.row_is_folder)
+        .filter(|row| !row.is_folder)
         .collect::<Vec<_>>();
     pdb_leaves.sort_by(|a, b| {
         a.sort_order
@@ -591,7 +591,7 @@ pub(super) fn merge_strict_parity_playlists(
     }
     let mut pdb_playlists_by_exact: HashMap<String, PdbPlaylistInfo> = HashMap::new();
     let mut pdb_canon_to_exact: HashMap<String, Vec<String>> = HashMap::new();
-    for leaf in parsed.playlist_tree.iter().filter(|r| !r.row_is_folder) {
+    for leaf in parsed.playlist_tree.iter().filter(|r| !r.is_folder) {
         let mut entries: Vec<_> = parsed
             .playlist_entries
             .iter()
@@ -631,7 +631,7 @@ pub(super) fn merge_strict_parity_playlists(
         .max()
         .unwrap_or(0)
         + 1;
-    let has_existing_pdb_order = parsed.playlist_tree.iter().any(|r| !r.row_is_folder);
+    let has_existing_pdb_order = parsed.playlist_tree.iter().any(|r| !r.is_folder);
     let mut used_playlist_ids = pdb_tree_ids.clone();
     let mut consumed_pdb_ids: HashSet<u32> = HashSet::new();
     let mut merged = Vec::<MergedPlaylist>::new();

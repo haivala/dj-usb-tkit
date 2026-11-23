@@ -1053,7 +1053,7 @@ pub(crate) fn compute_additive_diff(
             // is allowed to change, because that is a fixed-width field and
             // Used to put the exported playlist first.
             if existing.parent_id != new_row.parent_id
-                || existing.row_is_folder != new_row.is_folder
+                || existing.is_folder != new_row.is_folder
                 || existing.name != new_row.name
             {
                 return Err(NonAdditiveReason::PlaylistTreeRowMutated { id: new_row.id });

@@ -827,9 +827,7 @@ pub fn filter_prunable_stale_paths_for_playlist(
         let current_playlist_ids = parsed
             .playlist_tree
             .iter()
-            .filter(|row| {
-                !row.row_is_folder && canonicalize_playlist_name(&row.name) == wanted_name
-            })
+            .filter(|row| !row.is_folder && canonicalize_playlist_name(&row.name) == wanted_name)
             .map(|row| row.id)
             .collect::<HashSet<_>>();
         let track_by_id = parsed

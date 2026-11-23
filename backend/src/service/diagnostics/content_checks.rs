@@ -595,7 +595,7 @@ where
     let mut leaves: Vec<&crate::pdb_reader::PdbPlaylistTreeRow> = parsed
         .playlist_tree
         .iter()
-        .filter(|n| !n.row_is_folder)
+        .filter(|n| !n.is_folder)
         .collect();
     leaves.sort_by_key(|n| n.sort_order);
     let mut grouped_leaves = Vec::<(String, String, u32, Vec<u32>)>::new();

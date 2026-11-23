@@ -492,7 +492,7 @@ pub(crate) fn edb_as_parsed_pdb(
                     id: id(row.get(0)?),
                     parent_id: id(row.get(1)?),
                     sort_order: id(row.get(2)?),
-                    row_is_folder: row.get::<_, i64>(3)? == 1,
+                    is_folder: row.get::<_, i64>(3)? == 1,
                     name: row.get(4)?,
                 })
             })?

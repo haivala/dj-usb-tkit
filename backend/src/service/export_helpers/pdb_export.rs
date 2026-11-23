@@ -175,7 +175,7 @@ pub(super) fn validate_topology_locked_export_bytes(
     match crate::pdb_reader::parse_pdb_bytes(after) {
         Ok(parsed) => {
             let mut seen = HashSet::<u32>::new();
-            for row in parsed.playlist_tree.iter().filter(|row| !row.row_is_folder) {
+            for row in parsed.playlist_tree.iter().filter(|row| !row.is_folder) {
                 if !seen.insert(row.id) {
                     issues.push(format!("duplicate active playlist_tree id {}", row.id));
                 }
@@ -745,13 +745,7 @@ pub(crate) fn build_pdb_for_playlists(
         // real exports carry duplicate names/IDs in ways that should not be
         // normalized during additive export writes.
         for row in &parsed.playlist_tree {
-            all_playlist_tree.push(PdbPlaylistTreeRow {
-                id: row.id,
-                parent_id: row.parent_id,
-                sort_order: row.sort_order,
-                is_folder: row.row_is_folder,
-                name: row.name.clone(),
-            });
+            all_playlist_tree.push(row.clone());
             next_playlist_id = next_playlist_id.max(row.id + 1);
             next_sort_order = next_sort_order.max(row.sort_order + 1);
         }

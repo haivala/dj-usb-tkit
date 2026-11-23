@@ -326,7 +326,7 @@ pub(super) fn repaired_playlist_tree(
                 id: s.id,
                 parent_id: s.parent_id,
                 sort_order: s.sort_order,
-                row_is_folder: s.is_folder,
+                is_folder: s.is_folder,
                 name: renamed.map_or_else(|| s.name.replace('\0', ""), |r| r.new.clone()),
             }
         })

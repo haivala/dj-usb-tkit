@@ -1445,7 +1445,7 @@ fn export_to_usb_preserves_t07_playlist_tree_tombstone_page() {
         parsed
             .playlist_tree
             .iter()
-            .any(|row| !row.row_is_folder && row.name == "Tombstone Append"),
+            .any(|row| !row.is_folder && row.name == "Tombstone Append"),
         "second playlist should remain visible after tombstone-preserving append"
     );
 }
@@ -3862,7 +3862,7 @@ fn repeated_same_playlist_export_keeps_pdb_and_db_membership_stable() {
     let leaf_playlists = parsed
         .playlist_tree
         .iter()
-        .filter(|row| !row.row_is_folder && row.name == playlist_name)
+        .filter(|row| !row.is_folder && row.name == playlist_name)
         .collect::<Vec<_>>();
     assert_eq!(
         leaf_playlists.len(),
@@ -4632,7 +4632,7 @@ fn usb_playlist_track_paths(usb_root: &Path, playlist_name: &str) -> Vec<String>
     let playlist_ids = parsed
         .playlist_tree
         .iter()
-        .filter(|row| !row.row_is_folder && row.name == playlist_name)
+        .filter(|row| !row.is_folder && row.name == playlist_name)
         .map(|row| row.id)
         .collect::<Vec<_>>();
     let by_track_id = parsed

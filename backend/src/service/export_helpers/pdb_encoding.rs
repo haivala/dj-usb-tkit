@@ -62,7 +62,7 @@ pub fn encode_playlist_tree_row(
     id: u32,
     parent_id: u32,
     sort_order: u32,
-    row_is_folder: bool,
+    is_folder: bool,
     name: &str,
 ) -> Vec<u8> {
     use crate::pdb_row::{
@@ -75,7 +75,7 @@ pub fn encode_playlist_tree_row(
         (PLAYLIST_TREE_PARENT_AT, parent_id),
         (PLAYLIST_TREE_SORT_AT, sort_order),
         (PLAYLIST_TREE_ID_AT, id),
-        (PLAYLIST_TREE_FOLDER_AT, u32::from(row_is_folder)),
+        (PLAYLIST_TREE_FOLDER_AT, u32::from(is_folder)),
     ] {
         row[at..at + 4].copy_from_slice(&value.to_le_bytes());
     }

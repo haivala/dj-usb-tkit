@@ -381,7 +381,7 @@ fn playlist_paths(tree: &[PdbPlaylistTreeRow]) -> HashMap<u32, String> {
             let Some(at) = current else { break };
             parts.push(format!(
                 "{}{}",
-                if at.row_is_folder { "+" } else { "-" },
+                if at.is_folder { "+" } else { "-" },
                 canonicalize_playlist_name(&at.name)
             ));
             current = (at.parent_id != 0 && at.parent_id != at.id)
@@ -468,7 +468,7 @@ fn merge_edb_into_pdb(mut merged: ParsedPdb, edb: &ParsedPdb) -> ParsedPdb {
             id: next_playlist,
             parent_id: playlist_ids.get(&row.parent_id).copied().unwrap_or(0),
             sort_order: AFTER_PDB_LISTS.saturating_add(row.sort_order),
-            row_is_folder: row.row_is_folder,
+            is_folder: row.is_folder,
             name: row.name.clone(),
         });
         playlist_ids.insert(row.id, next_playlist);
@@ -758,7 +758,7 @@ fn engine_playlists(pdb: &ParsedPdb, engine_ids: &HashMap<u32, i64>) -> Vec<Engi
                     .filter_map(|e| engine_ids.get(&e.track_id).copied())
                     .collect(),
             });
-            if row.row_is_folder {
+            if row.is_folder {
                 level.push((row.id, id));
             }
         }

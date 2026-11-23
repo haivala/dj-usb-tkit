@@ -15,7 +15,7 @@ use std::path::Path;
 use backend::pdb_reader::parse_pdb;
 use backend::pdb_writer::{
     PdbAlbumRow, PdbArtistRow, PdbArtworkRow, PdbData, PdbDictRow, PdbHistoryEntryRow, PdbKeyRow,
-    PdbPlaylistEntryRow, PdbPlaylistTreeRow, standard_colors, standard_columns_raw, write_pdb,
+    PdbPlaylistEntryRow, standard_colors, standard_columns_raw, write_pdb,
 };
 use backend::service::export_helpers::PdbTrackRowData;
 
@@ -172,15 +172,8 @@ fn main() {
     }
 
     // Playlist tree
-    for p in &parsed.playlist_tree {
-        data.playlist_tree.push(PdbPlaylistTreeRow {
-            id: p.id,
-            parent_id: p.parent_id,
-            sort_order: p.sort_order,
-            is_folder: p.row_is_folder,
-            name: p.name.clone(),
-        });
-    }
+    data.playlist_tree
+        .extend(parsed.playlist_tree.iter().cloned());
 
     // Playlist entries
     for e in &parsed.playlist_entries {

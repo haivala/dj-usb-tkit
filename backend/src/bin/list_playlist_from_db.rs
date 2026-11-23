@@ -185,7 +185,7 @@ fn list_pdb_playlists(input: &Path) {
     for row in parsed.playlist_tree {
         println!(
             "playlist|db=pdb|id={}|name={}|parent_id={}|sort_order={}|is_folder={}",
-            row.id, row.name, row.parent_id, row.sort_order, row.row_is_folder
+            row.id, row.name, row.parent_id, row.sort_order, row.is_folder
         );
     }
 }

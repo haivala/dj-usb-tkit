@@ -151,7 +151,7 @@ fn unresolved_rows(parsed: &ParsedPdb) -> Vec<String> {
     let playlist_ids: HashSet<u32> = parsed
         .playlist_tree
         .iter()
-        .filter(|row| !row.row_is_folder)
+        .filter(|row| !row.is_folder)
         .map(|row| row.id)
         .collect();
     for entry in &parsed.playlist_entries {
@@ -171,7 +171,7 @@ fn unresolved_rows(parsed: &ParsedPdb) -> Vec<String> {
     let folder_ids: HashSet<u32> = parsed
         .playlist_tree
         .iter()
-        .filter(|row| row.row_is_folder)
+        .filter(|row| row.is_folder)
         .map(|row| row.id)
         .collect();
     for row in &parsed.playlist_tree {

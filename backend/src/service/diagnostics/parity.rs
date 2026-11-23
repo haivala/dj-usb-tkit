@@ -208,7 +208,7 @@ pub(crate) fn build_usb_parity_comparison(
     let mut leaves = parsed
         .playlist_tree
         .iter()
-        .filter(|n| !n.row_is_folder)
+        .filter(|n| !n.is_folder)
         .cloned()
         .collect::<Vec<_>>();
     leaves.sort_by_key(|n| n.sort_order);

@@ -663,7 +663,7 @@ fn first_playlist_pdb_artwork(usb_root: &Path, playlist_name: &str) -> (u32, u32
     let playlist_id = parsed
         .playlist_tree
         .iter()
-        .find(|row| !row.row_is_folder && row.name == playlist_name)
+        .find(|row| !row.is_folder && row.name == playlist_name)
         .map(|row| row.id)
         .expect("playlist row");
     let track_id = parsed
@@ -2587,13 +2587,13 @@ fn strict_repair_avoids_playlist_id_collisions_with_existing_pdb_folders() {
     let folder_ids = parsed
         .playlist_tree
         .iter()
-        .filter(|row| row.row_is_folder)
+        .filter(|row| row.is_folder)
         .map(|row| row.id)
         .collect::<Vec<_>>();
     let leaf_rows = parsed
         .playlist_tree
         .iter()
-        .filter(|row| !row.row_is_folder)
+        .filter(|row| !row.is_folder)
         .collect::<Vec<_>>();
     let unique_ids = parsed
         .playlist_tree
@@ -2633,13 +2633,13 @@ fn strict_repair_preserves_existing_pdb_playlist_ids_for_matched_playlists() {
     let expected_id_a = parsed_before
         .playlist_tree
         .iter()
-        .find(|row| !row.row_is_folder && row.name == playlist_a)
+        .find(|row| !row.is_folder && row.name == playlist_a)
         .map(|row| row.id)
         .expect("playlist a id before");
     let expected_id_b = parsed_before
         .playlist_tree
         .iter()
-        .find(|row| !row.row_is_folder && row.name == playlist_b)
+        .find(|row| !row.is_folder && row.name == playlist_b)
         .map(|row| row.id)
         .expect("playlist b id before");
 
@@ -2702,13 +2702,13 @@ fn strict_repair_preserves_existing_pdb_playlist_ids_for_matched_playlists() {
     let actual_id_a = parsed_after
         .playlist_tree
         .iter()
-        .find(|row| !row.row_is_folder && row.name == playlist_a)
+        .find(|row| !row.is_folder && row.name == playlist_a)
         .map(|row| row.id)
         .expect("playlist a id after");
     let actual_id_b = parsed_after
         .playlist_tree
         .iter()
-        .find(|row| !row.row_is_folder && row.name == playlist_b)
+        .find(|row| !row.is_folder && row.name == playlist_b)
         .map(|row| row.id)
         .expect("playlist b id after");
     assert_eq!(
@@ -3254,7 +3254,7 @@ fn strict_repair_preserves_sharp_keys_from_edb() {
     let playlist_id = parsed
         .playlist_tree
         .iter()
-        .find(|row| !row.row_is_folder && row.name == playlist_name)
+        .find(|row| !row.is_folder && row.name == playlist_name)
         .map(|row| row.id)
         .expect("playlist row");
     let track_id = parsed
@@ -3395,7 +3395,7 @@ fn strict_repair_source_selection_matrix_uses_supported_deltas() {
     let target_playlist_id = parsed_before
         .playlist_tree
         .iter()
-        .find(|row| !row.row_is_folder && row.name == playlist_none)
+        .find(|row| !row.is_folder && row.name == playlist_none)
         .map(|row| row.id)
         .expect("playlist id before matrix neither");
     let removed = backend_none.remove_usb_playlist(RemoveUsbPlaylistRequest {

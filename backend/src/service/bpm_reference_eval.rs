@@ -86,7 +86,7 @@ fn load_references(pdb: &Path, playlist: &str) -> Vec<Reference> {
     let playlist_ids = parsed
         .playlist_tree
         .iter()
-        .filter(|row| !row.row_is_folder && row.name == playlist)
+        .filter(|row| !row.is_folder && row.name == playlist)
         .map(|row| row.id)
         .collect::<Vec<_>>();
     assert!(

@@ -189,7 +189,7 @@ impl BackendService {
             let mut leaves = parsed
                 .playlist_tree
                 .iter()
-                .filter(|n| !n.row_is_folder)
+                .filter(|n| !n.is_folder)
                 .cloned()
                 .collect::<Vec<_>>();
             leaves.sort_by(|a, b| a.sort_order.cmp(&b.sort_order).then(a.name.cmp(&b.name)));

@@ -251,7 +251,7 @@ fn dump_pdb_tables(
             "id".to_string(),
             "parent_id".to_string(),
             "sort_order".to_string(),
-            "row_is_folder".to_string(),
+            "is_folder".to_string(),
             "name".to_string(),
         ],
         rows: parsed
@@ -262,7 +262,7 @@ fn dump_pdb_tables(
                     ("id".to_string(), row.id.to_string()),
                     ("parent_id".to_string(), row.parent_id.to_string()),
                     ("sort_order".to_string(), row.sort_order.to_string()),
-                    ("row_is_folder".to_string(), row.row_is_folder.to_string()),
+                    ("is_folder".to_string(), row.is_folder.to_string()),
                     ("name".to_string(), row.name.clone()),
                 ])
             })

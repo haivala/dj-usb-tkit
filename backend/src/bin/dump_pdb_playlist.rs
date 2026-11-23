@@ -39,7 +39,7 @@ fn main() {
     let matching_nodes = parsed
         .playlist_tree
         .iter()
-        .filter(|row| !row.row_is_folder && row.name == playlist_name)
+        .filter(|row| !row.is_folder && row.name == playlist_name)
         .cloned()
         .collect::<Vec<_>>();
 

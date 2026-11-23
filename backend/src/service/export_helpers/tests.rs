@@ -2168,7 +2168,7 @@ fn remove_playlist_and_tracks_from_pdb_allows_removing_last_playlist() {
         .playlist_tree
         .iter()
         .find(|row| {
-            !row.row_is_folder
+            !row.is_folder
                 && canonicalize_playlist_name(&row.name)
                     == canonicalize_playlist_name("Last Playlist")
         })
@@ -2196,7 +2196,7 @@ fn remove_playlist_and_tracks_from_pdb_allows_removing_last_playlist() {
         parsed
             .playlist_tree
             .iter()
-            .filter(|row| !row.row_is_folder)
+            .filter(|row| !row.is_folder)
             .all(|row| row.id != target_playlist_id),
         "playlist leaf should be removed from playlist_tree by id"
     );
@@ -2328,7 +2328,7 @@ fn remove_playlist_cleans_exclusive_tracks_preserves_shared() {
         !parsed_after
             .playlist_tree
             .iter()
-            .any(|p| !p.row_is_folder && p.name == "Playlist B"),
+            .any(|p| !p.is_folder && p.name == "Playlist B"),
         "Playlist B should not exist"
     );
 
@@ -2337,7 +2337,7 @@ fn remove_playlist_cleans_exclusive_tracks_preserves_shared() {
         parsed_after
             .playlist_tree
             .iter()
-            .any(|p| !p.row_is_folder && p.name == "Playlist A"),
+            .any(|p| !p.is_folder && p.name == "Playlist A"),
         "Playlist A should still exist"
     );
 
@@ -2519,7 +2519,7 @@ fn remove_playlist_preserves_pdb_page_count_with_many_entries() {
         parsed_after
             .playlist_tree
             .iter()
-            .all(|p| p.row_is_folder || p.name != "Big Playlist"),
+            .all(|p| p.is_folder || p.name != "Big Playlist"),
         "playlist should be removed"
     );
 }
@@ -3099,7 +3099,7 @@ fn rewrite_pdb_playlist_rebuilds_resolvable_dictionary_rows_on_initialized_usb()
     let playlist_row = parsed
         .playlist_tree
         .iter()
-        .find(|row| !row.row_is_folder && row.name == "Dictionary Repair")
+        .find(|row| !row.is_folder && row.name == "Dictionary Repair")
         .expect("rewritten playlist row");
     assert_eq!(playlist_row.id, 1);
 

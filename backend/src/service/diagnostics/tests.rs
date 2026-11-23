@@ -671,7 +671,7 @@ fn make_single_playlist_parsed(name: &str, playlist_id: u32, sort_order: u32) ->
         id: playlist_id,
         parent_id: 0,
         sort_order,
-        row_is_folder: false,
+        is_folder: false,
         name: name.to_string(),
     });
     parsed
@@ -883,7 +883,7 @@ fn parity_counts_use_unique_tracks_when_pdb_has_duplicate_entries() {
         id: 10,
         parent_id: 0,
         sort_order: 1,
-        row_is_folder: false,
+        is_folder: false,
         name: "Test".to_string(),
     });
     // Duplicate entries inflate raw count to 12, but unique set is 3.
@@ -1234,7 +1234,7 @@ fn parity_report_fails_when_playlist_order_differs() {
         id: 10,
         parent_id: 0,
         sort_order: 1,
-        row_is_folder: false,
+        is_folder: false,
         name: "Order".to_string(),
     });
     parsed.tracks = vec![
@@ -1296,14 +1296,14 @@ fn parity_report_fails_when_playlist_sort_order_differs() {
         id: 10,
         parent_id: 0,
         sort_order: 1,
-        row_is_folder: false,
+        is_folder: false,
         name: "First".to_string(),
     });
     parsed.playlist_tree.push(PdbPlaylistTreeRow {
         id: 20,
         parent_id: 0,
         sort_order: 2,
-        row_is_folder: false,
+        is_folder: false,
         name: "Second".to_string(),
     });
     parsed.tracks = vec![
@@ -1374,7 +1374,7 @@ fn three_playlist_parsed() -> ParsedPdb {
             id: 10 * (n + 1),
             parent_id: 0,
             sort_order: n,
-            row_is_folder: false,
+            is_folder: false,
             name: (*name).to_string(),
         });
         parsed.tracks.push(make_pdb_track(n + 1, name, 1, &path));
@@ -1442,14 +1442,14 @@ fn parity_playlist_details_follow_playlist_sort_order_not_name() {
         id: 10,
         parent_id: 0,
         sort_order: 1,
-        row_is_folder: false,
+        is_folder: false,
         name: "Zeta".to_string(),
     });
     parsed.playlist_tree.push(PdbPlaylistTreeRow {
         id: 20,
         parent_id: 0,
         sort_order: 2,
-        row_is_folder: false,
+        is_folder: false,
         name: "Alpha".to_string(),
     });
     parsed.tracks = vec![
@@ -1729,7 +1729,7 @@ fn parity_report_treats_empty_artist_as_unknown_artist_for_gate() {
         id: 1,
         parent_id: 0,
         sort_order: 1,
-        row_is_folder: false,
+        is_folder: false,
         name: "Unknown Artist Gate".to_string(),
     });
     parsed
@@ -1798,7 +1798,7 @@ fn playlist_resolution_uses_unique_entries_when_duplicates_exist() {
         id: 10,
         parent_id: 0,
         sort_order: 1,
-        row_is_folder: false,
+        is_folder: false,
         name: "Test".to_string(),
     });
     for i in 0..4u32 {
@@ -1859,21 +1859,21 @@ fn playlist_resolution_collapses_duplicate_leaf_names() {
         id: 10,
         parent_id: 0,
         sort_order: 1,
-        row_is_folder: false,
+        is_folder: false,
         name: "Dup".to_string(),
     });
     parsed.playlist_tree.push(PdbPlaylistTreeRow {
         id: 11,
         parent_id: 0,
         sort_order: 2,
-        row_is_folder: false,
+        is_folder: false,
         name: "Dup".to_string(),
     });
     parsed.playlist_tree.push(PdbPlaylistTreeRow {
         id: 12,
         parent_id: 0,
         sort_order: 3,
-        row_is_folder: false,
+        is_folder: false,
         name: "Dup".to_string(),
     });
     parsed.playlist_entries.push(PdbPlaylistEntryRow {
@@ -2394,7 +2394,7 @@ fn make_tree_leaf(id: u32, name: &str) -> PdbPlaylistTreeRow {
         id,
         parent_id: 0,
         sort_order: id,
-        row_is_folder: false,
+        is_folder: false,
         name: name.to_string(),
     }
 }

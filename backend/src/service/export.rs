@@ -999,7 +999,7 @@ pub(crate) fn usb_playlist_names_for_export_compare(
     let mut names = HashSet::new();
     if let Some(parsed) = parsed {
         for node in &parsed.playlist_tree {
-            if node.row_is_folder {
+            if node.is_folder {
                 continue;
             }
             names.insert(normalize_playlist_name_for_compare(&node.name));
@@ -4647,7 +4647,7 @@ mod tests {
             id,
             parent_id,
             sort_order: 0,
-            row_is_folder: is_folder,
+            is_folder,
             name: name.to_string(),
         }
     }

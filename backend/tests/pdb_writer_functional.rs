@@ -48,11 +48,7 @@ fn validate_pdb_header(usb_root: &Path) {
 /// Validate PDB/eDB playlist ID and count parity.
 fn validate_pdb_edb_parity(usb_root: &Path, expected_playlists: usize, expected_tracks: usize) {
     let parsed = parse_pdb(&pdb_path(usb_root)).expect("parse PDB");
-    let pdb_playlist_count = parsed
-        .playlist_tree
-        .iter()
-        .filter(|p| !p.row_is_folder)
-        .count();
+    let pdb_playlist_count = parsed.playlist_tree.iter().filter(|p| !p.is_folder).count();
     assert_eq!(
         pdb_playlist_count, expected_playlists,
         "PDB playlist count mismatch"
@@ -78,7 +74,7 @@ fn validate_pdb_edb_parity(usb_root: &Path, expected_playlists: usize, expected_
     );
 
     // Verify playlist IDs match between PDB and eDB
-    for pl in parsed.playlist_tree.iter().filter(|p| !p.row_is_folder) {
+    for pl in parsed.playlist_tree.iter().filter(|p| !p.is_folder) {
         let edb_id: Option<i64> = conn
             .query_row(
                 "SELECT playlist_id FROM playlist WHERE name = ?1 AND attribute = 0 LIMIT 1",
@@ -305,7 +301,7 @@ fn pdb_export_three_playlists_remove_middle_validates_structure() {
     let remaining_names: BTreeSet<&str> = parsed_after_remove_b
         .playlist_tree
         .iter()
-        .filter(|p| !p.row_is_folder)
+        .filter(|p| !p.is_folder)
         .map(|p| p.name.as_str())
         .collect();
     assert_eq!(
@@ -355,7 +351,7 @@ fn pdb_export_three_playlists_remove_middle_validates_structure() {
     let final_names: Vec<&str> = parsed_final
         .playlist_tree
         .iter()
-        .filter(|p| !p.row_is_folder)
+        .filter(|p| !p.is_folder)
         .map(|p| p.name.as_str())
         .collect();
     assert_eq!(final_names, vec!["Playlist C"], "only C should remain");
